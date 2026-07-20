@@ -1,6 +1,6 @@
 # YuanYe
 
-YuanYe 是面向阿里内部用户的本地 macOS HTML 编辑工作台。
+YuanYe 是本地 macOS HTML 编辑工作台。
 
 ## 下载
 
