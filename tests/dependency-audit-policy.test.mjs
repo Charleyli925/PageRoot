@@ -49,13 +49,13 @@ test("dependency audit policy rejects new and expired advisories", () => {
   assert.deepEqual(result.expired.map((item) => item.source), ["1"]);
 });
 
-test("Dependabot keeps coupled React updates together and defers TypeScript majors", () => {
+test("Dependabot keeps coupled React updates together and defers automatic majors", () => {
   assert.match(
     dependabotConfig,
     /react-stack:[\s\S]*patterns:[\s\S]*- react\n[\s\S]*- react-dom\n[\s\S]*- react-server-dom-webpack/,
   );
   assert.match(
     dependabotConfig,
-    /dependency-name: typescript[\s\S]*update-types:[\s\S]*- version-update:semver-major/,
+    /dependency-name: "\*"[\s\S]*update-types:[\s\S]*- version-update:semver-major/,
   );
 });
