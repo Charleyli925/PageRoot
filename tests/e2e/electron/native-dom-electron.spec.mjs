@@ -142,10 +142,11 @@ async function loadedDiskFrame(page, sourcePath, caseId) {
     async () => (await page.evaluate(() => window.htmlAIProjects?.getActiveProject()))?.sourcePath,
     { timeout: 15_000 },
   ).toBe(sourcePath);
-  await expect(page.getByTitle(sourcePath, { exact: true })).toHaveCount(1);
   await expect(page.locator('[aria-label="正在读取项目状态"]'))
     .toHaveCount(0, { timeout: 15_000 });
   await expect(page.locator('[aria-label="项目读取失败"]')).toHaveCount(0);
+  await expect(page.getByTitle(sourcePath, { exact: true }))
+    .toHaveCount(1, { timeout: 15_000 });
   await expect(page.getByRole("heading", { name: "选中内容，写下怎么改" }))
     .toBeVisible();
   await expect(page.getByText("本地项目记录未连接", { exact: true }))
