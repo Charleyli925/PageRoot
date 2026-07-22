@@ -5515,7 +5515,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     lockedRef.current = shouldLock;
     readOnlyRef.current = readOnly || shouldLock;
     enableReorderRef.current = enableReorder && !shouldLock;
-    documentNode?.documentElement.toggleAttribute("data-html-canvas-locked", shouldLock);
+    // During a frame navigation Chromium can expose a transient Document before
+    // its root element exists. Lock synchronization must not abort the React
+    // tree while that provisional document is being replaced.
+    documentNode?.documentElement?.toggleAttribute("data-html-canvas-locked", shouldLock);
     if (shouldLock) clearSelection();
     requestAnimationFrame(updateOverlayPosition);
   }, [

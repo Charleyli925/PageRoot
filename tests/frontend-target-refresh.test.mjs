@@ -388,6 +388,11 @@ test("ordinary patches keep the mounted iframe while source-authority fences use
   assert.match(canvas, /pendingFrameViewportRef/u);
   assert.match(
     canvas,
+    /documentNode\?\.documentElement\?\.toggleAttribute\("data-html-canvas-locked", shouldLock\)/u,
+    "lock synchronization must tolerate the transient rootless document exposed during iframe navigation",
+  );
+  assert.match(
+    canvas,
     /selectTarget\(pendingSelection, \{[\s\S]*?reveal: false,[\s\S]*?showToolbar: pendingToolbarVisible/u,
   );
   assert.match(applyCommand, /forwardPlan\.type === "replace-text-range"/u);
