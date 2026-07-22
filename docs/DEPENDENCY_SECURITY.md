@@ -4,7 +4,7 @@ Dependency versions are pinned by `package-lock.json`, updated through Pull Requ
 
 ## Update automation
 
-Dependabot checks monthly. Coupled React packages are updated together, and minor or patch development-tool updates are grouped to reduce noisy or internally inconsistent Pull Requests. TypeScript 7 is temporarily excluded until the ESLint toolchain supports it; that exclusion must be removed when compatibility is available. Every dependency Pull Request still requires the complete `release-gate` before merge.
+Dependabot checks monthly. Coupled React packages are updated together, and minor or patch development-tool updates are grouped to reduce noisy or internally inconsistent Pull Requests. TypeScript major updates are temporarily excluded until the complete lint and configuration toolchain supports a planned upgrade; that exclusion must be removed when compatibility is available. Every dependency Pull Request still requires the complete `release-gate` before merge.
 
 ## Temporary reviewed exceptions
 
