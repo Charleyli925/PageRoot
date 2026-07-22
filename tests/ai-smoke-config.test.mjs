@@ -20,4 +20,9 @@ test("AI smoke configuration selects one success and one fail-closed scope path"
     /await applicationClosed;[\s\S]*?rmSync\(resolved/u,
     "AI teardown must observe the Electron close event before deleting Bridge-owned files",
   );
+  assert.doesNotMatch(
+    source,
+    /if \(await processButton\.isVisible\(\)\) await processButton\.click\(\)/u,
+    "process-board navigation must wait for its control instead of sampling visibility once",
+  );
 });

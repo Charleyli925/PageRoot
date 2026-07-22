@@ -322,7 +322,8 @@ test("a clipboard handoff failure keeps the frozen Request recoverable", async (
     expect(await launched.electronApp.evaluate(({ clipboard }) => clipboard.readText()))
       .toBe(clipboardSentinel);
     const processButton = launched.page.getByRole("button", { name: "查看本轮处理" });
-    if (await processButton.isVisible()) await processButton.click();
+    await expect(processButton).toBeVisible();
+    await processButton.click();
     await expect(launched.page.getByText("等待复制到剪贴板", { exact: true }))
       .toBeVisible();
     const projectsRoot = path.join(launched.workspace, "projects");
