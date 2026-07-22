@@ -15,4 +15,9 @@ test("AI smoke configuration selects one success and one fail-closed scope path"
     "a verified AI result stays pending until the user opens the new HTML",
     "a soft out-of-scope AI return waits for an explicit waiver and open",
   ]);
+  assert.match(
+    source,
+    /await applicationClosed;[\s\S]*?rmSync\(resolved/u,
+    "AI teardown must observe the Electron close event before deleting Bridge-owned files",
+  );
 });

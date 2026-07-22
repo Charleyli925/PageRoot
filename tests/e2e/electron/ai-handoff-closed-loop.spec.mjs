@@ -67,21 +67,40 @@ async function launchPageRoot({ activeSourcePath, injectedEnv = {} }) {
 
 async function stopPageRoot(electronApp, isolatedUserData) {
   const electronProcess = electronApp.process();
-  await electronApp.evaluate(({ app }) => app.exit(0)).catch(() => {});
-  await new Promise((resolve) => {
+  const applicationClosed = electronApp
+    .waitForEvent("close", { timeout: 5_000 })
+    .then(() => true)
+    .catch(() => false);
+  const waitForExit = (timeout) => new Promise((resolve) => {
     if (electronProcess.exitCode !== null || electronProcess.signalCode !== null) {
-      resolve();
+      resolve(true);
       return;
     }
-    const timer = setTimeout(() => {
-      electronProcess.kill("SIGKILL");
-      resolve();
-    }, 5_000);
-    electronProcess.once("exit", () => {
-      clearTimeout(timer);
-      resolve();
-    });
+    let timer = null;
+    const onExit = () => {
+      if (timer) clearTimeout(timer);
+      resolve(true);
+    };
+    timer = setTimeout(() => {
+      electronProcess.off("exit", onExit);
+      resolve(false);
+    }, timeout);
+    electronProcess.once("exit", onExit);
   });
+
+  const exitRequest = electronApp
+    .evaluate(({ app }) => app.exit(0))
+    .catch(() => {});
+  await Promise.race([
+    exitRequest,
+    new Promise((resolve) => setTimeout(resolve, 1_000)),
+  ]);
+  if (!await waitForExit(3_000)) {
+    electronProcess.kill("SIGKILL");
+    await waitForExit(3_000);
+  }
+  await applicationClosed;
+
   const resolved = path.resolve(isolatedUserData);
   if (
     path.dirname(resolved) !== path.resolve(tmpdir())
