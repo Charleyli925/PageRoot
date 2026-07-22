@@ -25,8 +25,8 @@ updates:
           - patch
     ignore:
       - dependency-name: typescript
-        versions:
-          - ">=7.0.0"
+        update-types:
+          - version-update:semver-major
   - package-ecosystem: github-actions
     directory: /
     schedule:
