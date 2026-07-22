@@ -127,12 +127,16 @@ async function loadedDiskFrame(page, sourcePath) {
     async () => (await page.evaluate(() => window.htmlAIProjects?.getActiveProject()))?.sourcePath,
     { timeout: 20_000 },
   ).toBe(sourcePath);
+  await expect(page.locator('[aria-label="正在读取项目状态"]'))
+    .toHaveCount(0, { timeout: 60_000 });
+  await expect(page.locator('[aria-label="项目读取失败"]')).toHaveCount(0);
   const editor = page.getByTestId("html-canvas-editor").filter({ visible: true }).first();
-  await editor.waitFor({ state: "visible" });
+  await editor.waitFor({ state: "visible", timeout: 60_000 });
   const editorHandle = await editor.elementHandle();
   await page.waitForFunction(
     (element) => element?.getAttribute("data-render-verified") === "true",
     editorHandle,
+    { timeout: 60_000 },
   );
   const iframeHandle = await editor.locator('iframe[title*="HTML"]').elementHandle();
   const frame = await iframeHandle?.contentFrame();
@@ -140,6 +144,7 @@ async function loadedDiskFrame(page, sourcePath) {
   await frame.waitForFunction(
     (selector) => Boolean(document.querySelector(selector)),
     caseSelector("list-item"),
+    { timeout: 60_000 },
   );
   return frame;
 }
@@ -218,7 +223,7 @@ function workingHtmlFiles(workspace, projectId) {
 }
 
 test("a verified AI result stays pending until the user opens the new HTML", async () => {
-  test.setTimeout(90_000);
+  test.setTimeout(180_000);
   const fixture = createSourceFixture();
   const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
   try {

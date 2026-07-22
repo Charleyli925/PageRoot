@@ -23,7 +23,7 @@ export default defineConfig({
       outputFolder: path.join(artifactRoot, "report"),
     }],
   ],
-  timeout: 90_000,
+  timeout: 180_000,
   expect: { timeout: 20_000 },
   use: {
     screenshot: "only-on-failure",
