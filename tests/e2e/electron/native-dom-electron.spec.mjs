@@ -79,7 +79,12 @@ function removeValidatedTemporaryDirectory(directoryPath, namePrefix) {
   ) {
     throw new Error(`Refusing to remove non-E2E temporary data: ${directoryPath}`);
   }
-  rmSync(resolved, { recursive: true, force: true });
+  rmSync(resolved, {
+    recursive: true,
+    force: true,
+    maxRetries: 10,
+    retryDelay: 100,
+  });
 }
 
 function removeIsolatedUserData(isolatedUserData) {
@@ -282,18 +287,18 @@ test("Electron uses the authored DOM caret, Selection and beforeinput", async ()
     const { frame } = await loadFixture(page, "complex-layout.html");
     const initialDocument = await documentToken(frame);
     await activateNativeEdit(frame, "heading-inline");
-    await installInputRecorder(frame);
-    await setTextSelection(frame, "heading-inline", 3, 9);
-    await page.keyboard.insertText("Electron原位");
-
-    expect(await documentToken(frame)).toBe(initialDocument);
-    expect(await frame.locator(caseSelector("heading-inline")).textContent()).toContain("Electron原位");
     expect(await nativeEditingState(frame, "heading-inline")).toMatchObject({
       contenteditable: "plaintext-only",
       isContentEditable: true,
       activeIsLegacySurface: false,
       legacySurfaceCount: 0,
     });
+    await installInputRecorder(frame);
+    await setTextSelection(frame, "heading-inline", 3, 9);
+    await page.keyboard.insertText("Electron原位");
+
+    expect(await documentToken(frame)).toBe(initialDocument);
+    expect(await frame.locator(caseSelector("heading-inline")).textContent()).toContain("Electron原位");
     const events = await recordedInputEvents(frame);
     expect(events.some(({ type, inputType }) => type === "beforeinput" && inputType === "insertText")).toBe(true);
     expect(events.some(({ type }) => type === "input")).toBe(true);

@@ -89,7 +89,12 @@ async function stopPageRoot(electronApp, isolatedUserData) {
   ) {
     throw new Error(`Refusing to clean a non-E2E directory: ${resolved}`);
   }
-  rmSync(resolved, { recursive: true, force: true });
+  rmSync(resolved, {
+    recursive: true,
+    force: true,
+    maxRetries: 10,
+    retryDelay: 100,
+  });
 }
 
 function createSourceFixture() {
@@ -109,7 +114,12 @@ function removeSourceFixture(sourceDirectory) {
   ) {
     throw new Error(`Refusing to clean a non-E2E source directory: ${resolved}`);
   }
-  rmSync(resolved, { recursive: true, force: true });
+  rmSync(resolved, {
+    recursive: true,
+    force: true,
+    maxRetries: 10,
+    retryDelay: 100,
+  });
 }
 
 async function loadedDiskFrame(page, sourcePath) {

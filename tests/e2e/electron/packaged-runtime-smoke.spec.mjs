@@ -39,7 +39,12 @@ function removeIsolatedDirectory(directory) {
   ) {
     throw new Error(`Refusing to remove non-E2E directory: ${directory}`);
   }
-  rmSync(resolved, { recursive: true, force: true });
+  rmSync(resolved, {
+    recursive: true,
+    force: true,
+    maxRetries: 10,
+    retryDelay: 100,
+  });
 }
 
 test("packaged PageRoot boots in isolation and exports one byte-exact authored DOM edit", async () => {
