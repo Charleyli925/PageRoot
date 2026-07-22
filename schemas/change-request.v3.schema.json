@@ -1,0 +1,532 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://html-change.local/schemas/change-request.v3.schema.json",
+  "title": "HTML AI frozen change request v3",
+  "description": "A portable, immutable request that freezes the exact current source snapshot and system-reserved candidate Version identity for one internal-AI attempt.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "status",
+    "projectId",
+    "documentId",
+    "requestId",
+    "attemptId",
+    "createdAt",
+    "frozenAt",
+    "freezeCutoffRevision",
+    "versionIdentity",
+    "baseSnapshot",
+    "paths",
+    "requirements",
+    "annotations",
+    "finalization"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "3.0.0"
+    },
+    "status": {
+      "const": "frozen"
+    },
+    "projectId": {
+      "$ref": "#/$defs/projectId"
+    },
+    "documentId": {
+      "$ref": "#/$defs/documentId"
+    },
+    "requestId": {
+      "$ref": "#/$defs/requestId"
+    },
+    "attemptId": {
+      "$ref": "#/$defs/attemptId"
+    },
+    "createdAt": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "frozenAt": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "freezeCutoffRevision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "versionIdentity": {
+      "$ref": "#/$defs/versionIdentity"
+    },
+    "baseSnapshot": {
+      "$ref": "#/$defs/baseSnapshot"
+    },
+    "paths": {
+      "$ref": "#/$defs/paths"
+    },
+    "requirements": {
+      "$ref": "#/$defs/requirements"
+    },
+    "annotations": {
+      "$ref": "#/$defs/annotations"
+    },
+    "finalization": {
+      "$ref": "#/$defs/finalization"
+    }
+  },
+  "$defs": {
+    "versionIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "basedOnVersionId",
+        "previousVersionId",
+        "candidateVersionId",
+        "candidateVersionOrdinal",
+        "candidateVersionLabel"
+      ],
+      "properties": {
+        "basedOnVersionId": {
+          "$ref": "#/$defs/versionId"
+        },
+        "previousVersionId": {
+          "$ref": "#/$defs/versionId"
+        },
+        "candidateVersionId": {
+          "$ref": "#/$defs/versionId"
+        },
+        "candidateVersionOrdinal": {
+          "type": "integer",
+          "minimum": 2
+        },
+        "candidateVersionLabel": {
+          "type": "string",
+          "pattern": "^V[1-9][0-9]*$"
+        }
+      }
+    },
+    "baseSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "relativePath",
+        "byteLength",
+        "sha256",
+        "comparisonSha256",
+        "canonicalizationVersion"
+      ],
+      "properties": {
+        "relativePath": {
+          "const": "input/base/index.html"
+        },
+        "byteLength": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "comparisonSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "canonicalizationVersion": {
+          "const": "1"
+        }
+      }
+    },
+    "paths": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requestRelativePath",
+        "attemptRelativePath",
+        "promptRelativePath",
+        "inputManifestRelativePath"
+      ],
+      "properties": {
+        "requestRelativePath": {
+          "type": "string",
+          "pattern": "^requests/req_[A-Za-z0-9_-]+$"
+        },
+        "attemptRelativePath": {
+          "type": "string",
+          "pattern": "^requests/req_[A-Za-z0-9_-]+/attempts/attempt_[0-9]{3}$"
+        },
+        "promptRelativePath": {
+          "type": "string",
+          "pattern": "^requests/req_[A-Za-z0-9_-]+/PROMPT\\.md$"
+        },
+        "inputManifestRelativePath": {
+          "type": "string",
+          "pattern": "^requests/req_[A-Za-z0-9_-]+/input-manifest\\.json$"
+        }
+      }
+    },
+    "requirements": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "summary",
+        "instructions",
+        "targets",
+        "preserveOutsideTargets"
+      ],
+      "properties": {
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "instructions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "instructionId",
+              "text",
+              "targetRefs"
+            ],
+            "properties": {
+              "instructionId": {
+                "type": "string",
+                "pattern": "^instruction_[A-Za-z0-9_-]+$"
+              },
+              "text": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 20000
+              },
+              "targetRefs": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "pattern": "^target_[A-Za-z0-9_-]+$"
+                }
+              },
+              "attachmentRefs": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "pattern": "^attachment_[A-Za-z0-9_-]+$"
+                }
+              }
+            }
+          }
+        },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/attachment"
+          }
+        },
+        "targets": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/target"
+          }
+        },
+        "preserveOutsideTargets": {
+          "const": true
+        }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "targetId",
+        "label",
+        "level",
+        "resolution"
+      ],
+      "properties": {
+        "targetId": {
+          "type": "string",
+          "pattern": "^target_[A-Za-z0-9_-]+$"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "level": {
+          "enum": [
+            "module",
+            "subregion",
+            "text",
+            "insertion-point"
+          ]
+        },
+        "selector": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "textQuote": {
+          "type": "string",
+          "maxLength": 5000
+        },
+        "sourceAnchor": {
+          "$ref": "#/$defs/sourceAnchor"
+        },
+        "fingerprint": {
+          "$ref": "#/$defs/fingerprint"
+        },
+        "resolution": {
+          "enum": [
+            "exact",
+            "rebound",
+            "ambiguous",
+            "orphaned"
+          ]
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "selector"
+          ]
+        },
+        {
+          "required": [
+            "sourceAnchor"
+          ]
+        },
+        {
+          "required": [
+            "fingerprint"
+          ]
+        }
+      ]
+    },
+    "attachment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attachmentId",
+        "commentId",
+        "targetRef",
+        "kind",
+        "fileName",
+        "mediaType",
+        "byteLength",
+        "sha256",
+        "relativePath",
+        "requestRelativePath"
+      ],
+      "properties": {
+        "attachmentId": {
+          "type": "string",
+          "pattern": "^attachment_[A-Za-z0-9_-]+$"
+        },
+        "commentId": {
+          "type": "string",
+          "pattern": "^comment_[A-Za-z0-9_-]+$"
+        },
+        "targetRef": {
+          "type": "string",
+          "pattern": "^target_[A-Za-z0-9_-]+$"
+        },
+        "kind": {
+          "enum": [
+            "image",
+            "file"
+          ]
+        },
+        "fileName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "mediaType": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "byteLength": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 26214400
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "relativePath": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "requestRelativePath": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "localPath": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "^/[^\\u0000\\r\\n]+$"
+        },
+        "source": {
+          "enum": [
+            "clipboard",
+            "file-picker"
+          ]
+        }
+      }
+    },
+    "sourceAnchor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "startOffset",
+        "endOffset",
+        "sourceSha256"
+      ],
+      "properties": {
+        "startOffset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "endOffset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sourceSha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "fingerprint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tagName",
+        "stableAttributes",
+        "ancestorFingerprint"
+      ],
+      "properties": {
+        "tagName": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9:-]*$"
+        },
+        "stableAttributes": {
+          "type": "object",
+          "maxProperties": 32,
+          "additionalProperties": {
+            "type": "string",
+            "maxLength": 4000
+          }
+        },
+        "ancestorFingerprint": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "string",
+            "maxLength": 4000
+          }
+        },
+        "textPrefix": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "textSuffix": {
+          "type": "string",
+          "maxLength": 500
+        }
+      }
+    },
+    "annotations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "relativePath",
+        "sha256",
+        "commentCount",
+        "editEventCount"
+      ],
+      "properties": {
+        "relativePath": {
+          "const": "input/annotations/records.json"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "commentCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "editEventCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "attachmentCount": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "finalization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "outputRelativePath",
+        "completionRelativePath",
+        "completionSchema",
+        "supportedFinalizerVersion",
+        "finalizerCommand"
+      ],
+      "properties": {
+        "outputRelativePath": {
+          "const": "output/index.html"
+        },
+        "completionRelativePath": {
+          "const": "completion.json"
+        },
+        "completionSchema": {
+          "const": "completion.v1.schema.json"
+        },
+        "supportedFinalizerVersion": {
+          "const": "1.0.0"
+        },
+        "finalizerCommand": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8192
+        }
+      }
+    },
+    "projectId": {
+      "type": "string",
+      "pattern": "^project_[A-Za-z0-9_-]+$"
+    },
+    "documentId": {
+      "type": "string",
+      "pattern": "^doc_[A-Za-z0-9_-]+$"
+    },
+    "requestId": {
+      "type": "string",
+      "pattern": "^req_[A-Za-z0-9_-]+$"
+    },
+    "attemptId": {
+      "type": "string",
+      "pattern": "^attempt_[0-9]{3}$"
+    },
+    "versionId": {
+      "type": "string",
+      "pattern": "^ver_[0-9]{4,}$"
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*\\\\)(?!.*//)(?!\\.\\.?$)(?!\\.\\.?/)(?!.*\\/\\.\\.?\\/)(?!.*\\/\\.\\.?$)[^\\u0000\\r\\n]+$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    }
+  }
+}

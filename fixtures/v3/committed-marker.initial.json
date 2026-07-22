@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "1.0.0",
+  "status": "committed",
+  "sourceType": "initial",
+  "transactionId": "txn_metrics_initial",
+  "projectId": "project_metrics",
+  "documentId": "doc_dashboard",
+  "versionId": "ver_0001",
+  "versionOrdinal": 1,
+  "versionLabel": "V1",
+  "contentSha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "sourceSha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "manifestSha256": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+  "committedAt": "2026-07-17T08:00:00Z"
+}

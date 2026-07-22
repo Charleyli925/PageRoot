@@ -1,0 +1,48 @@
+name: Bug report
+description: Report a reproducible PageRoot problem
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Remove private information and confidential HTML before submitting.
+  - type: input
+    id: version
+    attributes:
+      label: PageRoot version
+      placeholder: 0.8.2
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: macOS and hardware
+      placeholder: macOS 15.5, Apple M2
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Provide the smallest safe example that reproduces the issue.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: checkboxes
+    id: security
+    attributes:
+      label: Safety check
+      options:
+        - label: This report does not contain a security vulnerability or sensitive data.
+          required: true

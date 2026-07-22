@@ -1,0 +1,40 @@
+{
+  "schemaVersion": "3.0.0",
+  "projectId": "project_market_report",
+  "documentId": "doc_weekly_report",
+  "versionId": "ver_0009",
+  "versionOrdinal": 9,
+  "versionLabel": "V9",
+  "sourceType": "internal-ai",
+  "previousVersionId": "ver_0008",
+  "basedOnVersionId": "ver_0008",
+  "requestId": "req_title_spacing",
+  "attemptId": "attempt_001",
+  "baseSnapshotSha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "inputManifestSha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "contentSha256": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "baseComparisonSha256": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "contentComparisonSha256": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "canonicalizationVersion": "1",
+  "generatedAt": "2026-07-18T09:38:41Z",
+  "summary": "缩小标题与正文间距，并保留冻结边界前的标题文字修改。",
+  "completionRelativePath": "requests/req_title_spacing/attempts/attempt_001/completion.json",
+  "outcomeRelativePath": "requests/req_title_spacing/attempts/attempt_001/outcome.json",
+  "annotationArchive": {
+    "versionRelativePath": "annotations/records.json",
+    "requestRelativePath": "requests/req_title_spacing/input/annotations/records.json",
+    "attemptRelativePath": "requests/req_title_spacing/attempts/attempt_001/annotations.json",
+    "sha256": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "commentCount": 1,
+    "editEventCount": 1
+  },
+  "files": [
+    {
+      "path": "files/index.html",
+      "role": "entry-html",
+      "mediaType": "text/html",
+      "byteLength": 31280,
+      "sha256": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "schemaVersion": "1.0.0",
+  "status": "version-created",
+  "projectId": "project_metrics",
+  "documentId": "doc_dashboard",
+  "requestId": "req_metrics_cards",
+  "attemptId": "attempt_001",
+  "previousVersionId": "ver_0008",
+  "basedOnVersionId": "ver_0005",
+  "candidateVersionId": "ver_0009",
+  "candidateVersionOrdinal": 9,
+  "candidateVersionLabel": "V9",
+  "baseSnapshotSha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "annotationArchive": {
+    "versionRelativePath": "annotations/records.json",
+    "requestRelativePath": "requests/req_metrics_cards/input/annotations/records.json",
+    "attemptRelativePath": "requests/req_metrics_cards/attempts/attempt_001/annotations.json",
+    "sha256": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "commentCount": 1,
+    "editEventCount": 1
+  },
+  "transactionId": "txn_metrics_v9",
+  "versionId": "ver_0009",
+  "versionManifestRelativePath": "versions/ver_0009/version.json",
+  "commitMarkerRelativePath": "versions/ver_0009/committed.json",
+  "contentSha256": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "completionRelativePath": "requests/req_metrics_cards/attempts/attempt_001/completion.json",
+  "completionSha256": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+  "committedAt": "2026-07-17T08:41:30Z"
+}

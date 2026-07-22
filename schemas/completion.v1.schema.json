@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://html-change.local/schemas/completion.v1.schema.json",
+  "title": "HTML AI finalizer completion v1",
+  "description": "The single authoritative completion signal atomically written by the supported finalizer after output is sealed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "finalizerVersion",
+    "status",
+    "projectId",
+    "documentId",
+    "requestId",
+    "attemptId",
+    "basedOnVersionId",
+    "previousVersionId",
+    "candidateVersionId",
+    "candidateVersionOrdinal",
+    "candidateVersionLabel",
+    "baseSnapshotSha256",
+    "inputManifestSha256",
+    "outputRelativePath",
+    "outputSha256",
+    "baseComparisonSha256",
+    "outputComparisonSha256",
+    "canonicalizationVersion",
+    "completedAt"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0.0"
+    },
+    "finalizerVersion": {
+      "const": "1.0.0"
+    },
+    "status": {
+      "const": "completed"
+    },
+    "projectId": {
+      "$ref": "#/$defs/projectId"
+    },
+    "documentId": {
+      "$ref": "#/$defs/documentId"
+    },
+    "requestId": {
+      "$ref": "#/$defs/requestId"
+    },
+    "attemptId": {
+      "$ref": "#/$defs/attemptId"
+    },
+    "basedOnVersionId": {
+      "$ref": "#/$defs/versionId"
+    },
+    "previousVersionId": {
+      "$ref": "#/$defs/versionId"
+    },
+    "candidateVersionId": {
+      "$ref": "#/$defs/versionId"
+    },
+    "candidateVersionOrdinal": {
+      "type": "integer",
+      "minimum": 2
+    },
+    "candidateVersionLabel": {
+      "type": "string",
+      "pattern": "^V[1-9][0-9]*$"
+    },
+    "baseSnapshotSha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "inputManifestSha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "outputRelativePath": {
+      "const": "output/index.html"
+    },
+    "outputSha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "baseComparisonSha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "outputComparisonSha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "canonicalizationVersion": {
+      "const": "1"
+    },
+    "completedAt": {
+      "$ref": "#/$defs/timestamp"
+    }
+  },
+  "$defs": {
+    "projectId": {
+      "type": "string",
+      "pattern": "^project_[A-Za-z0-9_-]+$"
+    },
+    "documentId": {
+      "type": "string",
+      "pattern": "^doc_[A-Za-z0-9_-]+$"
+    },
+    "requestId": {
+      "type": "string",
+      "pattern": "^req_[A-Za-z0-9_-]+$"
+    },
+    "attemptId": {
+      "type": "string",
+      "pattern": "^attempt_[0-9]{3}$"
+    },
+    "versionId": {
+      "type": "string",
+      "pattern": "^ver_[0-9]{4,}$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    }
+  }
+}

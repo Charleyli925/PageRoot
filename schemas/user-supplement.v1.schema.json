@@ -1,0 +1,163 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://html-change.local/schemas/user-supplement.v1.schema.json",
+  "title": "PageRoot controlled external-chat supplement v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "status",
+    "projectId",
+    "documentId",
+    "requestId",
+    "attemptId",
+    "records",
+    "sealedAt",
+    "recordsSha256",
+    "attachmentsSha256"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "status": { "enum": ["active", "sealed"] },
+    "projectId": { "type": "string", "pattern": "^project_[a-f0-9]{16,64}$" },
+    "documentId": { "type": "string", "pattern": "^doc_[a-f0-9]{16,64}$" },
+    "requestId": { "type": "string", "pattern": "^req_[0-9]{4,}$" },
+    "attemptId": { "type": "string", "pattern": "^attempt_[0-9]{3}$" },
+    "records": {
+      "type": "array",
+      "maxItems": 500,
+      "items": { "$ref": "#/$defs/record" }
+    },
+    "sealedAt": {
+      "oneOf": [
+        { "$ref": "#/$defs/timestamp" },
+        { "type": "null" }
+      ]
+    },
+    "recordsSha256": {
+      "oneOf": [
+        { "$ref": "#/$defs/sha256" },
+        { "type": "null" }
+      ]
+    },
+    "attachmentsSha256": {
+      "oneOf": [
+        { "$ref": "#/$defs/sha256" },
+        { "type": "null" }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "active" } }, "required": ["status"] },
+      "then": {
+        "properties": {
+          "sealedAt": { "type": "null" },
+          "recordsSha256": { "type": "null" },
+          "attachmentsSha256": { "type": "null" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "status": { "const": "sealed" } }, "required": ["status"] },
+      "then": {
+        "properties": {
+          "sealedAt": { "$ref": "#/$defs/timestamp" },
+          "recordsSha256": { "$ref": "#/$defs/sha256" },
+          "attachmentsSha256": { "$ref": "#/$defs/sha256" }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "recordId",
+        "recordedAt",
+        "idempotencyKey",
+        "action",
+        "refersTo",
+        "userText",
+        "targetDescription",
+        "evidenceState",
+        "evidenceDescription",
+        "attachments"
+      ],
+      "properties": {
+        "recordId": { "type": "string", "pattern": "^supplement_[0-9]{4,}$" },
+        "recordedAt": { "$ref": "#/$defs/timestamp" },
+        "idempotencyKey": { "type": "string", "minLength": 1, "maxLength": 180 },
+        "action": { "enum": ["add", "amend", "retract"] },
+        "refersTo": {
+          "type": "array",
+          "maxItems": 50,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^(?:instruction_[A-Za-z0-9_-]+|supplement_[0-9]{4,})$"
+          }
+        },
+        "userText": { "type": "string", "minLength": 1, "maxLength": 20000 },
+        "targetDescription": {
+          "oneOf": [
+            { "type": "string", "minLength": 1, "maxLength": 4000 },
+            { "type": "null" }
+          ]
+        },
+        "evidenceState": { "enum": ["text-only", "original-file", "description-only"] },
+        "evidenceDescription": {
+          "oneOf": [
+            { "type": "string", "minLength": 1, "maxLength": 20000 },
+            { "type": "null" }
+          ]
+        },
+        "attachments": {
+          "type": "array",
+          "maxItems": 10,
+          "items": { "$ref": "#/$defs/attachment" }
+        }
+      }
+    },
+    "attachment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attachmentId",
+        "fileName",
+        "mediaType",
+        "byteLength",
+        "sha256",
+        "relativePath"
+      ],
+      "properties": {
+        "attachmentId": { "type": "string", "pattern": "^suppatt_[0-9]{4,}_[0-9]{2}$" },
+        "fileName": { "type": "string", "minLength": 1, "maxLength": 180 },
+        "mediaType": {
+          "enum": [
+            "image/png",
+            "image/jpeg",
+            "image/webp",
+            "image/gif",
+            "image/heic",
+            "application/pdf",
+            "text/plain",
+            "text/markdown",
+            "application/json",
+            "text/csv",
+            "application/zip"
+          ]
+        },
+        "byteLength": { "type": "integer", "minimum": 1, "maximum": 26214400 },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "relativePath": {
+          "type": "string",
+          "pattern": "^supplement-attachments/suppatt_[0-9]{4,}_[0-9]{2}-[^/]+$"
+        }
+      }
+    },
+    "sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "timestamp": { "type": "string", "format": "date-time" }
+  }
+}

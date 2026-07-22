@@ -1,0 +1,61 @@
+{
+  "schemaVersion": "1.0.0",
+  "projectId": "project_metrics",
+  "documentId": "doc_dashboard",
+  "requestId": "req_metrics_cards",
+  "attemptId": "attempt_001",
+  "frozen": true,
+  "createdAt": "2026-07-17T08:34:00Z",
+  "readOrder": [
+    "PROMPT.md",
+    "input/AI_RULES.md",
+    "change-request.json",
+    "input/PROJECT.md",
+    "input/base/index.html",
+    "input/annotations/records.json"
+  ],
+  "files": [
+    {
+      "path": "PROMPT.md",
+      "role": "prompt",
+      "mediaType": "text/markdown",
+      "byteLength": 1024,
+      "sha256": "sha256:2121212121212121212121212121212121212121212121212121212121212121"
+    },
+    {
+      "path": "input/AI_RULES.md",
+      "role": "policy",
+      "mediaType": "text/markdown",
+      "byteLength": 768,
+      "sha256": "sha256:2424242424242424242424242424242424242424242424242424242424242424"
+    },
+    {
+      "path": "change-request.json",
+      "role": "change-request",
+      "mediaType": "application/json",
+      "byteLength": 2048,
+      "sha256": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    {
+      "path": "input/PROJECT.md",
+      "role": "project-rules",
+      "mediaType": "text/markdown",
+      "byteLength": 512,
+      "sha256": "sha256:2323232323232323232323232323232323232323232323232323232323232323"
+    },
+    {
+      "path": "input/base/index.html",
+      "role": "base-html",
+      "mediaType": "text/html",
+      "byteLength": 4988,
+      "sha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    {
+      "path": "input/annotations/records.json",
+      "role": "annotations",
+      "mediaType": "application/json",
+      "byteLength": 1200,
+      "sha256": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    }
+  ]
+}

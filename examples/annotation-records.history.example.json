@@ -1,0 +1,86 @@
+{
+  "schemaVersion": "3.0.0",
+  "projectId": "project_market_report",
+  "documentId": "doc_weekly_report",
+  "requestId": "req_title_spacing",
+  "attemptId": "attempt_001",
+  "capturedAt": "2026-07-18T09:35:00Z",
+  "freezeCutoffRevision": 18,
+  "basedOnVersionId": "ver_0008",
+  "baseSnapshotSha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "comments": [
+    {
+      "commentId": "comment_title_spacing",
+      "createdAt": "2026-07-18T09:31:12Z",
+      "updatedAt": "2026-07-18T09:32:06Z",
+      "capturedRevision": 18,
+      "text": "标题和正文之间再紧凑一点。",
+      "target": {
+        "targetId": "target_weekly_title_text",
+        "label": "本周判断标题文字",
+        "level": "text",
+        "selector": "#weekly-view h2",
+        "textQuote": "本周核心判断",
+        "sourceAnchor": {
+          "startOffset": 1260,
+          "endOffset": 1266,
+          "sourceSha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "fingerprint": {
+          "tagName": "h2",
+          "stableAttributes": {
+            "class": "section-title"
+          },
+          "ancestorFingerprint": [
+            "body",
+            "main",
+            "section#weekly-view"
+          ],
+          "textPrefix": "本周核心",
+          "textSuffix": "判断"
+        },
+        "resolution": "exact"
+      },
+      "persistence": "request-only"
+    }
+  ],
+  "editEvents": [
+    {
+      "eventId": "edit_weekly_title_text",
+      "createdAt": "2026-07-18T09:30:20Z",
+      "revision": 17,
+      "basedOnVersionId": "ver_0008",
+      "kind": "text",
+      "property": "textContent",
+      "summary": "将标题从“本周判断”改为“本周核心判断”",
+      "target": {
+        "targetId": "target_weekly_title_text",
+        "label": "本周判断标题文字",
+        "level": "text",
+        "selector": "#weekly-view h2",
+        "textQuote": "本周核心判断",
+        "sourceAnchor": {
+          "startOffset": 1260,
+          "endOffset": 1266,
+          "sourceSha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "fingerprint": {
+          "tagName": "h2",
+          "stableAttributes": {
+            "class": "section-title"
+          },
+          "ancestorFingerprint": [
+            "body",
+            "main",
+            "section#weekly-view"
+          ],
+          "textPrefix": "本周核心",
+          "textSuffix": "判断"
+        },
+        "resolution": "exact"
+      },
+      "before": "本周判断",
+      "after": "本周核心判断"
+    }
+  ]
+}

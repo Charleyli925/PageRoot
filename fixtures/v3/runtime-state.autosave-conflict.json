@@ -1,0 +1,53 @@
+{
+  "schemaVersion": "3.0.0",
+  "projectId": "project_metrics",
+  "documentId": "doc_dashboard",
+  "updatedAt": "2026-07-17T08:33:59Z",
+  "lifecycleState": "awaiting-conflict-resolution",
+  "projectLocked": true,
+  "editRevision": 42,
+  "lastPersistedRevision": 41,
+  "freezeCutoffRevision": null,
+  "autosave": {
+    "status": "external-conflict",
+    "expectedSourceSha256": "sha256:1616161616161616161616161616161616161616161616161616161616161616",
+    "lastPersistedAt": "2026-07-17T08:33:56Z",
+    "recoveryLogRelativePath": "recovery/autosave.jsonl",
+    "errorCode": "SOURCE_CHANGED_EXTERNALLY",
+    "errorMessage": "真实源 HTML 已在编辑器外发生变化。"
+  },
+  "pendingWrite": null,
+  "pendingSubmission": null,
+  "view": {
+    "viewMode": "current",
+    "latestVersionId": "ver_0008",
+    "currentBasedOnVersionId": "ver_0005",
+    "currentExactVersionId": null,
+    "viewingVersionId": null,
+    "renderedContentSha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "draft": {
+    "annotationsRelativePath": "draft/annotations.json",
+    "annotationsSha256": "sha256:1010101010101010101010101010101010101010101010101010101010101010",
+    "commentIds": [
+      "comment_emphasize_value"
+    ],
+    "editEventIds": [
+      "edit_title_weight"
+    ],
+    "draftRevision": 2,
+    "updatedAt": "2026-07-17T08:33:57Z"
+  },
+  "activeRun": null,
+  "activeTransaction": null,
+  "conflict": {
+    "conflictId": "conflict_autosave_revision_42",
+    "type": "autosave-source",
+    "detectedAt": "2026-07-17T08:33:59Z",
+    "expectedSourceSha256": "sha256:1616161616161616161616161616161616161616161616161616161616161616",
+    "externalSourceSha256": "sha256:1313131313131313131313131313131313131313131313131313131313131313",
+    "candidateContentSha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "candidateRecoveryRelativePath": "recovery/autosave/revision-00000042.html",
+    "editRevision": 42
+  }
+}

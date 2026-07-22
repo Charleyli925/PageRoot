@@ -1,0 +1,52 @@
+{
+  "schemaVersion": "3.0.0",
+  "projectId": "project_metrics",
+  "documentId": "doc_dashboard",
+  "updatedAt": "2026-07-17T08:34:00Z",
+  "lifecycleState": "submitting",
+  "projectLocked": true,
+  "editRevision": 42,
+  "lastPersistedRevision": 42,
+  "freezeCutoffRevision": 42,
+  "autosave": {
+    "status": "updated",
+    "expectedSourceSha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "lastPersistedAt": "2026-07-17T08:33:58Z",
+    "recoveryLogRelativePath": "recovery/autosave.jsonl"
+  },
+  "pendingWrite": null,
+  "pendingSubmission": {
+    "requestId": "req_metrics_cards",
+    "attemptId": "attempt_001",
+    "basedOnVersionId": "ver_0005",
+    "previousVersionId": "ver_0008",
+    "candidateVersionId": "ver_0009",
+    "candidateVersionOrdinal": 9,
+    "candidateVersionLabel": "V9",
+    "baseSnapshotSha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "freezeCutoffRevision": 42,
+    "lockedAt": "2026-07-17T08:34:00Z"
+  },
+  "view": {
+    "viewMode": "current",
+    "latestVersionId": "ver_0008",
+    "currentBasedOnVersionId": "ver_0005",
+    "currentExactVersionId": null,
+    "viewingVersionId": null,
+    "renderedContentSha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "draft": {
+    "annotationsRelativePath": "draft/annotations.json",
+    "annotationsSha256": "sha256:1010101010101010101010101010101010101010101010101010101010101010",
+    "commentIds": [
+      "comment_emphasize_value"
+    ],
+    "editEventIds": [
+      "edit_title_weight"
+    ],
+    "draftRevision": 2,
+    "updatedAt": "2026-07-17T08:33:59Z"
+  },
+  "activeRun": null,
+  "activeTransaction": null
+}

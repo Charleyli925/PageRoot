@@ -1,0 +1,37 @@
+{
+  "schemaVersion": "3.0.0",
+  "projectId": "project_metrics",
+  "documentId": "doc_dashboard",
+  "updatedAt": "2026-07-17T08:41:31Z",
+  "lifecycleState": "ready",
+  "projectLocked": false,
+  "editRevision": 42,
+  "lastPersistedRevision": 42,
+  "freezeCutoffRevision": null,
+  "autosave": {
+    "status": "updated",
+    "expectedSourceSha256": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "lastPersistedAt": "2026-07-17T08:41:30Z",
+    "recoveryLogRelativePath": "recovery/autosave.jsonl"
+  },
+  "pendingWrite": null,
+  "pendingSubmission": null,
+  "view": {
+    "viewMode": "current",
+    "latestVersionId": "ver_0009",
+    "currentBasedOnVersionId": "ver_0009",
+    "currentExactVersionId": "ver_0009",
+    "viewingVersionId": null,
+    "renderedContentSha256": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  },
+  "draft": {
+    "annotationsRelativePath": "draft/annotations.json",
+    "annotationsSha256": "sha256:1010101010101010101010101010101010101010101010101010101010101010",
+    "commentIds": [],
+    "editEventIds": [],
+    "draftRevision": 1,
+    "updatedAt": "2026-07-17T08:41:31Z"
+  },
+  "activeRun": null,
+  "activeTransaction": null
+}

@@ -1,0 +1,183 @@
+{
+  "schemaVersion": "1.0.0",
+  "fixture": "complex-layout.html",
+  "contract": {
+    "native-editable": "The authored DOM becomes the editing host and provides the complete browser caret, Selection, beforeinput and composition experience.",
+    "select-comment": "Browser text Selection remains available, but no editable caret is advertised; the user is offered a plain-language comment path.",
+    "comment-only": "The surface never becomes contenteditable and exposes an element-level comment path."
+  },
+  "cases": [
+    {
+      "id": "heading-inline",
+      "mode": "native-editable",
+      "features": ["heading", "nested-inline", "entity", "emoji"]
+    },
+    {
+      "id": "paragraph-entities",
+      "mode": "native-editable",
+      "features": ["paragraph", "nested-inline", "entity", "wrapping"]
+    },
+    {
+      "id": "grid-card",
+      "mode": "native-editable",
+      "features": ["css-grid", "nested-inline"]
+    },
+    {
+      "id": "flex-copy",
+      "mode": "native-editable",
+      "features": ["flex-item", "gap", "nested-inline"]
+    },
+    {
+      "id": "standalone-span",
+      "mode": "native-editable",
+      "features": ["capability-text-island", "span", "inline-flex"]
+    },
+    {
+      "id": "standalone-strong",
+      "mode": "native-editable",
+      "features": ["capability-text-island", "strong", "inline-flex"]
+    },
+    {
+      "id": "standalone-time",
+      "mode": "native-editable",
+      "features": ["capability-text-island", "time", "inline-flex"]
+    },
+    {
+      "id": "standalone-label",
+      "mode": "native-editable",
+      "features": ["capability-text-island", "label", "inline-flex"]
+    },
+    {
+      "id": "standalone-output",
+      "mode": "native-editable",
+      "features": ["capability-text-island", "output", "inline-flex"]
+    },
+    {
+      "id": "standalone-link",
+      "mode": "native-editable",
+      "features": ["capability-text-island", "anchor", "action-suppression"]
+    },
+    {
+      "id": "standalone-button",
+      "mode": "comment-only",
+      "reason": "Chromium focuses a contenteditable button but does not deliver a reliable native text-input transaction; it requires a dedicated label editor.",
+      "features": ["capability-text-island", "button", "action-suppression"]
+    },
+    {
+      "id": "standalone-summary",
+      "mode": "native-editable",
+      "features": ["capability-text-island", "summary", "details"]
+    },
+    {
+      "id": "nowrap-table-header",
+      "mode": "native-editable",
+      "features": ["table-header", "nowrap", "ua-white-space", "geometry-guard"]
+    },
+    {
+      "id": "table-cell",
+      "mode": "native-editable",
+      "features": ["table-cell", "nested-inline"]
+    },
+    {
+      "id": "list-item",
+      "mode": "native-editable",
+      "features": ["list-item", "nested-inline"]
+    },
+    {
+      "id": "rtl-copy",
+      "mode": "native-editable",
+      "features": ["rtl", "bidi", "mixed-script"]
+    },
+    {
+      "id": "hard-break",
+      "mode": "native-editable",
+      "features": ["br", "hard-break", "multi-line"]
+    },
+    {
+      "id": "scroll-copy",
+      "mode": "native-editable",
+      "features": ["scroll-container", "wrapping"]
+    },
+    {
+      "id": "transformed-copy",
+      "mode": "native-editable",
+      "features": ["transform", "scale"]
+    },
+    {
+      "id": "vertical-copy",
+      "mode": "select-comment",
+      "reason": "Vertical writing remains selectable until vertical caret geometry is release-gated.",
+      "features": ["writing-mode", "vertical-rl"]
+    },
+    {
+      "id": "preformatted-copy",
+      "mode": "select-comment",
+      "reason": "Whitespace-sensitive structural editing is intentionally not advertised as complete.",
+      "features": ["pre", "code", "whitespace"]
+    },
+    {
+      "id": "atom-mixed",
+      "mode": "select-comment",
+      "reason": "A text range crossing an atomic image is not a safe direct-edit island.",
+      "features": ["atom", "image", "cross-node-selection"]
+    },
+    {
+      "id": "custom-element",
+      "mode": "native-editable",
+      "features": ["custom-element"]
+    },
+    {
+      "id": "unsafe-contenteditable-css",
+      "mode": "select-comment",
+      "reason": "Author CSS changes geometry only after the contenteditable host receives focus.",
+      "features": ["author-css", "contenteditable-focus-selector", "layout-risk"]
+    },
+    {
+      "id": "transition-sensitive-copy",
+      "mode": "native-editable",
+      "features": ["author-css", "transition", "timing-risk"]
+    },
+    {
+      "id": "pseudo-content",
+      "mode": "native-editable",
+      "reason": "The authored text remains directly editable; only the generated prefix has no source range.",
+      "features": ["pseudo-element", "generated-content"]
+    },
+    {
+      "id": "canvas-surface",
+      "mode": "comment-only",
+      "reason": "Canvas pixels do not map to authored text.",
+      "features": ["canvas"]
+    },
+    {
+      "id": "nested-iframe",
+      "mode": "comment-only",
+      "reason": "Nested frame content is outside the edit document's source-selection boundary.",
+      "features": ["iframe", "nested-document"]
+    },
+    {
+      "id": "svg-text",
+      "mode": "comment-only",
+      "reason": "SVG text uses an element-level comment path in the first native editor release.",
+      "features": ["svg", "foreign-content"]
+    },
+    {
+      "id": "mathml-text",
+      "mode": "comment-only",
+      "reason": "MathML structure uses an element-level comment path instead of a misleading text caret.",
+      "features": ["mathml", "foreign-content", "formula"]
+    },
+    {
+      "id": "form-value",
+      "mode": "comment-only",
+      "reason": "Form values require a dedicated property editor, not contenteditable.",
+      "features": ["input", "attribute-value"]
+    },
+    {
+      "id": "shadow-content",
+      "mode": "comment-only",
+      "reason": "Declarative Shadow DOM is outside the authored light-DOM text map.",
+      "features": ["shadow-dom", "template"]
+    }
+  ]
+}

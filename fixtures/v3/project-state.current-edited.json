@@ -1,0 +1,13 @@
+{
+  "schemaVersion": "3.0.0",
+  "projectId": "project_metrics",
+  "documentId": "doc_dashboard",
+  "name": "AI 指标系统",
+  "sourcePath": "/Users/example/Documents/ai-metrics-system.html",
+  "latestVersionId": "ver_0008",
+  "currentBasedOnVersionId": "ver_0005",
+  "currentExactVersionId": null,
+  "restoredFromVersionId": "ver_0005",
+  "currentHtmlSha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "lastModifiedAt": "2026-07-17T08:33:58Z"
+}

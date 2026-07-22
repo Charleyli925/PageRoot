@@ -1,0 +1,338 @@
+{
+  "schemaVersion": 1,
+  "suites": {
+    "build-web": {
+      "description": "Build the production web renderer once for Node render and browser gates.",
+      "prerequisites": []
+    },
+    "build-desktop": {
+      "description": "Build the Electron renderer once for desktop gates and packaging.",
+      "prerequisites": []
+    },
+    "typecheck": {
+      "description": "Run the TypeScript compiler without emitting files.",
+      "prerequisites": []
+    },
+    "lint": {
+      "description": "Run repository lint rules.",
+      "prerequisites": []
+    },
+    "dependency-audit": {
+      "description": "Reject unreviewed or expired npm security advisories.",
+      "prerequisites": []
+    },
+    "node-targeted": {
+      "description": "Run only the Node test files selected by the impact map.",
+      "prerequisites": []
+    },
+    "node-core": {
+      "description": "Run core logic and invariant Node tests, excluding source-string contracts and heavy integration gates.",
+      "prerequisites": []
+    },
+    "node-contract": {
+      "description": "Run implementation-shape contracts only when their owned UI or controller changes.",
+      "prerequisites": []
+    },
+    "node-integration": {
+      "description": "Run Bridge, filesystem, schema, lifecycle and rendered-output integration tests.",
+      "prerequisites": ["build-web"]
+    },
+    "node-package": {
+      "description": "Run package manifest and packaged-artifact verifier contracts.",
+      "prerequisites": []
+    },
+    "node-full": {
+      "description": "Run every top-level Node test exactly once.",
+      "prerequisites": ["build-web"]
+    },
+    "browser-smoke": {
+      "description": "Run a small stable cross-section of real Chromium editing, source-byte, formatting and history behavior.",
+      "prerequisites": ["build-web"]
+    },
+    "browser-full": {
+      "description": "Run the complete real Chromium editing suite with retries disabled.",
+      "prerequisites": ["build-web"]
+    },
+    "real-html": {
+      "description": "Run the discovery-based real-HTML byte and geometry oracle on the repository corpus or an explicit sample.",
+      "prerequisites": ["build-web"]
+    },
+    "electron-smoke": {
+      "description": "Run stable real Electron authored-DOM and persisted-composition smoke tests.",
+      "prerequisites": ["build-desktop"]
+    },
+    "electron-full": {
+      "description": "Run the complete Electron editing suite, including disk persistence and cold reopen.",
+      "prerequisites": ["build-desktop"]
+    },
+    "ai-closed-loop": {
+      "description": "Run the deterministic Electron comment-to-AI finalizer closed loop and failure paths.",
+      "prerequisites": ["build-desktop"]
+    },
+    "ai-smoke": {
+      "description": "Run one successful deterministic AI loop and one out-of-scope fail-closed path.",
+      "prerequisites": ["build-desktop"]
+    },
+    "package-build": {
+      "description": "Build the requested macOS candidate without rebuilding the renderer.",
+      "prerequisites": ["build-desktop"]
+    },
+    "packaged-runtime": {
+      "description": "Launch the packaged .app with isolated data and execute a real authored-DOM source-byte smoke test.",
+      "prerequisites": ["package-build"]
+    },
+    "packaged-verify": {
+      "description": "Verify app.asar, Bridge resources, schemas, signature, DMG integrity and read-only mount contents.",
+      "prerequisites": ["package-build"]
+    }
+  },
+  "lanes": {
+    "edit": {
+      "description": "Fast feedback while editing; only impacted Node tests and explicitly mapped compiler checks.",
+      "allowedSuites": [
+        "typecheck",
+        "node-targeted",
+        "node-core",
+        "node-contract",
+        "node-integration",
+        "node-package"
+      ],
+      "alwaysForCode": []
+    },
+    "task": {
+      "description": "End-of-task gate; adds static checks and impacted browser, Electron or AI smoke coverage.",
+      "allowedSuites": [
+        "typecheck",
+        "lint",
+        "dependency-audit",
+        "node-targeted",
+        "node-core",
+        "node-contract",
+        "node-integration",
+        "node-package",
+        "browser-smoke",
+        "real-html",
+        "electron-smoke",
+        "ai-smoke"
+      ],
+      "alwaysForCode": ["typecheck", "lint"]
+    },
+    "release": {
+      "description": "Fully automated pre-package release gate against one source state.",
+      "fullSuites": [
+        "typecheck",
+        "lint",
+        "dependency-audit",
+        "node-full",
+        "browser-full",
+        "electron-full",
+        "ai-closed-loop",
+        "real-html"
+      ]
+    },
+    "artifact": {
+      "description": "Release gate plus package build, packaged runtime smoke and artifact verification.",
+      "fullSuites": [
+        "typecheck",
+        "lint",
+        "dependency-audit",
+        "node-full",
+        "browser-full",
+        "electron-full",
+        "ai-closed-loop",
+        "real-html",
+        "package-build",
+        "packaged-runtime",
+        "packaged-verify"
+      ]
+    }
+  },
+  "rules": [
+    {
+      "id": "test-policy",
+      "patterns": [
+        "^scripts/test-(?:gate|node-group)(?:-core)?\\.mjs$",
+        "^tests/test-impact-map\\.json$",
+        "^tests/test-gate-selection\\.test\\.mjs$"
+      ],
+      "suites": [],
+      "nodeTests": ["tests/test-gate-selection.test.mjs"]
+    },
+    {
+      "id": "source-editing-core",
+      "patterns": [
+        "^app/lib/(?:source-(?:index|patch-core|patch-engine|text-map)|target-resolver|runtime-dom-source-map|selection-bookmark|format-skeleton|native-(?:edit-capability|edit-transaction|source-map|block-edit-draft))\\.(?:js|ts)$",
+        "^scripts/(?:source-index|source-patch-engine|target-resolver)\\.mjs$"
+      ],
+      "suites": ["typecheck", "browser-smoke", "electron-smoke"],
+      "nodeTests": [
+        "tests/source-index-target-resolver.test.mjs",
+        "tests/source-patch-engine.test.mjs",
+        "tests/source-text-map.test.mjs",
+        "tests/runtime-dom-source-map.test.mjs",
+        "tests/selection-bookmark.test.mjs",
+        "tests/format-skeleton.test.mjs",
+        "tests/native-edit-capability.test.mjs",
+        "tests/native-edit-transaction.test.mjs",
+        "tests/native-block-edit-draft.test.mjs",
+        "tests/native-source-map-fuzz.test.mjs",
+        "tests/generated-source-invariants.test.mjs"
+      ]
+    },
+    {
+      "id": "native-controller",
+      "patterns": [
+        "^app/components/(?:HtmlCanvasEditor|NativeEditingController)\\.(?:tsx|ts)$"
+      ],
+      "suites": ["typecheck", "browser-smoke", "electron-smoke"],
+      "nodeTests": [
+        "tests/native-edit-transaction.test.mjs",
+        "tests/runtime-dom-source-map.test.mjs",
+        "tests/source-text-map.test.mjs",
+        "tests/format-skeleton.test.mjs",
+        "tests/native-command-queue-contract.test.mjs",
+        "tests/native-layout-guard.test.mjs",
+        "tests/workbench-history-fence-contract.test.mjs"
+      ]
+    },
+    {
+      "id": "workbench-lifecycle",
+      "patterns": ["^app/workbench\\.tsx$"],
+      "suites": ["typecheck", "browser-smoke", "electron-smoke", "ai-smoke"],
+      "nodeTests": [
+        "tests/direct-edit-history.test.mjs",
+        "tests/frontend-target-refresh.test.mjs",
+        "tests/notification-policy.test.mjs",
+        "tests/notification-ui.test.mjs",
+        "tests/workbench-history-fence-contract.test.mjs",
+        "tests/workbench-shell-ux.test.mjs"
+      ]
+    },
+    {
+      "id": "web-ui",
+      "patterns": ["^app/(?:components/.*|page|layout)\\.(?:tsx|ts)$"],
+      "suites": ["typecheck", "browser-smoke"],
+      "nodeTests": [
+        "tests/frontend-target-refresh.test.mjs",
+        "tests/notification-ui.test.mjs",
+        "tests/workbench-shell-ux.test.mjs"
+      ]
+    },
+    {
+      "id": "desktop-runtime",
+      "patterns": ["^desktop/.*\\.(?:mjs|tsx|ts|html)$"],
+      "suites": ["electron-smoke"],
+      "nodeTests": [
+        "tests/desktop-close-recovery.test.mjs",
+        "tests/desktop-file-writer.test.mjs",
+        "tests/desktop-preload-ipc.test.mjs",
+        "tests/bridge-shutdown.test.mjs",
+        "tests/export-copy.test.mjs",
+        "tests/desktop-package.test.mjs"
+      ]
+    },
+    {
+      "id": "desktop-ai-handoff",
+      "patterns": ["^desktop/(?:main|qoder-handoff|product-contract)\\.mjs$"],
+      "suites": ["ai-smoke"],
+      "nodeTests": [
+        "tests/qoder-handoff.test.mjs",
+        "tests/product-contract.test.mjs"
+      ]
+    },
+    {
+      "id": "bridge-lifecycle",
+      "patterns": [
+        "^scripts/(?:workspace-bridge|lifecycle-core|finalize-attempt|record-user-supplement|user-supplement-core|scope-validator|html-source-parser|attachment-storage|product-contract|target-identity)\\.mjs$"
+      ],
+      "suites": ["ai-smoke"],
+      "nodeTests": [
+        "tests/workspace-bridge.test.mjs",
+        "tests/lifecycle-core.test.mjs",
+        "tests/scope-validator.test.mjs",
+        "tests/html-source-parser.test.mjs",
+        "tests/attachment-storage.test.mjs",
+        "tests/product-contract.test.mjs",
+        "tests/targeted-change-schema.test.mjs",
+        "tests/user-supplement.test.mjs"
+      ]
+    },
+    {
+      "id": "schemas",
+      "patterns": ["^schemas/.*\\.json$"],
+      "suites": [],
+      "nodeTests": [
+        "tests/schema-contract.test.mjs",
+        "tests/targeted-change-schema.test.mjs",
+        "tests/scope-validator.test.mjs",
+        "tests/workspace-bridge.test.mjs"
+      ]
+    },
+    {
+      "id": "dependency-audit-policy",
+      "patterns": [
+        "^package(?:-lock)?\\.json$",
+        "^scripts/check-dependency-audit\\.mjs$",
+        "^tests/dependency-audit-policy\\.test\\.mjs$",
+        "^docs/DEPENDENCY_SECURITY\\.md$"
+      ],
+      "suites": ["dependency-audit"],
+      "nodeTests": ["tests/dependency-audit-policy.test.mjs"]
+    },
+    {
+      "id": "packaging",
+      "patterns": [
+        "^(?:package(?:-lock)?\\.json|desktop/after-pack\\.mjs|desktop/resources/.*|scripts/(?:build-package|create-release-assets|release-provenance|verify-packaged-artifact)\\.mjs)$"
+      ],
+      "suites": [],
+      "nodeTests": [
+        "tests/desktop-package.test.mjs",
+        "tests/packaged-artifact-gate.test.mjs",
+        "tests/release-provenance.test.mjs"
+      ]
+    },
+    {
+      "id": "real-html-e2e",
+      "patterns": [
+        "^tests/e2e/browser/real-complex-html\\.gate\\.mjs$",
+        "^tests/e2e/browser/playwright\\.real-html\\.config\\.mjs$"
+      ],
+      "suites": ["real-html"],
+      "nodeTests": []
+    },
+    {
+      "id": "browser-e2e",
+      "patterns": [
+        "^tests/e2e/browser/(?!real-complex-html\\.gate|playwright\\.real-html\\.config).*\\.mjs$"
+      ],
+      "suites": ["browser-smoke"],
+      "nodeTests": []
+    },
+    {
+      "id": "browser-fixtures",
+      "patterns": ["^tests/fixtures/native-dom/.*"],
+      "suites": ["browser-smoke", "real-html"],
+      "nodeTests": []
+    },
+    {
+      "id": "electron-e2e",
+      "patterns": ["^tests/e2e/electron/(?!ai-handoff-closed-loop).*\\.mjs$"],
+      "suites": ["electron-smoke"],
+      "nodeTests": []
+    },
+    {
+      "id": "ai-e2e",
+      "patterns": [
+        "^tests/e2e/electron/ai-handoff-closed-loop\\.spec\\.mjs$",
+        "^tests/e2e/electron/playwright\\.ai-(?:closed-loop|smoke)\\.config\\.mjs$",
+        "^tests/ai-smoke-config\\.test\\.mjs$"
+      ],
+      "suites": ["ai-smoke"],
+      "nodeTests": ["tests/ai-smoke-config.test.mjs"]
+    }
+  ],
+  "fallback": {
+    "codePattern": "\\.(?:cjs|mjs|js|jsx|ts|tsx|json)$",
+    "suites": ["node-core"]
+  }
+}

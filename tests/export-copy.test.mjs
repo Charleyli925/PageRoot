@@ -1,0 +1,206 @@
+import assert from "node:assert/strict";
+import {
+  link,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+
+import {
+  createSafeExportDefaultPath,
+  isProtectedExportDestination,
+  normalizedPathKey,
+  pathsReferToSameFile,
+  PROJECT_IPC_PROTOCOL,
+  PROJECT_IPC_VERSION,
+  runProjectIpcOperation,
+  selectExportDestination,
+} from "../desktop/export-copy.mjs";
+import { ProjectFileError } from "../desktop/project-files.mjs";
+
+test("the default export name is a free numbered copy and never the source", async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "html-ai-export-name-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const sourcePath = path.join(directory, "页面.html");
+  const firstCopyPath = path.join(directory, "页面-副本.html");
+  await writeFile(sourcePath, "<html></html>", "utf8");
+
+  assert.equal(
+    await createSafeExportDefaultPath({
+      directoryPath: directory,
+      suggestedName: "页面.html",
+      sourcePath,
+      activePath: sourcePath,
+    }),
+    firstCopyPath,
+  );
+
+  await writeFile(firstCopyPath, "existing copy", "utf8");
+  assert.equal(
+    await createSafeExportDefaultPath({
+      directoryPath: directory,
+      suggestedName: "页面.html",
+      sourcePath,
+      activePath: sourcePath,
+    }),
+    path.join(directory, "页面-副本-2.html"),
+  );
+});
+
+test("the default export name skips aliases and existing paths", async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "html-ai-export-alias-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const sourcePath = path.join(directory, "source.htm");
+  const hardLinkCopy = path.join(directory, "source-副本.htm");
+  await writeFile(sourcePath, "<html></html>", "utf8");
+  await link(sourcePath, hardLinkCopy);
+
+  assert.equal(
+    await createSafeExportDefaultPath({
+      directoryPath: directory,
+      suggestedName: "source.htm",
+      sourcePath,
+      activePath: sourcePath,
+    }),
+    path.join(directory, "source-副本-2.htm"),
+  );
+});
+
+test("the default export name also avoids a different active project", async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "html-ai-export-active-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const sourcePath = path.join(directory, "draft.html");
+  const activePath = path.join(directory, "draft-副本.html");
+  await writeFile(sourcePath, "<html>draft</html>", "utf8");
+  await writeFile(activePath, "<html>active</html>", "utf8");
+
+  assert.equal(
+    await createSafeExportDefaultPath({
+      directoryPath: directory,
+      suggestedName: "draft.html",
+      sourcePath,
+      activePath,
+    }),
+    path.join(directory, "draft-副本-2.html"),
+  );
+});
+
+test("macOS path comparison protects case and Unicode aliases", async () => {
+  const composed = "/tmp/项目/ÉXAMPLE.HTML";
+  const decomposed = "/tmp/项目/e\u0301xample.html";
+  assert.equal(
+    normalizedPathKey(composed, "darwin"),
+    normalizedPathKey(decomposed, "darwin"),
+  );
+  assert.equal(
+    await pathsReferToSameFile(composed, decomposed, {
+      platform: "darwin",
+      statFile: async () => {
+        throw Object.assign(new Error("not found"), { code: "ENOENT" });
+      },
+    }),
+    true,
+  );
+});
+
+test("existing inode identity protects hard links to the source", async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "html-ai-export-inode-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const sourcePath = path.join(directory, "source.html");
+  const aliasPath = path.join(directory, "alias.html");
+  await writeFile(sourcePath, "<html></html>", "utf8");
+  await link(sourcePath, aliasPath);
+
+  assert.equal(await pathsReferToSameFile(sourcePath, aliasPath), true);
+  assert.equal(
+    await isProtectedExportDestination(aliasPath, [sourcePath]),
+    true,
+  );
+});
+
+test("selecting the source shows a native retry path and reopens the save dialog", async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "html-ai-export-retry-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const sourcePath = path.join(directory, "source.html");
+  const defaultPath = path.join(directory, "source-副本.html");
+  await writeFile(sourcePath, "<html></html>", "utf8");
+  const selections = [
+    { canceled: false, filePath: sourcePath },
+    { canceled: false, filePath: defaultPath },
+  ];
+  const shownDefaults = [];
+  let warningCount = 0;
+
+  const selected = await selectExportDestination({
+    defaultPath,
+    protectedPaths: [sourcePath],
+    showSaveDialog: async (safeDefaultPath) => {
+      shownDefaults.push(safeDefaultPath);
+      return selections.shift();
+    },
+    showProtectedWarning: async () => {
+      warningCount += 1;
+      return true;
+    },
+  });
+
+  assert.equal(selected, defaultPath);
+  assert.deepEqual(shownDefaults, [defaultPath, defaultPath]);
+  assert.equal(warningCount, 1);
+});
+
+test("canceling after selecting the source is a normal null result", async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "html-ai-export-cancel-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const sourcePath = path.join(directory, "source.html");
+  await writeFile(sourcePath, "<html></html>", "utf8");
+
+  const selected = await selectExportDestination({
+    defaultPath: path.join(directory, "source-副本.html"),
+    protectedPaths: [sourcePath],
+    showSaveDialog: async () => ({ canceled: false, filePath: sourcePath }),
+    showProtectedWarning: async () => false,
+  });
+
+  assert.equal(selected, null);
+  assert.equal(await readFile(sourcePath, "utf8"), "<html></html>");
+});
+
+test("project IPC envelopes preserve safe errors and redact unknown failures", async () => {
+  const success = await runProjectIpcOperation(async () => ({ path: "/tmp/copy.html" }));
+  assert.deepEqual(success, {
+    protocol: PROJECT_IPC_PROTOCOL,
+    version: PROJECT_IPC_VERSION,
+    ok: true,
+    value: { path: "/tmp/copy.html" },
+  });
+
+  const expected = await runProjectIpcOperation(async () => {
+    throw new ProjectFileError(
+      "EXPORT_OVER_SOURCE",
+      "源文件没有被改动。",
+      { destinationPath: "/tmp/source.html" },
+    );
+  });
+  assert.equal(expected.ok, false);
+  assert.equal(expected.error.code, "EXPORT_OVER_SOURCE");
+  assert.equal(expected.error.message, "源文件没有被改动。");
+  assert.equal(expected.error.details.destinationPath, "/tmp/source.html");
+  assert.equal("stack" in expected.error, false);
+  assert.equal("name" in expected.error, false);
+
+  const unknown = await runProjectIpcOperation(async () => {
+    throw new Error("secret internal stack and channel");
+  });
+  assert.equal(unknown.ok, false);
+  assert.equal(unknown.error.code, "FILE_OPERATION_FAILED");
+  assert.equal(
+    unknown.error.message,
+    "本地文件操作没有完成，请重试或选择其他位置。",
+  );
+  assert.doesNotMatch(JSON.stringify(unknown), /secret|channel|stack/i);
+});

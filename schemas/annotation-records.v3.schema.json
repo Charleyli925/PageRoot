@@ -1,0 +1,397 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://html-change.local/schemas/annotation-records.v3.schema.json",
+  "title": "HTML AI frozen annotation and edit records v3",
+  "description": "The immutable comment and local-edit facts captured at one request freeze boundary. Records refer to a lineage Version but local edits never create or commit a Version.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "projectId",
+    "documentId",
+    "requestId",
+    "attemptId",
+    "capturedAt",
+    "freezeCutoffRevision",
+    "basedOnVersionId",
+    "baseSnapshotSha256",
+    "comments",
+    "editEvents"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "3.0.0"
+    },
+    "projectId": {
+      "$ref": "#/$defs/projectId"
+    },
+    "documentId": {
+      "$ref": "#/$defs/documentId"
+    },
+    "requestId": {
+      "$ref": "#/$defs/requestId"
+    },
+    "attemptId": {
+      "$ref": "#/$defs/attemptId"
+    },
+    "capturedAt": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "freezeCutoffRevision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "basedOnVersionId": {
+      "$ref": "#/$defs/versionId"
+    },
+    "baseSnapshotSha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "comments": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/comment"
+      }
+    },
+    "editEvents": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/editEvent"
+      }
+    }
+  },
+  "$defs": {
+    "comment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "commentId",
+        "createdAt",
+        "updatedAt",
+        "capturedRevision",
+        "text",
+        "target",
+        "persistence"
+      ],
+      "properties": {
+        "commentId": {
+          "type": "string",
+          "pattern": "^comment_[A-Za-z0-9_-]+$"
+        },
+        "createdAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "updatedAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "capturedRevision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "text": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 20000
+        },
+        "attachments": {
+          "type": "array",
+          "maxItems": 10,
+          "items": {
+            "$ref": "#/$defs/attachment"
+          }
+        },
+        "target": {
+          "$ref": "#/$defs/target"
+        },
+        "persistence": {
+          "enum": [
+            "request-only",
+            "project-rule"
+          ]
+        }
+      }
+    },
+    "attachment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attachmentId",
+        "kind",
+        "fileName",
+        "mediaType",
+        "byteLength",
+        "sha256",
+        "relativePath"
+      ],
+      "properties": {
+        "attachmentId": {
+          "type": "string",
+          "pattern": "^attachment_[A-Za-z0-9_-]+$"
+        },
+        "kind": {
+          "enum": [
+            "image",
+            "file"
+          ]
+        },
+        "fileName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "mediaType": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "byteLength": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 26214400
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "relativePath": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "requestRelativePath": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "source": {
+          "enum": [
+            "clipboard",
+            "file-picker"
+          ]
+        }
+      }
+    },
+    "editEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "eventId",
+        "createdAt",
+        "revision",
+        "basedOnVersionId",
+        "kind",
+        "summary",
+        "target",
+        "before",
+        "after"
+      ],
+      "properties": {
+        "eventId": {
+          "type": "string",
+          "pattern": "^edit_[A-Za-z0-9_-]+$"
+        },
+        "createdAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "basedOnVersionId": {
+          "$ref": "#/$defs/versionId"
+        },
+        "kind": {
+          "enum": [
+            "text",
+            "style",
+            "reorder",
+            "structure"
+          ]
+        },
+        "property": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "historyId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "undoesEventId": {
+          "type": "string",
+          "pattern": "^edit_[A-Za-z0-9_-]+$"
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 5000
+        },
+        "target": {
+          "$ref": "#/$defs/target"
+        },
+        "before": {},
+        "after": {}
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "targetId",
+        "label",
+        "level",
+        "resolution"
+      ],
+      "properties": {
+        "targetId": {
+          "type": "string",
+          "pattern": "^target_[A-Za-z0-9_-]+$"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "level": {
+          "enum": [
+            "module",
+            "subregion",
+            "text",
+            "insertion-point"
+          ]
+        },
+        "selector": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "textQuote": {
+          "type": "string",
+          "maxLength": 5000
+        },
+        "sourceAnchor": {
+          "$ref": "#/$defs/sourceAnchor"
+        },
+        "fingerprint": {
+          "$ref": "#/$defs/fingerprint"
+        },
+        "resolution": {
+          "enum": [
+            "exact",
+            "rebound",
+            "ambiguous",
+            "orphaned"
+          ]
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "selector"
+          ]
+        },
+        {
+          "required": [
+            "sourceAnchor"
+          ]
+        },
+        {
+          "required": [
+            "fingerprint"
+          ]
+        }
+      ]
+    },
+    "sourceAnchor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "startOffset",
+        "endOffset",
+        "sourceSha256"
+      ],
+      "properties": {
+        "startOffset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "endOffset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sourceSha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "fingerprint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tagName",
+        "stableAttributes",
+        "ancestorFingerprint"
+      ],
+      "properties": {
+        "tagName": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9:-]*$"
+        },
+        "stableAttributes": {
+          "type": "object",
+          "maxProperties": 32,
+          "additionalProperties": {
+            "type": "string",
+            "maxLength": 4000
+          }
+        },
+        "ancestorFingerprint": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "string",
+            "maxLength": 4000
+          }
+        },
+        "textPrefix": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "textSuffix": {
+          "type": "string",
+          "maxLength": 500
+        }
+      }
+    },
+    "projectId": {
+      "type": "string",
+      "pattern": "^project_[A-Za-z0-9_-]+$"
+    },
+    "documentId": {
+      "type": "string",
+      "pattern": "^doc_[A-Za-z0-9_-]+$"
+    },
+    "requestId": {
+      "type": "string",
+      "pattern": "^req_[A-Za-z0-9_-]+$"
+    },
+    "attemptId": {
+      "type": "string",
+      "pattern": "^attempt_[0-9]{3}$"
+    },
+    "versionId": {
+      "type": "string",
+      "pattern": "^ver_[0-9]{4,}$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*\\\\)(?!.*//)(?!\\.\\.?$)(?!\\.\\.?/)(?!.*\\/\\.\\.?\\/)(?!.*\\/\\.\\.?$)[^\\u0000\\r\\n]+$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    }
+  }
+}

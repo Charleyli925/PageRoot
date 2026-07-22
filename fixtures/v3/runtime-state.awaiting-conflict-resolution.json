@@ -1,0 +1,78 @@
+{
+  "schemaVersion": "3.0.0",
+  "projectId": "project_metrics",
+  "documentId": "doc_dashboard",
+  "updatedAt": "2026-07-17T08:41:05Z",
+  "lifecycleState": "awaiting-conflict-resolution",
+  "projectLocked": true,
+  "editRevision": 42,
+  "lastPersistedRevision": 42,
+  "freezeCutoffRevision": 42,
+  "autosave": {
+    "status": "external-conflict",
+    "expectedSourceSha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "lastPersistedAt": "2026-07-17T08:33:58Z",
+    "recoveryLogRelativePath": "recovery/autosave.jsonl",
+    "errorCode": "SOURCE_CHANGED_EXTERNALLY",
+    "errorMessage": "源 HTML 在内部 AI 处理期间发生外部变化。"
+  },
+  "pendingWrite": null,
+  "pendingSubmission": null,
+  "view": {
+    "viewMode": "current",
+    "latestVersionId": "ver_0008",
+    "currentBasedOnVersionId": "ver_0005",
+    "currentExactVersionId": null,
+    "viewingVersionId": null,
+    "renderedContentSha256": "sha256:1313131313131313131313131313131313131313131313131313131313131313"
+  },
+  "draft": {
+    "annotationsRelativePath": "draft/annotations.json",
+    "annotationsSha256": "sha256:1010101010101010101010101010101010101010101010101010101010101010",
+    "commentIds": [],
+    "editEventIds": [],
+    "draftRevision": 1,
+    "updatedAt": "2026-07-17T08:34:00Z"
+  },
+  "activeRun": {
+    "requestId": "req_metrics_cards",
+    "attemptId": "attempt_001",
+    "basedOnVersionId": "ver_0005",
+    "previousVersionId": "ver_0008",
+    "candidateVersionId": "ver_0009",
+    "candidateVersionOrdinal": 9,
+    "candidateVersionLabel": "V9",
+    "baseSnapshotSha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "submittedAt": "2026-07-17T08:34:00Z",
+    "requestRelativePath": "requests/req_metrics_cards",
+    "attemptRelativePath": "requests/req_metrics_cards/attempts/attempt_001",
+    "outputRelativePath": "requests/req_metrics_cards/attempts/attempt_001/output/index.html",
+    "completionRelativePath": "requests/req_metrics_cards/attempts/attempt_001/completion.json",
+    "frozenAnnotationsRelativePath": "requests/req_metrics_cards/input/annotations/records.json",
+    "frozenAnnotationsSha256": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "inputManifestSha256": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+    "frozenCommentIds": [
+      "comment_emphasize_value"
+    ],
+    "frozenEditEventIds": [
+      "edit_title_weight"
+    ]
+  },
+  "activeTransaction": {
+    "transactionId": "txn_metrics_v9",
+    "transactionRelativePath": "transactions/txn_metrics_v9/transaction.json"
+  },
+  "conflict": {
+    "conflictId": "conflict_metrics_v9",
+    "type": "ai-source",
+    "transactionId": "txn_metrics_v9",
+    "requestId": "req_metrics_cards",
+    "attemptId": "attempt_001",
+    "candidateVersionId": "ver_0009",
+    "detectedAt": "2026-07-17T08:41:05Z",
+    "expectedSourceSha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "externalSourceSha256": "sha256:1313131313131313131313131313131313131313131313131313131313131313",
+    "candidateOutputSha256": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "candidateRelativePath": "requests/req_metrics_cards/attempts/attempt_001/output/index.html"
+  }
+}

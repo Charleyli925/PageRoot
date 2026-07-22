@@ -1,0 +1,507 @@
+.editor {
+  --html-canvas-height: 720px;
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  height: var(--html-canvas-height);
+  display: grid;
+  grid-template-rows: 40px minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid #dcd9d2;
+  border-radius: 14px;
+  background: #f4f2ed;
+  box-shadow: 0 12px 34px rgb(37 34 27 / 8%);
+}
+
+.frame {
+  grid-row: 2;
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  border: 0;
+  border-top: 1px solid #e2dfd8;
+  background: #fff;
+}
+
+.editor:not([data-render-verified="true"]) .frame {
+  visibility: hidden;
+}
+
+.lockNotice {
+  position: absolute;
+  top: 3px;
+  left: 50%;
+  z-index: 12;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 0 13px;
+  border: 1px solid rgb(46 43 52 / 18%);
+  border-radius: 999px;
+  color: #3e3a45;
+  background: rgb(255 255 255 / 94%);
+  box-shadow: 0 7px 20px rgb(37 34 27 / 13%);
+  font: 650 12px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  white-space: nowrap;
+  pointer-events: none;
+  transform: translateX(-50%);
+  backdrop-filter: blur(10px);
+}
+
+.editBlockedNotice {
+  position: absolute;
+  top: 48px;
+  left: 50%;
+  z-index: 18;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: min(560px, calc(100% - 28px));
+  padding: 11px 12px;
+  border: 1px solid #e5d4a3;
+  border-radius: 11px;
+  color: #5f4b1f;
+  background: rgb(255 251 240 / 97%);
+  box-shadow: 0 10px 26px rgb(78 62 24 / 13%);
+  transform: translateX(-50%);
+  backdrop-filter: blur(10px);
+}
+
+.editBlockedNotice > div {
+  display: grid;
+  flex: 1;
+  gap: 4px;
+  min-width: 0;
+}
+
+.editBlockedNotice strong {
+  font: 720 11px/1.25 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.editBlockedNotice span {
+  font: 500 10px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.editBlockedNotice button {
+  flex: none;
+  min-height: 28px;
+  padding: 0 9px;
+  border: 1px solid #d8c48d;
+  border-radius: 7px;
+  color: inherit;
+  background: #fff;
+  font: 650 10px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  cursor: pointer;
+}
+
+.editBlockedNotice[data-tone="error"] {
+  border-color: #e0aaa2;
+  color: #723f37;
+  background: rgb(255 248 246 / 97%);
+  box-shadow: 0 10px 26px rgb(88 44 36 / 16%);
+}
+
+.editBlockedNotice[data-tone="error"] button {
+  border-color: #dba69d;
+}
+
+.lockNotice[data-mode="history"] {
+  border-color: rgb(81 71 220 / 22%);
+  color: #4037b7;
+  background: rgb(247 246 255 / 96%);
+}
+
+.lockGlyph {
+  position: relative;
+  display: block;
+  width: 13px;
+  height: 10px;
+  margin-top: 4px;
+  border: 1.5px solid currentcolor;
+  border-radius: 2px;
+}
+
+.lockGlyph > span {
+  position: absolute;
+  bottom: 8px;
+  left: 2px;
+  display: block;
+  width: 7px;
+  height: 7px;
+  border: 1.5px solid currentcolor;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+}
+
+.toolbar,
+.commentMarker,
+.globalCommentButton {
+  position: absolute;
+}
+
+.toolbar {
+  z-index: 10;
+}
+
+.globalCommentButton {
+  top: 5px;
+  right: 7px;
+  z-index: 11;
+  height: 30px;
+  padding: 0 14px;
+  border: 1px solid rgb(58 55 66 / 9%);
+  border-radius: 9px;
+  color: #77747d;
+  background: #e9e8e5;
+  box-shadow: 0 3px 10px rgb(37 34 45 / 6%);
+  font: 680 12px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  cursor: pointer;
+  transition:
+    color 140ms ease,
+    border-color 140ms ease,
+    background-color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.globalCommentButton:hover:not(:disabled):not([data-active="true"]) {
+  border-color: rgb(81 71 220 / 16%);
+  color: #5c55a5;
+  background: #eeedf5;
+}
+
+.globalCommentButton[data-active="true"] {
+  border-color: rgb(255 255 255 / 54%);
+  color: #fff;
+  background: #5147dc;
+  box-shadow: 0 8px 22px rgb(45 39 145 / 24%);
+}
+
+.globalCommentButton[data-active="true"]:hover {
+  background: #4338ca;
+}
+
+.globalCommentButton:disabled {
+  color: #9a979f;
+  background: #ecebe8;
+  box-shadow: none;
+  cursor: default;
+}
+
+.commentMarker {
+  z-index: 9;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  gap: 2px;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 5px;
+  border: 2px solid #fff;
+  border-radius: 999px;
+  color: #5147dc;
+  background: #eeecff;
+  box-shadow: 0 4px 12px rgb(45 39 145 / 22%);
+  cursor: pointer;
+  transform: translate(-50%, -50%);
+}
+
+.commentGlyph {
+  display: block;
+  font: 750 10px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.commentCount {
+  font: 700 9px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.commentMarker:hover {
+  color: #fff;
+  background: #5147dc;
+}
+
+.commentMarker:focus-visible,
+.globalCommentButton:focus-visible,
+.toolbar button:focus-visible,
+.toolbar input:focus-visible {
+  outline: 3px solid rgb(91 75 223 / 30%);
+  outline-offset: 2px;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  width: max-content;
+  max-width: calc(100% - 16px);
+  min-height: 42px;
+  padding: 5px 7px;
+  border: 1px solid rgb(32 29 49 / 12%);
+  border-radius: 11px;
+  color: #25232a;
+  background: rgb(255 255 255 / 96%);
+  box-shadow: 0 10px 30px rgb(28 25 52 / 18%);
+  font: 500 12px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  backdrop-filter: blur(12px);
+}
+
+.commentToolButton,
+.undoToolButton,
+.toolButton,
+.formatButton,
+.iconButton {
+  height: 30px;
+  border: 0;
+  border-radius: 7px;
+  color: #58535f;
+  background: transparent;
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.commentToolButton {
+  padding: 0 12px;
+  color: #fff;
+  background: #5147dc;
+  box-shadow: 0 4px 12px rgb(81 71 220 / 22%);
+}
+
+.commentToolButton:hover {
+  background: #4338ca;
+}
+
+.undoToolButton {
+  padding: 0 10px;
+  color: #58535f;
+  background: transparent;
+}
+
+.undoToolButton:hover:not(:disabled) {
+  color: #25232a;
+  background: #f1f0ed;
+}
+
+.toolButton {
+  padding: 0 10px;
+}
+
+.toolButton:hover,
+.formatButton:hover,
+.iconButton:hover:not(:disabled) {
+  color: #25232a;
+  background: #f1f0ed;
+}
+
+.toolButton:disabled,
+.undoToolButton:disabled,
+.formatButton:disabled,
+.iconButton:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.formatGroup {
+  display: inline-flex;
+  gap: 2px;
+  padding-left: 5px;
+  border-left: 1px solid #e3e0e6;
+}
+
+.formatButton {
+  min-width: 38px;
+  padding: 0 7px;
+  color: #58535f;
+  background: transparent;
+}
+
+.formatButton[aria-pressed="true"] {
+  color: #25232a;
+  background: #eceae6;
+}
+
+.field,
+.colorField {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.field span,
+.colorField span {
+  color: #77727d;
+}
+
+.numberInput {
+  width: 49px;
+  height: 30px;
+  padding: 0 5px;
+  border: 1px solid #dcd8e1;
+  border-radius: 7px;
+  color: #28252d;
+  background: #fff;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+.colorField input {
+  width: 29px;
+  height: 29px;
+  padding: 3px;
+  border: 1px solid #dcd8e1;
+  border-radius: 7px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.spacingMenu {
+  position: relative;
+}
+
+.spacingMenu > summary {
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  padding: 0 9px;
+  border-radius: 7px;
+  color: #58535f;
+  font-weight: 650;
+  cursor: pointer;
+  list-style: none;
+}
+
+.spacingMenu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.spacingMenu > summary::after {
+  width: 5px;
+  height: 5px;
+  margin: -3px 0 0 7px;
+  border-right: 1.5px solid currentcolor;
+  border-bottom: 1.5px solid currentcolor;
+  content: "";
+  transform: rotate(45deg);
+}
+
+.spacingMenu[open] > summary {
+  color: #25232a;
+  background: #eceae6;
+}
+
+.spacingPanel {
+  position: absolute;
+  top: calc(100% + 9px);
+  right: 0;
+  z-index: 14;
+  display: grid;
+  gap: 9px;
+  min-width: 154px;
+  padding: 11px;
+  border: 1px solid rgb(32 29 49 / 12%);
+  border-radius: 10px;
+  background: rgb(255 255 255 / 98%);
+  box-shadow: 0 12px 28px rgb(28 25 52 / 18%);
+}
+
+.spacingPanel .field {
+  justify-content: space-between;
+}
+
+.moveGroup {
+  display: inline-flex;
+  gap: 2px;
+  padding-left: 3px;
+  border-left: 1px solid #e3e0e6;
+}
+
+.iconButton {
+  min-width: 38px;
+  padding: 0 7px;
+  font-size: 11px;
+}
+
+@media (max-width: 720px) {
+  .toolbar {
+    max-width: calc(100% - 16px);
+    flex-wrap: wrap;
+  }
+
+  .field span,
+  .colorField span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+}
+
+/* Edge-to-edge canvas shell. The small top affordance is always discoverable;
+   controls become fully prominent on hover or keyboard focus. */
+.editor {
+  grid-template-rows: 30px minmax(0, 1fr);
+  border: 0;
+  border-radius: 0;
+  background: #f8f7f4;
+  box-shadow: none;
+}
+
+.frame {
+  border-top-color: #ebe8e1;
+}
+
+.globalCommentButton {
+  top: 3px;
+  right: 8px;
+  height: 24px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  background: rgb(237 235 231 / 76%);
+  box-shadow: none;
+  font-size: 10px;
+  opacity: 0.58;
+  transform: translateY(-2px);
+  transition:
+    opacity 180ms ease,
+    transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    color 160ms ease,
+    background-color 160ms ease;
+}
+
+.editor:hover .globalCommentButton,
+.editor:focus-within .globalCommentButton,
+.globalCommentButton[data-active="true"] {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.lockNotice {
+  top: 1px;
+  min-height: 27px;
+  padding-inline: 10px;
+  border: 0;
+  border-radius: 7px;
+  box-shadow: none;
+  font-size: 10px;
+}
+
+.editBlockedNotice {
+  top: 36px;
+}
+
+.toolbar {
+  border-radius: 9px;
+  box-shadow: 0 9px 24px rgb(28 25 52 / 15%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .globalCommentButton {
+    transition: none;
+  }
+}

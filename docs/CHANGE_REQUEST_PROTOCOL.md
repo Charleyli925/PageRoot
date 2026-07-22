@@ -1,0 +1,789 @@
+# HTML AI 工作台 Change Request 协议
+
+- 协议主版本：3
+- 状态：目标写入合同
+- 上位文档：[架构说明](ARCHITECTURE.md)
+- 安全边界：[安全模型](SECURITY_MODEL.md)
+- Schema 入口：[schemas](../schemas)
+- 代表性样本：[fixtures/v3](../fixtures/v3)
+
+本协议规定工作台与内部 AI 通过本地可见文件夹交接时的身份、目录、冻结、完成、校验、事务和恢复规则。
+
+v3 是干净切换后的唯一运行时协议。v1/v2 记录在切换前整体备份并转为只读归档；新程序不包含兼容 Reader 或自动迁移器。新写入不得沿用以下旧路径：
+
+- 通过本地编辑创建 `local-editor` Version。
+- 通过历史恢复创建 `restore` Version。
+- 使用全局可变 `current/` 作为当前事实源。
+- 只因 HTML 在固定窗口内未变化就自动成功。
+- 把非权威摘要文件当作可选或替代完成信号。
+
+## 1. 协议原则
+
+1. 项目 `sourcePath` 当前指向的 HTML 是当前可编辑内容的唯一事实源。本地直接编辑修改这份文件；AI 成功先创建不可变 Version 与新工作文件，用户明确点击打开后才切换 `sourcePath`，不覆盖旧文件。
+2. Request 是一次冻结快照，不随之后的本地编辑变化。
+3. 系统是候选版本身份的唯一分配者。
+4. 受支持 finalizer 最后原子写入的 `completion.json` 是唯一完成信号。
+5. 工作台必须独立重算 Hash，不信任声明。
+6. 只有带有效 `committed.json` 的 Version 才正式存在。
+7. 运行时状态按项目隔离，当前项目锁不影响其他项目。
+8. 所有新 JSON 使用严格 Schema，拒绝未知字段。
+9. 仅打开或预览未登记 HTML 时，源文件、registry 和项目目录保持不变；第一次真实持久化或发送给内部 AI 时才建立项目身份与初始基线。
+
+## 2. 目录
+
+```text
+项目记录/
+└── projects/
+    └── <projectId>/
+        ├── project.json
+        ├── PROJECT.md
+        ├── runtime-state.json
+        ├── edit-audit.jsonl
+        ├── working/
+        │   ├── V1.1.html
+        │   └── V1.2.html
+        ├── draft/
+        │   ├── annotations.json
+        │   └── attachments/<commentId>/<attachmentId>-<fileName>
+        ├── recovery/
+        │   └── autosave.jsonl
+        ├── transactions/
+        │   └── <transactionId>/
+        │       ├── transaction.json
+        │       ├── recovery/source.html
+        │       └── prepared-version/
+        ├── versions/
+        │   └── <versionId>/
+        │       ├── files/index.html
+        │       ├── annotations/records.json
+        │       ├── version.json
+        │       └── committed.json
+        └── requests/
+            └── <requestId>/
+                ├── PROMPT.md
+                ├── change-request.json
+                ├── input-manifest.json
+                ├── input/
+                │   ├── base/index.html
+                │   ├── annotations/records.json
+                │   ├── attachments/<commentId>/<attachmentId>-<fileName>
+                │   ├── PROJECT.md
+                │   └── references/
+                └── attempts/
+                    └── <attemptId>/
+                        ├── USER_SUPPLEMENT.json
+                        ├── supplement-attachments/
+                        ├── validation-review.json
+                        ├── annotations.json
+                        ├── output/index.html
+                        ├── completion.json
+                        └── outcome.json
+```
+
+约束：
+
+- 每个项目拥有独立目录、runtime state、事务、Version 和 Request。
+- `PROJECT.md` 是整个项目长期使用的 AI 修改规则，不只属于某一次 Request；项目空闲时允许用户修改，处理期间只读。Request 会把当时规则冻结到 `input/PROJECT.md`。
+- `runtime-state.json` 与 `edit-audit.jsonl` 是系统运行和本地直接编辑的审计文件，只建议查看，不提供普通用户编辑入口。
+- `working/V1.x.html` 是有效 AI 结果通过校验后创建的完整 HTML。它先进入“可打开”状态；只有用户点击“打开 Qoder 返回的最新版”后才成为项目当前源。旧工作文件永不原地改写。
+- input manifest、冻结 annotation 等可移植索引只使用项目或 Request 内相对路径。
+- `PROMPT.md` 可以包含本机绝对 Attempt 路径和可直接执行的 finalizer 命令。
+- `change-request.json` 的附件项可以额外包含由系统生成的 Request 内本机绝对 `localPath`，供当前电脑上的内部 AI / QoderWork 直接读取；同一项必须保留可移植的 `requestRelativePath`。
+- 除受控的 Request/Attempt/output/completion/附件 `localPath` 外，结构化路径不得为绝对路径；所有相对路径不得包含 `..`，任何路径都不得通过软链接逃逸项目目录。
+- output 只有一个完整 HTML，不得创建 `PROJECT.md` 或其他额外页面资产。
+
+## 3. 身份
+
+### 3.1 格式
+
+| 对象 | 格式 |
+|---|---|
+| 项目 | `project_<stable-id>` |
+| 文档 | `doc_<stable-id>` |
+| Version | `ver_0009` |
+| Request | `req_<stable-id>` |
+| Attempt | `attempt_001` |
+| Transaction | `txn_<stable-id>` |
+
+### 3.2 候选身份
+
+每个 Request 固定：
+
+```json
+{
+  "basedOnVersionId": "ver_0005",
+  "previousVersionId": "ver_0008",
+  "candidateVersionId": "ver_0009",
+  "candidateVersionOrdinal": 9,
+  "candidateVersionLabel": "V9"
+}
+```
+
+- `basedOnVersionId` 表示冻结内容的谱系基础。
+- `previousVersionId` 表示时间线上最新正式 Version。
+- `candidateVersionId` 是本次可能提交的下一版。
+- 内部 AI 不得自行改名、递增或另建版本身份。
+- 候选只有成功提交后才被占用。
+
+协议字段继续使用既有 `candidateVersionLabel=V1/V2/V3`，以兼容严格 v3 Schema；UI 按同一 ordinal 显示“版本 1、版本 2、版本 3”。既有 `working/*-V1.x.html` 文件名继续兼容，不作为用户版本名。内部 AI 必须原样保留协议标签，不能把显示标签写回旧字段。
+
+## 4. 提交前冻结
+
+### 4.1 锁定顺序
+
+用户触发交接时，工作台必须在任何异步操作前同步持久化或至少同步进入可持久化的：
+
+```text
+lifecycleState=submitting
+projectLocked=true
+freezeCutoffRevision=<current editRevision>
+```
+
+随后：
+
+1. flush 同一自动写回队列。
+2. 等待 `lastPersistedRevision >= freezeCutoffRevision`。
+3. 重读源 HTML并计算精确 Hash。
+4. 把这份完整源 HTML 冻结到 `input/base/index.html`，再冻结截止 revision 内的 comments 和 edit events。
+5. 分配 Request、Attempt 和候选 Version 身份。
+6. 在临时目录完成全部文件。
+7. Schema/Hash 校验通过后原子发布 Request。
+8. 将状态改为 `processing`。
+
+若任一步失败，删除未发布临时目录并回到 `editing`；不得丢失评论、编辑事实或源 HTML。
+
+成功发布 Request 后，`input/base/index.html` 是本轮修改前的完整、不可变基线。无论 AI 最终成功、失败、取消或 no-change，它都不得被工作文件或后续 Request 替换。
+
+### 4.2 冻结边界
+
+冻结文件：
+
+- `input/base/index.html`
+- `input/annotations/records.json`
+- `input/PROJECT.md`
+- `input-manifest.json`
+- `change-request.json`
+- `PROMPT.md`
+
+冻结后这些文件不可修改。用户在内部 AI 对话中新增、修订或撤销要求时，内部 AI 必须先调用 Prompt 提供的受控 helper，把用户原话追加到当前 Attempt 的 `USER_SUPPLEMENT.json`；helper 返回成功后才能执行。原始 Request 不变。Attempt 已封存后，任何新要求都必须创建新 Request。
+
+## 5. Change Request v3
+
+权威 Schema：
+
+[change-request.v3.schema.json](../schemas/change-request.v3.schema.json)
+
+顶层结构：
+
+```json
+{
+  "schemaVersion": "3.0.0",
+  "status": "frozen",
+  "projectId": "project_metrics",
+  "documentId": "doc_dashboard",
+  "requestId": "req_metrics_cards",
+  "attemptId": "attempt_001",
+  "createdAt": "2026-07-17T08:34:00Z",
+  "frozenAt": "2026-07-17T08:34:00Z",
+  "freezeCutoffRevision": 42,
+  "versionIdentity": {
+    "basedOnVersionId": "ver_0005",
+    "previousVersionId": "ver_0008",
+    "candidateVersionId": "ver_0009",
+    "candidateVersionOrdinal": 9,
+    "candidateVersionLabel": "V9"
+  },
+  "baseSnapshot": {
+    "relativePath": "input/base/index.html",
+    "byteLength": 4988,
+    "sha256": "sha256:...",
+    "comparisonSha256": "sha256:...",
+    "canonicalizationVersion": "1"
+  },
+  "paths": {},
+  "requirements": {},
+  "annotations": {},
+  "finalization": {}
+}
+```
+
+### 5.1 `baseSnapshot`
+
+- `relativePath` 固定为 `input/base/index.html`。
+- `sha256` 是冻结字节的精确 SHA-256。
+- `comparisonSha256` 是规范化算法输出的比较 Hash。
+- `canonicalizationVersion` 固定解析/序列化规则。
+- `byteLength` 必须与实际 UTF-8 字节数一致。
+
+### 5.2 `requirements`
+
+要求包含：
+
+- 一句摘要。
+- 至少一条带稳定 `instructionId` 的指令。
+- 每条指令引用明确 `targetRefs`。
+- 每个 target 保存稳定 ID、用户可读 label、层级和定位。
+- `preserveOutsideTargets=true`。
+
+目标层级：
+
+- `module`
+- `subregion`
+- `text`
+- `insertion-point`
+
+每个 TargetRef 必须使用 v3 的干净结构：
+
+- `targetId`、`label`、`level`。
+- `selector`、`sourceAnchor`、`fingerprint` 至少存在一种；允许组合使用来提高唯一定位置信度。
+- 若包含源码锚点，只使用冻结基线中的 `sourceAnchor.startOffset/endOffset/sourceSha256`。
+- 若包含指纹，使用 `fingerprint.tagName/stableAttributes/ancestorFingerprint`，可带文字前后缀。
+- 面向 AI 执行的整模块 TargetRef 若文字引用超过 500 字符，`change-request.json` 省略低信息密度的 `textQuote`，仍使用 selector、sourceAnchor 和 fingerprint 精确定位；完整冻结记录中继续保留捕获时的引用用于审计。
+- `resolution=exact|rebound|ambiguous|orphaned`。
+
+`insertion-point` 的 `sourceAnchor` 必须是位于唯一父节点真实子节点边界上的零宽范围，即 `startOffset=endOffset`；不能使用旧 insertion `anchor` 对象或仅凭同级序号猜测位置。
+
+offset 统一按 JavaScript UTF-16 code unit 计算。Request 只能把 `exact` 或 `rebound` 目标列入可执行范围；`ambiguous` 和 `orphaned` 评论仍保留审计记录，但必须先重新绑定才能驱动 AI 建版。
+
+### 5.3 `annotations`
+
+指向符合 [annotation-records.v3.schema.json](../schemas/annotation-records.v3.schema.json) 的冻结记录，并保存：
+
+- 相对路径。
+- 精确 Hash。
+- 评论数。
+- edit event 数。
+- 附件数。
+
+### 5.4 `finalization`
+
+固定：
+
+- `outputRelativePath=output/index.html`
+- `completionRelativePath=completion.json`
+- `completionSchema=completion.v1.schema.json`
+- 受支持 finalizer 版本
+- 可直接执行的完整 finalizer 命令
+
+Request 不定义任何基于时间窗口的成功条件。
+
+## 6. Annotation records v3
+
+权威 Schema：
+
+[annotation-records.v3.schema.json](../schemas/annotation-records.v3.schema.json)
+
+根记录固定：
+
+- 项目、文档、Request、Attempt。
+- `capturedAt`。
+- `freezeCutoffRevision`。
+- `basedOnVersionId`。
+- `baseSnapshotSha256`。
+- comments 与 edit events。
+
+Comment 包含：
+
+- 稳定 `commentId`。
+- 创建/更新时间。
+- `capturedRevision`。
+- 正文与目标。
+- `attachments[]`：稳定 `attachmentId`、图片/文件类型、文件名、媒体类型、字节数、Hash、项目相对路径、Request 相对路径和添加来源。
+- `request-only` 或 `project-rule`。
+
+附件实体保存在项目目录，草稿阶段位于 `draft/attachments/`；系统不保存用户桌面、下载目录、移动硬盘等外部原始路径。冻结 Request 时逐个重新读取并核对字节数与 Hash，再优先以 copy-on-write 独立快照写入 `input/attachments/<commentId>/`，文件系统不支持时回退为完整复制；文件和父目录同步成功后才能发布 Request。冻结 Comment、`requirements.attachments[]`、对应 instruction 的 `attachmentRefs[]` 和 input manifest 必须引用同一组附件 ID；其中 `targetRef` 明确附件随哪条评论作用于哪个模块或子区域。
+
+`requirements.attachments[]` 同时提供 Request 相对路径和 Request 管理文件的本机绝对 `localPath`。绝对路径只指向当前 Request 冻结快照，不得指向选择附件时的外部原文件。若项目目录整体移动，AI 应以 Request 根目录加相对路径重新定位。交接记录不得包含附件 Base64 或二进制内嵌内容。
+
+Edit event 包含：
+
+- 稳定 `eventId`。
+- 时间与 revision。
+- 发生编辑时的 `basedOnVersionId`；后续历史恢复不能改写这个事实。
+- `text/style/reorder/structure`。
+- 目标、摘要、before、after。
+
+新记录没有 `committedVersionId`。本地编辑是事实审计，不通过保存变成 Version。成功的 AI Version 通过 `annotationArchive` 引用同一冻结记录；失败、取消、no-change 或冲突未采用时，Request 仍保留这些记录。
+
+`input/annotations/records.json` 是不可变审计归档，保留评论和全部直接编辑事实，但不再作为 AI 默认执行输入。内部 AI 以 `change-request.json` 中的 instructions、targets 和 attachments 为唯一执行来源，避免重复读取同一评论和大量历史 edit events。
+
+## 7. Input manifest
+
+权威 Schema：
+
+[input-manifest.v1.schema.json](../schemas/input-manifest.v1.schema.json)
+
+Input manifest 同时包含完整冻结 Hash 清单 `files` 和 AI 执行读取子集 `readOrder`。
+
+`files` 至少库存：
+
+1. `PROMPT.md`
+2. `input/AI_RULES.md`
+3. `change-request.json`
+4. `input/PROJECT.md`
+5. `input/base/index.html`
+6. `input/annotations/records.json`（完整审计归档）
+7. 评论附件 `input/attachments/...`（存在时逐个列出，角色为 `reference`）
+8. 其他明确列出的 references
+每项包含相对路径、角色、媒体类型、字节数和 SHA-256。`readOrder` 默认依次只读 PROMPT、AI_RULES、change-request、PROJECT、base HTML 和评论附件；不包含 `input/annotations/records.json`。AI 只能读取 `readOrder` 声明的执行输入，不扫描 files 中仅用于审计的条目、其他 Request、Version 或项目目录。
+
+`input-manifest.json` 只描述冻结的原始输入。当前 Attempt 的 `USER_SUPPLEMENT.json` 是唯一允许在冻结后额外读取的动态执行记录；它不回写 manifest，也不能由内部 AI 直接编辑。
+
+## 8. Prompt
+
+Prompt 必须是当前 Attempt 的精简入口，至少包含：
+
+- 本机 Request 与 Attempt 绝对路径。
+- Request、Attempt、项目、文档与候选 Version 身份。
+- 读取顺序。
+- 评论、TargetRef 与附件清单的读取要求；不得只读正文而忽略图片或文件。
+- 每个附件的 Request 管理本机绝对路径和相对回退路径；明确禁止追踪外部原始文件。
+- 唯一 output 路径。
+- 完整 finalizer 命令。
+- “完成全部写入后最后执行 finalizer”的明确要求。
+- 不得修改冻结输入、不得扫描其他任务；`preserveOutsideTargets=true` 是默认边界，只有已经通过 helper 记录的用户补充可以明确扩大本轮范围。
+- 对话补充 helper 的完整命令、追加式 `add / amend / retract` 规则，以及“记录成功后才可执行”的停止条件。
+- `input/PROJECT.md` 只读；长期项目规则不得在本轮任务中修改。
+
+Prompt 不让 AI 手写 `completion.json`，也不让 AI猜候选版本号。
+
+## 9. AI 写入规则
+
+内部 AI 可直接写：
+
+- `attempts/<attemptId>/output/index.html`
+
+`USER_SUPPLEMENT.json` 只能由受控 helper 追加，内部 AI 不得直接编辑。helper 可把内部 AI 当前对话新增的文件或图片复制到 `supplement-attachments/` 并记录字节数与 SHA-256；无法取得原件时只能写 `description-only`，历史中明确显示“原件未归档”。旧记录不可覆盖，只能通过 `add / amend / retract` 形成审计链。
+
+finalizer 可写：
+
+- output 中的受控版本 meta
+- `attempts/<attemptId>/completion.json`
+- `USER_SUPPLEMENT.json` 的封存字段与整组记录、附件 Hash
+
+工作台事务可写：
+
+- `transactions/<transactionId>/`
+- `versions/<candidateVersionId>/`
+- 真实源 HTML
+- `project.json`
+- `runtime-state.json`
+- Attempt 的 `outcome.json`
+
+AI 不得：
+
+- 修改 Request 或 frozen input。
+- 修改其他 Attempt。
+- 写 Version 目录、commit marker、项目状态或源 HTML。
+- 在 output 中创建未声明资产。
+- 手写 completion。
+
+## 10. HTML 机器元数据
+
+finalizer 在 `<head>` 中写入或校验：
+
+```html
+<meta name="html-ai-document-id" content="doc_dashboard">
+<meta name="html-ai-version-id" content="ver_0009">
+<meta name="html-ai-version-label" content="V9">
+<meta name="html-ai-based-on-version-id" content="ver_0005">
+<meta name="html-ai-request-id" content="req_metrics_cards">
+```
+
+这些值来自冻结 Request。Version manifest 是最终身份权威；HTML meta 用于独立识别与交叉校验。
+
+## 11. Finalizer 与 completion
+
+### 11.1 finalizer 前置条件
+
+finalizer 必须：
+
+1. 解析受控 Attempt 路径。
+2. 向上定位唯一冻结 Request。
+3. 校验路径未逃逸项目。
+4. 读取该项目 `runtime-state.json`。
+5. 确认 active run 身份完全匹配，且状态允许完成。
+6. 确认未取消、未失败、未被替代。
+7. 校验完整 HTML。
+8. 写入受控 meta。
+9. 计算精确与比较 Hash。
+10. 用临时文件、刷盘、原子 rename 最后写入 completion。
+
+### 11.2 Completion v1
+
+权威 Schema：
+
+[completion.v1.schema.json](../schemas/completion.v1.schema.json)
+
+```json
+{
+  "schemaVersion": "1.0.0",
+  "finalizerVersion": "1.0.0",
+  "status": "completed",
+  "projectId": "project_metrics",
+  "documentId": "doc_dashboard",
+  "requestId": "req_metrics_cards",
+  "attemptId": "attempt_001",
+  "basedOnVersionId": "ver_0005",
+  "previousVersionId": "ver_0008",
+  "candidateVersionId": "ver_0009",
+  "candidateVersionOrdinal": 9,
+  "candidateVersionLabel": "V9",
+  "baseSnapshotSha256": "sha256:...",
+  "inputManifestSha256": "sha256:...",
+  "outputRelativePath": "output/index.html",
+  "outputSha256": "sha256:...",
+  "baseComparisonSha256": "sha256:...",
+  "outputComparisonSha256": "sha256:...",
+  "canonicalizationVersion": "1",
+  "completedAt": "2026-07-17T08:40:00Z"
+}
+```
+
+Completion 必须在 output 完全关闭后最后写入。完成后 output 封存；任何后续字节变化都使本次 completion 失效。
+
+### 11.3 工作台发现 completion
+
+工作台：
+
+1. 只监听 `runtime-state.json.activeRun` 指向的确切 Attempt。
+2. 原子读取 completion。
+3. 校验 Schema 与 finalizer 版本。
+4. 重新读取 runtime state，核对 active run。
+5. 重读 Request 和实际 output。
+6. 重算所有关键 Hash。
+7. 进入 no-change、冲突或事务提交。
+
+不扫描其他 Request，不按目录时间猜测，不复用旧 completion。
+
+## 12. 规范化比较
+
+`canonicalizationVersion=1` 的合同：
+
+1. 使用固定版本 HTML parser 解析冻结输入和 output。
+2. 只删除五个明确白名单 meta：
+   - `html-ai-document-id`
+   - `html-ai-version-id`
+   - `html-ai-version-label`
+   - `html-ai-based-on-version-id`
+   - `html-ai-request-id`
+3. 用同一确定性 serializer 输出 UTF-8。
+4. 计算两侧 SHA-256。
+
+不得：
+
+- 删除所有 `html-ai-*`。
+- 忽略 CSS 或 JavaScript。
+- 忽略正文、结构、普通属性或普通空白差异。
+- 使用不同 parser/serializer 比较两侧。
+
+比较 Hash 相同即 no-change：
+
+- 不创建 Version。
+- 不消耗候选身份。
+- outcome 记录 `no-change`。
+- Request、Attempt、评论和诊断保留。
+- runtime state 回到 editing。
+
+### 12.1 强制 ScopeValidator
+
+比较 Hash 不同不代表可以直接建版。工作台必须以冻结 base、AI output 和 v3 TargetRef 独立生成：
+
+[scope-report.v1.schema.json](../schemas/scope-report.v1.schema.json)
+
+报告必须记录：
+
+- base/output 精确 Hash 与比较 Hash。
+- Request、Attempt 和允许修改的 TargetRef。
+- 每个文字、属性、结构、inline style、共享 CSS、JavaScript、受管 metadata 或语义规范化差异。
+- 差异两侧的 UTF-16 位置、分类、目标归属、证据摘要和允许状态。
+- `enforcementMode=enforce` 与最终 `pass|fail`。
+
+只允许目标内变化、finalizer 精确管理的五个 meta 字段和经过同一规范化算法证明的语义等价差异。目标外正文、属性、结构、CSS、JavaScript或无法唯一解析的目标一律 `fail`；Attempt 保留 output、completion、scope report 和失败 outcome，但不得进入 Version 事务，也不得消耗候选版本号。
+
+## 13. 校验矩阵
+
+| 校验 | 不匹配结果 |
+|---|---|
+| completion Schema | `unsupported-completion` |
+| finalizer 版本 | `unsupported-finalizer` |
+| projectId/documentId | `identity-mismatch` |
+| requestId/attemptId | `active-run-mismatch` |
+| basedOn/previous/candidate | `candidate-mismatch` |
+| base snapshot Hash | `base-snapshot-mismatch` |
+| output 实际 Hash | `output-hash-mismatch` |
+| 比较 Hash | `comparison-hash-mismatch` |
+| canonicalizationVersion | `canonicalization-mismatch` |
+| output 完整性 | `invalid-html` |
+| completion 后 output 改变 | `sealed-output-modified` |
+| active run 已取消/替代 | `stale-completion` |
+| TargetRef 无法唯一解析 | `scope-target-unresolved` |
+| 身份、脚本或 TargetRef 完整性错误 | 硬阻断，不可忽略 |
+| 目标外正文、属性、结构或样式变化 | 进入 `awaiting-check-decision`，允许用户审计后忽略 |
+
+硬校验失败不得创建 Version 或推进 latest Version。范围/质量类软校验必须先展示具体原因；用户只有通过“无视本校验，继续”才能放行，系统把校验代码、理由与时间写入 `validation-review.json` 后继续使用同一个候选，不得静默绕过。
+
+## 14. 两阶段 Version 事务
+
+权威 Schema：
+
+[version-transaction.v1.schema.json](../schemas/version-transaction.v1.schema.json)
+
+### 14.1 准备
+
+1. 再读 runtime state，确认 active run。
+2. 分配 `transactionId`。
+3. 写 `transaction.json`，包含 `previousSourcePath`、冻结源 Hash、候选 Hash、`activeWorkingCopyRelativePath=working/V1.x.html` 与全部身份。
+4. 将 output 复制到 `prepared-version/files/index.html`。
+5. 写 v3 `version.json`、scope report 引用和 annotations archive。
+6. 校验准备内容 Hash。
+7. 读取提交前项目当前指向的 HTML。
+8. 若源 Hash 已变化，事务进入 `awaiting-conflict-resolution`。
+9. 否则保存 `recovery/source.html` 作为恢复与审计证据并校验；它不授权覆盖原文件。
+10. 刷盘并原子标记 `prepared`。
+
+### 14.2 应用
+
+1. 再次确认源 Hash 等于 `expectedSourceSha256`。
+2. 以 create-new/no-clobber 语义写入候选工作文件 `working/V1.x.html`；同名不同内容时失败关闭。
+3. 重读候选工作文件并校验候选 Hash，同时再次确认提交前当前 HTML 未被修改。
+4. 标记 `source-applied`；该状态表示候选工作文件已完整落盘，不表示旧源文件被替换。
+5. 原子发布 Version 目录。
+6. 标记 `version-published`。
+7. 原子写 `committed.json`。
+8. 标记 `committed`。
+9. 只推进 `project.json.latestVersionId`，保留 `sourcePath`、current exact Version 与当前画布不变。
+10. 写入 Attempt outcome，将 runtime 与 transaction 标记为 `ready-to-open`；重启后仍可恢复这项待打开结果。
+
+### 14.3 用户确认打开
+
+用户点击“打开 Qoder 返回的最新版”后：
+
+1. 重新核对 active run、transaction、Version、commit marker 与全部身份。
+2. 确认当前源 HTML 仍等于校验时的旧 Hash；若已变化，保留新 Version 但拒绝切换。
+3. 将 `project.json.sourcePath` 与 registry canonical path 切换到候选工作文件，并保留原始路径与旧工作路径作为同一项目的别名。
+4. 更新 current based-on 与 exact Version，清空本轮已归档的草稿评论和编辑事件。
+5. 从新的当前工作文件打开画布，并校验工作文件、不可变 Version 与画布三侧 Hash。
+6. 标记 `cache-rebuilt`，清理恢复文件并解锁编辑。
+
+### 14.4 Commit marker
+
+权威 Schema：
+
+[committed-marker.v1.schema.json](../schemas/committed-marker.v1.schema.json)
+
+历史与 latest discovery 只承认：
+
+- Version 目录存在。
+- v3 manifest 有效。
+- entry HTML Hash 有效。
+- `committed.json` 有效。
+- marker 的 Version、Transaction、Request、Attempt、manifest Hash 和 content Hash 全部匹配。
+
+Version 目录发布但 marker 未写入时，对用户不可见。
+
+初始 V1 使用 commit marker 的 `sourceType=initial` 分支，由项目初始化事务提交；该分支没有 Request、Attempt、previous 或 basedOn。内部 AI Version 使用 `sourceType=internal-ai` 分支并要求完整交接身份。
+
+### 14.5 恢复
+
+| 事务状态 | 恢复 |
+|---|---|
+| `prepared`，提交前当前 HTML 仍为旧 Hash | 创建候选工作文件并继续，或完整放弃候选 |
+| `source-applied`，候选工作文件为候选 Hash | 继续发布与提交 |
+| `version-published`，无 marker | 校验后写 marker |
+| `committed` | 完成校验与工作文件落盘，进入 `ready-to-open`，不切换当前画布 |
+| `ready-to-open` | 重启后继续等待用户确认；确认时重新核对旧源 Hash 后切换 canonical path |
+| 提交前当前 HTML 不再是旧 Hash | 进入持久冲突，绝不覆盖 |
+| 同名候选工作文件为其他 Hash | `WORKING_COPY_COLLISION`，绝不覆盖 |
+| `cache-rebuilt` | 幂等核对并结束 |
+
+恢复不能重新分配候选 ID，也不能重复创建 Version。
+
+事务同时保留两个不同语义的源 Hash：
+
+- `baseSnapshotSha256` 永远是交给内部 AI 的冻结输入，不能修改。
+- `expectedSourceSha256` 是创建新工作文件和切换项目路径前，提交前当前 HTML 必须匹配的 Hash；只有用户明确采用 AI 结果解决外部冲突时，才可更新为用户确认的外部源 Hash。
+
+事务还必须保存 candidate manifest、completion、恢复源和新工作文件的 Hash 与相对路径，确保崩溃恢复不依赖目录猜测。恢复只能完成同一个工作文件和 Version，不能重新编号或覆盖任一旧 HTML。
+
+## 15. Version manifest v3
+
+权威 Schema：
+
+[version-manifest.v3.schema.json](../schemas/version-manifest.v3.schema.json)
+
+Schema 使用 `sourceType` 常量区分严格分支。
+
+### 15.1 Initial
+
+只用于 V1，要求：
+
+- 项目、文档身份。
+- 固定 `ver_0001 / 1 / V1`。
+- content 与 comparison Hash。
+- canonicalization 版本。
+- generatedAt、summary、files。
+
+禁止出现 Request、Attempt、previous、basedOn 和 base snapshot。
+
+### 15.2 Internal AI
+
+要求：
+
+- 项目、文档、Version ID/序号/显示名。
+- previous 与 basedOn。
+- Request、Attempt。
+- 基础与最终精确 Hash。
+- 两侧比较 Hash。
+- canonicalization 版本。
+- generatedAt、summary。
+- completion 引用。
+- Attempt outcome 引用。
+- annotations archive，且同一个 Hash 分别指向 Version、冻结 Request 和 Attempt 中的归档路径。
+- files。
+
+新 Schema 不含 `local-editor` 或 `restore` 分支。
+
+## 16. Project 与 runtime state
+
+### 16.1 Project state
+
+权威 Schema：
+
+[project-state.v3.schema.json](../schemas/project-state.v3.schema.json)
+
+`project.json` 保存：
+
+- project/document 身份。
+- sourcePath。
+- latest Version。
+- current based-on 与 exact Version。
+- 当前 HTML Hash。
+- 修改时间。
+- 当前源文件和版本谱系 Hash。
+
+它不允许 `activeRun` 或项目锁。
+
+### 16.2 Runtime state
+
+权威 Schema：
+
+[runtime-state.v3.schema.json](../schemas/runtime-state.v3.schema.json)
+
+`runtime-state.json` 是以下信息的唯一事实源：
+
+- lifecycle state 与项目锁。
+- edit revision 与 persisted revision。
+- freeze cutoff。
+- autosave 状态与恢复日志。
+- 尚未写回的 `pendingWrite`：revision、预期源 Hash、目标 HTML Hash、恢复文件路径与 Hash。
+- Request 尚未发布时的 `pendingSubmission`：冻结 revision、基础 Hash、预留的 Request/Attempt/候选版本身份和锁定时间；此时 `activeRun=null`。
+- current/history view state。
+- 当前评论和 edit event 草稿的权威文件路径、Hash、ID 与更新时间。
+- active run；其中 `ready-to-open` 必须保留候选 Version 与 transaction 身份，直到用户打开、显式取消或进入可审计错误。
+- `activeTransaction`：提交、AI 冲突或恢复中的唯一 transaction ID 与日志路径，禁止扫描目录猜测。
+- 外部冲突。
+- 事务恢复。
+
+每个状态转换必须原子持久化。重启后不通过扫描 Request 推断。
+
+## 17. Outcome
+
+权威 Schema：
+
+[attempt-outcome.v1.schema.json](../schemas/attempt-outcome.v1.schema.json)
+
+Attempt 的 `outcome.json` 是工作台写入的严格诊断终态，不是完成信号。状态：
+
+- `version-created`
+- `no-change`
+- `cancelled`
+- `failed`
+- `external-source-kept`
+
+每个分支都引用 project/document/request/attempt/candidate、版本血缘、冻结源 Hash和 Attempt annotations archive。只有 `version-created` 引用正式 Version、transaction、completion 与提交时间；其他分支不得把候选版本解释为正式 Version。
+
+`no-change` 还必须保存 input manifest Hash 和 `canonicalizationVersion`；`external-source-kept` 必须引用被终止的 transaction，证明候选没有被静默提交。
+
+## 18. 取消
+
+取消必须再次核对事务状态：
+
+- `submitting/processing/validating`：标记 Attempt 取消，恢复冻结评论，释放候选，回到 editing。
+- `awaiting-conflict-resolution`：放弃未提交候选，保留源外部内容，恢复评论。
+- `committing` 且 commit marker 尚未写入：按事务恢复规则完整回退或完成，不能直接删除。
+- commit marker 已写入：Version 已提交，不能以“取消”撤销；用户可用历史替换当前内容。
+
+迟到 completion 在取消后无效。
+
+## 19. 外部冲突
+
+当源 Hash 不等于冻结 `baseSnapshotSha256`：
+
+- 不覆盖源文件。
+- 不写 commit marker。
+- runtime state 进入 `awaiting-conflict-resolution`。
+- transaction 保存外部、候选和基础 Hash。
+
+采用 AI 候选时，更新事务的 `expectedSourceSha256` 为用户确认的外部 Hash，但不修改冻结 `baseSnapshotSha256` 或 basedOn 身份。
+
+保留外部内容时，候选不提交，评论恢复，outcome 写 `external-source-kept`。
+
+## 20. v3 干净切换
+
+正式切换固定采用整体归档，不做逐记录迁移：
+
+1. 保留 0.6.1 安装包、源码和验证记录。
+2. 完整复制切换前 `项目记录` 与活动 HTML，并校验 Hash。
+3. 将旧记录目录标记为只读归档。
+4. v3 从空 registry 和空 `projects/` 开始。
+5. 用户要继续编辑的当前 HTML 作为普通文件重新登记为新项目和 V1。
+
+新程序必须在读取 registry、project、runtime、Request、annotations 和 Version 时严格要求 v3 主 Schema。发现 v1/v2 数据必须返回清晰的 `UNSUPPORTED_SCHEMA_VERSION`，不得尝试推断、补字段、迁移、展示 legacy history 或复用旧版本序号。
+
+## 21. 完整性与安全
+
+实现必须：
+
+- 使用 UTF-8。
+- 对结构化 JSON 使用 `additionalProperties=false`。
+- 原子写 JSON 与关键 HTML。
+- 拒绝路径穿越、软链接逃逸和跨项目引用。
+- 校验每个声明文件的 byte length 与 SHA-256。
+- 记录受支持的 Schema/finalizer/canonicalization 版本。
+- 对 completion、ScopeValidator、事务恢复和 commit marker 保持幂等。
+- 将日志与用户内容分开，避免在诊断中泄露完整 HTML 或评论。
+
+## 22. 协议验收
+
+### 22.1 Request
+
+- Request 发布前所有输入和 Hash 已冻结。
+- `freezeCutoffRevision` 已追平落盘。
+- basedOn、previous、candidate 三套身份明确。
+- 不引用可变 current 目录。
+- finalizer 命令和 completion 路径明确。
+
+### 22.2 Completion
+
+- output 单独存在 30 秒不触发校验成功。
+- completion 缺失不建版。
+- 任一身份/Hash 不匹配不建版。
+- unsupported finalizer 不建版。
+- completion 后 output 改变不建版。
+- no-change 不建版。
+
+### 22.3 Transaction
+
+- 无 marker 的 Version 不可见。
+- prepared、source-applied、version-published、committed、cache-rebuilt 各边界可注入崩溃。
+- 恢复后只能完整回到旧源或完整提交同一候选。
+- 源、Version 快照和画布 Hash 一致后才报告成功。
+
+### 22.4 Isolation 与干净切换
+
+- A 项目 active run 不锁 B 项目。
+- runtime state 不从 project state 或目录扫描猜测。
+- 新运行时不读取 v1/v2 项目记录或 legacy marker。
+- 旧目录和活动源切换前已有独立、只读、Hash 可校验的完整归档。
+- 旧 HTML 快照只可作为普通 HTML 新建项目，不还原旧评论、Request、Attempt 或 Version 关系。

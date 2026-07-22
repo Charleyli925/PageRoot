@@ -1,0 +1,40 @@
+{
+  "schemaVersion": "3.0.0",
+  "projectId": "project_metrics",
+  "documentId": "doc_dashboard",
+  "versionId": "ver_0009",
+  "versionOrdinal": 9,
+  "versionLabel": "V9",
+  "sourceType": "internal-ai",
+  "previousVersionId": "ver_0008",
+  "basedOnVersionId": "ver_0005",
+  "requestId": "req_metrics_cards",
+  "attemptId": "attempt_001",
+  "baseSnapshotSha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "inputManifestSha256": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+  "contentSha256": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "baseComparisonSha256": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "contentComparisonSha256": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "canonicalizationVersion": "1",
+  "generatedAt": "2026-07-17T08:41:30Z",
+  "summary": "优化指标卡片层级与标题间距",
+  "completionRelativePath": "requests/req_metrics_cards/attempts/attempt_001/completion.json",
+  "outcomeRelativePath": "requests/req_metrics_cards/attempts/attempt_001/outcome.json",
+  "annotationArchive": {
+    "versionRelativePath": "annotations/records.json",
+    "requestRelativePath": "requests/req_metrics_cards/input/annotations/records.json",
+    "attemptRelativePath": "requests/req_metrics_cards/attempts/attempt_001/annotations.json",
+    "sha256": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "commentCount": 1,
+    "editEventCount": 1
+  },
+  "files": [
+    {
+      "path": "files/index.html",
+      "role": "entry-html",
+      "mediaType": "text/html",
+      "byteLength": 5312,
+      "sha256": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    }
+  ]
+}

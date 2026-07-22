@@ -1,0 +1,194 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://html-change.local/schemas/committed-marker.v1.schema.json",
+  "title": "HTML AI Version commit marker v1",
+  "description": "The single commit point that makes an initial or internal-AI Version visible to history and latest-Version discovery.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/initialCommit"
+    },
+    {
+      "$ref": "#/$defs/internalAiCommit"
+    }
+  ],
+  "$defs": {
+    "initialCommit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "status",
+        "sourceType",
+        "transactionId",
+        "projectId",
+        "documentId",
+        "versionId",
+        "versionOrdinal",
+        "versionLabel",
+        "contentSha256",
+        "sourceSha256",
+        "manifestSha256",
+        "committedAt"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": "1.0.0"
+        },
+        "status": {
+          "const": "committed"
+        },
+        "sourceType": {
+          "const": "initial"
+        },
+        "transactionId": {
+          "$ref": "#/$defs/transactionId"
+        },
+        "projectId": {
+          "$ref": "#/$defs/projectId"
+        },
+        "documentId": {
+          "$ref": "#/$defs/documentId"
+        },
+        "versionId": {
+          "const": "ver_0001"
+        },
+        "versionOrdinal": {
+          "const": 1
+        },
+        "versionLabel": {
+          "const": "V1"
+        },
+        "contentSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "sourceSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "manifestSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "committedAt": {
+          "$ref": "#/$defs/timestamp"
+        }
+      }
+    },
+    "internalAiCommit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "status",
+        "sourceType",
+        "transactionId",
+        "projectId",
+        "documentId",
+        "versionId",
+        "versionOrdinal",
+        "versionLabel",
+        "previousVersionId",
+        "basedOnVersionId",
+        "requestId",
+        "attemptId",
+        "baseSnapshotSha256",
+        "contentSha256",
+        "sourceSha256",
+        "manifestSha256",
+        "completionSha256",
+        "committedAt"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": "1.0.0"
+        },
+        "status": {
+          "const": "committed"
+        },
+        "sourceType": {
+          "const": "internal-ai"
+        },
+        "transactionId": {
+          "$ref": "#/$defs/transactionId"
+        },
+        "projectId": {
+          "$ref": "#/$defs/projectId"
+        },
+        "documentId": {
+          "$ref": "#/$defs/documentId"
+        },
+        "versionId": {
+          "$ref": "#/$defs/versionId"
+        },
+        "versionOrdinal": {
+          "type": "integer",
+          "minimum": 2
+        },
+        "versionLabel": {
+          "type": "string",
+          "pattern": "^V[1-9][0-9]*$"
+        },
+        "previousVersionId": {
+          "$ref": "#/$defs/versionId"
+        },
+        "basedOnVersionId": {
+          "$ref": "#/$defs/versionId"
+        },
+        "requestId": {
+          "$ref": "#/$defs/requestId"
+        },
+        "attemptId": {
+          "$ref": "#/$defs/attemptId"
+        },
+        "baseSnapshotSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "contentSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "sourceSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "manifestSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "completionSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "committedAt": {
+          "$ref": "#/$defs/timestamp"
+        }
+      }
+    },
+    "transactionId": {
+      "type": "string",
+      "pattern": "^txn_[A-Za-z0-9_-]+$"
+    },
+    "projectId": {
+      "type": "string",
+      "pattern": "^project_[A-Za-z0-9_-]+$"
+    },
+    "documentId": {
+      "type": "string",
+      "pattern": "^doc_[A-Za-z0-9_-]+$"
+    },
+    "versionId": {
+      "type": "string",
+      "pattern": "^ver_[0-9]{4,}$"
+    },
+    "requestId": {
+      "type": "string",
+      "pattern": "^req_[A-Za-z0-9_-]+$"
+    },
+    "attemptId": {
+      "type": "string",
+      "pattern": "^attempt_[0-9]{3}$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    }
+  }
+}
