@@ -1,0 +1,83 @@
+{
+  "schemaVersion": "3.0.0",
+  "status": "frozen",
+  "projectId": "project_market_report",
+  "documentId": "doc_weekly_report",
+  "requestId": "req_insert_risk_section",
+  "attemptId": "attempt_001",
+  "createdAt": "2026-07-18T09:35:00Z",
+  "frozenAt": "2026-07-18T09:35:00Z",
+  "freezeCutoffRevision": 18,
+  "versionIdentity": {
+    "basedOnVersionId": "ver_0008",
+    "previousVersionId": "ver_0008",
+    "candidateVersionId": "ver_0009",
+    "candidateVersionOrdinal": 9,
+    "candidateVersionLabel": "V9"
+  },
+  "baseSnapshot": {
+    "relativePath": "input/base/index.html",
+    "byteLength": 31204,
+    "sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "comparisonSha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "canonicalizationVersion": "1"
+  },
+  "paths": {
+    "requestRelativePath": "requests/req_insert_risk_section",
+    "attemptRelativePath": "requests/req_insert_risk_section/attempts/attempt_001",
+    "promptRelativePath": "requests/req_insert_risk_section/PROMPT.md",
+    "inputManifestRelativePath": "requests/req_insert_risk_section/input-manifest.json"
+  },
+  "requirements": {
+    "summary": "在摘要后新增“主要风险”区块",
+    "instructions": [
+      {
+        "instructionId": "instruction_insert_risk_section",
+        "text": "只在冻结的插入点新增一个“主要风险”同级 section，包含三条风险；插入点以外的正文、结构、共享 CSS 和 JavaScript 必须保持不变。",
+        "targetRefs": [
+          "target_after_summary"
+        ]
+      }
+    ],
+    "targets": [
+      {
+        "targetId": "target_after_summary",
+        "label": "摘要区块后的插入位置",
+        "level": "insertion-point",
+        "selector": "main#report",
+        "textQuote": "核心结论",
+        "sourceAnchor": {
+          "startOffset": 2240,
+          "endOffset": 2240,
+          "sourceSha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "fingerprint": {
+          "tagName": "main",
+          "stableAttributes": {
+            "id": "report"
+          },
+          "ancestorFingerprint": [
+            "body"
+          ],
+          "textPrefix": "核心结论",
+          "textSuffix": "市场展望"
+        },
+        "resolution": "exact"
+      }
+    ],
+    "preserveOutsideTargets": true
+  },
+  "annotations": {
+    "relativePath": "input/annotations/records.json",
+    "sha256": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "commentCount": 1,
+    "editEventCount": 0
+  },
+  "finalization": {
+    "outputRelativePath": "output/index.html",
+    "completionRelativePath": "completion.json",
+    "completionSchema": "completion.v1.schema.json",
+    "supportedFinalizerVersion": "1.0.0",
+    "finalizerCommand": "html-ai-finalize --attempt requests/req_insert_risk_section/attempts/attempt_001"
+  }
+}

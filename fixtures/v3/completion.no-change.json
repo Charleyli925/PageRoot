@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "1.0.0",
+  "finalizerVersion": "1.0.0",
+  "status": "completed",
+  "projectId": "project_metrics",
+  "documentId": "doc_dashboard",
+  "requestId": "req_no_change",
+  "attemptId": "attempt_001",
+  "basedOnVersionId": "ver_0005",
+  "previousVersionId": "ver_0008",
+  "candidateVersionId": "ver_0009",
+  "candidateVersionOrdinal": 9,
+  "candidateVersionLabel": "V9",
+  "baseSnapshotSha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "inputManifestSha256": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+  "outputRelativePath": "output/index.html",
+  "outputSha256": "sha256:1212121212121212121212121212121212121212121212121212121212121212",
+  "baseComparisonSha256": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "outputComparisonSha256": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "canonicalizationVersion": "1",
+  "completedAt": "2026-07-17T09:00:00Z"
+}

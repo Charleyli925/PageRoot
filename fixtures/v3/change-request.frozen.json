@@ -1,0 +1,83 @@
+{
+  "schemaVersion": "3.0.0",
+  "status": "frozen",
+  "projectId": "project_metrics",
+  "documentId": "doc_dashboard",
+  "requestId": "req_metrics_cards",
+  "attemptId": "attempt_001",
+  "createdAt": "2026-07-17T08:34:00Z",
+  "frozenAt": "2026-07-17T08:34:00Z",
+  "freezeCutoffRevision": 42,
+  "versionIdentity": {
+    "basedOnVersionId": "ver_0005",
+    "previousVersionId": "ver_0008",
+    "candidateVersionId": "ver_0009",
+    "candidateVersionOrdinal": 9,
+    "candidateVersionLabel": "V9"
+  },
+  "baseSnapshot": {
+    "relativePath": "input/base/index.html",
+    "byteLength": 4988,
+    "sha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "comparisonSha256": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "canonicalizationVersion": "1"
+  },
+  "paths": {
+    "requestRelativePath": "requests/req_metrics_cards",
+    "attemptRelativePath": "requests/req_metrics_cards/attempts/attempt_001",
+    "promptRelativePath": "requests/req_metrics_cards/PROMPT.md",
+    "inputManifestRelativePath": "requests/req_metrics_cards/input-manifest.json"
+  },
+  "requirements": {
+    "summary": "优化指标卡片层级与标题间距",
+    "instructions": [
+      {
+        "instructionId": "instruction_card_hierarchy",
+        "text": "突出核心指标，并将标题与数值间距收紧。",
+        "targetRefs": [
+          "target_metrics_grid"
+        ]
+      }
+    ],
+    "targets": [
+      {
+        "targetId": "target_metrics_grid",
+        "label": "核心指标卡片区",
+        "level": "module",
+        "selector": "#metrics-grid",
+        "sourceAnchor": {
+          "startOffset": 800,
+          "endOffset": 1800,
+          "sourceSha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "fingerprint": {
+          "tagName": "section",
+          "stableAttributes": {
+            "id": "metrics-grid"
+          },
+          "ancestorFingerprint": [
+            "body",
+            "main"
+          ],
+          "textPrefix": "核心指标",
+          "textSuffix": "同比"
+        },
+        "resolution": "exact"
+      }
+    ],
+    "preserveOutsideTargets": true
+  },
+  "annotations": {
+    "relativePath": "input/annotations/records.json",
+    "sha256": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "commentCount": 1,
+    "editEventCount": 1
+  },
+  "finalization": {
+    "outputRelativePath": "output/index.html",
+    "completionRelativePath": "completion.json",
+    "completionSchema": "completion.v1.schema.json",
+    "supportedFinalizerVersion": "1.0.0",
+    "finalizerCommand": "html-ai-finalize --attempt requests/req_metrics_cards/attempts/attempt_001"
+  }
+}

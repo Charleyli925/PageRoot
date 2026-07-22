@@ -1,0 +1,82 @@
+{
+  "schemaVersion": "3.0.0",
+  "projectId": "project_metrics",
+  "documentId": "doc_dashboard",
+  "requestId": "req_metrics_cards",
+  "attemptId": "attempt_001",
+  "capturedAt": "2026-07-17T08:34:00Z",
+  "freezeCutoffRevision": 42,
+  "basedOnVersionId": "ver_0005",
+  "baseSnapshotSha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "comments": [
+    {
+      "commentId": "comment_emphasize_value",
+      "createdAt": "2026-07-17T08:30:00Z",
+      "updatedAt": "2026-07-17T08:32:00Z",
+      "capturedRevision": 42,
+      "text": "核心数值需要更突出，但不要改变卡片顺序。",
+      "target": {
+        "targetId": "target_metrics_grid",
+        "label": "核心指标卡片区",
+        "level": "module",
+        "selector": "#metrics-grid",
+        "sourceAnchor": {
+          "startOffset": 800,
+          "endOffset": 1800,
+          "sourceSha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "fingerprint": {
+          "tagName": "section",
+          "stableAttributes": {
+            "id": "metrics-grid"
+          },
+          "ancestorFingerprint": [
+            "body",
+            "main"
+          ],
+          "textPrefix": "核心指标",
+          "textSuffix": "同比"
+        },
+        "resolution": "exact"
+      },
+      "persistence": "request-only"
+    }
+  ],
+  "editEvents": [
+    {
+      "eventId": "edit_title_weight",
+      "createdAt": "2026-07-17T08:28:00Z",
+      "revision": 41,
+      "basedOnVersionId": "ver_0005",
+      "kind": "style",
+      "property": "font-weight",
+      "summary": "将指标标题字重调整为 600",
+      "target": {
+        "targetId": "target_metrics_grid",
+        "label": "核心指标卡片区",
+        "level": "module",
+        "selector": "#metrics-grid",
+        "sourceAnchor": {
+          "startOffset": 800,
+          "endOffset": 1800,
+          "sourceSha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "fingerprint": {
+          "tagName": "section",
+          "stableAttributes": {
+            "id": "metrics-grid"
+          },
+          "ancestorFingerprint": [
+            "body",
+            "main"
+          ],
+          "textPrefix": "核心指标",
+          "textSuffix": "同比"
+        },
+        "resolution": "exact"
+      },
+      "before": "500",
+      "after": "600"
+    }
+  ]
+}

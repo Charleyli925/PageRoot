@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "1.0.0",
+  "status": "cancelled",
+  "projectId": "project_metrics",
+  "documentId": "doc_dashboard",
+  "requestId": "req_cancelled",
+  "attemptId": "attempt_001",
+  "previousVersionId": "ver_0008",
+  "basedOnVersionId": "ver_0005",
+  "candidateVersionId": "ver_0009",
+  "candidateVersionOrdinal": 9,
+  "candidateVersionLabel": "V9",
+  "baseSnapshotSha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "annotationArchive": {
+    "requestRelativePath": "requests/req_cancelled/input/annotations/records.json",
+    "attemptRelativePath": "requests/req_cancelled/attempts/attempt_001/annotations.json",
+    "sha256": "sha256:1717171717171717171717171717171717171717171717171717171717171717",
+    "commentCount": 1,
+    "editEventCount": 0
+  },
+  "reason": "cancelled-by-user",
+  "cancelledAt": "2026-07-17T09:10:00Z"
+}

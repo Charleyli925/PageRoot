@@ -1,0 +1,26 @@
+{
+  "schemaVersion": "1.0.0",
+  "status": "failed",
+  "projectId": "project_metrics",
+  "documentId": "doc_dashboard",
+  "requestId": "req_failed",
+  "attemptId": "attempt_001",
+  "previousVersionId": "ver_0008",
+  "basedOnVersionId": "ver_0005",
+  "candidateVersionId": "ver_0009",
+  "candidateVersionOrdinal": 9,
+  "candidateVersionLabel": "V9",
+  "baseSnapshotSha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "annotationArchive": {
+    "requestRelativePath": "requests/req_failed/input/annotations/records.json",
+    "attemptRelativePath": "requests/req_failed/attempts/attempt_001/annotations.json",
+    "sha256": "sha256:1818181818181818181818181818181818181818181818181818181818181818",
+    "commentCount": 1,
+    "editEventCount": 1
+  },
+  "error": {
+    "code": "SEALED_OUTPUT_MODIFIED",
+    "message": "output/index.html changed after completion was sealed."
+  },
+  "failedAt": "2026-07-17T09:20:00Z"
+}

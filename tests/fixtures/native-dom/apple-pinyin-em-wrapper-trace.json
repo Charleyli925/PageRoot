@@ -1,0 +1,34 @@
+{
+  "name": "macOS Apple Simplified Pinyin replaces an authored em wrapper",
+  "capturedOn": {
+    "platform": "macOS 15.7.4",
+    "inputMethod": "Apple Simplified Pinyin",
+    "app": "PageRoot 0.8.0 Electron",
+    "fixtureCase": "heading-inline"
+  },
+  "initial": {
+    "selectionText": "Word",
+    "html": "真实 <strong data-html-ai-source-node-id=\"element:2681:2701:strong\">DOM</strong> 光标要像 <em data-html-ai-source-node-id=\"element:2707:2720:em\">Word</em> 一样自然&nbsp;🙂"
+  },
+  "events": [
+    { "type": "keydown", "key": "n", "code": "KeyN", "isComposing": false, "isTrusted": true },
+    { "type": "compositionstart", "data": "Word", "isTrusted": true },
+    { "type": "compositionupdate", "data": "n", "isTrusted": true },
+    { "type": "beforeinput", "inputType": "insertCompositionText", "data": "n", "isComposing": true, "isTrusted": true },
+    { "type": "input", "inputType": "insertCompositionText", "data": "n", "isComposing": true, "isTrusted": true, "html": "真实 <strong data-html-ai-source-node-id=\"element:2681:2701:strong\">DOM</strong> 光标要像 <em data-html-ai-source-node-id=\"element:2707:2720:em\">n</em> 一样自然&nbsp;🙂" },
+    { "type": "input", "inputType": "insertCompositionText", "data": "ni", "isComposing": true, "isTrusted": true, "html": "真实 <strong data-html-ai-source-node-id=\"element:2681:2701:strong\">DOM</strong> 光标要像 <em data-html-ai-source-node-id=\"element:2707:2720:em\">ni</em> 一样自然&nbsp;🙂" },
+    { "type": "input", "inputType": "insertCompositionText", "data": "ni h", "isComposing": true, "isTrusted": true, "html": "真实 <strong data-html-ai-source-node-id=\"element:2681:2701:strong\">DOM</strong> 光标要像 <i>ni h</i> 一样自然&nbsp;🙂" },
+    { "type": "input", "inputType": "insertCompositionText", "data": "ni hao", "isComposing": true, "isTrusted": true, "html": "真实 <strong data-html-ai-source-node-id=\"element:2681:2701:strong\">DOM</strong> 光标要像 <i>ni hao</i> 一样自然&nbsp;🙂" },
+    { "type": "keydown", "key": " ", "code": "Space", "isComposing": true, "isTrusted": true },
+    { "type": "compositionupdate", "data": "你好", "isTrusted": true },
+    { "type": "beforeinput", "inputType": "insertCompositionText", "data": "你好", "isComposing": true, "isTrusted": true },
+    { "type": "input", "inputType": "insertCompositionText", "data": "你好", "isComposing": true, "isTrusted": true, "html": "真实 <strong data-html-ai-source-node-id=\"element:2681:2701:strong\">DOM</strong> 光标要像 <i>你好</i> 一样自然&nbsp;🙂" },
+    { "type": "compositionend", "data": "你好", "isTrusted": false }
+  ],
+  "expectedCanonical": {
+    "text": "真实 DOM 光标要像 你好 一样自然 🙂",
+    "inlineHtml": "<em>你好</em>",
+    "sourceReplacement": { "before": "Word", "after": "你好" },
+    "historyEntries": 1
+  }
+}

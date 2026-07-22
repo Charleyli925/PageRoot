@@ -1,0 +1,108 @@
+{
+  "schemaVersion": "1.0.0",
+  "validatorVersion": "1.0.0",
+  "enforcementMode": "enforce",
+  "projectId": "project_metrics",
+  "documentId": "doc_dashboard",
+  "requestId": "req_metrics_cards",
+  "attemptId": "attempt_001",
+  "generatedAt": "2026-07-18T10:00:00Z",
+  "base": {
+    "sha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "comparisonSha256": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+  },
+  "output": {
+    "sha256": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "comparisonSha256": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+  },
+  "managedMetadataWhitelist": [
+    "html-ai-document-id",
+    "html-ai-version-id",
+    "html-ai-version-label",
+    "html-ai-based-on-version-id",
+    "html-ai-request-id"
+  ],
+  "allowedTargets": [
+    {
+      "targetId": "target_metrics_grid",
+      "label": "核心指标卡片区",
+      "level": "module",
+      "selector": "#metrics-grid",
+      "sourceAnchor": {
+        "startOffset": 800,
+        "endOffset": 1800,
+        "sourceSha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "fingerprint": {
+        "tagName": "section",
+        "stableAttributes": {
+          "id": "metrics-grid"
+        },
+        "ancestorFingerprint": [
+          "body",
+          "main"
+        ],
+        "textPrefix": "核心指标",
+        "textSuffix": "同比"
+      },
+      "resolution": {
+        "base": "exact",
+        "output": "rebound",
+        "basePath": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > section#metrics-grid:nth-of-type(1)",
+        "outputPath": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > section#metrics-grid:nth-of-type(1)",
+        "reason": null
+      }
+    }
+  ],
+  "differences": [
+    {
+      "differenceId": "difference_001",
+      "kind": "text",
+      "classification": "target-inside",
+      "operation": "modify",
+      "allowed": true,
+      "material": true,
+      "targetIds": [
+        "target_metrics_grid"
+      ],
+      "attributeName": null,
+      "baseLocation": {
+        "path": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > section#metrics-grid:nth-of-type(1) > h2:nth-of-type(1) > #text:nth-of-type(1)",
+        "startOffset": 900,
+        "endOffset": 904,
+        "startLine": 30,
+        "startColumn": 9,
+        "endLine": 30,
+        "endColumn": 13
+      },
+      "outputLocation": {
+        "path": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > section#metrics-grid:nth-of-type(1) > h2:nth-of-type(1) > #text:nth-of-type(1)",
+        "startOffset": 900,
+        "endOffset": 908,
+        "startLine": 30,
+        "startColumn": 9,
+        "endLine": 30,
+        "endColumn": 17
+      },
+      "before": {
+        "sha256": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "preview": "指标"
+      },
+      "after": {
+        "sha256": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        "preview": "核心指标"
+      }
+    }
+  ],
+  "summary": {
+    "differenceCount": 1,
+    "materialDifferenceCount": 1,
+    "allowedDifferenceCount": 1,
+    "violationCount": 0,
+    "byKind": {
+      "text": 1
+    }
+  },
+  "verdict": "pass",
+  "violationCodes": []
+}

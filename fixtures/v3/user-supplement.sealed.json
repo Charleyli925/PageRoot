@@ -1,0 +1,27 @@
+{
+  "schemaVersion": "1.0.0",
+  "status": "sealed",
+  "projectId": "project_0123456789abcdef",
+  "documentId": "doc_0123456789abcdef",
+  "requestId": "req_0001",
+  "attemptId": "attempt_001",
+  "records": [
+    {
+      "recordId": "supplement_0001",
+      "recordedAt": "2026-07-22T08:00:00Z",
+      "idempotencyKey": "chat-message-001",
+      "action": "add",
+      "refersTo": [
+        "instruction_primary"
+      ],
+      "userText": "请参考新图片收紧标题区域。",
+      "targetDescription": "标题区域",
+      "evidenceState": "description-only",
+      "evidenceDescription": "原图片只存在于对话上下文，原件未归档。",
+      "attachments": []
+    }
+  ],
+  "sealedAt": "2026-07-22T08:02:00Z",
+  "recordsSha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "attachmentsSha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+}

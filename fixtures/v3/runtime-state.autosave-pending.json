@@ -1,0 +1,57 @@
+{
+  "schemaVersion": "3.0.0",
+  "projectId": "project_metrics",
+  "documentId": "doc_dashboard",
+  "updatedAt": "2026-07-17T08:33:57Z",
+  "lifecycleState": "editing",
+  "projectLocked": false,
+  "editRevision": 42,
+  "lastPersistedRevision": 41,
+  "freezeCutoffRevision": null,
+  "autosave": {
+    "status": "updating",
+    "expectedSourceSha256": "sha256:1616161616161616161616161616161616161616161616161616161616161616",
+    "lastPersistedAt": "2026-07-17T08:33:56Z",
+    "recoveryLogRelativePath": "recovery/autosave.jsonl"
+  },
+  "pendingWrite": {
+    "revision": 42,
+    "expectedSourceSha256": "sha256:1616161616161616161616161616161616161616161616161616161616161616",
+    "targetHtmlSha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "recoveryHtmlRelativePath": "recovery/autosave/revision-00000042.html",
+    "recoveryHtmlSha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "auditEvents": [
+      {
+        "eventId": "edit_title_weight",
+        "editRevision": 42,
+        "projectId": "project_metrics",
+        "documentId": "doc_dashboard",
+        "persistedAt": "2026-07-17T08:33:57Z"
+      }
+    ],
+    "queuedAt": "2026-07-17T08:33:57Z"
+  },
+  "pendingSubmission": null,
+  "view": {
+    "viewMode": "current",
+    "latestVersionId": "ver_0008",
+    "currentBasedOnVersionId": "ver_0005",
+    "currentExactVersionId": null,
+    "viewingVersionId": null,
+    "renderedContentSha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "draft": {
+    "annotationsRelativePath": "draft/annotations.json",
+    "annotationsSha256": "sha256:1010101010101010101010101010101010101010101010101010101010101010",
+    "commentIds": [
+      "comment_emphasize_value"
+    ],
+    "editEventIds": [
+      "edit_title_weight"
+    ],
+    "draftRevision": 2,
+    "updatedAt": "2026-07-17T08:33:57Z"
+  },
+  "activeRun": null,
+  "activeTransaction": null
+}

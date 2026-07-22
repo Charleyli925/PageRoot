@@ -1,0 +1,76 @@
+.preview {
+  --preview-height: calc(100vh - 94px);
+  min-width: 0;
+  height: var(--preview-height);
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 36px minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid #d9d6ce;
+  border-radius: 13px;
+  background: #fff;
+  box-shadow: 0 10px 30px rgb(37 34 27 / 8%);
+}
+
+.statusBar {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 8px 0 13px;
+  border-bottom: 1px solid #e4e1da;
+  background: #f9f8f4;
+  color: #686970;
+  font-size: 10px;
+}
+
+.statusBar::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: #2f7758;
+  box-shadow: 0 0 0 4px rgb(47 119 88 / 10%);
+}
+
+.statusBar span {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.statusBar button {
+  min-height: 28px;
+  flex: none;
+  padding: 0 10px;
+  border: 1px solid #d8d5cd;
+  border-radius: 8px;
+  background: #fff;
+  color: #55575f;
+  font-size: 10px;
+  font-weight: 680;
+}
+
+.statusBar button:hover {
+  border-color: #b9b5aa;
+  background: #f3f1ec;
+  color: #202127;
+}
+
+.frame {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  border: 0;
+  background: #fff;
+}
+
+@media (max-width: 760px) {
+  .statusBar span {
+    display: none;
+  }
+}

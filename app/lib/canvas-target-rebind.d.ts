@@ -1,0 +1,26 @@
+import type {
+  HtmlCanvasSelection,
+  HtmlCanvasSelectionLevel,
+} from "../components/HtmlCanvasEditor";
+
+export function targetLevelForSelection(
+  level: HtmlCanvasSelectionLevel,
+): "module" | "subregion" | "insertion-point";
+
+export function sourceTargetRefForSelection(
+  selection: HtmlCanvasSelection,
+): {
+  targetId: string;
+  label: string;
+  level: "module" | "subregion" | "insertion-point";
+  selector?: string;
+  textQuote?: string;
+  sourceAnchor?: HtmlCanvasSelection["sourceAnchor"];
+  fingerprint?: HtmlCanvasSelection["fingerprint"];
+  resolution: HtmlCanvasSelection["resolution"];
+};
+
+export function rebindCanvasSelectionTargets(
+  sourceHtml: string,
+  targets: readonly HtmlCanvasSelection[],
+): HtmlCanvasSelection[];

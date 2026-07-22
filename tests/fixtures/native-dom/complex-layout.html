@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="refresh" content="120; url=https://example.invalid/should-never-run">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PageRoot native DOM editing matrix</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: Inter, "PingFang SC", sans-serif;
+      color: #17211e;
+      background: #f4f1e9;
+    }
+
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 32px; }
+    main { max-width: 980px; margin: 0 auto; }
+    h1 { max-width: 820px; font: 700 42px/1.14 Georgia, "Songti SC", serif; }
+    section { margin: 24px 0; }
+    .lede { max-width: 620px; font-size: 19px; line-height: 1.75; }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 17px; }
+    .card { min-width: 0; padding: 19px; border: 1px solid #b7c4bd; border-radius: 14px; background: #fff; }
+    .flex-row { display: flex; align-items: baseline; gap: 23px; padding: 12px 0; }
+    .flex-row > strong { flex: 0 0 auto; }
+    .flex-row > p { flex: 1 1 auto; margin: 0; }
+    .text-island-matrix { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+    .text-island-matrix > * { margin: 0; }
+    .standalone-badge, .standalone-strong, .standalone-time, .standalone-label,
+    .standalone-output { display: inline-flex; padding: 8px 12px; border: 1px solid #9aaba2; border-radius: 999px; }
+    .standalone-link, .standalone-button { display: inline-flex; padding: 8px 12px; }
+    .standalone-details { flex: 1 1 100%; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    th, td { border: 1px solid #9aaba2; padding: 12px; text-align: left; }
+    .nowrap-header { white-space: nowrap; }
+    .scroller { width: 360px; max-height: 86px; overflow: auto; padding: 12px; border: 1px solid #95a59e; }
+    .transformed { width: 420px; transform: translateX(8px) scale(.97); transform-origin: left center; }
+    .vertical { height: 180px; writing-mode: vertical-rl; text-orientation: mixed; }
+    pre { tab-size: 4; white-space: pre-wrap; }
+    .atom-line img { display: inline-block; width: 22px; height: 22px; vertical-align: middle; }
+    odd-card { display: block; padding: 12px; border: 1px dashed #788981; }
+    .editability-sensitive { width: 390px; padding: 9px; border: 1px solid #799087; }
+    .editability-sensitive[contenteditable]:focus {
+      width: 510px;
+      padding: 31px;
+      transform: translateX(40px);
+    }
+    .transition-sensitive { transition: color 180ms ease; }
+    .pseudo::before { content: "仅由 CSS 生成："; color: #a34b2a; }
+    .media-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; align-items: start; }
+    canvas, iframe, svg { width: 100%; min-height: 92px; border: 1px solid #87998f; background: #fff; }
+    input { width: 100%; padding: 10px; }
+    .rtl { direction: rtl; unicode-bidi: plaintext; }
+  </style>
+  <script>
+    document.documentElement.dataset.authorScriptRan = "true";
+  </script>
+</head>
+<body>
+  <main>
+    <header>
+      <small>01 / NATIVE DOM</small>
+      <h1 data-native-case="heading-inline" data-native-mode="native-editable">真实 <strong>DOM</strong> 光标要像 <em>Word</em> 一样自然&nbsp;🙂</h1>
+      <p class="lede" data-native-case="paragraph-entities" data-native-mode="native-editable">浏览器负责光标、选区与输入法；PageRoot 只把 <strong>必要文字</strong> 映射回源文件，保留 &amp;、&nbsp; 和原始标签。</p>
+    </header>
+
+    <section class="grid" aria-label="Grid editing cases">
+      <article class="card">
+        <h2>Grid</h2>
+        <p data-native-case="grid-card" data-native-mode="native-editable">网格卡片中的 <span>嵌套行内文字</span> 不应因为进入编辑而重新排版。</p>
+      </article>
+      <article class="card">
+        <h2>Break</h2>
+        <p data-native-case="hard-break" data-native-mode="native-editable">第一行保留原位。<br>第二行可以用方向键进入并继续输入。</p>
+      </article>
+    </section>
+
+    <section class="flex-row">
+      <strong>Flex label</strong>
+      <p data-native-case="flex-copy" data-native-mode="native-editable">这个 flex item 可以伸缩，进入编辑前后 gap、baseline 和折行都必须不变。</p>
+    </section>
+
+    <section class="text-island-matrix" aria-label="Capability based text islands">
+      <span class="standalone-badge" data-native-case="standalone-span" data-native-mode="native-editable">独立徽标文字</span>
+      <strong class="standalone-strong" data-native-case="standalone-strong" data-native-mode="native-editable">独立强调文字</strong>
+      <time class="standalone-time" datetime="2026-07-22" data-native-case="standalone-time" data-native-mode="native-editable">2026 年 7 月 22 日</time>
+      <label class="standalone-label" data-native-case="standalone-label" data-native-mode="native-editable">独立标签文字</label>
+      <output class="standalone-output" data-native-case="standalone-output" data-native-mode="native-editable">校验通过</output>
+      <a class="standalone-link" href="#top" data-native-case="standalone-link" data-native-mode="native-editable">独立链接文字</a>
+      <button class="standalone-button" type="button" data-native-case="standalone-button" data-native-mode="comment-only">独立按钮文字</button>
+      <details class="standalone-details" open>
+        <summary data-native-case="standalone-summary" data-native-mode="native-editable">独立折叠标题</summary>
+        <p>折叠内容保持独立。</p>
+      </details>
+    </section>
+
+    <section>
+      <table>
+        <thead><tr><th class="nowrap-header" data-native-case="nowrap-table-header" data-native-mode="native-editable">类型</th><th>体验</th></tr></thead>
+        <tbody>
+          <tr><td>原位编辑</td><td data-native-case="table-cell" data-native-mode="native-editable">表格单元格里的 <strong>几个字</strong> 可直接选择替换。</td></tr>
+        </tbody>
+      </table>
+      <ol>
+        <li data-native-case="list-item" data-native-mode="native-editable">列表项中的文字保持项目符号和缩进。</li>
+      </ol>
+    </section>
+
+    <section>
+      <p class="rtl" dir="rtl" data-native-case="rtl-copy" data-native-mode="native-editable">مرحبا PageRoot 中文 mixed direction 123</p>
+      <div class="scroller">
+        <p data-native-case="scroll-copy" data-native-mode="native-editable">滚动容器中的长文字需要保持 scrollTop、scrollLeft 和原始折行；输入时不能刷新整个 iframe，也不能跳回容器顶部。</p>
+      </div>
+      <p class="transformed" data-native-case="transformed-copy" data-native-mode="native-editable">带 translate 和 scale 的文字仍然使用真实 DOM caret。</p>
+    </section>
+
+    <section class="grid" aria-label="Selectable fallback cases">
+      <div class="card vertical" data-native-case="vertical-copy" data-native-mode="select-comment">竖排文字先允许原生选择和评论，不制造不可靠的假光标。</div>
+      <pre class="card" data-native-case="preformatted-copy" data-native-mode="select-comment"><code>const exact = "spaces  stay";
+	return exact;</code></pre>
+      <p class="card atom-line" data-native-case="atom-mixed" data-native-mode="select-comment">文字之前 <img alt="atomic icon" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Ccircle cx='5' cy='5' r='4' fill='%230b725b'/%3E%3C/svg%3E"> 文字之后。</p>
+      <odd-card data-native-case="custom-element" data-native-mode="native-editable">唯一映射的自定义元素文字也按能力进入直接编辑。</odd-card>
+      <p class="editability-sensitive" data-native-case="unsafe-contenteditable-css" data-native-mode="select-comment">作者 CSS 监听 contenteditable；能力预检必须在布局改变前关闭直接编辑。</p>
+      <p class="card transition-sensitive" data-native-case="transition-sensitive-copy" data-native-mode="native-editable">静态未触发的过渡声明不再误拦截文字编辑。</p>
+    </section>
+
+    <section class="media-row" aria-label="Comment-only cases">
+      <p class="pseudo" data-native-case="pseudo-content" data-native-mode="native-editable">这段真实源码文字可编辑，生成前缀仍不可编辑。</p>
+      <canvas data-native-case="canvas-surface" data-native-mode="comment-only" width="260" height="92">Canvas fallback</canvas>
+      <iframe data-native-case="nested-iframe" data-native-mode="comment-only" title="nested fixture frame" srcdoc="<!doctype html><p>nested document text</p>&lt;script&gt;parent.document.documentElement.dataset.nestedScriptRan='true'&lt;/script&gt;"></iframe>
+      <svg data-native-case="svg-text" data-native-mode="comment-only" viewBox="0 0 260 92" role="img" aria-label="SVG text sample"><text x="14" y="48">SVG authored text</text></svg>
+      <math data-native-case="mathml-text" data-native-mode="comment-only" display="block" aria-label="MathML formula sample"><mrow><mi>x</mi><mo>=</mo><mfrac><mrow><mo>−</mo><mi>b</mi><mo>±</mo><msqrt><mrow><msup><mi>b</mi><mn>2</mn></msup><mo>−</mo><mn>4</mn><mi>a</mi><mi>c</mi></mrow></msqrt></mrow><mrow><mn>2</mn><mi>a</mi></mrow></mfrac></mrow></math>
+      <label data-native-case="form-value" data-native-mode="comment-only">属性值<input value="表单属性使用专门编辑器" placeholder="placeholder attribute"></label>
+      <div data-native-case="shadow-content" data-native-mode="comment-only">
+        <template shadowrootmode="open"><span>Declarative shadow text</span></template>
+        Shadow host fallback
+      </div>
+    </section>
+  </main>
+</body>
+</html>

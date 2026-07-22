@@ -1,0 +1,572 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://html-change.local/schemas/attempt-outcome.v1.schema.json",
+  "title": "HTML AI immutable Attempt outcome v1",
+  "description": "The terminal, per-Attempt audit record. Success is the only branch that points to a committed Version; no-change, cancellation, failure and keeping an external source do not consume the candidate Version.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/versionCreated"
+    },
+    {
+      "$ref": "#/$defs/noChange"
+    },
+    {
+      "$ref": "#/$defs/cancelled"
+    },
+    {
+      "$ref": "#/$defs/failed"
+    },
+    {
+      "$ref": "#/$defs/externalKept"
+    }
+  ],
+  "$defs": {
+    "versionCreated": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "status",
+        "projectId",
+        "documentId",
+        "requestId",
+        "attemptId",
+        "previousVersionId",
+        "basedOnVersionId",
+        "candidateVersionId",
+        "candidateVersionOrdinal",
+        "candidateVersionLabel",
+        "baseSnapshotSha256",
+        "annotationArchive",
+        "transactionId",
+        "versionId",
+        "versionManifestRelativePath",
+        "commitMarkerRelativePath",
+        "contentSha256",
+        "completionRelativePath",
+        "completionSha256",
+        "committedAt"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": "1.0.0"
+        },
+        "status": {
+          "const": "version-created"
+        },
+        "projectId": {
+          "$ref": "#/$defs/projectId"
+        },
+        "documentId": {
+          "$ref": "#/$defs/documentId"
+        },
+        "requestId": {
+          "$ref": "#/$defs/requestId"
+        },
+        "attemptId": {
+          "$ref": "#/$defs/attemptId"
+        },
+        "previousVersionId": {
+          "$ref": "#/$defs/versionId"
+        },
+        "basedOnVersionId": {
+          "$ref": "#/$defs/versionId"
+        },
+        "candidateVersionId": {
+          "$ref": "#/$defs/versionId"
+        },
+        "candidateVersionOrdinal": {
+          "type": "integer",
+          "minimum": 2
+        },
+        "candidateVersionLabel": {
+          "type": "string",
+          "pattern": "^V[1-9][0-9]*$"
+        },
+        "baseSnapshotSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "annotationArchive": {
+          "$ref": "#/$defs/versionAnnotationArchive"
+        },
+        "transactionId": {
+          "$ref": "#/$defs/transactionId"
+        },
+        "versionId": {
+          "$ref": "#/$defs/versionId"
+        },
+        "versionManifestRelativePath": {
+          "type": "string",
+          "pattern": "^versions/ver_[0-9]{4,}/version\\.json$"
+        },
+        "commitMarkerRelativePath": {
+          "type": "string",
+          "pattern": "^versions/ver_[0-9]{4,}/committed\\.json$"
+        },
+        "contentSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "completionRelativePath": {
+          "type": "string",
+          "pattern": "^requests/req_[A-Za-z0-9_-]+/attempts/attempt_[0-9]{3}/completion\\.json$"
+        },
+        "completionSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "committedAt": {
+          "$ref": "#/$defs/timestamp"
+        }
+      }
+    },
+    "noChange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "status",
+        "projectId",
+        "documentId",
+        "requestId",
+        "attemptId",
+        "previousVersionId",
+        "basedOnVersionId",
+        "candidateVersionId",
+        "candidateVersionOrdinal",
+        "candidateVersionLabel",
+        "baseSnapshotSha256",
+        "annotationArchive",
+        "inputManifestSha256",
+        "canonicalizationVersion",
+        "completionRelativePath",
+        "completionSha256",
+        "outputSha256",
+        "baseComparisonSha256",
+        "outputComparisonSha256",
+        "completedAt"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": "1.0.0"
+        },
+        "status": {
+          "const": "no-change"
+        },
+        "projectId": {
+          "$ref": "#/$defs/projectId"
+        },
+        "documentId": {
+          "$ref": "#/$defs/documentId"
+        },
+        "requestId": {
+          "$ref": "#/$defs/requestId"
+        },
+        "attemptId": {
+          "$ref": "#/$defs/attemptId"
+        },
+        "previousVersionId": {
+          "$ref": "#/$defs/versionId"
+        },
+        "basedOnVersionId": {
+          "$ref": "#/$defs/versionId"
+        },
+        "candidateVersionId": {
+          "$ref": "#/$defs/versionId"
+        },
+        "candidateVersionOrdinal": {
+          "type": "integer",
+          "minimum": 2
+        },
+        "candidateVersionLabel": {
+          "type": "string",
+          "pattern": "^V[1-9][0-9]*$"
+        },
+        "baseSnapshotSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "annotationArchive": {
+          "$ref": "#/$defs/attemptAnnotationArchive"
+        },
+        "inputManifestSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "canonicalizationVersion": {
+          "const": "1"
+        },
+        "completionRelativePath": {
+          "type": "string",
+          "pattern": "^requests/req_[A-Za-z0-9_-]+/attempts/attempt_[0-9]{3}/completion\\.json$"
+        },
+        "completionSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "outputSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "baseComparisonSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "outputComparisonSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "completedAt": {
+          "$ref": "#/$defs/timestamp"
+        }
+      }
+    },
+    "cancelled": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "status",
+        "projectId",
+        "documentId",
+        "requestId",
+        "attemptId",
+        "previousVersionId",
+        "basedOnVersionId",
+        "candidateVersionId",
+        "candidateVersionOrdinal",
+        "candidateVersionLabel",
+        "baseSnapshotSha256",
+        "annotationArchive",
+        "reason",
+        "cancelledAt"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": "1.0.0"
+        },
+        "status": {
+          "const": "cancelled"
+        },
+        "projectId": {
+          "$ref": "#/$defs/projectId"
+        },
+        "documentId": {
+          "$ref": "#/$defs/documentId"
+        },
+        "requestId": {
+          "$ref": "#/$defs/requestId"
+        },
+        "attemptId": {
+          "$ref": "#/$defs/attemptId"
+        },
+        "previousVersionId": {
+          "$ref": "#/$defs/versionId"
+        },
+        "basedOnVersionId": {
+          "$ref": "#/$defs/versionId"
+        },
+        "candidateVersionId": {
+          "$ref": "#/$defs/versionId"
+        },
+        "candidateVersionOrdinal": {
+          "type": "integer",
+          "minimum": 2
+        },
+        "candidateVersionLabel": {
+          "type": "string",
+          "pattern": "^V[1-9][0-9]*$"
+        },
+        "baseSnapshotSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "annotationArchive": {
+          "$ref": "#/$defs/attemptAnnotationArchive"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "cancelledAt": {
+          "$ref": "#/$defs/timestamp"
+        }
+      }
+    },
+    "failed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "status",
+        "projectId",
+        "documentId",
+        "requestId",
+        "attemptId",
+        "previousVersionId",
+        "basedOnVersionId",
+        "candidateVersionId",
+        "candidateVersionOrdinal",
+        "candidateVersionLabel",
+        "baseSnapshotSha256",
+        "annotationArchive",
+        "error",
+        "failedAt"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": "1.0.0"
+        },
+        "status": {
+          "const": "failed"
+        },
+        "projectId": {
+          "$ref": "#/$defs/projectId"
+        },
+        "documentId": {
+          "$ref": "#/$defs/documentId"
+        },
+        "requestId": {
+          "$ref": "#/$defs/requestId"
+        },
+        "attemptId": {
+          "$ref": "#/$defs/attemptId"
+        },
+        "previousVersionId": {
+          "$ref": "#/$defs/versionId"
+        },
+        "basedOnVersionId": {
+          "$ref": "#/$defs/versionId"
+        },
+        "candidateVersionId": {
+          "$ref": "#/$defs/versionId"
+        },
+        "candidateVersionOrdinal": {
+          "type": "integer",
+          "minimum": 2
+        },
+        "candidateVersionLabel": {
+          "type": "string",
+          "pattern": "^V[1-9][0-9]*$"
+        },
+        "baseSnapshotSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "annotationArchive": {
+          "$ref": "#/$defs/attemptAnnotationArchive"
+        },
+        "error": {
+          "$ref": "#/$defs/error"
+        },
+        "failedAt": {
+          "$ref": "#/$defs/timestamp"
+        }
+      }
+    },
+    "externalKept": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "status",
+        "projectId",
+        "documentId",
+        "requestId",
+        "attemptId",
+        "previousVersionId",
+        "basedOnVersionId",
+        "candidateVersionId",
+        "candidateVersionOrdinal",
+        "candidateVersionLabel",
+        "baseSnapshotSha256",
+        "annotationArchive",
+        "transactionId",
+        "completionRelativePath",
+        "completionSha256",
+        "candidateOutputSha256",
+        "externalSourceSha256",
+        "resolvedAt"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": "1.0.0"
+        },
+        "status": {
+          "const": "external-source-kept"
+        },
+        "projectId": {
+          "$ref": "#/$defs/projectId"
+        },
+        "documentId": {
+          "$ref": "#/$defs/documentId"
+        },
+        "requestId": {
+          "$ref": "#/$defs/requestId"
+        },
+        "attemptId": {
+          "$ref": "#/$defs/attemptId"
+        },
+        "previousVersionId": {
+          "$ref": "#/$defs/versionId"
+        },
+        "basedOnVersionId": {
+          "$ref": "#/$defs/versionId"
+        },
+        "candidateVersionId": {
+          "$ref": "#/$defs/versionId"
+        },
+        "candidateVersionOrdinal": {
+          "type": "integer",
+          "minimum": 2
+        },
+        "candidateVersionLabel": {
+          "type": "string",
+          "pattern": "^V[1-9][0-9]*$"
+        },
+        "baseSnapshotSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "annotationArchive": {
+          "$ref": "#/$defs/attemptAnnotationArchive"
+        },
+        "transactionId": {
+          "$ref": "#/$defs/transactionId"
+        },
+        "completionRelativePath": {
+          "type": "string",
+          "pattern": "^requests/req_[A-Za-z0-9_-]+/attempts/attempt_[0-9]{3}/completion\\.json$"
+        },
+        "completionSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "candidateOutputSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "externalSourceSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "resolvedAt": {
+          "$ref": "#/$defs/timestamp"
+        }
+      }
+    },
+    "attemptAnnotationArchive": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requestRelativePath",
+        "attemptRelativePath",
+        "sha256",
+        "commentCount",
+        "editEventCount"
+      ],
+      "properties": {
+        "requestRelativePath": {
+          "type": "string",
+          "pattern": "^requests/req_[A-Za-z0-9_-]+/input/annotations/records\\.json$"
+        },
+        "attemptRelativePath": {
+          "type": "string",
+          "pattern": "^requests/req_[A-Za-z0-9_-]+/attempts/attempt_[0-9]{3}/annotations\\.json$"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "commentCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "editEventCount": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "versionAnnotationArchive": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "versionRelativePath",
+        "requestRelativePath",
+        "attemptRelativePath",
+        "sha256",
+        "commentCount",
+        "editEventCount"
+      ],
+      "properties": {
+        "versionRelativePath": {
+          "const": "annotations/records.json"
+        },
+        "requestRelativePath": {
+          "type": "string",
+          "pattern": "^requests/req_[A-Za-z0-9_-]+/input/annotations/records\\.json$"
+        },
+        "attemptRelativePath": {
+          "type": "string",
+          "pattern": "^requests/req_[A-Za-z0-9_-]+/attempts/attempt_[0-9]{3}/annotations\\.json$"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "commentCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "editEventCount": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 5000
+        }
+      }
+    },
+    "projectId": {
+      "type": "string",
+      "pattern": "^project_[A-Za-z0-9_-]+$"
+    },
+    "documentId": {
+      "type": "string",
+      "pattern": "^doc_[A-Za-z0-9_-]+$"
+    },
+    "requestId": {
+      "type": "string",
+      "pattern": "^req_[A-Za-z0-9_-]+$"
+    },
+    "attemptId": {
+      "type": "string",
+      "pattern": "^attempt_[0-9]{3}$"
+    },
+    "versionId": {
+      "type": "string",
+      "pattern": "^ver_[0-9]{4,}$"
+    },
+    "transactionId": {
+      "type": "string",
+      "pattern": "^txn_[A-Za-z0-9_-]+$"
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*\\\\)(?!.*//)(?!\\.\\.?$)(?!\\.\\.?/)(?!.*\\/\\.\\.?\\/)(?!.*\\/\\.\\.?$)[^\\u0000\\r\\n]+$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    }
+  }
+}

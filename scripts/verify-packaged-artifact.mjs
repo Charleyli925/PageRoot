@@ -1,0 +1,549 @@
+#!/usr/bin/env node
+
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
+import {
+  access,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+} from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { extractFile, listPackage, statFile } from "@electron/asar";
+import { assertBuildInfo, expectedBuildInfo } from "./release-provenance.mjs";
+
+const SCRIPT_PATH = fileURLToPath(import.meta.url);
+const DEFAULT_PRODUCT_ROOT = path.resolve(path.dirname(SCRIPT_PATH), "..");
+const REQUIRED_BRIDGE_FILES = [
+  "workspace-bridge.mjs",
+  "finalize-attempt.mjs",
+  "lifecycle-core.mjs",
+  "user-supplement-core.mjs",
+  "record-user-supplement.mjs",
+  "html-source-parser.mjs",
+  "scope-validator.mjs",
+  "target-identity.mjs",
+  "product-contract.mjs",
+  "attachment-storage.mjs",
+];
+const REQUIRED_BRIDGE_MODULES = ["entities", "parse5"];
+const REQUIRED_LEGAL_RESOURCES = ["LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md"];
+const REQUIRED_APP_SOURCE_FILES = [
+  "desktop/main.mjs",
+  "desktop/preload.mjs",
+  "desktop/project-files.mjs",
+  "desktop/export-copy.mjs",
+  "desktop/bridge-shutdown.mjs",
+  "desktop/close-recovery.mjs",
+  "desktop/product-contract.mjs",
+  "desktop/qoder-handoff.mjs",
+  "desktop/manual-update.mjs",
+];
+const RETIRED_EDITOR_ARTIFACTS = [
+  { name: "Lexical", pattern: /(?:@lexical\/|\blexical\b)/iu },
+  { name: "TextFlow", pattern: /text[\s_-]?flow/iu },
+  {
+    name: "legacy editing surface",
+    pattern: /pageroot-text-(?:editor|ghost)|data-(?:html-canvas|pageroot)-text-flow/iu,
+  },
+];
+const RUNTIME_TEXT_EXTENSIONS = new Set([
+  ".css",
+  ".html",
+  ".js",
+  ".json",
+  ".mjs",
+  ".txt",
+]);
+
+function parseArguments(argv) {
+  const options = { arch: "arm64", releaseDirectory: undefined };
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
+    if (argument === "--arch") {
+      options.arch = argv[index + 1];
+      index += 1;
+      continue;
+    }
+    if (argument === "--release-directory") {
+      options.releaseDirectory = argv[index + 1];
+      index += 1;
+      continue;
+    }
+    throw new Error(`Unknown argument: ${argument}`);
+  }
+  assert.match(options.arch ?? "", /^(arm64|x64)$/, "--arch must be arm64 or x64");
+  return options;
+}
+
+export function expectedArtifactLayout({
+  productRoot = DEFAULT_PRODUCT_ROOT,
+  packageJson,
+  arch = "arm64",
+  releaseDirectory,
+}) {
+  const resolvedReleaseDirectory = path.resolve(
+    releaseDirectory ?? path.join(productRoot, packageJson.build?.directories?.output ?? "release"),
+  );
+  const productName = packageJson.build?.productName;
+  const artifactName = packageJson.build?.artifactName;
+  assert.equal(typeof productName, "string", "build.productName must be configured");
+  assert.equal(typeof artifactName, "string", "build.artifactName must be configured");
+  assert.equal(typeof packageJson.version, "string", "package version must be configured");
+  const architectureDirectory = arch === "arm64" ? "mac-arm64" : "mac";
+  const dmgName = artifactName
+    .replaceAll("${version}", packageJson.version)
+    .replaceAll("${arch}", arch)
+    .replaceAll("${ext}", "dmg");
+  assert.doesNotMatch(dmgName, /\$\{[^}]+\}/, "build.artifactName contains an unsupported macro");
+  return {
+    releaseDirectory: resolvedReleaseDirectory,
+    appPath: path.join(resolvedReleaseDirectory, architectureDirectory, `${productName}.app`),
+    dmgPath: path.join(resolvedReleaseDirectory, dmgName),
+    productName,
+    version: packageJson.version,
+  };
+}
+
+function normalizeRelativePath(value) {
+  return value.split(path.sep).join("/");
+}
+
+async function listFiles(root, predicate = () => true) {
+  const output = [];
+  async function visit(directory, relativeDirectory = "") {
+    const entries = await readdir(directory, { withFileTypes: true });
+    entries.sort((left, right) => left.name.localeCompare(right.name));
+    for (const entry of entries) {
+      const relativePath = relativeDirectory
+        ? path.join(relativeDirectory, entry.name)
+        : entry.name;
+      const absolutePath = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        await visit(absolutePath, relativePath);
+      } else if (entry.isFile() && predicate(relativePath)) {
+        output.push(normalizeRelativePath(relativePath));
+      }
+    }
+  }
+  await visit(root);
+  return output;
+}
+
+function sha256(buffer) {
+  return createHash("sha256").update(buffer).digest("hex");
+}
+
+export function assertNoRetiredEditorArtifacts(contents, label = "runtime artifact") {
+  const text = Buffer.isBuffer(contents) ? contents.toString("utf8") : String(contents);
+  for (const artifact of RETIRED_EDITOR_ARTIFACTS) {
+    assert.doesNotMatch(
+      text,
+      artifact.pattern,
+      `${label} still contains retired ${artifact.name} code`,
+    );
+  }
+}
+
+function isRuntimeTextArtifact(relativePath) {
+  return RUNTIME_TEXT_EXTENSIONS.has(path.extname(relativePath).toLowerCase());
+}
+
+async function assertSourceDependencyClosureIsClean(productRoot, packageJson) {
+  const [manifestText, lockText] = await Promise.all([
+    readFile(path.join(productRoot, "package.json"), "utf8"),
+    readFile(path.join(productRoot, "package-lock.json"), "utf8"),
+  ]);
+  const sourceManifest = JSON.parse(manifestText);
+  assert.equal(sourceManifest.name, packageJson.name, "source package name drifted");
+  assert.equal(sourceManifest.version, packageJson.version, "source package version drifted");
+  assertNoRetiredEditorArtifacts(manifestText, "source package.json");
+  assertNoRetiredEditorArtifacts(lockText, "source package-lock.json");
+}
+
+async function assertFilesEqual(sourcePath, packagedPath, label) {
+  const [source, packaged] = await Promise.all([
+    readFile(sourcePath),
+    readFile(packagedPath),
+  ]);
+  assert.equal(
+    sha256(packaged),
+    sha256(source),
+    `${label} does not match source: ${packagedPath}`,
+  );
+}
+
+function asarFilePaths(asarPath) {
+  return listPackage(asarPath)
+    .map((entry) => entry.replace(/^\//, ""))
+    .filter((entry) => !statFile(asarPath, entry, false).files)
+    .sort();
+}
+
+function decodeXml(value) {
+  return value
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">")
+    .replaceAll("&quot;", '"')
+    .replaceAll("&apos;", "'")
+    .replaceAll("&amp;", "&");
+}
+
+async function readPlistString(infoPlistPath, key) {
+  const xml = await readFile(infoPlistPath, "utf8");
+  const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = xml.match(
+    new RegExp(`<key>\\s*${escapedKey}\\s*</key>\\s*<string>([\\s\\S]*?)</string>`),
+  );
+  assert.ok(match, `${key} is missing from ${infoPlistPath}`);
+  return decodeXml(match[1].trim());
+}
+
+async function assertDirectoryMatches({ sourceRoot, packagedRoot, predicate, label }) {
+  const [sourceFiles, packagedFiles] = await Promise.all([
+    listFiles(sourceRoot, predicate),
+    listFiles(packagedRoot, predicate),
+  ]);
+  assert.deepEqual(packagedFiles, sourceFiles, `${label} file list does not match source`);
+  for (const relativePath of sourceFiles) {
+    await assertFilesEqual(
+      path.join(sourceRoot, relativePath),
+      path.join(packagedRoot, relativePath),
+      `${label}/${relativePath}`,
+    );
+  }
+  return sourceFiles;
+}
+
+async function assertSchemaBundleMatches({
+  productRoot,
+  resourcesPath,
+  packageJson,
+}) {
+  const schemaResource = packageJson.build?.extraResources?.find(
+    (entry) => entry?.to === "schemas",
+  );
+  const expectedFiles = [...(schemaResource?.filter ?? [])].sort();
+  assert.ok(expectedFiles.length > 0, "the active Schema allowlist is empty");
+  assert.ok(
+    expectedFiles.every((fileName) => /^[a-z0-9.-]+\.schema\.json$/.test(fileName)),
+    "the active Schema allowlist must contain explicit schema filenames",
+  );
+  const packagedRoot = path.join(resourcesPath, "schemas");
+  const packagedFiles = await listFiles(packagedRoot);
+  assert.deepEqual(
+    packagedFiles,
+    expectedFiles,
+    "packaged schemas must exactly match the active clean-workspace allowlist",
+  );
+  for (const fileName of expectedFiles) {
+    await assertFilesEqual(
+      path.resolve(productRoot, "schemas", fileName),
+      path.join(packagedRoot, fileName),
+      `schemas/${fileName}`,
+    );
+  }
+  return packagedFiles;
+}
+
+function commandExists(commandPath) {
+  return existsSync(commandPath);
+}
+
+function runCommand(command, arguments_, label, options = {}) {
+  const result = spawnSync(command, arguments_, {
+    encoding: "utf8",
+    env: options.env,
+    maxBuffer: 16 * 1024 * 1024,
+  });
+  if (result.error) throw result.error;
+  assert.equal(
+    result.status,
+    0,
+    `${label} failed\n${result.stdout ?? ""}${result.stderr ?? ""}`,
+  );
+  return `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
+}
+
+export async function verifyAppBundle({
+  productRoot = DEFAULT_PRODUCT_ROOT,
+  appPath,
+  packageJson,
+  verifySignature = true,
+  expectedProvenance,
+}) {
+  const resourcesPath = path.join(appPath, "Contents", "Resources");
+  const infoPlistPath = path.join(appPath, "Contents", "Info.plist");
+  const asarPath = path.join(resourcesPath, "app.asar");
+  await Promise.all([
+    access(appPath),
+    access(infoPlistPath),
+    access(asarPath),
+    assertSourceDependencyClosureIsClean(productRoot, packageJson),
+  ]);
+
+  const [shortVersion, bundleVersion, bundleIdentifier] = await Promise.all([
+    readPlistString(infoPlistPath, "CFBundleShortVersionString"),
+    readPlistString(infoPlistPath, "CFBundleVersion"),
+    readPlistString(infoPlistPath, "CFBundleIdentifier"),
+  ]);
+  assert.equal(shortVersion, packageJson.version, "CFBundleShortVersionString is stale");
+  assert.equal(bundleVersion, packageJson.version, "CFBundleVersion is stale");
+  assert.equal(bundleIdentifier, packageJson.build.appId, "CFBundleIdentifier is incorrect");
+
+  const expectedAsarFiles = ["package.json", ...REQUIRED_APP_SOURCE_FILES];
+  const rendererSourceRoot = path.join(productRoot, "dist-desktop");
+  const rendererFiles = await listFiles(rendererSourceRoot);
+  expectedAsarFiles.push(...rendererFiles.map((entry) => `dist-desktop/${entry}`));
+  expectedAsarFiles.sort();
+  const packagedAsarFiles = asarFilePaths(asarPath);
+  for (const relativePath of packagedAsarFiles) {
+    assertNoRetiredEditorArtifacts(relativePath, "app.asar path list");
+  }
+  assert.deepEqual(
+    packagedAsarFiles,
+    expectedAsarFiles,
+    "app.asar contains missing, stale, or unexpected runtime files",
+  );
+
+  for (const relativePath of REQUIRED_APP_SOURCE_FILES) {
+    const source = await readFile(path.join(productRoot, relativePath));
+    const packaged = extractFile(asarPath, relativePath);
+    assertNoRetiredEditorArtifacts(source, `source ${relativePath}`);
+    assertNoRetiredEditorArtifacts(packaged, `app.asar ${relativePath}`);
+    assert.equal(
+      sha256(packaged),
+      sha256(source),
+      `${relativePath} in app.asar does not match source`,
+    );
+  }
+  for (const relativePath of rendererFiles) {
+    const source = await readFile(path.join(rendererSourceRoot, relativePath));
+    const packaged = extractFile(asarPath, `dist-desktop/${relativePath}`);
+    if (isRuntimeTextArtifact(relativePath)) {
+      assertNoRetiredEditorArtifacts(source, `renderer ${relativePath}`);
+      assertNoRetiredEditorArtifacts(packaged, `app.asar renderer ${relativePath}`);
+    }
+    assert.equal(
+      sha256(packaged),
+      sha256(source),
+      `dist-desktop/${relativePath} in app.asar does not match the latest renderer build`,
+    );
+  }
+  const packagedManifestText = extractFile(asarPath, "package.json").toString("utf8");
+  assertNoRetiredEditorArtifacts(packagedManifestText, "app.asar package.json");
+  const packagedManifest = JSON.parse(packagedManifestText);
+  assert.equal(packagedManifest.name, packageJson.name, "packaged package name is incorrect");
+  assert.equal(packagedManifest.version, packageJson.version, "packaged package version is stale");
+  assert.equal(packagedManifest.main, packageJson.main, "packaged main entry is incorrect");
+
+  const bridgePackagedRoot = path.join(resourcesPath, "bridge");
+  const packagedBridgeFiles = await listFiles(bridgePackagedRoot);
+  assert.deepEqual(
+    packagedBridgeFiles,
+    [...REQUIRED_BRIDGE_FILES].sort(),
+    "packaged Bridge resources are incomplete or contain stale files",
+  );
+  for (const fileName of REQUIRED_BRIDGE_FILES) {
+    const sourcePath = fileName === "product-contract.mjs"
+      ? path.join(productRoot, "desktop", fileName)
+      : path.join(productRoot, "scripts", fileName);
+    await assertFilesEqual(
+      sourcePath,
+      path.join(bridgePackagedRoot, fileName),
+      `bridge/${fileName}`,
+    );
+  }
+  for (const moduleName of REQUIRED_BRIDGE_MODULES) {
+    await assertDirectoryMatches({
+      sourceRoot: path.join(productRoot, "node_modules", moduleName),
+      packagedRoot: path.join(resourcesPath, "node_modules", moduleName),
+      label: `node_modules/${moduleName}`,
+    });
+  }
+
+  const helperExecutable = path.join(
+    appPath,
+    "Contents",
+    "Frameworks",
+    `${packageJson.build.productName} Helper.app`,
+    "Contents",
+    "MacOS",
+    `${packageJson.build.productName} Helper`,
+  );
+  if (await existsSync(helperExecutable)) {
+    const lifecycleCoreUrl = pathToFileURL(
+      path.join(resourcesPath, "bridge", "lifecycle-core.mjs"),
+    ).href;
+    const scopeValidatorUrl = pathToFileURL(
+      path.join(resourcesPath, "bridge", "scope-validator.mjs"),
+    ).href;
+    runCommand(
+      helperExecutable,
+      [
+        "--input-type=module",
+        "--eval",
+        `await import(${JSON.stringify(lifecycleCoreUrl)}); await import(${JSON.stringify(scopeValidatorUrl)})`,
+      ],
+      "packaged Bridge dependency smoke",
+      {
+        env: {
+          ...process.env,
+          ELECTRON_RUN_AS_NODE: "1",
+        },
+      },
+    );
+  } else if (verifySignature && process.platform === "darwin") {
+    assert.fail(`packaged Electron Helper is missing: ${helperExecutable}`);
+  }
+
+  const schemas = await assertSchemaBundleMatches({
+    productRoot,
+    resourcesPath,
+    packageJson,
+  });
+  assert.ok(schemas.length > 0, "no schemas were packaged");
+  const provenance = assertBuildInfo(
+    JSON.parse(await readFile(path.join(resourcesPath, "build-info.json"), "utf8")),
+    {
+      schemaVersion: 1,
+      name: packageJson.name,
+      version: packageJson.version,
+      ...(expectedProvenance || {}),
+    },
+  );
+  for (const fileName of REQUIRED_LEGAL_RESOURCES) {
+    await assertFilesEqual(
+      path.join(productRoot, fileName),
+      path.join(resourcesPath, fileName),
+      fileName,
+    );
+  }
+
+  if (
+    verifySignature
+    && process.platform === "darwin"
+    && commandExists("/usr/bin/codesign")
+  ) {
+    runCommand(
+      "/usr/bin/codesign",
+      ["--verify", "--deep", "--strict", "--verbose=2", appPath],
+      "codesign verification",
+    );
+  }
+
+  return {
+    appPath,
+    version: shortVersion,
+    asarFileCount: expectedAsarFiles.length,
+    schemaFileCount: schemas.length,
+    legalResourceCount: REQUIRED_LEGAL_RESOURCES.length,
+    provenance,
+  };
+}
+
+async function verifyDmg({
+  dmgPath,
+  productName,
+  productRoot,
+  packageJson,
+  expectedProvenance,
+}) {
+  const dmgInfo = await stat(dmgPath);
+  assert.ok(dmgInfo.isFile(), `DMG is not a file: ${dmgPath}`);
+  assert.ok(dmgInfo.size > 1_000_000, `DMG is unexpectedly small: ${dmgPath}`);
+
+  if (process.platform !== "darwin" || !commandExists("/usr/bin/hdiutil")) {
+    return { mounted: false, reason: "hdiutil is unavailable on this platform" };
+  }
+
+  runCommand("/usr/bin/hdiutil", ["verify", dmgPath], "DMG verification");
+  const mountPoint = await mkdtemp(path.join(os.tmpdir(), "html-ai-workbench-dmg-"));
+  let mounted = false;
+  try {
+    runCommand(
+      "/usr/bin/hdiutil",
+      ["attach", "-readonly", "-nobrowse", "-mountpoint", mountPoint, dmgPath],
+      "DMG mount",
+    );
+    mounted = true;
+    const mountedAppPath = path.join(mountPoint, `${productName}.app`);
+    await verifyAppBundle({
+      productRoot,
+      appPath: mountedAppPath,
+      packageJson,
+      verifySignature: true,
+      expectedProvenance,
+    });
+    return { mounted: true, mountedAppPath };
+  } finally {
+    if (mounted) {
+      runCommand("/usr/bin/hdiutil", ["detach", mountPoint], "DMG detach");
+    }
+    await rm(mountPoint, { recursive: true, force: true });
+  }
+}
+
+export async function verifyPackagedArtifact({
+  productRoot = DEFAULT_PRODUCT_ROOT,
+  arch = "arm64",
+  releaseDirectory,
+} = {}) {
+  const packageJson = JSON.parse(
+    await readFile(path.join(productRoot, "package.json"), "utf8"),
+  );
+  const layout = expectedArtifactLayout({
+    productRoot,
+    packageJson,
+    arch,
+    releaseDirectory,
+  });
+  const provenance = await expectedBuildInfo({
+    productRoot,
+    architecture: arch,
+    requireClean: true,
+  });
+  const [app, dmg] = await Promise.all([
+    verifyAppBundle({
+      productRoot,
+      appPath: layout.appPath,
+      packageJson,
+      verifySignature: true,
+      expectedProvenance: provenance,
+    }),
+    verifyDmg({
+      dmgPath: layout.dmgPath,
+      productName: layout.productName,
+      productRoot,
+      packageJson,
+      expectedProvenance: provenance,
+    }),
+  ]);
+  return { ...layout, app, dmg };
+}
+
+async function main() {
+  const options = parseArguments(process.argv.slice(2));
+  const result = await verifyPackagedArtifact({
+    arch: options.arch,
+    releaseDirectory: options.releaseDirectory,
+  });
+  console.log(`Packaged artifact verified: ${result.dmgPath}`);
+  console.log(
+    `App ${result.version}: ${result.app.asarFileCount} app.asar files, ${result.app.schemaFileCount} schemas`,
+  );
+  if (!result.dmg.mounted) console.log(`DMG mount skipped: ${result.dmg.reason}`);
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === SCRIPT_PATH) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? error.stack : error);
+    process.exitCode = 1;
+  });
+}

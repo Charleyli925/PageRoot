@@ -1,0 +1,27 @@
+{
+  "schemaVersion": "1.0.0",
+  "status": "external-source-kept",
+  "projectId": "project_metrics",
+  "documentId": "doc_dashboard",
+  "requestId": "req_external_kept",
+  "attemptId": "attempt_001",
+  "previousVersionId": "ver_0008",
+  "basedOnVersionId": "ver_0005",
+  "candidateVersionId": "ver_0009",
+  "candidateVersionOrdinal": 9,
+  "candidateVersionLabel": "V9",
+  "baseSnapshotSha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "annotationArchive": {
+    "requestRelativePath": "requests/req_external_kept/input/annotations/records.json",
+    "attemptRelativePath": "requests/req_external_kept/attempts/attempt_001/annotations.json",
+    "sha256": "sha256:1919191919191919191919191919191919191919191919191919191919191919",
+    "commentCount": 1,
+    "editEventCount": 1
+  },
+  "transactionId": "txn_external_kept",
+  "completionRelativePath": "requests/req_external_kept/attempts/attempt_001/completion.json",
+  "completionSha256": "sha256:2020202020202020202020202020202020202020202020202020202020202020",
+  "candidateOutputSha256": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "externalSourceSha256": "sha256:1313131313131313131313131313131313131313131313131313131313131313",
+  "resolvedAt": "2026-07-17T09:30:00Z"
+}

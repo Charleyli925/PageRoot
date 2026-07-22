@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://html-change.local/schemas/project-state.v3.schema.json",
+  "title": "HTML AI project state v3",
+  "description": "Durable project identity and source-lineage cache. Active runs and locks are deliberately excluded and belong only to runtime-state.json.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "projectId",
+    "documentId",
+    "name",
+    "sourcePath",
+    "latestVersionId",
+    "currentBasedOnVersionId",
+    "currentExactVersionId",
+    "currentHtmlSha256",
+    "lastModifiedAt"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "3.0.0"
+    },
+    "projectId": {
+      "$ref": "#/$defs/projectId"
+    },
+    "documentId": {
+      "$ref": "#/$defs/documentId"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 300
+    },
+    "sourcePath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "latestVersionId": {
+      "$ref": "#/$defs/versionId"
+    },
+    "currentBasedOnVersionId": {
+      "$ref": "#/$defs/versionId"
+    },
+    "currentExactVersionId": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/versionId"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "restoredFromVersionId": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/versionId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Persistent audit marker for the history Version last restored into the editable source. It is cleared after a successful AI Version commit."
+    },
+    "currentHtmlSha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "lastModifiedAt": {
+      "$ref": "#/$defs/timestamp"
+    }
+  },
+  "$defs": {
+    "projectId": {
+      "type": "string",
+      "pattern": "^project_[A-Za-z0-9_-]+$"
+    },
+    "documentId": {
+      "type": "string",
+      "pattern": "^doc_[A-Za-z0-9_-]+$"
+    },
+    "versionId": {
+      "type": "string",
+      "pattern": "^ver_[0-9]{4,}$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    }
+  }
+}

@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <title>选区字体布局回归</title>
+    <style>
+      body {
+        display: grid;
+        gap: 24px;
+        padding: 40px;
+        font: 28px/1.4 -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+      }
+      .row {
+        display: flex;
+        gap: 24px;
+        align-items: center;
+      }
+      .control {
+        min-height: 56px;
+        padding: 10px 18px;
+        border: 2px solid #654ff0;
+        border-radius: 14px;
+        background: white;
+        color: #202124;
+      }
+      .flex-gap {
+        display: inline-flex;
+        gap: 14px;
+      }
+      .grid-gap {
+        display: inline-grid;
+        grid-auto-flow: column;
+        gap: 14px;
+      }
+      .normal-inline {
+        display: inline;
+      }
+      .dynamic-risk,
+      .dynamic-safe,
+      .inactive-media-risk {
+        display: inline-flex;
+        gap: 14px;
+      }
+      .dynamic-risk:hover > span {
+        transform: translateY(2px);
+      }
+      .dynamic-risk:focus-within > span {
+        width: 100%;
+      }
+      .dynamic-safe:hover > span {
+        box-sizing: border-box;
+      }
+      .descendant-risk > span > span {
+        margin-left: 20px;
+      }
+      .root-has-risk:has(> span) {
+        padding: 20px;
+      }
+      a:hover > svg {
+        transform: scale(1.05);
+      }
+      @media (min-width: 9999px) {
+        .inactive-media-risk > span {
+          width: 100%;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <h1>选区字体布局回归</h1>
+    <div class="row">
+      <button class="control flex-gap" id="flex-case">打开原生对话框</button>
+      <button class="control grid-gap" id="grid-case">查看测试提示</button>
+    </div>
+    <p class="control normal-inline" id="inline-case">普通行内文字保持连续</p>
+    <p class="control" id="mixed-case">混合 <strong>强调文字</strong> 仍保持连续</p>
+    <button class="control dynamic-risk" id="dynamic-risk-case">动态伪类必须阻止</button>
+    <button class="control dynamic-safe" id="dynamic-safe-case">仅安全属性可继续</button>
+    <button class="control inactive-media-risk" id="inactive-media-risk-case">非当前媒体也要阻止</button>
+    <button class="control flex-gap descendant-risk" id="descendant-risk-case"><span>旧后代不得新命中</span></button>
+    <button class="control flex-gap root-has-risk" id="root-has-risk-case">根节点不得新命中</button>
+  </body>
+</html>

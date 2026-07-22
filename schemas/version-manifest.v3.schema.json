@@ -1,0 +1,342 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://html-change.local/schemas/version-manifest.v3.schema.json",
+  "title": "HTML AI immutable version manifest v3",
+  "description": "A committed, immutable HTML milestone. New records are either an initial V1 baseline or a validated internal-AI result; local edits and history restores are never Version records.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/initialVersion"
+    },
+    {
+      "$ref": "#/$defs/internalAiVersion"
+    }
+  ],
+  "$defs": {
+    "initialVersion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "projectId",
+        "documentId",
+        "versionId",
+        "versionOrdinal",
+        "versionLabel",
+        "sourceType",
+        "contentSha256",
+        "contentComparisonSha256",
+        "canonicalizationVersion",
+        "generatedAt",
+        "summary",
+        "files"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": "3.0.0"
+        },
+        "projectId": {
+          "$ref": "#/$defs/projectId"
+        },
+        "documentId": {
+          "$ref": "#/$defs/documentId"
+        },
+        "versionId": {
+          "const": "ver_0001"
+        },
+        "versionOrdinal": {
+          "const": 1
+        },
+        "versionLabel": {
+          "const": "V1"
+        },
+        "sourceType": {
+          "const": "initial"
+        },
+        "contentSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "contentComparisonSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "canonicalizationVersion": {
+          "$ref": "#/$defs/canonicalizationVersion"
+        },
+        "generatedAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "summary": {
+          "$ref": "#/$defs/summary"
+        },
+        "files": {
+          "$ref": "#/$defs/files"
+        }
+      }
+    },
+    "internalAiVersion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "projectId",
+        "documentId",
+        "versionId",
+        "versionOrdinal",
+        "versionLabel",
+        "sourceType",
+        "previousVersionId",
+        "basedOnVersionId",
+        "requestId",
+        "attemptId",
+        "baseSnapshotSha256",
+        "inputManifestSha256",
+        "contentSha256",
+        "baseComparisonSha256",
+        "contentComparisonSha256",
+        "canonicalizationVersion",
+        "generatedAt",
+        "summary",
+        "completionRelativePath",
+        "outcomeRelativePath",
+        "annotationArchive",
+        "files"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": "3.0.0"
+        },
+        "projectId": {
+          "$ref": "#/$defs/projectId"
+        },
+        "documentId": {
+          "$ref": "#/$defs/documentId"
+        },
+        "versionId": {
+          "$ref": "#/$defs/versionId"
+        },
+        "versionOrdinal": {
+          "$ref": "#/$defs/versionOrdinal"
+        },
+        "versionLabel": {
+          "$ref": "#/$defs/versionLabel"
+        },
+        "sourceType": {
+          "const": "internal-ai"
+        },
+        "previousVersionId": {
+          "$ref": "#/$defs/versionId"
+        },
+        "basedOnVersionId": {
+          "$ref": "#/$defs/versionId"
+        },
+        "requestId": {
+          "$ref": "#/$defs/requestId"
+        },
+        "attemptId": {
+          "$ref": "#/$defs/attemptId"
+        },
+        "baseSnapshotSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "inputManifestSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "contentSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "baseComparisonSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "contentComparisonSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "canonicalizationVersion": {
+          "$ref": "#/$defs/canonicalizationVersion"
+        },
+        "generatedAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "summary": {
+          "$ref": "#/$defs/summary"
+        },
+        "completionRelativePath": {
+          "type": "string",
+          "pattern": "^requests/req_[A-Za-z0-9_-]+/attempts/attempt_[0-9]{3}/completion\\.json$"
+        },
+        "outcomeRelativePath": {
+          "type": "string",
+          "pattern": "^requests/req_[A-Za-z0-9_-]+/attempts/attempt_[0-9]{3}/outcome\\.json$"
+        },
+        "annotationArchive": {
+          "$ref": "#/$defs/annotationArchive"
+        },
+        "files": {
+          "$ref": "#/$defs/files"
+        }
+      }
+    },
+    "annotationArchive": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "versionRelativePath",
+        "requestRelativePath",
+        "attemptRelativePath",
+        "sha256",
+        "commentCount",
+        "editEventCount"
+      ],
+      "properties": {
+        "versionRelativePath": {
+          "const": "annotations/records.json"
+        },
+        "requestRelativePath": {
+          "type": "string",
+          "pattern": "^requests/req_[A-Za-z0-9_-]+/input/annotations/records\\.json$"
+        },
+        "attemptRelativePath": {
+          "type": "string",
+          "pattern": "^requests/req_[A-Za-z0-9_-]+/attempts/attempt_[0-9]{3}/annotations\\.json$"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "commentCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "editEventCount": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "files": {
+      "type": "array",
+      "minItems": 1,
+      "contains": {
+        "type": "object",
+        "required": [
+          "role"
+        ],
+        "properties": {
+          "role": {
+            "const": "entry-html"
+          }
+        }
+      },
+      "minContains": 1,
+      "maxContains": 1,
+      "items": {
+        "$ref": "#/$defs/file"
+      }
+    },
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "role",
+        "mediaType",
+        "byteLength",
+        "sha256"
+      ],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "role": {
+          "enum": [
+            "entry-html",
+            "asset"
+          ]
+        },
+        "mediaType": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "byteLength": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "role": {
+                "const": "entry-html"
+              }
+            },
+            "required": [
+              "role"
+            ]
+          },
+          "then": {
+            "properties": {
+              "path": {
+                "const": "files/index.html"
+              },
+              "mediaType": {
+                "const": "text/html"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "projectId": {
+      "type": "string",
+      "pattern": "^project_[A-Za-z0-9_-]+$"
+    },
+    "documentId": {
+      "type": "string",
+      "pattern": "^doc_[A-Za-z0-9_-]+$"
+    },
+    "versionId": {
+      "type": "string",
+      "pattern": "^ver_[0-9]{4,}$"
+    },
+    "versionOrdinal": {
+      "type": "integer",
+      "minimum": 2
+    },
+    "versionLabel": {
+      "type": "string",
+      "pattern": "^V[1-9][0-9]*$"
+    },
+    "requestId": {
+      "type": "string",
+      "pattern": "^req_[A-Za-z0-9_-]+$"
+    },
+    "attemptId": {
+      "type": "string",
+      "pattern": "^attempt_[0-9]{3}$"
+    },
+    "canonicalizationVersion": {
+      "const": "1"
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 5000
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*\\\\)(?!.*//)(?!\\.\\.?$)(?!\\.\\.?/)(?!.*\\/\\.\\.?\\/)(?!.*\\/\\.\\.?$)[^\\u0000\\r\\n]+$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    }
+  }
+}

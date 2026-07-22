@@ -1,0 +1,25 @@
+<!doctype html>
+<!-- byte oracle: every byte outside the editable target must remain exact -->
+<html lang='zh-CN' data-z="last" data-a='first'>
+<head>
+  <meta charset='utf-8'>
+  <title>Source byte fidelity fixture</title>
+  <style>
+    body { font-family: "PingFang SC", sans-serif; }
+    .target { color: rgb(23, 33, 30); }
+  </style>
+</head>
+<body>
+  <main id='main' data-dupe="first" data-dupe='second'>
+    <!-- preserve this comment, quote style, entity spelling, and whitespace -->
+    <p class='target' data-native-case="source-fidelity" data-native-mode='native-editable'><span title='single-quoted' data-order-b="2" data-order-a='1'>SOURCE_FIDELITY_TOKEN_001</span></p>
+    <p title="entity spellings">&copy; &#169; &#xA9; &amp; &nbsp;</p>
+    <template id='kept-template'>
+      <section data-template="untouched">Template bytes stay untouched.</section>
+    </template>
+    <script type='application/json'>{"not":"serialized", "spacing" : true}</script>
+    <pre>first line
+    indented line	with tab</pre>
+  </main>
+</body>
+</html>

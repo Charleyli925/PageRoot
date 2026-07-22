@@ -1,0 +1,1201 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://html-change.local/schemas/runtime-state.v3.schema.json",
+  "title": "HTML AI per-project runtime state v3",
+  "description": "The sole durable authority for one project's lifecycle state, lock, active run, autosave recovery, frozen comments, conflict and transaction recovery.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "projectId",
+    "documentId",
+    "updatedAt",
+    "lifecycleState",
+    "projectLocked",
+    "editRevision",
+    "lastPersistedRevision",
+    "freezeCutoffRevision",
+    "autosave",
+    "pendingWrite",
+    "pendingSubmission",
+    "view",
+    "draft",
+    "activeRun",
+    "activeTransaction"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "3.0.0"
+    },
+    "projectId": {
+      "$ref": "#/$defs/projectId"
+    },
+    "documentId": {
+      "$ref": "#/$defs/documentId"
+    },
+    "updatedAt": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "lifecycleState": {
+      "enum": [
+        "editing",
+        "submitting",
+        "processing",
+        "validating",
+        "committing",
+        "ready-to-open",
+        "ready",
+        "awaiting-conflict-resolution",
+        "recovering-transaction"
+      ]
+    },
+    "projectLocked": {
+      "type": "boolean"
+    },
+    "editRevision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "lastPersistedRevision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "freezeCutoffRevision": {
+      "oneOf": [
+        {
+          "type": "integer",
+          "minimum": 0
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "autosave": {
+      "$ref": "#/$defs/autosave"
+    },
+    "pendingWrite": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/pendingWrite"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "pendingSubmission": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/pendingSubmission"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "view": {
+      "$ref": "#/$defs/view"
+    },
+    "draft": {
+      "$ref": "#/$defs/draft"
+    },
+    "activeRun": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/activeRun"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "activeTransaction": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/activeTransaction"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "conflict": {
+      "$ref": "#/$defs/conflict"
+    },
+    "recovery": {
+      "$ref": "#/$defs/recovery"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "lifecycleState": {
+            "enum": [
+              "submitting",
+              "processing",
+              "validating",
+              "committing",
+              "ready-to-open",
+              "ready",
+              "awaiting-conflict-resolution",
+              "recovering-transaction"
+            ]
+          }
+        },
+        "required": [
+          "lifecycleState"
+        ]
+      },
+      "then": {
+        "properties": {
+          "view": {
+            "type": "object",
+            "properties": {
+              "viewMode": {
+                "const": "current"
+              },
+              "viewingVersionId": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "lifecycleState": {
+            "enum": [
+              "processing",
+              "validating",
+              "committing",
+              "ready-to-open",
+              "recovering-transaction"
+            ]
+          }
+        },
+        "required": [
+          "lifecycleState"
+        ]
+      },
+      "then": {
+        "properties": {
+          "activeRun": {
+            "allOf": [
+              {
+                "$ref": "#/$defs/activeRun"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "inputManifestSha256"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "lifecycleState": {
+            "enum": [
+              "editing",
+              "ready"
+            ]
+          }
+        },
+        "required": [
+          "lifecycleState"
+        ]
+      },
+      "then": {
+        "properties": {
+          "projectLocked": {
+            "const": false
+          },
+          "activeRun": {
+            "type": "null"
+          },
+          "pendingSubmission": {
+            "type": "null"
+          },
+          "activeTransaction": {
+            "type": "null"
+          },
+          "freezeCutoffRevision": {
+            "type": "null"
+          }
+        },
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "conflict"
+              ]
+            },
+            {
+              "required": [
+                "recovery"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "lifecycleState": {
+            "enum": [
+              "processing",
+              "validating",
+              "committing",
+              "ready-to-open"
+            ]
+          }
+        },
+        "required": [
+          "lifecycleState"
+        ]
+      },
+      "then": {
+        "properties": {
+          "projectLocked": {
+            "const": true
+          },
+          "activeRun": {
+            "$ref": "#/$defs/activeRun"
+          },
+          "pendingSubmission": {
+            "type": "null"
+          },
+          "freezeCutoffRevision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "conflict"
+              ]
+            },
+            {
+              "required": [
+                "recovery"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "lifecycleState": {
+            "const": "submitting"
+          }
+        },
+        "required": [
+          "lifecycleState"
+        ]
+      },
+      "then": {
+        "properties": {
+          "projectLocked": {
+            "const": true
+          },
+          "activeRun": {
+            "type": "null"
+          },
+          "pendingSubmission": {
+            "$ref": "#/$defs/pendingSubmission"
+          },
+          "activeTransaction": {
+            "type": "null"
+          },
+          "freezeCutoffRevision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "pendingWrite": {
+            "type": "null"
+          }
+        },
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "conflict"
+              ]
+            },
+            {
+              "required": [
+                "recovery"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "lifecycleState": {
+            "enum": [
+              "processing",
+              "validating",
+              "ready-to-open"
+            ]
+          }
+        },
+        "required": [
+          "lifecycleState"
+        ]
+      },
+      "then": {
+        "properties": {
+          "activeTransaction": {
+            "type": "null"
+          },
+          "pendingWrite": {
+            "type": "null"
+          },
+          "autosave": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "const": "updated"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "lifecycleState": {
+            "const": "committing"
+          }
+        },
+        "required": [
+          "lifecycleState"
+        ]
+      },
+      "then": {
+        "properties": {
+          "activeTransaction": {
+            "$ref": "#/$defs/activeTransaction"
+          },
+          "pendingWrite": {
+            "type": "null"
+          },
+          "autosave": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "const": "updated"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "lifecycleState": {
+            "const": "awaiting-conflict-resolution"
+          }
+        },
+        "required": [
+          "lifecycleState"
+        ]
+      },
+      "then": {
+        "required": [
+          "conflict"
+        ],
+        "properties": {
+          "projectLocked": {
+            "const": true
+          },
+          "pendingSubmission": {
+            "type": "null"
+          }
+        },
+        "not": {
+          "required": [
+            "recovery"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "lifecycleState": {
+            "const": "awaiting-conflict-resolution"
+          },
+          "conflict": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "ai-source"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        },
+        "required": [
+          "lifecycleState",
+          "conflict"
+        ]
+      },
+      "then": {
+        "properties": {
+          "activeRun": {
+            "allOf": [
+              {
+                "$ref": "#/$defs/activeRun"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "inputManifestSha256"
+                ]
+              }
+            ]
+          },
+          "freezeCutoffRevision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "activeTransaction": {
+            "$ref": "#/$defs/activeTransaction"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "lifecycleState": {
+            "const": "awaiting-conflict-resolution"
+          },
+          "conflict": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "autosave-source"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        },
+        "required": [
+          "lifecycleState",
+          "conflict"
+        ]
+      },
+      "then": {
+        "properties": {
+          "activeRun": {
+            "type": "null"
+          },
+          "freezeCutoffRevision": {
+            "type": "null"
+          },
+          "activeTransaction": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "lifecycleState": {
+            "const": "recovering-transaction"
+          }
+        },
+        "required": [
+          "lifecycleState"
+        ]
+      },
+      "then": {
+        "required": [
+          "recovery"
+        ],
+        "properties": {
+          "projectLocked": {
+            "const": true
+          },
+          "activeRun": {
+            "$ref": "#/$defs/activeRun"
+          },
+          "pendingSubmission": {
+            "type": "null"
+          },
+          "activeTransaction": {
+            "$ref": "#/$defs/activeTransaction"
+          }
+        },
+        "not": {
+          "required": [
+            "conflict"
+          ]
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "autosave": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "expectedSourceSha256",
+        "recoveryLogRelativePath"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "updated",
+            "updating",
+            "error",
+            "external-conflict"
+          ]
+        },
+        "expectedSourceSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "lastPersistedAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "recoveryLogRelativePath": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "errorCode": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "errorMessage": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 5000
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "updated"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "required": [
+              "lastPersistedAt"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "errorCode"
+                  ]
+                },
+                {
+                  "required": [
+                    "errorMessage"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "error",
+                  "external-conflict"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "required": [
+              "errorCode",
+              "errorMessage"
+            ]
+          }
+        }
+      ]
+    },
+    "pendingWrite": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "revision",
+        "expectedSourceSha256",
+        "targetHtmlSha256",
+        "recoveryHtmlRelativePath",
+        "recoveryHtmlSha256",
+        "auditEvents",
+        "queuedAt"
+      ],
+      "properties": {
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "expectedSourceSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "targetHtmlSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "recoveryHtmlRelativePath": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "recoveryHtmlSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "auditEvents": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "eventId",
+              "editRevision",
+              "projectId",
+              "documentId",
+              "persistedAt"
+            ],
+            "properties": {
+              "eventId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 180
+              },
+              "editRevision": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "projectId": {
+                "$ref": "#/$defs/projectId"
+              },
+              "documentId": {
+                "$ref": "#/$defs/documentId"
+              },
+              "persistedAt": {
+                "$ref": "#/$defs/timestamp"
+              }
+            }
+          }
+        },
+        "queuedAt": {
+          "$ref": "#/$defs/timestamp"
+        }
+      }
+    },
+    "pendingSubmission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requestId",
+        "attemptId",
+        "basedOnVersionId",
+        "previousVersionId",
+        "candidateVersionId",
+        "candidateVersionOrdinal",
+        "candidateVersionLabel",
+        "baseSnapshotSha256",
+        "freezeCutoffRevision",
+        "lockedAt"
+      ],
+      "properties": {
+        "requestId": {
+          "$ref": "#/$defs/requestId"
+        },
+        "attemptId": {
+          "$ref": "#/$defs/attemptId"
+        },
+        "basedOnVersionId": {
+          "$ref": "#/$defs/versionId"
+        },
+        "previousVersionId": {
+          "$ref": "#/$defs/versionId"
+        },
+        "candidateVersionId": {
+          "$ref": "#/$defs/versionId"
+        },
+        "candidateVersionOrdinal": {
+          "type": "integer",
+          "minimum": 2
+        },
+        "candidateVersionLabel": {
+          "type": "string",
+          "pattern": "^V[1-9][0-9]*$"
+        },
+        "baseSnapshotSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "freezeCutoffRevision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "lockedAt": {
+          "$ref": "#/$defs/timestamp"
+        }
+      }
+    },
+    "view": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "viewMode",
+        "latestVersionId",
+        "currentBasedOnVersionId",
+        "currentExactVersionId",
+        "viewingVersionId",
+        "renderedContentSha256"
+      ],
+      "properties": {
+        "viewMode": {
+          "enum": [
+            "current",
+            "history"
+          ]
+        },
+        "latestVersionId": {
+          "$ref": "#/$defs/versionId"
+        },
+        "currentBasedOnVersionId": {
+          "$ref": "#/$defs/versionId"
+        },
+        "currentExactVersionId": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/versionId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "viewingVersionId": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/versionId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "renderedContentSha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "viewMode": {
+                "const": "current"
+              }
+            },
+            "required": [
+              "viewMode"
+            ]
+          },
+          "then": {
+            "properties": {
+              "viewingVersionId": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "viewMode": {
+                "const": "history"
+              }
+            },
+            "required": [
+              "viewMode"
+            ]
+          },
+          "then": {
+            "properties": {
+              "viewingVersionId": {
+                "$ref": "#/$defs/versionId"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "draft": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "annotationsRelativePath",
+        "annotationsSha256",
+        "commentIds",
+        "editEventIds",
+        "draftRevision",
+        "updatedAt"
+      ],
+      "properties": {
+        "annotationsRelativePath": {
+          "const": "draft/annotations.json"
+        },
+        "annotationsSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "commentIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^comment_[A-Za-z0-9_-]+$"
+          }
+        },
+        "editEventIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^edit_[A-Za-z0-9_-]+$"
+          }
+        },
+        "draftRevision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "updatedAt": {
+          "$ref": "#/$defs/timestamp"
+        }
+      }
+    },
+    "activeRun": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requestId",
+        "attemptId",
+        "basedOnVersionId",
+        "previousVersionId",
+        "candidateVersionId",
+        "candidateVersionOrdinal",
+        "candidateVersionLabel",
+        "baseSnapshotSha256",
+        "submittedAt",
+        "requestRelativePath",
+        "attemptRelativePath",
+        "outputRelativePath",
+        "completionRelativePath",
+        "frozenAnnotationsRelativePath",
+        "frozenAnnotationsSha256",
+        "frozenCommentIds",
+        "frozenEditEventIds"
+      ],
+      "properties": {
+        "requestId": {
+          "$ref": "#/$defs/requestId"
+        },
+        "attemptId": {
+          "$ref": "#/$defs/attemptId"
+        },
+        "basedOnVersionId": {
+          "$ref": "#/$defs/versionId"
+        },
+        "previousVersionId": {
+          "$ref": "#/$defs/versionId"
+        },
+        "candidateVersionId": {
+          "$ref": "#/$defs/versionId"
+        },
+        "candidateVersionOrdinal": {
+          "type": "integer",
+          "minimum": 2
+        },
+        "candidateVersionLabel": {
+          "type": "string",
+          "pattern": "^V[1-9][0-9]*$"
+        },
+        "baseSnapshotSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "submittedAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "requestRelativePath": {
+          "type": "string",
+          "pattern": "^requests/req_[A-Za-z0-9_-]+$"
+        },
+        "attemptRelativePath": {
+          "type": "string",
+          "pattern": "^requests/req_[A-Za-z0-9_-]+/attempts/attempt_[0-9]{3}$"
+        },
+        "outputRelativePath": {
+          "type": "string",
+          "pattern": "^requests/req_[A-Za-z0-9_-]+/attempts/attempt_[0-9]{3}/output/index\\.html$"
+        },
+        "completionRelativePath": {
+          "type": "string",
+          "pattern": "^requests/req_[A-Za-z0-9_-]+/attempts/attempt_[0-9]{3}/completion\\.json$"
+        },
+        "frozenAnnotationsRelativePath": {
+          "type": "string",
+          "pattern": "^requests/req_[A-Za-z0-9_-]+/input/annotations/records\\.json$"
+        },
+        "frozenAnnotationsSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "inputManifestSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "frozenCommentIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^comment_[A-Za-z0-9_-]+$"
+          }
+        },
+        "frozenEditEventIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^edit_[A-Za-z0-9_-]+$"
+          }
+        }
+      }
+    },
+    "conflict": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/autosaveConflict"
+        },
+        {
+          "$ref": "#/$defs/aiConflict"
+        }
+      ]
+    },
+    "autosaveConflict": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "conflictId",
+        "type",
+        "detectedAt",
+        "expectedSourceSha256",
+        "externalSourceSha256",
+        "candidateContentSha256",
+        "candidateRecoveryRelativePath",
+        "editRevision"
+      ],
+      "properties": {
+        "conflictId": {
+          "$ref": "#/$defs/conflictId"
+        },
+        "type": {
+          "const": "autosave-source"
+        },
+        "detectedAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "expectedSourceSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "externalSourceSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "candidateContentSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "candidateRecoveryRelativePath": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "editRevision": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "aiConflict": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "conflictId",
+        "type",
+        "transactionId",
+        "requestId",
+        "attemptId",
+        "candidateVersionId",
+        "detectedAt",
+        "expectedSourceSha256",
+        "externalSourceSha256",
+        "candidateOutputSha256",
+        "candidateRelativePath"
+      ],
+      "properties": {
+        "conflictId": {
+          "$ref": "#/$defs/conflictId"
+        },
+        "type": {
+          "const": "ai-source"
+        },
+        "transactionId": {
+          "$ref": "#/$defs/transactionId"
+        },
+        "requestId": {
+          "$ref": "#/$defs/requestId"
+        },
+        "attemptId": {
+          "$ref": "#/$defs/attemptId"
+        },
+        "candidateVersionId": {
+          "$ref": "#/$defs/versionId"
+        },
+        "detectedAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "expectedSourceSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "externalSourceSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "candidateOutputSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "candidateRelativePath": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "confirmedExternalSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "confirmedAt": {
+          "$ref": "#/$defs/timestamp"
+        }
+      },
+      "dependentRequired": {
+        "confirmedExternalSha256": [
+          "confirmedAt"
+        ],
+        "confirmedAt": [
+          "confirmedExternalSha256"
+        ]
+      }
+    },
+    "recovery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "transactionId",
+        "transactionRelativePath",
+        "enteredAt"
+      ],
+      "properties": {
+        "transactionId": {
+          "$ref": "#/$defs/transactionId"
+        },
+        "transactionRelativePath": {
+          "type": "string",
+          "pattern": "^transactions/txn_[A-Za-z0-9_-]+/transaction\\.json$"
+        },
+        "enteredAt": {
+          "$ref": "#/$defs/timestamp"
+        }
+      }
+    },
+    "activeTransaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "transactionId",
+        "transactionRelativePath"
+      ],
+      "properties": {
+        "transactionId": {
+          "$ref": "#/$defs/transactionId"
+        },
+        "transactionRelativePath": {
+          "type": "string",
+          "pattern": "^transactions/txn_[A-Za-z0-9_-]+/transaction\\.json$"
+        }
+      }
+    },
+    "projectId": {
+      "type": "string",
+      "pattern": "^project_[A-Za-z0-9_-]+$"
+    },
+    "documentId": {
+      "type": "string",
+      "pattern": "^doc_[A-Za-z0-9_-]+$"
+    },
+    "requestId": {
+      "type": "string",
+      "pattern": "^req_[A-Za-z0-9_-]+$"
+    },
+    "attemptId": {
+      "type": "string",
+      "pattern": "^attempt_[0-9]{3}$"
+    },
+    "versionId": {
+      "type": "string",
+      "pattern": "^ver_[0-9]{4,}$"
+    },
+    "transactionId": {
+      "type": "string",
+      "pattern": "^txn_[A-Za-z0-9_-]+$"
+    },
+    "conflictId": {
+      "type": "string",
+      "pattern": "^conflict_[A-Za-z0-9_-]+$"
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*\\\\)(?!.*//)(?!\\.\\.?$)(?!\\.\\.?/)(?!.*\\/\\.\\.?\\/)(?!.*\\/\\.\\.?$)[^\\u0000\\r\\n]+$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    }
+  }
+}

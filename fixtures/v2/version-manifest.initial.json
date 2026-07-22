@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "2.0.0",
+  "projectId": "project_metrics",
+  "documentId": "doc_dashboard",
+  "versionId": "ver_0001",
+  "versionOrdinal": 1,
+  "versionLabel": "V1",
+  "sourceType": "initial",
+  "contentSha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "contentComparisonSha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "canonicalizationVersion": "1",
+  "generatedAt": "2026-07-17T08:00:00Z",
+  "summary": "登记初始 HTML 基线",
+  "files": [
+    {
+      "path": "files/index.html",
+      "role": "entry-html",
+      "mediaType": "text/html",
+      "byteLength": 4821,
+      "sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  ]
+}

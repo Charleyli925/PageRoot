@@ -1,0 +1,583 @@
+import { createRequire } from "node:module";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
+import { expect, test } from "@playwright/test";
+import { _electron as electron } from "playwright";
+
+import {
+  activateNativeEdit,
+  caseSelector,
+  currentEditorFrame,
+  documentToken,
+  fixtureBuffer,
+  installInputRecorder,
+  keyShortcut,
+  loadFixture,
+  nativeEditingState,
+  productRoot,
+  recordedInputEvents,
+  replaceUniqueBytes,
+  setTextSelection,
+  withBomAndCrLf,
+} from "../browser/pageroot-driver.mjs";
+
+const require = createRequire(import.meta.url);
+const electronExecutable = require("electron");
+
+function seedActiveDiskProject(isolatedUserData, sourcePath) {
+  writeFileSync(
+    path.join(isolatedUserData, "html-projects.json"),
+    JSON.stringify({
+      version: 1,
+      activePath: sourcePath,
+      recent: [{
+        path: sourcePath,
+        name: path.basename(sourcePath),
+        lastOpenedAt: Date.now(),
+      }],
+    }),
+    "utf8",
+  );
+}
+
+async function launchPageRoot(options = {}) {
+  const isolatedUserData = options.isolatedUserData
+    || mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-"));
+  mkdirSync(isolatedUserData, { recursive: true });
+  if (options.activeSourcePath) {
+    seedActiveDiskProject(isolatedUserData, options.activeSourcePath);
+  }
+  const electronApp = await electron.launch({
+    executablePath: electronExecutable,
+    args: [path.join(productRoot, "desktop/main.mjs")],
+    cwd: productRoot,
+    env: {
+      ...process.env,
+      PAGEROOT_E2E: "1",
+      PAGEROOT_E2E_USER_DATA_DIR: isolatedUserData,
+      HTML_AI_WORKSPACE: path.join(isolatedUserData, "workspace"),
+    },
+  });
+  const page = await electronApp.firstWindow();
+  await page.waitForLoadState("domcontentloaded");
+  return { electronApp, page, isolatedUserData };
+}
+
+function removeValidatedTemporaryDirectory(directoryPath, namePrefix) {
+  const resolved = path.resolve(directoryPath);
+  if (
+    path.dirname(resolved) !== path.resolve(tmpdir())
+    || !path.basename(resolved).startsWith(namePrefix)
+  ) {
+    throw new Error(`Refusing to remove non-E2E temporary data: ${directoryPath}`);
+  }
+  rmSync(resolved, {
+    recursive: true,
+    force: true,
+    maxRetries: 10,
+    retryDelay: 100,
+  });
+}
+
+function removeIsolatedUserData(isolatedUserData) {
+  removeValidatedTemporaryDirectory(isolatedUserData, "pageroot-native-e2e-");
+}
+
+async function stopPageRoot(electronApp, isolatedUserData, { cleanup = true } = {}) {
+  const electronProcess = electronApp.process();
+  const applicationClosed = electronApp
+    .waitForEvent("close", { timeout: 5_000 })
+    .then(() => true)
+    .catch(() => false);
+  const waitForExit = (timeout) => new Promise((resolve) => {
+    if (electronProcess.exitCode !== null || electronProcess.signalCode !== null) {
+      resolve(true);
+      return;
+    }
+    let timer = null;
+    const onExit = () => {
+      if (timer) clearTimeout(timer);
+      resolve(true);
+    };
+    timer = setTimeout(() => {
+      electronProcess.off("exit", onExit);
+      resolve(false);
+    }, timeout);
+    electronProcess.once("exit", onExit);
+  });
+
+  const exitRequest = electronApp
+    .evaluate(({ app }) => app.exit(0))
+    .catch(() => {});
+  await Promise.race([
+    exitRequest,
+    new Promise((resolve) => setTimeout(resolve, 1_000)),
+  ]);
+  if (!await waitForExit(3_000)) {
+    electronProcess.kill("SIGKILL");
+    await waitForExit(3_000);
+  }
+  await applicationClosed;
+  if (cleanup) removeIsolatedUserData(isolatedUserData);
+}
+
+async function closePageRootGracefully(electronApp) {
+  const closed = electronApp.waitForEvent("close", { timeout: 15_000 });
+  await electronApp.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0]?.close();
+  });
+  await closed;
+}
+
+async function loadedDiskFrame(page, sourcePath, caseId) {
+  await expect.poll(
+    async () => (await page.evaluate(() => window.htmlAIProjects?.getActiveProject()))?.sourcePath,
+    { timeout: 15_000 },
+  ).toBe(sourcePath);
+  await expect(page.locator('[aria-label="正在读取项目状态"]'))
+    .toHaveCount(0, { timeout: 15_000 });
+  await expect(page.locator('[aria-label="项目读取失败"]')).toHaveCount(0);
+  const editor = page.getByTestId("html-canvas-editor").filter({ visible: true }).first();
+  await editor.waitFor({ state: "visible" });
+  const editorHandle = await editor.elementHandle();
+  await page.waitForFunction(
+    (element) => element?.getAttribute("data-render-verified") === "true",
+    editorHandle,
+  );
+  const iframe = editor.locator('iframe[title*="HTML"]');
+  const iframeHandle = await iframe.elementHandle();
+  const frame = await iframeHandle?.contentFrame();
+  if (!frame) throw new Error("PageRoot Electron canvas did not expose its edit frame.");
+  await frame.waitForFunction(
+    (selector) => Boolean(document.querySelector(selector)),
+    caseSelector(caseId),
+  );
+  return { editor, frame };
+}
+
+async function waitForFreshDiskFrame(page, previousDocumentToken, caseId) {
+  await expect.poll(async () => {
+    try {
+      return await documentToken(page);
+    } catch {
+      return previousDocumentToken;
+    }
+  }).not.toBe(previousDocumentToken);
+  const frame = await currentEditorFrame(page);
+  await frame.waitForFunction(
+    (selector) => Boolean(document.querySelector(selector)),
+    caseSelector(caseId),
+  );
+  await expect.poll(() => nativeEditingState(page, caseId)).toMatchObject({
+    targetIsActive: true,
+    contenteditable: "plaintext-only",
+    isContentEditable: true,
+    activeCase: caseId,
+    selectionInside: true,
+  });
+  return frame;
+}
+
+async function rememberCurrentNativeHost(page, caseId) {
+  const iframe = page
+    .getByTestId("html-canvas-editor")
+    .filter({ visible: true })
+    .first()
+    .locator('iframe[title*="HTML"]');
+  await iframe.evaluate((frameElement, selector) => {
+    window.__PAGEROOT_ELECTRON_RETIRED_NATIVE_HOST__ =
+      frameElement.contentDocument?.querySelector(selector) || null;
+  }, caseSelector(caseId));
+}
+
+async function retiredNativeHostState(page) {
+  return page.evaluate(() => {
+    const host = window.__PAGEROOT_ELECTRON_RETIRED_NATIVE_HOST__;
+    if (!host || host.nodeType !== 1) {
+      throw new Error("Electron History Fence lost the retired native host reference.");
+    }
+    const state = {
+      contenteditable: host.getAttribute("contenteditable"),
+      editingMarker: host.getAttribute("data-html-canvas-editing"),
+    };
+    delete window.__PAGEROOT_ELECTRON_RETIRED_NATIVE_HOST__;
+    return state;
+  });
+}
+
+async function expectCheckpointPersisted(page, afterRevision) {
+  const indicator = page.locator("[data-persist-state]").first();
+  await expect.poll(async () => indicator.evaluate((element, minimumRevision) => {
+    const editRevision = Number(element.getAttribute("data-edit-revision"));
+    const persistedRevision = Number(
+      element.getAttribute("data-persisted-revision"),
+    );
+    return {
+      idle: element.getAttribute("data-persist-state") === "idle",
+      synchronized:
+        Number.isSafeInteger(editRevision)
+        && editRevision > minimumRevision
+        && editRevision === persistedRevision,
+    };
+  }, afterRevision), { timeout: 15_000 }).toEqual({ idle: true, synchronized: true });
+  return Number(await indicator.getAttribute("data-persisted-revision"));
+}
+
+async function replayApplePinyinStyledWrapperCommit(frame, caseId) {
+  const target = frame.locator(caseSelector(caseId));
+  const originalText = await target.textContent();
+  const wordStart = originalText.indexOf("Word");
+  if (wordStart < 0) throw new Error("Apple Pinyin fixture word is missing.");
+  await setTextSelection(frame, caseId, wordStart, wordStart + 4);
+  await target.evaluate((element) => {
+    const dispatchCompositionInput = (data) => {
+      element.dispatchEvent(new InputEvent("beforeinput", {
+        bubbles: true,
+        cancelable: false,
+        data,
+        inputType: "insertCompositionText",
+        isComposing: true,
+      }));
+      element.dispatchEvent(new InputEvent("input", {
+        bubbles: true,
+        data,
+        inputType: "insertCompositionText",
+        isComposing: true,
+      }));
+    };
+    const authoredEm = element.querySelector("em");
+    if (!(authoredEm instanceof HTMLElement)) {
+      throw new Error("Authored em wrapper is missing.");
+    }
+    element.dispatchEvent(new CompositionEvent("compositionstart", {
+      bubbles: true,
+      data: "Word",
+    }));
+    authoredEm.textContent = "ni";
+    dispatchCompositionInput("ni");
+    const temporaryItalic = document.createElement("i");
+    temporaryItalic.textContent = "ni hao";
+    authoredEm.replaceWith(temporaryItalic);
+    dispatchCompositionInput("ni hao");
+    temporaryItalic.textContent = "你好";
+    dispatchCompositionInput("你好");
+    element.dispatchEvent(new CompositionEvent("compositionend", {
+      bubbles: true,
+      data: "你好",
+    }));
+  });
+}
+
+test("Electron uses the authored DOM caret, Selection and beforeinput", async () => {
+  const { electronApp, page, isolatedUserData } = await launchPageRoot();
+  try {
+    const { frame } = await loadFixture(page, "complex-layout.html");
+    const initialDocument = await documentToken(frame);
+    await activateNativeEdit(frame, "heading-inline");
+    expect(await nativeEditingState(frame, "heading-inline")).toMatchObject({
+      contenteditable: "plaintext-only",
+      isContentEditable: true,
+      activeIsLegacySurface: false,
+      legacySurfaceCount: 0,
+    });
+    await installInputRecorder(frame);
+    await setTextSelection(frame, "heading-inline", 3, 9);
+    await page.keyboard.insertText("Electron原位");
+
+    expect(await documentToken(frame)).toBe(initialDocument);
+    expect(await frame.locator(caseSelector("heading-inline")).textContent()).toContain("Electron原位");
+    const events = await recordedInputEvents(frame);
+    expect(events.some(({ type, inputType }) => type === "beforeinput" && inputType === "insertText")).toBe(true);
+    expect(events.some(({ type }) => type === "input")).toBe(true);
+  } finally {
+    await stopPageRoot(electronApp, isolatedUserData);
+  }
+});
+
+test("Electron autosaves one authorized disk patch and reopens the same undo-redo result", async () => {
+  test.setTimeout(90_000);
+  const sourceDirectory = mkdtempSync(path.join(tmpdir(), "pageroot-native-source-e2e-"));
+  const sourcePath = path.join(sourceDirectory, "native-source-fidelity.html");
+  const originalToken = "SOURCE_FIDELITY_TOKEN_001";
+  const replacement = "Electron磁盘原位_OK";
+  const original = withBomAndCrLf(fixtureBuffer("source-fidelity.html"));
+  const expected = replaceUniqueBytes(original, originalToken, replacement);
+  writeFileSync(sourcePath, original);
+
+  const isolatedUserData = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-"));
+  let firstApp = null;
+  let reopenedApp = null;
+  try {
+    const firstLaunch = await launchPageRoot({
+      isolatedUserData,
+      activeSourcePath: sourcePath,
+    });
+    firstApp = firstLaunch.electronApp;
+    let { frame } = await loadedDiskFrame(
+      firstLaunch.page,
+      sourcePath,
+      "source-fidelity",
+    );
+    expect(
+      readFileSync(sourcePath).equals(original),
+      "opening and registering a disk project must not rewrite its HTML",
+    ).toBe(true);
+    let persistedRevision = 0;
+
+    await activateNativeEdit(frame, "source-fidelity");
+    await setTextSelection(frame, "source-fidelity", 0, originalToken.length);
+    await firstLaunch.page.keyboard.insertText(replacement);
+    expect(await frame.locator(caseSelector("source-fidelity")).textContent()).toBe(replacement);
+    expect(await frame.evaluate(() => ({
+      lexical: document.querySelectorAll("[data-lexical-editor]").length,
+      mirror: document.querySelectorAll("[data-html-canvas-text-flow-surface]").length,
+      editableCases: Array.from(document.querySelectorAll("[contenteditable]")).map(
+        (element) => element.getAttribute("data-native-case"),
+      ),
+    }))).toEqual({
+      lexical: 0,
+      mirror: 0,
+      editableCases: ["source-fidelity"],
+    });
+    await rememberCurrentNativeHost(firstLaunch.page, "source-fidelity");
+    let previousDocumentToken = await documentToken(firstLaunch.page);
+    await firstLaunch.page.keyboard.press(keyShortcut("S"));
+    persistedRevision = await expectCheckpointPersisted(
+      firstLaunch.page,
+      persistedRevision,
+    );
+    expect(
+      readFileSync(sourcePath).equals(expected),
+      "checkpoint/autosave must write only the authorized bytes",
+    ).toBe(true);
+
+    frame = await waitForFreshDiskFrame(
+      firstLaunch.page,
+      previousDocumentToken,
+      "source-fidelity",
+    );
+    expect(await retiredNativeHostState(firstLaunch.page)).toEqual({
+      contenteditable: null,
+      editingMarker: null,
+    });
+
+    previousDocumentToken = await documentToken(firstLaunch.page);
+    await firstLaunch.page.keyboard.press(keyShortcut("Z"));
+    frame = await waitForFreshDiskFrame(
+      firstLaunch.page,
+      previousDocumentToken,
+      "source-fidelity",
+    );
+    await expect.poll(() => frame.locator(caseSelector("source-fidelity")).textContent())
+      .toBe(originalToken);
+    previousDocumentToken = await documentToken(firstLaunch.page);
+    await firstLaunch.page.keyboard.press(keyShortcut("S"));
+    persistedRevision = await expectCheckpointPersisted(
+      firstLaunch.page,
+      persistedRevision,
+    );
+    frame = await waitForFreshDiskFrame(
+      firstLaunch.page,
+      previousDocumentToken,
+      "source-fidelity",
+    );
+    expect(
+      readFileSync(sourcePath).equals(original),
+      "undo must restore the exact original disk bytes",
+    ).toBe(true);
+
+    previousDocumentToken = await documentToken(firstLaunch.page);
+    await firstLaunch.page.keyboard.press(
+      `${process.platform === "darwin" ? "Meta" : "Control"}+Shift+Z`,
+    );
+    frame = await waitForFreshDiskFrame(
+      firstLaunch.page,
+      previousDocumentToken,
+      "source-fidelity",
+    );
+    await expect.poll(() => frame.locator(caseSelector("source-fidelity")).textContent())
+      .toBe(replacement);
+    previousDocumentToken = await documentToken(firstLaunch.page);
+    await firstLaunch.page.keyboard.press(keyShortcut("S"));
+    await expectCheckpointPersisted(
+      firstLaunch.page,
+      persistedRevision,
+    );
+    frame = await waitForFreshDiskFrame(
+      firstLaunch.page,
+      previousDocumentToken,
+      "source-fidelity",
+    );
+    expect(
+      readFileSync(sourcePath).equals(expected),
+      "redo must replay the identical authorized bytes",
+    ).toBe(true);
+
+    await closePageRootGracefully(firstApp);
+    firstApp = null;
+
+    const reopened = await launchPageRoot({ isolatedUserData });
+    reopenedApp = reopened.electronApp;
+    const { frame: reopenedFrame } = await loadedDiskFrame(
+      reopened.page,
+      sourcePath,
+      "source-fidelity",
+    );
+    expect(await reopenedFrame.locator(caseSelector("source-fidelity")).textContent())
+      .toBe(replacement);
+    await activateNativeEdit(reopenedFrame, "source-fidelity");
+    expect(await nativeEditingState(reopenedFrame, "source-fidelity")).toMatchObject({
+      targetIsActive: true,
+      contenteditable: "plaintext-only",
+      activeIsLegacySurface: false,
+      legacySurfaceCount: 0,
+    });
+    expect(await reopenedFrame.locator("[data-lexical-editor]").count()).toBe(0);
+    expect(readFileSync(sourcePath).equals(expected)).toBe(true);
+
+    await closePageRootGracefully(reopenedApp);
+    reopenedApp = null;
+  } finally {
+    if (firstApp) await stopPageRoot(firstApp, isolatedUserData, { cleanup: false });
+    if (reopenedApp) await stopPageRoot(reopenedApp, isolatedUserData, { cleanup: false });
+    removeIsolatedUserData(isolatedUserData);
+    removeValidatedTemporaryDirectory(
+      sourceDirectory,
+      "pageroot-native-source-e2e-",
+    );
+  }
+});
+
+test("Electron canonicalizes and persists an Apple Pinyin styled-wrapper composition", async () => {
+  test.setTimeout(90_000);
+  const sourceDirectory = mkdtempSync(path.join(tmpdir(), "pageroot-native-source-e2e-"));
+  const sourcePath = path.join(sourceDirectory, "apple-pinyin-styled-wrapper.html");
+  const original = fixtureBuffer("complex-layout.html");
+  const expected = replaceUniqueBytes(
+    original,
+    "<em>Word</em>",
+    "<em>你好</em>",
+  );
+  writeFileSync(sourcePath, original);
+
+  const isolatedUserData = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-"));
+  let firstApp = null;
+  let reopenedApp = null;
+  try {
+    const firstLaunch = await launchPageRoot({
+      isolatedUserData,
+      activeSourcePath: sourcePath,
+    });
+    firstApp = firstLaunch.electronApp;
+    const { editor, frame } = await loadedDiskFrame(
+      firstLaunch.page,
+      sourcePath,
+      "heading-inline",
+    );
+    await activateNativeEdit(frame, "heading-inline");
+    await replayApplePinyinStyledWrapperCommit(frame, "heading-inline");
+
+    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
+    await expect(firstLaunch.page.locator(".round-record-counts"))
+      .toHaveText("0 条评论 · 1 项直接编辑记录");
+    await expect.poll(() => frame.locator(caseSelector("heading-inline")).innerHTML())
+      .toContain("<em");
+    const committedHtml = await frame.locator(caseSelector("heading-inline")).innerHTML();
+    expect(committedHtml).toContain(">你好</em>");
+    expect(committedHtml).not.toContain("<i>");
+    expect(await editor.getAttribute("data-edit-block-detail")).toBeNull();
+
+    let persistedRevision = 0;
+    await firstLaunch.page.keyboard.press(keyShortcut("S"));
+    persistedRevision = await expectCheckpointPersisted(
+      firstLaunch.page,
+      persistedRevision,
+    );
+    expect(
+      readFileSync(sourcePath).equals(expected),
+      "styled-wrapper IME commit must persist only Word -> 你好",
+    ).toBe(true);
+
+    await firstLaunch.page.keyboard.press(keyShortcut("Z"));
+    await firstLaunch.page.keyboard.press(keyShortcut("S"));
+    persistedRevision = await expectCheckpointPersisted(
+      firstLaunch.page,
+      persistedRevision,
+    );
+    expect(
+      readFileSync(sourcePath).equals(original),
+      "IME undo must restore the byte-exact original fixture",
+    ).toBe(true);
+
+    await firstLaunch.page.keyboard.press(
+      `${process.platform === "darwin" ? "Meta" : "Control"}+Shift+Z`,
+    );
+    await firstLaunch.page.keyboard.press(keyShortcut("S"));
+    await expectCheckpointPersisted(firstLaunch.page, persistedRevision);
+    expect(
+      readFileSync(sourcePath).equals(expected),
+      "IME redo must reproduce the identical forward SourcePatch",
+    ).toBe(true);
+
+    await closePageRootGracefully(firstApp);
+    firstApp = null;
+    const reopened = await launchPageRoot({ isolatedUserData });
+    reopenedApp = reopened.electronApp;
+    const { frame: reopenedFrame } = await loadedDiskFrame(
+      reopened.page,
+      sourcePath,
+      "heading-inline",
+    );
+    const reopenedHtml = await reopenedFrame.locator(
+      caseSelector("heading-inline"),
+    ).innerHTML();
+    expect(reopenedHtml).toContain(">你好</em>");
+    expect(reopenedHtml).not.toContain("<i>");
+    expect(readFileSync(sourcePath).equals(expected)).toBe(true);
+
+    await closePageRootGracefully(reopenedApp);
+    reopenedApp = null;
+  } finally {
+    if (firstApp) await stopPageRoot(firstApp, isolatedUserData, { cleanup: false });
+    if (reopenedApp) await stopPageRoot(reopenedApp, isolatedUserData, { cleanup: false });
+    removeIsolatedUserData(isolatedUserData);
+    removeValidatedTemporaryDirectory(
+      sourceDirectory,
+      "pageroot-native-source-e2e-",
+    );
+  }
+});
+
+test("Electron Chromium commits a composition without leaving interim pinyin", async () => {
+  const { electronApp, page, isolatedUserData } = await launchPageRoot();
+  try {
+    const { frame } = await loadFixture(page, "complex-layout.html");
+    await activateNativeEdit(frame, "list-item");
+    await installInputRecorder(frame);
+    await setTextSelection(frame, "list-item", 0, 3);
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("Input.imeSetComposition", {
+      text: "zhongwen",
+      selectionStart: 8,
+      selectionEnd: 8,
+    });
+    await cdp.send("Input.insertText", { text: "中文" });
+
+    const text = await frame.locator(caseSelector("list-item")).textContent();
+    expect(text).toContain("中文");
+    expect(text).not.toContain("zhongwen");
+    const events = await recordedInputEvents(frame);
+    expect(events.some(({ type }) => type === "compositionstart")).toBe(true);
+    expect(events.some(({ type }) => type === "compositionend")).toBe(true);
+  } finally {
+    await stopPageRoot(electronApp, isolatedUserData);
+  }
+});

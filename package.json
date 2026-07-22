@@ -1,0 +1,263 @@
+{
+  "name": "pageroot",
+  "version": "0.8.2",
+  "description": "源页（PageRoot）— Edit visually. Stay in source. 以源码级局部 Patch 安全编辑真实 HTML。",
+  "author": "源页",
+  "license": "Apache-2.0",
+  "private": true,
+  "homepage": "https://github.com/Charleyli925/PageRoot#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Charleyli925/PageRoot.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Charleyli925/PageRoot/issues"
+  },
+  "main": "desktop/main.mjs",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "dev": "WRANGLER_LOG_PATH=.wrangler/wrangler.log node scripts/dev.mjs",
+    "build": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext build",
+    "start": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext start",
+    "desktop:renderer": "vite build --config desktop/vite.config.ts",
+    "desktop:dev": "npm run desktop:renderer && electron desktop/main.mjs",
+    "desktop:pack": "npm run desktop:renderer && npm run desktop:pack:prepared",
+    "desktop:pack:prepared": "node scripts/build-package.mjs --arch arm64",
+    "desktop:pack:x64": "npm run desktop:renderer && npm run desktop:pack:x64:prepared",
+    "desktop:pack:x64:prepared": "node scripts/build-package.mjs --arch x64",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run test:node:full",
+    "test:node:core": "node scripts/test-node-group.mjs core",
+    "test:node:core:prepared": "node scripts/test-node-group.mjs core",
+    "test:contract": "node scripts/test-node-group.mjs contract",
+    "test:contract:prepared": "node scripts/test-node-group.mjs contract",
+    "test:node:integration": "npm run build && npm run test:node:integration:prepared",
+    "test:node:integration:prepared": "node scripts/test-node-group.mjs integration",
+    "test:node:full": "npm run build && npm run test:node:full:prepared",
+    "test:node:full:prepared": "node scripts/test-node-group.mjs full",
+    "test:native": "npm run test:node:core",
+    "test:browser": "npm run test:browser:full",
+    "test:browser:smoke": "npm run build && npm run test:browser:smoke:prepared",
+    "test:browser:smoke:prepared": "playwright test --config tests/e2e/browser/playwright.smoke.config.mjs",
+    "test:browser:full": "npm run build && npm run test:browser:full:prepared",
+    "test:browser:full:prepared": "playwright test --config tests/e2e/browser/playwright.config.mjs",
+    "test:real-html": "npm run build && npm run test:real-html:prepared",
+    "test:real-html:prepared": "playwright test --config tests/e2e/browser/playwright.real-html.config.mjs",
+    "test:electron-editing": "npm run test:electron:full",
+    "test:electron:smoke": "npm run desktop:renderer && npm run test:electron:smoke:prepared",
+    "test:electron:smoke:prepared": "playwright test --config tests/e2e/electron/playwright.smoke.config.mjs",
+    "test:electron:full": "npm run desktop:renderer && npm run test:electron:full:prepared",
+    "test:electron:full:prepared": "playwright test --config tests/e2e/electron/playwright.config.mjs",
+    "test:ai-closed-loop:smoke": "npm run desktop:renderer && npm run test:ai-closed-loop:smoke:prepared",
+    "test:ai-closed-loop:smoke:prepared": "playwright test --config tests/e2e/electron/playwright.ai-smoke.config.mjs",
+    "test:ai-closed-loop": "npm run desktop:renderer && npm run test:ai-closed-loop:prepared",
+    "test:ai-closed-loop:prepared": "playwright test --config tests/e2e/electron/playwright.ai-closed-loop.config.mjs",
+    "test:packaged-runtime:prepared": "playwright test --config tests/e2e/electron/playwright.packaged.config.mjs",
+    "test:bridge": "node --test tests/workspace-bridge.test.mjs",
+    "test:package": "node scripts/test-node-group.mjs package",
+    "verify:packaged": "node scripts/verify-packaged-artifact.mjs --arch arm64",
+    "verify:packaged:x64": "node scripts/verify-packaged-artifact.mjs --arch x64",
+    "release:assets": "node scripts/create-release-assets.mjs",
+    "audit:dependencies": "node scripts/check-dependency-audit.mjs",
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern dist-desktop --ignore-pattern release --ignore-pattern .next",
+    "gate:edit": "node scripts/test-gate.mjs edit",
+    "gate:task": "node scripts/test-gate.mjs task",
+    "gate:release:auto": "node scripts/test-gate.mjs release",
+    "gate:artifact:auto": "node scripts/test-gate.mjs artifact --arch arm64",
+    "gate:artifact:auto:x64": "node scripts/test-gate.mjs artifact --arch x64",
+    "verify": "npm run gate:task",
+    "release:mac": "npm run gate:artifact:auto",
+    "release:mac:x64": "npm run gate:artifact:auto:x64"
+  },
+  "dependencies": {
+    "@noble/hashes": "2.2.0",
+    "@phosphor-icons/react": "2.1.10",
+    "entities": "6.0.1",
+    "next": "16.2.11",
+    "parse5": "8.0.0",
+    "react": "19.2.6",
+    "react-dom": "19.2.6"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "1.46.0",
+    "@playwright/test": "^1.61.1",
+    "@tailwindcss/postcss": "4.2.1",
+    "@types/node": "22.19.19",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.2",
+    "@vitejs/plugin-rsc": "0.5.26",
+    "electron": "43.1.1",
+    "electron-builder": "26.15.3",
+    "eslint": "9.39.4",
+    "eslint-config-next": "16.2.6",
+    "playwright": "^1.61.1",
+    "react-server-dom-webpack": "19.2.6",
+    "tailwindcss": "4.2.1",
+    "typescript": "5.9.3",
+    "vinext": "0.0.50",
+    "vite": "8.1.5",
+    "wrangler": "4.113.0"
+  },
+  "type": "module",
+  "build": {
+    "appId": "com.htmlai.workbench",
+    "productName": "PageRoot",
+    "artifactName": "PageRoot-${version}-${arch}.${ext}",
+    "afterPack": "desktop/after-pack.mjs",
+    "asar": true,
+    "directories": {
+      "output": "release",
+      "buildResources": "desktop/resources"
+    },
+    "files": [
+      "desktop/main.mjs",
+      "desktop/preload.mjs",
+      "desktop/project-files.mjs",
+      "desktop/export-copy.mjs",
+      "desktop/bridge-shutdown.mjs",
+      "desktop/close-recovery.mjs",
+      "desktop/product-contract.mjs",
+      "desktop/qoder-handoff.mjs",
+      "desktop/manual-update.mjs",
+      "dist-desktop/renderer/**/*",
+      "package.json",
+      "!node_modules/**/*"
+    ],
+    "npmRebuild": false,
+    "extraResources": [
+      {
+        "from": "scripts/workspace-bridge.mjs",
+        "to": "bridge/workspace-bridge.mjs"
+      },
+      {
+        "from": "scripts/finalize-attempt.mjs",
+        "to": "bridge/finalize-attempt.mjs"
+      },
+      {
+        "from": "scripts/lifecycle-core.mjs",
+        "to": "bridge/lifecycle-core.mjs"
+      },
+      {
+        "from": "scripts/user-supplement-core.mjs",
+        "to": "bridge/user-supplement-core.mjs"
+      },
+      {
+        "from": "scripts/record-user-supplement.mjs",
+        "to": "bridge/record-user-supplement.mjs"
+      },
+      {
+        "from": "scripts/html-source-parser.mjs",
+        "to": "bridge/html-source-parser.mjs"
+      },
+      {
+        "from": "scripts/scope-validator.mjs",
+        "to": "bridge/scope-validator.mjs"
+      },
+      {
+        "from": "scripts/target-identity.mjs",
+        "to": "bridge/target-identity.mjs"
+      },
+      {
+        "from": "scripts/product-contract.mjs",
+        "to": "bridge/product-contract.mjs"
+      },
+      {
+        "from": "scripts/attachment-storage.mjs",
+        "to": "bridge/attachment-storage.mjs"
+      },
+      {
+        "from": "node_modules/parse5",
+        "to": "node_modules/parse5",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "node_modules/entities",
+        "to": "node_modules/entities",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "schemas",
+        "to": "schemas",
+        "filter": [
+          "annotation-records.v3.schema.json",
+          "attempt-outcome.v1.schema.json",
+          "change-request.v3.schema.json",
+          "committed-marker.v1.schema.json",
+          "completion.v1.schema.json",
+          "input-manifest.v1.schema.json",
+          "project-state.v3.schema.json",
+          "runtime-state.v3.schema.json",
+          "scope-report.v1.schema.json",
+          "user-supplement.v1.schema.json",
+          "version-manifest.v3.schema.json",
+          "version-transaction.v1.schema.json"
+        ]
+      },
+      {
+        "from": "output/release-metadata/build-info.json",
+        "to": "build-info.json"
+      },
+      {
+        "from": "LICENSE",
+        "to": "LICENSE"
+      },
+      {
+        "from": "NOTICE",
+        "to": "NOTICE"
+      },
+      {
+        "from": "THIRD_PARTY_NOTICES.md",
+        "to": "THIRD_PARTY_NOTICES.md"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "icon": "desktop/resources/icon.icns",
+      "identity": "-",
+      "hardenedRuntime": false,
+      "minimumSystemVersion": "12.0",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ]
+    },
+    "dmg": {
+      "title": "PageRoot ${version}",
+      "backgroundColor": "#f2f0ea",
+      "window": {
+        "width": 660,
+        "height": 430
+      },
+      "contents": [
+        {
+          "x": 170,
+          "y": 210,
+          "type": "file"
+        },
+        {
+          "x": 490,
+          "y": 210,
+          "type": "link",
+          "path": "/Applications"
+        },
+        {
+          "x": 330,
+          "y": 350,
+          "type": "file",
+          "path": "desktop/resources/首次打开说明.txt"
+        }
+      ]
+    }
+  }
+}
