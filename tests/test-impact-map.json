@@ -272,6 +272,7 @@
       "id": "dependency-audit-policy",
       "patterns": [
         "^package(?:-lock)?\\.json$",
+        "^\\.github/dependabot\\.yml$",
         "^scripts/check-dependency-audit\\.mjs$",
         "^tests/dependency-audit-policy\\.test\\.mjs$",
         "^docs/DEPENDENCY_SECURITY\\.md$"
