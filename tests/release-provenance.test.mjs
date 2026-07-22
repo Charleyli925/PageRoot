@@ -15,7 +15,7 @@ function fixture(overrides = {}) {
   return {
     schemaVersion: 1,
     name: "pageroot",
-    version: "0.8.2",
+    version: "0.8.3",
     architecture: "arm64",
     sourceRepository: "https://github.com/Charleyli925/PageRoot",
     commitSha: "a".repeat(40),
@@ -30,7 +30,7 @@ test("build provenance is strict and identifies one source tree", () => {
     assertBuildInfo(fixture(), {
       schemaVersion: 1,
       name: "pageroot",
-      version: "0.8.2",
+      version: "0.8.3",
       architecture: "arm64",
     }),
     fixture(),
@@ -42,7 +42,7 @@ test("build provenance is strict and identifies one source tree", () => {
     fixture({ builtAt: "today" }),
     { ...fixture(), extra: true },
   ]) {
-    assert.throws(() => assertBuildInfo(invalid, { version: "0.8.2" }));
+    assert.throws(() => assertBuildInfo(invalid, { version: "0.8.3" }));
   }
 });
 
@@ -57,5 +57,5 @@ test("repository identity and expected build info come from the active checkout"
   });
   assert.equal(expected.commitSha, repository.commitSha);
   assert.equal(expected.treeSha, repository.treeSha);
-  assert.equal(expected.version, "0.8.2");
+  assert.equal(expected.version, "0.8.3");
 });

@@ -236,11 +236,12 @@ async function createPackagedFixture(t) {
 }
 
 test("release commands use one automated artifact lane with full tests and packaged runtime verification", async () => {
-  const [packageText, verifier, impactMapText, gateRunner] = await Promise.all([
+  const [packageText, verifier, impactMapText, gateRunner, packageBuilder] = await Promise.all([
     readFile(path.join(productRoot, "package.json"), "utf8"),
     readFile(path.join(productRoot, "scripts/verify-packaged-artifact.mjs"), "utf8"),
     readFile(path.join(productRoot, "tests/test-impact-map.json"), "utf8"),
     readFile(path.join(productRoot, "scripts/test-gate.mjs"), "utf8"),
+    readFile(path.join(productRoot, "scripts/build-package.mjs"), "utf8"),
   ]);
   const packageJson = JSON.parse(packageText);
   const impactMap = JSON.parse(impactMapText);
@@ -267,6 +268,11 @@ test("release commands use one automated artifact lane with full tests and packa
   assert.match(gateRunner, /require a clean Git worktree/);
   assert.match(gateRunner, /Release source changed while the gate was running/);
   assert.match(packageJson.scripts["desktop:pack:prepared"], /build-package\.mjs --arch arm64/);
+  assert.match(
+    packageBuilder,
+    /\["--mac", "dmg", `--\$\{architecture\}`, "--publish", "never"\]/u,
+    "electron-builder must never publish before PageRoot verifies the complete release asset set",
+  );
   assert.ok(packageJson.build.extraResources.some((entry) => entry.to === "build-info.json"));
   assert.match(packageJson.scripts["verify:packaged"], /verify-packaged-artifact\.mjs/);
   assert.match(verifier, /codesign/);
@@ -280,7 +286,7 @@ test("release commands use one automated artifact lane with full tests and packa
 
   const layout = expectedArtifactLayout({ productRoot, packageJson, arch: "arm64" });
   assert.match(layout.appPath, /release\/mac-arm64\/PageRoot\.app$/);
-  assert.match(layout.dmgPath, /PageRoot-0\.8\.2-arm64\.dmg$/);
+  assert.match(layout.dmgPath, /PageRoot-0\.8\.3-arm64\.dmg$/);
 });
 
 test("retired editor guard rejects dependencies, bundled code, and legacy editing surfaces", () => {

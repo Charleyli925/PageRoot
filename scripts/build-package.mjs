@@ -28,11 +28,18 @@ async function main() {
     ".bin",
     process.platform === "win32" ? "electron-builder.cmd" : "electron-builder",
   );
-  const child = spawn(executable, ["--mac", "dmg", `--${architecture}`], {
-    cwd: productRoot,
-    env: process.env,
-    stdio: "inherit",
-  });
+  // A release tag makes electron-builder infer `--publish onTagOrDraft` unless
+  // publishing is disabled explicitly. PageRoot publishes only after the DMG
+  // and its provenance have passed the artifact gate in the Release workflow.
+  const child = spawn(
+    executable,
+    ["--mac", "dmg", `--${architecture}`, "--publish", "never"],
+    {
+      cwd: productRoot,
+      env: process.env,
+      stdio: "inherit",
+    },
+  );
   const exitCode = await new Promise((resolve, reject) => {
     child.once("error", reject);
     child.once("exit", (code, signal) => {

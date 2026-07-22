@@ -17,11 +17,12 @@ Create and push an annotated immutable tag:
 git switch main
 git pull --ff-only
 git status --short
-git tag -a v0.8.2 -m "PageRoot 0.8.2"
-git push origin v0.8.2
+VERSION=0.8.3
+git tag -a "v${VERSION}" -m "PageRoot ${VERSION}"
+git push origin "v${VERSION}"
 ```
 
-The GitHub `Release` workflow verifies that the tag matches `package.json`, runs the complete source and packaged-artifact gate on an Apple-silicon macOS runner, and publishes the DMG, checksum, update manifest and build provenance.
+The GitHub `Release` workflow verifies that the tag matches `package.json`, runs the complete source and packaged-artifact gate on an Apple-silicon macOS runner, and publishes the DMG, checksum, update manifest and build provenance. `electron-builder` is forced to `--publish never`; only the final workflow step may publish assets after verification.
 
 Do not move or reuse a published tag. Do not replace assets silently. If a released build is wrong, fix the source and publish a new patch version.
 
