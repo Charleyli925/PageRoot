@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { evaluateAuditReport } from "../scripts/check-dependency-audit.mjs";
+
+const dependabotConfig = await readFile(
+  new URL("../.github/dependabot.yml", import.meta.url),
+  "utf8",
+);
 
 function report(...advisories) {
   return {
@@ -41,4 +47,15 @@ test("dependency audit policy rejects new and expired advisories", () => {
   assert.equal(result.passed, false);
   assert.deepEqual(result.unexpected.map((item) => item.source), [2]);
   assert.deepEqual(result.expired.map((item) => item.source), ["1"]);
+});
+
+test("Dependabot keeps coupled React updates together and defers TypeScript 7", () => {
+  assert.match(
+    dependabotConfig,
+    /react-stack:[\s\S]*patterns:[\s\S]*- react\n[\s\S]*- react-dom\n[\s\S]*- react-server-dom-webpack/,
+  );
+  assert.match(
+    dependabotConfig,
+    /dependency-name: typescript[\s\S]*versions:[\s\S]*- ">=7\.0\.0"/,
+  );
 });
