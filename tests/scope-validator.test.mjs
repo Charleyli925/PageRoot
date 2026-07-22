@@ -93,7 +93,7 @@ function reportFor(outputHtml, allowedTargets = [regularTarget()]) {
 async function scopeSchemaValidator() {
   const schema = JSON.parse(
     await readFile(
-      join(productRoot, "..", "schemas", "scope-report.v1.schema.json"),
+      join(productRoot, "schemas", "scope-report.v1.schema.json"),
       "utf8",
     ),
   );
