@@ -112,7 +112,7 @@ test("nested bold, italic, color, size, span attributes and outside bytes surviv
 test("editing link text preserves the authored link boundary and every non-text byte", async ({ page }) => {
   const { editor, frame } = await openFormatFixture(page);
   const caseId = "single-link";
-  const target = await activateNativeEdit(frame, caseId, { x: 1, y: 1 });
+  const target = await activateNativeEdit(frame, caseId);
   const expectedSource = replaceUniqueBytes(
     formatSource,
     ">链接文字</a>",
@@ -140,7 +140,7 @@ test("editing link text preserves the authored link boundary and every non-text 
 test("a replacement crossing a link boundary is rejected even when the wrapper DOM remains intact", async ({ page }) => {
   const { editor, frame } = await openFormatFixture(page);
   const caseId = "cross-link";
-  const target = await activateNativeEdit(frame, caseId, { x: 1, y: 1 });
+  const target = await activateNativeEdit(frame, caseId);
 
   await setTextSelection(frame, caseId, 0, 4);
   const accepted = await target.evaluate((element) => {
