@@ -24,6 +24,7 @@ import {
   injectManagedMeta,
   recordUserSupplement,
 } from "../scripts/lifecycle-core.mjs";
+import { ensureManagedWelcomeHtml } from "../desktop/project-files.mjs";
 import { buildSourceIndex } from "../scripts/source-index.mjs";
 import {
   createTargetRef,
@@ -245,6 +246,35 @@ test("fresh launch and read-only preview do not create PageRoot storage", async 
   assert.equal(ensured.response.status, 200, JSON.stringify(ensured.body));
   assert.equal(ensured.body.registered, true);
   await access(join(workspace, "projects"));
+  await access(join(workspace, "project-registry.json"));
+});
+
+test("managed welcome HTML registers the same workspace and V1 lifecycle as any opened HTML", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "pageroot-welcome-workspace-"));
+  const workspace = join(root, "PageRoot", "项目记录");
+  const welcome = await ensureManagedWelcomeHtml({ workspaceRoot: workspace });
+  const bridge = await startBridge(workspace);
+  t.after(async () => {
+    await stopChild(bridge.child);
+    await rm(root, { recursive: true, force: true });
+  });
+
+  await assert.rejects(access(workspace));
+  const preview = await previewWorkspace(bridge.baseUrl, welcome.sourcePath);
+  assert.equal(preview.response.status, 200, JSON.stringify(preview.body));
+  assert.equal(preview.body.registered, false);
+
+  const ensured = await postJson(bridge.baseUrl, "/project/ensure", {
+    sourcePath: welcome.sourcePath,
+    expectedSourceSha256: welcome.sha256,
+  });
+  assert.equal(ensured.response.status, 200, JSON.stringify(ensured.body));
+  assert.equal(ensured.body.registered, true);
+  assert.equal(ensured.body.sourcePath, welcome.sourcePath);
+  assert.equal(ensured.body.currentHtmlSha256, welcome.sha256);
+  assert.equal(ensured.body.versions.length, 1);
+  assert.equal(ensured.body.versions[0].versionId, "ver_0001");
+  await access(join(workspace, "projects", ensured.body.projectId));
   await access(join(workspace, "project-registry.json"));
 });
 

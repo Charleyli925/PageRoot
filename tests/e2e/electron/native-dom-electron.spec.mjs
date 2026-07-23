@@ -1,5 +1,6 @@
 import { createRequire } from "node:module";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -276,6 +277,76 @@ async function replayApplePinyinStyledWrapperCommit(frame, caseId) {
     }));
   });
 }
+
+test("Electron first launch registers the welcome HTML and sends its comment to Qoder", async () => {
+  const launched = await launchPageRoot();
+  const welcomePath = path.join(launched.isolatedUserData, "欢迎来到源页.html");
+  const workspace = path.join(launched.isolatedUserData, "workspace");
+  try {
+    await expect.poll(
+      async () => (
+        await launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject())
+      )?.sourcePath,
+      { timeout: 20_000 },
+    ).toBe(welcomePath);
+    await expect(launched.page.locator('[aria-label="正在读取项目状态"]'))
+      .toHaveCount(0, { timeout: 20_000 });
+    await expect(launched.page.locator('[aria-label="项目读取失败"]')).toHaveCount(0);
+    await expect.poll(() => (
+      existsSync(welcomePath)
+      && existsSync(path.join(workspace, "project-registry.json"))
+    )).toBe(true);
+
+    const registry = JSON.parse(
+      readFileSync(path.join(workspace, "project-registry.json"), "utf8"),
+    );
+    const projectIds = Object.keys(registry.projects);
+    expect(projectIds).toHaveLength(1);
+    expect(registry.projects[projectIds[0]].sourcePath).toBe(welcomePath);
+    expect(existsSync(
+      path.join(workspace, "projects", projectIds[0], "versions", "ver_0001", "committed.json"),
+    )).toBe(true);
+
+    const editor = launched.page.getByTestId("html-canvas-editor")
+      .filter({ visible: true })
+      .first();
+    await editor.waitFor({ state: "visible" });
+    const editorHandle = await editor.elementHandle();
+    await launched.page.waitForFunction(
+      (element) => element?.getAttribute("data-render-verified") === "true",
+      editorHandle,
+    );
+    await launched.electronApp.evaluate(({ clipboard }) => clipboard.clear());
+    await launched.page.getByRole("button", { name: "全局评论" }).click();
+    await launched.page.getByRole("textbox", { name: "评论内容" })
+      .fill("把欢迎页主标题改得更简洁。");
+    await launched.page.getByRole("button", { name: "评论", exact: true }).click();
+    await launched.page.getByRole("button", { name: /发送至 Qoder/u }).click();
+    await expect(
+      launched.page.getByText("等待 QoderWork 返回修改结果", { exact: true }),
+    ).toBeVisible();
+
+    let promptPath = "";
+    await expect.poll(async () => {
+      const copied = await launched.electronApp.evaluate(
+        ({ clipboard }) => clipboard.readText(),
+      );
+      promptPath = copied.match(/请执行\s+(.+?\/PROMPT\.md)\s+中的单轮任务/u)?.[1] || "";
+      return Boolean(promptPath && existsSync(promptPath));
+    }, { timeout: 20_000 }).toBe(true);
+    const changeRequest = JSON.parse(
+      readFileSync(path.join(path.dirname(promptPath), "change-request.json"), "utf8"),
+    );
+    expect(changeRequest.projectId).toBe(projectIds[0]);
+    expect(changeRequest.requirements.instructions[0].text)
+      .toBe("把欢迎页主标题改得更简洁。");
+  } finally {
+    await stopPageRoot(
+      launched.electronApp,
+      launched.isolatedUserData,
+    );
+  }
+});
 
 test("Electron uses the authored DOM caret, Selection and beforeinput", async () => {
   const { electronApp, page, isolatedUserData } = await launchPageRoot();

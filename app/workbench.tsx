@@ -54,7 +54,10 @@ import {
   shouldPresentNotice,
   shouldReplaceNotice,
 } from "./lib/notification-policy";
-import { DEFAULT_PROJECT_HTML } from "./lib/sample-html";
+import {
+  DEFAULT_PROJECT_HTML,
+  WELCOME_PROJECT_NAME,
+} from "./lib/sample-html";
 import { versionAuditCollections } from "./lib/version-audit-records";
 import {
   canCloseDuringHydration,
@@ -435,7 +438,7 @@ function bridgeFetch(
 }
 
 const WELCOME_PROJECT = {
-  name: "欢迎来到源页.html",
+  name: WELCOME_PROJECT_NAME,
   sourcePath: null as string | null,
 };
 
@@ -3334,6 +3337,7 @@ export default function Workbench() {
             applyProject(active);
             const epoch = projectEpochRef.current;
             await refreshWorkspace(active.sourcePath, epoch, false, epoch);
+            await refreshRecents();
           }
         });
     }, 0);
@@ -3341,7 +3345,7 @@ export default function Workbench() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [applyProject, hydrateRecentProjectRuns, refreshWorkspace]);
+  }, [applyProject, hydrateRecentProjectRuns, refreshRecents, refreshWorkspace]);
 
   useEffect(() => {
     const onPointerDown = (event: PointerEvent) => {

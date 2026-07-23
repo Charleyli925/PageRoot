@@ -4,6 +4,8 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+- Provision the first-run welcome page as a persistent ordinary HTML project with its own initial workspace, so edits, comments and QoderWork handoff work before users import another file.
+
 ## [0.8.5] - 2026-07-23
 
 - Published the 0.8.4 source feature set from a new immutable release tag after the earlier artifact run stopped before publication.
