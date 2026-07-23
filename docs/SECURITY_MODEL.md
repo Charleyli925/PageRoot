@@ -13,6 +13,16 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
 - Strict schemas, frozen inputs and identity/scope/Hash checks before accepting AI output
 - No silent application update or binary replacement
 
+## Native editing trust boundary
+
+The rendered preview DOM is disposable and never becomes a persistence source. Native editing may use either measured `contenteditable="plaintext-only"` or the controlled `contenteditable="true"` fallback, but both modes have the same authority:
+
+- SourceTextMap must prove one source-backed text island before activation.
+- Runtime layout, text style, Selection, focus and restoration must pass the full live preflight.
+- `contenteditable="true"` paste is reduced to `text/plain`; formatting and structural input do not gain commit authority.
+- MutationObserver evidence, the delivered `beforeinput/input` pair, FormatSkeleton, source Hash and SourcePatch must all agree before a local patch can persist.
+- `display: contents` may enter only through the observer-guarded lane. Missing delivery, unknown DOM mutation or failed rollback remains fail-closed.
+
 ## Untrusted inputs
 
 HTML, attachments, AI output, update manifests and IPC payloads are treated as untrusted. Tests and fixtures must use synthetic data. A renderer compromise should not provide arbitrary Node or filesystem access; any new privileged API needs explicit validation and negative tests.

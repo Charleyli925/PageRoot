@@ -2,64 +2,62 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-test("native preflight rejects display:contents and generated content anywhere in the text island", async () => {
-  const [canvas, capability] = await Promise.all([
-    readFile(
-      new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url),
-      "utf8",
-    ),
-    readFile(
-      new URL("../app/lib/native-edit-capability.js", import.meta.url),
-      "utf8",
-    ),
-  ]);
+import {
+  chooseNativeEditHostMode,
+  classifyNativeEventDelivery,
+} from "../app/lib/native-edit-policy.js";
 
-  assert.match(
-    canvas,
-    /function hasGeneratedPseudoContent[\s\S]*?querySelectorAll<HTMLElement>\("\*"\)[\s\S]*?hasContent\(candidate, "::before"\)[\s\S]*?hasContent\(candidate, "::after"\)/u,
+test("native host and display-contents decisions are explicit policy outcomes", () => {
+  assert.equal(
+    chooseNativeEditHostMode({
+      plaintextOnly: { layoutStable: false, styleStable: true },
+      controlled: { layoutStable: true, styleStable: true },
+    }),
+    "true",
   );
-  assert.match(
-    canvas,
-    /const nativeEventDeliveryStable = \[[\s\S]*?rootElement\.querySelectorAll<HTMLElement>\("\*"\)[\s\S]*?getComputedStyle\(element\)\.display\.toLowerCase\(\) !== "contents"/u,
+  assert.equal(
+    classifyNativeEventDelivery({
+      hasDisplayContents: true,
+      observerReady: true,
+    }),
+    "observer-guarded",
   );
-  assert.match(
-    canvas,
-    /pseudoContent: hasGeneratedPseudoContent\(rootElement\)/u,
-  );
-  assert.match(
-    canvas,
-    /nativeEventDeliveryStable,/u,
-  );
-  assert.match(
-    capability,
-    /runtime\.nativeEventDeliveryStable !== true/u,
-    "missing event-delivery evidence must fail closed, not inherit an old permissive default",
+  assert.equal(
+    classifyNativeEventDelivery({
+      hasDisplayContents: true,
+      observerReady: false,
+    }),
+    "unsafe",
   );
 });
 
 test("native preflight distinguishes an idle transition from real layout or author-DOM drift", async () => {
-  const canvas = await readFile(
-    new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url),
+  const preflight = await readFile(
+    new URL("../app/components/native-edit-runtime-preflight.ts", import.meta.url),
     "utf8",
   );
 
-  assert.match(canvas, /function sameNativeTextStyle/u);
+  assert.match(preflight, /function sameNativeTextStyle/u);
   assert.match(
-    canvas,
+    preflight,
     /function sameNativeLayout[\s\S]*?Math\.abs\(left\.width - right\.width\)[\s\S]*?sameTextRects/u,
   );
   assert.match(
-    canvas,
+    preflight,
     /uaOwnedEditingWhiteSpace[\s\S]*?"nowrap"[\s\S]*?"pre"[\s\S]*?whiteSpaceStable/u,
     "UA white-space renaming is allowed only alongside the independent geometry gate",
   );
   assert.doesNotMatch(
-    canvas,
+    preflight,
     /function sameNativeLayout[\s\S]*?left\.transitionDuration === right\.transitionDuration/u,
   );
   assert.match(
-    canvas,
+    preflight,
     /preflightObserver\?\.observe\(documentNode\.documentElement[\s\S]*?unexpectedPreflightMutations[\s\S]*?authorMutationRisk:/u,
+  );
+  assert.match(
+    preflight,
+    /measureMode\(NATIVE_EDIT_HOST_MODE\.PLAINTEXT_ONLY\)[\s\S]*?measureMode\(NATIVE_EDIT_HOST_MODE\.CONTROLLED\)/u,
   );
 });
 
@@ -95,13 +93,17 @@ test("text-range formatting uses an event-stable wrapper while retaining live la
 });
 
 test("ambiguous inline insertion guard owns only collapsed text input and precedes IME commit matching", async () => {
-  const [controller, canvas] = await Promise.all([
+  const [controller, canvas, logicalIndex] = await Promise.all([
     readFile(
       new URL("../app/components/NativeEditingController.ts", import.meta.url),
       "utf8",
     ),
     readFile(
       new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL("../app/lib/native-dom-logical-index.ts", import.meta.url),
       "utf8",
     ),
   ]);
@@ -111,8 +113,12 @@ test("ambiguous inline insertion guard owns only collapsed text input and preced
     /const COLLAPSED_TEXT_INSERT_INPUT_TYPES = new Set\(\[[\s\S]*?"insertCompositionText"[\s\S]*?"insertFromComposition"[\s\S]*?"insertText"[\s\S]*?\]\)/u,
   );
   assert.match(
-    controller,
-    /function transparentInlineLogicalRanges[\s\S]*?isTransparentSourceTextElement\(element\.localName\)/u,
+    logicalIndex,
+    /isTransparentSourceTextElement\(element\.localName\)[\s\S]*?transparentInlineRanges\.push/u,
+  );
+  assert.match(
+    logicalIndex,
+    /function transparentInlineLogicalRanges[\s\S]*?return index\.transparentInlineRanges/u,
   );
   assert.match(
     controller,

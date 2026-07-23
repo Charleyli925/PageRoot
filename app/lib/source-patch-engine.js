@@ -1,6 +1,7 @@
 import {
   buildSourceIndex,
   compareParseIntegrity,
+  normalizeSourceText,
   sourceSha256,
 } from "./source-index.js";
 import { decodeHTML } from "entities";
@@ -8,6 +9,7 @@ import {
   isTransparentSourceTextElement,
 } from "./source-text-map.js";
 import { isNativeDirectEditRoot } from "./native-edit-capability.js";
+import { isDisposableNativeInlineWrapperTag } from "./native-edit-policy.js";
 import {
   cleanTargetRef,
   createInsertionPointTargetRef,
@@ -42,6 +44,19 @@ const TEXT_RANGE_UNSAFE_CONTEXT_ELEMENTS = new Set([
 ]);
 
 const TEXT_INSERTION_AFFINITIES = new Set(["left", "right"]);
+const SPLIT_TEXT_BLOCK_TAGS = new Set(["p", "li"]);
+const SPLIT_TEXT_BLOCK_PARENTS = new Set(["ul", "ol"]);
+const SPLIT_TEXT_BLOCK_OMITTED_ATTRIBUTES = new Set([
+  "id",
+  "name",
+  "value",
+  "for",
+  "form",
+  "itemid",
+  "itemref",
+  "slot",
+  "popovertarget",
+]);
 
 const TRUSTED_INVERSE_PLANS = new WeakMap();
 const CSS_PROPERTY_NAME_PATTERN = /^(?:--[A-Za-z0-9_-]+|-?[A-Za-z][A-Za-z0-9-]*)$/;
@@ -52,26 +67,12 @@ const CSS_PROPERTY_NAME_PATTERN = /^(?:--[A-Za-z0-9_-]+|-?[A-Za-z][A-Za-z0-9-]*)
 // clearing box metrics; callers already reject flex/grid item and visible
 // background cases where a new inline box would not be layout-safe.
 const TEXT_RANGE_LAYOUT_GUARD = "all: unset; display: inline !important";
-const DISPOSABLE_EMPTY_TEXT_WRAPPER_TAGS = new Set([
-  "b",
-  "em",
-  "i",
-  "mark",
-  "s",
-  "small",
-  "span",
-  "strong",
-  "sub",
-  "sup",
-  "u",
-]);
-
 export function isDisposableSourceTextWrapper(element) {
   return Boolean(
     element?.type === "element"
     && element.namespaceURI === "http://www.w3.org/1999/xhtml"
     && isTransparentSourceTextElement(element.tagName)
-    && DISPOSABLE_EMPTY_TEXT_WRAPPER_TAGS.has(element.tagName)
+    && isDisposableNativeInlineWrapperTag(element.tagName)
     && element.attributes.every((attribute) => attribute.name === "style")
     && element.explicitEndTag
     && !element.isVoid
@@ -197,6 +198,35 @@ function makePlan(index, command, patches, targetRefs, metadata = {}) {
 
 function escapeTextContent(value) {
   return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+}
+
+function escapeTextFlowContent(value) {
+  return String(value)
+    .split("\n")
+    .map((line) => escapeTextContent(line))
+    .join("<br>");
+}
+
+function omitAttributeFromSplitClone(attribute) {
+  const name = String(attribute?.name ?? "").toLowerCase();
+  return SPLIT_TEXT_BLOCK_OMITTED_ATTRIBUTES.has(name)
+    || name.startsWith("on")
+    || /^data-(?:.*-)?(?:id|key|uid|uuid)$/u.test(name);
+}
+
+function splitCloneStartTag(index, element) {
+  const omitted = element.attributes
+    .filter(omitAttributeFromSplitClone)
+    .map((attribute) => attribute.range)
+    .sort((left, right) => left.startOffset - right.startOffset);
+  let cursor = element.startTagRange.startOffset;
+  let cloned = "";
+  for (const attributeRange of omitted) {
+    cloned += index.source.slice(cursor, attributeRange.startOffset);
+    cursor = attributeRange.endOffset;
+  }
+  cloned += index.source.slice(cursor, element.startTagRange.endOffset);
+  return cloned;
 }
 
 function isDescendantNode(index, node, ancestor) {
@@ -1009,7 +1039,7 @@ export function planTextPatch(indexOrHtml, command) {
   );
 }
 
-export function planTextRangePatch(indexOrHtml, command) {
+function planTextRangeLikePatch(indexOrHtml, command, options) {
   const index = typeof indexOrHtml === "string"
     ? buildSourceIndex(indexOrHtml)
     : indexOrHtml;
@@ -1035,7 +1065,7 @@ export function planTextRangePatch(indexOrHtml, command) {
   } = normalizedTextReplacements(index, target, command);
   const patches = [];
   for (const replacement of replacements) {
-    const escapedNextText = escapeTextContent(replacement.nextText);
+    const escapedNextText = options.encodeNextText(replacement.nextText);
     let insertionOwner = null;
     if (replacement.insertAt.kind === "text") {
       insertionOwner = replacement.segments.find((segment) => (
@@ -1067,7 +1097,7 @@ export function planTextRangePatch(indexOrHtml, command) {
         before,
         after,
         {
-          kind: "text-range",
+          kind: options.patchKind,
           nodeId: segment.textNodeId,
           replacementIndex: replacement.replacementIndex,
         },
@@ -1080,7 +1110,7 @@ export function planTextRangePatch(indexOrHtml, command) {
         "",
         escapedNextText,
         {
-          kind: "text-range",
+          kind: options.patchKind,
           nodeId: replacement.insertAt.textNodeId
             ?? replacement.insertAt.parentNodeId,
           replacementIndex: replacement.replacementIndex,
@@ -1116,7 +1146,7 @@ export function planTextRangePatch(indexOrHtml, command) {
       element.raw,
       boundaryInsertion?.after ?? "",
       {
-        kind: "text-range",
+        kind: options.patchKind,
         nodeId: element.nodeId,
         cleanup: "empty-transparent-wrapper",
         ...(boundaryInsertion?.replacementIndex !== undefined
@@ -1139,7 +1169,7 @@ export function planTextRangePatch(indexOrHtml, command) {
 
   return makePlan(
     index,
-    { ...command, type: "replace-text-range" },
+    { ...command, type: options.planType },
     textPatchesOutsideEmptyWrappers,
     [currentTargetRef],
     {
@@ -1153,7 +1183,199 @@ export function planTextRangePatch(indexOrHtml, command) {
             segments: metadataReplacements[0].deleteSegments,
           }
         : {}),
-      writeScope: "selected-text-ranges",
+      writeScope: options.writeScope,
+    },
+  );
+}
+
+export function planTextRangePatch(indexOrHtml, command) {
+  return planTextRangeLikePatch(indexOrHtml, command, {
+    planType: "replace-text-range",
+    patchKind: "text-range",
+    encodeNextText: escapeTextContent,
+    writeScope: "selected-text-ranges",
+  });
+}
+
+export function planTextFlowRangePatch(indexOrHtml, command) {
+  const inputs = Array.isArray(command?.replacements)
+    ? command.replacements
+    : [command];
+  const nextTexts = inputs
+    .filter((input) => input && Object.hasOwn(input, "nextText"))
+    .map((input) => String(input.nextText));
+  if (nextTexts.some((value) => value.includes("\r"))) {
+    fail(
+      "TEXT_FLOW_NOT_NORMALIZED",
+      "Text flow line endings must be normalized before planning.",
+    );
+  }
+  if (!nextTexts.some((value) => value.includes("\n"))) {
+    fail(
+      "TEXT_FLOW_BREAK_REQUIRED",
+      "Text flow replacement requires at least one explicit hard break.",
+    );
+  }
+  return planTextRangeLikePatch(indexOrHtml, command, {
+    planType: "replace-text-flow-range",
+    patchKind: "text-flow",
+    encodeNextText: escapeTextFlowContent,
+    writeScope: "selected-text-ranges-and-generated-hard-breaks",
+  });
+}
+
+export function planDeleteHardBreakPatch(indexOrHtml, command) {
+  const index = typeof indexOrHtml === "string"
+    ? buildSourceIndex(indexOrHtml)
+    : indexOrHtml;
+  const targetRef = commandTargetRef(index, command);
+  const resolution = resolvedTarget(index, targetRef, "element");
+  const target = resolution.target;
+  const currentTargetRef = refreshResolvedTargetRef(
+    index,
+    targetRef,
+    target,
+  );
+  if (!supportsTextRangeEditing(target.tagName)) {
+    fail(
+      "TEXT_RANGE_STYLE_UNSUPPORTED",
+      `Hard-break editing is not supported inside <${target.tagName}>.`,
+      { nodeId: target.nodeId },
+    );
+  }
+  const hardBreak = index.byNodeId.get(String(command.hardBreakNodeId ?? ""));
+  if (
+    !hardBreak
+    || hardBreak.type !== "element"
+    || hardBreak.tagName !== "br"
+    || hardBreak.namespaceURI !== "http://www.w3.org/1999/xhtml"
+    || !isDescendantNode(index, hardBreak, target)
+  ) {
+    fail(
+      "HARD_BREAK_TARGET_INVALID",
+      "The declared hard break no longer belongs to the editable source element.",
+      { hardBreakNodeId: command.hardBreakNodeId, targetId: target.nodeId },
+    );
+  }
+  const patch = sourcePatch(
+    hardBreak.range.startOffset,
+    hardBreak.range.endOffset,
+    hardBreak.raw,
+    "",
+    {
+      kind: "hard-break",
+      nodeId: hardBreak.nodeId,
+    },
+  );
+  return makePlan(
+    index,
+    { ...command, type: "delete-hard-break" },
+    [patch],
+    [currentTargetRef],
+    {
+      resolution: resolution.resolution,
+      nodeId: target.nodeId,
+      hardBreakNodeId: hardBreak.nodeId,
+      hardBreakSource: hardBreak.raw,
+      writeScope: "one-authored-hard-break",
+    },
+  );
+}
+
+export function planSplitTextBlockPatch(indexOrHtml, command) {
+  const index = typeof indexOrHtml === "string"
+    ? buildSourceIndex(indexOrHtml)
+    : indexOrHtml;
+  const targetRef = commandTargetRef(index, command);
+  const resolution = resolvedTarget(index, targetRef, "element");
+  const target = resolution.target;
+  const parent = target.parentId ? index.byNodeId.get(target.parentId) : null;
+  if (
+    target.namespaceURI !== "http://www.w3.org/1999/xhtml"
+    || !SPLIT_TEXT_BLOCK_TAGS.has(target.tagName)
+    || !target.explicitEndTag
+    || target.isVoid
+    || !target.boundarySafe
+    || (
+      target.tagName === "li"
+      && (
+        parent?.type !== "element"
+        || !SPLIT_TEXT_BLOCK_PARENTS.has(parent.tagName)
+      )
+    )
+  ) {
+    fail(
+      "BLOCK_SPLIT_UNSUPPORTED",
+      "Only explicit simple <p> blocks and <li> items inside <ul>/<ol> can be split.",
+      { nodeId: target.nodeId, tagName: target.tagName },
+    );
+  }
+  if (target.childIds.length !== 1) {
+    fail(
+      "BLOCK_SPLIT_COMPLEX_CONTENT",
+      "The block contains inline or structural children and needs a dedicated structural editor.",
+      { nodeId: target.nodeId, childCount: target.childIds.length },
+    );
+  }
+  const textNode = index.byNodeId.get(target.childIds[0]);
+  if (
+    !textNode
+    || textNode.type !== "text"
+    || textNode.parentId !== target.nodeId
+  ) {
+    fail(
+      "BLOCK_SPLIT_COMPLEX_CONTENT",
+      "The block is not backed by one direct source text node.",
+      { nodeId: target.nodeId },
+    );
+  }
+  const splitOffset = Number(command.splitOffset);
+  if (
+    !Number.isInteger(splitOffset)
+    || splitOffset <= 0
+    || splitOffset >= textNode.value.length
+  ) {
+    fail(
+      "BLOCK_SPLIT_BOUNDARY_UNSUPPORTED",
+      "The caret must be inside non-empty text so both resulting blocks remain editable.",
+      { splitOffset, textLength: textNode.value.length },
+    );
+  }
+  const rawSplitOffset = rawBoundaryForTextOffset(textNode, splitOffset);
+  const clonedStartTag = splitCloneStartTag(index, target);
+  const insertedSource = `${target.endTagRaw}${clonedStartTag}`;
+  const currentTargetRef = refreshResolvedTargetRef(
+    index,
+    targetRef,
+    target,
+  );
+  const patch = sourcePatch(
+    rawSplitOffset,
+    rawSplitOffset,
+    "",
+    insertedSource,
+    {
+      kind: "block-split",
+      nodeId: target.nodeId,
+    },
+  );
+  return makePlan(
+    index,
+    { ...command, type: "split-text-block" },
+    [patch],
+    [currentTargetRef],
+    {
+      resolution: resolution.resolution,
+      nodeId: target.nodeId,
+      tagName: target.tagName,
+      splitOffset,
+      rawSplitOffset,
+      beforeText: textNode.value,
+      firstText: textNode.value.slice(0, splitOffset),
+      secondText: textNode.value.slice(splitOffset),
+      clonedStartTag,
+      createdBlockStartOffset: rawSplitOffset + target.endTagRaw.length,
+      writeScope: "one-simple-text-block-boundary",
     },
   );
 }
@@ -1999,6 +2221,13 @@ export function planSourcePatch(command, indexOrHtml) {
     case "text-range":
     case "replace-text-range":
       return planTextRangePatch(index, command);
+    case "text-flow-range":
+    case "replace-text-flow-range":
+      return planTextFlowRangePatch(index, command);
+    case "delete-hard-break":
+      return planDeleteHardBreakPatch(index, command);
+    case "split-text-block":
+      return planSplitTextBlockPatch(index, command);
     case "style":
     case "set-inline-style":
       return planInlineStylePatch(index, command);
@@ -2254,6 +2483,9 @@ function authorizePatchPlan(plan, index, patches) {
   if (![
     "replace-text",
     "replace-text-range",
+    "replace-text-flow-range",
+    "delete-hard-break",
+    "split-text-block",
     "set-inline-style",
     "set-text-range-style",
     "reorder-sibling",
@@ -2366,6 +2598,107 @@ function authorizePatchPlan(plan, index, patches) {
         fail(
           "PATCH_PLAN_TAMPERED",
           "Text range patches do not match the declared operation metadata.",
+        );
+      }
+    }
+  }
+
+  if (operationType === "replace-text-flow-range") {
+    if (targetRefs.length !== 1 || resolutions[0].target.type !== "element") {
+      fail("PATCH_TARGET_COUNT_INVALID", "Text flow patch requires one element TargetRef.");
+    }
+    const element = resolutions[0].target;
+    for (const patch of patches) {
+      if (String(patch.kind ?? "").replace(/^(?:inverse:)+/, "") !== "text-flow") {
+        fail("PATCH_KIND_MISMATCH", "Text flow patch has an unrelated source operation.", { patch });
+      }
+      assertPatchWithin(
+        patch,
+        element.contentRange,
+        "PATCH_OUTSIDE_TARGET",
+        "Text flow patch is outside the authorized element content.",
+      );
+    }
+    if (!isInverse) {
+      const expected = planTextFlowRangePatch(index, {
+        type: "replace-text-flow-range",
+        targetRef: targetRefs[0],
+        beforeText: plan.metadata?.beforeText,
+        replacements: plan.metadata?.replacements,
+        expectedSourceSha256: index.sourceSha256,
+      });
+      if (!patchesEqual(patches, expected.patches)) {
+        fail(
+          "PATCH_PLAN_TAMPERED",
+          "Text flow patches do not match the declared operation metadata.",
+        );
+      }
+    }
+  }
+
+  if (operationType === "delete-hard-break") {
+    if (targetRefs.length !== 1 || resolutions[0].target.type !== "element") {
+      fail("PATCH_TARGET_COUNT_INVALID", "Hard-break deletion requires one element TargetRef.");
+    }
+    const element = resolutions[0].target;
+    for (const patch of patches) {
+      if (String(patch.kind ?? "").replace(/^(?:inverse:)+/, "") !== "hard-break") {
+        fail("PATCH_KIND_MISMATCH", "Hard-break deletion has an unrelated source operation.", { patch });
+      }
+      assertPatchWithin(
+        patch,
+        element.contentRange,
+        "PATCH_OUTSIDE_TARGET",
+        "Hard-break deletion is outside the authorized element content.",
+      );
+    }
+    if (!isInverse) {
+      const expected = planDeleteHardBreakPatch(index, {
+        type: "delete-hard-break",
+        targetRef: targetRefs[0],
+        hardBreakNodeId: plan.metadata?.hardBreakNodeId,
+        expectedSourceSha256: index.sourceSha256,
+      });
+      if (!patchesEqual(patches, expected.patches)) {
+        fail(
+          "PATCH_PLAN_TAMPERED",
+          "Hard-break deletion does not match the declared operation metadata.",
+        );
+      }
+    }
+  }
+
+  if (operationType === "split-text-block") {
+    if (targetRefs.length !== 1 || resolutions[0].target.type !== "element") {
+      fail("PATCH_TARGET_COUNT_INVALID", "Block split requires one element TargetRef.");
+    }
+    const element = resolutions[0].target;
+    const parent = element.parentId ? index.byNodeId.get(element.parentId) : null;
+    if (isInverse && parent?.type !== "element") {
+      fail("BLOCK_SPLIT_PARENT_REQUIRED", "Block split inverse requires its source parent.");
+    }
+    for (const patch of patches) {
+      if (String(patch.kind ?? "").replace(/^(?:inverse:)+/, "") !== "block-split") {
+        fail("PATCH_KIND_MISMATCH", "Block split has an unrelated source operation.", { patch });
+      }
+      assertPatchWithin(
+        patch,
+        isInverse ? parent.contentRange : element.contentRange,
+        "PATCH_OUTSIDE_TARGET",
+        "Block split is outside the authorized source boundary.",
+      );
+    }
+    if (!isInverse) {
+      const expected = planSplitTextBlockPatch(index, {
+        type: "split-text-block",
+        targetRef: targetRefs[0],
+        splitOffset: plan.metadata?.splitOffset,
+        expectedSourceSha256: index.sourceSha256,
+      });
+      if (!patchesEqual(patches, expected.patches)) {
+        fail(
+          "PATCH_PLAN_TAMPERED",
+          "Block split does not match the declared operation metadata.",
         );
       }
     }
@@ -2637,6 +2970,186 @@ function deterministicMappedNode(plan, baseIndex, nextIndex, patches, baseNode) 
   return null;
 }
 
+function splitPatchDirection(plan, patches) {
+  if (
+    operationTypeForPlan(plan) !== "split-text-block"
+    || patches.length !== 1
+  ) return null;
+  const [patch] = patches;
+  if (patch.before === "" && patch.after !== "") return "split";
+  if (patch.before !== "" && patch.after === "") return "merge";
+  return null;
+}
+
+function splitTrackedTargetIds(plan) {
+  return new Set(
+    Array.isArray(plan?.metadata?.splitTrackedTargetIds)
+      ? plan.metadata.splitTrackedTargetIds.map(String)
+      : [],
+  );
+}
+
+function splitRootForResolvedTarget(index, target) {
+  if (target?.type === "element") return target;
+  if (target?.type !== "text" || !target.parentId) return null;
+  const parent = index.byNodeId.get(target.parentId);
+  return parent?.type === "element" ? parent : null;
+}
+
+function splitTargetMapping(
+  beforeTargetRef,
+  beforeResolution,
+  nextIndex,
+  nextNode,
+  tracked,
+) {
+  const afterTargetRef = createTargetRef(nextIndex, nextNode, {
+    targetId: beforeTargetRef.targetId,
+    label: beforeTargetRef.label,
+    level: beforeTargetRef.level,
+  });
+  return {
+    targetId: beforeTargetRef.targetId,
+    beforeTargetRef,
+    afterTargetRef,
+    beforeNodeId: beforeResolution.target?.nodeId ?? null,
+    afterNodeId: nextNode.nodeId,
+    resolution: "exact",
+    tracked,
+    splitTracked: true,
+  };
+}
+
+function ambiguousSplitTargetMapping(
+  beforeTargetRef,
+  beforeResolution,
+  tracked,
+) {
+  const mapping = unresolvedTargetMapping(
+    beforeTargetRef,
+    beforeResolution,
+    tracked,
+    "ambiguous",
+  );
+  // A one-to-many split has no truthful single source range. Keeping the old
+  // range under the new source hash would make the ref look exact even though
+  // the user must choose one of the resulting blocks.
+  delete mapping.afterTargetRef.sourceAnchor;
+  mapping.splitTracked = true;
+  return mapping;
+}
+
+function mappedForwardSplitTrackedTarget(
+  plan,
+  baseIndex,
+  nextIndex,
+  patches,
+  beforeTargetRef,
+  beforeResolution,
+  tracked,
+) {
+  if (!tracked || splitPatchDirection(plan, patches) !== "split") return null;
+  const block = splitRootForResolvedTarget(baseIndex, beforeResolution.target);
+  const rawSplitOffset = Number(plan?.metadata?.rawSplitOffset);
+  if (
+    !block
+    || block.tagName !== plan?.metadata?.tagName
+    || !Number.isInteger(rawSplitOffset)
+    || rawSplitOffset < block.contentRange.startOffset
+    || rawSplitOffset > block.contentRange.endOffset
+  ) return null;
+
+  const firstStartOffset = transformedOffset(block.range.startOffset, patches);
+  const secondStartOffset = Number(plan?.metadata?.createdBlockStartOffset);
+  const firstBlock = nextIndex.elements.find((element) => (
+    element.tagName === block.tagName
+    && element.range.startOffset === firstStartOffset
+  ));
+  const secondBlock = nextIndex.elements.find((element) => (
+    element.tagName === block.tagName
+    && element.startTagRange.startOffset === secondStartOffset
+  ));
+  if (!firstBlock || !secondBlock) {
+    const mapping = unresolvedTargetMapping(
+      beforeTargetRef,
+      beforeResolution,
+      tracked,
+      "orphaned",
+    );
+    mapping.splitTracked = true;
+    return mapping;
+  }
+
+  const quote = normalizeSourceText(beforeTargetRef.textQuote ?? "");
+  const beforeText = normalizeSourceText(plan?.metadata?.beforeText ?? "");
+  const firstText = normalizeSourceText(plan?.metadata?.firstText ?? "");
+  const secondText = normalizeSourceText(plan?.metadata?.secondText ?? "");
+  const inFirst = Boolean(quote) && firstText.includes(quote);
+  const inSecond = Boolean(quote) && secondText.includes(quote);
+
+  // A full-block target now names two blocks. A narrower tracked quote may
+  // follow one side only when the result is unique; repeated or crossing text
+  // remains explicitly ambiguous instead of silently following the first node.
+  if (quote && quote !== beforeText && inFirst !== inSecond) {
+    return splitTargetMapping(
+      beforeTargetRef,
+      beforeResolution,
+      nextIndex,
+      inFirst ? firstBlock : secondBlock,
+      tracked,
+    );
+  }
+  return ambiguousSplitTargetMapping(
+    beforeTargetRef,
+    beforeResolution,
+    tracked,
+  );
+}
+
+function mappedMergedSplitTrackedTarget(
+  plan,
+  nextIndex,
+  patches,
+  beforeTargetRef,
+  tracked,
+) {
+  if (
+    !tracked
+    || splitPatchDirection(plan, patches) !== "merge"
+    || !splitTrackedTargetIds(plan).has(beforeTargetRef.targetId)
+  ) return null;
+  const rawSplitOffset = Number(plan?.metadata?.rawSplitOffset);
+  const tagName = String(plan?.metadata?.tagName ?? "");
+  const candidates = nextIndex.elements.filter((element) => (
+    element.tagName === tagName
+    && Number.isInteger(rawSplitOffset)
+    && rawSplitOffset >= element.contentRange.startOffset
+    && rawSplitOffset <= element.contentRange.endOffset
+  ));
+  const nextNode = candidates.length === 1 ? candidates[0] : null;
+  const beforeResolution = {
+    resolution: beforeTargetRef.resolution,
+    target: null,
+  };
+  if (!nextNode) {
+    const mapping = unresolvedTargetMapping(
+      beforeTargetRef,
+      beforeResolution,
+      tracked,
+      "orphaned",
+    );
+    mapping.splitTracked = true;
+    return mapping;
+  }
+  return splitTargetMapping(
+    beforeTargetRef,
+    beforeResolution,
+    nextIndex,
+    nextNode,
+    tracked,
+  );
+}
+
 function unresolvedTargetMapping(
   beforeTargetRef,
   beforeResolution,
@@ -2751,6 +3264,14 @@ function mappedInsertionPointRef(
 
 function mappedTargetRef(plan, baseIndex, nextIndex, patches, targetRef, tracked) {
   const beforeTargetRef = cleanTargetRef(targetRef);
+  const mergedSplitMapping = mappedMergedSplitTrackedTarget(
+    plan,
+    nextIndex,
+    patches,
+    beforeTargetRef,
+    tracked,
+  );
+  if (mergedSplitMapping) return mergedSplitMapping;
   let beforeResolution;
   try {
     beforeResolution = resolveTargetRef(baseIndex, beforeTargetRef);
@@ -2784,6 +3305,16 @@ function mappedTargetRef(plan, baseIndex, nextIndex, patches, targetRef, tracked
       tracked,
     );
   }
+  const forwardSplitMapping = mappedForwardSplitTrackedTarget(
+    plan,
+    baseIndex,
+    nextIndex,
+    patches,
+    beforeTargetRef,
+    beforeResolution,
+    tracked,
+  );
+  if (forwardSplitMapping) return forwardSplitMapping;
   const nextNode = deterministicMappedNode(
     plan,
     baseIndex,
@@ -2890,9 +3421,13 @@ export function applyPatchPlan(plan, sourceHtml, options = {}) {
   const operationTargetIds = new Set(
     operationMappings.map((mapping) => mapping.targetId),
   );
+  const mapsOneTargetToMany = authorization.operationType === "split-text-block";
   const trackedMappings = trackedTargetRefs
     .map((targetRef) => cleanTargetRef(targetRef))
-    .filter((targetRef) => !operationTargetIds.has(targetRef.targetId))
+    .filter((targetRef) => (
+      mapsOneTargetToMany
+      || !operationTargetIds.has(targetRef.targetId)
+    ))
     .map((targetRef) => mappedTargetRef(
       plan,
       baseIndex,
@@ -2919,6 +3454,9 @@ export function applyPatchPlan(plan, sourceHtml, options = {}) {
     inverseProvenance,
     refreshedTargetRefs,
   );
+  const splitTrackedTargetIdsForInverse = trackedMappings
+    .filter((mapping) => mapping.splitTracked)
+    .map((mapping) => mapping.targetId);
   const inversePlan = {
     version: 1,
     type: `inverse:${plan.type}`,
@@ -2931,6 +3469,9 @@ export function applyPatchPlan(plan, sourceHtml, options = {}) {
       originalType: plan.type,
       operationType: authorization.operationType,
       ...plan.metadata,
+      ...(mapsOneTargetToMany
+        ? { splitTrackedTargetIds: splitTrackedTargetIdsForInverse }
+        : {}),
       ...mirroredReorderMetadata(plan, reorderMap),
       inverseProvenance,
     },

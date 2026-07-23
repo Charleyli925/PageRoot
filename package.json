@@ -1,6 +1,6 @@
 {
   "name": "pageroot",
-  "version": "0.8.3",
+  "version": "0.8.4",
   "description": "源页（PageRoot）— Edit visually. Stay in source. 以源码级局部 Patch 安全编辑真实 HTML。",
   "author": "源页",
   "license": "Apache-2.0",

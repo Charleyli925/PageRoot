@@ -179,13 +179,13 @@ async function addCommentAndSubmit(page, electronApp, sourcePath) {
     .first();
   await expect(commentButton).toBeVisible();
   await commentButton.click();
-  const composer = page.getByRole("textbox", { name: "本轮修改评论" });
+  const composer = page.getByRole("textbox", { name: "评论内容" });
   await composer.fill(`只把这个列表项改为“${UPDATED_TEXT}”，其他地方保持不变。`);
-  await page.getByRole("button", { name: "发送评论" }).click();
-  await expect(page.getByRole("textbox", { name: "评论 1" }))
-    .toHaveValue(new RegExp(UPDATED_TEXT, "u"));
-  await page.getByRole("button", { name: "一键发送至 QoderWork" }).click();
-  await expect(page.getByText("等待 QoderWork 完成修改", { exact: true }))
+  await page.getByRole("button", { name: "评论", exact: true }).click();
+  await expect(page.locator(".comment-card").filter({ hasText: UPDATED_TEXT }))
+    .toHaveCount(1);
+  await page.getByRole("button", { name: /发送至 Qoder/u }).click();
+  await expect(page.getByText("等待 QoderWork 返回修改结果", { exact: true }))
     .toBeVisible();
   let promptPath = "";
   await expect.poll(async () => {
@@ -258,7 +258,7 @@ test("a verified AI result stays pending until the user opens the new HTML", asy
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
 
     await expect(launched.page.getByText(
-      "最新版已通过检查，等待你打开",
+      "修改结果已通过检查",
       { exact: true },
     ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
     const pending = await launched.page.evaluate(
@@ -272,7 +272,7 @@ test("a verified AI result stays pending until the user opens the new HTML", asy
     ).toBe(1);
 
     await launched.page.getByRole("button", {
-      name: "打开 Qoder 返回的最新版",
+      name: "打开最新版",
     }).click();
     await expect.poll(async () => (
       launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject())
@@ -313,19 +313,25 @@ test("a clipboard handoff failure keeps the frozen Request recoverable", async (
       .filter({ visible: true })
       .first()
       .click();
-    await launched.page.getByRole("textbox", { name: "本轮修改评论" })
+    await launched.page.getByRole("textbox", { name: "评论内容" })
       .fill(`改为 ${UPDATED_TEXT}`);
-    await launched.page.getByRole("button", { name: "发送评论" }).click();
-    await launched.page.getByRole("button", { name: "一键发送至 QoderWork" }).click();
-    await expect(launched.page.getByText("等待 QoderWork 完成修改", { exact: true }))
+    await launched.page.getByRole("button", { name: "评论", exact: true }).click();
+    await launched.page.getByRole("button", { name: /发送至 Qoder/u }).click();
+    await expect(launched.page.getByText("等待 QoderWork 返回修改结果", { exact: true }))
       .toBeVisible();
     expect(await launched.electronApp.evaluate(({ clipboard }) => clipboard.readText()))
       .toBe(clipboardSentinel);
-    const processButton = launched.page.getByRole("button", { name: "查看本轮处理" });
-    await expect(processButton).toBeVisible();
-    await processButton.click();
-    await expect(launched.page.getByText("等待复制到剪贴板", { exact: true }))
+    await expect(launched.page.getByRole("button", { name: "发送至 Qoder" }))
       .toBeVisible();
+    const handoffError = launched.page.getByRole("alert")
+      .filter({ hasText: "暂时无法复制交接内容" });
+    await expect(handoffError).toBeVisible();
+    await handoffError.getByRole("button", { name: "关闭提醒" }).click();
+    await expect(handoffError).toBeHidden();
+    const retryCopy = launched.page.getByRole("button", { name: "再次复制本轮要求" });
+    await expect(retryCopy).toBeVisible();
+    await retryCopy.click();
+    await expect(handoffError).toBeVisible();
     const projectsRoot = path.join(launched.workspace, "projects");
     await expect.poll(() => (
       existsSync(projectsRoot)
@@ -352,7 +358,7 @@ test("output without the mandatory finalizer never creates or opens a version", 
     );
     writeAiOutput(request.requestRoot, (base) => base.replace(ORIGINAL_TEXT, UPDATED_TEXT));
     await launched.page.waitForTimeout(3_500);
-    await expect(launched.page.getByText("等待 QoderWork 完成修改", { exact: true }))
+    await expect(launched.page.getByText("等待 QoderWork 返回修改结果", { exact: true }))
       .toBeVisible();
     expect(workingHtmlFiles(launched.workspace, request.changeRequest.projectId)).toHaveLength(0);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
@@ -384,7 +390,7 @@ test("a malformed AI HTML return is rejected before completion or opening", asyn
     );
     expect(existsSync(path.join(attemptRoot, "completion.json"))).toBe(false);
     await launched.page.waitForTimeout(3_500);
-    await expect(launched.page.getByText("等待 QoderWork 完成修改", { exact: true }))
+    await expect(launched.page.getByText("等待 QoderWork 返回修改结果", { exact: true }))
       .toBeVisible();
     expect(workingHtmlFiles(launched.workspace, request.changeRequest.projectId)).toHaveLength(0);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
@@ -422,7 +428,7 @@ test("a soft out-of-scope AI return waits for an explicit waiver and open", asyn
 
     await launched.page.getByRole("button", { name: "无视本校验，继续" }).click();
     await expect(launched.page.getByText(
-      "最新版已通过检查，等待你打开",
+      "修改结果已通过检查",
       { exact: true },
     ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
     active = await launched.page.evaluate(
@@ -455,11 +461,11 @@ test("a committed version that the desktop cannot activate stays visibly blocked
     writeAiOutput(request.requestRoot, (base) => base.replace(ORIGINAL_TEXT, UPDATED_TEXT));
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
     await expect(launched.page.getByText(
-      "最新版已通过检查，等待你打开",
+      "修改结果已通过检查",
       { exact: true },
     ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
     await launched.page.getByRole("button", {
-      name: "打开 Qoder 返回的最新版",
+      name: "打开最新版",
     }).click();
     await expect(launched.page.getByText(/新版本文件暂时无法打开|最新版暂时无法打开/u)
       .filter({ visible: true }).first())

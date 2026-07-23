@@ -48,7 +48,7 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.equal(packageJson.name, "pageroot");
   assert.match(packageJson.description, /源页（PageRoot）— Edit visually\. Stay in source\./);
   assert.equal(packageJson.build.appId, "com.htmlai.workbench");
-  assert.equal(packageJson.version, "0.8.3");
+  assert.equal(packageJson.version, "0.8.4");
   assert.equal(packageJson.build.productName, "PageRoot");
   assert.equal(packageJson.build.artifactName, "PageRoot-${version}-${arch}.${ext}");
   assert.equal(packageJson.build.mac.identity, "-");
@@ -110,7 +110,7 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.doesNotMatch(workspaceResolver, /mkdir|writeFile|rename/);
   assert.match(mainProcess, /"ACTIVE_PROJECT_MISSING"/);
   assert.match(mainProcess, /titleBarStyle:\s*"hiddenInset"/);
-  assert.match(mainProcess, /trafficLightPosition:\s*\{ x: 18, y: 20 \}/);
+  assert.match(mainProcess, /trafficLightPosition:\s*\{ x: 18, y: 15 \}/);
   assert.doesNotMatch(mainProcess, /PROJECT_CHANNELS\.persistHtml/);
   assert.doesNotMatch(mainProcess, /html-projects:persist/);
   assert.doesNotMatch(mainProcess, /PROJECT_CHANNELS\.newHtml|html-projects:new/);

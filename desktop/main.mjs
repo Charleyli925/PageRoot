@@ -1310,13 +1310,13 @@ async function createWindow() {
     height: 960,
     minWidth: 960,
     minHeight: 720,
-    backgroundColor: "#f2f0ea",
+    backgroundColor: "#f7f8fa",
     title: "源页",
     show: false,
     ...(process.platform === "darwin"
       ? {
           titleBarStyle: "hiddenInset",
-          trafficLightPosition: { x: 18, y: 20 },
+          trafficLightPosition: { x: 18, y: 15 },
         }
       : {}),
     ...(!app.isPackaged

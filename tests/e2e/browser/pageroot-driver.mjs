@@ -218,7 +218,9 @@ export async function activateNativeEdit(frame, id, position) {
   try {
     await currentEditorFrame(frame).then((currentFrame) => currentFrame.waitForFunction((caseId) => {
       const expected = document.querySelector(`[data-native-case=${JSON.stringify(caseId)}]`);
-      return expected?.getAttribute("contenteditable") === "plaintext-only"
+      return ["plaintext-only", "true"].includes(
+        expected?.getAttribute("contenteditable"),
+      )
         && document.activeElement === expected
         && expected.isContentEditable;
     }, id, { timeout: 7_000 }));
@@ -643,10 +645,25 @@ export function keyShortcut(key) {
   return `${process.platform === "darwin" ? "Meta" : "Control"}+${key}`;
 }
 
+export async function requestExportCurrentHtml(page) {
+  return page.evaluate(() => {
+    const event = new KeyboardEvent("keydown", {
+      key: "E",
+      metaKey: true,
+      ctrlKey: true,
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    window.dispatchEvent(event);
+    return event.defaultPrevented;
+  });
+}
+
 export async function exportCurrentHtml(page) {
   const [download] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("button", { name: "导出 HTML 副本", exact: true }).click(),
+    requestExportCurrentHtml(page),
   ]);
   const stream = await download.createReadStream();
   if (!stream) throw new Error("Export download did not expose a readable stream.");

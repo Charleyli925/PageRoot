@@ -505,3 +505,24 @@
     transition: none;
   }
 }
+
+/* The V5 workbench owns these controls in the application toolbar. Keeping the
+   iframe shell to one row also gives the source page the full canvas height. */
+.globalCommentButton,
+.lockNotice {
+  display: none;
+}
+
+.editor {
+  grid-template-rows: minmax(0, 1fr);
+  background: #fff;
+}
+
+.frame {
+  grid-row: 1;
+  border-top: 0;
+}
+
+.editBlockedNotice {
+  top: 10px;
+}

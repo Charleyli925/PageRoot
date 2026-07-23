@@ -1,4 +1,8 @@
 import type { SourceTextMap } from "./source-text-map";
+import type {
+  NativeEditEventDeliveryMode,
+  NativeEditHostMode,
+} from "./native-edit-policy";
 
 export type NativeEditMode =
   | "native-editable"
@@ -15,11 +19,14 @@ export type NativeEditRuntimePreflight = {
   pseudoContent?: boolean;
   isSingleTextIsland?: boolean;
   mappingComplete?: boolean;
+  contentEditableMode?: NativeEditHostMode | null;
   styleStable?: boolean;
   layoutStable?: boolean;
   selectionStable?: boolean;
   observerReady?: boolean;
+  nativeEventDeliveryMode?: NativeEditEventDeliveryMode;
   nativeEventDeliveryStable?: boolean;
+  nativeEventDeliveryGuarded?: boolean;
   authorMutationRisk?: boolean;
 };
 

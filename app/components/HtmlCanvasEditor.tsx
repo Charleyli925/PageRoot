@@ -38,7 +38,6 @@ import {
 import {
   classifyNativeEditCapability,
   isNativeEditableCapability,
-  type NativeEditRuntimePreflight,
 } from "../lib/native-edit-capability.js";
 import { RuntimeDomSourceMap } from "../lib/runtime-dom-source-map.js";
 import {
@@ -55,6 +54,14 @@ import {
   type NativeEditSelection,
   type NativeEditSessionState,
 } from "./NativeEditingController";
+import {
+  planNativeStructuralEdit,
+  type NativeSourceEditIntent,
+} from "../lib/native-structural-edit-planner.js";
+import {
+  buildRuntimeDomMap,
+  nativeRuntimePreflight as inspectNativeEditRuntime,
+} from "./native-edit-runtime-preflight";
 import styles from "./HtmlCanvasEditor.module.css";
 
 const EDITOR_STYLE_ATTRIBUTE = "data-html-canvas-editor-style";
@@ -161,7 +168,7 @@ export type HtmlCanvasSelection = {
 };
 
 export type HtmlCanvasMutation = {
-  kind: "text" | "style" | "reorder";
+  kind: "text" | "style" | "reorder" | "structure";
   /** Stable identity shared by a direct edit and its undo/redo mutations. */
   historyId?: string;
   /** Lets the host fold history without creating a second editing authority. */
@@ -216,6 +223,17 @@ export type HtmlCanvasCommentedTarget = {
   label?: string;
 };
 
+export type HtmlCanvasCommentLayoutState = {
+  scrollTop: number;
+  scrollHeight: number;
+  clientHeight: number;
+  targets: Array<{
+    targetId: string;
+    top: number;
+    height: number;
+  }>;
+};
+
 const EMPTY_COMMENTED_TARGETS: readonly HtmlCanvasCommentedTarget[] = [];
 const EMPTY_TRACKED_TARGETS: readonly HtmlCanvasSelection[] = [];
 
@@ -267,6 +285,8 @@ export type HtmlCanvasEditorProps = {
   onSelect?: (selection: HtmlCanvasSelection | null) => void;
   /** Notifies the host about any pointer interaction inside the isolated iframe. */
   onInteraction?: () => void;
+  /** Mirrors the authored page scroll coordinate into the host comment rail. */
+  onCommentLayout?: (state: HtmlCanvasCommentLayoutState) => void;
   /** Opens the host product's comment composer for the current selection. */
   onRequestComment?: (selection: HtmlCanvasSelection) => void;
   /** Callback alternative to using a ref. Receives null when the editor unmounts. */
@@ -312,6 +332,7 @@ type SelectedStyle = {
   lineHeight: number;
   isBold: boolean;
   isItalic: boolean;
+  isUnderline: boolean;
   sources: StyleSourceInfo[];
 };
 
@@ -321,6 +342,7 @@ type EditableStyleProperty =
   | "backgroundColor"
   | "fontWeight"
   | "fontStyle"
+  | "textDecorationLine"
   | "padding"
   | "margin"
   | "lineHeight";
@@ -434,6 +456,13 @@ type PendingNativeEditResume = NativeEditFenceBookmark & {
   sourceRevision: string;
 };
 
+type NativeStructureCommitResume = {
+  target: HtmlCanvasSelection;
+  selection: NativeEditSelection;
+};
+
+type NativeFormatShortcut = "bold" | "italic" | "underline";
+
 function nativeEditLeasesMatch(
   left: ActiveNativeEdit["lease"] | null,
   right: ActiveNativeEdit["lease"],
@@ -535,6 +564,7 @@ const STYLE_PROPERTY_CONFIGS: ReadonlyArray<{
   { property: "backgroundColor", cssProperty: "background-color", label: "填充" },
   { property: "fontWeight", cssProperty: "font-weight", label: "字重" },
   { property: "fontStyle", cssProperty: "font-style", label: "字形" },
+  { property: "textDecorationLine", cssProperty: "text-decoration-line", label: "下划线" },
   { property: "padding", cssProperty: "padding-top", label: "内边距" },
   { property: "margin", cssProperty: "margin-top", label: "外间距" },
   { property: "lineHeight", cssProperty: "line-height", label: "行距" },
@@ -546,6 +576,7 @@ const TEXT_RANGE_EDITABLE_PROPERTIES = new Set<EditableStyleProperty>([
   "backgroundColor",
   "fontWeight",
   "fontStyle",
+  "textDecorationLine",
 ]);
 
 const NATURALLY_INHERITED_PROPERTIES = new Set([
@@ -1208,18 +1239,36 @@ function uniqueSelections(
   return [...byTargetId.values()];
 }
 
+function sourcePatchOperationType(plan: SourcePatchPlan): string {
+  const metadata = plan.metadata as Record<string, unknown> | undefined;
+  const value = String(metadata?.operationType ?? plan.type ?? "");
+  return value.replace(/^(?:inverse:)+/, "");
+}
+
 function trackedSourceTargetRefs(
   targets: readonly HtmlCanvasSelection[],
   operationTargetRefs: readonly SourceTargetRef[],
+  options: {
+    includeOperationTargetIds?: boolean;
+    includeUnresolvedTargetIds?: ReadonlySet<string>;
+  } = {},
 ): SourceTargetRef[] {
   const operationTargetIds = new Set(
     operationTargetRefs.map((target) => target.targetId),
   );
   return uniqueSelections(targets).flatMap((target) => {
     if (
-      operationTargetIds.has(target.id)
-      || target.resolution === "ambiguous"
-      || target.resolution === "orphaned"
+      (
+        operationTargetIds.has(target.id)
+        && !options.includeOperationTargetIds
+      )
+      || (
+        (
+          target.resolution === "ambiguous"
+          || target.resolution === "orphaned"
+        )
+        && !options.includeUnresolvedTargetIds?.has(target.id)
+      )
     ) return [];
     return [sourceTargetRefForSelection(target)];
   });
@@ -1254,27 +1303,50 @@ function deterministicTargetUpdates(
   const originals = new Map(
     uniqueSelections(originalTargets).map((target) => [target.id, target]),
   );
-  const afterNodeIds = new Map(
-    result.targetMappings.map((mapping) => [
-      mapping.targetId,
-      mapping.afterNodeId || undefined,
-    ]),
-  );
   const refreshedTargetRefs = [
-    ...result.refreshedTargetRefs,
-    ...result.refreshedTrackedTargetRefs,
-  ] as SourceTargetRef[];
-  return refreshedTargetRefs.flatMap((targetRef: SourceTargetRef) => {
+    ...result.refreshedTargetRefs.map((targetRef: SourceTargetRef) => ({
+      targetRef,
+      tracked: false,
+    })),
+    ...result.refreshedTrackedTargetRefs.map((targetRef: SourceTargetRef) => ({
+      targetRef,
+      tracked: true,
+    })),
+  ];
+  return refreshedTargetRefs.flatMap(({ targetRef, tracked }) => {
     const original = originals.get(targetRef.targetId);
     if (!original) return [];
+    const mapping = result.targetMappings.find((candidate) => (
+      candidate.targetId === targetRef.targetId
+      && Boolean(candidate.tracked) === tracked
+    ));
     return [
       selectionFromRefreshedTarget(
         original,
         targetRef as SourceTargetRef,
-        afterNodeIds.get(targetRef.targetId),
+        mapping?.afterNodeId || undefined,
       ),
     ];
   });
+}
+
+function deterministicOperationTargetUpdate(
+  result: ReturnType<typeof applyPatchPlan>,
+  original: HtmlCanvasSelection,
+): HtmlCanvasSelection | null {
+  const targetRef = result.refreshedTargetRefs.find(
+    (candidate: SourceTargetRef) => candidate.targetId === original.id,
+  ) as SourceTargetRef | undefined;
+  if (!targetRef) return null;
+  const mapping = result.targetMappings.find((candidate) => (
+    candidate.targetId === original.id
+    && !candidate.tracked
+  ));
+  return selectionFromRefreshedTarget(
+    original,
+    targetRef,
+    mapping?.afterNodeId || undefined,
+  );
 }
 
 function selectionForElement(
@@ -1468,401 +1540,6 @@ function nativeEditHostForElement(
   const nodeId = candidate.getAttribute(SOURCE_NODE_ATTRIBUTE);
   if (!nodeId) return null;
   return sourceIndex.byNodeId.get(nodeId)?.type === "element" ? candidate : null;
-}
-
-type NativeLayoutFingerprint = {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  scrollWidth: number;
-  scrollHeight: number;
-  display: string;
-  position: string;
-  font: string;
-  lineHeight: string;
-  whiteSpace: string;
-  writingMode: string;
-  transitionDuration: string;
-  animationDuration: string;
-  animationName: string;
-  textRects: Array<{ x: number; y: number; width: number; height: number }>;
-};
-
-function nativeLayoutFingerprint(element: HTMLElement): NativeLayoutFingerprint {
-  const rect = element.getBoundingClientRect();
-  const style = element.ownerDocument.defaultView?.getComputedStyle(element);
-  const textRects: NativeLayoutFingerprint["textRects"] = [];
-  const walker = element.ownerDocument.createTreeWalker(
-    element,
-    element.ownerDocument.defaultView?.NodeFilter.SHOW_TEXT ?? 4,
-  );
-  let current = walker.nextNode();
-  while (current) {
-    const text = (current as Text).data;
-    for (const match of text.matchAll(/[^ \t\r\n\f]+/gu)) {
-      const startOffset = match.index;
-      const endOffset = startOffset + match[0].length;
-      const range = element.ownerDocument.createRange();
-      range.setStart(current, startOffset);
-      range.setEnd(current, endOffset);
-      for (const textRect of Array.from(range.getClientRects())) {
-        textRects.push({
-          x: Math.round((textRect.x - rect.x) * 100) / 100,
-          y: Math.round((textRect.y - rect.y) * 100) / 100,
-          width: Math.round(textRect.width * 100) / 100,
-          height: Math.round(textRect.height * 100) / 100,
-        });
-      }
-    }
-    current = walker.nextNode();
-  }
-  return {
-    x: Math.round(rect.x * 100) / 100,
-    y: Math.round(rect.y * 100) / 100,
-    width: Math.round(rect.width * 100) / 100,
-    height: Math.round(rect.height * 100) / 100,
-    scrollWidth: element.scrollWidth,
-    scrollHeight: element.scrollHeight,
-    display: style?.display ?? "",
-    position: style?.position ?? "",
-    font: style?.font ?? "",
-    lineHeight: style?.lineHeight ?? "",
-    whiteSpace: style?.whiteSpace ?? "",
-    writingMode: style?.writingMode ?? "",
-    transitionDuration: style?.transitionDuration ?? "",
-    animationDuration: style?.animationDuration ?? "",
-    animationName: style?.animationName ?? "",
-    textRects,
-  };
-}
-
-function sameNativeLayout(
-  left: NativeLayoutFingerprint,
-  right: NativeLayoutFingerprint,
-): boolean {
-  const sameTextRects = left.textRects.length === right.textRects.length
-    && left.textRects.every((rect, index) => {
-      const candidate = right.textRects[index];
-      return Boolean(
-        candidate
-        && Math.abs(rect.x - candidate.x) <= 0.5
-        && Math.abs(rect.y - candidate.y) <= 0.5
-        && Math.abs(rect.width - candidate.width) <= 0.5
-        && Math.abs(rect.height - candidate.height) <= 0.5
-      );
-    });
-  return (
-    Math.abs(left.width - right.width) <= 0.5
-    && Math.abs(left.height - right.height) <= 0.5
-    && left.scrollWidth === right.scrollWidth
-    && left.scrollHeight === right.scrollHeight
-    && sameTextRects
-  );
-}
-
-function sameNativeTextStyle(
-  left: NativeLayoutFingerprint,
-  right: NativeLayoutFingerprint,
-): boolean {
-  // Chromium owns white-space on a plaintext-only editing host: authored
-  // `normal`, `nowrap`, or `pre-line` can be reported as `pre`/`pre-wrap`.
-  // This is only a style-name exception. `sameNativeLayout` remains a separate
-  // hard gate, so size, scroll extent, and every text rect still have to match.
-  const uaOwnedEditingWhiteSpace = (
-    ["normal", "nowrap", "pre-line"].includes(left.whiteSpace)
-    && ["pre", "pre-wrap"].includes(right.whiteSpace)
-  );
-  const whiteSpaceStable = left.whiteSpace === right.whiteSpace
-    || uaOwnedEditingWhiteSpace;
-  return (
-    left.display === right.display
-    && left.position === right.position
-    && left.font === right.font
-    && left.lineHeight === right.lineHeight
-    && whiteSpaceStable
-    && left.writingMode === right.writingMode
-  );
-}
-
-function hasGeneratedPseudoContent(element: HTMLElement): boolean {
-  const view = element.ownerDocument.defaultView;
-  if (!view) return true;
-  const hasContent = (
-    candidate: HTMLElement,
-    pseudo: "::before" | "::after",
-  ) => {
-    const content = view.getComputedStyle(candidate, pseudo).content;
-    return Boolean(content && content !== "none" && content !== "normal" && content !== "\"\"");
-  };
-  return [
-    element,
-    ...Array.from(element.querySelectorAll<HTMLElement>("*")),
-  ].some((candidate) => (
-    hasContent(candidate, "::before") || hasContent(candidate, "::after")
-  ));
-}
-
-function buildRuntimeDomMap(
-  rootElement: HTMLElement,
-  sourceMap: SourceTextMap,
-  rootTargetRef: SourceTargetRef,
-): RuntimeDomSourceMap | null {
-  const runtimeMap = new RuntimeDomSourceMap({
-    epoch: sourceMap.sourceSha256.slice(0, 12),
-    idPrefix: "pageroot",
-  });
-  const sourceElements = [
-    rootElement,
-    ...Array.from(rootElement.querySelectorAll<HTMLElement>(`[${SOURCE_NODE_ATTRIBUTE}]`)),
-  ];
-  for (const element of sourceElements) {
-    const sourceNodeId = element.getAttribute(SOURCE_NODE_ATTRIBUTE);
-    if (!sourceNodeId) return null;
-    runtimeMap.bindElement(element, {
-      sourceNodeId,
-      targetRef: element === rootElement ? rootTargetRef : null,
-    });
-  }
-
-  const sourceRuns = sourceMap.runs.filter((run) => run.kind === "text");
-  const showText = rootElement.ownerDocument.defaultView?.NodeFilter.SHOW_TEXT ?? 4;
-  const walker = rootElement.ownerDocument.createTreeWalker(rootElement, showText);
-  const entries: Array<{
-    node: Text;
-    spans: Array<{
-      domStart: number;
-      domEnd: number;
-      textNodeId: string;
-      sourceStartOffset: number;
-      sourceEndOffset: number;
-    }>;
-  }> = [];
-  let runIndex = 0;
-  let runOffset = 0;
-  let current = walker.nextNode();
-  while (current) {
-    const textNode = current as Text;
-    const spans = [];
-    let domOffset = 0;
-    while (domOffset < textNode.data.length) {
-      const run = sourceRuns[runIndex];
-      if (!run) return null;
-      const remainingDom = textNode.data.length - domOffset;
-      const remainingSource = run.text.length - runOffset;
-      const length = Math.min(remainingDom, remainingSource);
-      if (
-        length <= 0
-        || textNode.data.slice(domOffset, domOffset + length)
-          !== run.text.slice(runOffset, runOffset + length)
-      ) return null;
-      spans.push({
-        domStart: domOffset,
-        domEnd: domOffset + length,
-        textNodeId: run.textNodeId,
-        sourceStartOffset: runOffset,
-        sourceEndOffset: runOffset + length,
-      });
-      domOffset += length;
-      runOffset += length;
-      if (runOffset === run.text.length) {
-        runIndex += 1;
-        runOffset = 0;
-      }
-    }
-    if (textNode.data.length > 0) entries.push({ node: textNode, spans });
-    current = walker.nextNode();
-  }
-  if (runIndex !== sourceRuns.length || runOffset !== 0) return null;
-  runtimeMap.bindTextSequence(rootElement, entries);
-  return runtimeMap;
-}
-
-function nativeRuntimePreflight(
-  rootElement: HTMLElement,
-  sourceMap: SourceTextMap,
-  rootTargetRef: SourceTargetRef,
-): {
-  runtimeMap: RuntimeDomSourceMap | null;
-  runtime: NativeEditRuntimePreflight;
-  layoutDebug: {
-    before: NativeLayoutFingerprint;
-    after: NativeLayoutFingerprint;
-    restored: NativeLayoutFingerprint;
-  };
-} {
-  const runtimeMap = buildRuntimeDomMap(rootElement, sourceMap, rootTargetRef);
-  const documentNode = rootElement.ownerDocument;
-  const view = documentNode.defaultView;
-  const before = nativeLayoutFingerprint(rootElement);
-  const priorActiveElement = documentNode.activeElement;
-  const liveSelection = documentNode.getSelection();
-  const priorSelection = liveSelection?.anchorNode && liveSelection.focusNode
-    ? {
-        anchorNode: liveSelection.anchorNode,
-        anchorOffset: liveSelection.anchorOffset,
-        focusNode: liveSelection.focusNode,
-        focusOffset: liveSelection.focusOffset,
-      }
-    : null;
-  const hadSelectionRange = Boolean(liveSelection?.rangeCount);
-  const scrollPositions: Array<{
-    element: Element;
-    left: number;
-    top: number;
-  }> = [];
-  let scrollCandidate: Element | null = rootElement;
-  while (scrollCandidate) {
-    scrollPositions.push({
-      element: scrollCandidate,
-      left: scrollCandidate.scrollLeft,
-      top: scrollCandidate.scrollTop,
-    });
-    scrollCandidate = scrollCandidate.parentElement;
-  }
-  const scrollingElement = documentNode.scrollingElement;
-  if (scrollingElement && !scrollPositions.some(({ element }) => element === scrollingElement)) {
-    scrollPositions.push({
-      element: scrollingElement,
-      left: scrollingElement.scrollLeft,
-      top: scrollingElement.scrollTop,
-    });
-  }
-  const previousContentEditable = rootElement.getAttribute("contenteditable");
-  const hadContentEditable = rootElement.hasAttribute("contenteditable");
-  const MutationObserverConstructor = view?.MutationObserver;
-  const preflightObserver = MutationObserverConstructor
-    ? new MutationObserverConstructor(() => undefined)
-    : null;
-  preflightObserver?.observe(documentNode.documentElement, {
-    subtree: true,
-    childList: true,
-    characterData: true,
-    attributes: true,
-  });
-  const preflightMutationRecords: MutationRecord[] = [];
-  const collectPreflightMutations = () => {
-    preflightMutationRecords.push(...(preflightObserver?.takeRecords() ?? []));
-  };
-  let after = before;
-  let focusAccepted = false;
-  let preflightFailed = false;
-  try {
-    rootElement.setAttribute("contenteditable", "plaintext-only");
-    rootElement.focus({ preventScroll: true });
-    focusAccepted = documentNode.activeElement === rootElement;
-    after = nativeLayoutFingerprint(rootElement);
-    collectPreflightMutations();
-  } catch {
-    preflightFailed = true;
-  } finally {
-    if (hadContentEditable) {
-      rootElement.setAttribute("contenteditable", previousContentEditable ?? "");
-    } else {
-      rootElement.removeAttribute("contenteditable");
-    }
-    try {
-      const ViewHTMLElement = view?.HTMLElement;
-      if (
-        ViewHTMLElement
-        && priorActiveElement instanceof ViewHTMLElement
-        && priorActiveElement.isConnected
-      ) {
-        (priorActiveElement as HTMLElement).focus({ preventScroll: true });
-      } else {
-        rootElement.blur();
-      }
-      for (const position of scrollPositions) {
-        position.element.scrollLeft = position.left;
-        position.element.scrollTop = position.top;
-      }
-      if (liveSelection) {
-        liveSelection.removeAllRanges();
-        if (
-          priorSelection
-          && priorSelection.anchorNode.isConnected
-          && priorSelection.focusNode.isConnected
-        ) {
-          liveSelection.setBaseAndExtent(
-            priorSelection.anchorNode,
-            priorSelection.anchorOffset,
-            priorSelection.focusNode,
-            priorSelection.focusOffset,
-          );
-        }
-      }
-    } catch {
-      preflightFailed = true;
-    }
-    collectPreflightMutations();
-    preflightObserver?.disconnect();
-  }
-  const restored = nativeLayoutFingerprint(rootElement);
-  const activeElementRestored = documentNode.activeElement === priorActiveElement;
-  const selectionRestored = !liveSelection
-    || (
-      !hadSelectionRange
-        ? liveSelection.rangeCount === 0
-        : Boolean(
-            priorSelection
-            && liveSelection.anchorNode === priorSelection.anchorNode
-            && liveSelection.anchorOffset === priorSelection.anchorOffset
-            && liveSelection.focusNode === priorSelection.focusNode
-            && liveSelection.focusOffset === priorSelection.focusOffset
-          )
-    );
-  const layoutStable = sameNativeLayout(before, after);
-  const styleStable = sameNativeTextStyle(before, after);
-  const restorationStable = sameNativeLayout(before, restored)
-    && sameNativeTextStyle(before, restored);
-  const unexpectedPreflightMutations = preflightMutationRecords.filter((record) => !(
-    record.type === "attributes"
-    && record.target === rootElement
-    && record.attributeName === "contenteditable"
-  ));
-  // Chromium exposes caret hit-testing APIs for vertical writing, but that is
-  // not enough to promise stable visual up/down movement and range geometry.
-  // Keep the native-edit contract fail-closed until the vertical caret matrix
-  // is explicitly release-gated; text selection and comments remain available.
-  const writingModeSupportsNativeCaret = (
-    before.writingMode === ""
-    || before.writingMode === "horizontal-tb"
-  );
-  const nativeEventDeliveryStable = [
-    rootElement,
-    ...Array.from(rootElement.querySelectorAll<HTMLElement>("*")),
-  ].every((element) => (
-    view?.getComputedStyle(element).display.toLowerCase() !== "contents"
-  ));
-  return {
-    runtimeMap,
-    layoutDebug: { before, after, restored },
-    runtime: {
-      preflightComplete: true,
-      sourceBacked: Boolean(rootElement.getAttribute(SOURCE_NODE_ATTRIBUTE)),
-      isConnected: rootElement.isConnected,
-      crossOrigin: false,
-      insideShadowRoot: rootElement.getRootNode() !== rootElement.ownerDocument,
-      generatedContent: false,
-      pseudoContent: hasGeneratedPseudoContent(rootElement),
-      isSingleTextIsland: nativeLogicalText(rootElement) === sourceMap.text,
-      mappingComplete: Boolean(runtimeMap),
-      styleStable: styleStable && restorationStable,
-      layoutStable: layoutStable && restorationStable,
-      selectionStable: focusAccepted
-        && activeElementRestored
-        && selectionRestored
-        && writingModeSupportsNativeCaret && Boolean(
-        rootElement.ownerDocument.caretPositionFromPoint
-        || rootElement.ownerDocument.caretRangeFromPoint
-      ),
-      observerReady: Boolean(preflightObserver),
-      nativeEventDeliveryStable,
-      authorMutationRisk: preflightFailed
-        || unexpectedPreflightMutations.length > 0
-        || !restorationStable,
-    },
-  };
 }
 
 function sourceTextParentsForSegments(
@@ -2314,6 +1991,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     onChange,
     onSelect,
     onInteraction,
+    onCommentLayout,
     onRequestComment,
     onReady,
     onRequestFlush,
@@ -2371,6 +2049,13 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     target: HtmlCanvasSelection | null,
     selection?: NativeEditSelection,
   ) => void>(() => undefined);
+  const resumeNativeStructureCommitRef = useRef<(
+    result: ReturnType<typeof applyPatchPlan>,
+    resume: NativeStructureCommitResume,
+  ) => boolean>(() => false);
+  const applyNativeFormatShortcutRef = useRef<(
+    shortcut: NativeFormatShortcut,
+  ) => boolean>(() => false);
   const restartCanonicalNativeEditRef = useRef<(
     active: ActiveNativeEdit,
     target: HtmlCanvasSelection,
@@ -2408,6 +2093,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const onChangeRef = useRef(onChange);
   const onSelectRef = useRef(onSelect);
   const onInteractionRef = useRef(onInteraction);
+  const onCommentLayoutRef = useRef(onCommentLayout);
   const onRequestCommentRef = useRef(onRequestComment);
   const onRequestFlushRef = useRef(onRequestFlush);
   const onEditBlockedRef = useRef(onEditBlocked);
@@ -2430,6 +2116,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   onChangeRef.current = onChange;
   onSelectRef.current = onSelect;
   onInteractionRef.current = onInteraction;
+  onCommentLayoutRef.current = onCommentLayout;
   onRequestCommentRef.current = onRequestComment;
   onRequestFlushRef.current = onRequestFlush;
   onEditBlockedRef.current = onEditBlocked;
@@ -2458,6 +2145,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     lineHeight: 24,
     isBold: false,
     isItalic: false,
+    isUnderline: false,
     sources: [],
   });
   const [moveAvailability, setMoveAvailability] = useState<MoveAvailability>({ up: false, down: false });
@@ -2608,6 +2296,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     const styleIsItalic = (candidate: CSSStyleDeclaration) => (
       candidate.fontStyle === "italic" || candidate.fontStyle === "oblique"
     );
+    const styleIsUnderline = (candidate: CSSStyleDeclaration) => (
+      candidate.textDecorationLine.split(/\s+/u).includes("underline")
+    );
     setSelectedStyle({
       fontSize: Math.max(1, Math.round(Number.parseFloat(computedStyle.fontSize) || 16)),
       color: toHexColor(computedStyle.color, "#202124"),
@@ -2620,6 +2311,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       ),
       isBold: rangeComputedStyles.every(styleIsBold),
       isItalic: rangeComputedStyles.every(styleIsItalic),
+      isUnderline: rangeComputedStyles.every(styleIsUnderline),
       sources: styleSourcesForElement(styleElement),
     });
   }, []);
@@ -2665,6 +2357,54 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       return;
     }
 
+    const containerRect = container.getBoundingClientRect();
+    const iframeRect = iframe.getBoundingClientRect();
+    const frameOffsetLeft = iframeRect.left - containerRect.left;
+    const frameOffsetTop = iframeRect.top - containerRect.top;
+    const frameHeight = iframe.clientHeight;
+    const frameWidth = iframe.clientWidth;
+    const scrollingElement = documentNode.scrollingElement || documentNode.documentElement;
+    const frameView = documentNode.defaultView;
+    const scrollTop = Math.max(
+      0,
+      Number(frameView?.scrollY || scrollingElement.scrollTop || 0),
+    );
+    const commentLayouts = commentedTargetsRef.current.flatMap((rawTarget) => {
+      const target = rawTarget.target;
+      try {
+        const sourceIndex = sourceIndexRef.current;
+        const resolution = sourceIndex
+          ? resolveTargetRef(sourceIndex, sourceTargetRefForSelection(target))
+          : null;
+        if (resolution?.target?.type !== "element") return [];
+        const escapedNodeId = String(resolution.target.nodeId)
+          .replace(/\\/g, "\\\\")
+          .replace(/"/g, '\\"');
+        const targetElement = documentNode.querySelector<HTMLElement>(
+          `[${SOURCE_NODE_ATTRIBUTE}="${escapedNodeId}"]`,
+        );
+        if (!targetElement) return [];
+        const targetRect = targetElement.getBoundingClientRect();
+        return [{
+          targetId: target.id,
+          top: Math.max(0, targetRect.top + scrollTop),
+          height: Math.max(0, targetRect.height),
+        }];
+      } catch {
+        return [];
+      }
+    });
+    onCommentLayoutRef.current?.({
+      scrollTop,
+      scrollHeight: Math.max(
+        scrollingElement.scrollHeight,
+        documentNode.documentElement.scrollHeight,
+        documentNode.body.scrollHeight,
+      ),
+      clientHeight: frameHeight,
+      targets: commentLayouts,
+    });
+
     if (lockedRef.current) {
       setOverlayPosition(null);
       setInsertionPoints([]);
@@ -2672,13 +2412,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       insertionPointsRef.current = [];
       return;
     }
-
-    const containerRect = container.getBoundingClientRect();
-    const iframeRect = iframe.getBoundingClientRect();
-    const frameOffsetLeft = iframeRect.left - containerRect.left;
-    const frameOffsetTop = iframeRect.top - containerRect.top;
-    const frameHeight = iframe.clientHeight;
-    const frameWidth = iframe.clientWidth;
 
     if (element?.isConnected) {
       const elementRect = element.getBoundingClientRect();
@@ -3266,6 +2999,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         /** A source-authority fence will retire this session immediately. */
         deferPreviewReconcile?: boolean;
       };
+      nativeStructureCommit?: {
+        resolveResume: (
+          result: ReturnType<typeof applyPatchPlan>,
+        ) => NativeStructureCommitResume;
+      };
     } = {},
   ): ReturnType<typeof applyPatchPlan> | null => {
     const sourceIndex = sourceIndexRef.current;
@@ -3288,14 +3026,20 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
 
     try {
       const forwardPlan = planSourcePatch(command, sourceIndex) as SourcePatchPlan;
-      const originalTargets = uniqueSelections([
-        mutation.target,
+      const ambientTargets = uniqueSelections([
         ...commentedTargetsRef.current.map((entry) => entry.target),
         ...trackedTargetsRef.current,
       ]);
+      const originalTargets = uniqueSelections([
+        mutation.target,
+        ...ambientTargets,
+      ]);
+      const mapsOneTargetToMany =
+        sourcePatchOperationType(forwardPlan) === "split-text-block";
       const trackedTargetRefs = trackedSourceTargetRefs(
-        originalTargets,
+        ambientTargets,
         forwardPlan.targetRefs,
+        { includeOperationTargetIds: mapsOneTargetToMany },
       );
       const result = applyPatchPlan(
         forwardPlan,
@@ -3304,16 +3048,34 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       );
       if (result.html === currentSource) return null;
       options.validateResult?.(result);
+      const nativeStructureResume = options.nativeStructureCommit
+        ? options.nativeStructureCommit.resolveResume(result)
+        : null;
+      if (
+        nativeStructureResume
+        && (
+          !activeNativeEditRef.current
+          || activeNativeEditRef.current.target.id !== mutation.target.id
+        )
+      ) {
+        throw new Error("段落拆分前的原位编辑会话已经变化，已停止提交。");
+      }
       const targetUpdates = deterministicTargetUpdates(result, originalTargets);
       const targetUpdatesById = new Map(
         targetUpdates.map((target) => [target.id, target]),
       );
+      const operationTargetUpdate = deterministicOperationTargetUpdate(
+        result,
+        mutation.target,
+      );
       let appliedMutation: HtmlCanvasMutation = {
         ...mutation,
-        target: targetUpdatesById.get(mutation.target.id) || {
-          ...mutation.target,
-          resolution: "orphaned",
-        },
+        target: operationTargetUpdate
+          || targetUpdatesById.get(mutation.target.id)
+          || {
+            ...mutation.target,
+            resolution: "orphaned",
+          },
         targetUpdates,
         trackedTargetIds: [
           ...new Set([
@@ -3342,12 +3104,27 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       }
       setEditFeedback(null);
       lastEmittedHtmlRef.current = result.html;
+      if (nativeStructureResume) {
+        sourceIndexRef.current = result.sourceIndex;
+        frameSourceHtmlRef.current = result.html;
+        if (resumeNativeStructureCommitRef.current(result, nativeStructureResume)) {
+          containerRef.current?.setAttribute(
+            "data-native-commit-path",
+            "structural-fence-reload",
+          );
+          return result;
+        }
+        nativeEditNeedsReloadRef.current = true;
+        renderedSourceHtmlRef.current = null;
+      }
       const activeNativeEdit = activeNativeEditRef.current;
       const keepsNativeEditMounted = Boolean(
         activeNativeEdit
         && activeNativeEdit.target.id === mutation.target.id
         && (
           forwardPlan.type === "replace-text-range"
+          || forwardPlan.type === "replace-text-flow-range"
+          || forwardPlan.type === "delete-hard-break"
           || forwardPlan.type === "set-text-range-style"
         ),
       );
@@ -4029,6 +3806,151 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     checkpointNativeEdit();
   };
 
+  const applyNativeSourceEditIntent = useCallback((
+    originSession: NativeEditingController,
+    intent: NativeSourceEditIntent,
+  ): boolean => {
+    const originActive = activeNativeEditRef.current;
+    if (!originActive || originActive.session !== originSession) return false;
+
+    const checkpoint = checkpointNativeEdit("manual");
+    if (!checkpoint.ok) return true;
+    const active = activeNativeEditRef.current;
+    const sourceIndex = sourceIndexRef.current;
+    if (!active || !sourceIndex || sourceIndex.source !== frameSourceHtmlRef.current) {
+      reportBlockedEdit(new Error("结构编辑前的源码状态已经变化，请重新点选文字后再试。"));
+      return true;
+    }
+
+    try {
+      const structural = planNativeStructuralEdit(active.projection, intent);
+      let validatedProjection: SourceTextMap | null = null;
+      let structuralResume: NativeStructureCommitResume | null = null;
+      const mutation: HtmlCanvasMutation = {
+        kind: "structure",
+        target: active.target,
+        property: structural.kind === "delete-hard-break"
+          ? "hardBreakDelete"
+          : structural.kind === "split-block"
+            ? "blockSplit"
+            : "plainTextFlow",
+        before: {
+          text: structural.previousText,
+          selection: intent.selection,
+        },
+        after: {
+          text: structural.nextText,
+          ...(structural.firstText !== undefined
+            ? {
+                firstText: structural.firstText,
+                secondText: structural.secondText,
+              }
+            : {}),
+          selection: structural.selection,
+          inputType: structural.inputType,
+        },
+      };
+      const result = applySourceCommand({
+        ...structural.command,
+        targetRef: active.rootTargetRef,
+        expectedSourceSha256: active.projection.sourceSha256,
+      } as SourcePatchCommand, mutation, {
+        ...(structural.kind === "split-block"
+          ? {
+              nativeStructureCommit: {
+                resolveResume: () => {
+                  if (!structuralResume) {
+                    throw new Error("新增段落无法在源码中精确定位，已停止提交。");
+                  }
+                  mutation.after = {
+                    ...(mutation.after as Record<string, unknown>),
+                    resumeTarget: structuralResume.target,
+                  };
+                  return structuralResume;
+                },
+              },
+            }
+          : {
+              nativeTextCommit: {
+                selection: structural.selection,
+                requiresCanonicalReconcile: true,
+              },
+            }),
+        validateResult: (candidate) => {
+          const operationTargetRef = candidate.refreshedTargetRefs.find(
+            (targetRef: SourceTargetRef) => (
+              targetRef.targetId === active.rootTargetRef.targetId
+            ),
+          );
+          if (!operationTargetRef || operationTargetRef.resolution !== "exact") {
+            throw new Error("结构编辑后的文字宿主无法精确重绑，已停止提交。");
+          }
+          const projection = buildSourceTextMap(
+            candidate.sourceIndex,
+            operationTargetRef,
+            { allowEmpty: true },
+          );
+          if (structural.kind !== "split-block") {
+            if (projection.text !== structural.nextText) {
+              throw new Error("换行后的源码文字与预期不一致，已停止提交。");
+            }
+            validatedProjection = projection;
+            return;
+          }
+          if (projection.text !== structural.firstText) {
+            throw new Error("拆分后的第一段文字与预期不一致，已停止提交。");
+          }
+          const createdBlockStartOffset = Number(
+            candidate.inversePlan.metadata?.createdBlockStartOffset,
+          );
+          const createdBlock = (candidate.sourceIndex.elements as SourceElementValue[]).find(
+            (element) => (
+              element.tagName === active.projection.rootTagName
+              && element.startTagRange.startOffset === createdBlockStartOffset
+            ),
+          );
+          if (!createdBlock) {
+            throw new Error("新增段落无法在源码中精确定位，已停止提交。");
+          }
+          const createdTargetRef = createTargetRef(
+            candidate.sourceIndex,
+            createdBlock,
+            { level: active.rootTargetRef.level },
+          ) as SourceTargetRef;
+          const createdProjection = buildSourceTextMap(
+            candidate.sourceIndex,
+            createdTargetRef,
+            { allowEmpty: true },
+          );
+          if (createdProjection.text !== structural.secondText) {
+            throw new Error("拆分后的第二段文字与预期不一致，已停止提交。");
+          }
+          structuralResume = {
+            target: selectionFromRefreshedTarget(
+              active.target,
+              createdTargetRef,
+              createdBlock.nodeId,
+            ),
+            selection: structural.selection,
+          };
+          validatedProjection = createdProjection;
+        },
+      });
+      if (!result || !validatedProjection) {
+        reportBlockedEdit(new Error("这处文字无法生成安全的结构修改。"));
+      }
+    } catch (cause) {
+      reportBlockedEdit(cause);
+    }
+    // The browser event is always consumed once it reaches the source-owned
+    // structural lane. A rejected plan must not fall back to browser DOM.
+    return true;
+  }, [
+    applySourceCommand,
+    checkpointNativeEdit,
+    reportBlockedEdit,
+  ]);
+
   const finishNativeEditing = useCallback((
     shouldApply: boolean,
     trigger: NativeEditCheckpointTrigger = "manual",
@@ -4241,6 +4163,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     restoredSelection?: NativeEditSelection,
   ): boolean => {
     containerRef.current?.setAttribute("data-native-start-status", "starting");
+    containerRef.current?.removeAttribute("data-native-host-mode");
+    containerRef.current?.removeAttribute("data-native-event-delivery-mode");
     if (readOnlyRef.current) {
       containerRef.current?.setAttribute("data-native-start-status", "read-only");
       return false;
@@ -4283,10 +4207,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       const activationLogicalRange = priorRange
         ? sourceSegmentsToTextRange(projection, priorRange.segments)
         : null;
-      const preflight = nativeRuntimePreflight(
+      const preflight = inspectNativeEditRuntime(
         hostElement,
         projection,
         rootTargetRef,
+        { ariaLabel: `编辑${target.label}` },
       );
       const capability = classifyNativeEditCapability(
         sourceIndex,
@@ -4300,7 +4225,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           runtime: preflight.runtime,
         },
       );
-      if (!isNativeEditableCapability(capability) || !preflight.runtimeMap) {
+      if (
+        !isNativeEditableCapability(capability)
+        || !preflight.runtimeMap
+        || !preflight.hostMode
+      ) {
         containerRef.current?.setAttribute(
           "data-native-start-status",
           `capability:${capability.code}`,
@@ -4383,8 +4312,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             : NATIVE_EDIT_CHECKPOINT_DELAY_MS);
         }
       };
-      const session = new NativeEditingController({
+      const session: NativeEditingController = new NativeEditingController({
         hostElement,
+        hostMode: preflight.hostMode,
         baseline,
         lease: {
           stamp: lease,
@@ -4464,6 +4394,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         onEscape: () => finishNativeEditing(true, "manual"),
         onUndo: () => undoRef.current(),
         onRedo: () => redoRef.current(),
+        onSourceEditIntent: (intent: NativeSourceEditIntent): boolean => (
+          applyNativeSourceEditIntent(session, intent)
+        ),
         onUnsupportedInput: (inputType) => reportBlockedEdit(new Error(
           inputType === "insertFromPasteMultiline"
             ? "当前结构暂不支持多行粘贴，可粘贴单行文字或添加评论。"
@@ -4507,6 +4440,14 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       retainNativeEditFocusRef.current = null;
       containerRef.current?.removeAttribute("data-edit-block-detail");
       containerRef.current?.removeAttribute("data-native-capability-detail");
+      containerRef.current?.setAttribute(
+        "data-native-host-mode",
+        preflight.hostMode,
+      );
+      containerRef.current?.setAttribute(
+        "data-native-event-delivery-mode",
+        preflight.runtime.nativeEventDeliveryMode ?? "unsafe",
+      );
       hostElement.setAttribute("data-html-canvas-editing", "true");
       activeTextRangeRef.current = priorRange
         ? { ...priorRange, target }
@@ -4547,6 +4488,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   }, [
     clearNativeEditCheckpointTimer,
     finishNativeEditing,
+    applyNativeSourceEditIntent,
     refreshNativeEditRangeState,
     reportBlockedEdit,
     selectElement,
@@ -5054,6 +4996,28 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   }, [loadFrameSource]);
   queueNativeFenceReloadRef.current = queueNativeFenceReload;
 
+  const resumeNativeStructureCommit = useCallback((
+    result: ReturnType<typeof applyPatchPlan>,
+    resume: NativeStructureCommitResume,
+  ): boolean => {
+    const bookmark = detachNativeEditForFence();
+    if (!bookmark) return false;
+    sourceIndexRef.current = result.sourceIndex;
+    frameSourceHtmlRef.current = result.html;
+    queueNativeFenceReload(
+      result.html,
+      {
+        ...bookmark,
+        target: resume.target,
+        selection: resume.selection,
+      },
+      resume.target,
+      resume.selection,
+    );
+    return true;
+  }, [detachNativeEditForFence, queueNativeFenceReload]);
+  resumeNativeStructureCommitRef.current = resumeNativeStructureCommit;
+
   const applyHistoryPlan = useCallback((
     plan: SourcePatchPlan,
     mutation: HtmlCanvasMutation,
@@ -5066,14 +5030,30 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         reportBlockedEdit(new Error("源码地图已过期，无法安全撤销。"));
         return null;
       }
-      const originalTargets = uniqueSelections([
-        mutation.target,
+      const ambientTargets = uniqueSelections([
         ...commentedTargetsRef.current.map((entry) => entry.target),
         ...trackedTargetsRef.current,
       ]);
+      const originalTargets = uniqueSelections([
+        mutation.target,
+        ...ambientTargets,
+      ]);
+      const mapsOneTargetToMany =
+        sourcePatchOperationType(plan) === "split-text-block";
+      const planMetadata = plan.metadata as Record<string, unknown> | undefined;
+      const recoverableSplitTargetIds = new Set<string>(
+        mapsOneTargetToMany
+        && Array.isArray(planMetadata?.splitTrackedTargetIds)
+          ? planMetadata.splitTrackedTargetIds.map(String)
+          : [],
+      );
       const trackedTargetRefs = trackedSourceTargetRefs(
-        originalTargets,
+        ambientTargets,
         plan.targetRefs,
+        {
+          includeOperationTargetIds: mapsOneTargetToMany,
+          includeUnresolvedTargetIds: recoverableSplitTargetIds,
+        },
       );
       const result = applyPatchPlan(
         plan,
@@ -5084,12 +5064,18 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       const targetUpdatesById = new Map(
         targetUpdates.map((target) => [target.id, target]),
       );
+      const operationTargetUpdate = deterministicOperationTargetUpdate(
+        result,
+        mutation.target,
+      );
       const appliedMutation: HtmlCanvasMutation = {
         ...mutation,
-        target: targetUpdatesById.get(mutation.target.id) || {
-          ...mutation.target,
-          resolution: "orphaned",
-        },
+        target: operationTargetUpdate
+          || targetUpdatesById.get(mutation.target.id)
+          || {
+            ...mutation.target,
+            resolution: "orphaned",
+          },
         targetUpdates,
         trackedTargetIds: [
           ...new Set([
@@ -5110,6 +5096,45 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       }
       sourceIndexRef.current = result.sourceIndex;
       frameSourceHtmlRef.current = result.html;
+      let historyResumeTarget = appliedMutation.target;
+      const mutationAfter = mutation.after;
+      const storedResumeTarget = (
+        mutation.historyAction === "redo"
+        && mutationAfter
+        && typeof mutationAfter === "object"
+        && "resumeTarget" in mutationAfter
+      )
+        ? (mutationAfter as { resumeTarget?: HtmlCanvasSelection }).resumeTarget
+        : null;
+      if (storedResumeTarget) {
+        try {
+          const resolvedResume = resolveTargetRef(
+            result.sourceIndex,
+            sourceTargetRefForSelection(storedResumeTarget),
+          );
+          if (
+            resolvedResume.resolution === "exact"
+            && resolvedResume.target?.type === "element"
+          ) {
+            const refreshedResumeRef = createTargetRef(
+              result.sourceIndex,
+              resolvedResume.target,
+              {
+                targetId: storedResumeTarget.id,
+                label: storedResumeTarget.label,
+                level: targetLevelForSelection(storedResumeTarget.level),
+              },
+            ) as SourceTargetRef;
+            historyResumeTarget = selectionFromRefreshedTarget(
+              storedResumeTarget,
+              refreshedResumeRef,
+              resolvedResume.target.nodeId,
+            );
+          }
+        } catch {
+          historyResumeTarget = appliedMutation.target;
+        }
+      }
       const nextSelection = nativeBookmark
         ? nativeSelectionFromMutationValue(
             appliedMutation.after,
@@ -5122,7 +5147,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       queueNativeFenceReload(
         result.html,
         nativeBookmark,
-        appliedMutation.target,
+        historyResumeTarget,
         nextSelection,
       );
       setEditFeedback(null);
@@ -5706,6 +5731,22 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       }
       const activeNativeEdit = activeNativeEditRef.current;
       if (activeNativeEdit?.rootElement.contains(event.target as Node)) {
+        const formatShortcut = (
+          (event.metaKey || event.ctrlKey)
+          && !event.altKey
+        )
+          ? ({
+              b: "bold",
+              i: "italic",
+              u: "underline",
+            } as const)[event.key.toLowerCase() as "b" | "i" | "u"]
+          : null;
+        if (formatShortcut) {
+          event.preventDefault();
+          event.stopPropagation();
+          applyNativeFormatShortcutRef.current(formatShortcut);
+          return;
+        }
         if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") {
           event.preventDefault();
           if (event.shiftKey) redo();
@@ -6133,6 +6174,52 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     ],
   );
 
+  const applyNativeFormatShortcut = useCallback((
+    shortcut: NativeFormatShortcut,
+  ): boolean => {
+    const active = activeNativeEditRef.current;
+    if (!active) return false;
+    const nativeSelection = active.session.getSelection();
+    refreshNativeEditRangeState(active, nativeSelection);
+    const activeRange = activeTextRangeRef.current;
+    if (!activeRange) {
+      reportBlockedEdit(new Error("请先选中要修改的文字，再使用格式快捷键。"));
+      return true;
+    }
+    const view = active.rootElement.ownerDocument.defaultView;
+    const styleElements = activeRange.styleElements.length > 0
+      ? activeRange.styleElements
+      : [active.rootElement];
+    const computedStyles = styleElements.map((element) => (
+      view!.getComputedStyle(element)
+    ));
+    if (shortcut === "bold") {
+      const enabled = computedStyles.every((style) => (
+        style.fontWeight === "bold"
+        || Number.parseInt(style.fontWeight, 10) >= 600
+      ));
+      applyInlineStyle("fontWeight", enabled ? "normal" : "700");
+      return true;
+    }
+    if (shortcut === "italic") {
+      const enabled = computedStyles.every((style) => (
+        style.fontStyle === "italic" || style.fontStyle === "oblique"
+      ));
+      applyInlineStyle("fontStyle", enabled ? "normal" : "italic");
+      return true;
+    }
+    const enabled = computedStyles.every((style) => (
+      style.textDecorationLine.split(/\s+/u).includes("underline")
+    ));
+    applyInlineStyle("textDecorationLine", enabled ? "none" : "underline");
+    return true;
+  }, [
+    applyInlineStyle,
+    refreshNativeEditRangeState,
+    reportBlockedEdit,
+  ]);
+  applyNativeFormatShortcutRef.current = applyNativeFormatShortcut;
+
   const handleToolbarKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") {
       event.preventDefault();
@@ -6386,6 +6473,19 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
                   onClick={() => applyInlineStyle("fontStyle", selectedStyle.isItalic ? "normal" : "italic")}
                 >
                   斜体
+                </button>
+                <button
+                  type="button"
+                  className={styles.formatButton}
+                  aria-pressed={selectedStyle.isUnderline}
+                  disabled={textFormatRequiresSelection}
+                  title={textFormatRequiresSelection ? "请先选中要修改的文字" : "下划线"}
+                  onClick={() => applyInlineStyle(
+                    "textDecorationLine",
+                    selectedStyle.isUnderline ? "none" : "underline",
+                  )}
+                >
+                  下划线
                 </button>
               </div>
 

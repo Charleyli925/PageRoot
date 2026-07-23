@@ -286,7 +286,10 @@ test("release commands use one automated artifact lane with full tests and packa
 
   const layout = expectedArtifactLayout({ productRoot, packageJson, arch: "arm64" });
   assert.match(layout.appPath, /release\/mac-arm64\/PageRoot\.app$/);
-  assert.match(layout.dmgPath, /PageRoot-0\.8\.3-arm64\.dmg$/);
+  assert.equal(
+    path.basename(layout.dmgPath),
+    `PageRoot-${packageJson.version}-arm64.dmg`,
+  );
 });
 
 test("retired editor guard rejects dependencies, bundled code, and legacy editing surfaces", () => {

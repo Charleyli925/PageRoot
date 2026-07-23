@@ -745,6 +745,188 @@ test("replacement command fails closed for stale, overlap, hard-break, atom, for
   }, html));
 });
 
+test("plain text flow inserts generated hard breaks, escapes markup, and round-trips bytes", () => {
+  const html = `<section data-keep="yes"><p id="flow">甲&amp;乙</p><aside>outside</aside></section>`;
+  const index = buildSourceIndex(html);
+  const paragraph = elementBy(index, (element) => element.stableAttributes.id === "flow");
+  const map = buildSourceTextMap(index, paragraph.nodeId);
+  const targetRef = createTargetRef(index, paragraph.nodeId, { level: "subregion" });
+  const edit = textRangeToSourceEdit(map, 2, 2, "right");
+  const plan = planSourcePatch({
+    type: "replace-text-flow-range",
+    targetRef,
+    replacements: [{
+      deleteSegments: edit.deleteSegments,
+      insertAt: edit.insertAt,
+      beforeText: "",
+      nextText: `<img src=x>\n第二行 & 保留`,
+    }],
+    beforeText: "",
+    expectedSourceSha256: index.sourceSha256,
+  }, index);
+  const result = applyPatchPlan(plan, html);
+
+  assert.equal(
+    result.html,
+    `<section data-keep="yes"><p id="flow">甲&amp;&lt;img src=x><br>第二行 &amp; 保留乙</p><aside>outside</aside></section>`,
+  );
+  assert.equal(result.patches.length, 1);
+  assert.equal(result.patches[0].kind, "text-flow");
+  assert.equal(result.scopeReport.outsideUnchanged, true);
+  const undone = applyPatchPlan(result.inversePlan, result.html);
+  assert.equal(undone.html, html);
+  assert.equal(applyPatchPlan(undone.inversePlan, undone.html).html, result.html);
+
+  assertPatchError("TEXT_FLOW_BREAK_REQUIRED", () => planSourcePatch({
+    type: "replace-text-flow-range",
+    targetRef,
+    replacements: [{
+      deleteSegments: [],
+      insertAt: edit.insertAt,
+      nextText: "single line",
+    }],
+  }, index));
+  assertPatchError("TEXT_FLOW_NOT_NORMALIZED", () => planSourcePatch({
+    type: "replace-text-flow-range",
+    targetRef,
+    replacements: [{
+      deleteSegments: [],
+      insertAt: edit.insertAt,
+      nextText: "first\r\nsecond",
+    }],
+  }, index));
+  assertPatchError("PATCH_PLAN_TAMPERED", () => applyPatchPlan({
+    ...plan,
+    patches: plan.patches.map((patch) => ({ ...patch, after: "<script>x</script>" })),
+  }, html));
+});
+
+test("one authored hard break can be deleted and restored without rewriting neighbours", () => {
+  const html = `<div data-keep='1'><p id="flow">第一行<br class='authored'>第二行</p><aside>same</aside></div>`;
+  const index = buildSourceIndex(html);
+  const paragraph = elementBy(index, (element) => element.stableAttributes.id === "flow");
+  const hardBreak = elementBy(index, (element) => (
+    element.tagName === "br" && element.parentId === paragraph.nodeId
+  ));
+  const targetRef = createTargetRef(index, paragraph.nodeId, { level: "subregion" });
+  const plan = planSourcePatch({
+    type: "delete-hard-break",
+    targetRef,
+    hardBreakNodeId: hardBreak.nodeId,
+    expectedSourceSha256: index.sourceSha256,
+  }, index);
+  const result = applyPatchPlan(plan, html);
+
+  assert.equal(
+    result.html,
+    `<div data-keep='1'><p id="flow">第一行第二行</p><aside>same</aside></div>`,
+  );
+  assert.deepEqual(result.patches.map(({ before, after, kind }) => ({
+    before,
+    after,
+    kind,
+  })), [{
+    before: `<br class='authored'>`,
+    after: "",
+    kind: "hard-break",
+  }]);
+  const undone = applyPatchPlan(result.inversePlan, result.html);
+  assert.equal(undone.html, html);
+  assert.equal(applyPatchPlan(undone.inversePlan, undone.html).html, result.html);
+
+  assertPatchError("HARD_BREAK_TARGET_INVALID", () => planSourcePatch({
+    type: "delete-hard-break",
+    targetRef,
+    hardBreakNodeId: paragraph.nodeId,
+  }, index));
+});
+
+test("simple paragraph and list-item splits preserve text bytes and omit cloned identity or behavior attributes", () => {
+  const fixtures = [
+    {
+      html: `<main><p id='copy' class="lead" style='color:red' data-item-id='one' data-section="hero" onclick='go()'>甲&amp;乙丙</p><aside>same</aside></main>`,
+      tagName: "p",
+      splitOffset: 2,
+      expectedFirst: "甲&",
+      expectedSecond: "乙丙",
+    },
+    {
+      html: `<ol><li id="item" class='row' value="7">第一项第二项</li></ol>`,
+      tagName: "li",
+      splitOffset: 3,
+      expectedFirst: "第一项",
+      expectedSecond: "第二项",
+    },
+  ];
+
+  for (const fixture of fixtures) {
+    const index = buildSourceIndex(fixture.html);
+    const block = elementBy(index, (element) => (
+      element.tagName === fixture.tagName
+      && element.attributesByName.has("id")
+    ));
+    const targetRef = createTargetRef(index, block.nodeId, { level: "subregion" });
+    const plan = planSourcePatch({
+      type: "split-text-block",
+      targetRef,
+      splitOffset: fixture.splitOffset,
+      expectedSourceSha256: index.sourceSha256,
+    }, index);
+    const result = applyPatchPlan(plan, fixture.html);
+    const blocks = result.sourceIndex.elements.filter(
+      (element) => element.tagName === fixture.tagName,
+    );
+
+    assert.equal(blocks.length, 2);
+    assert.equal(blocks[0].textContent, fixture.expectedFirst);
+    assert.equal(blocks[1].textContent, fixture.expectedSecond);
+    assert.equal(blocks[1].attributesByName.has("id"), false);
+    assert.equal(blocks[1].attributesByName.has("name"), false);
+    assert.equal(blocks[1].attributesByName.has("value"), false);
+    assert.equal(blocks[1].attributes.some(({ name }) => name.startsWith("on")), false);
+    assert.equal(blocks[1].attributesByName.has("class"), true);
+    assert.equal(
+      blocks[1].startTagRange.startOffset,
+      plan.metadata.createdBlockStartOffset,
+    );
+    assert.equal(result.scopeReport.outsideUnchanged, true);
+    if (fixture.tagName === "p") {
+      assert.equal(blocks[1].attributesByName.has("data-item-id"), false);
+      assert.equal(blocks[1].attributesByName.has("data-section"), true);
+      assert.match(result.html, /<aside>same<\/aside>/u);
+    }
+
+    const undone = applyPatchPlan(result.inversePlan, result.html);
+    assert.equal(undone.html, fixture.html);
+    assert.equal(applyPatchPlan(undone.inversePlan, undone.html).html, result.html);
+    assertPatchError("PATCH_PLAN_TAMPERED", () => applyPatchPlan({
+      ...plan,
+      patches: plan.patches.map((patch) => ({
+        ...patch,
+        after: patch.after.replace(fixture.tagName, "section"),
+      })),
+    }, fixture.html));
+  }
+});
+
+test("block splitting refuses complex children, boundary carets, and unsupported roots", () => {
+  for (const [html, id, splitOffset, code] of [
+    [`<p id="copy">甲<strong>乙</strong></p>`, "copy", 1, "BLOCK_SPLIT_COMPLEX_CONTENT"],
+    [`<p id="copy">甲乙</p>`, "copy", 0, "BLOCK_SPLIT_BOUNDARY_UNSUPPORTED"],
+    [`<h2 id="copy">甲乙</h2>`, "copy", 1, "BLOCK_SPLIT_UNSUPPORTED"],
+  ]) {
+    const index = buildSourceIndex(html);
+    const block = elementBy(index, (element) => element.stableAttributes.id === id);
+    const targetRef = createTargetRef(index, block.nodeId, { level: "subregion" });
+    assertPatchError(code, () => planSourcePatch({
+      type: "split-text-block",
+      targetRef,
+      splitOffset,
+      expectedSourceSha256: index.sourceSha256,
+    }, index));
+  }
+});
+
 test("inline style patch preserves quote, attribute order, unrelated declarations, and !important", () => {
   const html = `<button data-x=1 class='cta' style='color : red !important;  padding:4px ; --Token: 10' aria-label="go">Go</button>`;
   const index = buildSourceIndex(html);

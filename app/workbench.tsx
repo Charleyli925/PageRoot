@@ -12,21 +12,29 @@ import {
   type ChangeEvent,
   type ClipboardEvent,
 } from "react";
-import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
+import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowCounterClockwise";
 import { CaretRightIcon } from "@phosphor-icons/react/dist/csr/CaretRight";
 import { ChatCircleTextIcon } from "@phosphor-icons/react/dist/csr/ChatCircleText";
 import { CheckCircleIcon } from "@phosphor-icons/react/dist/csr/CheckCircle";
 import { ClockCounterClockwiseIcon } from "@phosphor-icons/react/dist/csr/ClockCounterClockwise";
 import { CopyIcon } from "@phosphor-icons/react/dist/csr/Copy";
+import { EyeIcon } from "@phosphor-icons/react/dist/csr/Eye";
 import { FileIcon } from "@phosphor-icons/react/dist/csr/File";
-import { FileTextIcon } from "@phosphor-icons/react/dist/csr/FileText";
+import { FileHtmlIcon } from "@phosphor-icons/react/dist/csr/FileHtml";
 import { FolderOpenIcon } from "@phosphor-icons/react/dist/csr/FolderOpen";
+import { ImageIcon } from "@phosphor-icons/react/dist/csr/Image";
+import { LockKeyIcon } from "@phosphor-icons/react/dist/csr/LockKey";
 import { PaperclipIcon } from "@phosphor-icons/react/dist/csr/Paperclip";
+import { PaperPlaneTiltIcon } from "@phosphor-icons/react/dist/csr/PaperPlaneTilt";
+import { PencilSimpleIcon } from "@phosphor-icons/react/dist/csr/PencilSimple";
 import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
+import { SealCheckIcon } from "@phosphor-icons/react/dist/csr/SealCheck";
+import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
 import { TriangleIcon } from "@phosphor-icons/react/dist/csr/Triangle";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 
 import type {
+  HtmlCanvasCommentLayoutState,
   HtmlCanvasEditorHandle,
   HtmlCanvasMutation,
   HtmlCanvasSelection,
@@ -1418,11 +1426,16 @@ export default function Workbench() {
     commentId: string;
   } | null>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  const commentEditRef = useRef<HTMLTextAreaElement>(null);
+  const commentsPanelRef = useRef<HTMLElement>(null);
+  const reviewStageRef = useRef<HTMLDivElement>(null);
   const projectMenuRef = useRef<HTMLDivElement>(null);
   const projectSwitcherRef = useRef<HTMLButtonElement>(null);
   const commentCounter = useRef(1);
   const changeCounter = useRef(1);
   const attachmentCounter = useRef(1);
+  const focusedCommentIdRef = useRef<string | null>(null);
+  const reviewRevealRequestRef = useRef(0);
   const projectEpochRef = useRef(0);
   const projectOpenRequestRef = useRef(0);
   const htmlRef = useRef(DEFAULT_PROJECT_HTML);
@@ -1480,7 +1493,7 @@ export default function Workbench() {
   const [persistState, setPersistState] = useState<PersistState>("idle");
   const [persistError, setPersistError] = useState("");
   const [lastModifiedAt, setLastModifiedAt] = useState<string | null>(null);
-  const [projectMenuOpen, setProjectMenuOpen] = useState(false);
+  const [, setProjectMenuOpen] = useState(false);
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
   const [selection, setSelection] = useState<HtmlCanvasSelection | null>(null);
   const [draftTarget, setDraftTarget] = useState<HtmlCanvasSelection | null>(null);
@@ -1494,6 +1507,15 @@ export default function Workbench() {
   const [comments, setComments] = useState<CommentItem[]>([]);
   const [changeEvents, setChangeEvents] = useState<DirectEditEvent[]>([]);
   const [drawer, setDrawer] = useState<Drawer>(null);
+  const [expandedVersionId, setExpandedVersionId] = useState<string | null>(null);
+  const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
+  const [commentEditDraft, setCommentEditDraft] = useState("");
+  const [pendingDeleteCommentId, setPendingDeleteCommentId] = useState<string | null>(null);
+  const [handoffPreviewOpen, setHandoffPreviewOpen] = useState(false);
+  const [commentRailHeight, setCommentRailHeight] = useState(0);
+  const [commentCardHeights, setCommentCardHeights] = useState<Record<string, number>>({});
+  const [commentTargetTops, setCommentTargetTops] = useState<Record<string, number>>({});
+  const [focusedCommentId, setFocusedCommentId] = useState<string | null>(null);
   const [fileView, setFileView] = useState<WorkspaceFileView | null>(null);
   const [projectRulesSaving, setProjectRulesSaving] = useState(false);
   const [versions, setVersions] = useState<Version[]>([]);
@@ -1506,7 +1528,7 @@ export default function Workbench() {
   const [viewingVersionId, setViewingVersionId] = useState<string | null>(null);
   const [preserveEditorHistory, setPreserveEditorHistory] = useState(false);
   const [renderedContentSha256, setRenderedContentSha256] = useState<string | null>(null);
-  const [bridgeConnected, setBridgeConnected] = useState<boolean | null>(null);
+  const [, setBridgeConnected] = useState<boolean | null>(null);
   const [activeRun, setActiveRun] = useState<ActiveRun | null>(null);
   const [projectLocked, setProjectLocked] = useState(false);
   const [projectHydrating, setProjectHydrating] = useState(false);
@@ -1523,24 +1545,10 @@ export default function Workbench() {
     requestId: string;
     status: QoderHandoffResult["status"];
   } | null>(null);
-  const [updateResult, setUpdateResult] = useState<ManualUpdateResult | null>(null);
+  const [, setUpdateResult] = useState<ManualUpdateResult | null>(null);
   const [openedAiVersionNotice, setOpenedAiVersionNotice] =
     useState<OpenedAiVersionNotice | null>(null);
   const [toast, setToast] = useReducer(noticeReducer, null);
-
-  const openProjectRepository = useCallback(async () => {
-    try {
-      const result = await window.htmlAIUpdates?.openProjectRepository();
-      if (!result?.opened) throw new Error("GitHub 项目页没有打开。");
-    } catch {
-      setToast({
-        title: "GitHub 项目页没有打开",
-        message: "请确认当前网络可以访问 GitHub 后重试。",
-        tone: "warning",
-        dedupeKey: "project-repository",
-      });
-    }
-  }, []);
 
   useEffect(() => {
     const updates = window.htmlAIUpdates;
@@ -1584,9 +1592,13 @@ export default function Workbench() {
     [comments],
   );
   const activeCommentCount = activeCommentItems.length;
-  const summarizedChangeEvents = useMemo(
-    () => summarizeChangeEvents(changeEvents),
-    [changeEvents],
+  const visibleCommentItems = useMemo(
+    () => (
+      viewMode === "history" && viewingVersion
+        ? viewingVersion.comments.filter(commentHasContent)
+        : activeCommentItems
+    ),
+    [activeCommentItems, viewMode, viewingVersion],
   );
   const unsafeHandoffTargets = useMemo(
     () => activeCommentItems.filter(
@@ -1618,6 +1630,9 @@ export default function Workbench() {
     commentsRef.current = comments;
   }, [comments]);
   useEffect(() => {
+    focusedCommentIdRef.current = focusedCommentId;
+  }, [focusedCommentId]);
+  useEffect(() => {
     composerDraftRef.current = draft;
   }, [draft]);
   useEffect(() => {
@@ -1639,13 +1654,61 @@ export default function Workbench() {
     attachmentObjectUrlsRef.current.clear();
   }, []);
 
+  const handleCommentLayout = useCallback((layout: HtmlCanvasCommentLayoutState) => {
+    setCommentRailHeight((current) => (
+      Math.abs(current - layout.scrollHeight) > 1 ? layout.scrollHeight : current
+    ));
+    const nextTops = Object.fromEntries(
+      layout.targets.map((target) => [target.targetId, target.top]),
+    );
+    setCommentTargetTops((current) => {
+      const currentEntries = Object.entries(current);
+      const nextEntries = Object.entries(nextTops);
+      if (
+        currentEntries.length === nextEntries.length
+        && nextEntries.every(([targetId, top]) => current[targetId] === top)
+      ) return current;
+      return nextTops;
+    });
+  }, []);
+
+  useEffect(() => {
+    const root = commentsPanelRef.current;
+    if (!root || typeof ResizeObserver === "undefined") return undefined;
+    const nodes = [...root.querySelectorAll<HTMLElement>("[data-comment-measure]")];
+    const update = () => {
+      const next = Object.fromEntries(nodes.map((node) => [
+        String(node.dataset.commentMeasure),
+        Math.ceil(node.getBoundingClientRect().height),
+      ]));
+      setCommentCardHeights((current) => {
+        const entries = Object.entries(next);
+        if (
+          Object.keys(current).length === entries.length
+          && entries.every(([key, height]) => current[key] === height)
+        ) return current;
+        return next;
+      });
+    };
+    const observer = new ResizeObserver(update);
+    nodes.forEach((node) => observer.observe(node));
+    update();
+    return () => observer.disconnect();
+  }, [
+    attachmentObjectUrls,
+    composerOpen,
+    draftAttachments,
+    editingCommentId,
+    visibleCommentItems,
+  ]);
+
   const commentedTargets = useMemo(() => {
     const grouped = new Map<string, {
       target: HtmlCanvasSelection;
       count: number;
       label: string;
     }>();
-    for (const comment of activeCommentItems) {
+    for (const comment of visibleCommentItems) {
       const current = grouped.get(comment.target.id);
       if (current) current.count += 1;
       else {
@@ -1657,7 +1720,7 @@ export default function Workbench() {
       }
     }
     return [...grouped.values()];
-  }, [activeCommentItems]);
+  }, [visibleCommentItems]);
 
   const trackedAuditTargets = useMemo(() => {
     const byTargetId = new Map<string, HtmlCanvasSelection>();
@@ -2408,6 +2471,15 @@ export default function Workbench() {
     setAttachmentObjectUrls({});
     setAttachmentUploadCount(0);
     setPreviewAttachment(null);
+    setEditingCommentId(null);
+    setCommentEditDraft("");
+    setPendingDeleteCommentId(null);
+    setCommentCardHeights({});
+    setCommentRailHeight(0);
+    setCommentTargetTops({});
+    focusedCommentIdRef.current = null;
+    setFocusedCommentId(null);
+    reviewRevealRequestRef.current += 1;
     changeEventsRef.current = [];
     setChangeEvents([]);
     setVersions([]);
@@ -2432,6 +2504,7 @@ export default function Workbench() {
     setCancelling(false);
     setDrawer(null);
     setFileView(null);
+    reviewStageRef.current?.scrollTo({ top: 0 });
     if (!opensLockedProject) editorRef.current?.unlockNow?.();
     editorRef.current?.clearSelection();
   }, [clearAutosaveTimer]);
@@ -3513,20 +3586,7 @@ export default function Workbench() {
     target: { kind: "composer" | "comment"; commentId: string },
     source: "clipboard" | "file-picker",
   ) => {
-    const activeSource = sourcePathRef.current;
-    if (!activeSource || files.length === 0) return;
-    try {
-      const registered = await ensureProjectRegistered(activeSource);
-      if (!registered) throw new Error("当前项目已经切换，请重试。");
-    } catch (cause) {
-      setToast({
-        title: "附件尚未加入",
-        message: productErrorMessage(cause, "项目记录暂时无法建立。"),
-        tone: "warning",
-        dedupeKey: "attachment-project-registration",
-      });
-      return;
-    }
+    if (files.length === 0) return;
     const existingCount = target.kind === "composer"
       ? composerAttachmentsRef.current.length
       : commentsRef.current.find((comment) => comment.commentId === target.commentId)
@@ -3540,6 +3600,68 @@ export default function Workbench() {
         tone: "info",
         dedupeKey: `attachment-limit-${target.commentId}`,
       });
+    }
+    const activeSource = sourcePathRef.current;
+    if (!activeSource) {
+      if (typeof window !== "undefined" && !window.htmlAIProjects) {
+        const previewAttachments = selected.flatMap((file) => {
+          if (file.size <= 0 || file.size > 25 * 1024 * 1024) return [];
+          const attachmentId = recordId("attachment", attachmentCounter.current++);
+          const attachment: CommentAttachment = {
+            attachmentId,
+            kind: isImageFile(file) ? "image" : "file",
+            fileName: file.name || "附件",
+            mediaType: file.type || "application/octet-stream",
+            byteLength: file.size,
+            sha256: `preview:${attachmentId}`,
+            relativePath: `preview/${attachmentId}/${file.name || "attachment"}`,
+            source,
+          };
+          if (attachment.kind === "image") {
+            rememberAttachmentObjectUrl(attachmentId, URL.createObjectURL(file));
+          }
+          return [attachment];
+        });
+        if (previewAttachments.length === 0) return;
+        if (target.kind === "composer") {
+          if (composerCommentIdRef.current !== target.commentId) return;
+          const next = [...composerAttachmentsRef.current, ...previewAttachments];
+          composerAttachmentsRef.current = next;
+          setDraftAttachments(next);
+        } else {
+          const nextComments = commentsRef.current.map((comment) => (
+            comment.commentId === target.commentId
+              ? {
+                  ...comment,
+                  attachments: [...(comment.attachments ?? []), ...previewAttachments],
+                  updatedAt: new Date().toISOString(),
+                }
+              : comment
+          ));
+          commentsRef.current = nextComments;
+          setComments(nextComments);
+        }
+        return;
+      }
+      setToast({
+        title: "请先打开本地 HTML",
+        message: "附件需要保存在当前项目记录中；打开 HTML 后即可添加。",
+        tone: "warning",
+        dedupeKey: "submit-blocked",
+      });
+      return;
+    }
+    try {
+      const registered = await ensureProjectRegistered(activeSource);
+      if (!registered) throw new Error("当前项目已经切换，请重试。");
+    } catch (cause) {
+      setToast({
+        title: "附件尚未加入",
+        message: productErrorMessage(cause, "项目记录暂时无法建立。"),
+        tone: "warning",
+        dedupeKey: "submit-blocked",
+      });
+      return;
     }
     for (const originalFile of selected) {
       const file = source === "clipboard" && !originalFile.name
@@ -3633,9 +3755,19 @@ export default function Workbench() {
 
   const openAttachmentPicker = useCallback((
     target: { kind: "composer" | "comment"; commentId: string },
+    accept: "all" | "image" = "all",
   ) => {
     attachmentInputTargetRef.current = target;
-    attachmentInputRef.current?.click();
+    const input = attachmentInputRef.current;
+    if (!input) return;
+    input.accept = accept === "image" ? "image/*" : "";
+    input.value = "";
+    try {
+      if (typeof input.showPicker === "function") input.showPicker();
+      else input.click();
+    } catch {
+      input.click();
+    }
   }, []);
 
   const pasteImages = useCallback((
@@ -3704,7 +3836,7 @@ export default function Workbench() {
       changeEvents,
     };
     persistDraftRecovery(snapshot);
-    if (projectLocked || projectHydrating) return;
+    if (projectLockedRef.current || projectLocked || projectHydrating) return;
     void flushDraftPersistence(snapshot);
   }, [
     changeEvents,
@@ -4742,7 +4874,10 @@ export default function Workbench() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey)) return;
-      if (event.key.toLowerCase() === "s" && !event.shiftKey) {
+      if (event.key.toLowerCase() === "e" && event.shiftKey) {
+        event.preventDefault();
+        void exportCurrentHtml();
+      } else if (event.key.toLowerCase() === "s" && !event.shiftKey) {
         event.preventDefault();
         requestUserFlush();
       }
@@ -4763,7 +4898,40 @@ export default function Workbench() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [interactionLocked, requestUserFlush, viewMode]);
+  }, [exportCurrentHtml, interactionLocked, requestUserFlush, viewMode]);
+
+  const updateFocusedComment = useCallback((commentId: string | null) => {
+    focusedCommentIdRef.current = commentId;
+    setFocusedCommentId(commentId);
+  }, []);
+
+  const queueReviewPairReveal = useCallback((
+    target: HtmlCanvasSelection,
+    itemKey: string,
+  ) => {
+    const requestId = ++reviewRevealRequestRef.current;
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        if (requestId !== reviewRevealRequestRef.current) return;
+        const stage = reviewStageRef.current;
+        const rail = commentsPanelRef.current;
+        if (!stage || !rail) return;
+        const item = [...rail.querySelectorAll<HTMLElement>("[data-comment-measure]")]
+          .find((node) => node.dataset.commentMeasure === itemKey);
+        const targetTop = target.tagName === "body"
+          ? 82
+          : commentTargetTops[target.id] ?? target.boundingBox?.y ?? 82;
+        const itemTop = item?.offsetTop ?? targetTop;
+        const desiredTop = Math.max(0, Math.min(targetTop, itemTop) - 92);
+        const maxTop = Math.max(0, stage.scrollHeight - stage.clientHeight);
+        const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        stage.scrollTo({
+          top: Math.min(desiredTop, maxTop),
+          behavior: reduceMotion ? "auto" : "smooth",
+        });
+      });
+    });
+  }, [commentTargetTops]);
 
   const openCommentComposer = useCallback((target: HtmlCanvasSelection) => {
     if (
@@ -4807,13 +4975,36 @@ export default function Workbench() {
       setDraftCommentId(nextCommentId);
     }
     draftTargetRef.current = target;
+    updateFocusedComment(null);
     setComposerOpen(true);
     setDraftTarget(target);
+    queueReviewPairReveal(target, "__composer");
     window.requestAnimationFrame(() => {
-      composerRef.current?.focus();
-      composerRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      composerRef.current?.focus({ preventScroll: true });
     });
-  }, [viewMode]);
+  }, [queueReviewPairReveal, updateFocusedComment, viewMode]);
+
+  const openGlobalCommentComposer = useCallback(() => {
+    if (interactionLocked) {
+      if (runInProgress) setDrawer("handoff");
+      return;
+    }
+    setCanvasMode("edit");
+    setDrawer(null);
+    setProjectMenuOpen(false);
+    const globalTarget: HtmlCanvasSelection = {
+      id: "target_global_page",
+      label: "整个页面",
+      selector: "body",
+      level: "module",
+      tagName: "body",
+      text: "",
+      resolution: "exact",
+    };
+    editorRef.current?.clearSelection();
+    setSelection(null);
+    openCommentComposer(globalTarget);
+  }, [interactionLocked, openCommentComposer, runInProgress]);
 
   const closeCommentComposer = useCallback(() => {
     const abandonedAttachments = [...composerAttachmentsRef.current];
@@ -4826,12 +5017,18 @@ export default function Workbench() {
     setDraftAttachments([]);
     setDraftTarget(null);
     setComposerOpen(false);
+    updateFocusedComment(null);
     persistCurrentDraftRecovery();
     for (const attachment of abandonedAttachments) {
       forgetAttachmentObjectUrl(attachment.attachmentId);
       void deleteAttachmentFile(attachment);
     }
-  }, [deleteAttachmentFile, forgetAttachmentObjectUrl, persistCurrentDraftRecovery]);
+  }, [
+    deleteAttachmentFile,
+    forgetAttachmentObjectUrl,
+    persistCurrentDraftRecovery,
+    updateFocusedComment,
+  ]);
 
   const addComment = useCallback(() => {
     if (
@@ -4886,7 +5083,9 @@ export default function Workbench() {
     setDraftAttachments([]);
     setDraftTarget(null);
     setComposerOpen(false);
+    updateFocusedComment(commentId);
     persistCurrentDraftRecovery(nextComments);
+    queueReviewPairReveal(draftTarget, commentId);
   }, [
     currentBasedOnVersionId,
     draft,
@@ -4895,7 +5094,63 @@ export default function Workbench() {
     draftTarget,
     attachmentUploadCount,
     persistCurrentDraftRecovery,
+    queueReviewPairReveal,
+    updateFocusedComment,
     viewMode,
+  ]);
+
+  const queueReviewCommentFocus = useCallback((
+    target: HtmlCanvasSelection,
+    commentId: string,
+  ) => {
+    updateFocusedComment(commentId);
+    queueReviewPairReveal(target, commentId);
+  }, [queueReviewPairReveal, updateFocusedComment]);
+
+  const beginCommentEdit = useCallback((comment: CommentItem) => {
+    setPendingDeleteCommentId(null);
+    setCommentEditDraft(comment.text);
+    setEditingCommentId(comment.commentId);
+    queueReviewCommentFocus(comment.target, comment.commentId);
+    window.requestAnimationFrame(() => {
+      commentEditRef.current?.focus({ preventScroll: true });
+      commentEditRef.current?.select();
+    });
+  }, [queueReviewCommentFocus]);
+
+  const cancelCommentEdit = useCallback(() => {
+    const current = commentsRef.current.find(
+      (comment) => comment.commentId === editingCommentId,
+    );
+    setCommentEditDraft("");
+    setEditingCommentId(null);
+    if (current) queueReviewCommentFocus(current.target, current.commentId);
+  }, [editingCommentId, queueReviewCommentFocus]);
+
+  const confirmCommentEdit = useCallback((commentId: string) => {
+    const current = commentsRef.current.find((comment) => comment.commentId === commentId);
+    if (!current) {
+      cancelCommentEdit();
+      return;
+    }
+    const nextText = commentEditDraft.trim();
+    if (!nextText && !(current.attachments?.length)) return;
+    const nextComments = commentsRef.current.map((comment) => (
+      comment.commentId === commentId
+        ? { ...comment, text: nextText, updatedAt: new Date().toISOString() }
+        : comment
+    ));
+    commentsRef.current = nextComments;
+    setComments(nextComments);
+    setCommentEditDraft("");
+    setEditingCommentId(null);
+    persistCurrentDraftRecovery(nextComments);
+    queueReviewCommentFocus(current.target, current.commentId);
+  }, [
+    cancelCommentEdit,
+    commentEditDraft,
+    persistCurrentDraftRecovery,
+    queueReviewCommentFocus,
   ]);
 
   const deleteComment = useCallback((commentId: string) => {
@@ -4906,14 +5161,33 @@ export default function Workbench() {
     );
     commentsRef.current = nextComments;
     setComments(nextComments);
+    setPendingDeleteCommentId(null);
+    if (editingCommentId === commentId) {
+      setEditingCommentId(null);
+      setCommentEditDraft("");
+    }
     persistCurrentDraftRecovery(nextComments);
     for (const attachment of deleted?.attachments ?? []) {
       forgetAttachmentObjectUrl(attachment.attachmentId);
       void deleteAttachmentFile(attachment);
     }
-  }, [deleteAttachmentFile, forgetAttachmentObjectUrl, persistCurrentDraftRecovery]);
+    if (deleted) {
+      updateFocusedComment(null);
+      queueReviewPairReveal(deleted.target, "");
+    }
+  }, [
+    deleteAttachmentFile,
+    editingCommentId,
+    forgetAttachmentObjectUrl,
+    persistCurrentDraftRecovery,
+    queueReviewPairReveal,
+    updateFocusedComment,
+  ]);
 
-  const focusCommentTarget = useCallback((target: HtmlCanvasSelection) => {
+  const focusCommentTarget = useCallback((
+    target: HtmlCanvasSelection,
+    commentId: string,
+  ) => {
     if (!canLocateTarget(target)) {
       setSelection(target);
       setToast({
@@ -4924,9 +5198,44 @@ export default function Workbench() {
       });
       return;
     }
+    updateFocusedComment(commentId);
     const located = editorRef.current?.select(target, { showToolbar: false });
-    setSelection(located || target);
-  }, []);
+    const nextTarget = located || target;
+    setSelection(nextTarget);
+    queueReviewPairReveal(nextTarget, commentId);
+  }, [queueReviewPairReveal, updateFocusedComment]);
+
+  const handleCanvasSelection = useCallback((target: HtmlCanvasSelection | null) => {
+    setSelection(target);
+    if (!target) {
+      if (!composerOpen) updateFocusedComment(null);
+      return;
+    }
+    if (composerOpen || viewMode === "history") return;
+    const matchesTarget = (comment: CommentItem) => (
+      comment.target.id === target.id
+      || (
+        comment.target.selector === target.selector
+        && comment.target.level === target.level
+      )
+    );
+    const currentFocusedId = focusedCommentIdRef.current;
+    const focusedMatch = visibleCommentItems.find(
+      (comment) => comment.commentId === currentFocusedId && matchesTarget(comment),
+    );
+    const nextComment = focusedMatch || visibleCommentItems.find(matchesTarget);
+    if (!nextComment || !canLocateTarget(nextComment.target)) {
+      updateFocusedComment(null);
+      return;
+    }
+    queueReviewCommentFocus(nextComment.target, nextComment.commentId);
+  }, [
+    composerOpen,
+    queueReviewCommentFocus,
+    updateFocusedComment,
+    viewMode,
+    visibleCommentItems,
+  ]);
 
   const readWorkspaceFile = useCallback(async (
     relativePath: string,
@@ -5019,7 +5328,8 @@ export default function Workbench() {
       setToast({
         title: "暂时无法复制交接内容",
         message: productErrorMessage(cause, "请在正式桌面应用中重试。"),
-        tone: "warning",
+        tone: "error",
+        sticky: true,
         dedupeKey: "qoder-handoff",
       });
     }
@@ -5064,12 +5374,53 @@ export default function Workbench() {
     }
   }, []);
 
+  const startPreviewHandoff = useCallback(() => {
+    const activeComments = commentsRef.current.filter(commentHasContent);
+    if (activeComments.length === 0) {
+      composerRef.current?.focus();
+      return;
+    }
+    const submittedAt = new Date().toISOString();
+    const previewRun: ActiveRun = {
+      projectId: "preview-project",
+      documentId: "preview-document",
+      requestId: "preview-request",
+      attemptId: "attempt_001",
+      requestPath: "",
+      attemptPath: "",
+      handoffMessage: "源页交互预览：本轮要求已复制。",
+      status: "processing",
+      sourcePath: "preview://welcome",
+      baseSnapshotSha256: `sha256:${"0".repeat(64)}`,
+      previousVersionId: latestVersionId,
+      basedOnVersionId: currentBasedOnVersionId,
+      freezeCutoffRevision: editRevisionRef.current,
+      candidateVersionId: "preview-version-2",
+      candidateVersionLabel: "版本 2",
+      submittedAt,
+      summary: activeComments.map((comment) => comment.text).filter(Boolean).join("；"),
+      commentCount: activeComments.length,
+      changeEventCount: changeEventsRef.current.length,
+    };
+    projectLockedRef.current = true;
+    setProjectLocked(true);
+    setActiveRun(previewRun);
+    setQoderHandoffState({ requestId: previewRun.requestId, status: "copied" });
+    setHandoffPreviewOpen(false);
+    setCanvasMode("edit");
+    setDrawer("handoff");
+  }, [currentBasedOnVersionId, latestVersionId]);
+
   const generateRequest = useCallback(async (fromDeferred = false) => {
     if (!sourcePathRef.current) {
+      if (typeof window !== "undefined" && !window.htmlAIProjects) {
+        startPreviewHandoff();
+        return;
+      }
       setToast({
         title: "请先打开本地 HTML",
         message: "浏览器预览没有绑定源文件，暂时不能交给内部 AI。",
-        tone: "info",
+        tone: "warning",
         dedupeKey: "submit-blocked",
       });
       return;
@@ -5231,6 +5582,8 @@ export default function Workbench() {
       changeEventCount: submissionContext.changeEvents.length,
     };
     setActiveRun(pendingRun);
+    setHandoffPreviewOpen(false);
+    setCanvasMode("edit");
     setDrawer("handoff");
 
     let requestDispatched = false;
@@ -5337,6 +5690,7 @@ export default function Workbench() {
       if (isCurrentProjectContext(submissionContext)) {
         setActiveRun(run);
         setBridgeConnected(true);
+        setDrawer("handoff");
       }
     } catch (cause) {
       if (requestDispatched) {
@@ -5421,6 +5775,7 @@ export default function Workbench() {
     currentBasedOnVersionId,
     projectName,
     sendToQoderWork,
+    startPreviewHandoff,
     viewMode,
   ]);
   useEffect(() => {
@@ -5662,6 +6017,8 @@ export default function Workbench() {
       candidateVersionLabel: candidateLabel,
       status: protocolViolation ? "error" : "complete",
     });
+    setHandoffPreviewOpen(false);
+    setCanvasMode("edit");
     setDrawer(null);
     persistRecoveryLog(null, adoptedContext);
     await refreshWorkspace(committedSourcePath, adoptedContext.epoch);
@@ -5771,6 +6128,13 @@ export default function Workbench() {
       backgroundRunsRef.current.set(run.sourcePath, nextRun);
       setActiveRun(nextRun);
       setDrawer("handoff");
+      setToast({
+        title: "最新版暂时无法打开",
+        message: error,
+        tone: "error",
+        sticky: true,
+        dedupeKey: "activate-ready-version",
+      });
     } finally {
       setOpeningReadyVersion(false);
     }
@@ -6040,7 +6404,9 @@ export default function Workbench() {
 
   useEffect(() => {
     if (
-      !projectLocked
+      generating
+      || submissionPendingRef.current
+      || !projectLocked
       || activeRun?.requestId !== "pending"
       || !sourcePath
     ) return;
@@ -6101,6 +6467,7 @@ export default function Workbench() {
   }, [
     activeRun?.requestId,
     captureProjectContext,
+    generating,
     isCurrentProjectContext,
     projectLocked,
     sourcePath,
@@ -6109,6 +6476,17 @@ export default function Workbench() {
   const cancelActiveRun = useCallback(async () => {
     if (!activeRun || cancelling || !activeRun.requestId || activeRun.requestId === "pending") return;
     const run = { ...activeRun };
+    if (run.sourcePath === "preview://welcome") {
+      projectLockedRef.current = false;
+      setProjectLocked(false);
+      editorRef.current?.unlockNow?.();
+      setActiveRun(null);
+      setQoderHandoffState(null);
+      setHandoffPreviewOpen(false);
+      setCanvasMode("edit");
+      setDrawer(null);
+      return;
+    }
     const context = sourcePathRef.current === run.sourcePath
       ? captureProjectContext()
       : null;
@@ -6136,6 +6514,8 @@ export default function Workbench() {
         setProjectLocked(false);
         editorRef.current?.unlockNow?.();
         setActiveRun(null);
+        setHandoffPreviewOpen(false);
+        setCanvasMode("edit");
         setDrawer(null);
       } else {
         setToast({
@@ -6691,11 +7071,9 @@ export default function Workbench() {
     openedAiVersionNotice?.sourcePath === sourcePath
       ? openedAiVersionNotice
       : null;
-  const currentProjectFolder = folderFromSourcePath(sourcePath);
   const visibleRecentProjects = recentProjects
     .filter((project) => project.sourcePath !== sourcePath)
     .slice(0, 3);
-  const candidateLabel = activeRun?.candidateVersionLabel || "下一版";
   const runBasisLabel = activeRun?.basedOnVersionId
     ? safeVersionLabel(activeRun.basedOnVersionId)
     : currentBasedOnVersionId
@@ -6704,25 +7082,6 @@ export default function Workbench() {
   const runSubmittedLabel = activeRun?.submittedAt
     ? formatTime(activeRun.submittedAt, true)
     : "正在提交";
-  const runStatus = activeRun?.status === "submitting"
-    ? "正在准备本轮修改…"
-    : activeRun?.status === "awaiting-check-decision"
-      ? "有一项范围校验需要你决定"
-    : activeRun?.status === "ready-to-open"
-      ? "最新版已通过检查，等待你打开"
-    : activeRun?.status === "validating"
-      ? "正在检查修改结果…"
-      : activeRun?.status === "committing"
-        ? "正在保存修改结果…"
-        : activeRun?.status === "awaiting-conflict-resolution"
-          ? "修改已完成，但源 HTML 同时被外部更新"
-          : activeRun?.status === "recovering-transaction"
-            ? "正在恢复尚未保存完成的修改…"
-            : activeRun?.status === "error"
-              ? activeRun.error || "本轮处理遇到问题"
-              : activeRun?.status === "no-change"
-                ? "本轮没有检测到有效变化"
-                : "等待 QoderWork 返回修改结果";
   const returnedStates: LifecycleState[] = [
     "validating",
     "awaiting-check-decision",
@@ -6823,11 +7182,6 @@ export default function Workbench() {
           : "pending",
     },
   ] as const : [];
-  const activeSupplementRecords = supplementsFromRecords(
-    isRecord(activeRun?.readyPayload?.supplement)
-      ? activeRun?.readyPayload?.supplement.records
-      : activeRun?.readyPayload?.supplements,
-  );
   const draftTargetScope = !draftTarget
     ? "尚未选择"
     : draftTarget.tagName === "body"
@@ -6837,6 +7191,145 @@ export default function Workbench() {
       : draftTarget.level === "insertion"
         ? "添加位置"
         : "页面内容";
+  const sortedVisibleCommentItems = useMemo(() => (
+    visibleCommentItems
+      .map((comment, index) => ({
+        comment,
+        index,
+        targetTop: comment.target.tagName === "body"
+          ? 82
+          : commentTargetTops[comment.target.id]
+            ?? comment.target.boundingBox?.y
+            ?? Number.MAX_SAFE_INTEGER,
+      }))
+      .sort((left, right) => (
+        left.targetTop - right.targetTop
+        || left.comment.createdAt.localeCompare(right.comment.createdAt)
+        || left.index - right.index
+      ))
+      .map(({ comment }) => comment)
+  ), [commentTargetTops, visibleCommentItems]);
+  const commentRailLayout = useMemo(() => {
+    const items: Array<{
+      key: string;
+      targetTop: number;
+      fallbackHeight: number;
+      order: number;
+    }> = sortedVisibleCommentItems.map((comment, index) => {
+      const imageCount = (comment.attachments ?? []).filter(
+        (attachment) => attachment.kind === "image",
+      ).length;
+      const fileCount = (comment.attachments ?? []).length - imageCount;
+      const textLines = Math.max(1, Math.ceil((comment.text.length || 18) / 25));
+      const imageRows = Math.ceil(imageCount / 3);
+      return {
+        key: comment.commentId,
+        targetTop: comment.target.tagName === "body"
+          ? 82
+          : Math.max(
+              82,
+              commentTargetTops[comment.target.id]
+                ?? comment.target.boundingBox?.y
+                ?? commentRailHeight
+                ?? 82,
+            ),
+        fallbackHeight: 104 + textLines * 19 + imageRows * 78 + fileCount * 48,
+        order: index + 1,
+      };
+    });
+    if (composerOpen && draftTarget) {
+      items.push({
+        key: "__composer",
+        targetTop: draftTarget.tagName === "body"
+          ? 82
+          : Math.max(
+              82,
+              commentTargetTops[draftTarget.id]
+                ?? draftTarget.boundingBox?.y
+                ?? 82,
+            ),
+        fallbackHeight: 276,
+        order: 0,
+      });
+    }
+    items.sort((left, right) => (
+      left.targetTop - right.targetTop || left.order - right.order
+    ));
+    const positions: Record<string, number> = {};
+    const minimumTop = 82;
+    const itemGap = 20;
+    const itemHeight = (item: (typeof items)[number]) => (
+      commentCardHeights[item.key] || item.fallbackHeight
+    );
+    const focusKey = composerOpen && draftTarget ? "__composer" : focusedCommentId;
+    const focusIndex = focusKey
+      ? items.findIndex((item) => item.key === focusKey)
+      : -1;
+
+    if (focusIndex >= 0) {
+      const focusedItem = items[focusIndex];
+      const focusedTop = Math.max(minimumTop, focusedItem.targetTop);
+      positions[focusedItem.key] = focusedTop;
+
+      let upperCursor = focusedTop;
+      const deferredItems: typeof items = [];
+      for (let index = focusIndex - 1; index >= 0; index -= 1) {
+        const item = items[index];
+        const availableTop = upperCursor - itemHeight(item) - itemGap;
+        if (availableTop < minimumTop) {
+          deferredItems.unshift(item);
+          continue;
+        }
+        const top = Math.min(Math.max(minimumTop, item.targetTop), availableTop);
+        positions[item.key] = top;
+        upperCursor = top;
+      }
+
+      let lowerCursor = focusedTop + itemHeight(focusedItem) + itemGap;
+      for (const item of [...deferredItems, ...items.slice(focusIndex + 1)]) {
+        const top = Math.max(lowerCursor, item.targetTop);
+        positions[item.key] = top;
+        lowerCursor = top + itemHeight(item) + itemGap;
+      }
+    } else {
+      let cursor = minimumTop;
+      for (const item of items) {
+        const top = Math.max(cursor, item.targetTop);
+        positions[item.key] = top;
+        cursor = top + itemHeight(item) + itemGap;
+      }
+    }
+    const bottom = items.reduce((maximum, item) => (
+      Math.max(
+        maximum,
+        (positions[item.key] ?? minimumTop) + itemHeight(item) + itemGap,
+      )
+    ), minimumTop);
+    return {
+      positions,
+      bottom,
+      composerTop: positions.__composer ?? 82,
+    };
+  }, [
+    commentCardHeights,
+    commentRailHeight,
+    commentTargetTops,
+    composerOpen,
+    draftTarget,
+    focusedCommentId,
+    sortedVisibleCommentItems,
+  ]);
+  const visibleCommentPositions = commentRailLayout.positions;
+  const composerTop = commentRailLayout.composerTop;
+  const commentRailContentHeight = Math.max(
+    commentRailHeight,
+    commentRailLayout.bottom + 24,
+    720,
+  );
+  const canvasDocumentHeight = Math.max(
+    760,
+    Math.ceil(commentRailHeight || 0),
+  );
   const toastToneLabel = toast
     ? {
         success: "操作已完成",
@@ -6859,129 +7352,192 @@ export default function Workbench() {
       void cancelActiveRun();
     }
   };
-  const renderHistoryItem = (version: Version) => (
-    <article
-      className="history-item"
-      key={version.id}
-    >
-      <div className="history-item-heading">
-        <div>
-          <strong>
-            {version.label}
-            {version.ordinal === 1 ? " · 初始基线" : " · AI 返回版本"}
-          </strong>
-          <span>{version.summary}</span>
-          <small>
-            {version.source} · 生成于 {formatTime(version.generatedAt)}
-            {version.basedOnVersionId ? ` · 基于 ${safeVersionLabel(version.basedOnVersionId)}` : ""}
-          </small>
-        </div>
-      </div>
-      <div className="history-item-actions">
+  const renderHistoryItem = (version: Version) => {
+    const expanded = expandedVersionId === version.id;
+    const attachmentCount = version.comments.reduce(
+      (count, comment) => count + (comment.attachments?.length ?? 0),
+      0,
+    );
+    return (
+      <article
+        className="history-item version-entry"
+        data-current={version.id === latestVersionId ? "true" : undefined}
+        key={version.id}
+      >
         <button
+          className="version-row"
           type="button"
-          disabled={
-            runInProgress
-            || projectHydrating
-            || Boolean(projectLoadError)
-            || viewTransitioning
-          }
-          onClick={() => void viewHistoryVersion(version)}
-        >只读查看</button>
-        {typeof window !== "undefined"
-          && window.htmlAIProjects?.revealVersionFile ? (
-          <button
-            type="button"
-            onClick={() => void revealVersionInFinder(version)}
-          >在 Finder 中显示</button>
+          aria-expanded={expanded}
+          onClick={() => setExpandedVersionId(expanded ? null : version.id)}
+        >
+          <span className="version-index">V{version.ordinal}</span>
+          <span>
+            <strong>{version.label}</strong>
+            <small>
+              {version.ordinal === 1 ? "原始导入" : `${version.comments.length} 条评论 · 已安全保留`}
+            </small>
+          </span>
+          <time dateTime={version.generatedAt}>{formatTime(version.generatedAt)}</time>
+          <CaretRightIcon aria-hidden="true" size={14} weight="bold" />
+        </button>
+        {expanded ? (
+          <section className="version-inline-detail" aria-label={`${version.label} 详情`}>
+            <header>
+              <span>{viewingVersionId === version.id ? "当前浏览" : "只读备份"}</span>
+              <small>{formatTime(version.generatedAt, true)} 保存</small>
+            </header>
+            <div className="version-summary-facts">
+              <div><strong>{version.comments.length}</strong><span>条评论</span></div>
+              <div><strong>{attachmentCount}</strong><span>个附件</span></div>
+              <div><strong>网页</strong><span>画布类型</span></div>
+            </div>
+            <div className="version-change-summary">
+              <strong>这个版本包含</strong>
+              <ul>
+                <li>{version.summary || "完整 HTML 内容与页面结构"}</li>
+                <li>评论、图片与附件的完整保留</li>
+                <li>{version.validationReview?.status === "waived" ? "安全校验通过，范围提示已记录" : "身份、Hash 与文件完整性已校验"}</li>
+              </ul>
+            </div>
+            {version.comments.length > 0
+              || version.directEdits.length > 0
+              || version.supplements.length > 0
+              || version.validationReview ? (
+              <details className="history-records">
+                <summary>查看本版修改来源与校验</summary>
+                <section className="history-source-group">
+                  <header><strong>源页原始评论</strong><span>{version.comments.length}</span></header>
+                  {version.comments.map((comment) => (
+                    <article className="history-record" key={comment.commentId}>
+                      <div>
+                        <strong>{insertionLabel(comment.target)}</strong>
+                        <span
+                          className="target-resolution"
+                          data-resolution={comment.target.resolution}
+                        >{targetResolutionLabel(comment.target.resolution)}</span>
+                        <time dateTime={comment.updatedAt || comment.createdAt}>
+                          {formatTime(comment.updatedAt || comment.createdAt, true)}
+                        </time>
+                      </div>
+                      {comment.text ? <p>{comment.text}</p> : null}
+                      <CommentAttachmentStrip
+                        attachments={comment.attachments}
+                        objectUrls={attachmentObjectUrls}
+                        onEnsurePreview={ensureAttachmentObjectUrl}
+                        onPreview={(attachment) => void openAttachmentPreview(attachment)}
+                        onDownload={(attachment) => void downloadAttachment(attachment)}
+                      />
+                    </article>
+                  ))}
+                  {version.comments.length === 0 ? <small>本版没有源页评论。</small> : null}
+                </section>
+                <section className="history-source-group">
+                  <header><strong>内部 AI 对话补充</strong><span>{version.supplements.length}</span></header>
+                  {version.supplements.map((supplement) => (
+                    <article className="history-record" key={supplement.recordId}>
+                      <div>
+                        <strong>
+                          {supplement.action === "add"
+                            ? "新增要求"
+                            : supplement.action === "amend"
+                              ? "补充修改"
+                              : "撤回要求"}
+                        </strong>
+                        <time dateTime={supplement.createdAt}>
+                          {formatTime(supplement.createdAt, true)}
+                        </time>
+                      </div>
+                      <p>{supplement.text}</p>
+                      {supplement.attachments.length > 0 ? (
+                        <small>
+                          已归档原件：
+                          {supplement.attachments.map((item) => item.fileName).join("、")}
+                        </small>
+                      ) : supplement.evidenceState === "description-only" ? (
+                        <small>原件未归档 · {supplement.evidenceDescription}</small>
+                      ) : null}
+                    </article>
+                  ))}
+                  {version.supplements.length === 0 ? <small>本版没有内部 AI 对话补充。</small> : null}
+                </section>
+                <section className="history-source-group">
+                  <header>
+                    <strong>本地编辑</strong>
+                    <span>{summarizeChangeEvents(version.directEdits).length}</span>
+                  </header>
+                  {summarizeChangeEvents(version.directEdits).map((event) => (
+                    <article
+                      className="history-record history-change-record"
+                      key={event.eventId}
+                    >
+                      <div>
+                        <strong>
+                          {changeKindLabel(event)} · {insertionLabel(event.target)}
+                        </strong>
+                        <time dateTime={event.createdAt}>
+                          {formatTime(event.createdAt, true)}
+                        </time>
+                      </div>
+                      <div className="history-change-values">
+                        <span>
+                          <small>修改前</small>
+                          <del>{historyRecordValue(event, event.before)}</del>
+                        </span>
+                        <CaretRightIcon aria-hidden="true" size={14} weight="bold" />
+                        <span>
+                          <small>修改后</small>
+                          <ins>{historyRecordValue(event, event.after)}</ins>
+                        </span>
+                      </div>
+                    </article>
+                  ))}
+                  {version.directEdits.length === 0 ? <small>本版没有本地编辑。</small> : null}
+                </section>
+                <section className="history-source-group">
+                  <header><strong>AI 结果与校验</strong><span>已归档</span></header>
+                  <p>{version.validationReview?.status === "waived"
+                    ? "硬校验通过；软校验由用户选择忽略，决定与原因已记录。"
+                    : "版本身份、内容 Hash 与不可变文件已经校验并提交。"}</p>
+                </section>
+              </details>
+            ) : null}
+            <div className="version-detail-actions">
+              <button
+                className="view-version-button"
+                type="button"
+                disabled={
+                  runInProgress
+                  || projectHydrating
+                  || Boolean(projectLoadError)
+                  || viewTransitioning
+                }
+                onClick={() => void viewHistoryVersion(version)}
+              >
+                <EyeIcon aria-hidden="true" size={15} weight="bold" />
+                在画布中查看
+              </button>
+              {typeof window !== "undefined" && window.htmlAIProjects?.revealVersionFile ? (
+                <button type="button" onClick={() => void revealVersionInFinder(version)}>
+                  Finder
+                </button>
+              ) : null}
+              <button
+                type="button"
+                disabled={
+                  runInProgress
+                  || projectHydrating
+                  || Boolean(projectLoadError)
+                  || viewTransitioning
+                  || restoring !== null
+                }
+                onClick={() => void restoreVersion(version)}
+              >{restoring === version.id ? "正在切换…" : "设为当前 HTML"}</button>
+            </div>
+          </section>
         ) : null}
-        <button
-          type="button"
-          disabled={
-            runInProgress
-            || projectHydrating
-            || Boolean(projectLoadError)
-            || viewTransitioning
-            || restoring !== null
-          }
-          onClick={() => void restoreVersion(version)}
-        >{restoring === version.id ? "替换中…" : "替换当前 HTML"}</button>
-      </div>
-      {version.comments.length > 0
-        || version.directEdits.length > 0
-        || version.supplements.length > 0
-        || version.validationReview ? (
-        <details className="history-records">
-          <summary>查看本版修改来源与校验</summary>
-          <section className="history-source-group">
-            <header><strong>源页原始评论</strong><span>{version.comments.length}</span></header>
-            {version.comments.map((comment) => (
-              <article className="history-record" key={comment.commentId}>
-                <div>
-                  <strong>{comment.target.label || comment.target.selector}</strong>
-                  <span
-                    className="target-resolution"
-                    data-resolution={comment.target.resolution}
-                  >{targetResolutionLabel(comment.target.resolution)}</span>
-                  <time dateTime={comment.createdAt}>{formatTime(comment.createdAt, true)}</time>
-                </div>
-                {comment.text ? <p>{comment.text}</p> : null}
-                <CommentAttachmentStrip
-                  attachments={comment.attachments}
-                  objectUrls={attachmentObjectUrls}
-                  onEnsurePreview={ensureAttachmentObjectUrl}
-                  onPreview={(attachment) => void openAttachmentPreview(attachment)}
-                  onDownload={(attachment) => void downloadAttachment(attachment)}
-                />
-              </article>
-            ))}
-            {version.comments.length === 0 ? <small>本版没有源页评论。</small> : null}
-          </section>
-          <section className="history-source-group">
-            <header><strong>内部 AI 对话补充</strong><span>{version.supplements.length}</span></header>
-            {version.supplements.map((supplement) => (
-              <article className="history-record" key={supplement.recordId}>
-                <div>
-                  <strong>{supplement.action === "add" ? "新增要求" : supplement.action === "amend" ? "补充修改" : "撤回要求"}</strong>
-                  <time dateTime={supplement.createdAt}>{formatTime(supplement.createdAt, true)}</time>
-                </div>
-                <p>{supplement.text}</p>
-                {supplement.attachments.length > 0 ? (
-                  <small>已归档原件：{supplement.attachments.map((item) => item.fileName).join("、")}</small>
-                ) : supplement.evidenceState === "description-only" ? (
-                  <small>原件未归档 · {supplement.evidenceDescription}</small>
-                ) : null}
-              </article>
-            ))}
-            {version.supplements.length === 0 ? <small>本版没有内部 AI 对话补充。</small> : null}
-          </section>
-          <section className="history-source-group">
-            <header><strong>本地编辑</strong><span>{summarizeChangeEvents(version.directEdits).length}</span></header>
-            {summarizeChangeEvents(version.directEdits).map((event) => (
-              <article className="history-record history-change-record" key={event.eventId}>
-                <div>
-                  <strong>{changeKindLabel(event)} · {event.target.label || event.target.selector}</strong>
-                  <time dateTime={event.createdAt}>{formatTime(event.createdAt, true)}</time>
-                </div>
-                <div className="history-change-values">
-                  <span><small>修改前</small><del>{historyRecordValue(event, event.before)}</del></span>
-                  <CaretRightIcon aria-hidden="true" size={14} weight="bold" />
-                  <span><small>修改后</small><ins>{historyRecordValue(event, event.after)}</ins></span>
-                </div>
-              </article>
-            ))}
-            {version.directEdits.length === 0 ? <small>本版没有本地编辑。</small> : null}
-          </section>
-          <section className="history-source-group">
-            <header><strong>AI 结果与校验</strong><span>已归档</span></header>
-            <p>{version.validationReview?.status === "waived"
-              ? "硬校验通过；软校验由用户选择忽略，决定与原因已记录。"
-              : "版本身份、内容 Hash 与不可变文件已经校验并提交。"}</p>
-          </section>
-        </details>
-      ) : null}
-    </article>
-  );
+      </article>
+    );
+  };
 
   return (
     <main
@@ -6991,180 +7547,35 @@ export default function Workbench() {
       aria-label="HTML AI 可视化编辑工作台"
     >
       <header className="workbench-header">
-        <div className="project-area">
-          <div className="brand-lockup">
-            <button
-              className="brand"
-              type="button"
-              aria-label={
-                updateResult?.status === "available" && updateResult.latestVersion
-                  ? `打开源页 GitHub 项目页，发现新版本 ${updateResult.latestVersion}`
-                  : "打开源页 GitHub 项目页"
-              }
-              title="打开源页 GitHub 项目页"
-              onClick={() => void openProjectRepository()}
-            >
-              {/* A plain image keeps the shared renderer compatible with Electron file URLs. */}
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="./brand-logo.png" alt="" />
-              {updateResult?.status === "available" ? (
-                <span className="update-badge" aria-hidden="true">new!</span>
-              ) : null}
-            </button>
-          </div>
-          <div
-            className="project-summary"
-            data-ai-file-opened={activeOpenedAiVersionNotice ? "true" : undefined}
-          >
-            <button
-              ref={projectSwitcherRef}
-              className="project-switcher"
-              type="button"
-              aria-label={
-                activeOpenedAiVersionNotice
-                  ? `QoderWork 返回的新文件已打开：${activeOpenedAiVersionNotice.fileName}。切换或打开本地 HTML`
-                  : `当前项目：${projectName}。切换或打开本地 HTML`
-              }
-              aria-expanded={projectMenuOpen}
-              data-ai-file-opened={activeOpenedAiVersionNotice ? "true" : undefined}
-              onClick={() => setProjectMenuOpen((value) => !value)}
-            >
-              <span
-                className="project-state-label"
-                role={activeOpenedAiVersionNotice ? "status" : undefined}
-                aria-live={activeOpenedAiVersionNotice ? "polite" : undefined}
-                aria-atomic={activeOpenedAiVersionNotice ? "true" : undefined}
-              >
-                {activeOpenedAiVersionNotice ? (
-                  <>
-                    <CheckCircleIcon aria-hidden="true" size={17} weight="fill" />
-                    <span>QoderWork 返回的新文件已打开</span>
-                  </>
-                ) : "当前项目"}
+        <div className="window-file">
+          <div className="window-file-copy">
+            <strong title={activeOpenedAiVersionNotice?.fileName || projectName}>
+              {activeOpenedAiVersionNotice?.fileName || projectName}
+            </strong>
+            <span className="file-meta">
+              <span>
+                {viewMode === "history"
+                  ? `${viewingVersion?.label || "历史版本"} · 只读`
+                  : activeRun?.candidateVersionLabel && runInProgress
+                    ? `${activeRun.candidateVersionLabel} · 本轮处理中`
+                    : currentBasedOnVersionId
+                      ? safeVersionLabel(currentBasedOnVersionId)
+                      : latestVersion?.label || "版本 1"}
               </span>
-              <strong title={activeOpenedAiVersionNotice?.fileName || projectName}>
-                {activeOpenedAiVersionNotice?.fileName || projectName}
-              </strong>
-              <CaretDownIcon aria-hidden="true" size={18} weight="bold" />
               <span
-                className="save-indicator"
-                data-dirty={persistState !== "idle" ? "true" : "false"}
+                className="save-status"
                 data-persist-state={persistState}
                 data-edit-revision={editRevision}
                 data-persisted-revision={lastPersistedRevision}
                 data-rendered-sha256={renderedContentSha256 || undefined}
-                role={activeOpenedAiVersionNotice ? undefined : "status"}
-                aria-live={activeOpenedAiVersionNotice ? "off" : "polite"}
+                role="status"
+                aria-live="polite"
               >
-                {viewMode === "history"
-                  ? `只读查看 ${viewingVersion?.label || viewingVersionId}`
-                  : activeOpenedAiVersionNotice && persistState === "idle"
-                    ? `原文件已保留 · ${formatTime(activeOpenedAiVersionNotice.generatedAt, true)}`
-                    : persistLabel}
+                <span aria-hidden="true" />
+                {persistState === "idle" ? "已安全保存" : persistLabel}
               </span>
-            </button>
+            </span>
           </div>
-          <div
-            ref={projectMenuRef}
-            className="project-menu"
-            data-open={projectMenuOpen ? "true" : "false"}
-            role="dialog"
-            aria-label="项目菜单"
-            inert={!projectMenuOpen}
-          >
-            <TriangleIcon
-              className="project-menu-pointer"
-              aria-hidden="true"
-              size={24}
-              weight="fill"
-            />
-            <span className="project-menu-heading">当前项目</span>
-            <div className="project-menu-file current-project-file">
-              <FileTextIcon
-                className="project-file-icon"
-                aria-hidden="true"
-                size={25}
-                weight="fill"
-              />
-              <strong>{projectName}</strong>
-              <small title={sourcePath || undefined}>{currentProjectFolder}</small>
-              {lastModifiedAt ? (
-                <time dateTime={lastModifiedAt}>
-                  {formatProjectTimestamp(lastModifiedAt)}
-                </time>
-              ) : null}
-              {sourcePath
-                && typeof window !== "undefined"
-                && window.htmlAIProjects?.showInFolder ? (
-                <button
-                  className="project-file-finder"
-                  type="button"
-                  onClick={() => void showProjectInFolder()}
-                >在 Finder 中显示</button>
-              ) : null}
-            </div>
-            <div className="recent-projects">
-              <span>最近打开</span>
-              {visibleRecentProjects.length > 0 ? visibleRecentProjects.map((project) => (
-                <div className="project-menu-file recent-project-file" key={project.path}>
-                  <FileTextIcon
-                    className="project-file-icon"
-                    aria-hidden="true"
-                    size={23}
-                    weight="fill"
-                  />
-                  <button
-                    className="project-file-open"
-                    type="button"
-                    onClick={() => void openProject(project.sourcePath)}
-                    aria-label={`打开 ${project.name}`}
-                  />
-                  <strong>{project.name}</strong>
-                  <small>{project.sourcePath}</small>
-                  <time dateTime={new Date(project.lastOpenedAt).toISOString()}>
-                    {formatProjectTimestamp(project.lastOpenedAt)}
-                  </time>
-                  {typeof window !== "undefined"
-                    && window.htmlAIProjects?.showInFolder ? (
-                    <button
-                      className="project-file-finder"
-                      type="button"
-                      onClick={() => void showProjectInFolder(project.sourcePath)}
-                    >在 Finder 中显示</button>
-                  ) : null}
-                </div>
-              )) : <small className="recent-projects-empty">还没有最近打开的文件</small>}
-            </div>
-            <div className="project-menu-actions">
-              <button type="button" onClick={() => void openProject()}>
-                <PlusIcon aria-hidden="true" size={21} weight="regular" />
-                <span>
-                  <strong>打开本地 HTML…</strong>
-                  <small>选择已有的 .html 或 .htm 文件</small>
-                </span>
-                <CaretRightIcon aria-hidden="true" size={18} weight="bold" />
-              </button>
-            </div>
-          </div>
-          <input
-            ref={fileInputRef}
-            className="sr-only"
-            type="file"
-            accept=".html,.htm,text/html"
-            onChange={(event) => void handleBrowserFile(event)}
-          />
-          <input
-            ref={attachmentInputRef}
-            className="sr-only"
-            type="file"
-            multiple
-            onChange={(event) => {
-              const target = attachmentInputTargetRef.current;
-              const files = [...(event.target.files ?? [])];
-              event.target.value = "";
-              if (target) void uploadAttachments(files, target, "file-picker");
-            }}
-          />
         </div>
 
         <nav className="header-actions" aria-label="画布模式、项目和版本操作">
@@ -7172,11 +7583,15 @@ export default function Workbench() {
             <button
               type="button"
               aria-pressed={canvasMode === "edit"}
+              disabled={runInProgress || viewMode === "history"}
               onClick={() => {
                 setCanvasMode("edit");
                 setProjectMenuOpen(false);
               }}
-            >编辑</button>
+            >
+              <PencilSimpleIcon aria-hidden="true" size={16} weight="bold" />
+              编辑
+            </button>
             <button
               type="button"
               aria-pressed={canvasMode === "preview"}
@@ -7200,48 +7615,113 @@ export default function Workbench() {
                   }
                   editorRef.current?.clearSelection();
                   setSelection(null);
+                  updateFocusedComment(null);
                   setProjectMenuOpen(false);
                   setCanvasMode("preview");
                 };
                 if (deferEditorCommand("project-switch", enterPreview)) return;
                 enterPreview();
               }}
-            >预览</button>
+            >
+              <EyeIcon aria-hidden="true" size={16} weight="bold" />
+              预览
+            </button>
           </div>
-          <span className="header-divider" aria-hidden="true" />
-          <button type="button" disabled={
-            projectHydrating || viewTransitioning || Boolean(projectLoadError)
-          } onClick={() => {
-            const openProjectFiles = () => {
-              setFileView(null);
-              setDrawer("files");
-            };
-            if (deferEditorCommand("project-files", openProjectFiles)) return;
-            openProjectFiles();
-          }}>项目文件</button>
           <button
+            className="project-button"
             type="button"
+            aria-expanded={drawer === "files" || drawer === "history"}
             disabled={
               projectHydrating || viewTransitioning || Boolean(projectLoadError)
             }
             onClick={() => {
-              const openVersionHistory = () => {
-                setCanvasMode("edit");
-                setDrawer("history");
+              const openProjectPanel = () => {
+                setFileView(null);
+                setDrawer((current) => (
+                  current === "files" || current === "history" ? null : "files"
+                ));
               };
-              if (deferEditorCommand("version-history", openVersionHistory)) return;
-              openVersionHistory();
+              if (deferEditorCommand("project-files", openProjectPanel)) return;
+              openProjectPanel();
             }}
           >
-            版本历史
+            <FolderOpenIcon aria-hidden="true" size={18} weight="duotone" />
+            项目
           </button>
-          <span className="header-divider" aria-hidden="true" />
           <button
+            className="global-comment-button"
             type="button"
-            disabled={projectHydrating || viewTransitioning}
-            onClick={() => void exportCurrentHtml()}
-          >导出 HTML 副本</button>
+            aria-expanded={composerOpen && draftTarget?.tagName === "body"}
+            disabled={interactionLocked || canvasMode !== "edit"}
+            onClick={openGlobalCommentComposer}
+          >
+            <ChatCircleTextIcon aria-hidden="true" size={18} weight="duotone" />
+            全局评论
+          </button>
+          <button
+            className="header-send-button"
+            type="button"
+            data-copied={currentQoderHandoffStatus === "copied" ? "true" : undefined}
+            disabled={
+              generating
+              || projectHydrating
+              || Boolean(projectLoadError)
+              || viewTransitioning
+              || viewMode === "history"
+              || (!runInProgress && (
+                activeCommentCount === 0
+                || hasUnsafeHandoffTargets
+                || interactionLocked
+                || persistState === "failed"
+                || Boolean(draftPersistError)
+              ))
+            }
+            onClick={() => {
+              if (runInProgress) {
+                setHandoffPreviewOpen(false);
+                setCanvasMode("edit");
+                setDrawer("handoff");
+              } else {
+                void generateRequest();
+              }
+            }}
+          >
+            {currentQoderHandoffStatus === "copied" ? (
+              <CheckCircleIcon aria-hidden="true" size={18} weight="fill" />
+            ) : (
+              <PaperPlaneTiltIcon aria-hidden="true" size={18} weight="fill" />
+            )}
+            <span>
+              {generating
+                ? "正在准备…"
+                : currentQoderHandoffStatus === "copied"
+                  ? "已复制至剪贴板"
+                  : "发送至 Qoder"}
+            </span>
+            {!runInProgress && currentQoderHandoffStatus !== "copied"
+              ? <small>{activeCommentCount}</small>
+              : null}
+          </button>
         </nav>
+        <input
+          ref={fileInputRef}
+          className="sr-only"
+          type="file"
+          accept=".html,.htm,text/html"
+          onChange={(event) => void handleBrowserFile(event)}
+        />
+        <input
+          ref={attachmentInputRef}
+          className="sr-only"
+          type="file"
+          multiple
+          onChange={(event) => {
+            const target = attachmentInputTargetRef.current;
+            const files = [...(event.target.files ?? [])];
+            event.target.value = "";
+            if (target) void uploadAttachments(files, target, "file-picker");
+          }}
+        />
       </header>
 
       {startupIssue ? (
@@ -7271,442 +7751,517 @@ export default function Workbench() {
         </section>
       ) : null}
 
-      {viewMode === "history" ? (
+      {runInProgress && handoffPreviewOpen ? (
+        <section className="history-view-banner sent-preview-banner" role="status">
+          <div>
+            <EyeIcon aria-hidden="true" size={18} weight="duotone" />
+            <span>
+              <strong>正在预览已发送 HTML</strong>
+              <small>这是本轮冻结并复制给 Qoder 的只读内容</small>
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setHandoffPreviewOpen(false);
+              setCanvasMode("edit");
+              setDrawer("handoff");
+            }}
+          >
+            <ArrowCounterClockwiseIcon aria-hidden="true" size={15} weight="bold" />
+            返回等待处理
+          </button>
+        </section>
+      ) : viewMode === "history" ? (
         <section className="history-view-banner" role="status">
           <div>
-            <strong>只读查看 {viewingVersion?.label || viewingVersionId}</strong>
+            <ClockCounterClockwiseIcon aria-hidden="true" size={18} weight="duotone" />
             <span>
-              {viewingVersion
-                ? `${formatTime(viewingVersion.generatedAt)} 生成 · 当前项目：${currentBasedOnVersionId ? `基于 ${safeVersionLabel(currentBasedOnVersionId)}${restoredFromVersionId ? "（从历史恢复）" : ""}` : "初始内容"}`
-                : "画布来自精确不可变版本文件"}
+              <strong>正在浏览 {viewingVersion?.label || viewingVersionId}</strong>
+              <small>
+                {viewingVersion
+                  ? `只读 HTML 与 ${viewingVersion.comments.length} 条历史评论已在画布中展开`
+                  : "画布来自精确不可变版本文件"}
+              </small>
             </span>
           </div>
           <button
             type="button"
             disabled={viewTransitioning}
             onClick={() => void returnToCurrent()}
-          >返回当前 HTML</button>
-          {viewingVersion ? (
-            <button
-              type="button"
-              disabled={viewTransitioning || restoring !== null}
-              onClick={() => void restoreVersion(viewingVersion)}
-            >
-              用此版本替换当前 HTML
-            </button>
-          ) : null}
+          >
+            <ArrowCounterClockwiseIcon aria-hidden="true" size={15} weight="bold" />
+            回到当前版本
+          </button>
         </section>
       ) : null}
 
-      <section className="canvas-column" aria-label="页面画布">
-        <div
-          className="canvas-edit-surface"
-          hidden={canvasMode !== "edit"}
-          aria-hidden={canvasMode !== "edit"}
-        >
-          <div className="canvas-edit-status" role="status">
-            本地文本编辑会直接修改源文件并保存
+      <div ref={reviewStageRef} className="review-scroll-stage">
+        <section className="canvas-column" aria-label="页面画布">
+          <div
+            className="canvas-edit-surface"
+            hidden={canvasMode !== "edit"}
+            aria-hidden={canvasMode !== "edit"}
+          >
+            <Suspense fallback={(
+              <div className="canvas-loading" role="status">正在载入源码画布…</div>
+            )}>
+              <HtmlCanvasEditor
+                ref={editorRef}
+                html={html}
+                sourcePath={sourcePath || undefined}
+                height={`${canvasDocumentHeight}px`}
+                onChange={handleCanvasChange}
+                onInteraction={() => setProjectMenuOpen(false)}
+                onCommentLayout={handleCommentLayout}
+                onSelect={handleCanvasSelection}
+                onRequestComment={openCommentComposer}
+                onRequestFlush={requestUserFlush}
+                commentedTargets={commentedTargets}
+                trackedTargets={trackedAuditTargets}
+                locked={
+                  runInProgress
+                  || projectHydrating
+                  || Boolean(projectLoadError)
+                  || viewTransitioning
+                  || persistState === "conflict"
+                }
+                readOnly={viewMode === "history"}
+                interactionMode={viewMode === "history"
+                  ? "history"
+                  : runInProgress || projectHydrating
+                    ? "processing"
+                    : "editing"}
+                enableReorder={!interactionLocked}
+                preserveUndoHistory={preserveEditorHistory}
+              />
+            </Suspense>
           </div>
-          <Suspense fallback={(
-            <div className="canvas-loading" role="status">正在载入源码画布…</div>
-          )}>
-            <HtmlCanvasEditor
-              ref={editorRef}
+          {canvasMode === "preview" ? (
+            <HtmlInteractionPreview
               html={html}
               sourcePath={sourcePath || undefined}
-              height="calc(100vh - 56px)"
-              onChange={handleCanvasChange}
+              height="100%"
               onInteraction={() => setProjectMenuOpen(false)}
-              onSelect={(target) => {
-                setSelection(target);
-              }}
-              onRequestComment={openCommentComposer}
-              onRequestFlush={requestUserFlush}
-              commentedTargets={commentedTargets}
-              trackedTargets={trackedAuditTargets}
-              locked={
-                runInProgress
-                || projectHydrating
-                || Boolean(projectLoadError)
-                || viewTransitioning
-                || persistState === "conflict"
-              }
-              readOnly={viewMode === "history"}
-              interactionMode={viewMode === "history"
-                ? "history"
-                : runInProgress || projectHydrating
-                  ? "processing"
-                  : "editing"}
-              enableReorder={!interactionLocked}
-              preserveUndoHistory={preserveEditorHistory}
             />
-          </Suspense>
-        </div>
-        {canvasMode === "preview" ? (
-          <HtmlInteractionPreview
-            html={html}
-            sourcePath={sourcePath || undefined}
-            height="calc(100vh - 56px)"
-            onInteraction={() => setProjectMenuOpen(false)}
-          />
-        ) : null}
-      </section>
-
-      {canvasMode === "edit" ? (
-      <aside className="comments-panel" aria-label="本轮要求">
-        <header className="comments-header">
-          <div>
-            <span>{projectLoadError ? "读取失败" : projectHydrating || viewTransitioning ? "正在读取" : viewMode === "history" ? "历史只读" : runInProgress ? candidateLabel : "当前 HTML"}</span>
-            <h1>{projectLoadError
-              ? "当前项目暂不可编辑"
-              : projectHydrating || viewTransitioning
-              ? "正在核对项目状态"
-              : viewMode === "history"
-              ? "返回当前 HTML 后继续编辑"
-              : runInProgress
-                ? "等待 QoderWork 完成修改"
-                : "选中内容，写下怎么改"}</h1>
-            <small className="round-record-counts">
-              {runInProgress
-                ? `${activeRun?.commentCount ?? activeCommentCount} 条评论 · ${activeRun?.changeEventCount ?? changeEvents.length} 项直接编辑记录`
-                : `${activeCommentCount} 条评论 · ${changeEvents.length} 项直接编辑记录`}
-              </small>
-            </div>
-        </header>
-
-        {projectLoadError ? (
-          <section className="round-lock-card" aria-label="项目读取失败">
-            <strong>没有用未知状态覆盖源文件</strong>
-            <span>{projectLoadError}</span>
-            <button type="button" onClick={() => {
-              const activeSource = sourcePathRef.current;
-              if (!activeSource) return;
-              projectHydratingRef.current = true;
-              projectLoadErrorRef.current = null;
-              setProjectHydrating(true);
-              setProjectLoadError(null);
-              const hydrationEpoch = projectEpochRef.current;
-              void refreshWorkspace(activeSource, hydrationEpoch, false, hydrationEpoch);
-            }}>重试读取</button>
-          </section>
-        ) : projectHydrating || viewTransitioning ? (
-          <section className="round-lock-card" aria-label="正在读取项目状态">
-            <strong>确认源文件与运行态后开放编辑</strong>
-            <span>这能避免用过期编辑状态覆盖磁盘上的新内容。</span>
-          </section>
-        ) : runInProgress ? (
-          <section className="round-lock-card" aria-label="当前项目已锁定">
-            <strong>{runStatus}</strong>
-            <span>
-              基于 {runBasisLabel} · {runSubmittedLabel} 提交 · {activeRun?.commentCount ?? activeCommentCount} 条要求
-            </span>
-            <small>当前项目已锁定；完成前不会清除评论，可继续打开其他项目。</small>
-          </section>
-        ) : viewMode === "history" ? (
-          <section className="round-lock-card" aria-label="历史版本只读">
-            <strong>历史版本不会接受编辑或评论</strong>
-            <span>返回当前 HTML 后，尚未提交的评论仍会保留。</span>
-          </section>
-        ) : composerOpen && draftTarget ? (
-          <section className="comment-composer" aria-label="添加评论">
-            <div className="composer-target" data-empty={!draftTarget ? "true" : "false"}>
-              <span>{draftTargetScope}</span>
-              <strong>{draftTarget ? insertionLabel(draftTarget) : "先在画布中点一下要修改的内容"}</strong>
-            </div>
-            <textarea
-              ref={composerRef}
-              value={draft}
-              disabled={!draftTarget || !canLocateTarget(draftTarget) || interactionLocked}
-              aria-label="本轮修改评论"
-              placeholder={
-                draftTarget?.level === "insertion"
-                  ? "例如：在这里增加一个风险提示模块。"
-                  : draftTarget
-                    ? "例如：把标题改得更简洁，保持当前风格。"
-                    : "选择内容后在这里输入评论"
-              }
-              onChange={(event) => {
-                composerDraftRef.current = event.target.value;
-                setDraft(event.target.value);
-                persistCurrentDraftRecovery();
-              }}
-              onPaste={(event) => {
-                const commentId = draftCommentId || composerCommentIdRef.current;
-                if (commentId) pasteImages(event, { kind: "composer", commentId });
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault();
-                  addComment();
-                }
-              }}
-            />
-            <CommentAttachmentStrip
-              attachments={draftAttachments}
-              objectUrls={attachmentObjectUrls}
-              editable={!interactionLocked}
-              onEnsurePreview={ensureAttachmentObjectUrl}
-              onPreview={(attachment) => void openAttachmentPreview(attachment)}
-              onDownload={(attachment) => void downloadAttachment(attachment)}
-              onRemove={removeComposerAttachment}
-            />
-            <div className="composer-actions">
-              <button
-                className="attachment-trigger"
-                type="button"
-                title="从本机添加，文件只会保存到当前项目"
-                disabled={interactionLocked || !draftCommentId}
-                onClick={() => {
-                  if (draftCommentId) {
-                    openAttachmentPicker({ kind: "composer", commentId: draftCommentId });
-                  }
-                }}
-              >
-                <PaperclipIcon aria-hidden="true" size={14} weight="regular" />
-                <span>{attachmentUploadCount > 0 ? "正在添加…" : "添加图片或文件"}</span>
-              </button>
-              <div>
-                <button
-                  className="cancel-comment-button"
-                  type="button"
-                  onClick={closeCommentComposer}
-                >取消</button>
-                <button
-                  className="add-comment-button"
-                  type="button"
-                  disabled={
-                    !canLocateTarget(draftTarget)
-                    || (!draft.trim() && draftAttachments.length === 0)
-                    || attachmentUploadCount > 0
-                    || interactionLocked
-                  }
-                  onClick={addComment}
-                >发送评论</button>
-              </div>
-            </div>
-          </section>
-        ) : draftTarget && (draft.trim() || draftAttachments.length > 0) ? (
-          <section className="draft-recovery-card" aria-label="未发送评论">
-            <div>
-              <strong>有一条未发送评论</strong>
-              <span>{insertionLabel(draftTarget)}</span>
-            </div>
-            {draft.trim() ? <p>{draft}</p> : null}
-            <CommentAttachmentStrip
-              attachments={draftAttachments}
-              objectUrls={attachmentObjectUrls}
-              onEnsurePreview={ensureAttachmentObjectUrl}
-              onPreview={(attachment) => void openAttachmentPreview(attachment)}
-              onDownload={(attachment) => void downloadAttachment(attachment)}
-            />
-            <div>
-              <button
-                type="button"
-                onClick={closeCommentComposer}
-              >放弃</button>
-              <button
-                className="resume-comment-button"
-                type="button"
-                onClick={() => {
-                  const located = editorRef.current?.select(draftTarget, { showToolbar: false });
-                  setSelection(located || draftTarget);
-                  setDraftTarget(located || draftTarget);
-                  draftTargetRef.current = located || draftTarget;
-                  setComposerOpen(true);
-                  window.requestAnimationFrame(() => composerRef.current?.focus());
-                }}
-              >继续填写</button>
-            </div>
-          </section>
-        ) : null}
-
-        <div className="comment-list" aria-label="已添加的评论">
-          {comments.length === 0 ? (
-            <div className="comments-empty">
-              <strong>评论会显示在这里</strong>
-              <span>可以评论整个模块或其中的小区块。</span>
-            </div>
-          ) : comments.map((comment, index) => (
-            <article
-              className="comment-card"
-              data-selected={selection?.selector === comment.target.selector ? "true" : "false"}
-              data-resolution={comment.target.resolution}
-              role="group"
-              tabIndex={!interactionLocked && canLocateTarget(comment.target) ? 0 : -1}
-              aria-label={canLocateTarget(comment.target)
-                ? `在画布中定位：${insertionLabel(comment.target)}`
-                : undefined}
-              onClick={() => {
-                if (!interactionLocked && canLocateTarget(comment.target)) {
-                  focusCommentTarget(comment.target);
-                }
-              }}
-              onKeyDown={(event) => {
-                if (event.target !== event.currentTarget) return;
-                if (
-                  !interactionLocked
-                  && canLocateTarget(comment.target)
-                  && (event.key === "Enter" || event.key === " ")
-                ) {
-                  event.preventDefault();
-                  focusCommentTarget(comment.target);
-                }
-              }}
-              key={comment.commentId}
-            >
-              <div className="comment-card-header">
-                <div className="comment-target-label">
-                  <span>{index + 1}</span>
-                  <strong>{insertionLabel(comment.target)}</strong>
-                </div>
-                <div className="comment-card-actions">
-                  <button
-                    className="comment-action delete-comment"
-                    type="button"
-                    disabled={interactionLocked}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      deleteComment(comment.commentId);
-                    }}
-                  >删除</button>
-                </div>
-              </div>
-              <textarea
-                aria-label={`评论 ${index + 1}`}
-                value={comment.text}
-                disabled={interactionLocked}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  if (!interactionLocked && canLocateTarget(comment.target)) {
-                    focusCommentTarget(comment.target);
-                  }
-                }}
-                onChange={(event) => {
-                  const nextComments = commentsRef.current.map((item) => (
-                    item.commentId === comment.commentId
-                      ? { ...item, text: event.target.value, updatedAt: new Date().toISOString() }
-                      : item
-                  ));
-                  commentsRef.current = nextComments;
-                  setComments(nextComments);
-                  persistCurrentDraftRecovery(nextComments);
-                }}
-                onPaste={(event) => pasteImages(event, {
-                  kind: "comment",
-                  commentId: comment.commentId,
-                })}
-                onBlur={() => {
-                  if (!commentHasContent(comment)) deleteComment(comment.commentId);
-                }}
-              />
-              <CommentAttachmentStrip
-                attachments={comment.attachments}
-                objectUrls={attachmentObjectUrls}
-                editable={!interactionLocked}
-                onEnsurePreview={ensureAttachmentObjectUrl}
-                onPreview={(attachment) => void openAttachmentPreview(attachment)}
-                onDownload={(attachment) => void downloadAttachment(attachment)}
-                onRemove={(attachment) => removeCommentAttachment(
-                  comment.commentId,
-                  attachment,
-                )}
-              />
-              <button
-                className="comment-add-attachment"
-                type="button"
-                title="从本机添加，文件只会保存到当前项目"
-                disabled={interactionLocked}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  openAttachmentPicker({
-                    kind: "comment",
-                    commentId: comment.commentId,
-                  });
-                }}
-              >
-                <PaperclipIcon aria-hidden="true" size={13} weight="regular" />
-                <span>添加图片或文件</span>
-              </button>
-            </article>
-          ))}
-        </div>
-
-        <footer className="comments-footer">
-          {draftPersistError ? (
-            <section className="comment-persist-error" role="alert" aria-atomic="true">
-              <div>
-                <strong>评论还没有安全记录</strong>
-                <span>{productErrorMessage(
-                  draftPersistError,
-                  "本轮评论暂时无法记录；当前内容仍保留在页面中。",
-                )}</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => void flushDraftPersistence()}
-              >重试记录</button>
-            </section>
           ) : null}
-          <button
-            className="handoff-button"
-            type="button"
-            disabled={
-              generating
-              || projectHydrating
-              || Boolean(projectLoadError)
-              || viewTransitioning
-              || viewMode === "history"
-              || (!runInProgress && (
-                activeCommentCount === 0
-                || hasUnsafeHandoffTargets
-                || interactionLocked
-                || persistState === "failed"
-                || Boolean(draftPersistError)
-              ))
-            }
-            onClick={() => {
-              if (!runInProgress) {
-                void generateRequest();
-                return;
-              }
-              setDrawer("handoff");
-            }}
+        </section>
+
+        {canvasMode === "edit" ? (
+          <aside
+            ref={commentsPanelRef}
+            className="comments-panel comment-rail"
+            aria-label={viewMode === "history" ? "历史版本评论" : "本轮评论"}
           >
-            {generating ? "正在冻结当前 HTML…" : runInProgress ? (
-              <>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src="./qoder-logo.png" alt="" />
-                <span>{
-                  currentQoderHandoffStatus === "copied"
-                    ? "已复制，可粘贴至 QoderWork"
-                    : "查看本轮处理"
-                }</span>
-              </>
-            ) : (
-              <>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src="./qoder-logo.png" alt="" />
-                <span>一键发送至 QoderWork</span>
-              </>
-            )}
-          </button>
-          <span
-            role="status"
-            data-tone={!runInProgress && hasUnsafeHandoffTargets ? "warning" : "default"}
-          >{projectHydrating
-            ? "正在核对项目身份、源文件与编辑状态"
-            : runInProgress
-            ? <>如有任何建议和问题，请钉钉联系<strong>竺可</strong>。</>
-            : bridgeConnected === false
-              ? "本地项目记录未连接"
-              : hasUnsafeHandoffTargets
-                ? `${unsafeHandoffTargets.length} 条要求的目标已失联或不唯一 · 请在画布重新选择后重新添加`
-              : (
-                <>如有任何建议和问题，请钉钉联系<strong>竺可</strong>。</>
-              )}</span>
-        </footer>
-      </aside>
-      ) : null}
+          <div
+            className="comment-rail-content"
+            style={{ minHeight: `${commentRailContentHeight}px` }}
+          >
+            <header className="comments-header comment-rail-header">
+              <div>
+                <h1>评论 <span>{visibleCommentItems.length}</span></h1>
+                <small>{viewMode === "history" ? "历史版本 · 只读" : "与正文同步滚动"}</small>
+                <span className="round-record-counts sr-only">
+                  {activeCommentCount} 条评论 · {changeEvents.length} 项直接编辑记录
+                </span>
+              </div>
+            </header>
+            <span className="sr-only" role="status" aria-live="polite">
+              {composerOpen
+                ? "评论输入框已与画布目标同时定位"
+                : focusedCommentId
+                  ? "评论与画布目标已同时定位"
+                  : ""}
+            </span>
+
+            {projectLoadError ? (
+              <section className="round-lock-card rail-status-card" aria-label="项目读取失败">
+                <strong>当前项目暂不可编辑</strong>
+                <span>{projectLoadError}</span>
+                <button type="button" onClick={() => {
+                  const activeSource = sourcePathRef.current;
+                  if (!activeSource) return;
+                  projectHydratingRef.current = true;
+                  projectLoadErrorRef.current = null;
+                  setProjectHydrating(true);
+                  setProjectLoadError(null);
+                  const hydrationEpoch = projectEpochRef.current;
+                  void refreshWorkspace(activeSource, hydrationEpoch, false, hydrationEpoch);
+                }}>重试读取</button>
+              </section>
+            ) : composerOpen && draftTarget && !interactionLocked ? (
+              <section
+                className="comment-composer rail-comment-composer"
+                aria-label="添加评论"
+                data-comment-measure="__composer"
+                data-focused="true"
+                style={{ top: `${composerTop}px` }}
+              >
+                <header>
+                  <div className="composer-target" data-empty={!draftTarget ? "true" : "false"}>
+                    <strong>{draftTargetScope}</strong>
+                    <span>“{insertionLabel(draftTarget)}”</span>
+                  </div>
+                  <button
+                    className="comment-tool-button"
+                    type="button"
+                    aria-label="关闭评论编辑器"
+                    title="关闭"
+                    onClick={closeCommentComposer}
+                  >
+                    <XIcon aria-hidden="true" size={15} weight="bold" />
+                  </button>
+                </header>
+                <label htmlFor="round-comment-draft">评论内容</label>
+                <textarea
+                  id="round-comment-draft"
+                  ref={composerRef}
+                  value={draft}
+                  disabled={!draftTarget || !canLocateTarget(draftTarget) || interactionLocked}
+                  placeholder={draftTarget.tagName === "body"
+                    ? "输入对整个页面的修改要求…"
+                    : "输入对这部分内容的修改要求…"}
+                  onChange={(event) => {
+                    composerDraftRef.current = event.target.value;
+                    setDraft(event.target.value);
+                    persistCurrentDraftRecovery();
+                  }}
+                  onPaste={(event) => {
+                    const commentId = draftCommentId || composerCommentIdRef.current;
+                    if (commentId) pasteImages(event, { kind: "composer", commentId });
+                  }}
+                  onKeyDown={(event) => {
+                    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                      event.preventDefault();
+                      addComment();
+                    }
+                  }}
+                />
+                <CommentAttachmentStrip
+                  attachments={draftAttachments}
+                  objectUrls={attachmentObjectUrls}
+                  editable={!interactionLocked}
+                  onEnsurePreview={ensureAttachmentObjectUrl}
+                  onPreview={(attachment) => void openAttachmentPreview(attachment)}
+                  onDownload={(attachment) => void downloadAttachment(attachment)}
+                  onRemove={removeComposerAttachment}
+                />
+                <footer className="composer-actions">
+                  <div className="composer-footer-tools">
+                    <button
+                      className="comment-tool-button"
+                      type="button"
+                      aria-label="添加附件"
+                      title="添加附件"
+                      disabled={interactionLocked || !draftCommentId}
+                      onClick={() => {
+                        if (draftCommentId) {
+                          openAttachmentPicker(
+                            { kind: "composer", commentId: draftCommentId },
+                            "all",
+                          );
+                        }
+                      }}
+                    >
+                      <PaperclipIcon aria-hidden="true" size={15} weight="bold" />
+                    </button>
+                    <button
+                      className="comment-tool-button"
+                      type="button"
+                      aria-label="添加图片"
+                      title="添加图片"
+                      disabled={interactionLocked || !draftCommentId}
+                      onClick={() => {
+                        if (draftCommentId) {
+                          openAttachmentPicker(
+                            { kind: "composer", commentId: draftCommentId },
+                            "image",
+                          );
+                        }
+                      }}
+                    >
+                      <ImageIcon aria-hidden="true" size={15} weight="bold" />
+                    </button>
+                    {attachmentUploadCount > 0 ? <small>正在添加附件…</small> : null}
+                  </div>
+                  <button
+                    className="add-comment-button"
+                    type="button"
+                    disabled={
+                      !canLocateTarget(draftTarget)
+                      || (!draft.trim() && draftAttachments.length === 0)
+                      || attachmentUploadCount > 0
+                      || interactionLocked
+                    }
+                    onClick={(event) => {
+                      event.currentTarget.blur();
+                      addComment();
+                    }}
+                  >
+                    <ChatCircleTextIcon aria-hidden="true" size={15} weight="bold" />
+                    评论
+                  </button>
+                </footer>
+              </section>
+            ) : draftTarget && (draft.trim() || draftAttachments.length > 0) && !interactionLocked ? (
+              <section
+                className="draft-recovery-card rail-status-card"
+                aria-label="未发送评论"
+              >
+                <div><strong>有一条未发送评论</strong><span>{insertionLabel(draftTarget)}</span></div>
+                <button
+                  className="resume-comment-button"
+                  type="button"
+                  onClick={() => {
+                    const located = editorRef.current?.select(draftTarget, { showToolbar: false });
+                    setSelection(located || draftTarget);
+                    setDraftTarget(located || draftTarget);
+                    draftTargetRef.current = located || draftTarget;
+                    updateFocusedComment(null);
+                    setComposerOpen(true);
+                    queueReviewPairReveal(located || draftTarget, "__composer");
+                    window.requestAnimationFrame(() => {
+                      composerRef.current?.focus({ preventScroll: true });
+                    });
+                  }}
+                >继续填写</button>
+              </section>
+            ) : null}
+
+            {visibleCommentItems.length === 0 && !composerOpen ? (
+              <div className="comments-empty">
+                <ChatCircleTextIcon aria-hidden="true" size={24} weight="duotone" />
+                <strong>评论会显示在这里</strong>
+                <span>可以评论整个页面、模块或其中的小区块。</span>
+              </div>
+            ) : sortedVisibleCommentItems.map((comment, index) => {
+              const editable = viewMode === "current" && !interactionLocked;
+              const editing = editingCommentId === comment.commentId;
+              const deleting = pendingDeleteCommentId === comment.commentId;
+              const quote = comment.target.textQuote || comment.target.text;
+              return (
+                <article
+                  className="comment-card"
+                  data-comment-measure={comment.commentId}
+                  data-selected={selection?.selector === comment.target.selector ? "true" : "false"}
+                  data-focused={focusedCommentId === comment.commentId ? "true" : undefined}
+                  data-resolution={comment.target.resolution}
+                  data-editing={editing ? "true" : undefined}
+                  role="group"
+                  aria-current={focusedCommentId === comment.commentId ? "location" : undefined}
+                  tabIndex={editable && canLocateTarget(comment.target) ? 0 : -1}
+                  aria-label={`${insertionLabel(comment.target)}：${comment.text}`}
+                  style={{ top: `${visibleCommentPositions[comment.commentId] ?? 82}px` }}
+                  onClick={() => {
+                    if (!editing && !deleting && editable && canLocateTarget(comment.target)) {
+                      focusCommentTarget(comment.target, comment.commentId);
+                    }
+                  }}
+                  onKeyDown={(event) => {
+                    if (
+                      event.target === event.currentTarget
+                      && !editing
+                      && !deleting
+                      && editable
+                      && canLocateTarget(comment.target)
+                      && (event.key === "Enter" || event.key === " ")
+                    ) {
+                      event.preventDefault();
+                      focusCommentTarget(comment.target, comment.commentId);
+                    }
+                  }}
+                  key={comment.commentId}
+                >
+                  <header className="comment-card-header">
+                    <span className="comment-target">{insertionLabel(comment.target)}</span>
+                    <time dateTime={comment.updatedAt || comment.createdAt}>
+                      {formatTime(comment.updatedAt || comment.createdAt, true)}
+                    </time>
+                  </header>
+                  {quote ? <q>{quote.length > 96 ? `${quote.slice(0, 96)}…` : quote}</q> : null}
+                  {editing ? (
+                    <textarea
+                      ref={commentEditRef}
+                      className="comment-edit-textarea"
+                      aria-label={`编辑评论 ${index + 1}`}
+                      value={commentEditDraft}
+                      onClick={(event) => event.stopPropagation()}
+                      onChange={(event) => setCommentEditDraft(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Escape") {
+                          event.preventDefault();
+                          cancelCommentEdit();
+                        } else if (
+                          (event.metaKey || event.ctrlKey)
+                          && event.key === "Enter"
+                        ) {
+                          event.preventDefault();
+                          confirmCommentEdit(comment.commentId);
+                        }
+                      }}
+                      onPaste={(event) => pasteImages(event, {
+                        kind: "comment",
+                        commentId: comment.commentId,
+                      })}
+                    />
+                  ) : <p>{comment.text || "已添加参考附件"}</p>}
+                  <CommentAttachmentStrip
+                    attachments={comment.attachments}
+                    objectUrls={attachmentObjectUrls}
+                    editable={editable}
+                    onEnsurePreview={ensureAttachmentObjectUrl}
+                    onPreview={(attachment) => void openAttachmentPreview(attachment)}
+                    onDownload={(attachment) => void downloadAttachment(attachment)}
+                    onRemove={(attachment) => removeCommentAttachment(
+                      comment.commentId,
+                      attachment,
+                    )}
+                  />
+                  {editable ? (
+                    deleting ? (
+                      <footer
+                        className="comment-delete-confirm"
+                        role="alert"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        <span>删除这条评论？</span>
+                        <div>
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.currentTarget.blur();
+                              setPendingDeleteCommentId(null);
+                              queueReviewCommentFocus(comment.target, comment.commentId);
+                            }}
+                          >取消</button>
+                          <button
+                            className="confirm-delete"
+                            type="button"
+                            onClick={(event) => {
+                              event.currentTarget.blur();
+                              deleteComment(comment.commentId);
+                            }}
+                          >删除</button>
+                        </div>
+                      </footer>
+                    ) : (
+                      <footer className="comment-card-footer">
+                        <span>{comment.attachments?.length
+                          ? `${comment.attachments.length} 个附件`
+                          : "可添加附件"}</span>
+                        <div className="comment-card-tools">
+                          <button
+                            className="comment-tool-button"
+                            type="button"
+                            aria-label="添加附件"
+                            title="添加附件"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              openAttachmentPicker(
+                                { kind: "comment", commentId: comment.commentId },
+                                "all",
+                              );
+                            }}
+                          >
+                            <PaperclipIcon aria-hidden="true" size={15} weight="bold" />
+                          </button>
+                          <button
+                            className="comment-tool-button"
+                            type="button"
+                            aria-label="添加图片"
+                            title="添加图片"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              openAttachmentPicker(
+                                { kind: "comment", commentId: comment.commentId },
+                                "image",
+                              );
+                            }}
+                          >
+                            <ImageIcon aria-hidden="true" size={15} weight="bold" />
+                          </button>
+                          {editing ? (
+                            <>
+                              <button
+                                className="comment-tool-button cancel-edit"
+                                type="button"
+                                aria-label="取消编辑"
+                                title="取消编辑"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  event.currentTarget.blur();
+                                  cancelCommentEdit();
+                                }}
+                              >
+                                <XIcon aria-hidden="true" size={15} weight="bold" />
+                              </button>
+                              <button
+                                className="comment-tool-button confirm-edit"
+                                type="button"
+                                aria-label="确认修改"
+                                title="确认修改"
+                                disabled={!commentEditDraft.trim() && !(comment.attachments?.length)}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  event.currentTarget.blur();
+                                  confirmCommentEdit(comment.commentId);
+                                }}
+                              >
+                                <CheckCircleIcon aria-hidden="true" size={16} weight="fill" />
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              className="comment-tool-button"
+                              type="button"
+                              aria-label="编辑评论"
+                              title="编辑评论"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                beginCommentEdit(comment);
+                              }}
+                            >
+                              <PencilSimpleIcon aria-hidden="true" size={15} weight="bold" />
+                            </button>
+                          )}
+                          <button
+                            className="comment-tool-button danger"
+                            type="button"
+                            aria-label="删除评论"
+                            title="删除评论"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              event.currentTarget.blur();
+                              setPendingDeleteCommentId(comment.commentId);
+                              queueReviewCommentFocus(comment.target, comment.commentId);
+                            }}
+                          >
+                            <TrashIcon aria-hidden="true" size={15} weight="bold" />
+                          </button>
+                        </div>
+                      </footer>
+                    )
+                  ) : null}
+                </article>
+              );
+            })}
+
+            {draftPersistError ? (
+              <section className="comment-persist-error rail-persist-error" role="alert">
+                <div>
+                  <strong>评论还没有安全记录</strong>
+                  <span>{productErrorMessage(
+                    draftPersistError,
+                    "本轮评论暂时无法记录；当前内容仍保留在页面中。",
+                  )}</span>
+                </div>
+                <button type="button" onClick={() => void flushDraftPersistence()}>重试记录</button>
+              </section>
+            ) : null}
+          </div>
+          </aside>
+        ) : null}
+      </div>
 
       {previewAttachment && attachmentObjectUrls[previewAttachment.attachmentId] ? (
         <div
@@ -7746,102 +8301,93 @@ export default function Workbench() {
         className={`drawer-overlay${drawer ? " show" : ""}`}
         data-drawer={drawer || undefined}
         aria-hidden="true"
-        onClick={() => setDrawer(null)}
+        onClick={() => {
+          if (drawer !== "handoff") setDrawer(null);
+        }}
       />
       <aside
         className={`side-drawer${drawer ? " open" : ""}`}
         data-drawer={drawer || undefined}
         inert={!drawer}
+        role="dialog"
+        aria-modal={drawer === "handoff" ? "true" : undefined}
         aria-label={drawer === "history" ? "版本历史" : drawer === "files" ? "项目文件" : "本轮处理"}
       >
-        <header className="drawer-header">
-          <div>
-            <strong>{drawer === "history" ? "版本历史" : drawer === "files" ? "项目文件" : "本轮处理"}</strong>
-            <span>{drawer === "history"
-              ? "当前 HTML 可编辑；历史版本保持只读"
-              : drawer === "files"
-                ? "当前页面与项目记录的位置"
-                : activeRun
-                  ? "查看进度、评论和修改记录"
-                  : "发送评论后在这里查看进度"}</span>
-          </div>
-          <button type="button" onClick={() => setDrawer(null)}>关闭</button>
-        </header>
+        {drawer === "handoff" ? (
+          <header className="drawer-header processing-header">
+            <div className="processing-title">
+              <span className="processing-brand">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="./qoder-logo.png" alt="" />
+              </span>
+              <span>
+                <small>本轮处理</small>
+                <strong>{activeRun?.status === "ready-to-open"
+                  ? "修改结果已通过检查"
+                  : "等待 QoderWork 返回修改结果"}</strong>
+              </span>
+            </div>
+            <span className="round-version">{activeRun?.candidateVersionLabel || "下一版"}</span>
+          </header>
+        ) : drawer ? (
+          <>
+            <header className="drawer-header project-panel-header">
+              <div className="project-panel-title">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="./brand-logo.png" alt="" />
+                <span>
+                  <small>源页工作区</small>
+                  <strong>项目与版本</strong>
+                </span>
+              </div>
+              <button
+                className="drawer-close-button"
+                type="button"
+                aria-label="关闭项目面板"
+                title="关闭"
+                onClick={() => setDrawer(null)}
+              >
+                <XIcon aria-hidden="true" size={18} weight="bold" />
+              </button>
+            </header>
+            <nav className="project-tabs" aria-label="项目信息">
+              <button
+                type="button"
+                data-active={drawer === "files" ? "true" : "false"}
+                onClick={() => {
+                  setFileView(null);
+                  setDrawer("files");
+                }}
+              >当前项目</button>
+              <button
+                type="button"
+                data-active={drawer === "history" ? "true" : "false"}
+                onClick={() => {
+                  setFileView(null);
+                  setDrawer("history");
+                }}
+              >版本历史</button>
+            </nav>
+          </>
+        ) : null}
         <div className="drawer-body">
           {drawer === "history" ? (
-            <div className="history-list">
-              <section className="current-work-history" aria-label="当前 HTML 修改记录">
-                <header>
-                  <div>
-                    <strong>当前 HTML</strong>
-                    <span>正在编辑并自动写回源文件的工作内容</span>
-                  </div>
-                  <b>工作中</b>
-                </header>
-                <p>
-                  本地编辑不会自动生成新版本；发送至 QoderWork 并成功完成后，
-                  这些记录会随新版本归档。
-                </p>
-                <strong className="current-work-counts">
-                  {activeCommentCount} 条评论 · {summarizedChangeEvents.length} 项修改
-                </strong>
-                {activeCommentCount > 0 || changeEvents.length > 0 ? (
-                  <details className="history-records">
-                    <summary>查看本次修改</summary>
-                    {activeCommentItems.map((comment) => (
-                      <article className="history-record" key={comment.commentId}>
-                        <div>
-                          <strong>评论 · {comment.target.label || comment.target.selector}</strong>
-                          <time dateTime={comment.createdAt}>{formatTime(comment.createdAt, true)}</time>
-                        </div>
-                        {comment.text ? <p>{comment.text}</p> : null}
-                        <CommentAttachmentStrip
-                          attachments={comment.attachments}
-                          objectUrls={attachmentObjectUrls}
-                          onEnsurePreview={ensureAttachmentObjectUrl}
-                          onPreview={(attachment) => void openAttachmentPreview(attachment)}
-                          onDownload={(attachment) => void downloadAttachment(attachment)}
-                        />
-                      </article>
-                    ))}
-                    {summarizedChangeEvents.map((event) => (
-                      <article className="history-record history-change-record" key={event.eventId}>
-                        <div>
-                          <strong>{changeKindLabel(event)} · {event.target.label || event.target.selector}</strong>
-                          <time dateTime={event.createdAt}>{formatTime(event.createdAt, true)}</time>
-                        </div>
-                        <div className="history-change-values">
-                          <span>
-                            <small>修改前</small>
-                            <del>{historyRecordValue(event, event.before)}</del>
-                          </span>
-                          <CaretRightIcon aria-hidden="true" size={14} weight="bold" />
-                          <span>
-                            <small>修改后</small>
-                            <ins>{historyRecordValue(event, event.after)}</ins>
-                          </span>
-                        </div>
-                      </article>
-                    ))}
-                    {changeEvents.length > 0 ? (
-                      <small className="history-audit-note">
-                        已将 {changeEvents.length} 条底层记录整理为 {summarizedChangeEvents.length} 项用户可读变更；完整审计仍保存在项目记录中。
-                      </small>
-                    ) : null}
-                  </details>
-                ) : (
-                  <span className="history-no-records">当前还没有评论或直接编辑记录。</span>
-                )}
-              </section>
-              <div className="history-section-heading">
-                <strong>历史基线与 AI 版本</strong>
-                <span>只读、不随当前 HTML 的本地编辑变化</span>
-              </div>
+            <div className="history-list version-panel-body">
+              <header className="version-panel-heading">
+                <ClockCounterClockwiseIcon aria-hidden="true" size={22} weight="duotone" />
+                <span>
+                  <small>版本历史</small>
+                  <strong>安全保留每一次修改</strong>
+                </span>
+              </header>
               {versions.length === 0 ? (
                 <div className="drawer-empty">首次编辑或发送给 AI 后，会建立版本 1。</div>
               ) : (
-                versions.map(renderHistoryItem)
+                <div className="version-list">{versions.map(renderHistoryItem)}</div>
               )}
+              <p className="version-note">
+                在画布中查看不会覆盖当前 HTML；历史内容与当时的评论都保持只读。
+              </p>
             </div>
           ) : null}
 
@@ -7895,95 +8441,85 @@ export default function Workbench() {
                 ) : <pre>{fileView.content}</pre>}
               </div>
             ) : (
-              <div className="files-panel">
-                <section className="project-locations" aria-label="文件位置">
-                  <article className="project-location-card">
-                    <div>
-                      <FileTextIcon aria-hidden="true" size={18} weight="duotone" />
-                      <strong>当前 HTML</strong>
-                      {sourcePath
-                        && typeof window !== "undefined"
-                        && window.htmlAIProjects?.showInFolder ? (
-                        <button
-                          type="button"
-                          aria-label="在 Finder 中显示当前 HTML"
-                          onClick={() => void showProjectInFolder()}
-                        >
-                          <FolderOpenIcon aria-hidden="true" size={15} weight="bold" />
-                          显示
-                        </button>
-                      ) : null}
-                    </div>
-                    <span className="project-location-path" title={sourcePath || undefined}>
-                      {sourcePath || "尚未打开本地文件"}
-                    </span>
-                  </article>
-                  <article
-                    className="project-location-card"
-                    data-empty={projectRecordsPath ? "false" : "true"}
-                  >
-                    <div>
-                      <FolderOpenIcon aria-hidden="true" size={18} weight="duotone" />
-                      <strong>项目记录</strong>
-                      {projectRecordsPath ? (
-                        <button
-                          type="button"
-                          aria-label="在 Finder 中打开项目记录"
-                          onClick={() => void showProjectRecordsInFolder()}
-                        >
-                          <FolderOpenIcon aria-hidden="true" size={15} weight="bold" />
-                          打开
-                        </button>
-                      ) : null}
-                    </div>
-                    <span
-                      className="project-location-path"
-                      title={projectRecordsPath || undefined}
-                    >
-                      {projectRecordsPath || "首次编辑或发送给 AI 后创建"}
-                    </span>
-                  </article>
+              <div className="files-panel project-panel-body">
+                <section className="current-project-card">
+                  <span className="project-file-icon">
+                    <FileHtmlIcon aria-hidden="true" size={22} weight="duotone" />
+                  </span>
+                  <span>
+                    <small>当前文件</small>
+                    <strong>{projectName}</strong>
+                    <em>
+                      <span aria-hidden="true" />
+                      {persistState === "idle" ? "已安全保存" : persistLabel}
+                    </em>
+                  </span>
+                  <div className="current-project-actions">
+                    {sourcePath && typeof window !== "undefined" && window.htmlAIProjects?.showInFolder ? (
+                      <button type="button" onClick={() => void showProjectInFolder()}>Finder</button>
+                    ) : null}
+                    <button type="button" onClick={() => void exportCurrentHtml()}>
+                      导出 HTML 副本
+                    </button>
+                  </div>
                 </section>
-                <p className="project-storage-note">
-                  {projectRecordsPath
-                    ? "AI 完成后，新 HTML 和历史记录都保存在项目记录中。"
-                    : "仅打开不会改动源文件。"}
-                </p>
-                <button
-                  className="project-rule-card"
-                  type="button"
-                  disabled={!projectId}
-                  onClick={() => void viewFile("PROJECT.md")}
-                >
-                  <strong>项目规则</strong>
-                  <span>{projectId ? "用于以后每次 AI 修改" : "建立项目记录后可用"}</span>
+
+                <section className="recent-files">
+                  <header>
+                    <strong>最近打开</strong>
+                    <small>{visibleRecentProjects.length} 个文件</small>
+                  </header>
+                  <div>
+                    {visibleRecentProjects.length ? visibleRecentProjects.map((project) => (
+                      <button
+                        className="recent-file-row"
+                        type="button"
+                        key={project.path}
+                        onClick={() => void openProject(project.sourcePath)}
+                      >
+                        <FileHtmlIcon aria-hidden="true" size={19} weight="duotone" />
+                        <span>
+                          <strong>{project.name}</strong>
+                          <small>{folderFromSourcePath(project.sourcePath)}</small>
+                        </span>
+                        <time dateTime={new Date(project.lastOpenedAt).toISOString()}>
+                          {formatProjectTimestamp(project.lastOpenedAt)}
+                        </time>
+                        <CaretRightIcon aria-hidden="true" size={14} weight="bold" />
+                      </button>
+                    )) : <span className="recent-projects-empty">还没有最近打开的文件</span>}
+                  </div>
+                </section>
+
+                <button className="open-local-button" type="button" onClick={() => void openProject()}>
+                  <span><PlusIcon aria-hidden="true" size={19} weight="bold" /></span>
+                  <span>
+                    <strong>打开本地 HTML</strong>
+                    <small>选择已有的 .html 或 .htm 文件</small>
+                  </span>
+                  <CaretRightIcon aria-hidden="true" size={15} weight="bold" />
                 </button>
-                {projectId ? (
-                  <details className="technical-files">
-                    <summary>技术记录</summary>
-                    <div>
-                      <button type="button" onClick={() => void viewFile("runtime-state.json")}>
-                        <strong>运行状态</strong><span>仅查看</span>
+
+                <details className="project-advanced">
+                  <summary>项目规则与记录</summary>
+                  <div>
+                    <button
+                      className="project-rule-card"
+                      type="button"
+                      disabled={!projectId}
+                      onClick={() => void viewFile("PROJECT.md")}
+                    >
+                      <strong>项目规则</strong>
+                      <span>{projectId ? "用于以后每次 AI 修改" : "建立项目记录后可用"}</span>
+                    </button>
+                    {projectRecordsPath ? (
+                      <button type="button" onClick={() => void showProjectRecordsInFolder()}>
+                        <FolderOpenIcon aria-hidden="true" size={16} weight="duotone" />
+                        在 Finder 中打开项目记录
                       </button>
-                      <button type="button" onClick={() => void viewFile("edit-audit.jsonl")}>
-                        <strong>编辑记录</strong><span>仅查看</span>
-                      </button>
-                      {activeRun?.requestId && activeRun.requestId !== "pending" ? (
-                        <>
-                          <button type="button" onClick={() => void viewFile(`requests/${activeRun.requestId}/PROMPT.md`)}>
-                            <strong>本轮 Prompt</strong><span>仅查看</span>
-                          </button>
-                          <button type="button" onClick={() => void viewFile(`requests/${activeRun.requestId}/change-request.json`)}>
-                            <strong>本轮修改要求</strong><span>仅查看</span>
-                          </button>
-                          <button type="button" onClick={() => void viewFile(`requests/${activeRun.requestId}/input/AI_RULES.md`)}>
-                            <strong>本轮 AI 规则</strong><span>仅查看</span>
-                          </button>
-                        </>
-                      ) : null}
-                    </div>
-                  </details>
-                ) : null}
+                    ) : null}
+                  </div>
+                </details>
               </div>
             )
           ) : null}
@@ -7992,240 +8528,133 @@ export default function Workbench() {
             <div className="handoff-panel">
               {activeRun ? (
                 <>
-                  <section
-                    className="handoff-process-board"
-                    data-status={activeRun.status}
-                    aria-live="polite"
-                  >
-                    <header>
-                      <div>
-                        <span>本轮流程</span>
-                        <strong>{runStatus}</strong>
-                      </div>
-                      <small>{activeRun.candidateVersionLabel}</small>
-                    </header>
-                    <ol>
-                      {processSteps.map((step) => (
-                        <li key={step.key} data-state={step.state}>
-                          <span className="process-step-icon" aria-hidden="true">
-                            {step.state === "done" ? (
-                              <CheckCircleIcon size={19} weight="fill" />
-                            ) : step.state === "attention" || step.state === "error" ? (
-                              <TriangleIcon size={17} weight="fill" />
-                            ) : (
-                              <ClockCounterClockwiseIcon size={18} weight="duotone" />
-                            )}
-                          </span>
-                          <span>
-                            <strong>{step.label}</strong>
-                            <small>{step.detail}</small>
-                          </span>
-                        </li>
-                      ))}
-                    </ol>
-                  </section>
-                  {activeRun.status === "awaiting-check-decision" ? (
-                    <section className="validation-decision" role="alert">
-                      <strong>这不是安全错误，可以由你决定继续</strong>
-                      <p>
-                        {activeRun.validationReview?.softViolationCodes.length
-                          ? `范围提示：${activeRun.validationReview.softViolationCodes.join("、")}`
-                          : "检测到超出原评论范围的修改。"}
-                      </p>
-                      {activeRun.error ? <small>{activeRun.error}</small> : null}
-                      <button
-                        type="button"
-                        disabled={waivingValidation}
-                        onClick={() => void waiveCurrentValidation()}
-                      >{waivingValidation ? "正在记录决定…" : "无视本校验，继续"}</button>
-                    </section>
-                  ) : null}
-                  {activeRun.status === "ready-to-open" ? (
-                    <section className="ready-version-action" role="status">
-                      <div>
-                        <strong>{activeRun.candidateVersionLabel} 已准备好</strong>
-                        <span>当前左侧仍是旧版；点击后才会切换。</span>
-                        {activeRun.error ? <small>{activeRun.error}</small> : null}
-                      </div>
-                      <button
-                        className="drawer-primary"
-                        type="button"
-                        disabled={openingReadyVersion || !activeRun.readyPayload}
-                        onClick={() => void activateReadyResult()}
-                      >{openingReadyVersion
-                        ? "正在打开并核对…"
-                        : activeRun.readyPayload
-                          ? "打开 Qoder 返回的最新版"
-                          : "正在恢复最新版…"}</button>
-                    </section>
-                  ) : null}
-                  {activeRun.status === "awaiting-conflict-resolution" ? (
-                    <section className="ai-conflict-panel" role="alert">
-                      <strong>请选择哪份内容成为当前 HTML</strong>
-                      <p>外部文件和 AI 候选都已保留。系统不会静默覆盖任一侧。</p>
-                      <button type="button" onClick={() => void viewAiConflictDiff()}>
-                        比较两份内容
-                      </button>
-                      <button type="button" onClick={() => void resolveAiConflict("adopt-ai")}>采用 AI 候选</button>
-                      <button type="button" onClick={() => void resolveAiConflict("keep-external")}>保留外部内容</button>
-                    </section>
-                  ) : null}
-                  {activeRun.status === "recovering-transaction" ? (
-                    <section className="ai-conflict-panel" role="status">
-                      <strong>正在恢复尚未保存完成的修改</strong>
-                      <p>恢复完成前页面会保持只读，评论和修改记录不会丢失。</p>
-                    </section>
-                  ) : null}
-                  {runInProgress && [
-                    "submitting",
-                    "processing",
-                  ].includes(activeRun.status) ? (
-                    <div className="handoff-actions">
-                      <button
-                        className="drawer-primary"
-                        type="button"
-                        disabled={!activeRun.handoffMessage}
-                        onClick={() => void sendToQoderWork(
-                          activeRun.handoffMessage,
-                          activeRun.requestId,
-                        )}
-                      >
-                        <CopyIcon aria-hidden="true" size={15} weight="bold" />
-                        <span>再次复制评论</span>
-                      </button>
-                      <button
-                        className="cancel-run-button"
-                        type="button"
-                        disabled={cancelling}
-                        onClick={() => void cancelActiveRun()}
-                      >{cancelling ? "正在恢复编辑…" : "先不发送，继续编辑评论"}</button>
+                  <div className="processing-summary-bar">
+                    <div>
+                      <LockKeyIcon aria-hidden="true" size={19} weight="duotone" />
+                      <span>
+                        <strong>画布已锁定，仅可浏览</strong>
+                        <small>原始评论和本地内容均已冻结，返回结果不会覆盖它们</small>
+                      </span>
                     </div>
-                  ) : null}
-                  {activeRun.requestPath
-                    && typeof window !== "undefined"
-                    && window.htmlAIProjects?.revealRequestFolder ? (
-                    <button
-                      className="handoff-folder-link"
-                      type="button"
-                      onClick={() => void revealActiveRunInFinder()}
-                    >
-                      <FolderOpenIcon aria-hidden="true" size={18} weight="duotone" />
-                      <span>在 Finder 中查看本轮文件</span>
-                      <CaretRightIcon aria-hidden="true" size={14} weight="bold" />
-                    </button>
-                  ) : null}
+                    <span className="status-chip">
+                      <span aria-hidden="true" />
+                      {activeRun.status === "ready-to-open" ? "等待确认打开" : "正在监听返回文件"}
+                    </span>
+                  </div>
 
-                  <section className="handoff-history" aria-label="本轮评论和修改记录">
-                    <header>
-                      <div>
-                        <strong>本轮记录</strong>
-                        <span>原始要求、内部 AI 补充与本地编辑</span>
+                  <div className="processing-content">
+                    <section
+                      className="handoff-process-board timeline-panel"
+                      data-status={activeRun.status}
+                      aria-live="polite"
+                    >
+                      <header>
+                        <span>本轮流程</span>
+                        <strong>
+                          {processSteps.length} 个步骤 · 已完成 {processSteps.filter((step) => step.state === "done").length} 个
+                        </strong>
+                      </header>
+                      <ol>
+                        {processSteps.map((step) => (
+                          <li key={step.key} data-state={step.state}>
+                            <span className="process-step-icon" aria-hidden="true">
+                              {step.state === "done" ? (
+                                <CheckCircleIcon size={20} weight="fill" />
+                              ) : step.state === "attention" || step.state === "error" ? (
+                                <TriangleIcon size={18} weight="fill" />
+                              ) : (
+                                <ClockCounterClockwiseIcon size={19} weight="duotone" />
+                              )}
+                            </span>
+                            <span>
+                              <strong>{step.label}</strong>
+                              <small>{step.detail}</small>
+                            </span>
+                          </li>
+                        ))}
+                      </ol>
+                    </section>
+
+                    <section className="round-detail-panel" aria-label="本轮记录">
+                      <header>
+                        <div>
+                          <span>本轮记录</span>
+                          <strong>{activeCommentCount} 条评论</strong>
+                        </div>
+                        <SealCheckIcon aria-hidden="true" size={24} weight="duotone" />
+                      </header>
+                      <div className="round-facts">
+                        <div><span>基于版本</span><strong>{runBasisLabel}</strong></div>
+                        <div><span>目标版本</span><strong>{activeRun.candidateVersionLabel}</strong></div>
+                        <div><span>提交时间</span><strong>{runSubmittedLabel}</strong></div>
                       </div>
-                      <small>{activeCommentCount + summarizedChangeEvents.length + activeSupplementRecords.length} 项</small>
-                    </header>
-                    <details
-                      className="handoff-history-group"
-                      aria-label="本轮评论"
-                    >
-                      <summary className="handoff-history-heading">
-                        <ChatCircleTextIcon aria-hidden="true" size={17} weight="duotone" />
-                        <strong>源页原始评论</strong>
-                        <span>{activeCommentCount}</span>
-                      </summary>
-                      {activeCommentItems.length > 0 ? activeCommentItems.map((comment) => (
-                        <article className="handoff-history-item" key={comment.commentId}>
-                          <div>
-                            <strong>{insertionLabel(comment.target)}</strong>
-                            <time dateTime={comment.createdAt}>{formatTime(comment.createdAt, true)}</time>
-                          </div>
-                          <p>{comment.text || "已添加参考附件"}</p>
-                          <CommentAttachmentStrip
-                            attachments={comment.attachments}
-                            objectUrls={attachmentObjectUrls}
-                            onEnsurePreview={ensureAttachmentObjectUrl}
-                            onPreview={(attachment) => void openAttachmentPreview(attachment)}
-                            onDownload={(attachment) => void downloadAttachment(attachment)}
-                          />
-                        </article>
-                      )) : (
-                        <span className="handoff-history-empty">本轮没有评论。</span>
-                      )}
-                    </details>
-                    <details
-                      className="handoff-history-group"
-                      aria-label="本轮页面修改"
-                    >
-                      <summary className="handoff-history-heading">
-                        <ClockCounterClockwiseIcon aria-hidden="true" size={17} weight="duotone" />
-                        <strong>本地编辑</strong>
-                        <span>{summarizedChangeEvents.length}</span>
-                      </summary>
-                      {summarizedChangeEvents.length > 0 ? summarizedChangeEvents.map((event) => (
-                        <article className="handoff-history-item handoff-change-item" key={event.eventId}>
-                          <div>
-                            <strong>{changeKindLabel(event)} · {event.target.label || event.target.selector}</strong>
-                            <time dateTime={event.createdAt}>{formatTime(event.createdAt, true)}</time>
-                          </div>
-                          <div className="history-change-values">
-                            <span>
-                              <small>修改前</small>
-                              <del>{historyRecordValue(event, event.before)}</del>
-                            </span>
-                            <CaretRightIcon aria-hidden="true" size={14} weight="bold" />
-                            <span>
-                              <small>修改后</small>
-                              <ins>{historyRecordValue(event, event.after)}</ins>
-                            </span>
-                          </div>
-                        </article>
-                      )) : (
-                        <span className="handoff-history-empty">本轮没有直接修改页面。</span>
-                      )}
-                    </details>
-                    {activeSupplementRecords.length > 0 ? (
-                      <details
-                        className="handoff-history-group"
-                        aria-label="内部 AI 对话补充"
-                      >
-                        <summary className="handoff-history-heading">
-                          <ChatCircleTextIcon aria-hidden="true" size={17} weight="duotone" />
-                          <strong>内部 AI 对话补充</strong>
-                          <span>{activeSupplementRecords.length}</span>
-                        </summary>
-                        {activeSupplementRecords.map((supplement) => (
-                          <article className="handoff-history-item" key={supplement.recordId}>
+                      <div className="round-comment-list">
+                        {activeCommentItems.map((comment, index) => (
+                          <article key={comment.commentId}>
+                            <span>{index + 1}</span>
                             <div>
-                              <strong>{supplement.action === "add" ? "新增要求" : supplement.action === "amend" ? "补充修改" : "撤回要求"}</strong>
-                              <time dateTime={supplement.createdAt}>{formatTime(supplement.createdAt, true)}</time>
+                              <strong>{insertionLabel(comment.target)}</strong>
+                              {comment.target.textQuote || comment.target.text ? (
+                                <q>{comment.target.textQuote || comment.target.text}</q>
+                              ) : null}
+                              <p>{comment.text || "已添加参考附件"}</p>
+                              {comment.attachments?.length ? (
+                                <small>
+                                  <PaperclipIcon aria-hidden="true" size={12} weight="bold" />
+                                  {comment.attachments.length} 个附件
+                                </small>
+                              ) : null}
                             </div>
-                            <p>{supplement.text}</p>
-                            {supplement.attachments.length > 0 ? (
-                              <small>{supplement.attachments.map((item) => item.fileName).join("、")}</small>
-                            ) : supplement.evidenceState === "description-only" ? (
-                              <small>原件未归档 · {supplement.evidenceDescription}</small>
-                            ) : null}
                           </article>
                         ))}
-                      </details>
+                      </div>
+                      {activeRun.requestPath
+                        && typeof window !== "undefined"
+                        && window.htmlAIProjects?.revealRequestFolder ? (
+                        <button
+                          className="handoff-folder-link finder-link"
+                          type="button"
+                          onClick={() => void revealActiveRunInFinder()}
+                        >
+                          <FolderOpenIcon aria-hidden="true" size={18} weight="duotone" />
+                          <span>在 Finder 中查看本轮文件</span>
+                          <CaretRightIcon aria-hidden="true" size={14} weight="bold" />
+                        </button>
+                      ) : null}
+                    </section>
+                  </div>
+
+                  <div className="processing-decisions">
+                    {activeRun.status === "awaiting-check-decision" ? (
+                      <section className="validation-decision" role="alert">
+                        <strong>有一项范围校验需要你决定</strong>
+                        <p>{activeRun.validationReview?.softViolationCodes.length
+                          ? `范围提示：${activeRun.validationReview.softViolationCodes.join("、")}`
+                          : "检测到超出原评论范围的修改。"}</p>
+                        {activeRun.error ? <small>{activeRun.error}</small> : null}
+                        <button
+                          type="button"
+                          disabled={waivingValidation}
+                          onClick={() => void waiveCurrentValidation()}
+                        >{waivingValidation ? "正在记录决定…" : "无视本校验，继续"}</button>
+                      </section>
                     ) : null}
-                    <details
-                      className="handoff-history-group"
-                      aria-label="AI 结果与校验"
-                    >
-                      <summary className="handoff-history-heading">
-                        <CheckCircleIcon aria-hidden="true" size={17} weight="duotone" />
-                        <strong>AI 结果与校验</strong>
-                        <span>{activeRun.status === "ready-to-open" || activeRun.status === "complete" ? "已通过" : "进行中"}</span>
-                      </summary>
-                      <article className="handoff-history-item">
-                        <p>{activeRun.validationReview?.status === "waived"
-                          ? "硬校验已通过；软校验已按用户决定记录并继续。"
-                          : activeRun.status === "ready-to-open" || activeRun.status === "complete"
-                            ? "身份、Hash、完整 HTML、冻结输入与版本完整性均已通过。"
-                            : "校验结果会在这里持续更新。"}</p>
-                      </article>
-                    </details>
-                  </section>
+                    {activeRun.status === "awaiting-conflict-resolution" ? (
+                      <section className="ai-conflict-panel" role="alert">
+                        <strong>请选择哪份内容成为当前 HTML</strong>
+                        <p>外部文件和 AI 候选都已保留，系统不会静默覆盖任一侧。</p>
+                        <button type="button" onClick={() => void viewAiConflictDiff()}>比较两份内容</button>
+                        <button type="button" onClick={() => void resolveAiConflict("adopt-ai")}>采用 AI 候选</button>
+                        <button type="button" onClick={() => void resolveAiConflict("keep-external")}>保留外部内容</button>
+                      </section>
+                    ) : null}
+                    {activeRun.status === "recovering-transaction" ? (
+                      <section className="ai-conflict-panel" role="status">
+                        <strong>正在恢复尚未保存完成的修改</strong>
+                        <p>恢复完成前页面保持只读，评论和修改记录不会丢失。</p>
+                      </section>
+                    ) : null}
+                  </div>
                 </>
               ) : (
                 <div className="drawer-empty">发送评论后，这里会显示处理进度和本轮记录。</div>
@@ -8233,6 +8662,57 @@ export default function Workbench() {
             </div>
           ) : null}
         </div>
+        {drawer === "handoff" && activeRun ? (
+          <footer className="processing-footer">
+            {activeRun.status === "ready-to-open" ? (
+              <button
+                className="primary-action"
+                type="button"
+                disabled={openingReadyVersion || !activeRun.readyPayload}
+                onClick={() => void activateReadyResult()}
+              >
+                <FileHtmlIcon aria-hidden="true" size={18} weight="duotone" />
+                {openingReadyVersion ? "正在打开并核对…" : "打开最新版"}
+              </button>
+            ) : (
+              <>
+                <button
+                  className="cancel-action"
+                  type="button"
+                  disabled={cancelling || activeRun.requestId === "pending"}
+                  onClick={() => void cancelActiveRun()}
+                >
+                  <ArrowCounterClockwiseIcon aria-hidden="true" size={17} weight="bold" />
+                  {cancelling ? "正在恢复编辑…" : "取消发送，继续编辑"}
+                </button>
+                <button
+                  className="secondary-action"
+                  type="button"
+                  onClick={() => {
+                    setHandoffPreviewOpen(true);
+                    setCanvasMode("preview");
+                    setDrawer(null);
+                  }}
+                >
+                  <EyeIcon aria-hidden="true" size={17} weight="bold" />
+                  预览已发送 HTML
+                </button>
+                <button
+                  className="primary-action"
+                  type="button"
+                  disabled={!activeRun.handoffMessage}
+                  onClick={() => void sendToQoderWork(
+                    activeRun.handoffMessage,
+                    activeRun.requestId,
+                  )}
+                >
+                  <CopyIcon aria-hidden="true" size={18} weight="bold" />
+                  再次复制本轮要求
+                </button>
+              </>
+            )}
+          </footer>
+        ) : null}
       </aside>
 
       <div

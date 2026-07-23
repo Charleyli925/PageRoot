@@ -2,6 +2,7 @@ import {
   SourceTextMapError,
   buildSourceTextMap,
 } from "./source-text-map.js";
+import { isNativeEditHostMode } from "./native-edit-policy.js";
 
 export const NATIVE_EDIT_MODE = Object.freeze({
   EDITABLE: "native-editable",
@@ -261,15 +262,26 @@ export function classifyNativeEditCapability(index, target, options = {}) {
 
   const runtimeBlockers = [];
   if (runtime.mappingComplete !== true) runtimeBlockers.push("mapping-incomplete");
+  if (!isNativeEditHostMode(runtime.contentEditableMode)) {
+    runtimeBlockers.push("contenteditable-mode-unproven");
+  }
   if (runtime.styleStable !== true) runtimeBlockers.push("style-unstable");
   if (runtime.layoutStable !== true) runtimeBlockers.push("layout-unstable");
   if (runtime.selectionStable !== true) runtimeBlockers.push("selection-unstable");
   if (runtime.observerReady !== true) runtimeBlockers.push("mutation-observer-not-ready");
-  // Event delivery is part of the positive runtime proof. Older callers that
-  // omit this field must not silently regain direct editing for a
-  // display:contents tree where Chromium can skip the owning host's native
-  // beforeinput/input delivery.
-  if (runtime.nativeEventDeliveryStable !== true) {
+  const nativeEventDeliveryProven = (
+    runtime.nativeEventDeliveryMode === "native"
+    && runtime.nativeEventDeliveryStable === true
+  );
+  const nativeEventDeliveryGuarded = (
+    runtime.nativeEventDeliveryMode === "observer-guarded"
+    && runtime.nativeEventDeliveryGuarded === true
+    && runtime.observerReady === true
+  );
+  // display:contents no longer fails from a static heuristic alone. It may
+  // enter only through the observer-guarded lane, where a missing event pair
+  // becomes an unowned mutation and is rolled back before SourcePatch.
+  if (!nativeEventDeliveryProven && !nativeEventDeliveryGuarded) {
     runtimeBlockers.push("native-editing-event-delivery-unstable");
   }
   if (runtime.authorMutationRisk !== false) runtimeBlockers.push("author-mutation-risk-unknown");
@@ -289,6 +301,8 @@ export function classifyNativeEditCapability(index, target, options = {}) {
     {
       textLength: sourceMap.textLength,
       boundaryCount: sourceMap.boundaryCount,
+      contentEditableMode: runtime.contentEditableMode,
+      nativeEventDeliveryMode: runtime.nativeEventDeliveryMode,
     },
     sourceMap,
   );

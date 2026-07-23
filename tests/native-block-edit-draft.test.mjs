@@ -51,6 +51,46 @@ test("draft snapshots are deeply immutable and detached from constructor data", 
   assert.equal(draft.snapshot().currentSelection.anchor, 5);
 });
 
+test("draft views expose owned frozen state without deep-copying hot-path data", () => {
+  const draft = createDraft({
+    formatSkeleton: {
+      wrappers: Array.from({ length: 250 }, (_, index) => ({
+        tag: index % 2 === 0 ? "strong" : "em",
+        start: index,
+        end: index + 1,
+        metadata: {
+          sourceOrder: index,
+          attributes: { class: `wrapper-${index}` },
+        },
+      })),
+    },
+  });
+
+  const before = draft.view();
+  const repeated = draft.view();
+  assert.notEqual(before, repeated);
+  assert.equal(before.formatSkeleton, repeated.formatSkeleton);
+  assert.equal(before.currentSelection, repeated.currentSelection);
+  assert.equal(Object.isFrozen(before), true);
+  assert.equal(Object.isFrozen(before.formatSkeleton), true);
+  assert.equal(Object.isFrozen(before.formatSkeleton.wrappers[0].metadata), true);
+
+  const detached = draft.snapshot();
+  assert.notEqual(detached.formatSkeleton, before.formatSkeleton);
+  assert.notEqual(detached.currentSelection, before.currentSelection);
+  assert.deepEqual(detached, before);
+
+  assert.equal(draft.recordOwnedText({
+    lease,
+    text: "hello!",
+    selection: caret(6),
+    evidence: "input",
+  }).accepted, true);
+  assert.equal(before.currentText, "hello");
+  assert.equal(before.currentSelection.anchor, 5);
+  assert.equal(draft.view().currentText, "hello!");
+});
+
 test("only exact-lease owned input evidence may advance draft text", () => {
   const draft = createDraft();
   const stale = { ...lease, sourceRevision: "sha-stale" };

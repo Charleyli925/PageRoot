@@ -19,11 +19,14 @@ function safeRuntime(overrides = {}) {
     sourceBacked: true,
     isConnected: true,
     mappingComplete: true,
+    contentEditableMode: "plaintext-only",
     styleStable: true,
     layoutStable: true,
     selectionStable: true,
     observerReady: true,
+    nativeEventDeliveryMode: "native",
     nativeEventDeliveryStable: true,
+    nativeEventDeliveryGuarded: false,
     authorMutationRisk: false,
     isSingleTextIsland: true,
     ...overrides,
@@ -136,16 +139,19 @@ test("allows explicitly implemented structural features without weakening runtim
   assert.deepEqual(unstable.details.blockers, ["style-unstable"]);
 });
 
-test("requires an explicit proof that native editing events reach the authored host", () => {
+test("requires native delivery or an explicit observer-guarded delivery lane", () => {
   const index = buildSourceIndex(
     `<p id="copy">Old <span style="display: contents !important">event wrapper</span></p>`,
   );
   const paragraph = elementById(index, "copy");
   const missingProof = safeRuntime();
-  delete missingProof.nativeEventDeliveryStable;
+  delete missingProof.nativeEventDeliveryMode;
 
   for (const runtime of [
-    safeRuntime({ nativeEventDeliveryStable: false }),
+    safeRuntime({
+      nativeEventDeliveryMode: "unsafe",
+      nativeEventDeliveryStable: false,
+    }),
     missingProof,
   ]) {
     const result = classifyNativeEditCapability(index, paragraph.nodeId, { runtime });
@@ -157,6 +163,31 @@ test("requires an explicit proof that native editing events reach the authored h
       ["native-editing-event-delivery-unstable"],
     );
   }
+
+  const guarded = classifyNativeEditCapability(index, paragraph.nodeId, {
+    runtime: safeRuntime({
+      nativeEventDeliveryMode: "observer-guarded",
+      nativeEventDeliveryStable: false,
+      nativeEventDeliveryGuarded: true,
+    }),
+  });
+  assert.equal(guarded.mode, NATIVE_EDIT_MODE.EDITABLE);
+  assert.equal(guarded.details.nativeEventDeliveryMode, "observer-guarded");
+});
+
+test("requires the measured contenteditable host mode", () => {
+  const index = buildSourceIndex(`<p id="copy">Text</p>`);
+  const runtime = safeRuntime();
+  delete runtime.contentEditableMode;
+  const result = classifyNativeEditCapability(
+    index,
+    elementById(index, "copy").nodeId,
+    { runtime },
+  );
+  assert.equal(result.code, "RUNTIME_NATIVE_EDIT_UNSAFE");
+  assert.deepEqual(result.details.blockers, [
+    "contenteditable-mode-unproven",
+  ]);
 });
 
 test("routes generated, cross-origin, Shadow DOM, and dedicated controls to comment-only", () => {

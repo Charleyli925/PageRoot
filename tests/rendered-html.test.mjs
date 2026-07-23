@@ -50,12 +50,12 @@ test("server-renders the autosave-first workbench entry points", async () => {
   await access(new URL("../public/brand-logo.png", import.meta.url));
   await access(new URL("../public/qoder-logo.png", import.meta.url));
   for (const entryPoint of [
-    "打开本地 HTML",
-    "项目文件",
-    "本轮要求",
-    "一键发送至 QoderWork",
-    "导出 HTML 副本",
-    "版本历史",
+    "编辑",
+    "预览",
+    "项目",
+    "全局评论",
+    "发送至 Qoder",
+    "评论会显示在这里",
   ]) {
     assert.match(html, new RegExp(entryPoint));
   }
@@ -88,7 +88,7 @@ test("workbench encodes the v3 single-source lifecycle instead of save-created v
   assert.equal(packageJson.dependencies?.["@lexical/history"], undefined);
   assert.equal(packageJson.dependencies?.["@lexical/plain-text"], undefined);
   assert.equal(packageJson.dependencies?.["@lexical/selection"], undefined);
-  assert.equal(packageJson.version, "0.8.3");
+  assert.equal(packageJson.version, "0.8.4");
   assert.equal(packageJson.build?.mac?.extendInfo?.NSMicrophoneUsageDescription, undefined);
   assert.equal(packageJson.build?.mac?.extendInfo?.NSSpeechRecognitionUsageDescription, undefined);
 
@@ -124,8 +124,8 @@ test("workbench encodes the v3 single-source lifecycle instead of save-created v
     "/draft",
     "awaiting-conflict-resolution",
     "recovering-transaction",
-    "本轮没有检测到有效变化",
-    "原文件已保留",
+    "这次没有生成新版本",
+    "旧版未被覆盖",
     "openedAiVersionNotice",
     "removeAcknowledgedAuditEvents",
     "hydrateRecentProjectRuns",
@@ -233,7 +233,7 @@ test("workbench encodes the v3 single-source lifecycle instead of save-created v
     "freezeNow must not lock the editor when a native-edit checkpoint fails",
   );
 
-  assert.match(nativeController, /this\.hostElement\.setAttribute\("contenteditable", "plaintext-only"\)/u);
+  assert.match(nativeController, /applyNativeEditSessionAttributes\(this\.hostElement/u);
   assert.match(nativeController, /this\.hostElement\.addEventListener\("beforeinput"/u);
   assert.match(nativeController, /documentNode\.addEventListener\("selectionchange"/u);
   assert.match(nativeController, /restoreAttribute\(this\.hostElement, name, saved\)/u);
@@ -272,8 +272,8 @@ test("history cards read only v3 immutable annotations and show audit details", 
   assert.match(workbench, /versionAuditCollections\(raw\)/);
   assert.match(workbench, /commentsFromRecords\(auditCollections\.comments\)/);
   assert.match(workbench, /changesFromRecords\(auditCollections\.editEvents\)/);
-  assert.match(workbench, /comment\.target\.label \|\| comment\.target\.selector/);
-  assert.match(workbench, /dateTime=\{comment\.createdAt\}/);
+  assert.match(workbench, /insertionLabel\(comment\.target\)/);
+  assert.match(workbench, /dateTime=\{comment\.updatedAt \|\| comment\.createdAt\}/);
   assert.match(workbench, /historyRecordValue\(event, event\.before\)/);
   assert.match(workbench, /historyRecordValue\(event, event\.after\)/);
   assert.doesNotMatch(workbench, /function displayRecordValue/);
@@ -409,7 +409,7 @@ test("canvas persistence has one SourcePatchEngine path and clean v3 TargetRefs"
     nativeController,
     /if \(this\.composing \|\| this\.draftCompositionUnsettled\) \{[\s\S]*?reason: "composing"/u,
   );
-  assert.match(nativeController, /hostElement\.setAttribute\("contenteditable", "plaintext-only"\)/u);
+  assert.match(nativeController, /applyNativeEditSessionAttributes\(this\.hostElement/u);
   assert.doesNotMatch(nativeController, /setRootElement|LexicalEditor|registerPlainText/u);
 
   const targetWriter = workbench.slice(
@@ -447,10 +447,10 @@ test("handoff fails closed before locking when a comment target is unsafe", asyn
     "utf8",
   );
 
-  const locatorGuard = workbench.slice(
-    workbench.indexOf("function canLocateTarget"),
-    workbench.indexOf("function changeKindLabel"),
-  );
+  const locatorGuard = workbench.match(
+    /function canLocateTarget\(target: HtmlCanvasSelection\): boolean \{[\s\S]*?\n\}/u,
+  )?.[0] ?? "";
+  assert.notEqual(locatorGuard, "");
   assert.match(locatorGuard, /resolution === "exact"/);
   assert.match(locatorGuard, /resolution === "rebound"/);
   assert.doesNotMatch(locatorGuard, /resolution === "ambiguous"/);
@@ -463,8 +463,8 @@ test("handoff fails closed before locking when a comment target is unsafe", asyn
     "请重新选择失联的评论目标",
     "本轮尚未锁定或提交",
     "|| hasUnsafeHandoffTargets",
-    'data-tone={!runInProgress && hasUnsafeHandoffTargets ? "warning" : "default"}',
-    "目标已失联或不唯一 · 请在画布重新选择后重新添加",
+    "activeCommentCount === 0",
+    "data-resolution={comment.target.resolution}",
     "targets: targets.map(persistedTargetRef)",
   ]) {
     assert.match(

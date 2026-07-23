@@ -9,6 +9,7 @@ import {
   keyShortcut,
   loadFixture,
   nativeEditingState,
+  requestExportCurrentHtml,
   replaceUniqueBytes,
   selectionSnapshot,
   setTextSelection,
@@ -126,7 +127,7 @@ test("ordinary text checkpoint preserves the live Text node, Selection and activ
 
   // Blur after a revision advance must retire the current session rather than
   // comparing against the initial lease captured when editing started.
-  await page.getByRole("button", { name: "项目文件", exact: true }).focus();
+  await page.getByRole("button", { name: "项目", exact: true }).focus();
   await expect.poll(() => target.getAttribute("contenteditable")).toBeNull();
   expect((await exportCurrentHtml(page)).equals(replaceUniqueBytes(
     source,
@@ -470,10 +471,8 @@ test("undo and export fence fail closed during composition without retiring the 
         && host.getAttribute("contenteditable") === "plaintext-only";
     })).toBe(true);
 
-    await page.getByRole("button", { name: "导出 HTML 副本", exact: true }).evaluate(
-      (button) => button.click(),
-    );
-    // The outer composition guard may reject the click before React invokes
+    await requestExportCurrentHtml(page);
+    // The outer composition guard may reject the shortcut before React invokes
     // the fence, while a direct fence invocation rejects captureCheckpoint as
     // composing. Both observable paths must be fail-closed: no download, no
     // document generation advance, and no session retirement.

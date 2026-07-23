@@ -7,6 +7,7 @@ import {
   exportCurrentHtml,
   loadFixture,
   nativeEditingState,
+  requestExportCurrentHtml,
   replaceUniqueBytes,
   selectionSnapshot,
   setTextSelection,
@@ -69,7 +70,7 @@ async function dispatchMissingTerminalComposition(target, {
   }, { nextText, caretOffset });
 }
 
-test("one export click finalizes a stable missing-terminal composition and resumes its logical caret", async ({ page }) => {
+test("one export shortcut finalizes a stable missing-terminal composition and resumes its logical caret", async ({ page }) => {
   const { editor, frame } = await openSessionFixture(page);
   const caseId = "session-copy";
   const target = await activateNativeEdit(frame, caseId);
@@ -88,7 +89,7 @@ test("one export click finalizes a stable missing-terminal composition and resum
 
   const [download] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("button", { name: "导出 HTML 副本", exact: true }).click(),
+    requestExportCurrentHtml(page),
   ]);
 
   expect((await readDownload(download)).equals(expectedSource)).toBe(true);
@@ -130,11 +131,11 @@ test("strict text wins over a missing terminal; one queued command completes and
   }, caseSelector(caseId));
 
   // The click occurs while composition settlement still owns the host. The
-  // first click must queue, discard only provisional marked text, commit the
+  // first shortcut must queue, discard only provisional marked text, commit the
   // earlier strict input and then run export without asking the user to retry.
   const [download] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("button", { name: "导出 HTML 副本", exact: true }).click(),
+    requestExportCurrentHtml(page),
   ]);
 
   expect((await readDownload(download)).equals(strictSource)).toBe(true);

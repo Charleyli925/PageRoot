@@ -64,6 +64,82 @@ test("a tracked comment stays on the same unstable element after text edit and u
   assert.equal(resolvedElement(undone.sourceIndex, restored).textContent, "before");
 });
 
+test("a comment on a split block never silently follows the wrong half", () => {
+  const source = "<!doctype html><html><body><main><p id=\"copy\">前段评论后段</p></main></body></html>";
+  const index = buildSourceIndex(source);
+  const paragraph = index.elements.find((element) => element.tagName === "p");
+  assert.ok(paragraph);
+  const editTarget = createTargetRef(index, paragraph, {
+    targetId: "target_shared",
+    level: "subregion",
+  });
+  const fullBlockComment = createTargetRef(index, paragraph, {
+    targetId: "target_shared",
+    level: "subregion",
+  });
+  const narrowedComment = (targetId, textQuote) => ({
+    ...createTargetRef(index, paragraph, {
+      targetId,
+      level: "subregion",
+    }),
+    textQuote,
+  });
+  const plan = planSourcePatch({
+    type: "split-text-block",
+    targetRef: editTarget,
+    splitOffset: 4,
+    expectedSourceSha256: index.sourceSha256,
+  }, index);
+  const applied = applyPatchPlan(plan, source, {
+    trackedTargetRefs: [
+      fullBlockComment,
+      narrowedComment("target_first", "前段"),
+      narrowedComment("target_second", "后段"),
+      narrowedComment("target_crossing", "评论后"),
+    ],
+  });
+  const mappings = applied.targetMappings;
+  const mapping = (targetId, tracked = true) => mappings.find((candidate) => (
+    candidate.targetId === targetId && candidate.tracked === tracked
+  ));
+
+  assert.equal(mapping("target_shared", false).resolution, "exact");
+  assert.equal(
+    applied.sourceIndex.byNodeId.get(mapping("target_shared", false).afterNodeId).textContent,
+    "前段评论",
+  );
+  assert.equal(mapping("target_shared").resolution, "ambiguous");
+  assert.equal(mapping("target_shared").afterNodeId, null);
+  assert.equal(mapping("target_shared").afterTargetRef.sourceAnchor, undefined);
+  assert.equal(
+    applied.sourceIndex.byNodeId.get(mapping("target_first").afterNodeId).textContent,
+    "前段评论",
+  );
+  assert.equal(
+    applied.sourceIndex.byNodeId.get(mapping("target_second").afterNodeId).textContent,
+    "后段",
+  );
+  assert.equal(mapping("target_crossing").resolution, "ambiguous");
+
+  const undone = applyPatchPlan(applied.inversePlan, applied.html);
+  assert.equal(undone.html, source);
+  for (const targetId of [
+    "target_shared",
+    "target_first",
+    "target_second",
+    "target_crossing",
+  ]) {
+    const restored = undone.targetMappings.find((candidate) => (
+      candidate.targetId === targetId && candidate.tracked
+    ));
+    assert.equal(restored.resolution, "exact");
+    assert.equal(
+      undone.sourceIndex.byNodeId.get(restored.afterNodeId).textContent,
+      "前段评论后段",
+    );
+  }
+});
+
 test("a tracked comment follows its exact sibling through reorder and undo", () => {
   const source = [
     "<!doctype html><html><body><main>",
@@ -237,6 +313,10 @@ test("canvas and workbench consume deterministic mappings before generic fallbac
     "result.refreshedTrackedTargetRefs",
     "targetUpdates",
     "trackedTargetIds",
+    "const ambientTargets = uniqueSelections([",
+    "{ includeOperationTargetIds: mapsOneTargetToMany }",
+    "deterministicOperationTargetUpdate",
+    "includeUnresolvedTargetIds: recoverableSplitTargetIds",
     "const deterministicById = new Map(",
     "if (trackedTargetIds.has(target.id))",
     "rebindCanvasSelectionTargets(nextHtml, untrackedSafeTargets)",
@@ -377,7 +457,7 @@ test("ordinary patches keep the mounted iframe while source-authority fences use
   assert.doesNotMatch(applyHistory, /synchronizeStablePreview/u);
   assert.match(
     applyHistory,
-    /PageRoot history never shares[\s\S]*?queueNativeFenceReload\([\s\S]*?result\.html,[\s\S]*?nativeBookmark,[\s\S]*?appliedMutation\.target/u,
+    /PageRoot history never shares[\s\S]*?queueNativeFenceReload\([\s\S]*?result\.html,[\s\S]*?nativeBookmark,[\s\S]*?(?:appliedMutation\.target|historyResumeTarget)/u,
     "undo and redo must always rebuild a canonical frame rather than reuse Chromium history",
   );
   assert.match(
@@ -539,8 +619,8 @@ test("preview native links and forms cannot navigate the editing canvas on doubl
   assert.match(canvas, /documentNode\.addEventListener\("submit", handleSubmit, true\)/u);
 });
 
-test("native editing uses the authored DOM, browser Selection, and a plaintext caret", async () => {
-  const [canvas, nativeController, capability] = await Promise.all([
+test("native editing uses the authored DOM, browser Selection, and a measured host mode", async () => {
+  const [canvas, nativeController, capability, preflight, policy] = await Promise.all([
     readFile(
       new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url),
       "utf8",
@@ -553,9 +633,20 @@ test("native editing uses the authored DOM, browser Selection, and a plaintext c
       new URL("../app/lib/native-edit-capability.js", import.meta.url),
       "utf8",
     ),
+    readFile(
+      new URL("../app/components/native-edit-runtime-preflight.ts", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL("../app/lib/native-edit-policy.js", import.meta.url),
+      "utf8",
+    ),
   ]);
 
-  assert.match(canvas, /const session = new NativeEditingController\(\{[\s\S]*?hostElement,[\s\S]*?baseline,/u);
+  assert.match(
+    canvas,
+    /const session(?:: NativeEditingController)? = new NativeEditingController\(\{[\s\S]*?hostElement,[\s\S]*?baseline,/u,
+  );
   const caretPointHelper = canvas.slice(
     canvas.indexOf("function caretPointFromMouseEvent"),
     canvas.indexOf("function wordBoundsAtOffset"),
@@ -579,16 +670,16 @@ test("native editing uses the authored DOM, browser Selection, and a plaintext c
     /caretPositionFromPoint[\s\S]*?Never turn that proximity[\s\S]*?nativeTextRangeContainsPoint\(range, point\)/u,
     "an inert media surface or empty box must not fall back to nearby authored text",
   );
-  assert.match(canvas, /nativeRuntimePreflight\(/u);
+  assert.match(canvas, /inspectNativeEditRuntime\(/u);
   assert.match(
-    canvas,
+    preflight,
     /function hasGeneratedPseudoContent[\s\S]*?querySelectorAll<HTMLElement>\("\*"\)[\s\S]*?hasContent\(candidate, "::before"\)[\s\S]*?hasContent\(candidate, "::after"\)/u,
     "generated content on a descendant must block the whole native text island",
   );
   assert.match(
-    canvas,
-    /const nativeEventDeliveryStable = \[[\s\S]*?rootElement\.querySelectorAll<HTMLElement>\("\*"\)[\s\S]*?getComputedStyle\(element\)\.display\.toLowerCase\(\) !== "contents"/u,
-    "legacy display:contents roots or descendants must fail native event preflight",
+    preflight,
+    /hasDisplayContents[\s\S]*?classifyNativeEventDelivery\([\s\S]*?observerReady:/u,
+    "display:contents must use the explicit native or observer-guarded lane",
   );
   assert.match(canvas, /classifyNativeEditCapability\(/u);
   assert.match(canvas, /isNativeEditableCapability\(capability\)/u);
@@ -599,7 +690,8 @@ test("native editing uses the authored DOM, browser Selection, and a plaintext c
   assert.match(capability, /EDITABLE: "native-editable"/u);
   assert.match(capability, /SELECT_COMMENT: "select-comment"/u);
   assert.match(capability, /COMMENT_ONLY: "comment-only"/u);
-  assert.match(capability, /runtime\.nativeEventDeliveryStable !== true/u);
+  assert.match(capability, /nativeEventDeliveryProven/u);
+  assert.match(capability, /nativeEventDeliveryGuarded/u);
 
   const nativeBlur = canvas.slice(
     canvas.indexOf("onBlur: () => {"),
@@ -621,8 +713,9 @@ test("native editing uses the authored DOM, browser Selection, and a plaintext c
     "number and color inputs must retain focus instead of being stolen back by the iframe",
   );
 
-  assert.match(nativeController, /this\.hostElement\.setAttribute\("contenteditable", "plaintext-only"\)/u);
-  assert.match(nativeController, /this\.hostElement\.setAttribute\("role", "textbox"\)/u);
+  assert.match(nativeController, /applyNativeEditSessionAttributes\(this\.hostElement/u);
+  assert.match(policy, /element\.setAttribute\("contenteditable", hostMode\)/u);
+  assert.match(policy, /element\.setAttribute\("role", "textbox"\)/u);
   assert.match(nativeController, /this\.hostElement\.addEventListener\("beforeinput"/u);
   assert.match(nativeController, /documentNode\.addEventListener\("selectionchange"/u);
   assert.match(nativeController, /compositionstart/u);
@@ -664,7 +757,7 @@ test("native editing uses the authored DOM, browser Selection, and a plaintext c
     nativeController,
     /offsetNode === this\.hostElement \|\| this\.hostElement\.contains\(offsetNode\)/u,
   );
-  assert.match(nativeController, /restoreAttribute\(this\.hostElement, name, saved\)/u);
+  assert.match(nativeController, /restoreNativeEditSessionAttributes\(/u);
   assert.doesNotMatch(
     `${canvas}\n${nativeController}`,
     /InlineEditSession|LexicalEditor|createEditor\(|registerPlainText|pageroot-text-editor|pageroot-text-ghost/u,
@@ -715,7 +808,7 @@ test("canvas root whitespace clears selection instead of selecting the document 
 });
 
 test("canvas maps native DOM selections to source-safe patches and promotes media to modules", async () => {
-  const [canvas, nativeController, sourceMap, sourcePatch, workbench] = await Promise.all([
+  const [canvas, nativeController, sourceMap, sourcePatch, workbench, preflight] = await Promise.all([
     readFile(
       new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url),
       "utf8",
@@ -734,6 +827,10 @@ test("canvas maps native DOM selections to source-safe patches and promotes medi
     ),
     readFile(
       new URL("../app/workbench.tsx", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL("../app/components/native-edit-runtime-preflight.ts", import.meta.url),
       "utf8",
     ),
   ]);
@@ -785,7 +882,7 @@ test("canvas maps native DOM selections to source-safe patches and promotes medi
 
   assert.match(canvas, /classifyNativeEditCapability/u);
   assert.match(canvas, /buildSourceTextMap\(/u);
-  assert.match(canvas, /buildRuntimeDomMap\(/u);
+  assert.match(preflight, /function buildRuntimeDomMap\(/u);
   assert.match(canvas, /const captured = active\.session\.captureCheckpoint\(trigger\)/u);
   assert.match(
     canvas,
@@ -841,7 +938,7 @@ test("canvas maps native DOM selections to source-safe patches and promotes medi
     `${canvas}\n${nativeController}`,
     /InlineEditSession|LexicalEditor|registerPlainText|pageroot-text-editor|pageroot-text-ghost/u,
   );
-  assert.match(nativeController, /setAttribute\("contenteditable", "plaintext-only"\)/u);
+  assert.match(nativeController, /applyNativeEditSessionAttributes\(this\.hostElement/u);
   assert.doesNotMatch(canvas, /data-pageroot-text-flow-item/u);
   assert.match(canvas, /MEDIA_SURFACE_SELECTOR/u);
   assert.match(canvas, /element\.querySelector\(MEDIA_SURFACE_SELECTOR\)/u);

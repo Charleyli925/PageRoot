@@ -385,11 +385,14 @@ test("a real complex HTML file keeps layout and source authority through edit, u
   const target = await sourceNodes.nth(candidate.index).elementHandle();
   if (!target) throw new Error(`Editable candidate detached before activation: ${JSON.stringify(candidate)}`);
   await target.scrollIntoViewIfNeeded();
-  const beforeGeometry = await visualGeometrySnapshot(target);
   await testInfo.attach("real-html-before-edit.png", {
     body: await iframe.screenshot(),
     contentType: "image/png",
   });
+  // Chromium may finalize lazy glyph metrics while taking the first iframe
+  // screenshot. Capture the geometry baseline after that rendering barrier so
+  // the edit assertion compares two settled layouts rather than font warm-up.
+  const beforeGeometry = await visualGeometrySnapshot(target);
 
   await target.dblclick({ position: await firstRenderedTextPosition(target) });
   await expect.poll(

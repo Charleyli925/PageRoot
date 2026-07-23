@@ -1,22 +1,48 @@
 import {
   NativeTextChangeTracker,
   NativeTransactionSelectionTracker,
-  classifyNativeInput,
   type NativeTextChangeTrackerSnapshot,
   type NativeTextReplacement,
 } from "../lib/native-edit-transaction.js";
+import {
+  classifyNativeInputIntent,
+  hasMultilinePlainText,
+  NATIVE_INPUT_INTENT_KIND,
+  normalizePlainTextLineEndings,
+} from "../lib/native-input-intent.js";
+import type { NativeSourceEditIntent } from "../lib/native-structural-edit-planner.js";
 import {
   NativeBlockEditDraft,
   type NativeBlockEditDraftSnapshot,
   type NativeBlockPendingCommand,
 } from "../lib/native-block-edit-draft.js";
-import { isTransparentSourceTextElement } from "../lib/source-text-map.js";
+import {
+  domPointForLogicalOffset,
+  isNativeDomAtomElement as isAtomElement,
+  logicalIndexForHost,
+  logicalOffsetForDomPoint,
+  logicalOffsetsForDomPoints,
+  nativeLogicalText,
+  tokensForHost,
+  transparentInlineLogicalRanges,
+} from "../lib/native-dom-logical-index.js";
+import {
+  applyNativeEditSessionAttributes,
+  captureNativeEditSessionAttributes,
+  isDisposableNativeInlineWrapperTag,
+  isNativeEditHostMode,
+  NATIVE_EDIT_CHECKPOINT_DELAY_MS,
+  NATIVE_EDIT_COMPOSITION_TERMINAL_GRACE_MS,
+  NATIVE_EDIT_HOST_MODE,
+  NATIVE_EDIT_MANAGED_ATTRIBUTES,
+  NATIVE_EDIT_PENDING_COMPOSITION_COMMAND_GRACE_MS,
+  NATIVE_EDIT_SESSION_CONTROLLED_ATTRIBUTES,
+  restoreNativeEditSessionAttributes,
+  type NativeEditHostMode,
+} from "../lib/native-edit-policy.js";
 
-export const NATIVE_EDIT_CHECKPOINT_DELAY_MS = 700;
-
-const COMPOSITION_TERMINAL_DELIVERY_GRACE_MS = 80;
-
-const PENDING_COMPOSITION_COMMAND_GRACE_MS = 1200;
+export { NATIVE_EDIT_CHECKPOINT_DELAY_MS };
+export { nativeLogicalText };
 
 const COLLAPSED_TEXT_INSERT_INPUT_TYPES = new Set([
   "insertCompositionText",
@@ -39,70 +65,16 @@ const EXPLICIT_COMPOSITION_FALLBACK_TRIGGERS = new Set<NativeEditCheckpointTrigg
   "manual",
 ]);
 
-const ATOM_TAGS = new Set([
-  "audio",
-  "button",
-  "canvas",
-  "embed",
-  "iframe",
-  "img",
-  "input",
-  "math",
-  "object",
-  "select",
-  "svg",
-  "textarea",
-  "video",
-]);
+const MANAGED_EDIT_ATTRIBUTE_NAMES = new Set<string>(
+  NATIVE_EDIT_MANAGED_ATTRIBUTES,
+);
 
-const MANAGED_EDIT_ATTRIBUTE_NAMES = new Set([
-  "aria-label",
-  "aria-multiline",
-  "autocapitalize",
-  "autocomplete",
-  "contenteditable",
-  "data-gramm",
-  "data-html-canvas-editing",
-  "data-html-canvas-native-editing",
-  "data-html-canvas-selected",
-  "role",
-  "spellcheck",
-  "tabindex",
-]);
-
-const SESSION_CONTROLLED_ATTRIBUTE_NAMES = [
-  "aria-label",
-  "aria-multiline",
-  "autocapitalize",
-  "autocomplete",
-  "contenteditable",
-  "data-html-canvas-native-editing",
-  "data-gramm",
-  "role",
-  "spellcheck",
-  "tabindex",
-] as const;
+const SESSION_CONTROLLED_ATTRIBUTE_NAMES =
+  NATIVE_EDIT_SESSION_CONTROLLED_ATTRIBUTES;
 
 const SESSION_CONTROLLED_ATTRIBUTE_NAME_SET = new Set<string>(
   SESSION_CONTROLLED_ATTRIBUTE_NAMES,
 );
-
-// Keep this in lockstep with source-patch-engine's disposable empty text
-// wrappers. These are the only authored elements Chromium may temporarily
-// remove after their complete text range is replaced.
-const DISPOSABLE_INLINE_WRAPPER_TAGS = new Set([
-  "b",
-  "em",
-  "i",
-  "mark",
-  "s",
-  "small",
-  "span",
-  "strong",
-  "sub",
-  "sup",
-  "u",
-]);
 
 export type NativeEditSelection = {
   anchor: number;
@@ -217,6 +189,7 @@ export type NativeEditExternalBaselineOptions = {
 
 export type NativeEditingControllerOptions = {
   hostElement: HTMLElement;
+  hostMode: NativeEditHostMode;
   baseline: NativeEditBaseline;
   lease: NativeEditLease;
   ariaLabel?: string;
@@ -225,6 +198,7 @@ export type NativeEditingControllerOptions = {
   onEscape?: () => void;
   onUndo?: () => void;
   onRedo?: () => void;
+  onSourceEditIntent?: (intent: NativeSourceEditIntent) => boolean;
   onUnsupportedInput?: (inputType: string) => void;
   onError?: (error: Error) => void;
   canRemoveInlineWrapper?: (element: Element) => boolean;
@@ -239,19 +213,6 @@ export type NativeEditingControllerOptions = {
     draftText: string;
     lease: NativeEditLeaseStamp;
   }) => void;
-};
-
-type DomPoint = {
-  node: Node;
-  offset: number;
-};
-
-type Token = {
-  kind: "text" | "hard-break" | "atom";
-  node: Node;
-  text: string;
-  start: number;
-  end: number;
 };
 
 type SavedAttribute = {
@@ -399,139 +360,6 @@ function errorFrom(cause: unknown): Error {
   return cause instanceof Error ? cause : new Error(String(cause));
 }
 
-function isAtomElement(element: Element): boolean {
-  return (
-    ATOM_TAGS.has(element.localName)
-    || element.getAttribute("contenteditable") === "false"
-  );
-}
-
-function tokensForHost(hostElement: HTMLElement): Token[] {
-  const tokens: Token[] = [];
-  let logicalOffset = 0;
-  const visit = (node: Node) => {
-    if (node.nodeType === Node.TEXT_NODE) {
-      const text = (node as Text).data;
-      tokens.push({
-        kind: "text",
-        node,
-        text,
-        start: logicalOffset,
-        end: logicalOffset + text.length,
-      });
-      logicalOffset += text.length;
-      return;
-    }
-    if (node.nodeType !== Node.ELEMENT_NODE) return;
-    const element = node as Element;
-    if (element.localName === "br") {
-      tokens.push({
-        kind: "hard-break",
-        node,
-        text: "\n",
-        start: logicalOffset,
-        end: logicalOffset + 1,
-      });
-      logicalOffset += 1;
-      return;
-    }
-    if (isAtomElement(element)) {
-      tokens.push({
-        kind: "atom",
-        node,
-        text: "\ufffc",
-        start: logicalOffset,
-        end: logicalOffset + 1,
-      });
-      logicalOffset += 1;
-      return;
-    }
-    node.childNodes.forEach(visit);
-  };
-  hostElement.childNodes.forEach(visit);
-  return tokens;
-}
-
-export function nativeLogicalText(hostElement: HTMLElement): string {
-  return tokensForHost(hostElement).map((token) => token.text).join("");
-}
-
-function nodeLogicalLength(node: Node): number {
-  if (node.nodeType === Node.TEXT_NODE) return (node as Text).data.length;
-  if (node.nodeType !== Node.ELEMENT_NODE) return 0;
-  const element = node as Element;
-  if (element.localName === "br" || isAtomElement(element)) return 1;
-  return Array.from(node.childNodes).reduce(
-    (total, child) => total + nodeLogicalLength(child),
-    0,
-  );
-}
-
-function logicalOffsetForDomPoint(
-  hostElement: HTMLElement,
-  targetNode: Node,
-  targetOffset: number,
-): number | null {
-  if (targetNode !== hostElement && !hostElement.contains(targetNode)) return null;
-  let consumed = 0;
-  let result: number | null = null;
-  const visit = (node: Node) => {
-    if (result !== null) return;
-    if (node === targetNode) {
-      if (node.nodeType === Node.TEXT_NODE) {
-        const length = (node as Text).data.length;
-        result = consumed + Math.max(0, Math.min(length, targetOffset));
-        return;
-      }
-      const children = Array.from(node.childNodes);
-      const childLimit = Math.max(0, Math.min(children.length, targetOffset));
-      result = consumed + children
-        .slice(0, childLimit)
-        .reduce((total, child) => total + nodeLogicalLength(child), 0);
-      return;
-    }
-    if (node.nodeType === Node.TEXT_NODE) {
-      consumed += (node as Text).data.length;
-      return;
-    }
-    if (node.nodeType !== Node.ELEMENT_NODE) return;
-    const element = node as Element;
-    if (element.localName === "br" || isAtomElement(element)) {
-      consumed += 1;
-      return;
-    }
-    node.childNodes.forEach(visit);
-  };
-  visit(hostElement);
-  return result;
-}
-
-function transparentInlineLogicalRanges(
-  hostElement: HTMLElement,
-): Array<{ startOffset: number; endOffset: number }> {
-  const ranges: Array<{ startOffset: number; endOffset: number }> = [];
-  let logicalOffset = 0;
-  const visit = (node: Node) => {
-    if (node.nodeType === Node.TEXT_NODE) {
-      logicalOffset += (node as Text).data.length;
-      return;
-    }
-    if (node.nodeType !== Node.ELEMENT_NODE) return;
-    const element = node as Element;
-    if (element.localName === "br" || isAtomElement(element)) {
-      logicalOffset += 1;
-      return;
-    }
-    const startOffset = logicalOffset;
-    node.childNodes.forEach(visit);
-    if (node !== hostElement && isTransparentSourceTextElement(element.localName)) {
-      ranges.push({ startOffset, endOffset: logicalOffset });
-    }
-  };
-  hostElement.childNodes.forEach(visit);
-  return ranges;
-}
-
 /**
  * A logical text offset cannot distinguish the several real DOM/source
  * anchors that meet at the start or end of an authored inline wrapper. The
@@ -573,62 +401,27 @@ function insertionTargetsAmbiguousInlineBoundary(
     endNode = selection.focusNode;
     endOffset = selection.focusOffset;
   }
+  const index = logicalIndexForHost(hostElement);
   const logicalStart = logicalOffsetForDomPoint(
     hostElement,
     startNode,
     startOffset,
+    index,
   );
   const logicalEnd = logicalOffsetForDomPoint(
     hostElement,
     endNode,
     endOffset,
+    index,
   );
   if (logicalStart === null || logicalEnd === null) return true;
   // The collapsed checks above are the authority for this event-level guard;
   // this equality is only a defensive consistency check for DOM point
   // conversion, never a way to turn a non-collapsed range into a caret.
   if (logicalStart !== logicalEnd) return false;
-  return transparentInlineLogicalRanges(hostElement).some((range) => (
+  return transparentInlineLogicalRanges(hostElement, index).some((range) => (
     logicalStart === range.startOffset || logicalStart === range.endOffset
   ));
-}
-
-function domPointForLogicalOffset(
-  hostElement: HTMLElement,
-  logicalOffset: number,
-  affinity: "left" | "right",
-): DomPoint {
-  const tokens = tokensForHost(hostElement);
-  const logicalLength = tokens.at(-1)?.end ?? 0;
-  const clamped = Math.max(0, Math.min(logicalLength, logicalOffset));
-  for (let index = 0; index < tokens.length; index += 1) {
-    const token = tokens[index];
-    if (token.kind === "text") {
-      if (clamped > token.start && clamped < token.end) {
-        return { node: token.node, offset: clamped - token.start };
-      }
-      if (clamped === token.start && affinity === "right") {
-        return { node: token.node, offset: 0 };
-      }
-      if (clamped === token.end && affinity === "left") {
-        return { node: token.node, offset: token.text.length };
-      }
-    }
-    if (clamped === token.start || clamped === token.end) {
-      const parent = token.node.parentNode;
-      if (!parent) continue;
-      const childIndex = Array.from<Node>(parent.childNodes).indexOf(token.node);
-      return {
-        node: parent,
-        offset: childIndex + (clamped === token.end ? 1 : 0),
-      };
-    }
-  }
-  const lastText = [...tokens].reverse().find((token) => token.kind === "text");
-  if (lastText?.node.nodeType === Node.TEXT_NODE) {
-    return { node: lastText.node, offset: (lastText.node as Text).data.length };
-  }
-  return { node: hostElement, offset: hostElement.childNodes.length };
 }
 
 function graphemeDeletionRange(
@@ -691,21 +484,16 @@ function replacementTextForFrozenRange(
 
 function selectionValue(hostElement: HTMLElement): NativeEditSelection {
   const selection = hostElement.ownerDocument.getSelection();
-  const logicalLength = nativeLogicalText(hostElement).length;
   if (!selection?.anchorNode || !selection.focusNode) {
+    const logicalLength = logicalIndexForHost(hostElement).logicalLength;
     return { anchor: logicalLength, focus: logicalLength, affinity: "right" };
   }
-  const anchor = logicalOffsetForDomPoint(
-    hostElement,
-    selection.anchorNode,
-    selection.anchorOffset,
-  );
-  const focus = logicalOffsetForDomPoint(
-    hostElement,
-    selection.focusNode,
-    selection.focusOffset,
-  );
+  const [anchor, focus] = logicalOffsetsForDomPoints(hostElement, [
+    { node: selection.anchorNode, offset: selection.anchorOffset },
+    { node: selection.focusNode, offset: selection.focusOffset },
+  ]);
   if (anchor === null || focus === null) {
+    const logicalLength = logicalIndexForHost(hostElement).logicalLength;
     return { anchor: logicalLength, focus: logicalLength, affinity: "right" };
   }
   return {
@@ -723,8 +511,19 @@ function setSelectionValue(
 ): void {
   const selection = hostElement.ownerDocument.getSelection();
   if (!selection) return;
-  const anchor = domPointForLogicalOffset(hostElement, value.anchor, value.affinity);
-  const focus = domPointForLogicalOffset(hostElement, value.focus, value.affinity);
+  const index = logicalIndexForHost(hostElement);
+  const anchor = domPointForLogicalOffset(
+    hostElement,
+    value.anchor,
+    value.affinity,
+    index,
+  );
+  const focus = domPointForLogicalOffset(
+    hostElement,
+    value.focus,
+    value.affinity,
+    index,
+  );
   selection.removeAllRanges();
   if (typeof selection.setBaseAndExtent === "function") {
     selection.setBaseAndExtent(anchor.node, anchor.offset, focus.node, focus.offset);
@@ -739,13 +538,6 @@ function setSelectionValue(
     range.setEnd(anchor.node, anchor.offset);
   }
   selection.addRange(range);
-}
-
-function savedAttribute(element: Element, name: string): SavedAttribute {
-  return {
-    present: element.hasAttribute(name),
-    value: element.getAttribute(name),
-  };
 }
 
 function restoreAttribute(
@@ -1002,7 +794,7 @@ function isProvablyDisposableMissingWrapper(
   return record.nodeType === Node.ELEMENT_NODE
     && record.namespaceURI === "http://www.w3.org/1999/xhtml"
     && record.localName !== null
-    && DISPOSABLE_INLINE_WRAPPER_TAGS.has(record.localName)
+    && isDisposableNativeInlineWrapperTag(record.localName)
     && record.attributeNames.every((name) => (
       name === "style" || name === "data-html-ai-source-node-id"
     ))
@@ -1014,7 +806,7 @@ function isProvablyDisposableMissingWrapper(
     && endOffset !== null
     && endOffset > startOffset
     && intents.some((intent) => (
-      classifyNativeInput(intent.inputType).category === "text"
+      classifyNativeInputIntent(intent.inputType).kind === NATIVE_INPUT_INTENT_KIND.TEXT
       && deletionFullyCoversRange(startOffset, endOffset, intent.originalRanges)
     ))
     && deletionFullyCoversRange(startOffset, endOffset, replacements)
@@ -1049,7 +841,7 @@ function isCompositionCoveredMissingWrapper(
   return record.nodeType === Node.ELEMENT_NODE
     && record.namespaceURI === "http://www.w3.org/1999/xhtml"
     && record.localName !== null
-    && DISPOSABLE_INLINE_WRAPPER_TAGS.has(record.localName)
+    && isDisposableNativeInlineWrapperTag(record.localName)
     && record.attributeNames.every((name) => (
       name === "style" || name === "data-html-ai-source-node-id"
     ))
@@ -1073,7 +865,7 @@ function isSafeCompositionTemporaryWrapper(
   return record.nodeType === Node.ELEMENT_NODE
     && record.namespaceURI === "http://www.w3.org/1999/xhtml"
     && record.localName !== null
-    && DISPOSABLE_INLINE_WRAPPER_TAGS.has(record.localName)
+    && isDisposableNativeInlineWrapperTag(record.localName)
     // Start with the exact shape observed from Chromium/macOS. Attributes on
     // a browser-created wrapper are not needed to preserve text and would
     // broaden the trust boundary to author-controlled behavior or styling.
@@ -1265,6 +1057,8 @@ function restoreRestorableDomNode(snapshot: RestorableDomNode): void {
 export class NativeEditingController {
   readonly hostElement: HTMLElement;
 
+  private readonly hostMode: NativeEditHostMode;
+
   private baseline: NativeEditBaseline;
 
   private leaseStamp: NativeEditLeaseStamp;
@@ -1288,6 +1082,8 @@ export class NativeEditingController {
   private readonly onUndo?: NativeEditingControllerOptions["onUndo"];
 
   private readonly onRedo?: NativeEditingControllerOptions["onRedo"];
+
+  private readonly onSourceEditIntent?: NativeEditingControllerOptions["onSourceEditIntent"];
 
   private readonly onUnsupportedInput?: NativeEditingControllerOptions["onUnsupportedInput"];
 
@@ -1338,6 +1134,8 @@ export class NativeEditingController {
   private pendingCommandReadyScheduled = false;
 
   private explicitFallbackCommandSequence: number | null = null;
+
+  private enterKeyIntent: "hard-break" | "split-block" | null = null;
 
   private lastInputType: string | null = null;
 
@@ -1425,6 +1223,16 @@ export class NativeEditingController {
     return guard?.phase === "composing" || guard?.phase === "settling";
   }
 
+  /**
+   * One derived interaction policy for UI commands and structural input.
+   * Epoch owns browser delivery; Draft owns fallback/queue readiness.
+   */
+  private get compositionInteractionBlocked(): boolean {
+    return this.composing
+      || this.compositionDeliveryPending
+      || this.draftCompositionUnsettled;
+  }
+
   private externalLeaseIsCurrent(stamp: NativeEditLeaseStamp): boolean {
     try {
       return this.leaseIsCurrent(stamp);
@@ -1466,12 +1274,12 @@ export class NativeEditingController {
     return `composition_${epoch.id}`;
   }
 
-  private draftSnapshot(): NativeBlockEditDraftSnapshot<unknown> {
-    return this.blockDraft.snapshot();
+  private draftState(): NativeBlockEditDraftSnapshot<unknown> {
+    return this.blockDraft.view();
   }
 
   private currentDraftCompositionGuard() {
-    const snapshot = this.draftSnapshot();
+    const snapshot = this.draftState();
     const compositionId = this.draftCompositionId();
     return compositionId && snapshot.compositionGuard?.compositionId === compositionId
       ? snapshot.compositionGuard
@@ -1557,7 +1365,7 @@ export class NativeEditingController {
     });
     if (!result.accepted) return;
     const strictText = this.tracker.value();
-    const draftText = this.draftSnapshot().currentText;
+    const draftText = this.draftState().currentText;
     if (strictText !== draftText) {
       this.onShadowTrace?.({
         code: guard ? "composition-shadow-pending" : "strict-draft-text-mismatch",
@@ -1612,7 +1420,7 @@ export class NativeEditingController {
   private notifyPendingCommandReady(): void {
     if (
       this.pendingCommandReadyScheduled
-      || !this.draftSnapshot().pendingCommand
+      || !this.draftState().pendingCommand
       || !this.hasCurrentLease()
       || this.compositionDeliveryPending
     ) return;
@@ -1755,12 +1563,16 @@ export class NativeEditingController {
       this.finishNativeMutationWindow();
       this.emitState();
       this.notifyPendingCommandReady();
-    }, PENDING_COMPOSITION_COMMAND_GRACE_MS);
+    }, NATIVE_EDIT_PENDING_COMPOSITION_COMMAND_GRACE_MS);
     this.pendingCommandTimer = timer;
   }
 
   constructor(options: NativeEditingControllerOptions) {
     this.hostElement = options.hostElement;
+    if (!isNativeEditHostMode(options.hostMode)) {
+      throw new Error("编辑宿主模式未通过能力预检，已停止直接编辑。");
+    }
+    this.hostMode = options.hostMode;
     this.baseline = options.baseline;
     this.leaseStamp = cloneLeaseStamp(options.lease.stamp);
     this.leaseIsCurrent = options.lease.isCurrent;
@@ -1774,6 +1586,7 @@ export class NativeEditingController {
     this.onEscape = options.onEscape;
     this.onUndo = options.onUndo;
     this.onRedo = options.onRedo;
+    this.onSourceEditIntent = options.onSourceEditIntent;
     this.onUnsupportedInput = options.onUnsupportedInput;
     this.onError = options.onError;
     this.canRemoveInlineWrapper = options.canRemoveInlineWrapper;
@@ -1789,10 +1602,8 @@ export class NativeEditingController {
       },
       formatSkeleton: options.formatSkeleton ?? null,
     });
-    this.originalAttributes = Object.fromEntries(
-      SESSION_CONTROLLED_ATTRIBUTE_NAMES.map((name) => (
-        [name, savedAttribute(this.hostElement, name)]
-      )),
+    this.originalAttributes = captureNativeEditSessionAttributes(
+      this.hostElement,
     );
     this.baselineChildren = this.cloneChildren();
     this.baselineHostAttributes = authoredAttributes(this.hostElement, true);
@@ -1803,29 +1614,22 @@ export class NativeEditingController {
       throw new Error("真实 DOM 文字与源码映射不一致，已停止直接编辑。");
     }
 
-    this.hostElement.setAttribute("data-html-canvas-native-editing", "true");
-    this.hostElement.setAttribute("contenteditable", "plaintext-only");
-    this.hostElement.setAttribute("role", "textbox");
-    this.hostElement.setAttribute("aria-multiline", "true");
-    this.hostElement.setAttribute("aria-label", options.ariaLabel || "原位编辑文字");
-    this.hostElement.setAttribute("autocapitalize", "off");
-    this.hostElement.setAttribute("autocomplete", "off");
-    this.hostElement.setAttribute("data-gramm", "false");
-    this.hostElement.spellcheck = true;
-    if (this.hostElement.tabIndex < 0) this.hostElement.tabIndex = 0;
-    this.activeSessionAttributes = Object.fromEntries(
-      SESSION_CONTROLLED_ATTRIBUTE_NAMES.map((name) => (
-        [name, savedAttribute(this.hostElement, name)]
-      )),
+    applyNativeEditSessionAttributes(this.hostElement, {
+      hostMode: this.hostMode,
+      ariaLabel: options.ariaLabel,
+    });
+    this.activeSessionAttributes = captureNativeEditSessionAttributes(
+      this.hostElement,
     );
     this.domStructureSnapshot = captureDomStructure(this.hostElement);
 
     const documentNode = this.hostElement.ownerDocument;
     const MutationObserverConstructor = documentNode.defaultView?.MutationObserver;
     if (!MutationObserverConstructor) {
-      for (const [name, saved] of Object.entries(this.originalAttributes)) {
-        restoreAttribute(this.hostElement, name, saved);
-      }
+      restoreNativeEditSessionAttributes(
+        this.hostElement,
+        this.originalAttributes,
+      );
       throw new Error("当前页面无法监测文字变化，已停止直接编辑。");
     }
     this.mutationObserver = new MutationObserverConstructor((records) => {
@@ -2086,6 +1890,13 @@ export class NativeEditingController {
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (!this.canHandleEvent(event)) return;
+      if (
+        event.key === "Enter"
+        && !this.compositionInteractionBlocked
+      ) {
+        this.enterKeyIntent = event.shiftKey ? "hard-break" : "split-block";
+        return;
+      }
       if (event.key !== "Escape") return;
       const compositionWasActive = this.composing;
       if (this.consumeCompositionEscape()) {
@@ -2099,6 +1910,10 @@ export class NativeEditingController {
       }
       event.preventDefault();
       this.callbackIfCurrent(this.onEscape);
+    };
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (!this.canHandleEvent(event)) return;
+      if (event.key === "Enter") this.enterKeyIntent = null;
     };
     const onFocusOut = (event: FocusEvent) => {
       if (!this.canHandleEvent(event)) return;
@@ -2131,6 +1946,7 @@ export class NativeEditingController {
     this.hostElement.addEventListener("compositionstart", onCompositionStart);
     this.hostElement.addEventListener("compositionend", onCompositionEnd);
     this.hostElement.addEventListener("keydown", onKeyDown);
+    this.hostElement.addEventListener("keyup", onKeyUp);
     this.hostElement.addEventListener("focusout", onFocusOut);
     this.hostElement.addEventListener("drop", preventDrop);
     this.hostElement.addEventListener("dragstart", preventDragStart);
@@ -2142,6 +1958,7 @@ export class NativeEditingController {
     this.cleanup.push(() => this.hostElement.removeEventListener("compositionstart", onCompositionStart));
     this.cleanup.push(() => this.hostElement.removeEventListener("compositionend", onCompositionEnd));
     this.cleanup.push(() => this.hostElement.removeEventListener("keydown", onKeyDown));
+    this.cleanup.push(() => this.hostElement.removeEventListener("keyup", onKeyUp));
     this.cleanup.push(() => this.hostElement.removeEventListener("focusout", onFocusOut));
     this.cleanup.push(() => this.hostElement.removeEventListener("drop", preventDrop));
     this.cleanup.push(() => this.hostElement.removeEventListener("dragstart", preventDragStart));
@@ -2281,28 +2098,84 @@ export class NativeEditingController {
     // the durable boundary that retires a cancelled-composition tombstone.
     this.clearCancelledCompositionTombstone();
     if (this.compositionEndFocusGuard) this.clearCompositionEndFocusGuard();
-    const input = classifyNativeInput(event.inputType);
+    const input = classifyNativeInputIntent(event.inputType);
     const insertedText = event.data
       ?? event.dataTransfer?.getData("text/plain")
       ?? "";
     if (
-      event.inputType.startsWith("insert")
-      && /[\r\n]/u.test(insertedText)
+      typeof event.inputType === "string"
+      && event.inputType.startsWith("insert")
+      && hasMultilinePlainText(insertedText)
     ) {
       event.preventDefault();
+      if (this.requestSourceEditIntent({
+        kind: "insert-text-flow",
+        inputType: event.inputType || "insertFromPaste",
+        text: normalizePlainTextLineEndings(insertedText),
+        selection: this.getSelection(),
+      })) return;
       this.unsupportedInputIfCurrent("insertFromPasteMultiline");
       return;
     }
-    if (input.category === "history") {
+    if (input.kind === NATIVE_INPUT_INTENT_KIND.HISTORY) {
       event.preventDefault();
       if (input.action === "redo") this.callbackIfCurrent(this.onRedo);
       else this.callbackIfCurrent(this.onUndo);
+      return;
+    }
+    if (
+      input.kind === NATIVE_INPUT_INTENT_KIND.INSERT_HARD_BREAK
+      || input.kind === NATIVE_INPUT_INTENT_KIND.SPLIT_BLOCK
+    ) {
+      event.preventDefault();
+      const enterKeyIntent = this.enterKeyIntent;
+      this.enterKeyIntent = null;
+      if (
+        enterKeyIntent === "hard-break"
+        && this.requestSourceEditIntent({
+          kind: "insert-text-flow",
+          inputType: event.inputType || "insertLineBreak",
+          text: "\n",
+          selection: this.getSelection(),
+        })
+      ) return;
+      if (
+        enterKeyIntent === "split-block"
+        && this.requestSourceEditIntent({
+          kind: "split-block",
+          inputType: "insertParagraph",
+          selection: this.getSelection(),
+        })
+      ) return;
+      this.unsupportedInputIfCurrent(
+        enterKeyIntent === "split-block"
+          ? "insertParagraph"
+          : event.inputType || "insertLineBreak",
+      );
       return;
     }
     if (!input.supported) {
       event.preventDefault();
       this.unsupportedInputIfCurrent(event.inputType || "unknown");
       return;
+    }
+    if (
+      event.inputType === "deleteContentBackward"
+      || event.inputType === "deleteContentForward"
+    ) {
+      const selection = this.getSelection();
+      const range = this.hardBreakDeletionRange(event.inputType, selection);
+      if (range) {
+        event.preventDefault();
+        if (this.requestSourceEditIntent({
+          kind: "delete-hard-break",
+          inputType: event.inputType,
+          range,
+          selection,
+        })) return;
+        this.unsupportedInputIfCurrent("deleteHardBreakUnavailable");
+        return;
+      }
     }
     if (event.inputType === "insertFromDrop") {
       event.preventDefault();
@@ -2327,6 +2200,41 @@ export class NativeEditingController {
     }
     this.beginNativeCandidate(event.inputType || "unknown");
     this.captureNativeMutationIntent(event, event.inputType || "unknown");
+  }
+
+  private requestSourceEditIntent(intent: NativeSourceEditIntent): boolean {
+    if (!this.hasCurrentLease() || !this.onSourceEditIntent) return false;
+    try {
+      return this.onSourceEditIntent(intent) === true;
+    } catch (cause) {
+      this.reportErrorIfCurrent(errorFrom(cause));
+      return false;
+    }
+  }
+
+  private hardBreakDeletionRange(
+    inputType: "deleteContentBackward" | "deleteContentForward",
+    selection: NativeEditSelection,
+  ): { startOffset: number; endOffset: number } | null {
+    const startOffset = Math.min(selection.anchor, selection.focus);
+    const endOffset = Math.max(selection.anchor, selection.focus);
+    const hardBreaks = tokensForHost(this.hostElement).filter(
+      (token) => token.kind === "hard-break",
+    );
+    if (startOffset !== endOffset) {
+      const selected = hardBreaks.find((token) => (
+        token.start === startOffset && token.end === endOffset
+      ));
+      return selected
+        ? { startOffset: selected.start, endOffset: selected.end }
+        : null;
+    }
+    const adjacent = inputType === "deleteContentBackward"
+      ? hardBreaks.find((token) => token.end === startOffset)
+      : hardBreaks.find((token) => token.start === startOffset);
+    return adjacent
+      ? { startOffset: adjacent.start, endOffset: adjacent.end }
+      : null;
   }
 
   private beginNativeCandidate(inputType: string): void {
@@ -2373,15 +2281,12 @@ export class NativeEditingController {
     const targetOffsets: Array<{ startOffset: number; endOffset: number }> = [];
     if (event && typeof event.getTargetRanges === "function") {
       for (const range of event.getTargetRanges()) {
-        const startOffset = logicalOffsetForDomPoint(
+        const [startOffset, endOffset] = logicalOffsetsForDomPoints(
           this.hostElement,
-          range.startContainer,
-          range.startOffset,
-        );
-        const endOffset = logicalOffsetForDomPoint(
-          this.hostElement,
-          range.endContainer,
-          range.endOffset,
+          [
+            { node: range.startContainer, offset: range.startOffset },
+            { node: range.endContainer, offset: range.endOffset },
+          ],
         );
         if (startOffset !== null && endOffset !== null) {
           targetOffsets.push({
@@ -2536,13 +2441,68 @@ export class NativeEditingController {
   private handlePaste(event: ClipboardEvent): void {
     if (!this.canHandleEvent(event)) return;
     const plainText = event.clipboardData?.getData("text/plain") ?? "";
-    if (!/[\r\n]/u.test(plainText)) return;
-    // A multiline plaintext paste makes Chromium synthesize child blocks in a
-    // plaintext-only host. PageRoot cannot losslessly map that transient
-    // structure back to an existing text island, so reject the whole gesture
-    // at the clipboard event, before the DOM or Selection can move.
+    if (hasMultilinePlainText(plainText)) {
+      event.preventDefault();
+      if (
+        !this.compositionInteractionBlocked
+        && !this.requiresCanonicalReconcile
+        && this.requestSourceEditIntent({
+          kind: "insert-text-flow",
+          inputType: "insertFromPaste",
+          text: normalizePlainTextLineEndings(plainText),
+          selection: this.getSelection(),
+        })
+      ) return;
+      this.unsupportedInputIfCurrent("insertFromPasteMultiline");
+      this.emitState();
+      return;
+    }
+    if (this.hostMode !== NATIVE_EDIT_HOST_MODE.CONTROLLED) return;
+
+    // contenteditable=true accepts HTML fragments and formatting by default.
+    // PageRoot's controlled mode therefore owns every paste and asks Chromium
+    // to insert only text. execCommand("insertText") is intentionally narrow:
+    // it preserves the native undo owner and still has to complete the same
+    // beforeinput/input + MutationObserver proof as keyboard input.
     event.preventDefault();
-    this.unsupportedInputIfCurrent("insertFromPasteMultiline");
+    if (!plainText) {
+      this.emitState();
+      return;
+    }
+    if (
+      this.compositionInteractionBlocked
+      || this.requiresCanonicalReconcile
+    ) {
+      this.unsupportedInputIfCurrent("insertFromPasteWhileComposing");
+      this.emitState();
+      return;
+    }
+    if (insertionTargetsAmbiguousInlineBoundary(this.hostElement, null)) {
+      this.unsupportedInputIfCurrent("insertAtAmbiguousInlineBoundary");
+      this.emitState();
+      return;
+    }
+    if (!this.openNativeMutationWindow()) return;
+    this.beginNativeCandidate("insertFromPaste");
+    // Chromium reports execCommand("insertText") as insertText on some
+    // versions and insertFromPaste on others. Both names belong to this one
+    // clipboard-authorized candidate; no structural input type is authorized.
+    this.beginNativeCandidate("insertText");
+    this.captureNativeMutationIntent(null, "insertFromPaste");
+    try {
+      const accepted = this.hostElement.ownerDocument.execCommand(
+        "insertText",
+        false,
+        plainText,
+      );
+      if (accepted) return;
+    } catch (cause) {
+      this.reportErrorIfCurrent(errorFrom(cause));
+    }
+    this.discardPendingNativeCandidate();
+    this.restoreLastValidatedSnapshot();
+    this.finishNativeMutationWindow();
+    this.unsupportedInputIfCurrent("insertFromPasteUnavailable");
     this.emitState();
   }
 
@@ -3150,7 +3110,7 @@ export class NativeEditingController {
       this.finishNativeMutationWindow();
       this.emitState();
       this.notifyPendingCommandReady();
-    }, COMPOSITION_TERMINAL_DELIVERY_GRACE_MS);
+    }, NATIVE_EDIT_COMPOSITION_TERMINAL_GRACE_MS);
     this.compositionTerminalDeliveryTimer = timer;
   }
 
@@ -3734,9 +3694,7 @@ export class NativeEditingController {
       this.onStateChange?.({
         dirty: this.tracker.dirty(),
         draftPending: this.hasPendingDraft(),
-        composing: this.composing
-          || this.compositionDeliveryPending
-          || this.draftCompositionUnsettled,
+        composing: this.compositionInteractionBlocked,
         requiresCanonicalReconcile: this.requiresCanonicalReconcile,
         selection: this.getSelection(),
         inputType: this.lastInputType,
@@ -3901,7 +3859,7 @@ export class NativeEditingController {
   }
 
   getBlockDraftSnapshot(): NativeBlockEditDraftSnapshot<unknown> {
-    return this.draftSnapshot();
+    return this.blockDraft.snapshot();
   }
 
   captureCheckpoint(
@@ -4147,7 +4105,7 @@ export class NativeEditingController {
       setSelectionValue(this.hostElement, baseline.selection);
     }
     const snapshotSelection = selectionValue(this.hostElement);
-    let nextFormatSkeleton = this.draftSnapshot().formatSkeleton;
+    let nextFormatSkeleton = this.draftState().formatSkeleton;
     if (options.getFormatSkeleton) {
       try {
         nextFormatSkeleton = options.getFormatSkeleton();
@@ -4254,7 +4212,7 @@ export class NativeEditingController {
       nextLease: this.leaseStamp,
       baselineText: this.baseline.text,
       baselineSelection: this.getSelection(),
-      formatSkeleton: this.draftSnapshot().formatSkeleton,
+      formatSkeleton: this.draftState().formatSkeleton,
       preservePendingCommand: false,
     });
     this.refreshLastValidatedSnapshot();
@@ -4263,11 +4221,7 @@ export class NativeEditingController {
 
   isComposing(): boolean {
     return this.hasCurrentLease()
-      && (
-        this.composing
-        || this.compositionDeliveryPending
-        || this.draftCompositionUnsettled
-      );
+      && this.compositionInteractionBlocked;
   }
 
   consumeCompositionEscape(): boolean {
@@ -4296,7 +4250,7 @@ export class NativeEditingController {
 
   hasPendingDraft(): boolean {
     if (!this.hasCurrentLease()) return false;
-    const snapshot = this.draftSnapshot();
+    const snapshot = this.draftState();
     const guard = snapshot.compositionGuard;
     return Boolean(
       guard
@@ -4389,8 +4343,9 @@ export class NativeEditingController {
     // Keep the legacy dispose contract: HtmlCanvas intentionally clears its
     // outer lease ref before ending a normal session, but the retiring
     // controller must still restore the attributes it captured on entry.
-    for (const [name, saved] of Object.entries(this.originalAttributes)) {
-      restoreAttribute(this.hostElement, name, saved);
-    }
+    restoreNativeEditSessionAttributes(
+      this.hostElement,
+      this.originalAttributes,
+    );
   }
 }

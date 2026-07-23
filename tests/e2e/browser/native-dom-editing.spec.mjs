@@ -112,7 +112,6 @@ test.describe("authored DOM native editing contract", () => {
       const state = await nativeEditingState(frame, contractCase.id);
       expect(state).toMatchObject({
         targetIsActive: true,
-        contenteditable: "plaintext-only",
         isContentEditable: true,
         activeCase: contractCase.id,
         activeIsLegacySurface: false,
@@ -120,6 +119,10 @@ test.describe("authored DOM native editing contract", () => {
         authoredNodeHidden: false,
         selectionInside: true,
       });
+      expect(["plaintext-only", "true"]).toContain(state.contenteditable);
+      if (contractCase.hostMode) {
+        expect(state.contenteditable).toBe(contractCase.hostMode);
+      }
       expect(await documentToken(frame)).toBe(beforeDocument);
       expectGeometryUnchanged(beforeGeometry, await geometrySnapshot(frame, contractCase.id));
     });
@@ -406,8 +409,8 @@ test.describe("authored DOM native editing contract", () => {
     expect(detailsOpenAfter).toBe(true);
   });
 
-  test("Enter and Shift+Enter are blocked before structural DOM mutation", async ({ page }) => {
-    const { frame } = await openMatrix(page);
+  test("Enter stays blocked for complex break content while Shift+Enter commits one source-owned hard break", async ({ page }) => {
+    const { editor, frame, source } = await openMatrix(page);
     await activateNativeEdit(frame, "hard-break");
     await installInputRecorder(frame);
     await setTextSelection(frame, "hard-break", 3);
@@ -426,6 +429,14 @@ test.describe("authored DOM native editing contract", () => {
       });
     });
     await page.keyboard.press("Enter");
+    expect(await target.innerHTML()).toBe(beforeHtml);
+    expect(await selectionSnapshot(frame, "hard-break")).toMatchObject({
+      collapsed: beforeSelection.collapsed,
+      anchorOffset: beforeSelection.anchorOffset,
+      focusOffset: beforeSelection.focusOffset,
+      activeCase: "hard-break",
+    });
+
     await page.keyboard.press("Shift+Enter");
 
     const beforeInputs = (await recordedInputEvents(frame))
@@ -440,19 +451,178 @@ test.describe("authored DOM native editing contract", () => {
     );
     expect(structuralEvents.map(({ inputType }) => inputType)).toEqual(structuralInputTypes);
     expect(structuralEvents.every(({ defaultPrevented }) => defaultPrevented)).toBe(true);
-    expect(await target.innerHTML()).toBe(beforeHtml);
     expect(await selectionSnapshot(frame, "hard-break")).toMatchObject({
-      collapsed: beforeSelection.collapsed,
-      anchorOffset: beforeSelection.anchorOffset,
-      focusOffset: beforeSelection.focusOffset,
+      collapsed: true,
+      // DOM Range.toString() does not count <br>; the controller's logical
+      // Selection is 4 and sits after the new break, while this helper reports
+      // the three visible characters before it.
+      anchorOffset: 3,
+      focusOffset: 3,
       activeCase: "hard-break",
     });
-    const notice = page.locator('[role="status"], [role="alert"]').filter({
-      hasText: /换行|评论/,
-    }).first();
-    await expect(notice).toBeVisible();
-    await expect(notice).toContainText("继续修改现有文字");
-    await expect(notice).toContainText("添加评论");
+    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
+    const expected = replaceUniqueBytes(
+      source,
+      ">第一行保留原位。<br>",
+      ">第一行<br>保留原位。<br>",
+    );
+    expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
+
+    await page.keyboard.press(keyShortcut("Z"));
+    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("0");
+    expect((await exportCurrentHtml(page)).equals(source)).toBe(true);
+  });
+
+  test("Enter splits one simple list item, resumes in the new item, and round-trips undo/redo", async ({ page }) => {
+    const { editor, frame, source } = await openMatrix(page);
+    const caseId = "list-item";
+    const originalText = "列表项中的文字保持项目符号和缩进。";
+    const firstText = "列表项中的";
+    const secondText = "文字保持项目符号和缩进。";
+    const startTag = `<li data-native-case="list-item" data-native-mode="native-editable">`;
+    const originalSource = `${startTag}${originalText}</li>`;
+    const splitSource = `${startTag}${firstText}</li>${startTag}${secondText}</li>`;
+
+    await activateNativeEdit(frame, caseId);
+    await setTextSelection(frame, caseId, firstText.length);
+    const initialDocument = await documentToken(frame);
+    await page.keyboard.press("Enter");
+
+    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
+    await expect.poll(() => frame.locator(caseSelector(caseId)).count()).toBe(2);
+    await expect.poll(() => documentToken(frame)).not.toBe(initialDocument);
+    expect((await exportCurrentHtml(page)).equals(
+      replaceUniqueBytes(source, originalSource, splitSource),
+    )).toBe(true);
+    await expect.poll(() => frame.evaluate((id) => {
+      const items = [...document.querySelectorAll(`[data-native-case=${JSON.stringify(id)}]`)];
+      const active = document.activeElement;
+      const selection = document.getSelection();
+      return {
+        activeIndex: items.indexOf(active),
+        contenteditable: active?.getAttribute("contenteditable"),
+        collapsed: selection?.isCollapsed,
+        offset: selection?.focusOffset,
+      };
+    }, caseId)).toMatchObject({
+      activeIndex: 1,
+      contenteditable: "plaintext-only",
+      collapsed: true,
+      offset: 0,
+    });
+
+    await page.keyboard.insertText("续");
+    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("2");
+    const typedSource = splitSource.replace(`>${secondText}`, `>续${secondText}`);
+    expect((await exportCurrentHtml(page)).equals(
+      replaceUniqueBytes(source, originalSource, typedSource),
+    )).toBe(true);
+
+    await page.keyboard.press(keyShortcut("Z"));
+    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
+    expect((await exportCurrentHtml(page)).equals(
+      replaceUniqueBytes(source, originalSource, splitSource),
+    )).toBe(true);
+    await page.keyboard.press(keyShortcut("Z"));
+    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("0");
+    await expect.poll(() => frame.locator(caseSelector(caseId)).count()).toBe(1);
+    expect((await exportCurrentHtml(page)).equals(source)).toBe(true);
+
+    await page.keyboard.press(
+      `${process.platform === "darwin" ? "Meta" : "Control"}+Shift+Z`,
+    );
+    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
+    await expect.poll(() => frame.locator(caseSelector(caseId)).count()).toBe(2);
+    expect((await exportCurrentHtml(page)).equals(
+      replaceUniqueBytes(source, originalSource, splitSource),
+    )).toBe(true);
+    await expect.poll(() => frame.evaluate((id) => {
+      const items = [...document.querySelectorAll(`[data-native-case=${JSON.stringify(id)}]`)];
+      return {
+        activeIndex: items.indexOf(document.activeElement),
+        contenteditable: document.activeElement?.getAttribute("contenteditable"),
+      };
+    }, caseId)).toEqual({
+      activeIndex: 1,
+      contenteditable: "plaintext-only",
+    });
+  });
+
+  test("a comment on a block becomes explicitly ambiguous after Enter and restores on undo", async ({ page }) => {
+    const { editor, frame } = await openMatrix(page);
+    const caseId = "list-item";
+    const firstText = "列表项中的";
+    const commentText = "保留这条评论的目标，不要静默移动。";
+
+    await frame.locator(caseSelector(caseId)).click();
+    const toolbar = page.getByRole("toolbar", { name: /编辑/ });
+    await toolbar.getByRole("button", { name: /留评论/ }).click();
+    const composer = page.getByRole("region", { name: "添加评论" });
+    await composer.getByRole("textbox", { name: "评论内容" }).fill(commentText);
+    await composer.getByRole("button", { name: "评论", exact: true }).click();
+    await expect(page.locator(".round-record-counts")).toHaveText(
+      "1 条评论 · 0 项直接编辑记录",
+    );
+    const commentCard = page.locator(".comment-card").filter({ hasText: commentText });
+    await expect(commentCard).toHaveAttribute("data-resolution", "exact");
+
+    await activateNativeEdit(frame, caseId);
+    await setTextSelection(frame, caseId, firstText.length);
+    await page.keyboard.press("Enter");
+
+    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
+    await expect(commentCard).toHaveAttribute("data-resolution", "ambiguous");
+    await expect(commentCard).toHaveAttribute("tabindex", "-1");
+
+    await page.keyboard.press(keyShortcut("Z"));
+    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("0");
+    await expect(commentCard).toHaveAttribute("data-resolution", "exact");
+    await expect(commentCard).toHaveAttribute("tabindex", "0");
+
+    await page.keyboard.press(
+      `${process.platform === "darwin" ? "Meta" : "Control"}+Shift+Z`,
+    );
+    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
+    await expect(commentCard).toHaveAttribute("data-resolution", "ambiguous");
+  });
+
+  test("Enter splits one simple paragraph and preserves its visual attributes", async ({ page }) => {
+    const { editor, frame, source } = await openMatrix(page);
+    const caseId = "flex-copy";
+    const firstText = "这个 flex item";
+    const secondText = " 可以伸缩，进入编辑前后 gap、baseline 和折行都必须不变。";
+    const startTag = `<p data-native-case="flex-copy" data-native-mode="native-editable">`;
+    const originalSource = `${startTag}${firstText}${secondText}</p>`;
+    const splitSource = `${startTag}${firstText}</p>${startTag}${secondText}</p>`;
+
+    await activateNativeEdit(frame, caseId);
+    await setTextSelection(frame, caseId, firstText.length);
+    await page.keyboard.press("Enter");
+
+    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
+    await expect.poll(() => frame.locator(caseSelector(caseId)).count()).toBe(2);
+    expect((await exportCurrentHtml(page)).equals(
+      replaceUniqueBytes(source, originalSource, splitSource),
+    )).toBe(true);
+    await expect.poll(() => frame.evaluate((id) => {
+      const blocks = [...document.querySelectorAll(`[data-native-case=${JSON.stringify(id)}]`)];
+      return {
+        activeIndex: blocks.indexOf(document.activeElement),
+        tagName: document.activeElement?.tagName,
+        editableModeSupported: ["plaintext-only", "true"].includes(
+          document.activeElement?.getAttribute("contenteditable"),
+        ),
+      };
+    }, caseId)).toEqual({
+      activeIndex: 1,
+      tagName: "P",
+      editableModeSupported: true,
+    });
+
+    await page.keyboard.press(keyShortcut("Z"));
+    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("0");
+    await expect.poll(() => frame.locator(caseSelector(caseId)).count()).toBe(1);
+    expect((await exportCurrentHtml(page)).equals(source)).toBe(true);
   });
 
   test("replacement can cross nested inline wrappers without losing the caret", async ({ page }) => {
@@ -660,31 +830,137 @@ test.describe("authored DOM native editing contract", () => {
     expect(events.some(({ type }) => type === "cut")).toBe(true);
   });
 
-  test("multi-line plain-text paste is rejected before DOM or source mutation", async ({ page, context }) => {
+  test("multi-line clipboard text is stripped to text and committed as generated hard breaks", async ({ page, context }) => {
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-    const { frame, source } = await openMatrix(page);
+    const { editor, frame, source } = await openMatrix(page);
     await activateNativeEdit(frame, "hard-break");
     await setTextSelection(frame, "hard-break", 2);
     const target = frame.locator(caseSelector("hard-break"));
-    const beforeHtml = await target.innerHTML();
-    const beforeSelection = await selectionSnapshot(frame, "hard-break");
-    await page.evaluate(() => navigator.clipboard.writeText("粘贴第一行\n粘贴第二行"));
+    await page.evaluate(() => navigator.clipboard.writeText(
+      "<b>粘贴第一行</b>\n粘贴第二行",
+    ));
     await page.keyboard.press(keyShortcut("V"));
-    expect(await target.innerHTML()).toBe(beforeHtml);
+    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
+    await expect(target).toContainText("<b>粘贴第一行</b>");
+    expect(await target.locator("b").count()).toBe(0);
+    expect(await target.locator("br").count()).toBe(2);
     expect(await selectionSnapshot(frame, "hard-break")).toMatchObject({
-      collapsed: beforeSelection.collapsed,
-      anchorOffset: beforeSelection.anchorOffset,
-      focusOffset: beforeSelection.focusOffset,
+      collapsed: true,
       activeCase: "hard-break",
     });
     expect((await nativeEditingState(frame, "hard-break")).targetIsActive).toBe(true);
-    const notice = page.locator('[role="status"], [role="alert"]').filter({
-      hasText: /多行|评论/,
-    }).first();
-    await expect(notice).toBeVisible();
-    await expect(notice).toContainText("粘贴单行文字");
-    await expect(notice).toContainText("添加评论");
+    const expected = replaceUniqueBytes(
+      source,
+      ">第一行保留原位。<br>",
+      ">第一&lt;b>粘贴第一行&lt;/b><br>粘贴第二行行保留原位。<br>",
+    );
+    expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
+
+    await page.keyboard.press(keyShortcut("Z"));
+    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("0");
     expect((await exportCurrentHtml(page)).equals(source)).toBe(true);
+  });
+
+  for (const key of ["Backspace", "Delete"]) {
+    test(`${key} deletes exactly the adjacent authored hard break and undo restores it`, async ({ page }) => {
+      const { editor, frame, source } = await openMatrix(page);
+      const target = await activateNativeEdit(frame, "hard-break");
+      if (key === "Backspace") {
+        await target.evaluate((host) => {
+          const hardBreak = host.querySelector("br");
+          if (!hardBreak?.parentNode) throw new Error("Expected an authored hard break.");
+          const childIndex = [...hardBreak.parentNode.childNodes].indexOf(hardBreak);
+          const range = document.createRange();
+          range.setStart(hardBreak.parentNode, childIndex + 1);
+          range.collapse(true);
+          const selection = document.getSelection();
+          selection.removeAllRanges();
+          selection.addRange(range);
+        });
+      } else {
+        await setTextSelection(frame, "hard-break", 8);
+      }
+      await page.keyboard.press(key);
+
+      await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
+      const expected = replaceUniqueBytes(
+        source,
+        "第一行保留原位。<br>第二行",
+        "第一行保留原位。第二行",
+      );
+      expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
+      expect(await selectionSnapshot(frame, "hard-break")).toMatchObject({
+        collapsed: true,
+        anchorOffset: 8,
+        focusOffset: 8,
+        activeCase: "hard-break",
+      });
+
+      await page.keyboard.press(keyShortcut("Z"));
+      await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("0");
+      expect((await exportCurrentHtml(page)).equals(source)).toBe(true);
+    });
+  }
+
+  test("controlled contenteditable preserves collapsed layout and owns paste as plain text", async ({ page, context }) => {
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    const { editor, frame, source } = await openMatrix(page);
+    const caseId = "collapsed-whitespace-copy";
+    const target = await activateNativeEdit(frame, caseId);
+    await expect(target).toHaveAttribute("contenteditable", "true");
+    await expect(editor).toHaveAttribute("data-native-host-mode", "true");
+
+    await setTextSelection(frame, caseId, 0, 4);
+    await page.evaluate(() => navigator.clipboard.writeText("<b>只作为文字</b>"));
+    await page.keyboard.press(keyShortcut("V"));
+    await expect.poll(() => target.textContent()).toContain("<b>只作为文字</b>");
+    expect(await target.locator("b").count()).toBe(0);
+
+    await page.waitForTimeout(850);
+    const afterPaste = await exportCurrentHtml(page);
+    expect(afterPaste.toString("utf8")).toContain("&lt;b>只作为文字&lt;/b>");
+    const acceptedHtml = await target.innerHTML();
+
+    await setTextSelection(frame, caseId, 1);
+    await target.evaluate((element) => {
+      element.ownerDocument.execCommand(
+        "insertHTML",
+        false,
+        '<strong data-browser-structure="true">BAD_STRUCTURE</strong>',
+      );
+    });
+    await expect.poll(() => target.innerHTML()).toBe(acceptedHtml);
+    expect((await exportCurrentHtml(page)).equals(afterPaste)).toBe(true);
+
+    await page.keyboard.press(keyShortcut("Z"));
+    await expect.poll(() => target.textContent()).not.toContain("<b>只作为文字</b>");
+    await expect.poll(async () => (await exportCurrentHtml(page)).equals(source)).toBe(true);
+  });
+
+  test("display contents enters through observer guard, accepts delivered input, and rolls back orphan mutation", async ({ page }) => {
+    const { editor, frame } = await openMatrix(page);
+    const caseId = "display-contents-copy";
+    const target = await activateNativeEdit(frame, caseId);
+    await expect(editor).toHaveAttribute(
+      "data-native-event-delivery-mode",
+      "observer-guarded",
+    );
+    const beforeText = await target.textContent();
+
+    await target.evaluate((element) => {
+      const wrapperText = element.querySelector("strong")?.firstChild;
+      if (!(wrapperText instanceof Text)) throw new Error("Missing display contents text.");
+      wrapperText.data = `ORPHAN_${wrapperText.data}`;
+    });
+    await expect.poll(() => target.textContent()).toBe(beforeText);
+
+    await installInputRecorder(frame);
+    await setTextSelection(frame, caseId, 0);
+    await page.keyboard.insertText("安全");
+    await expect.poll(() => target.textContent()).toBe(`安全${beforeText}`);
+    const events = await recordedInputEvents(frame);
+    expect(events.some(({ type }) => type === "beforeinput")).toBe(true);
+    expect(events.some(({ type }) => type === "input")).toBe(true);
   });
 
   test("Chromium IME composition commits one final authored-DOM value", async ({ page }) => {
@@ -719,7 +995,7 @@ test.describe("authored DOM native editing contract", () => {
     await installInputRecorder(frame);
     await reverseTextSelection(frame, caseId, 0, 2);
     const originalSelection = await selectionSnapshot(frame, caseId);
-    const saveIndicator = page.locator(".save-indicator");
+    const saveIndicator = page.locator(".save-status");
     const originalRevision = await saveIndicator.getAttribute("data-edit-revision");
     const originalRenderedSha = await saveIndicator.getAttribute("data-rendered-sha256");
 
@@ -979,9 +1255,9 @@ test.describe("authored DOM native editing contract", () => {
         data: "",
       }));
       const outerButton = Array.from(parent.document.querySelectorAll("button"))
-        .find((button) => button.textContent?.trim() === "项目文件");
+        .find((button) => button.textContent?.trim() === "项目");
       if (!(outerButton instanceof parent.HTMLButtonElement)) {
-        throw new Error("Outer project files button is missing.");
+        throw new Error("Outer project button is missing.");
       }
       outerButton.focus();
     });
@@ -1028,9 +1304,9 @@ test.describe("authored DOM native editing contract", () => {
         data: "确认",
       }));
       const outerButton = Array.from(parent.document.querySelectorAll("button"))
-        .find((button) => button.textContent?.trim() === "项目文件");
+        .find((button) => button.textContent?.trim() === "项目");
       if (!(outerButton instanceof parent.HTMLButtonElement)) {
-        throw new Error("Outer project files button is missing.");
+        throw new Error("Outer project button is missing.");
       }
       outerButton.focus();
     });
@@ -1107,7 +1383,7 @@ test.describe("authored DOM native editing contract", () => {
     await installInputRecorder(frame);
     const recorderIframe = await frame.frameElement();
     await setTextSelection(frame, "heading-inline", 0, 2);
-    const saveIndicator = page.locator(".save-indicator");
+    const saveIndicator = page.locator(".save-status");
     const initialRevision = await saveIndicator.getAttribute("data-edit-revision");
     const initialRenderedSha = await saveIndicator.getAttribute("data-rendered-sha256");
 
@@ -1122,7 +1398,7 @@ test.describe("authored DOM native editing contract", () => {
     // This button belongs to PageRoot's parent document. Its complete pointer
     // gesture must be inert while the iframe still owns an unconfirmed IME
     // candidate; checking only click-time is too late on macOS/Chromium.
-    await page.getByRole("button", { name: "项目文件", exact: true }).click();
+    await page.getByRole("button", { name: "项目", exact: true }).click();
 
     await expect(page.locator("aside.side-drawer")).not.toHaveClass(/\bopen\b/u);
     expect(await nativeEditingState(frame, "heading-inline")).toMatchObject({
@@ -1150,8 +1426,8 @@ test.describe("authored DOM native editing contract", () => {
     events = await recordedInputEventsFromIframe(recorderIframe);
     expect(events.filter(({ type }) => type === "compositionend")).toHaveLength(1);
     await page
-      .getByRole("complementary", { name: "项目文件" })
-      .getByRole("button", { name: "关闭", exact: true })
+      .getByRole("dialog", { name: "项目文件" })
+      .getByRole("button", { name: "关闭项目面板", exact: true })
       .click();
     await expect(page.locator("aside.side-drawer")).not.toHaveClass(/\bopen\b/u);
     const exported = await exportCurrentHtml(page);
@@ -1168,7 +1444,7 @@ test.describe("authored DOM native editing contract", () => {
     const target = await activateNativeEdit(frame, "heading-inline");
     await setTextSelection(frame, "heading-inline", 0, 2);
     const initialText = await target.textContent();
-    const saveIndicator = page.locator(".save-indicator");
+    const saveIndicator = page.locator(".save-status");
     const initialRenderedSha = await saveIndicator.getAttribute("data-rendered-sha256");
     const initialRevision = await saveIndicator.getAttribute("data-edit-revision");
 
@@ -1194,9 +1470,9 @@ test.describe("authored DOM native editing contract", () => {
         data: "blurraw",
       }));
       const outerButton = Array.from(parent.document.querySelectorAll("button"))
-        .find((button) => button.textContent?.trim() === "项目文件");
+        .find((button) => button.textContent?.trim() === "项目");
       if (!(outerButton instanceof parent.HTMLButtonElement)) {
-        throw new Error("Outer project files button is missing.");
+        throw new Error("Outer project button is missing.");
       }
       outerButton.focus();
     });
@@ -1218,7 +1494,7 @@ test.describe("authored DOM native editing contract", () => {
     const target = await activateNativeEdit(frame, "heading-inline");
     await setTextSelection(frame, "heading-inline", 0, 2);
     const initialText = await target.textContent();
-    const saveIndicator = page.locator(".save-indicator");
+    const saveIndicator = page.locator(".save-status");
     const initialRenderedSha = await saveIndicator.getAttribute("data-rendered-sha256");
 
     await target.evaluate((element) => {
@@ -1247,7 +1523,7 @@ test.describe("authored DOM native editing contract", () => {
     // The fail-closed window blur explicitly leaves composing state. A later
     // ordinary PageRoot click must therefore follow the established contract:
     // finish the clean session and execute its business action.
-    await page.getByRole("button", { name: "项目文件", exact: true }).click();
+    await page.getByRole("button", { name: "项目", exact: true }).click();
     await expect(page.locator("aside.side-drawer")).toHaveClass(/\bopen\b/u);
     await expect.poll(() => target.getAttribute("contenteditable")).toBeNull();
     expect(await editor.getAttribute("data-undo-depth")).toBe("0");
@@ -1301,12 +1577,47 @@ test.describe("authored DOM native editing contract", () => {
     expect((await exportCurrentHtml(page)).equals(forwardBytes)).toBe(true);
   });
 
+  for (const {
+    shortcut,
+    property,
+    value,
+  } of [
+    { shortcut: "B", property: "font-weight", value: "700" },
+    { shortcut: "I", property: "font-style", value: "italic" },
+    { shortcut: "U", property: "text-decoration-line", value: "underline" },
+  ]) {
+    test(`${keyShortcut(shortcut)} formats the selected source range without browser tags`, async ({ page }) => {
+      const { editor, frame, source } = await openMatrix(page);
+      const caseId = "list-item";
+      await activateNativeEdit(frame, caseId);
+      await setTextSelection(frame, caseId, 0, 3);
+      await page.keyboard.press(keyShortcut(shortcut));
+
+      await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
+      expect(await selectionSnapshot(frame, caseId)).toMatchObject({
+        text: "列表项",
+        collapsed: false,
+        activeCase: caseId,
+      });
+      const target = frame.locator(caseSelector(caseId));
+      expect(await target.locator("b, i, u").count()).toBe(0);
+      const exported = (await exportCurrentHtml(page)).toString("utf8");
+      expect(exported).toContain(
+        `<span style="all: unset; display: inline !important; ${property}: ${value}">列表项</span>`,
+      );
+
+      await page.keyboard.press(keyShortcut("Z"));
+      await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("0");
+      expect((await exportCurrentHtml(page)).equals(source)).toBe(true);
+    });
+  }
+
   test("a mixed-format replacement after toolbar restart fails closed without corrupting source history", async ({ page }) => {
     const { editor, frame, source } = await openMatrix(page);
     const caseId = "heading-inline";
     const target = await activateNativeEdit(frame, caseId);
     const originalText = await target.textContent();
-    const saveIndicator = page.locator(".save-indicator");
+    const saveIndicator = page.locator(".save-status");
 
     await setTextSelection(frame, caseId, 3, 9);
     await page.getByRole("button", { name: "加粗", exact: true }).click();
@@ -1338,7 +1649,7 @@ test.describe("authored DOM native editing contract", () => {
       .toBeNull();
 
     await activateNativeEdit(frame, "heading-inline");
-    await page.getByRole("button", { name: "项目文件", exact: true }).click();
+    await page.getByRole("button", { name: "项目", exact: true }).click();
     await expect.poll(() => frame.locator(caseSelector("heading-inline")).getAttribute("contenteditable"))
       .toBeNull();
   });
@@ -1380,7 +1691,7 @@ test.describe("fallback capability contract", () => {
 
       const state = await target.evaluate((element) => ({
         selfEditable: Boolean(element.isContentEditable),
-        authoredEditableCount: document.querySelectorAll('[contenteditable="plaintext-only"]').length,
+        authoredEditableCount: document.querySelectorAll("[data-html-canvas-native-editing]").length,
         legacySurfaceCount: document.querySelectorAll("[data-html-canvas-text-flow-surface]").length,
         selectedText: document.getSelection()?.toString() || "",
       }));

@@ -6,10 +6,10 @@
   display: grid;
   grid-template-rows: 36px minmax(0, 1fr);
   overflow: hidden;
-  border: 1px solid #d9d6ce;
-  border-radius: 13px;
+  border: 0;
+  border-radius: 0;
   background: #fff;
-  box-shadow: 0 10px 30px rgb(37 34 27 / 8%);
+  box-shadow: none;
 }
 
 .statusBar {

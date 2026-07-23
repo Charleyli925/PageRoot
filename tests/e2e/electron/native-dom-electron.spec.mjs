@@ -18,6 +18,7 @@ import {
   currentEditorFrame,
   documentToken,
   fixtureBuffer,
+  geometrySnapshot,
   installInputRecorder,
   keyShortcut,
   loadFixture,
@@ -297,6 +298,67 @@ test("Electron uses the authored DOM caret, Selection and beforeinput", async ()
     const events = await recordedInputEvents(frame);
     expect(events.some(({ type, inputType }) => type === "beforeinput" && inputType === "insertText")).toBe(true);
     expect(events.some(({ type }) => type === "input")).toBe(true);
+  } finally {
+    await stopPageRoot(electronApp, isolatedUserData);
+  }
+});
+
+test("Electron proves the controlled and observer-guarded fallback lanes", async () => {
+  const { electronApp, page, isolatedUserData } = await launchPageRoot();
+  try {
+    const { editor, frame } = await loadFixture(page, "complex-layout.html");
+    const controlledCase = "collapsed-whitespace-copy";
+    await frame.locator(caseSelector(controlledCase)).scrollIntoViewIfNeeded();
+    const beforeGeometry = await geometrySnapshot(frame, controlledCase);
+    const originalText = await frame.locator(caseSelector(controlledCase)).textContent();
+    const controlledTarget = await activateNativeEdit(frame, controlledCase);
+    await expect(controlledTarget).toHaveAttribute("contenteditable", "true");
+    await expect(editor).toHaveAttribute("data-native-host-mode", "true");
+    expect(await geometrySnapshot(frame, controlledCase)).toEqual(beforeGeometry);
+
+    await setTextSelection(frame, controlledCase, 0, 4);
+    await electronApp.evaluate(({ clipboard }, text) => {
+      clipboard.writeText(text);
+    }, "<b>Electron纯文字</b>");
+    await page.keyboard.press(keyShortcut("V"));
+    await expect.poll(() => controlledTarget.textContent())
+      .toContain("<b>Electron纯文字</b>");
+    expect(await controlledTarget.locator("b").count()).toBe(0);
+    await expect.poll(() => editor.getAttribute("data-undo-depth"))
+      .toBe("1");
+
+    await page.keyboard.press(keyShortcut("Z"));
+    await expect.poll(() => editor.getAttribute("data-undo-depth"))
+      .toBe("0");
+    await expect.poll(() => (
+      page
+        .getByTestId("html-canvas-editor")
+        .filter({ visible: true })
+        .first()
+        .locator('iframe[title*="HTML"]')
+        .contentFrame()
+        .locator(caseSelector(controlledCase))
+        .textContent()
+    )).toBe(originalText);
+
+    const guardedCase = "display-contents-copy";
+    await activateNativeEdit(page, guardedCase);
+    await expect(editor).toHaveAttribute(
+      "data-native-event-delivery-mode",
+      "observer-guarded",
+    );
+    await setTextSelection(page, guardedCase, 0);
+    await page.keyboard.insertText("电");
+    await expect.poll(() => (
+      page
+        .getByTestId("html-canvas-editor")
+        .filter({ visible: true })
+        .first()
+        .locator('iframe[title*="HTML"]')
+        .contentFrame()
+        .locator(caseSelector(guardedCase))
+        .textContent()
+    )).toContain("电观察器保护");
   } finally {
     await stopPageRoot(electronApp, isolatedUserData);
   }
