@@ -1088,8 +1088,105 @@ function insertionLabel(target: HtmlCanvasSelection): string {
   return target.level === "insertion" ? `添加位置：${label}` : label;
 }
 
+function targetResolutionLabel(resolution: HtmlCanvasSelection["resolution"]): string {
+  if (resolution === "exact") return "精确定位";
+  if (resolution === "rebound") return "已唯一重绑";
+  if (resolution === "ambiguous") return "多个候选，已阻止定位";
+  return "目标已失联";
+}
+
 function canLocateTarget(target: HtmlCanvasSelection): boolean {
   return target.resolution === "exact" || target.resolution === "rebound";
+}
+
+function changeKindLabel(event: DirectEditEvent): string {
+  if (event.kind === "text") return "文字修改";
+  if (event.kind === "reorder") return "位置移动";
+  if (event.kind === "structure") return "结构调整";
+  const labels: Record<string, string> = {
+    fontSize: "字号",
+    color: "文字颜色",
+    backgroundColor: "模块填充",
+    fontWeight: "加粗",
+    fontStyle: "斜体",
+    padding: "内边距",
+    margin: "外间距",
+    lineHeight: "行距",
+  };
+  return labels[event.property || ""] || "样式调整";
+}
+
+function compactHistoryText(value: unknown): string {
+  if (value === null || value === undefined || value === "") return "未设置";
+  const text = String(value).replace(/\s+/g, " ").trim();
+  return text.length > 72 ? `${text.slice(0, 72)}…` : text;
+}
+
+function recordValueScalar(value: unknown): unknown {
+  if (!isRecord(value)) return value;
+  if (value.sourceValue !== null && value.sourceValue !== undefined && value.sourceValue !== "") {
+    return value.sourceValue;
+  }
+  if (value.computedValue !== null && value.computedValue !== undefined && value.computedValue !== "") {
+    return value.computedValue;
+  }
+  return value.value ?? value.index ?? value.toIndex ?? value.fromIndex ?? null;
+}
+
+function friendlyStyleValue(property: string | undefined, value: unknown): string {
+  const scalar = recordValueScalar(value);
+  const normalized = String(scalar ?? "").trim().toLowerCase();
+  if (!normalized) return "未设置";
+  if (property === "fontWeight") {
+    const numeric = Number.parseInt(normalized, 10);
+    if (normalized === "bold" || Number.isFinite(numeric) && numeric >= 600) return "加粗";
+    if (normalized === "normal" || Number.isFinite(numeric) && numeric < 600) return "常规";
+  }
+  if (property === "fontStyle") {
+    if (normalized === "italic" || normalized === "oblique") return "斜体";
+    if (normalized === "normal") return "常规";
+  }
+  if (property === "backgroundColor" && ["transparent", "rgba(0, 0, 0, 0)"].includes(normalized)) {
+    return "透明";
+  }
+  return compactHistoryText(scalar);
+}
+
+function historyRecordValue(
+  event: DirectEditEvent,
+  value: unknown,
+): string {
+  if (event.kind === "reorder" && isRecord(value)) {
+    const index = Number(value.index ?? value.toIndex ?? value.fromIndex);
+    return Number.isFinite(index) ? `第 ${index + 1} 位` : "原位置";
+  }
+  if (event.kind === "text") {
+    const text = compactHistoryText(value);
+    return text === "未设置" ? text : `“${text}”`;
+  }
+  if (event.kind === "style") return friendlyStyleValue(event.property, value);
+  return compactHistoryText(recordValueScalar(value));
+}
+
+function summarizeChangeEvents(events: DirectEditEvent[]): DirectEditEvent[] {
+  const summaries = new Map<string, DirectEditEvent>();
+  for (const event of events) {
+    const key = [
+      event.target.id || event.target.selector,
+      event.kind,
+      event.property || "",
+    ].join("::");
+    const existing = summaries.get(key);
+    summaries.set(key, existing
+      ? {
+          ...event,
+          eventId: existing.eventId,
+          before: existing.before,
+          createdAt: event.createdAt,
+        }
+      : event);
+  }
+  return [...summaries.values()];
 }
 
 function compactLineDiff(workbenchHtml: string, externalHtml: string): string {
@@ -7302,6 +7399,108 @@ export default function Workbench() {
                 <li>{version.validationReview?.status === "waived" ? "安全校验通过，范围提示已记录" : "身份、Hash 与文件完整性已校验"}</li>
               </ul>
             </div>
+            {version.comments.length > 0
+              || version.directEdits.length > 0
+              || version.supplements.length > 0
+              || version.validationReview ? (
+              <details className="history-records">
+                <summary>查看本版修改来源与校验</summary>
+                <section className="history-source-group">
+                  <header><strong>源页原始评论</strong><span>{version.comments.length}</span></header>
+                  {version.comments.map((comment) => (
+                    <article className="history-record" key={comment.commentId}>
+                      <div>
+                        <strong>{insertionLabel(comment.target)}</strong>
+                        <span
+                          className="target-resolution"
+                          data-resolution={comment.target.resolution}
+                        >{targetResolutionLabel(comment.target.resolution)}</span>
+                        <time dateTime={comment.updatedAt || comment.createdAt}>
+                          {formatTime(comment.updatedAt || comment.createdAt, true)}
+                        </time>
+                      </div>
+                      {comment.text ? <p>{comment.text}</p> : null}
+                      <CommentAttachmentStrip
+                        attachments={comment.attachments}
+                        objectUrls={attachmentObjectUrls}
+                        onEnsurePreview={ensureAttachmentObjectUrl}
+                        onPreview={(attachment) => void openAttachmentPreview(attachment)}
+                        onDownload={(attachment) => void downloadAttachment(attachment)}
+                      />
+                    </article>
+                  ))}
+                  {version.comments.length === 0 ? <small>本版没有源页评论。</small> : null}
+                </section>
+                <section className="history-source-group">
+                  <header><strong>内部 AI 对话补充</strong><span>{version.supplements.length}</span></header>
+                  {version.supplements.map((supplement) => (
+                    <article className="history-record" key={supplement.recordId}>
+                      <div>
+                        <strong>
+                          {supplement.action === "add"
+                            ? "新增要求"
+                            : supplement.action === "amend"
+                              ? "补充修改"
+                              : "撤回要求"}
+                        </strong>
+                        <time dateTime={supplement.createdAt}>
+                          {formatTime(supplement.createdAt, true)}
+                        </time>
+                      </div>
+                      <p>{supplement.text}</p>
+                      {supplement.attachments.length > 0 ? (
+                        <small>
+                          已归档原件：
+                          {supplement.attachments.map((item) => item.fileName).join("、")}
+                        </small>
+                      ) : supplement.evidenceState === "description-only" ? (
+                        <small>原件未归档 · {supplement.evidenceDescription}</small>
+                      ) : null}
+                    </article>
+                  ))}
+                  {version.supplements.length === 0 ? <small>本版没有内部 AI 对话补充。</small> : null}
+                </section>
+                <section className="history-source-group">
+                  <header>
+                    <strong>本地编辑</strong>
+                    <span>{summarizeChangeEvents(version.directEdits).length}</span>
+                  </header>
+                  {summarizeChangeEvents(version.directEdits).map((event) => (
+                    <article
+                      className="history-record history-change-record"
+                      key={event.eventId}
+                    >
+                      <div>
+                        <strong>
+                          {changeKindLabel(event)} · {insertionLabel(event.target)}
+                        </strong>
+                        <time dateTime={event.createdAt}>
+                          {formatTime(event.createdAt, true)}
+                        </time>
+                      </div>
+                      <div className="history-change-values">
+                        <span>
+                          <small>修改前</small>
+                          <del>{historyRecordValue(event, event.before)}</del>
+                        </span>
+                        <CaretRightIcon aria-hidden="true" size={14} weight="bold" />
+                        <span>
+                          <small>修改后</small>
+                          <ins>{historyRecordValue(event, event.after)}</ins>
+                        </span>
+                      </div>
+                    </article>
+                  ))}
+                  {version.directEdits.length === 0 ? <small>本版没有本地编辑。</small> : null}
+                </section>
+                <section className="history-source-group">
+                  <header><strong>AI 结果与校验</strong><span>已归档</span></header>
+                  <p>{version.validationReview?.status === "waived"
+                    ? "硬校验通过；软校验由用户选择忽略，决定与原因已记录。"
+                    : "版本身份、内容 Hash 与不可变文件已经校验并提交。"}</p>
+                </section>
+              </details>
+            ) : null}
             <div className="version-detail-actions">
               <button
                 className="view-version-button"
