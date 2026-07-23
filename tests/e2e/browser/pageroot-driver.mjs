@@ -645,19 +645,25 @@ export function keyShortcut(key) {
   return `${process.platform === "darwin" ? "Meta" : "Control"}+${key}`;
 }
 
+export async function requestExportCurrentHtml(page) {
+  return page.evaluate(() => {
+    const event = new KeyboardEvent("keydown", {
+      key: "E",
+      metaKey: true,
+      ctrlKey: true,
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    window.dispatchEvent(event);
+    return event.defaultPrevented;
+  });
+}
+
 export async function exportCurrentHtml(page) {
   const [download] = await Promise.all([
     page.waitForEvent("download"),
-    page.evaluate(() => {
-      window.dispatchEvent(new KeyboardEvent("keydown", {
-        key: "E",
-        metaKey: true,
-        ctrlKey: true,
-        shiftKey: true,
-        bubbles: true,
-        cancelable: true,
-      }));
-    }),
+    requestExportCurrentHtml(page),
   ]);
   const stream = await download.createReadStream();
   if (!stream) throw new Error("Export download did not expose a readable stream.");

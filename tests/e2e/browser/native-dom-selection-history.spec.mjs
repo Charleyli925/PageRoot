@@ -7,6 +7,7 @@ import {
   loadCaseManifest,
   loadFixture,
   nativeEditingState,
+  requestExportCurrentHtml,
   replaceUniqueBytes,
   reverseTextSelection,
   selectionSnapshot,
@@ -34,10 +35,9 @@ async function waitForNativeSession(frame, caseId) {
 }
 
 async function exportCurrentHtmlPreservingFocus(page, frame, caseId) {
-  const exportButton = page.getByRole("button", { name: "导出 HTML 副本", exact: true });
   const [download] = await Promise.all([
     page.waitForEvent("download"),
-    exportButton.evaluate((button) => button.click()),
+    requestExportCurrentHtml(page),
   ]);
   const stream = await download.createReadStream();
   if (!stream) throw new Error("Export download did not expose a readable stream.");

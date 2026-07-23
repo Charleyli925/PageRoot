@@ -1000,7 +1000,7 @@ test("non-empty compositionend remains committed when its announced input tail i
   ))).toBe(true);
 });
 
-test("one export click inside the optional terminal grace completes exactly once", async ({ page }) => {
+test("one export shortcut inside the optional terminal grace completes exactly once", async ({ page }) => {
   const { editor, frame, source } = await openMatrix(page);
   const caseId = "heading-inline";
   const target = await activateNativeEdit(frame, caseId);
@@ -1042,15 +1042,17 @@ test("one export click inside the optional terminal grace completes exactly once
       data: "你好",
     }));
 
-    // Click in the same task as compositionend, before the optional terminal
+    // Dispatch in the same task as compositionend, before the optional terminal
     // delivery timer can expire. The command must remain queued until that
     // exact epoch clears, then cross one fence and download once.
-    const exportButton = Array.from(window.parent.document.querySelectorAll("button"))
-      .find((button) => button.textContent?.trim() === "导出 HTML 副本");
-    if (!(exportButton instanceof window.parent.HTMLButtonElement)) {
-      throw new Error("Export button is missing.");
-    }
-    exportButton.click();
+    window.parent.dispatchEvent(new window.parent.KeyboardEvent("keydown", {
+      key: "E",
+      metaKey: true,
+      ctrlKey: true,
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    }));
   });
 
   const download = await downloadPromise;
@@ -1964,9 +1966,9 @@ test("focusout rolls back a temporary composition wrapper without losing prior d
       isComposing: true,
     }));
     const outerButton = Array.from(parent.document.querySelectorAll("button"))
-      .find((button) => button.textContent?.trim() === "项目文件");
+      .find((button) => button.textContent?.trim() === "项目");
     if (!(outerButton instanceof parent.HTMLButtonElement)) {
-      throw new Error("Outer project files button is missing.");
+      throw new Error("Outer project button is missing.");
     }
     outerButton.focus();
   });

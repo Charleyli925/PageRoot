@@ -957,7 +957,7 @@ test.describe("authored DOM native editing contract", () => {
     await installInputRecorder(frame);
     await reverseTextSelection(frame, caseId, 0, 2);
     const originalSelection = await selectionSnapshot(frame, caseId);
-    const saveIndicator = page.locator(".save-indicator");
+    const saveIndicator = page.locator(".save-status");
     const originalRevision = await saveIndicator.getAttribute("data-edit-revision");
     const originalRenderedSha = await saveIndicator.getAttribute("data-rendered-sha256");
 
@@ -1217,9 +1217,9 @@ test.describe("authored DOM native editing contract", () => {
         data: "",
       }));
       const outerButton = Array.from(parent.document.querySelectorAll("button"))
-        .find((button) => button.textContent?.trim() === "项目文件");
+        .find((button) => button.textContent?.trim() === "项目");
       if (!(outerButton instanceof parent.HTMLButtonElement)) {
-        throw new Error("Outer project files button is missing.");
+        throw new Error("Outer project button is missing.");
       }
       outerButton.focus();
     });
@@ -1266,9 +1266,9 @@ test.describe("authored DOM native editing contract", () => {
         data: "确认",
       }));
       const outerButton = Array.from(parent.document.querySelectorAll("button"))
-        .find((button) => button.textContent?.trim() === "项目文件");
+        .find((button) => button.textContent?.trim() === "项目");
       if (!(outerButton instanceof parent.HTMLButtonElement)) {
-        throw new Error("Outer project files button is missing.");
+        throw new Error("Outer project button is missing.");
       }
       outerButton.focus();
     });
@@ -1345,7 +1345,7 @@ test.describe("authored DOM native editing contract", () => {
     await installInputRecorder(frame);
     const recorderIframe = await frame.frameElement();
     await setTextSelection(frame, "heading-inline", 0, 2);
-    const saveIndicator = page.locator(".save-indicator");
+    const saveIndicator = page.locator(".save-status");
     const initialRevision = await saveIndicator.getAttribute("data-edit-revision");
     const initialRenderedSha = await saveIndicator.getAttribute("data-rendered-sha256");
 
@@ -1360,7 +1360,7 @@ test.describe("authored DOM native editing contract", () => {
     // This button belongs to PageRoot's parent document. Its complete pointer
     // gesture must be inert while the iframe still owns an unconfirmed IME
     // candidate; checking only click-time is too late on macOS/Chromium.
-    await page.getByRole("button", { name: "项目文件", exact: true }).click();
+    await page.getByRole("button", { name: "项目", exact: true }).click();
 
     await expect(page.locator("aside.side-drawer")).not.toHaveClass(/\bopen\b/u);
     expect(await nativeEditingState(frame, "heading-inline")).toMatchObject({
@@ -1388,8 +1388,8 @@ test.describe("authored DOM native editing contract", () => {
     events = await recordedInputEventsFromIframe(recorderIframe);
     expect(events.filter(({ type }) => type === "compositionend")).toHaveLength(1);
     await page
-      .getByRole("complementary", { name: "项目文件" })
-      .getByRole("button", { name: "关闭", exact: true })
+      .getByRole("dialog", { name: "项目文件" })
+      .getByRole("button", { name: "关闭项目面板", exact: true })
       .click();
     await expect(page.locator("aside.side-drawer")).not.toHaveClass(/\bopen\b/u);
     const exported = await exportCurrentHtml(page);
@@ -1406,7 +1406,7 @@ test.describe("authored DOM native editing contract", () => {
     const target = await activateNativeEdit(frame, "heading-inline");
     await setTextSelection(frame, "heading-inline", 0, 2);
     const initialText = await target.textContent();
-    const saveIndicator = page.locator(".save-indicator");
+    const saveIndicator = page.locator(".save-status");
     const initialRenderedSha = await saveIndicator.getAttribute("data-rendered-sha256");
     const initialRevision = await saveIndicator.getAttribute("data-edit-revision");
 
@@ -1432,9 +1432,9 @@ test.describe("authored DOM native editing contract", () => {
         data: "blurraw",
       }));
       const outerButton = Array.from(parent.document.querySelectorAll("button"))
-        .find((button) => button.textContent?.trim() === "项目文件");
+        .find((button) => button.textContent?.trim() === "项目");
       if (!(outerButton instanceof parent.HTMLButtonElement)) {
-        throw new Error("Outer project files button is missing.");
+        throw new Error("Outer project button is missing.");
       }
       outerButton.focus();
     });
@@ -1456,7 +1456,7 @@ test.describe("authored DOM native editing contract", () => {
     const target = await activateNativeEdit(frame, "heading-inline");
     await setTextSelection(frame, "heading-inline", 0, 2);
     const initialText = await target.textContent();
-    const saveIndicator = page.locator(".save-indicator");
+    const saveIndicator = page.locator(".save-status");
     const initialRenderedSha = await saveIndicator.getAttribute("data-rendered-sha256");
 
     await target.evaluate((element) => {
@@ -1485,7 +1485,7 @@ test.describe("authored DOM native editing contract", () => {
     // The fail-closed window blur explicitly leaves composing state. A later
     // ordinary PageRoot click must therefore follow the established contract:
     // finish the clean session and execute its business action.
-    await page.getByRole("button", { name: "项目文件", exact: true }).click();
+    await page.getByRole("button", { name: "项目", exact: true }).click();
     await expect(page.locator("aside.side-drawer")).toHaveClass(/\bopen\b/u);
     await expect.poll(() => target.getAttribute("contenteditable")).toBeNull();
     expect(await editor.getAttribute("data-undo-depth")).toBe("0");
@@ -1579,7 +1579,7 @@ test.describe("authored DOM native editing contract", () => {
     const caseId = "heading-inline";
     const target = await activateNativeEdit(frame, caseId);
     const originalText = await target.textContent();
-    const saveIndicator = page.locator(".save-indicator");
+    const saveIndicator = page.locator(".save-status");
 
     await setTextSelection(frame, caseId, 3, 9);
     await page.getByRole("button", { name: "加粗", exact: true }).click();
@@ -1611,7 +1611,7 @@ test.describe("authored DOM native editing contract", () => {
       .toBeNull();
 
     await activateNativeEdit(frame, "heading-inline");
-    await page.getByRole("button", { name: "项目文件", exact: true }).click();
+    await page.getByRole("button", { name: "项目", exact: true }).click();
     await expect.poll(() => frame.locator(caseSelector("heading-inline")).getAttribute("contenteditable"))
       .toBeNull();
   });
