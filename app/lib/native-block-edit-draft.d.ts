@@ -82,6 +82,12 @@ export declare class NativeBlockEditDraft<TFormatSkeleton = unknown> {
     formatSkeleton?: TFormatSkeleton;
   });
 
+  /**
+   * Immutable zero-deep-copy state view for controller hot paths.
+   * Every nested value is already owned and frozen by the draft.
+   */
+  view(): NativeBlockEditDraftSnapshot<TFormatSkeleton>;
+
   snapshot(): NativeBlockEditDraftSnapshot<TFormatSkeleton>;
 
   recordOwnedMutation(options: {

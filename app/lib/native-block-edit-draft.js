@@ -266,8 +266,8 @@ export class NativeBlockEditDraft {
     this.#formatSkeleton = immutableCopy(formatSkeleton);
   }
 
-  snapshot() {
-    return immutableCopy({
+  view() {
+    return Object.freeze({
       lease: this.#lease,
       baselineText: this.#baselineText,
       currentText: this.#currentText,
@@ -280,6 +280,10 @@ export class NativeBlockEditDraft {
       pendingCommand: this.#pendingCommand,
       expired: this.#expired,
     });
+  }
+
+  snapshot() {
+    return immutableCopy(this.view());
   }
 
   #authorizeLease(candidate) {

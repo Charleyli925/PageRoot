@@ -17,6 +17,16 @@ import {
   type NativeBlockPendingCommand,
 } from "../lib/native-block-edit-draft.js";
 import {
+  domPointForLogicalOffset,
+  isNativeDomAtomElement as isAtomElement,
+  logicalIndexForHost,
+  logicalOffsetForDomPoint,
+  logicalOffsetsForDomPoints,
+  nativeLogicalText,
+  tokensForHost,
+  transparentInlineLogicalRanges,
+} from "../lib/native-dom-logical-index.js";
+import {
   applyNativeEditSessionAttributes,
   captureNativeEditSessionAttributes,
   isDisposableNativeInlineWrapperTag,
@@ -30,9 +40,9 @@ import {
   restoreNativeEditSessionAttributes,
   type NativeEditHostMode,
 } from "../lib/native-edit-policy.js";
-import { isTransparentSourceTextElement } from "../lib/source-text-map.js";
 
 export { NATIVE_EDIT_CHECKPOINT_DELAY_MS };
+export { nativeLogicalText };
 
 const COLLAPSED_TEXT_INSERT_INPUT_TYPES = new Set([
   "insertCompositionText",
@@ -53,22 +63,6 @@ const EXPLICIT_COMPOSITION_FALLBACK_TRIGGERS = new Set<NativeEditCheckpointTrigg
   "project-switch",
   "ai",
   "manual",
-]);
-
-const ATOM_TAGS = new Set([
-  "audio",
-  "button",
-  "canvas",
-  "embed",
-  "iframe",
-  "img",
-  "input",
-  "math",
-  "object",
-  "select",
-  "svg",
-  "textarea",
-  "video",
 ]);
 
 const MANAGED_EDIT_ATTRIBUTE_NAMES = new Set<string>(
@@ -221,19 +215,6 @@ export type NativeEditingControllerOptions = {
   }) => void;
 };
 
-type DomPoint = {
-  node: Node;
-  offset: number;
-};
-
-type Token = {
-  kind: "text" | "hard-break" | "atom";
-  node: Node;
-  text: string;
-  start: number;
-  end: number;
-};
-
 type SavedAttribute = {
   present: boolean;
   value: string | null;
@@ -379,139 +360,6 @@ function errorFrom(cause: unknown): Error {
   return cause instanceof Error ? cause : new Error(String(cause));
 }
 
-function isAtomElement(element: Element): boolean {
-  return (
-    ATOM_TAGS.has(element.localName)
-    || element.getAttribute("contenteditable") === "false"
-  );
-}
-
-function tokensForHost(hostElement: HTMLElement): Token[] {
-  const tokens: Token[] = [];
-  let logicalOffset = 0;
-  const visit = (node: Node) => {
-    if (node.nodeType === Node.TEXT_NODE) {
-      const text = (node as Text).data;
-      tokens.push({
-        kind: "text",
-        node,
-        text,
-        start: logicalOffset,
-        end: logicalOffset + text.length,
-      });
-      logicalOffset += text.length;
-      return;
-    }
-    if (node.nodeType !== Node.ELEMENT_NODE) return;
-    const element = node as Element;
-    if (element.localName === "br") {
-      tokens.push({
-        kind: "hard-break",
-        node,
-        text: "\n",
-        start: logicalOffset,
-        end: logicalOffset + 1,
-      });
-      logicalOffset += 1;
-      return;
-    }
-    if (isAtomElement(element)) {
-      tokens.push({
-        kind: "atom",
-        node,
-        text: "\ufffc",
-        start: logicalOffset,
-        end: logicalOffset + 1,
-      });
-      logicalOffset += 1;
-      return;
-    }
-    node.childNodes.forEach(visit);
-  };
-  hostElement.childNodes.forEach(visit);
-  return tokens;
-}
-
-export function nativeLogicalText(hostElement: HTMLElement): string {
-  return tokensForHost(hostElement).map((token) => token.text).join("");
-}
-
-function nodeLogicalLength(node: Node): number {
-  if (node.nodeType === Node.TEXT_NODE) return (node as Text).data.length;
-  if (node.nodeType !== Node.ELEMENT_NODE) return 0;
-  const element = node as Element;
-  if (element.localName === "br" || isAtomElement(element)) return 1;
-  return Array.from(node.childNodes).reduce(
-    (total, child) => total + nodeLogicalLength(child),
-    0,
-  );
-}
-
-function logicalOffsetForDomPoint(
-  hostElement: HTMLElement,
-  targetNode: Node,
-  targetOffset: number,
-): number | null {
-  if (targetNode !== hostElement && !hostElement.contains(targetNode)) return null;
-  let consumed = 0;
-  let result: number | null = null;
-  const visit = (node: Node) => {
-    if (result !== null) return;
-    if (node === targetNode) {
-      if (node.nodeType === Node.TEXT_NODE) {
-        const length = (node as Text).data.length;
-        result = consumed + Math.max(0, Math.min(length, targetOffset));
-        return;
-      }
-      const children = Array.from(node.childNodes);
-      const childLimit = Math.max(0, Math.min(children.length, targetOffset));
-      result = consumed + children
-        .slice(0, childLimit)
-        .reduce((total, child) => total + nodeLogicalLength(child), 0);
-      return;
-    }
-    if (node.nodeType === Node.TEXT_NODE) {
-      consumed += (node as Text).data.length;
-      return;
-    }
-    if (node.nodeType !== Node.ELEMENT_NODE) return;
-    const element = node as Element;
-    if (element.localName === "br" || isAtomElement(element)) {
-      consumed += 1;
-      return;
-    }
-    node.childNodes.forEach(visit);
-  };
-  visit(hostElement);
-  return result;
-}
-
-function transparentInlineLogicalRanges(
-  hostElement: HTMLElement,
-): Array<{ startOffset: number; endOffset: number }> {
-  const ranges: Array<{ startOffset: number; endOffset: number }> = [];
-  let logicalOffset = 0;
-  const visit = (node: Node) => {
-    if (node.nodeType === Node.TEXT_NODE) {
-      logicalOffset += (node as Text).data.length;
-      return;
-    }
-    if (node.nodeType !== Node.ELEMENT_NODE) return;
-    const element = node as Element;
-    if (element.localName === "br" || isAtomElement(element)) {
-      logicalOffset += 1;
-      return;
-    }
-    const startOffset = logicalOffset;
-    node.childNodes.forEach(visit);
-    if (node !== hostElement && isTransparentSourceTextElement(element.localName)) {
-      ranges.push({ startOffset, endOffset: logicalOffset });
-    }
-  };
-  hostElement.childNodes.forEach(visit);
-  return ranges;
-}
-
 /**
  * A logical text offset cannot distinguish the several real DOM/source
  * anchors that meet at the start or end of an authored inline wrapper. The
@@ -553,62 +401,27 @@ function insertionTargetsAmbiguousInlineBoundary(
     endNode = selection.focusNode;
     endOffset = selection.focusOffset;
   }
+  const index = logicalIndexForHost(hostElement);
   const logicalStart = logicalOffsetForDomPoint(
     hostElement,
     startNode,
     startOffset,
+    index,
   );
   const logicalEnd = logicalOffsetForDomPoint(
     hostElement,
     endNode,
     endOffset,
+    index,
   );
   if (logicalStart === null || logicalEnd === null) return true;
   // The collapsed checks above are the authority for this event-level guard;
   // this equality is only a defensive consistency check for DOM point
   // conversion, never a way to turn a non-collapsed range into a caret.
   if (logicalStart !== logicalEnd) return false;
-  return transparentInlineLogicalRanges(hostElement).some((range) => (
+  return transparentInlineLogicalRanges(hostElement, index).some((range) => (
     logicalStart === range.startOffset || logicalStart === range.endOffset
   ));
-}
-
-function domPointForLogicalOffset(
-  hostElement: HTMLElement,
-  logicalOffset: number,
-  affinity: "left" | "right",
-): DomPoint {
-  const tokens = tokensForHost(hostElement);
-  const logicalLength = tokens.at(-1)?.end ?? 0;
-  const clamped = Math.max(0, Math.min(logicalLength, logicalOffset));
-  for (let index = 0; index < tokens.length; index += 1) {
-    const token = tokens[index];
-    if (token.kind === "text") {
-      if (clamped > token.start && clamped < token.end) {
-        return { node: token.node, offset: clamped - token.start };
-      }
-      if (clamped === token.start && affinity === "right") {
-        return { node: token.node, offset: 0 };
-      }
-      if (clamped === token.end && affinity === "left") {
-        return { node: token.node, offset: token.text.length };
-      }
-    }
-    if (clamped === token.start || clamped === token.end) {
-      const parent = token.node.parentNode;
-      if (!parent) continue;
-      const childIndex = Array.from<Node>(parent.childNodes).indexOf(token.node);
-      return {
-        node: parent,
-        offset: childIndex + (clamped === token.end ? 1 : 0),
-      };
-    }
-  }
-  const lastText = [...tokens].reverse().find((token) => token.kind === "text");
-  if (lastText?.node.nodeType === Node.TEXT_NODE) {
-    return { node: lastText.node, offset: (lastText.node as Text).data.length };
-  }
-  return { node: hostElement, offset: hostElement.childNodes.length };
 }
 
 function graphemeDeletionRange(
@@ -671,21 +484,16 @@ function replacementTextForFrozenRange(
 
 function selectionValue(hostElement: HTMLElement): NativeEditSelection {
   const selection = hostElement.ownerDocument.getSelection();
-  const logicalLength = nativeLogicalText(hostElement).length;
   if (!selection?.anchorNode || !selection.focusNode) {
+    const logicalLength = logicalIndexForHost(hostElement).logicalLength;
     return { anchor: logicalLength, focus: logicalLength, affinity: "right" };
   }
-  const anchor = logicalOffsetForDomPoint(
-    hostElement,
-    selection.anchorNode,
-    selection.anchorOffset,
-  );
-  const focus = logicalOffsetForDomPoint(
-    hostElement,
-    selection.focusNode,
-    selection.focusOffset,
-  );
+  const [anchor, focus] = logicalOffsetsForDomPoints(hostElement, [
+    { node: selection.anchorNode, offset: selection.anchorOffset },
+    { node: selection.focusNode, offset: selection.focusOffset },
+  ]);
   if (anchor === null || focus === null) {
+    const logicalLength = logicalIndexForHost(hostElement).logicalLength;
     return { anchor: logicalLength, focus: logicalLength, affinity: "right" };
   }
   return {
@@ -703,8 +511,19 @@ function setSelectionValue(
 ): void {
   const selection = hostElement.ownerDocument.getSelection();
   if (!selection) return;
-  const anchor = domPointForLogicalOffset(hostElement, value.anchor, value.affinity);
-  const focus = domPointForLogicalOffset(hostElement, value.focus, value.affinity);
+  const index = logicalIndexForHost(hostElement);
+  const anchor = domPointForLogicalOffset(
+    hostElement,
+    value.anchor,
+    value.affinity,
+    index,
+  );
+  const focus = domPointForLogicalOffset(
+    hostElement,
+    value.focus,
+    value.affinity,
+    index,
+  );
   selection.removeAllRanges();
   if (typeof selection.setBaseAndExtent === "function") {
     selection.setBaseAndExtent(anchor.node, anchor.offset, focus.node, focus.offset);
@@ -1404,6 +1223,16 @@ export class NativeEditingController {
     return guard?.phase === "composing" || guard?.phase === "settling";
   }
 
+  /**
+   * One derived interaction policy for UI commands and structural input.
+   * Epoch owns browser delivery; Draft owns fallback/queue readiness.
+   */
+  private get compositionInteractionBlocked(): boolean {
+    return this.composing
+      || this.compositionDeliveryPending
+      || this.draftCompositionUnsettled;
+  }
+
   private externalLeaseIsCurrent(stamp: NativeEditLeaseStamp): boolean {
     try {
       return this.leaseIsCurrent(stamp);
@@ -1445,12 +1274,12 @@ export class NativeEditingController {
     return `composition_${epoch.id}`;
   }
 
-  private draftSnapshot(): NativeBlockEditDraftSnapshot<unknown> {
-    return this.blockDraft.snapshot();
+  private draftState(): NativeBlockEditDraftSnapshot<unknown> {
+    return this.blockDraft.view();
   }
 
   private currentDraftCompositionGuard() {
-    const snapshot = this.draftSnapshot();
+    const snapshot = this.draftState();
     const compositionId = this.draftCompositionId();
     return compositionId && snapshot.compositionGuard?.compositionId === compositionId
       ? snapshot.compositionGuard
@@ -1536,7 +1365,7 @@ export class NativeEditingController {
     });
     if (!result.accepted) return;
     const strictText = this.tracker.value();
-    const draftText = this.draftSnapshot().currentText;
+    const draftText = this.draftState().currentText;
     if (strictText !== draftText) {
       this.onShadowTrace?.({
         code: guard ? "composition-shadow-pending" : "strict-draft-text-mismatch",
@@ -1591,7 +1420,7 @@ export class NativeEditingController {
   private notifyPendingCommandReady(): void {
     if (
       this.pendingCommandReadyScheduled
-      || !this.draftSnapshot().pendingCommand
+      || !this.draftState().pendingCommand
       || !this.hasCurrentLease()
       || this.compositionDeliveryPending
     ) return;
@@ -2063,9 +1892,7 @@ export class NativeEditingController {
       if (!this.canHandleEvent(event)) return;
       if (
         event.key === "Enter"
-        && !this.composing
-        && !this.compositionDeliveryPending
-        && !this.draftCompositionUnsettled
+        && !this.compositionInteractionBlocked
       ) {
         this.enterKeyIntent = event.shiftKey ? "hard-break" : "split-block";
         return;
@@ -2276,7 +2103,8 @@ export class NativeEditingController {
       ?? event.dataTransfer?.getData("text/plain")
       ?? "";
     if (
-      event.inputType.startsWith("insert")
+      typeof event.inputType === "string"
+      && event.inputType.startsWith("insert")
       && hasMultilinePlainText(insertedText)
     ) {
       event.preventDefault();
@@ -2453,15 +2281,12 @@ export class NativeEditingController {
     const targetOffsets: Array<{ startOffset: number; endOffset: number }> = [];
     if (event && typeof event.getTargetRanges === "function") {
       for (const range of event.getTargetRanges()) {
-        const startOffset = logicalOffsetForDomPoint(
+        const [startOffset, endOffset] = logicalOffsetsForDomPoints(
           this.hostElement,
-          range.startContainer,
-          range.startOffset,
-        );
-        const endOffset = logicalOffsetForDomPoint(
-          this.hostElement,
-          range.endContainer,
-          range.endOffset,
+          [
+            { node: range.startContainer, offset: range.startOffset },
+            { node: range.endContainer, offset: range.endOffset },
+          ],
         );
         if (startOffset !== null && endOffset !== null) {
           targetOffsets.push({
@@ -2619,9 +2444,7 @@ export class NativeEditingController {
     if (hasMultilinePlainText(plainText)) {
       event.preventDefault();
       if (
-        !this.composing
-        && !this.compositionDeliveryPending
-        && !this.draftCompositionUnsettled
+        !this.compositionInteractionBlocked
         && !this.requiresCanonicalReconcile
         && this.requestSourceEditIntent({
           kind: "insert-text-flow",
@@ -2647,9 +2470,7 @@ export class NativeEditingController {
       return;
     }
     if (
-      this.composing
-      || this.compositionDeliveryPending
-      || this.draftCompositionUnsettled
+      this.compositionInteractionBlocked
       || this.requiresCanonicalReconcile
     ) {
       this.unsupportedInputIfCurrent("insertFromPasteWhileComposing");
@@ -3873,9 +3694,7 @@ export class NativeEditingController {
       this.onStateChange?.({
         dirty: this.tracker.dirty(),
         draftPending: this.hasPendingDraft(),
-        composing: this.composing
-          || this.compositionDeliveryPending
-          || this.draftCompositionUnsettled,
+        composing: this.compositionInteractionBlocked,
         requiresCanonicalReconcile: this.requiresCanonicalReconcile,
         selection: this.getSelection(),
         inputType: this.lastInputType,
@@ -4040,7 +3859,7 @@ export class NativeEditingController {
   }
 
   getBlockDraftSnapshot(): NativeBlockEditDraftSnapshot<unknown> {
-    return this.draftSnapshot();
+    return this.blockDraft.snapshot();
   }
 
   captureCheckpoint(
@@ -4286,7 +4105,7 @@ export class NativeEditingController {
       setSelectionValue(this.hostElement, baseline.selection);
     }
     const snapshotSelection = selectionValue(this.hostElement);
-    let nextFormatSkeleton = this.draftSnapshot().formatSkeleton;
+    let nextFormatSkeleton = this.draftState().formatSkeleton;
     if (options.getFormatSkeleton) {
       try {
         nextFormatSkeleton = options.getFormatSkeleton();
@@ -4393,7 +4212,7 @@ export class NativeEditingController {
       nextLease: this.leaseStamp,
       baselineText: this.baseline.text,
       baselineSelection: this.getSelection(),
-      formatSkeleton: this.draftSnapshot().formatSkeleton,
+      formatSkeleton: this.draftState().formatSkeleton,
       preservePendingCommand: false,
     });
     this.refreshLastValidatedSnapshot();
@@ -4402,11 +4221,7 @@ export class NativeEditingController {
 
   isComposing(): boolean {
     return this.hasCurrentLease()
-      && (
-        this.composing
-        || this.compositionDeliveryPending
-        || this.draftCompositionUnsettled
-      );
+      && this.compositionInteractionBlocked;
   }
 
   consumeCompositionEscape(): boolean {
@@ -4435,7 +4250,7 @@ export class NativeEditingController {
 
   hasPendingDraft(): boolean {
     if (!this.hasCurrentLease()) return false;
-    const snapshot = this.draftSnapshot();
+    const snapshot = this.draftState();
     const guard = snapshot.compositionGuard;
     return Boolean(
       guard

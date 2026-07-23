@@ -93,13 +93,17 @@ test("text-range formatting uses an event-stable wrapper while retaining live la
 });
 
 test("ambiguous inline insertion guard owns only collapsed text input and precedes IME commit matching", async () => {
-  const [controller, canvas] = await Promise.all([
+  const [controller, canvas, logicalIndex] = await Promise.all([
     readFile(
       new URL("../app/components/NativeEditingController.ts", import.meta.url),
       "utf8",
     ),
     readFile(
       new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL("../app/lib/native-dom-logical-index.ts", import.meta.url),
       "utf8",
     ),
   ]);
@@ -109,8 +113,12 @@ test("ambiguous inline insertion guard owns only collapsed text input and preced
     /const COLLAPSED_TEXT_INSERT_INPUT_TYPES = new Set\(\[[\s\S]*?"insertCompositionText"[\s\S]*?"insertFromComposition"[\s\S]*?"insertText"[\s\S]*?\]\)/u,
   );
   assert.match(
-    controller,
-    /function transparentInlineLogicalRanges[\s\S]*?isTransparentSourceTextElement\(element\.localName\)/u,
+    logicalIndex,
+    /isTransparentSourceTextElement\(element\.localName\)[\s\S]*?transparentInlineRanges\.push/u,
+  );
+  assert.match(
+    logicalIndex,
+    /function transparentInlineLogicalRanges[\s\S]*?return index\.transparentInlineRanges/u,
   );
   assert.match(
     controller,

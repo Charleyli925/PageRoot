@@ -2311,7 +2311,7 @@ test("structure validation stays linear across one thousand inline nodes", async
   }
 
   expect(childNodesReads).toBeGreaterThan(1_000);
-  expect(childNodesReads).toBeLessThan(25_000);
+  expect(childNodesReads).toBeLessThan(15_000);
   expect(longTasks).toEqual([]);
   await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
   await expect(target).toHaveText(/^X\u5c3eX0/u);
