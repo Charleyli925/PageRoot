@@ -201,7 +201,7 @@ test("preload exposes the narrow QoderWork handoff integration", async () => {
   ]);
 });
 
-test("preload exposes backend update status and the fixed project link", async () => {
+test("preload exposes backend update status and the fixed latest-release link", async () => {
   const calls = [];
   const { updates } = await loadPreloadApis(async (...args) => {
     calls.push(args);
@@ -218,12 +218,12 @@ test("preload exposes backend update status and the fixed project link", async (
   assert.equal(typeof unsubscribe, "function");
   unsubscribe();
 
-  await updates.openProjectRepository();
-  assert.deepEqual(calls[1], ["html-updates:open-repository"]);
+  await updates.openLatestRelease();
+  assert.deepEqual(calls[1], ["html-updates:open-latest-release"]);
   assert.deepEqual(Object.keys(updates).sort(), [
     "getStatus",
     "onStatus",
-    "openProjectRepository",
+    "openLatestRelease",
   ]);
 });
 

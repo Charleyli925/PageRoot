@@ -29,16 +29,17 @@
 - 评论与本轮要求面板。
 - 自动写回状态。
 - “一键发送至 QoderWork”主按钮。
+- 仅在 GitHub 有兼容新版本时显示、位于发送按钮上方的 `Update` 入口；点击只打开固定 latest release 页面，不静默下载。
 - 项目文件与交接详情。
 - 版本历史。
 
-“项目文件”使用用户语言解释：
+“项目资料”使用用户语言解释：
 
 - `PROJECT.md`：整个项目以后每次 AI 修改都会使用的长期规则；项目空闲时可修改，处理时只查看。
 - `runtime-state.json`：系统记录项目当前是否在处理、锁定或恢复；只查看。
 - `edit-audit.jsonl`：系统记录本地直接编辑的时间、位置和修改前后内容；只查看。
 
-抽屉标题下不使用“每个项目独立保存 Request 与审计记录”作为唯一说明，改为“这个 HTML 项目的规则、每次交给 AI 的内容、AI 返回结果和历史文件，都保存在自己的项目文件夹里”。
+项目面板展开“项目资料”时自动准备项目记录，不要求用户先发送一次 AI 任务。入口分为“项目长期规则”和“项目记录文件夹”：前者说明以后每次 AI 修改都会读取，后者说明可在 Finder 查看每轮要求、AI 返回与历史文件。规则读取完成前不可编辑；未保存时离开或切换项目会被阻止，并明确要求保存或还原。
 
 文件菜单提供：
 
@@ -92,7 +93,7 @@ stateDiagram-v2
 
 1. 用户选择本地 HTML。
 2. 系统优先按持久 `documentId` 重新绑定；无法识别时创建新 Document。
-3. 若是新 Document，仅以未登记只读状态打开；第一次真实编辑、添加附件或发送给 QoderWork 时才登记项目与初始 V1。
+3. 若是新 Document，仅以未登记只读状态打开；第一次真实编辑、添加附件、发送给 QoderWork，或用户明确展开“项目资料”时才登记项目与初始 V1。
 4. 读取该项目自己的 `project.json` 与 `runtime-state.json`。
 5. 对照项目当前 `sourcePath` 指向的 HTML、latest committed Version 和运行时 Hash。旧原始路径或旧工作路径打开时，通过 registry 别名回到同一项目的最新 canonical path。
 6. 按项目状态恢复：editing 时可恢复 current 或精确历史查看；存在 active run 时强制显示该轮冻结 current 页面，冲突时显示该候选对比，事务恢复时显示恢复进度。
@@ -229,6 +230,8 @@ commit pending native edit checkpoint
 → lifecycleState = submitting
 ```
 
+提交准备意图在任何异步登记之前同步占位；快速双击、键盘快捷操作或重复事件只能复用/退出，不能并行建立两个 Request。若用户已打开过“项目资料”，提交沿用同一项目登记结果。
+
 原生编辑 checkpoint 或 freeze 失败时立即停止：不锁定、不建立 Request、不复制旧内容。
 
 冻结成功并锁定后：
@@ -274,7 +277,8 @@ commit pending native edit checkpoint
 - 冻结时间和评论数量。
 - Prompt、Request、输入快照与 Attempt 路径。
 - 每个附件在当前 Request 内的本机绝对路径和相对回退路径，不包含外部原文件路径或 Base64。
-- 系统在发布 Request 时把交接消息写入剪贴板，并逐字 readback；只有一致才显示“已复制，可粘贴至 QoderWork”。
+- 系统在发布 Request 时把交接消息写入剪贴板，并逐字 readback；只有一致才显示“交接内容已写入剪贴板”，同时明确“不代表 Qoder 已收到”。
+- 复制状态按 `sourcePath + requestId + attemptId` 保存。A 项目复制失败只让 A 显示“重新复制”；切换到 B 后，B 的发送和复制状态独立计算。
 - 产品不自动打开、控制或粘贴到 QoderWork；用户自行新建对话并粘贴。
 
 用户把消息粘贴给内部 AI。AI 只能处理指定 Request/Attempt。
@@ -495,17 +499,21 @@ A 项目 processing 时切换 B 项目：
 
 - A 的 runtime state 与锁保持。
 - B 按自己的 runtime state 渲染。
+- A 的复制、取消、校验豁免、冲突处理和打开结果等异步回调只更新 A；不得清除或覆盖 B 的按钮状态。
 - 全局标题可提示“A 正在生成候选 V9”。
 - 回到 A 时精确恢复 frozen comments 和 active run。
 
-不得使用一个全局 `runInProgress` 锁住所有项目。
+不得使用一个全局 `runInProgress`、`generating` 或 Qoder copy state 锁住所有项目。各后台状态轮询并行执行，单个慢项目不能延迟其他项目。
 
 ### 12.2 关闭与重启
 
 关闭前：
 
 - 各项目 autosave 队列必须完成或明确显示失败。
+- 若 `editRevision > lastPersistedRevision` 却意外缺少 queued write，关闭或切换边界必须从当前内存 HTML、revision 与待审计事件重建恢复写入，不能永久停在“未保存”。
+- 旧项目的登记或 autosave 失败回调只能写入旧项目恢复记录，不能占用当前项目的 pending write。
 - active run、冲突和事务状态已经持久化。
+- 关闭处理面板只收起详情，不取消后台任务；收起后的透明遮罩不得继续拦截画布。
 
 重启后：
 

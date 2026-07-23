@@ -35,6 +35,7 @@ test("ordinary visible state does not create another toast", () => {
   assert.equal(shouldPresentNotice({ tone: "success", dedupeKey: "qoder-handoff" }), false);
   assert.equal(shouldPresentNotice({ tone: "info", dedupeKey: "current-version-result" }), false);
   assert.equal(shouldPresentNotice({ tone: "warning", dedupeKey: "preview-commit-blocked" }), true);
+  assert.equal(shouldPresentNotice({ tone: "warning", dedupeKey: "project-rules-unsaved" }), true);
   assert.equal(shouldPresentNotice({ tone: "error", dedupeKey: "project-open-error" }), true);
   assert.equal(shouldPresentNotice({ tone: "success", action: { id: "open-project" } }), true);
 });

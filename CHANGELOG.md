@@ -4,6 +4,13 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+- Refined “项目资料” into clear project-rule and Finder record actions, added a safer rules editor with loading/read-only/unsaved states, and prepares project records when the panel is opened.
+- Restored the automatic GitHub update result as a compact `Update` action above “发送至 Qoder”; it opens the fixed latest-release page and never downloads silently.
+- Isolated Qoder clipboard feedback, Request submission, cancellation, validation waiver, conflict resolution, result activation, and status polling by project and run identity.
+- Prevented rapid duplicate submits from creating more than one Request and kept clipboard failures recoverable without disabling other projects.
+- Hardened rapid switching and close recovery by rebuilding a missing autosave job from the authoritative in-memory revision and preventing a retired project's failure callback from contaminating the current project.
+- Added a non-cancelling close action to the processing panel and made closed drawer overlays stop intercepting the canvas immediately.
+
 ## [0.8.5] - 2026-07-23
 
 - Published the 0.8.4 source feature set from a new immutable release tag after the earlier artifact run stopped before publication.

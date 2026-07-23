@@ -16,6 +16,7 @@ const BLOCKING_WARNING_KEYS = new Set([
   "browser-file-error",
   "navigation-commit-blocked",
   "preview-commit-blocked",
+  "project-rules-unsaved",
   "project-switch-commit-blocked",
   "project-switch-persist-blocked",
   "submit-blocked",

@@ -135,6 +135,15 @@ type QoderHandoffResult = {
   reason: string | null;
 };
 
+type QoderHandoffUiStatus = "copying" | "copied" | "failed";
+
+type ProjectQoderHandoffState = {
+  sourcePath: string;
+  requestId: string;
+  attemptId: string;
+  status: QoderHandoffUiStatus;
+};
+
 type DesktopIntegrationsApi = {
   handoffToQoderWork: (payload: {
     message: string;
@@ -161,7 +170,7 @@ type DesktopUpdatesApi = {
   onStatus: (
     listener: (result: ManualUpdateResult | null) => void,
   ) => () => void;
-  openProjectRepository: () => Promise<{ opened: boolean }>;
+  openLatestRelease: () => Promise<{ opened: boolean }>;
 };
 
 declare global {
@@ -345,6 +354,7 @@ type WorkspaceFileView = {
   path: string;
   content: string;
   savedContent: string;
+  loading: boolean;
 };
 type PendingWrite = {
   epoch: number;
@@ -466,6 +476,13 @@ function displayVersionLabel(ordinal: number): string {
 
 function fileNameFromSourcePath(sourcePath: string): string {
   return sourcePath.split(/[\\/]/).at(-1) || "新版本.html";
+}
+
+function activeRunOperationKey(run: Pick<
+  ActiveRun,
+  "sourcePath" | "requestId" | "attemptId"
+>): string {
+  return `${run.sourcePath}\n${run.requestId}\n${run.attemptId}`;
 }
 
 function workspaceFileLabel(relativePath: string): string {
@@ -1475,7 +1492,20 @@ export default function Workbench() {
   const projectRegistrationPromiseRef =
     useRef<Promise<ProjectContext | null> | null>(null);
   const backgroundRunsRef = useRef<Map<string, ActiveRun>>(new Map());
-  const statusPollBusyRef = useRef(false);
+  const qoderHandoffStatesRef =
+    useRef<Map<string, ProjectQoderHandoffState>>(new Map());
+  const activeRunRef = useRef<ActiveRun | null>(null);
+  const submissionIntentRef = useRef<{
+    token: number;
+    epoch: number;
+    sourcePath: string;
+  } | null>(null);
+  const submissionIntentCounterRef = useRef(0);
+  const activatingRunsRef = useRef<Set<string>>(new Set());
+  const waivingRunsRef = useRef<Set<string>>(new Set());
+  const cancellingRunsRef = useRef<Set<string>>(new Set());
+  const resolvingRunsRef = useRef<Set<string>>(new Set());
+  const statusPollBusyRef = useRef<Set<string>>(new Set());
   const closePreparationRequestRef = useRef<string | null>(null);
   const closeFreezeRequestRef = useRef<string | null>(null);
   const abortedCloseRequestsRef = useRef<Set<string>>(new Set());
@@ -1518,6 +1548,7 @@ export default function Workbench() {
   const [focusedCommentId, setFocusedCommentId] = useState<string | null>(null);
   const [fileView, setFileView] = useState<WorkspaceFileView | null>(null);
   const [projectRulesSaving, setProjectRulesSaving] = useState(false);
+  const [projectRecordsPreparing, setProjectRecordsPreparing] = useState(false);
   const [versions, setVersions] = useState<Version[]>([]);
   const [latestVersionId, setLatestVersionId] = useState<string | null>(null);
   const [currentBasedOnVersionId, setCurrentBasedOnVersionId] = useState<string | null>(null);
@@ -1540,12 +1571,12 @@ export default function Workbench() {
   const [cancelling, setCancelling] = useState(false);
   const [openingReadyVersion, setOpeningReadyVersion] = useState(false);
   const [waivingValidation, setWaivingValidation] = useState(false);
+  const [resolvingConflict, setResolvingConflict] = useState(false);
   const [restoring, setRestoring] = useState<string | null>(null);
-  const [qoderHandoffState, setQoderHandoffState] = useState<{
-    requestId: string;
-    status: QoderHandoffResult["status"];
-  } | null>(null);
-  const [, setUpdateResult] = useState<ManualUpdateResult | null>(null);
+  const [qoderHandoffState, setQoderHandoffState] =
+    useState<ProjectQoderHandoffState | null>(null);
+  const [updateResult, setUpdateResult] =
+    useState<ManualUpdateResult | null>(null);
   const [openedAiVersionNotice, setOpenedAiVersionNotice] =
     useState<OpenedAiVersionNotice | null>(null);
   const [toast, setToast] = useReducer(noticeReducer, null);
@@ -1565,6 +1596,20 @@ export default function Workbench() {
     };
   }, []);
 
+  const openLatestRelease = useCallback(async () => {
+    try {
+      const result = await window.htmlAIUpdates?.openLatestRelease();
+      if (!result?.opened) throw new Error("GitHub 更新页面没有打开。");
+    } catch {
+      setToast({
+        title: "更新页面没有打开",
+        message: "请确认当前网络可以访问 GitHub 后重试。",
+        tone: "warning",
+        dedupeKey: "latest-release",
+      });
+    }
+  }, []);
+
   const latestVersion = useMemo(
     () => versions.find((version) => version.id === latestVersionId) || null,
     [latestVersionId, versions],
@@ -1575,11 +1620,18 @@ export default function Workbench() {
   );
   const runInProgress = projectLocked || isLockedLifecycle(activeRun?.status);
   const currentQoderHandoffStatus = (
-    activeRun?.requestId
+    activeRun?.sourcePath
+    && activeRun.requestId
+    && qoderHandoffState?.sourcePath === activeRun.sourcePath
     && qoderHandoffState?.requestId === activeRun.requestId
+    && qoderHandoffState.attemptId === activeRun.attemptId
   )
     ? qoderHandoffState.status
     : "idle";
+  const updateAvailable = Boolean(
+    updateResult?.status === "available"
+    && updateResult.latestVersion,
+  );
   const interactionLocked = runInProgress
     || projectHydrating
     || Boolean(projectLoadError)
@@ -1617,6 +1669,9 @@ export default function Workbench() {
   useEffect(() => {
     sourceShaRef.current = sourceSha256;
   }, [sourceSha256]);
+  useEffect(() => {
+    activeRunRef.current = activeRun;
+  }, [activeRun]);
   useEffect(() => {
     projectIdRef.current = projectId;
   }, [projectId]);
@@ -1881,6 +1936,45 @@ export default function Workbench() {
     }
   }, []);
 
+  const prepareProjectRecords = useCallback(async () => {
+    const activeSource = sourcePathRef.current;
+    const epoch = projectEpochRef.current;
+    if (
+      !activeSource
+      || (projectIdRef.current && documentIdRef.current)
+      || projectRegistrationPromiseRef.current
+    ) return;
+    setProjectRecordsPreparing(true);
+    try {
+      const registered = await ensureProjectRegistered();
+      if (
+        !registered
+        && projectEpochRef.current === epoch
+        && sourcePathRef.current === activeSource
+      ) {
+        throw new Error("项目资料没有完成初始化。");
+      }
+    } catch (cause) {
+      if (
+        projectEpochRef.current !== epoch
+        || sourcePathRef.current !== activeSource
+      ) return;
+      setToast({
+        title: "项目资料暂时不可用",
+        message: productErrorMessage(cause, "请确认源 HTML 仍然可读后重试。"),
+        tone: "warning",
+        dedupeKey: "project-records",
+      });
+    } finally {
+      if (
+        projectEpochRef.current === epoch
+        && sourcePathRef.current === activeSource
+      ) {
+        setProjectRecordsPreparing(false);
+      }
+    }
+  }, [ensureProjectRegistered]);
+
   const verifyCanvasRendered = useCallback(async (
     expectedHtml: string,
     expectedSha256: string,
@@ -2045,7 +2139,32 @@ export default function Workbench() {
         throughRevision !== undefined
         && lastPersistedRevisionRef.current >= throughRevision
       ) return true;
-      if (!pendingWriteRef.current) return true;
+      if (
+        !pendingWriteRef.current
+        && editRevisionRef.current <= lastPersistedRevisionRef.current
+      ) return true;
+    }
+    if (
+      !pendingWriteRef.current
+      && sourcePathRef.current
+      && editRevisionRef.current > lastPersistedRevisionRef.current
+    ) {
+      const reconstructedWrite: PendingWrite = {
+        epoch: projectEpochRef.current,
+        projectId: projectIdRef.current,
+        documentId: documentIdRef.current,
+        sourcePath: sourcePathRef.current,
+        expectedSourceSha256: sourceShaRef.current,
+        html: htmlRef.current,
+        revision: editRevisionRef.current,
+        events: [...auditPendingRef.current],
+        recoveryIdentity: recoveryIdentityRef.current,
+      };
+      pendingWriteRef.current = reconstructedWrite;
+      persistRecoveryLog(reconstructedWrite);
+      persistStateRef.current = "queued";
+      setPersistState("queued");
+      setPersistError("");
     }
     if (!sourcePathRef.current && !pendingWriteRef.current?.sourcePath) return false;
     if (
@@ -2084,7 +2203,9 @@ export default function Workbench() {
               write.expectedSourceSha256,
               false,
             );
-            if (!registered) return false;
+            if (!registered) {
+              throw new Error("项目已切换，原项目的修改已保留在恢复记录中。");
+            }
             write = {
               ...write,
               projectId: registered.projectId,
@@ -2269,7 +2390,17 @@ export default function Workbench() {
             && pendingAfterFailure.revision > write.revision
             ? pendingAfterFailure
             : write;
-          if (!pendingAfterFailure || pendingAfterFailure.revision < recoveryWrite.revision) {
+          if (
+            isCurrentProjectContext(writeContext)
+            && (
+              !pendingAfterFailure
+              || (
+                pendingAfterFailure.epoch === recoveryWrite.epoch
+                && pendingAfterFailure.sourcePath === recoveryWrite.sourcePath
+                && pendingAfterFailure.revision < recoveryWrite.revision
+              )
+            )
+          ) {
             pendingWriteRef.current = recoveryWrite;
           }
           persistRecoveryLog(recoveryWrite, writeContext);
@@ -2413,6 +2544,12 @@ export default function Workbench() {
     const backgroundRun = project.sourcePath
       ? backgroundRunsRef.current.get(project.sourcePath) || null
       : null;
+    const backgroundRunKey = backgroundRun
+      ? activeRunOperationKey(backgroundRun)
+      : "";
+    const projectQoderHandoff = project.sourcePath
+      ? qoderHandoffStatesRef.current.get(project.sourcePath) || null
+      : null;
     const opensLockedProject = isLockedLifecycle(backgroundRun?.status);
     projectEpochRef.current += 1;
     clearAutosaveTimer();
@@ -2492,7 +2629,9 @@ export default function Workbench() {
     setViewingVersionId(null);
     setPreserveEditorHistory(false);
     setRenderedContentSha256(null);
+    activeRunRef.current = backgroundRun;
     setActiveRun(backgroundRun);
+    setQoderHandoffState(projectQoderHandoff);
     setProjectLocked(opensLockedProject);
     setProjectHydrating(Boolean(project.sourcePath));
     setProjectLoadError(null);
@@ -2500,8 +2639,23 @@ export default function Workbench() {
     setDraftPersistError("");
     setProjectMenuOpen(false);
     setProjectRulesSaving(false);
+    setProjectRecordsPreparing(false);
     setRestoring(null);
-    setCancelling(false);
+    setGenerating(
+      submissionIntentRef.current?.sourcePath === project.sourcePath,
+    );
+    setCancelling(
+      Boolean(backgroundRunKey && cancellingRunsRef.current.has(backgroundRunKey)),
+    );
+    setOpeningReadyVersion(
+      Boolean(backgroundRunKey && activatingRunsRef.current.has(backgroundRunKey)),
+    );
+    setWaivingValidation(
+      Boolean(backgroundRunKey && waivingRunsRef.current.has(backgroundRunKey)),
+    );
+    setResolvingConflict(
+      Boolean(backgroundRunKey && resolvingRunsRef.current.has(backgroundRunKey)),
+    );
     setDrawer(null);
     setFileView(null);
     reviewStageRef.current?.scrollTo({ top: 0 });
@@ -2625,6 +2779,18 @@ export default function Workbench() {
     const targetSha256 = await browserSha256(recoveredHtml);
     if (!isCurrentProjectContext(context)) return false;
     if (targetSha256 === currentSourceSha256) {
+      const recoveredRevision = Number.isSafeInteger(Number(raw.revision))
+        ? Number(raw.revision)
+        : 0;
+      const reconciledRevision = Math.max(serverRevision, recoveredRevision);
+      editRevisionRef.current = reconciledRevision;
+      lastPersistedRevisionRef.current = reconciledRevision;
+      pendingWriteRef.current = null;
+      setEditRevision(reconciledRevision);
+      setLastPersistedRevision(reconciledRevision);
+      persistStateRef.current = "idle";
+      setPersistState("idle");
+      setPersistError("");
       window.localStorage.removeItem(recoveredKey);
       return false;
     }
@@ -3930,6 +4096,14 @@ export default function Workbench() {
             return { ready: true };
           }
 
+          if (submissionIntentRef.current) {
+            await beforeDeadline((async () => {
+              while (submissionIntentRef.current) {
+                await new Promise<void>((resolve) => window.setTimeout(resolve, 40));
+              }
+            })(), "等待本轮提交准备结束");
+          }
+
           if (submissionPendingRef.current) {
             await beforeDeadline((async () => {
               while (submissionPendingRef.current) {
@@ -4010,7 +4184,7 @@ export default function Workbench() {
             }
           }
 
-          if (submissionPendingRef.current) {
+          if (submissionIntentRef.current || submissionPendingRef.current) {
             return { ready: false, reason: "内部 AI 的冻结 Request 尚未安全建立。" };
           }
           if (abortedCloseRequestsRef.current.has(detail.requestId)) {
@@ -4145,12 +4319,24 @@ export default function Workbench() {
         { onDiscard: () => resolveDeferred?.(false) },
       )) return deferredResult;
     }
-    if (submissionPendingRef.current) {
+    if (submissionIntentRef.current || submissionPendingRef.current) {
       setToast({
-        title: "正在建立冻结任务",
-        message: "Request 持久化完成后即可切换项目，请稍候。",
+        title: "正在准备本轮任务",
+        message: "当前项目完成冻结与记录后即可切换，请稍候。",
         tone: "info",
         dedupeKey: "project-switch-blocked",
+      });
+      return false;
+    }
+    if (
+      fileView?.path === "PROJECT.md"
+      && fileView.content !== fileView.savedContent
+    ) {
+      setToast({
+        title: "项目规则还有未保存修改",
+        message: "请先保存规则或还原修改，再切换项目。",
+        tone: "warning",
+        dedupeKey: "project-rules-unsaved",
       });
       return false;
     }
@@ -4275,6 +4461,7 @@ export default function Workbench() {
     currentBasedOnVersionId,
     flushAutosave,
     flushDraftPersistence,
+    fileView,
     viewMode,
   ]);
   useEffect(() => {
@@ -4758,7 +4945,12 @@ export default function Workbench() {
       if (!response.ok) throw responseError(payload, "无法读取外部文件。");
       if (!isCurrentProjectContext(context)) return;
       const diff = compactLineDiff(localHtml, String(payload.content || ""));
-      setFileView({ path: "源文件冲突对比", content: diff, savedContent: diff });
+      setFileView({
+        path: "源文件冲突对比",
+        content: diff,
+        savedContent: diff,
+        loading: false,
+      });
       setDrawer("files");
     } catch (cause) {
       if (!isCurrentProjectContext(context)) return;
@@ -4827,6 +5019,7 @@ export default function Workbench() {
         path: "外部 HTML 与 AI 候选对比",
         content: diff,
         savedContent: diff,
+        loading: false,
       });
       setDrawer("files");
     } catch (cause) {
@@ -5253,20 +5446,47 @@ export default function Workbench() {
   const viewFile = useCallback(async (path: string) => {
     const context = captureProjectContext();
     if (!context) return;
-    setFileView({ path, content: "正在读取…", savedContent: "正在读取…" });
+    setFileView({
+      path,
+      content: "正在读取…",
+      savedContent: "正在读取…",
+      loading: true,
+    });
     try {
       const content = await readWorkspaceFile(path, context.sourcePath);
       if (!isCurrentProjectContext(context)) return;
-      setFileView({ path, content, savedContent: content });
+      setFileView({ path, content, savedContent: content, loading: false });
     } catch {
       if (!isCurrentProjectContext(context)) return;
       const content = "文件尚未生成，或本地项目记录暂时不可用。";
-      setFileView({ path, content, savedContent: content });
+      setFileView({ path, content, savedContent: content, loading: false });
     }
   }, [captureProjectContext, isCurrentProjectContext, readWorkspaceFile]);
 
+  const closeFileView = useCallback((): boolean => {
+    if (
+      fileView?.path === "PROJECT.md"
+      && fileView.content !== fileView.savedContent
+    ) {
+      setToast({
+        title: "项目规则还有未保存修改",
+        message: "请先保存规则，或使用“还原修改”放弃本次编辑。",
+        tone: "warning",
+        dedupeKey: "project-rules-unsaved",
+      });
+      return false;
+    }
+    setFileView(null);
+    return true;
+  }, [fileView]);
+
   const saveProjectRules = useCallback(async () => {
-    if (!fileView || fileView.path !== "PROJECT.md" || runInProgress) return;
+    if (
+      !fileView
+      || fileView.path !== "PROJECT.md"
+      || fileView.loading
+      || runInProgress
+    ) return;
     const context = captureProjectContext();
     if (!context) return;
     const nextContent = fileView.content;
@@ -5309,9 +5529,42 @@ export default function Workbench() {
 
   const sendToQoderWork = useCallback(async (
     handoffMessage: string,
-    requestId: string,
+    run: Pick<ActiveRun, "sourcePath" | "requestId" | "attemptId">,
   ) => {
-    if (!handoffMessage.trim() || !requestId || requestId === "pending") return;
+    if (
+      !handoffMessage.trim()
+      || !run.sourcePath
+      || !run.requestId
+      || run.requestId === "pending"
+    ) return;
+
+    const publishStatus = (status: QoderHandoffUiStatus) => {
+      const previousState = qoderHandoffStatesRef.current.get(run.sourcePath);
+      if (
+        status !== "copying"
+        && previousState
+        && (
+          previousState.requestId !== run.requestId
+          || previousState.attemptId !== run.attemptId
+        )
+      ) return;
+      const nextState: ProjectQoderHandoffState = {
+        sourcePath: run.sourcePath,
+        requestId: run.requestId,
+        attemptId: run.attemptId,
+        status,
+      };
+      qoderHandoffStatesRef.current.set(run.sourcePath, nextState);
+      const visibleRun = activeRunRef.current;
+      if (
+        sourcePathRef.current === run.sourcePath
+        && visibleRun?.requestId === run.requestId
+        && visibleRun.attemptId === run.attemptId
+      ) {
+        setQoderHandoffState(nextState);
+      }
+    };
+    publishStatus("copying");
 
     try {
       const integrations = window.htmlAIIntegrations;
@@ -5323,15 +5576,27 @@ export default function Workbench() {
       } else {
         await copyText(handoffMessage);
       }
-      setQoderHandoffState({ requestId, status: "copied" });
+      publishStatus("copied");
     } catch (cause) {
-      setToast({
-        title: "暂时无法复制交接内容",
-        message: productErrorMessage(cause, "请在正式桌面应用中重试。"),
-        tone: "error",
-        sticky: true,
-        dedupeKey: "qoder-handoff",
-      });
+      publishStatus("failed");
+      const visibleRun = activeRunRef.current;
+      if (
+        sourcePathRef.current === run.sourcePath
+        && visibleRun?.requestId === run.requestId
+        && visibleRun.attemptId === run.attemptId
+      ) {
+        setToast({
+          title: "交接内容还没有复制",
+          message: productErrorMessage(
+            cause,
+            "本轮 Request 已保留；请打开处理详情后重试复制。",
+          ),
+          tone: "error",
+          sticky: true,
+          dedupeKey: `qoder-handoff:${run.sourcePath}`,
+          action: { id: "open-handoff", label: "查看处理详情" },
+        });
+      }
     }
   }, []);
 
@@ -5404,14 +5669,23 @@ export default function Workbench() {
     };
     projectLockedRef.current = true;
     setProjectLocked(true);
+    activeRunRef.current = previewRun;
     setActiveRun(previewRun);
-    setQoderHandoffState({ requestId: previewRun.requestId, status: "copied" });
+    const previewQoderState: ProjectQoderHandoffState = {
+      sourcePath: previewRun.sourcePath,
+      requestId: previewRun.requestId,
+      attemptId: previewRun.attemptId,
+      status: "copied",
+    };
+    qoderHandoffStatesRef.current.set(previewRun.sourcePath, previewQoderState);
+    setQoderHandoffState(previewQoderState);
     setHandoffPreviewOpen(false);
     setCanvasMode("edit");
     setDrawer("handoff");
   }, [currentBasedOnVersionId, latestVersionId]);
 
   const generateRequest = useCallback(async (fromDeferred = false) => {
+    if (submissionIntentRef.current) return;
     if (!sourcePathRef.current) {
       if (typeof window !== "undefined" && !window.htmlAIProjects) {
         startPreviewHandoff();
@@ -5486,9 +5760,32 @@ export default function Workbench() {
       return;
     }
 
+    const submissionIntent = {
+      token: ++submissionIntentCounterRef.current,
+      epoch: projectEpochRef.current,
+      sourcePath: sourcePathRef.current,
+    };
+    submissionIntentRef.current = submissionIntent;
+    setGenerating(true);
+    const releaseSubmissionIntent = () => {
+      if (submissionIntentRef.current?.token === submissionIntent.token) {
+        submissionIntentRef.current = null;
+      }
+      if (sourcePathRef.current === submissionIntent.sourcePath) {
+        setGenerating(false);
+      }
+    };
+
     try {
       const registered = await ensureProjectRegistered();
       if (!registered) throw new Error("当前项目已经切换，请重试。");
+      if (
+        submissionIntentRef.current?.token !== submissionIntent.token
+        || projectEpochRef.current !== submissionIntent.epoch
+        || sourcePathRef.current !== submissionIntent.sourcePath
+      ) {
+        throw new Error("当前项目已经切换，请重试。");
+      }
     } catch (cause) {
       setToast({
         title: "项目记录尚未建立",
@@ -5500,11 +5797,13 @@ export default function Workbench() {
         sticky: true,
         dedupeKey: "project-registration",
       });
+      releaseSubmissionIntent();
       return;
     }
     activeComments = commentsRef.current.filter(commentHasContent);
     if (activeComments.length === 0) {
       composerRef.current?.focus();
+      releaseSubmissionIntent();
       return;
     }
     const unsafeRegisteredTargets = activeComments.filter(
@@ -5518,6 +5817,7 @@ export default function Workbench() {
         sticky: true,
         dedupeKey: "unsafe-comment-targets",
       });
+      releaseSubmissionIntent();
       return;
     }
 
@@ -5537,12 +5837,12 @@ export default function Workbench() {
         sticky: true,
         dedupeKey: "ai-submit-freeze-blocked",
       });
+      releaseSubmissionIntent();
       return;
     }
     projectLockedRef.current = true;
     submissionPendingRef.current = true;
     setProjectLocked(true);
-    setGenerating(true);
     const capturedHtml = frozen.html;
     if (capturedHtml !== htmlRef.current) {
       enqueueAutosave(capturedHtml, frozen.pendingMutation || undefined);
@@ -5581,6 +5881,7 @@ export default function Workbench() {
       commentCount: activeComments.length,
       changeEventCount: submissionContext.changeEvents.length,
     };
+    activeRunRef.current = pendingRun;
     setActiveRun(pendingRun);
     setHandoffPreviewOpen(false);
     setCanvasMode("edit");
@@ -5688,6 +5989,7 @@ export default function Workbench() {
       submissionPendingRef.current = false;
       backgroundRunsRef.current.set(run.sourcePath, run);
       if (isCurrentProjectContext(submissionContext)) {
+        activeRunRef.current = run;
         setActiveRun(run);
         setBridgeConnected(true);
         setDrawer("handoff");
@@ -5708,11 +6010,15 @@ export default function Workbench() {
             );
             if (durableRun) {
               backgroundRunsRef.current.set(submissionContext.sourcePath, durableRun);
-              if (isCurrentProjectContext(submissionContext)) setActiveRun(durableRun);
+              if (isCurrentProjectContext(submissionContext)) {
+                activeRunRef.current = durableRun;
+                setActiveRun(durableRun);
+              }
             } else if (isCurrentProjectContext(submissionContext)) {
               confirmedNoRun = true;
               projectLockedRef.current = false;
               setProjectLocked(false);
+              activeRunRef.current = null;
               setActiveRun(null);
               editorRef.current?.unlockNow?.();
             }
@@ -5725,6 +6031,7 @@ export default function Workbench() {
         projectLockedRef.current = false;
         setProjectLocked(false);
         editorRef.current?.unlockNow?.();
+        activeRunRef.current = null;
         setActiveRun(null);
       }
       if (
@@ -5759,10 +6066,10 @@ export default function Workbench() {
       }
     } finally {
       submissionPendingRef.current = false;
-      setGenerating(false);
+      releaseSubmissionIntent();
     }
     if (durableRun?.handoffMessage) {
-      await sendToQoderWork(durableRun.handoffMessage, durableRun.requestId);
+      await sendToQoderWork(durableRun.handoffMessage, durableRun);
     }
   }, [
     deferEditorCommand,
@@ -6011,12 +6318,14 @@ export default function Workbench() {
     setPreviewAttachment(null);
     viewTransitioningRef.current = true;
     setViewTransitioning(true);
-    setActiveRun({
+    const completedRun: ActiveRun = {
       ...run,
       sourcePath: committedSourcePath,
       candidateVersionLabel: candidateLabel,
       status: protocolViolation ? "error" : "complete",
-    });
+    };
+    activeRunRef.current = completedRun;
+    setActiveRun(completedRun);
     setHandoffPreviewOpen(false);
     setCanvasMode("edit");
     setDrawer(null);
@@ -6039,13 +6348,15 @@ export default function Workbench() {
     });
     if (protocolViolation) {
       const warning = "内部 AI 的临时输出在最终化后又被修改；已提交版本本身未受影响。";
-      setActiveRun({
+      const warningRun: ActiveRun = {
         ...run,
         sourcePath: committedSourcePath,
         candidateVersionLabel: candidateLabel,
         status: "error",
         error: warning,
-      });
+      };
+      activeRunRef.current = warningRun;
+      setActiveRun(warningRun);
       setDrawer("handoff");
       setToast({
         title: `${candidateLabel} 已打开，但需要检查`,
@@ -6086,10 +6397,14 @@ export default function Workbench() {
       !run
       || run.status !== "ready-to-open"
       || !run.readyPayload
-      || openingReadyVersion
     ) return;
+    const operationKey = activeRunOperationKey(run);
+    if (activatingRunsRef.current.has(operationKey)) return;
+    activatingRunsRef.current.add(operationKey);
     setOpeningReadyVersion(true);
-    setActiveRun({ ...run, error: undefined });
+    const clearedRun = { ...run, error: undefined };
+    activeRunRef.current = clearedRun;
+    setActiveRun(clearedRun);
     try {
       const response = await bridgeFetch(`${BRIDGE_URL}/ready-version/activate`, {
         method: "POST",
@@ -6126,19 +6441,37 @@ export default function Workbench() {
       const error = productErrorMessage(cause, "最新版暂时无法打开。");
       const nextRun = { ...run, status: "ready-to-open" as const, error };
       backgroundRunsRef.current.set(run.sourcePath, nextRun);
-      setActiveRun(nextRun);
-      setDrawer("handoff");
-      setToast({
-        title: "最新版暂时无法打开",
-        message: error,
-        tone: "error",
-        sticky: true,
-        dedupeKey: "activate-ready-version",
-      });
+      const visibleRun = activeRunRef.current;
+      if (
+        sourcePathRef.current === run.sourcePath
+        && visibleRun?.requestId === run.requestId
+        && visibleRun.attemptId === run.attemptId
+      ) {
+        activeRunRef.current = nextRun;
+        setActiveRun(nextRun);
+        setDrawer("handoff");
+        setToast({
+          title: "最新版暂时无法打开",
+          message: error,
+          tone: "error",
+          sticky: true,
+          dedupeKey: "activate-ready-version",
+        });
+      }
     } finally {
-      setOpeningReadyVersion(false);
+      activatingRunsRef.current.delete(operationKey);
+      const visibleRun = activeRunRef.current;
+      if (
+        sourcePathRef.current === run.sourcePath
+        || (
+          visibleRun?.requestId === run.requestId
+          && visibleRun.attemptId === run.attemptId
+        )
+      ) {
+        setOpeningReadyVersion(false);
+      }
     }
-  }, [activeRun, openCommittedVersion, openingReadyVersion]);
+  }, [activeRun, openCommittedVersion]);
 
   const waiveCurrentValidation = useCallback(async () => {
     const run = activeRun;
@@ -6147,8 +6480,10 @@ export default function Workbench() {
       !run
       || run.status !== "awaiting-check-decision"
       || !review
-      || waivingValidation
     ) return;
+    const operationKey = activeRunOperationKey(run);
+    if (waivingRunsRef.current.has(operationKey)) return;
+    waivingRunsRef.current.add(operationKey);
     setWaivingValidation(true);
     try {
       const response = await bridgeFetch(`${BRIDGE_URL}/validation/waive`, {
@@ -6175,16 +6510,42 @@ export default function Workbench() {
         error: undefined,
       };
       backgroundRunsRef.current.set(run.sourcePath, nextRun);
-      setActiveRun(nextRun);
+      const visibleRun = activeRunRef.current;
+      if (
+        sourcePathRef.current === run.sourcePath
+        && visibleRun?.requestId === run.requestId
+        && visibleRun.attemptId === run.attemptId
+      ) {
+        activeRunRef.current = nextRun;
+        setActiveRun(nextRun);
+      }
     } catch (cause) {
-      setActiveRun({
+      const nextRun = {
         ...run,
         error: productErrorMessage(cause, "无法记录本次校验决定。"),
-      });
+      };
+      backgroundRunsRef.current.set(run.sourcePath, nextRun);
+      const visibleRun = activeRunRef.current;
+      if (
+        sourcePathRef.current === run.sourcePath
+        && visibleRun?.requestId === run.requestId
+        && visibleRun.attemptId === run.attemptId
+      ) {
+        activeRunRef.current = nextRun;
+        setActiveRun(nextRun);
+      }
     } finally {
-      setWaivingValidation(false);
+      waivingRunsRef.current.delete(operationKey);
+      const visibleRun = activeRunRef.current;
+      if (
+        sourcePathRef.current === run.sourcePath
+        && visibleRun?.requestId === run.requestId
+        && visibleRun.attemptId === run.attemptId
+      ) {
+        setWaivingValidation(false);
+      }
     }
-  }, [activeRun, waivingValidation]);
+  }, [activeRun]);
 
   const processRunStatus = useCallback(async (
     run: ActiveRun,
@@ -6374,28 +6735,28 @@ export default function Workbench() {
 
   useEffect(() => {
     const poll = async () => {
-      if (statusPollBusyRef.current || backgroundRunsRef.current.size === 0) return;
-      statusPollBusyRef.current = true;
-      try {
-        for (const run of [...backgroundRunsRef.current.values()]) {
-          if (!run.requestId || run.requestId === "pending") continue;
-          const url = new URL(`${BRIDGE_URL}/status`);
-          url.searchParams.set("sourcePath", run.sourcePath);
-          url.searchParams.set("projectId", run.projectId);
-          url.searchParams.set("requestId", run.requestId);
-          url.searchParams.set("attemptId", run.attemptId);
+      if (backgroundRunsRef.current.size === 0) return;
+      await Promise.allSettled(
+        [...backgroundRunsRef.current.values()].map(async (run) => {
+          if (!run.requestId || run.requestId === "pending") return;
+          const operationKey = activeRunOperationKey(run);
+          if (statusPollBusyRef.current.has(operationKey)) return;
+          statusPollBusyRef.current.add(operationKey);
           try {
+            const url = new URL(`${BRIDGE_URL}/status`);
+            url.searchParams.set("sourcePath", run.sourcePath);
+            url.searchParams.set("projectId", run.projectId);
+            url.searchParams.set("requestId", run.requestId);
+            url.searchParams.set("attemptId", run.attemptId);
             const response = await bridgeFetch(url, { cache: "no-store" });
             const payload = await readJsonResponse(response);
             if (!response.ok) throw responseError(payload, "无法读取本轮状态。");
             await processRunStatus(run, payload);
-          } catch {
-            // Bridge restarts are expected; runtime-state remains the source of truth.
+          } finally {
+            statusPollBusyRef.current.delete(operationKey);
           }
-        }
-      } finally {
-        statusPollBusyRef.current = false;
-      }
+        }),
+      );
     };
     void poll();
     const timer = window.setInterval(() => void poll(), 1600);
@@ -6474,12 +6835,15 @@ export default function Workbench() {
   ]);
 
   const cancelActiveRun = useCallback(async () => {
-    if (!activeRun || cancelling || !activeRun.requestId || activeRun.requestId === "pending") return;
+    if (!activeRun || !activeRun.requestId || activeRun.requestId === "pending") return;
     const run = { ...activeRun };
+    const operationKey = activeRunOperationKey(run);
+    if (cancellingRunsRef.current.has(operationKey)) return;
     if (run.sourcePath === "preview://welcome") {
       projectLockedRef.current = false;
       setProjectLocked(false);
       editorRef.current?.unlockNow?.();
+      activeRunRef.current = null;
       setActiveRun(null);
       setQoderHandoffState(null);
       setHandoffPreviewOpen(false);
@@ -6487,6 +6851,7 @@ export default function Workbench() {
       setDrawer(null);
       return;
     }
+    cancellingRunsRef.current.add(operationKey);
     const context = sourcePathRef.current === run.sourcePath
       ? captureProjectContext()
       : null;
@@ -6513,6 +6878,7 @@ export default function Workbench() {
         projectLockedRef.current = false;
         setProjectLocked(false);
         editorRef.current?.unlockNow?.();
+        activeRunRef.current = null;
         setActiveRun(null);
         setHandoffPreviewOpen(false);
         setCanvasMode("edit");
@@ -6536,11 +6902,13 @@ export default function Workbench() {
         action: { id: "retry-cancel", label: "重试取消" },
       });
     } finally {
-      setCancelling(false);
+      cancellingRunsRef.current.delete(operationKey);
+      if (context && isCurrentProjectContext(context)) {
+        setCancelling(false);
+      }
     }
   }, [
     activeRun,
-    cancelling,
     captureProjectContext,
     isCurrentProjectContext,
   ]);
@@ -6548,9 +6916,13 @@ export default function Workbench() {
   const resolveAiConflict = useCallback(async (action: "adopt-ai" | "keep-external") => {
     if (!activeRun || activeRun.status !== "awaiting-conflict-resolution") return;
     const run = { ...activeRun };
+    const operationKey = activeRunOperationKey(run);
+    if (resolvingRunsRef.current.has(operationKey)) return;
+    resolvingRunsRef.current.add(operationKey);
     const context = sourcePathRef.current === run.sourcePath
       ? captureProjectContext()
       : null;
+    setResolvingConflict(true);
     try {
       const response = await bridgeFetch(`${BRIDGE_URL}/conflict/resolve`, {
         method: "POST",
@@ -6608,6 +6980,11 @@ export default function Workbench() {
         dedupeKey: "ai-conflict",
         action: { id: "open-handoff", label: "返回冲突处理" },
       });
+    } finally {
+      resolvingRunsRef.current.delete(operationKey);
+      if (context && isCurrentProjectContext(context)) {
+        setResolvingConflict(false);
+      }
     }
   }, [
     activeRun,
@@ -7107,11 +7484,21 @@ export default function Workbench() {
     },
     {
       key: "copied",
-      label: "已复制给内部 AI",
+      label: currentQoderHandoffStatus === "failed"
+        ? "交接内容尚未复制"
+        : "交接内容已写入剪贴板",
       detail: currentQoderHandoffStatus === "copied"
-        ? "仅确认已写入剪贴板，不代表 AI 已收到"
-        : "等待复制到剪贴板",
-      state: currentQoderHandoffStatus === "copied" ? "done" : "current",
+        ? "仅确认剪贴板写入成功，不代表 Qoder 已收到"
+        : currentQoderHandoffStatus === "failed"
+          ? "Request 已安全保留，可在下方重新复制"
+          : currentQoderHandoffStatus === "copying"
+            ? "正在写入并核对剪贴板"
+            : "等待复制本轮要求",
+      state: currentQoderHandoffStatus === "copied"
+        ? "done"
+        : currentQoderHandoffStatus === "failed"
+          ? "error"
+          : "current",
     },
     {
       key: "returned",
@@ -7350,6 +7737,8 @@ export default function Workbench() {
       void openProject(action.sourcePath);
     } else if (action.id === "retry-cancel") {
       void cancelActiveRun();
+    } else if (action.id === "open-release") {
+      void openLatestRelease();
     }
   };
   const renderHistoryItem = (version: Version) => {
@@ -7636,10 +8025,12 @@ export default function Workbench() {
             }
             onClick={() => {
               const openProjectPanel = () => {
-                setFileView(null);
                 setDrawer((current) => (
                   current === "files" || current === "history" ? null : "files"
                 ));
+                if (drawer !== "files" && drawer !== "history") {
+                  void prepareProjectRecords();
+                }
               };
               if (deferEditorCommand("project-files", openProjectPanel)) return;
               openProjectPanel();
@@ -7658,50 +8049,68 @@ export default function Workbench() {
             <ChatCircleTextIcon aria-hidden="true" size={18} weight="duotone" />
             全局评论
           </button>
-          <button
-            className="header-send-button"
-            type="button"
-            data-copied={currentQoderHandoffStatus === "copied" ? "true" : undefined}
-            disabled={
-              generating
-              || projectHydrating
-              || Boolean(projectLoadError)
-              || viewTransitioning
-              || viewMode === "history"
-              || (!runInProgress && (
-                activeCommentCount === 0
-                || hasUnsafeHandoffTargets
-                || interactionLocked
-                || persistState === "failed"
-                || Boolean(draftPersistError)
-              ))
-            }
-            onClick={() => {
-              if (runInProgress) {
-                setHandoffPreviewOpen(false);
-                setCanvasMode("edit");
-                setDrawer("handoff");
-              } else {
-                void generateRequest();
+          <div className="header-send-cluster">
+            {updateAvailable ? (
+              <button
+                className="header-update-badge"
+                type="button"
+                aria-label={`发现 PageRoot ${updateResult?.latestVersion || "新版本"}，打开 GitHub 更新页面`}
+                title={`PageRoot ${updateResult?.latestVersion || "新版本"} 可用`}
+                onClick={() => void openLatestRelease()}
+              >
+                Update
+              </button>
+            ) : null}
+            <button
+              className="header-send-button"
+              type="button"
+              data-handoff-status={currentQoderHandoffStatus}
+              data-copied={currentQoderHandoffStatus === "copied" ? "true" : undefined}
+              disabled={
+                generating
+                || projectHydrating
+                || Boolean(projectLoadError)
+                || viewTransitioning
+                || viewMode === "history"
+                || (!runInProgress && (
+                  activeCommentCount === 0
+                  || hasUnsafeHandoffTargets
+                  || interactionLocked
+                  || persistState === "failed"
+                  || Boolean(draftPersistError)
+                ))
               }
-            }}
-          >
-            {currentQoderHandoffStatus === "copied" ? (
-              <CheckCircleIcon aria-hidden="true" size={18} weight="fill" />
-            ) : (
-              <PaperPlaneTiltIcon aria-hidden="true" size={18} weight="fill" />
-            )}
-            <span>
-              {generating
-                ? "正在准备…"
-                : currentQoderHandoffStatus === "copied"
-                  ? "已复制至剪贴板"
-                  : "发送至 Qoder"}
-            </span>
-            {!runInProgress && currentQoderHandoffStatus !== "copied"
-              ? <small>{activeCommentCount}</small>
-              : null}
-          </button>
+              onClick={() => {
+                if (runInProgress) {
+                  setHandoffPreviewOpen(false);
+                  setCanvasMode("edit");
+                  setDrawer("handoff");
+                } else {
+                  void generateRequest();
+                }
+              }}
+            >
+              {currentQoderHandoffStatus === "copied" ? (
+                <CheckCircleIcon aria-hidden="true" size={18} weight="fill" />
+              ) : (
+                <PaperPlaneTiltIcon aria-hidden="true" size={18} weight="fill" />
+              )}
+              <span>
+                {generating
+                  ? "正在准备…"
+                  : currentQoderHandoffStatus === "copying"
+                    ? "正在复制交接内容…"
+                    : currentQoderHandoffStatus === "copied"
+                      ? "本轮要求已复制"
+                      : currentQoderHandoffStatus === "failed"
+                        ? "复制失败 · 查看"
+                        : "发送至 Qoder"}
+              </span>
+              {!runInProgress && currentQoderHandoffStatus !== "copied"
+                ? <small>{activeCommentCount}</small>
+                : null}
+            </button>
+          </div>
         </nav>
         <input
           ref={fileInputRef}
@@ -8330,7 +8739,18 @@ export default function Workbench() {
                   : "等待 QoderWork 返回修改结果"}</strong>
               </span>
             </div>
-            <span className="round-version">{activeRun?.candidateVersionLabel || "下一版"}</span>
+            <div className="processing-header-actions">
+              <span className="round-version">{activeRun?.candidateVersionLabel || "下一版"}</span>
+              <button
+                className="drawer-close-button"
+                type="button"
+                aria-label="关闭处理面板"
+                title="关闭面板，任务会继续运行"
+                onClick={() => setDrawer(null)}
+              >
+                <XIcon aria-hidden="true" size={18} weight="bold" />
+              </button>
+            </div>
           </header>
         ) : drawer ? (
           <>
@@ -8358,7 +8778,7 @@ export default function Workbench() {
                 type="button"
                 data-active={drawer === "files" ? "true" : "false"}
                 onClick={() => {
-                  setFileView(null);
+                  if (!closeFileView()) return;
                   setDrawer("files");
                 }}
               >当前项目</button>
@@ -8366,7 +8786,7 @@ export default function Workbench() {
                 type="button"
                 data-active={drawer === "history" ? "true" : "false"}
                 onClick={() => {
-                  setFileView(null);
+                  if (!closeFileView()) return;
                   setDrawer("history");
                 }}
               >版本历史</button>
@@ -8397,20 +8817,55 @@ export default function Workbench() {
           {drawer === "files" ? (
             fileView ? (
               <div className="file-view" data-editable={fileView.path === "PROJECT.md" ? "true" : "false"}>
-                <button type="button" onClick={() => setFileView(null)}>返回文件</button>
-                <strong>{workspaceFileLabel(fileView.path)}</strong>
+                <button
+                  className="project-file-back"
+                  type="button"
+                  onClick={() => void closeFileView()}
+                >
+                  <CaretRightIcon aria-hidden="true" size={13} weight="bold" />
+                  返回项目
+                </button>
                 {fileView.path === "PROJECT.md" ? (
                   <>
-                    <p className="project-file-note">
-                      {runInProgress
-                        ? "AI 正在处理，项目规则暂时只读。"
-                        : "用于以后每次 AI 修改。"}
+                    <header className="project-rules-heading">
+                      <span className="project-resource-icon">
+                        <FileIcon aria-hidden="true" size={20} weight="duotone" />
+                      </span>
+                      <span>
+                        <small>项目长期规则</small>
+                        <strong>管理 AI 修改规则</strong>
+                      </span>
+                      <em
+                        data-state={fileView.loading
+                          ? "loading"
+                          : runInProgress
+                          ? "locked"
+                          : fileView.content === fileView.savedContent
+                            ? "saved"
+                            : "dirty"}
+                      >
+                        {fileView.loading
+                          ? "正在读取"
+                          : runInProgress
+                          ? "处理中 · 只读"
+                          : fileView.content === fileView.savedContent
+                            ? "已保存"
+                            : "有未保存修改"}
+                      </em>
+                    </header>
+                    <p className="project-file-note" id="project-rules-help">
+                      {fileView.loading
+                        ? "正在读取项目规则。内容核对完成前暂不接受编辑。"
+                        : runInProgress
+                        ? "本轮已经使用冻结时的规则。AI 处理完成前这里保持只读，不会把临时修改追加入本轮。"
+                        : "每次发送至 Qoder 时，源页都会把这份规则与本轮要求一起交接。保存只影响后续任务，不会修改当前 HTML。"}
                     </p>
                     <textarea
                       className="project-file-editor"
                       aria-label="项目长期规则"
+                      aria-describedby="project-rules-help"
                       spellCheck={false}
-                      disabled={runInProgress}
+                      disabled={fileView.loading || runInProgress}
                       value={fileView.content}
                       onChange={(event) => setFileView((current) => (
                         current?.path === "PROJECT.md"
@@ -8419,29 +8874,45 @@ export default function Workbench() {
                       ))}
                     />
                     <div className="project-file-actions">
+                      <small>
+                        {fileView.content === fileView.savedContent
+                          ? "当前内容已记录"
+                          : "离开前请保存或还原修改"}
+                      </small>
                       <button
                         type="button"
-                        disabled={projectRulesSaving || runInProgress || fileView.content === fileView.savedContent}
+                        disabled={
+                          fileView.loading
+                          || projectRulesSaving
+                          || runInProgress
+                          || fileView.content === fileView.savedContent
+                        }
                         onClick={() => setFileView((current) => (
                           current?.path === "PROJECT.md"
                             ? { ...current, content: current.savedContent }
                             : current
                         ))}
-                      >取消修改</button>
+                      >还原修改</button>
                       <button
                         className="drawer-primary"
                         type="button"
                         disabled={
                           projectRulesSaving
+                          || fileView.loading
                           || runInProgress
                           || !fileView.content.trim()
                           || fileView.content === fileView.savedContent
                         }
                         onClick={() => void saveProjectRules()}
-                      >{projectRulesSaving ? "更新中…" : "更新项目规则"}</button>
+                      >{projectRulesSaving ? "保存中…" : "保存规则"}</button>
                     </div>
                   </>
-                ) : <pre>{fileView.content}</pre>}
+                ) : (
+                  <>
+                    <strong>{workspaceFileLabel(fileView.path)}</strong>
+                    <pre>{fileView.content}</pre>
+                  </>
+                )}
               </div>
             ) : (
               <div className="files-panel project-panel-body">
@@ -8503,24 +8974,81 @@ export default function Workbench() {
                   <CaretRightIcon aria-hidden="true" size={15} weight="bold" />
                 </button>
 
-                <details className="project-advanced">
-                  <summary>项目规则与记录</summary>
-                  <div>
+                <details
+                  className="project-advanced"
+                  onToggle={(event) => {
+                    if (event.currentTarget.open) void prepareProjectRecords();
+                  }}
+                >
+                  <summary>
+                    <span>
+                      <strong>项目资料</strong>
+                      <small>长期规则与每轮处理记录</small>
+                    </span>
+                    <CaretRightIcon aria-hidden="true" size={14} weight="bold" />
+                  </summary>
+                  <div className="project-resource-list">
                     <button
-                      className="project-rule-card"
+                      className="project-resource-row project-rule-card"
                       type="button"
-                      disabled={!projectId}
+                      disabled={!projectId || projectRecordsPreparing}
                       onClick={() => void viewFile("PROJECT.md")}
                     >
-                      <strong>项目规则</strong>
-                      <span>{projectId ? "用于以后每次 AI 修改" : "建立项目记录后可用"}</span>
+                      <span className="project-resource-icon">
+                        <FileIcon aria-hidden="true" size={18} weight="duotone" />
+                      </span>
+                      <span className="project-resource-copy">
+                        <strong>项目长期规则</strong>
+                        <small>
+                          {projectId
+                            ? "以后每次 AI 修改都会读取"
+                            : projectRecordsPreparing
+                              ? "正在准备可编辑的项目资料"
+                              : "打开后会自动建立项目资料"}
+                        </small>
+                      </span>
+                      <span
+                        className="project-resource-meta"
+                        data-state={runInProgress ? "locked" : "ready"}
+                      >
+                        {runInProgress
+                          ? "处理中 · 只读"
+                          : projectId
+                            ? "可编辑"
+                            : projectRecordsPreparing
+                              ? "准备中"
+                              : "待建立"}
+                      </span>
+                      <CaretRightIcon aria-hidden="true" size={14} weight="bold" />
                     </button>
-                    {projectRecordsPath ? (
-                      <button type="button" onClick={() => void showProjectRecordsInFolder()}>
-                        <FolderOpenIcon aria-hidden="true" size={16} weight="duotone" />
-                        在 Finder 中打开项目记录
-                      </button>
-                    ) : null}
+                    <button
+                      className="project-resource-row"
+                      type="button"
+                      disabled={!projectRecordsPath || projectRecordsPreparing}
+                      onClick={() => void showProjectRecordsInFolder()}
+                    >
+                      <span className="project-resource-icon">
+                        <FolderOpenIcon aria-hidden="true" size={18} weight="duotone" />
+                      </span>
+                      <span className="project-resource-copy">
+                        <strong>项目记录文件夹</strong>
+                        <small>
+                          {projectRecordsPath
+                            ? "查看每轮要求、AI 返回与历史文件"
+                            : projectRecordsPreparing
+                              ? "正在建立本地记录文件夹"
+                              : "打开后会自动建立记录文件夹"}
+                        </small>
+                      </span>
+                      <span className="project-resource-meta">
+                        {projectRecordsPath
+                          ? "Finder"
+                          : projectRecordsPreparing
+                            ? "准备中"
+                            : "待建立"}
+                      </span>
+                      <CaretRightIcon aria-hidden="true" size={14} weight="bold" />
+                    </button>
                   </div>
                 </details>
               </div>
@@ -8646,9 +9174,21 @@ export default function Workbench() {
                       <section className="ai-conflict-panel" role="alert">
                         <strong>请选择哪份内容成为当前 HTML</strong>
                         <p>外部文件和 AI 候选都已保留，系统不会静默覆盖任一侧。</p>
-                        <button type="button" onClick={() => void viewAiConflictDiff()}>比较两份内容</button>
-                        <button type="button" onClick={() => void resolveAiConflict("adopt-ai")}>采用 AI 候选</button>
-                        <button type="button" onClick={() => void resolveAiConflict("keep-external")}>保留外部内容</button>
+                        <button
+                          type="button"
+                          disabled={resolvingConflict}
+                          onClick={() => void viewAiConflictDiff()}
+                        >比较两份内容</button>
+                        <button
+                          type="button"
+                          disabled={resolvingConflict}
+                          onClick={() => void resolveAiConflict("adopt-ai")}
+                        >{resolvingConflict ? "正在处理…" : "采用 AI 候选"}</button>
+                        <button
+                          type="button"
+                          disabled={resolvingConflict}
+                          onClick={() => void resolveAiConflict("keep-external")}
+                        >保留外部内容</button>
                       </section>
                     ) : null}
                     {activeRun.status === "recovering-transaction" ? (
@@ -8703,14 +9243,21 @@ export default function Workbench() {
                 <button
                   className="primary-action"
                   type="button"
-                  disabled={!activeRun.handoffMessage}
+                  disabled={
+                    !activeRun.handoffMessage
+                    || currentQoderHandoffStatus === "copying"
+                  }
                   onClick={() => void sendToQoderWork(
                     activeRun.handoffMessage,
-                    activeRun.requestId,
+                    activeRun,
                   )}
                 >
                   <CopyIcon aria-hidden="true" size={18} weight="bold" />
-                  再次复制本轮要求
+                  {currentQoderHandoffStatus === "copying"
+                    ? "正在复制并核对…"
+                    : currentQoderHandoffStatus === "failed"
+                      ? "重新复制本轮要求"
+                      : "再次复制本轮要求"}
                 </button>
               </>
             )}

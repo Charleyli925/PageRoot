@@ -27,7 +27,7 @@ const integrationChannels = Object.freeze({
 const updateChannels = Object.freeze({
   getStatus: "html-updates:get-status",
   status: "html-updates:status",
-  openRepository: "html-updates:open-repository",
+  openLatestRelease: "html-updates:open-latest-release",
 });
 const PROJECT_IPC_PROTOCOL = "html-ai-project-result";
 const PROJECT_IPC_VERSION = 1;
@@ -119,7 +119,7 @@ const updatesApi = Object.freeze({
       ipcRenderer.removeListener(updateChannels.status, registered);
     };
   },
-  openProjectRepository: () => invokeProject(updateChannels.openRepository),
+  openLatestRelease: () => invokeProject(updateChannels.openLatestRelease),
 });
 
 const query = new URLSearchParams(globalThis.location.search);

@@ -46,7 +46,7 @@ import {
 import { handoffToQoderWork } from "./qoder-handoff.mjs";
 import {
   ManualUpdateError,
-  PROJECT_REPOSITORY_URL,
+  LATEST_RELEASE_PAGE_URL,
   checkForManualUpdate,
 } from "./manual-update.mjs";
 
@@ -106,7 +106,7 @@ const INTEGRATION_CHANNELS = Object.freeze({
 const UPDATE_CHANNELS = Object.freeze({
   getStatus: "html-updates:get-status",
   status: "html-updates:status",
-  openRepository: "html-updates:open-repository",
+  openLatestRelease: "html-updates:open-latest-release",
 });
 
 let bridgeProcess = null;
@@ -905,8 +905,8 @@ function scheduleAutomaticUpdateCheck() {
   updateCheckTimer.unref?.();
 }
 
-async function openProjectRepository() {
-  await shell.openExternal(PROJECT_REPOSITORY_URL);
+async function openLatestRelease() {
+  await shell.openExternal(LATEST_RELEASE_PAGE_URL);
   return { opened: true };
 }
 
@@ -984,8 +984,8 @@ function registerProjectIpc() {
     trustedProject(() => latestUpdateResult),
   );
   ipcMain.handle(
-    UPDATE_CHANNELS.openRepository,
-    trustedProject(openProjectRepository),
+    UPDATE_CHANNELS.openLatestRelease,
+    trustedProject(openLatestRelease),
   );
   ipcMain.handle(APP_CHANNELS.closeResult, trusted(reportCloseResult));
 }

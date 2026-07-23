@@ -16,9 +16,11 @@ import { expect, test } from "@playwright/test";
 import { _electron as electron } from "playwright";
 
 import {
+  activateNativeEdit,
   caseSelector,
   fixtureBuffer,
   productRoot,
+  setTextSelection,
 } from "../browser/pageroot-driver.mjs";
 
 const require = createRequire(import.meta.url);
@@ -26,28 +28,39 @@ const electronExecutable = require("electron");
 const ORIGINAL_TEXT = "列表项中的文字保持项目符号和缩进。";
 const UPDATED_TEXT = "自动闭环验收通过";
 
-function seedActiveDiskProject(isolatedUserData, sourcePath) {
+function seedActiveDiskProject(
+  isolatedUserData,
+  sourcePath,
+  recentSourcePaths = [sourcePath],
+) {
   writeFileSync(
     path.join(isolatedUserData, "html-projects.json"),
     JSON.stringify({
       version: 1,
       activePath: sourcePath,
-      recent: [{
-        path: sourcePath,
-        name: path.basename(sourcePath),
-        lastOpenedAt: Date.now(),
-      }],
+      recent: recentSourcePaths.map((recentPath, index) => ({
+        path: recentPath,
+        name: path.basename(recentPath),
+        lastOpenedAt: Date.now() - index,
+      })),
     }),
     "utf8",
   );
 }
 
-async function launchPageRoot({ activeSourcePath, injectedEnv = {} }) {
-  const isolatedUserData = mkdtempSync(
+async function launchPageRoot({
+  activeSourcePath = null,
+  recentSourcePaths = activeSourcePath ? [activeSourcePath] : [],
+  isolatedUserData: existingUserData = null,
+  injectedEnv = {},
+} = {}) {
+  const isolatedUserData = existingUserData || mkdtempSync(
     path.join(tmpdir(), "pageroot-native-e2e-ai-loop-"),
   );
   const workspace = path.join(isolatedUserData, "workspace");
-  seedActiveDiskProject(isolatedUserData, activeSourcePath);
+  if (activeSourcePath) {
+    seedActiveDiskProject(isolatedUserData, activeSourcePath, recentSourcePaths);
+  }
   const electronApp = await electron.launch({
     executablePath: electronExecutable,
     args: [path.join(productRoot, "desktop/main.mjs")],
@@ -63,6 +76,22 @@ async function launchPageRoot({ activeSourcePath, injectedEnv = {} }) {
   const page = await electronApp.firstWindow();
   await page.waitForLoadState("domcontentloaded");
   return { electronApp, page, isolatedUserData, workspace };
+}
+
+function removeAiLoopUserData(isolatedUserData) {
+  const resolved = path.resolve(isolatedUserData);
+  if (
+    path.dirname(resolved) !== path.resolve(tmpdir())
+    || !path.basename(resolved).startsWith("pageroot-native-e2e-ai-loop-")
+  ) {
+    throw new Error(`Refusing to clean a non-E2E directory: ${resolved}`);
+  }
+  rmSync(resolved, {
+    recursive: true,
+    force: true,
+    maxRetries: 10,
+    retryDelay: 100,
+  });
 }
 
 async function stopPageRoot(electronApp, isolatedUserData) {
@@ -101,26 +130,22 @@ async function stopPageRoot(electronApp, isolatedUserData) {
   }
   await applicationClosed;
 
-  const resolved = path.resolve(isolatedUserData);
-  if (
-    path.dirname(resolved) !== path.resolve(tmpdir())
-    || !path.basename(resolved).startsWith("pageroot-native-e2e-ai-loop-")
-  ) {
-    throw new Error(`Refusing to clean a non-E2E directory: ${resolved}`);
-  }
-  rmSync(resolved, {
-    recursive: true,
-    force: true,
-    maxRetries: 10,
-    retryDelay: 100,
-  });
+  removeAiLoopUserData(isolatedUserData);
 }
 
-function createSourceFixture() {
+async function closePageRootGracefully(electronApp) {
+  const closed = electronApp.waitForEvent("close", { timeout: 20_000 });
+  await electronApp.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0]?.close();
+  });
+  await closed;
+}
+
+function createSourceFixture(fileName = "generated-ai-loop.html") {
   const sourceDirectory = mkdtempSync(
     path.join(tmpdir(), "pageroot-ai-loop-source-"),
   );
-  const sourcePath = path.join(sourceDirectory, "generated-ai-loop.html");
+  const sourcePath = path.join(sourceDirectory, fileName);
   writeFileSync(sourcePath, fixtureBuffer("complex-layout.html"));
   return { sourceDirectory, sourcePath, original: readFileSync(sourcePath) };
 }
@@ -170,20 +195,7 @@ async function loadedDiskFrame(page, sourcePath) {
 
 async function addCommentAndSubmit(page, electronApp, sourcePath) {
   await electronApp.evaluate(({ clipboard }) => clipboard.clear());
-  const frame = await loadedDiskFrame(page, sourcePath);
-  const target = frame.locator(caseSelector("list-item"));
-  await target.scrollIntoViewIfNeeded();
-  await target.click();
-  const commentButton = page.getByRole("button", { name: /给.+留评论/u })
-    .filter({ visible: true })
-    .first();
-  await expect(commentButton).toBeVisible();
-  await commentButton.click();
-  const composer = page.getByRole("textbox", { name: "评论内容" });
-  await composer.fill(`只把这个列表项改为“${UPDATED_TEXT}”，其他地方保持不变。`);
-  await page.getByRole("button", { name: "评论", exact: true }).click();
-  await expect(page.locator(".comment-card").filter({ hasText: UPDATED_TEXT }))
-    .toHaveCount(1);
+  await addComment(page, sourcePath);
   await page.getByRole("button", { name: /发送至 Qoder/u }).click();
   await expect(page.getByText("等待 QoderWork 返回修改结果", { exact: true }))
     .toBeVisible();
@@ -202,6 +214,56 @@ async function addCommentAndSubmit(page, electronApp, sourcePath) {
   expect(changeRequest.requirements.instructions[0].text).toContain(UPDATED_TEXT);
   expect(changeRequest.requirements.preserveOutsideTargets).toBe(true);
   return { promptPath, requestRoot, changeRequest };
+}
+
+async function addComment(page, sourcePath, text = (
+  `只把这个列表项改为“${UPDATED_TEXT}”，其他地方保持不变。`
+)) {
+  const frame = await loadedDiskFrame(page, sourcePath);
+  const target = frame.locator(caseSelector("list-item"));
+  await target.scrollIntoViewIfNeeded();
+  await target.click();
+  const commentButton = page.getByRole("button", { name: /给.+留评论/u })
+    .filter({ visible: true })
+    .first();
+  await expect(commentButton).toBeVisible();
+  await commentButton.click();
+  const composer = page.getByRole("textbox", { name: "评论内容" });
+  await composer.fill(text);
+  await page.getByRole("button", { name: "评论", exact: true }).click();
+  await expect(page.locator(".comment-card").filter({ hasText: UPDATED_TEXT }))
+    .toHaveCount(1);
+}
+
+async function openRecentProject(page, sourcePath) {
+  const visibleToast = page.locator(".toast.show");
+  await visibleToast.waitFor({ state: "visible", timeout: 2_000 }).catch(() => {});
+  if (await visibleToast.isVisible()) {
+    await visibleToast.getByRole("button", { name: "关闭提醒" }).click();
+    await expect(visibleToast).toBeHidden();
+  }
+  const processingDialog = page.getByRole("dialog", { name: "本轮处理" });
+  if (await processingDialog.isVisible()) {
+    await processingDialog.getByRole("button", { name: "关闭处理面板" }).click();
+  }
+  await page.getByRole("button", { name: "项目", exact: true }).click();
+  await page.getByRole("button", {
+    name: new RegExp(path.basename(sourcePath).replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"),
+  }).click();
+  return loadedDiskFrame(page, sourcePath);
+}
+
+function requestDirectoryCount(workspace) {
+  const projectsRoot = path.join(workspace, "projects");
+  if (!existsSync(projectsRoot)) return 0;
+  return readdirSync(projectsRoot).reduce((total, projectId) => {
+    const requestsRoot = path.join(projectsRoot, projectId, "requests");
+    return total + (
+      existsSync(requestsRoot)
+        ? readdirSync(requestsRoot).filter((entry) => !entry.startsWith(".")).length
+        : 0
+    );
+  }, 0);
 }
 
 function writeAiOutput(requestRoot, transform) {
@@ -321,14 +383,14 @@ test("a clipboard handoff failure keeps the frozen Request recoverable", async (
       .toBeVisible();
     expect(await launched.electronApp.evaluate(({ clipboard }) => clipboard.readText()))
       .toBe(clipboardSentinel);
-    await expect(launched.page.getByRole("button", { name: "发送至 Qoder" }))
+    await expect(launched.page.getByRole("button", { name: "复制失败 · 查看" }))
       .toBeVisible();
     const handoffError = launched.page.getByRole("alert")
-      .filter({ hasText: "暂时无法复制交接内容" });
+      .filter({ hasText: "交接内容还没有复制" });
     await expect(handoffError).toBeVisible();
     await handoffError.getByRole("button", { name: "关闭提醒" }).click();
     await expect(handoffError).toBeHidden();
-    const retryCopy = launched.page.getByRole("button", { name: "再次复制本轮要求" });
+    const retryCopy = launched.page.getByRole("button", { name: "重新复制本轮要求" });
     await expect(retryCopy).toBeVisible();
     await retryCopy.click();
     await expect(handoffError).toBeVisible();
@@ -344,6 +406,243 @@ test("a clipboard handoff failure keeps the frozen Request recoverable", async (
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("a failed handoff in project A does not block project B or replace its state", async () => {
+  test.setTimeout(180_000);
+  const projectA = createSourceFixture("project-a.html");
+  const projectB = createSourceFixture("project-b.html");
+  const launched = await launchPageRoot({
+    activeSourcePath: projectA.sourcePath,
+    recentSourcePaths: [projectA.sourcePath, projectB.sourcePath],
+    injectedEnv: { PAGEROOT_E2E_QODER_HANDOFF_FAILURE: "1" },
+  });
+  try {
+    await addComment(launched.page, projectA.sourcePath);
+    await launched.page.getByRole("button", { name: /发送至 Qoder/u }).click();
+    await expect(launched.page.getByRole("alert")
+      .filter({ hasText: "交接内容还没有复制" }))
+      .toBeVisible({ timeout: 30_000 });
+    await expect.poll(
+      () => requestDirectoryCount(launched.workspace),
+      { timeout: 20_000 },
+    ).toBe(1);
+
+    await openRecentProject(launched.page, projectB.sourcePath);
+    await expect(launched.page.getByRole("button", { name: "发送至 Qoder" }))
+      .toBeDisabled();
+    await addComment(launched.page, projectB.sourcePath);
+    await expect(launched.page.getByRole("button", { name: /发送至 Qoder/u }))
+      .toBeEnabled();
+    await launched.page.getByRole("button", { name: /发送至 Qoder/u }).click();
+    await expect(launched.page.getByText(
+      "等待 QoderWork 返回修改结果",
+      { exact: true },
+    )).toBeVisible();
+    await expect(launched.page.getByRole("button", { name: "复制失败 · 查看" }))
+      .toBeVisible({ timeout: 30_000 });
+    await expect.poll(
+      () => requestDirectoryCount(launched.workspace),
+      { timeout: 20_000 },
+    ).toBe(2);
+
+    await openRecentProject(launched.page, projectA.sourcePath);
+    await expect(launched.page.getByRole("button", { name: "复制失败 · 查看" }))
+      .toBeVisible();
+    await launched.page.getByRole("button", { name: "复制失败 · 查看" }).click();
+    await expect(launched.page.getByText("交接内容尚未复制", { exact: true }))
+      .toBeVisible();
+
+    await openRecentProject(launched.page, projectB.sourcePath);
+    await expect(launched.page.getByRole("button", { name: "复制失败 · 查看" }))
+      .toBeVisible();
+    expect(readFileSync(projectA.sourcePath).equals(projectA.original)).toBe(true);
+    expect(readFileSync(projectB.sourcePath).equals(projectB.original)).toBe(true);
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(projectA.sourceDirectory);
+    removeSourceFixture(projectB.sourceDirectory);
+  }
+});
+
+test("a rapid double click creates exactly one durable Request", async () => {
+  test.setTimeout(120_000);
+  const fixture = createSourceFixture("double-submit.html");
+  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  try {
+    await launched.electronApp.evaluate(({ clipboard }) => clipboard.clear());
+    await addComment(launched.page, fixture.sourcePath);
+    await launched.page.getByRole("button", { name: /发送至 Qoder/u }).dblclick({
+      delay: 0,
+    });
+    await expect(launched.page.getByText(
+      "等待 QoderWork 返回修改结果",
+      { exact: true },
+    )).toBeVisible();
+    await expect.poll(
+      () => requestDirectoryCount(launched.workspace),
+      { timeout: 20_000 },
+    ).toBe(1);
+    await launched.page.waitForTimeout(1_000);
+    expect(requestDirectoryCount(launched.workspace)).toBe(1);
+    const copied = await launched.electronApp.evaluate(
+      ({ clipboard }) => clipboard.readText(),
+    );
+    expect(copied).toMatch(/请执行\s+.+?\/PROMPT\.md\s+中的单轮任务/u);
+    expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("project resources expose clear rules and protect unsaved edits", async () => {
+  const fixture = createSourceFixture("project-resources.html");
+  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  try {
+    await loadedDiskFrame(launched.page, fixture.sourcePath);
+    await launched.page.getByRole("button", { name: "项目", exact: true }).click();
+    await launched.page.getByText("项目资料", { exact: true }).click();
+    const rulesButton = launched.page.getByRole("button", {
+      name: /项目长期规则.*以后每次 AI 修改都会读取.*可编辑/u,
+    });
+    await expect(rulesButton).toBeVisible();
+    await expect(launched.page.getByRole("button", {
+      name: /项目记录文件夹.*查看每轮要求、AI 返回与历史文件.*Finder/u,
+    })).toBeVisible();
+    await rulesButton.click();
+    await expect(launched.page.getByText("管理 AI 修改规则", { exact: true }))
+      .toBeVisible();
+    await expect(launched.page.getByText(
+      "每次发送至 Qoder 时，源页都会把这份规则与本轮要求一起交接。保存只影响后续任务，不会修改当前 HTML。",
+      { exact: true },
+    )).toBeVisible();
+    const rulesEditor = launched.page.getByRole("textbox", { name: "项目长期规则" });
+    await expect(rulesEditor).toBeEnabled();
+    const originalRules = await rulesEditor.inputValue();
+    await rulesEditor.fill(`${originalRules}\n\n- 测试未保存保护`);
+    await launched.page.getByRole("button", { name: "返回项目" }).click();
+    await expect(launched.page.getByText(
+      "项目规则还有未保存修改",
+      { exact: true },
+    )).toBeVisible();
+    await expect(rulesEditor).toBeVisible();
+    await launched.page.getByRole("button", { name: "还原修改" }).click();
+    await launched.page.getByRole("button", { name: "返回项目" }).click();
+    await expect(launched.page.getByText("当前文件", { exact: true })).toBeVisible();
+    expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("an automatic update result appears above the Qoder action", async () => {
+  const fixture = createSourceFixture("update-indicator.html");
+  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  try {
+    await loadedDiskFrame(launched.page, fixture.sourcePath);
+    await launched.electronApp.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0]?.webContents.send(
+        "html-updates:status",
+        {
+          status: "available",
+          currentVersion: "0.8.5",
+          latestVersion: "9.9.9",
+          minimumMacOS: "12.0",
+          architecture: "arm64",
+          publishedAt: "2026-07-23T00:00:00.000Z",
+        },
+      );
+    });
+    await expect(launched.page.getByRole("button", {
+      name: "发现 PageRoot 9.9.9，打开 GitHub 更新页面",
+    })).toBeVisible();
+
+    await launched.electronApp.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0]?.webContents.send(
+        "html-updates:status",
+        {
+          status: "current",
+          currentVersion: "0.8.5",
+          latestVersion: "0.8.5",
+          minimumMacOS: "12.0",
+          architecture: "arm64",
+          publishedAt: "2026-07-23T00:00:00.000Z",
+        },
+      );
+    });
+    await expect(launched.page.getByRole("button", {
+      name: /打开 GitHub 更新页面/u,
+    })).toHaveCount(0);
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("rapid project switching and immediate close preserve the last native edit", async () => {
+  test.setTimeout(180_000);
+  const projectA = createSourceFixture("close-switch-a.html");
+  const projectB = createSourceFixture("close-switch-b.html");
+  const firstLaunch = await launchPageRoot({
+    activeSourcePath: projectA.sourcePath,
+    recentSourcePaths: [projectA.sourcePath, projectB.sourcePath],
+  });
+  let firstClosed = false;
+  let reopened = null;
+  try {
+    const switchedText = "快速切换仍然安全写回";
+    const closeText = "关闭前最后一次原位编辑";
+    let frame = await loadedDiskFrame(firstLaunch.page, projectA.sourcePath);
+    await activateNativeEdit(frame, "list-item");
+    await setTextSelection(frame, "list-item", 0, ORIGINAL_TEXT.length);
+    await firstLaunch.page.keyboard.insertText(switchedText);
+    await expect(frame.locator(caseSelector("list-item"))).toHaveText(switchedText);
+
+    await firstLaunch.page.getByRole("button", { name: "项目", exact: true }).click();
+    await firstLaunch.page.getByRole("button", {
+      name: /close-switch-b\.html/u,
+    }).click();
+    await loadedDiskFrame(firstLaunch.page, projectB.sourcePath);
+    await expect.poll(
+      () => readFileSync(projectA.sourcePath, "utf8"),
+      { timeout: 20_000 },
+    ).toContain(switchedText);
+
+    frame = await openRecentProject(firstLaunch.page, projectA.sourcePath);
+    await expect(frame.locator(caseSelector("list-item"))).toHaveText(switchedText);
+    await activateNativeEdit(frame, "list-item");
+    await setTextSelection(frame, "list-item", 0, switchedText.length);
+    await firstLaunch.page.keyboard.insertText(closeText);
+    await expect(frame.locator(caseSelector("list-item"))).toHaveText(closeText);
+
+    await closePageRootGracefully(firstLaunch.electronApp);
+    firstClosed = true;
+    reopened = await launchPageRoot({
+      isolatedUserData: firstLaunch.isolatedUserData,
+    });
+    const reopenedFrame = await loadedDiskFrame(
+      reopened.page,
+      projectA.sourcePath,
+    );
+    await expect(reopenedFrame.locator(caseSelector("list-item")))
+      .toHaveText(closeText);
+    expect(readFileSync(projectA.sourcePath, "utf8")).toContain(closeText);
+  } finally {
+    if (reopened) {
+      await stopPageRoot(reopened.electronApp, reopened.isolatedUserData);
+    } else if (!firstClosed) {
+      await stopPageRoot(
+        firstLaunch.electronApp,
+        firstLaunch.isolatedUserData,
+      );
+    } else {
+      removeAiLoopUserData(firstLaunch.isolatedUserData);
+    }
+    removeSourceFixture(projectA.sourceDirectory);
+    removeSourceFixture(projectB.sourceDirectory);
   }
 });
 
