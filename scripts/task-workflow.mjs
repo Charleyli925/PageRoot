@@ -30,7 +30,7 @@ async function runCapture(root, command, args, { allowFailure = false } = {}) {
   child.stderr.on("data", (chunk) => stderr.push(Buffer.from(chunk)));
   const code = await new Promise((resolve, reject) => {
     child.once("error", reject);
-    child.once("exit", (exitCode, signal) => {
+    child.once("close", (exitCode, signal) => {
       if (signal) reject(new Error(`${command} ended by ${signal}.`));
       else resolve(exitCode ?? 1);
     });
@@ -55,7 +55,7 @@ async function runInherited(root, command, args) {
   });
   const code = await new Promise((resolve, reject) => {
     child.once("error", reject);
-    child.once("exit", (exitCode, signal) => {
+    child.once("close", (exitCode, signal) => {
       if (signal) reject(new Error(`${command} ended by ${signal}.`));
       else resolve(exitCode ?? 1);
     });

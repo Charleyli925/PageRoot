@@ -28,7 +28,7 @@ async function run(root, command, args) {
   child.stderr.on("data", (chunk) => stderr.push(Buffer.from(chunk)));
   const code = await new Promise((resolve, reject) => {
     child.once("error", reject);
-    child.once("exit", (exitCode) => resolve(exitCode ?? 1));
+    child.once("close", (exitCode) => resolve(exitCode ?? 1));
   });
   if (code !== 0) {
     throw new Error(`${command} ${args.join(" ")} failed: ${Buffer.concat(stderr).toString("utf8")}`);
