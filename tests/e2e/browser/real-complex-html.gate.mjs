@@ -46,14 +46,21 @@ function escapeAttributeValue(value) {
 async function loadRealHtml(page, sourcePath, source) {
   await page.goto("/");
   const name = path.basename(sourcePath);
+  // Setting the hidden input directly bypasses prepareProjectSwitch(), so wait
+  // for the initial canvas to reach the same commit-ready state as the real UI.
+  const editor = page.getByTestId("html-canvas-editor").filter({ visible: true }).first();
+  await editor.waitFor({ state: "visible" });
+  const editorHandle = await editor.elementHandle();
+  await page.waitForFunction(
+    (element) => element?.getAttribute("data-render-verified") === "true",
+    editorHandle,
+  );
+
   const fileInput = page.locator('input[type="file"][accept*=".html"]').first();
   await fileInput.waitFor({ state: "attached" });
   await fileInput.setInputFiles({ name, mimeType: "text/html", buffer: source });
   await page.getByText(name, { exact: true }).first().waitFor({ state: "visible" });
 
-  const editor = page.getByTestId("html-canvas-editor").filter({ visible: true }).first();
-  await editor.waitFor({ state: "visible" });
-  const editorHandle = await editor.elementHandle();
   await page.waitForFunction(
     (element) => element?.getAttribute("data-render-verified") === "true",
     editorHandle,
