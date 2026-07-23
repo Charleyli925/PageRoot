@@ -181,7 +181,7 @@ async function addCommentAndSubmit(page, electronApp, sourcePath) {
   await commentButton.click();
   const composer = page.getByRole("textbox", { name: "评论内容" });
   await composer.fill(`只把这个列表项改为“${UPDATED_TEXT}”，其他地方保持不变。`);
-  await page.getByRole("button", { name: "加入本轮" }).click();
+  await page.getByRole("button", { name: "评论", exact: true }).click();
   await expect(page.locator(".comment-card").filter({ hasText: UPDATED_TEXT }))
     .toHaveCount(1);
   await page.getByRole("button", { name: /发送至 Qoder/u }).click();
@@ -315,7 +315,7 @@ test("a clipboard handoff failure keeps the frozen Request recoverable", async (
       .click();
     await launched.page.getByRole("textbox", { name: "评论内容" })
       .fill(`改为 ${UPDATED_TEXT}`);
-    await launched.page.getByRole("button", { name: "加入本轮" }).click();
+    await launched.page.getByRole("button", { name: "评论", exact: true }).click();
     await launched.page.getByRole("button", { name: /发送至 Qoder/u }).click();
     await expect(launched.page.getByText("等待 QoderWork 返回修改结果", { exact: true }))
       .toBeVisible();
