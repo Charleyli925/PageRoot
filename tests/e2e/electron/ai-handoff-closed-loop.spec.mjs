@@ -182,8 +182,14 @@ async function loadedDiskFrame(page, sourcePath) {
     editorHandle,
     { timeout: 60_000 },
   );
-  const iframeHandle = await editor.locator('iframe[title*="HTML"]').elementHandle();
-  const frame = await iframeHandle?.contentFrame();
+  const iframe = editor.locator('iframe[title*="HTML"]').first();
+  await iframe.waitFor({ state: "attached", timeout: 60_000 });
+  let frame = null;
+  await expect.poll(async () => {
+    const iframeHandle = await iframe.elementHandle();
+    frame = await iframeHandle?.contentFrame() || null;
+    return Boolean(frame);
+  }, { timeout: 60_000 }).toBe(true);
   if (!frame) throw new Error("PageRoot did not expose the Electron edit frame.");
   await frame.waitForFunction(
     (selector) => Boolean(document.querySelector(selector)),
