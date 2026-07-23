@@ -1,5 +1,11 @@
+import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
-import { readFile, realpath } from "node:fs/promises";
+import {
+  lstat,
+  readFile,
+  readlink,
+  realpath,
+} from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -134,15 +140,58 @@ export function parseTaskArguments(argv) {
   };
   while (args.length > 0) {
     const argument = args.shift();
-    if (argument === "--base") options.base = args.shift() || "";
-    else if (argument === "--json") options.json = true;
+    if (argument === "--base") {
+      throw new Error("Task workflow base is fixed to origin/main.");
+    } else if (argument === "--json") options.json = true;
     else throw new Error(`Unknown argument: ${argument}`);
   }
-  if (!options.base || options.base.startsWith("-")) {
-    throw new Error("--base requires a Git ref, for example origin/main.");
+  if (options.json && command !== "status") {
+    throw new Error("--json is supported only by task:status.");
   }
   if (command === "start") options.branch = validateTaskBranchName(options.branch);
   return options;
+}
+
+async function repositoryStateFingerprint(root) {
+  const [
+    headResult,
+    unstagedResult,
+    stagedResult,
+    untrackedResult,
+  ] = await Promise.all([
+    git(root, ["rev-parse", "HEAD"]),
+    git(root, ["diff", "--binary", "--no-ext-diff", "--"]),
+    git(root, ["diff", "--cached", "--binary", "--no-ext-diff", "HEAD", "--"]),
+    git(root, ["ls-files", "--others", "--exclude-standard", "-z"]),
+  ]);
+  const hash = createHash("sha256");
+  hash.update("head\0");
+  hash.update(headResult.stdout);
+  hash.update("\0unstaged\0");
+  hash.update(unstagedResult.stdout);
+  hash.update("\0staged\0");
+  hash.update(stagedResult.stdout);
+  for (const file of splitNullSeparated(untrackedResult.stdout).sort()) {
+    const absolute = path.resolve(root, file);
+    if (!absolute.startsWith(`${root}${path.sep}`)) {
+      throw new Error(`Untracked path escapes the repository: ${file}.`);
+    }
+    hash.update("\0untracked\0");
+    hash.update(file);
+    const info = await lstat(absolute).catch(() => null);
+    if (!info) {
+      hash.update("\0missing");
+    } else if (info.isSymbolicLink()) {
+      hash.update(`\0symlink:${info.mode.toString(8)}\0`);
+      hash.update(await readlink(absolute));
+    } else if (info.isFile()) {
+      hash.update(`\0file:${info.mode.toString(8)}\0`);
+      hash.update(await readFile(absolute));
+    } else {
+      hash.update(`\0other:${info.mode.toString(8)}`);
+    }
+  }
+  return hash.digest("hex");
 }
 
 export async function repositoryReport(root, { base = DEFAULT_BASE } = {}) {
@@ -216,9 +265,9 @@ export function formatTaskReport(report) {
 export async function startTask({
   root = productRoot,
   branch,
-  base = DEFAULT_BASE,
   fetch = true,
 } = {}) {
+  const base = DEFAULT_BASE;
   const taskBranch = validateTaskBranchName(branch);
   await assertRepositoryRoot(root);
   const before = await repositoryReport(root, { base });
@@ -249,16 +298,31 @@ export async function startTask({
 
 export async function finishTask({
   root = productRoot,
-  base = DEFAULT_BASE,
+  runGate = (gateRoot, base) => runInherited(
+    gateRoot,
+    "npm",
+    ["run", "gate:task", "--", "--base", base],
+  ),
 } = {}) {
+  const base = DEFAULT_BASE;
   const before = await repositoryReport(root, { base });
   if (before.branch === "main") throw new Error("Refusing to finish a task directly on main.");
   if (before.changedFiles.length === 0) {
     throw new Error(`No task changes were found against ${base}.`);
   }
-  await runInherited(root, "npm", ["run", "gate:task", "--", "--base", base]);
+  const beforeGate = await repositoryStateFingerprint(root);
+  await runGate(root, base);
+  const afterGate = await repositoryStateFingerprint(root);
+  const report = await repositoryReport(root, { base });
+  const afterReport = await repositoryStateFingerprint(root);
+  if (beforeGate !== afterGate || beforeGate !== afterReport) {
+    throw new Error(
+      "Repository source changed while the task gate was running. "
+      + "Review the new state and rerun npm run task:finish.",
+    );
+  }
   return {
-    ...await repositoryReport(root, { base }),
+    ...report,
     verification: {
       command: `npm run gate:task -- --base ${base}`,
       status: "passed",
@@ -273,12 +337,10 @@ async function main() {
     report = await startTask({
       root: productRoot,
       branch: options.branch,
-      base: options.base,
     });
   } else if (options.command === "finish") {
     report = await finishTask({
       root: productRoot,
-      base: options.base,
     });
   } else {
     report = await repositoryReport(productRoot, { base: options.base });

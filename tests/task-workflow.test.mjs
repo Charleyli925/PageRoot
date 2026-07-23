@@ -6,6 +6,7 @@ import { spawn } from "node:child_process";
 import test from "node:test";
 
 import {
+  finishTask,
   parseTaskArguments,
   repositoryReport,
   startTask,
@@ -72,7 +73,11 @@ test("task arguments and branch names fail closed", () => {
   ]) {
     assert.throws(() => validateTaskBranchName(invalid));
   }
-  assert.throws(() => parseTaskArguments(["finish", "--base"]));
+  assert.throws(
+    () => parseTaskArguments(["finish", "--base", "HEAD~1"]),
+    /base is fixed to origin\/main/u,
+  );
+  assert.throws(() => parseTaskArguments(["finish", "--json"]), /only by task:status/u);
   assert.throws(() => parseTaskArguments(["publish"]));
 });
 
@@ -121,4 +126,19 @@ test("task report covers committed and uncommitted changes against main", async 
   assert.equal(report.clean, false);
   assert.deepEqual(report.changedFiles, ["README.md", "new-file.md"]);
   assert.equal(report.branch, "docs/report-fixture");
+});
+
+test("task finish rejects source changes that occur during the gate", async (t) => {
+  const repository = await createRepository(t);
+  await startTask({ root: repository, branch: "fix/stable-gate-source" });
+  await writeFile(path.join(repository, "README.md"), "# before gate\n", "utf8");
+  await assert.rejects(
+    finishTask({
+      root: repository,
+      runGate: async () => {
+        await writeFile(path.join(repository, "README.md"), "# changed during gate\n", "utf8");
+      },
+    }),
+    /source changed while the task gate was running/u,
+  );
 });

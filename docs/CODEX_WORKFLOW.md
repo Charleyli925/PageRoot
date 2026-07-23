@@ -56,7 +56,7 @@ npm run task:finish
 npm run gate:task -- --base origin/main
 ```
 
-This covers committed, staged, unstaged and untracked task files, then prints a final repository report. It does not stage, commit, push, merge or release; the agent must still inspect and intentionally perform those actions.
+The comparison base is fixed to `origin/main`; `task:finish` does not accept a custom `--base`. This prevents a newer branch ref from hiding earlier task commits from impact selection. The command covers committed, staged, unstaged and untracked task files, rejects source changes that occur while the gate is running, then prints a final repository report. It does not stage, commit, push, merge or release; the agent must still inspect and intentionally perform those actions.
 
 ## Branch and Pull Request flow
 
