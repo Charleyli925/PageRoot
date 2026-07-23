@@ -80,13 +80,25 @@ export const DEFAULT_PROJECT_HTML = `<!doctype html>
     h1 {
       max-width: 640px;
       margin: 0;
-      font-family: "Songti SC", "STSong", serif;
-      font-size: clamp(44px, 6vw, 68px);
-      font-weight: 600;
-      line-height: 1.08;
-      letter-spacing: -.045em;
+      font-family: "Songti SC", "STSong", "Noto Serif CJK SC", serif;
+      font-size: clamp(46px, 5.8vw, 70px);
+      font-weight: 400;
+      line-height: .98;
+      letter-spacing: -.06em;
+      text-wrap: balance;
+      font-feature-settings: "palt" 1;
     }
-    h1 span { color: #b8a9ff; }
+    h1 span { display: block; }
+    h1 span + span {
+      width: max-content;
+      max-width: calc(100% - 34px);
+      margin-top: 13px;
+      margin-left: clamp(26px, 4.2vw, 56px);
+      color: #c4b9ff;
+      font-size: .91em;
+      letter-spacing: -.055em;
+      text-shadow: 0 16px 38px rgba(92, 70, 188, .18);
+    }
     .intro {
       max-width: 620px;
       margin: 25px 0 0;
@@ -141,11 +153,13 @@ export const DEFAULT_PROJECT_HTML = `<!doctype html>
     .section-heading small { color: var(--violet); font-size: 10px; font-weight: 750; letter-spacing: .14em; }
     .section-heading h2 { max-width: 570px; margin: 8px 0 0; font: 600 32px/1.28 "Songti SC", "STSong", serif; }
     .section-heading p { max-width: 330px; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.75; }
-    .promise-grid { display: grid; grid-template-columns: repeat(3, 1fr); border-block: 1px solid var(--line); }
-    .promise { min-height: 204px; padding: 25px 24px 24px 0; }
-    .promise + .promise { padding-left: 24px; border-left: 1px solid var(--line); }
+    .promise-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-block: 1px solid var(--line); }
+    .promise { min-height: 188px; padding: 28px 30px; border-bottom: 1px solid var(--line); }
+    .promise:nth-child(odd) { padding-left: 0; }
+    .promise:nth-child(even) { padding-right: 0; border-left: 1px solid var(--line); }
+    .promise:nth-child(n + 3) { border-bottom: 0; }
     .promise-index { color: var(--violet); font: 700 10px/1 system-ui; letter-spacing: .12em; }
-    .promise h3 { margin: 40px 0 10px; font-size: 18px; }
+    .promise h3 { margin: 27px 0 10px; font-size: 18px; }
     .promise p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.8; }
     .workflow {
       display: grid;
@@ -204,7 +218,9 @@ export const DEFAULT_PROJECT_HTML = `<!doctype html>
       .section-heading { display: block; }
       .section-heading p { margin-top: 14px; }
       .promise-grid { grid-template-columns: 1fr; }
-      .promise, .promise + .promise { min-height: 0; padding: 24px 0; border-left: 0; border-bottom: 1px solid var(--line); }
+      .promise,
+      .promise:nth-child(odd),
+      .promise:nth-child(even) { min-height: 0; padding: 24px 0; border-left: 0; border-bottom: 1px solid var(--line); }
       .promise:last-child { border-bottom: 0; }
       .promise h3 { margin-top: 20px; }
       .workflow { grid-template-columns: 1fr; gap: 30px; padding: 30px 24px; }
@@ -224,19 +240,19 @@ export const DEFAULT_PROJECT_HTML = `<!doctype html>
           </div>
           <span class="demo-badge">内置介绍页</span>
         </div>
-        <p class="eyebrow">Edit visually. Stay in source.</p>
-        <h1>看得见地改，<span>留在源码里。</span></h1>
-        <p class="intro">源页是一款面向真实 HTML 的本地可视化工作台。直接选择页面中的模块或小区域，完成局部编辑、添加评论，再把边界清晰的修改请求交给 AI。</p>
-        <div class="hero-foot"><span>本地 HTML</span><span>源码级局部 Patch</span><span>评论与版本审计</span></div>
+        <p class="eyebrow">Write smoothly. Change precisely.</p>
+        <h1><span>所见，即可落笔。</span><span>所改，止于所选。</span></h1>
+        <p class="intro">在真实 HTML 上直接双击文字，光标准确落点，输入、删除、选择与中文输入都自然顺畅。简单修改即时完成，复杂要求则用评论清楚交给 AI。</p>
+        <div class="hero-foot"><span>原生光标与输入法</span><span>源码级局部 Patch</span><span>评论与附件</span></div>
       </div>
       <aside class="source-card">
-        <small>SOURCE CONTRACT</small>
-        <h2>预览帮助你判断，源码决定最终结果。</h2>
-        <p>源页不会把预览画布当作新的真相。每一次有效修改，都回到你打开的那份 HTML 中完成。</p>
+        <small>SAFE BY DEFAULT</small>
+        <h2>每一次写回，都经过完整校验。</h2>
+        <p>源页只相信真实 HTML。目标、源码和返回结果没有全部对上，就不会写入，也不会生成新版本。</p>
         <div class="source-path">
           <span><i></i>真实 HTML 是唯一事实源</span>
-          <span><i></i>修改范围先被识别与校验</span>
-          <span><i></i>历史记录保留变更依据</span>
+          <span><i></i>只修改被明确选中的范围</span>
+          <span><i></i>AI 新版独立保留，不覆盖提交前文件</span>
         </div>
       </aside>
     </header>
@@ -244,32 +260,33 @@ export const DEFAULT_PROJECT_HTML = `<!doctype html>
     <div class="content">
       <section>
         <div class="section-heading">
-          <div><small>WHY PAGEROOT</small><h2>让每一次页面修改，都更准确、更克制、更容易回看。</h2></div>
-          <p>不把 HTML 变成低代码项目，也不让 AI 重写整页。源页只帮助你更清楚地表达和执行局部变化。</p>
+          <div><small>CORE EXPERIENCE</small><h2>把网页修改，变成四件自然的事。</h2></div>
+          <p>不用在源码里找标签，也不必向 AI 解释整张页面。你专注于内容和意见，源页负责守住修改边界。</p>
         </div>
         <div class="promise-grid">
-          <article class="promise"><span class="promise-index">01 / SELECT</span><h3>从画布准确选中</h3><p>单击选择整个模块；进入模块后，再选择标题、正文、指标卡或按钮等具体区域。</p></article>
-          <article class="promise"><span class="promise-index">02 / EDIT</span><h3>只修改应该变化的地方</h3><p>文字、当前元素样式与安全的同级排序，会以局部源码 Patch 写回，不无故扰动其余结构。</p></article>
-          <article class="promise"><span class="promise-index">03 / REVIEW</span><h3>把意见和依据一起留下</h3><p>评论、附件、直接编辑与 AI 返回结果都带着目标和版本关系，方便复核与追溯。</p></article>
+          <article class="promise"><span class="promise-index">01 / TYPE</span><h3>顺畅的文本编辑</h3><p>安全可编辑的文字，双击就能把光标放到点击位置。输入、删除、选择、粘贴和中文输入法都沿用熟悉的原生体验。</p></article>
+          <article class="promise"><span class="promise-index">02 / TARGET</span><h3>指哪改哪的局部修改</h3><p>选中标题就只改标题，选中正文就只改正文。修改以最小源码 Patch 写回，其余 HTML 结构和格式保持不动。</p></article>
+          <article class="promise"><span class="promise-index">03 / COMMENT</span><h3>轻松完整的评论体验</h3><p>评论可以跟随整个页面、模块或具体文字；图片和文件也能一起附上，意见、目标与历史版本始终对应。</p></article>
+          <article class="promise"><span class="promise-index">04 / VERIFY</span><h3>完整的安全校验</h3><p>写回前核对目标、源码与外部改动；AI 结果还会检查身份、文件完整性和修改范围，任何异常都会停止。</p></article>
         </div>
       </section>
 
       <section class="workflow">
-        <div class="workflow-copy"><small>START HERE</small><h2>打开一份 HTML，开始一次有边界的修改。</h2><p>顶部项目区始终告诉你当前打开的是哪份文件，以及修改是否已经同步到磁盘。</p></div>
+        <div class="workflow-copy"><small>HOW IT FEELS</small><h2>打开 HTML，直接开始。</h2><p>当前文件、保存状态、评论数量和 AI 处理进度都清楚可见，你始终知道内容正处在哪一步。</p></div>
         <div class="steps">
-          <div class="step"><b>01</b><div><strong>打开本地 HTML</strong><span>从左上角项目菜单选择文件。源页读取原文件，并建立可核对的初始基线。</span></div></div>
-          <div class="step"><b>02</b><div><strong>选择、编辑或添加评论</strong><span>在画布中确定模块或小区域；直接处理简单改动，复杂要求则写成评论。</span></div></div>
-          <div class="step"><b>03</b><div><strong>交给 AI，并检查新版本</strong><span>源页冻结本轮目标与上下文，校验返回结果没有越界后，再建立可查看的版本。</span></div></div>
+          <div class="step"><b>01</b><div><strong>双击文字，光标落点即编辑</strong><span>简单内容自然输入；不能安全直改的区域不会被冒险写回，仍可用评论说明要求。</span></div></div>
+          <div class="step"><b>02</b><div><strong>评论具体位置，带上图片或文件</strong><span>选中目标后写下要求，右侧评论与页面位置保持关系，集中查看、补充和复核都更方便。</span></div></div>
+          <div class="step"><b>03</b><div><strong>发送、校验，再打开最新版</strong><span>源页冻结本轮内容；AI 返回后执行完整校验。通过后由你打开最新版，提交前文件与历史版本仍会保留。</span></div></div>
         </div>
       </section>
 
       <aside class="notice">
-        <div><strong>这是一张可以试操作的内置介绍页。</strong><span>你可以选择内容体验画布，但它尚未绑定本地文件；打开自己的 HTML 后，修改才会安全写回磁盘。</span></div>
-        <em>请从左上角开始</em>
+        <div><strong>这张欢迎页可以直接体验选择和评论。</strong><span>它尚未绑定本地文件；打开自己的 HTML 后，安全的文字修改才会自动写回，AI 新版也会进入独立版本历史。</span></div>
+        <em>从顶部「项目」打开 HTML</em>
       </aside>
     </div>
 
-    <footer><span>源页 · PageRoot</span><span>Edit visually. Stay in source.</span></footer>
+    <footer><span>源页 · PageRoot</span><span>Write smoothly. Change precisely.</span></footer>
   </article>
 </body>
 </html>`;

@@ -223,6 +223,17 @@ export type HtmlCanvasCommentedTarget = {
   label?: string;
 };
 
+export type HtmlCanvasCommentLayoutState = {
+  scrollTop: number;
+  scrollHeight: number;
+  clientHeight: number;
+  targets: Array<{
+    targetId: string;
+    top: number;
+    height: number;
+  }>;
+};
+
 const EMPTY_COMMENTED_TARGETS: readonly HtmlCanvasCommentedTarget[] = [];
 const EMPTY_TRACKED_TARGETS: readonly HtmlCanvasSelection[] = [];
 
@@ -274,6 +285,8 @@ export type HtmlCanvasEditorProps = {
   onSelect?: (selection: HtmlCanvasSelection | null) => void;
   /** Notifies the host about any pointer interaction inside the isolated iframe. */
   onInteraction?: () => void;
+  /** Mirrors the authored page scroll coordinate into the host comment rail. */
+  onCommentLayout?: (state: HtmlCanvasCommentLayoutState) => void;
   /** Opens the host product's comment composer for the current selection. */
   onRequestComment?: (selection: HtmlCanvasSelection) => void;
   /** Callback alternative to using a ref. Receives null when the editor unmounts. */
@@ -1937,6 +1950,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     onChange,
     onSelect,
     onInteraction,
+    onCommentLayout,
     onRequestComment,
     onReady,
     onRequestFlush,
@@ -2038,6 +2052,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const onChangeRef = useRef(onChange);
   const onSelectRef = useRef(onSelect);
   const onInteractionRef = useRef(onInteraction);
+  const onCommentLayoutRef = useRef(onCommentLayout);
   const onRequestCommentRef = useRef(onRequestComment);
   const onRequestFlushRef = useRef(onRequestFlush);
   const onEditBlockedRef = useRef(onEditBlocked);
@@ -2060,6 +2075,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   onChangeRef.current = onChange;
   onSelectRef.current = onSelect;
   onInteractionRef.current = onInteraction;
+  onCommentLayoutRef.current = onCommentLayout;
   onRequestCommentRef.current = onRequestComment;
   onRequestFlushRef.current = onRequestFlush;
   onEditBlockedRef.current = onEditBlocked;
@@ -2300,6 +2316,54 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       return;
     }
 
+    const containerRect = container.getBoundingClientRect();
+    const iframeRect = iframe.getBoundingClientRect();
+    const frameOffsetLeft = iframeRect.left - containerRect.left;
+    const frameOffsetTop = iframeRect.top - containerRect.top;
+    const frameHeight = iframe.clientHeight;
+    const frameWidth = iframe.clientWidth;
+    const scrollingElement = documentNode.scrollingElement || documentNode.documentElement;
+    const frameView = documentNode.defaultView;
+    const scrollTop = Math.max(
+      0,
+      Number(frameView?.scrollY || scrollingElement.scrollTop || 0),
+    );
+    const commentLayouts = commentedTargetsRef.current.flatMap((rawTarget) => {
+      const target = rawTarget.target;
+      try {
+        const sourceIndex = sourceIndexRef.current;
+        const resolution = sourceIndex
+          ? resolveTargetRef(sourceIndex, sourceTargetRefForSelection(target))
+          : null;
+        if (resolution?.target?.type !== "element") return [];
+        const escapedNodeId = String(resolution.target.nodeId)
+          .replace(/\\/g, "\\\\")
+          .replace(/"/g, '\\"');
+        const targetElement = documentNode.querySelector<HTMLElement>(
+          `[${SOURCE_NODE_ATTRIBUTE}="${escapedNodeId}"]`,
+        );
+        if (!targetElement) return [];
+        const targetRect = targetElement.getBoundingClientRect();
+        return [{
+          targetId: target.id,
+          top: Math.max(0, targetRect.top + scrollTop),
+          height: Math.max(0, targetRect.height),
+        }];
+      } catch {
+        return [];
+      }
+    });
+    onCommentLayoutRef.current?.({
+      scrollTop,
+      scrollHeight: Math.max(
+        scrollingElement.scrollHeight,
+        documentNode.documentElement.scrollHeight,
+        documentNode.body.scrollHeight,
+      ),
+      clientHeight: frameHeight,
+      targets: commentLayouts,
+    });
+
     if (lockedRef.current) {
       setOverlayPosition(null);
       setInsertionPoints([]);
@@ -2307,13 +2371,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       insertionPointsRef.current = [];
       return;
     }
-
-    const containerRect = container.getBoundingClientRect();
-    const iframeRect = iframe.getBoundingClientRect();
-    const frameOffsetLeft = iframeRect.left - containerRect.left;
-    const frameOffsetTop = iframeRect.top - containerRect.top;
-    const frameHeight = iframe.clientHeight;
-    const frameWidth = iframe.clientWidth;
 
     if (element?.isConnected) {
       const elementRect = element.getBoundingClientRect();

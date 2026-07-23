@@ -37,7 +37,7 @@ test("redundant feedback was removed and comment persistence is contextual", () 
   ]) {
     assert.doesNotMatch(workbench, new RegExp(removedCopy));
   }
-  assert.match(workbench, /className="comment-persist-error"/);
+  assert.match(workbench, /className="comment-persist-error[^"]*"/);
   assert.match(workbench, />重试记录<\/button>/);
   assert.match(
     workbench,
@@ -84,38 +84,27 @@ test("technical desktop error plumbing is absent from product copy", () => {
 });
 
 test("critical notices are legible and their close action cannot wrap", () => {
-  const compactToastStyles = styles.slice(styles.lastIndexOf("\n.toast {"));
   assert.match(styles, /\.toast\[data-tone="error"\]/);
-  assert.match(compactToastStyles, /\.toast-copy strong\s*\{[\s\S]*?font-size:\s*12px/);
-  assert.match(compactToastStyles, /\.toast-copy > span\s*\{[\s\S]*?font-size:\s*11px/);
+  assert.match(styles, /\.toast-copy strong\s*\{[\s\S]*?font-size:\s*12px/);
+  assert.match(styles, /\.toast-copy > span\s*\{[\s\S]*?font-size:\s*11px/);
   assert.match(
-    compactToastStyles,
+    styles,
     /\.toast-actions button\s*\{[\s\S]*?min-height:\s*30px/,
   );
   assert.match(styles, /\.comment-persist-error\s*\{/);
 });
 
-test("the verified AI file marker appears only after the user opens the ready Version", () => {
+test("the verified AI file identity appears only after the user opens the ready Version", () => {
   assert.doesNotMatch(workbench, /className="ai-file-opened-card"/);
   assert.doesNotMatch(workbench, /关闭新文件打开提示/);
-  assert.match(workbench, /当前左侧仍是旧版；点击后才会切换。/);
-  assert.match(workbench, /打开 Qoder 返回的最新版/);
+  assert.match(workbench, /打开最新版/);
   assert.match(workbench, /\/ready-version\/activate/);
-  assert.match(workbench, /className="project-state-label"/);
-  assert.match(workbench, /QoderWork 返回的新文件已打开/);
-  assert.match(workbench, /原文件已保留/);
   assert.match(
     workbench,
-    /\{activeOpenedAiVersionNotice\?\.fileName \|\| projectName\}/,
-  );
-  assert.match(
-    workbench,
-    /aria-label=\{[\s\S]*?QoderWork 返回的新文件已打开：\$\{activeOpenedAiVersionNotice\.fileName\}/,
+    /<strong title=\{activeOpenedAiVersionNotice\?\.fileName \|\| projectName\}>[\s\S]*?\{activeOpenedAiVersionNotice\?\.fileName \|\| projectName\}/,
   );
   assert.match(workbench, /setOpenedAiVersionNotice\(\{[\s\S]*?sourcePath: committedSourcePath/);
-  assert.match(styles, /\.project-switcher\[data-ai-file-opened="true"\]\s*\{/);
-  assert.match(styles, /\.project-switcher\[data-ai-file-opened="true"\] > \.project-state-label/);
-  assert.match(styles, /prefers-reduced-motion[\s\S]*?\.project-switcher\[data-ai-file-opened="true"\]/);
+  assert.doesNotMatch(workbench, /QoderWork 返回的新文件已打开|原文件已保留/);
 });
 
 test("ready polling never opens automatically; the adopted marker ends on first edit or comment", () => {
@@ -154,8 +143,6 @@ test("ready polling never opens automatically; the adopted marker ends on first 
     workbench,
     /const applyProject[\s\S]*?setProjectName\(project\.name\);\s*setOpenedAiVersionNotice\(null\);/,
   );
-  assert.match(
-    workbench,
-    /className="project-switcher"[\s\S]*?onClick=\{\(\) => setProjectMenuOpen\(\(value\) => !value\)\}/,
-  );
+  assert.match(workbench, /className="window-file"/);
+  assert.doesNotMatch(workbench, /className="project-switcher"/);
 });

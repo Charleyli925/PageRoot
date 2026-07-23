@@ -648,7 +648,16 @@ export function keyShortcut(key) {
 export async function exportCurrentHtml(page) {
   const [download] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("button", { name: "导出 HTML 副本", exact: true }).click(),
+    page.evaluate(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", {
+        key: "E",
+        metaKey: true,
+        ctrlKey: true,
+        shiftKey: true,
+        bubbles: true,
+        cancelable: true,
+      }));
+    }),
   ]);
   const stream = await download.createReadStream();
   if (!stream) throw new Error("Export download did not expose a readable stream.");

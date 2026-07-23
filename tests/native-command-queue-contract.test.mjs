@@ -158,11 +158,7 @@ test("Workbench header drawers defer until the active composition is settled", (
 
   assert.match(
     headerActions,
-    /const openProjectFiles = \(\) => \{[\s\S]*?setDrawer\("files"\);[\s\S]*?deferEditorCommand\("project-files", openProjectFiles\)/u,
-  );
-  assert.match(
-    headerActions,
-    /const openVersionHistory = \(\) => \{[\s\S]*?setDrawer\("history"\);[\s\S]*?deferEditorCommand\("version-history", openVersionHistory\)/u,
+    /const openProjectPanel = \(\) => \{[\s\S]*?setDrawer\(\(current\) => \([\s\S]*?"files"[\s\S]*?\)\);[\s\S]*?deferEditorCommand\("project-files", openProjectPanel\)/u,
   );
 });
 
