@@ -23,6 +23,17 @@ npm run dev             # web development server
 npm run desktop:dev     # build renderer and launch Electron
 ```
 
+## Agent task lifecycle
+
+```bash
+npm run task:status
+npm run task:start -- fix/short-description
+# edit
+npm run task:finish
+```
+
+`task:start` requires clean synchronized `main`. `task:finish` runs the task gate against `origin/main` and reports committed plus uncommitted task files. Neither command commits, pushes, merges or releases. See `AGENTS.md` and `docs/CODEX_WORKFLOW.md` for the complete automation and authorization boundary.
+
 ## Test lanes
 
 | Command | Purpose |

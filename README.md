@@ -43,6 +43,9 @@ npm run desktop:dev
 常用验证命令：
 
 ```bash
+npm run task:status        # 查看分支、差异和工作区状态
+npm run task:start -- fix/short-name
+npm run task:finish        # 完成一项修改并运行任务门禁
 npm run gate:edit          # 开发中的定向检查
 npm run gate:task          # 一项修改完成后的检查
 npm run gate:release:auto  # 干净提交上的完整发布前检查
@@ -50,6 +53,8 @@ npm run release:mac        # 完整检查、打包并验证 arm64 DMG
 ```
 
 发布门禁只接受已经提交且工作区干净的源码。详细环境与测试说明见[开发指南](docs/DEVELOPMENT.md)。
+
+Codex 和其他代码 Agent 应先读取 [`AGENTS.md`](AGENTS.md)；重复任务命令、授权边界、文档路由和最终报告格式见 [Codex 工作流](docs/CODEX_WORKFLOW.md)。
 
 ## 仓库结构
 

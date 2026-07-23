@@ -19,7 +19,7 @@ npm ci
 npx playwright install chromium
 ```
 
-Run `npm run gate:edit` while working and `npm run gate:task` before committing. Update tests and documentation with behavioral changes. Use a clear imperative commit message such as `fix: preserve selection across source refresh`.
+Repository agents may use `npm run task:start -- fix/short-description` for the first three Git commands. Run `npm run gate:edit` while working and `npm run task:finish` before committing. Update tests and the routed documentation in `AGENTS.md` with behavioral, contract or workflow changes. Use a clear imperative commit message such as `fix: preserve selection across source refresh`.
 
 Push the branch and open a Pull Request. The PR must explain the problem, the chosen boundary, verification performed and any user-visible impact. Maintainers may request a smaller change when a PR mixes unrelated concerns.
 
