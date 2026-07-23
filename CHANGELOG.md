@@ -4,6 +4,14 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+## [0.8.4] - 2026-07-23
+
+- Expanded source-preserving native text editing to more safely mapped text hosts.
+- Added source-owned hard breaks, plain-text multiline paste, and simple paragraph or list-item splitting with undo and redo coverage.
+- Reduced repeated DOM scans and draft copying on the native editing hot path.
+- Redesigned the review workspace, project/version panels, comment tools, AI handoff state, and built-in welcome page.
+- Added paired canvas/comment focus, dense-comment layout, full-bleed edit and preview surfaces, and a compact processing view without an outer scrollbar.
+
 ## [0.8.3] - 2026-07-23
 
 - Opened the PageRoot source repository under Apache-2.0.
@@ -21,7 +29,8 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 - Published the first public macOS release in this repository under the earlier YuanYe artifact name.
 
-[Unreleased]: https://github.com/Charleyli925/PageRoot/compare/v0.8.3...HEAD
+[Unreleased]: https://github.com/Charleyli925/PageRoot/compare/v0.8.4...HEAD
+[0.8.4]: https://github.com/Charleyli925/PageRoot/compare/v0.8.3...v0.8.4
 [0.8.3]: https://github.com/Charleyli925/PageRoot/compare/v0.8.2...v0.8.3
 [0.8.2]: https://github.com/Charleyli925/PageRoot/compare/v0.7.4...v0.8.2
 [0.7.4]: https://github.com/Charleyli925/PageRoot/releases/tag/v0.7.4
