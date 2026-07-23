@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import { evaluateAuditReport } from "../scripts/check-dependency-audit.mjs";
+import {
+  acceptedAdvisories,
+  evaluateAuditReport,
+} from "../scripts/check-dependency-audit.mjs";
 
 const dependabotConfig = await readFile(
   new URL("../.github/dependabot.yml", import.meta.url),
@@ -47,6 +50,18 @@ test("dependency audit policy rejects new and expired advisories", () => {
   assert.equal(result.passed, false);
   assert.deepEqual(result.unexpected.map((item) => item.source), [2]);
   assert.deepEqual(result.expired.map((item) => item.source), ["1"]);
+});
+
+test("reviewed production exceptions are explicit and time-bounded", () => {
+  assert.deepEqual(acceptedAdvisories["1124252"], {
+    package: "postcss",
+    url: "https://github.com/advisories/GHSA-6g55-p6wh-862q",
+    expiresOn: "2026-08-31",
+  });
+  assert.ok(
+    Object.values(acceptedAdvisories).every((advisory) => advisory.expiresOn),
+    "every dependency exception must have a mandatory review date",
+  );
 });
 
 test("Dependabot keeps coupled React updates together and defers automatic majors", () => {
