@@ -159,6 +159,17 @@
       "nodeTests": ["tests/test-gate-selection.test.mjs"]
     },
     {
+      "id": "task-workflow",
+      "patterns": [
+        "^AGENTS\\.md$",
+        "^docs/CODEX_WORKFLOW\\.md$",
+        "^scripts/task-workflow\\.mjs$",
+        "^tests/task-workflow\\.test\\.mjs$"
+      ],
+      "suites": [],
+      "nodeTests": ["tests/task-workflow.test.mjs"]
+    },
+    {
       "id": "source-editing-core",
       "patterns": [
         "^app/lib/(?:source-(?:index|patch-core|patch-engine|text-map)|target-resolver|runtime-dom-source-map|selection-bookmark|format-skeleton|native-(?:edit-capability|edit-transaction|source-map|block-edit-draft))\\.(?:js|ts)$",

@@ -18,6 +18,13 @@ GitHub main
 Start from current `main`:
 
 ```bash
+npm run task:status
+npm run task:start -- feature/short-name
+```
+
+`task:start` refuses dirty, detached, divergent or non-`main` checkouts. It fetches `origin`, fast-forwards `main` and creates the short-lived branch without stashing or deleting work. The equivalent manual commands remain:
+
+```bash
 git switch main
 git pull --ff-only
 git switch -c feature/short-name
@@ -28,7 +35,7 @@ Inspect and save coherent checkpoints:
 ```bash
 git status --short
 git diff
-npm run gate:task
+npm run task:finish
 git add <intentional-files>
 git diff --cached
 git commit -m "feat: describe the user-visible outcome"
@@ -37,7 +44,9 @@ git push -u origin feature/short-name
 
 Open a Pull Request, wait for required CI, review the final diff, then squash-merge. Delete the merged branch. Never use a DMG, `.app`, copied folder or local backup as the basis for a new edit.
 
-Recommended prefixes are `feature/`, `fix/`, `docs/`, `test/`, `refactor/` and `chore/`. Commits should be small enough to explain and restore. Avoid mixing formatting, generated output and behavioral changes.
+Recommended prefixes are `agent/`, `feature/`, `fix/`, `docs/`, `test/`, `refactor/`, `chore/` and `recovery/`. Commits should be small enough to explain and restore. Avoid mixing formatting, generated output and behavioral changes.
+
+Codex and other coding agents follow `AGENTS.md`; detailed authorization, worktree, documentation and final-report behavior is in `docs/CODEX_WORKFLOW.md`. Implementation tasks normally end at a tested Pull Request. Merge and release remain separate explicit decisions.
 
 ## Updating an active branch
 
