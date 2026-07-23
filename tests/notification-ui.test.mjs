@@ -2,30 +2,34 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const [workbench, styles, canvas, canvasStyles] = await Promise.all([
+const [workbench, styles, canvas, canvasStyles, notice, noticeStyles] = await Promise.all([
   readFile(new URL("../app/workbench.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
   readFile(new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/components/HtmlCanvasEditor.module.css", import.meta.url), "utf8"),
+  readFile(new URL("../app/components/NoticeBar.tsx", import.meta.url), "utf8"),
+  readFile(new URL("../app/components/NoticeBar.module.css", import.meta.url), "utf8"),
 ]);
 
 test("global notifications expose severity, persistence and actions", () => {
   assert.match(workbench, /noticeAutoDismissMs\(toast\)/);
   assert.match(workbench, /shouldPresentNotice\(next\)/);
   assert.match(workbench, /shouldReplaceNotice\(current, next\)/);
-  assert.match(workbench, /data-tone=\{toast\?\.tone \|\| "info"\}/);
+  assert.match(workbench, /<NoticeBar[\s\S]*?className="toast"/);
+  assert.match(notice, /data-tone=\{tone\}/);
   assert.match(
-    workbench,
-    /role=\{toast\?\.tone === "error" \? "alert" : "status"\}/,
+    notice,
+    /role=\{tone === "error" \? "alert" : "status"\}/,
   );
   assert.match(
-    workbench,
-    /aria-live=\{toast\?\.tone === "error" \? "assertive" : "polite"\}/,
+    notice,
+    /aria-live=\{tone === "error" \? "assertive" : "polite"\}/,
   );
   assert.match(workbench, /action: \{ id: "retry-export"/);
   assert.match(workbench, /title: "副本没有导出"/);
-  assert.match(workbench, /onMouseEnter=\{\(\) => setPausedNoticeIdentity\(noticeIdentity\)\}/);
-  assert.match(workbench, /onFocusCapture=\{\(\) => setPausedNoticeIdentity\(noticeIdentity\)\}/);
+  assert.match(notice, /onMouseEnter=\{\(\) => onPauseChange\?\.\(true\)\}/);
+  assert.match(notice, /onFocusCapture=\{\(\) => onPauseChange\?\.\(true\)\}/);
+  assert.match(workbench, /setPausedNoticeIdentity\(paused \? noticeIdentity : null\)/);
 });
 
 test("redundant feedback was removed and comment persistence is contextual", () => {
@@ -60,12 +64,20 @@ test("canvas edit feedback is contextual, plain-language, and not duplicated glo
   assert.match(canvas, /你仍可以选中文字调整样式，或添加评论交给 AI 处理/u);
   assert.match(canvas, /继续浏览和选择文字/u);
   assert.match(canvas, /sticky: false/u);
-  assert.match(canvas, /editFeedback\.tone === "error" \? "alert" : "status"/u);
+  assert.match(canvas, /recovery: "comment"/u);
+  assert.match(canvas, /recovery: "reload"/u);
+  assert.match(canvas, /<NoticeBar[\s\S]*?placement="canvas"/u);
+  assert.match(canvas, /actionLabel=\{editFeedback\.recovery === "reload" \? reloadActionLabel : "添加评论"\}/u);
+  assert.match(canvas, /onRequestReload\?\.\(\)/u);
+  assert.match(workbench, /if \(sourcePathRef\.current\)[\s\S]*?reloadCurrentSource\(\)[\s\S]*?openProject\(\)/u);
+  assert.match(workbench, /reloadActionLabel=\{sourcePath \? "重新载入" : "重新选择"\}/u);
   assert.match(canvas, /editFeedbackPaused/u);
+  assert.match(canvas, /\}, 5_000\);/u);
   assert.doesNotMatch(canvas, /本次直接编辑已阻止|"code" in cause/u);
   assert.doesNotMatch(canvas, /这次修改没有应用|原 HTML 没有变化/u);
   assert.doesNotMatch(canvas, /这段内容暂时无法准确定位/u);
   assert.doesNotMatch(workbench, /onEditBlocked=/u);
+  assert.doesNotMatch(canvasStyles, /\.editBlockedNotice/u);
 
   const toolbarControls = canvasStyles.slice(
     canvasStyles.indexOf(".commentToolButton,"),
@@ -87,14 +99,41 @@ test("technical desktop error plumbing is absent from product copy", () => {
 });
 
 test("critical notices are legible and their close action cannot wrap", () => {
-  assert.match(styles, /\.toast\[data-tone="error"\]/);
-  assert.match(styles, /\.toast-copy strong\s*\{[\s\S]*?font-size:\s*12px/);
-  assert.match(styles, /\.toast-copy > span\s*\{[\s\S]*?font-size:\s*11px/);
+  assert.match(noticeStyles, /\.notice\[data-tone="error"\]/);
+  assert.match(noticeStyles, /\.copy strong\s*\{[\s\S]*?font-size:\s*12px/);
+  assert.match(noticeStyles, /\.copy > span\s*\{[\s\S]*?font-size:\s*10\.5px/);
   assert.match(
-    styles,
-    /\.toast-actions button\s*\{[\s\S]*?min-height:\s*30px/,
+    noticeStyles,
+    /\.actions button\s*\{[\s\S]*?min-height:\s*32px/,
   );
+  assert.match(noticeStyles, /backdrop-filter:\s*blur\(22px\)/);
+  assert.match(
+    noticeStyles,
+    /left:\s*calc\(\(100vw - var\(--notice-rail-width, 376px\)\) \/ 2\)/,
+  );
+  assert.doesNotMatch(styles, /\.toast/u);
   assert.match(styles, /\.comment-persist-error\s*\{/);
+});
+
+test("file and attachment failures keep a real recovery path", () => {
+  assert.match(workbench, /planAttachmentSelection\(files, existingCount\)/);
+  assert.doesNotMatch(workbench, /if \(previewAttachments\.length === 0\) return/);
+  assert.match(workbench, /if \(selected\.length === 0 && issueNotes\.length > 0\)/);
+  assert.match(workbench, /title: addedAttachmentCount > 0[\s\S]*?"附件没有加入"/);
+  assert.match(workbench, /dedupeKey: `attachment-batch-\$\{target\.commentId\}`/);
+  assert.match(workbench, /id: "open-attachment-picker"[\s\S]*?label: "重新选择"/);
+  assert.match(workbench, /id: "review-comment-attachments"[\s\S]*?label: "查看附件"/);
+  assert.match(workbench, /请先移除一个附件，再重新选择。/);
+  assert.match(
+    workbench,
+    /action\.id === "review-comment-attachments"[\s\S]*?queueReviewPairReveal[\s\S]*?focusCommentTarget/,
+  );
+  assert.match(workbench, /title: encodingUnsupported \? "文件编码不支持" : "文件无法打开"/);
+  assert.match(workbench, /原文件没有被修改。请先转换为 UTF-8，再重新选择。/);
+  assert.match(
+    workbench,
+    /dedupeKey: "browser-file-error",[\s\S]*?id: "retry-project-open", label: "重新选择"/,
+  );
 });
 
 test("blocking paths expose an in-context recovery instead of a dead end", () => {
@@ -124,7 +163,7 @@ test("the verified AI file identity appears only after the user opens the ready 
   assert.match(workbench, /\/ready-version\/activate/);
   assert.match(
     workbench,
-    /<strong title=\{activeOpenedAiVersionNotice\?\.fileName \|\| projectName\}>[\s\S]*?\{activeOpenedAiVersionNotice\?\.fileName \|\| projectName\}/,
+    /<strong[\s\S]*?title=\{activeOpenedAiVersionNotice\?\.fileName \|\| projectName\}[\s\S]*?\{activeOpenedAiVersionNotice\?\.fileName \|\| projectName\}/,
   );
   assert.match(workbench, /setOpenedAiVersionNotice\(\{[\s\S]*?sourcePath: committedSourcePath/);
   assert.doesNotMatch(workbench, /QoderWork 返回的新文件已打开|原文件已保留/);

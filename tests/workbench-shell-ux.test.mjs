@@ -358,7 +358,8 @@ test("QoderWork handoff exposes a truthful process board and manual open action"
   assert.match(workbench, /不代表 Qoder 已收到/);
   assert.match(workbench, /等待 QoderWork 返回修改结果/);
   assert.match(workbench, /画布已锁定，仅可浏览/);
-  assert.match(workbench, /身份、Hash 与文件完整性/);
+  assert.match(workbench, /版本与文件完整性/);
+  assert.doesNotMatch(workbench, /身份、Hash 与文件完整性/);
   assert.match(workbench, /范围与质量校验/);
   assert.match(workbench, /无视本校验，继续/);
   assert.match(workbench, /打开最新版/);
@@ -628,7 +629,7 @@ test("AI completion adopts the generated semantic file before editing resumes", 
   assert.doesNotMatch(workbench, /QoderWork 返回的新文件已打开|原文件已保留/u);
   assert.match(
     workbench,
-    /<strong title=\{activeOpenedAiVersionNotice\?\.fileName \|\| projectName\}>/,
+    /<strong[\s\S]*?title=\{activeOpenedAiVersionNotice\?\.fileName \|\| projectName\}[\s\S]*?aria-live="polite"[\s\S]*?aria-atomic="true"/,
   );
   assert.match(workbench, /aria-live="polite"[\s\S]*?aria-atomic="true"/u);
   assert.match(

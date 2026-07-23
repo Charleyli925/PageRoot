@@ -42,7 +42,12 @@ import type {
   NativeDeferredCommandDiscardReason,
 } from "./components/HtmlCanvasEditor";
 import HtmlInteractionPreview from "./components/HtmlInteractionPreview";
+import NoticeBar from "./components/NoticeBar";
 import { rebindCanvasSelectionTargets } from "./lib/canvas-target-rebind.js";
+import {
+  MAX_COMMENT_ATTACHMENTS,
+  planAttachmentSelection,
+} from "./lib/attachment-selection.js";
 import {
   auditEventKey,
   removeAcknowledgedAuditEvents,
@@ -344,6 +349,11 @@ type ToastAction =
       label: string;
       target: { kind: "composer" | "comment"; commentId: string };
       accept?: "all" | "image";
+    }
+  | {
+      id: "review-comment-attachments";
+      label: string;
+      target: { kind: "composer" | "comment"; commentId: string };
     }
   | { id: "retry-attachment-preview"; label: string; attachment: CommentAttachment }
   | { id: "retry-attachment-download"; label: string; attachment: CommentAttachment }
@@ -3932,22 +3942,74 @@ export default function Workbench() {
     source: "clipboard" | "file-picker",
   ) => {
     if (files.length === 0) return;
+    const targetIsOpen = target.kind === "composer"
+      ? composerCommentIdRef.current === target.commentId
+      : commentsRef.current.some((comment) => comment.commentId === target.commentId);
+    if (!targetIsOpen) {
+      setToast({
+        title: "附件没有加入",
+        message: "这条评论已经关闭。请重新打开评论后再选择附件。",
+        tone: "warning",
+        sticky: true,
+        dedupeKey: `attachment-target-closed-${target.commentId}`,
+      });
+      return;
+    }
     const existingCount = target.kind === "composer"
       ? composerAttachmentsRef.current.length
       : commentsRef.current.find((comment) => comment.commentId === target.commentId)
           ?.attachments?.length ?? 0;
-    const available = Math.max(0, 10 - existingCount);
-    const selected = files.slice(0, available);
+    const attachmentPlan = planAttachmentSelection(files, existingCount);
+    const selected = attachmentPlan.accepted;
     const issueNotes: string[] = [];
     const failedNames: string[] = [];
-    if (selected.length < files.length) {
-      issueNotes.push(`已达到每条评论 10 个附件的上限，${files.length - selected.length} 个未加入`);
+    let addedAttachmentCount = 0;
+    const attachmentRecoveryAction = (needsRemoval: boolean): ToastAction => (
+      needsRemoval
+        ? {
+            id: "review-comment-attachments",
+            label: "查看附件",
+            target,
+          }
+        : {
+            id: "open-attachment-picker",
+            label: "重新选择",
+            target,
+          }
+    );
+    if (attachmentPlan.invalid.length === 1) {
+      const invalidFile = attachmentPlan.invalid[0];
+      issueNotes.push(`${invalidFile.name || "未命名文件"} 为空或超过 25 MB`);
+    } else if (attachmentPlan.invalid.length > 1) {
+      issueNotes.push(`${attachmentPlan.invalid.length} 个文件为空或超过 25 MB`);
+    }
+    if (attachmentPlan.overLimit.length > 0) {
+      issueNotes.push(
+        `已达到每条评论 ${MAX_COMMENT_ATTACHMENTS} 个附件的上限，`
+        + `${attachmentPlan.overLimit.length} 个未加入`,
+      );
+    }
+    if (selected.length === 0 && issueNotes.length > 0) {
+      const needsRemoval = attachmentPlan.overLimit.length > 0
+        && attachmentPlan.available === 0;
+      setToast({
+        title: "附件没有加入",
+        message: `${issueNotes.join("；")}。${
+          needsRemoval
+            ? "请先移除一个附件，再重新选择。"
+            : "请选择其他文件。"
+        }`,
+        tone: "warning",
+        sticky: true,
+        dedupeKey: `attachment-batch-${target.commentId}`,
+        action: attachmentRecoveryAction(needsRemoval),
+      });
+      return;
     }
     const activeSource = sourcePathRef.current;
     if (!activeSource) {
       if (typeof window !== "undefined" && !window.htmlAIProjects) {
-        const previewAttachments = selected.flatMap((file) => {
-          if (file.size <= 0 || file.size > 25 * 1024 * 1024) return [];
+        const previewAttachments = selected.map((file) => {
           const attachmentId = recordId("attachment", attachmentCounter.current++);
           const attachment: CommentAttachment = {
             attachmentId,
@@ -3962,15 +4024,14 @@ export default function Workbench() {
           if (attachment.kind === "image") {
             rememberAttachmentObjectUrl(attachmentId, URL.createObjectURL(file));
           }
-          return [attachment];
+          return attachment;
         });
-        if (previewAttachments.length === 0) return;
-        if (target.kind === "composer") {
-          if (composerCommentIdRef.current !== target.commentId) return;
+        if (previewAttachments.length > 0 && target.kind === "composer") {
           const next = [...composerAttachmentsRef.current, ...previewAttachments];
           composerAttachmentsRef.current = next;
           setDraftAttachments(next);
-        } else {
+          addedAttachmentCount = previewAttachments.length;
+        } else if (previewAttachments.length > 0) {
           const nextComments = commentsRef.current.map((comment) => (
             comment.commentId === target.commentId
               ? {
@@ -3982,6 +4043,29 @@ export default function Workbench() {
           ));
           commentsRef.current = nextComments;
           setComments(nextComments);
+          addedAttachmentCount = previewAttachments.length;
+        }
+        if (issueNotes.length > 0) {
+          const needsRemoval = attachmentPlan.overLimit.length > 0
+            && existingCount + addedAttachmentCount >= MAX_COMMENT_ATTACHMENTS;
+          setToast({
+            title: addedAttachmentCount > 0
+              ? "部分附件没有加入"
+              : "附件没有加入",
+            message: `${issueNotes.join("；")}。${
+              addedAttachmentCount > 0
+                ? needsRemoval
+                  ? "已加入的附件仍然保留；如需加入其余文件，请先移除一个附件。"
+                  : "已加入的附件仍然保留。"
+                : needsRemoval
+                  ? "请先移除一个附件，再重新选择。"
+                  : "请选择其他文件。"
+            }`,
+            tone: "warning",
+            sticky: true,
+            dedupeKey: `attachment-batch-${target.commentId}`,
+            action: attachmentRecoveryAction(needsRemoval),
+          });
         }
         return;
       }
@@ -4022,10 +4106,6 @@ export default function Workbench() {
             { type: originalFile.type || "image/png" },
           )
         : originalFile;
-      if (file.size <= 0 || file.size > 25 * 1024 * 1024) {
-        issueNotes.push(`${file.name || "未命名文件"} 为空或超过 25 MB`);
-        continue;
-      }
       setAttachmentUploadCount((count) => count + 1);
       try {
         const attachmentId = recordId("attachment", attachmentCounter.current++);
@@ -4052,22 +4132,33 @@ export default function Workbench() {
           isRecord(payload.attachment) ? payload.attachment : null,
         );
         if (!attachment) throw new Error("附件已写入，但返回的记录不完整。");
-        if (attachment.kind === "image") {
-          rememberAttachmentObjectUrl(
-            attachment.attachmentId,
-            URL.createObjectURL(file),
-          );
-        }
         if (target.kind === "composer") {
           if (composerCommentIdRef.current !== target.commentId) {
             void deleteAttachmentFile(attachment);
-            continue;
+            throw new Error("这条评论已经关闭。请重新打开评论后再选择附件。");
+          }
+          if (attachment.kind === "image") {
+            rememberAttachmentObjectUrl(
+              attachment.attachmentId,
+              URL.createObjectURL(file),
+            );
           }
           const next = [...composerAttachmentsRef.current, attachment];
           composerAttachmentsRef.current = next;
           setDraftAttachments(next);
           persistCurrentDraftRecovery();
+          addedAttachmentCount += 1;
         } else {
+          if (!commentsRef.current.some((comment) => comment.commentId === target.commentId)) {
+            void deleteAttachmentFile(attachment);
+            throw new Error("这条评论已经关闭。请重新打开评论后再选择附件。");
+          }
+          if (attachment.kind === "image") {
+            rememberAttachmentObjectUrl(
+              attachment.attachmentId,
+              URL.createObjectURL(file),
+            );
+          }
           const nextComments = commentsRef.current.map((comment) => (
             comment.commentId === target.commentId
               ? {
@@ -4080,6 +4171,7 @@ export default function Workbench() {
           commentsRef.current = nextComments;
           setComments(nextComments);
           persistCurrentDraftRecovery(nextComments);
+          addedAttachmentCount += 1;
         }
       } catch (cause) {
         failedNames.push(file.name || "未命名文件");
@@ -4097,17 +4189,34 @@ export default function Workbench() {
       issueNotes.push(`${failedNames.join("、")} 未加入评论`);
     }
     if (issueNotes.length > 0) {
+      const targetStillOpen = target.kind === "composer"
+        ? composerCommentIdRef.current === target.commentId
+        : commentsRef.current.some((comment) => comment.commentId === target.commentId);
+      const currentAttachmentCount = target.kind === "composer"
+        ? composerAttachmentsRef.current.length
+        : commentsRef.current.find((comment) => comment.commentId === target.commentId)
+            ?.attachments?.length ?? 0;
+      const needsRemoval = attachmentPlan.overLimit.length > 0
+        && currentAttachmentCount >= MAX_COMMENT_ATTACHMENTS;
       setToast({
-        title: failedNames.length > 0 ? "部分附件没有加入" : "有附件没有加入",
-        message: `${issueNotes.join("；")}。已成功加入的附件仍然保留。`,
+        title: addedAttachmentCount > 0 ? "部分附件没有加入" : "附件没有加入",
+        message: `${issueNotes.join("；")}。${
+          addedAttachmentCount > 0
+            ? needsRemoval
+              ? "已加入的附件仍然保留；如需加入其余文件，请先移除一个附件。"
+              : "已加入的附件仍然保留。"
+            : targetStillOpen
+              ? needsRemoval
+                ? "请先移除一个附件，再重新选择。"
+                : "请选择其他文件。"
+              : "请重新打开评论后再选择附件。"
+        }`,
         tone: failedNames.length > 0 ? "error" : "warning",
         sticky: true,
         dedupeKey: `attachment-batch-${target.commentId}`,
-        action: {
-          id: "open-attachment-picker",
-          label: "重新选择",
-          target,
-        },
+        ...(targetStillOpen ? {
+          action: attachmentRecoveryAction(needsRemoval),
+        } : {}),
       });
     }
   }, [
@@ -4831,13 +4940,16 @@ export default function Workbench() {
       if (openRequest !== projectOpenRequestRef.current) return;
       applyProject({ name: file.name, sourcePath: null, html: fileHtml });
     } catch (cause) {
+      const encodingUnsupported = cause instanceof TypeError;
       setToast({
-        title: "无法读取文件",
-        message: cause instanceof TypeError
-          ? "这个 HTML 不是 UTF-8 编码。为了不损坏原文件，请先转换为 UTF-8 后再打开。"
-          : "请选择普通的 .html 或 .htm 文件。",
+        title: encodingUnsupported ? "文件编码不支持" : "文件无法打开",
+        message: encodingUnsupported
+          ? "原文件没有被修改。请先转换为 UTF-8，再重新选择。"
+          : "请选择 .html 或 .htm 文件后重试。",
         tone: "warning",
+        sticky: true,
         dedupeKey: "browser-file-error",
+        action: { id: "retry-project-open", label: "重新选择" },
       });
     }
   }, [applyProject, prepareProjectSwitch]);
@@ -7963,7 +8075,7 @@ export default function Workbench() {
         ? "错误详情保留在本轮记录中，返回编辑后可调整并重试"
         : "原始评论和本地内容均已冻结，返回结果不会覆盖它们";
   const processStatusLabel = pendingRunOutcome
-    ? "等待状态确认"
+    ? "正在等待修改结果"
     : activeRun?.status === "ready-to-open"
       ? "等待确认打开"
       : activeRun?.status === "no-change"
@@ -8024,7 +8136,7 @@ export default function Workbench() {
     },
     {
       key: "integrity",
-      label: "身份、Hash 与文件完整性",
+      label: "版本与文件完整性",
       detail: activeRun.status === "error"
         ? activeRun.error || "硬校验未通过"
         : activeRun.status === "no-change"
@@ -8237,14 +8349,6 @@ export default function Workbench() {
     760,
     Math.ceil(commentRailHeight || 0),
   );
-  const toastToneLabel = toast
-    ? {
-        success: "操作已完成",
-        info: "提示",
-        warning: "需要关注",
-        error: "需要处理",
-      }[toast.tone]
-    : "";
   const returnToEditingFromTerminalRun = (adjustRequirements: boolean) => {
     const completedRun = activeRunRef.current;
     if (completedRun?.sourcePath) {
@@ -8300,6 +8404,25 @@ export default function Workbench() {
       void reloadCurrentSource(true);
     } else if (action.id === "open-attachment-picker") {
       openAttachmentPicker(action.target, action.accept || "all");
+    } else if (action.id === "review-comment-attachments") {
+      if (action.target.kind === "composer") {
+        const target = draftTargetRef.current;
+        if (
+          composerCommentIdRef.current === action.target.commentId
+          && target
+        ) {
+          setComposerOpen(true);
+          queueReviewPairReveal(target, "__composer");
+          window.requestAnimationFrame(() => {
+            composerRef.current?.focus({ preventScroll: true });
+          });
+        }
+      } else {
+        const comment = commentsRef.current.find(
+          (item) => item.commentId === action.target.commentId,
+        );
+        if (comment) focusCommentTarget(comment.target, comment.commentId);
+      }
     } else if (action.id === "retry-attachment-preview") {
       void openAttachmentPreview(action.attachment);
     } else if (action.id === "retry-attachment-download") {
@@ -8378,7 +8501,7 @@ export default function Workbench() {
               <ul>
                 <li>{version.summary || "完整 HTML 内容与页面结构"}</li>
                 <li>评论、图片与附件的完整保留</li>
-                <li>{version.validationReview?.status === "waived" ? "安全校验通过，范围提示已记录" : "身份、Hash 与文件完整性已校验"}</li>
+                <li>{version.validationReview?.status === "waived" ? "安全校验通过，范围提示已记录" : "版本与文件完整性已校验"}</li>
               </ul>
             </div>
             {version.comments.length > 0
@@ -8479,7 +8602,7 @@ export default function Workbench() {
                   <header><strong>AI 结果与校验</strong><span>已归档</span></header>
                   <p>{version.validationReview?.status === "waived"
                     ? "硬校验通过；软校验由用户选择忽略，决定与原因已记录。"
-                    : "版本身份、内容 Hash 与不可变文件已经校验并提交。"}</p>
+                    : "版本与文件内容已经校验并保存。"}</p>
                 </section>
               </details>
             ) : null}
@@ -8532,7 +8655,12 @@ export default function Workbench() {
       <header className="workbench-header">
         <div className="window-file">
           <div className="window-file-copy">
-            <strong title={activeOpenedAiVersionNotice?.fileName || projectName}>
+            <strong
+              title={activeOpenedAiVersionNotice?.fileName || projectName}
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+            >
               {activeOpenedAiVersionNotice?.fileName || projectName}
             </strong>
             <span className="file-meta">
@@ -8839,6 +8967,14 @@ export default function Workbench() {
                 onRequestExport={() => {
                   void exportCurrentHtml();
                 }}
+                onRequestReload={() => {
+                  if (sourcePathRef.current) {
+                    void reloadCurrentSource();
+                  } else {
+                    void openProject();
+                  }
+                }}
+                reloadActionLabel={sourcePath ? "重新载入" : "重新选择"}
                 commentedTargets={commentedTargets}
                 trackedTargets={trackedAuditTargets}
                 locked={
@@ -10057,44 +10193,20 @@ export default function Workbench() {
         ) : null}
       </aside>
 
-      <div
-        className={`toast${toast ? " show" : ""}`}
-        data-tone={toast?.tone || "info"}
-        role={toast?.tone === "error" ? "alert" : "status"}
-        aria-live={toast?.tone === "error" ? "assertive" : "polite"}
-        aria-atomic="true"
-        onMouseEnter={() => setPausedNoticeIdentity(noticeIdentity)}
-        onMouseLeave={() => setPausedNoticeIdentity(null)}
-        onFocusCapture={() => setPausedNoticeIdentity(noticeIdentity)}
-        onBlurCapture={(event) => {
-          const next = event.relatedTarget;
-          if (!(next instanceof Node) || !event.currentTarget.contains(next)) {
-            setPausedNoticeIdentity(null);
-          }
-        }}
-      >
-        <span className="toast-accent" aria-hidden="true" />
-        <div className="toast-copy">
-          <small>{toastToneLabel}</small>
-          <strong>{toast?.title}</strong>
-          <span>{toast?.message}</span>
-        </div>
-        <div className="toast-actions">
-          {toast?.action ? (
-            <button
-              className="toast-action"
-              type="button"
-              onClick={handleToastAction}
-            >{toast.action.label}</button>
-          ) : null}
-          <button
-            className="toast-close"
-            type="button"
-            aria-label="关闭提醒"
-            onClick={() => setToast(null)}
-          >关闭</button>
-        </div>
-      </div>
+      {toast ? (
+        <NoticeBar
+          className="toast"
+          title={toast.title}
+          message={toast.message}
+          tone={toast.tone}
+          actionLabel={toast.action?.label}
+          onAction={toast.action ? handleToastAction : undefined}
+          onDismiss={() => setToast(null)}
+          onPauseChange={(paused) => {
+            setPausedNoticeIdentity(paused ? noticeIdentity : null);
+          }}
+        />
+      ) : null}
     </main>
   );
 }
