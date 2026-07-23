@@ -4,6 +4,8 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+- Reduced repeated release validation by binding the full PR gate to an exact Git Tree Hash, using a fast post-merge smoke, and reusing fresh matching source evidence for installer-only release verification.
+
 ## [0.8.5] - 2026-07-23
 
 - Published the 0.8.4 source feature set from a new immutable release tag after the earlier artifact run stopped before publication.

@@ -249,6 +249,10 @@ test("release commands use one automated artifact lane with full tests and packa
   assert.equal(packageJson.scripts.verify, "npm run gate:task");
   assert.equal(packageJson.scripts["release:mac"], "npm run gate:artifact:auto");
   assert.equal(packageJson.scripts["release:mac:x64"], "npm run gate:artifact:auto:x64");
+  assert.equal(
+    packageJson.scripts["gate:artifact-only:auto"],
+    "node scripts/test-gate.mjs artifact-only --arch arm64",
+  );
   assert.deepEqual(impactMap.lanes.artifact.fullSuites, [
     "typecheck",
     "lint",
@@ -262,11 +266,18 @@ test("release commands use one automated artifact lane with full tests and packa
     "packaged-runtime",
     "packaged-verify",
   ]);
+  assert.deepEqual(impactMap.lanes["artifact-only"].fullSuites, [
+    "package-build",
+    "packaged-runtime",
+    "packaged-verify",
+  ]);
   assert.match(gateRunner, /output\/test-runs/);
   assert.match(gateRunner, /changeSetSha256/);
   assert.match(packageJson.scripts["audit:dependencies"], /check-dependency-audit\.mjs/);
   assert.match(gateRunner, /require a clean Git worktree/);
-  assert.match(gateRunner, /Release source changed while the gate was running/);
+  assert.match(gateRunner, /Clean source changed while the gate was running/);
+  assert.match(gateRunner, /artifact-only requires a trusted source-gate decision from CI/);
+  assert.match(gateRunner, /PAGEROOT_SOURCE_GATE_TREE/);
   assert.match(packageJson.scripts["desktop:pack:prepared"], /build-package\.mjs --arch arm64/);
   assert.match(
     packageBuilder,

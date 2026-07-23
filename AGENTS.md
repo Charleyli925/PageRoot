@@ -30,7 +30,7 @@ For command behavior, authorization levels, worktrees and reporting format, read
 - Complete clean source candidate: `npm run gate:release:auto`
 - Verified arm64 installer candidate: `npm run release:mac`
 
-The release and artifact gates require a clean committed tree. Any source change invalidates earlier release evidence. Release only from reviewed `main` using the immutable-tag process in `docs/RELEASING.md`.
+The release and artifact gates require a clean committed tree. Any source change invalidates earlier release evidence. Pull Requests run the complete source gate once; `main` verifies its exact-tree attestation and runs only a fast smoke. A release tag may use the internal `gate:artifact-only:auto` lane only when CI has authenticated a fresh successful PR gate for the identical Git tree and version; otherwise it must rerun `release:mac`. Release only from reviewed `main` using the immutable-tag process in `docs/RELEASING.md`.
 
 ## Product invariants
 

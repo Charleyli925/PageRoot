@@ -33,8 +33,8 @@ function parseArguments(argv) {
     else if (argument === "--real-html") options.realHtmlPath = argv.shift() || null;
     else throw new Error(`Unknown argument: ${argument}`);
   }
-  if (!/^(?:edit|task|release|artifact)$/u.test(options.lane)) {
-    throw new Error("Lane must be edit, task, release or artifact.");
+  if (!/^(?:edit|task|main|release|artifact-only|artifact)$/u.test(options.lane)) {
+    throw new Error("Lane must be edit, task, main, release, artifact-only or artifact.");
   }
   if (!/^(?:arm64|x64)$/u.test(options.arch)) throw new Error("--arch must be arm64 or x64.");
   if (options.realHtmlPath) {
@@ -128,6 +128,7 @@ function commandForSuite(suiteId, context) {
     "node-contract": packageCommand("test:contract:prepared"),
     "node-integration": packageCommand("test:node:integration:prepared"),
     "node-package": packageCommand("test:package"),
+    "node-smoke": packageCommand("test:node:smoke:prepared"),
     "node-full": packageCommand("test:node:full:prepared"),
     "browser-smoke": packageCommand("test:browser:smoke:prepared"),
     "browser-full": packageCommand("test:browser:full:prepared"),
@@ -183,7 +184,7 @@ async function assertReleaseRepositoryStable(repository) {
   const current = await repositoryEvidence(files);
   if (files.length > 0 || current.head !== repository.head || current.tree !== repository.tree) {
     throw new Error(
-      "Release source changed while the gate was running. Commit the final source and rerun the entire gate.",
+      "Clean source changed while the gate was running. Commit the final source and rerun the gate.",
     );
   }
 }
@@ -198,14 +199,26 @@ async function main() {
       + "Pass --base <git-ref> for a committed task, or use the release gate for complete coverage.",
     );
   }
-  if ((options.lane === "release" || options.lane === "artifact") && files.length > 0) {
+  const cleanSourceLane = ["main", "release", "artifact-only", "artifact"].includes(options.lane);
+  if (cleanSourceLane && files.length > 0) {
     throw new Error(
-      `${options.lane} gates require a clean Git worktree. Commit or stash every source change first.`,
+      `${options.lane} gates require a clean Git worktree. Commit every source change first.`,
     );
   }
   const plan = assertFullyAutomatedPlan(selectGatePlan({ map, lane: options.lane, changedFiles: files }));
   const repository = await repositoryEvidence(files);
   const packageJson = JSON.parse(await readFile(path.join(productRoot, "package.json"), "utf8"));
+  if (options.lane === "artifact-only") {
+    if (process.env.PAGEROOT_SOURCE_GATE_TRUSTED !== "true") {
+      throw new Error("artifact-only requires a trusted source-gate decision from CI.");
+    }
+    if (
+      process.env.PAGEROOT_SOURCE_GATE_TREE !== repository.tree
+      || process.env.PAGEROOT_SOURCE_GATE_VERSION !== packageJson.version
+    ) {
+      throw new Error("artifact-only source-gate tree or version does not match the clean checkout.");
+    }
+  }
   const artifact = expectedArtifactLayout({
     productRoot,
     packageJson,
@@ -245,7 +258,7 @@ async function main() {
   const results = [];
   if (!options.dryRun) {
     for (const suite of selectedSuites) {
-      if (options.lane === "release" || options.lane === "artifact") {
+      if (cleanSourceLane) {
         await assertReleaseRepositoryStable(repository);
       }
       const command = commandForSuite(suite.id, context);
@@ -285,7 +298,7 @@ async function main() {
       if (exitCode !== 0 || failure) break;
     }
     if (!results.some((result) => result.status === "failed")
-      && (options.lane === "release" || options.lane === "artifact")) {
+      && cleanSourceLane) {
       await assertReleaseRepositoryStable(repository);
     }
   }

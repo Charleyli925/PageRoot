@@ -6,7 +6,13 @@ on:
       - "v*.*.*"
 
 permissions:
+  actions: read
   contents: write
+  pull-requests: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   release:
@@ -23,9 +29,55 @@ jobs:
           cache: npm
       - name: Verify tag matches package version
         run: test "$GITHUB_REF_NAME" = "v$(node -p "require('./package.json').version")"
+      - name: Check for reusable exact-tree PR source gate
+        id: source-gate
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/source-gate-provenance.mjs verify \
+            --repository "$GITHUB_REPOSITORY" \
+            --workflow ci.yml \
+            --max-age-hours 168 \
+            --mode advisory \
+            --github-output "$GITHUB_OUTPUT"
+      - name: Restore Electron and builder downloads
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+          key: ${{ runner.os }}-electron-builder-${{ hashFiles('package-lock.json') }}
       - run: npm ci
-      - run: npx playwright install chromium
-      - run: npm run release:mac
+      - name: Restore Playwright Chromium for source-gate fallback
+        if: steps.source-gate.outputs.trusted != 'true'
+        id: playwright-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/Library/Caches/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}
+      - name: Install Playwright Chromium for source-gate fallback
+        if: steps.source-gate.outputs.trusted != 'true' && steps.playwright-cache.outputs.cache-hit != 'true'
+        run: npx playwright install chromium
+      - name: Build and verify installer from attested source
+        if: steps.source-gate.outputs.trusted == 'true'
+        env:
+          PAGEROOT_SOURCE_GATE_TRUSTED: ${{ steps.source-gate.outputs.trusted }}
+          PAGEROOT_SOURCE_GATE_TREE: ${{ steps.source-gate.outputs.tree_sha }}
+          PAGEROOT_SOURCE_GATE_VERSION: ${{ steps.source-gate.outputs.package_version }}
+        run: npm run gate:artifact-only:auto
+      - name: Re-run complete source and installer gate
+        if: steps.source-gate.outputs.trusted != 'true'
+        run: npm run release:mac
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: PageRoot-Release-diagnostics-${{ github.run_attempt }}
+          path: |
+            output/test-runs
+            output/playwright
+          if-no-files-found: warn
+          retention-days: 7
       - run: npm run release:assets -- --arch arm64
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
