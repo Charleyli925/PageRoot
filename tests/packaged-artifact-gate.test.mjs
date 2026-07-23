@@ -310,6 +310,9 @@ test("retired editor guard rejects dependencies, bundled code, and legacy editin
     ["renderer bundle", "Minified Lexical error"],
     ["renderer bundle", "new TextFlowSession()"],
     ["renderer bundle", "startTextFlowEditing()"],
+    ["source package.json", '{"dependencies":{"text-flow":"1.0.0"}}'],
+    ["source package-lock.json", '{"packages":{"node_modules/textflow":{}}}'],
+    ["source package alias", '{"dependencies":{"legacy-editor":"npm:text-flow@1.0.0"}}'],
     ["app.asar renderer", "<pageroot-text-editor>"],
     ["app.asar renderer", "data-html-canvas-text-flow"],
   ]) {

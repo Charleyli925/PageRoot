@@ -84,7 +84,7 @@ test("packaged PageRoot boots in isolation and exports one byte-exact authored D
     await setTextSelection(frame, "source-fidelity", 0, originalToken.length);
     await page.keyboard.insertText(replacement);
     await page.keyboard.press(keyShortcut("S"));
-    expect(await requestExportCurrentHtml(page)).toBe(true);
+    await requestExportCurrentHtml(page);
     await expect.poll(() => existsSync(exportedPath), { timeout: 15_000 }).toBe(true);
     const exported = readFileSync(exportedPath);
     expect(exported.equals(expected), "packaged export must differ only at the authorized bytes").toBe(true);

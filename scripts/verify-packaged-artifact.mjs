@@ -49,7 +49,7 @@ const RETIRED_EDITOR_ARTIFACTS = [
   { name: "Lexical", pattern: /(?:@lexical\/|\blexical\b)/iu },
   {
     name: "TextFlow",
-    pattern: /\b(?:TextFlow(?:Editor|Session|Surface)?|textFlow(?:Editor|Session|Surface)|startTextFlowEditing)\b/u,
+    pattern: /(?:\b(?:TextFlow(?:Editor|Session|Surface)?|textFlow(?:Editor|Session|Surface)|startTextFlowEditing)\b|"(?:node_modules\/)?(?:@[^"/]+\/)?text-?flow"\s*:|"[^"]+"\s*:\s*"npm:(?:@[^"/]+\/)?text-?flow@)/iu,
   },
   {
     name: "legacy editing surface",
