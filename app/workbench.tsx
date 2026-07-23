@@ -7328,7 +7328,7 @@ export default function Workbench() {
   );
   const canvasDocumentHeight = Math.max(
     760,
-    Math.ceil(commentRailHeight || 0) + 42,
+    Math.ceil(commentRailHeight || 0),
   );
   const toastToneLabel = toast
     ? {

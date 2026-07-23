@@ -37,7 +37,9 @@ export default defineConfig({
     command: "npm run start",
     cwd: productRoot,
     url: baseURL,
-    reuseExistingServer: !process.env.CI,
+    // A green gate must belong to this checkout's freshly built renderer.
+    // Reusing an unrelated local server can silently validate stale code.
+    reuseExistingServer: false,
     timeout: 120_000,
     stdout: "pipe",
     stderr: "pipe",

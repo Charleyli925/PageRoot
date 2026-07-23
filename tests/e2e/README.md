@@ -25,12 +25,16 @@ npx playwright install chromium
 npx playwright test --config tests/e2e/browser/playwright.config.mjs
 ```
 
-An already-running server can be used without letting the config start one:
+An explicitly chosen already-running server can be used without letting the
+config start one:
 
 ```sh
 PAGEROOT_BASE_URL=http://127.0.0.1:3000 \
   npx playwright test --config tests/e2e/browser/playwright.config.mjs
 ```
+
+Without `PAGEROOT_BASE_URL`, the gate starts this checkout's production server
+and refuses to silently reuse another process already listening on port 3000.
 
 For Electron, build the renderer first, then run the isolated app tests:
 
