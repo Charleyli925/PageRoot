@@ -7817,6 +7817,9 @@ export default function Workbench() {
                 onSelect={handleCanvasSelection}
                 onRequestComment={openCommentComposer}
                 onRequestFlush={requestUserFlush}
+                onRequestExport={() => {
+                  void exportCurrentHtml();
+                }}
                 commentedTargets={commentedTargets}
                 trackedTargets={trackedAuditTargets}
                 locked={

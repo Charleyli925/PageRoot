@@ -293,15 +293,26 @@ test("release commands use one automated artifact lane with full tests and packa
 });
 
 test("retired editor guard rejects dependencies, bundled code, and legacy editing surfaces", () => {
-  assert.doesNotThrow(() => assertNoRetiredEditorArtifacts(
+  for (const contents of [
     "const nativeEditing = true; data-pageroot-runtime-node",
-    "clean native runtime",
-  ));
+    "replace-text-flow-range",
+    "planTextFlowRangePatch()",
+    "plainTextFlow",
+  ]) {
+    assert.doesNotThrow(() => assertNoRetiredEditorArtifacts(
+      contents,
+      "clean native runtime",
+    ));
+  }
   for (const [label, contents] of [
     ["source package.json", '{"dependencies":{"lexical":"0.48.0"}}'],
     ["source package-lock.json", '{"packages":{"node_modules/@lexical/history":{}}}'],
     ["renderer bundle", "Minified Lexical error"],
+    ["renderer bundle", "new TextFlowSession()"],
     ["renderer bundle", "startTextFlowEditing()"],
+    ["source package.json", '{"dependencies":{"text-flow":"1.0.0"}}'],
+    ["source package-lock.json", '{"packages":{"node_modules/textflow":{}}}'],
+    ["source package alias", '{"dependencies":{"legacy-editor":"npm:text-flow@1.0.0"}}'],
     ["app.asar renderer", "<pageroot-text-editor>"],
     ["app.asar renderer", "data-html-canvas-text-flow"],
   ]) {

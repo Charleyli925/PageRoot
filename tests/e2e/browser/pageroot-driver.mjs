@@ -646,18 +646,7 @@ export function keyShortcut(key) {
 }
 
 export async function requestExportCurrentHtml(page) {
-  return page.evaluate(() => {
-    const event = new KeyboardEvent("keydown", {
-      key: "E",
-      metaKey: true,
-      ctrlKey: true,
-      shiftKey: true,
-      bubbles: true,
-      cancelable: true,
-    });
-    window.dispatchEvent(event);
-    return event.defaultPrevented;
-  });
+  await page.keyboard.press(keyShortcut("Shift+E"));
 }
 
 export async function exportCurrentHtml(page) {

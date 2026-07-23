@@ -293,6 +293,8 @@ export type HtmlCanvasEditorProps = {
   onReady?: (api: HtmlCanvasEditorHandle | null) => void;
   /** Handles Cmd/Ctrl+S inside the iframe without exposing the browser's native Save dialog. */
   onRequestFlush?: () => void;
+  /** Handles Shift+Cmd/Ctrl+E inside the iframe using the host product's source-safe export path. */
+  onRequestExport?: () => void;
   /** Reports a fail-closed edit whose source target could not be patched safely. */
   onEditBlocked?: (message: string) => void;
   /** Optional base URL for relative assets. The injected base element is not included in serialized output. */
@@ -1995,6 +1997,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     onRequestComment,
     onReady,
     onRequestFlush,
+    onRequestExport,
     onEditBlocked,
     baseHref,
     sourcePath,
@@ -2096,6 +2099,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const onCommentLayoutRef = useRef(onCommentLayout);
   const onRequestCommentRef = useRef(onRequestComment);
   const onRequestFlushRef = useRef(onRequestFlush);
+  const onRequestExportRef = useRef(onRequestExport);
   const onEditBlockedRef = useRef(onEditBlocked);
   const readOnlyRef = useRef(readOnly);
   const lockedRef = useRef(locked);
@@ -2119,6 +2123,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   onCommentLayoutRef.current = onCommentLayout;
   onRequestCommentRef.current = onRequestComment;
   onRequestFlushRef.current = onRequestFlush;
+  onRequestExportRef.current = onRequestExport;
   onEditBlockedRef.current = onEditBlocked;
   readOnlyRef.current = readOnly || controlledInteractionLocked || imperativeLockRef.current;
   lockedRef.current = controlledInteractionLocked || imperativeLockRef.current;
@@ -5713,6 +5718,16 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     };
 
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (
+        (event.metaKey || event.ctrlKey)
+        && event.shiftKey
+        && event.key.toLowerCase() === "e"
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        onRequestExportRef.current?.();
+        return;
+      }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
         event.preventDefault();
         event.stopPropagation();

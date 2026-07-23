@@ -16,6 +16,7 @@ import {
   keyShortcut,
   loadFixture,
   productRoot,
+  requestExportCurrentHtml,
   replaceUniqueBytes,
   setTextSelection,
   withBomAndCrLf,
@@ -83,7 +84,7 @@ test("packaged PageRoot boots in isolation and exports one byte-exact authored D
     await setTextSelection(frame, "source-fidelity", 0, originalToken.length);
     await page.keyboard.insertText(replacement);
     await page.keyboard.press(keyShortcut("S"));
-    await page.getByRole("button", { name: "导出 HTML 副本", exact: true }).click();
+    await requestExportCurrentHtml(page);
     await expect.poll(() => existsSync(exportedPath), { timeout: 15_000 }).toBe(true);
     const exported = readFileSync(exportedPath);
     expect(exported.equals(expected), "packaged export must differ only at the authorized bytes").toBe(true);

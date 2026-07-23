@@ -539,11 +539,13 @@ test("Electron canonicalizes and persists an Apple Pinyin styled-wrapper composi
       activeSourcePath: sourcePath,
     });
     firstApp = firstLaunch.electronApp;
-    const { editor, frame } = await loadedDiskFrame(
+    const loaded = await loadedDiskFrame(
       firstLaunch.page,
       sourcePath,
       "heading-inline",
     );
+    const { editor } = loaded;
+    let { frame } = loaded;
     await activateNativeEdit(frame, "heading-inline");
     await replayApplePinyinStyledWrapperCommit(frame, "heading-inline");
 
@@ -558,32 +560,66 @@ test("Electron canonicalizes and persists an Apple Pinyin styled-wrapper composi
     expect(await editor.getAttribute("data-edit-block-detail")).toBeNull();
 
     let persistedRevision = 0;
+    let previousDocumentToken = await documentToken(firstLaunch.page);
     await firstLaunch.page.keyboard.press(keyShortcut("S"));
     persistedRevision = await expectCheckpointPersisted(
       firstLaunch.page,
       persistedRevision,
+    );
+    frame = await waitForFreshDiskFrame(
+      firstLaunch.page,
+      previousDocumentToken,
+      "heading-inline",
     );
     expect(
       readFileSync(sourcePath).equals(expected),
       "styled-wrapper IME commit must persist only Word -> 你好",
     ).toBe(true);
 
+    previousDocumentToken = await documentToken(firstLaunch.page);
     await firstLaunch.page.keyboard.press(keyShortcut("Z"));
+    frame = await waitForFreshDiskFrame(
+      firstLaunch.page,
+      previousDocumentToken,
+      "heading-inline",
+    );
+    await expect.poll(() => frame.locator(caseSelector("heading-inline")).innerHTML())
+      .toContain(">Word</em>");
+    previousDocumentToken = await documentToken(firstLaunch.page);
     await firstLaunch.page.keyboard.press(keyShortcut("S"));
     persistedRevision = await expectCheckpointPersisted(
       firstLaunch.page,
       persistedRevision,
+    );
+    frame = await waitForFreshDiskFrame(
+      firstLaunch.page,
+      previousDocumentToken,
+      "heading-inline",
     );
     expect(
       readFileSync(sourcePath).equals(original),
       "IME undo must restore the byte-exact original fixture",
     ).toBe(true);
 
+    previousDocumentToken = await documentToken(firstLaunch.page);
     await firstLaunch.page.keyboard.press(
       `${process.platform === "darwin" ? "Meta" : "Control"}+Shift+Z`,
     );
+    frame = await waitForFreshDiskFrame(
+      firstLaunch.page,
+      previousDocumentToken,
+      "heading-inline",
+    );
+    await expect.poll(() => frame.locator(caseSelector("heading-inline")).innerHTML())
+      .toContain(">你好</em>");
+    previousDocumentToken = await documentToken(firstLaunch.page);
     await firstLaunch.page.keyboard.press(keyShortcut("S"));
     await expectCheckpointPersisted(firstLaunch.page, persistedRevision);
+    frame = await waitForFreshDiskFrame(
+      firstLaunch.page,
+      previousDocumentToken,
+      "heading-inline",
+    );
     expect(
       readFileSync(sourcePath).equals(expected),
       "IME redo must reproduce the identical forward SourcePatch",
