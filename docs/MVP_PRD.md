@@ -113,7 +113,7 @@ HTML AI 工作台让用户在真实本地 HTML 上完成两类工作：
 
 每次本地修改：
 
-1. 文字双击时只为当前宿主建立 `TextFlowProjection + InlineEditSession` 临时 overlay；它负责光标、选区、IME 和会话 undo，不成为第二事实源。
+1. 文字双击时由 `NativeEditingController` 接管当前源码宿主；浏览器原生 DOM、Selection 和 IME 负责光标与输入，Controller 的临时跟踪状态只服务当前会话，不成为第二事实源。
 2. 约 700ms、格式、失焦、Cmd+S、切换、关闭或发送边界生成带目标身份、源 Hash、精确 before/after 和操作类型的 `EditCommand`。
 3. SourceIndex/TargetResolver 唯一定位真实源码范围；无法唯一定位时保留草稿并阻止操作。
 4. SourcePatchEngine 生成局部 forward/inverse Patch，并验证范围外源码不变。flex/grid 文字只有在源码、布局和 selector 均安全时，才随首个真实 Patch 创建一个 canonical 直接文字项，避免 wrapper 分裂成多个 gap item。
@@ -123,6 +123,8 @@ HTML AI 工作台让用户在真实本地 HTML 上完成两类工作：
 8. 写入成功后推进 `lastPersistedRevision` 和显示时间。
 
 用户合同不是固定 700 毫秒，而是“无需手动保存，状态真实可见”。实现应以约 700 毫秒为初值并通过性能测试调整。
+
+宿主能力预检优先选择 `contenteditable="plaintext-only"`。只有当该模式改变文字几何、而 `contenteditable="true"` 在相同完整会话属性下保持布局、文字样式、选区与恢复精确稳定时，才允许受控 fallback。fallback 不开放富文本能力：粘贴仅插入 `text/plain`，结构输入被阻止，未形成完整输入事件的 DOM 变化由 MutationObserver 回滚。包含 `display: contents` 的文字岛也只能通过 observer-guarded 事件通道进入；观察器不可用时继续 fail-closed。
 
 编辑画布必须明确提示“本地文本编辑会直接修改源文件并保存”。这里的“源文件”指项目当前指向的 HTML：首次打开时是用户原文件；AI 成功后是新的 `working/V1.x.html`。
 
@@ -136,7 +138,7 @@ HTML AI 工作台让用户在真实本地 HTML 上完成两类工作：
 - 替换后重读并校验 Hash。
 - 串行处理新旧 revision，旧写入不能覆盖新编辑。
 - Patch 后重新解析失败时不进入写入队列。
-- Lexical surface、ghost 节点、预览 nodeId 和编辑器样式永不写入源文件；canonical item 只能由受权 SourcePatch plan 创建，并拥有 exact inverse。
+- `contenteditable`、临时 IME wrapper、预览 nodeId 和编辑器样式永不写入源文件；canonical item 只能由受权 SourcePatch plan 创建，并拥有 exact inverse。
 
 界面状态：
 
@@ -194,14 +196,14 @@ v3 TargetRef 保存 label、层级、selector/结构锚点、源码位置、源 
 
 用户触发提交后必须按唯一顺序执行：
 
-1. 提交当前 TextFlow；composition、映射或 Patch 失败立即停止。
+1. 提交当前原生编辑 checkpoint；composition、映射或 Patch 失败立即停止。
 2. 校验本轮评论并完成必要的首次项目登记。
 3. 同步执行 `freezeNow()`，得到可验证的 HTML、source SHA 与 revision。
 4. 只有冻结成功才设置 `projectLocked=true` 并进入 `submitting`。
 5. 等待自动写回追平 revision，并重读磁盘 Hash；任一步失败都回到 editing，不建立或发布 Request。
 6. 去重快速双击、键盘快捷操作和重复事件。
 
-锁定不能早于 TextFlow commit/freeze 成功，否则失败会留下“未提交却被锁定”的假状态。
+锁定不能早于原生编辑 checkpoint/freeze 成功，否则失败会留下“未提交却被锁定”的假状态。
 
 锁定后允许：
 

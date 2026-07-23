@@ -218,7 +218,9 @@ export async function activateNativeEdit(frame, id, position) {
   try {
     await currentEditorFrame(frame).then((currentFrame) => currentFrame.waitForFunction((caseId) => {
       const expected = document.querySelector(`[data-native-case=${JSON.stringify(caseId)}]`);
-      return expected?.getAttribute("contenteditable") === "plaintext-only"
+      return ["plaintext-only", "true"].includes(
+        expected?.getAttribute("contenteditable"),
+      )
         && document.activeElement === expected
         && expected.isContentEditable;
     }, id, { timeout: 7_000 }));

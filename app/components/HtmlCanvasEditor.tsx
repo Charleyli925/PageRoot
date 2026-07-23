@@ -38,7 +38,6 @@ import {
 import {
   classifyNativeEditCapability,
   isNativeEditableCapability,
-  type NativeEditRuntimePreflight,
 } from "../lib/native-edit-capability.js";
 import { RuntimeDomSourceMap } from "../lib/runtime-dom-source-map.js";
 import {
@@ -55,6 +54,10 @@ import {
   type NativeEditSelection,
   type NativeEditSessionState,
 } from "./NativeEditingController";
+import {
+  buildRuntimeDomMap,
+  nativeRuntimePreflight as inspectNativeEditRuntime,
+} from "./native-edit-runtime-preflight";
 import styles from "./HtmlCanvasEditor.module.css";
 
 const EDITOR_STYLE_ATTRIBUTE = "data-html-canvas-editor-style";
@@ -1468,401 +1471,6 @@ function nativeEditHostForElement(
   const nodeId = candidate.getAttribute(SOURCE_NODE_ATTRIBUTE);
   if (!nodeId) return null;
   return sourceIndex.byNodeId.get(nodeId)?.type === "element" ? candidate : null;
-}
-
-type NativeLayoutFingerprint = {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  scrollWidth: number;
-  scrollHeight: number;
-  display: string;
-  position: string;
-  font: string;
-  lineHeight: string;
-  whiteSpace: string;
-  writingMode: string;
-  transitionDuration: string;
-  animationDuration: string;
-  animationName: string;
-  textRects: Array<{ x: number; y: number; width: number; height: number }>;
-};
-
-function nativeLayoutFingerprint(element: HTMLElement): NativeLayoutFingerprint {
-  const rect = element.getBoundingClientRect();
-  const style = element.ownerDocument.defaultView?.getComputedStyle(element);
-  const textRects: NativeLayoutFingerprint["textRects"] = [];
-  const walker = element.ownerDocument.createTreeWalker(
-    element,
-    element.ownerDocument.defaultView?.NodeFilter.SHOW_TEXT ?? 4,
-  );
-  let current = walker.nextNode();
-  while (current) {
-    const text = (current as Text).data;
-    for (const match of text.matchAll(/[^ \t\r\n\f]+/gu)) {
-      const startOffset = match.index;
-      const endOffset = startOffset + match[0].length;
-      const range = element.ownerDocument.createRange();
-      range.setStart(current, startOffset);
-      range.setEnd(current, endOffset);
-      for (const textRect of Array.from(range.getClientRects())) {
-        textRects.push({
-          x: Math.round((textRect.x - rect.x) * 100) / 100,
-          y: Math.round((textRect.y - rect.y) * 100) / 100,
-          width: Math.round(textRect.width * 100) / 100,
-          height: Math.round(textRect.height * 100) / 100,
-        });
-      }
-    }
-    current = walker.nextNode();
-  }
-  return {
-    x: Math.round(rect.x * 100) / 100,
-    y: Math.round(rect.y * 100) / 100,
-    width: Math.round(rect.width * 100) / 100,
-    height: Math.round(rect.height * 100) / 100,
-    scrollWidth: element.scrollWidth,
-    scrollHeight: element.scrollHeight,
-    display: style?.display ?? "",
-    position: style?.position ?? "",
-    font: style?.font ?? "",
-    lineHeight: style?.lineHeight ?? "",
-    whiteSpace: style?.whiteSpace ?? "",
-    writingMode: style?.writingMode ?? "",
-    transitionDuration: style?.transitionDuration ?? "",
-    animationDuration: style?.animationDuration ?? "",
-    animationName: style?.animationName ?? "",
-    textRects,
-  };
-}
-
-function sameNativeLayout(
-  left: NativeLayoutFingerprint,
-  right: NativeLayoutFingerprint,
-): boolean {
-  const sameTextRects = left.textRects.length === right.textRects.length
-    && left.textRects.every((rect, index) => {
-      const candidate = right.textRects[index];
-      return Boolean(
-        candidate
-        && Math.abs(rect.x - candidate.x) <= 0.5
-        && Math.abs(rect.y - candidate.y) <= 0.5
-        && Math.abs(rect.width - candidate.width) <= 0.5
-        && Math.abs(rect.height - candidate.height) <= 0.5
-      );
-    });
-  return (
-    Math.abs(left.width - right.width) <= 0.5
-    && Math.abs(left.height - right.height) <= 0.5
-    && left.scrollWidth === right.scrollWidth
-    && left.scrollHeight === right.scrollHeight
-    && sameTextRects
-  );
-}
-
-function sameNativeTextStyle(
-  left: NativeLayoutFingerprint,
-  right: NativeLayoutFingerprint,
-): boolean {
-  // Chromium owns white-space on a plaintext-only editing host: authored
-  // `normal`, `nowrap`, or `pre-line` can be reported as `pre`/`pre-wrap`.
-  // This is only a style-name exception. `sameNativeLayout` remains a separate
-  // hard gate, so size, scroll extent, and every text rect still have to match.
-  const uaOwnedEditingWhiteSpace = (
-    ["normal", "nowrap", "pre-line"].includes(left.whiteSpace)
-    && ["pre", "pre-wrap"].includes(right.whiteSpace)
-  );
-  const whiteSpaceStable = left.whiteSpace === right.whiteSpace
-    || uaOwnedEditingWhiteSpace;
-  return (
-    left.display === right.display
-    && left.position === right.position
-    && left.font === right.font
-    && left.lineHeight === right.lineHeight
-    && whiteSpaceStable
-    && left.writingMode === right.writingMode
-  );
-}
-
-function hasGeneratedPseudoContent(element: HTMLElement): boolean {
-  const view = element.ownerDocument.defaultView;
-  if (!view) return true;
-  const hasContent = (
-    candidate: HTMLElement,
-    pseudo: "::before" | "::after",
-  ) => {
-    const content = view.getComputedStyle(candidate, pseudo).content;
-    return Boolean(content && content !== "none" && content !== "normal" && content !== "\"\"");
-  };
-  return [
-    element,
-    ...Array.from(element.querySelectorAll<HTMLElement>("*")),
-  ].some((candidate) => (
-    hasContent(candidate, "::before") || hasContent(candidate, "::after")
-  ));
-}
-
-function buildRuntimeDomMap(
-  rootElement: HTMLElement,
-  sourceMap: SourceTextMap,
-  rootTargetRef: SourceTargetRef,
-): RuntimeDomSourceMap | null {
-  const runtimeMap = new RuntimeDomSourceMap({
-    epoch: sourceMap.sourceSha256.slice(0, 12),
-    idPrefix: "pageroot",
-  });
-  const sourceElements = [
-    rootElement,
-    ...Array.from(rootElement.querySelectorAll<HTMLElement>(`[${SOURCE_NODE_ATTRIBUTE}]`)),
-  ];
-  for (const element of sourceElements) {
-    const sourceNodeId = element.getAttribute(SOURCE_NODE_ATTRIBUTE);
-    if (!sourceNodeId) return null;
-    runtimeMap.bindElement(element, {
-      sourceNodeId,
-      targetRef: element === rootElement ? rootTargetRef : null,
-    });
-  }
-
-  const sourceRuns = sourceMap.runs.filter((run) => run.kind === "text");
-  const showText = rootElement.ownerDocument.defaultView?.NodeFilter.SHOW_TEXT ?? 4;
-  const walker = rootElement.ownerDocument.createTreeWalker(rootElement, showText);
-  const entries: Array<{
-    node: Text;
-    spans: Array<{
-      domStart: number;
-      domEnd: number;
-      textNodeId: string;
-      sourceStartOffset: number;
-      sourceEndOffset: number;
-    }>;
-  }> = [];
-  let runIndex = 0;
-  let runOffset = 0;
-  let current = walker.nextNode();
-  while (current) {
-    const textNode = current as Text;
-    const spans = [];
-    let domOffset = 0;
-    while (domOffset < textNode.data.length) {
-      const run = sourceRuns[runIndex];
-      if (!run) return null;
-      const remainingDom = textNode.data.length - domOffset;
-      const remainingSource = run.text.length - runOffset;
-      const length = Math.min(remainingDom, remainingSource);
-      if (
-        length <= 0
-        || textNode.data.slice(domOffset, domOffset + length)
-          !== run.text.slice(runOffset, runOffset + length)
-      ) return null;
-      spans.push({
-        domStart: domOffset,
-        domEnd: domOffset + length,
-        textNodeId: run.textNodeId,
-        sourceStartOffset: runOffset,
-        sourceEndOffset: runOffset + length,
-      });
-      domOffset += length;
-      runOffset += length;
-      if (runOffset === run.text.length) {
-        runIndex += 1;
-        runOffset = 0;
-      }
-    }
-    if (textNode.data.length > 0) entries.push({ node: textNode, spans });
-    current = walker.nextNode();
-  }
-  if (runIndex !== sourceRuns.length || runOffset !== 0) return null;
-  runtimeMap.bindTextSequence(rootElement, entries);
-  return runtimeMap;
-}
-
-function nativeRuntimePreflight(
-  rootElement: HTMLElement,
-  sourceMap: SourceTextMap,
-  rootTargetRef: SourceTargetRef,
-): {
-  runtimeMap: RuntimeDomSourceMap | null;
-  runtime: NativeEditRuntimePreflight;
-  layoutDebug: {
-    before: NativeLayoutFingerprint;
-    after: NativeLayoutFingerprint;
-    restored: NativeLayoutFingerprint;
-  };
-} {
-  const runtimeMap = buildRuntimeDomMap(rootElement, sourceMap, rootTargetRef);
-  const documentNode = rootElement.ownerDocument;
-  const view = documentNode.defaultView;
-  const before = nativeLayoutFingerprint(rootElement);
-  const priorActiveElement = documentNode.activeElement;
-  const liveSelection = documentNode.getSelection();
-  const priorSelection = liveSelection?.anchorNode && liveSelection.focusNode
-    ? {
-        anchorNode: liveSelection.anchorNode,
-        anchorOffset: liveSelection.anchorOffset,
-        focusNode: liveSelection.focusNode,
-        focusOffset: liveSelection.focusOffset,
-      }
-    : null;
-  const hadSelectionRange = Boolean(liveSelection?.rangeCount);
-  const scrollPositions: Array<{
-    element: Element;
-    left: number;
-    top: number;
-  }> = [];
-  let scrollCandidate: Element | null = rootElement;
-  while (scrollCandidate) {
-    scrollPositions.push({
-      element: scrollCandidate,
-      left: scrollCandidate.scrollLeft,
-      top: scrollCandidate.scrollTop,
-    });
-    scrollCandidate = scrollCandidate.parentElement;
-  }
-  const scrollingElement = documentNode.scrollingElement;
-  if (scrollingElement && !scrollPositions.some(({ element }) => element === scrollingElement)) {
-    scrollPositions.push({
-      element: scrollingElement,
-      left: scrollingElement.scrollLeft,
-      top: scrollingElement.scrollTop,
-    });
-  }
-  const previousContentEditable = rootElement.getAttribute("contenteditable");
-  const hadContentEditable = rootElement.hasAttribute("contenteditable");
-  const MutationObserverConstructor = view?.MutationObserver;
-  const preflightObserver = MutationObserverConstructor
-    ? new MutationObserverConstructor(() => undefined)
-    : null;
-  preflightObserver?.observe(documentNode.documentElement, {
-    subtree: true,
-    childList: true,
-    characterData: true,
-    attributes: true,
-  });
-  const preflightMutationRecords: MutationRecord[] = [];
-  const collectPreflightMutations = () => {
-    preflightMutationRecords.push(...(preflightObserver?.takeRecords() ?? []));
-  };
-  let after = before;
-  let focusAccepted = false;
-  let preflightFailed = false;
-  try {
-    rootElement.setAttribute("contenteditable", "plaintext-only");
-    rootElement.focus({ preventScroll: true });
-    focusAccepted = documentNode.activeElement === rootElement;
-    after = nativeLayoutFingerprint(rootElement);
-    collectPreflightMutations();
-  } catch {
-    preflightFailed = true;
-  } finally {
-    if (hadContentEditable) {
-      rootElement.setAttribute("contenteditable", previousContentEditable ?? "");
-    } else {
-      rootElement.removeAttribute("contenteditable");
-    }
-    try {
-      const ViewHTMLElement = view?.HTMLElement;
-      if (
-        ViewHTMLElement
-        && priorActiveElement instanceof ViewHTMLElement
-        && priorActiveElement.isConnected
-      ) {
-        (priorActiveElement as HTMLElement).focus({ preventScroll: true });
-      } else {
-        rootElement.blur();
-      }
-      for (const position of scrollPositions) {
-        position.element.scrollLeft = position.left;
-        position.element.scrollTop = position.top;
-      }
-      if (liveSelection) {
-        liveSelection.removeAllRanges();
-        if (
-          priorSelection
-          && priorSelection.anchorNode.isConnected
-          && priorSelection.focusNode.isConnected
-        ) {
-          liveSelection.setBaseAndExtent(
-            priorSelection.anchorNode,
-            priorSelection.anchorOffset,
-            priorSelection.focusNode,
-            priorSelection.focusOffset,
-          );
-        }
-      }
-    } catch {
-      preflightFailed = true;
-    }
-    collectPreflightMutations();
-    preflightObserver?.disconnect();
-  }
-  const restored = nativeLayoutFingerprint(rootElement);
-  const activeElementRestored = documentNode.activeElement === priorActiveElement;
-  const selectionRestored = !liveSelection
-    || (
-      !hadSelectionRange
-        ? liveSelection.rangeCount === 0
-        : Boolean(
-            priorSelection
-            && liveSelection.anchorNode === priorSelection.anchorNode
-            && liveSelection.anchorOffset === priorSelection.anchorOffset
-            && liveSelection.focusNode === priorSelection.focusNode
-            && liveSelection.focusOffset === priorSelection.focusOffset
-          )
-    );
-  const layoutStable = sameNativeLayout(before, after);
-  const styleStable = sameNativeTextStyle(before, after);
-  const restorationStable = sameNativeLayout(before, restored)
-    && sameNativeTextStyle(before, restored);
-  const unexpectedPreflightMutations = preflightMutationRecords.filter((record) => !(
-    record.type === "attributes"
-    && record.target === rootElement
-    && record.attributeName === "contenteditable"
-  ));
-  // Chromium exposes caret hit-testing APIs for vertical writing, but that is
-  // not enough to promise stable visual up/down movement and range geometry.
-  // Keep the native-edit contract fail-closed until the vertical caret matrix
-  // is explicitly release-gated; text selection and comments remain available.
-  const writingModeSupportsNativeCaret = (
-    before.writingMode === ""
-    || before.writingMode === "horizontal-tb"
-  );
-  const nativeEventDeliveryStable = [
-    rootElement,
-    ...Array.from(rootElement.querySelectorAll<HTMLElement>("*")),
-  ].every((element) => (
-    view?.getComputedStyle(element).display.toLowerCase() !== "contents"
-  ));
-  return {
-    runtimeMap,
-    layoutDebug: { before, after, restored },
-    runtime: {
-      preflightComplete: true,
-      sourceBacked: Boolean(rootElement.getAttribute(SOURCE_NODE_ATTRIBUTE)),
-      isConnected: rootElement.isConnected,
-      crossOrigin: false,
-      insideShadowRoot: rootElement.getRootNode() !== rootElement.ownerDocument,
-      generatedContent: false,
-      pseudoContent: hasGeneratedPseudoContent(rootElement),
-      isSingleTextIsland: nativeLogicalText(rootElement) === sourceMap.text,
-      mappingComplete: Boolean(runtimeMap),
-      styleStable: styleStable && restorationStable,
-      layoutStable: layoutStable && restorationStable,
-      selectionStable: focusAccepted
-        && activeElementRestored
-        && selectionRestored
-        && writingModeSupportsNativeCaret && Boolean(
-        rootElement.ownerDocument.caretPositionFromPoint
-        || rootElement.ownerDocument.caretRangeFromPoint
-      ),
-      observerReady: Boolean(preflightObserver),
-      nativeEventDeliveryStable,
-      authorMutationRisk: preflightFailed
-        || unexpectedPreflightMutations.length > 0
-        || !restorationStable,
-    },
-  };
 }
 
 function sourceTextParentsForSegments(
@@ -4241,6 +3849,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     restoredSelection?: NativeEditSelection,
   ): boolean => {
     containerRef.current?.setAttribute("data-native-start-status", "starting");
+    containerRef.current?.removeAttribute("data-native-host-mode");
+    containerRef.current?.removeAttribute("data-native-event-delivery-mode");
     if (readOnlyRef.current) {
       containerRef.current?.setAttribute("data-native-start-status", "read-only");
       return false;
@@ -4283,10 +3893,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       const activationLogicalRange = priorRange
         ? sourceSegmentsToTextRange(projection, priorRange.segments)
         : null;
-      const preflight = nativeRuntimePreflight(
+      const preflight = inspectNativeEditRuntime(
         hostElement,
         projection,
         rootTargetRef,
+        { ariaLabel: `编辑${target.label}` },
       );
       const capability = classifyNativeEditCapability(
         sourceIndex,
@@ -4300,7 +3911,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           runtime: preflight.runtime,
         },
       );
-      if (!isNativeEditableCapability(capability) || !preflight.runtimeMap) {
+      if (
+        !isNativeEditableCapability(capability)
+        || !preflight.runtimeMap
+        || !preflight.hostMode
+      ) {
         containerRef.current?.setAttribute(
           "data-native-start-status",
           `capability:${capability.code}`,
@@ -4385,6 +4000,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       };
       const session = new NativeEditingController({
         hostElement,
+        hostMode: preflight.hostMode,
         baseline,
         lease: {
           stamp: lease,
@@ -4507,6 +4123,14 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       retainNativeEditFocusRef.current = null;
       containerRef.current?.removeAttribute("data-edit-block-detail");
       containerRef.current?.removeAttribute("data-native-capability-detail");
+      containerRef.current?.setAttribute(
+        "data-native-host-mode",
+        preflight.hostMode,
+      );
+      containerRef.current?.setAttribute(
+        "data-native-event-delivery-mode",
+        preflight.runtime.nativeEventDeliveryMode ?? "unsafe",
+      );
       hostElement.setAttribute("data-html-canvas-editing", "true");
       activeTextRangeRef.current = priorRange
         ? { ...priorRange, target }

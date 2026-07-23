@@ -138,6 +138,20 @@
       "features": ["author-css", "transition", "timing-risk"]
     },
     {
+      "id": "collapsed-whitespace-copy",
+      "mode": "native-editable",
+      "hostMode": "true",
+      "reason": "plaintext-only changes collapsed source whitespace geometry; measured controlled contenteditable preserves it exactly.",
+      "features": ["collapsed-whitespace", "controlled-contenteditable", "layout-fallback"]
+    },
+    {
+      "id": "display-contents-copy",
+      "mode": "native-editable",
+      "eventDelivery": "observer-guarded",
+      "reason": "display:contents uses optimistic event delivery backed by unowned-mutation rollback.",
+      "features": ["display-contents", "observer-guarded", "event-delivery"]
+    },
+    {
       "id": "pseudo-content",
       "mode": "native-editable",
       "reason": "The authored text remains directly editable; only the generated prefix has no source range.",

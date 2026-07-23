@@ -112,7 +112,6 @@ test.describe("authored DOM native editing contract", () => {
       const state = await nativeEditingState(frame, contractCase.id);
       expect(state).toMatchObject({
         targetIsActive: true,
-        contenteditable: "plaintext-only",
         isContentEditable: true,
         activeCase: contractCase.id,
         activeIsLegacySurface: false,
@@ -120,6 +119,10 @@ test.describe("authored DOM native editing contract", () => {
         authoredNodeHidden: false,
         selectionInside: true,
       });
+      expect(["plaintext-only", "true"]).toContain(state.contenteditable);
+      if (contractCase.hostMode) {
+        expect(state.contenteditable).toBe(contractCase.hostMode);
+      }
       expect(await documentToken(frame)).toBe(beforeDocument);
       expectGeometryUnchanged(beforeGeometry, await geometrySnapshot(frame, contractCase.id));
     });
@@ -685,6 +688,67 @@ test.describe("authored DOM native editing contract", () => {
     await expect(notice).toContainText("粘贴单行文字");
     await expect(notice).toContainText("添加评论");
     expect((await exportCurrentHtml(page)).equals(source)).toBe(true);
+  });
+
+  test("controlled contenteditable preserves collapsed layout and owns paste as plain text", async ({ page, context }) => {
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    const { editor, frame, source } = await openMatrix(page);
+    const caseId = "collapsed-whitespace-copy";
+    const target = await activateNativeEdit(frame, caseId);
+    await expect(target).toHaveAttribute("contenteditable", "true");
+    await expect(editor).toHaveAttribute("data-native-host-mode", "true");
+
+    await setTextSelection(frame, caseId, 0, 4);
+    await page.evaluate(() => navigator.clipboard.writeText("<b>只作为文字</b>"));
+    await page.keyboard.press(keyShortcut("V"));
+    await expect.poll(() => target.textContent()).toContain("<b>只作为文字</b>");
+    expect(await target.locator("b").count()).toBe(0);
+
+    await page.waitForTimeout(850);
+    const afterPaste = await exportCurrentHtml(page);
+    expect(afterPaste.toString("utf8")).toContain("&lt;b>只作为文字&lt;/b>");
+    const acceptedHtml = await target.innerHTML();
+
+    await setTextSelection(frame, caseId, 1);
+    await target.evaluate((element) => {
+      element.ownerDocument.execCommand(
+        "insertHTML",
+        false,
+        '<strong data-browser-structure="true">BAD_STRUCTURE</strong>',
+      );
+    });
+    await expect.poll(() => target.innerHTML()).toBe(acceptedHtml);
+    expect((await exportCurrentHtml(page)).equals(afterPaste)).toBe(true);
+
+    await page.keyboard.press(keyShortcut("Z"));
+    await expect.poll(() => target.textContent()).not.toContain("<b>只作为文字</b>");
+    await expect.poll(async () => (await exportCurrentHtml(page)).equals(source)).toBe(true);
+  });
+
+  test("display contents enters through observer guard, accepts delivered input, and rolls back orphan mutation", async ({ page }) => {
+    const { editor, frame } = await openMatrix(page);
+    const caseId = "display-contents-copy";
+    const target = await activateNativeEdit(frame, caseId);
+    await expect(editor).toHaveAttribute(
+      "data-native-event-delivery-mode",
+      "observer-guarded",
+    );
+    const beforeText = await target.textContent();
+
+    await target.evaluate((element) => {
+      const wrapperText = element.querySelector("strong")?.firstChild;
+      if (!(wrapperText instanceof Text)) throw new Error("Missing display contents text.");
+      wrapperText.data = `ORPHAN_${wrapperText.data}`;
+    });
+    await expect.poll(() => target.textContent()).toBe(beforeText);
+
+    await installInputRecorder(frame);
+    await setTextSelection(frame, caseId, 0);
+    await page.keyboard.insertText("安全");
+    await expect.poll(() => target.textContent()).toBe(`安全${beforeText}`);
+    const events = await recordedInputEvents(frame);
+    expect(events.some(({ type }) => type === "beforeinput")).toBe(true);
+    expect(events.some(({ type }) => type === "input")).toBe(true);
   });
 
   test("Chromium IME composition commits one final authored-DOM value", async ({ page }) => {
@@ -1380,7 +1444,7 @@ test.describe("fallback capability contract", () => {
 
       const state = await target.evaluate((element) => ({
         selfEditable: Boolean(element.isContentEditable),
-        authoredEditableCount: document.querySelectorAll('[contenteditable="plaintext-only"]').length,
+        authoredEditableCount: document.querySelectorAll("[data-html-canvas-native-editing]").length,
         legacySurfaceCount: document.querySelectorAll("[data-html-canvas-text-flow-surface]").length,
         selectedText: document.getSelection()?.toString() || "",
       }));

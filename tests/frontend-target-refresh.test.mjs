@@ -539,8 +539,8 @@ test("preview native links and forms cannot navigate the editing canvas on doubl
   assert.match(canvas, /documentNode\.addEventListener\("submit", handleSubmit, true\)/u);
 });
 
-test("native editing uses the authored DOM, browser Selection, and a plaintext caret", async () => {
-  const [canvas, nativeController, capability] = await Promise.all([
+test("native editing uses the authored DOM, browser Selection, and a measured host mode", async () => {
+  const [canvas, nativeController, capability, preflight, policy] = await Promise.all([
     readFile(
       new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url),
       "utf8",
@@ -551,6 +551,14 @@ test("native editing uses the authored DOM, browser Selection, and a plaintext c
     ),
     readFile(
       new URL("../app/lib/native-edit-capability.js", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL("../app/components/native-edit-runtime-preflight.ts", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL("../app/lib/native-edit-policy.js", import.meta.url),
       "utf8",
     ),
   ]);
@@ -579,16 +587,16 @@ test("native editing uses the authored DOM, browser Selection, and a plaintext c
     /caretPositionFromPoint[\s\S]*?Never turn that proximity[\s\S]*?nativeTextRangeContainsPoint\(range, point\)/u,
     "an inert media surface or empty box must not fall back to nearby authored text",
   );
-  assert.match(canvas, /nativeRuntimePreflight\(/u);
+  assert.match(canvas, /inspectNativeEditRuntime\(/u);
   assert.match(
-    canvas,
+    preflight,
     /function hasGeneratedPseudoContent[\s\S]*?querySelectorAll<HTMLElement>\("\*"\)[\s\S]*?hasContent\(candidate, "::before"\)[\s\S]*?hasContent\(candidate, "::after"\)/u,
     "generated content on a descendant must block the whole native text island",
   );
   assert.match(
-    canvas,
-    /const nativeEventDeliveryStable = \[[\s\S]*?rootElement\.querySelectorAll<HTMLElement>\("\*"\)[\s\S]*?getComputedStyle\(element\)\.display\.toLowerCase\(\) !== "contents"/u,
-    "legacy display:contents roots or descendants must fail native event preflight",
+    preflight,
+    /hasDisplayContents[\s\S]*?classifyNativeEventDelivery\([\s\S]*?observerReady:/u,
+    "display:contents must use the explicit native or observer-guarded lane",
   );
   assert.match(canvas, /classifyNativeEditCapability\(/u);
   assert.match(canvas, /isNativeEditableCapability\(capability\)/u);
@@ -599,7 +607,8 @@ test("native editing uses the authored DOM, browser Selection, and a plaintext c
   assert.match(capability, /EDITABLE: "native-editable"/u);
   assert.match(capability, /SELECT_COMMENT: "select-comment"/u);
   assert.match(capability, /COMMENT_ONLY: "comment-only"/u);
-  assert.match(capability, /runtime\.nativeEventDeliveryStable !== true/u);
+  assert.match(capability, /nativeEventDeliveryProven/u);
+  assert.match(capability, /nativeEventDeliveryGuarded/u);
 
   const nativeBlur = canvas.slice(
     canvas.indexOf("onBlur: () => {"),
@@ -621,8 +630,9 @@ test("native editing uses the authored DOM, browser Selection, and a plaintext c
     "number and color inputs must retain focus instead of being stolen back by the iframe",
   );
 
-  assert.match(nativeController, /this\.hostElement\.setAttribute\("contenteditable", "plaintext-only"\)/u);
-  assert.match(nativeController, /this\.hostElement\.setAttribute\("role", "textbox"\)/u);
+  assert.match(nativeController, /applyNativeEditSessionAttributes\(this\.hostElement/u);
+  assert.match(policy, /element\.setAttribute\("contenteditable", hostMode\)/u);
+  assert.match(policy, /element\.setAttribute\("role", "textbox"\)/u);
   assert.match(nativeController, /this\.hostElement\.addEventListener\("beforeinput"/u);
   assert.match(nativeController, /documentNode\.addEventListener\("selectionchange"/u);
   assert.match(nativeController, /compositionstart/u);
@@ -664,7 +674,7 @@ test("native editing uses the authored DOM, browser Selection, and a plaintext c
     nativeController,
     /offsetNode === this\.hostElement \|\| this\.hostElement\.contains\(offsetNode\)/u,
   );
-  assert.match(nativeController, /restoreAttribute\(this\.hostElement, name, saved\)/u);
+  assert.match(nativeController, /restoreNativeEditSessionAttributes\(/u);
   assert.doesNotMatch(
     `${canvas}\n${nativeController}`,
     /InlineEditSession|LexicalEditor|createEditor\(|registerPlainText|pageroot-text-editor|pageroot-text-ghost/u,
@@ -715,7 +725,7 @@ test("canvas root whitespace clears selection instead of selecting the document 
 });
 
 test("canvas maps native DOM selections to source-safe patches and promotes media to modules", async () => {
-  const [canvas, nativeController, sourceMap, sourcePatch, workbench] = await Promise.all([
+  const [canvas, nativeController, sourceMap, sourcePatch, workbench, preflight] = await Promise.all([
     readFile(
       new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url),
       "utf8",
@@ -734,6 +744,10 @@ test("canvas maps native DOM selections to source-safe patches and promotes medi
     ),
     readFile(
       new URL("../app/workbench.tsx", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL("../app/components/native-edit-runtime-preflight.ts", import.meta.url),
       "utf8",
     ),
   ]);
@@ -785,7 +799,7 @@ test("canvas maps native DOM selections to source-safe patches and promotes medi
 
   assert.match(canvas, /classifyNativeEditCapability/u);
   assert.match(canvas, /buildSourceTextMap\(/u);
-  assert.match(canvas, /buildRuntimeDomMap\(/u);
+  assert.match(preflight, /function buildRuntimeDomMap\(/u);
   assert.match(canvas, /const captured = active\.session\.captureCheckpoint\(trigger\)/u);
   assert.match(
     canvas,
@@ -841,7 +855,7 @@ test("canvas maps native DOM selections to source-safe patches and promotes medi
     `${canvas}\n${nativeController}`,
     /InlineEditSession|LexicalEditor|registerPlainText|pageroot-text-editor|pageroot-text-ghost/u,
   );
-  assert.match(nativeController, /setAttribute\("contenteditable", "plaintext-only"\)/u);
+  assert.match(nativeController, /applyNativeEditSessionAttributes\(this\.hostElement/u);
   assert.doesNotMatch(canvas, /data-pageroot-text-flow-item/u);
   assert.match(canvas, /MEDIA_SURFACE_SELECTOR/u);
   assert.match(canvas, /element\.querySelector\(MEDIA_SURFACE_SELECTOR\)/u);

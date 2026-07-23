@@ -46,6 +46,8 @@
       transform: translateX(40px);
     }
     .transition-sensitive { transition: color 180ms ease; }
+    .collapsed-whitespace { width: 390px; white-space: normal; }
+    .display-contents-inline { display: contents; }
     .pseudo::before { content: "仅由 CSS 生成："; color: #a34b2a; }
     .media-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; align-items: start; }
     canvas, iframe, svg { width: 100%; min-height: 92px; border: 1px solid #87998f; background: #fff; }
@@ -122,6 +124,9 @@
       <odd-card data-native-case="custom-element" data-native-mode="native-editable">唯一映射的自定义元素文字也按能力进入直接编辑。</odd-card>
       <p class="editability-sensitive" data-native-case="unsafe-contenteditable-css" data-native-mode="select-comment">作者 CSS 监听 contenteditable；能力预检必须在布局改变前关闭直接编辑。</p>
       <p class="card transition-sensitive" data-native-case="transition-sensitive-copy" data-native-mode="native-editable">静态未触发的过渡声明不再误拦截文字编辑。</p>
+      <p class="card collapsed-whitespace" data-native-case="collapsed-whitespace-copy" data-native-mode="native-editable">源码中的折叠空白
+        在编辑前后仍然只按普通空白排版。</p>
+      <p class="card" data-native-case="display-contents-copy" data-native-mode="native-editable">观察器保护 <span class="display-contents-inline"><strong>display contents</strong></span> 文字的事件投递。</p>
     </section>
 
     <section class="media-row" aria-label="Comment-only cases">

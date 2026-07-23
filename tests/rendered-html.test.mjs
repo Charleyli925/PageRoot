@@ -233,7 +233,7 @@ test("workbench encodes the v3 single-source lifecycle instead of save-created v
     "freezeNow must not lock the editor when a native-edit checkpoint fails",
   );
 
-  assert.match(nativeController, /this\.hostElement\.setAttribute\("contenteditable", "plaintext-only"\)/u);
+  assert.match(nativeController, /applyNativeEditSessionAttributes\(this\.hostElement/u);
   assert.match(nativeController, /this\.hostElement\.addEventListener\("beforeinput"/u);
   assert.match(nativeController, /documentNode\.addEventListener\("selectionchange"/u);
   assert.match(nativeController, /restoreAttribute\(this\.hostElement, name, saved\)/u);
@@ -409,7 +409,7 @@ test("canvas persistence has one SourcePatchEngine path and clean v3 TargetRefs"
     nativeController,
     /if \(this\.composing \|\| this\.draftCompositionUnsettled\) \{[\s\S]*?reason: "composing"/u,
   );
-  assert.match(nativeController, /hostElement\.setAttribute\("contenteditable", "plaintext-only"\)/u);
+  assert.match(nativeController, /applyNativeEditSessionAttributes\(this\.hostElement/u);
   assert.doesNotMatch(nativeController, /setRootElement|LexicalEditor|registerPlainText/u);
 
   const targetWriter = workbench.slice(

@@ -25,6 +25,8 @@ Comments + frozen input
 - `scripts/` owns the local Bridge, protocol finalization, scope validation and automated gates.
 - `schemas/` defines persisted and exchanged records. `fixtures/` proves strict current and legacy behavior.
 - Preview DOM is disposable. It is never a persistence source.
+- `native-edit-policy` is the single policy source for session attributes, host modes, wrapper disposal and editing timeouts. `native-edit-runtime-preflight` owns iframe geometry/event capability inspection; `HtmlCanvasEditor` only coordinates its result with selection, SourcePatch and UI.
+- `contenteditable="true"` is a measured, controlled fallback rather than a second editor engine. It shares the same Controller, FormatSkeleton and SourcePatch authority as `plaintext-only`, and cannot commit rich structure.
 
 ## Persistence
 

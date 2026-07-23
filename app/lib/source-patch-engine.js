@@ -8,6 +8,7 @@ import {
   isTransparentSourceTextElement,
 } from "./source-text-map.js";
 import { isNativeDirectEditRoot } from "./native-edit-capability.js";
+import { isDisposableNativeInlineWrapperTag } from "./native-edit-policy.js";
 import {
   cleanTargetRef,
   createInsertionPointTargetRef,
@@ -52,26 +53,12 @@ const CSS_PROPERTY_NAME_PATTERN = /^(?:--[A-Za-z0-9_-]+|-?[A-Za-z][A-Za-z0-9-]*)
 // clearing box metrics; callers already reject flex/grid item and visible
 // background cases where a new inline box would not be layout-safe.
 const TEXT_RANGE_LAYOUT_GUARD = "all: unset; display: inline !important";
-const DISPOSABLE_EMPTY_TEXT_WRAPPER_TAGS = new Set([
-  "b",
-  "em",
-  "i",
-  "mark",
-  "s",
-  "small",
-  "span",
-  "strong",
-  "sub",
-  "sup",
-  "u",
-]);
-
 export function isDisposableSourceTextWrapper(element) {
   return Boolean(
     element?.type === "element"
     && element.namespaceURI === "http://www.w3.org/1999/xhtml"
     && isTransparentSourceTextElement(element.tagName)
-    && DISPOSABLE_EMPTY_TEXT_WRAPPER_TAGS.has(element.tagName)
+    && isDisposableNativeInlineWrapperTag(element.tagName)
     && element.attributes.every((attribute) => attribute.name === "style")
     && element.explicitEndTag
     && !element.isVoid

@@ -4,6 +4,10 @@ import {
   textRangeToSourceEdit,
 } from "./source-text-map.js";
 import { RUNTIME_NODE_ATTRIBUTE } from "./runtime-dom-source-map.js";
+import {
+  NATIVE_EDIT_DISPOSABLE_INLINE_WRAPPER_TAGS,
+  NATIVE_EDIT_FORMAT_SKELETON_ROOT_ATTRIBUTES,
+} from "./native-edit-policy.js";
 
 export const FORMAT_SKELETON_VERSION = 1;
 
@@ -20,23 +24,9 @@ export const FORMAT_SKELETON_CRITICAL_STYLES = Object.freeze([
 
 const HTML_NAMESPACE = "http://www.w3.org/1999/xhtml";
 
-// Keep this list aligned with the source patcher's empty-wrapper cleanup.
-// These elements carry formatting only; links and semantic inline elements are
-// deliberately absent. Attributes are checked separately before a wrapper is
-// considered disposable.
-const DISPOSABLE_FORMAT_TAGS = new Set([
-  "b",
-  "em",
-  "i",
-  "mark",
-  "s",
-  "small",
-  "span",
-  "strong",
-  "sub",
-  "sup",
-  "u",
-]);
+const DISPOSABLE_FORMAT_TAGS = new Set(
+  NATIVE_EDIT_DISPOSABLE_INLINE_WRAPPER_TAGS,
+);
 
 const RUNTIME_ONLY_ATTRIBUTES = new Set([
   SOURCE_NODE_ATTRIBUTE,
@@ -51,19 +41,9 @@ const RUNTIME_ONLY_ATTRIBUTES = new Set([
 // between those two moments; they are not authored HTML. Keep the exception
 // root-only so an authored aria/data/role attribute on an inline descendant
 // remains protected byte-for-byte.
-const EDIT_SESSION_ROOT_ATTRIBUTES = new Set([
-  "aria-label",
-  "aria-multiline",
-  "autocapitalize",
-  "autocomplete",
-  "data-gramm",
-  "data-html-canvas-editing",
-  "data-html-canvas-global-selected",
-  "data-html-canvas-native-editing",
-  "data-html-canvas-selected",
-  "role",
-  "tabindex",
-]);
+const EDIT_SESSION_ROOT_ATTRIBUTES = new Set(
+  NATIVE_EDIT_FORMAT_SKELETON_ROOT_ATTRIBUTES,
+);
 
 const STYLE_PROPERTY_TO_CAMEL = Object.freeze({
   "font-weight": "fontWeight",

@@ -53,7 +53,7 @@
 ```mermaid
 stateDiagram-v2
     [*] --> editing
-    editing --> submitting: TextFlow 与冻结成功后发送至 QoderWork
+    editing --> submitting: 原生编辑 checkpoint 与冻结成功后发送至 QoderWork
     submitting --> processing: 冻结输入发布成功
     submitting --> editing: 准备失败或取消
     processing --> validating: 发现有效 completion
@@ -116,7 +116,7 @@ stateDiagram-v2
 ```text
 单击选择文字宿主
 → 双击并把光标放到点击位置
-→ 创建当前宿主的临时 TextFlowProjection / Lexical overlay
+→ NativeEditingController 接管当前源码宿主，浏览器原生 DOM / Selection / IME 开始会话
 → 用户输入、删除或选择文字
 → 约 700ms 或格式、失焦、Cmd+S、切换、关闭、发送边界
 → 生成 EditCommand
@@ -142,9 +142,16 @@ stateDiagram-v2
 - 队列继续处理最新 revision，直至 `lastPersistedRevision=editRevision`。
 - UI 只在最后成功落盘后显示“已更新”。
 - 画布 DOM 只用于预览和采集用户意图；不得把 `documentElement.outerHTML` 或整页 DOM 序列化结果写回源文件。
-- Lexical overlay、ghost 节点和逻辑选区只存在于当前会话；不能保存为第二份 HTML 或长期 JSON。
+- `contenteditable`、临时 IME wrapper、运行时 nodeId 和逻辑选区只存在于当前会话；不能保存为第二份 HTML 或长期 JSON。
 - flex/grid 文字只有在源码、运行时布局和 CSS selector 均安全时，才随首个真实 Patch 创建唯一 canonical 直接文字项；双击本身不修改源码。
 - 任何目标为 `ambiguous`、`orphaned`，或 patch 越出已解析源码范围时都必须 fail-closed，保留当前源码并要求用户重新定位。
+
+编辑宿主按实时能力选择：
+
+- 优先使用 `contenteditable="plaintext-only"`。
+- 如果它只因 Chromium 的 `white-space` 行为改变真实文字几何，而 `contenteditable="true"` 的完整会话属性预检能证明布局、样式、选区和恢复完全稳定，则进入受控模式；受控模式仍只接受纯文字事务，粘贴强制取 `text/plain`，格式命令、HTML 插入和无完整事件投递的结构变化全部阻止或回滚。
+- `display: contents` 不再仅凭静态命中就拒绝；有 MutationObserver 时可进入 observer-guarded 模式。真实 `beforeinput/input` 正常完成才提交，缺失事件的孤立 DOM 变化在 SourcePatch 前恢复。
+- 两种放宽都不能绕过 SourceTextMap、FormatSkeleton、SourcePatch 或源码 Hash 校验。
 
 ### 5.2 `Cmd+S`
 
@@ -214,14 +221,14 @@ stateDiagram-v2
 用户按下“一键发送至 QoderWork”后必须先完成：
 
 ```text
-commit pending TextFlow
+commit pending native edit checkpoint
 → validate comments / ensure project
 → freezeNow() returns exact html + sha + revision
 → projectLocked = true
 → lifecycleState = submitting
 ```
 
-TextFlow commit 或 freeze 失败时立即停止：不锁定、不建立 Request、不复制旧内容。
+原生编辑 checkpoint 或 freeze 失败时立即停止：不锁定、不建立 Request、不复制旧内容。
 
 冻结成功并锁定后：
 
@@ -234,7 +241,7 @@ TextFlow commit 或 freeze 失败时立即停止：不锁定、不建立 Request
 
 ### 7.2 持久化并发布冻结输入
 
-`freezeNow()` 已在锁定前同步捕获 `freezeCutoffRevision`、提交 TextFlow，并返回同一 revision 的 HTML 与 source SHA。锁定后继续：
+`freezeNow()` 已在锁定前同步捕获 `freezeCutoffRevision`、提交原生编辑 checkpoint，并返回同一 revision 的 HTML 与 source SHA。锁定后继续：
 
 1. flush 同一自动写回队列。
 2. 等待 `lastPersistedRevision` 追平冻结 revision。

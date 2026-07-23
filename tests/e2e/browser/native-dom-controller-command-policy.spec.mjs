@@ -78,6 +78,7 @@ test.beforeEach(async ({ page }) => {
     }
     const controller = new nativeControllerModule.NativeEditingController({
       hostElement: host,
+      hostMode: "plaintext-only",
       baseline: {
         revision: initialLease.sourceRevision,
         text: "hello",

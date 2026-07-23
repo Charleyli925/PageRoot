@@ -8,11 +8,12 @@ paths enter the same-origin edit iframe and operate authored DOM with real
 mouse, keyboard, Selection, clipboard, `beforeinput`, and Chromium composition
 events. They do not inject an editor implementation.
 
-The gates require the authored fixture element itself to become
-`contenteditable="plaintext-only"`, with browser-native Selection, caret,
-`beforeinput`, and composition behavior. A passing build keeps the iframe
-`Document` alive during typing, creates no substitute editing surface, and
-persists only the minimal PageRoot SourcePatch transaction.
+The gates require the authored fixture element itself to become the measured
+`plaintext-only` host or the controlled `contenteditable="true"` fallback,
+with browser-native Selection, caret, `beforeinput`, composition and guarded
+mutation behavior. A passing build keeps the iframe `Document` alive during
+typing, creates no substitute editing surface, and persists only the minimal
+PageRoot SourcePatch transaction.
 
 ## Dependency condition
 

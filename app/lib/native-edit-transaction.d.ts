@@ -54,34 +54,3 @@ export declare class NativeTransactionSelectionTracker {
   startSelection(): NativeTransactionSelection | null;
   rebase(): void;
 }
-
-export type SourceTransactionQueueOptions<TPayload, TResult> = {
-  sessionId?: string;
-  commit: (transaction: TPayload & {
-    sessionId: string;
-    sequence: number;
-    status: string;
-    enqueuedAt: number;
-  }) => TResult | Promise<TResult>;
-  onStateChange?: (state: SourceTransactionQueueState<TPayload>) => void;
-};
-
-export type SourceTransactionQueueState<TPayload> = {
-  sessionId: string;
-  lastSequence: number;
-  pending: Array<TPayload & Record<string, unknown>>;
-  failed: Array<TPayload & Record<string, unknown>>;
-};
-
-export declare class SourceTransactionQueue<TPayload = Record<string, unknown>, TResult = unknown> {
-  constructor(options: SourceTransactionQueueOptions<TPayload, TResult>);
-  enqueue(payload: TPayload): Promise<{
-    ok: boolean;
-    transaction: TPayload & Record<string, unknown>;
-    result?: TResult;
-    error?: unknown;
-  }>;
-  snapshot(): SourceTransactionQueueState<TPayload>;
-  flush(): Promise<SourceTransactionQueueState<TPayload>>;
-  clearFailed(): void;
-}

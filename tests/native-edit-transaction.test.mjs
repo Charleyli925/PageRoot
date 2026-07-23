@@ -5,7 +5,6 @@ import test from "node:test";
 import {
   NativeTextChangeTracker,
   NativeTransactionSelectionTracker,
-  SourceTransactionQueue,
   classifyNativeInput,
   diffNativeText,
 } from "../app/lib/native-edit-transaction.js";
@@ -137,29 +136,4 @@ test("explicit current ranges disambiguate equal adjacent source characters", ()
   assert.deepEqual(tracker.replacements(), [
     { startOffset: 1, endOffset: 1, beforeText: "", nextText: "a" },
   ]);
-});
-
-test("source transaction queue commits in sequence and preserves failed metadata", async () => {
-  const order = [];
-  const queue = new SourceTransactionQueue({
-    sessionId: "session_a",
-    commit: async (transaction) => {
-      order.push(`start:${transaction.sequence}`);
-      await Promise.resolve();
-      if (transaction.sequence === 2) throw new Error("stale source");
-      order.push(`end:${transaction.sequence}`);
-      return transaction.value;
-    },
-  });
-  const first = queue.enqueue({ value: "one", baseSourceSha256: "sha0" });
-  const second = queue.enqueue({ value: "two", baseSourceSha256: "sha1" });
-  const third = queue.enqueue({ value: "three", baseSourceSha256: "sha1" });
-  const results = await Promise.all([first, second, third]);
-  assert.deepEqual(order, ["start:1", "end:1", "start:2", "start:3", "end:3"]);
-  assert.equal(results[0].ok, true);
-  assert.equal(results[1].ok, false);
-  assert.equal(results[2].ok, true);
-  assert.equal(queue.snapshot().pending.length, 0);
-  assert.equal(queue.snapshot().failed[0].sequence, 2);
-  assert.match(queue.snapshot().failed[0].error, /stale source/u);
 });

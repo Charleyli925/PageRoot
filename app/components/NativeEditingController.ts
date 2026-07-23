@@ -10,13 +10,23 @@ import {
   type NativeBlockEditDraftSnapshot,
   type NativeBlockPendingCommand,
 } from "../lib/native-block-edit-draft.js";
+import {
+  applyNativeEditSessionAttributes,
+  captureNativeEditSessionAttributes,
+  isDisposableNativeInlineWrapperTag,
+  isNativeEditHostMode,
+  NATIVE_EDIT_CHECKPOINT_DELAY_MS,
+  NATIVE_EDIT_COMPOSITION_TERMINAL_GRACE_MS,
+  NATIVE_EDIT_HOST_MODE,
+  NATIVE_EDIT_MANAGED_ATTRIBUTES,
+  NATIVE_EDIT_PENDING_COMPOSITION_COMMAND_GRACE_MS,
+  NATIVE_EDIT_SESSION_CONTROLLED_ATTRIBUTES,
+  restoreNativeEditSessionAttributes,
+  type NativeEditHostMode,
+} from "../lib/native-edit-policy.js";
 import { isTransparentSourceTextElement } from "../lib/source-text-map.js";
 
-export const NATIVE_EDIT_CHECKPOINT_DELAY_MS = 700;
-
-const COMPOSITION_TERMINAL_DELIVERY_GRACE_MS = 80;
-
-const PENDING_COMPOSITION_COMMAND_GRACE_MS = 1200;
+export { NATIVE_EDIT_CHECKPOINT_DELAY_MS };
 
 const COLLAPSED_TEXT_INSERT_INPUT_TYPES = new Set([
   "insertCompositionText",
@@ -55,54 +65,16 @@ const ATOM_TAGS = new Set([
   "video",
 ]);
 
-const MANAGED_EDIT_ATTRIBUTE_NAMES = new Set([
-  "aria-label",
-  "aria-multiline",
-  "autocapitalize",
-  "autocomplete",
-  "contenteditable",
-  "data-gramm",
-  "data-html-canvas-editing",
-  "data-html-canvas-native-editing",
-  "data-html-canvas-selected",
-  "role",
-  "spellcheck",
-  "tabindex",
-]);
+const MANAGED_EDIT_ATTRIBUTE_NAMES = new Set<string>(
+  NATIVE_EDIT_MANAGED_ATTRIBUTES,
+);
 
-const SESSION_CONTROLLED_ATTRIBUTE_NAMES = [
-  "aria-label",
-  "aria-multiline",
-  "autocapitalize",
-  "autocomplete",
-  "contenteditable",
-  "data-html-canvas-native-editing",
-  "data-gramm",
-  "role",
-  "spellcheck",
-  "tabindex",
-] as const;
+const SESSION_CONTROLLED_ATTRIBUTE_NAMES =
+  NATIVE_EDIT_SESSION_CONTROLLED_ATTRIBUTES;
 
 const SESSION_CONTROLLED_ATTRIBUTE_NAME_SET = new Set<string>(
   SESSION_CONTROLLED_ATTRIBUTE_NAMES,
 );
-
-// Keep this in lockstep with source-patch-engine's disposable empty text
-// wrappers. These are the only authored elements Chromium may temporarily
-// remove after their complete text range is replaced.
-const DISPOSABLE_INLINE_WRAPPER_TAGS = new Set([
-  "b",
-  "em",
-  "i",
-  "mark",
-  "s",
-  "small",
-  "span",
-  "strong",
-  "sub",
-  "sup",
-  "u",
-]);
 
 export type NativeEditSelection = {
   anchor: number;
@@ -217,6 +189,7 @@ export type NativeEditExternalBaselineOptions = {
 
 export type NativeEditingControllerOptions = {
   hostElement: HTMLElement;
+  hostMode: NativeEditHostMode;
   baseline: NativeEditBaseline;
   lease: NativeEditLease;
   ariaLabel?: string;
@@ -741,13 +714,6 @@ function setSelectionValue(
   selection.addRange(range);
 }
 
-function savedAttribute(element: Element, name: string): SavedAttribute {
-  return {
-    present: element.hasAttribute(name),
-    value: element.getAttribute(name),
-  };
-}
-
 function restoreAttribute(
   element: Element,
   name: string,
@@ -1002,7 +968,7 @@ function isProvablyDisposableMissingWrapper(
   return record.nodeType === Node.ELEMENT_NODE
     && record.namespaceURI === "http://www.w3.org/1999/xhtml"
     && record.localName !== null
-    && DISPOSABLE_INLINE_WRAPPER_TAGS.has(record.localName)
+    && isDisposableNativeInlineWrapperTag(record.localName)
     && record.attributeNames.every((name) => (
       name === "style" || name === "data-html-ai-source-node-id"
     ))
@@ -1049,7 +1015,7 @@ function isCompositionCoveredMissingWrapper(
   return record.nodeType === Node.ELEMENT_NODE
     && record.namespaceURI === "http://www.w3.org/1999/xhtml"
     && record.localName !== null
-    && DISPOSABLE_INLINE_WRAPPER_TAGS.has(record.localName)
+    && isDisposableNativeInlineWrapperTag(record.localName)
     && record.attributeNames.every((name) => (
       name === "style" || name === "data-html-ai-source-node-id"
     ))
@@ -1073,7 +1039,7 @@ function isSafeCompositionTemporaryWrapper(
   return record.nodeType === Node.ELEMENT_NODE
     && record.namespaceURI === "http://www.w3.org/1999/xhtml"
     && record.localName !== null
-    && DISPOSABLE_INLINE_WRAPPER_TAGS.has(record.localName)
+    && isDisposableNativeInlineWrapperTag(record.localName)
     // Start with the exact shape observed from Chromium/macOS. Attributes on
     // a browser-created wrapper are not needed to preserve text and would
     // broaden the trust boundary to author-controlled behavior or styling.
@@ -1264,6 +1230,8 @@ function restoreRestorableDomNode(snapshot: RestorableDomNode): void {
 
 export class NativeEditingController {
   readonly hostElement: HTMLElement;
+
+  private readonly hostMode: NativeEditHostMode;
 
   private baseline: NativeEditBaseline;
 
@@ -1755,12 +1723,16 @@ export class NativeEditingController {
       this.finishNativeMutationWindow();
       this.emitState();
       this.notifyPendingCommandReady();
-    }, PENDING_COMPOSITION_COMMAND_GRACE_MS);
+    }, NATIVE_EDIT_PENDING_COMPOSITION_COMMAND_GRACE_MS);
     this.pendingCommandTimer = timer;
   }
 
   constructor(options: NativeEditingControllerOptions) {
     this.hostElement = options.hostElement;
+    if (!isNativeEditHostMode(options.hostMode)) {
+      throw new Error("编辑宿主模式未通过能力预检，已停止直接编辑。");
+    }
+    this.hostMode = options.hostMode;
     this.baseline = options.baseline;
     this.leaseStamp = cloneLeaseStamp(options.lease.stamp);
     this.leaseIsCurrent = options.lease.isCurrent;
@@ -1789,10 +1761,8 @@ export class NativeEditingController {
       },
       formatSkeleton: options.formatSkeleton ?? null,
     });
-    this.originalAttributes = Object.fromEntries(
-      SESSION_CONTROLLED_ATTRIBUTE_NAMES.map((name) => (
-        [name, savedAttribute(this.hostElement, name)]
-      )),
+    this.originalAttributes = captureNativeEditSessionAttributes(
+      this.hostElement,
     );
     this.baselineChildren = this.cloneChildren();
     this.baselineHostAttributes = authoredAttributes(this.hostElement, true);
@@ -1803,29 +1773,22 @@ export class NativeEditingController {
       throw new Error("真实 DOM 文字与源码映射不一致，已停止直接编辑。");
     }
 
-    this.hostElement.setAttribute("data-html-canvas-native-editing", "true");
-    this.hostElement.setAttribute("contenteditable", "plaintext-only");
-    this.hostElement.setAttribute("role", "textbox");
-    this.hostElement.setAttribute("aria-multiline", "true");
-    this.hostElement.setAttribute("aria-label", options.ariaLabel || "原位编辑文字");
-    this.hostElement.setAttribute("autocapitalize", "off");
-    this.hostElement.setAttribute("autocomplete", "off");
-    this.hostElement.setAttribute("data-gramm", "false");
-    this.hostElement.spellcheck = true;
-    if (this.hostElement.tabIndex < 0) this.hostElement.tabIndex = 0;
-    this.activeSessionAttributes = Object.fromEntries(
-      SESSION_CONTROLLED_ATTRIBUTE_NAMES.map((name) => (
-        [name, savedAttribute(this.hostElement, name)]
-      )),
+    applyNativeEditSessionAttributes(this.hostElement, {
+      hostMode: this.hostMode,
+      ariaLabel: options.ariaLabel,
+    });
+    this.activeSessionAttributes = captureNativeEditSessionAttributes(
+      this.hostElement,
     );
     this.domStructureSnapshot = captureDomStructure(this.hostElement);
 
     const documentNode = this.hostElement.ownerDocument;
     const MutationObserverConstructor = documentNode.defaultView?.MutationObserver;
     if (!MutationObserverConstructor) {
-      for (const [name, saved] of Object.entries(this.originalAttributes)) {
-        restoreAttribute(this.hostElement, name, saved);
-      }
+      restoreNativeEditSessionAttributes(
+        this.hostElement,
+        this.originalAttributes,
+      );
       throw new Error("当前页面无法监测文字变化，已停止直接编辑。");
     }
     this.mutationObserver = new MutationObserverConstructor((records) => {
@@ -2536,13 +2499,63 @@ export class NativeEditingController {
   private handlePaste(event: ClipboardEvent): void {
     if (!this.canHandleEvent(event)) return;
     const plainText = event.clipboardData?.getData("text/plain") ?? "";
-    if (!/[\r\n]/u.test(plainText)) return;
-    // A multiline plaintext paste makes Chromium synthesize child blocks in a
-    // plaintext-only host. PageRoot cannot losslessly map that transient
-    // structure back to an existing text island, so reject the whole gesture
-    // at the clipboard event, before the DOM or Selection can move.
+    if (/[\r\n]/u.test(plainText)) {
+      // A multiline paste can synthesize child blocks in either editing host.
+      // PageRoot cannot losslessly map that transient structure back to an
+      // existing text island, so reject before DOM or Selection can move.
+      event.preventDefault();
+      this.unsupportedInputIfCurrent("insertFromPasteMultiline");
+      this.emitState();
+      return;
+    }
+    if (this.hostMode !== NATIVE_EDIT_HOST_MODE.CONTROLLED) return;
+
+    // contenteditable=true accepts HTML fragments and formatting by default.
+    // PageRoot's controlled mode therefore owns every paste and asks Chromium
+    // to insert only text. execCommand("insertText") is intentionally narrow:
+    // it preserves the native undo owner and still has to complete the same
+    // beforeinput/input + MutationObserver proof as keyboard input.
     event.preventDefault();
-    this.unsupportedInputIfCurrent("insertFromPasteMultiline");
+    if (!plainText) {
+      this.emitState();
+      return;
+    }
+    if (
+      this.composing
+      || this.compositionDeliveryPending
+      || this.draftCompositionUnsettled
+      || this.requiresCanonicalReconcile
+    ) {
+      this.unsupportedInputIfCurrent("insertFromPasteWhileComposing");
+      this.emitState();
+      return;
+    }
+    if (insertionTargetsAmbiguousInlineBoundary(this.hostElement, null)) {
+      this.unsupportedInputIfCurrent("insertAtAmbiguousInlineBoundary");
+      this.emitState();
+      return;
+    }
+    if (!this.openNativeMutationWindow()) return;
+    this.beginNativeCandidate("insertFromPaste");
+    // Chromium reports execCommand("insertText") as insertText on some
+    // versions and insertFromPaste on others. Both names belong to this one
+    // clipboard-authorized candidate; no structural input type is authorized.
+    this.beginNativeCandidate("insertText");
+    this.captureNativeMutationIntent(null, "insertFromPaste");
+    try {
+      const accepted = this.hostElement.ownerDocument.execCommand(
+        "insertText",
+        false,
+        plainText,
+      );
+      if (accepted) return;
+    } catch (cause) {
+      this.reportErrorIfCurrent(errorFrom(cause));
+    }
+    this.discardPendingNativeCandidate();
+    this.restoreLastValidatedSnapshot();
+    this.finishNativeMutationWindow();
+    this.unsupportedInputIfCurrent("insertFromPasteUnavailable");
     this.emitState();
   }
 
@@ -3150,7 +3163,7 @@ export class NativeEditingController {
       this.finishNativeMutationWindow();
       this.emitState();
       this.notifyPendingCommandReady();
-    }, COMPOSITION_TERMINAL_DELIVERY_GRACE_MS);
+    }, NATIVE_EDIT_COMPOSITION_TERMINAL_GRACE_MS);
     this.compositionTerminalDeliveryTimer = timer;
   }
 
@@ -4389,8 +4402,9 @@ export class NativeEditingController {
     // Keep the legacy dispose contract: HtmlCanvas intentionally clears its
     // outer lease ref before ending a normal session, but the retiring
     // controller must still restore the attributes it captured on entry.
-    for (const [name, saved] of Object.entries(this.originalAttributes)) {
-      restoreAttribute(this.hostElement, name, saved);
-    }
+    restoreNativeEditSessionAttributes(
+      this.hostElement,
+      this.originalAttributes,
+    );
   }
 }
