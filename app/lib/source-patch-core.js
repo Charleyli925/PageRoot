@@ -28,6 +28,7 @@ export {
   planInlineStylePatch,
   planSiblingReorderPatch,
   planSourcePatch,
+  planSplitTextBlockPatch,
   planTextFlowRangePatch,
   planTextRangePatch,
   planTextRangeStylePatch,

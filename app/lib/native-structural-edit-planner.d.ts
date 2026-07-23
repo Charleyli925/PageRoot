@@ -16,6 +16,11 @@ export type NativeSourceEditIntent =
         endOffset: number;
       };
       selection: NativeEditSelection;
+    }
+  | {
+      kind: "split-block";
+      inputType: "insertParagraph";
+      selection: NativeEditSelection;
     };
 
 export type NativeStructuralEditPlan = {
@@ -24,12 +29,15 @@ export type NativeStructuralEditPlan = {
   command: Record<string, unknown>;
   previousText: string;
   nextText: string;
+  firstText?: string;
+  secondText?: string;
   selection: NativeEditSelection;
 };
 
 export declare const NATIVE_SOURCE_EDIT_KIND: Readonly<{
   INSERT_TEXT_FLOW: "insert-text-flow";
   DELETE_HARD_BREAK: "delete-hard-break";
+  SPLIT_BLOCK: "split-block";
 }>;
 
 export declare class NativeStructuralEditError extends Error {

@@ -841,6 +841,92 @@ test("one authored hard break can be deleted and restored without rewriting neig
   }, index));
 });
 
+test("simple paragraph and list-item splits preserve text bytes and omit cloned identity or behavior attributes", () => {
+  const fixtures = [
+    {
+      html: `<main><p id='copy' class="lead" style='color:red' data-item-id='one' data-section="hero" onclick='go()'>甲&amp;乙丙</p><aside>same</aside></main>`,
+      tagName: "p",
+      splitOffset: 2,
+      expectedFirst: "甲&",
+      expectedSecond: "乙丙",
+    },
+    {
+      html: `<ol><li id="item" class='row' value="7">第一项第二项</li></ol>`,
+      tagName: "li",
+      splitOffset: 3,
+      expectedFirst: "第一项",
+      expectedSecond: "第二项",
+    },
+  ];
+
+  for (const fixture of fixtures) {
+    const index = buildSourceIndex(fixture.html);
+    const block = elementBy(index, (element) => (
+      element.tagName === fixture.tagName
+      && element.attributesByName.has("id")
+    ));
+    const targetRef = createTargetRef(index, block.nodeId, { level: "subregion" });
+    const plan = planSourcePatch({
+      type: "split-text-block",
+      targetRef,
+      splitOffset: fixture.splitOffset,
+      expectedSourceSha256: index.sourceSha256,
+    }, index);
+    const result = applyPatchPlan(plan, fixture.html);
+    const blocks = result.sourceIndex.elements.filter(
+      (element) => element.tagName === fixture.tagName,
+    );
+
+    assert.equal(blocks.length, 2);
+    assert.equal(blocks[0].textContent, fixture.expectedFirst);
+    assert.equal(blocks[1].textContent, fixture.expectedSecond);
+    assert.equal(blocks[1].attributesByName.has("id"), false);
+    assert.equal(blocks[1].attributesByName.has("name"), false);
+    assert.equal(blocks[1].attributesByName.has("value"), false);
+    assert.equal(blocks[1].attributes.some(({ name }) => name.startsWith("on")), false);
+    assert.equal(blocks[1].attributesByName.has("class"), true);
+    assert.equal(
+      blocks[1].startTagRange.startOffset,
+      plan.metadata.createdBlockStartOffset,
+    );
+    assert.equal(result.scopeReport.outsideUnchanged, true);
+    if (fixture.tagName === "p") {
+      assert.equal(blocks[1].attributesByName.has("data-item-id"), false);
+      assert.equal(blocks[1].attributesByName.has("data-section"), true);
+      assert.match(result.html, /<aside>same<\/aside>/u);
+    }
+
+    const undone = applyPatchPlan(result.inversePlan, result.html);
+    assert.equal(undone.html, fixture.html);
+    assert.equal(applyPatchPlan(undone.inversePlan, undone.html).html, result.html);
+    assertPatchError("PATCH_PLAN_TAMPERED", () => applyPatchPlan({
+      ...plan,
+      patches: plan.patches.map((patch) => ({
+        ...patch,
+        after: patch.after.replace(fixture.tagName, "section"),
+      })),
+    }, fixture.html));
+  }
+});
+
+test("block splitting refuses complex children, boundary carets, and unsupported roots", () => {
+  for (const [html, id, splitOffset, code] of [
+    [`<p id="copy">甲<strong>乙</strong></p>`, "copy", 1, "BLOCK_SPLIT_COMPLEX_CONTENT"],
+    [`<p id="copy">甲乙</p>`, "copy", 0, "BLOCK_SPLIT_BOUNDARY_UNSUPPORTED"],
+    [`<h2 id="copy">甲乙</h2>`, "copy", 1, "BLOCK_SPLIT_UNSUPPORTED"],
+  ]) {
+    const index = buildSourceIndex(html);
+    const block = elementBy(index, (element) => element.stableAttributes.id === id);
+    const targetRef = createTargetRef(index, block.nodeId, { level: "subregion" });
+    assertPatchError(code, () => planSourcePatch({
+      type: "split-text-block",
+      targetRef,
+      splitOffset,
+      expectedSourceSha256: index.sourceSha256,
+    }, index));
+  }
+});
+
 test("inline style patch preserves quote, attribute order, unrelated declarations, and !important", () => {
   const html = `<button data-x=1 class='cta' style='color : red !important;  padding:4px ; --Token: 10' aria-label="go">Go</button>`;
   const index = buildSourceIndex(html);

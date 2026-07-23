@@ -4,6 +4,7 @@ import { textRangeToSourceEdit } from "./source-text-map.js";
 export const NATIVE_SOURCE_EDIT_KIND = Object.freeze({
   INSERT_TEXT_FLOW: "insert-text-flow",
   DELETE_HARD_BREAK: "delete-hard-break",
+  SPLIT_BLOCK: "split-block",
 });
 
 export class NativeStructuralEditError extends Error {
@@ -126,6 +127,55 @@ export function planNativeStructuralEdit(sourceMap, intent) {
         anchor: startOffset,
         focus: startOffset,
         affinity: intent.inputType === "deleteContentForward" ? "right" : "left",
+      },
+    };
+  }
+
+  if (intent?.kind === NATIVE_SOURCE_EDIT_KIND.SPLIT_BLOCK) {
+    if (selection.startOffset !== selection.endOffset) {
+      fail(
+        "BLOCK_SPLIT_SELECTION_UNSUPPORTED",
+        "Block splitting requires one collapsed caret.",
+        { selection },
+      );
+    }
+    const textRun = sourceMap.runs.length === 1
+      && sourceMap.runs[0]?.kind === "text"
+      && sourceMap.runs[0].parentNodeId === sourceMap.rootNodeId
+      ? sourceMap.runs[0]
+      : null;
+    if (
+      !["p", "li"].includes(sourceMap.rootTagName)
+      || !textRun
+      || selection.startOffset <= 0
+      || selection.startOffset >= sourceMap.textLength
+    ) {
+      fail(
+        "BLOCK_SPLIT_SIMPLE_TEXT_REQUIRED",
+        "Only a caret inside one direct, non-empty <p> or <li> text node can split the block.",
+        {
+          rootTagName: sourceMap.rootTagName,
+          runCount: sourceMap.runs.length,
+          splitOffset: selection.startOffset,
+          textLength: sourceMap.textLength,
+        },
+      );
+    }
+    return {
+      kind: intent.kind,
+      inputType: String(intent.inputType || "insertParagraph"),
+      command: {
+        type: "split-text-block",
+        splitOffset: selection.startOffset,
+      },
+      previousText: sourceMap.text,
+      nextText: sourceMap.text,
+      firstText: sourceMap.text.slice(0, selection.startOffset),
+      secondText: sourceMap.text.slice(selection.startOffset),
+      selection: {
+        anchor: 0,
+        focus: 0,
+        affinity: "right",
       },
     };
   }

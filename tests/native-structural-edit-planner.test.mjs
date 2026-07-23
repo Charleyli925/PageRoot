@@ -91,3 +91,52 @@ test("backspace and delete target exactly one authored hard break", () => {
     affinity: "left",
   });
 });
+
+test("Enter plans a source-owned split for one simple paragraph or list-item text node", () => {
+  for (const [html, id] of [
+    [`<p id="copy">第一段第二段</p>`, "copy"],
+    [`<ol><li id="item">第一项第二项</li></ol>`, "item"],
+  ]) {
+    const sourceMap = sourceMapFor(html, id);
+    const plan = planNativeStructuralEdit(sourceMap, {
+      kind: NATIVE_SOURCE_EDIT_KIND.SPLIT_BLOCK,
+      inputType: "insertParagraph",
+      selection: {
+        anchor: 3,
+        focus: 3,
+        affinity: "right",
+      },
+    });
+
+    assert.equal(plan.command.type, "split-text-block");
+    assert.equal(plan.command.splitOffset, 3);
+    assert.equal(plan.firstText, sourceMap.text.slice(0, 3));
+    assert.equal(plan.secondText, sourceMap.text.slice(3));
+    assert.deepEqual(plan.selection, {
+      anchor: 0,
+      focus: 0,
+      affinity: "right",
+    });
+  }
+});
+
+test("Enter refuses selected text, block boundaries, and inline structure", () => {
+  const simple = sourceMapFor(`<p id="copy">甲乙</p>`, "copy");
+  assert.throws(() => planNativeStructuralEdit(simple, {
+    kind: NATIVE_SOURCE_EDIT_KIND.SPLIT_BLOCK,
+    inputType: "insertParagraph",
+    selection: { anchor: 0, focus: 1, affinity: "right" },
+  }), (error) => error.code === "BLOCK_SPLIT_SELECTION_UNSUPPORTED");
+  assert.throws(() => planNativeStructuralEdit(simple, {
+    kind: NATIVE_SOURCE_EDIT_KIND.SPLIT_BLOCK,
+    inputType: "insertParagraph",
+    selection: { anchor: 0, focus: 0, affinity: "right" },
+  }), (error) => error.code === "BLOCK_SPLIT_SIMPLE_TEXT_REQUIRED");
+
+  const inline = sourceMapFor(`<p id="copy">甲<strong>乙</strong></p>`, "copy");
+  assert.throws(() => planNativeStructuralEdit(inline, {
+    kind: NATIVE_SOURCE_EDIT_KIND.SPLIT_BLOCK,
+    inputType: "insertParagraph",
+    selection: { anchor: 1, focus: 1, affinity: "right" },
+  }), (error) => error.code === "BLOCK_SPLIT_SIMPLE_TEXT_REQUIRED");
+});

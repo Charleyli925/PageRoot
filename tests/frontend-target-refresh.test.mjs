@@ -377,7 +377,7 @@ test("ordinary patches keep the mounted iframe while source-authority fences use
   assert.doesNotMatch(applyHistory, /synchronizeStablePreview/u);
   assert.match(
     applyHistory,
-    /PageRoot history never shares[\s\S]*?queueNativeFenceReload\([\s\S]*?result\.html,[\s\S]*?nativeBookmark,[\s\S]*?appliedMutation\.target/u,
+    /PageRoot history never shares[\s\S]*?queueNativeFenceReload\([\s\S]*?result\.html,[\s\S]*?nativeBookmark,[\s\S]*?(?:appliedMutation\.target|historyResumeTarget)/u,
     "undo and redo must always rebuild a canonical frame rather than reuse Chromium history",
   );
   assert.match(

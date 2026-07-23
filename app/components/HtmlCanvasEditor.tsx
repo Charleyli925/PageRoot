@@ -319,6 +319,7 @@ type SelectedStyle = {
   lineHeight: number;
   isBold: boolean;
   isItalic: boolean;
+  isUnderline: boolean;
   sources: StyleSourceInfo[];
 };
 
@@ -328,6 +329,7 @@ type EditableStyleProperty =
   | "backgroundColor"
   | "fontWeight"
   | "fontStyle"
+  | "textDecorationLine"
   | "padding"
   | "margin"
   | "lineHeight";
@@ -441,6 +443,13 @@ type PendingNativeEditResume = NativeEditFenceBookmark & {
   sourceRevision: string;
 };
 
+type NativeStructureCommitResume = {
+  target: HtmlCanvasSelection;
+  selection: NativeEditSelection;
+};
+
+type NativeFormatShortcut = "bold" | "italic" | "underline";
+
 function nativeEditLeasesMatch(
   left: ActiveNativeEdit["lease"] | null,
   right: ActiveNativeEdit["lease"],
@@ -542,6 +551,7 @@ const STYLE_PROPERTY_CONFIGS: ReadonlyArray<{
   { property: "backgroundColor", cssProperty: "background-color", label: "填充" },
   { property: "fontWeight", cssProperty: "font-weight", label: "字重" },
   { property: "fontStyle", cssProperty: "font-style", label: "字形" },
+  { property: "textDecorationLine", cssProperty: "text-decoration-line", label: "下划线" },
   { property: "padding", cssProperty: "padding-top", label: "内边距" },
   { property: "margin", cssProperty: "margin-top", label: "外间距" },
   { property: "lineHeight", cssProperty: "line-height", label: "行距" },
@@ -553,6 +563,7 @@ const TEXT_RANGE_EDITABLE_PROPERTIES = new Set<EditableStyleProperty>([
   "backgroundColor",
   "fontWeight",
   "fontStyle",
+  "textDecorationLine",
 ]);
 
 const NATURALLY_INHERITED_PROPERTIES = new Set([
@@ -1983,6 +1994,13 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     target: HtmlCanvasSelection | null,
     selection?: NativeEditSelection,
   ) => void>(() => undefined);
+  const resumeNativeStructureCommitRef = useRef<(
+    result: ReturnType<typeof applyPatchPlan>,
+    resume: NativeStructureCommitResume,
+  ) => boolean>(() => false);
+  const applyNativeFormatShortcutRef = useRef<(
+    shortcut: NativeFormatShortcut,
+  ) => boolean>(() => false);
   const restartCanonicalNativeEditRef = useRef<(
     active: ActiveNativeEdit,
     target: HtmlCanvasSelection,
@@ -2070,6 +2088,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     lineHeight: 24,
     isBold: false,
     isItalic: false,
+    isUnderline: false,
     sources: [],
   });
   const [moveAvailability, setMoveAvailability] = useState<MoveAvailability>({ up: false, down: false });
@@ -2220,6 +2239,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     const styleIsItalic = (candidate: CSSStyleDeclaration) => (
       candidate.fontStyle === "italic" || candidate.fontStyle === "oblique"
     );
+    const styleIsUnderline = (candidate: CSSStyleDeclaration) => (
+      candidate.textDecorationLine.split(/\s+/u).includes("underline")
+    );
     setSelectedStyle({
       fontSize: Math.max(1, Math.round(Number.parseFloat(computedStyle.fontSize) || 16)),
       color: toHexColor(computedStyle.color, "#202124"),
@@ -2232,6 +2254,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       ),
       isBold: rangeComputedStyles.every(styleIsBold),
       isItalic: rangeComputedStyles.every(styleIsItalic),
+      isUnderline: rangeComputedStyles.every(styleIsUnderline),
       sources: styleSourcesForElement(styleElement),
     });
   }, []);
@@ -2878,6 +2901,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         /** A source-authority fence will retire this session immediately. */
         deferPreviewReconcile?: boolean;
       };
+      nativeStructureCommit?: {
+        resolveResume: (
+          result: ReturnType<typeof applyPatchPlan>,
+        ) => NativeStructureCommitResume;
+      };
     } = {},
   ): ReturnType<typeof applyPatchPlan> | null => {
     const sourceIndex = sourceIndexRef.current;
@@ -2916,6 +2944,18 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       );
       if (result.html === currentSource) return null;
       options.validateResult?.(result);
+      const nativeStructureResume = options.nativeStructureCommit
+        ? options.nativeStructureCommit.resolveResume(result)
+        : null;
+      if (
+        nativeStructureResume
+        && (
+          !activeNativeEditRef.current
+          || activeNativeEditRef.current.target.id !== mutation.target.id
+        )
+      ) {
+        throw new Error("段落拆分前的原位编辑会话已经变化，已停止提交。");
+      }
       const targetUpdates = deterministicTargetUpdates(result, originalTargets);
       const targetUpdatesById = new Map(
         targetUpdates.map((target) => [target.id, target]),
@@ -2954,6 +2994,19 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       }
       setEditFeedback(null);
       lastEmittedHtmlRef.current = result.html;
+      if (nativeStructureResume) {
+        sourceIndexRef.current = result.sourceIndex;
+        frameSourceHtmlRef.current = result.html;
+        if (resumeNativeStructureCommitRef.current(result, nativeStructureResume)) {
+          containerRef.current?.setAttribute(
+            "data-native-commit-path",
+            "structural-fence-reload",
+          );
+          return result;
+        }
+        nativeEditNeedsReloadRef.current = true;
+        renderedSourceHtmlRef.current = null;
+      }
       const activeNativeEdit = activeNativeEditRef.current;
       const keepsNativeEditMounted = Boolean(
         activeNativeEdit
@@ -3655,25 +3708,34 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     const active = activeNativeEditRef.current;
     const sourceIndex = sourceIndexRef.current;
     if (!active || !sourceIndex || sourceIndex.source !== frameSourceHtmlRef.current) {
-      reportBlockedEdit(new Error("换行前的源码状态已经变化，请重新点选文字后再试。"));
+      reportBlockedEdit(new Error("结构编辑前的源码状态已经变化，请重新点选文字后再试。"));
       return true;
     }
 
     try {
       const structural = planNativeStructuralEdit(active.projection, intent);
       let validatedProjection: SourceTextMap | null = null;
+      let structuralResume: NativeStructureCommitResume | null = null;
       const mutation: HtmlCanvasMutation = {
         kind: "structure",
         target: active.target,
         property: structural.kind === "delete-hard-break"
           ? "hardBreakDelete"
-          : "plainTextFlow",
+          : structural.kind === "split-block"
+            ? "blockSplit"
+            : "plainTextFlow",
         before: {
           text: structural.previousText,
           selection: intent.selection,
         },
         after: {
           text: structural.nextText,
+          ...(structural.firstText !== undefined
+            ? {
+                firstText: structural.firstText,
+                secondText: structural.secondText,
+              }
+            : {}),
           selection: structural.selection,
           inputType: structural.inputType,
         },
@@ -3683,10 +3745,27 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         targetRef: active.rootTargetRef,
         expectedSourceSha256: active.projection.sourceSha256,
       } as SourcePatchCommand, mutation, {
-        nativeTextCommit: {
-          selection: structural.selection,
-          requiresCanonicalReconcile: true,
-        },
+        ...(structural.kind === "split-block"
+          ? {
+              nativeStructureCommit: {
+                resolveResume: () => {
+                  if (!structuralResume) {
+                    throw new Error("新增段落无法在源码中精确定位，已停止提交。");
+                  }
+                  mutation.after = {
+                    ...(mutation.after as Record<string, unknown>),
+                    resumeTarget: structuralResume.target,
+                  };
+                  return structuralResume;
+                },
+              },
+            }
+          : {
+              nativeTextCommit: {
+                selection: structural.selection,
+                requiresCanonicalReconcile: true,
+              },
+            }),
         validateResult: (candidate) => {
           const operationTargetRef = candidate.refreshedTargetRefs.find(
             (targetRef: SourceTargetRef) => (
@@ -3694,21 +3773,61 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             ),
           );
           if (!operationTargetRef || operationTargetRef.resolution !== "exact") {
-            throw new Error("换行后的文字宿主无法精确重绑，已停止提交。");
+            throw new Error("结构编辑后的文字宿主无法精确重绑，已停止提交。");
           }
           const projection = buildSourceTextMap(
             candidate.sourceIndex,
             operationTargetRef,
             { allowEmpty: true },
           );
-          if (projection.text !== structural.nextText) {
-            throw new Error("换行后的源码文字与预期不一致，已停止提交。");
+          if (structural.kind !== "split-block") {
+            if (projection.text !== structural.nextText) {
+              throw new Error("换行后的源码文字与预期不一致，已停止提交。");
+            }
+            validatedProjection = projection;
+            return;
           }
-          validatedProjection = projection;
+          if (projection.text !== structural.firstText) {
+            throw new Error("拆分后的第一段文字与预期不一致，已停止提交。");
+          }
+          const createdBlockStartOffset = Number(
+            candidate.inversePlan.metadata?.createdBlockStartOffset,
+          );
+          const createdBlock = (candidate.sourceIndex.elements as SourceElementValue[]).find(
+            (element) => (
+              element.tagName === active.projection.rootTagName
+              && element.startTagRange.startOffset === createdBlockStartOffset
+            ),
+          );
+          if (!createdBlock) {
+            throw new Error("新增段落无法在源码中精确定位，已停止提交。");
+          }
+          const createdTargetRef = createTargetRef(
+            candidate.sourceIndex,
+            createdBlock,
+            { level: active.rootTargetRef.level },
+          ) as SourceTargetRef;
+          const createdProjection = buildSourceTextMap(
+            candidate.sourceIndex,
+            createdTargetRef,
+            { allowEmpty: true },
+          );
+          if (createdProjection.text !== structural.secondText) {
+            throw new Error("拆分后的第二段文字与预期不一致，已停止提交。");
+          }
+          structuralResume = {
+            target: selectionFromRefreshedTarget(
+              active.target,
+              createdTargetRef,
+              createdBlock.nodeId,
+            ),
+            selection: structural.selection,
+          };
+          validatedProjection = createdProjection;
         },
       });
       if (!result || !validatedProjection) {
-        reportBlockedEdit(new Error("这处文字无法生成安全的换行源码修改。"));
+        reportBlockedEdit(new Error("这处文字无法生成安全的结构修改。"));
       }
     } catch (cause) {
       reportBlockedEdit(cause);
@@ -4767,6 +4886,28 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   }, [loadFrameSource]);
   queueNativeFenceReloadRef.current = queueNativeFenceReload;
 
+  const resumeNativeStructureCommit = useCallback((
+    result: ReturnType<typeof applyPatchPlan>,
+    resume: NativeStructureCommitResume,
+  ): boolean => {
+    const bookmark = detachNativeEditForFence();
+    if (!bookmark) return false;
+    sourceIndexRef.current = result.sourceIndex;
+    frameSourceHtmlRef.current = result.html;
+    queueNativeFenceReload(
+      result.html,
+      {
+        ...bookmark,
+        target: resume.target,
+        selection: resume.selection,
+      },
+      resume.target,
+      resume.selection,
+    );
+    return true;
+  }, [detachNativeEditForFence, queueNativeFenceReload]);
+  resumeNativeStructureCommitRef.current = resumeNativeStructureCommit;
+
   const applyHistoryPlan = useCallback((
     plan: SourcePatchPlan,
     mutation: HtmlCanvasMutation,
@@ -4823,6 +4964,45 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       }
       sourceIndexRef.current = result.sourceIndex;
       frameSourceHtmlRef.current = result.html;
+      let historyResumeTarget = appliedMutation.target;
+      const mutationAfter = mutation.after;
+      const storedResumeTarget = (
+        mutation.historyAction === "redo"
+        && mutationAfter
+        && typeof mutationAfter === "object"
+        && "resumeTarget" in mutationAfter
+      )
+        ? (mutationAfter as { resumeTarget?: HtmlCanvasSelection }).resumeTarget
+        : null;
+      if (storedResumeTarget) {
+        try {
+          const resolvedResume = resolveTargetRef(
+            result.sourceIndex,
+            sourceTargetRefForSelection(storedResumeTarget),
+          );
+          if (
+            resolvedResume.resolution === "exact"
+            && resolvedResume.target?.type === "element"
+          ) {
+            const refreshedResumeRef = createTargetRef(
+              result.sourceIndex,
+              resolvedResume.target,
+              {
+                targetId: storedResumeTarget.id,
+                label: storedResumeTarget.label,
+                level: targetLevelForSelection(storedResumeTarget.level),
+              },
+            ) as SourceTargetRef;
+            historyResumeTarget = selectionFromRefreshedTarget(
+              storedResumeTarget,
+              refreshedResumeRef,
+              resolvedResume.target.nodeId,
+            );
+          }
+        } catch {
+          historyResumeTarget = appliedMutation.target;
+        }
+      }
       const nextSelection = nativeBookmark
         ? nativeSelectionFromMutationValue(
             appliedMutation.after,
@@ -4835,7 +5015,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       queueNativeFenceReload(
         result.html,
         nativeBookmark,
-        appliedMutation.target,
+        historyResumeTarget,
         nextSelection,
       );
       setEditFeedback(null);
@@ -5419,6 +5599,22 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       }
       const activeNativeEdit = activeNativeEditRef.current;
       if (activeNativeEdit?.rootElement.contains(event.target as Node)) {
+        const formatShortcut = (
+          (event.metaKey || event.ctrlKey)
+          && !event.altKey
+        )
+          ? ({
+              b: "bold",
+              i: "italic",
+              u: "underline",
+            } as const)[event.key.toLowerCase() as "b" | "i" | "u"]
+          : null;
+        if (formatShortcut) {
+          event.preventDefault();
+          event.stopPropagation();
+          applyNativeFormatShortcutRef.current(formatShortcut);
+          return;
+        }
         if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") {
           event.preventDefault();
           if (event.shiftKey) redo();
@@ -5846,6 +6042,52 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     ],
   );
 
+  const applyNativeFormatShortcut = useCallback((
+    shortcut: NativeFormatShortcut,
+  ): boolean => {
+    const active = activeNativeEditRef.current;
+    if (!active) return false;
+    const nativeSelection = active.session.getSelection();
+    refreshNativeEditRangeState(active, nativeSelection);
+    const activeRange = activeTextRangeRef.current;
+    if (!activeRange) {
+      reportBlockedEdit(new Error("请先选中要修改的文字，再使用格式快捷键。"));
+      return true;
+    }
+    const view = active.rootElement.ownerDocument.defaultView;
+    const styleElements = activeRange.styleElements.length > 0
+      ? activeRange.styleElements
+      : [active.rootElement];
+    const computedStyles = styleElements.map((element) => (
+      view!.getComputedStyle(element)
+    ));
+    if (shortcut === "bold") {
+      const enabled = computedStyles.every((style) => (
+        style.fontWeight === "bold"
+        || Number.parseInt(style.fontWeight, 10) >= 600
+      ));
+      applyInlineStyle("fontWeight", enabled ? "normal" : "700");
+      return true;
+    }
+    if (shortcut === "italic") {
+      const enabled = computedStyles.every((style) => (
+        style.fontStyle === "italic" || style.fontStyle === "oblique"
+      ));
+      applyInlineStyle("fontStyle", enabled ? "normal" : "italic");
+      return true;
+    }
+    const enabled = computedStyles.every((style) => (
+      style.textDecorationLine.split(/\s+/u).includes("underline")
+    ));
+    applyInlineStyle("textDecorationLine", enabled ? "none" : "underline");
+    return true;
+  }, [
+    applyInlineStyle,
+    refreshNativeEditRangeState,
+    reportBlockedEdit,
+  ]);
+  applyNativeFormatShortcutRef.current = applyNativeFormatShortcut;
+
   const handleToolbarKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") {
       event.preventDefault();
@@ -6099,6 +6341,19 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
                   onClick={() => applyInlineStyle("fontStyle", selectedStyle.isItalic ? "normal" : "italic")}
                 >
                   斜体
+                </button>
+                <button
+                  type="button"
+                  className={styles.formatButton}
+                  aria-pressed={selectedStyle.isUnderline}
+                  disabled={textFormatRequiresSelection}
+                  title={textFormatRequiresSelection ? "请先选中要修改的文字" : "下划线"}
+                  onClick={() => applyInlineStyle(
+                    "textDecorationLine",
+                    selectedStyle.isUnderline ? "none" : "underline",
+                  )}
+                >
+                  下划线
                 </button>
               </div>
 

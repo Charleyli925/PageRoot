@@ -409,7 +409,7 @@ test.describe("authored DOM native editing contract", () => {
     expect(detailsOpenAfter).toBe(true);
   });
 
-  test("Enter stays blocked while Shift+Enter commits one source-owned hard break", async ({ page }) => {
+  test("Enter stays blocked for complex break content while Shift+Enter commits one source-owned hard break", async ({ page }) => {
     const { editor, frame, source } = await openMatrix(page);
     await activateNativeEdit(frame, "hard-break");
     await installInputRecorder(frame);
@@ -470,6 +470,120 @@ test.describe("authored DOM native editing contract", () => {
 
     await page.keyboard.press(keyShortcut("Z"));
     await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("0");
+    expect((await exportCurrentHtml(page)).equals(source)).toBe(true);
+  });
+
+  test("Enter splits one simple list item, resumes in the new item, and round-trips undo/redo", async ({ page }) => {
+    const { editor, frame, source } = await openMatrix(page);
+    const caseId = "list-item";
+    const originalText = "列表项中的文字保持项目符号和缩进。";
+    const firstText = "列表项中的";
+    const secondText = "文字保持项目符号和缩进。";
+    const startTag = `<li data-native-case="list-item" data-native-mode="native-editable">`;
+    const originalSource = `${startTag}${originalText}</li>`;
+    const splitSource = `${startTag}${firstText}</li>${startTag}${secondText}</li>`;
+
+    await activateNativeEdit(frame, caseId);
+    await setTextSelection(frame, caseId, firstText.length);
+    const initialDocument = await documentToken(frame);
+    await page.keyboard.press("Enter");
+
+    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
+    await expect.poll(() => frame.locator(caseSelector(caseId)).count()).toBe(2);
+    await expect.poll(() => documentToken(frame)).not.toBe(initialDocument);
+    expect((await exportCurrentHtml(page)).equals(
+      replaceUniqueBytes(source, originalSource, splitSource),
+    )).toBe(true);
+    await expect.poll(() => frame.evaluate((id) => {
+      const items = [...document.querySelectorAll(`[data-native-case=${JSON.stringify(id)}]`)];
+      const active = document.activeElement;
+      const selection = document.getSelection();
+      return {
+        activeIndex: items.indexOf(active),
+        contenteditable: active?.getAttribute("contenteditable"),
+        collapsed: selection?.isCollapsed,
+        offset: selection?.focusOffset,
+      };
+    }, caseId)).toMatchObject({
+      activeIndex: 1,
+      contenteditable: "plaintext-only",
+      collapsed: true,
+      offset: 0,
+    });
+
+    await page.keyboard.insertText("续");
+    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("2");
+    const typedSource = splitSource.replace(`>${secondText}`, `>续${secondText}`);
+    expect((await exportCurrentHtml(page)).equals(
+      replaceUniqueBytes(source, originalSource, typedSource),
+    )).toBe(true);
+
+    await page.keyboard.press(keyShortcut("Z"));
+    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
+    expect((await exportCurrentHtml(page)).equals(
+      replaceUniqueBytes(source, originalSource, splitSource),
+    )).toBe(true);
+    await page.keyboard.press(keyShortcut("Z"));
+    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("0");
+    await expect.poll(() => frame.locator(caseSelector(caseId)).count()).toBe(1);
+    expect((await exportCurrentHtml(page)).equals(source)).toBe(true);
+
+    await page.keyboard.press(
+      `${process.platform === "darwin" ? "Meta" : "Control"}+Shift+Z`,
+    );
+    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
+    await expect.poll(() => frame.locator(caseSelector(caseId)).count()).toBe(2);
+    expect((await exportCurrentHtml(page)).equals(
+      replaceUniqueBytes(source, originalSource, splitSource),
+    )).toBe(true);
+    await expect.poll(() => frame.evaluate((id) => {
+      const items = [...document.querySelectorAll(`[data-native-case=${JSON.stringify(id)}]`)];
+      return {
+        activeIndex: items.indexOf(document.activeElement),
+        contenteditable: document.activeElement?.getAttribute("contenteditable"),
+      };
+    }, caseId)).toEqual({
+      activeIndex: 1,
+      contenteditable: "plaintext-only",
+    });
+  });
+
+  test("Enter splits one simple paragraph and preserves its visual attributes", async ({ page }) => {
+    const { editor, frame, source } = await openMatrix(page);
+    const caseId = "flex-copy";
+    const firstText = "这个 flex item";
+    const secondText = " 可以伸缩，进入编辑前后 gap、baseline 和折行都必须不变。";
+    const startTag = `<p data-native-case="flex-copy" data-native-mode="native-editable">`;
+    const originalSource = `${startTag}${firstText}${secondText}</p>`;
+    const splitSource = `${startTag}${firstText}</p>${startTag}${secondText}</p>`;
+
+    await activateNativeEdit(frame, caseId);
+    await setTextSelection(frame, caseId, firstText.length);
+    await page.keyboard.press("Enter");
+
+    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
+    await expect.poll(() => frame.locator(caseSelector(caseId)).count()).toBe(2);
+    expect((await exportCurrentHtml(page)).equals(
+      replaceUniqueBytes(source, originalSource, splitSource),
+    )).toBe(true);
+    await expect.poll(() => frame.evaluate((id) => {
+      const blocks = [...document.querySelectorAll(`[data-native-case=${JSON.stringify(id)}]`)];
+      return {
+        activeIndex: blocks.indexOf(document.activeElement),
+        tagName: document.activeElement?.tagName,
+        editableModeSupported: ["plaintext-only", "true"].includes(
+          document.activeElement?.getAttribute("contenteditable"),
+        ),
+      };
+    }, caseId)).toEqual({
+      activeIndex: 1,
+      tagName: "P",
+      editableModeSupported: true,
+    });
+
+    await page.keyboard.press(keyShortcut("Z"));
+    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("0");
+    await expect.poll(() => frame.locator(caseSelector(caseId)).count()).toBe(1);
     expect((await exportCurrentHtml(page)).equals(source)).toBe(true);
   });
 
@@ -1424,6 +1538,41 @@ test.describe("authored DOM native editing contract", () => {
     });
     expect((await exportCurrentHtml(page)).equals(forwardBytes)).toBe(true);
   });
+
+  for (const {
+    shortcut,
+    property,
+    value,
+  } of [
+    { shortcut: "B", property: "font-weight", value: "700" },
+    { shortcut: "I", property: "font-style", value: "italic" },
+    { shortcut: "U", property: "text-decoration-line", value: "underline" },
+  ]) {
+    test(`${keyShortcut(shortcut)} formats the selected source range without browser tags`, async ({ page }) => {
+      const { editor, frame, source } = await openMatrix(page);
+      const caseId = "list-item";
+      await activateNativeEdit(frame, caseId);
+      await setTextSelection(frame, caseId, 0, 3);
+      await page.keyboard.press(keyShortcut(shortcut));
+
+      await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
+      expect(await selectionSnapshot(frame, caseId)).toMatchObject({
+        text: "列表项",
+        collapsed: false,
+        activeCase: caseId,
+      });
+      const target = frame.locator(caseSelector(caseId));
+      expect(await target.locator("b, i, u").count()).toBe(0);
+      const exported = (await exportCurrentHtml(page)).toString("utf8");
+      expect(exported).toContain(
+        `<span style="all: unset; display: inline !important; ${property}: ${value}">列表项</span>`,
+      );
+
+      await page.keyboard.press(keyShortcut("Z"));
+      await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("0");
+      expect((await exportCurrentHtml(page)).equals(source)).toBe(true);
+    });
+  }
 
   test("a mixed-format replacement after toolbar restart fails closed without corrupting source history", async ({ page }) => {
     const { editor, frame, source } = await openMatrix(page);

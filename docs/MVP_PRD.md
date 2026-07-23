@@ -124,7 +124,7 @@ HTML AI 工作台让用户在真实本地 HTML 上完成两类工作：
 
 用户合同不是固定 700 毫秒，而是“无需手动保存，状态真实可见”。实现应以约 700 毫秒为初值并通过性能测试调整。
 
-宿主能力预检优先选择 `contenteditable="plaintext-only"`。只有当该模式改变文字几何、而 `contenteditable="true"` 在相同完整会话属性下保持布局、文字样式、选区与恢复精确稳定时，才允许受控 fallback。fallback 不开放富文本能力：粘贴只读取 `text/plain`；多行纯文本和 `Shift+Enter` 由显式 SourcePatch 生成固定 `<br>`，相邻已有 `<br>` 可由 Backspace/Delete 精确删除。浏览器生成的富 HTML、任意块结构以及未形成完整输入事件的 DOM 变化仍由 MutationObserver 阻止或回滚。包含 `display: contents` 的文字岛也只能通过 observer-guarded 事件通道进入；观察器不可用时继续 fail-closed。
+宿主能力预检优先选择 `contenteditable="plaintext-only"`。只有当该模式改变文字几何、而 `contenteditable="true"` 在相同完整会话属性下保持布局、文字样式、选区与恢复精确稳定时，才允许受控 fallback。fallback 不开放浏览器自由生成富文本的能力：粘贴只读取 `text/plain`；多行纯文本和 `Shift+Enter` 由显式 SourcePatch 生成固定 `<br>`，相邻已有 `<br>` 可由 Backspace/Delete 精确删除；普通 `Enter` 可拆分一个直接文字节点构成的 `<p>` 或 `<ul>/<ol>` 中的 `<li>`。新块复制视觉属性，但去除 `id/name/value`、事件属性和明显唯一的 data 属性。选区格式快捷键 `Cmd/Ctrl+B/I/U` 与工具栏下划线也走显式源码 Patch。浏览器生成的富 HTML、任意复杂块结构以及未形成完整输入事件的 DOM 变化仍由 MutationObserver 阻止或回滚。包含 `display: contents` 的文字岛也只能通过 observer-guarded 事件通道进入；观察器不可用时继续 fail-closed。
 
 编辑画布必须明确提示“本地文本编辑会直接修改源文件并保存”。这里的“源文件”指项目当前指向的 HTML：首次打开时是用户原文件；AI 成功后是新的 `working/V1.x.html`。
 

@@ -2311,6 +2311,14 @@ export class NativeEditingController {
           selection: this.getSelection(),
         })
       ) return;
+      if (
+        enterKeyIntent === "split-block"
+        && this.requestSourceEditIntent({
+          kind: "split-block",
+          inputType: "insertParagraph",
+          selection: this.getSelection(),
+        })
+      ) return;
       this.unsupportedInputIfCurrent(
         enterKeyIntent === "split-block"
           ? "insertParagraph"

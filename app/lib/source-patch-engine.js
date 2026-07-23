@@ -43,6 +43,19 @@ const TEXT_RANGE_UNSAFE_CONTEXT_ELEMENTS = new Set([
 ]);
 
 const TEXT_INSERTION_AFFINITIES = new Set(["left", "right"]);
+const SPLIT_TEXT_BLOCK_TAGS = new Set(["p", "li"]);
+const SPLIT_TEXT_BLOCK_PARENTS = new Set(["ul", "ol"]);
+const SPLIT_TEXT_BLOCK_OMITTED_ATTRIBUTES = new Set([
+  "id",
+  "name",
+  "value",
+  "for",
+  "form",
+  "itemid",
+  "itemref",
+  "slot",
+  "popovertarget",
+]);
 
 const TRUSTED_INVERSE_PLANS = new WeakMap();
 const CSS_PROPERTY_NAME_PATTERN = /^(?:--[A-Za-z0-9_-]+|-?[A-Za-z][A-Za-z0-9-]*)$/;
@@ -191,6 +204,28 @@ function escapeTextFlowContent(value) {
     .split("\n")
     .map((line) => escapeTextContent(line))
     .join("<br>");
+}
+
+function omitAttributeFromSplitClone(attribute) {
+  const name = String(attribute?.name ?? "").toLowerCase();
+  return SPLIT_TEXT_BLOCK_OMITTED_ATTRIBUTES.has(name)
+    || name.startsWith("on")
+    || /^data-(?:.*-)?(?:id|key|uid|uuid)$/u.test(name);
+}
+
+function splitCloneStartTag(index, element) {
+  const omitted = element.attributes
+    .filter(omitAttributeFromSplitClone)
+    .map((attribute) => attribute.range)
+    .sort((left, right) => left.startOffset - right.startOffset);
+  let cursor = element.startTagRange.startOffset;
+  let cloned = "";
+  for (const attributeRange of omitted) {
+    cloned += index.source.slice(cursor, attributeRange.startOffset);
+    cursor = attributeRange.endOffset;
+  }
+  cloned += index.source.slice(cursor, element.startTagRange.endOffset);
+  return cloned;
 }
 
 function isDescendantNode(index, node, ancestor) {
@@ -1246,6 +1281,104 @@ export function planDeleteHardBreakPatch(indexOrHtml, command) {
   );
 }
 
+export function planSplitTextBlockPatch(indexOrHtml, command) {
+  const index = typeof indexOrHtml === "string"
+    ? buildSourceIndex(indexOrHtml)
+    : indexOrHtml;
+  const targetRef = commandTargetRef(index, command);
+  const resolution = resolvedTarget(index, targetRef, "element");
+  const target = resolution.target;
+  const parent = target.parentId ? index.byNodeId.get(target.parentId) : null;
+  if (
+    target.namespaceURI !== "http://www.w3.org/1999/xhtml"
+    || !SPLIT_TEXT_BLOCK_TAGS.has(target.tagName)
+    || !target.explicitEndTag
+    || target.isVoid
+    || !target.boundarySafe
+    || (
+      target.tagName === "li"
+      && (
+        parent?.type !== "element"
+        || !SPLIT_TEXT_BLOCK_PARENTS.has(parent.tagName)
+      )
+    )
+  ) {
+    fail(
+      "BLOCK_SPLIT_UNSUPPORTED",
+      "Only explicit simple <p> blocks and <li> items inside <ul>/<ol> can be split.",
+      { nodeId: target.nodeId, tagName: target.tagName },
+    );
+  }
+  if (target.childIds.length !== 1) {
+    fail(
+      "BLOCK_SPLIT_COMPLEX_CONTENT",
+      "The block contains inline or structural children and needs a dedicated structural editor.",
+      { nodeId: target.nodeId, childCount: target.childIds.length },
+    );
+  }
+  const textNode = index.byNodeId.get(target.childIds[0]);
+  if (
+    !textNode
+    || textNode.type !== "text"
+    || textNode.parentId !== target.nodeId
+  ) {
+    fail(
+      "BLOCK_SPLIT_COMPLEX_CONTENT",
+      "The block is not backed by one direct source text node.",
+      { nodeId: target.nodeId },
+    );
+  }
+  const splitOffset = Number(command.splitOffset);
+  if (
+    !Number.isInteger(splitOffset)
+    || splitOffset <= 0
+    || splitOffset >= textNode.value.length
+  ) {
+    fail(
+      "BLOCK_SPLIT_BOUNDARY_UNSUPPORTED",
+      "The caret must be inside non-empty text so both resulting blocks remain editable.",
+      { splitOffset, textLength: textNode.value.length },
+    );
+  }
+  const rawSplitOffset = rawBoundaryForTextOffset(textNode, splitOffset);
+  const clonedStartTag = splitCloneStartTag(index, target);
+  const insertedSource = `${target.endTagRaw}${clonedStartTag}`;
+  const currentTargetRef = refreshResolvedTargetRef(
+    index,
+    targetRef,
+    target,
+  );
+  const patch = sourcePatch(
+    rawSplitOffset,
+    rawSplitOffset,
+    "",
+    insertedSource,
+    {
+      kind: "block-split",
+      nodeId: target.nodeId,
+    },
+  );
+  return makePlan(
+    index,
+    { ...command, type: "split-text-block" },
+    [patch],
+    [currentTargetRef],
+    {
+      resolution: resolution.resolution,
+      nodeId: target.nodeId,
+      tagName: target.tagName,
+      splitOffset,
+      rawSplitOffset,
+      beforeText: textNode.value,
+      firstText: textNode.value.slice(0, splitOffset),
+      secondText: textNode.value.slice(splitOffset),
+      clonedStartTag,
+      createdBlockStartOffset: rawSplitOffset + target.endTagRaw.length,
+      writeScope: "one-simple-text-block-boundary",
+    },
+  );
+}
+
 function normalizePropertyName(property) {
   const value = String(property ?? "").trim();
   if (!CSS_PROPERTY_NAME_PATTERN.test(value)) {
@@ -2092,6 +2225,8 @@ export function planSourcePatch(command, indexOrHtml) {
       return planTextFlowRangePatch(index, command);
     case "delete-hard-break":
       return planDeleteHardBreakPatch(index, command);
+    case "split-text-block":
+      return planSplitTextBlockPatch(index, command);
     case "style":
     case "set-inline-style":
       return planInlineStylePatch(index, command);
@@ -2349,6 +2484,7 @@ function authorizePatchPlan(plan, index, patches) {
     "replace-text-range",
     "replace-text-flow-range",
     "delete-hard-break",
+    "split-text-block",
     "set-inline-style",
     "set-text-range-style",
     "reorder-sibling",
@@ -2526,6 +2662,42 @@ function authorizePatchPlan(plan, index, patches) {
         fail(
           "PATCH_PLAN_TAMPERED",
           "Hard-break deletion does not match the declared operation metadata.",
+        );
+      }
+    }
+  }
+
+  if (operationType === "split-text-block") {
+    if (targetRefs.length !== 1 || resolutions[0].target.type !== "element") {
+      fail("PATCH_TARGET_COUNT_INVALID", "Block split requires one element TargetRef.");
+    }
+    const element = resolutions[0].target;
+    const parent = element.parentId ? index.byNodeId.get(element.parentId) : null;
+    if (isInverse && parent?.type !== "element") {
+      fail("BLOCK_SPLIT_PARENT_REQUIRED", "Block split inverse requires its source parent.");
+    }
+    for (const patch of patches) {
+      if (String(patch.kind ?? "").replace(/^(?:inverse:)+/, "") !== "block-split") {
+        fail("PATCH_KIND_MISMATCH", "Block split has an unrelated source operation.", { patch });
+      }
+      assertPatchWithin(
+        patch,
+        isInverse ? parent.contentRange : element.contentRange,
+        "PATCH_OUTSIDE_TARGET",
+        "Block split is outside the authorized source boundary.",
+      );
+    }
+    if (!isInverse) {
+      const expected = planSplitTextBlockPatch(index, {
+        type: "split-text-block",
+        targetRef: targetRefs[0],
+        splitOffset: plan.metadata?.splitOffset,
+        expectedSourceSha256: index.sourceSha256,
+      });
+      if (!patchesEqual(patches, expected.patches)) {
+        fail(
+          "PATCH_PLAN_TAMPERED",
+          "Block split does not match the declared operation metadata.",
         );
       }
     }
