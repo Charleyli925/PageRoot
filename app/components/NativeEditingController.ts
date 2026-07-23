@@ -1,10 +1,14 @@
 import {
   NativeTextChangeTracker,
   NativeTransactionSelectionTracker,
-  classifyNativeInput,
   type NativeTextChangeTrackerSnapshot,
   type NativeTextReplacement,
 } from "../lib/native-edit-transaction.js";
+import {
+  classifyNativeInputIntent,
+  hasMultilinePlainText,
+  NATIVE_INPUT_INTENT_KIND,
+} from "../lib/native-input-intent.js";
 import {
   NativeBlockEditDraft,
   type NativeBlockEditDraftSnapshot,
@@ -980,7 +984,7 @@ function isProvablyDisposableMissingWrapper(
     && endOffset !== null
     && endOffset > startOffset
     && intents.some((intent) => (
-      classifyNativeInput(intent.inputType).category === "text"
+      classifyNativeInputIntent(intent.inputType).kind === NATIVE_INPUT_INTENT_KIND.TEXT
       && deletionFullyCoversRange(startOffset, endOffset, intent.originalRanges)
     ))
     && deletionFullyCoversRange(startOffset, endOffset, replacements)
@@ -2244,19 +2248,19 @@ export class NativeEditingController {
     // the durable boundary that retires a cancelled-composition tombstone.
     this.clearCancelledCompositionTombstone();
     if (this.compositionEndFocusGuard) this.clearCompositionEndFocusGuard();
-    const input = classifyNativeInput(event.inputType);
+    const input = classifyNativeInputIntent(event.inputType);
     const insertedText = event.data
       ?? event.dataTransfer?.getData("text/plain")
       ?? "";
     if (
       event.inputType.startsWith("insert")
-      && /[\r\n]/u.test(insertedText)
+      && hasMultilinePlainText(insertedText)
     ) {
       event.preventDefault();
       this.unsupportedInputIfCurrent("insertFromPasteMultiline");
       return;
     }
-    if (input.category === "history") {
+    if (input.kind === NATIVE_INPUT_INTENT_KIND.HISTORY) {
       event.preventDefault();
       if (input.action === "redo") this.callbackIfCurrent(this.onRedo);
       else this.callbackIfCurrent(this.onUndo);
@@ -2499,7 +2503,7 @@ export class NativeEditingController {
   private handlePaste(event: ClipboardEvent): void {
     if (!this.canHandleEvent(event)) return;
     const plainText = event.clipboardData?.getData("text/plain") ?? "";
-    if (/[\r\n]/u.test(plainText)) {
+    if (hasMultilinePlainText(plainText)) {
       // A multiline paste can synthesize child blocks in either editing host.
       // PageRoot cannot losslessly map that transient structure back to an
       // existing text island, so reject before DOM or Selection can move.

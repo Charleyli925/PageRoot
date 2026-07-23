@@ -172,7 +172,7 @@
     {
       "id": "source-editing-core",
       "patterns": [
-        "^app/lib/(?:source-(?:index|patch-core|patch-engine|text-map)|target-resolver|runtime-dom-source-map|format-skeleton|native-(?:edit-capability|edit-policy|edit-transaction|source-map|block-edit-draft))\\.(?:js|ts)$",
+        "^app/lib/(?:source-(?:index|patch-core|patch-engine|text-map)|target-resolver|runtime-dom-source-map|format-skeleton|native-(?:edit-capability|edit-policy|edit-transaction|input-intent|source-map|block-edit-draft))\\.(?:js|ts)$",
         "^scripts/(?:source-index|source-patch-engine|target-resolver)\\.mjs$"
       ],
       "suites": ["typecheck", "browser-smoke", "electron-smoke"],
@@ -184,6 +184,7 @@
         "tests/format-skeleton.test.mjs",
         "tests/native-edit-capability.test.mjs",
         "tests/native-edit-policy.test.mjs",
+        "tests/native-input-intent.test.mjs",
         "tests/native-edit-transaction.test.mjs",
         "tests/native-block-edit-draft.test.mjs",
         "tests/native-source-map-fuzz.test.mjs",

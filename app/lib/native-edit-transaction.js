@@ -1,52 +1,7 @@
-const SAFE_TEXT_INPUT_TYPES = new Set([
-  "deleteByCut",
-  "deleteContent",
-  "deleteContentBackward",
-  "deleteContentForward",
-  "deleteEntireSoftLine",
-  "deleteHardLineBackward",
-  "deleteHardLineForward",
-  "deleteSoftLineBackward",
-  "deleteSoftLineForward",
-  "deleteWordBackward",
-  "deleteWordForward",
-  "insertCompositionText",
-  "insertFromComposition",
-  "insertFromDrop",
-  "insertFromPaste",
-  "insertFromPasteAsQuotation",
-  "insertReplacementText",
-  "insertText",
-]);
-
-const STRUCTURAL_INPUT_TYPES = new Set([
-  "deleteByDrag",
-  "deleteByComposition",
-  "formatBackColor",
-  "formatBold",
-  "formatFontColor",
-  "formatFontName",
-  "formatIndent",
-  "formatItalic",
-  "formatJustifyCenter",
-  "formatJustifyFull",
-  "formatJustifyLeft",
-  "formatJustifyRight",
-  "formatOutdent",
-  "formatRemove",
-  "formatSetBlockTextDirection",
-  "formatSetInlineTextDirection",
-  "formatStrikethrough",
-  "formatSubscript",
-  "formatSuperscript",
-  "formatUnderline",
-  "insertHorizontalRule",
-  "insertLineBreak",
-  "insertOrderedList",
-  "insertParagraph",
-  "insertTranspose",
-  "insertUnorderedList",
-]);
+import {
+  classifyNativeInputIntent,
+  NATIVE_INPUT_INTENT_KIND,
+} from "./native-input-intent.js";
 
 function isSafeUtf16Boundary(value, offset) {
   if (offset <= 0 || offset >= value.length) return true;
@@ -61,31 +16,33 @@ function isSafeUtf16Boundary(value, offset) {
 }
 
 export function classifyNativeInput(inputType) {
-  const normalized = String(inputType || "");
-  if (normalized === "historyUndo") {
-    return { category: "history", action: "undo", supported: true };
+  const intent = classifyNativeInputIntent(inputType);
+  if (intent.kind === NATIVE_INPUT_INTENT_KIND.HISTORY) {
+    return { category: "history", action: intent.action, supported: true };
   }
-  if (normalized === "historyRedo") {
-    return { category: "history", action: "redo", supported: true };
-  }
-  if (SAFE_TEXT_INPUT_TYPES.has(normalized)) {
+  if (intent.kind === NATIVE_INPUT_INTENT_KIND.TEXT) {
     return {
       category: "text",
-      action: normalized,
+      action: intent.action,
       supported: true,
-      composition: normalized.includes("Composition"),
+      composition: intent.composition === true,
     };
   }
-  if (STRUCTURAL_INPUT_TYPES.has(normalized)) {
+  if (
+    intent.kind === NATIVE_INPUT_INTENT_KIND.INSERT_HARD_BREAK
+    || intent.kind === NATIVE_INPUT_INTENT_KIND.SPLIT_BLOCK
+    || intent.kind === NATIVE_INPUT_INTENT_KIND.FORMAT
+    || intent.kind === NATIVE_INPUT_INTENT_KIND.STRUCTURE
+  ) {
     return {
       category: "structure",
-      action: normalized,
+      action: intent.action,
       supported: false,
     };
   }
   return {
     category: "unsupported",
-    action: normalized || "unknown",
+    action: intent.action,
     supported: false,
   };
 }
