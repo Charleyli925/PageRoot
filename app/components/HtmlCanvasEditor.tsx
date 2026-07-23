@@ -2159,6 +2159,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const [commentMarkers, setCommentMarkers] = useState<CommentMarker[]>([]);
   const [, setSelectedInsertionId] = useState<string | null>(null);
   const [editFeedback, setEditFeedback] = useState<EditFeedback | null>(null);
+  const [editFeedbackPaused, setEditFeedbackPaused] = useState(false);
   const [undoDepth, setUndoDepth] = useState(0);
   const [redoDepth, setRedoDepth] = useState(0);
   const [spacingMenuOpen, setSpacingMenuOpen] = useState(false);
@@ -2209,12 +2210,16 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   }, []);
 
   useEffect(() => {
-    if (!editFeedback || editFeedback.sticky) return undefined;
+    setEditFeedbackPaused(false);
+  }, [editFeedback?.title, editFeedback?.message]);
+
+  useEffect(() => {
+    if (!editFeedback || editFeedback.sticky || editFeedbackPaused) return undefined;
     const timer = window.setTimeout(() => {
       setEditFeedback((current) => current === editFeedback ? null : current);
     }, 8000);
     return () => window.clearTimeout(timer);
-  }, [editFeedback]);
+  }, [editFeedback, editFeedbackPaused]);
 
   const loadFrameSource = useCallback((
     source: string,
@@ -6301,6 +6306,15 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           data-tone={editFeedback.tone}
           role={editFeedback.tone === "error" ? "alert" : "status"}
           aria-live={editFeedback.tone === "error" ? "assertive" : "polite"}
+          onMouseEnter={() => setEditFeedbackPaused(true)}
+          onMouseLeave={() => setEditFeedbackPaused(false)}
+          onFocusCapture={() => setEditFeedbackPaused(true)}
+          onBlurCapture={(event) => {
+            const next = event.relatedTarget;
+            if (!(next instanceof Node) || !event.currentTarget.contains(next)) {
+              setEditFeedbackPaused(false);
+            }
+          }}
         >
           <div>
             <strong>{editFeedback.title}</strong>

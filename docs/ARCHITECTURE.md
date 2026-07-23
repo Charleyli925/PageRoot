@@ -37,3 +37,7 @@ Initial and accepted AI results are immutable versions. Routine local edits do n
 ## Trust model
 
 The renderer is sandboxed with context isolation and no Node integration. The preload exposes narrow validated IPC methods. The Bridge uses a per-process authentication token and only operates on managed project paths. AI output is untrusted until protocol, identity, Hash, path, scope and HTML checks succeed.
+
+Every renderer request to the Bridge is bounded: ordinary state/file operations use 15 seconds, attachments use 30 seconds, and Request creation uses 60 seconds. Busy refs are released in `finally`, so an unresponsive local service cannot leave a permanent UI lock. An unknown Request POST outcome remains fail-closed and is reconciled against the durable workspace state before editing resumes.
+
+If the utility Bridge exits after startup, the main process sends the narrow `html-app:workspace-unavailable` event and shows a two-path native recovery dialog. The renderer keeps in-memory content visible and exportable while blocking new Bridge-backed mutations. `html-app:relaunch` still runs the normal renderer close-readiness handshake; an unsafe relaunch is rejected until the user exports or resolves pending writes.

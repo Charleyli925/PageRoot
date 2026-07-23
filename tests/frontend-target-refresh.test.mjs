@@ -319,7 +319,13 @@ test("canvas and workbench consume deterministic mappings before generic fallbac
     "includeUnresolvedTargetIds: recoverableSplitTargetIds",
     "const deterministicById = new Map(",
     "if (trackedTargetIds.has(target.id))",
-    "rebindCanvasSelectionTargets(nextHtml, untrackedSafeTargets)",
+    "rebindTargetsPreservingGlobal(nextHtml, untrackedSafeTargets)",
+    "isGlobalPageTarget(target)",
+    "exactGlobalPageTarget(target)",
+    "!isGlobalPageTarget(target) && canLocateTarget(target)",
+    ": canLocateTarget(target)",
+    "independentCommentTarget(draftTarget, commentId)",
+    "relinkSelectionArmedRef.current",
   ]) {
     assert.match(
       `${canvas}\n${workbench}`,

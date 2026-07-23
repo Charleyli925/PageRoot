@@ -24,6 +24,8 @@ test("global notifications expose severity, persistence and actions", () => {
   );
   assert.match(workbench, /action: \{ id: "retry-export"/);
   assert.match(workbench, /title: "副本没有导出"/);
+  assert.match(workbench, /onMouseEnter=\{\(\) => setPausedNoticeIdentity\(noticeIdentity\)\}/);
+  assert.match(workbench, /onFocusCapture=\{\(\) => setPausedNoticeIdentity\(noticeIdentity\)\}/);
 });
 
 test("redundant feedback was removed and comment persistence is contextual", () => {
@@ -59,6 +61,7 @@ test("canvas edit feedback is contextual, plain-language, and not duplicated glo
   assert.match(canvas, /继续浏览和选择文字/u);
   assert.match(canvas, /sticky: false/u);
   assert.match(canvas, /editFeedback\.tone === "error" \? "alert" : "status"/u);
+  assert.match(canvas, /editFeedbackPaused/u);
   assert.doesNotMatch(canvas, /本次直接编辑已阻止|"code" in cause/u);
   assert.doesNotMatch(canvas, /这次修改没有应用|原 HTML 没有变化/u);
   assert.doesNotMatch(canvas, /这段内容暂时无法准确定位/u);
@@ -92,6 +95,26 @@ test("critical notices are legible and their close action cannot wrap", () => {
     /\.toast-actions button\s*\{[\s\S]*?min-height:\s*30px/,
   );
   assert.match(styles, /\.comment-persist-error\s*\{/);
+});
+
+test("blocking paths expose an in-context recovery instead of a dead end", () => {
+  assert.match(workbench, /const BRIDGE_REQUEST_TIMEOUT_MS = 60_000/);
+  assert.match(
+    workbench,
+    /timeoutMs = BRIDGE_STATE_READ_TIMEOUT_MS/,
+  );
+  assert.match(workbench, /const reconcilePendingRun = useCallback/);
+  assert.match(workbench, /重新核对任务状态/);
+  assert.match(workbench, /重新打开源页/);
+  assert.match(workbench, /fileView\.error \?/);
+  assert.match(workbench, />重试读取</);
+  assert.match(workbench, /const finishTargetRelink = useCallback/);
+  assert.match(workbench, /重新选择目标/);
+  assert.match(workbench, /terminalRun \?/);
+  assert.match(workbench, /返回编辑/);
+  assert.match(workbench, /调整要求后重试/);
+  assert.match(workbench, /className="project-resource-error" role="alert"/);
+  assert.match(workbench, /className="recent-projects-error" role="status"/);
 });
 
 test("the verified AI file identity appears only after the user opens the ready Version", () => {

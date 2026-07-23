@@ -14,10 +14,15 @@ async function loadPreloadApis(invoke) {
     "utf8",
   );
   const exposed = new Map();
+  const listeners = new Map();
   const ipcRenderer = {
     invoke,
-    on() {},
-    removeListener() {},
+    on(channel, listener) {
+      listeners.set(channel, listener);
+    },
+    removeListener(channel, listener) {
+      if (listeners.get(channel) === listener) listeners.delete(channel);
+    },
   };
   const contextBridge = {
     exposeInMainWorld(name, value) {
@@ -41,6 +46,10 @@ async function loadPreloadApis(invoke) {
     integrations: exposed.get("htmlAIIntegrations"),
     updates: exposed.get("htmlAIUpdates"),
     runtime: exposed.get("htmlAIRuntime"),
+    lifecycle: exposed.get("htmlAIAppLifecycle"),
+    emit(channel, payload) {
+      listeners.get(channel)?.({}, payload);
+    },
   };
 }
 
@@ -86,6 +95,53 @@ test("preload exposes the structured Finder reveal operation", async () => {
     "html-projects:show-in-folder",
     "/Users/demo/report.html",
   ]);
+});
+
+test("preload exposes explicit recent-record removal", async () => {
+  const calls = [];
+  const api = await loadPreload(async (...args) => {
+    calls.push(args);
+    return success({ sourcePath: "/Users/demo/moved.html" });
+  });
+
+  assert.deepEqual(
+    await api.forgetRecent("/Users/demo/moved.html"),
+    { sourcePath: "/Users/demo/moved.html" },
+  );
+  assert.deepEqual(calls[0], [
+    "html-projects:forget-recent",
+    "/Users/demo/moved.html",
+  ]);
+});
+
+test("preload exposes workspace failure recovery and a narrow relaunch action", async () => {
+  const calls = [];
+  const preload = await loadPreloadApis(async (...args) => {
+    calls.push(args);
+    return { relaunched: false };
+  });
+  const issues = [];
+  const unsubscribe = preload.lifecycle.onWorkspaceUnavailable((issue) => {
+    issues.push(issue);
+  });
+
+  preload.emit("html-app:workspace-unavailable", {
+    title: "本地项目资料暂时不可用",
+    message: "请先导出当前编辑。",
+  });
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(issues)),
+    [{
+      title: "本地项目资料暂时不可用",
+      message: "请先导出当前编辑。",
+    }],
+  );
+  assert.deepEqual(
+    await preload.lifecycle.relaunch(),
+    { relaunched: false },
+  );
+  assert.deepEqual(calls[0], ["html-app:relaunch"]);
+  unsubscribe();
 });
 
 test("preload exposes the narrow generated-version activation operation", async () => {

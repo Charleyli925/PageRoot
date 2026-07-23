@@ -584,6 +584,16 @@ test.describe("authored DOM native editing contract", () => {
     );
     await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
     await expect(commentCard).toHaveAttribute("data-resolution", "ambiguous");
+
+    await commentCard.getByRole("button", { name: "重新选择目标" }).click();
+    await expect(commentCard.getByText("正在等待选择…")).toBeVisible();
+    await frame.locator(caseSelector("flex-copy")).click();
+
+    await expect(commentCard).toHaveAttribute("data-resolution", "exact");
+    await expect(commentCard).toContainText(commentText);
+    await expect(page.locator(".comment-card")).toHaveCount(1);
+    await expect(commentCard.getByRole("button", { name: "重新选择目标" }))
+      .toHaveCount(0);
   });
 
   test("Enter splits one simple paragraph and preserves its visual attributes", async ({ page }) => {

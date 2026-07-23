@@ -94,11 +94,14 @@ const PROJECT_CHANNELS = Object.freeze({
   revealRequestFolder: "html-projects:reveal-request-folder",
   listRecentProjects: "html-projects:list-recent",
   openRecent: "html-projects:open-recent",
+  forgetRecent: "html-projects:forget-recent",
 });
 const APP_CHANNELS = Object.freeze({
   prepareClose: "html-app:prepare-close",
   closeResult: "html-app:close-result",
   closeAborted: "html-app:close-aborted",
+  workspaceUnavailable: "html-app:workspace-unavailable",
+  relaunch: "html-app:relaunch",
 });
 const INTEGRATION_CHANNELS = Object.freeze({
   qoderHandoff: "html-integrations:qoder-handoff",
@@ -124,6 +127,7 @@ let stateWriteQueue = Promise.resolve();
 let updateCheckTimer = null;
 let updateCheckPromise = null;
 let latestUpdateResult = null;
+let workspaceFailurePrompt = null;
 
 function emptyProjectState() {
   return {
@@ -854,6 +858,12 @@ async function openRecent(filePath) {
   }
 }
 
+async function forgetRecentProject(filePath) {
+  const normalizedPath = assertHtmlPath(filePath);
+  await forgetProject(normalizedPath);
+  return { sourcePath: normalizedPath };
+}
+
 async function checkForUpdates() {
   try {
     return await checkForManualUpdate({
@@ -961,6 +971,7 @@ function registerProjectIpc() {
   ipcMain.handle(PROJECT_CHANNELS.revealRequestFolder, trustedProject(revealRequestFolder));
   ipcMain.handle(PROJECT_CHANNELS.listRecentProjects, trustedProject(listRecentProjects));
   ipcMain.handle(PROJECT_CHANNELS.openRecent, trustedProject(openRecent));
+  ipcMain.handle(PROJECT_CHANNELS.forgetRecent, trustedProject(forgetRecentProject));
   ipcMain.handle(
     INTEGRATION_CHANNELS.qoderHandoff,
     trustedProject((payload) => {
@@ -988,6 +999,12 @@ function registerProjectIpc() {
     trustedProject(openLatestRelease),
   );
   ipcMain.handle(APP_CHANNELS.closeResult, trusted(reportCloseResult));
+  ipcMain.handle(
+    APP_CHANNELS.relaunch,
+    trusted(async () => ({
+      relaunched: await coordinateApplicationRelaunch("user-relaunch"),
+    })),
+  );
 }
 
 function findAvailablePort() {
@@ -1145,6 +1162,7 @@ function unregisterIpc() {
     ...Object.values(INTEGRATION_CHANNELS),
     ...Object.values(UPDATE_CHANNELS),
     APP_CHANNELS.closeResult,
+    APP_CHANNELS.relaunch,
   ]) {
     ipcMain.removeHandler(channel);
   }
@@ -1197,6 +1215,83 @@ async function coordinateApplicationExit(reason) {
     return false;
   });
   return coordinatedExit;
+}
+
+async function coordinateApplicationRelaunch(reason) {
+  if (coordinatedExit) return false;
+  coordinatedExit = (async () => {
+    const result = await requestRendererClose(reason);
+    if (!result.ready) {
+      notifyRendererCloseAborted(result.requestId, result.reason);
+      const messageBoxOptions = {
+        type: "warning",
+        title: "重新打开前还需要一步",
+        message: "当前页面还有内容没有完成安全写入。",
+        detail: `${result.reason || "请先确认当前编辑状态。"}\n\n可返回源页导出当前编辑，再重新打开。`,
+        buttons: ["返回源页"],
+        defaultId: 0,
+        noLink: true,
+      };
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        await dialog.showMessageBox(mainWindow, messageBoxOptions);
+      } else {
+        await dialog.showMessageBox(messageBoxOptions);
+      }
+      coordinatedExit = null;
+      return false;
+    }
+
+    isQuitting = true;
+    await stateWriteQueue.catch(() => {});
+    if (bridgeProcess) await stopBridgeGracefully().catch(() => {});
+    unregisterIpc();
+    finalExitStarted = true;
+    app.relaunch();
+    setImmediate(() => app.exit(0));
+    return true;
+  })().catch((error) => {
+    coordinatedExit = null;
+    isQuitting = false;
+    dialog.showErrorBox(
+      "暂时无法重新打开源页",
+      error instanceof Error ? error.message : String(error),
+    );
+    return false;
+  });
+  return coordinatedExit;
+}
+
+async function showWorkspaceUnavailableRecovery() {
+  const issue = {
+    title: "本地项目资料暂时不可用",
+    message: "当前页面内容仍保留。可先导出当前编辑，再重新打开源页恢复本地服务。",
+  };
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(APP_CHANNELS.workspaceUnavailable, issue);
+  }
+  if (workspaceFailurePrompt) return workspaceFailurePrompt;
+  const options = {
+    type: "warning",
+    title: issue.title,
+    message: "源页的本地项目服务已停止。",
+    detail: "当前窗口中的内容仍保留。返回源页可先导出当前编辑；若没有待保存内容，也可以直接重新打开。",
+    buttons: ["返回源页处理", "重新打开源页"],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true,
+  };
+  workspaceFailurePrompt = (
+    mainWindow && !mainWindow.isDestroyed()
+      ? dialog.showMessageBox(mainWindow, options)
+      : dialog.showMessageBox(options)
+  ).then(async (result) => {
+    if (result.response === 1) {
+      await coordinateApplicationRelaunch("workspace-unavailable");
+    }
+  }).finally(() => {
+    workspaceFailurePrompt = null;
+  });
+  return workspaceFailurePrompt;
 }
 
 async function workspacePath() {
@@ -1288,10 +1383,7 @@ async function startBridge() {
       bridgePort = null;
       if (!settled) finish(new Error(`本地工作区服务意外退出（${code}）。${errorOutput ? `\n${errorOutput}` : ""}`));
       else if (!isQuitting) {
-        dialog.showErrorBox(
-          "本地工作区服务已停止",
-          "请重新打开源页。现有项目文件不会丢失。",
-        );
+        void showWorkspaceUnavailableRecovery();
       }
     });
 

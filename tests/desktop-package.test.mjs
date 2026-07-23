@@ -118,6 +118,7 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.match(mainProcess, /PROJECT_CHANNELS\.readHtml/);
   assert.match(mainProcess, /PROJECT_CHANNELS\.showInFolder/);
   assert.match(mainProcess, /PROJECT_CHANNELS\.revealRequestFolder/);
+  assert.match(mainProcess, /PROJECT_CHANNELS\.forgetRecent/);
   assert.match(mainProcess, /INTEGRATION_CHANNELS\.qoderHandoff/);
   assert.match(mainProcess, /UPDATE_CHANNELS\.getStatus/);
   assert.match(mainProcess, /UPDATE_CHANNELS\.openLatestRelease/);
@@ -151,6 +152,17 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.match(mainProcess, /APP_CHANNELS\.prepareClose/);
   assert.match(mainProcess, /APP_CHANNELS\.closeResult/);
   assert.match(mainProcess, /APP_CHANNELS\.closeAborted/);
+  assert.match(mainProcess, /APP_CHANNELS\.workspaceUnavailable/);
+  assert.match(mainProcess, /APP_CHANNELS\.relaunch/);
+  assert.match(mainProcess, /coordinateApplicationRelaunch/);
+  assert.match(
+    mainProcess,
+    /buttons:\s*\["返回源页处理",\s*"重新打开源页"\]/,
+  );
+  assert.match(
+    mainProcess,
+    /webContents\.send\(APP_CHANNELS\.workspaceUnavailable,\s*issue\)/,
+  );
   assert.match(mainProcess, /requestRendererClose/);
   assert.match(mainProcess, /if \(!rendererHasLoaded\)/);
   assert.match(mainProcess, /coordinateApplicationExit/);
@@ -210,6 +222,9 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.match(preload, /reportReady/);
   assert.match(preload, /reportBlocked/);
   assert.match(preload, /onCloseAborted/);
+  assert.match(preload, /onWorkspaceUnavailable/);
+  assert.match(preload, /relaunch:\s*\(\) => ipcRenderer\.invoke\(appChannels\.relaunch\)/);
+  assert.match(preload, /forgetRecent:\s*\(sourcePath\)/);
   assert.doesNotMatch(preload, /saveHtml|saveHtmlAs/);
   assert.doesNotMatch(preload, /exposeInMainWorld\([^)]*ipcRenderer/s);
 

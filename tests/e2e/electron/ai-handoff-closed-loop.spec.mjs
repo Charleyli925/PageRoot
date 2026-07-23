@@ -253,9 +253,9 @@ async function openRecentProject(page, sourcePath) {
     await processingDialog.getByRole("button", { name: "关闭处理面板" }).click();
   }
   await page.getByRole("button", { name: "项目", exact: true }).click();
-  await page.getByRole("button", {
-    name: new RegExp(path.basename(sourcePath).replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"),
-  }).click();
+  await page.locator(".recent-file-row")
+    .filter({ hasText: path.basename(sourcePath) })
+    .click();
   return loadedDiskFrame(page, sourcePath);
 }
 
@@ -357,6 +357,45 @@ test("a verified AI result stays pending until the user opens the new HTML", asy
     const openedFrame = await loadedDiskFrame(launched.page, opened.sourcePath);
     await expect(openedFrame.locator(caseSelector("list-item")))
       .toHaveText(UPDATED_TEXT);
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("a no-change result returns to editable requirements without a dead end", async () => {
+  test.setTimeout(120_000);
+  const fixture = createSourceFixture("no-change-recovery.html");
+  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  try {
+    const request = await addCommentAndSubmit(
+      launched.page,
+      launched.electronApp,
+      fixture.sourcePath,
+    );
+    writeAiOutput(request.requestRoot, (base) => base);
+    runOfficialFinalizer(request.requestRoot, request.changeRequest);
+
+    await expect(launched.page.getByText(
+      "这次没有产生有效变化",
+      { exact: true },
+    ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+    await expect(launched.page.getByText(
+      "原评论和附件都已保留，调整要求后可以重新发送",
+      { exact: true },
+    )).toBeVisible();
+    await expect(launched.page.getByRole("button", { name: "返回编辑" }))
+      .toBeVisible();
+    await expect(launched.page.getByRole("button", { name: "调整要求后重试" }))
+      .toBeVisible();
+    expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
+
+    await launched.page.getByRole("button", { name: "调整要求后重试" }).click();
+    const editor = launched.page.getByRole("textbox", { name: /编辑评论/u });
+    await expect(editor).toBeVisible();
+    await expect(editor).toHaveValue(new RegExp(UPDATED_TEXT, "u"));
+    await expect(launched.page.getByRole("button", { name: /发送至 Qoder/u }))
+      .toBeEnabled();
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
@@ -503,12 +542,92 @@ test("a rapid double click creates exactly one durable Request", async () => {
   }
 });
 
+test("an unknown Request outcome stays fail-closed and can be reconciled explicitly", async () => {
+  test.setTimeout(120_000);
+  const fixture = createSourceFixture("unknown-request-outcome.html");
+  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  try {
+    await addComment(launched.page, fixture.sourcePath);
+    await launched.page.evaluate(() => {
+      const originalFetch = window.fetch.bind(window);
+      let requestDispatched = false;
+      window.__PAGEROOT_ALLOW_UNKNOWN_REQUEST_RECONCILE__ = false;
+      window.fetch = async (input, init) => {
+        const url = new URL(
+          typeof input === "string" ? input : input instanceof URL ? input.href : input.url,
+          window.location.href,
+        );
+        if (url.pathname === "/request" && !requestDispatched) {
+          requestDispatched = true;
+          const response = await originalFetch(input, init);
+          if (!response.ok) return response;
+          throw new DOMException(
+            "Test injected an unknown POST outcome.",
+            "TimeoutError",
+          );
+        }
+        if (
+          url.pathname === "/workspace"
+          && requestDispatched
+          && !window.__PAGEROOT_ALLOW_UNKNOWN_REQUEST_RECONCILE__
+        ) {
+          throw new DOMException(
+            "Test keeps reconciliation unavailable.",
+            "TimeoutError",
+          );
+        }
+        return originalFetch(input, init);
+      };
+    });
+
+    await launched.page.getByRole("button", { name: /发送至 Qoder/u }).click();
+    await expect(launched.page.getByText(
+      "需要确认任务是否已经建立",
+      { exact: true },
+    )).toBeVisible({ timeout: 30_000 });
+    await expect(launched.page.getByRole("button", { name: "立即重新核对" }))
+      .toBeVisible();
+    await expect(launched.page.getByRole("button", { name: "重新打开源页" }).first())
+      .toBeVisible();
+    await expect.poll(
+      () => requestDirectoryCount(launched.workspace),
+      { timeout: 20_000 },
+    ).toBe(1);
+
+    await launched.page.evaluate(() => {
+      window.__PAGEROOT_ALLOW_UNKNOWN_REQUEST_RECONCILE__ = true;
+    });
+    await launched.page.getByRole("button", { name: "立即重新核对" }).click();
+    await expect(launched.page.getByText(
+      "等待 QoderWork 返回修改结果",
+      { exact: true },
+    )).toBeVisible({ timeout: 20_000 });
+    await expect(launched.page.getByRole("button", {
+      name: "取消发送，继续编辑",
+    })).toBeEnabled();
+    expect(requestDirectoryCount(launched.workspace)).toBe(1);
+    expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
 test("project resources expose clear rules and protect unsaved edits", async () => {
   const fixture = createSourceFixture("project-resources.html");
   const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
   try {
     await loadedDiskFrame(launched.page, fixture.sourcePath);
+    const projectCount = () => {
+      const projectsRoot = path.join(launched.workspace, "projects");
+      return existsSync(projectsRoot)
+        ? readdirSync(projectsRoot).filter((entry) => !entry.startsWith(".")).length
+        : 0;
+    };
+    expect(projectCount()).toBe(0);
     await launched.page.getByRole("button", { name: "项目", exact: true }).click();
+    await launched.page.waitForTimeout(250);
+    expect(projectCount()).toBe(0);
     await launched.page.getByText("项目资料", { exact: true }).click();
     const rulesButton = launched.page.getByRole("button", {
       name: /项目长期规则.*以后每次 AI 修改都会读取.*可编辑/u,
@@ -538,6 +657,37 @@ test("project resources expose clear rules and protect unsaved edits", async () 
     await launched.page.getByRole("button", { name: "返回项目" }).click();
     await expect(launched.page.getByText("当前文件", { exact: true })).toBeVisible();
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("a global comment stays exact through first project registration", async () => {
+  const fixture = createSourceFixture("global-comment-registration.html");
+  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  try {
+    const frame = await loadedDiskFrame(launched.page, fixture.sourcePath);
+    await launched.page.getByRole("button", { name: "全局评论" }).click();
+    await launched.page.getByRole("textbox", { name: "评论内容" })
+      .fill("保持整个页面的视觉层级。");
+    await launched.page.getByRole("button", { name: "评论", exact: true }).click();
+    const globalComment = launched.page.locator(".comment-card")
+      .filter({ hasText: "保持整个页面的视觉层级。" });
+    await expect(globalComment).toHaveAttribute("data-resolution", "exact");
+
+    await activateNativeEdit(frame, "list-item");
+    await setTextSelection(frame, "list-item", 0, ORIGINAL_TEXT.length);
+    await launched.page.keyboard.insertText("首次登记后仍精确");
+    await expect.poll(
+      () => readFileSync(fixture.sourcePath, "utf8"),
+      { timeout: 20_000 },
+    ).toContain("首次登记后仍精确");
+
+    await expect(globalComment).toHaveAttribute("data-resolution", "exact");
+    await expect(globalComment.getByText("原位置已变化")).toHaveCount(0);
+    await expect(launched.page.getByRole("button", { name: /发送至 Qoder/u }))
+      .toBeEnabled();
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
@@ -608,9 +758,9 @@ test("rapid project switching and immediate close preserve the last native edit"
     await expect(frame.locator(caseSelector("list-item"))).toHaveText(switchedText);
 
     await firstLaunch.page.getByRole("button", { name: "项目", exact: true }).click();
-    await firstLaunch.page.getByRole("button", {
-      name: /close-switch-b\.html/u,
-    }).click();
+    await firstLaunch.page.locator(".recent-file-row")
+      .filter({ hasText: "close-switch-b.html" })
+      .click();
     await loadedDiskFrame(firstLaunch.page, projectB.sourcePath);
     await expect.poll(
       () => readFileSync(projectA.sourcePath, "utf8"),

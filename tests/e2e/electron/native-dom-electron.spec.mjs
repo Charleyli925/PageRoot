@@ -364,6 +364,128 @@ test("Electron proves the controlled and observer-guarded fallback lanes", async
   }
 });
 
+test("PROJECT.md read failure never becomes editable data and recovers in place", async () => {
+  test.setTimeout(60_000);
+  const sourceDirectory = mkdtempSync(path.join(tmpdir(), "pageroot-native-source-e2e-"));
+  const sourcePath = path.join(sourceDirectory, "project-rules-recovery.html");
+  writeFileSync(sourcePath, fixtureBuffer("complex-layout.html"));
+  const isolatedUserData = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-"));
+  let electronApp = null;
+  try {
+    const launched = await launchPageRoot({
+      isolatedUserData,
+      activeSourcePath: sourcePath,
+    });
+    electronApp = launched.electronApp;
+    await loadedDiskFrame(launched.page, sourcePath, "list-item");
+
+    await launched.page.getByRole("button", { name: "项目", exact: true }).click();
+    await launched.page.getByText("项目资料", { exact: true }).click();
+    const projectRules = launched.page.getByRole("button", {
+      name: /项目长期规则/u,
+    });
+    await expect(projectRules).toBeEnabled({ timeout: 20_000 });
+
+    await launched.page.evaluate(() => {
+      const originalFetch = window.fetch.bind(window);
+      let rejectNextProjectRulesRead = true;
+      window.fetch = (input, init) => {
+        const url = new URL(
+          typeof input === "string" ? input : input instanceof URL ? input.href : input.url,
+          window.location.href,
+        );
+        if (
+          rejectNextProjectRulesRead
+          && url.pathname === "/file"
+          && url.searchParams.get("path") === "PROJECT.md"
+        ) {
+          rejectNextProjectRulesRead = false;
+          return Promise.resolve(new Response(JSON.stringify({
+            ok: false,
+            error: { message: "测试注入：项目规则暂时不可读。" },
+          }), {
+            status: 503,
+            headers: { "content-type": "application/json" },
+          }));
+        }
+        return originalFetch(input, init);
+      };
+    });
+
+    await projectRules.click();
+    const failure = launched.page.getByRole("alert")
+      .filter({ hasText: "内容没有读取成功" });
+    await expect(failure).toBeVisible();
+    await expect(failure).toContainText("项目规则暂时不可读");
+    await expect(launched.page.getByRole("textbox", { name: "项目长期规则" }))
+      .toHaveCount(0);
+    await expect(failure.getByRole("button", { name: "重试读取" })).toBeVisible();
+    await expect(launched.page.getByRole("button", { name: "返回项目" })).toBeVisible();
+
+    await failure.getByRole("button", { name: "重试读取" }).click();
+    const editor = launched.page.getByRole("textbox", { name: "项目长期规则" });
+    await expect(editor).toBeVisible();
+    await expect(editor).not.toHaveValue(/测试注入|文件尚未生成/u);
+  } finally {
+    if (electronApp) {
+      await stopPageRoot(electronApp, isolatedUserData, { cleanup: false });
+    }
+    removeIsolatedUserData(isolatedUserData);
+    removeValidatedTemporaryDirectory(
+      sourceDirectory,
+      "pageroot-native-source-e2e-",
+    );
+  }
+});
+
+test("workspace failure keeps the current page visible with export and relaunch paths", async () => {
+  const sourceDirectory = mkdtempSync(path.join(tmpdir(), "pageroot-native-source-e2e-"));
+  const sourcePath = path.join(sourceDirectory, "workspace-recovery.html");
+  writeFileSync(sourcePath, fixtureBuffer("complex-layout.html"));
+  const isolatedUserData = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-"));
+  let electronApp = null;
+  try {
+    const launched = await launchPageRoot({
+      isolatedUserData,
+      activeSourcePath: sourcePath,
+    });
+    electronApp = launched.electronApp;
+    await loadedDiskFrame(launched.page, sourcePath, "list-item");
+    await launched.electronApp.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0]?.webContents.send(
+        "html-app:workspace-unavailable",
+        {
+          title: "本地项目资料暂时不可用",
+          message: "当前页面内容仍保留。可先导出当前编辑，再重新打开源页。",
+        },
+      );
+    });
+
+    const recovery = launched.page.getByRole("alert")
+      .filter({ hasText: "本地项目资料暂时不可用" });
+    await expect(recovery).toBeVisible();
+    await expect(recovery.getByRole("button", { name: "导出当前编辑" }))
+      .toBeVisible();
+    await expect(recovery.getByRole("button", { name: "重新打开源页" }))
+      .toBeVisible();
+    await expect(launched.page.getByRole("button", { name: "全局评论" }))
+      .toBeDisabled();
+    await expect(launched.page.getByTestId("html-canvas-editor")
+      .filter({ visible: true })
+      .first()
+      .locator('iframe[title*="本轮已锁定"]')).toBeVisible();
+  } finally {
+    if (electronApp) {
+      await stopPageRoot(electronApp, isolatedUserData, { cleanup: false });
+    }
+    removeIsolatedUserData(isolatedUserData);
+    removeValidatedTemporaryDirectory(
+      sourceDirectory,
+      "pageroot-native-source-e2e-",
+    );
+  }
+});
+
 test("Electron autosaves one authorized disk patch and reopens the same undo-redo result", async () => {
   test.setTimeout(90_000);
   const sourceDirectory = mkdtempSync(path.join(tmpdir(), "pageroot-native-source-e2e-"));

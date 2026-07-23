@@ -711,7 +711,9 @@ test("comment composer is explicit, transient and horizontally contained", () =>
   assert.match(workbench, /draftTargetRef\.current\?\.id === target\.id/);
   assert.match(workbench, /if \(!resumesRecoveredDraft\)/);
   assert.match(workbench, /className="draft-recovery-card[^"]*"/);
-  assert.match(workbench, />继续填写</);
+  assert.match(workbench, /canLocateTarget\(draftTarget\) \? "继续填写" : "重新选择目标"/);
+  assert.match(workbench, /beginTargetRelink\("__composer"\)/);
+  assert.match(workbench, /评论和附件仍保留，重新关联后即可发送/);
   assert.match(workbench, /recoveredDraftTarget\.id !== target\.id/);
   assert.match(workbench, /const activeCommentCount = activeCommentItems\.length/);
   assert.match(workbench, />\s*评论\s*<\/button>/);
