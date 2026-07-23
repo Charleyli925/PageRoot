@@ -745,6 +745,102 @@ test("replacement command fails closed for stale, overlap, hard-break, atom, for
   }, html));
 });
 
+test("plain text flow inserts generated hard breaks, escapes markup, and round-trips bytes", () => {
+  const html = `<section data-keep="yes"><p id="flow">甲&amp;乙</p><aside>outside</aside></section>`;
+  const index = buildSourceIndex(html);
+  const paragraph = elementBy(index, (element) => element.stableAttributes.id === "flow");
+  const map = buildSourceTextMap(index, paragraph.nodeId);
+  const targetRef = createTargetRef(index, paragraph.nodeId, { level: "subregion" });
+  const edit = textRangeToSourceEdit(map, 2, 2, "right");
+  const plan = planSourcePatch({
+    type: "replace-text-flow-range",
+    targetRef,
+    replacements: [{
+      deleteSegments: edit.deleteSegments,
+      insertAt: edit.insertAt,
+      beforeText: "",
+      nextText: `<img src=x>\n第二行 & 保留`,
+    }],
+    beforeText: "",
+    expectedSourceSha256: index.sourceSha256,
+  }, index);
+  const result = applyPatchPlan(plan, html);
+
+  assert.equal(
+    result.html,
+    `<section data-keep="yes"><p id="flow">甲&amp;&lt;img src=x><br>第二行 &amp; 保留乙</p><aside>outside</aside></section>`,
+  );
+  assert.equal(result.patches.length, 1);
+  assert.equal(result.patches[0].kind, "text-flow");
+  assert.equal(result.scopeReport.outsideUnchanged, true);
+  const undone = applyPatchPlan(result.inversePlan, result.html);
+  assert.equal(undone.html, html);
+  assert.equal(applyPatchPlan(undone.inversePlan, undone.html).html, result.html);
+
+  assertPatchError("TEXT_FLOW_BREAK_REQUIRED", () => planSourcePatch({
+    type: "replace-text-flow-range",
+    targetRef,
+    replacements: [{
+      deleteSegments: [],
+      insertAt: edit.insertAt,
+      nextText: "single line",
+    }],
+  }, index));
+  assertPatchError("TEXT_FLOW_NOT_NORMALIZED", () => planSourcePatch({
+    type: "replace-text-flow-range",
+    targetRef,
+    replacements: [{
+      deleteSegments: [],
+      insertAt: edit.insertAt,
+      nextText: "first\r\nsecond",
+    }],
+  }, index));
+  assertPatchError("PATCH_PLAN_TAMPERED", () => applyPatchPlan({
+    ...plan,
+    patches: plan.patches.map((patch) => ({ ...patch, after: "<script>x</script>" })),
+  }, html));
+});
+
+test("one authored hard break can be deleted and restored without rewriting neighbours", () => {
+  const html = `<div data-keep='1'><p id="flow">第一行<br class='authored'>第二行</p><aside>same</aside></div>`;
+  const index = buildSourceIndex(html);
+  const paragraph = elementBy(index, (element) => element.stableAttributes.id === "flow");
+  const hardBreak = elementBy(index, (element) => (
+    element.tagName === "br" && element.parentId === paragraph.nodeId
+  ));
+  const targetRef = createTargetRef(index, paragraph.nodeId, { level: "subregion" });
+  const plan = planSourcePatch({
+    type: "delete-hard-break",
+    targetRef,
+    hardBreakNodeId: hardBreak.nodeId,
+    expectedSourceSha256: index.sourceSha256,
+  }, index);
+  const result = applyPatchPlan(plan, html);
+
+  assert.equal(
+    result.html,
+    `<div data-keep='1'><p id="flow">第一行第二行</p><aside>same</aside></div>`,
+  );
+  assert.deepEqual(result.patches.map(({ before, after, kind }) => ({
+    before,
+    after,
+    kind,
+  })), [{
+    before: `<br class='authored'>`,
+    after: "",
+    kind: "hard-break",
+  }]);
+  const undone = applyPatchPlan(result.inversePlan, result.html);
+  assert.equal(undone.html, html);
+  assert.equal(applyPatchPlan(undone.inversePlan, undone.html).html, result.html);
+
+  assertPatchError("HARD_BREAK_TARGET_INVALID", () => planSourcePatch({
+    type: "delete-hard-break",
+    targetRef,
+    hardBreakNodeId: paragraph.nodeId,
+  }, index));
+});
+
 test("inline style patch preserves quote, attribute order, unrelated declarations, and !important", () => {
   const html = `<button data-x=1 class='cta' style='color : red !important;  padding:4px ; --Token: 10' aria-label="go">Go</button>`;
   const index = buildSourceIndex(html);

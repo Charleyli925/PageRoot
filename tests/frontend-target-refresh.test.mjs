@@ -563,7 +563,10 @@ test("native editing uses the authored DOM, browser Selection, and a measured ho
     ),
   ]);
 
-  assert.match(canvas, /const session = new NativeEditingController\(\{[\s\S]*?hostElement,[\s\S]*?baseline,/u);
+  assert.match(
+    canvas,
+    /const session(?:: NativeEditingController)? = new NativeEditingController\(\{[\s\S]*?hostElement,[\s\S]*?baseline,/u,
+  );
   const caretPointHelper = canvas.slice(
     canvas.indexOf("function caretPointFromMouseEvent"),
     canvas.indexOf("function wordBoundsAtOffset"),

@@ -409,8 +409,8 @@ test.describe("authored DOM native editing contract", () => {
     expect(detailsOpenAfter).toBe(true);
   });
 
-  test("Enter and Shift+Enter are blocked before structural DOM mutation", async ({ page }) => {
-    const { frame } = await openMatrix(page);
+  test("Enter stays blocked while Shift+Enter commits one source-owned hard break", async ({ page }) => {
+    const { editor, frame, source } = await openMatrix(page);
     await activateNativeEdit(frame, "hard-break");
     await installInputRecorder(frame);
     await setTextSelection(frame, "hard-break", 3);
@@ -429,6 +429,14 @@ test.describe("authored DOM native editing contract", () => {
       });
     });
     await page.keyboard.press("Enter");
+    expect(await target.innerHTML()).toBe(beforeHtml);
+    expect(await selectionSnapshot(frame, "hard-break")).toMatchObject({
+      collapsed: beforeSelection.collapsed,
+      anchorOffset: beforeSelection.anchorOffset,
+      focusOffset: beforeSelection.focusOffset,
+      activeCase: "hard-break",
+    });
+
     await page.keyboard.press("Shift+Enter");
 
     const beforeInputs = (await recordedInputEvents(frame))
@@ -443,19 +451,26 @@ test.describe("authored DOM native editing contract", () => {
     );
     expect(structuralEvents.map(({ inputType }) => inputType)).toEqual(structuralInputTypes);
     expect(structuralEvents.every(({ defaultPrevented }) => defaultPrevented)).toBe(true);
-    expect(await target.innerHTML()).toBe(beforeHtml);
     expect(await selectionSnapshot(frame, "hard-break")).toMatchObject({
-      collapsed: beforeSelection.collapsed,
-      anchorOffset: beforeSelection.anchorOffset,
-      focusOffset: beforeSelection.focusOffset,
+      collapsed: true,
+      // DOM Range.toString() does not count <br>; the controller's logical
+      // Selection is 4 and sits after the new break, while this helper reports
+      // the three visible characters before it.
+      anchorOffset: 3,
+      focusOffset: 3,
       activeCase: "hard-break",
     });
-    const notice = page.locator('[role="status"], [role="alert"]').filter({
-      hasText: /换行|评论/,
-    }).first();
-    await expect(notice).toBeVisible();
-    await expect(notice).toContainText("继续修改现有文字");
-    await expect(notice).toContainText("添加评论");
+    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
+    const expected = replaceUniqueBytes(
+      source,
+      ">第一行保留原位。<br>",
+      ">第一行<br>保留原位。<br>",
+    );
+    expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
+
+    await page.keyboard.press(keyShortcut("Z"));
+    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("0");
+    expect((await exportCurrentHtml(page)).equals(source)).toBe(true);
   });
 
   test("replacement can cross nested inline wrappers without losing the caret", async ({ page }) => {
@@ -663,32 +678,77 @@ test.describe("authored DOM native editing contract", () => {
     expect(events.some(({ type }) => type === "cut")).toBe(true);
   });
 
-  test("multi-line plain-text paste is rejected before DOM or source mutation", async ({ page, context }) => {
+  test("multi-line clipboard text is stripped to text and committed as generated hard breaks", async ({ page, context }) => {
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-    const { frame, source } = await openMatrix(page);
+    const { editor, frame, source } = await openMatrix(page);
     await activateNativeEdit(frame, "hard-break");
     await setTextSelection(frame, "hard-break", 2);
     const target = frame.locator(caseSelector("hard-break"));
-    const beforeHtml = await target.innerHTML();
-    const beforeSelection = await selectionSnapshot(frame, "hard-break");
-    await page.evaluate(() => navigator.clipboard.writeText("粘贴第一行\n粘贴第二行"));
+    await page.evaluate(() => navigator.clipboard.writeText(
+      "<b>粘贴第一行</b>\n粘贴第二行",
+    ));
     await page.keyboard.press(keyShortcut("V"));
-    expect(await target.innerHTML()).toBe(beforeHtml);
+    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
+    await expect(target).toContainText("<b>粘贴第一行</b>");
+    expect(await target.locator("b").count()).toBe(0);
+    expect(await target.locator("br").count()).toBe(2);
     expect(await selectionSnapshot(frame, "hard-break")).toMatchObject({
-      collapsed: beforeSelection.collapsed,
-      anchorOffset: beforeSelection.anchorOffset,
-      focusOffset: beforeSelection.focusOffset,
+      collapsed: true,
       activeCase: "hard-break",
     });
     expect((await nativeEditingState(frame, "hard-break")).targetIsActive).toBe(true);
-    const notice = page.locator('[role="status"], [role="alert"]').filter({
-      hasText: /多行|评论/,
-    }).first();
-    await expect(notice).toBeVisible();
-    await expect(notice).toContainText("粘贴单行文字");
-    await expect(notice).toContainText("添加评论");
+    const expected = replaceUniqueBytes(
+      source,
+      ">第一行保留原位。<br>",
+      ">第一&lt;b>粘贴第一行&lt;/b><br>粘贴第二行行保留原位。<br>",
+    );
+    expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
+
+    await page.keyboard.press(keyShortcut("Z"));
+    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("0");
     expect((await exportCurrentHtml(page)).equals(source)).toBe(true);
   });
+
+  for (const key of ["Backspace", "Delete"]) {
+    test(`${key} deletes exactly the adjacent authored hard break and undo restores it`, async ({ page }) => {
+      const { editor, frame, source } = await openMatrix(page);
+      const target = await activateNativeEdit(frame, "hard-break");
+      if (key === "Backspace") {
+        await target.evaluate((host) => {
+          const hardBreak = host.querySelector("br");
+          if (!hardBreak?.parentNode) throw new Error("Expected an authored hard break.");
+          const childIndex = [...hardBreak.parentNode.childNodes].indexOf(hardBreak);
+          const range = document.createRange();
+          range.setStart(hardBreak.parentNode, childIndex + 1);
+          range.collapse(true);
+          const selection = document.getSelection();
+          selection.removeAllRanges();
+          selection.addRange(range);
+        });
+      } else {
+        await setTextSelection(frame, "hard-break", 8);
+      }
+      await page.keyboard.press(key);
+
+      await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
+      const expected = replaceUniqueBytes(
+        source,
+        "第一行保留原位。<br>第二行",
+        "第一行保留原位。第二行",
+      );
+      expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
+      expect(await selectionSnapshot(frame, "hard-break")).toMatchObject({
+        collapsed: true,
+        anchorOffset: 8,
+        focusOffset: 8,
+        activeCase: "hard-break",
+      });
+
+      await page.keyboard.press(keyShortcut("Z"));
+      await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("0");
+      expect((await exportCurrentHtml(page)).equals(source)).toBe(true);
+    });
+  }
 
   test("controlled contenteditable preserves collapsed layout and owns paste as plain text", async ({ page, context }) => {
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);

@@ -186,6 +186,13 @@ function escapeTextContent(value) {
   return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;");
 }
 
+function escapeTextFlowContent(value) {
+  return String(value)
+    .split("\n")
+    .map((line) => escapeTextContent(line))
+    .join("<br>");
+}
+
 function isDescendantNode(index, node, ancestor) {
   let current = node;
   while (current?.parentId) {
@@ -996,7 +1003,7 @@ export function planTextPatch(indexOrHtml, command) {
   );
 }
 
-export function planTextRangePatch(indexOrHtml, command) {
+function planTextRangeLikePatch(indexOrHtml, command, options) {
   const index = typeof indexOrHtml === "string"
     ? buildSourceIndex(indexOrHtml)
     : indexOrHtml;
@@ -1022,7 +1029,7 @@ export function planTextRangePatch(indexOrHtml, command) {
   } = normalizedTextReplacements(index, target, command);
   const patches = [];
   for (const replacement of replacements) {
-    const escapedNextText = escapeTextContent(replacement.nextText);
+    const escapedNextText = options.encodeNextText(replacement.nextText);
     let insertionOwner = null;
     if (replacement.insertAt.kind === "text") {
       insertionOwner = replacement.segments.find((segment) => (
@@ -1054,7 +1061,7 @@ export function planTextRangePatch(indexOrHtml, command) {
         before,
         after,
         {
-          kind: "text-range",
+          kind: options.patchKind,
           nodeId: segment.textNodeId,
           replacementIndex: replacement.replacementIndex,
         },
@@ -1067,7 +1074,7 @@ export function planTextRangePatch(indexOrHtml, command) {
         "",
         escapedNextText,
         {
-          kind: "text-range",
+          kind: options.patchKind,
           nodeId: replacement.insertAt.textNodeId
             ?? replacement.insertAt.parentNodeId,
           replacementIndex: replacement.replacementIndex,
@@ -1103,7 +1110,7 @@ export function planTextRangePatch(indexOrHtml, command) {
       element.raw,
       boundaryInsertion?.after ?? "",
       {
-        kind: "text-range",
+        kind: options.patchKind,
         nodeId: element.nodeId,
         cleanup: "empty-transparent-wrapper",
         ...(boundaryInsertion?.replacementIndex !== undefined
@@ -1126,7 +1133,7 @@ export function planTextRangePatch(indexOrHtml, command) {
 
   return makePlan(
     index,
-    { ...command, type: "replace-text-range" },
+    { ...command, type: options.planType },
     textPatchesOutsideEmptyWrappers,
     [currentTargetRef],
     {
@@ -1140,7 +1147,101 @@ export function planTextRangePatch(indexOrHtml, command) {
             segments: metadataReplacements[0].deleteSegments,
           }
         : {}),
-      writeScope: "selected-text-ranges",
+      writeScope: options.writeScope,
+    },
+  );
+}
+
+export function planTextRangePatch(indexOrHtml, command) {
+  return planTextRangeLikePatch(indexOrHtml, command, {
+    planType: "replace-text-range",
+    patchKind: "text-range",
+    encodeNextText: escapeTextContent,
+    writeScope: "selected-text-ranges",
+  });
+}
+
+export function planTextFlowRangePatch(indexOrHtml, command) {
+  const inputs = Array.isArray(command?.replacements)
+    ? command.replacements
+    : [command];
+  const nextTexts = inputs
+    .filter((input) => input && Object.hasOwn(input, "nextText"))
+    .map((input) => String(input.nextText));
+  if (nextTexts.some((value) => value.includes("\r"))) {
+    fail(
+      "TEXT_FLOW_NOT_NORMALIZED",
+      "Text flow line endings must be normalized before planning.",
+    );
+  }
+  if (!nextTexts.some((value) => value.includes("\n"))) {
+    fail(
+      "TEXT_FLOW_BREAK_REQUIRED",
+      "Text flow replacement requires at least one explicit hard break.",
+    );
+  }
+  return planTextRangeLikePatch(indexOrHtml, command, {
+    planType: "replace-text-flow-range",
+    patchKind: "text-flow",
+    encodeNextText: escapeTextFlowContent,
+    writeScope: "selected-text-ranges-and-generated-hard-breaks",
+  });
+}
+
+export function planDeleteHardBreakPatch(indexOrHtml, command) {
+  const index = typeof indexOrHtml === "string"
+    ? buildSourceIndex(indexOrHtml)
+    : indexOrHtml;
+  const targetRef = commandTargetRef(index, command);
+  const resolution = resolvedTarget(index, targetRef, "element");
+  const target = resolution.target;
+  const currentTargetRef = refreshResolvedTargetRef(
+    index,
+    targetRef,
+    target,
+  );
+  if (!supportsTextRangeEditing(target.tagName)) {
+    fail(
+      "TEXT_RANGE_STYLE_UNSUPPORTED",
+      `Hard-break editing is not supported inside <${target.tagName}>.`,
+      { nodeId: target.nodeId },
+    );
+  }
+  const hardBreak = index.byNodeId.get(String(command.hardBreakNodeId ?? ""));
+  if (
+    !hardBreak
+    || hardBreak.type !== "element"
+    || hardBreak.tagName !== "br"
+    || hardBreak.namespaceURI !== "http://www.w3.org/1999/xhtml"
+    || !isDescendantNode(index, hardBreak, target)
+  ) {
+    fail(
+      "HARD_BREAK_TARGET_INVALID",
+      "The declared hard break no longer belongs to the editable source element.",
+      { hardBreakNodeId: command.hardBreakNodeId, targetId: target.nodeId },
+    );
+  }
+  const patch = sourcePatch(
+    hardBreak.range.startOffset,
+    hardBreak.range.endOffset,
+    hardBreak.raw,
+    "",
+    {
+      kind: "hard-break",
+      nodeId: hardBreak.nodeId,
+    },
+  );
+  return makePlan(
+    index,
+    { ...command, type: "delete-hard-break" },
+    [patch],
+    [currentTargetRef],
+    {
+      resolution: resolution.resolution,
+      nodeId: target.nodeId,
+      hardBreakNodeId: hardBreak.nodeId,
+      hardBreakSource: hardBreak.raw,
+      writeScope: "one-authored-hard-break",
     },
   );
 }
@@ -1986,6 +2087,11 @@ export function planSourcePatch(command, indexOrHtml) {
     case "text-range":
     case "replace-text-range":
       return planTextRangePatch(index, command);
+    case "text-flow-range":
+    case "replace-text-flow-range":
+      return planTextFlowRangePatch(index, command);
+    case "delete-hard-break":
+      return planDeleteHardBreakPatch(index, command);
     case "style":
     case "set-inline-style":
       return planInlineStylePatch(index, command);
@@ -2241,6 +2347,8 @@ function authorizePatchPlan(plan, index, patches) {
   if (![
     "replace-text",
     "replace-text-range",
+    "replace-text-flow-range",
+    "delete-hard-break",
     "set-inline-style",
     "set-text-range-style",
     "reorder-sibling",
@@ -2353,6 +2461,71 @@ function authorizePatchPlan(plan, index, patches) {
         fail(
           "PATCH_PLAN_TAMPERED",
           "Text range patches do not match the declared operation metadata.",
+        );
+      }
+    }
+  }
+
+  if (operationType === "replace-text-flow-range") {
+    if (targetRefs.length !== 1 || resolutions[0].target.type !== "element") {
+      fail("PATCH_TARGET_COUNT_INVALID", "Text flow patch requires one element TargetRef.");
+    }
+    const element = resolutions[0].target;
+    for (const patch of patches) {
+      if (String(patch.kind ?? "").replace(/^(?:inverse:)+/, "") !== "text-flow") {
+        fail("PATCH_KIND_MISMATCH", "Text flow patch has an unrelated source operation.", { patch });
+      }
+      assertPatchWithin(
+        patch,
+        element.contentRange,
+        "PATCH_OUTSIDE_TARGET",
+        "Text flow patch is outside the authorized element content.",
+      );
+    }
+    if (!isInverse) {
+      const expected = planTextFlowRangePatch(index, {
+        type: "replace-text-flow-range",
+        targetRef: targetRefs[0],
+        beforeText: plan.metadata?.beforeText,
+        replacements: plan.metadata?.replacements,
+        expectedSourceSha256: index.sourceSha256,
+      });
+      if (!patchesEqual(patches, expected.patches)) {
+        fail(
+          "PATCH_PLAN_TAMPERED",
+          "Text flow patches do not match the declared operation metadata.",
+        );
+      }
+    }
+  }
+
+  if (operationType === "delete-hard-break") {
+    if (targetRefs.length !== 1 || resolutions[0].target.type !== "element") {
+      fail("PATCH_TARGET_COUNT_INVALID", "Hard-break deletion requires one element TargetRef.");
+    }
+    const element = resolutions[0].target;
+    for (const patch of patches) {
+      if (String(patch.kind ?? "").replace(/^(?:inverse:)+/, "") !== "hard-break") {
+        fail("PATCH_KIND_MISMATCH", "Hard-break deletion has an unrelated source operation.", { patch });
+      }
+      assertPatchWithin(
+        patch,
+        element.contentRange,
+        "PATCH_OUTSIDE_TARGET",
+        "Hard-break deletion is outside the authorized element content.",
+      );
+    }
+    if (!isInverse) {
+      const expected = planDeleteHardBreakPatch(index, {
+        type: "delete-hard-break",
+        targetRef: targetRefs[0],
+        hardBreakNodeId: plan.metadata?.hardBreakNodeId,
+        expectedSourceSha256: index.sourceSha256,
+      });
+      if (!patchesEqual(patches, expected.patches)) {
+        fail(
+          "PATCH_PLAN_TAMPERED",
+          "Hard-break deletion does not match the declared operation metadata.",
         );
       }
     }

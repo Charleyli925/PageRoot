@@ -149,7 +149,7 @@ stateDiagram-v2
 编辑宿主按实时能力选择：
 
 - 优先使用 `contenteditable="plaintext-only"`。
-- 如果它只因 Chromium 的 `white-space` 行为改变真实文字几何，而 `contenteditable="true"` 的完整会话属性预检能证明布局、样式、选区和恢复完全稳定，则进入受控模式；受控模式仍只接受纯文字事务，粘贴强制取 `text/plain`，格式命令、HTML 插入和无完整事件投递的结构变化全部阻止或回滚。
+- 如果它只因 Chromium 的 `white-space` 行为改变真实文字几何，而 `contenteditable="true"` 的完整会话属性预检能证明布局、样式、选区和恢复完全稳定，则进入受控模式；受控模式的粘贴强制只取 `text/plain`。多行纯文本与 `Shift+Enter` 不采用浏览器生成的 HTML，而由 SourcePatch 生成固定 `<br>`；相邻已有 `<br>` 的 Backspace/Delete 同样走显式源码命令。富 HTML、任意块结构和无完整事件投递的 DOM 变化仍全部阻止或回滚。
 - `display: contents` 不再仅凭静态命中就拒绝；有 MutationObserver 时可进入 observer-guarded 模式。真实 `beforeinput/input` 正常完成才提交，缺失事件的孤立 DOM 变化在 SourcePatch 前恢复。
 - 两种放宽都不能绕过 SourceTextMap、FormatSkeleton、SourcePatch 或源码 Hash 校验。
 

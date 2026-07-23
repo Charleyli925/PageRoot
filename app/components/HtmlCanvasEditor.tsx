@@ -55,6 +55,10 @@ import {
   type NativeEditSessionState,
 } from "./NativeEditingController";
 import {
+  planNativeStructuralEdit,
+  type NativeSourceEditIntent,
+} from "../lib/native-structural-edit-planner.js";
+import {
   buildRuntimeDomMap,
   nativeRuntimePreflight as inspectNativeEditRuntime,
 } from "./native-edit-runtime-preflight";
@@ -164,7 +168,7 @@ export type HtmlCanvasSelection = {
 };
 
 export type HtmlCanvasMutation = {
-  kind: "text" | "style" | "reorder";
+  kind: "text" | "style" | "reorder" | "structure";
   /** Stable identity shared by a direct edit and its undo/redo mutations. */
   historyId?: string;
   /** Lets the host fold history without creating a second editing authority. */
@@ -2956,6 +2960,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         && activeNativeEdit.target.id === mutation.target.id
         && (
           forwardPlan.type === "replace-text-range"
+          || forwardPlan.type === "replace-text-flow-range"
+          || forwardPlan.type === "delete-hard-break"
           || forwardPlan.type === "set-text-range-style"
         ),
       );
@@ -3637,6 +3643,85 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     checkpointNativeEdit();
   };
 
+  const applyNativeSourceEditIntent = useCallback((
+    originSession: NativeEditingController,
+    intent: NativeSourceEditIntent,
+  ): boolean => {
+    const originActive = activeNativeEditRef.current;
+    if (!originActive || originActive.session !== originSession) return false;
+
+    const checkpoint = checkpointNativeEdit("manual");
+    if (!checkpoint.ok) return true;
+    const active = activeNativeEditRef.current;
+    const sourceIndex = sourceIndexRef.current;
+    if (!active || !sourceIndex || sourceIndex.source !== frameSourceHtmlRef.current) {
+      reportBlockedEdit(new Error("换行前的源码状态已经变化，请重新点选文字后再试。"));
+      return true;
+    }
+
+    try {
+      const structural = planNativeStructuralEdit(active.projection, intent);
+      let validatedProjection: SourceTextMap | null = null;
+      const mutation: HtmlCanvasMutation = {
+        kind: "structure",
+        target: active.target,
+        property: structural.kind === "delete-hard-break"
+          ? "hardBreakDelete"
+          : "plainTextFlow",
+        before: {
+          text: structural.previousText,
+          selection: intent.selection,
+        },
+        after: {
+          text: structural.nextText,
+          selection: structural.selection,
+          inputType: structural.inputType,
+        },
+      };
+      const result = applySourceCommand({
+        ...structural.command,
+        targetRef: active.rootTargetRef,
+        expectedSourceSha256: active.projection.sourceSha256,
+      } as SourcePatchCommand, mutation, {
+        nativeTextCommit: {
+          selection: structural.selection,
+          requiresCanonicalReconcile: true,
+        },
+        validateResult: (candidate) => {
+          const operationTargetRef = candidate.refreshedTargetRefs.find(
+            (targetRef: SourceTargetRef) => (
+              targetRef.targetId === active.rootTargetRef.targetId
+            ),
+          );
+          if (!operationTargetRef || operationTargetRef.resolution !== "exact") {
+            throw new Error("换行后的文字宿主无法精确重绑，已停止提交。");
+          }
+          const projection = buildSourceTextMap(
+            candidate.sourceIndex,
+            operationTargetRef,
+            { allowEmpty: true },
+          );
+          if (projection.text !== structural.nextText) {
+            throw new Error("换行后的源码文字与预期不一致，已停止提交。");
+          }
+          validatedProjection = projection;
+        },
+      });
+      if (!result || !validatedProjection) {
+        reportBlockedEdit(new Error("这处文字无法生成安全的换行源码修改。"));
+      }
+    } catch (cause) {
+      reportBlockedEdit(cause);
+    }
+    // The browser event is always consumed once it reaches the source-owned
+    // structural lane. A rejected plan must not fall back to browser DOM.
+    return true;
+  }, [
+    applySourceCommand,
+    checkpointNativeEdit,
+    reportBlockedEdit,
+  ]);
+
   const finishNativeEditing = useCallback((
     shouldApply: boolean,
     trigger: NativeEditCheckpointTrigger = "manual",
@@ -3998,7 +4083,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             : NATIVE_EDIT_CHECKPOINT_DELAY_MS);
         }
       };
-      const session = new NativeEditingController({
+      const session: NativeEditingController = new NativeEditingController({
         hostElement,
         hostMode: preflight.hostMode,
         baseline,
@@ -4080,6 +4165,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         onEscape: () => finishNativeEditing(true, "manual"),
         onUndo: () => undoRef.current(),
         onRedo: () => redoRef.current(),
+        onSourceEditIntent: (intent: NativeSourceEditIntent): boolean => (
+          applyNativeSourceEditIntent(session, intent)
+        ),
         onUnsupportedInput: (inputType) => reportBlockedEdit(new Error(
           inputType === "insertFromPasteMultiline"
             ? "当前结构暂不支持多行粘贴，可粘贴单行文字或添加评论。"
@@ -4171,6 +4259,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   }, [
     clearNativeEditCheckpointTimer,
     finishNativeEditing,
+    applyNativeSourceEditIntent,
     refreshNativeEditRangeState,
     reportBlockedEdit,
     selectElement,

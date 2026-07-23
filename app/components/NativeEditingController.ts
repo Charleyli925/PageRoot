@@ -8,7 +8,9 @@ import {
   classifyNativeInputIntent,
   hasMultilinePlainText,
   NATIVE_INPUT_INTENT_KIND,
+  normalizePlainTextLineEndings,
 } from "../lib/native-input-intent.js";
+import type { NativeSourceEditIntent } from "../lib/native-structural-edit-planner.js";
 import {
   NativeBlockEditDraft,
   type NativeBlockEditDraftSnapshot,
@@ -202,6 +204,7 @@ export type NativeEditingControllerOptions = {
   onEscape?: () => void;
   onUndo?: () => void;
   onRedo?: () => void;
+  onSourceEditIntent?: (intent: NativeSourceEditIntent) => boolean;
   onUnsupportedInput?: (inputType: string) => void;
   onError?: (error: Error) => void;
   canRemoveInlineWrapper?: (element: Element) => boolean;
@@ -1261,6 +1264,8 @@ export class NativeEditingController {
 
   private readonly onRedo?: NativeEditingControllerOptions["onRedo"];
 
+  private readonly onSourceEditIntent?: NativeEditingControllerOptions["onSourceEditIntent"];
+
   private readonly onUnsupportedInput?: NativeEditingControllerOptions["onUnsupportedInput"];
 
   private readonly onError?: NativeEditingControllerOptions["onError"];
@@ -1310,6 +1315,8 @@ export class NativeEditingController {
   private pendingCommandReadyScheduled = false;
 
   private explicitFallbackCommandSequence: number | null = null;
+
+  private enterKeyIntent: "hard-break" | "split-block" | null = null;
 
   private lastInputType: string | null = null;
 
@@ -1750,6 +1757,7 @@ export class NativeEditingController {
     this.onEscape = options.onEscape;
     this.onUndo = options.onUndo;
     this.onRedo = options.onRedo;
+    this.onSourceEditIntent = options.onSourceEditIntent;
     this.onUnsupportedInput = options.onUnsupportedInput;
     this.onError = options.onError;
     this.canRemoveInlineWrapper = options.canRemoveInlineWrapper;
@@ -2053,6 +2061,15 @@ export class NativeEditingController {
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (!this.canHandleEvent(event)) return;
+      if (
+        event.key === "Enter"
+        && !this.composing
+        && !this.compositionDeliveryPending
+        && !this.draftCompositionUnsettled
+      ) {
+        this.enterKeyIntent = event.shiftKey ? "hard-break" : "split-block";
+        return;
+      }
       if (event.key !== "Escape") return;
       const compositionWasActive = this.composing;
       if (this.consumeCompositionEscape()) {
@@ -2066,6 +2083,10 @@ export class NativeEditingController {
       }
       event.preventDefault();
       this.callbackIfCurrent(this.onEscape);
+    };
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (!this.canHandleEvent(event)) return;
+      if (event.key === "Enter") this.enterKeyIntent = null;
     };
     const onFocusOut = (event: FocusEvent) => {
       if (!this.canHandleEvent(event)) return;
@@ -2098,6 +2119,7 @@ export class NativeEditingController {
     this.hostElement.addEventListener("compositionstart", onCompositionStart);
     this.hostElement.addEventListener("compositionend", onCompositionEnd);
     this.hostElement.addEventListener("keydown", onKeyDown);
+    this.hostElement.addEventListener("keyup", onKeyUp);
     this.hostElement.addEventListener("focusout", onFocusOut);
     this.hostElement.addEventListener("drop", preventDrop);
     this.hostElement.addEventListener("dragstart", preventDragStart);
@@ -2109,6 +2131,7 @@ export class NativeEditingController {
     this.cleanup.push(() => this.hostElement.removeEventListener("compositionstart", onCompositionStart));
     this.cleanup.push(() => this.hostElement.removeEventListener("compositionend", onCompositionEnd));
     this.cleanup.push(() => this.hostElement.removeEventListener("keydown", onKeyDown));
+    this.cleanup.push(() => this.hostElement.removeEventListener("keyup", onKeyUp));
     this.cleanup.push(() => this.hostElement.removeEventListener("focusout", onFocusOut));
     this.cleanup.push(() => this.hostElement.removeEventListener("drop", preventDrop));
     this.cleanup.push(() => this.hostElement.removeEventListener("dragstart", preventDragStart));
@@ -2257,6 +2280,12 @@ export class NativeEditingController {
       && hasMultilinePlainText(insertedText)
     ) {
       event.preventDefault();
+      if (this.requestSourceEditIntent({
+        kind: "insert-text-flow",
+        inputType: event.inputType || "insertFromPaste",
+        text: normalizePlainTextLineEndings(insertedText),
+        selection: this.getSelection(),
+      })) return;
       this.unsupportedInputIfCurrent("insertFromPasteMultiline");
       return;
     }
@@ -2266,10 +2295,51 @@ export class NativeEditingController {
       else this.callbackIfCurrent(this.onUndo);
       return;
     }
+    if (
+      input.kind === NATIVE_INPUT_INTENT_KIND.INSERT_HARD_BREAK
+      || input.kind === NATIVE_INPUT_INTENT_KIND.SPLIT_BLOCK
+    ) {
+      event.preventDefault();
+      const enterKeyIntent = this.enterKeyIntent;
+      this.enterKeyIntent = null;
+      if (
+        enterKeyIntent === "hard-break"
+        && this.requestSourceEditIntent({
+          kind: "insert-text-flow",
+          inputType: event.inputType || "insertLineBreak",
+          text: "\n",
+          selection: this.getSelection(),
+        })
+      ) return;
+      this.unsupportedInputIfCurrent(
+        enterKeyIntent === "split-block"
+          ? "insertParagraph"
+          : event.inputType || "insertLineBreak",
+      );
+      return;
+    }
     if (!input.supported) {
       event.preventDefault();
       this.unsupportedInputIfCurrent(event.inputType || "unknown");
       return;
+    }
+    if (
+      event.inputType === "deleteContentBackward"
+      || event.inputType === "deleteContentForward"
+    ) {
+      const selection = this.getSelection();
+      const range = this.hardBreakDeletionRange(event.inputType, selection);
+      if (range) {
+        event.preventDefault();
+        if (this.requestSourceEditIntent({
+          kind: "delete-hard-break",
+          inputType: event.inputType,
+          range,
+          selection,
+        })) return;
+        this.unsupportedInputIfCurrent("deleteHardBreakUnavailable");
+        return;
+      }
     }
     if (event.inputType === "insertFromDrop") {
       event.preventDefault();
@@ -2294,6 +2364,41 @@ export class NativeEditingController {
     }
     this.beginNativeCandidate(event.inputType || "unknown");
     this.captureNativeMutationIntent(event, event.inputType || "unknown");
+  }
+
+  private requestSourceEditIntent(intent: NativeSourceEditIntent): boolean {
+    if (!this.hasCurrentLease() || !this.onSourceEditIntent) return false;
+    try {
+      return this.onSourceEditIntent(intent) === true;
+    } catch (cause) {
+      this.reportErrorIfCurrent(errorFrom(cause));
+      return false;
+    }
+  }
+
+  private hardBreakDeletionRange(
+    inputType: "deleteContentBackward" | "deleteContentForward",
+    selection: NativeEditSelection,
+  ): { startOffset: number; endOffset: number } | null {
+    const startOffset = Math.min(selection.anchor, selection.focus);
+    const endOffset = Math.max(selection.anchor, selection.focus);
+    const hardBreaks = tokensForHost(this.hostElement).filter(
+      (token) => token.kind === "hard-break",
+    );
+    if (startOffset !== endOffset) {
+      const selected = hardBreaks.find((token) => (
+        token.start === startOffset && token.end === endOffset
+      ));
+      return selected
+        ? { startOffset: selected.start, endOffset: selected.end }
+        : null;
+    }
+    const adjacent = inputType === "deleteContentBackward"
+      ? hardBreaks.find((token) => token.end === startOffset)
+      : hardBreaks.find((token) => token.start === startOffset);
+    return adjacent
+      ? { startOffset: adjacent.start, endOffset: adjacent.end }
+      : null;
   }
 
   private beginNativeCandidate(inputType: string): void {
@@ -2504,10 +2609,19 @@ export class NativeEditingController {
     if (!this.canHandleEvent(event)) return;
     const plainText = event.clipboardData?.getData("text/plain") ?? "";
     if (hasMultilinePlainText(plainText)) {
-      // A multiline paste can synthesize child blocks in either editing host.
-      // PageRoot cannot losslessly map that transient structure back to an
-      // existing text island, so reject before DOM or Selection can move.
       event.preventDefault();
+      if (
+        !this.composing
+        && !this.compositionDeliveryPending
+        && !this.draftCompositionUnsettled
+        && !this.requiresCanonicalReconcile
+        && this.requestSourceEditIntent({
+          kind: "insert-text-flow",
+          inputType: "insertFromPaste",
+          text: normalizePlainTextLineEndings(plainText),
+          selection: this.getSelection(),
+        })
+      ) return;
       this.unsupportedInputIfCurrent("insertFromPasteMultiline");
       this.emitState();
       return;
