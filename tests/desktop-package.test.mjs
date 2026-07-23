@@ -48,7 +48,7 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.equal(packageJson.name, "pageroot");
   assert.match(packageJson.description, /源页（PageRoot）— Edit visually\. Stay in source\./);
   assert.equal(packageJson.build.appId, "com.htmlai.workbench");
-  assert.equal(packageJson.version, "0.8.4");
+  assert.equal(packageJson.version, "0.8.5");
   assert.equal(packageJson.build.productName, "PageRoot");
   assert.equal(packageJson.build.artifactName, "PageRoot-${version}-${arch}.${ext}");
   assert.equal(packageJson.build.mac.identity, "-");
