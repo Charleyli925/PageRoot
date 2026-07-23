@@ -548,6 +548,44 @@ test.describe("authored DOM native editing contract", () => {
     });
   });
 
+  test("a comment on a block becomes explicitly ambiguous after Enter and restores on undo", async ({ page }) => {
+    const { editor, frame } = await openMatrix(page);
+    const caseId = "list-item";
+    const firstText = "列表项中的";
+    const commentText = "保留这条评论的目标，不要静默移动。";
+
+    await frame.locator(caseSelector(caseId)).click();
+    const toolbar = page.getByRole("toolbar", { name: /编辑/ });
+    await toolbar.getByRole("button", { name: /留评论/ }).click();
+    const composer = page.getByRole("region", { name: "添加评论" });
+    await composer.getByRole("textbox", { name: "评论内容" }).fill(commentText);
+    await composer.getByRole("button", { name: "评论", exact: true }).click();
+    await expect(page.locator(".round-record-counts")).toHaveText(
+      "1 条评论 · 0 项直接编辑记录",
+    );
+    const commentCard = page.locator(".comment-card").filter({ hasText: commentText });
+    await expect(commentCard).toHaveAttribute("data-resolution", "exact");
+
+    await activateNativeEdit(frame, caseId);
+    await setTextSelection(frame, caseId, firstText.length);
+    await page.keyboard.press("Enter");
+
+    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
+    await expect(commentCard).toHaveAttribute("data-resolution", "ambiguous");
+    await expect(commentCard).toHaveAttribute("tabindex", "-1");
+
+    await page.keyboard.press(keyShortcut("Z"));
+    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("0");
+    await expect(commentCard).toHaveAttribute("data-resolution", "exact");
+    await expect(commentCard).toHaveAttribute("tabindex", "0");
+
+    await page.keyboard.press(
+      `${process.platform === "darwin" ? "Meta" : "Control"}+Shift+Z`,
+    );
+    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
+    await expect(commentCard).toHaveAttribute("data-resolution", "ambiguous");
+  });
+
   test("Enter splits one simple paragraph and preserves its visual attributes", async ({ page }) => {
     const { editor, frame, source } = await openMatrix(page);
     const caseId = "flex-copy";

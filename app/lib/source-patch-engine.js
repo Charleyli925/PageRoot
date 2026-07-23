@@ -1,6 +1,7 @@
 import {
   buildSourceIndex,
   compareParseIntegrity,
+  normalizeSourceText,
   sourceSha256,
 } from "./source-index.js";
 import { decodeHTML } from "entities";
@@ -2969,6 +2970,186 @@ function deterministicMappedNode(plan, baseIndex, nextIndex, patches, baseNode) 
   return null;
 }
 
+function splitPatchDirection(plan, patches) {
+  if (
+    operationTypeForPlan(plan) !== "split-text-block"
+    || patches.length !== 1
+  ) return null;
+  const [patch] = patches;
+  if (patch.before === "" && patch.after !== "") return "split";
+  if (patch.before !== "" && patch.after === "") return "merge";
+  return null;
+}
+
+function splitTrackedTargetIds(plan) {
+  return new Set(
+    Array.isArray(plan?.metadata?.splitTrackedTargetIds)
+      ? plan.metadata.splitTrackedTargetIds.map(String)
+      : [],
+  );
+}
+
+function splitRootForResolvedTarget(index, target) {
+  if (target?.type === "element") return target;
+  if (target?.type !== "text" || !target.parentId) return null;
+  const parent = index.byNodeId.get(target.parentId);
+  return parent?.type === "element" ? parent : null;
+}
+
+function splitTargetMapping(
+  beforeTargetRef,
+  beforeResolution,
+  nextIndex,
+  nextNode,
+  tracked,
+) {
+  const afterTargetRef = createTargetRef(nextIndex, nextNode, {
+    targetId: beforeTargetRef.targetId,
+    label: beforeTargetRef.label,
+    level: beforeTargetRef.level,
+  });
+  return {
+    targetId: beforeTargetRef.targetId,
+    beforeTargetRef,
+    afterTargetRef,
+    beforeNodeId: beforeResolution.target?.nodeId ?? null,
+    afterNodeId: nextNode.nodeId,
+    resolution: "exact",
+    tracked,
+    splitTracked: true,
+  };
+}
+
+function ambiguousSplitTargetMapping(
+  beforeTargetRef,
+  beforeResolution,
+  tracked,
+) {
+  const mapping = unresolvedTargetMapping(
+    beforeTargetRef,
+    beforeResolution,
+    tracked,
+    "ambiguous",
+  );
+  // A one-to-many split has no truthful single source range. Keeping the old
+  // range under the new source hash would make the ref look exact even though
+  // the user must choose one of the resulting blocks.
+  delete mapping.afterTargetRef.sourceAnchor;
+  mapping.splitTracked = true;
+  return mapping;
+}
+
+function mappedForwardSplitTrackedTarget(
+  plan,
+  baseIndex,
+  nextIndex,
+  patches,
+  beforeTargetRef,
+  beforeResolution,
+  tracked,
+) {
+  if (!tracked || splitPatchDirection(plan, patches) !== "split") return null;
+  const block = splitRootForResolvedTarget(baseIndex, beforeResolution.target);
+  const rawSplitOffset = Number(plan?.metadata?.rawSplitOffset);
+  if (
+    !block
+    || block.tagName !== plan?.metadata?.tagName
+    || !Number.isInteger(rawSplitOffset)
+    || rawSplitOffset < block.contentRange.startOffset
+    || rawSplitOffset > block.contentRange.endOffset
+  ) return null;
+
+  const firstStartOffset = transformedOffset(block.range.startOffset, patches);
+  const secondStartOffset = Number(plan?.metadata?.createdBlockStartOffset);
+  const firstBlock = nextIndex.elements.find((element) => (
+    element.tagName === block.tagName
+    && element.range.startOffset === firstStartOffset
+  ));
+  const secondBlock = nextIndex.elements.find((element) => (
+    element.tagName === block.tagName
+    && element.startTagRange.startOffset === secondStartOffset
+  ));
+  if (!firstBlock || !secondBlock) {
+    const mapping = unresolvedTargetMapping(
+      beforeTargetRef,
+      beforeResolution,
+      tracked,
+      "orphaned",
+    );
+    mapping.splitTracked = true;
+    return mapping;
+  }
+
+  const quote = normalizeSourceText(beforeTargetRef.textQuote ?? "");
+  const beforeText = normalizeSourceText(plan?.metadata?.beforeText ?? "");
+  const firstText = normalizeSourceText(plan?.metadata?.firstText ?? "");
+  const secondText = normalizeSourceText(plan?.metadata?.secondText ?? "");
+  const inFirst = Boolean(quote) && firstText.includes(quote);
+  const inSecond = Boolean(quote) && secondText.includes(quote);
+
+  // A full-block target now names two blocks. A narrower tracked quote may
+  // follow one side only when the result is unique; repeated or crossing text
+  // remains explicitly ambiguous instead of silently following the first node.
+  if (quote && quote !== beforeText && inFirst !== inSecond) {
+    return splitTargetMapping(
+      beforeTargetRef,
+      beforeResolution,
+      nextIndex,
+      inFirst ? firstBlock : secondBlock,
+      tracked,
+    );
+  }
+  return ambiguousSplitTargetMapping(
+    beforeTargetRef,
+    beforeResolution,
+    tracked,
+  );
+}
+
+function mappedMergedSplitTrackedTarget(
+  plan,
+  nextIndex,
+  patches,
+  beforeTargetRef,
+  tracked,
+) {
+  if (
+    !tracked
+    || splitPatchDirection(plan, patches) !== "merge"
+    || !splitTrackedTargetIds(plan).has(beforeTargetRef.targetId)
+  ) return null;
+  const rawSplitOffset = Number(plan?.metadata?.rawSplitOffset);
+  const tagName = String(plan?.metadata?.tagName ?? "");
+  const candidates = nextIndex.elements.filter((element) => (
+    element.tagName === tagName
+    && Number.isInteger(rawSplitOffset)
+    && rawSplitOffset >= element.contentRange.startOffset
+    && rawSplitOffset <= element.contentRange.endOffset
+  ));
+  const nextNode = candidates.length === 1 ? candidates[0] : null;
+  const beforeResolution = {
+    resolution: beforeTargetRef.resolution,
+    target: null,
+  };
+  if (!nextNode) {
+    const mapping = unresolvedTargetMapping(
+      beforeTargetRef,
+      beforeResolution,
+      tracked,
+      "orphaned",
+    );
+    mapping.splitTracked = true;
+    return mapping;
+  }
+  return splitTargetMapping(
+    beforeTargetRef,
+    beforeResolution,
+    nextIndex,
+    nextNode,
+    tracked,
+  );
+}
+
 function unresolvedTargetMapping(
   beforeTargetRef,
   beforeResolution,
@@ -3083,6 +3264,14 @@ function mappedInsertionPointRef(
 
 function mappedTargetRef(plan, baseIndex, nextIndex, patches, targetRef, tracked) {
   const beforeTargetRef = cleanTargetRef(targetRef);
+  const mergedSplitMapping = mappedMergedSplitTrackedTarget(
+    plan,
+    nextIndex,
+    patches,
+    beforeTargetRef,
+    tracked,
+  );
+  if (mergedSplitMapping) return mergedSplitMapping;
   let beforeResolution;
   try {
     beforeResolution = resolveTargetRef(baseIndex, beforeTargetRef);
@@ -3116,6 +3305,16 @@ function mappedTargetRef(plan, baseIndex, nextIndex, patches, targetRef, tracked
       tracked,
     );
   }
+  const forwardSplitMapping = mappedForwardSplitTrackedTarget(
+    plan,
+    baseIndex,
+    nextIndex,
+    patches,
+    beforeTargetRef,
+    beforeResolution,
+    tracked,
+  );
+  if (forwardSplitMapping) return forwardSplitMapping;
   const nextNode = deterministicMappedNode(
     plan,
     baseIndex,
@@ -3222,9 +3421,13 @@ export function applyPatchPlan(plan, sourceHtml, options = {}) {
   const operationTargetIds = new Set(
     operationMappings.map((mapping) => mapping.targetId),
   );
+  const mapsOneTargetToMany = authorization.operationType === "split-text-block";
   const trackedMappings = trackedTargetRefs
     .map((targetRef) => cleanTargetRef(targetRef))
-    .filter((targetRef) => !operationTargetIds.has(targetRef.targetId))
+    .filter((targetRef) => (
+      mapsOneTargetToMany
+      || !operationTargetIds.has(targetRef.targetId)
+    ))
     .map((targetRef) => mappedTargetRef(
       plan,
       baseIndex,
@@ -3251,6 +3454,9 @@ export function applyPatchPlan(plan, sourceHtml, options = {}) {
     inverseProvenance,
     refreshedTargetRefs,
   );
+  const splitTrackedTargetIdsForInverse = trackedMappings
+    .filter((mapping) => mapping.splitTracked)
+    .map((mapping) => mapping.targetId);
   const inversePlan = {
     version: 1,
     type: `inverse:${plan.type}`,
@@ -3263,6 +3469,9 @@ export function applyPatchPlan(plan, sourceHtml, options = {}) {
       originalType: plan.type,
       operationType: authorization.operationType,
       ...plan.metadata,
+      ...(mapsOneTargetToMany
+        ? { splitTrackedTargetIds: splitTrackedTargetIdsForInverse }
+        : {}),
       ...mirroredReorderMetadata(plan, reorderMap),
       inverseProvenance,
     },

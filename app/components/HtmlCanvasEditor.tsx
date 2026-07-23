@@ -1239,18 +1239,36 @@ function uniqueSelections(
   return [...byTargetId.values()];
 }
 
+function sourcePatchOperationType(plan: SourcePatchPlan): string {
+  const metadata = plan.metadata as Record<string, unknown> | undefined;
+  const value = String(metadata?.operationType ?? plan.type ?? "");
+  return value.replace(/^(?:inverse:)+/, "");
+}
+
 function trackedSourceTargetRefs(
   targets: readonly HtmlCanvasSelection[],
   operationTargetRefs: readonly SourceTargetRef[],
+  options: {
+    includeOperationTargetIds?: boolean;
+    includeUnresolvedTargetIds?: ReadonlySet<string>;
+  } = {},
 ): SourceTargetRef[] {
   const operationTargetIds = new Set(
     operationTargetRefs.map((target) => target.targetId),
   );
   return uniqueSelections(targets).flatMap((target) => {
     if (
-      operationTargetIds.has(target.id)
-      || target.resolution === "ambiguous"
-      || target.resolution === "orphaned"
+      (
+        operationTargetIds.has(target.id)
+        && !options.includeOperationTargetIds
+      )
+      || (
+        (
+          target.resolution === "ambiguous"
+          || target.resolution === "orphaned"
+        )
+        && !options.includeUnresolvedTargetIds?.has(target.id)
+      )
     ) return [];
     return [sourceTargetRefForSelection(target)];
   });
@@ -1285,27 +1303,50 @@ function deterministicTargetUpdates(
   const originals = new Map(
     uniqueSelections(originalTargets).map((target) => [target.id, target]),
   );
-  const afterNodeIds = new Map(
-    result.targetMappings.map((mapping) => [
-      mapping.targetId,
-      mapping.afterNodeId || undefined,
-    ]),
-  );
   const refreshedTargetRefs = [
-    ...result.refreshedTargetRefs,
-    ...result.refreshedTrackedTargetRefs,
-  ] as SourceTargetRef[];
-  return refreshedTargetRefs.flatMap((targetRef: SourceTargetRef) => {
+    ...result.refreshedTargetRefs.map((targetRef: SourceTargetRef) => ({
+      targetRef,
+      tracked: false,
+    })),
+    ...result.refreshedTrackedTargetRefs.map((targetRef: SourceTargetRef) => ({
+      targetRef,
+      tracked: true,
+    })),
+  ];
+  return refreshedTargetRefs.flatMap(({ targetRef, tracked }) => {
     const original = originals.get(targetRef.targetId);
     if (!original) return [];
+    const mapping = result.targetMappings.find((candidate) => (
+      candidate.targetId === targetRef.targetId
+      && Boolean(candidate.tracked) === tracked
+    ));
     return [
       selectionFromRefreshedTarget(
         original,
         targetRef as SourceTargetRef,
-        afterNodeIds.get(targetRef.targetId),
+        mapping?.afterNodeId || undefined,
       ),
     ];
   });
+}
+
+function deterministicOperationTargetUpdate(
+  result: ReturnType<typeof applyPatchPlan>,
+  original: HtmlCanvasSelection,
+): HtmlCanvasSelection | null {
+  const targetRef = result.refreshedTargetRefs.find(
+    (candidate: SourceTargetRef) => candidate.targetId === original.id,
+  ) as SourceTargetRef | undefined;
+  if (!targetRef) return null;
+  const mapping = result.targetMappings.find((candidate) => (
+    candidate.targetId === original.id
+    && !candidate.tracked
+  ));
+  return selectionFromRefreshedTarget(
+    original,
+    targetRef,
+    mapping?.afterNodeId || undefined,
+  );
 }
 
 function selectionForElement(
@@ -2985,14 +3026,20 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
 
     try {
       const forwardPlan = planSourcePatch(command, sourceIndex) as SourcePatchPlan;
-      const originalTargets = uniqueSelections([
-        mutation.target,
+      const ambientTargets = uniqueSelections([
         ...commentedTargetsRef.current.map((entry) => entry.target),
         ...trackedTargetsRef.current,
       ]);
+      const originalTargets = uniqueSelections([
+        mutation.target,
+        ...ambientTargets,
+      ]);
+      const mapsOneTargetToMany =
+        sourcePatchOperationType(forwardPlan) === "split-text-block";
       const trackedTargetRefs = trackedSourceTargetRefs(
-        originalTargets,
+        ambientTargets,
         forwardPlan.targetRefs,
+        { includeOperationTargetIds: mapsOneTargetToMany },
       );
       const result = applyPatchPlan(
         forwardPlan,
@@ -3017,12 +3064,18 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       const targetUpdatesById = new Map(
         targetUpdates.map((target) => [target.id, target]),
       );
+      const operationTargetUpdate = deterministicOperationTargetUpdate(
+        result,
+        mutation.target,
+      );
       let appliedMutation: HtmlCanvasMutation = {
         ...mutation,
-        target: targetUpdatesById.get(mutation.target.id) || {
-          ...mutation.target,
-          resolution: "orphaned",
-        },
+        target: operationTargetUpdate
+          || targetUpdatesById.get(mutation.target.id)
+          || {
+            ...mutation.target,
+            resolution: "orphaned",
+          },
         targetUpdates,
         trackedTargetIds: [
           ...new Set([
@@ -4977,14 +5030,30 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         reportBlockedEdit(new Error("源码地图已过期，无法安全撤销。"));
         return null;
       }
-      const originalTargets = uniqueSelections([
-        mutation.target,
+      const ambientTargets = uniqueSelections([
         ...commentedTargetsRef.current.map((entry) => entry.target),
         ...trackedTargetsRef.current,
       ]);
+      const originalTargets = uniqueSelections([
+        mutation.target,
+        ...ambientTargets,
+      ]);
+      const mapsOneTargetToMany =
+        sourcePatchOperationType(plan) === "split-text-block";
+      const planMetadata = plan.metadata as Record<string, unknown> | undefined;
+      const recoverableSplitTargetIds = new Set<string>(
+        mapsOneTargetToMany
+        && Array.isArray(planMetadata?.splitTrackedTargetIds)
+          ? planMetadata.splitTrackedTargetIds.map(String)
+          : [],
+      );
       const trackedTargetRefs = trackedSourceTargetRefs(
-        originalTargets,
+        ambientTargets,
         plan.targetRefs,
+        {
+          includeOperationTargetIds: mapsOneTargetToMany,
+          includeUnresolvedTargetIds: recoverableSplitTargetIds,
+        },
       );
       const result = applyPatchPlan(
         plan,
@@ -4995,12 +5064,18 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       const targetUpdatesById = new Map(
         targetUpdates.map((target) => [target.id, target]),
       );
+      const operationTargetUpdate = deterministicOperationTargetUpdate(
+        result,
+        mutation.target,
+      );
       const appliedMutation: HtmlCanvasMutation = {
         ...mutation,
-        target: targetUpdatesById.get(mutation.target.id) || {
-          ...mutation.target,
-          resolution: "orphaned",
-        },
+        target: operationTargetUpdate
+          || targetUpdatesById.get(mutation.target.id)
+          || {
+            ...mutation.target,
+            resolution: "orphaned",
+          },
         targetUpdates,
         trackedTargetIds: [
           ...new Set([

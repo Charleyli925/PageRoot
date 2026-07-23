@@ -64,6 +64,82 @@ test("a tracked comment stays on the same unstable element after text edit and u
   assert.equal(resolvedElement(undone.sourceIndex, restored).textContent, "before");
 });
 
+test("a comment on a split block never silently follows the wrong half", () => {
+  const source = "<!doctype html><html><body><main><p id=\"copy\">前段评论后段</p></main></body></html>";
+  const index = buildSourceIndex(source);
+  const paragraph = index.elements.find((element) => element.tagName === "p");
+  assert.ok(paragraph);
+  const editTarget = createTargetRef(index, paragraph, {
+    targetId: "target_shared",
+    level: "subregion",
+  });
+  const fullBlockComment = createTargetRef(index, paragraph, {
+    targetId: "target_shared",
+    level: "subregion",
+  });
+  const narrowedComment = (targetId, textQuote) => ({
+    ...createTargetRef(index, paragraph, {
+      targetId,
+      level: "subregion",
+    }),
+    textQuote,
+  });
+  const plan = planSourcePatch({
+    type: "split-text-block",
+    targetRef: editTarget,
+    splitOffset: 4,
+    expectedSourceSha256: index.sourceSha256,
+  }, index);
+  const applied = applyPatchPlan(plan, source, {
+    trackedTargetRefs: [
+      fullBlockComment,
+      narrowedComment("target_first", "前段"),
+      narrowedComment("target_second", "后段"),
+      narrowedComment("target_crossing", "评论后"),
+    ],
+  });
+  const mappings = applied.targetMappings;
+  const mapping = (targetId, tracked = true) => mappings.find((candidate) => (
+    candidate.targetId === targetId && candidate.tracked === tracked
+  ));
+
+  assert.equal(mapping("target_shared", false).resolution, "exact");
+  assert.equal(
+    applied.sourceIndex.byNodeId.get(mapping("target_shared", false).afterNodeId).textContent,
+    "前段评论",
+  );
+  assert.equal(mapping("target_shared").resolution, "ambiguous");
+  assert.equal(mapping("target_shared").afterNodeId, null);
+  assert.equal(mapping("target_shared").afterTargetRef.sourceAnchor, undefined);
+  assert.equal(
+    applied.sourceIndex.byNodeId.get(mapping("target_first").afterNodeId).textContent,
+    "前段评论",
+  );
+  assert.equal(
+    applied.sourceIndex.byNodeId.get(mapping("target_second").afterNodeId).textContent,
+    "后段",
+  );
+  assert.equal(mapping("target_crossing").resolution, "ambiguous");
+
+  const undone = applyPatchPlan(applied.inversePlan, applied.html);
+  assert.equal(undone.html, source);
+  for (const targetId of [
+    "target_shared",
+    "target_first",
+    "target_second",
+    "target_crossing",
+  ]) {
+    const restored = undone.targetMappings.find((candidate) => (
+      candidate.targetId === targetId && candidate.tracked
+    ));
+    assert.equal(restored.resolution, "exact");
+    assert.equal(
+      undone.sourceIndex.byNodeId.get(restored.afterNodeId).textContent,
+      "前段评论后段",
+    );
+  }
+});
+
 test("a tracked comment follows its exact sibling through reorder and undo", () => {
   const source = [
     "<!doctype html><html><body><main>",
@@ -237,6 +313,10 @@ test("canvas and workbench consume deterministic mappings before generic fallbac
     "result.refreshedTrackedTargetRefs",
     "targetUpdates",
     "trackedTargetIds",
+    "const ambientTargets = uniqueSelections([",
+    "{ includeOperationTargetIds: mapsOneTargetToMany }",
+    "deterministicOperationTargetUpdate",
+    "includeUnresolvedTargetIds: recoverableSplitTargetIds",
     "const deterministicById = new Map(",
     "if (trackedTargetIds.has(target.id))",
     "rebindCanvasSelectionTargets(nextHtml, untrackedSafeTargets)",
