@@ -2266,6 +2266,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     cleanupFrameRef.current();
     pendingFrameRestoreEpochRef.current += 1;
     frameLoadGenerationRef.current += 1;
+    const nextFrameGeneration = frameLoadGenerationRef.current;
     nativeDomGenerationRef.current += 1;
     nativeHistoryDirtyRef.current = false;
     nativeEditNeedsReloadRef.current = false;
@@ -2301,10 +2302,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     renderedSourceHtmlRef.current = null;
     containerRef.current?.setAttribute("data-render-verified", "false");
     const replaceFrameElement = () => {
-      setFrameRender((current) => ({
+      setFrameRender({
         html: prepared,
-        elementGeneration: current.elementGeneration + 1,
-      }));
+        elementGeneration: nextFrameGeneration,
+      });
     };
     if (options.immediate) {
       // A History Fence must retire the browsing context itself. Chromium can
@@ -5611,9 +5612,14 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     };
   }, [clearNativeEditCheckpointTimer, discardPendingNativeCommands]);
 
-  const connectFrame = useCallback((iframe: HTMLIFrameElement) => {
-    if (iframe !== iframeRef.current) return;
-    const connectedFrameGeneration = frameLoadGenerationRef.current;
+  const connectFrame = useCallback((
+    iframe: HTMLIFrameElement,
+    connectedFrameGeneration: number,
+  ) => {
+    if (
+      iframe !== iframeRef.current
+      || connectedFrameGeneration !== frameLoadGenerationRef.current
+    ) return;
     cleanupFrameRef.current();
     const documentNode = iframe.contentDocument;
     const expectedFrameHtml = expectedFrameHtmlRef.current;
@@ -6336,6 +6342,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       <iframe
         key={frameRender.elementGeneration}
         ref={iframeRef}
+        data-frame-generation={frameRender.elementGeneration}
         className={styles.frame}
         title={
           renderedMode === "history"
@@ -6346,7 +6353,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         }
         srcDoc={frameRender.html}
         sandbox="allow-same-origin"
-        onLoad={(event) => connectFrame(event.currentTarget)}
+        onLoad={(event) => connectFrame(
+          event.currentTarget,
+          frameRender.elementGeneration,
+        )}
       />
 
       {editFeedback && !interactionLocked ? (

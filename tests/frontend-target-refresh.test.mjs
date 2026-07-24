@@ -453,7 +453,18 @@ test("ordinary patches keep the mounted iframe while source-authority fences use
   );
   assert.match(canvas, /flushSync\(replaceFrameElement\)/u);
   assert.match(canvas, /key=\{frameRender\.elementGeneration\}/u);
+  assert.match(canvas, /data-frame-generation=\{frameRender\.elementGeneration\}/u);
   assert.match(canvas, /srcDoc=\{frameRender\.html\}/u);
+  assert.match(
+    canvas,
+    /connectedFrameGeneration !== frameLoadGenerationRef\.current[\s\S]*?return/u,
+    "a late load from a retired frame must not overwrite the current render verification state",
+  );
+  assert.match(
+    canvas,
+    /connectFrame\([\s\S]*?event\.currentTarget,[\s\S]*?frameRender\.elementGeneration/u,
+    "frame load events must carry the render generation that created their iframe",
+  );
 
   assert.match(applyCommand, /previewStayedMounted = synchronizeStablePreview/u);
   assert.match(
