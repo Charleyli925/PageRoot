@@ -33,7 +33,7 @@ The workflow:
 - launches the packaged App with isolated data;
 - verifies the App bundle, Bridge resources, schemas, ad-hoc signature, DMG integrity and read-only mount;
 - creates the checksum, update manifest and `build-info.json`;
-- freezes those files with `release-candidate.json` in an artifact named for the exact Tree Hash, version and architecture.
+- freezes those files with `release-candidate.json` in an artifact named for the exact Tree Hash, version, architecture and workflow run attempt.
 
 It does not create a tag or GitHub Release. A failed build or verification therefore leaves the version namespace untouched.
 
@@ -64,7 +64,7 @@ If publication fails after the tag push but before the GitHub Release exists, re
 
 Packaging refuses committed-source drift or untracked source files. `build-info.json` records version, architecture, repository, commit SHA, Tree SHA and build time. `release-candidate.json` additionally binds the source-gate run, candidate run/attempt and SHA-256 plus size of every public asset.
 
-Publication revalidates all of that information after downloading the artifact. The Release includes both provenance files, so the published installer can be traced to the reviewed source tree and the exact successful candidate run.
+Publication resolves only the artifact whose name matches the successful run attempt, then revalidates all of that information after downloading it. This keeps a failed-job rerun distinct from bytes uploaded by an earlier attempt of the same workflow run. The Release includes both provenance files, so the published installer can be traced to the reviewed source tree and the exact successful candidate run and attempt.
 
 Current public builds use ad-hoc signing (`identity: "-"`) and are not notarized. Developer ID signing and notarization should be added before presenting the app as a frictionless production download; credentials must stay in GitHub encrypted secrets and must never enter the repository.
 

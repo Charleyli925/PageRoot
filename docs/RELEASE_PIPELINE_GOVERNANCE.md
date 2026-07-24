@@ -62,7 +62,7 @@ Do not raise global timeouts, enable blanket retries or rerun an entire green ma
 1. Merge the version/change PR after its final ready-state `release-gate` passes.
 2. Confirm `main-integrity` and `main-smoke` are green for the merge commit.
 3. Dispatch `Release Candidate` from `main`. It requires a source-gate attestation no older than 168 hours.
-4. Inspect the candidate run and its artifact. Candidate artifacts are retained for 14 days and are reusable for publication for 72 hours.
+4. Inspect the candidate run and its attempt-qualified artifact. Candidate artifacts are retained for 14 days and are reusable for publication for 72 hours. A failed-job rerun creates a distinct candidate identity and publication resolves only the successful attempt.
 5. Dispatch `Release` from `main` with the exact package version. It verifies and publishes the candidate, then creates the annotated immutable tag and GitHub Release.
 6. If publication fails after the exact tag was created but before the Release exists, rerun the same publication workflow. It may resume only when the existing annotated tag resolves to the identical commit.
 

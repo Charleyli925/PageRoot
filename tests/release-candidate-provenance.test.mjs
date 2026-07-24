@@ -22,7 +22,7 @@ const productRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "
 const commitSha = "a".repeat(40);
 const treeSha = "b".repeat(40);
 const packageVersion = "0.8.7";
-const artifactName = releaseCandidateArtifactName(treeSha, packageVersion, "arm64");
+const artifactName = releaseCandidateArtifactName(treeSha, packageVersion, "arm64", 1);
 const now = new Date("2026-07-24T12:00:00.000Z");
 
 function evidence(overrides = {}) {
@@ -50,18 +50,26 @@ function evidence(overrides = {}) {
   };
 }
 
-test("release candidate identity binds tree, version and architecture", () => {
+test("release candidate identity binds tree, version, architecture and run attempt", () => {
   assert.equal(
     artifactName,
-    `PageRoot-release-candidate-${treeSha}-${packageVersion}-arm64`,
+    `PageRoot-release-candidate-${treeSha}-${packageVersion}-arm64-attempt-1`,
+  );
+  assert.notEqual(
+    artifactName,
+    releaseCandidateArtifactName(treeSha, packageVersion, "arm64", 2),
   );
   assert.throws(
-    () => releaseCandidateArtifactName("short", packageVersion, "arm64"),
+    () => releaseCandidateArtifactName("short", packageVersion, "arm64", 1),
     /40-character Git SHA/u,
   );
   assert.throws(
-    () => releaseCandidateArtifactName(treeSha, packageVersion, "universal"),
+    () => releaseCandidateArtifactName(treeSha, packageVersion, "universal", 1),
     /architecture/u,
+  );
+  assert.throws(
+    () => releaseCandidateArtifactName(treeSha, packageVersion, "arm64", 0),
+    /positive integer/u,
   );
 });
 
@@ -86,6 +94,38 @@ test("only a fresh successful main candidate with the exact artifact is reusable
     artifactsByRunId: {
       501: [{ id: 601, name: artifactName, expired: true }],
     },
+  })).reason, "matching_candidate_artifact_missing");
+});
+
+test("a rerun resolves only the artifact created by its exact run attempt", () => {
+  const rerunArtifactName = releaseCandidateArtifactName(
+    treeSha,
+    packageVersion,
+    "arm64",
+    2,
+  );
+  const rerunResult = evaluateReleaseCandidateEvidence(evidence({
+    workflowRuns: [{
+      ...evidence().workflowRuns[0],
+      run_attempt: 2,
+    }],
+    artifactsByRunId: {
+      501: [
+        { id: 601, name: artifactName, expired: false },
+        { id: 602, name: rerunArtifactName, expired: false },
+      ],
+    },
+  }));
+  assert.equal(rerunResult.trusted, true);
+  assert.equal(rerunResult.runAttempt, 2);
+  assert.equal(rerunResult.artifactId, 602);
+  assert.equal(rerunResult.artifactName, rerunArtifactName);
+
+  assert.equal(evaluateReleaseCandidateEvidence(evidence({
+    workflowRuns: [{
+      ...evidence().workflowRuns[0],
+      run_attempt: 2,
+    }],
   })).reason, "matching_candidate_artifact_missing");
 });
 

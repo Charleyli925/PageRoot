@@ -58,12 +58,18 @@ function assertPositiveInteger(value, label) {
   return parsed;
 }
 
-export function releaseCandidateArtifactName(treeSha, packageVersion, architecture = "arm64") {
+export function releaseCandidateArtifactName(
+  treeSha,
+  packageVersion,
+  architecture,
+  runAttempt,
+) {
   return [
     "PageRoot-release-candidate",
     assertSha(treeSha, "treeSha"),
     assertVersion(packageVersion, "packageVersion"),
     assertArchitecture(architecture),
+    `attempt-${assertPositiveInteger(runAttempt, "run attempt")}`,
   ].join("-");
 }
 
@@ -220,6 +226,7 @@ async function createCandidate(options) {
     identity.treeSha,
     identity.packageVersion,
     architecture,
+    workflowRunAttempt,
   );
   const attestation = Object.freeze({
     schemaVersion: 1,
@@ -305,12 +312,17 @@ export function evaluateReleaseCandidateEvidence({
       runId: matchingRuns[0]?.id || null,
     });
   }
-  const expectedName = releaseCandidateArtifactName(
-    currentTreeSha,
-    packageVersion,
-    architecture,
-  );
   for (const run of freshRuns) {
+    const runAttempt = assertPositiveInteger(
+      run.run_attempt || 1,
+      "candidate run attempt",
+    );
+    const expectedName = releaseCandidateArtifactName(
+      currentTreeSha,
+      packageVersion,
+      architecture,
+      runAttempt,
+    );
     const artifact = (artifactsByRunId?.[String(run.id)] || []).find((candidate) => (
       candidate?.name === expectedName && candidate?.expired !== true
     ));
@@ -320,7 +332,7 @@ export function evaluateReleaseCandidateEvidence({
       trusted: true,
       reason: "matching_release_candidate",
       runId: run.id,
-      runAttempt: assertPositiveInteger(run.run_attempt || 1, "candidate run attempt"),
+      runAttempt,
       artifactId: artifact.id,
       artifactName: artifact.name,
       ageHours: Math.round(((nowMs - completedMs) / (60 * 60 * 1000)) * 100) / 100,
@@ -471,6 +483,7 @@ export async function verifyReleaseCandidateBundle({
     identity.treeSha,
     identity.packageVersion,
     normalizedArchitecture,
+    expectedRunAttempt,
   );
   const expectedTopLevel = {
     schemaVersion: 1,
