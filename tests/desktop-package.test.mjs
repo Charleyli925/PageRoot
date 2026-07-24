@@ -186,6 +186,11 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
     mainProcess,
     /process\.env\.PAGEROOT_E2E === "1"[\s\S]*?backgroundThrottling:\s*false/u,
   );
+  assert.match(
+    mainProcess,
+    /if \(e2eUserDataPath\) \{[\s\S]*?disable-background-timer-throttling[\s\S]*?disable-renderer-backgrounding[\s\S]*?disable-backgrounding-occluded-windows[\s\S]*?\}/u,
+    "hosted Electron E2E must keep startup timers and rendering active without changing production",
+  );
 
   assert.match(projectFiles, /persistHtmlFile/);
   assert.match(projectFiles, /expectedSha256/);

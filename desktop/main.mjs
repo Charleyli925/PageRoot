@@ -73,6 +73,15 @@ const e2eUserDataPath = (() => {
 const productUserDataPath = e2eUserDataPath || path.join(app.getPath("appData"), "PageRoot");
 app.setPath("userData", productUserDataPath);
 app.setName("源页");
+if (e2eUserDataPath) {
+  // Hosted macOS runners can report an Electron window as visible while the
+  // WindowServer still classifies it as background or occluded. Keep the
+  // renderer's startup timers and frame commits active for deterministic E2E
+  // hydration; production launch behavior remains unchanged.
+  app.commandLine.appendSwitch("disable-background-timer-throttling");
+  app.commandLine.appendSwitch("disable-renderer-backgrounding");
+  app.commandLine.appendSwitch("disable-backgrounding-occluded-windows");
+}
 
 const STARTUP_TIMEOUT_MS = 12_000;
 const RENDERER_CLOSE_TIMEOUT_MS = 30_000;
