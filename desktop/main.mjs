@@ -414,6 +414,12 @@ async function ensureBridgeProjectRegistered(project) {
     }),
   });
   const workspace = await response.json().catch(() => null);
+  const [workspaceSourceIdentity, projectSourceIdentity] = await Promise.all([
+    typeof workspace?.sourcePath === "string"
+      ? existingPathIdentity(workspace.sourcePath)
+      : Promise.resolve(null),
+    existingPathIdentity(project.sourcePath),
+  ]);
   if (
     !response.ok
     || !workspace
@@ -423,8 +429,7 @@ async function ensureBridgeProjectRegistered(project) {
     || !/^project_[A-Za-z0-9_-]+$/.test(workspace.projectId)
     || typeof workspace.documentId !== "string"
     || !/^doc_[A-Za-z0-9_-]+$/.test(workspace.documentId)
-    || path.resolve(String(workspace.sourcePath || ""))
-      !== path.resolve(project.sourcePath)
+    || workspaceSourceIdentity !== projectSourceIdentity
     || workspace.currentHtmlSha256 !== project.sha256
   ) {
     throw new ProjectFileError(
@@ -433,7 +438,7 @@ async function ensureBridgeProjectRegistered(project) {
       { sourcePath: project.sourcePath },
     );
   }
-  managedWelcomeRegistration = `${project.sourcePath}\0${project.sha256}`;
+  managedWelcomeRegistration = `${projectSourceIdentity}\0${project.sha256}`;
 }
 
 async function getActiveProject() {
@@ -448,6 +453,10 @@ async function getActiveProject() {
     });
     activePath = project.sourcePath;
     await activateProject(activePath);
+    // activateProject persists the canonical filesystem identity. Re-read the
+    // welcome project through that identity so the renderer and bridge start
+    // from the same source path on systems where /var maps to /private/var.
+    project = null;
   }
   try {
     project ||= await readHtmlProject(activePath);
@@ -461,8 +470,14 @@ async function getActiveProject() {
     }
     throw error;
   }
-  if (path.resolve(activePath) === path.resolve(welcomeSourcePath)) {
-    const registrationKey = `${project.sourcePath}\0${project.sha256}`;
+  const [activePathIdentity, welcomePathIdentity, projectSourceIdentity] =
+    await Promise.all([
+      existingPathIdentity(activePath),
+      existingPathIdentity(welcomeSourcePath),
+      existingPathIdentity(project.sourcePath),
+    ]);
+  if (activePathIdentity === welcomePathIdentity) {
+    const registrationKey = `${projectSourceIdentity}\0${project.sha256}`;
     if (managedWelcomeRegistration !== registrationKey) {
       await ensureBridgeProjectRegistered(project);
     }

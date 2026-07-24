@@ -284,12 +284,16 @@ test("Electron first launch registers the welcome HTML and sends its comment to 
   const welcomePath = path.join(launched.isolatedUserData, "欢迎来到源页.html");
   const workspace = path.join(launched.isolatedUserData, "workspace");
   try {
+    const canonicalWelcomePath = path.join(
+      realpathSync(launched.isolatedUserData),
+      "欢迎来到源页.html",
+    );
     await expect.poll(
       async () => (
         await launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject())
       )?.sourcePath,
       { timeout: 20_000 },
-    ).toBe(welcomePath);
+    ).toBe(canonicalWelcomePath);
     await expect(launched.page.locator('[aria-label="正在读取项目状态"]'))
       .toHaveCount(0, { timeout: 20_000 });
     await expect(launched.page.locator('[aria-label="项目读取失败"]')).toHaveCount(0);
@@ -303,7 +307,7 @@ test("Electron first launch registers the welcome HTML and sends its comment to 
     );
     const projectIds = Object.keys(registry.projects);
     expect(projectIds).toHaveLength(1);
-    expect(registry.projects[projectIds[0]].sourcePath).toBe(welcomePath);
+    expect(registry.projects[projectIds[0]].sourcePath).toBe(canonicalWelcomePath);
     expect(existsSync(
       path.join(workspace, "projects", projectIds[0], "versions", "ver_0001", "committed.json"),
     )).toBe(true);
