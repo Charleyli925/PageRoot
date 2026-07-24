@@ -25,6 +25,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   ProjectFileError,
+  ensureManagedWelcomeHtml,
+  managedWelcomeSourcePath,
   readHtmlFile,
   writeHtmlCopy,
 } from "./project-files.mjs";
@@ -128,6 +130,7 @@ let updateCheckTimer = null;
 let updateCheckPromise = null;
 let latestUpdateResult = null;
 let workspaceFailurePrompt = null;
+let managedWelcomeRegistration = null;
 
 function emptyProjectState() {
   return {
@@ -390,11 +393,64 @@ async function currentActivePath() {
   return state.activePath;
 }
 
+async function ensureBridgeProjectRegistered(project) {
+  if (!bridgePort) {
+    throw new ProjectFileError(
+      "BRIDGE_NOT_READY",
+      "欢迎页已经建立，但项目记录服务尚未就绪。",
+    );
+  }
+  const endpoint = new URL(`http://127.0.0.1:${bridgePort}/project/ensure`);
+  const response = await net.fetch(endpoint, {
+    method: "POST",
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json",
+      "X-HTML-AI-Bridge-Token": bridgeAuthToken,
+    },
+    body: JSON.stringify({
+      sourcePath: project.sourcePath,
+      expectedSourceSha256: project.sha256,
+    }),
+  });
+  const workspace = await response.json().catch(() => null);
+  if (
+    !response.ok
+    || !workspace
+    || workspace.ok !== true
+    || workspace.registered !== true
+    || typeof workspace.projectId !== "string"
+    || !/^project_[A-Za-z0-9_-]+$/.test(workspace.projectId)
+    || typeof workspace.documentId !== "string"
+    || !/^doc_[A-Za-z0-9_-]+$/.test(workspace.documentId)
+    || path.resolve(String(workspace.sourcePath || ""))
+      !== path.resolve(project.sourcePath)
+    || workspace.currentHtmlSha256 !== project.sha256
+  ) {
+    throw new ProjectFileError(
+      "WELCOME_WORKSPACE_REGISTRATION_FAILED",
+      "欢迎页已经建立，但对应的项目工作区没有通过完整性校验。",
+      { sourcePath: project.sourcePath },
+    );
+  }
+  managedWelcomeRegistration = `${project.sourcePath}\0${project.sha256}`;
+}
+
 async function getActiveProject() {
-  const activePath = await currentActivePath();
-  if (!activePath) return null;
+  const workspaceRoot = await workspacePath();
+  const welcomeSourcePath = managedWelcomeSourcePath(workspaceRoot);
+  let activePath = await currentActivePath();
+  let project;
+  if (!activePath) {
+    project = await ensureManagedWelcomeHtml({
+      workspaceRoot,
+      maxHtmlBytes: MAX_HTML_BYTES,
+    });
+    activePath = project.sourcePath;
+    await activateProject(activePath);
+  }
   try {
-    return await readHtmlProject(activePath);
+    project ||= await readHtmlProject(activePath);
   } catch (error) {
     if (error?.code === "ENOENT") {
       throw new ProjectFileError(
@@ -405,6 +461,13 @@ async function getActiveProject() {
     }
     throw error;
   }
+  if (path.resolve(activePath) === path.resolve(welcomeSourcePath)) {
+    const registrationKey = `${project.sourcePath}\0${project.sha256}`;
+    if (managedWelcomeRegistration !== registrationKey) {
+      await ensureBridgeProjectRegistered(project);
+    }
+  }
+  return project;
 }
 
 async function openHtml() {

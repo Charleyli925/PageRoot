@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
   lstat,
+  mkdir,
   open,
   readFile,
   rename,
@@ -10,6 +11,10 @@ import {
 import path from "node:path";
 
 import { PRODUCT_MAX_HTML_BYTES } from "./product-contract.mjs";
+import {
+  DEFAULT_PROJECT_HTML,
+  WELCOME_PROJECT_NAME,
+} from "./welcome-project-content.mjs";
 
 const DEFAULT_MAX_HTML_BYTES = PRODUCT_MAX_HTML_BYTES;
 const SHA256_PATTERN = /^sha256:[a-f0-9]{64}$/;
@@ -236,6 +241,70 @@ export async function readHtmlFile({
     path: resolvedPath,
     name: path.basename(resolvedPath),
     ...snapshot,
+  };
+}
+
+export function managedWelcomeSourcePath(workspaceRoot) {
+  if (
+    typeof workspaceRoot !== "string"
+    || !workspaceRoot.trim()
+    || workspaceRoot.includes("\0")
+  ) {
+    throw new TypeError("欢迎页工作区路径无效。");
+  }
+  const resolvedWorkspaceRoot = path.resolve(workspaceRoot);
+  if (resolvedWorkspaceRoot === path.parse(resolvedWorkspaceRoot).root) {
+    throw new TypeError("欢迎页工作区不能是文件系统根目录。");
+  }
+  return path.join(path.dirname(resolvedWorkspaceRoot), WELCOME_PROJECT_NAME);
+}
+
+export async function ensureManagedWelcomeHtml({
+  workspaceRoot,
+  maxHtmlBytes = DEFAULT_MAX_HTML_BYTES,
+}) {
+  const sourcePath = managedWelcomeSourcePath(workspaceRoot);
+  validateHtml(DEFAULT_PROJECT_HTML, maxHtmlBytes);
+  await mkdir(path.dirname(sourcePath), { recursive: true });
+
+  let handle;
+  let created = false;
+  try {
+    handle = await open(sourcePath, "wx", 0o600);
+  } catch (error) {
+    if (error?.code !== "EEXIST") throw error;
+  }
+  if (handle) {
+    try {
+      await handle.writeFile(DEFAULT_PROJECT_HTML, "utf8");
+      await handle.sync();
+      await handle.close();
+      handle = null;
+      await syncDirectory(path.dirname(sourcePath));
+      created = true;
+    } catch (error) {
+      await handle?.close().catch(() => {});
+      await unlink(sourcePath).catch(() => {});
+      throw error;
+    }
+  }
+
+  const project = await readHtmlFile({ sourcePath, maxHtmlBytes });
+  if (created && project.sha256 !== htmlSha256(DEFAULT_PROJECT_HTML)) {
+    throw new ProjectFileError(
+      "WELCOME_SOURCE_MISMATCH",
+      "欢迎页写入后的内容校验失败。",
+      {
+        sourcePath,
+        expectedSha256: htmlSha256(DEFAULT_PROJECT_HTML),
+        actualSha256: project.sha256,
+      },
+    );
+  }
+  return {
+    ...project,
+    created,
+    managedWelcome: true,
   };
 }
 

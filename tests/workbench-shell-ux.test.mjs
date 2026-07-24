@@ -17,16 +17,22 @@ const [
   readFile(new URL("../desktop/main.mjs", import.meta.url), "utf8"),
   readFile(new URL("../desktop/preload.mjs", import.meta.url), "utf8"),
   readFile(new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url), "utf8"),
-  readFile(new URL("../app/lib/sample-html.ts", import.meta.url), "utf8"),
+  readFile(new URL("../desktop/welcome-project-content.mjs", import.meta.url), "utf8"),
   readFile(new URL("../app/components/HtmlInteractionPreview.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/components/HtmlInteractionPreview.module.css", import.meta.url), "utf8"),
 ]);
 
-test("unbound startup opens the PageRoot introduction instead of a business sample", () => {
+test("startup welcome HTML is provisioned as a normal registered project", () => {
   assert.match(workbench, /const WELCOME_PROJECT/);
-  assert.match(workbench, /name: "欢迎来到源页\.html"/);
+  assert.match(workbench, /name: WELCOME_PROJECT_NAME/);
+  assert.match(sampleHtml, /WELCOME_PROJECT_NAME = "欢迎来到源页\.html"/);
   assert.match(workbench, /内置介绍页 · 打开本地 HTML 后开始编辑/);
   assert.doesNotMatch(workbench, /市场策略周报\.html|示例预览 · 打开本地 HTML 后自动更新/);
+  assert.match(mainProcess, /ensureManagedWelcomeHtml/);
+  assert.match(mainProcess, /ensureBridgeProjectRegistered/);
+  assert.match(mainProcess, /\/project\/ensure/);
+  assert.match(mainProcess, /workspace\.registered !== true/);
+  assert.doesNotMatch(mainProcess, /if \(!activePath\) return null/);
   assert.match(sampleHtml, /<title>源页 · PageRoot<\/title>/);
   assert.match(
     sampleHtml,
@@ -671,7 +677,7 @@ test("project panel keeps actions clear without technical paths in the header", 
   assert.match(styles, /\.project-advanced\s*\{/);
 });
 
-test("first open stays read-only until a real project action", () => {
+test("user-opened HTML stays lazily registered until a real project action", () => {
   assert.match(workbench, /BRIDGE_URL\}\/project\/ensure/);
   assert.match(
     workbench,
@@ -702,6 +708,10 @@ test("first open stays read-only until a real project action", () => {
   assert.match(
     workbench,
     /Promise\.allSettled\(\[api\.getActiveProject\(\), api\.listRecentProjects\(\)\]\)/,
+  );
+  assert.match(
+    workbench,
+    /await refreshWorkspace\(active\.sourcePath, epoch, false, epoch\);[\s\S]*?await refreshRecents\(\)/,
   );
   assert.match(workbench, /上次打开的 HTML 无法恢复/);
   assert.match(workbench, /文件可能已移动、删除或损坏/);

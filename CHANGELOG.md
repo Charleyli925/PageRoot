@@ -11,6 +11,7 @@ Notable user-visible changes are documented here. This project follows Semantic 
 - Hardened rapid switching and close recovery by rebuilding a missing autosave job from the authoritative in-memory revision and preventing a retired project's failure callback from contaminating the current project.
 - Added a non-cancelling close action to the processing panel and made closed drawer overlays stop intercepting the canvas immediately.
 - Reduced repeated release validation by binding the full PR gate to an exact Git Tree Hash, using a fast post-merge smoke, and reusing fresh matching source evidence for installer-only release verification.
+- Provision the first-run welcome page as a persistent ordinary HTML project with its own initial workspace, so edits, comments and QoderWork handoff work before users import another file.
 
 ## [0.8.5] - 2026-07-23
 

@@ -9,7 +9,7 @@ const productRoot = path.resolve(currentDirectory, "../../..");
 
 export default defineConfig({
   ...electronConfig,
-  grep: /Electron uses the authored DOM caret, Selection and beforeinput|Electron canonicalizes and persists an Apple Pinyin styled-wrapper composition/u,
+  grep: /Electron first launch registers the welcome HTML and sends its comment to Qoder|Electron uses the authored DOM caret, Selection and beforeinput|Electron canonicalizes and persists an Apple Pinyin styled-wrapper composition/u,
   outputDir: path.join(productRoot, "output/playwright/native-dom-electron-smoke/results"),
   reporter: [
     ["list"],
