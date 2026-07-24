@@ -939,7 +939,7 @@ test("an automatic update result appears above the Qoder action", async () => {
         "html-updates:status",
         {
           status: "available",
-          currentVersion: "0.8.5",
+          currentVersion: "0.8.6",
           latestVersion: "9.9.9",
           minimumMacOS: "12.0",
           architecture: "arm64",
@@ -956,8 +956,8 @@ test("an automatic update result appears above the Qoder action", async () => {
         "html-updates:status",
         {
           status: "current",
-          currentVersion: "0.8.5",
-          latestVersion: "0.8.5",
+          currentVersion: "0.8.6",
+          latestVersion: "0.8.6",
           minimumMacOS: "12.0",
           architecture: "arm64",
           publishedAt: "2026-07-23T00:00:00.000Z",
