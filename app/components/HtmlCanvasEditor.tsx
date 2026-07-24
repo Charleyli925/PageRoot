@@ -62,6 +62,7 @@ import {
   buildRuntimeDomMap,
   nativeRuntimePreflight as inspectNativeEditRuntime,
 } from "./native-edit-runtime-preflight";
+import NoticeBar from "./NoticeBar";
 import styles from "./HtmlCanvasEditor.module.css";
 
 const EDITOR_STYLE_ATTRIBUTE = "data-html-canvas-editor-style";
@@ -295,6 +296,10 @@ export type HtmlCanvasEditorProps = {
   onRequestFlush?: () => void;
   /** Handles Shift+Cmd/Ctrl+E inside the iframe using the host product's source-safe export path. */
   onRequestExport?: () => void;
+  /** Reloads the current source after the editor cannot build a safe source map. */
+  onRequestReload?: () => void;
+  /** Labels the source-map recovery action when the host must ask for the file again. */
+  reloadActionLabel?: string;
   /** Reports a fail-closed edit whose source target could not be patched safely. */
   onEditBlocked?: (message: string) => void;
   /** Optional base URL for relative assets. The injected base element is not included in serialized output. */
@@ -511,6 +516,7 @@ type EditFeedback = {
   message: string;
   tone: "warning" | "error";
   sticky: boolean;
+  recovery: "comment" | "reload";
 };
 
 type EditorHistoryEntry = {
@@ -1952,10 +1958,31 @@ function findSelectableElement(target: EventTarget | null): HTMLElement | null {
 }
 
 const MEDIA_SURFACE_SELECTOR = "iframe, audio, video, canvas, object, embed";
+const COMPOUND_VALUE_AFFIX_TAGS = new Set(["SMALL", "SUP", "SUB"]);
+
+function compoundValueSelectionRoot(element: HTMLElement): HTMLElement {
+  if (!COMPOUND_VALUE_AFFIX_TAGS.has(element.tagName)) return element;
+  const parent = element.parentElement;
+  if (!parent || parent === parent.ownerDocument.body) return element;
+  const directText = Array.from(parent.childNodes)
+    .filter((node) => node.nodeType === 3)
+    .map((node) => node.textContent ?? "")
+    .join("")
+    .trim();
+  const combinedText = (parent.textContent ?? "").replace(/\s+/g, "");
+  if (
+    !/\d/u.test(directText)
+    || combinedText.length === 0
+    || combinedText.length > 40
+    || parent.querySelector("div, section, article, header, footer, main, aside, table, ul, ol")
+  ) return element;
+  return parent;
+}
 
 function findCanvasSelectionElement(target: EventTarget | null): HTMLElement | null {
-  const element = findSelectableElement(target);
-  if (!element) return null;
+  const selected = findSelectableElement(target);
+  if (!selected) return null;
+  const element = compoundValueSelectionRoot(selected);
   const ownsMediaSurface = element.matches(MEDIA_SURFACE_SELECTOR)
     || Boolean(element.querySelector(MEDIA_SURFACE_SELECTOR));
   if (!ownsMediaSurface) return element;
@@ -1998,6 +2025,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     onReady,
     onRequestFlush,
     onRequestExport,
+    onRequestReload,
+    reloadActionLabel = "重新载入",
     onEditBlocked,
     baseHref,
     sourcePath,
@@ -2159,6 +2188,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const [commentMarkers, setCommentMarkers] = useState<CommentMarker[]>([]);
   const [, setSelectedInsertionId] = useState<string | null>(null);
   const [editFeedback, setEditFeedback] = useState<EditFeedback | null>(null);
+  const [editFeedbackPaused, setEditFeedbackPaused] = useState(false);
   const [undoDepth, setUndoDepth] = useState(0);
   const [redoDepth, setRedoDepth] = useState(0);
   const [spacingMenuOpen, setSpacingMenuOpen] = useState(false);
@@ -2209,12 +2239,16 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   }, []);
 
   useEffect(() => {
-    if (!editFeedback || editFeedback.sticky) return undefined;
+    setEditFeedbackPaused(false);
+  }, [editFeedback?.title, editFeedback?.message]);
+
+  useEffect(() => {
+    if (!editFeedback || editFeedback.sticky || editFeedbackPaused) return undefined;
     const timer = window.setTimeout(() => {
       setEditFeedback((current) => current === editFeedback ? null : current);
-    }, 8000);
+    }, 5_000);
     return () => window.clearTimeout(timer);
-  }, [editFeedback]);
+  }, [editFeedback, editFeedbackPaused]);
 
   const loadFrameSource = useCallback((
     source: string,
@@ -2232,6 +2266,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     cleanupFrameRef.current();
     pendingFrameRestoreEpochRef.current += 1;
     frameLoadGenerationRef.current += 1;
+    const nextFrameGeneration = frameLoadGenerationRef.current;
     nativeDomGenerationRef.current += 1;
     nativeHistoryDirtyRef.current = false;
     nativeEditNeedsReloadRef.current = false;
@@ -2256,6 +2291,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         message,
         tone: "error",
         sticky: true,
+        recovery: "reload",
       });
       onEditBlockedRef.current?.(message);
     }
@@ -2266,10 +2302,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     renderedSourceHtmlRef.current = null;
     containerRef.current?.setAttribute("data-render-verified", "false");
     const replaceFrameElement = () => {
-      setFrameRender((current) => ({
+      setFrameRender({
         html: prepared,
-        elementGeneration: current.elementGeneration + 1,
-      }));
+        elementGeneration: nextFrameGeneration,
+      });
     };
     if (options.immediate) {
       // A History Fence must retire the browsing context itself. Chromium can
@@ -2988,6 +3024,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       message,
       tone: "warning",
       sticky: false,
+      recovery: "comment",
     });
     onEditBlockedRef.current?.(message);
   }, []);
@@ -5575,9 +5612,14 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     };
   }, [clearNativeEditCheckpointTimer, discardPendingNativeCommands]);
 
-  const connectFrame = useCallback((iframe: HTMLIFrameElement) => {
-    if (iframe !== iframeRef.current) return;
-    const connectedFrameGeneration = frameLoadGenerationRef.current;
+  const connectFrame = useCallback((
+    iframe: HTMLIFrameElement,
+    connectedFrameGeneration: number,
+  ) => {
+    if (
+      iframe !== iframeRef.current
+      || connectedFrameGeneration !== frameLoadGenerationRef.current
+    ) return;
     cleanupFrameRef.current();
     const documentNode = iframe.contentDocument;
     const expectedFrameHtml = expectedFrameHtmlRef.current;
@@ -5989,6 +6031,50 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     updateOverlayPosition,
   ]);
 
+  useEffect(() => {
+    const iframe = iframeRef.current;
+    if (!iframe) return;
+    const connectedFrameGeneration = frameRender.elementGeneration;
+    let animationFrame = 0;
+    let attempts = 0;
+    const connectParsedFrame = () => {
+      if (
+        iframe !== iframeRef.current
+        || connectedFrameGeneration !== frameLoadGenerationRef.current
+      ) return;
+      const documentNode = iframe.contentDocument;
+      const expectedFrameHtml = expectedFrameHtmlRef.current;
+      const expectedToken = expectedFrameTokenRef.current;
+      const marker = documentNode?.head.querySelector<HTMLMetaElement>(
+        `meta[${FRAME_VERIFICATION_ATTRIBUTE}]`,
+      );
+      if (
+        documentNode?.documentElement
+        && expectedFrameHtml
+        && expectedToken
+        && iframe.srcdoc === expectedFrameHtml
+        && marker?.getAttribute(FRAME_VERIFICATION_ATTRIBUTE) === expectedToken
+        && marker.getAttribute("content") === expectedToken
+      ) {
+        // DOM parsing is sufficient to validate and connect the inert preview.
+        // Slow images, fonts, or stylesheets may delay the iframe load event;
+        // the body ResizeObserver keeps layout chrome current as they settle.
+        connectFrame(iframe, connectedFrameGeneration);
+        return;
+      }
+      attempts += 1;
+      if (attempts < 120) {
+        animationFrame = requestAnimationFrame(connectParsedFrame);
+      }
+    };
+    animationFrame = requestAnimationFrame(connectParsedFrame);
+    return () => cancelAnimationFrame(animationFrame);
+  }, [
+    connectFrame,
+    frameRender.elementGeneration,
+    frameRender.html,
+  ]);
+
   const applyInlineStyle = useCallback(
     (
       property: EditableStyleProperty,
@@ -6268,6 +6354,24 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     ? nativeEditHostForElement(selectedElementRef.current, sourceIndexRef.current)
     : null;
   const textFormatRequiresSelection = isEditing && !hasTextRange;
+  const handleEditFeedbackAction = useCallback(() => {
+    const recovery = editFeedback?.recovery;
+    setEditFeedback(null);
+    setEditFeedbackPaused(false);
+    if (recovery === "reload") {
+      onRequestReload?.();
+      return;
+    }
+    const target = selectedSourceSelectionRef.current;
+    if (target) {
+      onRequestCommentRef.current?.(target);
+    } else {
+      requestGlobalComment();
+    }
+  }, [editFeedback?.recovery, onRequestReload, requestGlobalComment]);
+  const editFeedbackActionAvailable = editFeedback?.recovery === "reload"
+    ? Boolean(onRequestReload)
+    : Boolean(onRequestComment);
 
   return (
     <div
@@ -6282,6 +6386,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       <iframe
         key={frameRender.elementGeneration}
         ref={iframeRef}
+        data-frame-generation={frameRender.elementGeneration}
         className={styles.frame}
         title={
           renderedMode === "history"
@@ -6292,26 +6397,24 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         }
         srcDoc={frameRender.html}
         sandbox="allow-same-origin"
-        onLoad={(event) => connectFrame(event.currentTarget)}
+        onLoad={(event) => connectFrame(
+          event.currentTarget,
+          frameRender.elementGeneration,
+        )}
       />
 
       {editFeedback && !interactionLocked ? (
-        <section
-          className={styles.editBlockedNotice}
-          data-tone={editFeedback.tone}
-          role={editFeedback.tone === "error" ? "alert" : "status"}
-          aria-live={editFeedback.tone === "error" ? "assertive" : "polite"}
-        >
-          <div>
-            <strong>{editFeedback.title}</strong>
-            <span>{editFeedback.message}</span>
-          </div>
-          <button
-            type="button"
-            onClick={() => setEditFeedback(null)}
-            aria-label="关闭修改提示"
-          >关闭</button>
-        </section>
+        <NoticeBar
+          placement="canvas"
+          title={editFeedback.title}
+          message={editFeedback.message}
+          tone={editFeedback.tone}
+          actionLabel={editFeedback.recovery === "reload" ? reloadActionLabel : "添加评论"}
+          onAction={editFeedbackActionAvailable ? handleEditFeedbackAction : undefined}
+          onDismiss={() => setEditFeedback(null)}
+          onPauseChange={setEditFeedbackPaused}
+          dismissLabel="关闭修改提示"
+        />
       ) : null}
 
       {interactionLocked ? (

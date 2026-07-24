@@ -5,6 +5,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  realpath,
   rm,
   writeFile,
 } from "node:fs/promises";
@@ -1045,7 +1046,9 @@ test(
   "a real Bridge run emits a fully schema-valid and semantically aligned lifecycle bundle",
   { timeout: 30_000 },
   async (t) => {
-    const root = await mkdtemp(join(tmpdir(), "html-ai-schema-export-"));
+    const root = await realpath(
+      await mkdtemp(join(tmpdir(), "html-ai-schema-export-")),
+    );
     const workspace = join(root, "workspace");
     const sources = join(root, "sources");
     await mkdir(workspace);

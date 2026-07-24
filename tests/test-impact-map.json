@@ -41,6 +41,10 @@
       "description": "Run package manifest and packaged-artifact verifier contracts.",
       "prerequisites": []
     },
+    "node-smoke": {
+      "description": "Run a fixed fast cross-section of source patch, scope and product-contract Node tests.",
+      "prerequisites": []
+    },
     "node-full": {
       "description": "Run every top-level Node test exactly once.",
       "prerequisites": ["build-web"]
@@ -117,6 +121,13 @@
       ],
       "alwaysForCode": ["typecheck", "lint"]
     },
+    "main": {
+      "description": "Fast post-merge smoke after the PR source-gate provenance has matched the exact main tree.",
+      "fullSuites": [
+        "node-smoke",
+        "browser-smoke"
+      ]
+    },
     "release": {
       "description": "Fully automated pre-package release gate against one source state.",
       "fullSuites": [
@@ -145,6 +156,14 @@
         "packaged-runtime",
         "packaged-verify"
       ]
+    },
+    "artifact-only": {
+      "description": "Build and verify the installer only after CI has authenticated a fresh source gate for the exact tree.",
+      "fullSuites": [
+        "package-build",
+        "packaged-runtime",
+        "packaged-verify"
+      ]
     }
   },
   "rules": [
@@ -157,6 +176,16 @@
       ],
       "suites": [],
       "nodeTests": ["tests/test-gate-selection.test.mjs"]
+    },
+    {
+      "id": "source-gate-provenance",
+      "patterns": [
+        "^scripts/source-gate-provenance\\.mjs$",
+        "^tests/source-gate-provenance\\.test\\.mjs$",
+        "^\\.github/workflows/(?:ci|release)\\.yml$"
+      ],
+      "suites": [],
+      "nodeTests": ["tests/source-gate-provenance.test.mjs"]
     },
     {
       "id": "task-workflow",
@@ -296,13 +325,14 @@
     {
       "id": "packaging",
       "patterns": [
-        "^(?:package(?:-lock)?\\.json|desktop/after-pack\\.mjs|desktop/resources/.*|scripts/(?:build-package|create-release-assets|release-provenance|verify-packaged-artifact)\\.mjs)$"
+        "^(?:package(?:-lock)?\\.json|desktop/after-pack\\.mjs|desktop/resources/.*|scripts/(?:build-package|create-release-assets|release-provenance|source-gate-provenance|verify-packaged-artifact)\\.mjs)$"
       ],
       "suites": [],
       "nodeTests": [
         "tests/desktop-package.test.mjs",
         "tests/packaged-artifact-gate.test.mjs",
-        "tests/release-provenance.test.mjs"
+        "tests/release-provenance.test.mjs",
+        "tests/source-gate-provenance.test.mjs"
       ]
     },
     {

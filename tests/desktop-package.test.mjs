@@ -48,7 +48,7 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.equal(packageJson.name, "pageroot");
   assert.match(packageJson.description, /源页（PageRoot）— Edit visually\. Stay in source\./);
   assert.equal(packageJson.build.appId, "com.htmlai.workbench");
-  assert.equal(packageJson.version, "0.8.5");
+  assert.equal(packageJson.version, "0.8.6");
   assert.equal(packageJson.build.productName, "PageRoot");
   assert.equal(packageJson.build.artifactName, "PageRoot-${version}-${arch}.${ext}");
   assert.equal(packageJson.build.mac.identity, "-");
@@ -56,12 +56,14 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.ok(packageJson.build.files.includes("!node_modules/**/*"));
   assert.ok(packageJson.build.files.includes("desktop/preload.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/project-files.mjs"));
+  assert.ok(packageJson.build.files.includes("desktop/welcome-project-content.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/export-copy.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/bridge-shutdown.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/close-recovery.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/product-contract.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/qoder-handoff.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/manual-update.mjs"));
+  assert.ok(packageJson.build.files.includes("public/brand-logo.png"));
   assert.equal(
     packageJson.build.mac.extendInfo?.NSAppleEventsUsageDescription,
     undefined,
@@ -118,9 +120,14 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.match(mainProcess, /PROJECT_CHANNELS\.readHtml/);
   assert.match(mainProcess, /PROJECT_CHANNELS\.showInFolder/);
   assert.match(mainProcess, /PROJECT_CHANNELS\.revealRequestFolder/);
+  assert.match(mainProcess, /PROJECT_CHANNELS\.forgetRecent/);
   assert.match(mainProcess, /INTEGRATION_CHANNELS\.qoderHandoff/);
   assert.match(mainProcess, /UPDATE_CHANNELS\.getStatus/);
-  assert.match(mainProcess, /UPDATE_CHANNELS\.openRepository/);
+  assert.match(mainProcess, /UPDATE_CHANNELS\.openLatestRelease/);
+  assert.match(
+    mainProcess,
+    /shell\.openExternal\(LATEST_RELEASE_PAGE_URL\)/,
+  );
   assert.match(mainProcess, /scheduleAutomaticUpdateCheck\(\)/);
   assert.match(mainProcess, /net\.fetch/);
   assert.match(mainProcess, /app\.getVersion\(\)/);
@@ -147,6 +154,17 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.match(mainProcess, /APP_CHANNELS\.prepareClose/);
   assert.match(mainProcess, /APP_CHANNELS\.closeResult/);
   assert.match(mainProcess, /APP_CHANNELS\.closeAborted/);
+  assert.match(mainProcess, /APP_CHANNELS\.workspaceUnavailable/);
+  assert.match(mainProcess, /APP_CHANNELS\.relaunch/);
+  assert.match(mainProcess, /coordinateApplicationRelaunch/);
+  assert.match(
+    mainProcess,
+    /buttons:\s*\["返回源页处理",\s*"重新打开源页"\]/,
+  );
+  assert.match(
+    mainProcess,
+    /webContents\.send\(APP_CHANNELS\.workspaceUnavailable,\s*issue\)/,
+  );
   assert.match(mainProcess, /requestRendererClose/);
   assert.match(mainProcess, /if \(!rendererHasLoaded\)/);
   assert.match(mainProcess, /coordinateApplicationExit/);
@@ -164,6 +182,16 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.match(mainProcess, /nodeIntegration:\s*false/);
   assert.match(mainProcess, /sandbox:\s*true/);
   assert.match(mainProcess, /webSecurity:\s*true/);
+  assert.match(mainProcess, /show:\s*process\.env\.PAGEROOT_E2E === "1"/u);
+  assert.match(
+    mainProcess,
+    /process\.env\.PAGEROOT_E2E === "1"[\s\S]*?backgroundThrottling:\s*false/u,
+  );
+  assert.match(
+    mainProcess,
+    /if \(e2eUserDataPath\) \{[\s\S]*?disable-background-timer-throttling[\s\S]*?disable-renderer-backgrounding[\s\S]*?disable-backgrounding-occluded-windows[\s\S]*?\}/u,
+    "hosted Electron E2E must keep startup timers and rendering active without changing production",
+  );
 
   assert.match(projectFiles, /persistHtmlFile/);
   assert.match(projectFiles, /expectedSha256/);
@@ -206,6 +234,9 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.match(preload, /reportReady/);
   assert.match(preload, /reportBlocked/);
   assert.match(preload, /onCloseAborted/);
+  assert.match(preload, /onWorkspaceUnavailable/);
+  assert.match(preload, /relaunch:\s*\(\) => ipcRenderer\.invoke\(appChannels\.relaunch\)/);
+  assert.match(preload, /forgetRecent:\s*\(sourcePath\)/);
   assert.doesNotMatch(preload, /saveHtml|saveHtmlAs/);
   assert.doesNotMatch(preload, /exposeInMainWorld\([^)]*ipcRenderer/s);
 

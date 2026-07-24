@@ -319,7 +319,13 @@ test("canvas and workbench consume deterministic mappings before generic fallbac
     "includeUnresolvedTargetIds: recoverableSplitTargetIds",
     "const deterministicById = new Map(",
     "if (trackedTargetIds.has(target.id))",
-    "rebindCanvasSelectionTargets(nextHtml, untrackedSafeTargets)",
+    "rebindTargetsPreservingGlobal(nextHtml, untrackedSafeTargets)",
+    "isGlobalPageTarget(target)",
+    "exactGlobalPageTarget(target)",
+    "!isGlobalPageTarget(target) && canLocateTarget(target)",
+    ": canLocateTarget(target)",
+    "independentCommentTarget(draftTarget, commentId)",
+    "relinkSelectionArmedRef.current",
   ]) {
     assert.match(
       `${canvas}\n${workbench}`,
@@ -447,7 +453,23 @@ test("ordinary patches keep the mounted iframe while source-authority fences use
   );
   assert.match(canvas, /flushSync\(replaceFrameElement\)/u);
   assert.match(canvas, /key=\{frameRender\.elementGeneration\}/u);
+  assert.match(canvas, /data-frame-generation=\{frameRender\.elementGeneration\}/u);
   assert.match(canvas, /srcDoc=\{frameRender\.html\}/u);
+  assert.match(
+    canvas,
+    /connectedFrameGeneration !== frameLoadGenerationRef\.current[\s\S]*?return/u,
+    "a late load from a retired frame must not overwrite the current render verification state",
+  );
+  assert.match(
+    canvas,
+    /connectFrame\([\s\S]*?event\.currentTarget,[\s\S]*?frameRender\.elementGeneration/u,
+    "frame load events must carry the render generation that created their iframe",
+  );
+  assert.match(
+    canvas,
+    /const connectParsedFrame = \(\) => \{[\s\S]*?connectedFrameGeneration !== frameLoadGenerationRef\.current[\s\S]*?iframe\.srcdoc === expectedFrameHtml[\s\S]*?marker\.getAttribute\("content"\) === expectedToken[\s\S]*?connectFrame\(iframe, connectedFrameGeneration\)/u,
+    "a verified parsed frame must connect without waiting for load-blocking page resources",
+  );
 
   assert.match(applyCommand, /previewStayedMounted = synchronizeStablePreview/u);
   assert.match(

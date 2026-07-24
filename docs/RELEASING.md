@@ -17,12 +17,21 @@ Create and push an annotated immutable tag:
 git switch main
 git pull --ff-only
 git status --short
-VERSION=0.8.5
+VERSION=0.8.6
 git tag -a "v${VERSION}" -m "PageRoot ${VERSION}"
 git push origin "v${VERSION}"
 ```
 
-The GitHub `Release` workflow verifies that the tag matches `package.json`, runs the complete source and packaged-artifact gate on an Apple-silicon macOS runner, and publishes the DMG, checksum, update manifest and build provenance. `electron-builder` is forced to `--publish never`; only the final workflow step may publish assets after verification.
+The required PR gate records the tested merge Tree Hash, package version, PR head and successful workflow run in a retained source-gate attestation. On a tag, the GitHub `Release` workflow verifies:
+
+1. the tag matches `package.json` and the lockfile root version;
+2. the tag commit is the merged `main` commit associated with that PR;
+3. the successful PR run and its attestation match the exact tag Tree Hash and version;
+4. the source evidence is no more than seven days old.
+
+When all four checks match, the workflow builds the Electron renderer once, packages the App, launches the packaged runtime, verifies app contents/signature and mounts and verifies the DMG. It does not repeat the already-proven full Node, Chromium and Electron source suites. If evidence is missing, stale, mismatched or temporarily unavailable, the workflow automatically runs the complete `release:mac` source-and-artifact gate before publication.
+
+`electron-builder` is forced to `--publish never`; only the final workflow step may publish the DMG, checksum, update manifest and build provenance after verification.
 
 Do not move or reuse a published tag. Do not replace assets silently. If a released build is wrong, fix the source and publish a new patch version.
 

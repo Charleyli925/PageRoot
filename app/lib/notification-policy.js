@@ -16,6 +16,7 @@ const BLOCKING_WARNING_KEYS = new Set([
   "browser-file-error",
   "navigation-commit-blocked",
   "preview-commit-blocked",
+  "project-rules-unsaved",
   "project-switch-commit-blocked",
   "project-switch-persist-blocked",
   "submit-blocked",
@@ -38,7 +39,7 @@ export function noticeTone(value) {
 export function noticeAutoDismissMs(notice) {
   if (!notice) return null;
   const tone = noticeTone(notice.tone);
-  if (notice.sticky || tone === "error") return null;
+  if (notice.sticky || notice.action || tone === "error") return null;
   if (tone === "warning") return 5_000;
   return 2_500;
 }
@@ -81,9 +82,19 @@ export function shouldReplaceNotice(current, next) {
   }
   const currentTone = noticeTone(current.tone);
   const nextTone = noticeTone(next.tone);
+  const nextNeedsDecision = Boolean(
+    next.sticky
+    || next.action
+    || nextTone === "error"
+    || (
+      nextTone === "warning"
+      && BLOCKING_WARNING_KEYS.has(String(next.dedupeKey || ""))
+    ),
+  );
   if (
     (current.sticky || currentTone === "error")
     && NOTICE_PRIORITIES[nextTone] < NOTICE_PRIORITIES[currentTone]
+    && !nextNeedsDecision
   ) {
     return false;
   }

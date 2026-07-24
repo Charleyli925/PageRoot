@@ -22,6 +22,11 @@ type PrepareCloseDetail = PrepareCloseRequest & {
   waitUntil: (readiness: Promise<CloseReadiness>) => void;
 };
 
+type WorkspaceUnavailable = {
+  title: string;
+  message: string;
+};
+
 declare global {
   interface Window {
     htmlAIAppLifecycle?: {
@@ -34,6 +39,10 @@ declare global {
       onCloseAborted: (
         listener: (request: CloseAbortedRequest) => void,
       ) => () => void;
+      onWorkspaceUnavailable: (
+        listener: (issue: WorkspaceUnavailable) => void,
+      ) => () => void;
+      relaunch: () => Promise<{ relaunched: boolean }>;
     };
   }
 }

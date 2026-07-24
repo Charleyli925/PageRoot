@@ -403,6 +403,19 @@ test("refresh and project-switch awaiters always settle when replayed or discard
     refresh,
     /authority: "system",[\s\S]*?onDiscard: \(\) => resolveDeferred\?\.\(\)/u,
   );
+  assertOrdered(
+    refresh,
+    [
+      "if (!fromDeferred && sourceTransitionToken === undefined)",
+      "deferEditorCommand(",
+    ],
+    "an authorized project hydration must bypass a stale native-edit queue",
+  );
+  assert.match(
+    refresh,
+    /finally \{[\s\S]*?hydrationSourceTransitionAuthorized[\s\S]*?epoch === projectEpochRef\.current[\s\S]*?sameLocalSourcePath\(sourcePathRef\.current, activeSource\)[\s\S]*?setProjectHydrating\(false\)/u,
+    "the current hydration owner must release its lock on every exit path",
+  );
   assert.match(
     refresh,
     /const replay = deferredEditorReplayRef\.current\.refreshWorkspace;[\s\S]*?if \(!replay\) \{[\s\S]*?resolveDeferred\?\.\(\);[\s\S]*?return;[\s\S]*?replay\(/u,

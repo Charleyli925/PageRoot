@@ -7,13 +7,15 @@ import {
   mkdtemp,
   readFile,
   readdir,
+  realpath,
   rename,
   rm,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
@@ -24,6 +26,7 @@ import {
   injectManagedMeta,
   recordUserSupplement,
 } from "../scripts/lifecycle-core.mjs";
+import { ensureManagedWelcomeHtml } from "../desktop/project-files.mjs";
 import { buildSourceIndex } from "../scripts/source-index.mjs";
 import {
   createTargetRef,
@@ -177,7 +180,9 @@ async function startBridge(workspace, extraEnvironment = {}) {
 }
 
 async function createEnvironment(t) {
-  const root = await mkdtemp(join(tmpdir(), "html-ai-lifecycle-v3-"));
+  const root = await realpath(
+    await mkdtemp(join(tmpdir(), "html-ai-lifecycle-v3-")),
+  );
   const workspace = join(root, "workspace");
   const sources = join(root, "sources");
   await mkdir(workspace);
@@ -220,7 +225,9 @@ async function openWorkspace(baseUrl, sourcePath) {
 }
 
 test("fresh launch and read-only preview do not create PageRoot storage", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "html-ai-lazy-workspace-"));
+  const root = await realpath(
+    await mkdtemp(join(tmpdir(), "html-ai-lazy-workspace-")),
+  );
   const workspace = join(root, "PageRoot", "项目记录");
   const sources = join(root, "sources");
   await mkdir(sources);
@@ -245,6 +252,36 @@ test("fresh launch and read-only preview do not create PageRoot storage", async 
   assert.equal(ensured.response.status, 200, JSON.stringify(ensured.body));
   assert.equal(ensured.body.registered, true);
   await access(join(workspace, "projects"));
+  await access(join(workspace, "project-registry.json"));
+});
+
+test("managed welcome HTML registers the same workspace and V1 lifecycle as any opened HTML", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "pageroot-welcome-workspace-"));
+  const workspace = join(root, "PageRoot", "项目记录");
+  const welcome = await ensureManagedWelcomeHtml({ workspaceRoot: workspace });
+  const bridge = await startBridge(workspace);
+  t.after(async () => {
+    await stopChild(bridge.child);
+    await rm(root, { recursive: true, force: true });
+  });
+
+  await assert.rejects(access(workspace));
+  const preview = await previewWorkspace(bridge.baseUrl, welcome.sourcePath);
+  assert.equal(preview.response.status, 200, JSON.stringify(preview.body));
+  assert.equal(preview.body.registered, false);
+
+  const ensured = await postJson(bridge.baseUrl, "/project/ensure", {
+    sourcePath: welcome.sourcePath,
+    expectedSourceSha256: welcome.sha256,
+  });
+  const canonicalWelcomePath = await realpath(welcome.sourcePath);
+  assert.equal(ensured.response.status, 200, JSON.stringify(ensured.body));
+  assert.equal(ensured.body.registered, true);
+  assert.equal(ensured.body.sourcePath, canonicalWelcomePath);
+  assert.equal(ensured.body.currentHtmlSha256, welcome.sha256);
+  assert.equal(ensured.body.versions.length, 1);
+  assert.equal(ensured.body.versions[0].versionId, "ver_0001");
+  await access(join(workspace, "projects", ensured.body.projectId));
   await access(join(workspace, "project-registry.json"));
 });
 
@@ -1432,7 +1469,7 @@ test("sequential AI successes preserve every prior source and activate semantic 
   const environment = await createEnvironment(t);
   const originalPath = join(environment.sources, "复杂HTML综合测试页.html");
   await writeFile(originalPath, htmlPage("不可覆盖的原文件"), "utf8");
-  const bridge = await environment.start();
+  let bridge = await environment.start();
   const opened = (await openWorkspace(bridge.baseUrl, originalPath)).body;
   const originalBytes = await readFile(originalPath);
   const originalSha256 = hash(originalBytes);
@@ -1477,13 +1514,30 @@ test("sequential AI successes preserve every prior source and activate semantic 
   const firstCreated = await activateReadyVersion(bridge.baseUrl, firstReady);
   assert.equal(firstCreated.currentPath, firstReady.workingCopyPath);
 
+  const workingAliasRoot = join(environment.root, "working-directory-alias");
+  await symlink(dirname(firstCreated.currentPath), workingAliasRoot, "dir");
+  const aliasedFirstWorkingPath = join(
+    workingAliasRoot,
+    basename(firstCreated.currentPath),
+  );
+  const canonicalFirstWorkingPath = join(
+    await realpath(dirname(firstCreated.currentPath)),
+    basename(firstCreated.currentPath),
+  );
+  const openedThroughAlias = (
+    await openWorkspace(bridge.baseUrl, aliasedFirstWorkingPath)
+  ).body;
+  assert.equal(openedThroughAlias.projectId, opened.projectId);
+  assert.equal(openedThroughAlias.documentId, opened.documentId);
+  assert.equal(openedThroughAlias.sourcePath, canonicalFirstWorkingPath);
+
   const afterFirst = (await openWorkspace(bridge.baseUrl, originalPath)).body;
   assert.equal(afterFirst.sourcePath, firstCreated.currentPath);
   const secondRun = (
     await postJson(bridge.baseUrl, "/request", {
-      // The renderer may still hold the originally selected path. Registry
-      // aliases must route it to the active V1.1 working copy.
-      sourcePath: originalPath,
+      // Desktop state may spell the same workspace directory through a
+      // symlink alias such as /private/var instead of /var.
+      sourcePath: aliasedFirstWorkingPath,
       expectedSourceSha256: afterFirst.currentHtmlSha256,
       freezeCutoffRevision: afterFirst.runtimeState.editRevision,
       summary: "生成第二个非覆盖 AI 版本",
@@ -1534,6 +1588,14 @@ test("sequential AI successes preserve every prior source and activate semantic 
   const projectSources = Object.values(registry.sources).filter(
     (record) => record.projectId === opened.projectId,
   );
+  assert.equal(
+    projectSources.filter((record) => record.role === "current").length,
+    1,
+  );
+  assert.equal(
+    projectSources.find((record) => record.role === "current")?.sourcePath,
+    secondCreated.currentPath,
+  );
   assert.ok(
     projectSources.some(
       (record) =>
@@ -1548,6 +1610,14 @@ test("sequential AI successes preserve every prior source and activate semantic 
         && record.canonicalSourcePath === secondCreated.currentPath,
     ),
   );
+
+  await stopChild(bridge.child);
+  bridge = await environment.start();
+  const afterRestart = (await openWorkspace(bridge.baseUrl, originalPath)).body;
+  assert.equal(afterRestart.projectId, opened.projectId);
+  assert.equal(afterRestart.documentId, opened.documentId);
+  assert.equal(afterRestart.sourcePath, secondCreated.currentPath);
+  assert.equal(afterRestart.currentHtmlSha256, secondCreated.contentSha256);
 
   const afterSecond = (await openWorkspace(bridge.baseUrl, originalPath)).body;
   const noChangeRun = (
@@ -3683,6 +3753,11 @@ test("version list returns hash-validated comments, local edits, and AI dialogue
       changeEvents: [directEdit],
     })
   ).body;
+  const frozenChangeRequest = JSON.parse(
+    await readFile(join(run.requestPath, "change-request.json"), "utf8"),
+  );
+  const [frozenInstruction] = frozenChangeRequest.requirements.instructions;
+  assert.match(frozenInstruction.instructionId, /^instruction_/u);
   await recordUserSupplement({
     workspaceRoot: environment.workspace,
     projectId: run.projectId,
@@ -3691,7 +3766,7 @@ test("version list returns hash-validated comments, local edits, and AI dialogue
     payload: {
       idempotencyKey: "history-chat-supplement-001",
       action: "add",
-      refersTo: [],
+      refersTo: [frozenInstruction.instructionId],
       userText: "内部 AI 对话里又补充：结论区保持简洁，并参考刚发的图片留白。",
       targetDescription: "结论区",
       evidenceState: "description-only",
@@ -3896,4 +3971,19 @@ test("output PROJECT.md is rejected as a protocol violation", async (t) => {
   );
   assert.equal(archived.status, "failed");
   assert.equal(archived.error.code, "OUTPUT_PROTOCOL_VIOLATION");
+  const reconciledCancel = await postJson(
+    bridge.baseUrl,
+    "/active-run/cancel",
+    {
+      sourcePath,
+      requestId: run.requestId,
+      attemptId: run.attemptId,
+    },
+  );
+  assert.equal(reconciledCancel.response.status, 200);
+  assert.equal(reconciledCancel.body.status, "already-inactive");
+  assert.equal(reconciledCancel.body.terminalStatus, "failed");
+  const workspace = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+  assert.equal(workspace.runtimeState.lifecycleState, "editing");
+  assert.equal(workspace.runtimeState.activeRun, null);
 });

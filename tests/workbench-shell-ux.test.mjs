@@ -17,16 +17,27 @@ const [
   readFile(new URL("../desktop/main.mjs", import.meta.url), "utf8"),
   readFile(new URL("../desktop/preload.mjs", import.meta.url), "utf8"),
   readFile(new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url), "utf8"),
-  readFile(new URL("../app/lib/sample-html.ts", import.meta.url), "utf8"),
+  readFile(new URL("../desktop/welcome-project-content.mjs", import.meta.url), "utf8"),
   readFile(new URL("../app/components/HtmlInteractionPreview.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/components/HtmlInteractionPreview.module.css", import.meta.url), "utf8"),
 ]);
 
-test("unbound startup opens the PageRoot introduction instead of a business sample", () => {
+test("startup welcome HTML is provisioned as a normal registered project", () => {
   assert.match(workbench, /const WELCOME_PROJECT/);
-  assert.match(workbench, /name: "欢迎来到源页\.html"/);
+  assert.match(workbench, /name: WELCOME_PROJECT_NAME/);
+  assert.match(sampleHtml, /WELCOME_PROJECT_NAME = "欢迎来到源页\.html"/);
   assert.match(workbench, /内置介绍页 · 打开本地 HTML 后开始编辑/);
   assert.doesNotMatch(workbench, /市场策略周报\.html|示例预览 · 打开本地 HTML 后自动更新/);
+  assert.match(mainProcess, /ensureManagedWelcomeHtml/);
+  assert.match(mainProcess, /ensureBridgeProjectRegistered/);
+  assert.match(mainProcess, /\/project\/ensure/);
+  assert.match(mainProcess, /workspace\.registered !== true/);
+  assert.match(workbench, /data-project-state=\{/);
+  assert.match(
+    workbench,
+    /projectHydrating[\s\S]*?"hydrating"[\s\S]*?sourcePath[\s\S]*?"ready"/,
+  );
+  assert.doesNotMatch(mainProcess, /if \(!activePath\) return null/);
   assert.match(sampleHtml, /<title>源页 · PageRoot<\/title>/);
   assert.match(
     sampleHtml,
@@ -38,8 +49,40 @@ test("unbound startup opens the PageRoot introduction instead of a business samp
   assert.match(sampleHtml, /完整的安全校验/);
   assert.match(sampleHtml, /真实 HTML 是唯一事实源/);
   assert.match(sampleHtml, /发送、校验，再打开最新版/);
-  assert.match(sampleHtml, /从顶部「项目」打开 HTML/);
+  assert.match(
+    sampleHtml,
+    /WELCOME_LOGO_RELATIVE_PATH = "brand-logo\.png"/,
+  );
+  assert.match(
+    sampleHtml,
+    /src="\.\/\$\{WELCOME_LOGO_RELATIVE_PATH\}"/,
+  );
+  assert.match(sampleHtml, /它是源页建立的本地 HTML/);
+  assert.match(sampleHtml, /修改会自动保存到「欢迎来到源页\.html」/);
+  assert.match(sampleHtml, /从顶部「项目」打开其他 HTML/);
+  assert.doesNotMatch(sampleHtml, /尚未绑定本地文件/);
   assert.doesNotMatch(sampleHtml, /利率拐点前的仓位选择|美国 10 年期|市场策略周报/);
+});
+
+test("presentational cleanup cannot strand an authorized project hydration", () => {
+  const applyProjectFlow = workbench.slice(
+    workbench.indexOf("const applyProject"),
+    workbench.indexOf("const refreshRecents"),
+  );
+  assert.match(applyProjectFlow, /markProjectHydrationStage\("apply-start"\)/);
+  assert.match(
+    applyProjectFlow,
+    /URL\.revokeObjectURL\(url\);[\s\S]*?catch \{[\s\S]*?must not block the next project's authority/u,
+  );
+  assert.match(
+    applyProjectFlow,
+    /typeof reviewStage\.scrollTo === "function"[\s\S]*?reviewStage\.scrollTo\(\{ top: 0 \}\);[\s\S]*?catch/u,
+  );
+  assert.match(
+    applyProjectFlow,
+    /editorRef\.current\?\.unlockNow\?\.\(\);[\s\S]*?catch[\s\S]*?editorRef\.current\?\.clearSelection\(\);[\s\S]*?catch/u,
+  );
+  assert.match(applyProjectFlow, /markProjectHydrationStage\("apply-complete"\)/);
 });
 
 test("the right-side project panel keeps file actions concise and safe", () => {
@@ -76,7 +119,7 @@ test("the right-side project panel keeps file actions concise and safe", () => {
   assert.match(mainProcess, /shell\.showItemInFolder\(resolvedVersionPath\)/);
   assert.match(
     mainProcess,
-    /sourceEndpoint\.searchParams\.set\("sourcePath", previousSourcePath\)/,
+    /sourceEndpoint\.searchParams\.set\("sourcePath", resolvedPreviousPath\)/,
   );
   assert.match(
     mainProcess,
@@ -84,11 +127,11 @@ test("the right-side project panel keeps file actions concise and safe", () => {
   );
   assert.match(
     mainProcess,
-    /authoritativeSource\.sourcePath[\s\S]*?path\.resolve\(nextSourcePath\)/,
+    /const authoritativeSourcePath = await realpath\(authoritativeSource\.sourcePath\)[\s\S]*?authoritativeSourcePath !== resolvedNextPath/,
   );
   assert.match(
     mainProcess,
-    /const activatesCurrentProject =[\s\S]*?state\.activePath === previousSourcePath[\s\S]*?if \(activatesCurrentProject\) \{[\s\S]*?state\.activePath = resolvedNextPath/,
+    /const activatesCurrentProject =[\s\S]*?activePathIdentity === resolvedPreviousPath[\s\S]*?if \(activatesCurrentProject\) \{[\s\S]*?state\.activePath = resolvedNextPath/,
   );
   assert.match(
     mainProcess,
@@ -313,7 +356,7 @@ test("external source adoption invalidates the active native editing session", (
   );
   assert.match(
     completedVersion,
-    /const transitionAffectsCurrentCanvas[\s\S]*?sourcePathRef\.current === run\.sourcePath[\s\S]*?sourcePathRef\.current === committedSourcePath[\s\S]*?const transitionContext = captureProjectContext\(\)[\s\S]*?fenceAndFreezeCurrentCanvas\([\s\S]*?if \(!frozen\.ok\)[\s\S]*?isCurrentProjectContext\(transitionContext\)[\s\S]*?await adoptGeneratedSourcePath\(\{[\s\S]*?htmlRef\.current = content;[\s\S]*?setHtml\(content\)/u,
+    /const transitionAffectsCurrentCanvas[\s\S]*?sameLocalSourcePath\(sourcePathRef\.current, run\.sourcePath\)[\s\S]*?sameLocalSourcePath\(sourcePathRef\.current, committedSourcePath\)[\s\S]*?const transitionContext = captureProjectContext\(\)[\s\S]*?fenceAndFreezeCurrentCanvas\([\s\S]*?if \(!frozen\.ok\)[\s\S]*?isCurrentProjectContext\(transitionContext\)[\s\S]*?await adoptGeneratedSourcePath\(\{[\s\S]*?htmlRef\.current = content;[\s\S]*?setHtml\(content\)/u,
   );
 });
 
@@ -326,6 +369,10 @@ test("header prioritizes the filename and keeps the approved action order", () =
   assert.match(header, /className="window-file"/);
   assert.match(header, /className="save-status"/);
   assert.doesNotMatch(header, /brand-logo\.png|className="brand"|className="update-badge"/);
+  assert.match(
+    header,
+    /updateAvailable[\s\S]*?className="header-update-badge"[\s\S]*?>\s*Update\s*</,
+  );
   const editPreview = header.indexOf('className="canvas-mode-switch"');
   const project = header.indexOf('className="project-button"');
   const globalComment = header.indexOf('className="global-comment-button"');
@@ -343,23 +390,33 @@ test("header prioritizes the filename and keeps the approved action order", () =
   assert.doesNotMatch(header, /app-version-button|检查更新|<strong>(?:YuanYe|PageRoot)<\/strong>/);
   assert.match(styles, /\.header-actions button,[\s\S]*?border:\s*0[\s\S]*?box-shadow:\s*none/);
   assert.match(mainProcess, /scheduleAutomaticUpdateCheck\(\)/);
-  assert.match(mainProcess, /PROJECT_REPOSITORY_URL/);
-  assert.doesNotMatch(preload, /openProjectRepository:\s*\([^)]*url/);
+  assert.match(mainProcess, /LATEST_RELEASE_PAGE_URL/);
+  assert.match(mainProcess, /shell\.openExternal\(LATEST_RELEASE_PAGE_URL\)/);
+  assert.doesNotMatch(preload, /openLatestRelease:\s*\([^)]*url/);
 });
 
 test("QoderWork handoff exposes a truthful process board and manual open action", () => {
   assert.match(workbench, /发送至 Qoder/);
-  assert.match(workbench, /已复制至剪贴板/);
+  assert.match(workbench, /交接内容已写入剪贴板/);
+  assert.match(workbench, /不代表 Qoder 已收到/);
   assert.match(workbench, /等待 QoderWork 返回修改结果/);
   assert.match(workbench, /画布已锁定，仅可浏览/);
-  assert.match(workbench, /身份、Hash 与文件完整性/);
+  assert.match(workbench, /版本与文件完整性/);
+  assert.doesNotMatch(workbench, /身份、Hash 与文件完整性/);
   assert.match(workbench, /范围与质量校验/);
   assert.match(workbench, /无视本校验，继续/);
   assert.match(workbench, /打开最新版/);
   const sendToQoderStart = workbench.indexOf("const sendToQoderWork = useCallback");
   const sendToQoderEnd = workbench.indexOf("const revealActiveRunInFinder", sendToQoderStart);
   const sendToQoderWork = workbench.slice(sendToQoderStart, sendToQoderEnd);
-  assert.match(sendToQoderWork, /setQoderHandoffState\(\{ requestId, status: "copied" }\)/);
+  assert.match(sendToQoderWork, /qoderHandoffStatesRef\.current\.set\(run\.sourcePath, nextState\)/);
+  assert.match(sendToQoderWork, /publishStatus\("copying"\)/);
+  assert.match(sendToQoderWork, /publishStatus\("copied"\)/);
+  assert.match(sendToQoderWork, /publishStatus\("failed"\)/);
+  assert.match(
+    sendToQoderWork,
+    /sameLocalSourcePath\(sourcePathRef\.current, run\.sourcePath\)[\s\S]*?visibleRun\?\.requestId === run\.requestId[\s\S]*?visibleRun\.attemptId === run\.attemptId/,
+  );
   assert.doesNotMatch(sendToQoderWork, /setDrawer\("handoff"\)|tone: "success"/);
   assert.match(workbench, /qoder-logo\.png/);
   assert.match(workbench, /window\.htmlAIIntegrations/);
@@ -370,7 +427,7 @@ test("QoderWork handoff exposes a truthful process board and manual open action"
   );
   assert.match(
     workbench,
-    /await sendToQoderWork\(durableRun\.handoffMessage, durableRun\.requestId\)/,
+    /await sendToQoderWork\(durableRun\.handoffMessage, durableRun\)/,
   );
   assert.doesNotMatch(workbench, /QoderWork 已打开|已粘贴至 QoderWork|自动发送消息/);
   assert.match(workbench, /在 Finder 中查看本轮文件/);
@@ -391,26 +448,38 @@ test("QoderWork handoff exposes a truthful process board and manual open action"
     processingHeaderStart,
     workbench.indexOf("</header>", processingHeaderStart),
   );
-  assert.doesNotMatch(processingHeader, /drawer-close-button|XIcon/);
+  assert.match(
+    processingHeader,
+    /aria-label="关闭处理面板"[\s\S]*?onClick=\{\(\) => setDrawer\(null\)\}/,
+  );
+  assert.doesNotMatch(processingHeader, /cancelActiveRun|取消发送/);
   assert.match(
     workbench,
     /generating[\s\S]*?\|\| submissionPendingRef\.current[\s\S]*?\|\| !projectLocked[\s\S]*?activeRun\?\.requestId !== "pending"/,
   );
 });
 
-test("processing uses one blocking decision surface while preserving recovery actions", () => {
+test("processing keeps its decision surface dismissible and project navigation available", () => {
   assert.match(
     workbench,
-    /<nav className="header-actions"[\s\S]*?disabled=\{\s*projectHydrating \|\| viewTransitioning \|\| Boolean\(projectLoadError\)/,
+    /className="project-button"[\s\S]*?disabled=\{projectHydrating \|\| viewTransitioning\}/,
   );
   assert.match(workbench, /aria-pressed=\{canvasMode === "edit"\}[\s\S]*?disabled=\{runInProgress \|\| viewMode === "history"\}/);
   assert.match(workbench, /className="global-comment-button"[\s\S]*?disabled=\{interactionLocked \|\| canvasMode !== "edit"\}/);
-  assert.match(styles, /\.drawer-overlay\.show\[data-drawer="handoff"\]\s*\{[\s\S]*?pointer-events:\s*auto/);
+  assert.match(styles, /\.drawer-overlay\.show\[data-drawer="handoff"\]\s*\{[\s\S]*?pointer-events:\s*none/);
+  assert.doesNotMatch(workbench, /aria-modal=\{drawer === "handoff"/);
+  assert.match(
+    workbench,
+    /if \(!drawer \|\| previewAttachment\) return(?: undefined)?;[\s\S]*?event\.key === "Escape"[\s\S]*?setDrawer\(null\)/,
+  );
   assert.match(
     styles,
     /\.workbench\[data-round-state="processing"\] > \.review-scroll-stage\s*\{[\s\S]*?opacity:\s*0\.38/,
   );
-  assert.match(workbench, /textarea[\s\S]*?disabled=\{runInProgress\}/);
+  assert.match(
+    workbench,
+    /className="project-file-editor"[\s\S]*?disabled=\{fileView\.loading \|\| runInProgress\}/,
+  );
   assert.match(workbench, /取消发送，继续编辑/);
   assert.match(workbench, /预览已发送 HTML/);
   assert.match(workbench, /再次复制本轮要求/);
@@ -451,6 +520,55 @@ test("first project registration is part of the recoverable autosave transaction
     /fenceAndFreezeCurrentCanvas\([\s\S]*?persistRecoveryLog\(recoveryWrite, writeContext\)[\s\S]*?persistStateRef\.current = "conflict"/u,
   );
   assert.match(recovery, /persistRecoveryLog\(recoveryWrite, writeContext\)/);
+  assert.match(
+    flush,
+    /editRevisionRef\.current > lastPersistedRevisionRef\.current[\s\S]*?const reconstructedWrite: PendingWrite[\s\S]*?html: htmlRef\.current[\s\S]*?pendingWriteRef\.current = reconstructedWrite/,
+  );
+  assert.match(
+    recovery,
+    /isCurrentProjectContext\(writeContext\)[\s\S]*?pendingWriteRef\.current = recoveryWrite/,
+  );
+  assert.match(
+    workbench,
+    /targetSha256 === currentSourceSha256[\s\S]*?const reconciledRevision = Math\.max\(serverRevision, recoveredRevision\)[\s\S]*?lastPersistedRevisionRef\.current = reconciledRevision/,
+  );
+});
+
+test("AI submission and run operations remain isolated by project and run identity", () => {
+  const generateStart = workbench.indexOf("const generateRequest = useCallback");
+  const generateEnd = workbench.indexOf(
+    "const openCommittedVersion = useCallback",
+    generateStart,
+  );
+  const generate = workbench.slice(generateStart, generateEnd);
+  const intentClaim = generate.indexOf("submissionIntentRef.current = submissionIntent");
+  const registration = generate.indexOf("await ensureProjectRegistered()");
+  assert.ok(intentClaim >= 0 && registration > intentClaim);
+  assert.match(generate, /if \(submissionIntentRef\.current\) return/);
+  assert.match(
+    generate,
+    /submissionIntentRef\.current\?\.token !== submissionIntent\.token[\s\S]*?projectEpochRef\.current !== submissionIntent\.epoch[\s\S]*?!sameLocalSourcePath\(sourcePathRef\.current, submissionIntent\.sourcePath\)/,
+  );
+  assert.match(workbench, /qoderHandoffStatesRef\s*=\s*useRef<Map<string, ProjectQoderHandoffState>>/);
+  assert.match(workbench, /activatingRunsRef = useRef<Set<string>>/);
+  assert.match(workbench, /waivingRunsRef = useRef<Set<string>>/);
+  assert.match(workbench, /cancellingRunsRef = useRef<Set<string>>/);
+  assert.match(
+    workbench,
+    /statusPollBusyRef = useRef<Set<string>>\(new Set\(\)\)[\s\S]*?statusPollBusyRef\.current\.has\(operationKey\)[\s\S]*?statusPollBusyRef\.current\.delete\(operationKey\)/,
+  );
+  assert.match(
+    workbench,
+    /await Promise\.allSettled\([\s\S]*?backgroundRunsRef\.current\.values\(\)/,
+  );
+  assert.match(
+    workbench,
+    /const projectQoderHandoff = project\.sourcePath[\s\S]*?qoderHandoffStatesRef\.current\.get\(project\.sourcePath\)/,
+  );
+  assert.match(
+    workbench,
+    /const previousState = qoderHandoffStatesRef\.current\.get\(run\.sourcePath\)[\s\S]*?previousState\.requestId !== run\.requestId[\s\S]*?previousState\.attemptId !== run\.attemptId/,
+  );
 });
 
 test("undo and redo use stable history identity without folding in-flight audit events", () => {
@@ -559,7 +677,7 @@ test("AI completion adopts the generated semantic file before editing resumes", 
   assert.doesNotMatch(workbench, /QoderWork 返回的新文件已打开|原文件已保留/u);
   assert.match(
     workbench,
-    /<strong title=\{activeOpenedAiVersionNotice\?\.fileName \|\| projectName\}>/,
+    /<strong[\s\S]*?title=\{activeOpenedAiVersionNotice\?\.fileName \|\| projectName\}[\s\S]*?aria-live="polite"[\s\S]*?aria-atomic="true"/,
   );
   assert.match(workbench, /aria-live="polite"[\s\S]*?aria-atomic="true"/u);
   assert.match(
@@ -571,17 +689,18 @@ test("AI completion adopts the generated semantic file before editing resumes", 
 
 test("project panel keeps actions clear without technical paths in the header", () => {
   assert.match(workbench, /className="project-button"[\s\S]*?项目/);
-  assert.match(
-    workbench,
-    /setFileView\(null\);[\s\S]*?setDrawer\("files"\)/,
-  );
+  assert.match(workbench, /const closeFileView = useCallback/);
+  assert.match(workbench, /if \(!closeFileView\(\)\) return;[\s\S]*?setDrawer\("files"\)/);
   assert.match(workbench, /className="current-project-card"/);
   assert.match(workbench, /导出 HTML 副本/);
   assert.match(workbench, />打开本地 HTML</);
-  assert.match(workbench, /在 Finder 中打开项目记录/);
+  assert.match(workbench, /项目记录文件夹/);
+  assert.match(workbench, /查看每轮要求、AI 返回与历史文件/);
   assert.match(workbench, /BRIDGE_URL\}\/open-folder/);
-  assert.match(workbench, /用于以后每次 AI 修改/);
-  assert.match(workbench, /<details className="project-advanced">/);
+  assert.match(workbench, /以后每次 AI 修改都会读取/);
+  assert.match(workbench, /保存只影响后续任务，不会修改当前 HTML/);
+  assert.match(workbench, /项目规则还有未保存修改/);
+  assert.match(workbench, /<details[\s\S]*?className="project-advanced"/);
   const headerStart = workbench.indexOf('<header className="workbench-header">');
   const header = workbench.slice(
     headerStart,
@@ -595,7 +714,7 @@ test("project panel keeps actions clear without technical paths in the header", 
   assert.match(styles, /\.project-advanced\s*\{/);
 });
 
-test("first open stays read-only until a real project action", () => {
+test("user-opened HTML stays lazily registered until a real project action", () => {
   assert.match(workbench, /BRIDGE_URL\}\/project\/ensure/);
   assert.match(
     workbench,
@@ -627,6 +746,10 @@ test("first open stays read-only until a real project action", () => {
     workbench,
     /Promise\.allSettled\(\[api\.getActiveProject\(\), api\.listRecentProjects\(\)\]\)/,
   );
+  assert.match(
+    workbench,
+    /await refreshWorkspace\(active\.sourcePath, epoch, false, epoch\);[\s\S]*?await refreshRecents\(\)/,
+  );
   assert.match(workbench, /上次打开的 HTML 无法恢复/);
   assert.match(workbench, /文件可能已移动、删除或损坏/);
   assert.match(workbench, /className="startup-issue" role="alert"/);
@@ -641,7 +764,9 @@ test("comment composer is explicit, transient and horizontally contained", () =>
   assert.match(workbench, /draftTargetRef\.current\?\.id === target\.id/);
   assert.match(workbench, /if \(!resumesRecoveredDraft\)/);
   assert.match(workbench, /className="draft-recovery-card[^"]*"/);
-  assert.match(workbench, />继续填写</);
+  assert.match(workbench, /canLocateTarget\(draftTarget\) \? "继续填写" : "重新选择目标"/);
+  assert.match(workbench, /beginTargetRelink\("__composer"\)/);
+  assert.match(workbench, /评论和附件仍保留，重新关联后即可发送/);
   assert.match(workbench, /recoveredDraftTarget\.id !== target\.id/);
   assert.match(workbench, /const activeCommentCount = activeCommentItems\.length/);
   assert.match(workbench, />\s*评论\s*<\/button>/);

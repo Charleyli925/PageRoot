@@ -32,8 +32,14 @@ Comments + frozen input
 
 Direct edits form ordered revisions and are written through a single queue. Every write checks the expected source Hash, uses a same-directory temporary file and atomic replacement, then rereads the result. External modification causes a fail-closed conflict.
 
+When no desktop project can be restored, the main process provisions the built-in welcome content once as a regular HTML source beside the selected workspace and immediately registers its initial V1 through the authenticated Bridge. Existing welcome bytes are never replaced on startup. From that point onward it uses the same source, comment, Request, handoff and Version boundaries as any user-opened HTML.
+
 Initial and accepted AI results are immutable versions. Routine local edits do not create versions. A validated AI result is not activated until the user explicitly chooses it.
 
 ## Trust model
 
 The renderer is sandboxed with context isolation and no Node integration. The preload exposes narrow validated IPC methods. The Bridge uses a per-process authentication token and only operates on managed project paths. AI output is untrusted until protocol, identity, Hash, path, scope and HTML checks succeed.
+
+Every renderer request to the Bridge is bounded: ordinary state/file operations use 15 seconds, attachments use 30 seconds, and Request creation uses 60 seconds. Busy refs are released in `finally`, so an unresponsive local service cannot leave a permanent UI lock. An unknown Request POST outcome remains fail-closed and is reconciled against the durable workspace state before editing resumes.
+
+If the utility Bridge exits after startup, the main process sends the narrow `html-app:workspace-unavailable` event and shows a two-path native recovery dialog. The renderer keeps in-memory content visible and exportable while blocking new Bridge-backed mutations. `html-app:relaunch` still runs the normal renderer close-readiness handshake; an unsafe relaunch is rejected until the user exports or resolves pending writes.

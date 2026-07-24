@@ -26,6 +26,13 @@ test("technical Electron IPC prefixes never reach the visible error copy", () =>
 test("critical notices remain visible until dismissed", () => {
   assert.equal(noticeAutoDismissMs({ tone: "error" }), null);
   assert.equal(noticeAutoDismissMs({ tone: "warning", sticky: true }), null);
+  assert.equal(
+    noticeAutoDismissMs({
+      tone: "info",
+      action: { id: "retry", label: "重试" },
+    }),
+    null,
+  );
   assert.equal(noticeAutoDismissMs({ tone: "warning" }), 5_000);
   assert.equal(noticeAutoDismissMs({ tone: "success" }), 2_500);
   assert.equal(noticeAutoDismissMs({ tone: "info" }), 2_500);
@@ -35,11 +42,24 @@ test("ordinary visible state does not create another toast", () => {
   assert.equal(shouldPresentNotice({ tone: "success", dedupeKey: "qoder-handoff" }), false);
   assert.equal(shouldPresentNotice({ tone: "info", dedupeKey: "current-version-result" }), false);
   assert.equal(shouldPresentNotice({ tone: "warning", dedupeKey: "preview-commit-blocked" }), true);
+  assert.equal(shouldPresentNotice({ tone: "warning", dedupeKey: "project-rules-unsaved" }), true);
   assert.equal(shouldPresentNotice({ tone: "error", dedupeKey: "project-open-error" }), true);
   assert.equal(shouldPresentNotice({ tone: "success", action: { id: "open-project" } }), true);
 });
 
 test("low-priority feedback cannot hide a persistent critical notice", () => {
+  assert.equal(
+    shouldReplaceNotice(
+      { tone: "error", sticky: true, title: "旧问题" },
+      {
+        tone: "warning",
+        sticky: true,
+        title: "当前操作需要决定",
+        action: { id: "retry", label: "重试" },
+      },
+    ),
+    true,
+  );
   assert.equal(
     shouldReplaceNotice(
       { tone: "error", sticky: true, title: "副本没有导出" },

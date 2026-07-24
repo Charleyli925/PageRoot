@@ -40,10 +40,14 @@ npm run task:finish
 | --- | --- |
 | `npm run gate:edit` | Fast, impact-selected feedback for uncommitted work |
 | `npm run gate:task` | Static checks plus impacted Node/browser/Electron coverage |
+| `npm run gate:main:auto` | Internal post-merge Node/browser smoke after exact-tree PR provenance verification |
 | `npm run gate:release:auto` | Complete source gate on a clean commit |
+| `npm run gate:artifact-only:auto` | Guarded internal installer lane; it refuses to run without CI's fresh matching tree/version decision |
 | `npm run release:mac` | Complete source gate, arm64 package, packaged runtime test and artifact verification |
 
 The release and artifact lanes stop if the worktree is dirty or if HEAD/tree changes during the run. Reports are written to the ignored `output/test-runs/` directory.
+
+GitHub runs the final PR source gate as parallel Node, three-shard Chromium and macOS Electron groups. Web and desktop renderers are built once and shared between those groups. Node and Chromium use Linux runners; macOS remains responsible for Electron behavior and installer creation. Dependency, Playwright and Electron downloads are cached by lockfile identity.
 
 ## Design constraints
 

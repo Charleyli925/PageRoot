@@ -50,21 +50,14 @@ async function loadRealHtml(page, sourcePath, source) {
   // for the initial canvas to reach the same commit-ready state as the real UI.
   const editor = page.getByTestId("html-canvas-editor").filter({ visible: true }).first();
   await editor.waitFor({ state: "visible" });
-  const editorHandle = await editor.elementHandle();
-  await page.waitForFunction(
-    (element) => element?.getAttribute("data-render-verified") === "true",
-    editorHandle,
-  );
+  await expect(editor).toHaveAttribute("data-render-verified", "true");
 
   const fileInput = page.locator('input[type="file"][accept*=".html"]').first();
   await fileInput.waitFor({ state: "attached" });
   await fileInput.setInputFiles({ name, mimeType: "text/html", buffer: source });
   await page.getByText(name, { exact: true }).first().waitFor({ state: "visible" });
 
-  await page.waitForFunction(
-    (element) => element?.getAttribute("data-render-verified") === "true",
-    editorHandle,
-  );
+  await expect(editor).toHaveAttribute("data-render-verified", "true");
   const iframe = editor.locator('iframe[title*="HTML"]');
   await iframe.waitFor({ state: "visible" });
   const frame = await (await iframe.elementHandle())?.contentFrame();

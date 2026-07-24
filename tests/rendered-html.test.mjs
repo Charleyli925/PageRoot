@@ -88,7 +88,7 @@ test("workbench encodes the v3 single-source lifecycle instead of save-created v
   assert.equal(packageJson.dependencies?.["@lexical/history"], undefined);
   assert.equal(packageJson.dependencies?.["@lexical/plain-text"], undefined);
   assert.equal(packageJson.dependencies?.["@lexical/selection"], undefined);
-  assert.equal(packageJson.version, "0.8.5");
+  assert.equal(packageJson.version, "0.8.6");
   assert.equal(packageJson.build?.mac?.extendInfo?.NSMicrophoneUsageDescription, undefined);
   assert.equal(packageJson.build?.mac?.extendInfo?.NSSpeechRecognitionUsageDescription, undefined);
 
@@ -124,7 +124,7 @@ test("workbench encodes the v3 single-source lifecycle instead of save-created v
     "/draft",
     "awaiting-conflict-resolution",
     "recovering-transaction",
-    "这次没有生成新版本",
+    "没有生成新版本",
     "旧版未被覆盖",
     "openedAiVersionNotice",
     "removeAcknowledgedAuditEvents",
@@ -457,12 +457,11 @@ test("handoff fails closed before locking when a comment target is unsafe", asyn
   assert.doesNotMatch(locatorGuard, /resolution === "orphaned"/);
 
   for (const required of [
-    "const unsafeHandoffTargets = useMemo(",
-    "const hasUnsafeHandoffTargets = unsafeHandoffTargets.length > 0",
     "const unsafeTargets = activeComments.filter(",
     "请重新选择失联的评论目标",
-    "本轮尚未锁定或提交",
-    "|| hasUnsafeHandoffTargets",
+    "评论和附件仍保留；重新关联后即可发送",
+    "beginTargetRelink",
+    "本轮没有提交",
     "activeCommentCount === 0",
     "data-resolution={comment.target.resolution}",
     "targets: targets.map(persistedTargetRef)",

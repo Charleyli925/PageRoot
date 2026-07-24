@@ -1,8 +1,10 @@
 import { createRequire } from "node:module";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -68,7 +70,19 @@ async function launchPageRoot(options = {}) {
     },
   });
   const page = await electronApp.firstWindow();
+  await electronApp.evaluate(({ app, BrowserWindow }) => {
+    const window = BrowserWindow.getAllWindows()[0];
+    window?.webContents.setBackgroundThrottling(false);
+    window?.show();
+    app.focus({ steal: true });
+    window?.focus();
+  });
+  await page.bringToFront();
   await page.waitForLoadState("domcontentloaded");
+  await page.waitForFunction(() => document.visibilityState === "visible");
+  await page.evaluate(() => new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  }));
   return { electronApp, page, isolatedUserData };
 }
 
@@ -138,13 +152,27 @@ async function closePageRootGracefully(electronApp) {
   await closed;
 }
 
+async function waitForProjectReady(page, timeout = 30_000) {
+  await expect.poll(async () => {
+    await page.bringToFront();
+    const state = await page.locator("main.workbench").getAttribute("data-project-state");
+    if (state === "ready") return state;
+    const stage = await page.evaluate(() => window.__PAGEROOT_HYDRATION_STAGE__);
+    return `${state}:${stage || "unmarked"}`;
+  }, { timeout }).toBe("ready");
+}
+
 async function loadedDiskFrame(page, sourcePath, caseId) {
   await expect.poll(
     async () => (await page.evaluate(() => window.htmlAIProjects?.getActiveProject()))?.sourcePath,
     { timeout: 15_000 },
-  ).toBe(sourcePath);
-  await expect(page.locator('[aria-label="正在读取项目状态"]'))
-    .toHaveCount(0, { timeout: 15_000 });
+  ).toBe(realpathSync(sourcePath));
+  await waitForProjectReady(page);
+  await expect(page.locator('[aria-label="项目读取失败"]')).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "项目", exact: true }))
+    .toBeEnabled({ timeout: 30_000 });
+  await expect(page.getByRole("button", { name: "全局评论", exact: true }))
+    .toBeEnabled({ timeout: 30_000 });
   await expect(page.locator('[aria-label="项目读取失败"]')).toHaveCount(0);
   const editor = page.getByTestId("html-canvas-editor").filter({ visible: true }).first();
   await editor.waitFor({ state: "visible" });
@@ -277,6 +305,95 @@ async function replayApplePinyinStyledWrapperCommit(frame, caseId) {
   });
 }
 
+test("Electron first launch registers the welcome HTML and sends its comment to Qoder", async () => {
+  const launched = await launchPageRoot();
+  const welcomePath = path.join(launched.isolatedUserData, "欢迎来到源页.html");
+  const welcomeLogoPath = path.join(
+    launched.isolatedUserData,
+    "brand-logo.png",
+  );
+  const workspace = path.join(launched.isolatedUserData, "workspace");
+  try {
+    const canonicalWelcomePath = path.join(
+      realpathSync(launched.isolatedUserData),
+      "欢迎来到源页.html",
+    );
+    await waitForProjectReady(launched.page);
+    await expect.poll(
+      async () => (
+        await launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject())
+      )?.sourcePath,
+      { timeout: 20_000 },
+    ).toBe(canonicalWelcomePath);
+    await expect(launched.page.locator('[aria-label="项目读取失败"]')).toHaveCount(0);
+    await expect(launched.page.getByRole("button", { name: "项目", exact: true }))
+      .toBeEnabled({ timeout: 30_000 });
+    await expect(launched.page.getByRole("button", { name: "全局评论", exact: true }))
+      .toBeEnabled({ timeout: 30_000 });
+    await expect(launched.page.locator('[aria-label="项目读取失败"]')).toHaveCount(0);
+    await expect.poll(() => (
+      existsSync(welcomePath)
+      && existsSync(welcomeLogoPath)
+      && existsSync(path.join(workspace, "project-registry.json"))
+    )).toBe(true);
+
+    const registry = JSON.parse(
+      readFileSync(path.join(workspace, "project-registry.json"), "utf8"),
+    );
+    const projectIds = Object.keys(registry.projects);
+    expect(projectIds).toHaveLength(1);
+    expect(registry.projects[projectIds[0]].sourcePath).toBe(canonicalWelcomePath);
+    expect(existsSync(
+      path.join(workspace, "projects", projectIds[0], "versions", "ver_0001", "committed.json"),
+    )).toBe(true);
+
+    const editor = launched.page.getByTestId("html-canvas-editor")
+      .filter({ visible: true })
+      .first();
+    await editor.waitFor({ state: "visible" });
+    const editorHandle = await editor.elementHandle();
+    await launched.page.waitForFunction(
+      (element) => element?.getAttribute("data-render-verified") === "true",
+      editorHandle,
+    );
+    const welcomeFrame = await currentEditorFrame(launched.page);
+    await expect.poll(() =>
+      welcomeFrame.locator('img[alt="源页 Logo"]').evaluate(
+        (image) => image.complete && image.naturalWidth > 0,
+      )
+    ).toBe(true);
+    await launched.electronApp.evaluate(({ clipboard }) => clipboard.clear());
+    await launched.page.getByRole("button", { name: "全局评论" }).click();
+    await launched.page.getByRole("textbox", { name: "评论内容" })
+      .fill("把欢迎页主标题改得更简洁。");
+    await launched.page.getByRole("button", { name: "评论", exact: true }).click();
+    await launched.page.getByRole("button", { name: /发送至 Qoder/u }).click();
+    await expect(
+      launched.page.getByText("等待 QoderWork 返回修改结果", { exact: true }),
+    ).toBeVisible();
+
+    let promptPath = "";
+    await expect.poll(async () => {
+      const copied = await launched.electronApp.evaluate(
+        ({ clipboard }) => clipboard.readText(),
+      );
+      promptPath = copied.match(/请执行\s+(.+?\/PROMPT\.md)\s+中的单轮任务/u)?.[1] || "";
+      return Boolean(promptPath && existsSync(promptPath));
+    }, { timeout: 20_000 }).toBe(true);
+    const changeRequest = JSON.parse(
+      readFileSync(path.join(path.dirname(promptPath), "change-request.json"), "utf8"),
+    );
+    expect(changeRequest.projectId).toBe(projectIds[0]);
+    expect(changeRequest.requirements.instructions[0].text)
+      .toBe("把欢迎页主标题改得更简洁。");
+  } finally {
+    await stopPageRoot(
+      launched.electronApp,
+      launched.isolatedUserData,
+    );
+  }
+});
+
 test("Electron uses the authored DOM caret, Selection and beforeinput", async () => {
   const { electronApp, page, isolatedUserData } = await launchPageRoot();
   try {
@@ -361,6 +478,128 @@ test("Electron proves the controlled and observer-guarded fallback lanes", async
     )).toContain("电观察器保护");
   } finally {
     await stopPageRoot(electronApp, isolatedUserData);
+  }
+});
+
+test("PROJECT.md read failure never becomes editable data and recovers in place", async () => {
+  test.setTimeout(60_000);
+  const sourceDirectory = mkdtempSync(path.join(tmpdir(), "pageroot-native-source-e2e-"));
+  const sourcePath = path.join(sourceDirectory, "project-rules-recovery.html");
+  writeFileSync(sourcePath, fixtureBuffer("complex-layout.html"));
+  const isolatedUserData = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-"));
+  let electronApp = null;
+  try {
+    const launched = await launchPageRoot({
+      isolatedUserData,
+      activeSourcePath: sourcePath,
+    });
+    electronApp = launched.electronApp;
+    await loadedDiskFrame(launched.page, sourcePath, "list-item");
+
+    await launched.page.getByRole("button", { name: "项目", exact: true }).click();
+    await launched.page.getByText("项目资料", { exact: true }).click();
+    const projectRules = launched.page.getByRole("button", {
+      name: /项目长期规则/u,
+    });
+    await expect(projectRules).toBeEnabled({ timeout: 20_000 });
+
+    await launched.page.evaluate(() => {
+      const originalFetch = window.fetch.bind(window);
+      let rejectNextProjectRulesRead = true;
+      window.fetch = (input, init) => {
+        const url = new URL(
+          typeof input === "string" ? input : input instanceof URL ? input.href : input.url,
+          window.location.href,
+        );
+        if (
+          rejectNextProjectRulesRead
+          && url.pathname === "/file"
+          && url.searchParams.get("path") === "PROJECT.md"
+        ) {
+          rejectNextProjectRulesRead = false;
+          return Promise.resolve(new Response(JSON.stringify({
+            ok: false,
+            error: { message: "测试注入：项目规则暂时不可读。" },
+          }), {
+            status: 503,
+            headers: { "content-type": "application/json" },
+          }));
+        }
+        return originalFetch(input, init);
+      };
+    });
+
+    await projectRules.click();
+    const failure = launched.page.getByRole("alert")
+      .filter({ hasText: "内容没有读取成功" });
+    await expect(failure).toBeVisible();
+    await expect(failure).toContainText("项目规则暂时不可读");
+    await expect(launched.page.getByRole("textbox", { name: "项目长期规则" }))
+      .toHaveCount(0);
+    await expect(failure.getByRole("button", { name: "重试读取" })).toBeVisible();
+    await expect(launched.page.getByRole("button", { name: "返回项目" })).toBeVisible();
+
+    await failure.getByRole("button", { name: "重试读取" }).click();
+    const editor = launched.page.getByRole("textbox", { name: "项目长期规则" });
+    await expect(editor).toBeVisible();
+    await expect(editor).not.toHaveValue(/测试注入|文件尚未生成/u);
+  } finally {
+    if (electronApp) {
+      await stopPageRoot(electronApp, isolatedUserData, { cleanup: false });
+    }
+    removeIsolatedUserData(isolatedUserData);
+    removeValidatedTemporaryDirectory(
+      sourceDirectory,
+      "pageroot-native-source-e2e-",
+    );
+  }
+});
+
+test("workspace failure keeps the current page visible with export and relaunch paths", async () => {
+  const sourceDirectory = mkdtempSync(path.join(tmpdir(), "pageroot-native-source-e2e-"));
+  const sourcePath = path.join(sourceDirectory, "workspace-recovery.html");
+  writeFileSync(sourcePath, fixtureBuffer("complex-layout.html"));
+  const isolatedUserData = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-"));
+  let electronApp = null;
+  try {
+    const launched = await launchPageRoot({
+      isolatedUserData,
+      activeSourcePath: sourcePath,
+    });
+    electronApp = launched.electronApp;
+    await loadedDiskFrame(launched.page, sourcePath, "list-item");
+    await launched.electronApp.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0]?.webContents.send(
+        "html-app:workspace-unavailable",
+        {
+          title: "本地项目资料暂时不可用",
+          message: "当前页面内容仍保留。可先导出当前编辑，再重新打开源页。",
+        },
+      );
+    });
+
+    const recovery = launched.page.getByRole("alert")
+      .filter({ hasText: "本地项目资料暂时不可用" });
+    await expect(recovery).toBeVisible();
+    await expect(recovery.getByRole("button", { name: "导出当前编辑" }))
+      .toBeVisible();
+    await expect(recovery.getByRole("button", { name: "重新打开源页" }))
+      .toBeVisible();
+    await expect(launched.page.getByRole("button", { name: "全局评论" }))
+      .toBeDisabled();
+    await expect(launched.page.getByTestId("html-canvas-editor")
+      .filter({ visible: true })
+      .first()
+      .locator('iframe[title*="本轮已锁定"]')).toBeVisible();
+  } finally {
+    if (electronApp) {
+      await stopPageRoot(electronApp, isolatedUserData, { cleanup: false });
+    }
+    removeIsolatedUserData(isolatedUserData);
+    removeValidatedTemporaryDirectory(
+      sourceDirectory,
+      "pageroot-native-source-e2e-",
+    );
   }
 });
 

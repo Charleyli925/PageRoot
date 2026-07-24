@@ -5,16 +5,50 @@ import { join } from "node:path";
 import test from "node:test";
 
 import {
+  ensureManagedWelcomeHtml,
   htmlSha256,
+  managedWelcomeSourcePath,
   persistHtmlFile,
   readHtmlFile,
   resetProjectFileQueuesForTests,
   writeHtmlCopy,
 } from "../desktop/project-files.mjs";
+import {
+  DEFAULT_PROJECT_HTML,
+  WELCOME_LOGO_RELATIVE_PATH,
+  WELCOME_PROJECT_NAME,
+} from "../desktop/welcome-project-content.mjs";
 
 function page(title) {
   return `<!doctype html><html><head><title>${title}</title></head><body>${title}</body></html>`;
 }
+
+test("managed welcome HTML is a normal source file and is never reset after editing", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "pageroot-welcome-"));
+  const workspaceRoot = join(directory, "PageRoot", "项目记录");
+  const sourcePath = join(directory, "PageRoot", WELCOME_PROJECT_NAME);
+  const logoPath = join(directory, "PageRoot", WELCOME_LOGO_RELATIVE_PATH);
+  t.after(() => rm(directory, { recursive: true, force: true }));
+
+  assert.equal(managedWelcomeSourcePath(workspaceRoot), sourcePath);
+  const first = await ensureManagedWelcomeHtml({ workspaceRoot });
+  assert.equal(first.created, true);
+  assert.equal(first.managedWelcome, true);
+  assert.equal(first.sourcePath, sourcePath);
+  assert.equal(first.html, DEFAULT_PROJECT_HTML);
+  assert.equal(first.sha256, htmlSha256(DEFAULT_PROJECT_HTML));
+  assert.deepEqual(
+    await readFile(logoPath),
+    await readFile(new URL("../public/brand-logo.png", import.meta.url)),
+  );
+
+  const edited = page("用户已经修改欢迎页");
+  await writeFile(sourcePath, edited, "utf8");
+  const reopened = await ensureManagedWelcomeHtml({ workspaceRoot });
+  assert.equal(reopened.created, false);
+  assert.equal(reopened.html, edited);
+  assert.equal(await readFile(sourcePath, "utf8"), edited);
+});
 
 test("desktop writer serializes revisions and never lets an older write win", async (t) => {
   resetProjectFileQueuesForTests();

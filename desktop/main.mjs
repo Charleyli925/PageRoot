@@ -25,6 +25,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   ProjectFileError,
+  ensureManagedWelcomeHtml,
+  managedWelcomeSourcePath,
   readHtmlFile,
   writeHtmlCopy,
 } from "./project-files.mjs";
@@ -46,7 +48,7 @@ import {
 import { handoffToQoderWork } from "./qoder-handoff.mjs";
 import {
   ManualUpdateError,
-  PROJECT_REPOSITORY_URL,
+  LATEST_RELEASE_PAGE_URL,
   checkForManualUpdate,
 } from "./manual-update.mjs";
 
@@ -71,6 +73,15 @@ const e2eUserDataPath = (() => {
 const productUserDataPath = e2eUserDataPath || path.join(app.getPath("appData"), "PageRoot");
 app.setPath("userData", productUserDataPath);
 app.setName("源页");
+if (e2eUserDataPath) {
+  // Hosted macOS runners can report an Electron window as visible while the
+  // WindowServer still classifies it as background or occluded. Keep the
+  // renderer's startup timers and frame commits active for deterministic E2E
+  // hydration; production launch behavior remains unchanged.
+  app.commandLine.appendSwitch("disable-background-timer-throttling");
+  app.commandLine.appendSwitch("disable-renderer-backgrounding");
+  app.commandLine.appendSwitch("disable-backgrounding-occluded-windows");
+}
 
 const STARTUP_TIMEOUT_MS = 12_000;
 const RENDERER_CLOSE_TIMEOUT_MS = 30_000;
@@ -94,11 +105,14 @@ const PROJECT_CHANNELS = Object.freeze({
   revealRequestFolder: "html-projects:reveal-request-folder",
   listRecentProjects: "html-projects:list-recent",
   openRecent: "html-projects:open-recent",
+  forgetRecent: "html-projects:forget-recent",
 });
 const APP_CHANNELS = Object.freeze({
   prepareClose: "html-app:prepare-close",
   closeResult: "html-app:close-result",
   closeAborted: "html-app:close-aborted",
+  workspaceUnavailable: "html-app:workspace-unavailable",
+  relaunch: "html-app:relaunch",
 });
 const INTEGRATION_CHANNELS = Object.freeze({
   qoderHandoff: "html-integrations:qoder-handoff",
@@ -106,7 +120,7 @@ const INTEGRATION_CHANNELS = Object.freeze({
 const UPDATE_CHANNELS = Object.freeze({
   getStatus: "html-updates:get-status",
   status: "html-updates:status",
-  openRepository: "html-updates:open-repository",
+  openLatestRelease: "html-updates:open-latest-release",
 });
 
 let bridgeProcess = null;
@@ -124,6 +138,8 @@ let stateWriteQueue = Promise.resolve();
 let updateCheckTimer = null;
 let updateCheckPromise = null;
 let latestUpdateResult = null;
+let workspaceFailurePrompt = null;
+let managedWelcomeRegistration = null;
 
 function emptyProjectState() {
   return {
@@ -166,6 +182,11 @@ function assertHtmlPath(value, label = "HTML 文件路径") {
     throw new TypeError(`${label}必须以 .html 或 .htm 结尾。`);
   }
   return resolved;
+}
+
+async function existingPathIdentity(value) {
+  const resolved = path.resolve(value);
+  return realpath(resolved).catch(() => resolved);
 }
 
 function ensureHtmlExtension(value) {
@@ -319,8 +340,11 @@ function persistProjectState() {
 }
 
 async function activateProject(filePath) {
-  const normalizedPath = assertHtmlPath(filePath);
+  const normalizedPath = await existingPathIdentity(assertHtmlPath(filePath));
   const state = await loadProjectState();
+  const recentPathIdentities = await Promise.all(
+    state.recent.map((entry) => existingPathIdentity(entry.path)),
+  );
   const now = Date.now();
   state.activePath = normalizedPath;
   state.recent = [
@@ -329,15 +353,26 @@ async function activateProject(filePath) {
       name: path.basename(normalizedPath),
       lastOpenedAt: now,
     },
-    ...state.recent.filter((entry) => entry.path !== normalizedPath),
+    ...state.recent.filter(
+      (_entry, index) => recentPathIdentities[index] !== normalizedPath,
+    ),
   ].slice(0, MAX_RECENT_PROJECTS);
   await persistProjectState();
 }
 
 async function forgetProject(filePath) {
   const state = await loadProjectState();
-  state.recent = state.recent.filter((entry) => entry.path !== filePath);
-  if (state.activePath === filePath) state.activePath = null;
+  const forgottenIdentity = await existingPathIdentity(filePath);
+  const recentPathIdentities = await Promise.all(
+    state.recent.map((entry) => existingPathIdentity(entry.path)),
+  );
+  state.recent = state.recent.filter(
+    (_entry, index) => recentPathIdentities[index] !== forgottenIdentity,
+  );
+  if (
+    state.activePath
+    && await existingPathIdentity(state.activePath) === forgottenIdentity
+  ) state.activePath = null;
   await persistProjectState();
 }
 
@@ -355,8 +390,9 @@ async function inspectHtmlFile(filePath) {
 
 async function readHtmlProject(filePath) {
   const normalizedPath = await inspectHtmlFile(filePath);
+  const canonicalPath = await realpath(normalizedPath);
   return readHtmlFile({
-    sourcePath: normalizedPath,
+    sourcePath: canonicalPath,
     maxHtmlBytes: MAX_HTML_BYTES,
   });
 }
@@ -366,11 +402,73 @@ async function currentActivePath() {
   return state.activePath;
 }
 
+async function ensureBridgeProjectRegistered(project) {
+  if (!bridgePort) {
+    throw new ProjectFileError(
+      "BRIDGE_NOT_READY",
+      "欢迎页已经建立，但项目记录服务尚未就绪。",
+    );
+  }
+  const endpoint = new URL(`http://127.0.0.1:${bridgePort}/project/ensure`);
+  const response = await net.fetch(endpoint, {
+    method: "POST",
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json",
+      "X-HTML-AI-Bridge-Token": bridgeAuthToken,
+    },
+    body: JSON.stringify({
+      sourcePath: project.sourcePath,
+      expectedSourceSha256: project.sha256,
+    }),
+  });
+  const workspace = await response.json().catch(() => null);
+  const [workspaceSourceIdentity, projectSourceIdentity] = await Promise.all([
+    typeof workspace?.sourcePath === "string"
+      ? existingPathIdentity(workspace.sourcePath)
+      : Promise.resolve(null),
+    existingPathIdentity(project.sourcePath),
+  ]);
+  if (
+    !response.ok
+    || !workspace
+    || workspace.ok !== true
+    || workspace.registered !== true
+    || typeof workspace.projectId !== "string"
+    || !/^project_[A-Za-z0-9_-]+$/.test(workspace.projectId)
+    || typeof workspace.documentId !== "string"
+    || !/^doc_[A-Za-z0-9_-]+$/.test(workspace.documentId)
+    || workspaceSourceIdentity !== projectSourceIdentity
+    || workspace.currentHtmlSha256 !== project.sha256
+  ) {
+    throw new ProjectFileError(
+      "WELCOME_WORKSPACE_REGISTRATION_FAILED",
+      "欢迎页已经建立，但对应的项目工作区没有通过完整性校验。",
+      { sourcePath: project.sourcePath },
+    );
+  }
+  managedWelcomeRegistration = `${projectSourceIdentity}\0${project.sha256}`;
+}
+
 async function getActiveProject() {
-  const activePath = await currentActivePath();
-  if (!activePath) return null;
+  const workspaceRoot = await workspacePath();
+  const welcomeSourcePath = managedWelcomeSourcePath(workspaceRoot);
+  let activePath = await currentActivePath();
+  let project;
+  if (!activePath) {
+    project = await ensureManagedWelcomeHtml({
+      workspaceRoot,
+      maxHtmlBytes: MAX_HTML_BYTES,
+    });
+    activePath = project.sourcePath;
+    await activateProject(activePath);
+    // activateProject persists the canonical filesystem identity. Re-read the
+    // welcome project through that identity so the renderer and bridge start
+    // from the same source path on systems where /var maps to /private/var.
+    project = null;
+  }
   try {
-    return await readHtmlProject(activePath);
+    project ||= await readHtmlProject(activePath);
   } catch (error) {
     if (error?.code === "ENOENT") {
       throw new ProjectFileError(
@@ -381,6 +479,19 @@ async function getActiveProject() {
     }
     throw error;
   }
+  const [activePathIdentity, welcomePathIdentity, projectSourceIdentity] =
+    await Promise.all([
+      existingPathIdentity(activePath),
+      existingPathIdentity(welcomeSourcePath),
+      existingPathIdentity(project.sourcePath),
+    ]);
+  if (activePathIdentity === welcomePathIdentity) {
+    const registrationKey = `${projectSourceIdentity}\0${project.sha256}`;
+    if (managedWelcomeRegistration !== registrationKey) {
+      await ensureBridgeProjectRegistered(project);
+    }
+  }
+  return project;
 }
 
 async function openHtml() {
@@ -401,8 +512,12 @@ async function openHtml() {
 
 async function assertKnownProjectPath(sourcePath) {
   const state = await loadProjectState();
-  const known = state.activePath === sourcePath
-    || state.recent.some((entry) => entry.path === sourcePath);
+  const requestedIdentity = await existingPathIdentity(sourcePath);
+  const knownIdentities = await Promise.all([
+    state.activePath,
+    ...state.recent.map((entry) => entry.path),
+  ].filter(Boolean).map(existingPathIdentity));
+  const known = knownIdentities.includes(requestedIdentity);
   if (!known) {
     throw new ProjectFileError(
       "UNKNOWN_SOURCE",
@@ -472,13 +587,17 @@ async function activateGeneratedVersion(payload) {
   }
 
   const state = await loadProjectState();
-  const knownPaths = new Set([
+  const [resolvedPreviousPath, resolvedNextPath] = await Promise.all([
+    realpath(previousSourcePath),
+    realpath(nextSourcePath),
+  ]);
+  const knownPathIdentities = new Set(await Promise.all([
     state.activePath,
     ...state.recent.map((entry) => entry.path),
-  ].filter(Boolean));
+  ].filter(Boolean).map(existingPathIdentity)));
   if (
-    !knownPaths.has(previousSourcePath)
-    && !knownPaths.has(nextSourcePath)
+    !knownPathIdentities.has(resolvedPreviousPath)
+    && !knownPathIdentities.has(resolvedNextPath)
   ) {
     throw new ProjectFileError(
       "UNKNOWN_SOURCE",
@@ -494,7 +613,7 @@ async function activateGeneratedVersion(payload) {
   }
 
   const sourceEndpoint = new URL(`http://127.0.0.1:${bridgePort}/source`);
-  sourceEndpoint.searchParams.set("sourcePath", previousSourcePath);
+  sourceEndpoint.searchParams.set("sourcePath", resolvedPreviousPath);
   const sourceResponse = await net.fetch(sourceEndpoint, {
     cache: "no-store",
     headers: {
@@ -516,10 +635,8 @@ async function activateGeneratedVersion(payload) {
       "项目记录无法确认这个 AI 新版本，当前文件没有切换。",
     );
   }
-  if (
-    path.resolve(authoritativeSource.sourcePath)
-    !== path.resolve(nextSourcePath)
-  ) {
+  const authoritativeSourcePath = await realpath(authoritativeSource.sourcePath);
+  if (authoritativeSourcePath !== resolvedNextPath) {
     throw new ProjectFileError(
       "GENERATED_VERSION_PATH_MISMATCH",
       "新版本路径与项目记录不一致，当前文件没有切换。",
@@ -530,10 +647,7 @@ async function activateGeneratedVersion(payload) {
     );
   }
 
-  const [workspaceRoot, resolvedNextPath] = await Promise.all([
-    workspacePath().then((value) => realpath(value)),
-    realpath(nextSourcePath),
-  ]);
+  const workspaceRoot = await workspacePath().then((value) => realpath(value));
   const relativeNextPath = path.relative(workspaceRoot, resolvedNextPath);
   const pathParts = relativeNextPath.split(path.sep);
   if (
@@ -569,13 +683,19 @@ async function activateGeneratedVersion(payload) {
   }
 
   const now = Date.now();
+  const activePathIdentity = state.activePath
+    ? await existingPathIdentity(state.activePath)
+    : null;
+  const recentPathIdentities = await Promise.all(
+    state.recent.map((entry) => existingPathIdentity(entry.path)),
+  );
   const activatesCurrentProject =
-    state.activePath === previousSourcePath
-    || state.activePath === resolvedNextPath;
-  const replacedIndex = state.recent.findIndex(
-    (entry) =>
-      entry.path === previousSourcePath
-      || entry.path === resolvedNextPath,
+    activePathIdentity === resolvedPreviousPath
+    || activePathIdentity === resolvedNextPath;
+  const replacedIndex = recentPathIdentities.findIndex(
+    (identity) =>
+      identity === resolvedPreviousPath
+      || identity === resolvedNextPath,
   );
   const replacedEntry = replacedIndex >= 0
     ? state.recent[replacedIndex]
@@ -590,9 +710,9 @@ async function activateGeneratedVersion(payload) {
       : replacedEntry?.lastOpenedAt ?? now,
   };
   const retained = state.recent.filter(
-    (entry) =>
-      entry.path !== previousSourcePath
-      && entry.path !== resolvedNextPath,
+    (_entry, index) =>
+      recentPathIdentities[index] !== resolvedPreviousPath
+      && recentPathIdentities[index] !== resolvedNextPath,
   );
   if (activatesCurrentProject) {
     state.activePath = resolvedNextPath;
@@ -611,7 +731,7 @@ async function activateGeneratedVersion(payload) {
   await persistProjectState();
   return {
     ...project,
-    previousSourcePath,
+    previousSourcePath: resolvedPreviousPath,
     versionId: payload.versionId,
   };
 }
@@ -826,18 +946,25 @@ async function exportHtmlCopy(payload) {
 
 async function listRecentProjects() {
   const state = await loadProjectState();
-  return state.recent.map((entry) => ({
-    path: entry.path,
-    sourcePath: entry.path,
-    name: entry.name,
-    lastOpenedAt: entry.lastOpenedAt,
+  return Promise.all(state.recent.map(async (entry) => {
+    const sourcePath = await existingPathIdentity(entry.path);
+    return {
+      path: sourcePath,
+      sourcePath,
+      name: entry.name,
+      lastOpenedAt: entry.lastOpenedAt,
+    };
   }));
 }
 
 async function openRecent(filePath) {
   const normalizedPath = assertHtmlPath(filePath);
   const state = await loadProjectState();
-  if (!state.recent.some((entry) => entry.path === normalizedPath)) {
+  const requestedIdentity = await existingPathIdentity(normalizedPath);
+  const recentIdentities = await Promise.all(
+    state.recent.map((entry) => existingPathIdentity(entry.path)),
+  );
+  if (!recentIdentities.includes(requestedIdentity)) {
     throw new ProjectFileError(
       "NOT_RECENT_PROJECT",
       "该文件已从最近项目中移除，请用“打开本地 HTML”重新选择。",
@@ -846,12 +973,18 @@ async function openRecent(filePath) {
 
   try {
     const project = await readHtmlProject(normalizedPath);
-    await activateProject(normalizedPath);
+    await activateProject(project.sourcePath);
     return project;
   } catch (error) {
     if (error?.code === "ENOENT") await forgetProject(normalizedPath);
     throw error;
   }
+}
+
+async function forgetRecentProject(filePath) {
+  const normalizedPath = assertHtmlPath(filePath);
+  await forgetProject(normalizedPath);
+  return { sourcePath: normalizedPath };
 }
 
 async function checkForUpdates() {
@@ -905,8 +1038,8 @@ function scheduleAutomaticUpdateCheck() {
   updateCheckTimer.unref?.();
 }
 
-async function openProjectRepository() {
-  await shell.openExternal(PROJECT_REPOSITORY_URL);
+async function openLatestRelease() {
+  await shell.openExternal(LATEST_RELEASE_PAGE_URL);
   return { opened: true };
 }
 
@@ -961,6 +1094,7 @@ function registerProjectIpc() {
   ipcMain.handle(PROJECT_CHANNELS.revealRequestFolder, trustedProject(revealRequestFolder));
   ipcMain.handle(PROJECT_CHANNELS.listRecentProjects, trustedProject(listRecentProjects));
   ipcMain.handle(PROJECT_CHANNELS.openRecent, trustedProject(openRecent));
+  ipcMain.handle(PROJECT_CHANNELS.forgetRecent, trustedProject(forgetRecentProject));
   ipcMain.handle(
     INTEGRATION_CHANNELS.qoderHandoff,
     trustedProject((payload) => {
@@ -984,10 +1118,16 @@ function registerProjectIpc() {
     trustedProject(() => latestUpdateResult),
   );
   ipcMain.handle(
-    UPDATE_CHANNELS.openRepository,
-    trustedProject(openProjectRepository),
+    UPDATE_CHANNELS.openLatestRelease,
+    trustedProject(openLatestRelease),
   );
   ipcMain.handle(APP_CHANNELS.closeResult, trusted(reportCloseResult));
+  ipcMain.handle(
+    APP_CHANNELS.relaunch,
+    trusted(async () => ({
+      relaunched: await coordinateApplicationRelaunch("user-relaunch"),
+    })),
+  );
 }
 
 function findAvailablePort() {
@@ -1145,6 +1285,7 @@ function unregisterIpc() {
     ...Object.values(INTEGRATION_CHANNELS),
     ...Object.values(UPDATE_CHANNELS),
     APP_CHANNELS.closeResult,
+    APP_CHANNELS.relaunch,
   ]) {
     ipcMain.removeHandler(channel);
   }
@@ -1197,6 +1338,83 @@ async function coordinateApplicationExit(reason) {
     return false;
   });
   return coordinatedExit;
+}
+
+async function coordinateApplicationRelaunch(reason) {
+  if (coordinatedExit) return false;
+  coordinatedExit = (async () => {
+    const result = await requestRendererClose(reason);
+    if (!result.ready) {
+      notifyRendererCloseAborted(result.requestId, result.reason);
+      const messageBoxOptions = {
+        type: "warning",
+        title: "重新打开前还需要一步",
+        message: "当前页面还有内容没有完成安全写入。",
+        detail: `${result.reason || "请先确认当前编辑状态。"}\n\n可返回源页导出当前编辑，再重新打开。`,
+        buttons: ["返回源页"],
+        defaultId: 0,
+        noLink: true,
+      };
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        await dialog.showMessageBox(mainWindow, messageBoxOptions);
+      } else {
+        await dialog.showMessageBox(messageBoxOptions);
+      }
+      coordinatedExit = null;
+      return false;
+    }
+
+    isQuitting = true;
+    await stateWriteQueue.catch(() => {});
+    if (bridgeProcess) await stopBridgeGracefully().catch(() => {});
+    unregisterIpc();
+    finalExitStarted = true;
+    app.relaunch();
+    setImmediate(() => app.exit(0));
+    return true;
+  })().catch((error) => {
+    coordinatedExit = null;
+    isQuitting = false;
+    dialog.showErrorBox(
+      "暂时无法重新打开源页",
+      error instanceof Error ? error.message : String(error),
+    );
+    return false;
+  });
+  return coordinatedExit;
+}
+
+async function showWorkspaceUnavailableRecovery() {
+  const issue = {
+    title: "本地项目资料暂时不可用",
+    message: "当前页面内容仍保留。可先导出当前编辑，再重新打开源页恢复本地服务。",
+  };
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(APP_CHANNELS.workspaceUnavailable, issue);
+  }
+  if (workspaceFailurePrompt) return workspaceFailurePrompt;
+  const options = {
+    type: "warning",
+    title: issue.title,
+    message: "源页的本地项目服务已停止。",
+    detail: "当前窗口中的内容仍保留。返回源页可先导出当前编辑；若没有待保存内容，也可以直接重新打开。",
+    buttons: ["返回源页处理", "重新打开源页"],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true,
+  };
+  workspaceFailurePrompt = (
+    mainWindow && !mainWindow.isDestroyed()
+      ? dialog.showMessageBox(mainWindow, options)
+      : dialog.showMessageBox(options)
+  ).then(async (result) => {
+    if (result.response === 1) {
+      await coordinateApplicationRelaunch("workspace-unavailable");
+    }
+  }).finally(() => {
+    workspaceFailurePrompt = null;
+  });
+  return workspaceFailurePrompt;
 }
 
 async function workspacePath() {
@@ -1288,10 +1506,7 @@ async function startBridge() {
       bridgePort = null;
       if (!settled) finish(new Error(`本地工作区服务意外退出（${code}）。${errorOutput ? `\n${errorOutput}` : ""}`));
       else if (!isQuitting) {
-        dialog.showErrorBox(
-          "本地工作区服务已停止",
-          "请重新打开源页。现有项目文件不会丢失。",
-        );
+        void showWorkspaceUnavailableRecovery();
       }
     });
 
@@ -1312,7 +1527,7 @@ async function createWindow() {
     minHeight: 720,
     backgroundColor: "#f7f8fa",
     title: "源页",
-    show: false,
+    show: process.env.PAGEROOT_E2E === "1",
     ...(process.platform === "darwin"
       ? {
           titleBarStyle: "hiddenInset",
@@ -1328,6 +1543,9 @@ async function createWindow() {
       nodeIntegration: false,
       sandbox: true,
       webSecurity: true,
+      ...(process.env.PAGEROOT_E2E === "1"
+        ? { backgroundThrottling: false }
+        : {}),
     },
   });
 

@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
   lstat,
+  mkdir,
   open,
   readFile,
   rename,
@@ -8,11 +9,20 @@ import {
   unlink,
 } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { PRODUCT_MAX_HTML_BYTES } from "./product-contract.mjs";
+import {
+  DEFAULT_PROJECT_HTML,
+  WELCOME_LOGO_RELATIVE_PATH,
+  WELCOME_PROJECT_NAME,
+} from "./welcome-project-content.mjs";
 
 const DEFAULT_MAX_HTML_BYTES = PRODUCT_MAX_HTML_BYTES;
 const SHA256_PATTERN = /^sha256:[a-f0-9]{64}$/;
+const WELCOME_LOGO_SOURCE_PATH = fileURLToPath(
+  new URL("../public/brand-logo.png", import.meta.url),
+);
 const perSourceQueues = new Map();
 const lastPersistedStates = new Map();
 
@@ -169,6 +179,60 @@ async function syncDirectory(directoryPath) {
   }
 }
 
+async function ensureManagedWelcomeLogo(sourceDirectory) {
+  const logoBytes = await readFile(WELCOME_LOGO_SOURCE_PATH);
+  const expectedSha256 = createHash("sha256").update(logoBytes).digest("hex");
+  const destinationPath = path.join(
+    sourceDirectory,
+    WELCOME_LOGO_RELATIVE_PATH,
+  );
+  await mkdir(path.dirname(destinationPath), { recursive: true });
+
+  let handle;
+  try {
+    handle = await open(destinationPath, "wx", 0o600);
+  } catch (error) {
+    if (error?.code !== "EEXIST") throw error;
+  }
+  if (handle) {
+    try {
+      await handle.writeFile(logoBytes);
+      await handle.sync();
+      await handle.close();
+      handle = null;
+      await syncDirectory(path.dirname(destinationPath));
+    } catch (error) {
+      await handle?.close().catch(() => {});
+      await unlink(destinationPath).catch(() => {});
+      throw error;
+    }
+  }
+
+  const information = await lstat(destinationPath);
+  if (!information.isFile() || information.isSymbolicLink()) {
+    throw new ProjectFileError(
+      "WELCOME_ASSET_UNSAFE",
+      "欢迎页 Logo 必须是源页建立的普通文件。",
+      { destinationPath },
+    );
+  }
+  const actualBytes = await readFile(destinationPath);
+  const actualSha256 = createHash("sha256")
+    .update(actualBytes)
+    .digest("hex");
+  if (actualSha256 !== expectedSha256) {
+    throw new ProjectFileError(
+      "WELCOME_ASSET_MISMATCH",
+      "欢迎页 Logo 与当前源页版本不一致。",
+      {
+        destinationPath,
+        expectedSha256,
+        actualSha256,
+      },
+    );
+  }
+}
+
 async function writeTemporaryHtml({
   sourcePath,
   html,
@@ -236,6 +300,72 @@ export async function readHtmlFile({
     path: resolvedPath,
     name: path.basename(resolvedPath),
     ...snapshot,
+  };
+}
+
+export function managedWelcomeSourcePath(workspaceRoot) {
+  if (
+    typeof workspaceRoot !== "string"
+    || !workspaceRoot.trim()
+    || workspaceRoot.includes("\0")
+  ) {
+    throw new TypeError("欢迎页工作区路径无效。");
+  }
+  const resolvedWorkspaceRoot = path.resolve(workspaceRoot);
+  if (resolvedWorkspaceRoot === path.parse(resolvedWorkspaceRoot).root) {
+    throw new TypeError("欢迎页工作区不能是文件系统根目录。");
+  }
+  return path.join(path.dirname(resolvedWorkspaceRoot), WELCOME_PROJECT_NAME);
+}
+
+export async function ensureManagedWelcomeHtml({
+  workspaceRoot,
+  maxHtmlBytes = DEFAULT_MAX_HTML_BYTES,
+}) {
+  const sourcePath = managedWelcomeSourcePath(workspaceRoot);
+  validateHtml(DEFAULT_PROJECT_HTML, maxHtmlBytes);
+  const sourceDirectory = path.dirname(sourcePath);
+  await mkdir(sourceDirectory, { recursive: true });
+  await ensureManagedWelcomeLogo(sourceDirectory);
+
+  let handle;
+  let created = false;
+  try {
+    handle = await open(sourcePath, "wx", 0o600);
+  } catch (error) {
+    if (error?.code !== "EEXIST") throw error;
+  }
+  if (handle) {
+    try {
+      await handle.writeFile(DEFAULT_PROJECT_HTML, "utf8");
+      await handle.sync();
+      await handle.close();
+      handle = null;
+      await syncDirectory(path.dirname(sourcePath));
+      created = true;
+    } catch (error) {
+      await handle?.close().catch(() => {});
+      await unlink(sourcePath).catch(() => {});
+      throw error;
+    }
+  }
+
+  const project = await readHtmlFile({ sourcePath, maxHtmlBytes });
+  if (created && project.sha256 !== htmlSha256(DEFAULT_PROJECT_HTML)) {
+    throw new ProjectFileError(
+      "WELCOME_SOURCE_MISMATCH",
+      "欢迎页写入后的内容校验失败。",
+      {
+        sourcePath,
+        expectedSha256: htmlSha256(DEFAULT_PROJECT_HTML),
+        actualSha256: project.sha256,
+      },
+    );
+  }
+  return {
+    ...project,
+    created,
+    managedWelcome: true,
   };
 }
 

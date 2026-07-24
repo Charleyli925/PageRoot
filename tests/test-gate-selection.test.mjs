@@ -123,6 +123,21 @@ test("release and artifact lanes use complete automated coverage and never smoke
     )),
     false,
   );
+
+  const main = assertFullyAutomatedPlan(selectGatePlan({ map, lane: "main" }));
+  assert.deepEqual(suiteIds(main), [
+    "node-smoke",
+    "build-web",
+    "browser-smoke",
+  ]);
+
+  const artifactOnly = assertFullyAutomatedPlan(selectGatePlan({ map, lane: "artifact-only" }));
+  assert.deepEqual(suiteIds(artifactOnly), [
+    "build-desktop",
+    "package-build",
+    "packaged-runtime",
+    "packaged-verify",
+  ]);
 });
 
 test("Node groups partition every top-level test exactly once outside full", async () => {
@@ -138,4 +153,12 @@ test("Node groups partition every top-level test exactly once outside full", asy
   assert.deepEqual([...new Set(categorized)].sort(), groups.full.map(relative).sort());
   assert.ok(groups.contract.some((file) => file.endsWith("workbench-shell-ux.test.mjs")));
   assert.ok(groups.package.some((file) => file.endsWith("packaged-artifact-gate.test.mjs")));
+  assert.deepEqual(
+    groups.smoke.map(relative).sort(),
+    [
+      "product-contract.test.mjs",
+      "scope-validator.test.mjs",
+      "source-patch-engine.test.mjs",
+    ],
+  );
 });

@@ -13,6 +13,11 @@ export const acceptedAdvisories = Object.freeze({
     url: "https://github.com/advisories/GHSA-qx2v-qp2m-jg93",
     expiresOn: "2026-08-31",
   }),
+  1124252: Object.freeze({
+    package: "postcss",
+    url: "https://github.com/advisories/GHSA-6g55-p6wh-862q",
+    expiresOn: "2026-08-31",
+  }),
   1124066: Object.freeze({
     package: "sharp",
     url: "https://github.com/advisories/GHSA-f88m-g3jw-g9cj",
