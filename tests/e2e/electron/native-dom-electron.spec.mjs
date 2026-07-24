@@ -152,13 +152,19 @@ async function closePageRootGracefully(electronApp) {
   await closed;
 }
 
+async function waitForProjectReady(page, timeout = 30_000) {
+  await expect.poll(async () => {
+    await page.bringToFront();
+    return page.locator("main.workbench").getAttribute("data-project-state");
+  }, { timeout }).toBe("ready");
+}
+
 async function loadedDiskFrame(page, sourcePath, caseId) {
   await expect.poll(
     async () => (await page.evaluate(() => window.htmlAIProjects?.getActiveProject()))?.sourcePath,
     { timeout: 15_000 },
   ).toBe(realpathSync(sourcePath));
-  await expect(page.locator('main[data-project-state="ready"]'))
-    .toBeVisible({ timeout: 30_000 });
+  await waitForProjectReady(page);
   await expect(page.locator('[aria-label="项目读取失败"]')).toHaveCount(0);
   await expect(page.getByRole("button", { name: "项目", exact: true }))
     .toBeEnabled({ timeout: 30_000 });
@@ -305,8 +311,7 @@ test("Electron first launch registers the welcome HTML and sends its comment to 
       realpathSync(launched.isolatedUserData),
       "欢迎来到源页.html",
     );
-    await expect(launched.page.locator('main[data-project-state="ready"]'))
-      .toBeVisible({ timeout: 30_000 });
+    await waitForProjectReady(launched.page);
     await expect.poll(
       async () => (
         await launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject())

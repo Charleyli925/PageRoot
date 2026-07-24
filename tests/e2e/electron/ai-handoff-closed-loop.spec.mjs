@@ -180,14 +180,20 @@ function removeSourceFixture(sourceDirectory) {
   });
 }
 
+async function waitForProjectReady(page, timeout = 60_000) {
+  await expect.poll(async () => {
+    await page.bringToFront();
+    return page.locator("main.workbench").getAttribute("data-project-state");
+  }, { timeout }).toBe("ready");
+}
+
 async function loadedDiskFrame(page, sourcePath, { editable = true } = {}) {
   const canonicalSourcePath = realpathSync(sourcePath);
   await expect.poll(
     async () => (await page.evaluate(() => window.htmlAIProjects?.getActiveProject()))?.sourcePath,
     { timeout: 20_000 },
   ).toBe(canonicalSourcePath);
-  await expect(page.locator('main[data-project-state="ready"]'))
-    .toBeVisible({ timeout: 60_000 });
+  await waitForProjectReady(page);
   await expect(page.locator('[aria-label="项目读取失败"]')).toHaveCount(0);
   // The former loading card is no longer rendered, so its absence cannot
   // prove that hydration finished. Wait on the actual interaction boundary
