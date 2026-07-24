@@ -76,7 +76,19 @@ async function launchPageRoot({
     },
   });
   const page = await electronApp.firstWindow();
+  await electronApp.evaluate(({ app, BrowserWindow }) => {
+    const window = BrowserWindow.getAllWindows()[0];
+    window?.webContents.setBackgroundThrottling(false);
+    window?.show();
+    app.focus({ steal: true });
+    window?.focus();
+  });
+  await page.bringToFront();
   await page.waitForLoadState("domcontentloaded");
+  await page.waitForFunction(() => document.visibilityState === "visible");
+  await page.evaluate(() => new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  }));
   return { electronApp, page, isolatedUserData, workspace };
 }
 
@@ -174,6 +186,8 @@ async function loadedDiskFrame(page, sourcePath, { editable = true } = {}) {
     async () => (await page.evaluate(() => window.htmlAIProjects?.getActiveProject()))?.sourcePath,
     { timeout: 20_000 },
   ).toBe(canonicalSourcePath);
+  await expect(page.locator('main[data-project-state="ready"]'))
+    .toBeVisible({ timeout: 60_000 });
   await expect(page.locator('[aria-label="项目读取失败"]')).toHaveCount(0);
   // The former loading card is no longer rendered, so its absence cannot
   // prove that hydration finished. Wait on the actual interaction boundary

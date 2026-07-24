@@ -32,6 +32,11 @@ test("startup welcome HTML is provisioned as a normal registered project", () =>
   assert.match(mainProcess, /ensureBridgeProjectRegistered/);
   assert.match(mainProcess, /\/project\/ensure/);
   assert.match(mainProcess, /workspace\.registered !== true/);
+  assert.match(workbench, /data-project-state=\{/);
+  assert.match(
+    workbench,
+    /projectHydrating[\s\S]*?"hydrating"[\s\S]*?sourcePath[\s\S]*?"ready"/,
+  );
   assert.doesNotMatch(mainProcess, /if \(!activePath\) return null/);
   assert.match(sampleHtml, /<title>源页 · PageRoot<\/title>/);
   assert.match(

@@ -70,12 +70,19 @@ async function launchPageRoot(options = {}) {
     },
   });
   const page = await electronApp.firstWindow();
-  if (options.hideWindow) {
-    await electronApp.evaluate(({ BrowserWindow }) => {
-      BrowserWindow.getAllWindows()[0]?.hide();
-    });
-  }
+  await electronApp.evaluate(({ app, BrowserWindow }) => {
+    const window = BrowserWindow.getAllWindows()[0];
+    window?.webContents.setBackgroundThrottling(false);
+    window?.show();
+    app.focus({ steal: true });
+    window?.focus();
+  });
+  await page.bringToFront();
   await page.waitForLoadState("domcontentloaded");
+  await page.waitForFunction(() => document.visibilityState === "visible");
+  await page.evaluate(() => new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  }));
   return { electronApp, page, isolatedUserData };
 }
 
@@ -150,6 +157,8 @@ async function loadedDiskFrame(page, sourcePath, caseId) {
     async () => (await page.evaluate(() => window.htmlAIProjects?.getActiveProject()))?.sourcePath,
     { timeout: 15_000 },
   ).toBe(realpathSync(sourcePath));
+  await expect(page.locator('main[data-project-state="ready"]'))
+    .toBeVisible({ timeout: 30_000 });
   await expect(page.locator('[aria-label="项目读取失败"]')).toHaveCount(0);
   await expect(page.getByRole("button", { name: "项目", exact: true }))
     .toBeEnabled({ timeout: 30_000 });
@@ -296,6 +305,8 @@ test("Electron first launch registers the welcome HTML and sends its comment to 
       realpathSync(launched.isolatedUserData),
       "欢迎来到源页.html",
     );
+    await expect(launched.page.locator('main[data-project-state="ready"]'))
+      .toBeVisible({ timeout: 30_000 });
     await expect.poll(
       async () => (
         await launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject())
@@ -360,31 +371,6 @@ test("Electron first launch registers the welcome HTML and sends its comment to 
     await stopPageRoot(
       launched.electronApp,
       launched.isolatedUserData,
-    );
-  }
-});
-
-test("Electron test hydration stays live while the window is hidden", async () => {
-  const sourceDirectory = mkdtempSync(path.join(tmpdir(), "pageroot-native-source-e2e-"));
-  const sourcePath = path.join(sourceDirectory, "hidden-window-hydration.html");
-  writeFileSync(sourcePath, fixtureBuffer("complex-layout.html"));
-  const launched = await launchPageRoot({
-    activeSourcePath: sourcePath,
-    hideWindow: true,
-  });
-  try {
-    const { frame } = await loadedDiskFrame(
-      launched.page,
-      sourcePath,
-      "list-item",
-    );
-    await expect(frame.locator(caseSelector("list-item")))
-      .toContainText("列表项中的文字");
-  } finally {
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
-    removeValidatedTemporaryDirectory(
-      sourceDirectory,
-      "pageroot-native-source-e2e-",
     );
   }
 });

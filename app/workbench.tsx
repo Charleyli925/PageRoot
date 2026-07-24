@@ -8869,6 +8869,15 @@ export default function Workbench() {
       className="workbench"
       data-round-state={runInProgress ? "processing" : viewMode}
       data-canvas-mode={canvasMode}
+      data-project-state={
+        projectLoadError
+          ? "failed"
+          : projectHydrating
+            ? "hydrating"
+            : sourcePath
+              ? "ready"
+              : "unbound"
+      }
       aria-label="HTML AI 可视化编辑工作台"
     >
       <header className="workbench-header">
