@@ -155,7 +155,11 @@ async function closePageRootGracefully(electronApp) {
 async function waitForProjectReady(page, timeout = 30_000) {
   await expect.poll(async () => {
     await page.bringToFront();
-    return page.locator("main.workbench").getAttribute("data-project-state");
+    const state = await page.locator("main.workbench").getAttribute("data-project-state");
+    if (state === "ready") return state;
+    const stage = await page.locator("html")
+      .getAttribute("data-pageroot-hydration-stage");
+    return `${state}:${stage || "unmarked"}`;
   }, { timeout }).toBe("ready");
 }
 

@@ -491,6 +491,11 @@ function bridgeFetch(
   return fetch(input, { ...init, headers, signal });
 }
 
+function markProjectHydrationStage(stage: string): void {
+  if (typeof document === "undefined") return;
+  document.documentElement.setAttribute("data-pageroot-hydration-stage", stage);
+}
+
 const WELCOME_PROJECT = {
   name: WELCOME_PROJECT_NAME,
   sourcePath: null as string | null,
@@ -3344,6 +3349,7 @@ export default function Workbench() {
     let mustAdoptAuthoritativeSource = hydrationSourceTransitionAuthorized;
     let recoveredAutosaveConflict = false;
     try {
+      markProjectHydrationStage("workspace-request");
       if (projectHydratingRef.current && !hydrationSourceTransitionAuthorized) {
         throw new Error("这次项目读取缺少与当前项目一致的源码切换令牌。");
       }
@@ -3354,7 +3360,9 @@ export default function Workbench() {
         { cache: "no-store" },
         BRIDGE_STATE_READ_TIMEOUT_MS,
       );
+      markProjectHydrationStage("workspace-response");
       const payload = await readJsonResponse(response);
+      markProjectHydrationStage("workspace-parsed");
       if (!response.ok) throw responseError(payload, "本地项目记录不可用。");
       if (
         epoch !== projectEpochRef.current
@@ -3443,6 +3451,7 @@ export default function Workbench() {
       const workspaceHash = String(payload.currentHtmlSha256 || "");
       let authoritativeSourceHash = workspaceHash;
       if (mustAdoptAuthoritativeSource) {
+        markProjectHydrationStage("source-request");
         const sourceUrl = new URL(`${BRIDGE_URL}/source`);
         sourceUrl.searchParams.set("sourcePath", activeSource);
         const sourceResponse = await bridgeFetch(
@@ -3450,7 +3459,9 @@ export default function Workbench() {
           { cache: "no-store" },
           BRIDGE_STATE_READ_TIMEOUT_MS,
         );
+        markProjectHydrationStage("source-response");
         const sourcePayload = await readJsonResponse(sourceResponse);
+        markProjectHydrationStage("source-parsed");
         if (!sourceResponse.ok) {
           throw responseError(sourcePayload, "无法核对打开项目的最新源 HTML。");
         }
@@ -3462,6 +3473,7 @@ export default function Workbench() {
         }
         const authoritativeHtml = String(sourcePayload.content || "");
         authoritativeSourceHash = String(sourcePayload.sha256 || "");
+        markProjectHydrationStage("source-hash");
         if (
           !authoritativeSourceHash
           || await browserSha256(authoritativeHtml) !== authoritativeSourceHash
@@ -3603,6 +3615,7 @@ export default function Workbench() {
         }
       }
       if (hydrationSourceTransitionAuthorized && authoritativeSourceHash) {
+        markProjectHydrationStage("recovery");
         const context: ProjectContext = {
           epoch,
           projectId: nextProjectId,
@@ -3666,8 +3679,10 @@ export default function Workbench() {
         }
       }
       if (mustAdoptAuthoritativeSource) {
+        markProjectHydrationStage("canvas-hash");
         const expectedCanvasHtml = htmlRef.current;
         const expectedCanvasHash = await browserSha256(expectedCanvasHtml);
+        markProjectHydrationStage("canvas-verify");
         await verifyCanvasRendered(expectedCanvasHtml, expectedCanvasHash, {
           epoch,
           projectId: nextProjectId,
@@ -3697,6 +3712,7 @@ export default function Workbench() {
       setProjectHydrating(false);
       setProjectLoadError(null);
       setBridgeConnected(true);
+      markProjectHydrationStage("ready");
       if (sourceBoundaryFrozen && !recoveredAutosaveConflict && !projectLockedRef.current) {
         window.requestAnimationFrame(() => editorRef.current?.unlockNow?.());
       }
@@ -3712,6 +3728,7 @@ export default function Workbench() {
         setProjectLoadError(message);
         setRenderedContentSha256(null);
         setBridgeConnected(false);
+        markProjectHydrationStage("failed");
       }
     } finally {
       // Every authorized hydration must release its own lock, including a
@@ -3725,6 +3742,7 @@ export default function Workbench() {
       ) {
         projectHydratingRef.current = false;
         setProjectHydrating(false);
+        markProjectHydrationStage("released");
       }
     }
   }, [
