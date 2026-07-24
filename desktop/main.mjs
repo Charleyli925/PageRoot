@@ -1518,7 +1518,7 @@ async function createWindow() {
     minHeight: 720,
     backgroundColor: "#f7f8fa",
     title: "源页",
-    show: false,
+    show: process.env.PAGEROOT_E2E === "1",
     ...(process.platform === "darwin"
       ? {
           titleBarStyle: "hiddenInset",
@@ -1534,6 +1534,9 @@ async function createWindow() {
       nodeIntegration: false,
       sandbox: true,
       webSecurity: true,
+      ...(process.env.PAGEROOT_E2E === "1"
+        ? { backgroundThrottling: false }
+        : {}),
     },
   });
 
