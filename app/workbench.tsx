@@ -11,6 +11,7 @@ import {
   useState,
   type ChangeEvent,
   type ClipboardEvent,
+  type ReactNode,
 } from "react";
 import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowCounterClockwise";
 import { CaretRightIcon } from "@phosphor-icons/react/dist/csr/CaretRight";
@@ -1394,6 +1395,85 @@ function isLockedLifecycle(state: LifecycleState | undefined): boolean {
 function noticeReducer(current: Toast, next: Toast): Toast {
   if (!shouldPresentNotice(next)) return current;
   return shouldReplaceNotice(current, next) ? next : current;
+}
+
+const PREVIEW_NAVIGATION_AUTO_COLLAPSE_MS = 3_500;
+
+function PreviewNavigationBanner({
+  icon,
+  title,
+  detail,
+  actionLabel,
+  actionDisabled = false,
+  className,
+  onAction,
+}: {
+  icon: ReactNode;
+  title: ReactNode;
+  detail: ReactNode;
+  actionLabel: string;
+  actionDisabled?: boolean;
+  className?: string;
+  onAction: () => void;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+  const [focusWithin, setFocusWithin] = useState(false);
+
+  useEffect(() => {
+    if (collapsed || focusWithin) return;
+    const timer = window.setTimeout(() => {
+      setCollapsed(true);
+    }, PREVIEW_NAVIGATION_AUTO_COLLAPSE_MS);
+    return () => window.clearTimeout(timer);
+  }, [collapsed, focusWithin]);
+
+  return (
+    <section
+      className={[
+        "history-view-banner",
+        "preview-navigation-banner",
+        className,
+      ].filter(Boolean).join(" ")}
+      data-collapsed={collapsed ? "true" : "false"}
+      role="status"
+      onMouseEnter={() => setCollapsed(false)}
+      onMouseMove={() => {
+        if (collapsed) setCollapsed(false);
+      }}
+      onFocusCapture={() => {
+        setFocusWithin(true);
+        setCollapsed(false);
+      }}
+      onBlurCapture={(event) => {
+        const next = event.relatedTarget;
+        if (!(next instanceof Node) || !event.currentTarget.contains(next)) {
+          setFocusWithin(false);
+        }
+      }}
+    >
+      <div>
+        {icon}
+        <span>
+          <strong>{title}</strong>
+          <small>{detail}</small>
+        </span>
+      </div>
+      <button
+        type="button"
+        disabled={actionDisabled}
+        onClick={onAction}
+      >
+        <ArrowCounterClockwiseIcon aria-hidden="true" size={15} weight="bold" />
+        {actionLabel}
+      </button>
+      <button
+        className="preview-banner-reveal"
+        type="button"
+        aria-label="显示预览导航提示"
+        onClick={() => setCollapsed(false)}
+      />
+    </section>
+  );
 }
 
 function CommentAttachmentStrip({
@@ -8911,6 +8991,7 @@ export default function Workbench() {
       className="workbench"
       data-round-state={runInProgress ? "processing" : viewMode}
       data-canvas-mode={canvasMode}
+      data-handoff-preview={runInProgress && handoffPreviewOpen ? "true" : undefined}
       data-project-state={
         projectLoadError
           ? "failed"
@@ -9162,48 +9243,31 @@ export default function Workbench() {
       ) : null}
 
       {runInProgress && handoffPreviewOpen ? (
-        <section className="history-view-banner sent-preview-banner" role="status">
-          <div>
-            <EyeIcon aria-hidden="true" size={18} weight="duotone" />
-            <span>
-              <strong>正在预览已发送 HTML</strong>
-              <small>这是本轮冻结并复制给 Qoder 的只读内容</small>
-            </span>
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              setHandoffPreviewOpen(false);
-              setCanvasMode("edit");
-              setDrawer("handoff");
-            }}
-          >
-            <ArrowCounterClockwiseIcon aria-hidden="true" size={15} weight="bold" />
-            返回等待处理
-          </button>
-        </section>
+        <PreviewNavigationBanner
+          key={`handoff-${activeRun?.requestId || "pending"}-${activeRun?.attemptId || "pending"}`}
+          className="sent-preview-banner"
+          icon={<EyeIcon aria-hidden="true" size={18} weight="duotone" />}
+          title="正在预览已发送 HTML"
+          detail="这是本轮冻结并复制给 Qoder 的只读内容"
+          actionLabel="返回等待处理"
+          onAction={() => {
+            setHandoffPreviewOpen(false);
+            setCanvasMode("edit");
+            setDrawer("handoff");
+          }}
+        />
       ) : viewMode === "history" ? (
-        <section className="history-view-banner" role="status">
-          <div>
-            <ClockCounterClockwiseIcon aria-hidden="true" size={18} weight="duotone" />
-            <span>
-              <strong>正在浏览 {viewingVersion?.label || viewingVersionId}</strong>
-              <small>
-                {viewingVersion
-                  ? `只读 HTML 与 ${viewingVersion.comments.length} 条历史评论已在画布中展开`
-                  : "画布来自精确不可变版本文件"}
-              </small>
-            </span>
-          </div>
-          <button
-            type="button"
-            disabled={viewTransitioning}
-            onClick={() => void returnToCurrent()}
-          >
-            <ArrowCounterClockwiseIcon aria-hidden="true" size={15} weight="bold" />
-            回到当前版本
-          </button>
-        </section>
+        <PreviewNavigationBanner
+          key={`history-${viewingVersionId || "unknown"}`}
+          icon={<ClockCounterClockwiseIcon aria-hidden="true" size={18} weight="duotone" />}
+          title={<>正在浏览 {viewingVersion?.label || viewingVersionId}</>}
+          detail={viewingVersion
+            ? `只读 HTML 与 ${viewingVersion.comments.length} 条历史评论已在画布中展开`
+            : "画布来自精确不可变版本文件"}
+          actionLabel="回到当前版本"
+          actionDisabled={viewTransitioning}
+          onAction={() => void returnToCurrent()}
+        />
       ) : null}
 
       <div ref={reviewStageRef} className="review-scroll-stage">
