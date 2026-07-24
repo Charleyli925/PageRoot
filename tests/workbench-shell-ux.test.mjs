@@ -730,7 +730,7 @@ test("user-opened HTML stays lazily registered until a real project action", () 
   );
   assert.match(
     workbench,
-    /let activeComments = commentsRef\.current\.filter\(commentHasContent\)[\s\S]*?await ensureProjectRegistered\(\)[\s\S]*?activeComments = commentsRef\.current\.filter\(commentHasContent\)/,
+    /let activeComments = normalizeCurrentGlobalComments\(\)[\s\S]*?await ensureProjectRegistered\(\)[\s\S]*?activeComments = normalizeCurrentGlobalComments\(\)/,
   );
   assert.match(
     workbench,

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import ts from "typescript";
 
 const [workbench, styles, canvas, canvasStyles, notice, noticeStyles] = await Promise.all([
   readFile(new URL("../app/workbench.tsx", import.meta.url), "utf8"),
@@ -10,6 +11,19 @@ const [workbench, styles, canvas, canvasStyles, notice, noticeStyles] = await Pr
   readFile(new URL("../app/components/NoticeBar.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/components/NoticeBar.module.css", import.meta.url), "utf8"),
 ]);
+
+function literalProperty(object, name) {
+  const property = object.properties.find((candidate) => (
+    ts.isPropertyAssignment(candidate)
+    && ts.isIdentifier(candidate.name)
+    && candidate.name.text === name
+  ));
+  return property?.initializer;
+}
+
+function literalText(node) {
+  return node && ts.isStringLiteralLike(node) ? node.text : null;
+}
 
 test("global notifications expose severity, persistence and actions", () => {
   assert.match(workbench, /noticeAutoDismissMs\(toast\)/);
@@ -30,6 +44,47 @@ test("global notifications expose severity, persistence and actions", () => {
   assert.match(notice, /onMouseEnter=\{\(\) => onPauseChange\?\.\(true\)\}/);
   assert.match(notice, /onFocusCapture=\{\(\) => onPauseChange\?\.\(true\)\}/);
   assert.match(workbench, /setPausedNoticeIdentity\(paused \? noticeIdentity : null\)/);
+});
+
+test("literal critical notices always expose a concrete recovery action", () => {
+  const source = ts.createSourceFile(
+    "workbench.tsx",
+    workbench,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  );
+  const missing = [];
+  const visit = (node) => {
+    if (
+      ts.isCallExpression(node)
+      && ts.isIdentifier(node.expression)
+      && node.expression.text === "setToast"
+      && node.arguments[0]
+      && ts.isObjectLiteralExpression(node.arguments[0])
+    ) {
+      const object = node.arguments[0];
+      const tone = literalText(literalProperty(object, "tone"));
+      const sticky = literalProperty(object, "sticky")?.kind === ts.SyntaxKind.TrueKeyword;
+      const action = literalProperty(object, "action");
+      if ((tone === "error" || sticky) && !action) {
+        const { line } = source.getLineAndCharacterOfPosition(node.getStart(source));
+        missing.push(line + 1);
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  assert.deepEqual(
+    missing,
+    [],
+    `critical notices without a literal action at lines: ${missing.join(", ")}`,
+  );
+  assert.doesNotMatch(
+    workbench,
+    /label:\s*"(?:重试|处理第一条|查看|继续打开|重新打开)"/u,
+    "notice buttons must name the object or visible outcome",
+  );
 });
 
 test("redundant feedback was removed and comment persistence is contextual", () => {
@@ -148,7 +203,16 @@ test("blocking paths expose an in-context recovery instead of a dead end", () =>
   assert.match(workbench, /fileView\.error \?/);
   assert.match(workbench, />重试读取</);
   assert.match(workbench, /const finishTargetRelink = useCallback/);
-  assert.match(workbench, /重新选择目标/);
+  assert.match(workbench, /选择新位置/);
+  assert.match(workbench, /开始重新定位/);
+  assert.match(workbench, /resumeSubmissionAfterRelinkRef/);
+  assert.match(workbench, /normalizeCurrentGlobalComments/);
+  assert.match(workbench, /pendingProjectOpenRef/);
+  assert.match(workbench, /disposition: "defer-and-resume"/);
+  assert.match(
+    workbench,
+    /const pending = pendingProjectOpenRef\.current;[\s\S]*?void openProject\(pending\.recentPath\)/u,
+  );
   assert.match(workbench, /terminalRun \?/);
   assert.match(workbench, /返回编辑/);
   assert.match(workbench, /调整要求后重试/);

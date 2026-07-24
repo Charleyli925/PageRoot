@@ -190,7 +190,11 @@ async function waitForProjectReady(page, timeout = 60_000) {
   }, { timeout }).toBe("ready");
 }
 
-async function loadedDiskFrame(page, sourcePath, { editable = true } = {}) {
+async function loadedDiskFrame(
+  page,
+  sourcePath,
+  { editable = true, expectedCase = "list-item" } = {},
+) {
   const canonicalSourcePath = realpathSync(sourcePath);
   await expect.poll(
     async () => (await page.evaluate(() => window.htmlAIProjects?.getActiveProject()))?.sourcePath,
@@ -227,7 +231,7 @@ async function loadedDiskFrame(page, sourcePath, { editable = true } = {}) {
   if (!frame) throw new Error("PageRoot did not expose the Electron edit frame.");
   await frame.waitForFunction(
     (selector) => Boolean(document.querySelector(selector)),
-    caseSelector("list-item"),
+    caseSelector(expectedCase),
     { timeout: 60_000 },
   );
   return frame;
@@ -267,9 +271,11 @@ async function addCommentAndSubmit(
 
 async function addComment(page, sourcePath, text = (
   `只把这个列表项改为“${UPDATED_TEXT}”，其他地方保持不变。`
-)) {
+), targetCase = "list-item") {
   const frame = await loadedDiskFrame(page, sourcePath);
-  const target = frame.locator(caseSelector("list-item"));
+  const target = frame.locator(caseSelector(targetCase));
+  await page.keyboard.press("Escape");
+  await frame.locator("body").click({ position: { x: 2, y: 2 } });
   await target.scrollIntoViewIfNeeded();
   await target.click();
   const commentButton = page.getByRole("button", { name: /给.+留评论/u })
@@ -313,6 +319,46 @@ function requestDirectoryCount(workspace) {
         : 0
     );
   }, 0);
+}
+
+function workspaceContainsDraftComment(workspace, text) {
+  const projectsRoot = path.join(workspace, "projects");
+  if (!existsSync(projectsRoot)) return false;
+  return readdirSync(projectsRoot).some((projectId) => {
+    const draftPath = path.join(
+      projectsRoot,
+      projectId,
+      "draft",
+      "annotations.json",
+    );
+    if (!existsSync(draftPath)) return false;
+    const draft = JSON.parse(readFileSync(draftPath, "utf8"));
+    return Array.isArray(draft.comments)
+      && draft.comments.some((comment) => comment.text === text);
+  });
+}
+
+function rewriteWorkspaceDraftComment(workspace, text, update) {
+  const projectsRoot = path.join(workspace, "projects");
+  if (!existsSync(projectsRoot)) return false;
+  for (const projectId of readdirSync(projectsRoot)) {
+    const draftPath = path.join(
+      projectsRoot,
+      projectId,
+      "draft",
+      "annotations.json",
+    );
+    if (!existsSync(draftPath)) continue;
+    const draft = JSON.parse(readFileSync(draftPath, "utf8"));
+    const comment = Array.isArray(draft.comments)
+      ? draft.comments.find((candidate) => candidate.text === text)
+      : null;
+    if (!comment) continue;
+    update(comment);
+    writeFileSync(draftPath, `${JSON.stringify(draft, null, 2)}\n`, "utf8");
+    return true;
+  }
+  return false;
 }
 
 function writeAiOutput(requestRoot, transform) {
@@ -963,6 +1009,142 @@ test("a global comment stays exact through first project registration", async ()
       .toBeEnabled();
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("a persisted legacy global comment stays exact after restart and sends directly", async () => {
+  test.setTimeout(120_000);
+  const fixture = createSourceFixture("global-comment-restart.html");
+  const firstLaunch = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  const commentText = "重启后仍然保持整个页面的视觉层级。";
+  let activeLaunch = firstLaunch;
+  try {
+    const frame = await loadedDiskFrame(firstLaunch.page, fixture.sourcePath);
+    await firstLaunch.page.getByRole("button", { name: "全局评论" }).click();
+    await firstLaunch.page.getByRole("textbox", { name: "评论内容" })
+      .fill(commentText);
+    await firstLaunch.page.getByRole("button", { name: "评论", exact: true }).click();
+    await expect(firstLaunch.page.locator(".comment-card")
+      .filter({ hasText: commentText }))
+      .toHaveAttribute("data-resolution", "exact");
+    await activateNativeEdit(frame, "list-item");
+    await setTextSelection(frame, "list-item", 0, ORIGINAL_TEXT.length);
+    await firstLaunch.page.keyboard.insertText("重启兼容测试");
+    await expect.poll(
+      () => readFileSync(fixture.sourcePath, "utf8"),
+      { timeout: 20_000 },
+    ).toContain("重启兼容测试");
+    await expect.poll(
+      () => workspaceContainsDraftComment(firstLaunch.workspace, commentText),
+      { timeout: 20_000 },
+    ).toBe(true);
+
+    await closePageRootGracefully(firstLaunch.electronApp);
+    expect(workspaceContainsDraftComment(firstLaunch.workspace, commentText)).toBe(true);
+    expect(rewriteWorkspaceDraftComment(
+      firstLaunch.workspace,
+      commentText,
+      (comment) => {
+        delete comment.target.fingerprint;
+        comment.target.resolution = "orphaned";
+      },
+    )).toBe(true);
+    activeLaunch = await launchPageRoot({
+      activeSourcePath: fixture.sourcePath,
+      isolatedUserData: firstLaunch.isolatedUserData,
+    });
+    expect(workspaceContainsDraftComment(activeLaunch.workspace, commentText)).toBe(true);
+    await loadedDiskFrame(activeLaunch.page, fixture.sourcePath);
+    const recoveredComment = activeLaunch.page.locator(".comment-card")
+      .filter({ hasText: commentText });
+    await expect(recoveredComment).toHaveAttribute("data-resolution", "exact");
+    await expect(recoveredComment.getByText("原位置已变化")).toHaveCount(0);
+
+    await activeLaunch.page.getByRole("button", { name: /发送至 Qoder/u }).click();
+    await expect(activeLaunch.page.getByText(
+      "等待 QoderWork 返回修改结果",
+      { exact: true },
+    )).toBeVisible({ timeout: 30_000 });
+    await expect(activeLaunch.page.getByText(/评论需要重新定位/u)).toHaveCount(0);
+  } finally {
+    await stopPageRoot(activeLaunch.electronApp, firstLaunch.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("multiple orphaned comments relink in sequence and resume the original send", async () => {
+  test.setTimeout(120_000);
+  const fixture = createSourceFixture("orphaned-comments-resume-send.html");
+  const firstLaunch = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  const firstComment = "把原列表项改成更简洁的表达。";
+  const secondComment = "把原表格单元格改成更清楚的说明。";
+  let activeLaunch = firstLaunch;
+  try {
+    const frame = await loadedDiskFrame(firstLaunch.page, fixture.sourcePath);
+    await addComment(firstLaunch.page, fixture.sourcePath, firstComment, "list-item");
+    await addComment(firstLaunch.page, fixture.sourcePath, secondComment, "table-cell");
+
+    await activateNativeEdit(frame, "list-item");
+    await setTextSelection(frame, "list-item", 0, ORIGINAL_TEXT.length);
+    await firstLaunch.page.keyboard.insertText("失联评论登记测试");
+    await expect.poll(
+      () => workspaceContainsDraftComment(firstLaunch.workspace, secondComment),
+      { timeout: 20_000 },
+    ).toBe(true);
+    await closePageRootGracefully(firstLaunch.electronApp);
+
+    const externallyChanged = readFileSync(fixture.sourcePath, "utf8")
+      .replace(
+        /<li data-native-case="list-item"[^>]*>[\s\S]*?<\/li>/u,
+        "",
+      )
+      .replace(
+        /<td data-native-case="table-cell"[^>]*>[\s\S]*?<\/td>/u,
+        "",
+      );
+    writeFileSync(fixture.sourcePath, externallyChanged, "utf8");
+
+    activeLaunch = await launchPageRoot({
+      activeSourcePath: fixture.sourcePath,
+      isolatedUserData: firstLaunch.isolatedUserData,
+    });
+    const recoveredFrame = await loadedDiskFrame(
+      activeLaunch.page,
+      fixture.sourcePath,
+      { expectedCase: "flex-copy" },
+    );
+    const recoveredComments = activeLaunch.page.locator(".comment-card");
+    await expect(recoveredComments).toHaveCount(2);
+    await expect(recoveredComments.filter({ hasText: firstComment }))
+      .toHaveAttribute("data-resolution", "orphaned");
+    await expect(recoveredComments.filter({ hasText: secondComment }))
+      .toHaveAttribute("data-resolution", "orphaned");
+
+    await activeLaunch.page.getByRole("button", { name: /发送至 Qoder/u }).click();
+    await expect(activeLaunch.page.getByText("2 条评论需要重新定位", { exact: true }))
+      .toBeVisible();
+    await activeLaunch.page.getByRole("button", { name: "开始重新定位" }).click();
+
+    await recoveredFrame.locator(caseSelector("flex-copy")).click();
+    await expect(activeLaunch.page.getByText("1 条评论需要重新定位", { exact: true }))
+      .toBeVisible();
+    await expect(recoveredComments.filter({ hasText: firstComment }))
+      .toHaveAttribute("data-resolution", "exact");
+    await expect(recoveredComments.filter({ hasText: secondComment }))
+      .toHaveAttribute("data-resolution", "orphaned");
+
+    await recoveredFrame.locator(caseSelector("grid-card")).click();
+    await expect(activeLaunch.page.getByText(
+      "等待 QoderWork 返回修改结果",
+      { exact: true },
+    )).toBeVisible({ timeout: 30_000 });
+    await expect.poll(
+      () => requestDirectoryCount(activeLaunch.workspace),
+      { timeout: 20_000 },
+    ).toBe(1);
+  } finally {
+    await stopPageRoot(activeLaunch.electronApp, firstLaunch.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
   }
 });

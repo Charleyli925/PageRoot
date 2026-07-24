@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   noticeAutoDismissMs,
+  noticeDisposition,
   productErrorMessage,
   shouldPresentNotice,
   shouldReplaceNotice,
@@ -45,6 +46,74 @@ test("ordinary visible state does not create another toast", () => {
   assert.equal(shouldPresentNotice({ tone: "warning", dedupeKey: "project-rules-unsaved" }), true);
   assert.equal(shouldPresentNotice({ tone: "error", dedupeKey: "project-open-error" }), true);
   assert.equal(shouldPresentNotice({ tone: "success", action: { id: "open-project" } }), true);
+});
+
+test("recovery ownership is decided before presentation", () => {
+  assert.equal(
+    noticeDisposition({ disposition: "silent-recover", tone: "warning" }),
+    "silent-recover",
+  );
+  assert.equal(
+    noticeDisposition({ disposition: "defer-and-resume", tone: "info" }),
+    "defer-and-resume",
+  );
+  assert.equal(
+    noticeDisposition({ tone: "warning", action: { id: "retry" } }),
+    "direct-action",
+  );
+  assert.equal(
+    noticeDisposition({
+      tone: "warning",
+      sticky: true,
+      dedupeKey: "project-rules-unsaved",
+    }),
+    "user-choice",
+  );
+  assert.equal(
+    shouldPresentNotice({
+      disposition: "silent-recover",
+      tone: "warning",
+      sticky: true,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldPresentNotice({
+      disposition: "defer-and-resume",
+      tone: "info",
+    }),
+    false,
+  );
+  assert.equal(
+    shouldPresentNotice({
+      disposition: "direct-action",
+      tone: "warning",
+      action: { id: "retry" },
+    }),
+    true,
+  );
+  assert.equal(
+    shouldPresentNotice({
+      disposition: "user-choice",
+      tone: "warning",
+      sticky: true,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldPresentNotice({
+      disposition: "background-result",
+      tone: "warning",
+    }),
+    true,
+  );
+  assert.equal(
+    shouldPresentNotice({
+      disposition: "inform-in-place",
+      tone: "success",
+    }),
+    false,
+  );
 });
 
 test("low-priority feedback cannot hide a persistent critical notice", () => {

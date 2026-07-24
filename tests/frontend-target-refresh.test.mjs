@@ -334,6 +334,48 @@ test("canvas and workbench consume deterministic mappings before generic fallbac
   }
 });
 
+test("legacy whole-page comments normalize before recovery and submission", async () => {
+  const workbench = await readFile(
+    new URL("../app/workbench.tsx", import.meta.url),
+    "utf8",
+  );
+  const globalTargetPolicy = workbench.slice(
+    workbench.indexOf("function isGlobalPageTarget"),
+    workbench.indexOf("function displayVersionLabel"),
+  );
+  const recordHydration = workbench.slice(
+    workbench.indexOf("function selectionFromRecord"),
+    workbench.indexOf("type PersistedTargetRef"),
+  );
+  const submission = workbench.slice(
+    workbench.indexOf("const generateRequest"),
+    workbench.indexOf("const openCommittedVersion"),
+  );
+
+  assert.match(
+    globalTargetPolicy,
+    /target\.selector\.trim\(\)\.toLowerCase\(\) === "body"[\s\S]*?target\.level === "module"/u,
+  );
+  assert.doesNotMatch(
+    globalTargetPolicy.slice(
+      0,
+      globalTargetPolicy.indexOf("function exactGlobalPageTarget"),
+    ),
+    /tagName/u,
+    "whole-page identity must not depend on a field omitted by legacy records",
+  );
+  assert.match(
+    recordHydration,
+    /isGlobalPageTarget\(selection\)[\s\S]*?exactGlobalPageTarget\(selection\)/u,
+  );
+  assert.ok(
+    submission.match(/normalizeCurrentGlobalComments\(\)/gu)?.length >= 2,
+    "submission must normalize before and after lazy project registration",
+  );
+  assert.match(submission, /unsafeCommentTargetsNotice\(unsafeTargets\)/u);
+  assert.match(submission, /unsafeCommentTargetsNotice\(unsafeRegisteredTargets\)/u);
+});
+
 test("style writes use source-safe values, canonical target identity, and only active cascade rules", async () => {
   const [canvas, directEditHistory] = await Promise.all([
     readFile(
@@ -991,7 +1033,7 @@ test("handoff commits a pending source edit before recapturing and freezing comm
     handoffStart,
   );
   const initialCapture = workbench.indexOf(
-    "let activeComments = commentsRef.current.filter",
+    "let activeComments = normalizeCurrentGlobalComments();",
     handoffStart,
   );
   const ensure = workbench.indexOf(
@@ -999,7 +1041,7 @@ test("handoff commits a pending source edit before recapturing and freezing comm
     initialCapture,
   );
   const recapture = workbench.indexOf(
-    "activeComments = commentsRef.current.filter",
+    "activeComments = normalizeCurrentGlobalComments();",
     ensure,
   );
   const revalidate = workbench.indexOf(
