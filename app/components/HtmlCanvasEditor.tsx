@@ -6031,6 +6031,50 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     updateOverlayPosition,
   ]);
 
+  useEffect(() => {
+    const iframe = iframeRef.current;
+    if (!iframe) return;
+    const connectedFrameGeneration = frameRender.elementGeneration;
+    let animationFrame = 0;
+    let attempts = 0;
+    const connectParsedFrame = () => {
+      if (
+        iframe !== iframeRef.current
+        || connectedFrameGeneration !== frameLoadGenerationRef.current
+      ) return;
+      const documentNode = iframe.contentDocument;
+      const expectedFrameHtml = expectedFrameHtmlRef.current;
+      const expectedToken = expectedFrameTokenRef.current;
+      const marker = documentNode?.head.querySelector<HTMLMetaElement>(
+        `meta[${FRAME_VERIFICATION_ATTRIBUTE}]`,
+      );
+      if (
+        documentNode?.documentElement
+        && expectedFrameHtml
+        && expectedToken
+        && iframe.srcdoc === expectedFrameHtml
+        && marker?.getAttribute(FRAME_VERIFICATION_ATTRIBUTE) === expectedToken
+        && marker.getAttribute("content") === expectedToken
+      ) {
+        // DOM parsing is sufficient to validate and connect the inert preview.
+        // Slow images, fonts, or stylesheets may delay the iframe load event;
+        // the body ResizeObserver keeps layout chrome current as they settle.
+        connectFrame(iframe, connectedFrameGeneration);
+        return;
+      }
+      attempts += 1;
+      if (attempts < 120) {
+        animationFrame = requestAnimationFrame(connectParsedFrame);
+      }
+    };
+    animationFrame = requestAnimationFrame(connectParsedFrame);
+    return () => cancelAnimationFrame(animationFrame);
+  }, [
+    connectFrame,
+    frameRender.elementGeneration,
+    frameRender.html,
+  ]);
+
   const applyInlineStyle = useCallback(
     (
       property: EditableStyleProperty,

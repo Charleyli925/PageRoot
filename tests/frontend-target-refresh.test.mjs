@@ -465,6 +465,11 @@ test("ordinary patches keep the mounted iframe while source-authority fences use
     /connectFrame\([\s\S]*?event\.currentTarget,[\s\S]*?frameRender\.elementGeneration/u,
     "frame load events must carry the render generation that created their iframe",
   );
+  assert.match(
+    canvas,
+    /const connectParsedFrame = \(\) => \{[\s\S]*?connectedFrameGeneration !== frameLoadGenerationRef\.current[\s\S]*?iframe\.srcdoc === expectedFrameHtml[\s\S]*?marker\.getAttribute\("content"\) === expectedToken[\s\S]*?connectFrame\(iframe, connectedFrameGeneration\)/u,
+    "a verified parsed frame must connect without waiting for load-blocking page resources",
+  );
 
   assert.match(applyCommand, /previewStayedMounted = synchronizeStablePreview/u);
   assert.match(
