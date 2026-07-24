@@ -38,12 +38,14 @@ const REQUIRED_APP_SOURCE_FILES = [
   "desktop/main.mjs",
   "desktop/preload.mjs",
   "desktop/project-files.mjs",
+  "desktop/welcome-project-content.mjs",
   "desktop/export-copy.mjs",
   "desktop/bridge-shutdown.mjs",
   "desktop/close-recovery.mjs",
   "desktop/product-contract.mjs",
   "desktop/qoder-handoff.mjs",
   "desktop/manual-update.mjs",
+  "public/brand-logo.png",
 ];
 const RETIRED_EDITOR_ARTIFACTS = [
   { name: "Lexical", pattern: /(?:@lexical\/|\blexical\b)/iu },

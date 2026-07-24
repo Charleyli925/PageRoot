@@ -4,6 +4,10 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+## [0.8.7] - 2026-07-24
+
+- Updated the exact App bundle allowlist and its fixture to verify the managed welcome-page module and logo that were added in 0.8.6, allowing a new immutable patch release without moving the failed 0.8.6 tag.
+
 ## [0.8.6] - 2026-07-24
 
 - Refined “项目资料” into clear project-rule and Finder record actions, added a safer rules editor with loading/read-only/unsaved states, and prepares project records when the panel is opened.
@@ -50,7 +54,8 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 - Published the first public macOS release in this repository under the earlier YuanYe artifact name.
 
-[Unreleased]: https://github.com/Charleyli925/PageRoot/compare/v0.8.6...HEAD
+[Unreleased]: https://github.com/Charleyli925/PageRoot/compare/v0.8.7...HEAD
+[0.8.7]: https://github.com/Charleyli925/PageRoot/compare/v0.8.6...v0.8.7
 [0.8.6]: https://github.com/Charleyli925/PageRoot/compare/v0.8.5...v0.8.6
 [0.8.5]: https://github.com/Charleyli925/PageRoot/compare/v0.8.4...v0.8.5
 [0.8.4]: https://github.com/Charleyli925/PageRoot/compare/v0.8.3...v0.8.4

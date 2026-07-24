@@ -17,7 +17,7 @@ Create and push an annotated immutable tag:
 git switch main
 git pull --ff-only
 git status --short
-VERSION=0.8.6
+VERSION=0.8.7
 git tag -a "v${VERSION}" -m "PageRoot ${VERSION}"
 git push origin "v${VERSION}"
 ```
