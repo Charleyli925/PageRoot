@@ -3298,7 +3298,11 @@ export default function Workbench() {
     fromDeferred = false,
     sourceTransitionToken?: number,
   ) => {
-    if (!fromDeferred) {
+    // An authorized project hydration already owns the source transition. It
+    // must not wait behind a stale native-edit queue from the previous Canvas,
+    // otherwise the new project can remain locked forever with no gesture able
+    // to drain that queue.
+    if (!fromDeferred && sourceTransitionToken === undefined) {
       let resolveDeferred: (() => void) | null = null;
       const deferredResult = new Promise<void>((resolve) => {
         resolveDeferred = resolve;
@@ -3708,6 +3712,19 @@ export default function Workbench() {
         setProjectLoadError(message);
         setRenderedContentSha256(null);
         setBridgeConnected(false);
+      }
+    } finally {
+      // Every authorized hydration must release its own lock, including a
+      // harmless early return while it still owns the current identity. A
+      // newer project epoch remains solely responsible for its hydration.
+      if (
+        hydrationSourceTransitionAuthorized
+        && projectHydratingRef.current
+        && epoch === projectEpochRef.current
+        && sameLocalSourcePath(sourcePathRef.current, activeSource)
+      ) {
+        projectHydratingRef.current = false;
+        setProjectHydrating(false);
       }
     }
   }, [
