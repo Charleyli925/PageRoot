@@ -1,6 +1,5 @@
 export const WELCOME_PROJECT_NAME = "欢迎来到源页.html";
-export const WELCOME_LOGO_RELATIVE_PATH =
-  "PageRoot-assets/brand-logo-v1.png";
+export const WELCOME_LOGO_RELATIVE_PATH = "brand-logo.png";
 
 export const DEFAULT_PROJECT_HTML = `<!doctype html>
 <html lang="zh-CN">

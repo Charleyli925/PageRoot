@@ -310,8 +310,7 @@ test("Electron first launch registers the welcome HTML and sends its comment to 
   const welcomePath = path.join(launched.isolatedUserData, "欢迎来到源页.html");
   const welcomeLogoPath = path.join(
     launched.isolatedUserData,
-    "PageRoot-assets",
-    "brand-logo-v1.png",
+    "brand-logo.png",
   );
   const workspace = path.join(launched.isolatedUserData, "workspace");
   try {
