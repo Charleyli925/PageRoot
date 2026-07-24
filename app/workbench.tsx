@@ -356,6 +356,11 @@ type ToastAction =
       target: { kind: "composer" | "comment"; commentId: string };
       accept?: "all" | "image";
     }
+  | {
+      id: "review-comment-attachments";
+      label: string;
+      target: { kind: "composer" | "comment"; commentId: string };
+    }
   | { id: "retry-attachment-preview"; label: string; attachment: CommentAttachment }
   | { id: "retry-attachment-download"; label: string; attachment: CommentAttachment }
   | { id: "relink-target"; label: string; commentId: string }
@@ -4093,6 +4098,19 @@ export default function Workbench() {
     const issueNotes: string[] = [];
     const failedNames: string[] = [];
     let addedAttachmentCount = 0;
+    const attachmentRecoveryAction = (needsRemoval: boolean): ToastAction => (
+      needsRemoval
+        ? {
+            id: "review-comment-attachments",
+            label: "查看附件",
+            target,
+          }
+        : {
+            id: "open-attachment-picker",
+            label: "重新选择",
+            target,
+          }
+    );
     if (attachmentPlan.invalid.length === 1) {
       const invalidFile = attachmentPlan.invalid[0];
       issueNotes.push(`${invalidFile.name || "未命名文件"} 为空或超过 25 MB`);
@@ -4104,6 +4122,23 @@ export default function Workbench() {
         `已达到每条评论 ${MAX_COMMENT_ATTACHMENTS} 个附件的上限，`
         + `${attachmentPlan.overLimit.length} 个未加入`,
       );
+    }
+    if (selected.length === 0 && issueNotes.length > 0) {
+      const needsRemoval = attachmentPlan.overLimit.length > 0
+        && attachmentPlan.available === 0;
+      setToast({
+        title: "附件没有加入",
+        message: `${issueNotes.join("；")}。${
+          needsRemoval
+            ? "请先移除一个附件，再重新选择。"
+            : "请选择其他文件。"
+        }`,
+        tone: "warning",
+        sticky: true,
+        dedupeKey: `attachment-batch-${target.commentId}`,
+        action: attachmentRecoveryAction(needsRemoval),
+      });
+      return;
     }
     const activeSource = sourcePathRef.current;
     if (!activeSource) {
@@ -4145,23 +4180,25 @@ export default function Workbench() {
           addedAttachmentCount = previewAttachments.length;
         }
         if (issueNotes.length > 0) {
+          const needsRemoval = attachmentPlan.overLimit.length > 0
+            && existingCount + addedAttachmentCount >= MAX_COMMENT_ATTACHMENTS;
           setToast({
             title: addedAttachmentCount > 0
               ? "部分附件没有加入"
               : "附件没有加入",
             message: `${issueNotes.join("；")}。${
               addedAttachmentCount > 0
-                ? "已加入的附件仍然保留。"
-                : "请选择其他文件。"
+                ? needsRemoval
+                  ? "已加入的附件仍然保留；如需加入其余文件，请先移除一个附件。"
+                  : "已加入的附件仍然保留。"
+                : needsRemoval
+                  ? "请先移除一个附件，再重新选择。"
+                  : "请选择其他文件。"
             }`,
-            tone: "warning",
-            sticky: true,
-            dedupeKey: `attachment-batch-${target.commentId}`,
-            action: {
-              id: "open-attachment-picker",
-              label: "重新选择",
-              target,
-            },
+              tone: "warning",
+              sticky: true,
+              dedupeKey: `attachment-batch-${target.commentId}`,
+            action: attachmentRecoveryAction(needsRemoval),
           });
         }
         return;
@@ -4289,24 +4326,30 @@ export default function Workbench() {
       const targetStillOpen = target.kind === "composer"
         ? composerCommentIdRef.current === target.commentId
         : commentsRef.current.some((comment) => comment.commentId === target.commentId);
+      const currentAttachmentCount = target.kind === "composer"
+        ? composerAttachmentsRef.current.length
+        : commentsRef.current.find((comment) => comment.commentId === target.commentId)
+            ?.attachments?.length ?? 0;
+      const needsRemoval = attachmentPlan.overLimit.length > 0
+        && currentAttachmentCount >= MAX_COMMENT_ATTACHMENTS;
       setToast({
         title: addedAttachmentCount > 0 ? "部分附件没有加入" : "附件没有加入",
         message: `${issueNotes.join("；")}。${
           addedAttachmentCount > 0
-            ? "已加入的附件仍然保留。"
+            ? needsRemoval
+              ? "已加入的附件仍然保留；如需加入其余文件，请先移除一个附件。"
+              : "已加入的附件仍然保留。"
             : targetStillOpen
-              ? "请选择其他文件。"
+              ? needsRemoval
+                ? "请先移除一个附件，再重新选择。"
+                : "请选择其他文件。"
               : "请重新打开评论后再选择附件。"
         }`,
         tone: failedNames.length > 0 ? "error" : "warning",
         sticky: true,
         dedupeKey: `attachment-batch-${target.commentId}`,
         ...(targetStillOpen ? {
-          action: {
-            id: "open-attachment-picker" as const,
-            label: "重新选择",
-            target,
-          },
+          action: attachmentRecoveryAction(needsRemoval),
         } : {}),
       });
     }
@@ -8199,7 +8242,7 @@ export default function Workbench() {
         ? "错误详情保留在本轮记录中，返回编辑后可调整并重试"
         : "原始评论和本地内容均已冻结，返回结果不会覆盖它们";
   const processStatusLabel = pendingRunOutcome
-    ? "等待状态确认"
+    ? "正在等待修改结果"
     : activeRun?.status === "ready-to-open"
       ? "等待确认打开"
       : activeRun?.status === "no-change"
@@ -8559,6 +8602,25 @@ export default function Workbench() {
       void reloadCurrentSource(true);
     } else if (action.id === "open-attachment-picker") {
       openAttachmentPicker(action.target, action.accept || "all");
+    } else if (action.id === "review-comment-attachments") {
+      if (action.target.kind === "composer") {
+        const target = draftTargetRef.current;
+        if (
+          composerCommentIdRef.current === action.target.commentId
+          && target
+        ) {
+          setComposerOpen(true);
+          queueReviewPairReveal(target, "__composer");
+          window.requestAnimationFrame(() => {
+            composerRef.current?.focus({ preventScroll: true });
+          });
+        }
+      } else {
+        const comment = commentsRef.current.find(
+          (item) => item.commentId === action.target.commentId,
+        );
+        if (comment) focusCommentTarget(comment.target, comment.commentId);
+      }
     } else if (action.id === "retry-attachment-preview") {
       void openAttachmentPreview(action.attachment);
     } else if (action.id === "retry-attachment-download") {
@@ -9102,8 +9164,13 @@ export default function Workbench() {
                   void exportCurrentHtml();
                 }}
                 onRequestReload={() => {
-                  void reloadCurrentSource(true);
+                  if (sourcePathRef.current) {
+                    void reloadCurrentSource();
+                  } else {
+                    void openProject();
+                  }
                 }}
+                reloadActionLabel={sourcePath ? "重新载入" : "重新选择"}
                 commentedTargets={commentedTargets}
                 trackedTargets={trackedAuditTargets}
                 locked={

@@ -67,8 +67,10 @@ test("canvas edit feedback is contextual, plain-language, and not duplicated glo
   assert.match(canvas, /recovery: "comment"/u);
   assert.match(canvas, /recovery: "reload"/u);
   assert.match(canvas, /<NoticeBar[\s\S]*?placement="canvas"/u);
-  assert.match(canvas, /actionLabel=\{editFeedback\.recovery === "reload" \? "重新载入" : "添加评论"\}/u);
+  assert.match(canvas, /actionLabel=\{editFeedback\.recovery === "reload" \? reloadActionLabel : "添加评论"\}/u);
   assert.match(canvas, /onRequestReload\?\.\(\)/u);
+  assert.match(workbench, /if \(sourcePathRef\.current\)[\s\S]*?reloadCurrentSource\(\)[\s\S]*?openProject\(\)/u);
+  assert.match(workbench, /reloadActionLabel=\{sourcePath \? "重新载入" : "重新选择"\}/u);
   assert.match(canvas, /editFeedbackPaused/u);
   assert.match(canvas, /\}, 5_000\);/u);
   assert.doesNotMatch(canvas, /本次直接编辑已阻止|"code" in cause/u);
@@ -116,9 +118,16 @@ test("critical notices are legible and their close action cannot wrap", () => {
 test("file and attachment failures keep a real recovery path", () => {
   assert.match(workbench, /planAttachmentSelection\(files, existingCount\)/);
   assert.doesNotMatch(workbench, /if \(previewAttachments\.length === 0\) return/);
+  assert.match(workbench, /if \(selected\.length === 0 && issueNotes\.length > 0\)/);
   assert.match(workbench, /title: addedAttachmentCount > 0[\s\S]*?"附件没有加入"/);
   assert.match(workbench, /dedupeKey: `attachment-batch-\$\{target\.commentId\}`/);
   assert.match(workbench, /id: "open-attachment-picker"[\s\S]*?label: "重新选择"/);
+  assert.match(workbench, /id: "review-comment-attachments"[\s\S]*?label: "查看附件"/);
+  assert.match(workbench, /请先移除一个附件，再重新选择。/);
+  assert.match(
+    workbench,
+    /action\.id === "review-comment-attachments"[\s\S]*?queueReviewPairReveal[\s\S]*?focusCommentTarget/,
+  );
   assert.match(workbench, /title: encodingUnsupported \? "文件编码不支持" : "文件无法打开"/);
   assert.match(workbench, /原文件没有被修改。请先转换为 UTF-8，再重新选择。/);
   assert.match(

@@ -298,6 +298,8 @@ export type HtmlCanvasEditorProps = {
   onRequestExport?: () => void;
   /** Reloads the current source after the editor cannot build a safe source map. */
   onRequestReload?: () => void;
+  /** Labels the source-map recovery action when the host must ask for the file again. */
+  reloadActionLabel?: string;
   /** Reports a fail-closed edit whose source target could not be patched safely. */
   onEditBlocked?: (message: string) => void;
   /** Optional base URL for relative assets. The injected base element is not included in serialized output. */
@@ -2024,6 +2026,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     onRequestFlush,
     onRequestExport,
     onRequestReload,
+    reloadActionLabel = "重新载入",
     onEditBlocked,
     baseHref,
     sourcePath,
@@ -6352,7 +6355,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           title={editFeedback.title}
           message={editFeedback.message}
           tone={editFeedback.tone}
-          actionLabel={editFeedback.recovery === "reload" ? "重新载入" : "添加评论"}
+          actionLabel={editFeedback.recovery === "reload" ? reloadActionLabel : "添加评论"}
           onAction={editFeedbackActionAvailable ? handleEditFeedbackAction : undefined}
           onDismiss={() => setEditFeedback(null)}
           onPauseChange={setEditFeedbackPaused}
