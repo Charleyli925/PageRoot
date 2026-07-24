@@ -1,0 +1,119 @@
+name: Release Candidate
+run-name: Candidate for ${{ github.sha }}
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: release-candidate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  candidate:
+    name: build-and-verify-candidate
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - name: Require the current main branch before packaging
+        run: |
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$GITHUB_SHA" = "$(git rev-parse origin/main)"
+      - name: Verify reusable exact-tree PR source evidence
+        id: source-gate
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/source-gate-provenance.mjs verify \
+            --repository "$GITHUB_REPOSITORY" \
+            --workflow ci.yml \
+            --max-age-hours 168 \
+            --mode required \
+            --github-output "$GITHUB_OUTPUT"
+      - name: Restore Electron and builder downloads
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+          key: ${{ runner.os }}-electron-builder-${{ hashFiles('package-lock.json') }}
+      - run: npm ci
+      - name: Prove hosted Electron scheduling before packaging
+        run: >-
+          node scripts/ci-evidence.mjs run
+          --suite release-candidate-preflight
+          --stage environment-preflight
+          --
+          npm run test:electron:ci-preflight:prepared
+      - name: Build and verify the exact pre-tag installer
+        env:
+          PAGEROOT_SOURCE_GATE_TRUSTED: ${{ steps.source-gate.outputs.trusted }}
+          PAGEROOT_SOURCE_GATE_TREE: ${{ steps.source-gate.outputs.tree_sha }}
+          PAGEROOT_SOURCE_GATE_VERSION: ${{ steps.source-gate.outputs.package_version }}
+        run: >-
+          node scripts/ci-evidence.mjs run
+          --suite release-candidate-artifact
+          --stage artifact-candidate
+          --
+          npm run gate:artifact-only:auto
+      - name: Create public release metadata
+        run: >-
+          node scripts/ci-evidence.mjs run
+          --suite release-candidate-assets
+          --stage artifact-candidate
+          --
+          npm run release:assets -- --arch arm64
+      - name: Freeze candidate bytes and provenance
+        id: candidate
+        run: >-
+          node scripts/ci-evidence.mjs run
+          --suite release-candidate-provenance
+          --stage artifact-candidate
+          --
+          node scripts/release-candidate-provenance.mjs create
+          --repository "$GITHUB_REPOSITORY"
+          --architecture arm64
+          --directory release
+          --output output/release-candidate/bundle
+          --run-id "$GITHUB_RUN_ID"
+          --run-attempt "$GITHUB_RUN_ATTEMPT"
+          --source-gate-run-id "${{ steps.source-gate.outputs.run_id }}"
+          --source-gate-tree "${{ steps.source-gate.outputs.tree_sha }}"
+          --source-gate-version "${{ steps.source-gate.outputs.package_version }}"
+          --github-output "$GITHUB_OUTPUT"
+      - name: Upload exact candidate bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.candidate.outputs.artifact_name }}
+          path: output/release-candidate/bundle
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload candidate failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: PageRoot-release-candidate-diagnostics-${{ github.run_attempt }}
+          path: |
+            output/test-runs
+            output/playwright
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Upload candidate CI evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: PageRoot-release-candidate-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: output/ci-evidence
+          if-no-files-found: warn
+          retention-days: 30

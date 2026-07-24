@@ -7,10 +7,11 @@
 ```text
 GitHub main
   -> short-lived branch
-  -> reviewed Pull Request + complete source gate + Tree Hash attestation
+  -> draft Pull Request + impact-selected feedback
+  -> ready Pull Request + complete source gate + Tree Hash attestation
   -> main commit + exact-tree verification + fast smoke
-  -> immutable version tag + installer verification
-  -> reproducible GitHub Release assets
+  -> pre-tag installer candidate + packaged-runtime verification
+  -> exact candidate verification + immutable version tag + GitHub Release
 ```
 
 ## Daily changes
@@ -70,4 +71,6 @@ Use `git revert <commit>` to undo a merged public change while preserving histor
 
 ## Release rule
 
-Version, commit, tag and artifacts form one immutable set. `npm run release:mac` refuses a dirty worktree and embeds the exact commit/tree in `build-info.json`. CI may avoid repeating the source suite only when a successful PR source-gate attestation matches the exact tree and version and is no more than seven days old. If the source changes, evidence is stale or remote evidence is unavailable, the tag workflow runs the entire source and artifact gate again.
+Version, commit, tag and artifacts form one immutable set. `npm run release:mac` remains the complete local source-and-artifact gate and refuses a dirty worktree. The governed GitHub path first runs `Release Candidate` on reviewed `main`: a successful PR source-gate attestation must match the exact tree/version and be no more than seven days old, then the workflow embeds the commit/tree in `build-info.json`, packages and verifies the App and uploads frozen candidate bytes.
+
+Only after that candidate succeeds may the separate `Release` workflow run for the exact version on current `main`. It accepts a matching candidate no more than 72 hours old, verifies every downloaded asset hash, creates the annotated tag and publishes the same files without rebuilding. Do not push release tags manually. See `docs/RELEASING.md` and `docs/RELEASE_PIPELINE_GOVERNANCE.md`.

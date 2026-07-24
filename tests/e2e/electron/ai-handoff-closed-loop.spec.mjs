@@ -860,10 +860,17 @@ test("an unknown Request outcome stays fail-closed and can be reconciled explici
       { timeout: 20_000 },
     ).toBe(1);
 
-    await launched.page.evaluate(() => {
-      window.__PAGEROOT_ALLOW_UNKNOWN_REQUEST_RECONCILE__ = true;
+    const reconcileButton = launched.page.getByRole("button", {
+      name: "立即重新核对",
     });
-    await launched.page.getByRole("button", { name: "立即重新核对" }).click();
+    await reconcileButton.evaluate((button) => {
+      // Keep automatic reconciliation unavailable until the explicit user
+      // action begins, otherwise its timer can win the test-only fetch race.
+      button.addEventListener("click", () => {
+        window.__PAGEROOT_ALLOW_UNKNOWN_REQUEST_RECONCILE__ = true;
+      }, { capture: true, once: true });
+    });
+    await reconcileButton.click();
     await expect(launched.page.getByText(
       "等待 QoderWork 返回修改结果",
       { exact: true },

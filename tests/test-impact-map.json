@@ -182,10 +182,39 @@
       "patterns": [
         "^scripts/source-gate-provenance\\.mjs$",
         "^tests/source-gate-provenance\\.test\\.mjs$",
-        "^\\.github/workflows/(?:ci|release)\\.yml$"
+        "^\\.github/workflows/(?:ci|release|release-candidate)\\.yml$"
       ],
       "suites": [],
       "nodeTests": ["tests/source-gate-provenance.test.mjs"]
+    },
+    {
+      "id": "ci-evidence",
+      "patterns": [
+        "^scripts/ci-evidence\\.mjs$",
+        "^tests/ci-evidence\\.test\\.mjs$"
+      ],
+      "suites": [],
+      "nodeTests": ["tests/ci-evidence.test.mjs"]
+    },
+    {
+      "id": "ci-health-report",
+      "patterns": [
+        "^scripts/ci-health-report\\.mjs$",
+        "^tests/ci-health-report\\.test\\.mjs$",
+        "^\\.github/workflows/ci-health\\.yml$"
+      ],
+      "suites": [],
+      "nodeTests": ["tests/ci-health-report.test.mjs"]
+    },
+    {
+      "id": "release-candidate-provenance",
+      "patterns": [
+        "^scripts/release-candidate-provenance\\.mjs$",
+        "^tests/release-candidate-provenance\\.test\\.mjs$",
+        "^\\.github/workflows/(?:release|release-candidate)\\.yml$"
+      ],
+      "suites": [],
+      "nodeTests": ["tests/release-candidate-provenance.test.mjs"]
     },
     {
       "id": "task-workflow",
@@ -325,7 +354,7 @@
     {
       "id": "packaging",
       "patterns": [
-        "^(?:package(?:-lock)?\\.json|desktop/after-pack\\.mjs|desktop/resources/.*|scripts/(?:build-package|create-release-assets|release-provenance|source-gate-provenance|verify-packaged-artifact)\\.mjs)$"
+        "^(?:package(?:-lock)?\\.json|desktop/after-pack\\.mjs|desktop/resources/.*|scripts/(?:build-package|create-release-assets|release-candidate-provenance|release-provenance|source-gate-provenance|verify-packaged-artifact)\\.mjs)$"
       ],
       "suites": [],
       "nodeTests": [
