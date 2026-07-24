@@ -7,9 +7,9 @@
 ```text
 GitHub main
   -> short-lived branch
-  -> reviewed Pull Request + CI
-  -> main commit
-  -> immutable version tag
+  -> reviewed Pull Request + complete source gate + Tree Hash attestation
+  -> main commit + exact-tree verification + fast smoke
+  -> immutable version tag + installer verification
   -> reproducible GitHub Release assets
 ```
 
@@ -70,4 +70,4 @@ Use `git revert <commit>` to undo a merged public change while preserving histor
 
 ## Release rule
 
-Version, commit, tag and artifacts form one immutable set. `npm run release:mac` refuses a dirty worktree and embeds the exact commit/tree in `build-info.json`. If source changes after a successful gate, the entire release gate must run again.
+Version, commit, tag and artifacts form one immutable set. `npm run release:mac` refuses a dirty worktree and embeds the exact commit/tree in `build-info.json`. CI may avoid repeating the source suite only when a successful PR source-gate attestation matches the exact tree and version and is no more than seven days old. If the source changes, evidence is stale or remote evidence is unavailable, the tag workflow runs the entire source and artifact gate again.

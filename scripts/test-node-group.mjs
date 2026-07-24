@@ -7,6 +7,12 @@ const scriptPath = fileURLToPath(import.meta.url);
 const productRoot = path.resolve(path.dirname(scriptPath), "..");
 const testsRoot = path.join(productRoot, "tests");
 
+const SMOKE_TESTS = new Set([
+  "product-contract.test.mjs",
+  "scope-validator.test.mjs",
+  "source-patch-engine.test.mjs",
+]);
+
 const CONTRACT_TESTS = new Set([
   "native-command-queue-contract.test.mjs",
   "native-layout-guard.test.mjs",
@@ -19,6 +25,7 @@ const PACKAGE_TESTS = new Set([
   "desktop-package.test.mjs",
   "packaged-artifact-gate.test.mjs",
   "release-provenance.test.mjs",
+  "source-gate-provenance.test.mjs",
 ]);
 
 const INTEGRATION_TESTS = new Set([
@@ -50,6 +57,7 @@ export async function nodeTestGroups(root = testsRoot) {
     .sort();
   const known = new Set(all);
   for (const [group, names] of [
+    ["smoke", SMOKE_TESTS],
     ["contract", CONTRACT_TESTS],
     ["integration", INTEGRATION_TESTS],
     ["package", PACKAGE_TESTS],
@@ -67,6 +75,7 @@ export async function nodeTestGroups(root = testsRoot) {
   const absolute = (names) => names.map((name) => path.join(root, name));
   return {
     full: absolute(all),
+    smoke: absolute(all.filter((name) => SMOKE_TESTS.has(name))),
     core: absolute(all.filter((name) => !reserved.has(name))),
     contract: absolute(all.filter((name) => CONTRACT_TESTS.has(name))),
     integration: absolute(all.filter((name) => INTEGRATION_TESTS.has(name))),

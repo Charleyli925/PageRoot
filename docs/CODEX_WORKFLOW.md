@@ -70,6 +70,10 @@ The comparison base is fixed to `origin/main`; `task:finish` does not accept a c
 
 Do not use an installed app, DMG, backup folder or another checkout as a source for new edits. If the local checkout contains unrelated work, create an isolated Git worktree rather than stashing or mixing changes.
 
+The required PR `release-gate` is the one complete source gate for the final PR tree. Local development should normally stop at impact-selected `gate:edit` and `task:finish`; rerun the complete source gate locally only for release candidates, CI diagnosis or high-risk editing-engine work where the additional evidence is useful.
+
+After merge, CI authenticates the successful PR result against the exact `main` Tree Hash and package/lockfile version, then runs a small Node and browser smoke on Linux. It does not repeat the complete browser and Electron suites. The source-gate attestation is valid for seven days and only for the exact tree. The tag workflow may then run the installer-only lane; a missing, stale or mismatched attestation automatically restores the complete source-and-artifact gate.
+
 ## Documentation impact
 
 Behavior and its documentation form one change. Use this routing table:

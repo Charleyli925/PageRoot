@@ -10,6 +10,7 @@ Notable user-visible changes are documented here. This project follows Semantic 
 - Prevented rapid duplicate submits from creating more than one Request and kept clipboard failures recoverable without disabling other projects.
 - Hardened rapid switching and close recovery by rebuilding a missing autosave job from the authoritative in-memory revision and preventing a retired project's failure callback from contaminating the current project.
 - Added a non-cancelling close action to the processing panel and made closed drawer overlays stop intercepting the canvas immediately.
+- Reduced repeated release validation by binding the full PR gate to an exact Git Tree Hash, using a fast post-merge smoke, and reusing fresh matching source evidence for installer-only release verification.
 
 ## [0.8.5] - 2026-07-23
 

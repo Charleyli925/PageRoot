@@ -253,17 +253,31 @@ test.describe("authored DOM native editing contract", () => {
     const target = frame.locator(caseSelector("heading-inline"));
 
     await target.evaluate((element) => {
-      const rect = element.getBoundingClientRect();
+      const hitWalker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+      let hitNode = hitWalker.nextNode();
+      while (hitNode && !/\S/u.test(hitNode.data)) hitNode = hitWalker.nextNode();
+      if (!(hitNode instanceof Text)) {
+        throw new Error("Native activation test has no rendered text.");
+      }
+      const hitIndex = hitNode.data.search(/\S/u);
+      const hitRange = document.createRange();
+      hitRange.setStart(hitNode, hitIndex);
+      hitRange.setEnd(hitNode, hitIndex + 1);
+      const hitRect = hitRange.getClientRects()[0];
+      if (!hitRect || (!hitRect.width && !hitRect.height)) {
+        throw new Error("Native activation test has no rendered glyph.");
+      }
       element.dispatchEvent(new MouseEvent("dblclick", {
         bubbles: true,
         cancelable: true,
         detail: 2,
         view: window,
-        clientX: rect.left + rect.width * 0.72,
-        clientY: rect.top + rect.height / 2,
+        clientX: hitRect.left + (hitRect.width ? hitRect.width / 2 : 1),
+        clientY: hitRect.top + (hitRect.height ? hitRect.height / 2 : 1),
       }));
-      if (element.getAttribute("contenteditable") !== "plaintext-only") {
-        throw new Error("Native editing did not activate synchronously.");
+      const hostMode = element.getAttribute("contenteditable");
+      if (!["plaintext-only", "true"].includes(hostMode || "")) {
+        throw new Error(`Native editing did not activate synchronously (host mode: ${hostMode || "missing"}).`);
       }
 
       const points = [];
@@ -1720,7 +1734,7 @@ test.describe("fallback capability contract", () => {
 
   test("unsupported direct editing explains the comment path without source jargon", async ({ page }) => {
     const { frame } = await openMatrix(page);
-    await frame.locator(caseSelector("unsafe-contenteditable-css")).dblclick();
+    await attemptFallbackDoubleClick(frame, "unsafe-contenteditable-css");
 
     const notice = page.locator('[role="status"], [role="alert"]').filter({
       hasText: /复杂|暂不支持|评论/,

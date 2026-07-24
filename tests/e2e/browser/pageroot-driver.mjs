@@ -199,10 +199,15 @@ export async function doubleClickRenderedText(frame, id, position) {
       range.setEnd(node, match.index + match[0].length);
       const glyphRect = range.getClientRects()[0];
       const elementRect = element.getBoundingClientRect();
-      if (!glyphRect?.width || !glyphRect.height) continue;
+      // Chromium on Linux can report a zero-sized inline axis for a valid
+      // vertical-writing glyph. The other axis still identifies a real hit
+      // target, so pad only the missing axis instead of rejecting the glyph.
+      if (!glyphRect || (!glyphRect.width && !glyphRect.height)) continue;
       return {
-        x: glyphRect.left - elementRect.left + Math.min(glyphRect.width / 2, 3),
-        y: glyphRect.top - elementRect.top + glyphRect.height / 2,
+        x: glyphRect.left - elementRect.left
+          + (glyphRect.width ? Math.min(glyphRect.width / 2, 3) : 1),
+        y: glyphRect.top - elementRect.top
+          + (glyphRect.height ? glyphRect.height / 2 : 1),
       };
     }
     throw new Error(`No rendered text glyph found for native edit case ${element.getAttribute("data-native-case")}.`);
