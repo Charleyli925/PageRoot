@@ -274,9 +274,10 @@ test("managed welcome HTML registers the same workspace and V1 lifecycle as any 
     sourcePath: welcome.sourcePath,
     expectedSourceSha256: welcome.sha256,
   });
+  const canonicalWelcomePath = await realpath(welcome.sourcePath);
   assert.equal(ensured.response.status, 200, JSON.stringify(ensured.body));
   assert.equal(ensured.body.registered, true);
-  assert.equal(ensured.body.sourcePath, welcome.sourcePath);
+  assert.equal(ensured.body.sourcePath, canonicalWelcomePath);
   assert.equal(ensured.body.currentHtmlSha256, welcome.sha256);
   assert.equal(ensured.body.versions.length, 1);
   assert.equal(ensured.body.versions[0].versionId, "ver_0001");
