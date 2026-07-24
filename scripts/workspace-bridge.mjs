@@ -10,6 +10,7 @@ import {
   open,
   readFile,
   readdir,
+  realpath,
   rename,
   rm,
   stat,
@@ -21,6 +22,7 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import {
   assertSchemaVersion,
+  activeUserSupplementRecords,
   atomicWriteFile,
   atomicWriteJson,
   AUXILIARY_SCHEMA_VERSION,
@@ -303,6 +305,7 @@ function assignCurrentSourceIdentity(
     ...(registry.sources[fingerprint] ?? {}),
     sourcePath,
     canonicalSourcePath,
+    role: sourcePath === canonicalSourcePath ? "current" : "alias",
     projectId,
     documentId,
     ...identity,
@@ -322,6 +325,40 @@ function assignCurrentSourceIdentity(
     ...identity,
   };
   return registry.sources[fingerprint];
+}
+
+async function canonicalizeProjectSourceRecords(
+  registry,
+  projectId,
+  canonicalSourcePath,
+) {
+  const retained = [];
+  for (const [fingerprint, record] of Object.entries(registry.sources)) {
+    if (record?.projectId !== projectId) continue;
+    delete registry.sources[fingerprint];
+    const sourcePath = await canonicalExistingSourcePath(record.sourcePath);
+    retained.push({
+      ...record,
+      sourcePath,
+      canonicalSourcePath,
+      role: sourcePath === canonicalSourcePath ? "current" : "alias",
+    });
+  }
+  for (const record of retained) {
+    const fingerprint = sourceFingerprint(record.sourcePath);
+    const collision = registry.sources[fingerprint];
+    if (collision && collision.projectId !== projectId) {
+      throw new HttpError(
+        409,
+        "ACTIVE_SOURCE_PATH_COLLISION",
+        "A canonical source path belongs to another project.",
+      );
+    }
+    registry.sources[fingerprint] = {
+      ...(collision ?? {}),
+      ...record,
+    };
+  }
 }
 
 function randomStableId(prefix) {
@@ -439,6 +476,17 @@ function normalizeSourcePath(value) {
     );
   }
   return normalized;
+}
+
+async function canonicalExistingSourcePath(value) {
+  const normalized = normalizeSourcePath(value);
+  try {
+    const canonicalParent = await realpath(path.dirname(normalized));
+    return path.join(canonicalParent, path.basename(normalized));
+  } catch (error) {
+    if (error?.code === "ENOENT") return normalized;
+    throw error;
+  }
 }
 
 function requireSha256(value, label = "sha256") {
@@ -1000,7 +1048,7 @@ async function activateProjectSourceRaw(
   project,
   activeSourcePath,
 ) {
-  const normalizedActivePath = normalizeSourcePath(activeSourcePath);
+  const normalizedActivePath = await canonicalExistingSourcePath(activeSourcePath);
   const activeFingerprint = sourceFingerprint(normalizedActivePath);
   const activeSource = await readSourceFile(normalizedActivePath);
   project.sourcePath = normalizedActivePath;
@@ -1017,13 +1065,11 @@ async function activateProjectSourceRaw(
           "The generated working-copy path belongs to another project.",
         );
       }
-      for (const [fingerprint, record] of Object.entries(registry.sources)) {
-        if (record?.projectId !== context.projectId) continue;
-        registry.sources[fingerprint] = {
-          ...record,
-          canonicalSourcePath: normalizedActivePath,
-        };
-      }
+      await canonicalizeProjectSourceRecords(
+        registry,
+        context.projectId,
+        normalizedActivePath,
+      );
       assignCurrentSourceIdentity(registry, {
         sourcePath: normalizedActivePath,
         canonicalSourcePath: normalizedActivePath,
@@ -1573,6 +1619,10 @@ async function relinkRegisteredDocument(
   }
   const project = await readLifecycleJson(projectPath, "project.json");
   const previousSourcePath = project.sourcePath;
+  const previousCanonicalSourcePath = await canonicalExistingSourcePath(
+    previousSourcePath,
+  );
+  const isCanonicalPathMigration = previousCanonicalSourcePath === sourcePath;
   if (previousSourcePath !== sourcePath && await exists(previousSourcePath)) {
     try {
       const previousSource = await readSourceFile(previousSourcePath);
@@ -1582,7 +1632,7 @@ async function relinkRegisteredDocument(
             sourceFileIdentity(previousSource),
           )
         : documentIdFromHtml(previousSource.html) === project.documentId;
-      if (previousIsSameDocument) {
+      if (previousIsSameDocument && !isCanonicalPathMigration) {
         throw new HttpError(
           409,
           "DUPLICATE_DOCUMENT_IDENTITY",
@@ -1614,8 +1664,12 @@ async function relinkRegisteredDocument(
   );
   project.lastModifiedAt = source.lastModifiedAt;
   await writeProject(context, project);
-  for (const [key, value] of Object.entries(registry.sources)) {
-    if (value?.projectId === projectId) delete registry.sources[key];
+  if (isCanonicalPathMigration) {
+    await canonicalizeProjectSourceRecords(registry, projectId, sourcePath);
+  } else {
+    for (const [key, value] of Object.entries(registry.sources)) {
+      if (value?.projectId === projectId) delete registry.sources[key];
+    }
   }
   const linkedRecord = assignCurrentSourceIdentity(registry, {
     sourcePath,
@@ -1633,7 +1687,7 @@ async function loadContextBySource(
   options = {},
 ) {
   await initializeRoot();
-  const sourcePath = normalizeSourcePath(sourcePathValue);
+  const sourcePath = await canonicalExistingSourcePath(sourcePathValue);
   if (!(await exists(WORKSPACE_ROOT))) {
     // Merely inspecting an HTML file must not create an empty project tree.
     // Storage begins with the first real edit, attachment, or AI Request.
@@ -1819,7 +1873,7 @@ async function loadContextBySource(
       "The registered source path does not match.",
     );
   }
-  const canonicalSourcePath = normalizeSourcePath(
+  const canonicalSourcePath = await canonicalExistingSourcePath(
     record.canonicalSourcePath ?? record.sourcePath,
   );
   if (canonicalSourcePath !== sourcePath) {
@@ -2828,6 +2882,44 @@ function assertProjectMutable(runtime) {
   }
 }
 
+function instructionIdsFromChangeRequest(changeRequest) {
+  return (changeRequest?.requirements?.instructions ?? [])
+    .map((instruction) => instruction?.instructionId)
+    .filter((value) => typeof value === "string");
+}
+
+async function validateAttemptSupplement(
+  context,
+  {
+    requestId,
+    attemptId,
+    attemptRoot,
+    changeRequest = null,
+    requireSealed = true,
+  },
+) {
+  const request = changeRequest ?? await readLifecycleJson(
+    path.join(
+      context.projectRoot,
+      "requests",
+      requestId,
+      "change-request.json",
+    ),
+    "change-request.json",
+  );
+  return validateUserSupplementArchive({
+    attemptRoot,
+    expectedIdentity: {
+      projectId: context.projectId,
+      documentId: context.documentId,
+      requestId,
+      attemptId,
+      instructionIds: instructionIdsFromChangeRequest(request),
+    },
+    requireSealed,
+  });
+}
+
 async function refreshIdleSource(context, project, runtime) {
   if (runtime.activeRun || runtime.pendingWrite || runtime.conflict) return;
   const source = await readSourceFile(context.sourcePath);
@@ -2891,17 +2983,11 @@ async function listVersions(context) {
           path.join(requestRoot, "change-request.json"),
           "change-request.json",
         );
-        supplementArchive = await validateUserSupplementArchive({
+        supplementArchive = await validateAttemptSupplement(context, {
+          requestId: manifest.requestId,
+          attemptId: manifest.attemptId,
           attemptRoot,
-          expectedIdentity: {
-            projectId: context.projectId,
-            documentId: context.documentId,
-            requestId: manifest.requestId,
-            attemptId: manifest.attemptId,
-            instructionIds: (changeRequest.requirements?.instructions ?? [])
-              .map((instruction) => instruction.instructionId)
-              .filter((value) => typeof value === "string"),
-          },
+          changeRequest,
           requireSealed: true,
         });
         supplements = supplementArchive.records;
@@ -4145,7 +4231,7 @@ ${attachmentLines.join("\n")}
 
 ## 记录对话补充
 
-每一条新增、修订或撤销都单独追加。把 payload 里的 userText 保留为用户原话；action 只能是 add、amend 或 retract。修订/撤销时，refersTo 必须引用已有 instructionId 或 supplement recordId。
+每一条新增、修订或撤销都单独追加。把 payload 里的 userText 保留为用户原话；action 只能是 add、amend 或 retract。add 可用 refersTo 指明它补充的原始 instructionId；amend / retract 必须引用已有 instructionId 或 supplement recordId。
 
 如果能取得用户发送的原始图片或文件，在 attachments 中传入本机普通文件的绝对路径，helper 会复制、计算 Hash 并归档；如果只能看到图片而拿不到原件，使用 evidenceState=description-only 和 evidenceDescription，绝不能伪造附件路径。
 
@@ -4888,17 +4974,11 @@ async function validateCompletionRaw(context, runtime) {
     path.join(requestRoot, "change-request.json"),
     "change-request.json",
   );
-  const supplement = await validateUserSupplementArchive({
+  const supplement = await validateAttemptSupplement(context, {
+    requestId: activeRun.requestId,
+    attemptId: activeRun.attemptId,
     attemptRoot,
-    expectedIdentity: {
-      projectId: context.projectId,
-      documentId: context.documentId,
-      requestId: activeRun.requestId,
-      attemptId: activeRun.attemptId,
-      instructionIds: (changeRequest.requirements?.instructions ?? [])
-        .map((instruction) => instruction.instructionId)
-        .filter((value) => typeof value === "string"),
-    },
+    changeRequest,
     requireSealed: true,
   });
   return {
@@ -4935,6 +5015,9 @@ async function writeEnforcedScopeReportRaw(context, runtime, validated) {
     documentId: context.documentId,
     requestId: activeRun.requestId,
     attemptId: activeRun.attemptId,
+    supplementRecords: activeUserSupplementRecords(
+      validated.supplement.records,
+    ),
     expectedManagedMetadata: {
       "html-ai-document-id": activeRun.documentId,
       "html-ai-version-id": activeRun.candidateVersionId,
@@ -5804,14 +5887,10 @@ async function finalizeCommittedTransactionRaw(
         "validation-review.json",
       )
     : null;
-  const supplement = await validateUserSupplementArchive({
+  const supplement = await validateAttemptSupplement(context, {
+    requestId: transaction.requestId,
+    attemptId: transaction.attemptId,
     attemptRoot,
-    expectedIdentity: {
-      projectId: context.projectId,
-      documentId: context.documentId,
-      requestId: transaction.requestId,
-      attemptId: transaction.attemptId,
-    },
     requireSealed: true,
   });
   const outcome = {
@@ -6063,9 +6142,9 @@ async function activateReadyVersion(body) {
       currentHtmlSha256: workingCopy.source.sha256,
       lastModifiedAt: workingCopy.source.lastModifiedAt,
       committedAt: validatedVersion.committed.committedAt,
-      sourcePath: workingCopy.absolutePath,
-      currentPath: workingCopy.absolutePath,
-      workingCopyPath: workingCopy.absolutePath,
+      sourcePath: context.sourcePath,
+      currentPath: context.sourcePath,
+      workingCopyPath: context.sourcePath,
       workingCopyRelativePath: workingCopy.relativePath,
       versionEntryRelativePath:
         `projects/${context.projectId}/versions/${requestedVersionId}/files/index.html`,
@@ -6439,14 +6518,10 @@ async function statusFor(sourcePath, requestId, attemptId = "attempt_001") {
           const validationReview = await exists(reviewPath)
             ? await readAuxiliaryJson(reviewPath, "validation-review.json")
             : null;
-          const supplement = await validateUserSupplementArchive({
+          const supplement = await validateAttemptSupplement(context, {
+            requestId,
+            attemptId,
             attemptRoot,
-            expectedIdentity: {
-              projectId: context.projectId,
-              documentId: context.documentId,
-              requestId,
-              attemptId,
-            },
             requireSealed: true,
           });
           return {
@@ -6807,6 +6882,36 @@ async function cancelActiveRun(body) {
     const runtime = await readRuntime(context, { hydrateArtifacts: false });
     const activeRun = runtime.activeRun;
     if (!activeRun) {
+      const archivedOutcomePath = body.requestId
+        ? path.join(
+            context.projectRoot,
+            "requests",
+            body.requestId,
+            "outcome.json",
+          )
+        : null;
+      const terminal = runtime.lastCompleted ?? (
+        archivedOutcomePath && await exists(archivedOutcomePath)
+          ? await readAuxiliaryJson(archivedOutcomePath, "outcome.json")
+          : null
+      );
+      if (
+        body.requestId
+        && body.attemptId
+        && terminal?.requestId === body.requestId
+        && terminal?.attemptId === body.attemptId
+        && runtime.lifecycleState === "editing"
+      ) {
+        return {
+          ok: true,
+          status: "already-inactive",
+          projectId: context.projectId,
+          documentId: context.documentId,
+          requestId: body.requestId,
+          attemptId: body.attemptId,
+          terminalStatus: terminal.status,
+        };
+      }
       throw new HttpError(404, "ACTIVE_RUN_NOT_FOUND", "No active run exists.");
     }
     if (

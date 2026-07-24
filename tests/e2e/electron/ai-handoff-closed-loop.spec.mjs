@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   readdirSync,
   rmSync,
   writeFileSync,
@@ -27,6 +28,7 @@ const require = createRequire(import.meta.url);
 const electronExecutable = require("electron");
 const ORIGINAL_TEXT = "列表项中的文字保持项目符号和缩进。";
 const UPDATED_TEXT = "自动闭环验收通过";
+const SECOND_UPDATED_TEXT = "自动闭环第二版通过";
 
 function seedActiveDiskProject(
   isolatedUserData,
@@ -167,10 +169,11 @@ function removeSourceFixture(sourceDirectory) {
 }
 
 async function loadedDiskFrame(page, sourcePath) {
+  const canonicalSourcePath = realpathSync(sourcePath);
   await expect.poll(
     async () => (await page.evaluate(() => window.htmlAIProjects?.getActiveProject()))?.sourcePath,
     { timeout: 20_000 },
-  ).toBe(sourcePath);
+  ).toBe(canonicalSourcePath);
   await expect(page.locator('[aria-label="正在读取项目状态"]'))
     .toHaveCount(0, { timeout: 60_000 });
   await expect(page.locator('[aria-label="项目读取失败"]')).toHaveCount(0);
@@ -199,9 +202,18 @@ async function loadedDiskFrame(page, sourcePath) {
   return frame;
 }
 
-async function addCommentAndSubmit(page, electronApp, sourcePath) {
+async function addCommentAndSubmit(
+  page,
+  electronApp,
+  sourcePath,
+  updatedText = UPDATED_TEXT,
+) {
   await electronApp.evaluate(({ clipboard }) => clipboard.clear());
-  await addComment(page, sourcePath);
+  await addComment(
+    page,
+    sourcePath,
+    `只把这个列表项改为“${updatedText}”，其他地方保持不变。`,
+  );
   await page.getByRole("button", { name: /发送至 Qoder/u }).click();
   await expect(page.getByText("等待 QoderWork 返回修改结果", { exact: true }))
     .toBeVisible();
@@ -217,7 +229,7 @@ async function addCommentAndSubmit(page, electronApp, sourcePath) {
     readFileSync(path.join(requestRoot, "change-request.json"), "utf8"),
   );
   expect(changeRequest.requirements.instructions).toHaveLength(1);
-  expect(changeRequest.requirements.instructions[0].text).toContain(UPDATED_TEXT);
+  expect(changeRequest.requirements.instructions[0].text).toContain(updatedText);
   expect(changeRequest.requirements.preserveOutsideTargets).toBe(true);
   return { promptPath, requestRoot, changeRequest };
 }
@@ -237,7 +249,7 @@ async function addComment(page, sourcePath, text = (
   const composer = page.getByRole("textbox", { name: "评论内容" });
   await composer.fill(text);
   await page.getByRole("button", { name: "评论", exact: true }).click();
-  await expect(page.locator(".comment-card").filter({ hasText: UPDATED_TEXT }))
+  await expect(page.locator(".comment-card").filter({ hasText: text }))
     .toHaveCount(1);
 }
 
@@ -301,6 +313,30 @@ function runOfficialFinalizer(requestRoot, changeRequest) {
   }
 }
 
+function recordOfficialSupplement(workspace, requestRoot, changeRequest, payload) {
+  const result = spawnSync(process.execPath, [
+    path.join(productRoot, "scripts", "record-user-supplement.mjs"),
+    "--workspace",
+    workspace,
+    "--project-id",
+    changeRequest.projectId,
+    "--request-id",
+    path.basename(requestRoot),
+    "--attempt-id",
+    "attempt_001",
+  ], {
+    cwd: requestRoot,
+    encoding: "utf8",
+    input: JSON.stringify(payload),
+    env: process.env,
+    timeout: 60_000,
+  });
+  if (result.status !== 0) {
+    throw new Error(`Supplement recorder failed:\n${result.stdout}\n${result.stderr}`);
+  }
+  return JSON.parse(result.stdout);
+}
+
 function workingHtmlFiles(workspace, projectId) {
   const directory = path.join(workspace, "projects", projectId, "working");
   if (!existsSync(directory)) return [];
@@ -332,7 +368,7 @@ test("a verified AI result stays pending until the user opens the new HTML", asy
     const pending = await launched.page.evaluate(
       () => window.htmlAIProjects?.getActiveProject(),
     );
-    expect(pending.sourcePath).toBe(fixture.sourcePath);
+    expect(pending.sourcePath).toBe(realpathSync(fixture.sourcePath));
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
     await expect.poll(
       () => workingHtmlFiles(launched.workspace, request.changeRequest.projectId).length,
@@ -357,6 +393,195 @@ test("a verified AI result stays pending until the user opens the new HTML", asy
     const openedFrame = await loadedDiskFrame(launched.page, opened.sourcePath);
     await expect(openedFrame.locator(caseSelector("list-item")))
       .toHaveText(UPDATED_TEXT);
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("two AI versions activate in order and survive relaunch without identity drift", async () => {
+  test.setTimeout(240_000);
+  const fixture = createSourceFixture("sequential-ai-loop.html");
+  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  let activeApp = launched.electronApp;
+  let activeAppClosed = false;
+  try {
+    const firstRequest = await addCommentAndSubmit(
+      launched.page,
+      launched.electronApp,
+      fixture.sourcePath,
+    );
+    writeAiOutput(
+      firstRequest.requestRoot,
+      (base) => base.replace(ORIGINAL_TEXT, UPDATED_TEXT),
+    );
+    runOfficialFinalizer(firstRequest.requestRoot, firstRequest.changeRequest);
+    await expect(launched.page.getByText(
+      "修改结果已通过检查",
+      { exact: true },
+    ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+    await launched.page.getByRole("button", { name: "打开最新版" }).click();
+    await expect.poll(async () => (
+      launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject())
+    ), { timeout: 30_000 }).toMatchObject({
+      sourcePath: expect.stringMatching(/\/working\/sequential-ai-loop-V1\.1\.html$/u),
+    });
+    const firstActive = await launched.page.evaluate(
+      () => window.htmlAIProjects?.getActiveProject(),
+    );
+    await expect((await loadedDiskFrame(
+      launched.page,
+      firstActive.sourcePath,
+    )).locator(caseSelector("list-item"))).toHaveText(UPDATED_TEXT);
+
+    const secondRequest = await addCommentAndSubmit(
+      launched.page,
+      launched.electronApp,
+      firstActive.sourcePath,
+      SECOND_UPDATED_TEXT,
+    );
+    writeAiOutput(
+      secondRequest.requestRoot,
+      (base) => base.replace(UPDATED_TEXT, SECOND_UPDATED_TEXT),
+    );
+    runOfficialFinalizer(secondRequest.requestRoot, secondRequest.changeRequest);
+    await expect(launched.page.getByText(
+      "修改结果已通过检查",
+      { exact: true },
+    ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+    await launched.page.getByRole("button", { name: "打开最新版" }).click();
+    await expect.poll(async () => (
+      launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject())
+    ), { timeout: 30_000 }).toMatchObject({
+      sourcePath: expect.stringMatching(/\/working\/sequential-ai-loop-V1\.2\.html$/u),
+    });
+    const secondActive = await launched.page.evaluate(
+      () => window.htmlAIProjects?.getActiveProject(),
+    );
+    expect(readFileSync(firstActive.sourcePath, "utf8")).toContain(UPDATED_TEXT);
+    expect(readFileSync(firstActive.sourcePath, "utf8"))
+      .not.toContain(SECOND_UPDATED_TEXT);
+    expect(readFileSync(secondActive.sourcePath, "utf8"))
+      .toContain(SECOND_UPDATED_TEXT);
+    await expect((await loadedDiskFrame(
+      launched.page,
+      secondActive.sourcePath,
+    )).locator(caseSelector("list-item"))).toHaveText(SECOND_UPDATED_TEXT);
+
+    const registry = JSON.parse(readFileSync(
+      path.join(launched.workspace, "project-registry.json"),
+      "utf8",
+    ));
+    expect(Object.values(registry.projects)).toHaveLength(1);
+    const sourceRecords = Object.values(registry.sources).filter(
+      (record) => record.projectId === secondRequest.changeRequest.projectId,
+    );
+    expect(sourceRecords.filter((record) => record.role === "current"))
+      .toHaveLength(1);
+
+    await closePageRootGracefully(launched.electronApp);
+    activeAppClosed = true;
+    const relaunched = await launchPageRoot({
+      isolatedUserData: launched.isolatedUserData,
+    });
+    activeApp = relaunched.electronApp;
+    activeAppClosed = false;
+    await expect.poll(async () => (
+      relaunched.page.evaluate(() => window.htmlAIProjects?.getActiveProject())
+    ), { timeout: 30_000 }).toMatchObject({
+      sourcePath: secondActive.sourcePath,
+    });
+    await expect((await loadedDiskFrame(
+      relaunched.page,
+      secondActive.sourcePath,
+    )).locator(caseSelector("list-item"))).toHaveText(SECOND_UPDATED_TEXT);
+  } finally {
+    if (activeAppClosed) {
+      removeAiLoopUserData(launched.isolatedUserData);
+    } else {
+      await stopPageRoot(activeApp, launched.isolatedUserData);
+    }
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("an internal AI supplement is sealed, scope-authorized, opened, and shown in history", async () => {
+  test.setTimeout(180_000);
+  const fixture = createSourceFixture("supplement-ai-loop.html");
+  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  try {
+    const request = await addCommentAndSubmit(
+      launched.page,
+      launched.electronApp,
+      fixture.sourcePath,
+    );
+    const instructionId = request.changeRequest.requirements
+      .instructions[0].instructionId;
+    const supplementText = "把“校验通过”改为“补充指令已回写”。";
+    const supplement = recordOfficialSupplement(
+      launched.workspace,
+      request.requestRoot,
+      request.changeRequest,
+      {
+        idempotencyKey: "e2e-internal-ai-prompt-001",
+        action: "add",
+        refersTo: [instructionId],
+        userText: supplementText,
+        targetDescription: "独立校验结果",
+        evidenceState: "text-only",
+        attachments: [],
+      },
+    );
+    expect(supplement.recordId).toBe("supplement_0001");
+
+    writeAiOutput(request.requestRoot, (base) => base
+      .replace(ORIGINAL_TEXT, UPDATED_TEXT)
+      .replace("校验通过", "补充指令已回写"));
+    runOfficialFinalizer(request.requestRoot, request.changeRequest);
+    await expect(launched.page.getByText(
+      "修改结果已通过检查",
+      { exact: true },
+    ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+    await expect(launched.page.getByText(
+      "有一项范围校验需要你决定",
+      { exact: true },
+    )).toHaveCount(0);
+
+    const archive = JSON.parse(readFileSync(path.join(
+      request.requestRoot,
+      "attempts",
+      "attempt_001",
+      "USER_SUPPLEMENT.json",
+    ), "utf8"));
+    expect(archive.status).toBe("sealed");
+    expect(archive.records).toHaveLength(1);
+    expect(archive.records[0].refersTo).toContain(instructionId);
+
+    await launched.page.getByRole("button", { name: "打开最新版" }).click();
+    await expect.poll(async () => (
+      launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject())
+    ), { timeout: 30_000 }).toMatchObject({
+      sourcePath: expect.stringMatching(/\/working\/supplement-ai-loop-V1\.1\.html$/u),
+    });
+    const active = await launched.page.evaluate(
+      () => window.htmlAIProjects?.getActiveProject(),
+    );
+    const frame = await loadedDiskFrame(launched.page, active.sourcePath);
+    await expect(frame.locator(caseSelector("list-item"))).toHaveText(UPDATED_TEXT);
+    await expect(frame.locator(caseSelector("standalone-output")))
+      .toHaveText("补充指令已回写");
+
+    await launched.page.getByRole("button", { name: "项目", exact: true }).click();
+    await launched.page.getByRole("button", { name: "版本历史" }).click();
+    await launched.page.getByRole("button", { name: /V2 版本 2/u }).click();
+    await launched.page.getByText(
+      "查看本版修改来源与校验",
+      { exact: true },
+    ).click();
+    await expect(launched.page.getByText("内部 AI 对话补充", { exact: true }))
+      .toBeVisible();
+    await expect(launched.page.getByText(supplementText, { exact: true }))
+      .toBeVisible();
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
@@ -474,7 +699,17 @@ test("a failed handoff in project A does not block project B or replace its stat
       { timeout: 20_000 },
     ).toBe(1);
 
-    await openRecentProject(launched.page, projectB.sourcePath);
+    const processingDialog = launched.page.getByRole("dialog", { name: "本轮处理" });
+    await expect(processingDialog).toBeVisible();
+    await launched.page.keyboard.press("Escape");
+    await expect(processingDialog).toBeHidden();
+    await launched.page.getByRole("button", { name: "复制失败 · 查看" }).click();
+    await expect(processingDialog).toBeVisible();
+    await launched.page.getByRole("button", { name: "项目", exact: true }).click();
+    await launched.page.locator(".recent-file-row")
+      .filter({ hasText: path.basename(projectB.sourcePath) })
+      .click();
+    await loadedDiskFrame(launched.page, projectB.sourcePath);
     await expect(launched.page.getByRole("button", { name: "发送至 Qoder" }))
       .toBeDisabled();
     await addComment(launched.page, projectB.sourcePath);
@@ -877,7 +1112,7 @@ test("a soft out-of-scope AI return waits for an explicit waiver and open", asyn
     let active = await launched.page.evaluate(
       () => window.htmlAIProjects?.getActiveProject(),
     );
-    expect(active.sourcePath).toBe(fixture.sourcePath);
+    expect(active.sourcePath).toBe(realpathSync(fixture.sourcePath));
     expect(workingHtmlFiles(launched.workspace, request.changeRequest.projectId)).toHaveLength(0);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
 
@@ -889,7 +1124,7 @@ test("a soft out-of-scope AI return waits for an explicit waiver and open", asyn
     active = await launched.page.evaluate(
       () => window.htmlAIProjects?.getActiveProject(),
     );
-    expect(active.sourcePath).toBe(fixture.sourcePath);
+    expect(active.sourcePath).toBe(realpathSync(fixture.sourcePath));
     await expect.poll(
       () => workingHtmlFiles(launched.workspace, request.changeRequest.projectId).length,
       { timeout: 20_000 },
@@ -928,7 +1163,7 @@ test("a committed version that the desktop cannot activate stays visibly blocked
     const active = await launched.page.evaluate(
       () => window.htmlAIProjects?.getActiveProject(),
     );
-    expect(active.sourcePath).toBe(fixture.sourcePath);
+    expect(active.sourcePath).toBe(realpathSync(fixture.sourcePath));
     await expect.poll(
       () => workingHtmlFiles(launched.workspace, request.changeRequest.projectId).length,
       { timeout: 20_000 },

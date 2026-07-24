@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { createReadStream, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { expect } from "@playwright/test";
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 export const productRoot = path.resolve(currentDirectory, "../../..");
@@ -104,11 +105,11 @@ export async function loadFixture(page, name, { buffer = fixtureBuffer(name) } =
   // canvas to reach the same ready state.
   const editor = page.getByTestId("html-canvas-editor").filter({ visible: true }).first();
   await editor.waitFor({ state: "visible" });
-  const editorHandle = await editor.elementHandle();
-  await page.waitForFunction(
-    (element) => element?.getAttribute("data-render-verified") === "true",
-    editorHandle,
-  );
+  // Keep this readiness check locator-backed. React hydration may replace the
+  // server-rendered editor node after it first becomes visible; an
+  // ElementHandle captured before that replacement would wait forever on a
+  // detached node even though the current Canvas is already verified.
+  await expect(editor).toHaveAttribute("data-render-verified", "true");
 
   const fileInput = page.locator('input[type="file"][accept*=".html"]').first();
   await fileInput.waitFor({ state: "attached" });
@@ -119,10 +120,7 @@ export async function loadFixture(page, name, { buffer = fixtureBuffer(name) } =
   });
   await page.getByText(name, { exact: true }).first().waitFor({ state: "visible" });
 
-  await page.waitForFunction(
-    (element) => element?.getAttribute("data-render-verified") === "true",
-    editorHandle,
-  );
+  await expect(editor).toHaveAttribute("data-render-verified", "true");
 
   const iframe = editor.locator('iframe[title*="HTML"]');
   await iframe.waitFor({ state: "visible" });

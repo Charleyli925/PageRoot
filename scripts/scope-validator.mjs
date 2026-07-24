@@ -1317,6 +1317,32 @@ function stableFingerprintCandidateScore(node, target) {
   return identityScore;
 }
 
+function stableStructuralCandidateScore(node, target) {
+  const fingerprint = target?.fingerprint;
+  if (!fingerprint || typeof fingerprint !== "object") return null;
+  const tagName = String(fingerprint.tagName ?? "").toLowerCase();
+  if (tagName && node?.tagName !== tagName) return null;
+  const stableAttributes =
+    fingerprint.stableAttributes
+    && typeof fingerprint.stableAttributes === "object"
+      ? fingerprint.stableAttributes
+      : {};
+  for (const [name, value] of Object.entries(stableAttributes)) {
+    if (node.attributes.get(name.toLowerCase()) !== String(value)) return null;
+  }
+  const ancestorMatches = matchingFingerprintPrefixCount(
+    Array.isArray(fingerprint.ancestorFingerprint)
+      ? fingerprint.ancestorFingerprint
+      : [],
+    ancestorFingerprint(node),
+  );
+  return (
+    ancestorMatches * 30
+    + Object.keys(stableAttributes).length * 20
+    + (tagName ? 5 : 0)
+  );
+}
+
 function resolveStalePositionalTarget(tree, target) {
   const scored = tree.elements
     .map((node) => ({
@@ -1769,6 +1795,38 @@ function closestSharedStyleNode(node) {
   return null;
 }
 
+function supplementTargetId(record) {
+  return `target_supplement_${record.recordId}`;
+}
+
+function supplementMentionsEvidence(record, value) {
+  const preview = normalizedText(value?.preview ?? "");
+  if (preview.length < 2) return false;
+  const instruction = normalizedText(
+    `${record.userText ?? ""} ${record.targetDescription ?? ""}`,
+  );
+  return instruction.includes(preview);
+}
+
+function supplementAuthorizesDifference(record, difference) {
+  if (!["text", "attribute", "inline-style"].includes(difference.kind)) {
+    return false;
+  }
+  if (difference.operation === "add") {
+    return supplementMentionsEvidence(record, difference.after);
+  }
+  if (difference.operation === "remove") {
+    return supplementMentionsEvidence(record, difference.before);
+  }
+  if (difference.operation === "modify") {
+    return (
+      supplementMentionsEvidence(record, difference.before)
+      && supplementMentionsEvidence(record, difference.after)
+    );
+  }
+  return false;
+}
+
 function insertionGapMatches(
   targetResolution,
   insertedNode,
@@ -1851,9 +1909,11 @@ function classifyDifferences(
   targetResolutions,
   baseToOutput,
   outputToBase,
+  supplementRecords,
 ) {
   const results = [];
   const violationCodes = new Set();
+  const authorizedSupplementTargets = new Map();
 
   for (const targetResolution of targetResolutions) {
     targetResolution.baseToOutput = baseToOutput;
@@ -2021,6 +2081,30 @@ function classifyDifferences(
       }
       matchingTargets.push(target.targetId);
     }
+    if (matchingTargets.length === 0) {
+      const authorizingRecord = supplementRecords.find((record) =>
+        supplementAuthorizesDifference(record, difference)
+      );
+      if (authorizingRecord) {
+        const targetId = supplementTargetId(authorizingRecord);
+        matchingTargets.push(targetId);
+        authorizedSupplementTargets.set(targetId, {
+          targetId,
+          label:
+            authorizingRecord.targetDescription
+            || authorizingRecord.userText.slice(0, 500),
+          level: "subregion",
+          resolution: {
+            base: "rebound",
+            output: "rebound",
+            basePath: difference._baseNode?.path ?? null,
+            outputPath: difference._outputNode?.path ?? null,
+            reason:
+              `Authorized by sealed supplement record ${authorizingRecord.recordId}.`,
+          },
+        });
+      }
+    }
     const allowed = matchingTargets.length > 0;
     if (!allowed) {
       const code =
@@ -2042,7 +2126,11 @@ function classifyDifferences(
     });
   }
 
-  return { results, violationCodes: [...violationCodes].sort() };
+  return {
+    results,
+    violationCodes: [...violationCodes].sort(),
+    authorizedSupplementTargets: [...authorizedSupplementTargets.values()],
+  };
 }
 
 function managedMetadataDifferences(
@@ -2171,6 +2259,16 @@ function combineTargetResolutions({
     const base = resolveTarget(baseTree, target, baseSha256);
     let output = resolveTarget(outputTree, target, outputSha256);
     const mapped = base.node ? baseToOutput.get(base.node) : null;
+    if (mapped && output.node && mapped !== output.node) {
+      const mappedScore = stableStructuralCandidateScore(mapped, target);
+      const resolvedScore = stableStructuralCandidateScore(output.node, target);
+      if (
+        mappedScore !== null
+        && (resolvedScore === null || mappedScore > resolvedScore)
+      ) {
+        output = resolutionStatusForMappedNode(base, mapped);
+      }
+    }
     if (
       base.node
       && mapped
@@ -2244,6 +2342,7 @@ export function validateScope({
   requestId,
   attemptId,
   expectedManagedMetadata,
+  supplementRecords = [],
   generatedAt = new Date().toISOString(),
 }) {
   const baseText = String(baseHtml);
@@ -2271,6 +2370,7 @@ export function validateScope({
     targetResolutions,
     compared.baseToOutput,
     compared.outputToBase,
+    supplementRecords,
   );
   const differences = classified.results.map(stripInternalFields);
   const byKind = {};
@@ -2298,7 +2398,10 @@ export function validateScope({
       comparisonSha256: comparisonSha256(outputText),
     },
     managedMetadataWhitelist: [...MANAGED_META_NAMES],
-    allowedTargets: targetResolutions.map((item) => item.report),
+    allowedTargets: [
+      ...targetResolutions.map((item) => item.report),
+      ...classified.authorizedSupplementTargets,
+    ],
     differences,
     summary: {
       differenceCount: differences.length,

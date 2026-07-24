@@ -6,6 +6,7 @@ import {
   mkdir,
   readFile,
   readdir,
+  realpath,
   rm,
   writeFile,
 } from "node:fs/promises";
@@ -228,6 +229,68 @@ test("multiple targets form an exact union and do not widen to their parent", ()
   });
   assert.equal(widened.verdict, "fail");
   assert.ok(widened.violationCodes.includes("TARGET_OUTSIDE_TEXT"));
+});
+
+test("a changed duplicate label stays bound to its frozen structural ancestor", () => {
+  const base = `<!doctype html><html><head><title>duplicate</title></head><body><header><span class="brand">Atlas Lab</span></header><main>正文</main><footer><span class="brand">Atlas Lab</span></footer></body></html>`;
+  const index = buildSourceIndex(base);
+  const duplicateLabels = index.elements.filter(
+    (element) => element.tagName === "span" && element.textContent === "Atlas Lab",
+  );
+  assert.equal(duplicateLabels.length, 2);
+  const footerTarget = createTargetRef(
+    index,
+    duplicateLabels[1].nodeId,
+    { level: "subregion" },
+  );
+  const report = validateScope({
+    ...identity(),
+    baseHtml: base,
+    outputHtml: base.replace(
+      "<footer><span class=\"brand\">Atlas Lab</span></footer>",
+      "<footer><span class=\"brand\">Atlas Lab 2035</span></footer>",
+    ),
+    allowedTargets: [footerTarget],
+  });
+  assert.equal(report.verdict, "pass");
+  assert.ok(!report.violationCodes.includes("TARGET_ROOT_TOPOLOGY_CHANGED"));
+  assert.match(report.allowedTargets[0].resolution.outputPath, /footer/u);
+});
+
+test("a sealed active supplement authorizes only the exact values it names", () => {
+  const supplement = {
+    recordId: "supplement_0001",
+    userText: "把活跃项目从 156 个改为 164 个",
+    targetDescription: "活跃项目指标卡",
+  };
+  const changed = documentHtml().replace(
+    '<aside id="outside">目标外正文</aside>',
+    '<aside id="outside"><span>活跃项目</span><strong>156</strong></aside>',
+  );
+  const output = changed.replace("<strong>156</strong>", "<strong>164</strong>");
+  const authorized = validateScope({
+    ...identity(),
+    baseHtml: changed,
+    outputHtml: output,
+    allowedTargets: [regularTarget()],
+    supplementRecords: [supplement],
+  });
+  assert.equal(authorized.verdict, "pass");
+  assert.ok(
+    authorized.differences.some((difference) =>
+      difference.targetIds.includes("target_supplement_supplement_0001")
+    ),
+  );
+
+  const unrelated = validateScope({
+    ...identity(),
+    baseHtml: changed,
+    outputHtml: output.replace("第二目标", "未授权变化"),
+    allowedTargets: [regularTarget()],
+    supplementRecords: [supplement],
+  });
+  assert.equal(unrelated.verdict, "fail");
+  assert.ok(unrelated.violationCodes.includes("TARGET_OUTSIDE_TEXT"));
 });
 
 test("a frozen target root cannot be reparented or reordered without an explicit topology guard", () => {
@@ -805,7 +868,9 @@ async function runFinalizer(workspace, run) {
 }
 
 test("workspace lifecycle keeps text scope exact and hard-blocks identity or script widening", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "html-ai-text-scope-"));
+  const root = await realpath(
+    await mkdtemp(join(tmpdir(), "html-ai-text-scope-")),
+  );
   const workspace = join(root, "workspace");
   const sources = join(root, "sources");
   await mkdir(workspace);
@@ -953,7 +1018,9 @@ test("workspace lifecycle keeps text scope exact and hard-blocks identity or scr
 });
 
 test("a soft scope finding requires an audited waiver before the Version becomes ready", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "html-ai-soft-scope-waiver-"));
+  const root = await realpath(
+    await mkdtemp(join(tmpdir(), "html-ai-soft-scope-waiver-")),
+  );
   const workspace = join(root, "workspace");
   const sources = join(root, "sources");
   await mkdir(workspace);
@@ -1073,7 +1140,9 @@ test("a soft scope finding requires an audited waiver before the Version becomes
 });
 
 test("workspace lifecycle surfaces soft scope classes for a user decision and reuses a cancelled candidate", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "html-ai-scope-lifecycle-"));
+  const root = await realpath(
+    await mkdtemp(join(tmpdir(), "html-ai-scope-lifecycle-")),
+  );
   const workspace = join(root, "workspace");
   const sources = join(root, "sources");
   await mkdir(workspace);

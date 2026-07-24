@@ -353,7 +353,9 @@ Prompt 不让 AI 手写 `completion.json`，也不让 AI猜候选版本号。
 
 - `attempts/<attemptId>/output/index.html`
 
-`USER_SUPPLEMENT.json` 只能由受控 helper 追加，内部 AI 不得直接编辑。helper 可把内部 AI 当前对话新增的文件或图片复制到 `supplement-attachments/` 并记录字节数与 SHA-256；无法取得原件时只能写 `description-only`，历史中明确显示“原件未归档”。旧记录不可覆盖，只能通过 `add / amend / retract` 形成审计链。
+`USER_SUPPLEMENT.json` 只能由受控 helper 追加，内部 AI 不得直接编辑。helper 可把内部 AI 当前对话新增的文件或图片复制到 `supplement-attachments/` 并记录字节数与 SHA-256；无法取得原件时只能写 `description-only`，历史中明确显示“原件未归档”。旧记录不可覆盖，只能通过 `add / amend / retract` 形成审计链。`add.refersTo` 可以指向它所补充的原始 `instructionId`；`amend / retract` 必须引用原始 instruction 或更早的 supplement record。所有写入、封存、建版与历史读取都使用同一组冻结 instruction 身份校验。
+
+`amend` 会替代它引用的旧 supplement record，`retract` 会撤销它引用的 record；范围校验只消费最终仍有效的记录。有效补充可以授权原始 TargetRef 之外的精确文字、属性或行内样式值，但 before/after 必须同时能由补充原话证明；脚本、共享 CSS、身份、Hash、歧义目标和未提及的其他变化仍按硬边界拒绝。
 
 finalizer 可写：
 
@@ -561,7 +563,7 @@ Completion 必须在 output 完全关闭后最后写入。完成后 output 封�
 
 1. 重新核对 active run、transaction、Version、commit marker 与全部身份。
 2. 确认当前源 HTML 仍等于校验时的旧 Hash；若已变化，保留新 Version 但拒绝切换。
-3. 将 `project.json.sourcePath` 与 registry canonical path 切换到候选工作文件，并保留原始路径与旧工作路径作为同一项目的别名。
+3. 将 `project.json.sourcePath` 与 registry canonical path 切换到候选工作文件，并保留原始路径与旧工作路径作为同一项目的别名。文件系统对同一路径的不同拼写（例如 macOS 的 `/var` 与 `/private/var`）必须先归一到真实父目录；registry 合并重复指纹，并且每个项目只能有一个 `role=current` 的来源记录。
 4. 更新 current based-on 与 exact Version，清空本轮已归档的草稿评论和编辑事件。
 5. 从新的当前工作文件打开画布，并校验工作文件、不可变 Version 与画布三侧 Hash。
 6. 标记 `cache-rebuilt`，清理恢复文件并解锁编辑。

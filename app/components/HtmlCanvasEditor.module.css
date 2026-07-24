@@ -50,63 +50,6 @@
   backdrop-filter: blur(10px);
 }
 
-.editBlockedNotice {
-  position: absolute;
-  top: 48px;
-  left: 50%;
-  z-index: 18;
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  width: min(560px, calc(100% - 28px));
-  padding: 11px 12px;
-  border: 1px solid #e5d4a3;
-  border-radius: 11px;
-  color: #5f4b1f;
-  background: rgb(255 251 240 / 97%);
-  box-shadow: 0 10px 26px rgb(78 62 24 / 13%);
-  transform: translateX(-50%);
-  backdrop-filter: blur(10px);
-}
-
-.editBlockedNotice > div {
-  display: grid;
-  flex: 1;
-  gap: 4px;
-  min-width: 0;
-}
-
-.editBlockedNotice strong {
-  font: 720 11px/1.25 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-}
-
-.editBlockedNotice span {
-  font: 500 10px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-}
-
-.editBlockedNotice button {
-  flex: none;
-  min-height: 28px;
-  padding: 0 9px;
-  border: 1px solid #d8c48d;
-  border-radius: 7px;
-  color: inherit;
-  background: #fff;
-  font: 650 10px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  cursor: pointer;
-}
-
-.editBlockedNotice[data-tone="error"] {
-  border-color: #e0aaa2;
-  color: #723f37;
-  background: rgb(255 248 246 / 97%);
-  box-shadow: 0 10px 26px rgb(88 44 36 / 16%);
-}
-
-.editBlockedNotice[data-tone="error"] button {
-  border-color: #dba69d;
-}
-
 .lockNotice[data-mode="history"] {
   border-color: rgb(81 71 220 / 22%);
   color: #4037b7;
@@ -491,10 +434,6 @@
   font-size: 10px;
 }
 
-.editBlockedNotice {
-  top: 36px;
-}
-
 .toolbar {
   border-radius: 9px;
   box-shadow: 0 9px 24px rgb(28 25 52 / 15%);
@@ -521,8 +460,4 @@
 .frame {
   grid-row: 1;
   border-top: 0;
-}
-
-.editBlockedNotice {
-  top: 10px;
 }

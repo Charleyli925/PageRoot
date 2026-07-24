@@ -172,6 +172,11 @@ function assertHtmlPath(value, label = "HTML 文件路径") {
   return resolved;
 }
 
+async function existingPathIdentity(value) {
+  const resolved = path.resolve(value);
+  return realpath(resolved).catch(() => resolved);
+}
+
 function ensureHtmlExtension(value) {
   const extension = path.extname(value);
   return extension ? value : `${value}.html`;
@@ -323,8 +328,11 @@ function persistProjectState() {
 }
 
 async function activateProject(filePath) {
-  const normalizedPath = assertHtmlPath(filePath);
+  const normalizedPath = await existingPathIdentity(assertHtmlPath(filePath));
   const state = await loadProjectState();
+  const recentPathIdentities = await Promise.all(
+    state.recent.map((entry) => existingPathIdentity(entry.path)),
+  );
   const now = Date.now();
   state.activePath = normalizedPath;
   state.recent = [
@@ -333,15 +341,26 @@ async function activateProject(filePath) {
       name: path.basename(normalizedPath),
       lastOpenedAt: now,
     },
-    ...state.recent.filter((entry) => entry.path !== normalizedPath),
+    ...state.recent.filter(
+      (_entry, index) => recentPathIdentities[index] !== normalizedPath,
+    ),
   ].slice(0, MAX_RECENT_PROJECTS);
   await persistProjectState();
 }
 
 async function forgetProject(filePath) {
   const state = await loadProjectState();
-  state.recent = state.recent.filter((entry) => entry.path !== filePath);
-  if (state.activePath === filePath) state.activePath = null;
+  const forgottenIdentity = await existingPathIdentity(filePath);
+  const recentPathIdentities = await Promise.all(
+    state.recent.map((entry) => existingPathIdentity(entry.path)),
+  );
+  state.recent = state.recent.filter(
+    (_entry, index) => recentPathIdentities[index] !== forgottenIdentity,
+  );
+  if (
+    state.activePath
+    && await existingPathIdentity(state.activePath) === forgottenIdentity
+  ) state.activePath = null;
   await persistProjectState();
 }
 
@@ -359,8 +378,9 @@ async function inspectHtmlFile(filePath) {
 
 async function readHtmlProject(filePath) {
   const normalizedPath = await inspectHtmlFile(filePath);
+  const canonicalPath = await realpath(normalizedPath);
   return readHtmlFile({
-    sourcePath: normalizedPath,
+    sourcePath: canonicalPath,
     maxHtmlBytes: MAX_HTML_BYTES,
   });
 }
@@ -405,8 +425,12 @@ async function openHtml() {
 
 async function assertKnownProjectPath(sourcePath) {
   const state = await loadProjectState();
-  const known = state.activePath === sourcePath
-    || state.recent.some((entry) => entry.path === sourcePath);
+  const requestedIdentity = await existingPathIdentity(sourcePath);
+  const knownIdentities = await Promise.all([
+    state.activePath,
+    ...state.recent.map((entry) => entry.path),
+  ].filter(Boolean).map(existingPathIdentity));
+  const known = knownIdentities.includes(requestedIdentity);
   if (!known) {
     throw new ProjectFileError(
       "UNKNOWN_SOURCE",
@@ -476,13 +500,17 @@ async function activateGeneratedVersion(payload) {
   }
 
   const state = await loadProjectState();
-  const knownPaths = new Set([
+  const [resolvedPreviousPath, resolvedNextPath] = await Promise.all([
+    realpath(previousSourcePath),
+    realpath(nextSourcePath),
+  ]);
+  const knownPathIdentities = new Set(await Promise.all([
     state.activePath,
     ...state.recent.map((entry) => entry.path),
-  ].filter(Boolean));
+  ].filter(Boolean).map(existingPathIdentity)));
   if (
-    !knownPaths.has(previousSourcePath)
-    && !knownPaths.has(nextSourcePath)
+    !knownPathIdentities.has(resolvedPreviousPath)
+    && !knownPathIdentities.has(resolvedNextPath)
   ) {
     throw new ProjectFileError(
       "UNKNOWN_SOURCE",
@@ -498,7 +526,7 @@ async function activateGeneratedVersion(payload) {
   }
 
   const sourceEndpoint = new URL(`http://127.0.0.1:${bridgePort}/source`);
-  sourceEndpoint.searchParams.set("sourcePath", previousSourcePath);
+  sourceEndpoint.searchParams.set("sourcePath", resolvedPreviousPath);
   const sourceResponse = await net.fetch(sourceEndpoint, {
     cache: "no-store",
     headers: {
@@ -520,10 +548,8 @@ async function activateGeneratedVersion(payload) {
       "项目记录无法确认这个 AI 新版本，当前文件没有切换。",
     );
   }
-  if (
-    path.resolve(authoritativeSource.sourcePath)
-    !== path.resolve(nextSourcePath)
-  ) {
+  const authoritativeSourcePath = await realpath(authoritativeSource.sourcePath);
+  if (authoritativeSourcePath !== resolvedNextPath) {
     throw new ProjectFileError(
       "GENERATED_VERSION_PATH_MISMATCH",
       "新版本路径与项目记录不一致，当前文件没有切换。",
@@ -534,10 +560,7 @@ async function activateGeneratedVersion(payload) {
     );
   }
 
-  const [workspaceRoot, resolvedNextPath] = await Promise.all([
-    workspacePath().then((value) => realpath(value)),
-    realpath(nextSourcePath),
-  ]);
+  const workspaceRoot = await workspacePath().then((value) => realpath(value));
   const relativeNextPath = path.relative(workspaceRoot, resolvedNextPath);
   const pathParts = relativeNextPath.split(path.sep);
   if (
@@ -573,13 +596,19 @@ async function activateGeneratedVersion(payload) {
   }
 
   const now = Date.now();
+  const activePathIdentity = state.activePath
+    ? await existingPathIdentity(state.activePath)
+    : null;
+  const recentPathIdentities = await Promise.all(
+    state.recent.map((entry) => existingPathIdentity(entry.path)),
+  );
   const activatesCurrentProject =
-    state.activePath === previousSourcePath
-    || state.activePath === resolvedNextPath;
-  const replacedIndex = state.recent.findIndex(
-    (entry) =>
-      entry.path === previousSourcePath
-      || entry.path === resolvedNextPath,
+    activePathIdentity === resolvedPreviousPath
+    || activePathIdentity === resolvedNextPath;
+  const replacedIndex = recentPathIdentities.findIndex(
+    (identity) =>
+      identity === resolvedPreviousPath
+      || identity === resolvedNextPath,
   );
   const replacedEntry = replacedIndex >= 0
     ? state.recent[replacedIndex]
@@ -594,9 +623,9 @@ async function activateGeneratedVersion(payload) {
       : replacedEntry?.lastOpenedAt ?? now,
   };
   const retained = state.recent.filter(
-    (entry) =>
-      entry.path !== previousSourcePath
-      && entry.path !== resolvedNextPath,
+    (_entry, index) =>
+      recentPathIdentities[index] !== resolvedPreviousPath
+      && recentPathIdentities[index] !== resolvedNextPath,
   );
   if (activatesCurrentProject) {
     state.activePath = resolvedNextPath;
@@ -615,7 +644,7 @@ async function activateGeneratedVersion(payload) {
   await persistProjectState();
   return {
     ...project,
-    previousSourcePath,
+    previousSourcePath: resolvedPreviousPath,
     versionId: payload.versionId,
   };
 }
@@ -830,18 +859,25 @@ async function exportHtmlCopy(payload) {
 
 async function listRecentProjects() {
   const state = await loadProjectState();
-  return state.recent.map((entry) => ({
-    path: entry.path,
-    sourcePath: entry.path,
-    name: entry.name,
-    lastOpenedAt: entry.lastOpenedAt,
+  return Promise.all(state.recent.map(async (entry) => {
+    const sourcePath = await existingPathIdentity(entry.path);
+    return {
+      path: sourcePath,
+      sourcePath,
+      name: entry.name,
+      lastOpenedAt: entry.lastOpenedAt,
+    };
   }));
 }
 
 async function openRecent(filePath) {
   const normalizedPath = assertHtmlPath(filePath);
   const state = await loadProjectState();
-  if (!state.recent.some((entry) => entry.path === normalizedPath)) {
+  const requestedIdentity = await existingPathIdentity(normalizedPath);
+  const recentIdentities = await Promise.all(
+    state.recent.map((entry) => existingPathIdentity(entry.path)),
+  );
+  if (!recentIdentities.includes(requestedIdentity)) {
     throw new ProjectFileError(
       "NOT_RECENT_PROJECT",
       "该文件已从最近项目中移除，请用“打开本地 HTML”重新选择。",
@@ -850,7 +886,7 @@ async function openRecent(filePath) {
 
   try {
     const project = await readHtmlProject(normalizedPath);
-    await activateProject(normalizedPath);
+    await activateProject(project.sourcePath);
     return project;
   } catch (error) {
     if (error?.code === "ENOENT") await forgetProject(normalizedPath);

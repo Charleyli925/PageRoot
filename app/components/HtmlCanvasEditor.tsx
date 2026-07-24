@@ -62,6 +62,7 @@ import {
   buildRuntimeDomMap,
   nativeRuntimePreflight as inspectNativeEditRuntime,
 } from "./native-edit-runtime-preflight";
+import NoticeBar from "./NoticeBar";
 import styles from "./HtmlCanvasEditor.module.css";
 
 const EDITOR_STYLE_ATTRIBUTE = "data-html-canvas-editor-style";
@@ -295,6 +296,8 @@ export type HtmlCanvasEditorProps = {
   onRequestFlush?: () => void;
   /** Handles Shift+Cmd/Ctrl+E inside the iframe using the host product's source-safe export path. */
   onRequestExport?: () => void;
+  /** Reloads the current source after the editor cannot build a safe source map. */
+  onRequestReload?: () => void;
   /** Reports a fail-closed edit whose source target could not be patched safely. */
   onEditBlocked?: (message: string) => void;
   /** Optional base URL for relative assets. The injected base element is not included in serialized output. */
@@ -511,6 +514,7 @@ type EditFeedback = {
   message: string;
   tone: "warning" | "error";
   sticky: boolean;
+  recovery: "comment" | "reload";
 };
 
 type EditorHistoryEntry = {
@@ -1952,10 +1956,31 @@ function findSelectableElement(target: EventTarget | null): HTMLElement | null {
 }
 
 const MEDIA_SURFACE_SELECTOR = "iframe, audio, video, canvas, object, embed";
+const COMPOUND_VALUE_AFFIX_TAGS = new Set(["SMALL", "SUP", "SUB"]);
+
+function compoundValueSelectionRoot(element: HTMLElement): HTMLElement {
+  if (!COMPOUND_VALUE_AFFIX_TAGS.has(element.tagName)) return element;
+  const parent = element.parentElement;
+  if (!parent || parent === parent.ownerDocument.body) return element;
+  const directText = Array.from(parent.childNodes)
+    .filter((node) => node.nodeType === 3)
+    .map((node) => node.textContent ?? "")
+    .join("")
+    .trim();
+  const combinedText = (parent.textContent ?? "").replace(/\s+/g, "");
+  if (
+    !/\d/u.test(directText)
+    || combinedText.length === 0
+    || combinedText.length > 40
+    || parent.querySelector("div, section, article, header, footer, main, aside, table, ul, ol")
+  ) return element;
+  return parent;
+}
 
 function findCanvasSelectionElement(target: EventTarget | null): HTMLElement | null {
-  const element = findSelectableElement(target);
-  if (!element) return null;
+  const selected = findSelectableElement(target);
+  if (!selected) return null;
+  const element = compoundValueSelectionRoot(selected);
   const ownsMediaSurface = element.matches(MEDIA_SURFACE_SELECTOR)
     || Boolean(element.querySelector(MEDIA_SURFACE_SELECTOR));
   if (!ownsMediaSurface) return element;
@@ -1998,6 +2023,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     onReady,
     onRequestFlush,
     onRequestExport,
+    onRequestReload,
     onEditBlocked,
     baseHref,
     sourcePath,
@@ -2217,7 +2243,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     if (!editFeedback || editFeedback.sticky || editFeedbackPaused) return undefined;
     const timer = window.setTimeout(() => {
       setEditFeedback((current) => current === editFeedback ? null : current);
-    }, 8000);
+    }, 5_000);
     return () => window.clearTimeout(timer);
   }, [editFeedback, editFeedbackPaused]);
 
@@ -2261,6 +2287,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         message,
         tone: "error",
         sticky: true,
+        recovery: "reload",
       });
       onEditBlockedRef.current?.(message);
     }
@@ -2993,6 +3020,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       message,
       tone: "warning",
       sticky: false,
+      recovery: "comment",
     });
     onEditBlockedRef.current?.(message);
   }, []);
@@ -6273,6 +6301,24 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     ? nativeEditHostForElement(selectedElementRef.current, sourceIndexRef.current)
     : null;
   const textFormatRequiresSelection = isEditing && !hasTextRange;
+  const handleEditFeedbackAction = useCallback(() => {
+    const recovery = editFeedback?.recovery;
+    setEditFeedback(null);
+    setEditFeedbackPaused(false);
+    if (recovery === "reload") {
+      onRequestReload?.();
+      return;
+    }
+    const target = selectedSourceSelectionRef.current;
+    if (target) {
+      onRequestCommentRef.current?.(target);
+    } else {
+      requestGlobalComment();
+    }
+  }, [editFeedback?.recovery, onRequestReload, requestGlobalComment]);
+  const editFeedbackActionAvailable = editFeedback?.recovery === "reload"
+    ? Boolean(onRequestReload)
+    : Boolean(onRequestComment);
 
   return (
     <div
@@ -6301,31 +6347,17 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       />
 
       {editFeedback && !interactionLocked ? (
-        <section
-          className={styles.editBlockedNotice}
-          data-tone={editFeedback.tone}
-          role={editFeedback.tone === "error" ? "alert" : "status"}
-          aria-live={editFeedback.tone === "error" ? "assertive" : "polite"}
-          onMouseEnter={() => setEditFeedbackPaused(true)}
-          onMouseLeave={() => setEditFeedbackPaused(false)}
-          onFocusCapture={() => setEditFeedbackPaused(true)}
-          onBlurCapture={(event) => {
-            const next = event.relatedTarget;
-            if (!(next instanceof Node) || !event.currentTarget.contains(next)) {
-              setEditFeedbackPaused(false);
-            }
-          }}
-        >
-          <div>
-            <strong>{editFeedback.title}</strong>
-            <span>{editFeedback.message}</span>
-          </div>
-          <button
-            type="button"
-            onClick={() => setEditFeedback(null)}
-            aria-label="关闭修改提示"
-          >关闭</button>
-        </section>
+        <NoticeBar
+          placement="canvas"
+          title={editFeedback.title}
+          message={editFeedback.message}
+          tone={editFeedback.tone}
+          actionLabel={editFeedback.recovery === "reload" ? "重新载入" : "添加评论"}
+          onAction={editFeedbackActionAvailable ? handleEditFeedbackAction : undefined}
+          onDismiss={() => setEditFeedback(null)}
+          onPauseChange={setEditFeedbackPaused}
+          dismissLabel="关闭修改提示"
+        />
       ) : null}
 
       {interactionLocked ? (

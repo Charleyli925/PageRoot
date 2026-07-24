@@ -76,7 +76,7 @@ test("the right-side project panel keeps file actions concise and safe", () => {
   assert.match(mainProcess, /shell\.showItemInFolder\(resolvedVersionPath\)/);
   assert.match(
     mainProcess,
-    /sourceEndpoint\.searchParams\.set\("sourcePath", previousSourcePath\)/,
+    /sourceEndpoint\.searchParams\.set\("sourcePath", resolvedPreviousPath\)/,
   );
   assert.match(
     mainProcess,
@@ -84,11 +84,11 @@ test("the right-side project panel keeps file actions concise and safe", () => {
   );
   assert.match(
     mainProcess,
-    /authoritativeSource\.sourcePath[\s\S]*?path\.resolve\(nextSourcePath\)/,
+    /const authoritativeSourcePath = await realpath\(authoritativeSource\.sourcePath\)[\s\S]*?authoritativeSourcePath !== resolvedNextPath/,
   );
   assert.match(
     mainProcess,
-    /const activatesCurrentProject =[\s\S]*?state\.activePath === previousSourcePath[\s\S]*?if \(activatesCurrentProject\) \{[\s\S]*?state\.activePath = resolvedNextPath/,
+    /const activatesCurrentProject =[\s\S]*?activePathIdentity === resolvedPreviousPath[\s\S]*?if \(activatesCurrentProject\) \{[\s\S]*?state\.activePath = resolvedNextPath/,
   );
   assert.match(
     mainProcess,
@@ -313,7 +313,7 @@ test("external source adoption invalidates the active native editing session", (
   );
   assert.match(
     completedVersion,
-    /const transitionAffectsCurrentCanvas[\s\S]*?sourcePathRef\.current === run\.sourcePath[\s\S]*?sourcePathRef\.current === committedSourcePath[\s\S]*?const transitionContext = captureProjectContext\(\)[\s\S]*?fenceAndFreezeCurrentCanvas\([\s\S]*?if \(!frozen\.ok\)[\s\S]*?isCurrentProjectContext\(transitionContext\)[\s\S]*?await adoptGeneratedSourcePath\(\{[\s\S]*?htmlRef\.current = content;[\s\S]*?setHtml\(content\)/u,
+    /const transitionAffectsCurrentCanvas[\s\S]*?sameLocalSourcePath\(sourcePathRef\.current, run\.sourcePath\)[\s\S]*?sameLocalSourcePath\(sourcePathRef\.current, committedSourcePath\)[\s\S]*?const transitionContext = captureProjectContext\(\)[\s\S]*?fenceAndFreezeCurrentCanvas\([\s\S]*?if \(!frozen\.ok\)[\s\S]*?isCurrentProjectContext\(transitionContext\)[\s\S]*?await adoptGeneratedSourcePath\(\{[\s\S]*?htmlRef\.current = content;[\s\S]*?setHtml\(content\)/u,
   );
 });
 
@@ -358,7 +358,8 @@ test("QoderWork handoff exposes a truthful process board and manual open action"
   assert.match(workbench, /不代表 Qoder 已收到/);
   assert.match(workbench, /等待 QoderWork 返回修改结果/);
   assert.match(workbench, /画布已锁定，仅可浏览/);
-  assert.match(workbench, /身份、Hash 与文件完整性/);
+  assert.match(workbench, /版本与文件完整性/);
+  assert.doesNotMatch(workbench, /身份、Hash 与文件完整性/);
   assert.match(workbench, /范围与质量校验/);
   assert.match(workbench, /无视本校验，继续/);
   assert.match(workbench, /打开最新版/);
@@ -371,7 +372,7 @@ test("QoderWork handoff exposes a truthful process board and manual open action"
   assert.match(sendToQoderWork, /publishStatus\("failed"\)/);
   assert.match(
     sendToQoderWork,
-    /sourcePathRef\.current === run\.sourcePath[\s\S]*?visibleRun\?\.requestId === run\.requestId[\s\S]*?visibleRun\.attemptId === run\.attemptId/,
+    /sameLocalSourcePath\(sourcePathRef\.current, run\.sourcePath\)[\s\S]*?visibleRun\?\.requestId === run\.requestId[\s\S]*?visibleRun\.attemptId === run\.attemptId/,
   );
   assert.doesNotMatch(sendToQoderWork, /setDrawer\("handoff"\)|tone: "success"/);
   assert.match(workbench, /qoder-logo\.png/);
@@ -415,14 +416,19 @@ test("QoderWork handoff exposes a truthful process board and manual open action"
   );
 });
 
-test("processing uses one blocking decision surface while preserving recovery actions", () => {
+test("processing keeps its decision surface dismissible and project navigation available", () => {
   assert.match(
     workbench,
-    /<nav className="header-actions"[\s\S]*?disabled=\{\s*projectHydrating \|\| viewTransitioning \|\| Boolean\(projectLoadError\)/,
+    /className="project-button"[\s\S]*?disabled=\{projectHydrating \|\| viewTransitioning\}/,
   );
   assert.match(workbench, /aria-pressed=\{canvasMode === "edit"\}[\s\S]*?disabled=\{runInProgress \|\| viewMode === "history"\}/);
   assert.match(workbench, /className="global-comment-button"[\s\S]*?disabled=\{interactionLocked \|\| canvasMode !== "edit"\}/);
-  assert.match(styles, /\.drawer-overlay\.show\[data-drawer="handoff"\]\s*\{[\s\S]*?pointer-events:\s*auto/);
+  assert.match(styles, /\.drawer-overlay\.show\[data-drawer="handoff"\]\s*\{[\s\S]*?pointer-events:\s*none/);
+  assert.doesNotMatch(workbench, /aria-modal=\{drawer === "handoff"/);
+  assert.match(
+    workbench,
+    /if \(!drawer \|\| previewAttachment\) return(?: undefined)?;[\s\S]*?event\.key === "Escape"[\s\S]*?setDrawer\(null\)/,
+  );
   assert.match(
     styles,
     /\.workbench\[data-round-state="processing"\] > \.review-scroll-stage\s*\{[\s\S]*?opacity:\s*0\.38/,
@@ -498,7 +504,7 @@ test("AI submission and run operations remain isolated by project and run identi
   assert.match(generate, /if \(submissionIntentRef\.current\) return/);
   assert.match(
     generate,
-    /submissionIntentRef\.current\?\.token !== submissionIntent\.token[\s\S]*?projectEpochRef\.current !== submissionIntent\.epoch[\s\S]*?sourcePathRef\.current !== submissionIntent\.sourcePath/,
+    /submissionIntentRef\.current\?\.token !== submissionIntent\.token[\s\S]*?projectEpochRef\.current !== submissionIntent\.epoch[\s\S]*?!sameLocalSourcePath\(sourcePathRef\.current, submissionIntent\.sourcePath\)/,
   );
   assert.match(workbench, /qoderHandoffStatesRef\s*=\s*useRef<Map<string, ProjectQoderHandoffState>>/);
   assert.match(workbench, /activatingRunsRef = useRef<Set<string>>/);
@@ -628,7 +634,7 @@ test("AI completion adopts the generated semantic file before editing resumes", 
   assert.doesNotMatch(workbench, /QoderWork 返回的新文件已打开|原文件已保留/u);
   assert.match(
     workbench,
-    /<strong title=\{activeOpenedAiVersionNotice\?\.fileName \|\| projectName\}>/,
+    /<strong[\s\S]*?title=\{activeOpenedAiVersionNotice\?\.fileName \|\| projectName\}[\s\S]*?aria-live="polite"[\s\S]*?aria-atomic="true"/,
   );
   assert.match(workbench, /aria-live="polite"[\s\S]*?aria-atomic="true"/u);
   assert.match(

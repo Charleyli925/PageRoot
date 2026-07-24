@@ -490,19 +490,23 @@ function supplementAttachmentsSha256(records) {
   return sha256(Buffer.from(jsonText(manifest), "utf8"));
 }
 
-function activeSupplementRequirementCount(records) {
-  const active = new Set();
+export function activeUserSupplementRecords(records) {
+  const active = new Map();
   for (const record of records) {
-    if (record.action === "add" || record.action === "amend") {
-      active.add(record.recordId);
-    }
-    if (record.action === "retract") {
+    if (record.action === "amend" || record.action === "retract") {
       for (const reference of record.refersTo) {
         if (SUPPLEMENT_RECORD_ID_PATTERN.test(reference)) active.delete(reference);
       }
     }
+    if (record.action === "add" || record.action === "amend") {
+      active.set(record.recordId, record);
+    }
   }
-  return active.size;
+  return records.filter((record) => active.has(record.recordId));
+}
+
+function activeSupplementRequirementCount(records) {
+  return activeUserSupplementRecords(records).length;
 }
 
 function validateSupplementRecordShape(recordValue, index) {

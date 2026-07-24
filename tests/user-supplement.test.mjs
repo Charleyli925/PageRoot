@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 
 import {
+  activeUserSupplementRecords,
   LIFECYCLE_SCHEMA_VERSION,
   projectDirectory,
   recordUserSupplement,
@@ -108,6 +109,11 @@ test("internal AI conversation supplements are append-only, hashed and sealed", 
   });
   assert.equal(sealed.status, "sealed");
   assert.equal(sealed.recordCount, 2);
+  assert.equal(sealed.activeRequirementCount, 1);
+  assert.deepEqual(
+    activeUserSupplementRecords(sealed.records).map((record) => record.recordId),
+    ["supplement_0002"],
+  );
   assert.match(sealed.recordsSha256, /^sha256:[a-f0-9]{64}$/);
   assert.match(sealed.attachmentsSha256, /^sha256:[a-f0-9]{64}$/);
   assert.equal(sealed.records[0].attachments.length, 1);
@@ -129,6 +135,7 @@ test("internal AI conversation supplements are append-only, hashed and sealed", 
     requireSealed: true,
   });
   assert.equal(verified.recordCount, 2);
+  assert.equal(verified.activeRequirementCount, 1);
 
   await assert.rejects(
     recordUserSupplement({
