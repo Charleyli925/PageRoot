@@ -1,0 +1,76 @@
+name: CI incident
+description: Classify a repeated PageRoot test, runner or artifact failure on one exact SHA.
+title: "ci: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use synthetic evidence only. Do not attach user HTML, personal paths, credentials or private logs.
+  - type: dropdown
+    id: category
+    attributes:
+      label: Final category
+      options:
+        - product
+        - test_script
+        - ci_environment
+        - packaged_artifact
+    validations:
+      required: true
+  - type: input
+    id: commit
+    attributes:
+      label: Exact commit SHA
+      placeholder: 40-character SHA
+    validations:
+      required: true
+  - type: input
+    id: run
+    attributes:
+      label: Failed run or job URL
+      placeholder: https://github.com/Charleyli925/PageRoot/actions/runs/...
+    validations:
+      required: true
+  - type: input
+    id: signature
+    attributes:
+      label: Normalized failure signature
+      placeholder: pageroot-ci-v1:...
+    validations:
+      required: true
+  - type: dropdown
+    id: same_sha_rerun
+    attributes:
+      label: Same-SHA failed-job rerun
+      options:
+        - Same signature failed twice
+        - Rerun passed
+        - Signature changed
+        - Not yet rerun
+    validations:
+      required: true
+  - type: dropdown
+    id: local_reproduction
+    attributes:
+      label: Local reproduction
+      options:
+        - Reproduced locally
+        - Did not reproduce locally
+        - Environment preflight failure; not applicable
+        - Not yet attempted
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence and first failed boundary
+      description: Summarize the machine evidence, first failed assertion/stage and why the category is justified.
+    validations:
+      required: true
+  - type: textarea
+    id: action
+    attributes:
+      label: Containment and next action
+      description: State whether the candidate is frozen and identify the narrow fix or follow-up.
+    validations:
+      required: true

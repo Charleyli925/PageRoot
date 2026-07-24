@@ -18,7 +18,7 @@ This repository is the complete public source boundary for PageRoot. Keep this f
 3. Keep the diff focused. Add tests and documentation in the same change when behavior, contracts, commands or public expectations change.
 4. While editing, use `npm run gate:edit`. Before publishing a branch, run `npm run task:finish`.
 5. Review `git diff`, stage only intentional paths, review `git diff --cached`, then commit and push the task branch.
-6. Open a draft PR while work is incomplete. After the required gate passes and the final diff is reviewable, mark it ready. Squash-merge only with explicit authorization.
+6. Open a draft PR while work is incomplete. When the final intended diff is reviewable, mark it ready to run the required complete gate once. Squash-merge only with explicit authorization.
 7. End every task with: branch, commit, changed-file summary, tests run and results, documentation impact, PR/Release links, and whether the worktree is clean.
 
 For command behavior, authorization levels, worktrees and reporting format, read `docs/CODEX_WORKFLOW.md`.
@@ -30,7 +30,7 @@ For command behavior, authorization levels, worktrees and reporting format, read
 - Complete clean source candidate: `npm run gate:release:auto`
 - Verified arm64 installer candidate: `npm run release:mac`
 
-The release and artifact gates require a clean committed tree. Any source change invalidates earlier release evidence. Pull Requests run the complete source gate once; `main` verifies its exact-tree attestation and runs only a fast smoke. A release tag may use the internal `gate:artifact-only:auto` lane only when CI has authenticated a fresh successful PR gate for the identical Git tree and version; otherwise it must rerun `release:mac`. Release only from reviewed `main` using the immutable-tag process in `docs/RELEASING.md`.
+The release and artifact gates require a clean committed tree. Any source change invalidates earlier release evidence. Draft Pull Requests run impact-selected feedback; marking the final tree ready runs the complete source gate once. `main` verifies its exact-tree attestation and runs only a fast smoke. The manual `Release Candidate` workflow may use the internal `gate:artifact-only:auto` lane only when CI has authenticated a fresh successful PR gate for the identical Git tree and version. The separate `Release` workflow then verifies and publishes those exact candidate bytes and creates the immutable tag; it never rebuilds during publication. Release only from reviewed `main` using `docs/RELEASING.md`.
 
 ## Product invariants
 

@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
   workflow_dispatch:
 
 permissions:
@@ -16,9 +17,46 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  draft-feedback:
+    name: draft-feedback
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - name: Restore Electron download cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/electron
+          key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
+      - run: npm ci
+      - name: Run impact-selected draft feedback
+        run: >-
+          node scripts/ci-evidence.mjs run
+          --suite draft-feedback
+          --stage draft-feedback
+          --
+          npm run gate:edit -- --base origin/main
+      - name: Upload draft evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: PageRoot-draft-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            output/ci-evidence
+            output/test-runs
+          if-no-files-found: warn
+          retention-days: 14
+
   source-build:
     name: source-build
-    if: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.draft == false) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -35,28 +73,34 @@ jobs:
           path: ~/.cache/electron
           key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
       - run: npm ci
-      - name: Run static and dependency checks
-        run: |
-          npm run typecheck
-          npm run lint
-          npm run audit:dependencies
-      - name: Build shared web and Electron renderers once
-        run: |
-          npm run build
-          npm run desktop:renderer
-      - name: Upload shared source build
+      - name: Run static checks and build the shared web renderer
+        run: >-
+          node scripts/ci-evidence.mjs run
+          --suite source-build
+          --stage source-build
+          --
+          npm run ci:source-build
+      - name: Upload shared web build
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: PageRoot-source-build-${{ github.run_id }}-${{ github.run_attempt }}
+          name: PageRoot-web-build-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             dist
-            dist-desktop
+            package.json
           if-no-files-found: error
           retention-days: 1
+      - name: Upload source-build evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: PageRoot-source-build-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: output/ci-evidence
+          if-no-files-found: warn
+          retention-days: 30
 
   source-node:
     name: source-node
-    if: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.draft == false) }}
     needs: source-build
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -74,16 +118,30 @@ jobs:
           path: ~/.cache/electron
           key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
       - run: npm ci
-      - name: Download shared source build
+      - name: Download shared web build
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: PageRoot-source-build-${{ github.run_id }}-${{ github.run_attempt }}
+          name: PageRoot-web-build-${{ github.run_id }}-${{ github.run_attempt }}
           path: .
-      - run: npm run test:node:full:prepared
+      - name: Run full Node suite
+        run: >-
+          node scripts/ci-evidence.mjs run
+          --suite source-node
+          --stage source-test
+          --
+          npm run test:node:full:prepared
+      - name: Upload Node evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: PageRoot-source-node-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: output/ci-evidence
+          if-no-files-found: warn
+          retention-days: 30
 
   source-browser:
     name: browser-${{ matrix.label }}
-    if: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.draft == false) }}
     needs: source-build
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -124,13 +182,18 @@ jobs:
       - name: Install Playwright Chromium
         if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: npx playwright install chromium
-      - name: Download shared source build
+      - name: Download shared web build
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: PageRoot-source-build-${{ github.run_id }}-${{ github.run_attempt }}
+          name: PageRoot-web-build-${{ github.run_id }}-${{ github.run_attempt }}
           path: .
       - name: Run ${{ matrix.label }}
-        run: ${{ matrix.command }}
+        run: >-
+          node scripts/ci-evidence.mjs run
+          --suite browser-${{ matrix.label }}
+          --stage source-test
+          --
+          ${{ matrix.command }}
       - name: Upload browser failure diagnostics
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -139,11 +202,18 @@ jobs:
           path: output/playwright
           if-no-files-found: warn
           retention-days: 7
+      - name: Upload browser evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: PageRoot-browser-${{ matrix.label }}-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: output/ci-evidence
+          if-no-files-found: warn
+          retention-days: 30
 
-  source-electron:
-    name: source-electron
-    if: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' }}
-    needs: source-build
+  source-electron-native:
+    name: electron-native
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.draft == false) }}
     runs-on: macos-14
     timeout-minutes: 45
     steps:
@@ -162,30 +232,112 @@ jobs:
             ~/Library/Caches/electron-builder
           key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
       - run: npm ci
-      - name: Download shared source build
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: PageRoot-source-build-${{ github.run_id }}-${{ github.run_attempt }}
-          path: .
-      - run: npm run test:electron:full:prepared
-      - run: npm run test:ai-closed-loop:prepared
-      - name: Upload Electron failure diagnostics
+      - name: Prove hosted renderer scheduling before product tests
+        run: >-
+          node scripts/ci-evidence.mjs run
+          --suite electron-native-preflight
+          --stage environment-preflight
+          --
+          npm run test:electron:ci-preflight:prepared
+      - name: Build Electron renderer on the target OS
+        run: >-
+          node scripts/ci-evidence.mjs run
+          --suite electron-native-renderer
+          --stage source-build
+          --
+          npm run desktop:renderer
+      - name: Run native Electron suite
+        run: >-
+          node scripts/ci-evidence.mjs run
+          --suite electron-native
+          --stage source-test
+          --
+          npm run test:electron:full:prepared
+      - name: Upload native Electron failure diagnostics
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: PageRoot-Electron-diagnostics-${{ github.run_attempt }}
+          name: PageRoot-electron-native-diagnostics-${{ github.run_attempt }}
           path: output/playwright
           if-no-files-found: warn
           retention-days: 7
+      - name: Upload native Electron evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: PageRoot-electron-native-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: output/ci-evidence
+          if-no-files-found: warn
+          retention-days: 30
+
+  source-electron-ai:
+    name: electron-ai
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.draft == false) }}
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - name: Restore Electron download cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+          key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
+      - run: npm ci
+      - name: Prove hosted renderer scheduling before AI tests
+        run: >-
+          node scripts/ci-evidence.mjs run
+          --suite electron-ai-preflight
+          --stage environment-preflight
+          --
+          npm run test:electron:ci-preflight:prepared
+      - name: Build Electron renderer on the target OS
+        run: >-
+          node scripts/ci-evidence.mjs run
+          --suite electron-ai-renderer
+          --stage source-build
+          --
+          npm run desktop:renderer
+      - name: Run deterministic AI closed-loop suite
+        run: >-
+          node scripts/ci-evidence.mjs run
+          --suite electron-ai
+          --stage source-test
+          --
+          npm run test:ai-closed-loop:prepared
+      - name: Upload AI Electron failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: PageRoot-electron-ai-diagnostics-${{ github.run_attempt }}
+          path: output/playwright
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Upload AI Electron evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: PageRoot-electron-ai-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: output/ci-evidence
+          if-no-files-found: warn
+          retention-days: 30
 
   release-gate:
     name: release-gate
-    if: ${{ always() && (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch') }}
+    if: ${{ always() && (github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.draft == false)) }}
     needs:
       - source-build
       - source-node
       - source-browser
-      - source-electron
+      - source-electron-native
+      - source-electron-ai
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -194,12 +346,14 @@ jobs:
           BUILD_RESULT: ${{ needs.source-build.result }}
           NODE_RESULT: ${{ needs.source-node.result }}
           BROWSER_RESULT: ${{ needs.source-browser.result }}
-          ELECTRON_RESULT: ${{ needs.source-electron.result }}
+          ELECTRON_NATIVE_RESULT: ${{ needs.source-electron-native.result }}
+          ELECTRON_AI_RESULT: ${{ needs.source-electron-ai.result }}
         run: |
           test "$BUILD_RESULT" = "success"
           test "$NODE_RESULT" = "success"
           test "$BROWSER_RESULT" = "success"
-          test "$ELECTRON_RESULT" = "success"
+          test "$ELECTRON_NATIVE_RESULT" = "success"
+          test "$ELECTRON_AI_RESULT" = "success"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
@@ -281,7 +435,13 @@ jobs:
       - name: Install Playwright Chromium
         if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: npx playwright install chromium
-      - run: npm run gate:main:auto
+      - name: Run exact-tree main smoke
+        run: >-
+          node scripts/ci-evidence.mjs run
+          --suite main-smoke
+          --stage post-merge
+          --
+          npm run gate:main:auto
       - name: Upload main smoke diagnostics
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -292,3 +452,11 @@ jobs:
             output/playwright
           if-no-files-found: warn
           retention-days: 7
+      - name: Upload main smoke evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: PageRoot-main-smoke-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: output/ci-evidence
+          if-no-files-found: warn
+          retention-days: 30

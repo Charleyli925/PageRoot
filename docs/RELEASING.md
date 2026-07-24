@@ -1,42 +1,78 @@
 # Release guide
 
-Releases are generated only from a reviewed commit on `main`.
+Official releases use two explicit GitHub Actions stages from reviewed `main`:
 
-## Prepare
+1. `Release Candidate` builds and verifies the installer before a tag exists.
+2. `Release` verifies those frozen bytes, creates the annotated immutable tag and publishes the same files.
 
-1. Update `package.json` and `package-lock.json` to the same semantic version.
+Do not push a release tag manually. A tag is an output of successful candidate verification, not the input that starts packaging.
+
+## Prepare the source
+
+1. Update `package.json` and the package-lock root to the same semantic version.
 2. Move relevant `CHANGELOG.md` entries from Unreleased into that version.
-3. Merge the change through a Pull Request and confirm CI is green.
-4. On a clean checkout of `main`, run `npm ci`, install Playwright Chromium and run `npm run release:mac` if a local candidate is required.
+3. Open a draft Pull Request while iterating. Draft updates run impact-selected feedback.
+4. Mark the final intended tree ready and wait for the required complete `release-gate`.
+5. Merge only with authorization, then confirm `main-integrity` and `main-smoke` pass for the exact merge commit.
 
-## Publish
+Local `npm run release:mac` remains available when a complete local source-and-installer proof is useful. It is not publication and does not replace the reviewed GitHub flow.
 
-Create and push an annotated immutable tag:
+## Build the pre-tag candidate
 
-```bash
-git switch main
-git pull --ff-only
-git status --short
-VERSION=0.8.7
-git tag -a "v${VERSION}" -m "PageRoot ${VERSION}"
-git push origin "v${VERSION}"
-```
+In GitHub Actions:
 
-The required PR gate records the tested merge Tree Hash, package version, PR head and successful workflow run in a retained source-gate attestation. On a tag, the GitHub `Release` workflow verifies:
+1. Select the `Release Candidate` workflow.
+2. Choose `main`.
+3. Run the workflow and wait for `build-and-verify-candidate`.
 
-1. the tag matches `package.json` and the lockfile root version;
-2. the tag commit is the merged `main` commit associated with that PR;
-3. the successful PR run and its attestation match the exact tag Tree Hash and version;
-4. the source evidence is no more than seven days old.
+The workflow:
 
-When all four checks match, the workflow builds the Electron renderer once, packages the App, launches the packaged runtime, verifies app contents/signature and mounts and verifies the DMG. It does not repeat the already-proven full Node, Chromium and Electron source suites. If evidence is missing, stale, mismatched or temporarily unavailable, the workflow automatically runs the complete `release:mac` source-and-artifact gate before publication.
+- refuses any ref other than current `main`;
+- requires a successful PR source-gate attestation for the exact Tree Hash and package/lockfile version, no older than seven days;
+- packages on macOS with `electron-builder --publish never`;
+- launches the packaged App with isolated data;
+- verifies the App bundle, Bridge resources, schemas, ad-hoc signature, DMG integrity and read-only mount;
+- creates the checksum, update manifest and `build-info.json`;
+- freezes those files with `release-candidate.json` in an artifact named for the exact Tree Hash, version and architecture.
 
-`electron-builder` is forced to `--publish never`; only the final workflow step may publish the DMG, checksum, update manifest and build provenance after verification.
+It does not create a tag or GitHub Release. A failed build or verification therefore leaves the version namespace untouched.
 
-Do not move or reuse a published tag. Do not replace assets silently. If a released build is wrong, fix the source and publish a new patch version.
+Candidate artifacts are retained for 14 days. Publication accepts only a successful matching candidate no older than 72 hours. If the source changes for any reason, build a new candidate for the new Tree Hash.
+
+## Publish the candidate
+
+After reviewing the candidate run:
+
+1. Select the `Release` workflow.
+2. Choose `main`.
+3. Enter the exact version from `package.json`, without the `v` prefix.
+4. Run `publish-verified-candidate`.
+
+The workflow:
+
+1. verifies the requested version against `package.json` and the package-lock root;
+2. resolves a fresh successful `Release Candidate` run for the exact current commit, Tree Hash, version and `arm64` architecture;
+3. downloads the frozen candidate;
+4. verifies the candidate attestation, build provenance, expected file set, sizes and SHA-256 of every asset;
+5. checks that no published Release already exists;
+6. creates an annotated `v<version>` tag at that exact commit;
+7. publishes the candidate DMG, checksum, update manifest, build provenance and candidate attestation without rebuilding.
+
+If publication fails after the tag push but before the GitHub Release exists, rerun the same `Release` workflow from the same `main` commit and version. It may resume only when the existing tag is annotated and resolves to the identical commit. If a Release already exists, the workflow refuses to replace its assets.
 
 ## Provenance
 
-Packaging refuses uncommitted or untracked source changes. `build-info.json` records version, architecture, repository, commit SHA, tree SHA and build time. Artifact verification compares this record with the clean checkout and verifies the application bundle, embedded Bridge resources, schemas, signature and mounted DMG.
+Packaging refuses committed-source drift or untracked source files. `build-info.json` records version, architecture, repository, commit SHA, Tree SHA and build time. `release-candidate.json` additionally binds the source-gate run, candidate run/attempt and SHA-256 plus size of every public asset.
+
+Publication revalidates all of that information after downloading the artifact. The Release includes both provenance files, so the published installer can be traced to the reviewed source tree and the exact successful candidate run.
 
 Current public builds use ad-hoc signing (`identity: "-"`) and are not notarized. Developer ID signing and notarization should be added before presenting the app as a frictionless production download; credentials must stay in GitHub encrypted secrets and must never enter the repository.
+
+## Failures
+
+Use the machine evidence under `output/ci-evidence/` and the procedure in `docs/RELEASE_PIPELINE_GOVERNANCE.md`.
+
+- Rerun only a failed job when the exact SHA and failure signature indicate a hosted-environment incident.
+- Do not make no-op commits, enable blanket retries or restart a green matrix.
+- After the same environment signature fails twice on one SHA without local reproduction, freeze the candidate and open a CI incident.
+- Never move or reuse a published tag. If released source is wrong, fix it through a new PR and publish a new patch version.

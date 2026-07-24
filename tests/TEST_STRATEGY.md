@@ -8,11 +8,13 @@
 |---|---|---|---|
 | `npm run gate:edit` | 一次局部修改后 | 只运行影响映射命中的 Node 文件；必要时 typecheck | 快速发现局部逻辑错误，不启动浏览器或 Electron |
 | `npm run gate:task` | 一个开发任务完成时 | 静态检查、受影响 Node 文件，以及相关 Browser/Electron/AI 冒烟 | 在较短时间内证明生产链路已经接通 |
-| PR `release-gate` | 最终 PR Tree | 全量 Node、三分片完整 Browser、完整 Electron、确定性 AI 闭环、真实 HTML 发现式门禁 | 完整源码回归只跑一次并签发 Tree Hash 凭证 |
+| Draft PR `draft-feedback` | PR 仍在迭代 | 按影响映射选择 Node/编译检查 | 不因每次推送重复消费完整矩阵 |
+| Ready PR `release-gate` | 最终 PR Tree | 全量 Node、三分片完整 Browser、独立 Native Electron、独立确定性 AI 闭环、真实 HTML 发现式门禁 | 完整源码回归只跑一次并签发 Tree Hash 凭证 |
 | `npm run gate:main:auto` | 合并到 `main` | 校验 PR 结果/Tree Hash/版本后，固定 Node 与 Browser 冒烟 | 快速证明合并结果没有漂移，不重复全量源码测试 |
-| 标签 `gate:artifact-only:auto` | 凭证新鲜且 Tree/版本完全一致 | 打包、打包 App 实机启动、DMG/签名/包内容校验 | 重点证明最终安装包；凭证不可信时自动回退 `release:mac` |
+| `Release Candidate` | 打标签之前，凭证新鲜且 Tree/版本完全一致 | 打包、打包 App 实机启动、DMG/签名/包内容校验，冻结候选字节 | 失败时不消耗不可变版本 tag |
+| `Release` | 候选包通过且不超过 72 小时 | 重新校验候选凭证和每个文件 Hash，创建 tag 并发布原字节 | 发布阶段不重新构建、不悄悄替换文件 |
 
-本地 `release` 和完整 `artifact` 不根据改动缩减范围。`artifact-only` 不是开发者手工跳过源码测试的捷径：执行器会拒绝缺少 CI 信任决定、Tree Hash 或版本不一致的调用，只允许 CI 在七天内成功 PR 凭证与当前 Tree Hash、版本完全一致时进入。`edit` 和 `task` 的选择由 `tests/test-impact-map.json` 决定，模型或开发者只选择门禁层级，不临时拼接测试命令。
+本地 `release` 和完整 `artifact` 不根据改动缩减范围。`artifact-only` 不是开发者手工跳过源码测试的捷径：执行器会拒绝缺少 CI 信任决定、Tree Hash 或版本不一致的调用，只允许 `Release Candidate` 在七天内成功 PR 凭证与当前 Tree Hash、版本完全一致时进入。发布工作流只接受同一 Tree/版本、已验证且 72 小时内的候选包。`edit` 和 `task` 的选择由 `tests/test-impact-map.json` 决定，模型或开发者只选择门禁层级，不临时拼接测试命令。
 
 工作区有未提交修改时，`edit/task` 自动读取 staged、unstaged 和 untracked 文件。任务已经提交后应运行 `npm run gate:task -- --base <基准分支或提交>`；干净工作区又没有 `--base` 时门禁会明确失败，不会把“零测试”伪装成通过。
 
@@ -27,7 +29,9 @@
 - AI 闭环：任务级只跑正常闭环和越界失败 2 个代表场景；发布级跑完整 6 个场景，包括复制失败、缺失 finalizer、非法 HTML 和版本激活失败。测试自动生成受控 AI 输出并执行正式 finalizer，不等待外部模型或真人接力。
 - 候选包：从 `.app` 的真实可执行文件启动，使用隔离 userData，完成源码字节 oracle；随后校验 app.asar、Bridge、Schema、签名、DMG 和只读挂载内容。
 
-顶层 Node 测试在一次执行中只出现一次。精确影响映射优先；只有找不到任何精确用例时才启用 `node-core` 兜底。PR CI 先构建一次 Web 与 Electron renderer，再让 Node、Browser 和 Electron 组共享产物并行运行；Browser 保持每个分片单 worker、零重试，但跨三个独立分片并发。普通 Node/Chromium 在 Linux，Electron 与安装包在 macOS。
+顶层 Node 测试在一次执行中只出现一次。精确影响映射优先；只有找不到任何精确用例时才启用 `node-core` 兜底。PR CI 在 Linux 构建一次 Web renderer，供 Node 和 Browser 共享；每个 macOS Electron job 在目标系统本地构建 renderer，并先用独立 preflight 证明窗口可见、计时器和 animation frame 正常推进。Native Electron 与 AI 闭环分成两个 job，Browser 保持每个分片单 worker、零重试，但跨三个独立分片并发。
+
+关键 CI 命令通过 `scripts/ci-evidence.mjs` 记录 commit、Tree、job、耗时、退出状态、标准化失败摘要与稳定签名。环境 preflight 失败可直接归类为 `ci_environment`；源码测试失败先标 `needs_triage`，再依据独立 oracle 归为 `product`、`test_script` 或 `ci_environment`。同一 SHA 的环境嫌疑只重跑失败 job；相同签名连续两次失败且本地不复现时冻结候选并登记 CI incident。完整规则见 `docs/RELEASE_PIPELINE_GOVERNANCE.md`。
 
 ## 判断标准优先级
 

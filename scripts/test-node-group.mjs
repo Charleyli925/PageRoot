@@ -24,6 +24,7 @@ const CONTRACT_TESTS = new Set([
 const PACKAGE_TESTS = new Set([
   "desktop-package.test.mjs",
   "packaged-artifact-gate.test.mjs",
+  "release-candidate-provenance.test.mjs",
   "release-provenance.test.mjs",
   "source-gate-provenance.test.mjs",
 ]);

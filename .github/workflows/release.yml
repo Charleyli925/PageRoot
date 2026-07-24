@@ -1,24 +1,27 @@
 name: Release
+run-name: Publish PageRoot ${{ inputs.version }}
 
 on:
-  push:
-    tags:
-      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact package version already merged to main
+        required: true
+        type: string
 
 permissions:
   actions: read
   contents: write
-  pull-requests: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-publish-${{ inputs.version }}
   cancel-in-progress: false
 
 jobs:
   release:
-    name: build-and-publish
-    runs-on: macos-14
-    timeout-minutes: 90
+    name: publish-verified-candidate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -26,78 +29,100 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22.13.0
-          cache: npm
-      - name: Verify tag matches package version
-        run: test "$GITHUB_REF_NAME" = "v$(node -p "require('./package.json').version")"
-      - name: Check for reusable exact-tree PR source gate
-        id: source-gate
+      - name: Require exact version on current main
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$GITHUB_SHA" = "$(git rev-parse origin/main)"
+          test "$REQUESTED_VERSION" = "$(node -p "require('./package.json').version")"
+          test "$REQUESTED_VERSION" = "$(node -p "require('./package-lock.json').packages[''].version")"
+      - name: Resolve fresh exact-tree pre-tag candidate
+        id: candidate
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          node scripts/source-gate-provenance.mjs verify \
-            --repository "$GITHUB_REPOSITORY" \
-            --workflow ci.yml \
-            --max-age-hours 168 \
-            --mode advisory \
-            --github-output "$GITHUB_OUTPUT"
-      - name: Restore Electron and builder downloads
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/Library/Caches/electron
-            ~/Library/Caches/electron-builder
-          key: ${{ runner.os }}-electron-builder-${{ hashFiles('package-lock.json') }}
-      - run: npm ci
-      - name: Restore Playwright Chromium for source-gate fallback
-        if: steps.source-gate.outputs.trusted != 'true'
-        id: playwright-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/Library/Caches/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}
-      - name: Install Playwright Chromium for source-gate fallback
-        if: steps.source-gate.outputs.trusted != 'true' && steps.playwright-cache.outputs.cache-hit != 'true'
-        run: npx playwright install chromium
-      - name: Build and verify installer from attested source
-        if: steps.source-gate.outputs.trusted == 'true'
+        run: >-
+          node scripts/ci-evidence.mjs run
+          --suite release-candidate-resolve
+          --stage publish
+          --
+          node scripts/release-candidate-provenance.mjs resolve
+          --repository "$GITHUB_REPOSITORY"
+          --workflow release-candidate.yml
+          --architecture arm64
+          --max-age-hours 72
+          --github-output "$GITHUB_OUTPUT"
+      - name: Download frozen candidate bytes
         env:
-          PAGEROOT_SOURCE_GATE_TRUSTED: ${{ steps.source-gate.outputs.trusted }}
-          PAGEROOT_SOURCE_GATE_TREE: ${{ steps.source-gate.outputs.tree_sha }}
-          PAGEROOT_SOURCE_GATE_VERSION: ${{ steps.source-gate.outputs.package_version }}
-        run: npm run gate:artifact-only:auto
-      - name: Re-run complete source and installer gate
-        if: steps.source-gate.outputs.trusted != 'true'
-        run: npm run release:mac
-      - name: Upload failure diagnostics
-        if: failure()
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_RUN_ID: ${{ steps.candidate.outputs.run_id }}
+          CANDIDATE_ARTIFACT: ${{ steps.candidate.outputs.artifact_name }}
+        run: >-
+          node scripts/ci-evidence.mjs run
+          --suite release-candidate-download
+          --stage publish
+          --
+          gh run download "$CANDIDATE_RUN_ID"
+          --repo "$GITHUB_REPOSITORY"
+          --name "$CANDIDATE_ARTIFACT"
+          --dir output/downloaded-release-candidate
+      - name: Verify downloaded provenance and every asset byte
+        env:
+          CANDIDATE_RUN_ID: ${{ steps.candidate.outputs.run_id }}
+          CANDIDATE_RUN_ATTEMPT: ${{ steps.candidate.outputs.run_attempt }}
+        run: >-
+          node scripts/ci-evidence.mjs run
+          --suite release-candidate-verify
+          --stage publish
+          --
+          node scripts/release-candidate-provenance.mjs verify
+          --repository "$GITHUB_REPOSITORY"
+          --architecture arm64
+          --directory output/downloaded-release-candidate
+          --run-id "$CANDIDATE_RUN_ID"
+          --run-attempt "$CANDIDATE_RUN_ATTEMPT"
+      - name: Upload pre-publication evidence
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: PageRoot-Release-diagnostics-${{ github.run_attempt }}
-          path: |
-            output/test-runs
-            output/playwright
+          name: PageRoot-release-publication-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: output/ci-evidence
           if-no-files-found: warn
-          retention-days: 7
-      - run: npm run release:assets -- --arch arm64
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: PageRoot-${{ github.ref_name }}-arm64
-          path: |
-            release/PageRoot-*-arm64.dmg
-            release/SHA256SUMS.txt
-            release/update-manifest.json
-            release/build-info.json
-          if-no-files-found: error
+          retention-days: 30
+      - name: Create or safely resume the immutable annotated tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          TAG="v${VERSION}"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; refusing to replace immutable assets."
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            git fetch --no-tags origin "refs/tags/$TAG:refs/tags/$TAG"
+            test "$(git cat-file -t "refs/tags/$TAG")" = "tag"
+            test "$(git rev-parse "refs/tags/$TAG^{commit}")" = "$GITHUB_SHA"
+            echo "Resuming publication from the existing exact annotated tag $TAG."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$TAG" "$GITHUB_SHA" -m "PageRoot ${VERSION}"
+            git push origin "refs/tags/$TAG"
+          fi
       - name: Publish immutable GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
         run: |
-          VERSION="$(node -p "require('./package.json').version")"
-          gh release create "$GITHUB_REF_NAME" \
-            "release/PageRoot-${VERSION}-arm64.dmg" \
-            "release/SHA256SUMS.txt" \
-            "release/update-manifest.json" \
-            "release/build-info.json" \
+          CANDIDATE_DIRECTORY="output/downloaded-release-candidate"
+          gh release create "v${VERSION}" \
+            "$CANDIDATE_DIRECTORY/PageRoot-${VERSION}-arm64.dmg" \
+            "$CANDIDATE_DIRECTORY/SHA256SUMS.txt" \
+            "$CANDIDATE_DIRECTORY/update-manifest.json" \
+            "$CANDIDATE_DIRECTORY/build-info.json" \
+            "$CANDIDATE_DIRECTORY/release-candidate.json" \
+            --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
             --generate-notes \
             --title "PageRoot ${VERSION}"
