@@ -62,17 +62,19 @@ The comparison base is fixed to `origin/main`; `task:finish` does not accept a c
 
 1. Use a short-lived branch with an approved prefix.
 2. Keep one coherent outcome per PR.
-3. Open a draft PR until implementation and verification are complete.
+3. Open a draft PR while implementation is changing. Draft updates run only impact-selected feedback.
 4. The PR body must state outcome, boundary, verification, documentation impact and release impact.
-5. Wait for the required `release-gate`.
-6. Review the final GitHub diff, not only the local working diff.
+5. When the final intended GitHub diff is reviewable, mark the PR ready. This triggers the one complete `release-gate` for that tree.
+6. Wait for the required `release-gate` and review the final GitHub diff, not only the local working diff.
 7. Squash-merge only after authorization, delete the remote task branch, then fast-forward local `main`.
 
 Do not use an installed app, DMG, backup folder or another checkout as a source for new edits. If the local checkout contains unrelated work, create an isolated Git worktree rather than stashing or mixing changes.
 
-The required PR `release-gate` is the one complete source gate for the final PR tree. Local development should normally stop at impact-selected `gate:edit` and `task:finish`; rerun the complete source gate locally only for release candidates, CI diagnosis or high-risk editing-engine work where the additional evidence is useful.
+The required PR `release-gate` is the one complete source gate for the final ready PR tree. Draft updates run `draft-feedback` and do not spend the complete Browser/Electron matrix. Local development should normally stop at impact-selected `gate:edit` and `task:finish`; rerun the complete source gate locally only for CI diagnosis or high-risk editing-engine work where the additional evidence is useful.
 
-After merge, CI authenticates the successful PR result against the exact `main` Tree Hash and package/lockfile version, then runs a small Node and browser smoke on Linux. It does not repeat the complete browser and Electron suites. The source-gate attestation is valid for seven days and only for the exact tree. The tag workflow may then run the installer-only lane; a missing, stale or mismatched attestation automatically restores the complete source-and-artifact gate.
+After merge, CI authenticates the successful PR result against the exact `main` Tree Hash and package/lockfile version, then runs a small Node and browser smoke on Linux. It does not repeat the complete browser and Electron suites. The source-gate attestation is valid for seven days and only for the exact tree.
+
+Before a tag exists, the manual `Release Candidate` workflow uses that source attestation to run only the installer lane on macOS. It freezes the verified DMG, checksum, update manifest, build provenance and candidate attestation for the exact tree. The manual `Release` workflow accepts only a matching candidate no older than 72 hours, verifies every downloaded byte, creates the annotated tag and publishes those same files without rebuilding. See `docs/RELEASE_PIPELINE_GOVERNANCE.md` for failure classification, rerun policy and metrics.
 
 ## Documentation impact
 
@@ -125,6 +127,7 @@ Recommended review lifecycle:
 Scheduled monitoring is read-only unless a later instruction explicitly authorizes a fix. Recommended jobs:
 
 - Weekdays: summarize open PageRoot PRs, failed or pending required checks, review requests and merge blockers. Report only actionable changes.
+- Weekly: review the read-only `CI Health` report against the release-pipeline targets; do not rerun or mutate workflows automatically.
 - Weekly: inspect Dependabot PRs and run or verify the dependency-audit policy. Report new, expired or changed advisories; do not merge dependency updates automatically.
 
 Use a GitHub-connected task when only remote state is needed. Use an isolated PageRoot worktree when local commands are required. Never run scheduled modification work directly in a checkout that may contain active user edits.

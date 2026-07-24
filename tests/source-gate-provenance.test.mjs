@@ -111,12 +111,17 @@ test("failed runs, expired artifacts and non-PR commits are never trusted", () =
   })).reason, "no_merged_pull_request");
 });
 
-test("GitHub workflows keep one full PR boundary, a light main boundary and a conditional artifact boundary", async () => {
-  const [ci, release] = await Promise.all([
+test("GitHub workflows keep one ready-PR source boundary, a light main boundary and a pre-tag artifact boundary", async () => {
+  const [ci, candidate, release] = await Promise.all([
     readFile(path.join(productRoot, ".github/workflows/ci.yml"), "utf8"),
+    readFile(path.join(productRoot, ".github/workflows/release-candidate.yml"), "utf8"),
     readFile(path.join(productRoot, ".github/workflows/release.yml"), "utf8"),
   ]);
 
+  assert.match(ci, /ready_for_review/u);
+  assert.match(ci, /converted_to_draft/u);
+  assert.match(ci, /name: draft-feedback/u);
+  assert.match(ci, /github\.event\.pull_request\.draft == false/u);
   assert.match(ci, /name: release-gate/u);
   assert.match(ci, /source-gate-provenance\.mjs create/u);
   assert.match(ci, /steps\.provenance\.outputs\.artifact_name/u);
@@ -126,15 +131,32 @@ test("GitHub workflows keep one full PR boundary, a light main boundary and a co
   assert.match(ci, /--shard=2\/3/u);
   assert.match(ci, /--shard=3\/3/u);
   assert.match(ci, /--fully-parallel --workers=1/u);
+  assert.match(ci, /name: electron-native/u);
+  assert.match(ci, /name: electron-ai/u);
+  assert.match(ci, /test:electron:ci-preflight:prepared/u);
+  assert.match(ci, /--stage environment-preflight/u);
+  assert.match(ci, /npm run desktop:renderer/u);
+  assert.doesNotMatch(ci, /dist-desktop/u);
+  assert.doesNotMatch(ci, /Download shared source build/u);
+  assert.match(ci, /scripts\/ci-evidence\.mjs run/u);
   assert.match(ci, /gate:main:auto/u);
   assert.match(ci, /Verify PR result, exact tree, version and freshness/u);
   assert.doesNotMatch(ci, /push:[\s\S]{0,300}gate:release:auto/u);
 
-  assert.match(release, /source-gate-provenance\.mjs verify/u);
-  assert.match(release, /gate:artifact-only:auto/u);
-  assert.match(release, /PAGEROOT_SOURCE_GATE_TRUSTED/u);
-  assert.match(release, /PAGEROOT_SOURCE_GATE_TREE/u);
-  assert.match(release, /npm run release:mac/u);
-  assert.match(release, /steps\.source-gate\.outputs\.trusted == 'true'/u);
-  assert.match(release, /steps\.source-gate\.outputs\.trusted != 'true'/u);
+  assert.match(candidate, /source-gate-provenance\.mjs verify/u);
+  assert.match(candidate, /gate:artifact-only:auto/u);
+  assert.match(candidate, /PAGEROOT_SOURCE_GATE_TRUSTED/u);
+  assert.match(candidate, /PAGEROOT_SOURCE_GATE_TREE/u);
+  assert.match(candidate, /release-candidate-provenance\.mjs create/u);
+  assert.match(candidate, /test:electron:ci-preflight:prepared/u);
+  assert.doesNotMatch(candidate, /npm run release:mac/u);
+  assert.doesNotMatch(candidate, /gh release create/u);
+
+  assert.match(release, /release-candidate-provenance\.mjs resolve/u);
+  assert.match(release, /release-candidate-provenance\.mjs verify/u);
+  assert.match(release, /gh release create/u);
+  assert.match(release, /release-candidate\.json/u);
+  assert.doesNotMatch(release, /tags:/u);
+  assert.doesNotMatch(release, /source-gate-provenance\.mjs verify/u);
+  assert.doesNotMatch(release, /gate:artifact-only:auto/u);
 });
