@@ -185,8 +185,7 @@ async function waitForProjectReady(page, timeout = 60_000) {
     await page.bringToFront();
     const state = await page.locator("main.workbench").getAttribute("data-project-state");
     if (state === "ready") return state;
-    const stage = await page.locator("html")
-      .getAttribute("data-pageroot-hydration-stage");
+    const stage = await page.evaluate(() => window.__PAGEROOT_HYDRATION_STAGE__);
     return `${state}:${stage || "unmarked"}`;
   }, { timeout }).toBe("ready");
 }

@@ -198,6 +198,7 @@ declare global {
       bridgeAuthToken: string;
       appVersion: string;
     };
+    __PAGEROOT_HYDRATION_STAGE__?: string;
   }
 }
 
@@ -492,8 +493,8 @@ function bridgeFetch(
 }
 
 function markProjectHydrationStage(stage: string): void {
-  if (typeof document === "undefined") return;
-  document.documentElement.setAttribute("data-pageroot-hydration-stage", stage);
+  if (typeof window === "undefined") return;
+  window.__PAGEROOT_HYDRATION_STAGE__ = stage;
 }
 
 const WELCOME_PROJECT = {
