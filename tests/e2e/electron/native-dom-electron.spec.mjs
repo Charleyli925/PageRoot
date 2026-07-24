@@ -70,6 +70,11 @@ async function launchPageRoot(options = {}) {
     },
   });
   const page = await electronApp.firstWindow();
+  if (options.hideWindow) {
+    await electronApp.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0]?.hide();
+    });
+  }
   await page.waitForLoadState("domcontentloaded");
   return { electronApp, page, isolatedUserData };
 }
@@ -355,6 +360,31 @@ test("Electron first launch registers the welcome HTML and sends its comment to 
     await stopPageRoot(
       launched.electronApp,
       launched.isolatedUserData,
+    );
+  }
+});
+
+test("Electron test hydration stays live while the window is hidden", async () => {
+  const sourceDirectory = mkdtempSync(path.join(tmpdir(), "pageroot-native-source-e2e-"));
+  const sourcePath = path.join(sourceDirectory, "hidden-window-hydration.html");
+  writeFileSync(sourcePath, fixtureBuffer("complex-layout.html"));
+  const launched = await launchPageRoot({
+    activeSourcePath: sourcePath,
+    hideWindow: true,
+  });
+  try {
+    const { frame } = await loadedDiskFrame(
+      launched.page,
+      sourcePath,
+      "list-item",
+    );
+    await expect(frame.locator(caseSelector("list-item")))
+      .toContainText("列表项中的文字");
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeValidatedTemporaryDirectory(
+      sourceDirectory,
+      "pageroot-native-source-e2e-",
     );
   }
 });

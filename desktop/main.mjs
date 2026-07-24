@@ -1534,6 +1534,9 @@ async function createWindow() {
       nodeIntegration: false,
       sandbox: true,
       webSecurity: true,
+      ...(process.env.PAGEROOT_E2E === "1"
+        ? { backgroundThrottling: false }
+        : {}),
     },
   });
 

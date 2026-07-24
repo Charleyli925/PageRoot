@@ -181,6 +181,10 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.match(mainProcess, /nodeIntegration:\s*false/);
   assert.match(mainProcess, /sandbox:\s*true/);
   assert.match(mainProcess, /webSecurity:\s*true/);
+  assert.match(
+    mainProcess,
+    /process\.env\.PAGEROOT_E2E === "1"[\s\S]*?backgroundThrottling:\s*false/u,
+  );
 
   assert.match(projectFiles, /persistHtmlFile/);
   assert.match(projectFiles, /expectedSha256/);
