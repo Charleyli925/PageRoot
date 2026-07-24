@@ -15,6 +15,7 @@ import {
 } from "../desktop/project-files.mjs";
 import {
   DEFAULT_PROJECT_HTML,
+  WELCOME_LOGO_RELATIVE_PATH,
   WELCOME_PROJECT_NAME,
 } from "../desktop/welcome-project-content.mjs";
 
@@ -26,6 +27,7 @@ test("managed welcome HTML is a normal source file and is never reset after edit
   const directory = await mkdtemp(join(tmpdir(), "pageroot-welcome-"));
   const workspaceRoot = join(directory, "PageRoot", "项目记录");
   const sourcePath = join(directory, "PageRoot", WELCOME_PROJECT_NAME);
+  const logoPath = join(directory, "PageRoot", WELCOME_LOGO_RELATIVE_PATH);
   t.after(() => rm(directory, { recursive: true, force: true }));
 
   assert.equal(managedWelcomeSourcePath(workspaceRoot), sourcePath);
@@ -35,6 +37,10 @@ test("managed welcome HTML is a normal source file and is never reset after edit
   assert.equal(first.sourcePath, sourcePath);
   assert.equal(first.html, DEFAULT_PROJECT_HTML);
   assert.equal(first.sha256, htmlSha256(DEFAULT_PROJECT_HTML));
+  assert.deepEqual(
+    await readFile(logoPath),
+    await readFile(new URL("../public/brand-logo.png", import.meta.url)),
+  );
 
   const edited = page("用户已经修改欢迎页");
   await writeFile(sourcePath, edited, "utf8");

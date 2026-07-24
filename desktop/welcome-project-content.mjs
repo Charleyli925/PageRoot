@@ -1,4 +1,6 @@
 export const WELCOME_PROJECT_NAME = "欢迎来到源页.html";
+export const WELCOME_LOGO_RELATIVE_PATH =
+  "PageRoot-assets/brand-logo-v1.png";
 
 export const DEFAULT_PROJECT_HTML = `<!doctype html>
 <html lang="zh-CN">
@@ -237,7 +239,7 @@ export const DEFAULT_PROJECT_HTML = `<!doctype html>
       <div>
         <div class="brand-row">
           <div class="brand-lockup">
-            <img src="./brand-logo.png" alt="源页 Logo" />
+            <img src="./${WELCOME_LOGO_RELATIVE_PATH}" alt="源页 Logo" />
             <div><strong>源页</strong><small>PAGEROOT</small></div>
           </div>
           <span class="demo-badge">内置介绍页</span>
@@ -283,8 +285,8 @@ export const DEFAULT_PROJECT_HTML = `<!doctype html>
       </section>
 
       <aside class="notice">
-        <div><strong>这张欢迎页可以直接体验选择和评论。</strong><span>它尚未绑定本地文件；打开自己的 HTML 后，安全的文字修改才会自动写回，AI 新版也会进入独立版本历史。</span></div>
-        <em>从顶部「项目」打开 HTML</em>
+        <div><strong>这张欢迎页可以直接体验编辑、选择和评论。</strong><span>它是源页建立的本地 HTML；你的修改会自动保存到「欢迎来到源页.html」，AI 新版也会进入独立版本历史。</span></div>
+        <em>从顶部「项目」打开其他 HTML</em>
       </aside>
     </div>
 

@@ -49,7 +49,11 @@ test("startup welcome HTML is provisioned as a normal registered project", () =>
   assert.match(sampleHtml, /完整的安全校验/);
   assert.match(sampleHtml, /真实 HTML 是唯一事实源/);
   assert.match(sampleHtml, /发送、校验，再打开最新版/);
-  assert.match(sampleHtml, /从顶部「项目」打开 HTML/);
+  assert.match(sampleHtml, /PageRoot-assets\/brand-logo-v1\.png/);
+  assert.match(sampleHtml, /它是源页建立的本地 HTML/);
+  assert.match(sampleHtml, /修改会自动保存到「欢迎来到源页\.html」/);
+  assert.match(sampleHtml, /从顶部「项目」打开其他 HTML/);
+  assert.doesNotMatch(sampleHtml, /尚未绑定本地文件/);
   assert.doesNotMatch(sampleHtml, /利率拐点前的仓位选择|美国 10 年期|市场策略周报/);
 });
 

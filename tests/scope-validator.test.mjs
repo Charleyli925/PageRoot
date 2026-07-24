@@ -293,6 +293,84 @@ test("a sealed active supplement authorizes only the exact values it names", () 
   assert.ok(unrelated.violationCodes.includes("TARGET_OUTSIDE_TEXT"));
 });
 
+test("a sealed supplement resolves one unique frozen location and rejects repeated-value widening", () => {
+  const supplement = {
+    recordId: "supplement_0001",
+    userText: "把活跃项目从 156 个改为 164 个",
+    targetDescription: "活跃项目指标卡",
+  };
+  const base = documentHtml()
+    .replace(
+      '<aside id="outside">目标外正文</aside>',
+      '<aside id="outside"><span>活跃项目</span><strong>156</strong></aside>',
+    )
+    .replace(
+      "</body>",
+      '<section id="other-metric"><strong>156</strong></section></body>',
+    );
+  const targetOnly = base.replace(
+    '<aside id="outside"><span>活跃项目</span><strong>156</strong></aside>',
+    '<aside id="outside"><span>活跃项目</span><strong>164</strong></aside>',
+  );
+  const authorized = validateScope({
+    ...identity(),
+    baseHtml: base,
+    outputHtml: targetOnly,
+    allowedTargets: [regularTarget()],
+    supplementRecords: [supplement],
+  });
+  assert.equal(authorized.verdict, "pass");
+  assert.match(
+    authorized.allowedTargets.find(
+      (target) => target.targetId === "target_supplement_supplement_0001",
+    )?.resolution.reason ?? "",
+    /Unique frozen context "活跃项目"/u,
+  );
+
+  const wrongOccurrence = validateScope({
+    ...identity(),
+    baseHtml: base,
+    outputHtml: base.replace(
+      '<section id="other-metric"><strong>156</strong></section>',
+      '<section id="other-metric"><strong>164</strong></section>',
+    ),
+    allowedTargets: [regularTarget()],
+    supplementRecords: [supplement],
+  });
+  assert.equal(wrongOccurrence.verdict, "fail");
+  assert.ok(wrongOccurrence.violationCodes.includes("TARGET_OUTSIDE_TEXT"));
+
+  const widened = validateScope({
+    ...identity(),
+    baseHtml: base,
+    outputHtml: targetOnly.replace(
+      '<section id="other-metric"><strong>156</strong></section>',
+      '<section id="other-metric"><strong>164</strong></section>',
+    ),
+    allowedTargets: [regularTarget()],
+    supplementRecords: [supplement],
+  });
+  assert.equal(widened.verdict, "fail");
+  assert.ok(widened.violationCodes.includes("TARGET_OUTSIDE_TEXT"));
+
+  const ambiguousBase = base.replace(
+    '<section id="other-metric"><strong>156</strong></section>',
+    '<section id="other-metric"><span>活跃项目</span><strong>156</strong></section>',
+  );
+  const ambiguous = validateScope({
+    ...identity(),
+    baseHtml: ambiguousBase,
+    outputHtml: ambiguousBase.replace(
+      '<aside id="outside"><span>活跃项目</span><strong>156</strong></aside>',
+      '<aside id="outside"><span>活跃项目</span><strong>164</strong></aside>',
+    ),
+    allowedTargets: [regularTarget()],
+    supplementRecords: [supplement],
+  });
+  assert.equal(ambiguous.verdict, "fail");
+  assert.ok(ambiguous.violationCodes.includes("TARGET_OUTSIDE_TEXT"));
+});
+
 test("a frozen target root cannot be reparented or reordered without an explicit topology guard", () => {
   const reparentBase = `<!doctype html><html><head><title>move</title></head><body><section id="left"><article id="moving">A</article></section><section id="right"></section></body></html>`;
   const reparented = reparentBase.replace(

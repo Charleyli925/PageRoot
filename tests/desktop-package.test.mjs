@@ -63,6 +63,7 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.ok(packageJson.build.files.includes("desktop/product-contract.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/qoder-handoff.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/manual-update.mjs"));
+  assert.ok(packageJson.build.files.includes("public/brand-logo.png"));
   assert.equal(
     packageJson.build.mac.extendInfo?.NSAppleEventsUsageDescription,
     undefined,

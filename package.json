@@ -131,6 +131,7 @@
       "desktop/product-contract.mjs",
       "desktop/qoder-handoff.mjs",
       "desktop/manual-update.mjs",
+      "public/brand-logo.png",
       "dist-desktop/renderer/**/*",
       "package.json",
       "!node_modules/**/*"

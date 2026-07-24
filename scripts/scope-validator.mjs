@@ -1799,6 +1799,21 @@ function supplementTargetId(record) {
   return `target_supplement_${record.recordId}`;
 }
 
+const SUPPLEMENT_CONTEXT_MAX_CODEPOINTS = 64;
+const SUPPLEMENT_CONTEXT_STOP_NEEDLES = new Set([
+  "修改",
+  "更改",
+  "改为",
+  "替换",
+  "新增",
+  "添加",
+  "删除",
+  "移除",
+  "调整",
+  "这个",
+  "那个",
+]);
+
 function supplementMentionsEvidence(record, value) {
   const preview = normalizedText(value?.preview ?? "");
   if (preview.length < 2) return false;
@@ -1812,9 +1827,6 @@ function supplementAuthorizesDifference(record, difference) {
   if (!["text", "attribute", "inline-style"].includes(difference.kind)) {
     return false;
   }
-  if (difference.operation === "add") {
-    return supplementMentionsEvidence(record, difference.after);
-  }
   if (difference.operation === "remove") {
     return supplementMentionsEvidence(record, difference.before);
   }
@@ -1825,6 +1837,207 @@ function supplementAuthorizesDifference(record, difference) {
     );
   }
   return false;
+}
+
+function normalizedSupplementContext(value) {
+  return normalizedText(value)
+    .toLocaleLowerCase("zh-CN")
+    .replace(/[\p{P}\p{S}]+/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
+function supplementEvidenceValues(difference) {
+  const values = [];
+  for (const item of [difference.before, difference.after]) {
+    if (typeof item?.preview !== "string" || !item.preview) continue;
+    if (difference.kind === "attribute" || difference.kind === "inline-style") {
+      try {
+        const parsed = JSON.parse(item.preview);
+        if (Array.isArray(parsed)) {
+          values.push(...parsed.map((value) => String(value)));
+          continue;
+        }
+      } catch {
+        // The evidence hash remains authoritative; this is only context cleanup.
+      }
+    }
+    values.push(item.preview);
+  }
+  return values;
+}
+
+function meaningfulSupplementNeedle(value) {
+  const codepoints = [...value];
+  const hanCount = codepoints.filter((character) =>
+    /\p{Script=Han}/u.test(character)
+  ).length;
+  if (hanCount >= 2) {
+    return !SUPPLEMENT_CONTEXT_STOP_NEEDLES.has(value);
+  }
+  return value.replace(/[^\p{L}\p{N}]/gu, "").length >= 4;
+}
+
+function supplementContextNeedles(record, difference) {
+  let description = normalizedSupplementContext(
+    record.targetDescription ?? "",
+  );
+  if (!description) return [];
+  for (const evidenceValue of supplementEvidenceValues(difference)) {
+    const normalizedEvidence = normalizedSupplementContext(evidenceValue);
+    if (normalizedEvidence) {
+      description = description.replaceAll(normalizedEvidence, " ");
+    }
+  }
+  const segments = normalizedText(description)
+    .split(" ")
+    .map((segment) => [...segment])
+    .filter(
+      (segment) =>
+        segment.length >= 2
+        && segment.length <= SUPPLEMENT_CONTEXT_MAX_CODEPOINTS,
+    );
+  const needles = new Set();
+  for (const segment of segments) {
+    for (let length = segment.length; length >= 2; length -= 1) {
+      for (let start = 0; start + length <= segment.length; start += 1) {
+        const candidate = segment.slice(start, start + length).join("");
+        if (meaningfulSupplementNeedle(candidate)) needles.add(candidate);
+      }
+    }
+  }
+  return [...needles].sort(
+    (left, right) => [...right].length - [...left].length,
+  );
+}
+
+function supplementNodeContext(node) {
+  if (!node || node.type !== "element") return "";
+  const contextAttributes = [...node.attributes.entries()]
+    .filter(([name]) =>
+      [
+        "id",
+        "class",
+        "name",
+        "role",
+        "title",
+        "aria-label",
+      ].includes(name)
+      || name.startsWith("data-")
+    )
+    .flatMap(([name, value]) => [name, value])
+    .join(" ");
+  return normalizedSupplementContext(
+    `${nodeText(node)} ${contextAttributes}`,
+  );
+}
+
+function baseEvidenceCandidates(baseTree, difference) {
+  const beforeSha256 = difference.before?.sha256;
+  if (!beforeSha256) return [];
+  if (difference.kind === "text") {
+    return baseTree.textNodes.filter(
+      (node) => evidence(node.value).sha256 === beforeSha256,
+    );
+  }
+  if (
+    ["attribute", "inline-style"].includes(difference.kind)
+    && difference.attributeName
+  ) {
+    return baseTree.elements.filter((node) => {
+      const values = attributeValuesByName(node).get(
+        difference.attributeName,
+      );
+      return Boolean(values) && evidence(values).sha256 === beforeSha256;
+    });
+  }
+  return [];
+}
+
+function closestSupplementContextMatch(candidate, candidates, needles) {
+  let cursor = candidate.type === "element" ? candidate : candidate.parent;
+  let distance = 0;
+  while (cursor) {
+    if (cursor.type === "element") {
+      const candidateCount = candidates.filter((other) =>
+        isDescendantOrSelf(other, cursor)
+      ).length;
+      if (candidateCount === 1) {
+        const context = supplementNodeContext(cursor);
+        const needle = needles.find((item) => context.includes(item));
+        if (needle) {
+          return {
+            node: candidate,
+            anchor: cursor,
+            needle,
+            matchLength: [...needle].length,
+            distance,
+          };
+        }
+      }
+    }
+    cursor = cursor.parent;
+    distance += 1;
+  }
+  return null;
+}
+
+function resolveSupplementBaseLocation(record, difference, baseTree) {
+  const candidates = baseEvidenceCandidates(baseTree, difference);
+  if (candidates.length === 1) {
+    return {
+      node: candidates[0],
+      anchor: candidates[0],
+      reason: "Unique frozen before evidence.",
+    };
+  }
+  if (candidates.length < 2) return null;
+  const needles = supplementContextNeedles(record, difference);
+  if (needles.length === 0) return null;
+  const matches = candidates
+    .map((candidate) =>
+      closestSupplementContextMatch(candidate, candidates, needles)
+    )
+    .filter(Boolean)
+    .sort(
+      (left, right) =>
+        right.matchLength - left.matchLength
+        || left.distance - right.distance,
+    );
+  if (matches.length === 0) return null;
+  const best = matches[0];
+  const tied = matches.filter(
+    (match) =>
+      match.matchLength === best.matchLength
+      && match.distance === best.distance,
+  );
+  if (tied.length !== 1) return null;
+  return {
+    node: best.node,
+    anchor: best.anchor,
+    reason:
+      `Unique frozen context ${JSON.stringify(best.needle)} at ${best.anchor.path}.`,
+  };
+}
+
+function supplementAuthorizationForDifference(
+  record,
+  difference,
+  baseTree,
+) {
+  if (!supplementAuthorizesDifference(record, difference)) return null;
+  const resolution = resolveSupplementBaseLocation(
+    record,
+    difference,
+    baseTree,
+  );
+  if (!resolution || resolution.node !== difference._baseNode) return null;
+  return {
+    record,
+    baseNode: resolution.node,
+    outputNode: difference._outputNode ?? null,
+    reason: resolution.reason,
+  };
 }
 
 function insertionGapMatches(
@@ -1910,10 +2123,30 @@ function classifyDifferences(
   baseToOutput,
   outputToBase,
   supplementRecords,
+  baseTree,
 ) {
   const results = [];
   const violationCodes = new Set();
   const authorizedSupplementTargets = new Map();
+  const supplementAuthorizations = new Map();
+
+  for (const record of supplementRecords) {
+    const matches = rawDifferences
+      .map((difference) => ({
+        difference,
+        authorization: supplementAuthorizationForDifference(
+          record,
+          difference,
+          baseTree,
+        ),
+      }))
+      .filter((item) => item.authorization);
+    if (matches.length !== 1) continue;
+    const [{ difference, authorization }] = matches;
+    const authorizations = supplementAuthorizations.get(difference) ?? [];
+    authorizations.push(authorization);
+    supplementAuthorizations.set(difference, authorizations);
+  }
 
   for (const targetResolution of targetResolutions) {
     targetResolution.baseToOutput = baseToOutput;
@@ -2082,25 +2315,27 @@ function classifyDifferences(
       matchingTargets.push(target.targetId);
     }
     if (matchingTargets.length === 0) {
-      const authorizingRecord = supplementRecords.find((record) =>
-        supplementAuthorizesDifference(record, difference)
-      );
-      if (authorizingRecord) {
+      const authorizations = supplementAuthorizations.get(difference) ?? [];
+      if (authorizations.length === 1) {
+        const authorization = authorizations[0];
+        const authorizingRecord = authorization.record;
         const targetId = supplementTargetId(authorizingRecord);
         matchingTargets.push(targetId);
         authorizedSupplementTargets.set(targetId, {
           targetId,
           label:
-            authorizingRecord.targetDescription
-            || authorizingRecord.userText.slice(0, 500),
+            (
+              authorizingRecord.targetDescription
+              || authorizingRecord.userText
+            ).slice(0, 500),
           level: "subregion",
           resolution: {
-            base: "rebound",
-            output: "rebound",
-            basePath: difference._baseNode?.path ?? null,
-            outputPath: difference._outputNode?.path ?? null,
+            base: "exact",
+            output: authorization.outputNode ? "exact" : "orphaned",
+            basePath: authorization.baseNode.path,
+            outputPath: authorization.outputNode?.path ?? null,
             reason:
-              `Authorized by sealed supplement record ${authorizingRecord.recordId}.`,
+              `Authorized by sealed supplement record ${authorizingRecord.recordId}. ${authorization.reason}`,
           },
         });
       }
@@ -2371,6 +2606,7 @@ export function validateScope({
     compared.baseToOutput,
     compared.outputToBase,
     supplementRecords,
+    baseTree,
   );
   const differences = classified.results.map(stripInternalFields);
   const byKind = {};

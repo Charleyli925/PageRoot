@@ -308,6 +308,11 @@ async function replayApplePinyinStyledWrapperCommit(frame, caseId) {
 test("Electron first launch registers the welcome HTML and sends its comment to Qoder", async () => {
   const launched = await launchPageRoot();
   const welcomePath = path.join(launched.isolatedUserData, "欢迎来到源页.html");
+  const welcomeLogoPath = path.join(
+    launched.isolatedUserData,
+    "PageRoot-assets",
+    "brand-logo-v1.png",
+  );
   const workspace = path.join(launched.isolatedUserData, "workspace");
   try {
     const canonicalWelcomePath = path.join(
@@ -329,6 +334,7 @@ test("Electron first launch registers the welcome HTML and sends its comment to 
     await expect(launched.page.locator('[aria-label="项目读取失败"]')).toHaveCount(0);
     await expect.poll(() => (
       existsSync(welcomePath)
+      && existsSync(welcomeLogoPath)
       && existsSync(path.join(workspace, "project-registry.json"))
     )).toBe(true);
 
@@ -351,6 +357,12 @@ test("Electron first launch registers the welcome HTML and sends its comment to 
       (element) => element?.getAttribute("data-render-verified") === "true",
       editorHandle,
     );
+    const welcomeFrame = await currentEditorFrame(launched.page);
+    await expect.poll(() =>
+      welcomeFrame.locator('img[alt="源页 Logo"]').evaluate(
+        (image) => image.complete && image.naturalWidth > 0,
+      )
+    ).toBe(true);
     await launched.electronApp.evaluate(({ clipboard }) => clipboard.clear());
     await launched.page.getByRole("button", { name: "全局评论" }).click();
     await launched.page.getByRole("textbox", { name: "评论内容" })
