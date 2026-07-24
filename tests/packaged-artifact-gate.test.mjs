@@ -85,12 +85,14 @@ async function createPackagedFixture(t) {
     "desktop/main.mjs",
     "desktop/preload.mjs",
     "desktop/project-files.mjs",
+    "desktop/welcome-project-content.mjs",
     "desktop/export-copy.mjs",
     "desktop/bridge-shutdown.mjs",
     "desktop/close-recovery.mjs",
     "desktop/product-contract.mjs",
     "desktop/qoder-handoff.mjs",
     "desktop/manual-update.mjs",
+    "public/brand-logo.png",
     "dist-desktop/renderer/index.html",
   ]) {
     await writeFixtureFile(
@@ -159,6 +161,7 @@ async function createPackagedFixture(t) {
     "desktop/main.mjs",
     "desktop/preload.mjs",
     "desktop/project-files.mjs",
+    "desktop/welcome-project-content.mjs",
     "desktop/export-copy.mjs",
     "desktop/bridge-shutdown.mjs",
     "desktop/close-recovery.mjs",
@@ -166,6 +169,7 @@ async function createPackagedFixture(t) {
     "desktop/product-contract.mjs",
     "desktop/qoder-handoff.mjs",
     "desktop/manual-update.mjs",
+    "public/brand-logo.png",
     "package.json",
   ]) {
     const destination = path.join(asarSource, relativePath);
@@ -353,7 +357,7 @@ test("the app-bundle gate compares app.asar, Bridge scripts, schemas and plist v
     verifySignature: false,
   });
   assert.equal(result.version, "0.7.0");
-  assert.equal(result.asarFileCount, 11);
+  assert.equal(result.asarFileCount, 13);
   assert.equal(result.schemaFileCount, 3);
   assert.equal(result.legalResourceCount, 3);
   assert.equal(result.provenance.commitSha, "a".repeat(40));

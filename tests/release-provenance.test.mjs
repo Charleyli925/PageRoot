@@ -57,5 +57,5 @@ test("repository identity and expected build info come from the active checkout"
   });
   assert.equal(expected.commitSha, repository.commitSha);
   assert.equal(expected.treeSha, repository.treeSha);
-  assert.equal(expected.version, "0.8.6");
+  assert.equal(expected.version, "0.8.7");
 });
