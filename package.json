@@ -86,7 +86,7 @@
     "@phosphor-icons/react": "2.1.10",
     "entities": "6.0.1",
     "next": "16.2.11",
-    "parse5": "8.0.0",
+    "parse5": "8.0.1",
     "react": "19.2.6",
     "react-dom": "19.2.6"
   },
