@@ -2776,6 +2776,7 @@ export default function Workbench() {
     sha256?: string | null;
     lastModifiedAt?: string;
   }) => {
+    markProjectHydrationStage("apply-start");
     const backgroundRun = project.sourcePath
       ? backgroundRunsRef.current.get(project.sourcePath)
         || [...backgroundRunsRef.current.values()].find(
@@ -2810,6 +2811,7 @@ export default function Workbench() {
     documentIdRef.current = "";
     projectLockedRef.current = opensLockedProject;
     projectHydratingRef.current = Boolean(project.sourcePath);
+    markProjectHydrationStage("apply-authority");
     projectLoadErrorRef.current = null;
     viewTransitioningRef.current = false;
     navigationOperationRef.current += 1;
@@ -2845,7 +2847,11 @@ export default function Workbench() {
     composerAttachmentsRef.current = [];
     draftTargetRef.current = null;
     for (const url of attachmentObjectUrlsRef.current.values()) {
-      URL.revokeObjectURL(url);
+      try {
+        URL.revokeObjectURL(url);
+      } catch {
+        // A retired preview URL must not block the next project's authority.
+      }
     }
     attachmentObjectUrlsRef.current.clear();
     setAttachmentObjectUrls({});
@@ -2909,9 +2915,26 @@ export default function Workbench() {
     );
     setDrawer(null);
     setFileView(null);
-    reviewStageRef.current?.scrollTo({ top: 0 });
-    if (!opensLockedProject) editorRef.current?.unlockNow?.();
-    editorRef.current?.clearSelection();
+    markProjectHydrationStage("apply-ui-cleanup");
+    const reviewStage = reviewStageRef.current;
+    if (reviewStage && typeof reviewStage.scrollTo === "function") {
+      try {
+        reviewStage.scrollTo({ top: 0 });
+      } catch {
+        // Scrolling is presentational and cannot own a project transition.
+      }
+    }
+    try {
+      if (!opensLockedProject) editorRef.current?.unlockNow?.();
+    } catch {
+      // The outgoing lazy editor may be between ref cleanup and DOM teardown.
+    }
+    try {
+      editorRef.current?.clearSelection();
+    } catch {
+      // The incoming source load will independently retire the old selection.
+    }
+    markProjectHydrationStage("apply-complete");
   }, [clearAutosaveTimer]);
 
   const refreshRecents = useCallback(async () => {

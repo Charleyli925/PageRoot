@@ -53,6 +53,27 @@ test("startup welcome HTML is provisioned as a normal registered project", () =>
   assert.doesNotMatch(sampleHtml, /利率拐点前的仓位选择|美国 10 年期|市场策略周报/);
 });
 
+test("presentational cleanup cannot strand an authorized project hydration", () => {
+  const applyProjectFlow = workbench.slice(
+    workbench.indexOf("const applyProject"),
+    workbench.indexOf("const refreshRecents"),
+  );
+  assert.match(applyProjectFlow, /markProjectHydrationStage\("apply-start"\)/);
+  assert.match(
+    applyProjectFlow,
+    /URL\.revokeObjectURL\(url\);[\s\S]*?catch \{[\s\S]*?must not block the next project's authority/u,
+  );
+  assert.match(
+    applyProjectFlow,
+    /typeof reviewStage\.scrollTo === "function"[\s\S]*?reviewStage\.scrollTo\(\{ top: 0 \}\);[\s\S]*?catch/u,
+  );
+  assert.match(
+    applyProjectFlow,
+    /editorRef\.current\?\.unlockNow\?\.\(\);[\s\S]*?catch[\s\S]*?editorRef\.current\?\.clearSelection\(\);[\s\S]*?catch/u,
+  );
+  assert.match(applyProjectFlow, /markProjectHydrationStage\("apply-complete"\)/);
+});
+
 test("the right-side project panel keeps file actions concise and safe", () => {
   assert.match(workbench, /brand-logo\.png/);
   assert.match(workbench, /className="drawer-header project-panel-header"/);
