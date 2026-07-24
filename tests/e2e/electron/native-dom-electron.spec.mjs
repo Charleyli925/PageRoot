@@ -145,8 +145,11 @@ async function loadedDiskFrame(page, sourcePath, caseId) {
     async () => (await page.evaluate(() => window.htmlAIProjects?.getActiveProject()))?.sourcePath,
     { timeout: 15_000 },
   ).toBe(realpathSync(sourcePath));
-  await expect(page.locator('[aria-label="正在读取项目状态"]'))
-    .toHaveCount(0, { timeout: 15_000 });
+  await expect(page.locator('[aria-label="项目读取失败"]')).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "项目", exact: true }))
+    .toBeEnabled({ timeout: 30_000 });
+  await expect(page.getByRole("button", { name: "全局评论", exact: true }))
+    .toBeEnabled({ timeout: 30_000 });
   await expect(page.locator('[aria-label="项目读取失败"]')).toHaveCount(0);
   const editor = page.getByTestId("html-canvas-editor").filter({ visible: true }).first();
   await editor.waitFor({ state: "visible" });
@@ -294,8 +297,11 @@ test("Electron first launch registers the welcome HTML and sends its comment to 
       )?.sourcePath,
       { timeout: 20_000 },
     ).toBe(canonicalWelcomePath);
-    await expect(launched.page.locator('[aria-label="正在读取项目状态"]'))
-      .toHaveCount(0, { timeout: 20_000 });
+    await expect(launched.page.locator('[aria-label="项目读取失败"]')).toHaveCount(0);
+    await expect(launched.page.getByRole("button", { name: "项目", exact: true }))
+      .toBeEnabled({ timeout: 30_000 });
+    await expect(launched.page.getByRole("button", { name: "全局评论", exact: true }))
+      .toBeEnabled({ timeout: 30_000 });
     await expect(launched.page.locator('[aria-label="项目读取失败"]')).toHaveCount(0);
     await expect.poll(() => (
       existsSync(welcomePath)

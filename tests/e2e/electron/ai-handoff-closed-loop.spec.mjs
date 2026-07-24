@@ -168,14 +168,22 @@ function removeSourceFixture(sourceDirectory) {
   });
 }
 
-async function loadedDiskFrame(page, sourcePath) {
+async function loadedDiskFrame(page, sourcePath, { editable = true } = {}) {
   const canonicalSourcePath = realpathSync(sourcePath);
   await expect.poll(
     async () => (await page.evaluate(() => window.htmlAIProjects?.getActiveProject()))?.sourcePath,
     { timeout: 20_000 },
   ).toBe(canonicalSourcePath);
-  await expect(page.locator('[aria-label="正在读取项目状态"]'))
-    .toHaveCount(0, { timeout: 60_000 });
+  await expect(page.locator('[aria-label="项目读取失败"]')).toHaveCount(0);
+  // The former loading card is no longer rendered, so its absence cannot
+  // prove that hydration finished. Wait on the actual interaction boundary
+  // before selecting, commenting, or starting a native edit.
+  await expect(page.getByRole("button", { name: "项目", exact: true }))
+    .toBeEnabled({ timeout: 60_000 });
+  if (editable) {
+    await expect(page.getByRole("button", { name: "全局评论", exact: true }))
+      .toBeEnabled({ timeout: 60_000 });
+  }
   await expect(page.locator('[aria-label="项目读取失败"]')).toHaveCount(0);
   const editor = page.getByTestId("html-canvas-editor").filter({ visible: true }).first();
   await editor.waitFor({ state: "visible", timeout: 60_000 });
@@ -253,7 +261,7 @@ async function addComment(page, sourcePath, text = (
     .toHaveCount(1);
 }
 
-async function openRecentProject(page, sourcePath) {
+async function openRecentProject(page, sourcePath, options) {
   const visibleToast = page.locator(".toast.show");
   await visibleToast.waitFor({ state: "visible", timeout: 2_000 }).catch(() => {});
   if (await visibleToast.isVisible()) {
@@ -268,7 +276,7 @@ async function openRecentProject(page, sourcePath) {
   await page.locator(".recent-file-row")
     .filter({ hasText: path.basename(sourcePath) })
     .click();
-  return loadedDiskFrame(page, sourcePath);
+  return loadedDiskFrame(page, sourcePath, options);
 }
 
 function requestDirectoryCount(workspace) {
@@ -727,14 +735,14 @@ test("a failed handoff in project A does not block project B or replace its stat
       { timeout: 20_000 },
     ).toBe(2);
 
-    await openRecentProject(launched.page, projectA.sourcePath);
+    await openRecentProject(launched.page, projectA.sourcePath, { editable: false });
     await expect(launched.page.getByRole("button", { name: "复制失败 · 查看" }))
       .toBeVisible();
     await launched.page.getByRole("button", { name: "复制失败 · 查看" }).click();
     await expect(launched.page.getByText("交接内容尚未复制", { exact: true }))
       .toBeVisible();
 
-    await openRecentProject(launched.page, projectB.sourcePath);
+    await openRecentProject(launched.page, projectB.sourcePath, { editable: false });
     await expect(launched.page.getByRole("button", { name: "复制失败 · 查看" }))
       .toBeVisible();
     expect(readFileSync(projectA.sourcePath).equals(projectA.original)).toBe(true);
