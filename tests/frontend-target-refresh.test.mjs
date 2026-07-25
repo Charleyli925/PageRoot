@@ -750,7 +750,8 @@ test("native editing uses the authored DOM, browser Selection, and a measured ho
   assert.match(canvas, /reportBlockedEdit\(new Error\(capability\.userMessage\)\)/u);
   assert.match(canvas, /nativeLogicalText\(hostElement\) !== projection\.text/u);
   assert.match(canvas, /可选中文字后添加评论/u);
-  assert.match(canvas, /继续浏览和选择文字/u);
+  assert.match(canvas, /这处内容暂时不能直接编辑/u);
+  assert.match(canvas, /页面内容没有改变。你仍可以选择文字，或添加评论说明要怎么改。/u);
   assert.match(capability, /EDITABLE: "native-editable"/u);
   assert.match(capability, /SELECT_COMMENT: "select-comment"/u);
   assert.match(capability, /COMMENT_ONLY: "comment-only"/u);

@@ -1027,29 +1027,40 @@ test("workspace lifecycle keeps text scope exact and hard-blocks identity or scr
       bridge.baseUrl,
       `/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
     );
+    const scopeReport = status.body.scopeReport || JSON.parse(
+      await readFile(join(run.attemptPath, "scope-report.json"), "utf8"),
+    );
     if (status.body.status === "error") {
       hardCaseCount += 1;
       assert.equal(status.body.error.code, "HARD_VALIDATION_FAILED");
       assert.ok(status.body.error.details.hardViolationCodes.length > 0);
     } else {
       softCaseCount += 1;
-      assert.equal(status.body.status, "awaiting-check-decision");
-      assert.equal(status.body.validationReview.status, "pending");
-      assert.deepEqual(status.body.validationReview.hardViolationCodes, []);
-      const cancelled = await postJson(
-        bridge.baseUrl,
-        "/active-run/cancel",
-        {
-          sourcePath,
-          requestId: run.requestId,
-          attemptId: run.attemptId,
-        },
+      assert.ok(
+        ["ready-to-open", "no-change"].includes(status.body.status),
+        status.body.status,
       );
-      assert.equal(cancelled.response.status, 200);
-      assert.equal(cancelled.body.status, "cancelled");
+      const validationReview = status.body.validationReview || JSON.parse(
+        await readFile(join(run.attemptPath, "validation-review.json"), "utf8"),
+      );
+      assert.equal(validationReview.status, "observed");
+      assert.deepEqual(validationReview.hardViolationCodes, []);
+      if (status.body.status === "ready-to-open") {
+        const cancelled = await postJson(
+          bridge.baseUrl,
+          "/active-run/cancel",
+          {
+            sourcePath,
+            requestId: run.requestId,
+            attemptId: run.attemptId,
+          },
+        );
+        assert.equal(cancelled.response.status, 200);
+        assert.equal(cancelled.body.status, "cancelled");
+      }
     }
     assert.ok(
-      status.body.scopeReport.differences.some(
+      scopeReport.differences.some(
         (difference) =>
           difference.kind === expectedKind
           && difference.classification === "target-outside",
@@ -1059,7 +1070,7 @@ test("workspace lifecycle keeps text scope exact and hard-blocks identity or scr
     assert.equal(await readFile(sourcePath, "utf8"), frozenSource);
   }
   assert.ok(hardCaseCount > 0, "at least one identity/security widening must hard-fail");
-  assert.ok(softCaseCount > 0, "reviewable breadth findings must require a user decision");
+  assert.ok(softCaseCount > 0, "reviewable breadth findings must be recorded automatically");
 
   const acceptedRun = (
     await postJson(bridge.baseUrl, "/request", {
@@ -1079,7 +1090,7 @@ test("workspace lifecycle keeps text scope exact and hard-blocks identity or scr
       ],
     })
   ).body;
-  assert.equal(acceptedRun.candidateVersionId, "ver_0002");
+  assert.match(acceptedRun.candidateVersionId, /^ver_\d{4,}$/);
   const acceptedBase = await readFile(acceptedRun.inputPath, "utf8");
   await writeFile(
     acceptedRun.outputPath,
@@ -1092,12 +1103,12 @@ test("workspace lifecycle keeps text scope exact and hard-blocks identity or scr
     `/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${acceptedRun.requestId}&attemptId=${acceptedRun.attemptId}`,
   );
   assert.equal(accepted.body.status, "ready-to-open");
-  assert.equal(accepted.body.versionId, "ver_0002");
+  assert.equal(accepted.body.versionId, acceptedRun.candidateVersionId);
 });
 
-test("a soft scope finding requires an audited waiver before the Version becomes ready", async (t) => {
+test("a soft scope finding is audited without blocking the ready Version", async (t) => {
   const root = await realpath(
-    await mkdtemp(join(tmpdir(), "html-ai-soft-scope-waiver-")),
+    await mkdtemp(join(tmpdir(), "html-ai-soft-scope-observed-")),
   );
   const workspace = join(root, "workspace");
   const sources = join(root, "sources");
@@ -1151,60 +1162,15 @@ test("a soft scope finding requires an audited waiver before the Version becomes
   );
   await runFinalizer(workspace, run);
 
-  const pending = await requestJson(
-    bridge.baseUrl,
-    `/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
-  );
-  assert.equal(pending.response.status, 200);
-  assert.equal(pending.body.status, "awaiting-check-decision");
-  assert.equal(pending.body.validationReview.status, "pending");
-  assert.deepEqual(pending.body.validationReview.hardViolationCodes, []);
-  assert.ok(pending.body.validationReview.softViolationCodes.length > 0);
-  assert.equal(await readFile(sourcePath, "utf8"), originalHtml);
-
-  const wrongWaiver = await postJson(
-    bridge.baseUrl,
-    "/validation/waive",
-    {
-      sourcePath,
-      projectId: opened.projectId,
-      documentId: opened.documentId,
-      requestId: run.requestId,
-      attemptId: run.attemptId,
-      violationCodes: ["SOME_OTHER_FINDING"],
-    },
-  );
-  assert.equal(wrongWaiver.response.status, 409);
-  assert.equal(wrongWaiver.body.error.code, "VALIDATION_WAIVER_SCOPE_MISMATCH");
-
-  const waived = await postJson(
-    bridge.baseUrl,
-    "/validation/waive",
-    {
-      sourcePath,
-      projectId: opened.projectId,
-      documentId: opened.documentId,
-      requestId: run.requestId,
-      attemptId: run.attemptId,
-      violationCodes: pending.body.validationReview.softViolationCodes,
-      reason: "用户选择采用评论范围外的额外变化。",
-    },
-  );
-  assert.equal(waived.response.status, 200, JSON.stringify(waived.body));
-  assert.equal(waived.body.status, "validation-waived");
-  assert.equal(waived.body.validationReview.status, "waived");
-  assert.equal(
-    waived.body.validationReview.waiver.decision,
-    "ignore-and-continue",
-  );
-
   const ready = await requestJson(
     bridge.baseUrl,
     `/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
   );
   assert.equal(ready.response.status, 200, JSON.stringify(ready.body));
   assert.equal(ready.body.status, "ready-to-open");
-  assert.equal(ready.body.validationReview.status, "waived");
+  assert.equal(ready.body.validationReview.status, "observed");
+  assert.deepEqual(ready.body.validationReview.hardViolationCodes, []);
+  assert.ok(ready.body.validationReview.softViolationCodes.length > 0);
   assert.equal(ready.body.versionId, "ver_0002");
   assert.equal(ready.body.currentPath, sourcePath);
   assert.notEqual(ready.body.workingCopyPath, sourcePath);
@@ -1213,14 +1179,11 @@ test("a soft scope finding requires an audited waiver before the Version becomes
   const persistedReview = JSON.parse(
     await readFile(join(run.attemptPath, "validation-review.json"), "utf8"),
   );
-  assert.equal(persistedReview.status, "waived");
-  assert.equal(
-    persistedReview.waiver.reason,
-    "用户选择采用评论范围外的额外变化。",
-  );
+  assert.equal(persistedReview.status, "observed");
+  assert.equal(persistedReview.waiver, undefined);
 });
 
-test("workspace lifecycle surfaces soft scope classes for a user decision and reuses a cancelled candidate", async (t) => {
+test("workspace lifecycle records soft scope classes without blocking the candidate", async (t) => {
   const root = await realpath(
     await mkdtemp(join(tmpdir(), "html-ai-scope-lifecycle-")),
   );
@@ -1281,6 +1244,8 @@ test("workspace lifecycle surfaces soft scope classes for a user decision and re
   ];
 
   let expectedSourceSha256 = opened.currentHtmlSha256;
+  let nextVersionOrdinal = 2;
+  const expectedVersionIds = ["ver_0001"];
   for (const [expectedKind, hardFailure, mutate] of violations) {
     const run = (
       await postJson(bridge.baseUrl, "/request", {
@@ -1300,7 +1265,9 @@ test("workspace lifecycle surfaces soft scope classes for a user decision and re
         ],
       })
     ).body;
-    assert.equal(run.candidateVersionId, "ver_0002", expectedKind);
+    const expectedCandidateVersionId =
+      `ver_${String(nextVersionOrdinal).padStart(4, "0")}`;
+    assert.equal(run.candidateVersionId, expectedCandidateVersionId, expectedKind);
     const frozenHtml = await readFile(run.inputPath, "utf8");
     await writeFile(run.outputPath, mutate(frozenHtml), "utf8");
     await runFinalizer(workspace, run);
@@ -1311,14 +1278,14 @@ test("workspace lifecycle surfaces soft scope classes for a user decision and re
     assert.equal(status.response.status, 200, expectedKind);
     assert.equal(
       status.body.status,
-      hardFailure ? "error" : "awaiting-check-decision",
+      hardFailure ? "error" : "ready-to-open",
       expectedKind,
     );
     if (hardFailure) {
       assert.equal(status.body.error.code, "HARD_VALIDATION_FAILED");
       assert.ok(status.body.error.details.hardViolationCodes.length > 0);
     } else {
-      assert.equal(status.body.validationReview.status, "pending", expectedKind);
+      assert.equal(status.body.validationReview.status, "observed", expectedKind);
       assert.deepEqual(
         status.body.validationReview.hardViolationCodes,
         [],
@@ -1329,16 +1296,6 @@ test("workspace lifecycle surfaces soft scope classes for a user decision and re
         expectedKind,
       );
     }
-    assert.equal(status.body.scopeReport.verdict, "fail", expectedKind);
-    assert.ok(
-      status.body.scopeReport.differences.some(
-        (difference) =>
-          difference.kind === expectedKind
-          && difference.classification === "target-outside",
-      ),
-      expectedKind,
-    );
-
     const scopeReportPath = join(run.attemptPath, "scope-report.json");
     const validationReviewPath = join(
       run.attemptPath,
@@ -1354,11 +1311,20 @@ test("workspace lifecycle surfaces soft scope classes for a user decision and re
     const persistedReport = JSON.parse(
       await readFile(scopeReportPath, "utf8"),
     );
+    assert.equal(persistedReport.verdict, "fail", expectedKind);
+    assert.ok(
+      persistedReport.differences.some(
+        (difference) =>
+          difference.kind === expectedKind
+          && difference.classification === "target-outside",
+      ),
+      expectedKind,
+    );
     if (!hardFailure) {
       const persistedReview = JSON.parse(
         await readFile(validationReviewPath, "utf8"),
       );
-      assert.equal(persistedReview.status, "pending", expectedKind);
+      assert.equal(persistedReview.status, "observed", expectedKind);
       const cancelled = await postJson(
         bridge.baseUrl,
         "/active-run/cancel",
@@ -1370,6 +1336,8 @@ test("workspace lifecycle surfaces soft scope classes for a user decision and re
       );
       assert.equal(cancelled.response.status, 200, expectedKind);
       assert.equal(cancelled.body.status, "cancelled", expectedKind);
+      expectedVersionIds.push(run.candidateVersionId);
+      nextVersionOrdinal += 1;
     }
     const persistedOutcome = JSON.parse(
       await readFile(outcomePath, "utf8"),
@@ -1394,11 +1362,15 @@ test("workspace lifecycle surfaces soft scope classes for a user decision and re
     );
     const versionIds = (await readdir(join(projectRoot, "versions")))
       .filter((name) => /^ver_\d+$/.test(name));
-    assert.deepEqual(versionIds, ["ver_0001"], expectedKind);
+    assert.deepEqual(versionIds, expectedVersionIds, expectedKind);
     const transactionEntries = await readdir(
       join(projectRoot, "transactions"),
     );
-    assert.deepEqual(transactionEntries, [], expectedKind);
+    assert.equal(
+      transactionEntries.length,
+      expectedVersionIds.length - 1,
+      expectedKind,
+    );
     const runtime = JSON.parse(
       await readFile(join(projectRoot, "runtime-state.json"), "utf8"),
     );
@@ -1426,7 +1398,8 @@ test("workspace lifecycle surfaces soft scope classes for a user decision and re
       ],
     })
   ).body;
-  assert.equal(acceptedRun.candidateVersionId, "ver_0002");
+  const acceptedVersionId = `ver_${String(nextVersionOrdinal).padStart(4, "0")}`;
+  assert.equal(acceptedRun.candidateVersionId, acceptedVersionId);
   const acceptedBase = await readFile(acceptedRun.inputPath, "utf8");
   await writeFile(
     acceptedRun.outputPath,
@@ -1440,7 +1413,7 @@ test("workspace lifecycle surfaces soft scope classes for a user decision and re
   );
   assert.equal(accepted.response.status, 200);
   assert.equal(accepted.body.status, "ready-to-open");
-  assert.equal(accepted.body.versionId, "ver_0002");
+  assert.equal(accepted.body.versionId, acceptedVersionId);
   const acceptedReport = JSON.parse(
     await readFile(
       join(acceptedRun.attemptPath, "scope-report.json"),
@@ -1461,6 +1434,6 @@ test("workspace lifecycle surfaces soft scope classes for a user decision and re
     (await readdir(
       join(workspace, "projects", opened.projectId, "versions"),
     )).filter((name) => /^ver_\d+$/.test(name)).length,
-    2,
+    expectedVersionIds.length + 1,
   );
 });

@@ -1299,9 +1299,9 @@ async function coordinateApplicationExit(reason) {
       notifyRendererCloseAborted(result.requestId, result.reason);
       const messageBoxOptions = {
         type: "warning",
-        title: "暂时无法安全关闭",
-        message: "还有本地更改没有完成安全写入。",
-        detail: result.reason || "请确认自动保存状态后再试一次。",
+        title: "还有内容没有保存",
+        message: result.reason || "当前页面还有内容没有保存完成。",
+        detail: "源页已取消关闭并返回当前页面，请处理后再试。",
         buttons: ["继续编辑"],
         defaultId: 0,
         noLink: true,
@@ -1348,9 +1348,9 @@ async function coordinateApplicationRelaunch(reason) {
       notifyRendererCloseAborted(result.requestId, result.reason);
       const messageBoxOptions = {
         type: "warning",
-        title: "重新打开前还需要一步",
-        message: "当前页面还有内容没有完成安全写入。",
-        detail: `${result.reason || "请先确认当前编辑状态。"}\n\n可返回源页导出当前编辑，再重新打开。`,
+        title: "还有内容没有保存",
+        message: result.reason || "当前页面还有内容没有保存完成。",
+        detail: "源页已取消重新打开并返回当前页面，请处理后再试。",
         buttons: ["返回源页"],
         defaultId: 0,
         noLink: true,

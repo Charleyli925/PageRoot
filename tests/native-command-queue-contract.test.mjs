@@ -316,7 +316,7 @@ test("Workbench bridges deferred manual version opening success, failure, and di
   const activateReady = section(
     workbench,
     "const activateReadyResult = useCallback",
-    "const waiveCurrentValidation = useCallback",
+    "const processRunStatus = useCallback",
   );
 
   assert.match(

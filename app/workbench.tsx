@@ -45,6 +45,7 @@ import HtmlInteractionPreview from "./components/HtmlInteractionPreview";
 import NoticeBar from "./components/NoticeBar";
 import { rebindCanvasSelectionTargets } from "./lib/canvas-target-rebind.js";
 import {
+  MAX_ATTACHMENT_BYTES,
   MAX_COMMENT_ATTACHMENTS,
   planAttachmentSelection,
 } from "./lib/attachment-selection.js";
@@ -75,6 +76,8 @@ import {
 } from "../desktop/close-recovery.mjs";
 
 const HtmlCanvasEditor = lazy(() => import("./components/HtmlCanvasEditor"));
+const BROWSER_PREVIEW_LOGO_PLACEHOLDER =
+  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x2='1' y2='1'%3E%3Cstop stop-color='%236550e8'/%3E%3Cstop offset='1' stop-color='%23d45df2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='15' fill='url(%23g)'/%3E%3Cpath d='M23 23 13 32l10 9M41 23l10 9-10 9M36 16 28 48' fill='none' stroke='white' stroke-width='5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E";
 
 class DeferredEditorCommandDiscardedError extends Error {
   readonly reason: NativeDeferredCommandDiscardReason;
@@ -226,6 +229,15 @@ type CommentItem = {
   resultVersionId?: string;
 };
 
+type CommentDraft = {
+  commentId: string;
+  createdAt: string;
+  updatedAt: string;
+  target: HtmlCanvasSelection;
+  text: string;
+  attachments: CommentAttachment[];
+};
+
 type DirectEditEvent = {
   eventId: string;
   createdAt: string;
@@ -281,7 +293,7 @@ type UserSupplementRecord = {
 };
 
 type ValidationReview = {
-  status: "pending" | "waived";
+  status: "observed" | "pending" | "waived";
   hardViolationCodes: string[];
   softViolationCodes: string[];
   waiver?: {
@@ -296,7 +308,6 @@ type LifecycleState =
   | "processing"
   | "validating"
   | "committing"
-  | "awaiting-check-decision"
   | "ready-to-open"
   | "awaiting-conflict-resolution"
   | "recovering-transaction"
@@ -375,7 +386,7 @@ type ToastAction =
   | { id: "retry-draft-persist"; label: string }
   | { id: "review-project-rules"; label: string }
   | { id: "retry-submit"; label: string }
-  | { id: "retry-return-current"; label: string };
+  | { id: "review-comment-drafts"; label: string };
 type Toast = {
   title: string;
   message: string;
@@ -439,6 +450,11 @@ type PendingDraft = ProjectContext & {
   comments: CommentItem[];
   changeEvents: DirectEditEvent[];
 };
+type BackgroundProjectResult = {
+  state: "processing" | "ready" | "no-change" | "error" | "conflict";
+  label: string;
+  updatedAt: number;
+};
 type UndoDraftFold = {
   event: DirectEditEvent;
   eventId: string;
@@ -482,7 +498,7 @@ const BRIDGE_WRITE_TIMEOUT_MS = 15_000;
 const BRIDGE_REQUEST_TIMEOUT_MS = 60_000;
 const BRIDGE_ATTACHMENT_TIMEOUT_MS = 30_000;
 const BRIDGE_READ_RETRY_DELAY_MS = 180;
-const STATUS_POLL_FAILURE_THRESHOLD = 3;
+const PROJECT_RULES_AUTOSAVE_DELAY_MS = 700;
 
 function waitFor(delayMs: number): Promise<void> {
   return new Promise((resolve) => globalThis.setTimeout(resolve, delayMs));
@@ -711,10 +727,6 @@ function formatProjectTimestamp(value: unknown): string {
     return `${date.getMonth() + 1}月${date.getDate()}日`;
   }
   return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`;
-}
-
-function shortHash(hash: string): string {
-  return hash.replace(/^sha256:/, "").slice(0, 10);
 }
 
 function recordId(
@@ -1160,7 +1172,9 @@ function supplementsFromRecords(raw: unknown): UserSupplementRecord[] {
 function validationReviewFromRecord(raw: unknown): ValidationReview | null {
   if (!isRecord(raw)) return null;
   const status = String(raw.status || "");
-  if (status !== "pending" && status !== "waived") return null;
+  if (status !== "observed" && status !== "pending" && status !== "waived") {
+    return null;
+  }
   const waiver = isRecord(raw.waiver) ? raw.waiver : null;
   return {
     status,
@@ -1235,6 +1249,8 @@ function activeRunFromRecord(raw: unknown): ActiveRun | null {
       ? "processing"
       : rawStatus === "importing" || rawStatus === "result-ready"
         ? "validating"
+        : rawStatus === "awaiting-check-decision"
+          ? "validating"
         : rawStatus === "version-created" || rawStatus === "completed"
           ? "complete"
           : rawStatus === "canceled"
@@ -1243,7 +1259,7 @@ function activeRunFromRecord(raw: unknown): ActiveRun | null {
   );
   const allowed: LifecycleState[] = [
     "editing", "submitting", "processing", "validating", "committing",
-    "awaiting-check-decision", "ready-to-open",
+    "ready-to-open",
     "awaiting-conflict-resolution", "recovering-transaction", "ready",
     "no-change", "complete", "cancelled", "error",
   ];
@@ -1475,54 +1491,12 @@ function summarizeChangeEvents(events: DirectEditEvent[]): DirectEditEvent[] {
   return [...summaries.values()];
 }
 
-function compactLineDiff(workbenchHtml: string, externalHtml: string): string {
-  const localLines = workbenchHtml.split(/\r?\n/);
-  const externalLines = externalHtml.split(/\r?\n/);
-  let start = 0;
-  while (
-    start < localLines.length
-    && start < externalLines.length
-    && localLines[start] === externalLines[start]
-  ) start += 1;
-  let localEnd = localLines.length - 1;
-  let externalEnd = externalLines.length - 1;
-  while (
-    localEnd >= start
-    && externalEnd >= start
-    && localLines[localEnd] === externalLines[externalEnd]
-  ) {
-    localEnd -= 1;
-    externalEnd -= 1;
-  }
-  const contextStart = Math.max(0, start - 3);
-  const contextEnd = Math.min(
-    Math.max(localEnd, externalEnd) + 4,
-    Math.max(localLines.length, externalLines.length),
-  );
-  const lines = [
-    "# 当前工作台编辑（尚未覆盖外部文件）",
-    ...localLines.slice(contextStart, Math.min(contextEnd, localLines.length)).map((line, index) =>
-      `${contextStart + index < start || contextStart + index > localEnd ? " " : "-"} ${line}`
-    ),
-    "",
-    "# 磁盘上的外部文件",
-    ...externalLines.slice(contextStart, Math.min(contextEnd, externalLines.length)).map((line, index) =>
-      `${contextStart + index < start || contextStart + index > externalEnd ? " " : "+"} ${line}`
-    ),
-  ];
-  if (contextEnd < Math.max(localLines.length, externalLines.length)) {
-    lines.push("", "… 仅显示首个变化区域附近内容；导出当前编辑可保留完整工作台版本。");
-  }
-  return lines.join("\n");
-}
-
 function isLockedLifecycle(state: LifecycleState | undefined): boolean {
   return Boolean(state && [
     "submitting",
     "processing",
     "validating",
     "committing",
-    "awaiting-check-decision",
     "ready-to-open",
     "awaiting-conflict-resolution",
     "recovering-transaction",
@@ -1667,7 +1641,6 @@ export default function Workbench() {
     ) => void;
     viewHistoryVersion?: (version: Version) => void;
     returnToCurrent?: () => void;
-    restoreVersion?: (version: Version) => void;
   }>({});
   const deferEditorCommand = useCallback((
     kind: string,
@@ -1753,6 +1726,8 @@ export default function Workbench() {
   const composerCommentIdRef = useRef<string | null>(null);
   const composerAttachmentsRef = useRef<CommentAttachment[]>([]);
   const draftTargetRef = useRef<HtmlCanvasSelection | null>(null);
+  const commentDraftsRef = useRef<CommentDraft[]>([]);
+  const attachmentUploadCountRef = useRef(0);
   const attachmentObjectUrlsRef = useRef<Map<string, string>>(new Map());
   const draftPendingRef = useRef<PendingDraft | null>(null);
   const draftRevisionRef = useRef(0);
@@ -1762,6 +1737,8 @@ export default function Workbench() {
   const projectRegistrationPromiseRef =
     useRef<Promise<ProjectContext | null> | null>(null);
   const backgroundRunsRef = useRef<Map<string, ActiveRun>>(new Map());
+  const backgroundProjectResultsRef =
+    useRef<Map<string, BackgroundProjectResult>>(new Map());
   const qoderHandoffStatesRef =
     useRef<Map<string, ProjectQoderHandoffState>>(new Map());
   const activeRunRef = useRef<ActiveRun | null>(null);
@@ -1772,11 +1749,9 @@ export default function Workbench() {
   } | null>(null);
   const submissionIntentCounterRef = useRef(0);
   const activatingRunsRef = useRef<Set<string>>(new Set());
-  const waivingRunsRef = useRef<Set<string>>(new Set());
   const cancellingRunsRef = useRef<Set<string>>(new Set());
   const resolvingRunsRef = useRef<Set<string>>(new Set());
   const statusPollBusyRef = useRef<Set<string>>(new Set());
-  const statusPollFailureCountsRef = useRef<Map<string, number>>(new Map());
   const toastRef = useRef<Toast>(null);
   const pendingReconcileBusyRef = useRef(false);
   const relinkingTargetRef = useRef<string | null>(null);
@@ -1789,6 +1764,7 @@ export default function Workbench() {
   const closePreparationRequestRef = useRef<string | null>(null);
   const closeFreezeRequestRef = useRef<string | null>(null);
   const abortedCloseRequestsRef = useRef<Set<string>>(new Set());
+  const saveProjectRulesRef = useRef<() => Promise<boolean>>(async () => false);
 
   const [html, setHtml] = useState(DEFAULT_PROJECT_HTML);
   const [projectName, setProjectName] = useState(WELCOME_PROJECT.name);
@@ -1811,8 +1787,11 @@ export default function Workbench() {
   const [draft, setDraft] = useState("");
   const [draftCommentId, setDraftCommentId] = useState<string | null>(null);
   const [draftAttachments, setDraftAttachments] = useState<CommentAttachment[]>([]);
+  const [commentDrafts, setCommentDrafts] = useState<CommentDraft[]>([]);
   const [attachmentObjectUrls, setAttachmentObjectUrls] = useState<Record<string, string>>({});
   const [attachmentUploadCount, setAttachmentUploadCount] = useState(0);
+  const [backgroundProjectResults, setBackgroundProjectResults] =
+    useState<Map<string, BackgroundProjectResult>>(new Map());
   const [previewAttachment, setPreviewAttachment] = useState<CommentAttachment | null>(null);
   const [composerOpen, setComposerOpen] = useState(false);
   const [comments, setComments] = useState<CommentItem[]>([]);
@@ -1855,13 +1834,11 @@ export default function Workbench() {
   const [generating, setGenerating] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [openingReadyVersion, setOpeningReadyVersion] = useState(false);
-  const [waivingValidation, setWaivingValidation] = useState(false);
   const [resolvingConflict, setResolvingConflict] = useState(false);
   const [pendingReconcileBusy, setPendingReconcileBusy] = useState(false);
-  const [pendingReconcileError, setPendingReconcileError] = useState("");
-  const [runStatusError, setRunStatusError] = useState("");
   const [relinkingTarget, setRelinkingTarget] = useState<string | null>(null);
-  const [restoring, setRestoring] = useState<string | null>(null);
+  const [runtimeCapabilitiesReady, setRuntimeCapabilitiesReady] = useState(false);
+  const [browserPreviewOnly, setBrowserPreviewOnly] = useState(false);
   const [qoderHandoffState, setQoderHandoffState] =
     useState<ProjectQoderHandoffState | null>(null);
   const [updateResult, setUpdateResult] =
@@ -1962,6 +1939,7 @@ export default function Workbench() {
     && updateResult.latestVersion,
   );
   const interactionLocked = runInProgress
+    || browserPreviewOnly
     || projectHydrating
     || Boolean(projectLoadError)
     || Boolean(workspaceIssue)
@@ -1974,6 +1952,24 @@ export default function Workbench() {
     [comments],
   );
   const activeCommentCount = activeCommentItems.length;
+  const currentComposerHasContent = Boolean(
+    draftTarget
+    && (draft.trim() || draftAttachments.length > 0),
+  );
+  const pendingSendItemCount = activeCommentCount
+    + commentDrafts.length
+    + (currentComposerHasContent ? 1 : 0);
+  const interactionPreviewHtml = useMemo(() => {
+    if (!browserPreviewOnly || projectName !== WELCOME_PROJECT_NAME) return html;
+    return html.replace(
+      /(["'])(?:\.\/)?brand-logo\.png\1/iu,
+      (_matched, quote: string) => `${quote}${BROWSER_PREVIEW_LOGO_PLACEHOLDER}${quote}`,
+    );
+  }, [
+    browserPreviewOnly,
+    html,
+    projectName,
+  ]);
   const visibleCommentItems = useMemo(
     () => (
       viewMode === "history" && viewingVersion
@@ -2008,6 +2004,9 @@ export default function Workbench() {
     commentsRef.current = comments;
   }, [comments]);
   useEffect(() => {
+    commentDraftsRef.current = commentDrafts;
+  }, [commentDrafts]);
+  useEffect(() => {
     focusedCommentIdRef.current = focusedCommentId;
   }, [focusedCommentId]);
   useEffect(() => {
@@ -2023,13 +2022,51 @@ export default function Workbench() {
     draftTargetRef.current = draftTarget;
   }, [draftTarget]);
   useEffect(() => {
+    attachmentUploadCountRef.current = attachmentUploadCount;
+  }, [attachmentUploadCount]);
+  useEffect(() => {
     projectLockedRef.current = projectLocked;
   }, [projectLocked]);
+  useEffect(() => {
+    const previewOnly = !window.htmlAIProjects;
+    const frame = window.requestAnimationFrame(() => {
+      setBrowserPreviewOnly(previewOnly);
+      if (previewOnly) setCanvasMode("preview");
+      setRuntimeCapabilitiesReady(true);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
   useEffect(() => () => {
     for (const url of attachmentObjectUrlsRef.current.values()) {
       URL.revokeObjectURL(url);
     }
     attachmentObjectUrlsRef.current.clear();
+  }, []);
+
+  const markBackgroundProjectResult = useCallback((
+    activeSourcePath: string,
+    result: BackgroundProjectResult,
+  ) => {
+    for (const key of backgroundProjectResultsRef.current.keys()) {
+      if (sameLocalSourcePath(key, activeSourcePath)) {
+        backgroundProjectResultsRef.current.delete(key);
+      }
+    }
+    backgroundProjectResultsRef.current.set(activeSourcePath, result);
+    setBackgroundProjectResults(new Map(backgroundProjectResultsRef.current));
+  }, []);
+
+  const clearBackgroundProjectResult = useCallback((activeSourcePath: string) => {
+    let changed = false;
+    for (const key of backgroundProjectResultsRef.current.keys()) {
+      if (sameLocalSourcePath(key, activeSourcePath)) {
+        backgroundProjectResultsRef.current.delete(key);
+        changed = true;
+      }
+    }
+    if (changed) {
+      setBackgroundProjectResults(new Map(backgroundProjectResultsRef.current));
+    }
   }, []);
 
   const handleCommentLayout = useCallback((layout: HtmlCanvasCommentLayoutState) => {
@@ -2261,6 +2298,7 @@ export default function Workbench() {
           canonicalSource,
           [
             ...commentsRef.current.map((comment) => comment.target),
+            ...commentDraftsRef.current.map((savedDraft) => savedDraft.target),
             ...(draftTargetRef.current ? [draftTargetRef.current] : []),
           ],
         );
@@ -2273,6 +2311,12 @@ export default function Workbench() {
         }));
         commentsRef.current = reboundComments;
         setComments(reboundComments);
+        const reboundCommentDrafts = commentDraftsRef.current.map((savedDraft) => ({
+          ...savedDraft,
+          target: reboundById.get(savedDraft.target.id) || savedDraft.target,
+        }));
+        commentDraftsRef.current = reboundCommentDrafts;
+        setCommentDrafts(reboundCommentDrafts);
         if (draftTargetRef.current) {
           const reboundDraftTarget =
             reboundById.get(draftTargetRef.current.id)
@@ -2448,10 +2492,12 @@ export default function Workbench() {
       const composerText = composerDraftRef.current;
       const composerTarget = draftTargetRef.current;
       const composerAttachments = composerAttachmentsRef.current;
+      const savedCommentDrafts = commentDraftsRef.current;
       if (
         snapshot.comments.length === 0
         && snapshot.changeEvents.length === 0
         && deletedCommentIdsRef.current.size === 0
+        && savedCommentDrafts.length === 0
         && !composerText.trim()
         && composerAttachments.length === 0
         && !composerTarget
@@ -2460,7 +2506,7 @@ export default function Workbench() {
         return;
       }
       const serialized = JSON.stringify({
-        schemaVersion: "3.0.0",
+        schemaVersion: "3.1.0",
         projectId: snapshot.projectId,
         documentId: snapshot.documentId,
         sourcePath: snapshot.sourcePath,
@@ -2474,6 +2520,14 @@ export default function Workbench() {
         composerCommentId: composerCommentIdRef.current,
         composerAttachments: composerAttachments.map(persistedAttachment),
         composerTarget: composerTarget ? persistedTargetRef(composerTarget) : null,
+        commentDrafts: savedCommentDrafts.map((savedDraft) => ({
+          commentId: savedDraft.commentId,
+          createdAt: savedDraft.createdAt,
+          updatedAt: savedDraft.updatedAt,
+          text: savedDraft.text,
+          target: persistedTargetRef(savedDraft.target),
+          attachments: savedDraft.attachments.map(persistedAttachment),
+        })),
       });
       for (const key of keys) window.localStorage.setItem(key, serialized);
     } catch {
@@ -2700,6 +2754,7 @@ export default function Workbench() {
                 [
                   ...commentsRef.current.map((comment) => comment.target),
                   ...changeEventsRef.current.map((event) => event.target),
+                  ...commentDraftsRef.current.map((savedDraft) => savedDraft.target),
                   ...(draftTargetRef.current ? [draftTargetRef.current] : []),
                 ],
               );
@@ -2716,8 +2771,14 @@ export default function Workbench() {
               }));
               commentsRef.current = reboundComments;
               changeEventsRef.current = reboundEvents;
+              const reboundCommentDrafts = commentDraftsRef.current.map((savedDraft) => ({
+                ...savedDraft,
+                target: reboundById.get(savedDraft.target.id) || savedDraft.target,
+              }));
+              commentDraftsRef.current = reboundCommentDrafts;
               setComments(reboundComments);
               setChangeEvents(reboundEvents);
+              setCommentDrafts(reboundCommentDrafts);
               if (draftTargetRef.current) {
                 const reboundDraftTarget =
                   reboundById.get(draftTargetRef.current.id)
@@ -2928,6 +2989,33 @@ export default function Workbench() {
     lastModifiedAt?: string;
   }) => {
     markProjectHydrationStage("apply-start");
+    const outgoingRun = activeRunRef.current;
+    const outgoingSourcePath = sourcePathRef.current;
+    if (
+      outgoingRun
+      && outgoingSourcePath
+      && !sameLocalSourcePath(outgoingSourcePath, project.sourcePath)
+    ) {
+      if (outgoingRun.status === "ready-to-open") {
+        markBackgroundProjectResult(outgoingSourcePath, {
+          state: "ready",
+          label: "新版本可查看",
+          updatedAt: Date.now(),
+        });
+      } else if (outgoingRun.status === "awaiting-conflict-resolution") {
+        markBackgroundProjectResult(outgoingSourcePath, {
+          state: "conflict",
+          label: "需要处理",
+          updatedAt: Date.now(),
+        });
+      } else if (isLockedLifecycle(outgoingRun.status)) {
+        markBackgroundProjectResult(outgoingSourcePath, {
+          state: "processing",
+          label: "正在处理",
+          updatedAt: Date.now(),
+        });
+      }
+    }
     const backgroundRun = project.sourcePath
       ? backgroundRunsRef.current.get(project.sourcePath)
         || [...backgroundRunsRef.current.values()].find(
@@ -2998,6 +3086,8 @@ export default function Workbench() {
     composerCommentIdRef.current = null;
     composerAttachmentsRef.current = [];
     draftTargetRef.current = null;
+    commentDraftsRef.current = [];
+    setCommentDrafts([]);
     for (const url of attachmentObjectUrlsRef.current.values()) {
       try {
         URL.revokeObjectURL(url);
@@ -3007,6 +3097,7 @@ export default function Workbench() {
     }
     attachmentObjectUrlsRef.current.clear();
     setAttachmentObjectUrls({});
+    attachmentUploadCountRef.current = 0;
     setAttachmentUploadCount(0);
     setPreviewAttachment(null);
     setEditingCommentId(null);
@@ -3031,7 +3122,11 @@ export default function Workbench() {
     setCurrentExactVersionId(null);
     setRestoredFromVersionId(null);
     setViewMode("current");
-    setCanvasMode("edit");
+    setCanvasMode(
+      typeof window !== "undefined" && !window.htmlAIProjects
+        ? "preview"
+        : "edit",
+    );
     setViewingVersionId(null);
     setPreserveEditorHistory(false);
     setRenderedContentSha256(null);
@@ -3048,12 +3143,8 @@ export default function Workbench() {
     setProjectRulesSaveError("");
     setProjectRecordsPreparing(false);
     setProjectRecordsError("");
-    statusPollFailureCountsRef.current.clear();
     pendingReconcileBusyRef.current = false;
     setPendingReconcileBusy(false);
-    setPendingReconcileError("");
-    setRunStatusError("");
-    setRestoring(null);
     setGenerating(
       sameLocalSourcePath(submissionIntentRef.current?.sourcePath, project.sourcePath),
     );
@@ -3063,14 +3154,12 @@ export default function Workbench() {
     setOpeningReadyVersion(
       Boolean(backgroundRunKey && activatingRunsRef.current.has(backgroundRunKey)),
     );
-    setWaivingValidation(
-      Boolean(backgroundRunKey && waivingRunsRef.current.has(backgroundRunKey)),
-    );
     setResolvingConflict(
       Boolean(backgroundRunKey && resolvingRunsRef.current.has(backgroundRunKey)),
     );
     setDrawer(null);
     setFileView(null);
+    if (project.sourcePath) clearBackgroundProjectResult(project.sourcePath);
     markProjectHydrationStage("apply-ui-cleanup");
     const reviewStage = reviewStageRef.current;
     if (reviewStage && typeof reviewStage.scrollTo === "function") {
@@ -3091,7 +3180,11 @@ export default function Workbench() {
       // The incoming source load will independently retire the old selection.
     }
     markProjectHydrationStage("apply-complete");
-  }, [clearAutosaveTimer]);
+  }, [
+    clearAutosaveTimer,
+    clearBackgroundProjectResult,
+    markBackgroundProjectResult,
+  ]);
 
   const refreshRecents = useCallback(async () => {
     const api = window.htmlAIProjects;
@@ -3385,6 +3478,7 @@ export default function Workbench() {
     composerCommentId: string | null;
     composerAttachments: CommentAttachment[];
     composerTarget: HtmlCanvasSelection | null;
+    commentDrafts: CommentDraft[];
   } => {
     const keys = [
       `html-ai-draft-recovery:${context.documentId}`,
@@ -3422,6 +3516,7 @@ export default function Workbench() {
         composerCommentId: null,
         composerAttachments: [],
         composerTarget: null,
+        commentDrafts: [],
       };
     }
     const localComments = Array.isArray(latest.comments)
@@ -3474,6 +3569,26 @@ export default function Workbench() {
       composerTarget: isRecord(latest.composerTarget)
         ? selectionFromRecord(latest.composerTarget)
         : null,
+      commentDrafts: Array.isArray(latest.commentDrafts)
+        ? latest.commentDrafts.flatMap((rawDraft) => {
+            if (!isRecord(rawDraft) || !isRecord(rawDraft.target)) return [];
+            const commentId = String(rawDraft.commentId || "");
+            const target = selectionFromRecord(rawDraft.target);
+            if (!/^comment_[A-Za-z0-9_-]+$/.test(commentId) || !target) return [];
+            return [{
+              commentId,
+              createdAt: String(rawDraft.createdAt || new Date().toISOString()),
+              updatedAt: String(rawDraft.updatedAt || rawDraft.createdAt || new Date().toISOString()),
+              target,
+              text: String(rawDraft.text || ""),
+              attachments: Array.isArray(rawDraft.attachments)
+                ? rawDraft.attachments
+                    .map(attachmentFromRecord)
+                    .filter((item): item is CommentAttachment => Boolean(item))
+                : [],
+            }];
+          })
+        : [],
     };
   }, []);
 
@@ -3736,7 +3851,11 @@ export default function Workbench() {
       );
       const recoveredCommentTargets = rebindTargetsPreservingGlobal(
         htmlRef.current,
-        recoveredDraft.comments.map((comment) => comment.target),
+        [
+          ...recoveredDraft.comments.map((comment) => comment.target),
+          ...recoveredDraft.commentDrafts.map((savedDraft) => savedDraft.target),
+          ...(recoveredDraft.composerTarget ? [recoveredDraft.composerTarget] : []),
+        ],
       );
       const recoveredTargetById = new Map(
         recoveredCommentTargets.map((target) => [target.id, target]),
@@ -3749,8 +3868,17 @@ export default function Workbench() {
         },
       }));
       const recoveredEvents = recoveredDraft.changeEvents;
+      const recoveredCommentDrafts = recoveredDraft.commentDrafts.map((savedDraft) => ({
+        ...savedDraft,
+        target: recoveredTargetById.get(savedDraft.target.id) || {
+          ...savedDraft.target,
+          resolution: "orphaned" as const,
+        },
+      }));
       setComments(recoveredComments);
       commentsRef.current = recoveredComments;
+      setCommentDrafts(recoveredCommentDrafts);
+      commentDraftsRef.current = recoveredCommentDrafts;
       changeEventsRef.current = recoveredEvents;
       setChangeEvents(recoveredEvents);
       draftPersistenceAuthorityRef.current = {
@@ -3764,10 +3892,7 @@ export default function Workbench() {
       composerAttachmentsRef.current = recoveredDraft.composerAttachments;
       const recoveredComposerTarget = recoveredDraft.composerTarget
         ? recoveredTargetById.get(recoveredDraft.composerTarget.id)
-          || rebindTargetsPreservingGlobal(
-            htmlRef.current,
-            [recoveredDraft.composerTarget],
-          )[0]
+          || { ...recoveredDraft.composerTarget, resolution: "orphaned" as const }
         : null;
       draftTargetRef.current = recoveredComposerTarget;
       setDraft(recoveredDraft.composerDraft);
@@ -4304,16 +4429,7 @@ export default function Workbench() {
     const targetIsOpen = target.kind === "composer"
       ? composerCommentIdRef.current === target.commentId
       : commentsRef.current.some((comment) => comment.commentId === target.commentId);
-    if (!targetIsOpen) {
-      setToast({
-        title: "附件没有加入",
-        message: "这条评论已关闭，本次选择的附件没有加入。",
-        tone: "warning",
-        disposition: "background-result",
-        dedupeKey: `attachment-target-closed-${target.commentId}`,
-      });
-      return;
-    }
+    if (!targetIsOpen) return;
     const existingCount = target.kind === "composer"
       ? composerAttachmentsRef.current.length
       : commentsRef.current.find((comment) => comment.commentId === target.commentId)
@@ -4336,11 +4452,17 @@ export default function Workbench() {
             target,
           }
     );
-    if (attachmentPlan.invalid.length === 1) {
-      const invalidFile = attachmentPlan.invalid[0];
-      issueNotes.push(`${invalidFile.name || "未命名文件"} 为空或超过 25 MB`);
-    } else if (attachmentPlan.invalid.length > 1) {
-      issueNotes.push(`${attachmentPlan.invalid.length} 个文件为空或超过 25 MB`);
+    for (const invalidFile of attachmentPlan.invalid) {
+      const fileName = invalidFile?.name || "未命名文件";
+      if (!invalidFile || !Number.isFinite(invalidFile.size) || invalidFile.size <= 0) {
+        issueNotes.push(`${fileName} 是空文件`);
+      } else if (invalidFile.size > MAX_ATTACHMENT_BYTES) {
+        issueNotes.push(
+          `${fileName} 为 ${(invalidFile.size / 1024 / 1024).toFixed(1)} MB，超过 25 MB`,
+        );
+      } else {
+        issueNotes.push(`${fileName} 无法读取`);
+      }
     }
     if (attachmentPlan.overLimit.length > 0) {
       issueNotes.push(
@@ -4368,76 +4490,6 @@ export default function Workbench() {
     }
     const activeSource = sourcePathRef.current;
     if (!activeSource) {
-      if (typeof window !== "undefined" && !window.htmlAIProjects) {
-        const previewAttachments = selected.map((file) => {
-          const attachmentId = recordId("attachment", attachmentCounter.current++);
-          const attachment: CommentAttachment = {
-            attachmentId,
-            kind: isImageFile(file) ? "image" : "file",
-            fileName: file.name || "附件",
-            mediaType: file.type || "application/octet-stream",
-            byteLength: file.size,
-            sha256: `preview:${attachmentId}`,
-            relativePath: `preview/${attachmentId}/${file.name || "attachment"}`,
-            source,
-          };
-          if (attachment.kind === "image") {
-            rememberAttachmentObjectUrl(attachmentId, URL.createObjectURL(file));
-          }
-          return attachment;
-        });
-        if (previewAttachments.length > 0 && target.kind === "composer") {
-          const next = [...composerAttachmentsRef.current, ...previewAttachments];
-          composerAttachmentsRef.current = next;
-          setDraftAttachments(next);
-          addedAttachmentCount = previewAttachments.length;
-        } else if (previewAttachments.length > 0) {
-          const nextComments = commentsRef.current.map((comment) => (
-            comment.commentId === target.commentId
-              ? {
-                  ...comment,
-                  attachments: [...(comment.attachments ?? []), ...previewAttachments],
-                  updatedAt: new Date().toISOString(),
-                }
-              : comment
-          ));
-          commentsRef.current = nextComments;
-          setComments(nextComments);
-          addedAttachmentCount = previewAttachments.length;
-        }
-        if (issueNotes.length > 0) {
-          const needsRemoval = attachmentPlan.overLimit.length > 0
-            && existingCount + addedAttachmentCount >= MAX_COMMENT_ATTACHMENTS;
-          setToast({
-            title: addedAttachmentCount > 0
-              ? "部分附件没有加入"
-              : "附件没有加入",
-            message: `${issueNotes.join("；")}。${
-              addedAttachmentCount > 0
-                ? needsRemoval
-                  ? "已加入的附件仍然保留；如需加入其余文件，请先移除一个附件。"
-                  : "已加入的附件仍然保留。"
-                : needsRemoval
-                  ? "请先移除一个附件，再重新选择。"
-                  : "请选择其他文件。"
-            }`,
-              tone: "warning",
-              sticky: true,
-              disposition: "direct-action",
-              dedupeKey: `attachment-batch-${target.commentId}`,
-            action: attachmentRecoveryAction(needsRemoval),
-          });
-        }
-        return;
-      }
-      setToast({
-        title: "请先打开本地 HTML",
-        message: "附件需要保存在当前项目记录中；打开 HTML 后即可添加。",
-        tone: "warning",
-        disposition: "direct-action",
-        dedupeKey: "submit-blocked",
-        action: { id: "retry-project-open", label: "打开本地 HTML" },
-      });
       return;
     }
     try {
@@ -4469,7 +4521,8 @@ export default function Workbench() {
             { type: originalFile.type || "image/png" },
           )
         : originalFile;
-      setAttachmentUploadCount((count) => count + 1);
+      attachmentUploadCountRef.current += 1;
+      setAttachmentUploadCount(attachmentUploadCountRef.current);
       try {
         const attachmentId = recordId("attachment", attachmentCounter.current++);
         const response = await bridgeFetch(`${BRIDGE_URL}/attachment`, {
@@ -4498,7 +4551,7 @@ export default function Workbench() {
         if (target.kind === "composer") {
           if (composerCommentIdRef.current !== target.commentId) {
             void deleteAttachmentFile(attachment);
-            throw new Error("这条评论已经关闭。请重新打开评论后再选择附件。");
+            continue;
           }
           if (attachment.kind === "image") {
             rememberAttachmentObjectUrl(
@@ -4514,7 +4567,7 @@ export default function Workbench() {
         } else {
           if (!commentsRef.current.some((comment) => comment.commentId === target.commentId)) {
             void deleteAttachmentFile(attachment);
-            throw new Error("这条评论已经关闭。请重新打开评论后再选择附件。");
+            continue;
           }
           if (attachment.kind === "image") {
             rememberAttachmentObjectUrl(
@@ -4545,7 +4598,11 @@ export default function Workbench() {
           ));
         }
       } finally {
-        setAttachmentUploadCount((count) => Math.max(0, count - 1));
+        attachmentUploadCountRef.current = Math.max(
+          0,
+          attachmentUploadCountRef.current - 1,
+        );
+        setAttachmentUploadCount(attachmentUploadCountRef.current);
       }
     }
     if (failedNames.length > 0) {
@@ -4696,6 +4753,7 @@ export default function Workbench() {
   }, [
     changeEvents,
     comments,
+    commentDrafts,
     currentBasedOnVersionId,
     documentId,
     flushDraftPersistence,
@@ -4810,6 +4868,26 @@ export default function Workbench() {
             })(), "等待冻结任务安全写入");
           }
 
+          if (attachmentUploadCountRef.current > 0) {
+            await beforeDeadline((async () => {
+              while (attachmentUploadCountRef.current > 0) {
+                await new Promise<void>((resolve) => window.setTimeout(resolve, 40));
+              }
+            })(), "等待附件添加完成");
+          }
+
+          if (
+            fileView?.path === "PROJECT.md"
+            && !fileView.error
+            && fileView.content !== fileView.savedContent
+            && !await beforeDeadline(
+              saveProjectRulesRef.current(),
+              "等待项目规则保存",
+            )
+          ) {
+            return { ready: false, reason: "项目规则还没有保存，请返回项目面板处理。" };
+          }
+
           if (viewMode !== "history" && !projectLockedRef.current) {
             const frozen = editorRef.current?.freezeNow();
             if (!frozen) {
@@ -4921,6 +4999,7 @@ export default function Workbench() {
     enqueueAutosave,
     flushAutosave,
     flushDraftPersistence,
+    fileView,
     persistDraftRecovery,
     persistState,
     viewMode,
@@ -5026,40 +5105,24 @@ export default function Workbench() {
     }
     if (submissionIntentRef.current || submissionPendingRef.current) {
       rememberProjectOpen();
-      setToast({
-        title: "正在准备本轮任务",
-        message: "当前操作结束后会自动打开目标项目。",
-        tone: "info",
-        disposition: "defer-and-resume",
-        dedupeKey: "project-switch-blocked",
-      });
+      return false;
+    }
+    if (attachmentUploadCountRef.current > 0) {
+      rememberProjectOpen();
       return false;
     }
     if (
       fileView?.path === "PROJECT.md"
       && fileView.content !== fileView.savedContent
     ) {
-      rememberProjectOpen();
-      setToast({
-        title: "项目规则还有未保存修改",
-        message: "保存或还原规则后，会自动打开目标项目。",
-        tone: "warning",
-        sticky: true,
-        disposition: "user-choice",
-        dedupeKey: "project-rules-unsaved",
-        action: { id: "review-project-rules", label: "处理项目规则" },
-      });
-      return false;
+      if (!await saveProjectRulesRef.current()) {
+        rememberProjectOpen();
+        setDrawer("files");
+        return false;
+      }
     }
     if (viewTransitioningRef.current) {
       rememberProjectOpen();
-      setToast({
-        title: "正在核对当前画布",
-        message: "核对完成后会自动打开目标项目。",
-        tone: "info",
-        disposition: "defer-and-resume",
-        dedupeKey: "project-switch-blocked",
-      });
       return false;
     }
     if (projectLoadErrorRef.current) {
@@ -5068,28 +5131,10 @@ export default function Workbench() {
     }
     if (flushPromiseRef.current && !await flushPromiseRef.current) {
       rememberProjectOpen();
-      setToast({
-        title: "当前修改还没有安全写入",
-        message: "处理保存问题后，会自动打开目标项目。",
-        tone: "warning",
-        sticky: true,
-        disposition: "direct-action",
-        dedupeKey: "project-switch-persist-blocked",
-        action: { id: "retry-export", label: "导出当前编辑" },
-      });
       return false;
     }
     if (draftFlushPromiseRef.current && !await draftFlushPromiseRef.current) {
       rememberProjectOpen();
-      setToast({
-        title: "评论还没有安全记录",
-        message: "记录成功后，会自动打开目标项目。",
-        tone: "warning",
-        sticky: true,
-        disposition: "direct-action",
-        dedupeKey: "project-switch-persist-blocked",
-        action: { id: "retry-draft-persist", label: "重试记录评论" },
-      });
       return false;
     }
     if (projectLockedRef.current) return true;
@@ -5123,15 +5168,6 @@ export default function Workbench() {
         )
       ) {
         rememberProjectOpen();
-        setToast({
-          title: "当前 HTML 还没有更新成功",
-          message: "解决文件问题后，会自动打开目标项目。",
-          tone: "warning",
-          sticky: true,
-          disposition: "direct-action",
-          dedupeKey: "project-switch-persist-blocked",
-          action: { id: "retry-export", label: "导出当前编辑" },
-        });
         return false;
       }
     }
@@ -5141,13 +5177,6 @@ export default function Workbench() {
       || flushPromiseRef.current
     ) {
       rememberProjectOpen();
-      setToast({
-        title: "检测到新的画布修改",
-        message: "新修改保存后，会自动打开目标项目。",
-        tone: "info",
-        disposition: "defer-and-resume",
-        dedupeKey: "project-switch-new-edit",
-      });
       return false;
     }
     if (
@@ -5159,15 +5188,6 @@ export default function Workbench() {
       )
     ) {
       rememberProjectOpen();
-      setToast({
-        title: "当前 HTML 还没有更新成功",
-        message: "解决文件问题后，会自动打开目标项目。",
-        tone: "warning",
-        sticky: true,
-        disposition: "direct-action",
-        dedupeKey: "project-switch-persist-blocked",
-        action: { id: "retry-export", label: "导出当前编辑" },
-      });
       return false;
     }
     const context = captureProjectContext();
@@ -5181,20 +5201,8 @@ export default function Workbench() {
       });
       if (!draftOk) {
         rememberProjectOpen();
-        setToast({
-          title: "本轮评论还没有记录成功",
-          message: "评论记录成功后，会自动打开目标项目。",
-          tone: "error",
-          sticky: true,
-          disposition: "direct-action",
-          dedupeKey: "comment-persist-error",
-          action: { id: "retry-draft-persist", label: "重试记录评论" },
-        });
         return false;
       }
-    }
-    if (!sourcePathRef.current && editRevisionRef.current > 0) {
-      return window.confirm("这个浏览器预览尚未绑定本地 HTML。切换后当前修改不会保留，仍要继续吗？");
     }
     return true;
   }, [
@@ -5271,6 +5279,7 @@ export default function Workbench() {
       generating
       || submissionIntentRef.current
       || submissionPendingRef.current
+      || attachmentUploadCount > 0
       || projectHydrating
       || viewTransitioning
       || projectRulesUnsaved
@@ -5286,6 +5295,7 @@ export default function Workbench() {
     void openProject(pending.recentPath);
   }, [
     draftPersistError,
+    attachmentUploadCount,
     editRevision,
     fileView,
     generating,
@@ -5380,6 +5390,8 @@ export default function Workbench() {
 
   const handleCanvasChange = useCallback((nextHtml: string, mutation?: HtmlCanvasMutation): boolean => {
     if (
+      (typeof window !== "undefined" && !window.htmlAIProjects)
+      ||
       projectLockedRef.current
       || projectHydratingRef.current
       || projectLoadErrorRef.current
@@ -5391,6 +5403,7 @@ export default function Workbench() {
     const activeTargets = [
       ...commentsRef.current.map((comment) => comment.target),
       ...changeEventsRef.current.map((event) => event.target),
+      ...commentDraftsRef.current.map((savedDraft) => savedDraft.target),
       ...(draftTargetRef.current ? [draftTargetRef.current] : []),
     ];
     if (activeTargets.length > 0) {
@@ -5430,6 +5443,12 @@ export default function Workbench() {
       }));
       changeEventsRef.current = nextEvents;
       setChangeEvents(nextEvents);
+      const nextCommentDrafts = commentDraftsRef.current.map((savedDraft) => ({
+        ...savedDraft,
+        target: refreshedTarget(savedDraft.target),
+      }));
+      commentDraftsRef.current = nextCommentDrafts;
+      setCommentDrafts(nextCommentDrafts);
       const currentDraftTarget = draftTargetRef.current;
       if (currentDraftTarget) {
         const nextDraftTarget = refreshedTarget(currentDraftTarget);
@@ -5739,108 +5758,6 @@ export default function Workbench() {
     };
   }, [reloadCurrentSource]);
 
-  const viewSourceConflictDiff = useCallback(async () => {
-    const context = captureProjectContext();
-    if (!context) return;
-    const localHtml = htmlRef.current;
-    try {
-      const url = new URL(`${BRIDGE_URL}/source`);
-      url.searchParams.set("sourcePath", context.sourcePath);
-      const response = await bridgeFetch(url, { cache: "no-store" });
-      const payload = await readJsonResponse(response);
-      if (!response.ok) throw responseError(payload, "无法读取外部文件。");
-      if (!isCurrentProjectContext(context)) return;
-      const diff = compactLineDiff(localHtml, String(payload.content || ""));
-      setFileView({
-        path: "源文件冲突对比",
-        content: diff,
-        savedContent: diff,
-        loading: false,
-      });
-      setDrawer("files");
-    } catch (cause) {
-      if (!isCurrentProjectContext(context)) return;
-      setToast({
-        title: "暂时无法查看差异",
-        message: productErrorMessage(cause, "外部文件没有被覆盖，请稍后重试。"),
-        tone: "warning",
-        disposition: "background-result",
-        dedupeKey: "source-diff",
-      });
-    }
-  }, [captureProjectContext, isCurrentProjectContext]);
-
-  const viewAiConflictDiff = useCallback(async () => {
-    const run = activeRun;
-    const context = captureProjectContext();
-    if (
-      !run
-      || run.status !== "awaiting-conflict-resolution"
-      || !context
-      || context.sourcePath !== run.sourcePath
-    ) return;
-    try {
-      const candidateUrl = new URL(`${BRIDGE_URL}/conflict-candidate`);
-      candidateUrl.searchParams.set("sourcePath", context.sourcePath);
-      const sourceUrl = new URL(`${BRIDGE_URL}/source`);
-      sourceUrl.searchParams.set("sourcePath", context.sourcePath);
-      const [candidateResponse, sourceResponse] = await Promise.all([
-        bridgeFetch(candidateUrl, { cache: "no-store" }),
-        bridgeFetch(sourceUrl, { cache: "no-store" }),
-      ]);
-      const [candidatePayload, sourcePayload] = await Promise.all([
-        readJsonResponse(candidateResponse),
-        readJsonResponse(sourceResponse),
-      ]);
-      if (!candidateResponse.ok) {
-        throw responseError(candidatePayload, "无法读取 AI 候选内容。");
-      }
-      if (!sourceResponse.ok) {
-        throw responseError(sourcePayload, "无法读取外部源 HTML。");
-      }
-      if (!isCurrentProjectContext(context)) return;
-      const candidate = String(candidatePayload.content || "");
-      const external = String(sourcePayload.content || "");
-      const candidateHash = String(
-        candidatePayload.sha256
-        || candidatePayload.candidateOutputSha256
-        || "",
-      );
-      const externalHash = String(sourcePayload.sha256 || "");
-      if (
-        String(candidatePayload.projectId || "") !== context.projectId
-        || String(candidatePayload.documentId || "") !== context.documentId
-        || await browserSha256(candidate) !== candidateHash
-        || await browserSha256(external) !== externalHash
-        || (run.candidateOutputSha256 && candidateHash !== run.candidateOutputSha256)
-        || (run.externalSourceSha256 && externalHash !== run.externalSourceSha256)
-      ) {
-        throw new Error("AI 候选或外部 HTML 的身份与冲突记录不一致。");
-      }
-      const diff = [
-        `外部 HTML ${shortHash(externalHash)}  ↔  AI 候选 ${shortHash(candidateHash)}`,
-        "",
-        compactLineDiff(external, candidate),
-      ].join("\n");
-      setFileView({
-        path: "外部 HTML 与 AI 候选对比",
-        content: diff,
-        savedContent: diff,
-        loading: false,
-      });
-      setDrawer("files");
-    } catch (cause) {
-      if (!isCurrentProjectContext(context)) return;
-      setToast({
-        title: "暂时无法比较两份内容",
-        message: productErrorMessage(cause, "两份文件都仍被安全保留，请稍后重试。"),
-        tone: "warning",
-        disposition: "background-result",
-        dedupeKey: "ai-conflict-diff",
-      });
-    }
-  }, [activeRun, captureProjectContext, isCurrentProjectContext]);
-
   const requestUserFlush = useCallback((fromDeferred = false) => {
     if (interactionLocked) {
       if (runInProgress) setDrawer("handoff");
@@ -6039,8 +5956,125 @@ export default function Workbench() {
     }
   }, []);
 
+  const clearCurrentComposer = useCallback(() => {
+    composerDraftRef.current = "";
+    composerCommentIdRef.current = null;
+    composerAttachmentsRef.current = [];
+    draftTargetRef.current = null;
+    setDraft("");
+    setDraftCommentId(null);
+    setDraftAttachments([]);
+    setDraftTarget(null);
+    setComposerOpen(false);
+    updateFocusedComment(null);
+  }, [updateFocusedComment]);
+
+  const stashCurrentComposerDraft = useCallback((): CommentDraft | null => {
+    const target = draftTargetRef.current;
+    const text = composerDraftRef.current;
+    const attachments = composerAttachmentsRef.current;
+    const commentId = composerCommentIdRef.current;
+    if (
+      !target
+      || !commentId
+      || (!text.trim() && attachments.length === 0)
+    ) {
+      clearCurrentComposer();
+      persistCurrentDraftRecovery();
+      return null;
+    }
+    const now = new Date().toISOString();
+    const existing = commentDraftsRef.current.find(
+      (savedDraft) => savedDraft.commentId === commentId,
+    );
+    const savedDraft: CommentDraft = {
+      commentId,
+      createdAt: existing?.createdAt || now,
+      updatedAt: now,
+      target,
+      text,
+      attachments: attachments.map(persistedAttachment),
+    };
+    const nextDrafts = [
+      ...commentDraftsRef.current.filter(
+        (current) => current.commentId !== commentId,
+      ),
+      savedDraft,
+    ];
+    commentDraftsRef.current = nextDrafts;
+    setCommentDrafts(nextDrafts);
+    clearCurrentComposer();
+    persistCurrentDraftRecovery();
+    return savedDraft;
+  }, [clearCurrentComposer, persistCurrentDraftRecovery]);
+
+  const restoreCommentDraft = useCallback((commentId: string) => {
+    if (attachmentUploadCountRef.current > 0) return;
+    if (
+      draftTargetRef.current
+      && composerCommentIdRef.current !== commentId
+      && (
+        composerDraftRef.current.trim()
+        || composerAttachmentsRef.current.length > 0
+      )
+    ) {
+      stashCurrentComposerDraft();
+    }
+    const savedDraft = commentDraftsRef.current.find(
+      (current) => current.commentId === commentId,
+    );
+    if (!savedDraft) return;
+    const nextDrafts = commentDraftsRef.current.filter(
+      (current) => current.commentId !== commentId,
+    );
+    commentDraftsRef.current = nextDrafts;
+    setCommentDrafts(nextDrafts);
+    composerDraftRef.current = savedDraft.text;
+    composerCommentIdRef.current = savedDraft.commentId;
+    composerAttachmentsRef.current = savedDraft.attachments;
+    draftTargetRef.current = savedDraft.target;
+    setDraft(savedDraft.text);
+    setDraftCommentId(savedDraft.commentId);
+    setDraftAttachments(savedDraft.attachments);
+    setDraftTarget(savedDraft.target);
+    setSelection(savedDraft.target);
+    setComposerOpen(true);
+    updateFocusedComment(null);
+    persistCurrentDraftRecovery();
+    queueReviewPairReveal(savedDraft.target, "__composer");
+    window.requestAnimationFrame(() => {
+      composerRef.current?.focus({ preventScroll: true });
+    });
+  }, [
+    persistCurrentDraftRecovery,
+    queueReviewPairReveal,
+    stashCurrentComposerDraft,
+    updateFocusedComment,
+  ]);
+
+  const deleteCommentDraft = useCallback((commentId: string) => {
+    const savedDraft = commentDraftsRef.current.find(
+      (current) => current.commentId === commentId,
+    );
+    const nextDrafts = commentDraftsRef.current.filter(
+      (current) => current.commentId !== commentId,
+    );
+    commentDraftsRef.current = nextDrafts;
+    setCommentDrafts(nextDrafts);
+    persistCurrentDraftRecovery();
+    for (const attachment of savedDraft?.attachments ?? []) {
+      forgetAttachmentObjectUrl(attachment.attachmentId);
+      void deleteAttachmentFile(attachment);
+    }
+  }, [
+    deleteAttachmentFile,
+    forgetAttachmentObjectUrl,
+    persistCurrentDraftRecovery,
+  ]);
+
   const openCommentComposer = useCallback((target: HtmlCanvasSelection) => {
     if (relinkingTargetRef.current && finishTargetRelink(target)) return;
+    if (attachmentUploadCountRef.current > 0) return;
     if (
       projectLockedRef.current
       || projectHydratingRef.current
@@ -6049,6 +6083,13 @@ export default function Workbench() {
       || persistStateRef.current === "conflict"
       || viewMode === "history"
     ) return;
+    const savedDraft = commentDraftsRef.current.find(
+      (current) => current.target.id === target.id,
+    );
+    if (savedDraft) {
+      restoreCommentDraft(savedDraft.commentId);
+      return;
+    }
     const recoveredDraftTarget = draftTargetRef.current;
     if (
       recoveredDraftTarget
@@ -6057,26 +6098,7 @@ export default function Workbench() {
         composerDraftRef.current.trim()
         || composerAttachmentsRef.current.length > 0
       )
-    ) {
-      if (!canLocateTarget(recoveredDraftTarget)) {
-        beginTargetRelink("__composer");
-        return;
-      }
-      const located = editorRef.current?.select(
-        recoveredDraftTarget,
-        { showToolbar: false },
-      );
-      const resumedTarget = located || recoveredDraftTarget;
-      draftTargetRef.current = resumedTarget;
-      setSelection(resumedTarget);
-      setDraftTarget(resumedTarget);
-      setComposerOpen(true);
-      queueReviewPairReveal(resumedTarget, "__composer");
-      window.requestAnimationFrame(() => {
-        composerRef.current?.focus({ preventScroll: true });
-      });
-      return;
-    }
+    ) stashCurrentComposerDraft();
     setSelection(target);
     const resumesRecoveredDraft = draftTargetRef.current?.id === target.id;
     if (!resumesRecoveredDraft) {
@@ -6101,9 +6123,10 @@ export default function Workbench() {
       composerRef.current?.focus({ preventScroll: true });
     });
   }, [
-    beginTargetRelink,
     finishTargetRelink,
     queueReviewPairReveal,
+    restoreCommentDraft,
+    stashCurrentComposerDraft,
     updateFocusedComment,
     viewMode,
   ]);
@@ -6142,28 +6165,9 @@ export default function Workbench() {
   ]);
 
   const closeCommentComposer = useCallback(() => {
-    const abandonedAttachments = [...composerAttachmentsRef.current];
-    composerDraftRef.current = "";
-    composerCommentIdRef.current = null;
-    composerAttachmentsRef.current = [];
-    draftTargetRef.current = null;
-    setDraft("");
-    setDraftCommentId(null);
-    setDraftAttachments([]);
-    setDraftTarget(null);
-    setComposerOpen(false);
-    updateFocusedComment(null);
-    persistCurrentDraftRecovery();
-    for (const attachment of abandonedAttachments) {
-      forgetAttachmentObjectUrl(attachment.attachmentId);
-      void deleteAttachmentFile(attachment);
-    }
-  }, [
-    deleteAttachmentFile,
-    forgetAttachmentObjectUrl,
-    persistCurrentDraftRecovery,
-    updateFocusedComment,
-  ]);
+    if (attachmentUploadCountRef.current > 0) return;
+    stashCurrentComposerDraft();
+  }, [stashCurrentComposerDraft]);
 
   const addComment = useCallback(() => {
     if (
@@ -6179,18 +6183,6 @@ export default function Workbench() {
       return;
     }
     if (!canLocateTarget(draftTarget)) {
-      setToast({
-        title: "评论目标无法安全定位",
-        message: "评论内容和附件仍保留；重新选择画布位置后即可继续。",
-        tone: "warning",
-        disposition: "user-choice",
-        dedupeKey: `unsafe-comment-target-${draftTarget.id}`,
-        action: {
-          id: "relink-target",
-          label: "重新选择目标",
-          commentId: "__composer",
-        },
-      });
       return;
     }
     if (!draft.trim() && draftAttachments.length === 0) {
@@ -6201,6 +6193,11 @@ export default function Workbench() {
     const now = new Date().toISOString();
     const commentId = draftCommentId || recordId("comment", commentCounter.current++);
     const commentTarget = independentCommentTarget(draftTarget, commentId);
+    const remainingDrafts = commentDraftsRef.current.filter(
+      (savedDraft) => savedDraft.commentId !== commentId,
+    );
+    commentDraftsRef.current = remainingDrafts;
+    setCommentDrafts(remainingDrafts);
     const nextComments = [...commentsRef.current, {
       commentId,
       createdAt: now,
@@ -6332,18 +6329,8 @@ export default function Workbench() {
   ) => {
     if (!canLocateTarget(target)) {
       setSelection(target);
-      setToast({
-        title: target.resolution === "ambiguous" ? "目标存在多个候选" : "原目标已不存在",
-        message: "评论和附件仍保留；重新选择画布位置即可继续。",
-        tone: "warning",
-        disposition: "user-choice",
-        dedupeKey: `unsafe-target-${target.id}`,
-        action: {
-          id: "relink-target",
-          label: "重新选择目标",
-          commentId,
-        },
-      });
+      updateFocusedComment(commentId);
+      queueReviewPairReveal(target, commentId);
       return;
     }
     updateFocusedComment(commentId);
@@ -6428,28 +6415,22 @@ export default function Workbench() {
     }
   }, [captureProjectContext, isCurrentProjectContext, readWorkspaceFile]);
 
-  const closeFileView = useCallback((): boolean => {
+  const saveProjectRules = useCallback(async (): Promise<boolean> => {
     if (
       fileView?.path === "PROJECT.md"
+      && !fileView.loading
       && !fileView.error
-      && fileView.content !== fileView.savedContent
-    ) {
-      return false;
-    }
-    setFileView(null);
-    return true;
-  }, [fileView]);
-
-  const saveProjectRules = useCallback(async () => {
+      && fileView.content === fileView.savedContent
+    ) return true;
     if (
       !fileView
       || fileView.path !== "PROJECT.md"
       || fileView.loading
       || fileView.error
       || runInProgress
-    ) return;
+    ) return false;
     const context = captureProjectContext();
-    if (!context) return;
+    if (!context) return false;
     const nextContent = fileView.content;
     setProjectRulesSaveError("");
     setProjectRulesSaving(true);
@@ -6471,16 +6452,17 @@ export default function Workbench() {
       });
       const payload = await readJsonResponse(response);
       if (!response.ok) throw responseError(payload, "无法更新 PROJECT.md。");
-      if (!isCurrentProjectContext(context)) return;
+      if (!isCurrentProjectContext(context)) return false;
       markRulesSaved();
+      return true;
     } catch (cause) {
-      if (!isCurrentProjectContext(context)) return;
+      if (!isCurrentProjectContext(context)) return false;
       try {
         const persisted = await readWorkspaceFile("PROJECT.md", context.sourcePath);
-        if (!isCurrentProjectContext(context)) return;
+        if (!isCurrentProjectContext(context)) return false;
         if (persisted === nextContent) {
           markRulesSaved();
-          return;
+          return true;
         }
       } catch {
         // The original write error is the most useful local explanation.
@@ -6489,6 +6471,7 @@ export default function Workbench() {
         cause,
         "项目规则暂时没有保存；内容仍保留在这里，可以再次保存。",
       ));
+      return false;
     } finally {
       if (isCurrentProjectContext(context)) setProjectRulesSaving(false);
     }
@@ -6499,6 +6482,41 @@ export default function Workbench() {
     readWorkspaceFile,
     runInProgress,
   ]);
+
+  useEffect(() => {
+    if (
+      fileView?.path !== "PROJECT.md"
+      || fileView.loading
+      || fileView.error
+      || fileView.content === fileView.savedContent
+      || projectRulesSaving
+      || runInProgress
+    ) return;
+    const timer = window.setTimeout(() => {
+      void saveProjectRules();
+    }, PROJECT_RULES_AUTOSAVE_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [
+    fileView,
+    projectRulesSaving,
+    runInProgress,
+    saveProjectRules,
+  ]);
+
+  const closeFileView = useCallback(async (): Promise<boolean> => {
+    if (
+      fileView?.path === "PROJECT.md"
+      && !fileView.error
+      && fileView.content !== fileView.savedContent
+      && !await saveProjectRules()
+    ) return false;
+    setFileView(null);
+    return true;
+  }, [fileView, saveProjectRules]);
+
+  useEffect(() => {
+    saveProjectRulesRef.current = saveProjectRules;
+  }, [saveProjectRules]);
 
   const sendToQoderWork = useCallback(async (
     handoffMessage: string,
@@ -6617,58 +6635,10 @@ export default function Workbench() {
     }
   }, []);
 
-  const startPreviewHandoff = useCallback(() => {
-    const activeComments = commentsRef.current.filter(commentHasContent);
-    if (activeComments.length === 0) {
-      composerRef.current?.focus();
-      return;
-    }
-    const submittedAt = new Date().toISOString();
-    const previewRun: ActiveRun = {
-      projectId: "preview-project",
-      documentId: "preview-document",
-      requestId: "preview-request",
-      attemptId: "attempt_001",
-      requestPath: "",
-      attemptPath: "",
-      handoffMessage: "源页交互预览：本轮要求已复制。",
-      status: "processing",
-      sourcePath: "preview://welcome",
-      baseSnapshotSha256: `sha256:${"0".repeat(64)}`,
-      previousVersionId: latestVersionId,
-      basedOnVersionId: currentBasedOnVersionId,
-      freezeCutoffRevision: editRevisionRef.current,
-      candidateVersionId: "preview-version-2",
-      candidateVersionLabel: "版本 2",
-      submittedAt,
-      summary: activeComments.map((comment) => comment.text).filter(Boolean).join("；"),
-      commentCount: activeComments.length,
-      changeEventCount: changeEventsRef.current.length,
-    };
-    projectLockedRef.current = true;
-    setProjectLocked(true);
-    activeRunRef.current = previewRun;
-    setActiveRun(previewRun);
-    const previewQoderState: ProjectQoderHandoffState = {
-      sourcePath: previewRun.sourcePath,
-      requestId: previewRun.requestId,
-      attemptId: previewRun.attemptId,
-      status: "copied",
-    };
-    qoderHandoffStatesRef.current.set(previewRun.sourcePath, previewQoderState);
-    setQoderHandoffState(previewQoderState);
-    setHandoffPreviewOpen(false);
-    setCanvasMode("edit");
-    setDrawer("handoff");
-  }, [currentBasedOnVersionId, latestVersionId]);
-
   const generateRequest = useCallback(async (fromDeferred = false) => {
     if (submissionIntentRef.current) return;
     if (!sourcePathRef.current) {
-      if (typeof window !== "undefined" && !window.htmlAIProjects) {
-        startPreviewHandoff();
-        return;
-      }
+      if (typeof window !== "undefined" && !window.htmlAIProjects) return;
       void openProject();
       return;
     }
@@ -6687,6 +6657,27 @@ export default function Workbench() {
     }
     if (projectLockedRef.current) {
       setDrawer("handoff");
+      return;
+    }
+    if (
+      draftTargetRef.current
+      && (
+        composerDraftRef.current.trim()
+        || composerAttachmentsRef.current.length > 0
+      )
+    ) {
+      stashCurrentComposerDraft();
+    }
+    if (commentDraftsRef.current.length > 0) {
+      setToast({
+        title: `${commentDraftsRef.current.length} 条评论还没有完成`,
+        message: "草稿和附件都已保留。确认、补充或删除后再发送本轮要求。",
+        tone: "warning",
+        sticky: true,
+        disposition: "user-choice",
+        dedupeKey: "unfinished-comment-drafts",
+        action: { id: "review-comment-drafts", label: "查看未完成评论" },
+      });
       return;
     }
     if (
@@ -7006,15 +6997,17 @@ export default function Workbench() {
       if (!durableRun && requestDispatched && !confirmedNoRun) {
         setDrawer("handoff");
       } else if (!durableRun) {
-        setToast({
-          title: "本轮没有提交",
-          message: productErrorMessage(cause, "页面和评论已经恢复编辑，请检查后重试。"),
-          tone: "error",
-          sticky: true,
-          disposition: "direct-action",
-          dedupeKey: "ai-submit",
-          action: { id: "retry-submit", label: "重试提交本轮" },
-        });
+        const failedRun: ActiveRun = {
+          ...pendingRun,
+          status: "error",
+          error: productErrorMessage(
+            cause,
+            "这次发送没有成功。页面和评论仍然保留。",
+          ),
+        };
+        activeRunRef.current = failedRun;
+        setActiveRun(failedRun);
+        setDrawer("handoff");
       }
     } finally {
       submissionPendingRef.current = false;
@@ -7036,7 +7029,7 @@ export default function Workbench() {
     openProject,
     projectName,
     sendToQoderWork,
-    startPreviewHandoff,
+    stashCurrentComposerDraft,
     viewMode,
   ]);
   useEffect(() => {
@@ -7426,81 +7419,6 @@ export default function Workbench() {
     }
   }, [activeRun, openCommittedVersion]);
 
-  const waiveCurrentValidation = useCallback(async () => {
-    const run = activeRun;
-    const review = run?.validationReview;
-    if (
-      !run
-      || run.status !== "awaiting-check-decision"
-      || !review
-    ) return;
-    const operationKey = activeRunOperationKey(run);
-    if (waivingRunsRef.current.has(operationKey)) return;
-    waivingRunsRef.current.add(operationKey);
-    setWaivingValidation(true);
-    try {
-      const response = await bridgeFetch(`${BRIDGE_URL}/validation/waive`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sourcePath: run.sourcePath,
-          projectId: run.projectId,
-          documentId: run.documentId,
-          requestId: run.requestId,
-          attemptId: run.attemptId,
-          violationCodes: review.softViolationCodes,
-          reason: "用户选择采用评论范围外的额外变化。",
-        }),
-      });
-      const payload = await readJsonResponse(response);
-      if (!response.ok) {
-        throw responseError(payload, "无法记录本次校验决定。");
-      }
-      const nextRun = {
-        ...run,
-        status: "validating" as const,
-        validationReview: validationReviewFromRecord(payload.validationReview)
-          || review,
-        error: undefined,
-      };
-      backgroundRunsRef.current.set(run.sourcePath, nextRun);
-      const visibleRun = activeRunRef.current;
-      if (
-        sameLocalSourcePath(sourcePathRef.current, run.sourcePath)
-        && visibleRun?.requestId === run.requestId
-        && visibleRun.attemptId === run.attemptId
-      ) {
-        activeRunRef.current = nextRun;
-        setActiveRun(nextRun);
-      }
-    } catch (cause) {
-      const nextRun = {
-        ...run,
-        error: productErrorMessage(cause, "无法记录本次校验决定。"),
-      };
-      backgroundRunsRef.current.set(run.sourcePath, nextRun);
-      const visibleRun = activeRunRef.current;
-      if (
-        sameLocalSourcePath(sourcePathRef.current, run.sourcePath)
-        && visibleRun?.requestId === run.requestId
-        && visibleRun.attemptId === run.attemptId
-      ) {
-        activeRunRef.current = nextRun;
-        setActiveRun(nextRun);
-      }
-    } finally {
-      waivingRunsRef.current.delete(operationKey);
-      const visibleRun = activeRunRef.current;
-      if (
-        sameLocalSourcePath(sourcePathRef.current, run.sourcePath)
-        && visibleRun?.requestId === run.requestId
-        && visibleRun.attemptId === run.attemptId
-      ) {
-        setWaivingValidation(false);
-      }
-    }
-  }, [activeRun]);
-
   const processRunStatus = useCallback(async (
     run: ActiveRun,
     payload: Record<string, unknown>,
@@ -7512,7 +7430,6 @@ export default function Workbench() {
       || trackedRun.attemptId !== run.attemptId
     ) return;
     const deleteTrackedRun = () => {
-      statusPollFailureCountsRef.current.delete(activeRunOperationKey(run));
       for (const [trackedPath, current] of backgroundRunsRef.current) {
         if (
           current.requestId === run.requestId
@@ -7536,6 +7453,8 @@ export default function Workbench() {
           ? "processing"
           : rawState === "importing" || rawState === "result-ready"
             ? "validating"
+            : rawState === "awaiting-check-decision"
+              ? "validating"
             : rawState === "canceled"
               ? "cancelled"
               : rawState
@@ -7549,25 +7468,6 @@ export default function Workbench() {
       || sameLocalSourcePath(sourcePathRef.current, run.sourcePath)
     );
     const previousBackgroundState = backgroundRunsRef.current.get(run.sourcePath)?.status;
-    if (state === "awaiting-check-decision") {
-      const validationReview = validationReviewFromRecord(payload.validationReview);
-      const nextRun: ActiveRun = {
-        ...run,
-        status: "awaiting-check-decision",
-        ...(validationReview ? { validationReview } : {}),
-        ...(isRecord(payload.scopeReport)
-          ? { scopeReport: payload.scopeReport }
-          : {}),
-      };
-      backgroundRunsRef.current.set(run.sourcePath, nextRun);
-      if (isCurrentProject) {
-        setActiveRun(nextRun);
-        setProjectLocked(true);
-        projectLockedRef.current = true;
-        setDrawer("handoff");
-      }
-      return;
-    }
     if (state === "ready-to-open") {
       const validationReview = validationReviewFromRecord(payload.validationReview);
       const nextRun: ActiveRun = {
@@ -7575,15 +7475,24 @@ export default function Workbench() {
         status: "ready-to-open",
         readyPayload: payload,
         ...(validationReview ? { validationReview } : {}),
+        ...(isRecord(payload.scopeReport)
+          ? { scopeReport: payload.scopeReport }
+          : {}),
       };
       backgroundRunsRef.current.set(run.sourcePath, nextRun);
       if (isCurrentProject) {
+        clearBackgroundProjectResult(run.sourcePath);
         setActiveRun(nextRun);
         setProjectLocked(true);
         projectLockedRef.current = true;
         setDrawer("handoff");
         if (toastRef.current?.dedupeKey === "ai-submit") setToast(null);
       } else if (previousBackgroundState !== "ready-to-open") {
+        markBackgroundProjectResult(run.sourcePath, {
+          state: "ready",
+          label: "新版本可查看",
+          updatedAt: Date.now(),
+        });
         setToast({
           title: `${run.candidateVersionLabel} 可以打开了`,
           message: "切回项目确认后再打开，当前画布没有被替换。",
@@ -7602,6 +7511,7 @@ export default function Workbench() {
     if (state === "no-change") {
       deleteTrackedRun();
       if (isCurrentProject) {
+        clearBackgroundProjectResult(run.sourcePath);
         projectLockedRef.current = false;
         setProjectLocked(false);
         editorRef.current?.unlockNow?.();
@@ -7610,17 +7520,10 @@ export default function Workbench() {
         setActiveRun(noChangeRun);
         setDrawer("handoff");
       } else {
-        setToast({
-          title: `${run.sourcePath.split(/[\\/]/).at(-1)} 没有生成新版本`,
-          message: "没有产生可采用的变化；切回项目后可调整原评论并重试。",
-          tone: "info",
-          disposition: "background-result",
-          dedupeKey: `background-version:${run.sourcePath}`,
-          action: {
-            id: "open-project",
-            label: "打开项目",
-            sourcePath: run.sourcePath,
-          },
+        markBackgroundProjectResult(run.sourcePath, {
+          state: "no-change",
+          label: "已完成 · 无变化",
+          updatedAt: Date.now(),
         });
       }
       return;
@@ -7628,6 +7531,7 @@ export default function Workbench() {
     if (state === "cancelled") {
       deleteTrackedRun();
       if (isCurrentProject) {
+        clearBackgroundProjectResult(run.sourcePath);
         projectLockedRef.current = false;
         setProjectLocked(false);
         editorRef.current?.unlockNow?.();
@@ -7650,18 +7554,10 @@ export default function Workbench() {
         setActiveRun(errorRun);
         setDrawer("handoff");
       } else {
-        setToast({
-          title: `${run.sourcePath.split(/[\\/]/).at(-1)} 需要处理`,
-          message: "切回该项目可查看完整错误，源 HTML 没有被覆盖。",
-          tone: "error",
-          sticky: true,
-          disposition: "background-result",
-          dedupeKey: `background-version:${run.sourcePath}`,
-          action: {
-            id: "open-project",
-            label: "打开项目",
-            sourcePath: run.sourcePath,
-          },
+        markBackgroundProjectResult(run.sourcePath, {
+          state: "error",
+          label: "需要处理",
+          updatedAt: Date.now(),
         });
       }
       return;
@@ -7674,6 +7570,7 @@ export default function Workbench() {
       || { ...run, status: state };
     backgroundRunsRef.current.set(run.sourcePath, nextRun);
     if (isCurrentProject) {
+      clearBackgroundProjectResult(run.sourcePath);
       setActiveRun(nextRun);
       setProjectLocked(isLockedLifecycle(nextRun.status));
       projectLockedRef.current = isLockedLifecycle(nextRun.status);
@@ -7685,21 +7582,19 @@ export default function Workbench() {
       nextRun.status === "awaiting-conflict-resolution"
       && previousBackgroundState !== nextRun.status
     ) {
-      setToast({
-        title: `${run.sourcePath.split(/[\\/]/).at(-1)} 需要处理冲突`,
-        message: "AI 候选和外部文件都已保留；切回该项目后选择采用哪一份。",
-        tone: "warning",
-        sticky: true,
-        disposition: "background-result",
-        dedupeKey: `background-version:${run.sourcePath}`,
-        action: {
-          id: "open-project",
-          label: "打开项目",
-          sourcePath: run.sourcePath,
-        },
+      markBackgroundProjectResult(run.sourcePath, {
+        state: "conflict",
+        label: "需要处理",
+        updatedAt: Date.now(),
+      });
+    } else if (!isCurrentProject) {
+      markBackgroundProjectResult(run.sourcePath, {
+        state: "processing",
+        label: "正在处理",
+        updatedAt: Date.now(),
       });
     }
-  }, []);
+  }, [clearBackgroundProjectResult, markBackgroundProjectResult]);
 
   useEffect(() => {
     const poll = async () => {
@@ -7719,25 +7614,10 @@ export default function Workbench() {
             const response = await bridgeFetch(url, { cache: "no-store" });
             const payload = await readJsonResponse(response);
             if (!response.ok) throw responseError(payload, "无法读取本轮状态。");
-            statusPollFailureCountsRef.current.delete(operationKey);
-            if (sameLocalSourcePath(sourcePathRef.current, run.sourcePath)) {
-              setRunStatusError("");
-            }
             await processRunStatus(run, payload);
-          } catch (cause) {
-            const failureCount = (
-              statusPollFailureCountsRef.current.get(operationKey) || 0
-            ) + 1;
-            statusPollFailureCountsRef.current.set(operationKey, failureCount);
-            if (
-              failureCount >= STATUS_POLL_FAILURE_THRESHOLD
-              && sameLocalSourcePath(sourcePathRef.current, run.sourcePath)
-            ) {
-              setRunStatusError(productErrorMessage(
-                cause,
-                "本轮状态暂时没有响应。源页会继续自动核对；当前项目不会重复提交。",
-              ));
-            }
+          } catch {
+            // Temporary polling failures are recovered by the next automatic pass.
+            // The workspace-level unavailable state remains the user-facing boundary.
           } finally {
             statusPollBusyRef.current.delete(operationKey);
           }
@@ -7762,7 +7642,6 @@ export default function Workbench() {
     if (!context) return;
     pendingReconcileBusyRef.current = true;
     setPendingReconcileBusy(true);
-    setPendingReconcileError("");
     try {
       const url = new URL(`${BRIDGE_URL}/workspace`);
       url.searchParams.set("sourcePath", context.sourcePath);
@@ -7791,7 +7670,6 @@ export default function Workbench() {
         setProjectLocked(isLockedLifecycle(recoveredRun.status));
         projectLockedRef.current = isLockedLifecycle(recoveredRun.status);
         setBridgeConnected(true);
-        setPendingReconcileError("");
         setDrawer("handoff");
         return;
       }
@@ -7801,14 +7679,8 @@ export default function Workbench() {
       activeRunRef.current = null;
       setActiveRun(null);
       setDrawer(null);
-      setPendingReconcileError("");
-    } catch (cause) {
+    } catch {
       if (!isCurrentProjectContext(context)) return;
-      const message = productErrorMessage(
-        cause,
-        "本地项目资料暂时没有响应。当前页面保持只读，源页会继续自动核对。",
-      );
-      setPendingReconcileError(message);
     } finally {
       pendingReconcileBusyRef.current = false;
       if (isCurrentProjectContext(context)) setPendingReconcileBusy(false);
@@ -7903,10 +7775,16 @@ export default function Workbench() {
     } catch (cause) {
       if (context && !isCurrentProjectContext(context)) return;
       if (context) {
-        setRunStatusError(productErrorMessage(
-          cause,
-          "取消结果暂时无法确认。源页会继续核对本轮状态，当前项目不会重复提交。",
-        ));
+        const nextRun = {
+          ...run,
+          error: productErrorMessage(
+            cause,
+            "取消结果暂时无法确认。源页会继续在后台核对。",
+          ),
+        };
+        backgroundRunsRef.current.set(run.sourcePath, nextRun);
+        activeRunRef.current = nextRun;
+        setActiveRun(nextRun);
       }
     } finally {
       cancellingRunsRef.current.delete(operationKey);
@@ -8263,204 +8141,6 @@ export default function Workbench() {
     };
   }, [returnToCurrent]);
 
-  const restoreVersion = useCallback(async (
-    version: Version,
-    fromDeferred = false,
-  ) => {
-    if (
-      runInProgress
-      || projectHydratingRef.current
-      || projectLoadErrorRef.current
-      || viewTransitioningRef.current
-    ) return;
-    const context = captureProjectContext();
-    if (!context) return;
-    if (
-      !fromDeferred
-      && !window.confirm(`用 ${version.label} 的内容替换当前 HTML？这不会创建新版本，当前评论会保留。`)
-    ) return;
-    if (
-      !fromDeferred
-      && deferEditorCommand(
-        "project-switch",
-        () => deferredEditorReplayRef.current.restoreVersion?.(version),
-      )
-    ) return;
-    const operationId = beginNavigationOperation();
-    if (operationId === null) return;
-    const previousHtml = htmlRef.current;
-    const previousViewMode = viewMode;
-    const previousViewingVersionId = viewingVersionId;
-    const previousPreserveHistory = preserveEditorHistory;
-    let sourceWasReplaced = false;
-    let committedContent = "";
-    let committedHash = "";
-    setRestoring(version.id);
-    try {
-      if (viewMode === "current") {
-        if ((pendingWriteRef.current || flushPromiseRef.current) && !await flushAutosave()) {
-          throw new Error("当前编辑尚未写回，不能执行历史替换。");
-        }
-      }
-      if (
-        navigationOperationRef.current !== operationId
-        || !isCurrentProjectContext(context)
-      ) return;
-      const draftOk = await flushDraftPersistence({
-        ...context,
-        basedOnVersionId: currentBasedOnVersionId,
-        expectedDraftRevision: draftRevisionRef.current,
-        comments: [...commentsRef.current],
-        changeEvents: [...changeEventsRef.current],
-      });
-      if (!draftOk) {
-        throw new Error("本轮评论尚未安全记录，不能执行历史替换。");
-      }
-      const expectedSourceSha256 = sourceShaRef.current;
-      if (!expectedSourceSha256) {
-        throw new Error("当前源 HTML 缺少可验证的 Hash，不能执行历史替换。");
-      }
-      const response = await bridgeFetch(`${BRIDGE_URL}/restore`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          projectId: context.projectId,
-          documentId: context.documentId,
-          sourcePath: context.sourcePath,
-          versionId: version.id,
-          expectedSourceSha256,
-        }),
-      });
-      const payload = await readJsonResponse(response);
-      if (!response.ok) throw responseError(payload, "无法替换当前 HTML。");
-      sourceWasReplaced = true;
-      if (
-        navigationOperationRef.current !== operationId
-        || !isCurrentProjectContext(context)
-      ) return;
-      if (
-        String(payload.projectId || "") !== context.projectId
-        || String(payload.documentId || "") !== context.documentId
-      ) throw new Error("历史替换返回的项目身份不一致。");
-      const content = String(payload.content || "");
-      const hash = String(payload.sha256 || payload.currentHtmlSha256 || "");
-      if (!hash || await browserSha256(content) !== hash) {
-        throw new Error("历史替换结果与声明 Hash 不一致。");
-      }
-      committedContent = content;
-      committedHash = hash;
-      htmlRef.current = content;
-      setHtml(content);
-      setRenderedContentSha256(null);
-      await verifyCanvasRendered(content, hash, context);
-      if (
-        navigationOperationRef.current !== operationId
-        || !isCurrentProjectContext(context)
-      ) return;
-      sourceShaRef.current = hash;
-      pendingWriteRef.current = null;
-      auditPendingRef.current = [];
-      undoDraftFoldsRef.current.clear();
-      redoDraftFoldsRef.current.clear();
-      changeEventsRef.current = [];
-      setChangeEvents([]);
-      setSourceSha256(hash);
-      setLastModifiedAt(String(payload.lastModifiedAt || ""));
-      setCurrentBasedOnVersionId(version.id);
-      setCurrentExactVersionId(version.id);
-      setRestoredFromVersionId(version.id);
-      setViewMode("current");
-      setViewingVersionId(null);
-      setPreserveEditorHistory(false);
-      persistStateRef.current = "idle";
-      setPersistState("idle");
-      setPersistError("");
-      persistRecoveryLog(null, context);
-      await refreshWorkspace(context.sourcePath, context.epoch);
-      if (
-        navigationOperationRef.current !== operationId
-        || !isCurrentProjectContext(context)
-      ) return;
-      setToast({
-        title: `当前 HTML 已基于 ${version.label}`,
-        message: `版本历史仍以 ${latestVersion?.label || "现有最新版"} 为最新；下一次有效 AI 返回会继续递增。`,
-        tone: "success",
-        dedupeKey: "history-restore",
-      });
-    } catch (cause) {
-      if (!isCurrentProjectContext(context)) return;
-      if (navigationOperationRef.current === operationId) {
-        if (sourceWasReplaced) {
-          if (committedContent) {
-            htmlRef.current = committedContent;
-            sourceShaRef.current = committedHash;
-            setHtml(committedContent);
-            setSourceSha256(committedHash);
-            setRenderedContentSha256(null);
-          }
-          const message = cause instanceof Error
-            ? cause.message
-            : "源文件已替换，但画布核对未完成。";
-          projectLoadErrorRef.current = message;
-          setProjectLoadError(message);
-        } else {
-          htmlRef.current = previousHtml;
-          setHtml(previousHtml);
-          setViewMode(previousViewMode);
-          setViewingVersionId(previousViewingVersionId);
-          setPreserveEditorHistory(previousPreserveHistory);
-          setRenderedContentSha256(null);
-          try {
-            await verifyCanvasRendered(
-              previousHtml,
-              await browserSha256(previousHtml),
-              context,
-            );
-          } catch {
-            // The previous view remains authoritative.
-          }
-        }
-      }
-      setToast({
-        title: "历史内容没有完成核对",
-        message: productErrorMessage(
-          cause,
-          "源页没有继续写入。可重新读取当前 HTML，确认画布与磁盘内容一致。",
-        ),
-        tone: "error",
-        sticky: true,
-        disposition: "direct-action",
-        dedupeKey: "history-restore",
-        action: { id: "retry-return-current", label: "重新读取当前 HTML" },
-      });
-    } finally {
-      if (navigationOperationRef.current === operationId) setRestoring(null);
-      finishNavigationOperation(operationId);
-    }
-  }, [
-    beginNavigationOperation,
-    captureProjectContext,
-    deferEditorCommand,
-    finishNavigationOperation,
-    flushAutosave,
-    flushDraftPersistence,
-    isCurrentProjectContext,
-    latestVersion,
-    persistRecoveryLog,
-    refreshWorkspace,
-    runInProgress,
-    currentBasedOnVersionId,
-    verifyCanvasRendered,
-    viewingVersionId,
-    viewMode,
-    preserveEditorHistory,
-  ]);
-  useEffect(() => {
-    deferredEditorReplayRef.current.restoreVersion = (version) => {
-      void restoreVersion(version, true);
-    };
-  }, [restoreVersion]);
-
   const persistLabel = persistState === "writing"
     ? "正在更新文件…"
     : persistState === "queued"
@@ -8473,7 +8153,9 @@ export default function Workbench() {
           ? "文件更新失败 · 尚未写入磁盘"
           : sourcePath
             ? `已同步更新${lastModifiedAt ? ` · ${formatProjectTimestamp(lastModifiedAt)}` : ""}`
-            : "内置介绍页 · 打开本地 HTML 后开始编辑";
+            : browserPreviewOnly
+              ? "浏览器预览 · 只读"
+              : "内置介绍页 · 打开本地 HTML 后开始编辑";
   const activeOpenedAiVersionNotice =
     sameLocalSourcePath(openedAiVersionNotice?.sourcePath, sourcePath)
       ? openedAiVersionNotice
@@ -8481,6 +8163,12 @@ export default function Workbench() {
   const visibleRecentProjects = recentProjects
     .filter((project) => !sameLocalSourcePath(project.sourcePath, sourcePath))
     .slice(0, 3);
+  const recentProjectStatus = (projectSourcePath: string): BackgroundProjectResult | null => {
+    const recorded = [...backgroundProjectResults.entries()].find(
+      ([key]) => sameLocalSourcePath(key, projectSourcePath),
+    )?.[1];
+    return recorded || null;
+  };
   const runBasisLabel = activeRun?.basedOnVersionId
     ? safeVersionLabel(activeRun.basedOnVersionId)
     : currentBasedOnVersionId
@@ -8495,11 +8183,11 @@ export default function Workbench() {
   const terminalRun = Boolean(
     activeRun && ["error", "no-change"].includes(activeRun.status) && !pendingRunOutcome,
   );
-  const activeScopeDecision = activeRun?.status === "awaiting-check-decision"
+  const activeScopeDecision = activeRun?.validationReview?.softViolationCodes.length
     ? scopeDecisionSummary(activeRun.scopeReport)
     : null;
   const processPanelTitle = pendingRunOutcome
-    ? "正在核对任务是否建立"
+    ? "正在确认这次发送是否成功"
     : activeRun?.status === "ready-to-open"
       ? "修改结果已通过检查"
       : activeRun?.status === "no-change"
@@ -8517,7 +8205,7 @@ export default function Workbench() {
           ? "源 HTML 没有被覆盖"
           : "画布已锁定，仅可浏览";
   const processSummaryDetail = pendingRunOutcome
-    ? "源页会自动继续核对；若本地服务持续未恢复，可重新打开源页"
+    ? "源页会在后台继续核对，不会重复发送同一轮要求"
     : activeRun?.status === "no-change"
       ? "原评论和附件都已保留，调整要求后可以重新发送"
       : activeRun?.status === "error"
@@ -8534,7 +8222,6 @@ export default function Workbench() {
           : "正在等待修改结果";
   const returnedStates: LifecycleState[] = [
     "validating",
-    "awaiting-check-decision",
     "committing",
     "ready-to-open",
     "complete",
@@ -8542,7 +8229,6 @@ export default function Workbench() {
     "error",
   ];
   const validatedStates: LifecycleState[] = [
-    "awaiting-check-decision",
     "committing",
     "ready-to-open",
     "complete",
@@ -8604,16 +8290,12 @@ export default function Workbench() {
     {
       key: "scope",
       label: "范围与质量校验",
-      detail: activeRun.status === "awaiting-check-decision"
-        ? "AI 还修改了评论范围外的内容，需要你决定是否采用"
-        : activeRun.validationReview?.status === "waived"
-          ? "已记录你采用额外变化的决定"
+      detail: activeRun.validationReview?.softViolationCodes.length
+          ? "已记录评论范围外的额外变化，未中断版本生成"
           : ["committing", "ready-to-open", "complete", "no-change"].includes(activeRun.status)
             ? "已通过"
             : "等待校验",
-      state: activeRun.status === "awaiting-check-decision"
-        ? "attention"
-        : ["committing", "ready-to-open", "complete", "no-change"].includes(activeRun.status)
+      state: ["committing", "ready-to-open", "complete", "no-change"].includes(activeRun.status)
           ? "done"
           : activeRun.status === "validating"
             ? "current"
@@ -8677,6 +8359,9 @@ export default function Workbench() {
       ))
       .map(({ comment }) => comment)
   ), [commentTargetTops, visibleCommentItems]);
+  const savedDraftPanelHeight = commentDrafts.length > 0 && !composerOpen
+    ? 58 + commentDrafts.length * 66
+    : 0;
   const commentRailLayout = useMemo(() => {
     const items: Array<{
       key: string;
@@ -8724,7 +8409,9 @@ export default function Workbench() {
       left.targetTop - right.targetTop || left.order - right.order
     ));
     const positions: Record<string, number> = {};
-    const minimumTop = 82;
+    const minimumTop = savedDraftPanelHeight > 0
+      ? 92 + savedDraftPanelHeight + 20
+      : 82;
     const itemGap = 20;
     const itemHeight = (item: (typeof items)[number]) => (
       commentCardHeights[item.key] || item.fallbackHeight
@@ -8789,6 +8476,7 @@ export default function Workbench() {
     composerOpen,
     draftTarget,
     focusedCommentId,
+    savedDraftPanelHeight,
     sortedVisibleCommentItems,
   ]);
   const visibleCommentPositions = commentRailLayout.positions;
@@ -8823,6 +8511,7 @@ export default function Workbench() {
   const commentRailContentHeight = Math.max(
     commentRailHeight,
     commentRailLayout.bottom + 24,
+    savedDraftPanelHeight + 136,
     720,
   );
   const canvasDocumentHeight = Math.max(
@@ -8902,10 +8591,15 @@ export default function Workbench() {
     } else if (action.id === "review-project-rules") {
       setDrawer("files");
       if (fileView?.path !== "PROJECT.md") void viewFile("PROJECT.md");
+    } else if (action.id === "review-comment-drafts") {
+      const firstDraft = commentDraftsRef.current[0];
+      if (firstDraft) {
+        setCanvasMode("edit");
+        setDrawer(null);
+        restoreCommentDraft(firstDraft.commentId);
+      }
     } else if (action.id === "retry-submit") {
       void generateRequest();
-    } else if (action.id === "retry-return-current") {
-      void returnToCurrent();
     }
   };
   const renderHistoryItem = (version: Version) => {
@@ -8952,7 +8646,9 @@ export default function Workbench() {
               <ul>
                 <li>{version.summary || "完整 HTML 内容与页面结构"}</li>
                 <li>评论、图片与附件的完整保留</li>
-                <li>{version.validationReview?.status === "waived" ? "安全校验通过，范围提示已记录" : "版本与文件完整性已校验"}</li>
+                <li>{version.validationReview?.softViolationCodes.length
+                  ? "硬边界已通过，额外范围变化已记录"
+                  : "版本与文件完整性已校验"}</li>
               </ul>
             </div>
             {version.comments.length > 0
@@ -9051,8 +8747,8 @@ export default function Workbench() {
                 </section>
                 <section className="history-source-group">
                   <header><strong>AI 结果与校验</strong><span>已归档</span></header>
-                  <p>{version.validationReview?.status === "waived"
-                    ? "硬校验通过；软校验由用户选择忽略，决定与原因已记录。"
+                  <p>{version.validationReview?.softViolationCodes.length
+                    ? "不可忽略的硬边界已通过；评论范围外的额外变化已随版本记录。"
                     : "版本与文件内容已经校验并保存。"}</p>
                 </section>
               </details>
@@ -9078,17 +8774,6 @@ export default function Workbench() {
                   Finder
                 </button>
               ) : null}
-              <button
-                type="button"
-                disabled={
-                  runInProgress
-                  || projectHydrating
-                  || Boolean(projectLoadError)
-                  || viewTransitioning
-                  || restoring !== null
-                }
-                onClick={() => void restoreVersion(version)}
-              >{restoring === version.id ? "正在切换…" : "设为当前 HTML"}</button>
             </div>
           </section>
         ) : null}
@@ -9125,7 +8810,9 @@ export default function Workbench() {
             </strong>
             <span className="file-meta">
               <span>
-                {viewMode === "history"
+                {browserPreviewOnly
+                  ? "浏览器预览 · 只读"
+                  : viewMode === "history"
                   ? `${viewingVersion?.label || "历史版本"} · 只读`
                   : activeRun?.candidateVersionLabel && runInProgress
                     ? `${activeRun.candidateVersionLabel} · 本轮处理中`
@@ -9143,7 +8830,11 @@ export default function Workbench() {
                 aria-live="polite"
               >
                 <span aria-hidden="true" />
-                {persistState === "idle" ? "已安全保存" : persistLabel}
+                {browserPreviewOnly
+                  ? "操作不会保存"
+                  : persistState === "idle"
+                    ? "已安全保存"
+                    : persistLabel}
               </span>
             </span>
           </div>
@@ -9154,7 +8845,8 @@ export default function Workbench() {
             <button
               type="button"
               aria-pressed={canvasMode === "edit"}
-              disabled={runInProgress || viewMode === "history"}
+              disabled={browserPreviewOnly || runInProgress || viewMode === "history"}
+              title={browserPreviewOnly ? "浏览器预览为只读模式" : undefined}
               onClick={() => {
                 setCanvasMode("edit");
                 setProjectMenuOpen(false);
@@ -9166,10 +8858,18 @@ export default function Workbench() {
             <button
               type="button"
               aria-pressed={canvasMode === "preview"}
-              disabled={interactionLocked}
-              title={interactionLocked ? "当前状态只能使用编辑画布" : "运行页面自身的脚本和交互"}
+              disabled={!browserPreviewOnly && interactionLocked}
+              title={browserPreviewOnly
+                ? "只读运行页面自身的脚本和交互；操作不会保存"
+                : interactionLocked
+                  ? "当前状态只能使用编辑画布"
+                  : "运行页面自身的脚本和交互"}
               onClick={() => {
-                if (interactionLocked) return;
+                if (!browserPreviewOnly && interactionLocked) return;
+                if (browserPreviewOnly) {
+                  setCanvasMode("preview");
+                  return;
+                }
                 const enterPreview = () => {
                   const committed = editorRef.current?.fencePendingEdit({
                     resumeEditing: false,
@@ -9199,7 +8899,7 @@ export default function Workbench() {
             className="project-button"
             type="button"
             aria-expanded={drawer === "files" || drawer === "history"}
-            disabled={projectHydrating || viewTransitioning}
+            disabled={projectHydrating || viewTransitioning || attachmentUploadCount > 0}
             onClick={() => {
               const openProjectPanel = () => {
                 setDrawer((current) => (
@@ -9247,7 +8947,7 @@ export default function Workbench() {
                 || viewTransitioning
                 || viewMode === "history"
                 || (!runInProgress && (
-                  activeCommentCount === 0
+                  pendingSendItemCount === 0
                   || interactionLocked
                   || persistState === "failed"
                   || Boolean(draftPersistError)
@@ -9280,7 +8980,7 @@ export default function Workbench() {
                         : "发送至 Qoder"}
               </span>
               {!runInProgress && currentQoderHandoffStatus !== "copied"
-                ? <small>{activeCommentCount}</small>
+                ? <small>{pendingSendItemCount}</small>
                 : null}
             </button>
           </div>
@@ -9342,7 +9042,6 @@ export default function Workbench() {
             <strong>{persistState === "conflict" ? "源 HTML 已被外部修改" : "当前修改还没有写入文件"}</strong>
             <span>{persistError || "工作台保留了当前编辑内容，不会假装已经更新。"}</span>
           </div>
-          <button type="button" onClick={() => void viewSourceConflictDiff()}>查看差异</button>
           <button type="button" onClick={() => void exportCurrentHtml()}>导出当前编辑</button>
           <button type="button" onClick={() => void reloadCurrentSource()}>重新载入外部文件</button>
         </section>
@@ -9400,59 +9099,63 @@ export default function Workbench() {
             hidden={canvasMode !== "edit"}
             aria-hidden={canvasMode !== "edit"}
           >
-            <Suspense fallback={(
-              <div className="canvas-loading" role="status">正在载入源码画布…</div>
-            )}>
-              <HtmlCanvasEditor
-                ref={editorRef}
-                html={html}
-                sourcePath={sourcePath || undefined}
-                height={`${canvasDocumentHeight}px`}
-                onChange={handleCanvasChange}
-                onInteraction={() => {
-                  setProjectMenuOpen(false);
-                  if (relinkingTargetRef.current) {
-                    relinkSelectionArmedRef.current = true;
+            {!runtimeCapabilitiesReady ? (
+              <div className="canvas-loading" role="status">正在识别运行环境…</div>
+            ) : !browserPreviewOnly ? (
+              <Suspense fallback={(
+                <div className="canvas-loading" role="status">正在载入源码画布…</div>
+              )}>
+                <HtmlCanvasEditor
+                  ref={editorRef}
+                  html={html}
+                  sourcePath={sourcePath || undefined}
+                  height={`${canvasDocumentHeight}px`}
+                  onChange={handleCanvasChange}
+                  onInteraction={() => {
+                    setProjectMenuOpen(false);
+                    if (relinkingTargetRef.current) {
+                      relinkSelectionArmedRef.current = true;
+                    }
+                  }}
+                  onCommentLayout={handleCommentLayout}
+                  onSelect={handleCanvasSelection}
+                  onRequestComment={openCommentComposer}
+                  onRequestFlush={requestUserFlush}
+                  onRequestExport={() => {
+                    void exportCurrentHtml();
+                  }}
+                  onRequestReload={() => {
+                    if (sourcePathRef.current) {
+                      void reloadCurrentSource();
+                    } else {
+                      void openProject();
+                    }
+                  }}
+                  reloadActionLabel={sourcePath ? "重新载入" : "重新选择"}
+                  commentedTargets={commentedTargets}
+                  trackedTargets={trackedAuditTargets}
+                  locked={
+                    runInProgress
+                    || projectHydrating
+                    || Boolean(projectLoadError)
+                    || viewTransitioning
+                    || persistState === "conflict"
                   }
-                }}
-                onCommentLayout={handleCommentLayout}
-                onSelect={handleCanvasSelection}
-                onRequestComment={openCommentComposer}
-                onRequestFlush={requestUserFlush}
-                onRequestExport={() => {
-                  void exportCurrentHtml();
-                }}
-                onRequestReload={() => {
-                  if (sourcePathRef.current) {
-                    void reloadCurrentSource();
-                  } else {
-                    void openProject();
-                  }
-                }}
-                reloadActionLabel={sourcePath ? "重新载入" : "重新选择"}
-                commentedTargets={commentedTargets}
-                trackedTargets={trackedAuditTargets}
-                locked={
-                  runInProgress
-                  || projectHydrating
-                  || Boolean(projectLoadError)
-                  || viewTransitioning
-                  || persistState === "conflict"
-                }
-                readOnly={viewMode === "history"}
-                interactionMode={viewMode === "history"
-                  ? "history"
-                  : runInProgress || projectHydrating || workspaceIssue
-                    ? "processing"
-                    : "editing"}
-                enableReorder={!interactionLocked}
-                preserveUndoHistory={preserveEditorHistory}
-              />
-            </Suspense>
+                  readOnly={viewMode === "history"}
+                  interactionMode={viewMode === "history"
+                    ? "history"
+                    : runInProgress || projectHydrating || workspaceIssue
+                      ? "processing"
+                      : "editing"}
+                  enableReorder={!interactionLocked}
+                  preserveUndoHistory={preserveEditorHistory}
+                />
+              </Suspense>
+            ) : null}
           </div>
           {canvasMode === "preview" ? (
             <HtmlInteractionPreview
-              html={html}
+              html={interactionPreviewHtml}
               sourcePath={sourcePath || undefined}
               height="100%"
               onInteraction={() => setProjectMenuOpen(false)}
@@ -9524,7 +9227,8 @@ export default function Workbench() {
                     className="comment-tool-button"
                     type="button"
                     aria-label="关闭评论编辑器"
-                    title="关闭"
+                    title={attachmentUploadCount > 0 ? "附件添加完成后可关闭" : "收起并保留草稿"}
+                    disabled={attachmentUploadCount > 0}
                     onClick={closeCommentComposer}
                   >
                     <XIcon aria-hidden="true" size={15} weight="bold" />
@@ -9665,7 +9369,50 @@ export default function Workbench() {
               </section>
             ) : null}
 
-            {visibleCommentItems.length === 0 && !composerOpen ? (
+            {!composerOpen && commentDrafts.length > 0 && !interactionLocked ? (
+              <section
+                className="draft-recovery-card rail-status-card saved-comment-drafts"
+                aria-label={`${commentDrafts.length} 条未完成评论`}
+              >
+                <div className="saved-comment-drafts-heading">
+                  <strong>{commentDrafts.length} 条未完成评论</strong>
+                  <span>发送前需要确认</span>
+                </div>
+                <div className="saved-comment-drafts-list">
+                  {commentDrafts.map((savedDraft) => (
+                    <article
+                      key={savedDraft.commentId}
+                      data-resolution={savedDraft.target.resolution}
+                    >
+                      <span>
+                        <strong>{insertionLabel(savedDraft.target)}</strong>
+                        <small>
+                          {savedDraft.text.trim()
+                            ? savedDraft.text.trim().slice(0, 58)
+                            : `${savedDraft.attachments.length} 个附件`}
+                        </small>
+                      </span>
+                      <span className="saved-comment-draft-actions">
+                        <button
+                          className="resume-comment-button"
+                          type="button"
+                          onClick={() => restoreCommentDraft(savedDraft.commentId)}
+                        >继续填写</button>
+                        <button
+                          type="button"
+                          aria-label={`删除 ${insertionLabel(savedDraft.target)} 的未完成评论`}
+                          onClick={() => deleteCommentDraft(savedDraft.commentId)}
+                        >删除</button>
+                      </span>
+                    </article>
+                  ))}
+                </div>
+              </section>
+            ) : null}
+
+            {visibleCommentItems.length === 0
+              && !composerOpen
+              && commentDrafts.length === 0 ? (
               <div className="comments-empty">
                 <ChatCircleTextIcon aria-hidden="true" size={24} weight="duotone" />
                 <strong>评论会显示在这里</strong>
@@ -10023,16 +9770,16 @@ export default function Workbench() {
               <button
                 type="button"
                 data-active={drawer === "files" ? "true" : "false"}
-                onClick={() => {
-                  if (!closeFileView()) return;
+                onClick={async () => {
+                  if (!await closeFileView()) return;
                   setDrawer("files");
                 }}
               >当前项目</button>
               <button
                 type="button"
                 data-active={drawer === "history" ? "true" : "false"}
-                onClick={() => {
-                  if (!closeFileView()) return;
+                onClick={async () => {
+                  if (!await closeFileView()) return;
                   setDrawer("history");
                 }}
               >版本历史</button>
@@ -10108,6 +9855,8 @@ export default function Workbench() {
                           ? "loading"
                           : runInProgress
                           ? "locked"
+                          : projectRulesSaving
+                            ? "loading"
                           : fileView.content === fileView.savedContent
                             ? "saved"
                             : "dirty"}
@@ -10116,9 +9865,11 @@ export default function Workbench() {
                           ? "正在读取"
                           : runInProgress
                           ? "处理中 · 只读"
+                          : projectRulesSaving
+                            ? "正在保存"
                           : fileView.content === fileView.savedContent
                             ? "已保存"
-                            : "有未保存修改"}
+                            : "等待自动保存"}
                       </em>
                     </header>
                     <p className="project-file-note" id="project-rules-help">
@@ -10126,7 +9877,7 @@ export default function Workbench() {
                         ? "正在读取项目规则。内容核对完成前暂不接受编辑。"
                         : runInProgress
                         ? "本轮已经使用冻结时的规则。AI 处理完成前这里保持只读，不会把临时修改追加入本轮。"
-                        : "每次发送至 Qoder 时，源页都会把这份规则与本轮要求一起交接。保存只影响后续任务，不会修改当前 HTML。"}
+                        : "修改会自动保存。每次发送至 Qoder 时，源页都会把这份规则与本轮要求一起交接；规则只影响后续任务，不会修改当前 HTML。"}
                     </p>
                     <textarea
                       className="project-file-editor"
@@ -10151,9 +9902,11 @@ export default function Workbench() {
                     ) : null}
                     <div className="project-file-actions">
                       <small>
-                        {fileView.content === fileView.savedContent
+                        {projectRulesSaving
+                          ? "正在自动保存"
+                          : fileView.content === fileView.savedContent
                           ? "当前内容已记录"
-                          : "离开前请保存或还原修改"}
+                          : "修改将在稍后自动保存"}
                       </small>
                       <button
                         type="button"
@@ -10172,18 +9925,14 @@ export default function Workbench() {
                           ));
                         }}
                       >还原修改</button>
-                      <button
-                        className="drawer-primary"
-                        type="button"
-                        disabled={
-                          projectRulesSaving
-                          || fileView.loading
-                          || runInProgress
-                          || !fileView.content.trim()
-                          || fileView.content === fileView.savedContent
-                        }
-                        onClick={() => void saveProjectRules()}
-                      >{projectRulesSaving ? "保存中…" : "保存规则"}</button>
+                      {projectRulesSaveError ? (
+                        <button
+                          className="drawer-primary"
+                          type="button"
+                          disabled={projectRulesSaving || runInProgress}
+                          onClick={() => void saveProjectRules()}
+                        >再次保存</button>
+                      ) : null}
                     </div>
                   </>
                 ) : (
@@ -10204,7 +9953,11 @@ export default function Workbench() {
                     <strong>{projectName}</strong>
                     <em>
                       <span aria-hidden="true" />
-                      {persistState === "idle" ? "已安全保存" : persistLabel}
+                      {browserPreviewOnly
+                        ? "只读预览 · 操作不会保存"
+                        : persistState === "idle"
+                          ? "已安全保存"
+                          : persistLabel}
                     </em>
                   </span>
                   <div className="current-project-actions">
@@ -10231,11 +9984,14 @@ export default function Workbench() {
                         </button>
                       </section>
                     ) : null}
-                    {visibleRecentProjects.length ? visibleRecentProjects.map((project) => (
+                    {visibleRecentProjects.length ? visibleRecentProjects.map((project) => {
+                      const projectStatus = recentProjectStatus(project.sourcePath);
+                      return (
                       <div className="recent-file-item" key={project.path}>
                         <button
                           className="recent-file-row"
                           type="button"
+                          disabled={attachmentUploadCount > 0}
                           onClick={() => void openProject(project.sourcePath)}
                         >
                           <FileHtmlIcon aria-hidden="true" size={19} weight="duotone" />
@@ -10246,6 +10002,12 @@ export default function Workbench() {
                           <time dateTime={new Date(project.lastOpenedAt).toISOString()}>
                             {formatProjectTimestamp(project.lastOpenedAt)}
                           </time>
+                          {projectStatus ? (
+                            <em
+                              className="recent-project-status"
+                              data-state={projectStatus.state}
+                            >{projectStatus.label}</em>
+                          ) : null}
                           <CaretRightIcon aria-hidden="true" size={14} weight="bold" />
                         </button>
                         {typeof window !== "undefined" && window.htmlAIProjects?.forgetRecent ? (
@@ -10260,7 +10022,8 @@ export default function Workbench() {
                           </button>
                         ) : null}
                       </div>
-                    )) : !recentProjectsError ? (
+                      );
+                    }) : !recentProjectsError ? (
                       <span className="recent-projects-empty">还没有最近打开的文件</span>
                     ) : null}
                   </div>
@@ -10413,7 +10176,7 @@ export default function Workbench() {
                             <span className="process-step-icon" aria-hidden="true">
                               {step.state === "done" ? (
                                 <CheckCircleIcon size={20} weight="fill" />
-                              ) : step.state === "attention" || step.state === "error" ? (
+                              ) : step.state === "error" ? (
                                 <TriangleIcon size={18} weight="fill" />
                               ) : (
                                 <ClockCounterClockwiseIcon size={19} weight="duotone" />
@@ -10478,11 +10241,12 @@ export default function Workbench() {
                   </div>
 
                   <div className="processing-decisions">
-                    {activeRun.status === "awaiting-check-decision" ? (
+                    {activeRun.validationReview?.softViolationCodes.length
+                      && activeRun.status === "ready-to-open" ? (
                       <section className="validation-decision" role="status">
-                        <strong>AI 还修改了评论范围外的内容</strong>
+                        <strong>已记录评论范围外的额外变化</strong>
                         <p>{activeScopeDecision?.message
-                          || "AI 结果包含评论范围外的变化。当前 HTML 尚未改变。"}</p>
+                          || "这些变化没有触及不可忽略的文件、身份或脚本边界，因此没有中断版本生成。"}</p>
                         {activeScopeDecision?.examples.length ? (
                           <ul className="scope-change-preview">
                             {activeScopeDecision.examples.map((example) => (
@@ -10490,12 +10254,6 @@ export default function Workbench() {
                             ))}
                           </ul>
                         ) : null}
-                        {activeRun.error ? <small>{activeRun.error}</small> : null}
-                        <button
-                          type="button"
-                          disabled={waivingValidation}
-                          onClick={() => void waiveCurrentValidation()}
-                        >{waivingValidation ? "正在记录决定…" : "采用这些额外变化"}</button>
                       </section>
                     ) : null}
                     {activeRun.status === "awaiting-conflict-resolution" ? (
@@ -10503,11 +10261,6 @@ export default function Workbench() {
                         <strong>请选择哪份内容成为当前 HTML</strong>
                         <p>外部文件和 AI 候选都已保留，系统不会静默覆盖任一侧。</p>
                         {activeRun.error ? <small>{activeRun.error}</small> : null}
-                        <button
-                          type="button"
-                          disabled={resolvingConflict}
-                          onClick={() => void viewAiConflictDiff()}
-                        >比较两份内容</button>
                         <button
                           type="button"
                           disabled={resolvingConflict}
@@ -10526,29 +10279,12 @@ export default function Workbench() {
                         <p>恢复完成前页面保持只读，评论和修改记录不会丢失。</p>
                       </section>
                     ) : null}
-                    {runStatusError && !pendingRunOutcome ? (
-                      <section className="ai-conflict-panel" role="status">
-                        <strong>本轮状态暂时没有更新</strong>
-                        <p>{runStatusError}</p>
-                        <button type="button" onClick={() => void relaunchApp()}>
-                          重新打开源页
-                        </button>
-                      </section>
-                    ) : null}
                     {pendingRunOutcome ? (
                       <section className="ai-conflict-panel" role="status">
-                        <strong>正在确认任务是否已经建立</strong>
+                        <strong>正在确认这次发送是否成功</strong>
                         <p>
-                          {pendingReconcileError
-                            || activeRun.error
-                            || "源页会自动继续核对，不会重复发送同一轮要求。"}
+                          源页会在后台继续核对，不会重复发送同一轮要求。
                         </p>
-                        {pendingReconcileError ? (
-                          <button
-                            type="button"
-                            onClick={() => void relaunchApp()}
-                          >重新打开源页</button>
-                        ) : null}
                       </section>
                     ) : null}
                     {!pendingRunOutcome
@@ -10592,20 +10328,9 @@ export default function Workbench() {
                 {openingReadyVersion ? "正在打开并核对…" : "打开最新版"}
               </button>
             ) : pendingRunOutcome ? (
-              pendingReconcileError ? (
-                <button
-                  className="primary-action"
-                  type="button"
-                  onClick={() => void relaunchApp()}
-                >
-                  <ArrowCounterClockwiseIcon aria-hidden="true" size={17} weight="bold" />
-                  重新打开源页
-                </button>
-              ) : (
-                <span className="processing-auto-status" role="status">
-                  {pendingReconcileBusy ? "正在自动核对任务状态…" : "等待下一次自动核对…"}
-                </span>
-              )
+              <span className="processing-auto-status" role="status">
+                {pendingReconcileBusy ? "正在自动确认发送结果…" : "等待下一次自动确认…"}
+              </span>
             ) : terminalRun ? (
               <>
                 <button

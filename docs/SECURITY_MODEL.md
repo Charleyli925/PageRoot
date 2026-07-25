@@ -10,7 +10,7 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
 - Hash-checked atomic writes that stop on external modification
 - Per-process Bridge authentication token and managed workspace boundaries
 - Clipboard-only third-party AI handoff
-- Strict schemas, frozen inputs and identity/scope/Hash checks before accepting AI output
+- Strict schemas, frozen inputs and identity/Hash checks before accepting AI output; scope evidence is always recorded, with protocol/script/target-integrity findings hard-blocked and ordinary breadth findings observed without a user-waiver loop
 - No silent application update or binary replacement
 
 ## Native editing trust boundary
@@ -22,6 +22,8 @@ The rendered preview DOM is disposable and never becomes a persistence source. N
 - `contenteditable="true"` paste is reduced to `text/plain`; formatting and structural input do not gain commit authority.
 - MutationObserver evidence, the delivered `beforeinput/input` pair, FormatSkeleton, source Hash and SourcePatch must all agree before a local patch can persist.
 - `display: contents` may enter only through the observer-guarded lane. Missing delivery, unknown DOM mutation or failed rollback remains fail-closed.
+
+Pure-browser preview is a different, strictly weaker capability: authored scripts and interactions may run inside the sandbox, but PageRoot editing, comments, attachments, local persistence and AI submission are unavailable. Its transient page state is never treated as unsaved PageRoot content.
 
 ## Untrusted inputs
 

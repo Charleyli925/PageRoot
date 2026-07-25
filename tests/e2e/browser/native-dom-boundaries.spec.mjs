@@ -21,6 +21,22 @@ test.beforeEach(async ({ page }) => {
   await page.goto("/");
 });
 
+test("pure browser use stays in a formal read-only preview", async ({ page }) => {
+  await expect(page.getByText("浏览器预览 · 只读", { exact: true })).toBeVisible();
+  await expect(page.getByText("操作不会保存", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "编辑", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "预览", exact: true }))
+    .toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "全局评论", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: /发送至 Qoder/u })).toBeDisabled();
+  await expect(page.getByTestId("html-canvas-editor")).toHaveCount(0);
+
+  const preview = page.locator('iframe[title="HTML 交互预览"]');
+  await expect(preview).toBeVisible();
+  expect((await preview.getAttribute("sandbox"))?.split(/\s+/)).not.toContain("allow-same-origin");
+  expect(await page.evaluate(() => Boolean(window.htmlAIProjects))).toBe(false);
+});
+
 test("the edit iframe is same-origin but never executes author scripts or refresh", async ({ page }) => {
   const { iframe, frame } = await loadFixture(page, "complex-layout.html");
   await expect(iframe).toHaveAttribute("sandbox", "allow-same-origin");

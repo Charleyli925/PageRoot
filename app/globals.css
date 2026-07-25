@@ -950,6 +950,47 @@ input:focus-visible,
   color: #fff;
 }
 
+.saved-comment-drafts {
+  z-index: 4;
+}
+
+.saved-comment-drafts-heading {
+  padding-bottom: 4px;
+}
+
+.saved-comment-drafts-list {
+  display: grid;
+  gap: 7px;
+}
+
+.saved-comment-drafts-list article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding-top: 7px;
+  border-top: 1px solid #e5e3f5;
+}
+
+.saved-comment-drafts-list article > span:first-child {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.saved-comment-drafts-list article small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.saved-comment-draft-actions {
+  display: flex;
+  gap: 5px;
+}
+
 .round-lock-card strong {
   font-size: 12px;
 }
@@ -4125,7 +4166,7 @@ body {
   min-width: 0;
   min-height: 58px;
   display: grid;
-  grid-template-columns: 26px minmax(0, 1fr) auto 14px;
+  grid-template-columns: 26px minmax(0, 1fr) auto auto 14px;
   align-items: center;
   gap: 9px;
   padding: 9px 11px;
@@ -4171,6 +4212,33 @@ body {
 
 .recent-file-row time {
   white-space: nowrap;
+}
+
+.recent-project-status {
+  padding: 3px 6px;
+  border-radius: 999px;
+  background: #efeff4;
+  color: #666873;
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.recent-project-status[data-state="processing"] {
+  background: #eeedff;
+  color: #5a55c9;
+}
+
+.recent-project-status[data-state="ready"] {
+  background: #e9f7ef;
+  color: #347453;
+}
+
+.recent-project-status[data-state="error"],
+.recent-project-status[data-state="conflict"] {
+  background: #fff0ee;
+  color: #a34d46;
 }
 
 .recent-projects-empty {

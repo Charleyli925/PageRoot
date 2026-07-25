@@ -2989,8 +2989,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       "data-edit-block-detail",
       rawDetail.slice(0, 240),
     );
-    let title = "请重新选择后再试";
-    let message = "你可以继续浏览和选择文字，也可以添加评论说明要怎么改。";
+    let title = "这处内容暂时不能直接编辑";
+    let message = "页面内容没有改变。你仍可以选择文字，或添加评论说明要怎么改。";
     if (/两种样式的边界|文字属于哪一侧|样式内一个字的位置/iu.test(rawDetail)) {
       title = "请把光标移入文字内部";
       message = "这里正好是两种文字样式的边界，直接输入可能跑到错误一侧。请把光标移到样式内一个字的位置后输入，或添加评论。";
@@ -3005,12 +3005,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     } else if (/transform|zoom|多栏|flex|grid|布局|盒子|光标错位|间距变化/iu.test(rawDetail)) {
       title = "这里暂时不能直接改字";
       message = "这段文字的排版比较特殊。你仍可以选中文字调整样式，或添加评论交给 AI 处理。";
-    } else if (/多行粘贴/iu.test(rawDetail)) {
-      title = "这里暂时不能粘贴多行文字";
-      message = "可以粘贴单行文字；如果需要加入多行内容，请添加评论交给 AI 处理。";
-    } else if (/换行|新增段落/iu.test(rawDetail)) {
-      title = "这里暂时不能新增换行";
-      message = "可以继续修改现有文字；如果需要拆分段落，请添加评论交给 AI 处理。";
     } else if (/图片|图标|嵌入组件|结构边界|删除键|退格/iu.test(rawDetail)) {
       title = "这处内容不能这样删除";
       message = "请只修改文字，或添加评论说明要删除的图片、图标或组件。";
@@ -6060,7 +6054,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       const documentNode = iframe.contentDocument;
       const expectedFrameHtml = expectedFrameHtmlRef.current;
       const expectedToken = expectedFrameTokenRef.current;
-      const marker = documentNode?.head.querySelector<HTMLMetaElement>(
+      const marker = documentNode?.head?.querySelector<HTMLMetaElement>(
         `meta[${FRAME_VERIFICATION_ATTRIBUTE}]`,
       );
       if (

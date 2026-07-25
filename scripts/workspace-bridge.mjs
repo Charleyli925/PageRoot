@@ -92,9 +92,9 @@ const MAX_EXECUTION_MODULE_TEXT_QUOTE_CHARS = 500;
 const BRIDGE_AUTH_TOKEN = process.env.HTML_AI_BRIDGE_AUTH_TOKEN || null;
 const execFileAsync = promisify(execFile);
 
-// These checks protect the immutable Request/Attempt/Version chain and can
-// never be waived from the UI. Other scope findings are reviewable because
-// they describe quality or breadth, not protocol integrity.
+// These checks protect the immutable Request/Attempt/Version chain and always
+// stop the candidate. Other scope findings are recorded as observations
+// because they describe quality or breadth, not protocol integrity.
 const HARD_SCOPE_VIOLATION_CODES = new Set([
   "OUTPUT_MANAGED_META_MISMATCH",
   "SCRIPT_OUTSIDE_TARGET",
@@ -3879,45 +3879,6 @@ function normalizeFrozenEditEvents(events, frozenAt, revision, basedOnVersionId)
   }));
 }
 
-async function resetDraftEditsAfterHistoryRestore(
-  context,
-  runtime,
-) {
-  const updatedAt = nowIso();
-  const comments = Array.isArray(runtime.draft?.comments)
-    ? runtime.draft.comments
-    : [];
-  const draftContent = {
-    schemaVersion: AUXILIARY_SCHEMA_VERSION,
-    comments,
-    editEvents: [],
-  };
-  const draftText = jsonText(draftContent);
-  await atomicWriteFile(
-    path.join(context.projectRoot, "draft", "annotations.json"),
-    draftText,
-  );
-  runtime.draft = {
-    annotationsRelativePath: "draft/annotations.json",
-    annotationsSha256: sha256(draftText),
-    commentIds: comments.map((item, index) =>
-      schemaRecordId(
-        "comment",
-        item?.commentId ?? item?.id,
-        String(index + 1),
-      )
-    ),
-    editEventIds: [],
-    draftRevision:
-      (Number.isSafeInteger(runtime.draft?.draftRevision)
-        ? runtime.draft.draftRevision
-        : 0) + 1,
-    updatedAt,
-    comments,
-    changeEvents: [],
-  };
-}
-
 async function saveDraft(body) {
   const context = await loadContextBySource(body.sourcePath, true);
   assertBodyContext(context, body);
@@ -5101,7 +5062,7 @@ async function readValidationReviewRaw(context, runtime, scoped) {
   if (!(await exists(reviewPath))) {
     const review = {
       ...identity,
-      status: "pending",
+      status: "observed",
       ...classification,
       createdAt: nowIso(),
       updatedAt: nowIso(),
@@ -5138,104 +5099,20 @@ async function readValidationReviewRaw(context, runtime, scoped) {
       "validation-review.json does not match the current validation findings.",
     );
   }
-  if (!["pending", "waived"].includes(review.status)) {
+  if (!["observed", "pending", "waived"].includes(review.status)) {
     throw new HttpError(
       409,
       "VALIDATION_REVIEW_STATUS_INVALID",
       "validation-review.json has an unsupported status.",
     );
   }
+  if (review.status === "pending") {
+    review.status = "observed";
+    review.updatedAt = nowIso();
+    review.automaticDecision = "record-and-continue";
+    await atomicWriteJson(reviewPath, review);
+  }
   return { review, reviewPath };
-}
-
-async function waiveSoftValidation(body) {
-  const context = await loadContextBySource(body.sourcePath, false);
-  assertBodyContext(context, body);
-  return withProjectMutation(context, async () => {
-    const runtime = await readRuntime(context);
-    const activeRun = runtime.activeRun;
-    if (
-      runtime.lifecycleState !== "validating"
-      || !activeRun
-      || activeRun.requestId !== body.requestId
-      || activeRun.attemptId !== body.attemptId
-    ) {
-      throw new HttpError(
-        409,
-        "VALIDATION_REVIEW_NOT_ACTIVE",
-        "This validation decision no longer belongs to the active run.",
-      );
-    }
-    const validated = await validateCompletionRaw(context, runtime);
-    if (validated.waiting) {
-      throw new HttpError(
-        409,
-        "COMPLETION_NOT_FOUND",
-        "The finalized AI result is not available for review.",
-      );
-    }
-    const scoped = await writeEnforcedScopeReportRaw(
-      context,
-      runtime,
-      validated,
-    );
-    const { review, reviewPath } = await readValidationReviewRaw(
-      context,
-      runtime,
-      scoped,
-    );
-    if (review.hardViolationCodes.length > 0) {
-      throw new HttpError(
-        422,
-        "HARD_VALIDATION_CANNOT_BE_WAIVED",
-        "Protocol, identity, or security checks cannot be ignored.",
-        { hardViolationCodes: review.hardViolationCodes },
-      );
-    }
-    if (review.softViolationCodes.length === 0) {
-      throw new HttpError(
-        409,
-        "NO_SOFT_VALIDATION_TO_WAIVE",
-        "There is no reviewable validation finding to ignore.",
-      );
-    }
-    const requestedCodes = Array.isArray(body.violationCodes)
-      ? [...new Set(body.violationCodes.map((code) => cleanText(code, 180)))].sort()
-      : [...review.softViolationCodes];
-    if (
-      JSON.stringify(requestedCodes)
-      !== JSON.stringify([...review.softViolationCodes].sort())
-    ) {
-      throw new HttpError(
-        409,
-        "VALIDATION_WAIVER_SCOPE_MISMATCH",
-        "The waiver must acknowledge every current soft validation finding.",
-      );
-    }
-    const decidedAt = nowIso();
-    const waived = {
-      ...review,
-      status: "waived",
-      waiver: {
-        decision: "ignore-and-continue",
-        ignoredViolationCodes: requestedCodes,
-        reason:
-          cleanText(body.reason, 1000)
-          || "用户选择采用评论范围外的额外变化。",
-        decidedAt,
-      },
-      updatedAt: decidedAt,
-    };
-    await atomicWriteJson(reviewPath, waived);
-    return {
-      ok: true,
-      status: "validation-waived",
-      requestId: activeRun.requestId,
-      attemptId: activeRun.attemptId,
-      validationReview: waived,
-      scopeReport: scoped.report,
-    };
-  });
 }
 
 function transactionDirectory(context, transactionId) {
@@ -6774,61 +6651,45 @@ async function statusFor(sourcePath, requestId, attemptId = "attempt_001") {
       const classification = classifyScopeViolationCodes(scoped.report);
       const violationSummary = scoped.report.violationCodes.join(", ");
       if (classification.hardViolationCodes.length === 0) {
-        const { review } = await readValidationReviewRaw(
+        await readValidationReviewRaw(
           context,
           runtime,
           scoped,
         );
-        if (review.status !== "waived") {
-          return {
-            ok: true,
-            status: "awaiting-check-decision",
-            requestId,
-            attemptId,
-            activeRun: runtime.activeRun,
-            validationReview: review,
-            scopeReport: scoped.report,
-            scopeReportPath: scoped.reportPath,
-          };
-        }
-      }
-      if (classification.hardViolationCodes.length === 0) {
-        // The user's audited waiver applies only to the exact immutable
-        // report above. Continue through the normal no-change/transaction path.
       } else {
-      const outcome = {
-        schemaVersion: LIFECYCLE_SCHEMA_VERSION,
-        status: "error",
-        projectId: context.projectId,
-        documentId: context.documentId,
-        requestId,
-        attemptId,
-        candidateVersionId: runtime.activeRun.candidateVersionId,
-        error: {
-          code: "HARD_VALIDATION_FAILED",
-          message:
-            `AI output failed a non-waivable protocol or security check${
-              violationSummary ? `: ${violationSummary}` : "."
-            }`,
-          details: {
-            hardViolationCodes: classification.hardViolationCodes,
-            softViolationCodes: classification.softViolationCodes,
+        const outcome = {
+          schemaVersion: LIFECYCLE_SCHEMA_VERSION,
+          status: "error",
+          projectId: context.projectId,
+          documentId: context.documentId,
+          requestId,
+          attemptId,
+          candidateVersionId: runtime.activeRun.candidateVersionId,
+          error: {
+            code: "HARD_VALIDATION_FAILED",
+            message:
+              `AI output failed a non-waivable protocol or security check${
+                violationSummary ? `: ${violationSummary}` : "."
+              }`,
+            details: {
+              hardViolationCodes: classification.hardViolationCodes,
+              softViolationCodes: classification.softViolationCodes,
+            },
           },
-        },
-        completedAt: nowIso(),
-      };
-      await archiveAttemptOutcomeRaw(context, runtime.activeRun, outcome);
-      runtime.lifecycleState = "editing";
-      runtime.activeRun = null;
-      runtime.conflict = null;
-      runtime.lastCompleted = outcome;
-      await writeRuntime(context.projectRoot, runtime);
-      return {
-        ok: true,
-        ...outcome,
-        scopeReport: scoped.report,
-        scopeReportPath: scoped.reportPath,
-      };
+          completedAt: nowIso(),
+        };
+        await archiveAttemptOutcomeRaw(context, runtime.activeRun, outcome);
+        runtime.lifecycleState = "editing";
+        runtime.activeRun = null;
+        runtime.conflict = null;
+        runtime.lastCompleted = outcome;
+        await writeRuntime(context.projectRoot, runtime);
+        return {
+          ok: true,
+          ...outcome,
+          scopeReport: scoped.report,
+          scopeReportPath: scoped.reportPath,
+        };
       }
     }
     if (
@@ -7158,94 +7019,6 @@ async function resolveConflict(body) {
       prepared.transactionRoot,
       prepared.transaction,
     );
-  });
-}
-
-async function restoreVersion(body) {
-  const context = await loadContextBySource(body.sourcePath, false);
-  assertBodyContext(context, body);
-  const versionId = cleanText(body.versionId, 100);
-  if (!/^ver_\d{4,}$/.test(versionId)) {
-    throw new HttpError(400, "INVALID_VERSION_ID", "versionId is invalid.");
-  }
-  return withProjectMutation(context, async () => {
-    await recoverTransactionsRaw(context);
-    const project = await readProject(context);
-    const runtime = await readRuntime(context);
-    assertProjectMutable(runtime);
-    const validatedVersion = await validateCommittedVersionRaw(
-      context,
-      versionId,
-    );
-    const versionBuffer = validatedVersion.entryBuffer;
-    const source = await readSourceFile(context.sourcePath);
-    const expected = requireSha256(
-      body.expectedSourceSha256 ?? project.currentHtmlSha256,
-      "expectedSourceSha256",
-    );
-    const written =
-      sha256(versionBuffer) === source.sha256
-        ? source
-        : await atomicReplaceSource(context.sourcePath, expected, versionBuffer);
-    await syncCurrentSourceIdentity(context, written);
-    project.currentHtmlSha256 = written.sha256;
-    project.currentBasedOnVersionId = versionId;
-    project.currentExactVersionId =
-      written.sha256 === validatedVersion.contentSha256
-        ? versionId
-        : null;
-    project.restoredFromVersionId = versionId;
-    project.lastModifiedAt = written.lastModifiedAt;
-    await writeProject(context, project);
-    runtime.editRevision += 1;
-    runtime.lastPersistedRevision = runtime.editRevision;
-    runtime.lifecycleState = "editing";
-    runtime.view = {
-      viewMode: "current",
-      latestVersionId: project.latestVersionId,
-      currentBasedOnVersionId: versionId,
-      currentExactVersionId: project.currentExactVersionId,
-      viewingVersionId: null,
-      renderedContentSha256: written.sha256,
-    };
-    runtime.autosave = {
-      status: "updated",
-      expectedSourceSha256: written.sha256,
-      lastPersistedAt: nowIso(),
-      recoveryLogRelativePath: "recovery/autosave-log.json",
-    };
-    await resetDraftEditsAfterHistoryRestore(
-      context,
-      runtime,
-    );
-    await writeRuntime(context.projectRoot, runtime);
-    await appendAudit(context, {
-      eventId: `restore_${versionId}_${randomUUID()}`,
-      kind: "history-restore",
-      restoredFromVersionId: versionId,
-      before: { sha256: source.sha256 },
-      after: { sha256: written.sha256 },
-      persistedAt: nowIso(),
-      versionCreated: false,
-    });
-    return {
-      ok: true,
-      status: "source-restored",
-      projectId: context.projectId,
-      documentId: context.documentId,
-      restoredFromVersionId: versionId,
-      versionCreated: false,
-      latestVersionId: project.latestVersionId,
-      currentBasedOnVersionId: versionId,
-      currentExactVersionId: project.currentExactVersionId,
-      currentHtmlSha256: written.sha256,
-      sourceSha256: written.sha256,
-      sha256: written.sha256,
-      content: written.html,
-      persistedRevision: runtime.lastPersistedRevision,
-      lastModifiedAt: written.lastModifiedAt,
-      currentPath: context.sourcePath,
-    };
   });
 }
 
@@ -7790,14 +7563,6 @@ async function route(request, response) {
   }
   if (
     request.method === "POST"
-    && url.pathname === "/validation/waive"
-  ) {
-    const body = await readBody(request);
-    sendJson(response, 200, await waiveSoftValidation(body));
-    return;
-  }
-  if (
-    request.method === "POST"
     && url.pathname === "/ready-version/activate"
   ) {
     const body = await readBody(request);
@@ -7815,11 +7580,6 @@ async function route(request, response) {
   if (request.method === "POST" && url.pathname === "/conflict/resolve") {
     const body = await readBody(request);
     sendJson(response, 200, await resolveConflict(body));
-    return;
-  }
-  if (request.method === "POST" && url.pathname === "/restore") {
-    const body = await readBody(request);
-    sendJson(response, 200, await restoreVersion(body));
     return;
   }
   if (request.method === "GET" && url.pathname === "/version-file") {

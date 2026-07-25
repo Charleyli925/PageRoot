@@ -98,7 +98,31 @@ function resilientEditorFrame(page) {
   };
 }
 
+async function ensureDesktopRendererTestBridge(page) {
+  const hasDesktopBridge = await page.evaluate(() => Boolean(window.htmlAIProjects));
+  if (hasDesktopBridge) return;
+
+  await page.addInitScript(() => {
+    Object.defineProperty(window, "htmlAIProjects", {
+      configurable: true,
+      value: {
+        getActiveProject: async () => null,
+        openHtml: async () => null,
+        listRecentProjects: async () => [],
+        openRecent: async () => {
+          throw new Error("The browser renderer harness has no recent files.");
+        },
+      },
+    });
+  });
+  await page.reload();
+}
+
 export async function loadFixture(page, name, { buffer = fixtureBuffer(name) } = {}) {
+  // Pure browser use is a formal read-only preview. These source-editing tests
+  // exercise the desktop renderer, so expose only the narrow capability marker
+  // needed to mount its editor before loading an in-memory fixture.
+  await ensureDesktopRendererTestBridge(page);
   // The real UI opens the file picker only after prepareProjectSwitch() has
   // confirmed that the current canvas can commit. Setting a hidden file input
   // directly bypasses that user-facing gate, so first wait for the initial

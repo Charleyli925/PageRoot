@@ -124,7 +124,7 @@ test("workbench encodes the v3 single-source lifecycle instead of save-created v
     "/draft",
     "awaiting-conflict-resolution",
     "recovering-transaction",
-    "没有生成新版本",
+    "没有创建新版本",
     "旧版未被覆盖",
     "openedAiVersionNotice",
     "removeAcknowledgedAuditEvents",
@@ -461,8 +461,8 @@ test("handoff fails closed before locking when a comment target is unsafe", asyn
     "条评论需要重新定位",
     "评论和附件已保留",
     "beginTargetRelink",
-    "本轮没有提交",
-    "activeCommentCount === 0",
+    "选择新位置",
+    "activeComments.length === 0",
     "data-resolution={comment.target.resolution}",
     "targets: targets.map(persistedTargetRef)",
   ]) {
@@ -471,6 +471,7 @@ test("handoff fails closed before locking when a comment target is unsafe", asyn
       new RegExp(required.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
     );
   }
+  assert.doesNotMatch(workbench, /本轮没有提交/);
 
   const unsafeGuardIndex = workbench.indexOf(
     "const unsafeTargets = activeComments.filter(",

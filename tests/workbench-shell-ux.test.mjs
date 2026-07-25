@@ -57,7 +57,8 @@ test("startup welcome HTML is provisioned as a normal registered project", () =>
     sampleHtml,
     /src="\.\/\$\{WELCOME_LOGO_RELATIVE_PATH\}"/,
   );
-  assert.match(sampleHtml, /它是源页建立的本地 HTML/);
+  assert.match(sampleHtml, /在桌面版中，这张欢迎页可以直接体验编辑、选择和评论/);
+  assert.match(sampleHtml, /桌面版会把它建立为本地 HTML/);
   assert.match(sampleHtml, /修改会自动保存到「欢迎来到源页\.html」/);
   assert.match(sampleHtml, /从顶部「项目」打开其他 HTML/);
   assert.doesNotMatch(sampleHtml, /尚未绑定本地文件/);
@@ -177,8 +178,13 @@ test("editing and interactive preview are separate canvas modes", () => {
   assert.match(workbench, /className="canvas-mode-switch"[\s\S]*?编辑[\s\S]*?预览/);
   assert.match(
     workbench,
-    /aria-pressed=\{canvasMode === "preview"\}[\s\S]*?disabled=\{interactionLocked\}/,
+    /aria-pressed=\{canvasMode === "preview"\}[\s\S]*?disabled=\{!browserPreviewOnly && interactionLocked\}/,
   );
+  assert.match(
+    workbench,
+    /aria-pressed=\{canvasMode === "edit"\}[\s\S]*?disabled=\{browserPreviewOnly \|\| runInProgress \|\| viewMode === "history"\}/,
+  );
+  assert.match(workbench, /浏览器预览 · 只读[\s\S]*?操作不会保存/);
   const previewModeStart = workbench.indexOf('aria-pressed={canvasMode === "preview"}');
   const previewModeEnd = workbench.indexOf("</button>", previewModeStart);
   const previewModeControl = workbench.slice(
@@ -209,7 +215,10 @@ test("editing and interactive preview are separate canvas modes", () => {
   );
   assert.match(workbench, /\{canvasMode === "edit" \? \(\s*<aside[\s\S]*?className="comments-panel comment-rail"/);
   assert.match(workbench, /setCanvasMode\("edit"\);[\s\S]*?setDrawer\("history"\)/);
-  assert.match(workbench, /const applyProject[\s\S]*?setViewMode\("current"\);\s*setCanvasMode\("edit"\)/);
+  assert.match(
+    workbench,
+    /const applyProject[\s\S]*?setViewMode\("current"\);[\s\S]*?setCanvasMode\([\s\S]*?!window\.htmlAIProjects[\s\S]*?\? "preview"[\s\S]*?: "edit"/,
+  );
   assert.match(styles, /\.workbench\[data-canvas-mode="preview"\]\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\)/);
   assert.match(styles, /\.workbench\[data-canvas-mode="preview"\] \.canvas-column\s*\{[\s\S]*?grid-column:\s*1 \/ -1/);
 
@@ -407,8 +416,8 @@ test("QoderWork handoff exposes a truthful process board and manual open action"
   assert.match(workbench, /版本与文件完整性/);
   assert.doesNotMatch(workbench, /身份、Hash 与文件完整性/);
   assert.match(workbench, /范围与质量校验/);
-  assert.match(workbench, /采用这些额外变化/);
-  assert.match(workbench, /AI 还修改了评论范围外的内容/);
+  assert.match(workbench, /已记录评论范围外的额外变化/);
+  assert.doesNotMatch(workbench, /采用这些额外变化|AI 还修改了评论范围外的内容/);
   assert.match(workbench, /打开最新版/);
   const sendToQoderStart = workbench.indexOf("const sendToQoderWork = useCallback");
   const sendToQoderEnd = workbench.indexOf("const revealActiveRunInFinder", sendToQoderStart);
@@ -466,9 +475,9 @@ test("QoderWork handoff exposes a truthful process board and manual open action"
 test("processing keeps its decision surface dismissible and project navigation available", () => {
   assert.match(
     workbench,
-    /className="project-button"[\s\S]*?disabled=\{projectHydrating \|\| viewTransitioning\}/,
+    /className="project-button"[\s\S]*?disabled=\{projectHydrating \|\| viewTransitioning \|\| attachmentUploadCount > 0\}/,
   );
-  assert.match(workbench, /aria-pressed=\{canvasMode === "edit"\}[\s\S]*?disabled=\{runInProgress \|\| viewMode === "history"\}/);
+  assert.match(workbench, /aria-pressed=\{canvasMode === "edit"\}[\s\S]*?disabled=\{browserPreviewOnly \|\| runInProgress \|\| viewMode === "history"\}/);
   assert.match(workbench, /className="global-comment-button"[\s\S]*?disabled=\{interactionLocked \|\| canvasMode !== "edit"\}/);
   assert.match(styles, /\.drawer-overlay\.show\[data-drawer="handoff"\]\s*\{[\s\S]*?pointer-events:\s*none/);
   assert.doesNotMatch(workbench, /aria-modal=\{drawer === "handoff"/);
@@ -501,7 +510,10 @@ test("header keeps persistence state concise without a redundant history suffix"
   assert.doesNotMatch(workbench, /currentIdentity/);
   assert.match(workbench, /className="save-status"/);
   assert.match(workbench, /\{viewMode === "history"/);
-  assert.match(workbench, /\{persistState === "idle" \? "已安全保存" : persistLabel\}/);
+  assert.match(
+    workbench,
+    /browserPreviewOnly[\s\S]*?"操作不会保存"[\s\S]*?persistState === "idle"[\s\S]*?"已安全保存"[\s\S]*?: persistLabel/,
+  );
 });
 
 test("first project registration is part of the recoverable autosave transaction", () => {
@@ -555,7 +567,7 @@ test("AI submission and run operations remain isolated by project and run identi
   );
   assert.match(workbench, /qoderHandoffStatesRef\s*=\s*useRef<Map<string, ProjectQoderHandoffState>>/);
   assert.match(workbench, /activatingRunsRef = useRef<Set<string>>/);
-  assert.match(workbench, /waivingRunsRef = useRef<Set<string>>/);
+  assert.doesNotMatch(workbench, /waivingRunsRef|\/validation\/waive/);
   assert.match(workbench, /cancellingRunsRef = useRef<Set<string>>/);
   assert.match(
     workbench,
@@ -624,13 +636,7 @@ test("history opens concise immutable versions in the canvas with their comments
   );
   assert.match(styles, /\.version-list\s*\{[\s\S]*?border-radius:\s*15px/);
   assert.match(styles, /\.version-row\s*\{[\s\S]*?grid-template-columns:\s*42px minmax\(0, 1fr\) auto 14px/);
-  const restoreStart = workbench.indexOf("const restoreVersion = useCallback");
-  const restoreEnd = workbench.indexOf("const persistLabel =", restoreStart);
-  assert.ok(restoreStart >= 0 && restoreEnd > restoreStart);
-  assert.match(
-    workbench.slice(restoreStart, restoreEnd),
-    /auditPendingRef\.current = \[\];\s*undoDraftFoldsRef\.current\.clear\(\);\s*redoDraftFoldsRef\.current\.clear\(\);\s*changeEventsRef\.current = \[\];\s*setChangeEvents\(\[\]\);/,
-  );
+  assert.doesNotMatch(workbench, /const restoreVersion|\/restore|设为当前 HTML/);
 });
 
 test("AI completion adopts the generated semantic file before editing resumes", () => {
@@ -694,7 +700,7 @@ test("AI completion adopts the generated semantic file before editing resumes", 
 test("project panel keeps actions clear without technical paths in the header", () => {
   assert.match(workbench, /className="project-button"[\s\S]*?项目/);
   assert.match(workbench, /const closeFileView = useCallback/);
-  assert.match(workbench, /if \(!closeFileView\(\)\) return;[\s\S]*?setDrawer\("files"\)/);
+  assert.match(workbench, /if \(!await closeFileView\(\)\) return;[\s\S]*?setDrawer\("files"\)/);
   assert.match(workbench, /className="current-project-card"/);
   assert.match(workbench, /导出 HTML 副本/);
   assert.match(workbench, />打开本地 HTML</);
@@ -702,8 +708,9 @@ test("project panel keeps actions clear without technical paths in the header", 
   assert.match(workbench, /查看每轮要求、AI 返回与历史文件/);
   assert.match(workbench, /BRIDGE_URL\}\/open-folder/);
   assert.match(workbench, /以后每次 AI 修改都会读取/);
-  assert.match(workbench, /保存只影响后续任务，不会修改当前 HTML/);
-  assert.match(workbench, /项目规则还有未保存修改/);
+  assert.match(workbench, /规则只影响后续任务，不会修改当前 HTML/);
+  assert.match(workbench, /修改会自动保存/);
+  assert.doesNotMatch(workbench, /项目规则还有未保存修改/);
   assert.match(workbench, /<details[\s\S]*?className="project-advanced"/);
   const headerStart = workbench.indexOf('<header className="workbench-header">');
   const header = workbench.slice(

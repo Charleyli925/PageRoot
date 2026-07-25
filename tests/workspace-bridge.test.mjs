@@ -1216,7 +1216,11 @@ test("autosave writes the real source without Versions and projects stay isolate
         target: stableCommentTarget,
       },
     ],
-    changeEvents: [{ eventId: "pending_edit", kind: "style" }],
+    changeEvents: [{
+      eventId: "pending_edit",
+      kind: "style",
+      target: stableCommentTarget,
+    }],
   });
   assert.equal(draft.body.activeDraft.comments[0].commentId, "comment_a");
   const draftReloaded = await openWorkspace(bridge.baseUrl, sourceA);
@@ -1237,56 +1241,32 @@ test("autosave writes the real source without Versions and projects stay isolate
   assert.equal(aStillIndependent.body.versions.length, 1);
   assert.equal(aStillIndependent.body.projectId, openedA.body.projectId);
 
-  const restored = await postJson(bridge.baseUrl, "/restore", {
+  const restoreUnavailable = await postJson(bridge.baseUrl, "/restore", {
     sourcePath: sourceA,
     versionId: "ver_0001",
     expectedSourceSha256,
   });
-  assert.equal(restored.response.status, 200, JSON.stringify(restored.body));
-  assert.equal(restored.body.status, "source-restored");
-  assert.equal(restored.body.projectId, openedA.body.projectId);
-  assert.equal(restored.body.documentId, openedA.body.documentId);
-  assert.equal(restored.body.versionCreated, false);
-  assert.equal(await readFile(sourceA, "utf8"), initialSourceA);
-  const afterRestore = await openWorkspace(bridge.baseUrl, sourceA);
-  assert.equal(afterRestore.body.versions.length, 1);
-  assert.equal(afterRestore.body.currentBasedOnVersionId, "ver_0001");
-  assert.equal(afterRestore.body.currentExactVersionId, "ver_0001");
+  assert.equal(restoreUnavailable.response.status, 404);
+  assert.equal(restoreUnavailable.body.error.code, "NOT_FOUND");
+  assert.equal(await readFile(sourceA, "utf8"), draftSource);
+  const afterUnavailableRestore = await openWorkspace(bridge.baseUrl, sourceA);
+  assert.equal(afterUnavailableRestore.body.versions.length, 1);
+  assert.equal(afterUnavailableRestore.body.currentBasedOnVersionId, "ver_0001");
+  assert.equal(afterUnavailableRestore.body.currentExactVersionId, null);
   assert.deepEqual(
-    afterRestore.body.activeDraft.comments.map((comment) => comment.commentId),
+    afterUnavailableRestore.body.activeDraft.comments.map((comment) => comment.commentId),
     ["comment_a"],
   );
-  assert.deepEqual(afterRestore.body.activeDraft.changeEvents, []);
-  assert.deepEqual(afterRestore.body.runtimeState.draft.editEventIds, []);
-  assert.ok(
-    String(afterRestore.body.runtimeState.draft.updatedAt)
-      >= String(draft.body.activeDraft.updatedAt),
-    "restored server draft must supersede stale local recovery timestamps",
-  );
-  const restoredCommentResolution = resolveTargetRef(
-    buildSourceIndex(restored.body.content),
-    afterRestore.body.activeDraft.comments[0].target,
-  );
-  assert.equal(restoredCommentResolution.resolution, "rebound");
-  assert.ok(restoredCommentResolution.target);
-  const restoredDraftPath = join(
-    environment.workspace,
-    "projects",
-    openedA.body.projectId,
-    "draft",
-    "annotations.json",
-  );
-  const restoredDraftText = await readFile(restoredDraftPath, "utf8");
-  const restoredDraft = JSON.parse(restoredDraftText);
   assert.deepEqual(
-    restoredDraft.comments.map((comment) => comment.commentId),
-    ["comment_a"],
+    afterUnavailableRestore.body.activeDraft.changeEvents.map((event) => event.eventId),
+    ["pending_edit"],
   );
-  assert.deepEqual(restoredDraft.editEvents, []);
-  assert.equal(
-    afterRestore.body.runtimeState.draft.annotationsSha256,
-    hash(restoredDraftText),
+  const preservedCommentResolution = resolveTargetRef(
+    buildSourceIndex(draftSource),
+    afterUnavailableRestore.body.activeDraft.comments[0].target,
   );
+  assert.equal(preservedCommentResolution.resolution, "exact");
+  assert.ok(preservedCommentResolution.target);
 
   const exactHistory = await requestJson(
     bridge.baseUrl,
@@ -1300,23 +1280,32 @@ test("autosave writes the real source without Versions and projects stay isolate
     bridge.baseUrl,
     `/source?sourcePath=${encodeURIComponent(sourceA)}`,
   );
-  assert.equal(currentSource.body.content, initialSourceA);
-  assert.equal(currentSource.body.sha256, hash(initialSourceA));
-  const requestAfterRestore = await postJson(bridge.baseUrl, "/request", {
+  assert.equal(currentSource.body.content, draftSource);
+  assert.equal(currentSource.body.sha256, hash(draftSource));
+  const requestAfterUnavailableRestore = await postJson(bridge.baseUrl, "/request", {
     sourcePath: sourceA,
-    projectId: afterRestore.body.projectId,
-    documentId: afterRestore.body.documentId,
-    expectedSourceSha256: afterRestore.body.currentHtmlSha256,
-    freezeCutoffRevision: afterRestore.body.runtimeState.editRevision,
+    projectId: afterUnavailableRestore.body.projectId,
+    documentId: afterUnavailableRestore.body.documentId,
+    expectedSourceSha256: afterUnavailableRestore.body.currentHtmlSha256,
+    freezeCutoffRevision: afterUnavailableRestore.body.runtimeState.editRevision,
     lastPersistedRevision:
-      afterRestore.body.runtimeState.lastPersistedRevision,
-    summary: "恢复历史后只携带仍然存在的评论。",
+      afterUnavailableRestore.body.runtimeState.lastPersistedRevision,
+    summary: "历史保持只读，只携带当前仍然存在的评论。",
+    targets: [
+      afterUnavailableRestore.body.activeDraft.comments[0].target,
+    ],
+    comments: afterUnavailableRestore.body.activeDraft.comments,
+    changeEvents: afterUnavailableRestore.body.activeDraft.changeEvents,
   });
-  assert.equal(requestAfterRestore.response.status, 201);
-  const frozenAfterRestore = JSON.parse(
+  assert.equal(
+    requestAfterUnavailableRestore.response.status,
+    201,
+    JSON.stringify(requestAfterUnavailableRestore.body),
+  );
+  const frozenAfterUnavailableRestore = JSON.parse(
     await readFile(
       join(
-        requestAfterRestore.body.requestPath,
+        requestAfterUnavailableRestore.body.requestPath,
         "input",
         "annotations",
         "records.json",
@@ -1325,13 +1314,16 @@ test("autosave writes the real source without Versions and projects stay isolate
     ),
   );
   assert.deepEqual(
-    frozenAfterRestore.comments.map((comment) => comment.commentId),
+    frozenAfterUnavailableRestore.comments.map((comment) => comment.commentId),
     ["comment_a"],
   );
-  assert.deepEqual(frozenAfterRestore.editEvents, []);
   assert.deepEqual(
-    requestAfterRestore.body.activeRun.frozenEditEventIds,
-    [],
+    frozenAfterUnavailableRestore.editEvents.map((event) => event.eventId),
+    ["edit_pending_edit"],
+  );
+  assert.deepEqual(
+    requestAfterUnavailableRestore.body.activeRun.frozenEditEventIds,
+    ["edit_pending_edit"],
   );
   const auditPath = join(
     environment.workspace,
@@ -1340,129 +1332,33 @@ test("autosave writes the real source without Versions and projects stay isolate
     "edit-audit.jsonl",
   );
   const auditLines = (await readFile(auditPath, "utf8")).trim().split("\n");
-  assert.ok(auditLines.length >= 21);
+  assert.equal(auditLines.length, 20);
 });
 
-test("an effective AI result after history restore uses the project max ordinal and restored base", async (t) => {
+test("version history stays read-only and the restore endpoint is unavailable", async (t) => {
   const environment = await createEnvironment(t);
-  const sourcePath = join(environment.sources, "restore-then-ai.html");
-  await writeFile(sourcePath, htmlPage("恢复后 V1"), "utf8");
+  const sourcePath = join(environment.sources, "read-only-history.html");
+  await writeFile(sourcePath, htmlPage("只读历史"), "utf8");
   const bridge = await environment.start();
   const opened = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
-
-  const firstRun = (
-    await postJson(bridge.baseUrl, "/request", {
-      sourcePath,
-      projectId: opened.projectId,
-      documentId: opened.documentId,
-      expectedSourceSha256: opened.currentHtmlSha256,
-      freezeCutoffRevision: opened.runtimeState.editRevision,
-      summary: "先生成有效 V2",
-    })
-  ).body;
-  assert.equal(firstRun.candidateVersionId, "ver_0002");
-  await writeFile(
-    firstRun.outputPath,
-    htmlPage("有效 V2", '<p id="v2">AI V2</p>'),
-    "utf8",
-  );
-  await runFinalizer(environment.workspace, firstRun);
-  const completedV2 = await requestJson(
+  const version = await requestJson(
     bridge.baseUrl,
-    `/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${firstRun.requestId}&attemptId=${firstRun.attemptId}`,
+    `/version-file?sourcePath=${encodeURIComponent(sourcePath)}&versionId=ver_0001`,
   );
-  assert.equal(completedV2.body.status, "ready-to-open");
-  assert.equal(completedV2.body.versionId, "ver_0002");
-  assert.equal(completedV2.body.currentPath, sourcePath);
-  assert.notEqual(completedV2.body.workingCopyPath, sourcePath);
-  await activateReadyVersion(bridge.baseUrl, completedV2.body);
-
-  const afterV2 = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
-  const restored = await postJson(bridge.baseUrl, "/restore", {
+  assert.equal(version.response.status, 200);
+  assert.equal(version.body.readOnly, true);
+  const restoreUnavailable = await postJson(bridge.baseUrl, "/restore", {
     sourcePath,
     projectId: opened.projectId,
     documentId: opened.documentId,
     versionId: "ver_0001",
-    expectedSourceSha256: afterV2.currentHtmlSha256,
+    expectedSourceSha256: opened.currentHtmlSha256,
   });
-  assert.equal(restored.response.status, 200, JSON.stringify(restored.body));
-  assert.equal(restored.body.versionCreated, false);
-  const afterRestore = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
-  assert.equal(afterRestore.versions.length, 2);
-  assert.equal(afterRestore.latestVersionId, "ver_0002");
-  assert.equal(afterRestore.currentBasedOnVersionId, "ver_0001");
-  assert.equal(afterRestore.currentExactVersionId, "ver_0001");
-
-  const secondRun = (
-    await postJson(bridge.baseUrl, "/request", {
-      sourcePath,
-      projectId: opened.projectId,
-      documentId: opened.documentId,
-      expectedSourceSha256: afterRestore.currentHtmlSha256,
-      freezeCutoffRevision: afterRestore.runtimeState.editRevision,
-      summary: "从 V1 恢复内容生成有效 V3",
-    })
-  ).body;
-  assert.equal(secondRun.candidateVersionId, "ver_0003");
-  assert.equal(secondRun.previousVersionId, "ver_0002");
-  assert.equal(secondRun.basedOnVersionId, "ver_0001");
-  await writeFile(
-    secondRun.outputPath,
-    htmlPage("有效 V3", '<p id="v3">AI V3 based on restored V1</p>'),
-    "utf8",
-  );
-  await runFinalizer(environment.workspace, secondRun);
-  const completedV3 = await requestJson(
-    bridge.baseUrl,
-    `/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${secondRun.requestId}&attemptId=${secondRun.attemptId}`,
-  );
-  assert.equal(completedV3.body.status, "ready-to-open");
-  assert.equal(completedV3.body.versionId, "ver_0003");
-  await activateReadyVersion(bridge.baseUrl, completedV3.body);
-
-  const finalWorkspace = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
-  assert.equal(finalWorkspace.versions.length, 3);
-  assert.equal(finalWorkspace.latestVersionId, "ver_0003");
-  assert.equal(finalWorkspace.currentBasedOnVersionId, "ver_0003");
-  assert.equal(finalWorkspace.currentExactVersionId, "ver_0003");
-  assert.equal(finalWorkspace.runtimeState.view.viewMode, "current");
-  assert.equal(finalWorkspace.runtimeState.view.latestVersionId, "ver_0003");
-  assert.equal(
-    finalWorkspace.runtimeState.view.currentBasedOnVersionId,
-    "ver_0003",
-  );
-  assert.equal(
-    finalWorkspace.runtimeState.view.currentExactVersionId,
-    "ver_0003",
-  );
-  assert.equal(finalWorkspace.runtimeState.view.viewingVersionId, null);
-
-  const versionRoot = join(
-    environment.workspace,
-    "projects",
-    opened.projectId,
-    "versions",
-    "ver_0003",
-  );
-  const manifest = JSON.parse(
-    await readFile(join(versionRoot, "version.json"), "utf8"),
-  );
-  const marker = JSON.parse(
-    await readFile(join(versionRoot, "committed.json"), "utf8"),
-  );
-  const versionHtml = await readFile(
-    join(versionRoot, "files", "index.html"),
-    "utf8",
-  );
-  const sourceHtml = await readFile(finalWorkspace.sourcePath, "utf8");
-  assert.equal(manifest.previousVersionId, "ver_0002");
-  assert.equal(manifest.basedOnVersionId, "ver_0001");
-  assert.equal(manifest.contentSha256, hash(versionHtml));
-  assert.equal(marker.contentSha256, manifest.contentSha256);
-  assert.equal(hash(sourceHtml), manifest.contentSha256);
-  assert.equal(sourceHtml, versionHtml);
-  assert.match(sourceHtml, /html-ai-version-id" content="ver_0003"/);
-  assert.match(sourceHtml, /html-ai-based-on-version-id" content="ver_0001"/);
+  assert.equal(restoreUnavailable.response.status, 404);
+  assert.equal(restoreUnavailable.body.error.code, "NOT_FOUND");
+  const unchanged = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+  assert.equal(unchanged.currentHtmlSha256, opened.currentHtmlSha256);
+  assert.equal(unchanged.currentExactVersionId, "ver_0001");
 });
 
 test("sequential AI successes preserve every prior source and activate semantic working files", async (t) => {
@@ -2612,70 +2508,22 @@ test("mandatory finalizer controls completion, identity, no-change, and cancella
   );
 
   const afterV2 = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
-  const exactV1 = await requestJson(
-    bridge.baseUrl,
-    `/version-file?sourcePath=${encodeURIComponent(sourcePath)}&versionId=ver_0001`,
-  );
-  const restoredV1 = await postJson(bridge.baseUrl, "/restore", {
+  const restoreUnavailable = await postJson(bridge.baseUrl, "/restore", {
     projectId: afterV2.projectId,
     documentId: afterV2.documentId,
     sourcePath,
     versionId: "ver_0001",
     expectedSourceSha256: afterV2.currentHtmlSha256,
   });
-  assert.equal(restoredV1.response.status, 200, JSON.stringify(restoredV1.body));
-  assert.equal(restoredV1.body.status, "source-restored");
-  assert.equal(restoredV1.body.projectId, afterV2.projectId);
-  assert.equal(restoredV1.body.documentId, afterV2.documentId);
-  assert.equal(restoredV1.body.restoredFromVersionId, "ver_0001");
-  assert.equal(restoredV1.body.versionCreated, false);
-  assert.equal(restoredV1.body.latestVersionId, "ver_0002");
-  assert.equal(restoredV1.body.currentBasedOnVersionId, "ver_0001");
-  assert.equal(restoredV1.body.currentExactVersionId, "ver_0001");
-  assert.equal(restoredV1.body.content, exactV1.body.content);
-  assert.equal(restoredV1.body.sha256, exactV1.body.sha256);
-  assert.equal(
-    await readFile(restoredV1.body.currentPath, "utf8"),
-    exactV1.body.content,
-  );
+  assert.equal(restoreUnavailable.response.status, 404);
+  assert.equal(restoreUnavailable.body.error.code, "NOT_FOUND");
   assert.equal(hash(await readFile(sourcePath, "utf8")), originalSourceSha256);
-  const afterV1Restore = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
-  assert.equal(afterV1Restore.projectId, afterV2.projectId);
-  assert.equal(afterV1Restore.documentId, afterV2.documentId);
-  assert.equal(afterV1Restore.latestVersionId, "ver_0002");
-  assert.equal(afterV1Restore.currentBasedOnVersionId, "ver_0001");
-  assert.equal(afterV1Restore.currentExactVersionId, "ver_0001");
-  assert.equal(afterV1Restore.restoredFromVersionId, "ver_0001");
-  assert.equal(afterV1Restore.versions.length, 2);
-  const rejectedStaleRestore = await postJson(bridge.baseUrl, "/restore", {
-    projectId: afterV1Restore.projectId,
-    documentId: afterV1Restore.documentId,
-    sourcePath,
-    versionId: "ver_0002",
-    expectedSourceSha256: hash("stale source"),
-  });
-  assert.equal(rejectedStaleRestore.response.status, 409);
-  assert.equal(rejectedStaleRestore.body.error.code, "SOURCE_HASH_CONFLICT");
-  assert.equal(
-    await readFile(afterV1Restore.sourcePath, "utf8"),
-    exactV1.body.content,
-  );
-  assert.equal(hash(await readFile(sourcePath, "utf8")), originalSourceSha256);
-  const afterRejectedRestore = (
-    await openWorkspace(bridge.baseUrl, sourcePath)
-  ).body;
-  assert.equal(afterRejectedRestore.projectId, afterV2.projectId);
-  assert.equal(afterRejectedRestore.documentId, afterV2.documentId);
-  assert.equal(afterRejectedRestore.latestVersionId, "ver_0002");
-  assert.equal(afterRejectedRestore.currentBasedOnVersionId, "ver_0001");
-  assert.equal(afterRejectedRestore.currentExactVersionId, "ver_0001");
-  assert.equal(afterRejectedRestore.versions.length, 2);
 
   const invalidIdentityRun = (
     await postJson(bridge.baseUrl, "/request", {
       sourcePath,
-      expectedSourceSha256: afterV1Restore.currentHtmlSha256,
-      freezeCutoffRevision: afterV1Restore.runtimeState.editRevision,
+      expectedSourceSha256: afterV2.currentHtmlSha256,
+      freezeCutoffRevision: afterV2.runtimeState.editRevision,
       summary: "身份错误必须被拒绝",
     })
   ).body;
@@ -3926,11 +3774,10 @@ test("history endpoints reject marker, manifest, and entry tampering", async (t)
   const marker = JSON.parse(originalMarker.toString("utf8"));
   marker.contentSha256 = hash("not the entry");
   await writeFile(markerPath, `${JSON.stringify(marker, null, 2)}\n`);
-  const markerRejected = await postJson(bridge.baseUrl, "/restore", {
-    sourcePath,
-    versionId: "ver_0002",
-    expectedSourceSha256: hash(await readFile(sourcePath)),
-  });
+  const markerRejected = await requestJson(
+    bridge.baseUrl,
+    `/version-file?sourcePath=${encodeURIComponent(sourcePath)}&versionId=ver_0002`,
+  );
   assert.equal(markerRejected.response.status, 409);
   assert.equal(
     markerRejected.body.error.code,

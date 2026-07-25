@@ -894,13 +894,13 @@ test("an unknown Request outcome stays fail-closed and reconciles automatically"
 
     await launched.page.getByRole("button", { name: /发送至 Qoder/u }).click();
     await expect(launched.page.getByText(
-      "正在确认任务是否已经建立",
+      "正在确认这次发送是否成功",
       { exact: true },
     )).toBeVisible({ timeout: 30_000 });
     await expect(launched.page.getByRole("button", { name: "立即重新核对" }))
       .toHaveCount(0);
     await expect(launched.page.getByRole("button", { name: "重新打开源页" }).first())
-      .toBeVisible();
+      .toHaveCount(0);
     await expect.poll(
       () => requestDirectoryCount(launched.workspace),
       { timeout: 20_000 },
@@ -1302,7 +1302,7 @@ test("a malformed AI HTML return is rejected before completion or opening", asyn
   }
 });
 
-test("a soft out-of-scope AI return waits for an explicit waiver and open", async () => {
+test("a soft out-of-scope AI return is audited without blocking the ready version", async () => {
   const fixture = createSourceFixture();
   const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
   try {
@@ -1318,22 +1318,16 @@ test("a soft out-of-scope AI return waits for an explicit waiver and open", asyn
         "<title>unauthorized title mutation</title>",
       ));
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
-    await expect(launched.page.getByText("AI 还修改了评论范围外的内容", { exact: true })
+    await expect(launched.page.getByText("已记录评论范围外的额外变化", { exact: true })
       .filter({ visible: true }).first())
       .toBeVisible({ timeout: 30_000 });
-    let active = await launched.page.evaluate(
-      () => window.htmlAIProjects?.getActiveProject(),
-    );
-    expect(active.sourcePath).toBe(realpathSync(fixture.sourcePath));
-    expect(workingHtmlFiles(launched.workspace, request.changeRequest.projectId)).toHaveLength(0);
-    expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
-
-    await launched.page.getByRole("button", { name: "采用这些额外变化" }).click();
     await expect(launched.page.getByText(
       "修改结果已通过检查",
       { exact: true },
     ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
-    active = await launched.page.evaluate(
+    await expect(launched.page.getByRole("button", { name: "采用这些额外变化" }))
+      .toHaveCount(0);
+    const active = await launched.page.evaluate(
       () => window.htmlAIProjects?.getActiveProject(),
     );
     expect(active.sourcePath).toBe(realpathSync(fixture.sourcePath));

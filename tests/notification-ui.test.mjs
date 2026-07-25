@@ -107,7 +107,7 @@ test("redundant feedback was removed and comment persistence is contextual", () 
 });
 
 test("canvas edit feedback is contextual, plain-language, and not duplicated globally", () => {
-  assert.match(canvas, /let title = "请重新选择后再试"/u);
+  assert.match(canvas, /let title = "这处内容暂时不能直接编辑"/u);
   assert.match(canvas, /title = "这里暂时不能直接改字"/u);
   assert.match(canvas, /title = "已恢复输入前的文字"/u);
   assert.match(canvas, /title = "请重新选择这段文字"/u);
@@ -116,7 +116,9 @@ test("canvas edit feedback is contextual, plain-language, and not duplicated glo
   assert.match(canvas, /这段内容里有需要保留的网页结构/u);
   assert.match(canvas, /输入法没有完整确认这次输入/u);
   assert.match(canvas, /你仍可以选中文字调整样式，或添加评论交给 AI 处理/u);
-  assert.match(canvas, /继续浏览和选择文字/u);
+  assert.match(canvas, /页面内容没有改变/u);
+  assert.doesNotMatch(canvas, /这里暂时不能粘贴多行文字/u);
+  assert.doesNotMatch(canvas, /这里暂时不能新增换行/u);
   assert.match(canvas, /sticky: false/u);
   assert.match(canvas, /recovery: "comment"/u);
   assert.match(canvas, /recovery: "reload"/u);
@@ -202,8 +204,8 @@ test("blocking paths auto-recover or expose one in-context decision", () => {
     /timeoutMs = BRIDGE_STATE_READ_TIMEOUT_MS/,
   );
   assert.match(workbench, /const reconcilePendingRun = useCallback/);
-  assert.match(workbench, /源页会自动继续核对/);
-  assert.match(workbench, /等待下一次自动核对/);
+  assert.match(workbench, /源页会在后台继续核对/);
+  assert.match(workbench, /等待下一次自动确认/);
   assert.doesNotMatch(workbench, /立即重新核对|重新核对任务状态/);
   assert.match(workbench, /重新打开源页/);
   assert.match(workbench, /fileView\.error \?/);
@@ -214,7 +216,7 @@ test("blocking paths auto-recover or expose one in-context decision", () => {
   assert.match(workbench, /resumeSubmissionAfterRelinkRef/);
   assert.match(workbench, /normalizeCurrentGlobalComments/);
   assert.match(workbench, /pendingProjectOpenRef/);
-  assert.match(workbench, /disposition: "defer-and-resume"/);
+  assert.doesNotMatch(workbench, /project-switch-(?:blocked|new-edit|persist-blocked)/u);
   assert.match(
     workbench,
     /const pending = pendingProjectOpenRef\.current;[\s\S]*?void openProject\(pending\.recentPath\)/u,
@@ -259,7 +261,7 @@ test("ready polling never opens automatically; the adopted marker ends on first 
   assert.doesNotMatch(statusFlow, /openCommittedVersion\(/);
   const activationFlow = workbench.slice(
     workbench.indexOf("const activateReadyResult"),
-    workbench.indexOf("const waiveCurrentValidation"),
+    workbench.indexOf("const processRunStatus"),
   );
   assert.match(activationFlow, /\/ready-version\/activate/);
   assert.match(activationFlow, /await openCommittedVersion\(run, mergedPayload\)/);
@@ -277,4 +279,27 @@ test("ready polling never opens automatically; the adopted marker ends on first 
   );
   assert.match(workbench, /className="window-file"/);
   assert.doesNotMatch(workbench, /className="project-switcher"/);
+});
+
+test("browser preview is a formal read-only route and unfinished comments are preserved", () => {
+  assert.match(workbench, /const \[runtimeCapabilitiesReady, setRuntimeCapabilitiesReady\]/u);
+  assert.match(workbench, /const \[browserPreviewOnly, setBrowserPreviewOnly\]/u);
+  assert.match(workbench, /disabled=\{browserPreviewOnly \|\| runInProgress/u);
+  assert.match(workbench, /: !browserPreviewOnly \? \(/u);
+  assert.match(workbench, /readOnly=\{viewMode === "history"\}/u);
+  assert.match(workbench, /浏览器预览 · 只读/u);
+  assert.match(workbench, /操作不会保存/u);
+  assert.match(workbench, /const interactionPreviewHtml = useMemo/u);
+  assert.match(workbench, /BROWSER_PREVIEW_LOGO_PLACEHOLDER/u);
+  assert.doesNotMatch(workbench, /fetch\("\/brand-logo\.png"/u);
+  assert.match(workbench, /html=\{interactionPreviewHtml\}/u);
+  assert.doesNotMatch(workbench, /startPreviewHandoff/u);
+  assert.doesNotMatch(workbench, /previewAttachments/u);
+
+  assert.match(workbench, /type CommentDraft = \{/u);
+  assert.match(workbench, /const stashCurrentComposerDraft = useCallback/u);
+  assert.match(workbench, /const restoreCommentDraft = useCallback/u);
+  assert.match(workbench, /commentDrafts: savedCommentDrafts\.map/u);
+  assert.match(workbench, /id: "review-comment-drafts"/u);
+  assert.match(workbench, /条评论还没有完成/u);
 });
