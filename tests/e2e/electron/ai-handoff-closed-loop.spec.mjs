@@ -854,7 +854,7 @@ test("a rapid double click creates exactly one durable Request", async () => {
   }
 });
 
-test("an unknown Request outcome stays fail-closed and can be reconciled explicitly", async () => {
+test("an unknown Request outcome stays fail-closed and reconciles automatically", async () => {
   test.setTimeout(120_000);
   const fixture = createSourceFixture("unknown-request-outcome.html");
   const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
@@ -894,11 +894,11 @@ test("an unknown Request outcome stays fail-closed and can be reconciled explici
 
     await launched.page.getByRole("button", { name: /发送至 Qoder/u }).click();
     await expect(launched.page.getByText(
-      "需要确认任务是否已经建立",
+      "正在确认任务是否已经建立",
       { exact: true },
     )).toBeVisible({ timeout: 30_000 });
     await expect(launched.page.getByRole("button", { name: "立即重新核对" }))
-      .toBeVisible();
+      .toHaveCount(0);
     await expect(launched.page.getByRole("button", { name: "重新打开源页" }).first())
       .toBeVisible();
     await expect.poll(
@@ -906,17 +906,9 @@ test("an unknown Request outcome stays fail-closed and can be reconciled explici
       { timeout: 20_000 },
     ).toBe(1);
 
-    const reconcileButton = launched.page.getByRole("button", {
-      name: "立即重新核对",
+    await launched.page.evaluate(() => {
+      window.__PAGEROOT_ALLOW_UNKNOWN_REQUEST_RECONCILE__ = true;
     });
-    await reconcileButton.evaluate((button) => {
-      // Keep automatic reconciliation unavailable until the explicit user
-      // action begins, otherwise its timer can win the test-only fetch race.
-      button.addEventListener("click", () => {
-        window.__PAGEROOT_ALLOW_UNKNOWN_REQUEST_RECONCILE__ = true;
-      }, { capture: true, once: true });
-    });
-    await reconcileButton.click();
     await expect(launched.page.getByText(
       "等待 QoderWork 返回修改结果",
       { exact: true },
@@ -1326,7 +1318,7 @@ test("a soft out-of-scope AI return waits for an explicit waiver and open", asyn
         "<title>unauthorized title mutation</title>",
       ));
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
-    await expect(launched.page.getByText("有一项范围校验需要你决定", { exact: true })
+    await expect(launched.page.getByText("AI 还修改了评论范围外的内容", { exact: true })
       .filter({ visible: true }).first())
       .toBeVisible({ timeout: 30_000 });
     let active = await launched.page.evaluate(
@@ -1336,7 +1328,7 @@ test("a soft out-of-scope AI return waits for an explicit waiver and open", asyn
     expect(workingHtmlFiles(launched.workspace, request.changeRequest.projectId)).toHaveLength(0);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
 
-    await launched.page.getByRole("button", { name: "无视本校验，继续" }).click();
+    await launched.page.getByRole("button", { name: "采用这些额外变化" }).click();
     await expect(launched.page.getByText(
       "修改结果已通过检查",
       { exact: true },

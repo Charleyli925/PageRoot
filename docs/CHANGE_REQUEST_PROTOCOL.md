@@ -521,9 +521,9 @@ Completion 必须在 output 完全关闭后最后写入。完成后 output 封�
 | active run 已取消/替代 | `stale-completion` |
 | TargetRef 无法唯一解析 | `scope-target-unresolved` |
 | 身份、脚本或 TargetRef 完整性错误 | 硬阻断，不可忽略 |
-| 目标外正文、属性、结构或样式变化 | 进入 `awaiting-check-decision`，允许用户审计后忽略 |
+| 目标外正文、属性、结构或样式变化 | 进入 `awaiting-check-decision`，展示变化摘要并由用户决定是否采用 |
 
-硬校验失败不得创建 Version 或推进 latest Version。范围/质量类软校验必须先展示具体原因；用户只有通过“无视本校验，继续”才能放行，系统把校验代码、理由与时间写入 `validation-review.json` 后继续使用同一个候选，不得静默绕过。
+硬校验失败不得创建 Version 或推进 latest Version。范围/质量类软校验必须先用产品语言展示具体变化与少量前后示例，不直接暴露内部校验代码；用户只有通过“采用这些额外变化”才能放行。系统把内部校验代码、用户决定、理由与时间写入 `validation-review.json` 后继续使用同一个候选，不得静默绕过。
 
 ## 14. 两阶段 Version 事务
 

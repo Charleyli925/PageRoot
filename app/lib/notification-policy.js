@@ -10,20 +10,6 @@ const IPC_ERROR_PREFIX =
 const ERROR_CLASS_PREFIX =
   /^(?:ProjectFileError|TypeError|RangeError|Error):\s*/i;
 
-const BLOCKING_WARNING_KEYS = new Set([
-  "ai-submit-commit-blocked",
-  "ai-submit-freeze-blocked",
-  "browser-file-error",
-  "navigation-commit-blocked",
-  "preview-commit-blocked",
-  "project-rules-unsaved",
-  "project-switch-commit-blocked",
-  "project-switch-persist-blocked",
-  "submit-blocked",
-  "unfinished-comment-draft",
-  "user-flush-commit-blocked",
-]);
-
 const NOTICE_DISPOSITIONS = new Set([
   "silent-recover",
   "defer-and-resume",
@@ -48,15 +34,23 @@ export function noticeTone(value) {
 export function noticeAutoDismissMs(notice) {
   if (!notice) return null;
   const tone = noticeTone(notice.tone);
-  if (notice.sticky || notice.action || tone === "error") return null;
+  const disposition = noticeDisposition(notice);
+  if (
+    notice.sticky
+    || tone === "error"
+    || disposition === "direct-action"
+    || disposition === "user-choice"
+  ) return null;
+  if (disposition === "background-result") return 7_000;
   if (tone === "warning") return 5_000;
   return 2_500;
 }
 
 /**
  * Decide who owns the next step before deciding whether to interrupt the user.
- * Existing callers without an explicit disposition retain the prior severity-
- * based behavior while business flows migrate to the structured contract.
+ * Presentation is opt-in. Severity and the existence of a button do not prove
+ * that the user owns recovery, so callers without an explicit disposition stay
+ * in their existing control or panel instead of creating a global interruption.
  *
  * @param {{ disposition?: string, tone?: string, sticky?: boolean, dedupeKey?: string, action?: unknown } | null} notice
  * @returns {"silent-recover" | "defer-and-resume" | "direct-action" | "user-choice" | "background-result" | "inform-in-place"}
@@ -65,16 +59,6 @@ export function noticeDisposition(notice) {
   if (notice && NOTICE_DISPOSITIONS.has(notice.disposition)) {
     return notice.disposition;
   }
-  if (notice?.action) return "direct-action";
-  const tone = noticeTone(notice?.tone);
-  if (tone === "error") return "direct-action";
-  if (
-    tone === "warning"
-    && (
-      notice?.sticky
-      || BLOCKING_WARNING_KEYS.has(String(notice?.dedupeKey || ""))
-    )
-  ) return "user-choice";
   return "inform-in-place";
 }
 

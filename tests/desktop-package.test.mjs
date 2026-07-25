@@ -165,6 +165,11 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
     mainProcess,
     /webContents\.send\(APP_CHANNELS\.workspaceUnavailable,\s*issue\)/,
   );
+  assert.match(
+    mainProcess,
+    /webContents\.send\(APP_CHANNELS\.workspaceUnavailable,\s*issue\);[\s\S]*?if \(rendererHasLoaded\) \{[\s\S]*?return;[\s\S]*?const options = \{/,
+    "a loaded renderer owns workspace recovery without a duplicate native modal",
+  );
   assert.match(mainProcess, /requestRendererClose/);
   assert.match(mainProcess, /if \(!rendererHasLoaded\)/);
   assert.match(mainProcess, /coordinateApplicationExit/);

@@ -5221,7 +5221,7 @@ async function waiveSoftValidation(body) {
         ignoredViolationCodes: requestedCodes,
         reason:
           cleanText(body.reason, 1000)
-          || "用户选择无视本轮软校验并继续生成版本。",
+          || "用户选择采用评论范围外的额外变化。",
         decidedAt,
       },
       updatedAt: decidedAt,

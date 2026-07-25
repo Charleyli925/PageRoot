@@ -5,7 +5,9 @@ Notable user-visible changes are documented here. This project follows Semantic 
 ## [Unreleased]
 
 - Automatically normalize persisted whole-page comments across restarts so legacy records no longer block Qoder submission or require users to reselect “全局评论”.
-- Classify recovery ownership before showing notifications, automatically resume deferred project opens and interrupted submissions, and give every persistent error an object-specific recovery action.
+- Make global notifications opt-in, automatically recover transient reads and unknown AI outcomes, and keep file, canvas, rule, attachment, and processing feedback in context instead of asking users to repeat failed actions.
+- Replace raw scope-code warnings with concise before/after summaries and an explicit “采用这些额外变化” decision.
+- Remove the product-level 100-comment cap while retaining virtualized rendering for large review rounds.
 
 ## [0.8.7] - 2026-07-24
 

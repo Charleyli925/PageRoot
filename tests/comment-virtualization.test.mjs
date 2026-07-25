@@ -4,9 +4,10 @@ import test from "node:test";
 import {
   commentMarkerGroupKey,
   COMMENT_VIRTUALIZATION_THRESHOLD,
-  MAX_COMMENT_COUNT,
   virtualizedCommentIds,
 } from "../app/lib/comment-virtualization.js";
+
+const COMMENT_STRESS_COUNT = 100;
 
 test("small comment sets render completely", () => {
   const ids = Array.from(
@@ -27,7 +28,7 @@ test("small comment sets render completely", () => {
 
 test("large comment sets render only the viewport window plus forced cards", () => {
   const ids = Array.from(
-    { length: MAX_COMMENT_COUNT },
+    { length: COMMENT_STRESS_COUNT },
     (_, index) => `comment_${index + 1}`,
   );
   const positions = Object.fromEntries(

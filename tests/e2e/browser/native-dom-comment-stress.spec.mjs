@@ -6,7 +6,7 @@ import {
   loadFixture,
 } from "./pageroot-driver.mjs";
 
-test("100 real comments stay bounded, virtualized, navigable, and capped", async ({ page }) => {
+test("more than 100 real comments stay bounded, virtualized, and navigable", async ({ page }) => {
   test.setTimeout(180_000);
   await page.goto("/");
   const { frame } = await loadFixture(
@@ -40,9 +40,8 @@ test("100 real comments stay bounded, virtualized, navigable, and capped", async
   await toolbar.getByRole("button", { name: /留评论/u }).click();
   await page.getByRole("textbox", { name: "评论内容" }).fill("压力评论 101");
   await page.getByRole("button", { name: "评论", exact: true }).click();
-  await expect(page.getByRole("status").filter({ hasText: "本轮评论已达上限" }))
-    .toBeVisible();
-  await expect(commentRail.locator(".comments-header h1")).toContainText("100");
-  await expect(page.getByRole("textbox", { name: "评论内容" }))
-    .toHaveValue("压力评论 101");
+  await expect(commentRail.locator(".comments-header h1")).toContainText("101");
+  await expect(commentRail.locator(".comment-card")
+    .filter({ hasText: "压力评论 101" })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "评论内容" })).toHaveCount(0);
 });

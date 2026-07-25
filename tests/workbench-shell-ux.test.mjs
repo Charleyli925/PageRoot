@@ -98,7 +98,10 @@ test("the right-side project panel keeps file actions concise and safe", () => {
   assert.doesNotMatch(workbench, />新建 HTML</);
   assert.doesNotMatch(workbench, /api\.newHtml/);
   assert.doesNotMatch(workbench, /className="project-switcher"|className="project-menu"/);
-  assert.match(workbench, /api\.showInFolder\(activeSourcePath\)/);
+  assert.match(
+    workbench,
+    /const showInFolder = window\.htmlAIProjects\?\.showInFolder[\s\S]*?withOneAutomaticRetry\(\(\) => showInFolder\(activeSourcePath\)\)/,
+  );
   assert.match(workbench, /formatProjectTimestamp\(project\.lastOpenedAt\)/);
   assert.doesNotMatch(workbench, /formatRecentProjectTimestamp/);
   assert.match(styles, /\.side-drawer\s*\{[\s\S]*?width:\s*min\(410px, calc\(100vw - 24px\)\)/);
@@ -404,7 +407,8 @@ test("QoderWork handoff exposes a truthful process board and manual open action"
   assert.match(workbench, /版本与文件完整性/);
   assert.doesNotMatch(workbench, /身份、Hash 与文件完整性/);
   assert.match(workbench, /范围与质量校验/);
-  assert.match(workbench, /无视本校验，继续/);
+  assert.match(workbench, /采用这些额外变化/);
+  assert.match(workbench, /AI 还修改了评论范围外的内容/);
   assert.match(workbench, /打开最新版/);
   const sendToQoderStart = workbench.indexOf("const sendToQoderWork = useCallback");
   const sendToQoderEnd = workbench.indexOf("const revealActiveRunInFinder", sendToQoderStart);
@@ -612,7 +616,7 @@ test("history opens concise immutable versions in the canvas with their comments
   );
   assert.match(
     workbench,
-    /const revealVersionInFinder = useCallback[\s\S]*?await api\.revealVersionFile\(\{[\s\S]*?versionId: version\.id/,
+    /const revealVersionInFinder = useCallback[\s\S]*?withOneAutomaticRetry\(\(\) => revealVersionFile\(\{[\s\S]*?versionId: version\.id/,
   );
   assert.match(
     workbench,

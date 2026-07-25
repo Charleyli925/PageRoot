@@ -25,20 +25,15 @@ function literalText(node) {
   return node && ts.isStringLiteralLike(node) ? node.text : null;
 }
 
-test("global notifications expose severity, persistence and actions", () => {
+test("global notifications are polite, policy-gated, and actionable", () => {
   assert.match(workbench, /noticeAutoDismissMs\(toast\)/);
   assert.match(workbench, /shouldPresentNotice\(next\)/);
   assert.match(workbench, /shouldReplaceNotice\(current, next\)/);
   assert.match(workbench, /<NoticeBar[\s\S]*?className="toast"/);
   assert.match(notice, /data-tone=\{tone\}/);
-  assert.match(
-    notice,
-    /role=\{tone === "error" \? "alert" : "status"\}/,
-  );
-  assert.match(
-    notice,
-    /aria-live=\{tone === "error" \? "assertive" : "polite"\}/,
-  );
+  assert.match(notice, /role="status"/);
+  assert.match(notice, /aria-live="polite"/);
+  assert.doesNotMatch(notice, /role="alert"|aria-live="assertive"/);
   assert.match(workbench, /action: \{ id: "retry-export"/);
   assert.match(workbench, /title: "副本没有导出"/);
   assert.match(notice, /onMouseEnter=\{\(\) => onPauseChange\?\.\(true\)\}/);
@@ -46,7 +41,7 @@ test("global notifications expose severity, persistence and actions", () => {
   assert.match(workbench, /setPausedNoticeIdentity\(paused \? noticeIdentity : null\)/);
 });
 
-test("literal critical notices always expose a concrete recovery action", () => {
+test("only explicit direct-action notices require a concrete recovery action", () => {
   const source = ts.createSourceFile(
     "workbench.tsx",
     workbench,
@@ -64,10 +59,9 @@ test("literal critical notices always expose a concrete recovery action", () => 
       && ts.isObjectLiteralExpression(node.arguments[0])
     ) {
       const object = node.arguments[0];
-      const tone = literalText(literalProperty(object, "tone"));
-      const sticky = literalProperty(object, "sticky")?.kind === ts.SyntaxKind.TrueKeyword;
+      const disposition = literalText(literalProperty(object, "disposition"));
       const action = literalProperty(object, "action");
-      if ((tone === "error" || sticky) && !action) {
+      if (disposition === "direct-action" && !action) {
         const { line } = source.getLineAndCharacterOfPosition(node.getStart(source));
         missing.push(line + 1);
       }
@@ -78,7 +72,12 @@ test("literal critical notices always expose a concrete recovery action", () => 
   assert.deepEqual(
     missing,
     [],
-    `critical notices without a literal action at lines: ${missing.join(", ")}`,
+    `direct-action notices without a literal action at lines: ${missing.join(", ")}`,
+  );
+  assert.doesNotMatch(
+    workbench,
+    /retry-(?:reconcile|cancel|ready-version|restore-version|view-history|reload|source-diff|ai-diff|attachment-preview|attachment-download)/u,
+    "automatic or contextual recovery must not be exposed as a duplicate retry toast",
   );
   assert.doesNotMatch(
     workbench,
@@ -121,8 +120,13 @@ test("canvas edit feedback is contextual, plain-language, and not duplicated glo
   assert.match(canvas, /sticky: false/u);
   assert.match(canvas, /recovery: "comment"/u);
   assert.match(canvas, /recovery: "reload"/u);
+  assert.match(canvas, /recovery: "none"/u);
+  assert.match(canvas, /showCommitBlocked/u);
   assert.match(canvas, /<NoticeBar[\s\S]*?placement="canvas"/u);
-  assert.match(canvas, /actionLabel=\{editFeedback\.recovery === "reload" \? reloadActionLabel : "添加评论"\}/u);
+  assert.match(
+    canvas,
+    /editFeedback\.recovery === "comment"[\s\S]*?\? "添加评论"[\s\S]*?: undefined/u,
+  );
   assert.match(canvas, /onRequestReload\?\.\(\)/u);
   assert.match(workbench, /if \(sourcePathRef\.current\)[\s\S]*?reloadCurrentSource\(\)[\s\S]*?openProject\(\)/u);
   assert.match(workbench, /reloadActionLabel=\{sourcePath \? "重新载入" : "重新选择"\}/u);
@@ -153,10 +157,10 @@ test("technical desktop error plumbing is absent from product copy", () => {
   );
 });
 
-test("critical notices are legible and their close action cannot wrap", () => {
+test("exceptional notices are legible and their close action cannot wrap", () => {
   assert.match(noticeStyles, /\.notice\[data-tone="error"\]/);
-  assert.match(noticeStyles, /\.copy strong\s*\{[\s\S]*?font-size:\s*12px/);
-  assert.match(noticeStyles, /\.copy > span\s*\{[\s\S]*?font-size:\s*10\.5px/);
+  assert.match(noticeStyles, /\.copy strong\s*\{[\s\S]*?font-size:\s*13px/);
+  assert.match(noticeStyles, /\.copy > span\s*\{[\s\S]*?font-size:\s*12px/);
   assert.match(
     noticeStyles,
     /\.actions button\s*\{[\s\S]*?min-height:\s*32px/,
@@ -187,18 +191,20 @@ test("file and attachment failures keep a real recovery path", () => {
   assert.match(workbench, /原文件没有被修改。请先转换为 UTF-8，再重新选择。/);
   assert.match(
     workbench,
-    /dedupeKey: "browser-file-error",[\s\S]*?id: "retry-project-open", label: "重新选择"/,
+    /disposition: "direct-action",[\s\S]*?dedupeKey: "browser-file-error",[\s\S]*?id: "retry-project-open", label: "重新选择"/,
   );
 });
 
-test("blocking paths expose an in-context recovery instead of a dead end", () => {
+test("blocking paths auto-recover or expose one in-context decision", () => {
   assert.match(workbench, /const BRIDGE_REQUEST_TIMEOUT_MS = 60_000/);
   assert.match(
     workbench,
     /timeoutMs = BRIDGE_STATE_READ_TIMEOUT_MS/,
   );
   assert.match(workbench, /const reconcilePendingRun = useCallback/);
-  assert.match(workbench, /重新核对任务状态/);
+  assert.match(workbench, /源页会自动继续核对/);
+  assert.match(workbench, /等待下一次自动核对/);
+  assert.doesNotMatch(workbench, /立即重新核对|重新核对任务状态/);
   assert.match(workbench, /重新打开源页/);
   assert.match(workbench, /fileView\.error \?/);
   assert.match(workbench, />重试读取</);

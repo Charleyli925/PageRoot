@@ -24,7 +24,7 @@ test("technical Electron IPC prefixes never reach the visible error copy", () =>
   assert.doesNotMatch(message, /Error invoking|html-projects|ProjectFileError/);
 });
 
-test("critical notices remain visible until dismissed", () => {
+test("only explicit decisions persist while background results expire", () => {
   assert.equal(noticeAutoDismissMs({ tone: "error" }), null);
   assert.equal(noticeAutoDismissMs({ tone: "warning", sticky: true }), null);
   assert.equal(
@@ -32,7 +32,22 @@ test("critical notices remain visible until dismissed", () => {
       tone: "info",
       action: { id: "retry", label: "重试" },
     }),
+    2_500,
+  );
+  assert.equal(
+    noticeAutoDismissMs({
+      disposition: "direct-action",
+      tone: "info",
+      action: { id: "choose", label: "选择新位置" },
+    }),
     null,
+  );
+  assert.equal(
+    noticeAutoDismissMs({
+      disposition: "background-result",
+      tone: "warning",
+    }),
+    7_000,
   );
   assert.equal(noticeAutoDismissMs({ tone: "warning" }), 5_000);
   assert.equal(noticeAutoDismissMs({ tone: "success" }), 2_500);
@@ -42,10 +57,15 @@ test("critical notices remain visible until dismissed", () => {
 test("ordinary visible state does not create another toast", () => {
   assert.equal(shouldPresentNotice({ tone: "success", dedupeKey: "qoder-handoff" }), false);
   assert.equal(shouldPresentNotice({ tone: "info", dedupeKey: "current-version-result" }), false);
-  assert.equal(shouldPresentNotice({ tone: "warning", dedupeKey: "preview-commit-blocked" }), true);
-  assert.equal(shouldPresentNotice({ tone: "warning", dedupeKey: "project-rules-unsaved" }), true);
-  assert.equal(shouldPresentNotice({ tone: "error", dedupeKey: "project-open-error" }), true);
-  assert.equal(shouldPresentNotice({ tone: "success", action: { id: "open-project" } }), true);
+  assert.equal(shouldPresentNotice({ tone: "warning", dedupeKey: "preview-commit-blocked" }), false);
+  assert.equal(shouldPresentNotice({ tone: "warning", dedupeKey: "project-rules-unsaved" }), false);
+  assert.equal(shouldPresentNotice({ tone: "error", dedupeKey: "project-open-error" }), false);
+  assert.equal(shouldPresentNotice({ tone: "success", action: { id: "open-project" } }), false);
+  assert.equal(shouldPresentNotice({
+    disposition: "background-result",
+    tone: "success",
+    action: { id: "open-project" },
+  }), true);
 });
 
 test("recovery ownership is decided before presentation", () => {
@@ -59,7 +79,7 @@ test("recovery ownership is decided before presentation", () => {
   );
   assert.equal(
     noticeDisposition({ tone: "warning", action: { id: "retry" } }),
-    "direct-action",
+    "inform-in-place",
   );
   assert.equal(
     noticeDisposition({
@@ -67,7 +87,7 @@ test("recovery ownership is decided before presentation", () => {
       sticky: true,
       dedupeKey: "project-rules-unsaved",
     }),
-    "user-choice",
+    "inform-in-place",
   );
   assert.equal(
     shouldPresentNotice({
@@ -121,6 +141,7 @@ test("low-priority feedback cannot hide a persistent critical notice", () => {
     shouldReplaceNotice(
       { tone: "error", sticky: true, title: "旧问题" },
       {
+        disposition: "direct-action",
         tone: "warning",
         sticky: true,
         title: "当前操作需要决定",
@@ -146,6 +167,7 @@ test("low-priority feedback cannot hide a persistent critical notice", () => {
         message: "磁盘不可写",
       },
       {
+        disposition: "background-result",
         tone: "success",
         dedupeKey: "export",
         title: "副本已导出",

@@ -1391,6 +1391,12 @@ async function showWorkspaceUnavailableRecovery() {
   };
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send(APP_CHANNELS.workspaceUnavailable, issue);
+    if (rendererHasLoaded) {
+      // The renderer owns recovery once it can show the persistent workspace
+      // banner. A second native modal would duplicate the same decision and
+      // interrupt whichever task the user is doing.
+      return;
+    }
   }
   if (workspaceFailurePrompt) return workspaceFailurePrompt;
   const options = {

@@ -1187,7 +1187,7 @@ test("a soft scope finding requires an audited waiver before the Version becomes
       requestId: run.requestId,
       attemptId: run.attemptId,
       violationCodes: pending.body.validationReview.softViolationCodes,
-      reason: "用户点击无视本校验，继续。",
+      reason: "用户选择采用评论范围外的额外变化。",
     },
   );
   assert.equal(waived.response.status, 200, JSON.stringify(waived.body));
@@ -1214,7 +1214,10 @@ test("a soft scope finding requires an audited waiver before the Version becomes
     await readFile(join(run.attemptPath, "validation-review.json"), "utf8"),
   );
   assert.equal(persistedReview.status, "waived");
-  assert.equal(persistedReview.waiver.reason, "用户点击无视本校验，继续。");
+  assert.equal(
+    persistedReview.waiver.reason,
+    "用户选择采用评论范围外的额外变化。",
+  );
 });
 
 test("workspace lifecycle surfaces soft scope classes for a user decision and reuses a cancelled candidate", async (t) => {

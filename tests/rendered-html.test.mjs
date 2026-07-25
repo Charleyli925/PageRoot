@@ -458,8 +458,8 @@ test("handoff fails closed before locking when a comment target is unsafe", asyn
 
   for (const required of [
     "const unsafeTargets = activeComments.filter(",
-    "请重新选择失联的评论目标",
-    "评论和附件仍保留；重新关联后即可发送",
+    "条评论需要重新定位",
+    "评论和附件已保留",
     "beginTargetRelink",
     "本轮没有提交",
     "activeCommentCount === 0",

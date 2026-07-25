@@ -255,6 +255,8 @@ export type HtmlCanvasEditorHandle = {
   freezeNow: () => HtmlCanvasFreezeSnapshot;
   /** Releases an imperative freeze when the controlled mode is editing. */
   unlockNow: () => boolean;
+  /** Keeps a failed commit explanation beside the canvas instead of escalating it globally. */
+  showCommitBlocked: (reason?: string) => void;
   undo: () => boolean;
   canUndo: () => boolean;
   /** True while source-uncommitted native text or marked text still exists. */
@@ -516,7 +518,7 @@ type EditFeedback = {
   message: string;
   tone: "warning" | "error";
   sticky: boolean;
-  recovery: "comment" | "reload";
+  recovery: "comment" | "reload" | "none";
 };
 
 type EditorHistoryEntry = {
@@ -5463,6 +5465,17 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     return true;
   }, [controlledInteractionLocked, enableReorder, readOnly, updateOverlayPosition]);
 
+  const showCommitBlocked = useCallback((reason?: string) => {
+    setEditFeedback({
+      title: "当前文字还在处理中",
+      message: reason
+        || "请点回文字完成输入；已输入的内容仍保留在画布中。",
+      tone: "warning",
+      sticky: false,
+      recovery: "none",
+    });
+  }, []);
+
   const api = useMemo<HtmlCanvasEditorHandle>(
     () => ({
       getSourceHtml: () => frameSourceHtmlRef.current,
@@ -5472,6 +5485,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       commitPendingEdit,
       freezeNow,
       unlockNow,
+      showCommitBlocked,
       undo,
       canUndo: () => Boolean(
         undoStackRef.current.length > 0
@@ -5501,6 +5515,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       moveSelected,
       redo,
       selectTarget,
+      showCommitBlocked,
       startEditing,
       undo,
       unlockNow,
@@ -6362,6 +6377,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       onRequestReload?.();
       return;
     }
+    if (recovery !== "comment") return;
     const target = selectedSourceSelectionRef.current;
     if (target) {
       onRequestCommentRef.current?.(target);
@@ -6371,7 +6387,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   }, [editFeedback?.recovery, onRequestReload, requestGlobalComment]);
   const editFeedbackActionAvailable = editFeedback?.recovery === "reload"
     ? Boolean(onRequestReload)
-    : Boolean(onRequestComment);
+    : editFeedback?.recovery === "comment" && Boolean(onRequestComment);
 
   return (
     <div
@@ -6409,7 +6425,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           title={editFeedback.title}
           message={editFeedback.message}
           tone={editFeedback.tone}
-          actionLabel={editFeedback.recovery === "reload" ? reloadActionLabel : "添加评论"}
+          actionLabel={editFeedback.recovery === "reload"
+            ? reloadActionLabel
+            : editFeedback.recovery === "comment"
+              ? "添加评论"
+              : undefined}
           onAction={editFeedbackActionAvailable ? handleEditFeedbackAction : undefined}
           onDismiss={() => setEditFeedback(null)}
           onPauseChange={setEditFeedbackPaused}

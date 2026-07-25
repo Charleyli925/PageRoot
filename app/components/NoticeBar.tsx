@@ -60,8 +60,8 @@ export default function NoticeBar({
     <section
       className={classes}
       data-tone={tone}
-      role={tone === "error" ? "alert" : "status"}
-      aria-live={tone === "error" ? "assertive" : "polite"}
+      role="status"
+      aria-live="polite"
       aria-atomic="true"
       onMouseEnter={() => onPauseChange?.(true)}
       onMouseLeave={() => onPauseChange?.(false)}
