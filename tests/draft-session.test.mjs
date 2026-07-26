@@ -181,14 +181,57 @@ test("a final drain verifies an unchanged acknowledged draft without a write", a
   const session = new DraftSession({ bridgeClient: client });
   session.activate(context, 106, authoritative(106, {
     comments: [{ commentId: "comment_1", text: "same" }],
+    deletedCommentIds: ["comment_already_deleted"],
   }));
   const snapshot = session.createSnapshot({
     comments: [{ commentId: "comment_1", text: "same" }],
+    deletedCommentIds: [],
   });
 
   assert.equal(await session.drain(snapshot), true);
   assert.equal(writes, 0);
   assert.equal(session.revision, 106);
+});
+
+test("an acknowledged deletion does not create a second no-op revision", async () => {
+  const writes = [];
+  const client = {
+    async saveDraft(write) {
+      writes.push(write);
+      return {
+        ok: true,
+        activeDraft: authoritative(write.expectedDraftRevision + 1, {
+          comments: [],
+          deletedCommentIds: ["comment_deleted"],
+          appliedOperationIds: [write.operationId],
+        }),
+      };
+    },
+    async workspace() {
+      return {};
+    },
+  };
+  const session = new DraftSession({ bridgeClient: client });
+  session.activate(context, 8, authoritative(8, {
+    comments: [{
+      commentId: "comment_deleted",
+      text: "remove me",
+    }],
+  }));
+
+  assert.equal(await session.drain(session.createSnapshot({
+    comments: [],
+    deletedCommentIds: ["comment_deleted"],
+  })), true);
+  assert.equal(writes.length, 1);
+  assert.equal(session.revision, 9);
+
+  assert.equal(await session.drain(session.createSnapshot({
+    comments: [],
+    deletedCommentIds: [],
+  })), true);
+  assert.equal(writes.length, 1);
+  assert.equal(session.revision, 9);
 });
 
 test("an older in-flight failure cannot replace a newer pending aggregate", async () => {

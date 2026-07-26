@@ -103,6 +103,8 @@ export class DraftSession {
 
   #acknowledgedFingerprint = null;
 
+  #acknowledgedDraft = null;
+
   constructor({
     bridgeClient,
     encodeComment = (value) => value,
@@ -142,8 +144,11 @@ export class DraftSession {
       this.#lastError = null;
       this.#activeContext = nextContext;
       this.#revision = normalizedRevision(authoritativeRevision);
-      this.#acknowledgedFingerprint = authoritativeDraft
-        ? draftFingerprint(normalizeAuthoritativeDraft(authoritativeDraft))
+      this.#acknowledgedDraft = authoritativeDraft
+        ? normalizeAuthoritativeDraft(authoritativeDraft)
+        : null;
+      this.#acknowledgedFingerprint = this.#acknowledgedDraft
+        ? draftFingerprint(this.#acknowledgedDraft)
         : null;
       return true;
     }
@@ -152,8 +157,11 @@ export class DraftSession {
       normalizedRevision(authoritativeRevision),
     );
     if (authoritativeDraft) {
+      this.#acknowledgedDraft = normalizeAuthoritativeDraft(
+        authoritativeDraft,
+      );
       this.#acknowledgedFingerprint = draftFingerprint(
-        normalizeAuthoritativeDraft(authoritativeDraft),
+        this.#acknowledgedDraft,
       );
     }
     return true;
@@ -170,8 +178,11 @@ export class DraftSession {
     this.#lastError = null;
     this.#activeContext = nextContext;
     this.#revision = normalizedRevision(authoritativeRevision);
-    this.#acknowledgedFingerprint = authoritativeDraft
-      ? draftFingerprint(normalizeAuthoritativeDraft(authoritativeDraft))
+    this.#acknowledgedDraft = authoritativeDraft
+      ? normalizeAuthoritativeDraft(authoritativeDraft)
+      : null;
+    this.#acknowledgedFingerprint = this.#acknowledgedDraft
+      ? draftFingerprint(this.#acknowledgedDraft)
       : null;
     return true;
   }
@@ -183,6 +194,7 @@ export class DraftSession {
     this.#pending = null;
     this.#lastError = null;
     this.#acknowledgedFingerprint = null;
+    this.#acknowledgedDraft = null;
   }
 
   isActive(context) {
@@ -229,11 +241,16 @@ export class DraftSession {
 
   queue(snapshot) {
     if (!sameContext(this.#activeContext, snapshot)) return false;
-    const fingerprint = draftFingerprint({
+    const encoded = {
       comments: snapshot.comments.map(this.#encodeComment),
       changeEvents: snapshot.changeEvents.map(this.#encodeChangeEvent),
       deletedCommentIds: snapshot.deletedCommentIds,
-    });
+    };
+    const fingerprint = draftFingerprint(
+      this.#acknowledgedDraft
+        ? rebaseDraftMutation(encoded, this.#acknowledgedDraft)
+        : encoded,
+    );
     if (
       !this.#pending
       && !this.#lastError
@@ -351,6 +368,7 @@ export class DraftSession {
         this.#acknowledgedFingerprint = draftFingerprint(
           result.authoritative,
         );
+        this.#acknowledgedDraft = result.authoritative;
         if (this.#pending && sameContext(this.#pending, write)) {
           this.#pending = rebaseDraftMutation(
             this.#pending,
