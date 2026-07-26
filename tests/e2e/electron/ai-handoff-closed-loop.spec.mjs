@@ -186,7 +186,10 @@ async function waitForProjectReady(page, timeout = 60_000) {
     const state = await page.locator("main.workbench").getAttribute("data-project-state");
     if (state === "ready") return state;
     const stage = await page.evaluate(() => window.__PAGEROOT_HYDRATION_STAGE__);
-    return `${state}:${stage || "unmarked"}`;
+    const visibleFailure = state === "failed"
+      ? await page.locator('[aria-label="项目读取失败"]').textContent().catch(() => "")
+      : "";
+    return `${state}:${stage || "unmarked"}:${visibleFailure || "no-detail"}`;
   }, { timeout }).toBe("ready");
 }
 
@@ -355,6 +358,8 @@ function rewriteWorkspaceDraftComment(workspace, text, update) {
       : null;
     if (!comment) continue;
     update(comment);
+    draft.draftRevision = Math.max(0, Number(draft.draftRevision) || 0) + 1;
+    draft.updatedAt = new Date().toISOString();
     writeFileSync(draftPath, `${JSON.stringify(draft, null, 2)}\n`, "utf8");
     return true;
   }
@@ -732,11 +737,18 @@ test("a clipboard handoff failure keeps the frozen Request recoverable", async (
       .toBe(clipboardSentinel);
     await expect(launched.page.getByRole("button", { name: "复制失败 · 查看" }))
       .toBeVisible();
-    const handoffError = launched.page.getByRole("alert")
-      .filter({ hasText: "交接内容还没有复制" });
+    const processingDialog = launched.page.getByRole("dialog", { name: "本轮处理" });
+    const handoffError = processingDialog.getByText(
+      "交接内容尚未复制",
+      { exact: true },
+    );
     await expect(handoffError).toBeVisible();
-    await handoffError.getByRole("button", { name: "关闭提醒" }).click();
-    await expect(handoffError).toBeHidden();
+    await expect(launched.page.getByRole("alert")
+      .filter({ hasText: "交接内容还没有复制" })).toHaveCount(0);
+    await processingDialog.getByRole("button", { name: "关闭处理面板" }).click();
+    await expect(processingDialog).toBeHidden();
+    await launched.page.getByRole("button", { name: "复制失败 · 查看" }).click();
+    await expect(processingDialog).toBeVisible();
     const retryCopy = launched.page.getByRole("button", { name: "重新复制本轮要求" });
     await expect(retryCopy).toBeVisible();
     await retryCopy.click();
@@ -768,15 +780,17 @@ test("a failed handoff in project A does not block project B or replace its stat
   try {
     await addComment(launched.page, projectA.sourcePath);
     await launched.page.getByRole("button", { name: /发送至 Qoder/u }).click();
-    await expect(launched.page.getByRole("alert")
-      .filter({ hasText: "交接内容还没有复制" }))
+    const processingDialog = launched.page.getByRole("dialog", { name: "本轮处理" });
+    await expect(processingDialog.getByText(
+      "交接内容尚未复制",
+      { exact: true },
+    ))
       .toBeVisible({ timeout: 30_000 });
     await expect.poll(
       () => requestDirectoryCount(launched.workspace),
       { timeout: 20_000 },
     ).toBe(1);
 
-    const processingDialog = launched.page.getByRole("dialog", { name: "本轮处理" });
     await expect(processingDialog).toBeVisible();
     await launched.page.keyboard.press("Escape");
     await expect(processingDialog).toBeHidden();
@@ -866,43 +880,38 @@ test("an unknown Request outcome stays fail-closed and reconciles automatically"
   const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
   try {
     await addComment(launched.page, fixture.sourcePath);
-    await launched.page.evaluate(() => {
-      const originalFetch = window.fetch.bind(window);
-      let requestDispatched = false;
-      window.__PAGEROOT_ALLOW_UNKNOWN_REQUEST_RECONCILE__ = false;
-      window.fetch = async (input, init) => {
-        const url = new URL(
-          typeof input === "string" ? input : input instanceof URL ? input.href : input.url,
-          window.location.href,
-        );
-        if (url.pathname === "/request" && !requestDispatched) {
-          requestDispatched = true;
-          const response = await originalFetch(input, init);
-          if (!response.ok) return response;
-          throw new DOMException(
-            "Test injected an unknown POST outcome.",
-            "TimeoutError",
-          );
+    let requestDispatched = false;
+    let allowUnknownRequestReconcile = false;
+    const bridgeRoute = "**/*";
+    const injectUnknownRequestOutcome = async (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname === "/request" && !requestDispatched) {
+        requestDispatched = true;
+        const response = await route.fetch();
+        if (!response.ok()) {
+          await route.fulfill({ response });
+          return;
         }
-        if (
-          url.pathname === "/workspace"
-          && requestDispatched
-          && !window.__PAGEROOT_ALLOW_UNKNOWN_REQUEST_RECONCILE__
-        ) {
-          throw new DOMException(
-            "Test keeps reconciliation unavailable.",
-            "TimeoutError",
-          );
-        }
-        return originalFetch(input, init);
-      };
-    });
+        await route.abort("timedout");
+        return;
+      }
+      if (
+        url.pathname === "/workspace"
+        && requestDispatched
+        && !allowUnknownRequestReconcile
+      ) {
+        await route.abort("timedout");
+        return;
+      }
+      await route.continue();
+    };
+    await launched.page.route(bridgeRoute, injectUnknownRequestOutcome);
 
     await launched.page.getByRole("button", { name: /发送至 Qoder/u }).click();
     await expect(launched.page.getByText(
       "正在确认这次发送是否成功",
       { exact: true },
-    )).toBeVisible({ timeout: 30_000 });
+    ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
     await expect(launched.page.getByRole("button", { name: "立即重新核对" }))
       .toHaveCount(0);
     await expect(launched.page.getByRole("button", { name: "重新打开源页" }).first())
@@ -912,13 +921,12 @@ test("an unknown Request outcome stays fail-closed and reconciles automatically"
       { timeout: 20_000 },
     ).toBe(1);
 
-    await launched.page.evaluate(() => {
-      window.__PAGEROOT_ALLOW_UNKNOWN_REQUEST_RECONCILE__ = true;
-    });
+    allowUnknownRequestReconcile = true;
     await expect(launched.page.getByText(
       "等待 QoderWork 返回修改结果",
       { exact: true },
     )).toBeVisible({ timeout: 20_000 });
+    await launched.page.unroute(bridgeRoute, injectUnknownRequestOutcome);
     await expect(launched.page.getByRole("button", {
       name: "取消发送，继续编辑",
     })).toBeEnabled();
@@ -930,7 +938,7 @@ test("an unknown Request outcome stays fail-closed and reconciles automatically"
   }
 });
 
-test("project resources expose clear rules and protect unsaved edits", async () => {
+test("project resources expose clear rules and drain edits before leaving", async () => {
   const fixture = createSourceFixture("project-resources.html");
   const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
   try {
@@ -957,20 +965,31 @@ test("project resources expose clear rules and protect unsaved edits", async () 
     await expect(launched.page.getByText("管理 AI 修改规则", { exact: true }))
       .toBeVisible();
     await expect(launched.page.getByText(
-      "每次发送至 Qoder 时，源页都会把这份规则与本轮要求一起交接。保存只影响后续任务，不会修改当前 HTML。",
+      "修改会自动保存。每次发送至 Qoder 时，源页都会把这份规则与本轮要求一起交接；规则只影响后续任务，不会修改当前 HTML。",
       { exact: true },
     )).toBeVisible();
     const rulesEditor = launched.page.getByRole("textbox", { name: "项目长期规则" });
     await expect(rulesEditor).toBeEnabled();
     const originalRules = await rulesEditor.inputValue();
-    await rulesEditor.fill(`${originalRules}\n\n- 测试未保存保护`);
+    const updatedRules = `${originalRules}\n\n- 测试自动保存保护`;
+    await rulesEditor.fill(updatedRules);
     await launched.page.getByRole("button", { name: "返回项目" }).click();
-    await expect(launched.page.getByText(
-      "项目规则还有未保存修改",
-      { exact: true },
-    )).toBeVisible();
-    await expect(rulesEditor).toBeVisible();
+    await expect(launched.page.getByText("当前文件", { exact: true })).toBeVisible();
+    const projectsRoot = path.join(launched.workspace, "projects");
+    const [projectId] = readdirSync(projectsRoot)
+      .filter((entry) => !entry.startsWith("."));
+    const projectRulesPath = path.join(projectsRoot, projectId, "PROJECT.md");
+    await expect.poll(
+      () => readFileSync(projectRulesPath, "utf8"),
+      { timeout: 20_000 },
+    ).toBe(updatedRules);
+
+    await launched.page.getByText("项目资料", { exact: true }).click();
+    await rulesButton.click();
+    await expect(rulesEditor).toHaveValue(updatedRules);
+    await rulesEditor.fill(`${updatedRules}\n- 这行只用于验证还原`);
     await launched.page.getByRole("button", { name: "还原修改" }).click();
+    await expect(rulesEditor).toHaveValue(updatedRules);
     await launched.page.getByRole("button", { name: "返回项目" }).click();
     await expect(launched.page.getByText("当前文件", { exact: true })).toBeVisible();
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
