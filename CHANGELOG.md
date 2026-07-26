@@ -9,6 +9,7 @@ Notable user-visible changes are documented here. This project follows Semantic 
 - Make global notifications opt-in, automatically recover transient reads and unknown AI outcomes, and keep file, canvas, rule, attachment, and processing feedback in context instead of asking users to repeat failed actions.
 - Replace raw scope-code warnings with concise before/after summaries and an explicit “采用这些额外变化” decision.
 - Remove the product-level 100-comment cap while retaining virtualized rendering for large review rounds.
+- Restored full-fidelity rendering for the frozen HTML preview and made preview/history return bars auto-collapse into a discoverable 2px edge that reopens on hover, focus or click.
 
 ## [0.8.7] - 2026-07-24
 

@@ -479,6 +479,32 @@ test("QoderWork handoff exposes a truthful process board and manual open action"
   assert.ok(cancel >= 0 && preview > cancel && copy > preview);
   assert.match(footer, /activeRun\.status === "ready-to-open"[\s\S]*?打开最新版/);
   assert.match(workbench, /正在预览已发送 HTML[\s\S]*?返回等待处理/);
+  assert.match(workbench, /const PREVIEW_NAVIGATION_AUTO_COLLAPSE_MS = 3_500/);
+  assert.equal(
+    [...workbench.matchAll(/<PreviewNavigationBanner/g)].length,
+    2,
+  );
+  assert.match(
+    workbench,
+    /onMouseMove=\{\(\) => \{[\s\S]*?if \(collapsed\) setCollapsed\(false\)/,
+  );
+  assert.match(
+    workbench,
+    /data-handoff-preview=\{runInProgress && handoffPreviewOpen \? "true" : undefined\}/,
+  );
+  assert.match(
+    styles,
+    /\[data-handoff-preview="true"\] > \.review-scroll-stage\s*\{[\s\S]*?filter:\s*none;[\s\S]*?opacity:\s*1;/,
+  );
+  assert.match(
+    styles,
+    /\.preview-navigation-banner\[data-collapsed="true"\]\s*\{[\s\S]*?translateY\(-100%\)/,
+  );
+  assert.match(styles, /\.preview-banner-reveal:focus-visible/);
+  assert.match(
+    styles,
+    /@media \(prefers-reduced-motion: reduce\)\s*\{[\s\S]*?\.preview-navigation-banner/,
+  );
   const processingHeaderStart = workbench.indexOf(
     '<header className="drawer-header processing-header">',
   );
