@@ -4,6 +4,10 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+## [0.8.9] - 2026-07-26
+
+- Treat already acknowledged deletion tombstones as durable Bridge authority when comparing draft content, so unchanged close and restart drains no longer create redundant operation IDs or advance the draft revision.
+
 ## [0.8.8] - 2026-07-26
 
 - Unified project, document, draft, run and close ownership behind typed application services so the renderer and Bridge can no longer advance different identities or revisions.
@@ -70,7 +74,8 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 - Published the first public macOS release in this repository under the earlier YuanYe artifact name.
 
-[Unreleased]: https://github.com/Charleyli925/PageRoot/compare/v0.8.8...HEAD
+[Unreleased]: https://github.com/Charleyli925/PageRoot/compare/v0.8.9...HEAD
+[0.8.9]: https://github.com/Charleyli925/PageRoot/compare/v0.8.8...v0.8.9
 [0.8.8]: https://github.com/Charleyli925/PageRoot/compare/v0.8.7...v0.8.8
 [0.8.7]: https://github.com/Charleyli925/PageRoot/compare/v0.8.6...v0.8.7
 [0.8.6]: https://github.com/Charleyli925/PageRoot/compare/v0.8.5...v0.8.6
