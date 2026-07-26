@@ -114,7 +114,7 @@ async function handledInputEvents(frame) {
 }
 
 test("every exact collapsed DOM point at A/inline/B boundaries is blocked", async ({ page }) => {
-  const { editor, frame } = await openFixture(page);
+  const { frame } = await openFixture(page);
   const target = await attemptDirectEdit(frame, "exact-boundaries");
   await expect(target).toHaveAttribute("contenteditable", "plaintext-only");
   // A document bubble listener runs after NativeEditingController's target
@@ -136,7 +136,6 @@ test("every exact collapsed DOM point at A/inline/B boundaries is blocked", asyn
       });
       expect(events.some((event) => event.type === "input")).toBe(false);
       expect(await authoredInnerHtml(target)).toBe("<em><strong>A</strong></em>B");
-      expect(await editor.getAttribute("data-undo-depth")).toBe("0");
     });
   }
 
@@ -163,7 +162,6 @@ test("a non-collapsed replacement at the same wrapper endpoints remains native",
 
   await expect(target).toHaveText("XB");
   expect(await authoredInnerHtml(target)).toBe("<em><strong>X</strong></em>B");
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
   expect(await editor.getAttribute("data-edit-block-detail")).toBeNull();
   const expected = Buffer.from(source.toString("utf8").replace(
     "<strong>A</strong>",
@@ -173,7 +171,7 @@ test("a non-collapsed replacement at the same wrapper endpoints remains native",
 });
 
 test("a strict text-node interior offset remains a native source-exact edit", async ({ page }) => {
-  const { editor, frame } = await openFixture(page);
+  const { frame } = await openFixture(page);
   const target = await attemptDirectEdit(frame, "inline-interior");
   await expect(target).toHaveAttribute("contenteditable", "plaintext-only");
   await target.evaluate((element) => {
@@ -192,7 +190,6 @@ test("a strict text-node interior offset remains a native source-exact edit", as
 
   await expect(target).toHaveText("AXBC");
   expect(await authoredInnerHtml(target)).toBe("<em><strong>AXB</strong></em>C");
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
   const expected = Buffer.from(source.toString("utf8").replace(
     "<strong>AB</strong>",
     "<strong>AXB</strong>",
@@ -201,7 +198,7 @@ test("a strict text-node interior offset remains a native source-exact edit", as
 });
 
 test("an empty transparent wrapper rejects the whole direct-edit island", async ({ page }) => {
-  const { editor, frame } = await openFixture(page);
+  const { frame } = await openFixture(page);
   const target = await attemptDirectEdit(frame, "empty-wrapper");
 
   await expect(page.locator('[role="status"], [role="alert"]').filter({
@@ -214,12 +211,11 @@ test("an empty transparent wrapper rejects the whole direct-edit island", async 
   await page.keyboard.insertText("不应写入");
 
   expect(await target.textContent()).toBe("AB");
-  expect(await editor.getAttribute("data-undo-depth")).toBe("0");
   expect((await exportCurrentHtml(page)).equals(source)).toBe(true);
 });
 
 test("the first IME beforeinput cancels the boundary epoch and restores hostile late tails", async ({ page }) => {
-  const { editor, frame } = await openFixture(page);
+  const { frame } = await openFixture(page);
   const target = await attemptDirectEdit(frame, "exact-boundaries");
   await expect(target).toHaveAttribute("contenteditable", "plaintext-only");
   await setExactBoundaryPoint(target, "b-text-start");
@@ -299,7 +295,6 @@ test("the first IME beforeinput cancels the boundary epoch and restores hostile 
   expect(result.htmlAfterCompositionTail).not.toContain("你");
   expect(result.htmlAfterTerminalTail).not.toContain("你");
   expect(await authoredInnerHtml(target)).toBe("<em><strong>A</strong></em>B");
-  expect(await editor.getAttribute("data-undo-depth")).toBe("0");
 
   const preventedBeforeInputs = (await handledInputEvents(frame)).filter(
     (event) => event.type === "beforeinput" && event.defaultPrevented,

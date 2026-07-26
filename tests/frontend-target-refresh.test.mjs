@@ -19,7 +19,7 @@ function resolvedElement(index, targetRef) {
   return resolution.target;
 }
 
-test("a tracked comment stays on the same unstable element after text edit and undo", () => {
+test("a tracked comment stays on the same unstable element after text edit and inverse restoration", () => {
   const source = "<!doctype html><html><body><main><p>before</p></main></body></html>";
   const index = buildSourceIndex(source);
   const paragraph = index.elements.find((element) => element.tagName === "p");
@@ -52,16 +52,16 @@ test("a tracked comment stays on the same unstable element after text edit and u
   assert.equal(refreshed.sourceAnchor?.sourceSha256, applied.sourceSha256);
   assert.equal(resolvedElement(applied.sourceIndex, refreshed).textContent, "after");
 
-  const undone = applyPatchPlan(applied.inversePlan, applied.html, {
+  const restoredResult = applyPatchPlan(applied.inversePlan, applied.html, {
     trackedTargetRefs: [refreshed],
   });
-  const restored = undone.refreshedTrackedTargetRefs.find(
+  const restored = restoredResult.refreshedTrackedTargetRefs.find(
     (target) => target.targetId === "target_comment",
   );
-  assert.equal(undone.html, source);
+  assert.equal(restoredResult.html, source);
   assert.ok(restored);
   assert.equal(restored.targetId, commentTarget.targetId);
-  assert.equal(resolvedElement(undone.sourceIndex, restored).textContent, "before");
+  assert.equal(resolvedElement(restoredResult.sourceIndex, restored).textContent, "before");
 });
 
 test("a comment on a split block never silently follows the wrong half", () => {
@@ -121,26 +121,26 @@ test("a comment on a split block never silently follows the wrong half", () => {
   );
   assert.equal(mapping("target_crossing").resolution, "ambiguous");
 
-  const undone = applyPatchPlan(applied.inversePlan, applied.html);
-  assert.equal(undone.html, source);
+  const restoredResult = applyPatchPlan(applied.inversePlan, applied.html);
+  assert.equal(restoredResult.html, source);
   for (const targetId of [
     "target_shared",
     "target_first",
     "target_second",
     "target_crossing",
   ]) {
-    const restored = undone.targetMappings.find((candidate) => (
+    const restored = restoredResult.targetMappings.find((candidate) => (
       candidate.targetId === targetId && candidate.tracked
     ));
     assert.equal(restored.resolution, "exact");
     assert.equal(
-      undone.sourceIndex.byNodeId.get(restored.afterNodeId).textContent,
+      restoredResult.sourceIndex.byNodeId.get(restored.afterNodeId).textContent,
       "前段评论后段",
     );
   }
 });
 
-test("a tracked comment follows its exact sibling through reorder and undo", () => {
+test("a tracked comment follows its exact sibling through reorder and inverse restoration", () => {
   const source = [
     "<!doctype html><html><body><main>",
     "<section><p>one</p></section>",
@@ -178,20 +178,20 @@ test("a tracked comment follows its exact sibling through reorder and undo", () 
   assert.equal(moved.textContent, "one");
   assert.equal(moved.siblingIndex, 1);
 
-  const undone = applyPatchPlan(applied.inversePlan, applied.html, {
+  const restoredResult = applyPatchPlan(applied.inversePlan, applied.html, {
     trackedTargetRefs: [refreshed],
   });
-  const restored = undone.refreshedTrackedTargetRefs.find(
+  const restored = restoredResult.refreshedTrackedTargetRefs.find(
     (target) => target.targetId === "target_reorder_comment",
   );
-  assert.equal(undone.html, source);
+  assert.equal(restoredResult.html, source);
   assert.ok(restored);
-  const originalPosition = resolvedElement(undone.sourceIndex, restored);
+  const originalPosition = resolvedElement(restoredResult.sourceIndex, restored);
   assert.equal(originalPosition.textContent, "one");
   assert.equal(originalPosition.siblingIndex, 0);
 });
 
-test("consecutive source-backed moves remain serializable through undo and redo", () => {
+test("consecutive source-backed moves remain serializable through inverse round trips", () => {
   const source = [
     "<!doctype html><html><body><main>",
     '<section data-key="a">A</section>',
@@ -207,7 +207,7 @@ test("consecutive source-backed moves remain serializable through undo and redo"
     currentIndex.elements.find((element) => element.stableAttributes["data-key"] === "a"),
     { targetId: "rapid-reorder-a", level: "module" },
   );
-  const history = [];
+  const roundTripPlans = [];
   const order = (index) => {
     const parent = index.elements.find((element) => element.tagName === "main");
     assert.ok(parent);
@@ -228,7 +228,7 @@ test("consecutive source-backed moves remain serializable through undo and redo"
       expectedSourceSha256: currentIndex.sourceSha256,
     }, currentIndex);
     const applied = applyPatchPlan(forwardPlan, currentSource);
-    history.push({ forwardPlan, inversePlan: applied.inversePlan });
+    roundTripPlans.push({ forwardPlan, inversePlan: applied.inversePlan });
     currentSource = applied.html;
     currentIndex = applied.sourceIndex;
     movingTarget = applied.refreshedTargetRefs.find(
@@ -239,20 +239,20 @@ test("consecutive source-backed moves remain serializable through undo and redo"
   }
   assert.deepEqual(order(currentIndex), ["b", "c", "d", "a"]);
 
-  const redoPlans = [];
-  for (const entry of history.toReversed()) {
-    const undone = applyPatchPlan(entry.inversePlan, currentSource);
-    redoPlans.push(undone.inversePlan);
-    currentSource = undone.html;
-    currentIndex = undone.sourceIndex;
+  const reapplyPlans = [];
+  for (const entry of roundTripPlans.toReversed()) {
+    const restoredResult = applyPatchPlan(entry.inversePlan, currentSource);
+    reapplyPlans.push(restoredResult.inversePlan);
+    currentSource = restoredResult.html;
+    currentIndex = restoredResult.sourceIndex;
   }
   assert.equal(currentSource, source);
   assert.deepEqual(order(currentIndex), ["a", "b", "c", "d"]);
 
-  for (const redoPlan of redoPlans.toReversed()) {
-    const redone = applyPatchPlan(redoPlan, currentSource);
-    currentSource = redone.html;
-    currentIndex = redone.sourceIndex;
+  for (const reapplyPlan of reapplyPlans.toReversed()) {
+    const reapplied = applyPatchPlan(reapplyPlan, currentSource);
+    currentSource = reapplied.html;
+    currentIndex = reapplied.sourceIndex;
   }
   assert.deepEqual(order(currentIndex), ["b", "c", "d", "a"]);
 });
@@ -316,7 +316,6 @@ test("canvas and workbench consume deterministic mappings before generic fallbac
     "const ambientTargets = uniqueSelections([",
     "{ includeOperationTargetIds: mapsOneTargetToMany }",
     "deterministicOperationTargetUpdate",
-    "includeUnresolvedTargetIds: recoverableSplitTargetIds",
     "const deterministicById = new Map(",
     "if (trackedTargetIds.has(target.id))",
     "rebindTargetsPreservingGlobal(nextHtml, untrackedSafeTargets)",
@@ -377,12 +376,12 @@ test("legacy whole-page comments normalize before recovery and submission", asyn
 });
 
 test("style writes use source-safe values, canonical target identity, and only active cascade rules", async () => {
-  const [canvas, directEditHistory] = await Promise.all([
+  const [canvas, directEditEvents] = await Promise.all([
     readFile(
       new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url),
       "utf8",
     ),
-    readFile(new URL("../app/lib/direct-edit-history.js", import.meta.url), "utf8"),
+    readFile(new URL("../app/lib/direct-edit-events.js", import.meta.url), "utf8"),
   ]);
 
   assert.doesNotMatch(
@@ -390,9 +389,9 @@ test("style writes use source-safe values, canonical target identity, and only a
     /beforeValue:\s*inlineBefore/u,
     "CSSOM-normalized values must not be compared with authored source text",
   );
-  assert.match(directEditHistory, /last\.target\.id !== mutation\.target\.id/u);
+  assert.match(directEditEvents, /last\.target\.id !== mutation\.target\.id/u);
   assert.doesNotMatch(
-    directEditHistory,
+    directEditEvents,
     /last\.target\.selector === mutation\.target\.selector/u,
   );
   assert.match(canvas, /activeMediaCondition\(view, sheetMedia\)/u);
@@ -453,15 +452,11 @@ test("ordinary patches keep the mounted iframe while source-authority fences use
   );
   const stablePreview = canvas.slice(
     canvas.indexOf("const synchronizeStablePreview = useCallback"),
-    canvas.indexOf("const recordHistoryEntry", canvas.indexOf("const synchronizeStablePreview = useCallback")),
+    canvas.indexOf("const applySourceCommand = useCallback", canvas.indexOf("const synchronizeStablePreview = useCallback")),
   );
   const applyCommand = canvas.slice(
     canvas.indexOf("const applySourceCommand = useCallback"),
     canvas.indexOf("const resetSelection = useCallback", canvas.indexOf("const applySourceCommand = useCallback")),
-  );
-  const applyHistory = canvas.slice(
-    canvas.indexOf("const applyHistoryPlan = useCallback"),
-    canvas.indexOf("const undo = useCallback", canvas.indexOf("const applyHistoryPlan = useCallback")),
   );
 
   assert.match(
@@ -518,12 +513,7 @@ test("ordinary patches keep the mounted iframe while source-authority fences use
     applyCommand,
     /if \(!previewStayedMounted\) \{[\s\S]*loadFrameSource\(result\.html, \{ preserveViewport: true \}\)/u,
   );
-  assert.doesNotMatch(applyHistory, /synchronizeStablePreview/u);
-  assert.match(
-    applyHistory,
-    /PageRoot history never shares[\s\S]*?queueNativeFenceReload\([\s\S]*?result\.html,[\s\S]*?nativeBookmark,[\s\S]*?(?:appliedMutation\.target|historyResumeTarget)/u,
-    "undo and redo must always rebuild a canonical frame rather than reuse Chromium history",
-  );
+  assert.doesNotMatch(canvas, /applyHistoryPlan|undoStackRef|redoStackRef/u);
   assert.match(
     canvas,
     /mutation\.kind === "reorder"[\s\S]*loadFrameSource\(result\.html, \{ preserveViewport: true \}\)/u,
@@ -576,7 +566,7 @@ test("ordinary patches keep the mounted iframe while source-authority fences use
   assert.doesNotMatch(stableFinish, /loadFrameSource\(source/u);
 });
 
-test("canvas hides insertion affordances while retaining target recovery and local undo", async () => {
+test("canvas hides insertion and source-reversal affordances while retaining target recovery", async () => {
   const [canvas, css] = await Promise.all([
     readFile(new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/components/HtmlCanvasEditor.module.css", import.meta.url), "utf8"),
@@ -590,27 +580,10 @@ test("canvas hides insertion affordances while retaining target recovery and loc
   assert.match(canvas, /overlap >= Math\.min\(existing\.width, point\.width\) \* 0\.8/u);
   assert.doesNotMatch(canvas, /insertionPoints\.map/u);
   assert.doesNotMatch(canvas, /styles\.insertionPlus/u);
-  assert.match(canvas, /撤销上一次文字、样式或排序修改/u);
-  const undoLabel = canvas.indexOf('aria-label="撤销上一次文字、样式或排序修改"');
-  const undoControl = canvas.slice(
-    canvas.lastIndexOf("<button", undoLabel),
-    canvas.indexOf("</button>", undoLabel),
-  );
-  assert.ok(undoLabel >= 0, "the local undo control must remain available");
-  assert.match(undoControl, /disabled=\{/u);
-  assert.match(undoControl, /undoDepth === 0/u);
-  assert.match(undoControl, /!activeNativeEditRef\.current\?\.session\.isDirty\(\)/u);
-  assert.match(
-    undoControl,
-    /!hasPendingNativeDraft/u,
-    "uncheckpointed or composing native text must keep undo enabled",
-  );
-  assert.match(canvas, /historyId: mutation\.historyId/u);
-  assert.match(canvas, /mutation\.historyId = appliedMutation\.historyId/u);
-  assert.match(canvas, /historyAction: "undo" as const/u);
+  assert.doesNotMatch(canvas, /撤销|重做|undoStackRef|redoStackRef|historyAction/u);
   const existingCommentMarker = canvas.slice(
     canvas.indexOf("commentMarkers.map"),
-    canvas.indexOf("className={styles.globalCommentButton}", canvas.indexOf("commentMarkers.map")),
+    canvas.indexOf("&& toolbarVisible", canvas.indexOf("commentMarkers.map")),
   );
   assert.match(
     existingCommentMarker,
@@ -621,18 +594,15 @@ test("canvas hides insertion affordances while retaining target recovery and loc
   assert.doesNotMatch(css, /\.insertionButton|\.insertionLine|\.insertionPoint|\.insertionPlus/u);
 });
 
-test("global comment selects the whole page, returns to the top, and keeps its marker away from the button", async () => {
+test("the canvas has no persistent global-comment button while global targets remain addressable", async () => {
   const [canvas, css] = await Promise.all([
     readFile(new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/components/HtmlCanvasEditor.module.css", import.meta.url), "utf8"),
   ]);
 
   assert.match(canvas, /data-html-canvas-selected", nextSelection\.level/u);
-  assert.match(canvas, /className=\{styles\.globalCommentButton\}/u);
-  assert.match(canvas, />\s*全局评论\s*<\/button>/u);
-  assert.match(canvas, /data-active=\{!interactionLocked && isPageRootSelection\(selection\)/u);
-  assert.match(canvas, /disabled=\{interactionLocked\}/u);
-  assert.match(canvas, /onClick=\{requestGlobalComment\}/u);
+  assert.doesNotMatch(canvas, /className=\{styles\.globalCommentButton\}/u);
+  assert.doesNotMatch(css, /\.globalCommentButton/u);
   assert.match(canvas, /defaultGlobalCommentElement\(documentNode\)/u);
   assert.match(canvas, /return documentNode\.body/u);
   assert.match(canvas, /selectElement\(globalElement, "module"\)/u);
@@ -640,10 +610,6 @@ test("global comment selects the whole page, returns to the top, and keeps its m
   assert.match(canvas, /documentNode\.defaultView\?\.scrollTo\(\{[\s\S]*?top: 0/u);
   assert.match(canvas, /isGlobalPageTarget[\s\S]*?frameOffsetLeft \+ 18/u);
   assert.match(canvas, /data-global=\{isPageRootSelection\(marker\.selection\)/u);
-  assert.doesNotMatch(
-    canvas,
-    /\{!interactionLocked && selection\?\.level === "module" \? \([\s\S]*className=\{styles\.globalCommentButton\}/u,
-  );
   assert.match(canvas, /toolbarVisible[\s\S]*?!isPageRootSelection\(selection\)[\s\S]*?overlayPosition/u);
   assert.match(canvas, /levelOverride \?\? identityTarget\?\.level \?\? inferSelectionLevel\(element\)/u);
   assert.match(canvas, /element === element\.ownerDocument\.documentElement/u);
@@ -651,8 +617,6 @@ test("global comment selects the whole page, returns to the top, and keeps its m
   assert.match(canvas, /\[data-html-canvas-selected="module"\]:not\(\[data-html-canvas-global-selected\]\)/u);
   assert.match(canvas, /\[data-html-canvas-global-selected\]/u);
   assert.doesNotMatch(canvas, /\[data-html-canvas-selected\]\s*\{/u);
-  assert.match(css, /\.globalCommentButton\s*\{[\s\S]*color: #77747d;[\s\S]*background: #e9e8e5;/u);
-  assert.match(css, /\.globalCommentButton\[data-active="true"\]\s*\{[\s\S]*background: #5147dc;/u);
   assert.match(css, /\.editor\s*\{[\s\S]*grid-template-rows:\s*40px minmax\(0, 1fr\)/u);
   assert.match(css, /\.frame\s*\{[\s\S]*grid-row:\s*2/u);
   assert.match(css, /\.editor:not\(\[data-render-verified="true"\]\) \.frame\s*\{[\s\S]*?visibility:\s*hidden/u);
@@ -681,6 +645,14 @@ test("preview native links and forms cannot navigate the editing canvas on doubl
   const clickHandler = canvas.slice(
     canvas.indexOf("const handleClick = (event: MouseEvent) =>"),
     canvas.indexOf("const handleDoubleClick = (event: MouseEvent) =>"),
+  );
+  const actionDefault = clickHandler.indexOf("if (nativeActionTarget) event.preventDefault()");
+  const activeEditFastPath = clickHandler.indexOf(
+    "if (activeNativeEditRef.current?.rootElement.contains(event.target as Node)) return",
+  );
+  assert.ok(
+    actionDefault >= 0 && activeEditFastPath > actionDefault,
+    "authored actions must be suppressed before the active-edit fast path",
   );
   assert.match(clickHandler, /event\.preventDefault\(\);[\s\S]*?event\.stopPropagation\(\);[\s\S]*?selectElement\(target\)/u);
   assert.match(canvas, /documentNode\.addEventListener\("submit", handleSubmit, true\)/u);
@@ -799,7 +771,7 @@ test("native editing uses the authored DOM, browser Selection, and a measured ho
   assert.match(
     canvas,
     /currentNativeEditLeaseRef\.current = null;[\s\S]*?activeNativeEditRef\.current = null;[\s\S]*?active\.session\.fenceDispose\(\)/u,
-    "a History Fence must invalidate ownership before retiring the old controller",
+    "a source-authority fence must invalidate ownership before retiring the old controller",
   );
   assert.match(
     nativeController,
@@ -811,12 +783,12 @@ test("native editing uses the authored DOM, browser Selection, and a measured ho
     /this\.disposed = true;[\s\S]*?this\.detachSessionInfrastructure\(\);[\s\S]*?this\.cancelAllScheduledWork\(\)/u,
     "late native work must see a retired lease before listener and timer cleanup",
   );
-  assert.match(canvas, /nativeHistoryDirtyRef\.current = true/u);
-  assert.match(canvas, /nativeHistoryDirtyRef\.current = false/u);
+  assert.match(canvas, /nativeSessionNeedsCanonicalFenceRef\.current = true/u);
+  assert.match(canvas, /nativeSessionNeedsCanonicalFenceRef\.current = false/u);
   assert.match(
     canvas,
-    /const needsCanonicalFence = Boolean\(bookmark\) \|\| nativeHistoryDirtyRef\.current/u,
-    "save and export fences must replace a contaminated Document after the controller has blurred",
+    /const needsCanonicalFence = Boolean\(bookmark\)[\s\S]*?\|\| nativeSessionNeedsCanonicalFenceRef\.current/u,
+    "save and export fences must replace a retired editable Document after the controller has blurred",
   );
   assert.match(nativeController, /focusAtPoint\(point\?: \{ clientX: number; clientY: number \}\)/u);
   assert.match(nativeController, /documentNode\.caretPositionFromPoint/u);
@@ -1088,7 +1060,7 @@ test("handoff commits a pending source edit before recapturing and freezing comm
   assert.match(
     workbench.slice(commit, initialCapture),
     /const (\w+) = editorRef\.current\?\.fencePendingEdit\(\{[\s\S]*?resumeEditing: false,[\s\S]*?trigger: "ai",[\s\S]*?\}\);[\s\S]*?if \(!\1 \|\| !\1\.ok\) \{[\s\S]*?return;/u,
-    "a failed native-edit History Fence must stop handoff before comment targets are captured",
+    "a failed native-edit source-authority fence must stop handoff before comment targets are captured",
   );
   assert.doesNotMatch(
     workbench.slice(recapture, freeze),

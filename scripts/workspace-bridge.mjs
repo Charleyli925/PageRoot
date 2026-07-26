@@ -3966,12 +3966,6 @@ function normalizeFrozenEditEvents(events, frozenAt, revision, basedOnVersionId)
     ...(cleanText(event.property, 300)
       ? { property: cleanText(event.property, 300) }
       : {}),
-    ...(cleanText(event.historyId, 300)
-      ? { historyId: cleanText(event.historyId, 300) }
-      : {}),
-    ...(cleanText(event.undoesEventId, 180)
-      ? { undoesEventId: cleanText(event.undoesEventId, 180) }
-      : {}),
     summary:
       cleanText(event.summary, 5000)
       || "提交前已自动写回的本地编辑",

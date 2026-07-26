@@ -170,10 +170,6 @@ export type HtmlCanvasSelection = {
 
 export type HtmlCanvasMutation = {
   kind: "text" | "style" | "reorder" | "structure";
-  /** Stable identity shared by a direct edit and its undo/redo mutations. */
-  historyId?: string;
-  /** Lets the host fold history without creating a second editing authority. */
-  historyAction?: "undo" | "redo";
   target: HtmlCanvasSelection;
   property?: string;
   before: unknown;
@@ -245,7 +241,7 @@ export type HtmlCanvasEditorHandle = {
   getRenderedSourceHtml: () => string | null;
   /** Commits delivered native input while keeping the live editing session active. */
   checkpointPendingEdit: () => HtmlCanvasCommitResult;
-  /** Cuts Chromium editing history, reloads canonical DOM, and optionally resumes editing. */
+  /** Retires the editable DOM, reloads canonical source, and optionally resumes editing. */
   fencePendingEdit: (options?: {
     resumeEditing?: boolean;
     trigger?: NativeEditCheckpointTrigger;
@@ -257,12 +253,8 @@ export type HtmlCanvasEditorHandle = {
   unlockNow: () => boolean;
   /** Keeps a failed commit explanation beside the canvas instead of escalating it globally. */
   showCommitBlocked: (reason?: string) => void;
-  undo: () => boolean;
-  canUndo: () => boolean;
   /** True while source-uncommitted native text or marked text still exists. */
   hasPendingNativeEdit: () => boolean;
-  redo: () => boolean;
-  canRedo: () => boolean;
   clearSelection: () => void;
   select: (
     target: HtmlCanvasSelection,
@@ -319,8 +311,6 @@ export type HtmlCanvasEditorProps = {
   locked?: boolean;
   /** Reordering is limited to safe element siblings and can be disabled by the host. */
   enableReorder?: boolean;
-  /** Keeps the current document's undo stack while temporarily rendering an immutable history file. */
-  preserveUndoHistory?: boolean;
   /** CSS selectors that already have comments and should receive a compact canvas marker. */
   commentedTargets?: readonly HtmlCanvasCommentedTarget[];
   /** Non-visual audit targets that must retain identity through later source patches. */
@@ -492,38 +482,12 @@ type NativeEditCommitResult = {
   frameReloading?: boolean;
 };
 
-function nativeSelectionFromMutationValue(
-  value: unknown,
-  fallback: NativeEditSelection,
-): NativeEditSelection {
-  if (!value || typeof value !== "object" || !("selection" in value)) return fallback;
-  const selection = (value as { selection?: Partial<NativeEditSelection> }).selection;
-  if (
-    !selection
-    || !Number.isSafeInteger(selection.anchor)
-    || !Number.isSafeInteger(selection.focus)
-    || Number(selection.anchor) < 0
-    || Number(selection.focus) < 0
-    || (selection.affinity !== "left" && selection.affinity !== "right")
-  ) return fallback;
-  return {
-    anchor: Number(selection.anchor),
-    focus: Number(selection.focus),
-    affinity: selection.affinity,
-  };
-}
-
 type EditFeedback = {
   title: string;
   message: string;
   tone: "warning" | "error";
   sticky: boolean;
   recovery: "comment" | "reload" | "none";
-};
-
-type EditorHistoryEntry = {
-  inversePlan: SourcePatchPlan;
-  mutation: HtmlCanvasMutation;
 };
 
 type SourceIndexValue = ReturnType<typeof buildSourceIndex>;
@@ -561,8 +525,6 @@ type SourceTargetRef = {
 };
 type SourcePatchCommand = Parameters<typeof planSourcePatch>[0];
 type SourcePatchPlan = NonNullable<ReturnType<typeof planSourcePatch>>;
-
-const MAX_UNDO_ENTRIES = 100;
 
 const STYLE_PROPERTY_CONFIGS: ReadonlyArray<{
   property: EditableStyleProperty;
@@ -1905,6 +1867,14 @@ function findNativeActionTarget(target: EventTarget | null): HTMLElement | null 
   ) ?? null;
 }
 
+function isBlockedSourceReversalShortcut(event: {
+  metaKey: boolean;
+  ctrlKey: boolean;
+  key: string;
+}): boolean {
+  return (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z";
+}
+
 function isCanvasRootElement(target: EventTarget | null): boolean {
   return Boolean(
     target
@@ -1938,7 +1908,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     interactionMode = "editing",
     locked = false,
     enableReorder = true,
-    preserveUndoHistory = false,
     commentedTargets = EMPTY_COMMENTED_TARGETS,
     trackedTargets = EMPTY_TRACKED_TARGETS,
   },
@@ -1968,7 +1937,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const nativeEditCheckpointRef = useRef<() => void>(() => undefined);
   const nativeEditSessionSequenceRef = useRef(0);
   const nativeDomGenerationRef = useRef(0);
-  const nativeHistoryDirtyRef = useRef(false);
+  const nativeSessionNeedsCanonicalFenceRef = useRef(false);
   const nativeEditFenceSequenceRef = useRef(0);
   const currentNativeEditLeaseRef = useRef<ActiveNativeEdit["lease"] | null>(null);
   const pendingNativeEditResumeRef = useRef<PendingNativeEditResume | null>(null);
@@ -2000,8 +1969,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const nativeEditNeedsReloadRef = useRef(false);
   const retainNativeEditFocusRef = useRef<RetainedNativeEditFocus | null>(null);
   const blockedOuterCompositionGestureRef = useRef(false);
-  const undoRef = useRef<(fromQueuedCommand?: boolean) => boolean>(() => false);
-  const redoRef = useRef<(fromQueuedCommand?: boolean) => boolean>(() => false);
   const insertionPointsRef = useRef<InsertionPoint[]>([]);
   const cleanupFrameRef = useRef<() => void>(() => undefined);
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
@@ -2018,9 +1985,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const expectedFrameHtmlRef = useRef<string | null>(null);
   const expectedFrameTokenRef = useRef<string | null>(null);
   const frameLoadGenerationRef = useRef(0);
-  const historySequenceRef = useRef(0);
-  const undoStackRef = useRef<EditorHistoryEntry[]>([]);
-  const redoStackRef = useRef<EditorHistoryEntry[]>([]);
   const imperativeLockRef = useRef(false);
   const lastPropRef = useRef({ html, baseHref: resolvedBaseHref });
   const onChangeRef = useRef(onChange);
@@ -2070,7 +2034,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const [overlayPosition, setOverlayPosition] = useState<OverlayPosition | null>(null);
   const [toolbarVisible, setToolbarVisible] = useState(false);
   const [hasTextRange, setHasTextRange] = useState(false);
-  const [hasPendingNativeDraft, setHasPendingNativeDraft] = useState(false);
   const [selectedStyle, setSelectedStyle] = useState<SelectedStyle>({
     fontSize: 16,
     color: "#202124",
@@ -2090,8 +2053,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const [, setSelectedInsertionId] = useState<string | null>(null);
   const [editFeedback, setEditFeedback] = useState<EditFeedback | null>(null);
   const [editFeedbackPaused, setEditFeedbackPaused] = useState(false);
-  const [undoDepth, setUndoDepth] = useState(0);
-  const [redoDepth, setRedoDepth] = useState(0);
   const [spacingMenuOpen, setSpacingMenuOpen] = useState(false);
 
   toolbarVisibleRef.current = toolbarVisible;
@@ -2118,7 +2079,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       if (!activeNativeEdit?.session.isComposing()) return;
       blockedOuterCompositionGestureRef.current = true;
       // Prevent only the focus-moving pointer default. The click must still
-      // reach its real save/export/history/style handler so that handler can
+      // reach its real save/export/style handler so that handler can
       // enqueue one explicit latest-wins command.
       event.preventDefault();
     };
@@ -2169,7 +2130,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     frameLoadGenerationRef.current += 1;
     const nextFrameGeneration = frameLoadGenerationRef.current;
     nativeDomGenerationRef.current += 1;
-    nativeHistoryDirtyRef.current = false;
+    nativeSessionNeedsCanonicalFenceRef.current = false;
     nativeEditNeedsReloadRef.current = false;
     currentNativeEditLeaseRef.current = null;
     const randomPart = globalThis.crypto?.randomUUID?.()
@@ -2212,11 +2173,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       });
     };
     if (options.immediate) {
-      // A History Fence must retire the browsing context itself. Chromium can
+      // A source-authority fence must retire the browsing context itself. Chromium can
       // accept a rapid srcdoc assignment without navigating the existing
-      // iframe, which leaves its contenteditable undo manager alive. A keyed
+      // iframe, which leaves its contenteditable mutation manager alive. A keyed
       // remount guarantees a fresh Document and therefore a fresh native edit
-      // history before Selection is restored.
+      // edit state before Selection is restored.
       flushSync(replaceFrameElement);
     } else {
       replaceFrameElement();
@@ -2861,28 +2822,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     updateSelectedStyle,
   ]);
 
-  const recordHistoryEntry = useCallback((
-    inversePlan: SourcePatchPlan,
-    mutation: HtmlCanvasMutation,
-  ): HtmlCanvasMutation => {
-    if (!mutation.historyId) historySequenceRef.current += 1;
-    const recordedMutation: HtmlCanvasMutation = {
-      ...mutation,
-      historyId: mutation.historyId
-        || `history_${Date.now().toString(36)}_${historySequenceRef.current.toString(36)}`,
-    };
-    undoStackRef.current = [
-      ...undoStackRef.current,
-      { inversePlan, mutation: recordedMutation },
-    ].slice(-MAX_UNDO_ENTRIES);
-    redoStackRef.current = [];
-    containerRef.current?.setAttribute("data-undo-depth", String(undoStackRef.current.length));
-    containerRef.current?.setAttribute("data-redo-depth", "0");
-    setUndoDepth(undoStackRef.current.length);
-    setRedoDepth(0);
-    return recordedMutation;
-  }, []);
-
   const reportBlockedEdit = useCallback((cause: unknown) => {
     const rawDetail = cause instanceof Error
       ? cause.message
@@ -2931,7 +2870,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     command: SourcePatchCommand,
     mutation: HtmlCanvasMutation,
     options: {
-      recordHistory?: boolean;
       validateResult?: (result: ReturnType<typeof applyPatchPlan>) => void;
       nativeTextCommit?: {
         selection: NativeEditSelection;
@@ -3008,7 +2946,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         result,
         mutation.target,
       );
-      let appliedMutation: HtmlCanvasMutation = {
+      const appliedMutation: HtmlCanvasMutation = {
         ...mutation,
         target: operationTargetUpdate
           || targetUpdatesById.get(mutation.target.id)
@@ -3026,21 +2964,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           ]),
         ],
       };
-      if (options.recordHistory !== false) {
-        historySequenceRef.current += 1;
-        appliedMutation = {
-          ...appliedMutation,
-          historyId: appliedMutation.historyId
-            || `history_${Date.now().toString(36)}_${historySequenceRef.current.toString(36)}`,
-        };
-      }
       if (!onChangeRef.current(result.html, appliedMutation)) {
         reportBlockedEdit(new Error("宿主状态已锁定，本次画布修改未被接受。"));
         return null;
-      }
-      if (options.recordHistory !== false) {
-        recordHistoryEntry(result.inversePlan, appliedMutation);
-        mutation.historyId = appliedMutation.historyId;
       }
       setEditFeedback(null);
       lastEmittedHtmlRef.current = result.html;
@@ -3076,7 +3002,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         let refreshedNativePreview = false;
         const nextTarget = appliedMutation.target;
         if (options.nativeTextCommit?.deferPreviewReconcile) {
-          // History/save/export/navigation will synchronously retire this
+          // Save/export/navigation will synchronously retire this
           // controller after SourcePatch returns. Do not create an interim
           // contenteditable owner only to destroy it in the same command.
           nativeEditNeedsReloadRef.current = true;
@@ -3282,7 +3208,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     }
   }, [
     loadFrameSource,
-    recordHistoryEntry,
     reportBlockedEdit,
     synchronizeStablePreview,
   ]);
@@ -3458,7 +3383,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     activeTextRangeRef.current = null;
     setIsEditing(false);
     setHasTextRange(false);
-    setHasPendingNativeDraft(false);
     rootElement.removeAttribute("data-html-canvas-editing");
     rootElement.ownerDocument.getSelection()?.removeAllRanges();
     queueNativeFenceReloadRef.current(
@@ -3924,7 +3848,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       activeTextRangeRef.current = null;
       setIsEditing(false);
       setHasTextRange(false);
-      setHasPendingNativeDraft(false);
       rootElement.removeAttribute("data-html-canvas-editing");
       rootElement.ownerDocument.getSelection()?.removeAllRanges();
       if (frameReloadRequired) {
@@ -4220,10 +4143,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         ...(initialSelection ? { selection: initialSelection } : {}),
       };
       nativeEditSessionSequenceRef.current += 1;
-      // Entering contenteditable gives Chromium a native undo owner for this
-      // Document even when the user later blurs before typing. Keep that
+      // Entering contenteditable gives Chromium a document-local mutation
+      // owner even when the user later blurs before typing. Keep that
       // generation marked until a canonical frame replacement cuts it off.
-      nativeHistoryDirtyRef.current = true;
+      nativeSessionNeedsCanonicalFenceRef.current = true;
       const lease: ActiveNativeEdit["lease"] = {
         sessionId: `native_${nativeEditSessionSequenceRef.current.toString(36)}`,
         domGeneration: nativeDomGenerationRef.current,
@@ -4238,7 +4161,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           || active.session !== session
           || !nativeEditLeasesMatch(currentNativeEditLeaseRef.current, active.lease)
         ) return;
-        setHasPendingNativeDraft(state.draftPending);
         refreshNativeEditRangeState(active, state.selection);
         clearNativeEditCheckpointTimer();
         if (state.dirty && !state.composing) {
@@ -4332,8 +4254,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           }, 0);
         },
         onEscape: () => finishNativeEditing(true, "manual"),
-        onUndo: () => undoRef.current(),
-        onRedo: () => redoRef.current(),
         onSourceEditIntent: (intent: NativeSourceEditIntent): boolean => (
           applyNativeSourceEditIntent(session, intent)
         ),
@@ -4394,7 +4314,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         : null;
       setIsEditing(true);
       setHasTextRange(Boolean(priorRange));
-      setHasPendingNativeDraft(false);
       setToolbarVisible(true);
       refreshNativeEditRangeState(active, active.selection);
       // Establish the native focus/caret before startEditing returns. Deferring
@@ -4491,7 +4410,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     activeTextRangeRef.current = null;
     setIsEditing(false);
     setHasTextRange(false);
-    setHasPendingNativeDraft(false);
     selectElement(nextRoot, "part", {
       preserveTextSelection: true,
       showToolbar: true,
@@ -4877,7 +4795,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     activeTextRangeRef.current = null;
     setIsEditing(false);
     setHasTextRange(false);
-    setHasPendingNativeDraft(false);
     return bookmark;
   }, [
     clearNativeEditCheckpointTimer,
@@ -4958,298 +4875,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   }, [detachNativeEditForFence, queueNativeFenceReload]);
   resumeNativeStructureCommitRef.current = resumeNativeStructureCommit;
 
-  const applyHistoryPlan = useCallback((
-    plan: SourcePatchPlan,
-    mutation: HtmlCanvasMutation,
-    nativeBookmark: NativeEditFenceBookmark | null = null,
-  ): ReturnType<typeof applyPatchPlan> | null => {
-    if (readOnlyRef.current || lockedRef.current) return null;
-    try {
-      const previousIndex = sourceIndexRef.current;
-      if (!previousIndex || previousIndex.source !== frameSourceHtmlRef.current) {
-        reportBlockedEdit(new Error("源码地图已过期，无法安全撤销。"));
-        return null;
-      }
-      const ambientTargets = uniqueSelections([
-        ...commentedTargetsRef.current.map((entry) => entry.target),
-        ...trackedTargetsRef.current,
-      ]);
-      const originalTargets = uniqueSelections([
-        mutation.target,
-        ...ambientTargets,
-      ]);
-      const mapsOneTargetToMany =
-        sourcePatchOperationType(plan) === "split-text-block";
-      const planMetadata = plan.metadata as Record<string, unknown> | undefined;
-      const recoverableSplitTargetIds = new Set<string>(
-        mapsOneTargetToMany
-        && Array.isArray(planMetadata?.splitTrackedTargetIds)
-          ? planMetadata.splitTrackedTargetIds.map(String)
-          : [],
-      );
-      const trackedTargetRefs = trackedSourceTargetRefs(
-        ambientTargets,
-        plan.targetRefs,
-        {
-          includeOperationTargetIds: mapsOneTargetToMany,
-          includeUnresolvedTargetIds: recoverableSplitTargetIds,
-        },
-      );
-      const result = applyPatchPlan(
-        plan,
-        frameSourceHtmlRef.current,
-        { trackedTargetRefs },
-      );
-      const targetUpdates = deterministicTargetUpdates(result, originalTargets);
-      const targetUpdatesById = new Map(
-        targetUpdates.map((target) => [target.id, target]),
-      );
-      const operationTargetUpdate = deterministicOperationTargetUpdate(
-        result,
-        mutation.target,
-      );
-      const appliedMutation: HtmlCanvasMutation = {
-        ...mutation,
-        target: operationTargetUpdate
-          || targetUpdatesById.get(mutation.target.id)
-          || {
-            ...mutation.target,
-            resolution: "orphaned",
-          },
-        targetUpdates,
-        trackedTargetIds: [
-          ...new Set([
-            ...plan.targetRefs.map(
-              (target: SourceTargetRef) => target.targetId,
-            ),
-            ...trackedTargetRefs.map((target) => target.targetId),
-          ]),
-        ],
-      };
-      if (!onChangeRef.current(result.html, appliedMutation)) {
-        reportBlockedEdit(new Error("宿主状态已锁定，本次撤销未被接受。"));
-        return null;
-      }
-      lastEmittedHtmlRef.current = result.html;
-      if (activeNativeEditRef.current) {
-        throw new Error("撤销前的原位编辑会话没有完整结束。");
-      }
-      sourceIndexRef.current = result.sourceIndex;
-      frameSourceHtmlRef.current = result.html;
-      let historyResumeTarget = appliedMutation.target;
-      const mutationAfter = mutation.after;
-      const storedResumeTarget = (
-        mutation.historyAction === "redo"
-        && mutationAfter
-        && typeof mutationAfter === "object"
-        && "resumeTarget" in mutationAfter
-      )
-        ? (mutationAfter as { resumeTarget?: HtmlCanvasSelection }).resumeTarget
-        : null;
-      if (storedResumeTarget) {
-        try {
-          const resolvedResume = resolveTargetRef(
-            result.sourceIndex,
-            sourceTargetRefForSelection(storedResumeTarget),
-          );
-          if (
-            resolvedResume.resolution === "exact"
-            && resolvedResume.target?.type === "element"
-          ) {
-            const refreshedResumeRef = createTargetRef(
-              result.sourceIndex,
-              resolvedResume.target,
-              {
-                targetId: storedResumeTarget.id,
-                label: storedResumeTarget.label,
-                level: targetLevelForSelection(storedResumeTarget.level),
-              },
-            ) as SourceTargetRef;
-            historyResumeTarget = selectionFromRefreshedTarget(
-              storedResumeTarget,
-              refreshedResumeRef,
-              resolvedResume.target.nodeId,
-            );
-          }
-        } catch {
-          historyResumeTarget = appliedMutation.target;
-        }
-      }
-      const nextSelection = nativeBookmark
-        ? nativeSelectionFromMutationValue(
-            appliedMutation.after,
-            nativeBookmark.selection,
-          )
-        : undefined;
-      // PageRoot history never shares a browsing context with Chromium's
-      // contenteditable history. Undo/redo always crosses a fresh canonical
-      // Document, even if the native controller already ended on blur.
-      queueNativeFenceReload(
-        result.html,
-        nativeBookmark,
-        historyResumeTarget,
-        nextSelection,
-      );
-      setEditFeedback(null);
-      return result;
-    } catch (cause) {
-      reportBlockedEdit(cause);
-      return null;
-    }
-  }, [
-    queueNativeFenceReload,
-    reportBlockedEdit,
-  ]);
-
-  const undo = useCallback((fromQueuedCommand = false): boolean => {
-    if (readOnlyRef.current || lockedRef.current) return false;
-    if (activeNativeEditRef.current) {
-      if (
-        !fromQueuedCommand
-        && deferNativeCommandRef.current("undo", () => undoRef.current(true))
-      ) {
-        return true;
-      }
-      const committed = checkpointNativeEdit("history", {
-        deferPreviewReconcile: true,
-      });
-      if (!committed.ok) return false;
-    }
-    const pendingResume = pendingNativeEditResumeRef.current;
-    const nativeBookmark = activeNativeEditRef.current
-      ? detachNativeEditForFence()
-      : pendingResume
-        ? {
-            fenceId: pendingResume.fenceId,
-            target: pendingResume.target,
-            selection: pendingResume.selection,
-            focus: pendingResume.focus,
-            toolbarVisible: pendingResume.toolbarVisible,
-        }
-        : null;
-    const entry = undoStackRef.current.at(-1);
-    if (!entry) {
-      if (nativeBookmark || nativeHistoryDirtyRef.current) {
-        const fallbackTarget = nativeBookmark?.target ?? selectedSourceSelectionRef.current;
-        queueNativeFenceReload(
-          frameSourceHtmlRef.current,
-          nativeBookmark,
-          fallbackTarget,
-          nativeBookmark?.selection,
-        );
-      }
-      return false;
-    }
-    const mutation = {
-      ...entry.mutation,
-      historyAction: "undo" as const,
-      before: entry.mutation.after,
-      after: entry.mutation.before,
-    };
-    const result = applyHistoryPlan(entry.inversePlan, mutation, nativeBookmark);
-    if (!result) {
-      if (nativeBookmark || nativeHistoryDirtyRef.current) {
-        const fallbackTarget = nativeBookmark?.target ?? selectedSourceSelectionRef.current;
-        queueNativeFenceReload(
-          frameSourceHtmlRef.current,
-          nativeBookmark,
-          fallbackTarget,
-          nativeBookmark?.selection,
-        );
-      }
-      return false;
-    }
-    undoStackRef.current = undoStackRef.current.slice(0, -1);
-    redoStackRef.current = [
-      ...redoStackRef.current,
-      { inversePlan: result.inversePlan, mutation: entry.mutation },
-    ].slice(-MAX_UNDO_ENTRIES);
-    containerRef.current?.setAttribute("data-undo-depth", String(undoStackRef.current.length));
-    containerRef.current?.setAttribute("data-redo-depth", String(redoStackRef.current.length));
-    setUndoDepth(undoStackRef.current.length);
-    setRedoDepth(redoStackRef.current.length);
-    return true;
-  }, [
-    applyHistoryPlan,
-    checkpointNativeEdit,
-    detachNativeEditForFence,
-    queueNativeFenceReload,
-  ]);
-  undoRef.current = undo;
-
-  const redo = useCallback((fromQueuedCommand = false): boolean => {
-    if (readOnlyRef.current || lockedRef.current) return false;
-    if (activeNativeEditRef.current) {
-      if (
-        !fromQueuedCommand
-        && deferNativeCommandRef.current("redo", () => redoRef.current(true))
-      ) {
-        return true;
-      }
-      const committed = checkpointNativeEdit("history", {
-        deferPreviewReconcile: true,
-      });
-      if (!committed.ok) return false;
-    }
-    const pendingResume = pendingNativeEditResumeRef.current;
-    const nativeBookmark = activeNativeEditRef.current
-      ? detachNativeEditForFence()
-      : pendingResume
-        ? {
-            fenceId: pendingResume.fenceId,
-            target: pendingResume.target,
-            selection: pendingResume.selection,
-            focus: pendingResume.focus,
-            toolbarVisible: pendingResume.toolbarVisible,
-        }
-        : null;
-    const entry = redoStackRef.current.at(-1);
-    if (!entry) {
-      if (nativeBookmark || nativeHistoryDirtyRef.current) {
-        const fallbackTarget = nativeBookmark?.target ?? selectedSourceSelectionRef.current;
-        queueNativeFenceReload(
-          frameSourceHtmlRef.current,
-          nativeBookmark,
-          fallbackTarget,
-          nativeBookmark?.selection,
-        );
-      }
-      return false;
-    }
-    const mutation = {
-      ...entry.mutation,
-      historyAction: "redo" as const,
-    };
-    const result = applyHistoryPlan(entry.inversePlan, mutation, nativeBookmark);
-    if (!result) {
-      if (nativeBookmark || nativeHistoryDirtyRef.current) {
-        const fallbackTarget = nativeBookmark?.target ?? selectedSourceSelectionRef.current;
-        queueNativeFenceReload(
-          frameSourceHtmlRef.current,
-          nativeBookmark,
-          fallbackTarget,
-          nativeBookmark?.selection,
-        );
-      }
-      return false;
-    }
-    redoStackRef.current = redoStackRef.current.slice(0, -1);
-    undoStackRef.current = [
-      ...undoStackRef.current,
-      { inversePlan: result.inversePlan, mutation: entry.mutation },
-    ].slice(-MAX_UNDO_ENTRIES);
-    containerRef.current?.setAttribute("data-undo-depth", String(undoStackRef.current.length));
-    containerRef.current?.setAttribute("data-redo-depth", String(redoStackRef.current.length));
-    setUndoDepth(undoStackRef.current.length);
-    setRedoDepth(redoStackRef.current.length);
-    return true;
-  }, [
-    applyHistoryPlan,
-    checkpointNativeEdit,
-    detachNativeEditForFence,
-    queueNativeFenceReload,
-  ]);
-  redoRef.current = redo;
 
   const checkpointPendingEdit = useCallback((): HtmlCanvasCommitResult => {
     const committed = checkpointNativeEdit("manual");
@@ -5285,7 +4910,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     }
 
     const bookmark = detachNativeEditForFence();
-    const needsCanonicalFence = Boolean(bookmark) || nativeHistoryDirtyRef.current;
+    const needsCanonicalFence = Boolean(bookmark)
+      || nativeSessionNeedsCanonicalFenceRef.current;
     if (needsCanonicalFence) {
       const target = resumeEditing
         ? bookmark?.target ?? selectedSourceSelectionRef.current
@@ -5382,19 +5008,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       freezeNow,
       unlockNow,
       showCommitBlocked,
-      undo,
-      canUndo: () => Boolean(
-        undoStackRef.current.length > 0
-        || activeNativeEditRef.current?.session.isDirty()
-        || activeNativeEditRef.current?.session.hasPendingDraft()
-      ),
       hasPendingNativeEdit: () => Boolean(
         activeNativeEditRef.current?.session.isDirty()
         || activeNativeEditRef.current?.session.hasPendingDraft()
         || activeNativeEditRef.current?.session.isComposing()
       ),
-      redo,
-      canRedo: () => redoStackRef.current.length > 0,
       clearSelection,
       select: selectTarget,
       startEditing,
@@ -5409,11 +5027,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       deferNativeCommand,
       freezeNow,
       moveSelected,
-      redo,
       selectTarget,
       showCommitBlocked,
       startEditing,
-      undo,
       unlockNow,
     ],
   );
@@ -5430,12 +5046,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       frameInitializedRef.current = true;
       loadFrameSource(html);
       lastPropRef.current = { html, baseHref: resolvedBaseHref };
-      undoStackRef.current = [];
-      redoStackRef.current = [];
-      containerRef.current?.setAttribute("data-undo-depth", "0");
-      containerRef.current?.setAttribute("data-redo-depth", "0");
-      setUndoDepth(0);
-      setRedoDepth(0);
       return;
     }
 
@@ -5447,21 +5057,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     if (activeNativeEditRef.current) detachNativeEditForFence();
     pendingNativeEditResumeRef.current = null;
     resetSelection(false);
-    if (!preserveUndoHistory) {
-      undoStackRef.current = [];
-      redoStackRef.current = [];
-      containerRef.current?.setAttribute("data-undo-depth", "0");
-      containerRef.current?.setAttribute("data-redo-depth", "0");
-      setUndoDepth(0);
-      setRedoDepth(0);
-    }
     lastEmittedHtmlRef.current = null;
     loadFrameSource(html);
   }, [
     detachNativeEditForFence,
     html,
     loadFrameSource,
-    preserveUndoHistory,
     resetSelection,
     resolvedBaseHref,
   ]);
@@ -5574,6 +5175,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         }
         return;
       }
+      // Authored controls remain selectable/editable content in the Canvas,
+      // never live navigation or form controls. Suppress their browser action
+      // before the active-edit fast path so a second click cannot navigate the
+      // iframe away from the verified source document.
+      const nativeActionTarget = findNativeActionTarget(event.target);
+      if (nativeActionTarget) event.preventDefault();
       const target = findCanvasSelectionElement(event.target);
       if (!target) return;
       if (lockedRef.current) {
@@ -5594,6 +5201,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     };
 
     const handleDoubleClick = (event: MouseEvent) => {
+      if (findNativeActionTarget(event.target)) event.preventDefault();
       const target = findCanvasSelectionElement(event.target);
       if (!target) return;
       if (activeNativeEditRef.current?.rootElement.contains(event.target as Node)) return;
@@ -5715,10 +5323,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           applyNativeFormatShortcutRef.current(formatShortcut);
           return;
         }
-        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") {
+        if (isBlockedSourceReversalShortcut(event)) {
           event.preventDefault();
-          if (event.shiftKey) redo();
-          else undo();
+          event.stopPropagation();
           return;
         }
         if (event.key === "Escape") {
@@ -5743,10 +5350,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         event.preventDefault();
       }
       if (lockedRef.current) return;
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") {
+      if (isBlockedSourceReversalShortcut(event)) {
         event.preventDefault();
-        if (event.shiftKey) redo();
-        else undo();
+        event.stopPropagation();
         return;
       }
       if (event.key === "Escape") {
@@ -5937,8 +5543,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     selectElement,
     selectTarget,
     startEditing,
-    undo,
-    redo,
     updateOverlayPosition,
   ]);
 
@@ -6233,11 +5837,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   applyNativeFormatShortcutRef.current = applyNativeFormatShortcut;
 
   const handleToolbarKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") {
+    if (isBlockedSourceReversalShortcut(event)) {
       event.preventDefault();
       event.stopPropagation();
-      if (event.shiftKey) redo();
-      else undo();
       return;
     }
     if (event.key === "Escape") {
@@ -6375,18 +5977,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         </button>
       )) : null}
 
-      <button
-        type="button"
-        className={styles.globalCommentButton}
-        data-active={!interactionLocked && isPageRootSelection(selection) ? "true" : undefined}
-        aria-label="给整个页面留全局评论"
-        title={interactionLocked ? "当前页面只读" : "全局评论"}
-        disabled={interactionLocked}
-        onClick={requestGlobalComment}
-      >
-        全局评论
-      </button>
-
       {!interactionLocked
       && toolbarVisible
       && selection
@@ -6449,32 +6039,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
 
           {!readOnly && selection.level === "part" ? (
             <>
-              <button
-                type="button"
-                className={styles.undoToolButton}
-                disabled={
-                  undoDepth === 0
-                  && !activeNativeEditRef.current?.session.isDirty()
-                  && !hasPendingNativeDraft
-                }
-                aria-label="撤销上一次文字、样式或排序修改"
-                title="撤销上一次修改（不包括评论）"
-                onClick={() => undo()}
-              >
-                撤销
-              </button>
-
-              <button
-                type="button"
-                className={styles.undoToolButton}
-                disabled={redoDepth === 0}
-                aria-label="重做上一次撤销的文字、样式或排序修改"
-                title="重做上一次撤销（不包括评论）"
-                onClick={() => redo()}
-              >
-                重做
-              </button>
-
               <button
                 type="button"
                 className={styles.toolButton}

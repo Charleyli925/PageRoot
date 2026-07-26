@@ -17,9 +17,6 @@ function isSafeUtf16Boundary(value, offset) {
 
 export function classifyNativeInput(inputType) {
   const intent = classifyNativeInputIntent(inputType);
-  if (intent.kind === NATIVE_INPUT_INTENT_KIND.HISTORY) {
-    return { category: "history", action: intent.action, supported: true };
-  }
   if (intent.kind === NATIVE_INPUT_INTENT_KIND.TEXT) {
     return {
       category: "text",
@@ -111,7 +108,7 @@ function copyNativeEditSelection(selection) {
 /**
  * Freezes the browser Selection that existed before the first DOM mutation in
  * a source transaction. Later input/selectionchange events may advance the
- * live caret, but they must not rewrite the history transaction's before
+ * live caret, but they must not rewrite the source transaction's starting
  * bookmark. A successful source rebase starts the next transaction.
  */
 export class NativeTransactionSelectionTracker {

@@ -63,42 +63,18 @@ test("one text edit changes only the authorized UTF-8 bytes, including BOM and C
   expect(sha256(actual), "exported byte hash").toBe(sha256(expected));
 });
 
-test("undo restores the exact original source SHA, quote styles, entities and whitespace", async ({ page }) => {
-  const original = withBomAndCrLf(fixtureBuffer("source-fidelity.html"));
-  const { frame } = await loadFixture(page, "source-fidelity.html", { buffer: original });
-  await activateNativeEdit(frame, "source-fidelity");
-  await setTextSelection(frame, "source-fidelity", 0, originalToken.length);
-  await page.keyboard.insertText(replacement);
-  await page.keyboard.press(keyShortcut("Z"));
-  expect(await frame.locator(caseSelector("source-fidelity")).textContent()).toBe(originalToken);
-
-  await page.keyboard.press(keyShortcut("S"));
-  const restored = await exportCurrentHtml(page);
-  expect(sha256(restored)).toBe(sha256(original));
-  expect(restored.equals(original)).toBe(true);
-});
-
-test("undo and redo resume a fresh authored host and replay the same forward bytes", async ({ page }) => {
+test("source reversal shortcuts are blocked and never change committed bytes", async ({ page }) => {
   const original = withBomAndCrLf(fixtureBuffer("source-fidelity.html"));
   const expected = replaceUniqueBytes(original, originalToken, replacement);
-  const { editor, frame } = await loadFixture(page, "source-fidelity.html", { buffer: original });
+  const { frame } = await loadFixture(page, "source-fidelity.html", { buffer: original });
   await activateNativeEdit(frame, "source-fidelity");
   await setTextSelection(frame, "source-fidelity", 0, originalToken.length);
   await page.keyboard.insertText(replacement);
 
   await page.keyboard.press(keyShortcut("Z"));
   await expect.poll(() => frame.locator(caseSelector("source-fidelity")).textContent())
-    .toBe(originalToken);
+    .toBe(replacement);
   await waitForNativeSession(frame, "source-fidelity");
-  const undoState = await nativeEditingState(frame, "source-fidelity");
-  expect(
-    undoState,
-    `undo edit block: ${await editor.getAttribute("data-edit-block-detail")}`,
-  ).toMatchObject({
-    targetIsActive: true,
-    contenteditable: "plaintext-only",
-    selectionInside: true,
-  });
 
   await page.keyboard.press(`${process.platform === "darwin" ? "Meta" : "Control"}+Shift+Z`);
   await expect.poll(() => frame.locator(caseSelector("source-fidelity")).textContent())
@@ -110,8 +86,8 @@ test("undo and redo resume a fresh authored host and replay the same forward byt
     selectionInside: true,
   });
 
-  const redone = await exportCurrentHtml(page);
-  expect(redone.equals(expected), firstByteDifference(redone, expected)).toBe(true);
+  const exported = await exportCurrentHtml(page);
+  expect(exported.equals(expected), firstByteDifference(exported, expected)).toBe(true);
 });
 
 test("selection and comment-only interaction never changes source bytes", async ({ page }) => {

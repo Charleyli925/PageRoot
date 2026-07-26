@@ -158,11 +158,20 @@ export async function isProtectedExportDestination(
 function exportNameParts(suggestedName) {
   const name = path.basename(suggestedName || "HTML.html");
   const parsed = path.parse(name);
-  const extension = [".html", ".htm"].includes(parsed.ext.toLowerCase())
-    ? parsed.ext
-    : ".html";
-  const stem = parsed.name || "HTML";
+  const hasHtmlExtension = [".html", ".htm"].includes(parsed.ext.toLowerCase());
+  const extension = hasHtmlExtension ? parsed.ext : ".html";
+  // A product/version name such as "页面-V1.3" does not have a file
+  // extension. Keep the dotted version intact and append the canonical HTML
+  // extension at the single export boundary.
+  const stem = (hasHtmlExtension ? parsed.name : name) || "HTML";
   return { stem, extension };
+}
+
+export function normalizeHtmlExportPath(value) {
+  const resolved = path.resolve(value);
+  return [".html", ".htm"].includes(path.extname(resolved).toLowerCase())
+    ? resolved
+    : `${resolved}.html`;
 }
 
 export async function createSafeExportDefaultPath({

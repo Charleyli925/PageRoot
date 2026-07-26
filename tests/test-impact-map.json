@@ -289,7 +289,7 @@
         "tests/native-command-queue-contract.test.mjs",
         "tests/native-layout-guard.test.mjs",
         "tests/html-preview-sandbox.test.mjs",
-        "tests/workbench-history-fence-contract.test.mjs"
+        "tests/workbench-source-fence-contract.test.mjs"
       ]
     },
     {
@@ -297,11 +297,11 @@
       "patterns": ["^app/workbench\\.tsx$"],
       "suites": ["typecheck", "browser-smoke", "electron-smoke", "ai-smoke"],
       "nodeTests": [
-        "tests/direct-edit-history.test.mjs",
+        "tests/direct-edit-events.test.mjs",
         "tests/frontend-target-refresh.test.mjs",
         "tests/notification-policy.test.mjs",
         "tests/notification-ui.test.mjs",
-        "tests/workbench-history-fence-contract.test.mjs",
+        "tests/workbench-source-fence-contract.test.mjs",
         "tests/workbench-shell-ux.test.mjs"
       ]
     },

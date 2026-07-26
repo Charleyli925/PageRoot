@@ -248,7 +248,7 @@ async function retiredNativeHostState(page) {
   return page.evaluate(() => {
     const host = window.__PAGEROOT_ELECTRON_RETIRED_NATIVE_HOST__;
     if (!host || host.nodeType !== 1) {
-      throw new Error("Electron History Fence lost the retired native host reference.");
+      throw new Error("Electron source-authority fence lost the retired native host reference.");
     }
     const state = {
       contenteditable: host.getAttribute("contenteditable"),
@@ -449,7 +449,6 @@ test("Electron proves the controlled and observer-guarded fallback lanes", async
     const controlledCase = "collapsed-whitespace-copy";
     await frame.locator(caseSelector(controlledCase)).scrollIntoViewIfNeeded();
     const beforeGeometry = await geometrySnapshot(frame, controlledCase);
-    const originalText = await frame.locator(caseSelector(controlledCase)).textContent();
     const controlledTarget = await activateNativeEdit(frame, controlledCase);
     await expect(controlledTarget).toHaveAttribute("contenteditable", "true");
     await expect(editor).toHaveAttribute("data-native-host-mode", "true");
@@ -463,22 +462,6 @@ test("Electron proves the controlled and observer-guarded fallback lanes", async
     await expect.poll(() => controlledTarget.textContent())
       .toContain("<b>Electron纯文字</b>");
     expect(await controlledTarget.locator("b").count()).toBe(0);
-    await expect.poll(() => editor.getAttribute("data-undo-depth"))
-      .toBe("1");
-
-    await page.keyboard.press(keyShortcut("Z"));
-    await expect.poll(() => editor.getAttribute("data-undo-depth"))
-      .toBe("0");
-    await expect.poll(() => (
-      page
-        .getByTestId("html-canvas-editor")
-        .filter({ visible: true })
-        .first()
-        .locator('iframe[title*="HTML"]')
-        .contentFrame()
-        .locator(caseSelector(controlledCase))
-        .textContent()
-    )).toBe(originalText);
 
     const guardedCase = "display-contents-copy";
     await activateNativeEdit(page, guardedCase);
@@ -618,7 +601,7 @@ test("workspace failure keeps the current page visible with export and relaunch 
   }
 });
 
-test("Electron autosaves one authorized disk patch and reopens the same undo-redo result", async () => {
+test("Electron autosaves one authorized disk patch and reopens the same forward result", async () => {
   test.setTimeout(90_000);
   const sourceDirectory = mkdtempSync(path.join(tmpdir(), "pageroot-native-source-e2e-"));
   const sourcePath = path.join(sourceDirectory, "native-source-fidelity.html");
@@ -646,8 +629,6 @@ test("Electron autosaves one authorized disk patch and reopens the same undo-red
       readFileSync(sourcePath).equals(original),
       "opening and registering a disk project must not rewrite its HTML",
     ).toBe(true);
-    let persistedRevision = 0;
-
     await activateNativeEdit(frame, "source-fidelity");
     await setTextSelection(frame, "source-fidelity", 0, originalToken.length);
     await firstLaunch.page.keyboard.insertText(replacement);
@@ -664,11 +645,11 @@ test("Electron autosaves one authorized disk patch and reopens the same undo-red
       editableCases: ["source-fidelity"],
     });
     await rememberCurrentNativeHost(firstLaunch.page, "source-fidelity");
-    let previousDocumentToken = await documentToken(firstLaunch.page);
+    const previousDocumentToken = await documentToken(firstLaunch.page);
     await firstLaunch.page.keyboard.press(keyShortcut("S"));
-    persistedRevision = await expectCheckpointPersisted(
+    await expectCheckpointPersisted(
       firstLaunch.page,
-      persistedRevision,
+      0,
     );
     expect(
       readFileSync(sourcePath).equals(expected),
@@ -685,57 +666,8 @@ test("Electron autosaves one authorized disk patch and reopens the same undo-red
       editingMarker: null,
     });
 
-    previousDocumentToken = await documentToken(firstLaunch.page);
-    await firstLaunch.page.keyboard.press(keyShortcut("Z"));
-    frame = await waitForFreshDiskFrame(
-      firstLaunch.page,
-      previousDocumentToken,
-      "source-fidelity",
-    );
-    await expect.poll(() => frame.locator(caseSelector("source-fidelity")).textContent())
-      .toBe(originalToken);
-    previousDocumentToken = await documentToken(firstLaunch.page);
-    await firstLaunch.page.keyboard.press(keyShortcut("S"));
-    persistedRevision = await expectCheckpointPersisted(
-      firstLaunch.page,
-      persistedRevision,
-    );
-    frame = await waitForFreshDiskFrame(
-      firstLaunch.page,
-      previousDocumentToken,
-      "source-fidelity",
-    );
-    expect(
-      readFileSync(sourcePath).equals(original),
-      "undo must restore the exact original disk bytes",
-    ).toBe(true);
-
-    previousDocumentToken = await documentToken(firstLaunch.page);
-    await firstLaunch.page.keyboard.press(
-      `${process.platform === "darwin" ? "Meta" : "Control"}+Shift+Z`,
-    );
-    frame = await waitForFreshDiskFrame(
-      firstLaunch.page,
-      previousDocumentToken,
-      "source-fidelity",
-    );
     await expect.poll(() => frame.locator(caseSelector("source-fidelity")).textContent())
       .toBe(replacement);
-    previousDocumentToken = await documentToken(firstLaunch.page);
-    await firstLaunch.page.keyboard.press(keyShortcut("S"));
-    await expectCheckpointPersisted(
-      firstLaunch.page,
-      persistedRevision,
-    );
-    frame = await waitForFreshDiskFrame(
-      firstLaunch.page,
-      previousDocumentToken,
-      "source-fidelity",
-    );
-    expect(
-      readFileSync(sourcePath).equals(expected),
-      "redo must replay the identical authorized bytes",
-    ).toBe(true);
 
     await closePageRootGracefully(firstApp);
     firstApp = null;
@@ -803,7 +735,6 @@ test("Electron canonicalizes and persists an Apple Pinyin styled-wrapper composi
     await activateNativeEdit(frame, "heading-inline");
     await replayApplePinyinStyledWrapperCommit(frame, "heading-inline");
 
-    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
     await expect(firstLaunch.page.locator(".round-record-counts"))
       .toHaveText("0 条评论 · 1 项直接编辑记录");
     await expect.poll(() => frame.locator(caseSelector("heading-inline")).innerHTML())
@@ -813,12 +744,11 @@ test("Electron canonicalizes and persists an Apple Pinyin styled-wrapper composi
     expect(committedHtml).not.toContain("<i>");
     expect(await editor.getAttribute("data-edit-block-detail")).toBeNull();
 
-    let persistedRevision = 0;
-    let previousDocumentToken = await documentToken(firstLaunch.page);
+    const previousDocumentToken = await documentToken(firstLaunch.page);
     await firstLaunch.page.keyboard.press(keyShortcut("S"));
-    persistedRevision = await expectCheckpointPersisted(
+    await expectCheckpointPersisted(
       firstLaunch.page,
-      persistedRevision,
+      0,
     );
     frame = await waitForFreshDiskFrame(
       firstLaunch.page,
@@ -830,54 +760,8 @@ test("Electron canonicalizes and persists an Apple Pinyin styled-wrapper composi
       "styled-wrapper IME commit must persist only Word -> 你好",
     ).toBe(true);
 
-    previousDocumentToken = await documentToken(firstLaunch.page);
-    await firstLaunch.page.keyboard.press(keyShortcut("Z"));
-    frame = await waitForFreshDiskFrame(
-      firstLaunch.page,
-      previousDocumentToken,
-      "heading-inline",
-    );
-    await expect.poll(() => frame.locator(caseSelector("heading-inline")).innerHTML())
-      .toContain(">Word</em>");
-    previousDocumentToken = await documentToken(firstLaunch.page);
-    await firstLaunch.page.keyboard.press(keyShortcut("S"));
-    persistedRevision = await expectCheckpointPersisted(
-      firstLaunch.page,
-      persistedRevision,
-    );
-    frame = await waitForFreshDiskFrame(
-      firstLaunch.page,
-      previousDocumentToken,
-      "heading-inline",
-    );
-    expect(
-      readFileSync(sourcePath).equals(original),
-      "IME undo must restore the byte-exact original fixture",
-    ).toBe(true);
-
-    previousDocumentToken = await documentToken(firstLaunch.page);
-    await firstLaunch.page.keyboard.press(
-      `${process.platform === "darwin" ? "Meta" : "Control"}+Shift+Z`,
-    );
-    frame = await waitForFreshDiskFrame(
-      firstLaunch.page,
-      previousDocumentToken,
-      "heading-inline",
-    );
     await expect.poll(() => frame.locator(caseSelector("heading-inline")).innerHTML())
       .toContain(">你好</em>");
-    previousDocumentToken = await documentToken(firstLaunch.page);
-    await firstLaunch.page.keyboard.press(keyShortcut("S"));
-    await expectCheckpointPersisted(firstLaunch.page, persistedRevision);
-    frame = await waitForFreshDiskFrame(
-      firstLaunch.page,
-      previousDocumentToken,
-      "heading-inline",
-    );
-    expect(
-      readFileSync(sourcePath).equals(expected),
-      "IME redo must reproduce the identical forward SourcePatch",
-    ).toBe(true);
 
     await closePageRootGracefully(firstApp);
     firstApp = null;

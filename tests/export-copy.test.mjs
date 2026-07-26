@@ -13,6 +13,7 @@ import test from "node:test";
 import {
   createSafeExportDefaultPath,
   isProtectedExportDestination,
+  normalizeHtmlExportPath,
   normalizedPathKey,
   pathsReferToSameFile,
   PROJECT_IPC_PROTOCOL,
@@ -48,6 +49,36 @@ test("the default export name is a free numbered copy and never the source", asy
       activePath: sourcePath,
     }),
     path.join(directory, "页面-副本-2.html"),
+  );
+});
+
+test("a dotted product version remains part of the export file name", async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "html-ai-export-version-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+
+  assert.equal(
+    await createSafeExportDefaultPath({
+      directoryPath: directory,
+      suggestedName: "复杂HTML综合测试页-V1.3",
+      sourcePath: null,
+      activePath: null,
+    }),
+    path.join(directory, "复杂HTML综合测试页-V1.3-副本.html"),
+  );
+});
+
+test("the selected destination gets one canonical HTML extension", () => {
+  assert.equal(
+    normalizeHtmlExportPath("/tmp/复杂HTML综合测试页-V1.3"),
+    path.resolve("/tmp/复杂HTML综合测试页-V1.3.html"),
+  );
+  assert.equal(
+    normalizeHtmlExportPath("/tmp/页面.htm"),
+    path.resolve("/tmp/页面.htm"),
+  );
+  assert.equal(
+    normalizeHtmlExportPath("/tmp/页面.notes"),
+    path.resolve("/tmp/页面.notes.html"),
   );
 });
 

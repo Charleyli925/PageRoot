@@ -7,7 +7,7 @@ import {
   normalizePlainTextLineEndings,
 } from "../app/lib/native-input-intent.js";
 
-test("native input intents keep existing text and history behavior explicit", () => {
+test("native input intents support text while rejecting browser history input", () => {
   assert.deepEqual(classifyNativeInputIntent("insertText"), {
     kind: "text",
     action: "insertText",
@@ -21,9 +21,9 @@ test("native input intents keep existing text and history behavior explicit", ()
     composition: true,
   });
   assert.deepEqual(classifyNativeInputIntent("historyRedo"), {
-    kind: "history",
-    action: "redo",
-    supported: true,
+    kind: "unsupported",
+    action: "historyRedo",
+    supported: false,
   });
 });
 

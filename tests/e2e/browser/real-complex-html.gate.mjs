@@ -8,7 +8,6 @@ import {
   documentToken,
   ensureSourceEditingTestRuntime,
   exportCurrentHtml,
-  keyShortcut,
   replaceUniqueBytes,
   sha256,
 } from "./pageroot-driver.mjs";
@@ -367,7 +366,7 @@ async function firstRenderedTextPosition(handle) {
   });
 }
 
-test("a real complex HTML file keeps layout and source authority through edit, undo and fallback", async ({ page }, testInfo) => {
+test("a real complex HTML file keeps layout and source authority through edit and fallback", async ({ page }, testInfo) => {
   const sourcePath = validatedRealHtmlPath();
   const beforeStat = statSync(sourcePath);
   const original = readFileSync(sourcePath);
@@ -442,36 +441,19 @@ test("a real complex HTML file keeps layout and source authority through edit, u
   await page.keyboard.insertText(replacement);
   await expect.poll(() => target.textContent()).toContain(replacement);
   let previousDocumentToken = await documentToken(page);
-  await page.keyboard.press(keyShortcut("S"));
+  await page.keyboard.press(process.platform === "darwin" ? "Meta+S" : "Control+S");
   await waitForFreshFenceFrame(page, editor, previousDocumentToken);
-  await expect.poll(
-    () => editor.getAttribute("data-undo-depth"),
-    { message: `The native DOM edit never reached SourcePatch. block=${await editor.getAttribute("data-edit-block-detail")}` },
-  ).toBe("1");
   previousDocumentToken = await documentToken(page);
   const modified = await exportCurrentHtml(page);
-  await waitForFreshFenceFrame(page, editor, previousDocumentToken);
-  expect(
-    modified.equals(expected),
-    `Only the selected literal may change: ${firstByteDifference(modified, expected)}`,
-  ).toBe(true);
-
-  previousDocumentToken = await documentToken(page);
-  await page.keyboard.press(keyShortcut("Z"));
-  await waitForFreshFenceFrame(page, editor, previousDocumentToken);
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("0");
-  previousDocumentToken = await documentToken(page);
-  await page.keyboard.press(keyShortcut("S"));
-  await waitForFreshFenceFrame(page, editor, previousDocumentToken);
-  previousDocumentToken = await documentToken(page);
-  const restored = await exportCurrentHtml(page);
   let currentFrame = await waitForFreshFenceFrame(
     page,
     editor,
     previousDocumentToken,
   );
-  expect(sha256(restored)).toBe(originalSha);
-  expect(restored.equals(original), firstByteDifference(restored, original)).toBe(true);
+  expect(
+    modified.equals(expected),
+    `Only the selected literal may change: ${firstByteDifference(modified, expected)}`,
+  ).toBe(true);
 
   const remainingEditHost = currentFrame.locator('[contenteditable="plaintext-only"]');
   if (await remainingEditHost.count()) {
@@ -548,7 +530,7 @@ test("a real complex HTML file keeps layout and source authority through edit, u
   await expect(notice).not.toContainText(/SourcePatch|source anchor|TargetRef|源码映射|原 HTML 没有变化/i);
   await page.keyboard.insertText("FALLBACK_MUST_NOT_EDIT");
   const afterFallback = await exportCurrentHtml(page);
-  expect(afterFallback.equals(original), firstByteDifference(afterFallback, original)).toBe(true);
+  expect(afterFallback.equals(expected), firstByteDifference(afterFallback, expected)).toBe(true);
 
   const afterStat = statSync(sourcePath);
   const diskAfter = readFileSync(sourcePath);

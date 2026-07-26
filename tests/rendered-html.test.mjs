@@ -178,7 +178,7 @@ test("application boundaries encode the v3 single-source lifecycle instead of sa
   assert.match(workbench, /添加位置：/u);
   assert.match(canvasEditor, /sourceValue/u);
   assert.match(canvasEditor, /computedValue/u);
-  assert.match(workbench, /undoesEventId/u);
+  assert.doesNotMatch(workbench, /undoesEventId/u);
   assert.match(workbench, /版本号没有变化/);
   assert.match(
     workbench,
@@ -193,9 +193,7 @@ test("application boundaries encode the v3 single-source lifecycle instead of sa
   assert.match(canvasEditor, /applyPatchPlan/);
   assert.match(canvasEditor, /freezeNow/);
   assert.match(canvasEditor, /imperativeLockRef\.current = true/);
-  assert.match(canvasEditor, /undoStackRef/);
-  assert.match(canvasEditor, /inversePlan/);
-  assert.match(canvasEditor, /historyId/);
+  assert.doesNotMatch(canvasEditor, /undoStackRef|redoStackRef|historyAction|historyId/u);
   assert.doesNotMatch(canvasEditor, /frameRevision/);
   assert.doesNotMatch(canvasEditor, /key=\{frameRevision\}/);
   assert.match(canvasEditor, /preserveViewport/);
@@ -352,9 +350,6 @@ test("canvas persistence has one SourcePatchEngine path and clean v3 TargetRefs"
     "new NativeEditingController",
     'type: "set-inline-style"',
     'type: "reorder-sibling"',
-    "entry.inversePlan",
-    "historyAction: \"undo\"",
-    "historyId",
     "synchronizeStablePreview",
     "在页面顶部添加内容建议",
     "target-resolution",

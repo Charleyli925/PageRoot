@@ -56,7 +56,6 @@ const COLLAPSED_TEXT_INSERT_INPUT_TYPES = new Set([
 const EXPLICIT_COMPOSITION_FALLBACK_TRIGGERS = new Set<NativeEditCheckpointTrigger>([
   "blur",
   "fence",
-  "history",
   "style",
   "save",
   "export",
@@ -144,7 +143,6 @@ export type NativeEditCheckpointTrigger =
   | "automatic"
   | "blur"
   | "fence"
-  | "history"
   | "style"
   | "save"
   | "export"
@@ -196,8 +194,6 @@ export type NativeEditingControllerOptions = {
   onStateChange?: (state: NativeEditSessionState) => void;
   onBlur?: () => void;
   onEscape?: () => void;
-  onUndo?: () => void;
-  onRedo?: () => void;
   onSourceEditIntent?: (intent: NativeSourceEditIntent) => boolean;
   onUnsupportedInput?: (inputType: string) => void;
   onError?: (error: Error) => void;
@@ -454,13 +450,18 @@ function graphemeDeletionRange(
   };
 }
 
-function complexGraphemeDeletionRange(
+function ownedGraphemeDeletionRange(
   text: string,
   caretOffset: number,
   inputType: "deleteContentBackward" | "deleteContentForward",
 ): { startOffset: number; endOffset: number } | null {
   const range = graphemeDeletionRange(text, caretOffset, inputType);
-  return range && range.endOffset - range.startOffset > 1 ? range : null;
+  if (!range) return null;
+  if (range.endOffset - range.startOffset > 1) return range;
+  const collapsedTrailingWhitespace = inputType === "deleteContentBackward"
+    && caretOffset < text.length
+    && /^[\t\n\f\r ]+$/u.test(text.slice(caretOffset));
+  return collapsedTrailingWhitespace ? range : null;
 }
 
 function replacementTextForFrozenRange(
@@ -1079,10 +1080,6 @@ export class NativeEditingController {
 
   private readonly onEscape?: NativeEditingControllerOptions["onEscape"];
 
-  private readonly onUndo?: NativeEditingControllerOptions["onUndo"];
-
-  private readonly onRedo?: NativeEditingControllerOptions["onRedo"];
-
   private readonly onSourceEditIntent?: NativeEditingControllerOptions["onSourceEditIntent"];
 
   private readonly onUnsupportedInput?: NativeEditingControllerOptions["onUnsupportedInput"];
@@ -1584,8 +1581,6 @@ export class NativeEditingController {
     this.onStateChange = options.onStateChange;
     this.onBlur = options.onBlur;
     this.onEscape = options.onEscape;
-    this.onUndo = options.onUndo;
-    this.onRedo = options.onRedo;
     this.onSourceEditIntent = options.onSourceEditIntent;
     this.onUnsupportedInput = options.onUnsupportedInput;
     this.onError = options.onError;
@@ -2117,12 +2112,6 @@ export class NativeEditingController {
       this.unsupportedInputIfCurrent("insertFromPasteMultiline");
       return;
     }
-    if (input.kind === NATIVE_INPUT_INTENT_KIND.HISTORY) {
-      event.preventDefault();
-      if (input.action === "redo") this.callbackIfCurrent(this.onRedo);
-      else this.callbackIfCurrent(this.onUndo);
-      return;
-    }
     if (
       input.kind === NATIVE_INPUT_INTENT_KIND.INSERT_HARD_BREAK
       || input.kind === NATIVE_INPUT_INTENT_KIND.SPLIT_BLOCK
@@ -2193,7 +2182,7 @@ export class NativeEditingController {
       return;
     }
     this.capturePendingCompositionTerminal(event);
-    if (this.handleComplexGraphemeDeletion(event)) return;
+    if (this.handleOwnedGraphemeDeletion(event)) return;
     if (!this.openNativeMutationWindow()) {
       event.preventDefault();
       return;
@@ -2353,7 +2342,7 @@ export class NativeEditingController {
     if (!duplicate) this.nativeMutationIntents.push({ inputType, originalRanges });
   }
 
-  private handleComplexGraphemeDeletion(event: InputEvent): boolean {
+  private handleOwnedGraphemeDeletion(event: InputEvent): boolean {
     if (!this.canHandleEvent(event)) return true;
     if (
       this.composing
@@ -2365,7 +2354,7 @@ export class NativeEditingController {
     const selection = this.getSelection();
     if (selection.anchor !== selection.focus) return false;
     const currentText = nativeLogicalText(this.hostElement);
-    const deletion = complexGraphemeDeletionRange(
+    const deletion = ownedGraphemeDeletionRange(
       currentText,
       selection.focus,
       event.inputType,
@@ -2382,16 +2371,17 @@ export class NativeEditingController {
       "left",
     );
     // Keep the correction deliberately narrow: PageRoot performs the delete
-    // only when the whole grapheme lives in one authored Text node. Chromium
-    // may otherwise delete only one code unit across inline boundaries and
-    // leave an orphan combining mark, ZWJ, or surrogate. Fail closed before
-    // the DOM changes; the user can select the whole visible cluster instead.
+    // only when the whole grapheme lives in one authored Text node. This owns
+    // both multi-code-unit graphemes and a visible final grapheme followed by
+    // source indentation that CSS collapses away. Chromium may otherwise
+    // delete the grapheme together with that invisible suffix, which cannot
+    // map back to the exact source range.
     if (
       start.node !== end.node
       || start.node.nodeType !== Node.TEXT_NODE
     ) {
       event.preventDefault();
-      this.unsupportedInputIfCurrent("deleteComplexGraphemeAcrossInlineBoundary");
+      this.unsupportedInputIfCurrent("deleteOwnedGraphemeAcrossInlineBoundary");
       this.emitState();
       return true;
     }
@@ -2462,7 +2452,7 @@ export class NativeEditingController {
     // contenteditable=true accepts HTML fragments and formatting by default.
     // PageRoot's controlled mode therefore owns every paste and asks Chromium
     // to insert only text. execCommand("insertText") is intentionally narrow:
-    // it preserves the native undo owner and still has to complete the same
+    // it preserves the native edit owner and still has to complete the same
     // beforeinput/input + MutationObserver proof as keyboard input.
     event.preventDefault();
     if (!plainText) {
@@ -3043,7 +3033,7 @@ export class NativeEditingController {
       const observedMutationWithoutInput = this.nativeMutationObserved;
       // beforeinput only announces a candidate operation. Without its input
       // completion event, even a structurally valid text mutation is not an
-      // accepted user transaction and must never reach SourcePatch/history.
+      // accepted user transaction and must never reach SourcePatch.
       if (observedMutationWithoutInput) {
         this.markUnauthorizedDomDrift(
           "浏览器没有完成这次输入，本次文字没有保存，已恢复原内容。",
@@ -3560,12 +3550,12 @@ export class NativeEditingController {
     ) return;
     // A focus loss in the same task as compositionend is not an explicit IME
     // acceptance. Restore the composition-start DOM and Selection so raw
-    // marked text cannot become a SourcePatch or history/audit entry, while a
+    // marked text cannot become a SourcePatch or audit entry, while a
     // preceding accepted but not-yet-checkpointed text edit remains intact.
     if (this.compositionEpoch?.phase === "composing") {
       const epoch = this.compositionEpoch;
       // A browser/window blur is allowed to omit compositionend. Move the
-      // epoch to its cancelled-drain lane ourselves so save/undo cannot stay
+      // epoch to its cancelled-drain lane ourselves so save cannot stay
       // stranded as "composing" and a late terminal event can be absorbed.
       this.compositionEpoch = {
         lease: epoch.lease,
@@ -3831,8 +3821,6 @@ export class NativeEditingController {
       provisionalComposition
       && (
         compositionSnapshot!.replacements.length > 0
-        || result.command.kind === "undo"
-        || result.command.kind === "redo"
         || result.command.authority === "system"
       )
     );
@@ -3840,10 +3828,9 @@ export class NativeEditingController {
       ? null
       : result.command.sequence;
     if (mustCancelProvisionalComposition && compositionSnapshot) {
-      // Redo cannot accept a new composition first because that clears its
-      // stack. Undo and system work must not adopt provisional IME DOM either.
-      // A user command after earlier strict edits preserves those proven edits
-      // and discards only the current marked-text epoch before replay.
+      // System work must not adopt provisional IME DOM. A user command after
+      // earlier strict edits preserves those proven edits and discards only
+      // the current marked-text epoch before replay.
       this.restoreCompositionSnapshot(true);
       this.establishCancelledCompositionTombstone();
       const compositionId = this.draftCompositionId();
@@ -4306,7 +4293,7 @@ export class NativeEditingController {
     this.ready = false;
     this.blockDraft.expire({
       lease: this.leaseStamp,
-      reason: "history-or-source-fence",
+      reason: "source-authority-fence",
     });
     this.detachSessionInfrastructure();
     this.cancelAllScheduledWork();

@@ -584,7 +584,7 @@ test("text anchors preserve entity and UTF-16 boundaries and reject a surrogate 
   }, index));
 });
 
-test("one command applies multiple non-contiguous replacements and undo restores every byte", () => {
+test("one command applies multiple non-contiguous replacements and its inverse restores every byte", () => {
   const html = `<div data-keep='1'><p id="flow">甲乙<strong>丙丁</strong>戊己</p><aside>same</aside></div>`;
   const index = buildSourceIndex(html);
   const paragraph = elementBy(index, (element) => element.stableAttributes.id === "flow");
@@ -1443,7 +1443,7 @@ test("apply authorizes patches against exact operation TargetRefs and rejects ta
   );
 });
 
-test("handcrafted self-authenticated inverse plans cannot bypass the trusted history gate", () => {
+test("handcrafted self-authenticated inverse plans cannot bypass provenance validation", () => {
   const html = `<p>safe</p>`;
   const forgedOutput = `<p>evil</p>`;
   const index = buildSourceIndex(html);
@@ -1510,7 +1510,7 @@ test("source scope evidence rejects undeclared changes", () => {
   );
 });
 
-test("target mappings preserve text identity through apply, inverse, and redo", () => {
+test("target mappings preserve text identity through apply, inverse, and reapplication", () => {
   const html = `<p>before</p>`;
   const index = buildSourceIndex(html);
   const paragraph = elementBy(index, (element) => element.tagName === "p");
@@ -1537,12 +1537,12 @@ test("target mappings preserve text identity through apply, inverse, and redo", 
   );
   assert.deepEqual(result.inversePlan.targetRefs, result.refreshedTargetRefs);
 
-  const undone = applyPatchPlan(result.inversePlan, result.html);
-  assert.equal(undone.html, html);
-  const redone = applyPatchPlan(undone.inversePlan, undone.html);
-  assert.equal(redone.html, result.html);
-  assert.equal(redone.targetMappings[0].targetId, "plain-text-target");
-  assert.equal(redone.targetMappings[0].resolution, "exact");
+  const restoredResult = applyPatchPlan(result.inversePlan, result.html);
+  assert.equal(restoredResult.html, html);
+  const reapplied = applyPatchPlan(restoredResult.inversePlan, restoredResult.html);
+  assert.equal(reapplied.html, result.html);
+  assert.equal(reapplied.targetMappings[0].targetId, "plain-text-target");
+  assert.equal(reapplied.targetMappings[0].resolution, "exact");
 });
 
 test("tracked insertion points refresh deterministically through offset-shifting edits and inverse", () => {

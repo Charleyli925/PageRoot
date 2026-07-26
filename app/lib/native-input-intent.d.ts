@@ -1,6 +1,5 @@
 export type NativeInputIntentKind =
   | "text"
-  | "history"
   | "insert-hard-break"
   | "split-block"
   | "format"
@@ -16,7 +15,6 @@ export type NativeInputIntent = {
 
 export declare const NATIVE_INPUT_INTENT_KIND: Readonly<{
   TEXT: "text";
-  HISTORY: "history";
   INSERT_HARD_BREAK: "insert-hard-break";
   SPLIT_BLOCK: "split-block";
   FORMAT: "format";

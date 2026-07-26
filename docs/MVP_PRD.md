@@ -41,7 +41,7 @@ HTML AI 工作台让用户在真实本地 HTML 上完成两类工作：
 
 - 不做低代码搭建器。
 - 不让用户逐个接受 AI 的多个候选区块。
-- 不把临时文件、自动写回、撤销快照或恢复日志显示为 Version。
+- 不把临时文件、自动写回、事务恢复快照或恢复日志显示为 Version。
 - 不把文件名、页面标题或文件系统修改时间当作版本身份。
 - 不依赖固定时间窗口推断内部 AI 已完成。
 - 不维护一个会被反复覆盖、可能与项目当前路径分叉的含糊 `current/index.html`。有效 AI 成功创建按版本命名的 `working/V1.x.html` 并自动切换项目路径，不要求用户手动管理副本。
@@ -110,14 +110,14 @@ HTML AI 工作台让用户在真实本地 HTML 上完成两类工作：
 - 字体、字号、字重、斜体和颜色。
 - 背景、填充、边框和常用间距。
 - 同级模块顺序。
-- 撤销文字、样式和排序；不提供重做，评论在评论区独立删除。
+- 不提供画布级撤销或重做；源码画布拦截 `Cmd/Ctrl+Z`，避免 Chromium 绕过 SourcePatch 直接改 DOM。表单输入框保留自己的本地输入历史，评论在评论区独立删除。
 
 每次本地修改：
 
 1. 文字双击时由 `NativeEditingController` 接管当前源码宿主；浏览器原生 DOM、Selection 和 IME 负责光标与输入，Controller 的临时跟踪状态只服务当前会话，不成为第二事实源。
 2. 约 700ms、格式、失焦、Cmd+S、切换、关闭或发送边界生成带目标身份、源 Hash、精确 before/after 和操作类型的 `EditCommand`。
 3. SourceIndex/TargetResolver 唯一定位真实源码范围；无法唯一定位时保留草稿并阻止操作。
-4. SourcePatchEngine 生成局部 forward/inverse Patch，并验证范围外源码不变。flex/grid 文字只有在源码、布局和 selector 均安全时，才随首个真实 Patch 创建一个 canonical 直接文字项，避免 wrapper 分裂成多个 gap item。
+4. SourcePatchEngine 生成局部 forward/inverse Patch，并验证范围外源码不变。inverse 只用于同一事务失败时的原子恢复与测试证明，不保存为用户可操作的历史栈。flex/grid 文字只有在源码、布局和 selector 均安全时，才随首个真实 Patch 创建一个 canonical 直接文字项，避免 wrapper 分裂成多个 gap item。
 5. 用 Patch 结果更新内存 HTML 并原子重建 projection；失败时保留原会话和草稿。
 6. 增加 `editRevision` 并追加稳定 ID 的 edit event。
 7. 触发有上限 debounce 的同一条串行写入队列。

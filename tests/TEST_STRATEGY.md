@@ -24,8 +24,8 @@
 
 - 核心 Node：算法、状态机、序列化、事务、错误关闭和 forward/inverse 不变量。
 - 源码字符串合同：只在其拥有的组件或控制器变化时运行；不把实现文本匹配当作主要正确性证据。
-- Browser 冒烟：固定覆盖脚本隔离、源码字节、格式骨架、历史和能力降级五类关键风险；完整 Browser 仍包含所有回归，不修改或跳过已知失败。
-- Electron 冒烟：固定覆盖真实 authored DOM 输入和一次带磁盘持久化的 composition；完整 Electron 保留保存、关闭重开、undo/redo 等全部路径。
+- Browser 冒烟：固定覆盖脚本隔离、源码字节、格式骨架、源码权威围栏和能力降级五类关键风险；完整 Browser 仍包含所有回归，不修改或跳过已知失败。
+- Electron 冒烟：固定覆盖真实 authored DOM 输入和一次带磁盘持久化的 composition；完整 Electron 保留保存、关闭重开和逐字节 forward 结果等全部路径。
 - AI 闭环：任务级只跑正常闭环和越界失败 2 个代表场景；发布级跑完整 6 个场景，包括复制失败、缺失 finalizer、非法 HTML 和版本激活失败。测试自动生成受控 AI 输出并执行正式 finalizer，不等待外部模型或真人接力。
 - 候选包：从 `.app` 的真实可执行文件启动，使用隔离 userData，完成源码字节 oracle；随后校验 app.asar、Bridge、Schema、签名、DMG 和只读挂载内容。
 
@@ -40,7 +40,9 @@
 3. DOM 身份、Selection、caret、几何、scroll 和布局指纹。
 4. 截图、trace 和视频只作为失败诊断物，不要求真人看图后决定通过。
 
-`tests/generated-source-invariants.test.mjs` 用固定种子生成 BOM、LF/CRLF、单双引号、多语言 Unicode、entity、注释和脚本文本组合。每个失败都带 seed；测试用独立字节替换 oracle 验证未命中范围、undo 和 redo，而不是复用被测实现计算期望值。
+`tests/generated-source-invariants.test.mjs` 用固定种子生成 BOM、LF/CRLF、单双引号、多语言 Unicode、entity、注释和脚本文本组合。每个失败都带 seed；测试用独立字节替换 oracle 验证未命中范围、inverse 原子恢复和同一计划重放，而不是复用被测实现计算期望值。
+
+画布不提供用户级撤销或重做，也不维护产品历史栈。源码画布内的 `Cmd/Ctrl+Z` 与 `Cmd/Ctrl+Shift+Z` 必须被阻止，避免 Chromium 绕过源码映射；真实表单和评论输入框仍保留浏览器自己的局部输入历史。SourcePatch 的 inverse plan 只作为同一事务失败恢复和字节不变量证明，不得重新暴露为产品能力。
 
 ## 真实 HTML 与输入法边界
 

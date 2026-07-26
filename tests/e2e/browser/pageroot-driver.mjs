@@ -48,7 +48,7 @@ export async function currentEditorFrame(frameOrPage) {
   const iframe = currentEditorIframe(page);
   await iframe.waitFor({ state: "attached" });
 
-  // A History Fence deliberately replaces the iframe element. The locator is
+  // A source-authority fence deliberately replaces the iframe element. The locator is
   // resilient to that replacement, while an ElementHandle/Frame is not. A
   // short retry closes the tiny gap between resolving the current element and
   // Chromium exposing its new same-origin browsing context.

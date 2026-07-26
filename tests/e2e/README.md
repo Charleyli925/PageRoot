@@ -66,8 +66,8 @@ only when `PAGEROOT_E2E=1` and the path is an isolated
 also place the bridge workspace inside that directory, remove only validated
 test directories, and never change `HOME` or open the user's real HTML
 project. The real-file case checkpoints and autosaves a temporary disk HTML,
-proves that only the authorized bytes changed, checks exact undo and redo, and
-then closes and reopens the app against the same file.
+proves that only the authorized bytes changed, and then closes and reopens the
+app against the same forward result.
 
 ## Coverage and release interpretation
 
@@ -82,11 +82,11 @@ same final commit and content hash recorded by the automated gate report.
   Document identity, scroll stability, rapid typing, target ranges and long
   tasks.
 - `native-dom-source.spec.mjs`: byte-exact UTF-8 replacement, BOM/CRLF,
-  entities/quotes/comments/duplicate attributes, exact undo SHA, and redo of
-  the identical forward bytes.
+  entities/quotes/comments/duplicate attributes, exact forward bytes, and
+  blocked source-reversal shortcuts.
 - `native-dom-electron.spec.mjs`: the same real native editing path in the
   shipped Chromium environment, plus temporary-disk checkpoint/autosave,
-  exact undo/redo bytes, graceful close, and cold reopen consistency.
+  exact forward bytes, graceful close, and cold reopen consistency.
 - `ai-handoff-closed-loop.spec.mjs`: real comment UI, frozen Request, clipboard
   handoff, generated-AI/finalizer result, status polling, non-overwriting Version
   creation, automatic working-HTML activation, and fail-closed recovery paths.
@@ -105,8 +105,10 @@ The capability assertions use the same production contract as the canvas:
 Every source test treats the imported HTML bytes as the oracle. BOM, line
 endings, entities, quotes, comments, duplicate attributes, formatting, and all
 other bytes outside the approved SourcePatch ranges must remain unchanged.
-Undo must restore the exact pre-edit SHA; redo must reproduce the same forward
-Patch. A DOM serialization that merely renders the same page is a failure.
+The canvas has no user undo/redo stack; source-reversal shortcuts must not
+mutate committed bytes. Inverse plans remain transaction-local proof for
+atomic recovery only. A DOM serialization that merely renders the same page
+is a failure.
 
 Playwright traces, screenshots, videos and reports are written only below
 `output/playwright/`.

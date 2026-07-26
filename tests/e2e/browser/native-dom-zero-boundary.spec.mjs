@@ -33,7 +33,7 @@ async function attemptDirectEdit(frame, id) {
 }
 
 test("visible empty inline boundary stays selectable/commentable and never becomes editable", async ({ page }) => {
-  const { editor, frame } = await openBoundaryFixture(page);
+  const { frame } = await openBoundaryFixture(page);
   const target = await attemptDirectEdit(frame, "visible-empty-boundary");
 
   await expect(page.locator('[role="status"], [role="alert"]').filter({
@@ -45,12 +45,11 @@ test("visible empty inline boundary stays selectable/commentable and never becom
 
   await page.keyboard.insertText("不应写入");
   expect(await target.textContent()).toBe("前文后文");
-  expect(await editor.getAttribute("data-undo-depth")).toBe("0");
   expect((await exportCurrentHtml(page)).equals(source)).toBe(true);
 });
 
 test("authored comment boundary also fails closed and preserves every source byte", async ({ page }) => {
-  const { editor, frame } = await openBoundaryFixture(page);
+  const { frame } = await openBoundaryFixture(page);
   const target = await attemptDirectEdit(frame, "source-comment-boundary");
 
   await expect(page.locator('[role="status"], [role="alert"]').filter({
@@ -61,7 +60,6 @@ test("authored comment boundary also fails closed and preserves every source byt
 
   await page.keyboard.insertText("不应写入");
   expect(await target.textContent()).toBe("甲乙");
-  expect(await editor.getAttribute("data-undo-depth")).toBe("0");
   expect((await exportCurrentHtml(page)).equals(source)).toBe(true);
 });
 
@@ -121,7 +119,7 @@ async function authoredInnerHtml(target) {
 
 test("collapsed typing is blocked at every non-empty inline style boundary", async ({ page }) => {
   for (const point of styledBoundaryPoints) {
-    const { editor, frame } = await openBoundaryFixture(page);
+    const { frame } = await openBoundaryFixture(page);
     const target = await attemptDirectEdit(frame, "styled-inline-boundary");
     await expect(target).toHaveAttribute("contenteditable", "plaintext-only");
     await setStyledBoundaryPoint(target, point);
@@ -132,13 +130,12 @@ test("collapsed typing is blocked at every non-empty inline style boundary", asy
       hasText: /两种文字样式的边界/,
     }).first()).toContainText(/移到样式内一个字的位置/);
     expect(await authoredInnerHtml(target)).toBe('<em style="color:#c43"><strong>AB</strong></em>C');
-    expect(await editor.getAttribute("data-undo-depth")).toBe("0");
     expect((await exportCurrentHtml(page)).equals(source)).toBe(true);
   }
 });
 
 test("typing strictly inside a styled inline wrapper stays native and source-exact", async ({ page }) => {
-  const { editor, frame } = await openBoundaryFixture(page);
+  const { frame } = await openBoundaryFixture(page);
   const target = await attemptDirectEdit(frame, "styled-inline-boundary");
   await target.evaluate((element) => {
     const text = element.querySelector("strong")?.firstChild;
@@ -155,7 +152,6 @@ test("typing strictly inside a styled inline wrapper stays native and source-exa
 
   await expect(target).toHaveText("AXBC");
   expect(await authoredInnerHtml(target)).toBe('<em style="color:#c43"><strong>AXB</strong></em>C');
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
   const expected = Buffer.from(source.toString("utf8").replace(
     "<strong>AB</strong>",
     "<strong>AXB</strong>",
@@ -164,7 +160,7 @@ test("typing strictly inside a styled inline wrapper stays native and source-exa
 });
 
 test("an IME epoch at an inline boundary is cancelled before DOM mutation and drains late tails", async ({ page }) => {
-  const { editor, frame } = await openBoundaryFixture(page);
+  const { frame } = await openBoundaryFixture(page);
   const target = await attemptDirectEdit(frame, "styled-inline-boundary");
   await setStyledBoundaryPoint(target, "trailing-text-start");
 
@@ -206,6 +202,5 @@ test("an IME epoch at an inline boundary is cancelled before DOM mutation and dr
     hasText: /两种文字样式的边界/,
   }).first()).toContainText(/添加评论/);
   expect(await authoredInnerHtml(target)).toBe('<em style="color:#c43"><strong>AB</strong></em>C');
-  expect(await editor.getAttribute("data-undo-depth")).toBe("0");
   expect((await exportCurrentHtml(page)).equals(source)).toBe(true);
 });
