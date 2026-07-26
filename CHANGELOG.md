@@ -4,13 +4,20 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+## [0.8.8] - 2026-07-26
+
+- Unified project, document, draft, run and close ownership behind typed application services so the renderer and Bridge can no longer advance different identities or revisions.
 - Reconcile stale or uncertain comment-draft writes against the authoritative Bridge draft, preserve deletions with durable tombstones, and avoid creating a new draft revision when close or project switch only verifies unchanged content.
+- Rebase stale draft operations with stable operation IDs, replay them exactly once, reject impossible revision jumps, and recover the one valid artifact-ahead crash window without resurrecting deleted comments.
+- Route close, project switch, Request submission and history boundaries through one drain coordinator; Electron close now waits for the exact source and draft generations while browser `beforeunload` remains browser-only.
+- Retain Bridge-unavailable recovery until the Workbench listener acknowledges readiness, then replay it after renderer reloads instead of losing the only recovery action.
 - Keep only one unsaved comment at a time, reopen the processing panel when entering an active run, and preserve the Canvas scroll position when selecting commented content.
 - Automatically normalize persisted whole-page comments across restarts so legacy records no longer block Qoder submission or require users to reselect “全局评论”.
 - Make global notifications opt-in, automatically recover transient reads and unknown AI outcomes, and keep file, canvas, rule, attachment, and processing feedback in context instead of asking users to repeat failed actions.
 - Replace raw scope-code warnings with concise before/after summaries and an explicit “采用这些额外变化” decision.
 - Remove the product-level 100-comment cap while retaining virtualized rendering for large review rounds.
 - Restored full-fidelity rendering for the frozen HTML preview and made preview/history return bars auto-collapse into a discoverable 2px edge that reopens on hover, focus or click.
+- Added architecture contracts, a state-ownership registry, engineering standards, an ADR and executable CI checks that reject direct view-level Bridge/storage writes, duplicate lifecycle authority and uncoordinated drain paths.
 
 ## [0.8.7] - 2026-07-24
 
@@ -62,7 +69,8 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 - Published the first public macOS release in this repository under the earlier YuanYe artifact name.
 
-[Unreleased]: https://github.com/Charleyli925/PageRoot/compare/v0.8.7...HEAD
+[Unreleased]: https://github.com/Charleyli925/PageRoot/compare/v0.8.8...HEAD
+[0.8.8]: https://github.com/Charleyli925/PageRoot/compare/v0.8.7...v0.8.8
 [0.8.7]: https://github.com/Charleyli925/PageRoot/compare/v0.8.6...v0.8.7
 [0.8.6]: https://github.com/Charleyli925/PageRoot/compare/v0.8.5...v0.8.6
 [0.8.5]: https://github.com/Charleyli925/PageRoot/compare/v0.8.4...v0.8.5

@@ -21,7 +21,7 @@ import {
 const productRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const commitSha = "a".repeat(40);
 const treeSha = "b".repeat(40);
-const packageVersion = "0.8.7";
+const packageVersion = "0.8.8";
 const artifactName = releaseCandidateArtifactName(treeSha, packageVersion, "arm64", 1);
 const now = new Date("2026-07-24T12:00:00.000Z");
 
