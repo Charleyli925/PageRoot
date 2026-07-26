@@ -387,7 +387,7 @@ test("header prioritizes the filename and keeps the approved action order", () =
   );
   assert.match(
     header,
-    /canShowCurrentFileInFolder[\s\S]*?className="window-file-folder-action"[\s\S]*?onClick=\{\(\) => void showProjectInFolder\(\)\}[\s\S]*?>\s*在文件夹中打开\s*</,
+    /className="file-version-label"[\s\S]*?canShowCurrentFileInFolder[\s\S]*?className="window-file-folder-action"[\s\S]*?onClick=\{\(\) => void showProjectInFolder\(\)\}[\s\S]*?>\s*在文件夹中打开\s*<\/button>[\s\S]*?className="save-status"/,
   );
   assert.doesNotMatch(header, /brand-logo\.png|className="brand"|className="update-badge"/);
   assert.match(
@@ -400,7 +400,15 @@ test("header prioritizes the filename and keeps the approved action order", () =
   );
   assert.match(
     styles,
-    /\.window-file-folder-action\s*\{[\s\S]*?min-height:\s*34px/,
+    /\.file-meta\s*\{[\s\S]*?font-style:\s*italic/,
+  );
+  assert.match(
+    styles,
+    /\.file-version-label,\s*\.window-file-folder-action\s*\{[\s\S]*?padding:\s*2px 7px[\s\S]*?border-radius:\s*999px[\s\S]*?background:\s*#f0f1f4[\s\S]*?color:\s*#666975[\s\S]*?font-weight:\s*650/,
+  );
+  assert.match(
+    styles,
+    /\.window-file-folder-action\s*\{[\s\S]*?border:\s*0[\s\S]*?text-decoration:\s*none/,
   );
   const editPreview = header.indexOf('className="canvas-mode-switch"');
   const project = header.indexOf('className="project-button"');

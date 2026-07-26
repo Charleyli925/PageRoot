@@ -8669,6 +8669,17 @@ export default function Workbench() {
                       ? safeVersionLabel(currentBasedOnVersionId)
                       : latestVersion?.label || "版本 1"}
               </span>
+              {canShowCurrentFileInFolder ? (
+                <button
+                  className="window-file-folder-action"
+                  type="button"
+                  aria-label={`在文件夹中打开 ${activeOpenedAiVersionNotice?.fileName || projectName}`}
+                  title="在 Finder 中显示当前文件"
+                  onClick={() => void showProjectInFolder()}
+                >
+                  在文件夹中打开
+                </button>
+              ) : null}
               <span
                 className="save-status"
                 data-persist-state={persistState}
@@ -8687,18 +8698,6 @@ export default function Workbench() {
               </span>
             </span>
           </div>
-          {canShowCurrentFileInFolder ? (
-            <button
-              className="window-file-folder-action"
-              type="button"
-              aria-label={`在文件夹中打开 ${activeOpenedAiVersionNotice?.fileName || projectName}`}
-              title="在 Finder 中显示当前文件"
-              onClick={() => void showProjectInFolder()}
-            >
-              <FolderOpenIcon aria-hidden="true" size={15} weight="bold" />
-              <span>在文件夹中打开</span>
-            </button>
-          ) : null}
         </div>
 
         <nav className="header-actions" aria-label="画布模式、项目和版本操作">
