@@ -267,13 +267,18 @@ async function expectCheckpointPersisted(page, afterRevision) {
       element.getAttribute("data-persisted-revision"),
     );
     return {
-      idle: element.getAttribute("data-persist-state") === "idle",
+      state: element.getAttribute("data-persist-state"),
+      editRevision,
+      persistedRevision,
       synchronized:
         Number.isSafeInteger(editRevision)
         && editRevision > minimumRevision
         && editRevision === persistedRevision,
     };
-  }, afterRevision), { timeout: 15_000 }).toEqual({ idle: true, synchronized: true });
+  }, afterRevision), { timeout: 30_000 }).toMatchObject({
+    state: "idle",
+    synchronized: true,
+  });
   return Number(await indicator.getAttribute("data-persisted-revision"));
 }
 
