@@ -3,13 +3,22 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import ts from "typescript";
 
-const [workbench, styles, canvas, canvasStyles, notice, noticeStyles] = await Promise.all([
+const [
+  workbench,
+  styles,
+  canvas,
+  canvasStyles,
+  notice,
+  noticeStyles,
+  bridgeClient,
+] = await Promise.all([
   readFile(new URL("../app/workbench.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
   readFile(new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/components/HtmlCanvasEditor.module.css", import.meta.url), "utf8"),
   readFile(new URL("../app/components/NoticeBar.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/components/NoticeBar.module.css", import.meta.url), "utf8"),
+  readFile(new URL("../app/application/bridge-client.js", import.meta.url), "utf8"),
 ]);
 
 function literalProperty(object, name) {
@@ -198,10 +207,10 @@ test("file and attachment failures keep a real recovery path", () => {
 });
 
 test("blocking paths auto-recover or expose one in-context decision", () => {
-  assert.match(workbench, /const BRIDGE_REQUEST_TIMEOUT_MS = 60_000/);
+  assert.match(bridgeClient, /const DEFAULT_REQUEST_TIMEOUT_MS = 60_000/);
   assert.match(
-    workbench,
-    /timeoutMs = BRIDGE_STATE_READ_TIMEOUT_MS/,
+    bridgeClient,
+    /timeoutMs = DEFAULT_READ_TIMEOUT_MS/,
   );
   assert.match(workbench, /const reconcilePendingRun = useCallback/);
   assert.match(workbench, /源页会在后台继续核对/);
@@ -232,7 +241,8 @@ test("the verified AI file identity appears only after the user opens the ready 
   assert.doesNotMatch(workbench, /className="ai-file-opened-card"/);
   assert.doesNotMatch(workbench, /关闭新文件打开提示/);
   assert.match(workbench, /打开最新版/);
-  assert.match(workbench, /\/ready-version\/activate/);
+  assert.match(workbench, /bridgeClient\.activateReadyVersion/);
+  assert.match(bridgeClient, /"\/ready-version\/activate"/);
   assert.match(
     workbench,
     /<strong[\s\S]*?title=\{activeOpenedAiVersionNotice\?\.fileName \|\| projectName\}[\s\S]*?\{activeOpenedAiVersionNotice\?\.fileName \|\| projectName\}/,
@@ -263,7 +273,7 @@ test("ready polling never opens automatically; the adopted marker ends on first 
     workbench.indexOf("const activateReadyResult"),
     workbench.indexOf("const processRunStatus"),
   );
-  assert.match(activationFlow, /\/ready-version\/activate/);
+  assert.match(activationFlow, /bridgeClient\.activateReadyVersion/);
   assert.match(activationFlow, /await openCommittedVersion\(run, mergedPayload\)/);
   assert.match(
     workbench,

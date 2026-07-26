@@ -459,7 +459,8 @@ editing
 | 当前可编辑 HTML | `project.json.sourcePath` 当前指向的原始 HTML 或 `working/V1.x.html` |
 | 项目/文档身份与可重建缓存 | `project.json` |
 | 整个项目长期使用的 AI 规则 | `PROJECT.md` |
-| active run、项目锁、草稿、冲突、恢复 | `runtime-state.json` |
+| active run、项目锁、冲突与恢复事务 | `runtime-state.json` |
+| 当前评论、edit event、删除 tombstone、草稿 revision 与已处理 operation ID | `draft/annotations.json`；`runtime-state.json` 只保存其指针与 revision |
 | 本地直接编辑审计 | `edit-audit.jsonl` |
 | 冻结输入 | Request 的 `input/` |
 | AI 完成 | Attempt 的 `completion.json` |
@@ -535,6 +536,9 @@ editing
 - `Cmd+S` 只刷新同一队列。
 - 重启后源 HTML 包含最后一次成功写回。
 - 自动写入失败或外部冲突时不能提交。
+- 页面草稿 revision 落后 Bridge 时，先读取权威草稿并重放稳定 operation；旧快照不能覆盖新评论，也不能让已经删除的评论复活。
+- 草稿 POST 超时后先按 operation ID 查询是否已确认；不得把“可能已成功”当成失败后盲目重发。
+- 在草稿内容未变化时连续触发关闭或项目切换，Bridge draft revision 保持不变，应用不会进入永久“尚未安全记录”状态。
 
 ### 10.2 锁定与多项目
 

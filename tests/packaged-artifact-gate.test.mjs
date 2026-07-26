@@ -112,6 +112,8 @@ async function createPackagedFixture(t) {
     "target-identity.mjs",
     "product-contract.mjs",
     "attachment-storage.mjs",
+    "draft-aggregate.mjs",
+    "draft-service.mjs",
   ]) {
     await writeFixtureFile(
       fixtureProductRoot,
@@ -188,6 +190,8 @@ async function createPackagedFixture(t) {
     "target-identity.mjs",
     "product-contract.mjs",
     "attachment-storage.mjs",
+    "draft-aggregate.mjs",
+    "draft-service.mjs",
   ]) {
     const destination = path.join(resourcesPath, "bridge", fileName);
     await mkdir(path.dirname(destination), { recursive: true });
@@ -196,6 +200,19 @@ async function createPackagedFixture(t) {
       : path.join(fixtureProductRoot, "scripts", fileName);
     await copyFile(sourcePath, destination);
   }
+  await writeFixtureFile(
+    fixtureProductRoot,
+    "shared/draft-aggregate.mjs",
+    "export const fixtureDraftAggregate = true;\n",
+  );
+  await copyFile(
+    path.join(fixtureProductRoot, "shared/draft-aggregate.mjs"),
+    await writeFixtureFile(
+      resourcesPath,
+      "shared/draft-aggregate.mjs",
+      "",
+    ),
+  );
   for (const moduleName of ["parse5", "entities"]) {
     for (const relativePath of ["package.json", "dist/index.js"]) {
       const destination = path.join(
@@ -249,7 +266,10 @@ test("release commands use one automated artifact lane with full tests and packa
   ]);
   const packageJson = JSON.parse(packageText);
   const impactMap = JSON.parse(impactMapText);
-  assert.equal(packageJson.scripts.typecheck, "tsc --noEmit");
+  assert.equal(
+    packageJson.scripts.typecheck,
+    "npm run architecture:check && tsc --noEmit",
+  );
   assert.equal(packageJson.scripts.verify, "npm run gate:task");
   assert.equal(packageJson.scripts["release:mac"], "npm run gate:artifact:auto");
   assert.equal(packageJson.scripts["release:mac:x64"], "npm run gate:artifact:auto:x64");

@@ -324,7 +324,7 @@ test("canvas and workbench consume deterministic mappings before generic fallbac
     "exactGlobalPageTarget(target)",
     "!isGlobalPageTarget(target) && canLocateTarget(target)",
     ": canLocateTarget(target)",
-    "independentCommentTarget(draftTarget, commentId)",
+    "independentCommentTarget(currentTarget, commentId)",
     "relinkSelectionArmedRef.current",
   ]) {
     assert.match(
@@ -876,7 +876,15 @@ test("canvas root whitespace clears selection instead of selecting the document 
 });
 
 test("canvas maps native DOM selections to source-safe patches and promotes media to modules", async () => {
-  const [canvas, nativeController, sourceMap, sourcePatch, workbench, preflight] = await Promise.all([
+  const [
+    canvas,
+    nativeController,
+    sourceMap,
+    sourcePatch,
+    workbench,
+    preflight,
+    previewSandbox,
+  ] = await Promise.all([
     readFile(
       new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url),
       "utf8",
@@ -899,6 +907,10 @@ test("canvas maps native DOM selections to source-safe patches and promotes medi
     ),
     readFile(
       new URL("../app/components/native-edit-runtime-preflight.ts", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL("../app/components/html-preview-sandbox.js", import.meta.url),
       "utf8",
     ),
   ]);
@@ -1013,7 +1025,11 @@ test("canvas maps native DOM selections to source-safe patches and promotes medi
   assert.match(canvas, /inferSelectionLevel\(candidate\) === "module"/u);
   assert.match(canvas, /pointer-events: none !important/u);
   assert.match(canvas, /noscript \{[\s\S]*?display: none !important/u);
-  assert.match(canvas, /prepareVerifiedFrameDocument[\s\S]*?editorStyle\.textContent = EDITOR_DOCUMENT_STYLES/u);
+  assert.match(canvas, /prepareVerifiedFrameDocument[\s\S]*?editorStyles: EDITOR_DOCUMENT_STYLES/u);
+  assert.match(
+    previewSandbox,
+    /prepareVerifiedFrameDocument[\s\S]*?editorStyle\.textContent = String\(editorStyles \|\| ""\)/u,
+  );
   assert.match(canvas, /pendingToolbarVisibleRef\.current = toolbarVisibleRef\.current/u);
   assert.match(canvas, /showToolbar: pendingToolbarVisible/u);
   assert.match(canvas, /rangeComputedStyles\.every\(styleIsBold\)/u);
@@ -1091,13 +1107,16 @@ test("handoff commits a pending source edit before recapturing and freezing comm
     workbench.slice(freezeGuard, projectLock),
     /!frozen[\s\S]*?\|\| !frozen\.ok[\s\S]*?return;/u,
   );
-  const flush = workbench.indexOf("await flushAutosave(freezeCutoffRevision)", projectLock);
-  const requestDispatch = workbench.indexOf("requestDispatched = true", flush);
-  assert.ok(flush > projectLock);
-  assert.ok(requestDispatch > flush);
+  const drain = workbench.indexOf(
+    'await drainCoordinatorRef.current.drain("submit"',
+    projectLock,
+  );
+  const requestDispatch = workbench.indexOf("requestDispatched = true", drain);
+  assert.ok(drain > projectLock);
+  assert.ok(requestDispatch > drain);
   assert.match(
-    workbench.slice(flush, requestDispatch),
-    /lastPersistedRevisionRef\.current !== freezeCutoffRevision[\s\S]*?editRevisionRef\.current !== freezeCutoffRevision[\s\S]*?persistedSourceSha256 !== frozen\.sourceSha256/u,
+    workbench.slice(drain, requestDispatch),
+    /!drained\.ok[\s\S]*?lastPersistedRevisionRef\.current !== freezeCutoffRevision[\s\S]*?editRevisionRef\.current !== freezeCutoffRevision[\s\S]*?persistedSourceSha256 !== frozen\.sourceSha256/u,
     "handoff must prove that the exact frozen revision and hash were persisted before dispatch",
   );
 });

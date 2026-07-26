@@ -145,11 +145,28 @@ async function stopPageRoot(electronApp, isolatedUserData, { cleanup = true } = 
 }
 
 async function closePageRootGracefully(electronApp) {
-  const closed = electronApp.waitForEvent("close", { timeout: 15_000 });
+  const page = electronApp.windows()[0];
+  await page?.evaluate(() => {
+    window.__PAGEROOT_CLOSE_ABORT_REASON__ = null;
+    window.addEventListener("html-ai:close-aborted", (event) => {
+      window.__PAGEROOT_CLOSE_ABORT_REASON__ = event.detail?.reason || "unknown";
+    }, { once: true });
+  });
+  const closed = electronApp.waitForEvent("close", { timeout: 35_000 });
   await electronApp.evaluate(({ BrowserWindow }) => {
     BrowserWindow.getAllWindows()[0]?.close();
   });
-  await closed;
+  try {
+    await closed;
+  } catch (error) {
+    const reason = await page?.evaluate(
+      () => window.__PAGEROOT_CLOSE_ABORT_REASON__,
+    ).catch(() => null);
+    throw new Error(
+      `PageRoot graceful close did not complete${reason ? `: ${reason}` : "."}`,
+      { cause: error },
+    );
+  }
 }
 
 async function waitForProjectReady(page, timeout = 30_000) {
@@ -866,6 +883,26 @@ test("Electron canonicalizes and persists an Apple Pinyin styled-wrapper composi
 
     await closePageRootGracefully(firstApp);
     firstApp = null;
+    const workspace = path.join(isolatedUserData, "workspace");
+    const registry = JSON.parse(
+      readFileSync(path.join(workspace, "project-registry.json"), "utf8"),
+    );
+    const projectEntry = Object.entries(registry.projects).find(
+      ([, project]) => project.sourcePath === realpathSync(sourcePath),
+    );
+    expect(projectEntry, "the first durable edit must establish one project authority")
+      .toBeTruthy();
+    const [persistedProjectId] = projectEntry;
+    const projectRoot = path.join(workspace, "projects", persistedProjectId);
+    const annotations = JSON.parse(
+      readFileSync(path.join(projectRoot, "draft", "annotations.json"), "utf8"),
+    );
+    const runtimeState = JSON.parse(
+      readFileSync(path.join(projectRoot, "runtime-state.json"), "utf8"),
+    );
+    expect(annotations.draftRevision).toBeGreaterThan(0);
+    expect(annotations.editEvents.length).toBeGreaterThan(0);
+    expect(runtimeState.draft.draftRevision).toBe(annotations.draftRevision);
     const reopened = await launchPageRoot({ isolatedUserData });
     reopenedApp = reopened.electronApp;
     const { frame: reopenedFrame } = await loadedDiskFrame(

@@ -68,17 +68,40 @@ test("server-renders the autosave-first workbench entry points", async () => {
   assert.doesNotMatch(html, /codex-preview|_sites-preview|react-loading-skeleton/i);
 });
 
-test("workbench encodes the v3 single-source lifecycle instead of save-created versions", async () => {
-  const [page, layout, packageText, workbench, canvasEditor, nativeController, viteConfig] = await Promise.all([
+test("application boundaries encode the v3 single-source lifecycle instead of save-created versions", async () => {
+  const [
+    page,
+    layout,
+    packageText,
+    workbench,
+    bridgeClient,
+    draftSession,
+    drainCoordinator,
+    runLifecycle,
+    canvasEditor,
+    nativeController,
+    viteConfig,
+  ] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
     readFile(new URL("../app/workbench.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/application/bridge-client.js", import.meta.url), "utf8"),
+    readFile(new URL("../app/application/draft-session.js", import.meta.url), "utf8"),
+    readFile(new URL("../app/application/drain-coordinator.js", import.meta.url), "utf8"),
+    readFile(new URL("../app/domain/run-lifecycle.js", import.meta.url), "utf8"),
     readFile(new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/components/NativeEditingController.ts", import.meta.url), "utf8"),
     readFile(new URL("../vite.config.ts", import.meta.url), "utf8"),
   ]);
   const packageJson = JSON.parse(packageText);
+  const applicationLifecycle = [
+    workbench,
+    bridgeClient,
+    draftSession,
+    drainCoordinator,
+    runLifecycle,
+  ].join("\n");
 
   assert.doesNotMatch(page, /codex-preview|_sites-preview|SkeletonPreview/);
   assert.doesNotMatch(layout, /codex-preview|_sites-preview|Starter Project/);
@@ -115,7 +138,7 @@ test("workbench encodes the v3 single-source lifecycle instead of save-created v
     "html-ai:prepare-close",
     "bridgeAuthToken",
     "x-html-ai-bridge-token",
-    "BRIDGE_STATE_READ_TIMEOUT_MS",
+    "DEFAULT_READ_TIMEOUT_MS",
     "AbortSignal.timeout",
     "/autosave",
     "/version-file",
@@ -129,13 +152,16 @@ test("workbench encodes the v3 single-source lifecycle instead of save-created v
     "openedAiVersionNotice",
     "removeAcknowledgedAuditEvents",
     "hydrateRecentProjectRuns",
-    "await flushDraftPersistence({",
+    '.drain("submit"',
     "projectIdRef.current === run.projectId",
     "transitionAffectsCurrentCanvas",
     "isCurrentProjectContext(transitionContext)",
     "已打开，但需要检查",
   ]) {
-    assert.match(workbench, new RegExp(required.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.match(
+      applicationLifecycle,
+      new RegExp(required.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+    );
   }
 
   assert.doesNotMatch(workbench, /archiveLocalVersion|saveCurrent|saveAs/);
@@ -290,6 +316,7 @@ test("history cards read only v3 immutable annotations and show audit details", 
 test("canvas persistence has one SourcePatchEngine path and clean v3 TargetRefs", async () => {
   const [
     workbench,
+    draftSession,
     canvasEditor,
     nativeController,
     sourcePatchEngine,
@@ -299,6 +326,7 @@ test("canvas persistence has one SourcePatchEngine path and clean v3 TargetRefs"
     globals,
   ] = await Promise.all([
     readFile(new URL("../app/workbench.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/application/draft-session.js", import.meta.url), "utf8"),
     readFile(new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/components/NativeEditingController.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/lib/source-patch-engine.js", import.meta.url), "utf8"),
@@ -331,11 +359,13 @@ test("canvas persistence has one SourcePatchEngine path and clean v3 TargetRefs"
     "在页面顶部添加内容建议",
     "target-resolution",
     "persistedTargetRef",
-    "comments: write.comments.map(persistedComment)",
-    "changeEvents: write.changeEvents.map(persistedChangeEvent)",
+    "encodeComment: persistedComment",
+    "encodeChangeEvent: persistedChangeEvent",
+    "comments: write.comments.map(this.#encodeComment)",
+    "changeEvents: write.changeEvents.map(this.#encodeChangeEvent)",
   ]) {
     assert.match(
-      `${canvasEditor}\n${workbench}\n${globals}`,
+      `${canvasEditor}\n${workbench}\n${draftSession}\n${globals}`,
       new RegExp(required.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
     );
   }

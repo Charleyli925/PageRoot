@@ -85,6 +85,7 @@ test("durable agent guidance keeps progressive disclosure and review boundaries"
   assert.match(agentGuidance, /^## Progressive disclosure$/mu);
   assert.match(agentGuidance, /^## Code Review Rules$/mu);
   assert.match(agentGuidance, /update that document in the same PR/u);
+  assert.match(agentGuidance, /ENGINEERING_STANDARDS\.md/u);
   assert.match(agentGuidance, /Do not merge, create or move a tag, publish a Release/u);
   assert.doesNotMatch(agentGuidance, /\/Users\/|[A-Za-z]:\\/u);
   assert.doesNotMatch(codexWorkflow, /\/Users\/|[A-Za-z]:\\/u);

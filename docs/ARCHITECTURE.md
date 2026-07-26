@@ -20,6 +20,9 @@ Comments + frozen input
 
 ## Boundaries
 
+- `docs/ARCHITECTURE_CONTRACT.md` is the normative dependency, state-ownership,
+  asynchronous outcome and drain contract. `docs/STATE_OWNERSHIP.md` names the
+  sole owner of each mutable fact.
 - `app/` owns the visual workbench, source mapping and direct-edit transaction model.
 - `desktop/` owns privileged filesystem access, windows, lifecycle, update checks and safe IPC exposure.
 - `scripts/` owns the local Bridge, protocol finalization, scope validation and automated gates.
@@ -29,6 +32,29 @@ Comments + frozen input
 - `native-edit-policy` is the single policy source for session attributes, host modes, wrapper disposal and editing timeouts. `native-edit-runtime-preflight` owns iframe geometry/event capability inspection; `HtmlCanvasEditor` only coordinates its result with selection, SourcePatch and UI.
 - `contenteditable="true"` is a measured, controlled fallback rather than a second editor engine. It shares the same Controller, FormatSkeleton and SourcePatch authority as `plaintext-only`, and cannot commit rich structure.
 
+## Module map
+
+`app/workbench.tsx` is the composition root for the review workspace. It
+renders owner snapshots and dispatches user intent; it does not own persistence
+protocols.
+
+| Boundary | Owner |
+| --- | --- |
+| Bridge routes, timeouts and structured outcomes | `app/application/bridge-client.js` |
+| Renderer draft revision, pending operations and reconciliation | `app/application/draft-session.js` |
+| Pure comment/edit-event/tombstone transition rules | `shared/draft-aggregate.mjs` |
+| Bridge-side draft command validation and CAS | `scripts/draft-service.mjs` |
+| Close, switch, submit and history obligations | `app/application/drain-coordinator.js` |
+| Late query rejection and monotonic draft reads | `app/application/project-query-fence.js` |
+| Crash-only browser recovery | `app/application/recovery-store.js` |
+| Preview sanitization and verified frame injection | `app/components/html-preview-sandbox.js` |
+| Run lifecycle decoding and transition policy | `app/domain/run-lifecycle.js` |
+
+The source-fidelity path remains a protected core: `SourceIndex`,
+`TargetResolver`, `FormatSkeleton`, `SourcePatchEngine`,
+`NativeEditingController` and the atomic source writer may be split only around
+a proven invariant, not to satisfy a line-count target.
+
 ## Persistence
 
 Direct edits form ordered revisions and are written through a single queue. Every write checks the expected source Hash, uses a same-directory temporary file and atomic replacement, then rereads the result. External modification causes a fail-closed conflict.
@@ -37,7 +63,23 @@ When no desktop project can be restored, the main process provisions the built-i
 
 Initial and accepted AI results are immutable versions. Routine local edits do not create versions. A validated AI result is not activated until the user explicitly chooses it.
 
-`PROJECT.md` uses debounced autosave and is flushed before project switch or close. Comment composers may produce multiple recoverable local drafts; attachment uploads, rule saves and ordinary source writes are finished or surfaced in their owning panel before navigation proceeds.
+`PROJECT.md` uses debounced autosave and is flushed before project switch or close. One recoverable unsaved comment composer is allowed at a time. Attachment uploads, rule saves and ordinary source writes are finished or surfaced in their owning panel before navigation proceeds.
+
+Draft mutations carry stable operation identities. Deletion tombstones and
+processed-operation acknowledgements live in `draft/annotations.json`. A stale
+revision or unknown POST outcome is reconciled against the authoritative draft,
+rebased and retried within a bounded loop; a blind retry of the same stale
+snapshot is not a recovery action.
+
+A draft artifact stores its own revision, timestamp and operation
+acknowledgements. If the Bridge stops after atomically replacing that artifact
+but before refreshing the runtime pointer, the next read adopts the newer
+artifact revision and verifies its Hash; an older artifact than the runtime
+pointer or a same-revision Hash mismatch fails closed.
+
+A close or navigation boundary performs a final draft verification through the
+same session. If the aggregate fingerprint is already acknowledged, that
+verification is a no-op: it neither POSTs the draft nor advances its revision.
 
 ## Trust model
 

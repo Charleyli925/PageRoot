@@ -1,0 +1,310 @@
+const DEFAULT_READ_TIMEOUT_MS = 15_000;
+const DEFAULT_WRITE_TIMEOUT_MS = 15_000;
+const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
+const DEFAULT_ATTACHMENT_TIMEOUT_MS = 30_000;
+const DEFAULT_RETRY_DELAY_MS = 180;
+
+function isRecord(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function waitFor(delayMs) {
+  return new Promise((resolve) => globalThis.setTimeout(resolve, delayMs));
+}
+
+function normalizedPath(pathname) {
+  return pathname.startsWith("/") ? pathname : `/${pathname}`;
+}
+
+function queryUrl(baseUrl, pathname, search = {}) {
+  const url = new URL(`${baseUrl}${normalizedPath(pathname)}`);
+  for (const [key, value] of Object.entries(search)) {
+    if (value === undefined || value === null || value === "") continue;
+    url.searchParams.set(key, String(value));
+  }
+  return url;
+}
+
+async function readJson(response) {
+  const payload = await response.json().catch(() => ({}));
+  return isRecord(payload) ? payload : {};
+}
+
+function bridgeError(response, payload, fallback, outcome = "rejected") {
+  const raw = isRecord(payload.error) ? payload.error : {};
+  const details = isRecord(raw.details)
+    ? raw.details
+    : isRecord(payload.details)
+      ? payload.details
+      : {};
+  return new BridgeRequestError(
+    String(raw.message || payload.message || fallback),
+    {
+      status: response.status,
+      code: String(raw.code || payload.code || ""),
+      details,
+      outcome,
+    },
+  );
+}
+
+export class BridgeRequestError extends Error {
+  constructor(message, {
+    status = 0,
+    code = "",
+    details = {},
+    outcome = "rejected",
+    cause,
+  } = {}) {
+    super(message, cause === undefined ? undefined : { cause });
+    this.name = "BridgeRequestError";
+    this.status = status;
+    this.code = code;
+    this.details = details;
+    this.outcome = outcome;
+  }
+}
+
+export function isBridgeRequestError(value) {
+  return value instanceof BridgeRequestError;
+}
+
+export function createBridgeClient({
+  baseUrl,
+  authToken = "",
+  fetchImpl = globalThis.fetch,
+  retryDelayMs = DEFAULT_RETRY_DELAY_MS,
+} = {}) {
+  if (!baseUrl) throw new TypeError("Bridge baseUrl is required.");
+  if (typeof fetchImpl !== "function") {
+    throw new TypeError("Bridge fetch implementation is required.");
+  }
+
+  const fetchResponse = async (
+    input,
+    init = {},
+    {
+      timeoutMs = DEFAULT_READ_TIMEOUT_MS,
+      fallback = "本地项目资料暂时没有响应。",
+    } = {},
+  ) => {
+    const method = String(init.method || "GET").toUpperCase();
+    const readOnly = method === "GET" || method === "HEAD";
+    const attemptCount = readOnly ? 2 : 1;
+    let lastError = null;
+    for (let attempt = 0; attempt < attemptCount; attempt += 1) {
+      const headers = new Headers(init.headers);
+      if (authToken) headers.set("x-html-ai-bridge-token", authToken);
+      const timeoutSignal = timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : null;
+      const signal = timeoutSignal && init.signal
+        ? AbortSignal.any([init.signal, timeoutSignal])
+        : timeoutSignal || init.signal;
+      try {
+        const response = await fetchImpl(input, { ...init, headers, signal });
+        const transientStatus = response.status === 408
+          || response.status === 425
+          || response.status === 429
+          || response.status >= 500;
+        if (!readOnly || !transientStatus || attempt + 1 >= attemptCount) {
+          return response;
+        }
+      } catch (cause) {
+        lastError = cause;
+        if (init.signal?.aborted || attempt + 1 >= attemptCount) {
+          throw new BridgeRequestError(fallback, {
+            outcome: readOnly ? "rejected" : "unknown",
+            cause,
+          });
+        }
+      }
+      await waitFor(retryDelayMs * (attempt + 1));
+    }
+    throw new BridgeRequestError(fallback, {
+      outcome: readOnly ? "rejected" : "unknown",
+      cause: lastError,
+    });
+  };
+
+  const jsonRequest = async (
+    input,
+    init = {},
+    {
+      timeoutMs = DEFAULT_READ_TIMEOUT_MS,
+      fallback = "本地项目资料暂时没有响应。",
+    } = {},
+  ) => {
+    const response = await fetchResponse(input, init, { timeoutMs, fallback });
+    const payload = await readJson(response);
+    if (!response.ok) {
+      const method = String(init.method || "GET").toUpperCase();
+      const mutationMayHaveCommitted =
+        method !== "GET"
+        && method !== "HEAD"
+        && (response.status === 408 || response.status >= 500);
+      throw bridgeError(
+        response,
+        payload,
+        fallback,
+        mutationMayHaveCommitted ? "unknown" : "rejected",
+      );
+    }
+    return payload;
+  };
+
+  const query = (
+    pathname,
+    search,
+    fallback,
+    timeoutMs = DEFAULT_READ_TIMEOUT_MS,
+  ) => jsonRequest(
+    queryUrl(baseUrl, pathname, search),
+    { cache: "no-store" },
+    { fallback, timeoutMs },
+  );
+
+  const command = (
+    pathname,
+    body,
+    fallback,
+    timeoutMs = DEFAULT_WRITE_TIMEOUT_MS,
+  ) => jsonRequest(
+    `${baseUrl}${normalizedPath(pathname)}`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    },
+    { fallback, timeoutMs },
+  );
+
+  return Object.freeze({
+    workspace: (sourcePath) => query(
+      "/workspace",
+      { sourcePath },
+      "本地项目记录不可用。",
+    ),
+    source: (sourcePath) => query(
+      "/source",
+      { sourcePath },
+      "无法读取当前源 HTML。",
+    ),
+    conflictCandidate: (sourcePath) => query(
+      "/conflict-candidate",
+      { sourcePath },
+      "无法读取源文件冲突候选。",
+    ),
+    status: (sourcePath, requestId, attemptId) => query(
+      "/status",
+      { sourcePath, requestId, attemptId },
+      "暂时无法核对本轮任务状态。",
+    ),
+    versionFile: (sourcePath, versionId) => query(
+      "/version-file",
+      { sourcePath, versionId },
+      "无法读取这份不可变版本。",
+    ),
+    projectFile: (sourcePath, path) => query(
+      "/file",
+      { sourcePath, path },
+      "无法读取项目文件。",
+    ),
+    ensureProject: (body) => command(
+      "/project/ensure",
+      body,
+      "无法建立项目记录。",
+    ),
+    autosave: (body) => command(
+      "/autosave",
+      body,
+      "无法把修改更新到源 HTML。",
+    ),
+    saveDraft: (body) => command(
+      "/draft",
+      body,
+      "本轮评论暂时无法记录。",
+    ),
+    saveAttachment: (body) => command(
+      "/attachment",
+      body,
+      "无法添加评论附件。",
+      DEFAULT_ATTACHMENT_TIMEOUT_MS,
+    ),
+    deleteAttachment: (body) => command(
+      "/attachment/delete",
+      body,
+      "无法删除评论附件。",
+      DEFAULT_ATTACHMENT_TIMEOUT_MS,
+    ),
+    createRequest: (body) => command(
+      "/request",
+      body,
+      "无法建立本轮内部 AI 任务。",
+      DEFAULT_REQUEST_TIMEOUT_MS,
+    ),
+    resolveConflict: (body) => command(
+      "/conflict/resolve",
+      body,
+      "无法处理外部文件冲突。",
+    ),
+    activateReadyVersion: (body) => command(
+      "/ready-version/activate",
+      body,
+      "最新版暂时无法打开。",
+      DEFAULT_REQUEST_TIMEOUT_MS,
+    ),
+    cancelActiveRun: (body) => command(
+      "/active-run/cancel",
+      body,
+      "无法取消本轮。",
+    ),
+    updateProjectFile: (body) => command(
+      "/project-file",
+      body,
+      "无法更新 PROJECT.md。",
+    ),
+    openFolder: (body) => command(
+      "/open-folder",
+      body,
+      "无法打开项目记录。",
+    ),
+    attachment: async (sourcePath, relativePath) => {
+      const url = queryUrl(baseUrl, "/attachment", {
+        sourcePath,
+        relativePath,
+      });
+      const response = await fetchResponse(
+        url,
+        { cache: "no-store" },
+        {
+          timeoutMs: DEFAULT_ATTACHMENT_TIMEOUT_MS,
+          fallback: "无法读取评论附件。",
+        },
+      );
+      if (!response.ok) {
+        throw bridgeError(
+          response,
+          await readJson(response),
+          "无法读取评论附件。",
+        );
+      }
+      return response.blob();
+    },
+  });
+}
+
+export function createRuntimeBridgeClient() {
+  const port = typeof window === "undefined"
+    ? "4317"
+    : window.htmlAIRuntime?.bridgePort
+      || new URLSearchParams(window.location.search).get("bridgePort")
+      || "4317";
+  const authToken = typeof window === "undefined"
+    ? ""
+    : window.htmlAIRuntime?.bridgeAuthToken
+      || new URLSearchParams(window.location.search).get("bridgeAuthToken")
+      || "";
+  return createBridgeClient({
+    baseUrl: `http://127.0.0.1:${port}`,
+    authToken,
+  });
+}

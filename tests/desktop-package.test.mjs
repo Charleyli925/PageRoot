@@ -79,6 +79,8 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
     "bridge/target-identity.mjs",
     "bridge/product-contract.mjs",
     "bridge/attachment-storage.mjs",
+    "bridge/draft-aggregate.mjs",
+    "bridge/draft-service.mjs",
     "node_modules/parse5",
     "node_modules/entities",
     "schemas",

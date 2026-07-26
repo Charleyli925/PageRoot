@@ -63,16 +63,16 @@ import {
   nativeRuntimePreflight as inspectNativeEditRuntime,
 } from "./native-edit-runtime-preflight";
 import NoticeBar from "./NoticeBar";
+import {
+  EDITOR_STYLE_ATTRIBUTE,
+  FRAME_VERIFICATION_ATTRIBUTE,
+  baseHrefFromSourcePath,
+  disableExecutableMarkup,
+  prepareVerifiedFrameDocument,
+} from "./html-preview-sandbox.js";
 import styles from "./HtmlCanvasEditor.module.css";
 
-const EDITOR_STYLE_ATTRIBUTE = "data-html-canvas-editor-style";
-const INJECTED_BASE_ATTRIBUTE = "data-html-canvas-injected-base";
-const DISABLED_SCRIPT_ATTRIBUTE = "data-html-canvas-disabled-script";
-const ORIGINAL_SCRIPT_TYPE_ATTRIBUTE = "data-html-canvas-original-script-type";
-const DISABLED_REFRESH_ATTRIBUTE = "data-html-canvas-disabled-refresh";
-const FRAME_VERIFICATION_ATTRIBUTE = "data-html-canvas-render-verification";
 const GLOBAL_SELECTION_ATTRIBUTE = "data-html-canvas-global-selected";
-const MISSING_ATTRIBUTE_VALUE = "__html_canvas_missing__";
 
 const EDITOR_DOCUMENT_STYLES = `
   ::selection {
@@ -603,107 +603,6 @@ const NATURALLY_INHERITED_PROPERTIES = new Set([
   "white-space",
   "word-spacing",
 ]);
-
-function escapeAttribute(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/"/g, "&quot;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
-
-function disableExecutableMarkup(source: string): string {
-  return source.replace(/<script\b([^>]*)>/gi, (_openingTag, rawAttributes: string) => {
-    const typePattern = /\s+type\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i;
-    const typeMatch = rawAttributes.match(typePattern);
-    const originalType = typeMatch ? typeMatch[1] ?? typeMatch[2] ?? typeMatch[3] ?? "" : MISSING_ATTRIBUTE_VALUE;
-    const attributesWithoutType = rawAttributes.replace(typePattern, "");
-    return `<script${attributesWithoutType} type="application/x-html-canvas-disabled" ${DISABLED_SCRIPT_ATTRIBUTE}="true" ${ORIGINAL_SCRIPT_TYPE_ATTRIBUTE}="${escapeAttribute(originalType)}">`;
-  });
-}
-
-function doctypeString(doctype: DocumentType | null): string {
-  if (!doctype) return "<!DOCTYPE html>";
-  const publicId = doctype.publicId ? ` PUBLIC "${doctype.publicId}"` : "";
-  const systemId = doctype.systemId
-    ? `${publicId ? "" : " SYSTEM"} "${doctype.systemId}"`
-    : "";
-  return `<!DOCTYPE ${doctype.name}${publicId}${systemId}>`;
-}
-
-function sanitizeDocument(source: string, baseUrl?: string): string {
-  const disabledSource = disableExecutableMarkup(source);
-  if (typeof DOMParser === "undefined") return disabledSource;
-
-  const parsed = new DOMParser().parseFromString(disabledSource, "text/html");
-  parsed.querySelectorAll("meta[http-equiv]").forEach((node) => {
-    const directive = node.getAttribute("http-equiv")?.trim().toLowerCase();
-    if (directive === "refresh") {
-      node.setAttribute(DISABLED_REFRESH_ATTRIBUTE, "true");
-      node.setAttribute("http-equiv", "x-html-canvas-disabled-refresh");
-    }
-  });
-
-  if (baseUrl && !parsed.head.querySelector("base")) {
-    const base = parsed.createElement("base");
-    base.href = baseUrl;
-    base.setAttribute(INJECTED_BASE_ATTRIBUTE, "true");
-    parsed.head.prepend(base);
-  }
-
-  return `${doctypeString(parsed.doctype)}\n${parsed.documentElement.outerHTML}`;
-}
-
-function prepareVerifiedFrameDocument(
-  source: string,
-  verificationToken: string,
-  baseUrl?: string,
-): string {
-  const sanitized = sanitizeDocument(source, baseUrl);
-  if (typeof DOMParser === "undefined") return sanitized;
-  const parsed = new DOMParser().parseFromString(sanitized, "text/html");
-  parsed.head.querySelectorAll(`style[${EDITOR_STYLE_ATTRIBUTE}]`).forEach((node) => node.remove());
-  const editorStyle = parsed.createElement("style");
-  editorStyle.setAttribute(EDITOR_STYLE_ATTRIBUTE, "true");
-  editorStyle.textContent = EDITOR_DOCUMENT_STYLES;
-  parsed.head.prepend(editorStyle);
-  const marker = parsed.createElement("meta");
-  marker.setAttribute(FRAME_VERIFICATION_ATTRIBUTE, verificationToken);
-  marker.setAttribute("content", verificationToken);
-  parsed.head.prepend(marker);
-  return `${doctypeString(parsed.doctype)}\n${parsed.documentElement.outerHTML}`;
-}
-
-function baseHrefFromSourcePath(sourcePath?: string): string | undefined {
-  if (!sourcePath) return undefined;
-  const trimmedPath = sourcePath.trim();
-  if (!trimmedPath) return undefined;
-
-  try {
-    if (/^[a-z][a-z\d+.-]*:/i.test(trimmedPath)) {
-      const sourceUrl = new URL(trimmedPath);
-      if (!sourceUrl.pathname.endsWith("/")) {
-        sourceUrl.pathname = sourceUrl.pathname.slice(0, sourceUrl.pathname.lastIndexOf("/") + 1);
-      }
-      sourceUrl.search = "";
-      sourceUrl.hash = "";
-      return sourceUrl.href;
-    }
-  } catch {
-    return undefined;
-  }
-
-  const normalizedPath = trimmedPath.replace(/\\/g, "/");
-  if (!normalizedPath.startsWith("/")) return undefined;
-  const directoryPath = normalizedPath.endsWith("/")
-    ? normalizedPath
-    : normalizedPath.slice(0, normalizedPath.lastIndexOf("/") + 1);
-  const encodedPath = directoryPath
-    .split("/")
-    .map((segment) => encodeURIComponent(segment))
-    .join("/");
-  return `file://${encodedPath}`;
-}
 
 function escapeIdentifier(documentNode: Document, value: string): string {
   const cssApi = documentNode.defaultView?.CSS;
@@ -2297,7 +2196,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       });
       onEditBlockedRef.current?.(message);
     }
-    const prepared = prepareVerifiedFrameDocument(instrumentedSource, token, resolvedBaseHref);
+    const prepared = prepareVerifiedFrameDocument(instrumentedSource, token, {
+      baseUrl: resolvedBaseHref,
+      editorStyles: EDITOR_DOCUMENT_STYLES,
+    });
     frameSourceHtmlRef.current = source;
     expectedFrameTokenRef.current = token;
     expectedFrameHtmlRef.current = prepared;

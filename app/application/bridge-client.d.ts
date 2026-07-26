@@ -1,0 +1,44 @@
+export type BridgeOutcome = "rejected" | "unknown";
+export type BridgeJson = Record<string, unknown>;
+
+export class BridgeRequestError extends Error {
+  readonly status: number;
+  readonly code: string;
+  readonly details: BridgeJson;
+  readonly outcome: BridgeOutcome;
+}
+
+export function isBridgeRequestError(value: unknown): value is BridgeRequestError;
+
+export type BridgeClient = {
+  workspace(sourcePath: string): Promise<BridgeJson>;
+  source(sourcePath: string): Promise<BridgeJson>;
+  conflictCandidate(sourcePath: string): Promise<BridgeJson>;
+  status(
+    sourcePath: string,
+    requestId: string,
+    attemptId?: string | null,
+  ): Promise<BridgeJson>;
+  versionFile(sourcePath: string, versionId: string): Promise<BridgeJson>;
+  projectFile(sourcePath: string, path: string): Promise<BridgeJson>;
+  ensureProject(body: BridgeJson): Promise<BridgeJson>;
+  autosave(body: BridgeJson): Promise<BridgeJson>;
+  saveDraft(body: BridgeJson): Promise<BridgeJson>;
+  saveAttachment(body: BridgeJson): Promise<BridgeJson>;
+  deleteAttachment(body: BridgeJson): Promise<BridgeJson>;
+  createRequest(body: BridgeJson): Promise<BridgeJson>;
+  resolveConflict(body: BridgeJson): Promise<BridgeJson>;
+  activateReadyVersion(body: BridgeJson): Promise<BridgeJson>;
+  cancelActiveRun(body: BridgeJson): Promise<BridgeJson>;
+  updateProjectFile(body: BridgeJson): Promise<BridgeJson>;
+  openFolder(body: BridgeJson): Promise<BridgeJson>;
+  attachment(sourcePath: string, relativePath: string): Promise<Blob>;
+};
+
+export function createBridgeClient(options: {
+  baseUrl: string;
+  authToken?: string;
+  fetchImpl?: typeof fetch;
+  retryDelayMs?: number;
+}): BridgeClient;
+export function createRuntimeBridgeClient(): BridgeClient;

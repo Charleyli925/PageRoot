@@ -11,6 +11,8 @@ const [
   sampleHtml,
   interactionPreview,
   interactionPreviewStyles,
+  previewSandbox,
+  bridgeClient,
 ] = await Promise.all([
   readFile(new URL("../app/workbench.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
@@ -20,6 +22,8 @@ const [
   readFile(new URL("../desktop/welcome-project-content.mjs", import.meta.url), "utf8"),
   readFile(new URL("../app/components/HtmlInteractionPreview.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/components/HtmlInteractionPreview.module.css", import.meta.url), "utf8"),
+  readFile(new URL("../app/components/html-preview-sandbox.js", import.meta.url), "utf8"),
+  readFile(new URL("../app/application/bridge-client.js", import.meta.url), "utf8"),
 ]);
 
 test("startup welcome HTML is provisioned as a normal registered project", () => {
@@ -239,7 +243,7 @@ test("editing and interactive preview are separate canvas modes", () => {
 
   assert.match(canvas, /sandbox="allow-same-origin"/);
   assert.doesNotMatch(canvas, /sandbox="[^"]*allow-scripts/);
-  assert.match(canvas, /type="application\/x-html-canvas-disabled"/);
+  assert.match(previewSandbox, /type="application\/x-html-canvas-disabled"/);
 });
 
 test("workbench transitions fail closed when a native DOM edit cannot commit or freeze", () => {
@@ -269,7 +273,10 @@ test("workbench transitions fail closed when a native DOM edit cannot commit or 
     "const switchCutoffRevision = editRevisionRef.current;",
     switchFenceGuard,
   );
-  const switchFlush = projectSwitch.indexOf("flushAutosave(switchCutoffRevision)", switchCutoff);
+  const switchDrain = projectSwitch.indexOf(
+    'drainCoordinatorRef.current.drain("switch"',
+    switchCutoff,
+  );
   assert.match(
     projectSwitch.slice(switchFence, switchFenceGuard),
     /resumeEditing: false,[\s\S]*?trigger: "project-switch"/u,
@@ -278,7 +285,7 @@ test("workbench transitions fail closed when a native DOM edit cannot commit or 
     switchFence >= 0
       && switchFenceGuard > switchFence
       && switchCutoff > switchFenceGuard
-      && switchFlush > switchCutoff,
+      && switchDrain > switchCutoff,
     "project switching must fail closed at a History Fence before persisting its cutoff revision",
   );
   assert.match(
@@ -588,8 +595,14 @@ test("first project registration is part of the recoverable autosave transaction
   const transactionCatch = flush.indexOf("} catch (cause) {", registration);
   assert.ok(writing >= 0 && transactionTry > writing);
   assert.ok(registration > transactionTry && transactionCatch > registration);
-  assert.match(flush, /\/autosave`[\s\S]*?BRIDGE_WRITE_TIMEOUT_MS/);
-  assert.match(workbench, /\/project\/ensure`[\s\S]*?BRIDGE_WRITE_TIMEOUT_MS/);
+  assert.match(flush, /bridgeClient\.autosave\(/);
+  assert.match(workbench, /bridgeClient\.ensureProject\(/);
+  assert.match(bridgeClient, /"\/autosave"/);
+  assert.match(bridgeClient, /"\/project\/ensure"/);
+  assert.match(
+    bridgeClient,
+    /const command = \([\s\S]*?timeoutMs = DEFAULT_WRITE_TIMEOUT_MS/,
+  );
   const recovery = flush.slice(transactionCatch);
   assert.match(recovery, /pendingWriteRef\.current = recoveryWrite/);
   assert.match(
@@ -767,7 +780,8 @@ test("project panel keeps actions clear without technical paths in the header", 
   assert.match(workbench, />打开本地 HTML</);
   assert.match(workbench, /项目记录文件夹/);
   assert.match(workbench, /查看每轮要求、AI 返回与历史文件/);
-  assert.match(workbench, /BRIDGE_URL\}\/open-folder/);
+  assert.match(workbench, /bridgeClient\.openFolder/);
+  assert.match(bridgeClient, /"\/open-folder"/);
   assert.match(workbench, /以后每次 AI 修改都会读取/);
   assert.match(workbench, /规则只影响后续任务，不会修改当前 HTML/);
   assert.match(workbench, /修改会自动保存/);
@@ -787,7 +801,8 @@ test("project panel keeps actions clear without technical paths in the header", 
 });
 
 test("user-opened HTML stays lazily registered until a real project action", () => {
-  assert.match(workbench, /BRIDGE_URL\}\/project\/ensure/);
+  assert.match(workbench, /bridgeClient\.ensureProject/);
+  assert.match(bridgeClient, /"\/project\/ensure"/);
   assert.match(
     workbench,
     /const ensureProjectRegistered = useCallback/,
@@ -795,6 +810,14 @@ test("user-opened HTML stays lazily registered until a real project action", () 
   assert.match(
     workbench,
     /if \(!write\.projectId \|\| !write\.documentId\) \{[\s\S]*?ensureProjectRegistered/,
+  );
+  assert.match(
+    workbench,
+    /draftSessionRef\.current\.replaceAuthority\([\s\S]*?registeredContext[\s\S]*?authoritativeDraftRevision/,
+  );
+  assert.match(
+    workbench,
+    /!draftSessionRef\.current\.isActive\(context\)[\s\S]*?ensureProjectRegistered/,
   );
   assert.match(
     workbench,
@@ -806,7 +829,7 @@ test("user-opened HTML stays lazily registered until a real project action", () 
   );
   assert.match(
     workbench,
-    /const flushed = await flushAutosave\(freezeCutoffRevision\)[\s\S]*?const persistedComments = commentsRef\.current\.filter\(commentHasContent\)[\s\S]*?submissionContext\.comments = persistedComments\.map[\s\S]*?submissionContext\.changeEvents = changeEventsRef\.current\.map/,
+    /const drained = await drainCoordinatorRef\.current\.drain\("submit"[\s\S]*?const persistedComments = commentsRef\.current\.filter\(commentHasContent\)[\s\S]*?submissionContext\.comments = persistedComments\.map[\s\S]*?submissionContext\.changeEvents = changeEventsRef\.current\.map/,
   );
   assert.match(
     workbench,

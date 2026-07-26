@@ -32,6 +32,7 @@ import {
   createTargetRef,
   resolveTargetRef,
 } from "../scripts/target-resolver.mjs";
+import { rebaseDraftMutation } from "../scripts/draft-aggregate.mjs";
 
 const execFileAsync = promisify(execFile);
 const productRoot = fileURLToPath(new URL("../", import.meta.url));
@@ -3219,6 +3220,175 @@ test("draft writes use monotonic CAS and reject a stale client snapshot", async 
     reloaded.runtimeState.draft.comments.map((comment) => comment.commentId),
     ["comment_first"],
   );
+});
+
+test("draft operations rebase stale revisions, persist deletes, and replay exactly once", async (t) => {
+  const environment = await createEnvironment(t);
+  const sourcePath = join(environment.sources, "draft-operation-rebase.html");
+  await writeFile(sourcePath, htmlPage("Draft operation rebase"), "utf8");
+  const bridge = await environment.start();
+  const opened = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+
+  const firstOperation = {
+    operationId: "draftop_first_operation_0001",
+    sourcePath,
+    projectId: opened.projectId,
+    documentId: opened.documentId,
+    expectedDraftRevision: 0,
+    comments: [{
+      commentId: "comment_first",
+      createdAt: "2026-07-26T00:00:00.000Z",
+      updatedAt: "2026-07-26T00:00:00.000Z",
+      text: "first",
+    }],
+    changeEvents: [],
+    deletedCommentIds: [],
+  };
+  const first = await postJson(bridge.baseUrl, "/draft", firstOperation);
+  assert.equal(first.response.status, 200, JSON.stringify(first.body));
+  assert.equal(first.body.activeDraft.draftRevision, 1);
+
+  const replayed = await postJson(bridge.baseUrl, "/draft", {
+    ...firstOperation,
+    comments: [{ commentId: "comment_must_not_duplicate", text: "ignored" }],
+  });
+  assert.equal(replayed.response.status, 200, JSON.stringify(replayed.body));
+  assert.equal(replayed.body.replayed, true);
+  assert.equal(replayed.body.activeDraft.draftRevision, 1);
+  assert.deepEqual(
+    replayed.body.activeDraft.comments.map((comment) => comment.commentId),
+    ["comment_first"],
+  );
+
+  const deleteOperation = await postJson(bridge.baseUrl, "/draft", {
+    operationId: "draftop_delete_operation_0002",
+    sourcePath,
+    projectId: opened.projectId,
+    documentId: opened.documentId,
+    expectedDraftRevision: 1,
+    comments: [{
+      commentId: "comment_second",
+      createdAt: "2026-07-26T00:01:00.000Z",
+      updatedAt: "2026-07-26T00:01:00.000Z",
+      text: "second",
+    }],
+    changeEvents: [],
+    deletedCommentIds: ["comment_first"],
+  });
+  assert.equal(deleteOperation.response.status, 200, JSON.stringify(deleteOperation.body));
+  assert.equal(deleteOperation.body.activeDraft.draftRevision, 2);
+  assert.deepEqual(deleteOperation.body.activeDraft.deletedCommentIds, ["comment_first"]);
+  assert.deepEqual(
+    deleteOperation.body.activeDraft.comments.map((comment) => comment.commentId),
+    ["comment_second"],
+  );
+
+  const staleMutation = {
+    operationId: "draftop_stale_operation_0003",
+    sourcePath,
+    projectId: opened.projectId,
+    documentId: opened.documentId,
+    expectedDraftRevision: 1,
+    comments: [{
+      commentId: "comment_third",
+      createdAt: "2026-07-26T00:02:00.000Z",
+      updatedAt: "2026-07-26T00:02:00.000Z",
+      text: "third",
+    }],
+    changeEvents: [],
+    deletedCommentIds: [],
+  };
+  const conflict = await postJson(bridge.baseUrl, "/draft", staleMutation);
+  assert.equal(conflict.response.status, 409, JSON.stringify(conflict.body));
+  assert.equal(conflict.body.error.code, "DRAFT_REVISION_CONFLICT");
+  assert.equal(conflict.body.error.details.currentDraftRevision, 2);
+  assert.equal(conflict.body.error.details.activeDraft.draftRevision, 2);
+
+  const rebasedMutation = rebaseDraftMutation(
+    staleMutation,
+    conflict.body.error.details.activeDraft,
+  );
+  const recovered = await postJson(bridge.baseUrl, "/draft", rebasedMutation);
+  assert.equal(recovered.response.status, 200, JSON.stringify(recovered.body));
+  assert.equal(recovered.body.activeDraft.draftRevision, 3);
+  assert.deepEqual(
+    recovered.body.activeDraft.comments
+      .map((comment) => comment.commentId)
+      .sort(),
+    ["comment_second", "comment_third"],
+  );
+  assert.deepEqual(
+    recovered.body.activeDraft.deletedCommentIds,
+    ["comment_first"],
+  );
+
+  await stopChild(bridge.child);
+  const restarted = await environment.start();
+  const afterRestart = (await openWorkspace(
+    restarted.baseUrl,
+    sourcePath,
+  )).body.runtimeState.draft;
+  assert.equal(afterRestart.draftRevision, 3);
+  assert.deepEqual(afterRestart.deletedCommentIds, ["comment_first"]);
+  assert.equal(
+    afterRestart.appliedOperationIds.includes(
+      "draftop_stale_operation_0003",
+    ),
+    true,
+  );
+});
+
+test("a draft artifact written before a Bridge crash restores revision and acknowledgement", async (t) => {
+  const environment = await createEnvironment(t);
+  const sourcePath = join(environment.sources, "draft-artifact-crash.html");
+  await writeFile(sourcePath, htmlPage("Draft artifact crash"), "utf8");
+  const interruptedBridge = await environment.start({
+    HTML_AI_FAILPOINT: "after-draft-artifact-written",
+  });
+  const opened = (await openWorkspace(
+    interruptedBridge.baseUrl,
+    sourcePath,
+  )).body;
+  const operation = {
+    operationId: "draftop_crash_recovery_0001",
+    sourcePath,
+    projectId: opened.projectId,
+    documentId: opened.documentId,
+    expectedDraftRevision: 0,
+    comments: [{
+      commentId: "comment_crash",
+      text: "artifact is authoritative",
+      createdAt: "2026-07-26T00:00:00.000Z",
+      updatedAt: "2026-07-26T00:00:00.000Z",
+    }],
+    changeEvents: [],
+    deletedCommentIds: [],
+  };
+  const interrupted = await postJson(
+    interruptedBridge.baseUrl,
+    "/draft",
+    operation,
+  );
+  assert.equal(interrupted.response.status, 500);
+  await stopChild(interruptedBridge.child);
+
+  const restarted = await environment.start();
+  const recovered = (await openWorkspace(restarted.baseUrl, sourcePath)).body;
+  assert.equal(recovered.activeDraft.draftRevision, 1);
+  assert.equal(recovered.runtimeState.draft.draftRevision, 1);
+  assert.deepEqual(
+    recovered.activeDraft.comments.map((comment) => comment.commentId),
+    ["comment_crash"],
+  );
+  assert.equal(
+    recovered.activeDraft.appliedOperationIds.includes(operation.operationId),
+    true,
+  );
+
+  const replayed = await postJson(restarted.baseUrl, "/draft", operation);
+  assert.equal(replayed.response.status, 200, JSON.stringify(replayed.body));
+  assert.equal(replayed.body.replayed, true);
+  assert.equal(replayed.body.activeDraft.draftRevision, 1);
 });
 
 test("corrupt frozen annotations do not block status polling or cancellation", async (t) => {

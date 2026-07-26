@@ -75,6 +75,32 @@ import {
   canCloseDuringHydration,
   shouldRecoverEditorAfterCloseAbort,
 } from "../desktop/close-recovery.mjs";
+import {
+  createRuntimeBridgeClient,
+  isBridgeRequestError,
+} from "./application/bridge-client.js";
+import {
+  DraftSession,
+  type DraftSessionEvent,
+  type DraftSnapshot,
+} from "./application/draft-session.js";
+import { DrainCoordinator } from "./application/drain-coordinator.js";
+import { ProjectQueryFence } from "./application/project-query-fence.js";
+import { createBrowserRecoveryStore } from "./application/recovery-store.js";
+import {
+  createDraftOperationId,
+  isDraftOperationId,
+  rebaseDraftMutation,
+} from "./domain/draft-aggregate.js";
+import {
+  activeRunFromRecord,
+  canonicalLifecycleState,
+  isLockedLifecycleState,
+  validationReviewFromRecord,
+  type ActiveRun,
+  type LifecycleState,
+  type ValidationReview,
+} from "./domain/run-lifecycle.js";
 
 const HtmlCanvasEditor = lazy(() => import("./components/HtmlCanvasEditor"));
 const BROWSER_PREVIEW_LOGO_PLACEHOLDER =
@@ -284,61 +310,6 @@ type UserSupplementRecord = {
   attachments: UserSupplementAttachment[];
 };
 
-type ValidationReview = {
-  status: "observed" | "pending" | "waived";
-  hardViolationCodes: string[];
-  softViolationCodes: string[];
-  waiver?: {
-    reason?: string;
-    decidedAt?: string;
-  };
-};
-
-type LifecycleState =
-  | "editing"
-  | "submitting"
-  | "processing"
-  | "validating"
-  | "committing"
-  | "ready-to-open"
-  | "awaiting-conflict-resolution"
-  | "recovering-transaction"
-  | "ready"
-  | "no-change"
-  | "complete"
-  | "cancelled"
-  | "error";
-
-type ActiveRun = {
-  projectId: string;
-  documentId: string;
-  requestId: string;
-  attemptId: string;
-  requestPath: string;
-  attemptPath: string;
-  handoffMessage: string;
-  status: LifecycleState;
-  sourcePath: string;
-  baseSnapshotSha256: string;
-  previousVersionId: string | null;
-  basedOnVersionId: string | null;
-  freezeCutoffRevision: number;
-  candidateVersionId: string;
-  candidateVersionLabel: string;
-  submittedAt: string;
-  summary?: string;
-  commentCount?: number;
-  changeEventCount?: number;
-  error?: string;
-  conflictId?: string;
-  externalSourceSha256?: string;
-  candidateOutputSha256?: string;
-  conflictDetectedAt?: string;
-  readyPayload?: Record<string, unknown>;
-  validationReview?: ValidationReview;
-  scopeReport?: Record<string, unknown>;
-};
-
 type PersistState = "idle" | "preview-dirty" | "queued" | "writing" | "failed" | "conflict";
 type ViewMode = "current" | "history";
 type CanvasMode = "edit" | "preview";
@@ -436,12 +407,7 @@ type ProjectContext = {
   documentId: string;
   sourcePath: string;
 };
-type PendingDraft = ProjectContext & {
-  basedOnVersionId: string | null;
-  expectedDraftRevision: number;
-  comments: CommentItem[];
-  changeEvents: DirectEditEvent[];
-};
+type PendingDraft = DraftSnapshot<CommentItem, DirectEditEvent>;
 type BackgroundProjectResult = {
   state: "processing" | "ready" | "no-change" | "error" | "conflict";
   label: string;
@@ -457,6 +423,7 @@ type RedoDraftFold = {
   undoFold: UndoDraftFold;
   undoAuditEvent: DirectEditEvent | null;
 };
+
 type CloseReadiness =
   | { ready: true }
   | { ready: false; reason: string };
@@ -471,29 +438,18 @@ type CloseAbortedDetail = {
   reason: string;
 };
 
-const bridgePort =
-  typeof window === "undefined"
-    ? "4317"
-    : window.htmlAIRuntime?.bridgePort
-      || new URLSearchParams(window.location.search).get("bridgePort")
-      || "4317";
-const bridgeAuthToken =
-  typeof window === "undefined"
-    ? ""
-    : window.htmlAIRuntime?.bridgeAuthToken
-      || new URLSearchParams(window.location.search).get("bridgeAuthToken")
-      || "";
-const BRIDGE_URL = `http://127.0.0.1:${bridgePort}`;
 const AUTOSAVE_DELAY_MS = 700;
-const BRIDGE_STATE_READ_TIMEOUT_MS = 15_000;
-const BRIDGE_WRITE_TIMEOUT_MS = 15_000;
-const BRIDGE_REQUEST_TIMEOUT_MS = 60_000;
-const BRIDGE_ATTACHMENT_TIMEOUT_MS = 30_000;
-const BRIDGE_READ_RETRY_DELAY_MS = 180;
+const bridgeClient = createRuntimeBridgeClient();
+const recoveryStore = createBrowserRecoveryStore();
+const LOCAL_ACTION_RETRY_DELAY_MS = 180;
 const PROJECT_RULES_AUTOSAVE_DELAY_MS = 700;
 
 function waitFor(delayMs: number): Promise<void> {
   return new Promise((resolve) => globalThis.setTimeout(resolve, delayMs));
+}
+
+async function waitUntilResolved(predicate: () => boolean): Promise<void> {
+  while (!predicate()) await waitFor(40);
 }
 
 async function withOneAutomaticRetry<T>(
@@ -502,42 +458,9 @@ async function withOneAutomaticRetry<T>(
   try {
     return await work();
   } catch {
-    await waitFor(BRIDGE_READ_RETRY_DELAY_MS);
+    await waitFor(LOCAL_ACTION_RETRY_DELAY_MS);
     return work();
   }
-}
-
-async function bridgeFetch(
-  input: RequestInfo | URL,
-  init: RequestInit = {},
-  timeoutMs = BRIDGE_STATE_READ_TIMEOUT_MS,
-): Promise<Response> {
-  const method = String(init.method || "GET").toUpperCase();
-  const attemptCount = method === "GET" || method === "HEAD" ? 2 : 1;
-  let lastError: unknown = null;
-  for (let attempt = 0; attempt < attemptCount; attempt += 1) {
-    const headers = new Headers(init.headers);
-    if (bridgeAuthToken) headers.set("x-html-ai-bridge-token", bridgeAuthToken);
-    const timeoutSignal = timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : null;
-    const signal = timeoutSignal && init.signal
-      ? AbortSignal.any([init.signal, timeoutSignal])
-      : timeoutSignal || init.signal;
-    try {
-      const response = await fetch(input, { ...init, headers, signal });
-      const transientStatus = response.status === 408
-        || response.status === 425
-        || response.status === 429
-        || response.status >= 500;
-      if (!transientStatus || attempt + 1 >= attemptCount) return response;
-    } catch (cause) {
-      lastError = cause;
-      if (init.signal?.aborted || attempt + 1 >= attemptCount) throw cause;
-    }
-    await waitFor(BRIDGE_READ_RETRY_DELAY_MS * (attempt + 1));
-  }
-  throw lastError instanceof Error
-    ? lastError
-    : new Error("本地项目资料暂时没有响应。");
 }
 
 function markProjectHydrationStage(stage: string): void {
@@ -839,6 +762,24 @@ function isImageFile(file: File): boolean {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function draftAuthorityFromWorkspace(
+  payload: Record<string, unknown>,
+): Record<string, unknown> {
+  const runtime = isRecord(payload.runtimeState) ? payload.runtimeState : {};
+  return isRecord(runtime.draft)
+    ? runtime.draft
+    : isRecord(payload.activeDraft)
+      ? payload.activeDraft
+      : {};
+}
+
+function authoritativeDraftRevision(
+  draft: Record<string, unknown>,
+): number {
+  const revision = Number(draft.draftRevision || 0);
+  return Number.isSafeInteger(revision) && revision >= 0 ? revision : 0;
 }
 
 function scopeDifferenceKindLabel(kind: unknown): string {
@@ -1161,32 +1102,6 @@ function supplementsFromRecords(raw: unknown): UserSupplementRecord[] {
   });
 }
 
-function validationReviewFromRecord(raw: unknown): ValidationReview | null {
-  if (!isRecord(raw)) return null;
-  const status = String(raw.status || "");
-  if (status !== "observed" && status !== "pending" && status !== "waived") {
-    return null;
-  }
-  const waiver = isRecord(raw.waiver) ? raw.waiver : null;
-  return {
-    status,
-    hardViolationCodes: Array.isArray(raw.hardViolationCodes)
-      ? raw.hardViolationCodes.map(String)
-      : [],
-    softViolationCodes: Array.isArray(raw.softViolationCodes)
-      ? raw.softViolationCodes.map(String)
-      : [],
-    ...(waiver
-      ? {
-          waiver: {
-            ...(waiver.reason ? { reason: String(waiver.reason) } : {}),
-            ...(waiver.decidedAt ? { decidedAt: String(waiver.decidedAt) } : {}),
-          },
-        }
-      : {}),
-  };
-}
-
 function versionsFromWorkspace(payload: Record<string, unknown>): Version[] {
   if (!Array.isArray(payload.versions)) return [];
   return payload.versions.flatMap((raw) => {
@@ -1228,99 +1143,6 @@ function versionsFromWorkspace(payload: Record<string, unknown>): Version[] {
       validationReview: validationReviewFromRecord(raw.validationReview),
     }];
   }).sort((a, b) => b.ordinal - a.ordinal);
-}
-
-function activeRunFromRecord(raw: unknown): ActiveRun | null {
-  if (!isRecord(raw)) return null;
-  const conflict = isRecord(raw.conflict) ? raw.conflict : raw;
-  const requestId = String(raw.requestId || "");
-  if (!requestId) return null;
-  const rawStatus = String(raw.status || raw.lifecycleState || "processing");
-  const statusValue = (
-    rawStatus === "waiting" || rawStatus === "ready"
-      ? "processing"
-      : rawStatus === "importing" || rawStatus === "result-ready"
-        ? "validating"
-        : rawStatus === "awaiting-check-decision"
-          ? "validating"
-        : rawStatus === "version-created" || rawStatus === "completed"
-          ? "complete"
-          : rawStatus === "canceled"
-            ? "cancelled"
-            : rawStatus
-  );
-  const allowed: LifecycleState[] = [
-    "editing", "submitting", "processing", "validating", "committing",
-    "ready-to-open",
-    "awaiting-conflict-resolution", "recovering-transaction", "ready",
-    "no-change", "complete", "cancelled", "error",
-  ];
-  return {
-    projectId: String(raw.projectId || ""),
-    documentId: String(raw.documentId || ""),
-    requestId,
-    attemptId: String(raw.attemptId || "attempt_001"),
-    requestPath: String(raw.requestPath || ""),
-    attemptPath: String(raw.attemptPath || ""),
-    handoffMessage: String(raw.handoffMessage || ""),
-    status: allowed.includes(statusValue as LifecycleState)
-      ? statusValue as LifecycleState
-      : "processing",
-    sourcePath: String(raw.sourcePath || ""),
-    baseSnapshotSha256: String(raw.baseSnapshotSha256 || raw.sourceSha256 || ""),
-    previousVersionId: raw.previousVersionId ? String(raw.previousVersionId) : null,
-    basedOnVersionId: raw.basedOnVersionId ? String(raw.basedOnVersionId) : null,
-    freezeCutoffRevision: Number(raw.freezeCutoffRevision || 0),
-    candidateVersionId: String(raw.candidateVersionId || ""),
-    candidateVersionLabel: String(
-      raw.candidateDisplayVersionLabel
-      || (
-        Number.isSafeInteger(Number(raw.candidateVersionOrdinal))
-        && Number(raw.candidateVersionOrdinal) > 0
-          ? displayVersionLabel(Number(raw.candidateVersionOrdinal))
-          : null
-      )
-      || raw.candidateVersionLabel
-      || (raw.candidateVersionId ? safeVersionLabel(String(raw.candidateVersionId)) : "下一版"),
-    ),
-    submittedAt: String(raw.submittedAt || ""),
-    ...(raw.summary ? { summary: String(raw.summary) } : {}),
-    ...(Number.isFinite(Number(raw.commentCount)) ? { commentCount: Number(raw.commentCount) } : {}),
-    ...(Number.isFinite(Number(raw.changeEventCount))
-      ? { changeEventCount: Number(raw.changeEventCount) }
-      : {}),
-    ...(raw.error
-      ? { error: isRecord(raw.error) ? String(raw.error.message || "") : String(raw.error) }
-      : {}),
-    ...(raw.conflictId || conflict.conflictId
-      ? { conflictId: String(raw.conflictId || conflict.conflictId) }
-      : {}),
-    ...(conflict.externalSourceSha256
-      ? { externalSourceSha256: String(conflict.externalSourceSha256) }
-      : {}),
-    ...(conflict.candidateOutputSha256 || conflict.candidateSha256
-      ? {
-          candidateOutputSha256: String(
-            conflict.candidateOutputSha256 || conflict.candidateSha256,
-          ),
-        }
-      : {}),
-    ...(conflict.detectedAt
-      ? { conflictDetectedAt: String(conflict.detectedAt) }
-      : {}),
-  };
-}
-
-async function readJsonResponse(response: Response): Promise<Record<string, unknown>> {
-  const payload = await response.json().catch(() => ({}));
-  return isRecord(payload) ? payload : {};
-}
-
-function responseError(payload: Record<string, unknown>, fallback: string): Error & { code?: string } {
-  const raw = isRecord(payload.error) ? payload.error : {};
-  const error = new Error(String(raw.message || payload.message || fallback)) as Error & { code?: string };
-  error.code = String(raw.code || payload.code || "");
-  return error;
 }
 
 async function copyText(value: string): Promise<void> {
@@ -1484,15 +1306,7 @@ function summarizeChangeEvents(events: DirectEditEvent[]): DirectEditEvent[] {
 }
 
 function isLockedLifecycle(state: LifecycleState | undefined): boolean {
-  return Boolean(state && [
-    "submitting",
-    "processing",
-    "validating",
-    "committing",
-    "ready-to-open",
-    "awaiting-conflict-resolution",
-    "recovering-transaction",
-  ].includes(state));
+  return isLockedLifecycleState(state);
 }
 
 function noticeReducer(current: Toast, next: Toast): Toast {
@@ -1768,6 +1582,13 @@ export default function Workbench() {
   const reviewRevealRequestRef = useRef(0);
   const projectEpochRef = useRef(0);
   const projectOpenRequestRef = useRef(0);
+  const projectQueryFenceRef = useRef(new ProjectQueryFence());
+  const drainCoordinatorRef = useRef(new DrainCoordinator());
+  const draftSessionRef = useRef(new DraftSession<CommentItem, DirectEditEvent>({
+    bridgeClient,
+    encodeComment: persistedComment,
+    encodeChangeEvent: persistedChangeEvent,
+  }));
   const htmlRef = useRef(DEFAULT_PROJECT_HTML);
   const sourcePathRef = useRef<string | null>(null);
   const sourceShaRef = useRef<string | null>(null);
@@ -1799,11 +1620,9 @@ export default function Workbench() {
   const draftTargetRef = useRef<HtmlCanvasSelection | null>(null);
   const attachmentUploadCountRef = useRef(0);
   const attachmentObjectUrlsRef = useRef<Map<string, string>>(new Map());
-  const draftPendingRef = useRef<PendingDraft | null>(null);
-  const draftRevisionRef = useRef(0);
   const draftPersistenceAuthorityRef = useRef<ProjectContext | null>(null);
   const draftRecoverySequenceRef = useRef(0);
-  const draftFlushPromiseRef = useRef<Promise<boolean> | null>(null);
+  const draftRecoveryOperationIdRef = useRef<string | null>(null);
   const projectRegistrationPromiseRef =
     useRef<Promise<ProjectContext | null> | null>(null);
   const backgroundRunsRef = useRef<Map<string, ActiveRun>>(new Map());
@@ -2249,11 +2068,13 @@ export default function Workbench() {
 
   const captureProjectContext = useCallback((): ProjectContext | null => {
     const activeSource = sourcePathRef.current;
-    if (!activeSource) return null;
+    const activeProjectId = projectIdRef.current;
+    const activeDocumentId = documentIdRef.current;
+    if (!activeSource || !activeProjectId || !activeDocumentId) return null;
     return {
       epoch: projectEpochRef.current,
-      projectId: projectIdRef.current,
-      documentId: documentIdRef.current,
+      projectId: activeProjectId,
+      documentId: activeDocumentId,
       sourcePath: activeSource,
     };
   }, []);
@@ -2274,30 +2095,48 @@ export default function Workbench() {
       expectedHashOverride || sourceShaRef.current;
     if (!activeSource || !expectedSourceSha256) return null;
     if (projectIdRef.current && documentIdRef.current) {
-      return {
+      const existingContext = {
         epoch: projectEpochRef.current,
         projectId: projectIdRef.current,
         documentId: documentIdRef.current,
         sourcePath: activeSource,
       };
+      if (!draftSessionRef.current.isActive(existingContext)) {
+        const payload = await bridgeClient.workspace(activeSource);
+        if (
+          existingContext.epoch !== projectEpochRef.current
+          || !sameLocalSourcePath(sourcePathRef.current, activeSource)
+        ) return null;
+        if (
+          String(payload.projectId || "") !== existingContext.projectId
+          || String(payload.documentId || "") !== existingContext.documentId
+          || !sameLocalSourcePath(
+            String(payload.sourcePath || activeSource),
+            activeSource,
+          )
+        ) {
+          throw new Error("项目记录的身份与当前页面不一致，已停止恢复评论会话。");
+        }
+        const authoritativeDraft = draftAuthorityFromWorkspace(payload);
+        draftSessionRef.current.replaceAuthority(
+          existingContext,
+          authoritativeDraftRevision(authoritativeDraft),
+          authoritativeDraft,
+        );
+        draftPersistenceAuthorityRef.current = existingContext;
+      }
+      return existingContext;
     }
     if (projectRegistrationPromiseRef.current) {
       return projectRegistrationPromiseRef.current;
     }
     const epoch = projectEpochRef.current;
     const registration = (async () => {
-      const response = await bridgeFetch(`${BRIDGE_URL}/project/ensure`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          sourcePath: activeSource,
-          expectedSourceSha256,
-        }),
-      }, BRIDGE_WRITE_TIMEOUT_MS);
-      const payload = await readJsonResponse(response);
-      if (!response.ok || payload.ok === false) {
-        throw responseError(payload, "无法建立项目记录。");
-      }
+      const payload = await bridgeClient.ensureProject({
+        sourcePath: activeSource,
+        expectedSourceSha256,
+      });
+      if (payload.ok === false) throw new Error("无法建立项目记录。");
       if (
         epoch !== projectEpochRef.current
         || !sameLocalSourcePath(sourcePathRef.current, activeSource)
@@ -2387,6 +2226,12 @@ export default function Workbench() {
         documentId: nextDocumentId,
         sourcePath: activeSource,
       };
+      const authoritativeDraft = draftAuthorityFromWorkspace(payload);
+      draftSessionRef.current.replaceAuthority(
+        registeredContext,
+        authoritativeDraftRevision(authoritativeDraft),
+        authoritativeDraft,
+      );
       draftPersistenceAuthorityRef.current = registeredContext;
       return registeredContext;
     })();
@@ -2502,25 +2347,23 @@ export default function Workbench() {
       || sourcePathRef.current
       || "unbound";
     const key = `html-ai-recovery:${keyPart}`;
-    try {
-      if (!write) {
-        window.localStorage.removeItem(key);
-        return;
-      }
-      window.localStorage.setItem(key, JSON.stringify({
-        schemaVersion: "2.0.0",
-        projectId: write.projectId,
-        documentId: write.documentId,
-        sourcePath: write.sourcePath,
-        recoveryIdentity: write.recoveryIdentity,
-        expectedSourceSha256: write.expectedSourceSha256,
-        revision: write.revision,
-        html: write.html,
-        changeEvents: write.events.map(persistedChangeEvent),
-      }));
-    } catch {
-      // A full localStorage quota must never make the actual source write look successful.
+    if (!write) {
+      recoveryStore.remove(key);
+      return;
     }
+    // A full browser-storage quota must never make the actual source write
+    // look successful; the store reports failure without changing write state.
+    recoveryStore.write(key, {
+      schemaVersion: "2.0.0",
+      projectId: write.projectId,
+      documentId: write.documentId,
+      sourcePath: write.sourcePath,
+      recoveryIdentity: write.recoveryIdentity,
+      expectedSourceSha256: write.expectedSourceSha256,
+      revision: write.revision,
+      html: write.html,
+      changeEvents: write.events.map(persistedChangeEvent),
+    });
   }, []);
 
   const persistDraftRecovery = useCallback((
@@ -2537,45 +2380,43 @@ export default function Workbench() {
       documentKeyPart ? `html-ai-draft-recovery:${documentKeyPart}` : "",
       sourceKeyPart ? `html-ai-draft-recovery:${sourceKeyPart}` : "",
     ].filter(Boolean);
-    try {
-      if (!snapshot) {
-        for (const key of keys) window.localStorage.removeItem(key);
-        return;
-      }
+    if (!snapshot) {
+      recoveryStore.remove(keys);
+      return;
+    }
       const composerText = composerDraftRef.current;
       const composerTarget = draftTargetRef.current;
       const composerAttachments = composerAttachmentsRef.current;
       if (
         snapshot.comments.length === 0
         && snapshot.changeEvents.length === 0
-        && deletedCommentIdsRef.current.size === 0
+        && snapshot.deletedCommentIds.length === 0
         && !composerText.trim()
         && composerAttachments.length === 0
         && !composerTarget
       ) {
-        for (const key of keys) window.localStorage.removeItem(key);
+        recoveryStore.remove(keys);
         return;
       }
-      const serialized = JSON.stringify({
+      recoveryStore.write(keys, {
         schemaVersion: "3.1.0",
         projectId: snapshot.projectId,
         documentId: snapshot.documentId,
         sourcePath: snapshot.sourcePath,
         basedOnVersionId: snapshot.basedOnVersionId,
         baseDraftRevision: snapshot.expectedDraftRevision,
+        operationId: snapshot.operationId,
         localSequence: ++draftRecoverySequenceRef.current,
         comments: snapshot.comments.map(persistedComment),
         changeEvents: snapshot.changeEvents.map(persistedChangeEvent),
-        deletedCommentIds: [...deletedCommentIdsRef.current],
+        deletedCommentIds: snapshot.deletedCommentIds,
         composerDraft: composerText,
         composerCommentId: composerCommentIdRef.current,
         composerAttachments: composerAttachments.map(persistedAttachment),
         composerTarget: composerTarget ? persistedTargetRef(composerTarget) : null,
       });
-      for (const key of keys) window.localStorage.setItem(key, serialized);
-    } catch {
-      // The Bridge remains authoritative after acknowledgement; this is only a crash fallback.
-    }
+    // The Bridge remains authoritative after acknowledgement; this is only a
+    // crash fallback and storage failure cannot downgrade the Bridge result.
   }, []);
 
   const persistCurrentDraftRecovery = useCallback((
@@ -2584,13 +2425,15 @@ export default function Workbench() {
   ) => {
     const context = captureProjectContext();
     if (!context) return;
-    persistDraftRecovery({
-      ...context,
+    const snapshot = draftSessionRef.current.createSnapshot({
+      context,
       basedOnVersionId: currentBasedOnVersionId,
-      expectedDraftRevision: draftRevisionRef.current,
-      comments: [...nextComments],
-      changeEvents: [...nextEvents],
+      comments: nextComments,
+      changeEvents: nextEvents,
+      deletedCommentIds: deletedCommentIdsRef.current,
+      operationId: draftRecoveryOperationIdRef.current || undefined,
     });
+    if (snapshot) persistDraftRecovery(snapshot);
   }, [captureProjectContext, currentBasedOnVersionId, persistDraftRecovery]);
 
   const normalizeCurrentGlobalComments = useCallback((): CommentItem[] => {
@@ -2714,22 +2557,17 @@ export default function Workbench() {
             documentId: write.documentId,
             sourcePath: write.sourcePath,
           };
-          const response = await bridgeFetch(`${BRIDGE_URL}/autosave`, {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({
-              projectId: write.projectId,
-              documentId: write.documentId,
-              sourcePath: write.sourcePath,
-              html: write.html,
-              expectedSourceSha256: write.expectedSourceSha256,
-              editRevision: write.revision,
-              changeEvents: write.events.map(persistedChangeEvent),
-            }),
-          }, BRIDGE_WRITE_TIMEOUT_MS);
-          const payload = await readJsonResponse(response);
-          if (!response.ok || payload.ok === false) {
-            throw responseError(payload, "无法把修改更新到源 HTML。");
+          const payload = await bridgeClient.autosave({
+            projectId: write.projectId,
+            documentId: write.documentId,
+            sourcePath: write.sourcePath,
+            html: write.html,
+            expectedSourceSha256: write.expectedSourceSha256,
+            editRevision: write.revision,
+            changeEvents: write.events.map(persistedChangeEvent),
+          });
+          if (payload.ok === false) {
+            throw new Error("无法把修改更新到源 HTML。");
           }
           const hasExactAcknowledgedHtml =
             typeof payload.content === "string"
@@ -3091,9 +2929,9 @@ export default function Workbench() {
     viewTransitioningRef.current = false;
     navigationOperationRef.current += 1;
     submissionPendingRef.current = false;
-    draftPendingRef.current = null;
-    draftRevisionRef.current = 0;
+    draftSessionRef.current.deactivate();
     draftPersistenceAuthorityRef.current = null;
+    draftRecoveryOperationIdRef.current = null;
     htmlRef.current = project.html;
     setProjectName(project.name);
     setOpenedAiVersionNotice(null);
@@ -3340,7 +3178,8 @@ export default function Workbench() {
       sourceShaRef.current = expectedSha256;
       recoveryIdentityRef.current = null;
       pendingWriteRef.current = null;
-      draftPendingRef.current = null;
+      draftSessionRef.current.deactivate();
+      draftRecoveryOperationIdRef.current = null;
       setSourcePath(nextSourcePath);
       setSourceSha256(expectedSha256);
     }
@@ -3363,19 +3202,12 @@ export default function Workbench() {
     ];
     let raw: Record<string, unknown> | null = null;
     let recoveredKey = "";
-    try {
-      for (const key of keys) {
-        const serialized = window.localStorage.getItem(key);
-        if (!serialized) continue;
-        const parsed = JSON.parse(serialized);
-        if (isRecord(parsed)) {
-          raw = parsed;
-          recoveredKey = key;
-          break;
-        }
+    for (const record of recoveryStore.readRecords(keys)) {
+      if (isRecord(record.value)) {
+        raw = record.value;
+        recoveredKey = record.key;
+        break;
       }
-    } catch {
-      return false;
     }
     if (
       !raw
@@ -3402,7 +3234,7 @@ export default function Workbench() {
       persistStateRef.current = "idle";
       setPersistState("idle");
       setPersistError("");
-      window.localStorage.removeItem(recoveredKey);
+      recoveryStore.remove(recoveredKey);
       return false;
     }
 
@@ -3504,6 +3336,8 @@ export default function Workbench() {
     serverComments: CommentItem[],
     serverEvents: DirectEditEvent[],
     serverDraftRevision: number,
+    serverDeletedCommentIds: string[],
+    serverAppliedOperationIds: string[],
     serverBasedOnVersionId: string | null,
   ): {
     comments: CommentItem[];
@@ -3518,18 +3352,13 @@ export default function Workbench() {
       `html-ai-draft-recovery:${context.sourcePath}`,
     ];
     let latest: Record<string, unknown> | null = null;
-    try {
-      for (const key of keys) {
-        const serialized = window.localStorage.getItem(key);
-        if (!serialized) continue;
-        const parsed = JSON.parse(serialized);
+    for (const { value: parsed } of recoveryStore.readRecords(keys)) {
         if (
           !isRecord(parsed)
           || String(parsed.sourcePath || "") !== context.sourcePath
           || (parsed.documentId && String(parsed.documentId) !== context.documentId)
           || String(parsed.projectId || "") !== context.projectId
           || String(parsed.documentId || "") !== context.documentId
-          || Number(parsed.baseDraftRevision) !== serverDraftRevision
           || String(parsed.basedOnVersionId || "")
             !== String(serverBasedOnVersionId || "")
         ) continue;
@@ -3537,11 +3366,9 @@ export default function Workbench() {
           !latest
           || Number(parsed.localSequence || 0) > Number(latest.localSequence || 0)
         ) latest = parsed;
-      }
-    } catch {
-      latest = null;
     }
     if (!latest) {
+      draftRecoveryOperationIdRef.current = null;
       return {
         comments: serverComments,
         changeEvents: serverEvents,
@@ -3554,37 +3381,45 @@ export default function Workbench() {
     const localComments = Array.isArray(latest.comments)
       ? commentsFromRecords(latest.comments)
       : [];
-    const deletedCommentIds = new Set(
+    const recoveredOperationId = isDraftOperationId(latest.operationId)
+      ? String(latest.operationId)
+      : createDraftOperationId();
+    const operationAlreadyApplied =
+      serverAppliedOperationIds.includes(recoveredOperationId);
+    const localDeletedCommentIds = new Set(
       Array.isArray(latest.deletedCommentIds)
         ? latest.deletedCommentIds.map((value) => String(value))
         : [],
     );
-    deletedCommentIdsRef.current = deletedCommentIds;
-    const commentsById = new Map(
-      serverComments.map((comment) => [comment.commentId, comment]),
-    );
-    for (const comment of localComments) {
-      const serverComment = commentsById.get(comment.commentId);
-      if (
-        !serverComment
-        || String(comment.updatedAt || comment.createdAt)
-          >= String(serverComment.updatedAt || serverComment.createdAt)
-      ) {
-        commentsById.set(comment.commentId, comment);
-      }
-    }
-    for (const commentId of deletedCommentIds) commentsById.delete(commentId);
-    const eventsById = new Map(
-      serverEvents.map((event) => [event.eventId, event]),
-    );
-    for (const event of Array.isArray(latest.changeEvents)
-      ? changesFromRecords(latest.changeEvents)
-      : []) {
-      eventsById.set(event.eventId, event);
-    }
+    const rebased = rebaseDraftMutation({
+      operationId: recoveredOperationId,
+      expectedDraftRevision: Number(latest.baseDraftRevision || 0),
+      comments: operationAlreadyApplied ? serverComments : localComments,
+      changeEvents: Array.isArray(latest.changeEvents)
+        ? (
+            operationAlreadyApplied
+              ? serverEvents
+              : changesFromRecords(latest.changeEvents)
+          )
+        : serverEvents,
+      deletedCommentIds: operationAlreadyApplied
+        ? serverDeletedCommentIds
+        : [...localDeletedCommentIds],
+    }, {
+      draftRevision: serverDraftRevision,
+      comments: serverComments,
+      changeEvents: serverEvents,
+      deletedCommentIds: serverDeletedCommentIds,
+    });
+    deletedCommentIdsRef.current = operationAlreadyApplied
+      ? new Set()
+      : new Set(rebased.deletedCommentIds);
+    draftRecoveryOperationIdRef.current = operationAlreadyApplied
+      ? null
+      : recoveredOperationId;
     return {
-      comments: [...commentsById.values()],
-      changeEvents: [...eventsById.values()],
+      comments: rebased.comments,
+      changeEvents: rebased.changeEvents,
       composerDraft: typeof latest.composerDraft === "string"
         ? latest.composerDraft
         : "",
@@ -3647,6 +3482,17 @@ export default function Workbench() {
       return;
     }
     let epoch = epochOverride ?? projectEpochRef.current;
+    const workspaceQueryTicket = projectQueryFenceRef.current.begin({
+      epoch,
+      projectId: projectIdRef.current,
+      documentId: documentIdRef.current,
+      sourcePath: activeSource,
+    }, "workspace");
+    const workspaceQueryIsCurrent = () => (
+      projectQueryFenceRef.current.isCurrent(workspaceQueryTicket)
+      && epoch === projectEpochRef.current
+      && sameLocalSourcePath(sourcePathRef.current, activeSource)
+    );
     const hydrationSourceTransitionAuthorized =
       sourceTransitionToken !== undefined
       && sourceTransitionToken === epoch
@@ -3660,21 +3506,10 @@ export default function Workbench() {
       if (projectHydratingRef.current && !hydrationSourceTransitionAuthorized) {
         throw new Error("这次项目读取缺少与当前项目一致的源码切换令牌。");
       }
-      const url = new URL(`${BRIDGE_URL}/workspace`);
-      url.searchParams.set("sourcePath", activeSource);
-      const response = await bridgeFetch(
-        url,
-        { cache: "no-store" },
-        BRIDGE_STATE_READ_TIMEOUT_MS,
-      );
+      const payload = await bridgeClient.workspace(activeSource);
       markProjectHydrationStage("workspace-response");
-      const payload = await readJsonResponse(response);
       markProjectHydrationStage("workspace-parsed");
-      if (!response.ok) throw responseError(payload, "本地项目记录不可用。");
-      if (
-        epoch !== projectEpochRef.current
-        || !sameLocalSourcePath(sourcePathRef.current, activeSource)
-      ) return;
+      if (!workspaceQueryIsCurrent()) return;
 
       const nextProjectId = String(payload.projectId || "");
       const nextDocumentId = String(payload.documentId || "");
@@ -3759,19 +3594,10 @@ export default function Workbench() {
       let authoritativeSourceHash = workspaceHash;
       if (mustAdoptAuthoritativeSource) {
         markProjectHydrationStage("source-request");
-        const sourceUrl = new URL(`${BRIDGE_URL}/source`);
-        sourceUrl.searchParams.set("sourcePath", activeSource);
-        const sourceResponse = await bridgeFetch(
-          sourceUrl,
-          { cache: "no-store" },
-          BRIDGE_STATE_READ_TIMEOUT_MS,
-        );
+        const sourcePayload = await bridgeClient.source(activeSource);
         markProjectHydrationStage("source-response");
-        const sourcePayload = await readJsonResponse(sourceResponse);
         markProjectHydrationStage("source-parsed");
-        if (!sourceResponse.ok) {
-          throw responseError(sourcePayload, "无法核对打开项目的最新源 HTML。");
-        }
+        if (!workspaceQueryIsCurrent()) return;
         if (
           String(sourcePayload.projectId || "") !== nextProjectId
           || String(sourcePayload.documentId || "") !== nextDocumentId
@@ -3787,6 +3613,7 @@ export default function Workbench() {
         ) {
           throw new Error("源 HTML 内容与服务端 Hash 不一致，已拒绝开放编辑。");
         }
+        if (!workspaceQueryIsCurrent()) return;
         htmlRef.current = authoritativeHtml;
         sourceShaRef.current = authoritativeSourceHash;
         setHtml(authoritativeHtml);
@@ -3820,6 +3647,7 @@ export default function Workbench() {
         setLastModifiedAt(String(payload.lastModifiedAt));
       }
 
+      if (!workspaceQueryIsCurrent()) return;
       const runtime = isRecord(payload.runtimeState) ? payload.runtimeState : {};
       const runtimeConflict = isRecord(runtime.conflict) ? runtime.conflict : null;
       const edit = isRecord(runtime.edit) ? runtime.edit : {};
@@ -3837,71 +3665,75 @@ export default function Workbench() {
       setEditRevision(editRevisionRef.current);
       setLastPersistedRevision(lastPersistedRevisionRef.current);
 
-      const draftRecord = isRecord(runtime.draft)
-        ? runtime.draft
-        : isRecord(payload.activeDraft)
-          ? payload.activeDraft
-          : {};
-      const serverDraftRevision = Number(draftRecord.draftRevision || 0);
-      draftRevisionRef.current =
-        Number.isSafeInteger(serverDraftRevision) && serverDraftRevision >= 0
-          ? serverDraftRevision
-          : 0;
-      const recoveredDraft = recoverDraftLog(
-        {
-          epoch,
-          projectId: nextProjectId,
-          documentId: nextDocumentId,
-          sourcePath: activeSource,
-        },
-        commentsFromRecords(draftRecord.comments),
-        changesFromRecords(draftRecord.changeEvents),
-        draftRevisionRef.current,
-        payload.currentBasedOnVersionId
-          ? String(payload.currentBasedOnVersionId)
-          : null,
-      );
-      const recoveredCommentTargets = rebindTargetsPreservingGlobal(
-        htmlRef.current,
-        [
-          ...recoveredDraft.comments.map((comment) => comment.target),
-          ...(recoveredDraft.composerTarget ? [recoveredDraft.composerTarget] : []),
-        ],
-      );
-      const recoveredTargetById = new Map(
-        recoveredCommentTargets.map((target) => [target.id, target]),
-      );
-      const recoveredComments = recoveredDraft.comments.map((comment) => ({
-        ...comment,
-        target: recoveredTargetById.get(comment.target.id) || {
-          ...comment.target,
-          resolution: "orphaned" as const,
-        },
-      }));
-      const recoveredEvents = recoveredDraft.changeEvents;
-      setComments(recoveredComments);
-      commentsRef.current = recoveredComments;
-      changeEventsRef.current = recoveredEvents;
-      setChangeEvents(recoveredEvents);
-      draftPersistenceAuthorityRef.current = {
+      const draftRecord = draftAuthorityFromWorkspace(payload);
+      const serverDraftRevision = authoritativeDraftRevision(draftRecord);
+      let recoveredEvents = changeEventsRef.current;
+      const draftContext = {
         epoch,
         projectId: nextProjectId,
         documentId: nextDocumentId,
         sourcePath: activeSource,
       };
-      composerDraftRef.current = recoveredDraft.composerDraft;
-      composerCommentIdRef.current = recoveredDraft.composerCommentId;
-      composerAttachmentsRef.current = recoveredDraft.composerAttachments;
-      const recoveredComposerTarget = recoveredDraft.composerTarget
-        ? recoveredTargetById.get(recoveredDraft.composerTarget.id)
-          || { ...recoveredDraft.composerTarget, resolution: "orphaned" as const }
-        : null;
-      draftTargetRef.current = recoveredComposerTarget;
-      setDraft(recoveredDraft.composerDraft);
-      setDraftCommentId(recoveredDraft.composerCommentId);
-      setDraftAttachments(recoveredDraft.composerAttachments);
-      setDraftTarget(recoveredComposerTarget);
-      setComposerOpen(false);
+      const draftSession = draftSessionRef.current;
+      const canApplyDraftAuthority = !draftSession.isActive(draftContext)
+        || serverDraftRevision >= draftSession.revision;
+      if (canApplyDraftAuthority) {
+        draftSession.activate(draftContext, serverDraftRevision, draftRecord);
+        const recoveredDraft = recoverDraftLog(draftContext,
+        commentsFromRecords(draftRecord.comments),
+        changesFromRecords(draftRecord.changeEvents),
+        draftSession.revision,
+        Array.isArray(draftRecord.deletedCommentIds)
+          ? draftRecord.deletedCommentIds.map((value) => String(value))
+          : [],
+        Array.isArray(draftRecord.appliedOperationIds)
+          ? draftRecord.appliedOperationIds.map((value) => String(value))
+          : [],
+        payload.currentBasedOnVersionId
+          ? String(payload.currentBasedOnVersionId)
+          : null);
+        const recoveredCommentTargets = rebindTargetsPreservingGlobal(
+          htmlRef.current,
+          [
+            ...recoveredDraft.comments.map((comment) => comment.target),
+            ...(recoveredDraft.composerTarget ? [recoveredDraft.composerTarget] : []),
+          ],
+        );
+        const recoveredTargetById = new Map(
+          recoveredCommentTargets.map((target) => [target.id, target]),
+        );
+        const recoveredComments = recoveredDraft.comments.map((comment) => ({
+          ...comment,
+          target: recoveredTargetById.get(comment.target.id) || {
+            ...comment.target,
+            resolution: "orphaned" as const,
+          },
+        }));
+        recoveredEvents = recoveredDraft.changeEvents;
+        setComments(recoveredComments);
+        commentsRef.current = recoveredComments;
+        changeEventsRef.current = recoveredEvents;
+        setChangeEvents(recoveredEvents);
+        draftPersistenceAuthorityRef.current = {
+          epoch,
+          projectId: nextProjectId,
+          documentId: nextDocumentId,
+          sourcePath: activeSource,
+        };
+        composerDraftRef.current = recoveredDraft.composerDraft;
+        composerCommentIdRef.current = recoveredDraft.composerCommentId;
+        composerAttachmentsRef.current = recoveredDraft.composerAttachments;
+        const recoveredComposerTarget = recoveredDraft.composerTarget
+          ? recoveredTargetById.get(recoveredDraft.composerTarget.id)
+            || { ...recoveredDraft.composerTarget, resolution: "orphaned" as const }
+          : null;
+        draftTargetRef.current = recoveredComposerTarget;
+        setDraft(recoveredDraft.composerDraft);
+        setDraftCommentId(recoveredDraft.composerCommentId);
+        setDraftAttachments(recoveredDraft.composerAttachments);
+        setDraftTarget(recoveredComposerTarget);
+        setComposerOpen(false);
+      }
 
       const recoveredRunRecord = isRecord(runtime.activeRun)
         ? runtime.activeRun
@@ -3951,15 +3783,13 @@ export default function Workbench() {
           && runtimeConflict
           && String(runtimeConflict.type || "") === "autosave-source"
         ) {
-          const conflictUrl = new URL(`${BRIDGE_URL}/conflict-candidate`);
-          conflictUrl.searchParams.set("sourcePath", activeSource);
-          const conflictResponse = await bridgeFetch(
-            conflictUrl,
-            { cache: "no-store" },
-            BRIDGE_STATE_READ_TIMEOUT_MS,
-          );
-          const conflictPayload = await readJsonResponse(conflictResponse);
-          if (conflictResponse.ok && typeof conflictPayload.content === "string") {
+          const conflictPayload = await bridgeClient
+            .conflictCandidate(activeSource)
+            .catch((): Record<string, unknown> => ({}));
+          if (
+            workspaceQueryIsCurrent()
+            && typeof conflictPayload.content === "string"
+          ) {
             const candidateHtml = conflictPayload.content;
             const candidateHash = await browserSha256(candidateHtml);
             if (
@@ -4099,11 +3929,7 @@ export default function Workbench() {
         .filter((value) => value && !sameLocalSourcePath(value, activeSourcePath)),
     )];
     await Promise.allSettled(sourcePaths.map(async (recentSourcePath) => {
-      const url = new URL(`${BRIDGE_URL}/workspace`);
-      url.searchParams.set("sourcePath", recentSourcePath);
-      const response = await bridgeFetch(url, { cache: "no-store" });
-      const payload = await readJsonResponse(response);
-      if (!response.ok) return;
+      const payload = await bridgeClient.workspace(recentSourcePath);
       const runtime = isRecord(payload.runtimeState) ? payload.runtimeState : {};
       const runtimeConflict = isRecord(runtime.conflict) ? runtime.conflict : null;
       const recoveredRunRecord = isRecord(runtime.activeRun)
@@ -4227,89 +4053,264 @@ export default function Workbench() {
     return () => window.removeEventListener("keydown", closeDrawer);
   }, [drawer, previewAttachment]);
 
-  const flushDraftPersistence = useCallback(async (
-    snapshot?: PendingDraft,
-  ): Promise<boolean> => {
-    if (snapshot) draftPendingRef.current = snapshot;
-    if (draftFlushPromiseRef.current) {
-      const previous = await draftFlushPromiseRef.current;
-      if (!previous) return false;
-      if (!draftPendingRef.current) return true;
+  const handleDraftSessionEvent = useCallback((
+    event: DraftSessionEvent<CommentItem, DirectEditEvent>,
+  ) => {
+    if (event.type === "failed") {
+      if (!isCurrentProjectContext(event.write)) return;
+      setDraftPersistError(productErrorMessage(
+        event.error,
+        "本轮评论自动恢复后仍无法记录，请稍后重试。",
+      ));
+      setBridgeConnected(false);
+      return;
     }
-    const run = async () => {
-      while (draftPendingRef.current) {
-        const write = draftPendingRef.current;
-        draftPendingRef.current = null;
-        if (!write.projectId || !write.documentId) {
-          persistDraftRecovery(write);
-          continue;
-        }
-        try {
-          const response = await bridgeFetch(`${BRIDGE_URL}/draft`, {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({
-              projectId: write.projectId,
-              documentId: write.documentId,
-              sourcePath: write.sourcePath,
-              expectedDraftRevision: write.expectedDraftRevision,
-              basedOnVersionId: write.basedOnVersionId,
-              comments: write.comments.map(persistedComment),
-              changeEvents: write.changeEvents.map(persistedChangeEvent),
-            }),
-          });
-          const payload = await readJsonResponse(response);
-          if (!response.ok) throw responseError(payload, "本轮评论暂时无法记录。");
-          if (isCurrentProjectContext(write)) {
-            const activeDraft = isRecord(payload.activeDraft)
-              ? payload.activeDraft
-              : {};
-            const acknowledgedDraftRevision = Number(activeDraft.draftRevision);
-            if (
-              !Number.isSafeInteger(acknowledgedDraftRevision)
-              || acknowledgedDraftRevision <= write.expectedDraftRevision
-            ) {
-              throw new Error("草稿保存返回了不完整或过期的 revision。");
-            }
-            draftRevisionRef.current = acknowledgedDraftRevision;
-            const queuedDraft = draftPendingRef.current as PendingDraft | null;
-            if (queuedDraft) {
-              draftPendingRef.current = {
-                ...queuedDraft,
-                expectedDraftRevision: acknowledgedDraftRevision,
-              };
-            }
-            setDraftPersistError("");
-            setBridgeConnected(true);
-            if (!draftPendingRef.current) {
-              deletedCommentIdsRef.current.clear();
-              persistDraftRecovery({
-                ...write,
-                expectedDraftRevision: acknowledgedDraftRevision,
-              });
-            }
-          }
-        } catch (cause) {
-          if (isCurrentProjectContext(write) && !projectLockedRef.current) {
-            draftPendingRef.current = write;
-            setDraftPersistError(
-              productErrorMessage(cause, "本轮评论暂时无法记录，请重试。"),
-            );
-            setBridgeConnected(false);
-          }
-          return false;
-        }
-      }
-      return true;
-    };
-    const promise = run();
-    draftFlushPromiseRef.current = promise;
-    try {
-      return await promise;
-    } finally {
-      if (draftFlushPromiseRef.current === promise) draftFlushPromiseRef.current = null;
+    if (event.type !== "acknowledged") return;
+    if (!isCurrentProjectContext(event.write)) return;
+
+    const acknowledgedComments = commentsFromRecords(
+      event.authoritative.comments,
+    );
+    const acknowledgedEvents = changesFromRecords(
+      event.authoritative.changeEvents,
+    );
+    const sessionState = draftSessionRef.current.inspect();
+    if (event.rebaseCount > 0 && !sessionState.pending) {
+      commentsRef.current = acknowledgedComments;
+      changeEventsRef.current = acknowledgedEvents;
+      setComments(acknowledgedComments);
+      setChangeEvents(acknowledgedEvents);
+    }
+    setDraftPersistError("");
+    setBridgeConnected(true);
+    if (!sessionState.pending) {
+      deletedCommentIdsRef.current.clear();
+      persistDraftRecovery({
+        ...event.write,
+        expectedDraftRevision: event.authoritative.draftRevision,
+        comments: acknowledgedComments,
+        changeEvents: acknowledgedEvents,
+        deletedCommentIds: [],
+      });
     }
   }, [isCurrentProjectContext, persistDraftRecovery]);
+
+  useEffect(() => {
+    const session = draftSessionRef.current;
+    session.setObserver(handleDraftSessionEvent);
+    return () => session.setObserver(null);
+  }, [handleDraftSessionEvent]);
+
+  const flushDraftPersistence = useCallback(async (
+    snapshot?: PendingDraft,
+  ): Promise<boolean> => draftSessionRef.current.drain(snapshot), []);
+
+  useEffect(() => {
+    const coordinator = drainCoordinatorRef.current;
+    coordinator.replace("view-transition", {
+      label: "等待页面切换完成",
+      inspect: (boundary) => (
+        viewTransitioningRef.current && boundary !== "history"
+      )
+        ? {
+            state: "blocked",
+            reason: "正在核对历史或当前 HTML，请等待本次切换完成后再继续。",
+          }
+        : { state: "resolved" },
+    });
+    coordinator.replace("submission", {
+      label: "等待本轮提交准备结束",
+      inspect: (boundary) => (
+        boundary !== "submit"
+        && (submissionIntentRef.current || submissionPendingRef.current)
+          ? { state: "pending", reason: "内部 AI 的冻结 Request 尚未安全建立。" }
+          : { state: "resolved" }
+      ),
+      drain: () => waitUntilResolved(
+        () => !submissionIntentRef.current && !submissionPendingRef.current,
+      ),
+    });
+    coordinator.replace("attachments", {
+      label: "等待附件添加完成",
+      inspect: () => attachmentUploadCountRef.current > 0
+        ? { state: "pending", reason: "评论附件仍在写入项目记录。" }
+        : { state: "resolved" },
+      drain: () => waitUntilResolved(
+        () => attachmentUploadCountRef.current === 0,
+      ),
+    });
+    coordinator.replace("project-rules", {
+      label: "等待项目规则保存",
+      inspect: () => {
+        const dirty = Boolean(
+          fileView?.path === "PROJECT.md"
+          && fileView.content !== fileView.savedContent,
+        );
+        if (!dirty) return { state: "resolved" };
+        if (fileView?.error) {
+          return {
+            state: "blocked",
+            reason: "项目规则当前无法读取，请返回项目面板处理后再继续。",
+          };
+        }
+        return { state: "pending", reason: "项目规则还没有保存。" };
+      },
+      drain: () => saveProjectRulesRef.current(),
+    });
+    coordinator.replace("source", {
+      label: "等待当前 HTML 写回",
+      inspect: (boundary) => {
+        if (
+          projectLockedRef.current
+          && boundary !== "submit"
+        ) return { state: "resolved" };
+        if (!sourcePathRef.current && editRevisionRef.current > 0) {
+          return {
+            state: "blocked",
+            reason: "当前编辑尚未绑定本地 HTML，请先导出或打开本地文件。",
+          };
+        }
+        if (persistStateRef.current === "conflict") {
+          return {
+            state: "blocked",
+            reason: "当前 HTML 与外部文件存在冲突，请先选择保留哪一份。",
+          };
+        }
+        if (
+          pendingWriteRef.current
+          || flushPromiseRef.current
+          || editRevisionRef.current > lastPersistedRevisionRef.current
+        ) {
+          return {
+            state: "pending",
+            reason: "当前 HTML 仍有修改尚未安全写回源文件。",
+          };
+        }
+        return { state: "resolved" };
+      },
+      drain: () => flushAutosave(editRevisionRef.current),
+    });
+    coordinator.replace("draft", {
+      label: "等待评论记录写入",
+      alwaysDrain: true,
+      inspect: (boundary) => {
+        const hasLocalDraftMaterial = Boolean(
+          commentsRef.current.length > 0
+          || changeEventsRef.current.length > 0
+          || deletedCommentIdsRef.current.size > 0
+          || composerDraftRef.current.trim()
+          || composerAttachmentsRef.current.length > 0
+          || draftTargetRef.current
+        );
+        if (
+          (projectLockedRef.current && boundary !== "submit")
+          || projectLoadErrorRef.current
+        ) return { state: "resolved" };
+        if (!captureProjectContext()) {
+          return hasLocalDraftMaterial
+            ? {
+                state: "pending",
+                reason: "正在为本轮评论建立唯一项目身份。",
+              }
+            : { state: "resolved" };
+        }
+        const draftState = draftSessionRef.current.inspect();
+        if (!draftState.active) {
+          return {
+            state: "pending",
+            reason: "正在重新核对本轮评论的项目身份。",
+          };
+        }
+        if (
+          draftState.pending
+          || draftState.writing
+          || draftState.error
+        ) {
+          return {
+            state: "pending",
+            reason: "本轮评论或编辑审计仍未安全记录。",
+          };
+        }
+        return { state: "resolved" };
+      },
+      drain: async ({ boundary }) => {
+        const hasLocalDraftMaterial = Boolean(
+          commentsRef.current.length > 0
+          || changeEventsRef.current.length > 0
+          || deletedCommentIdsRef.current.size > 0
+          || composerDraftRef.current.trim()
+          || composerAttachmentsRef.current.length > 0
+          || draftTargetRef.current
+        );
+        let context = captureProjectContext();
+        if (
+          (projectLockedRef.current && boundary !== "submit")
+          || projectLoadErrorRef.current
+        ) return true;
+        if (!context && !hasLocalDraftMaterial) return true;
+        if (!context) {
+          context = await ensureProjectRegistered();
+          if (!context) {
+            throw new Error("无法为本轮评论建立唯一项目身份。");
+          }
+        } else if (!draftSessionRef.current.isActive(context)) {
+          context = await ensureProjectRegistered(
+            context.sourcePath,
+            sourceShaRef.current,
+            false,
+          );
+          if (!context || !draftSessionRef.current.isActive(context)) {
+            throw new Error("无法恢复本轮评论的项目身份。");
+          }
+        }
+        const snapshot = draftSessionRef.current.createSnapshot({
+          context,
+          basedOnVersionId: currentBasedOnVersionId,
+          comments: commentsRef.current,
+          changeEvents: changeEventsRef.current,
+          deletedCommentIds: deletedCommentIdsRef.current,
+          operationId: draftRecoveryOperationIdRef.current || undefined,
+        });
+        if (!snapshot) {
+          const activeContext = draftSessionRef.current.context;
+          const mismatches = [
+            activeContext?.epoch !== context.epoch ? "project-epoch" : "",
+            activeContext?.projectId !== context.projectId ? "project-id" : "",
+            activeContext?.documentId !== context.documentId ? "document-id" : "",
+            activeContext?.sourcePath !== context.sourcePath ? "source-path" : "",
+          ].filter(Boolean);
+          throw new Error(
+            `评论会话与当前项目身份不一致（${mismatches.join(", ") || "inactive"}）。`,
+          );
+        }
+        draftRecoveryOperationIdRef.current = null;
+        persistDraftRecovery(snapshot);
+        const persisted = await flushDraftPersistence(snapshot);
+        if (!persisted) {
+          throw draftSessionRef.current.lastError
+            || new Error("本轮评论或编辑审计没有完成安全记录。");
+        }
+        return true;
+      },
+    });
+    coordinator.replace("native-edit", {
+      label: "等待当前文字输入收口",
+      inspect: () => editorRef.current?.hasPendingNativeEdit()
+        ? {
+            state: "pending",
+            reason: "当前文字尚未完成输入，不能离开编辑画布。",
+          }
+        : { state: "resolved" },
+    });
+  }, [
+    captureProjectContext,
+    currentBasedOnVersionId,
+    ensureProjectRegistered,
+    fileView,
+    flushAutosave,
+    flushDraftPersistence,
+    persistDraftRecovery,
+  ]);
 
   const rememberAttachmentObjectUrl = useCallback((
     attachmentId: string,
@@ -4341,17 +4342,7 @@ export default function Workbench() {
   ): Promise<Blob> => {
     const activeSource = sourcePathRef.current;
     if (!activeSource) throw new Error("当前评论还没有绑定本地项目。");
-    const url = new URL(`${BRIDGE_URL}/attachment`);
-    url.searchParams.set("sourcePath", activeSource);
-    url.searchParams.set("relativePath", attachment.relativePath);
-    const response = await bridgeFetch(url, { cache: "no-store" });
-    if (!response.ok) {
-      const payload = await readJsonResponse(response);
-      throw responseError(payload, "无法读取评论附件。");
-    }
-    return new Blob([await response.arrayBuffer()], {
-      type: attachment.mediaType || "application/octet-stream",
-    });
+    return bridgeClient.attachment(activeSource, attachment.relativePath);
   }, []);
 
   const ensureAttachmentObjectUrl = useCallback(async (
@@ -4370,20 +4361,12 @@ export default function Workbench() {
     const activeSource = sourcePathRef.current;
     if (!activeSource) return;
     try {
-      const response = await bridgeFetch(`${BRIDGE_URL}/attachment/delete`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          projectId: projectIdRef.current,
-          documentId: documentIdRef.current,
-          sourcePath: activeSource,
-          relativePath: attachment.relativePath,
-        }),
+      await bridgeClient.deleteAttachment({
+        projectId: projectIdRef.current,
+        documentId: documentIdRef.current,
+        sourcePath: activeSource,
+        relativePath: attachment.relativePath,
       });
-      if (!response.ok) {
-        const payload = await readJsonResponse(response);
-        throw responseError(payload, "无法删除评论附件。");
-      }
     } catch (cause) {
       setToast({
         title: "附件已从评论移除",
@@ -4532,25 +4515,19 @@ export default function Workbench() {
       setAttachmentUploadCount(attachmentUploadCountRef.current);
       try {
         const attachmentId = recordId("attachment", attachmentCounter.current++);
-        const response = await bridgeFetch(`${BRIDGE_URL}/attachment`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            projectId: projectIdRef.current,
-            documentId: documentIdRef.current,
-            sourcePath: activeSource,
-            commentId: target.commentId,
-            attachmentId,
-            fileName: file.name || "附件",
-            mediaType: file.type || "application/octet-stream",
-            byteLength: file.size,
-            kind: isImageFile(file) ? "image" : "file",
-            source,
-            dataBase64: await fileAsBase64(file),
-          }),
-        }, BRIDGE_ATTACHMENT_TIMEOUT_MS);
-        const payload = await readJsonResponse(response);
-        if (!response.ok) throw responseError(payload, "无法添加评论附件。");
+        const payload = await bridgeClient.saveAttachment({
+          projectId: projectIdRef.current,
+          documentId: documentIdRef.current,
+          sourcePath: activeSource,
+          commentId: target.commentId,
+          attachmentId,
+          fileName: file.name || "附件",
+          mediaType: file.type || "application/octet-stream",
+          byteLength: file.size,
+          kind: isImageFile(file) ? "image" : "file",
+          source,
+          dataBase64: await fileAsBase64(file),
+        });
         const attachment = attachmentFromRecord(
           isRecord(payload.attachment) ? payload.attachment : null,
         );
@@ -4744,16 +4721,21 @@ export default function Workbench() {
       || projectHydratingRef.current
       || projectHydrating
     ) return;
-    const snapshot: PendingDraft = {
+    const snapshot = draftSessionRef.current.createSnapshot({
+      context: {
       epoch: projectEpochRef.current,
       projectId,
       documentId,
       sourcePath,
+      },
       basedOnVersionId: currentBasedOnVersionId,
-      expectedDraftRevision: draftRevisionRef.current,
       comments,
       changeEvents,
-    };
+      deletedCommentIds: deletedCommentIdsRef.current,
+      operationId: draftRecoveryOperationIdRef.current || undefined,
+    });
+    if (!snapshot) return;
+    draftRecoveryOperationIdRef.current = null;
     persistDraftRecovery(snapshot);
     if (projectLockedRef.current || projectLocked) return;
     void flushDraftPersistence(snapshot);
@@ -4781,16 +4763,20 @@ export default function Workbench() {
       || !sameLocalSourcePath(authority.sourcePath, sourcePath)
       || projectHydratingRef.current
     ) return;
-    persistDraftRecovery({
-      epoch: projectEpochRef.current,
-      projectId,
-      documentId,
-      sourcePath,
+    const snapshot = draftSessionRef.current.createSnapshot({
+      context: {
+        epoch: projectEpochRef.current,
+        projectId,
+        documentId,
+        sourcePath,
+      },
       basedOnVersionId: currentBasedOnVersionId,
-      expectedDraftRevision: draftRevisionRef.current,
-      comments: [...commentsRef.current],
-      changeEvents: [...changeEventsRef.current],
+      comments: commentsRef.current,
+      changeEvents: changeEventsRef.current,
+      deletedCommentIds: deletedCommentIdsRef.current,
+      operationId: draftRecoveryOperationIdRef.current || undefined,
     });
+    if (snapshot) persistDraftRecovery(snapshot);
   }, [
     currentBasedOnVersionId,
     documentId,
@@ -4813,24 +4799,10 @@ export default function Workbench() {
         let frozenSourceSha256: string | null = null;
         let ready = false;
         closePreparationRequestRef.current = detail.requestId;
-        const beforeDeadline = async <T,>(work: Promise<T>, label: string): Promise<T> => {
-          const remaining = Math.max(0, detail.deadlineAt - Date.now() - 250);
-          if (remaining === 0) throw new Error(`${label}超时。`);
-          let timer = 0;
-          try {
-            return await Promise.race([
-              work,
-              new Promise<T>((_resolve, reject) => {
-                timer = window.setTimeout(() => reject(new Error(`${label}超时。`)), remaining);
-              }),
-            ]);
-          } finally {
-            if (timer) window.clearTimeout(timer);
-          }
-        };
 
         try {
           if (projectHydratingRef.current) {
+            const draftState = draftSessionRef.current.inspect();
             if (canCloseDuringHydration({
               projectHydrating: true,
               viewTransitioning: viewTransitioningRef.current,
@@ -4838,8 +4810,8 @@ export default function Workbench() {
               persistState: persistStateRef.current,
               pendingWrite: Boolean(pendingWriteRef.current),
               flushInProgress: Boolean(flushPromiseRef.current),
-              draftPending: Boolean(draftPendingRef.current),
-              draftFlushInProgress: Boolean(draftFlushPromiseRef.current),
+              draftPending: draftState.pending,
+              draftFlushInProgress: draftState.writing,
               editRevision: editRevisionRef.current,
               lastPersistedRevision: lastPersistedRevisionRef.current,
             })) {
@@ -4848,50 +4820,11 @@ export default function Workbench() {
             }
             return { ready: false, reason: "项目状态尚未读取完成，已取消关闭以避免覆盖未知编辑状态。" };
           }
-          if (viewTransitioningRef.current) {
-            return { ready: false, reason: "正在核对历史或当前 HTML，请等待本次切换完成后再关闭。" };
-          }
           if (projectLoadErrorRef.current) {
             if (pendingWriteRef.current || flushPromiseRef.current) {
               return { ready: false, reason: "项目读取失败且仍有待恢复的 HTML 修改，请先重试读取或导出副本。" };
             }
             return { ready: true };
-          }
-
-          if (submissionIntentRef.current) {
-            await beforeDeadline((async () => {
-              while (submissionIntentRef.current) {
-                await new Promise<void>((resolve) => window.setTimeout(resolve, 40));
-              }
-            })(), "等待本轮提交准备结束");
-          }
-
-          if (submissionPendingRef.current) {
-            await beforeDeadline((async () => {
-              while (submissionPendingRef.current) {
-                await new Promise<void>((resolve) => window.setTimeout(resolve, 40));
-              }
-            })(), "等待冻结任务安全写入");
-          }
-
-          if (attachmentUploadCountRef.current > 0) {
-            await beforeDeadline((async () => {
-              while (attachmentUploadCountRef.current > 0) {
-                await new Promise<void>((resolve) => window.setTimeout(resolve, 40));
-              }
-            })(), "等待附件添加完成");
-          }
-
-          if (
-            fileView?.path === "PROJECT.md"
-            && !fileView.error
-            && fileView.content !== fileView.savedContent
-            && !await beforeDeadline(
-              saveProjectRulesRef.current(),
-              "等待项目规则保存",
-            )
-          ) {
-            return { ready: false, reason: "项目规则还没有保存，请返回项目面板处理。" };
           }
 
           if (viewMode !== "history" && !projectLockedRef.current) {
@@ -4916,22 +4849,12 @@ export default function Workbench() {
             }
           }
 
-          if (!sourcePathRef.current && editRevisionRef.current > 0) {
-            return { ready: false, reason: "当前编辑尚未绑定本地 HTML，请先导出或打开本地文件。" };
-          }
-          if (persistState === "conflict") {
-            return { ready: false, reason: "当前 HTML 与外部文件存在冲突，请先选择保留哪一份。" };
-          }
-
           const cutoffRevision = editRevisionRef.current;
-          if (pendingWriteRef.current || flushPromiseRef.current || cutoffRevision > lastPersistedRevisionRef.current) {
-            const autosaveOk = await beforeDeadline(
-              flushAutosave(cutoffRevision),
-              "等待当前 HTML 写回",
-            );
-            if (!autosaveOk || pendingWriteRef.current || flushPromiseRef.current) {
-              return { ready: false, reason: "当前 HTML 仍有修改尚未安全写回源文件。" };
-            }
+          const drained = await drainCoordinatorRef.current.drain("close", {
+            deadlineAt: detail.deadlineAt - 250,
+          });
+          if (!drained.ok) {
+            return { ready: false, reason: drained.reason };
           }
           if (
             imposedEditorFreeze
@@ -4945,30 +4868,6 @@ export default function Workbench() {
             return { ready: false, reason: "关闭前冻结的 HTML 与已写回源文件不一致。" };
           }
 
-          const context = captureProjectContext();
-          if (context) {
-            const snapshot: PendingDraft = {
-              ...context,
-              basedOnVersionId: currentBasedOnVersionId,
-              expectedDraftRevision: draftRevisionRef.current,
-              comments: [...commentsRef.current],
-              changeEvents: [...changeEventsRef.current],
-            };
-            persistDraftRecovery(snapshot);
-            if (!projectLockedRef.current) {
-              const draftOk = await beforeDeadline(
-                flushDraftPersistence(snapshot),
-                "等待评论记录写入",
-              );
-              if (!draftOk || draftPendingRef.current || draftFlushPromiseRef.current) {
-                return { ready: false, reason: "本轮评论或编辑审计仍未安全记录。" };
-              }
-            }
-          }
-
-          if (submissionIntentRef.current || submissionPendingRef.current) {
-            return { ready: false, reason: "内部 AI 的冻结 Request 尚未安全建立。" };
-          }
           if (abortedCloseRequestsRef.current.has(detail.requestId)) {
             return { ready: false, reason: "桌面外壳已取消本次关闭。" };
           }
@@ -5000,14 +4899,7 @@ export default function Workbench() {
     window.addEventListener("html-ai:prepare-close", handlePrepareClose);
     return () => window.removeEventListener("html-ai:prepare-close", handlePrepareClose);
   }, [
-    captureProjectContext,
-    currentBasedOnVersionId,
     enqueueAutosave,
-    flushAutosave,
-    flushDraftPersistence,
-    fileView,
-    persistDraftRecovery,
-    persistState,
     viewMode,
   ]);
 
@@ -5022,6 +4914,7 @@ export default function Workbench() {
       if (closePreparationRequestRef.current === detail.requestId) return;
       if (closeFreezeRequestRef.current !== detail.requestId) return;
 
+      const draftState = draftSessionRef.current.inspect();
       const mayRecover = shouldRecoverEditorAfterCloseAbort({
         approvedRequestId: closeFreezeRequestRef.current,
         abortedRequestId: detail.requestId,
@@ -5034,9 +4927,9 @@ export default function Workbench() {
         persistState: persistStateRef.current,
         pendingWrite: Boolean(pendingWriteRef.current),
         flushInProgress: Boolean(flushPromiseRef.current),
-        draftPending: Boolean(draftPendingRef.current),
-        draftFlushInProgress: Boolean(draftFlushPromiseRef.current),
-        draftPersistError: Boolean(draftPersistError),
+        draftPending: draftState.pending,
+        draftFlushInProgress: draftState.writing,
+        draftPersistError: Boolean(draftState.error),
         editRevision: editRevisionRef.current,
         lastPersistedRevision: lastPersistedRevisionRef.current,
       });
@@ -5051,34 +4944,20 @@ export default function Workbench() {
 
     window.addEventListener("html-ai:close-aborted", handleCloseAborted);
     return () => window.removeEventListener("html-ai:close-aborted", handleCloseAborted);
-  }, [draftPersistError]);
+  }, []);
 
   useEffect(() => {
     const beforeUnload = (event: BeforeUnloadEvent) => {
-      const hasPendingNativeEdit =
-        editorRef.current?.hasPendingNativeEdit() ?? false;
-      const hasUnacknowledgedSourceRevision =
-        editRevisionRef.current > lastPersistedRevisionRef.current;
-      if (
-        !pendingWriteRef.current
-        && !draftPendingRef.current
-        && !hasPendingNativeEdit
-        && !hasUnacknowledgedSourceRevision
-        && !draftPersistError
-        && persistState !== "failed"
-        && persistState !== "conflict"
-        && persistState !== "preview-dirty"
-      ) return;
+      if (!drainCoordinatorRef.current.hasPending("close")) return;
       event.preventDefault();
       event.returnValue = "";
-      if (pendingWriteRef.current && persistState !== "conflict") {
-        void flushAutosave();
-      }
-      if (draftPendingRef.current) void flushDraftPersistence();
+      void drainCoordinatorRef.current.drain("close", {
+        deadlineAt: Date.now() + 3_000,
+      });
     };
     window.addEventListener("beforeunload", beforeUnload);
     return () => window.removeEventListener("beforeunload", beforeUnload);
-  }, [draftPersistError, flushAutosave, flushDraftPersistence, persistState]);
+  }, []);
 
   const prepareProjectSwitch = useCallback(async (
     fromDeferred = false,
@@ -5109,41 +4988,24 @@ export default function Workbench() {
         { onDiscard: () => resolveDeferred?.(false) },
       )) return deferredResult;
     }
-    if (submissionIntentRef.current || submissionPendingRef.current) {
-      rememberProjectOpen();
-      return false;
-    }
-    if (attachmentUploadCountRef.current > 0) {
-      rememberProjectOpen();
-      return false;
-    }
-    if (
-      fileView?.path === "PROJECT.md"
-      && fileView.content !== fileView.savedContent
-    ) {
-      if (!await saveProjectRulesRef.current()) {
-        rememberProjectOpen();
-        setDrawer("files");
-        return false;
-      }
-    }
-    if (viewTransitioningRef.current) {
+    const hardBlocker = drainCoordinatorRef.current
+      .inspect("switch")
+      .find((status) => status.state === "blocked");
+    if (hardBlocker) {
       rememberProjectOpen();
       return false;
     }
     if (projectLoadErrorRef.current) {
-      draftPendingRef.current = null;
+      draftSessionRef.current.deactivate();
       return true;
     }
-    if (flushPromiseRef.current && !await flushPromiseRef.current) {
-      rememberProjectOpen();
-      return false;
+    if (projectLockedRef.current) {
+      const drained = await drainCoordinatorRef.current.drain("switch", {
+        deadlineAt: Date.now() + 15_000,
+      });
+      if (!drained.ok) rememberProjectOpen();
+      return drained.ok;
     }
-    if (draftFlushPromiseRef.current && !await draftFlushPromiseRef.current) {
-      rememberProjectOpen();
-      return false;
-    }
-    if (projectLockedRef.current) return true;
     const shouldCommitCurrentCanvas = viewMode !== "history";
     const committed = shouldCommitCurrentCanvas
       ? editorRef.current?.fencePendingEdit({
@@ -5158,24 +5020,12 @@ export default function Workbench() {
       return false;
     }
     const switchCutoffRevision = editRevisionRef.current;
-    if (
-      pendingWriteRef.current
-      || flushPromiseRef.current
-      || switchCutoffRevision > lastPersistedRevisionRef.current
-    ) {
-      const ok = await flushAutosave(switchCutoffRevision);
-      if (
-        !ok
-        || lastPersistedRevisionRef.current < switchCutoffRevision
-        || (
-          Boolean(sourcePathRef.current)
-          && committed
-          && sourceShaRef.current !== committed.sourceSha256
-        )
-      ) {
-        rememberProjectOpen();
-        return false;
-      }
+    const drained = await drainCoordinatorRef.current.drain("switch", {
+      deadlineAt: Date.now() + 15_000,
+    });
+    if (!drained.ok) {
+      rememberProjectOpen();
+      return false;
     }
     if (
       editRevisionRef.current !== switchCutoffRevision
@@ -5196,30 +5046,9 @@ export default function Workbench() {
       rememberProjectOpen();
       return false;
     }
-    const context = captureProjectContext();
-    if (context) {
-      const draftOk = await flushDraftPersistence({
-        ...context,
-        basedOnVersionId: currentBasedOnVersionId,
-        expectedDraftRevision: draftRevisionRef.current,
-        comments,
-        changeEvents,
-      });
-      if (!draftOk) {
-        rememberProjectOpen();
-        return false;
-      }
-    }
     return true;
   }, [
     deferEditorCommand,
-    captureProjectContext,
-    changeEvents,
-    comments,
-    currentBasedOnVersionId,
-    flushAutosave,
-    flushDraftPersistence,
-    fileView,
     viewMode,
   ]);
   useEffect(() => {
@@ -5281,6 +5110,7 @@ export default function Workbench() {
       fileView?.path === "PROJECT.md"
       && fileView.content !== fileView.savedContent,
     );
+    const draftState = draftSessionRef.current.inspect();
     if (
       generating
       || submissionIntentRef.current
@@ -5292,9 +5122,9 @@ export default function Workbench() {
       || persistState !== "idle"
       || pendingWriteRef.current
       || flushPromiseRef.current
-      || draftPendingRef.current
-      || draftFlushPromiseRef.current
-      || draftPersistError
+      || draftState.pending
+      || draftState.writing
+      || draftState.error
       || editRevision > lastPersistedRevision
     ) return;
     pendingProjectOpenRef.current = null;
@@ -5338,15 +5168,10 @@ export default function Workbench() {
     if (!activeSourcePath || !projectRecordsPath) return;
     try {
       await withOneAutomaticRetry(async () => {
-        const response = await bridgeFetch(`${BRIDGE_URL}/open-folder`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ sourcePath: activeSourcePath }),
+        const payload = await bridgeClient.openFolder({
+          sourcePath: activeSourcePath,
         });
-        const payload = await readJsonResponse(response);
-        if (!response.ok || payload.ok === false) {
-          throw responseError(payload, "无法打开项目记录。");
-        }
+        if (payload.ok === false) throw new Error("无法打开项目记录。");
       });
     } catch (cause) {
       setToast({
@@ -5402,7 +5227,7 @@ export default function Workbench() {
       || projectHydratingRef.current
       || projectLoadErrorRef.current
       || viewTransitioningRef.current
-      || persistStateRef.current === "conflict"
+      || String(persistStateRef.current) === "conflict"
       || viewMode === "history"
     ) return false;
     setOpenedAiVersionNotice(null);
@@ -5611,32 +5436,26 @@ export default function Workbench() {
     let externalAccepted = false;
     try {
       if (persistState === "conflict") {
-        const resolveResponse = await bridgeFetch(`${BRIDGE_URL}/conflict/resolve`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
+        try {
+          await bridgeClient.resolveConflict({
             projectId: context.projectId,
             documentId: context.documentId,
             sourcePath: context.sourcePath,
             action: "keep-external",
-          }),
-        });
-        const resolvePayload = await readJsonResponse(resolveResponse);
-        const resolveError = responseError(resolvePayload, "无法解除源文件冲突。");
-        if (!resolveResponse.ok && resolveError.code !== "CONFLICT_NOT_FOUND") {
-          throw resolveError;
+          });
+          externalAccepted = true;
+        } catch (cause) {
+          if (
+            !isBridgeRequestError(cause)
+            || cause.code !== "CONFLICT_NOT_FOUND"
+          ) throw cause;
         }
-        externalAccepted = resolveResponse.ok;
         if (
           navigationOperationRef.current !== operationId
           || !isCurrentProjectContext(context)
         ) return;
       }
-      const url = new URL(`${BRIDGE_URL}/source`);
-      url.searchParams.set("sourcePath", context.sourcePath);
-      const response = await bridgeFetch(url, { cache: "no-store" });
-      const payload = await readJsonResponse(response);
-      if (!response.ok) throw responseError(payload, "无法重新读取源 HTML。");
+      const payload = await bridgeClient.source(context.sourcePath);
       if (
         navigationOperationRef.current !== operationId
         || !isCurrentProjectContext(context)
@@ -6002,6 +5821,10 @@ export default function Workbench() {
       || persistStateRef.current === "conflict"
       || viewMode === "history"
     ) return;
+    // Opening a composer is the first durable project action for a lazily
+    // registered HTML. Start identity creation before accepting text so crash
+    // recovery and the Bridge draft share one authority.
+    void prepareProjectRecords();
     const recoveredDraftTarget = draftTargetRef.current;
     if (
       recoveredDraftTarget
@@ -6047,6 +5870,7 @@ export default function Workbench() {
     });
   }, [
     finishTargetRelink,
+    prepareProjectRecords,
     queueReviewPairReveal,
     updateFocusedComment,
     viewMode,
@@ -6104,7 +5928,7 @@ export default function Workbench() {
     updateFocusedComment,
   ]);
 
-  const addComment = useCallback(() => {
+  const addComment = useCallback(async () => {
     if (
       projectLockedRef.current
       || projectHydratingRef.current
@@ -6125,17 +5949,61 @@ export default function Workbench() {
       return;
     }
     if (attachmentUploadCount > 0) return;
+    const commentEpoch = projectEpochRef.current;
+    const requestedTargetId = draftTarget.id;
+    if (sourcePathRef.current) {
+      try {
+        const registered = await ensureProjectRegistered();
+        if (!registered) throw new Error("当前项目已经切换，请重试。");
+      } catch (cause) {
+        if (commentEpoch !== projectEpochRef.current) return;
+        setToast({
+          title: "评论尚未保存",
+          message: productErrorMessage(
+            cause,
+            "项目记录暂时无法建立；评论内容仍保留在输入框中。",
+          ),
+          tone: "warning",
+          sticky: true,
+          disposition: "direct-action",
+          dedupeKey: "project-registration",
+          action: { id: "resume-draft", label: "继续填写" },
+        });
+        composerRef.current?.focus();
+        return;
+      }
+    }
+    const currentTarget = draftTargetRef.current;
+    if (
+      commentEpoch !== projectEpochRef.current
+      || projectLockedRef.current
+      || projectHydratingRef.current
+      || projectLoadErrorRef.current
+      || viewTransitioningRef.current
+      || String(persistStateRef.current) === "conflict"
+      || !currentTarget
+      || currentTarget.id !== requestedTargetId
+      || !canLocateTarget(currentTarget)
+    ) return;
+    const currentText = composerDraftRef.current.trim();
+    const currentAttachments = [...composerAttachmentsRef.current];
+    if (!currentText && currentAttachments.length === 0) {
+      composerRef.current?.focus();
+      return;
+    }
     const now = new Date().toISOString();
-    const commentId = draftCommentId || recordId("comment", commentCounter.current++);
-    const commentTarget = independentCommentTarget(draftTarget, commentId);
+    const commentId = composerCommentIdRef.current
+      || draftCommentId
+      || recordId("comment", commentCounter.current++);
+    const commentTarget = independentCommentTarget(currentTarget, commentId);
     const nextComments = [...commentsRef.current, {
       commentId,
       createdAt: now,
       updatedAt: now,
       target: commentTarget,
-      text: draft.trim(),
-      ...(draftAttachments.length > 0
-        ? { attachments: draftAttachments.map(persistedAttachment) }
+      text: currentText,
+      ...(currentAttachments.length > 0
+        ? { attachments: currentAttachments.map(persistedAttachment) }
         : {}),
       baseVersionId: currentBasedOnVersionId,
     }];
@@ -6165,6 +6033,7 @@ export default function Workbench() {
     draftCommentId,
     draftTarget,
     attachmentUploadCount,
+    ensureProjectRegistered,
     persistCurrentDraftRecovery,
     queueReviewPairReveal,
     updateFocusedComment,
@@ -6313,12 +6182,10 @@ export default function Workbench() {
     relativePath: string,
     projectSourcePath: string,
   ): Promise<string> => {
-    const url = new URL(`${BRIDGE_URL}/file`);
-    url.searchParams.set("path", relativePath);
-    url.searchParams.set("sourcePath", projectSourcePath);
-    const response = await bridgeFetch(url, { cache: "no-store" });
-    const payload = await readJsonResponse(response);
-    if (!response.ok) throw responseError(payload, "无法读取项目文件。");
+    const payload = await bridgeClient.projectFile(
+      projectSourcePath,
+      relativePath,
+    );
     return String(payload.content || "");
   }, []);
 
@@ -6376,17 +6243,11 @@ export default function Workbench() {
       setProjectRulesSaveError("");
     };
     try {
-      const response = await bridgeFetch(`${BRIDGE_URL}/project-file`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          sourcePath: context.sourcePath,
-          projectId: context.projectId,
-          content: nextContent,
-        }),
+      await bridgeClient.updateProjectFile({
+        sourcePath: context.sourcePath,
+        projectId: context.projectId,
+        content: nextContent,
       });
-      const payload = await readJsonResponse(response);
-      if (!response.ok) throw responseError(payload, "无法更新 PROJECT.md。");
       if (!isCurrentProjectContext(context)) return false;
       markRulesSaved();
       return true;
@@ -6769,13 +6630,19 @@ export default function Workbench() {
     let durableRun: ActiveRun | null = null;
     let confirmedNoRun = false;
     try {
-      const flushed = await flushAutosave(freezeCutoffRevision);
+      const drained = await drainCoordinatorRef.current.drain("submit", {
+        deadlineAt: Date.now() + 60_000,
+      });
       if (
-        !flushed
+        !drained.ok
         || lastPersistedRevisionRef.current !== freezeCutoffRevision
         || editRevisionRef.current !== freezeCutoffRevision
       ) {
-        throw new Error("冻结前的最后一次修改尚未安全写入源 HTML。");
+        throw new Error(
+          drained.ok
+            ? "冻结前的最后一次修改尚未安全写入源 HTML。"
+            : drained.reason,
+        );
       }
       const persistedSourceSha256 = sourceShaRef.current;
       if (
@@ -6807,52 +6674,36 @@ export default function Workbench() {
       submissionContext.changeEvents = changeEventsRef.current.map(
         (event) => ({ ...event }),
       );
-      const draftFlushed = await flushDraftPersistence({
-        epoch: submissionContext.epoch,
-        projectId: submissionContext.projectId,
-        documentId: submissionContext.documentId,
-        sourcePath: submissionContext.sourcePath,
-        basedOnVersionId: currentBasedOnVersionId,
-        expectedDraftRevision: draftRevisionRef.current,
-        comments: submissionContext.comments,
-        changeEvents: submissionContext.changeEvents,
-      });
-      if (!draftFlushed || !isCurrentProjectContext(submissionContext)) {
+      if (!isCurrentProjectContext(submissionContext)) {
         throw new Error("冻结边界内的最新评论与修改审计尚未安全记录。");
       }
       const targets = uniqueTargets(submissionContext.comments);
       requestDispatched = true;
-      const response = await bridgeFetch(`${BRIDGE_URL}/request`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          projectId: submissionContext.projectId,
-          documentId: submissionContext.documentId,
-          projectName: fileStem(submissionContext.projectName),
-          projectMd: projectMarkdown(submissionContext.projectName),
-          sourcePath: submissionContext.sourcePath,
-          expectedSourceSha256: persistedSourceSha256,
-          freezeCutoffRevision,
-          lastPersistedRevision: lastPersistedRevisionRef.current,
-          summary: submissionContext.comments.map((comment) => (
-            comment.text.trim()
-            || `参考附件：${(comment.attachments ?? []).map((item) => item.fileName).join("、")}`
-          )).join("；").slice(0, 5000),
-          targets: targets.map(persistedTargetRef),
-          instructions: submissionContext.comments.map((comment) => ({
-            instructionId: `instruction_${comment.commentId.replace(/^comment_/, "")}`,
-            text: comment.text.trim() || "请结合本条评论所附附件完成修改。",
-            targetRefs: [comment.target.id],
-            attachmentRefs: (comment.attachments ?? []).map(
-              (attachment) => attachment.attachmentId,
-            ),
-          })),
-          comments: submissionContext.comments.map(persistedComment),
-          changeEvents: submissionContext.changeEvents.map(persistedChangeEvent),
-        }),
-      }, BRIDGE_REQUEST_TIMEOUT_MS);
-      const payload = await readJsonResponse(response);
-      if (!response.ok) throw responseError(payload, "无法建立本轮内部 AI 任务。");
+      const payload = await bridgeClient.createRequest({
+        projectId: submissionContext.projectId,
+        documentId: submissionContext.documentId,
+        projectName: fileStem(submissionContext.projectName),
+        projectMd: projectMarkdown(submissionContext.projectName),
+        sourcePath: submissionContext.sourcePath,
+        expectedSourceSha256: persistedSourceSha256,
+        freezeCutoffRevision,
+        lastPersistedRevision: lastPersistedRevisionRef.current,
+        summary: submissionContext.comments.map((comment) => (
+          comment.text.trim()
+          || `参考附件：${(comment.attachments ?? []).map((item) => item.fileName).join("、")}`
+        )).join("；").slice(0, 5000),
+        targets: targets.map(persistedTargetRef),
+        instructions: submissionContext.comments.map((comment) => ({
+          instructionId: `instruction_${comment.commentId.replace(/^comment_/, "")}`,
+          text: comment.text.trim() || "请结合本条评论所附附件完成修改。",
+          targetRefs: [comment.target.id],
+          attachmentRefs: (comment.attachments ?? []).map(
+            (attachment) => attachment.attachmentId,
+          ),
+        })),
+        comments: submissionContext.comments.map(persistedComment),
+        changeEvents: submissionContext.changeEvents.map(persistedChangeEvent),
+      });
       const run = activeRunFromRecord(
         isRecord(payload.activeRun)
           ? {
@@ -6875,31 +6726,28 @@ export default function Workbench() {
     } catch (cause) {
       if (requestDispatched) {
         try {
-          const workspaceUrl = new URL(`${BRIDGE_URL}/workspace`);
-          workspaceUrl.searchParams.set("sourcePath", submissionContext.sourcePath);
-          const reconcileResponse = await bridgeFetch(workspaceUrl, { cache: "no-store" });
-          const reconcilePayload = await readJsonResponse(reconcileResponse);
-          if (reconcileResponse.ok) {
-            durableRun = activeRunFromRecord(
-              (isRecord(reconcilePayload.runtimeState)
-                ? reconcilePayload.runtimeState.activeRun
-                : null)
-              || reconcilePayload.activeRun,
-            );
-            if (durableRun) {
-              backgroundRunsRef.current.set(submissionContext.sourcePath, durableRun);
-              if (isCurrentProjectContext(submissionContext)) {
-                activeRunRef.current = durableRun;
-                setActiveRun(durableRun);
-              }
-            } else if (isCurrentProjectContext(submissionContext)) {
-              confirmedNoRun = true;
-              projectLockedRef.current = false;
-              setProjectLocked(false);
-              activeRunRef.current = null;
-              setActiveRun(null);
-              editorRef.current?.unlockNow?.();
+          const reconcilePayload = await bridgeClient.workspace(
+            submissionContext.sourcePath,
+          );
+          durableRun = activeRunFromRecord(
+            (isRecord(reconcilePayload.runtimeState)
+              ? reconcilePayload.runtimeState.activeRun
+              : null)
+            || reconcilePayload.activeRun,
+          );
+          if (durableRun) {
+            backgroundRunsRef.current.set(submissionContext.sourcePath, durableRun);
+            if (isCurrentProjectContext(submissionContext)) {
+              activeRunRef.current = durableRun;
+              setActiveRun(durableRun);
             }
+          } else if (isCurrentProjectContext(submissionContext)) {
+            confirmedNoRun = true;
+            projectLockedRef.current = false;
+            setProjectLocked(false);
+            activeRunRef.current = null;
+            setActiveRun(null);
+            editorRef.current?.unlockNow?.();
           }
         } catch {
           // Unknown POST outcome is intentionally kept locked until workspace
@@ -6952,8 +6800,6 @@ export default function Workbench() {
     deferEditorCommand,
     enqueueAutosave,
     ensureProjectRegistered,
-    flushAutosave,
-    flushDraftPersistence,
     isCurrentProjectContext,
     latestVersionId,
     currentBasedOnVersionId,
@@ -7064,21 +6910,10 @@ export default function Workbench() {
     if (run.candidateVersionId && versionId !== run.candidateVersionId) {
       throw new Error("完成结果的版本 ID 与系统预留候选版本不一致，已拒绝打开。");
     }
-    const versionUrl = new URL(`${BRIDGE_URL}/version-file`);
-    versionUrl.searchParams.set("sourcePath", run.sourcePath);
-    versionUrl.searchParams.set("versionId", versionId);
-    const sourceUrl = new URL(`${BRIDGE_URL}/source`);
-    sourceUrl.searchParams.set("sourcePath", run.sourcePath);
-    const [versionResponse, sourceResponse] = await Promise.all([
-      bridgeFetch(versionUrl, { cache: "no-store" }),
-      bridgeFetch(sourceUrl, { cache: "no-store" }),
-    ]);
     const [versionPayload, sourcePayload] = await Promise.all([
-      readJsonResponse(versionResponse),
-      readJsonResponse(sourceResponse),
+      bridgeClient.versionFile(run.sourcePath, versionId),
+      bridgeClient.source(run.sourcePath),
     ]);
-    if (!versionResponse.ok) throw responseError(versionPayload, "已提交版本的不可变文件缺失。");
-    if (!sourceResponse.ok) throw responseError(sourcePayload, "无法核对当前源 HTML。");
     const versionHash = String(versionPayload.sha256 || "");
     const sourceHash = String(sourcePayload.sha256 || "");
     const content = String(versionPayload.content || "");
@@ -7184,7 +7019,14 @@ export default function Workbench() {
     composerCommentIdRef.current = null;
     composerAttachmentsRef.current = [];
     draftTargetRef.current = null;
-    draftPendingRef.current = null;
+    draftSessionRef.current.replaceAuthority(adoptedContext, 0, {
+      draftRevision: 0,
+      comments: [],
+      changeEvents: [],
+      deletedCommentIds: [],
+      appliedOperationIds: [],
+    });
+    draftRecoveryOperationIdRef.current = null;
     setComments([]);
     changeEventsRef.current = [];
     setChangeEvents([]);
@@ -7290,22 +7132,14 @@ export default function Workbench() {
     activeRunRef.current = clearedRun;
     setActiveRun(clearedRun);
     try {
-      const response = await bridgeFetch(`${BRIDGE_URL}/ready-version/activate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sourcePath: run.sourcePath,
-          projectId: run.projectId,
-          documentId: run.documentId,
-          requestId: run.requestId,
-          attemptId: run.attemptId,
-          versionId: run.candidateVersionId,
-        }),
+      const activatedPayload = await bridgeClient.activateReadyVersion({
+        sourcePath: run.sourcePath,
+        projectId: run.projectId,
+        documentId: run.documentId,
+        requestId: run.requestId,
+        attemptId: run.attemptId,
+        versionId: run.candidateVersionId,
       });
-      const activatedPayload = await readJsonResponse(response);
-      if (!response.ok) {
-        throw responseError(activatedPayload, "最新版暂时无法打开。");
-      }
       const mergedPayload = {
         ...run.readyPayload,
         ...activatedPayload,
@@ -7371,25 +7205,9 @@ export default function Workbench() {
       }
     };
     const rawState = String(payload.status || payload.lifecycleState || "processing");
-    const legacyReadyResult = Boolean(payload.versionId) && [
-      "version-created",
-      "completed",
-      "complete",
-      "ready",
-    ].includes(rawState);
-    const state = (
-      legacyReadyResult
-        ? "ready-to-open"
-        : rawState === "waiting" || rawState === "ready"
-          ? "processing"
-          : rawState === "importing" || rawState === "result-ready"
-            ? "validating"
-            : rawState === "awaiting-check-decision"
-              ? "validating"
-            : rawState === "canceled"
-              ? "cancelled"
-              : rawState
-    ) as LifecycleState;
+    const state = canonicalLifecycleState(rawState, {
+      readyVersion: Boolean(payload.versionId),
+    });
     const isCurrentProject = (
       (
         Boolean(run.projectId)
@@ -7537,14 +7355,11 @@ export default function Workbench() {
           if (statusPollBusyRef.current.has(operationKey)) return;
           statusPollBusyRef.current.add(operationKey);
           try {
-            const url = new URL(`${BRIDGE_URL}/status`);
-            url.searchParams.set("sourcePath", run.sourcePath);
-            url.searchParams.set("projectId", run.projectId);
-            url.searchParams.set("requestId", run.requestId);
-            url.searchParams.set("attemptId", run.attemptId);
-            const response = await bridgeFetch(url, { cache: "no-store" });
-            const payload = await readJsonResponse(response);
-            if (!response.ok) throw responseError(payload, "无法读取本轮状态。");
+            const payload = await bridgeClient.status(
+              run.sourcePath,
+              run.requestId,
+              run.attemptId,
+            );
             await processRunStatus(run, payload);
           } catch {
             // Temporary polling failures are recovered by the next automatic pass.
@@ -7574,13 +7389,7 @@ export default function Workbench() {
     pendingReconcileBusyRef.current = true;
     setPendingReconcileBusy(true);
     try {
-      const url = new URL(`${BRIDGE_URL}/workspace`);
-      url.searchParams.set("sourcePath", context.sourcePath);
-      const response = await bridgeFetch(url, { cache: "no-store" });
-      const payload = await readJsonResponse(response);
-      if (!response.ok) {
-        throw responseError(payload, "暂时无法核对本轮任务状态。");
-      }
+      const payload = await bridgeClient.workspace(context.sourcePath);
       if (!isCurrentProjectContext(context)) return;
       const runtime = isRecord(payload.runtimeState) ? payload.runtimeState : {};
       const runtimeConflict = isRecord(runtime.conflict) ? runtime.conflict : null;
@@ -7669,18 +7478,12 @@ export default function Workbench() {
       : null;
     setCancelling(true);
     try {
-      const response = await bridgeFetch(`${BRIDGE_URL}/active-run/cancel`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          projectId: run.projectId,
-          sourcePath: run.sourcePath,
-          requestId: run.requestId,
-          attemptId: run.attemptId,
-        }),
+      await bridgeClient.cancelActiveRun({
+        projectId: run.projectId,
+        sourcePath: run.sourcePath,
+        requestId: run.requestId,
+        attemptId: run.attemptId,
       });
-      const payload = await readJsonResponse(response);
-      if (!response.ok) throw responseError(payload, "无法取消本轮。");
       const tracked = backgroundRunsRef.current.get(run.sourcePath);
       if (
         tracked?.requestId === run.requestId
@@ -7747,20 +7550,14 @@ export default function Workbench() {
       : null;
     setResolvingConflict(true);
     try {
-      const response = await bridgeFetch(`${BRIDGE_URL}/conflict/resolve`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          projectId: run.projectId,
-          sourcePath: run.sourcePath,
-          requestId: run.requestId,
-          attemptId: run.attemptId,
-          conflictId: run.conflictId,
-          action,
-        }),
+      const payload = await bridgeClient.resolveConflict({
+        projectId: run.projectId,
+        sourcePath: run.sourcePath,
+        requestId: run.requestId,
+        attemptId: run.attemptId,
+        conflictId: run.conflictId,
+        action,
       });
-      const payload = await readJsonResponse(response);
-      if (!response.ok) throw responseError(payload, "无法处理外部文件冲突。");
       if (action === "keep-external") {
         const tracked = backgroundRunsRef.current.get(run.sourcePath);
         if (
@@ -7848,28 +7645,15 @@ export default function Workbench() {
     const previousPreserveHistory = preserveEditorHistory;
     try {
       if (viewMode === "current") {
-        if ((pendingWriteRef.current || flushPromiseRef.current) && !await flushAutosave()) {
-          throw new Error("当前编辑尚未写回，不能切换到历史视图。");
-        }
-        if (
-          navigationOperationRef.current !== operationId
-          || !isCurrentProjectContext(context)
-        ) return;
-        const draftOk = await flushDraftPersistence({
-          ...context,
-          basedOnVersionId: currentBasedOnVersionId,
-          expectedDraftRevision: draftRevisionRef.current,
-          comments: [...commentsRef.current],
-          changeEvents: [...changeEventsRef.current],
+        const drained = await drainCoordinatorRef.current.drain("history", {
+          deadlineAt: Date.now() + 15_000,
         });
-        if (!draftOk) throw new Error("本轮评论尚未安全记录，不能切换到历史视图。");
+        if (!drained.ok) throw new Error(drained.reason);
       }
-      const url = new URL(`${BRIDGE_URL}/version-file`);
-      url.searchParams.set("sourcePath", context.sourcePath);
-      url.searchParams.set("versionId", version.id);
-      const response = await bridgeFetch(url, { cache: "no-store" });
-      const payload = await readJsonResponse(response);
-      if (!response.ok) throw responseError(payload, "无法读取这份不可变版本。");
+      const payload = await bridgeClient.versionFile(
+        context.sourcePath,
+        version.id,
+      );
       if (
         navigationOperationRef.current !== operationId
         || !isCurrentProjectContext(context)
@@ -7935,11 +7719,8 @@ export default function Workbench() {
   }, [
     beginNavigationOperation,
     captureProjectContext,
-    currentBasedOnVersionId,
     deferEditorCommand,
     finishNavigationOperation,
-    flushAutosave,
-    flushDraftPersistence,
     isCurrentProjectContext,
     preserveEditorHistory,
     runInProgress,
@@ -7971,11 +7752,7 @@ export default function Workbench() {
     const previousViewingVersionId = viewingVersionId;
     const previousPreserveHistory = preserveEditorHistory;
     try {
-      const url = new URL(`${BRIDGE_URL}/source`);
-      url.searchParams.set("sourcePath", context.sourcePath);
-      const response = await bridgeFetch(url, { cache: "no-store" });
-      const payload = await readJsonResponse(response);
-      if (!response.ok) throw responseError(payload, "无法读取当前源 HTML。");
+      const payload = await bridgeClient.source(context.sourcePath);
       if (
         navigationOperationRef.current !== operationId
         || !isCurrentProjectContext(context)
@@ -9194,7 +8971,7 @@ export default function Workbench() {
                   onKeyDown={(event) => {
                     if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
                       event.preventDefault();
-                      addComment();
+                      void addComment();
                     }
                   }}
                 />
@@ -9256,7 +9033,7 @@ export default function Workbench() {
                     }
                     onClick={(event) => {
                       event.currentTarget.blur();
-                      addComment();
+                      void addComment();
                     }}
                   >
                     <ChatCircleTextIcon aria-hidden="true" size={15} weight="bold" />

@@ -62,6 +62,10 @@ import {
   workingCopyStem,
 } from "./product-contract.mjs";
 import { freezeLocalAttachment } from "./attachment-storage.mjs";
+import {
+  activeDraftSnapshot,
+  applyDraftCommand,
+} from "./draft-service.mjs";
 
 const HOST = "127.0.0.1";
 const DEFAULT_PORT = 4317;
@@ -1087,6 +1091,25 @@ function defaultProjectRules(name) {
   return `# ${name}\n\n- 保持当前页面的视觉语言、内容结构和响应式行为。\n- 只修改本轮明确指定的位置。\n`;
 }
 
+function draftArtifactRecord({
+  draftRevision = 0,
+  updatedAt,
+  comments = [],
+  changeEvents = [],
+  deletedCommentIds = [],
+  appliedOperationIds = [],
+} = {}) {
+  return {
+    schemaVersion: AUXILIARY_SCHEMA_VERSION,
+    draftRevision,
+    updatedAt: updatedAt ?? nowIso(),
+    comments,
+    editEvents: changeEvents,
+    deletedCommentIds,
+    appliedOperationIds,
+  };
+}
+
 function emptyRuntime(
   projectId,
   documentId,
@@ -1094,6 +1117,10 @@ function emptyRuntime(
   latestVersionId = "ver_0001",
 ) {
   const timestamp = nowIso();
+  const emptyDraftText = jsonText(draftArtifactRecord({
+    draftRevision: 0,
+    updatedAt: timestamp,
+  }));
   return {
     schemaVersion: LIFECYCLE_SCHEMA_VERSION,
     projectId,
@@ -1123,11 +1150,7 @@ function emptyRuntime(
     activeTransaction: null,
     draft: {
       annotationsRelativePath: "draft/annotations.json",
-      annotationsSha256: sha256(jsonText({
-        schemaVersion: AUXILIARY_SCHEMA_VERSION,
-        comments: [],
-        editEvents: [],
-      })),
+      annotationsSha256: sha256(emptyDraftText),
       commentIds: [],
       editEventIds: [],
       draftRevision: 0,
@@ -1348,6 +1371,8 @@ async function writeRuntime(projectRoot, runtime) {
   const transientActiveRun = runtime.activeRun;
   const transientDraftComments = runtime.draft?.comments;
   const transientDraftEvents = runtime.draft?.changeEvents;
+  const transientDeletedCommentIds = runtime.draft?.deletedCommentIds;
+  const transientAppliedOperationIds = runtime.draft?.appliedOperationIds;
   await atomicWriteJson(
     path.join(projectRoot, "runtime-state.json"),
     persisted,
@@ -1361,6 +1386,12 @@ async function writeRuntime(projectRoot, runtime) {
   }
   if (transientDraftEvents) {
     runtime.draft.changeEvents = transientDraftEvents;
+  }
+  if (transientDeletedCommentIds) {
+    runtime.draft.deletedCommentIds = transientDeletedCommentIds;
+  }
+  if (transientAppliedOperationIds) {
+    runtime.draft.appliedOperationIds = transientAppliedOperationIds;
   }
   runtime.transactionId = transactionId;
 }
@@ -1518,17 +1549,22 @@ async function createInitialProject(
     lastModifiedAt: source.lastModifiedAt,
   };
   await atomicWriteJson(path.join(projectRoot, "project.json"), project);
+  const runtime = emptyRuntime(
+    projectId,
+    documentId,
+    source.sha256,
+    versionId,
+  );
   await atomicWriteJson(
     path.join(projectRoot, "runtime-state.json"),
-    emptyRuntime(projectId, documentId, source.sha256, versionId),
+    runtime,
   );
   await atomicWriteFile(
     path.join(projectRoot, "draft", "annotations.json"),
-    jsonText({
-      schemaVersion: AUXILIARY_SCHEMA_VERSION,
-      comments: [],
-      editEvents: [],
-    }),
+    jsonText(draftArtifactRecord({
+      draftRevision: runtime.draft.draftRevision,
+      updatedAt: runtime.draft.updatedAt,
+    })),
   );
   await atomicWriteFile(
     path.join(projectRoot, "PROJECT.md"),
@@ -1969,20 +2005,74 @@ async function readRuntime(context, { hydrateArtifacts = true } = {}) {
   if (!hydrateArtifacts) {
     runtime.draft.comments = [];
     runtime.draft.changeEvents = [];
+    runtime.draft.deletedCommentIds = [];
+    runtime.draft.appliedOperationIds = [];
   } else if (await exists(draftPath)) {
     const draftRecords = await readAuxiliaryJson(
       draftPath,
       "draft/annotations.json",
     );
+    const runtimeDraftRevision = Number(runtime.draft?.draftRevision);
+    const artifactDraftRevision = Number(draftRecords.draftRevision);
+    const hasArtifactRevision =
+      Number.isSafeInteger(artifactDraftRevision)
+      && artifactDraftRevision >= 0;
+    if (
+      hasArtifactRevision
+      && Number.isSafeInteger(runtimeDraftRevision)
+      && artifactDraftRevision < runtimeDraftRevision
+    ) {
+      throw new HttpError(
+        409,
+        "DRAFT_ARTIFACT_REVISION_REGRESSION",
+        "draft/annotations.json is older than its runtime pointer.",
+        {
+          runtimeDraftRevision,
+          artifactDraftRevision,
+        },
+      );
+    }
+    const artifactBuffer = await readFile(draftPath);
+    const artifactSha256 = sha256(artifactBuffer);
+    if (
+      (!hasArtifactRevision || artifactDraftRevision === runtimeDraftRevision)
+      && runtime.draft?.annotationsSha256
+      && runtime.draft.annotationsSha256 !== artifactSha256
+    ) {
+      throw new HttpError(
+        409,
+        "DRAFT_ARTIFACT_HASH_MISMATCH",
+        "draft/annotations.json does not match its runtime pointer.",
+      );
+    }
+    if (hasArtifactRevision) {
+      runtime.draft.draftRevision = artifactDraftRevision;
+    }
+    if (typeof draftRecords.updatedAt === "string" && draftRecords.updatedAt) {
+      runtime.draft.updatedAt = draftRecords.updatedAt;
+    }
+    runtime.draft.annotationsSha256 = artifactSha256;
     runtime.draft.comments = Array.isArray(draftRecords.comments)
       ? draftRecords.comments
       : [];
     runtime.draft.changeEvents = Array.isArray(draftRecords.editEvents)
       ? draftRecords.editEvents
       : [];
+    runtime.draft.deletedCommentIds = Array.isArray(
+      draftRecords.deletedCommentIds,
+    )
+      ? draftRecords.deletedCommentIds
+      : [];
+    runtime.draft.appliedOperationIds = Array.isArray(
+      draftRecords.appliedOperationIds,
+    )
+      ? draftRecords.appliedOperationIds
+      : [];
   } else {
     runtime.draft.comments = [];
     runtime.draft.changeEvents = [];
+    runtime.draft.deletedCommentIds = [];
+    runtime.draft.appliedOperationIds = [];
   }
   if (
     !runtime.activeRun
@@ -3885,61 +3975,35 @@ async function saveDraft(body) {
   return withProjectMutation(context, async () => {
     const runtime = await readRuntime(context);
     assertProjectMutable(runtime);
-    const currentDraftRevision =
-      Number.isSafeInteger(runtime.draft?.draftRevision)
-        ? runtime.draft.draftRevision
-        : 0;
-    const expectedDraftRevision = Number(body.expectedDraftRevision);
-    if (
-      !Number.isSafeInteger(expectedDraftRevision)
-      || expectedDraftRevision < 0
-    ) {
-      throw new HttpError(
-        400,
-        "INVALID_DRAFT_REVISION",
-        "expectedDraftRevision must be a non-negative integer.",
-      );
+    const command = applyDraftCommand(runtime.draft, body, {
+      randomUUID,
+      now: nowIso,
+    });
+    if (command.replayed) {
+      return {
+        ok: true,
+        replayed: true,
+        operationId: command.operationId,
+        projectId: context.projectId,
+        documentId: context.documentId,
+        activeDraft: command.current,
+      };
     }
-    if (expectedDraftRevision !== currentDraftRevision) {
-      throw new HttpError(
-        409,
-        "DRAFT_REVISION_CONFLICT",
-        "The draft changed after this client snapshot was created.",
-        {
-          expectedDraftRevision,
-          currentDraftRevision,
-        },
-      );
-    }
-    if (body.clear === true) {
-      runtime.draft.comments = [];
-      runtime.draft.changeEvents = [];
-    } else {
-      runtime.draft.comments = mergeRecords(
-          [],
-          Array.isArray(body.comments) ? body.comments : [],
-          ["commentId", "id"],
-        );
-      runtime.draft.changeEvents = mergeRecords(
-          [],
-          Array.isArray(body.changeEvents) ? body.changeEvents : [],
-          ["eventId", "id"],
-        );
-    }
-    const draftContent = {
-      schemaVersion: AUXILIARY_SCHEMA_VERSION,
-      comments: runtime.draft.comments,
-      editEvents: runtime.draft.changeEvents,
-    };
+    const nextDraft = command.next;
+    const draftContent = draftArtifactRecord(nextDraft);
     const draftText = jsonText(draftContent);
     await atomicWriteFile(
       path.join(context.projectRoot, "draft", "annotations.json"),
       draftText,
     );
+    await maybeFailpoint(
+      "after-draft-artifact-written",
+      path.join(context.projectRoot, "draft"),
+    );
     runtime.draft = {
       annotationsRelativePath: "draft/annotations.json",
       annotationsSha256: sha256(draftText),
-      commentIds: runtime.draft.comments
+      commentIds: nextDraft.comments
         .map((item, index) =>
           schemaRecordId(
             "comment",
@@ -3947,7 +4011,7 @@ async function saveDraft(body) {
             String(index + 1),
           )
         ),
-      editEventIds: runtime.draft.changeEvents
+      editEventIds: nextDraft.changeEvents
         .map((item, index) =>
           schemaRecordId(
             "edit",
@@ -3955,21 +4019,21 @@ async function saveDraft(body) {
             String(index + 1),
           )
         ),
-      draftRevision: currentDraftRevision + 1,
-      updatedAt: nowIso(),
-      comments: runtime.draft.comments,
-      changeEvents: runtime.draft.changeEvents,
+      draftRevision: nextDraft.draftRevision,
+      updatedAt: nextDraft.updatedAt,
+      comments: nextDraft.comments,
+      changeEvents: nextDraft.changeEvents,
+      deletedCommentIds: nextDraft.deletedCommentIds,
+      appliedOperationIds: nextDraft.appliedOperationIds,
     };
     await writeRuntime(context.projectRoot, runtime);
     return {
       ok: true,
+      replayed: false,
+      operationId: command.operationId,
       projectId: context.projectId,
       documentId: context.documentId,
-      activeDraft: {
-        ...runtime.draft,
-        comments: runtime.draft.comments,
-        changeEvents: runtime.draft.changeEvents,
-      },
+      activeDraft: activeDraftSnapshot(runtime.draft, nowIso),
     };
   });
 }
@@ -5948,11 +6012,15 @@ async function activateReadyVersion(body) {
       workingCopy.absolutePath,
     );
 
-    const emptyDraftText = jsonText({
-      schemaVersion: AUXILIARY_SCHEMA_VERSION,
-      comments: [],
-      editEvents: [],
-    });
+    const nextDraftRevision =
+      (Number.isSafeInteger(runtime.draft?.draftRevision)
+        ? runtime.draft.draftRevision
+        : 0) + 1;
+    const nextDraftUpdatedAt = nowIso();
+    const emptyDraftText = jsonText(draftArtifactRecord({
+      draftRevision: nextDraftRevision,
+      updatedAt: nextDraftUpdatedAt,
+    }));
     await atomicWriteFile(
       path.join(context.projectRoot, "draft", "annotations.json"),
       emptyDraftText,
@@ -5984,13 +6052,12 @@ async function activateReadyVersion(body) {
       annotationsSha256: sha256(emptyDraftText),
       commentIds: [],
       editEventIds: [],
-      draftRevision:
-        (Number.isSafeInteger(runtime.draft?.draftRevision)
-          ? runtime.draft.draftRevision
-          : 0) + 1,
-      updatedAt: nowIso(),
+      draftRevision: nextDraftRevision,
+      updatedAt: nextDraftUpdatedAt,
       comments: [],
       changeEvents: [],
+      deletedCommentIds: [],
+      appliedOperationIds: [],
     };
     await writeRuntime(context.projectRoot, runtime);
     transaction.state = "cache-rebuilt";
