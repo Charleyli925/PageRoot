@@ -246,9 +246,16 @@ export class DraftSession {
       changeEvents: snapshot.changeEvents.map(this.#encodeChangeEvent),
       deletedCommentIds: snapshot.deletedCommentIds,
     };
+    // Tombstones are durable authority metadata, while comments and edit
+    // events are replacement aggregate fields. Projecting only the tombstones
+    // keeps an acknowledged deletion dominant without hiding a later removal
+    // such as undoing an already acknowledged direct edit.
     const fingerprint = draftFingerprint(
       this.#acknowledgedDraft
-        ? rebaseDraftMutation(encoded, this.#acknowledgedDraft)
+        ? rebaseDraftMutation(encoded, {
+            draftRevision: this.#acknowledgedDraft.draftRevision,
+            deletedCommentIds: this.#acknowledgedDraft.deletedCommentIds,
+          })
         : encoded,
     );
     if (

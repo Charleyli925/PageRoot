@@ -184,7 +184,13 @@ test("a final drain verifies an unchanged acknowledged draft without a write", a
     deletedCommentIds: ["comment_already_deleted"],
   }));
   const snapshot = session.createSnapshot({
-    comments: [{ commentId: "comment_1", text: "same" }],
+    comments: [
+      { commentId: "comment_1", text: "same" },
+      {
+        commentId: "comment_already_deleted",
+        text: "stale local recovery",
+      },
+    ],
     deletedCommentIds: [],
   });
 
@@ -232,6 +238,39 @@ test("an acknowledged deletion does not create a second no-op revision", async (
   })), true);
   assert.equal(writes.length, 1);
   assert.equal(session.revision, 9);
+});
+
+test("removing an acknowledged change event remains a real mutation", async () => {
+  const writes = [];
+  const client = {
+    async saveDraft(write) {
+      writes.push(write);
+      return {
+        ok: true,
+        activeDraft: authoritative(write.expectedDraftRevision + 1, {
+          changeEvents: write.changeEvents,
+          appliedOperationIds: [write.operationId],
+        }),
+      };
+    },
+    async workspace() {
+      return {};
+    },
+  };
+  const session = new DraftSession({ bridgeClient: client });
+  session.activate(context, 12, authoritative(12, {
+    changeEvents: [{
+      eventId: "edit_acknowledged",
+      kind: "text",
+    }],
+  }));
+
+  assert.equal(await session.drain(session.createSnapshot({
+    changeEvents: [],
+  })), true);
+  assert.equal(writes.length, 1);
+  assert.deepEqual(writes[0].changeEvents, []);
+  assert.equal(session.revision, 13);
 });
 
 test("an older in-flight failure cannot replace a newer pending aggregate", async () => {
