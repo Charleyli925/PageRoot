@@ -135,6 +135,7 @@ const runtimeCapabilities = Object.freeze({
   sourceEditing: "enabled",
   projectOpening: "desktop-dialog",
   attachmentPersistence: "bridge",
+  closeCoordination: "electron-handshake",
 });
 const runtimeConfig = Object.freeze({
   bridgePort,

@@ -82,6 +82,9 @@ runtime pointer or a same-revision Hash mismatch.
 A close or navigation boundary performs a final draft verification through the
 same session. If the aggregate fingerprint is already acknowledged, that
 verification is a no-op: it neither POSTs the draft nor advances its revision.
+The runtime capability manifest selects exactly one close coordinator:
+Electron's acknowledged handshake for the desktop app, or `beforeunload` for a
+browser runtime. They never compete over the same close.
 
 ## Trust model
 
@@ -99,3 +102,7 @@ keeps in-memory content visible and exportable while blocking new Bridge-backed
 mutations. `html-app:relaunch` still runs the normal renderer close-readiness
 handshake; an unsafe relaunch is rejected until the user exports or resolves
 pending writes.
+
+Only a non-in-place main-frame navigation revokes renderer readiness. Canvas
+iframe loads and same-document navigation are subordinate UI activity; treating
+them as a Workbench reload would bypass the final close drain and is forbidden.

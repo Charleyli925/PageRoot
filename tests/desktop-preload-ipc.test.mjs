@@ -71,6 +71,7 @@ test("preload declares one immutable desktop runtime capability manifest", async
   assert.equal(runtime.capabilities.sourceEditing, "enabled");
   assert.equal(runtime.capabilities.projectOpening, "desktop-dialog");
   assert.equal(runtime.capabilities.attachmentPersistence, "bridge");
+  assert.equal(runtime.capabilities.closeCoordination, "electron-handshake");
   assert.equal(Object.isFrozen(runtime.capabilities), true);
 });
 

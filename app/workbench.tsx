@@ -443,6 +443,11 @@ type CloseAbortedDetail = {
   requestId: string;
   reason: string;
 };
+type CloseLifecycle = {
+  preparingRequestId: string | null;
+  frozenRequestId: string | null;
+  abortedRequestIds: Set<string>;
+};
 
 const AUTOSAVE_DELAY_MS = 700;
 const bridgeClient = createRuntimeBridgeClient();
@@ -1658,9 +1663,11 @@ export default function Workbench() {
     recentPath?: string;
     requestedAt: number;
   } | null>(null);
-  const closePreparationRequestRef = useRef<string | null>(null);
-  const closeFreezeRequestRef = useRef<string | null>(null);
-  const abortedCloseRequestsRef = useRef<Set<string>>(new Set());
+  const closeLifecycleRef = useRef<CloseLifecycle>({
+    preparingRequestId: null,
+    frozenRequestId: null,
+    abortedRequestIds: new Set(),
+  });
   const saveProjectRulesRef = useRef<() => Promise<boolean>>(async () => false);
 
   const [html, setHtml] = useState(DEFAULT_PROJECT_HTML);
@@ -4886,7 +4893,8 @@ export default function Workbench() {
         let imposedEditorFreeze = false;
         let frozenSourceSha256: string | null = null;
         let ready = false;
-        closePreparationRequestRef.current = detail.requestId;
+        const closeLifecycle = closeLifecycleRef.current;
+        closeLifecycle.preparingRequestId = detail.requestId;
 
         try {
           if (projectHydratingRef.current) {
@@ -4912,6 +4920,7 @@ export default function Workbench() {
             if (pendingWriteRef.current || flushPromiseRef.current) {
               return { ready: false, reason: "项目读取失败且仍有待恢复的 HTML 修改，请先重试读取或导出副本。" };
             }
+            ready = true;
             return { ready: true };
           }
 
@@ -4928,7 +4937,7 @@ export default function Workbench() {
             }
             imposedEditorFreeze = true;
             frozenSourceSha256 = frozen.sourceSha256;
-            closeFreezeRequestRef.current = detail.requestId;
+            closeLifecycle.frozenRequestId = detail.requestId;
             if (
               frozen.html !== htmlRef.current
               && (Boolean(sourcePathRef.current) || Boolean(frozen.pendingMutation))
@@ -4956,7 +4965,7 @@ export default function Workbench() {
             return { ready: false, reason: "关闭前冻结的 HTML 与已写回源文件不一致。" };
           }
 
-          if (abortedCloseRequestsRef.current.has(detail.requestId)) {
+          if (closeLifecycle.abortedRequestIds.has(detail.requestId)) {
             return { ready: false, reason: "桌面外壳已取消本次关闭。" };
           }
           ready = true;
@@ -4967,16 +4976,16 @@ export default function Workbench() {
             reason: cause instanceof Error ? cause.message : "关闭前安全写入检查失败。",
           };
         } finally {
-          if (closePreparationRequestRef.current === detail.requestId) {
-            closePreparationRequestRef.current = null;
+          if (closeLifecycle.preparingRequestId === detail.requestId) {
+            closeLifecycle.preparingRequestId = null;
           }
           if (!ready && imposedEditorFreeze && !projectLockedRef.current) {
-            if (closeFreezeRequestRef.current === detail.requestId) {
-              closeFreezeRequestRef.current = null;
+            if (closeLifecycle.frozenRequestId === detail.requestId) {
+              closeLifecycle.frozenRequestId = null;
             }
             editorRef.current?.unlockNow?.();
           }
-          abortedCloseRequestsRef.current.delete(detail.requestId);
+          closeLifecycle.abortedRequestIds.delete(detail.requestId);
         }
       };
 
@@ -4995,16 +5004,17 @@ export default function Workbench() {
     const handleCloseAborted = (event: Event) => {
       const detail = (event as CustomEvent<CloseAbortedDetail>).detail;
       if (!detail || typeof detail.requestId !== "string") return;
-      abortedCloseRequestsRef.current.add(detail.requestId);
+      const closeLifecycle = closeLifecycleRef.current;
+      closeLifecycle.abortedRequestIds.add(detail.requestId);
 
       // An in-flight readiness check owns its freeze and will release it in
       // `finally`; waiting avoids unlocking while a write is still draining.
-      if (closePreparationRequestRef.current === detail.requestId) return;
-      if (closeFreezeRequestRef.current !== detail.requestId) return;
+      if (closeLifecycle.preparingRequestId === detail.requestId) return;
+      if (closeLifecycle.frozenRequestId !== detail.requestId) return;
 
       const draftState = draftSessionRef.current.inspect();
       const mayRecover = shouldRecoverEditorAfterCloseAbort({
-        approvedRequestId: closeFreezeRequestRef.current,
+        approvedRequestId: closeLifecycle.frozenRequestId,
         abortedRequestId: detail.requestId,
         imposedEditorFreeze: true,
         projectLocked: projectLockedRef.current,
@@ -5023,8 +5033,8 @@ export default function Workbench() {
       });
 
       if (mayRecover) {
-        closeFreezeRequestRef.current = null;
-        abortedCloseRequestsRef.current.delete(detail.requestId);
+        closeLifecycle.frozenRequestId = null;
+        closeLifecycle.abortedRequestIds.delete(detail.requestId);
         editorRef.current?.unlockNow?.();
         return;
       }
@@ -5036,6 +5046,10 @@ export default function Workbench() {
 
   useEffect(() => {
     const beforeUnload = (event: BeforeUnloadEvent) => {
+      if (
+        runtimeCapabilitiesRef.current.closeCoordination
+        === "electron-handshake"
+      ) return;
       if (!drainCoordinatorRef.current.hasPending("close")) return;
       event.preventDefault();
       event.returnValue = "";

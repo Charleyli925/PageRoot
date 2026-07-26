@@ -167,6 +167,9 @@ export async function architectureViolations() {
     || !workbench.includes(
       "runtimeCapabilitiesRef.current.attachmentPersistence",
     )
+    || !workbench.includes(
+      'runtimeCapabilitiesRef.current.closeCoordination',
+    )
   ) {
     violations.push(
       "app/workbench.tsx: runtime features must use the central capability manifest",

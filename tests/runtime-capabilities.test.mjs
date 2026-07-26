@@ -11,13 +11,14 @@ test("pure browser runtime is read-only and has no persistence authority", () =>
   assert.deepEqual(resolveRuntimeCapabilities(), BROWSER_RUNTIME_CAPABILITIES);
 });
 
-test("the explicit desktop manifest owns editor, picker, and attachment capabilities", () => {
+test("the explicit desktop manifest owns editor, picker, attachment, and close capabilities", () => {
   const resolved = resolveRuntimeCapabilities({
     runtimeConfig: {
       capabilities: {
         sourceEditing: "enabled",
         projectOpening: "desktop-dialog",
         attachmentPersistence: "bridge",
+        closeCoordination: "electron-handshake",
       },
     },
   });
@@ -33,6 +34,7 @@ test("the browser editing harness declares only the capabilities it exercises", 
           sourceEditing: "enabled",
           projectOpening: "browser-file",
           attachmentPersistence: "memory",
+          closeCoordination: "browser-beforeunload",
         },
       },
     }),
@@ -40,6 +42,7 @@ test("the browser editing harness declares only the capabilities it exercises", 
       sourceEditing: "enabled",
       projectOpening: "browser-file",
       attachmentPersistence: "memory",
+      closeCoordination: "browser-beforeunload",
     },
   );
 });
@@ -52,6 +55,7 @@ test("an invalid explicit manifest fails closed instead of guessing from APIs", 
           sourceEditing: "enabled",
           projectOpening: "desktop-dialog",
           attachmentPersistence: "unknown",
+          closeCoordination: "electron-handshake",
         },
       },
       projectsApi: {

@@ -1,6 +1,7 @@
 const SOURCE_EDITING = new Set(["enabled", "read-only"]);
 const PROJECT_OPENING = new Set(["desktop-dialog", "browser-file"]);
 const ATTACHMENT_PERSISTENCE = new Set(["bridge", "memory", "none"]);
+const CLOSE_COORDINATION = new Set(["electron-handshake", "browser-beforeunload"]);
 
 function isRecord(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -10,7 +11,8 @@ function isCapabilityManifest(value) {
   return isRecord(value)
     && SOURCE_EDITING.has(value.sourceEditing)
     && PROJECT_OPENING.has(value.projectOpening)
-    && ATTACHMENT_PERSISTENCE.has(value.attachmentPersistence);
+    && ATTACHMENT_PERSISTENCE.has(value.attachmentPersistence)
+    && CLOSE_COORDINATION.has(value.closeCoordination);
 }
 
 function freezeManifest(value) {
@@ -18,6 +20,7 @@ function freezeManifest(value) {
     sourceEditing: value.sourceEditing,
     projectOpening: value.projectOpening,
     attachmentPersistence: value.attachmentPersistence,
+    closeCoordination: value.closeCoordination,
   });
 }
 
@@ -25,12 +28,14 @@ export const BROWSER_RUNTIME_CAPABILITIES = freezeManifest({
   sourceEditing: "read-only",
   projectOpening: "browser-file",
   attachmentPersistence: "none",
+  closeCoordination: "browser-beforeunload",
 });
 
 export const DESKTOP_RUNTIME_CAPABILITIES = freezeManifest({
   sourceEditing: "enabled",
   projectOpening: "desktop-dialog",
   attachmentPersistence: "bridge",
+  closeCoordination: "electron-handshake",
 });
 
 export function resolveRuntimeCapabilities({

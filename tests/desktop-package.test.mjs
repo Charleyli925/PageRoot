@@ -170,6 +170,12 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   );
   assert.match(mainProcess, /APP_CHANNELS\.workspaceRecoveryReady/);
   assert.match(mainProcess, /workspaceRecoveryMailbox\.acknowledgeRendererReady\(\)/);
+  assert.match(
+    mainProcess,
+    /"did-start-navigation"[\s\S]*?isInPlace,\s*isMainFrame[\s\S]*?if \(isInPlace \|\| !isMainFrame\) return;[\s\S]*?workspaceRecoveryMailbox\.beginRendererLoad\(\)/,
+    "only a real main-frame navigation may revoke renderer close readiness",
+  );
+  assert.doesNotMatch(mainProcess, /"did-start-loading"/);
   assert.match(mainProcess, /requestRendererClose/);
   assert.match(mainProcess, /if \(!rendererHasLoaded\)/);
   assert.match(mainProcess, /coordinateApplicationExit/);

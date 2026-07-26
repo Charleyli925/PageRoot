@@ -115,6 +115,7 @@ export async function ensureSourceEditingTestRuntime(page) {
           sourceEditing: "enabled",
           projectOpening: "browser-file",
           attachmentPersistence: "memory",
+          closeCoordination: "browser-beforeunload",
         },
       },
     });

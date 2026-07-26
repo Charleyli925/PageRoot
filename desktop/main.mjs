@@ -1577,10 +1577,14 @@ async function createWindow() {
   mainWindow.webContents.on("will-navigate", (event, url) => {
     if (!isTrustedRendererUrl(url)) event.preventDefault();
   });
-  mainWindow.webContents.on("did-start-loading", () => {
-    rendererHasLoaded = false;
-    workspaceRecoveryMailbox.beginRendererLoad();
-  });
+  mainWindow.webContents.on(
+    "did-start-navigation",
+    (_event, _url, isInPlace, isMainFrame) => {
+      if (isInPlace || !isMainFrame) return;
+      rendererHasLoaded = false;
+      workspaceRecoveryMailbox.beginRendererLoad();
+    },
+  );
   mainWindow.webContents.on("did-finish-load", () => {
     rendererHasLoaded = true;
     scheduleAutomaticUpdateCheck();

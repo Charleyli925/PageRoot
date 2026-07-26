@@ -35,8 +35,10 @@ Bridge route adapters
   weaken the gate to land a feature.
 - Runtime capability decoding has one ingress:
   `app/application/runtime-capabilities.js`. Source editing, project opening
-  and attachment persistence are independent declarations; consumers may not
-  infer all three from the presence of one preload API.
+  attachment persistence and close coordination are independent declarations;
+  consumers may not infer the whole runtime from the presence of one preload
+  API. Electron owns desktop close safety through its acknowledged handshake;
+  `beforeunload` is only the browser fallback.
 
 ## State ownership
 

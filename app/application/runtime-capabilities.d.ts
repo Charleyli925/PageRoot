@@ -2,6 +2,7 @@ export type RuntimeCapabilities = Readonly<{
   sourceEditing: "enabled" | "read-only";
   projectOpening: "desktop-dialog" | "browser-file";
   attachmentPersistence: "bridge" | "memory" | "none";
+  closeCoordination: "electron-handshake" | "browser-beforeunload";
 }>;
 
 export const BROWSER_RUNTIME_CAPABILITIES: RuntimeCapabilities;

@@ -10,10 +10,10 @@
 | Staged comment attachments and references | Draft aggregate attachment repository | managed draft attachment directory plus draft references | composer and Request freeze |
 | AI Request/Attempt/Version transition | Run lifecycle | runtime state, immutable Request/Attempt/Version records | process panel, project list |
 | `PROJECT.md` content and save status | Project-rules session | managed `PROJECT.md` | project panel, Request freeze |
-| Close/switch/submit/history readiness | Drain coordinator | composed owner snapshots; no separate copied state | Electron close handshake and navigation |
+| Close/switch/submit/history readiness and desktop close lifecycle | Drain coordinator plus one renderer close lifecycle | composed owner snapshots and request identity; no copied dirty booleans | Electron close handshake, browser fallback and navigation |
 | Bridge transport, timeouts, error details and unknown outcomes | Typed Bridge client | no durable state | application sessions |
 | Undelivered Bridge-unavailable recovery issue and renderer-listener readiness | Main-process recovery mailbox | in-memory for the current app process | preload handshake, native fallback and Workbench banner |
-| Renderer edit, project-picker and attachment-persistence capabilities | Runtime capability resolver | immutable preload manifest; fail-closed browser default | Workbench composition root |
+| Renderer edit, project-picker, attachment-persistence and close-coordination capabilities | Runtime capability resolver | immutable preload manifest; fail-closed browser default | Workbench composition root |
 | Crash-only renderer recovery records | Recovery store adapter | browser storage, subordinate to Bridge authority | document and draft sessions |
 | Native edit lease, IME/composition and transaction candidate | Native edit session machine | in-memory until SourcePatch acknowledgement | Canvas controller and document session |
 
