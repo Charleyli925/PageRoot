@@ -520,31 +520,23 @@ test("PROJECT.md read failure never becomes editable data and recovers in place"
     });
     await expect(projectRules).toBeEnabled({ timeout: 20_000 });
 
-    await launched.page.evaluate(() => {
-      const originalFetch = window.fetch.bind(window);
-      let rejectNextProjectRulesRead = true;
-      window.fetch = (input, init) => {
-        const url = new URL(
-          typeof input === "string" ? input : input instanceof URL ? input.href : input.url,
-          window.location.href,
-        );
-        if (
-          rejectNextProjectRulesRead
-          && url.pathname === "/file"
-          && url.searchParams.get("path") === "PROJECT.md"
-        ) {
-          rejectNextProjectRulesRead = false;
-          return Promise.resolve(new Response(JSON.stringify({
+    const projectFileRoute = "**/file?**";
+    const rejectProjectRulesRead = async (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get("path") === "PROJECT.md") {
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({
             ok: false,
             error: { message: "测试注入：项目规则暂时不可读。" },
-          }), {
-            status: 503,
-            headers: { "content-type": "application/json" },
-          }));
-        }
-        return originalFetch(input, init);
-      };
-    });
+          }),
+        });
+        return;
+      }
+      await route.continue();
+    };
+    await launched.page.route(projectFileRoute, rejectProjectRulesRead);
 
     await projectRules.click();
     const failure = launched.page.getByRole("alert")
@@ -556,6 +548,7 @@ test("PROJECT.md read failure never becomes editable data and recovers in place"
     await expect(failure.getByRole("button", { name: "重试读取" })).toBeVisible();
     await expect(launched.page.getByRole("button", { name: "返回项目" })).toBeVisible();
 
+    await launched.page.unroute(projectFileRoute, rejectProjectRulesRead);
     await failure.getByRole("button", { name: "重试读取" }).click();
     const editor = launched.page.getByRole("textbox", { name: "项目长期规则" });
     await expect(editor).toBeVisible();
