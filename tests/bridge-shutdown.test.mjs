@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import test from "node:test";
 import {
   BridgeShutdownTimeoutError,
+  createWorkspaceRecoveryMailbox,
   stopBridgeProcessGracefully,
 } from "../desktop/bridge-shutdown.mjs";
 
@@ -22,6 +23,32 @@ class FakeBridgeProcess extends EventEmitter {
     return this.acceptStop;
   }
 }
+
+test("workspace recovery is replayed only after the renderer listener acknowledges readiness", () => {
+  const mailbox = createWorkspaceRecoveryMailbox();
+  const firstIssue = {
+    title: "本地项目资料暂时不可用",
+    message: "请先导出当前编辑。",
+  };
+
+  const beforeReady = mailbox.publish(firstIssue);
+  assert.equal(beforeReady.deliverToRenderer, false);
+  assert.deepEqual(mailbox.acknowledgeRendererReady(), firstIssue);
+
+  const afterReady = mailbox.publish({
+    title: "本地项目资料仍不可用",
+    message: "请重新打开源页。",
+  });
+  assert.equal(afterReady.deliverToRenderer, true);
+
+  mailbox.beginRendererLoad();
+  assert.equal(mailbox.inspect().rendererReady, false);
+  assert.deepEqual(
+    mailbox.acknowledgeRendererReady(),
+    afterReady.issue,
+    "a renderer reload must replay the latest undelivered recovery issue",
+  );
+});
 
 test("graceful Bridge shutdown completes only after the process exit event", async () => {
   const child = new FakeBridgeProcess({ exitOnStop: true });

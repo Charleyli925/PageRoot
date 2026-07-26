@@ -63,16 +63,16 @@ import {
   nativeRuntimePreflight as inspectNativeEditRuntime,
 } from "./native-edit-runtime-preflight";
 import NoticeBar from "./NoticeBar";
+import {
+  EDITOR_STYLE_ATTRIBUTE,
+  FRAME_VERIFICATION_ATTRIBUTE,
+  baseHrefFromSourcePath,
+  disableExecutableMarkup,
+  prepareVerifiedFrameDocument,
+} from "./html-preview-sandbox.js";
 import styles from "./HtmlCanvasEditor.module.css";
 
-const EDITOR_STYLE_ATTRIBUTE = "data-html-canvas-editor-style";
-const INJECTED_BASE_ATTRIBUTE = "data-html-canvas-injected-base";
-const DISABLED_SCRIPT_ATTRIBUTE = "data-html-canvas-disabled-script";
-const ORIGINAL_SCRIPT_TYPE_ATTRIBUTE = "data-html-canvas-original-script-type";
-const DISABLED_REFRESH_ATTRIBUTE = "data-html-canvas-disabled-refresh";
-const FRAME_VERIFICATION_ATTRIBUTE = "data-html-canvas-render-verification";
 const GLOBAL_SELECTION_ATTRIBUTE = "data-html-canvas-global-selected";
-const MISSING_ATTRIBUTE_VALUE = "__html_canvas_missing__";
 
 const EDITOR_DOCUMENT_STYLES = `
   ::selection {
@@ -255,6 +255,8 @@ export type HtmlCanvasEditorHandle = {
   freezeNow: () => HtmlCanvasFreezeSnapshot;
   /** Releases an imperative freeze when the controlled mode is editing. */
   unlockNow: () => boolean;
+  /** Keeps a failed commit explanation beside the canvas instead of escalating it globally. */
+  showCommitBlocked: (reason?: string) => void;
   undo: () => boolean;
   canUndo: () => boolean;
   /** True while source-uncommitted native text or marked text still exists. */
@@ -516,7 +518,7 @@ type EditFeedback = {
   message: string;
   tone: "warning" | "error";
   sticky: boolean;
-  recovery: "comment" | "reload";
+  recovery: "comment" | "reload" | "none";
 };
 
 type EditorHistoryEntry = {
@@ -601,107 +603,6 @@ const NATURALLY_INHERITED_PROPERTIES = new Set([
   "white-space",
   "word-spacing",
 ]);
-
-function escapeAttribute(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/"/g, "&quot;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
-
-function disableExecutableMarkup(source: string): string {
-  return source.replace(/<script\b([^>]*)>/gi, (_openingTag, rawAttributes: string) => {
-    const typePattern = /\s+type\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i;
-    const typeMatch = rawAttributes.match(typePattern);
-    const originalType = typeMatch ? typeMatch[1] ?? typeMatch[2] ?? typeMatch[3] ?? "" : MISSING_ATTRIBUTE_VALUE;
-    const attributesWithoutType = rawAttributes.replace(typePattern, "");
-    return `<script${attributesWithoutType} type="application/x-html-canvas-disabled" ${DISABLED_SCRIPT_ATTRIBUTE}="true" ${ORIGINAL_SCRIPT_TYPE_ATTRIBUTE}="${escapeAttribute(originalType)}">`;
-  });
-}
-
-function doctypeString(doctype: DocumentType | null): string {
-  if (!doctype) return "<!DOCTYPE html>";
-  const publicId = doctype.publicId ? ` PUBLIC "${doctype.publicId}"` : "";
-  const systemId = doctype.systemId
-    ? `${publicId ? "" : " SYSTEM"} "${doctype.systemId}"`
-    : "";
-  return `<!DOCTYPE ${doctype.name}${publicId}${systemId}>`;
-}
-
-function sanitizeDocument(source: string, baseUrl?: string): string {
-  const disabledSource = disableExecutableMarkup(source);
-  if (typeof DOMParser === "undefined") return disabledSource;
-
-  const parsed = new DOMParser().parseFromString(disabledSource, "text/html");
-  parsed.querySelectorAll("meta[http-equiv]").forEach((node) => {
-    const directive = node.getAttribute("http-equiv")?.trim().toLowerCase();
-    if (directive === "refresh") {
-      node.setAttribute(DISABLED_REFRESH_ATTRIBUTE, "true");
-      node.setAttribute("http-equiv", "x-html-canvas-disabled-refresh");
-    }
-  });
-
-  if (baseUrl && !parsed.head.querySelector("base")) {
-    const base = parsed.createElement("base");
-    base.href = baseUrl;
-    base.setAttribute(INJECTED_BASE_ATTRIBUTE, "true");
-    parsed.head.prepend(base);
-  }
-
-  return `${doctypeString(parsed.doctype)}\n${parsed.documentElement.outerHTML}`;
-}
-
-function prepareVerifiedFrameDocument(
-  source: string,
-  verificationToken: string,
-  baseUrl?: string,
-): string {
-  const sanitized = sanitizeDocument(source, baseUrl);
-  if (typeof DOMParser === "undefined") return sanitized;
-  const parsed = new DOMParser().parseFromString(sanitized, "text/html");
-  parsed.head.querySelectorAll(`style[${EDITOR_STYLE_ATTRIBUTE}]`).forEach((node) => node.remove());
-  const editorStyle = parsed.createElement("style");
-  editorStyle.setAttribute(EDITOR_STYLE_ATTRIBUTE, "true");
-  editorStyle.textContent = EDITOR_DOCUMENT_STYLES;
-  parsed.head.prepend(editorStyle);
-  const marker = parsed.createElement("meta");
-  marker.setAttribute(FRAME_VERIFICATION_ATTRIBUTE, verificationToken);
-  marker.setAttribute("content", verificationToken);
-  parsed.head.prepend(marker);
-  return `${doctypeString(parsed.doctype)}\n${parsed.documentElement.outerHTML}`;
-}
-
-function baseHrefFromSourcePath(sourcePath?: string): string | undefined {
-  if (!sourcePath) return undefined;
-  const trimmedPath = sourcePath.trim();
-  if (!trimmedPath) return undefined;
-
-  try {
-    if (/^[a-z][a-z\d+.-]*:/i.test(trimmedPath)) {
-      const sourceUrl = new URL(trimmedPath);
-      if (!sourceUrl.pathname.endsWith("/")) {
-        sourceUrl.pathname = sourceUrl.pathname.slice(0, sourceUrl.pathname.lastIndexOf("/") + 1);
-      }
-      sourceUrl.search = "";
-      sourceUrl.hash = "";
-      return sourceUrl.href;
-    }
-  } catch {
-    return undefined;
-  }
-
-  const normalizedPath = trimmedPath.replace(/\\/g, "/");
-  if (!normalizedPath.startsWith("/")) return undefined;
-  const directoryPath = normalizedPath.endsWith("/")
-    ? normalizedPath
-    : normalizedPath.slice(0, normalizedPath.lastIndexOf("/") + 1);
-  const encodedPath = directoryPath
-    .split("/")
-    .map((segment) => encodeURIComponent(segment))
-    .join("/");
-  return `file://${encodedPath}`;
-}
 
 function escapeIdentifier(documentNode: Document, value: string): string {
   const cssApi = documentNode.defaultView?.CSS;
@@ -2295,7 +2196,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       });
       onEditBlockedRef.current?.(message);
     }
-    const prepared = prepareVerifiedFrameDocument(instrumentedSource, token, resolvedBaseHref);
+    const prepared = prepareVerifiedFrameDocument(instrumentedSource, token, {
+      baseUrl: resolvedBaseHref,
+      editorStyles: EDITOR_DOCUMENT_STYLES,
+    });
     frameSourceHtmlRef.current = source;
     expectedFrameTokenRef.current = token;
     expectedFrameHtmlRef.current = prepared;
@@ -2987,8 +2891,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       "data-edit-block-detail",
       rawDetail.slice(0, 240),
     );
-    let title = "请重新选择后再试";
-    let message = "你可以继续浏览和选择文字，也可以添加评论说明要怎么改。";
+    let title = "这处内容暂时不能直接编辑";
+    let message = "页面内容没有改变。你仍可以选择文字，或添加评论说明要怎么改。";
     if (/两种样式的边界|文字属于哪一侧|样式内一个字的位置/iu.test(rawDetail)) {
       title = "请把光标移入文字内部";
       message = "这里正好是两种文字样式的边界，直接输入可能跑到错误一侧。请把光标移到样式内一个字的位置后输入，或添加评论。";
@@ -3003,12 +2907,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     } else if (/transform|zoom|多栏|flex|grid|布局|盒子|光标错位|间距变化/iu.test(rawDetail)) {
       title = "这里暂时不能直接改字";
       message = "这段文字的排版比较特殊。你仍可以选中文字调整样式，或添加评论交给 AI 处理。";
-    } else if (/多行粘贴/iu.test(rawDetail)) {
-      title = "这里暂时不能粘贴多行文字";
-      message = "可以粘贴单行文字；如果需要加入多行内容，请添加评论交给 AI 处理。";
-    } else if (/换行|新增段落/iu.test(rawDetail)) {
-      title = "这里暂时不能新增换行";
-      message = "可以继续修改现有文字；如果需要拆分段落，请添加评论交给 AI 处理。";
     } else if (/图片|图标|嵌入组件|结构边界|删除键|退格/iu.test(rawDetail)) {
       title = "这处内容不能这样删除";
       message = "请只修改文字，或添加评论说明要删除的图片、图标或组件。";
@@ -5463,6 +5361,17 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     return true;
   }, [controlledInteractionLocked, enableReorder, readOnly, updateOverlayPosition]);
 
+  const showCommitBlocked = useCallback((reason?: string) => {
+    setEditFeedback({
+      title: "当前文字还在处理中",
+      message: reason
+        || "请点回文字完成输入；已输入的内容仍保留在画布中。",
+      tone: "warning",
+      sticky: false,
+      recovery: "none",
+    });
+  }, []);
+
   const api = useMemo<HtmlCanvasEditorHandle>(
     () => ({
       getSourceHtml: () => frameSourceHtmlRef.current,
@@ -5472,6 +5381,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       commitPendingEdit,
       freezeNow,
       unlockNow,
+      showCommitBlocked,
       undo,
       canUndo: () => Boolean(
         undoStackRef.current.length > 0
@@ -5501,6 +5411,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       moveSelected,
       redo,
       selectTarget,
+      showCommitBlocked,
       startEditing,
       undo,
       unlockNow,
@@ -6045,7 +5956,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       const documentNode = iframe.contentDocument;
       const expectedFrameHtml = expectedFrameHtmlRef.current;
       const expectedToken = expectedFrameTokenRef.current;
-      const marker = documentNode?.head.querySelector<HTMLMetaElement>(
+      const marker = documentNode?.head?.querySelector<HTMLMetaElement>(
         `meta[${FRAME_VERIFICATION_ATTRIBUTE}]`,
       );
       if (
@@ -6362,6 +6273,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       onRequestReload?.();
       return;
     }
+    if (recovery !== "comment") return;
     const target = selectedSourceSelectionRef.current;
     if (target) {
       onRequestCommentRef.current?.(target);
@@ -6371,7 +6283,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   }, [editFeedback?.recovery, onRequestReload, requestGlobalComment]);
   const editFeedbackActionAvailable = editFeedback?.recovery === "reload"
     ? Boolean(onRequestReload)
-    : Boolean(onRequestComment);
+    : editFeedback?.recovery === "comment" && Boolean(onRequestComment);
 
   return (
     <div
@@ -6409,7 +6321,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           title={editFeedback.title}
           message={editFeedback.message}
           tone={editFeedback.tone}
-          actionLabel={editFeedback.recovery === "reload" ? reloadActionLabel : "添加评论"}
+          actionLabel={editFeedback.recovery === "reload"
+            ? reloadActionLabel
+            : editFeedback.recovery === "comment"
+              ? "添加评论"
+              : undefined}
           onAction={editFeedbackActionAvailable ? handleEditFeedbackAction : undefined}
           onDismiss={() => setEditFeedback(null)}
           onPauseChange={setEditFeedbackPaused}
@@ -6448,7 +6364,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           title={marker.label || "查看已有评论"}
           onClick={() => {
             if (lockedRef.current) return;
-            selectTarget(marker.selection, { showToolbar: true });
+            // The marker was clicked at the user's current Canvas position.
+            // Keep that viewport stable; navigation from the comment rail can
+            // still opt into revealing the paired target.
+            selectTarget(marker.selection, { reveal: false, showToolbar: true });
           }}
         >
           <span className={styles.commentGlyph} aria-hidden="true">评</span>

@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import {
+  caseSelector,
   fixtureBuffer,
   loadFixture,
 } from "./pageroot-driver.mjs";
@@ -97,5 +98,72 @@ test.describe("notification recovery paths", () => {
 
     await expect(attachments).toHaveAttribute("aria-label", "10 个附件");
     await expect(attachments).toContainText("overflow.txt");
+  });
+
+  test("one unsaved comment blocks a second target and Canvas selection keeps its scroll", async ({
+    page,
+  }) => {
+    const { frame } = await openFixture(page);
+    const toolbar = page.getByRole("toolbar", { name: /编辑/u });
+    const commentButton = toolbar.getByRole("button", { name: /留评论/u });
+    const firstTarget = frame.locator(caseSelector("list-item"));
+    const secondTarget = frame.locator(caseSelector("flex-copy"));
+    const firstComment = "先保存这一条，再继续下一处。";
+
+    await firstTarget.click();
+    await commentButton.click();
+    const composer = page.getByRole("region", { name: "添加评论" });
+    await composer.getByRole("textbox", { name: "评论内容" }).fill(firstComment);
+    await composer.getByRole("button", { name: "关闭评论编辑器" }).click();
+
+    const recoveryCard = page.getByRole("region", { name: "未保存评论" });
+    await expect(recoveryCard).toHaveCount(1);
+    await secondTarget.click();
+    await commentButton.click();
+
+    const notice = page.locator(".toast.show");
+    await expect(notice).toContainText("上一条评论还未保存");
+    await expect(notice).toContainText(
+      "请先点击“评论”保存；保存后仍可修改，再为其他内容添加评论。",
+    );
+    await expect(composer).toHaveCount(0);
+    await expect(recoveryCard).toHaveCount(1);
+
+    await notice.getByRole("button", { name: "继续填写" }).click();
+    await expect(composer.getByRole("textbox", { name: "评论内容" }))
+      .toHaveValue(firstComment);
+    await composer.getByRole("button", { name: "评论", exact: true }).click();
+    await expect(page.locator(".comment-card").filter({ hasText: firstComment }))
+      .toBeVisible();
+
+    await secondTarget.click();
+    await commentButton.click();
+    await expect(composer.getByRole("textbox", { name: "评论内容" })).toHaveValue("");
+    await composer.getByRole("button", { name: "关闭评论编辑器" }).click();
+
+    await firstTarget.scrollIntoViewIfNeeded();
+    const stage = page.locator(".review-scroll-stage");
+    const canvasMarker = page.getByTestId("html-canvas-editor")
+      .getByRole("button", {
+        name: "列表项 · 列表项中的文字保持项目符号和缩进。",
+        exact: true,
+      });
+    await expect(canvasMarker).toBeVisible();
+    await expect.poll(() => stage.evaluate((element) => element.scrollTop))
+      .toBeGreaterThan(0);
+    await page.waitForTimeout(350);
+    const markerBox = await canvasMarker.boundingBox();
+    expect(markerBox).not.toBeNull();
+    const beforeClick = await stage.evaluate((element) => element.scrollTop);
+    await page.mouse.click(
+      markerBox.x + markerBox.width / 2,
+      markerBox.y + markerBox.height / 2,
+    );
+    await page.waitForTimeout(500);
+    const afterClick = await stage.evaluate((element) => element.scrollTop);
+
+    expect(Math.abs(afterClick - beforeClick)).toBeLessThanOrEqual(1);
+    await expect(page.locator(".comment-card").filter({ hasText: firstComment }))
+      .toHaveAttribute("data-focused", "true");
   });
 });

@@ -10,6 +10,45 @@ export class BridgeShutdownTimeoutError extends Error {
   }
 }
 
+function normalizedWorkspaceIssue(issue) {
+  return Object.freeze({
+    title: typeof issue?.title === "string" && issue.title.trim()
+      ? issue.title.trim()
+      : "本地项目资料暂时不可用",
+    message: typeof issue?.message === "string" && issue.message.trim()
+      ? issue.message.trim()
+      : "当前页面内容仍保留，可以导出后重新打开源页。",
+  });
+}
+
+export function createWorkspaceRecoveryMailbox() {
+  let rendererReady = false;
+  let pendingIssue = null;
+
+  return Object.freeze({
+    beginRendererLoad() {
+      rendererReady = false;
+    },
+    publish(issue) {
+      pendingIssue = normalizedWorkspaceIssue(issue);
+      return Object.freeze({
+        issue: pendingIssue,
+        deliverToRenderer: rendererReady,
+      });
+    },
+    acknowledgeRendererReady() {
+      rendererReady = true;
+      return pendingIssue;
+    },
+    inspect() {
+      return Object.freeze({
+        rendererReady,
+        pendingIssue,
+      });
+    },
+  });
+}
+
 function bridgeProcessError(_type, _location, report) {
   const detail = typeof report === "string" && report.trim()
     ? `：${report.trim()}`

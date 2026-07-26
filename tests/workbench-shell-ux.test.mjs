@@ -11,6 +11,8 @@ const [
   sampleHtml,
   interactionPreview,
   interactionPreviewStyles,
+  previewSandbox,
+  bridgeClient,
 ] = await Promise.all([
   readFile(new URL("../app/workbench.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
@@ -20,6 +22,8 @@ const [
   readFile(new URL("../desktop/welcome-project-content.mjs", import.meta.url), "utf8"),
   readFile(new URL("../app/components/HtmlInteractionPreview.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/components/HtmlInteractionPreview.module.css", import.meta.url), "utf8"),
+  readFile(new URL("../app/components/html-preview-sandbox.js", import.meta.url), "utf8"),
+  readFile(new URL("../app/application/bridge-client.js", import.meta.url), "utf8"),
 ]);
 
 test("startup welcome HTML is provisioned as a normal registered project", () => {
@@ -57,7 +61,8 @@ test("startup welcome HTML is provisioned as a normal registered project", () =>
     sampleHtml,
     /src="\.\/\$\{WELCOME_LOGO_RELATIVE_PATH\}"/,
   );
-  assert.match(sampleHtml, /它是源页建立的本地 HTML/);
+  assert.match(sampleHtml, /在桌面版中，这张欢迎页可以直接体验编辑、选择和评论/);
+  assert.match(sampleHtml, /桌面版会把它建立为本地 HTML/);
   assert.match(sampleHtml, /修改会自动保存到「欢迎来到源页\.html」/);
   assert.match(sampleHtml, /从顶部「项目」打开其他 HTML/);
   assert.doesNotMatch(sampleHtml, /尚未绑定本地文件/);
@@ -98,7 +103,10 @@ test("the right-side project panel keeps file actions concise and safe", () => {
   assert.doesNotMatch(workbench, />新建 HTML</);
   assert.doesNotMatch(workbench, /api\.newHtml/);
   assert.doesNotMatch(workbench, /className="project-switcher"|className="project-menu"/);
-  assert.match(workbench, /api\.showInFolder\(activeSourcePath\)/);
+  assert.match(
+    workbench,
+    /const showInFolder = window\.htmlAIProjects\?\.showInFolder[\s\S]*?withOneAutomaticRetry\(\(\) => showInFolder\(activeSourcePath\)\)/,
+  );
   assert.match(workbench, /formatProjectTimestamp\(project\.lastOpenedAt\)/);
   assert.doesNotMatch(workbench, /formatRecentProjectTimestamp/);
   assert.match(styles, /\.side-drawer\s*\{[\s\S]*?width:\s*min\(410px, calc\(100vw - 24px\)\)/);
@@ -174,8 +182,13 @@ test("editing and interactive preview are separate canvas modes", () => {
   assert.match(workbench, /className="canvas-mode-switch"[\s\S]*?编辑[\s\S]*?预览/);
   assert.match(
     workbench,
-    /aria-pressed=\{canvasMode === "preview"\}[\s\S]*?disabled=\{interactionLocked\}/,
+    /aria-pressed=\{canvasMode === "preview"\}[\s\S]*?disabled=\{!browserPreviewOnly && interactionLocked\}/,
   );
+  assert.match(
+    workbench,
+    /aria-pressed=\{canvasMode === "edit"\}[\s\S]*?disabled=\{browserPreviewOnly \|\| runInProgress \|\| viewMode === "history"\}/,
+  );
+  assert.match(workbench, /浏览器预览 · 只读[\s\S]*?操作不会保存/);
   const previewModeStart = workbench.indexOf('aria-pressed={canvasMode === "preview"}');
   const previewModeEnd = workbench.indexOf("</button>", previewModeStart);
   const previewModeControl = workbench.slice(
@@ -206,7 +219,10 @@ test("editing and interactive preview are separate canvas modes", () => {
   );
   assert.match(workbench, /\{canvasMode === "edit" \? \(\s*<aside[\s\S]*?className="comments-panel comment-rail"/);
   assert.match(workbench, /setCanvasMode\("edit"\);[\s\S]*?setDrawer\("history"\)/);
-  assert.match(workbench, /const applyProject[\s\S]*?setViewMode\("current"\);\s*setCanvasMode\("edit"\)/);
+  assert.match(
+    workbench,
+    /const applyProject[\s\S]*?setViewMode\("current"\);[\s\S]*?setCanvasMode\([\s\S]*?runtimeCapabilitiesRef\.current\.sourceEditing !== "enabled"[\s\S]*?\? "preview"[\s\S]*?: "edit"/,
+  );
   assert.match(styles, /\.workbench\[data-canvas-mode="preview"\]\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\)/);
   assert.match(styles, /\.workbench\[data-canvas-mode="preview"\] \.canvas-column\s*\{[\s\S]*?grid-column:\s*1 \/ -1/);
 
@@ -227,7 +243,7 @@ test("editing and interactive preview are separate canvas modes", () => {
 
   assert.match(canvas, /sandbox="allow-same-origin"/);
   assert.doesNotMatch(canvas, /sandbox="[^"]*allow-scripts/);
-  assert.match(canvas, /type="application\/x-html-canvas-disabled"/);
+  assert.match(previewSandbox, /type="application\/x-html-canvas-disabled"/);
 });
 
 test("workbench transitions fail closed when a native DOM edit cannot commit or freeze", () => {
@@ -257,7 +273,10 @@ test("workbench transitions fail closed when a native DOM edit cannot commit or 
     "const switchCutoffRevision = editRevisionRef.current;",
     switchFenceGuard,
   );
-  const switchFlush = projectSwitch.indexOf("flushAutosave(switchCutoffRevision)", switchCutoff);
+  const switchDrain = projectSwitch.indexOf(
+    'drainCoordinatorRef.current.drain("switch"',
+    switchCutoff,
+  );
   assert.match(
     projectSwitch.slice(switchFence, switchFenceGuard),
     /resumeEditing: false,[\s\S]*?trigger: "project-switch"/u,
@@ -266,7 +285,7 @@ test("workbench transitions fail closed when a native DOM edit cannot commit or 
     switchFence >= 0
       && switchFenceGuard > switchFence
       && switchCutoff > switchFenceGuard
-      && switchFlush > switchCutoff,
+      && switchDrain > switchCutoff,
     "project switching must fail closed at a History Fence before persisting its cutoff revision",
   );
   assert.match(
@@ -367,11 +386,36 @@ test("header prioritizes the filename and keeps the approved action order", () =
     workbench.indexOf("</header>", headerStart),
   );
   assert.match(header, /className="window-file"/);
+  assert.match(header, /className="window-file-icon"[\s\S]*?<FileHtmlIcon/);
   assert.match(header, /className="save-status"/);
+  assert.match(
+    workbench,
+    /const canShowCurrentFileInFolder = Boolean\([\s\S]*?sourcePath[\s\S]*?window\.htmlAIProjects\?\.showInFolder/,
+  );
+  assert.match(
+    header,
+    /className="file-version-label"[\s\S]*?canShowCurrentFileInFolder[\s\S]*?className="window-file-folder-action"[\s\S]*?onClick=\{\(\) => void showProjectInFolder\(\)\}[\s\S]*?>\s*在文件夹中打开\s*<\/button>[\s\S]*?className="save-status"/,
+  );
   assert.doesNotMatch(header, /brand-logo\.png|className="brand"|className="update-badge"/);
   assert.match(
     header,
     /updateAvailable[\s\S]*?className="header-update-badge"[\s\S]*?>\s*Update\s*</,
+  );
+  assert.match(
+    styles,
+    /\.window-file-copy > strong\s*\{[\s\S]*?font-size:\s*17px/,
+  );
+  assert.match(
+    styles,
+    /\.file-meta\s*\{[\s\S]*?font-style:\s*italic/,
+  );
+  assert.match(
+    styles,
+    /\.file-version-label,\s*\.window-file-folder-action\s*\{[\s\S]*?padding:\s*2px 7px[\s\S]*?border-radius:\s*999px[\s\S]*?background:\s*#f0f1f4[\s\S]*?color:\s*#666975[\s\S]*?font-weight:\s*650/,
+  );
+  assert.match(
+    styles,
+    /\.window-file-folder-action\s*\{[\s\S]*?border:\s*0[\s\S]*?text-decoration:\s*none/,
   );
   const editPreview = header.indexOf('className="canvas-mode-switch"');
   const project = header.indexOf('className="project-button"');
@@ -404,7 +448,8 @@ test("QoderWork handoff exposes a truthful process board and manual open action"
   assert.match(workbench, /版本与文件完整性/);
   assert.doesNotMatch(workbench, /身份、Hash 与文件完整性/);
   assert.match(workbench, /范围与质量校验/);
-  assert.match(workbench, /无视本校验，继续/);
+  assert.match(workbench, /已记录评论范围外的额外变化/);
+  assert.doesNotMatch(workbench, /采用这些额外变化|AI 还修改了评论范围外的内容/);
   assert.match(workbench, /打开最新版/);
   const sendToQoderStart = workbench.indexOf("const sendToQoderWork = useCallback");
   const sendToQoderEnd = workbench.indexOf("const revealActiveRunInFinder", sendToQoderStart);
@@ -441,6 +486,32 @@ test("QoderWork handoff exposes a truthful process board and manual open action"
   assert.ok(cancel >= 0 && preview > cancel && copy > preview);
   assert.match(footer, /activeRun\.status === "ready-to-open"[\s\S]*?打开最新版/);
   assert.match(workbench, /正在预览已发送 HTML[\s\S]*?返回等待处理/);
+  assert.match(workbench, /const PREVIEW_NAVIGATION_AUTO_COLLAPSE_MS = 3_500/);
+  assert.equal(
+    [...workbench.matchAll(/<PreviewNavigationBanner/g)].length,
+    2,
+  );
+  assert.match(
+    workbench,
+    /onMouseMove=\{\(\) => \{[\s\S]*?if \(collapsed\) setCollapsed\(false\)/,
+  );
+  assert.match(
+    workbench,
+    /data-handoff-preview=\{runInProgress && handoffPreviewOpen \? "true" : undefined\}/,
+  );
+  assert.match(
+    styles,
+    /\[data-handoff-preview="true"\] > \.review-scroll-stage\s*\{[\s\S]*?filter:\s*none;[\s\S]*?opacity:\s*1;/,
+  );
+  assert.match(
+    styles,
+    /\.preview-navigation-banner\[data-collapsed="true"\]\s*\{[\s\S]*?translateY\(-100%\)/,
+  );
+  assert.match(styles, /\.preview-banner-reveal:focus-visible/);
+  assert.match(
+    styles,
+    /@media \(prefers-reduced-motion: reduce\)\s*\{[\s\S]*?\.preview-navigation-banner/,
+  );
   const processingHeaderStart = workbench.indexOf(
     '<header className="drawer-header processing-header">',
   );
@@ -460,11 +531,21 @@ test("QoderWork handoff exposes a truthful process board and manual open action"
 });
 
 test("processing keeps its decision surface dismissible and project navigation available", () => {
+  const recoveredRunStart = workbench.indexOf(
+    "if (recoveredRun && isLockedLifecycle(recoveredRun.status))",
+  );
+  const recoveredRunEnd = workbench.indexOf("} else {", recoveredRunStart);
+  const recoveredRun = workbench.slice(recoveredRunStart, recoveredRunEnd);
+  assert.ok(recoveredRunStart >= 0 && recoveredRunEnd > recoveredRunStart);
+  assert.match(
+    recoveredRun,
+    /projectHydratingRef\.current[\s\S]*?setHandoffPreviewOpen\(false\)[\s\S]*?setCanvasMode\("edit"\)[\s\S]*?setDrawer\("handoff"\)/,
+  );
   assert.match(
     workbench,
-    /className="project-button"[\s\S]*?disabled=\{projectHydrating \|\| viewTransitioning\}/,
+    /className="project-button"[\s\S]*?disabled=\{projectHydrating \|\| viewTransitioning \|\| attachmentUploadCount > 0\}/,
   );
-  assert.match(workbench, /aria-pressed=\{canvasMode === "edit"\}[\s\S]*?disabled=\{runInProgress \|\| viewMode === "history"\}/);
+  assert.match(workbench, /aria-pressed=\{canvasMode === "edit"\}[\s\S]*?disabled=\{browserPreviewOnly \|\| runInProgress \|\| viewMode === "history"\}/);
   assert.match(workbench, /className="global-comment-button"[\s\S]*?disabled=\{interactionLocked \|\| canvasMode !== "edit"\}/);
   assert.match(styles, /\.drawer-overlay\.show\[data-drawer="handoff"\]\s*\{[\s\S]*?pointer-events:\s*none/);
   assert.doesNotMatch(workbench, /aria-modal=\{drawer === "handoff"/);
@@ -497,7 +578,10 @@ test("header keeps persistence state concise without a redundant history suffix"
   assert.doesNotMatch(workbench, /currentIdentity/);
   assert.match(workbench, /className="save-status"/);
   assert.match(workbench, /\{viewMode === "history"/);
-  assert.match(workbench, /\{persistState === "idle" \? "已安全保存" : persistLabel\}/);
+  assert.match(
+    workbench,
+    /browserPreviewOnly[\s\S]*?"操作不会保存"[\s\S]*?persistState === "idle"[\s\S]*?"已安全保存"[\s\S]*?: persistLabel/,
+  );
 });
 
 test("first project registration is part of the recoverable autosave transaction", () => {
@@ -511,8 +595,14 @@ test("first project registration is part of the recoverable autosave transaction
   const transactionCatch = flush.indexOf("} catch (cause) {", registration);
   assert.ok(writing >= 0 && transactionTry > writing);
   assert.ok(registration > transactionTry && transactionCatch > registration);
-  assert.match(flush, /\/autosave`[\s\S]*?BRIDGE_WRITE_TIMEOUT_MS/);
-  assert.match(workbench, /\/project\/ensure`[\s\S]*?BRIDGE_WRITE_TIMEOUT_MS/);
+  assert.match(flush, /bridgeClient\.autosave\(/);
+  assert.match(workbench, /bridgeClient\.ensureProject\(/);
+  assert.match(bridgeClient, /"\/autosave"/);
+  assert.match(bridgeClient, /"\/project\/ensure"/);
+  assert.match(
+    bridgeClient,
+    /const command = \([\s\S]*?timeoutMs = DEFAULT_WRITE_TIMEOUT_MS/,
+  );
   const recovery = flush.slice(transactionCatch);
   assert.match(recovery, /pendingWriteRef\.current = recoveryWrite/);
   assert.match(
@@ -551,7 +641,7 @@ test("AI submission and run operations remain isolated by project and run identi
   );
   assert.match(workbench, /qoderHandoffStatesRef\s*=\s*useRef<Map<string, ProjectQoderHandoffState>>/);
   assert.match(workbench, /activatingRunsRef = useRef<Set<string>>/);
-  assert.match(workbench, /waivingRunsRef = useRef<Set<string>>/);
+  assert.doesNotMatch(workbench, /waivingRunsRef|\/validation\/waive/);
   assert.match(workbench, /cancellingRunsRef = useRef<Set<string>>/);
   assert.match(
     workbench,
@@ -612,7 +702,7 @@ test("history opens concise immutable versions in the canvas with their comments
   );
   assert.match(
     workbench,
-    /const revealVersionInFinder = useCallback[\s\S]*?await api\.revealVersionFile\(\{[\s\S]*?versionId: version\.id/,
+    /const revealVersionInFinder = useCallback[\s\S]*?withOneAutomaticRetry\(\(\) => revealVersionFile\(\{[\s\S]*?versionId: version\.id/,
   );
   assert.match(
     workbench,
@@ -620,13 +710,7 @@ test("history opens concise immutable versions in the canvas with their comments
   );
   assert.match(styles, /\.version-list\s*\{[\s\S]*?border-radius:\s*15px/);
   assert.match(styles, /\.version-row\s*\{[\s\S]*?grid-template-columns:\s*42px minmax\(0, 1fr\) auto 14px/);
-  const restoreStart = workbench.indexOf("const restoreVersion = useCallback");
-  const restoreEnd = workbench.indexOf("const persistLabel =", restoreStart);
-  assert.ok(restoreStart >= 0 && restoreEnd > restoreStart);
-  assert.match(
-    workbench.slice(restoreStart, restoreEnd),
-    /auditPendingRef\.current = \[\];\s*undoDraftFoldsRef\.current\.clear\(\);\s*redoDraftFoldsRef\.current\.clear\(\);\s*changeEventsRef\.current = \[\];\s*setChangeEvents\(\[\]\);/,
-  );
+  assert.doesNotMatch(workbench, /const restoreVersion|\/restore|设为当前 HTML/);
 });
 
 test("AI completion adopts the generated semantic file before editing resumes", () => {
@@ -690,16 +774,18 @@ test("AI completion adopts the generated semantic file before editing resumes", 
 test("project panel keeps actions clear without technical paths in the header", () => {
   assert.match(workbench, /className="project-button"[\s\S]*?项目/);
   assert.match(workbench, /const closeFileView = useCallback/);
-  assert.match(workbench, /if \(!closeFileView\(\)\) return;[\s\S]*?setDrawer\("files"\)/);
+  assert.match(workbench, /if \(!await closeFileView\(\)\) return;[\s\S]*?setDrawer\("files"\)/);
   assert.match(workbench, /className="current-project-card"/);
   assert.match(workbench, /导出 HTML 副本/);
   assert.match(workbench, />打开本地 HTML</);
   assert.match(workbench, /项目记录文件夹/);
   assert.match(workbench, /查看每轮要求、AI 返回与历史文件/);
-  assert.match(workbench, /BRIDGE_URL\}\/open-folder/);
+  assert.match(workbench, /bridgeClient\.openFolder/);
+  assert.match(bridgeClient, /"\/open-folder"/);
   assert.match(workbench, /以后每次 AI 修改都会读取/);
-  assert.match(workbench, /保存只影响后续任务，不会修改当前 HTML/);
-  assert.match(workbench, /项目规则还有未保存修改/);
+  assert.match(workbench, /规则只影响后续任务，不会修改当前 HTML/);
+  assert.match(workbench, /修改会自动保存/);
+  assert.doesNotMatch(workbench, /项目规则还有未保存修改/);
   assert.match(workbench, /<details[\s\S]*?className="project-advanced"/);
   const headerStart = workbench.indexOf('<header className="workbench-header">');
   const header = workbench.slice(
@@ -715,7 +801,8 @@ test("project panel keeps actions clear without technical paths in the header", 
 });
 
 test("user-opened HTML stays lazily registered until a real project action", () => {
-  assert.match(workbench, /BRIDGE_URL\}\/project\/ensure/);
+  assert.match(workbench, /bridgeClient\.ensureProject/);
+  assert.match(bridgeClient, /"\/project\/ensure"/);
   assert.match(
     workbench,
     /const ensureProjectRegistered = useCallback/,
@@ -726,15 +813,23 @@ test("user-opened HTML stays lazily registered until a real project action", () 
   );
   assert.match(
     workbench,
+    /draftSessionRef\.current\.replaceAuthority\([\s\S]*?registeredContext[\s\S]*?authoritativeDraftRevision/,
+  );
+  assert.match(
+    workbench,
+    /!draftSessionRef\.current\.isActive\(context\)[\s\S]*?ensureProjectRegistered/,
+  );
+  assert.match(
+    workbench,
     /const generateRequest = useCallback[\s\S]*?await ensureProjectRegistered\(\)/,
   );
   assert.match(
     workbench,
-    /let activeComments = commentsRef\.current\.filter\(commentHasContent\)[\s\S]*?await ensureProjectRegistered\(\)[\s\S]*?activeComments = commentsRef\.current\.filter\(commentHasContent\)/,
+    /let activeComments = normalizeCurrentGlobalComments\(\)[\s\S]*?await ensureProjectRegistered\(\)[\s\S]*?activeComments = normalizeCurrentGlobalComments\(\)/,
   );
   assert.match(
     workbench,
-    /const flushed = await flushAutosave\(freezeCutoffRevision\)[\s\S]*?const persistedComments = commentsRef\.current\.filter\(commentHasContent\)[\s\S]*?submissionContext\.comments = persistedComments\.map[\s\S]*?submissionContext\.changeEvents = changeEventsRef\.current\.map/,
+    /const drained = await drainCoordinatorRef\.current\.drain\("submit"[\s\S]*?const persistedComments = commentsRef\.current\.filter\(commentHasContent\)[\s\S]*?submissionContext\.comments = persistedComments\.map[\s\S]*?submissionContext\.changeEvents = changeEventsRef\.current\.map/,
   );
   assert.match(
     workbench,
@@ -768,7 +863,12 @@ test("comment composer is explicit, transient and horizontally contained", () =>
   assert.match(workbench, /beginTargetRelink\("__composer"\)/);
   assert.match(workbench, /评论和附件仍保留，重新关联后即可发送/);
   assert.match(workbench, /recoveredDraftTarget\.id !== target\.id/);
+  assert.match(workbench, /上一条评论还未保存/);
+  assert.match(workbench, /请先点击“评论”保存；保存后仍可修改/);
+  assert.match(workbench, /const resumeCurrentComposer = useCallback/);
+  assert.doesNotMatch(workbench, /saved-comment-drafts|review-comment-drafts/);
   assert.match(workbench, /const activeCommentCount = activeCommentItems\.length/);
+  assert.match(workbench, /const pendingSendItemCount = activeCommentCount;/);
   assert.match(workbench, />\s*评论\s*<\/button>/);
   assert.doesNotMatch(workbench, />\s*加入本轮\s*<\/button>|⌘ Enter 添加/);
   assert.match(workbench, /onClick=\{closeCommentComposer\}/);
@@ -805,6 +905,12 @@ test("comment composer is explicit, transient and horizontally contained", () =>
   assert.match(workbench, /const focusKey = composerOpen && draftTarget \? "__composer" : focusedCommentId/);
   assert.match(workbench, /deferredItems\.unshift\(item\)/);
   assert.match(workbench, /queueReviewPairReveal\(target, "__composer"\)/);
+  const canvasSelectionHandler = workbench.slice(
+    workbench.indexOf("const handleCanvasSelection = useCallback"),
+    workbench.indexOf("const readWorkspaceFile = useCallback"),
+  );
+  assert.match(canvasSelectionHandler, /updateFocusedComment\(nextComment\.commentId\)/);
+  assert.doesNotMatch(canvasSelectionHandler, /queueReviewPairReveal|queueReviewCommentFocus/);
   assert.match(workbench, /data-focused=\{focusedCommentId === comment\.commentId/);
   assert.match(workbench, /aria-current=\{focusedCommentId === comment\.commentId \? "location"/);
   assert.match(

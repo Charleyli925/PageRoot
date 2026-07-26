@@ -284,7 +284,7 @@ export const DEFAULT_PROJECT_HTML = `<!doctype html>
       </section>
 
       <aside class="notice">
-        <div><strong>这张欢迎页可以直接体验编辑、选择和评论。</strong><span>它是源页建立的本地 HTML；你的修改会自动保存到「欢迎来到源页.html」，AI 新版也会进入独立版本历史。</span></div>
+        <div><strong>在桌面版中，这张欢迎页可以直接体验编辑、选择和评论。</strong><span>桌面版会把它建立为本地 HTML；修改会自动保存到「欢迎来到源页.html」，AI 新版也会进入独立版本历史。</span></div>
         <em>从顶部「项目」打开其他 HTML</em>
       </aside>
     </div>

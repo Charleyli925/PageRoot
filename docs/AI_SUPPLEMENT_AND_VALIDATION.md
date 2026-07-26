@@ -28,7 +28,7 @@
 - 目标身份失联/歧义、管理元信息和脚本越界等安全问题；
 - 事务、工作副本与版本完整性。
 
-有效补充明确写出范围外文字、属性或行内样式的 before/after 时，校验器可以把对应差异记为 supplement 授权；未被原话精确证明的变化不随之放宽。before 证据还必须在冻结 HTML 中解析到唯一语义位置；相同值重复出现时，只能用 `targetDescription` 在包含该值的局部源码上下文中唯一定位，否则失败关闭。一个封存 supplement 记录最多授权一个差异，新增位置也不能只凭 output 中的新值获得授权。范围联动、样式和普通结构变化属于软校验。软校验失败时右栏停在“需要你决定”，用户可以点击“无视本校验，继续”。系统把决定、具体代码、原因和时间写进 `validation-review.json`，并且只对当前不可变 scope report 生效。
+有效补充明确写出范围外文字、属性或行内样式的 before/after 时，校验器可以把对应差异记为 supplement 授权；未被原话精确证明的变化不随之放宽。before 证据还必须在冻结 HTML 中解析到唯一语义位置；相同值重复出现时，只能用 `targetDescription` 在包含该值的局部源码上下文中唯一定位，否则失败关闭。一个封存 supplement 记录最多授权一个差异，新增位置也不能只凭 output 中的新值获得授权。范围联动、样式和普通结构变化属于软观察：右栏说明“已记录评论范围外的额外变化”并展示少量前后示例，系统把具体代码、原因、时间和 `automaticDecision=record-and-continue` 写进 `validation-review.json`，但不要求用户先豁免，也不阻断同一不可变候选。受管 meta、目标歧义/失联和目标外脚本仍是硬阻断。
 
 ## 3. 结果打开方式
 
@@ -47,6 +47,6 @@ AI 结果通过校验后先创建不可变 Version 和独立 working HTML，运�
 - 源页原始评论；
 - 内部 AI 对话补充；
 - 本地编辑；
-- AI 结果与校验（包括软校验豁免）。
+- AI 结果与校验（包括软观察记录）。
 
 Version manifest 仍保持不可变；历史通过其 `requestId + attemptId` 定位同一 Attempt 下的 supplement 和 validation review。

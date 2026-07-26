@@ -8,13 +8,23 @@ Dependabot checks monthly. Coupled React packages are updated together, and mino
 
 ## Temporary reviewed exceptions
 
-Reviewed on 2026-07-23; mandatory review date: 2026-08-31.
+Each exception has its own mandatory review date. An exception is removed in
+the same Pull Request that introduces a verified compatible fix.
 
-| Advisory | Dependency path | Current assessment |
-| --- | --- | --- |
-| [GHSA-qx2v-qp2m-jg93](https://github.com/advisories/GHSA-qx2v-qp2m-jg93) | Next.js -> PostCSS | The current latest compatible Next.js still pins the affected PostCSS. PageRoot does not accept remote CSS into a deployed Next.js server. |
-| [GHSA-6g55-p6wh-862q](https://github.com/advisories/GHSA-6g55-p6wh-862q) | Next.js -> PostCSS | Next.js 16.2.11 pins PostCSS 8.4.31 while PageRoot's direct build toolchain uses patched PostCSS 8.5.22. Imported user HTML and CSS are rendered as document content and never processed by Next.js/PostCSS; that build path only receives trusted, checked-in application CSS. |
-| [GHSA-f88m-g3jw-g9cj](https://github.com/advisories/GHSA-f88m-g3jw-g9cj) | Next.js/Miniflare -> Sharp/libvips | The current latest compatible parents still select Sharp 0.34.x. Sharp, Next.js and Miniflare are not included in the Electron package allowlist. |
+| Advisory | Review by | Dependency path | Current assessment |
+| --- | --- | --- | --- |
+| [GHSA-mh99-v99m-4gvg](https://github.com/advisories/GHSA-mh99-v99m-4gvg) | 2026-08-15 | ESLint/electron-builder -> minimatch -> brace-expansion | Reviewed 2026-07-26. The available fixed brace-expansion is a new major while several build-only parents require older majors; forcing one global override would replace their parser contract without upstream compatibility evidence. PageRoot passes only repository-owned glob patterns to these lint and packaging tools, and none of this dependency tree is shipped in the Electron package. Upgrade or remove the parent chains as soon as compatible releases exist. |
+| [GHSA-f88m-g3jw-g9cj](https://github.com/advisories/GHSA-f88m-g3jw-g9cj) | 2026-08-31 | Next.js -> Sharp/libvips | Reviewed 2026-07-23. The current latest compatible parent still selects Sharp 0.34.x. Sharp and Next.js are not included in the Electron package allowlist. |
+
+## Reviewed fixes
+
+The 2026-07-26 dependency convergence incorporates the complete contents of
+open dependency PRs #9, #12 and #30, then verifies them with the current
+architecture tree. React and `react-server-dom-webpack` are 19.2.8, parse5 is
+8.0.1, and the grouped development dependencies use their reviewed patch or
+minor versions. A same-major override selects PostCSS 8.5.23 for Next.js and tar
+7.5.22 for the build chain; the former PostCSS and tar exceptions were removed
+after `npm audit` no longer reported them.
 
 The macOS package includes the compiled desktop renderer, selected desktop modules, `parse5`, `entities`, schemas and build provenance; it explicitly excludes the general `node_modules` tree. These exceptions do not authorize adding the affected packages to the packaged runtime.
 

@@ -79,6 +79,8 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
     "bridge/target-identity.mjs",
     "bridge/product-contract.mjs",
     "bridge/attachment-storage.mjs",
+    "bridge/draft-aggregate.mjs",
+    "bridge/draft-service.mjs",
     "node_modules/parse5",
     "node_modules/entities",
     "schemas",
@@ -163,8 +165,17 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   );
   assert.match(
     mainProcess,
-    /webContents\.send\(APP_CHANNELS\.workspaceUnavailable,\s*issue\)/,
+    /workspaceRecoveryMailbox\.publish\([\s\S]*?delivery\.deliverToRenderer[\s\S]*?webContents\.send\([\s\S]*?APP_CHANNELS\.workspaceUnavailable[\s\S]*?delivery\.issue[\s\S]*?return;/,
+    "only a renderer that acknowledged its recovery listener suppresses the native modal",
   );
+  assert.match(mainProcess, /APP_CHANNELS\.workspaceRecoveryReady/);
+  assert.match(mainProcess, /workspaceRecoveryMailbox\.acknowledgeRendererReady\(\)/);
+  assert.match(
+    mainProcess,
+    /"did-start-navigation"[\s\S]*?isInPlace,\s*isMainFrame[\s\S]*?if \(isInPlace \|\| !isMainFrame\) return;[\s\S]*?workspaceRecoveryMailbox\.beginRendererLoad\(\)/,
+    "only a real main-frame navigation may revoke renderer close readiness",
+  );
+  assert.doesNotMatch(mainProcess, /"did-start-loading"/);
   assert.match(mainProcess, /requestRendererClose/);
   assert.match(mainProcess, /if \(!rendererHasLoaded\)/);
   assert.match(mainProcess, /coordinateApplicationExit/);
@@ -235,6 +246,10 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.match(preload, /reportBlocked/);
   assert.match(preload, /onCloseAborted/);
   assert.match(preload, /onWorkspaceUnavailable/);
+  assert.match(
+    preload,
+    /ipcRenderer\.invoke\(appChannels\.workspaceRecoveryReady\)/,
+  );
   assert.match(preload, /relaunch:\s*\(\) => ipcRenderer\.invoke\(appChannels\.relaunch\)/);
   assert.match(preload, /forgetRecent:\s*\(sourcePath\)/);
   assert.doesNotMatch(preload, /saveHtml|saveHtmlAs/);

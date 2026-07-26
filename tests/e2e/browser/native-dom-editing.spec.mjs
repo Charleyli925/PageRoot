@@ -20,6 +20,7 @@ import {
   reverseTextSelection,
   selectionSnapshot,
   setTextSelection,
+  waitForResumedNativeSession,
 } from "./pageroot-driver.mjs";
 
 const manifest = loadCaseManifest();
@@ -913,6 +914,7 @@ test.describe("authored DOM native editing contract", () => {
         "第一行保留原位。第二行",
       );
       expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
+      await waitForResumedNativeSession(frame, "hard-break");
       expect(await selectionSnapshot(frame, "hard-break")).toMatchObject({
         collapsed: true,
         anchorOffset: 8,

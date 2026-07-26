@@ -62,6 +62,10 @@ import {
   workingCopyStem,
 } from "./product-contract.mjs";
 import { freezeLocalAttachment } from "./attachment-storage.mjs";
+import {
+  activeDraftSnapshot,
+  applyDraftCommand,
+} from "./draft-service.mjs";
 
 const HOST = "127.0.0.1";
 const DEFAULT_PORT = 4317;
@@ -92,9 +96,9 @@ const MAX_EXECUTION_MODULE_TEXT_QUOTE_CHARS = 500;
 const BRIDGE_AUTH_TOKEN = process.env.HTML_AI_BRIDGE_AUTH_TOKEN || null;
 const execFileAsync = promisify(execFile);
 
-// These checks protect the immutable Request/Attempt/Version chain and can
-// never be waived from the UI. Other scope findings are reviewable because
-// they describe quality or breadth, not protocol integrity.
+// These checks protect the immutable Request/Attempt/Version chain and always
+// stop the candidate. Other scope findings are recorded as observations
+// because they describe quality or breadth, not protocol integrity.
 const HARD_SCOPE_VIOLATION_CODES = new Set([
   "OUTPUT_MANAGED_META_MISMATCH",
   "SCRIPT_OUTSIDE_TARGET",
@@ -1087,6 +1091,25 @@ function defaultProjectRules(name) {
   return `# ${name}\n\n- 保持当前页面的视觉语言、内容结构和响应式行为。\n- 只修改本轮明确指定的位置。\n`;
 }
 
+function draftArtifactRecord({
+  draftRevision = 0,
+  updatedAt,
+  comments = [],
+  changeEvents = [],
+  deletedCommentIds = [],
+  appliedOperationIds = [],
+} = {}) {
+  return {
+    schemaVersion: AUXILIARY_SCHEMA_VERSION,
+    draftRevision,
+    updatedAt: updatedAt ?? nowIso(),
+    comments,
+    editEvents: changeEvents,
+    deletedCommentIds,
+    appliedOperationIds,
+  };
+}
+
 function emptyRuntime(
   projectId,
   documentId,
@@ -1094,6 +1117,10 @@ function emptyRuntime(
   latestVersionId = "ver_0001",
 ) {
   const timestamp = nowIso();
+  const emptyDraftText = jsonText(draftArtifactRecord({
+    draftRevision: 0,
+    updatedAt: timestamp,
+  }));
   return {
     schemaVersion: LIFECYCLE_SCHEMA_VERSION,
     projectId,
@@ -1123,11 +1150,7 @@ function emptyRuntime(
     activeTransaction: null,
     draft: {
       annotationsRelativePath: "draft/annotations.json",
-      annotationsSha256: sha256(jsonText({
-        schemaVersion: AUXILIARY_SCHEMA_VERSION,
-        comments: [],
-        editEvents: [],
-      })),
+      annotationsSha256: sha256(emptyDraftText),
       commentIds: [],
       editEventIds: [],
       draftRevision: 0,
@@ -1348,6 +1371,8 @@ async function writeRuntime(projectRoot, runtime) {
   const transientActiveRun = runtime.activeRun;
   const transientDraftComments = runtime.draft?.comments;
   const transientDraftEvents = runtime.draft?.changeEvents;
+  const transientDeletedCommentIds = runtime.draft?.deletedCommentIds;
+  const transientAppliedOperationIds = runtime.draft?.appliedOperationIds;
   await atomicWriteJson(
     path.join(projectRoot, "runtime-state.json"),
     persisted,
@@ -1361,6 +1386,12 @@ async function writeRuntime(projectRoot, runtime) {
   }
   if (transientDraftEvents) {
     runtime.draft.changeEvents = transientDraftEvents;
+  }
+  if (transientDeletedCommentIds) {
+    runtime.draft.deletedCommentIds = transientDeletedCommentIds;
+  }
+  if (transientAppliedOperationIds) {
+    runtime.draft.appliedOperationIds = transientAppliedOperationIds;
   }
   runtime.transactionId = transactionId;
 }
@@ -1518,17 +1549,22 @@ async function createInitialProject(
     lastModifiedAt: source.lastModifiedAt,
   };
   await atomicWriteJson(path.join(projectRoot, "project.json"), project);
+  const runtime = emptyRuntime(
+    projectId,
+    documentId,
+    source.sha256,
+    versionId,
+  );
   await atomicWriteJson(
     path.join(projectRoot, "runtime-state.json"),
-    emptyRuntime(projectId, documentId, source.sha256, versionId),
+    runtime,
   );
   await atomicWriteFile(
     path.join(projectRoot, "draft", "annotations.json"),
-    jsonText({
-      schemaVersion: AUXILIARY_SCHEMA_VERSION,
-      comments: [],
-      editEvents: [],
-    }),
+    jsonText(draftArtifactRecord({
+      draftRevision: runtime.draft.draftRevision,
+      updatedAt: runtime.draft.updatedAt,
+    })),
   );
   await atomicWriteFile(
     path.join(projectRoot, "PROJECT.md"),
@@ -1969,20 +2005,89 @@ async function readRuntime(context, { hydrateArtifacts = true } = {}) {
   if (!hydrateArtifacts) {
     runtime.draft.comments = [];
     runtime.draft.changeEvents = [];
+    runtime.draft.deletedCommentIds = [];
+    runtime.draft.appliedOperationIds = [];
   } else if (await exists(draftPath)) {
     const draftRecords = await readAuxiliaryJson(
       draftPath,
       "draft/annotations.json",
     );
+    const runtimeDraftRevision = Number(runtime.draft?.draftRevision);
+    const artifactDraftRevision = Number(draftRecords.draftRevision);
+    const hasArtifactRevision =
+      Number.isSafeInteger(artifactDraftRevision)
+      && artifactDraftRevision >= 0;
+    if (
+      hasArtifactRevision
+      && Number.isSafeInteger(runtimeDraftRevision)
+      && artifactDraftRevision < runtimeDraftRevision
+    ) {
+      throw new HttpError(
+        409,
+        "DRAFT_ARTIFACT_REVISION_REGRESSION",
+        "draft/annotations.json is older than its runtime pointer.",
+        {
+          runtimeDraftRevision,
+          artifactDraftRevision,
+        },
+      );
+    }
+    if (
+      hasArtifactRevision
+      && Number.isSafeInteger(runtimeDraftRevision)
+      && artifactDraftRevision > runtimeDraftRevision + 1
+    ) {
+      throw new HttpError(
+        409,
+        "DRAFT_ARTIFACT_REVISION_JUMP",
+        "draft/annotations.json is more than one revision ahead of its runtime pointer.",
+        {
+          runtimeDraftRevision,
+          artifactDraftRevision,
+        },
+      );
+    }
+    const artifactBuffer = await readFile(draftPath);
+    const artifactSha256 = sha256(artifactBuffer);
+    if (
+      (!hasArtifactRevision || artifactDraftRevision === runtimeDraftRevision)
+      && runtime.draft?.annotationsSha256
+      && runtime.draft.annotationsSha256 !== artifactSha256
+    ) {
+      throw new HttpError(
+        409,
+        "DRAFT_ARTIFACT_HASH_MISMATCH",
+        "draft/annotations.json does not match its runtime pointer.",
+      );
+    }
+    if (hasArtifactRevision) {
+      runtime.draft.draftRevision = artifactDraftRevision;
+    }
+    if (typeof draftRecords.updatedAt === "string" && draftRecords.updatedAt) {
+      runtime.draft.updatedAt = draftRecords.updatedAt;
+    }
+    runtime.draft.annotationsSha256 = artifactSha256;
     runtime.draft.comments = Array.isArray(draftRecords.comments)
       ? draftRecords.comments
       : [];
     runtime.draft.changeEvents = Array.isArray(draftRecords.editEvents)
       ? draftRecords.editEvents
       : [];
+    runtime.draft.deletedCommentIds = Array.isArray(
+      draftRecords.deletedCommentIds,
+    )
+      ? draftRecords.deletedCommentIds
+      : [];
+    runtime.draft.appliedOperationIds = Array.isArray(
+      draftRecords.appliedOperationIds,
+    )
+      ? draftRecords.appliedOperationIds
+      : [];
   } else {
     runtime.draft.comments = [];
     runtime.draft.changeEvents = [];
+    runtime.draft.deletedCommentIds = [];
+    runtime.draft.appliedOperationIds = [];
   }
   if (
     !runtime.activeRun
@@ -3879,106 +3984,41 @@ function normalizeFrozenEditEvents(events, frozenAt, revision, basedOnVersionId)
   }));
 }
 
-async function resetDraftEditsAfterHistoryRestore(
-  context,
-  runtime,
-) {
-  const updatedAt = nowIso();
-  const comments = Array.isArray(runtime.draft?.comments)
-    ? runtime.draft.comments
-    : [];
-  const draftContent = {
-    schemaVersion: AUXILIARY_SCHEMA_VERSION,
-    comments,
-    editEvents: [],
-  };
-  const draftText = jsonText(draftContent);
-  await atomicWriteFile(
-    path.join(context.projectRoot, "draft", "annotations.json"),
-    draftText,
-  );
-  runtime.draft = {
-    annotationsRelativePath: "draft/annotations.json",
-    annotationsSha256: sha256(draftText),
-    commentIds: comments.map((item, index) =>
-      schemaRecordId(
-        "comment",
-        item?.commentId ?? item?.id,
-        String(index + 1),
-      )
-    ),
-    editEventIds: [],
-    draftRevision:
-      (Number.isSafeInteger(runtime.draft?.draftRevision)
-        ? runtime.draft.draftRevision
-        : 0) + 1,
-    updatedAt,
-    comments,
-    changeEvents: [],
-  };
-}
-
 async function saveDraft(body) {
   const context = await loadContextBySource(body.sourcePath, true);
   assertBodyContext(context, body);
   return withProjectMutation(context, async () => {
     const runtime = await readRuntime(context);
     assertProjectMutable(runtime);
-    const currentDraftRevision =
-      Number.isSafeInteger(runtime.draft?.draftRevision)
-        ? runtime.draft.draftRevision
-        : 0;
-    const expectedDraftRevision = Number(body.expectedDraftRevision);
-    if (
-      !Number.isSafeInteger(expectedDraftRevision)
-      || expectedDraftRevision < 0
-    ) {
-      throw new HttpError(
-        400,
-        "INVALID_DRAFT_REVISION",
-        "expectedDraftRevision must be a non-negative integer.",
-      );
+    const command = applyDraftCommand(runtime.draft, body, {
+      randomUUID,
+      now: nowIso,
+    });
+    if (command.replayed) {
+      return {
+        ok: true,
+        replayed: true,
+        operationId: command.operationId,
+        projectId: context.projectId,
+        documentId: context.documentId,
+        activeDraft: command.current,
+      };
     }
-    if (expectedDraftRevision !== currentDraftRevision) {
-      throw new HttpError(
-        409,
-        "DRAFT_REVISION_CONFLICT",
-        "The draft changed after this client snapshot was created.",
-        {
-          expectedDraftRevision,
-          currentDraftRevision,
-        },
-      );
-    }
-    if (body.clear === true) {
-      runtime.draft.comments = [];
-      runtime.draft.changeEvents = [];
-    } else {
-      runtime.draft.comments = mergeRecords(
-          [],
-          Array.isArray(body.comments) ? body.comments : [],
-          ["commentId", "id"],
-        );
-      runtime.draft.changeEvents = mergeRecords(
-          [],
-          Array.isArray(body.changeEvents) ? body.changeEvents : [],
-          ["eventId", "id"],
-        );
-    }
-    const draftContent = {
-      schemaVersion: AUXILIARY_SCHEMA_VERSION,
-      comments: runtime.draft.comments,
-      editEvents: runtime.draft.changeEvents,
-    };
+    const nextDraft = command.next;
+    const draftContent = draftArtifactRecord(nextDraft);
     const draftText = jsonText(draftContent);
     await atomicWriteFile(
       path.join(context.projectRoot, "draft", "annotations.json"),
       draftText,
     );
+    await maybeFailpoint(
+      "after-draft-artifact-written",
+      path.join(context.projectRoot, "draft"),
+    );
     runtime.draft = {
       annotationsRelativePath: "draft/annotations.json",
       annotationsSha256: sha256(draftText),
-      commentIds: runtime.draft.comments
+      commentIds: nextDraft.comments
         .map((item, index) =>
           schemaRecordId(
             "comment",
@@ -3986,7 +4026,7 @@ async function saveDraft(body) {
             String(index + 1),
           )
         ),
-      editEventIds: runtime.draft.changeEvents
+      editEventIds: nextDraft.changeEvents
         .map((item, index) =>
           schemaRecordId(
             "edit",
@@ -3994,21 +4034,21 @@ async function saveDraft(body) {
             String(index + 1),
           )
         ),
-      draftRevision: currentDraftRevision + 1,
-      updatedAt: nowIso(),
-      comments: runtime.draft.comments,
-      changeEvents: runtime.draft.changeEvents,
+      draftRevision: nextDraft.draftRevision,
+      updatedAt: nextDraft.updatedAt,
+      comments: nextDraft.comments,
+      changeEvents: nextDraft.changeEvents,
+      deletedCommentIds: nextDraft.deletedCommentIds,
+      appliedOperationIds: nextDraft.appliedOperationIds,
     };
     await writeRuntime(context.projectRoot, runtime);
     return {
       ok: true,
+      replayed: false,
+      operationId: command.operationId,
       projectId: context.projectId,
       documentId: context.documentId,
-      activeDraft: {
-        ...runtime.draft,
-        comments: runtime.draft.comments,
-        changeEvents: runtime.draft.changeEvents,
-      },
+      activeDraft: activeDraftSnapshot(runtime.draft, nowIso),
     };
   });
 }
@@ -5101,7 +5141,7 @@ async function readValidationReviewRaw(context, runtime, scoped) {
   if (!(await exists(reviewPath))) {
     const review = {
       ...identity,
-      status: "pending",
+      status: "observed",
       ...classification,
       createdAt: nowIso(),
       updatedAt: nowIso(),
@@ -5138,104 +5178,20 @@ async function readValidationReviewRaw(context, runtime, scoped) {
       "validation-review.json does not match the current validation findings.",
     );
   }
-  if (!["pending", "waived"].includes(review.status)) {
+  if (!["observed", "pending", "waived"].includes(review.status)) {
     throw new HttpError(
       409,
       "VALIDATION_REVIEW_STATUS_INVALID",
       "validation-review.json has an unsupported status.",
     );
   }
+  if (review.status === "pending") {
+    review.status = "observed";
+    review.updatedAt = nowIso();
+    review.automaticDecision = "record-and-continue";
+    await atomicWriteJson(reviewPath, review);
+  }
   return { review, reviewPath };
-}
-
-async function waiveSoftValidation(body) {
-  const context = await loadContextBySource(body.sourcePath, false);
-  assertBodyContext(context, body);
-  return withProjectMutation(context, async () => {
-    const runtime = await readRuntime(context);
-    const activeRun = runtime.activeRun;
-    if (
-      runtime.lifecycleState !== "validating"
-      || !activeRun
-      || activeRun.requestId !== body.requestId
-      || activeRun.attemptId !== body.attemptId
-    ) {
-      throw new HttpError(
-        409,
-        "VALIDATION_REVIEW_NOT_ACTIVE",
-        "This validation decision no longer belongs to the active run.",
-      );
-    }
-    const validated = await validateCompletionRaw(context, runtime);
-    if (validated.waiting) {
-      throw new HttpError(
-        409,
-        "COMPLETION_NOT_FOUND",
-        "The finalized AI result is not available for review.",
-      );
-    }
-    const scoped = await writeEnforcedScopeReportRaw(
-      context,
-      runtime,
-      validated,
-    );
-    const { review, reviewPath } = await readValidationReviewRaw(
-      context,
-      runtime,
-      scoped,
-    );
-    if (review.hardViolationCodes.length > 0) {
-      throw new HttpError(
-        422,
-        "HARD_VALIDATION_CANNOT_BE_WAIVED",
-        "Protocol, identity, or security checks cannot be ignored.",
-        { hardViolationCodes: review.hardViolationCodes },
-      );
-    }
-    if (review.softViolationCodes.length === 0) {
-      throw new HttpError(
-        409,
-        "NO_SOFT_VALIDATION_TO_WAIVE",
-        "There is no reviewable validation finding to ignore.",
-      );
-    }
-    const requestedCodes = Array.isArray(body.violationCodes)
-      ? [...new Set(body.violationCodes.map((code) => cleanText(code, 180)))].sort()
-      : [...review.softViolationCodes];
-    if (
-      JSON.stringify(requestedCodes)
-      !== JSON.stringify([...review.softViolationCodes].sort())
-    ) {
-      throw new HttpError(
-        409,
-        "VALIDATION_WAIVER_SCOPE_MISMATCH",
-        "The waiver must acknowledge every current soft validation finding.",
-      );
-    }
-    const decidedAt = nowIso();
-    const waived = {
-      ...review,
-      status: "waived",
-      waiver: {
-        decision: "ignore-and-continue",
-        ignoredViolationCodes: requestedCodes,
-        reason:
-          cleanText(body.reason, 1000)
-          || "用户选择无视本轮软校验并继续生成版本。",
-        decidedAt,
-      },
-      updatedAt: decidedAt,
-    };
-    await atomicWriteJson(reviewPath, waived);
-    return {
-      ok: true,
-      status: "validation-waived",
-      requestId: activeRun.requestId,
-      attemptId: activeRun.attemptId,
-      validationReview: waived,
-      scopeReport: scoped.report,
-    };
-  });
 }
 
 function transactionDirectory(context, transactionId) {
@@ -6071,11 +6027,15 @@ async function activateReadyVersion(body) {
       workingCopy.absolutePath,
     );
 
-    const emptyDraftText = jsonText({
-      schemaVersion: AUXILIARY_SCHEMA_VERSION,
-      comments: [],
-      editEvents: [],
-    });
+    const nextDraftRevision =
+      (Number.isSafeInteger(runtime.draft?.draftRevision)
+        ? runtime.draft.draftRevision
+        : 0) + 1;
+    const nextDraftUpdatedAt = nowIso();
+    const emptyDraftText = jsonText(draftArtifactRecord({
+      draftRevision: nextDraftRevision,
+      updatedAt: nextDraftUpdatedAt,
+    }));
     await atomicWriteFile(
       path.join(context.projectRoot, "draft", "annotations.json"),
       emptyDraftText,
@@ -6107,13 +6067,12 @@ async function activateReadyVersion(body) {
       annotationsSha256: sha256(emptyDraftText),
       commentIds: [],
       editEventIds: [],
-      draftRevision:
-        (Number.isSafeInteger(runtime.draft?.draftRevision)
-          ? runtime.draft.draftRevision
-          : 0) + 1,
-      updatedAt: nowIso(),
+      draftRevision: nextDraftRevision,
+      updatedAt: nextDraftUpdatedAt,
       comments: [],
       changeEvents: [],
+      deletedCommentIds: [],
+      appliedOperationIds: [],
     };
     await writeRuntime(context.projectRoot, runtime);
     transaction.state = "cache-rebuilt";
@@ -6774,61 +6733,45 @@ async function statusFor(sourcePath, requestId, attemptId = "attempt_001") {
       const classification = classifyScopeViolationCodes(scoped.report);
       const violationSummary = scoped.report.violationCodes.join(", ");
       if (classification.hardViolationCodes.length === 0) {
-        const { review } = await readValidationReviewRaw(
+        await readValidationReviewRaw(
           context,
           runtime,
           scoped,
         );
-        if (review.status !== "waived") {
-          return {
-            ok: true,
-            status: "awaiting-check-decision",
-            requestId,
-            attemptId,
-            activeRun: runtime.activeRun,
-            validationReview: review,
-            scopeReport: scoped.report,
-            scopeReportPath: scoped.reportPath,
-          };
-        }
-      }
-      if (classification.hardViolationCodes.length === 0) {
-        // The user's audited waiver applies only to the exact immutable
-        // report above. Continue through the normal no-change/transaction path.
       } else {
-      const outcome = {
-        schemaVersion: LIFECYCLE_SCHEMA_VERSION,
-        status: "error",
-        projectId: context.projectId,
-        documentId: context.documentId,
-        requestId,
-        attemptId,
-        candidateVersionId: runtime.activeRun.candidateVersionId,
-        error: {
-          code: "HARD_VALIDATION_FAILED",
-          message:
-            `AI output failed a non-waivable protocol or security check${
-              violationSummary ? `: ${violationSummary}` : "."
-            }`,
-          details: {
-            hardViolationCodes: classification.hardViolationCodes,
-            softViolationCodes: classification.softViolationCodes,
+        const outcome = {
+          schemaVersion: LIFECYCLE_SCHEMA_VERSION,
+          status: "error",
+          projectId: context.projectId,
+          documentId: context.documentId,
+          requestId,
+          attemptId,
+          candidateVersionId: runtime.activeRun.candidateVersionId,
+          error: {
+            code: "HARD_VALIDATION_FAILED",
+            message:
+              `AI output failed a non-waivable protocol or security check${
+                violationSummary ? `: ${violationSummary}` : "."
+              }`,
+            details: {
+              hardViolationCodes: classification.hardViolationCodes,
+              softViolationCodes: classification.softViolationCodes,
+            },
           },
-        },
-        completedAt: nowIso(),
-      };
-      await archiveAttemptOutcomeRaw(context, runtime.activeRun, outcome);
-      runtime.lifecycleState = "editing";
-      runtime.activeRun = null;
-      runtime.conflict = null;
-      runtime.lastCompleted = outcome;
-      await writeRuntime(context.projectRoot, runtime);
-      return {
-        ok: true,
-        ...outcome,
-        scopeReport: scoped.report,
-        scopeReportPath: scoped.reportPath,
-      };
+          completedAt: nowIso(),
+        };
+        await archiveAttemptOutcomeRaw(context, runtime.activeRun, outcome);
+        runtime.lifecycleState = "editing";
+        runtime.activeRun = null;
+        runtime.conflict = null;
+        runtime.lastCompleted = outcome;
+        await writeRuntime(context.projectRoot, runtime);
+        return {
+          ok: true,
+          ...outcome,
+          scopeReport: scoped.report,
+          scopeReportPath: scoped.reportPath,
+        };
       }
     }
     if (
@@ -7158,94 +7101,6 @@ async function resolveConflict(body) {
       prepared.transactionRoot,
       prepared.transaction,
     );
-  });
-}
-
-async function restoreVersion(body) {
-  const context = await loadContextBySource(body.sourcePath, false);
-  assertBodyContext(context, body);
-  const versionId = cleanText(body.versionId, 100);
-  if (!/^ver_\d{4,}$/.test(versionId)) {
-    throw new HttpError(400, "INVALID_VERSION_ID", "versionId is invalid.");
-  }
-  return withProjectMutation(context, async () => {
-    await recoverTransactionsRaw(context);
-    const project = await readProject(context);
-    const runtime = await readRuntime(context);
-    assertProjectMutable(runtime);
-    const validatedVersion = await validateCommittedVersionRaw(
-      context,
-      versionId,
-    );
-    const versionBuffer = validatedVersion.entryBuffer;
-    const source = await readSourceFile(context.sourcePath);
-    const expected = requireSha256(
-      body.expectedSourceSha256 ?? project.currentHtmlSha256,
-      "expectedSourceSha256",
-    );
-    const written =
-      sha256(versionBuffer) === source.sha256
-        ? source
-        : await atomicReplaceSource(context.sourcePath, expected, versionBuffer);
-    await syncCurrentSourceIdentity(context, written);
-    project.currentHtmlSha256 = written.sha256;
-    project.currentBasedOnVersionId = versionId;
-    project.currentExactVersionId =
-      written.sha256 === validatedVersion.contentSha256
-        ? versionId
-        : null;
-    project.restoredFromVersionId = versionId;
-    project.lastModifiedAt = written.lastModifiedAt;
-    await writeProject(context, project);
-    runtime.editRevision += 1;
-    runtime.lastPersistedRevision = runtime.editRevision;
-    runtime.lifecycleState = "editing";
-    runtime.view = {
-      viewMode: "current",
-      latestVersionId: project.latestVersionId,
-      currentBasedOnVersionId: versionId,
-      currentExactVersionId: project.currentExactVersionId,
-      viewingVersionId: null,
-      renderedContentSha256: written.sha256,
-    };
-    runtime.autosave = {
-      status: "updated",
-      expectedSourceSha256: written.sha256,
-      lastPersistedAt: nowIso(),
-      recoveryLogRelativePath: "recovery/autosave-log.json",
-    };
-    await resetDraftEditsAfterHistoryRestore(
-      context,
-      runtime,
-    );
-    await writeRuntime(context.projectRoot, runtime);
-    await appendAudit(context, {
-      eventId: `restore_${versionId}_${randomUUID()}`,
-      kind: "history-restore",
-      restoredFromVersionId: versionId,
-      before: { sha256: source.sha256 },
-      after: { sha256: written.sha256 },
-      persistedAt: nowIso(),
-      versionCreated: false,
-    });
-    return {
-      ok: true,
-      status: "source-restored",
-      projectId: context.projectId,
-      documentId: context.documentId,
-      restoredFromVersionId: versionId,
-      versionCreated: false,
-      latestVersionId: project.latestVersionId,
-      currentBasedOnVersionId: versionId,
-      currentExactVersionId: project.currentExactVersionId,
-      currentHtmlSha256: written.sha256,
-      sourceSha256: written.sha256,
-      sha256: written.sha256,
-      content: written.html,
-      persistedRevision: runtime.lastPersistedRevision,
-      lastModifiedAt: written.lastModifiedAt,
-      currentPath: context.sourcePath,
-    };
   });
 }
 
@@ -7790,14 +7645,6 @@ async function route(request, response) {
   }
   if (
     request.method === "POST"
-    && url.pathname === "/validation/waive"
-  ) {
-    const body = await readBody(request);
-    sendJson(response, 200, await waiveSoftValidation(body));
-    return;
-  }
-  if (
-    request.method === "POST"
     && url.pathname === "/ready-version/activate"
   ) {
     const body = await readBody(request);
@@ -7815,11 +7662,6 @@ async function route(request, response) {
   if (request.method === "POST" && url.pathname === "/conflict/resolve") {
     const body = await readBody(request);
     sendJson(response, 200, await resolveConflict(body));
-    return;
-  }
-  if (request.method === "POST" && url.pathname === "/restore") {
-    const body = await readBody(request);
-    sendJson(response, 200, await restoreVersion(body));
     return;
   }
   if (request.method === "GET" && url.pathname === "/version-file") {

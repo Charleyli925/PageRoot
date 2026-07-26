@@ -8,15 +8,10 @@ const scriptPath = fileURLToPath(import.meta.url);
 const productRoot = path.resolve(path.dirname(scriptPath), "..");
 
 export const acceptedAdvisories = Object.freeze({
-  1117015: Object.freeze({
-    package: "postcss",
-    url: "https://github.com/advisories/GHSA-qx2v-qp2m-jg93",
-    expiresOn: "2026-08-31",
-  }),
-  1124252: Object.freeze({
-    package: "postcss",
-    url: "https://github.com/advisories/GHSA-6g55-p6wh-862q",
-    expiresOn: "2026-08-31",
+  1124334: Object.freeze({
+    package: "brace-expansion",
+    url: "https://github.com/advisories/GHSA-mh99-v99m-4gvg",
+    expiresOn: "2026-08-15",
   }),
   1124066: Object.freeze({
     package: "sharp",

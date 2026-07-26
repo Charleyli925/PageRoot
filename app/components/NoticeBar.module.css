@@ -91,7 +91,7 @@
 
 .copy strong {
   color: #25272e;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 740;
   line-height: 1.35;
 }
@@ -99,7 +99,7 @@
 .copy > span {
   overflow-wrap: anywhere;
   color: #656873;
-  font-size: 10.5px;
+  font-size: 12px;
   font-weight: 510;
   line-height: 1.48;
 }
@@ -113,7 +113,7 @@
 .actions button {
   min-height: 32px;
   border-radius: 9px;
-  font: 700 10px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font: 700 11.5px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   cursor: pointer;
 }
 

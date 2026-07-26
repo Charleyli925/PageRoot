@@ -51,7 +51,7 @@ Read only the documents needed for the task:
 | Git, branches, commits, recovery | `docs/GIT_WORKFLOW.md` |
 | Codex task automation and final reports | `docs/CODEX_WORKFLOW.md` |
 | Development environment and test lanes | `docs/DEVELOPMENT.md`, then `tests/TEST_STRATEGY.md` when test ownership changes |
-| Architecture, source patches, persistence, IPC | `docs/ARCHITECTURE.md`, `docs/SECURITY_MODEL.md` |
+| Architecture, state, source patches, persistence, IPC | `docs/ARCHITECTURE.md`, `docs/ARCHITECTURE_CONTRACT.md`, `docs/STATE_OWNERSHIP.md`, `docs/ENGINEERING_STANDARDS.md`, `docs/SECURITY_MODEL.md` |
 | User flows, state or UI behavior | `docs/INTERACTION_FLOW.md`, plus the relevant focused policy document |
 | Change Request, schemas, AI completion or versions | `docs/CHANGE_REQUEST_PROTOCOL.md`, relevant files in `schemas/` and `fixtures/` |
 | Internal AI supplements or validation waivers | `docs/AI_SUPPLEMENT_AND_VALIDATION.md` |
@@ -68,6 +68,10 @@ When code makes a routed document inaccurate, update that document in the same P
 
 - Flag any path that serializes preview DOM, rewrites unrelated HTML bytes, bypasses SourcePatchEngine, weakens stale-source checks, or makes concurrent writes last-writer-wins.
 - Require negative and compatibility coverage for changes to target resolution, source mapping, atomic writes, selection or IME behavior.
+- Require one named owner, an asynchronous outcome model and a drain-boundary
+  decision for every new mutable or persisted state. `npm run
+  architecture:check` must pass; never bypass it with a new view-level Bridge
+  call, browser-storage write or duplicated compatibility branch.
 
 ### Trust and protocol boundaries
 

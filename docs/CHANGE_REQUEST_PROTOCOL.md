@@ -83,7 +83,7 @@ v3 是干净切换后的唯一运行时协议。v1/v2 记录在切换前整体�
 约束：
 
 - 每个项目拥有独立目录、runtime state、事务、Version 和 Request。
-- `PROJECT.md` 是整个项目长期使用的 AI 修改规则，不只属于某一次 Request；项目空闲时允许用户修改，处理期间只读。Request 会把当时规则冻结到 `input/PROJECT.md`。
+- `PROJECT.md` 是整个项目长期使用的 AI 修改规则，不只属于某一次 Request；项目空闲时允许用户修改并由工作台自动保存，处理期间只读。Request 会把当时已持久化规则冻结到 `input/PROJECT.md`。
 - `runtime-state.json` 与 `edit-audit.jsonl` 是系统运行和本地直接编辑的审计文件，只建议查看，不提供普通用户编辑入口。
 - `working/V1.x.html` 是有效 AI 结果通过校验后创建的完整 HTML。它先进入“可打开”状态；只有用户点击“打开 Qoder 返回的最新版”后才成为项目当前源。旧工作文件永不原地改写。
 - input manifest、冻结 annotation 等可移植索引只使用项目或 Request 内相对路径。
@@ -501,7 +501,7 @@ Completion 必须在 output 完全关闭后最后写入。完成后 output 封�
 - 差异两侧的 UTF-16 位置、分类、目标归属、证据摘要和允许状态。
 - `enforcementMode=enforce` 与最终 `pass|fail`。
 
-只允许目标内变化、finalizer 精确管理的五个 meta 字段和经过同一规范化算法证明的语义等价差异。目标外正文、属性、结构、CSS、JavaScript或无法唯一解析的目标一律 `fail`；Attempt 保留 output、completion、scope report 和失败 outcome，但不得进入 Version 事务，也不得消耗候选版本号。
+Scope report 仍以严格目标合同标记 `pass|fail`，完整记录目标外正文、属性、结构、CSS、JavaScript和无法唯一解析的目标。Bridge 再按风险分级：受管 meta、目标歧义/失联与目标外脚本是硬阻断；其余目标外正文、属性、普通结构与样式属于软观察，保存 `validation-review.json` 后可以进入 Version 事务。硬阻断的 Attempt 保留 output、completion、scope report 和失败 outcome，但不得进入 Version 事务，也不得消耗候选版本号。
 
 ## 13. 校验矩阵
 
@@ -521,9 +521,9 @@ Completion 必须在 output 完全关闭后最后写入。完成后 output 封�
 | active run 已取消/替代 | `stale-completion` |
 | TargetRef 无法唯一解析 | `scope-target-unresolved` |
 | 身份、脚本或 TargetRef 完整性错误 | 硬阻断，不可忽略 |
-| 目标外正文、属性、结构或样式变化 | 进入 `awaiting-check-decision`，允许用户审计后忽略 |
+| 目标外正文、属性、普通结构或样式变化 | 记录为 `observed`，展示变化摘要但不阻断 Version |
 
-硬校验失败不得创建 Version 或推进 latest Version。范围/质量类软校验必须先展示具体原因；用户只有通过“无视本校验，继续”才能放行，系统把校验代码、理由与时间写入 `validation-review.json` 后继续使用同一个候选，不得静默绕过。
+硬校验失败不得创建 Version 或推进 latest Version。范围/质量类软观察必须写入 `validation-review.json`，并在产品界面用少量前后示例说明“已记录评论范围外的额外变化”，不直接暴露内部校验代码，也不要求用户先豁免。旧运行态中的 `pending` 记录在恢复时转换为 `observed`，继续使用同一个不可变候选。身份、脚本、协议、路径、Hash、目标歧义和完整性仍是不可忽略的硬边界。
 
 ## 14. 两阶段 Version 事务
 
@@ -714,7 +714,7 @@ Attempt 的 `outcome.json` 是工作台写入的严格诊断终态，不是完�
 - `submitting/processing/validating`：标记 Attempt 取消，恢复冻结评论，释放候选，回到 editing。
 - `awaiting-conflict-resolution`：放弃未提交候选，保留源外部内容，恢复评论。
 - `committing` 且 commit marker 尚未写入：按事务恢复规则完整回退或完成，不能直接删除。
-- commit marker 已写入：Version 已提交，不能以“取消”撤销；用户可用历史替换当前内容。
+- commit marker 已写入：Version 已提交，不能以“取消”撤销；候选进入只读历史并等待用户按正常“打开最新版”流程处理。
 
 迟到 completion 在取消后无效。
 

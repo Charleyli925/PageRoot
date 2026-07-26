@@ -28,7 +28,8 @@
     "desktop:pack:x64": "npm run desktop:renderer && npm run desktop:pack:x64:prepared",
     "desktop:pack:x64:prepared": "node scripts/build-package.mjs --arch x64",
     "ci:source-build": "npm run typecheck && npm run lint && npm run audit:dependencies && npm run build",
-    "typecheck": "tsc --noEmit",
+    "architecture:check": "node scripts/check-architecture.mjs",
+    "typecheck": "npm run architecture:check && tsc --noEmit",
     "test": "npm run test:node:full",
     "test:node:core": "node scripts/test-node-group.mjs core",
     "test:node:core:prepared": "node scripts/test-node-group.mjs core",
@@ -86,30 +87,36 @@
     "@phosphor-icons/react": "2.1.10",
     "entities": "6.0.1",
     "next": "16.2.11",
-    "parse5": "8.0.0",
-    "react": "19.2.6",
-    "react-dom": "19.2.6"
+    "parse5": "8.0.1",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
   },
   "devDependencies": {
-    "@cloudflare/vite-plugin": "1.46.0",
+    "@cloudflare/vite-plugin": "1.47.0",
     "@playwright/test": "^1.61.1",
-    "@tailwindcss/postcss": "4.2.1",
-    "@types/node": "22.19.19",
-    "@types/react": "19.2.14",
+    "@tailwindcss/postcss": "4.3.3",
+    "@types/node": "22.20.1",
+    "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
-    "@vitejs/plugin-react": "6.0.2",
-    "@vitejs/plugin-rsc": "0.5.26",
-    "electron": "43.1.1",
+    "@vitejs/plugin-react": "6.0.4",
+    "@vitejs/plugin-rsc": "0.5.30",
+    "electron": "43.2.0",
     "electron-builder": "26.15.3",
-    "eslint": "9.39.4",
-    "eslint-config-next": "16.2.6",
+    "eslint": "9.39.5",
+    "eslint-config-next": "16.2.11",
     "playwright": "^1.61.1",
-    "react-server-dom-webpack": "19.2.6",
-    "tailwindcss": "4.2.1",
+    "react-server-dom-webpack": "19.2.8",
+    "tailwindcss": "4.3.3",
     "typescript": "5.9.3",
-    "vinext": "0.0.50",
+    "vinext": "0.2.1",
     "vite": "8.1.5",
-    "wrangler": "4.113.0"
+    "wrangler": "4.114.0"
+  },
+  "overrides": {
+    "next": {
+      "postcss": "8.5.23"
+    },
+    "tar": "7.5.22"
   },
   "type": "module",
   "build": {
@@ -179,6 +186,18 @@
       {
         "from": "scripts/attachment-storage.mjs",
         "to": "bridge/attachment-storage.mjs"
+      },
+      {
+        "from": "scripts/draft-aggregate.mjs",
+        "to": "bridge/draft-aggregate.mjs"
+      },
+      {
+        "from": "scripts/draft-service.mjs",
+        "to": "bridge/draft-service.mjs"
+      },
+      {
+        "from": "shared/draft-aggregate.mjs",
+        "to": "shared/draft-aggregate.mjs"
       },
       {
         "from": "node_modules/parse5",

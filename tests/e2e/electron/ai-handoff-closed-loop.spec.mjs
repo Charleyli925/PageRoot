@@ -186,11 +186,18 @@ async function waitForProjectReady(page, timeout = 60_000) {
     const state = await page.locator("main.workbench").getAttribute("data-project-state");
     if (state === "ready") return state;
     const stage = await page.evaluate(() => window.__PAGEROOT_HYDRATION_STAGE__);
-    return `${state}:${stage || "unmarked"}`;
+    const visibleFailure = state === "failed"
+      ? await page.locator('[aria-label="项目读取失败"]').textContent().catch(() => "")
+      : "";
+    return `${state}:${stage || "unmarked"}:${visibleFailure || "no-detail"}`;
   }, { timeout }).toBe("ready");
 }
 
-async function loadedDiskFrame(page, sourcePath, { editable = true } = {}) {
+async function loadedDiskFrame(
+  page,
+  sourcePath,
+  { editable = true, expectedCase = "list-item" } = {},
+) {
   const canonicalSourcePath = realpathSync(sourcePath);
   await expect.poll(
     async () => (await page.evaluate(() => window.htmlAIProjects?.getActiveProject()))?.sourcePath,
@@ -227,7 +234,7 @@ async function loadedDiskFrame(page, sourcePath, { editable = true } = {}) {
   if (!frame) throw new Error("PageRoot did not expose the Electron edit frame.");
   await frame.waitForFunction(
     (selector) => Boolean(document.querySelector(selector)),
-    caseSelector("list-item"),
+    caseSelector(expectedCase),
     { timeout: 60_000 },
   );
   return frame;
@@ -267,9 +274,11 @@ async function addCommentAndSubmit(
 
 async function addComment(page, sourcePath, text = (
   `只把这个列表项改为“${UPDATED_TEXT}”，其他地方保持不变。`
-)) {
+), targetCase = "list-item") {
   const frame = await loadedDiskFrame(page, sourcePath);
-  const target = frame.locator(caseSelector("list-item"));
+  const target = frame.locator(caseSelector(targetCase));
+  await page.keyboard.press("Escape");
+  await frame.locator("body").click({ position: { x: 2, y: 2 } });
   await target.scrollIntoViewIfNeeded();
   await target.click();
   const commentButton = page.getByRole("button", { name: /给.+留评论/u })
@@ -313,6 +322,48 @@ function requestDirectoryCount(workspace) {
         : 0
     );
   }, 0);
+}
+
+function workspaceContainsDraftComment(workspace, text) {
+  const projectsRoot = path.join(workspace, "projects");
+  if (!existsSync(projectsRoot)) return false;
+  return readdirSync(projectsRoot).some((projectId) => {
+    const draftPath = path.join(
+      projectsRoot,
+      projectId,
+      "draft",
+      "annotations.json",
+    );
+    if (!existsSync(draftPath)) return false;
+    const draft = JSON.parse(readFileSync(draftPath, "utf8"));
+    return Array.isArray(draft.comments)
+      && draft.comments.some((comment) => comment.text === text);
+  });
+}
+
+function rewriteWorkspaceDraftComment(workspace, text, update) {
+  const projectsRoot = path.join(workspace, "projects");
+  if (!existsSync(projectsRoot)) return false;
+  for (const projectId of readdirSync(projectsRoot)) {
+    const draftPath = path.join(
+      projectsRoot,
+      projectId,
+      "draft",
+      "annotations.json",
+    );
+    if (!existsSync(draftPath)) continue;
+    const draft = JSON.parse(readFileSync(draftPath, "utf8"));
+    const comment = Array.isArray(draft.comments)
+      ? draft.comments.find((candidate) => candidate.text === text)
+      : null;
+    if (!comment) continue;
+    update(comment);
+    draft.draftRevision = Math.max(0, Number(draft.draftRevision) || 0) + 1;
+    draft.updatedAt = new Date().toISOString();
+    writeFileSync(draftPath, `${JSON.stringify(draft, null, 2)}\n`, "utf8");
+    return true;
+  }
+  return false;
 }
 
 function writeAiOutput(requestRoot, transform) {
@@ -686,11 +737,18 @@ test("a clipboard handoff failure keeps the frozen Request recoverable", async (
       .toBe(clipboardSentinel);
     await expect(launched.page.getByRole("button", { name: "复制失败 · 查看" }))
       .toBeVisible();
-    const handoffError = launched.page.getByRole("alert")
-      .filter({ hasText: "交接内容还没有复制" });
+    const processingDialog = launched.page.getByRole("dialog", { name: "本轮处理" });
+    const handoffError = processingDialog.getByText(
+      "交接内容尚未复制",
+      { exact: true },
+    );
     await expect(handoffError).toBeVisible();
-    await handoffError.getByRole("button", { name: "关闭提醒" }).click();
-    await expect(handoffError).toBeHidden();
+    await expect(launched.page.getByRole("alert")
+      .filter({ hasText: "交接内容还没有复制" })).toHaveCount(0);
+    await processingDialog.getByRole("button", { name: "关闭处理面板" }).click();
+    await expect(processingDialog).toBeHidden();
+    await launched.page.getByRole("button", { name: "复制失败 · 查看" }).click();
+    await expect(processingDialog).toBeVisible();
     const retryCopy = launched.page.getByRole("button", { name: "重新复制本轮要求" });
     await expect(retryCopy).toBeVisible();
     await retryCopy.click();
@@ -722,15 +780,17 @@ test("a failed handoff in project A does not block project B or replace its stat
   try {
     await addComment(launched.page, projectA.sourcePath);
     await launched.page.getByRole("button", { name: /发送至 Qoder/u }).click();
-    await expect(launched.page.getByRole("alert")
-      .filter({ hasText: "交接内容还没有复制" }))
+    const processingDialog = launched.page.getByRole("dialog", { name: "本轮处理" });
+    await expect(processingDialog.getByText(
+      "交接内容尚未复制",
+      { exact: true },
+    ))
       .toBeVisible({ timeout: 30_000 });
     await expect.poll(
       () => requestDirectoryCount(launched.workspace),
       { timeout: 20_000 },
     ).toBe(1);
 
-    const processingDialog = launched.page.getByRole("dialog", { name: "本轮处理" });
     await expect(processingDialog).toBeVisible();
     await launched.page.keyboard.press("Escape");
     await expect(processingDialog).toBeHidden();
@@ -759,6 +819,11 @@ test("a failed handoff in project A does not block project B or replace its stat
     ).toBe(2);
 
     await openRecentProject(launched.page, projectA.sourcePath, { editable: false });
+    await expect(processingDialog).toBeVisible();
+    await expect(launched.page.getByText("交接内容尚未复制", { exact: true }))
+      .toBeVisible();
+    await launched.page.keyboard.press("Escape");
+    await expect(processingDialog).toBeHidden();
     await expect(launched.page.getByRole("button", { name: "复制失败 · 查看" }))
       .toBeVisible();
     await launched.page.getByRole("button", { name: "复制失败 · 查看" }).click();
@@ -766,6 +831,7 @@ test("a failed handoff in project A does not block project B or replace its stat
       .toBeVisible();
 
     await openRecentProject(launched.page, projectB.sourcePath, { editable: false });
+    await expect(processingDialog).toBeVisible();
     await expect(launched.page.getByRole("button", { name: "复制失败 · 查看" }))
       .toBeVisible();
     expect(readFileSync(projectA.sourcePath).equals(projectA.original)).toBe(true);
@@ -808,73 +874,59 @@ test("a rapid double click creates exactly one durable Request", async () => {
   }
 });
 
-test("an unknown Request outcome stays fail-closed and can be reconciled explicitly", async () => {
+test("an unknown Request outcome stays fail-closed and reconciles automatically", async () => {
   test.setTimeout(120_000);
   const fixture = createSourceFixture("unknown-request-outcome.html");
   const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
   try {
     await addComment(launched.page, fixture.sourcePath);
-    await launched.page.evaluate(() => {
-      const originalFetch = window.fetch.bind(window);
-      let requestDispatched = false;
-      window.__PAGEROOT_ALLOW_UNKNOWN_REQUEST_RECONCILE__ = false;
-      window.fetch = async (input, init) => {
-        const url = new URL(
-          typeof input === "string" ? input : input instanceof URL ? input.href : input.url,
-          window.location.href,
-        );
-        if (url.pathname === "/request" && !requestDispatched) {
-          requestDispatched = true;
-          const response = await originalFetch(input, init);
-          if (!response.ok) return response;
-          throw new DOMException(
-            "Test injected an unknown POST outcome.",
-            "TimeoutError",
-          );
+    let requestDispatched = false;
+    let allowUnknownRequestReconcile = false;
+    const bridgeRoute = "**/*";
+    const injectUnknownRequestOutcome = async (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname === "/request" && !requestDispatched) {
+        requestDispatched = true;
+        const response = await route.fetch();
+        if (!response.ok()) {
+          await route.fulfill({ response });
+          return;
         }
-        if (
-          url.pathname === "/workspace"
-          && requestDispatched
-          && !window.__PAGEROOT_ALLOW_UNKNOWN_REQUEST_RECONCILE__
-        ) {
-          throw new DOMException(
-            "Test keeps reconciliation unavailable.",
-            "TimeoutError",
-          );
-        }
-        return originalFetch(input, init);
-      };
-    });
+        await route.abort("timedout");
+        return;
+      }
+      if (
+        url.pathname === "/workspace"
+        && requestDispatched
+        && !allowUnknownRequestReconcile
+      ) {
+        await route.abort("timedout");
+        return;
+      }
+      await route.continue();
+    };
+    await launched.page.route(bridgeRoute, injectUnknownRequestOutcome);
 
     await launched.page.getByRole("button", { name: /发送至 Qoder/u }).click();
     await expect(launched.page.getByText(
-      "需要确认任务是否已经建立",
+      "正在确认这次发送是否成功",
       { exact: true },
-    )).toBeVisible({ timeout: 30_000 });
+    ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
     await expect(launched.page.getByRole("button", { name: "立即重新核对" }))
-      .toBeVisible();
+      .toHaveCount(0);
     await expect(launched.page.getByRole("button", { name: "重新打开源页" }).first())
-      .toBeVisible();
+      .toHaveCount(0);
     await expect.poll(
       () => requestDirectoryCount(launched.workspace),
       { timeout: 20_000 },
     ).toBe(1);
 
-    const reconcileButton = launched.page.getByRole("button", {
-      name: "立即重新核对",
-    });
-    await reconcileButton.evaluate((button) => {
-      // Keep automatic reconciliation unavailable until the explicit user
-      // action begins, otherwise its timer can win the test-only fetch race.
-      button.addEventListener("click", () => {
-        window.__PAGEROOT_ALLOW_UNKNOWN_REQUEST_RECONCILE__ = true;
-      }, { capture: true, once: true });
-    });
-    await reconcileButton.click();
+    allowUnknownRequestReconcile = true;
     await expect(launched.page.getByText(
       "等待 QoderWork 返回修改结果",
       { exact: true },
     )).toBeVisible({ timeout: 20_000 });
+    await launched.page.unroute(bridgeRoute, injectUnknownRequestOutcome);
     await expect(launched.page.getByRole("button", {
       name: "取消发送，继续编辑",
     })).toBeEnabled();
@@ -886,7 +938,7 @@ test("an unknown Request outcome stays fail-closed and can be reconciled explici
   }
 });
 
-test("project resources expose clear rules and protect unsaved edits", async () => {
+test("project resources expose clear rules and drain edits before leaving", async () => {
   const fixture = createSourceFixture("project-resources.html");
   const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
   try {
@@ -913,20 +965,31 @@ test("project resources expose clear rules and protect unsaved edits", async () 
     await expect(launched.page.getByText("管理 AI 修改规则", { exact: true }))
       .toBeVisible();
     await expect(launched.page.getByText(
-      "每次发送至 Qoder 时，源页都会把这份规则与本轮要求一起交接。保存只影响后续任务，不会修改当前 HTML。",
+      "修改会自动保存。每次发送至 Qoder 时，源页都会把这份规则与本轮要求一起交接；规则只影响后续任务，不会修改当前 HTML。",
       { exact: true },
     )).toBeVisible();
     const rulesEditor = launched.page.getByRole("textbox", { name: "项目长期规则" });
     await expect(rulesEditor).toBeEnabled();
     const originalRules = await rulesEditor.inputValue();
-    await rulesEditor.fill(`${originalRules}\n\n- 测试未保存保护`);
+    const updatedRules = `${originalRules}\n\n- 测试自动保存保护`;
+    await rulesEditor.fill(updatedRules);
     await launched.page.getByRole("button", { name: "返回项目" }).click();
-    await expect(launched.page.getByText(
-      "项目规则还有未保存修改",
-      { exact: true },
-    )).toBeVisible();
-    await expect(rulesEditor).toBeVisible();
+    await expect(launched.page.getByText("当前文件", { exact: true })).toBeVisible();
+    const projectsRoot = path.join(launched.workspace, "projects");
+    const [projectId] = readdirSync(projectsRoot)
+      .filter((entry) => !entry.startsWith("."));
+    const projectRulesPath = path.join(projectsRoot, projectId, "PROJECT.md");
+    await expect.poll(
+      () => readFileSync(projectRulesPath, "utf8"),
+      { timeout: 20_000 },
+    ).toBe(updatedRules);
+
+    await launched.page.getByText("项目资料", { exact: true }).click();
+    await rulesButton.click();
+    await expect(rulesEditor).toHaveValue(updatedRules);
+    await rulesEditor.fill(`${updatedRules}\n- 这行只用于验证还原`);
     await launched.page.getByRole("button", { name: "还原修改" }).click();
+    await expect(rulesEditor).toHaveValue(updatedRules);
     await launched.page.getByRole("button", { name: "返回项目" }).click();
     await expect(launched.page.getByText("当前文件", { exact: true })).toBeVisible();
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
@@ -963,6 +1026,142 @@ test("a global comment stays exact through first project registration", async ()
       .toBeEnabled();
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("a persisted legacy global comment stays exact after restart and sends directly", async () => {
+  test.setTimeout(120_000);
+  const fixture = createSourceFixture("global-comment-restart.html");
+  const firstLaunch = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  const commentText = "重启后仍然保持整个页面的视觉层级。";
+  let activeLaunch = firstLaunch;
+  try {
+    const frame = await loadedDiskFrame(firstLaunch.page, fixture.sourcePath);
+    await firstLaunch.page.getByRole("button", { name: "全局评论" }).click();
+    await firstLaunch.page.getByRole("textbox", { name: "评论内容" })
+      .fill(commentText);
+    await firstLaunch.page.getByRole("button", { name: "评论", exact: true }).click();
+    await expect(firstLaunch.page.locator(".comment-card")
+      .filter({ hasText: commentText }))
+      .toHaveAttribute("data-resolution", "exact");
+    await activateNativeEdit(frame, "list-item");
+    await setTextSelection(frame, "list-item", 0, ORIGINAL_TEXT.length);
+    await firstLaunch.page.keyboard.insertText("重启兼容测试");
+    await expect.poll(
+      () => readFileSync(fixture.sourcePath, "utf8"),
+      { timeout: 20_000 },
+    ).toContain("重启兼容测试");
+    await expect.poll(
+      () => workspaceContainsDraftComment(firstLaunch.workspace, commentText),
+      { timeout: 20_000 },
+    ).toBe(true);
+
+    await closePageRootGracefully(firstLaunch.electronApp);
+    expect(workspaceContainsDraftComment(firstLaunch.workspace, commentText)).toBe(true);
+    expect(rewriteWorkspaceDraftComment(
+      firstLaunch.workspace,
+      commentText,
+      (comment) => {
+        delete comment.target.fingerprint;
+        comment.target.resolution = "orphaned";
+      },
+    )).toBe(true);
+    activeLaunch = await launchPageRoot({
+      activeSourcePath: fixture.sourcePath,
+      isolatedUserData: firstLaunch.isolatedUserData,
+    });
+    expect(workspaceContainsDraftComment(activeLaunch.workspace, commentText)).toBe(true);
+    await loadedDiskFrame(activeLaunch.page, fixture.sourcePath);
+    const recoveredComment = activeLaunch.page.locator(".comment-card")
+      .filter({ hasText: commentText });
+    await expect(recoveredComment).toHaveAttribute("data-resolution", "exact");
+    await expect(recoveredComment.getByText("原位置已变化")).toHaveCount(0);
+
+    await activeLaunch.page.getByRole("button", { name: /发送至 Qoder/u }).click();
+    await expect(activeLaunch.page.getByText(
+      "等待 QoderWork 返回修改结果",
+      { exact: true },
+    )).toBeVisible({ timeout: 30_000 });
+    await expect(activeLaunch.page.getByText(/评论需要重新定位/u)).toHaveCount(0);
+  } finally {
+    await stopPageRoot(activeLaunch.electronApp, firstLaunch.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("multiple orphaned comments relink in sequence and resume the original send", async () => {
+  test.setTimeout(120_000);
+  const fixture = createSourceFixture("orphaned-comments-resume-send.html");
+  const firstLaunch = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  const firstComment = "把原列表项改成更简洁的表达。";
+  const secondComment = "把原表格单元格改成更清楚的说明。";
+  let activeLaunch = firstLaunch;
+  try {
+    const frame = await loadedDiskFrame(firstLaunch.page, fixture.sourcePath);
+    await addComment(firstLaunch.page, fixture.sourcePath, firstComment, "list-item");
+    await addComment(firstLaunch.page, fixture.sourcePath, secondComment, "table-cell");
+
+    await activateNativeEdit(frame, "list-item");
+    await setTextSelection(frame, "list-item", 0, ORIGINAL_TEXT.length);
+    await firstLaunch.page.keyboard.insertText("失联评论登记测试");
+    await expect.poll(
+      () => workspaceContainsDraftComment(firstLaunch.workspace, secondComment),
+      { timeout: 20_000 },
+    ).toBe(true);
+    await closePageRootGracefully(firstLaunch.electronApp);
+
+    const externallyChanged = readFileSync(fixture.sourcePath, "utf8")
+      .replace(
+        /<li data-native-case="list-item"[^>]*>[\s\S]*?<\/li>/u,
+        "",
+      )
+      .replace(
+        /<td data-native-case="table-cell"[^>]*>[\s\S]*?<\/td>/u,
+        "",
+      );
+    writeFileSync(fixture.sourcePath, externallyChanged, "utf8");
+
+    activeLaunch = await launchPageRoot({
+      activeSourcePath: fixture.sourcePath,
+      isolatedUserData: firstLaunch.isolatedUserData,
+    });
+    const recoveredFrame = await loadedDiskFrame(
+      activeLaunch.page,
+      fixture.sourcePath,
+      { expectedCase: "flex-copy" },
+    );
+    const recoveredComments = activeLaunch.page.locator(".comment-card");
+    await expect(recoveredComments).toHaveCount(2);
+    await expect(recoveredComments.filter({ hasText: firstComment }))
+      .toHaveAttribute("data-resolution", "orphaned");
+    await expect(recoveredComments.filter({ hasText: secondComment }))
+      .toHaveAttribute("data-resolution", "orphaned");
+
+    await activeLaunch.page.getByRole("button", { name: /发送至 Qoder/u }).click();
+    await expect(activeLaunch.page.getByText("2 条评论需要重新定位", { exact: true }))
+      .toBeVisible();
+    await activeLaunch.page.getByRole("button", { name: "开始重新定位" }).click();
+
+    await recoveredFrame.locator(caseSelector("flex-copy")).click();
+    await expect(activeLaunch.page.getByText("1 条评论需要重新定位", { exact: true }))
+      .toBeVisible();
+    await expect(recoveredComments.filter({ hasText: firstComment }))
+      .toHaveAttribute("data-resolution", "exact");
+    await expect(recoveredComments.filter({ hasText: secondComment }))
+      .toHaveAttribute("data-resolution", "orphaned");
+
+    await recoveredFrame.locator(caseSelector("grid-card")).click();
+    await expect(activeLaunch.page.getByText(
+      "等待 QoderWork 返回修改结果",
+      { exact: true },
+    )).toBeVisible({ timeout: 30_000 });
+    await expect.poll(
+      () => requestDirectoryCount(activeLaunch.workspace),
+      { timeout: 20_000 },
+    ).toBe(1);
+  } finally {
+    await stopPageRoot(activeLaunch.electronApp, firstLaunch.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
   }
 });
@@ -1128,7 +1327,7 @@ test("a malformed AI HTML return is rejected before completion or opening", asyn
   }
 });
 
-test("a soft out-of-scope AI return waits for an explicit waiver and open", async () => {
+test("a soft out-of-scope AI return is audited without blocking the ready version", async () => {
   const fixture = createSourceFixture();
   const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
   try {
@@ -1144,22 +1343,16 @@ test("a soft out-of-scope AI return waits for an explicit waiver and open", asyn
         "<title>unauthorized title mutation</title>",
       ));
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
-    await expect(launched.page.getByText("有一项范围校验需要你决定", { exact: true })
+    await expect(launched.page.getByText("已记录评论范围外的额外变化", { exact: true })
       .filter({ visible: true }).first())
       .toBeVisible({ timeout: 30_000 });
-    let active = await launched.page.evaluate(
-      () => window.htmlAIProjects?.getActiveProject(),
-    );
-    expect(active.sourcePath).toBe(realpathSync(fixture.sourcePath));
-    expect(workingHtmlFiles(launched.workspace, request.changeRequest.projectId)).toHaveLength(0);
-    expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
-
-    await launched.page.getByRole("button", { name: "无视本校验，继续" }).click();
     await expect(launched.page.getByText(
       "修改结果已通过检查",
       { exact: true },
     ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
-    active = await launched.page.evaluate(
+    await expect(launched.page.getByRole("button", { name: "采用这些额外变化" }))
+      .toHaveCount(0);
+    const active = await launched.page.evaluate(
       () => window.htmlAIProjects?.getActiveProject(),
     );
     expect(active.sourcePath).toBe(realpathSync(fixture.sourcePath));

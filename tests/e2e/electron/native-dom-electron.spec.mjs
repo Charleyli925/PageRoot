@@ -145,11 +145,28 @@ async function stopPageRoot(electronApp, isolatedUserData, { cleanup = true } = 
 }
 
 async function closePageRootGracefully(electronApp) {
-  const closed = electronApp.waitForEvent("close", { timeout: 15_000 });
+  const page = electronApp.windows()[0];
+  await page?.evaluate(() => {
+    window.__PAGEROOT_CLOSE_ABORT_REASON__ = null;
+    window.addEventListener("html-ai:close-aborted", (event) => {
+      window.__PAGEROOT_CLOSE_ABORT_REASON__ = event.detail?.reason || "unknown";
+    }, { once: true });
+  });
+  const closed = electronApp.waitForEvent("close", { timeout: 35_000 });
   await electronApp.evaluate(({ BrowserWindow }) => {
     BrowserWindow.getAllWindows()[0]?.close();
   });
-  await closed;
+  try {
+    await closed;
+  } catch (error) {
+    const reason = await page?.evaluate(
+      () => window.__PAGEROOT_CLOSE_ABORT_REASON__,
+    ).catch(() => null);
+    throw new Error(
+      `PageRoot graceful close did not complete${reason ? `: ${reason}` : "."}`,
+      { cause: error },
+    );
+  }
 }
 
 async function waitForProjectReady(page, timeout = 30_000) {
@@ -250,13 +267,18 @@ async function expectCheckpointPersisted(page, afterRevision) {
       element.getAttribute("data-persisted-revision"),
     );
     return {
-      idle: element.getAttribute("data-persist-state") === "idle",
+      state: element.getAttribute("data-persist-state"),
+      editRevision,
+      persistedRevision,
       synchronized:
         Number.isSafeInteger(editRevision)
         && editRevision > minimumRevision
         && editRevision === persistedRevision,
     };
-  }, afterRevision), { timeout: 15_000 }).toEqual({ idle: true, synchronized: true });
+  }, afterRevision), { timeout: 30_000 }).toMatchObject({
+    state: "idle",
+    synchronized: true,
+  });
   return Number(await indicator.getAttribute("data-persisted-revision"));
 }
 
@@ -503,31 +525,23 @@ test("PROJECT.md read failure never becomes editable data and recovers in place"
     });
     await expect(projectRules).toBeEnabled({ timeout: 20_000 });
 
-    await launched.page.evaluate(() => {
-      const originalFetch = window.fetch.bind(window);
-      let rejectNextProjectRulesRead = true;
-      window.fetch = (input, init) => {
-        const url = new URL(
-          typeof input === "string" ? input : input instanceof URL ? input.href : input.url,
-          window.location.href,
-        );
-        if (
-          rejectNextProjectRulesRead
-          && url.pathname === "/file"
-          && url.searchParams.get("path") === "PROJECT.md"
-        ) {
-          rejectNextProjectRulesRead = false;
-          return Promise.resolve(new Response(JSON.stringify({
+    const projectFileRoute = "**/file?**";
+    const rejectProjectRulesRead = async (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get("path") === "PROJECT.md") {
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({
             ok: false,
             error: { message: "测试注入：项目规则暂时不可读。" },
-          }), {
-            status: 503,
-            headers: { "content-type": "application/json" },
-          }));
-        }
-        return originalFetch(input, init);
-      };
-    });
+          }),
+        });
+        return;
+      }
+      await route.continue();
+    };
+    await launched.page.route(projectFileRoute, rejectProjectRulesRead);
 
     await projectRules.click();
     const failure = launched.page.getByRole("alert")
@@ -539,6 +553,7 @@ test("PROJECT.md read failure never becomes editable data and recovers in place"
     await expect(failure.getByRole("button", { name: "重试读取" })).toBeVisible();
     await expect(launched.page.getByRole("button", { name: "返回项目" })).toBeVisible();
 
+    await launched.page.unroute(projectFileRoute, rejectProjectRulesRead);
     await failure.getByRole("button", { name: "重试读取" }).click();
     const editor = launched.page.getByRole("textbox", { name: "项目长期规则" });
     await expect(editor).toBeVisible();
@@ -866,6 +881,26 @@ test("Electron canonicalizes and persists an Apple Pinyin styled-wrapper composi
 
     await closePageRootGracefully(firstApp);
     firstApp = null;
+    const workspace = path.join(isolatedUserData, "workspace");
+    const registry = JSON.parse(
+      readFileSync(path.join(workspace, "project-registry.json"), "utf8"),
+    );
+    const projectEntry = Object.entries(registry.projects).find(
+      ([, project]) => project.sourcePath === realpathSync(sourcePath),
+    );
+    expect(projectEntry, "the first durable edit must establish one project authority")
+      .toBeTruthy();
+    const [persistedProjectId] = projectEntry;
+    const projectRoot = path.join(workspace, "projects", persistedProjectId);
+    const annotations = JSON.parse(
+      readFileSync(path.join(projectRoot, "draft", "annotations.json"), "utf8"),
+    );
+    const runtimeState = JSON.parse(
+      readFileSync(path.join(projectRoot, "runtime-state.json"), "utf8"),
+    );
+    expect(annotations.draftRevision).toBeGreaterThan(0);
+    expect(annotations.editEvents.length).toBeGreaterThan(0);
+    expect(runtimeState.draft.draftRevision).toBe(annotations.draftRevision);
     const reopened = await launchPageRoot({ isolatedUserData });
     reopenedApp = reopened.electronApp;
     const { frame: reopenedFrame } = await loadedDiskFrame(

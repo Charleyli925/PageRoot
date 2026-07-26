@@ -31,8 +31,11 @@ const REQUIRED_BRIDGE_FILES = [
   "target-identity.mjs",
   "product-contract.mjs",
   "attachment-storage.mjs",
+  "draft-aggregate.mjs",
+  "draft-service.mjs",
 ];
 const REQUIRED_BRIDGE_MODULES = ["entities", "parse5"];
+const REQUIRED_SHARED_FILES = ["draft-aggregate.mjs"];
 const REQUIRED_LEGAL_RESOURCES = ["LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md"];
 const REQUIRED_APP_SOURCE_FILES = [
   "desktop/main.mjs",
@@ -365,6 +368,20 @@ export async function verifyAppBundle({
       `bridge/${fileName}`,
     );
   }
+  const sharedPackagedRoot = path.join(resourcesPath, "shared");
+  const packagedSharedFiles = await listFiles(sharedPackagedRoot);
+  assert.deepEqual(
+    packagedSharedFiles,
+    [...REQUIRED_SHARED_FILES].sort(),
+    "packaged shared resources are incomplete or contain stale files",
+  );
+  for (const fileName of REQUIRED_SHARED_FILES) {
+    await assertFilesEqual(
+      path.join(productRoot, "shared", fileName),
+      path.join(sharedPackagedRoot, fileName),
+      `shared/${fileName}`,
+    );
+  }
   for (const moduleName of REQUIRED_BRIDGE_MODULES) {
     await assertDirectoryMatches({
       sourceRoot: path.join(productRoot, "node_modules", moduleName),
@@ -389,12 +406,15 @@ export async function verifyAppBundle({
     const scopeValidatorUrl = pathToFileURL(
       path.join(resourcesPath, "bridge", "scope-validator.mjs"),
     ).href;
+    const draftServiceUrl = pathToFileURL(
+      path.join(resourcesPath, "bridge", "draft-service.mjs"),
+    ).href;
     runCommand(
       helperExecutable,
       [
         "--input-type=module",
         "--eval",
-        `await import(${JSON.stringify(lifecycleCoreUrl)}); await import(${JSON.stringify(scopeValidatorUrl)})`,
+        `await import(${JSON.stringify(lifecycleCoreUrl)}); await import(${JSON.stringify(scopeValidatorUrl)}); await import(${JSON.stringify(draftServiceUrl)})`,
       ],
       "packaged Bridge dependency smoke",
       {

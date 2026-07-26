@@ -98,7 +98,36 @@ function resilientEditorFrame(page) {
   };
 }
 
+export async function ensureSourceEditingTestRuntime(page) {
+  const hasEditingRuntime = await page.evaluate(
+    () => window.htmlAIRuntime?.capabilities?.sourceEditing === "enabled",
+  );
+  if (hasEditingRuntime) return;
+
+  await page.addInitScript(() => {
+    Object.defineProperty(window, "htmlAIRuntime", {
+      configurable: true,
+      value: {
+        bridgePort: "1",
+        bridgeAuthToken: "browser-e2e-memory-only",
+        appVersion: "0.0.0-test",
+        capabilities: {
+          sourceEditing: "enabled",
+          projectOpening: "browser-file",
+          attachmentPersistence: "memory",
+          closeCoordination: "browser-beforeunload",
+        },
+      },
+    });
+  });
+  await page.reload();
+}
+
 export async function loadFixture(page, name, { buffer = fixtureBuffer(name) } = {}) {
+  // Pure browser use is a formal read-only preview. These source-editing tests
+  // exercise the desktop renderer, so expose only the narrow capability marker
+  // needed to mount its editor before loading an in-memory fixture.
+  await ensureSourceEditingTestRuntime(page);
   // The real UI opens the file picker only after prepareProjectSwitch() has
   // confirmed that the current canvas can commit. Setting a hidden file input
   // directly bypasses that user-facing gate, so first wait for the initial
@@ -260,6 +289,16 @@ export async function nativeEditingState(frame, id) {
           : selection.anchorNode),
       ),
     };
+  });
+}
+
+export async function waitForResumedNativeSession(frame, id) {
+  await expect.poll(() => nativeEditingState(frame, id)).toMatchObject({
+    targetIsActive: true,
+    contenteditable: "plaintext-only",
+    isContentEditable: true,
+    activeCase: id,
+    selectionInside: true,
   });
 }
 

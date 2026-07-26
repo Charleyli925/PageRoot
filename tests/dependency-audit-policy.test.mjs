@@ -53,10 +53,14 @@ test("dependency audit policy rejects new and expired advisories", () => {
 });
 
 test("reviewed production exceptions are explicit and time-bounded", () => {
-  assert.deepEqual(acceptedAdvisories["1124252"], {
-    package: "postcss",
-    url: "https://github.com/advisories/GHSA-6g55-p6wh-862q",
-    expiresOn: "2026-08-31",
+  assert.deepEqual(Object.keys(acceptedAdvisories).sort(), [
+    "1124066",
+    "1124334",
+  ]);
+  assert.deepEqual(acceptedAdvisories["1124334"], {
+    package: "brace-expansion",
+    url: "https://github.com/advisories/GHSA-mh99-v99m-4gvg",
+    expiresOn: "2026-08-15",
   });
   assert.ok(
     Object.values(acceptedAdvisories).every((advisory) => advisory.expiresOn),

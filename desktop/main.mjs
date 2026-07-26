@@ -36,7 +36,10 @@ import {
   runProjectIpcOperation,
   selectExportDestination,
 } from "./export-copy.mjs";
-import { stopBridgeProcessGracefully } from "./bridge-shutdown.mjs";
+import {
+  createWorkspaceRecoveryMailbox,
+  stopBridgeProcessGracefully,
+} from "./bridge-shutdown.mjs";
 import {
   closeAbortPayload,
   stopBridgeOrNotifyCloseAborted,
@@ -112,6 +115,7 @@ const APP_CHANNELS = Object.freeze({
   closeResult: "html-app:close-result",
   closeAborted: "html-app:close-aborted",
   workspaceUnavailable: "html-app:workspace-unavailable",
+  workspaceRecoveryReady: "html-app:workspace-recovery-ready",
   relaunch: "html-app:relaunch",
 });
 const INTEGRATION_CHANNELS = Object.freeze({
@@ -140,6 +144,7 @@ let updateCheckPromise = null;
 let latestUpdateResult = null;
 let workspaceFailurePrompt = null;
 let managedWelcomeRegistration = null;
+const workspaceRecoveryMailbox = createWorkspaceRecoveryMailbox();
 
 function emptyProjectState() {
   return {
@@ -1123,6 +1128,12 @@ function registerProjectIpc() {
   );
   ipcMain.handle(APP_CHANNELS.closeResult, trusted(reportCloseResult));
   ipcMain.handle(
+    APP_CHANNELS.workspaceRecoveryReady,
+    trusted(() => ({
+      issue: workspaceRecoveryMailbox.acknowledgeRendererReady(),
+    })),
+  );
+  ipcMain.handle(
     APP_CHANNELS.relaunch,
     trusted(async () => ({
       relaunched: await coordinateApplicationRelaunch("user-relaunch"),
@@ -1285,6 +1296,7 @@ function unregisterIpc() {
     ...Object.values(INTEGRATION_CHANNELS),
     ...Object.values(UPDATE_CHANNELS),
     APP_CHANNELS.closeResult,
+    APP_CHANNELS.workspaceRecoveryReady,
     APP_CHANNELS.relaunch,
   ]) {
     ipcMain.removeHandler(channel);
@@ -1299,9 +1311,9 @@ async function coordinateApplicationExit(reason) {
       notifyRendererCloseAborted(result.requestId, result.reason);
       const messageBoxOptions = {
         type: "warning",
-        title: "暂时无法安全关闭",
-        message: "还有本地更改没有完成安全写入。",
-        detail: result.reason || "请确认自动保存状态后再试一次。",
+        title: "还有内容没有保存",
+        message: result.reason || "当前页面还有内容没有保存完成。",
+        detail: "源页已取消关闭并返回当前页面，请处理后再试。",
         buttons: ["继续编辑"],
         defaultId: 0,
         noLink: true,
@@ -1348,9 +1360,9 @@ async function coordinateApplicationRelaunch(reason) {
       notifyRendererCloseAborted(result.requestId, result.reason);
       const messageBoxOptions = {
         type: "warning",
-        title: "重新打开前还需要一步",
-        message: "当前页面还有内容没有完成安全写入。",
-        detail: `${result.reason || "请先确认当前编辑状态。"}\n\n可返回源页导出当前编辑，再重新打开。`,
+        title: "还有内容没有保存",
+        message: result.reason || "当前页面还有内容没有保存完成。",
+        detail: "源页已取消重新打开并返回当前页面，请处理后再试。",
         buttons: ["返回源页"],
         defaultId: 0,
         noLink: true,
@@ -1385,17 +1397,25 @@ async function coordinateApplicationRelaunch(reason) {
 }
 
 async function showWorkspaceUnavailableRecovery() {
-  const issue = {
+  const delivery = workspaceRecoveryMailbox.publish({
     title: "本地项目资料暂时不可用",
     message: "当前页面内容仍保留。可先导出当前编辑，再重新打开源页恢复本地服务。",
-  };
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send(APP_CHANNELS.workspaceUnavailable, issue);
+  });
+  if (
+    delivery.deliverToRenderer
+    && mainWindow
+    && !mainWindow.isDestroyed()
+  ) {
+    mainWindow.webContents.send(
+      APP_CHANNELS.workspaceUnavailable,
+      delivery.issue,
+    );
+    return;
   }
   if (workspaceFailurePrompt) return workspaceFailurePrompt;
   const options = {
     type: "warning",
-    title: issue.title,
+    title: delivery.issue.title,
     message: "源页的本地项目服务已停止。",
     detail: "当前窗口中的内容仍保留。返回源页可先导出当前编辑；若没有待保存内容，也可以直接重新打开。",
     buttons: ["返回源页处理", "重新打开源页"],
@@ -1520,6 +1540,7 @@ async function createWindow() {
   const port = await startBridge();
 
   rendererHasLoaded = false;
+  workspaceRecoveryMailbox.beginRendererLoad();
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 960,
@@ -1556,7 +1577,15 @@ async function createWindow() {
   mainWindow.webContents.on("will-navigate", (event, url) => {
     if (!isTrustedRendererUrl(url)) event.preventDefault();
   });
-  mainWindow.webContents.once("did-finish-load", () => {
+  mainWindow.webContents.on(
+    "did-start-navigation",
+    (_event, _url, isInPlace, isMainFrame) => {
+      if (isInPlace || !isMainFrame) return;
+      rendererHasLoaded = false;
+      workspaceRecoveryMailbox.beginRendererLoad();
+    },
+  );
+  mainWindow.webContents.on("did-finish-load", () => {
     rendererHasLoaded = true;
     scheduleAutomaticUpdateCheck();
   });
@@ -1567,6 +1596,8 @@ async function createWindow() {
     void coordinateApplicationExit("window-close");
   });
   mainWindow.on("closed", () => {
+    rendererHasLoaded = false;
+    workspaceRecoveryMailbox.beginRendererLoad();
     mainWindow = null;
   });
 

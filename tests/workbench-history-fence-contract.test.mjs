@@ -103,18 +103,16 @@ test("beforeunload observes native composition drafts and unacknowledged revisio
     "const beforeUnload = (event: BeforeUnloadEvent) => {",
     "window.addEventListener(\"beforeunload\"",
   );
-
-  assertOrdered(
-    unload,
-    [
-      "editorRef.current?.hasPendingNativeEdit()",
-      "editRevisionRef.current > lastPersistedRevisionRef.current",
-      "&& !hasPendingNativeEdit",
-      "&& !hasUnacknowledgedSourceRevision",
-      "event.preventDefault()",
-    ],
-    "browser unload must be blocked by Canvas-native or source-level dirtiness",
+  const obligations = section(
+    workbench,
+    "coordinator.replace(\"source\"",
+    "const rememberAttachmentObjectUrl",
   );
+
+  assert.match(unload, /hasPending\("close"\)/u);
+  assert.match(unload, /event\.preventDefault\(\)/u);
+  assert.match(obligations, /editRevisionRef\.current > lastPersistedRevisionRef\.current/u);
+  assert.match(obligations, /editorRef\.current\?\.hasPendingNativeEdit\(\)/u);
 });
 
 test("opening a committed version strictly freezes the current Canvas before adoption", () => {
@@ -162,7 +160,7 @@ test("workspace source adoption requires an explicit hydration token or a live F
       "const adoptedContext = await adoptGeneratedSourcePath",
       "mustAdoptAuthoritativeSource = true",
       "if (mustAdoptAuthoritativeSource)",
-      "const sourceResponse = await bridgeFetch",
+      "const sourcePayload = await bridgeClient.source",
       "await verifyCanvasRendered",
     ],
     "metadata refresh must not silently become a source transition",

@@ -1,35 +1,98 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import ts from "typescript";
 
-const [workbench, styles, canvas, canvasStyles, notice, noticeStyles] = await Promise.all([
+const [
+  workbench,
+  styles,
+  canvas,
+  canvasStyles,
+  notice,
+  noticeStyles,
+  bridgeClient,
+] = await Promise.all([
   readFile(new URL("../app/workbench.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
   readFile(new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/components/HtmlCanvasEditor.module.css", import.meta.url), "utf8"),
   readFile(new URL("../app/components/NoticeBar.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/components/NoticeBar.module.css", import.meta.url), "utf8"),
+  readFile(new URL("../app/application/bridge-client.js", import.meta.url), "utf8"),
 ]);
 
-test("global notifications expose severity, persistence and actions", () => {
+function literalProperty(object, name) {
+  const property = object.properties.find((candidate) => (
+    ts.isPropertyAssignment(candidate)
+    && ts.isIdentifier(candidate.name)
+    && candidate.name.text === name
+  ));
+  return property?.initializer;
+}
+
+function literalText(node) {
+  return node && ts.isStringLiteralLike(node) ? node.text : null;
+}
+
+test("global notifications are polite, policy-gated, and actionable", () => {
   assert.match(workbench, /noticeAutoDismissMs\(toast\)/);
   assert.match(workbench, /shouldPresentNotice\(next\)/);
   assert.match(workbench, /shouldReplaceNotice\(current, next\)/);
   assert.match(workbench, /<NoticeBar[\s\S]*?className="toast"/);
   assert.match(notice, /data-tone=\{tone\}/);
-  assert.match(
-    notice,
-    /role=\{tone === "error" \? "alert" : "status"\}/,
-  );
-  assert.match(
-    notice,
-    /aria-live=\{tone === "error" \? "assertive" : "polite"\}/,
-  );
+  assert.match(notice, /role="status"/);
+  assert.match(notice, /aria-live="polite"/);
+  assert.doesNotMatch(notice, /role="alert"|aria-live="assertive"/);
   assert.match(workbench, /action: \{ id: "retry-export"/);
   assert.match(workbench, /title: "副本没有导出"/);
   assert.match(notice, /onMouseEnter=\{\(\) => onPauseChange\?\.\(true\)\}/);
   assert.match(notice, /onFocusCapture=\{\(\) => onPauseChange\?\.\(true\)\}/);
   assert.match(workbench, /setPausedNoticeIdentity\(paused \? noticeIdentity : null\)/);
+});
+
+test("only explicit direct-action notices require a concrete recovery action", () => {
+  const source = ts.createSourceFile(
+    "workbench.tsx",
+    workbench,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  );
+  const missing = [];
+  const visit = (node) => {
+    if (
+      ts.isCallExpression(node)
+      && ts.isIdentifier(node.expression)
+      && node.expression.text === "setToast"
+      && node.arguments[0]
+      && ts.isObjectLiteralExpression(node.arguments[0])
+    ) {
+      const object = node.arguments[0];
+      const disposition = literalText(literalProperty(object, "disposition"));
+      const action = literalProperty(object, "action");
+      if (disposition === "direct-action" && !action) {
+        const { line } = source.getLineAndCharacterOfPosition(node.getStart(source));
+        missing.push(line + 1);
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  assert.deepEqual(
+    missing,
+    [],
+    `direct-action notices without a literal action at lines: ${missing.join(", ")}`,
+  );
+  assert.doesNotMatch(
+    workbench,
+    /retry-(?:reconcile|cancel|ready-version|restore-version|view-history|reload|source-diff|ai-diff|attachment-preview|attachment-download)/u,
+    "automatic or contextual recovery must not be exposed as a duplicate retry toast",
+  );
+  assert.doesNotMatch(
+    workbench,
+    /label:\s*"(?:重试|处理第一条|查看|继续打开|重新打开)"/u,
+    "notice buttons must name the object or visible outcome",
+  );
 });
 
 test("redundant feedback was removed and comment persistence is contextual", () => {
@@ -53,7 +116,7 @@ test("redundant feedback was removed and comment persistence is contextual", () 
 });
 
 test("canvas edit feedback is contextual, plain-language, and not duplicated globally", () => {
-  assert.match(canvas, /let title = "请重新选择后再试"/u);
+  assert.match(canvas, /let title = "这处内容暂时不能直接编辑"/u);
   assert.match(canvas, /title = "这里暂时不能直接改字"/u);
   assert.match(canvas, /title = "已恢复输入前的文字"/u);
   assert.match(canvas, /title = "请重新选择这段文字"/u);
@@ -62,12 +125,19 @@ test("canvas edit feedback is contextual, plain-language, and not duplicated glo
   assert.match(canvas, /这段内容里有需要保留的网页结构/u);
   assert.match(canvas, /输入法没有完整确认这次输入/u);
   assert.match(canvas, /你仍可以选中文字调整样式，或添加评论交给 AI 处理/u);
-  assert.match(canvas, /继续浏览和选择文字/u);
+  assert.match(canvas, /页面内容没有改变/u);
+  assert.doesNotMatch(canvas, /这里暂时不能粘贴多行文字/u);
+  assert.doesNotMatch(canvas, /这里暂时不能新增换行/u);
   assert.match(canvas, /sticky: false/u);
   assert.match(canvas, /recovery: "comment"/u);
   assert.match(canvas, /recovery: "reload"/u);
+  assert.match(canvas, /recovery: "none"/u);
+  assert.match(canvas, /showCommitBlocked/u);
   assert.match(canvas, /<NoticeBar[\s\S]*?placement="canvas"/u);
-  assert.match(canvas, /actionLabel=\{editFeedback\.recovery === "reload" \? reloadActionLabel : "添加评论"\}/u);
+  assert.match(
+    canvas,
+    /editFeedback\.recovery === "comment"[\s\S]*?\? "添加评论"[\s\S]*?: undefined/u,
+  );
   assert.match(canvas, /onRequestReload\?\.\(\)/u);
   assert.match(workbench, /if \(sourcePathRef\.current\)[\s\S]*?reloadCurrentSource\(\)[\s\S]*?openProject\(\)/u);
   assert.match(workbench, /reloadActionLabel=\{sourcePath \? "重新载入" : "重新选择"\}/u);
@@ -98,10 +168,10 @@ test("technical desktop error plumbing is absent from product copy", () => {
   );
 });
 
-test("critical notices are legible and their close action cannot wrap", () => {
+test("exceptional notices are legible and their close action cannot wrap", () => {
   assert.match(noticeStyles, /\.notice\[data-tone="error"\]/);
-  assert.match(noticeStyles, /\.copy strong\s*\{[\s\S]*?font-size:\s*12px/);
-  assert.match(noticeStyles, /\.copy > span\s*\{[\s\S]*?font-size:\s*10\.5px/);
+  assert.match(noticeStyles, /\.copy strong\s*\{[\s\S]*?font-size:\s*13px/);
+  assert.match(noticeStyles, /\.copy > span\s*\{[\s\S]*?font-size:\s*12px/);
   assert.match(
     noticeStyles,
     /\.actions button\s*\{[\s\S]*?min-height:\s*32px/,
@@ -132,23 +202,34 @@ test("file and attachment failures keep a real recovery path", () => {
   assert.match(workbench, /原文件没有被修改。请先转换为 UTF-8，再重新选择。/);
   assert.match(
     workbench,
-    /dedupeKey: "browser-file-error",[\s\S]*?id: "retry-project-open", label: "重新选择"/,
+    /disposition: "direct-action",[\s\S]*?dedupeKey: "browser-file-error",[\s\S]*?id: "retry-project-open", label: "重新选择"/,
   );
 });
 
-test("blocking paths expose an in-context recovery instead of a dead end", () => {
-  assert.match(workbench, /const BRIDGE_REQUEST_TIMEOUT_MS = 60_000/);
+test("blocking paths auto-recover or expose one in-context decision", () => {
+  assert.match(bridgeClient, /const DEFAULT_REQUEST_TIMEOUT_MS = 60_000/);
   assert.match(
-    workbench,
-    /timeoutMs = BRIDGE_STATE_READ_TIMEOUT_MS/,
+    bridgeClient,
+    /timeoutMs = DEFAULT_READ_TIMEOUT_MS/,
   );
   assert.match(workbench, /const reconcilePendingRun = useCallback/);
-  assert.match(workbench, /重新核对任务状态/);
+  assert.match(workbench, /源页会在后台继续核对/);
+  assert.match(workbench, /等待下一次自动确认/);
+  assert.doesNotMatch(workbench, /立即重新核对|重新核对任务状态/);
   assert.match(workbench, /重新打开源页/);
   assert.match(workbench, /fileView\.error \?/);
   assert.match(workbench, />重试读取</);
   assert.match(workbench, /const finishTargetRelink = useCallback/);
-  assert.match(workbench, /重新选择目标/);
+  assert.match(workbench, /选择新位置/);
+  assert.match(workbench, /开始重新定位/);
+  assert.match(workbench, /resumeSubmissionAfterRelinkRef/);
+  assert.match(workbench, /normalizeCurrentGlobalComments/);
+  assert.match(workbench, /pendingProjectOpenRef/);
+  assert.doesNotMatch(workbench, /project-switch-(?:blocked|new-edit|persist-blocked)/u);
+  assert.match(
+    workbench,
+    /const pending = pendingProjectOpenRef\.current;[\s\S]*?void openProject\(pending\.recentPath\)/u,
+  );
   assert.match(workbench, /terminalRun \?/);
   assert.match(workbench, /返回编辑/);
   assert.match(workbench, /调整要求后重试/);
@@ -160,7 +241,8 @@ test("the verified AI file identity appears only after the user opens the ready 
   assert.doesNotMatch(workbench, /className="ai-file-opened-card"/);
   assert.doesNotMatch(workbench, /关闭新文件打开提示/);
   assert.match(workbench, /打开最新版/);
-  assert.match(workbench, /\/ready-version\/activate/);
+  assert.match(workbench, /bridgeClient\.activateReadyVersion/);
+  assert.match(bridgeClient, /"\/ready-version\/activate"/);
   assert.match(
     workbench,
     /<strong[\s\S]*?title=\{activeOpenedAiVersionNotice\?\.fileName \|\| projectName\}[\s\S]*?\{activeOpenedAiVersionNotice\?\.fileName \|\| projectName\}/,
@@ -189,9 +271,9 @@ test("ready polling never opens automatically; the adopted marker ends on first 
   assert.doesNotMatch(statusFlow, /openCommittedVersion\(/);
   const activationFlow = workbench.slice(
     workbench.indexOf("const activateReadyResult"),
-    workbench.indexOf("const waiveCurrentValidation"),
+    workbench.indexOf("const processRunStatus"),
   );
-  assert.match(activationFlow, /\/ready-version\/activate/);
+  assert.match(activationFlow, /bridgeClient\.activateReadyVersion/);
   assert.match(activationFlow, /await openCommittedVersion\(run, mergedPayload\)/);
   assert.match(
     workbench,
@@ -207,4 +289,29 @@ test("ready polling never opens automatically; the adopted marker ends on first 
   );
   assert.match(workbench, /className="window-file"/);
   assert.doesNotMatch(workbench, /className="project-switcher"/);
+});
+
+test("browser preview stays read-only and comment creation keeps one unsaved draft", () => {
+  assert.match(workbench, /const \[runtimeCapabilitiesReady, setRuntimeCapabilitiesReady\]/u);
+  assert.match(workbench, /const \[browserPreviewOnly, setBrowserPreviewOnly\]/u);
+  assert.match(workbench, /disabled=\{browserPreviewOnly \|\| runInProgress/u);
+  assert.match(workbench, /: !browserPreviewOnly \? \(/u);
+  assert.match(workbench, /readOnly=\{viewMode === "history"\}/u);
+  assert.match(workbench, /浏览器预览 · 只读/u);
+  assert.match(workbench, /操作不会保存/u);
+  assert.match(workbench, /const interactionPreviewHtml = useMemo/u);
+  assert.match(workbench, /BROWSER_PREVIEW_LOGO_PLACEHOLDER/u);
+  assert.doesNotMatch(workbench, /fetch\("\/brand-logo\.png"/u);
+  assert.match(workbench, /html=\{interactionPreviewHtml\}/u);
+  assert.doesNotMatch(workbench, /startPreviewHandoff/u);
+  assert.doesNotMatch(workbench, /previewAttachments/u);
+
+  assert.doesNotMatch(workbench, /type CommentDraft = \{/u);
+  assert.doesNotMatch(workbench, /const stashCurrentComposerDraft = useCallback/u);
+  assert.doesNotMatch(workbench, /saved-comment-drafts/u);
+  assert.match(workbench, /title: "上一条评论还未保存"/u);
+  assert.match(workbench, /action: \{ id: "resume-draft", label: "继续填写" \}/u);
+  assert.match(workbench, /const resumeCurrentComposer = useCallback/u);
+  assert.doesNotMatch(workbench, /latest\.commentDrafts|legacyCommentDrafts/u);
+  assert.match(workbench, /const pendingSendItemCount = activeCommentCount;/u);
 });

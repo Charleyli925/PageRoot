@@ -324,7 +324,7 @@ test("canvas and workbench consume deterministic mappings before generic fallbac
     "exactGlobalPageTarget(target)",
     "!isGlobalPageTarget(target) && canLocateTarget(target)",
     ": canLocateTarget(target)",
-    "independentCommentTarget(draftTarget, commentId)",
+    "independentCommentTarget(currentTarget, commentId)",
     "relinkSelectionArmedRef.current",
   ]) {
     assert.match(
@@ -332,6 +332,48 @@ test("canvas and workbench consume deterministic mappings before generic fallbac
       new RegExp(required.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
     );
   }
+});
+
+test("legacy whole-page comments normalize before recovery and submission", async () => {
+  const workbench = await readFile(
+    new URL("../app/workbench.tsx", import.meta.url),
+    "utf8",
+  );
+  const globalTargetPolicy = workbench.slice(
+    workbench.indexOf("function isGlobalPageTarget"),
+    workbench.indexOf("function displayVersionLabel"),
+  );
+  const recordHydration = workbench.slice(
+    workbench.indexOf("function selectionFromRecord"),
+    workbench.indexOf("type PersistedTargetRef"),
+  );
+  const submission = workbench.slice(
+    workbench.indexOf("const generateRequest"),
+    workbench.indexOf("const openCommittedVersion"),
+  );
+
+  assert.match(
+    globalTargetPolicy,
+    /target\.selector\.trim\(\)\.toLowerCase\(\) === "body"[\s\S]*?target\.level === "module"/u,
+  );
+  assert.doesNotMatch(
+    globalTargetPolicy.slice(
+      0,
+      globalTargetPolicy.indexOf("function exactGlobalPageTarget"),
+    ),
+    /tagName/u,
+    "whole-page identity must not depend on a field omitted by legacy records",
+  );
+  assert.match(
+    recordHydration,
+    /isGlobalPageTarget\(selection\)[\s\S]*?exactGlobalPageTarget\(selection\)/u,
+  );
+  assert.ok(
+    submission.match(/normalizeCurrentGlobalComments\(\)/gu)?.length >= 2,
+    "submission must normalize before and after lazy project registration",
+  );
+  assert.match(submission, /unsafeCommentTargetsNotice\(unsafeTargets\)/u);
+  assert.match(submission, /unsafeCommentTargetsNotice\(unsafeRegisteredTargets\)/u);
 });
 
 test("style writes use source-safe values, canonical target identity, and only active cascade rules", async () => {
@@ -570,7 +612,10 @@ test("canvas hides insertion affordances while retaining target recovery and loc
     canvas.indexOf("commentMarkers.map"),
     canvas.indexOf("className={styles.globalCommentButton}", canvas.indexOf("commentMarkers.map")),
   );
-  assert.match(existingCommentMarker, /selectTarget\(marker\.selection, \{ showToolbar: true \}\)/u);
+  assert.match(
+    existingCommentMarker,
+    /selectTarget\(marker\.selection, \{ reveal: false, showToolbar: true \}\)/u,
+  );
   assert.doesNotMatch(existingCommentMarker, /onRequestCommentRef/u);
 
   assert.doesNotMatch(css, /\.insertionButton|\.insertionLine|\.insertionPoint|\.insertionPlus/u);
@@ -708,7 +753,8 @@ test("native editing uses the authored DOM, browser Selection, and a measured ho
   assert.match(canvas, /reportBlockedEdit\(new Error\(capability\.userMessage\)\)/u);
   assert.match(canvas, /nativeLogicalText\(hostElement\) !== projection\.text/u);
   assert.match(canvas, /可选中文字后添加评论/u);
-  assert.match(canvas, /继续浏览和选择文字/u);
+  assert.match(canvas, /这处内容暂时不能直接编辑/u);
+  assert.match(canvas, /页面内容没有改变。你仍可以选择文字，或添加评论说明要怎么改。/u);
   assert.match(capability, /EDITABLE: "native-editable"/u);
   assert.match(capability, /SELECT_COMMENT: "select-comment"/u);
   assert.match(capability, /COMMENT_ONLY: "comment-only"/u);
@@ -830,7 +876,15 @@ test("canvas root whitespace clears selection instead of selecting the document 
 });
 
 test("canvas maps native DOM selections to source-safe patches and promotes media to modules", async () => {
-  const [canvas, nativeController, sourceMap, sourcePatch, workbench, preflight] = await Promise.all([
+  const [
+    canvas,
+    nativeController,
+    sourceMap,
+    sourcePatch,
+    workbench,
+    preflight,
+    previewSandbox,
+  ] = await Promise.all([
     readFile(
       new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url),
       "utf8",
@@ -853,6 +907,10 @@ test("canvas maps native DOM selections to source-safe patches and promotes medi
     ),
     readFile(
       new URL("../app/components/native-edit-runtime-preflight.ts", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL("../app/components/html-preview-sandbox.js", import.meta.url),
       "utf8",
     ),
   ]);
@@ -967,7 +1025,11 @@ test("canvas maps native DOM selections to source-safe patches and promotes medi
   assert.match(canvas, /inferSelectionLevel\(candidate\) === "module"/u);
   assert.match(canvas, /pointer-events: none !important/u);
   assert.match(canvas, /noscript \{[\s\S]*?display: none !important/u);
-  assert.match(canvas, /prepareVerifiedFrameDocument[\s\S]*?editorStyle\.textContent = EDITOR_DOCUMENT_STYLES/u);
+  assert.match(canvas, /prepareVerifiedFrameDocument[\s\S]*?editorStyles: EDITOR_DOCUMENT_STYLES/u);
+  assert.match(
+    previewSandbox,
+    /prepareVerifiedFrameDocument[\s\S]*?editorStyle\.textContent = String\(editorStyles \|\| ""\)/u,
+  );
   assert.match(canvas, /pendingToolbarVisibleRef\.current = toolbarVisibleRef\.current/u);
   assert.match(canvas, /showToolbar: pendingToolbarVisible/u);
   assert.match(canvas, /rangeComputedStyles\.every\(styleIsBold\)/u);
@@ -991,7 +1053,7 @@ test("handoff commits a pending source edit before recapturing and freezing comm
     handoffStart,
   );
   const initialCapture = workbench.indexOf(
-    "let activeComments = commentsRef.current.filter",
+    "let activeComments = normalizeCurrentGlobalComments();",
     handoffStart,
   );
   const ensure = workbench.indexOf(
@@ -999,7 +1061,7 @@ test("handoff commits a pending source edit before recapturing and freezing comm
     initialCapture,
   );
   const recapture = workbench.indexOf(
-    "activeComments = commentsRef.current.filter",
+    "activeComments = normalizeCurrentGlobalComments();",
     ensure,
   );
   const revalidate = workbench.indexOf(
@@ -1045,13 +1107,16 @@ test("handoff commits a pending source edit before recapturing and freezing comm
     workbench.slice(freezeGuard, projectLock),
     /!frozen[\s\S]*?\|\| !frozen\.ok[\s\S]*?return;/u,
   );
-  const flush = workbench.indexOf("await flushAutosave(freezeCutoffRevision)", projectLock);
-  const requestDispatch = workbench.indexOf("requestDispatched = true", flush);
-  assert.ok(flush > projectLock);
-  assert.ok(requestDispatch > flush);
+  const drain = workbench.indexOf(
+    'await drainCoordinatorRef.current.drain("submit"',
+    projectLock,
+  );
+  const requestDispatch = workbench.indexOf("requestDispatched = true", drain);
+  assert.ok(drain > projectLock);
+  assert.ok(requestDispatch > drain);
   assert.match(
-    workbench.slice(flush, requestDispatch),
-    /lastPersistedRevisionRef\.current !== freezeCutoffRevision[\s\S]*?editRevisionRef\.current !== freezeCutoffRevision[\s\S]*?persistedSourceSha256 !== frozen\.sourceSha256/u,
+    workbench.slice(drain, requestDispatch),
+    /!drained\.ok[\s\S]*?lastPersistedRevisionRef\.current !== freezeCutoffRevision[\s\S]*?editRevisionRef\.current !== freezeCutoffRevision[\s\S]*?persistedSourceSha256 !== frozen\.sourceSha256/u,
     "handoff must prove that the exact frozen revision and hash were persisted before dispatch",
   );
 });

@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import {
   currentEditorFrame,
   documentToken,
+  ensureSourceEditingTestRuntime,
   exportCurrentHtml,
   keyShortcut,
   replaceUniqueBytes,
@@ -45,6 +46,7 @@ function escapeAttributeValue(value) {
 
 async function loadRealHtml(page, sourcePath, source) {
   await page.goto("/");
+  await ensureSourceEditingTestRuntime(page);
   const name = path.basename(sourcePath);
   // Setting the hidden input directly bypasses prepareProjectSwitch(), so wait
   // for the initial canvas to reach the same commit-ready state as the real UI.

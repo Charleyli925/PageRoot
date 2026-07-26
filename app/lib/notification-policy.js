@@ -10,18 +10,13 @@ const IPC_ERROR_PREFIX =
 const ERROR_CLASS_PREFIX =
   /^(?:ProjectFileError|TypeError|RangeError|Error):\s*/i;
 
-const BLOCKING_WARNING_KEYS = new Set([
-  "ai-submit-commit-blocked",
-  "ai-submit-freeze-blocked",
-  "browser-file-error",
-  "navigation-commit-blocked",
-  "preview-commit-blocked",
-  "project-rules-unsaved",
-  "project-switch-commit-blocked",
-  "project-switch-persist-blocked",
-  "submit-blocked",
-  "unfinished-comment-draft",
-  "user-flush-commit-blocked",
+const NOTICE_DISPOSITIONS = new Set([
+  "silent-recover",
+  "defer-and-resume",
+  "direct-action",
+  "user-choice",
+  "background-result",
+  "inform-in-place",
 ]);
 
 /**
@@ -39,9 +34,32 @@ export function noticeTone(value) {
 export function noticeAutoDismissMs(notice) {
   if (!notice) return null;
   const tone = noticeTone(notice.tone);
-  if (notice.sticky || notice.action || tone === "error") return null;
+  const disposition = noticeDisposition(notice);
+  if (
+    notice.sticky
+    || tone === "error"
+    || disposition === "direct-action"
+    || disposition === "user-choice"
+  ) return null;
+  if (disposition === "background-result") return 7_000;
   if (tone === "warning") return 5_000;
   return 2_500;
+}
+
+/**
+ * Decide who owns the next step before deciding whether to interrupt the user.
+ * Presentation is opt-in. Severity and the existence of a button do not prove
+ * that the user owns recovery, so callers without an explicit disposition stay
+ * in their existing control or panel instead of creating a global interruption.
+ *
+ * @param {{ disposition?: string, tone?: string, sticky?: boolean, dedupeKey?: string, action?: unknown } | null} notice
+ * @returns {"silent-recover" | "defer-and-resume" | "direct-action" | "user-choice" | "background-result" | "inform-in-place"}
+ */
+export function noticeDisposition(notice) {
+  if (notice && NOTICE_DISPOSITIONS.has(notice.disposition)) {
+    return notice.disposition;
+  }
+  return "inform-in-place";
 }
 
 /**
@@ -53,10 +71,10 @@ export function noticeAutoDismissMs(notice) {
  */
 export function shouldPresentNotice(notice) {
   if (!notice) return true;
-  const tone = noticeTone(notice.tone);
-  if (tone === "error" || notice.sticky || notice.action) return true;
-  return tone === "warning"
-    && BLOCKING_WARNING_KEYS.has(String(notice.dedupeKey || ""));
+  const disposition = noticeDisposition(notice);
+  return disposition === "direct-action"
+    || disposition === "user-choice"
+    || disposition === "background-result";
 }
 
 /**
@@ -82,15 +100,10 @@ export function shouldReplaceNotice(current, next) {
   }
   const currentTone = noticeTone(current.tone);
   const nextTone = noticeTone(next.tone);
-  const nextNeedsDecision = Boolean(
-    next.sticky
-    || next.action
-    || nextTone === "error"
-    || (
-      nextTone === "warning"
-      && BLOCKING_WARNING_KEYS.has(String(next.dedupeKey || ""))
-    ),
-  );
+  const nextDisposition = noticeDisposition(next);
+  const nextNeedsDecision =
+    nextDisposition === "direct-action"
+    || nextDisposition === "user-choice";
   if (
     (current.sticky || currentTone === "error")
     && NOTICE_PRIORITIES[nextTone] < NOTICE_PRIORITIES[currentTone]

@@ -13,7 +13,7 @@ test("AI smoke configuration selects one success and one fail-closed scope path"
   const selected = titles.filter((title) => smokeConfig.grep.test(title));
   assert.deepEqual(selected, [
     "a verified AI result stays pending until the user opens the new HTML",
-    "a soft out-of-scope AI return waits for an explicit waiver and open",
+    "a soft out-of-scope AI return is audited without blocking the ready version",
   ]);
   assert.match(
     source,
