@@ -98,7 +98,7 @@ function resilientEditorFrame(page) {
   };
 }
 
-async function ensureDesktopRendererTestBridge(page) {
+export async function ensureDesktopRendererTestBridge(page) {
   const hasDesktopBridge = await page.evaluate(() => Boolean(window.htmlAIProjects));
   if (hasDesktopBridge) return;
 
