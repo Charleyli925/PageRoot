@@ -2032,6 +2032,21 @@ async function readRuntime(context, { hydrateArtifacts = true } = {}) {
         },
       );
     }
+    if (
+      hasArtifactRevision
+      && Number.isSafeInteger(runtimeDraftRevision)
+      && artifactDraftRevision > runtimeDraftRevision + 1
+    ) {
+      throw new HttpError(
+        409,
+        "DRAFT_ARTIFACT_REVISION_JUMP",
+        "draft/annotations.json is more than one revision ahead of its runtime pointer.",
+        {
+          runtimeDraftRevision,
+          artifactDraftRevision,
+        },
+      );
+    }
     const artifactBuffer = await readFile(draftPath);
     const artifactSha256 = sha256(artifactBuffer);
     if (

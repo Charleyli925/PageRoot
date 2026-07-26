@@ -165,13 +165,11 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   );
   assert.match(
     mainProcess,
-    /webContents\.send\(APP_CHANNELS\.workspaceUnavailable,\s*issue\)/,
+    /workspaceRecoveryMailbox\.publish\([\s\S]*?delivery\.deliverToRenderer[\s\S]*?webContents\.send\([\s\S]*?APP_CHANNELS\.workspaceUnavailable[\s\S]*?delivery\.issue[\s\S]*?return;/,
+    "only a renderer that acknowledged its recovery listener suppresses the native modal",
   );
-  assert.match(
-    mainProcess,
-    /webContents\.send\(APP_CHANNELS\.workspaceUnavailable,\s*issue\);[\s\S]*?if \(rendererHasLoaded\) \{[\s\S]*?return;[\s\S]*?const options = \{/,
-    "a loaded renderer owns workspace recovery without a duplicate native modal",
-  );
+  assert.match(mainProcess, /APP_CHANNELS\.workspaceRecoveryReady/);
+  assert.match(mainProcess, /workspaceRecoveryMailbox\.acknowledgeRendererReady\(\)/);
   assert.match(mainProcess, /requestRendererClose/);
   assert.match(mainProcess, /if \(!rendererHasLoaded\)/);
   assert.match(mainProcess, /coordinateApplicationExit/);
@@ -242,6 +240,10 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.match(preload, /reportBlocked/);
   assert.match(preload, /onCloseAborted/);
   assert.match(preload, /onWorkspaceUnavailable/);
+  assert.match(
+    preload,
+    /ipcRenderer\.invoke\(appChannels\.workspaceRecoveryReady\)/,
+  );
   assert.match(preload, /relaunch:\s*\(\) => ipcRenderer\.invoke\(appChannels\.relaunch\)/);
   assert.match(preload, /forgetRecent:\s*\(sourcePath\)/);
   assert.doesNotMatch(preload, /saveHtml|saveHtmlAs/);

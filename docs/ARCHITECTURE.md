@@ -74,9 +74,10 @@ snapshot is not a recovery action.
 
 A draft artifact stores its own revision, timestamp and operation
 acknowledgements. If the Bridge stops after atomically replacing that artifact
-but before refreshing the runtime pointer, the next read adopts the newer
-artifact revision and verifies its Hash; an older artifact than the runtime
-pointer or a same-revision Hash mismatch fails closed.
+but before refreshing the runtime pointer, the next read may adopt an artifact
+that is exactly one revision ahead and verifies its Hash. A larger forward jump
+is not a valid crash window and fails closed, as does an artifact older than the
+runtime pointer or a same-revision Hash mismatch.
 
 A close or navigation boundary performs a final draft verification through the
 same session. If the aggregate fingerprint is already acknowledged, that
@@ -88,4 +89,13 @@ The renderer is sandboxed with context isolation and no Node integration. The pr
 
 Every renderer request to the Bridge is bounded: ordinary state/file operations use 15 seconds, attachments use 30 seconds, and Request creation uses 60 seconds. Busy refs are released in `finally`, so an unresponsive local service cannot leave a permanent UI lock. An unknown Request POST outcome remains fail-closed and is reconciled against the durable workspace state before editing resumes.
 
-If the utility Bridge exits after startup, the main process sends the narrow `html-app:workspace-unavailable` event and shows a two-path native recovery dialog. The renderer keeps in-memory content visible and exportable while blocking new Bridge-backed mutations. `html-app:relaunch` still runs the normal renderer close-readiness handshake; an unsafe relaunch is rejected until the user exports or resolves pending writes.
+If the utility Bridge exits after startup, the main process retains one
+workspace-recovery issue. It sends the narrow
+`html-app:workspace-unavailable` event only after the Workbench listener
+acknowledges readiness; a late listener or renderer reload receives the retained
+issue through the readiness handshake. Before that acknowledgement, the
+two-path native recovery dialog remains the fail-closed fallback. The renderer
+keeps in-memory content visible and exportable while blocking new Bridge-backed
+mutations. `html-app:relaunch` still runs the normal renderer close-readiness
+handshake; an unsafe relaunch is rejected until the user exports or resolves
+pending writes.

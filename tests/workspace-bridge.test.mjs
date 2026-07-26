@@ -3391,6 +3391,39 @@ test("a draft artifact written before a Bridge crash restores revision and ackno
   assert.equal(replayed.body.activeDraft.draftRevision, 1);
 });
 
+test("a draft artifact cannot jump beyond the single-write crash window", async (t) => {
+  const environment = await createEnvironment(t);
+  const sourcePath = join(environment.sources, "draft-artifact-jump.html");
+  await writeFile(sourcePath, htmlPage("Draft artifact jump"), "utf8");
+  const bridge = await environment.start();
+  const opened = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+  const annotationsPath = join(
+    environment.workspace,
+    "projects",
+    opened.projectId,
+    "draft",
+    "annotations.json",
+  );
+  const annotations = JSON.parse(await readFile(annotationsPath, "utf8"));
+  annotations.draftRevision = 99;
+  annotations.comments = [{
+    commentId: "comment_impossible_jump",
+    text: "must never become authoritative",
+  }];
+  await writeFile(
+    annotationsPath,
+    `${JSON.stringify(annotations, null, 2)}\n`,
+  );
+
+  const rejected = await openWorkspace(bridge.baseUrl, sourcePath);
+  assert.equal(rejected.response.status, 409, JSON.stringify(rejected.body));
+  assert.equal(rejected.body.error.code, "DRAFT_ARTIFACT_REVISION_JUMP");
+  assert.deepEqual(rejected.body.error.details, {
+    runtimeDraftRevision: 0,
+    artifactDraftRevision: 99,
+  });
+});
+
 test("corrupt frozen annotations do not block status polling or cancellation", async (t) => {
   const environment = await createEnvironment(t);
   const sourcePath = join(environment.sources, "cancel-corrupt-annotations.html");

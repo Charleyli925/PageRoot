@@ -22,6 +22,7 @@ const appChannels = Object.freeze({
   closeResult: "html-app:close-result",
   closeAborted: "html-app:close-aborted",
   workspaceUnavailable: "html-app:workspace-unavailable",
+  workspaceRecoveryReady: "html-app:workspace-recovery-ready",
   relaunch: "html-app:relaunch",
 });
 const integrationChannels = Object.freeze({
@@ -145,6 +146,16 @@ const runtimeConfig = Object.freeze({
 const closeListeners = new Map();
 const closeAbortListeners = new Map();
 const workspaceUnavailableListeners = new Map();
+function normalizedWorkspaceIssue(payload) {
+  return Object.freeze({
+    title: typeof payload?.title === "string"
+      ? payload.title
+      : "本地项目资料暂时不可用",
+    message: typeof payload?.message === "string"
+      ? payload.message
+      : "当前页面内容仍保留，可以导出后重新打开源页。",
+  });
+}
 const appLifecycleApi = Object.freeze({
   onPrepareClose: (listener) => {
     if (typeof listener !== "function") {
@@ -194,16 +205,21 @@ const appLifecycleApi = Object.freeze({
     if (typeof listener !== "function") {
       throw new TypeError("onWorkspaceUnavailable listener must be a function.");
     }
-    const wrapped = (_event, payload) => listener(Object.freeze({
-      title: typeof payload?.title === "string"
-        ? payload.title
-        : "本地项目资料暂时不可用",
-      message: typeof payload?.message === "string"
-        ? payload.message
-        : "当前页面内容仍保留，可以导出后重新打开源页。",
-    }));
+    const wrapped = (_event, payload) => listener(
+      normalizedWorkspaceIssue(payload),
+    );
     workspaceUnavailableListeners.set(listener, wrapped);
     ipcRenderer.on(appChannels.workspaceUnavailable, wrapped);
+    void ipcRenderer.invoke(appChannels.workspaceRecoveryReady)
+      .then((payload) => {
+        if (
+          workspaceUnavailableListeners.get(listener) === wrapped
+          && payload?.issue
+        ) {
+          wrapped(null, payload.issue);
+        }
+      })
+      .catch(() => {});
     return () => {
       const registered = workspaceUnavailableListeners.get(listener);
       if (!registered) return;

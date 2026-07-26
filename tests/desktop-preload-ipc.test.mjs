@@ -126,12 +126,21 @@ test("preload exposes workspace failure recovery and a narrow relaunch action", 
   const calls = [];
   const preload = await loadPreloadApis(async (...args) => {
     calls.push(args);
+    if (args[0] === "html-app:workspace-recovery-ready") {
+      return {
+        issue: {
+          title: "启动期间本地项目资料不可用",
+          message: "已为较晚注册的监听器保留恢复信息。",
+        },
+      };
+    }
     return { relaunched: false };
   });
   const issues = [];
   const unsubscribe = preload.lifecycle.onWorkspaceUnavailable((issue) => {
     issues.push(issue);
   });
+  await new Promise((resolve) => setImmediate(resolve));
 
   preload.emit("html-app:workspace-unavailable", {
     title: "本地项目资料暂时不可用",
@@ -139,16 +148,25 @@ test("preload exposes workspace failure recovery and a narrow relaunch action", 
   });
   assert.deepEqual(
     JSON.parse(JSON.stringify(issues)),
-    [{
-      title: "本地项目资料暂时不可用",
-      message: "请先导出当前编辑。",
-    }],
+    [
+      {
+        title: "启动期间本地项目资料不可用",
+        message: "已为较晚注册的监听器保留恢复信息。",
+      },
+      {
+        title: "本地项目资料暂时不可用",
+        message: "请先导出当前编辑。",
+      },
+    ],
   );
   assert.deepEqual(
     await preload.lifecycle.relaunch(),
     { relaunched: false },
   );
-  assert.deepEqual(calls[0], ["html-app:relaunch"]);
+  assert.deepEqual(calls, [
+    ["html-app:workspace-recovery-ready"],
+    ["html-app:relaunch"],
+  ]);
   unsubscribe();
 });
 
