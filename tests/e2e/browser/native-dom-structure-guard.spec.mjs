@@ -854,7 +854,7 @@ test("a final composition input after non-empty compositionend stays in one epoc
     }));
   });
 
-  expect(await currentCaseHtml(editor, caseId)).toContain(">你好</em>");
+  await expect.poll(() => currentCaseHtml(editor, caseId)).toContain(">你好</em>");
   expect(await currentCaseHtml(editor, caseId)).not.toContain("<i>");
   expect((await exportCurrentHtml(page)).equals(replaceUniqueBytes(
     source,
@@ -915,7 +915,7 @@ for (const compositionEndData of ["", "你好"]) {
       }));
     }, compositionEndData);
 
-    expect(await currentCaseHtml(editor, caseId)).toContain(">你好</em>");
+    await expect.poll(() => currentCaseHtml(editor, caseId)).toContain(">你好</em>");
     expect(await currentCaseHtml(editor, caseId)).not.toContain("<i>");
     expect((await exportCurrentHtml(page)).equals(replaceUniqueBytes(
       source,
@@ -966,7 +966,7 @@ test("non-empty compositionend remains committed when its announced input tail i
   });
 
   await page.waitForTimeout(150);
-  expect(await currentCaseHtml(editor, caseId)).toContain(">你好</em>");
+  await expect.poll(() => currentCaseHtml(editor, caseId)).toContain(">你好</em>");
   expect(await currentCaseHtml(editor, caseId)).not.toContain("<i>");
   expect((await exportCurrentHtml(page)).equals(replaceUniqueBytes(
     source,
@@ -1045,7 +1045,7 @@ test("one export shortcut inside the optional terminal grace completes exactly o
   await page.waitForTimeout(150);
   expect(downloadCount).toBe(1);
   expect(exported.equals(expected)).toBe(true);
-  expect(await currentCaseHtml(editor, caseId)).toContain(">你好</em>");
+  await expect.poll(() => currentCaseHtml(editor, caseId)).toContain(">你好</em>");
   expect(await currentCaseHtml(editor, caseId)).not.toContain("<i>");
 });
 
@@ -1175,7 +1175,7 @@ for (const barrier of ["immediate", "stable"]) {
       inheritedProvisional: null,
       restoredText: "Word",
     });
-    expect(await currentCaseHtml(editor, caseId)).toContain(">你好</em>");
+    await expect.poll(() => currentCaseHtml(editor, caseId)).toContain(">你好</em>");
     expect(await currentCaseHtml(editor, caseId)).not.toContain("<i>");
     expect(await currentCaseHtml(editor, caseId)).not.toContain("ni hao");
     expect((await exportCurrentHtml(page)).equals(replaceUniqueBytes(
@@ -1296,7 +1296,7 @@ test("a non-composing final input before empty compositionend commits the compos
     input: { data: "你好", inputType: "insertText", isComposing: false },
     compositionEndData: "",
   });
-  expect(await currentCaseHtml(editor, caseId)).toContain(">你好</em>");
+  await expect.poll(() => currentCaseHtml(editor, caseId)).toContain(">你好</em>");
   expect(await currentCaseHtml(editor, caseId)).not.toContain("<i>");
   expect((await exportCurrentHtml(page)).equals(replaceUniqueBytes(
     source,
@@ -1469,7 +1469,7 @@ test("an empty compositionend can be completed by a later non-empty final input"
     }));
   });
 
-  expect(await currentCaseHtml(editor, caseId)).toContain(">你好</em>");
+  await expect.poll(() => currentCaseHtml(editor, caseId)).toContain(">你好</em>");
   expect(await currentCaseHtml(editor, caseId)).not.toContain("<i>");
   expect((await exportCurrentHtml(page)).equals(replaceUniqueBytes(
     source,
@@ -1508,7 +1508,7 @@ test("shared-prefix IME commit uses the frozen selection instead of a minimal di
     }));
   });
 
-  expect(await currentCaseHtml(editor, caseId)).toContain(">World</em>");
+  await expect.poll(() => currentCaseHtml(editor, caseId)).toContain(">World</em>");
   expect((await exportCurrentHtml(page)).equals(replaceUniqueBytes(
     source,
     "<em>Word</em>",
@@ -1553,7 +1553,7 @@ for (const temporaryTree of ["span", "nested-i-span"]) {
       }));
     }, temporaryTree);
 
-    expect(await currentCaseHtml(editor, caseId)).toContain(">你好</em>");
+    await expect.poll(() => currentCaseHtml(editor, caseId)).toContain(">你好</em>");
     expect(await currentCaseHtml(editor, caseId)).not.toMatch(/<(?:i|span)>/u);
     expect((await exportCurrentHtml(page)).equals(replaceUniqueBytes(
       source,
@@ -1602,7 +1602,7 @@ test("a second input is blocked until provisional IME DOM is canonicalized", asy
   });
 
   expect(secondInputPrevented).toBe(true);
-  expect(await currentCaseHtml(editor, caseId)).toContain(">你好</em>");
+  await expect.poll(() => currentCaseHtml(editor, caseId)).toContain(">你好</em>");
   expect((await exportCurrentHtml(page)).equals(replaceUniqueBytes(
     source,
     "<em>Word</em>",
@@ -1831,7 +1831,7 @@ test("a backward complete-word composition commits through a temporary wrapper",
     }));
   });
 
-  expect(await currentCaseHtml(editor, caseId)).toContain(">你好</em>");
+  await expect.poll(() => currentCaseHtml(editor, caseId)).toContain(">你好</em>");
   expect(await currentCaseHtml(editor, caseId)).not.toContain("<i>");
   expect(await editor.getAttribute("data-edit-block-detail")).toBeNull();
   expect((await exportCurrentHtml(page)).equals(replaceUniqueBytes(
@@ -1887,7 +1887,7 @@ test("a collapsed caret inside em commits composition and lands after the insert
     }));
   });
 
-  expect(await currentCaseHtml(editor, caseId)).toContain(">Wo你好rd</em>");
+  await expect.poll(() => currentCaseHtml(editor, caseId)).toContain(">Wo你好rd</em>");
   expect(await selectionSnapshot(frame, caseId)).toMatchObject({
     collapsed: true,
     anchorOffset: insertionOffset + 2,
