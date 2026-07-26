@@ -14,6 +14,7 @@ const smokeTitles = [
   "nested bold, italic, color, size, span attributes and outside bytes survive an internal edit",
   "one text edit changes only the authorized UTF-8 bytes, including BOM and CRLF",
   "visible empty inline boundary stays selectable/commentable and never becomes editable",
+  "one unsaved comment blocks a second target and Canvas selection keeps its scroll",
 ];
 const escapedTitles = smokeTitles.map((title) => title.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"));
 

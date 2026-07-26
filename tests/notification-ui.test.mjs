@@ -281,7 +281,7 @@ test("ready polling never opens automatically; the adopted marker ends on first 
   assert.doesNotMatch(workbench, /className="project-switcher"/);
 });
 
-test("browser preview is a formal read-only route and unfinished comments are preserved", () => {
+test("browser preview stays read-only and comment creation keeps one unsaved draft", () => {
   assert.match(workbench, /const \[runtimeCapabilitiesReady, setRuntimeCapabilitiesReady\]/u);
   assert.match(workbench, /const \[browserPreviewOnly, setBrowserPreviewOnly\]/u);
   assert.match(workbench, /disabled=\{browserPreviewOnly \|\| runInProgress/u);
@@ -296,10 +296,12 @@ test("browser preview is a formal read-only route and unfinished comments are pr
   assert.doesNotMatch(workbench, /startPreviewHandoff/u);
   assert.doesNotMatch(workbench, /previewAttachments/u);
 
-  assert.match(workbench, /type CommentDraft = \{/u);
-  assert.match(workbench, /const stashCurrentComposerDraft = useCallback/u);
-  assert.match(workbench, /const restoreCommentDraft = useCallback/u);
-  assert.match(workbench, /commentDrafts: savedCommentDrafts\.map/u);
-  assert.match(workbench, /id: "review-comment-drafts"/u);
-  assert.match(workbench, /条评论还没有完成/u);
+  assert.doesNotMatch(workbench, /type CommentDraft = \{/u);
+  assert.doesNotMatch(workbench, /const stashCurrentComposerDraft = useCallback/u);
+  assert.doesNotMatch(workbench, /saved-comment-drafts/u);
+  assert.match(workbench, /title: "上一条评论还未保存"/u);
+  assert.match(workbench, /action: \{ id: "resume-draft", label: "继续填写" \}/u);
+  assert.match(workbench, /const resumeCurrentComposer = useCallback/u);
+  assert.doesNotMatch(workbench, /latest\.commentDrafts|legacyCommentDrafts/u);
+  assert.match(workbench, /const pendingSendItemCount = activeCommentCount;/u);
 });

@@ -379,11 +379,28 @@ test("header prioritizes the filename and keeps the approved action order", () =
     workbench.indexOf("</header>", headerStart),
   );
   assert.match(header, /className="window-file"/);
+  assert.match(header, /className="window-file-icon"[\s\S]*?<FileHtmlIcon/);
   assert.match(header, /className="save-status"/);
+  assert.match(
+    workbench,
+    /const canShowCurrentFileInFolder = Boolean\([\s\S]*?sourcePath[\s\S]*?window\.htmlAIProjects\?\.showInFolder/,
+  );
+  assert.match(
+    header,
+    /canShowCurrentFileInFolder[\s\S]*?className="window-file-folder-action"[\s\S]*?onClick=\{\(\) => void showProjectInFolder\(\)\}[\s\S]*?>\s*在文件夹中打开\s*</,
+  );
   assert.doesNotMatch(header, /brand-logo\.png|className="brand"|className="update-badge"/);
   assert.match(
     header,
     /updateAvailable[\s\S]*?className="header-update-badge"[\s\S]*?>\s*Update\s*</,
+  );
+  assert.match(
+    styles,
+    /\.window-file-copy > strong\s*\{[\s\S]*?font-size:\s*17px/,
+  );
+  assert.match(
+    styles,
+    /\.window-file-folder-action\s*\{[\s\S]*?min-height:\s*34px/,
   );
   const editPreview = header.indexOf('className="canvas-mode-switch"');
   const project = header.indexOf('className="project-button"');
@@ -473,6 +490,16 @@ test("QoderWork handoff exposes a truthful process board and manual open action"
 });
 
 test("processing keeps its decision surface dismissible and project navigation available", () => {
+  const recoveredRunStart = workbench.indexOf(
+    "if (recoveredRun && isLockedLifecycle(recoveredRun.status))",
+  );
+  const recoveredRunEnd = workbench.indexOf("} else {", recoveredRunStart);
+  const recoveredRun = workbench.slice(recoveredRunStart, recoveredRunEnd);
+  assert.ok(recoveredRunStart >= 0 && recoveredRunEnd > recoveredRunStart);
+  assert.match(
+    recoveredRun,
+    /projectHydratingRef\.current[\s\S]*?setHandoffPreviewOpen\(false\)[\s\S]*?setCanvasMode\("edit"\)[\s\S]*?setDrawer\("handoff"\)/,
+  );
   assert.match(
     workbench,
     /className="project-button"[\s\S]*?disabled=\{projectHydrating \|\| viewTransitioning \|\| attachmentUploadCount > 0\}/,
@@ -779,7 +806,12 @@ test("comment composer is explicit, transient and horizontally contained", () =>
   assert.match(workbench, /beginTargetRelink\("__composer"\)/);
   assert.match(workbench, /评论和附件仍保留，重新关联后即可发送/);
   assert.match(workbench, /recoveredDraftTarget\.id !== target\.id/);
+  assert.match(workbench, /上一条评论还未保存/);
+  assert.match(workbench, /请先点击“评论”保存；保存后仍可修改/);
+  assert.match(workbench, /const resumeCurrentComposer = useCallback/);
+  assert.doesNotMatch(workbench, /saved-comment-drafts|review-comment-drafts/);
   assert.match(workbench, /const activeCommentCount = activeCommentItems\.length/);
+  assert.match(workbench, /const pendingSendItemCount = activeCommentCount;/);
   assert.match(workbench, />\s*评论\s*<\/button>/);
   assert.doesNotMatch(workbench, />\s*加入本轮\s*<\/button>|⌘ Enter 添加/);
   assert.match(workbench, /onClick=\{closeCommentComposer\}/);
@@ -816,6 +848,12 @@ test("comment composer is explicit, transient and horizontally contained", () =>
   assert.match(workbench, /const focusKey = composerOpen && draftTarget \? "__composer" : focusedCommentId/);
   assert.match(workbench, /deferredItems\.unshift\(item\)/);
   assert.match(workbench, /queueReviewPairReveal\(target, "__composer"\)/);
+  const canvasSelectionHandler = workbench.slice(
+    workbench.indexOf("const handleCanvasSelection = useCallback"),
+    workbench.indexOf("const readWorkspaceFile = useCallback"),
+  );
+  assert.match(canvasSelectionHandler, /updateFocusedComment\(nextComment\.commentId\)/);
+  assert.doesNotMatch(canvasSelectionHandler, /queueReviewPairReveal|queueReviewCommentFocus/);
   assert.match(workbench, /data-focused=\{focusedCommentId === comment\.commentId/);
   assert.match(workbench, /aria-current=\{focusedCommentId === comment\.commentId \? "location"/);
   assert.match(

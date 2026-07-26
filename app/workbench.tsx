@@ -229,15 +229,6 @@ type CommentItem = {
   resultVersionId?: string;
 };
 
-type CommentDraft = {
-  commentId: string;
-  createdAt: string;
-  updatedAt: string;
-  target: HtmlCanvasSelection;
-  text: string;
-  attachments: CommentAttachment[];
-};
-
 type DirectEditEvent = {
   eventId: string;
   createdAt: string;
@@ -386,7 +377,7 @@ type ToastAction =
   | { id: "retry-draft-persist"; label: string }
   | { id: "review-project-rules"; label: string }
   | { id: "retry-submit"; label: string }
-  | { id: "review-comment-drafts"; label: string };
+  | { id: "resume-draft"; label: string };
 type Toast = {
   title: string;
   message: string;
@@ -1726,7 +1717,6 @@ export default function Workbench() {
   const composerCommentIdRef = useRef<string | null>(null);
   const composerAttachmentsRef = useRef<CommentAttachment[]>([]);
   const draftTargetRef = useRef<HtmlCanvasSelection | null>(null);
-  const commentDraftsRef = useRef<CommentDraft[]>([]);
   const attachmentUploadCountRef = useRef(0);
   const attachmentObjectUrlsRef = useRef<Map<string, string>>(new Map());
   const draftPendingRef = useRef<PendingDraft | null>(null);
@@ -1787,7 +1777,6 @@ export default function Workbench() {
   const [draft, setDraft] = useState("");
   const [draftCommentId, setDraftCommentId] = useState<string | null>(null);
   const [draftAttachments, setDraftAttachments] = useState<CommentAttachment[]>([]);
-  const [commentDrafts, setCommentDrafts] = useState<CommentDraft[]>([]);
   const [attachmentObjectUrls, setAttachmentObjectUrls] = useState<Record<string, string>>({});
   const [attachmentUploadCount, setAttachmentUploadCount] = useState(0);
   const [backgroundProjectResults, setBackgroundProjectResults] =
@@ -1952,13 +1941,7 @@ export default function Workbench() {
     [comments],
   );
   const activeCommentCount = activeCommentItems.length;
-  const currentComposerHasContent = Boolean(
-    draftTarget
-    && (draft.trim() || draftAttachments.length > 0),
-  );
-  const pendingSendItemCount = activeCommentCount
-    + commentDrafts.length
-    + (currentComposerHasContent ? 1 : 0);
+  const pendingSendItemCount = activeCommentCount;
   const interactionPreviewHtml = useMemo(() => {
     if (!browserPreviewOnly || projectName !== WELCOME_PROJECT_NAME) return html;
     return html.replace(
@@ -2003,9 +1986,6 @@ export default function Workbench() {
   useEffect(() => {
     commentsRef.current = comments;
   }, [comments]);
-  useEffect(() => {
-    commentDraftsRef.current = commentDrafts;
-  }, [commentDrafts]);
   useEffect(() => {
     focusedCommentIdRef.current = focusedCommentId;
   }, [focusedCommentId]);
@@ -2298,7 +2278,6 @@ export default function Workbench() {
           canonicalSource,
           [
             ...commentsRef.current.map((comment) => comment.target),
-            ...commentDraftsRef.current.map((savedDraft) => savedDraft.target),
             ...(draftTargetRef.current ? [draftTargetRef.current] : []),
           ],
         );
@@ -2311,12 +2290,6 @@ export default function Workbench() {
         }));
         commentsRef.current = reboundComments;
         setComments(reboundComments);
-        const reboundCommentDrafts = commentDraftsRef.current.map((savedDraft) => ({
-          ...savedDraft,
-          target: reboundById.get(savedDraft.target.id) || savedDraft.target,
-        }));
-        commentDraftsRef.current = reboundCommentDrafts;
-        setCommentDrafts(reboundCommentDrafts);
         if (draftTargetRef.current) {
           const reboundDraftTarget =
             reboundById.get(draftTargetRef.current.id)
@@ -2492,12 +2465,10 @@ export default function Workbench() {
       const composerText = composerDraftRef.current;
       const composerTarget = draftTargetRef.current;
       const composerAttachments = composerAttachmentsRef.current;
-      const savedCommentDrafts = commentDraftsRef.current;
       if (
         snapshot.comments.length === 0
         && snapshot.changeEvents.length === 0
         && deletedCommentIdsRef.current.size === 0
-        && savedCommentDrafts.length === 0
         && !composerText.trim()
         && composerAttachments.length === 0
         && !composerTarget
@@ -2520,14 +2491,6 @@ export default function Workbench() {
         composerCommentId: composerCommentIdRef.current,
         composerAttachments: composerAttachments.map(persistedAttachment),
         composerTarget: composerTarget ? persistedTargetRef(composerTarget) : null,
-        commentDrafts: savedCommentDrafts.map((savedDraft) => ({
-          commentId: savedDraft.commentId,
-          createdAt: savedDraft.createdAt,
-          updatedAt: savedDraft.updatedAt,
-          text: savedDraft.text,
-          target: persistedTargetRef(savedDraft.target),
-          attachments: savedDraft.attachments.map(persistedAttachment),
-        })),
       });
       for (const key of keys) window.localStorage.setItem(key, serialized);
     } catch {
@@ -2754,7 +2717,6 @@ export default function Workbench() {
                 [
                   ...commentsRef.current.map((comment) => comment.target),
                   ...changeEventsRef.current.map((event) => event.target),
-                  ...commentDraftsRef.current.map((savedDraft) => savedDraft.target),
                   ...(draftTargetRef.current ? [draftTargetRef.current] : []),
                 ],
               );
@@ -2771,14 +2733,8 @@ export default function Workbench() {
               }));
               commentsRef.current = reboundComments;
               changeEventsRef.current = reboundEvents;
-              const reboundCommentDrafts = commentDraftsRef.current.map((savedDraft) => ({
-                ...savedDraft,
-                target: reboundById.get(savedDraft.target.id) || savedDraft.target,
-              }));
-              commentDraftsRef.current = reboundCommentDrafts;
               setComments(reboundComments);
               setChangeEvents(reboundEvents);
-              setCommentDrafts(reboundCommentDrafts);
               if (draftTargetRef.current) {
                 const reboundDraftTarget =
                   reboundById.get(draftTargetRef.current.id)
@@ -3086,8 +3042,6 @@ export default function Workbench() {
     composerCommentIdRef.current = null;
     composerAttachmentsRef.current = [];
     draftTargetRef.current = null;
-    commentDraftsRef.current = [];
-    setCommentDrafts([]);
     for (const url of attachmentObjectUrlsRef.current.values()) {
       try {
         URL.revokeObjectURL(url);
@@ -3478,7 +3432,6 @@ export default function Workbench() {
     composerCommentId: string | null;
     composerAttachments: CommentAttachment[];
     composerTarget: HtmlCanvasSelection | null;
-    commentDrafts: CommentDraft[];
   } => {
     const keys = [
       `html-ai-draft-recovery:${context.documentId}`,
@@ -3516,7 +3469,6 @@ export default function Workbench() {
         composerCommentId: null,
         composerAttachments: [],
         composerTarget: null,
-        commentDrafts: [],
       };
     }
     const localComments = Array.isArray(latest.comments)
@@ -3569,26 +3521,6 @@ export default function Workbench() {
       composerTarget: isRecord(latest.composerTarget)
         ? selectionFromRecord(latest.composerTarget)
         : null,
-      commentDrafts: Array.isArray(latest.commentDrafts)
-        ? latest.commentDrafts.flatMap((rawDraft) => {
-            if (!isRecord(rawDraft) || !isRecord(rawDraft.target)) return [];
-            const commentId = String(rawDraft.commentId || "");
-            const target = selectionFromRecord(rawDraft.target);
-            if (!/^comment_[A-Za-z0-9_-]+$/.test(commentId) || !target) return [];
-            return [{
-              commentId,
-              createdAt: String(rawDraft.createdAt || new Date().toISOString()),
-              updatedAt: String(rawDraft.updatedAt || rawDraft.createdAt || new Date().toISOString()),
-              target,
-              text: String(rawDraft.text || ""),
-              attachments: Array.isArray(rawDraft.attachments)
-                ? rawDraft.attachments
-                    .map(attachmentFromRecord)
-                    .filter((item): item is CommentAttachment => Boolean(item))
-                : [],
-            }];
-          })
-        : [],
     };
   }, []);
 
@@ -3853,7 +3785,6 @@ export default function Workbench() {
         htmlRef.current,
         [
           ...recoveredDraft.comments.map((comment) => comment.target),
-          ...recoveredDraft.commentDrafts.map((savedDraft) => savedDraft.target),
           ...(recoveredDraft.composerTarget ? [recoveredDraft.composerTarget] : []),
         ],
       );
@@ -3868,17 +3799,8 @@ export default function Workbench() {
         },
       }));
       const recoveredEvents = recoveredDraft.changeEvents;
-      const recoveredCommentDrafts = recoveredDraft.commentDrafts.map((savedDraft) => ({
-        ...savedDraft,
-        target: recoveredTargetById.get(savedDraft.target.id) || {
-          ...savedDraft.target,
-          resolution: "orphaned" as const,
-        },
-      }));
       setComments(recoveredComments);
       commentsRef.current = recoveredComments;
-      setCommentDrafts(recoveredCommentDrafts);
-      commentDraftsRef.current = recoveredCommentDrafts;
       changeEventsRef.current = recoveredEvents;
       setChangeEvents(recoveredEvents);
       draftPersistenceAuthorityRef.current = {
@@ -3916,6 +3838,11 @@ export default function Workbench() {
         setProjectLocked(true);
         projectLockedRef.current = true;
         backgroundRunsRef.current.set(activeSource, recoveredRun);
+        if (projectHydratingRef.current) {
+          setHandoffPreviewOpen(false);
+          setCanvasMode("edit");
+          setDrawer("handoff");
+        }
       } else {
         setActiveRun(null);
         backgroundRunsRef.current.delete(activeSource);
@@ -4753,7 +4680,6 @@ export default function Workbench() {
   }, [
     changeEvents,
     comments,
-    commentDrafts,
     currentBasedOnVersionId,
     documentId,
     flushDraftPersistence,
@@ -5403,7 +5329,6 @@ export default function Workbench() {
     const activeTargets = [
       ...commentsRef.current.map((comment) => comment.target),
       ...changeEventsRef.current.map((event) => event.target),
-      ...commentDraftsRef.current.map((savedDraft) => savedDraft.target),
       ...(draftTargetRef.current ? [draftTargetRef.current] : []),
     ];
     if (activeTargets.length > 0) {
@@ -5443,12 +5368,6 @@ export default function Workbench() {
       }));
       changeEventsRef.current = nextEvents;
       setChangeEvents(nextEvents);
-      const nextCommentDrafts = commentDraftsRef.current.map((savedDraft) => ({
-        ...savedDraft,
-        target: refreshedTarget(savedDraft.target),
-      }));
-      commentDraftsRef.current = nextCommentDrafts;
-      setCommentDrafts(nextCommentDrafts);
       const currentDraftTarget = draftTargetRef.current;
       if (currentDraftTarget) {
         const nextDraftTarget = refreshedTarget(currentDraftTarget);
@@ -5969,108 +5888,28 @@ export default function Workbench() {
     updateFocusedComment(null);
   }, [updateFocusedComment]);
 
-  const stashCurrentComposerDraft = useCallback((): CommentDraft | null => {
+  const resumeCurrentComposer = useCallback(() => {
     const target = draftTargetRef.current;
-    const text = composerDraftRef.current;
-    const attachments = composerAttachmentsRef.current;
-    const commentId = composerCommentIdRef.current;
-    if (
-      !target
-      || !commentId
-      || (!text.trim() && attachments.length === 0)
-    ) {
-      clearCurrentComposer();
-      persistCurrentDraftRecovery();
-      return null;
+    if (!target) return;
+    if (!canLocateTarget(target)) {
+      beginTargetRelink("__composer");
+      return;
     }
-    const now = new Date().toISOString();
-    const existing = commentDraftsRef.current.find(
-      (savedDraft) => savedDraft.commentId === commentId,
-    );
-    const savedDraft: CommentDraft = {
-      commentId,
-      createdAt: existing?.createdAt || now,
-      updatedAt: now,
-      target,
-      text,
-      attachments: attachments.map(persistedAttachment),
-    };
-    const nextDrafts = [
-      ...commentDraftsRef.current.filter(
-        (current) => current.commentId !== commentId,
-      ),
-      savedDraft,
-    ];
-    commentDraftsRef.current = nextDrafts;
-    setCommentDrafts(nextDrafts);
-    clearCurrentComposer();
-    persistCurrentDraftRecovery();
-    return savedDraft;
-  }, [clearCurrentComposer, persistCurrentDraftRecovery]);
-
-  const restoreCommentDraft = useCallback((commentId: string) => {
-    if (attachmentUploadCountRef.current > 0) return;
-    if (
-      draftTargetRef.current
-      && composerCommentIdRef.current !== commentId
-      && (
-        composerDraftRef.current.trim()
-        || composerAttachmentsRef.current.length > 0
-      )
-    ) {
-      stashCurrentComposerDraft();
-    }
-    const savedDraft = commentDraftsRef.current.find(
-      (current) => current.commentId === commentId,
-    );
-    if (!savedDraft) return;
-    const nextDrafts = commentDraftsRef.current.filter(
-      (current) => current.commentId !== commentId,
-    );
-    commentDraftsRef.current = nextDrafts;
-    setCommentDrafts(nextDrafts);
-    composerDraftRef.current = savedDraft.text;
-    composerCommentIdRef.current = savedDraft.commentId;
-    composerAttachmentsRef.current = savedDraft.attachments;
-    draftTargetRef.current = savedDraft.target;
-    setDraft(savedDraft.text);
-    setDraftCommentId(savedDraft.commentId);
-    setDraftAttachments(savedDraft.attachments);
-    setDraftTarget(savedDraft.target);
-    setSelection(savedDraft.target);
-    setComposerOpen(true);
+    const located = editorRef.current?.select(target, { showToolbar: false });
+    const nextTarget = located || target;
+    draftTargetRef.current = nextTarget;
+    setSelection(nextTarget);
+    setDraftTarget(nextTarget);
     updateFocusedComment(null);
-    persistCurrentDraftRecovery();
-    queueReviewPairReveal(savedDraft.target, "__composer");
+    setComposerOpen(true);
+    queueReviewPairReveal(nextTarget, "__composer");
+    if (toastRef.current?.dedupeKey === "unfinished-comment-draft") {
+      setToast(null);
+    }
     window.requestAnimationFrame(() => {
       composerRef.current?.focus({ preventScroll: true });
     });
-  }, [
-    persistCurrentDraftRecovery,
-    queueReviewPairReveal,
-    stashCurrentComposerDraft,
-    updateFocusedComment,
-  ]);
-
-  const deleteCommentDraft = useCallback((commentId: string) => {
-    const savedDraft = commentDraftsRef.current.find(
-      (current) => current.commentId === commentId,
-    );
-    const nextDrafts = commentDraftsRef.current.filter(
-      (current) => current.commentId !== commentId,
-    );
-    commentDraftsRef.current = nextDrafts;
-    setCommentDrafts(nextDrafts);
-    persistCurrentDraftRecovery();
-    for (const attachment of savedDraft?.attachments ?? []) {
-      forgetAttachmentObjectUrl(attachment.attachmentId);
-      void deleteAttachmentFile(attachment);
-    }
-  }, [
-    deleteAttachmentFile,
-    forgetAttachmentObjectUrl,
-    persistCurrentDraftRecovery,
-  ]);
+  }, [beginTargetRelink, queueReviewPairReveal, updateFocusedComment]);
 
   const openCommentComposer = useCallback((target: HtmlCanvasSelection) => {
     if (relinkingTargetRef.current && finishTargetRelink(target)) return;
@@ -6083,13 +5922,6 @@ export default function Workbench() {
       || persistStateRef.current === "conflict"
       || viewMode === "history"
     ) return;
-    const savedDraft = commentDraftsRef.current.find(
-      (current) => current.target.id === target.id,
-    );
-    if (savedDraft) {
-      restoreCommentDraft(savedDraft.commentId);
-      return;
-    }
     const recoveredDraftTarget = draftTargetRef.current;
     if (
       recoveredDraftTarget
@@ -6098,7 +5930,18 @@ export default function Workbench() {
         composerDraftRef.current.trim()
         || composerAttachmentsRef.current.length > 0
       )
-    ) stashCurrentComposerDraft();
+    ) {
+      setToast({
+        title: "上一条评论还未保存",
+        message: "请先点击“评论”保存；保存后仍可修改，再为其他内容添加评论。",
+        tone: "warning",
+        sticky: true,
+        disposition: "direct-action",
+        dedupeKey: "unfinished-comment-draft",
+        action: { id: "resume-draft", label: "继续填写" },
+      });
+      return;
+    }
     setSelection(target);
     const resumesRecoveredDraft = draftTargetRef.current?.id === target.id;
     if (!resumesRecoveredDraft) {
@@ -6125,8 +5968,6 @@ export default function Workbench() {
   }, [
     finishTargetRelink,
     queueReviewPairReveal,
-    restoreCommentDraft,
-    stashCurrentComposerDraft,
     updateFocusedComment,
     viewMode,
   ]);
@@ -6166,8 +6007,22 @@ export default function Workbench() {
 
   const closeCommentComposer = useCallback(() => {
     if (attachmentUploadCountRef.current > 0) return;
-    stashCurrentComposerDraft();
-  }, [stashCurrentComposerDraft]);
+    if (
+      composerDraftRef.current.trim()
+      || composerAttachmentsRef.current.length > 0
+    ) {
+      setComposerOpen(false);
+      updateFocusedComment(null);
+      persistCurrentDraftRecovery();
+      return;
+    }
+    clearCurrentComposer();
+    persistCurrentDraftRecovery();
+  }, [
+    clearCurrentComposer,
+    persistCurrentDraftRecovery,
+    updateFocusedComment,
+  ]);
 
   const addComment = useCallback(() => {
     if (
@@ -6193,11 +6048,6 @@ export default function Workbench() {
     const now = new Date().toISOString();
     const commentId = draftCommentId || recordId("comment", commentCounter.current++);
     const commentTarget = independentCommentTarget(draftTarget, commentId);
-    const remainingDrafts = commentDraftsRef.current.filter(
-      (savedDraft) => savedDraft.commentId !== commentId,
-    );
-    commentDraftsRef.current = remainingDrafts;
-    setCommentDrafts(remainingDrafts);
     const nextComments = [...commentsRef.current, {
       commentId,
       createdAt: now,
@@ -6222,6 +6072,9 @@ export default function Workbench() {
     setDraftAttachments([]);
     setDraftTarget(null);
     setComposerOpen(false);
+    if (toastRef.current?.dedupeKey === "unfinished-comment-draft") {
+      setToast(null);
+    }
     updateFocusedComment(commentId);
     persistCurrentDraftRecovery(nextComments);
     queueReviewPairReveal(commentTarget, commentId);
@@ -6364,11 +6217,13 @@ export default function Workbench() {
       updateFocusedComment(null);
       return;
     }
-    queueReviewCommentFocus(nextComment.target, nextComment.commentId);
+    // A direct Canvas click already happened at the user's current viewport.
+    // Highlight its paired comment without moving the shared Canvas/rail scroll.
+    // Explicit navigation from a comment card still reveals its Canvas target.
+    updateFocusedComment(nextComment.commentId);
   }, [
     composerOpen,
     finishTargetRelink,
-    queueReviewCommentFocus,
     updateFocusedComment,
     viewMode,
     visibleCommentItems,
@@ -6666,17 +6521,14 @@ export default function Workbench() {
         || composerAttachmentsRef.current.length > 0
       )
     ) {
-      stashCurrentComposerDraft();
-    }
-    if (commentDraftsRef.current.length > 0) {
       setToast({
-        title: `${commentDraftsRef.current.length} 条评论还没有完成`,
-        message: "草稿和附件都已保留。确认、补充或删除后再发送本轮要求。",
+        title: "还有一条评论未保存",
+        message: "请先点击“评论”保存；保存后仍可修改，再发送本轮要求。",
         tone: "warning",
         sticky: true,
-        disposition: "user-choice",
-        dedupeKey: "unfinished-comment-drafts",
-        action: { id: "review-comment-drafts", label: "查看未完成评论" },
+        disposition: "direct-action",
+        dedupeKey: "unfinished-comment-draft",
+        action: { id: "resume-draft", label: "继续填写" },
       });
       return;
     }
@@ -7029,7 +6881,6 @@ export default function Workbench() {
     openProject,
     projectName,
     sendToQoderWork,
-    stashCurrentComposerDraft,
     viewMode,
   ]);
   useEffect(() => {
@@ -8160,6 +8011,11 @@ export default function Workbench() {
     sameLocalSourcePath(openedAiVersionNotice?.sourcePath, sourcePath)
       ? openedAiVersionNotice
       : null;
+  const canShowCurrentFileInFolder = Boolean(
+    sourcePath
+    && typeof window !== "undefined"
+    && window.htmlAIProjects?.showInFolder,
+  );
   const visibleRecentProjects = recentProjects
     .filter((project) => !sameLocalSourcePath(project.sourcePath, sourcePath))
     .slice(0, 3);
@@ -8359,9 +8215,6 @@ export default function Workbench() {
       ))
       .map(({ comment }) => comment)
   ), [commentTargetTops, visibleCommentItems]);
-  const savedDraftPanelHeight = commentDrafts.length > 0 && !composerOpen
-    ? 58 + commentDrafts.length * 66
-    : 0;
   const commentRailLayout = useMemo(() => {
     const items: Array<{
       key: string;
@@ -8409,9 +8262,7 @@ export default function Workbench() {
       left.targetTop - right.targetTop || left.order - right.order
     ));
     const positions: Record<string, number> = {};
-    const minimumTop = savedDraftPanelHeight > 0
-      ? 92 + savedDraftPanelHeight + 20
-      : 82;
+    const minimumTop = 82;
     const itemGap = 20;
     const itemHeight = (item: (typeof items)[number]) => (
       commentCardHeights[item.key] || item.fallbackHeight
@@ -8476,7 +8327,6 @@ export default function Workbench() {
     composerOpen,
     draftTarget,
     focusedCommentId,
-    savedDraftPanelHeight,
     sortedVisibleCommentItems,
   ]);
   const visibleCommentPositions = commentRailLayout.positions;
@@ -8511,7 +8361,6 @@ export default function Workbench() {
   const commentRailContentHeight = Math.max(
     commentRailHeight,
     commentRailLayout.bottom + 24,
-    savedDraftPanelHeight + 136,
     720,
   );
   const canvasDocumentHeight = Math.max(
@@ -8591,13 +8440,10 @@ export default function Workbench() {
     } else if (action.id === "review-project-rules") {
       setDrawer("files");
       if (fileView?.path !== "PROJECT.md") void viewFile("PROJECT.md");
-    } else if (action.id === "review-comment-drafts") {
-      const firstDraft = commentDraftsRef.current[0];
-      if (firstDraft) {
-        setCanvasMode("edit");
-        setDrawer(null);
-        restoreCommentDraft(firstDraft.commentId);
-      }
+    } else if (action.id === "resume-draft") {
+      setCanvasMode("edit");
+      setDrawer(null);
+      resumeCurrentComposer();
     } else if (action.id === "retry-submit") {
       void generateRequest();
     }
@@ -8799,6 +8645,9 @@ export default function Workbench() {
     >
       <header className="workbench-header">
         <div className="window-file">
+          <span className="window-file-icon" aria-hidden="true">
+            <FileHtmlIcon size={20} weight="duotone" />
+          </span>
           <div className="window-file-copy">
             <strong
               title={activeOpenedAiVersionNotice?.fileName || projectName}
@@ -8809,7 +8658,7 @@ export default function Workbench() {
               {activeOpenedAiVersionNotice?.fileName || projectName}
             </strong>
             <span className="file-meta">
-              <span>
+              <span className="file-version-label">
                 {browserPreviewOnly
                   ? "浏览器预览 · 只读"
                   : viewMode === "history"
@@ -8838,6 +8687,18 @@ export default function Workbench() {
               </span>
             </span>
           </div>
+          {canShowCurrentFileInFolder ? (
+            <button
+              className="window-file-folder-action"
+              type="button"
+              aria-label={`在文件夹中打开 ${activeOpenedAiVersionNotice?.fileName || projectName}`}
+              title="在 Finder 中显示当前文件"
+              onClick={() => void showProjectInFolder()}
+            >
+              <FolderOpenIcon aria-hidden="true" size={15} weight="bold" />
+              <span>在文件夹中打开</span>
+            </button>
+          ) : null}
         </div>
 
         <nav className="header-actions" aria-label="画布模式、项目和版本操作">
@@ -9343,76 +9204,18 @@ export default function Workbench() {
             ) : draftTarget && (draft.trim() || draftAttachments.length > 0) && !interactionLocked ? (
               <section
                 className="draft-recovery-card rail-status-card"
-                aria-label="未发送评论"
+                aria-label="未保存评论"
               >
-                <div><strong>有一条未发送评论</strong><span>{insertionLabel(draftTarget)}</span></div>
+                <div><strong>有一条未保存评论</strong><span>{insertionLabel(draftTarget)}</span></div>
                 <button
                   className="resume-comment-button"
                   type="button"
-                  onClick={() => {
-                    if (!canLocateTarget(draftTarget)) {
-                      beginTargetRelink("__composer");
-                      return;
-                    }
-                    const located = editorRef.current?.select(draftTarget, { showToolbar: false });
-                    setSelection(located || draftTarget);
-                    setDraftTarget(located || draftTarget);
-                    draftTargetRef.current = located || draftTarget;
-                    updateFocusedComment(null);
-                    setComposerOpen(true);
-                    queueReviewPairReveal(located || draftTarget, "__composer");
-                    window.requestAnimationFrame(() => {
-                      composerRef.current?.focus({ preventScroll: true });
-                    });
-                  }}
+                  onClick={resumeCurrentComposer}
                 >{canLocateTarget(draftTarget) ? "继续填写" : "重新选择目标"}</button>
               </section>
             ) : null}
 
-            {!composerOpen && commentDrafts.length > 0 && !interactionLocked ? (
-              <section
-                className="draft-recovery-card rail-status-card saved-comment-drafts"
-                aria-label={`${commentDrafts.length} 条未完成评论`}
-              >
-                <div className="saved-comment-drafts-heading">
-                  <strong>{commentDrafts.length} 条未完成评论</strong>
-                  <span>发送前需要确认</span>
-                </div>
-                <div className="saved-comment-drafts-list">
-                  {commentDrafts.map((savedDraft) => (
-                    <article
-                      key={savedDraft.commentId}
-                      data-resolution={savedDraft.target.resolution}
-                    >
-                      <span>
-                        <strong>{insertionLabel(savedDraft.target)}</strong>
-                        <small>
-                          {savedDraft.text.trim()
-                            ? savedDraft.text.trim().slice(0, 58)
-                            : `${savedDraft.attachments.length} 个附件`}
-                        </small>
-                      </span>
-                      <span className="saved-comment-draft-actions">
-                        <button
-                          className="resume-comment-button"
-                          type="button"
-                          onClick={() => restoreCommentDraft(savedDraft.commentId)}
-                        >继续填写</button>
-                        <button
-                          type="button"
-                          aria-label={`删除 ${insertionLabel(savedDraft.target)} 的未完成评论`}
-                          onClick={() => deleteCommentDraft(savedDraft.commentId)}
-                        >删除</button>
-                      </span>
-                    </article>
-                  ))}
-                </div>
-              </section>
-            ) : null}
-
-            {visibleCommentItems.length === 0
-              && !composerOpen
-              && commentDrafts.length === 0 ? (
+            {visibleCommentItems.length === 0 && !composerOpen ? (
               <div className="comments-empty">
                 <ChatCircleTextIcon aria-hidden="true" size={24} weight="duotone" />
                 <strong>评论会显示在这里</strong>

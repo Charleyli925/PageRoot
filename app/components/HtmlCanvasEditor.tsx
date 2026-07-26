@@ -6462,7 +6462,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           title={marker.label || "查看已有评论"}
           onClick={() => {
             if (lockedRef.current) return;
-            selectTarget(marker.selection, { showToolbar: true });
+            // The marker was clicked at the user's current Canvas position.
+            // Keep that viewport stable; navigation from the comment rail can
+            // still opt into revealing the paired target.
+            selectTarget(marker.selection, { reveal: false, showToolbar: true });
           }}
         >
           <span className={styles.commentGlyph} aria-hidden="true">评</span>

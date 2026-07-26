@@ -612,7 +612,10 @@ test("canvas hides insertion affordances while retaining target recovery and loc
     canvas.indexOf("commentMarkers.map"),
     canvas.indexOf("className={styles.globalCommentButton}", canvas.indexOf("commentMarkers.map")),
   );
-  assert.match(existingCommentMarker, /selectTarget\(marker\.selection, \{ showToolbar: true \}\)/u);
+  assert.match(
+    existingCommentMarker,
+    /selectTarget\(marker\.selection, \{ reveal: false, showToolbar: true \}\)/u,
+  );
   assert.doesNotMatch(existingCommentMarker, /onRequestCommentRef/u);
 
   assert.doesNotMatch(css, /\.insertionButton|\.insertionLine|\.insertionPoint|\.insertionPlus/u);

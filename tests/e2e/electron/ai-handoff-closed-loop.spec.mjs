@@ -805,6 +805,11 @@ test("a failed handoff in project A does not block project B or replace its stat
     ).toBe(2);
 
     await openRecentProject(launched.page, projectA.sourcePath, { editable: false });
+    await expect(processingDialog).toBeVisible();
+    await expect(launched.page.getByText("交接内容尚未复制", { exact: true }))
+      .toBeVisible();
+    await launched.page.keyboard.press("Escape");
+    await expect(processingDialog).toBeHidden();
     await expect(launched.page.getByRole("button", { name: "复制失败 · 查看" }))
       .toBeVisible();
     await launched.page.getByRole("button", { name: "复制失败 · 查看" }).click();
@@ -812,6 +817,7 @@ test("a failed handoff in project A does not block project B or replace its stat
       .toBeVisible();
 
     await openRecentProject(launched.page, projectB.sourcePath, { editable: false });
+    await expect(processingDialog).toBeVisible();
     await expect(launched.page.getByRole("button", { name: "复制失败 · 查看" }))
       .toBeVisible();
     expect(readFileSync(projectA.sourcePath).equals(projectA.original)).toBe(true);
