@@ -88,6 +88,11 @@ import { DrainCoordinator } from "./application/drain-coordinator.js";
 import { ProjectQueryFence } from "./application/project-query-fence.js";
 import { createBrowserRecoveryStore } from "./application/recovery-store.js";
 import {
+  BROWSER_RUNTIME_CAPABILITIES,
+  resolveRuntimeCapabilities,
+  type RuntimeCapabilities,
+} from "./application/runtime-capabilities.js";
+import {
   createDraftOperationId,
   isDraftOperationId,
   rebaseDraftMutation,
@@ -226,6 +231,7 @@ declare global {
       bridgePort: string;
       bridgeAuthToken: string;
       appVersion: string;
+      capabilities?: RuntimeCapabilities;
     };
     __PAGEROOT_HYDRATION_STAGE__?: string;
   }
@@ -1584,6 +1590,8 @@ export default function Workbench() {
   const projectOpenRequestRef = useRef(0);
   const projectQueryFenceRef = useRef(new ProjectQueryFence());
   const drainCoordinatorRef = useRef(new DrainCoordinator());
+  const runtimeCapabilitiesRef =
+    useRef<RuntimeCapabilities>(BROWSER_RUNTIME_CAPABILITIES);
   const draftSessionRef = useRef(new DraftSession<CommentItem, DirectEditEvent>({
     bridgeClient,
     encodeComment: persistedComment,
@@ -1907,7 +1915,12 @@ export default function Workbench() {
     projectLockedRef.current = projectLocked;
   }, [projectLocked]);
   useEffect(() => {
-    const previewOnly = !window.htmlAIProjects;
+    const capabilities = resolveRuntimeCapabilities({
+      runtimeConfig: window.htmlAIRuntime,
+      projectsApi: window.htmlAIProjects,
+    });
+    runtimeCapabilitiesRef.current = capabilities;
+    const previewOnly = capabilities.sourceEditing !== "enabled";
     const frame = window.requestAnimationFrame(() => {
       setBrowserPreviewOnly(previewOnly);
       if (previewOnly) setCanvasMode("preview");
@@ -2995,7 +3008,7 @@ export default function Workbench() {
     setRestoredFromVersionId(null);
     setViewMode("current");
     setCanvasMode(
-      typeof window !== "undefined" && !window.htmlAIProjects
+      runtimeCapabilitiesRef.current.sourceEditing !== "enabled"
         ? "preview"
         : "edit",
     );
@@ -4478,8 +4491,83 @@ export default function Workbench() {
       });
       return;
     }
+    const attachmentPersistence =
+      runtimeCapabilitiesRef.current.attachmentPersistence;
+    if (attachmentPersistence === "memory") {
+      const memoryAttachments = selected.map((file) => {
+        const attachmentId = recordId("attachment", attachmentCounter.current++);
+        const attachment: CommentAttachment = {
+          attachmentId,
+          kind: isImageFile(file) ? "image" : "file",
+          fileName: file.name || "附件",
+          mediaType: file.type || "application/octet-stream",
+          byteLength: file.size,
+          sha256: `memory:${attachmentId}`,
+          relativePath: `memory/${attachmentId}/${file.name || "attachment"}`,
+          source,
+        };
+        if (attachment.kind === "image") {
+          rememberAttachmentObjectUrl(attachmentId, URL.createObjectURL(file));
+        }
+        return attachment;
+      });
+      if (target.kind === "composer") {
+        const next = [...composerAttachmentsRef.current, ...memoryAttachments];
+        composerAttachmentsRef.current = next;
+        setDraftAttachments(next);
+      } else {
+        const nextComments = commentsRef.current.map((comment) => (
+          comment.commentId === target.commentId
+            ? {
+                ...comment,
+                attachments: [
+                  ...(comment.attachments ?? []),
+                  ...memoryAttachments,
+                ],
+                updatedAt: new Date().toISOString(),
+              }
+            : comment
+        ));
+        commentsRef.current = nextComments;
+        setComments(nextComments);
+      }
+      addedAttachmentCount = memoryAttachments.length;
+      if (issueNotes.length > 0) {
+        const needsRemoval = attachmentPlan.overLimit.length > 0
+          && existingCount + addedAttachmentCount >= MAX_COMMENT_ATTACHMENTS;
+        setToast({
+          title: addedAttachmentCount > 0
+            ? "部分附件没有加入"
+            : "附件没有加入",
+          message: `${issueNotes.join("；")}。${
+            addedAttachmentCount > 0
+              ? needsRemoval
+                ? "已加入的附件仍然保留；如需加入其余文件，请先移除一个附件。"
+                : "已加入的附件仍然保留。"
+              : needsRemoval
+                ? "请先移除一个附件，再重新选择。"
+                : "请选择其他文件。"
+          }`,
+          tone: "warning",
+          sticky: true,
+          disposition: "direct-action",
+          dedupeKey: `attachment-batch-${target.commentId}`,
+          action: attachmentRecoveryAction(needsRemoval),
+        });
+      }
+      return;
+    }
+    if (attachmentPersistence !== "bridge") return;
     const activeSource = sourcePathRef.current;
     if (!activeSource) {
+      setToast({
+        title: "请先打开本地 HTML",
+        message: "附件需要保存在当前项目记录中；打开 HTML 后即可添加。",
+        tone: "warning",
+        disposition: "direct-action",
+        dedupeKey: "submit-blocked",
+        action: { id: "retry-project-open", label: "打开本地 HTML" },
+      });
       return;
     }
     try {
@@ -5063,11 +5151,15 @@ export default function Workbench() {
     setProjectMenuOpen(false);
     const openRequest = projectOpenRequestRef.current + 1;
     projectOpenRequestRef.current = openRequest;
-    const api = window.htmlAIProjects;
-    if (!api) {
+    if (
+      runtimeCapabilitiesRef.current.projectOpening === "browser-file"
+      && !recentPath
+    ) {
       fileInputRef.current?.click();
       return;
     }
+    const api = window.htmlAIProjects;
+    if (!api) return;
     try {
       const project = recentPath
         ? await api.openRecent(recentPath)
@@ -5221,7 +5313,7 @@ export default function Workbench() {
 
   const handleCanvasChange = useCallback((nextHtml: string, mutation?: HtmlCanvasMutation): boolean => {
     if (
-      (typeof window !== "undefined" && !window.htmlAIProjects)
+      runtimeCapabilitiesRef.current.sourceEditing !== "enabled"
       ||
       projectLockedRef.current
       || projectHydratingRef.current

@@ -130,10 +130,16 @@ const query = new URLSearchParams(globalThis.location.search);
 const bridgePort = query.get("bridgePort") || "";
 const bridgeAuthToken = query.get("bridgeAuthToken") || "";
 const appVersion = query.get("appVersion") || "";
+const runtimeCapabilities = Object.freeze({
+  sourceEditing: "enabled",
+  projectOpening: "desktop-dialog",
+  attachmentPersistence: "bridge",
+});
 const runtimeConfig = Object.freeze({
   bridgePort,
   bridgeAuthToken,
   appVersion,
+  capabilities: runtimeCapabilities,
 });
 
 const closeListeners = new Map();

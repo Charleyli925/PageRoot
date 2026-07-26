@@ -156,6 +156,27 @@ export async function architectureViolations() {
       "app/workbench.tsx: registered project contexts cannot contain empty identities",
     );
   }
+  if (
+    !workbench.includes("resolveRuntimeCapabilities({")
+    || !workbench.includes(
+      'runtimeCapabilitiesRef.current.sourceEditing !== "enabled"',
+    )
+    || !workbench.includes(
+      'runtimeCapabilitiesRef.current.projectOpening === "browser-file"',
+    )
+    || !workbench.includes(
+      "runtimeCapabilitiesRef.current.attachmentPersistence",
+    )
+  ) {
+    violations.push(
+      "app/workbench.tsx: runtime features must use the central capability manifest",
+    );
+  }
+  if (/const previewOnly = !window\.htmlAIProjects/.test(workbench)) {
+    violations.push(
+      "app/workbench.tsx: project IPC presence cannot own renderer edit capability",
+    );
+  }
   for (const boundary of ["close", "switch", "submit", "history"]) {
     if (!new RegExp(`\\.drain\\("${boundary}"`).test(workbench)) {
       violations.push(

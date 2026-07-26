@@ -66,6 +66,14 @@ function success(value) {
   };
 }
 
+test("preload declares one immutable desktop runtime capability manifest", async () => {
+  const { runtime } = await loadPreloadApis(async () => success(null));
+  assert.equal(runtime.capabilities.sourceEditing, "enabled");
+  assert.equal(runtime.capabilities.projectOpening, "desktop-dialog");
+  assert.equal(runtime.capabilities.attachmentPersistence, "bridge");
+  assert.equal(Object.isFrozen(runtime.capabilities), true);
+});
+
 test("preload unwraps structured project IPC success results", async () => {
   const calls = [];
   const api = await loadPreload(async (...args) => {

@@ -6,11 +6,11 @@ import {
   documentToken,
   exportCurrentHtml,
   loadFixture,
-  nativeEditingState,
   requestExportCurrentHtml,
   replaceUniqueBytes,
   selectionSnapshot,
   setTextSelection,
+  waitForResumedNativeSession,
 } from "./pageroot-driver.mjs";
 
 const sessionSource = Buffer.from(`<!doctype html>
@@ -31,16 +31,6 @@ async function readDownload(download) {
   const chunks = [];
   for await (const chunk of stream) chunks.push(Buffer.from(chunk));
   return Buffer.concat(chunks);
-}
-
-async function waitForResumedSession(frameOrPage, caseId) {
-  await expect.poll(() => nativeEditingState(frameOrPage, caseId)).toMatchObject({
-    targetIsActive: true,
-    contenteditable: "plaintext-only",
-    isContentEditable: true,
-    activeCase: caseId,
-    selectionInside: true,
-  });
 }
 
 async function dispatchMissingTerminalComposition(target, {
@@ -96,7 +86,7 @@ test("one export shortcut finalizes a stable missing-terminal composition and re
   expect(downloadCount).toBe(1);
   await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
   await expect.poll(() => documentToken(page)).not.toBe(initialDocument);
-  await waitForResumedSession(frame, caseId);
+  await waitForResumedNativeSession(frame, caseId);
   await expect(frame.locator(caseSelector(caseId))).toHaveText("Al你pha");
   expect(await selectionSnapshot(frame, caseId)).toMatchObject({
     collapsed: true,
@@ -142,7 +132,7 @@ test("strict text wins over a missing terminal; one queued command completes and
   expect(downloadCount).toBe(1);
   await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
   await expect.poll(() => documentToken(page)).not.toBe(initialDocument);
-  await waitForResumedSession(frame, caseId);
+  await waitForResumedNativeSession(frame, caseId);
   await expect(frame.locator(caseSelector(caseId))).toHaveText("SAlpha");
   expect(await selectionSnapshot(frame, caseId)).toMatchObject({
     collapsed: true,
@@ -201,7 +191,7 @@ test("strict text wins over a missing terminal; one queued command completes and
   expect(await editor.getAttribute("data-undo-depth")).toBe("1");
   expect(await editor.getAttribute("data-redo-depth")).toBe("0");
   await expect(frame.locator(caseSelector(caseId))).toHaveText("SAlpha");
-  await waitForResumedSession(frame, caseId);
+  await waitForResumedNativeSession(frame, caseId);
   expect((await exportCurrentHtml(page)).equals(strictSource)).toBe(true);
   expect(downloadCount).toBe(2);
 });

@@ -5,10 +5,10 @@ import {
   exportCurrentHtml,
   keyShortcut,
   loadFixture,
-  nativeEditingState,
   replaceUniqueBytes,
   selectionSnapshot,
   setTextSelection,
+  waitForResumedNativeSession,
 } from "./pageroot-driver.mjs";
 
 const formatSource = Buffer.from(`<!doctype html>
@@ -41,16 +41,6 @@ async function expectNoCommittedEdit(page, editor) {
   await expect(page.locator(".round-record-counts")).toHaveText(
     "0 条评论 · 0 项直接编辑记录",
   );
-}
-
-async function waitForResumedSession(frameOrPage, caseId) {
-  await expect.poll(() => nativeEditingState(frameOrPage, caseId)).toMatchObject({
-    targetIsActive: true,
-    contenteditable: "plaintext-only",
-    isContentEditable: true,
-    activeCase: caseId,
-    selectionInside: true,
-  });
 }
 
 test("nested bold, italic, color, size, span attributes and outside bytes survive an internal edit", async ({ page }) => {
@@ -95,11 +85,11 @@ test("nested bold, italic, color, size, span attributes and outside bytes surviv
   });
   expect((await exportCurrentHtml(page)).equals(expectedSource)).toBe(true);
 
-  await waitForResumedSession(frame, caseId);
+  await waitForResumedNativeSession(frame, caseId);
   await page.keyboard.press(keyShortcut("Z"));
   await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("0");
   await expect(target).toHaveText("前粗彩色字号斜尾后");
-  await waitForResumedSession(frame, caseId);
+  await waitForResumedNativeSession(frame, caseId);
   expect(await selectionSnapshot(frame, caseId)).toMatchObject({
     collapsed: false,
     anchorOffset: 3,

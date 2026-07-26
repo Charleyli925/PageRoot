@@ -13,6 +13,7 @@ import {
   replaceUniqueBytes,
   selectionSnapshot,
   setTextSelection,
+  waitForResumedNativeSession,
   withBomAndCrLf,
 } from "./pageroot-driver.mjs";
 
@@ -41,16 +42,6 @@ async function waitForFreshDocument(frame, previousToken) {
     }
   }).not.toBe(previousToken);
   return documentToken(frame);
-}
-
-async function waitForResumedSession(frame, id) {
-  await expect.poll(() => nativeEditingState(frame, id)).toMatchObject({
-    targetIsActive: true,
-    contenteditable: "plaintext-only",
-    isContentEditable: true,
-    activeCase: id,
-    selectionInside: true,
-  });
 }
 
 test("ordinary text checkpoint preserves the live Text node, Selection and active host", async ({ page }) => {
@@ -171,7 +162,7 @@ test("a failed source-id rebind rolls back metadata before canonical island rest
 
   await page.keyboard.insertText("甲");
   await waitForUndoDepth(editor, 1);
-  await waitForResumedSession(frame, caseId);
+  await waitForResumedNativeSession(frame, caseId);
   await expect(target).toHaveText(
     `${sourceToken.slice(0, insertionOffset)}甲${sourceToken.slice(insertionOffset)}`,
   );
@@ -211,7 +202,7 @@ test("undo and redo cross fresh Document and host generations while preserving l
   await page.keyboard.press(keyShortcut("Z"));
   const undoDocument = await waitForFreshDocument(frame, editedDocument);
   await expect(frame.locator(caseSelector(caseId))).toHaveText(sourceToken);
-  await waitForResumedSession(frame, caseId);
+  await waitForResumedNativeSession(frame, caseId);
   expect(await frame.locator(caseSelector(caseId)).evaluate((host) => (
     host.__PAGEROOT_HISTORY_FENCE_HOST_GENERATION__
   ))).toBeUndefined();
@@ -228,7 +219,7 @@ test("undo and redo cross fresh Document and host generations while preserving l
   const redoDocument = await waitForFreshDocument(frame, undoDocument);
   expect(redoDocument).not.toBe(editedDocument);
   await expect(frame.locator(caseSelector(caseId))).toHaveText(editedText);
-  await waitForResumedSession(frame, caseId);
+  await waitForResumedNativeSession(frame, caseId);
   expect(await frame.locator(caseSelector(caseId)).evaluate((host) => (
     host.__PAGEROOT_HISTORY_FENCE_HOST_GENERATION__
   ))).toBeUndefined();
@@ -253,7 +244,7 @@ test("undo then redo followed by immediate export returns the exact forward byte
   const editedDocument = await documentToken(frame);
   await page.keyboard.press(keyShortcut("Z"));
   await waitForFreshDocument(frame, editedDocument);
-  await waitForResumedSession(frame, caseId);
+  await waitForResumedNativeSession(frame, caseId);
 
   await page.keyboard.press(redoShortcut);
   const exported = await exportCurrentHtml(page);
@@ -277,7 +268,7 @@ test("late input from a retired host cannot mutate the new DOM or source revisio
   const editedDocument = await documentToken(frame);
   await page.keyboard.press(keyShortcut("Z"));
   await waitForFreshDocument(frame, editedDocument);
-  await waitForResumedSession(frame, caseId);
+  await waitForResumedNativeSession(frame, caseId);
 
   const retiredState = await iframe.evaluate((frameElement) => {
     const retiredHost = window.__PAGEROOT_HISTORY_FENCE_RETIRED_HOST__;
@@ -316,7 +307,7 @@ test("late input from a retired host cannot mutate the new DOM or source revisio
   // Cover the normal checkpoint delay and any same-task browser history tail.
   await page.waitForTimeout(900);
   await expect(frame.locator(caseSelector(caseId))).toHaveText(sourceToken);
-  await waitForResumedSession(frame, caseId);
+  await waitForResumedNativeSession(frame, caseId);
   expect(await editor.getAttribute("data-undo-depth")).toBe("0");
   expect(await editor.getAttribute("data-redo-depth")).toBe("1");
   expect((await exportCurrentHtml(page)).equals(source)).toBe(true);
@@ -339,7 +330,7 @@ test("export fences the document, resumes a new native session, and accepts the 
 
   expect((await exportCurrentHtml(page)).equals(firstExpected)).toBe(true);
   await waitForFreshDocument(frame, beforeExportDocument);
-  await waitForResumedSession(frame, caseId);
+  await waitForResumedNativeSession(frame, caseId);
   expect(await selectionSnapshot(frame, caseId)).toMatchObject({
     collapsed: true,
     anchorOffset: replacement.length,
@@ -430,7 +421,7 @@ test("undo and export fence fail closed during composition without retiring the 
   const setupDocument = await documentToken(frame);
   await exportCurrentHtml(page);
   await waitForFreshDocument(frame, setupDocument);
-  await waitForResumedSession(frame, caseId);
+  await waitForResumedNativeSession(frame, caseId);
   await setTextSelection(frame, caseId, insertionOffset + 1);
   const composingDocument = await documentToken(frame);
   await target.evaluate((host) => {

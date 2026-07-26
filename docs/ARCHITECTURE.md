@@ -47,6 +47,7 @@ protocols.
 | Close, switch, submit and history obligations | `app/application/drain-coordinator.js` |
 | Late query rejection and monotonic draft reads | `app/application/project-query-fence.js` |
 | Crash-only browser recovery | `app/application/recovery-store.js` |
+| Renderer, project-picker and attachment capabilities | `app/application/runtime-capabilities.js` |
 | Preview sanitization and verified frame injection | `app/components/html-preview-sandbox.js` |
 | Run lifecycle decoding and transition policy | `app/domain/run-lifecycle.js` |
 

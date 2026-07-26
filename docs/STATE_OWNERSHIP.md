@@ -12,6 +12,7 @@
 | `PROJECT.md` content and save status | Project-rules session | managed `PROJECT.md` | project panel, Request freeze |
 | Close/switch/submit/history readiness | Drain coordinator | composed owner snapshots; no separate copied state | Electron close handshake and navigation |
 | Bridge transport, timeouts, error details and unknown outcomes | Typed Bridge client | no durable state | application sessions |
+| Renderer edit, project-picker and attachment-persistence capabilities | Runtime capability resolver | immutable preload manifest; fail-closed browser default | Workbench composition root |
 | Crash-only renderer recovery records | Recovery store adapter | browser storage, subordinate to Bridge authority | document and draft sessions |
 | Native edit lease, IME/composition and transaction candidate | Native edit session machine | in-memory until SourcePatch acknowledgement | Canvas controller and document session |
 
@@ -25,6 +26,8 @@ Rules:
   state can be acknowledged.
 - Cross-owner operations are coordinated explicitly; they do not synchronize
   through incidental React effects.
+- Runtime features are declared independently. The presence of a project-picker
+  API never implies source-edit or attachment-persistence authority.
 - Runtime state is not a second copy of draft contents. It carries lifecycle
   state and a revisioned pointer to the draft repository.
 - Local recovery records are an outbox/fallback, never an equal authority to an

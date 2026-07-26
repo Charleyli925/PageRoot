@@ -33,6 +33,10 @@ Bridge route adapters
   under the project mutation lock and repository boundary.
 - `scripts/check-architecture.mjs` enforces the dependency direction. Do not
   weaken the gate to land a feature.
+- Runtime capability decoding has one ingress:
+  `app/application/runtime-capabilities.js`. Source editing, project opening
+  and attachment persistence are independent declarations; consumers may not
+  infer all three from the presence of one preload API.
 
 ## State ownership
 

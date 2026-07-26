@@ -230,11 +230,11 @@
     {
       "id": "state-architecture",
       "patterns": [
-        "^app/application/(?:bridge-client|draft-session|drain-coordinator|project-query-fence|recovery-store)\\.(?:js|d\\.ts)$",
+        "^app/application/(?:bridge-client|draft-session|drain-coordinator|project-query-fence|recovery-store|runtime-capabilities)\\.(?:js|d\\.ts)$",
         "^app/domain/(?:draft-aggregate|run-lifecycle)\\.(?:js|d\\.ts)$",
         "^shared/draft-aggregate\\.mjs$",
         "^scripts/(?:check-architecture|draft-aggregate|draft-service)\\.mjs$",
-        "^tests/(?:architecture-boundaries|bridge-client|draft-aggregate|draft-service|draft-session|drain-coordinator|project-query-fence|recovery-store|run-lifecycle)\\.test\\.mjs$",
+        "^tests/(?:architecture-boundaries|bridge-client|draft-aggregate|draft-service|draft-session|drain-coordinator|project-query-fence|recovery-store|run-lifecycle|runtime-capabilities)\\.test\\.mjs$",
         "^(?:CONTRIBUTING|docs/(?:ARCHITECTURE|ARCHITECTURE_CONTRACT|STATE_OWNERSHIP|ENGINEERING_STANDARDS))\\.md$",
         "^docs/decisions/0003-session-ownership-and-mutation-outcomes\\.md$"
       ],
@@ -248,7 +248,8 @@
         "tests/drain-coordinator.test.mjs",
         "tests/project-query-fence.test.mjs",
         "tests/recovery-store.test.mjs",
-        "tests/run-lifecycle.test.mjs"
+        "tests/run-lifecycle.test.mjs",
+        "tests/runtime-capabilities.test.mjs"
       ]
     },
     {
