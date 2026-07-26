@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -50,6 +51,73 @@ export function evaluateAuditReport(report, {
   });
 }
 
+function managedRuntimeModules(packageJson) {
+  const modules = new Set();
+  for (const resource of packageJson?.build?.extraResources || []) {
+    if (
+      typeof resource?.from !== "string"
+      || resource.to !== resource.from
+    ) {
+      continue;
+    }
+    const match = resource.from.match(
+      /^node_modules\/((?:@[^/]+\/)?[^/]+)$/u,
+    );
+    if (match) modules.add(match[1]);
+  }
+  return modules;
+}
+
+export function evaluatePackagedRuntimeClosure(packageJson, packageLock) {
+  if (
+    !packageJson
+    || typeof packageJson !== "object"
+    || !packageLock
+    || typeof packageLock !== "object"
+    || !packageLock.packages
+    || typeof packageLock.packages !== "object"
+  ) {
+    throw new Error("Package manifest and lockfile are required.");
+  }
+  const managedModules = managedRuntimeModules(packageJson);
+  const missingPackages = [];
+  const missingResources = [];
+  const nestedPackages = [];
+  for (const moduleName of managedModules) {
+    const packagePath = `node_modules/${moduleName}`;
+    const lockedPackage = packageLock.packages[packagePath];
+    if (!lockedPackage) {
+      missingPackages.push(packagePath);
+      continue;
+    }
+    for (const dependencyName of Object.keys(lockedPackage.dependencies || {})) {
+      const dependencyPath = `node_modules/${dependencyName}`;
+      if (!packageLock.packages[dependencyPath]) {
+        missingPackages.push(dependencyPath);
+      } else if (!managedModules.has(dependencyName)) {
+        missingResources.push(`${moduleName} -> ${dependencyName}`);
+      }
+    }
+    const nestedPrefix = `${packagePath}/node_modules/`;
+    for (const lockedPath of Object.keys(packageLock.packages)) {
+      if (lockedPath.startsWith(nestedPrefix)) {
+        nestedPackages.push(lockedPath);
+      }
+    }
+  }
+  return Object.freeze({
+    managedModules: Object.freeze([...managedModules].sort()),
+    missingPackages: Object.freeze([...new Set(missingPackages)].sort()),
+    missingResources: Object.freeze([...new Set(missingResources)].sort()),
+    nestedPackages: Object.freeze([...new Set(nestedPackages)].sort()),
+    passed: (
+      missingPackages.length === 0
+      && missingResources.length === 0
+      && nestedPackages.length === 0
+    ),
+  });
+}
+
 function runAudit() {
   const result = spawnSync("npm", ["audit", "--json"], {
     cwd: productRoot,
@@ -65,6 +133,28 @@ function runAudit() {
 }
 
 function main() {
+  const packageJson = JSON.parse(
+    readFileSync(path.join(productRoot, "package.json"), "utf8"),
+  );
+  const packageLock = JSON.parse(
+    readFileSync(path.join(productRoot, "package-lock.json"), "utf8"),
+  );
+  const runtimeClosure = evaluatePackagedRuntimeClosure(
+    packageJson,
+    packageLock,
+  );
+  if (!runtimeClosure.passed) {
+    throw new Error(
+      [
+        runtimeClosure.missingPackages.length > 0
+          && `Packaged runtime modules missing from lockfile: ${runtimeClosure.missingPackages.join(", ")}.`,
+        runtimeClosure.missingResources.length > 0
+          && `Packaged runtime dependencies missing from extraResources: ${runtimeClosure.missingResources.join(", ")}.`,
+        runtimeClosure.nestedPackages.length > 0
+          && `Packaged runtime dependencies must be hoisted: ${runtimeClosure.nestedPackages.join(", ")}.`,
+      ].filter(Boolean).join("\n"),
+    );
+  }
   const evaluation = evaluateAuditReport(runAudit());
   for (const advisory of evaluation.advisories) {
     const accepted = acceptedAdvisories[String(advisory.source)];
@@ -82,7 +172,9 @@ function main() {
       ].filter(Boolean).join("\n"),
     );
   }
-  console.log("Dependency audit policy passed; no unreviewed advisory is present.");
+  console.log(
+    `Dependency audit policy passed; ${runtimeClosure.managedModules.length} packaged runtime module(s) form one hoisted closure and no unreviewed advisory is present.`,
+  );
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === scriptPath) {

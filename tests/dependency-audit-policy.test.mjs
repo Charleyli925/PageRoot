@@ -5,6 +5,7 @@ import test from "node:test";
 import {
   acceptedAdvisories,
   evaluateAuditReport,
+  evaluatePackagedRuntimeClosure,
 } from "../scripts/check-dependency-audit.mjs";
 
 const dependabotConfig = await readFile(
@@ -77,4 +78,57 @@ test("Dependabot keeps coupled React updates together and defers automatic major
     dependabotConfig,
     /dependency-name: "\*"[\s\S]*update-types:[\s\S]*- version-update:semver-major/,
   );
+});
+
+test("packaged runtime dependencies form one explicit hoisted closure", () => {
+  const packageJson = {
+    build: {
+      extraResources: [
+        { from: "node_modules/parse5", to: "node_modules/parse5" },
+        { from: "node_modules/entities", to: "node_modules/entities" },
+      ],
+    },
+  };
+  const alignedLock = {
+    packages: {
+      "": {},
+      "node_modules/parse5": {
+        dependencies: { entities: "^8.0.0" },
+      },
+      "node_modules/entities": {},
+    },
+  };
+  assert.deepEqual(
+    evaluatePackagedRuntimeClosure(packageJson, alignedLock),
+    {
+      managedModules: ["entities", "parse5"],
+      missingPackages: [],
+      missingResources: [],
+      nestedPackages: [],
+      passed: true,
+    },
+  );
+
+  const splitLock = structuredClone(alignedLock);
+  splitLock.packages["node_modules/parse5/node_modules/entities"] = {};
+  const split = evaluatePackagedRuntimeClosure(packageJson, splitLock);
+  assert.equal(split.passed, false);
+  assert.deepEqual(split.nestedPackages, [
+    "node_modules/parse5/node_modules/entities",
+  ]);
+
+  const incompletePackage = structuredClone(packageJson);
+  incompletePackage.build.extraResources.pop();
+  const incomplete = evaluatePackagedRuntimeClosure(
+    incompletePackage,
+    alignedLock,
+  );
+  assert.equal(incomplete.passed, false);
+  assert.deepEqual(incomplete.missingResources, ["parse5 -> entities"]);
+
+  const missingLock = structuredClone(alignedLock);
+  delete missingLock.packages["node_modules/entities"];
+  const missing = evaluatePackagedRuntimeClosure(packageJson, missingLock);
+  assert.equal(missing.passed, false);
+  assert.deepEqual(missing.missingPackages, ["node_modules/entities"]);
 });

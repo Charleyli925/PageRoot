@@ -21,10 +21,14 @@ the same Pull Request that introduces a verified compatible fix.
 The 2026-07-26 dependency convergence incorporates the complete contents of
 open dependency PRs #9, #12 and #30, then verifies them with the current
 architecture tree. React and `react-server-dom-webpack` are 19.2.8, parse5 is
-8.0.1, and the grouped development dependencies use their reviewed patch or
-minor versions. A same-major override selects PostCSS 8.5.23 for Next.js and tar
-7.5.22 for the build chain; the former PostCSS and tar exceptions were removed
-after `npm audit` no longer reported them.
+8.0.1, and its shared runtime dependency `entities` is 8.0.0. Keeping one
+hoisted `entities` version prevents the packaged Bridge from losing a nested
+dependency that Electron Builder does not copy from inside another managed
+module. The dependency audit rejects nested or incomplete packaged-runtime
+closures before the artifact stage. The grouped development dependencies use
+their reviewed patch or minor versions. A same-major override selects PostCSS
+8.5.23 for Next.js and tar 7.5.22 for the build chain; the former PostCSS and tar
+exceptions were removed after `npm audit` no longer reported them.
 
 The macOS package includes the compiled desktop renderer, selected desktop modules, `parse5`, `entities`, schemas and build provenance; it explicitly excludes the general `node_modules` tree. These exceptions do not authorize adding the affected packages to the packaged runtime.
 

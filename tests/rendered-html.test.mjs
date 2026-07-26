@@ -111,7 +111,7 @@ test("application boundaries encode the v3 single-source lifecycle instead of sa
   assert.equal(packageJson.dependencies?.["@lexical/history"], undefined);
   assert.equal(packageJson.dependencies?.["@lexical/plain-text"], undefined);
   assert.equal(packageJson.dependencies?.["@lexical/selection"], undefined);
-  assert.equal(packageJson.version, "0.8.7");
+  assert.equal(packageJson.version, "0.8.8");
   assert.equal(packageJson.build?.mac?.extendInfo?.NSMicrophoneUsageDescription, undefined);
   assert.equal(packageJson.build?.mac?.extendInfo?.NSSpeechRecognitionUsageDescription, undefined);
 
