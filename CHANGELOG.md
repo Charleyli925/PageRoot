@@ -4,6 +4,14 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+## [0.8.10] - 2026-07-27
+
+- Allow ordinary typing at editable paragraph starts and ends, inline-style boundaries and link boundaries while preserving the intended neighboring style and exact source whitespace.
+- Prevent links and authored controls from navigating while they are being edited, and keep final visible punctuation deletion source-exact.
+- Simplify the Canvas comment surface by removing duplicate global-target copy and user-facing undo/redo history.
+- Keep dotted PageRoot versions intact in exported HTML filenames.
+- Make stale comment-draft reconciliation plus clean close/reopen a mandatory packaged-App release proof, while replacing repeated high-volume UI setup with lower-cost invariant coverage.
+
 ## [0.8.9] - 2026-07-26
 
 - Treat already acknowledged deletion tombstones as durable Bridge authority when comparing draft content, so unchanged close and restart drains no longer create redundant operation IDs or advance the draft revision.
@@ -74,7 +82,8 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 - Published the first public macOS release in this repository under the earlier YuanYe artifact name.
 
-[Unreleased]: https://github.com/Charleyli925/PageRoot/compare/v0.8.9...HEAD
+[Unreleased]: https://github.com/Charleyli925/PageRoot/compare/v0.8.10...HEAD
+[0.8.10]: https://github.com/Charleyli925/PageRoot/compare/v0.8.9...v0.8.10
 [0.8.9]: https://github.com/Charleyli925/PageRoot/compare/v0.8.8...v0.8.9
 [0.8.8]: https://github.com/Charleyli925/PageRoot/compare/v0.8.7...v0.8.8
 [0.8.7]: https://github.com/Charleyli925/PageRoot/compare/v0.8.6...v0.8.7

@@ -78,6 +78,16 @@ test("real-HTML gate changes run the discovery oracle instead of an unrelated sm
   assert.deepEqual(suiteIds(plan), ["typecheck", "lint", "build-web", "real-html"]);
 });
 
+test("packaged-runtime test changes wait for the artifact boundary instead of running unrelated Electron smoke", () => {
+  const plan = selectGatePlan({
+    map,
+    lane: "task",
+    changedFiles: ["tests/e2e/electron/packaged-runtime-smoke.spec.mjs"],
+  });
+  assert.deepEqual(suiteIds(plan), ["typecheck", "lint"]);
+  assert.deepEqual(plan.selectedNodeTests, []);
+});
+
 test("desktop handoff changes select Electron and deterministic AI closed-loop coverage", () => {
   const plan = selectGatePlan({
     map,

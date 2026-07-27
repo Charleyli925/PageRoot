@@ -5,7 +5,8 @@ import { fileURLToPath } from "node:url";
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 const productRoot = path.resolve(currentDirectory, "../../..");
 const externalBaseUrl = process.env.PAGEROOT_BASE_URL || "";
-const baseURL = externalBaseUrl || "http://localhost:3000";
+const localPort = process.env.PORT || "3000";
+const baseURL = externalBaseUrl || `http://localhost:${localPort}`;
 
 export default defineConfig({
   testDir: currentDirectory,
