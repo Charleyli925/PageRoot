@@ -20,7 +20,7 @@ import {
   keyShortcut,
   productRoot,
   requestExportCurrentHtml,
-  replaceUniqueBytes,
+  replaceEditableIslandBytes,
   setTextSelection,
   withBomAndCrLf,
 } from "../browser/pageroot-driver.mjs";
@@ -28,10 +28,10 @@ import {
 function packagedExecutable() {
   const appPath = process.env.PAGEROOT_PACKAGED_APP_PATH;
   if (!appPath || !path.isAbsolute(appPath) || path.extname(appPath) !== ".app") {
-    throw new Error("PAGEROOT_PACKAGED_APP_PATH must name the absolute packaged PageRoot.app path.");
+    throw new Error("PAGEROOT_PACKAGED_APP_PATH must name the absolute packaged PageRootV2.app path.");
   }
-  const executable = path.join(appPath, "Contents/MacOS/PageRoot");
-  if (!existsSync(executable)) throw new Error(`Packaged PageRoot executable is missing: ${executable}`);
+  const executable = path.join(appPath, "Contents/MacOS/PageRootV2");
+  if (!existsSync(executable)) throw new Error(`Packaged PageRootV2 executable is missing: ${executable}`);
   return executable;
 }
 
@@ -64,7 +64,7 @@ async function launchPackaged(isolatedUserData) {
   });
   const page = await electronApp.firstWindow();
   await page.waitForLoadState("domcontentloaded");
-  await expect(page).toHaveTitle("源页");
+  await expect(page).toHaveTitle("源页 V2");
   return { electronApp, page };
 }
 
@@ -116,7 +116,7 @@ function removeIsolatedDirectory(directory) {
   });
 }
 
-test("packaged PageRoot preserves source bytes and reconciles draft revision before close", async () => {
+test("packaged PageRootV2 preserves outside-island bytes and reconciles draft revision before close", async () => {
   test.setTimeout(120_000);
   const isolatedUserData = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-packaged-"));
   const sourcePathAlias = path.join(isolatedUserData, "packaged-source.html");
@@ -124,7 +124,11 @@ test("packaged PageRoot preserves source bytes and reconciles draft revision bef
   const originalToken = "SOURCE_FIDELITY_TOKEN_001";
   const replacement = "PackagedRuntime_OK_源页";
   const original = withBomAndCrLf(fixtureBuffer("source-fidelity.html"));
-  const expected = replaceUniqueBytes(original, originalToken, replacement);
+  const expected = replaceEditableIslandBytes(
+    original,
+    "source-fidelity",
+    `<span title='single-quoted' data-order-b="2" data-order-a='1'>${replacement}</span>`,
+  );
   writeFileSync(sourcePathAlias, original);
   const sourcePath = realpathSync(sourcePathAlias);
   seedActiveDiskProject(isolatedUserData, sourcePath);

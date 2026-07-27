@@ -82,7 +82,7 @@ export declare const SOURCE_TEXT_OBJECT: "\ufffc";
 export declare function buildSourceTextMap(
   index: Record<string, unknown>,
   target: string | Record<string, unknown>,
-  options?: { allowEmpty?: boolean },
+  options?: { allowEmpty?: boolean; ignoreComments?: boolean },
 ): SourceTextMap;
 
 export declare function textOffsetToSourceAnchor(

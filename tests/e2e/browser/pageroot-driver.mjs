@@ -3,6 +3,12 @@ import { createReadStream, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect } from "@playwright/test";
+import {
+  buildSourceIndex,
+} from "../../../app/lib/source-patch-core.js";
+import {
+  normalizeEditableIslandHtml,
+} from "../../../app/lib/editable-island.js";
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 export const productRoot = path.resolve(currentDirectory, "../../..");
@@ -295,7 +301,7 @@ export async function nativeEditingState(frame, id) {
 export async function waitForResumedNativeSession(frame, id) {
   await expect.poll(() => nativeEditingState(frame, id)).toMatchObject({
     targetIsActive: true,
-    contenteditable: "plaintext-only",
+    contenteditable: "true",
     isContentEditable: true,
     activeCase: id,
     selectionInside: true,
@@ -345,37 +351,52 @@ export async function selectionSnapshot(frame, id) {
   });
 }
 
-export async function setTextSelection(frame, id, start, end = start) {
-  return currentNativeTarget(frame, id).evaluate((target, offsets) => {
-    const textNodes = [];
-    const walker = document.createTreeWalker(target, NodeFilter.SHOW_TEXT);
-    for (let node = walker.nextNode(); node; node = walker.nextNode()) textNodes.push(node);
-    const totalLength = textNodes.reduce((sum, node) => sum + node.data.length, 0);
-    if (offsets.start < 0 || offsets.end < offsets.start || offsets.end > totalLength) {
-      throw new RangeError(`Selection ${offsets.start}:${offsets.end} exceeds ${totalLength}.`);
+export async function setTextSelection(frameOrPage, id, start, end = start) {
+  const page = pageForFrame(frameOrPage);
+  let lastError;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const frame = await currentEditorFrame(page);
+    try {
+      return await frame.locator(caseSelector(id)).evaluate((target, offsets) => {
+        const textNodes = [];
+        const walker = document.createTreeWalker(target, NodeFilter.SHOW_TEXT);
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) textNodes.push(node);
+        const totalLength = textNodes.reduce((sum, node) => sum + node.data.length, 0);
+        if (offsets.start < 0 || offsets.end < offsets.start || offsets.end > totalLength) {
+          throw new RangeError(`Selection ${offsets.start}:${offsets.end} exceeds ${totalLength}.`);
+        }
+        const pointAt = (absoluteOffset) => {
+          let consumed = 0;
+          for (const node of textNodes) {
+            const next = consumed + node.data.length;
+            if (absoluteOffset <= next) return [node, absoluteOffset - consumed];
+            consumed = next;
+          }
+          const last = textNodes.at(-1);
+          return [last, last?.data.length || 0];
+        };
+        const [startNode, startOffset] = pointAt(offsets.start);
+        const [endNode, endOffset] = pointAt(offsets.end);
+        if (!startNode || !endNode) throw new Error("Editable case has no text nodes.");
+        target.focus({ preventScroll: true });
+        const range = document.createRange();
+        range.setStart(startNode, startOffset);
+        range.setEnd(endNode, endOffset);
+        const selection = document.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+        return selection.toString();
+      }, { start, end });
+    } catch (error) {
+      lastError = error;
+      const message = error instanceof Error ? error.message : String(error);
+      if (
+        !frame.isDetached()
+        && !/detached|Execution context was destroyed|Cannot find context/iu.test(message)
+      ) throw error;
     }
-    const pointAt = (absoluteOffset) => {
-      let consumed = 0;
-      for (const node of textNodes) {
-        const next = consumed + node.data.length;
-        if (absoluteOffset <= next) return [node, absoluteOffset - consumed];
-        consumed = next;
-      }
-      const last = textNodes.at(-1);
-      return [last, last?.data.length || 0];
-    };
-    const [startNode, startOffset] = pointAt(offsets.start);
-    const [endNode, endOffset] = pointAt(offsets.end);
-    if (!startNode || !endNode) throw new Error("Editable case has no text nodes.");
-    target.focus({ preventScroll: true });
-    const range = document.createRange();
-    range.setStart(startNode, startOffset);
-    range.setEnd(endNode, endOffset);
-    const selection = document.getSelection();
-    selection.removeAllRanges();
-    selection.addRange(range);
-    return selection.toString();
-  }, { start, end });
+  }
+  throw lastError ?? new Error("Unable to set selection in the current edit frame.");
 }
 
 export async function clickTextPosition(frame, id, position) {
@@ -715,6 +736,68 @@ export function replaceUniqueBytes(source, beforeText, afterText) {
     after,
     source.subarray(start + before.length),
   ]);
+}
+
+export function replaceEditableIslandBytes(source, caseId, nextInnerHtml) {
+  const buffer = Buffer.isBuffer(source) ? source : Buffer.from(source);
+  const sourceText = buffer.toString("utf8");
+  const index = buildSourceIndex(sourceText);
+  const element = index.elements.find((candidate) => (
+    candidate.stableAttributes?.["data-native-case"] === caseId
+  ));
+  if (!element) {
+    throw new Error(`Editable island fixture target is missing: ${caseId}`);
+  }
+  const beforeInnerHtml = sourceText.slice(
+    element.contentRange.startOffset,
+    element.contentRange.endOffset,
+  );
+  const normalized = normalizeEditableIslandHtml(nextInnerHtml, {
+    baselineInnerHtml: beforeInnerHtml,
+  });
+  return Buffer.from(
+    sourceText.slice(0, element.contentRange.startOffset)
+      + normalized
+      + sourceText.slice(element.contentRange.endOffset),
+    "utf8",
+  );
+}
+
+export function replaceEditableIslandTextBytes(
+  source,
+  sourceNodeId,
+  beforeText,
+  afterText,
+) {
+  const buffer = Buffer.isBuffer(source) ? source : Buffer.from(source);
+  const sourceText = buffer.toString("utf8");
+  const index = buildSourceIndex(sourceText);
+  const element = index.byNodeId.get(sourceNodeId);
+  if (!element || element.type !== "element") {
+    throw new Error(`Editable island source element is missing: ${sourceNodeId}`);
+  }
+  const beforeInnerHtml = sourceText.slice(
+    element.contentRange.startOffset,
+    element.contentRange.endOffset,
+  );
+  const first = beforeInnerHtml.indexOf(beforeText);
+  if (first < 0 || beforeInnerHtml.indexOf(beforeText, first + beforeText.length) >= 0) {
+    throw new Error(
+      `Editable island oracle token must occur exactly once inside ${sourceNodeId}: ${beforeText}`,
+    );
+  }
+  const nextInnerHtml = beforeInnerHtml.slice(0, first)
+    + afterText
+    + beforeInnerHtml.slice(first + beforeText.length);
+  const normalized = normalizeEditableIslandHtml(nextInnerHtml, {
+    baselineInnerHtml: beforeInnerHtml,
+  });
+  return Buffer.from(
+    sourceText.slice(0, element.contentRange.startOffset)
+      + normalized
+      + sourceText.slice(element.contentRange.endOffset),
+    "utf8",
+  );
 }
 
 export function sha256(buffer) {

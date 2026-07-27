@@ -288,6 +288,7 @@ export function buildSourceTextMap(index, target, options = {}) {
       return;
     }
     if (node.type === "comment") {
+      if (options.ignoreComments === true) return;
       textOffset = pushBoundary(runs, "structure", node, textOffset);
       return;
     }

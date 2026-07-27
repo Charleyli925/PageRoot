@@ -4,7 +4,7 @@ import {
   activateNativeEdit,
   exportCurrentHtml,
   loadFixture,
-  replaceUniqueBytes,
+  replaceEditableIslandBytes,
   selectionSnapshot,
   setTextSelection,
 } from "./pageroot-driver.mjs";
@@ -44,10 +44,10 @@ test("nested bold, italic, color, size, span attributes and outside bytes surviv
   const { frame } = await openFormatFixture(page);
   const caseId = "nested-format";
   const target = await activateNativeEdit(frame, caseId);
-  const expectedSource = replaceUniqueBytes(
+  const expectedSource = replaceEditableIslandBytes(
     formatSource,
-    ">彩色字号</span>",
-    ">彩新文号</span>",
+    caseId,
+    `前<strong data-weight="kept">粗<em><span class="tone" style='font-size:21px; color:rgb(180, 40, 30)'>彩新文号</span>斜</em>尾</strong>后`,
   );
 
   // 前(0) 粗(1) 彩(2) 色(3) 字(4) 号(5) 斜(6) 尾(7) 后(8)
@@ -87,10 +87,10 @@ test("editing link text preserves the authored link boundary and every non-text 
   const { frame } = await openFormatFixture(page);
   const caseId = "single-link";
   const target = await activateNativeEdit(frame, caseId);
-  const expectedSource = replaceUniqueBytes(
+  const expectedSource = replaceEditableIslandBytes(
     formatSource,
-    ">链接文字</a>",
-    ">新链</a>",
+    caseId,
+    `去<a href='/docs?q=1&amp;x=2' class="link" data-kind="kept">新链</a>返回`,
   );
 
   await setTextSelection(frame, caseId, 1, 5);

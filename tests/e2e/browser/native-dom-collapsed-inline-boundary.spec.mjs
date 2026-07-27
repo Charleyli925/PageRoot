@@ -147,9 +147,9 @@ test("every exact collapsed DOM point at A/inline/B boundaries inserts with dete
     await test.step(point, async () => {
       const { frame } = await openFixture(page);
       const target = await attemptDirectEdit(frame, "exact-boundaries");
-      await expect(target).toHaveAttribute("contenteditable", "plaintext-only");
-      // A document bubble listener runs after NativeEditingController's
-      // target listener and observes PageRoot's owned correction.
+      await expect(target).toHaveAttribute("contenteditable", "true");
+      // A document bubble listener confirms V2 owns the mutation after
+      // normalizing the collapsed caret to its deterministic source side.
       await installHandledInputRecorder(frame);
       await setExactBoundaryPoint(target, point);
       await page.keyboard.insertText("X");
@@ -180,7 +180,7 @@ test("every exact collapsed DOM point at A/inline/B boundaries inserts with dete
 test("a non-collapsed replacement at the same wrapper endpoints remains native", async ({ page }) => {
   const { editor, frame } = await openFixture(page);
   const target = await attemptDirectEdit(frame, "exact-boundaries");
-  await expect(target).toHaveAttribute("contenteditable", "plaintext-only");
+  await expect(target).toHaveAttribute("contenteditable", "true");
   await target.evaluate((element) => {
     const text = element.querySelector("strong")?.firstChild;
     if (!(text instanceof Text)) throw new Error("Inline replacement text is missing.");
@@ -202,13 +202,15 @@ test("a non-collapsed replacement at the same wrapper endpoints remains native",
     "<strong>A</strong>",
     "<strong>X</strong>",
   ), "utf8");
-  expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
+  expect((await exportCurrentHtml(page)).toString("utf8")).toBe(
+    expected.toString("utf8"),
+  );
 });
 
 test("a strict text-node interior offset remains a native source-exact edit", async ({ page }) => {
   const { frame } = await openFixture(page);
   const target = await attemptDirectEdit(frame, "inline-interior");
-  await expect(target).toHaveAttribute("contenteditable", "plaintext-only");
+  await expect(target).toHaveAttribute("contenteditable", "true");
   await target.evaluate((element) => {
     const text = element.querySelector("strong")?.firstChild;
     if (!(text instanceof Text)) throw new Error("Inline interior text is missing.");
@@ -265,7 +267,9 @@ test("visible paragraph start and end preserve authored indentation while accept
   const expected = Buffer.from(source.toString("utf8")
     .replace("<em>Start</em>", "<em>首Start</em>")
     .replace("<strong>End</strong>", "<strong>End尾</strong>"), "utf8");
-  expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
+  expect((await exportCurrentHtml(page)).toString("utf8")).toBe(
+    expected.toString("utf8"),
+  );
 });
 
 test("a visual text end before collapsed whitespace and an inline icon accepts text", async ({ page }) => {
@@ -449,27 +453,41 @@ test("an IME delivery at a plain visual paragraph end stays before authored inde
   expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
 });
 
-test("an empty transparent wrapper rejects the whole direct-edit island", async ({ page }) => {
+test("an empty transparent wrapper remains intact while its left boundary accepts text", async ({ page }) => {
   const { frame } = await openFixture(page);
   const target = await attemptDirectEdit(frame, "empty-wrapper");
 
-  await expect(page.locator('[role="status"], [role="alert"]').filter({
-    hasText: /空的排版元素/,
-  }).first()).toBeVisible();
-  expect(await target.getAttribute("contenteditable")).toBeNull();
-  expect(await target.evaluate((element) => element.isContentEditable)).toBe(false);
+  await expect(target).toHaveAttribute("contenteditable", "true");
   expect(await authoredInnerHtml(target)).toBe("A<em><strong></strong></em>B");
 
-  await page.keyboard.insertText("不应写入");
+  await target.evaluate((element) => {
+    const strong = element.querySelector("strong");
+    if (!strong) throw new Error("Empty inline wrapper is missing.");
+    element.focus({ preventScroll: true });
+    const range = document.createRange();
+    range.setStart(strong, 0);
+    range.collapse(true);
+    const selection = document.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  });
+  await page.keyboard.insertText("可编辑");
 
-  expect(await target.textContent()).toBe("AB");
-  expect((await exportCurrentHtml(page)).equals(source)).toBe(true);
+  expect(await target.textContent()).toBe("A可编辑B");
+  expect(await authoredInnerHtml(target)).toBe(
+    "A可编辑<em><strong></strong></em>B",
+  );
+  const expected = Buffer.from(source.toString("utf8").replace(
+    "A<em><strong></strong></em>B",
+    "A可编辑<em><strong></strong></em>B",
+  ), "utf8");
+  expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
 });
 
 test("an IME boundary epoch canonicalizes a wrong-side delivery into the left style", async ({ page }) => {
   const { frame } = await openFixture(page);
   const target = await attemptDirectEdit(frame, "exact-boundaries");
-  await expect(target).toHaveAttribute("contenteditable", "plaintext-only");
+  await expect(target).toHaveAttribute("contenteditable", "true");
   await setExactBoundaryPoint(target, "b-text-start");
   await installHandledInputRecorder(frame);
 

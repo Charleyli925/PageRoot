@@ -561,7 +561,7 @@ test("delivered input cannot alter controller-owned host attributes", async ({ p
     editor,
     caseId,
     "contenteditable",
-  )).toBe("plaintext-only");
+  )).toBe("true");
   await expectNoSourceCommit(page, editor, source);
 });
 
@@ -1979,7 +1979,7 @@ test("window blur rolls back a temporary composition wrapper without losing prio
   await expect(target).toHaveText(`${originalText}A`);
   expect(await target.innerHTML()).toContain(">Word</em>");
   expect(await target.innerHTML()).not.toContain("<i>");
-  expect(await target.getAttribute("contenteditable")).toBe("plaintext-only");
+  expect(await target.getAttribute("contenteditable")).toBe("true");
   expect(await editor.getAttribute("data-edit-block-detail")).toBeNull();
   expect((await exportCurrentHtml(page)).equals(replaceUniqueBytes(
     source,

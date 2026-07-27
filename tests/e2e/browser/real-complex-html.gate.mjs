@@ -4,11 +4,18 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  buildSourceIndex,
+  createTargetRef,
+} from "../../../app/lib/source-patch-core.js";
+import {
+  isEditableIslandTarget,
+} from "../../../app/lib/editable-island.js";
+import {
   currentEditorFrame,
   documentToken,
   ensureSourceEditingTestRuntime,
   exportCurrentHtml,
-  replaceUniqueBytes,
+  replaceEditableIslandTextBytes,
   sha256,
 } from "./pageroot-driver.mjs";
 
@@ -43,9 +50,292 @@ function escapeAttributeValue(value) {
   return String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
-async function loadRealHtml(page, sourcePath, source) {
-  await page.goto("/");
-  await ensureSourceEditingTestRuntime(page);
+function editableSourceElementIds(source) {
+  const index = buildSourceIndex(source.toString("utf8"));
+  return new Set(index.elements.flatMap((element) => {
+    if (!element.textContent?.trim()) return [];
+    const targetRef = createTargetRef(index, element, { level: "subregion" });
+    return isEditableIslandTarget(index, targetRef).editable ? [element.nodeId] : [];
+  }));
+}
+
+async function discoverVisibleEditableHosts(frame, source) {
+  const eligibleIds = [...editableSourceElementIds(source)];
+  return frame.locator("[data-html-ai-source-node-id]").evaluateAll(
+    (elements, allowedSourceIds) => {
+      const allowed = new Set(allowedSourceIds);
+      const transparent = new Set([
+        "a", "abbr", "b", "bdi", "bdo", "cite", "code", "data", "del", "dfn",
+        "em", "i", "ins", "kbd", "label", "mark", "q", "s", "samp", "small",
+        "span", "strong", "sub", "sup", "time", "u", "var",
+      ]);
+      const sourceIdOf = (element) => element.getAttribute("data-html-ai-source-node-id");
+      const sourceParent = (element) => element.parentElement?.closest(
+        "[data-html-ai-source-node-id]",
+      ) ?? null;
+      const stableDomSelector = (element) => {
+        const parts = [];
+        let current = element;
+        while (current && current !== document.documentElement) {
+          const parent = current.parentElement;
+          if (!parent) return null;
+          parts.push(`:nth-child(${Array.from(parent.children).indexOf(current) + 1})`);
+          current = parent;
+        }
+        return current === document.documentElement
+          ? `html${parts.reverse().map((part) => ` > ${part}`).join("")}`
+          : null;
+      };
+      const resolved = new Map();
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const match = /\S/u.exec(node.data);
+        if (!match || !node.parentElement) continue;
+        let host = node.parentElement.closest("[data-html-ai-source-node-id]");
+        while (host) {
+          const style = getComputedStyle(host);
+          const standalone = style.display !== "inline" && style.display !== "contents";
+          if (!transparent.has(host.localName) || standalone) break;
+          const parent = sourceParent(host);
+          if (!parent || parent === document.body || parent === document.documentElement) break;
+          host = parent;
+        }
+        const sourceId = host ? sourceIdOf(host) : null;
+        if (!host || !sourceId || !allowed.has(sourceId) || resolved.has(sourceId)) continue;
+        const rect = host.getBoundingClientRect();
+        const style = getComputedStyle(host);
+        const insideClosedDetails = Boolean(
+          host.closest("details:not([open])")
+          && !host.closest("summary"),
+        );
+        let hiddenByFixedAncestor = false;
+        for (let ancestor = host; ancestor; ancestor = ancestor.parentElement) {
+          const ancestorStyle = getComputedStyle(ancestor);
+          if (
+            ancestorStyle.display === "none"
+            || ancestorStyle.visibility === "hidden"
+          ) {
+            hiddenByFixedAncestor = true;
+            break;
+          }
+          if (ancestorStyle.position === "fixed") {
+            const ancestorRect = ancestor.getBoundingClientRect();
+            if (
+              ancestorRect.bottom <= 0
+              || ancestorRect.top >= innerHeight
+              || ancestorRect.right <= 0
+              || ancestorRect.left >= innerWidth
+            ) {
+              hiddenByFixedAncestor = true;
+              break;
+            }
+          }
+        }
+        if (
+          rect.width <= 2
+          || rect.height <= 2
+          || style.display === "none"
+          || style.visibility === "hidden"
+          || style.pointerEvents === "none"
+          || insideClosedDetails
+          || hiddenByFixedAncestor
+        ) continue;
+        const range = document.createRange();
+        range.setStart(node, match.index);
+        range.setEnd(node, match.index + match[0].length);
+        const glyphRect = range.getClientRects()[0] || range.getBoundingClientRect();
+        if (!glyphRect || (!glyphRect.width && !glyphRect.height)) continue;
+        if (
+          style.position === "fixed"
+          && (
+            glyphRect.bottom <= 0
+            || glyphRect.top >= innerHeight
+            || glyphRect.right <= 0
+            || glyphRect.left >= innerWidth
+          )
+        ) continue;
+        resolved.set(sourceId, {
+          sourceId,
+          domSelector: stableDomSelector(host),
+          tagName: host.localName,
+          text: host.textContent || "",
+          documentOrder: elements.indexOf(host),
+          clickPosition: {
+            x: glyphRect.left - rect.left
+              + (glyphRect.width ? Math.min(glyphRect.width / 2, 3) : 1),
+            y: glyphRect.top - rect.top
+              + (glyphRect.height ? glyphRect.height / 2 : 1),
+          },
+        });
+      }
+      return [...resolved.values()].sort(
+        (left, right) => left.documentOrder - right.documentOrder,
+      );
+    },
+    eligibleIds,
+  );
+}
+
+async function exerciseEditableHost(handle) {
+  return handle.evaluate((element) => {
+    const textNodes = () => {
+      const result = [];
+      const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        result.push(node);
+      }
+      return result;
+    };
+    const select = (absoluteOffset) => {
+      let consumed = 0;
+      let point = null;
+      for (const node of textNodes()) {
+        if (absoluteOffset <= consumed + node.data.length) {
+          point = [node, absoluteOffset - consumed];
+          break;
+        }
+        consumed += node.data.length;
+      }
+      if (!point) throw new RangeError(`Selection offset ${absoluteOffset} is outside the host.`);
+      element.focus({ preventScroll: true });
+      const range = document.createRange();
+      range.setStart(point[0], point[1]);
+      range.collapse(true);
+      const selection = document.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    };
+    const insert = (data) => {
+      element.dispatchEvent(new InputEvent("beforeinput", {
+        bubbles: true,
+        cancelable: true,
+        data,
+        inputType: "insertText",
+      }));
+    };
+    const key = (value) => {
+      element.dispatchEvent(new KeyboardEvent("keydown", {
+        bubbles: true,
+        cancelable: true,
+        key: value,
+      }));
+    };
+    const assert = (condition, message) => {
+      if (!condition) throw new Error(message);
+    };
+    const beforeText = element.textContent || "";
+    const segments = [...new Intl.Segmenter("zh-CN", {
+      granularity: "grapheme",
+    }).segment(beforeText)];
+    const offsets = [...new Set([
+      0,
+      segments[Math.floor(segments.length / 2)]?.index ?? 0,
+      beforeText.length,
+    ])];
+    let operations = 0;
+
+    for (const offset of offsets) {
+      select(offset);
+      insert("测");
+      assert(element.textContent !== beforeText, `insert failed at ${offset}`);
+      operations += 1;
+      key("Backspace");
+      assert(element.textContent === beforeText, `delete failed at ${offset}`);
+      operations += 1;
+    }
+
+    select(beforeText.length);
+    const beforeBreaks = element.querySelectorAll("br").length;
+    key("Enter");
+    assert(
+      element.querySelectorAll("br").length > beforeBreaks,
+      "line-break insertion failed",
+    );
+    operations += 1;
+    key("Backspace");
+    assert(
+      element.querySelectorAll("br").length === beforeBreaks,
+      "line-break deletion failed",
+    );
+    operations += 1;
+
+    const finalSegment = segments.filter(({ segment }) => segment.trim()).at(-1);
+    if (finalSegment) {
+      select(finalSegment.index + finalSegment.segment.length);
+      key("Backspace");
+      assert(element.textContent !== beforeText, "authored grapheme deletion failed");
+      operations += 1;
+      insert(finalSegment.segment);
+      assert(element.textContent === beforeText, "authored grapheme restoration failed");
+      operations += 1;
+    }
+    return { beforeText, operations };
+  });
+}
+
+async function renderedTokenPosition(handle, token) {
+  return handle.evaluate((element, wanted) => {
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    let consumed = "";
+    const nodes = [];
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      nodes.push(node);
+      consumed += node.data;
+    }
+    const tokenOffset = consumed.lastIndexOf(wanted);
+    if (tokenOffset < 0) throw new Error(`Rendered token is missing: ${wanted}`);
+    let traversed = 0;
+    for (const node of nodes) {
+      if (tokenOffset < traversed + node.data.length) {
+        const localOffset = tokenOffset - traversed;
+        const range = document.createRange();
+        range.setStart(node, localOffset);
+        range.setEnd(node, localOffset + 1);
+        const glyphRect = range.getClientRects()[0] || range.getBoundingClientRect();
+        const elementRect = element.getBoundingClientRect();
+        return {
+          x: glyphRect.left - elementRect.left + Math.min(glyphRect.width / 2, 3),
+          y: glyphRect.top - elementRect.top + glyphRect.height / 2,
+        };
+      }
+      traversed += node.data.length;
+    }
+    throw new Error(`Rendered token has no glyph: ${wanted}`);
+  }, token);
+}
+
+async function waitForEditableHost(frame, editor, expectedTarget, label) {
+  try {
+    await expect.poll(
+      () => expectedTarget.getAttribute("contenteditable"),
+      { timeout: 2_000 },
+    ).toBe("true");
+  } catch (cause) {
+    const active = frame.locator('[contenteditable="true"]');
+    const activeCount = await active.count();
+    const activeId = activeCount > 0
+      ? await active.first().getAttribute("data-html-ai-source-node-id")
+      : null;
+    throw new Error(
+      `${label} did not activate. `
+      + `status=${await editor.getAttribute("data-native-start-status")} `
+      + `capability=${await editor.getAttribute("data-native-capability-detail")} `
+      + `block=${await editor.getAttribute("data-edit-block-detail")} `
+      + `activeCount=${activeCount} `
+      + `activeId=${activeId}`,
+      { cause },
+    );
+  }
+}
+
+async function loadRealHtml(page, sourcePath, source, { navigate = true } = {}) {
+  const previousToken = navigate
+    ? null
+    : await documentToken(page).catch(() => null);
+  if (navigate) {
+    await page.goto("/", { waitUntil: "domcontentloaded", timeout: 15_000 });
+    await ensureSourceEditingTestRuntime(page);
+  }
   const name = path.basename(sourcePath);
   // Setting the hidden input directly bypasses prepareProjectSwitch(), so wait
   // for the initial canvas to reach the same commit-ready state as the real UI.
@@ -57,6 +347,12 @@ async function loadRealHtml(page, sourcePath, source) {
   await fileInput.waitFor({ state: "attached" });
   await fileInput.setInputFiles({ name, mimeType: "text/html", buffer: source });
   await page.getByText(name, { exact: true }).first().waitFor({ state: "visible" });
+  if (previousToken) {
+    await expect.poll(
+      () => documentToken(page),
+      { timeout: 10_000 },
+    ).not.toBe(previousToken);
+  }
 
   await expect(editor).toHaveAttribute("data-render-verified", "true");
   const iframe = editor.locator('iframe[title*="HTML"]');
@@ -187,13 +483,9 @@ async function discoverEditableCandidate(frame, source) {
 
 async function discoverCommentCandidate(frame) {
   const candidates = await frame.locator("[data-html-ai-source-node-id]").evaluateAll((elements) => {
-    const directEditRoots = new Set([
-      "p", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "li", "dt", "dd",
-      "caption", "figcaption", "td", "th", "div",
-    ]);
     const dedicatedEditorRoots = new Set([
       "input", "textarea", "select", "option", "script", "style", "template", "title",
-      "canvas", "iframe", "svg", "math", "pre",
+      "canvas", "iframe", "svg", "math",
     ]);
     const dedicatedEditorSelector = [...dedicatedEditorRoots].join(",");
     const documentContainers = new Set(["html", "head", "body"]);
@@ -214,8 +506,6 @@ async function discoverCommentCandidate(frame) {
       const insideDedicatedEditorRoot = Boolean(
         element.parentElement?.closest(dedicatedEditorSelector),
       );
-      const structureAtom = directEditRoots.has(tagName)
-        && Boolean(element.querySelector("img,svg,math,canvas,iframe,input,textarea,select,object,embed"));
       return {
         index,
         sourceId: element.getAttribute("data-html-ai-source-node-id"),
@@ -228,36 +518,33 @@ async function discoverCommentCandidate(frame) {
         documentContainer: documentContainers.has(tagName),
         dedicatedEditorRoot: dedicatedEditorRoots.has(tagName),
         insideDedicatedEditorRoot,
-        structureAtom,
         pseudoContent,
       };
     });
   });
   const candidate = candidates
-    .filter(({ rendered, text, documentContainer, insideDedicatedEditorRoot, dedicatedEditorRoot, structureAtom }) => (
+    .filter(({ rendered, text, documentContainer, insideDedicatedEditorRoot, dedicatedEditorRoot }) => (
       rendered && !documentContainer
       && !insideDedicatedEditorRoot
       && text.length > 0
-      && (dedicatedEditorRoot || structureAtom)
+      && dedicatedEditorRoot
     ))
     .sort((left, right) => (
-      Number(!left.structureAtom) - Number(!right.structureAtom)
-      || Number(!left.dedicatedEditorRoot) - Number(!right.dedicatedEditorRoot)
-      || left.childElementCount - right.childElementCount
+      left.childElementCount - right.childElementCount
       || left.text.length - right.text.length
       || left.index - right.index
     ))[0];
   if (!candidate) {
     throw new Error(
       `No explicit select-comment/comment-only candidate was found. `
-      + `Expected a rendered dedicated editor root or structural atom. `
+      + `Expected a rendered dedicated editor root. `
       + `Sample: ${JSON.stringify(candidates.slice(0, 12))}`,
     );
   }
-  const expectedCapabilities = candidate.dedicatedEditorRoot
-    ? ["DEDICATED_EDITOR_REQUIRED"]
-    : ["SOURCE_STRUCTURE_RANGE_UNSUPPORTED", "DEDICATED_EDITOR_REQUIRED"];
-  return { ...candidate, expectedCapabilities };
+  return {
+    ...candidate,
+    expectedCapabilities: ["EDITABLE_ISLAND_ROOT_UNSUPPORTED"],
+  };
 }
 
 async function visualGeometrySnapshot(handle) {
@@ -400,7 +687,7 @@ async function firstRenderedTextPosition(handle) {
   });
 }
 
-test("a real complex HTML file keeps layout and source authority through edit and fallback", async ({ page }, testInfo) => {
+test("a real complex HTML file keeps layout and editable-island source authority", async ({ page }, testInfo) => {
   const sourcePath = validatedRealHtmlPath();
   const beforeStat = statSync(sourcePath);
   const original = readFileSync(sourcePath);
@@ -428,7 +715,7 @@ test("a real complex HTML file keeps layout and source authority through edit an
     {
       message: `Candidate did not enter native edit. candidate=${JSON.stringify(candidate)} block=${await editor.getAttribute("data-edit-block-detail")} capability=${await editor.getAttribute("data-native-capability-detail")}`,
     },
-  ).toBe("plaintext-only");
+  ).toBe("true");
   const activeState = await target.evaluate((element) => {
     const selection = document.getSelection();
     const selectionNode = selection?.anchorNode?.nodeType === Node.TEXT_NODE
@@ -466,7 +753,12 @@ test("a real complex HTML file keeps layout and source authority through edit an
   if (original.includes(Buffer.from(replacement))) {
     throw new Error(`Replacement oracle already exists in source: ${replacement}`);
   }
-  const expected = replaceUniqueBytes(original, candidate.token, replacement);
+  const expected = replaceEditableIslandTextBytes(
+    original,
+    candidate.sourceId,
+    candidate.token,
+    replacement,
+  );
   await setHandleTextSelection(
     target,
     candidate.textOffset,
@@ -489,7 +781,7 @@ test("a real complex HTML file keeps layout and source authority through edit an
     `Only the selected literal may change: ${firstByteDifference(modified, expected)}`,
   ).toBe(true);
 
-  const remainingEditHost = currentFrame.locator('[contenteditable="plaintext-only"]');
+  const remainingEditHost = currentFrame.locator('[contenteditable="true"]');
   if (await remainingEditHost.count()) {
     await remainingEditHost.press("Escape");
     await expect(remainingEditHost).toHaveCount(0);
@@ -502,61 +794,17 @@ test("a real complex HTML file keeps layout and source authority through edit an
     );
   await expect(commentTarget, `Comment candidate must stay uniquely source-backed: ${JSON.stringify(commentCandidate)}`)
     .toHaveCount(1);
-  if (commentCandidate.structureAtom) {
-    const commentHandle = await commentTarget.elementHandle();
-    if (!commentHandle) throw new Error("The structural fallback candidate detached before activation.");
-    await commentHandle.dblclick({ position: await firstRenderedTextPosition(commentHandle) });
-  } else {
-    await commentTarget.dispatchEvent("dblclick", {
-      bubbles: true,
-      cancelable: true,
-      detail: 2,
-    });
-  }
-  expect(await currentFrame.locator('[contenteditable="plaintext-only"]').count()).toBe(0);
+  await commentTarget.dblclick({
+    force: true,
+    position: { x: 4, y: 4 },
+  });
+  expect(await currentFrame.locator('[contenteditable="true"]').count()).toBe(0);
   await expect.poll(async () => {
     const detail = await editor.getAttribute("data-native-capability-detail") || "";
     return commentCandidate.expectedCapabilities.some((code) => detail.includes(code));
   }, {
     message: `Expected one of ${commentCandidate.expectedCapabilities.join(", ")}: ${JSON.stringify(commentCandidate)}`,
   }).toBe(true);
-  const fallbackSelection = await commentTarget.evaluate((candidateElement) => {
-    const selectedElement = candidateElement.matches("[data-html-canvas-selected]")
-      ? candidateElement
-      : candidateElement.querySelector("[data-html-canvas-selected]")
-        || candidateElement.closest("[data-html-canvas-selected]");
-    const selection = document.getSelection();
-    const anchorElement = selection?.anchorNode?.nodeType === Node.TEXT_NODE
-      ? selection.anchorNode.parentElement
-      : selection?.anchorNode;
-    const focusElement = selection?.focusNode?.nodeType === Node.TEXT_NODE
-      ? selection.focusNode.parentElement
-      : selection?.focusNode;
-    return {
-      level: selectedElement?.getAttribute("data-html-canvas-selected") || null,
-      selectedRelatedToCandidate: Boolean(
-        selectedElement
-        && (candidateElement.contains(selectedElement) || selectedElement.contains(candidateElement)),
-      ),
-      nativeSelectionWithinCandidate: Boolean(
-        anchorElement
-        && focusElement
-        && candidateElement.contains(anchorElement)
-        && candidateElement.contains(focusElement),
-      ),
-      selectedText: selection?.toString() || "",
-    };
-  });
-  expect(
-    fallbackSelection.level,
-    `Fallback must select a comment target: ${JSON.stringify({ commentCandidate, fallbackSelection })}`,
-  ).toMatch(/^(part|module)$/);
-  expect(fallbackSelection.selectedRelatedToCandidate).toBe(true);
-  expect(
-    fallbackSelection.nativeSelectionWithinCandidate,
-    `Fallback must retain native selection: ${JSON.stringify({ commentCandidate, fallbackSelection })}`,
-  ).toBe(true);
-  expect(fallbackSelection.selectedText.trim().length).toBeGreaterThan(0);
   await expect(page.getByRole("button", { name: /留评论|评论/ }).filter({ visible: true }).first())
     .toBeVisible();
   const notice = page.locator('[role="status"], [role="alert"]').filter({ hasText: /评论/ }).first();
@@ -571,4 +819,275 @@ test("a real complex HTML file keeps layout and source authority through edit an
   expect(sha256(diskAfter), "the original desktop file SHA").toBe(originalSha);
   expect(afterStat.size).toBe(beforeStat.size);
   expect(afterStat.mtimeMs).toBe(beforeStat.mtimeMs);
+});
+
+const REAL_CENSUS_SHARD_COUNT = 32;
+
+for (let shardIndex = 0; shardIndex < REAL_CENSUS_SHARD_COUNT; shardIndex += 1) {
+test(`the real complex page edits every visible V2 host at start, middle and end (${shardIndex + 1}/${REAL_CENSUS_SHARD_COUNT})`, async ({ page }, testInfo) => {
+  test.skip(
+    !process.env.PAGEROOT_REAL_HTML_PATH,
+    "The exhaustive census runs only when an explicit real HTML path is supplied.",
+  );
+  test.setTimeout(15 * 60_000);
+  const sourcePath = validatedRealHtmlPath();
+  const original = readFileSync(sourcePath);
+  const beforeStat = statSync(sourcePath);
+  const originalSha = sha256(original);
+  let loaded = await loadRealHtml(page, sourcePath, original);
+  const hosts = await discoverVisibleEditableHosts(loaded.frame, original);
+  const onlyIndex = process.env.PAGEROOT_CENSUS_ONLY_INDEX === undefined
+    ? null
+    : Number.parseInt(process.env.PAGEROOT_CENSUS_ONLY_INDEX, 10);
+  const scheduledHosts = Number.isInteger(onlyIndex)
+    ? hosts.map((host, index) => ({ host, hostIndex: index }))
+      .filter(({ hostIndex }) => (
+        hostIndex === onlyIndex
+        && hostIndex % REAL_CENSUS_SHARD_COUNT === shardIndex
+      ))
+    : hosts.map((host, hostIndex) => ({ host, hostIndex }))
+      .filter(({ hostIndex }) => (
+        hostIndex % REAL_CENSUS_SHARD_COUNT === shardIndex
+      ));
+  if (Number.isInteger(onlyIndex) && scheduledHosts.length === 0) test.skip();
+  if (scheduledHosts.length === 0) {
+    throw new Error(`PAGEROOT_CENSUS_ONLY_INDEX did not match a host: ${onlyIndex}`);
+  }
+  console.log(`PageRootV2 real census discovered ${hosts.length} visible hosts.`);
+  const stats = {
+    sourcePath: path.basename(sourcePath),
+    discoveredEditableHosts: 0,
+    successfulHosts: 0,
+    failedHosts: 0,
+    successfulOperations: 0,
+    failedOperations: 0,
+    failures: [],
+    hosts: [],
+  };
+  const testedHostPaths = new Set();
+
+  for (const { hostIndex, host } of scheduledHosts) {
+    const hostResult = {
+      sourceId: host.sourceId,
+      tagName: host.tagName,
+      text: host.text.trim().slice(0, 80),
+      operations: 0,
+      status: "passed",
+    };
+    try {
+      if (!host.domSelector) throw new Error("Editable host has no stable DOM path.");
+      let target = loaded.frame.locator(host.domSelector);
+      await expect(target).toHaveCount(1);
+      const stillIndependentlyTestable = await target.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        return Boolean((element.textContent || "").length)
+          && rect.width > 2
+          && rect.height > 2
+          && style.display !== "none"
+          && style.visibility !== "hidden";
+      });
+      if (!stillIndependentlyTestable) {
+        throw new Error("Editable host was altered by an earlier host in the same isolated shard.");
+      }
+      await target.evaluate((element) => element.scrollIntoView({
+        block: "center",
+        inline: "center",
+      }));
+      const activate = async () => {
+        // The fixture intentionally contains perpetual CSS motion. `force`
+        // preserves a browser-generated pointer sequence without waiting for
+        // an animation to become "stable", which can never happen for cards.
+        await target.dblclick({
+          position: host.clickPosition,
+          force: true,
+          timeout: 2_000,
+        });
+        await waitForEditableHost(
+          loaded.frame,
+          loaded.editor,
+          target,
+          `${host.tagName}:${host.sourceId}`,
+        );
+      };
+      await activate();
+      const active = loaded.frame.locator('[contenteditable="true"]');
+      await expect(active).toHaveCount(1);
+      const activeId = await active.getAttribute("data-html-ai-source-node-id");
+      if (!activeId) throw new Error("Activated host lost its source identity.");
+      if (testedHostPaths.has(host.domSelector)) {
+        throw new Error(`Duplicate editable-host DOM path: ${host.domSelector}`);
+      }
+      testedHostPaths.add(host.domSelector);
+      hostResult.sourceId = activeId;
+      hostResult.tagName = await active.evaluate((element) => element.localName);
+      hostResult.text = (await active.textContent()).trim().slice(0, 80);
+      const activeHandle = await active.elementHandle();
+      if (!activeHandle) throw new Error("Activated host detached before its operation matrix.");
+      hostResult.operations += 1;
+      stats.successfulOperations += 1;
+      const exercised = await exerciseEditableHost(activeHandle);
+      hostResult.operations += exercised.operations;
+      stats.successfulOperations += exercised.operations;
+
+      expect(
+        await loaded.editor.getAttribute("data-edit-block-detail"),
+        `${host.tagName}:${host.sourceId}`,
+      ).toBeNull();
+      const tokenBeforeExit = await documentToken(page);
+      const deferredFence = (
+        await loaded.editor.getAttribute("data-native-commit-path")
+      )?.includes("fence-deferred");
+      await page.keyboard.press("Escape");
+      if (deferredFence) {
+        loaded = {
+          ...loaded,
+          frame: await waitForFreshFenceFrame(
+            page,
+            loaded.editor,
+            tokenBeforeExit,
+          ),
+        };
+      }
+      await expect(loaded.frame.locator('[contenteditable="true"]')).toHaveCount(0);
+      stats.successfulHosts += 1;
+      if (stats.successfulHosts % 50 === 0) {
+        console.log(`PageRootV2 real census progress: ${stats.successfulHosts}/${hosts.length}`);
+      }
+    } catch (error) {
+      hostResult.status = "failed";
+      hostResult.error = error instanceof Error ? error.message : String(error);
+      stats.failedHosts += 1;
+      stats.failedOperations += 1;
+      stats.failures.push({
+        index: hostIndex,
+        sourceId: host.sourceId,
+        tagName: host.tagName,
+        text: host.text.trim().slice(0, 120),
+        error: hostResult.error,
+      });
+      console.log(`PageRootV2 census failure: ${JSON.stringify(stats.failures.at(-1))}`);
+      await page.keyboard.press("Escape").catch(() => undefined);
+      if (process.env.PAGEROOT_CENSUS_STOP_AFTER_FAILURE === "1") break;
+      loaded = await loadRealHtml(page, sourcePath, original);
+    }
+    stats.hosts.push(hostResult);
+  }
+
+  stats.discoveredEditableHosts = scheduledHosts.length;
+  console.log(`PageRootV2 real census summary: ${JSON.stringify({
+    discoveredEditableHosts: stats.discoveredEditableHosts,
+    successfulHosts: stats.successfulHosts,
+    failedHosts: stats.failedHosts,
+    successfulOperations: stats.successfulOperations,
+    failedOperations: stats.failedOperations,
+  })}`);
+  await testInfo.attach("pageroot-v2-real-editability-census.json", {
+    body: Buffer.from(JSON.stringify(stats, null, 2)),
+    contentType: "application/json",
+  });
+  expect(
+    stats.failures,
+    `V2 real-page census failures: ${JSON.stringify(stats.failures, null, 2)}`,
+  ).toEqual([]);
+  expect(stats.successfulHosts).toBe(scheduledHosts.length);
+  expect(stats.successfulOperations).toBeGreaterThanOrEqual(scheduledHosts.length * 9);
+  const afterStat = statSync(sourcePath);
+  expect(sha256(readFileSync(sourcePath))).toBe(originalSha);
+  expect(afterStat.size).toBe(beforeStat.size);
+  expect(afterStat.mtimeMs).toBe(beforeStat.mtimeMs);
+});
+}
+
+test("reported real-page end boundaries round-trip with only island normalization", async ({ page }, testInfo) => {
+  test.skip(
+    !process.env.PAGEROOT_REAL_HTML_PATH,
+    "Named regressions run only when an explicit real HTML path is supplied.",
+  );
+  test.setTimeout(3 * 60_000);
+  const sourcePath = validatedRealHtmlPath();
+  const original = readFileSync(sourcePath);
+  const originalSha = sha256(original);
+  const scenarios = [
+    {
+      name: "header brand",
+      selector: "header.site-header a.brand-lockup > span:last-child[data-html-ai-source-node-id]",
+      boundaryToken: "2030",
+    },
+    {
+      name: "hero real-world paragraph",
+      selector: ".hero .hero-lede[data-html-ai-source-node-id]",
+      boundaryToken: "保存。",
+    },
+    {
+      name: "start-browsing link",
+      selector: '.hero .button-row > a.button[href="#dashboard"][data-html-ai-source-node-id]',
+      boundaryToken: "开始浏览",
+    },
+    {
+      name: "module-ordering paragraph",
+      selector: "#dashboard .section-heading > p:not(.kicker)[data-html-ai-source-node-id]",
+      boundaryToken: "模块排序。",
+    },
+  ];
+  const report = [];
+
+  for (const scenario of scenarios) {
+    const { editor, frame } = await loadRealHtml(page, sourcePath, original);
+    const target = frame.locator(scenario.selector);
+    await expect(target, scenario.name).toHaveCount(1);
+    const handle = await target.elementHandle();
+    if (!handle) throw new Error(`${scenario.name} detached before activation.`);
+    await handle.scrollIntoViewIfNeeded();
+    await handle.dblclick({
+      position: await renderedTokenPosition(handle, scenario.boundaryToken),
+    });
+    await waitForEditableHost(frame, editor, target, scenario.name);
+    const sourceId = await target.getAttribute("data-html-ai-source-node-id");
+    if (!sourceId) throw new Error(`${scenario.name} lost its source identity.`);
+    const beforeText = await target.textContent();
+    const boundaryStart = beforeText.lastIndexOf(scenario.boundaryToken);
+    if (boundaryStart < 0) {
+      throw new Error(`${scenario.name} boundary token is not rendered.`);
+    }
+    const boundaryOffset = boundaryStart + scenario.boundaryToken.length;
+    await setHandleTextSelection(handle, boundaryOffset);
+    await page.keyboard.insertText("测");
+    await expect.poll(() => target.textContent()).not.toBe(beforeText);
+    await page.keyboard.press("Backspace");
+    await expect.poll(() => target.textContent()).toBe(beforeText);
+    await setHandleTextSelection(handle, boundaryOffset);
+    const beforeBreaks = await target.locator("br").count();
+    await page.keyboard.press("Enter");
+    await expect.poll(() => target.locator("br").count()).toBeGreaterThan(beforeBreaks);
+    await page.keyboard.press("Backspace");
+    await expect.poll(() => target.locator("br").count()).toBe(beforeBreaks);
+    expect(await editor.getAttribute("data-edit-block-detail"), scenario.name).toBeNull();
+    await page.keyboard.press("Escape");
+
+    const expected = replaceEditableIslandTextBytes(
+      original,
+      sourceId,
+      scenario.boundaryToken,
+      scenario.boundaryToken,
+    );
+    const exported = await exportCurrentHtml(page);
+    expect(
+      exported.equals(expected),
+      `${scenario.name}: ${firstByteDifference(exported, expected)}`,
+    ).toBe(true);
+    report.push({ ...scenario, status: "passed", operations: 4 });
+  }
+
+  await testInfo.attach("pageroot-v2-reported-boundaries.json", {
+    body: Buffer.from(JSON.stringify({
+      targets: scenarios.length,
+      successfulTargets: report.length,
+      successfulOperations: report.reduce((sum, item) => sum + item.operations, 0),
+      failedOperations: 0,
+      report,
+    }, null, 2)),
+    contentType: "application/json",
+  });
+  expect(sha256(readFileSync(sourcePath))).toBe(originalSha);
 });

@@ -10,9 +10,9 @@ import {
   type NativeEditHostMode,
 } from "../lib/native-edit-policy.js";
 import type { NativeEditRuntimePreflight } from "../lib/native-edit-capability.js";
+import { nativeLogicalText } from "../lib/native-dom-logical-index.js";
 import { RuntimeDomSourceMap } from "../lib/runtime-dom-source-map.js";
 import type { SourceTextMap } from "../lib/source-text-map.js";
-import { nativeLogicalText } from "./NativeEditingController";
 
 export type NativeLayoutFingerprint = {
   x: number;

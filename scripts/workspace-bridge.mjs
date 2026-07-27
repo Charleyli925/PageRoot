@@ -73,7 +73,7 @@ const SERVICE_NAME = "html-ai-workspace-bridge";
 const DEFAULT_WORKSPACE = path.join(
   os.homedir(),
   "Documents",
-  "PageRoot",
+  "PageRootV2",
   "项目记录",
 );
 const WORKSPACE_ROOT = path.resolve(

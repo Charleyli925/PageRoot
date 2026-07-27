@@ -1,6 +1,6 @@
 # ADR 0002: Native edit hosts are measured capabilities
 
-- Status: Accepted
+- Status: Superseded by ADR 0004 for PageRootV2
 - Date: 2026-07-23
 
 ## Context

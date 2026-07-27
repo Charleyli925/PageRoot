@@ -11,6 +11,8 @@ export default defineConfig({
   ...browserConfig,
   testMatch: /real-complex-html\.gate\.mjs/,
   outputDir: path.join(productRoot, "output/playwright/real-complex-html/results"),
+  fullyParallel: true,
+  workers: 4,
   retries: 0,
   timeout: 90_000,
   reporter: [

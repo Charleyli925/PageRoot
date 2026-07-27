@@ -51,9 +51,7 @@ import {
 } from "./product-contract.mjs";
 import { handoffToQoderWork } from "./qoder-handoff.mjs";
 import {
-  ManualUpdateError,
   LATEST_RELEASE_PAGE_URL,
-  checkForManualUpdate,
 } from "./manual-update.mjs";
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
@@ -74,9 +72,9 @@ const e2eUserDataPath = (() => {
   }
   return resolved;
 })();
-const productUserDataPath = e2eUserDataPath || path.join(app.getPath("appData"), "PageRoot");
+const productUserDataPath = e2eUserDataPath || path.join(app.getPath("appData"), "PageRootV2");
 app.setPath("userData", productUserDataPath);
-app.setName("源页");
+app.setName("源页 V2");
 if (e2eUserDataPath) {
   // Hosted macOS runners can report an Electron window as visible while the
   // WindowServer still classifies it as background or occluded. Keep the
@@ -160,17 +158,7 @@ function projectStatePath() {
 }
 
 async function projectStatePathForRead() {
-  const currentPath = projectStatePath();
-  const legacyPaths = ["YuanYe", "HTML AI 工作台"].map((directoryName) => (
-    path.join(app.getPath("appData"), directoryName, "html-projects.json")
-  ));
-  for (const candidate of [currentPath, ...legacyPaths]) {
-    const isFile = await stat(candidate)
-      .then((entry) => entry.isFile())
-      .catch(() => false);
-    if (isFile) return candidate;
-  }
-  return currentPath;
+  return projectStatePath();
 }
 
 function assertHtmlPath(value, label = "HTML 文件路径") {
@@ -985,29 +973,14 @@ async function forgetRecentProject(filePath) {
 }
 
 async function checkForUpdates() {
-  try {
-    return await checkForManualUpdate({
-      currentVersion: app.getVersion(),
-      architecture: process.arch,
-      fetchImpl: (url, options) => net.fetch(url, options),
-    });
-  } catch (error) {
-    const code = error instanceof ManualUpdateError
-      ? error.code
-      : "UPDATE_UNAVAILABLE";
-    console.warn(
-      `[manual-update:${code}]`,
-      error instanceof Error ? error.message : String(error),
-    );
-    return {
-      status: "unavailable",
-      currentVersion: app.getVersion(),
-      latestVersion: null,
-      minimumMacOS: null,
-      architecture: process.arch,
-      publishedAt: null,
-    };
-  }
+  return {
+    status: "current",
+    currentVersion: app.getVersion(),
+    latestVersion: app.getVersion(),
+    minimumMacOS: null,
+    architecture: process.arch,
+    publishedAt: null,
+  };
 }
 
 async function runAutomaticUpdateCheck() {
@@ -1436,23 +1409,7 @@ async function workspacePath() {
   }
 
   const documents = app.getPath("documents");
-  const legacyWorkspace = path.join(
-    documents,
-    "HTML AI 工作台",
-    "项目记录",
-  );
-  const yuanyeWorkspace = path.join(documents, "YuanYe", "项目记录");
-  const pageRootWorkspace = path.join(documents, "PageRoot", "项目记录");
-  const existingWorkspace = await Promise.all(
-    [pageRootWorkspace, yuanyeWorkspace, legacyWorkspace].map(async (candidate) => (
-      await stat(candidate)
-        .then((entry) => entry.isDirectory())
-        .catch(() => false)
-        ? candidate
-        : null
-    )),
-  ).then((candidates) => candidates.find(Boolean));
-  return existingWorkspace ?? pageRootWorkspace;
+  return path.join(documents, "PageRootV2", "项目记录");
 }
 
 async function startBridge() {
@@ -1539,7 +1496,7 @@ async function createWindow() {
     minWidth: 960,
     minHeight: 720,
     backgroundColor: "#f7f8fa",
-    title: "源页",
+    title: "源页 V2",
     show: process.env.PAGEROOT_E2E === "1",
     ...(process.platform === "darwin"
       ? {

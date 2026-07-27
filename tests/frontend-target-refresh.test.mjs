@@ -529,17 +529,12 @@ test("ordinary patches keep the mounted iframe while source-authority fences use
     canvas,
     /selectTarget\(pendingSelection, \{[\s\S]*?reveal: false,[\s\S]*?showToolbar: pendingToolbarVisible/u,
   );
-  assert.match(applyCommand, /forwardPlan\.type === "replace-text-range"/u);
-  assert.match(
-    applyCommand,
-    /const logicalSelection = options\.nativeTextCommit\?\.selection[\s\S]*?\?\? activeNativeEdit\.session\.getSelection\(\)/u,
-  );
+  assert.match(applyCommand, /forwardPlan\.type === "replace-editable-island"/u);
+  assert.match(applyCommand, /options\.islandTextCommit/u);
   assert.match(applyCommand, /buildSourceTextMap\(/u);
-  assert.match(applyCommand, /canonicalNativeHostPreview\(/u);
-  assert.match(applyCommand, /nativePreviewOwnershipMatches\(/u);
-  assert.match(applyCommand, /restartCanonicalNativeEditRef\.current\(/u);
-  assert.match(applyCommand, /buildRuntimeDomMap\(/u);
-  assert.match(applyCommand, /\.session\.applyExternalBaseline\(\{/u);
+  assert.match(applyCommand, /editableIslandForTarget\(/u);
+  assert.match(applyCommand, /refreshMountedPreviewSourceNodeIds\(/u);
+  assert.match(applyCommand, /\.session\.applyExternalIslandBaseline\(\{/u);
   assert.match(applyCommand, /data-render-verified", "true"/u);
   assert.doesNotMatch(applyCommand, /data-render-verified", "false"/u);
 
@@ -658,7 +653,7 @@ test("preview native links and forms cannot navigate the editing canvas on doubl
   assert.match(canvas, /documentNode\.addEventListener\("submit", handleSubmit, true\)/u);
 });
 
-test("native editing uses the authored DOM, browser Selection, and a measured host mode", async () => {
+test.skip("retired V1 native-controller source contract", async () => {
   const [canvas, nativeController, capability, preflight, policy] = await Promise.all([
     readFile(
       new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url),
@@ -847,7 +842,7 @@ test("canvas root whitespace clears selection instead of selecting the document 
   );
 });
 
-test("canvas maps native DOM selections to source-safe patches and promotes media to modules", async () => {
+test.skip("retired V1 range-tracker source contract", async () => {
   const [
     canvas,
     nativeController,

@@ -92,7 +92,7 @@ stateDiagram-v2
 
 ### 3.1 首次启动欢迎项目
 
-桌面应用没有可恢复的当前项目时，不显示一个只有内存内容的假预览。系统会在所选工作区的上级目录建立 `欢迎来到源页.html`；默认位置是 `~/Documents/PageRoot/欢迎来到源页.html`，并立即：
+桌面应用没有可恢复的当前项目时，不显示一个只有内存内容的假预览。系统会在所选工作区的上级目录建立 `欢迎来到源页 V2.html`；默认位置是 `~/Documents/PageRootV2/欢迎来到源页 V2.html`，并立即：
 
 1. 把它作为普通当前 HTML 加入最近项目。
 2. 通过 Bridge 登记独立的 `projectId`、`documentId` 和初始 V1。
@@ -139,13 +139,14 @@ stateDiagram-v2
 ```text
 单击选择文字宿主
 → 双击并把光标放到点击位置
-→ NativeEditingController 接管当前源码宿主，浏览器原生 DOM / Selection / IME 开始会话
+→ IslandEditingController 建立一个与精确源码 contentRange 对应的可编辑岛
+→ 浏览器提供光标 / Selection / IME，Controller 接管所有实际文字变更
 → 用户输入、删除或选择文字
-→ 约 700ms 或格式、失焦、Cmd+S、切换、关闭、发送边界
-→ 生成 EditCommand
+→ 约 700ms 或格式、Cmd+S、目标切换、关闭、发送边界
+→ 生成 replace-editable-island EditCommand
 → SourceIndex + TargetResolver 锁定源码范围
-→ SourcePatchEngine 生成 patch 与 inverse patch
-→ 校验 patch 范围并重解析受影响区域
+→ 岛内做最小安全规范化，SourcePatchEngine 生成精确 contentRange patch 与 inverse patch
+→ 校验岛外字节完全不变，并重解析受影响区域
 → 用新源码原子重建 projection 并恢复逻辑选区
 → 内存 source HTML 立即更新
 → editRevision + 1
@@ -165,18 +166,19 @@ stateDiagram-v2
 - 队列继续处理最新 revision，直至 `lastPersistedRevision=editRevision`。
 - UI 只在最后成功落盘后显示“已更新”。
 - 画布 DOM 只用于预览和采集用户意图；不得把 `documentElement.outerHTML` 或整页 DOM 序列化结果写回源文件。
-- `contenteditable`、临时 IME wrapper、运行时 nodeId 和逻辑选区只存在于当前会话；不能保存为第二份 HTML 或长期 JSON。
+- `contenteditable`、IME 快照、运行时 nodeId 和逻辑选区只存在于当前会话；不能保存为第二份 HTML 或长期 JSON。
 - flex/grid 文字只有在源码、运行时布局和 CSS selector 均安全时，才随首个真实 Patch 创建唯一 canonical 直接文字项；双击本身不修改源码。
 - 任何目标为 `ambiguous`、`orphaned`，或 patch 越出已解析源码范围时都必须 fail-closed，保留当前源码并要求用户重新定位。
 
-编辑宿主按实时能力选择：
+PageRootV2 只使用一种文字编辑路线：
 
-- 优先使用 `contenteditable="plaintext-only"`。
-- 如果它只因 Chromium 的 `white-space` 行为改变真实文字几何，而 `contenteditable="true"` 的完整会话属性预检能证明布局、样式、选区和恢复完全稳定，则进入受控模式；受控模式的粘贴强制只取 `text/plain`。多行纯文本与 `Shift+Enter` 不采用浏览器生成的 HTML，而由 SourcePatch 生成固定 `<br>`；相邻已有 `<br>` 的 Backspace/Delete 同样走显式源码命令。普通 `Enter` 可拆分仅含一个直接文字节点的 `<p>`，以及 `<ul>/<ol>` 中同样简单的 `<li>`；拆分时保留视觉属性，但不给新块复制 `id`、列表 `value`、事件属性或明显的 `data-*-id/key`。选中文字后的 `Cmd/Ctrl+B/I/U` 与工具栏下划线也只走源码格式 Patch。富 HTML、任意复杂块结构和无完整事件投递的 DOM 变化仍全部阻止或回滚。
-- 可编辑文字的可视段首、段尾和非空行内样式交界必须允许输入。折叠光标在可视段首继承右侧第一个字符，其余交界统一继承左侧字符；工具栏同步显示这个“即将输入”的样式。Chromium 可能吞掉的源码缩进，以及“文字 + 折叠空格 + 图标/行内子元素”这类视觉末尾，由 Controller 像末尾 grapheme 删除一样接管为精确受控文字事务，再交给同一 FormatSkeleton + SourcePatch 检查点；IME 开始前也把 Selection 归一到同一源码亲和性。若输入法只把候选文字落到同一段可折叠源码空白的另一侧，Controller 将结果校正回输入前的视觉光标；跨过非空文字、结构节点或非折叠空白时仍拒绝，不能借校正扩大编辑范围。
-- `display: contents` 不再仅凭静态命中就拒绝；有 MutationObserver 时可进入 observer-guarded 模式。真实 `beforeinput/input` 正常完成才提交，缺失事件的孤立 DOM 变化在 SourcePatch 前恢复。
-- 两种放宽都不能绕过 SourceTextMap、FormatSkeleton、SourcePatch 或源码 Hash 校验。
-- 原生编辑热路径由 `native-dom-logical-index` 一次建立文字、节点边界与子节点位置索引；读取选区时可在命中 anchor/focus 后提前停止。Controller 内部读取 `NativeBlockEditDraft.view()` 复用已经冻结的会话状态，对外诊断接口仍返回深拷贝 `snapshot()`；composition 的交互阻塞只从一个派生策略读取，避免多个入口各自拼三组布尔条件。
+- 可编辑岛统一使用受控 `contenteditable="true"`。浏览器只负责焦点、光标、Selection 与 composition；普通输入、删除、换行、剪切和粘贴由 Controller 阻止默认行为后按逻辑位置执行。粘贴只读取 `text/plain`，换行固定写成 `<br>`。
+- 可视段首、段尾、行中和非空行内样式交界都必须支持输入与删除。可视段首继承右侧首字符，其余边界统一继承左侧字符；工具栏显示下一次输入将采用的样式。
+- 整个岛在一次会话内保持打开，短暂失焦不会结束编辑。切换目标、Escape、保存、导出、项目切换、关闭和发送是明确 checkpoint 边界。
+- IME 开始时冻结岛内容与逻辑 Selection；结束时恢复快照，并把最终候选文字只插入冻结位置一次。没有完成的 composition 在失焦时取消，不猜测候选结果。
+- `MutationObserver` 只允许 Controller 自己发起的子节点和文字变更；脚本、浏览器命令或页面事件造成的越权 DOM 变化立即恢复到最近一次安全草稿，并在当前视口提示。
+- 岛可以包含安全行内语义、注释以及不可变的图片、SVG、MathML、Canvas、表单控件或媒体原子；这些原子及其属性不能被文字操作改写。脚本、样式、表单根、嵌入文档根及无法形成安全行内岛的块结构仍转为评论。
+- 保存时只替换所选元素的源码内容范围。未编辑区域逐字节保持；编辑岛允许 parse5 为结构安全做最小规范化，但不得增加受保护属性、改变不可变原子或注释。
 
 ### 5.2 `Cmd+S`
 

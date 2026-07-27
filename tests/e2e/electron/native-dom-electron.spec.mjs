@@ -27,6 +27,7 @@ import {
   nativeEditingState,
   productRoot,
   recordedInputEvents,
+  replaceEditableIslandBytes,
   replaceUniqueBytes,
   setTextSelection,
   withBomAndCrLf,
@@ -224,7 +225,7 @@ async function waitForFreshDiskFrame(page, previousDocumentToken, caseId) {
   );
   await expect.poll(() => nativeEditingState(page, caseId)).toMatchObject({
     targetIsActive: true,
-    contenteditable: "plaintext-only",
+    contenteditable: "true",
     isContentEditable: true,
     activeCase: caseId,
     selectionInside: true,
@@ -329,7 +330,7 @@ async function replayApplePinyinStyledWrapperCommit(frame, caseId) {
 
 test("Electron first launch registers the welcome HTML and sends its comment to Qoder", async () => {
   const launched = await launchPageRoot();
-  const welcomePath = path.join(launched.isolatedUserData, "欢迎来到源页.html");
+  const welcomePath = path.join(launched.isolatedUserData, "欢迎来到源页 V2.html");
   const welcomeLogoPath = path.join(
     launched.isolatedUserData,
     "brand-logo.png",
@@ -338,7 +339,7 @@ test("Electron first launch registers the welcome HTML and sends its comment to 
   try {
     const canonicalWelcomePath = path.join(
       realpathSync(launched.isolatedUserData),
-      "欢迎来到源页.html",
+      "欢迎来到源页 V2.html",
     );
     await waitForProjectReady(launched.page);
     await expect.poll(
@@ -416,14 +417,14 @@ test("Electron first launch registers the welcome HTML and sends its comment to 
   }
 });
 
-test("Electron uses the authored DOM caret, Selection and beforeinput", async () => {
+test("Electron uses the authored DOM caret, Selection and controlled beforeinput", async () => {
   const { electronApp, page, isolatedUserData } = await launchPageRoot();
   try {
     const { frame } = await loadFixture(page, "complex-layout.html");
     const initialDocument = await documentToken(frame);
     await activateNativeEdit(frame, "heading-inline");
     expect(await nativeEditingState(frame, "heading-inline")).toMatchObject({
-      contenteditable: "plaintext-only",
+      contenteditable: "true",
       isContentEditable: true,
       activeIsLegacySurface: false,
       legacySurfaceCount: 0,
@@ -436,13 +437,13 @@ test("Electron uses the authored DOM caret, Selection and beforeinput", async ()
     expect(await frame.locator(caseSelector("heading-inline")).textContent()).toContain("Electron原位");
     const events = await recordedInputEvents(frame);
     expect(events.some(({ type, inputType }) => type === "beforeinput" && inputType === "insertText")).toBe(true);
-    expect(events.some(({ type }) => type === "input")).toBe(true);
+    expect(events.some(({ type }) => type === "input")).toBe(false);
   } finally {
     await stopPageRoot(electronApp, isolatedUserData);
   }
 });
 
-test("Electron proves the controlled and observer-guarded fallback lanes", async () => {
+test("Electron proves one V2 editable-island lane across complex projections", async () => {
   const { electronApp, page, isolatedUserData } = await launchPageRoot();
   try {
     const { editor, frame } = await loadFixture(page, "complex-layout.html");
@@ -451,7 +452,14 @@ test("Electron proves the controlled and observer-guarded fallback lanes", async
     const beforeGeometry = await geometrySnapshot(frame, controlledCase);
     const controlledTarget = await activateNativeEdit(frame, controlledCase);
     await expect(controlledTarget).toHaveAttribute("contenteditable", "true");
-    await expect(editor).toHaveAttribute("data-native-host-mode", "true");
+    await expect(editor).toHaveAttribute(
+      "data-native-host-mode",
+      "v2-editable-island",
+    );
+    await expect(editor).toHaveAttribute(
+      "data-native-event-delivery-mode",
+      "native-editable-island",
+    );
     expect(await geometrySnapshot(frame, controlledCase)).toEqual(beforeGeometry);
 
     await setTextSelection(frame, controlledCase, 0, 4);
@@ -463,13 +471,17 @@ test("Electron proves the controlled and observer-guarded fallback lanes", async
       .toContain("<b>Electron纯文字</b>");
     expect(await controlledTarget.locator("b").count()).toBe(0);
 
-    const guardedCase = "display-contents-copy";
-    await activateNativeEdit(page, guardedCase);
+    const secondProjectionCase = "display-contents-copy";
+    await activateNativeEdit(page, secondProjectionCase);
+    await expect(editor).toHaveAttribute(
+      "data-native-host-mode",
+      "v2-editable-island",
+    );
     await expect(editor).toHaveAttribute(
       "data-native-event-delivery-mode",
-      "observer-guarded",
+      "native-editable-island",
     );
-    await setTextSelection(page, guardedCase, 0);
+    await setTextSelection(page, secondProjectionCase, 0);
     await page.keyboard.insertText("电");
     await expect.poll(() => (
       page
@@ -478,7 +490,7 @@ test("Electron proves the controlled and observer-guarded fallback lanes", async
         .first()
         .locator('iframe[title*="HTML"]')
         .contentFrame()
-        .locator(caseSelector(guardedCase))
+        .locator(caseSelector(secondProjectionCase))
         .textContent()
     )).toContain("电观察器保护");
   } finally {
@@ -608,7 +620,11 @@ test("Electron autosaves one authorized disk patch and reopens the same forward 
   const originalToken = "SOURCE_FIDELITY_TOKEN_001";
   const replacement = "Electron磁盘原位_OK";
   const original = withBomAndCrLf(fixtureBuffer("source-fidelity.html"));
-  const expected = replaceUniqueBytes(original, originalToken, replacement);
+  const expected = replaceEditableIslandBytes(
+    original,
+    "source-fidelity",
+    `<span title='single-quoted' data-order-b="2" data-order-a='1'>${replacement}</span>`,
+  );
   writeFileSync(sourcePath, original);
 
   const isolatedUserData = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-"));
@@ -684,7 +700,7 @@ test("Electron autosaves one authorized disk patch and reopens the same forward 
     await activateNativeEdit(reopenedFrame, "source-fidelity");
     expect(await nativeEditingState(reopenedFrame, "source-fidelity")).toMatchObject({
       targetIsActive: true,
-      contenteditable: "plaintext-only",
+      contenteditable: "true",
       activeIsLegacySurface: false,
       legacySurfaceCount: 0,
     });
@@ -704,7 +720,7 @@ test("Electron autosaves one authorized disk patch and reopens the same forward 
   }
 });
 
-test("Electron canonicalizes and persists an Apple Pinyin styled-wrapper composition", async () => {
+test("Electron persists an Apple Pinyin boundary composition with left affinity", async () => {
   test.setTimeout(90_000);
   const sourceDirectory = mkdtempSync(path.join(tmpdir(), "pageroot-native-source-e2e-"));
   const sourcePath = path.join(sourceDirectory, "apple-pinyin-styled-wrapper.html");
@@ -712,7 +728,7 @@ test("Electron canonicalizes and persists an Apple Pinyin styled-wrapper composi
   const expected = replaceUniqueBytes(
     original,
     "<em>Word</em>",
-    "<em>你好</em>",
+    "你好<em></em>",
   );
   writeFileSync(sourcePath, original);
 
@@ -740,7 +756,7 @@ test("Electron canonicalizes and persists an Apple Pinyin styled-wrapper composi
     await expect.poll(() => frame.locator(caseSelector("heading-inline")).innerHTML())
       .toContain("<em");
     const committedHtml = await frame.locator(caseSelector("heading-inline")).innerHTML();
-    expect(committedHtml).toContain(">你好</em>");
+    expect(committedHtml).toContain("你好<em></em>");
     expect(committedHtml).not.toContain("<i>");
     expect(await editor.getAttribute("data-edit-block-detail")).toBeNull();
 
@@ -757,11 +773,11 @@ test("Electron canonicalizes and persists an Apple Pinyin styled-wrapper composi
     );
     expect(
       readFileSync(sourcePath).equals(expected),
-      "styled-wrapper IME commit must persist only Word -> 你好",
+      "boundary IME commit must persist only the left-affinity island change",
     ).toBe(true);
 
     await expect.poll(() => frame.locator(caseSelector("heading-inline")).innerHTML())
-      .toContain(">你好</em>");
+      .toContain("你好<em");
 
     await closePageRootGracefully(firstApp);
     firstApp = null;
@@ -795,7 +811,7 @@ test("Electron canonicalizes and persists an Apple Pinyin styled-wrapper composi
     const reopenedHtml = await reopenedFrame.locator(
       caseSelector("heading-inline"),
     ).innerHTML();
-    expect(reopenedHtml).toContain(">你好</em>");
+    expect(reopenedHtml).toContain("你好<em");
     expect(reopenedHtml).not.toContain("<i>");
     expect(readFileSync(sourcePath).equals(expected)).toBe(true);
 

@@ -4,6 +4,18 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+- Forked the independent PageRootV2 beta identity, application data directory
+  and workspace so it can be installed and compared without replacing PageRoot.
+- Replaced the production native-text state machine with one controlled editable
+  island route: outside bytes stay exact, while the edited island may be
+  minimally normalized for visual, semantic and structural safety.
+- Added deterministic start/middle/end insertion, grapheme deletion, line
+  breaks, plain-text paste, frozen-selection IME replay and left-style boundary
+  inheritance across paragraphs, headings, links, buttons, lists, tables,
+  preformatted text, vertical writing and immutable embedded atoms.
+- Kept edit warnings visible at the application viewport while the HTML page is
+  scrolled, and added exhaustive synthetic plus opt-in real-complex-page edit
+  censuses with machine-readable success/failure reports.
 ## [0.8.10] - 2026-07-27
 
 - Allow ordinary typing at editable paragraph starts and ends, inline-style boundaries and link boundaries while preserving the intended neighboring style and exact source whitespace.

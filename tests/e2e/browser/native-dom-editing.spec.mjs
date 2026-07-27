@@ -518,7 +518,7 @@ test.describe("authored DOM native editing contract", () => {
       };
     }, caseId)).toMatchObject({
       activeIndex: 1,
-      contenteditable: "plaintext-only",
+      contenteditable: "true",
       collapsed: true,
       offset: 0,
     });
@@ -972,7 +972,7 @@ test.describe("authored DOM native editing contract", () => {
     });
     expect(await nativeEditingState(frame, caseId)).toMatchObject({
       targetIsActive: true,
-      contenteditable: "plaintext-only",
+      contenteditable: "true",
     });
     expect(await saveIndicator.getAttribute("data-edit-revision")).toBe(originalRevision);
     expect(await saveIndicator.getAttribute("data-rendered-sha256")).toBe(originalRenderedSha);
@@ -1083,7 +1083,7 @@ test.describe("authored DOM native editing contract", () => {
     await expect(target).toHaveText(originalText);
     expect(await nativeEditingState(frame, caseId)).toMatchObject({
       targetIsActive: true,
-      contenteditable: "plaintext-only",
+      contenteditable: "true",
     });
     // Once the same-task guard has expired, a new deliberate Escape is a real
     // PageRoot command even though the composition-delivery tombstone remains.
@@ -1286,7 +1286,7 @@ test.describe("authored DOM native editing contract", () => {
 
     expect(await nativeEditingState(frame, "heading-inline")).toMatchObject({
       targetIsActive: true,
-      contenteditable: "plaintext-only",
+      contenteditable: "true",
     });
     let events = await recordedInputEventsFromIframe(recorderIframe);
     expect(events.filter(({ type }) => type === "compositionend")).toHaveLength(0);
@@ -1333,7 +1333,7 @@ test.describe("authored DOM native editing contract", () => {
     await expect(page.locator("aside.side-drawer")).not.toHaveClass(/\bopen\b/u);
     expect(await nativeEditingState(frame, "heading-inline")).toMatchObject({
       targetIsActive: true,
-      contenteditable: "plaintext-only",
+      contenteditable: "true",
     });
     let events = await recordedInputEventsFromIframe(recorderIframe);
     expect(events.filter(({ type }) => type === "compositionend")).toHaveLength(0);
@@ -1440,7 +1440,7 @@ test.describe("authored DOM native editing contract", () => {
     });
 
     expect(await target.textContent()).toBe(initialText);
-    expect(await target.getAttribute("contenteditable")).toBe("plaintext-only");
+    expect(await target.getAttribute("contenteditable")).toBe("true");
     expect(await saveIndicator.getAttribute("data-rendered-sha256")).toBe(initialRenderedSha);
 
     // The fail-closed window blur explicitly leaves composing state. A later
@@ -1465,7 +1465,7 @@ test.describe("authored DOM native editing contract", () => {
     const after = await selectionSnapshot(frame, "heading-inline");
     expect(after.text).toBe(before.text);
     expect(await nativeEditingState(frame, "heading-inline")).toMatchObject({
-      contenteditable: "plaintext-only",
+      contenteditable: "true",
       legacySurfaceCount: 0,
     });
 
@@ -1482,7 +1482,7 @@ test.describe("authored DOM native editing contract", () => {
     expect(forwardBytes.includes(Buffer.from("尾", "utf8"))).toBe(true);
     await expect.poll(() => nativeEditingState(frame, "heading-inline")).toMatchObject({
       targetIsActive: true,
-      contenteditable: "plaintext-only",
+      contenteditable: "true",
     });
 
     expect((await exportCurrentHtml(page)).equals(forwardBytes)).toBe(true);
@@ -1576,7 +1576,7 @@ test.describe("fallback capability contract", () => {
         frameBox.x + mediaRect.x + mediaRect.width / 2,
         frameBox.y + mediaRect.y + mediaRect.height / 2,
       );
-      expect(await frame.locator('[contenteditable="plaintext-only"]').count(), id).toBe(0);
+      expect(await frame.locator('[contenteditable="true"]').count(), id).toBe(0);
       expect(await frame.evaluate(() => document.getSelection()?.toString() || ""), id).toBe("");
       await expect.poll(() => editor.getAttribute("data-native-start-status"), {
         message: `${id} must stop at the direct text hit gate`,

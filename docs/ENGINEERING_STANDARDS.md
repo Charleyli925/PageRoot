@@ -43,8 +43,9 @@ Large source-fidelity engines are not split merely to reduce line count. A
 split must create a real invariant boundary and preserve byte, Selection, IME
 and transaction coverage. New product persistence or lifecycle behavior may
 not be added directly to `workbench.tsx`, `HtmlCanvasEditor.tsx`,
-`NativeEditingController.ts` or `workspace-bridge.mjs`; first introduce or use
-the owning application/domain/service module.
+`IslandEditingController.ts` or `workspace-bridge.mjs`; first introduce or use
+the owning application/domain/service module. The retired V1
+`NativeEditingController.ts` is not a PageRootV2 extension point.
 
 ## Effects and asynchronous work
 
