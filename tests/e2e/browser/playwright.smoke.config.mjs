@@ -10,7 +10,7 @@ const productRoot = path.resolve(currentDirectory, "../../..");
 const smokeTitles = [
   "pure browser use stays in a formal read-only preview",
   "the edit iframe is same-origin but never executes author scripts or refresh",
-  "plain insertion undo restores the transaction-start caret and redo restores the after caret",
+  "source reversal shortcuts are blocked and never change committed bytes",
   "nested bold, italic, color, size, span attributes and outside bytes survive an internal edit",
   "one text edit changes only the authorized UTF-8 bytes, including BOM and CRLF",
   "visible empty inline boundary stays selectable/commentable and never becomes editable",

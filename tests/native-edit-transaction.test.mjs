@@ -30,7 +30,7 @@ test("native transaction selection remains frozen until the source baseline adva
   assert.deepEqual(selections.freeze(before), before);
 
   // input, compositionend, and selectionchange all expose the new caret. They
-  // must not rewrite the history transaction's before bookmark.
+  // must not rewrite the source transaction's starting bookmark.
   assert.deepEqual(
     selections.freeze({ anchor: 21, focus: 21, affinity: "left" }),
     before,
@@ -47,7 +47,7 @@ test("native transaction selection remains frozen until the source baseline adva
   assert.deepEqual(selections.freeze(nextBefore), nextBefore);
 });
 
-test("native input classification separates text, history, and structural operations", () => {
+test("native input classification separates text from blocked source mutations", () => {
   assert.deepEqual(classifyNativeInput("insertText"), {
     category: "text",
     action: "insertText",
@@ -55,9 +55,9 @@ test("native input classification separates text, history, and structural operat
     composition: false,
   });
   assert.deepEqual(classifyNativeInput("historyUndo"), {
-    category: "history",
-    action: "undo",
-    supported: true,
+    category: "unsupported",
+    action: "historyUndo",
+    supported: false,
   });
   assert.deepEqual(classifyNativeInput("insertParagraph"), {
     category: "structure",

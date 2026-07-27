@@ -32,51 +32,6 @@ function assertOrdered(source, markers, message) {
   }
 }
 
-test("queued undo and redo bypass their own defer branch exactly once", () => {
-  const undo = section(
-    canvas,
-    "const undo = useCallback",
-    "const redo = useCallback",
-  );
-  const redo = section(
-    canvas,
-    "const redo = useCallback",
-    "const checkpointPendingEdit = useCallback",
-  );
-
-  assert.match(canvas, /const undoRef = useRef<\(fromQueuedCommand\?: boolean\) => boolean>/u);
-  assert.match(canvas, /const redoRef = useRef<\(fromQueuedCommand\?: boolean\) => boolean>/u);
-  assert.match(undo, /\(fromQueuedCommand = false\): boolean/u);
-  assert.match(
-    undo,
-    /!fromQueuedCommand[\s\S]*?deferNativeCommandRef\.current\("undo", \(\) => undoRef\.current\(true\)\)/u,
-  );
-  assert.doesNotMatch(
-    undo,
-    /deferNativeCommandRef\.current\("undo", \(\) => undoRef\.current\(\)\)/u,
-  );
-  assertOrdered(
-    undo,
-    [
-      "!fromQueuedCommand",
-      "deferNativeCommandRef.current(\"undo\"",
-      "checkpointNativeEdit(\"history\", {",
-      "applyHistoryPlan(",
-    ],
-    "queued undo must bypass re-queuing before committing history",
-  );
-
-  assert.match(redo, /\(fromQueuedCommand = false\): boolean/u);
-  assert.match(
-    redo,
-    /!fromQueuedCommand[\s\S]*?deferNativeCommandRef\.current\("redo", \(\) => redoRef\.current\(true\)\)/u,
-  );
-  assert.doesNotMatch(
-    redo,
-    /deferNativeCommandRef\.current\("redo", \(\) => redoRef\.current\(\)\)/u,
-  );
-});
-
 test("pending and already-scheduled callbacks share one cancellable latest-wins slot", () => {
   const queue = section(
     canvas,
@@ -249,17 +204,11 @@ test("canonical island replacement retires the old lease before DOM removal", ()
   );
 });
 
-test("source-authority fences defer preview reconcile and cut history even when the stack is empty", () => {
+test("source-authority fences defer preview reconcile and retire the editable DOM", () => {
   const fence = section(
     canvas,
     "const fencePendingEdit = useCallback",
     "const commitPendingEdit = useCallback",
-  );
-  const undo = section(canvas, "const undo = useCallback", "const redo = useCallback");
-  const redo = section(
-    canvas,
-    "const redo = useCallback",
-    "const checkpointPendingEdit = useCallback",
   );
 
   assert.match(
@@ -271,18 +220,16 @@ test("source-authority fences defer preview reconcile and cut history even when 
     /if \(options\.nativeTextCommit\?\.deferPreviewReconcile\) \{[\s\S]*?"fence-deferred"/u,
     "a fence checkpoint must not create an interim contenteditable session",
   );
-  for (const historyCommand of [undo, redo]) {
-    assertOrdered(
-      historyCommand,
-      [
-        "checkpointNativeEdit(\"history\", {",
-        "detachNativeEditForFence()",
-        "if (!entry)",
-        "queueNativeFenceReload(",
-      ],
-      "every invoked source-history command must retire Chromium history before a no-op return",
-    );
-  }
+  assertOrdered(
+    fence,
+    [
+      "checkpointNativeEdit(options.trigger ?? \"fence\"",
+      "detachNativeEditForFence()",
+      "needsCanonicalFence",
+      "queueNativeFenceReload(",
+    ],
+    "a source fence must retire the live editable document before resuming",
+  );
 });
 
 test("composition checkpoints and source revision advance both use hard generation boundaries", () => {

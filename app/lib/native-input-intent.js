@@ -51,7 +51,6 @@ const OTHER_STRUCTURAL_INPUT_TYPES = new Set([
 
 export const NATIVE_INPUT_INTENT_KIND = Object.freeze({
   TEXT: "text",
-  HISTORY: "history",
   INSERT_HARD_BREAK: "insert-hard-break",
   SPLIT_BLOCK: "split-block",
   FORMAT: "format",
@@ -61,13 +60,6 @@ export const NATIVE_INPUT_INTENT_KIND = Object.freeze({
 
 export function classifyNativeInputIntent(inputType) {
   const action = String(inputType || "");
-  if (action === "historyUndo" || action === "historyRedo") {
-    return {
-      kind: NATIVE_INPUT_INTENT_KIND.HISTORY,
-      action: action === "historyRedo" ? "redo" : "undo",
-      supported: true,
-    };
-  }
   if (SAFE_TEXT_INPUT_TYPES.has(action)) {
     return {
       kind: NATIVE_INPUT_INTENT_KIND.TEXT,

@@ -205,7 +205,7 @@ test("editing and interactive preview are separate canvas modes", () => {
       && previewFenceGuard > previewFence
       && previewClear > previewFenceGuard
       && enterPreview > previewClear,
-    "preview entry must pass a fail-closed History Fence before changing modes",
+    "preview entry must pass a fail-closed source-authority fence before changing modes",
   );
   assert.match(
     workbench,
@@ -286,7 +286,7 @@ test("workbench transitions fail closed when a native DOM edit cannot commit or 
       && switchFenceGuard > switchFence
       && switchCutoff > switchFenceGuard
       && switchDrain > switchCutoff,
-    "project switching must fail closed at a History Fence before persisting its cutoff revision",
+    "project switching must fail closed at a source-authority fence before persisting its cutoff revision",
   );
   assert.match(
     projectSwitch,
@@ -312,7 +312,7 @@ test("workbench transitions fail closed when a native DOM edit cannot commit or 
       && navigationFreeze > navigationFenceGuard
       && navigationFreezeGuard > navigationFreeze
       && navigationLock > navigationFreezeGuard,
-    "navigation must pass both the History Fence and freeze guard before locking the view",
+    "navigation must pass both the source-authority fence and freeze guard before locking the view",
   );
 
   const userFlush = workbench.slice(
@@ -328,7 +328,7 @@ test("workbench transitions fail closed when a native DOM edit cannot commit or 
   );
   assert.ok(
     saveFence >= 0 && saveGuard > saveFence && saveFlush > saveGuard,
-    "manual save must fail closed at a resumable History Fence before autosave",
+    "manual save must fail closed at a resumable source-authority fence before autosave",
   );
 
   const exportFlow = workbench.slice(
@@ -344,19 +344,21 @@ test("workbench transitions fail closed when a native DOM edit cannot commit or 
   );
   assert.ok(
     exportFence >= 0 && exportGuard > exportFence && exportSnapshot > exportGuard,
-    "export must reject a failed History Fence before choosing its source snapshot",
+    "export must reject a failed source-authority fence before choosing its source snapshot",
   );
 });
 
-test("outer undo and redo shortcuts dispatch both PageRoot history directions", () => {
+test("outer source reversal shortcuts are blocked without exposing reversal APIs", () => {
   const shortcutFlow = workbench.slice(
     workbench.indexOf("const requestUserFlush"),
     workbench.indexOf("const openCommentComposer"),
   );
   assert.match(
     shortcutFlow,
-    /event\.key\.toLowerCase\(\) === "z"[\s\S]*?event\.preventDefault\(\);[\s\S]*?if \(event\.shiftKey\) editorRef\.current\?\.redo\?\.\(\);[\s\S]*?else editorRef\.current\?\.undo\?\.\(\);/u,
+    /event\.key\.toLowerCase\(\) === "z"[\s\S]*?target\?\.isContentEditable[\s\S]*?event\.preventDefault\(\);[\s\S]*?return;/u,
   );
+  assert.doesNotMatch(canvas, /\b(?:undo|redo): \(\) => boolean/u);
+  assert.doesNotMatch(shortcutFlow, /editorRef\.current\?\.(?:undo|redo)/u);
 });
 
 test("external source adoption invalidates the active native editing session", () => {
@@ -519,10 +521,7 @@ test("QoderWork handoff exposes a truthful process board and manual open action"
     processingHeaderStart,
     workbench.indexOf("</header>", processingHeaderStart),
   );
-  assert.match(
-    processingHeader,
-    /aria-label="关闭处理面板"[\s\S]*?onClick=\{\(\) => setDrawer\(null\)\}/,
-  );
+  assert.doesNotMatch(processingHeader, /关闭处理面板|setDrawer\(null\)/);
   assert.doesNotMatch(processingHeader, /cancelActiveRun|取消发送/);
   assert.match(
     workbench,
@@ -661,9 +660,7 @@ test("AI submission and run operations remain isolated by project and run identi
   );
 });
 
-test("undo and redo use stable history identity without folding in-flight audit events", () => {
-  assert.match(canvas, /historyId\?: string/);
-  assert.match(canvas, /historyAction:\s*"undo"/);
+test("forward edit events remain exact-once after persistence starts", () => {
   assert.match(
     workbench,
     /const auditInFlightKeysRef = useRef<Set<string>>\(new Set\(\)\)/,
@@ -676,11 +673,10 @@ test("undo and redo use stable history identity without folding in-flight audit 
     workbench,
     /finally \{[\s\S]*?auditInFlightKeysRef\.current\.delete\(key\)/,
   );
-  assert.match(workbench, /const history = reduceDirectEditHistory\(\{/);
-  assert.match(workbench, /undoFolds: undoDraftFoldsRef\.current/);
-  assert.match(workbench, /redoFolds: redoDraftFoldsRef\.current/);
+  assert.match(workbench, /const nextEvents = appendDirectEditEvent\(\{/);
   assert.match(workbench, /inFlightKeys: auditInFlightKeysRef\.current/);
-  assert.match(workbench, /persistCurrentDraftRecovery\(commentsRef\.current, history\.events\)/);
+  assert.match(workbench, /persistCurrentDraftRecovery\(commentsRef\.current, nextEvents\.events\)/);
+  assert.doesNotMatch(workbench, /undoFolds|redoFolds|undoesEventId/u);
 });
 
 test("history opens concise immutable versions in the canvas with their comments", () => {
@@ -932,6 +928,30 @@ test("comment composer is explicit, transient and horizontally contained", () =>
   assert.match(workbench, /typeof input\.showPicker === "function"/);
   assert.match(workbench, /editorRef\.current\?\.select\(target, \{ showToolbar: false \}\)/);
   assert.match(workbench, /openGlobalCommentComposer[\s\S]*?tagName: "body"[\s\S]*?openCommentComposer\(globalTarget\)/);
+});
+
+test("comment cards show one two-line target label without duplicate copy", () => {
+  assert.doesNotMatch(workbench, /<q\b|可添加附件/u);
+  assert.match(
+    workbench,
+    /<span className="comment-target">\{insertionLabel\(comment\.target\)\}<\/span>/u,
+  );
+  assert.match(
+    workbench,
+    /<strong>\{insertionLabel\(comment\.target\)\}<\/strong>[\s\S]*?<p>\{comment\.text/u,
+  );
+  assert.match(
+    styles,
+    /\.comment-card-header \.comment-target\s*\{[\s\S]*?-webkit-line-clamp:\s*2/u,
+  );
+  assert.match(
+    styles,
+    /\.round-comment-list strong\s*\{[\s\S]*?-webkit-line-clamp:\s*2/u,
+  );
+  assert.match(
+    workbench,
+    /\{comment\.attachments\?\.length \? \([\s\S]*?\{comment\.attachments\.length\} 个附件/u,
+  );
 });
 
 test("comment attachments support paste, upload, removal, preview, and AI handoff metadata", () => {

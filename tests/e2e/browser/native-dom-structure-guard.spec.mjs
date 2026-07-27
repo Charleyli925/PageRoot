@@ -4,7 +4,6 @@ import {
   activateNativeEdit,
   documentToken,
   exportCurrentHtml,
-  keyShortcut,
   loadCaseManifest,
   loadFixture,
   replaceUniqueBytes,
@@ -22,7 +21,6 @@ async function openMatrix(page) {
 
 async function expectNoSourceCommit(page, editor, source) {
   await page.waitForTimeout(850);
-  expect(await editor.getAttribute("data-undo-depth")).toBe("0");
   await expect(page.locator(".round-record-counts")).toHaveText(
     "0 条评论 · 0 项直接编辑记录",
   );
@@ -57,7 +55,7 @@ async function expectCurrentCaseHtmlAfterDelivery(page, editor, caseId, expected
 }
 
 test("native text-node split and merge remain a supported text-only transaction", async ({ page }) => {
-  const { editor, frame, source } = await openMatrix(page);
+  const { frame, source } = await openMatrix(page);
   const target = await activateNativeEdit(frame, "heading-inline");
   await setTextSelection(frame, "heading-inline", 0);
 
@@ -85,7 +83,6 @@ test("native text-node split and merge remain a supported text-only transaction"
     }));
   });
 
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
   expect((await exportCurrentHtml(page)).equals(replaceUniqueBytes(
     source,
     ">真实 <strong>",
@@ -94,7 +91,7 @@ test("native text-node split and merge remain a supported text-only transaction"
 });
 
 test("a MutationObserver delivery before input waits for the final text tracker value", async ({ page }) => {
-  const { editor, frame, source } = await openMatrix(page);
+  const { frame, source } = await openMatrix(page);
   const target = await activateNativeEdit(frame, "heading-inline");
   await setTextSelection(frame, "heading-inline", 0);
 
@@ -117,7 +114,6 @@ test("a MutationObserver delivery before input waits for the final text tracker 
     }));
   });
 
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
   expect((await exportCurrentHtml(page)).equals(replaceUniqueBytes(
     source,
     ">真实 <strong>",
@@ -192,7 +188,6 @@ test("a synchronous checkpoint cannot promote text without a delivered input eve
   });
 
   await expectCurrentCaseHtmlAfterDelivery(page, editor, caseId, originalHtml);
-  expect(await editor.getAttribute("data-undo-depth")).toBe("0");
   await expect(page.locator(".round-record-counts")).toHaveText(
     "0 条评论 · 0 项直接编辑记录",
   );
@@ -327,7 +322,6 @@ test("a microtask mutation after expected normalization preserves the delivered 
   });
 
   await expectCurrentCaseHtmlAfterDelivery(page, editor, caseId, "");
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
   const exported = await exportCurrentHtml(page);
   expect(exported.includes(Buffer.from("late drift", "utf8"))).toBe(false);
   expect(exported.equals(replaceUniqueBytes(
@@ -371,7 +365,6 @@ test("a characterData microtask cannot erase the already delivered transaction",
     caseId,
     `先${originalHtml}`,
   );
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
   expect((await exportCurrentHtml(page)).equals(replaceUniqueBytes(
     source,
     ">真实 <strong>",
@@ -428,14 +421,13 @@ test("a mismatched inputType cannot complete another beforeinput candidate", asy
 });
 
 test("a mismatched input restores only its gesture and preserves earlier delivered text", async ({ page }) => {
-  const { editor, frame, source } = await openMatrix(page);
+  const { frame, source } = await openMatrix(page);
   const caseId = "list-item";
   const target = await activateNativeEdit(frame, caseId);
   const originalText = await target.textContent();
   await setTextSelection(frame, caseId, 0);
   await page.keyboard.insertText("A");
   await expect(target).toHaveText(`A${originalText}`);
-  expect(await editor.getAttribute("data-undo-depth")).toBe("0");
   await setTextSelection(frame, caseId, 1);
 
   await target.evaluate((element) => {
@@ -461,7 +453,6 @@ test("a mismatched input restores only its gesture and preserves earlier deliver
     anchorOffset: 1,
     focusOffset: 1,
   });
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
   expect((await exportCurrentHtml(page)).equals(replaceUniqueBytes(
     source,
     `>${originalText}</li>`,
@@ -490,7 +481,7 @@ test("compositionend without compositionstart cannot accept DOM text", async ({ 
 });
 
 test("an unfinished ordinary mutation cannot be laundered by composition", async ({ page }) => {
-  const { editor, frame, source } = await openMatrix(page);
+  const { frame, source } = await openMatrix(page);
   const caseId = "heading-inline";
   const target = await activateNativeEdit(frame, caseId);
   await setTextSelection(frame, caseId, 0);
@@ -532,7 +523,6 @@ test("an unfinished ordinary mutation cannot be laundered by composition", async
     }));
   });
 
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
   const exported = await exportCurrentHtml(page);
   expect(exported.includes(Buffer.from("orphan", "utf8"))).toBe(false);
   expect(exported.equals(replaceUniqueBytes(
@@ -619,7 +609,7 @@ test("a stale no-DOM candidate cannot authorize later wrapper removal", async ({
 });
 
 test("a no-DOM candidate preserves an earlier delivered transaction start", async ({ page }) => {
-  const { editor, frame, source } = await openMatrix(page);
+  const { frame, source } = await openMatrix(page);
   const caseId = "heading-inline";
   const target = await activateNativeEdit(frame, caseId);
   const originalText = await target.textContent();
@@ -634,12 +624,12 @@ test("a no-DOM candidate preserves an earlier delivered transaction start", asyn
   });
   await page.waitForTimeout(50);
 
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
-  await page.keyboard.press(keyShortcut("Z"));
-  await expect.poll(async () => (
-    await selectionSnapshot(frame, caseId)
-  ).anchorOffset).toBe(originalText.length);
-  expect((await exportCurrentHtml(page)).equals(source)).toBe(true);
+  await expect(target).toHaveText(`${originalText}尾`);
+  expect((await exportCurrentHtml(page)).equals(replaceUniqueBytes(
+    source,
+    "🙂</h1>",
+    "🙂尾</h1>",
+  ))).toBe(true);
 });
 
 test("an element inserted during composition is rolled back before checkpoint", async ({ page }) => {
@@ -724,7 +714,6 @@ test("Apple Pinyin temporary i wrapper is canonicalized back to authored em", as
 
   await page.waitForTimeout(100);
   expect(await editor.getAttribute("data-edit-block-detail")).toBeNull();
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
   await expect.poll(() => currentCaseHtml(editor, caseId)).toContain("<em");
   expect(await currentCaseHtml(editor, caseId)).toContain(">你好</em>");
   expect(await currentCaseHtml(editor, caseId)).not.toContain("<i>");
@@ -734,16 +723,6 @@ test("Apple Pinyin temporary i wrapper is canonicalized back to authored em", as
     "<em>你好</em>",
   ))).toBe(true);
 
-  await page.keyboard.press(keyShortcut("Z"));
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("0");
-  expect((await exportCurrentHtml(page)).equals(source)).toBe(true);
-  await page.getByRole("button", { name: /\u91cd\u505a\u4e0a\u4e00\u6b21\u64a4\u9500/u }).click();
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
-  expect((await exportCurrentHtml(page)).equals(replaceUniqueBytes(
-    source,
-    "<em>Word</em>",
-    "<em>你好</em>",
-  ))).toBe(true);
 });
 
 test("canonical island replacement failure reloads the committed IME patch without rebasing provisional DOM", async ({ page }) => {
@@ -812,7 +791,6 @@ test("canonical island replacement failure reloads the committed IME patch witho
   await expect.poll(() => page.evaluate(() => (
     window.__PAGEROOT_QA_CANONICAL_RECONCILE_FAILURE__?.attempts ?? 0
   ))).toBe(1);
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
   await expect(page.locator(".round-record-counts")).toHaveText(
     "0 条评论 · 1 项直接编辑记录",
   );
@@ -876,8 +854,7 @@ test("a final composition input after non-empty compositionend stays in one epoc
     }));
   });
 
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
-  expect(await currentCaseHtml(editor, caseId)).toContain(">你好</em>");
+  await expect.poll(() => currentCaseHtml(editor, caseId)).toContain(">你好</em>");
   expect(await currentCaseHtml(editor, caseId)).not.toContain("<i>");
   expect((await exportCurrentHtml(page)).equals(replaceUniqueBytes(
     source,
@@ -938,8 +915,7 @@ for (const compositionEndData of ["", "你好"]) {
       }));
     }, compositionEndData);
 
-    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
-    expect(await currentCaseHtml(editor, caseId)).toContain(">你好</em>");
+    await expect.poll(() => currentCaseHtml(editor, caseId)).toContain(">你好</em>");
     expect(await currentCaseHtml(editor, caseId)).not.toContain("<i>");
     expect((await exportCurrentHtml(page)).equals(replaceUniqueBytes(
       source,
@@ -990,8 +966,7 @@ test("non-empty compositionend remains committed when its announced input tail i
   });
 
   await page.waitForTimeout(150);
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
-  expect(await currentCaseHtml(editor, caseId)).toContain(">你好</em>");
+  await expect.poll(() => currentCaseHtml(editor, caseId)).toContain(">你好</em>");
   expect(await currentCaseHtml(editor, caseId)).not.toContain("<i>");
   expect((await exportCurrentHtml(page)).equals(replaceUniqueBytes(
     source,
@@ -1070,8 +1045,7 @@ test("one export shortcut inside the optional terminal grace completes exactly o
   await page.waitForTimeout(150);
   expect(downloadCount).toBe(1);
   expect(exported.equals(expected)).toBe(true);
-  expect(await editor.getAttribute("data-undo-depth")).toBe("1");
-  expect(await currentCaseHtml(editor, caseId)).toContain(">你好</em>");
+  await expect.poll(() => currentCaseHtml(editor, caseId)).toContain(">你好</em>");
   expect(await currentCaseHtml(editor, caseId)).not.toContain("<i>");
 });
 
@@ -1201,9 +1175,7 @@ for (const barrier of ["immediate", "stable"]) {
       inheritedProvisional: null,
       restoredText: "Word",
     });
-    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
-    expect(await editor.getAttribute("data-redo-depth")).toBe("0");
-    expect(await currentCaseHtml(editor, caseId)).toContain(">你好</em>");
+    await expect.poll(() => currentCaseHtml(editor, caseId)).toContain(">你好</em>");
     expect(await currentCaseHtml(editor, caseId)).not.toContain("<i>");
     expect(await currentCaseHtml(editor, caseId)).not.toContain("ni hao");
     expect((await exportCurrentHtml(page)).equals(replaceUniqueBytes(
@@ -1324,8 +1296,7 @@ test("a non-composing final input before empty compositionend commits the compos
     input: { data: "你好", inputType: "insertText", isComposing: false },
     compositionEndData: "",
   });
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
-  expect(await currentCaseHtml(editor, caseId)).toContain(">你好</em>");
+  await expect.poll(() => currentCaseHtml(editor, caseId)).toContain(">你好</em>");
   expect(await currentCaseHtml(editor, caseId)).not.toContain("<i>");
   expect((await exportCurrentHtml(page)).equals(replaceUniqueBytes(
     source,
@@ -1442,8 +1413,7 @@ test("a cancelled epoch's late empty input tail cannot poison the next compositi
     }));
   });
 
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
-  expect(await currentCaseHtml(editor, caseId)).toContain(">你好</em>");
+  await expect.poll(() => currentCaseHtml(editor, caseId)).toContain(">你好</em>");
   expect(await currentCaseHtml(editor, caseId)).not.toContain("<i>");
   expect((await exportCurrentHtml(page)).equals(replaceUniqueBytes(
     source,
@@ -1499,8 +1469,7 @@ test("an empty compositionend can be completed by a later non-empty final input"
     }));
   });
 
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
-  expect(await currentCaseHtml(editor, caseId)).toContain(">你好</em>");
+  await expect.poll(() => currentCaseHtml(editor, caseId)).toContain(">你好</em>");
   expect(await currentCaseHtml(editor, caseId)).not.toContain("<i>");
   expect((await exportCurrentHtml(page)).equals(replaceUniqueBytes(
     source,
@@ -1539,8 +1508,7 @@ test("shared-prefix IME commit uses the frozen selection instead of a minimal di
     }));
   });
 
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
-  expect(await currentCaseHtml(editor, caseId)).toContain(">World</em>");
+  await expect.poll(() => currentCaseHtml(editor, caseId)).toContain(">World</em>");
   expect((await exportCurrentHtml(page)).equals(replaceUniqueBytes(
     source,
     "<em>Word</em>",
@@ -1585,8 +1553,7 @@ for (const temporaryTree of ["span", "nested-i-span"]) {
       }));
     }, temporaryTree);
 
-    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
-    expect(await currentCaseHtml(editor, caseId)).toContain(">你好</em>");
+    await expect.poll(() => currentCaseHtml(editor, caseId)).toContain(">你好</em>");
     expect(await currentCaseHtml(editor, caseId)).not.toMatch(/<(?:i|span)>/u);
     expect((await exportCurrentHtml(page)).equals(replaceUniqueBytes(
       source,
@@ -1635,8 +1602,7 @@ test("a second input is blocked until provisional IME DOM is canonicalized", asy
   });
 
   expect(secondInputPrevented).toBe(true);
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
-  expect(await currentCaseHtml(editor, caseId)).toContain(">你好</em>");
+  await expect.poll(() => currentCaseHtml(editor, caseId)).toContain(">你好</em>");
   expect((await exportCurrentHtml(page)).equals(replaceUniqueBytes(
     source,
     "<em>Word</em>",
@@ -1817,8 +1783,6 @@ test("Escape cancels an Apple Pinyin temporary wrapper and restores the authored
     direction: originalSelection.direction,
     text: "Word",
   });
-  expect(await editor.getAttribute("data-undo-depth")).toBe("0");
-  expect(await editor.getAttribute("data-redo-depth")).toBe("0");
   expect(await editor.getAttribute("data-edit-block-detail")).toBeNull();
   expect((await exportCurrentHtml(page)).equals(source)).toBe(true);
 });
@@ -1867,8 +1831,7 @@ test("a backward complete-word composition commits through a temporary wrapper",
     }));
   });
 
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
-  expect(await currentCaseHtml(editor, caseId)).toContain(">你好</em>");
+  await expect.poll(() => currentCaseHtml(editor, caseId)).toContain(">你好</em>");
   expect(await currentCaseHtml(editor, caseId)).not.toContain("<i>");
   expect(await editor.getAttribute("data-edit-block-detail")).toBeNull();
   expect((await exportCurrentHtml(page)).equals(replaceUniqueBytes(
@@ -1924,8 +1887,7 @@ test("a collapsed caret inside em commits composition and lands after the insert
     }));
   });
 
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
-  expect(await currentCaseHtml(editor, caseId)).toContain(">Wo你好rd</em>");
+  await expect.poll(() => currentCaseHtml(editor, caseId)).toContain(">Wo你好rd</em>");
   expect(await selectionSnapshot(frame, caseId)).toMatchObject({
     collapsed: true,
     anchorOffset: insertionOffset + 2,
@@ -1977,7 +1939,6 @@ test("focusout rolls back a temporary composition wrapper without losing prior d
   await expect(target).toHaveText(`${originalText}A`);
   expect(await target.innerHTML()).toContain(">Word</em>");
   expect(await target.innerHTML()).not.toContain("<i>");
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
   expect(await editor.getAttribute("data-edit-block-detail")).toBeNull();
   expect((await exportCurrentHtml(page)).equals(replaceUniqueBytes(
     source,
@@ -2019,7 +1980,6 @@ test("window blur rolls back a temporary composition wrapper without losing prio
   expect(await target.innerHTML()).toContain(">Word</em>");
   expect(await target.innerHTML()).not.toContain("<i>");
   expect(await target.getAttribute("contenteditable")).toBe("plaintext-only");
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
   expect(await editor.getAttribute("data-edit-block-detail")).toBeNull();
   expect((await exportCurrentHtml(page)).equals(replaceUniqueBytes(
     source,
@@ -2157,14 +2117,13 @@ test("same-text replacement cannot erase a wrapper without a SourcePatch replace
 });
 
 test("an explicit full wrapper selection may remove that wrapper despite shared text", async ({ page }) => {
-  const { editor, frame, source } = await openMatrix(page);
+  const { frame, source } = await openMatrix(page);
   const caseId = "heading-inline";
   const target = await activateNativeEdit(frame, caseId);
   const originalText = await target.textContent();
   await setTextSelection(frame, caseId, 2, 7);
   await page.keyboard.insertText(" D ");
 
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
   await expect(target).toHaveText(`${originalText.slice(0, 2)} D ${originalText.slice(7)}`);
   await expect(target.locator("strong")).toHaveCount(0);
   expect((await exportCurrentHtml(page)).equals(replaceUniqueBytes(
@@ -2175,18 +2134,16 @@ test("an explicit full wrapper selection may remove that wrapper despite shared 
 });
 
 test("a later cross-wrapper gesture is proved by its own intent before one checkpoint", async ({ page }) => {
-  const { editor, frame, source } = await openMatrix(page);
+  const { frame, source } = await openMatrix(page);
   const caseId = "heading-inline";
   const target = await activateNativeEdit(frame, caseId);
   const originalText = await target.textContent();
 
   await setTextSelection(frame, caseId, originalText.length - 2, originalText.length);
   await page.keyboard.insertText("尾");
-  expect(await editor.getAttribute("data-undo-depth")).toBe("0");
   await setTextSelection(frame, caseId, 2, 15);
   await page.keyboard.insertText("跨行内替换");
 
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
   await expect(target).toHaveText(/跨行内替换.*尾$/u);
   const expectedCrossWrapper = replaceUniqueBytes(
     source,
@@ -2201,14 +2158,13 @@ test("a later cross-wrapper gesture is proved by its own intent before one check
 });
 
 test("Chromium's sole empty-host placeholder br is normalized, not treated as authored markup", async ({ page }) => {
-  const { editor, frame, source } = await openMatrix(page);
+  const { frame, source } = await openMatrix(page);
   const caseId = "list-item";
   const target = await activateNativeEdit(frame, caseId);
   const originalText = await target.textContent();
   await setTextSelection(frame, caseId, 0, originalText.length);
   await page.keyboard.press("Backspace");
 
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
   await expect(target).toHaveText("");
   expect((await exportCurrentHtml(page)).equals(replaceUniqueBytes(
     source,
@@ -2218,14 +2174,13 @@ test("Chromium's sole empty-host placeholder br is normalized, not treated as au
 });
 
 test("deleting a whole host may normalize Chromium's br after disposable wrappers are proved", async ({ page }) => {
-  const { editor, frame, source } = await openMatrix(page);
+  const { frame, source } = await openMatrix(page);
   const caseId = "heading-inline";
   const target = await activateNativeEdit(frame, caseId);
   const originalText = await target.textContent();
   await setTextSelection(frame, caseId, 0, originalText.length);
   await page.keyboard.press("Backspace");
 
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
   await expect(target).toHaveText("");
   expect((await exportCurrentHtml(page)).equals(replaceUniqueBytes(
     source,
@@ -2243,7 +2198,7 @@ test("structure validation stays linear across one thousand inline nodes", async
     "utf8",
   );
   await page.goto("/");
-  const { editor, frame } = await loadFixture(page, manifest.fixture, { buffer: source });
+  const { frame } = await loadFixture(page, manifest.fixture, { buffer: source });
   const caseId = "linear-structure";
   // Target the root-owned prefix so this regression isolates Controller work,
   // rather than the separate nested-inline hit-testing path.
@@ -2315,7 +2270,6 @@ test("structure validation stays linear across one thousand inline nodes", async
   expect(childNodesReads).toBeGreaterThan(1_000);
   expect(childNodesReads).toBeLessThan(15_000);
   expect(longTasks).toEqual([]);
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
   await expect(target).toHaveText(/^X\u5c3eX0/u);
   expect((await exportCurrentHtml(page)).equals(replaceUniqueBytes(
     source,

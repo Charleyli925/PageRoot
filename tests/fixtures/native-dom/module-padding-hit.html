@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Module padding selection fixture</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: sans-serif; }
+    section {
+      min-height: 420px;
+      padding: 96px 40px 48px;
+      background: #f6f3eb;
+    }
+    article {
+      min-height: 220px;
+      padding: 24px;
+      background: #fff;
+    }
+  </style>
+</head>
+<body>
+  <section aria-label="带顶部留白的模块">
+    <article>
+      <h1 data-native-case="module-padding-copy" data-native-mode="native-editable">
+        点击内容可以选择，点击模块留白不应触发选择。
+      </h1>
+    </article>
+  </section>
+</body>
+</html>

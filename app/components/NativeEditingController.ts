@@ -56,7 +56,6 @@ const COLLAPSED_TEXT_INSERT_INPUT_TYPES = new Set([
 const EXPLICIT_COMPOSITION_FALLBACK_TRIGGERS = new Set<NativeEditCheckpointTrigger>([
   "blur",
   "fence",
-  "history",
   "style",
   "save",
   "export",
@@ -144,7 +143,6 @@ export type NativeEditCheckpointTrigger =
   | "automatic"
   | "blur"
   | "fence"
-  | "history"
   | "style"
   | "save"
   | "export"
@@ -196,8 +194,6 @@ export type NativeEditingControllerOptions = {
   onStateChange?: (state: NativeEditSessionState) => void;
   onBlur?: () => void;
   onEscape?: () => void;
-  onUndo?: () => void;
-  onRedo?: () => void;
   onSourceEditIntent?: (intent: NativeSourceEditIntent) => boolean;
   onUnsupportedInput?: (inputType: string) => void;
   onError?: (error: Error) => void;
@@ -361,14 +357,12 @@ function errorFrom(cause: unknown): Error {
 }
 
 /**
- * A logical text offset cannot distinguish the several real DOM/source
- * anchors that meet at the start or end of an authored inline wrapper. The
- * browser may apply caret gravity to either side (even when Selection points
- * at the following Text node), while a later text-only patch would have to
- * guess. Block only collapsed insertion gestures at those exact boundaries;
- * interior typing and non-collapsed replacements remain native.
+ * Detect a collapsed insertion at the several real DOM/source anchors that
+ * meet at an authored inline boundary. PageRoot uses this narrow signal to
+ * own the text mutation with deterministic source affinity; interior typing
+ * and non-collapsed replacements remain browser-native.
  */
-function insertionTargetsAmbiguousInlineBoundary(
+function insertionTargetsInlineBoundary(
   hostElement: HTMLElement,
   event: InputEvent | null,
 ): boolean {
@@ -424,6 +418,83 @@ function insertionTargetsAmbiguousInlineBoundary(
   ));
 }
 
+function collapsesAuthoredWhitespace(hostElement: HTMLElement): boolean {
+  const whiteSpace = hostElement.ownerDocument.defaultView
+    ?.getComputedStyle(hostElement)
+    .whiteSpace;
+  return whiteSpace === "normal"
+    || whiteSpace === "nowrap"
+    || whiteSpace === "pre-line";
+}
+
+function collapsedInsertionAffinity(
+  hostElement: HTMLElement,
+  logicalOffset: number,
+): "left" | "right" {
+  if (logicalOffset <= 0) return "right";
+  if (
+    collapsesAuthoredWhitespace(hostElement)
+    && /^\s*$/u.test(nativeLogicalText(hostElement).slice(0, logicalOffset))
+  ) return "right";
+  return "left";
+}
+
+function insertionTouchesCollapsedWhitespaceEdge(
+  hostElement: HTMLElement,
+  selection: NativeEditSelection,
+): boolean {
+  if (
+    selection.anchor !== selection.focus
+    || !collapsesAuthoredWhitespace(hostElement)
+  ) return false;
+  const text = nativeLogicalText(hostElement);
+  const offset = selection.focus;
+  return (
+    offset > 0 && /[\t\n\f\r ]/u.test(text[offset - 1] ?? "")
+  ) || (
+    offset < text.length && /[\t\n\f\r ]/u.test(text[offset] ?? "")
+  );
+}
+
+function whitespaceEquivalentCollapsedInsertionOffset(
+  beforeText: string,
+  afterText: string,
+  insertedText: string,
+  intendedOffset: number,
+): number | null {
+  if (
+    !insertedText
+    || /[\r\n]/u.test(insertedText)
+    || afterText.length !== beforeText.length + insertedText.length
+  ) return null;
+  let whitespaceStart = intendedOffset;
+  let whitespaceEnd = intendedOffset;
+  while (
+    whitespaceStart > 0
+    && /[\t\n\f\r ]/u.test(beforeText[whitespaceStart - 1] ?? "")
+  ) whitespaceStart -= 1;
+  while (
+    whitespaceEnd < beforeText.length
+    && /[\t\n\f\r ]/u.test(beforeText[whitespaceEnd] ?? "")
+  ) whitespaceEnd += 1;
+  for (
+    let actualOffset = whitespaceStart;
+    actualOffset <= whitespaceEnd;
+    actualOffset += 1
+  ) {
+    if (
+      actualOffset === intendedOffset
+      || afterText !== (
+        `${beforeText.slice(0, actualOffset)}`
+        + `${insertedText}`
+        + `${beforeText.slice(actualOffset)}`
+      )
+    ) continue;
+    return actualOffset;
+  }
+  return null;
+}
+
 function graphemeDeletionRange(
   text: string,
   caretOffset: number,
@@ -454,13 +525,18 @@ function graphemeDeletionRange(
   };
 }
 
-function complexGraphemeDeletionRange(
+function ownedGraphemeDeletionRange(
   text: string,
   caretOffset: number,
   inputType: "deleteContentBackward" | "deleteContentForward",
 ): { startOffset: number; endOffset: number } | null {
   const range = graphemeDeletionRange(text, caretOffset, inputType);
-  return range && range.endOffset - range.startOffset > 1 ? range : null;
+  if (!range) return null;
+  if (range.endOffset - range.startOffset > 1) return range;
+  const collapsedTrailingWhitespace = inputType === "deleteContentBackward"
+    && caretOffset < text.length
+    && /^[\t\n\f\r ]+$/u.test(text.slice(caretOffset));
+  return collapsedTrailingWhitespace ? range : null;
 }
 
 function replacementTextForFrozenRange(
@@ -500,7 +576,7 @@ function selectionValue(hostElement: HTMLElement): NativeEditSelection {
     anchor,
     focus,
     affinity: anchor === focus
-      ? (focus > 0 ? "left" : "right")
+      ? collapsedInsertionAffinity(hostElement, focus)
       : anchor < focus ? "right" : "left",
   };
 }
@@ -1079,10 +1155,6 @@ export class NativeEditingController {
 
   private readonly onEscape?: NativeEditingControllerOptions["onEscape"];
 
-  private readonly onUndo?: NativeEditingControllerOptions["onUndo"];
-
-  private readonly onRedo?: NativeEditingControllerOptions["onRedo"];
-
   private readonly onSourceEditIntent?: NativeEditingControllerOptions["onSourceEditIntent"];
 
   private readonly onUnsupportedInput?: NativeEditingControllerOptions["onUnsupportedInput"];
@@ -1157,12 +1229,6 @@ export class NativeEditingController {
 
   /** Last DOM state proved by a complete input/composition delivery. */
   private lastValidatedSnapshot: CompositionSnapshot | null = null;
-
-  /** Frozen before an IME can apply caret gravity at an inline boundary. */
-  private ambiguousCompositionOrigin = false;
-
-  /** Drains late platform events from an IME epoch PageRoot blocked safely. */
-  private blockedAmbiguousCompositionEpochId: number | null = null;
 
   private unauthorizedDomDrift = false;
 
@@ -1584,8 +1650,6 @@ export class NativeEditingController {
     this.onStateChange = options.onStateChange;
     this.onBlur = options.onBlur;
     this.onEscape = options.onEscape;
-    this.onUndo = options.onUndo;
-    this.onRedo = options.onRedo;
     this.onSourceEditIntent = options.onSourceEditIntent;
     this.onUnsupportedInput = options.onUnsupportedInput;
     this.onError = options.onError;
@@ -1651,12 +1715,6 @@ export class NativeEditingController {
         event.preventDefault();
         return;
       }
-      if (this.blockedAmbiguousCompositionEpochId !== null) {
-        this.blockedAmbiguousCompositionEpochId = null;
-        this.acknowledgeDraftComposition();
-        this.compositionEpoch = null;
-        this.finishNativeMutationWindow();
-      }
       if (!this.retireDomOnlyProvisionalBeforeComposition()) {
         event.preventDefault();
         return;
@@ -1664,10 +1722,14 @@ export class NativeEditingController {
       this.clearCompositionEndFocusGuard();
       this.clearCancelledCompositionTombstone();
       this.resolveNativeDeliveryBeforeComposition();
-      this.ambiguousCompositionOrigin = insertionTargetsAmbiguousInlineBoundary(
-        this.hostElement,
-        null,
-      );
+      // Canonicalize the caret before the IME receives its first marked-text
+      // delivery. At an inline boundary this makes PageRoot's deterministic
+      // ownership visible to Chromium as well: paragraph start enters the
+      // first character's style; every other boundary inherits the left side.
+      const compositionSelection = this.getSelection();
+      if (compositionSelection.anchor === compositionSelection.focus) {
+        setSelectionValue(this.hostElement, compositionSelection);
+      }
       this.captureCompositionSnapshot();
       this.beginDraftComposition();
       this.openNativeMutationWindow();
@@ -1681,11 +1743,6 @@ export class NativeEditingController {
         !this.compositionEpoch
         || !leaseStampsMatch(this.compositionEpoch.lease, this.leaseStamp)
       ) return;
-      if (this.composing && this.ambiguousCompositionOrigin) {
-        this.cancelAmbiguousBoundaryComposition();
-        this.unsupportedInputIfCurrent("insertAtAmbiguousInlineBoundary");
-        return;
-      }
       if (this.cancelledCompositionTombstone) {
         this.restoreCompositionSnapshot(true);
         if (this.nativeMutationWindow) {
@@ -1694,7 +1751,6 @@ export class NativeEditingController {
         }
         return;
       }
-      this.ambiguousCompositionOrigin = false;
       if (this.compositionEpoch?.phase === "settling") {
         // macOS input methods and browser bridges may repeat compositionend
         // after the accepted value has already been delivered. A repeated end
@@ -1799,10 +1855,21 @@ export class NativeEditingController {
         const expectedText = snapshot
           ? `${snapshot.text.slice(0, originalStart)}${committedData}${snapshot.text.slice(originalEnd)}`
           : null;
-        const terminalTextMatches = Boolean(
+        let terminalTextMatches = Boolean(
           snapshot
           && nativeLogicalText(this.hostElement) === expectedText
         );
+        if (
+          !terminalTextMatches
+          && snapshot
+          && committedData
+          && this.canonicalizeWhitespaceEquivalentComposition(
+            snapshot,
+            committedData,
+          )
+        ) {
+          terminalTextMatches = true;
+        }
         if (!snapshot || terminalMismatch || !committedData) {
           cancelled = this.rejectCompositionEpoch(
             "输入法最终文字超出了开始选区，本次文字没有保存，已恢复原内容。",
@@ -1972,35 +2039,6 @@ export class NativeEditingController {
 
   private handleBeforeInput(event: InputEvent): void {
     if (!this.canHandleEvent(event)) return;
-    if (this.isBlockedAmbiguousCompositionDelivery(event)) {
-      event.preventDefault();
-      if (this.compositionEpoch?.phase === "settling") {
-        this.compositionEpoch = {
-          ...this.compositionEpoch,
-          lateDeliveryPending: true,
-        };
-      }
-      return;
-    }
-    if (this.blockedAmbiguousCompositionEpochId !== null) {
-      // A normal, new gesture after the same-task IME drain owns a fresh
-      // transaction. Retire the blocked tombstone rather than letting it be
-      // mistaken for an accepted settling composition.
-      this.blockedAmbiguousCompositionEpochId = null;
-      this.acknowledgeDraftComposition();
-      this.compositionEpoch = null;
-      this.finishNativeMutationWindow();
-    }
-    if (
-      this.composing
-      && this.ambiguousCompositionOrigin
-      && COLLAPSED_TEXT_INSERT_INPUT_TYPES.has(event.inputType)
-    ) {
-      event.preventDefault();
-      this.cancelAmbiguousBoundaryComposition();
-      this.unsupportedInputIfCurrent("insertAtAmbiguousInlineBoundary");
-      return;
-    }
     if (
       this.draftCompositionOwnsProvisionalDom()
       && this.isCompositionDeliveryType(event.inputType)
@@ -2117,12 +2155,6 @@ export class NativeEditingController {
       this.unsupportedInputIfCurrent("insertFromPasteMultiline");
       return;
     }
-    if (input.kind === NATIVE_INPUT_INTENT_KIND.HISTORY) {
-      event.preventDefault();
-      if (input.action === "redo") this.callbackIfCurrent(this.onRedo);
-      else this.callbackIfCurrent(this.onUndo);
-      return;
-    }
     if (
       input.kind === NATIVE_INPUT_INTENT_KIND.INSERT_HARD_BREAK
       || input.kind === NATIVE_INPUT_INTENT_KIND.SPLIT_BLOCK
@@ -2182,18 +2214,9 @@ export class NativeEditingController {
       this.unsupportedInputIfCurrent(event.inputType);
       return;
     }
-    if (
-      !this.composing
-      && COLLAPSED_TEXT_INSERT_INPUT_TYPES.has(event.inputType)
-      && insertionTargetsAmbiguousInlineBoundary(this.hostElement, event)
-    ) {
-      event.preventDefault();
-      this.unsupportedInputIfCurrent("insertAtAmbiguousInlineBoundary");
-      this.emitState();
-      return;
-    }
     this.capturePendingCompositionTerminal(event);
-    if (this.handleComplexGraphemeDeletion(event)) return;
+    if (this.handleOwnedCollapsedTextInsertion(event)) return;
+    if (this.handleOwnedGraphemeDeletion(event)) return;
     if (!this.openNativeMutationWindow()) {
       event.preventDefault();
       return;
@@ -2353,7 +2376,145 @@ export class NativeEditingController {
     if (!duplicate) this.nativeMutationIntents.push({ inputType, originalRanges });
   }
 
-  private handleComplexGraphemeDeletion(event: InputEvent): boolean {
+  private handleOwnedCollapsedTextInsertion(event: InputEvent): boolean {
+    if (
+      !this.canHandleEvent(event)
+      || this.composing
+      || !COLLAPSED_TEXT_INSERT_INPUT_TYPES.has(event.inputType)
+      || event.inputType === "insertCompositionText"
+      || event.inputType === "insertFromComposition"
+    ) return false;
+    const insertedText = event.data
+      ?? event.dataTransfer?.getData("text/plain")
+      ?? "";
+    if (!insertedText || hasMultilinePlainText(insertedText)) return false;
+    const selection = this.getSelection();
+    if (selection.anchor !== selection.focus) return false;
+    const ownsBoundary = insertionTargetsInlineBoundary(this.hostElement, event)
+      || insertionTouchesCollapsedWhitespaceEdge(this.hostElement, selection);
+    if (!ownsBoundary) return false;
+
+    // Chromium's target range is not stable at visual edges next to authored
+    // whitespace, inline wrappers and following icons. Own those collapsed
+    // insertions from PageRoot's logical Selection; strict text interiors keep
+    // the browser's complete beforeinput -> input delivery contract.
+    event.preventDefault();
+    if (!this.openNativeMutationWindow()) return true;
+    this.beginNativeCandidate(event.inputType);
+    if (this.pendingNativeCandidate) {
+      this.pendingNativeCandidate.currentRanges = [{
+        startOffset: selection.focus,
+        endOffset: selection.focus,
+      }];
+    }
+    try {
+      this.storeNativeMutationIntent(
+        event.inputType,
+        this.tracker.originalRangesForCurrentRange(
+          selection.focus,
+          selection.focus,
+        ),
+      );
+      const point = domPointForLogicalOffset(
+        this.hostElement,
+        selection.focus,
+        selection.affinity,
+      );
+      this.runExpectedMutation(() => {
+        if (point.node.nodeType === Node.TEXT_NODE) {
+          (point.node as Text).insertData(point.offset, insertedText);
+          return;
+        }
+        const textNode = this.hostElement.ownerDocument.createTextNode(insertedText);
+        point.node.insertBefore(textNode, point.node.childNodes.item(point.offset));
+      });
+      const nextOffset = selection.focus + insertedText.length;
+      setSelectionValue(this.hostElement, {
+        anchor: nextOffset,
+        focus: nextOffset,
+        affinity: "left",
+      });
+      if (!this.updateFromDom()) {
+        this.finishNativeMutationWindow();
+        return true;
+      }
+      this.promoteNativeCandidate(event.inputType);
+      this.nativeMutationValidated = true;
+      this.closeMutationWindowAfterDelivery();
+      this.emitState();
+      return true;
+    } catch (cause) {
+      this.reportErrorIfCurrent(errorFrom(cause));
+      this.restoreLastValidatedSnapshot();
+      this.finishNativeMutationWindow();
+      return true;
+    }
+  }
+
+  private canonicalizeWhitespaceEquivalentComposition(
+    snapshot: CompositionSnapshot,
+    insertedText: string,
+  ): boolean {
+    const originalStart = Math.min(
+      snapshot.selection.anchor,
+      snapshot.selection.focus,
+    );
+    const originalEnd = Math.max(
+      snapshot.selection.anchor,
+      snapshot.selection.focus,
+    );
+    if (
+      originalStart !== originalEnd
+      || !collapsesAuthoredWhitespace(this.hostElement)
+      || whitespaceEquivalentCollapsedInsertionOffset(
+        snapshot.text,
+        nativeLogicalText(this.hostElement),
+        insertedText,
+        originalStart,
+      ) === null
+    ) return false;
+
+    this.restoringCompositionSnapshot = true;
+    try {
+      this.runExpectedMutation(() => {
+        restoreAuthoredAttributes(this.hostElement, snapshot.hostAttributes);
+        for (const [name, saved] of Object.entries(this.activeSessionAttributes)) {
+          restoreAttribute(this.hostElement, name, saved);
+        }
+        for (const child of snapshot.children) restoreRestorableDomNode(child);
+        this.hostElement.replaceChildren(
+          ...snapshot.children.map((child) => child.node),
+        );
+        const point = domPointForLogicalOffset(
+          this.hostElement,
+          originalStart,
+          snapshot.selection.affinity,
+        );
+        if (point.node.nodeType === Node.TEXT_NODE) {
+          (point.node as Text).insertData(point.offset, insertedText);
+        } else {
+          const textNode = this.hostElement.ownerDocument.createTextNode(insertedText);
+          point.node.insertBefore(textNode, point.node.childNodes.item(point.offset));
+        }
+      });
+    } finally {
+      this.restoringCompositionSnapshot = false;
+    }
+    setSelectionValue(this.hostElement, {
+      anchor: originalStart + insertedText.length,
+      focus: originalStart + insertedText.length,
+      affinity: "left",
+    });
+    this.unauthorizedDomDrift = snapshot.unauthorizedDomDrift;
+    this.requiresCanonicalReconcile = true;
+    return nativeLogicalText(this.hostElement) === (
+      `${snapshot.text.slice(0, originalStart)}`
+      + `${insertedText}`
+      + `${snapshot.text.slice(originalEnd)}`
+    );
+  }
+
+  private handleOwnedGraphemeDeletion(event: InputEvent): boolean {
     if (!this.canHandleEvent(event)) return true;
     if (
       this.composing
@@ -2365,7 +2526,7 @@ export class NativeEditingController {
     const selection = this.getSelection();
     if (selection.anchor !== selection.focus) return false;
     const currentText = nativeLogicalText(this.hostElement);
-    const deletion = complexGraphemeDeletionRange(
+    const deletion = ownedGraphemeDeletionRange(
       currentText,
       selection.focus,
       event.inputType,
@@ -2382,16 +2543,17 @@ export class NativeEditingController {
       "left",
     );
     // Keep the correction deliberately narrow: PageRoot performs the delete
-    // only when the whole grapheme lives in one authored Text node. Chromium
-    // may otherwise delete only one code unit across inline boundaries and
-    // leave an orphan combining mark, ZWJ, or surrogate. Fail closed before
-    // the DOM changes; the user can select the whole visible cluster instead.
+    // only when the whole grapheme lives in one authored Text node. This owns
+    // both multi-code-unit graphemes and a visible final grapheme followed by
+    // source indentation that CSS collapses away. Chromium may otherwise
+    // delete the grapheme together with that invisible suffix, which cannot
+    // map back to the exact source range.
     if (
       start.node !== end.node
       || start.node.nodeType !== Node.TEXT_NODE
     ) {
       event.preventDefault();
-      this.unsupportedInputIfCurrent("deleteComplexGraphemeAcrossInlineBoundary");
+      this.unsupportedInputIfCurrent("deleteOwnedGraphemeAcrossInlineBoundary");
       this.emitState();
       return true;
     }
@@ -2462,7 +2624,7 @@ export class NativeEditingController {
     // contenteditable=true accepts HTML fragments and formatting by default.
     // PageRoot's controlled mode therefore owns every paste and asks Chromium
     // to insert only text. execCommand("insertText") is intentionally narrow:
-    // it preserves the native undo owner and still has to complete the same
+    // it preserves the native edit owner and still has to complete the same
     // beforeinput/input + MutationObserver proof as keyboard input.
     event.preventDefault();
     if (!plainText) {
@@ -2474,11 +2636,6 @@ export class NativeEditingController {
       || this.requiresCanonicalReconcile
     ) {
       this.unsupportedInputIfCurrent("insertFromPasteWhileComposing");
-      this.emitState();
-      return;
-    }
-    if (insertionTargetsAmbiguousInlineBoundary(this.hostElement, null)) {
-      this.unsupportedInputIfCurrent("insertAtAmbiguousInlineBoundary");
       this.emitState();
       return;
     }
@@ -2508,16 +2665,6 @@ export class NativeEditingController {
 
   private handleInput(event: InputEvent): void {
     if (!this.canHandleEvent(event)) return;
-    if (this.isBlockedAmbiguousCompositionDelivery(event)) {
-      this.restoreCompositionSnapshot(true);
-      if (this.compositionEpoch?.phase === "settling") {
-        this.compositionEpoch = {
-          ...this.compositionEpoch,
-          lateDeliveryPending: false,
-        };
-      }
-      return;
-    }
     if (
       this.compositionEpoch?.phase === "composing"
       && this.isCompositionDeliveryType(event.inputType)
@@ -3043,7 +3190,7 @@ export class NativeEditingController {
       const observedMutationWithoutInput = this.nativeMutationObserved;
       // beforeinput only announces a candidate operation. Without its input
       // completion event, even a structurally valid text mutation is not an
-      // accepted user transaction and must never reach SourcePatch/history.
+      // accepted user transaction and must never reach SourcePatch.
       if (observedMutationWithoutInput) {
         this.markUnauthorizedDomDrift(
           "浏览器没有完成这次输入，本次文字没有保存，已恢复原内容。",
@@ -3118,46 +3265,6 @@ export class NativeEditingController {
     if (this.mutationWindowTimer === null) return;
     window.clearTimeout(this.mutationWindowTimer);
     this.mutationWindowTimer = null;
-  }
-
-  private isBlockedAmbiguousCompositionDelivery(event: InputEvent): boolean {
-    const epoch = this.compositionEpoch;
-    if (
-      this.blockedAmbiguousCompositionEpochId === null
-      || epoch?.phase !== "settling"
-      || epoch.id !== this.blockedAmbiguousCompositionEpochId
-      || !this.isCompositionDeliveryType(event.inputType)
-    ) return false;
-    return event.inputType !== "insertText"
-      || event.isComposing
-      || this.compositionEndFocusGuard;
-  }
-
-  private cancelAmbiguousBoundaryComposition(): void {
-    const epoch = this.compositionEpoch;
-    this.ambiguousCompositionOrigin = false;
-    if (epoch?.phase !== "composing") return;
-    this.compositionEpoch = {
-      lease: epoch.lease,
-      id: epoch.id,
-      phase: "settling",
-      snapshot: epoch.snapshot,
-      cancelled: false,
-      focusGuard: true,
-      lateDeliveryPending: false,
-      compositionInputDelivered: epoch.compositionInputDelivered,
-      pendingTerminal: null,
-      commitAuthority: null,
-    };
-    this.blockedAmbiguousCompositionEpochId = epoch.id;
-    this.openCompositionEndFocusGuard();
-    if (this.restoreCompositionSnapshot(true)) {
-      this.establishCancelledCompositionTombstone();
-    } else {
-      this.restoreLastValidatedSnapshot();
-    }
-    this.finishNativeMutationWindow();
-    this.emitState();
   }
 
   private isCancelledCompositionTombstoneEvent(event: InputEvent): boolean {
@@ -3347,8 +3454,6 @@ export class NativeEditingController {
       window.clearTimeout(this.compositionEndFocusGuardTimer);
       this.compositionEndFocusGuardTimer = null;
     }
-    this.ambiguousCompositionOrigin = false;
-    this.blockedAmbiguousCompositionEpochId = null;
     this.compositionEpoch = null;
     this.requiresCanonicalReconcile = false;
     this.finishNativeMutationWindow();
@@ -3560,12 +3665,12 @@ export class NativeEditingController {
     ) return;
     // A focus loss in the same task as compositionend is not an explicit IME
     // acceptance. Restore the composition-start DOM and Selection so raw
-    // marked text cannot become a SourcePatch or history/audit entry, while a
+    // marked text cannot become a SourcePatch or audit entry, while a
     // preceding accepted but not-yet-checkpointed text edit remains intact.
     if (this.compositionEpoch?.phase === "composing") {
       const epoch = this.compositionEpoch;
       // A browser/window blur is allowed to omit compositionend. Move the
-      // epoch to its cancelled-drain lane ourselves so save/undo cannot stay
+      // epoch to its cancelled-drain lane ourselves so save cannot stay
       // stranded as "composing" and a late terminal event can be absorbed.
       this.compositionEpoch = {
         lease: epoch.lease,
@@ -3763,6 +3868,20 @@ export class NativeEditingController {
     if (!this.hasCurrentLease()) return [this.hostElement];
     const selection = this.hostElement.ownerDocument.getSelection();
     if (!selection || selection.rangeCount !== 1) return [this.hostElement];
+    if (selection.isCollapsed) {
+      const logicalSelection = this.getSelection();
+      const point = domPointForLogicalOffset(
+        this.hostElement,
+        logicalSelection.focus,
+        logicalSelection.affinity,
+      );
+      const styleElement = point.node.nodeType === Node.TEXT_NODE
+        ? point.node.parentElement
+        : point.node instanceof HTMLElement
+          ? point.node
+          : point.node.parentElement;
+      return styleElement ? [styleElement] : [this.hostElement];
+    }
     const range = selection.getRangeAt(0);
     const elements: HTMLElement[] = [];
     const walker = this.hostElement.ownerDocument.createTreeWalker(
@@ -3831,8 +3950,6 @@ export class NativeEditingController {
       provisionalComposition
       && (
         compositionSnapshot!.replacements.length > 0
-        || result.command.kind === "undo"
-        || result.command.kind === "redo"
         || result.command.authority === "system"
       )
     );
@@ -3840,10 +3957,9 @@ export class NativeEditingController {
       ? null
       : result.command.sequence;
     if (mustCancelProvisionalComposition && compositionSnapshot) {
-      // Redo cannot accept a new composition first because that clears its
-      // stack. Undo and system work must not adopt provisional IME DOM either.
-      // A user command after earlier strict edits preserves those proven edits
-      // and discards only the current marked-text epoch before replay.
+      // System work must not adopt provisional IME DOM. A user command after
+      // earlier strict edits preserves those proven edits and discards only
+      // the current marked-text epoch before replay.
       this.restoreCompositionSnapshot(true);
       this.establishCancelledCompositionTombstone();
       const compositionId = this.draftCompositionId();
@@ -4306,7 +4422,7 @@ export class NativeEditingController {
     this.ready = false;
     this.blockDraft.expire({
       lease: this.leaseStamp,
-      reason: "history-or-source-fence",
+      reason: "source-authority-fence",
     });
     this.detachSessionInfrastructure();
     this.cancelAllScheduledWork();

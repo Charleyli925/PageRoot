@@ -24,8 +24,8 @@
 
 - 核心 Node：算法、状态机、序列化、事务、错误关闭和 forward/inverse 不变量。
 - 源码字符串合同：只在其拥有的组件或控制器变化时运行；不把实现文本匹配当作主要正确性证据。
-- Browser 冒烟：固定覆盖脚本隔离、源码字节、格式骨架、历史和能力降级五类关键风险；完整 Browser 仍包含所有回归，不修改或跳过已知失败。
-- Electron 冒烟：固定覆盖真实 authored DOM 输入和一次带磁盘持久化的 composition；完整 Electron 保留保存、关闭重开、undo/redo 等全部路径。
+- Browser 冒烟：固定覆盖脚本隔离、源码字节、格式骨架、源码权威围栏和能力降级五类关键风险；完整 Browser 仍包含所有回归，不修改或跳过已知失败。
+- Electron 冒烟：固定覆盖真实 authored DOM 输入和一次带磁盘持久化的 composition；完整 Electron 保留保存、关闭重开和逐字节 forward 结果等全部路径。
 - AI 闭环：任务级只跑正常闭环和越界失败 2 个代表场景；发布级跑完整 6 个场景，包括复制失败、缺失 finalizer、非法 HTML 和版本激活失败。测试自动生成受控 AI 输出并执行正式 finalizer，不等待外部模型或真人接力。
 - 候选包：从 `.app` 的真实可执行文件启动，使用隔离 userData，完成源码字节 oracle；随后校验 app.asar、Bridge、Schema、签名、DMG 和只读挂载内容。
 
@@ -40,11 +40,15 @@
 3. DOM 身份、Selection、caret、几何、scroll 和布局指纹。
 4. 截图、trace 和视频只作为失败诊断物，不要求真人看图后决定通过。
 
-`tests/generated-source-invariants.test.mjs` 用固定种子生成 BOM、LF/CRLF、单双引号、多语言 Unicode、entity、注释和脚本文本组合。每个失败都带 seed；测试用独立字节替换 oracle 验证未命中范围、undo 和 redo，而不是复用被测实现计算期望值。
+`tests/generated-source-invariants.test.mjs` 用固定种子生成 BOM、LF/CRLF、单双引号、多语言 Unicode、entity、注释和脚本文本组合。每个失败都带 seed；测试用独立字节替换 oracle 验证未命中范围、inverse 原子恢复和同一计划重放，而不是复用被测实现计算期望值。
+
+画布不提供用户级撤销或重做，也不维护产品历史栈。源码画布内的 `Cmd/Ctrl+Z` 与 `Cmd/Ctrl+Shift+Z` 必须被阻止，避免 Chromium 绕过源码映射；真实表单和评论输入框仍保留浏览器自己的局部输入历史。SourcePatch 的 inverse plan 只作为同一事务失败恢复和字节不变量证明，不得重新暴露为产品能力。
 
 ## 真实 HTML 与输入法边界
 
-`npm run test:real-html` 默认使用仓库内复杂 HTML 物料，自动发现一个可编辑目标和一个明确降级目标，并验证几何与字节不变量。也可以用 `PAGEROOT_REAL_HTML_PATH` 覆盖直接测试的输入，或对门禁执行器传入 `--real-html <绝对路径>`；原文件不会被写入。
+`npm run test:real-html` 默认使用仓库内复杂 HTML 物料，自动发现一个可编辑目标和一个明确降级目标，并验证几何与字节不变量。也可以用 `PAGEROOT_REAL_HTML_PATH` 覆盖直接测试的输入，或对门禁执行器传入 `--real-html <绝对路径>`；原文件不会被写入。真实页只要求 DOM 已进入可交互状态，不等待可能被外部字体或媒体永久拖住的整页 `load`；进入编辑前必须连续取得稳定的目标、文字、可见源码节点和文档尺寸几何快照。
+
+折叠光标回归矩阵必须覆盖普通段首/段尾、非空行内样式交界，以及文字后紧邻折叠源码空白和图标/行内子元素的视觉末尾；代表宿主至少包括标题、段落、列表项、链接、`summary` 和表格单元格。独立 oracle 同时检查输入未被恢复、输出 HTML 只增加目标文字、既有标签与源码空白逐字节保留。IME 用例还要模拟浏览器把候选文字落到同一段折叠空白另一侧，并证明最终锚点被校正，而跨非空文字/结构的漂移继续失败关闭。
 
 当前自动化能证明 Chromium/Electron composition 事件序列、Apple 拼音临时 wrapper 轨迹、取消/迟到事件、持久化和 canonical reconcile。它不能诚实证明第三方 macOS 输入法候选窗本身。该能力在出现可无人值守、可复现并有机器 oracle 的 OS 级驱动前只登记为覆盖边界，不设人工门禁，也不伪装成已自动验证。
 

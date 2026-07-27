@@ -886,19 +886,10 @@ function wrapperStackForSourceAnchor(skeleton, anchor) {
 
 function linkBoundaryViolation(skeleton, startOffset, endOffset) {
   const links = skeleton.linkBoundaries;
-  if (startOffset === endOffset) {
-    const boundary = links.find((link) => (
-      startOffset === link.textStart || startOffset === link.textEnd
-    ));
-    if (boundary) {
-      return {
-        code: "FORMAT_LINK_BOUNDARY_AMBIGUOUS",
-        reason: "A collapsed edit at a link boundary has ambiguous source ownership.",
-        details: { nodeId: boundary.nodeId, offset: startOffset },
-      };
-    }
-    return null;
-  }
+  // Collapsed ownership is deterministic: FormatSkeleton uses the edit
+  // range affinity to choose the exact source anchor. Paragraph start is
+  // right-affine; every other inline/link boundary inherits the left side.
+  if (startOffset === endOffset) return null;
   const intersected = links.filter((link) => (
     startOffset < link.textEnd && endOffset > link.textStart
   ));
@@ -1323,7 +1314,9 @@ export function validateFormatSkeletonEdit(skeleton, options = {}) {
       );
     }
 
-    const exactRange = exactProjectedRange(wrapper, editRange, replacementText.length);
+    const exactRange = inheritedWrapperNodeIds.has(wrapper.nodeId)
+      ? null
+      : exactProjectedRange(wrapper, editRange, replacementText.length);
     if (exactRange) {
       if (
         current.textStart !== exactRange.startOffset

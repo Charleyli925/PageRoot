@@ -2,7 +2,7 @@
 
 本文件是输入法问题的长期回归合同。真实 HTML 的 authored DOM 与源码是
 唯一事实源；输入法候选期产生的 marked text 或临时 inline wrapper 只属于
-一次 composition epoch，不能进入源码、历史或下一轮 DOM baseline。
+一次 composition epoch，不能进入源码、审计记录或下一轮 DOM baseline。
 
 ## 已确认的真实故障模式
 
@@ -41,7 +41,7 @@
 
   `logical replacement → SourceTextMap → SourcePatch → 新 SourceIndex → canonical authored DOM → RuntimeDomSourceMap → baseline rebase`
 
-- SourcePatch 前失败：恢复快照，源码和历史为零变化。SourcePatch 后 reconcile
+- SourcePatch 前失败：恢复快照，源码和审计记录为零变化。SourcePatch 后 reconcile
   失败：从已提交源码重载，绝不保留临时 DOM。
 - canonical reconcile 完成前阻止第二次输入或外层命令，避免两个 epoch 共用
   临时树或映射。
@@ -50,16 +50,16 @@
 
 | 类别 | 必须证明的结果 | 自动化层 |
 |---|---|---|
-| 标准 composition | 候选不进源码，确认只形成一个 undo 单元 | Browser CDP + Electron CDP |
+| 标准 composition | 候选不进源码，确认只形成一个 SourcePatch 与一条审计记录 | Browser CDP + Electron CDP |
 | Apple wrapper trace | `<em>Word</em> → <i>ni hao</i> → <em>你好</em>`，只改 `Word` 字节 | Browser replay + Electron disk |
 | 终端顺序 | final input 在 end 前/后、空 end 后 non-empty tail，均不重复或漏交 | Browser |
-| 取消与 stale tail | Escape/空 end 恢复 DOM、Selection、源码和历史；旧 tail 不污染新 epoch | Browser |
+| 取消与 stale tail | Escape/空 end 恢复 DOM、Selection、源码和审计记录；旧 tail 不污染新 epoch | Browser |
 | Selection | forward、reverse、collapsed caret、共有前缀替换 | Browser |
 | 焦点边界 | 工具栏、focusout、window blur 不提交中间拼音，prior dirty edit 不丢 | Browser |
 | 临时结构安全 | 越界、属性、atom、foreign/未知结构、所有权漂移全部整笔拒绝 | Browser |
 | canonical 故障 | 已提交 Patch 只记一次，iframe 从源码重载，临时树不成为 baseline | Browser fault injection |
 | Unicode | emoji、组合音标、ZWJ 序列按用户可见字符删除，无孤立 surrogate | Browser + Electron |
-| 磁盘闭环 | 保存、关闭重开、undo 原 SHA、redo 同一 forward Patch | Electron disk |
+| 磁盘闭环 | 保存、关闭重开后仍为同一逐字节 forward 结果 | Electron disk |
 | 复杂 HTML | 准入前后布局稳定；不可证明区域降级评论；未命中字节不变 | Real HTML gate |
 
 输入录制器必须保留单调序号、keydown/keyup、composition、beforeinput/input、

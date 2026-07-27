@@ -79,57 +79,12 @@
 }
 
 .toolbar,
-.commentMarker,
-.globalCommentButton {
+.commentMarker {
   position: absolute;
 }
 
 .toolbar {
   z-index: 10;
-}
-
-.globalCommentButton {
-  top: 5px;
-  right: 7px;
-  z-index: 11;
-  height: 30px;
-  padding: 0 14px;
-  border: 1px solid rgb(58 55 66 / 9%);
-  border-radius: 9px;
-  color: #77747d;
-  background: #e9e8e5;
-  box-shadow: 0 3px 10px rgb(37 34 45 / 6%);
-  font: 680 12px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  cursor: pointer;
-  transition:
-    color 140ms ease,
-    border-color 140ms ease,
-    background-color 140ms ease,
-    box-shadow 140ms ease;
-}
-
-.globalCommentButton:hover:not(:disabled):not([data-active="true"]) {
-  border-color: rgb(81 71 220 / 16%);
-  color: #5c55a5;
-  background: #eeedf5;
-}
-
-.globalCommentButton[data-active="true"] {
-  border-color: rgb(255 255 255 / 54%);
-  color: #fff;
-  background: #5147dc;
-  box-shadow: 0 8px 22px rgb(45 39 145 / 24%);
-}
-
-.globalCommentButton[data-active="true"]:hover {
-  background: #4338ca;
-}
-
-.globalCommentButton:disabled {
-  color: #9a979f;
-  background: #ecebe8;
-  box-shadow: none;
-  cursor: default;
 }
 
 .commentMarker {
@@ -165,7 +120,6 @@
 }
 
 .commentMarker:focus-visible,
-.globalCommentButton:focus-visible,
 .toolbar button:focus-visible,
 .toolbar input:focus-visible {
   outline: 3px solid rgb(91 75 223 / 30%);
@@ -191,7 +145,6 @@
 }
 
 .commentToolButton,
-.undoToolButton,
 .toolButton,
 .formatButton,
 .iconButton {
@@ -216,17 +169,6 @@
   background: #4338ca;
 }
 
-.undoToolButton {
-  padding: 0 10px;
-  color: #58535f;
-  background: transparent;
-}
-
-.undoToolButton:hover:not(:disabled) {
-  color: #25232a;
-  background: #f1f0ed;
-}
-
 .toolButton {
   padding: 0 10px;
 }
@@ -239,7 +181,6 @@
 }
 
 .toolButton:disabled,
-.undoToolButton:disabled,
 .formatButton:disabled,
 .iconButton:disabled {
   opacity: 0.35;
@@ -384,8 +325,7 @@
   }
 }
 
-/* Edge-to-edge canvas shell. The small top affordance is always discoverable;
-   controls become fully prominent on hover or keyboard focus. */
+/* Edge-to-edge canvas shell. */
 .editor {
   grid-template-rows: 30px minmax(0, 1fr);
   border: 0;
@@ -396,32 +336,6 @@
 
 .frame {
   border-top-color: #ebe8e1;
-}
-
-.globalCommentButton {
-  top: 3px;
-  right: 8px;
-  height: 24px;
-  padding: 0 10px;
-  border: 0;
-  border-radius: 7px;
-  background: rgb(237 235 231 / 76%);
-  box-shadow: none;
-  font-size: 10px;
-  opacity: 0.58;
-  transform: translateY(-2px);
-  transition:
-    opacity 180ms ease,
-    transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
-    color 160ms ease,
-    background-color 160ms ease;
-}
-
-.editor:hover .globalCommentButton,
-.editor:focus-within .globalCommentButton,
-.globalCommentButton[data-active="true"] {
-  opacity: 1;
-  transform: translateY(0);
 }
 
 .lockNotice {
@@ -439,15 +353,8 @@
   box-shadow: 0 9px 24px rgb(28 25 52 / 15%);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .globalCommentButton {
-    transition: none;
-  }
-}
-
 /* The V5 workbench owns these controls in the application toolbar. Keeping the
    iframe shell to one row also gives the source page the full canvas height. */
-.globalCommentButton,
 .lockNotice {
   display: none;
 }

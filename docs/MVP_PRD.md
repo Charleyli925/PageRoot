@@ -41,7 +41,7 @@ HTML AI 工作台让用户在真实本地 HTML 上完成两类工作：
 
 - 不做低代码搭建器。
 - 不让用户逐个接受 AI 的多个候选区块。
-- 不把临时文件、自动写回、撤销快照或恢复日志显示为 Version。
+- 不把临时文件、自动写回、事务恢复快照或恢复日志显示为 Version。
 - 不把文件名、页面标题或文件系统修改时间当作版本身份。
 - 不依赖固定时间窗口推断内部 AI 已完成。
 - 不维护一个会被反复覆盖、可能与项目当前路径分叉的含糊 `current/index.html`。有效 AI 成功创建按版本命名的 `working/V1.x.html` 并自动切换项目路径，不要求用户手动管理副本。
@@ -106,18 +106,19 @@ HTML AI 工作台让用户在真实本地 HTML 上完成两类工作：
 支持的直接编辑至少包括：
 
 - 双击 source-backed 静态文字后，光标直接出现在点击位置；普通文字和安全的混合行内文字都可输入、删除和选择。
+- 可编辑宿主的可视段首、段尾和非空样式交界均可输入：可视段首继承右侧首字符，其他交界继承左侧字符，工具栏显示与下一次输入一致的样式。
 - 文字 checkpoint 可以跨多个源码 text node，但不得拍平或序列化既有行内标签。
 - 字体、字号、字重、斜体和颜色。
 - 背景、填充、边框和常用间距。
 - 同级模块顺序。
-- 撤销文字、样式和排序；不提供重做，评论在评论区独立删除。
+- 不提供画布级撤销或重做；源码画布拦截 `Cmd/Ctrl+Z`，避免 Chromium 绕过 SourcePatch 直接改 DOM。表单输入框保留自己的本地输入历史，评论在评论区独立删除。
 
 每次本地修改：
 
 1. 文字双击时由 `NativeEditingController` 接管当前源码宿主；浏览器原生 DOM、Selection 和 IME 负责光标与输入，Controller 的临时跟踪状态只服务当前会话，不成为第二事实源。
 2. 约 700ms、格式、失焦、Cmd+S、切换、关闭或发送边界生成带目标身份、源 Hash、精确 before/after 和操作类型的 `EditCommand`。
 3. SourceIndex/TargetResolver 唯一定位真实源码范围；无法唯一定位时保留草稿并阻止操作。
-4. SourcePatchEngine 生成局部 forward/inverse Patch，并验证范围外源码不变。flex/grid 文字只有在源码、布局和 selector 均安全时，才随首个真实 Patch 创建一个 canonical 直接文字项，避免 wrapper 分裂成多个 gap item。
+4. SourcePatchEngine 生成局部 forward/inverse Patch，并验证范围外源码不变。inverse 只用于同一事务失败时的原子恢复与测试证明，不保存为用户可操作的历史栈。flex/grid 文字只有在源码、布局和 selector 均安全时，才随首个真实 Patch 创建一个 canonical 直接文字项，避免 wrapper 分裂成多个 gap item。
 5. 用 Patch 结果更新内存 HTML 并原子重建 projection；失败时保留原会话和草稿。
 6. 增加 `editRevision` 并追加稳定 ID 的 edit event。
 7. 触发有上限 debounce 的同一条串行写入队列。
@@ -126,6 +127,8 @@ HTML AI 工作台让用户在真实本地 HTML 上完成两类工作：
 用户合同不是固定 700 毫秒，而是“无需手动保存，状态真实可见”。实现应以约 700 毫秒为初值并通过性能测试调整。
 
 宿主能力预检优先选择 `contenteditable="plaintext-only"`。只有当该模式改变文字几何、而 `contenteditable="true"` 在相同完整会话属性下保持布局、文字样式、选区与恢复精确稳定时，才允许受控 fallback。fallback 不开放浏览器自由生成富文本的能力：粘贴只读取 `text/plain`；多行纯文本和 `Shift+Enter` 由显式 SourcePatch 生成固定 `<br>`，相邻已有 `<br>` 可由 Backspace/Delete 精确删除；普通 `Enter` 可拆分一个直接文字节点构成的 `<p>` 或 `<ul>/<ol>` 中的 `<li>`。新块复制视觉属性，但去除 `id/name/value`、事件属性和明显唯一的 data 属性。选区格式快捷键 `Cmd/Ctrl+B/I/U` 与工具栏下划线也走显式源码 Patch。浏览器生成的富 HTML、任意复杂块结构以及未形成完整输入事件的 DOM 变化仍由 MutationObserver 阻止或回滚。包含 `display: contents` 的文字岛也只能通过 observer-guarded 事件通道进入；观察器不可用时继续 fail-closed。
+
+折叠输入的格式归属以输入前的源码亲和性为准，而不是输入后光标的位置：可视段首向右，其余文字/样式/链接边界向左。对 Chromium 会归一化周围折叠空白的可视段首段尾、“文字 + 折叠空格 + 图标/行内子元素”结构，以及无法由浏览器 caret gravity 唯一表达的行内边界，Controller 必须接管最小文字变更并保留源码缩进。输入法若只在同一段可折叠源码空白内把候选文字放到视觉光标另一侧，可校正回输入前的精确锚点；任何跨非空文字或结构的落点仍失败关闭。最终仍由 FormatSkeleton、SourceTextMap、SourcePatch 和源码 Hash 校验，不能直接序列化 DOM。
 
 编辑画布必须明确提示“本地文本编辑会直接修改源文件并保存”。这里的“源文件”指项目当前指向的 HTML：首次打开时是用户原文件；AI 成功后是新的 `working/V1.x.html`。
 

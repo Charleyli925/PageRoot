@@ -33,6 +33,7 @@ import {
 import {
   createSafeExportDefaultPath,
   isProtectedExportDestination,
+  normalizeHtmlExportPath,
   runProjectIpcOperation,
   selectExportDestination,
 } from "./export-copy.mjs";
@@ -194,11 +195,6 @@ async function existingPathIdentity(value) {
   return realpath(resolved).catch(() => resolved);
 }
 
-function ensureHtmlExtension(value) {
-  const extension = path.extname(value);
-  return extension ? value : `${value}.html`;
-}
-
 function assertOptionalSuggestedName(value) {
   if (value === undefined || value === null || value === "") return null;
   const trimmed = typeof value === "string" ? value.trim() : value;
@@ -208,15 +204,13 @@ function assertOptionalSuggestedName(value) {
     || trimmed.length > 180
     || trimmed.includes("\0")
     || trimmed !== path.basename(trimmed)
+    || trimmed.includes("\\")
+    || trimmed === "."
+    || trimmed === ".."
   ) {
     throw new TypeError("建议文件名无效。");
   }
-
-  const withExtension = ensureHtmlExtension(trimmed);
-  if (!HTML_EXTENSIONS.has(path.extname(withExtension).toLowerCase())) {
-    throw new TypeError("建议文件名必须以 .html 或 .htm 结尾。");
-  }
-  return withExtension;
+  return trimmed;
 }
 
 function assertHtmlPayload(payload, { allowSuggestedName = false } = {}) {
@@ -900,9 +894,7 @@ async function exportHtmlCopy(payload) {
   const destinationPath = await selectExportDestination({
     defaultPath,
     protectedPaths,
-    normalizeDestination: (value) => (
-      assertHtmlPath(ensureHtmlExtension(value))
-    ),
+    normalizeDestination: (value) => assertHtmlPath(normalizeHtmlExportPath(value)),
     showSaveDialog: (safeDefaultPath) => dialog.showSaveDialog(mainWindow, {
       title: "导出 HTML 副本",
       buttonLabel: "导出副本",

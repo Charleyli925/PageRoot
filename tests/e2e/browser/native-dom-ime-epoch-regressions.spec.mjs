@@ -5,7 +5,6 @@ import {
   currentEditorFrame,
   documentToken,
   fixtureBuffer,
-  keyShortcut,
   loadCaseManifest,
   loadFixture,
   nativeEditingState,
@@ -16,7 +15,6 @@ import {
 } from "./pageroot-driver.mjs";
 
 const manifest = loadCaseManifest();
-const redoShortcut = `${process.platform === "darwin" ? "Meta" : "Control"}+Shift+Z`;
 
 async function openMatrix(page) {
   await page.goto("/");
@@ -77,9 +75,7 @@ async function expectSourceBytes(page, expected) {
   expect((await exportCurrentHtmlPreservingFocus(page)).equals(expected)).toBe(true);
 }
 
-async function expectOneCommittedTransaction(page, editor) {
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
-  expect(await editor.getAttribute("data-redo-depth")).toBe("0");
+async function expectOneCommittedTransaction(page) {
   await expect(page.locator(".round-record-counts")).toHaveText(
     "0 条评论 · 1 项直接编辑记录",
   );
@@ -104,7 +100,6 @@ for (const terminalInputType of ["insertText", "insertFromComposition"]) {
 
     await setTextSelection(frame, caseId, 0);
     await page.keyboard.insertText("A");
-    expect(await editor.getAttribute("data-undo-depth")).toBe("0");
     await setTextSelection(frame, caseId, 1);
 
     await target.evaluate((element, tailType) => {
@@ -150,7 +145,7 @@ for (const terminalInputType of ["insertText", "insertFromComposition"]) {
     }, terminalInputType);
 
     await expect(target).toHaveText(`A你好${originalText}`);
-    await expectOneCommittedTransaction(page, editor);
+    await expectOneCommittedTransaction(page);
     expect(await editor.getAttribute("data-edit-block-detail")).toBeNull();
     await expectSourceBytes(page, replaceUniqueBytes(
       source,
@@ -198,7 +193,7 @@ test("a repeated compositionend cannot rewind an accepted IME value", async ({ p
   });
 
   await expect(target).toHaveText(`A你好${originalText}`);
-  await expectOneCommittedTransaction(page, editor);
+  await expectOneCommittedTransaction(page);
   expect(await editor.getAttribute("data-edit-block-detail")).toBeNull();
   await expectSourceBytes(page, replaceUniqueBytes(
     source,
@@ -230,7 +225,7 @@ for (const entityDeletion of [
       authoredEntities,
     );
     await page.goto("/");
-    const { editor, frame } = await loadFixture(page, manifest.fixture, {
+    const { frame } = await loadFixture(page, manifest.fixture, {
       buffer: customSource,
     });
     const caseId = "list-item";
@@ -246,18 +241,13 @@ for (const entityDeletion of [
     await page.keyboard.press("Backspace");
 
     await expect(target).toHaveText("&");
-    await expectOneCommittedTransaction(page, editor);
+    await expectOneCommittedTransaction(page);
     await expectSourceBytes(page, replaceUniqueBytes(
       customSource,
       authoredEntities,
       entityDeletion.expected,
     ));
 
-    await page.keyboard.press(keyShortcut("Z"));
-    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("0");
-    await waitForResumedNativeSession(frame, caseId);
-    await expect(target).toHaveText("&&");
-    await expectSourceBytes(page, customSource);
   });
 }
 
@@ -279,7 +269,6 @@ test("composition rollback restores exact tracker pieces and preserves authored 
   await setTextSelection(frame, caseId, 1);
   await page.keyboard.insertText("&");
   await expect(target).toHaveText("&&");
-  expect(await editor.getAttribute("data-undo-depth")).toBe("0");
   await setTextSelection(frame, caseId, 0, 2);
 
   await target.evaluate((element) => {
@@ -306,7 +295,7 @@ test("composition rollback restores exact tracker pieces and preserves authored 
   });
 
   await expect(target).toHaveText("&&");
-  await expectOneCommittedTransaction(page, editor);
+  await expectOneCommittedTransaction(page);
   expect(await editor.getAttribute("data-edit-block-detail")).toBeNull();
   await expectSourceBytes(page, replaceUniqueBytes(
     customSource,
@@ -316,17 +305,12 @@ test("composition rollback restores exact tracker pieces and preserves authored 
 });
 
 test("same-value insertText after the composition guard is a new edit, not a late IME tail", async ({ page }) => {
-  const { editor, frame, source } = await openMatrix(page);
+  const { frame, source } = await openMatrix(page);
   const caseId = "list-item";
   const target = await activateNativeEdit(frame, caseId);
   const originalText = await target.textContent();
   const firstCompositionText = `a${originalText}`;
   const expectedText = `aa${originalText}`;
-  const firstCompositionSource = replaceUniqueBytes(
-    source,
-    `>${originalText}</li>`,
-    `>${firstCompositionText}</li>`,
-  );
   const expectedSource = replaceUniqueBytes(
     source,
     `>${originalText}</li>`,
@@ -363,8 +347,8 @@ test("same-value insertText after the composition guard is a new edit, not a lat
 
   // Every composition-derived commit crosses a hard DOM generation before a
   // generic insertText can be accepted. The composition and the later ordinary
-  // keystroke are therefore deliberately two source/history transactions.
-  await expectOneCommittedTransaction(page, editor);
+  // keystroke are therefore deliberately two forward source transactions.
+  await expectOneCommittedTransaction(page);
   await expect(target).toHaveText(firstCompositionText);
   expect(await target.evaluate((element) => {
     const replaced = window.__PAGEROOT_SAME_VALUE_COMPOSITION_HOST__ !== element;
@@ -406,8 +390,6 @@ test("same-value insertText after the composition guard is a new edit, not a lat
   });
 
   expect(secondAccepted).toBe(true);
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("2");
-  expect(await editor.getAttribute("data-redo-depth")).toBe("0");
   await expect(page.locator(".round-record-counts")).toHaveText(
     "0 条评论 · 2 项直接编辑记录",
   );
@@ -419,57 +401,10 @@ test("same-value insertText after the composition guard is a new edit, not a lat
   });
   await expectSourceBytes(page, expectedSource);
 
-  await page.keyboard.press(keyShortcut("Z"));
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
-  expect(await editor.getAttribute("data-redo-depth")).toBe("1");
-  await waitForResumedNativeSession(frame, caseId);
-  await expect(target).toHaveText(firstCompositionText);
-  expect(await selectionSnapshot(frame, caseId)).toMatchObject({
-    collapsed: true,
-    anchorOffset: 1,
-    focusOffset: 1,
-  });
-  await expectSourceBytes(page, firstCompositionSource);
-
-  await page.keyboard.press(keyShortcut("Z"));
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("0");
-  expect(await editor.getAttribute("data-redo-depth")).toBe("2");
-  await waitForResumedNativeSession(frame, caseId);
-  await expect(target).toHaveText(originalText);
-  expect(await selectionSnapshot(frame, caseId)).toMatchObject({
-    collapsed: true,
-    anchorOffset: 0,
-    focusOffset: 0,
-  });
-  await expectSourceBytes(page, source);
-
-  await page.keyboard.press(redoShortcut);
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
-  expect(await editor.getAttribute("data-redo-depth")).toBe("1");
-  await waitForResumedNativeSession(frame, caseId);
-  await expect(target).toHaveText(firstCompositionText);
-  expect(await selectionSnapshot(frame, caseId)).toMatchObject({
-    collapsed: true,
-    anchorOffset: 1,
-    focusOffset: 1,
-  });
-  await expectSourceBytes(page, firstCompositionSource);
-
-  await page.keyboard.press(redoShortcut);
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("2");
-  expect(await editor.getAttribute("data-redo-depth")).toBe("0");
-  await waitForResumedNativeSession(frame, caseId);
-  await expect(target).toHaveText(expectedText);
-  expect(await selectionSnapshot(frame, caseId)).toMatchObject({
-    collapsed: true,
-    anchorOffset: 2,
-    focusOffset: 2,
-  });
-  await expectSourceBytes(page, expectedSource);
 });
 
 test("an empty root remains an active editable baseline for the first following character", async ({ page }) => {
-  const { editor, frame, source } = await openMatrix(page);
+  const { frame, source } = await openMatrix(page);
   const caseId = "list-item";
   const target = await activateNativeEdit(frame, caseId);
   const originalText = await target.textContent();
@@ -482,8 +417,6 @@ test("an empty root remains an active editable baseline for the first following 
 
   await setTextSelection(frame, caseId, 0, originalText.length);
   await page.keyboard.press("Backspace");
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
-  expect(await editor.getAttribute("data-redo-depth")).toBe("0");
   await expect(target).toHaveText("");
   expect(await target.evaluate((element) => ({
     active: document.activeElement === element,
@@ -509,8 +442,6 @@ test("an empty root remains an active editable baseline for the first following 
   expect(await target.evaluate((element) => document.activeElement === element)).toBe(true);
   await page.keyboard.insertText("A");
 
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("2");
-  expect(await editor.getAttribute("data-redo-depth")).toBe("0");
   await expect(page.locator(".round-record-counts")).toHaveText(
     "0 条评论 · 2 项直接编辑记录",
   );
@@ -522,59 +453,10 @@ test("an empty root remains an active editable baseline for the first following 
   });
   await expectSourceBytes(page, firstCharacterSource);
 
-  await page.keyboard.press(keyShortcut("Z"));
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
-  await waitForResumedNativeSession(frame, caseId);
-  expect(await editor.getAttribute("data-redo-depth")).toBe("1");
-  await expect(target).toHaveText("");
-  expect(await selectionSnapshot(frame, caseId)).toMatchObject({
-    collapsed: true,
-    anchorOffset: 0,
-    focusOffset: 0,
-  });
-  await expectSourceBytes(page, emptySource);
-
-  await page.keyboard.press(keyShortcut("Z"));
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("0");
-  await waitForResumedNativeSession(frame, caseId);
-  expect(await editor.getAttribute("data-redo-depth")).toBe("2");
-  await expect(target).toHaveText(originalText);
-  expect(await selectionSnapshot(frame, caseId)).toMatchObject({
-    collapsed: false,
-    anchorOffset: 0,
-    focusOffset: originalText.length,
-    direction: "forward",
-    text: originalText,
-  });
-  await expectSourceBytes(page, source);
-
-  await page.keyboard.press(redoShortcut);
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
-  await waitForResumedNativeSession(frame, caseId);
-  expect(await editor.getAttribute("data-redo-depth")).toBe("1");
-  await expect(target).toHaveText("");
-  expect(await selectionSnapshot(frame, caseId)).toMatchObject({
-    collapsed: true,
-    anchorOffset: 0,
-    focusOffset: 0,
-  });
-  await expectSourceBytes(page, emptySource);
-
-  await page.keyboard.press(redoShortcut);
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("2");
-  await waitForResumedNativeSession(frame, caseId);
-  expect(await editor.getAttribute("data-redo-depth")).toBe("0");
-  await expect(target).toHaveText("A");
-  expect(await selectionSnapshot(frame, caseId)).toMatchObject({
-    collapsed: true,
-    anchorOffset: 1,
-    focusOffset: 1,
-  });
-  await expectSourceBytes(page, firstCharacterSource);
 });
 
 test("a canonical cross-strong replacement can be followed by another native transaction", async ({ page }) => {
-  const { editor, frame, source } = await openMatrix(page);
+  const { frame, source } = await openMatrix(page);
   const caseId = "heading-inline";
   const target = await activateNativeEdit(frame, caseId);
   const originalText = await target.textContent();
@@ -582,11 +464,6 @@ test("a canonical cross-strong replacement can be followed by another native tra
   const selectionEnd = 7;
   const expectedText = `${originalText.slice(0, selectionStart)}跨X${originalText.slice(selectionEnd)}`;
   const firstExpectedText = `${originalText.slice(0, selectionStart)}跨${originalText.slice(selectionEnd)}`;
-  const firstExpectedSource = replaceUniqueBytes(
-    source,
-    ">真实 <strong>DOM</strong> 光标要像 <em>Word</em> 一样自然&nbsp;🙂</h1>",
-    ">真实跨光标要像 <em>Word</em> 一样自然&nbsp;🙂</h1>",
-  );
   const expectedSource = replaceUniqueBytes(
     source,
     ">\u771f\u5b9e <strong>DOM</strong> \u5149\u6807\u8981\u50cf <em>Word</em> \u4e00\u6837\u81ea\u7136&nbsp;\ud83d\ude42</h1>",
@@ -604,8 +481,7 @@ test("a canonical cross-strong replacement can be followed by another native tra
   await page.keyboard.insertText("跨");
   // Removing the fully selected authored wrapper requires immediate canonical
   // island replacement. That source-authority boundary intentionally closes
-  // the first history transaction before the next character is accepted.
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
+  // the first source transaction before the next character is accepted.
   await expect(target).toHaveText(firstExpectedText);
   expect(await selectionSnapshot(frame, caseId)).toMatchObject({
     collapsed: true,
@@ -616,8 +492,6 @@ test("a canonical cross-strong replacement can be followed by another native tra
   // The fresh canonical session must accept the next character normally.
   await page.keyboard.insertText("X");
 
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("2");
-  expect(await editor.getAttribute("data-redo-depth")).toBe("0");
   await expect(page.locator(".round-record-counts")).toHaveText(
     "0 条评论 · 2 项直接编辑记录",
   );
@@ -629,55 +503,10 @@ test("a canonical cross-strong replacement can be followed by another native tra
   });
   await expectSourceBytes(page, expectedSource);
 
-  await page.keyboard.press(keyShortcut("Z"));
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
-  await waitForResumedNativeSession(frame, caseId);
-  await expect(target).toHaveText(firstExpectedText);
-  expect(await selectionSnapshot(frame, caseId)).toMatchObject({
-    collapsed: true,
-    anchorOffset: 3,
-    focusOffset: 3,
-  });
-  await expectSourceBytes(page, firstExpectedSource);
-
-  await page.keyboard.press(keyShortcut("Z"));
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("0");
-  await waitForResumedNativeSession(frame, caseId);
-  await expect(target).toHaveText(originalText);
-  expect(await selectionSnapshot(frame, caseId)).toMatchObject({
-    collapsed: false,
-    anchorOffset: selectionStart,
-    focusOffset: selectionEnd,
-    direction: "forward",
-    text: " DOM ",
-  });
-  await expectSourceBytes(page, source);
-
-  await page.keyboard.press(redoShortcut);
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
-  await waitForResumedNativeSession(frame, caseId);
-  await expect(target).toHaveText(firstExpectedText);
-  expect(await selectionSnapshot(frame, caseId)).toMatchObject({
-    collapsed: true,
-    anchorOffset: 3,
-    focusOffset: 3,
-  });
-  await expectSourceBytes(page, firstExpectedSource);
-
-  await page.keyboard.press(redoShortcut);
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("2");
-  await waitForResumedNativeSession(frame, caseId);
-  await expect(target).toHaveText(expectedText);
-  expect(await selectionSnapshot(frame, caseId)).toMatchObject({
-    collapsed: true,
-    anchorOffset: 4,
-    focusOffset: 4,
-  });
-  await expectSourceBytes(page, expectedSource);
 });
 
-test("a length-changing prefix edit and temporary-wrapper IME commit share one reversible transaction", async ({ page }) => {
-  const { editor, frame, source } = await openMatrix(page);
+test("a length-changing prefix edit and temporary-wrapper IME commit share one exact transaction", async ({ page }) => {
+  const { frame, source } = await openMatrix(page);
   const caseId = "heading-inline";
   const target = await activateNativeEdit(frame, caseId);
   const originalText = await target.textContent();
@@ -692,7 +521,6 @@ test("a length-changing prefix edit and temporary-wrapper IME commit share one r
   expect(originalWordStart).toBeGreaterThanOrEqual(0);
   await setTextSelection(frame, caseId, 0);
   await page.keyboard.insertText("A");
-  expect(await editor.getAttribute("data-undo-depth")).toBe("0");
 
   const currentWordStart = originalWordStart + 1;
   await setTextSelection(frame, caseId, currentWordStart, currentWordStart + 4);
@@ -724,7 +552,7 @@ test("a length-changing prefix edit and temporary-wrapper IME commit share one r
     }));
   });
 
-  await expectOneCommittedTransaction(page, editor);
+  await expectOneCommittedTransaction(page);
   await expect(target).toHaveText(expectedText);
   await expect(target.locator("em")).toHaveText("你好");
   expect(await target.locator("i").count()).toBe(0);
@@ -735,33 +563,10 @@ test("a length-changing prefix edit and temporary-wrapper IME commit share one r
   });
   await expectSourceBytes(page, expectedSource);
 
-  await page.keyboard.press(keyShortcut("Z"));
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("0");
-  await waitForResumedNativeSession(frame, caseId);
-  await expect(target).toHaveText(originalText);
-  await expect(target.locator("em")).toHaveText("Word");
-  expect(await selectionSnapshot(frame, caseId)).toMatchObject({
-    collapsed: true,
-    anchorOffset: 0,
-    focusOffset: 0,
-  });
-  await expectSourceBytes(page, source);
-
-  await page.keyboard.press(redoShortcut);
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
-  await waitForResumedNativeSession(frame, caseId);
-  await expect(target).toHaveText(expectedText);
-  await expect(target.locator("em")).toHaveText("你好");
-  expect(await selectionSnapshot(frame, caseId)).toMatchObject({
-    collapsed: true,
-    anchorOffset: currentWordStart + 2,
-    focusOffset: currentWordStart + 2,
-  });
-  await expectSourceBytes(page, expectedSource);
 });
 
 test("a partial inline edit cannot move the unselected remainder outside its authored wrapper", async ({ page }) => {
-  const { editor, frame, source } = await openMatrix(page);
+  const { frame, source } = await openMatrix(page);
   const caseId = "heading-inline";
   const target = await activateNativeEdit(frame, caseId);
   const originalHtml = await target.innerHTML();
@@ -823,8 +628,6 @@ test("a partial inline edit cannot move the unselected remainder outside its aut
   });
 
   await page.waitForTimeout(850);
-  expect(await editor.getAttribute("data-undo-depth")).toBe("0");
-  expect(await editor.getAttribute("data-redo-depth")).toBe("0");
   await expect(page.locator(".round-record-counts")).toHaveText(
     "0 条评论 · 0 项直接编辑记录",
   );
@@ -832,7 +635,7 @@ test("a partial inline edit cannot move the unselected remainder outside its aut
 });
 
 test("a complete inline replacement cannot absorb an unselected following text node", async ({ page }) => {
-  const { editor, frame, source } = await openMatrix(page);
+  const { frame, source } = await openMatrix(page);
   const caseId = "heading-inline";
   const target = await activateNativeEdit(frame, caseId);
   const originalHtml = await target.innerHTML();
@@ -895,8 +698,6 @@ test("a complete inline replacement cannot absorb an unselected following text n
   });
 
   await page.waitForTimeout(850);
-  expect(await editor.getAttribute("data-undo-depth")).toBe("0");
-  expect(await editor.getAttribute("data-redo-depth")).toBe("0");
   await expect(page.locator(".round-record-counts")).toHaveText(
     "0 条评论 · 0 项直接编辑记录",
   );
@@ -905,7 +706,7 @@ test("a complete inline replacement cannot absorb an unselected following text n
 
 for (const invalidComposition of ["out-of-range-terminal", "unsafe-wrapper"]) {
   test(`invalid ${invalidComposition} composition rolls back only its epoch and preserves prior dirty text`, async ({ page }) => {
-    const { editor, frame, source } = await openMatrix(page);
+    const { frame, source } = await openMatrix(page);
     const caseId = "heading-inline";
     const target = await activateNativeEdit(frame, caseId);
     const originalText = await target.textContent();
@@ -921,7 +722,6 @@ for (const invalidComposition of ["out-of-range-terminal", "unsafe-wrapper"]) {
     expect(originalWordStart).toBeGreaterThanOrEqual(0);
     await setTextSelection(frame, caseId, 0);
     await page.keyboard.insertText("A");
-    expect(await editor.getAttribute("data-undo-depth")).toBe("0");
     await setTextSelection(frame, caseId, currentWordStart, currentWordStart + 4);
 
     await target.evaluate((element, failureMode) => {
@@ -959,7 +759,7 @@ for (const invalidComposition of ["out-of-range-terminal", "unsafe-wrapper"]) {
 
     // A composition failure restores the epoch snapshot, not the session's
     // older source baseline. The accepted prefix remains dirty and is the only
-    // change allowed to reach SourcePatch/history.
+    // change allowed to reach SourcePatch.
     await expect(target).toHaveText(priorDirtyText);
     await expect(target.locator("em")).toHaveText("Word");
     expect(await target.locator("i").count()).toBe(0);
@@ -971,32 +771,8 @@ for (const invalidComposition of ["out-of-range-terminal", "unsafe-wrapper"]) {
       text: "Word",
     });
 
-    await expectOneCommittedTransaction(page, editor);
+    await expectOneCommittedTransaction(page);
     await expectSourceBytes(page, priorDirtySource);
 
-    await page.keyboard.press(keyShortcut("Z"));
-    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("0");
-    await waitForResumedNativeSession(frame, caseId);
-    await expect(target).toHaveText(originalText);
-    expect(await selectionSnapshot(frame, caseId)).toMatchObject({
-      collapsed: true,
-      anchorOffset: 0,
-      focusOffset: 0,
-    });
-    await expectSourceBytes(page, source);
-
-    await page.keyboard.press(redoShortcut);
-    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
-    await waitForResumedNativeSession(frame, caseId);
-    await expect(target).toHaveText(priorDirtyText);
-    await expect(target.locator("em")).toHaveText("Word");
-    expect(await selectionSnapshot(frame, caseId)).toMatchObject({
-      collapsed: false,
-      anchorOffset: currentWordStart,
-      focusOffset: currentWordStart + 4,
-      direction: "forward",
-      text: "Word",
-    });
-    await expectSourceBytes(page, priorDirtySource);
   });
 }

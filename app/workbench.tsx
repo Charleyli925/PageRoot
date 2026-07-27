@@ -59,7 +59,7 @@ import {
   auditEventKey,
   removeAcknowledgedAuditEvents,
 } from "./lib/audit-events";
-import { reduceDirectEditHistory } from "./lib/direct-edit-history.js";
+import { appendDirectEditEvent } from "./lib/direct-edit-events.js";
 import {
   noticeAutoDismissMs,
   productErrorMessage,
@@ -272,8 +272,6 @@ type DirectEditEvent = {
   after: unknown;
   baseVersionId: string | null;
   capturedRevision?: number;
-  historyId?: string;
-  undoesEventId?: string;
   inherited?: boolean;
   inheritedFromVersionId?: string;
 };
@@ -419,17 +417,6 @@ type BackgroundProjectResult = {
   label: string;
   updatedAt: number;
 };
-type UndoDraftFold = {
-  event: DirectEditEvent;
-  eventId: string;
-  previousEvent: DirectEditEvent | null;
-  previousPendingEvent: DirectEditEvent | null;
-};
-type RedoDraftFold = {
-  undoFold: UndoDraftFold;
-  undoAuditEvent: DirectEditEvent | null;
-};
-
 type CloseReadiness =
   | { ready: true }
   | { ready: false; reason: string };
@@ -1059,8 +1046,6 @@ function changesFromRecords(raw: unknown): DirectEditEvent[] {
             ),
           }
         : {}),
-      ...(value.historyId ? { historyId: String(value.historyId) } : {}),
-      ...(value.undoesEventId ? { undoesEventId: String(value.undoesEventId) } : {}),
       ...(value.inherited === true ? { inherited: true } : {}),
       ...(value.inheritedFromVersionId
         ? { inheritedFromVersionId: String(value.inheritedFromVersionId) }
@@ -1557,7 +1542,7 @@ export default function Workbench() {
     if (!editor) {
       return { ok: false as const, reason: missingReason };
     }
-    // freezeNow owns the complete History Fence: it checkpoints the source
+    // freezeNow owns the complete source-authority fence: it checkpoints the source
     // transaction, retires Chromium's editing host, and only then locks input.
     const frozen = editor.freezeNow();
     if (!frozen.ok) {
@@ -1623,8 +1608,6 @@ export default function Workbench() {
   const changeEventsRef = useRef<DirectEditEvent[]>([]);
   const auditPendingRef = useRef<DirectEditEvent[]>([]);
   const auditInFlightKeysRef = useRef<Set<string>>(new Set());
-  const undoDraftFoldsRef = useRef<Map<string, UndoDraftFold>>(new Map());
-  const redoDraftFoldsRef = useRef<Map<string, RedoDraftFold>>(new Map());
   const commentsRef = useRef<CommentItem[]>([]);
   const deletedCommentIdsRef = useRef<Set<string>>(new Set());
   const composerDraftRef = useRef("");
@@ -1723,7 +1706,6 @@ export default function Workbench() {
   const [viewMode, setViewMode] = useState<ViewMode>("current");
   const [canvasMode, setCanvasMode] = useState<CanvasMode>("edit");
   const [viewingVersionId, setViewingVersionId] = useState<string | null>(null);
-  const [preserveEditorHistory, setPreserveEditorHistory] = useState(false);
   const [renderedContentSha256, setRenderedContentSha256] = useState<string | null>(null);
   const [, setBridgeConnected] = useState<boolean | null>(null);
   const [activeRun, setActiveRun] = useState<ActiveRun | null>(null);
@@ -2815,24 +2797,20 @@ export default function Workbench() {
     setRenderedContentSha256(null);
 
     if (mutation) {
-      const history = reduceDirectEditHistory({
+      const nextEvents = appendDirectEditEvent({
         mutation,
         capturedRevision: nextRevision,
         createdAt: new Date().toISOString(),
         baseVersionId: currentBasedOnVersionId,
         events: changeEventsRef.current,
         pendingEvents: auditPendingRef.current,
-        undoFolds: undoDraftFoldsRef.current,
-        redoFolds: redoDraftFoldsRef.current,
         inFlightKeys: auditInFlightKeysRef.current,
         nextEventId: () => recordId("change", changeCounter.current++),
       });
-      changeEventsRef.current = history.events;
-      auditPendingRef.current = history.pendingEvents;
-      undoDraftFoldsRef.current = history.undoFolds;
-      redoDraftFoldsRef.current = history.redoFolds;
-      setChangeEvents(history.events);
-      persistCurrentDraftRecovery(commentsRef.current, history.events);
+      changeEventsRef.current = nextEvents.events;
+      auditPendingRef.current = nextEvents.pendingEvents;
+      setChangeEvents(nextEvents.events);
+      persistCurrentDraftRecovery(commentsRef.current, nextEvents.events);
     }
 
     if (!sourcePathRef.current) {
@@ -2932,8 +2910,6 @@ export default function Workbench() {
     clearAutosaveTimer();
     pendingWriteRef.current = null;
     auditPendingRef.current = [];
-    undoDraftFoldsRef.current.clear();
-    redoDraftFoldsRef.current.clear();
     editRevisionRef.current = 0;
     lastPersistedRevisionRef.current = 0;
     sourcePathRef.current = project.sourcePath || null;
@@ -3020,7 +2996,6 @@ export default function Workbench() {
         : "edit",
     );
     setViewingVersionId(null);
-    setPreserveEditorHistory(false);
     setRenderedContentSha256(null);
     activeRunRef.current = backgroundRun;
     setActiveRun(backgroundRun);
@@ -5538,7 +5513,6 @@ export default function Workbench() {
     const previousHtml = htmlRef.current;
     const previousViewMode = viewMode;
     const previousViewingVersionId = viewingVersionId;
-    const previousPreserveHistory = preserveEditorHistory;
     let externalAccepted = false;
     try {
       if (persistState === "conflict") {
@@ -5587,8 +5561,6 @@ export default function Workbench() {
       ) return;
       pendingWriteRef.current = null;
       auditPendingRef.current = [];
-      undoDraftFoldsRef.current.clear();
-      redoDraftFoldsRef.current.clear();
       changeEventsRef.current = [];
       setChangeEvents([]);
       persistRecoveryLog(null, context);
@@ -5611,7 +5583,6 @@ export default function Workbench() {
       );
       setViewMode("current");
       setViewingVersionId(null);
-      setPreserveEditorHistory(false);
       await refreshWorkspace(context.sourcePath, context.epoch);
       if (
         navigationOperationRef.current !== operationId
@@ -5631,7 +5602,6 @@ export default function Workbench() {
           setHtml(previousHtml);
           setViewMode(previousViewMode);
           setViewingVersionId(previousViewingVersionId);
-          setPreserveEditorHistory(previousPreserveHistory);
           setRenderedContentSha256(null);
           try {
             await verifyCanvasRendered(
@@ -5670,7 +5640,6 @@ export default function Workbench() {
     isCurrentProjectContext,
     persistRecoveryLog,
     persistState,
-    preserveEditorHistory,
     refreshWorkspace,
     verifyCanvasRendered,
     viewingVersionId,
@@ -5713,6 +5682,15 @@ export default function Workbench() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey)) return;
+      if (event.key.toLowerCase() === "z") {
+        const target = event.target as HTMLElement | null;
+        if (
+          target?.isContentEditable
+          || target?.closest("input, textarea, select, [contenteditable='true']")
+        ) return;
+        event.preventDefault();
+        return;
+      }
       if (event.key.toLowerCase() === "e" && event.shiftKey) {
         event.preventDefault();
         void exportCurrentHtml();
@@ -5720,24 +5698,10 @@ export default function Workbench() {
         event.preventDefault();
         requestUserFlush();
       }
-      if (
-        event.key.toLowerCase() === "z"
-        && viewMode === "current"
-        && !interactionLocked
-      ) {
-        const target = event.target as HTMLElement | null;
-        if (
-          target?.isContentEditable
-          || target?.closest("input, textarea, select, [contenteditable='true']")
-        ) return;
-        event.preventDefault();
-        if (event.shiftKey) editorRef.current?.redo?.();
-        else editorRef.current?.undo?.();
-      }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [exportCurrentHtml, interactionLocked, requestUserFlush, viewMode]);
+  }, [exportCurrentHtml, requestUserFlush]);
 
   const updateFocusedComment = useCallback((commentId: string | null) => {
     focusedCommentIdRef.current = commentId;
@@ -7101,8 +7065,6 @@ export default function Workbench() {
     sourceShaRef.current = sourceHash;
     pendingWriteRef.current = null;
     auditPendingRef.current = [];
-    undoDraftFoldsRef.current.clear();
-    redoDraftFoldsRef.current.clear();
     setHtml(content);
     setSourceSha256(sourceHash);
     setRenderedContentSha256(null);
@@ -7114,7 +7076,6 @@ export default function Workbench() {
     setRestoredFromVersionId(null);
     setViewMode("current");
     setViewingVersionId(null);
-    setPreserveEditorHistory(false);
     setLastModifiedAt(sourceLastModifiedAt);
     persistStateRef.current = "idle";
     setPersistState("idle");
@@ -7748,7 +7709,6 @@ export default function Workbench() {
     const previousHtml = htmlRef.current;
     const previousViewMode = viewMode;
     const previousViewingVersionId = viewingVersionId;
-    const previousPreserveHistory = preserveEditorHistory;
     try {
       if (viewMode === "current") {
         const drained = await drainCoordinatorRef.current.drain("history", {
@@ -7774,7 +7734,6 @@ export default function Workbench() {
       }
       htmlRef.current = content;
       setHtml(content);
-      setPreserveEditorHistory(true);
       setRenderedContentSha256(null);
       await verifyCanvasRendered(content, hash, context);
       if (
@@ -7792,7 +7751,6 @@ export default function Workbench() {
         setHtml(previousHtml);
         setViewMode(previousViewMode);
         setViewingVersionId(previousViewingVersionId);
-        setPreserveEditorHistory(true);
         setRenderedContentSha256(null);
         try {
           await verifyCanvasRendered(
@@ -7803,11 +7761,6 @@ export default function Workbench() {
         } catch {
           // Keep the prior view state; the error message below explains the failed transition.
         }
-        window.requestAnimationFrame(() => {
-          if (navigationOperationRef.current === operationId) {
-            setPreserveEditorHistory(previousPreserveHistory);
-          }
-        });
       }
       setToast({
         title: "无法打开这个历史版本",
@@ -7828,7 +7781,6 @@ export default function Workbench() {
     deferEditorCommand,
     finishNavigationOperation,
     isCurrentProjectContext,
-    preserveEditorHistory,
     runInProgress,
     verifyCanvasRendered,
     viewingVersionId,
@@ -7856,7 +7808,6 @@ export default function Workbench() {
     const previousHtml = htmlRef.current;
     const previousViewMode = viewMode;
     const previousViewingVersionId = viewingVersionId;
-    const previousPreserveHistory = preserveEditorHistory;
     try {
       const payload = await bridgeClient.source(context.sourcePath);
       if (
@@ -7875,7 +7826,6 @@ export default function Workbench() {
         throw new Error("当前源 HTML 与声明 Hash 不一致。");
       }
       htmlRef.current = content;
-      setPreserveEditorHistory(true);
       setHtml(content);
       setRenderedContentSha256(null);
       await verifyCanvasRendered(content, hash, context);
@@ -7899,11 +7849,6 @@ export default function Workbench() {
       );
       setViewMode("current");
       setViewingVersionId(null);
-      window.requestAnimationFrame(() => {
-        if (navigationOperationRef.current === operationId) {
-          setPreserveEditorHistory(false);
-        }
-      });
     } catch (cause) {
       if (!isCurrentProjectContext(context)) return;
       if (navigationOperationRef.current === operationId) {
@@ -7911,7 +7856,6 @@ export default function Workbench() {
         setHtml(previousHtml);
         setViewMode(previousViewMode);
         setViewingVersionId(previousViewingVersionId);
-        setPreserveEditorHistory(previousPreserveHistory);
         setRenderedContentSha256(null);
         try {
           await verifyCanvasRendered(
@@ -7943,7 +7887,6 @@ export default function Workbench() {
     deferEditorCommand,
     finishNavigationOperation,
     isCurrentProjectContext,
-    preserveEditorHistory,
     restoredFromVersionId,
     verifyCanvasRendered,
     viewingVersionId,
@@ -8955,7 +8898,6 @@ export default function Workbench() {
                       ? "processing"
                       : "editing"}
                   enableReorder={!interactionLocked}
-                  preserveUndoHistory={preserveEditorHistory}
                 />
               </Suspense>
             ) : null}
@@ -9174,7 +9116,6 @@ export default function Workbench() {
               const editable = viewMode === "current" && !interactionLocked;
               const editing = editingCommentId === comment.commentId;
               const deleting = pendingDeleteCommentId === comment.commentId;
-              const quote = comment.target.textQuote || comment.target.text;
               return (
                 <article
                   className="comment-card"
@@ -9214,7 +9155,6 @@ export default function Workbench() {
                       {formatTime(comment.updatedAt || comment.createdAt, true)}
                     </time>
                   </header>
-                  {quote ? <q>{quote.length > 96 ? `${quote.slice(0, 96)}…` : quote}</q> : null}
                   {!canLocateTarget(comment.target) && editable ? (
                     <div
                       className="comment-target-recovery"
@@ -9303,9 +9243,9 @@ export default function Workbench() {
                       </footer>
                     ) : (
                       <footer className="comment-card-footer">
-                        <span>{comment.attachments?.length
-                          ? `${comment.attachments.length} 个附件`
-                          : "可添加附件"}</span>
+                        {comment.attachments?.length ? (
+                          <span>{comment.attachments.length} 个附件</span>
+                        ) : null}
                         <div className="comment-card-tools">
                           <button
                             className="comment-tool-button"
@@ -9483,15 +9423,6 @@ export default function Workbench() {
             </div>
             <div className="processing-header-actions">
               <span className="round-version">{activeRun?.candidateVersionLabel || "下一版"}</span>
-              <button
-                className="drawer-close-button"
-                type="button"
-                aria-label="关闭处理面板"
-                title="关闭面板，任务会继续运行"
-                onClick={() => setDrawer(null)}
-              >
-                <XIcon aria-hidden="true" size={18} weight="bold" />
-              </button>
             </div>
           </header>
         ) : drawer ? (
@@ -9959,9 +9890,6 @@ export default function Workbench() {
                             <span>{index + 1}</span>
                             <div>
                               <strong>{insertionLabel(comment.target)}</strong>
-                              {comment.target.textQuote || comment.target.text ? (
-                                <q>{comment.target.textQuote || comment.target.text}</q>
-                              ) : null}
                               <p>{comment.text || "已添加参考附件"}</p>
                               {comment.attachments?.length ? (
                                 <small>

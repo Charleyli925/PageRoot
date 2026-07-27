@@ -1,5 +1,5 @@
 export type NativeInputClassification = {
-  category: "text" | "history" | "structure" | "unsupported";
+  category: "text" | "structure" | "unsupported";
   action: string;
   supported: boolean;
   composition?: boolean;

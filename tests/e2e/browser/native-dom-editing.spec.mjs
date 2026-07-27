@@ -392,27 +392,29 @@ test.describe("authored DOM native editing contract", () => {
     "transition-sensitive-copy",
     "pseudo-content",
   ]) {
-    test(`${id} commits a local source patch and undo restores exact bytes`, async ({ page }) => {
-      const { editor, frame, source } = await openMatrix(page);
+    test(`${id} commits one exact local source patch`, async ({ page }) => {
+      const { frame, source } = await openMatrix(page);
       const originalText = await frame.locator(caseSelector(id)).textContent() || "";
       const marker = "验";
       await activateNativeEdit(frame, id);
       await setTextSelection(frame, id, 0);
       await page.keyboard.insertText(marker);
-      await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
       const expected = replaceUniqueBytes(source, `>${originalText}`, `>${marker}${originalText}`);
       expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
-
-      await page.keyboard.press(keyShortcut("Z"));
-      await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("0");
-      expect((await exportCurrentHtml(page)).equals(source)).toBe(true);
     });
   }
 
   test("editing link and summary labels suppresses their native actions", async ({ page }) => {
     const { frame } = await openMatrix(page);
-    await activateNativeEdit(frame, "standalone-link");
+    const link = await activateNativeEdit(frame, "standalone-link");
+    const linkDocument = await documentToken(frame);
+    await link.dblclick();
     expect(await frame.evaluate(() => location.hash)).toBe("");
+    expect(await documentToken(frame)).toBe(linkDocument);
+    expect(await nativeEditingState(frame, "standalone-link")).toMatchObject({
+      targetIsActive: true,
+      selectionInside: true,
+    });
     await page.keyboard.press("Escape");
 
     const detailsOpenBefore = await frame.locator(caseSelector("standalone-summary"))
@@ -425,7 +427,7 @@ test.describe("authored DOM native editing contract", () => {
   });
 
   test("Enter stays blocked for complex break content while Shift+Enter commits one source-owned hard break", async ({ page }) => {
-    const { editor, frame, source } = await openMatrix(page);
+    const { frame, source } = await openMatrix(page);
     await activateNativeEdit(frame, "hard-break");
     await installInputRecorder(frame);
     await setTextSelection(frame, "hard-break", 3);
@@ -475,7 +477,6 @@ test.describe("authored DOM native editing contract", () => {
       focusOffset: 3,
       activeCase: "hard-break",
     });
-    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
     const expected = replaceUniqueBytes(
       source,
       ">第一行保留原位。<br>",
@@ -483,13 +484,10 @@ test.describe("authored DOM native editing contract", () => {
     );
     expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
 
-    await page.keyboard.press(keyShortcut("Z"));
-    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("0");
-    expect((await exportCurrentHtml(page)).equals(source)).toBe(true);
   });
 
-  test("Enter splits one simple list item, resumes in the new item, and round-trips undo/redo", async ({ page }) => {
-    const { editor, frame, source } = await openMatrix(page);
+  test("Enter splits one simple list item and resumes in the new item", async ({ page }) => {
+    const { frame, source } = await openMatrix(page);
     const caseId = "list-item";
     const originalText = "列表项中的文字保持项目符号和缩进。";
     const firstText = "列表项中的";
@@ -503,7 +501,6 @@ test.describe("authored DOM native editing contract", () => {
     const initialDocument = await documentToken(frame);
     await page.keyboard.press("Enter");
 
-    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
     await expect.poll(() => frame.locator(caseSelector(caseId)).count()).toBe(2);
     await expect.poll(() => documentToken(frame)).not.toBe(initialDocument);
     expect((await exportCurrentHtml(page)).equals(
@@ -527,44 +524,14 @@ test.describe("authored DOM native editing contract", () => {
     });
 
     await page.keyboard.insertText("续");
-    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("2");
     const typedSource = splitSource.replace(`>${secondText}`, `>续${secondText}`);
     expect((await exportCurrentHtml(page)).equals(
       replaceUniqueBytes(source, originalSource, typedSource),
     )).toBe(true);
-
-    await page.keyboard.press(keyShortcut("Z"));
-    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
-    expect((await exportCurrentHtml(page)).equals(
-      replaceUniqueBytes(source, originalSource, splitSource),
-    )).toBe(true);
-    await page.keyboard.press(keyShortcut("Z"));
-    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("0");
-    await expect.poll(() => frame.locator(caseSelector(caseId)).count()).toBe(1);
-    expect((await exportCurrentHtml(page)).equals(source)).toBe(true);
-
-    await page.keyboard.press(
-      `${process.platform === "darwin" ? "Meta" : "Control"}+Shift+Z`,
-    );
-    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
-    await expect.poll(() => frame.locator(caseSelector(caseId)).count()).toBe(2);
-    expect((await exportCurrentHtml(page)).equals(
-      replaceUniqueBytes(source, originalSource, splitSource),
-    )).toBe(true);
-    await expect.poll(() => frame.evaluate((id) => {
-      const items = [...document.querySelectorAll(`[data-native-case=${JSON.stringify(id)}]`)];
-      return {
-        activeIndex: items.indexOf(document.activeElement),
-        contenteditable: document.activeElement?.getAttribute("contenteditable"),
-      };
-    }, caseId)).toEqual({
-      activeIndex: 1,
-      contenteditable: "plaintext-only",
-    });
   });
 
-  test("a comment on a block becomes explicitly ambiguous after Enter and restores on undo", async ({ page }) => {
-    const { editor, frame } = await openMatrix(page);
+  test("a comment on a split block becomes explicitly ambiguous and can be relinked", async ({ page }) => {
+    const { frame } = await openMatrix(page);
     const caseId = "list-item";
     const firstText = "列表项中的";
     const commentText = "保留这条评论的目标，不要静默移动。";
@@ -585,20 +552,8 @@ test.describe("authored DOM native editing contract", () => {
     await setTextSelection(frame, caseId, firstText.length);
     await page.keyboard.press("Enter");
 
-    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
     await expect(commentCard).toHaveAttribute("data-resolution", "ambiguous");
     await expect(commentCard).toHaveAttribute("tabindex", "-1");
-
-    await page.keyboard.press(keyShortcut("Z"));
-    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("0");
-    await expect(commentCard).toHaveAttribute("data-resolution", "exact");
-    await expect(commentCard).toHaveAttribute("tabindex", "0");
-
-    await page.keyboard.press(
-      `${process.platform === "darwin" ? "Meta" : "Control"}+Shift+Z`,
-    );
-    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
-    await expect(commentCard).toHaveAttribute("data-resolution", "ambiguous");
 
     await commentCard.getByRole("button", { name: "重新选择目标" }).click();
     await expect(commentCard.getByText("正在等待选择…")).toBeVisible();
@@ -612,7 +567,7 @@ test.describe("authored DOM native editing contract", () => {
   });
 
   test("Enter splits one simple paragraph and preserves its visual attributes", async ({ page }) => {
-    const { editor, frame, source } = await openMatrix(page);
+    const { frame, source } = await openMatrix(page);
     const caseId = "flex-copy";
     const firstText = "这个 flex item";
     const secondText = " 可以伸缩，进入编辑前后 gap、baseline 和折行都必须不变。";
@@ -624,7 +579,6 @@ test.describe("authored DOM native editing contract", () => {
     await setTextSelection(frame, caseId, firstText.length);
     await page.keyboard.press("Enter");
 
-    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
     await expect.poll(() => frame.locator(caseSelector(caseId)).count()).toBe(2);
     expect((await exportCurrentHtml(page)).equals(
       replaceUniqueBytes(source, originalSource, splitSource),
@@ -644,16 +598,11 @@ test.describe("authored DOM native editing contract", () => {
       editableModeSupported: true,
     });
 
-    await page.keyboard.press(keyShortcut("Z"));
-    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("0");
-    await expect.poll(() => frame.locator(caseSelector(caseId)).count()).toBe(1);
-    expect((await exportCurrentHtml(page)).equals(source)).toBe(true);
   });
 
   test("replacement can cross nested inline wrappers without losing the caret", async ({ page }) => {
-    const { editor, frame, source } = await openMatrix(page);
+    const { frame, source } = await openMatrix(page);
     const target = frame.locator(caseSelector("heading-inline"));
-    const originalText = await target.textContent();
     await activateNativeEdit(frame, "heading-inline");
     await setTextSelection(frame, "heading-inline", 2, 15);
     await page.keyboard.insertText("跨行内替换");
@@ -664,7 +613,6 @@ test.describe("authored DOM native editing contract", () => {
     expect(selection.collapsed).toBe(true);
     expect(selection.activeCase).toBe("heading-inline");
 
-    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
     const expected = replaceUniqueBytes(
       source,
       ">真实 <strong>DOM</strong> 光标要像 <em>Word</em> 一样自然&nbsp;🙂</h1>",
@@ -672,52 +620,16 @@ test.describe("authored DOM native editing contract", () => {
     );
     expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
 
-    const undoRun = await openMatrix(page);
-    const undoTarget = undoRun.frame.locator(caseSelector("heading-inline"));
-    await activateNativeEdit(undoRun.frame, "heading-inline");
-    await setTextSelection(undoRun.frame, "heading-inline", 2, 15);
-    await page.keyboard.insertText("跨行内替换");
-    await expect.poll(() => undoRun.editor.getAttribute("data-undo-depth")).toBe("1");
-    await page.keyboard.press(keyShortcut("Z"));
-    await page.waitForTimeout(150);
-    expect(
-      await undoTarget.textContent(),
-      `undo edit block: ${await undoRun.editor.getAttribute("data-edit-block-detail")}`,
-    ).toBe(originalText);
-    expect((await exportCurrentHtml(page)).equals(undoRun.source)).toBe(true);
-
-    const redoRun = await openMatrix(page);
-    const redoTarget = redoRun.frame.locator(caseSelector("heading-inline"));
-    await activateNativeEdit(redoRun.frame, "heading-inline");
-    await setTextSelection(redoRun.frame, "heading-inline", 2, 15);
-    await page.waitForTimeout(50);
-    expect(await selectionSnapshot(redoRun.frame, "heading-inline")).toMatchObject({
-      anchorOffset: 2,
-      focusOffset: 15,
-      collapsed: false,
-    });
-    await page.keyboard.insertText("跨行内替换");
-    await expect.poll(() => redoRun.editor.getAttribute("data-undo-depth")).toBe("1");
-    await page.keyboard.press(keyShortcut("Z"));
-    await expect.poll(() => redoTarget.textContent()).toBe(originalText);
-    expect(await redoRun.editor.getAttribute("data-redo-depth")).toBe("1");
-    await page.keyboard.press(`${process.platform === "darwin" ? "Meta" : "Control"}+Shift+Z`);
-    await expect.poll(() => redoTarget.textContent()).toContain("跨行内替换");
-    expect(await redoRun.editor.getAttribute("data-undo-depth")).toBe("1");
-    expect(await redoRun.editor.getAttribute("data-redo-depth")).toBe("0");
-    expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
   });
 
   test("replacement from an exact wrapper boundary follows native ownership and remains byte-reversible", async ({ page }) => {
-    const { editor, frame, source } = await openMatrix(page);
+    const { frame, source } = await openMatrix(page);
     const target = frame.locator(caseSelector("heading-inline"));
-    const originalText = await target.textContent();
     await activateNativeEdit(frame, "heading-inline");
     await setTextSelection(frame, "heading-inline", 3, 9);
     await page.keyboard.insertText("Electron原位");
 
     expect(await target.textContent()).toContain("Electron原位");
-    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
     const expected = replaceUniqueBytes(
       source,
       ">真实 <strong>DOM</strong> 光标要像 <em>Word</em> 一样自然&nbsp;🙂</h1>",
@@ -725,19 +637,15 @@ test.describe("authored DOM native editing contract", () => {
     );
     expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
 
-    await page.keyboard.press(keyShortcut("Z"));
-    await expect.poll(() => target.textContent()).toBe(originalText);
-    expect((await exportCurrentHtml(page)).equals(source)).toBe(true);
   });
 
   test("a replacement ending at an inline-wrapper boundary shifts later ownership safely", async ({ page }) => {
-    const { editor, frame, source } = await openMatrix(page);
+    const { frame, source } = await openMatrix(page);
     const caseId = "heading-inline";
     const target = await activateNativeEdit(frame, caseId);
     await setTextSelection(frame, caseId, 0, 3);
     await page.keyboard.insertText("更长前缀");
 
-    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
     await expect(target.locator("strong")).toHaveText("DOM");
     expect((await exportCurrentHtml(page)).equals(replaceUniqueBytes(
       source,
@@ -759,7 +667,7 @@ test.describe("authored DOM native editing contract", () => {
   });
 
   test("Backspace deletes combining-mark and ZWJ text as whole grapheme clusters", async ({ page }) => {
-    const { editor, frame, source } = await openMatrix(page);
+    const { frame, source } = await openMatrix(page);
     const caseId = "heading-inline";
     const target = await activateNativeEdit(frame, caseId);
     const original = await target.textContent();
@@ -781,7 +689,6 @@ test.describe("authored DOM native editing contract", () => {
       expect(await target.textContent()).not.toContain("�");
     }
     await page.waitForTimeout(850);
-    expect(await editor.getAttribute("data-undo-depth")).toBe("0");
     expect((await exportCurrentHtml(page)).equals(source)).toBe(true);
   });
 
@@ -809,7 +716,7 @@ test.describe("authored DOM native editing contract", () => {
           ">真实 <strong>DOM</strong> 光标要像 <em>Word</em> 一样自然&nbsp;🙂</h1>",
           `>${markup}</h1>`,
         );
-        const { editor, frame } = await openMatrix(page, { buffer: source });
+        const { frame } = await openMatrix(page, { buffer: source });
         const caseId = "heading-inline";
         const target = await activateNativeEdit(frame, caseId);
         const text = await target.textContent();
@@ -830,7 +737,6 @@ test.describe("authored DOM native editing contract", () => {
           activeCase: caseId,
         });
         await page.waitForTimeout(850);
-        expect(await editor.getAttribute("data-undo-depth")).toBe("0");
         expect((await exportCurrentHtml(page)).equals(source)).toBe(true);
         expect(await target.textContent()).not.toContain("�");
       });
@@ -857,7 +763,7 @@ test.describe("authored DOM native editing contract", () => {
 
   test("multi-line clipboard text is stripped to text and committed as generated hard breaks", async ({ page, context }) => {
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-    const { editor, frame, source } = await openMatrix(page);
+    const { frame, source } = await openMatrix(page);
     await activateNativeEdit(frame, "hard-break");
     await setTextSelection(frame, "hard-break", 2);
     const target = frame.locator(caseSelector("hard-break"));
@@ -865,7 +771,6 @@ test.describe("authored DOM native editing contract", () => {
       "<b>粘贴第一行</b>\n粘贴第二行",
     ));
     await page.keyboard.press(keyShortcut("V"));
-    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
     await expect(target).toContainText("<b>粘贴第一行</b>");
     expect(await target.locator("b").count()).toBe(0);
     expect(await target.locator("br").count()).toBe(2);
@@ -881,14 +786,11 @@ test.describe("authored DOM native editing contract", () => {
     );
     expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
 
-    await page.keyboard.press(keyShortcut("Z"));
-    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("0");
-    expect((await exportCurrentHtml(page)).equals(source)).toBe(true);
   });
 
   for (const key of ["Backspace", "Delete"]) {
-    test(`${key} deletes exactly the adjacent authored hard break and undo restores it`, async ({ page }) => {
-      const { editor, frame, source } = await openMatrix(page);
+    test(`${key} deletes exactly the adjacent authored hard break`, async ({ page }) => {
+      const { frame, source } = await openMatrix(page);
       const target = await activateNativeEdit(frame, "hard-break");
       if (key === "Backspace") {
         await target.evaluate((host) => {
@@ -907,7 +809,6 @@ test.describe("authored DOM native editing contract", () => {
       }
       await page.keyboard.press(key);
 
-      await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
       const expected = replaceUniqueBytes(
         source,
         "第一行保留原位。<br>第二行",
@@ -921,16 +822,12 @@ test.describe("authored DOM native editing contract", () => {
         focusOffset: 8,
         activeCase: "hard-break",
       });
-
-      await page.keyboard.press(keyShortcut("Z"));
-      await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("0");
-      expect((await exportCurrentHtml(page)).equals(source)).toBe(true);
     });
   }
 
   test("controlled contenteditable preserves collapsed layout and owns paste as plain text", async ({ page, context }) => {
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-    const { editor, frame, source } = await openMatrix(page);
+    const { editor, frame } = await openMatrix(page);
     const caseId = "collapsed-whitespace-copy";
     const target = await activateNativeEdit(frame, caseId);
     await expect(target).toHaveAttribute("contenteditable", "true");
@@ -958,9 +855,28 @@ test.describe("authored DOM native editing contract", () => {
     await expect.poll(() => target.innerHTML()).toBe(acceptedHtml);
     expect((await exportCurrentHtml(page)).equals(afterPaste)).toBe(true);
 
-    await page.keyboard.press(keyShortcut("Z"));
-    await expect.poll(() => target.textContent()).not.toContain("<b>只作为文字</b>");
-    await expect.poll(async () => (await exportCurrentHtml(page)).equals(source)).toBe(true);
+  });
+
+  test("Backspace deletes the visible final punctuation without consuming collapsed source whitespace", async ({ page }) => {
+    const { frame, source } = await openMatrix(page);
+    const caseId = "collapsed-whitespace-copy";
+    const target = await activateNativeEdit(frame, caseId);
+    const beforeText = await target.textContent();
+    const visibleEnd = beforeText.lastIndexOf("。") + 1;
+    expect(visibleEnd).toBeGreaterThan(0);
+    expect(beforeText.slice(visibleEnd)).toMatch(/^[\t\n\f\r ]+$/u);
+
+    await setTextSelection(frame, caseId, visibleEnd);
+    await page.keyboard.press("Backspace");
+
+    await expect(target).toHaveText(
+      `${beforeText.slice(0, visibleEnd - 1)}${beforeText.slice(visibleEnd)}`,
+    );
+    expect((await exportCurrentHtml(page)).equals(replaceUniqueBytes(
+      source,
+      "排版。\n      </p>",
+      "排版\n      </p>",
+    ))).toBe(true);
   });
 
   test("display contents enters through observer guard, accepts delivered input, and rolls back orphan mutation", async ({ page }) => {
@@ -1013,7 +929,7 @@ test.describe("authored DOM native editing contract", () => {
   });
 
   test("Escape cancels a composition replacement and restores its original selection", async ({ page }) => {
-    const { editor, frame, source } = await openMatrix(page);
+    const { frame, source } = await openMatrix(page);
     const caseId = "heading-inline";
     const target = await activateNativeEdit(frame, caseId);
     const originalHtml = await target.innerHTML();
@@ -1058,8 +974,6 @@ test.describe("authored DOM native editing contract", () => {
       targetIsActive: true,
       contenteditable: "plaintext-only",
     });
-    expect(await editor.getAttribute("data-undo-depth")).toBe("0");
-    expect(await editor.getAttribute("data-redo-depth")).toBe("0");
     expect(await saveIndicator.getAttribute("data-edit-revision")).toBe(originalRevision);
     expect(await saveIndicator.getAttribute("data-rendered-sha256")).toBe(originalRenderedSha);
     await expect(page.locator(".round-record-counts")).toHaveText(
@@ -1074,7 +988,6 @@ test.describe("authored DOM native editing contract", () => {
     await setTextSelection(frame, caseId, originalText.length);
     await page.keyboard.insertText("Z");
     await expect(target).toHaveText(`${originalText}Z`);
-    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
     await expect(page.locator(".round-record-counts")).toHaveText(
       "0 条评论 · 1 项直接编辑记录",
     );
@@ -1087,7 +1000,7 @@ test.describe("authored DOM native editing contract", () => {
   });
 
   test("composition cancellation preserves a preceding uncheckpointed edit", async ({ page }) => {
-    const { editor, frame, source } = await openMatrix(page);
+    const { frame, source } = await openMatrix(page);
     const caseId = "heading-inline";
     const target = await activateNativeEdit(frame, caseId);
     const originalText = await target.textContent();
@@ -1120,7 +1033,6 @@ test.describe("authored DOM native editing contract", () => {
       direction: preCompositionSelection.direction,
       text: preCompositionSelection.text,
     });
-    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
     await expect(page.locator(".round-record-counts")).toHaveText(
       "0 条评论 · 1 项直接编辑记录",
     );
@@ -1133,7 +1045,7 @@ test.describe("authored DOM native editing contract", () => {
   });
 
   test("a trailing Escape after empty compositionend does not exit edit mode", async ({ page }) => {
-    const { editor, frame, source } = await openMatrix(page);
+    const { frame, source } = await openMatrix(page);
     const caseId = "heading-inline";
     const target = await activateNativeEdit(frame, caseId);
     const originalText = await target.textContent();
@@ -1173,7 +1085,6 @@ test.describe("authored DOM native editing contract", () => {
       targetIsActive: true,
       contenteditable: "plaintext-only",
     });
-    expect(await editor.getAttribute("data-undo-depth")).toBe("0");
     // Once the same-task guard has expired, a new deliberate Escape is a real
     // PageRoot command even though the composition-delivery tombstone remains.
     await target.press("Escape");
@@ -1182,7 +1093,7 @@ test.describe("authored DOM native editing contract", () => {
   });
 
   test("an event-driven composition tombstone rejects a delayed empty delivery", async ({ page }) => {
-    const { editor, frame, source } = await openMatrix(page);
+    const { frame, source } = await openMatrix(page);
     const caseId = "heading-inline";
     const target = await activateNativeEdit(frame, caseId);
     const originalText = await target.textContent();
@@ -1241,10 +1152,8 @@ test.describe("authored DOM native editing contract", () => {
 
     await page.waitForTimeout(100);
     await expect(target).toHaveText(originalText);
-    expect(await editor.getAttribute("data-undo-depth")).toBe("0");
     await setTextSelection(frame, caseId, originalText.length);
     await page.keyboard.insertText("Z");
-    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
     const expected = replaceUniqueBytes(
       source,
       "&nbsp;🙂</h1>",
@@ -1254,7 +1163,7 @@ test.describe("authored DOM native editing contract", () => {
   });
 
   test("same-task focus loss after cancellation keeps the pre-composition dirty edit", async ({ page }) => {
-    const { editor, frame, source } = await openMatrix(page);
+    const { frame, source } = await openMatrix(page);
     const caseId = "heading-inline";
     const target = await activateNativeEdit(frame, caseId);
     const originalText = await target.textContent();
@@ -1290,7 +1199,6 @@ test.describe("authored DOM native editing contract", () => {
 
     await expect.poll(() => target.getAttribute("contenteditable")).toBeNull();
     await expect(target).toHaveText(`${originalText}A`);
-    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
     await expect(page.locator(".round-record-counts")).toHaveText(
       "0 条评论 · 1 项直接编辑记录",
     );
@@ -1303,7 +1211,7 @@ test.describe("authored DOM native editing contract", () => {
   });
 
   test("same-task focus loss after non-empty composition restores only that composition", async ({ page }) => {
-    const { editor, frame, source } = await openMatrix(page);
+    const { frame, source } = await openMatrix(page);
     const caseId = "heading-inline";
     const target = await activateNativeEdit(frame, caseId);
     const originalText = await target.textContent();
@@ -1339,7 +1247,6 @@ test.describe("authored DOM native editing contract", () => {
 
     await expect.poll(() => target.getAttribute("contenteditable")).toBeNull();
     await expect(target).toHaveText(`${originalText}A`);
-    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
     await expect(page.locator(".round-record-counts")).toHaveText(
       "0 条评论 · 1 项直接编辑记录",
     );
@@ -1352,7 +1259,7 @@ test.describe("authored DOM native editing contract", () => {
   });
 
   test("toolbar pointer interaction cannot commit an intermediate IME draft", async ({ page }) => {
-    const { editor, frame, source } = await openMatrix(page);
+    const { frame, source } = await openMatrix(page);
     await activateNativeEdit(frame, "heading-inline");
     await installInputRecorder(frame);
     const recorderIframe = await frame.frameElement();
@@ -1383,12 +1290,9 @@ test.describe("authored DOM native editing contract", () => {
     });
     let events = await recordedInputEventsFromIframe(recorderIframe);
     expect(events.filter(({ type }) => type === "compositionend")).toHaveLength(0);
-    expect(await editor.getAttribute("data-undo-depth")).toBe("0");
-    expect(await editor.getAttribute("data-redo-depth")).toBe("0");
 
     await cdp.send("Input.insertText", { text: "工具" });
     await expect(frame.locator(caseSelector("heading-inline"))).toContainText("工具");
-    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
     await expect.poll(() => documentToken(frame)).not.toBe(initialDocument);
 
     events = await recordedInputEventsFromIframe(recorderIframe);
@@ -1404,7 +1308,7 @@ test.describe("authored DOM native editing contract", () => {
   });
 
   test("outer PageRoot pointer actions stay inert until IME composition finishes", async ({ page }) => {
-    const { editor, frame, source } = await openMatrix(page);
+    const { frame, source } = await openMatrix(page);
     await activateNativeEdit(frame, "heading-inline");
     await installInputRecorder(frame);
     const recorderIframe = await frame.frameElement();
@@ -1433,8 +1337,6 @@ test.describe("authored DOM native editing contract", () => {
     });
     let events = await recordedInputEventsFromIframe(recorderIframe);
     expect(events.filter(({ type }) => type === "compositionend")).toHaveLength(0);
-    expect(await editor.getAttribute("data-undo-depth")).toBe("0");
-    expect(await editor.getAttribute("data-redo-depth")).toBe("0");
     expect(await saveIndicator.getAttribute("data-edit-revision")).toBe(initialRevision);
     expect(await saveIndicator.getAttribute("data-rendered-sha256")).toBe(initialRenderedSha);
     await expect(page.locator(".round-record-counts")).toHaveText(
@@ -1443,7 +1345,6 @@ test.describe("authored DOM native editing contract", () => {
 
     await cdp.send("Input.insertText", { text: "项目" });
     await expect(frame.locator(caseSelector("heading-inline"))).toContainText("项目");
-    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
     await expect(page.locator(".round-record-counts")).toHaveText(
       "0 条评论 · 1 项直接编辑记录",
     );
@@ -1466,7 +1367,7 @@ test.describe("authored DOM native editing contract", () => {
   });
 
   test("focus loss during an unconfirmed composition rolls back without a patch", async ({ page }) => {
-    const { editor, frame, source } = await openMatrix(page);
+    const { frame, source } = await openMatrix(page);
     const target = await activateNativeEdit(frame, "heading-inline");
     await setTextSelection(frame, "heading-inline", 0, 2);
     const initialText = await target.textContent();
@@ -1506,8 +1407,6 @@ test.describe("authored DOM native editing contract", () => {
 
     expect(await target.textContent()).toBe(initialText);
     expect((await exportCurrentHtml(page)).equals(source)).toBe(true);
-    expect(await editor.getAttribute("data-undo-depth")).toBe("0");
-    expect(await editor.getAttribute("data-redo-depth")).toBe("0");
     expect(await saveIndicator.getAttribute("data-edit-revision")).toBe(initialRevision);
     expect(await saveIndicator.getAttribute("data-rendered-sha256")).toBe(initialRenderedSha);
     await expect(page.locator(".round-record-counts")).toHaveText(
@@ -1516,7 +1415,7 @@ test.describe("authored DOM native editing contract", () => {
   });
 
   test("window blur without compositionend cannot strand the edit session", async ({ page }) => {
-    const { editor, frame } = await openMatrix(page);
+    const { frame } = await openMatrix(page);
     const target = await activateNativeEdit(frame, "heading-inline");
     await setTextSelection(frame, "heading-inline", 0, 2);
     const initialText = await target.textContent();
@@ -1542,8 +1441,6 @@ test.describe("authored DOM native editing contract", () => {
 
     expect(await target.textContent()).toBe(initialText);
     expect(await target.getAttribute("contenteditable")).toBe("plaintext-only");
-    expect(await editor.getAttribute("data-undo-depth")).toBe("0");
-    expect(await editor.getAttribute("data-redo-depth")).toBe("0");
     expect(await saveIndicator.getAttribute("data-rendered-sha256")).toBe(initialRenderedSha);
 
     // The fail-closed window blur explicitly leaves composing state. A later
@@ -1552,13 +1449,11 @@ test.describe("authored DOM native editing contract", () => {
     await page.getByRole("button", { name: "项目", exact: true }).click();
     await expect(page.locator("aside.side-drawer")).toHaveClass(/\bopen\b/u);
     await expect.poll(() => target.getAttribute("contenteditable")).toBeNull();
-    expect(await editor.getAttribute("data-undo-depth")).toBe("0");
-    expect(await editor.getAttribute("data-redo-depth")).toBe("0");
     expect(await saveIndicator.getAttribute("data-rendered-sha256")).toBe(initialRenderedSha);
   });
 
   test("toolbar style restart preserves the native selection and accepts the next safe edit", async ({ page }) => {
-    const { editor, frame } = await openMatrix(page);
+    const { frame } = await openMatrix(page);
     const target = await activateNativeEdit(frame, "heading-inline");
     const originalText = await target.textContent();
     await setTextSelection(frame, "heading-inline", 3, 9);
@@ -1566,7 +1461,6 @@ test.describe("authored DOM native editing contract", () => {
     expect(before.collapsed).toBe(false);
 
     await page.getByRole("button", { name: "加粗", exact: true }).click();
-    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
 
     const after = await selectionSnapshot(frame, "heading-inline");
     expect(after.text).toBe(before.text);
@@ -1582,7 +1476,6 @@ test.describe("authored DOM native editing contract", () => {
     // regression below and recorded as LT-001).
     await setTextSelection(frame, "heading-inline", originalText.length);
     await page.keyboard.insertText("尾");
-    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("2");
     const expectedText = `${originalText}尾`;
     await expect(target).toHaveText(expectedText);
     const forwardBytes = await exportCurrentHtml(page);
@@ -1592,14 +1485,6 @@ test.describe("authored DOM native editing contract", () => {
       contenteditable: "plaintext-only",
     });
 
-    await page.keyboard.press(keyShortcut("Z"));
-    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
-    await page.keyboard.press(`${process.platform === "darwin" ? "Meta" : "Control"}+Shift+Z`);
-    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("2");
-    await expect.poll(() => nativeEditingState(frame, "heading-inline")).toMatchObject({
-      targetIsActive: true,
-      contenteditable: "plaintext-only",
-    });
     expect((await exportCurrentHtml(page)).equals(forwardBytes)).toBe(true);
   });
 
@@ -1613,13 +1498,12 @@ test.describe("authored DOM native editing contract", () => {
     { shortcut: "U", property: "text-decoration-line", value: "underline" },
   ]) {
     test(`${keyShortcut(shortcut)} formats the selected source range without browser tags`, async ({ page }) => {
-      const { editor, frame, source } = await openMatrix(page);
+      const { frame } = await openMatrix(page);
       const caseId = "list-item";
       await activateNativeEdit(frame, caseId);
       await setTextSelection(frame, caseId, 0, 3);
       await page.keyboard.press(keyShortcut(shortcut));
 
-      await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
       expect(await selectionSnapshot(frame, caseId)).toMatchObject({
         text: "列表项",
         collapsed: false,
@@ -1631,15 +1515,11 @@ test.describe("authored DOM native editing contract", () => {
       expect(exported).toContain(
         `<span style="all: unset; display: inline !important; ${property}: ${value}">列表项</span>`,
       );
-
-      await page.keyboard.press(keyShortcut("Z"));
-      await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("0");
-      expect((await exportCurrentHtml(page)).equals(source)).toBe(true);
     });
   }
 
-  test("a mixed-format replacement after toolbar restart fails closed without corrupting source history", async ({ page }) => {
-    const { editor, frame, source } = await openMatrix(page);
+  test("a mixed-format replacement after toolbar restart fails closed without corrupting source", async ({ page }) => {
+    const { frame, source } = await openMatrix(page);
     const caseId = "heading-inline";
     const target = await activateNativeEdit(frame, caseId);
     const originalText = await target.textContent();
@@ -1647,14 +1527,11 @@ test.describe("authored DOM native editing contract", () => {
 
     await setTextSelection(frame, caseId, 3, 9);
     await page.getByRole("button", { name: "加粗", exact: true }).click();
-    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
     const styledRevision = await saveIndicator.getAttribute("data-edit-revision");
     const styledSha = await saveIndicator.getAttribute("data-rendered-sha256");
 
     await page.keyboard.insertText("替代");
     await expect(target).toHaveText(originalText);
-    await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
-    expect(await editor.getAttribute("data-redo-depth")).toBe("0");
     expect(await saveIndicator.getAttribute("data-edit-revision")).toBe(styledRevision);
     expect(await saveIndicator.getAttribute("data-rendered-sha256")).toBe(styledSha);
     const rollbackNotice = page.locator('[role="status"]').filter({

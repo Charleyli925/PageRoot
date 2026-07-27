@@ -138,7 +138,7 @@ test("opening a committed version strictly freezes the current Canvas before ado
   );
 });
 
-test("workspace source adoption requires an explicit hydration token or a live Fence", () => {
+test("workspace source adoption requires an explicit hydration token or a live source fence", () => {
   const refresh = section(
     workbench,
     "const refreshWorkspace = useCallback",

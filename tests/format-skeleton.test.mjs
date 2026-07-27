@@ -505,7 +505,7 @@ test("validates a same-wrapper replacement as deterministic source segments with
   assert.equal(result.patch.canonicalizeDom, false);
 });
 
-test("allows an internal link text edit but rejects selections crossing one or more link boundaries", () => {
+test("allows deterministic collapsed and internal link edits but rejects selections crossing links", () => {
   const internal = fixture(`<p id="copy">Go <a href="/docs">Link</a> now</p>`);
   const link = sourceElementByTag(internal, "a");
   const linkText = internal.textBySourceId.get(link.textNodeIds[0]);
@@ -534,10 +534,10 @@ test("allows an internal link text edit but rejects selections crossing one or m
   const boundary = validateFormatSkeletonEdit(crossing.skeleton, {
     root: crossing.root,
     getComputedStyle: crossing.getComputedStyle,
-    editRange: { startOffset: 1, endOffset: 1 },
+    editRange: { startOffset: 1, endOffset: 1, affinity: "left" },
   });
-  assert.equal(boundary.ok, false);
-  assert.equal(boundary.code, "FORMAT_LINK_BOUNDARY_AMBIGUOUS");
+  assert.equal(boundary.ok, true);
+  assert.equal(boundary.patch.inheritFormatFrom.linkNodeId, null);
 });
 
 test("preserves a partially covered formatting wrapper and gives replacement text the start style", () => {
@@ -586,6 +586,29 @@ test("derives format inheritance from the exact SourceTextMap insertion owner", 
   assert.deepEqual(result.patch.removalEligibleWrapperNodeIds, [strong.nodeId]);
   assert.deepEqual(result.patch.preserveWrapperNodeIds, []);
   assert.equal(result.patch.canonicalizeDom, true);
+});
+
+test("expands only the wrapper selected by collapsed insertion affinity", () => {
+  for (const affinity of ["right", "left"]) {
+    const value = fixture(`<p id="copy"><em><strong>A</strong></em>B</p>`);
+    const emphasis = sourceElementByTag(value, "em");
+    const strong = sourceElementByTag(value, "strong");
+    const strongText = value.textBySourceId.get(strong.textNodeIds[0]);
+    strongText.data = affinity === "right" ? "XA" : "AX";
+    strongText.nodeValue = strongText.data;
+    const offset = affinity === "right" ? 0 : 1;
+    const result = validateFormatSkeletonEdit(value.skeleton, {
+      root: value.root,
+      getComputedStyle: value.getComputedStyle,
+      editRange: { startOffset: offset, endOffset: offset, affinity },
+    });
+    assert.equal(result.ok, true, `${affinity}: ${result.code}`);
+    assert.deepEqual(
+      result.patch.inheritFormatFrom.wrapperNodeIds,
+      [emphasis.nodeId, strong.nodeId],
+    );
+    assert.equal(result.patch.replacementText, "X");
+  }
 });
 
 test("allows removal only for a fully covered disposable source wrapper", () => {

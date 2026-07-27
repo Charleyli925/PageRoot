@@ -94,11 +94,11 @@ test("deterministic generated HTML corpus preserves every byte outside one autho
     assert.equal(applied.html.charCodeAt(0) === 0xfeff, Boolean(profile.bom), `${label}: BOM`);
     assert.equal(applied.html.includes(profile.newline), true, `${label}: line ending`);
 
-    const undone = applyPatchPlan(applied.inversePlan, applied.html);
-    assert.equal(undone.html, profile.html, `${label}: inverse bytes`);
-    assert.equal(sha256(undone.html), sha256(profile.html), `${label}: inverse SHA`);
-    const redone = applyPatchPlan(undone.inversePlan, undone.html);
-    assert.equal(redone.html, profile.expected, `${label}: redo bytes`);
-    assert.equal(sha256(redone.html), sha256(profile.expected), `${label}: redo SHA`);
+    const restoredResult = applyPatchPlan(applied.inversePlan, applied.html);
+    assert.equal(restoredResult.html, profile.html, `${label}: inverse bytes`);
+    assert.equal(sha256(restoredResult.html), sha256(profile.html), `${label}: inverse SHA`);
+    const reapplied = applyPatchPlan(restoredResult.inversePlan, restoredResult.html);
+    assert.equal(reapplied.html, profile.expected, `${label}: reapplied bytes`);
+    assert.equal(sha256(reapplied.html), sha256(profile.expected), `${label}: reapplied SHA`);
   }
 });

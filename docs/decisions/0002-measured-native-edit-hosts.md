@@ -25,4 +25,4 @@ PageRoot keeps one native DOM editing engine and chooses its host mode from a li
 - Browser differences are paid for through a synchronous activation preflight and guarded rollback.
 - Unknown event delivery, structure, focus or restoration remains fail-closed.
 - Buttons, code, form values, replaced content, foreign documents and ambiguous structural ranges still require dedicated editors.
-- Browser and Electron gates must cover controlled paste, unowned structural mutation, observer-guarded input, undo and byte-exact source recovery.
+- Browser and Electron gates must cover controlled paste, unowned structural mutation, observer-guarded input, blocked source-reversal shortcuts and byte-exact forward persistence.

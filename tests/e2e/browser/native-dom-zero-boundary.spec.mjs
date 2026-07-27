@@ -33,7 +33,7 @@ async function attemptDirectEdit(frame, id) {
 }
 
 test("visible empty inline boundary stays selectable/commentable and never becomes editable", async ({ page }) => {
-  const { editor, frame } = await openBoundaryFixture(page);
+  const { frame } = await openBoundaryFixture(page);
   const target = await attemptDirectEdit(frame, "visible-empty-boundary");
 
   await expect(page.locator('[role="status"], [role="alert"]').filter({
@@ -45,12 +45,11 @@ test("visible empty inline boundary stays selectable/commentable and never becom
 
   await page.keyboard.insertText("不应写入");
   expect(await target.textContent()).toBe("前文后文");
-  expect(await editor.getAttribute("data-undo-depth")).toBe("0");
   expect((await exportCurrentHtml(page)).equals(source)).toBe(true);
 });
 
 test("authored comment boundary also fails closed and preserves every source byte", async ({ page }) => {
-  const { editor, frame } = await openBoundaryFixture(page);
+  const { frame } = await openBoundaryFixture(page);
   const target = await attemptDirectEdit(frame, "source-comment-boundary");
 
   await expect(page.locator('[role="status"], [role="alert"]').filter({
@@ -61,7 +60,6 @@ test("authored comment boundary also fails closed and preserves every source byt
 
   await page.keyboard.insertText("不应写入");
   expect(await target.textContent()).toBe("甲乙");
-  expect(await editor.getAttribute("data-undo-depth")).toBe("0");
   expect((await exportCurrentHtml(page)).equals(source)).toBe(true);
 });
 
@@ -119,26 +117,35 @@ async function authoredInnerHtml(target) {
   });
 }
 
-test("collapsed typing is blocked at every non-empty inline style boundary", async ({ page }) => {
+test("collapsed typing at every non-empty inline style boundary inherits deterministically", async ({ page }) => {
+  const expectedInnerHtml = {
+    "strong-text-start": '<em style="color:#c43"><strong>XAB</strong></em>C',
+    "strong-text-end": '<em style="color:#c43"><strong>ABX</strong></em>C',
+    "trailing-text-start": '<em style="color:#c43"><strong>ABX</strong></em>C',
+    "root-before-inline": '<em style="color:#c43"><strong>XAB</strong></em>C',
+    "root-between-inline-and-text": '<em style="color:#c43"><strong>ABX</strong></em>C',
+    "strong-element-start": '<em style="color:#c43"><strong>XAB</strong></em>C',
+    "em-element-start": '<em style="color:#c43"><strong>XAB</strong></em>C',
+  };
   for (const point of styledBoundaryPoints) {
-    const { editor, frame } = await openBoundaryFixture(page);
+    const { frame } = await openBoundaryFixture(page);
     const target = await attemptDirectEdit(frame, "styled-inline-boundary");
     await expect(target).toHaveAttribute("contenteditable", "plaintext-only");
     await setStyledBoundaryPoint(target, point);
 
     await page.keyboard.insertText("X");
 
-    await expect(page.locator('[role="status"], [role="alert"]').filter({
-      hasText: /两种文字样式的边界/,
-    }).first()).toContainText(/移到样式内一个字的位置/);
-    expect(await authoredInnerHtml(target)).toBe('<em style="color:#c43"><strong>AB</strong></em>C');
-    expect(await editor.getAttribute("data-undo-depth")).toBe("0");
-    expect((await exportCurrentHtml(page)).equals(source)).toBe(true);
+    expect(await authoredInnerHtml(target)).toBe(expectedInnerHtml[point]);
+    const expected = Buffer.from(source.toString("utf8").replace(
+      '<em style="color:#c43"><strong>AB</strong></em>C',
+      expectedInnerHtml[point],
+    ), "utf8");
+    expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
   }
 });
 
 test("typing strictly inside a styled inline wrapper stays native and source-exact", async ({ page }) => {
-  const { editor, frame } = await openBoundaryFixture(page);
+  const { frame } = await openBoundaryFixture(page);
   const target = await attemptDirectEdit(frame, "styled-inline-boundary");
   await target.evaluate((element) => {
     const text = element.querySelector("strong")?.firstChild;
@@ -155,7 +162,6 @@ test("typing strictly inside a styled inline wrapper stays native and source-exa
 
   await expect(target).toHaveText("AXBC");
   expect(await authoredInnerHtml(target)).toBe('<em style="color:#c43"><strong>AXB</strong></em>C');
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
   const expected = Buffer.from(source.toString("utf8").replace(
     "<strong>AB</strong>",
     "<strong>AXB</strong>",
@@ -163,12 +169,35 @@ test("typing strictly inside a styled inline wrapper stays native and source-exa
   expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
 });
 
-test("an IME epoch at an inline boundary is cancelled before DOM mutation and drains late tails", async ({ page }) => {
-  const { editor, frame } = await openBoundaryFixture(page);
+test("the toolbar previews the left style at an inline boundary", async ({ page }) => {
+  const { frame } = await openBoundaryFixture(page);
+  const target = await attemptDirectEdit(frame, "styled-inline-boundary");
+  await setStyledBoundaryPoint(target, "trailing-text-start");
+
+  const toolbar = page.getByRole("toolbar");
+  await expect(toolbar.getByRole("button", { name: "加粗" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(toolbar.getByRole("button", { name: "斜体" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+
+  await page.keyboard.insertText("X");
+  expect(await authoredInnerHtml(target)).toBe(
+    '<em style="color:#c43"><strong>ABX</strong></em>C',
+  );
+});
+
+test("an IME epoch at an inline boundary commits into the left style", async ({ page }) => {
+  const { frame } = await openBoundaryFixture(page);
   const target = await attemptDirectEdit(frame, "styled-inline-boundary");
   await setStyledBoundaryPoint(target, "trailing-text-start");
 
   const beforeInputAccepted = await target.evaluate((element) => {
+    const strongText = element.querySelector("strong")?.firstChild;
+    if (!(strongText instanceof Text)) throw new Error("Strong text is missing.");
     element.dispatchEvent(new CompositionEvent("compositionstart", {
       bubbles: true,
       data: "",
@@ -180,8 +209,13 @@ test("an IME epoch at an inline boundary is cancelled before DOM mutation and dr
       inputType: "insertCompositionText",
       isComposing: true,
     }));
-    // Exercise defensive draining even if a platform bridge sends events
-    // after the cancelable beforeinput was prevented.
+    strongText.data = "AB你";
+    const selection = document.getSelection();
+    const range = document.createRange();
+    range.setStart(strongText, strongText.data.length);
+    range.collapse(true);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
     element.dispatchEvent(new InputEvent("input", {
       bubbles: true,
       data: "你",
@@ -192,20 +226,16 @@ test("an IME epoch at an inline boundary is cancelled before DOM mutation and dr
       bubbles: true,
       data: "你",
     }));
-    element.dispatchEvent(new InputEvent("input", {
-      bubbles: true,
-      data: null,
-      inputType: "insertText",
-      isComposing: false,
-    }));
     return accepted;
   });
 
-  expect(beforeInputAccepted).toBe(false);
-  await expect(page.locator('[role="status"], [role="alert"]').filter({
-    hasText: /两种文字样式的边界/,
-  }).first()).toContainText(/添加评论/);
-  expect(await authoredInnerHtml(target)).toBe('<em style="color:#c43"><strong>AB</strong></em>C');
-  expect(await editor.getAttribute("data-undo-depth")).toBe("0");
-  expect((await exportCurrentHtml(page)).equals(source)).toBe(true);
+  expect(beforeInputAccepted).toBe(true);
+  expect(await authoredInnerHtml(target)).toBe(
+    '<em style="color:#c43"><strong>AB你</strong></em>C',
+  );
+  const expected = Buffer.from(source.toString("utf8").replace(
+    "<strong>AB</strong>",
+    "<strong>AB你</strong>",
+  ), "utf8");
+  expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
 });

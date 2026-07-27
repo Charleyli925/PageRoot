@@ -211,11 +211,13 @@
         "historyId": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 300
+          "maxLength": 300,
+          "deprecated": true
         },
         "undoesEventId": {
           "type": "string",
-          "pattern": "^edit_[A-Za-z0-9_-]+$"
+          "pattern": "^edit_[A-Za-z0-9_-]+$",
+          "deprecated": true
         },
         "summary": {
           "type": "string",

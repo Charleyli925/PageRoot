@@ -61,7 +61,7 @@ async function dispatchMissingTerminalComposition(target, {
 }
 
 test("one export shortcut finalizes a stable missing-terminal composition and resumes its logical caret", async ({ page }) => {
-  const { editor, frame } = await openSessionFixture(page);
+  const { frame } = await openSessionFixture(page);
   const caseId = "session-copy";
   const target = await activateNativeEdit(frame, caseId);
   const initialDocument = await documentToken(frame);
@@ -84,7 +84,6 @@ test("one export shortcut finalizes a stable missing-terminal composition and re
 
   expect((await readDownload(download)).equals(expectedSource)).toBe(true);
   expect(downloadCount).toBe(1);
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
   await expect.poll(() => documentToken(page)).not.toBe(initialDocument);
   await waitForResumedNativeSession(frame, caseId);
   await expect(frame.locator(caseSelector(caseId))).toHaveText("Al你pha");
@@ -97,7 +96,7 @@ test("one export shortcut finalizes a stable missing-terminal composition and re
 });
 
 test("strict text wins over a missing terminal; one queued command completes and retired tails cannot revive it", async ({ page }) => {
-  const { editor, iframe, frame } = await openSessionFixture(page);
+  const { iframe, frame } = await openSessionFixture(page);
   const caseId = "session-copy";
   const target = await activateNativeEdit(frame, caseId);
   const initialDocument = await documentToken(frame);
@@ -109,7 +108,6 @@ test("strict text wins over a missing terminal; one queued command completes and
 
   await setTextSelection(frame, caseId, 0);
   await page.keyboard.insertText("S");
-  expect(await editor.getAttribute("data-undo-depth")).toBe("0");
   await setTextSelection(frame, caseId, 1);
   await dispatchMissingTerminalComposition(target, {
     nextText: "S你Alpha",
@@ -130,7 +128,6 @@ test("strict text wins over a missing terminal; one queued command completes and
 
   expect((await readDownload(download)).equals(strictSource)).toBe(true);
   expect(downloadCount).toBe(1);
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
   await expect.poll(() => documentToken(page)).not.toBe(initialDocument);
   await waitForResumedNativeSession(frame, caseId);
   await expect(frame.locator(caseSelector(caseId))).toHaveText("SAlpha");
@@ -183,13 +180,11 @@ test("strict text wins over a missing terminal; one queued command completes and
     editingMarker: null,
     // The Fence installs a capture guard on the retired Document. Cancelable
     // late tail events are deliberately prevented before they can reach any
-    // retired controller or browser editing history.
+    // retired controller or browser-local editing state.
     delivered: [false, false, false],
   });
   await page.waitForTimeout(900);
   expect(downloadCount).toBe(1);
-  expect(await editor.getAttribute("data-undo-depth")).toBe("1");
-  expect(await editor.getAttribute("data-redo-depth")).toBe("0");
   await expect(frame.locator(caseSelector(caseId))).toHaveText("SAlpha");
   await waitForResumedNativeSession(frame, caseId);
   expect((await exportCurrentHtml(page)).equals(strictSource)).toBe(true);

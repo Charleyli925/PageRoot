@@ -302,7 +302,8 @@ async function openRecentProject(page, sourcePath, options) {
   }
   const processingDialog = page.getByRole("dialog", { name: "本轮处理" });
   if (await processingDialog.isVisible()) {
-    await processingDialog.getByRole("button", { name: "关闭处理面板" }).click();
+    await page.keyboard.press("Escape");
+    await expect(processingDialog).toBeHidden();
   }
   await page.getByRole("button", { name: "项目", exact: true }).click();
   await page.locator(".recent-file-row")
@@ -745,7 +746,7 @@ test("a clipboard handoff failure keeps the frozen Request recoverable", async (
     await expect(handoffError).toBeVisible();
     await expect(launched.page.getByRole("alert")
       .filter({ hasText: "交接内容还没有复制" })).toHaveCount(0);
-    await processingDialog.getByRole("button", { name: "关闭处理面板" }).click();
+    await launched.page.keyboard.press("Escape");
     await expect(processingDialog).toBeHidden();
     await launched.page.getByRole("button", { name: "复制失败 · 查看" }).click();
     await expect(processingDialog).toBeVisible();

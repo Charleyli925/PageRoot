@@ -666,7 +666,7 @@ test("expiring a draft rejects late callbacks without changing its last trusted 
     selection: caret(6),
     evidence: "input",
   });
-  draft.expire({ lease, reason: "history-fence" });
+  draft.expire({ lease, reason: "source-authority-fence" });
   const beforeLateEvent = draft.snapshot();
   assert.equal(draft.recordOwnedText({
     lease,

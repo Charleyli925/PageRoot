@@ -3,12 +3,10 @@ import { expect, test } from "@playwright/test";
 import {
   activateNativeEdit,
   exportCurrentHtml,
-  keyShortcut,
   loadFixture,
   replaceUniqueBytes,
   selectionSnapshot,
   setTextSelection,
-  waitForResumedNativeSession,
 } from "./pageroot-driver.mjs";
 
 const formatSource = Buffer.from(`<!doctype html>
@@ -36,15 +34,14 @@ async function openFormatFixture(page) {
 }
 
 async function expectNoCommittedEdit(page, editor) {
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("0");
-  expect(await editor.getAttribute("data-redo-depth")).toBe("0");
+  await expect(editor).toHaveAttribute("data-render-verified", "true");
   await expect(page.locator(".round-record-counts")).toHaveText(
     "0 条评论 · 0 项直接编辑记录",
   );
 }
 
 test("nested bold, italic, color, size, span attributes and outside bytes survive an internal edit", async ({ page }) => {
-  const { editor, frame } = await openFormatFixture(page);
+  const { frame } = await openFormatFixture(page);
   const caseId = "nested-format";
   const target = await activateNativeEdit(frame, caseId);
   const expectedSource = replaceUniqueBytes(
@@ -57,7 +54,6 @@ test("nested bold, italic, color, size, span attributes and outside bytes surviv
   await setTextSelection(frame, caseId, 3, 5);
   await page.keyboard.insertText("新文");
 
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
   await expect(target).toHaveText("前粗彩新文号斜尾后");
   await expect(target.locator("strong[data-weight=kept]")).toHaveCount(1);
   await expect(target.locator("strong > em > span.tone")).toHaveText("彩新文号");
@@ -85,22 +81,10 @@ test("nested bold, italic, color, size, span attributes and outside bytes surviv
   });
   expect((await exportCurrentHtml(page)).equals(expectedSource)).toBe(true);
 
-  await waitForResumedNativeSession(frame, caseId);
-  await page.keyboard.press(keyShortcut("Z"));
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("0");
-  await expect(target).toHaveText("前粗彩色字号斜尾后");
-  await waitForResumedNativeSession(frame, caseId);
-  expect(await selectionSnapshot(frame, caseId)).toMatchObject({
-    collapsed: false,
-    anchorOffset: 3,
-    focusOffset: 5,
-    text: "色字",
-  });
-  expect((await exportCurrentHtml(page)).equals(formatSource)).toBe(true);
 });
 
 test("editing link text preserves the authored link boundary and every non-text byte", async ({ page }) => {
-  const { editor, frame } = await openFormatFixture(page);
+  const { frame } = await openFormatFixture(page);
   const caseId = "single-link";
   const target = await activateNativeEdit(frame, caseId);
   const expectedSource = replaceUniqueBytes(
@@ -112,7 +96,6 @@ test("editing link text preserves the authored link boundary and every non-text 
   await setTextSelection(frame, caseId, 1, 5);
   await page.keyboard.insertText("新链");
 
-  await expect.poll(() => editor.getAttribute("data-undo-depth")).toBe("1");
   await expect(target).toHaveText("去新链返回");
   const link = target.locator("a.link[data-kind=kept]");
   await expect(link).toHaveCount(1);

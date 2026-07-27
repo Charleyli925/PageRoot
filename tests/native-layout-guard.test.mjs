@@ -92,7 +92,7 @@ test("text-range formatting uses an event-stable wrapper while retaining live la
   assert.match(canvas, /sourceTextParentsForSegments\(/u);
 });
 
-test("ambiguous inline insertion guard owns only collapsed text input and precedes IME commit matching", async () => {
+test("collapsed boundary insertion has deterministic ownership for keyboard, IME, and toolbar style", async () => {
   const [controller, canvas, logicalIndex] = await Promise.all([
     readFile(
       new URL("../app/components/NativeEditingController.ts", import.meta.url),
@@ -123,27 +123,22 @@ test("ambiguous inline insertion guard owns only collapsed text input and preced
   assert.match(
     controller,
     /if \(ranges\.length > 1\) return false;[\s\S]*?if \(!targetRange\.collapsed\) return false;[\s\S]*?if \(!selection\.isCollapsed\) return false;/u,
-    "non-collapsed replacements must stay outside this narrow caret guard",
-  );
-
-  const compositionBoundaryGate = controller.indexOf(
-    "this.composing\n      && this.ambiguousCompositionOrigin",
-  );
-  const matchingCompositionCommit = controller.indexOf(
-    "if (this.isMatchingCompositionCommitEvent(event))",
-  );
-  assert.ok(compositionBoundaryGate >= 0);
-  assert.ok(matchingCompositionCommit > compositionBoundaryGate);
-  assert.match(
-    controller,
-    /this\.blockedAmbiguousCompositionEpochId = epoch\.id;[\s\S]*?this\.restoreCompositionSnapshot\(true\)/u,
+    "non-collapsed replacements must stay outside the narrow boundary detector",
   );
   assert.match(
     controller,
-    /isBlockedAmbiguousCompositionDelivery\(event\)[\s\S]*?event\.preventDefault\(\)/u,
+    /collapsedInsertionAffinity[\s\S]*?\^\\s\*\$[\s\S]*?return "right";[\s\S]*?return "left";/u,
+  );
+  assert.match(
+    controller,
+    /setSelectionValue\(this\.hostElement, compositionSelection\)/u,
+  );
+  assert.match(
+    controller,
+    /handleOwnedCollapsedTextInsertion\(event\)[\s\S]*?insertionTargetsInlineBoundary[\s\S]*?insertionTouchesCollapsedWhitespaceEdge/u,
   );
   assert.match(
     canvas,
-    /inputType === "insertAtAmbiguousInlineBoundary"[\s\S]*?两种样式的边界[\s\S]*?添加评论/u,
+    /activeNativeEditRef\.current\?\.session\.getStyleElementsForSelection\(\)/u,
   );
 });

@@ -60,6 +60,23 @@ test("the edit iframe is same-origin but never executes author scripts or refres
   });
 });
 
+test("clicking a module's blank padding clears selection instead of opening its toolbar", async ({
+  page,
+}) => {
+  const { editor, frame } = await loadFixture(page, "module-padding-hit.html");
+  const copy = frame.locator(caseSelector("module-padding-copy"));
+  const paddedSection = frame.locator("section");
+
+  await copy.click();
+  await expect(editor.getByRole("toolbar")).toBeVisible();
+  await expect(frame.locator("[data-html-canvas-selected]")).toHaveCount(1);
+
+  await paddedSection.click({ position: { x: 20, y: 20 } });
+
+  await expect(editor.getByRole("toolbar")).toHaveCount(0);
+  await expect(frame.locator("[data-html-canvas-selected]")).toHaveCount(0);
+});
+
 test("typing never replaces the iframe Document or jumps a scroll container", async ({ page }) => {
   const { frame } = await loadFixture(page, "complex-layout.html");
   const beforeDocument = await documentToken(frame);
