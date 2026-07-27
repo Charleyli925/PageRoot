@@ -218,11 +218,27 @@ test("packaged PageRoot preserves source bytes and reconciles draft revision bef
     launched = await launchPackaged(isolatedUserData);
     electronApp = launched.electronApp;
     page = launched.page;
-    const reopened = await bridgeJson(page, "/workspace", { sourcePath });
-    expect(reopened.runtimeState.draft.draftRevision).toBe(expectedRevision);
-    expect(reopened.runtimeState.draft.deletedCommentIds)
+    await expect.poll(
+      async () => (await page.evaluate(
+        () => window.htmlAIProjects?.getActiveProject(),
+      ))?.sourcePath,
+      { timeout: 30_000 },
+    ).toBe(sourcePath);
+    await expect(page.locator("main.workbench"))
+      .toHaveAttribute("data-project-state", "ready", { timeout: 30_000 });
+    const reopenedBeforeClose = await bridgeJson(page, "/workspace", { sourcePath });
+    expect(reopenedBeforeClose.runtimeState.draft.draftRevision).toBe(expectedRevision);
+    await closePackagedGracefully(electronApp);
+    electronApp = null;
+
+    launched = await launchPackaged(isolatedUserData);
+    electronApp = launched.electronApp;
+    page = launched.page;
+    const reopenedAfterClose = await bridgeJson(page, "/workspace", { sourcePath });
+    expect(reopenedAfterClose.runtimeState.draft.draftRevision).toBe(expectedRevision);
+    expect(reopenedAfterClose.runtimeState.draft.deletedCommentIds)
       .toEqual(["comment_packaged_external_deleted"]);
-    expect(reopened.runtimeState.draft.comments.map((comment) => comment.text))
+    expect(reopenedAfterClose.runtimeState.draft.comments.map((comment) => comment.text))
       .toEqual(["打包环境 Revision 自动合并"]);
   } finally {
     if (electronApp) {
