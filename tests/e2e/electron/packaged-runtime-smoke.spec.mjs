@@ -25,6 +25,10 @@ import {
   withBomAndCrLf,
 } from "../browser/pageroot-driver.mjs";
 
+const packageVersion = JSON.parse(
+  readFileSync(path.join(productRoot, "package.json"), "utf8"),
+).version;
+
 function packagedExecutable() {
   const appPath = process.env.PAGEROOT_PACKAGED_APP_PATH;
   if (!appPath || !path.isAbsolute(appPath) || path.extname(appPath) !== ".app") {
@@ -138,7 +142,7 @@ test("packaged PageRootV2 preserves outside-island bytes and reconciles draft re
     electronApp = launched.electronApp;
     let page = launched.page;
     const runtime = await page.evaluate(() => window.htmlAIRuntime);
-    expect(runtime?.appVersion).toMatch(/^\d+\.\d+\.\d+$/u);
+    expect(runtime?.appVersion).toBe(packageVersion);
     await electronApp.evaluate(({ dialog }, destination) => {
       dialog.showSaveDialog = async () => ({
         canceled: false,
