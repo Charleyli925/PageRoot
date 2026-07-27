@@ -449,12 +449,50 @@ function insertionTouchesCollapsedWhitespaceEdge(
   ) return false;
   const text = nativeLogicalText(hostElement);
   const offset = selection.focus;
-  const prefix = text.slice(0, offset);
-  const suffix = text.slice(offset);
   return (
-    (prefix.length > 0 && /^\s*$/u.test(prefix))
-    || (suffix.length > 0 && /^\s*$/u.test(suffix))
+    offset > 0 && /[\t\n\f\r ]/u.test(text[offset - 1] ?? "")
+  ) || (
+    offset < text.length && /[\t\n\f\r ]/u.test(text[offset] ?? "")
   );
+}
+
+function whitespaceEquivalentCollapsedInsertionOffset(
+  beforeText: string,
+  afterText: string,
+  insertedText: string,
+  intendedOffset: number,
+): number | null {
+  if (
+    !insertedText
+    || /[\r\n]/u.test(insertedText)
+    || afterText.length !== beforeText.length + insertedText.length
+  ) return null;
+  let whitespaceStart = intendedOffset;
+  let whitespaceEnd = intendedOffset;
+  while (
+    whitespaceStart > 0
+    && /[\t\n\f\r ]/u.test(beforeText[whitespaceStart - 1] ?? "")
+  ) whitespaceStart -= 1;
+  while (
+    whitespaceEnd < beforeText.length
+    && /[\t\n\f\r ]/u.test(beforeText[whitespaceEnd] ?? "")
+  ) whitespaceEnd += 1;
+  for (
+    let actualOffset = whitespaceStart;
+    actualOffset <= whitespaceEnd;
+    actualOffset += 1
+  ) {
+    if (
+      actualOffset === intendedOffset
+      || afterText !== (
+        `${beforeText.slice(0, actualOffset)}`
+        + `${insertedText}`
+        + `${beforeText.slice(actualOffset)}`
+      )
+    ) continue;
+    return actualOffset;
+  }
+  return null;
 }
 
 function graphemeDeletionRange(
@@ -1817,10 +1855,21 @@ export class NativeEditingController {
         const expectedText = snapshot
           ? `${snapshot.text.slice(0, originalStart)}${committedData}${snapshot.text.slice(originalEnd)}`
           : null;
-        const terminalTextMatches = Boolean(
+        let terminalTextMatches = Boolean(
           snapshot
           && nativeLogicalText(this.hostElement) === expectedText
         );
+        if (
+          !terminalTextMatches
+          && snapshot
+          && committedData
+          && this.canonicalizeWhitespaceEquivalentComposition(
+            snapshot,
+            committedData,
+          )
+        ) {
+          terminalTextMatches = true;
+        }
         if (!snapshot || terminalMismatch || !committedData) {
           cancelled = this.rejectCompositionEpoch(
             "输入法最终文字超出了开始选区，本次文字没有保存，已恢复原内容。",
@@ -2345,6 +2394,10 @@ export class NativeEditingController {
       || insertionTouchesCollapsedWhitespaceEdge(this.hostElement, selection);
     if (!ownsBoundary) return false;
 
+    // Chromium's target range is not stable at visual edges next to authored
+    // whitespace, inline wrappers and following icons. Own those collapsed
+    // insertions from PageRoot's logical Selection; strict text interiors keep
+    // the browser's complete beforeinput -> input delivery contract.
     event.preventDefault();
     if (!this.openNativeMutationWindow()) return true;
     this.beginNativeCandidate(event.inputType);
@@ -2396,6 +2449,69 @@ export class NativeEditingController {
       this.finishNativeMutationWindow();
       return true;
     }
+  }
+
+  private canonicalizeWhitespaceEquivalentComposition(
+    snapshot: CompositionSnapshot,
+    insertedText: string,
+  ): boolean {
+    const originalStart = Math.min(
+      snapshot.selection.anchor,
+      snapshot.selection.focus,
+    );
+    const originalEnd = Math.max(
+      snapshot.selection.anchor,
+      snapshot.selection.focus,
+    );
+    if (
+      originalStart !== originalEnd
+      || !collapsesAuthoredWhitespace(this.hostElement)
+      || whitespaceEquivalentCollapsedInsertionOffset(
+        snapshot.text,
+        nativeLogicalText(this.hostElement),
+        insertedText,
+        originalStart,
+      ) === null
+    ) return false;
+
+    this.restoringCompositionSnapshot = true;
+    try {
+      this.runExpectedMutation(() => {
+        restoreAuthoredAttributes(this.hostElement, snapshot.hostAttributes);
+        for (const [name, saved] of Object.entries(this.activeSessionAttributes)) {
+          restoreAttribute(this.hostElement, name, saved);
+        }
+        for (const child of snapshot.children) restoreRestorableDomNode(child);
+        this.hostElement.replaceChildren(
+          ...snapshot.children.map((child) => child.node),
+        );
+        const point = domPointForLogicalOffset(
+          this.hostElement,
+          originalStart,
+          snapshot.selection.affinity,
+        );
+        if (point.node.nodeType === Node.TEXT_NODE) {
+          (point.node as Text).insertData(point.offset, insertedText);
+        } else {
+          const textNode = this.hostElement.ownerDocument.createTextNode(insertedText);
+          point.node.insertBefore(textNode, point.node.childNodes.item(point.offset));
+        }
+      });
+    } finally {
+      this.restoringCompositionSnapshot = false;
+    }
+    setSelectionValue(this.hostElement, {
+      anchor: originalStart + insertedText.length,
+      focus: originalStart + insertedText.length,
+      affinity: "left",
+    });
+    this.unauthorizedDomDrift = snapshot.unauthorizedDomDrift;
+    this.requiresCanonicalReconcile = true;
+    return nativeLogicalText(this.hostElement) === (
+      `${snapshot.text.slice(0, originalStart)}`
+      + `${insertedText}`
+      + `${snapshot.text.slice(originalEnd)}`
+    );
   }
 
   private handleOwnedGraphemeDeletion(event: InputEvent): boolean {

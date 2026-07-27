@@ -11,7 +11,10 @@ const source = Buffer.from(`<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
-  <style>body { font: 20px/1.6 sans-serif; padding: 40px; }</style>
+  <style>
+    body { font: 20px/1.6 sans-serif; padding: 40px; }
+    .button { display: inline-flex; align-items: center; gap: 0.4rem; }
+  </style>
 </head>
 <body>
   <p data-native-case="exact-boundaries"><em><strong>A</strong></em>B</p>
@@ -23,6 +26,15 @@ const source = Buffer.from(`<!doctype html>
   <p data-native-case="visible-end">
     <strong>End</strong>
   </p>
+  <a class="button" href="#target" data-native-case="text-before-icon">开始浏览 <span aria-hidden="true">↓</span></a>
+  <p data-native-case="plain-visible-end">
+    Paragraph end
+  </p>
+  <h2 data-native-case="heading-before-inline">标题 <small>说明</small></h2>
+  <p data-native-case="paragraph-before-inline">正文 <em>强调</em></p>
+  <ul><li data-native-case="list-before-inline">列表 <span>状态</span></li></ul>
+  <details><summary data-native-case="summary-before-inline">摘要 <span>详情</span></summary></details>
+  <table><tbody><tr><td data-native-case="cell-before-inline">单元格 <span>状态</span></td></tr></tbody></table>
 </body>
 </html>
 `, "utf8");
@@ -253,6 +265,187 @@ test("visible paragraph start and end preserve authored indentation while accept
   const expected = Buffer.from(source.toString("utf8")
     .replace("<em>Start</em>", "<em>首Start</em>")
     .replace("<strong>End</strong>", "<strong>End尾</strong>"), "utf8");
+  expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
+});
+
+test("a visual text end before collapsed whitespace and an inline icon accepts text", async ({ page }) => {
+  const { frame } = await openFixture(page);
+  const target = await attemptDirectEdit(frame, "text-before-icon");
+  await expect(target).toHaveAttribute(
+    "contenteditable",
+    /^(?:plaintext-only|true)$/u,
+  );
+  await installHandledInputRecorder(frame);
+  await target.evaluate((element) => {
+    const text = element.firstChild;
+    if (!(text instanceof Text)) throw new Error("Button label text is missing.");
+    const visibleEnd = text.data.indexOf(" ");
+    if (visibleEnd <= 0) throw new Error("Button label has no collapsed gap before its icon.");
+    element.focus({ preventScroll: true });
+    const range = document.createRange();
+    range.setStart(text, visibleEnd);
+    range.collapse(true);
+    const selection = document.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  });
+
+  await page.keyboard.insertText("X");
+
+  const beforeInput = (await handledInputEvents(frame)).find(
+    (event) => event.type === "beforeinput",
+  );
+  expect(beforeInput).toMatchObject({
+    inputType: "insertText",
+    defaultPrevented: true,
+  });
+  expect(await authoredInnerHtml(target)).toBe(
+    '开始浏览X <span aria-hidden="true">↓</span>',
+  );
+  await page.waitForTimeout(900);
+  expect(await authoredInnerHtml(target)).toBe(
+    '开始浏览X <span aria-hidden="true">↓</span>',
+  );
+  expect(await page.getByTestId("html-canvas-editor").getAttribute(
+    "data-edit-block-detail",
+  )).toBeNull();
+  const expected = Buffer.from(source.toString("utf8").replace(
+    '开始浏览 <span aria-hidden="true">↓</span>',
+    '开始浏览X <span aria-hidden="true">↓</span>',
+  ), "utf8");
+  expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
+});
+
+test("common editable host types accept text before a collapsed inline gap", async ({ page }) => {
+  const cases = [
+    {
+      id: "heading-before-inline",
+      before: "标题 <small>说明</small>",
+      after: "标题X <small>说明</small>",
+    },
+    {
+      id: "paragraph-before-inline",
+      before: "正文 <em>强调</em>",
+      after: "正文X <em>强调</em>",
+    },
+    {
+      id: "list-before-inline",
+      before: "列表 <span>状态</span>",
+      after: "列表X <span>状态</span>",
+    },
+    {
+      id: "summary-before-inline",
+      before: "摘要 <span>详情</span>",
+      after: "摘要X <span>详情</span>",
+    },
+    {
+      id: "cell-before-inline",
+      before: "单元格 <span>状态</span>",
+      after: "单元格X <span>状态</span>",
+    },
+  ];
+  for (const fixtureCase of cases) {
+    await test.step(fixtureCase.id, async () => {
+      const { frame } = await openFixture(page);
+      const target = await attemptDirectEdit(frame, fixtureCase.id);
+      await expect(target).toHaveAttribute(
+        "contenteditable",
+        /^(?:plaintext-only|true)$/u,
+      );
+      await target.evaluate((element) => {
+        const text = element.firstChild;
+        if (!(text instanceof Text)) throw new Error("Leading host text is missing.");
+        const visibleEnd = text.data.indexOf(" ");
+        if (visibleEnd <= 0) throw new Error("Host has no collapsed inline gap.");
+        element.focus({ preventScroll: true });
+        const range = document.createRange();
+        range.setStart(text, visibleEnd);
+        range.collapse(true);
+        const selection = document.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+      });
+      await page.keyboard.insertText("X");
+      await page.waitForTimeout(900);
+      expect(await authoredInnerHtml(target)).toBe(fixtureCase.after);
+      expect(await page.getByTestId("html-canvas-editor").getAttribute(
+        "data-edit-block-detail",
+      )).toBeNull();
+      const expected = Buffer.from(source.toString("utf8").replace(
+        fixtureCase.before,
+        fixtureCase.after,
+      ), "utf8");
+      expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
+    });
+  }
+});
+
+test("an IME delivery at a plain visual paragraph end stays before authored indentation", async ({ page }) => {
+  const { frame } = await openFixture(page);
+  const target = await attemptDirectEdit(frame, "plain-visible-end");
+  await expect(target).toHaveAttribute(
+    "contenteditable",
+    /^(?:plaintext-only|true)$/u,
+  );
+
+  const result = await target.evaluate((element) => {
+    const text = element.firstChild;
+    if (!(text instanceof Text)) throw new Error("Paragraph text is missing.");
+    const marker = "Paragraph end";
+    const visibleEnd = text.data.indexOf(marker) + marker.length;
+    element.focus({ preventScroll: true });
+    const selection = document.getSelection();
+    const initialRange = document.createRange();
+    initialRange.setStart(text, visibleEnd);
+    initialRange.collapse(true);
+    selection?.removeAllRanges();
+    selection?.addRange(initialRange);
+
+    element.dispatchEvent(new CompositionEvent("compositionstart", {
+      bubbles: true,
+      data: "",
+    }));
+    const accepted = element.dispatchEvent(new InputEvent("beforeinput", {
+      bubbles: true,
+      cancelable: true,
+      data: "你",
+      inputType: "insertCompositionText",
+      isComposing: true,
+    }));
+
+    // Model Chromium placing marked text after the visually collapsed source
+    // indentation even though the user's caret is before it.
+    text.data = `${text.data}你`;
+    const deliveryRange = document.createRange();
+    deliveryRange.setStart(text, text.data.length);
+    deliveryRange.collapse(true);
+    selection?.removeAllRanges();
+    selection?.addRange(deliveryRange);
+    element.dispatchEvent(new InputEvent("input", {
+      bubbles: true,
+      data: "你",
+      inputType: "insertCompositionText",
+      isComposing: true,
+    }));
+    element.dispatchEvent(new CompositionEvent("compositionend", {
+      bubbles: true,
+      data: "你",
+    }));
+    return accepted;
+  });
+
+  expect(result).toBe(true);
+  await page.waitForTimeout(900);
+  expect(await authoredInnerHtml(target)).toBe(
+    "\n    Paragraph end你\n  ",
+  );
+  expect(await page.getByTestId("html-canvas-editor").getAttribute(
+    "data-edit-block-detail",
+  )).toBeNull();
+  const expected = Buffer.from(source.toString("utf8").replace(
+    "Paragraph end",
+    "Paragraph end你",
+  ), "utf8");
   expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
 });
 
