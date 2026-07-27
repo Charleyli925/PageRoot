@@ -82,7 +82,7 @@
       "prerequisites": ["build-desktop"]
     },
     "packaged-runtime": {
-      "description": "Launch the packaged .app with isolated data and execute a real authored-DOM source-byte smoke test.",
+      "description": "Launch the packaged .app with isolated data and verify source bytes, stale-draft reconciliation and clean close/reopen.",
       "prerequisites": ["package-build"]
     },
     "packaged-verify": {
@@ -415,8 +415,18 @@
       "nodeTests": []
     },
     {
+      "id": "packaged-runtime-e2e",
+      "patterns": [
+        "^tests/e2e/electron/(?:packaged-runtime-smoke\\.spec|playwright\\.packaged\\.config)\\.mjs$"
+      ],
+      "suites": [],
+      "nodeTests": []
+    },
+    {
       "id": "electron-e2e",
-      "patterns": ["^tests/e2e/electron/(?!ai-handoff-closed-loop).*\\.mjs$"],
+      "patterns": [
+        "^tests/e2e/electron/(?!ai-handoff-closed-loop|packaged-runtime-smoke\\.spec|playwright\\.packaged\\.config).*\\.mjs$"
+      ],
       "suites": ["electron-smoke"],
       "nodeTests": []
     },

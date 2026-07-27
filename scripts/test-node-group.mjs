@@ -15,7 +15,6 @@ const SMOKE_TESTS = new Set([
 
 const CONTRACT_TESTS = new Set([
   "native-command-queue-contract.test.mjs",
-  "native-layout-guard.test.mjs",
   "notification-ui.test.mjs",
   "workbench-source-fence-contract.test.mjs",
   "workbench-shell-ux.test.mjs",

@@ -2,7 +2,9 @@ import {
   existsSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -12,9 +14,10 @@ import { _electron as electron } from "playwright";
 
 import {
   activateNativeEdit,
+  caseSelector,
+  currentEditorFrame,
   fixtureBuffer,
   keyShortcut,
-  loadFixture,
   productRoot,
   requestExportCurrentHtml,
   replaceUniqueBytes,
@@ -30,6 +33,71 @@ function packagedExecutable() {
   const executable = path.join(appPath, "Contents/MacOS/PageRoot");
   if (!existsSync(executable)) throw new Error(`Packaged PageRoot executable is missing: ${executable}`);
   return executable;
+}
+
+function seedActiveDiskProject(isolatedUserData, sourcePath) {
+  writeFileSync(
+    path.join(isolatedUserData, "html-projects.json"),
+    JSON.stringify({
+      version: 1,
+      activePath: sourcePath,
+      recent: [{
+        path: sourcePath,
+        name: path.basename(sourcePath),
+        lastOpenedAt: Date.now(),
+      }],
+    }),
+    "utf8",
+  );
+}
+
+async function launchPackaged(isolatedUserData) {
+  const electronApp = await electron.launch({
+    executablePath: packagedExecutable(),
+    cwd: productRoot,
+    env: {
+      ...process.env,
+      PAGEROOT_E2E: "1",
+      PAGEROOT_E2E_USER_DATA_DIR: isolatedUserData,
+      HTML_AI_WORKSPACE: path.join(isolatedUserData, "workspace"),
+    },
+  });
+  const page = await electronApp.firstWindow();
+  await page.waitForLoadState("domcontentloaded");
+  await expect(page).toHaveTitle("源页");
+  return { electronApp, page };
+}
+
+async function bridgeJson(page, pathname, {
+  sourcePath,
+  body,
+} = {}) {
+  const runtime = await page.evaluate(() => window.htmlAIRuntime);
+  const url = new URL(`http://127.0.0.1:${runtime.bridgePort}${pathname}`);
+  if (sourcePath) url.searchParams.set("sourcePath", sourcePath);
+  const response = await fetch(url, {
+    method: body ? "POST" : "GET",
+    headers: {
+      ...(body ? { "content-type": "application/json" } : {}),
+      "x-html-ai-bridge-token": runtime.bridgeAuthToken,
+    },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(
+      `Packaged Bridge ${pathname} failed (${response.status}): ${JSON.stringify(payload)}`,
+    );
+  }
+  return payload;
+}
+
+async function closePackagedGracefully(electronApp) {
+  const closed = electronApp.waitForEvent("close", { timeout: 35_000 });
+  await electronApp.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0]?.close();
+  });
+  await closed;
 }
 
 function removeIsolatedDirectory(directory) {
@@ -48,28 +116,23 @@ function removeIsolatedDirectory(directory) {
   });
 }
 
-test("packaged PageRoot boots in isolation and exports one byte-exact authored DOM edit", async () => {
+test("packaged PageRoot preserves source bytes and reconciles draft revision before close", async () => {
+  test.setTimeout(120_000);
   const isolatedUserData = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-packaged-"));
+  const sourcePathAlias = path.join(isolatedUserData, "packaged-source.html");
   const exportedPath = path.join(isolatedUserData, "packaged-export.html");
   const originalToken = "SOURCE_FIDELITY_TOKEN_001";
   const replacement = "PackagedRuntime_OK_源页";
   const original = withBomAndCrLf(fixtureBuffer("source-fidelity.html"));
   const expected = replaceUniqueBytes(original, originalToken, replacement);
+  writeFileSync(sourcePathAlias, original);
+  const sourcePath = realpathSync(sourcePathAlias);
+  seedActiveDiskProject(isolatedUserData, sourcePath);
   let electronApp = null;
   try {
-    electronApp = await electron.launch({
-      executablePath: packagedExecutable(),
-      cwd: productRoot,
-      env: {
-        ...process.env,
-        PAGEROOT_E2E: "1",
-        PAGEROOT_E2E_USER_DATA_DIR: isolatedUserData,
-        HTML_AI_WORKSPACE: path.join(isolatedUserData, "workspace"),
-      },
-    });
-    const page = await electronApp.firstWindow();
-    await page.waitForLoadState("domcontentloaded");
-    await expect(page).toHaveTitle("源页");
+    let launched = await launchPackaged(isolatedUserData);
+    electronApp = launched.electronApp;
+    let page = launched.page;
     const runtime = await page.evaluate(() => window.htmlAIRuntime);
     expect(runtime?.appVersion).toMatch(/^\d+\.\d+\.\d+$/u);
     await electronApp.evaluate(({ dialog }, destination) => {
@@ -79,15 +142,88 @@ test("packaged PageRoot boots in isolation and exports one byte-exact authored D
       });
     }, exportedPath);
 
-    const { frame } = await loadFixture(page, "source-fidelity.html", { buffer: original });
+    await expect.poll(
+      async () => (await page.evaluate(
+        () => window.htmlAIProjects?.getActiveProject(),
+      ))?.sourcePath,
+      { timeout: 30_000 },
+    ).toBe(sourcePath);
+    await expect(page.locator("main.workbench"))
+      .toHaveAttribute("data-project-state", "ready", { timeout: 30_000 });
+    let frame = await currentEditorFrame(page);
+    await frame.waitForFunction(
+      (selector) => Boolean(document.querySelector(selector)),
+      caseSelector("source-fidelity"),
+    );
     await activateNativeEdit(frame, "source-fidelity");
     await setTextSelection(frame, "source-fidelity", 0, originalToken.length);
     await page.keyboard.insertText(replacement);
     await page.keyboard.press(keyShortcut("S"));
+    await expect.poll(
+      () => readFileSync(sourcePath).equals(expected),
+      { timeout: 30_000 },
+    ).toBe(true);
     await requestExportCurrentHtml(page);
     await expect.poll(() => existsSync(exportedPath), { timeout: 15_000 }).toBe(true);
     const exported = readFileSync(exportedPath);
     expect(exported.equals(expected), "packaged export must differ only at the authorized bytes").toBe(true);
+
+    const opened = await bridgeJson(page, "/workspace", { sourcePath });
+    const staleRendererRevision = opened.runtimeState.draft.draftRevision;
+    const external = await bridgeJson(page, "/draft", {
+      body: {
+        operationId: "draftop_packaged_external_delete_0001",
+        sourcePath,
+        projectId: opened.projectId,
+        documentId: opened.documentId,
+        expectedDraftRevision: staleRendererRevision,
+        comments: [],
+        changeEvents: [],
+        deletedCommentIds: ["comment_packaged_external_deleted"],
+      },
+    });
+    expect(external.activeDraft.draftRevision).toBe(staleRendererRevision + 1);
+
+    frame = await currentEditorFrame(page);
+    await frame.waitForFunction(
+      (selector) => Boolean(document.querySelector(selector)),
+      caseSelector("source-fidelity"),
+    );
+    await frame.locator(caseSelector("source-fidelity")).click();
+    const toolbar = page.getByRole("toolbar", { name: /编辑/u });
+    await toolbar.getByRole("button", { name: /留评论/u }).click();
+    await page.getByRole("textbox", { name: "评论内容" })
+      .fill("打包环境 Revision 自动合并");
+    await page.getByRole("button", { name: "评论", exact: true }).click();
+
+    const expectedRevision = staleRendererRevision + 2;
+    await expect.poll(async () => {
+      const workspace = await bridgeJson(page, "/workspace", { sourcePath });
+      return {
+        revision: workspace.runtimeState.draft.draftRevision,
+        comments: workspace.runtimeState.draft.comments.map(
+          (comment) => comment.text,
+        ),
+        deletedCommentIds: workspace.runtimeState.draft.deletedCommentIds,
+      };
+    }, { timeout: 30_000 }).toEqual({
+      revision: expectedRevision,
+      comments: ["打包环境 Revision 自动合并"],
+      deletedCommentIds: ["comment_packaged_external_deleted"],
+    });
+
+    await closePackagedGracefully(electronApp);
+    electronApp = null;
+
+    launched = await launchPackaged(isolatedUserData);
+    electronApp = launched.electronApp;
+    page = launched.page;
+    const reopened = await bridgeJson(page, "/workspace", { sourcePath });
+    expect(reopened.runtimeState.draft.draftRevision).toBe(expectedRevision);
+    expect(reopened.runtimeState.draft.deletedCommentIds)
+      .toEqual(["comment_packaged_external_deleted"]);
+    expect(reopened.runtimeState.draft.comments.map((comment) => comment.text))
+      .toEqual(["打包环境 Revision 自动合并"]);
   } finally {
     if (electronApp) {
       const electronProcess = electronApp.process();

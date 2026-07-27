@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -47,6 +48,10 @@ test("build provenance is strict and identifies one source tree", () => {
 });
 
 test("repository identity and expected build info come from the active checkout", async () => {
+  const packageJson = JSON.parse(await readFile(
+    path.join(productRoot, "package.json"),
+    "utf8",
+  ));
   const repository = readRepositoryIdentity(productRoot);
   assert.match(repository.commitSha, /^[0-9a-f]{40}$/u);
   assert.match(repository.treeSha, /^[0-9a-f]{40}$/u);
@@ -57,5 +62,5 @@ test("repository identity and expected build info come from the active checkout"
   });
   assert.equal(expected.commitSha, repository.commitSha);
   assert.equal(expected.treeSha, repository.treeSha);
-  assert.equal(expected.version, "0.8.9");
+  assert.equal(expected.version, packageJson.version);
 });
