@@ -63,7 +63,10 @@ async function loadRealHtml(page, sourcePath, source) {
   await iframe.waitFor({ state: "visible" });
   const frame = await (await iframe.elementHandle())?.contentFrame();
   if (!frame) throw new Error("The real HTML preview did not expose a same-origin edit frame.");
-  await frame.waitForFunction(() => document.readyState === "complete" && Boolean(document.body));
+  // A user HTML file may intentionally keep external media or fonts pending.
+  // DOM readiness is sufficient for source-backed editing; waiting for the
+  // window load event would make the real-file gate hang on unrelated assets.
+  await frame.waitForFunction(() => document.readyState !== "loading" && Boolean(document.body));
   return { editor, iframe, frame };
 }
 
@@ -318,6 +321,37 @@ function expectGeometryStable(before, after) {
   ));
 }
 
+function geometrySnapshotsClose(left, right, tolerance = 0.5) {
+  const rectClose = (first, second) => (
+    ["x", "y", "width", "height"].every(
+      (key) => Math.abs(first[key] - second[key]) <= tolerance,
+    )
+  );
+  return left.scroll.x === right.scroll.x
+    && left.scroll.y === right.scroll.y
+    && left.documentSize.width === right.documentSize.width
+    && left.documentSize.height === right.documentSize.height
+    && rectClose(left.target, right.target)
+    && left.textRects.length === right.textRects.length
+    && left.textRects.every((rect, index) => rectClose(rect, right.textRects[index]))
+    && left.visibleSourceRects.length === right.visibleSourceRects.length
+    && left.visibleSourceRects.every((entry, index) => (
+      entry.sourceId === right.visibleSourceRects[index].sourceId
+      && rectClose(entry.rect, right.visibleSourceRects[index].rect)
+    ));
+}
+
+async function waitForGeometrySettled(target) {
+  let previous = await visualGeometrySnapshot(target);
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const current = await visualGeometrySnapshot(target);
+    if (geometrySnapshotsClose(previous, current)) return current;
+    previous = current;
+  }
+  throw new Error("The real HTML layout did not settle before native editing.");
+}
+
 async function setHandleTextSelection(handle, start, end = start) {
   return handle.evaluate((target, offsets) => {
     const textNodes = [];
@@ -386,7 +420,7 @@ test("a real complex HTML file keeps layout and source authority through edit an
   // Chromium may finalize lazy glyph metrics while taking the first iframe
   // screenshot. Capture the geometry baseline after that rendering barrier so
   // the edit assertion compares two settled layouts rather than font warm-up.
-  const beforeGeometry = await visualGeometrySnapshot(target);
+  const beforeGeometry = await waitForGeometrySettled(target);
 
   await target.dblclick({ position: await firstRenderedTextPosition(target) });
   await expect.poll(

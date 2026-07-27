@@ -106,6 +106,7 @@ HTML AI 工作台让用户在真实本地 HTML 上完成两类工作：
 支持的直接编辑至少包括：
 
 - 双击 source-backed 静态文字后，光标直接出现在点击位置；普通文字和安全的混合行内文字都可输入、删除和选择。
+- 可编辑宿主的可视段首、段尾和非空样式交界均可输入：可视段首继承右侧首字符，其他交界继承左侧字符，工具栏显示与下一次输入一致的样式。
 - 文字 checkpoint 可以跨多个源码 text node，但不得拍平或序列化既有行内标签。
 - 字体、字号、字重、斜体和颜色。
 - 背景、填充、边框和常用间距。
@@ -126,6 +127,8 @@ HTML AI 工作台让用户在真实本地 HTML 上完成两类工作：
 用户合同不是固定 700 毫秒，而是“无需手动保存，状态真实可见”。实现应以约 700 毫秒为初值并通过性能测试调整。
 
 宿主能力预检优先选择 `contenteditable="plaintext-only"`。只有当该模式改变文字几何、而 `contenteditable="true"` 在相同完整会话属性下保持布局、文字样式、选区与恢复精确稳定时，才允许受控 fallback。fallback 不开放浏览器自由生成富文本的能力：粘贴只读取 `text/plain`；多行纯文本和 `Shift+Enter` 由显式 SourcePatch 生成固定 `<br>`，相邻已有 `<br>` 可由 Backspace/Delete 精确删除；普通 `Enter` 可拆分一个直接文字节点构成的 `<p>` 或 `<ul>/<ol>` 中的 `<li>`。新块复制视觉属性，但去除 `id/name/value`、事件属性和明显唯一的 data 属性。选区格式快捷键 `Cmd/Ctrl+B/I/U` 与工具栏下划线也走显式源码 Patch。浏览器生成的富 HTML、任意复杂块结构以及未形成完整输入事件的 DOM 变化仍由 MutationObserver 阻止或回滚。包含 `display: contents` 的文字岛也只能通过 observer-guarded 事件通道进入；观察器不可用时继续 fail-closed。
+
+折叠输入的格式归属以输入前的源码亲和性为准，而不是输入后光标的位置：可视段首向右，其余文字/样式/链接边界向左。对 Chromium 会归一化周围折叠空白的可视段首段尾，以及无法由浏览器 caret gravity 唯一表达的行内边界，Controller 必须接管最小文字变更并保留源码缩进；最终仍由 FormatSkeleton、SourceTextMap、SourcePatch 和源码 Hash 校验，不能直接序列化 DOM。
 
 编辑画布必须明确提示“本地文本编辑会直接修改源文件并保存”。这里的“源文件”指项目当前指向的 HTML：首次打开时是用户原文件；AI 成功后是新的 `working/V1.x.html`。
 

@@ -17,6 +17,12 @@ const source = Buffer.from(`<!doctype html>
   <p data-native-case="exact-boundaries"><em><strong>A</strong></em>B</p>
   <p data-native-case="inline-interior"><em><strong>AB</strong></em>C</p>
   <p data-native-case="empty-wrapper">A<em><strong></strong></em>B</p>
+  <p data-native-case="visible-start">
+    <em>Start</em>
+  </p>
+  <p data-native-case="visible-end">
+    <strong>End</strong>
+  </p>
 </body>
 </html>
 `, "utf8");
@@ -113,33 +119,50 @@ async function handledInputEvents(frame) {
   );
 }
 
-test("every exact collapsed DOM point at A/inline/B boundaries is blocked", async ({ page }) => {
-  const { frame } = await openFixture(page);
-  const target = await attemptDirectEdit(frame, "exact-boundaries");
-  await expect(target).toHaveAttribute("contenteditable", "plaintext-only");
-  // A document bubble listener runs after NativeEditingController's target
-  // listener and therefore observes the final preventDefault state, unlike
-  // the shared document capture recorder.
-  await installHandledInputRecorder(frame);
-
+test("every exact collapsed DOM point at A/inline/B boundaries inserts with deterministic affinity", async ({ page }) => {
+  const expectedInnerHtml = {
+    "a-text-start": "<em><strong>XA</strong></em>B",
+    "a-text-end": "<em><strong>AX</strong></em>B",
+    "strong-start": "<em><strong>XA</strong></em>B",
+    "strong-end": "<em><strong>AX</strong></em>B",
+    "em-start": "<em><strong>XA</strong></em>B",
+    "em-end": "<em><strong>AX</strong></em>B",
+    "root-start": "<em><strong>XA</strong></em>B",
+    "root-after-em": "<em><strong>AX</strong></em>B",
+    "b-text-start": "<em><strong>AX</strong></em>B",
+  };
   for (const point of boundaryPoints) {
     await test.step(point, async () => {
-      const eventCount = (await handledInputEvents(frame)).length;
+      const { frame } = await openFixture(page);
+      const target = await attemptDirectEdit(frame, "exact-boundaries");
+      await expect(target).toHaveAttribute("contenteditable", "plaintext-only");
+      // A document bubble listener runs after NativeEditingController's
+      // target listener and observes PageRoot's owned correction.
+      await installHandledInputRecorder(frame);
       await setExactBoundaryPoint(target, point);
       await page.keyboard.insertText("X");
 
-      const events = (await handledInputEvents(frame)).slice(eventCount);
+      const events = await handledInputEvents(frame);
       const beforeInput = events.find((event) => event.type === "beforeinput");
       expect(beforeInput).toMatchObject({
         inputType: "insertText",
         defaultPrevented: true,
       });
       expect(events.some((event) => event.type === "input")).toBe(false);
-      expect(await authoredInnerHtml(target)).toBe("<em><strong>A</strong></em>B");
+      expect(await authoredInnerHtml(target)).toBe(expectedInnerHtml[point]);
+      await page.waitForTimeout(900);
+      const afterCheckpoint = await authoredInnerHtml(target);
+      const diagnostics = await page.getByTestId("html-canvas-editor").evaluate(
+        (element) => ({
+          detail: element.getAttribute("data-edit-block-detail"),
+        }),
+      );
+      expect({ afterCheckpoint, diagnostics }).toEqual({
+        afterCheckpoint: expectedInnerHtml[point],
+        diagnostics: { detail: null },
+      });
     });
   }
-
-  expect((await exportCurrentHtml(page)).equals(source)).toBe(true);
 });
 
 test("a non-collapsed replacement at the same wrapper endpoints remains native", async ({ page }) => {
@@ -197,6 +220,42 @@ test("a strict text-node interior offset remains a native source-exact edit", as
   expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
 });
 
+test("visible paragraph start and end preserve authored indentation while accepting text", async ({ page }) => {
+  const { frame } = await openFixture(page);
+  const startTarget = await attemptDirectEdit(frame, "visible-start");
+  await startTarget.evaluate((element) => {
+    const text = element.querySelector("em")?.firstChild;
+    if (!(text instanceof Text)) throw new Error("Visible-start text is missing.");
+    const range = document.createRange();
+    range.setStart(text, 0);
+    range.collapse(true);
+    const selection = document.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  });
+  await page.keyboard.insertText("首");
+  await expect(startTarget).toContainText("首Start");
+
+  const endTarget = await attemptDirectEdit(frame, "visible-end");
+  await endTarget.evaluate((element) => {
+    const text = element.querySelector("strong")?.firstChild;
+    if (!(text instanceof Text)) throw new Error("Visible-end text is missing.");
+    const range = document.createRange();
+    range.setStart(text, text.data.length);
+    range.collapse(true);
+    const selection = document.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  });
+  await page.keyboard.insertText("尾");
+  await expect(endTarget).toContainText("End尾");
+
+  const expected = Buffer.from(source.toString("utf8")
+    .replace("<em>Start</em>", "<em>首Start</em>")
+    .replace("<strong>End</strong>", "<strong>End尾</strong>"), "utf8");
+  expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
+});
+
 test("an empty transparent wrapper rejects the whole direct-edit island", async ({ page }) => {
   const { frame } = await openFixture(page);
   const target = await attemptDirectEdit(frame, "empty-wrapper");
@@ -214,7 +273,7 @@ test("an empty transparent wrapper rejects the whole direct-edit island", async 
   expect((await exportCurrentHtml(page)).equals(source)).toBe(true);
 });
 
-test("the first IME beforeinput cancels the boundary epoch and restores hostile late tails", async ({ page }) => {
+test("an IME boundary epoch canonicalizes a wrong-side delivery into the left style", async ({ page }) => {
   const { frame } = await openFixture(page);
   const target = await attemptDirectEdit(frame, "exact-boundaries");
   await expect(target).toHaveAttribute("contenteditable", "plaintext-only");
@@ -240,10 +299,15 @@ test("the first IME beforeinput cancels the boundary epoch and restores hostile 
       isComposing: true,
     }));
 
-    // Synthetic beforeinput never performs the browser's default mutation.
-    // Reproduce a hostile platform tail explicitly: Chromium caret gravity may
-    // append the marked text to A even though Selection was at B@0.
-    strongText.data = "A你";
+    // PageRoot normalized this A/B boundary to the left (A). Reproduce a
+    // hostile platform delivery that nevertheless lands in the right text.
+    trailingText.data = "你B";
+    const selection = document.getSelection();
+    const range = document.createRange();
+    range.setStart(trailingText, 1);
+    range.collapse(true);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
     element.dispatchEvent(new InputEvent("input", {
       bubbles: true,
       data: "你",
@@ -256,31 +320,10 @@ test("the first IME beforeinput cancels the boundary epoch and restores hostile 
       bubbles: true,
       data: "你",
     }));
-    const terminalBeforeInputAccepted = element.dispatchEvent(new InputEvent("beforeinput", {
-      bubbles: true,
-      cancelable: true,
-      data: "你",
-      inputType: "insertText",
-      isComposing: false,
-    }));
-    const terminalTrailingText = element.lastChild;
-    if (!(terminalTrailingText instanceof Text)) {
-      throw new Error("Restored terminal text node is missing.");
-    }
-    terminalTrailingText.data = "你B";
-    element.dispatchEvent(new InputEvent("input", {
-      bubbles: true,
-      data: "你",
-      inputType: "insertText",
-      isComposing: false,
-    }));
-    const htmlAfterTerminalTail = element.innerHTML;
 
     return {
       firstBeforeInputAccepted,
-      terminalBeforeInputAccepted,
       htmlAfterCompositionTail,
-      htmlAfterTerminalTail,
     };
   });
   await waitForFramePaint(frame);
@@ -289,23 +332,21 @@ test("the first IME beforeinput cancels the boundary epoch and restores hostile 
   await page.waitForTimeout(850);
 
   expect(result).toMatchObject({
-    firstBeforeInputAccepted: false,
-    terminalBeforeInputAccepted: false,
+    firstBeforeInputAccepted: true,
   });
-  expect(result.htmlAfterCompositionTail).not.toContain("你");
-  expect(result.htmlAfterTerminalTail).not.toContain("你");
-  expect(await authoredInnerHtml(target)).toBe("<em><strong>A</strong></em>B");
+  expect(result.htmlAfterCompositionTail).toContain("你");
+  expect(await authoredInnerHtml(target)).toBe("<em><strong>A你</strong></em>B");
 
   const preventedBeforeInputs = (await handledInputEvents(frame)).filter(
     (event) => event.type === "beforeinput" && event.defaultPrevented,
   );
-  expect(preventedBeforeInputs).toHaveLength(2);
-  expect(preventedBeforeInputs.map((event) => event.inputType)).toEqual([
-    "insertCompositionText",
-    "insertText",
-  ]);
+  expect(preventedBeforeInputs).toHaveLength(0);
   await expect(page.locator(".round-record-counts")).toHaveText(
-    "0 条评论 · 0 项直接编辑记录",
+    "0 条评论 · 1 项直接编辑记录",
   );
-  expect((await exportCurrentHtml(page)).equals(source)).toBe(true);
+  const expected = Buffer.from(source.toString("utf8").replace(
+    "<strong>A</strong>",
+    "<strong>A你</strong>",
+  ), "utf8");
+  expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
 });

@@ -280,8 +280,7 @@ export function domPointForLogicalOffset(
   const tokens = hostIndex.tokens;
   const logicalLength = hostIndex.logicalLength;
   const clamped = Math.max(0, Math.min(logicalLength, logicalOffset));
-  for (let index = 0; index < tokens.length; index += 1) {
-    const token = tokens[index];
+  for (const token of tokens) {
     if (token.kind === "text") {
       if (clamped > token.start && clamped < token.end) {
         return { node: token.node, offset: clamped - token.start };
@@ -293,6 +292,8 @@ export function domPointForLogicalOffset(
         return { node: token.node, offset: token.text.length };
       }
     }
+  }
+  for (const token of tokens) {
     if (clamped === token.start || clamped === token.end) {
       const parent = token.node.parentNode;
       if (!parent) continue;

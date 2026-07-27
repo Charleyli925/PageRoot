@@ -46,7 +46,7 @@
 
 ## 真实 HTML 与输入法边界
 
-`npm run test:real-html` 默认使用仓库内复杂 HTML 物料，自动发现一个可编辑目标和一个明确降级目标，并验证几何与字节不变量。也可以用 `PAGEROOT_REAL_HTML_PATH` 覆盖直接测试的输入，或对门禁执行器传入 `--real-html <绝对路径>`；原文件不会被写入。
+`npm run test:real-html` 默认使用仓库内复杂 HTML 物料，自动发现一个可编辑目标和一个明确降级目标，并验证几何与字节不变量。也可以用 `PAGEROOT_REAL_HTML_PATH` 覆盖直接测试的输入，或对门禁执行器传入 `--real-html <绝对路径>`；原文件不会被写入。真实页只要求 DOM 已进入可交互状态，不等待可能被外部字体或媒体永久拖住的整页 `load`；进入编辑前必须连续取得稳定的目标、文字、可见源码节点和文档尺寸几何快照。
 
 当前自动化能证明 Chromium/Electron composition 事件序列、Apple 拼音临时 wrapper 轨迹、取消/迟到事件、持久化和 canonical reconcile。它不能诚实证明第三方 macOS 输入法候选窗本身。该能力在出现可无人值守、可复现并有机器 oracle 的 OS 级驱动前只登记为覆盖边界，不设人工门禁，也不伪装成已自动验证。
 

@@ -2214,9 +2214,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
 
   const updateSelectedStyle = useCallback(() => {
     const element = selectedElementRef.current;
-    const activeStyleElements = activeTextRangeRef.current?.styleElements.filter(
-      (candidate) => candidate.isConnected,
-    ) ?? [];
+    const activeStyleElements = (
+      activeTextRangeRef.current?.styleElements
+      ?? activeNativeEditRef.current?.session.getStyleElementsForSelection()
+      ?? []
+    ).filter((candidate) => candidate.isConnected);
     const styleElement = activeStyleElements[0] ?? element;
     const view = styleElement?.ownerDocument.defaultView;
     if (!element || !styleElement || !view) return;
@@ -3510,7 +3512,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             endOffset: replacement.endOffset,
             nextText: replacement.nextText,
             affinity: captured.checkpoint.formatEditRange?.affinity
-              ?? nextSelection.affinity,
+              // Insertion ownership belongs to the caret before the browser
+              // edit. The final caret sits after the new text and therefore
+              // has left affinity even when a paragraph-start insertion must
+              // inherit the first character on its right.
+              ?? beforeSelection.affinity,
           })),
           finalSelection: nextSelection,
           allowPlaceholderBreak: nextText === "",
