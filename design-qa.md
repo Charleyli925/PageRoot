@@ -1,5 +1,104 @@
 # Design QA
 
+## Comment card hierarchy and progressive actions
+
+Date: 2026-07-28
+
+Source visual truth:
+
+- Three user-provided comment-card captures covering visible actions, editing
+  hierarchy and the normal-state outer halo. They were reviewed locally and
+  remain excluded from the public repository.
+
+Implementation evidence:
+
+- `output/design-qa/2026-07-28-comment-card/comment-card-default-full.png`
+- `output/design-qa/2026-07-28-comment-card/comment-card-default.png`
+- `output/design-qa/2026-07-28-comment-card/comment-card-hover.png`
+- `output/design-qa/2026-07-28-comment-card/comment-card-editing.png`
+
+Combined comparison inputs:
+
+- `output/design-qa/2026-07-28-comment-card/comparison-default-source-vs-production.png`
+- `output/design-qa/2026-07-28-comment-card/comparison-hover-source-vs-production.png`
+- `output/design-qa/2026-07-28-comment-card/comparison-editing-source-vs-production.png`
+
+Viewport and normalization:
+
+- Production browser viewport and full screenshot: `1280 × 720` CSS pixels at
+  1× output density.
+- Focused production rail fixture: `376 × 430` CSS pixels; rendered card width
+  `348` pixels.
+- Source captures: `1486 × 546`, `712 × 542` and `762 × 698` pixels. Their CSS
+  viewport and density are unavailable.
+- Each focused comparison crops the source and production card regions, then
+  normalizes both rail widths to `600` pixels without stretching their heights.
+- States: saved comment at rest, actual forced `:hover`, keyboard focus within
+  the card, and focused editing.
+
+Full-view comparison evidence:
+
+- The production build was opened at the target viewport and the real PageRoot
+  stylesheet was exercised with a temporary synthetic comment-card fixture.
+  The fixture used the production markup classes and the same Phosphor icons as
+  the application; it was removed after the check.
+- The normal card retains the existing right-rail placement, connector,
+  typography hierarchy and semantic purple accent while removing the second
+  outer ring.
+- No page overflow, clipping, broken radius or unexpected surrounding layout
+  change appeared in the full capture.
+
+Focused comparison evidence:
+
+- Fonts and typography: saved-comment text and edit text both compute to
+  `14px` with `23.1px` line height. Existing target-label and timestamp
+  hierarchy remains unchanged.
+- Spacing and layout rhythm: the default footer computes to `0px` height and
+  `0px` top margin. Hover, keyboard focus and editing reveal a `30px` footer
+  with `6px` separation; the card grows by exactly `36px`.
+- Colors and tokens: normal, located-focus and editing states each compute to
+  one `1px` border, no outline and one
+  `0 15px 32px rgb(45 42 104 / 7%)` shadow.
+- Editor hierarchy: the focused textarea has a `0px` border, no outline, a
+  light-gray tonal background and one `2px` inset purple focus underline.
+- Image and icon fidelity: the existing Phosphor paperclip, image, pencil,
+  trash, cancel and confirm icons are retained. No replacement asset or
+  approximate glyph was introduced.
+- Copy and content: production labels, timestamp format and comment content
+  remain unchanged; only the approved text size and presentation states move.
+- Divider: the footer computes to a `0px` top border in every checked state.
+
+Findings:
+
+- No actionable P0, P1 or P2 mismatch remains.
+- The compact reveal is safe for keyboard users: programmatic keyboard focus on
+  the card reveals the same `30px` tools while retaining a single card shadow.
+- Dense-card placement continues to use the existing `ResizeObserver` height
+  measurements, so the additional `36px` revealed height is fed back into the
+  established non-overlap layout rather than being reserved at rest.
+
+Comparison history:
+
+1. Source inspection found a P2 hierarchy issue that would have survived a
+   base-card-only change: the later `data-focused="true"` rule still added a
+   second purple ring and an animated multi-shadow.
+2. The composer focus treatment was separated from saved-comment focus.
+   Normal, located-focus and editing cards now share one border and one shadow;
+   the editor uses a tonal plane and focus underline.
+3. Post-fix computed measurements confirmed default footer height `0px`, hover
+   and editing footer height `30px`, `6px` reveal spacing, `14px` comment text,
+   no divider, no card outline and no second shadow.
+
+Browser checks:
+
+- Production build loaded successfully at the target viewport.
+- Default, hover, keyboard-focus and editing states were captured and compared.
+- The browser console contained no warnings or errors.
+
+final result: passed
+
+---
+
 Viewport: 1280 × 720
 
 References:
