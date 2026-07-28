@@ -438,6 +438,21 @@ test("a verified AI result stays pending until the user opens the new HTML", asy
       launched.electronApp,
       fixture.sourcePath,
     );
+    const attemptRoot = path.join(
+      request.requestRoot,
+      "attempts",
+      "attempt_001",
+    );
+    writeFileSync(path.join(attemptRoot, ".DS_Store"), "Finder metadata");
+    writeFileSync(
+      path.join(attemptRoot, "output", ".DS_Store"),
+      "Finder metadata",
+    );
+    await launched.page.waitForTimeout(3_500);
+    await expect(
+      launched.page.locator(".handoff-process-board li")
+        .filter({ hasText: "等待 AI 返回结果" }),
+    ).toHaveAttribute("data-state", "pending");
     writeAiOutput(request.requestRoot, (base) => {
       expect(base.match(new RegExp(ORIGINAL_TEXT, "gu"))).toHaveLength(1);
       return base.replace(ORIGINAL_TEXT, UPDATED_TEXT);
@@ -448,6 +463,10 @@ test("a verified AI result stays pending until the user opens the new HTML", asy
       "修改结果已通过检查",
       { exact: true },
     ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+    await expect(
+      launched.page.locator(".handoff-process-board li")
+        .filter({ hasText: "已检测到 AI 返回结果" }),
+    ).toHaveAttribute("data-state", "done");
     const pending = await launched.page.evaluate(
       () => window.htmlAIProjects?.getActiveProject(),
     );

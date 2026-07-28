@@ -91,6 +91,7 @@ v3 是干净切换后的唯一运行时协议。v1/v2 记录在切换前整体�
 - `change-request.json` 的附件项可以额外包含由系统生成的 Request 内本机绝对 `localPath`，供当前电脑上的内部 AI / QoderWork 直接读取；同一项必须保留可移植的 `requestRelativePath`。
 - 除受控的 Request/Attempt/output/completion/附件 `localPath` 外，结构化路径不得为绝对路径；所有相对路径不得包含 `..`，任何路径都不得通过软链接逃逸项目目录。
 - output 只有一个完整 HTML，不得创建 `PROJECT.md` 或其他额外页面资产。
+- Finder 在 Attempt 或 output 中生成的普通、非软链接 `.DS_Store` 只属于系统显示元数据，不参与协议也不改变状态；其他未声明条目和同名软链接仍按协议违规拒绝。
 
 ## 3. 身份
 
@@ -457,6 +458,7 @@ Completion 必须在 output 完全关闭后最后写入。完成后 output 封�
 7. 进入 no-change、冲突或事务提交。
 
 不扫描其他 Request，不按目录时间猜测，不复用旧 completion。
+界面只根据 completion 是否已经出现显示“AI 已返回”；完成信号出现前的文件错误不得冒充 AI 返回。
 
 ## 12. 规范化比较
 

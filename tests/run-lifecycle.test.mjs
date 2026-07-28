@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   activeRunFromRecord,
   canonicalLifecycleState,
+  hasObservedCompletion,
   isLockedLifecycleState,
   validationReviewFromRecord,
 } from "../app/domain/run-lifecycle.js";
@@ -31,6 +32,21 @@ test("one canonical lock policy owns lifecycle interaction state", () => {
   assert.equal(isLockedLifecycleState("ready-to-open"), true);
   assert.equal(isLockedLifecycleState("complete"), false);
   assert.equal(isLockedLifecycleState("cancelled"), false);
+});
+
+test("AI completion progress uses explicit evidence instead of generic errors", () => {
+  assert.equal(hasObservedCompletion({ status: "processing" }), false);
+  assert.equal(hasObservedCompletion({ status: "error" }), false);
+  assert.equal(hasObservedCompletion({
+    status: "error",
+    completionObserved: true,
+  }), true);
+  assert.equal(hasObservedCompletion({
+    status: "awaiting-conflict-resolution",
+  }), true);
+  assert.equal(hasObservedCompletion({
+    status: "recovering-transaction",
+  }), true);
 });
 
 test("legacy validation review choices are decoded at the domain boundary", () => {

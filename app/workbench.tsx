@@ -100,6 +100,7 @@ import {
 import {
   activeRunFromRecord,
   canonicalLifecycleState,
+  hasObservedCompletion,
   isLockedLifecycleState,
   validationReviewFromRecord,
   type ActiveRun,
@@ -7365,7 +7366,12 @@ export default function Workbench() {
         const error = isRecord(payload.error)
           ? String(payload.error.message || "完成校验失败")
           : String(payload.error || "完成校验失败");
-        const errorRun = { ...run, status: "error" as const, error };
+        const errorRun = {
+          ...run,
+          status: "error" as const,
+          error,
+          completionObserved: payload.completionObserved === true,
+        };
         activeRunRef.current = errorRun;
         setActiveRun(errorRun);
         setDrawer("handoff");
@@ -7982,14 +7988,7 @@ export default function Workbench() {
         : activeRun?.status === "error"
           ? "需要处理"
           : "正在等待修改结果";
-  const returnedStates: LifecycleState[] = [
-    "validating",
-    "committing",
-    "ready-to-open",
-    "complete",
-    "no-change",
-    "error",
-  ];
+  const aiCompletionObserved = hasObservedCompletion(activeRun);
   const validatedStates: LifecycleState[] = [
     "committing",
     "ready-to-open",
@@ -8025,11 +8024,17 @@ export default function Workbench() {
     },
     {
       key: "returned",
-      label: "已检测到 AI 返回结果",
-      detail: returnedStates.includes(activeRun.status)
+      label: aiCompletionObserved
+        ? "已检测到 AI 返回结果"
+        : activeRun.status === "error"
+          ? "未检测到 AI 返回结果"
+          : "等待 AI 返回结果",
+      detail: aiCompletionObserved
         ? "完整 HTML 和完成记录已经出现"
-        : "等待 AI 写回受控文件",
-      state: returnedStates.includes(activeRun.status) ? "done" : "pending",
+        : activeRun.status === "error"
+          ? "本轮在完成记录出现前已停止"
+          : "等待 AI 写回受控文件",
+      state: aiCompletionObserved ? "done" : "pending",
     },
     {
       key: "integrity",
@@ -8045,7 +8050,7 @@ export default function Workbench() {
         ? "error"
         : validatedStates.includes(activeRun.status)
           ? "done"
-          : returnedStates.includes(activeRun.status)
+          : aiCompletionObserved
             ? "current"
             : "pending",
     },

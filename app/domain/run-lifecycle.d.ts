@@ -22,6 +22,9 @@ export function canonicalLifecycleState(
   },
 ): LifecycleState;
 export function isLockedLifecycleState(value: unknown): boolean;
+export function hasObservedCompletion(
+  run: Pick<ActiveRun, "status" | "completionObserved"> | null | undefined,
+): boolean;
 
 export type ValidationReview = {
   status: "observed" | "pending";
@@ -54,6 +57,7 @@ export type ActiveRun = {
   commentCount?: number;
   changeEventCount?: number;
   error?: string;
+  completionObserved?: boolean;
   conflictId?: string;
   externalSourceSha256?: string;
   candidateOutputSha256?: string;

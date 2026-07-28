@@ -48,6 +48,20 @@ const SUPPLEMENT_EVIDENCE_STATES = new Set([
   "original-file",
   "description-only",
 ]);
+const ATTEMPT_ENTRY_NAMES = new Set([
+  "output",
+  "completion.json",
+  "scope-report.json",
+  "result.json",
+  "cancelled.json",
+  "annotations.json",
+  "outcome.json",
+  "protocol-violation.json",
+  "USER_SUPPLEMENT.md",
+  "USER_SUPPLEMENT.json",
+  "supplement-attachments",
+  "validation-review.json",
+]);
 const MAX_SUPPLEMENT_RECORDS = 500;
 const MAX_SUPPLEMENT_ATTACHMENTS = 10;
 const MAX_SUPPLEMENT_ATTACHMENT_BYTES = 25 * 1024 * 1024;
@@ -114,6 +128,33 @@ export async function ensureDirectory(directory) {
       409,
     );
   }
+}
+
+function isFinderMetadataFile(entry) {
+  return entry.name === ".DS_Store"
+    && entry.isFile()
+    && !entry.isSymbolicLink();
+}
+
+export function findUnexpectedAttemptEntry(entries) {
+  return entries.find(
+    (entry) =>
+      !ATTEMPT_ENTRY_NAMES.has(entry.name)
+      && !entry.name.startsWith(".failpoint-")
+      && !isFinderMetadataFile(entry),
+  );
+}
+
+export function findUnexpectedAttemptOutputEntry(entries) {
+  return entries.find(
+    (entry) =>
+      !isFinderMetadataFile(entry)
+      && (
+        entry.name !== "index.html"
+        || entry.isSymbolicLink()
+        || !entry.isFile()
+      ),
+  );
 }
 
 export async function syncDirectory(directory) {
@@ -1251,25 +1292,7 @@ export async function recordUserSupplement({
 
 async function assertAttemptWriteSurface(attemptRoot) {
   const entries = await readdir(attemptRoot, { withFileTypes: true });
-  const allowed = new Set([
-    "output",
-    "completion.json",
-    "scope-report.json",
-    "result.json",
-    "cancelled.json",
-    "annotations.json",
-    "outcome.json",
-    "protocol-violation.json",
-    "USER_SUPPLEMENT.md",
-    "USER_SUPPLEMENT.json",
-    "supplement-attachments",
-    "validation-review.json",
-  ]);
-  const unexpected = entries.find(
-    (entry) =>
-      !allowed.has(entry.name)
-      && !entry.name.startsWith(".failpoint-"),
-  );
+  const unexpected = findUnexpectedAttemptEntry(entries);
   if (unexpected) {
     throw new LifecycleError(
       "UNEXPECTED_ATTEMPT_OUTPUT",
@@ -1298,12 +1321,7 @@ async function assertAttemptWriteSurface(attemptRoot) {
     );
   }
   const outputEntries = await readdir(outputRoot, { withFileTypes: true });
-  const unexpectedOutput = outputEntries.find(
-    (entry) =>
-      entry.name !== "index.html"
-      || entry.isSymbolicLink()
-      || !entry.isFile(),
-  );
+  const unexpectedOutput = findUnexpectedAttemptOutputEntry(outputEntries);
   if (unexpectedOutput) {
     throw new LifecycleError(
       "UNEXPECTED_OUTPUT_FILE",

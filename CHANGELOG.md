@@ -4,6 +4,10 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+- Keep Finder's regular `.DS_Store` metadata inert inside live AI Attempt
+  folders, and mark an AI return only after the mandatory completion signal
+  has actually appeared.
+
 ## [0.9.0] - 2026-07-28
 
 - Promoted the editable-island editor from the isolated V2 comparison build to

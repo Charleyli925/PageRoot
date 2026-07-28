@@ -447,6 +447,14 @@ test("QoderWork handoff exposes a truthful process board and manual open action"
   assert.match(workbench, /不代表 Qoder 已收到/);
   assert.match(workbench, /等待 QoderWork 返回修改结果/);
   assert.match(workbench, /画布已锁定，仅可浏览/);
+  assert.match(workbench, /hasObservedCompletion\(activeRun\)/);
+  assert.match(
+    workbench,
+    /completionObserved:\s*payload\.completionObserved === true/,
+  );
+  assert.match(workbench, /等待 AI 返回结果/);
+  assert.match(workbench, /未检测到 AI 返回结果/);
+  assert.doesNotMatch(workbench, /const returnedStates/);
   assert.match(workbench, /版本与文件完整性/);
   assert.doesNotMatch(workbench, /身份、Hash 与文件完整性/);
   assert.match(workbench, /范围与质量校验/);

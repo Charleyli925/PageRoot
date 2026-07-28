@@ -5,10 +5,51 @@ import {
   CANONICALIZATION_VERSION,
   MANAGED_META_NAMES,
   comparisonSha256,
+  findUnexpectedAttemptEntry,
+  findUnexpectedAttemptOutputEntry,
   injectManagedMeta,
   sha256,
   stripManagedMeta,
 } from "../scripts/lifecycle-core.mjs";
+
+function directoryEntry(name, kind = "file") {
+  return {
+    name,
+    isFile: () => kind === "file",
+    isSymbolicLink: () => kind === "symlink",
+  };
+}
+
+test("Attempt surfaces ignore only regular Finder metadata", () => {
+  assert.equal(
+    findUnexpectedAttemptEntry([directoryEntry(".DS_Store")]),
+    undefined,
+  );
+  assert.equal(
+    findUnexpectedAttemptOutputEntry([
+      directoryEntry("index.html"),
+      directoryEntry(".DS_Store"),
+    ]),
+    undefined,
+  );
+  assert.equal(
+    findUnexpectedAttemptEntry([
+      directoryEntry(".DS_Store", "symlink"),
+    ])?.name,
+    ".DS_Store",
+  );
+  assert.equal(
+    findUnexpectedAttemptEntry([directoryEntry(".hidden")])?.name,
+    ".hidden",
+  );
+  assert.equal(
+    findUnexpectedAttemptOutputEntry([
+      directoryEntry("index.html"),
+      directoryEntry("extra.html"),
+    ])?.name,
+    "extra.html",
+  );
+});
 
 const base = `<!doctype html>
 <html lang="zh-CN">

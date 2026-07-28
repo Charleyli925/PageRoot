@@ -24,6 +24,15 @@ const LOCKED = new Set([
   "awaiting-conflict-resolution",
   "recovering-transaction",
 ]);
+const COMPLETION_OBSERVED = new Set([
+  "validating",
+  "committing",
+  "ready-to-open",
+  "awaiting-conflict-resolution",
+  "recovering-transaction",
+  "no-change",
+  "complete",
+]);
 const LEGACY_DECODER = new Map([
   ["waiting", "processing"],
   ["importing", "validating"],
@@ -52,6 +61,11 @@ export function canonicalLifecycleState(
 
 export function isLockedLifecycleState(value) {
   return LOCKED.has(value);
+}
+
+export function hasObservedCompletion(run) {
+  return run?.completionObserved === true
+    || COMPLETION_OBSERVED.has(run?.status);
 }
 
 export function validationReviewFromRecord(value) {
@@ -146,6 +160,7 @@ export function activeRunFromRecord(raw) {
             : String(raw.error),
         }
       : {}),
+    ...(raw.completionObserved === true ? { completionObserved: true } : {}),
     ...(raw.conflictId || conflict.conflictId
       ? { conflictId: String(raw.conflictId || conflict.conflictId) }
       : {}),

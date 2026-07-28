@@ -32,6 +32,8 @@ import {
   ensureDirectory,
   exists,
   FINALIZER_VERSION,
+  findUnexpectedAttemptEntry,
+  findUnexpectedAttemptOutputEntry,
   jsonText,
   LIFECYCLE_SCHEMA_VERSION,
   LifecycleError,
@@ -4848,26 +4850,8 @@ async function createRequest(body) {
 }
 
 async function assertAttemptProtocolSurfaceRaw(attemptRoot) {
-  const allowed = new Set([
-    "output",
-    "completion.json",
-    "scope-report.json",
-    "result.json",
-    "cancelled.json",
-    "annotations.json",
-    "outcome.json",
-    "protocol-violation.json",
-    "USER_SUPPLEMENT.md",
-    "USER_SUPPLEMENT.json",
-    "supplement-attachments",
-    "validation-review.json",
-  ]);
   const entries = await readdir(attemptRoot, { withFileTypes: true });
-  const unexpected = entries.find(
-    (entry) =>
-      !allowed.has(entry.name)
-      && !entry.name.startsWith(".failpoint-"),
-  );
+  const unexpected = findUnexpectedAttemptEntry(entries);
   if (unexpected) {
     throw new HttpError(
       422,
@@ -4877,12 +4861,7 @@ async function assertAttemptProtocolSurfaceRaw(attemptRoot) {
   }
   const outputRoot = path.join(attemptRoot, "output");
   const outputEntries = await readdir(outputRoot, { withFileTypes: true });
-  const unexpectedOutput = outputEntries.find(
-    (entry) =>
-      entry.name !== "index.html"
-      || entry.isSymbolicLink()
-      || !entry.isFile(),
-  );
+  const unexpectedOutput = findUnexpectedAttemptOutputEntry(outputEntries);
   if (unexpectedOutput) {
     throw new HttpError(
       422,
@@ -6415,6 +6394,7 @@ async function statusFor(sourcePath, requestId, attemptId = "attempt_001") {
     if (!(await exists(attemptRoot))) {
       throw new HttpError(404, "ATTEMPT_NOT_FOUND", "Attempt was not found.");
     }
+    const completionPath = path.join(attemptRoot, "completion.json");
     const outcomePath = path.join(requestRoot, "outcome.json");
     if (await exists(outcomePath)) {
       const outcome = await readAuxiliaryJson(outcomePath, "outcome.json");
@@ -6516,7 +6496,6 @@ async function statusFor(sourcePath, requestId, attemptId = "attempt_001") {
         }
         const source = await readSourceFile(context.sourcePath);
         let protocolViolation = null;
-        const completionPath = path.join(attemptRoot, "completion.json");
         const outputPath = path.join(attemptRoot, "output", "index.html");
         let completion = null;
         if (await exists(completionPath)) {
@@ -6569,7 +6548,13 @@ async function statusFor(sourcePath, requestId, attemptId = "attempt_001") {
           workingCopyPath: context.sourcePath,
         };
       }
-      return { ok: true, requestId, attemptId, ...outcome };
+      return {
+        ok: true,
+        requestId,
+        attemptId,
+        ...outcome,
+        completionObserved: await exists(completionPath),
+      };
     }
     if (await exists(path.join(attemptRoot, "cancelled.json"))) {
       return {
@@ -6603,7 +6588,6 @@ async function statusFor(sourcePath, requestId, attemptId = "attempt_001") {
         activeRun: runtime.activeRun,
       };
     }
-    const completionPath = path.join(attemptRoot, "completion.json");
     let validated;
     try {
       if (!(await exists(completionPath))) {
@@ -6673,7 +6657,11 @@ async function statusFor(sourcePath, requestId, attemptId = "attempt_001") {
       runtime.conflict = null;
       runtime.lastCompleted = outcome;
       await writeRuntime(context.projectRoot, runtime);
-      return { ok: true, ...outcome };
+      return {
+        ok: true,
+        ...outcome,
+        completionObserved: await exists(completionPath),
+      };
     }
     if (validated.waiting) {
       return {
@@ -6721,7 +6709,7 @@ async function statusFor(sourcePath, requestId, attemptId = "attempt_001") {
       runtime.conflict = null;
       runtime.lastCompleted = outcome;
       await writeRuntime(context.projectRoot, runtime);
-      return { ok: true, ...outcome };
+      return { ok: true, ...outcome, completionObserved: true };
     }
     if (scoped.report.verdict !== "pass") {
       const classification = classifyScopeViolationCodes(scoped.report);
@@ -6763,6 +6751,7 @@ async function statusFor(sourcePath, requestId, attemptId = "attempt_001") {
         return {
           ok: true,
           ...outcome,
+          completionObserved: true,
           scopeReport: scoped.report,
           scopeReportPath: scoped.reportPath,
         };
