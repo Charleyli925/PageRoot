@@ -8,7 +8,7 @@ import {
   keyShortcut,
   loadFixture,
   nativeEditingState,
-  replaceUniqueBytes,
+  replaceEditableIslandBytes,
   setTextSelection,
   sha256,
   withBomAndCrLf,
@@ -35,7 +35,7 @@ function firstByteDifference(actual, expected) {
 async function waitForNativeSession(frame, caseId) {
   await expect.poll(() => nativeEditingState(frame, caseId)).toMatchObject({
     targetIsActive: true,
-    contenteditable: "plaintext-only",
+    contenteditable: "true",
     selectionInside: true,
   });
 }
@@ -46,7 +46,11 @@ test.beforeEach(async ({ page }) => {
 
 test("one text edit changes only the authorized UTF-8 bytes, including BOM and CRLF", async ({ page }) => {
   const original = withBomAndCrLf(fixtureBuffer("source-fidelity.html"));
-  const expected = replaceUniqueBytes(original, originalToken, replacement);
+  const expected = replaceEditableIslandBytes(
+    original,
+    "source-fidelity",
+    `<span title='single-quoted' data-order-b="2" data-order-a='1'>${replacement}</span>`,
+  );
   const { frame } = await loadFixture(page, "source-fidelity.html", { buffer: original });
   await activateNativeEdit(frame, "source-fidelity");
   await setTextSelection(frame, "source-fidelity", 0, originalToken.length);
@@ -65,7 +69,11 @@ test("one text edit changes only the authorized UTF-8 bytes, including BOM and C
 
 test("source reversal shortcuts are blocked and never change committed bytes", async ({ page }) => {
   const original = withBomAndCrLf(fixtureBuffer("source-fidelity.html"));
-  const expected = replaceUniqueBytes(original, originalToken, replacement);
+  const expected = replaceEditableIslandBytes(
+    original,
+    "source-fidelity",
+    `<span title='single-quoted' data-order-b="2" data-order-a='1'>${replacement}</span>`,
+  );
   const { frame } = await loadFixture(page, "source-fidelity.html", { buffer: original });
   await activateNativeEdit(frame, "source-fidelity");
   await setTextSelection(frame, "source-fidelity", 0, originalToken.length);
@@ -82,7 +90,7 @@ test("source reversal shortcuts are blocked and never change committed bytes", a
   await waitForNativeSession(frame, "source-fidelity");
   expect(await nativeEditingState(frame, "source-fidelity")).toMatchObject({
     targetIsActive: true,
-    contenteditable: "plaintext-only",
+    contenteditable: "true",
     selectionInside: true,
   });
 

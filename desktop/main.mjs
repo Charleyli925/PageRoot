@@ -161,10 +161,13 @@ function projectStatePath() {
 
 async function projectStatePathForRead() {
   const currentPath = projectStatePath();
-  const legacyPaths = ["YuanYe", "HTML AI 工作台"].map((directoryName) => (
-    path.join(app.getPath("appData"), directoryName, "html-projects.json")
-  ));
-  for (const candidate of [currentPath, ...legacyPaths]) {
+  if (e2eUserDataPath) return currentPath;
+  const compatibilityPaths = ["PageRootV2", "YuanYe", "HTML AI 工作台"].map(
+    (directoryName) => (
+      path.join(app.getPath("appData"), directoryName, "html-projects.json")
+    ),
+  );
+  for (const candidate of [currentPath, ...compatibilityPaths]) {
     const isFile = await stat(candidate)
       .then((entry) => entry.isFile())
       .catch(() => false);
@@ -1442,9 +1445,19 @@ async function workspacePath() {
     "项目记录",
   );
   const yuanyeWorkspace = path.join(documents, "YuanYe", "项目记录");
+  const pageRootV2Workspace = path.join(
+    documents,
+    "PageRootV2",
+    "项目记录",
+  );
   const pageRootWorkspace = path.join(documents, "PageRoot", "项目记录");
   const existingWorkspace = await Promise.all(
-    [pageRootWorkspace, yuanyeWorkspace, legacyWorkspace].map(async (candidate) => (
+    [
+      pageRootWorkspace,
+      pageRootV2Workspace,
+      yuanyeWorkspace,
+      legacyWorkspace,
+    ].map(async (candidate) => (
       await stat(candidate)
         .then((entry) => entry.isDirectory())
         .catch(() => false)

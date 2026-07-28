@@ -8,6 +8,10 @@ import { decodeHTML } from "entities";
 import {
   isTransparentSourceTextElement,
 } from "./source-text-map.js";
+import {
+  editableIslandForTarget,
+  normalizeEditableIslandHtml,
+} from "./editable-island.js";
 import { isNativeDirectEditRoot } from "./native-edit-capability.js";
 import { isDisposableNativeInlineWrapperTag } from "./native-edit-policy.js";
 import {
@@ -1035,6 +1039,63 @@ export function planTextPatch(indexOrHtml, command) {
       parentNodeId: parent.nodeId,
       beforeText: textNode.value,
       nextText: String(command.nextText),
+    },
+  );
+}
+
+export function planEditableIslandPatch(indexOrHtml, command) {
+  const index = typeof indexOrHtml === "string"
+    ? buildSourceIndex(indexOrHtml)
+    : indexOrHtml;
+  const targetRef = commandTargetRef(index, command);
+  const island = editableIslandForTarget(index, targetRef);
+  const currentTargetRef = refreshResolvedTargetRef(
+    index,
+    targetRef,
+    island.element,
+  );
+  if (
+    Object.hasOwn(command, "beforeInnerHtml")
+    && command.beforeInnerHtml !== island.innerHtml
+  ) {
+    fail(
+      "STALE_BEFORE_CONTENT",
+      "The editable island changed after this edit began.",
+      { expected: command.beforeInnerHtml, actual: island.innerHtml },
+    );
+  }
+  if (!Object.hasOwn(command, "nextInnerHtml")) {
+    fail(
+      "NEXT_ISLAND_HTML_REQUIRED",
+      "Editable island command is missing nextInnerHtml.",
+    );
+  }
+
+  const nextInnerHtml = normalizeEditableIslandHtml(
+    String(command.nextInnerHtml),
+    { baselineInnerHtml: island.innerHtml },
+  );
+  const patch = sourcePatch(
+    island.contentRange.startOffset,
+    island.contentRange.endOffset,
+    island.innerHtml,
+    nextInnerHtml,
+    {
+      kind: "editable-island",
+      nodeId: island.element.nodeId,
+    },
+  );
+  return makePlan(
+    index,
+    { ...command, type: "replace-editable-island" },
+    nextInnerHtml === island.innerHtml ? [] : [patch],
+    [currentTargetRef],
+    {
+      resolution: island.resolution,
+      rootTagName: island.element.tagName,
+      beforeInnerHtml: island.innerHtml,
+      nextInnerHtml,
+      writeScope: "editable-island-inner-html",
     },
   );
 }
@@ -2218,6 +2279,9 @@ export function planSourcePatch(command, indexOrHtml) {
     case "text":
     case "replace-text":
       return planTextPatch(index, command);
+    case "editable-island":
+    case "replace-editable-island":
+      return planEditableIslandPatch(index, command);
     case "text-range":
     case "replace-text-range":
       return planTextRangePatch(index, command);
@@ -2482,6 +2546,7 @@ function authorizePatchPlan(plan, index, patches) {
   const operationType = operationTypeForPlan(plan);
   if (![
     "replace-text",
+    "replace-editable-island",
     "replace-text-range",
     "replace-text-flow-range",
     "delete-hard-break",
@@ -2559,6 +2624,51 @@ function authorizePatchPlan(plan, index, patches) {
         fail(
           "PATCH_PLAN_TAMPERED",
           "Text patches do not match the declared operation metadata.",
+        );
+      }
+    }
+  }
+
+  if (operationType === "replace-editable-island") {
+    if (targetRefs.length !== 1 || resolutions[0].target.type !== "element") {
+      fail(
+        "PATCH_TARGET_COUNT_INVALID",
+        "Editable island replacement requires exactly one element TargetRef.",
+      );
+    }
+    const element = resolutions[0].target;
+    for (const patch of patches) {
+      const patchKind = String(patch.kind ?? "").replace(/^(?:inverse:)+/, "");
+      if (patchKind !== "editable-island") {
+        fail(
+          "PATCH_KIND_MISMATCH",
+          "Editable island replacement has an unrelated source operation.",
+          { patch },
+        );
+      }
+      if (
+        patch.startOffset !== element.contentRange.startOffset
+        || patch.endOffset !== element.contentRange.endOffset
+      ) {
+        fail(
+          "PATCH_OUTSIDE_TARGET",
+          "Editable island replacement must cover the exact element content boundary.",
+          { patch, contentRange: element.contentRange },
+        );
+      }
+    }
+    if (!isInverse) {
+      const expected = planEditableIslandPatch(index, {
+        type: "replace-editable-island",
+        targetRef: targetRefs[0],
+        beforeInnerHtml: plan.metadata?.beforeInnerHtml,
+        nextInnerHtml: plan.metadata?.nextInnerHtml,
+        expectedSourceSha256: index.sourceSha256,
+      });
+      if (!patchesEqual(patches, expected.patches)) {
+        fail(
+          "PATCH_PLAN_TAMPERED",
+          "Editable island patch does not match the declared operation metadata.",
         );
       }
     }

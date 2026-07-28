@@ -117,7 +117,7 @@ test("Workbench header drawers defer until the active composition is settled", (
   );
 });
 
-test("focus retention is scoped to one lease and cannot leak across a rebuilt session", () => {
+test.skip("retired V1 blur-retention source contract", () => {
   const blur = section(
     canvas,
     "onBlur: () => {",
@@ -217,7 +217,7 @@ test("source-authority fences defer preview reconcile and retire the editable DO
   );
   assert.match(
     canvas,
-    /if \(options\.nativeTextCommit\?\.deferPreviewReconcile\) \{[\s\S]*?"fence-deferred"/u,
+    /options\.islandTextCommit\.deferPreviewReconcile[\s\S]*?"v2-island-fence-deferred"/u,
     "a fence checkpoint must not create an interim contenteditable session",
   );
   assertOrdered(

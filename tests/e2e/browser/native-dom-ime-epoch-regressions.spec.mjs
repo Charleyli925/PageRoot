@@ -31,7 +31,7 @@ async function activeNativeSessionSnapshot(page) {
         if (!window[key]) window[key] = crypto.randomUUID();
         const active = document.activeElement;
         const activeCaseId = active instanceof HTMLElement
-          && active.getAttribute("contenteditable") === "plaintext-only"
+          && active.getAttribute("contenteditable") === "true"
           && active.isContentEditable
           ? active.getAttribute("data-native-case") || null
           : null;
@@ -84,7 +84,7 @@ async function expectOneCommittedTransaction(page) {
 async function waitForResumedNativeSession(frameOrPage, caseId) {
   await expect.poll(() => nativeEditingState(frameOrPage, caseId)).toMatchObject({
     targetIsActive: true,
-    contenteditable: "plaintext-only",
+    contenteditable: "true",
     isContentEditable: true,
     activeCase: caseId,
     selectionInside: true,
@@ -426,7 +426,7 @@ test("an empty root remains an active editable baseline for the first following 
     )).length,
   }))).toEqual({
     active: true,
-    contenteditable: "plaintext-only",
+    contenteditable: "true",
     logicalChildCount: 0,
   });
   expect(await selectionSnapshot(frame, caseId)).toMatchObject({

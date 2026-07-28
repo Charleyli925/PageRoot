@@ -133,7 +133,7 @@ test("canvas edit feedback is contextual, plain-language, and not duplicated glo
   assert.match(canvas, /recovery: "reload"/u);
   assert.match(canvas, /recovery: "none"/u);
   assert.match(canvas, /showCommitBlocked/u);
-  assert.match(canvas, /<NoticeBar[\s\S]*?placement="canvas"/u);
+  assert.match(canvas, /<NoticeBar[\s\S]*?placement="viewport"/u);
   assert.match(
     canvas,
     /editFeedback\.recovery === "comment"[\s\S]*?\? "添加评论"[\s\S]*?: undefined/u,

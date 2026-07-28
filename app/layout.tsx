@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "源页",
   applicationName: "源页",
-  description: "源页（PageRoot）— Edit visually. Stay in source.",
+  description: "源页（PageRoot）— Editable islands. Byte-exact outside.",
   icons: {
     icon: [{ url: "/favicon.png", type: "image/png" }],
   },
@@ -23,7 +23,7 @@ export const metadata: Metadata = {
     type: "website",
     locale: "zh_CN",
     title: "源页",
-    description: "PageRoot · Edit visually. Stay in source.",
+    description: "PageRoot · Editable islands. Byte-exact outside.",
     images: [
       {
         url: "/brand-logo.png",
@@ -36,7 +36,7 @@ export const metadata: Metadata = {
   twitter: {
     card: "summary_large_image",
     title: "源页",
-    description: "PageRoot · Edit visually. Stay in source.",
+    description: "PageRoot · Editable islands. Byte-exact outside.",
     images: ["/brand-logo.png"],
   },
 };

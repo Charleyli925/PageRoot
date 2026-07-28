@@ -4,6 +4,21 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-07-28
+
+- Promoted the editable-island editor from the isolated V2 comparison build to
+  the official PageRoot application, installer and GitHub update channel.
+- Replaced the production native-text state machine with one controlled editable
+  island route: outside bytes stay exact, while the edited island may be
+  minimally normalized for visual, semantic and structural safety.
+- Added deterministic start/middle/end insertion, grapheme deletion, line
+  breaks, plain-text paste, frozen-selection IME replay and left-style boundary
+  inheritance across paragraphs, headings, links, buttons, lists, tables,
+  preformatted text, vertical writing and immutable embedded atoms.
+- Kept edit warnings visible at the application viewport while the HTML page is
+  scrolled, and added exhaustive synthetic plus opt-in real-complex-page edit
+  censuses with machine-readable success/failure reports.
+
 ## [0.8.10] - 2026-07-27
 
 - Allow ordinary typing at editable paragraph starts and ends, inline-style boundaries and link boundaries while preserving the intended neighboring style and exact source whitespace.
@@ -82,7 +97,8 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 - Published the first public macOS release in this repository under the earlier YuanYe artifact name.
 
-[Unreleased]: https://github.com/Charleyli925/PageRoot/compare/v0.8.10...HEAD
+[Unreleased]: https://github.com/Charleyli925/PageRoot/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/Charleyli925/PageRoot/compare/v0.8.10...v0.9.0
 [0.8.10]: https://github.com/Charleyli925/PageRoot/compare/v0.8.9...v0.8.10
 [0.8.9]: https://github.com/Charleyli925/PageRoot/compare/v0.8.8...v0.8.9
 [0.8.8]: https://github.com/Charleyli925/PageRoot/compare/v0.8.7...v0.8.8

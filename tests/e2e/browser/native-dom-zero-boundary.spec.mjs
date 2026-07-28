@@ -1,9 +1,12 @@
 import { expect, test } from "@playwright/test";
 
 import {
+  activateNativeEdit,
   doubleClickRenderedText,
   exportCurrentHtml,
   loadFixture,
+  replaceEditableIslandBytes,
+  setTextSelection,
 } from "./pageroot-driver.mjs";
 
 const source = Buffer.from(`<!doctype html>
@@ -32,35 +35,37 @@ async function attemptDirectEdit(frame, id) {
   return doubleClickRenderedText(frame, id);
 }
 
-test("visible empty inline boundary stays selectable/commentable and never becomes editable", async ({ page }) => {
+test("visible empty inline boundary stays structurally intact while surrounding text remains editable", async ({ page }) => {
   const { frame } = await openBoundaryFixture(page);
   const target = await attemptDirectEdit(frame, "visible-empty-boundary");
 
-  await expect(page.locator('[role="status"], [role="alert"]').filter({
-    hasText: /空的排版元素/,
-  }).first()).toContainText(/输入可能跑到错误位置/);
-  expect(await target.getAttribute("contenteditable")).toBeNull();
-  expect(await target.evaluate((element) => element.isContentEditable)).toBe(false);
-  expect(await frame.locator('[contenteditable="plaintext-only"]').count()).toBe(0);
-
-  await page.keyboard.insertText("不应写入");
-  expect(await target.textContent()).toBe("前文后文");
-  expect((await exportCurrentHtml(page)).equals(source)).toBe(true);
+  await expect(target).toHaveAttribute("contenteditable", "true");
+  await setTextSelection(frame, "visible-empty-boundary", 4);
+  await page.keyboard.insertText("新增");
+  await expect(target).toHaveText("前文后文新增");
+  await expect(target.locator("span.visible-empty[aria-label='排版空位']")).toHaveCount(1);
+  const expected = replaceEditableIslandBytes(
+    source,
+    "visible-empty-boundary",
+    '前文<span class="visible-empty" aria-label="排版空位"></span>后文新增',
+  );
+  expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
 });
 
-test("authored comment boundary also fails closed and preserves every source byte", async ({ page }) => {
+test("authored comment boundary remains byte-stable while adjacent text is editable", async ({ page }) => {
   const { frame } = await openBoundaryFixture(page);
-  const target = await attemptDirectEdit(frame, "source-comment-boundary");
+  const target = await activateNativeEdit(frame, "source-comment-boundary");
 
-  await expect(page.locator('[role="status"], [role="alert"]').filter({
-    hasText: /需要保留的网页结构/,
-  }).first()).toContainText(/选中文字.*添加评论/);
-  expect(await target.getAttribute("contenteditable")).toBeNull();
-  expect(await target.evaluate((element) => element.isContentEditable)).toBe(false);
-
-  await page.keyboard.insertText("不应写入");
-  expect(await target.textContent()).toBe("甲乙");
-  expect((await exportCurrentHtml(page)).equals(source)).toBe(true);
+  await expect(target).toHaveAttribute("contenteditable", "true");
+  await setTextSelection(frame, "source-comment-boundary", 2);
+  await page.keyboard.insertText("新增");
+  await expect(target).toHaveText("甲乙新增");
+  const expected = replaceEditableIslandBytes(
+    source,
+    "source-comment-boundary",
+    "甲<!-- authored source boundary -->乙新增",
+  );
+  expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
 });
 
 const styledBoundaryPoints = [
@@ -130,7 +135,7 @@ test("collapsed typing at every non-empty inline style boundary inherits determi
   for (const point of styledBoundaryPoints) {
     const { frame } = await openBoundaryFixture(page);
     const target = await attemptDirectEdit(frame, "styled-inline-boundary");
-    await expect(target).toHaveAttribute("contenteditable", "plaintext-only");
+    await expect(target).toHaveAttribute("contenteditable", "true");
     await setStyledBoundaryPoint(target, point);
 
     await page.keyboard.insertText("X");

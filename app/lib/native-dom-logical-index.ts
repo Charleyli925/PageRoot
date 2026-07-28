@@ -64,6 +64,10 @@ export function logicalIndexForHost(
     startByNode.set(node, startOffset);
     if (node.nodeType === Node.TEXT_NODE) {
       const text = (node as Text).data;
+      if (text.length === 0) {
+        endByNode.set(node, logicalOffset);
+        return;
+      }
       tokens.push({
         kind: "text",
         node,
@@ -94,7 +98,7 @@ export function logicalIndexForHost(
       endByNode.set(node, logicalOffset);
       return;
     }
-    if (isNativeDomAtomElement(element)) {
+    if (element !== hostElement && isNativeDomAtomElement(element)) {
       tokens.push({
         kind: "atom",
         node,

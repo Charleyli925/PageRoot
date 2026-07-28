@@ -91,7 +91,7 @@ test("application boundaries encode the v3 single-source lifecycle instead of sa
     readFile(new URL("../app/application/drain-coordinator.js", import.meta.url), "utf8"),
     readFile(new URL("../app/domain/run-lifecycle.js", import.meta.url), "utf8"),
     readFile(new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/components/NativeEditingController.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/IslandEditingController.ts", import.meta.url), "utf8"),
     readFile(new URL("../vite.config.ts", import.meta.url), "utf8"),
   ]);
   const packageJson = JSON.parse(packageText);
@@ -203,16 +203,15 @@ test("application boundaries encode the v3 single-source lifecycle instead of sa
   assert.match(canvasEditor, /kind: "text"/);
   assert.match(canvasEditor, /kind: "style"/);
   assert.match(canvasEditor, /kind: "reorder"/);
-  assert.match(canvasEditor, /type: "replace-text-range"/);
-  assert.match(canvasEditor, /replacements: mappedReplacements\.map/);
-  assert.match(canvasEditor, /validateFormatSkeletonTransaction/);
-  assert.match(canvasEditor, /textRangeToSourceSegments/);
+  assert.match(canvasEditor, /type: "replace-editable-island"/);
+  assert.match(canvasEditor, /editableIslandForTarget/);
+  assert.match(canvasEditor, /islandTextCommit/);
   assert.doesNotMatch(
     canvasEditor,
     /textRangeToSourceEdit/,
     "native DOM commits must use FormatSkeleton descriptors rather than the legacy flat range mapper",
   );
-  assert.match(canvasEditor, /new NativeEditingController\(/);
+  assert.match(canvasEditor, /new IslandEditingController\(/);
   assert.match(canvasEditor, /type: "set-inline-style"/);
   assert.match(canvasEditor, /type: "reorder-sibling"/);
   assert.match(canvasEditor, /加粗/);
@@ -257,10 +256,10 @@ test("application boundaries encode the v3 single-source lifecycle instead of sa
     "freezeNow must not lock the editor when a native-edit checkpoint fails",
   );
 
-  assert.match(nativeController, /applyNativeEditSessionAttributes\(this\.hostElement/u);
-  assert.match(nativeController, /this\.hostElement\.addEventListener\("beforeinput"/u);
-  assert.match(nativeController, /documentNode\.addEventListener\("selectionchange"/u);
-  assert.match(nativeController, /restoreAttribute\(this\.hostElement, name, saved\)/u);
+  assert.match(nativeController, /this\.hostElement\.setAttribute\("contenteditable", "true"\)/u);
+  assert.match(nativeController, /listen\(this\.hostElement, "beforeinput"/u);
+  assert.match(nativeController, /this\.hostElement\.ownerDocument,[\s\S]*?"selectionchange"/u);
+  assert.match(nativeController, /this\.observer = new MutationObserver/u);
   assert.doesNotMatch(nativeController, /documentNode\.body\.appendChild|surfaceElement|LexicalEditor|registerPlainText/u);
   assert.doesNotMatch(canvasEditor, /pageroot-text-editor|pageroot-text-ghost|data-pageroot-text-flow-item/u);
 
@@ -326,7 +325,7 @@ test("canvas persistence has one SourcePatchEngine path and clean v3 TargetRefs"
     readFile(new URL("../app/workbench.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/application/draft-session.js", import.meta.url), "utf8"),
     readFile(new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/components/NativeEditingController.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/IslandEditingController.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/lib/source-patch-engine.js", import.meta.url), "utf8"),
     readFile(new URL("../app/lib/source-text-map.js", import.meta.url), "utf8"),
     readFile(new URL("../app/lib/runtime-dom-source-map.js", import.meta.url), "utf8"),
@@ -339,15 +338,11 @@ test("canvas persistence has one SourcePatchEngine path and clean v3 TargetRefs"
     "instrumentPreviewHtml",
     "SOURCE_NODE_ATTRIBUTE",
     "if (!onChangeRef.current(result.html, appliedMutation))",
-    'type: "replace-text-range"',
-    "replacements: mappedReplacements.map",
-    "validateFormatSkeletonTransaction",
-    "captureFormatSkeleton",
-    "textRangeToSourceSegments",
+    'type: "replace-editable-island"',
+    "islandTextCommit",
+    "editableIslandForTarget",
     "buildSourceTextMap",
-    "buildRuntimeDomMap",
-    "classifyNativeEditCapability",
-    "new NativeEditingController",
+    "new IslandEditingController",
     'type: "set-inline-style"',
     'type: "reorder-sibling"',
     "synchronizeStablePreview",
@@ -425,16 +420,10 @@ test("canvas persistence has one SourcePatchEngine path and clean v3 TargetRefs"
   assert.match(sourcePatchEngine, /inputs = command\.replacements/u);
   assert.match(sourcePatchEngine, /Text replacements contain overlapping deletion ranges/u);
   assert.match(sourcePatchEngine, /metadataReplacements = replacements\.map/u);
-  assert.match(
-    nativeController,
-    /captureCheckpoint\([\s\S]*?trigger: NativeEditCheckpointTrigger = "automatic",[\s\S]*?\): NativeEditCheckpoint/u,
-  );
-  assert.match(nativeController, /if \(!this\.hasCurrentLease\(\)\) return \{ ok: false, reason: "disposed" \}/u);
-  assert.match(
-    nativeController,
-    /if \(this\.composing \|\| this\.draftCompositionUnsettled\) \{[\s\S]*?reason: "composing"/u,
-  );
-  assert.match(nativeController, /applyNativeEditSessionAttributes\(this\.hostElement/u);
+  assert.match(nativeController, /applyExternalIslandBaseline\(/u);
+  assert.match(nativeController, /if \(!this\.hasCurrentLease\(\)\)/u);
+  assert.match(nativeController, /if \(this\.composing\)/u);
+  assert.match(nativeController, /this\.hostElement\.setAttribute\("contenteditable", "true"\)/u);
   assert.doesNotMatch(nativeController, /setRootElement|LexicalEditor|registerPlainText/u);
 
   const targetWriter = workbench.slice(

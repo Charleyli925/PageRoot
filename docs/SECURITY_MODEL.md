@@ -13,15 +13,29 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
 - Strict schemas, frozen inputs and identity/Hash checks before accepting AI output; scope evidence is always recorded, with protocol/script/target-integrity findings hard-blocked and ordinary breadth findings observed without a user-waiver loop
 - No silent application update or binary replacement
 
-## Native editing trust boundary
+## V2 editable-island trust boundary
 
-The rendered preview DOM is disposable and never becomes a persistence source. Native editing may use either measured `contenteditable="plaintext-only"` or the controlled `contenteditable="true"` fallback, but both modes have the same authority:
+The rendered preview DOM is disposable and never becomes a whole-document
+persistence source. PageRoot 0.9.0 has one controlled `contenteditable="true"`
+route:
 
-- SourceTextMap must prove one source-backed text island before activation.
-- Runtime layout, text style, Selection, focus and restoration must pass the full live preflight.
-- `contenteditable="true"` paste is reduced to `text/plain`; formatting and structural input do not gain commit authority.
-- MutationObserver evidence, the delivered `beforeinput/input` pair, FormatSkeleton, source Hash and SourcePatch must all agree before a local patch can persist.
-- `display: contents` may enter only through the observer-guarded lane. Missing delivery, unknown DOM mutation or failed rollback remains fail-closed.
+- SourceIndex and TargetResolver must prove one exact, explicit-end-tag HTML
+  element before activation.
+- Runtime layout, text style, Selection, focus and restoration must pass the
+  live preflight.
+- The controller prevents ordinary `beforeinput` mutations and applies owned
+  text, grapheme deletion, `<br>`, plain-text paste and safe inline formatting.
+  Browser-created rich HTML has no authority.
+- Authored comments and embedded/foreign content are immutable inventory;
+  protected attributes cannot be introduced or changed through text editing.
+- IME starts from a frozen island and logical Selection. Confirmation is
+  replayed once at that frozen source affinity; cancellation restores the
+  snapshot.
+- MutationObserver rejects and restores any child/text mutation not owned by
+  the controller.
+- SourcePatch may replace only the selected element's exact content range.
+  Outside bytes and source Hash preconditions remain exact; only the edited
+  island may be minimally normalized and reparsed.
 
 Pure-browser preview is a different, strictly weaker capability: authored scripts and interactions may run inside the sandbox, but PageRoot editing, comments, attachments, local persistence and AI submission are unavailable. Its transient page state is never treated as unsaved PageRoot content.
 

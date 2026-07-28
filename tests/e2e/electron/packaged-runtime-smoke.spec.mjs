@@ -20,10 +20,14 @@ import {
   keyShortcut,
   productRoot,
   requestExportCurrentHtml,
-  replaceUniqueBytes,
+  replaceEditableIslandBytes,
   setTextSelection,
   withBomAndCrLf,
 } from "../browser/pageroot-driver.mjs";
+
+const packageVersion = JSON.parse(
+  readFileSync(path.join(productRoot, "package.json"), "utf8"),
+).version;
 
 function packagedExecutable() {
   const appPath = process.env.PAGEROOT_PACKAGED_APP_PATH;
@@ -116,7 +120,7 @@ function removeIsolatedDirectory(directory) {
   });
 }
 
-test("packaged PageRoot preserves source bytes and reconciles draft revision before close", async () => {
+test("packaged PageRoot preserves outside-island bytes and reconciles draft revision before close", async () => {
   test.setTimeout(120_000);
   const isolatedUserData = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-packaged-"));
   const sourcePathAlias = path.join(isolatedUserData, "packaged-source.html");
@@ -124,7 +128,11 @@ test("packaged PageRoot preserves source bytes and reconciles draft revision bef
   const originalToken = "SOURCE_FIDELITY_TOKEN_001";
   const replacement = "PackagedRuntime_OK_源页";
   const original = withBomAndCrLf(fixtureBuffer("source-fidelity.html"));
-  const expected = replaceUniqueBytes(original, originalToken, replacement);
+  const expected = replaceEditableIslandBytes(
+    original,
+    "source-fidelity",
+    `<span title='single-quoted' data-order-b="2" data-order-a='1'>${replacement}</span>`,
+  );
   writeFileSync(sourcePathAlias, original);
   const sourcePath = realpathSync(sourcePathAlias);
   seedActiveDiskProject(isolatedUserData, sourcePath);
@@ -134,7 +142,7 @@ test("packaged PageRoot preserves source bytes and reconciles draft revision bef
     electronApp = launched.electronApp;
     let page = launched.page;
     const runtime = await page.evaluate(() => window.htmlAIRuntime);
-    expect(runtime?.appVersion).toMatch(/^\d+\.\d+\.\d+$/u);
+    expect(runtime?.appVersion).toBe(packageVersion);
     await electronApp.evaluate(({ dialog }, destination) => {
       dialog.showSaveDialog = async () => ({
         canceled: false,

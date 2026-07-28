@@ -1,4 +1,4 @@
-import type { NativeEditSelection } from "../components/NativeEditingController";
+import type { NativeEditSelection } from "../components/native-edit-types";
 import type { SourceTextMap } from "./source-text-map";
 
 export type NativeSourceEditIntent =

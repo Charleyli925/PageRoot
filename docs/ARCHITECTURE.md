@@ -6,8 +6,8 @@ PageRoot is an Electron application with a React renderer and a local Bridge pro
 User HTML bytes
   -> SourceIndex / TargetResolver
   -> isolated authored-DOM preview
-  -> native Selection and editing controller
-  -> minimal SourcePatch transaction
+  -> native Selection + V2 Editable Island controller
+  -> canonical island + exact content-range SourcePatch
   -> serialized atomic file writer
 
 Comments + frozen input
@@ -29,8 +29,9 @@ Comments + frozen input
 - `schemas/` defines persisted and exchanged records. `fixtures/` proves strict current and legacy behavior.
 - Preview DOM is disposable. It is never a persistence source.
 - Pure-browser preview is a supported read-only route. It may run authored page interactions inside the sandbox, but it exposes no PageRoot edit, comment, attachment, project-write, or AI-submit authority.
-- `native-edit-policy` is the single policy source for session attributes, host modes, wrapper disposal and editing timeouts. `native-edit-runtime-preflight` owns iframe geometry/event capability inspection; `HtmlCanvasEditor` only coordinates its result with selection, SourcePatch and UI.
-- `contenteditable="true"` is a measured, controlled fallback rather than a second editor engine. It shares the same Controller, FormatSkeleton and SourcePatch authority as `plaintext-only`, and cannot commit rich structure.
+- `IslandEditingController` is the only production text-edit engine in PageRoot 0.9.0. `contenteditable="true"` supplies focus, caret, Selection and IME composition, while the controller owns insertion, deletion, line breaks, paste and formatting. Chromium DOM serialization never has commit authority.
+- `editable-island` owns the V2 capability and normalization contract. An accepted edit replaces only the selected element's parsed `contentRange`; bytes outside that range remain exact. Inside the range, parse5 may perform the smallest safe normalization needed to preserve inline semantics, comments and immutable authored atoms.
+- `native-edit-policy` owns shared session attributes and checkpoint timing. `native-edit-runtime-preflight` still proves that enabling the island does not change geometry or text style; `HtmlCanvasEditor` only coordinates selection, the island session and SourcePatch.
 
 ## Module map
 
@@ -51,10 +52,11 @@ protocols.
 | Preview sanitization and verified frame injection | `app/components/html-preview-sandbox.js` |
 | Run lifecycle decoding and transition policy | `app/domain/run-lifecycle.js` |
 
-The source-fidelity path remains a protected core: `SourceIndex`,
-`TargetResolver`, `FormatSkeleton`, `SourcePatchEngine`,
-`NativeEditingController` and the atomic source writer may be split only around
-a proven invariant, not to satisfy a line-count target.
+The V2 source-fidelity path remains a protected core: `SourceIndex`,
+`TargetResolver`, `editable-island`, `IslandEditingController`,
+`SourcePatchEngine` and the atomic source writer may be split only around a
+proven invariant, not to satisfy a line-count target. The retired V1
+`NativeEditingController` is not imported by the production V2 route.
 
 ## Persistence
 

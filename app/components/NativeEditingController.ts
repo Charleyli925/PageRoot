@@ -14,7 +14,6 @@ import type { NativeSourceEditIntent } from "../lib/native-structural-edit-plann
 import {
   NativeBlockEditDraft,
   type NativeBlockEditDraftSnapshot,
-  type NativeBlockPendingCommand,
 } from "../lib/native-block-edit-draft.js";
 import {
   domPointForLogicalOffset,
@@ -40,9 +39,31 @@ import {
   restoreNativeEditSessionAttributes,
   type NativeEditHostMode,
 } from "../lib/native-edit-policy.js";
+import type {
+  NativeEditBaseline,
+  NativeEditCheckpointTrigger,
+  NativeEditLease,
+  NativeEditLeaseStamp,
+  NativeEditPendingCommandRequest,
+  NativeEditQueueCommandResult,
+  NativeEditQueuedCommand,
+  NativeEditSelection,
+  NativeEditSessionState,
+} from "./native-edit-types";
 
 export { NATIVE_EDIT_CHECKPOINT_DELAY_MS };
 export { nativeLogicalText };
+export type {
+  NativeEditBaseline,
+  NativeEditCheckpointTrigger,
+  NativeEditLease,
+  NativeEditLeaseStamp,
+  NativeEditPendingCommandRequest,
+  NativeEditQueueCommandResult,
+  NativeEditQueuedCommand,
+  NativeEditSelection,
+  NativeEditSessionState,
+} from "./native-edit-types";
 
 const COLLAPSED_TEXT_INSERT_INPUT_TYPES = new Set([
   "insertCompositionText",
@@ -74,34 +95,6 @@ const SESSION_CONTROLLED_ATTRIBUTE_NAMES =
 const SESSION_CONTROLLED_ATTRIBUTE_NAME_SET = new Set<string>(
   SESSION_CONTROLLED_ATTRIBUTE_NAMES,
 );
-
-export type NativeEditSelection = {
-  anchor: number;
-  focus: number;
-  affinity: "left" | "right";
-};
-
-export type NativeEditBaseline = {
-  revision: string;
-  text: string;
-  selection?: NativeEditSelection;
-};
-
-export type NativeEditLeaseStamp = {
-  readonly sessionId: string;
-  readonly domGeneration: number;
-  readonly sourceRevision: string;
-  readonly hostId: string;
-};
-
-export type NativeEditLease = {
-  stamp: NativeEditLeaseStamp;
-  isCurrent: (stamp: NativeEditLeaseStamp) => boolean;
-  advance: (
-    expected: NativeEditLeaseStamp,
-    next: NativeEditLeaseStamp,
-  ) => boolean;
-};
 
 export type NativeEditExternalDomReconcileResult = {
   ok: boolean;
@@ -138,43 +131,6 @@ export type NativeEditCheckpoint =
       };
       selection: NativeEditSelection;
     };
-
-export type NativeEditCheckpointTrigger =
-  | "automatic"
-  | "blur"
-  | "fence"
-  | "style"
-  | "save"
-  | "export"
-  | "project-switch"
-  | "ai"
-  | "manual";
-
-export type NativeEditPendingCommandRequest = {
-  kind: string;
-  /** Only an actual user command may authorize the narrow stable-composition fallback. */
-  authority?: "user-explicit" | "system";
-  payload?: unknown;
-};
-
-export type NativeEditQueuedCommand = NativeBlockPendingCommand;
-
-export type NativeEditQueueCommandResult =
-  | { queued: false }
-  | {
-      queued: true;
-      sequence: number;
-      replacedSequence: number | null;
-    };
-
-export type NativeEditSessionState = {
-  dirty: boolean;
-  draftPending: boolean;
-  composing: boolean;
-  requiresCanonicalReconcile: boolean;
-  selection: NativeEditSelection;
-  inputType: string | null;
-};
 
 export type NativeEditExternalBaselineOptions = {
   preserveLiveSelection?: boolean;

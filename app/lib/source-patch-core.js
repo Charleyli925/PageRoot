@@ -25,6 +25,7 @@ export {
   isDisposableSourceTextWrapper,
   parseInlineStyle,
   planDeleteHardBreakPatch,
+  planEditableIslandPatch,
   planInlineStylePatch,
   planSiblingReorderPatch,
   planSourcePatch,

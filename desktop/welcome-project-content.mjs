@@ -289,7 +289,7 @@ export const DEFAULT_PROJECT_HTML = `<!doctype html>
       </aside>
     </div>
 
-    <footer><span>源页 · PageRoot</span><span>Write smoothly. Change precisely.</span></footer>
+    <footer><span>源页 · PageRoot</span><span>Editable islands. Byte-exact outside.</span></footer>
   </article>
 </body>
 </html>`;
