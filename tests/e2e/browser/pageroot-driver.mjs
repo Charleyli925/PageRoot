@@ -234,13 +234,18 @@ export async function doubleClickRenderedText(frame, id, position) {
       range.setEnd(node, match.index + match[0].length);
       const glyphRect = range.getClientRects()[0];
       const elementRect = element.getBoundingClientRect();
+      const isVertical = getComputedStyle(element).writingMode.startsWith("vertical");
       // Chromium on Linux can report a zero-sized inline axis for a valid
       // vertical-writing glyph. The other axis still identifies a real hit
       // target, so pad only the missing axis instead of rejecting the glyph.
       if (!glyphRect || (!glyphRect.width && !glyphRect.height)) continue;
+      let glyphOffsetX = 1;
+      if (glyphRect.width) {
+        glyphOffsetX = Math.min(glyphRect.width / 2, 3);
+        if (isVertical) glyphOffsetX = glyphRect.width / 2;
+      }
       return {
-        x: glyphRect.left - elementRect.left
-          + (glyphRect.width ? Math.min(glyphRect.width / 2, 3) : 1),
+        x: glyphRect.left - elementRect.left + glyphOffsetX,
         y: glyphRect.top - elementRect.top
           + (glyphRect.height ? glyphRect.height / 2 : 1),
       };

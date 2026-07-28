@@ -31,7 +31,7 @@ const source = Buffer.from(`<!doctype html>
   <table><tbody><tr><td data-native-case="cell">表格单元格</td></tr></tbody></table>
   <p data-native-case="atom">图标前<svg viewBox="0 0 10 10" aria-label="圆点"><circle cx="5" cy="5" r="4"></circle></svg>图标后</p>
   <pre data-native-case="pre"><code>const value = 1;</code></pre>
-  <p class="vertical" data-native-case="vertical">竖排文字</p>
+  <p class="vertical" data-native-case="vertical">Vertical 竖排文字</p>
   <p data-native-case="comment">甲<!-- authored boundary -->乙</p>
 </body>
 </html>
@@ -55,7 +55,11 @@ const editableCases = [
     innerHtml: '图标前<svg viewBox="0 0 10 10" aria-label="圆点"><circle cx="5" cy="5" r="4"></circle></svg>图标后',
   },
   { id: "pre", text: "const value = 1;", innerHtml: "<code>const value = 1;</code>" },
-  { id: "vertical", text: "竖排文字", innerHtml: "竖排文字" },
+  {
+    id: "vertical",
+    text: "Vertical 竖排文字",
+    innerHtml: "Vertical 竖排文字",
+  },
   {
     id: "comment",
     text: "甲乙",
