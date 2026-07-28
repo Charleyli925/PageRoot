@@ -7113,6 +7113,7 @@ export default function Workbench() {
       sourcePath: committedSourcePath,
       candidateVersionLabel: candidateLabel,
       status: protocolViolation ? "error" : "complete",
+      completionObserved: true,
     };
     activeRunRef.current = completedRun;
     setActiveRun(completedRun);
@@ -7144,6 +7145,7 @@ export default function Workbench() {
         candidateVersionLabel: candidateLabel,
         status: "error",
         error: warning,
+        completionObserved: true,
       };
       activeRunRef.current = warningRun;
       setActiveRun(warningRun);
