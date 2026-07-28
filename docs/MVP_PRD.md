@@ -1,4 +1,4 @@
-# HTML AI 工作台 MVP 产品需求
+# PageRoot MVP 产品需求
 
 - 状态：v3 单引擎目标合同
 - 适用范围：本地 HTML 源码局部编辑、内部 AI 交接、强制范围校验与版本历史
@@ -12,7 +12,7 @@
 
 ## 1. 产品结论
 
-HTML AI 工作台让用户在真实本地 HTML 上完成两类工作：
+PageRoot 让用户在真实本地 HTML 上完成两类工作：
 
 1. 文字、inline 样式和同级模块顺序等直接编辑，由单一 SourcePatchEngine 对真实源码做局部 Patch 后自动写回源文件。
 2. 生成内容、跨区域修改和整体调整，通过页面评论冻结为 Request，交给内部 AI 返回完整 HTML。

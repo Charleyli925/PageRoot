@@ -4,6 +4,8 @@ import test from "node:test";
 import {
   activeRunFromRecord,
   canonicalLifecycleState,
+  deriveRunProgressSteps,
+  hasObservedCompletion,
   isLockedLifecycleState,
   validationReviewFromRecord,
 } from "../app/domain/run-lifecycle.js";
@@ -31,6 +33,105 @@ test("one canonical lock policy owns lifecycle interaction state", () => {
   assert.equal(isLockedLifecycleState("ready-to-open"), true);
   assert.equal(isLockedLifecycleState("complete"), false);
   assert.equal(isLockedLifecycleState("cancelled"), false);
+});
+
+test("AI completion progress uses explicit evidence instead of generic errors", () => {
+  assert.equal(hasObservedCompletion({ status: "processing" }), false);
+  assert.equal(hasObservedCompletion({ status: "error" }), false);
+  assert.equal(hasObservedCompletion({
+    status: "error",
+    completionObserved: true,
+  }), true);
+  assert.equal(hasObservedCompletion({
+    status: "awaiting-conflict-resolution",
+  }), true);
+  assert.equal(hasObservedCompletion({
+    status: "recovering-transaction",
+  }), true);
+});
+
+test("run progress exposes four user stages instead of internal validation steps", () => {
+  const processing = deriveRunProgressSteps({
+    requestId: "req_0001",
+    status: "processing",
+  }, "copied");
+  assert.deepEqual(
+    processing.map(({ label, state }) => ({ label, state })),
+    [
+      { label: "已准备并复制", state: "done" },
+      { label: "等待 AI 完成", state: "current" },
+      { label: "正在校验并保存", state: "pending" },
+      { label: "结果", state: "pending" },
+    ],
+  );
+
+  const copyFailure = deriveRunProgressSteps({
+    requestId: "req_0001",
+    status: "processing",
+  }, "failed");
+  assert.equal(copyFailure.length, 4);
+  assert.deepEqual(
+    copyFailure.map(({ state }) => state),
+    ["error", "pending", "pending", "pending"],
+  );
+  assert.equal(
+    copyFailure[0].detail,
+    "剪贴板写入失败；本轮要求已安全保留",
+  );
+});
+
+test("run progress keeps completion, validation, and result facts separate", () => {
+  const preCompletionError = deriveRunProgressSteps({
+    requestId: "req_0001",
+    status: "error",
+    error: "Attempt contains an unauthorized entry.",
+  }, "copied");
+  assert.deepEqual(
+    preCompletionError.map(({ state }) => state),
+    ["done", "error", "pending", "pending"],
+  );
+
+  const validationError = deriveRunProgressSteps({
+    requestId: "req_0001",
+    status: "error",
+    completionObserved: true,
+    error: "结果 Hash 不一致",
+  }, "copied");
+  assert.deepEqual(
+    validationError.map(({ state }) => state),
+    ["done", "done", "error", "pending"],
+  );
+  assert.equal(validationError[2].detail, "结果 Hash 不一致");
+
+  const ready = deriveRunProgressSteps({
+    requestId: "req_0001",
+    status: "ready-to-open",
+  });
+  assert.deepEqual(
+    ready.map(({ state }) => state),
+    ["done", "done", "done", "current"],
+  );
+  assert.equal(ready[3].label, "新版本已准备好");
+  assert.equal(ready[3].detail, "旧版未被覆盖，等待你确认打开最新版");
+
+  const noChange = deriveRunProgressSteps({
+    requestId: "req_0001",
+    status: "no-change",
+  });
+  assert.deepEqual(
+    noChange.map(({ state }) => state),
+    ["done", "done", "done", "neutral"],
+  );
+
+  const conflict = deriveRunProgressSteps({
+    requestId: "req_0001",
+    status: "awaiting-conflict-resolution",
+  });
+  assert.deepEqual(
+    conflict.map(({ state }) => state),
+    ["done", "done", "error", "current"],
+  );
+  assert.equal(conflict[3].label, "请选择当前 HTML");
 });
 
 test("legacy validation review choices are decoded at the domain boundary", () => {

@@ -25,6 +25,7 @@ import { FileHtmlIcon } from "@phosphor-icons/react/dist/csr/FileHtml";
 import { FolderOpenIcon } from "@phosphor-icons/react/dist/csr/FolderOpen";
 import { ImageIcon } from "@phosphor-icons/react/dist/csr/Image";
 import { LockKeyIcon } from "@phosphor-icons/react/dist/csr/LockKey";
+import { MinusCircleIcon } from "@phosphor-icons/react/dist/csr/MinusCircle";
 import { PaperclipIcon } from "@phosphor-icons/react/dist/csr/Paperclip";
 import { PaperPlaneTiltIcon } from "@phosphor-icons/react/dist/csr/PaperPlaneTilt";
 import { PencilSimpleIcon } from "@phosphor-icons/react/dist/csr/PencilSimple";
@@ -100,6 +101,7 @@ import {
 import {
   activeRunFromRecord,
   canonicalLifecycleState,
+  deriveRunProgressSteps,
   isLockedLifecycleState,
   validationReviewFromRecord,
   type ActiveRun,
@@ -7115,6 +7117,7 @@ export default function Workbench() {
       sourcePath: committedSourcePath,
       candidateVersionLabel: candidateLabel,
       status: protocolViolation ? "error" : "complete",
+      completionObserved: true,
     };
     activeRunRef.current = completedRun;
     setActiveRun(completedRun);
@@ -7146,6 +7149,7 @@ export default function Workbench() {
         candidateVersionLabel: candidateLabel,
         status: "error",
         error: warning,
+        completionObserved: true,
       };
       activeRunRef.current = warningRun;
       setActiveRun(warningRun);
@@ -7369,7 +7373,12 @@ export default function Workbench() {
         const error = isRecord(payload.error)
           ? String(payload.error.message || "完成校验失败")
           : String(payload.error || "完成校验失败");
-        const errorRun = { ...run, status: "error" as const, error };
+        const errorRun = {
+          ...run,
+          status: "error" as const,
+          error,
+          completionObserved: payload.completionObserved === true,
+        };
         activeRunRef.current = errorRun;
         setActiveRun(errorRun);
         setDrawer("handoff");
@@ -7949,6 +7958,15 @@ export default function Workbench() {
   const terminalRun = Boolean(
     activeRun && ["error", "no-change"].includes(activeRun.status) && !pendingRunOutcome,
   );
+  const handoffCopyFailed = Boolean(
+    activeRun
+    && currentQoderHandoffStatus === "failed"
+    && ["submitting", "processing", "ready"].includes(activeRun.status),
+  );
+  const checkingRun = Boolean(
+    activeRun
+    && ["validating", "committing", "recovering-transaction"].includes(activeRun.status),
+  );
   const activeScopeDecision = activeRun?.validationReview?.softViolationCodes.length
     ? scopeDecisionSummary(activeRun.scopeReport)
     : null;
@@ -7986,118 +8004,10 @@ export default function Workbench() {
         : activeRun?.status === "error"
           ? "需要处理"
           : "正在等待修改结果";
-  const returnedStates: LifecycleState[] = [
-    "validating",
-    "committing",
-    "ready-to-open",
-    "complete",
-    "no-change",
-    "error",
-  ];
-  const validatedStates: LifecycleState[] = [
-    "committing",
-    "ready-to-open",
-    "complete",
-    "no-change",
-  ];
-  const processSteps = activeRun ? [
-    {
-      key: "frozen",
-      label: "本轮要求已冻结",
-      detail: "原始评论和本地编辑不会再被覆盖",
-      state: activeRun.requestId !== "pending" && activeRun.status !== "submitting"
-        ? "done"
-        : "current",
-    },
-    {
-      key: "copied",
-      label: currentQoderHandoffStatus === "failed"
-        ? "交接内容尚未复制"
-        : "交接内容已写入剪贴板",
-      detail: currentQoderHandoffStatus === "copied"
-        ? "仅确认剪贴板写入成功，不代表 Qoder 已收到"
-        : currentQoderHandoffStatus === "failed"
-          ? "Request 已安全保留，可在下方重新复制"
-          : currentQoderHandoffStatus === "copying"
-            ? "正在写入并核对剪贴板"
-            : "等待复制本轮要求",
-      state: currentQoderHandoffStatus === "copied"
-        ? "done"
-        : currentQoderHandoffStatus === "failed"
-          ? "error"
-          : "current",
-    },
-    {
-      key: "returned",
-      label: "已检测到 AI 返回结果",
-      detail: returnedStates.includes(activeRun.status)
-        ? "完整 HTML 和完成记录已经出现"
-        : "等待 AI 写回受控文件",
-      state: returnedStates.includes(activeRun.status) ? "done" : "pending",
-    },
-    {
-      key: "integrity",
-      label: "版本与文件完整性",
-      detail: activeRun.status === "error"
-        ? activeRun.error || "硬校验未通过"
-        : activeRun.status === "no-change"
-          ? "结果已核对，没有可采用的内容变化"
-        : validatedStates.includes(activeRun.status)
-          ? "不可忽略的安全校验已通过"
-          : "等待返回结果",
-      state: activeRun.status === "error"
-        ? "error"
-        : validatedStates.includes(activeRun.status)
-          ? "done"
-          : returnedStates.includes(activeRun.status)
-            ? "current"
-            : "pending",
-    },
-    {
-      key: "scope",
-      label: "范围与质量校验",
-      detail: activeRun.validationReview?.softViolationCodes.length
-          ? "已记录评论范围外的额外变化，未中断版本生成"
-          : ["committing", "ready-to-open", "complete", "no-change"].includes(activeRun.status)
-            ? "已通过"
-            : "等待校验",
-      state: ["committing", "ready-to-open", "complete", "no-change"].includes(activeRun.status)
-          ? "done"
-          : activeRun.status === "validating"
-            ? "current"
-            : "pending",
-    },
-    {
-      key: "version",
-      label: "新版本已安全保存",
-      detail: activeRun.status === "no-change"
-        ? "没有创建新版本，当前 HTML 保持不变"
-        : ["ready-to-open", "complete"].includes(activeRun.status)
-          ? `${activeRun.candidateVersionLabel} 已保留，旧版未被覆盖`
-        : "等待版本提交",
-      state: ["ready-to-open", "complete", "no-change"].includes(activeRun.status)
-        ? "done"
-        : activeRun.status === "committing"
-          ? "current"
-          : "pending",
-    },
-    {
-      key: "open",
-      label: "打开最新版",
-      detail: activeRun.status === "ready-to-open"
-        ? "由你确认后才替换左侧画布"
-        : activeRun.status === "complete"
-          ? "左侧已经打开最新版"
-          : activeRun.status === "no-change"
-            ? "无需打开新版本，可直接返回编辑"
-          : "等待前序步骤完成",
-      state: ["complete", "no-change"].includes(activeRun.status)
-        ? "done"
-        : activeRun.status === "ready-to-open"
-          ? "current"
-          : "pending",
-    },
-  ] as const : [];
+  const processSteps = deriveRunProgressSteps(
+    activeRun,
+    currentQoderHandoffStatus,
+  );
   const draftTargetScope = !draftTarget
     ? "尚未选择"
     : draftTarget.tagName === "body"
@@ -9851,7 +9761,7 @@ export default function Workbench() {
                       <header>
                         <span>本轮流程</span>
                         <strong>
-                          {processSteps.length} 个步骤 · 已完成 {processSteps.filter((step) => step.state === "done").length} 个
+                          {processSteps.length} 个阶段 · 已完成 {processSteps.filter((step) => step.state === "done").length} 个
                         </strong>
                       </header>
                       <ol>
@@ -9862,6 +9772,8 @@ export default function Workbench() {
                                 <CheckCircleIcon size={20} weight="fill" />
                               ) : step.state === "error" ? (
                                 <TriangleIcon size={18} weight="fill" />
+                              ) : step.state === "neutral" ? (
+                                <MinusCircleIcon size={19} weight="duotone" />
                               ) : (
                                 <ClockCounterClockwiseIcon size={19} weight="duotone" />
                               )}
@@ -9942,16 +9854,6 @@ export default function Workbench() {
                         <strong>请选择哪份内容成为当前 HTML</strong>
                         <p>外部文件和 AI 候选都已保留，系统不会静默覆盖任一侧。</p>
                         {activeRun.error ? <small>{activeRun.error}</small> : null}
-                        <button
-                          type="button"
-                          disabled={resolvingConflict}
-                          onClick={() => void resolveAiConflict("adopt-ai")}
-                        >{resolvingConflict ? "正在处理…" : "采用 AI 候选"}</button>
-                        <button
-                          type="button"
-                          disabled={resolvingConflict}
-                          onClick={() => void resolveAiConflict("keep-external")}
-                        >保留外部内容</button>
                       </section>
                     ) : null}
                     {activeRun.status === "recovering-transaction" ? (
@@ -9999,21 +9901,101 @@ export default function Workbench() {
         {drawer === "handoff" && activeRun ? (
           <footer className="processing-footer">
             {activeRun.status === "ready-to-open" ? (
-              <button
-                className="primary-action"
-                type="button"
-                disabled={openingReadyVersion || !activeRun.readyPayload}
-                onClick={() => void activateReadyResult()}
-              >
-                <FileHtmlIcon aria-hidden="true" size={18} weight="duotone" />
-                {openingReadyVersion ? "正在打开并核对…" : "打开最新版"}
-              </button>
+              <>
+                <button
+                  className="primary-action"
+                  type="button"
+                  disabled={openingReadyVersion || !activeRun.readyPayload}
+                  onClick={() => void activateReadyResult()}
+                >
+                  <FileHtmlIcon aria-hidden="true" size={18} weight="duotone" />
+                  {openingReadyVersion ? "正在打开并核对…" : "打开最新版"}
+                </button>
+                <button
+                  className="secondary-action"
+                  type="button"
+                  onClick={() => setDrawer(null)}
+                >
+                  <ClockCounterClockwiseIcon aria-hidden="true" size={17} weight="duotone" />
+                  稍后处理
+                </button>
+              </>
             ) : pendingRunOutcome ? (
               <span className="processing-auto-status" role="status">
                 {pendingReconcileBusy ? "正在自动确认发送结果…" : "等待下一次自动确认…"}
               </span>
+            ) : handoffCopyFailed ? (
+              <>
+                <button
+                  className="primary-action"
+                  type="button"
+                  disabled={
+                    !activeRun.handoffMessage
+                    || currentQoderHandoffStatus === "copying"
+                  }
+                  onClick={() => void sendToQoderWork(
+                    activeRun.handoffMessage,
+                    activeRun,
+                  )}
+                >
+                  <CopyIcon aria-hidden="true" size={18} weight="bold" />
+                  重新复制
+                </button>
+                <button
+                  className="cancel-action"
+                  type="button"
+                  disabled={cancelling}
+                  onClick={() => void cancelActiveRun()}
+                >
+                  <ArrowCounterClockwiseIcon aria-hidden="true" size={17} weight="bold" />
+                  {cancelling ? "正在取消…" : "取消本轮"}
+                </button>
+              </>
+            ) : activeRun.status === "awaiting-conflict-resolution" ? (
+              <>
+                <button
+                  className="primary-action"
+                  type="button"
+                  disabled={resolvingConflict}
+                  onClick={() => void resolveAiConflict("adopt-ai")}
+                >
+                  <FileHtmlIcon aria-hidden="true" size={18} weight="duotone" />
+                  {resolvingConflict ? "正在处理…" : "采用 AI 版本"}
+                </button>
+                <button
+                  className="secondary-action"
+                  type="button"
+                  disabled={resolvingConflict}
+                  onClick={() => void resolveAiConflict("keep-external")}
+                >
+                  <FileIcon aria-hidden="true" size={17} weight="duotone" />
+                  保留外部版本
+                </button>
+              </>
+            ) : checkingRun ? (
+              <button
+                className="secondary-action"
+                type="button"
+                disabled={
+                  !activeRun.requestPath
+                  || typeof window === "undefined"
+                  || !window.htmlAIProjects?.revealRequestFolder
+                }
+                onClick={() => void revealActiveRunInFinder()}
+              >
+                <FolderOpenIcon aria-hidden="true" size={18} weight="duotone" />
+                查看本轮文件
+              </button>
             ) : terminalRun ? (
               <>
+                <button
+                  className="primary-action"
+                  type="button"
+                  onClick={() => returnToEditingFromTerminalRun(true)}
+                >
+                  <PencilSimpleIcon aria-hidden="true" size={17} weight="bold" />
+                  修改要求
+                </button>
                 <button
                   className="secondary-action"
                   type="button"
@@ -10021,14 +10003,6 @@ export default function Workbench() {
                 >
                   <ArrowCounterClockwiseIcon aria-hidden="true" size={17} weight="bold" />
                   返回编辑
-                </button>
-                <button
-                  className="primary-action"
-                  type="button"
-                  onClick={() => returnToEditingFromTerminalRun(true)}
-                >
-                  <PencilSimpleIcon aria-hidden="true" size={17} weight="bold" />
-                  调整要求后重试
                 </button>
               </>
             ) : (

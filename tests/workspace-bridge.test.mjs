@@ -582,6 +582,13 @@ test("registration and first edit keep document identity sidecar-only", async (t
   assert.notEqual(opened.body.documentId, staleDocumentId);
   assert.equal(opened.body.paths.currentHtml, sourcePath);
   assert.equal(opened.body.paths.projectRecords, opened.body.projectRoot);
+  const projectRules = await readFile(
+    join(opened.body.projectRoot, "PROJECT.md"),
+    "utf8",
+  );
+  assert.match(projectRules, /^# stale-v2-snapshot · 项目长期规则$/m);
+  assert.match(projectRules, /适用于本项目之后的每次 AI 修改/);
+  assert.match(projectRules, /完成要求所必需的关联内容/);
   const registeredHtml = await readFile(sourcePath, "utf8");
   assert.equal(registeredHtml, staleHtml);
   assert.equal(registeredHtml, opened.body.content);
@@ -1087,6 +1094,8 @@ test("AI readOrder excludes the full audit archive and compacts long module quot
     changeEvents: [],
   });
   assert.equal(submitted.response.status, 201, JSON.stringify(submitted.body));
+  assert.match(submitted.body.handoffMessage, /中的单轮任务/);
+  assert.match(submitted.body.handoffMessage, /最终化（finalizer）命令/);
 
   const [changeRequest, annotations, inputManifest, prompt, aiRules] =
     await Promise.all([
@@ -1115,16 +1124,27 @@ test("AI readOrder excludes the full audit archive and compacts long module quot
     false,
   );
   assert.doesNotMatch(prompt, /input\/annotations\/records\.json/);
-  assert.match(prompt, /不要读取未出现在 readOrder 中的审计归档/);
+  assert.match(prompt, /^# PageRoot 本轮修改 · compact-ai-input$/m);
+  assert.match(prompt, /不要读取未列入 readOrder 的审计归档/);
+  assert.match(
+    prompt,
+    new RegExp(`${submitted.body.projectId}.*${submitted.body.documentId}`),
+  );
+  assert.match(
+    prompt,
+    new RegExp(`${submitted.body.requestId}.*${submitted.body.attemptId}`),
+  );
   assert.match(prompt, /record-user-supplement\.mjs/);
-  assert.match(prompt, /失败时停止该条修改并把原因告诉用户/);
-  assert.match(prompt, /命令返回 ok=true 后，重新读取 USER_SUPPLEMENT\.json/);
+  assert.match(prompt, /失败时停止该条修改并说明原因/);
+  assert.match(prompt, /命令返回 `ok=true` 后才能执行该条要求/);
   assert.match(prompt, /evidenceState=description-only/);
+  assert.doesNotMatch(prompt, /## 本轮附件/);
   assert.match(
     aiRules,
-    /本轮有效要求由冻结 change-request\.json 与当前 Attempt 的 USER_SUPPLEMENT\.json/,
+    /本轮有效要求由 change-request\.json 中的冻结要求，以及当前 Attempt 的 USER_SUPPLEMENT\.json/,
   );
-  assert.match(aiRules, /不得读取仅在 files 中留档的审计文件/);
+  assert.match(aiRules, /^# PageRoot 通用执行规则$/m);
+  assert.match(aiRules, /files 中未列入 readOrder 的条目只用于审计，不得读取/);
 });
 
 test("historical direct-edit targets never block a resolved Request", async (t) => {
@@ -2196,13 +2216,13 @@ test("comment attachments persist in the project and freeze with comment-target 
     "utf8",
   );
   assert.doesNotMatch(prompt, /input\/annotations\/records\.json/);
-  assert.match(prompt, /change-request\.json 已包含完整评论、目标和附件关系/);
-  assert.match(prompt, /本地附件路径/);
+  assert.match(prompt, /change-request\.json 已包含完整的评论、目标和附件关系/);
+  assert.match(prompt, /本轮附件/);
   assert.match(prompt, /目标版本：\*\*版本 2\*\*/);
-  assert.match(prompt, /input-manifest\.json 是冻结输入清单/);
-  assert.match(prompt, /不扫描其他任务、版本或项目/);
-  assert.match(prompt, /只修改用户明确允许的地方/);
-  assert.match(prompt, /只写 output\/index\.html/);
+  assert.match(prompt, /严格按 input-manifest\.json 的 readOrder/);
+  assert.match(prompt, /不要扫描其他任务、版本或项目/);
+  assert.match(prompt, /只修改用户明确指定的区域/);
+  assert.match(prompt, /只把一个完整 HTML 写入当前 Attempt 的 output\/index\.html/);
   assert.match(prompt, /不得直接编辑 USER_SUPPLEMENT\.json、PROJECT\.md、冻结输入或其他协议文件/);
   assert.match(prompt, new RegExp(requestAttachment.localPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.doesNotMatch(prompt, /dataBase64|project-local-comment-image/);
@@ -2210,15 +2230,15 @@ test("comment attachments persist in the project and freeze with comment-target 
     join(submitted.body.requestPath, "input", "AI_RULES.md"),
     "utf8",
   );
-  assert.match(aiRules, /input-manifest\.json 是冻结输入清单/);
-  assert.match(aiRules, /严格按 readOrder 读取原始执行输入/);
+  assert.match(aiRules, /^# PageRoot 通用执行规则$/m);
+  assert.match(aiRules, /严格按 input-manifest\.json 的 readOrder 读取冻结输入/);
   assert.match(
     aiRules,
-    /本轮有效要求由冻结 change-request\.json 与当前 Attempt 的 USER_SUPPLEMENT\.json/,
+    /本轮有效要求由 change-request\.json 中的冻结要求，以及当前 Attempt 的 USER_SUPPLEMENT\.json/,
   );
-  assert.match(aiRules, /不得扫描其他 Request、Version、项目目录或用户文件/);
-  assert.match(aiRules, /只修改用户明确允许的区域/);
-  assert.match(aiRules, /本轮不得修改 PROJECT\.md、项目规则、冻结输入或协议文件/);
+  assert.match(aiRules, /不得扫描其他 Request、Attempt、Version、项目目录或用户文件/);
+  assert.match(aiRules, /只修改用户明确指定的区域/);
+  assert.match(aiRules, /不得修改 PROJECT\.md、冻结输入或协议文件/);
 
   await rm(join(
     opened.projectRoot,
@@ -2420,6 +2440,11 @@ test("mandatory finalizer controls completion, identity, no-change, and cancella
     run.outputPath,
     htmlPage("最终化", '<section id="ai-result">AI 完成的内容</section>'),
     "utf8",
+  );
+  await writeFile(join(run.attemptPath, ".DS_Store"), "Finder metadata");
+  await writeFile(
+    join(dirname(run.outputPath), ".DS_Store"),
+    "Finder metadata",
   );
 
   for (let index = 0; index < 2; index += 1) {
@@ -2766,6 +2791,7 @@ test("Bridge enforces the complete completion.v1 runtime contract before committ
     );
     assert.equal(rejected.response.status, 200, malformedCase.label);
     assert.equal(rejected.body.status, "error", malformedCase.label);
+    assert.equal(rejected.body.completionObserved, true, malformedCase.label);
     assert.equal(
       rejected.body.error.code,
       "COMPLETION_SCHEMA_INVALID",
@@ -4065,6 +4091,7 @@ test("output PROJECT.md is rejected as a protocol violation", async (t) => {
   );
   assert.equal(status.response.status, 200);
   assert.equal(status.body.status, "error");
+  assert.equal(status.body.completionObserved, false);
   assert.equal(
     status.body.protocolViolation.code,
     "OUTPUT_PROTOCOL_VIOLATION",
