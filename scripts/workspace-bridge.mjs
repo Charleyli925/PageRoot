@@ -4391,11 +4391,7 @@ ${attachmentLines.join("\n")}
 
 只读取上面的项目内副本，不要追溯用户的外部原文件。若绝对路径因项目整体移动而失效，请以 Request 根目录解析相对路径。
 `
-    : `
-## 本轮附件
-
-本轮没有评论附件。
-`;
+    : "";
   return `# PageRoot 本轮修改 · ${project.displayName}
 
 ## 本轮身份
