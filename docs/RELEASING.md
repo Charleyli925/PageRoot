@@ -40,15 +40,18 @@ In GitHub Actions:
 
 The workflow allows up to 110 minutes specifically for the combined
 build/sign/notarize/install-verification operation, within a 120-minute outer
-job guard. All other steps have explicit 2–10 minute limits, so an unrelated
-checkout, dependency, metadata, provenance or upload stall still fails quickly.
+job guard. The App and the final DMG are submitted to Apple independently; the
+DMG is stapled and validated after its own acceptance. All other steps have
+explicit 2–10 minute limits, so an unrelated checkout, dependency, metadata,
+provenance or upload stall still fails quickly.
 
 The workflow:
 
 - refuses any ref other than current `main`;
 - requires a successful PR source-gate attestation for the exact Tree Hash and package/lockfile version, no older than seven days;
 - packages on macOS with `electron-builder --publish never`, Developer ID
-  signing, Hardened Runtime and Apple notarization;
+  signing, Hardened Runtime, App notarization, and final DMG
+  notarization/stapling;
 - launches the packaged App with isolated data;
 - verifies the App bundle, Bridge resources, schemas, expected Team ID,
   notarization ticket, Gatekeeper assessment, DMG integrity, update ZIP,
@@ -91,11 +94,13 @@ Packaging refuses committed-source drift or untracked source files. `build-info.
 Publication resolves only the artifact whose name matches the successful run attempt, then revalidates all of that information after downloading it. This keeps a failed-job rerun distinct from bytes uploaded by an earlier attempt of the same workflow run. The Release includes both provenance files, so the published installer can be traced to the reviewed source tree and the exact successful candidate run and attempt.
 
 The public build is signed with a Developer ID Application certificate,
-notarized and stapled before it is frozen. `latest-mac.yml` describes the signed
-ZIP and its blockmap; electron-updater validates the release metadata and
-application signature, uses a cached prior ZIP for differential transfer when
-available, and falls back to a full ZIP on the first migration or if a
-differential request cannot be completed.
+notarized and stapled before it is frozen. If electron-builder lists the DMG in
+`latest-mac.yml`, its digest and size are refreshed after stapling so every
+listed artifact describes final bytes. The compatibility path continues to
+describe the signed ZIP and its blockmap; electron-updater validates the release
+metadata and application signature, uses a cached prior ZIP for differential
+transfer when available, and falls back to a full ZIP on the first migration or
+if a differential request cannot be completed.
 
 The first signed release is a trust-boundary migration. Existing ad-hoc clients
 show the legacy manual update entry and require one manual DMG install. Once the

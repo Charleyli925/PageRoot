@@ -607,6 +607,7 @@ async function verifyDmg({
 }
 
 async function verifyUpdateAssets({
+  dmgPath,
   zipPath,
   blockmapPath,
   updateInfoPath,
@@ -658,6 +659,26 @@ async function verifyUpdateAssets({
     new RegExp(`^sha512:\\s*${escapedZipSha512}\\s*$`, "mu"),
     "latest-mac.yml compatibility digest does not match the update ZIP",
   );
+  const dmgName = path.basename(dmgPath);
+  const escapedDmgName = dmgName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  if (new RegExp(`^\\s{2}- url:\\s*${escapedDmgName}\\s*$`, "mu").test(updateInfo)) {
+    const [dmgInfo, dmgBytes] = await Promise.all([
+      stat(dmgPath),
+      readFile(dmgPath),
+    ]);
+    const dmgSha512 = createHash("sha512").update(dmgBytes).digest("base64");
+    const escapedDmgSha512 = dmgSha512.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    assert.match(
+      updateInfo,
+      new RegExp(
+        `^\\s{2}- url:\\s*${escapedDmgName}\\s*\\n`
+          + `\\s{4}sha512:\\s*${escapedDmgSha512}\\s*\\n`
+          + `\\s{4}size:\\s*${dmgInfo.size}\\s*$`,
+        "mu",
+      ),
+      "latest-mac.yml does not describe the exact final DMG bytes",
+    );
+  }
 
   if (process.platform !== "darwin" || !commandExists("/usr/bin/ditto")) {
     return { extracted: false, reason: "ditto is unavailable" };
@@ -717,6 +738,7 @@ export async function verifyPackagedArtifact({
       expectedProvenance: provenance,
     }),
     verifyUpdateAssets({
+      dmgPath: layout.dmgPath,
       zipPath: layout.zipPath,
       blockmapPath: layout.blockmapPath,
       updateInfoPath: layout.updateInfoPath,

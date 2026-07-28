@@ -13,6 +13,10 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { createPackage } from "@electron/asar";
 import {
+  notarizeAndStapleDmg,
+  refreshDmgUpdateMetadata,
+} from "../scripts/build-package.mjs";
+import {
   assertNoRetiredEditorArtifacts,
   expectedArtifactLayout,
   verifyAppBundle,
@@ -360,6 +364,103 @@ test("release commands use one automated artifact lane with full tests and packa
     `PageRoot-${packageJson.version}-arm64.zip.blockmap`,
   );
   assert.equal(path.basename(layout.updateInfoPath), "latest-mac.yml");
+});
+
+test("release packaging notarizes, staples and validates the final DMG", async (t) => {
+  const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "pageroot-dmg-notarize-"));
+  t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
+  const dmgPath = await writeFixtureFile(
+    temporaryRoot,
+    "PageRoot-0.9.1-arm64.dmg",
+    "final dmg bytes",
+  );
+  const environment = {
+    PAGEROOT_REQUIRE_NOTARIZATION: "1",
+    APPLE_ID: "release@example.invalid",
+    APPLE_APP_SPECIFIC_PASSWORD: "fixture-password",
+    APPLE_TEAM_ID: "TEAM123456",
+  };
+  const calls = [];
+  await notarizeAndStapleDmg({
+    dmgPath,
+    environment,
+    commandRunner: async (command, arguments_, options) => {
+      calls.push({ command, arguments_, options });
+    },
+  });
+  assert.deepEqual(
+    calls.map(({ command, arguments_ }) => [command, arguments_]),
+    [
+      [
+        "/usr/bin/xcrun",
+        [
+          "notarytool",
+          "submit",
+          dmgPath,
+          "--apple-id",
+          environment.APPLE_ID,
+          "--password",
+          environment.APPLE_APP_SPECIFIC_PASSWORD,
+          "--team-id",
+          environment.APPLE_TEAM_ID,
+          "--wait",
+        ],
+      ],
+      ["/usr/bin/xcrun", ["stapler", "staple", dmgPath]],
+      ["/usr/bin/xcrun", ["stapler", "validate", dmgPath]],
+    ],
+  );
+  assert.ok(calls.every(({ options }) => options.environment === environment));
+
+  await assert.rejects(
+    notarizeAndStapleDmg({
+      dmgPath,
+      environment: { PAGEROOT_REQUIRE_NOTARIZATION: "1" },
+      commandRunner: async () => assert.fail("must fail before invoking xcrun"),
+    }),
+    /DMG notarization credentials are missing/u,
+  );
+  assert.deepEqual(
+    await notarizeAndStapleDmg({
+      dmgPath,
+      environment: {},
+      commandRunner: async () => assert.fail("local unsigned packaging must skip this stage"),
+    }),
+    { skipped: true },
+  );
+});
+
+test("DMG stapling refreshes only its final latest-mac metadata entry", async (t) => {
+  const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "pageroot-dmg-metadata-"));
+  t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
+  const dmgPath = await writeFixtureFile(
+    temporaryRoot,
+    "PageRoot-0.9.1-arm64.dmg",
+    "stapled-final-dmg",
+  );
+  const updateInfoPath = await writeFixtureFile(
+    temporaryRoot,
+    "latest-mac.yml",
+    [
+      "version: 0.9.1",
+      "files:",
+      "  - url: PageRoot-0.9.1-arm64.zip",
+      "    sha512: exact-zip-digest",
+      "    size: 1234",
+      "  - url: PageRoot-0.9.1-arm64.dmg",
+      "    sha512: stale-dmg-digest",
+      "    size: 42",
+      "path: PageRoot-0.9.1-arm64.zip",
+      "sha512: exact-zip-digest",
+      "",
+    ].join("\n"),
+  );
+  const result = await refreshDmgUpdateMetadata({ dmgPath, updateInfoPath });
+  const updated = await readFile(updateInfoPath, "utf8");
+  assert.equal(result.updated, true);
+  assert.match(updated, new RegExp(`    sha512: ${result.sha512}\\n    size: ${result.size}\\n`, "u"));
+  assert.match(updated, /PageRoot-0\.9\.1-arm64\.zip\n    sha512: exact-zip-digest\n    size: 1234/u);
+  assert.doesNotMatch(updated, /stale-dmg-digest/u);
 });
 
 test("retired editor guard rejects dependencies, bundled code, and legacy editing surfaces", () => {
