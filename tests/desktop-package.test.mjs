@@ -56,6 +56,7 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.ok(packageJson.build.files.includes("!node_modules/**/*"));
   assert.ok(packageJson.build.files.includes("desktop/preload.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/project-files.mjs"));
+  assert.ok(packageJson.build.files.includes("desktop/project-path-policy.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/welcome-project-content.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/export-copy.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/bridge-shutdown.mjs"));

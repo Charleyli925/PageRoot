@@ -49,6 +49,7 @@ import {
   PRODUCT_MAX_HTML_BYTES,
   isGeneratedWorkingCopyFileName,
 } from "./product-contract.mjs";
+import { isManagedVersionRelativePath } from "./project-path-policy.mjs";
 import { handoffToQoderWork } from "./qoder-handoff.mjs";
 import {
   ManualUpdateError,
@@ -779,6 +780,8 @@ async function revealVersionFile(payload) {
     || !versionRecord
     || versionRecord.ok !== true
     || versionRecord.versionId !== payload.versionId
+    || typeof versionRecord.projectId !== "string"
+    || typeof versionRecord.storageDirectoryName !== "string"
     || typeof versionRecord.path !== "string"
   ) {
     throw new ProjectFileError(
@@ -800,10 +803,11 @@ async function revealVersionFile(payload) {
     || relativeVersionPath.startsWith(`..${path.sep}`)
     || relativeVersionPath === ".."
     || path.isAbsolute(relativeVersionPath)
-    || !new RegExp(
-      `^projects${path.sep}project_[A-Za-z0-9_-]+${path.sep}versions`
-      + `${path.sep}${payload.versionId}${path.sep}files${path.sep}index\\.html$`,
-    ).test(relativeVersionPath)
+    || !isManagedVersionRelativePath(relativeVersionPath, {
+      projectId: versionRecord.projectId,
+      storageDirectoryName: versionRecord.storageDirectoryName,
+      versionId: payload.versionId,
+    })
   ) {
     throw new ProjectFileError(
       "UNSAFE_VERSION_PATH",

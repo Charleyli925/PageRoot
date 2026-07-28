@@ -52,6 +52,9 @@ async function fixture() {
     schemaVersion: LIFECYCLE_SCHEMA_VERSION,
     projectId: PROJECT_ID,
     documentId: DOCUMENT_ID,
+    displayName: "补充记录项目",
+    createdAt,
+    storageDirectoryName,
   }));
   await writeFile(path.join(projectRoot, "runtime-state.json"), JSON.stringify({
     schemaVersion: LIFECYCLE_SCHEMA_VERSION,
@@ -209,4 +212,30 @@ test("description-only evidence is explicit when the original file cannot be arc
   });
   assert.equal(archive.records[0].evidenceState, "description-only");
   assert.equal(archive.records[0].attachments.length, 0);
+});
+
+test("supplement mutation rejects a registry remap to mismatched project metadata", async (context) => {
+  const current = await fixture();
+  context.after(() => rm(current.workspaceRoot, { recursive: true, force: true }));
+  const registryPath = path.join(current.workspaceRoot, "project-registry.json");
+  const registry = JSON.parse(await readFile(registryPath, "utf8"));
+  registry.projects[PROJECT_ID].displayName = "被篡改的目录映射";
+  await writeFile(registryPath, JSON.stringify(registry));
+
+  await assert.rejects(
+    recordUserSupplement({
+      workspaceRoot: current.workspaceRoot,
+      projectId: PROJECT_ID,
+      requestId: REQUEST_ID,
+      attemptId: ATTEMPT_ID,
+      payload: {
+        idempotencyKey: "chat-message-mismatched-authority",
+        action: "add",
+        refersTo: [],
+        userText: "这条记录不应写入错配项目。",
+        attachments: [],
+      },
+    }),
+    (error) => error?.code === "PROJECT_STORAGE_METADATA_MISMATCH",
+  );
 });
