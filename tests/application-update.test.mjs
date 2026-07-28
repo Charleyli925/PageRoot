@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import test from "node:test";
 
-import { createApplicationUpdateController } from "../desktop/application-update.mjs";
+import {
+  APPLICATION_UPDATE_INITIAL_DELAY_MS,
+  APPLICATION_UPDATE_INTERVAL_MS,
+  createApplicationUpdateController,
+} from "../desktop/application-update.mjs";
 
 class FakeUpdater extends EventEmitter {
   constructor() {
@@ -149,4 +153,74 @@ test("controller releases every updater listener", () => {
   assert.ok(updater.eventNames().length > 0);
   value.dispose();
   assert.deepEqual(updater.eventNames(), []);
+});
+
+test("automatic checks run after startup and then every four hours", async () => {
+  const timers = [];
+  const cancelled = [];
+  const scheduleTimer = (callback, delay) => {
+    const timer = {
+      callback,
+      delay,
+      unrefCalled: false,
+      unref() {
+        this.unrefCalled = true;
+      },
+    };
+    timers.push(timer);
+    return timer;
+  };
+  const { updater, value } = controller({
+    scheduleTimer,
+    cancelTimer: (timer) => cancelled.push(timer),
+  });
+
+  assert.equal(value.startAutomaticChecks(), true);
+  assert.equal(timers.length, 1);
+  assert.equal(timers[0].delay, APPLICATION_UPDATE_INITIAL_DELAY_MS);
+  assert.equal(timers[0].unrefCalled, true);
+
+  await timers[0].callback();
+  assert.equal(updater.checkCount, 1);
+  assert.equal(timers.length, 2);
+  assert.equal(timers[1].delay, APPLICATION_UPDATE_INTERVAL_MS);
+  assert.equal(timers[1].unrefCalled, true);
+
+  value.stopAutomaticChecks();
+  assert.deepEqual(cancelled, [timers[1]]);
+});
+
+test("restarting or disposing automatic checks cancels the previous schedule", () => {
+  const timers = [];
+  const cancelled = [];
+  const { value } = controller({
+    scheduleTimer: (callback, delay) => {
+      const timer = { callback, delay };
+      timers.push(timer);
+      return timer;
+    },
+    cancelTimer: (timer) => cancelled.push(timer),
+  });
+
+  value.startAutomaticChecks();
+  value.startAutomaticChecks();
+  assert.deepEqual(cancelled, [timers[0]]);
+  value.dispose();
+  assert.deepEqual(cancelled, [timers[0], timers[1]]);
+});
+
+test("unsupported builds never schedule automatic checks", () => {
+  const timers = [];
+  const updater = new FakeUpdater();
+  const value = createApplicationUpdateController({
+    updater,
+    currentVersion: "0.9.0",
+    architecture: "arm64",
+    enabled: false,
+    scheduleTimer: (...args) => timers.push(args),
+    cancelTimer() {},
+  });
+
+  assert.equal(value.startAutomaticChecks(), false);
+  assert.deepEqual(timers, []);
 });

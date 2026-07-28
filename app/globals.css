@@ -6112,3 +6112,428 @@ body {
     transition: none;
   }
 }
+
+/* About PageRoot keeps product identity, update status and public-source
+   navigation in one deliberate desktop surface. */
+.header-actions .about-trigger-button {
+  width: 38px;
+  min-width: 38px;
+  padding: 0;
+  border: 1px solid #e6e7eb;
+  border-radius: 11px;
+  background: #f7f8fa;
+  color: #62646d;
+}
+
+.header-actions .about-trigger-button:hover:not(:disabled),
+.header-actions .about-trigger-button[aria-expanded="true"] {
+  border-color: #d8d7ed;
+  background: #f0efff;
+  color: var(--indigo-deep);
+}
+
+.about-dialog {
+  width: min(580px, calc(100vw - 32px));
+  max-width: none;
+  max-height: calc(100vh - 48px);
+  padding: 0;
+  overflow: visible;
+  border: 0;
+  border-radius: 22px;
+  background: transparent;
+  color: var(--ink);
+}
+
+.about-dialog::backdrop {
+  background: rgb(25 27 34 / 40%);
+  backdrop-filter: blur(8px);
+}
+
+.about-dialog-card {
+  position: relative;
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  padding: 30px;
+  border: 1px solid rgb(255 255 255 / 78%);
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at 84% 5%, rgb(103 96 233 / 11%), transparent 31%),
+    #fff;
+  box-shadow:
+    0 34px 90px rgb(24 26 35 / 24%),
+    0 3px 12px rgb(24 26 35 / 8%);
+  animation: about-dialog-appear 180ms ease-out;
+}
+
+@keyframes about-dialog-appear {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.about-close-button {
+  position: absolute;
+  z-index: 1;
+  top: 18px;
+  right: 18px;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: rgb(244 245 248 / 90%);
+  color: #747680;
+  transition: color 150ms ease, background-color 150ms ease;
+}
+
+.about-close-button:hover {
+  background: #eceef2;
+  color: #2e3037;
+}
+
+.about-identity {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  align-items: center;
+  gap: 19px;
+  padding-right: 42px;
+}
+
+.about-identity > img {
+  width: 72px;
+  height: 72px;
+  display: block;
+  border-radius: 19px;
+  object-fit: cover;
+  box-shadow:
+    0 13px 30px rgb(76 69 211 / 19%),
+    0 0 0 1px rgb(54 49 140 / 8%);
+}
+
+.about-identity > div {
+  min-width: 0;
+}
+
+.about-identity span {
+  display: block;
+  margin-bottom: 3px;
+  color: #6e6aaf;
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.about-identity h2 {
+  margin: 0;
+  color: #24252b;
+  font-size: 30px;
+  font-weight: 780;
+  line-height: 1.12;
+  letter-spacing: -0.04em;
+}
+
+.about-identity p {
+  max-width: 390px;
+  margin: 6px 0 0;
+  color: #666975;
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.about-product-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 20px;
+}
+
+.about-product-meta > span {
+  padding: 5px 9px;
+  border: 1px solid #e8e9ed;
+  border-radius: 999px;
+  background: #f7f8fa;
+  color: #686a74;
+  font-size: 9px;
+  font-weight: 680;
+  line-height: 1;
+}
+
+.about-update-card {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 13px;
+  margin-top: 24px;
+  padding: 17px;
+  border: 1px solid #e3e2f4;
+  border-radius: 16px;
+  background: #f8f7ff;
+}
+
+.about-update-card[data-tone="current"],
+.about-update-card[data-tone="ready"] {
+  border-color: #d6eadf;
+  background: #f4faf6;
+}
+
+.about-update-card[data-tone="unavailable"] {
+  border-color: #ebddd9;
+  background: #fcf7f5;
+}
+
+.about-update-icon {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 13px;
+  background: #e9e7ff;
+  color: #5650cb;
+}
+
+.about-update-card[data-tone="current"] .about-update-icon,
+.about-update-card[data-tone="ready"] .about-update-icon {
+  background: #dff1e7;
+  color: #2f7c5c;
+}
+
+.about-update-card[data-tone="unavailable"] .about-update-icon {
+  background: #f4e7e3;
+  color: #9b544e;
+}
+
+.about-update-copy {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.about-update-copy > span {
+  color: #7470b1;
+  font-size: 8px;
+  font-weight: 780;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.about-update-copy > strong {
+  overflow: hidden;
+  color: #30313a;
+  font-size: 12px;
+  font-weight: 730;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.about-update-copy > p {
+  margin: 0;
+  color: #757781;
+  font-size: 9px;
+  line-height: 1.55;
+}
+
+.about-update-progress {
+  height: 4px;
+  margin-top: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e4e3ef;
+}
+
+.about-update-progress > span {
+  height: 100%;
+  display: block;
+  border-radius: inherit;
+  background: var(--indigo);
+  transition: width 180ms ease;
+}
+
+.about-update-action {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 9px;
+  background: var(--indigo);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 720;
+  white-space: nowrap;
+  transition: background-color 150ms ease, box-shadow 150ms ease;
+}
+
+.about-update-action:hover:not(:disabled) {
+  background: var(--indigo-deep);
+  box-shadow: 0 6px 16px rgb(76 69 211 / 18%);
+}
+
+.about-update-action:disabled {
+  background: #e4e5e9;
+  color: #858791;
+  cursor: not-allowed;
+}
+
+.about-check-spinner {
+  animation: about-check-spin 900ms linear infinite;
+}
+
+@keyframes about-check-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.about-github-link {
+  width: 100%;
+  min-height: 64px;
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 11px 13px;
+  border: 1px solid #e7e8ec;
+  border-radius: 14px;
+  background: #fff;
+  color: #4e5059;
+  text-align: left;
+  transition: border-color 150ms ease, background-color 150ms ease;
+}
+
+.about-github-link:hover {
+  border-color: #d8d7e9;
+  background: #fafafe;
+}
+
+.about-github-icon {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 11px;
+  background: #25262c;
+  color: #fff;
+}
+
+.about-github-link > span:nth-child(2) {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.about-github-link strong {
+  color: #303139;
+  font-size: 11px;
+  font-weight: 720;
+}
+
+.about-github-link small {
+  overflow: hidden;
+  color: #858791;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.about-github-link > svg {
+  color: #898b94;
+}
+
+.about-link-error {
+  margin: 7px 2px 0;
+  color: #984c45;
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.about-footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 18px;
+  color: #9a9ca5;
+  font-size: 8px;
+  font-weight: 650;
+}
+
+.about-footer > i {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: #b7b9c0;
+}
+
+.about-dialog button {
+  cursor: pointer;
+}
+
+.about-dialog button:focus-visible,
+.header-actions .about-trigger-button:focus-visible {
+  outline: 3px solid rgb(90 85 223 / 24%);
+  outline-offset: 2px;
+}
+
+@media (max-width: 640px) {
+  .about-dialog {
+    width: calc(100vw - 20px);
+    max-height: calc(100vh - 20px);
+  }
+
+  .about-dialog-card {
+    max-height: calc(100vh - 20px);
+    padding: 24px 20px;
+    border-radius: 18px;
+  }
+
+  .about-identity {
+    grid-template-columns: 58px minmax(0, 1fr);
+    gap: 14px;
+  }
+
+  .about-identity > img {
+    width: 58px;
+    height: 58px;
+    border-radius: 16px;
+  }
+
+  .about-identity h2 {
+    font-size: 25px;
+  }
+
+  .about-update-card {
+    grid-template-columns: 42px minmax(0, 1fr);
+  }
+
+  .about-update-action {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .about-dialog-card,
+  .about-check-spinner {
+    animation: none;
+  }
+
+  .about-close-button,
+  .about-update-progress > span,
+  .about-update-action,
+  .about-github-link {
+    transition: none;
+  }
+}

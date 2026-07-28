@@ -301,16 +301,24 @@ test("preload exposes update status, restart installation, and the fixed release
   assert.equal(typeof unsubscribe, "function");
   unsubscribe();
 
+  await updates.checkNow();
+  assert.deepEqual(calls[1], ["html-updates:check-now"]);
+
   await updates.installDownloaded();
-  assert.deepEqual(calls[1], ["html-updates:install-downloaded"]);
+  assert.deepEqual(calls[2], ["html-updates:install-downloaded"]);
 
   await updates.openLatestRelease();
-  assert.deepEqual(calls[2], ["html-updates:open-latest-release"]);
+  assert.deepEqual(calls[3], ["html-updates:open-latest-release"]);
+
+  await updates.openRepository();
+  assert.deepEqual(calls[4], ["html-updates:open-repository"]);
   assert.deepEqual(Object.keys(updates).sort(), [
+    "checkNow",
     "getStatus",
     "installDownloaded",
     "onStatus",
     "openLatestRelease",
+    "openRepository",
   ]);
 });
 

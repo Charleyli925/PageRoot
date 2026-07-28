@@ -7,6 +7,9 @@ Notable user-visible changes are documented here. This project follows Semantic 
 - Added stable-only macOS auto-updates with automatic download, differential
   ZIP/blockmap transfer, a restart-to-install prompt, and the existing safe
   editor drain before installation.
+- Added four-hour update checks while the app remains open, plus a redesigned
+  About PageRoot dialog with manual update checking and the official GitHub
+  repository link.
 - Replaced ad-hoc distribution with fail-closed Developer ID signing, Hardened
   Runtime, Apple notarization and candidate verification of both DMG and updater
   assets while retaining the legacy manifest for one-time migration.

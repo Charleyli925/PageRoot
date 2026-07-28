@@ -24,6 +24,7 @@ import { FileIcon } from "@phosphor-icons/react/dist/csr/File";
 import { FileHtmlIcon } from "@phosphor-icons/react/dist/csr/FileHtml";
 import { FolderOpenIcon } from "@phosphor-icons/react/dist/csr/FolderOpen";
 import { ImageIcon } from "@phosphor-icons/react/dist/csr/Image";
+import { InfoIcon } from "@phosphor-icons/react/dist/csr/Info";
 import { LockKeyIcon } from "@phosphor-icons/react/dist/csr/LockKey";
 import { PaperclipIcon } from "@phosphor-icons/react/dist/csr/Paperclip";
 import { PaperPlaneTiltIcon } from "@phosphor-icons/react/dist/csr/PaperPlaneTilt";
@@ -42,6 +43,7 @@ import type {
   NativeDeferredCommandAuthority,
   NativeDeferredCommandDiscardReason,
 } from "./components/HtmlCanvasEditor";
+import AboutPageRootDialog from "./components/AboutPageRootDialog";
 import HtmlInteractionPreview from "./components/HtmlInteractionPreview";
 import NoticeBar from "./components/NoticeBar";
 import { rebindCanvasSelectionTargets } from "./lib/canvas-target-rebind.js";
@@ -110,6 +112,7 @@ import {
 const HtmlCanvasEditor = lazy(() => import("./components/HtmlCanvasEditor"));
 const BROWSER_PREVIEW_LOGO_PLACEHOLDER =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x2='1' y2='1'%3E%3Cstop stop-color='%236550e8'/%3E%3Cstop offset='1' stop-color='%23d45df2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='15' fill='url(%23g)'/%3E%3Cpath d='M23 23 13 32l10 9M41 23l10 9-10 9M36 16 28 48' fill='none' stroke='white' stroke-width='5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E";
+const PROJECT_REPOSITORY_URL = "https://github.com/Charleyli925/PageRoot";
 
 class DeferredEditorCommandDiscardedError extends Error {
   readonly reason: NativeDeferredCommandDiscardReason;
@@ -221,6 +224,7 @@ type ApplicationUpdateResult = {
 
 type DesktopUpdatesApi = {
   getStatus: () => Promise<ApplicationUpdateResult | null>;
+  checkNow: () => Promise<ApplicationUpdateResult>;
   onStatus: (
     listener: (result: ApplicationUpdateResult | null) => void,
   ) => () => void;
@@ -229,6 +233,7 @@ type DesktopUpdatesApi = {
     reason: "not-ready" | "close-blocked" | null;
   }>;
   openLatestRelease: () => Promise<{ opened: boolean }>;
+  openRepository: () => Promise<{ opened: boolean }>;
 };
 
 declare global {
@@ -1662,6 +1667,7 @@ export default function Workbench() {
     abortedRequestIds: new Set(),
   });
   const saveProjectRulesRef = useRef<() => Promise<boolean>>(async () => false);
+  const aboutButtonRef = useRef<HTMLButtonElement>(null);
 
   const [html, setHtml] = useState(DEFAULT_PROJECT_HTML);
   const [projectName, setProjectName] = useState(WELCOME_PROJECT.name);
@@ -1738,6 +1744,12 @@ export default function Workbench() {
     useState<ProjectQoderHandoffState | null>(null);
   const [updateResult, setUpdateResult] =
     useState<ApplicationUpdateResult | null>(null);
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const [applicationVersion, setApplicationVersion] = useState("");
+  const [desktopUpdatesAvailable, setDesktopUpdatesAvailable] = useState(false);
+  const [manualUpdateCheckPending, setManualUpdateCheckPending] = useState(false);
+  const [manualUpdateCheckFailed, setManualUpdateCheckFailed] = useState(false);
+  const [repositoryOpenFailed, setRepositoryOpenFailed] = useState(false);
   const promptedUpdateVersionRef = useRef<string | null>(null);
   const [openedAiVersionNotice, setOpenedAiVersionNotice] =
     useState<OpenedAiVersionNotice | null>(null);
@@ -1763,10 +1775,23 @@ export default function Workbench() {
       if (active) setUpdateResult(result);
     };
     const unsubscribe = updates.onStatus(receiveStatus);
+    queueMicrotask(() => {
+      if (active) setDesktopUpdatesAvailable(true);
+    });
     void updates.getStatus().then(receiveStatus).catch(() => undefined);
     return () => {
       active = false;
       unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    queueMicrotask(() => {
+      if (active) setApplicationVersion(window.htmlAIRuntime?.appVersion || "");
+    });
+    return () => {
+      active = false;
     };
   }, []);
 
@@ -1810,6 +1835,44 @@ export default function Workbench() {
         action: { id: "open-release", label: "打开更新页面" },
       });
     }
+  }, []);
+
+  const checkForApplicationUpdates = useCallback(async () => {
+    const updates = window.htmlAIUpdates;
+    setManualUpdateCheckFailed(false);
+    if (!updates) {
+      setManualUpdateCheckFailed(true);
+      return;
+    }
+    setManualUpdateCheckPending(true);
+    try {
+      const result = await updates.checkNow();
+      setUpdateResult(result);
+    } catch {
+      setManualUpdateCheckFailed(true);
+    } finally {
+      setManualUpdateCheckPending(false);
+    }
+  }, []);
+
+  const openProjectRepository = useCallback(async () => {
+    setRepositoryOpenFailed(false);
+    try {
+      const updates = window.htmlAIUpdates;
+      if (updates) {
+        const result = await updates.openRepository();
+        if (!result?.opened) throw new Error("GitHub repository did not open.");
+        return;
+      }
+      window.open(PROJECT_REPOSITORY_URL, "_blank", "noopener,noreferrer");
+    } catch {
+      setRepositoryOpenFailed(true);
+    }
+  }, []);
+
+  const closeAboutPageRoot = useCallback(() => {
+    setAboutOpen(false);
+    requestAnimationFrame(() => aboutButtonRef.current?.focus());
   }, []);
 
   const installDownloadedUpdate = useCallback(async () => {
@@ -8825,6 +8888,22 @@ export default function Workbench() {
                 : null}
             </button>
           </div>
+          <button
+            ref={aboutButtonRef}
+            className="about-trigger-button"
+            type="button"
+            aria-label="关于源页"
+            aria-haspopup="dialog"
+            aria-expanded={aboutOpen}
+            title="关于源页"
+            onClick={() => {
+              setManualUpdateCheckFailed(false);
+              setRepositoryOpenFailed(false);
+              setAboutOpen(true);
+            }}
+          >
+            <InfoIcon aria-hidden="true" size={19} weight="bold" />
+          </button>
         </nav>
         <input
           ref={fileInputRef}
@@ -10148,6 +10227,20 @@ export default function Workbench() {
           </footer>
         ) : null}
       </aside>
+
+      <AboutPageRootDialog
+        open={aboutOpen}
+        appVersion={applicationVersion}
+        updateResult={updateResult}
+        updatesAvailable={desktopUpdatesAvailable}
+        manualCheckPending={manualUpdateCheckPending}
+        manualCheckFailed={manualUpdateCheckFailed}
+        repositoryOpenFailed={repositoryOpenFailed}
+        onClose={closeAboutPageRoot}
+        onCheckForUpdates={() => void checkForApplicationUpdates()}
+        onInstallUpdate={() => void installDownloadedUpdate()}
+        onOpenRepository={() => void openProjectRepository()}
+      />
 
       {toast ? (
         <NoticeBar

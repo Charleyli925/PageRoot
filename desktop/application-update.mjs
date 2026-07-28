@@ -1,4 +1,6 @@
 const VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u;
+export const APPLICATION_UPDATE_INITIAL_DELAY_MS = 5_000;
+export const APPLICATION_UPDATE_INTERVAL_MS = 4 * 60 * 60 * 1_000;
 
 function publicVersion(value) {
   if (typeof value !== "string") return null;
@@ -24,6 +26,8 @@ export function createApplicationUpdateController({
   enabled,
   onStatus = () => {},
   logger = console,
+  scheduleTimer = setTimeout,
+  cancelTimer = clearTimeout,
 }) {
   if (
     !updater
@@ -42,6 +46,9 @@ export function createApplicationUpdateController({
   if (typeof architecture !== "string" || !architecture) {
     throw new TypeError("An architecture is required.");
   }
+  if (typeof scheduleTimer !== "function" || typeof cancelTimer !== "function") {
+    throw new TypeError("Compatible timer functions are required.");
+  }
 
   updater.autoDownload = true;
   updater.autoInstallOnAppQuit = false;
@@ -59,6 +66,8 @@ export function createApplicationUpdateController({
     publishedAt: null,
   });
   let checkPromise = null;
+  let automaticCheckTimer = null;
+  let automaticCheckGeneration = 0;
 
   const publish = (nextStatus, patch = {}) => {
     status = Object.freeze({
@@ -138,6 +147,42 @@ export function createApplicationUpdateController({
     return checkPromise;
   }
 
+  function stopAutomaticChecks() {
+    automaticCheckGeneration += 1;
+    if (automaticCheckTimer) {
+      cancelTimer(automaticCheckTimer);
+      automaticCheckTimer = null;
+    }
+  }
+
+  function startAutomaticChecks({
+    initialDelayMs = APPLICATION_UPDATE_INITIAL_DELAY_MS,
+    intervalMs = APPLICATION_UPDATE_INTERVAL_MS,
+  } = {}) {
+    if (
+      !Number.isSafeInteger(initialDelayMs)
+      || initialDelayMs < 0
+      || !Number.isSafeInteger(intervalMs)
+      || intervalMs <= 0
+    ) {
+      throw new TypeError("Automatic update delays must be safe positive integers.");
+    }
+    stopAutomaticChecks();
+    if (!enabled) return false;
+    const generation = automaticCheckGeneration;
+    const scheduleNext = (delayMs) => {
+      automaticCheckTimer = scheduleTimer(async () => {
+        automaticCheckTimer = null;
+        await checkForUpdates();
+        if (automaticCheckGeneration !== generation) return;
+        scheduleNext(intervalMs);
+      }, delayMs);
+      automaticCheckTimer?.unref?.();
+    };
+    scheduleNext(initialDelayMs);
+    return true;
+  }
+
   function installDownloadedUpdate() {
     if (status.status !== "downloaded") return false;
     const downloadedStatus = status;
@@ -153,6 +198,7 @@ export function createApplicationUpdateController({
   }
 
   function dispose() {
+    stopAutomaticChecks();
     for (const [eventName, listener] of listeners) {
       updater.removeListener(eventName, listener);
     }
@@ -163,5 +209,7 @@ export function createApplicationUpdateController({
     dispose,
     getStatus: () => status,
     installDownloadedUpdate,
+    startAutomaticChecks,
+    stopAutomaticChecks,
   });
 }

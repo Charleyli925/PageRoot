@@ -53,6 +53,7 @@ import {
 import { handoffToQoderWork } from "./qoder-handoff.mjs";
 import {
   LATEST_RELEASE_PAGE_URL,
+  PROJECT_REPOSITORY_URL,
 } from "./manual-update.mjs";
 import { createApplicationUpdateController } from "./application-update.mjs";
 
@@ -99,8 +100,6 @@ const MAX_PATH_LENGTH = 4096;
 const MAX_RECENT_PROJECTS = 12;
 const HTML_EXTENSIONS = new Set([".html", ".htm"]);
 const PROJECT_STATE_VERSION = 1;
-const AUTOMATIC_UPDATE_CHECK_DELAY_MS = 5_000;
-
 const PROJECT_CHANNELS = Object.freeze({
   getActiveProject: "html-projects:get-active",
   openHtml: "html-projects:open",
@@ -128,8 +127,10 @@ const INTEGRATION_CHANNELS = Object.freeze({
 const UPDATE_CHANNELS = Object.freeze({
   getStatus: "html-updates:get-status",
   status: "html-updates:status",
+  checkNow: "html-updates:check-now",
   installDownloaded: "html-updates:install-downloaded",
   openLatestRelease: "html-updates:open-latest-release",
+  openRepository: "html-updates:open-repository",
 });
 
 let bridgeProcess = null;
@@ -144,7 +145,6 @@ let coordinatedExit = null;
 let projectIpcRegistered = false;
 let projectState = null;
 let stateWriteQueue = Promise.resolve();
-let updateCheckTimer = null;
 let latestUpdateResult = null;
 let applicationUpdate = null;
 let workspaceFailurePrompt = null;
@@ -1015,21 +1015,17 @@ function ensureApplicationUpdateController() {
   return applicationUpdate;
 }
 
-async function runAutomaticUpdateCheck() {
+async function checkForApplicationUpdates() {
   return ensureApplicationUpdateController().checkForUpdates();
-}
-
-function scheduleAutomaticUpdateCheck() {
-  if (updateCheckTimer) clearTimeout(updateCheckTimer);
-  updateCheckTimer = setTimeout(() => {
-    updateCheckTimer = null;
-    void runAutomaticUpdateCheck();
-  }, AUTOMATIC_UPDATE_CHECK_DELAY_MS);
-  updateCheckTimer.unref?.();
 }
 
 async function openLatestRelease() {
   await shell.openExternal(LATEST_RELEASE_PAGE_URL);
+  return { opened: true };
+}
+
+async function openProjectRepository() {
+  await shell.openExternal(PROJECT_REPOSITORY_URL);
   return { opened: true };
 }
 
@@ -1108,6 +1104,10 @@ function registerProjectIpc() {
     trustedProject(() => latestUpdateResult),
   );
   ipcMain.handle(
+    UPDATE_CHANNELS.checkNow,
+    trustedProject(checkForApplicationUpdates),
+  );
+  ipcMain.handle(
     UPDATE_CHANNELS.installDownloaded,
     trustedProject(async () => {
       if (
@@ -1128,6 +1128,10 @@ function registerProjectIpc() {
   ipcMain.handle(
     UPDATE_CHANNELS.openLatestRelease,
     trustedProject(openLatestRelease),
+  );
+  ipcMain.handle(
+    UPDATE_CHANNELS.openRepository,
+    trustedProject(openProjectRepository),
   );
   ipcMain.handle(APP_CHANNELS.closeResult, trusted(reportCloseResult));
   ipcMain.handle(
@@ -1598,7 +1602,7 @@ async function createWindow() {
   );
   mainWindow.webContents.on("did-finish-load", () => {
     rendererHasLoaded = true;
-    scheduleAutomaticUpdateCheck();
+    ensureApplicationUpdateController().startAutomaticChecks();
   });
   mainWindow.once("ready-to-show", () => mainWindow?.show());
   mainWindow.on("close", (event) => {
@@ -1607,6 +1611,7 @@ async function createWindow() {
     void coordinateApplicationExit("window-close");
   });
   mainWindow.on("closed", () => {
+    applicationUpdate?.stopAutomaticChecks();
     rendererHasLoaded = false;
     workspaceRecoveryMailbox.beginRendererLoad();
     mainWindow = null;

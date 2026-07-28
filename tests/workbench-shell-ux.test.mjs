@@ -4,6 +4,7 @@ import test from "node:test";
 
 const [
   workbench,
+  aboutDialog,
   styles,
   mainProcess,
   preload,
@@ -15,6 +16,7 @@ const [
   bridgeClient,
 ] = await Promise.all([
   readFile(new URL("../app/workbench.tsx", import.meta.url), "utf8"),
+  readFile(new URL("../app/components/AboutPageRootDialog.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
   readFile(new URL("../desktop/main.mjs", import.meta.url), "utf8"),
   readFile(new URL("../desktop/preload.mjs", import.meta.url), "utf8"),
@@ -423,26 +425,39 @@ test("header prioritizes the filename and keeps the approved action order", () =
   const project = header.indexOf('className="project-button"');
   const globalComment = header.indexOf('className="global-comment-button"');
   const send = header.indexOf('className="header-send-button"');
+  const about = header.indexOf('className="about-trigger-button"');
   assert.ok(
     editPreview >= 0
       && project > editPreview
       && globalComment > project
-      && send > globalComment,
-    "header actions must remain edit/preview, project, global comment, then send",
+      && send > globalComment
+      && about > send,
+    "header actions must remain edit/preview, project, global comment, send, then About",
   );
   assert.match(workbench, /window\.htmlAIUpdates/);
   assert.match(workbench, /updates\.getStatus\(\)/);
   assert.match(workbench, /updates\.onStatus\(receiveStatus\)/);
+  assert.match(workbench, /updates\.checkNow\(\)/);
   assert.match(workbench, /installDownloaded\(\)/);
   assert.match(workbench, /重启并安装/);
-  assert.doesNotMatch(header, /app-version-button|检查更新|<strong>(?:YuanYe|PageRoot)<\/strong>/);
+  assert.doesNotMatch(header, /app-version-button|<strong>(?:YuanYe|PageRoot)<\/strong>/);
   assert.match(styles, /\.header-actions button,[\s\S]*?border:\s*0[\s\S]*?box-shadow:\s*none/);
-  assert.match(mainProcess, /scheduleAutomaticUpdateCheck\(\)/);
+  assert.match(mainProcess, /startAutomaticChecks\(\)/);
   assert.match(mainProcess, /createApplicationUpdateController/);
   assert.match(mainProcess, /coordinateApplicationUpdateInstall/);
   assert.match(mainProcess, /LATEST_RELEASE_PAGE_URL/);
   assert.match(mainProcess, /shell\.openExternal\(LATEST_RELEASE_PAGE_URL\)/);
+  assert.match(mainProcess, /shell\.openExternal\(PROJECT_REPOSITORY_URL\)/);
   assert.doesNotMatch(preload, /openLatestRelease:\s*\([^)]*url/);
+  assert.doesNotMatch(preload, /openRepository:\s*\([^)]*url/);
+  assert.match(aboutDialog, /<dialog[\s\S]*?className="about-dialog"/);
+  assert.match(aboutDialog, /id="about-pageroot-title">源页</);
+  assert.match(aboutDialog, /立即检查/);
+  assert.match(aboutDialog, /PageRoot on GitHub/);
+  assert.match(aboutDialog, /每 4 小时自动检查/);
+  assert.match(aboutDialog, /aria-live="polite"/);
+  assert.match(styles, /\.about-dialog::backdrop[\s\S]*?backdrop-filter:\s*blur\(8px\)/);
+  assert.match(styles, /\.about-dialog button:focus-visible/);
 });
 
 test("QoderWork handoff exposes a truthful process board and manual open action", () => {

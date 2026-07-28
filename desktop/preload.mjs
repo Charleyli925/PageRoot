@@ -31,8 +31,10 @@ const integrationChannels = Object.freeze({
 const updateChannels = Object.freeze({
   getStatus: "html-updates:get-status",
   status: "html-updates:status",
+  checkNow: "html-updates:check-now",
   installDownloaded: "html-updates:install-downloaded",
   openLatestRelease: "html-updates:open-latest-release",
+  openRepository: "html-updates:open-repository",
 });
 const PROJECT_IPC_PROTOCOL = "html-ai-project-result";
 const PROJECT_IPC_VERSION = 1;
@@ -107,6 +109,7 @@ const integrationsApi = Object.freeze({
 const updateStatusListeners = new Map();
 const updatesApi = Object.freeze({
   getStatus: () => invokeProject(updateChannels.getStatus),
+  checkNow: () => invokeProject(updateChannels.checkNow),
   onStatus: (listener) => {
     if (typeof listener !== "function") {
       throw new TypeError("onStatus listener must be a function.");
@@ -127,6 +130,7 @@ const updatesApi = Object.freeze({
   },
   installDownloaded: () => invokeProject(updateChannels.installDownloaded),
   openLatestRelease: () => invokeProject(updateChannels.openLatestRelease),
+  openRepository: () => invokeProject(updateChannels.openRepository),
 });
 
 const query = new URLSearchParams(globalThis.location.search);

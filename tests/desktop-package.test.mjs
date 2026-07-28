@@ -167,13 +167,19 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.match(mainProcess, /PROJECT_CHANNELS\.forgetRecent/);
   assert.match(mainProcess, /INTEGRATION_CHANNELS\.qoderHandoff/);
   assert.match(mainProcess, /UPDATE_CHANNELS\.getStatus/);
+  assert.match(mainProcess, /UPDATE_CHANNELS\.checkNow/);
   assert.match(mainProcess, /UPDATE_CHANNELS\.installDownloaded/);
   assert.match(mainProcess, /UPDATE_CHANNELS\.openLatestRelease/);
+  assert.match(mainProcess, /UPDATE_CHANNELS\.openRepository/);
   assert.match(
     mainProcess,
     /shell\.openExternal\(LATEST_RELEASE_PAGE_URL\)/,
   );
-  assert.match(mainProcess, /scheduleAutomaticUpdateCheck\(\)/);
+  assert.match(
+    mainProcess,
+    /shell\.openExternal\(PROJECT_REPOSITORY_URL\)/,
+  );
+  assert.match(mainProcess, /startAutomaticChecks\(\)/);
   assert.match(mainProcess, /createApplicationUpdateController\(\{/);
   assert.match(mainProcess, /updater:\s*autoUpdater/);
   assert.match(mainProcess, /coordinateApplicationUpdateInstall/);
