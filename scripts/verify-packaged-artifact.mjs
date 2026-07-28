@@ -15,6 +15,7 @@ import {
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { gunzipSync } from "node:zlib";
 import { extractFile, listPackage, statFile } from "@electron/asar";
 import { assertBuildInfo, expectedBuildInfo } from "./release-provenance.mjs";
 
@@ -34,9 +35,29 @@ const REQUIRED_BRIDGE_FILES = [
   "draft-aggregate.mjs",
   "draft-service.mjs",
 ];
-const REQUIRED_BRIDGE_MODULES = ["entities", "parse5"];
+const REQUIRED_PACKAGED_MODULES = [
+  "argparse",
+  "builder-util-runtime",
+  "debug",
+  "electron-updater",
+  "entities",
+  "fs-extra",
+  "graceful-fs",
+  "js-yaml",
+  "jsonfile",
+  "lazy-val",
+  "lodash.escaperegexp",
+  "lodash.isequal",
+  "ms",
+  "parse5",
+  "sax",
+  "semver",
+  "tiny-typed-emitter",
+  "universalify",
+];
 const REQUIRED_SHARED_FILES = ["draft-aggregate.mjs"];
 const REQUIRED_LEGAL_RESOURCES = ["LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md"];
+const EXPECTED_MAC_TEAM_ID = "RNK9RB969G";
 const REQUIRED_APP_SOURCE_FILES = [
   "desktop/main.mjs",
   "desktop/preload.mjs",
@@ -48,6 +69,7 @@ const REQUIRED_APP_SOURCE_FILES = [
   "desktop/product-contract.mjs",
   "desktop/qoder-handoff.mjs",
   "desktop/manual-update.mjs",
+  "desktop/application-update.mjs",
   "public/brand-logo.png",
 ];
 const RETIRED_EDITOR_ARTIFACTS = [
@@ -109,11 +131,19 @@ export function expectedArtifactLayout({
     .replaceAll("${version}", packageJson.version)
     .replaceAll("${arch}", arch)
     .replaceAll("${ext}", "dmg");
+  const zipName = artifactName
+    .replaceAll("${version}", packageJson.version)
+    .replaceAll("${arch}", arch)
+    .replaceAll("${ext}", "zip");
   assert.doesNotMatch(dmgName, /\$\{[^}]+\}/, "build.artifactName contains an unsupported macro");
+  assert.doesNotMatch(zipName, /\$\{[^}]+\}/, "build.artifactName contains an unsupported macro");
   return {
     releaseDirectory: resolvedReleaseDirectory,
     appPath: path.join(resolvedReleaseDirectory, architectureDirectory, `${productName}.app`),
     dmgPath: path.join(resolvedReleaseDirectory, dmgName),
+    zipPath: path.join(resolvedReleaseDirectory, zipName),
+    blockmapPath: path.join(resolvedReleaseDirectory, `${zipName}.blockmap`),
+    updateInfoPath: path.join(resolvedReleaseDirectory, "latest-mac.yml"),
     productName,
     version: packageJson.version,
   };
@@ -382,7 +412,19 @@ export async function verifyAppBundle({
       `shared/${fileName}`,
     );
   }
-  for (const moduleName of REQUIRED_BRIDGE_MODULES) {
+  const packagedModuleDirectories = (await readdir(
+    path.join(resourcesPath, "node_modules"),
+    { withFileTypes: true },
+  ))
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+  assert.deepEqual(
+    packagedModuleDirectories,
+    [...REQUIRED_PACKAGED_MODULES].sort(),
+    "packaged runtime modules must exactly match the reviewed allowlist",
+  );
+  for (const moduleName of REQUIRED_PACKAGED_MODULES) {
     await assertDirectoryMatches({
       sourceRoot: path.join(productRoot, "node_modules", moduleName),
       packagedRoot: path.join(resourcesPath, "node_modules", moduleName),
@@ -461,6 +503,43 @@ export async function verifyAppBundle({
       ["--verify", "--deep", "--strict", "--verbose=2", appPath],
       "codesign verification",
     );
+    const signatureDetails = runCommand(
+      "/usr/bin/codesign",
+      ["--display", "--verbose=4", appPath],
+      "Developer ID signature inspection",
+    );
+    assert.match(
+      signatureDetails,
+      /Authority=Developer ID Application:/u,
+      "packaged app is not signed with a Developer ID Application certificate",
+    );
+    assert.match(
+      signatureDetails,
+      new RegExp(`TeamIdentifier=${EXPECTED_MAC_TEAM_ID}`),
+      "packaged app was signed by an unexpected Apple team",
+    );
+    assert.doesNotMatch(
+      signatureDetails,
+      /Signature=adhoc/u,
+      "packaged app must not use an ad-hoc signature",
+    );
+    if (process.env.PAGEROOT_REQUIRE_NOTARIZATION === "1") {
+      runCommand(
+        "/usr/bin/xcrun",
+        ["stapler", "validate", appPath],
+        "notarization ticket validation",
+      );
+      const assessment = runCommand(
+        "/usr/sbin/spctl",
+        ["--assess", "--type", "execute", "--verbose=4", appPath],
+        "Gatekeeper assessment",
+      );
+      assert.match(
+        assessment,
+        /source=Notarized Developer ID/u,
+        "Gatekeeper did not identify a notarized Developer ID build",
+      );
+    }
   }
 
   return {
@@ -489,6 +568,16 @@ async function verifyDmg({
   }
 
   runCommand("/usr/bin/hdiutil", ["verify", dmgPath], "DMG verification");
+  if (
+    process.env.PAGEROOT_REQUIRE_NOTARIZATION === "1"
+    && commandExists("/usr/bin/xcrun")
+  ) {
+    runCommand(
+      "/usr/bin/xcrun",
+      ["stapler", "validate", dmgPath],
+      "DMG notarization ticket validation",
+    );
+  }
   const mountPoint = await mkdtemp(path.join(os.tmpdir(), "html-ai-workbench-dmg-"));
   let mounted = false;
   try {
@@ -515,6 +604,82 @@ async function verifyDmg({
   }
 }
 
+async function verifyUpdateAssets({
+  zipPath,
+  blockmapPath,
+  updateInfoPath,
+  productName,
+  productRoot,
+  packageJson,
+  expectedProvenance,
+}) {
+  const [zipInfo, zipBytes, blockmap, updateInfo] = await Promise.all([
+    stat(zipPath),
+    readFile(zipPath),
+    readFile(blockmapPath),
+    readFile(updateInfoPath, "utf8"),
+  ]);
+  assert.ok(zipInfo.isFile(), `update ZIP is not a file: ${zipPath}`);
+  assert.ok(zipInfo.size > 1_000_000, `update ZIP is unexpectedly small: ${zipPath}`);
+  assert.ok(blockmap.byteLength > 100, `update blockmap is unexpectedly small: ${blockmapPath}`);
+  const blockmapValue = JSON.parse(gunzipSync(blockmap).toString("utf8"));
+  assert.ok(
+    Array.isArray(blockmapValue?.files) && blockmapValue.files.length > 0,
+    "update blockmap does not contain any files",
+  );
+  assert.match(
+    updateInfo,
+    new RegExp(`^version:\\s*${packageJson.version.replaceAll(".", "\\.")}\\s*$`, "mu"),
+    "latest-mac.yml version does not match package.json",
+  );
+  const zipName = path.basename(zipPath);
+  const escapedZipName = zipName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const zipSha512 = createHash("sha512").update(zipBytes).digest("base64");
+  const escapedZipSha512 = zipSha512.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  assert.match(
+    updateInfo,
+    new RegExp(
+      `^\\s{2}- url:\\s*${escapedZipName}\\s*\\n`
+        + `\\s{4}sha512:\\s*${escapedZipSha512}\\s*\\n`
+        + `\\s{4}size:\\s*${zipInfo.size}\\s*$`,
+      "mu",
+    ),
+    "latest-mac.yml does not describe the exact frozen update ZIP",
+  );
+  assert.match(
+    updateInfo,
+    new RegExp(`^path:\\s*${escapedZipName}\\s*$`, "mu"),
+    "latest-mac.yml does not select the update ZIP as its compatibility path",
+  );
+  assert.match(
+    updateInfo,
+    new RegExp(`^sha512:\\s*${escapedZipSha512}\\s*$`, "mu"),
+    "latest-mac.yml compatibility digest does not match the update ZIP",
+  );
+
+  if (process.platform !== "darwin" || !commandExists("/usr/bin/ditto")) {
+    return { extracted: false, reason: "ditto is unavailable" };
+  }
+  const extractionRoot = await mkdtemp(path.join(os.tmpdir(), "pageroot-update-zip-"));
+  try {
+    runCommand(
+      "/usr/bin/ditto",
+      ["-x", "-k", zipPath, extractionRoot],
+      "update ZIP extraction",
+    );
+    const app = await verifyAppBundle({
+      productRoot,
+      appPath: path.join(extractionRoot, `${productName}.app`),
+      packageJson,
+      verifySignature: true,
+      expectedProvenance,
+    });
+    return { extracted: true, app };
+  } finally {
+    await rm(extractionRoot, { recursive: true, force: true });
+  }
+}
+
 export async function verifyPackagedArtifact({
   productRoot = DEFAULT_PRODUCT_ROOT,
   arch = "arm64",
@@ -534,7 +699,7 @@ export async function verifyPackagedArtifact({
     architecture: arch,
     requireClean: true,
   });
-  const [app, dmg] = await Promise.all([
+  const [app, dmg, update] = await Promise.all([
     verifyAppBundle({
       productRoot,
       appPath: layout.appPath,
@@ -549,8 +714,17 @@ export async function verifyPackagedArtifact({
       packageJson,
       expectedProvenance: provenance,
     }),
+    verifyUpdateAssets({
+      zipPath: layout.zipPath,
+      blockmapPath: layout.blockmapPath,
+      updateInfoPath: layout.updateInfoPath,
+      productName: layout.productName,
+      productRoot,
+      packageJson,
+      expectedProvenance: provenance,
+    }),
   ]);
-  return { ...layout, app, dmg };
+  return { ...layout, app, dmg, update };
 }
 
 async function main() {
@@ -560,6 +734,7 @@ async function main() {
     releaseDirectory: options.releaseDirectory,
   });
   console.log(`Packaged artifact verified: ${result.dmgPath}`);
+  console.log(`Updater ZIP verified: ${result.zipPath}`);
   console.log(
     `App ${result.version}: ${result.app.asarFileCount} app.asar files, ${result.app.schemaFileCount} schemas`,
   );

@@ -20,7 +20,9 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
     closeRecovery,
     qoderHandoff,
     manualUpdate,
+    applicationUpdate,
     afterPack,
+    entitlements,
     iconInfo,
   ] = await Promise.all([
     readFile(new URL("../package.json", import.meta.url), "utf8"),
@@ -39,7 +41,9 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
     readFile(new URL("../desktop/close-recovery.mjs", import.meta.url), "utf8"),
     readFile(new URL("../desktop/qoder-handoff.mjs", import.meta.url), "utf8"),
     readFile(new URL("../desktop/manual-update.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../desktop/application-update.mjs", import.meta.url), "utf8"),
     readFile(new URL("../desktop/after-pack.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../desktop/resources/entitlements.mac.plist", import.meta.url), "utf8"),
     stat(new URL("../desktop/resources/icon.icns", import.meta.url)),
   ]);
   const packageJson = JSON.parse(packageText);
@@ -51,7 +55,24 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.match(packageJson.version, /^\d+\.\d+\.\d+$/u);
   assert.equal(packageJson.build.productName, "PageRoot");
   assert.equal(packageJson.build.artifactName, "PageRoot-${version}-${arch}.${ext}");
-  assert.equal(packageJson.build.mac.identity, "-");
+  assert.equal(packageJson.build.forceCodeSigning, true);
+  assert.equal(packageJson.build.mac.identity, undefined);
+  assert.equal(packageJson.build.mac.hardenedRuntime, true);
+  assert.equal(packageJson.build.mac.notarize, true);
+  assert.equal(
+    packageJson.build.mac.entitlements,
+    "desktop/resources/entitlements.mac.plist",
+  );
+  assert.equal(
+    packageJson.build.mac.entitlementsInherit,
+    "desktop/resources/entitlements.mac.plist",
+  );
+  assert.deepEqual(packageJson.build.mac.target, ["dmg", "zip"]);
+  assert.equal(packageJson.build.publish[0].provider, "github");
+  assert.equal(packageJson.build.publish[0].owner, "Charleyli925");
+  assert.equal(packageJson.build.publish[0].repo, "PageRoot");
+  assert.equal(packageJson.build.publish[0].releaseType, "release");
+  assert.equal(packageJson.dependencies["electron-updater"], "6.8.9");
   assert.equal(packageJson.build.afterPack, "desktop/after-pack.mjs");
   assert.ok(packageJson.build.files.includes("!node_modules/**/*"));
   assert.ok(packageJson.build.files.includes("desktop/preload.mjs"));
@@ -63,6 +84,7 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.ok(packageJson.build.files.includes("desktop/product-contract.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/qoder-handoff.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/manual-update.mjs"));
+  assert.ok(packageJson.build.files.includes("desktop/application-update.mjs"));
   assert.ok(packageJson.build.files.includes("public/brand-logo.png"));
   assert.equal(
     packageJson.build.mac.extendInfo?.NSAppleEventsUsageDescription,
@@ -83,6 +105,22 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
     "bridge/draft-service.mjs",
     "node_modules/parse5",
     "node_modules/entities",
+    "node_modules/electron-updater",
+    "node_modules/builder-util-runtime",
+    "node_modules/fs-extra",
+    "node_modules/js-yaml",
+    "node_modules/lazy-val",
+    "node_modules/lodash.escaperegexp",
+    "node_modules/lodash.isequal",
+    "node_modules/semver",
+    "node_modules/tiny-typed-emitter",
+    "node_modules/debug",
+    "node_modules/sax",
+    "node_modules/ms",
+    "node_modules/argparse",
+    "node_modules/graceful-fs",
+    "node_modules/jsonfile",
+    "node_modules/universalify",
     "schemas",
     "build-info.json",
     "LICENSE",
@@ -129,14 +167,18 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.match(mainProcess, /PROJECT_CHANNELS\.forgetRecent/);
   assert.match(mainProcess, /INTEGRATION_CHANNELS\.qoderHandoff/);
   assert.match(mainProcess, /UPDATE_CHANNELS\.getStatus/);
+  assert.match(mainProcess, /UPDATE_CHANNELS\.installDownloaded/);
   assert.match(mainProcess, /UPDATE_CHANNELS\.openLatestRelease/);
   assert.match(
     mainProcess,
     /shell\.openExternal\(LATEST_RELEASE_PAGE_URL\)/,
   );
   assert.match(mainProcess, /scheduleAutomaticUpdateCheck\(\)/);
-  assert.match(mainProcess, /checkForManualUpdate\(\{/);
-  assert.match(mainProcess, /net\.fetch/);
+  assert.match(mainProcess, /createApplicationUpdateController\(\{/);
+  assert.match(mainProcess, /updater:\s*autoUpdater/);
+  assert.match(mainProcess, /coordinateApplicationUpdateInstall/);
+  assert.match(mainProcess, /installDownloadedUpdate\(\)/);
+  assert.doesNotMatch(mainProcess, /checkForManualUpdate\(\{/);
   assert.match(mainProcess, /app\.getVersion\(\)/);
   assert.match(mainProcess, /handoffToQoderWork/);
   assert.match(mainProcess, /clipboard\.writeText/);
@@ -257,6 +299,10 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   );
   assert.match(preload, /relaunch:\s*\(\) => ipcRenderer\.invoke\(appChannels\.relaunch\)/);
   assert.match(preload, /forgetRecent:\s*\(sourcePath\)/);
+  assert.match(
+    preload,
+    /installDownloaded:\s*\(\) => invokeProject\(updateChannels\.installDownloaded\)/,
+  );
   assert.doesNotMatch(preload, /saveHtml|saveHtmlAs/);
   assert.doesNotMatch(preload, /exposeInMainWorld\([^)]*ipcRenderer/s);
 
@@ -320,6 +366,13 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
     /PROJECT_REPOSITORY_URL[\s\S]*?Charleyli925\/PageRoot/,
   );
   assert.doesNotMatch(manualUpdate, /api\.github\.com/);
+  assert.match(applicationUpdate, /updater\.autoDownload = true/);
+  assert.match(applicationUpdate, /updater\.autoInstallOnAppQuit = false/);
+  assert.match(applicationUpdate, /updater\.allowPrerelease = false/);
+  assert.match(applicationUpdate, /updater\.disableDifferentialDownload = false/);
+  assert.match(applicationUpdate, /updater\.quitAndInstall\(\)/);
+  assert.match(entitlements, /com\.apple\.security\.cs\.allow-jit/);
+  assert.doesNotMatch(entitlements, /disable-library-validation/);
   assert.match(afterPack, /NSMicrophoneUsageDescription/);
   assert.match(afterPack, /NSAudioCaptureUsageDescription/);
   assert.match(afterPack, /Delete/);

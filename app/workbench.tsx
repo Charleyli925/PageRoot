@@ -199,26 +199,35 @@ type DesktopIntegrationsApi = {
   }) => Promise<QoderHandoffResult>;
 };
 
-type ManualUpdateStatus =
+type ApplicationUpdateStatus =
+  | "idle"
+  | "checking"
   | "available"
+  | "downloading"
+  | "downloaded"
+  | "installing"
   | "current"
   | "unsupported"
   | "unavailable";
 
-type ManualUpdateResult = {
-  status: ManualUpdateStatus;
+type ApplicationUpdateResult = {
+  status: ApplicationUpdateStatus;
   currentVersion: string;
   latestVersion: string | null;
-  minimumMacOS: string | null;
   architecture: string;
+  downloadPercent: number | null;
   publishedAt: string | null;
 };
 
 type DesktopUpdatesApi = {
-  getStatus: () => Promise<ManualUpdateResult | null>;
+  getStatus: () => Promise<ApplicationUpdateResult | null>;
   onStatus: (
-    listener: (result: ManualUpdateResult | null) => void,
+    listener: (result: ApplicationUpdateResult | null) => void,
   ) => () => void;
+  installDownloaded: () => Promise<{
+    installing: boolean;
+    reason: "not-ready" | "close-blocked" | null;
+  }>;
   openLatestRelease: () => Promise<{ opened: boolean }>;
 };
 
@@ -349,6 +358,7 @@ type ToastAction =
       resumeSubmission?: boolean;
     }
   | { id: "relaunch-app"; label: string }
+  | { id: "install-update"; label: string }
   | { id: "open-release"; label: string }
   | { id: "retry-draft-persist"; label: string }
   | { id: "review-project-rules"; label: string }
@@ -1727,7 +1737,8 @@ export default function Workbench() {
   const [qoderHandoffState, setQoderHandoffState] =
     useState<ProjectQoderHandoffState | null>(null);
   const [updateResult, setUpdateResult] =
-    useState<ManualUpdateResult | null>(null);
+    useState<ApplicationUpdateResult | null>(null);
+  const promptedUpdateVersionRef = useRef<string | null>(null);
   const [openedAiVersionNotice, setOpenedAiVersionNotice] =
     useState<OpenedAiVersionNotice | null>(null);
   const [toast, setToast] = useReducer(noticeReducer, null);
@@ -1748,7 +1759,7 @@ export default function Workbench() {
     const updates = window.htmlAIUpdates;
     if (!updates) return undefined;
     let active = true;
-    const receiveStatus = (result: ManualUpdateResult | null) => {
+    const receiveStatus = (result: ApplicationUpdateResult | null) => {
       if (active) setUpdateResult(result);
     };
     const unsubscribe = updates.onStatus(receiveStatus);
@@ -1801,6 +1812,45 @@ export default function Workbench() {
     }
   }, []);
 
+  const installDownloadedUpdate = useCallback(async () => {
+    try {
+      const result = await window.htmlAIUpdates?.installDownloaded();
+      if (!result?.installing) {
+        throw new Error(result?.reason || "下载的更新尚未准备完成。");
+      }
+    } catch {
+      setToast({
+        title: "暂时无法安装更新",
+        message: "当前编辑仍保留。可以稍后再次选择“重启更新”，或打开发布页手动下载。",
+        tone: "warning",
+        sticky: true,
+        dedupeKey: "install-update",
+        action: { id: "install-update", label: "重启更新" },
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    const version = updateResult?.latestVersion;
+    if (
+      updateResult?.status !== "downloaded"
+      || !version
+      || promptedUpdateVersionRef.current === version
+    ) {
+      return;
+    }
+    promptedUpdateVersionRef.current = version;
+    setToast({
+      title: `PageRoot ${version} 已下载`,
+      message: "重启后会自动安装；退出前，源页会先确认当前编辑已经安全写入。",
+      tone: "success",
+      sticky: true,
+      dedupeKey: `application-update:${version}`,
+      disposition: "background-result",
+      action: { id: "install-update", label: "重启并安装" },
+    });
+  }, [updateResult]);
+
   const latestVersion = useMemo(
     () => versions.find((version) => version.id === latestVersionId) || null,
     [latestVersionId, versions],
@@ -1819,10 +1869,24 @@ export default function Workbench() {
   )
     ? qoderHandoffState.status
     : "idle";
-  const updateAvailable = Boolean(
-    updateResult?.status === "available"
+  const updateActionVisible = Boolean(
+    (
+      updateResult?.status === "available"
+      || updateResult?.status === "downloading"
+      || updateResult?.status === "downloaded"
+      || updateResult?.status === "installing"
+    )
     && updateResult.latestVersion,
   );
+  const updateDownloaded = updateResult?.status === "downloaded";
+  const updateBadgeLabel = updateDownloaded
+    ? "重启更新"
+    : updateResult?.status === "downloading"
+      && typeof updateResult.downloadPercent === "number"
+      ? `${Math.round(updateResult.downloadPercent)}%`
+      : updateResult?.status === "installing"
+        ? "安装中"
+        : "Update";
   const interactionLocked = runInProgress
     || browserPreviewOnly
     || projectHydrating
@@ -8339,6 +8403,8 @@ export default function Workbench() {
       setDrawer(null);
     } else if (action.id === "relaunch-app") {
       void relaunchApp();
+    } else if (action.id === "install-update") {
+      void installDownloadedUpdate();
     } else if (action.id === "open-release") {
       void openLatestRelease();
     } else if (action.id === "retry-draft-persist") {
@@ -8691,15 +8757,23 @@ export default function Workbench() {
             全局评论
           </button>
           <div className="header-send-cluster">
-            {updateAvailable ? (
+            {updateActionVisible ? (
               <button
                 className="header-update-badge"
                 type="button"
-                aria-label={`发现 PageRoot ${updateResult?.latestVersion || "新版本"}，打开 GitHub 更新页面`}
-                title={`PageRoot ${updateResult?.latestVersion || "新版本"} 可用`}
-                onClick={() => void openLatestRelease()}
+                aria-label={updateDownloaded
+                  ? `PageRoot ${updateResult?.latestVersion || "新版本"} 已下载，重启并安装`
+                  : `PageRoot ${updateResult?.latestVersion || "新版本"} 正在准备更新`}
+                title={updateDownloaded
+                  ? `重启并安装 PageRoot ${updateResult?.latestVersion || "新版本"}`
+                  : `PageRoot ${updateResult?.latestVersion || "新版本"} 自动下载中`}
+                disabled={updateResult?.status === "installing"}
+                onClick={() => {
+                  if (updateDownloaded) void installDownloadedUpdate();
+                  else void openLatestRelease();
+                }}
               >
-                Update
+                {updateBadgeLabel}
               </button>
             ) : null}
             <button

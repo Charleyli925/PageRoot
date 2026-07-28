@@ -74,7 +74,7 @@ The required PR `release-gate` is the one complete source gate for the final rea
 
 After merge, CI authenticates the successful PR result against the exact `main` Tree Hash and package/lockfile version, then runs a small Node and browser smoke on Linux. It does not repeat the complete browser and Electron suites. The source-gate attestation is valid for seven days and only for the exact tree.
 
-Before a tag exists, the manual `Release Candidate` workflow uses that source attestation to run only the installer lane on macOS. It freezes the verified DMG, checksum, update manifest, build provenance and candidate attestation for the exact tree. The manual `Release` workflow accepts only a matching candidate no older than 72 hours, verifies every downloaded byte, creates the annotated tag and publishes those same files without rebuilding. See `docs/RELEASE_PIPELINE_GOVERNANCE.md` for failure classification, rerun policy and metrics.
+Before a tag exists, the manual `Release Candidate` workflow uses that source attestation to run only the installer lane on macOS. It freezes the verified, Developer ID signed and notarized DMG plus update ZIP/blockmap/metadata, checksums, legacy update manifest, build provenance and candidate attestation for the exact tree. The manual `Release` workflow accepts only a matching candidate no older than 72 hours, verifies every downloaded byte, creates the annotated tag and publishes those same files without rebuilding. See `docs/RELEASE_PIPELINE_GOVERNANCE.md` for failure classification, rerun policy and metrics.
 
 ## Documentation impact
 

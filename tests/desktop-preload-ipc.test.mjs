@@ -284,7 +284,7 @@ test("preload exposes the narrow QoderWork handoff integration", async () => {
   ]);
 });
 
-test("preload exposes backend update status and the fixed latest-release link", async () => {
+test("preload exposes update status, restart installation, and the fixed release fallback", async () => {
   const calls = [];
   const { updates } = await loadPreloadApis(async (...args) => {
     calls.push(args);
@@ -301,10 +301,14 @@ test("preload exposes backend update status and the fixed latest-release link", 
   assert.equal(typeof unsubscribe, "function");
   unsubscribe();
 
+  await updates.installDownloaded();
+  assert.deepEqual(calls[1], ["html-updates:install-downloaded"]);
+
   await updates.openLatestRelease();
-  assert.deepEqual(calls[1], ["html-updates:open-latest-release"]);
+  assert.deepEqual(calls[2], ["html-updates:open-latest-release"]);
   assert.deepEqual(Object.keys(updates).sort(), [
     "getStatus",
+    "installDownloaded",
     "onStatus",
     "openLatestRelease",
   ]);

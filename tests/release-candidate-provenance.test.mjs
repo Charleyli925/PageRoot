@@ -140,8 +140,14 @@ test("downloaded candidate verification rejects any changed release byte", async
     lockVersion: packageVersion,
     packageJson: { name: "pageroot" },
   };
+  const zipName = `PageRoot-${packageVersion}-arm64.zip`;
   const files = {
     [`PageRoot-${packageVersion}-arm64.dmg`]: Buffer.from("synthetic dmg bytes"),
+    [zipName]: Buffer.from("synthetic update zip bytes"),
+    [`${zipName}.blockmap`]: Buffer.from("synthetic blockmap bytes"),
+    "latest-mac.yml": Buffer.from(
+      `version: ${packageVersion}\nfiles:\n  - url: ${zipName}\n    sha512: synthetic\n`,
+    ),
     "update-manifest.json": Buffer.from(`${JSON.stringify({
       schemaVersion: 1,
       version: packageVersion,
@@ -161,8 +167,14 @@ test("downloaded candidate verification rejects any changed release byte", async
     }, null, 2)}\n`),
   };
   const dmgName = `PageRoot-${packageVersion}-arm64.dmg`;
-  const dmgDigest = createHash("sha256").update(files[dmgName]).digest("hex");
-  files["SHA256SUMS.txt"] = Buffer.from(`${dmgDigest}  ${dmgName}\n`);
+  files["SHA256SUMS.txt"] = Buffer.from(
+    `${Object.keys(files)
+      .sort((left, right) => left.localeCompare(right))
+      .map((name) => (
+        `${createHash("sha256").update(files[name]).digest("hex")}  ${name}`
+      ))
+      .join("\n")}\n`,
+  );
   await Promise.all(Object.entries(files).map(([name, contents]) => (
     writeFile(path.join(directory, name), contents)
   )));
@@ -226,6 +238,9 @@ test("release workflows build before tagging and publish the verified candidate 
   assert.match(candidate, /gate:artifact-only:auto/u);
   assert.match(candidate, /source-gate-provenance\.mjs verify/u);
   assert.match(candidate, /release-candidate-provenance\.mjs create/u);
+  assert.match(candidate, /MAC_CSC_LINK/u);
+  assert.match(candidate, /APPLE_APP_SPECIFIC_PASSWORD/u);
+  assert.match(candidate, /PAGEROOT_REQUIRE_NOTARIZATION/u);
   assert.doesNotMatch(candidate, /gh release create/u);
   assert.doesNotMatch(candidate, /git tag/u);
 
@@ -234,6 +249,9 @@ test("release workflows build before tagging and publish the verified candidate 
   assert.match(release, /release-candidate-provenance\.mjs verify/u);
   assert.match(release, /git tag -a/u);
   assert.match(release, /gh release create/u);
+  assert.match(release, /PageRoot-\$\{VERSION\}-arm64\.zip/u);
+  assert.match(release, /PageRoot-\$\{VERSION\}-arm64\.zip\.blockmap/u);
+  assert.match(release, /latest-mac\.yml/u);
   assert.match(
     release,
     /release-candidate-provenance\.mjs verify[\s\S]+git tag -a[\s\S]+gh release create/u,

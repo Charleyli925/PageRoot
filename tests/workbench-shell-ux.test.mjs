@@ -401,7 +401,7 @@ test("header prioritizes the filename and keeps the approved action order", () =
   assert.doesNotMatch(header, /brand-logo\.png|className="brand"|className="update-badge"/);
   assert.match(
     header,
-    /updateAvailable[\s\S]*?className="header-update-badge"[\s\S]*?>\s*Update\s*</,
+    /updateActionVisible[\s\S]*?className="header-update-badge"[\s\S]*?updateDownloaded[\s\S]*?installDownloadedUpdate\(\)[\s\S]*?\{updateBadgeLabel\}/,
   );
   assert.match(
     styles,
@@ -433,9 +433,13 @@ test("header prioritizes the filename and keeps the approved action order", () =
   assert.match(workbench, /window\.htmlAIUpdates/);
   assert.match(workbench, /updates\.getStatus\(\)/);
   assert.match(workbench, /updates\.onStatus\(receiveStatus\)/);
+  assert.match(workbench, /installDownloaded\(\)/);
+  assert.match(workbench, /重启并安装/);
   assert.doesNotMatch(header, /app-version-button|检查更新|<strong>(?:YuanYe|PageRoot)<\/strong>/);
   assert.match(styles, /\.header-actions button,[\s\S]*?border:\s*0[\s\S]*?box-shadow:\s*none/);
   assert.match(mainProcess, /scheduleAutomaticUpdateCheck\(\)/);
+  assert.match(mainProcess, /createApplicationUpdateController/);
+  assert.match(mainProcess, /coordinateApplicationUpdateInstall/);
   assert.match(mainProcess, /LATEST_RELEASE_PAGE_URL/);
   assert.match(mainProcess, /shell\.openExternal\(LATEST_RELEASE_PAGE_URL\)/);
   assert.doesNotMatch(preload, /openLatestRelease:\s*\([^)]*url/);

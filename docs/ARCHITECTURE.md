@@ -88,6 +88,13 @@ The runtime capability manifest selects exactly one close coordinator:
 Electron's acknowledged handshake for the desktop app, or `beforeunload` for a
 browser runtime. They never compete over the same close.
 
+The main-process application-update controller is the sole owner of stable
+channel checks, download progress and downloaded-install readiness. It exposes
+only immutable status snapshots through preload IPC. Automatic download does
+not grant exit authority: restart installation is a distinct explicit intent
+that reuses the same Electron drain coordinator before invoking the signed
+updater. Ordinary app quit never installs a pending update.
+
 ## Trust model
 
 The renderer is sandboxed with context isolation and no Node integration. The preload exposes narrow validated IPC methods. The Bridge uses a per-process authentication token and only operates on managed project paths. AI output is untrusted until protocol, identity, Hash, path and HTML checks succeed. Scope validation remains strict evidence: managed metadata, scripts and unresolved targets hard-stop; ordinary out-of-target content/style findings are persisted as `observed` audit records and do not create a separate user-waiver state.

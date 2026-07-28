@@ -4,6 +4,13 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+- Added stable-only macOS auto-updates with automatic download, differential
+  ZIP/blockmap transfer, a restart-to-install prompt, and the existing safe
+  editor drain before installation.
+- Replaced ad-hoc distribution with fail-closed Developer ID signing, Hardened
+  Runtime, Apple notarization and candidate verification of both DMG and updater
+  assets while retaining the legacy manifest for one-time migration.
+
 ## [0.9.0] - 2026-07-28
 
 - Promoted the editable-island editor from the isolated V2 comparison build to

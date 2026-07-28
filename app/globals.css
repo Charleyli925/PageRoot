@@ -5723,7 +5723,7 @@ body {
   }
 }
 
-/* Project resources, rules editor, and manual update affordance */
+/* Project resources, rules editor, and signed application update affordance */
 
 .header-send-cluster {
   position: relative;
@@ -5749,6 +5749,7 @@ body {
   font-weight: 760;
   line-height: 16px;
   letter-spacing: 0.015em;
+  white-space: nowrap;
   transition:
     border-color 150ms ease,
     background-color 150ms ease,

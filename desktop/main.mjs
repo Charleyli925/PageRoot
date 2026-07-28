@@ -8,6 +8,7 @@ import {
   shell,
   utilityProcess,
 } from "electron";
+import electronUpdater from "electron-updater";
 import { randomBytes, randomUUID } from "node:crypto";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -51,10 +52,12 @@ import {
 } from "./product-contract.mjs";
 import { handoffToQoderWork } from "./qoder-handoff.mjs";
 import {
-  ManualUpdateError,
   LATEST_RELEASE_PAGE_URL,
-  checkForManualUpdate,
 } from "./manual-update.mjs";
+import { createApplicationUpdateController } from "./application-update.mjs";
+
+// electron-updater is CommonJS; the default import is the supported ESM bridge.
+const { autoUpdater } = electronUpdater;
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
 const e2eUserDataPath = (() => {
@@ -125,6 +128,7 @@ const INTEGRATION_CHANNELS = Object.freeze({
 const UPDATE_CHANNELS = Object.freeze({
   getStatus: "html-updates:get-status",
   status: "html-updates:status",
+  installDownloaded: "html-updates:install-downloaded",
   openLatestRelease: "html-updates:open-latest-release",
 });
 
@@ -141,8 +145,8 @@ let projectIpcRegistered = false;
 let projectState = null;
 let stateWriteQueue = Promise.resolve();
 let updateCheckTimer = null;
-let updateCheckPromise = null;
 let latestUpdateResult = null;
+let applicationUpdate = null;
 let workspaceFailurePrompt = null;
 let managedWelcomeRegistration = null;
 const workspaceRecoveryMailbox = createWorkspaceRecoveryMailbox();
@@ -987,46 +991,32 @@ async function forgetRecentProject(filePath) {
   return { sourcePath: normalizedPath };
 }
 
-async function checkForUpdates() {
-  try {
-    return await checkForManualUpdate({
-      currentVersion: app.getVersion(),
-      architecture: process.arch,
-      fetchImpl: (url, options) => net.fetch(url, options),
-    });
-  } catch (error) {
-    const code = error instanceof ManualUpdateError
-      ? error.code
-      : "UPDATE_UNAVAILABLE";
-    console.warn(
-      `[manual-update:${code}]`,
-      error instanceof Error ? error.message : String(error),
-    );
-    return {
-      status: "unavailable",
-      currentVersion: app.getVersion(),
-      latestVersion: null,
-      minimumMacOS: null,
-      architecture: process.arch,
-      publishedAt: null,
-    };
+function publishApplicationUpdateStatus(result) {
+  latestUpdateResult = result;
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(UPDATE_CHANNELS.status, result);
   }
 }
 
+function ensureApplicationUpdateController() {
+  if (applicationUpdate) return applicationUpdate;
+  applicationUpdate = createApplicationUpdateController({
+    updater: autoUpdater,
+    currentVersion: app.getVersion(),
+    architecture: process.arch,
+    enabled: (
+      app.isPackaged
+      && process.platform === "darwin"
+      && process.env.PAGEROOT_E2E !== "1"
+    ),
+    onStatus: publishApplicationUpdateStatus,
+  });
+  latestUpdateResult = applicationUpdate.getStatus();
+  return applicationUpdate;
+}
+
 async function runAutomaticUpdateCheck() {
-  if (updateCheckPromise) return updateCheckPromise;
-  updateCheckPromise = checkForUpdates()
-    .then((result) => {
-      latestUpdateResult = result;
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send(UPDATE_CHANNELS.status, result);
-      }
-      return result;
-    })
-    .finally(() => {
-      updateCheckPromise = null;
-    });
-  return updateCheckPromise;
+  return ensureApplicationUpdateController().checkForUpdates();
 }
 
 function scheduleAutomaticUpdateCheck() {
@@ -1116,6 +1106,24 @@ function registerProjectIpc() {
   ipcMain.handle(
     UPDATE_CHANNELS.getStatus,
     trustedProject(() => latestUpdateResult),
+  );
+  ipcMain.handle(
+    UPDATE_CHANNELS.installDownloaded,
+    trustedProject(async () => {
+      if (
+        ensureApplicationUpdateController().getStatus().status
+        !== "downloaded"
+      ) {
+        return { installing: false, reason: "not-ready" };
+      }
+      const installing = await coordinateApplicationUpdateInstall(
+        "update-install",
+      );
+      return {
+        installing,
+        reason: installing ? null : "close-blocked",
+      };
+    }),
   );
   ipcMain.handle(
     UPDATE_CHANNELS.openLatestRelease,
@@ -1296,10 +1304,31 @@ function unregisterIpc() {
   ]) {
     ipcMain.removeHandler(channel);
   }
+  projectIpcRegistered = false;
 }
 
-async function coordinateApplicationExit(reason) {
+const EXIT_INTENTS = Object.freeze({
+  quit: Object.freeze({
+    abortDetail: "源页已取消关闭并返回当前页面，请处理后再试。",
+    abortButton: "继续编辑",
+    errorTitle: "无法安全关闭源页",
+  }),
+  relaunch: Object.freeze({
+    abortDetail: "源页已取消重新打开并返回当前页面，请处理后再试。",
+    abortButton: "返回源页",
+    errorTitle: "暂时无法重新打开源页",
+  }),
+  update: Object.freeze({
+    abortDetail: "源页已取消安装更新并返回当前页面，请处理后再试。",
+    abortButton: "返回源页",
+    errorTitle: "暂时无法安装更新",
+  }),
+});
+
+async function coordinateApplicationExit(reason, intent = "quit") {
   if (coordinatedExit) return coordinatedExit;
+  const exitIntent = EXIT_INTENTS[intent];
+  if (!exitIntent) throw new TypeError(`Unsupported exit intent: ${intent}`);
   coordinatedExit = (async () => {
     const result = await requestRendererClose(reason);
     if (!result.ready) {
@@ -1308,8 +1337,8 @@ async function coordinateApplicationExit(reason) {
         type: "warning",
         title: "还有内容没有保存",
         message: result.reason || "当前页面还有内容没有保存完成。",
-        detail: "源页已取消关闭并返回当前页面，请处理后再试。",
-        buttons: ["继续编辑"],
+        detail: exitIntent.abortDetail,
+        buttons: [exitIntent.abortButton],
         defaultId: 0,
         noLink: true,
       };
@@ -1324,22 +1353,35 @@ async function coordinateApplicationExit(reason) {
 
     isQuitting = true;
     await stateWriteQueue.catch(() => {});
-    await stopBridgeOrNotifyCloseAborted({
-      requestId: result.requestId,
-      stopBridge: stopBridgeGracefully,
-      notifyCloseAborted: (payload) => {
-        notifyRendererCloseAborted(payload.requestId, payload.reason);
-      },
-    });
+    if (intent === "relaunch") {
+      if (bridgeProcess) await stopBridgeGracefully().catch(() => {});
+    } else {
+      await stopBridgeOrNotifyCloseAborted({
+        requestId: result.requestId,
+        stopBridge: stopBridgeGracefully,
+        notifyCloseAborted: (payload) => {
+          notifyRendererCloseAborted(payload.requestId, payload.reason);
+        },
+      });
+    }
     unregisterIpc();
     finalExitStarted = true;
-    app.quit();
+    if (intent === "relaunch") {
+      app.relaunch();
+      setImmediate(() => app.exit(0));
+    } else if (intent === "update") {
+      const installing = ensureApplicationUpdateController()
+        .installDownloadedUpdate();
+      if (!installing) throw new Error("下载的更新已不再可安装。");
+    } else {
+      app.quit();
+    }
     return true;
   })().catch((error) => {
     coordinatedExit = null;
     isQuitting = false;
     dialog.showErrorBox(
-      "无法安全关闭源页",
+      exitIntent.errorTitle,
       error instanceof Error ? error.message : String(error),
     );
     return false;
@@ -1348,47 +1390,11 @@ async function coordinateApplicationExit(reason) {
 }
 
 async function coordinateApplicationRelaunch(reason) {
-  if (coordinatedExit) return false;
-  coordinatedExit = (async () => {
-    const result = await requestRendererClose(reason);
-    if (!result.ready) {
-      notifyRendererCloseAborted(result.requestId, result.reason);
-      const messageBoxOptions = {
-        type: "warning",
-        title: "还有内容没有保存",
-        message: result.reason || "当前页面还有内容没有保存完成。",
-        detail: "源页已取消重新打开并返回当前页面，请处理后再试。",
-        buttons: ["返回源页"],
-        defaultId: 0,
-        noLink: true,
-      };
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        await dialog.showMessageBox(mainWindow, messageBoxOptions);
-      } else {
-        await dialog.showMessageBox(messageBoxOptions);
-      }
-      coordinatedExit = null;
-      return false;
-    }
+  return coordinateApplicationExit(reason, "relaunch");
+}
 
-    isQuitting = true;
-    await stateWriteQueue.catch(() => {});
-    if (bridgeProcess) await stopBridgeGracefully().catch(() => {});
-    unregisterIpc();
-    finalExitStarted = true;
-    app.relaunch();
-    setImmediate(() => app.exit(0));
-    return true;
-  })().catch((error) => {
-    coordinatedExit = null;
-    isQuitting = false;
-    dialog.showErrorBox(
-      "暂时无法重新打开源页",
-      error instanceof Error ? error.message : String(error),
-    );
-    return false;
-  });
-  return coordinatedExit;
+async function coordinateApplicationUpdateInstall(reason) {
+  return coordinateApplicationExit(reason, "update");
 }
 
 async function showWorkspaceUnavailableRecovery() {
@@ -1631,6 +1637,7 @@ if (!hasSingleInstanceLock) {
     if (process.platform === "darwin" && app.dock && !app.isPackaged) {
       app.dock.setIcon(path.join(directory, "resources", "icon.png"));
     }
+    ensureApplicationUpdateController();
     await createWindow();
   }).catch((error) => {
     dialog.showErrorBox(

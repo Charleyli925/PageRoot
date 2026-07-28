@@ -31,6 +31,7 @@ const integrationChannels = Object.freeze({
 const updateChannels = Object.freeze({
   getStatus: "html-updates:get-status",
   status: "html-updates:status",
+  installDownloaded: "html-updates:install-downloaded",
   openLatestRelease: "html-updates:open-latest-release",
 });
 const PROJECT_IPC_PROTOCOL = "html-ai-project-result";
@@ -124,6 +125,7 @@ const updatesApi = Object.freeze({
       ipcRenderer.removeListener(updateChannels.status, registered);
     };
   },
+  installDownloaded: () => invokeProject(updateChannels.installDownloaded),
   openLatestRelease: () => invokeProject(updateChannels.openLatestRelease),
 });
 
