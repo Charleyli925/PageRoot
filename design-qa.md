@@ -161,6 +161,7 @@ Viewport and state:
 ## Automated checks
 
 - Focused lifecycle, shell, and notification tests: 41 passed.
+- Full Node suite: 481 passed, 3 skipped, 0 failed.
 - `npm run typecheck`
 - `npm run lint`
 - `npm run build`
