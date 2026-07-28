@@ -38,6 +38,11 @@ In GitHub Actions:
 2. Choose `main`.
 3. Run the workflow and wait for `build-and-verify-candidate`.
 
+The workflow allows up to 110 minutes specifically for the combined
+build/sign/notarize/install-verification operation, within a 120-minute outer
+job guard. All other steps have explicit 2–10 minute limits, so an unrelated
+checkout, dependency, metadata, provenance or upload stall still fails quickly.
+
 The workflow:
 
 - refuses any ref other than current `main`;
