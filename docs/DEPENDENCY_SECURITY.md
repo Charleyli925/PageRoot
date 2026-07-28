@@ -30,6 +30,6 @@ their reviewed patch or minor versions. A same-major override selects PostCSS
 8.5.23 for Next.js and tar 7.5.22 for the build chain; the former PostCSS and tar
 exceptions were removed after `npm audit` no longer reported them.
 
-The macOS package includes the compiled desktop renderer, selected desktop modules, `parse5`, `entities`, schemas and build provenance; it explicitly excludes the general `node_modules` tree. These exceptions do not authorize adding the affected packages to the packaged runtime.
+The macOS package includes the compiled desktop renderer, selected desktop modules, `parse5`, `entities`, the reviewed `electron-updater` closure, schemas and build provenance; it explicitly excludes the general `node_modules` tree. `semver` is pinned at the package root so the updater closure has no hidden nested runtime copy. The dependency audit rejects missing, nested or undeclared modules in this exact packaged allowlist. These exceptions do not authorize adding the affected packages to the packaged runtime.
 
 Do not use `npm audit fix --force`: npm currently proposes an incompatible Next.js downgrade. Remove each exception as soon as a compatible upstream release resolves it, and rerun all source and artifact gates after any dependency change.

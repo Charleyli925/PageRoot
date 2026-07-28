@@ -19,6 +19,26 @@ import {
 } from "../scripts/verify-packaged-artifact.mjs";
 
 const productRoot = fileURLToPath(new URL("../", import.meta.url));
+const PACKAGED_MODULES = [
+  "argparse",
+  "builder-util-runtime",
+  "debug",
+  "electron-updater",
+  "entities",
+  "fs-extra",
+  "graceful-fs",
+  "js-yaml",
+  "jsonfile",
+  "lazy-val",
+  "lodash.escaperegexp",
+  "lodash.isequal",
+  "ms",
+  "parse5",
+  "sax",
+  "semver",
+  "tiny-typed-emitter",
+  "universalify",
+];
 
 async function writeFixtureFile(root, relativePath, contents) {
   const destination = path.join(root, relativePath);
@@ -92,6 +112,7 @@ async function createPackagedFixture(t) {
     "desktop/product-contract.mjs",
     "desktop/qoder-handoff.mjs",
     "desktop/manual-update.mjs",
+    "desktop/application-update.mjs",
     "public/brand-logo.png",
     "dist-desktop/renderer/index.html",
   ]) {
@@ -121,7 +142,7 @@ async function createPackagedFixture(t) {
       `fixture:scripts/${fileName}\n`,
     );
   }
-  for (const moduleName of ["parse5", "entities"]) {
+  for (const moduleName of PACKAGED_MODULES) {
     await writeFixtureFile(
       fixtureProductRoot,
       `node_modules/${moduleName}/package.json`,
@@ -171,6 +192,7 @@ async function createPackagedFixture(t) {
     "desktop/product-contract.mjs",
     "desktop/qoder-handoff.mjs",
     "desktop/manual-update.mjs",
+    "desktop/application-update.mjs",
     "public/brand-logo.png",
     "package.json",
   ]) {
@@ -213,7 +235,7 @@ async function createPackagedFixture(t) {
       "",
     ),
   );
-  for (const moduleName of ["parse5", "entities"]) {
+  for (const moduleName of PACKAGED_MODULES) {
     for (const relativePath of ["package.json", "dist/index.js"]) {
       const destination = path.join(
         resourcesPath,
@@ -305,7 +327,7 @@ test("release commands use one automated artifact lane with full tests and packa
   assert.match(packageJson.scripts["desktop:pack:prepared"], /build-package\.mjs --arch arm64/);
   assert.match(
     packageBuilder,
-    /\["--mac", "dmg", `--\$\{architecture\}`, "--publish", "never"\]/u,
+    /\["--mac", "dmg", "zip", `--\$\{architecture\}`, "--publish", "never"\]/u,
     "electron-builder must never publish before PageRoot verifies the complete release asset set",
   );
   assert.ok(packageJson.build.extraResources.some((entry) => entry.to === "build-info.json"));
@@ -325,6 +347,15 @@ test("release commands use one automated artifact lane with full tests and packa
     path.basename(layout.dmgPath),
     `PageRoot-${packageJson.version}-arm64.dmg`,
   );
+  assert.equal(
+    path.basename(layout.zipPath),
+    `PageRoot-${packageJson.version}-arm64.zip`,
+  );
+  assert.equal(
+    path.basename(layout.blockmapPath),
+    `PageRoot-${packageJson.version}-arm64.zip.blockmap`,
+  );
+  assert.equal(path.basename(layout.updateInfoPath), "latest-mac.yml");
 });
 
 test("retired editor guard rejects dependencies, bundled code, and legacy editing surfaces", () => {
@@ -377,7 +408,7 @@ test("the app-bundle gate compares app.asar, Bridge scripts, schemas and plist v
     verifySignature: false,
   });
   assert.equal(result.version, "0.7.0");
-  assert.equal(result.asarFileCount, 13);
+  assert.equal(result.asarFileCount, 14);
   assert.equal(result.schemaFileCount, 3);
   assert.equal(result.legalResourceCount, 3);
   assert.equal(result.provenance.commitSha, "a".repeat(40));

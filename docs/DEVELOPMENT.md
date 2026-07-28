@@ -43,10 +43,17 @@ npm run task:finish
 | `npm run gate:main:auto` | Internal post-merge Node/browser smoke after exact-tree PR provenance verification |
 | `npm run gate:release:auto` | Complete source gate on a clean commit |
 | `npm run gate:artifact-only:auto` | Guarded internal installer lane; it refuses to run without CI's fresh matching tree/version decision |
-| `npm run release:mac` | Complete source gate, arm64 package, packaged runtime test and artifact verification |
+| `npm run release:mac` | Complete source gate, signed arm64 DMG/ZIP package, packaged runtime test and artifact verification; release credentials are required for notarization proof |
 | `npm run test:electron:ci-preflight:prepared` | Synthetic hosted-macOS window, timer and animation-frame preflight used before Electron product suites |
 
 The release and artifact lanes stop if the worktree is dirty or if HEAD/tree changes during the run. Reports are written to the ignored `output/test-runs/` directory.
+
+Desktop development and Electron E2E disable live update checks. The pure
+application-update controller is covered by Node tests; the Release Candidate
+lane owns the installed-App, Developer ID, notarization, ZIP/blockmap and
+`latest-mac.yml` evidence. Local packaging is a distribution build and therefore
+requires a valid Developer ID identity; publication credentials remain in
+GitHub encrypted secrets.
 
 Draft Pull Requests run only impact-selected feedback. Marking a final PR tree ready runs parallel Node, three-shard Chromium, real HTML, native Electron and deterministic AI groups. Linux builds and shares only the Web renderer used by Node and Browser. Each macOS job builds the Electron renderer locally, runs the hosted-window preflight, then owns either the native Electron suite or the AI suite; those jobs can be rerun independently. Dependency, Playwright and Electron downloads are cached by lockfile identity.
 
