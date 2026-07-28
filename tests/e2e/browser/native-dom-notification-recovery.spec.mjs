@@ -31,7 +31,7 @@ test.describe("notification recovery paths", () => {
     await expect(notice).toContainText(
       "原文件没有被修改。请先转换为 UTF-8，再重新选择。",
     );
-    await expect(page.getByText("notification-recovery.html", { exact: true }).first())
+    await expect(page.getByText("notification-recovery", { exact: true }).first())
       .toBeVisible();
 
     const chooserPromise = page.waitForEvent("filechooser");
@@ -43,7 +43,7 @@ test.describe("notification recovery paths", () => {
       buffer: fixtureBuffer("complex-layout.html"),
     });
 
-    await expect(page.getByText("recovered-utf8.html", { exact: true }).first())
+    await expect(page.getByText("recovered-utf8", { exact: true }).first())
       .toBeVisible();
     await expect(notice).toHaveCount(0);
   });

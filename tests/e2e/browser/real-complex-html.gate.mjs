@@ -337,6 +337,7 @@ async function loadRealHtml(page, sourcePath, source, { navigate = true } = {}) 
     await ensureSourceEditingTestRuntime(page);
   }
   const name = path.basename(sourcePath);
+  const displayName = name.replace(/\.html?$/iu, "");
   // Setting the hidden input directly bypasses prepareProjectSwitch(), so wait
   // for the initial canvas to reach the same commit-ready state as the real UI.
   const editor = page.getByTestId("html-canvas-editor").filter({ visible: true }).first();
@@ -346,7 +347,7 @@ async function loadRealHtml(page, sourcePath, source, { navigate = true } = {}) 
   const fileInput = page.locator('input[type="file"][accept*=".html"]').first();
   await fileInput.waitFor({ state: "attached" });
   await fileInput.setInputFiles({ name, mimeType: "text/html", buffer: source });
-  await page.getByText(name, { exact: true }).first().waitFor({ state: "visible" });
+  await page.getByText(displayName, { exact: true }).first().waitFor({ state: "visible" });
   if (previousToken) {
     await expect.poll(
       () => documentToken(page),
