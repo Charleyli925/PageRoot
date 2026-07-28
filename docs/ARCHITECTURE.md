@@ -64,6 +64,14 @@ Direct edits form ordered revisions and are written through a single queue. Ever
 
 When no desktop project can be restored, the main process provisions the built-in welcome content once as a regular HTML source beside the selected workspace and immediately registers its initial V1 through the authenticated Bridge. Existing welcome bytes are never replaced on startup. From that point onward it uses the same source, comment, Request, handoff and Version boundaries as any user-opened HTML.
 
+Project identity and storage presentation are separate facts. The registry maps
+the stable opaque `projectId` to one immutable readable directory name derived
+at creation from `displayName + local creation time + short project token`.
+`project.json` persists the same `displayName`, `createdAt` and
+`storageDirectoryName`; source renames and moves do not rename the managed
+directory. The clean-cutover decision is recorded in
+`docs/decisions/0005-readable-project-storage-directories.md`.
+
 Initial and accepted AI results are immutable versions. Routine local edits do not create versions. A validated AI result is not activated until the user explicitly chooses it.
 
 `PROJECT.md` uses debounced autosave and is flushed before project switch or close. One recoverable unsaved comment composer is allowed at a time. Attachment uploads, rule saves and ordinary source writes are finished or surfaced in their owning panel before navigation proceeds.

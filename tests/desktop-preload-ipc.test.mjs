@@ -183,7 +183,7 @@ test("preload exposes the narrow generated-version activation operation", async 
   const api = await loadPreload(async (...args) => {
     calls.push(args);
     return success({
-      sourcePath: "/Users/demo/PageRoot/项目记录/projects/project_demo/working/report-V1.1.html",
+      sourcePath: "/Users/demo/PageRoot/项目记录/projects/report__20260728-124315__01234567/working/report-V1.1.html",
       sha256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       previousSourcePath: "/Users/demo/report.html",
       versionId: "ver_0002",
@@ -191,7 +191,7 @@ test("preload exposes the narrow generated-version activation operation", async 
   });
   const payload = {
     previousSourcePath: "/Users/demo/report.html",
-    nextSourcePath: "/Users/demo/PageRoot/项目记录/projects/project_demo/working/report-V1.1.html",
+    nextSourcePath: "/Users/demo/PageRoot/项目记录/projects/report__20260728-124315__01234567/working/report-V1.1.html",
     expectedSha256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     projectId: "project_demo",
     versionId: "ver_0002",
@@ -200,7 +200,7 @@ test("preload exposes the narrow generated-version activation operation", async 
   assert.deepEqual(
     await api.activateGeneratedVersion(payload),
     {
-      sourcePath: "/Users/demo/PageRoot/项目记录/projects/project_demo/working/report-V1.1.html",
+      sourcePath: "/Users/demo/PageRoot/项目记录/projects/report__20260728-124315__01234567/working/report-V1.1.html",
       sha256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       previousSourcePath: "/Users/demo/report.html",
       versionId: "ver_0002",
@@ -219,7 +219,7 @@ test("preload exposes the narrow history-version Finder operation", async () => 
     return success({
       sourcePath: "/Users/demo/report.html",
       versionId: "ver_0002",
-      versionPath: "/Users/demo/PageRoot/项目记录/projects/project_demo/versions/ver_0002/files/index.html",
+      versionPath: "/Users/demo/PageRoot/项目记录/projects/report__20260728-124315__01234567/versions/ver_0002/files/index.html",
     });
   });
   const payload = {
@@ -232,7 +232,7 @@ test("preload exposes the narrow history-version Finder operation", async () => 
     {
       sourcePath: "/Users/demo/report.html",
       versionId: "ver_0002",
-      versionPath: "/Users/demo/PageRoot/项目记录/projects/project_demo/versions/ver_0002/files/index.html",
+      versionPath: "/Users/demo/PageRoot/项目记录/projects/report__20260728-124315__01234567/versions/ver_0002/files/index.html",
     },
   );
   assert.deepEqual(calls[0], [

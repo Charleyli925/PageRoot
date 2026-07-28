@@ -173,7 +173,7 @@ test("v3 comments can bind project attachments to the same target and AI instruc
     ...attachment,
     commentId: "comment_emphasize_value",
     targetRef: "target_metrics_grid",
-    localPath: "/Users/test/Documents/HTML AI 工作台/项目记录/projects/project_demo/requests/req_metrics_cards/input/attachments/comment_emphasize_value/attachment_reference_image-参考图.png",
+    localPath: "/Users/test/Documents/PageRoot/项目记录/projects/指标系统__20260728-124315__01234567/requests/req_metrics_cards/input/attachments/comment_emphasize_value/attachment_reference_image-参考图.png",
   }];
   request.annotations.attachmentCount = 1;
   assert.equal(

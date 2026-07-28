@@ -2284,7 +2284,9 @@ export default function Workbench() {
       setProjectRecordsPath(
         String(paths.projectRecords || payload.projectRoot || "") || null,
       );
-      if (projectRecord.name) setProjectName(String(projectRecord.name));
+      if (projectRecord.displayName) {
+        setProjectName(String(projectRecord.displayName));
+      }
       setVersions(versionsFromWorkspace(payload));
       setLatestVersionId(
         payload.latestVersionId ? String(payload.latestVersionId) : null,
@@ -3680,7 +3682,9 @@ export default function Workbench() {
       );
       const projectRecord = isRecord(payload.project) ? payload.project : {};
       const workspacePaths = isRecord(payload.paths) ? payload.paths : {};
-      if (projectRecord.name) setProjectName(String(projectRecord.name));
+      if (projectRecord.displayName) {
+        setProjectName(String(projectRecord.displayName));
+      }
       setProjectRecordsPath(
         String(
           workspacePaths.projectRecords

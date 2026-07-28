@@ -7,6 +7,8 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
 - Electron renderer sandbox, context isolation, disabled Node integration and explicit Content Security Policy
 - Narrow preload APIs with payload validation instead of direct IPC exposure
 - Project-path allowlisting and real-path checks for privileged file operations
+- Registry-bound readable project-directory validation; names are one safe path
+  segment and must carry the short token of their internal `projectId`
 - Hash-checked atomic writes that stop on external modification
 - Per-process Bridge authentication token and managed workspace boundaries
 - Clipboard-only third-party AI handoff

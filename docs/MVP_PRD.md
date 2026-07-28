@@ -71,7 +71,10 @@ PageRoot 让用户在真实本地 HTML 上完成两类工作：
 
 | 字段 | 作用 |
 |---|---|
-| `projectId` | 项目身份 |
+| `projectId` | 稳定的内部项目身份，不直接作为 Finder 文件夹名 |
+| `displayName` | 默认取 HTML 文件名（不含扩展名）的用户可读项目名称 |
+| `createdAt` | 不可变的项目创建时间 |
+| `storageDirectoryName` | 固定的可读项目目录名，由显示名、创建时间和短项目标识组成 |
 | `documentId` | 源 HTML 身份 |
 | `versionId` | 机器版本 ID，例如 `ver_0009` |
 | `versionOrdinal` | 连续序号，例如 `9` |
@@ -97,7 +100,7 @@ PageRoot 让用户在真实本地 HTML 上完成两类工作：
 
 工作台不负责新建 HTML。首次打开和预览尚未登记的既有 HTML 不创建项目记录或 Version；第一次真实编辑、添加附件、发送给 QoderWork，或用户明确展开“项目资料”查看长期规则与记录文件夹时，才创建 `sourceType=initial` 的 V1。V1 是初始只读基线，不是一次手动保存。
 
-每个项目拥有稳定 `projectId`，每个源 HTML 拥有稳定 `documentId`。改文件名或移动路径时，产品应通过持久身份和受控重新绑定保持 Document 连续性，不能只依赖文件名匹配。
+每个项目拥有稳定 `projectId`，每个源 HTML 拥有稳定 `documentId`。新建项目时，系统以 HTML 文件名（不含扩展名）建立 `displayName`，并生成固定的 `<displayName>__<YYYYMMDD-HHmmss>__<短 projectId>` 目录名。改文件名或移动路径时，产品应通过持久身份和受控重新绑定保持 Document 连续性，不能只依赖文件名匹配，也不重命名已经建立的项目记录目录。
 
 初始 Version 的内部标签为 `V1 / ver_0001`，界面显示“版本 1”。第一次有效 AI 成功使用内部 `V2 / ver_0002`，界面显示“版本 2”；之后依次递增。兼容工作文件名仍可使用 `working/V1.1.html`、`working/V1.2.html`，但不得把该文件标签当作用户界面的版本身份，也不得回写并破坏严格 v3 Schema。
 
@@ -449,7 +452,7 @@ editing
 ```text
 项目记录/
 └── projects/
-    └── <projectId>/
+    └── <displayName>__<YYYYMMDD-HHmmss>__<shortProjectId>/
         ├── project.json
         ├── PROJECT.md
         ├── runtime-state.json
@@ -468,7 +471,7 @@ editing
 | 事实 | 权威位置 |
 |---|---|
 | 当前可编辑 HTML | `project.json.sourcePath` 当前指向的原始 HTML 或 `working/V1.x.html` |
-| 项目/文档身份与可重建缓存 | `project.json` |
+| 项目/文档身份、显示名、创建时间、目录名与可重建缓存 | `project.json` 与 `project-registry.json` |
 | 整个项目长期使用的 AI 规则 | `PROJECT.md` |
 | active run、项目锁、冲突与恢复事务 | `runtime-state.json` |
 | 当前评论、edit event、删除 tombstone、草稿 revision 与已处理 operation ID | `draft/annotations.json`；`runtime-state.json` 只保存其指针与 revision |
@@ -479,7 +482,7 @@ editing
 
 任何渲染缓存都可丢弃，不能参与判断当前事实或最新 Version。
 
-“项目资料”必须把权限和用途说清楚：主入口为“项目长期规则”和“项目记录文件夹”。`PROJECT.md` 适用于整个项目、空闲时可修改；读取完成前与 AI 处理期间只读，停止输入约 700ms 后自动保存，保存只影响后续任务。切换项目、关闭规则页和关闭应用前必须完成保存或原位说明失败。记录文件夹通过 Finder 查看每轮要求、AI 返回与历史文件。不得只写“Request 与审计记录”这类需要用户理解内部术语的概括，也不得在规则仍在读取时接受输入或静默丢弃未保存修改。
+“项目资料”必须把权限和用途说清楚：主入口为“项目长期规则”和“项目记录文件夹”。`PROJECT.md` 适用于整个项目、空闲时可修改；读取完成前与 AI 处理期间只读，停止输入约 700ms 后自动保存，保存只影响后续任务。切换项目、关闭规则页和关闭应用前必须完成保存或原位说明失败。记录文件夹通过 Finder 查看每轮要求、AI 返回与历史文件；文件夹名必须可读且能区分同名 HTML，不得向用户暴露完整 UUID 作为主名称。不得只写“Request 与审计记录”这类需要用户理解内部术语的概括，也不得在规则仍在读取时接受输入或静默丢弃未保存修改。
 
 正式签名的 macOS App 在启动约 5 秒后检查 stable 更新，并在应用持续打开期间每 4 小时再次检查；macOS 应用菜单中的“关于源页”同时提供用户主动触发的“检查更新”和固定 GitHub 仓库入口。自动与手动检查必须合并到同一个主进程更新控制器，不得并发建立两套下载或安装状态。检测到 stable 新版本时，顶部发送按钮上方显示右对齐的红色斜体 `New!`；当前版本或自动检查失败时不占位，手动检查的结果和失败原因则在“关于源页”原位显示。只有用户点击 `New!` 或“关于源页”中的“下载更新”后才开始下载，优先使用差分传输，失败时允许回退完整 ZIP；下载期间顶部文案保持不变，不显示百分比、进度条或动画。下载完成后弹出“现在重启 / 稍后”确认；选择稍后时顶部变为 `New! 重启更新`，再次点击打开同一确认，Canvas 不显示下载完成横幅。只有编辑器写入、草稿和 Bridge 关闭排空全部成功后才重启安装。普通退出不得暗中安装，GitHub 仓库只作为项目与人工后备入口。
 
@@ -512,6 +515,7 @@ editing
 5. 用户继续编辑的 HTML 作为普通 HTML 重新登记为新项目 V1。
 6. 不自动恢复旧 Version 序号、评论绑定、Request、Attempt 或运行态。
 7. v1/v2 主记录返回 `UNSUPPORTED_SCHEMA_VERSION`，不做推断或补字段。
+8. 缺少 `displayName`、`createdAt` 或 `storageDirectoryName` 的旧 UUID 项目目录不迁移、不重命名也不删除；Bridge 直接拒绝该 workspace，由用户另行保留或清理旧记录。
 
 旧 HTML 快照仍可作为普通 HTML 打开或重新导入；这是新建项目，不是历史迁移。
 

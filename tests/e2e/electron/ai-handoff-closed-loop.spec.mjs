@@ -315,8 +315,12 @@ async function openRecentProject(page, sourcePath, options) {
 function requestDirectoryCount(workspace) {
   const projectsRoot = path.join(workspace, "projects");
   if (!existsSync(projectsRoot)) return 0;
-  return readdirSync(projectsRoot).reduce((total, projectId) => {
-    const requestsRoot = path.join(projectsRoot, projectId, "requests");
+  return readdirSync(projectsRoot).reduce((total, projectDirectoryName) => {
+    const requestsRoot = path.join(
+      projectsRoot,
+      projectDirectoryName,
+      "requests",
+    );
     return total + (
       existsSync(requestsRoot)
         ? readdirSync(requestsRoot).filter((entry) => !entry.startsWith(".")).length
@@ -328,10 +332,10 @@ function requestDirectoryCount(workspace) {
 function workspaceContainsDraftComment(workspace, text) {
   const projectsRoot = path.join(workspace, "projects");
   if (!existsSync(projectsRoot)) return false;
-  return readdirSync(projectsRoot).some((projectId) => {
+  return readdirSync(projectsRoot).some((projectDirectoryName) => {
     const draftPath = path.join(
       projectsRoot,
-      projectId,
+      projectDirectoryName,
       "draft",
       "annotations.json",
     );
@@ -345,10 +349,10 @@ function workspaceContainsDraftComment(workspace, text) {
 function rewriteWorkspaceDraftComment(workspace, text, update) {
   const projectsRoot = path.join(workspace, "projects");
   if (!existsSync(projectsRoot)) return false;
-  for (const projectId of readdirSync(projectsRoot)) {
+  for (const projectDirectoryName of readdirSync(projectsRoot)) {
     const draftPath = path.join(
       projectsRoot,
-      projectId,
+      projectDirectoryName,
       "draft",
       "annotations.json",
     );
@@ -421,7 +425,15 @@ function recordOfficialSupplement(workspace, requestRoot, changeRequest, payload
 }
 
 function workingHtmlFiles(workspace, projectId) {
-  const directory = path.join(workspace, "projects", projectId, "working");
+  const registry = JSON.parse(
+    readFileSync(path.join(workspace, "project-registry.json"), "utf8"),
+  );
+  const directory = path.join(
+    workspace,
+    "projects",
+    registry.projects[projectId].storageDirectoryName,
+    "working",
+  );
   if (!existsSync(directory)) return [];
   return readdirSync(directory)
     .filter((fileName) => fileName.endsWith(".html"))
@@ -786,8 +798,12 @@ test("a clipboard handoff failure keeps the frozen Request recoverable", async (
     const projectsRoot = path.join(launched.workspace, "projects");
     await expect.poll(() => (
       existsSync(projectsRoot)
-        ? readdirSync(projectsRoot).some((projectId) => (
-            existsSync(path.join(projectsRoot, projectId, "requests"))
+        ? readdirSync(projectsRoot).some((projectDirectoryName) => (
+            existsSync(path.join(
+              projectsRoot,
+              projectDirectoryName,
+              "requests",
+            ))
           ))
         : false
     )).toBe(true);
@@ -1006,9 +1022,13 @@ test("project resources expose clear rules and drain edits before leaving", asyn
     await launched.page.getByRole("button", { name: "返回项目" }).click();
     await expect(launched.page.getByText("当前文件", { exact: true })).toBeVisible();
     const projectsRoot = path.join(launched.workspace, "projects");
-    const [projectId] = readdirSync(projectsRoot)
+    const [projectDirectoryName] = readdirSync(projectsRoot)
       .filter((entry) => !entry.startsWith("."));
-    const projectRulesPath = path.join(projectsRoot, projectId, "PROJECT.md");
+    const projectRulesPath = path.join(
+      projectsRoot,
+      projectDirectoryName,
+      "PROJECT.md",
+    );
     await expect.poll(
       () => readFileSync(projectRulesPath, "utf8"),
       { timeout: 20_000 },
@@ -1215,7 +1235,7 @@ test("an automatic update result appears above the Qoder action", async () => {
       );
     });
     await expect(launched.page.getByRole("button", {
-      name: "发现 PageRoot 9.9.9，打开 GitHub 更新页面",
+      name: "发现 PageRoot 9.9.9，下载更新",
     })).toBeVisible();
 
     await launched.electronApp.evaluate(({ BrowserWindow }) => {
@@ -1232,7 +1252,7 @@ test("an automatic update result appears above the Qoder action", async () => {
       );
     });
     await expect(launched.page.getByRole("button", {
-      name: /打开 GitHub 更新页面/u,
+      name: "发现 PageRoot 9.9.9，下载更新",
     })).toHaveCount(0);
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
