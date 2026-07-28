@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   canCloseDuringHydration,
   closeAbortPayload,
+  runGuardedFinalExit,
   shouldRecoverEditorAfterCloseAbort,
   stopBridgeOrNotifyCloseAborted,
 } from "../desktop/close-recovery.mjs";
@@ -84,6 +85,49 @@ test("a failed Bridge shutdown notifies the exact renderer close request and sta
     requestId: safeRendererState.approvedRequestId,
     reason: shutdownError.message,
   }]);
+});
+
+test("a failed final update install restores exit guards before returning control", async () => {
+  const events = [];
+  const installError = new Error("下载的更新已不再可安装。");
+  let finalExitStarted = false;
+  let ipcRegistered = true;
+  let bridgeRunning = false;
+
+  await assert.rejects(
+    runGuardedFinalExit({
+      armFinalExit: () => {
+        events.push("arm");
+        finalExitStarted = true;
+        ipcRegistered = false;
+      },
+      executeFinalExit: () => {
+        events.push("install");
+        throw installError;
+      },
+      restoreFinalExit: async (error) => {
+        events.push("restart-bridge");
+        assert.equal(error, installError);
+        bridgeRunning = true;
+        finalExitStarted = false;
+        events.push("register-ipc");
+        ipcRegistered = true;
+        events.push("notify-renderer");
+      },
+    }),
+    installError,
+  );
+
+  assert.deepEqual(events, [
+    "arm",
+    "install",
+    "restart-bridge",
+    "register-ipc",
+    "notify-renderer",
+  ]);
+  assert.equal(finalExitStarted, false);
+  assert.equal(ipcRegistered, true);
+  assert.equal(bridgeRunning, true);
 });
 
 test("the editor recovers only for its own safely persisted close freeze", () => {

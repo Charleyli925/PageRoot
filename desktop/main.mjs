@@ -45,6 +45,7 @@ import {
 } from "./bridge-shutdown.mjs";
 import {
   closeAbortPayload,
+  runGuardedFinalExit,
   stopBridgeOrNotifyCloseAborted,
 } from "./close-recovery.mjs";
 import {
@@ -1419,18 +1420,39 @@ async function coordinateApplicationExit(reason, intent = "quit") {
         },
       });
     }
-    unregisterIpc();
-    finalExitStarted = true;
-    if (intent === "relaunch") {
-      app.relaunch();
-      setImmediate(() => app.exit(0));
-    } else if (intent === "update") {
-      const installing = ensureApplicationUpdateController()
-        .installDownloadedUpdate();
-      if (!installing) throw new Error("下载的更新已不再可安装。");
-    } else {
-      app.quit();
-    }
+    await runGuardedFinalExit({
+      armFinalExit: () => {
+        unregisterIpc();
+        finalExitStarted = true;
+      },
+      executeFinalExit: () => {
+        if (intent === "relaunch") {
+          app.relaunch();
+          setImmediate(() => app.exit(0));
+        } else if (intent === "update") {
+          const installing = ensureApplicationUpdateController()
+            .installDownloadedUpdate();
+          if (!installing) throw new Error("下载的更新已不再可安装。");
+        } else {
+          app.quit();
+        }
+        return true;
+      },
+      restoreFinalExit: async (error) => {
+        finalExitStarted = false;
+        isQuitting = false;
+        let restartError = null;
+        try {
+          await startBridge();
+        } catch (caught) {
+          restartError = caught;
+        } finally {
+          registerProjectIpc();
+          notifyRendererCloseAborted(result.requestId, error);
+        }
+        if (restartError) throw restartError;
+      },
+    });
     return true;
   })().catch((error) => {
     coordinatedExit = null;
