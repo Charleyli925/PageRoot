@@ -21,7 +21,7 @@ The publication workflow creates the annotated tag only after the pre-tag candid
 - Native Electron and deterministic AI run as separate jobs. A failure can be rerun independently.
 - Each macOS job first runs a product-independent synthetic Electron environment preflight. It proves that the hosted window is visible and that renderer timers and animation frames advance before PageRoot code or assertions begin.
 - Browser shards, real HTML, native Electron and AI keep retries at zero. Reliability is obtained from deterministic readiness and better evidence, not blanket retrying.
-- The release-candidate job has a 120-minute outer safety budget solely so its measured build/sign/notarize/install verification step may use up to 110 minutes for Apple queue variance. Checkout, dependency installation, source-evidence checks, metadata generation, provenance and uploads each retain explicit 2–10 minute step limits; the extended budget is not a blanket allowance for unrelated stalls.
+- The release-candidate job has a 120-minute outer safety budget solely so its measured build/sign/notarize/install verification step may use up to 110 minutes for Apple queue variance across the independent App and final-DMG submissions. After DMG acceptance the workflow staples and validates the ticket, then refreshes any DMG entry in updater metadata against the final stapled bytes. Checkout, dependency installation, source-evidence checks, metadata generation, provenance and uploads each retain explicit 2–10 minute step limits; the extended budget is not a blanket allowance for unrelated stalls.
 
 ## Failure evidence and classification
 
