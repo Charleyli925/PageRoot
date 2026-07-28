@@ -911,7 +911,7 @@ test("comment composer is explicit, transient and horizontally contained", () =>
   assert.match(workbench, /aria-current=\{focusedCommentId === comment\.commentId \? "location"/);
   assert.match(
     unifiedSurfaceStyles,
-    /\.comment-rail-content > \.comment-card\[data-focused="true"\]\s*\{[\s\S]*?animation:\s*review-focus-arrive/,
+    /\.comment-rail-content > \.comment-card\[data-focused="true"\],/,
   );
   assert.match(
     unifiedSurfaceStyles,
@@ -952,6 +952,50 @@ test("comment cards show one two-line target label without duplicate copy", () =
     workbench,
     /\{comment\.attachments\?\.length \? \([\s\S]*?\{comment\.attachments\.length\} 个附件/u,
   );
+});
+
+test("comment cards keep one visual boundary and reveal compact actions progressively", () => {
+  const footerRule = styles.match(/\.comment-card-footer\s*\{(?<rule>[^}]*)\}/u)
+    ?.groups?.rule;
+  assert.ok(footerRule);
+  assert.match(footerRule, /height:\s*0/u);
+  assert.match(footerRule, /min-height:\s*0/u);
+  assert.match(footerRule, /margin-top:\s*0/u);
+  assert.match(footerRule, /padding:\s*0/u);
+  assert.match(footerRule, /border:\s*0/u);
+  assert.match(footerRule, /opacity:\s*0/u);
+  assert.match(footerRule, /pointer-events:\s*none/u);
+  assert.doesNotMatch(footerRule, /border-top/u);
+  assert.match(
+    styles,
+    /\.comment-card:hover \.comment-card-footer,[\s\S]*?\.comment-card:focus-within \.comment-card-footer,[\s\S]*?\.comment-card\[data-editing="true"\] \.comment-card-footer\s*\{[\s\S]*?height:\s*30px;[\s\S]*?margin-top:\s*6px;[\s\S]*?opacity:\s*1;[\s\S]*?pointer-events:\s*auto/u,
+  );
+  assert.match(
+    styles,
+    /\.comment-card > p\s*\{[\s\S]*?font-size:\s*14px/u,
+  );
+
+  const editorRuleStart = styles.lastIndexOf(".comment-card .comment-edit-textarea {");
+  assert.notEqual(editorRuleStart, -1);
+  const editorRule = styles.slice(editorRuleStart, styles.indexOf("}", editorRuleStart) + 1);
+  assert.match(editorRule, /border:\s*0/u);
+  assert.match(editorRule, /background:\s*#f5f6f8/u);
+  assert.match(editorRule, /font-size:\s*14px/u);
+  assert.match(editorRule, /box-shadow:\s*inset 0 -2px 0 transparent/u);
+  assert.match(
+    styles,
+    /\.comment-card \.comment-edit-textarea:focus,[\s\S]*?\.comment-card \.comment-edit-textarea:focus-visible\s*\{[\s\S]*?outline:\s*0;[\s\S]*?box-shadow:\s*inset 0 -2px 0 #8f8ae8/u,
+  );
+
+  const singleBoundaryRule = styles.match(
+    /\.comment-rail-content > \.comment-card\[data-focused="true"\],[\s\S]*?\.comment-rail-content > \.comment-card:focus-visible\s*\{(?<rule>[^}]*)\}/u,
+  )?.groups?.rule;
+  assert.ok(singleBoundaryRule);
+  assert.match(singleBoundaryRule, /outline:\s*0/u);
+  assert.match(singleBoundaryRule, /box-shadow:\s*0 15px 32px rgb\(45 42 104 \/ 7%\)/u);
+  assert.match(singleBoundaryRule, /animation:\s*none/u);
+  assert.doesNotMatch(singleBoundaryRule, /0 0 0/u);
+  assert.match(workbench, /data-editing=\{editing \? "true" : undefined\}/u);
 });
 
 test("comment attachments support paste, upload, removal, preview, and AI handoff metadata", () => {

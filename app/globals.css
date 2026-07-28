@@ -3804,7 +3804,7 @@ body {
 .comment-card > p {
   margin: 9px 0 0;
   color: #44464f;
-  font-size: 11px;
+  font-size: 14px;
   line-height: 1.65;
   overflow-wrap: anywhere;
 }
@@ -3820,14 +3820,31 @@ body {
 }
 
 .comment-card-footer {
-  min-height: 35px;
+  height: 0;
+  min-height: 0;
   display: flex;
-  align-items: end;
+  align-items: center;
   justify-content: flex-end;
   gap: 10px;
-  margin-top: 10px;
-  padding-top: 9px;
-  border-top: 1px solid #f0f1f3;
+  overflow: hidden;
+  margin-top: 0;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    height 170ms ease,
+    margin-top 170ms ease,
+    opacity 110ms ease;
+}
+
+.comment-card:hover .comment-card-footer,
+.comment-card:focus-within .comment-card-footer,
+.comment-card[data-editing="true"] .comment-card-footer {
+  height: 30px;
+  margin-top: 6px;
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .comment-card-footer > span {
@@ -3846,8 +3863,8 @@ body {
 
 .comment-card .comment-edit-textarea {
   width: 100%;
-  min-height: 84px;
-  margin-top: 10px;
+  min-height: 94px;
+  margin-top: 15px;
 }
 
 .comment-rail-content > .comments-empty {
@@ -5318,24 +5335,44 @@ body {
   background: #dedcf6;
 }
 
-.rail-comment-composer textarea,
-.comment-card .comment-edit-textarea {
+.rail-comment-composer textarea {
   border-color: #e6e7eb;
   background: #fbfbfc;
   box-shadow: none;
 }
 
-.rail-comment-composer textarea:focus,
-.comment-card .comment-edit-textarea:focus {
+.rail-comment-composer textarea:focus {
   border-color: #ceccf2;
   background: #fff;
   box-shadow: 0 0 0 2px rgb(90 85 223 / 5%);
 }
 
-.rail-comment-composer textarea:focus-visible,
-.comment-card .comment-edit-textarea:focus-visible {
+.rail-comment-composer textarea:focus-visible {
   outline: 2px solid rgb(90 85 223 / 10%);
   outline-offset: 1px;
+}
+
+.comment-card .comment-edit-textarea {
+  padding: 12px 13px 13px;
+  border: 0;
+  border-radius: 10px;
+  outline: 0;
+  background: #f5f6f8;
+  color: #393b44;
+  font-size: 14px;
+  line-height: 1.65;
+  box-shadow: inset 0 -2px 0 transparent;
+  transition:
+    background-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.comment-card .comment-edit-textarea:focus,
+.comment-card .comment-edit-textarea:focus-visible {
+  border: 0;
+  outline: 0;
+  background: #f7f7fb;
+  box-shadow: inset 0 -2px 0 #8f8ae8;
 }
 
 .comment-rail-content > .comment-card {
@@ -5612,8 +5649,7 @@ body {
     background-color 180ms ease;
 }
 
-.rail-comment-composer[data-focused="true"],
-.comment-rail-content > .comment-card[data-focused="true"] {
+.rail-comment-composer[data-focused="true"] {
   z-index: 4;
   border-color: #c5c2f1;
   border-left-color: #8d88e8;
@@ -5622,6 +5658,20 @@ body {
     0 18px 38px rgb(45 42 104 / 9%),
     0 0 0 4px rgb(90 85 223 / 8%);
   animation: review-focus-arrive 420ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.comment-rail-content > .comment-card[data-focused="true"],
+.comment-rail-content > .comment-card[data-editing="true"],
+.comment-rail-content > .comment-card[data-editing="true"]:hover,
+.comment-rail-content > .comment-card[data-editing="true"]:focus-within,
+.comment-rail-content > .comment-card:focus-visible {
+  z-index: 4;
+  border-color: #c5c2f1;
+  border-left-color: #8d88e8;
+  outline: 0;
+  background: #fff;
+  box-shadow: 0 15px 32px rgb(45 42 104 / 7%);
+  animation: none;
 }
 
 .rail-comment-composer[data-focused="true"]::before,
@@ -5717,7 +5767,8 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .rail-comment-composer,
-  .comment-rail-content > .comment-card {
+  .comment-rail-content > .comment-card,
+  .comment-card-footer {
     transition: none;
     animation: none;
   }

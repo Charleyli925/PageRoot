@@ -4,6 +4,10 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+- Increased saved-comment text and edit text to 14px, collapsed comment tools
+  until hover, keyboard focus or editing, and simplified normal and editing
+  cards to one boundary with a compact divider-free action row.
+
 ## [0.9.0] - 2026-07-28
 
 - Promoted the editable-island editor from the isolated V2 comparison build to
