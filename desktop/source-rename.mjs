@@ -178,18 +178,51 @@ function isCaseOnlySameFile({
 async function moveRegularFileNoReplace({
   previousPath,
   sourcePath,
+  expectedInformation,
+  expectedSha256,
+  readProject,
+  lstatFile,
   linkFile,
   unlinkFile,
+  destinationAlreadyLinked = false,
 }) {
+  if (!destinationAlreadyLinked) {
+    try {
+      await linkFile(previousPath, sourcePath);
+    } catch (cause) {
+      if (cause?.code === "EEXIST") {
+        throw new ProjectFileError(
+          "RENAME_DESTINATION_EXISTS",
+          "同一文件夹里已经有这个文件名。",
+          { targetPath: sourcePath },
+        );
+      }
+      throw cause;
+    }
+  }
+
   try {
-    await linkFile(previousPath, sourcePath);
-  } catch (cause) {
-    if (cause?.code === "EEXIST") {
+    const linkedInformation = await lstatFile(sourcePath);
+    if (!sameFileIdentity(expectedInformation, linkedInformation)) {
       throw new ProjectFileError(
-        "RENAME_DESTINATION_EXISTS",
-        "同一文件夹里已经有这个文件名。",
-        { targetPath: sourcePath },
+        "RENAME_SOURCE_CHANGED",
+        "文件内容在重命名前发生了变化，源页没有修改文件名。",
+        { sourcePath: previousPath },
       );
+    }
+    await verifiedProject(sourcePath, expectedSha256, readProject);
+  } catch (cause) {
+    try {
+      await unlinkFile(sourcePath);
+    } catch (rollbackCause) {
+      cause.destinationCreated = true;
+      cause.details = {
+        ...(cause.details || {}),
+        rollbackCause:
+          rollbackCause instanceof Error
+            ? rollbackCause.message
+            : String(rollbackCause),
+      };
     }
     throw cause;
   }
@@ -208,6 +241,25 @@ async function moveRegularFileNoReplace({
     );
     error.destinationCreated = true;
     throw error;
+  }
+
+  try {
+    await verifiedProject(sourcePath, expectedSha256, readProject);
+  } catch (cause) {
+    try {
+      await linkFile(sourcePath, previousPath);
+      await unlinkFile(sourcePath);
+    } catch (rollbackCause) {
+      cause.destinationCreated = true;
+      cause.details = {
+        ...(cause.details || {}),
+        rollbackCause:
+          rollbackCause instanceof Error
+            ? rollbackCause.message
+            : String(rollbackCause),
+      };
+    }
+    throw cause;
   }
 }
 
@@ -403,14 +455,25 @@ export async function recoverPendingSourceRename({
     })) {
       await renameFile(pending.previousPath, pending.sourcePath);
     } else if (nextInformation) {
-      // The no-replace move linked the destination before the previous process
-      // stopped. Both names identify the same inode, so removing only the old
-      // name completes that exact prepared operation without replacing bytes.
-      await unlinkFile(pending.previousPath);
+      await moveRegularFileNoReplace({
+        previousPath: pending.previousPath,
+        sourcePath: pending.sourcePath,
+        expectedInformation: previousInformation,
+        expectedSha256: pending.expectedSha256,
+        readProject,
+        lstatFile,
+        linkFile,
+        unlinkFile,
+        destinationAlreadyLinked: true,
+      });
     } else {
       await moveRegularFileNoReplace({
         previousPath: pending.previousPath,
         sourcePath: pending.sourcePath,
+        expectedInformation: previousInformation,
+        expectedSha256: pending.expectedSha256,
+        readProject,
+        lstatFile,
         linkFile,
         unlinkFile,
       });
@@ -562,6 +625,10 @@ export async function renameHtmlSource({
       await moveRegularFileNoReplace({
         previousPath: pending.previousPath,
         sourcePath: pending.sourcePath,
+        expectedInformation: sourceInformation,
+        expectedSha256: pending.expectedSha256,
+        readProject,
+        lstatFile,
         linkFile,
         unlinkFile,
       });

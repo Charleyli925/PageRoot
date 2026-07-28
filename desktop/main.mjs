@@ -52,6 +52,10 @@ import {
   PRODUCT_MAX_HTML_BYTES,
   isGeneratedWorkingCopyFileName,
 } from "./product-contract.mjs";
+import {
+  isActiveProjectIdentity,
+  isManagedVersionRelativePath,
+} from "./project-path-policy.mjs";
 import { handoffToQoderWork } from "./qoder-handoff.mjs";
 import {
   LATEST_RELEASE_PAGE_URL,
@@ -619,7 +623,20 @@ async function showInFolder(sourcePathInput) {
 
 async function resolveKnownRenameSource(sourcePathInput) {
   const sourcePath = assertReadPayload(sourcePathInput);
-  await assertKnownProjectPath(sourcePath);
+  const state = await loadProjectState();
+  const [requestedIdentity, activeIdentity] = await Promise.all([
+    existingPathIdentity(sourcePath),
+    state.activePath
+      ? existingPathIdentity(state.activePath)
+      : Promise.resolve(null),
+  ]);
+  if (!isActiveProjectIdentity({ requestedIdentity, activeIdentity })) {
+    throw new ProjectFileError(
+      "INACTIVE_RENAME_SOURCE",
+      "只能重命名当前正在编辑的 HTML 文件。",
+      { sourcePath },
+    );
+  }
   await inspectHtmlFile(sourcePath);
   return realpath(sourcePath);
 }
@@ -894,6 +911,8 @@ async function revealVersionFile(payload) {
     || !versionRecord
     || versionRecord.ok !== true
     || versionRecord.versionId !== payload.versionId
+    || typeof versionRecord.projectId !== "string"
+    || typeof versionRecord.storageDirectoryName !== "string"
     || typeof versionRecord.path !== "string"
   ) {
     throw new ProjectFileError(
@@ -915,10 +934,11 @@ async function revealVersionFile(payload) {
     || relativeVersionPath.startsWith(`..${path.sep}`)
     || relativeVersionPath === ".."
     || path.isAbsolute(relativeVersionPath)
-    || !new RegExp(
-      `^projects${path.sep}project_[A-Za-z0-9_-]+${path.sep}versions`
-      + `${path.sep}${payload.versionId}${path.sep}files${path.sep}index\\.html$`,
-    ).test(relativeVersionPath)
+    || !isManagedVersionRelativePath(relativeVersionPath, {
+      projectId: versionRecord.projectId,
+      storageDirectoryName: versionRecord.storageDirectoryName,
+      versionId: payload.versionId,
+    })
   ) {
     throw new ProjectFileError(
       "UNSAFE_VERSION_PATH",

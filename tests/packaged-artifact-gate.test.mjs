@@ -106,6 +106,7 @@ async function createPackagedFixture(t) {
     "desktop/preload.mjs",
     "desktop/project-files.mjs",
     "desktop/source-rename.mjs",
+    "desktop/project-path-policy.mjs",
     "desktop/welcome-project-content.mjs",
     "desktop/export-copy.mjs",
     "desktop/bridge-shutdown.mjs",
@@ -186,6 +187,7 @@ async function createPackagedFixture(t) {
     "desktop/preload.mjs",
     "desktop/project-files.mjs",
     "desktop/source-rename.mjs",
+    "desktop/project-path-policy.mjs",
     "desktop/welcome-project-content.mjs",
     "desktop/export-copy.mjs",
     "desktop/bridge-shutdown.mjs",
@@ -410,7 +412,7 @@ test("the app-bundle gate compares app.asar, Bridge scripts, schemas and plist v
     verifySignature: false,
   });
   assert.equal(result.version, "0.7.0");
-  assert.equal(result.asarFileCount, 15);
+  assert.equal(result.asarFileCount, 16);
   assert.equal(result.schemaFileCount, 3);
   assert.equal(result.legalResourceCount, 3);
   assert.equal(result.provenance.commitSha, "a".repeat(40));

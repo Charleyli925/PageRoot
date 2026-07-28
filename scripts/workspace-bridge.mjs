@@ -7422,6 +7422,7 @@ async function versionFile(sourcePath, versionId) {
     ok: true,
     projectId: context.projectId,
     documentId: context.documentId,
+    storageDirectoryName: context.storageDirectoryName,
     versionId,
     content: buffer.toString("utf8"),
     sha256: sha256(buffer),

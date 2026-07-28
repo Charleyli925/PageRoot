@@ -177,6 +177,75 @@ test("source rename cannot overwrite a destination created after its preflight c
   assert.equal(writes.length, 2);
 });
 
+test("source rename rolls back when the source identity changes after preflight", async (t) => {
+  const fixture = await createFixture(t);
+  const destinationPath = path.join(fixture.directory, "身份竞态.html");
+  const replacementPath = path.join(fixture.directory, "外部替换.html");
+  const replacementHtml = "<html><body>外部编辑器替换后的内容</body></html>";
+  const state = projectState(fixture.sourcePath);
+  const writes = [];
+  const options = serviceOptions(
+    renamePayload(fixture.sourcePath, "身份竞态"),
+    state,
+    writes,
+    [],
+  );
+  options.linkFile = async (sourcePath, targetPath) => {
+    await writeFile(replacementPath, replacementHtml, "utf8");
+    await rename(replacementPath, sourcePath);
+    return link(sourcePath, targetPath);
+  };
+
+  await assert.rejects(
+    renameHtmlSource(options),
+    (error) => {
+      assert.equal(error.code, "RENAME_SOURCE_CHANGED");
+      return true;
+    },
+  );
+
+  assert.equal(await readFile(fixture.sourcePath, "utf8"), replacementHtml);
+  await assert.rejects(access(destinationPath), { code: "ENOENT" });
+  assert.equal(state.activePath, fixture.sourcePath);
+  assert.equal(state.pendingRename, null);
+  assert.equal(writes.length, 2);
+});
+
+test("source rename restores the old name when content changes before final commit", async (t) => {
+  const fixture = await createFixture(t);
+  const destinationPath = path.join(fixture.directory, "内容竞态.html");
+  const changedHtml = "<html><body>提交窗口中的外部修改</body></html>";
+  const state = projectState(fixture.sourcePath);
+  const writes = [];
+  const options = serviceOptions(
+    renamePayload(fixture.sourcePath, "内容竞态"),
+    state,
+    writes,
+    [],
+  );
+  const readProject = options.readProject;
+  let reads = 0;
+  options.readProject = async (sourcePath) => {
+    reads += 1;
+    if (reads === 3) await writeFile(sourcePath, changedHtml, "utf8");
+    return readProject(sourcePath);
+  };
+
+  await assert.rejects(
+    renameHtmlSource(options),
+    (error) => {
+      assert.equal(error.code, "RENAME_SOURCE_CHANGED");
+      return true;
+    },
+  );
+
+  assert.equal(await readFile(fixture.sourcePath, "utf8"), changedHtml);
+  await assert.rejects(access(destinationPath), { code: "ENOENT" });
+  assert.equal(state.activePath, fixture.sourcePath);
+  assert.equal(state.pendingRename, null);
+  assert.equal(writes.length, 2);
+});
+
 test("source rename recovers a no-replace move interrupted after linking the destination", async (t) => {
   const fixture = await createFixture(t);
   const destinationPath = path.join(fixture.directory, "中断后恢复.html");

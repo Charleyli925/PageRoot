@@ -141,7 +141,8 @@ stateDiagram-v2
 稳定 operationId + 当前 sourcePath + 预期源 Hash
 → 在桌面活动文件记录写入 pendingRename
 → 确认目标同目录、同后缀且没有同名文件
-→ 原子 rename，不改写 HTML 字节
+→ 以独占硬链接占位并复核 inode/Hash
+→ 删除旧路径；竞态时回滚且绝不覆盖目标文件
 → 把 active/recent 路径切换到新位置并写入 lastRename
 → Bridge 按物理文件身份重绑同一 projectId/documentId
 → Renderer 用新 sourcePath 刷新同一项目会话

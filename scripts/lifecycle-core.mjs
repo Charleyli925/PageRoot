@@ -493,7 +493,7 @@ export function projectDirectory(
   );
 }
 
-export async function resolveProjectDirectory(workspaceRoot, projectId) {
+async function readProjectDirectoryAuthority(workspaceRoot, projectId) {
   assertProjectId(projectId);
   const resolvedWorkspace = path.resolve(workspaceRoot);
   const registry = await readVersionedJson(
@@ -525,11 +525,46 @@ export async function resolveProjectDirectory(workspaceRoot, projectId) {
       409,
     );
   }
-  return projectDirectory(
-    resolvedWorkspace,
-    record.storageDirectoryName,
+  return {
+    record,
+    projectRoot: projectDirectory(
+      resolvedWorkspace,
+      record.storageDirectoryName,
+      projectId,
+    ),
+  };
+}
+
+export async function resolveProjectDirectory(workspaceRoot, projectId) {
+  const authority = await readProjectDirectoryAuthority(
+    workspaceRoot,
     projectId,
   );
+  return authority.projectRoot;
+}
+
+function assertProjectDirectoryAuthority({
+  project,
+  projectId,
+  projectRoot,
+  authority,
+}) {
+  if (
+    authority.projectRoot !== projectRoot
+    || project?.projectId !== projectId
+    || project.displayName !== authority.record.displayName
+    || project.createdAt !== authority.record.createdAt
+    || project.storageDirectoryName !== authority.record.storageDirectoryName
+    || path.basename(projectRoot) !== project.storageDirectoryName
+  ) {
+    throw new LifecycleError(
+      "PROJECT_STORAGE_METADATA_MISMATCH",
+      "Project registry and project.json storage metadata do not match.",
+      undefined,
+      409,
+    );
+  }
+  return project;
 }
 
 export async function withProjectFileLock(projectRoot, task, options = {}) {
@@ -1122,11 +1157,21 @@ export async function recordUserSupplement({
   ]), "supplement payload");
 
   return withProjectFileLock(projectRoot, async () => {
+    const authority = await readProjectDirectoryAuthority(
+      resolvedWorkspace,
+      projectId,
+    );
     const project = await readVersionedJson(
       path.join(projectRoot, "project.json"),
       "project.json",
       LIFECYCLE_SCHEMA_VERSION,
     );
+    assertProjectDirectoryAuthority({
+      project,
+      projectId,
+      projectRoot,
+      authority,
+    });
     const runtime = await readVersionedJson(
       path.join(projectRoot, "runtime-state.json"),
       "runtime-state.json",
@@ -1725,11 +1770,21 @@ export async function finalizeAttempt({
   }
 
   return withProjectFileLock(projectRoot, async () => {
+    const authority = await readProjectDirectoryAuthority(
+      resolvedWorkspace,
+      projectId,
+    );
     const project = await readVersionedJson(
       path.join(projectRoot, "project.json"),
       "project.json",
       LIFECYCLE_SCHEMA_VERSION,
     );
+    assertProjectDirectoryAuthority({
+      project,
+      projectId,
+      projectRoot,
+      authority,
+    });
     const runtime = await readVersionedJson(
       path.join(projectRoot, "runtime-state.json"),
       "runtime-state.json",
