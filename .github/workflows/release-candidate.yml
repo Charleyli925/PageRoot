@@ -17,21 +17,27 @@ jobs:
   candidate:
     name: build-and-verify-candidate
     runs-on: macos-14
-    timeout-minutes: 45
+    # Outer safety budget; only the measured build/sign/notarize step below
+    # receives an extended allowance. Every other step remains narrowly bounded.
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 5
         with:
           fetch-depth: 0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        timeout-minutes: 5
         with:
           node-version: 22.13.0
           cache: npm
       - name: Require the current main branch before packaging
+        timeout-minutes: 2
         run: |
           test "$GITHUB_REF" = "refs/heads/main"
           test "$GITHUB_SHA" = "$(git rev-parse origin/main)"
       - name: Verify reusable exact-tree PR source evidence
         id: source-gate
+        timeout-minutes: 5
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
@@ -43,13 +49,16 @@ jobs:
             --github-output "$GITHUB_OUTPUT"
       - name: Restore Electron and builder downloads
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        timeout-minutes: 10
         with:
           path: |
             ~/Library/Caches/electron
             ~/Library/Caches/electron-builder
           key: ${{ runner.os }}-electron-builder-${{ hashFiles('package-lock.json') }}
       - run: npm ci
+        timeout-minutes: 10
       - name: Require Developer ID signing and notarization credentials
+        timeout-minutes: 2
         env:
           CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
@@ -63,6 +72,7 @@ jobs:
             }
           done
       - name: Prove hosted Electron scheduling before packaging
+        timeout-minutes: 5
         run: >-
           node scripts/ci-evidence.mjs run
           --suite release-candidate-preflight
@@ -70,6 +80,8 @@ jobs:
           --
           npm run test:electron:ci-preflight:prepared
       - name: Build and verify the exact pre-tag installer
+        # Apple notarization is the only externally queued operation in this job.
+        timeout-minutes: 110
         env:
           PAGEROOT_SOURCE_GATE_TRUSTED: ${{ steps.source-gate.outputs.trusted }}
           PAGEROOT_SOURCE_GATE_TREE: ${{ steps.source-gate.outputs.tree_sha }}
@@ -87,6 +99,7 @@ jobs:
           --
           npm run gate:artifact-only:auto
       - name: Create public release metadata
+        timeout-minutes: 5
         run: >-
           node scripts/ci-evidence.mjs run
           --suite release-candidate-assets
@@ -95,6 +108,7 @@ jobs:
           npm run release:assets -- --arch arm64
       - name: Freeze candidate bytes and provenance
         id: candidate
+        timeout-minutes: 5
         run: >-
           node scripts/ci-evidence.mjs run
           --suite release-candidate-provenance
@@ -113,6 +127,7 @@ jobs:
           --github-output "$GITHUB_OUTPUT"
       - name: Upload exact candidate bundle
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        timeout-minutes: 10
         with:
           name: ${{ steps.candidate.outputs.artifact_name }}
           path: output/release-candidate/bundle
@@ -121,6 +136,7 @@ jobs:
       - name: Upload candidate failure diagnostics
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        timeout-minutes: 10
         with:
           name: PageRoot-release-candidate-diagnostics-${{ github.run_attempt }}
           path: |
@@ -131,6 +147,7 @@ jobs:
       - name: Upload candidate CI evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        timeout-minutes: 10
         with:
           name: PageRoot-release-candidate-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: output/ci-evidence

@@ -241,6 +241,18 @@ test("release workflows build before tagging and publish the verified candidate 
   assert.match(candidate, /MAC_CSC_LINK/u);
   assert.match(candidate, /APPLE_APP_SPECIFIC_PASSWORD/u);
   assert.match(candidate, /PAGEROOT_REQUIRE_NOTARIZATION/u);
+  assert.match(
+    candidate,
+    /build-and-verify-candidate[\s\S]+timeout-minutes: 120[\s\S]+Build and verify the exact pre-tag installer[\s\S]+timeout-minutes: 110/u,
+  );
+  assert.match(
+    candidate,
+    /run: npm ci\s+timeout-minutes: 10/u,
+  );
+  assert.match(
+    candidate,
+    /Upload exact candidate bundle[\s\S]+timeout-minutes: 10/u,
+  );
   assert.doesNotMatch(candidate, /gh release create/u);
   assert.doesNotMatch(candidate, /git tag/u);
 
