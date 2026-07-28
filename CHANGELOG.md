@@ -7,6 +7,9 @@ Notable user-visible changes are documented here. This project follows Semantic 
 - Keep Finder's regular `.DS_Store` metadata inert inside live AI Attempt
   folders, and mark an AI return only after the mandatory completion signal
   has actually appeared.
+- Clarified generated AI handoff files with PageRoot branding, plain-language
+  sections, explicit run identities and clearer default project rules while
+  preserving the existing frozen JSON protocol.
 
 ## [0.9.0] - 2026-07-28
 

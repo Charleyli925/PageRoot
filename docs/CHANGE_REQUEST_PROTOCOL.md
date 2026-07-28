@@ -1,4 +1,4 @@
-# HTML AI 工作台 Change Request 协议
+# PageRoot Change Request 协议
 
 - 协议主版本：3
 - 状态：目标写入合同
@@ -7,7 +7,7 @@
 - Schema 入口：[schemas](../schemas)
 - 代表性样本：[fixtures/v3](../fixtures/v3)
 
-本协议规定工作台与内部 AI 通过本地可见文件夹交接时的身份、目录、冻结、完成、校验、事务和恢复规则。
+本协议规定 PageRoot 与内部 AI 通过本地可见文件夹交接时的身份、目录、冻结、完成、校验、事务和恢复规则。
 
 v3 是干净切换后的唯一运行时协议。v1/v2 记录在切换前整体备份并转为只读归档；新程序不包含兼容 Reader 或自动迁移器。新写入不得沿用以下旧路径：
 
@@ -67,6 +67,7 @@ v3 是干净切换后的唯一运行时协议。v1/v2 记录在切换前整体�
                 │   ├── base/index.html
                 │   ├── annotations/records.json
                 │   ├── attachments/<commentId>/<attachmentId>-<fileName>
+                │   ├── AI_RULES.md
                 │   ├── PROJECT.md
                 │   └── references/
                 └── attempts/
@@ -161,6 +162,7 @@ freezeCutoffRevision=<current editRevision>
 
 - `input/base/index.html`
 - `input/annotations/records.json`
+- `input/AI_RULES.md`
 - `input/PROJECT.md`
 - `input-manifest.json`
 - `change-request.json`
@@ -334,6 +336,7 @@ Input manifest 同时包含完整冻结 Hash 清单 `files` 和 AI 执行读取�
 
 Prompt 必须是当前 Attempt 的精简入口，至少包含：
 
+- PageRoot 品牌标题，并按“本轮身份、执行顺序、文件位置、对话补充、附件、完成”分组，避免把协议要求堆成一段难读的说明。
 - 本机 Request 与 Attempt 绝对路径。
 - Request、Attempt、项目、文档与候选 Version 身份。
 - 读取顺序。
