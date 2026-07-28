@@ -1601,6 +1601,7 @@ test("document identity survives a move and same-path replacement starts isolate
   assert.equal(moved.latestVersionId, "ver_0001");
   assert.equal(moved.currentExactVersionId, "ver_0001");
   assert.equal(moved.versions.length, 1);
+  assert.equal(moved.project.name, "identity-moved");
   const movedProject = JSON.parse(
     await readFile(
       join(
@@ -1613,6 +1614,7 @@ test("document identity survives a move and same-path replacement starts isolate
     ),
   );
   assert.equal(movedProject.sourcePath, movedPath);
+  assert.equal(movedProject.name, "identity-moved");
 
   const replacement = htmlPage(
     "替换文件",

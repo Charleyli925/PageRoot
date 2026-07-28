@@ -326,6 +326,7 @@
         "tests/desktop-close-recovery.test.mjs",
         "tests/desktop-file-writer.test.mjs",
         "tests/desktop-preload-ipc.test.mjs",
+        "tests/source-rename.test.mjs",
         "tests/bridge-shutdown.test.mjs",
         "tests/export-copy.test.mjs",
         "tests/desktop-package.test.mjs"

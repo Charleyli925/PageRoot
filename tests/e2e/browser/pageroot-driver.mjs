@@ -153,7 +153,11 @@ export async function loadFixture(page, name, { buffer = fixtureBuffer(name) } =
     mimeType: "text/html",
     buffer,
   });
-  await page.getByText(name, { exact: true }).first().waitFor({ state: "visible" });
+  const visibleFileStem = name.replace(/\.html?$/iu, "");
+  await page.locator(".window-file-title-row")
+    .getByText(visibleFileStem, { exact: true })
+    .first()
+    .waitFor({ state: "visible" });
 
   await expect(editor).toHaveAttribute("data-render-verified", "true");
 

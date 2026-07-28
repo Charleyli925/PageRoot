@@ -3,6 +3,7 @@
 | Mutable fact | Sole owner | Durable authority | Consumers |
 | --- | --- | --- | --- |
 | Open source locator before first durable action | Project session | active-file record only | initial view and registration command |
+| Explicit source filename transition, pending operation and active/recent path rebase | Desktop source-rename transaction | active-file `pendingRename` / `lastRename`, then filesystem path | project session, Bridge relink, views |
 | Registered project/document/source identity and session generation | Project session | project registry and `project.json` | views, all durable sessions |
 | Current source bytes, Hash, edit revision and pending write | Document session | source HTML, runtime autosave record and recovery log | Canvas, drain coordinator |
 | Active renderer draft revision, pending command and unknown-outcome reconciliation | Draft session | acknowledged aggregate fingerprint plus crash-only recovery outbox | comment rail, drain coordinator |
@@ -27,6 +28,10 @@ Rules:
   state can be acknowledged.
 - Cross-owner operations are coordinated explicitly; they do not synchronize
   through incidental React effects.
+- A filename transition never owns HTML bytes or Document identity. It may
+  advance the source locator only after the expected source Hash is verified;
+  the project session then adopts the Bridge-confirmed path for the same
+  `projectId` and `documentId`.
 - Runtime features are declared independently. The presence of a project-picker
   API never implies source-edit or attachment-persistence authority.
 - Runtime state is not a second copy of draft contents. It carries lifecycle

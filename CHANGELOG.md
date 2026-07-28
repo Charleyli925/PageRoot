@@ -4,6 +4,10 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+- Added safe in-place filename editing for the current HTML: double-click the
+  saved title, edit only its stem, and keep the same file bytes, Project,
+  Document and Version history through collision checks and crash recovery.
+
 ## [0.9.0] - 2026-07-28
 
 - Promoted the editable-island editor from the isolated V2 comparison build to

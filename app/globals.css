@@ -6111,3 +6111,176 @@ body {
     transition: none;
   }
 }
+
+/* Safe, in-place source filename editing */
+
+.window-file-title-row {
+  position: relative;
+  min-width: 0;
+  max-width: min(500px, 38vw);
+  min-height: 20px;
+  display: flex;
+  align-items: center;
+}
+
+.window-file-title-row > strong,
+.window-file-title-action strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #24252b;
+  font-size: 17px;
+  font-weight: 740;
+  line-height: 1.12;
+  letter-spacing: -0.025em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.window-file-title-action {
+  appearance: none;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 0;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 4px;
+  margin: -2px -4px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  box-shadow: none;
+  text-align: left;
+  cursor: text;
+  transition: background-color 140ms ease;
+}
+
+.window-file-title-action:hover,
+.window-file-title-action:focus-visible {
+  background: rgb(81 71 220 / 6%);
+}
+
+.window-file-title-action:focus-visible {
+  outline: 2px solid rgb(81 71 220 / 24%);
+  outline-offset: 1px;
+}
+
+.window-file-rename-icon {
+  width: 13px;
+  flex: none;
+  margin-left: 5px;
+  color: #7771cf;
+  opacity: 0;
+  transform: translateX(-2px);
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+
+.window-file-title-action:hover .window-file-rename-icon,
+.window-file-title-action:focus-visible .window-file-rename-icon {
+  opacity: 0.78;
+  transform: translateX(0);
+}
+
+.window-file-rename-field {
+  min-width: 0;
+  max-width: 100%;
+  height: 27px;
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border: 1px solid #c8c4ef;
+  border-radius: 7px;
+  background: #fff;
+  box-shadow:
+    0 0 0 3px rgb(81 71 220 / 7%),
+    0 4px 12px rgb(45 42 104 / 6%);
+}
+
+.window-file-rename-field input {
+  width: clamp(150px, 28vw, 450px);
+  min-width: 0;
+  height: 23px;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #24252b;
+  font-size: 17px;
+  font-weight: 740;
+  line-height: 1.12;
+  letter-spacing: -0.025em;
+}
+
+.window-file-rename-field > span:last-child {
+  flex: none;
+  color: #91939c;
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.window-file-rename-field:focus-within {
+  border-color: #aaa5e7;
+  box-shadow:
+    0 0 0 3px rgb(81 71 220 / 10%),
+    0 5px 14px rgb(45 42 104 / 8%);
+}
+
+.window-file-rename-field:has(input[aria-invalid="true"]) {
+  border-color: #d7a09b;
+  box-shadow:
+    0 0 0 3px rgb(165 73 67 / 7%),
+    0 5px 14px rgb(96 45 40 / 7%);
+}
+
+.window-file-rename-error {
+  position: absolute;
+  z-index: 80;
+  top: calc(100% + 6px);
+  left: 0;
+  max-width: min(430px, 60vw);
+  padding: 6px 9px;
+  overflow: hidden;
+  border: 1px solid #edd1ce;
+  border-radius: 8px;
+  background: #fff8f7;
+  color: #984c45;
+  box-shadow: 0 8px 24px rgb(70 36 32 / 10%);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 600;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.save-status[data-file-renaming="true"] > span {
+  background: #8580eb;
+  animation: v5-save-pulse 1.1s ease-in-out infinite;
+}
+
+@media (max-width: 940px) {
+  .window-file-title-row {
+    max-width: 220px;
+  }
+
+  .window-file-title-row > strong,
+  .window-file-title-action strong,
+  .window-file-rename-field input {
+    font-size: 16px;
+  }
+
+  .window-file-rename-field input {
+    width: 174px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .window-file-title-action,
+  .window-file-rename-icon {
+    transition: none;
+  }
+
+  .save-status[data-file-renaming="true"] > span {
+    animation: none;
+  }
+}

@@ -55,6 +55,12 @@ import {
   LATEST_RELEASE_PAGE_URL,
   checkForManualUpdate,
 } from "./manual-update.mjs";
+import {
+  normalizeCompletedSourceRename,
+  normalizePendingSourceRename,
+  recoverPendingSourceRename,
+  renameHtmlSource,
+} from "./source-rename.mjs";
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
 const e2eUserDataPath = (() => {
@@ -95,7 +101,7 @@ const MAX_STATE_BYTES = 1024 * 1024;
 const MAX_PATH_LENGTH = 4096;
 const MAX_RECENT_PROJECTS = 12;
 const HTML_EXTENSIONS = new Set([".html", ".htm"]);
-const PROJECT_STATE_VERSION = 1;
+const PROJECT_STATE_VERSION = 2;
 const AUTOMATIC_UPDATE_CHECK_DELAY_MS = 5_000;
 
 const PROJECT_CHANNELS = Object.freeze({
@@ -104,6 +110,7 @@ const PROJECT_CHANNELS = Object.freeze({
   readHtml: "html-projects:read",
   exportHtmlCopy: "html-projects:export-copy",
   showInFolder: "html-projects:show-in-folder",
+  renameHtml: "html-projects:rename",
   activateGeneratedVersion: "html-projects:activate-generated-version",
   revealVersionFile: "html-projects:reveal-version-file",
   revealRequestFolder: "html-projects:reveal-request-folder",
@@ -152,6 +159,8 @@ function emptyProjectState() {
     version: PROJECT_STATE_VERSION,
     activePath: null,
     recent: [],
+    pendingRename: null,
+    lastRename: null,
   };
 }
 
@@ -313,7 +322,21 @@ async function loadProjectState() {
       version: PROJECT_STATE_VERSION,
       activePath,
       recent,
+      pendingRename: normalizePendingSourceRename(parsed.pendingRename),
+      lastRename: normalizeCompletedSourceRename(parsed.lastRename),
     };
+    if (projectState.pendingRename) {
+      await recoverPendingSourceRename({
+        state: projectState,
+        readProject: readHtmlProject,
+        persistState: persistProjectState,
+      }).catch((error) => {
+        console.error(
+          "[source-rename:recovery]",
+          error instanceof Error ? error.stack || error.message : String(error),
+        );
+      });
+    }
   } catch {
     projectState = emptyProjectState();
   }
@@ -544,6 +567,50 @@ async function showInFolder(sourcePathInput) {
   await inspectHtmlFile(sourcePath);
   shell.showItemInFolder(sourcePath);
   return { sourcePath };
+}
+
+async function resolveKnownRenameSource(sourcePathInput) {
+  const sourcePath = assertReadPayload(sourcePathInput);
+  await assertKnownProjectPath(sourcePath);
+  await inspectHtmlFile(sourcePath);
+  return realpath(sourcePath);
+}
+
+async function rebindRenamedWorkspace(sourcePath, expectedSha256) {
+  if (!bridgePort) return false;
+  const endpoint = new URL(`http://127.0.0.1:${bridgePort}/workspace`);
+  endpoint.searchParams.set("sourcePath", sourcePath);
+  const response = await net.fetch(endpoint, {
+    cache: "no-store",
+    headers: {
+      "X-HTML-AI-Bridge-Token": bridgeAuthToken,
+    },
+  });
+  const workspace = await response.json().catch(() => null);
+  if (
+    !response.ok
+    || !workspace
+    || workspace.ok !== true
+    || workspace.currentHtmlSha256 !== expectedSha256
+    || typeof workspace.sourcePath !== "string"
+  ) return false;
+  const [workspaceIdentity, renamedIdentity] = await Promise.all([
+    existingPathIdentity(workspace.sourcePath),
+    existingPathIdentity(sourcePath),
+  ]);
+  return workspaceIdentity === renamedIdentity;
+}
+
+async function renameHtml(payload) {
+  const state = await loadProjectState();
+  return renameHtmlSource({
+    payload,
+    state,
+    persistState: persistProjectState,
+    resolveKnownSource: resolveKnownRenameSource,
+    readProject: readHtmlProject,
+    rebindWorkspace: rebindRenamedWorkspace,
+  });
 }
 
 async function activateGeneratedVersion(payload) {
@@ -1086,6 +1153,7 @@ function registerProjectIpc() {
   ipcMain.handle(PROJECT_CHANNELS.readHtml, trustedProject(readHtml));
   ipcMain.handle(PROJECT_CHANNELS.exportHtmlCopy, trustedProject(exportHtmlCopy));
   ipcMain.handle(PROJECT_CHANNELS.showInFolder, trustedProject(showInFolder));
+  ipcMain.handle(PROJECT_CHANNELS.renameHtml, trustedProject(renameHtml));
   ipcMain.handle(
     PROJECT_CHANNELS.activateGeneratedVersion,
     trustedProject(activateGeneratedVersion),
