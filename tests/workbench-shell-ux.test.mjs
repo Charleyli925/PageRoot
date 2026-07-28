@@ -479,13 +479,18 @@ test("header prioritizes the filename and keeps the approved action order", () =
 
 test("QoderWork handoff exposes a truthful process board and manual open action", () => {
   assert.match(workbench, /发送至 Qoder/);
-  assert.match(workbench, /交接内容已写入剪贴板/);
-  assert.match(workbench, /不代表 Qoder 已收到/);
   assert.match(workbench, /等待 QoderWork 返回修改结果/);
   assert.match(workbench, /画布已锁定，仅可浏览/);
-  assert.match(workbench, /版本与文件完整性/);
-  assert.doesNotMatch(workbench, /身份、Hash 与文件完整性/);
-  assert.match(workbench, /范围与质量校验/);
+  assert.match(
+    workbench,
+    /deriveRunProgressSteps\(\s*activeRun,\s*currentQoderHandoffStatus,\s*\)/,
+  );
+  assert.match(
+    workbench,
+    /completionObserved:\s*payload\.completionObserved === true/,
+  );
+  assert.match(workbench, /processSteps\.length\} 个阶段/);
+  assert.doesNotMatch(workbench, /const returnedStates/);
   assert.match(workbench, /已记录评论范围外的额外变化/);
   assert.doesNotMatch(workbench, /采用这些额外变化|AI 还修改了评论范围外的内容/);
   assert.match(workbench, /打开最新版/);
@@ -522,7 +527,39 @@ test("QoderWork handoff exposes a truthful process board and manual open action"
   const preview = footer.indexOf("预览已发送 HTML");
   const copy = footer.indexOf("再次复制本轮要求");
   assert.ok(cancel >= 0 && preview > cancel && copy > preview);
-  assert.match(footer, /activeRun\.status === "ready-to-open"[\s\S]*?打开最新版/);
+  assert.match(
+    footer,
+    /activeRun\.status === "ready-to-open"[\s\S]*?打开最新版[\s\S]*?稍后处理/,
+  );
+  assert.match(
+    footer,
+    /handoffCopyFailed[\s\S]*?重新复制[\s\S]*?取消本轮/,
+  );
+  assert.match(
+    footer,
+    /awaiting-conflict-resolution[\s\S]*?采用 AI 版本[\s\S]*?保留外部版本/,
+  );
+  assert.match(footer, /checkingRun[\s\S]*?查看本轮文件/);
+  assert.match(
+    footer,
+    /terminalRun[\s\S]*?修改要求[\s\S]*?返回编辑/,
+  );
+  assert.match(
+    styles,
+    /\.handoff-process-board ol\s*\{[\s\S]*?gap:\s*8px/,
+  );
+  assert.match(
+    styles,
+    /\.handoff-process-board li\s*\{[\s\S]*?min-height:\s*64px[\s\S]*?border-radius:\s*10px/,
+  );
+  assert.doesNotMatch(
+    styles,
+    /\.handoff-process-board li:not\(:last-child\)::after/,
+  );
+  assert.match(
+    styles,
+    /\.processing-footer button\s*\{[\s\S]*?min-height:\s*42px[\s\S]*?border-radius:\s*11px/,
+  );
   assert.match(workbench, /正在预览已发送 HTML[\s\S]*?返回等待处理/);
   assert.match(workbench, /const PREVIEW_NAVIGATION_AUTO_COLLAPSE_MS = 3_500/);
   assert.equal(
@@ -947,7 +984,7 @@ test("comment composer is explicit, transient and horizontally contained", () =>
   assert.match(workbench, /aria-current=\{focusedCommentId === comment\.commentId \? "location"/);
   assert.match(
     unifiedSurfaceStyles,
-    /\.comment-rail-content > \.comment-card\[data-focused="true"\]\s*\{[\s\S]*?animation:\s*review-focus-arrive/,
+    /\.comment-rail-content > \.comment-card\[data-focused="true"\],/,
   );
   assert.match(
     unifiedSurfaceStyles,
@@ -988,6 +1025,50 @@ test("comment cards show one two-line target label without duplicate copy", () =
     workbench,
     /\{comment\.attachments\?\.length \? \([\s\S]*?\{comment\.attachments\.length\} 个附件/u,
   );
+});
+
+test("comment cards keep one visual boundary and reveal compact actions progressively", () => {
+  const footerRule = styles.match(/\.comment-card-footer\s*\{(?<rule>[^}]*)\}/u)
+    ?.groups?.rule;
+  assert.ok(footerRule);
+  assert.match(footerRule, /height:\s*0/u);
+  assert.match(footerRule, /min-height:\s*0/u);
+  assert.match(footerRule, /margin-top:\s*0/u);
+  assert.match(footerRule, /padding:\s*0/u);
+  assert.match(footerRule, /border:\s*0/u);
+  assert.match(footerRule, /opacity:\s*0/u);
+  assert.match(footerRule, /pointer-events:\s*none/u);
+  assert.doesNotMatch(footerRule, /border-top/u);
+  assert.match(
+    styles,
+    /\.comment-card:hover \.comment-card-footer,[\s\S]*?\.comment-card:focus-within \.comment-card-footer,[\s\S]*?\.comment-card\[data-editing="true"\] \.comment-card-footer\s*\{[\s\S]*?height:\s*30px;[\s\S]*?margin-top:\s*6px;[\s\S]*?opacity:\s*1;[\s\S]*?pointer-events:\s*auto/u,
+  );
+  assert.match(
+    styles,
+    /\.comment-card > p\s*\{[\s\S]*?font-size:\s*14px/u,
+  );
+
+  const editorRuleStart = styles.lastIndexOf(".comment-card .comment-edit-textarea {");
+  assert.notEqual(editorRuleStart, -1);
+  const editorRule = styles.slice(editorRuleStart, styles.indexOf("}", editorRuleStart) + 1);
+  assert.match(editorRule, /border:\s*0/u);
+  assert.match(editorRule, /background:\s*#f5f6f8/u);
+  assert.match(editorRule, /font-size:\s*14px/u);
+  assert.match(editorRule, /box-shadow:\s*inset 0 -2px 0 transparent/u);
+  assert.match(
+    styles,
+    /\.comment-card \.comment-edit-textarea:focus,[\s\S]*?\.comment-card \.comment-edit-textarea:focus-visible\s*\{[\s\S]*?outline:\s*0;[\s\S]*?box-shadow:\s*inset 0 -2px 0 #8f8ae8/u,
+  );
+
+  const singleBoundaryRule = styles.match(
+    /\.comment-rail-content > \.comment-card\[data-focused="true"\],[\s\S]*?\.comment-rail-content > \.comment-card:focus-visible\s*\{(?<rule>[^}]*)\}/u,
+  )?.groups?.rule;
+  assert.ok(singleBoundaryRule);
+  assert.match(singleBoundaryRule, /outline:\s*0/u);
+  assert.match(singleBoundaryRule, /box-shadow:\s*0 15px 32px rgb\(45 42 104 \/ 7%\)/u);
+  assert.match(singleBoundaryRule, /animation:\s*none/u);
+  assert.doesNotMatch(singleBoundaryRule, /0 0 0/u);
+  assert.match(workbench, /data-editing=\{editing \? "true" : undefined\}/u);
 });
 
 test("comment attachments support paste, upload, removal, preview, and AI handoff metadata", () => {

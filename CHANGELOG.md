@@ -16,6 +16,15 @@ Notable user-visible changes are documented here. This project follows Semantic 
 - Replaced ad-hoc distribution with fail-closed Developer ID signing, Hardened
   Runtime, Apple notarization and candidate verification of both DMG and updater
   assets while retaining the legacy manifest for one-time migration.
+- Keep Finder's regular `.DS_Store` metadata inert inside live AI Attempt
+  folders, and mark an AI return only after the mandatory completion signal
+  has actually appeared.
+- Increased saved-comment text and edit text to 14px, collapsed comment tools
+  until hover, keyboard focus or editing, and simplified normal and editing
+  cards to one boundary with a compact divider-free action row.
+- Clarified generated AI handoff files with PageRoot branding, plain-language
+  sections, explicit run identities and clearer default project rules while
+  preserving the existing frozen JSON protocol.
 
 ## [0.9.0] - 2026-07-28
 

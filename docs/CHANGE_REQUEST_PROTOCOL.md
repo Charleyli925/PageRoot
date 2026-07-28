@@ -1,4 +1,4 @@
-# HTML AI 工作台 Change Request 协议
+# PageRoot Change Request 协议
 
 - 协议主版本：3
 - 状态：目标写入合同
@@ -7,7 +7,7 @@
 - Schema 入口：[schemas](../schemas)
 - 代表性样本：[fixtures/v3](../fixtures/v3)
 
-本协议规定工作台与内部 AI 通过本地可见文件夹交接时的身份、目录、冻结、完成、校验、事务和恢复规则。
+本协议规定 PageRoot 与内部 AI 通过本地可见文件夹交接时的身份、目录、冻结、完成、校验、事务和恢复规则。
 
 v3 是干净切换后的唯一运行时协议。v1/v2 记录在切换前整体备份并转为只读归档；新程序不包含兼容 Reader 或自动迁移器。新写入不得沿用以下旧路径：
 
@@ -67,6 +67,7 @@ v3 是干净切换后的唯一运行时协议。v1/v2 记录在切换前整体�
                 │   ├── base/index.html
                 │   ├── annotations/records.json
                 │   ├── attachments/<commentId>/<attachmentId>-<fileName>
+                │   ├── AI_RULES.md
                 │   ├── PROJECT.md
                 │   └── references/
                 └── attempts/
@@ -91,6 +92,7 @@ v3 是干净切换后的唯一运行时协议。v1/v2 记录在切换前整体�
 - `change-request.json` 的附件项可以额外包含由系统生成的 Request 内本机绝对 `localPath`，供当前电脑上的内部 AI / QoderWork 直接读取；同一项必须保留可移植的 `requestRelativePath`。
 - 除受控的 Request/Attempt/output/completion/附件 `localPath` 外，结构化路径不得为绝对路径；所有相对路径不得包含 `..`，任何路径都不得通过软链接逃逸项目目录。
 - output 只有一个完整 HTML，不得创建 `PROJECT.md` 或其他额外页面资产。
+- Finder 在 Attempt 或 output 中生成的普通、非软链接 `.DS_Store` 只属于系统显示元数据，不参与协议也不改变状态；其他未声明条目和同名软链接仍按协议违规拒绝。
 
 ## 3. 身份
 
@@ -160,6 +162,7 @@ freezeCutoffRevision=<current editRevision>
 
 - `input/base/index.html`
 - `input/annotations/records.json`
+- `input/AI_RULES.md`
 - `input/PROJECT.md`
 - `input-manifest.json`
 - `change-request.json`
@@ -333,6 +336,7 @@ Input manifest 同时包含完整冻结 Hash 清单 `files` 和 AI 执行读取�
 
 Prompt 必须是当前 Attempt 的精简入口，至少包含：
 
+- PageRoot 品牌标题，并按“本轮身份、执行顺序、文件位置、对话补充、附件、完成”分组，避免把协议要求堆成一段难读的说明。
 - 本机 Request 与 Attempt 绝对路径。
 - Request、Attempt、项目、文档与候选 Version 身份。
 - 读取顺序。
@@ -457,6 +461,7 @@ Completion 必须在 output 完全关闭后最后写入。完成后 output 封�
 7. 进入 no-change、冲突或事务提交。
 
 不扫描其他 Request，不按目录时间猜测，不复用旧 completion。
+界面只根据 completion 是否已经出现显示“AI 已返回”；完成信号出现前的文件错误不得冒充 AI 返回。
 
 ## 12. 规范化比较
 
