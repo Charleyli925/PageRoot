@@ -132,6 +132,10 @@ must state the old producer, removal condition and focused coverage. Domain and
 view code use only current canonical states. Inline aliases and permanent
 “just in case” branches are not allowed.
 
+Project directories created before readable `storageDirectoryName` metadata are
+not a supported compatibility input. The Bridge rejects them without migration,
+renaming or deletion.
+
 ## Change requirements
 
 A change affecting state, persistence or lifecycle must include:

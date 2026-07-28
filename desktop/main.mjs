@@ -653,9 +653,11 @@ async function activateGeneratedVersion(payload) {
   const relativeNextPath = path.relative(workspaceRoot, resolvedNextPath);
   const pathParts = relativeNextPath.split(path.sep);
   if (
-    pathParts.length !== 4
+    typeof authoritativeSource.storageDirectoryName !== "string"
+    || !authoritativeSource.storageDirectoryName
+    || pathParts.length !== 4
     || pathParts[0] !== "projects"
-    || pathParts[1] !== payload.projectId
+    || pathParts[1] !== authoritativeSource.storageDirectoryName
     || pathParts[2] !== "working"
     || !isGeneratedWorkingCopyFileName(pathParts[3])
   ) {

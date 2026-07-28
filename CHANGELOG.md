@@ -10,6 +10,9 @@ Notable user-visible changes are documented here. This project follows Semantic 
 - Increased saved-comment text and edit text to 14px, collapsed comment tools
   until hover, keyboard focus or editing, and simplified normal and editing
   cards to one boundary with a compact divider-free action row.
+- Name project-record folders from the HTML filename, project creation time and
+  a short identity suffix, while retaining the full `projectId` as internal
+  metadata.
 
 ## [0.9.0] - 2026-07-28
 

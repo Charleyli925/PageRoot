@@ -139,6 +139,14 @@ test("the right-side project panel keeps file actions concise and safe", () => {
   );
   assert.match(
     mainProcess,
+    /pathParts\[1\] !== authoritativeSource\.storageDirectoryName/,
+  );
+  assert.doesNotMatch(
+    mainProcess,
+    /pathParts\[1\] !== payload\.projectId/,
+  );
+  assert.match(
+    mainProcess,
     /const activatesCurrentProject =[\s\S]*?activePathIdentity === resolvedPreviousPath[\s\S]*?if \(activatesCurrentProject\) \{[\s\S]*?state\.activePath = resolvedNextPath/,
   );
   assert.match(
@@ -731,7 +739,7 @@ test("AI completion adopts the generated semantic file before editing resumes", 
   );
   assert.match(
     workbench,
-    /const projectRecord = isRecord\(payload\.project\)[\s\S]*?if \(projectRecord\.name\) setProjectName\(String\(projectRecord\.name\)\)/,
+    /const projectRecord = isRecord\(payload\.project\)[\s\S]*?if \(projectRecord\.displayName\) \{[\s\S]*?setProjectName\(String\(projectRecord\.displayName\)\)/,
   );
   assert.match(
     workbench,

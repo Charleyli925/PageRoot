@@ -22,8 +22,11 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 
 import {
+  assertProjectStorageDirectoryName,
   comparisonSha256,
   injectManagedMeta,
+  projectDisplayName,
+  projectStorageDirectoryName,
   recordUserSupplement,
 } from "../scripts/lifecycle-core.mjs";
 import { ensureManagedWelcomeHtml } from "../desktop/project-files.mjs";
@@ -38,6 +41,42 @@ const execFileAsync = promisify(execFile);
 const productRoot = fileURLToPath(new URL("../", import.meta.url));
 const bridgeScript = join(productRoot, "scripts", "workspace-bridge.mjs");
 const finalizerScript = join(productRoot, "scripts", "finalize-attempt.mjs");
+
+async function registeredProjectRoot(workspace, projectId) {
+  const registry = JSON.parse(
+    await readFile(join(workspace, "project-registry.json"), "utf8"),
+  );
+  return join(
+    workspace,
+    "projects",
+    registry.projects[projectId].storageDirectoryName,
+  );
+}
+
+function projectRootFromRun(run) {
+  return dirname(dirname(run.requestPath));
+}
+
+test("readable project directory names stay safe, bounded, and tied to project identity", () => {
+  const projectId = "project_0123456789abcdef0123456789abcdef";
+  const displayName = projectDisplayName("/tmp/  .季度:报告?.html");
+  assert.equal(displayName, ".季度:报告?");
+  const storageDirectoryName = projectStorageDirectoryName({
+    displayName: `${displayName}${"很长".repeat(100)}`,
+    createdAt: "2026-07-28T04:43:15.000Z",
+    projectId,
+  });
+  assert.match(
+    storageDirectoryName,
+    /^季度-报告-.+__\d{8}-\d{6}__01234567$/,
+  );
+  assert.equal(Buffer.byteLength(storageDirectoryName, "utf8") <= 240, true);
+  assert.doesNotMatch(storageDirectoryName, /[/\\:*?"<>|]/);
+  assert.throws(
+    () => assertProjectStorageDirectoryName("季度报告", projectId),
+    /does not match projectId/,
+  );
+});
 
 test("workspace Bridge local imports stay inside the packaged Bridge dependency closure", async () => {
   const [bridgeSource, packageSource] = await Promise.all([
@@ -282,7 +321,16 @@ test("managed welcome HTML registers the same workspace and V1 lifecycle as any 
   assert.equal(ensured.body.currentHtmlSha256, welcome.sha256);
   assert.equal(ensured.body.versions.length, 1);
   assert.equal(ensured.body.versions[0].versionId, "ver_0001");
-  await access(join(workspace, "projects", ensured.body.projectId));
+  const projectRoot = await registeredProjectRoot(
+    workspace,
+    ensured.body.projectId,
+  );
+  assert.equal(projectRoot, ensured.body.projectRoot);
+  assert.match(
+    basename(projectRoot),
+    /^欢迎来到源页__\d{8}-\d{6}__[a-f0-9]{8}$/,
+  );
+  await access(projectRoot);
   await access(join(workspace, "project-registry.json"));
 });
 
@@ -427,6 +475,47 @@ test("v2 registries are rejected without migration or mutation", async (t) => {
   );
 });
 
+test("legacy UUID project directories are rejected without migration or deletion", async (t) => {
+  const environment = await createEnvironment(t);
+  const projectId = "project_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const legacyProjectRoot = join(
+    environment.workspace,
+    "projects",
+    projectId,
+  );
+  await mkdir(legacyProjectRoot, { recursive: true });
+  const markerPath = join(legacyProjectRoot, "legacy-marker.txt");
+  await writeFile(markerPath, "保留旧目录", "utf8");
+  const registryPath = join(
+    environment.workspace,
+    "project-registry.json",
+  );
+  const legacyRegistry = `${JSON.stringify(
+    {
+      schemaVersion: "3.0.0",
+      updatedAt: "2026-07-28T00:00:00.000Z",
+      sources: {},
+      projects: {
+        [projectId]: {
+          documentId: "doc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          sourcePath: join(environment.sources, "legacy.html"),
+        },
+      },
+      documents: {},
+    },
+    null,
+    2,
+  )}\n`;
+  await writeFile(registryPath, legacyRegistry, "utf8");
+
+  await assert.rejects(
+    startBridge(environment.workspace),
+    /metadata is invalid/,
+  );
+  assert.equal(await readFile(registryPath, "utf8"), legacyRegistry);
+  assert.equal(await readFile(markerPath, "utf8"), "保留旧目录");
+});
+
 test("registration and first edit keep document identity sidecar-only", async (t) => {
   const environment = await createEnvironment(t);
   const sourcePath = join(environment.sources, "stale-v2-snapshot.html");
@@ -514,7 +603,7 @@ test("registration and first edit keep document identity sidecar-only", async (t
   assert.equal(ensuredAgain.body.projectId, opened.body.projectId);
   assert.deepEqual(
     await readdir(join(environment.workspace, "projects")),
-    [opened.body.projectId],
+    [basename(opened.body.projectRoot)],
   );
 
   const edited = staleHtml.replace(
@@ -550,11 +639,7 @@ test("registration and first edit keep document identity sidecar-only", async (t
     assert.equal(importedHtml.includes(`name="${name}"`), true);
   }
 
-  const projectRoot = join(
-    environment.workspace,
-    "projects",
-    opened.body.projectId,
-  );
+  const projectRoot = opened.body.projectRoot;
   const [project, manifest, versionHtml] = await Promise.all([
     readFile(join(projectRoot, "project.json"), "utf8").then(JSON.parse),
     readFile(
@@ -567,6 +652,9 @@ test("registration and first edit keep document identity sidecar-only", async (t
     ),
   ]);
   assert.equal(project.schemaVersion, "3.0.0");
+  assert.equal(project.displayName, "stale-v2-snapshot");
+  assert.equal(project.storageDirectoryName, basename(projectRoot));
+  assert.equal(project.createdAt, manifest.generatedAt);
   assert.equal("migration" in project, false);
   assert.equal(manifest.schemaVersion, "3.0.0");
   assert.equal(manifest.sourceType, "initial");
@@ -574,6 +662,19 @@ test("registration and first edit keep document identity sidecar-only", async (t
   assert.equal(versionHtml, registeredHtml);
   assert.equal(manifest.contentSha256, hash(registeredHtml));
   const registry = JSON.parse(await readFile(registryPath, "utf8"));
+  assert.deepEqual(
+    {
+      displayName: registry.projects[opened.body.projectId].displayName,
+      createdAt: registry.projects[opened.body.projectId].createdAt,
+      storageDirectoryName:
+        registry.projects[opened.body.projectId].storageDirectoryName,
+    },
+    {
+      displayName: project.displayName,
+      createdAt: project.createdAt,
+      storageDirectoryName: project.storageDirectoryName,
+    },
+  );
   const sourceRecord = registry.sources[registry.projects[opened.body.projectId].sourceFingerprint];
   assert.deepEqual(Object.keys(sourceRecord.fileIdentity).sort(), ["birthtimeMs", "dev", "ino"]);
   assert.equal(sourceRecord.confirmedSourceSha256, autosaved.body.currentHtmlSha256);
@@ -585,11 +686,7 @@ test("registered v3 artifacts reject v2 schema versions", async (t) => {
   await writeFile(sourcePath, htmlPage("严格 V3"), "utf8");
   const bridge = await environment.start();
   const opened = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
-  const projectRoot = join(
-    environment.workspace,
-    "projects",
-    opened.projectId,
-  );
+  const projectRoot = opened.projectRoot;
   const projectPath = join(projectRoot, "project.json");
   const runtimePath = join(projectRoot, "runtime-state.json");
   const manifestPath = join(
@@ -667,11 +764,7 @@ test("finalizer rejects old or missing persisted schemas before mutating output"
   ).body;
   const rawOutput = htmlPage("最终化 Schema", "<p>raw candidate</p>");
   await writeFile(run.outputPath, rawOutput, "utf8");
-  const projectRoot = join(
-    environment.workspace,
-    "projects",
-    run.projectId,
-  );
+  const projectRoot = projectRootFromRun(run);
   const cases = [
     [join(projectRoot, "project.json"), "2.0.0"],
     [join(projectRoot, "runtime-state.json"), null],
@@ -836,11 +929,7 @@ test("status rejects an unsupported completion schema without mutating run state
     `${JSON.stringify(completion, null, 2)}\n`,
     "utf8",
   );
-  const projectRoot = join(
-    environment.workspace,
-    "projects",
-    run.projectId,
-  );
+  const projectRoot = projectRootFromRun(run);
   const runtimePath = join(projectRoot, "runtime-state.json");
   const runtimeBefore = await readFile(runtimePath, "utf8");
   const sourceBefore = await readFile(sourcePath, "utf8");
@@ -1347,9 +1436,7 @@ test("autosave writes the real source without Versions and projects stay isolate
     ["edit_pending_edit"],
   );
   const auditPath = join(
-    environment.workspace,
-    "projects",
-    openedA.body.projectId,
+    openedA.body.projectRoot,
     "edit-audit.jsonl",
   );
   const auditLines = (await readFile(auditPath, "utf8")).trim().split("\n");
@@ -1624,9 +1711,7 @@ test("document identity survives a move and same-path replacement starts isolate
   const movedProject = JSON.parse(
     await readFile(
       join(
-        environment.workspace,
-        "projects",
-        original.projectId,
+        original.projectRoot,
         "project.json",
       ),
       "utf8",
@@ -1656,9 +1741,7 @@ test("document identity survives a move and same-path replacement starts isolate
   assert.equal(
     await readFile(
       join(
-        environment.workspace,
-        "projects",
-        original.projectId,
+        original.projectRoot,
         "versions",
         "ver_0001",
         "files",
@@ -2158,9 +2241,7 @@ test("comment attachments persist in the project and freeze with comment-target 
   assert.match(aiRules, /不得修改 PROJECT\.md、冻结输入或协议文件/);
 
   await rm(join(
-    environment.workspace,
-    "projects",
-    opened.projectId,
+    opened.projectRoot,
     ...uploaded.body.attachment.relativePath.split("/"),
   ));
   assert.deepEqual(
@@ -2195,9 +2276,7 @@ test("request creation rejects a project attachment changed after selection", as
   assert.equal(uploaded.response.status, 201);
 
   const draftAttachmentPath = join(
-    environment.workspace,
-    "projects",
-    opened.projectId,
+    opened.projectRoot,
     ...uploaded.body.attachment.relativePath.split("/"),
   );
   await writeFile(draftAttachmentPath, "changed-after-selection", "utf8");
@@ -2423,11 +2502,7 @@ test("mandatory finalizer controls completion, identity, no-change, and cancella
     await readFile(created.body.currentPath, "utf8"),
     /content="ver_0002"/,
   );
-  const projectRoot = join(
-    environment.workspace,
-    "projects",
-    run.projectId,
-  );
+  const projectRoot = projectRootFromRun(run);
   const attemptRoot = join(
     projectRoot,
     "requests",
@@ -2820,9 +2895,7 @@ test("external changes become persistent conflicts with keep-external and adopt-
   );
   assert.equal(conflictedTwo.body.status, "awaiting-conflict-resolution");
   const secondTransactionRoot = join(
-    environment.workspace,
-    "projects",
-    secondRun.projectId,
+    projectRootFromRun(secondRun),
     "transactions",
     `txn_${secondRun.requestId}_${secondRun.attemptId}`,
   );
@@ -2858,9 +2931,7 @@ test("external changes become persistent conflicts with keep-external and adopt-
   const committedManifest = JSON.parse(
     await readFile(
       join(
-        environment.workspace,
-        "projects",
-        secondRun.projectId,
+        projectRootFromRun(secondRun),
         "versions",
         "ver_0002",
         "version.json",
@@ -2871,9 +2942,7 @@ test("external changes become persistent conflicts with keep-external and adopt-
   const committedMarker = JSON.parse(
     await readFile(
       join(
-        environment.workspace,
-        "projects",
-        secondRun.projectId,
+        projectRootFromRun(secondRun),
         "versions",
         "ver_0002",
         "committed.json",
@@ -3186,9 +3255,7 @@ test("native text autosave intent and source-application crash boundaries recove
     assert.equal(recovered.versions.length, 1);
     const auditText = await readFile(
       join(
-        environment.workspace,
-        "projects",
-        opened.projectId,
+        opened.projectRoot,
         "edit-audit.jsonl",
       ),
       "utf8",
@@ -3418,9 +3485,7 @@ test("a draft artifact cannot jump beyond the single-write crash window", async 
   const bridge = await environment.start();
   const opened = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
   const annotationsPath = join(
-    environment.workspace,
-    "projects",
-    opened.projectId,
+    opened.projectRoot,
     "draft",
     "annotations.json",
   );
@@ -3569,11 +3634,7 @@ test("transaction recovery rejects an unsupported schema before recovery mutatio
   );
   assert.equal(interrupted.response.status, 500);
   await stopChild(firstBridge.child);
-  const projectRoot = join(
-    environment.workspace,
-    "projects",
-    run.projectId,
-  );
+  const projectRoot = projectRootFromRun(run);
   const transactionPath = join(
     projectRoot,
     "transactions",
@@ -3667,11 +3728,7 @@ test("every Version transaction boundary recovers one committed candidate", asyn
       await readFile(workspace.sourcePath, "utf8"),
       new RegExp(failpoint),
     );
-    const projectRoot = join(
-      environment.workspace,
-      "projects",
-      run.projectId,
-    );
+    const projectRoot = projectRootFromRun(run);
     const [manifest, marker, transaction] = await Promise.all([
       readFile(
         join(projectRoot, "versions", "ver_0002", "version.json"),
@@ -3905,9 +3962,7 @@ test("version list returns hash-validated comments, local edits, and AI dialogue
   ]);
 
   const versionAnnotationPath = join(
-    environment.workspace,
-    "projects",
-    run.projectId,
+    projectRootFromRun(run),
     "versions",
     "ver_0002",
     "annotations",
@@ -3958,9 +4013,7 @@ test("history endpoints reject marker, manifest, and entry tampering", async (t)
   assert.equal(ready.body.status, "ready-to-open");
   await activateReadyVersion(bridge.baseUrl, ready.body);
   const versionRoot = join(
-    environment.workspace,
-    "projects",
-    run.projectId,
+    projectRootFromRun(run),
     "versions",
     "ver_0002",
   );
