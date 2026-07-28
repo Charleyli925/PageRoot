@@ -2648,7 +2648,8 @@ input:focus-visible,
 }
 
 .ai-conflict-panel strong,
-.ai-conflict-panel p {
+.ai-conflict-panel p,
+.ai-conflict-panel small {
   grid-column: 1 / -1;
 }
 
@@ -2660,16 +2661,6 @@ input:focus-visible,
   margin: 0;
   font-size: 9px;
   line-height: 1.6;
-}
-
-.ai-conflict-panel button {
-  min-height: 34px;
-  border: 1px solid #d3ad79;
-  border-radius: 8px;
-  background: #fff;
-  color: inherit;
-  font-size: 9px;
-  font-weight: 670;
 }
 
 .handoff-panel > details {
@@ -2997,41 +2988,32 @@ input:focus-visible,
 
 .handoff-process-board ol {
   display: grid;
-  gap: 0;
+  gap: 8px;
   padding: 0;
   margin: 0;
   list-style: none;
 }
 
 .handoff-process-board li {
-  position: relative;
-  min-height: 54px;
+  min-height: 64px;
   display: grid;
   grid-template-columns: 26px minmax(0, 1fr);
+  align-items: center;
   gap: 9px;
-  padding: 7px 2px;
-  color: #a0a0a5;
-}
-
-.handoff-process-board li:not(:last-child)::after {
-  position: absolute;
-  top: 35px;
-  bottom: -6px;
-  left: 11px;
-  width: 1px;
-  content: "";
-  background: #ddd9d1;
+  padding: 10px 12px;
+  border: 1px solid #e6e7eb;
+  border-radius: 10px;
+  background: #fafbfc;
+  color: #7d7f88;
 }
 
 .process-step-icon {
-  position: relative;
-  z-index: 1;
   width: 24px;
   height: 24px;
   display: grid;
   place-items: center;
   border-radius: 50%;
-  background: #f4f2ed;
+  background: #f0f1f3;
 }
 
 .handoff-process-board li > span:last-child {
@@ -3053,15 +3035,35 @@ input:focus-visible,
 }
 
 .handoff-process-board li[data-state="done"] {
+  border-color: #d4e6dc;
+  background: #eff8f3;
   color: #317454;
 }
 
-.handoff-process-board li[data-state="done"]::after {
-  background: #b9d2c4;
+.handoff-process-board li[data-state="done"] .process-step-icon {
+  background: #e2f1e8;
 }
 
 .handoff-process-board li[data-state="current"] {
+  border-color: #d8d5fb;
+  background: #f0efff;
   color: var(--indigo-deep);
+}
+
+.handoff-process-board li[data-state="current"] .process-step-icon {
+  background: #e7e5ff;
+}
+
+.handoff-process-board li[data-state="pending"] {
+  border-color: #e6e7eb;
+  background: #fafbfc;
+  color: #7d7f88;
+}
+
+.handoff-process-board li[data-state="neutral"] {
+  border-color: #e1e3e8;
+  background: #f5f6f8;
+  color: #6f727c;
 }
 
 .handoff-process-board li[data-state="attention"] {
@@ -3069,7 +3071,13 @@ input:focus-visible,
 }
 
 .handoff-process-board li[data-state="error"] {
+  border-color: #df8b84;
+  background: #fff2f0;
   color: #9b453e;
+}
+
+.handoff-process-board li[data-state="error"] .process-step-icon {
+  background: #ffe4e1;
 }
 
 .validation-decision,

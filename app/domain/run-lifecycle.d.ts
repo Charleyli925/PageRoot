@@ -26,6 +26,28 @@ export function hasObservedCompletion(
   run: Pick<ActiveRun, "status" | "completionObserved"> | null | undefined,
 ): boolean;
 
+export type RunProgressStepState =
+  | "done"
+  | "current"
+  | "pending"
+  | "error"
+  | "neutral";
+
+export type RunProgressStep = {
+  key: "handoff" | "ai" | "validation" | "result";
+  label: string;
+  detail: string;
+  state: RunProgressStepState;
+};
+
+export function deriveRunProgressSteps(
+  run: Pick<
+    ActiveRun,
+    "requestId" | "status" | "error" | "completionObserved"
+  > | null | undefined,
+  handoffStatus?: "idle" | "copying" | "copied" | "failed",
+): RunProgressStep[];
+
 export type ValidationReview = {
   status: "observed" | "pending";
   hardViolationCodes: string[];

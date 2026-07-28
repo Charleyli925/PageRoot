@@ -450,9 +450,18 @@ test("a verified AI result stays pending until the user opens the new HTML", asy
     );
     await launched.page.waitForTimeout(3_500);
     await expect(
-      launched.page.locator(".handoff-process-board li")
-        .filter({ hasText: "等待 AI 返回结果" }),
-    ).toHaveAttribute("data-state", "pending");
+      launched.page.locator(".handoff-process-board li"),
+    ).toHaveCount(4);
+    const aiProgressStep = launched.page
+      .locator(".handoff-process-board li")
+      .filter({
+        has: launched.page.locator("strong", {
+          hasText: /^等待 AI 完成$/u,
+        }),
+      });
+    await expect(
+      aiProgressStep,
+    ).toHaveAttribute("data-state", "current");
     writeAiOutput(request.requestRoot, (base) => {
       expect(base.match(new RegExp(ORIGINAL_TEXT, "gu"))).toHaveLength(1);
       return base.replace(ORIGINAL_TEXT, UPDATED_TEXT);
@@ -464,8 +473,7 @@ test("a verified AI result stays pending until the user opens the new HTML", asy
       { exact: true },
     ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
     await expect(
-      launched.page.locator(".handoff-process-board li")
-        .filter({ hasText: "已检测到 AI 返回结果" }),
+      aiProgressStep,
     ).toHaveAttribute("data-state", "done");
     const pending = await launched.page.evaluate(
       () => window.htmlAIProjects?.getActiveProject(),
@@ -713,11 +721,11 @@ test("a no-change result returns to editable requirements without a dead end", a
     )).toBeVisible();
     await expect(launched.page.getByRole("button", { name: "返回编辑" }))
       .toBeVisible();
-    await expect(launched.page.getByRole("button", { name: "调整要求后重试" }))
+    await expect(launched.page.getByRole("button", { name: "修改要求" }))
       .toBeVisible();
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
 
-    await launched.page.getByRole("button", { name: "调整要求后重试" }).click();
+    await launched.page.getByRole("button", { name: "修改要求" }).click();
     const editor = launched.page.getByRole("textbox", { name: /编辑评论/u });
     await expect(editor).toBeVisible();
     await expect(editor).toHaveValue(new RegExp(UPDATED_TEXT, "u"));
@@ -769,8 +777,10 @@ test("a clipboard handoff failure keeps the frozen Request recoverable", async (
     await expect(processingDialog).toBeHidden();
     await launched.page.getByRole("button", { name: "复制失败 · 查看" }).click();
     await expect(processingDialog).toBeVisible();
-    const retryCopy = launched.page.getByRole("button", { name: "重新复制本轮要求" });
+    const retryCopy = launched.page.getByRole("button", { name: "重新复制" });
     await expect(retryCopy).toBeVisible();
+    await expect(launched.page.getByRole("button", { name: "取消本轮" }))
+      .toBeVisible();
     await retryCopy.click();
     await expect(handoffError).toBeVisible();
     const projectsRoot = path.join(launched.workspace, "projects");
