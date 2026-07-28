@@ -1355,11 +1355,7 @@ test("workspace lifecycle records soft scope classes without blocking the candid
         expectedKind,
       );
     }
-    const projectRoot = join(
-      workspace,
-      "projects",
-      opened.projectId,
-    );
+    const projectRoot = opened.projectRoot;
     const versionIds = (await readdir(join(projectRoot, "versions")))
       .filter((name) => /^ver_\d+$/.test(name));
     assert.deepEqual(versionIds, expectedVersionIds, expectedKind);
@@ -1432,7 +1428,7 @@ test("workspace lifecycle records soft scope classes without blocking the candid
   );
   assert.equal(
     (await readdir(
-      join(workspace, "projects", opened.projectId, "versions"),
+      join(opened.projectRoot, "versions"),
     )).filter((name) => /^ver_\d+$/.test(name)).length,
     expectedVersionIds.length + 1,
   );

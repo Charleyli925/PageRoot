@@ -3,7 +3,7 @@
 | Mutable fact | Sole owner | Durable authority | Consumers |
 | --- | --- | --- | --- |
 | Open source locator before first durable action | Project session | active-file record only | initial view and registration command |
-| Registered project/document/source identity and session generation | Project session | project registry and `project.json` | views, all durable sessions |
+| Registered project/document/source identity, readable storage locator and session generation | Project session | project registry and `project.json` | views, all durable sessions |
 | Current source bytes, Hash, edit revision and pending write | Document session | source HTML, runtime autosave record and recovery log | Canvas, drain coordinator |
 | Active renderer draft revision, pending command and unknown-outcome reconciliation | Draft session | acknowledged aggregate fingerprint plus crash-only recovery outbox | comment rail, drain coordinator |
 | Comments, edit events, tombstones and operation acknowledgements | Draft aggregate and Bridge draft service | `draft/annotations.json`; runtime stores only its pointer and revision | draft session, Request freeze |

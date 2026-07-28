@@ -2,14 +2,16 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://html-change.local/schemas/project-state.v3.schema.json",
   "title": "HTML AI project state v3",
-  "description": "Durable project identity and source-lineage cache. Active runs and locks are deliberately excluded and belong only to runtime-state.json.",
+  "description": "Durable project identity, readable storage locator and source-lineage cache. Active runs and locks are deliberately excluded and belong only to runtime-state.json.",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "schemaVersion",
     "projectId",
     "documentId",
-    "name",
+    "displayName",
+    "createdAt",
+    "storageDirectoryName",
     "sourcePath",
     "latestVersionId",
     "currentBasedOnVersionId",
@@ -27,10 +29,19 @@
     "documentId": {
       "$ref": "#/$defs/documentId"
     },
-    "name": {
+    "displayName": {
       "type": "string",
       "minLength": 1,
       "maxLength": 300
+    },
+    "createdAt": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "storageDirectoryName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 240,
+      "pattern": "^.+__[0-9]{8}-[0-9]{6}__[a-f0-9]{8,32}$"
     },
     "sourcePath": {
       "type": "string",

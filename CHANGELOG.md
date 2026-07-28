@@ -4,6 +4,10 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+- Name project-record folders from the HTML filename, project creation time and
+  a short identity suffix, while retaining the full `projectId` as internal
+  metadata.
+
 ## [0.9.0] - 2026-07-28
 
 - Promoted the editable-island editor from the isolated V2 comparison build to

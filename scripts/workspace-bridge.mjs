@@ -37,7 +37,10 @@ import {
   LifecycleError,
   MANAGED_META_NAMES,
   nowIso,
+  projectDisplayName,
   projectDirectory,
+  projectStorageDirectoryName,
+  assertProjectStorageDirectoryName,
   readVersionedJson,
   requireCompleteHtml,
   sha256,
@@ -1014,6 +1017,36 @@ async function readRegistry() {
       );
     }
   }
+  for (const [projectId, record] of Object.entries(registry.projects)) {
+    if (
+      !record
+      || typeof record !== "object"
+      || Array.isArray(record)
+      || typeof record.displayName !== "string"
+      || record.displayName.trim().length === 0
+      || record.displayName.length > 300
+      || typeof record.createdAt !== "string"
+      || Number.isNaN(Date.parse(record.createdAt))
+    ) {
+      throw new HttpError(
+        409,
+        "WORKSPACE_SCHEMA_INVALID",
+        `project-registry.json project ${projectId} metadata is invalid.`,
+      );
+    }
+    try {
+      assertProjectStorageDirectoryName(
+        record.storageDirectoryName,
+        projectId,
+      );
+    } catch {
+      throw new HttpError(
+        409,
+        "WORKSPACE_SCHEMA_INVALID",
+        `project-registry.json project ${projectId} storage directory is invalid.`,
+      );
+    }
+  }
   return registry;
 }
 
@@ -1021,6 +1054,51 @@ async function writeRegistry(registry) {
   registry.schemaVersion = LIFECYCLE_SCHEMA_VERSION;
   registry.updatedAt = nowIso();
   await atomicWriteJson(REGISTRY_PATH, registry);
+}
+
+function projectRootFromRegistryRecord(projectId, record) {
+  return projectDirectory(
+    WORKSPACE_ROOT,
+    record?.storageDirectoryName,
+    projectId,
+  );
+}
+
+async function availableProjectStorageDirectory({
+  displayName,
+  createdAt,
+  projectId,
+  registry,
+}) {
+  const registeredDirectoryNames = new Set(
+    Object.values(registry.projects)
+      .map((record) => record?.storageDirectoryName)
+      .filter((value) => typeof value === "string"),
+  );
+  for (const suffixLength of [8, 12, 16, 24, 32]) {
+    const storageDirectoryName = projectStorageDirectoryName({
+      displayName,
+      createdAt,
+      projectId,
+      suffixLength,
+    });
+    const projectRoot = projectDirectory(
+      WORKSPACE_ROOT,
+      storageDirectoryName,
+      projectId,
+    );
+    if (
+      !registeredDirectoryNames.has(storageDirectoryName)
+      && !(await exists(projectRoot))
+    ) {
+      return { storageDirectoryName, projectRoot };
+    }
+  }
+  throw new HttpError(
+    409,
+    "PROJECT_STORAGE_COLLISION",
+    "A unique readable project directory could not be allocated.",
+  );
 }
 
 async function syncCurrentSourceIdentity(context, source) {
@@ -1487,7 +1565,17 @@ async function createInitialProject(
   }
   const projectId = randomStableId("project");
   const documentId = randomStableId("doc");
-  const projectRoot = projectDirectory(WORKSPACE_ROOT, projectId);
+  const displayName = projectDisplayName(sourcePath);
+  const createdAt = nowIso();
+  const {
+    storageDirectoryName,
+    projectRoot,
+  } = await availableProjectStorageDirectory({
+    displayName,
+    createdAt,
+    projectId,
+    registry,
+  });
   await ensureDirectory(projectRoot);
   for (const directory of [
     "versions",
@@ -1499,7 +1587,6 @@ async function createInitialProject(
   ]) {
     await ensureDirectory(path.join(projectRoot, directory));
   }
-  const createdAt = nowIso();
   const versionId = "ver_0001";
   const versionRoot = path.join(projectRoot, "versions", versionId);
   await ensureDirectory(path.join(versionRoot, "files"));
@@ -1540,7 +1627,9 @@ async function createInitialProject(
     schemaVersion: LIFECYCLE_SCHEMA_VERSION,
     projectId,
     documentId,
-    name: path.basename(sourcePath, path.extname(sourcePath)),
+    displayName,
+    createdAt,
+    storageDirectoryName,
     sourcePath,
     latestVersionId: versionId,
     currentBasedOnVersionId: versionId,
@@ -1568,8 +1657,13 @@ async function createInitialProject(
   );
   await atomicWriteFile(
     path.join(projectRoot, "PROJECT.md"),
-    defaultProjectRules(project.name),
+    defaultProjectRules(project.displayName),
   );
+  registry.projects[projectId] = {
+    displayName,
+    createdAt,
+    storageDirectoryName,
+  };
   assignCurrentSourceIdentity(registry, {
     sourcePath,
     projectId,
@@ -1598,7 +1692,10 @@ async function initializeRoot() {
           projectId,
           documentId: record.documentId,
           sourcePath: record.sourcePath,
-          projectRoot: projectDirectory(WORKSPACE_ROOT, projectId),
+          displayName: record.displayName,
+          createdAt: record.createdAt,
+          storageDirectoryName: record.storageDirectoryName,
+          projectRoot: projectRootFromRegistryRecord(projectId, record),
         };
         await withProjectFileLock(context.projectRoot, async () => {
           try {
@@ -1644,7 +1741,10 @@ async function relinkRegisteredDocument(
   source,
 ) {
   const projectId = documentRecord.projectId;
-  const projectRoot = projectDirectory(WORKSPACE_ROOT, projectId);
+  const projectRoot = projectRootFromRegistryRecord(
+    projectId,
+    registry.projects[projectId],
+  );
   const projectPath = path.join(projectRoot, "project.json");
   if (!(await exists(projectPath))) {
     throw new HttpError(
@@ -1654,6 +1754,19 @@ async function relinkRegisteredDocument(
     );
   }
   const project = await readLifecycleJson(projectPath, "project.json");
+  const registryProject = registry.projects[projectId];
+  if (
+    project.projectId !== projectId
+    || project.displayName !== registryProject.displayName
+    || project.createdAt !== registryProject.createdAt
+    || project.storageDirectoryName !== registryProject.storageDirectoryName
+  ) {
+    throw new HttpError(
+      409,
+      "PROJECT_IDENTITY_MISMATCH",
+      "Project metadata does not match the project registry.",
+    );
+  }
   const previousSourcePath = project.sourcePath;
   const previousCanonicalSourcePath = await canonicalExistingSourcePath(
     previousSourcePath,
@@ -1690,6 +1803,9 @@ async function relinkRegisteredDocument(
     projectId,
     documentId: project.documentId,
     sourcePath,
+    displayName: registry.projects[projectId].displayName,
+    createdAt: registry.projects[projectId].createdAt,
+    storageDirectoryName: registry.projects[projectId].storageDirectoryName,
     projectRoot,
   };
   project.sourcePath = sourcePath;
@@ -1739,6 +1855,7 @@ async function loadContextBySource(
   }
   const fingerprint = sourceFingerprint(sourcePath);
   let record;
+  let registeredProjectRecord = null;
   let canonicalFileIdentity = null;
   await registryQueue.run(() =>
     withProjectFileLock(WORKSPACE_ROOT, async () => {
@@ -1753,7 +1870,10 @@ async function loadContextBySource(
         if (!sameSourceFileIdentity(record.fileIdentity, observedFileIdentity)) {
           const project = await readLifecycleJson(
             path.join(
-              projectDirectory(WORKSPACE_ROOT, record.projectId),
+              projectRootFromRegistryRecord(
+                record.projectId,
+                registry.projects[record.projectId],
+              ),
               "project.json",
             ),
             "project.json",
@@ -1792,7 +1912,10 @@ async function loadContextBySource(
       } else if (record) {
         const project = await readLifecycleJson(
           path.join(
-            projectDirectory(WORKSPACE_ROOT, record.projectId),
+            projectRootFromRegistryRecord(
+              record.projectId,
+              registry.projects[record.projectId],
+            ),
             "project.json",
           ),
           "project.json",
@@ -1891,7 +2014,8 @@ async function loadContextBySource(
       }
       if (registryDirty) await writeRegistry(registry);
       if (record) {
-        canonicalFileIdentity = registry.projects[record.projectId]?.fileIdentity ?? null;
+        registeredProjectRecord = registry.projects[record.projectId] ?? null;
+        canonicalFileIdentity = registeredProjectRecord?.fileIdentity ?? null;
       }
     }),
   );
@@ -1934,7 +2058,13 @@ async function loadContextBySource(
     documentId: record.documentId,
     sourcePath: canonicalSourcePath,
     requestedSourcePath: sourcePath,
-    projectRoot: projectDirectory(WORKSPACE_ROOT, record.projectId),
+    displayName: registeredProjectRecord.displayName,
+    createdAt: registeredProjectRecord.createdAt,
+    storageDirectoryName: registeredProjectRecord.storageDirectoryName,
+    projectRoot: projectRootFromRegistryRecord(
+      record.projectId,
+      registeredProjectRecord,
+    ),
   };
 }
 
@@ -1970,6 +2100,13 @@ async function readProject(context) {
     project.projectId !== context.projectId
     || project.documentId !== context.documentId
     || project.sourcePath !== context.sourcePath
+    || project.displayName !== context.displayName
+    || project.createdAt !== context.createdAt
+    || project.storageDirectoryName !== context.storageDirectoryName
+    || typeof project.displayName !== "string"
+    || project.displayName.trim().length === 0
+    || typeof project.createdAt !== "string"
+    || Number.isNaN(Date.parse(project.createdAt))
   ) {
     throw new HttpError(
       409,
@@ -2578,7 +2715,9 @@ async function writeProject(context, project) {
     schemaVersion: LIFECYCLE_SCHEMA_VERSION,
     projectId: project.projectId,
     documentId: project.documentId,
-    name: project.name,
+    displayName: project.displayName,
+    createdAt: project.createdAt,
+    storageDirectoryName: project.storageDirectoryName,
     sourcePath: project.sourcePath,
     latestVersionId: project.latestVersionId,
     currentBasedOnVersionId: project.currentBasedOnVersionId,
@@ -3125,7 +3264,7 @@ async function listVersions(context) {
       attemptId: manifest.attemptId ?? null,
       contentSha256: manifest.contentSha256,
       versionEntryRelativePath:
-        `projects/${context.projectId}/versions/${versionId}/files/index.html`,
+        `projects/${context.storageDirectoryName}/versions/${versionId}/files/index.html`,
       versionEntryPath: validated.entryPath,
       ...(annotations ? { annotations } : {}),
       ...(supplementArchive
@@ -3193,10 +3332,7 @@ async function workspaceState(sourcePath) {
       currentExactVersionId: null,
       restoredFromVersionId: null,
       project: {
-        name: path.basename(
-          normalizedSourcePath,
-          path.extname(normalizedSourcePath),
-        ),
+        displayName: projectDisplayName(normalizedSourcePath),
         sourcePath: normalizedSourcePath,
       },
       runtimeState: {
@@ -4235,7 +4371,7 @@ ${attachmentLines.join("\n")}
     : `## 本地附件路径
 
 本轮没有评论附件。`;
-  return `# ${project.name} · ${userVersionLabel(activeRun.candidateVersionOrdinal)} 修改
+  return `# ${project.displayName} · ${userVersionLabel(activeRun.candidateVersionOrdinal)} 修改
 
 目标版本：**${userVersionLabel(activeRun.candidateVersionOrdinal)}**
 
@@ -4829,7 +4965,7 @@ async function createRequest(body) {
       plannedWorkingCopyPath: path.join(
         context.projectRoot,
         ...workingCopyDescriptor(
-          project.name,
+          project.displayName,
           activeRun.candidateVersionOrdinal,
         ).relativePath.split("/"),
       ),
@@ -5484,7 +5620,7 @@ async function prepareTransactionRaw(
   const createdAt = nowIso();
   const project = await readProject(context);
   const workingCopy = workingCopyDescriptor(
-    project.name,
+    project.displayName,
     activeRun.candidateVersionOrdinal,
   );
   const activeWorkingCopyRelativePath = workingCopy.relativePath;
@@ -5913,7 +6049,7 @@ async function finalizeCommittedTransactionRaw(
     workingCopyPath: workingCopy.absolutePath,
     workingCopyRelativePath: workingCopy.relativePath,
     versionEntryRelativePath:
-      `projects/${context.projectId}/versions/${transaction.candidateVersionId}/files/index.html`,
+      `projects/${context.storageDirectoryName}/versions/${transaction.candidateVersionId}/files/index.html`,
     versionEntryPath: path.join(versionRoot, "files", "index.html"),
   };
 }
@@ -6100,7 +6236,7 @@ async function activateReadyVersion(body) {
       workingCopyPath: context.sourcePath,
       workingCopyRelativePath: workingCopy.relativePath,
       versionEntryRelativePath:
-        `projects/${context.projectId}/versions/${requestedVersionId}/files/index.html`,
+        `projects/${context.storageDirectoryName}/versions/${requestedVersionId}/files/index.html`,
       versionEntryPath: validatedVersion.entryPath,
     };
   });
@@ -6508,7 +6644,7 @@ async function statusFor(sourcePath, requestId, attemptId = "attempt_001") {
             workingCopyPath: workingCopy.absolutePath,
             workingCopyRelativePath: workingCopy.relativePath,
             versionEntryRelativePath:
-              `projects/${context.projectId}/versions/${outcome.versionId}/files/index.html`,
+              `projects/${context.storageDirectoryName}/versions/${outcome.versionId}/files/index.html`,
             versionEntryPath: validatedVersion.entryPath,
             supplement,
             ...(validationReview ? { validationReview } : {}),
@@ -6559,7 +6695,7 @@ async function statusFor(sourcePath, requestId, attemptId = "attempt_001") {
           committedAt: committed.committedAt,
           protocolViolation,
           versionEntryRelativePath:
-            `projects/${context.projectId}/versions/${outcome.versionId}/files/index.html`,
+            `projects/${context.storageDirectoryName}/versions/${outcome.versionId}/files/index.html`,
           versionEntryPath: path.join(
             versionRoot,
             "files",
@@ -7126,7 +7262,7 @@ async function versionFile(sourcePath, versionId) {
     contentSha256: sha256(buffer),
     path: entryPath,
     relativePath:
-      `projects/${context.projectId}/versions/${versionId}/files/index.html`,
+      `projects/${context.storageDirectoryName}/versions/${versionId}/files/index.html`,
     readOnly: true,
   };
 }
@@ -7161,6 +7297,7 @@ async function sourceFile(sourcePath) {
     registered: true,
     projectId: context.projectId,
     documentId: context.documentId,
+    storageDirectoryName: context.storageDirectoryName,
     sourcePath: context.sourcePath,
     content: source.html,
     sha256: source.sha256,
@@ -7349,7 +7486,7 @@ async function projectFileGet(sourcePath) {
     sha256: sha256(buffer),
     updatedAt: information.mtime.toISOString(),
     path: filePath,
-    relativePath: `projects/${context.projectId}/PROJECT.md`,
+    relativePath: `projects/${context.storageDirectoryName}/PROJECT.md`,
   };
 }
 
@@ -7379,7 +7516,7 @@ async function projectFileUpdate(body) {
       content: body.content,
       sha256: sha256(buffer),
       path: filePath,
-      relativePath: `projects/${context.projectId}/PROJECT.md`,
+      relativePath: `projects/${context.storageDirectoryName}/PROJECT.md`,
     };
   });
 }

@@ -8,6 +8,7 @@ import {
   activeUserSupplementRecords,
   LIFECYCLE_SCHEMA_VERSION,
   projectDirectory,
+  projectStorageDirectoryName,
   recordUserSupplement,
   sealUserSupplementForAttempt,
   validateUserSupplementArchive,
@@ -20,10 +21,33 @@ const ATTEMPT_ID = "attempt_001";
 
 async function fixture() {
   const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "pageroot-supplement-"));
-  const projectRoot = projectDirectory(workspaceRoot, PROJECT_ID);
+  const createdAt = "2026-07-28T04:43:15.000Z";
+  const storageDirectoryName = projectStorageDirectoryName({
+    displayName: "补充记录项目",
+    createdAt,
+    projectId: PROJECT_ID,
+  });
+  const projectRoot = projectDirectory(
+    workspaceRoot,
+    storageDirectoryName,
+    PROJECT_ID,
+  );
   const requestRoot = path.join(projectRoot, "requests", REQUEST_ID);
   const attemptRoot = path.join(requestRoot, "attempts", ATTEMPT_ID);
   await mkdir(attemptRoot, { recursive: true });
+  await writeFile(
+    path.join(workspaceRoot, "project-registry.json"),
+    JSON.stringify({
+      schemaVersion: LIFECYCLE_SCHEMA_VERSION,
+      projects: {
+        [PROJECT_ID]: {
+          displayName: "补充记录项目",
+          createdAt,
+          storageDirectoryName,
+        },
+      },
+    }),
+  );
   await writeFile(path.join(projectRoot, "project.json"), JSON.stringify({
     schemaVersion: LIFECYCLE_SCHEMA_VERSION,
     projectId: PROJECT_ID,
