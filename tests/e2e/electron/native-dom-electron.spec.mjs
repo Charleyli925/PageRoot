@@ -366,8 +366,18 @@ test("Electron first launch registers the welcome HTML and sends its comment to 
     const projectIds = Object.keys(registry.projects);
     expect(projectIds).toHaveLength(1);
     expect(registry.projects[projectIds[0]].sourcePath).toBe(canonicalWelcomePath);
+    expect(registry.projects[projectIds[0]].displayName).toBe("欢迎来到源页");
+    expect(registry.projects[projectIds[0]].storageDirectoryName)
+      .toMatch(/^欢迎来到源页__\d{8}-\d{6}__[a-f0-9]{8}$/);
     expect(existsSync(
-      path.join(workspace, "projects", projectIds[0], "versions", "ver_0001", "committed.json"),
+      path.join(
+        workspace,
+        "projects",
+        registry.projects[projectIds[0]].storageDirectoryName,
+        "versions",
+        "ver_0001",
+        "committed.json",
+      ),
     )).toBe(true);
 
     const editor = launched.page.getByTestId("html-canvas-editor")
@@ -790,8 +800,12 @@ test("Electron persists an Apple Pinyin boundary composition with left affinity"
     );
     expect(projectEntry, "the first durable edit must establish one project authority")
       .toBeTruthy();
-    const [persistedProjectId] = projectEntry;
-    const projectRoot = path.join(workspace, "projects", persistedProjectId);
+    const [, persistedProject] = projectEntry;
+    const projectRoot = path.join(
+      workspace,
+      "projects",
+      persistedProject.storageDirectoryName,
+    );
     const annotations = JSON.parse(
       readFileSync(path.join(projectRoot, "draft", "annotations.json"), "utf8"),
     );
