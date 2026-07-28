@@ -495,15 +495,22 @@ test("Electron safely renames the saved current HTML without starting a new proj
     );
     expect(Object.keys(renamedRegistry.projects)).toEqual([projectId]);
     expect(renamedRegistry.projects[projectId].sourcePath).toBe(renamedPath);
+    const storageDirectoryName =
+      renamedRegistry.projects[projectId].storageDirectoryName;
+    expect(storageDirectoryName).toBe(
+      originalRegistry.projects[projectId].storageDirectoryName,
+    );
     const project = JSON.parse(
       readFileSync(
-        path.join(workspace, "projects", projectId, "project.json"),
+        path.join(workspace, "projects", storageDirectoryName, "project.json"),
         "utf8",
       ),
     );
     expect(project.documentId).toBe(originalRegistry.projects[projectId].documentId);
     expect(project.sourcePath).toBe(renamedPath);
-    expect(project.name).toBe("我的页面");
+    expect(project.displayName).toBe(
+      originalRegistry.projects[projectId].displayName,
+    );
   } finally {
     await stopPageRoot(
       launched.electronApp,
