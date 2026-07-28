@@ -14,7 +14,11 @@ const source = Buffer.from(`<!doctype html>
   <meta charset="utf-8">
   <style>
     body { font: 20px/1.6 sans-serif; padding: 32px; }
-    .vertical { writing-mode: vertical-rl; }
+    .vertical {
+      writing-mode: vertical-rl;
+      inline-size: 8em;
+      block-size: 2em;
+    }
   </style>
 </head>
 <body>
@@ -164,7 +168,7 @@ test("paste is plain text, multiline paste becomes br, and cut stays local", asy
 
   expect(await authoredInnerHtml(target)).toBe("第一行<br>第二行末尾");
   await setTextSelection(frame, "plain", 0, "第一行".length);
-  await page.keyboard.press("Meta+x");
+  await page.keyboard.press(process.platform === "darwin" ? "Meta+x" : "Control+x");
   await expect(target).toHaveText("第二行末尾");
   expect(await target.locator("img, b").count()).toBe(0);
 });
