@@ -341,10 +341,12 @@ commit pending native edit checkpoint
 4. 完成全部写入后执行 Prompt 给出的完整 finalizer 命令。
 
 产品可以用文件可读性检查辅助显示进度，但不得把“暂时没有变化”解释为完成。
+用户在 Finder 查看本轮目录时，普通、非软链接 `.DS_Store` 属于无语义的系统显示元数据：工作台和 finalizer 忽略它，但继续拒绝其他未声明文件、目录或软链接。
 
 ### 8.2 唯一完成信号
 
 finalizer 最后原子写入 `completion.json`。工作台发现它后进入 `validating`。
+“AI 已返回”只由这个完成信号或其后的生命周期状态点亮；完成信号出现前发生的错误显示“未检测到 AI 返回结果”，不能因为通用 `error` 状态而打勾。
 
 以下画面仍保持 processing：
 
@@ -372,6 +374,15 @@ finalizer 最后原子写入 `completion.json`。工作台发现它后进入 `va
 任何失败均不建版。界面显示明确错误与可恢复动作。
 
 范围校验失败时必须保留 Request、Attempt、output 与完整报告，释放候选号并返回可编辑态；失败候选不得复用，也不得通过 finalizer 元数据白名单掩盖任何实质越界变化。
+
+处理面板不逐条暴露上述内部检查，而是固定合并成四个用户阶段：
+“准备并复制”“等待 AI 完成”“校验并保存”“结果”。每轮只允许一个当前阶段；
+复制失败落在第一阶段，完成记录缺失落在第二阶段，校验失败或外部冲突落在第三阶段，
+成功、无变化和最终选择落在第四阶段。完成记录出现前不得把第二阶段显示为完成。
+
+等待 AI 时沿用既有的取消、预览与再次复制操作；复制失败、校验中、成功、无变化和
+外部冲突只显示各自下一步所需的底部操作。所有新增操作复用同一套底部按钮层级，
+不得再在流程卡片内复制一套决策按钮。
 
 ### 8.4 no-change
 
@@ -445,7 +456,7 @@ AI 完成后发现源 Hash 已变化：
 候选 V9 等待处理
 源 HTML 已被其他程序修改
 [比较外部内容与 AI 候选]
-[采用 AI 候选] [保留外部内容] [取消本轮]
+[采用 AI 版本] [保留外部版本]
 ```
 
 ### 10.1 采用 AI 候选
@@ -596,6 +607,7 @@ A 项目 processing 时切换 B 项目：
 | 自动写回失败 | 不提交、保留内容 | 重试或导出 |
 | freeze flush 失败 | 回到 editing | 修复后重试 |
 | output 无 completion | 继续 processing | 等待 AI finalizer |
+| Finder 写入普通 `.DS_Store` | 忽略并保持原状态 | 无需处理 |
 | completion 身份不符 | 不建版 | 检查正确 Attempt |
 | output Hash 不符 | 协议错误 | 重新生成并 finalizer |
 | completion 后 output 变化 | 协议违规 | 新 Attempt |
@@ -624,3 +636,5 @@ A 项目 processing 时切换 B 项目：
 13. 连续两次 AI 成功后，原始 HTML 和第一份工作文件逐字节不变，项目当前路径指向第二份工作文件。
 14. no-change、失败和取消均不创建下一个 `working/V1.x.html`。
 15. 历史抽屉无横向滚动，且“在 Finder 中显示”只定位对应不可变 HTML。
+16. 处理中查看 Request/Attempt/output 并产生普通 `.DS_Store`，仍保持 processing 且 finalizer 可正常完成；同名软链接和其他额外文件继续失败关闭。
+17. completion 出现前的失败不点亮“AI 已返回”；completion 出现后的校验失败保留已返回事实。

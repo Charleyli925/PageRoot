@@ -24,6 +24,15 @@ const LOCKED = new Set([
   "awaiting-conflict-resolution",
   "recovering-transaction",
 ]);
+const COMPLETION_OBSERVED = new Set([
+  "validating",
+  "committing",
+  "ready-to-open",
+  "awaiting-conflict-resolution",
+  "recovering-transaction",
+  "no-change",
+  "complete",
+]);
 const LEGACY_DECODER = new Map([
   ["waiting", "processing"],
   ["importing", "validating"],
@@ -52,6 +61,120 @@ export function canonicalLifecycleState(
 
 export function isLockedLifecycleState(value) {
   return LOCKED.has(value);
+}
+
+export function hasObservedCompletion(run) {
+  return run?.completionObserved === true
+    || COMPLETION_OBSERVED.has(run?.status);
+}
+
+function progressStep(key, label, detail, state) {
+  return { key, label, detail, state };
+}
+
+export function deriveRunProgressSteps(run, handoffStatus = "idle") {
+  if (!run) return [];
+
+  const status = canonicalLifecycleState(run.status);
+  const completionObserved = hasObservedCompletion(run);
+  const copyFailed = handoffStatus === "failed" && !completionObserved;
+  const copyConfirmed = handoffStatus === "copied" || completionObserved;
+  const steps = [
+    progressStep(
+      "handoff",
+      "正在准备并复制",
+      handoffStatus === "copying"
+        ? "正在写入并核对剪贴板"
+        : run.requestId === "pending" || status === "submitting"
+          ? "正在冻结本轮要求"
+          : "本轮要求已冻结，等待复制交接内容",
+      "current",
+    ),
+    progressStep(
+      "ai",
+      "等待 AI 完成",
+      copyConfirmed ? "等待 AI 写回完成记录" : "交接完成后开始",
+      copyConfirmed ? "current" : "pending",
+    ),
+    progressStep("validation", "正在校验并保存", "等待 AI 完成", "pending"),
+    progressStep("result", "结果", "等待前序步骤完成", "pending"),
+  ];
+  const [handoffStep, aiStep, validationStep, resultStep] = steps;
+
+  if (copyFailed) {
+    Object.assign(
+      handoffStep,
+      progressStep(
+        "handoff",
+        "交接内容尚未复制",
+        "剪贴板写入失败；本轮要求已安全保留",
+        "error",
+      ),
+    );
+    aiStep.detail = "尚未开始";
+    validationStep.detail = "尚未开始";
+    resultStep.detail = "没有生成新版本";
+    return steps;
+  }
+
+  if (copyConfirmed) {
+    Object.assign(
+      handoffStep,
+      progressStep("handoff", "已准备并复制", "交接内容已确认", "done"),
+    );
+  }
+  if (completionObserved) {
+    Object.assign(
+      aiStep,
+      progressStep("ai", "等待 AI 完成", "已收到完成记录", "done"),
+    );
+  } else if (status === "error") {
+    aiStep.detail = "未收到完成记录，本轮已停止";
+    aiStep.state = "error";
+  }
+
+  if (status === "awaiting-conflict-resolution") {
+    validationStep.detail = "检测到外部修改与 AI 结果冲突";
+    validationStep.state = "error";
+    resultStep.label = "请选择当前 HTML";
+    resultStep.detail = "两份内容均未被覆盖";
+    resultStep.state = "current";
+  } else if (status === "error") {
+    validationStep.detail = completionObserved
+      ? run.error || "结果未通过完整性或范围检查"
+      : "尚未开始";
+    validationStep.state = completionObserved ? "error" : "pending";
+    resultStep.detail = "没有生成新版本";
+  } else if (status === "no-change") {
+    validationStep.detail = "校验完成，未发现有效差异";
+    validationStep.state = "done";
+    resultStep.label = "无需创建新版本";
+    resultStep.detail = "当前 HTML 保持不变";
+    resultStep.state = "neutral";
+  } else if (status === "ready-to-open") {
+    validationStep.detail = "完整性与范围校验通过";
+    validationStep.state = "done";
+    resultStep.label = "新版本已准备好";
+    resultStep.detail = "旧版未被覆盖，等待你确认打开最新版";
+    resultStep.state = "current";
+  } else if (status === "complete") {
+    validationStep.detail = "完整性与范围校验通过";
+    validationStep.state = "done";
+    resultStep.label = "最新版已打开";
+    resultStep.detail = "当前画布已切换到新版本";
+    resultStep.state = "done";
+  } else if (status === "validating") {
+    validationStep.detail = "正在核对完整性、修改范围和文件";
+    validationStep.state = "current";
+  } else if (status === "committing") {
+    validationStep.detail = "检查已通过，正在安全保存新版本";
+    validationStep.state = "current";
+  } else if (status === "recovering-transaction") {
+    validationStep.detail = "正在恢复并核对保存结果";
+    validationStep.state = "current";
+  }
+
+  return steps;
 }
 
 export function validationReviewFromRecord(value) {
@@ -146,6 +269,7 @@ export function activeRunFromRecord(raw) {
             : String(raw.error),
         }
       : {}),
+    ...(raw.completionObserved === true ? { completionObserved: true } : {}),
     ...(raw.conflictId || conflict.conflictId
       ? { conflictId: String(raw.conflictId || conflict.conflictId) }
       : {}),

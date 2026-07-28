@@ -2362,6 +2362,11 @@ test("mandatory finalizer controls completion, identity, no-change, and cancella
     htmlPage("最终化", '<section id="ai-result">AI 完成的内容</section>'),
     "utf8",
   );
+  await writeFile(join(run.attemptPath, ".DS_Store"), "Finder metadata");
+  await writeFile(
+    join(dirname(run.outputPath), ".DS_Store"),
+    "Finder metadata",
+  );
 
   for (let index = 0; index < 2; index += 1) {
     await delay(120);
@@ -2711,6 +2716,7 @@ test("Bridge enforces the complete completion.v1 runtime contract before committ
     );
     assert.equal(rejected.response.status, 200, malformedCase.label);
     assert.equal(rejected.body.status, "error", malformedCase.label);
+    assert.equal(rejected.body.completionObserved, true, malformedCase.label);
     assert.equal(
       rejected.body.error.code,
       "COMPLETION_SCHEMA_INVALID",
@@ -4032,6 +4038,7 @@ test("output PROJECT.md is rejected as a protocol violation", async (t) => {
   );
   assert.equal(status.response.status, 200);
   assert.equal(status.body.status, "error");
+  assert.equal(status.body.completionObserved, false);
   assert.equal(
     status.body.protocolViolation.code,
     "OUTPUT_PROTOCOL_VIOLATION",

@@ -4,6 +4,9 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+- Keep Finder's regular `.DS_Store` metadata inert inside live AI Attempt
+  folders, and mark an AI return only after the mandatory completion signal
+  has actually appeared.
 - Increased saved-comment text and edit text to 14px, collapsed comment tools
   until hover, keyboard focus or editing, and simplified normal and editing
   cards to one boundary with a compact divider-free action row.
