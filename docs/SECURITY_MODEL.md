@@ -16,7 +16,7 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
 ## V2 editable-island trust boundary
 
 The rendered preview DOM is disposable and never becomes a whole-document
-persistence source. PageRootV2 has one controlled `contenteditable="true"`
+persistence source. PageRoot 0.9.0 has one controlled `contenteditable="true"`
 route:
 
 - SourceIndex and TargetResolver must prove one exact, explicit-end-tag HTML

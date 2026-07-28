@@ -330,7 +330,7 @@ async function replayApplePinyinStyledWrapperCommit(frame, caseId) {
 
 test("Electron first launch registers the welcome HTML and sends its comment to Qoder", async () => {
   const launched = await launchPageRoot();
-  const welcomePath = path.join(launched.isolatedUserData, "欢迎来到源页 V2.html");
+  const welcomePath = path.join(launched.isolatedUserData, "欢迎来到源页.html");
   const welcomeLogoPath = path.join(
     launched.isolatedUserData,
     "brand-logo.png",
@@ -339,7 +339,7 @@ test("Electron first launch registers the welcome HTML and sends its comment to 
   try {
     const canonicalWelcomePath = path.join(
       realpathSync(launched.isolatedUserData),
-      "欢迎来到源页 V2.html",
+      "欢迎来到源页.html",
     );
     await waitForProjectReady(launched.page);
     await expect.poll(

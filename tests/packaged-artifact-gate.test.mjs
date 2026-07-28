@@ -320,10 +320,10 @@ test("release commands use one automated artifact lane with full tests and packa
   assert.match(verifier, /packaged Bridge dependency smoke/);
 
   const layout = expectedArtifactLayout({ productRoot, packageJson, arch: "arm64" });
-  assert.match(layout.appPath, /release\/mac-arm64\/PageRootV2\.app$/);
+  assert.match(layout.appPath, /release\/mac-arm64\/PageRoot\.app$/);
   assert.equal(
     path.basename(layout.dmgPath),
-    `PageRootV2-${packageJson.version}-arm64.dmg`,
+    `PageRoot-${packageJson.version}-arm64.dmg`,
   );
 });
 

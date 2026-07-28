@@ -92,7 +92,7 @@ stateDiagram-v2
 
 ### 3.1 首次启动欢迎项目
 
-桌面应用没有可恢复的当前项目时，不显示一个只有内存内容的假预览。系统会在所选工作区的上级目录建立 `欢迎来到源页 V2.html`；默认位置是 `~/Documents/PageRootV2/欢迎来到源页 V2.html`，并立即：
+桌面应用没有可恢复的当前项目时，不显示一个只有内存内容的假预览。系统会在所选工作区的上级目录建立 `欢迎来到源页.html`；默认位置是 `~/Documents/PageRoot/欢迎来到源页.html`，并立即：
 
 1. 把它作为普通当前 HTML 加入最近项目。
 2. 通过 Bridge 登记独立的 `projectId`、`documentId` 和初始 V1。
@@ -170,7 +170,7 @@ stateDiagram-v2
 - flex/grid 文字只有在源码、运行时布局和 CSS selector 均安全时，才随首个真实 Patch 创建唯一 canonical 直接文字项；双击本身不修改源码。
 - 任何目标为 `ambiguous`、`orphaned`，或 patch 越出已解析源码范围时都必须 fail-closed，保留当前源码并要求用户重新定位。
 
-PageRootV2 只使用一种文字编辑路线：
+PageRoot 0.9.0 只使用一种文字编辑路线：
 
 - 可编辑岛统一使用受控 `contenteditable="true"`。浏览器只负责焦点、光标、Selection 与 composition；普通输入、删除、换行、剪切和粘贴由 Controller 阻止默认行为后按逻辑位置执行。粘贴只读取 `text/plain`，换行固定写成 `<br>`。
 - 可视段首、段尾、行中和非空行内样式交界都必须支持输入与删除。可视段首继承右侧首字符，其余边界统一继承左侧字符；工具栏显示下一次输入将采用的样式。

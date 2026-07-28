@@ -29,7 +29,7 @@ const [
 test("startup welcome HTML is provisioned as a normal registered project", () => {
   assert.match(workbench, /const WELCOME_PROJECT/);
   assert.match(workbench, /name: WELCOME_PROJECT_NAME/);
-  assert.match(sampleHtml, /WELCOME_PROJECT_NAME = "欢迎来到源页 V2\.html"/);
+  assert.match(sampleHtml, /WELCOME_PROJECT_NAME = "欢迎来到源页\.html"/);
   assert.match(workbench, /内置介绍页 · 打开本地 HTML 后开始编辑/);
   assert.doesNotMatch(workbench, /市场策略周报\.html|示例预览 · 打开本地 HTML 后自动更新/);
   assert.match(mainProcess, /ensureManagedWelcomeHtml/);
@@ -42,7 +42,7 @@ test("startup welcome HTML is provisioned as a normal registered project", () =>
     /projectHydrating[\s\S]*?"hydrating"[\s\S]*?sourcePath[\s\S]*?"ready"/,
   );
   assert.doesNotMatch(mainProcess, /if \(!activePath\) return null/);
-  assert.match(sampleHtml, /<title>源页 V2 · PageRootV2<\/title>/);
+  assert.match(sampleHtml, /<title>源页 · PageRoot<\/title>/);
   assert.match(
     sampleHtml,
     /<h1><span>所见，即可落笔。<\/span><span>所改，止于所选。<\/span><\/h1>/,
@@ -63,7 +63,7 @@ test("startup welcome HTML is provisioned as a normal registered project", () =>
   );
   assert.match(sampleHtml, /在桌面版中，这张欢迎页可以直接体验编辑、选择和评论/);
   assert.match(sampleHtml, /桌面版会把它建立为本地 HTML/);
-  assert.match(sampleHtml, /修改会自动保存到「欢迎来到源页 V2\.html」/);
+  assert.match(sampleHtml, /修改会自动保存到「欢迎来到源页\.html」/);
   assert.match(sampleHtml, /从顶部「项目」打开其他 HTML/);
   assert.doesNotMatch(sampleHtml, /尚未绑定本地文件/);
   assert.doesNotMatch(sampleHtml, /利率拐点前的仓位选择|美国 10 年期|市场策略周报/);

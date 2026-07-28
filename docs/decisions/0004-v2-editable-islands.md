@@ -1,4 +1,4 @@
-# ADR 0004: PageRootV2 uses one controlled editable-island route
+# ADR 0004: PageRoot 0.9.0 uses one controlled editable-island route
 
 - Status: Accepted
 - Date: 2026-07-28
@@ -11,7 +11,7 @@ mutation and composition placement to Chromium. Paragraph ends, inline-style
 boundaries, controls and composition recovery therefore accumulated separate
 fallbacks whose contracts disagreed.
 
-PageRootV2 instead prioritizes:
+PageRoot 0.9.0 instead prioritizes:
 
 1. exact source bytes outside the edited element;
 2. visual, semantic and structural safety inside it;
@@ -21,7 +21,7 @@ PageRootV2 instead prioritizes:
 
 ## Decision
 
-PageRootV2 has one production text engine, `IslandEditingController`.
+PageRoot 0.9.0 has one production text engine, `IslandEditingController`.
 
 - `contenteditable="true"` provides focus, caret, Selection and platform IME
   composition only. The controller prevents and owns ordinary mutations.
@@ -38,7 +38,7 @@ PageRootV2 has one production text engine, `IslandEditingController`.
 - Preview DOM is never serialized as a document.
 
 The V1 `NativeEditingController` remains only as non-production historical test
-material during the comparison period. No PageRootV2 runtime module imports it.
+material during the comparison period. No PageRoot runtime module imports it.
 
 ## Consequences
 

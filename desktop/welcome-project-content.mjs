@@ -1,4 +1,4 @@
-export const WELCOME_PROJECT_NAME = "欢迎来到源页 V2.html";
+export const WELCOME_PROJECT_NAME = "欢迎来到源页.html";
 export const WELCOME_LOGO_RELATIVE_PATH = "brand-logo.png";
 
 export const DEFAULT_PROJECT_HTML = `<!doctype html>
@@ -6,7 +6,7 @@ export const DEFAULT_PROJECT_HTML = `<!doctype html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>源页 V2 · PageRootV2</title>
+  <title>源页 · PageRoot</title>
   <style>
     :root {
       --paper: #fffdf8;
@@ -239,7 +239,7 @@ export const DEFAULT_PROJECT_HTML = `<!doctype html>
         <div class="brand-row">
           <div class="brand-lockup">
             <img src="./${WELCOME_LOGO_RELATIVE_PATH}" alt="源页 Logo" />
-            <div><strong>源页 V2</strong><small>PAGEROOT V2</small></div>
+            <div><strong>源页</strong><small>PAGEROOT</small></div>
           </div>
           <span class="demo-badge">内置介绍页</span>
         </div>
@@ -284,12 +284,12 @@ export const DEFAULT_PROJECT_HTML = `<!doctype html>
       </section>
 
       <aside class="notice">
-        <div><strong>在桌面版中，这张欢迎页可以直接体验编辑、选择和评论。</strong><span>桌面版会把它建立为本地 HTML；修改会自动保存到「欢迎来到源页 V2.html」，AI 新版也会进入独立版本历史。</span></div>
+        <div><strong>在桌面版中，这张欢迎页可以直接体验编辑、选择和评论。</strong><span>桌面版会把它建立为本地 HTML；修改会自动保存到「欢迎来到源页.html」，AI 新版也会进入独立版本历史。</span></div>
         <em>从顶部「项目」打开其他 HTML</em>
       </aside>
     </div>
 
-    <footer><span>源页 V2 · PageRootV2</span><span>Editable islands. Byte-exact outside.</span></footer>
+    <footer><span>源页 · PageRoot</span><span>Editable islands. Byte-exact outside.</span></footer>
   </article>
 </body>
 </html>`;

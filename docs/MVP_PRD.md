@@ -126,7 +126,7 @@ HTML AI 工作台让用户在真实本地 HTML 上完成两类工作：
 
 用户合同不是固定 700 毫秒，而是“无需手动保存，状态真实可见”。实现应以约 700 毫秒为初值并通过性能测试调整。
 
-PageRootV2 只有一个受控 `contenteditable="true"` 路线，不再在
+PageRoot 0.9.0 只有一个受控 `contenteditable="true"` 路线，不再在
 `plaintext-only`、浏览器富文本和自定义补丁间切换。粘贴只读取纯文本；
 换行固定生成 `<br>`；折叠光标在可视段首向右继承，其余文字、样式和
 链接边界向左继承。Controller 以 grapheme 为单位处理删除，并以冻结

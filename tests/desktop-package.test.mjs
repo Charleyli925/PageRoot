@@ -45,12 +45,12 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   const packageJson = JSON.parse(packageText);
 
   assert.equal(packageJson.main, "desktop/main.mjs");
-  assert.equal(packageJson.name, "pageroot-v2");
-  assert.match(packageJson.description, /源页 V2（PageRootV2）/);
-  assert.equal(packageJson.build.appId, "com.pageroot.v2");
-  assert.match(packageJson.version, /^\d+\.\d+\.\d+-beta\.\d+$/u);
-  assert.equal(packageJson.build.productName, "PageRootV2");
-  assert.equal(packageJson.build.artifactName, "PageRootV2-${version}-${arch}.${ext}");
+  assert.equal(packageJson.name, "pageroot");
+  assert.match(packageJson.description, /源页（PageRoot）— Editable islands/);
+  assert.equal(packageJson.build.appId, "com.htmlai.workbench");
+  assert.match(packageJson.version, /^\d+\.\d+\.\d+$/u);
+  assert.equal(packageJson.build.productName, "PageRoot");
+  assert.equal(packageJson.build.artifactName, "PageRoot-${version}-${arch}.${ext}");
   assert.equal(packageJson.build.mac.identity, "-");
   assert.equal(packageJson.build.afterPack, "desktop/after-pack.mjs");
   assert.ok(packageJson.build.files.includes("!node_modules/**/*"));
@@ -97,14 +97,24 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.match(mainProcess, /utilityProcess\.fork/);
   assert.match(mainProcess, /requestSingleInstanceLock/);
   assert.match(mainProcess, /app\.setPath\("userData",\s*productUserDataPath\)/);
-  assert.match(mainProcess, /app\.setName\("源页 V2"\)/);
-  assert.doesNotMatch(mainProcess, /\["YuanYe",\s*"HTML AI 工作台"\]/);
+  assert.match(mainProcess, /app\.setName\("源页"\)/);
+  assert.match(
+    mainProcess,
+    /\["PageRootV2",\s*"YuanYe",\s*"HTML AI 工作台"\][\s\S]*?"html-projects\.json"/,
+  );
+  assert.match(
+    mainProcess,
+    /if \(e2eUserDataPath\) return currentPath/,
+  );
   const workspaceResolver = mainProcess.slice(
     mainProcess.indexOf("async function workspacePath()"),
     mainProcess.indexOf("async function startBridge()"),
   );
-  assert.match(workspaceResolver, /path\.join\(documents,\s*"PageRootV2",\s*"项目记录"\)/);
-  assert.doesNotMatch(workspaceResolver, /PageRoot",|YuanYe|HTML AI 工作台/);
+  assert.match(
+    workspaceResolver,
+    /\[\s*pageRootWorkspace,\s*pageRootV2Workspace,\s*yuanyeWorkspace,\s*legacyWorkspace,\s*\]/,
+  );
+  assert.match(workspaceResolver, /return existingWorkspace \?\? pageRootWorkspace/);
   assert.doesNotMatch(workspaceResolver, /mkdir|writeFile|rename/);
   assert.match(mainProcess, /"ACTIVE_PROJECT_MISSING"/);
   assert.match(mainProcess, /titleBarStyle:\s*"hiddenInset"/);
@@ -125,6 +135,7 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
     /shell\.openExternal\(LATEST_RELEASE_PAGE_URL\)/,
   );
   assert.match(mainProcess, /scheduleAutomaticUpdateCheck\(\)/);
+  assert.match(mainProcess, /checkForManualUpdate\(\{/);
   assert.match(mainProcess, /net\.fetch/);
   assert.match(mainProcess, /app\.getVersion\(\)/);
   assert.match(mainProcess, /handoffToQoderWork/);
@@ -262,12 +273,13 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.match(rendererHtml, /frame-src 'self' data: blob:/);
   assert.match(rendererHtml, /object-src 'none'/);
   assert.match(rendererHtml, /base-uri 'self' file:/);
-  assert.match(rendererHtml, /<title>源页 V2<\/title>/);
-  assert.match(rendererHtml, /源页 V2（PageRootV2）/);
+  assert.match(rendererHtml, /<title>源页<\/title>/);
+  assert.match(rendererHtml, /源页（PageRoot）— Editable islands/);
   assert.doesNotMatch(rendererHtml, /frame-ancestors/);
-  assert.match(mainProcess, /path\.join\(documents,\s*"PageRootV2",\s*"项目记录"\)/);
-  assert.doesNotMatch(mainProcess, /path\.join\(documents,\s*"PageRoot",\s*"项目记录"\)/);
-  assert.match(bridge, /"PageRootV2",\s*\n\s*"项目记录"/);
+  assert.match(mainProcess, /path\.join\(\s*documents,\s*"PageRoot",\s*"项目记录",?\s*\)/);
+  assert.match(mainProcess, /path\.join\(\s*documents,\s*"PageRootV2",\s*"项目记录",?\s*\)/);
+  assert.match(mainProcess, /path\.join\(\s*documents,\s*"YuanYe",\s*"项目记录",?\s*\)/);
+  assert.match(bridge, /"PageRoot",\s*\n\s*"项目记录"/);
 
   assert.doesNotMatch(bridge, /\/Users\/lizexuan/);
   assert.match(bridge, /completion\.json/);

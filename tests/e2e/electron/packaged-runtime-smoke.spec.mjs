@@ -32,10 +32,10 @@ const packageVersion = JSON.parse(
 function packagedExecutable() {
   const appPath = process.env.PAGEROOT_PACKAGED_APP_PATH;
   if (!appPath || !path.isAbsolute(appPath) || path.extname(appPath) !== ".app") {
-    throw new Error("PAGEROOT_PACKAGED_APP_PATH must name the absolute packaged PageRootV2.app path.");
+    throw new Error("PAGEROOT_PACKAGED_APP_PATH must name the absolute packaged PageRoot.app path.");
   }
-  const executable = path.join(appPath, "Contents/MacOS/PageRootV2");
-  if (!existsSync(executable)) throw new Error(`Packaged PageRootV2 executable is missing: ${executable}`);
+  const executable = path.join(appPath, "Contents/MacOS/PageRoot");
+  if (!existsSync(executable)) throw new Error(`Packaged PageRoot executable is missing: ${executable}`);
   return executable;
 }
 
@@ -68,7 +68,7 @@ async function launchPackaged(isolatedUserData) {
   });
   const page = await electronApp.firstWindow();
   await page.waitForLoadState("domcontentloaded");
-  await expect(page).toHaveTitle("源页 V2");
+  await expect(page).toHaveTitle("源页");
   return { electronApp, page };
 }
 
@@ -120,7 +120,7 @@ function removeIsolatedDirectory(directory) {
   });
 }
 
-test("packaged PageRootV2 preserves outside-island bytes and reconciles draft revision before close", async () => {
+test("packaged PageRoot preserves outside-island bytes and reconciles draft revision before close", async () => {
   test.setTimeout(120_000);
   const isolatedUserData = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-packaged-"));
   const sourcePathAlias = path.join(isolatedUserData, "packaged-source.html");

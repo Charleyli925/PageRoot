@@ -64,10 +64,12 @@ Toast 只保留三类：用户必须改变条件才能继续的动作、存在�
 
 仅启动 App、打开“项目”面板或浏览最近文件不创建空的项目记录目录。用户第一次真正编辑、添加附件/评论、发送 AI Request，或明确展开“项目资料”时，才创建：
 
-`~/Documents/PageRootV2/项目记录`
+`~/Documents/PageRoot/项目记录`
 
-PageRootV2 不读取或迁移 PageRoot、YuanYe、HTML AI 工作台的目录；两个
-App 的项目、最近文件和恢复状态保持完全隔离，便于并行对比。
+正式版优先恢复 PageRoot；若当前正式目录尚不存在，则依次兼容
+PageRootV2 测试目录、YuanYe 和 HTML AI 工作台。兼容读取不会删除或覆盖
+旧目录；选中已有兼容工作区时继续使用该目录，只有都不存在时才建立新的
+PageRoot 工作区。
 
 ## 再次启动
 

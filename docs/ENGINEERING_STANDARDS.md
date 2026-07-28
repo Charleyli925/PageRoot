@@ -45,7 +45,7 @@ and transaction coverage. New product persistence or lifecycle behavior may
 not be added directly to `workbench.tsx`, `HtmlCanvasEditor.tsx`,
 `IslandEditingController.ts` or `workspace-bridge.mjs`; first introduce or use
 the owning application/domain/service module. The retired V1
-`NativeEditingController.ts` is not a PageRootV2 extension point.
+`NativeEditingController.ts` is not a PageRoot 0.9.0 extension point.
 
 ## Effects and asynchronous work
 

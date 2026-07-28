@@ -30,7 +30,7 @@ test("server-renders the autosave-first workbench entry points", async () => {
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /<title>源页 V2<\/title>/i);
+  assert.match(html, /<title>源页<\/title>/i);
   assert.match(
     html,
     /<link[^>]+rel=["']icon["'][^>]+href=["']\/favicon\.png["'][^>]*>/i,
@@ -111,7 +111,7 @@ test("application boundaries encode the v3 single-source lifecycle instead of sa
   assert.equal(packageJson.dependencies?.["@lexical/history"], undefined);
   assert.equal(packageJson.dependencies?.["@lexical/plain-text"], undefined);
   assert.equal(packageJson.dependencies?.["@lexical/selection"], undefined);
-  assert.match(packageJson.version, /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u);
+  assert.match(packageJson.version, /^\d+\.\d+\.\d+$/u);
   assert.equal(packageJson.build?.mac?.extendInfo?.NSMicrophoneUsageDescription, undefined);
   assert.equal(packageJson.build?.mac?.extendInfo?.NSSpeechRecognitionUsageDescription, undefined);
 

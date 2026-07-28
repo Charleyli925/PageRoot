@@ -1,7 +1,7 @@
 {
-  "name": "pageroot-v2",
-  "version": "2.0.0-beta.1",
-  "description": "源页 V2（PageRootV2）— Editable islands with byte-exact source outside every edited region.",
+  "name": "pageroot",
+  "version": "0.9.0",
+  "description": "源页（PageRoot）— Editable islands with byte-exact source outside every edited region.",
   "author": "源页",
   "license": "Apache-2.0",
   "private": true,
@@ -120,9 +120,9 @@
   },
   "type": "module",
   "build": {
-    "appId": "com.pageroot.v2",
-    "productName": "PageRootV2",
-    "artifactName": "PageRootV2-${version}-${arch}.${ext}",
+    "appId": "com.htmlai.workbench",
+    "productName": "PageRoot",
+    "artifactName": "PageRoot-${version}-${arch}.${ext}",
     "afterPack": "desktop/after-pack.mjs",
     "asar": true,
     "directories": {
@@ -264,7 +264,7 @@
       ]
     },
     "dmg": {
-      "title": "PageRootV2 ${version}",
+      "title": "PageRoot ${version}",
       "backgroundColor": "#f2f0ea",
       "window": {
         "width": 660,
