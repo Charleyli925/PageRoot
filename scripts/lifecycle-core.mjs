@@ -39,6 +39,9 @@ const DOCUMENT_ID_PATTERN = /^doc_[a-f0-9]{16,64}$/;
 const REQUEST_ID_PATTERN = /^req_\d{4,}$/;
 const ATTEMPT_ID_PATTERN = /^attempt_\d{3}$/;
 const VERSION_ID_PATTERN = /^ver_\d{4,}$/;
+const PROJECT_STORAGE_DIRECTORY_PATTERN =
+  /__(\d{8}-\d{6})__([a-f0-9]{8,32})$/;
+const PROJECT_STORAGE_DIRECTORY_MAX_BYTES = 240;
 const SUPPLEMENT_RECORD_ID_PATTERN = /^supplement_\d{4,}$/;
 const SUPPLEMENT_ATTACHMENT_ID_PATTERN = /^suppatt_\d{4,}_\d{2}$/;
 const SUPPLEMENT_REFERENCE_PATTERN = /^(?:instruction_[A-Za-z0-9_-]+|supplement_\d{4,})$/;
@@ -47,6 +50,20 @@ const SUPPLEMENT_EVIDENCE_STATES = new Set([
   "text-only",
   "original-file",
   "description-only",
+]);
+const ATTEMPT_ENTRY_NAMES = new Set([
+  "output",
+  "completion.json",
+  "scope-report.json",
+  "result.json",
+  "cancelled.json",
+  "annotations.json",
+  "outcome.json",
+  "protocol-violation.json",
+  "USER_SUPPLEMENT.md",
+  "USER_SUPPLEMENT.json",
+  "supplement-attachments",
+  "validation-review.json",
 ]);
 const MAX_SUPPLEMENT_RECORDS = 500;
 const MAX_SUPPLEMENT_ATTACHMENTS = 10;
@@ -114,6 +131,33 @@ export async function ensureDirectory(directory) {
       409,
     );
   }
+}
+
+function isFinderMetadataFile(entry) {
+  return entry.name === ".DS_Store"
+    && entry.isFile()
+    && !entry.isSymbolicLink();
+}
+
+export function findUnexpectedAttemptEntry(entries) {
+  return entries.find(
+    (entry) =>
+      !ATTEMPT_ENTRY_NAMES.has(entry.name)
+      && !entry.name.startsWith(".failpoint-")
+      && !isFinderMetadataFile(entry),
+  );
+}
+
+export function findUnexpectedAttemptOutputEntry(entries) {
+  return entries.find(
+    (entry) =>
+      !isFinderMetadataFile(entry)
+      && (
+        entry.name !== "index.html"
+        || entry.isSymbolicLink()
+        || !entry.isFile()
+      ),
+  );
 }
 
 export async function syncDirectory(directory) {
@@ -321,9 +365,202 @@ export const assertAttemptId = (value) =>
 export const assertVersionId = (value) =>
   assertId(value, VERSION_ID_PATTERN, "version_id");
 
-export function projectDirectory(workspaceRoot, projectId) {
+function compactLocalTimestamp(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.valueOf())) {
+    throw new LifecycleError(
+      "INVALID_PROJECT_CREATED_AT",
+      "Project createdAt must be a valid timestamp.",
+      undefined,
+      400,
+    );
+  }
+  const pad = (part) => String(part).padStart(2, "0");
+  return [
+    date.getFullYear(),
+    pad(date.getMonth() + 1),
+    pad(date.getDate()),
+  ].join("") + "-" + [
+    pad(date.getHours()),
+    pad(date.getMinutes()),
+    pad(date.getSeconds()),
+  ].join("");
+}
+
+function truncateUtf8(value, maxBytes) {
+  let result = "";
+  let byteLength = 0;
+  for (const character of value) {
+    const nextBytes = Buffer.byteLength(character, "utf8");
+    if (byteLength + nextBytes > maxBytes) break;
+    result += character;
+    byteLength += nextBytes;
+  }
+  return result;
+}
+
+export function projectDisplayName(sourcePath) {
+  const sourceName = path.basename(sourcePath, path.extname(sourcePath));
+  const normalized = sourceName
+    .normalize("NFC")
+    .replace(/[\u0000-\u001f\u007f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return normalized || "未命名项目";
+}
+
+export function projectStorageDirectoryName({
+  displayName,
+  createdAt,
+  projectId,
+  suffixLength = 8,
+}) {
   assertProjectId(projectId);
-  return path.join(path.resolve(workspaceRoot), "projects", projectId);
+  const projectToken = projectId.slice("project_".length);
+  const safeSuffixLength = Math.min(
+    projectToken.length,
+    Math.max(8, Number(suffixLength) || 8),
+  );
+  const suffix = projectToken.slice(0, safeSuffixLength);
+  const timestamp = compactLocalTimestamp(createdAt);
+  const fixedSuffix = `__${timestamp}__${suffix}`;
+  const availableDisplayBytes =
+    PROJECT_STORAGE_DIRECTORY_MAX_BYTES - Buffer.byteLength(fixedSuffix, "utf8");
+  const normalizedDisplayName = String(displayName || "未命名项目")
+    .normalize("NFC")
+    .replace(/[\u0000-\u001f\u007f/\\:*?"<>|]/g, "-")
+    .replace(/\s+/g, " ")
+    .replace(/^[.\s]+|[.\s]+$/g, "")
+    || "未命名项目";
+  const readablePrefix = truncateUtf8(
+    normalizedDisplayName,
+    availableDisplayBytes,
+  ).replace(/[.\s]+$/g, "") || "项目";
+  return `${readablePrefix}${fixedSuffix}`;
+}
+
+export function assertProjectStorageDirectoryName(value, projectId) {
+  assertProjectId(projectId);
+  if (
+    typeof value !== "string"
+    || value.length === 0
+    || value !== value.trim()
+    || value === "."
+    || value === ".."
+    || /[\u0000-\u001f\u007f/\\:*?"<>|]/.test(value)
+    || Buffer.byteLength(value, "utf8") > PROJECT_STORAGE_DIRECTORY_MAX_BYTES
+    || path.basename(value) !== value
+  ) {
+    throw new LifecycleError(
+      "INVALID_PROJECT_STORAGE_DIRECTORY",
+      "Project storageDirectoryName is invalid.",
+      undefined,
+      409,
+    );
+  }
+  const match = value.match(PROJECT_STORAGE_DIRECTORY_PATTERN);
+  if (
+    !match
+    || !projectId.slice("project_".length).startsWith(match[2])
+  ) {
+    throw new LifecycleError(
+      "PROJECT_STORAGE_IDENTITY_MISMATCH",
+      "Project storageDirectoryName does not match projectId.",
+      undefined,
+      409,
+    );
+  }
+  return value;
+}
+
+export function projectDirectory(
+  workspaceRoot,
+  storageDirectoryName,
+  projectId,
+) {
+  const safeDirectoryName = assertProjectStorageDirectoryName(
+    storageDirectoryName,
+    projectId,
+  );
+  return path.join(
+    path.resolve(workspaceRoot),
+    "projects",
+    safeDirectoryName,
+  );
+}
+
+async function readProjectDirectoryAuthority(workspaceRoot, projectId) {
+  assertProjectId(projectId);
+  const resolvedWorkspace = path.resolve(workspaceRoot);
+  const registry = await readVersionedJson(
+    path.join(resolvedWorkspace, "project-registry.json"),
+    "project-registry.json",
+    LIFECYCLE_SCHEMA_VERSION,
+  );
+  const record = registry?.projects?.[projectId];
+  if (!record) {
+    throw new LifecycleError(
+      "PROJECT_NOT_FOUND",
+      `${projectId} was not found.`,
+      undefined,
+      404,
+    );
+  }
+  if (
+    typeof record !== "object"
+    || Array.isArray(record)
+    || typeof record.displayName !== "string"
+    || record.displayName.trim().length === 0
+    || typeof record.createdAt !== "string"
+    || Number.isNaN(Date.parse(record.createdAt))
+  ) {
+    throw new LifecycleError(
+      "PROJECT_REGISTRY_INVALID",
+      `${projectId} does not have valid readable storage metadata.`,
+      undefined,
+      409,
+    );
+  }
+  return {
+    record,
+    projectRoot: projectDirectory(
+      resolvedWorkspace,
+      record.storageDirectoryName,
+      projectId,
+    ),
+  };
+}
+
+export async function resolveProjectDirectory(workspaceRoot, projectId) {
+  const authority = await readProjectDirectoryAuthority(
+    workspaceRoot,
+    projectId,
+  );
+  return authority.projectRoot;
+}
+
+function assertProjectDirectoryAuthority({
+  project,
+  projectId,
+  projectRoot,
+  authority,
+}) {
+  if (
+    authority.projectRoot !== projectRoot
+    || project?.projectId !== projectId
+    || project.displayName !== authority.record.displayName
+    || project.createdAt !== authority.record.createdAt
+    || project.storageDirectoryName !== authority.record.storageDirectoryName
+    || path.basename(projectRoot) !== project.storageDirectoryName
+  ) {
+    throw new LifecycleError(
+      "PROJECT_STORAGE_METADATA_MISMATCH",
+      "Project registry and project.json storage metadata do not match.",
+      undefined,
+      409,
+    );
+  }
+  return project;
 }
 
 export async function withProjectFileLock(projectRoot, task, options = {}) {
@@ -891,7 +1128,10 @@ export async function recordUserSupplement({
   assertProjectId(projectId);
   assertRequestId(requestId);
   assertAttemptId(attemptId);
-  const projectRoot = projectDirectory(resolvedWorkspace, projectId);
+  const projectRoot = await resolveProjectDirectory(
+    resolvedWorkspace,
+    projectId,
+  );
   if (!(await exists(projectRoot))) {
     throw new LifecycleError(
       "PROJECT_NOT_FOUND",
@@ -913,11 +1153,21 @@ export async function recordUserSupplement({
   ]), "supplement payload");
 
   return withProjectFileLock(projectRoot, async () => {
+    const authority = await readProjectDirectoryAuthority(
+      resolvedWorkspace,
+      projectId,
+    );
     const project = await readVersionedJson(
       path.join(projectRoot, "project.json"),
       "project.json",
       LIFECYCLE_SCHEMA_VERSION,
     );
+    assertProjectDirectoryAuthority({
+      project,
+      projectId,
+      projectRoot,
+      authority,
+    });
     const runtime = await readVersionedJson(
       path.join(projectRoot, "runtime-state.json"),
       "runtime-state.json",
@@ -1251,25 +1501,7 @@ export async function recordUserSupplement({
 
 async function assertAttemptWriteSurface(attemptRoot) {
   const entries = await readdir(attemptRoot, { withFileTypes: true });
-  const allowed = new Set([
-    "output",
-    "completion.json",
-    "scope-report.json",
-    "result.json",
-    "cancelled.json",
-    "annotations.json",
-    "outcome.json",
-    "protocol-violation.json",
-    "USER_SUPPLEMENT.md",
-    "USER_SUPPLEMENT.json",
-    "supplement-attachments",
-    "validation-review.json",
-  ]);
-  const unexpected = entries.find(
-    (entry) =>
-      !allowed.has(entry.name)
-      && !entry.name.startsWith(".failpoint-"),
-  );
+  const unexpected = findUnexpectedAttemptEntry(entries);
   if (unexpected) {
     throw new LifecycleError(
       "UNEXPECTED_ATTEMPT_OUTPUT",
@@ -1298,12 +1530,7 @@ async function assertAttemptWriteSurface(attemptRoot) {
     );
   }
   const outputEntries = await readdir(outputRoot, { withFileTypes: true });
-  const unexpectedOutput = outputEntries.find(
-    (entry) =>
-      entry.name !== "index.html"
-      || entry.isSymbolicLink()
-      || !entry.isFile(),
-  );
+  const unexpectedOutput = findUnexpectedAttemptOutputEntry(outputEntries);
   if (unexpectedOutput) {
     throw new LifecycleError(
       "UNEXPECTED_OUTPUT_FILE",
@@ -1525,7 +1752,10 @@ export async function finalizeAttempt({
   assertProjectId(projectId);
   assertRequestId(requestId);
   assertAttemptId(attemptId);
-  const projectRoot = projectDirectory(resolvedWorkspace, projectId);
+  const projectRoot = await resolveProjectDirectory(
+    resolvedWorkspace,
+    projectId,
+  );
   if (!(await exists(projectRoot))) {
     throw new LifecycleError(
       "PROJECT_NOT_FOUND",
@@ -1536,11 +1766,21 @@ export async function finalizeAttempt({
   }
 
   return withProjectFileLock(projectRoot, async () => {
+    const authority = await readProjectDirectoryAuthority(
+      resolvedWorkspace,
+      projectId,
+    );
     const project = await readVersionedJson(
       path.join(projectRoot, "project.json"),
       "project.json",
       LIFECYCLE_SCHEMA_VERSION,
     );
+    assertProjectDirectoryAuthority({
+      project,
+      projectId,
+      projectRoot,
+      authority,
+    });
     const runtime = await readVersionedJson(
       path.join(projectRoot, "runtime-state.json"),
       "runtime-state.json",

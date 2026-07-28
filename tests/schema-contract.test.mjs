@@ -1084,11 +1084,7 @@ test(
     );
     assert.equal(opened.body.registered, true);
     const sourceBeforeAi = await readFile(sourcePath);
-    const projectRoot = join(
-      workspace,
-      "projects",
-      opened.body.projectId,
-    );
+    const projectRoot = opened.body.projectRoot;
     const validateArtifact = async (schemaName, value, label) => {
       const { ajv, validate } = await validator(schemaName);
       assertValid(ajv, validate, value, label);

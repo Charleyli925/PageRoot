@@ -315,8 +315,12 @@ async function openRecentProject(page, sourcePath, options) {
 function requestDirectoryCount(workspace) {
   const projectsRoot = path.join(workspace, "projects");
   if (!existsSync(projectsRoot)) return 0;
-  return readdirSync(projectsRoot).reduce((total, projectId) => {
-    const requestsRoot = path.join(projectsRoot, projectId, "requests");
+  return readdirSync(projectsRoot).reduce((total, projectDirectoryName) => {
+    const requestsRoot = path.join(
+      projectsRoot,
+      projectDirectoryName,
+      "requests",
+    );
     return total + (
       existsSync(requestsRoot)
         ? readdirSync(requestsRoot).filter((entry) => !entry.startsWith(".")).length
@@ -328,10 +332,10 @@ function requestDirectoryCount(workspace) {
 function workspaceContainsDraftComment(workspace, text) {
   const projectsRoot = path.join(workspace, "projects");
   if (!existsSync(projectsRoot)) return false;
-  return readdirSync(projectsRoot).some((projectId) => {
+  return readdirSync(projectsRoot).some((projectDirectoryName) => {
     const draftPath = path.join(
       projectsRoot,
-      projectId,
+      projectDirectoryName,
       "draft",
       "annotations.json",
     );
@@ -345,10 +349,10 @@ function workspaceContainsDraftComment(workspace, text) {
 function rewriteWorkspaceDraftComment(workspace, text, update) {
   const projectsRoot = path.join(workspace, "projects");
   if (!existsSync(projectsRoot)) return false;
-  for (const projectId of readdirSync(projectsRoot)) {
+  for (const projectDirectoryName of readdirSync(projectsRoot)) {
     const draftPath = path.join(
       projectsRoot,
-      projectId,
+      projectDirectoryName,
       "draft",
       "annotations.json",
     );
@@ -421,7 +425,15 @@ function recordOfficialSupplement(workspace, requestRoot, changeRequest, payload
 }
 
 function workingHtmlFiles(workspace, projectId) {
-  const directory = path.join(workspace, "projects", projectId, "working");
+  const registry = JSON.parse(
+    readFileSync(path.join(workspace, "project-registry.json"), "utf8"),
+  );
+  const directory = path.join(
+    workspace,
+    "projects",
+    registry.projects[projectId].storageDirectoryName,
+    "working",
+  );
   if (!existsSync(directory)) return [];
   return readdirSync(directory)
     .filter((fileName) => fileName.endsWith(".html"))
@@ -438,6 +450,30 @@ test("a verified AI result stays pending until the user opens the new HTML", asy
       launched.electronApp,
       fixture.sourcePath,
     );
+    const attemptRoot = path.join(
+      request.requestRoot,
+      "attempts",
+      "attempt_001",
+    );
+    writeFileSync(path.join(attemptRoot, ".DS_Store"), "Finder metadata");
+    writeFileSync(
+      path.join(attemptRoot, "output", ".DS_Store"),
+      "Finder metadata",
+    );
+    await launched.page.waitForTimeout(3_500);
+    await expect(
+      launched.page.locator(".handoff-process-board li"),
+    ).toHaveCount(4);
+    const aiProgressStep = launched.page
+      .locator(".handoff-process-board li")
+      .filter({
+        has: launched.page.locator("strong", {
+          hasText: /^等待 AI 完成$/u,
+        }),
+      });
+    await expect(
+      aiProgressStep,
+    ).toHaveAttribute("data-state", "current");
     writeAiOutput(request.requestRoot, (base) => {
       expect(base.match(new RegExp(ORIGINAL_TEXT, "gu"))).toHaveLength(1);
       return base.replace(ORIGINAL_TEXT, UPDATED_TEXT);
@@ -448,6 +484,9 @@ test("a verified AI result stays pending until the user opens the new HTML", asy
       "修改结果已通过检查",
       { exact: true },
     ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+    await expect(
+      aiProgressStep,
+    ).toHaveAttribute("data-state", "done");
     const pending = await launched.page.evaluate(
       () => window.htmlAIProjects?.getActiveProject(),
     );
@@ -694,11 +733,11 @@ test("a no-change result returns to editable requirements without a dead end", a
     )).toBeVisible();
     await expect(launched.page.getByRole("button", { name: "返回编辑" }))
       .toBeVisible();
-    await expect(launched.page.getByRole("button", { name: "调整要求后重试" }))
+    await expect(launched.page.getByRole("button", { name: "修改要求" }))
       .toBeVisible();
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
 
-    await launched.page.getByRole("button", { name: "调整要求后重试" }).click();
+    await launched.page.getByRole("button", { name: "修改要求" }).click();
     const editor = launched.page.getByRole("textbox", { name: /编辑评论/u });
     await expect(editor).toBeVisible();
     await expect(editor).toHaveValue(new RegExp(UPDATED_TEXT, "u"));
@@ -750,15 +789,21 @@ test("a clipboard handoff failure keeps the frozen Request recoverable", async (
     await expect(processingDialog).toBeHidden();
     await launched.page.getByRole("button", { name: "复制失败 · 查看" }).click();
     await expect(processingDialog).toBeVisible();
-    const retryCopy = launched.page.getByRole("button", { name: "重新复制本轮要求" });
+    const retryCopy = launched.page.getByRole("button", { name: "重新复制" });
     await expect(retryCopy).toBeVisible();
+    await expect(launched.page.getByRole("button", { name: "取消本轮" }))
+      .toBeVisible();
     await retryCopy.click();
     await expect(handoffError).toBeVisible();
     const projectsRoot = path.join(launched.workspace, "projects");
     await expect.poll(() => (
       existsSync(projectsRoot)
-        ? readdirSync(projectsRoot).some((projectId) => (
-            existsSync(path.join(projectsRoot, projectId, "requests"))
+        ? readdirSync(projectsRoot).some((projectDirectoryName) => (
+            existsSync(path.join(
+              projectsRoot,
+              projectDirectoryName,
+              "requests",
+            ))
           ))
         : false
     )).toBe(true);
@@ -977,9 +1022,13 @@ test("project resources expose clear rules and drain edits before leaving", asyn
     await launched.page.getByRole("button", { name: "返回项目" }).click();
     await expect(launched.page.getByText("当前文件", { exact: true })).toBeVisible();
     const projectsRoot = path.join(launched.workspace, "projects");
-    const [projectId] = readdirSync(projectsRoot)
+    const [projectDirectoryName] = readdirSync(projectsRoot)
       .filter((entry) => !entry.startsWith("."));
-    const projectRulesPath = path.join(projectsRoot, projectId, "PROJECT.md");
+    const projectRulesPath = path.join(
+      projectsRoot,
+      projectDirectoryName,
+      "PROJECT.md",
+    );
     await expect.poll(
       () => readFileSync(projectRulesPath, "utf8"),
       { timeout: 20_000 },

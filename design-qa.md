@@ -1,5 +1,104 @@
 # Design QA
 
+## Comment card hierarchy and progressive actions
+
+Date: 2026-07-28
+
+Source visual truth:
+
+- Three user-provided comment-card captures covering visible actions, editing
+  hierarchy and the normal-state outer halo. They were reviewed locally and
+  remain excluded from the public repository.
+
+Implementation evidence:
+
+- `output/design-qa/2026-07-28-comment-card/comment-card-default-full.png`
+- `output/design-qa/2026-07-28-comment-card/comment-card-default.png`
+- `output/design-qa/2026-07-28-comment-card/comment-card-hover.png`
+- `output/design-qa/2026-07-28-comment-card/comment-card-editing.png`
+
+Combined comparison inputs:
+
+- `output/design-qa/2026-07-28-comment-card/comparison-default-source-vs-production.png`
+- `output/design-qa/2026-07-28-comment-card/comparison-hover-source-vs-production.png`
+- `output/design-qa/2026-07-28-comment-card/comparison-editing-source-vs-production.png`
+
+Viewport and normalization:
+
+- Production browser viewport and full screenshot: `1280 × 720` CSS pixels at
+  1× output density.
+- Focused production rail fixture: `376 × 430` CSS pixels; rendered card width
+  `348` pixels.
+- Source captures: `1486 × 546`, `712 × 542` and `762 × 698` pixels. Their CSS
+  viewport and density are unavailable.
+- Each focused comparison crops the source and production card regions, then
+  normalizes both rail widths to `600` pixels without stretching their heights.
+- States: saved comment at rest, actual forced `:hover`, keyboard focus within
+  the card, and focused editing.
+
+Full-view comparison evidence:
+
+- The production build was opened at the target viewport and the real PageRoot
+  stylesheet was exercised with a temporary synthetic comment-card fixture.
+  The fixture used the production markup classes and the same Phosphor icons as
+  the application; it was removed after the check.
+- The normal card retains the existing right-rail placement, connector,
+  typography hierarchy and semantic purple accent while removing the second
+  outer ring.
+- No page overflow, clipping, broken radius or unexpected surrounding layout
+  change appeared in the full capture.
+
+Focused comparison evidence:
+
+- Fonts and typography: saved-comment text and edit text both compute to
+  `14px` with `23.1px` line height. Existing target-label and timestamp
+  hierarchy remains unchanged.
+- Spacing and layout rhythm: the default footer computes to `0px` height and
+  `0px` top margin. Hover, keyboard focus and editing reveal a `30px` footer
+  with `6px` separation; the card grows by exactly `36px`.
+- Colors and tokens: normal, located-focus and editing states each compute to
+  one `1px` border, no outline and one
+  `0 15px 32px rgb(45 42 104 / 7%)` shadow.
+- Editor hierarchy: the focused textarea has a `0px` border, no outline, a
+  light-gray tonal background and one `2px` inset purple focus underline.
+- Image and icon fidelity: the existing Phosphor paperclip, image, pencil,
+  trash, cancel and confirm icons are retained. No replacement asset or
+  approximate glyph was introduced.
+- Copy and content: production labels, timestamp format and comment content
+  remain unchanged; only the approved text size and presentation states move.
+- Divider: the footer computes to a `0px` top border in every checked state.
+
+Findings:
+
+- No actionable P0, P1 or P2 mismatch remains.
+- The compact reveal is safe for keyboard users: programmatic keyboard focus on
+  the card reveals the same `30px` tools while retaining a single card shadow.
+- Dense-card placement continues to use the existing `ResizeObserver` height
+  measurements, so the additional `36px` revealed height is fed back into the
+  established non-overlap layout rather than being reserved at rest.
+
+Comparison history:
+
+1. Source inspection found a P2 hierarchy issue that would have survived a
+   base-card-only change: the later `data-focused="true"` rule still added a
+   second purple ring and an animated multi-shadow.
+2. The composer focus treatment was separated from saved-comment focus.
+   Normal, located-focus and editing cards now share one border and one shadow;
+   the editor uses a tonal plane and focus underline.
+3. Post-fix computed measurements confirmed default footer height `0px`, hover
+   and editing footer height `30px`, `6px` reveal spacing, `14px` comment text,
+   no divider, no card outline and no second shadow.
+
+Browser checks:
+
+- Production build loaded successfully at the target viewport.
+- Default, hover, keyboard-focus and editing states were captured and compared.
+- The browser console contained no warnings or errors.
+
+final result: passed
+
+---
+
 Viewport: 1280 × 720
 
 References:
@@ -85,6 +184,92 @@ Viewport and state:
 ## Follow-up polish
 
 - None required for this content refresh.
+
+final result: passed
+
+---
+
+# AI handoff four-stage flow QA
+
+Date: 2026-07-28
+
+Source visual truth:
+
+- Three user-provided captures covering the approved process-panel boundary,
+  native footer-button treatment, and state-specific actions.
+- The source captures were reviewed locally and remain outside the repository.
+
+Implementation evidence:
+
+- `output/design-qa/2026-07-28-ai-flow/handoff-waiting-4-stage.jpg`
+- `output/design-qa/2026-07-28-ai-flow/handoff-copy-failure-4-stage.jpg`
+- `output/design-qa/2026-07-28-ai-flow/handoff-success-4-stage.jpg`
+- `output/design-qa/2026-07-28-ai-flow/handoff-no-change-4-stage.jpg`
+
+Combined comparison inputs:
+
+- `output/design-qa/2026-07-28-ai-flow/comparison-waiting-reference-vs-final.png`
+- `output/design-qa/2026-07-28-ai-flow/comparison-process-panel-reference-vs-final.png`
+
+Viewport and state:
+
+- Waiting, copy-failure, and no-change captures: `1152 × 768` screen pixels.
+- Success capture: `1336 × 768` screen pixels after the native window zoom
+  action; the application content keeps the same desktop breakpoints.
+- The waiting-state combined comparison normalizes both source and
+  implementation to `1152 × 768` and compares the same locked-processing
+  state.
+- All states ran in isolated Electron user-data and workspace directories;
+  the user's installed application and project records were not used.
+
+## Findings
+
+- No actionable P0, P1, or P2 visual or interaction issue remains.
+- Scope: the title area, lock summary, right-side “本轮记录” panel, Finder row,
+  modal shell, and existing waiting-state footer remain visually unchanged.
+- Progress: seven internal implementation checks are represented as four
+  user-facing phases—prepare/copy, wait for AI, validate/save, and result.
+- Truthfulness: waiting shows one completed phase and one current phase;
+  completion is not inferred from an output file, elapsed time, or a generic
+  error.
+- State placement: clipboard failure is shown in phase one, no-change ends in
+  a neutral result row, and a verified new version ends in the current
+  confirmation row.
+- Visual hierarchy: each phase is a compact native card using the existing
+  green, indigo, neutral, and error tokens. Text remains inside the panel
+  without clipping or horizontal overflow.
+- Footer actions: the existing waiting buttons retain their original order,
+  icons, size, radius, outline, and filled-primary treatment. New actions use
+  those same project classes instead of adding a second button design.
+- Decision placement: success, no-change, copy recovery, and conflict actions
+  belong to the fixed footer; the process cards contain status only.
+
+## Interaction checks
+
+- Created a real frozen Request and confirmed the waiting state shows exactly
+  four phases plus the unchanged cancel, preview, and re-copy actions.
+- Injected a clipboard write failure and confirmed “重新复制” and “取消本轮”
+  are the only footer decisions.
+- Ran the official finalizer with changed HTML and confirmed
+  “打开最新版” plus “稍后处理”.
+- Ran the official finalizer with comparison-identical HTML and confirmed no
+  Version was created and the footer offers “修改要求” plus “返回编辑”.
+- Checked the accessibility tree in every captured state; phase labels,
+  details, counts, and buttons are exposed in reading order.
+
+## Automated checks
+
+- Focused lifecycle, shell, and notification tests: 41 passed.
+- Full Node suite: 481 passed, 3 skipped, 0 failed.
+- `npm run typecheck`
+- `npm run lint`
+- `npm run build`
+- `npm run task:finish`: passed, including 197 Node tests, 8 browser
+  smoke tests, 3 Electron smoke tests, and 2 AI closed-loop smoke tests.
+
+## Follow-up polish
+
+- None required inside the approved modification boundary.
 
 final result: passed
 
