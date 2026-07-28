@@ -429,6 +429,76 @@ function restoreChildren(hostElement: HTMLElement, children: Node[]): void {
   );
 }
 
+function restoreSourceChildren(
+  hostElement: HTMLElement,
+  sourceInnerHtml: string,
+): void {
+  const range = hostElement.ownerDocument.createRange();
+  range.selectNodeContents(hostElement);
+  hostElement.replaceChildren(range.createContextualFragment(sourceInnerHtml));
+}
+
+const HTML_NAMESPACE = "http://www.w3.org/1999/xhtml";
+const IMMUTABLE_FORMATTING_TAGS = new Set([
+  "audio",
+  "button",
+  "canvas",
+  "embed",
+  "iframe",
+  "img",
+  "input",
+  "math",
+  "object",
+  "optgroup",
+  "option",
+  "select",
+  "svg",
+  "textarea",
+  "video",
+]);
+
+function isRuntimeAttributeName(name: string): boolean {
+  const normalized = name.toLowerCase();
+  return normalized === "contenteditable"
+    || normalized === "data-html-ai-source-node-id"
+    || normalized === "role"
+    || normalized === "spellcheck"
+    || normalized.startsWith("data-html-canvas-")
+    || normalized.startsWith("data-pageroot-");
+}
+
+function isImmutableFormattingNode(node: Node): boolean {
+  if (node.nodeType === Node.COMMENT_NODE) return true;
+  if (node.nodeType !== Node.ELEMENT_NODE) return false;
+  const element = node as Element;
+  const tagName = element.localName.toLowerCase();
+  if (
+    element.namespaceURI !== HTML_NAMESPACE
+    || IMMUTABLE_FORMATTING_TAGS.has(tagName)
+  ) return true;
+  if (tagName === "br" || tagName === "wbr") return false;
+  const authoredAttributes = Array.from(element.attributes).filter(
+    (attribute) => !isRuntimeAttributeName(attribute.name),
+  );
+  return element.childNodes.length === 0 && authoredAttributes.length > 0;
+}
+
+function selectionCrossesImmutableStructure(
+  hostElement: HTMLElement,
+  range: Range,
+): boolean {
+  const walker = hostElement.ownerDocument.createTreeWalker(
+    hostElement,
+    NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_COMMENT,
+  );
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    if (isImmutableFormattingNode(node) && range.intersectsNode(node)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export class IslandEditingController {
   readonly hostElement: HTMLElement;
 
@@ -437,6 +507,8 @@ export class IslandEditingController {
   private baselineInnerHtml: string;
 
   private baselineCanonicalInnerHtml: string;
+
+  private ownedCanonicalInnerHtml: string;
 
   private baselineChildren: Node[];
 
@@ -498,7 +570,29 @@ export class IslandEditingController {
       onError: options.onError,
       onPendingCommandReady: options.onPendingCommandReady,
     };
-    this.baselineCanonicalInnerHtml = this.serializeCanonical();
+    this.baselineCanonicalInnerHtml = normalizeEditableIslandHtml(
+      this.baselineInnerHtml,
+      { baselineInnerHtml: this.baselineInnerHtml },
+    );
+    let liveDomMatchesSource = false;
+    try {
+      liveDomMatchesSource = this.serializeLiveCanonical()
+        === this.baselineCanonicalInnerHtml;
+    } catch {
+      liveDomMatchesSource = false;
+    }
+    if (!liveDomMatchesSource) {
+      restoreSourceChildren(this.hostElement, this.baselineInnerHtml);
+      if (
+        this.serializeLiveCanonical()
+        !== this.baselineCanonicalInnerHtml
+      ) {
+        throw new Error(
+          "源码可编辑岛无法建立一致的受控 DOM 基线。",
+        );
+      }
+    }
+    this.ownedCanonicalInnerHtml = this.baselineCanonicalInnerHtml;
     this.baselineChildren = Array.from(this.hostElement.childNodes).map(
       (node) => node.cloneNode(true),
     );
@@ -578,7 +672,7 @@ export class IslandEditingController {
     );
   }
 
-  private serializeCanonical(): string {
+  private serializeLiveCanonical(): string {
     return normalizeEditableIslandHtml(this.hostElement.innerHTML, {
       baselineInnerHtml: this.baselineInnerHtml,
     });
@@ -608,7 +702,7 @@ export class IslandEditingController {
 
   private validateDom(): boolean {
     try {
-      this.serializeCanonical();
+      this.ownedCanonicalInnerHtml = this.serializeLiveCanonical();
       this.refreshLastValidatedDraft();
       this.emitState();
       return true;
@@ -619,8 +713,27 @@ export class IslandEditingController {
     }
   }
 
+  private ensureControlledDom(): boolean {
+    try {
+      if (this.serializeLiveCanonical() === this.ownedCanonicalInnerHtml) {
+        return true;
+      }
+    } catch {
+      // Fall through to the same source-backed recovery path.
+    }
+    this.restoreLastValidatedDraft();
+    this.reportError(new Error(
+      "页面在编辑之外发生了变化，已恢复到上一次安全内容。",
+    ));
+    return false;
+  }
+
   private handleBeforeInput = (event: InputEvent): void => {
     if (!this.hasCurrentLease()) return;
+    if (!this.composing && !this.ensureControlledDom()) {
+      event.preventDefault();
+      return;
+    }
     this.lastInputType = event.inputType || null;
     if (
       !event.isComposing
@@ -665,22 +778,30 @@ export class IslandEditingController {
       this.validateDom();
       return;
     }
-    if (
-      event.inputType !== "insertParagraph"
-      && event.inputType !== "insertLineBreak"
-    ) {
+    if (event.isComposing) {
       this.armExpectedInputDelivery();
       return;
     }
+    if (
+      event.inputType === "insertParagraph"
+      || event.inputType === "insertLineBreak"
+    ) {
+      event.preventDefault();
+      this.runExpectedMutation(() => {
+        const fragment = this.hostElement.ownerDocument.createDocumentFragment();
+        fragment.append(this.hostElement.ownerDocument.createElement("br"));
+        if (!insertFragmentAtSelection(this.hostElement, fragment)) {
+          throw new Error("无法在当前光标位置插入换行。");
+        }
+      });
+      this.validateDom();
+      return;
+    }
     event.preventDefault();
-    this.runExpectedMutation(() => {
-      const fragment = this.hostElement.ownerDocument.createDocumentFragment();
-      fragment.append(this.hostElement.ownerDocument.createElement("br"));
-      if (!insertFragmentAtSelection(this.hostElement, fragment)) {
-        throw new Error("无法在当前光标位置插入换行。");
-      }
-    });
-    this.validateDom();
+    this.clearExpectedInputDelivery();
+    this.reportError(new Error(
+      `暂不支持 ${event.inputType || "unknown"} 类型的浏览器富文本输入。`,
+    ));
   };
 
   private handleInput = (event: InputEvent): void => {
@@ -710,6 +831,8 @@ export class IslandEditingController {
   private handlePaste = (event: ClipboardEvent): void => {
     if (!this.hasCurrentLease()) return;
     event.preventDefault();
+    if (!this.ensureControlledDom()) return;
+    this.clearExpectedInputDelivery();
     this.lastInputType = "insertFromPaste";
     this.normalizeCollapsedInsertionAffinity();
     const text = event.clipboardData?.getData("text/plain") ?? "";
@@ -726,6 +849,7 @@ export class IslandEditingController {
 
   private handleCompositionStart = (): void => {
     if (!this.hasCurrentLease()) return;
+    if (!this.ensureControlledDom()) return;
     this.normalizeCollapsedInsertionAffinity();
     this.compositionSnapshot = {
       children: Array.from(this.hostElement.childNodes).map(
@@ -742,6 +866,7 @@ export class IslandEditingController {
   private handleCompositionEnd = (event: CompositionEvent): void => {
     if (!this.hasCurrentLease()) return;
     this.composing = false;
+    this.clearExpectedInputDelivery();
     this.observer?.takeRecords();
     const snapshot = this.compositionSnapshot;
     this.compositionSnapshot = null;
@@ -776,6 +901,7 @@ export class IslandEditingController {
       this.composing = false;
       this.compositionSnapshot = null;
       this.compositionEscapeRequested = false;
+      this.clearExpectedInputDelivery();
       this.observer?.takeRecords();
       if (snapshot) {
         this.runExpectedMutation(() => {
@@ -792,6 +918,7 @@ export class IslandEditingController {
     if (!this.hasCurrentLease()) return;
     if (!this.composing && event.key === "Enter") {
       event.preventDefault();
+      if (!this.ensureControlledDom()) return;
       this.lastInputType = event.shiftKey
         ? "insertLineBreak"
         : "insertParagraph";
@@ -810,6 +937,7 @@ export class IslandEditingController {
       && (event.key === "Backspace" || event.key === "Delete")
     ) {
       event.preventDefault();
+      if (!this.ensureControlledDom()) return;
       const direction = event.key === "Backspace" ? "Backward" : "Forward";
       const granularity = event.metaKey
         ? "SoftLine"
@@ -858,7 +986,8 @@ export class IslandEditingController {
       if (!this.hasCurrentLease()) return;
       let dirty = false;
       try {
-        dirty = this.serializeCanonical() !== this.baselineCanonicalInnerHtml;
+        dirty = this.serializeLiveCanonical() !== this.ownedCanonicalInnerHtml
+          || this.ownedCanonicalInnerHtml !== this.baselineCanonicalInnerHtml;
       } catch {
         dirty = true;
       }
@@ -1012,8 +1141,15 @@ export class IslandEditingController {
 
   applyInlineStyle(property: string, value: string, important = false): boolean {
     if (!this.hasCurrentLease() || this.composing) return false;
+    if (!this.ensureControlledDom()) return false;
     const range = selectionRangeInsideHost(this.hostElement);
     if (!range || range.collapsed) return false;
+    if (selectionCrossesImmutableStructure(this.hostElement, range)) {
+      this.reportError(new Error(
+        "当前选区跨过图片、控件、媒体或源码注释，不能安全改变文字格式。",
+      ));
+      return false;
+    }
     const beforeSelection = this.getSelection();
     try {
       this.runExpectedMutation(() => {
@@ -1074,14 +1210,16 @@ export class IslandEditingController {
     if (!this.ready) return { ok: false, reason: "not-ready" };
     if (this.composing) return { ok: false, reason: "composing" };
     const selection = this.getSelection();
-    let nextInnerHtml: string;
     try {
-      nextInnerHtml = this.serializeCanonical();
+      if (this.serializeLiveCanonical() !== this.ownedCanonicalInnerHtml) {
+        throw new Error("可编辑 DOM 已偏离受控源码草稿。");
+      }
     } catch (cause) {
-      this.rollback();
+      this.restoreLastValidatedDraft();
       this.reportError(cause);
       return { ok: false, reason: "dom-drift" };
     }
+    const nextInnerHtml = this.ownedCanonicalInnerHtml;
     if (nextInnerHtml === this.baselineCanonicalInnerHtml) {
       return { ok: true, checkpoint: null, selection };
     }
@@ -1119,7 +1257,10 @@ export class IslandEditingController {
       canonical = normalizeEditableIslandHtml(baseline.innerHtml, {
         baselineInnerHtml: baseline.innerHtml,
       });
-      if (this.serializeCanonical() !== canonical) return false;
+      if (
+        this.ownedCanonicalInnerHtml !== canonical
+        || this.serializeLiveCanonical() !== canonical
+      ) return false;
     } catch {
       return false;
     }
@@ -1131,6 +1272,7 @@ export class IslandEditingController {
     this.baseline = { ...baseline };
     this.baselineInnerHtml = baseline.innerHtml;
     this.baselineCanonicalInnerHtml = canonical;
+    this.ownedCanonicalInnerHtml = canonical;
     this.baselineChildren = Array.from(this.hostElement.childNodes).map(
       (node) => node.cloneNode(true),
     );
@@ -1151,14 +1293,8 @@ export class IslandEditingController {
     baseline: NativeEditBaseline,
     options: IslandExternalBaselineOptions = {},
   ): boolean {
-    let innerHtml: string;
-    try {
-      innerHtml = this.serializeCanonical();
-    } catch {
-      return false;
-    }
     return this.applyExternalIslandBaseline(
-      { ...baseline, innerHtml },
+      { ...baseline, innerHtml: this.ownedCanonicalInnerHtml },
       options,
     );
   }
@@ -1189,6 +1325,7 @@ export class IslandEditingController {
       affinity: selection.affinity,
     });
     this.lastInputType = null;
+    this.ownedCanonicalInnerHtml = this.baselineCanonicalInnerHtml;
     this.clearExpectedInputDelivery();
     this.refreshLastValidatedDraft();
     this.emitState();
@@ -1207,7 +1344,8 @@ export class IslandEditingController {
   isDirty(): boolean {
     if (!this.hasCurrentLease()) return false;
     try {
-      return this.serializeCanonical() !== this.baselineCanonicalInnerHtml;
+      return this.serializeLiveCanonical() !== this.ownedCanonicalInnerHtml
+        || this.ownedCanonicalInnerHtml !== this.baselineCanonicalInnerHtml;
     } catch {
       return true;
     }

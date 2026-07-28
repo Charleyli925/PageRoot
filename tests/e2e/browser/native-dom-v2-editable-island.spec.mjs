@@ -177,6 +177,95 @@ test("paste is plain text, multiline paste becomes br, and cut stays local", asy
   expect(await target.locator("img, b").count()).toBe(0);
 });
 
+test("pre-activation runtime DOM drift never enters the source-backed island draft", async ({ page }) => {
+  const { frame } = await openFixture(page);
+  const previewTarget = frame.locator('[data-native-case="plain"]');
+  await previewTarget.evaluate((element) => {
+    const wrapper = element.ownerDocument.createElement("span");
+    wrapper.className = "runtime-only";
+    wrapper.style.color = "rgb(255, 0, 0)";
+    wrapper.textContent = element.textContent;
+    element.replaceChildren(wrapper);
+  });
+
+  const target = await activateNativeEdit(frame, "plain");
+  await expect(target.locator(".runtime-only")).toHaveCount(0);
+  await setTextSelection(frame, "plain", "普通段落末尾".length);
+  await page.keyboard.insertText("新增");
+
+  const expected = replaceEditableIslandBytes(
+    source,
+    "plain",
+    "普通段落末尾新增",
+  ).toString("utf8");
+  await expect.poll(async () => (
+    await exportCurrentHtml(page)
+  ).toString("utf8")).toBe(expected);
+});
+
+test("unsupported browser rich input never gains island commit authority", async ({ page }) => {
+  const { frame } = await openFixture(page);
+  const target = await activateNativeEdit(frame, "plain");
+  const delivery = await target.evaluate((element) => {
+    const event = new InputEvent("beforeinput", {
+      bubbles: true,
+      cancelable: true,
+      data: "不应写入",
+      inputType: "insertFromDrop",
+    });
+    return {
+      dispatchResult: element.dispatchEvent(event),
+      defaultPrevented: event.defaultPrevented,
+    };
+  });
+
+  expect(delivery).toEqual({
+    dispatchResult: false,
+    defaultPrevented: true,
+  });
+  expect(await authoredInnerHtml(target)).toBe("普通段落末尾");
+  expect((await exportCurrentHtml(page)).toString("utf8")).toBe(
+    source.toString("utf8"),
+  );
+});
+
+test("formatting refuses selections that cross immutable atoms or comments", async ({ page }) => {
+  for (const fixtureCase of editableCases.filter(({ id }) => (
+    id === "atom" || id === "comment"
+  ))) {
+    await test.step(fixtureCase.id, async () => {
+      const { editor, frame } = await openFixture(page);
+      const target = await activateNativeEdit(frame, fixtureCase.id);
+      await setTextSelection(
+        frame,
+        fixtureCase.id,
+        0,
+        fixtureCase.text.length,
+      );
+      const boldButton = page.getByRole("button", { name: "加粗", exact: true });
+      if (fixtureCase.id === "atom") {
+        // The source projection rejects structural atoms before a formatting
+        // command can be created, so the toolbar must remain unavailable.
+        await expect(boldButton).toBeDisabled();
+      } else {
+        // Comments are intentionally absent from the logical text map. The
+        // controller therefore owns the final immutable-structure check.
+        await expect(boldButton).toBeEnabled();
+        await boldButton.click();
+        await expect.poll(
+          () => editor.getAttribute("data-edit-block-detail"),
+        ).toContain("当前选区无法安全应用这个文字格式");
+      }
+
+      expect(await authoredInnerHtml(target)).toBe(fixtureCase.innerHtml);
+      expect((await exportCurrentHtml(page)).toString("utf8")).toBe(
+        source.toString("utf8"),
+      );
+      await page.keyboard.press("Escape");
+    });
+  }
+});
+
 test("toolbar formatting, protected atoms, comments and link identity stay safe", async ({ page }) => {
   const { frame } = await openFixture(page);
   const mixed = await activateNativeEdit(frame, "mixed");
