@@ -4,6 +4,8 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-07-28
+
 - Upgrade complete 0.9.0 project records additively on first start while
   retaining their existing UUID directories and every historical artifact.
 - Clarified generated AI handoff files with PageRoot branding, plain-language
@@ -127,7 +129,8 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 - Published the first public macOS release in this repository under the earlier YuanYe artifact name.
 
-[Unreleased]: https://github.com/Charleyli925/PageRoot/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/Charleyli925/PageRoot/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/Charleyli925/PageRoot/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/Charleyli925/PageRoot/compare/v0.8.10...v0.9.0
 [0.8.10]: https://github.com/Charleyli925/PageRoot/compare/v0.8.9...v0.8.10
 [0.8.9]: https://github.com/Charleyli925/PageRoot/compare/v0.8.8...v0.8.9
