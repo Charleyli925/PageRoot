@@ -45,6 +45,10 @@ Pure-browser preview is a different, strictly weaker capability: authored script
 
 HTML, attachments, AI output, update manifests and IPC payloads are treated as untrusted. Tests and fixtures must use synthetic data. A renderer compromise should not provide arbitrary Node or filesystem access; any new privileged API needs explicit validation and negative tests.
 
-## Known distribution limitation
+## Distribution and update trust
 
-Current macOS builds are ad-hoc signed and not notarized. Users must verify downloads through GitHub Releases and `SHA256SUMS.txt`. This limitation affects installation trust and convenience; it does not replace the runtime controls above.
+Public macOS candidates fail closed unless they are signed by the expected Developer ID team, use Hardened Runtime, pass Apple notarization, and carry a stapled ticket. The candidate gate verifies the signature, Team ID, Gatekeeper assessment, DMG, update ZIP, blockmap, update metadata and frozen hashes before publication.
+
+The main-process update controller accepts only the stable GitHub Release channel, owns both the startup-plus-four-hour schedule and coalesced manual checks, downloads the hash-described ZIP only after an explicit renderer intent, keeps differential transfer enabled, and disables install-on-ordinary-quit. The renderer receives only a bounded immutable status snapshot and narrow check/download/install intents. The About entry opens only the main-process constant for the project repository; renderer input can never choose an external URL. A downloaded update can install only after a second explicit restart confirmation and the normal renderer/Bridge drain succeeds; update metadata never gains filesystem or editor authority.
+
+Clients from the earlier ad-hoc/manual-update era cannot securely self-bootstrap into this trust chain. They must manually install the first signed and notarized migration release once; the legacy `update-manifest.json` remains published only to point those clients at that release.

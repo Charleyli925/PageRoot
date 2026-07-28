@@ -4,6 +4,8 @@ import test from "node:test";
 
 const [
   workbench,
+  aboutDialog,
+  restartUpdateDialog,
   styles,
   mainProcess,
   preload,
@@ -15,6 +17,8 @@ const [
   bridgeClient,
 ] = await Promise.all([
   readFile(new URL("../app/workbench.tsx", import.meta.url), "utf8"),
+  readFile(new URL("../app/components/AboutPageRootDialog.tsx", import.meta.url), "utf8"),
+  readFile(new URL("../app/components/RestartUpdateDialog.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
   readFile(new URL("../desktop/main.mjs", import.meta.url), "utf8"),
   readFile(new URL("../desktop/preload.mjs", import.meta.url), "utf8"),
@@ -409,7 +413,7 @@ test("header prioritizes the filename and keeps the approved action order", () =
   assert.doesNotMatch(header, /brand-logo\.png|className="brand"|className="update-badge"/);
   assert.match(
     header,
-    /updateAvailable[\s\S]*?className="header-update-badge"[\s\S]*?>\s*Update\s*</,
+    /updateActionVisible[\s\S]*?className="header-update-badge"[\s\S]*?updateDownloaded[\s\S]*?setRestartUpdateOpen\(true\)[\s\S]*?downloadAvailableUpdate\(\)[\s\S]*?\{updateBadgeLabel\}/,
   );
   assert.match(
     styles,
@@ -431,6 +435,7 @@ test("header prioritizes the filename and keeps the approved action order", () =
   const project = header.indexOf('className="project-button"');
   const globalComment = header.indexOf('className="global-comment-button"');
   const send = header.indexOf('className="header-send-button"');
+  const about = header.indexOf('className="about-trigger-button"');
   assert.ok(
     editPreview >= 0
       && project > editPreview
@@ -438,15 +443,46 @@ test("header prioritizes the filename and keeps the approved action order", () =
       && send > globalComment,
     "header actions must remain edit/preview, project, global comment, then send",
   );
+  assert.equal(about, -1);
+  assert.doesNotMatch(header, /InfoIcon|关于源页/);
   assert.match(workbench, /window\.htmlAIUpdates/);
   assert.match(workbench, /updates\.getStatus\(\)/);
   assert.match(workbench, /updates\.onStatus\(receiveStatus\)/);
-  assert.doesNotMatch(header, /app-version-button|检查更新|<strong>(?:YuanYe|PageRoot)<\/strong>/);
+  assert.match(workbench, /updates\.checkNow\(\)/);
+  assert.match(workbench, /downloadAvailable\(\)/);
+  assert.match(workbench, /installDownloaded\(\)/);
+  assert.match(workbench, /New! 重启更新/);
+  assert.doesNotMatch(workbench, /PageRoot \$\{version\} 已下载[\s\S]*?setToast/);
+  assert.doesNotMatch(header, /app-version-button|<strong>(?:YuanYe|PageRoot)<\/strong>/);
   assert.match(styles, /\.header-actions button,[\s\S]*?border:\s*0[\s\S]*?box-shadow:\s*none/);
-  assert.match(mainProcess, /scheduleAutomaticUpdateCheck\(\)/);
+  assert.match(
+    styles,
+    /\.header-actions \.header-update-badge\s*\{[\s\S]*?right:\s*0[\s\S]*?padding:\s*0[\s\S]*?border:\s*0[\s\S]*?background:\s*transparent[\s\S]*?color:\s*var\(--red\)[\s\S]*?font-style:\s*italic/,
+  );
+  assert.match(mainProcess, /startAutomaticChecks\(\)/);
+  assert.match(mainProcess, /createApplicationUpdateController/);
+  assert.match(mainProcess, /coordinateApplicationUpdateInstall/);
+  assert.match(mainProcess, /label:\s*"关于源页"[\s\S]*?click:\s*requestAboutPageRoot/);
   assert.match(mainProcess, /LATEST_RELEASE_PAGE_URL/);
   assert.match(mainProcess, /shell\.openExternal\(LATEST_RELEASE_PAGE_URL\)/);
+  assert.match(mainProcess, /shell\.openExternal\(PROJECT_REPOSITORY_URL\)/);
   assert.doesNotMatch(preload, /openLatestRelease:\s*\([^)]*url/);
+  assert.doesNotMatch(preload, /openRepository:\s*\([^)]*url/);
+  assert.match(aboutDialog, /<dialog[\s\S]*?className="about-dialog"/);
+  assert.match(aboutDialog, /id="about-pageroot-title">源页</);
+  assert.match(aboutDialog, /立即检查/);
+  assert.match(aboutDialog, /下载更新/);
+  assert.match(aboutDialog, /PageRoot on GitHub/);
+  assert.match(aboutDialog, /每 4 小时自动检查/);
+  assert.match(aboutDialog, /aria-live="polite"/);
+  assert.doesNotMatch(aboutDialog, /role="progressbar"|about-check-spinner/);
+  assert.match(restartUpdateDialog, /className="restart-update-dialog"/);
+  assert.match(restartUpdateDialog, /现在重启并安装更新？/);
+  assert.match(restartUpdateDialog, />\s*稍后\s*</);
+  assert.match(restartUpdateDialog, /现在重启/);
+  assert.match(styles, /\.about-dialog::backdrop[\s\S]*?backdrop-filter:\s*blur\(8px\)/);
+  assert.match(styles, /\.about-dialog button:focus-visible/);
+  assert.match(styles, /\.restart-update-dialog::backdrop/);
 });
 
 test("QoderWork handoff exposes a truthful process board and manual open action", () => {

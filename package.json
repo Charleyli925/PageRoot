@@ -85,11 +85,13 @@
   "dependencies": {
     "@noble/hashes": "2.2.0",
     "@phosphor-icons/react": "2.1.10",
+    "electron-updater": "6.8.9",
     "entities": "8.0.0",
     "next": "16.2.11",
     "parse5": "8.0.1",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "semver": "7.7.4"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "1.47.0",
@@ -125,6 +127,7 @@
     "artifactName": "PageRoot-${version}-${arch}.${ext}",
     "afterPack": "desktop/after-pack.mjs",
     "asar": true,
+    "forceCodeSigning": true,
     "directories": {
       "output": "release",
       "buildResources": "desktop/resources"
@@ -141,6 +144,7 @@
       "desktop/product-contract.mjs",
       "desktop/qoder-handoff.mjs",
       "desktop/manual-update.mjs",
+      "desktop/application-update.mjs",
       "public/brand-logo.png",
       "dist-desktop/renderer/**/*",
       "package.json",
@@ -215,6 +219,118 @@
         ]
       },
       {
+        "from": "node_modules/electron-updater",
+        "to": "node_modules/electron-updater",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "node_modules/builder-util-runtime",
+        "to": "node_modules/builder-util-runtime",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "node_modules/fs-extra",
+        "to": "node_modules/fs-extra",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "node_modules/js-yaml",
+        "to": "node_modules/js-yaml",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "node_modules/lazy-val",
+        "to": "node_modules/lazy-val",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "node_modules/lodash.escaperegexp",
+        "to": "node_modules/lodash.escaperegexp",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "node_modules/lodash.isequal",
+        "to": "node_modules/lodash.isequal",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "node_modules/semver",
+        "to": "node_modules/semver",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "node_modules/tiny-typed-emitter",
+        "to": "node_modules/tiny-typed-emitter",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "node_modules/debug",
+        "to": "node_modules/debug",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "node_modules/sax",
+        "to": "node_modules/sax",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "node_modules/ms",
+        "to": "node_modules/ms",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "node_modules/argparse",
+        "to": "node_modules/argparse",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "node_modules/graceful-fs",
+        "to": "node_modules/graceful-fs",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "node_modules/jsonfile",
+        "to": "node_modules/jsonfile",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "node_modules/universalify",
+        "to": "node_modules/universalify",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
         "from": "schemas",
         "to": "schemas",
         "filter": [
@@ -252,18 +368,25 @@
     "mac": {
       "category": "public.app-category.developer-tools",
       "icon": "desktop/resources/icon.icns",
-      "identity": "-",
-      "hardenedRuntime": false,
+      "hardenedRuntime": true,
+      "notarize": true,
+      "entitlements": "desktop/resources/entitlements.mac.plist",
+      "entitlementsInherit": "desktop/resources/entitlements.mac.plist",
+      "electronUpdaterCompatibility": ">=2.16",
       "minimumSystemVersion": "12.0",
       "target": [
-        {
-          "target": "dmg",
-          "arch": [
-            "arm64"
-          ]
-        }
+        "dmg",
+        "zip"
       ]
     },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Charleyli925",
+        "repo": "PageRoot",
+        "releaseType": "release"
+      }
+    ],
     "dmg": {
       "title": "PageRoot ${version}",
       "backgroundColor": "#f2f0ea",

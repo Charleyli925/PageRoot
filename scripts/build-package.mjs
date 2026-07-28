@@ -30,10 +30,10 @@ async function main() {
   );
   // A release tag makes electron-builder infer `--publish onTagOrDraft` unless
   // publishing is disabled explicitly. PageRoot publishes only after the DMG
-  // and its provenance have passed the artifact gate in the Release workflow.
+  // and updater assets have passed the artifact gate in the Release workflow.
   const child = spawn(
     executable,
-    ["--mac", "dmg", `--${architecture}`, "--publish", "never"],
+    ["--mac", "dmg", "zip", `--${architecture}`, "--publish", "never"],
     {
       cwd: productRoot,
       env: process.env,

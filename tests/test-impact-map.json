@@ -323,6 +323,7 @@
       "patterns": ["^desktop/.*\\.(?:mjs|tsx|ts|html)$"],
       "suites": ["electron-smoke"],
       "nodeTests": [
+        "tests/application-update.test.mjs",
         "tests/desktop-close-recovery.test.mjs",
         "tests/desktop-file-writer.test.mjs",
         "tests/desktop-preload-ipc.test.mjs",

@@ -1235,7 +1235,7 @@ test("an automatic update result appears above the Qoder action", async () => {
       );
     });
     await expect(launched.page.getByRole("button", {
-      name: "发现 PageRoot 9.9.9，打开 GitHub 更新页面",
+      name: "发现 PageRoot 9.9.9，下载更新",
     })).toBeVisible();
 
     await launched.electronApp.evaluate(({ BrowserWindow }) => {
@@ -1252,7 +1252,7 @@ test("an automatic update result appears above the Qoder action", async () => {
       );
     });
     await expect(launched.page.getByRole("button", {
-      name: /打开 GitHub 更新页面/u,
+      name: "发现 PageRoot 9.9.9，下载更新",
     })).toHaveCount(0);
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);

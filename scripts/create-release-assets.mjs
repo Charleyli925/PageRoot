@@ -31,8 +31,6 @@ async function main() {
     throw new Error(`Tag ${process.env.GITHUB_REF_NAME} does not match package version ${packageJson.version}.`);
   }
 
-  const dmg = await readFile(layout.dmgPath);
-  const checksum = createHash("sha256").update(dmg).digest("hex");
   const manifest = {
     schemaVersion: 1,
     version: packageJson.version,
@@ -46,16 +44,29 @@ async function main() {
       `${JSON.stringify(manifest, null, 2)}\n`,
       "utf8",
     ),
-    writeFile(
-      path.join(layout.releaseDirectory, "SHA256SUMS.txt"),
-      `${checksum}  ${path.basename(layout.dmgPath)}\n`,
-      "utf8",
-    ),
     copyFile(
       path.join(productRoot, buildInfoRelativePath),
       path.join(layout.releaseDirectory, "build-info.json"),
     ),
   ]);
+  const checksumPaths = [
+    layout.dmgPath,
+    layout.zipPath,
+    layout.blockmapPath,
+    layout.updateInfoPath,
+    path.join(layout.releaseDirectory, "update-manifest.json"),
+    path.join(layout.releaseDirectory, "build-info.json"),
+  ];
+  const checksumEntries = await Promise.all(checksumPaths.map(async (filePath) => ({
+    name: path.basename(filePath),
+    checksum: createHash("sha256").update(await readFile(filePath)).digest("hex"),
+  })));
+  checksumEntries.sort((left, right) => left.name.localeCompare(right.name));
+  await writeFile(
+    path.join(layout.releaseDirectory, "SHA256SUMS.txt"),
+    `${checksumEntries.map((entry) => `${entry.checksum}  ${entry.name}`).join("\n")}\n`,
+    "utf8",
+  );
   console.log(`Release assets created in ${layout.releaseDirectory}`);
 }
 

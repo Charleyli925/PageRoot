@@ -9,7 +9,7 @@ PageRoot keeps the release standard high while avoiding repeated proof of the sa
 | Draft feedback | Draft Pull Request open or update | Impact-selected Node/compiler feedback | Run the complete browser and Electron matrix |
 | Source candidate | Pull Request becomes ready or its ready head changes | Full Node, three Browser shards, real HTML, native Electron and deterministic AI; exact-tree attestation | Package or publish an installer |
 | Main integrity | Source candidate is merged | Match merge commit, Tree Hash, version and fresh PR attestation; fixed Node/Browser smoke | Repeat the complete source gate |
-| Release candidate | Manual `Release Candidate` dispatch on current `main` | Packaged App launch, DMG/signature/content checks, release asset hashes and candidate attestation | Create a tag or GitHub Release |
+| Release candidate | Manual `Release Candidate` dispatch on current `main` | Packaged App launch, Developer ID/notarization, DMG/ZIP/update-metadata/content checks, release asset hashes and candidate attestation | Create a tag or GitHub Release |
 | Publication | Manual `Release` dispatch for the exact version on current `main` | Fresh matching candidate, downloaded byte hashes and provenance | Rebuild, replace or silently mutate candidate bytes |
 
 The publication workflow creates the annotated tag only after the pre-tag candidate has passed. It publishes the exact downloaded candidate files. A failed candidate therefore does not consume a version tag.
@@ -61,7 +61,7 @@ Do not raise global timeouts, enable blanket retries or rerun an entire green ma
 
 1. Merge the version/change PR after its final ready-state `release-gate` passes.
 2. Confirm `main-integrity` and `main-smoke` are green for the merge commit.
-3. Dispatch `Release Candidate` from `main`. It requires a source-gate attestation no older than 168 hours.
+3. Confirm the signing `.p12` and fresh notarization credentials are present in GitHub encrypted secrets, then dispatch `Release Candidate` from `main`. It requires a source-gate attestation no older than 168 hours and fails before packaging when a required credential is missing.
 4. Inspect the candidate run and its attempt-qualified artifact. Candidate artifacts are retained for 14 days and are reusable for publication for 72 hours. A failed-job rerun creates a distinct candidate identity and publication resolves only the successful attempt.
 5. Dispatch `Release` from `main` with the exact package version. It verifies and publishes the candidate, then creates the annotated immutable tag and GitHub Release.
 6. If publication fails after the exact tag was created but before the Release exists, rerun the same publication workflow. It may resume only when the existing annotated tag resolves to the identical commit.
