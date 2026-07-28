@@ -152,6 +152,21 @@ type DesktopProjectsApi = {
   getActiveProject: () => Promise<HtmlProject | null>;
   openHtml: () => Promise<HtmlProject | null>;
   showInFolder?: (sourcePath: string) => Promise<{ sourcePath: string }>;
+  renameHtml?: (payload: {
+    operationId: string;
+    sourcePath: string;
+    stem: string;
+    expectedSha256: string;
+  }) => Promise<HtmlProject & {
+    operationId: string;
+    previousSourcePath: string;
+    fileName: string;
+    stem: string;
+    extension: string;
+    renamed: boolean;
+    replayed: boolean;
+    workspaceRelinked: boolean;
+  }>;
   revealRequestFolder?: (payload: {
     sourcePath: string;
     requestPath: string;
@@ -489,6 +504,28 @@ const WELCOME_PROJECT = {
 
 function fileStem(name: string): string {
   return name.replace(/\.html?$/i, "") || "未命名页面";
+}
+
+function localFileNameFromSourcePath(
+  sourcePath: string | null | undefined,
+): string {
+  if (!sourcePath) return "";
+  const separatorIndex = Math.max(
+    sourcePath.lastIndexOf("/"),
+    sourcePath.lastIndexOf("\\"),
+  );
+  return sourcePath.slice(separatorIndex + 1) || sourcePath;
+}
+
+function fileExtension(name: string): string {
+  const matched = name.match(/(\.html?)$/iu);
+  return matched?.[1] || "";
+}
+
+function sourceRenameOperationId(): string {
+  const randomId = globalThis.crypto?.randomUUID?.()
+    || `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 14)}`;
+  return `rename_${randomId}`;
 }
 
 function comparableLocalSourcePath(sourcePath: string | null | undefined): string {
@@ -1668,6 +1705,9 @@ export default function Workbench() {
     abortedRequestIds: new Set(),
   });
   const saveProjectRulesRef = useRef<() => Promise<boolean>>(async () => false);
+  const fileRenameInputRef = useRef<HTMLInputElement | null>(null);
+  const fileRenameEditingRef = useRef(false);
+  const fileRenameBusyRef = useRef(false);
 
   const [html, setHtml] = useState(DEFAULT_PROJECT_HTML);
   const [projectName, setProjectName] = useState(WELCOME_PROJECT.name);
@@ -1682,6 +1722,10 @@ export default function Workbench() {
   const [persistState, setPersistState] = useState<PersistState>("idle");
   const [persistError, setPersistError] = useState("");
   const [lastModifiedAt, setLastModifiedAt] = useState<string | null>(null);
+  const [fileRenameEditing, setFileRenameEditing] = useState(false);
+  const [fileRenameBusy, setFileRenameBusy] = useState(false);
+  const [fileRenameDraft, setFileRenameDraft] = useState("");
+  const [fileRenameError, setFileRenameError] = useState("");
   const [, setProjectMenuOpen] = useState(false);
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
   const [recentProjectsError, setRecentProjectsError] = useState("");
@@ -1752,7 +1796,7 @@ export default function Workbench() {
   const [manualUpdateCheckFailed, setManualUpdateCheckFailed] = useState(false);
   const [repositoryOpenFailed, setRepositoryOpenFailed] = useState(false);
   const promptedUpdateVersionRef = useRef<string | null>(null);
-  const [openedAiVersionNotice, setOpenedAiVersionNotice] =
+  const [, setOpenedAiVersionNotice] =
     useState<OpenedAiVersionNotice | null>(null);
   const [toast, setToast] = useReducer(noticeReducer, null);
   const [pausedNoticeIdentity, setPausedNoticeIdentity] =
@@ -1930,6 +1974,26 @@ export default function Workbench() {
     )
     && updateResult.latestVersion,
   );
+  const currentSourceFileName =
+    localFileNameFromSourcePath(sourcePath) || projectName;
+  const currentSourceFileExtension = fileExtension(currentSourceFileName);
+  const currentSourceFileStem = fileStem(currentSourceFileName);
+  const canOfferFileRename = Boolean(
+    sourcePath
+    && sourceSha256
+    && typeof window !== "undefined"
+    && window.htmlAIProjects?.renameHtml
+    && runtimeCapabilitiesReady
+    && !browserPreviewOnly
+    && !runInProgress
+    && !projectHydrating
+    && !projectLoadError
+    && !workspaceIssue
+    && !viewTransitioning
+    && viewMode === "current"
+    && persistState === "idle"
+    && editRevision === lastPersistedRevision
+  );
   const updateDownloaded = updateResult?.status === "downloaded";
   const updateDownloading = updateResult?.status === "downloading";
   const updateBadgeLabel = updateDownloaded ? "New! 重启更新" : "New!";
@@ -1939,6 +2003,8 @@ export default function Workbench() {
     || Boolean(projectLoadError)
     || Boolean(workspaceIssue)
     || viewTransitioning
+    || fileRenameEditing
+    || fileRenameBusy
     || persistState === "conflict"
     || viewMode === "history";
 
@@ -5358,6 +5424,317 @@ export default function Workbench() {
     }
   }, []);
 
+  const cancelFileRename = useCallback(() => {
+    if (fileRenameBusyRef.current) return;
+    fileRenameEditingRef.current = false;
+    setFileRenameEditing(false);
+    setFileRenameError("");
+    setFileRenameDraft("");
+  }, []);
+
+  const beginFileRename = useCallback(() => {
+    if (
+      !canOfferFileRename
+      || fileRenameEditingRef.current
+      || fileRenameBusyRef.current
+      || editorRef.current?.hasPendingNativeEdit()
+      || pendingWriteRef.current
+      || flushPromiseRef.current
+      || editRevisionRef.current !== lastPersistedRevisionRef.current
+    ) return;
+    fileRenameEditingRef.current = true;
+    setFileRenameEditing(true);
+    setFileRenameDraft(currentSourceFileStem);
+    setFileRenameError("");
+    window.requestAnimationFrame(() => {
+      fileRenameInputRef.current?.focus();
+      fileRenameInputRef.current?.select();
+    });
+  }, [canOfferFileRename, currentSourceFileStem]);
+
+  const commitFileRename = useCallback(async () => {
+    if (!fileRenameEditingRef.current || fileRenameBusyRef.current) return;
+    const api = window.htmlAIProjects;
+    const renameFile = api?.renameHtml;
+    const previousSourcePath = sourcePathRef.current;
+    const previousEpoch = projectEpochRef.current;
+    const previousProjectId = projectIdRef.current;
+    const previousDocumentId = documentIdRef.current;
+    const extension = fileExtension(
+      localFileNameFromSourcePath(previousSourcePath),
+    );
+    let requestedStem = fileRenameDraft.normalize("NFC").trim();
+    if (
+      extension
+      && requestedStem.toLowerCase().endsWith(extension.toLowerCase())
+    ) {
+      requestedStem = requestedStem.slice(0, -extension.length).trim();
+    }
+    if (
+      !renameFile
+      || !previousSourcePath
+      || !sourceShaRef.current
+      || viewMode !== "current"
+      || runInProgress
+      || projectHydratingRef.current
+      || projectLoadErrorRef.current
+      || workspaceIssue
+    ) {
+      setFileRenameError("当前状态还不能重命名，请等待文件安全保存。");
+      return;
+    }
+    if (requestedStem === currentSourceFileStem) {
+      cancelFileRename();
+      return;
+    }
+
+    fileRenameBusyRef.current = true;
+    setFileRenameBusy(true);
+    setFileRenameError("");
+    let transitionOwnsCanvas = false;
+    let renameCommitted = false;
+    try {
+      const committed = editorRef.current?.fencePendingEdit({
+        resumeEditing: true,
+        trigger: "project-switch",
+      });
+      if (!committed || !committed.ok) {
+        throw new Error(
+          committed?.reason || "请先完成当前文字输入，再修改文件名。",
+        );
+      }
+      if (
+        committed.html !== htmlRef.current
+        || committed.pendingMutation
+      ) {
+        enqueueAutosave(
+          committed.html,
+          committed.pendingMutation || undefined,
+        );
+      }
+      const drained = await drainCoordinatorRef.current.drain("switch", {
+        deadlineAt: Date.now() + 15_000,
+      });
+      if (!drained.ok) throw new Error(drained.reason);
+      if (
+        previousEpoch !== projectEpochRef.current
+        || !sameLocalSourcePath(sourcePathRef.current, previousSourcePath)
+        || pendingWriteRef.current
+        || flushPromiseRef.current
+        || persistStateRef.current !== "idle"
+        || editRevisionRef.current !== lastPersistedRevisionRef.current
+      ) {
+        throw new Error("文件状态刚刚发生变化，请等到“已安全保存”后重试。");
+      }
+
+      const frozen = editorRef.current?.freezeNow();
+      if (!frozen || !frozen.ok) {
+        throw new Error(
+          frozen?.reason || "编辑画布尚未完成安全收口。",
+        );
+      }
+      if (
+        frozen.html !== htmlRef.current
+        || frozen.pendingMutation
+      ) {
+        enqueueAutosave(
+          frozen.html,
+          frozen.pendingMutation || undefined,
+        );
+        throw new Error("刚刚还有文字输入，源页正在安全保存，请稍后再试。");
+      }
+      transitionOwnsCanvas = true;
+      viewTransitioningRef.current = true;
+      setViewTransitioning(true);
+
+      const expectedSha256 = sourceShaRef.current;
+      const operationId = sourceRenameOperationId();
+      let result: Awaited<ReturnType<NonNullable<DesktopProjectsApi["renameHtml"]>>>;
+      try {
+        result = await renameFile({
+          operationId,
+          sourcePath: previousSourcePath,
+          stem: requestedStem,
+          expectedSha256,
+        });
+      } catch (cause) {
+        const active = await api?.getActiveProject().catch(() => null);
+        const expectedFileName = `${requestedStem}${extension}`;
+        if (
+          !active
+          || active.sha256 !== expectedSha256
+          || localFileNameFromSourcePath(active.sourcePath).normalize("NFC")
+            !== expectedFileName.normalize("NFC")
+        ) throw cause;
+        result = {
+          ...active,
+          operationId,
+          previousSourcePath,
+          fileName: expectedFileName,
+          stem: requestedStem,
+          extension,
+          renamed: true,
+          replayed: true,
+          workspaceRelinked: false,
+        };
+      }
+      if (
+        result.operationId !== operationId
+        || !sameLocalSourcePath(
+          result.previousSourcePath,
+          previousSourcePath,
+        )
+        || result.sha256 !== expectedSha256
+        || !result.sourcePath
+      ) {
+        throw new Error("重命名结果与当前文件身份不一致。");
+      }
+      renameCommitted = true;
+      const nextSourcePath = result.sourcePath;
+
+      projectQueryFenceRef.current.retire({
+        epoch: previousEpoch,
+        projectId: previousProjectId,
+        documentId: previousDocumentId,
+        sourcePath: previousSourcePath,
+      });
+      const trackedRun = backgroundRunsRef.current.get(previousSourcePath)
+        || [...backgroundRunsRef.current.values()].find(
+          (run) => sameLocalSourcePath(run.sourcePath, previousSourcePath),
+        );
+      for (const [trackedPath] of backgroundRunsRef.current) {
+        if (sameLocalSourcePath(trackedPath, previousSourcePath)) {
+          backgroundRunsRef.current.delete(trackedPath);
+        }
+      }
+      if (trackedRun) {
+        backgroundRunsRef.current.set(nextSourcePath, {
+          ...trackedRun,
+          sourcePath: nextSourcePath,
+        });
+      }
+      const trackedHandoff = qoderHandoffStatesRef.current.get(previousSourcePath)
+        || [...qoderHandoffStatesRef.current.values()].find(
+          (state) => sameLocalSourcePath(state.sourcePath, previousSourcePath),
+        );
+      for (const [trackedPath] of qoderHandoffStatesRef.current) {
+        if (sameLocalSourcePath(trackedPath, previousSourcePath)) {
+          qoderHandoffStatesRef.current.delete(trackedPath);
+        }
+      }
+      if (trackedHandoff) {
+        const nextHandoff = {
+          ...trackedHandoff,
+          sourcePath: nextSourcePath,
+        };
+        qoderHandoffStatesRef.current.set(nextSourcePath, nextHandoff);
+        setQoderHandoffState((current) => (
+          sameLocalSourcePath(current?.sourcePath, previousSourcePath)
+            ? nextHandoff
+            : current
+        ));
+      }
+      const trackedBackgroundResult =
+        backgroundProjectResultsRef.current.get(previousSourcePath)
+        || [...backgroundProjectResultsRef.current.entries()].find(
+          ([trackedPath]) => sameLocalSourcePath(
+            trackedPath,
+            previousSourcePath,
+          ),
+        )?.[1];
+      for (const [trackedPath] of backgroundProjectResultsRef.current) {
+        if (sameLocalSourcePath(trackedPath, previousSourcePath)) {
+          backgroundProjectResultsRef.current.delete(trackedPath);
+        }
+      }
+      if (trackedBackgroundResult) {
+        backgroundProjectResultsRef.current.set(
+          nextSourcePath,
+          trackedBackgroundResult,
+        );
+        setBackgroundProjectResults(
+          new Map(backgroundProjectResultsRef.current),
+        );
+      }
+
+      projectEpochRef.current += 1;
+      sourcePathRef.current = nextSourcePath;
+      sourceShaRef.current = result.sha256;
+      recoveryIdentityRef.current = null;
+      pendingWriteRef.current = null;
+      projectRegistrationPromiseRef.current = null;
+      draftPersistenceAuthorityRef.current = null;
+      draftRecoveryOperationIdRef.current = null;
+      draftSessionRef.current.deactivate();
+      recoveryStore.remove([
+        `html-ai-recovery:${previousSourcePath}`,
+        `html-ai-draft-recovery:${previousSourcePath}`,
+      ]);
+      setSourcePath(nextSourcePath);
+      setSourceSha256(result.sha256);
+      setProjectName(result.stem || requestedStem);
+      setLastModifiedAt(result.lastModifiedAt || null);
+      setOpenedAiVersionNotice(null);
+
+      await Promise.all([
+        refreshRecents(),
+        refreshWorkspace(
+          nextSourcePath,
+          projectEpochRef.current,
+          true,
+        ),
+      ]);
+      persistCurrentDraftRecovery();
+      fileRenameEditingRef.current = false;
+      setFileRenameEditing(false);
+      setFileRenameDraft("");
+      setFileRenameError("");
+    } catch (cause) {
+      setFileRenameError(productErrorMessage(
+        cause,
+        renameCommitted
+          ? "文件名已经修改，但项目状态还没有完成刷新。"
+          : "文件名没有修改，请检查名称后重试。",
+      ));
+      window.requestAnimationFrame(() => {
+        fileRenameInputRef.current?.focus();
+        fileRenameInputRef.current?.select();
+      });
+    } finally {
+      if (transitionOwnsCanvas) {
+        viewTransitioningRef.current = false;
+        setViewTransitioning(false);
+        window.requestAnimationFrame(() => editorRef.current?.unlockNow?.());
+      }
+      fileRenameBusyRef.current = false;
+      setFileRenameBusy(false);
+    }
+  }, [
+    cancelFileRename,
+    currentSourceFileStem,
+    enqueueAutosave,
+    fileRenameDraft,
+    persistCurrentDraftRecovery,
+    refreshRecents,
+    refreshWorkspace,
+    runInProgress,
+    viewMode,
+    workspaceIssue,
+  ]);
+
+  useEffect(() => {
+    if (
+      fileRenameEditing
+      && !fileRenameBusy
+      && !canOfferFileRename
+    ) cancelFileRename();
+  }, [
+    canOfferFileRename,
+    cancelFileRename,
+    fileRenameBusy,
+    fileRenameEditing,
+  ]);
+
   const showProjectRecordsInFolder = useCallback(async () => {
     const activeSourcePath = sourcePathRef.current;
     if (!activeSourcePath || !projectRecordsPath) return;
@@ -8034,10 +8411,6 @@ export default function Workbench() {
             : browserPreviewOnly
               ? "浏览器预览 · 只读"
               : "内置介绍页 · 打开本地 HTML 后开始编辑";
-  const activeOpenedAiVersionNotice =
-    sameLocalSourcePath(openedAiVersionNotice?.sourcePath, sourcePath)
-      ? openedAiVersionNotice
-      : null;
   const canShowCurrentFileInFolder = Boolean(
     sourcePath
     && typeof window !== "undefined"
@@ -8576,14 +8949,82 @@ export default function Workbench() {
             <FileHtmlIcon size={20} weight="duotone" />
           </span>
           <div className="window-file-copy">
-            <strong
-              title={activeOpenedAiVersionNotice?.fileName || projectName}
-              role="status"
-              aria-live="polite"
-              aria-atomic="true"
+            <div
+              className="window-file-title-row"
+              data-renaming={fileRenameEditing ? "true" : undefined}
+              role={fileRenameEditing ? undefined : "status"}
+              aria-live={fileRenameEditing ? undefined : "polite"}
+              aria-atomic={fileRenameEditing ? undefined : "true"}
             >
-              {activeOpenedAiVersionNotice?.fileName || projectName}
-            </strong>
+              {fileRenameEditing ? (
+                <label className="window-file-rename-field">
+                  <span className="sr-only">文件名（不含后缀）</span>
+                  <input
+                    ref={fileRenameInputRef}
+                    aria-label="文件名（不含后缀）"
+                    aria-invalid={fileRenameError ? "true" : undefined}
+                    aria-describedby={fileRenameError
+                      ? "window-file-rename-error"
+                      : undefined}
+                    autoComplete="off"
+                    disabled={fileRenameBusy}
+                    maxLength={180}
+                    spellCheck={false}
+                    value={fileRenameDraft}
+                    onBlur={() => void commitFileRename()}
+                    onChange={(event) => {
+                      setFileRenameDraft(event.target.value);
+                      if (fileRenameError) setFileRenameError("");
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        void commitFileRename();
+                      } else if (event.key === "Escape") {
+                        event.preventDefault();
+                        cancelFileRename();
+                      }
+                    }}
+                  />
+                  <span aria-hidden="true">{currentSourceFileExtension}</span>
+                </label>
+              ) : canOfferFileRename ? (
+                <button
+                  className="window-file-title-action"
+                  type="button"
+                  aria-label={`重命名文件 ${currentSourceFileStem}`}
+                  title="双击重命名文件"
+                  onDoubleClick={beginFileRename}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === "F2") {
+                      event.preventDefault();
+                      beginFileRename();
+                    }
+                  }}
+                >
+                  <strong>{currentSourceFileStem}</strong>
+                  <PencilSimpleIcon
+                    className="window-file-rename-icon"
+                    aria-hidden="true"
+                    size={13}
+                    weight="bold"
+                  />
+                </button>
+              ) : (
+                <strong title={currentSourceFileName}>
+                  {currentSourceFileStem}
+                </strong>
+              )}
+              {fileRenameError ? (
+                <span
+                  id="window-file-rename-error"
+                  className="window-file-rename-error"
+                  role="alert"
+                >
+                  {fileRenameError}
+                </span>
+              ) : null}
+            </div>
             <span className="file-meta">
               <span className="file-version-label">
                 {browserPreviewOnly
@@ -8600,7 +9041,7 @@ export default function Workbench() {
                 <button
                   className="window-file-folder-action"
                   type="button"
-                  aria-label={`在文件夹中打开 ${activeOpenedAiVersionNotice?.fileName || projectName}`}
+                  aria-label={`在文件夹中打开 ${currentSourceFileName}`}
                   title="在 Finder 中显示当前文件"
                   onClick={() => void showProjectInFolder()}
                 >
@@ -8610,6 +9051,7 @@ export default function Workbench() {
               <span
                 className="save-status"
                 data-persist-state={persistState}
+                data-file-renaming={fileRenameBusy ? "true" : undefined}
                 data-edit-revision={editRevision}
                 data-persisted-revision={lastPersistedRevision}
                 data-rendered-sha256={renderedContentSha256 || undefined}
@@ -8619,6 +9061,8 @@ export default function Workbench() {
                 <span aria-hidden="true" />
                 {browserPreviewOnly
                   ? "操作不会保存"
+                  : fileRenameBusy
+                    ? "正在重命名…"
                   : persistState === "idle"
                     ? "已安全保存"
                     : persistLabel}

@@ -5,6 +5,17 @@ const VERSION_ID_PATTERN = /^ver_\d{4,}$/;
 const READABLE_STORAGE_SUFFIX_PATTERN =
   /__(\d{8}-\d{6})__([a-f0-9]{8,32})$/;
 
+export function isActiveProjectIdentity({
+  requestedIdentity,
+  activeIdentity,
+}) {
+  return Boolean(
+    typeof requestedIdentity === "string"
+    && requestedIdentity
+    && requestedIdentity === activeIdentity
+  );
+}
+
 export function isManagedProjectStorageDirectory(
   storageDirectoryName,
   projectId,

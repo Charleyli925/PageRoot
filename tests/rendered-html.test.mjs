@@ -149,7 +149,7 @@ test("application boundaries encode the v3 single-source lifecycle instead of sa
     "recovering-transaction",
     "没有创建新版本",
     "旧版未被覆盖",
-    "openedAiVersionNotice",
+    "setOpenedAiVersionNotice",
     "removeAcknowledgedAuditEvents",
     "hydrateRecentProjectRuns",
     '.drain("submit"',

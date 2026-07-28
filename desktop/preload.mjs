@@ -10,6 +10,7 @@ const channels = Object.freeze({
   readHtml: "html-projects:read",
   exportHtmlCopy: "html-projects:export-copy",
   showInFolder: "html-projects:show-in-folder",
+  renameHtml: "html-projects:rename",
   activateGeneratedVersion: "html-projects:activate-generated-version",
   revealVersionFile: "html-projects:reveal-version-file",
   revealRequestFolder: "html-projects:reveal-request-folder",
@@ -92,6 +93,7 @@ const projectsApi = Object.freeze({
   readHtml: (sourcePath) => invokeProject(channels.readHtml, sourcePath),
   exportHtmlCopy: (payload) => invokeProject(channels.exportHtmlCopy, payload),
   showInFolder: (sourcePath) => invokeProject(channels.showInFolder, sourcePath),
+  renameHtml: (payload) => invokeProject(channels.renameHtml, payload),
   activateGeneratedVersion: (payload) => invokeProject(
     channels.activateGeneratedVersion,
     payload,

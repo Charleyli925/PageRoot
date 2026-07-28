@@ -427,6 +427,98 @@ test("Electron first launch registers the welcome HTML and sends its comment to 
   }
 });
 
+test("Electron safely renames the saved current HTML without starting a new project", async () => {
+  const launched = await launchPageRoot();
+  const originalPath = path.join(
+    realpathSync(launched.isolatedUserData),
+    "欢迎来到源页.html",
+  );
+  const renamedPath = path.join(
+    realpathSync(launched.isolatedUserData),
+    "我的页面.html",
+  );
+  const workspace = path.join(launched.isolatedUserData, "workspace");
+  try {
+    await waitForProjectReady(launched.page);
+    await expect.poll(
+      async () => (
+        await launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject())
+      )?.sourcePath,
+      { timeout: 20_000 },
+    ).toBe(originalPath);
+    const originalBytes = readFileSync(originalPath);
+    const originalRegistry = JSON.parse(
+      readFileSync(path.join(workspace, "project-registry.json"), "utf8"),
+    );
+    const [projectId] = Object.keys(originalRegistry.projects);
+
+    const title = launched.page.getByRole("button", {
+      name: "重命名文件 欢迎来到源页",
+      exact: true,
+    });
+    await expect(title).toBeVisible();
+    await title.dblclick();
+    const input = launched.page.getByRole("textbox", {
+      name: "文件名（不含后缀）",
+      exact: true,
+    });
+    await expect(input).toHaveValue("欢迎来到源页");
+    await expect(input.locator("..")).toContainText(".html");
+    await input.fill("我的页面");
+    await input.press("Enter");
+
+    await expect(input).toHaveCount(0);
+    await expect.poll(
+      async () => (
+        await launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject())
+      )?.sourcePath,
+      { timeout: 20_000 },
+    ).toBe(renamedPath);
+    await expect(launched.page.getByRole("button", {
+      name: "重命名文件 我的页面",
+      exact: true,
+    })).toBeVisible();
+    expect(existsSync(originalPath)).toBe(false);
+    expect(readFileSync(renamedPath)).toEqual(originalBytes);
+
+    const state = JSON.parse(
+      readFileSync(path.join(launched.isolatedUserData, "html-projects.json"), "utf8"),
+    );
+    expect(state.version).toBe(2);
+    expect(state.activePath).toBe(renamedPath);
+    expect(state.recent[0].path).toBe(renamedPath);
+    expect(state.pendingRename).toBeNull();
+    expect(state.lastRename.sourcePath).toBe(renamedPath);
+
+    const renamedRegistry = JSON.parse(
+      readFileSync(path.join(workspace, "project-registry.json"), "utf8"),
+    );
+    expect(Object.keys(renamedRegistry.projects)).toEqual([projectId]);
+    expect(renamedRegistry.projects[projectId].sourcePath).toBe(renamedPath);
+    const storageDirectoryName =
+      renamedRegistry.projects[projectId].storageDirectoryName;
+    expect(storageDirectoryName).toBe(
+      originalRegistry.projects[projectId].storageDirectoryName,
+    );
+    const project = JSON.parse(
+      readFileSync(
+        path.join(workspace, "projects", storageDirectoryName, "project.json"),
+        "utf8",
+      ),
+    );
+    expect(project.documentId).toBe(originalRegistry.projects[projectId].documentId);
+    expect(project.sourcePath).toBe(renamedPath);
+    expect(project.displayName).toBe(
+      originalRegistry.projects[projectId].displayName,
+    );
+  } finally {
+    await stopPageRoot(
+      launched.electronApp,
+      launched.isolatedUserData,
+    );
+  }
+});
+
 test("Electron uses the authored DOM caret, Selection and controlled beforeinput", async () => {
   const { electronApp, page, isolatedUserData } = await launchPageRoot();
   try {

@@ -4,6 +4,9 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+- Added safe in-place filename editing for the current HTML: double-click the
+  saved title, edit only its stem, and keep the same file bytes, Project,
+  Document and Version history through collision checks and crash recovery.
 - Added stable-only macOS update checks with user-started differential
   ZIP/blockmap downloads, a restart confirmation, and the existing safe editor
   drain before installation.

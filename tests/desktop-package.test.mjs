@@ -10,6 +10,7 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
     rendererMain,
     rendererHtml,
     projectFiles,
+    sourceRename,
     exportCopy,
     bridge,
     finalizer,
@@ -31,6 +32,7 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
     readFile(new URL("../desktop/renderer/main.tsx", import.meta.url), "utf8"),
     readFile(new URL("../desktop/renderer/index.html", import.meta.url), "utf8"),
     readFile(new URL("../desktop/project-files.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../desktop/source-rename.mjs", import.meta.url), "utf8"),
     readFile(new URL("../desktop/export-copy.mjs", import.meta.url), "utf8"),
     readFile(new URL("../scripts/workspace-bridge.mjs", import.meta.url), "utf8"),
     readFile(new URL("../scripts/finalize-attempt.mjs", import.meta.url), "utf8"),
@@ -77,6 +79,7 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.ok(packageJson.build.files.includes("!node_modules/**/*"));
   assert.ok(packageJson.build.files.includes("desktop/preload.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/project-files.mjs"));
+  assert.ok(packageJson.build.files.includes("desktop/source-rename.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/project-path-policy.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/welcome-project-content.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/export-copy.mjs"));
@@ -164,6 +167,7 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.match(mainProcess, /PROJECT_CHANNELS\.exportHtmlCopy/);
   assert.match(mainProcess, /PROJECT_CHANNELS\.readHtml/);
   assert.match(mainProcess, /PROJECT_CHANNELS\.showInFolder/);
+  assert.match(mainProcess, /PROJECT_CHANNELS\.renameHtml/);
   assert.match(mainProcess, /PROJECT_CHANNELS\.revealRequestFolder/);
   assert.match(mainProcess, /PROJECT_CHANNELS\.forgetRecent/);
   assert.match(mainProcess, /INTEGRATION_CHANNELS\.qoderHandoff/);
@@ -199,6 +203,10 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.match(
     mainProcess,
     /async function showInFolder[\s\S]*?assertReadPayload\(sourcePathInput\)[\s\S]*?assertKnownProjectPath\(sourcePath\)[\s\S]*?inspectHtmlFile\(sourcePath\)/,
+  );
+  assert.match(
+    mainProcess,
+    /async function renameHtml[\s\S]*?renameHtmlSource\([\s\S]*?resolveKnownSource:\s*resolveKnownRenameSource[\s\S]*?rebindWorkspace:\s*rebindRenamedWorkspace/,
   );
   assert.match(mainProcess, /createSafeExportDefaultPath/);
   assert.match(mainProcess, /selectExportDestination/);
@@ -266,6 +274,10 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.match(projectFiles, /readFile/);
   assert.match(projectFiles, /lastModifiedAt/);
   assert.match(projectFiles, /persistedRevision/);
+  assert.match(sourceRename, /pendingRename/);
+  assert.match(sourceRename, /expectedSha256/);
+  assert.match(sourceRename, /RENAME_DESTINATION_EXISTS/);
+  assert.match(sourceRename, /recoverPendingSourceRename/);
   assert.match(exportCopy, /createSafeExportDefaultPath/);
   assert.match(exportCopy, /pathsReferToSameFile/);
   assert.match(exportCopy, /runProjectIpcOperation/);

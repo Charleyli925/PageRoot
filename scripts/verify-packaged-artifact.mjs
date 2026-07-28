@@ -62,6 +62,7 @@ const REQUIRED_APP_SOURCE_FILES = [
   "desktop/main.mjs",
   "desktop/preload.mjs",
   "desktop/project-files.mjs",
+  "desktop/source-rename.mjs",
   "desktop/project-path-policy.mjs",
   "desktop/welcome-project-content.mjs",
   "desktop/export-copy.mjs",

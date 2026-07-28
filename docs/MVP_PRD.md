@@ -102,6 +102,8 @@ PageRoot 让用户在真实本地 HTML 上完成两类工作：
 
 每个项目拥有稳定 `projectId`，每个源 HTML 拥有稳定 `documentId`。新建项目时，系统以 HTML 文件名（不含扩展名）建立 `displayName`，并生成固定的 `<displayName>__<YYYYMMDD-HHmmss>__<短 projectId>` 目录名。改文件名或移动路径时，产品应通过持久身份和受控重新绑定保持 Document 连续性，不能只依赖文件名匹配，也不重命名已经建立的项目记录目录。
 
+桌面版在当前 HTML 已安全保存、项目空闲且没有冲突时，允许用户双击顶部文件名原位重命名。输入只包含主文件名，现有 `.html/.htm` 后缀和所在目录保持不变；`Enter` 或失焦提交，`Escape` 取消。同名文件不得覆盖。成功重命名只改变当前真实文件路径、桌面活动/最近记录和项目显示名，不改变 HTML 字节、`projectId`、`documentId`、Version 或历史。事务必须有稳定 operation ID、预期源 Hash 和崩溃恢复记录。
+
 初始 Version 的内部标签为 `V1 / ver_0001`，界面显示“版本 1”。第一次有效 AI 成功使用内部 `V2 / ver_0002`，界面显示“版本 2”；之后依次递增。兼容工作文件名仍可使用 `working/V1.1.html`、`working/V1.2.html`，但不得把该文件标签当作用户界面的版本身份，也不得回写并破坏严格 v3 Schema。
 
 ### 5.2 直接编辑与自动写回

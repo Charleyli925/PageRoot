@@ -10,6 +10,9 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
 - Registry-bound readable project-directory validation; names are one safe path
   segment and must carry the short token of their internal `projectId`
 - Hash-checked atomic writes that stop on external modification
+- Same-directory filename changes with a fixed HTML extension, source Hash
+  precondition, no-overwrite destination check and a crash-recoverable
+  operation journal
 - Per-process Bridge authentication token and managed workspace boundaries
 - Clipboard-only third-party AI handoff
 - Strict schemas, frozen inputs and identity/Hash checks before accepting AI output; scope evidence is always recorded, with protocol/script/target-integrity findings hard-blocked and ordinary breadth findings observed without a user-waiver loop
