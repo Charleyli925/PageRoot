@@ -21,6 +21,7 @@ const appChannels = Object.freeze({
   prepareClose: "html-app:prepare-close",
   closeResult: "html-app:close-result",
   closeAborted: "html-app:close-aborted",
+  aboutRequested: "html-app:about-requested",
   workspaceUnavailable: "html-app:workspace-unavailable",
   workspaceRecoveryReady: "html-app:workspace-recovery-ready",
   relaunch: "html-app:relaunch",
@@ -32,6 +33,7 @@ const updateChannels = Object.freeze({
   getStatus: "html-updates:get-status",
   status: "html-updates:status",
   checkNow: "html-updates:check-now",
+  downloadAvailable: "html-updates:download-available",
   installDownloaded: "html-updates:install-downloaded",
   openLatestRelease: "html-updates:open-latest-release",
   openRepository: "html-updates:open-repository",
@@ -110,6 +112,7 @@ const updateStatusListeners = new Map();
 const updatesApi = Object.freeze({
   getStatus: () => invokeProject(updateChannels.getStatus),
   checkNow: () => invokeProject(updateChannels.checkNow),
+  downloadAvailable: () => invokeProject(updateChannels.downloadAvailable),
   onStatus: (listener) => {
     if (typeof listener !== "function") {
       throw new TypeError("onStatus listener must be a function.");
@@ -152,6 +155,7 @@ const runtimeConfig = Object.freeze({
 
 const closeListeners = new Map();
 const closeAbortListeners = new Map();
+const aboutRequestListeners = new Map();
 const workspaceUnavailableListeners = new Map();
 function normalizedWorkspaceIssue(payload) {
   return Object.freeze({
@@ -164,6 +168,20 @@ function normalizedWorkspaceIssue(payload) {
   });
 }
 const appLifecycleApi = Object.freeze({
+  onAboutRequested: (listener) => {
+    if (typeof listener !== "function") {
+      throw new TypeError("onAboutRequested listener must be a function.");
+    }
+    const wrapped = () => listener();
+    aboutRequestListeners.set(listener, wrapped);
+    ipcRenderer.on(appChannels.aboutRequested, wrapped);
+    return () => {
+      const registered = aboutRequestListeners.get(listener);
+      if (!registered) return;
+      aboutRequestListeners.delete(listener);
+      ipcRenderer.removeListener(appChannels.aboutRequested, registered);
+    };
+  },
   onPrepareClose: (listener) => {
     if (typeof listener !== "function") {
       throw new TypeError("onPrepareClose listener must be a function.");

@@ -34,6 +34,7 @@ export function createApplicationUpdateController({
     || typeof updater.on !== "function"
     || typeof updater.removeListener !== "function"
     || typeof updater.checkForUpdates !== "function"
+    || typeof updater.downloadUpdate !== "function"
     || typeof updater.quitAndInstall !== "function"
   ) {
     throw new TypeError("A compatible electron-updater instance is required.");
@@ -50,7 +51,7 @@ export function createApplicationUpdateController({
     throw new TypeError("Compatible timer functions are required.");
   }
 
-  updater.autoDownload = true;
+  updater.autoDownload = false;
   updater.autoInstallOnAppQuit = false;
   updater.autoRunAppAfterInstall = true;
   updater.allowPrerelease = false;
@@ -66,6 +67,7 @@ export function createApplicationUpdateController({
     publishedAt: null,
   });
   let checkPromise = null;
+  let downloadPromise = null;
   let automaticCheckTimer = null;
   let automaticCheckGeneration = 0;
 
@@ -95,7 +97,7 @@ export function createApplicationUpdateController({
     ["update-available", (info) => {
       publish("available", {
         ...updateInfoPatch(info),
-        downloadPercent: 0,
+        downloadPercent: null,
       });
     }],
     ["download-progress", (progress) => {
@@ -133,6 +135,14 @@ export function createApplicationUpdateController({
 
   async function checkForUpdates() {
     if (!enabled) return status;
+    if (
+      status.status === "available"
+      || status.status === "downloading"
+      || status.status === "downloaded"
+      || status.status === "installing"
+    ) {
+      return status;
+    }
     if (checkPromise) return checkPromise;
     checkPromise = Promise.resolve()
       .then(() => updater.checkForUpdates())
@@ -145,6 +155,24 @@ export function createApplicationUpdateController({
         checkPromise = null;
       });
     return checkPromise;
+  }
+
+  async function downloadAvailableUpdate() {
+    if (!enabled) return status;
+    if (downloadPromise) return downloadPromise;
+    if (status.status !== "available") return status;
+    publish("downloading", { downloadPercent: 0 });
+    downloadPromise = Promise.resolve()
+      .then(() => updater.downloadUpdate())
+      .then(() => status)
+      .catch((error) => {
+        listeners.get("error")(error);
+        return status;
+      })
+      .finally(() => {
+        downloadPromise = null;
+      });
+    return downloadPromise;
   }
 
   function stopAutomaticChecks() {
@@ -206,6 +234,7 @@ export function createApplicationUpdateController({
 
   return Object.freeze({
     checkForUpdates,
+    downloadAvailableUpdate,
     dispose,
     getStatus: () => status,
     installDownloadedUpdate,

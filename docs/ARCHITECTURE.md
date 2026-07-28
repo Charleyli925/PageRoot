@@ -91,12 +91,13 @@ browser runtime. They never compete over the same close.
 The main-process application-update controller is the sole owner of stable
 channel checks, the startup-plus-four-hour schedule, coalesced manual checks,
 download progress and downloaded-install readiness. It exposes only immutable
-status snapshots and narrow check/install intents through preload IPC. The
+status snapshots and narrow check/download/install intents through preload IPC. The
 renderer can also request the fixed project repository URL, but cannot supply
-an arbitrary external URL. Automatic download does not grant exit authority:
-restart installation is a distinct explicit intent that reuses the same
-Electron drain coordinator before invoking the signed updater. Ordinary app
-quit never installs a pending update.
+an arbitrary external URL. A renderer download intent is accepted only while
+the controller owns an available stable update; it does not grant exit
+authority. Restart installation is a second explicit intent that reuses the
+same Electron drain coordinator before invoking the signed updater. Ordinary
+app quit never installs a pending update.
 
 ## Trust model
 

@@ -24,7 +24,6 @@ import { FileIcon } from "@phosphor-icons/react/dist/csr/File";
 import { FileHtmlIcon } from "@phosphor-icons/react/dist/csr/FileHtml";
 import { FolderOpenIcon } from "@phosphor-icons/react/dist/csr/FolderOpen";
 import { ImageIcon } from "@phosphor-icons/react/dist/csr/Image";
-import { InfoIcon } from "@phosphor-icons/react/dist/csr/Info";
 import { LockKeyIcon } from "@phosphor-icons/react/dist/csr/LockKey";
 import { PaperclipIcon } from "@phosphor-icons/react/dist/csr/Paperclip";
 import { PaperPlaneTiltIcon } from "@phosphor-icons/react/dist/csr/PaperPlaneTilt";
@@ -46,6 +45,7 @@ import type {
 import AboutPageRootDialog from "./components/AboutPageRootDialog";
 import HtmlInteractionPreview from "./components/HtmlInteractionPreview";
 import NoticeBar from "./components/NoticeBar";
+import RestartUpdateDialog from "./components/RestartUpdateDialog";
 import { rebindCanvasSelectionTargets } from "./lib/canvas-target-rebind.js";
 import {
   MAX_ATTACHMENT_BYTES,
@@ -225,6 +225,7 @@ type ApplicationUpdateResult = {
 type DesktopUpdatesApi = {
   getStatus: () => Promise<ApplicationUpdateResult | null>;
   checkNow: () => Promise<ApplicationUpdateResult>;
+  downloadAvailable: () => Promise<ApplicationUpdateResult>;
   onStatus: (
     listener: (result: ApplicationUpdateResult | null) => void,
   ) => () => void;
@@ -363,8 +364,6 @@ type ToastAction =
       resumeSubmission?: boolean;
     }
   | { id: "relaunch-app"; label: string }
-  | { id: "install-update"; label: string }
-  | { id: "open-release"; label: string }
   | { id: "retry-draft-persist"; label: string }
   | { id: "review-project-rules"; label: string }
   | { id: "retry-submit"; label: string }
@@ -1667,7 +1666,6 @@ export default function Workbench() {
     abortedRequestIds: new Set(),
   });
   const saveProjectRulesRef = useRef<() => Promise<boolean>>(async () => false);
-  const aboutButtonRef = useRef<HTMLButtonElement>(null);
 
   const [html, setHtml] = useState(DEFAULT_PROJECT_HTML);
   const [projectName, setProjectName] = useState(WELCOME_PROJECT.name);
@@ -1745,6 +1743,7 @@ export default function Workbench() {
   const [updateResult, setUpdateResult] =
     useState<ApplicationUpdateResult | null>(null);
   const [aboutOpen, setAboutOpen] = useState(false);
+  const [restartUpdateOpen, setRestartUpdateOpen] = useState(false);
   const [applicationVersion, setApplicationVersion] = useState("");
   const [desktopUpdatesAvailable, setDesktopUpdatesAvailable] = useState(false);
   const [manualUpdateCheckPending, setManualUpdateCheckPending] = useState(false);
@@ -1822,19 +1821,14 @@ export default function Workbench() {
     });
   }, []);
 
-  const openLatestRelease = useCallback(async () => {
-    try {
-      const result = await window.htmlAIUpdates?.openLatestRelease();
-      if (!result?.opened) throw new Error("GitHub 更新页面没有打开。");
-    } catch {
-      setToast({
-        title: "更新页面没有打开",
-        message: "当前内容不受影响；可以重新打开 PageRoot 发布页。",
-        tone: "warning",
-        dedupeKey: "latest-release",
-        action: { id: "open-release", label: "打开更新页面" },
-      });
-    }
+  useEffect(() => {
+    const lifecycle = window.htmlAIAppLifecycle;
+    if (!lifecycle?.onAboutRequested) return undefined;
+    return lifecycle.onAboutRequested(() => {
+      setManualUpdateCheckFailed(false);
+      setRepositoryOpenFailed(false);
+      setAboutOpen(true);
+    });
   }, []);
 
   const checkForApplicationUpdates = useCallback(async () => {
@@ -1872,24 +1866,26 @@ export default function Workbench() {
 
   const closeAboutPageRoot = useCallback(() => {
     setAboutOpen(false);
-    requestAnimationFrame(() => aboutButtonRef.current?.focus());
   }, []);
 
-  const installDownloadedUpdate = useCallback(async () => {
+  const downloadAvailableUpdate = useCallback(async () => {
+    try {
+      const result = await window.htmlAIUpdates?.downloadAvailable();
+      if (result) setUpdateResult(result);
+    } catch {
+      // The main-process controller publishes a bounded unavailable state.
+    }
+  }, []);
+
+  const installDownloadedUpdate = useCallback(async (): Promise<boolean> => {
     try {
       const result = await window.htmlAIUpdates?.installDownloaded();
       if (!result?.installing) {
         throw new Error(result?.reason || "下载的更新尚未准备完成。");
       }
+      return true;
     } catch {
-      setToast({
-        title: "暂时无法安装更新",
-        message: "当前编辑仍保留。可以稍后再次选择“重启更新”，或打开发布页手动下载。",
-        tone: "warning",
-        sticky: true,
-        dedupeKey: "install-update",
-        action: { id: "install-update", label: "重启更新" },
-      });
+      return false;
     }
   }, []);
 
@@ -1903,15 +1899,7 @@ export default function Workbench() {
       return;
     }
     promptedUpdateVersionRef.current = version;
-    setToast({
-      title: `PageRoot ${version} 已下载`,
-      message: "重启后会自动安装；退出前，源页会先确认当前编辑已经安全写入。",
-      tone: "success",
-      sticky: true,
-      dedupeKey: `application-update:${version}`,
-      disposition: "background-result",
-      action: { id: "install-update", label: "重启并安装" },
-    });
+    setRestartUpdateOpen(true);
   }, [updateResult]);
 
   const latestVersion = useMemo(
@@ -1937,19 +1925,12 @@ export default function Workbench() {
       updateResult?.status === "available"
       || updateResult?.status === "downloading"
       || updateResult?.status === "downloaded"
-      || updateResult?.status === "installing"
     )
     && updateResult.latestVersion,
   );
   const updateDownloaded = updateResult?.status === "downloaded";
-  const updateBadgeLabel = updateDownloaded
-    ? "重启更新"
-    : updateResult?.status === "downloading"
-      && typeof updateResult.downloadPercent === "number"
-      ? `${Math.round(updateResult.downloadPercent)}%`
-      : updateResult?.status === "installing"
-        ? "安装中"
-        : "Update";
+  const updateDownloading = updateResult?.status === "downloading";
+  const updateBadgeLabel = updateDownloaded ? "New! 重启更新" : "New!";
   const interactionLocked = runInProgress
     || browserPreviewOnly
     || projectHydrating
@@ -8466,10 +8447,6 @@ export default function Workbench() {
       setDrawer(null);
     } else if (action.id === "relaunch-app") {
       void relaunchApp();
-    } else if (action.id === "install-update") {
-      void installDownloadedUpdate();
-    } else if (action.id === "open-release") {
-      void openLatestRelease();
     } else if (action.id === "retry-draft-persist") {
       void flushDraftPersistence();
     } else if (action.id === "review-project-rules") {
@@ -8825,15 +8802,22 @@ export default function Workbench() {
                 className="header-update-badge"
                 type="button"
                 aria-label={updateDownloaded
-                  ? `PageRoot ${updateResult?.latestVersion || "新版本"} 已下载，重启并安装`
-                  : `PageRoot ${updateResult?.latestVersion || "新版本"} 正在准备更新`}
+                  ? `PageRoot ${updateResult?.latestVersion || "新版本"} 已下载，重启更新`
+                  : updateDownloading
+                    ? `正在下载 PageRoot ${updateResult?.latestVersion || "新版本"}`
+                    : `发现 PageRoot ${updateResult?.latestVersion || "新版本"}，下载更新`}
                 title={updateDownloaded
-                  ? `重启并安装 PageRoot ${updateResult?.latestVersion || "新版本"}`
-                  : `PageRoot ${updateResult?.latestVersion || "新版本"} 自动下载中`}
-                disabled={updateResult?.status === "installing"}
+                  ? `重启更新 PageRoot ${updateResult?.latestVersion || "新版本"}`
+                  : updateDownloading
+                    ? `正在下载 PageRoot ${updateResult?.latestVersion || "新版本"}`
+                    : `下载 PageRoot ${updateResult?.latestVersion || "新版本"}`}
+                disabled={updateDownloading}
                 onClick={() => {
-                  if (updateDownloaded) void installDownloadedUpdate();
-                  else void openLatestRelease();
+                  if (updateDownloaded) {
+                    setRestartUpdateOpen(true);
+                  } else if (updateResult?.status === "available") {
+                    void downloadAvailableUpdate();
+                  }
                 }}
               >
                 {updateBadgeLabel}
@@ -8888,22 +8872,6 @@ export default function Workbench() {
                 : null}
             </button>
           </div>
-          <button
-            ref={aboutButtonRef}
-            className="about-trigger-button"
-            type="button"
-            aria-label="关于源页"
-            aria-haspopup="dialog"
-            aria-expanded={aboutOpen}
-            title="关于源页"
-            onClick={() => {
-              setManualUpdateCheckFailed(false);
-              setRepositoryOpenFailed(false);
-              setAboutOpen(true);
-            }}
-          >
-            <InfoIcon aria-hidden="true" size={19} weight="bold" />
-          </button>
         </nav>
         <input
           ref={fileInputRef}
@@ -10228,6 +10196,16 @@ export default function Workbench() {
         ) : null}
       </aside>
 
+      <RestartUpdateDialog
+        open={restartUpdateOpen && updateDownloaded}
+        installing={updateResult?.status === "installing"}
+        onClose={() => setRestartUpdateOpen(false)}
+        onRestartNow={() => {
+          setRestartUpdateOpen(false);
+          void installDownloadedUpdate();
+        }}
+      />
+
       <AboutPageRootDialog
         open={aboutOpen}
         appVersion={applicationVersion}
@@ -10238,7 +10216,11 @@ export default function Workbench() {
         repositoryOpenFailed={repositoryOpenFailed}
         onClose={closeAboutPageRoot}
         onCheckForUpdates={() => void checkForApplicationUpdates()}
-        onInstallUpdate={() => void installDownloadedUpdate()}
+        onDownloadUpdate={() => void downloadAvailableUpdate()}
+        onRequestRestart={() => {
+          setAboutOpen(false);
+          setRestartUpdateOpen(true);
+        }}
         onOpenRepository={() => void openProjectRepository()}
       />
 

@@ -12,13 +12,20 @@ class FakeUpdater extends EventEmitter {
   constructor() {
     super();
     this.checkCount = 0;
+    this.downloadCount = 0;
     this.installCount = 0;
     this.checkResult = Promise.resolve();
+    this.downloadResult = Promise.resolve();
   }
 
   checkForUpdates() {
     this.checkCount += 1;
     return this.checkResult;
+  }
+
+  downloadUpdate() {
+    this.downloadCount += 1;
+    return this.downloadResult;
   }
 
   quitAndInstall() {
@@ -44,10 +51,10 @@ function controller(options = {}) {
   };
 }
 
-test("stable updater automatically downloads but never installs on ordinary quit", () => {
+test("stable updater waits for an explicit download and never installs on ordinary quit", () => {
   const { updater, value } = controller();
 
-  assert.equal(updater.autoDownload, true);
+  assert.equal(updater.autoDownload, false);
   assert.equal(updater.autoInstallOnAppQuit, false);
   assert.equal(updater.autoRunAppAfterInstall, true);
   assert.equal(updater.allowPrerelease, false);
@@ -83,7 +90,7 @@ test("update events expose bounded public progress and a restart-ready state", (
     statuses.map((status) => [status.status, status.downloadPercent]),
     [
       ["checking", null],
-      ["available", 0],
+      ["available", null],
       ["downloading", 42.3],
       ["downloading", 100],
       ["downloaded", 100],
@@ -97,6 +104,30 @@ test("update events expose bounded public progress and a restart-ready state", (
     downloadPercent: 100,
     publishedAt: "2026-07-28T12:00:00.000Z",
   });
+});
+
+test("an available update downloads only after one coalesced user intent", async () => {
+  const updater = new FakeUpdater();
+  let finishDownload;
+  updater.downloadResult = new Promise((resolve) => {
+    finishDownload = resolve;
+  });
+  const { value } = controller({ updater });
+
+  assert.equal((await value.downloadAvailableUpdate()).status, "idle");
+  assert.equal(updater.downloadCount, 0);
+
+  updater.emit("update-available", { version: "0.10.0" });
+  const first = value.downloadAvailableUpdate();
+  const second = value.downloadAvailableUpdate();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(updater.downloadCount, 1);
+  assert.equal(value.getStatus().status, "downloading");
+  updater.emit("update-downloaded", { version: "0.10.0" });
+  finishDownload();
+  assert.equal((await first).status, "downloaded");
+  assert.equal((await second).status, "downloaded");
 });
 
 test("only a downloaded update may start installation", () => {
@@ -122,7 +153,9 @@ test("disabled environments never contact the release provider", async () => {
   });
 
   assert.equal((await value.checkForUpdates()).status, "unsupported");
+  assert.equal((await value.downloadAvailableUpdate()).status, "unsupported");
   assert.equal(updater.checkCount, 0);
+  assert.equal(updater.downloadCount, 0);
 });
 
 test("concurrent checks share one provider request and errors stay unavailable", async () => {

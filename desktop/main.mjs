@@ -4,6 +4,7 @@ import {
   clipboard,
   dialog,
   ipcMain,
+  Menu,
   net,
   shell,
   utilityProcess,
@@ -117,6 +118,7 @@ const APP_CHANNELS = Object.freeze({
   prepareClose: "html-app:prepare-close",
   closeResult: "html-app:close-result",
   closeAborted: "html-app:close-aborted",
+  aboutRequested: "html-app:about-requested",
   workspaceUnavailable: "html-app:workspace-unavailable",
   workspaceRecoveryReady: "html-app:workspace-recovery-ready",
   relaunch: "html-app:relaunch",
@@ -128,6 +130,7 @@ const UPDATE_CHANNELS = Object.freeze({
   getStatus: "html-updates:get-status",
   status: "html-updates:status",
   checkNow: "html-updates:check-now",
+  downloadAvailable: "html-updates:download-available",
   installDownloaded: "html-updates:install-downloaded",
   openLatestRelease: "html-updates:open-latest-release",
   openRepository: "html-updates:open-repository",
@@ -150,6 +153,46 @@ let applicationUpdate = null;
 let workspaceFailurePrompt = null;
 let managedWelcomeRegistration = null;
 const workspaceRecoveryMailbox = createWorkspaceRecoveryMailbox();
+
+function requestAboutPageRoot() {
+  if (
+    !rendererHasLoaded
+    || !mainWindow
+    || mainWindow.isDestroyed()
+  ) {
+    return;
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+  mainWindow.webContents.send(APP_CHANNELS.aboutRequested);
+}
+
+function installApplicationMenu() {
+  if (process.platform !== "darwin") return;
+  const menu = Menu.buildFromTemplate([
+    {
+      label: app.name,
+      submenu: [
+        {
+          label: "关于源页",
+          click: requestAboutPageRoot,
+        },
+        { type: "separator" },
+        { role: "services" },
+        { type: "separator" },
+        { role: "hide" },
+        { role: "hideOthers" },
+        { role: "unhide" },
+        { type: "separator" },
+        { role: "quit" },
+      ],
+    },
+    { role: "editMenu" },
+    { role: "windowMenu" },
+  ]);
+  Menu.setApplicationMenu(menu);
+}
 
 function emptyProjectState() {
   return {
@@ -1019,6 +1062,10 @@ async function checkForApplicationUpdates() {
   return ensureApplicationUpdateController().checkForUpdates();
 }
 
+async function downloadApplicationUpdate() {
+  return ensureApplicationUpdateController().downloadAvailableUpdate();
+}
+
 async function openLatestRelease() {
   await shell.openExternal(LATEST_RELEASE_PAGE_URL);
   return { opened: true };
@@ -1106,6 +1153,10 @@ function registerProjectIpc() {
   ipcMain.handle(
     UPDATE_CHANNELS.checkNow,
     trustedProject(checkForApplicationUpdates),
+  );
+  ipcMain.handle(
+    UPDATE_CHANNELS.downloadAvailable,
+    trustedProject(downloadApplicationUpdate),
   );
   ipcMain.handle(
     UPDATE_CHANNELS.installDownloaded,
@@ -1642,6 +1693,7 @@ if (!hasSingleInstanceLock) {
     if (process.platform === "darwin" && app.dock && !app.isPackaged) {
       app.dock.setIcon(path.join(directory, "resources", "icon.png"));
     }
+    installApplicationMenu();
     ensureApplicationUpdateController();
     await createWindow();
   }).catch((error) => {

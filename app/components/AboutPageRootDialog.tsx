@@ -6,7 +6,6 @@ import {
   type MouseEvent,
 } from "react";
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/csr/ArrowSquareOut";
-import { ArrowsClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowsClockwise";
 import { CheckCircleIcon } from "@phosphor-icons/react/dist/csr/CheckCircle";
 import { CloudArrowDownIcon } from "@phosphor-icons/react/dist/csr/CloudArrowDown";
 import { GithubLogoIcon } from "@phosphor-icons/react/dist/csr/GithubLogo";
@@ -42,7 +41,8 @@ type AboutPageRootDialogProps = {
   repositoryOpenFailed: boolean;
   onClose: () => void;
   onCheckForUpdates: () => void;
-  onInstallUpdate: () => void;
+  onDownloadUpdate: () => void;
+  onRequestRestart: () => void;
   onOpenRepository: () => void;
 };
 
@@ -114,19 +114,16 @@ function updatePresentation({
     return {
       tone: "available",
       eyebrow: "发现新版本",
-      title: `正在准备 PageRoot ${result.latestVersion || "新版本"}`,
-      detail: "更新将自动在后台下载，不影响当前编辑。",
+      title: `PageRoot ${result.latestVersion || "新版本"} 可以下载`,
+      detail: "点击下载后仍可继续编辑；下载完成时再决定是否重启。",
     };
   }
   if (result.status === "downloading") {
-    const progress = typeof result.downloadPercent === "number"
-      ? `已下载 ${Math.round(result.downloadPercent)}%。`
-      : "";
     return {
       tone: "available",
       eyebrow: "后台下载",
       title: `正在下载 PageRoot ${result.latestVersion || "新版本"}`,
-      detail: `${progress}你可以继续编辑，下载完成后再决定何时重启。`,
+      detail: "你可以继续编辑；下载完成后源页会询问是否现在重启。",
     };
   }
   if (result.status === "downloaded") {
@@ -179,7 +176,8 @@ export default function AboutPageRootDialog({
   repositoryOpenFailed,
   onClose,
   onCheckForUpdates,
-  onInstallUpdate,
+  onDownloadUpdate,
+  onRequestRestart,
   onOpenRepository,
 }: AboutPageRootDialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -192,30 +190,31 @@ export default function AboutPageRootDialog({
   });
   const checking = manualCheckPending || updateResult?.status === "checking";
   const downloaded = updateResult?.status === "downloaded";
+  const available = updateResult?.status === "available";
   const installing = updateResult?.status === "installing";
-  const downloading = (
-    updateResult?.status === "available"
-    || updateResult?.status === "downloading"
-  );
+  const downloading = updateResult?.status === "downloading";
   const canCheck = (
     updatesAvailable
     && !checking
+    && !available
     && !downloaded
     && !installing
     && !downloading
     && updateResult?.status !== "unsupported"
   );
   const actionLabel = downloaded
-    ? "重启并安装"
-    : installing
-      ? "正在安装…"
-      : downloading
-        ? "正在自动下载…"
-        : checking
-          ? "正在检查…"
-          : canCheck
-            ? "立即检查"
-            : "仅正式版可用";
+    ? "重启更新"
+    : available
+      ? "下载更新"
+      : installing
+        ? "正在重启…"
+        : downloading
+          ? "正在下载…"
+          : checking
+            ? "正在检查…"
+            : canCheck
+              ? "立即检查"
+              : "仅正式版可用";
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -291,34 +290,19 @@ export default function AboutPageRootDialog({
             <span>{presentation.eyebrow}</span>
             <strong id="about-update-title">{presentation.title}</strong>
             <p>{presentation.detail}</p>
-            {updateResult?.status === "downloading"
-              && typeof updateResult.downloadPercent === "number" ? (
-                <div
-                  className="about-update-progress"
-                  role="progressbar"
-                  aria-label="更新下载进度"
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-valuenow={Math.round(updateResult.downloadPercent)}
-                >
-                  <span style={{ width: `${updateResult.downloadPercent}%` }} />
-                </div>
-              ) : null}
           </div>
           <button
             className="about-update-action"
             type="button"
-            disabled={!canCheck && !downloaded}
-            onClick={downloaded ? onInstallUpdate : onCheckForUpdates}
+            disabled={!canCheck && !available && !downloaded}
+            onClick={
+              downloaded
+                ? onRequestRestart
+                : available
+                  ? onDownloadUpdate
+                  : onCheckForUpdates
+            }
           >
-            {checking ? (
-              <ArrowsClockwiseIcon
-                className="about-check-spinner"
-                aria-hidden="true"
-                size={16}
-                weight="bold"
-              />
-            ) : null}
             {actionLabel}
           </button>
         </section>

@@ -5734,33 +5734,37 @@ body {
 .header-actions .header-update-badge {
   position: absolute;
   z-index: 2;
-  top: -14px;
-  right: 9px;
+  top: -22px;
+  right: 0;
   min-width: 0;
-  min-height: 18px;
-  height: 18px;
-  padding: 0 7px;
-  border: 1px solid #c8c5f2;
-  border-radius: 999px;
-  background: #f2f1ff;
-  color: #4e49c7;
+  min-height: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--red);
   box-shadow: none;
-  font-size: 8px;
-  font-weight: 760;
+  font-size: 11px;
+  font-style: italic;
+  font-weight: 650;
   line-height: 16px;
-  letter-spacing: 0.015em;
+  letter-spacing: 0;
+  text-align: right;
   white-space: nowrap;
-  transition:
-    border-color 150ms ease,
-    background-color 150ms ease,
-    color 150ms ease;
+  transition: none;
 }
 
 .header-actions .header-update-badge:hover:not(:disabled) {
-  border-color: #aaa6e9;
-  background: #e8e6ff;
-  color: #3934aa;
+  border: 0;
+  background: transparent;
+  color: var(--red);
   transform: none;
+}
+
+.header-actions .header-update-badge:disabled {
+  opacity: 1;
+  cursor: default;
 }
 
 .header-send-button[data-handoff-status="failed"] {
@@ -6090,7 +6094,7 @@ body {
 
 @media (max-width: 940px) {
   .header-actions .header-update-badge {
-    right: 5px;
+    right: 0;
   }
 
   .project-resource-meta {
@@ -6115,23 +6119,6 @@ body {
 
 /* About PageRoot keeps product identity, update status and public-source
    navigation in one deliberate desktop surface. */
-.header-actions .about-trigger-button {
-  width: 38px;
-  min-width: 38px;
-  padding: 0;
-  border: 1px solid #e6e7eb;
-  border-radius: 11px;
-  background: #f7f8fa;
-  color: #62646d;
-}
-
-.header-actions .about-trigger-button:hover:not(:disabled),
-.header-actions .about-trigger-button[aria-expanded="true"] {
-  border-color: #d8d7ed;
-  background: #f0efff;
-  color: var(--indigo-deep);
-}
-
 .about-dialog {
   width: min(580px, calc(100vw - 32px));
   max-width: none;
@@ -6342,22 +6329,6 @@ body {
   line-height: 1.55;
 }
 
-.about-update-progress {
-  height: 4px;
-  margin-top: 5px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: #e4e3ef;
-}
-
-.about-update-progress > span {
-  height: 100%;
-  display: block;
-  border-radius: inherit;
-  background: var(--indigo);
-  transition: width 180ms ease;
-}
-
 .about-update-action {
   min-height: 34px;
   display: inline-flex;
@@ -6384,16 +6355,6 @@ body {
   background: #e4e5e9;
   color: #858791;
   cursor: not-allowed;
-}
-
-.about-check-spinner {
-  animation: about-check-spin 900ms linear infinite;
-}
-
-@keyframes about-check-spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 .about-github-link {
@@ -6481,8 +6442,7 @@ body {
   cursor: pointer;
 }
 
-.about-dialog button:focus-visible,
-.header-actions .about-trigger-button:focus-visible {
+.about-dialog button:focus-visible {
   outline: 3px solid rgb(90 85 223 / 24%);
   outline-offset: 2px;
 }
@@ -6525,15 +6485,91 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .about-dialog-card,
-  .about-check-spinner {
+  .about-dialog-card {
     animation: none;
   }
 
   .about-close-button,
-  .about-update-progress > span,
   .about-update-action,
   .about-github-link {
     transition: none;
   }
+}
+
+.restart-update-dialog {
+  width: min(500px, calc(100vw - 32px));
+  max-width: none;
+  padding: 0;
+  overflow: visible;
+  border: 0;
+  border-radius: 18px;
+  background: transparent;
+  color: var(--ink);
+}
+
+.restart-update-dialog::backdrop {
+  background: rgb(40 37 56 / 52%);
+}
+
+.restart-update-card {
+  padding: 28px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--paper);
+  box-shadow: 0 10px 24px rgb(20 19 28 / 22%);
+}
+
+.restart-update-card h2 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 18px;
+  font-weight: 680;
+  line-height: 1.35;
+}
+
+.restart-update-card p {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.restart-update-card footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 28px;
+  padding-top: 17px;
+  border-top: 1px solid var(--line);
+}
+
+.restart-update-card button {
+  min-height: 36px;
+  padding: 0 18px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.restart-update-later {
+  border: 1px solid #d6d3cb;
+  background: #f1f0ec;
+  color: #47484f;
+}
+
+.restart-update-now {
+  border: 1px solid var(--indigo);
+  background: var(--indigo);
+  color: #fff;
+}
+
+.restart-update-card button:disabled {
+  opacity: 0.68;
+  cursor: default;
+}
+
+.restart-update-card button:focus-visible {
+  outline: 3px solid rgb(90 85 223 / 24%);
+  outline-offset: 2px;
 }

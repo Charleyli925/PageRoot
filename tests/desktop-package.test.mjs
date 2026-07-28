@@ -372,10 +372,11 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
     /PROJECT_REPOSITORY_URL[\s\S]*?Charleyli925\/PageRoot/,
   );
   assert.doesNotMatch(manualUpdate, /api\.github\.com/);
-  assert.match(applicationUpdate, /updater\.autoDownload = true/);
+  assert.match(applicationUpdate, /updater\.autoDownload = false/);
   assert.match(applicationUpdate, /updater\.autoInstallOnAppQuit = false/);
   assert.match(applicationUpdate, /updater\.allowPrerelease = false/);
   assert.match(applicationUpdate, /updater\.disableDifferentialDownload = false/);
+  assert.match(applicationUpdate, /updater\.downloadUpdate\(\)/);
   assert.match(applicationUpdate, /updater\.quitAndInstall\(\)/);
   assert.match(entitlements, /com\.apple\.security\.cs\.allow-jit/);
   assert.doesNotMatch(entitlements, /disable-library-validation/);

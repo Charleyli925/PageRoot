@@ -4,12 +4,15 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
-- Added stable-only macOS auto-updates with automatic download, differential
-  ZIP/blockmap transfer, a restart-to-install prompt, and the existing safe
-  editor drain before installation.
+- Added stable-only macOS update checks with user-started differential
+  ZIP/blockmap downloads, a restart confirmation, and the existing safe editor
+  drain before installation.
 - Added four-hour update checks while the app remains open, plus a redesigned
   About PageRoot dialog with manual update checking and the official GitHub
   repository link.
+- Kept update status to one right-aligned red italic `New!` label above the
+  Qoder handoff button, with no Canvas completion banner, progress animation or
+  extra header icon.
 - Replaced ad-hoc distribution with fail-closed Developer ID signing, Hardened
   Runtime, Apple notarization and candidate verification of both DMG and updater
   assets while retaining the legacy manifest for one-time migration.
