@@ -49,7 +49,10 @@ import {
   PRODUCT_MAX_HTML_BYTES,
   isGeneratedWorkingCopyFileName,
 } from "./product-contract.mjs";
-import { isManagedVersionRelativePath } from "./project-path-policy.mjs";
+import {
+  isActiveProjectIdentity,
+  isManagedVersionRelativePath,
+} from "./project-path-policy.mjs";
 import { handoffToQoderWork } from "./qoder-handoff.mjs";
 import {
   ManualUpdateError,
@@ -572,7 +575,20 @@ async function showInFolder(sourcePathInput) {
 
 async function resolveKnownRenameSource(sourcePathInput) {
   const sourcePath = assertReadPayload(sourcePathInput);
-  await assertKnownProjectPath(sourcePath);
+  const state = await loadProjectState();
+  const [requestedIdentity, activeIdentity] = await Promise.all([
+    existingPathIdentity(sourcePath),
+    state.activePath
+      ? existingPathIdentity(state.activePath)
+      : Promise.resolve(null),
+  ]);
+  if (!isActiveProjectIdentity({ requestedIdentity, activeIdentity })) {
+    throw new ProjectFileError(
+      "INACTIVE_RENAME_SOURCE",
+      "只能重命名当前正在编辑的 HTML 文件。",
+      { sourcePath },
+    );
+  }
   await inspectHtmlFile(sourcePath);
   return realpath(sourcePath);
 }

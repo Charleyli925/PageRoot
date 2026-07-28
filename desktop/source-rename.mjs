@@ -1,7 +1,9 @@
 import {
+  link,
   lstat,
   realpath,
   rename,
+  unlink,
 } from "node:fs/promises";
 import path from "node:path";
 
@@ -157,6 +159,110 @@ function sameFileIdentity(left, right) {
   );
 }
 
+function isCaseOnlySameFile({
+  previousPath,
+  sourcePath,
+  previousInformation,
+  nextInformation,
+  platform,
+}) {
+  return Boolean(
+    nextInformation
+    && (platform === "darwin" || platform === "win32")
+    && normalizedPathKey(previousPath, platform)
+      === normalizedPathKey(sourcePath, platform)
+    && sameFileIdentity(previousInformation, nextInformation)
+  );
+}
+
+async function moveRegularFileNoReplace({
+  previousPath,
+  sourcePath,
+  expectedInformation,
+  expectedSha256,
+  readProject,
+  lstatFile,
+  linkFile,
+  unlinkFile,
+  destinationAlreadyLinked = false,
+}) {
+  if (!destinationAlreadyLinked) {
+    try {
+      await linkFile(previousPath, sourcePath);
+    } catch (cause) {
+      if (cause?.code === "EEXIST") {
+        throw new ProjectFileError(
+          "RENAME_DESTINATION_EXISTS",
+          "同一文件夹里已经有这个文件名。",
+          { targetPath: sourcePath },
+        );
+      }
+      throw cause;
+    }
+  }
+
+  try {
+    const linkedInformation = await lstatFile(sourcePath);
+    if (!sameFileIdentity(expectedInformation, linkedInformation)) {
+      throw new ProjectFileError(
+        "RENAME_SOURCE_CHANGED",
+        "文件内容在重命名前发生了变化，源页没有修改文件名。",
+        { sourcePath: previousPath },
+      );
+    }
+    await verifiedProject(sourcePath, expectedSha256, readProject);
+  } catch (cause) {
+    try {
+      await unlinkFile(sourcePath);
+    } catch (rollbackCause) {
+      cause.destinationCreated = true;
+      cause.details = {
+        ...(cause.details || {}),
+        rollbackCause:
+          rollbackCause instanceof Error
+            ? rollbackCause.message
+            : String(rollbackCause),
+      };
+    }
+    throw cause;
+  }
+
+  try {
+    await unlinkFile(previousPath);
+  } catch (cause) {
+    const error = new ProjectFileError(
+      "RENAME_MOVE_INCOMPLETE",
+      "文件名已开始更改，但旧路径尚未清理；源页会在下次打开时自动恢复。",
+      {
+        previousPath,
+        sourcePath,
+        cause: cause instanceof Error ? cause.message : String(cause),
+      },
+    );
+    error.destinationCreated = true;
+    throw error;
+  }
+
+  try {
+    await verifiedProject(sourcePath, expectedSha256, readProject);
+  } catch (cause) {
+    try {
+      await linkFile(sourcePath, previousPath);
+      await unlinkFile(sourcePath);
+    } catch (rollbackCause) {
+      cause.destinationCreated = true;
+      cause.details = {
+        ...(cause.details || {}),
+        rollbackCause:
+          rollbackCause instanceof Error
+            ? rollbackCause.message
+            : String(rollbackCause),
+      };
+    }
+    throw cause;
+  }
+}
+
 async function optionalLstat(filePath, lstatFile) {
   try {
     return await lstatFile(filePath);
@@ -294,6 +400,8 @@ export async function recoverPendingSourceRename({
   lstatFile = lstat,
   realpathFile = realpath,
   renameFile = rename,
+  linkFile = link,
+  unlinkFile = unlink,
   now = Date.now,
 }) {
   const pending = normalizePendingSourceRename(state?.pendingRename);
@@ -318,14 +426,7 @@ export async function recoverPendingSourceRename({
   }
 
   if (previousInformation && nextInformation) {
-    const caseOnlyPath = (
-      platform === "darwin" || platform === "win32"
-    ) && normalizedPathKey(pending.previousPath, platform)
-      === normalizedPathKey(pending.sourcePath, platform);
-    if (
-      !caseOnlyPath
-      || !sameFileIdentity(previousInformation, nextInformation)
-    ) {
+    if (!sameFileIdentity(previousInformation, nextInformation)) {
       state.pendingRename = null;
       await persistState();
       return { changed: true, recovered: false };
@@ -345,7 +446,38 @@ export async function recoverPendingSourceRename({
       await persistState();
       return { changed: true, recovered: false };
     }
-    await renameFile(pending.previousPath, pending.sourcePath);
+    if (isCaseOnlySameFile({
+      previousPath: pending.previousPath,
+      sourcePath: pending.sourcePath,
+      previousInformation,
+      nextInformation,
+      platform,
+    })) {
+      await renameFile(pending.previousPath, pending.sourcePath);
+    } else if (nextInformation) {
+      await moveRegularFileNoReplace({
+        previousPath: pending.previousPath,
+        sourcePath: pending.sourcePath,
+        expectedInformation: previousInformation,
+        expectedSha256: pending.expectedSha256,
+        readProject,
+        lstatFile,
+        linkFile,
+        unlinkFile,
+        destinationAlreadyLinked: true,
+      });
+    } else {
+      await moveRegularFileNoReplace({
+        previousPath: pending.previousPath,
+        sourcePath: pending.sourcePath,
+        expectedInformation: previousInformation,
+        expectedSha256: pending.expectedSha256,
+        readProject,
+        lstatFile,
+        linkFile,
+        unlinkFile,
+      });
+    }
   }
 
   try {
@@ -381,6 +513,8 @@ export async function renameHtmlSource({
   lstatFile = lstat,
   realpathFile = realpath,
   renameFile = rename,
+  linkFile = link,
+  unlinkFile = unlink,
   now = Date.now,
 }) {
   if (!state || typeof state !== "object") {
@@ -397,6 +531,8 @@ export async function renameHtmlSource({
       lstatFile,
       realpathFile,
       renameFile,
+      linkFile,
+      unlinkFile,
       now,
     });
   }
@@ -455,21 +591,19 @@ export async function renameHtmlSource({
     optionalLstat(canonicalRequest.targetPath, lstatFile),
   ]);
   assertRegularSource(sourceInformation, canonicalRequest.sourcePath);
-  if (destinationInformation) {
-    const caseOnlyPath = (
-      platform === "darwin" || platform === "win32"
-    ) && normalizedPathKey(canonicalRequest.sourcePath, platform)
-      === normalizedPathKey(canonicalRequest.targetPath, platform);
-    if (
-      !caseOnlyPath
-      || !sameFileIdentity(sourceInformation, destinationInformation)
-    ) {
-      throw new ProjectFileError(
-        "RENAME_DESTINATION_EXISTS",
-        "同一文件夹里已经有这个文件名。",
-        { targetPath: canonicalRequest.targetPath },
-      );
-    }
+  const caseOnlySameFile = isCaseOnlySameFile({
+    previousPath: canonicalRequest.sourcePath,
+    sourcePath: canonicalRequest.targetPath,
+    previousInformation: sourceInformation,
+    nextInformation: destinationInformation,
+    platform,
+  });
+  if (destinationInformation && !caseOnlySameFile) {
+    throw new ProjectFileError(
+      "RENAME_DESTINATION_EXISTS",
+      "同一文件夹里已经有这个文件名。",
+      { targetPath: canonicalRequest.targetPath },
+    );
   }
 
   const pending = {
@@ -485,10 +619,25 @@ export async function renameHtmlSource({
   await persistState();
 
   try {
-    await renameFile(pending.previousPath, pending.sourcePath);
+    if (caseOnlySameFile) {
+      await renameFile(pending.previousPath, pending.sourcePath);
+    } else {
+      await moveRegularFileNoReplace({
+        previousPath: pending.previousPath,
+        sourcePath: pending.sourcePath,
+        expectedInformation: sourceInformation,
+        expectedSha256: pending.expectedSha256,
+        readProject,
+        lstatFile,
+        linkFile,
+        unlinkFile,
+      });
+    }
   } catch (error) {
-    state.pendingRename = null;
-    await persistState();
+    if (!error?.destinationCreated) {
+      state.pendingRename = null;
+      await persistState();
+    }
     throw error;
   }
 

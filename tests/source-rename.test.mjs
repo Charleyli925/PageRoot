@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
 import {
   access,
+  link,
+  lstat,
   mkdtemp,
   readFile,
   realpath,
   rename,
   rm,
+  unlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -140,6 +143,163 @@ test("source rename refuses a live destination and does not overwrite either fil
   assert.equal(state.activePath, fixture.sourcePath);
   assert.equal(state.pendingRename, null);
   assert.equal(writes.length, 0);
+});
+
+test("source rename cannot overwrite a destination created after its preflight check", async (t) => {
+  const fixture = await createFixture(t);
+  const destinationPath = path.join(fixture.directory, "竞态目标.html");
+  const racedHtml = "<html><body>竞态创建的内容</body></html>";
+  const state = projectState(fixture.sourcePath);
+  const writes = [];
+  const options = serviceOptions(
+    renamePayload(fixture.sourcePath, "竞态目标"),
+    state,
+    writes,
+    [],
+  );
+  options.linkFile = async (sourcePath, targetPath) => {
+    await writeFile(targetPath, racedHtml, "utf8");
+    return link(sourcePath, targetPath);
+  };
+
+  await assert.rejects(
+    renameHtmlSource(options),
+    (error) => {
+      assert.equal(error.code, "RENAME_DESTINATION_EXISTS");
+      return true;
+    },
+  );
+
+  assert.equal(await readFile(fixture.sourcePath, "utf8"), HTML);
+  assert.equal(await readFile(destinationPath, "utf8"), racedHtml);
+  assert.equal(state.activePath, fixture.sourcePath);
+  assert.equal(state.pendingRename, null);
+  assert.equal(writes.length, 2);
+});
+
+test("source rename rolls back when the source identity changes after preflight", async (t) => {
+  const fixture = await createFixture(t);
+  const destinationPath = path.join(fixture.directory, "身份竞态.html");
+  const replacementPath = path.join(fixture.directory, "外部替换.html");
+  const replacementHtml = "<html><body>外部编辑器替换后的内容</body></html>";
+  const state = projectState(fixture.sourcePath);
+  const writes = [];
+  const options = serviceOptions(
+    renamePayload(fixture.sourcePath, "身份竞态"),
+    state,
+    writes,
+    [],
+  );
+  options.linkFile = async (sourcePath, targetPath) => {
+    await writeFile(replacementPath, replacementHtml, "utf8");
+    await rename(replacementPath, sourcePath);
+    return link(sourcePath, targetPath);
+  };
+
+  await assert.rejects(
+    renameHtmlSource(options),
+    (error) => {
+      assert.equal(error.code, "RENAME_SOURCE_CHANGED");
+      return true;
+    },
+  );
+
+  assert.equal(await readFile(fixture.sourcePath, "utf8"), replacementHtml);
+  await assert.rejects(access(destinationPath), { code: "ENOENT" });
+  assert.equal(state.activePath, fixture.sourcePath);
+  assert.equal(state.pendingRename, null);
+  assert.equal(writes.length, 2);
+});
+
+test("source rename restores the old name when content changes before final commit", async (t) => {
+  const fixture = await createFixture(t);
+  const destinationPath = path.join(fixture.directory, "内容竞态.html");
+  const changedHtml = "<html><body>提交窗口中的外部修改</body></html>";
+  const state = projectState(fixture.sourcePath);
+  const writes = [];
+  const options = serviceOptions(
+    renamePayload(fixture.sourcePath, "内容竞态"),
+    state,
+    writes,
+    [],
+  );
+  const readProject = options.readProject;
+  let reads = 0;
+  options.readProject = async (sourcePath) => {
+    reads += 1;
+    if (reads === 3) await writeFile(sourcePath, changedHtml, "utf8");
+    return readProject(sourcePath);
+  };
+
+  await assert.rejects(
+    renameHtmlSource(options),
+    (error) => {
+      assert.equal(error.code, "RENAME_SOURCE_CHANGED");
+      return true;
+    },
+  );
+
+  assert.equal(await readFile(fixture.sourcePath, "utf8"), changedHtml);
+  await assert.rejects(access(destinationPath), { code: "ENOENT" });
+  assert.equal(state.activePath, fixture.sourcePath);
+  assert.equal(state.pendingRename, null);
+  assert.equal(writes.length, 2);
+});
+
+test("source rename recovers a no-replace move interrupted after linking the destination", async (t) => {
+  const fixture = await createFixture(t);
+  const destinationPath = path.join(fixture.directory, "中断后恢复.html");
+  const state = projectState(fixture.sourcePath);
+  const writes = [];
+  const options = serviceOptions(
+    renamePayload(fixture.sourcePath, "中断后恢复"),
+    state,
+    writes,
+    [],
+  );
+  let failOldPathRemoval = true;
+  options.unlinkFile = async (sourcePath) => {
+    if (failOldPathRemoval) {
+      failOldPathRemoval = false;
+      throw Object.assign(new Error("测试注入：旧路径尚未删除。"), {
+        code: "EIO",
+      });
+    }
+    return unlink(sourcePath);
+  };
+
+  await assert.rejects(
+    renameHtmlSource(options),
+    (error) => {
+      assert.equal(error.code, "RENAME_MOVE_INCOMPLETE");
+      assert.equal(error.destinationCreated, true);
+      return true;
+    },
+  );
+
+  const [previousInformation, nextInformation] = await Promise.all([
+    lstat(fixture.sourcePath),
+    lstat(destinationPath),
+  ]);
+  assert.equal(previousInformation.dev, nextInformation.dev);
+  assert.equal(previousInformation.ino, nextInformation.ino);
+  assert.equal(state.pendingRename.operationId, "rename_test_operation_0001");
+  assert.equal(writes.length, 1);
+
+  const recovery = await recoverPendingSourceRename({
+    state,
+    readProject: (sourcePath) => readHtmlFile({ sourcePath }),
+    persistState: async () => writes.push(structuredClone(state)),
+    platform: "linux",
+    now: () => 1_001,
+  });
+
+  assert.equal(recovery.recovered, true);
+  assert.equal(await readFile(destinationPath, "utf8"), HTML);
+  await assert.rejects(access(fixture.sourcePath), { code: "ENOENT" });
+  assert.equal(state.pendingRename, null);
+  assert.equal(state.lastRename.completedAt, 1_001);
+  assert.equal(writes.length, 2);
 });
 
 test("source rename rejects a stale content Hash before creating an intent record", async (t) => {

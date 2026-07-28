@@ -67,9 +67,12 @@ An explicit filename change is a separate desktop source-path transaction, not
 an HTML write. `desktop/source-rename.mjs` validates one stable operation ID,
 the current source Hash, a same-directory target and an unchanged HTML
 extension. It writes `pendingRename` to the active-file record before the
-filesystem rename, then atomically rebases active/recent paths and records
-`lastRename`. Startup reconciles the prepared operation from the old/new paths
-and expected Hash. The Bridge's existing physical-file identity relink keeps
+exclusive hard-link/unlink move, which cannot replace a destination created
+after preflight, then atomically rebases active/recent paths and records
+`lastRename`. The linked inode and Hash are revalidated before and after
+removing the old name; a late source change rolls back to the old name. Startup
+reconciles the prepared operation from the old/new paths and expected Hash.
+The Bridge's existing physical-file identity relink keeps
 the same Project and Document and updates only canonical `sourcePath` and
 display name; no Version is created.
 
