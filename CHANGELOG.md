@@ -4,9 +4,22 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
-- Added safe in-place filename editing for the current HTML: double-click the
-  saved title, edit only its stem, and keep the same file bytes, Project,
-  Document and Version history through collision checks and crash recovery.
+## [0.9.1] - 2026-07-28
+
+- Upgrade complete 0.9.0 project records additively on first start while
+  retaining their existing UUID directories and every historical artifact.
+- Clarified generated AI handoff files with PageRoot branding, plain-language
+  sections, explicit run identities and clearer default project rules while
+  preserving the existing frozen JSON protocol.
+- Increased saved-comment text and edit text to 14px, collapsed comment tools
+  until hover, keyboard focus or editing, and simplified normal and editing
+  cards to one boundary with a compact divider-free action row.
+- Name project-record folders from the HTML filename, project creation time and
+  a short identity suffix, while retaining the full `projectId` as internal
+  metadata.
+- Keep Finder's regular `.DS_Store` metadata inert inside live AI Attempt
+  folders, and mark an AI return only after the mandatory completion signal
+  has actually appeared.
 - Added stable-only macOS update checks with user-started differential
   ZIP/blockmap downloads, a restart confirmation, and the existing safe editor
   drain before installation.
@@ -19,18 +32,9 @@ Notable user-visible changes are documented here. This project follows Semantic 
 - Replaced ad-hoc distribution with fail-closed Developer ID signing, Hardened
   Runtime, Apple notarization and candidate verification of both DMG and updater
   assets while retaining the legacy manifest for one-time migration.
-- Name project-record folders from the HTML filename, project creation time and
-  a short identity suffix, while retaining the full `projectId` as internal
-  metadata.
-- Keep Finder's regular `.DS_Store` metadata inert inside live AI Attempt
-  folders, and mark an AI return only after the mandatory completion signal
-  has actually appeared.
-- Increased saved-comment text and edit text to 14px, collapsed comment tools
-  until hover, keyboard focus or editing, and simplified normal and editing
-  cards to one boundary with a compact divider-free action row.
-- Clarified generated AI handoff files with PageRoot branding, plain-language
-  sections, explicit run identities and clearer default project rules while
-  preserving the existing frozen JSON protocol.
+- Added safe in-place filename editing for the current HTML: double-click the
+  saved title, edit only its stem, and keep the same file bytes, Project,
+  Document and Version history through collision checks and crash recovery.
 
 ## [0.9.0] - 2026-07-28
 
@@ -125,7 +129,8 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 - Published the first public macOS release in this repository under the earlier YuanYe artifact name.
 
-[Unreleased]: https://github.com/Charleyli925/PageRoot/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/Charleyli925/PageRoot/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/Charleyli925/PageRoot/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/Charleyli925/PageRoot/compare/v0.8.10...v0.9.0
 [0.8.10]: https://github.com/Charleyli925/PageRoot/compare/v0.8.9...v0.8.10
 [0.8.9]: https://github.com/Charleyli925/PageRoot/compare/v0.8.8...v0.8.9

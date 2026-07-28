@@ -76,6 +76,10 @@ test("readable project directory names stay safe, bounded, and tied to project i
     () => assertProjectStorageDirectoryName("季度报告", projectId),
     /does not match projectId/,
   );
+  assert.equal(
+    assertProjectStorageDirectoryName(projectId, projectId),
+    projectId,
+  );
 });
 
 test("workspace Bridge local imports stay inside the packaged Bridge dependency closure", async () => {
@@ -475,7 +479,7 @@ test("v2 registries are rejected without migration or mutation", async (t) => {
   );
 });
 
-test("legacy UUID project directories are rejected without migration or deletion", async (t) => {
+test("incomplete legacy UUID project directories are rejected without mutation", async (t) => {
   const environment = await createEnvironment(t);
   const projectId = "project_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
   const legacyProjectRoot = join(
@@ -510,10 +514,91 @@ test("legacy UUID project directories are rejected without migration or deletion
 
   await assert.rejects(
     startBridge(environment.workspace),
-    /metadata is invalid/,
+    /cannot be migrated: legacy project records are missing or invalid/,
   );
   assert.equal(await readFile(registryPath, "utf8"), legacyRegistry);
   assert.equal(await readFile(markerPath, "utf8"), "保留旧目录");
+});
+
+test("0.9.0 project metadata upgrades in place without moving history", async (t) => {
+  const environment = await createEnvironment(t);
+  const sourcePath = join(environment.sources, "已有项目.html");
+  const sourceHtml = htmlPage("已有项目");
+  await writeFile(sourcePath, sourceHtml, "utf8");
+  const firstBridge = await environment.start();
+  const opened = (await openWorkspace(firstBridge.baseUrl, sourcePath)).body;
+  await stopChild(firstBridge.child);
+
+  const registryPath = join(environment.workspace, "project-registry.json");
+  const readableProjectRoot = opened.projectRoot;
+  const legacyProjectRoot = join(
+    environment.workspace,
+    "projects",
+    opened.projectId,
+  );
+  const originalVersion = await readFile(
+    join(readableProjectRoot, "versions", "ver_0001", "version.json"),
+    "utf8",
+  );
+  const markerPath = join(readableProjectRoot, "legacy-marker.txt");
+  await writeFile(markerPath, "历史目录保持原位", "utf8");
+  await rename(readableProjectRoot, legacyProjectRoot);
+
+  const registry = JSON.parse(await readFile(registryPath, "utf8"));
+  delete registry.projects[opened.projectId].displayName;
+  delete registry.projects[opened.projectId].createdAt;
+  delete registry.projects[opened.projectId].storageDirectoryName;
+  await writeFile(registryPath, `${JSON.stringify(registry, null, 2)}\n`, "utf8");
+
+  const projectPath = join(legacyProjectRoot, "project.json");
+  const project = JSON.parse(await readFile(projectPath, "utf8"));
+  project.name = "已有项目";
+  delete project.displayName;
+  delete project.createdAt;
+  delete project.storageDirectoryName;
+  await writeFile(projectPath, `${JSON.stringify(project, null, 2)}\n`, "utf8");
+
+  const restarted = await environment.start();
+  const migrated = (await openWorkspace(restarted.baseUrl, sourcePath)).body;
+  assert.equal(migrated.projectId, opened.projectId);
+  assert.equal(migrated.documentId, opened.documentId);
+  assert.equal(migrated.projectRoot, legacyProjectRoot);
+  assert.equal(
+    await readFile(join(legacyProjectRoot, "legacy-marker.txt"), "utf8"),
+    "历史目录保持原位",
+  );
+  assert.equal(
+    await readFile(
+      join(legacyProjectRoot, "versions", "ver_0001", "version.json"),
+      "utf8",
+    ),
+    originalVersion,
+  );
+
+  const migratedRegistry = JSON.parse(await readFile(registryPath, "utf8"));
+  assert.equal(
+    migratedRegistry.projects[opened.projectId].displayName,
+    "已有项目",
+  );
+  assert.equal(
+    migratedRegistry.projects[opened.projectId].storageDirectoryName,
+    opened.projectId,
+  );
+  assert.equal(
+    Number.isNaN(
+      Date.parse(migratedRegistry.projects[opened.projectId].createdAt),
+    ),
+    false,
+  );
+  const migratedProject = JSON.parse(await readFile(projectPath, "utf8"));
+  assert.equal(migratedProject.displayName, "已有项目");
+  assert.equal(migratedProject.createdAt,
+    migratedRegistry.projects[opened.projectId].createdAt);
+  assert.equal(migratedProject.storageDirectoryName, opened.projectId);
+  assert.deepEqual(
+    await readdir(join(environment.workspace, "projects")),
+    [opened.projectId],
+  );
 });
 
 test("registration and first edit keep document identity sidecar-only", async (t) => {

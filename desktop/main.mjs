@@ -61,13 +61,13 @@ import {
   LATEST_RELEASE_PAGE_URL,
   PROJECT_REPOSITORY_URL,
 } from "./manual-update.mjs";
+import { createApplicationUpdateController } from "./application-update.mjs";
 import {
   normalizeCompletedSourceRename,
   normalizePendingSourceRename,
   recoverPendingSourceRename,
   renameHtmlSource,
 } from "./source-rename.mjs";
-import { createApplicationUpdateController } from "./application-update.mjs";
 
 // electron-updater is CommonJS; the default import is the supported ESM bridge.
 const { autoUpdater } = electronUpdater;

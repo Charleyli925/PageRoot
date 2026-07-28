@@ -1974,6 +1974,9 @@ export default function Workbench() {
     )
     && updateResult.latestVersion,
   );
+  const updateDownloaded = updateResult?.status === "downloaded";
+  const updateDownloading = updateResult?.status === "downloading";
+  const updateBadgeLabel = updateDownloaded ? "New! 重启更新" : "New!";
   const currentSourceFileName =
     localFileNameFromSourcePath(sourcePath) || projectName;
   const currentSourceFileExtension = fileExtension(currentSourceFileName);
@@ -1994,9 +1997,6 @@ export default function Workbench() {
     && persistState === "idle"
     && editRevision === lastPersistedRevision
   );
-  const updateDownloaded = updateResult?.status === "downloaded";
-  const updateDownloading = updateResult?.status === "downloading";
-  const updateBadgeLabel = updateDownloaded ? "New! 重启更新" : "New!";
   const interactionLocked = runInProgress
     || browserPreviewOnly
     || projectHydrating

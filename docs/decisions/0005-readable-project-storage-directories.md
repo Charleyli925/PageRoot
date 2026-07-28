@@ -26,17 +26,22 @@ is registered more than once.
   mapping.
 - Source-file renames, moves and generated working files do not rename the
   project directory.
-- Registries and project files without the readable-storage metadata are
-  rejected without migration, renaming or deletion.
+- A complete 0.9.0 project is upgraded additively on first start: the Bridge
+  derives `displayName` and `createdAt` from its source identity and immutable
+  initial Version, then records the existing `projectId` directory as its
+  legacy `storageDirectoryName`.
+- Legacy project directories are never renamed automatically, because frozen
+  Request/Attempt paths may still refer to them. New projects use readable
+  directory names.
 
 ## Consequences
 
-Finder exposes recognizable, collision-resistant project folders while
-protocol records retain stable opaque identities. Registry and `project.json`
-metadata must agree before a project can be used, and directory names are
-validated as one bounded path segment tied to the project token.
+Finder exposes recognizable, collision-resistant folders for newly registered
+projects while protocol records retain stable opaque identities. Existing UUID
+directories remain accepted only when the registry, `project.json` and initial
+Version prove one matching project identity. The upgrade changes metadata
+additively and never scans, moves, guesses ownership, or deletes a directory.
 
-This is a clean storage-layout cutover. Existing UUID directories remain on
-disk untouched but are not accepted by the new Bridge. Project creation may
-leave an unregistered orphan if the process stops before the registry publish;
-as before, recovery never scans or guesses ownership from directory names.
+Project creation may leave an unregistered orphan if the process stops before
+the registry publish; as before, recovery never scans or guesses ownership
+from directory names.

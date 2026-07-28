@@ -458,6 +458,10 @@ export function assertProjectStorageDirectoryName(value, projectId) {
       409,
     );
   }
+  // Projects created before readable storage names were introduced used the
+  // exact projectId as their directory. Keep that one legacy shape valid so
+  // existing immutable Request, Attempt and Version paths never have to move.
+  if (value === projectId) return value;
   const match = value.match(PROJECT_STORAGE_DIRECTORY_PATTERN);
   if (
     !match
