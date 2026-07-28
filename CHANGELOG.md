@@ -4,6 +4,10 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+- Clarified generated AI handoff files with PageRoot branding, plain-language
+  sections, explicit run identities and clearer default project rules while
+  preserving the existing frozen JSON protocol.
+
 ## [0.9.0] - 2026-07-28
 
 - Promoted the editable-island editor from the isolated V2 comparison build to
