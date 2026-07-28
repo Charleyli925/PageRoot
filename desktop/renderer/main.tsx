@@ -30,6 +30,7 @@ type WorkspaceUnavailable = {
 declare global {
   interface Window {
     htmlAIAppLifecycle?: {
+      onAboutRequested: (listener: () => void) => () => void;
       onPrepareClose: (listener: (request: PrepareCloseRequest) => void) => () => void;
       reportReady: (requestId: string) => Promise<{ accepted: boolean }>;
       reportBlocked: (

@@ -19,6 +19,19 @@ Local `npm run release:mac` remains available when a complete local source-and-i
 
 ## Build the pre-tag candidate
 
+Before the first signed candidate, configure these GitHub Actions secrets
+directly in the repository settings:
+
+- `MAC_CSC_LINK`: base64-encoded Developer ID Application `.p12`.
+- `MAC_CSC_KEY_PASSWORD`: the export password for that `.p12`.
+- `APPLE_ID`: the Apple ID used for notarization.
+- `APPLE_APP_SPECIFIC_PASSWORD`: a current app-specific password created for
+  CI notarization.
+
+Never paste those values into source, issues, Pull Requests, logs or chat. The
+public Team ID is fixed to `RNK9RB969G` in the release workflow so a candidate
+cannot silently switch signing teams.
+
 In GitHub Actions:
 
 1. Select the `Release Candidate` workflow.
@@ -29,10 +42,14 @@ The workflow:
 
 - refuses any ref other than current `main`;
 - requires a successful PR source-gate attestation for the exact Tree Hash and package/lockfile version, no older than seven days;
-- packages on macOS with `electron-builder --publish never`;
+- packages on macOS with `electron-builder --publish never`, Developer ID
+  signing, Hardened Runtime and Apple notarization;
 - launches the packaged App with isolated data;
-- verifies the App bundle, Bridge resources, schemas, ad-hoc signature, DMG integrity and read-only mount;
-- creates the checksum, update manifest and `build-info.json`;
+- verifies the App bundle, Bridge resources, schemas, expected Team ID,
+  notarization ticket, Gatekeeper assessment, DMG integrity, update ZIP,
+  blockmap, `latest-mac.yml` and read-only mount;
+- creates checksums for every public payload and metadata file, retains the
+  legacy `update-manifest.json`, and copies `build-info.json`;
 - freezes those files with `release-candidate.json` in an artifact named for the exact Tree Hash, version, architecture and workflow run attempt.
 
 It does not create a tag or GitHub Release. A failed build or verification therefore leaves the version namespace untouched.
@@ -56,7 +73,9 @@ The workflow:
 4. verifies the candidate attestation, build provenance, expected file set, sizes and SHA-256 of every asset;
 5. checks that no published Release already exists;
 6. creates an annotated `v<version>` tag at that exact commit;
-7. publishes the candidate DMG, checksum, update manifest, build provenance and candidate attestation without rebuilding.
+7. publishes the candidate DMG, ZIP, ZIP blockmap, `latest-mac.yml`, checksum,
+   legacy update manifest, build provenance and candidate attestation without
+   rebuilding.
 
 If publication fails after the tag push but before the GitHub Release exists, rerun the same `Release` workflow from the same `main` commit and version. It may resume only when the existing tag is annotated and resolves to the identical commit. If a Release already exists, the workflow refuses to replace its assets.
 
@@ -66,7 +85,17 @@ Packaging refuses committed-source drift or untracked source files. `build-info.
 
 Publication resolves only the artifact whose name matches the successful run attempt, then revalidates all of that information after downloading it. This keeps a failed-job rerun distinct from bytes uploaded by an earlier attempt of the same workflow run. The Release includes both provenance files, so the published installer can be traced to the reviewed source tree and the exact successful candidate run and attempt.
 
-Current public builds use ad-hoc signing (`identity: "-"`) and are not notarized. Developer ID signing and notarization should be added before presenting the app as a frictionless production download; credentials must stay in GitHub encrypted secrets and must never enter the repository.
+The public build is signed with a Developer ID Application certificate,
+notarized and stapled before it is frozen. `latest-mac.yml` describes the signed
+ZIP and its blockmap; electron-updater validates the release metadata and
+application signature, uses a cached prior ZIP for differential transfer when
+available, and falls back to a full ZIP on the first migration or if a
+differential request cannot be completed.
+
+The first signed release is a trust-boundary migration. Existing ad-hoc clients
+show the legacy manual update entry and require one manual DMG install. Once the
+signed build is installed, later stable releases download automatically and
+prompt for an explicit safe restart.
 
 ## Failures
 

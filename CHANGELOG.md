@@ -7,6 +7,18 @@ Notable user-visible changes are documented here. This project follows Semantic 
 - Added safe in-place filename editing for the current HTML: double-click the
   saved title, edit only its stem, and keep the same file bytes, Project,
   Document and Version history through collision checks and crash recovery.
+- Added stable-only macOS update checks with user-started differential
+  ZIP/blockmap downloads, a restart confirmation, and the existing safe editor
+  drain before installation.
+- Added four-hour update checks while the app remains open, plus a redesigned
+  About PageRoot dialog with manual update checking and the official GitHub
+  repository link.
+- Kept update status to one right-aligned red italic `New!` label above the
+  Qoder handoff button, with no Canvas completion banner, progress animation or
+  extra header icon.
+- Replaced ad-hoc distribution with fail-closed Developer ID signing, Hardened
+  Runtime, Apple notarization and candidate verification of both DMG and updater
+  assets while retaining the legacy manifest for one-time migration.
 - Name project-record folders from the HTML filename, project creation time and
   a short identity suffix, while retaining the full `projectId` as internal
   metadata.

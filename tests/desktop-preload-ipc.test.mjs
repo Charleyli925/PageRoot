@@ -172,6 +172,10 @@ test("preload exposes workspace failure recovery and a narrow relaunch action", 
     return { relaunched: false };
   });
   const issues = [];
+  let aboutRequests = 0;
+  const unsubscribeAbout = preload.lifecycle.onAboutRequested(() => {
+    aboutRequests += 1;
+  });
   const unsubscribe = preload.lifecycle.onWorkspaceUnavailable((issue) => {
     issues.push(issue);
   });
@@ -181,6 +185,8 @@ test("preload exposes workspace failure recovery and a narrow relaunch action", 
     title: "本地项目资料暂时不可用",
     message: "请先导出当前编辑。",
   });
+  preload.emit("html-app:about-requested");
+  assert.equal(aboutRequests, 1);
   assert.deepEqual(
     JSON.parse(JSON.stringify(issues)),
     [
@@ -202,6 +208,7 @@ test("preload exposes workspace failure recovery and a narrow relaunch action", 
     ["html-app:workspace-recovery-ready"],
     ["html-app:relaunch"],
   ]);
+  unsubscribeAbout();
   unsubscribe();
 });
 
@@ -318,7 +325,7 @@ test("preload exposes the narrow QoderWork handoff integration", async () => {
   ]);
 });
 
-test("preload exposes backend update status and the fixed latest-release link", async () => {
+test("preload exposes update status, restart installation, and the fixed release fallback", async () => {
   const calls = [];
   const { updates } = await loadPreloadApis(async (...args) => {
     calls.push(args);
@@ -335,12 +342,28 @@ test("preload exposes backend update status and the fixed latest-release link", 
   assert.equal(typeof unsubscribe, "function");
   unsubscribe();
 
+  await updates.checkNow();
+  assert.deepEqual(calls[1], ["html-updates:check-now"]);
+
+  await updates.downloadAvailable();
+  assert.deepEqual(calls[2], ["html-updates:download-available"]);
+
+  await updates.installDownloaded();
+  assert.deepEqual(calls[3], ["html-updates:install-downloaded"]);
+
   await updates.openLatestRelease();
-  assert.deepEqual(calls[1], ["html-updates:open-latest-release"]);
+  assert.deepEqual(calls[4], ["html-updates:open-latest-release"]);
+
+  await updates.openRepository();
+  assert.deepEqual(calls[5], ["html-updates:open-repository"]);
   assert.deepEqual(Object.keys(updates).sort(), [
+    "checkNow",
+    "downloadAvailable",
     "getStatus",
+    "installDownloaded",
     "onStatus",
     "openLatestRelease",
+    "openRepository",
   ]);
 });
 

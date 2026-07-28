@@ -74,8 +74,12 @@ export function releaseCandidateArtifactName(
 }
 
 function expectedAssetNames(packageVersion, architecture) {
+  const updateZip = `PageRoot-${packageVersion}-${architecture}.zip`;
   return [
     `PageRoot-${packageVersion}-${architecture}.dmg`,
+    updateZip,
+    `${updateZip}.blockmap`,
+    "latest-mac.yml",
     "SHA256SUMS.txt",
     "update-manifest.json",
     "build-info.json",
@@ -148,11 +152,13 @@ async function validateReleaseAssets({
     throw new Error("Release candidate update-manifest.json does not match build provenance.");
   }
   const checksumText = await readFile(paths["SHA256SUMS.txt"], "utf8");
-  const dmgName = expectedNames[0];
-  const dmgEntry = entries.find((entry) => entry.name === dmgName);
-  const expectedChecksum = `${dmgEntry.sha256.slice("sha256:".length)}  ${dmgName}\n`;
+  const expectedChecksum = `${entries
+    .filter((entry) => entry.name !== "SHA256SUMS.txt")
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .map((entry) => `${entry.sha256.slice("sha256:".length)}  ${entry.name}`)
+    .join("\n")}\n`;
   if (checksumText !== expectedChecksum) {
-    throw new Error("Release candidate checksum does not match the DMG bytes.");
+    throw new Error("Release candidate checksums do not match the public asset bytes.");
   }
   return Object.freeze({
     entries: entries.map((entry) => Object.freeze(entry)),

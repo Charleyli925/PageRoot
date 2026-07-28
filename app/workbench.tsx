@@ -43,8 +43,10 @@ import type {
   NativeDeferredCommandAuthority,
   NativeDeferredCommandDiscardReason,
 } from "./components/HtmlCanvasEditor";
+import AboutPageRootDialog from "./components/AboutPageRootDialog";
 import HtmlInteractionPreview from "./components/HtmlInteractionPreview";
 import NoticeBar from "./components/NoticeBar";
+import RestartUpdateDialog from "./components/RestartUpdateDialog";
 import { rebindCanvasSelectionTargets } from "./lib/canvas-target-rebind.js";
 import {
   MAX_ATTACHMENT_BYTES,
@@ -112,6 +114,7 @@ import {
 const HtmlCanvasEditor = lazy(() => import("./components/HtmlCanvasEditor"));
 const BROWSER_PREVIEW_LOGO_PLACEHOLDER =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x2='1' y2='1'%3E%3Cstop stop-color='%236550e8'/%3E%3Cstop offset='1' stop-color='%23d45df2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='15' fill='url(%23g)'/%3E%3Cpath d='M23 23 13 32l10 9M41 23l10 9-10 9M36 16 28 48' fill='none' stroke='white' stroke-width='5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E";
+const PROJECT_REPOSITORY_URL = "https://github.com/Charleyli925/PageRoot";
 
 class DeferredEditorCommandDiscardedError extends Error {
   readonly reason: NativeDeferredCommandDiscardReason;
@@ -216,27 +219,39 @@ type DesktopIntegrationsApi = {
   }) => Promise<QoderHandoffResult>;
 };
 
-type ManualUpdateStatus =
+type ApplicationUpdateStatus =
+  | "idle"
+  | "checking"
   | "available"
+  | "downloading"
+  | "downloaded"
+  | "installing"
   | "current"
   | "unsupported"
   | "unavailable";
 
-type ManualUpdateResult = {
-  status: ManualUpdateStatus;
+type ApplicationUpdateResult = {
+  status: ApplicationUpdateStatus;
   currentVersion: string;
   latestVersion: string | null;
-  minimumMacOS: string | null;
   architecture: string;
+  downloadPercent: number | null;
   publishedAt: string | null;
 };
 
 type DesktopUpdatesApi = {
-  getStatus: () => Promise<ManualUpdateResult | null>;
+  getStatus: () => Promise<ApplicationUpdateResult | null>;
+  checkNow: () => Promise<ApplicationUpdateResult>;
+  downloadAvailable: () => Promise<ApplicationUpdateResult>;
   onStatus: (
-    listener: (result: ManualUpdateResult | null) => void,
+    listener: (result: ApplicationUpdateResult | null) => void,
   ) => () => void;
+  installDownloaded: () => Promise<{
+    installing: boolean;
+    reason: "not-ready" | "close-blocked" | null;
+  }>;
   openLatestRelease: () => Promise<{ opened: boolean }>;
+  openRepository: () => Promise<{ opened: boolean }>;
 };
 
 declare global {
@@ -366,7 +381,6 @@ type ToastAction =
       resumeSubmission?: boolean;
     }
   | { id: "relaunch-app"; label: string }
-  | { id: "open-release"; label: string }
   | { id: "retry-draft-persist"; label: string }
   | { id: "review-project-rules"; label: string }
   | { id: "retry-submit"; label: string }
@@ -1773,7 +1787,15 @@ export default function Workbench() {
   const [qoderHandoffState, setQoderHandoffState] =
     useState<ProjectQoderHandoffState | null>(null);
   const [updateResult, setUpdateResult] =
-    useState<ManualUpdateResult | null>(null);
+    useState<ApplicationUpdateResult | null>(null);
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const [restartUpdateOpen, setRestartUpdateOpen] = useState(false);
+  const [applicationVersion, setApplicationVersion] = useState("");
+  const [desktopUpdatesAvailable, setDesktopUpdatesAvailable] = useState(false);
+  const [manualUpdateCheckPending, setManualUpdateCheckPending] = useState(false);
+  const [manualUpdateCheckFailed, setManualUpdateCheckFailed] = useState(false);
+  const [repositoryOpenFailed, setRepositoryOpenFailed] = useState(false);
+  const promptedUpdateVersionRef = useRef<string | null>(null);
   const [, setOpenedAiVersionNotice] =
     useState<OpenedAiVersionNotice | null>(null);
   const [toast, setToast] = useReducer(noticeReducer, null);
@@ -1794,14 +1816,27 @@ export default function Workbench() {
     const updates = window.htmlAIUpdates;
     if (!updates) return undefined;
     let active = true;
-    const receiveStatus = (result: ManualUpdateResult | null) => {
+    const receiveStatus = (result: ApplicationUpdateResult | null) => {
       if (active) setUpdateResult(result);
     };
     const unsubscribe = updates.onStatus(receiveStatus);
+    queueMicrotask(() => {
+      if (active) setDesktopUpdatesAvailable(true);
+    });
     void updates.getStatus().then(receiveStatus).catch(() => undefined);
     return () => {
       active = false;
       unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    queueMicrotask(() => {
+      if (active) setApplicationVersion(window.htmlAIRuntime?.appVersion || "");
+    });
+    return () => {
+      active = false;
     };
   }, []);
 
@@ -1832,20 +1867,86 @@ export default function Workbench() {
     });
   }, []);
 
-  const openLatestRelease = useCallback(async () => {
+  useEffect(() => {
+    const lifecycle = window.htmlAIAppLifecycle;
+    if (!lifecycle?.onAboutRequested) return undefined;
+    return lifecycle.onAboutRequested(() => {
+      setManualUpdateCheckFailed(false);
+      setRepositoryOpenFailed(false);
+      setAboutOpen(true);
+    });
+  }, []);
+
+  const checkForApplicationUpdates = useCallback(async () => {
+    const updates = window.htmlAIUpdates;
+    setManualUpdateCheckFailed(false);
+    if (!updates) {
+      setManualUpdateCheckFailed(true);
+      return;
+    }
+    setManualUpdateCheckPending(true);
     try {
-      const result = await window.htmlAIUpdates?.openLatestRelease();
-      if (!result?.opened) throw new Error("GitHub 更新页面没有打开。");
+      const result = await updates.checkNow();
+      setUpdateResult(result);
     } catch {
-      setToast({
-        title: "更新页面没有打开",
-        message: "当前内容不受影响；可以重新打开 PageRoot 发布页。",
-        tone: "warning",
-        dedupeKey: "latest-release",
-        action: { id: "open-release", label: "打开更新页面" },
-      });
+      setManualUpdateCheckFailed(true);
+    } finally {
+      setManualUpdateCheckPending(false);
     }
   }, []);
+
+  const openProjectRepository = useCallback(async () => {
+    setRepositoryOpenFailed(false);
+    try {
+      const updates = window.htmlAIUpdates;
+      if (updates) {
+        const result = await updates.openRepository();
+        if (!result?.opened) throw new Error("GitHub repository did not open.");
+        return;
+      }
+      window.open(PROJECT_REPOSITORY_URL, "_blank", "noopener,noreferrer");
+    } catch {
+      setRepositoryOpenFailed(true);
+    }
+  }, []);
+
+  const closeAboutPageRoot = useCallback(() => {
+    setAboutOpen(false);
+  }, []);
+
+  const downloadAvailableUpdate = useCallback(async () => {
+    try {
+      const result = await window.htmlAIUpdates?.downloadAvailable();
+      if (result) setUpdateResult(result);
+    } catch {
+      // The main-process controller publishes a bounded unavailable state.
+    }
+  }, []);
+
+  const installDownloadedUpdate = useCallback(async (): Promise<boolean> => {
+    try {
+      const result = await window.htmlAIUpdates?.installDownloaded();
+      if (!result?.installing) {
+        throw new Error(result?.reason || "下载的更新尚未准备完成。");
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
+
+  useEffect(() => {
+    const version = updateResult?.latestVersion;
+    if (
+      updateResult?.status !== "downloaded"
+      || !version
+      || promptedUpdateVersionRef.current === version
+    ) {
+      return;
+    }
+    promptedUpdateVersionRef.current = version;
+    setRestartUpdateOpen(true);
+  }, [updateResult]);
 
   const latestVersion = useMemo(
     () => versions.find((version) => version.id === latestVersionId) || null,
@@ -1865,8 +1966,12 @@ export default function Workbench() {
   )
     ? qoderHandoffState.status
     : "idle";
-  const updateAvailable = Boolean(
-    updateResult?.status === "available"
+  const updateActionVisible = Boolean(
+    (
+      updateResult?.status === "available"
+      || updateResult?.status === "downloading"
+      || updateResult?.status === "downloaded"
+    )
     && updateResult.latestVersion,
   );
   const currentSourceFileName =
@@ -1889,6 +1994,9 @@ export default function Workbench() {
     && persistState === "idle"
     && editRevision === lastPersistedRevision
   );
+  const updateDownloaded = updateResult?.status === "downloaded";
+  const updateDownloading = updateResult?.status === "downloading";
+  const updateBadgeLabel = updateDownloaded ? "New! 重启更新" : "New!";
   const interactionLocked = runInProgress
     || browserPreviewOnly
     || projectHydrating
@@ -8626,8 +8734,6 @@ export default function Workbench() {
       setDrawer(null);
     } else if (action.id === "relaunch-app") {
       void relaunchApp();
-    } else if (action.id === "open-release") {
-      void openLatestRelease();
     } else if (action.id === "retry-draft-persist") {
       void flushDraftPersistence();
     } else if (action.id === "review-project-rules") {
@@ -9049,15 +9155,30 @@ export default function Workbench() {
             全局评论
           </button>
           <div className="header-send-cluster">
-            {updateAvailable ? (
+            {updateActionVisible ? (
               <button
                 className="header-update-badge"
                 type="button"
-                aria-label={`发现 PageRoot ${updateResult?.latestVersion || "新版本"}，打开 GitHub 更新页面`}
-                title={`PageRoot ${updateResult?.latestVersion || "新版本"} 可用`}
-                onClick={() => void openLatestRelease()}
+                aria-label={updateDownloaded
+                  ? `PageRoot ${updateResult?.latestVersion || "新版本"} 已下载，重启更新`
+                  : updateDownloading
+                    ? `正在下载 PageRoot ${updateResult?.latestVersion || "新版本"}`
+                    : `发现 PageRoot ${updateResult?.latestVersion || "新版本"}，下载更新`}
+                title={updateDownloaded
+                  ? `重启更新 PageRoot ${updateResult?.latestVersion || "新版本"}`
+                  : updateDownloading
+                    ? `正在下载 PageRoot ${updateResult?.latestVersion || "新版本"}`
+                    : `下载 PageRoot ${updateResult?.latestVersion || "新版本"}`}
+                disabled={updateDownloading}
+                onClick={() => {
+                  if (updateDownloaded) {
+                    setRestartUpdateOpen(true);
+                  } else if (updateResult?.status === "available") {
+                    void downloadAvailableUpdate();
+                  }
+                }}
               >
-                Update
+                {updateBadgeLabel}
               </button>
             ) : null}
             <button
@@ -10496,6 +10617,34 @@ export default function Workbench() {
           </footer>
         ) : null}
       </aside>
+
+      <RestartUpdateDialog
+        open={restartUpdateOpen && updateDownloaded}
+        installing={updateResult?.status === "installing"}
+        onClose={() => setRestartUpdateOpen(false)}
+        onRestartNow={() => {
+          setRestartUpdateOpen(false);
+          void installDownloadedUpdate();
+        }}
+      />
+
+      <AboutPageRootDialog
+        open={aboutOpen}
+        appVersion={applicationVersion}
+        updateResult={updateResult}
+        updatesAvailable={desktopUpdatesAvailable}
+        manualCheckPending={manualUpdateCheckPending}
+        manualCheckFailed={manualUpdateCheckFailed}
+        repositoryOpenFailed={repositoryOpenFailed}
+        onClose={closeAboutPageRoot}
+        onCheckForUpdates={() => void checkForApplicationUpdates()}
+        onDownloadUpdate={() => void downloadAvailableUpdate()}
+        onRequestRestart={() => {
+          setAboutOpen(false);
+          setRestartUpdateOpen(true);
+        }}
+        onOpenRepository={() => void openProjectRepository()}
+      />
 
       {toast ? (
         <NoticeBar
