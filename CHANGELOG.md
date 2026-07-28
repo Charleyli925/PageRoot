@@ -13,6 +13,9 @@ Notable user-visible changes are documented here. This project follows Semantic 
 - Name project-record folders from the HTML filename, project creation time and
   a short identity suffix, while retaining the full `projectId` as internal
   metadata.
+- Keep Finder's regular `.DS_Store` metadata inert inside live AI Attempt
+  folders, and mark an AI return only after the mandatory completion signal
+  has actually appeared.
 
 ## [0.9.0] - 2026-07-28
 

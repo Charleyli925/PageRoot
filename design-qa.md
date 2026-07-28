@@ -189,6 +189,92 @@ final result: passed
 
 ---
 
+# AI handoff four-stage flow QA
+
+Date: 2026-07-28
+
+Source visual truth:
+
+- Three user-provided captures covering the approved process-panel boundary,
+  native footer-button treatment, and state-specific actions.
+- The source captures were reviewed locally and remain outside the repository.
+
+Implementation evidence:
+
+- `output/design-qa/2026-07-28-ai-flow/handoff-waiting-4-stage.jpg`
+- `output/design-qa/2026-07-28-ai-flow/handoff-copy-failure-4-stage.jpg`
+- `output/design-qa/2026-07-28-ai-flow/handoff-success-4-stage.jpg`
+- `output/design-qa/2026-07-28-ai-flow/handoff-no-change-4-stage.jpg`
+
+Combined comparison inputs:
+
+- `output/design-qa/2026-07-28-ai-flow/comparison-waiting-reference-vs-final.png`
+- `output/design-qa/2026-07-28-ai-flow/comparison-process-panel-reference-vs-final.png`
+
+Viewport and state:
+
+- Waiting, copy-failure, and no-change captures: `1152 × 768` screen pixels.
+- Success capture: `1336 × 768` screen pixels after the native window zoom
+  action; the application content keeps the same desktop breakpoints.
+- The waiting-state combined comparison normalizes both source and
+  implementation to `1152 × 768` and compares the same locked-processing
+  state.
+- All states ran in isolated Electron user-data and workspace directories;
+  the user's installed application and project records were not used.
+
+## Findings
+
+- No actionable P0, P1, or P2 visual or interaction issue remains.
+- Scope: the title area, lock summary, right-side “本轮记录” panel, Finder row,
+  modal shell, and existing waiting-state footer remain visually unchanged.
+- Progress: seven internal implementation checks are represented as four
+  user-facing phases—prepare/copy, wait for AI, validate/save, and result.
+- Truthfulness: waiting shows one completed phase and one current phase;
+  completion is not inferred from an output file, elapsed time, or a generic
+  error.
+- State placement: clipboard failure is shown in phase one, no-change ends in
+  a neutral result row, and a verified new version ends in the current
+  confirmation row.
+- Visual hierarchy: each phase is a compact native card using the existing
+  green, indigo, neutral, and error tokens. Text remains inside the panel
+  without clipping or horizontal overflow.
+- Footer actions: the existing waiting buttons retain their original order,
+  icons, size, radius, outline, and filled-primary treatment. New actions use
+  those same project classes instead of adding a second button design.
+- Decision placement: success, no-change, copy recovery, and conflict actions
+  belong to the fixed footer; the process cards contain status only.
+
+## Interaction checks
+
+- Created a real frozen Request and confirmed the waiting state shows exactly
+  four phases plus the unchanged cancel, preview, and re-copy actions.
+- Injected a clipboard write failure and confirmed “重新复制” and “取消本轮”
+  are the only footer decisions.
+- Ran the official finalizer with changed HTML and confirmed
+  “打开最新版” plus “稍后处理”.
+- Ran the official finalizer with comparison-identical HTML and confirmed no
+  Version was created and the footer offers “修改要求” plus “返回编辑”.
+- Checked the accessibility tree in every captured state; phase labels,
+  details, counts, and buttons are exposed in reading order.
+
+## Automated checks
+
+- Focused lifecycle, shell, and notification tests: 41 passed.
+- Full Node suite: 481 passed, 3 skipped, 0 failed.
+- `npm run typecheck`
+- `npm run lint`
+- `npm run build`
+- `npm run task:finish`: passed, including 197 Node tests, 8 browser
+  smoke tests, 3 Electron smoke tests, and 2 AI closed-loop smoke tests.
+
+## Follow-up polish
+
+- None required inside the approved modification boundary.
+
+final result: passed
+
+---
+
 # Paired review focus and full-bleed canvas QA
 
 Date: 2026-07-23
