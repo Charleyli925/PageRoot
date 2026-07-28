@@ -4,6 +4,8 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+- Upgrade complete 0.9.0 project records additively on first start while
+  retaining their existing UUID directories and every historical artifact.
 - Clarified generated AI handoff files with PageRoot branding, plain-language
   sections, explicit run identities and clearer default project rules while
   preserving the existing frozen JSON protocol.

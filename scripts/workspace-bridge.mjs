@@ -1000,6 +1000,157 @@ function emptyRegistry() {
   };
 }
 
+function hasProjectStorageMetadata(record) {
+  return Boolean(
+    record
+    && typeof record === "object"
+    && !Array.isArray(record)
+    && typeof record.displayName === "string"
+    && record.displayName.trim().length > 0
+    && record.displayName.length <= 300
+    && typeof record.createdAt === "string"
+    && !Number.isNaN(Date.parse(record.createdAt))
+    && typeof record.storageDirectoryName === "string",
+  );
+}
+
+function hasAnyProjectStorageMetadata(record) {
+  return Boolean(
+    record
+    && typeof record === "object"
+    && (
+      Object.hasOwn(record, "displayName")
+      || Object.hasOwn(record, "createdAt")
+      || Object.hasOwn(record, "storageDirectoryName")
+    ),
+  );
+}
+
+function legacyProjectMigrationError(projectId, reason) {
+  return new HttpError(
+    409,
+    "WORKSPACE_SCHEMA_INVALID",
+    `project-registry.json project ${projectId} cannot be migrated: ${reason}`,
+  );
+}
+
+async function migrateLegacyProjectStorageMetadata(registry) {
+  const migrations = [];
+  for (const [projectId, record] of Object.entries(registry.projects)) {
+    if (hasProjectStorageMetadata(record)) continue;
+    if (hasAnyProjectStorageMetadata(record)) {
+      throw legacyProjectMigrationError(
+        projectId,
+        "readable storage metadata is incomplete",
+      );
+    }
+    if (
+      !record
+      || typeof record !== "object"
+      || Array.isArray(record)
+      || typeof record.documentId !== "string"
+      || typeof record.sourcePath !== "string"
+    ) {
+      throw legacyProjectMigrationError(
+        projectId,
+        "legacy source identity is incomplete",
+      );
+    }
+
+    const projectRoot = projectDirectory(
+      WORKSPACE_ROOT,
+      projectId,
+      projectId,
+    );
+    let project;
+    let initialVersion;
+    try {
+      [project, initialVersion] = await Promise.all([
+        readLifecycleJson(
+          path.join(projectRoot, "project.json"),
+          "project.json",
+        ),
+        readLifecycleJson(
+          path.join(projectRoot, "versions", "ver_0001", "version.json"),
+          "ver_0001/version.json",
+        ),
+      ]);
+    } catch {
+      throw legacyProjectMigrationError(
+        projectId,
+        "legacy project records are missing or invalid",
+      );
+    }
+    if (
+      project.projectId !== projectId
+      || project.documentId !== record.documentId
+      || project.sourcePath !== record.sourcePath
+      || initialVersion.projectId !== projectId
+      || initialVersion.documentId !== record.documentId
+      || initialVersion.versionId !== "ver_0001"
+      || initialVersion.sourceType !== "initial"
+      || typeof initialVersion.generatedAt !== "string"
+      || Number.isNaN(Date.parse(initialVersion.generatedAt))
+    ) {
+      throw legacyProjectMigrationError(
+        projectId,
+        "legacy project identity does not match its initial version",
+      );
+    }
+
+    const projectHasMetadata = hasProjectStorageMetadata(project);
+    if (hasAnyProjectStorageMetadata(project) && !projectHasMetadata) {
+      throw legacyProjectMigrationError(
+        projectId,
+        "project.json readable storage metadata is incomplete",
+      );
+    }
+    const metadata = projectHasMetadata
+      ? {
+          displayName: project.displayName,
+          createdAt: project.createdAt,
+          storageDirectoryName: project.storageDirectoryName,
+        }
+      : {
+          displayName: projectDisplayName(record.sourcePath),
+          createdAt: initialVersion.generatedAt,
+          storageDirectoryName: projectId,
+        };
+    if (metadata.storageDirectoryName !== projectId) {
+      throw legacyProjectMigrationError(
+        projectId,
+        "legacy project directory identity changed unexpectedly",
+      );
+    }
+    migrations.push({
+      projectId,
+      projectRoot,
+      project,
+      projectHasMetadata,
+      metadata,
+    });
+  }
+
+  if (migrations.length === 0) return false;
+  for (const migration of migrations) {
+    if (!migration.projectHasMetadata) {
+      await atomicWriteJson(
+        path.join(migration.projectRoot, "project.json"),
+        {
+          ...migration.project,
+          ...migration.metadata,
+        },
+      );
+    }
+    registry.projects[migration.projectId] = {
+      ...registry.projects[migration.projectId],
+      ...migration.metadata,
+    };
+  }
+  await writeRegistry(registry);
+  return true;
+}
+
 async function readRegistry() {
   if (!(await exists(REGISTRY_PATH))) return emptyRegistry();
   const registry = await readLifecycleJson(
@@ -1019,6 +1170,7 @@ async function readRegistry() {
       );
     }
   }
+  await migrateLegacyProjectStorageMetadata(registry);
   for (const [projectId, record] of Object.entries(registry.projects)) {
     if (
       !record
