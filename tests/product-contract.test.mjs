@@ -96,16 +96,26 @@ test("generated working-copy names retain the stable user name safely", () => {
 });
 
 test("Prompt, protocol, helper, and finalizer agree on frozen input plus controlled supplements", async () => {
-  const [bridge, lifecycle, protocol] = await Promise.all([
-    readFile(new URL("../scripts/workspace-bridge.mjs", import.meta.url), "utf8"),
-    readFile(new URL("../scripts/lifecycle-core.mjs", import.meta.url), "utf8"),
-    readFile(new URL("../docs/CHANGE_REQUEST_PROTOCOL.md", import.meta.url), "utf8"),
-  ]);
-  assert.match(bridge, /input-manifest\.json 是冻结输入清单/);
-  assert.match(bridge, /USER_SUPPLEMENT\.json 中尚未撤销的记录共同组成/);
-  assert.match(bridge, /只有命令成功后才能执行/);
+  const [bridge, lifecycle, protocol, interactionFlow, productRequirements] =
+    await Promise.all([
+      readFile(new URL("../scripts/workspace-bridge.mjs", import.meta.url), "utf8"),
+      readFile(new URL("../scripts/lifecycle-core.mjs", import.meta.url), "utf8"),
+      readFile(new URL("../docs/CHANGE_REQUEST_PROTOCOL.md", import.meta.url), "utf8"),
+      readFile(new URL("../docs/INTERACTION_FLOW.md", import.meta.url), "utf8"),
+      readFile(new URL("../docs/MVP_PRD.md", import.meta.url), "utf8"),
+    ]);
+  assert.match(bridge, /# PageRoot 通用执行规则/);
+  assert.match(bridge, /严格按 input-manifest\.json 的 readOrder/);
+  assert.match(
+    bridge,
+    /USER_SUPPLEMENT\.json 中尚未撤销的补充共同组成/,
+  );
+  assert.match(bridge, /只有记录成功后才能执行该条要求/);
   assert.match(bridge, /不得直接编辑 USER_SUPPLEMENT\.json/);
-  assert.match(bridge, /本轮不得修改 PROJECT\.md、项目规则、冻结输入或协议文件/);
+  assert.match(
+    bridge,
+    /不得修改 PROJECT\.md、冻结输入或协议文件，也不得直接编辑 USER_SUPPLEMENT\.json/,
+  );
   assert.match(
     lifecycle,
     /entry\.name !== "index\.html"[\s\S]*?UNEXPECTED_OUTPUT_FILE/,
@@ -113,5 +123,8 @@ test("Prompt, protocol, helper, and finalizer agree on frozen input plus control
   assert.match(protocol, /output 只有一个完整 HTML，不得创建 `PROJECT\.md`/);
   assert.match(protocol, /`USER_SUPPLEMENT\.json` 只能由受控 helper 追加/);
   assert.match(protocol, /长期项目规则不得在本轮任务中修改/);
+  assert.match(protocol, /^# PageRoot Change Request 协议$/m);
+  assert.match(interactionFlow, /^# PageRoot 交互流程$/m);
+  assert.match(productRequirements, /^# PageRoot MVP 产品需求$/m);
   assert.doesNotMatch(protocol, /output\/PROJECT\.md/);
 });

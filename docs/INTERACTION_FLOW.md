@@ -1,4 +1,4 @@
-# HTML AI 工作台交互流程
+# PageRoot 交互流程
 
 - 状态：v3 源码级定点修改目标交互合同
 - 上位文档：[架构说明](ARCHITECTURE.md)
