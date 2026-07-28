@@ -31,6 +31,36 @@ export async function stopBridgeOrNotifyCloseAborted({
   }
 }
 
+export async function runGuardedFinalExit({
+  armFinalExit,
+  executeFinalExit,
+  restoreFinalExit,
+}) {
+  if (
+    typeof armFinalExit !== "function"
+    || typeof executeFinalExit !== "function"
+    || typeof restoreFinalExit !== "function"
+  ) {
+    throw new TypeError("最终退出处理器配置无效。");
+  }
+  armFinalExit();
+  try {
+    return await executeFinalExit();
+  } catch (error) {
+    try {
+      await restoreFinalExit(error);
+    } catch (restoreError) {
+      throw new AggregateError(
+        [error, restoreError],
+        `最终退出失败，恢复应用时也发生错误：${
+          restoreError instanceof Error ? restoreError.message : String(restoreError)
+        }`,
+      );
+    }
+    throw error;
+  }
+}
+
 export function canCloseDuringHydration({
   projectHydrating,
   viewTransitioning,

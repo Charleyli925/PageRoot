@@ -85,7 +85,9 @@ v3 是干净切换后的唯一运行时协议。v1/v2 记录在切换前整体�
 
 - 每个项目拥有独立目录、runtime state、事务、Version 和 Request。
 - 完整 `projectId` 只作为协议身份；registry 通过不可变
-  `storageDirectoryName` 定位可读项目目录。缺少该映射的旧 UUID 目录不迁移。
+  `storageDirectoryName` 定位可读项目目录。仅完整且身份可验证的 PageRoot
+  0.9.0 v3 项目允许由单一兼容适配器在原目录补写
+  `storageDirectoryName=projectId`；v1/v2、记录不完整或身份不一致的旧目录不迁移。
 - `PROJECT.md` 是整个项目长期使用的 AI 修改规则，不只属于某一次 Request；项目空闲时允许用户修改并由工作台自动保存，处理期间只读。Request 会把当时已持久化规则冻结到 `input/PROJECT.md`。
 - `runtime-state.json` 与 `edit-audit.jsonl` 是系统运行和本地直接编辑的审计文件，只建议查看，不提供普通用户编辑入口。
 - `working/V1.x.html` 是有效 AI 结果通过校验后创建的完整 HTML。它先进入“可打开”状态；只有用户点击“打开 Qoder 返回的最新版”后才成为项目当前源。旧工作文件永不原地改写。

@@ -1037,9 +1037,17 @@ test("project state cannot become a second active-run authority", async () => {
   const { validate } = await validator("project-state.v3.schema.json");
   const project = await fixture("project-state.current-edited.json");
 
+  assert.equal(validate({
+    ...project,
+    storageDirectoryName: project.projectId,
+  }), true);
   assert.equal(validate({ ...project, activeRun: {} }), false);
   assert.equal(validate({ ...project, projectLocked: true }), false);
   assert.equal(validate({ ...project, conflict: {} }), false);
+  assert.equal(validate({
+    ...project,
+    storageDirectoryName: "project_../escape",
+  }), false);
 });
 
 test(

@@ -132,9 +132,13 @@ must state the old producer, removal condition and focused coverage. Domain and
 view code use only current canonical states. Inline aliases and permanent
 “just in case” branches are not allowed.
 
-Project directories created before readable `storageDirectoryName` metadata are
-not a supported compatibility input. The Bridge rejects them without migration,
-renaming or deletion.
+The one compatibility decoder accepts only complete PageRoot 0.9.0 v3 project
+records whose registry, `project.json`, initial Version and existing
+`projects/<projectId>` directory prove one identity. It adds `displayName`,
+`createdAt` and `storageDirectoryName=projectId` in place without renaming or
+scanning directories. Remove this adapter only when 0.9.0 project records leave
+the supported upgrade window. v1/v2 and incomplete records remain unsupported
+and are rejected without migration, renaming or deletion.
 
 ## Change requirements
 
