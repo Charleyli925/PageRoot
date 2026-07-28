@@ -417,7 +417,7 @@ test("header prioritizes the filename and keeps the approved action order", () =
   );
   assert.match(
     styles,
-    /\.window-file-copy > strong\s*\{[\s\S]*?font-size:\s*17px/,
+    /\.window-file-title-row > strong,\s*\.window-file-title-action strong\s*\{[\s\S]*?font-size:\s*17px/,
   );
   assert.match(
     styles,
@@ -838,14 +838,48 @@ test("AI completion adopts the generated semantic file before editing resumes", 
   assert.doesNotMatch(workbench, /QoderWork 返回的新文件已打开|原文件已保留/u);
   assert.match(
     workbench,
-    /<strong[\s\S]*?title=\{activeOpenedAiVersionNotice\?\.fileName \|\| projectName\}[\s\S]*?aria-live="polite"[\s\S]*?aria-atomic="true"/,
+    /className="window-file-title-row"[\s\S]*?role=\{fileRenameEditing \? undefined : "status"\}[\s\S]*?aria-live=\{fileRenameEditing \? undefined : "polite"\}[\s\S]*?aria-atomic=\{fileRenameEditing \? undefined : "true"\}[\s\S]*?className="window-file-title-action"[\s\S]*?\{currentSourceFileStem\}/,
   );
-  assert.match(workbench, /aria-live="polite"[\s\S]*?aria-atomic="true"/u);
+  assert.match(
+    workbench,
+    /aria-live=\{fileRenameEditing \? undefined : "polite"\}[\s\S]*?aria-atomic=\{fileRenameEditing \? undefined : "true"\}/u,
+  );
   assert.match(
     workbench,
     /label: displayVersionLabel\(Number\(manifest\.versionOrdinal\)\)/,
   );
   assert.match(workbench, /return match \? `版本 \$\{Number\(match\[1\]\)\}`/);
+});
+
+test("a safely saved source can be renamed in place without exposing its extension", () => {
+  assert.match(
+    workbench,
+    /const canOfferFileRename = Boolean\([\s\S]*?window\.htmlAIProjects\?\.renameHtml[\s\S]*?persistState === "idle"[\s\S]*?editRevision === lastPersistedRevision/,
+  );
+  assert.match(
+    workbench,
+    /const commitFileRename = useCallback[\s\S]*?drainCoordinatorRef\.current\.drain\("switch"[\s\S]*?renameFile\(\{[\s\S]*?operationId,[\s\S]*?sourcePath: previousSourcePath,[\s\S]*?stem: requestedStem,[\s\S]*?expectedSha256/,
+  );
+  assert.match(
+    workbench,
+    /className="window-file-title-action"[\s\S]*?title="双击重命名文件"[\s\S]*?onDoubleClick=\{beginFileRename\}/,
+  );
+  assert.match(
+    workbench,
+    /className="window-file-rename-field"[\s\S]*?aria-label="文件名（不含后缀）"[\s\S]*?\{currentSourceFileExtension\}/,
+  );
+  assert.match(
+    workbench,
+    /event\.key === "Enter"[\s\S]*?commitFileRename\(\)[\s\S]*?event\.key === "Escape"[\s\S]*?cancelFileRename\(\)/,
+  );
+  assert.match(
+    styles,
+    /\.window-file-rename-field\s*\{[\s\S]*?border:\s*1px solid #c8c4ef[\s\S]*?border-radius:\s*7px/,
+  );
+  assert.match(
+    styles,
+    /\.window-file-rename-icon\s*\{[\s\S]*?opacity:\s*0[\s\S]*?\.window-file-title-action:hover \.window-file-rename-icon[\s\S]*?opacity:\s*0\.78/,
+  );
 });
 
 test("project panel keeps actions clear without technical paths in the header", () => {

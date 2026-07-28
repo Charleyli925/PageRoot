@@ -1817,6 +1817,9 @@ async function relinkRegisteredDocument(
     projectRoot,
   };
   project.sourcePath = sourcePath;
+  if (previousSourcePath !== sourcePath) {
+    project.name = path.basename(sourcePath, path.extname(sourcePath));
+  }
   project.currentHtmlSha256 = source.sha256;
   project.currentExactVersionId = await exactVersionForHash(
     context,

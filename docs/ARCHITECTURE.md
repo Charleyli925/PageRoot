@@ -49,6 +49,7 @@ protocols.
 | Late query rejection and monotonic draft reads | `app/application/project-query-fence.js` |
 | Crash-only browser recovery | `app/application/recovery-store.js` |
 | Renderer, project-picker and attachment capabilities | `app/application/runtime-capabilities.js` |
+| Same-directory source rename, operation journal and active/recent path rebase | `desktop/source-rename.mjs` |
 | Preview sanitization and verified frame injection | `app/components/html-preview-sandbox.js` |
 | Run lifecycle decoding and transition policy | `app/domain/run-lifecycle.js` |
 
@@ -61,6 +62,16 @@ proven invariant, not to satisfy a line-count target. The retired V1
 ## Persistence
 
 Direct edits form ordered revisions and are written through a single queue. Every write checks the expected source Hash, uses a same-directory temporary file and atomic replacement, then rereads the result. External modification causes a fail-closed conflict.
+
+An explicit filename change is a separate desktop source-path transaction, not
+an HTML write. `desktop/source-rename.mjs` validates one stable operation ID,
+the current source Hash, a same-directory target and an unchanged HTML
+extension. It writes `pendingRename` to the active-file record before the
+filesystem rename, then atomically rebases active/recent paths and records
+`lastRename`. Startup reconciles the prepared operation from the old/new paths
+and expected Hash. The Bridge's existing physical-file identity relink keeps
+the same Project and Document and updates only canonical `sourcePath` and
+display name; no Version is created.
 
 When no desktop project can be restored, the main process provisions the built-in welcome content once as a regular HTML source beside the selected workspace and immediately registers its initial V1 through the authenticated Bridge. Existing welcome bytes are never replaced on startup. From that point onward it uses the same source, comment, Request, handoff and Version boundaries as any user-opened HTML.
 

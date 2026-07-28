@@ -245,7 +245,7 @@ test("the verified AI file identity appears only after the user opens the ready 
   assert.match(bridgeClient, /"\/ready-version\/activate"/);
   assert.match(
     workbench,
-    /<strong[\s\S]*?title=\{activeOpenedAiVersionNotice\?\.fileName \|\| projectName\}[\s\S]*?\{activeOpenedAiVersionNotice\?\.fileName \|\| projectName\}/,
+    /const currentSourceFileName =[\s\S]*?localFileNameFromSourcePath\(sourcePath\)[\s\S]*?const currentSourceFileStem = fileStem\(currentSourceFileName\)[\s\S]*?<strong>\{currentSourceFileStem\}<\/strong>/,
   );
   assert.match(workbench, /setOpenedAiVersionNotice\(\{[\s\S]*?sourcePath: committedSourcePath/);
   assert.doesNotMatch(workbench, /QoderWork 返回的新文件已打开|原文件已保留/);

@@ -106,6 +106,40 @@ test("preload exposes the structured Finder reveal operation", async () => {
   ]);
 });
 
+test("preload exposes the narrow source rename operation", async () => {
+  const calls = [];
+  const api = await loadPreload(async (...args) => {
+    calls.push(args);
+    return success({
+      sourcePath: "/Users/demo/新名称.html",
+      previousSourcePath: "/Users/demo/report.html",
+      sha256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      operationId: "rename_demo_operation",
+    });
+  });
+  const payload = {
+    operationId: "rename_demo_operation",
+    sourcePath: "/Users/demo/report.html",
+    stem: "新名称",
+    expectedSha256:
+      "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  };
+
+  assert.deepEqual(
+    await api.renameHtml(payload),
+    {
+      sourcePath: "/Users/demo/新名称.html",
+      previousSourcePath: "/Users/demo/report.html",
+      sha256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      operationId: "rename_demo_operation",
+    },
+  );
+  assert.deepEqual(calls[0], [
+    "html-projects:rename",
+    payload,
+  ]);
+});
+
 test("preload exposes explicit recent-record removal", async () => {
   const calls = [];
   const api = await loadPreload(async (...args) => {
