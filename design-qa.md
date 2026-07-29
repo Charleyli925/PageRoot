@@ -99,6 +99,63 @@ final result: passed
 
 ---
 
+# Welcome badge top-right alignment QA
+
+Date: 2026-07-29
+
+Source visual truth:
+
+- `codex-clipboard-bb90f74c-2ac3-4652-b498-dc0d2fd33f92.png` — user-provided temporary reference attachment, `248 × 118` pixels, intentionally excluded from the public repository.
+- User direction: preserve the existing badge and the rest of the welcome page, while moving the badge to the upper-right corner of the full hero.
+
+Implementation evidence:
+
+- `docs/assets/pageroot-welcome-hero.png`
+- `output/design-qa/2026-07-29-welcome-badge/desktop-1080x900.png`
+- `output/design-qa/2026-07-29-welcome-badge/compact-720x1000.png`
+- `output/design-qa/2026-07-29-welcome-badge/badge-region-desktop.png`
+
+Combined comparison input:
+
+- `output/design-qa/2026-07-29-welcome-badge/reference-vs-final.png`
+
+Viewport and state:
+
+- Desktop viewport: `1080 × 900` CSS px; hero region: `1038 × 512` pixels.
+- Compact viewport: `720 × 1000` CSS px.
+- Source pixels: `248 × 118`; focused implementation pixels: `248 × 118`.
+- Both implementation captures used device scale factor 1, so no density normalization was required.
+- State: standalone built-in welcome page, default scroll position, fonts loaded.
+
+## Findings
+
+- No actionable P0, P1, or P2 visual issue remains.
+- Fonts and typography: the badge retains the existing font size, tracking, weight, and single-line label. No other typography changed.
+- Spacing and layout rhythm: on desktop the badge is positioned `44px` from the hero top and `50px` from its right edge. At the compact breakpoint it is `30px` from the top and `24px` from the right. It does not overlap the brand lockup or source card at either viewport.
+- Colors and visual tokens: the existing translucent violet surface, white border, muted text, and rounded shape are unchanged.
+- Image quality and asset fidelity: the provided reference and final focused region were inspected together. The implemented badge preserves the same visual treatment and renders sharply; no new image or icon asset was introduced.
+- Copy and content: the label remains exactly “内置介绍页”. All other welcome-page content and visible controls remain unchanged.
+- Responsiveness: desktop and compact renders have no horizontal overflow, clipping, or collision.
+
+## Comparison history
+
+1. The baseline placed the badge at the right edge of the hero's left grid column, which left it near the upper middle of the full hero.
+2. The badge was moved to be a direct child of the hero and positioned against the hero's upper-right inset. Compact offsets were matched to the existing compact hero padding.
+3. Final full-view and focused captures show the badge in the requested corner with the surrounding layout unchanged.
+
+## Browser checks
+
+- Verified the rendered page at `1080 × 900` and `720 × 1000`.
+- Confirmed loaded fonts, exact offsets, no element overlap, no horizontal overflow, and no browser console errors.
+
+## Follow-up polish
+
+- None required for this focused alignment change.
+
+final result: passed
+
+---
+
 Viewport: 1280 × 720
 
 References:

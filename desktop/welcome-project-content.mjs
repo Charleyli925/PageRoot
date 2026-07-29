@@ -64,6 +64,10 @@ export const DEFAULT_PROJECT_HTML = `<!doctype html>
     .brand-lockup strong { display: block; font-size: 15px; letter-spacing: .02em; }
     .brand-lockup small { display: block; margin-top: 2px; color: rgba(248, 246, 255, .55); font-size: 10px; letter-spacing: .12em; }
     .demo-badge {
+      position: absolute;
+      top: 44px;
+      right: 50px;
+      z-index: 2;
       padding: 7px 11px;
       border: 1px solid rgba(255, 255, 255, .18);
       border-radius: 999px;
@@ -216,6 +220,7 @@ export const DEFAULT_PROJECT_HTML = `<!doctype html>
     @media (max-width: 760px) {
       .page { width: 100%; margin: 0; border: 0; border-radius: 0; }
       .hero { grid-template-columns: 1fr; gap: 40px; padding: 30px 24px 40px; }
+      .demo-badge { top: 30px; right: 24px; }
       .brand-row { margin-bottom: 48px; }
       .content { padding: 42px 24px 36px; }
       .section-heading { display: block; }
@@ -235,13 +240,13 @@ export const DEFAULT_PROJECT_HTML = `<!doctype html>
 <body>
   <article class="page">
     <header class="hero">
+      <span class="demo-badge">内置介绍页</span>
       <div>
         <div class="brand-row">
           <div class="brand-lockup">
             <img src="./${WELCOME_LOGO_RELATIVE_PATH}" alt="源页 Logo" />
             <div><strong>源页</strong><small>PAGEROOT</small></div>
           </div>
-          <span class="demo-badge">内置介绍页</span>
         </div>
         <p class="eyebrow">Visual HTML × AI Agents</p>
         <h1><span>所见，即可落笔。</span><span>所改，止于所选。</span></h1>

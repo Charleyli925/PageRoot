@@ -51,6 +51,14 @@ test("startup welcome HTML is provisioned as a normal registered project", () =>
     sampleHtml,
     /<h1><span>所见，即可落笔。<\/span><span>所改，止于所选。<\/span><\/h1>/,
   );
+  assert.match(
+    sampleHtml,
+    /<header class="hero">\s*<span class="demo-badge">内置介绍页<\/span>/,
+  );
+  assert.match(
+    sampleHtml,
+    /\.demo-badge \{[\s\S]*?position: absolute;[\s\S]*?top: 44px;[\s\S]*?right: 50px;/,
+  );
   assert.match(sampleHtml, /顺畅的文本编辑/);
   assert.match(sampleHtml, /指哪改哪的局部修改/);
   assert.match(sampleHtml, /AI Agent 拿到完整上下文/);
