@@ -14,6 +14,10 @@ import {
 import { flushSync } from "react-dom";
 
 import {
+  resolvePageViewContext,
+  type PageViewContext,
+} from "../lib/page-view-context.js";
+import {
   SOURCE_NODE_ATTRIBUTE,
   applyPatchPlan,
   buildSourceIndex,
@@ -63,6 +67,7 @@ import {
 import styles from "./HtmlCanvasEditor.module.css";
 
 const GLOBAL_SELECTION_ATTRIBUTE = "data-html-canvas-global-selected";
+const PAGE_VIEW_CONTEXT_ATTRIBUTE = "data-pageroot-view-context";
 
 const EDITOR_DOCUMENT_STYLES = `
   ::selection {
@@ -259,6 +264,8 @@ export type HtmlCanvasEditorHandle = {
     payload?: unknown,
     options?: NativeDeferredCommandOptions,
   ) => boolean;
+  /** Applies disposable preview presentation state without changing source bytes. */
+  applyPageViewContext: (context: PageViewContext | null) => boolean;
 };
 
 export type HtmlCanvasEditorProps = {
@@ -308,6 +315,8 @@ export type HtmlCanvasEditorProps = {
   commentedTargets?: readonly HtmlCanvasCommentedTarget[];
   /** Non-visual audit targets that must retain identity through later source patches. */
   trackedTargets?: readonly HtmlCanvasSelection[];
+  /** Disposable Tab/panel presentation state captured from interactive preview. */
+  pageViewContext?: PageViewContext | null;
 };
 
 type OverlayPosition = {
@@ -1382,6 +1391,101 @@ function escapedSourceNodeId(nodeId: string): string {
   return nodeId.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
+function pageViewContextElement(
+  documentNode: Document,
+  sourceNodeId: string,
+): HTMLElement | null {
+  const matches = documentNode.querySelectorAll<HTMLElement>(
+    `[${SOURCE_NODE_ATTRIBUTE}="${escapedSourceNodeId(sourceNodeId)}"]`,
+  );
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function writeAriaState(
+  element: HTMLElement,
+  name: "aria-selected" | "aria-expanded",
+  value: "true" | "false" | null,
+) {
+  if (value === null) element.removeAttribute(name);
+  else element.setAttribute(name, value);
+}
+
+function restorePageViewContext(
+  documentNode: Document,
+  sourceHtml: string,
+  context: PageViewContext | null,
+) {
+  if (!context) return;
+  const resolved = resolvePageViewContext(sourceHtml, context);
+  for (const item of resolved.entries) {
+    const element = pageViewContextElement(documentNode, item.sourceNodeId);
+    if (!element) continue;
+    if (item.sourceState.classTokens.length > 0) {
+      element.setAttribute("class", item.sourceState.classTokens.join(" "));
+    } else {
+      element.removeAttribute("class");
+    }
+    element.toggleAttribute("hidden", item.sourceState.hidden);
+    element.toggleAttribute("open", item.sourceState.open);
+    writeAriaState(element, "aria-selected", (
+      item.sourceState.ariaSelected === "true"
+      || item.sourceState.ariaSelected === "false"
+    ) ? item.sourceState.ariaSelected : null);
+    writeAriaState(element, "aria-expanded", (
+      item.sourceState.ariaExpanded === "true"
+      || item.sourceState.ariaExpanded === "false"
+    ) ? item.sourceState.ariaExpanded : null);
+    element.removeAttribute(PAGE_VIEW_CONTEXT_ATTRIBUTE);
+  }
+}
+
+function applyPageViewContextToDocument(
+  documentNode: Document,
+  sourceHtml: string,
+  nextContext: PageViewContext | null,
+  previousContext: PageViewContext | null,
+): number {
+  restorePageViewContext(documentNode, sourceHtml, previousContext);
+  if (!nextContext) return 0;
+  const resolved = resolvePageViewContext(sourceHtml, nextContext);
+  let applied = 0;
+  for (const item of resolved.entries) {
+    const element = pageViewContextElement(documentNode, item.sourceNodeId);
+    if (!element) continue;
+    const classNames = new Set(item.sourceState.classTokens);
+    item.entry.classRemove.forEach((token) => classNames.delete(token));
+    item.entry.classAdd.forEach((token) => classNames.add(token));
+    if (classNames.size > 0) {
+      element.setAttribute("class", [...classNames].join(" "));
+    } else {
+      element.removeAttribute("class");
+    }
+    if (item.entry.hidden !== undefined) {
+      element.toggleAttribute("hidden", item.entry.hidden);
+    }
+    if (item.entry.open !== undefined) {
+      element.toggleAttribute("open", item.entry.open);
+    }
+    if ("ariaSelected" in item.entry) {
+      writeAriaState(
+        element,
+        "aria-selected",
+        item.entry.ariaSelected ?? null,
+      );
+    }
+    if ("ariaExpanded" in item.entry) {
+      writeAriaState(
+        element,
+        "aria-expanded",
+        item.entry.ariaExpanded ?? null,
+      );
+    }
+    element.setAttribute(PAGE_VIEW_CONTEXT_ATTRIBUTE, "true");
+    applied += 1;
+  }
+  return applied;
+}
+
 function isCanonicalSourceElement(
   element: HTMLElement,
   sourceIndex: SourceIndexValue,
@@ -1856,6 +1960,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     enableReorder = true,
     commentedTargets = EMPTY_COMMENTED_TARGETS,
     trackedTargets = EMPTY_TRACKED_TARGETS,
+    pageViewContext = null,
   },
   forwardedRef,
 ) {
@@ -1943,6 +2048,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const enableReorderRef = useRef(enableReorder);
   const commentedTargetsRef = useRef(commentedTargets);
   const trackedTargetsRef = useRef(trackedTargets);
+  const pageViewContextRef = useRef<PageViewContext | null>(pageViewContext);
+  const appliedPageViewContextRef = useRef<PageViewContext | null>(null);
   const controlledMode = locked ? "processing" : interactionMode;
   const controlledInteractionLocked = controlledMode !== "editing";
   const [imperativeLocked, setImperativeLocked] = useState(false);
@@ -1967,6 +2074,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   enableReorderRef.current = enableReorder && !lockedRef.current;
   commentedTargetsRef.current = commentedTargets;
   trackedTargetsRef.current = trackedTargets;
+  pageViewContextRef.current = pageViewContext;
 
   // Keep the server and hydration value deterministic, then normalize through DOMParser after mount.
   const [frameRender, setFrameRender] = useState(() => ({
@@ -4494,6 +4602,23 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     });
   }, []);
 
+  const applyPageViewContextNow = useCallback((
+    nextContext: PageViewContext | null,
+  ): boolean => {
+    pageViewContextRef.current = nextContext;
+    const documentNode = iframeRef.current?.contentDocument;
+    if (!documentNode?.documentElement) return false;
+    applyPageViewContextToDocument(
+      documentNode,
+      frameSourceHtmlRef.current,
+      nextContext,
+      appliedPageViewContextRef.current,
+    );
+    appliedPageViewContextRef.current = nextContext;
+    requestAnimationFrame(updateOverlayPosition);
+    return true;
+  }, [updateOverlayPosition]);
+
   const api = useMemo<HtmlCanvasEditorHandle>(
     () => ({
       getSourceHtml: () => frameSourceHtmlRef.current,
@@ -4514,8 +4639,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       startEditing,
       moveSelected,
       deferNativeCommand,
+      applyPageViewContext: applyPageViewContextNow,
     }),
     [
+      applyPageViewContextNow,
       clearSelection,
       checkpointPendingEdit,
       fencePendingEdit,
@@ -4531,6 +4658,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   );
 
   useImperativeHandle(forwardedRef, () => api, [api]);
+
+  useEffect(() => {
+    applyPageViewContextNow(pageViewContext);
+  }, [applyPageViewContextNow, pageViewContext]);
 
   useEffect(() => {
     onReady?.(api);
@@ -4668,6 +4799,13 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       documentNode.head.appendChild(editorStyle);
     }
     documentNode.documentElement.toggleAttribute("data-html-canvas-locked", lockedRef.current);
+    applyPageViewContextToDocument(
+      documentNode,
+      frameSourceHtmlRef.current,
+      pageViewContextRef.current,
+      null,
+    );
+    appliedPageViewContextRef.current = pageViewContextRef.current;
 
     const handleClick = (event: MouseEvent) => {
       if (isCanvasRootElement(event.target)) {

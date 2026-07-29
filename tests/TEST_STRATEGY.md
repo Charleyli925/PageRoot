@@ -27,6 +27,10 @@
 - 源码字符串合同：只在其拥有的组件或控制器变化时运行；不把实现文本匹配当作主要正确性证据。
 - Browser 冒烟：固定覆盖脚本隔离、源码字节、可编辑岛、源码权威围栏和能力降级五类关键风险；完整 Browser 包含全部活动 V2 回归。V1 的 per-keystroke tracker、FormatSkeleton 和 IME tail 状态机用例属于已退役路线，不再定义 V2 产品行为；它们由 V2 岛内字节 oracle、输入矩阵和 composition 快照用例替代。
 - Electron 冒烟：固定覆盖真实 authored DOM 输入和一次带磁盘持久化的 composition；完整 Electron 保留保存、关闭重开和逐字节 forward 结果等全部路径。
+- 交互预览：Node 分别证明短期自定义协议的资源边界和
+  PageViewContext 的 source-backed allowlist；Electron 用一份合成报告
+  证明宿主 CSP 下的相对脚本、SVG/Canvas/动态表格、Tab 切换，以及返回
+  编辑后只保留当前 Tab 且仍能进入原有文字编辑岛。
 - AI 闭环：任务级只跑正常闭环和越界失败 2 个代表场景；发布级跑完整 6 个场景，包括复制失败、缺失 finalizer、非法 HTML 和版本激活失败。测试自动生成受控 AI 输出并执行正式 finalizer，不等待外部模型或真人接力。
 - 应用更新：Node 用伪 updater 证明 stable-only、点击后单次下载、差分开启、普通退出不安装、仅 downloaded 状态可安装和错误降级；Preload/Workbench 合同证明状态快照、下载/安装意图、无 Canvas 完成横幅与重启确认保持窄边界。
 - 默认浏览器打开：Node 直接执行主进程操作与 sender 权限门，证明 malformed、非 HTML、未知项目、非普通文件和非可信 frame 均不会调用 shell；Workbench 合同只补充证明精确 edit revision 的围栏、写回和 IPC 顺序。

@@ -272,7 +272,7 @@
         "^scripts/(?:check-architecture|draft-aggregate|draft-service)\\.mjs$",
         "^tests/(?:architecture-boundaries|bridge-client|draft-aggregate|draft-service|draft-session|drain-coordinator|project-query-fence|recovery-store|run-lifecycle|runtime-capabilities)\\.test\\.mjs$",
         "^(?:CONTRIBUTING|docs/(?:ARCHITECTURE|ARCHITECTURE_CONTRACT|STATE_OWNERSHIP|ENGINEERING_STANDARDS))\\.md$",
-        "^docs/decisions/(?:0003-session-ownership-and-mutation-outcomes|0004-v2-editable-islands)\\.md$"
+        "^docs/decisions/(?:0003-session-ownership-and-mutation-outcomes|0004-v2-editable-islands|0007-independent-interactive-preview)\\.md$"
       ],
       "suites": ["typecheck"],
       "nodeTests": [
@@ -291,12 +291,13 @@
     {
       "id": "source-editing-core",
       "patterns": [
-        "^app/lib/(?:editable-island|source-(?:index|patch-core|patch-engine|text-map)|target-resolver|runtime-dom-source-map|format-skeleton|native-(?:edit-capability|edit-policy|edit-transaction|input-intent|structural-edit-planner|source-map|block-edit-draft))\\.(?:js|ts|d\\.ts)$",
+        "^app/lib/(?:editable-island|page-view-context|source-(?:index|patch-core|patch-engine|text-map)|target-resolver|runtime-dom-source-map|format-skeleton|native-(?:edit-capability|edit-policy|edit-transaction|input-intent|structural-edit-planner|source-map|block-edit-draft))\\.(?:js|ts|d\\.ts)$",
         "^scripts/(?:source-index|source-patch-engine|target-resolver)\\.mjs$"
       ],
       "suites": ["typecheck", "browser-smoke", "electron-smoke"],
       "nodeTests": [
         "tests/source-index-target-resolver.test.mjs",
+        "tests/page-view-context.test.mjs",
         "tests/source-patch-engine.test.mjs",
         "tests/editable-island.test.mjs",
         "tests/source-text-map.test.mjs",
@@ -377,7 +378,7 @@
       "id": "desktop-runtime",
       "patterns": [
         "^desktop/.*\\.(?:mjs|tsx|ts|html)$",
-        "^tests/open-in-default-browser\\.test\\.mjs$"
+        "^tests/(?:open-in-default-browser|preview-protocol)\\.test\\.mjs$"
       ],
       "suites": ["electron-smoke"],
       "nodeTests": [
@@ -389,6 +390,7 @@
         "tests/bridge-shutdown.test.mjs",
         "tests/export-copy.test.mjs",
         "tests/open-in-default-browser.test.mjs",
+        "tests/preview-protocol.test.mjs",
         "tests/desktop-package.test.mjs",
         "tests/usage-telemetry.test.mjs"
       ]
