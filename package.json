@@ -1,6 +1,6 @@
 {
   "name": "pageroot",
-  "version": "0.9.2",
+  "version": "0.9.3",
   "description": "源页（PageRoot）— Editable islands with byte-exact source outside every edited region.",
   "author": "源页",
   "license": "Apache-2.0",
