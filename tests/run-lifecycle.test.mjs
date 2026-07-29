@@ -64,6 +64,10 @@ test("run progress exposes four user stages instead of internal validation steps
       { label: "结果", state: "pending" },
     ],
   );
+  assert.equal(
+    processing[2].detail,
+    "等待 AI 完成后自动校验并写入本地",
+  );
 
   const copyFailure = deriveRunProgressSteps({
     requestId: "req_0001",

@@ -96,7 +96,12 @@ export function deriveRunProgressSteps(run, handoffStatus = "idle") {
       copyConfirmed ? "等待 AI 写回完成记录" : "交接完成后开始",
       copyConfirmed ? "current" : "pending",
     ),
-    progressStep("validation", "正在校验并保存", "等待 AI 完成", "pending"),
+    progressStep(
+      "validation",
+      "正在校验并保存",
+      "等待 AI 完成后自动校验并写入本地",
+      "pending",
+    ),
     progressStep("result", "结果", "等待前序步骤完成", "pending"),
   ];
   const [handoffStep, aiStep, validationStep, resultStep] = steps;

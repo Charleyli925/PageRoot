@@ -22,6 +22,8 @@ import { CopyIcon } from "@phosphor-icons/react/dist/csr/Copy";
 import { EyeIcon } from "@phosphor-icons/react/dist/csr/Eye";
 import { FileIcon } from "@phosphor-icons/react/dist/csr/File";
 import { FileHtmlIcon } from "@phosphor-icons/react/dist/csr/FileHtml";
+import { FlagCheckeredIcon } from "@phosphor-icons/react/dist/csr/FlagCheckered";
+import { FloppyDiskIcon } from "@phosphor-icons/react/dist/csr/FloppyDisk";
 import { FolderOpenIcon } from "@phosphor-icons/react/dist/csr/FolderOpen";
 import { ImageIcon } from "@phosphor-icons/react/dist/csr/Image";
 import { LockKeyIcon } from "@phosphor-icons/react/dist/csr/LockKey";
@@ -31,6 +33,7 @@ import { PaperPlaneTiltIcon } from "@phosphor-icons/react/dist/csr/PaperPlaneTil
 import { PencilSimpleIcon } from "@phosphor-icons/react/dist/csr/PencilSimple";
 import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
 import { SealCheckIcon } from "@phosphor-icons/react/dist/csr/SealCheck";
+import { ShieldCheckIcon } from "@phosphor-icons/react/dist/csr/ShieldCheck";
 import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
 import { TriangleIcon } from "@phosphor-icons/react/dist/csr/Triangle";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
@@ -1361,6 +1364,54 @@ function isLockedLifecycle(state: LifecycleState | undefined): boolean {
 function noticeReducer(current: Toast, next: Toast): Toast {
   if (!shouldPresentNotice(next)) return current;
   return shouldReplaceNotice(current, next) ? next : current;
+}
+
+function processStepStatusLabel(state: string): string {
+  switch (state) {
+    case "done":
+      return "已完成";
+    case "current":
+      return "进行中";
+    case "neutral":
+      return "已结束";
+    case "error":
+      return "需处理";
+    case "attention":
+      return "待确认";
+    default:
+      return "待进行";
+  }
+}
+
+function ProcessStepGlyph({
+  stepKey,
+  state,
+}: {
+  stepKey: string;
+  state: string;
+}) {
+  if (state === "error") {
+    return <TriangleIcon size={21} weight="fill" />;
+  }
+  if (state === "neutral") {
+    return <MinusCircleIcon size={22} weight="duotone" />;
+  }
+
+  switch (stepKey) {
+    case "handoff":
+      return (
+        <ShieldCheckIcon
+          size={23}
+          weight={state === "done" ? "fill" : "duotone"}
+        />
+      );
+    case "validation":
+      return <FloppyDiskIcon size={22} weight="regular" />;
+    case "result":
+      return <FlagCheckeredIcon size={22} weight="regular" />;
+    default:
+      return <ClockCounterClockwiseIcon size={22} weight="duotone" />;
+  }
 }
 
 const PREVIEW_NAVIGATION_AUTO_COLLAPSE_MS = 3_500;
@@ -10330,22 +10381,37 @@ export default function Workbench() {
                         </strong>
                       </header>
                       <ol>
-                        {processSteps.map((step) => (
+                        {processSteps.map((step, index) => (
                           <li key={step.key} data-state={step.state}>
-                            <span className="process-step-icon" aria-hidden="true">
-                              {step.state === "done" ? (
-                                <CheckCircleIcon size={20} weight="fill" />
-                              ) : step.state === "error" ? (
-                                <TriangleIcon size={18} weight="fill" />
-                              ) : step.state === "neutral" ? (
-                                <MinusCircleIcon size={19} weight="duotone" />
-                              ) : (
-                                <ClockCounterClockwiseIcon size={19} weight="duotone" />
-                              )}
+                            <span className="process-step-index" aria-hidden="true">
+                              {index + 1}
                             </span>
-                            <span>
+                            <span className="process-step-icon" aria-hidden="true">
+                              <ProcessStepGlyph
+                                stepKey={step.key}
+                                state={step.state}
+                              />
+                            </span>
+                            <span className="process-step-copy">
                               <strong>{step.label}</strong>
                               <small>{step.detail}</small>
+                            </span>
+                            <span
+                              className="process-step-status"
+                              data-state={step.state}
+                            >
+                              {step.state === "done" ? (
+                                <>
+                                  <CheckCircleIcon
+                                    aria-hidden="true"
+                                    size={22}
+                                    weight="regular"
+                                  />
+                                  <span className="sr-only">
+                                    {processStepStatusLabel(step.state)}
+                                  </span>
+                                </>
+                              ) : processStepStatusLabel(step.state)}
                             </span>
                           </li>
                         ))}
