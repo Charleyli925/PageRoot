@@ -11,6 +11,7 @@ const [
   notice,
   noticeStyles,
   bridgeClient,
+  usageTelemetry,
 ] = await Promise.all([
   readFile(new URL("../app/workbench.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
@@ -19,6 +20,7 @@ const [
   readFile(new URL("../app/components/NoticeBar.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/components/NoticeBar.module.css", import.meta.url), "utf8"),
   readFile(new URL("../app/application/bridge-client.js", import.meta.url), "utf8"),
+  readFile(new URL("../app/application/usage-telemetry.ts", import.meta.url), "utf8"),
 ]);
 
 function literalProperty(object, name) {
@@ -314,4 +316,32 @@ test("browser preview stays read-only and comment creation keeps one unsaved dra
   assert.match(workbench, /const resumeCurrentComposer = useCallback/u);
   assert.doesNotMatch(workbench, /latest\.commentDrafts|legacyCommentDrafts/u);
   assert.match(workbench, /const pendingSendItemCount = activeCommentCount;/u);
+});
+
+test("notification analytics uses stable codes and never forwards visible copy", () => {
+  assert.match(notice, /usageCode\?: string/u);
+  assert.match(notice, /usageCapture\?\.\("notification_presented"/u);
+  assert.match(notice, /usageCapture\?\.\("notification_interacted"/u);
+  assert.doesNotMatch(
+    notice,
+    /captureUsageEvent\([^)]*\{[^}]*\b(?:title|message)\b/su,
+  );
+  assert.match(canvas, /code: "canvas_c01_source_map"/u);
+  assert.match(canvas, /code: "canvas_c12_edit_in_progress"/u);
+  assert.match(workbench, /noticeUsageCode\(toast\.dedupeKey\)/u);
+  assert.match(workbench, /interaction: "auto-dismiss"/u);
+  assert.match(
+    workbench,
+    /previousPersistStateRef = useRef\(new Map<string, PersistState>\(\)\)/u,
+  );
+  assert.match(
+    workbench,
+    /projectId \|\| usageFingerprint\(sourcePath \|\| "unregistered"\)/u,
+  );
+  assert.match(usageTelemetry, /window\.htmlAIUsage\?\.capture/u);
+  assert.match(usageTelemetry, /:\s*"uncatalogued"/u);
+  assert.doesNotMatch(
+    usageTelemetry,
+    /\b(?:title|message|html|sourcePath|fileName|comment|prompt|stack)\s*:/u,
+  );
 });

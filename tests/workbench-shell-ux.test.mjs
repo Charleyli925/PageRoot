@@ -493,6 +493,14 @@ test("header prioritizes the filename and keeps the approved action order", () =
     workbench,
     /const openUserNotice = useCallback[\s\S]*?htmlAIAppLifecycle\?\.openUserNotice\(\)[\s\S]*?setUserNoticeOpenFailed\(true\)/,
   );
+  assert.match(aboutDialog, /使用数据说明/);
+  assert.match(aboutDialog, /默认发送有限的使用与故障统计/);
+  assert.match(aboutDialog, /不读取电脑序列号、设备名或 Apple 账号/);
+  assert.match(aboutDialog, /PostHog US Cloud/);
+  assert.doesNotMatch(
+    aboutDialog,
+    /type="checkbox"|关闭数据收集|停止收集|opt.?out/iu,
+  );
   assert.match(aboutDialog, /aria-live="polite"/);
   assert.doesNotMatch(aboutDialog, /role="progressbar"|about-check-spinner/);
   assert.match(restartUpdateDialog, /className="restart-update-dialog"/);

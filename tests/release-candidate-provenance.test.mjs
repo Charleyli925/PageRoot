@@ -241,6 +241,9 @@ test("release workflows build before tagging and publish the verified candidate 
   assert.match(candidate, /MAC_CSC_LINK/u);
   assert.match(candidate, /APPLE_APP_SPECIFIC_PASSWORD/u);
   assert.match(candidate, /PAGEROOT_REQUIRE_NOTARIZATION/u);
+  assert.match(candidate, /PAGEROOT_POSTHOG_TOKEN/u);
+  assert.match(candidate, /PAGEROOT_REQUIRE_TELEMETRY_CONFIG/u);
+  assert.match(candidate, /https:\/\/us\.i\.posthog\.com/u);
   assert.match(
     candidate,
     /build-and-verify-candidate[\s\S]+timeout-minutes: 120[\s\S]+Build and verify the exact pre-tag installer[\s\S]+timeout-minutes: 110/u,

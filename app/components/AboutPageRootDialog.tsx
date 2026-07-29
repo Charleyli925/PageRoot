@@ -280,6 +280,16 @@ export default function AboutPageRootDialog({
           <span>Apache-2.0</span>
         </div>
 
+        <section className="about-data-notice" aria-labelledby="about-data-title">
+          <strong id="about-data-title">使用数据说明</strong>
+          <p>
+            为改进产品，源页默认发送有限的使用与故障统计，包括功能与项目流程、提醒、中断和稳定错误码；这些统计不含用户内容和直接身份信息。
+          </p>
+          <small>
+            不发送 HTML、评论、附件、剪贴板、文件名或路径；不读取电脑序列号、设备名或 Apple 账号。应用使用首次运行随机生成的安装标识，数据存储于 PostHog US Cloud。
+          </small>
+        </section>
+
         <section
           className="about-update-card"
           data-tone={presentation.tone}

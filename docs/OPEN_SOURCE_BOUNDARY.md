@@ -16,6 +16,9 @@ This repository is the complete public source boundary required to build and tes
 - Real user HTML, attachments and project records
 - Local backups, previous workspace copies and internal design-review notes
 - Developer home-directory paths, credentials, signing certificates and notarization secrets
+- The production PostHog Project token and generated
+  `output/release-metadata/usage-telemetry-config.json`; packaging receives the
+  public ingestion token from repository Actions secrets
 - `node_modules/`, build caches, test output, `.app`, DMG and other generated release files
 - Private operational logs and unpublished research material
 

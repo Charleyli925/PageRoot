@@ -15,8 +15,12 @@ async function loadPreloadApis(invoke) {
   );
   const exposed = new Map();
   const listeners = new Map();
+  const sent = [];
   const ipcRenderer = {
     invoke,
+    send(...args) {
+      sent.push(args);
+    },
     on(channel, listener) {
       listeners.set(channel, listener);
     },
@@ -47,6 +51,8 @@ async function loadPreloadApis(invoke) {
     updates: exposed.get("htmlAIUpdates"),
     runtime: exposed.get("htmlAIRuntime"),
     lifecycle: exposed.get("htmlAIAppLifecycle"),
+    usage: exposed.get("htmlAIUsage"),
+    sent,
     emit(channel, payload) {
       listeners.get(channel)?.({}, payload);
     },
@@ -73,6 +79,51 @@ test("preload declares one immutable desktop runtime capability manifest", async
   assert.equal(runtime.capabilities.attachmentPersistence, "bridge");
   assert.equal(runtime.capabilities.closeCoordination, "electron-handshake");
   assert.equal(Object.isFrozen(runtime.capabilities), true);
+});
+
+test("preload exposes one fire-and-forget usage channel with a narrow payload", async () => {
+  const preload = await loadPreloadApis(async () => success(null));
+  preload.usage.capture(
+    "notification_presented",
+    {
+      notice_code: "source_reload",
+      tone: "warning",
+      disposition: "direct-action",
+      surface: "global",
+      has_action: true,
+    },
+    "project_demo",
+  );
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(preload.sent)),
+    [[
+      "html-usage:capture",
+      {
+        event: "notification_presented",
+        properties: {
+          notice_code: "source_reload",
+          tone: "warning",
+          disposition: "direct-action",
+          surface: "global",
+          has_action: true,
+        },
+        projectId: "project_demo",
+      },
+    ]],
+  );
+
+  preload.usage.capture(
+    "renderer_fault",
+    { nested: { raw: "not allowed" } },
+    "project_demo",
+  );
+  preload.usage.capture(
+    "renderer_fault",
+    { kind: "window_error" },
+    "/Users/demo/private.html",
+  );
+  assert.equal(preload.sent.length, 1);
+  assert.deepEqual(Object.keys(preload.usage), ["capture"]);
 });
 
 test("preload unwraps structured project IPC success results", async () => {

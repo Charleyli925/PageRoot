@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   access,
+  mkdir,
   readFile,
   stat,
   writeFile,
@@ -13,6 +14,7 @@ import { fileURLToPath } from "node:url";
 
 import { writeBuildInfo } from "./release-provenance.mjs";
 import { expectedArtifactLayout } from "./verify-packaged-artifact.mjs";
+import { createTelemetryBuildConfig } from "../desktop/usage-telemetry.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
 const productRoot = path.resolve(path.dirname(scriptPath), "..");
@@ -154,6 +156,37 @@ export async function refreshDmgUpdateMetadata({ dmgPath, updateInfoPath }) {
   };
 }
 
+export async function writeUsageTelemetryBuildConfig({
+  productRoot: root = productRoot,
+  environment = process.env,
+} = {}) {
+  const config = createTelemetryBuildConfig(environment);
+  if (
+    environment.PAGEROOT_REQUIRE_TELEMETRY_CONFIG === "1"
+    && !config.enabled
+  ) {
+    throw new Error(
+      "PAGEROOT_POSTHOG_TOKEN is required for a telemetry-enabled release candidate.",
+    );
+  }
+  const destination = path.join(
+    root,
+    "output",
+    "release-metadata",
+    "usage-telemetry-config.json",
+  );
+  await mkdir(path.dirname(destination), { recursive: true });
+  await writeFile(destination, `${JSON.stringify(config, null, 2)}\n`, {
+    encoding: "utf8",
+    mode: 0o600,
+  });
+  return {
+    destination,
+    enabled: config.enabled,
+    host: config.host,
+  };
+}
+
 async function main() {
   const architecture = parseArchitecture(process.argv.slice(2));
   const packageJson = JSON.parse(
@@ -161,8 +194,14 @@ async function main() {
   );
   const layout = expectedArtifactLayout({ productRoot, packageJson, arch: architecture });
   const { buildInfo, destination } = await writeBuildInfo({ productRoot, architecture });
+  const telemetryConfig = await writeUsageTelemetryBuildConfig({ productRoot });
   console.log(`Build provenance: ${destination}`);
   console.log(`Git commit: ${buildInfo.commitSha}`);
+  console.log(
+    telemetryConfig.enabled
+      ? `Usage telemetry configured for ${telemetryConfig.host}`
+      : "Usage telemetry build config has no project token; collection will remain inactive.",
+  );
 
   const executable = path.join(
     productRoot,

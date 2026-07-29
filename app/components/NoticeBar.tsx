@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { CheckCircleIcon } from "@phosphor-icons/react/dist/csr/CheckCircle";
 import { InfoIcon } from "@phosphor-icons/react/dist/csr/Info";
 import { WarningCircleIcon } from "@phosphor-icons/react/dist/csr/WarningCircle";
@@ -9,6 +10,11 @@ import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 import styles from "./NoticeBar.module.css";
 
 export type NoticeTone = "success" | "info" | "warning" | "error";
+export type NoticeUsageCapture = (
+  event: string,
+  properties: Record<string, string | number | boolean | null | undefined>,
+  projectId?: string,
+) => void;
 
 export type NoticeBarProps = {
   title: string;
@@ -21,6 +27,11 @@ export type NoticeBarProps = {
   onAction?: () => void;
   onDismiss: () => void;
   onPauseChange?: (paused: boolean) => void;
+  usageCode?: string;
+  usageDisposition?: string;
+  usageSurface?: "canvas" | "global" | "native" | "panel";
+  usageProjectId?: string;
+  usageCapture?: NoticeUsageCapture;
 };
 
 function NoticeToneIcon({ tone }: { tone: NoticeTone }) {
@@ -47,6 +58,11 @@ export default function NoticeBar({
   onAction,
   onDismiss,
   onPauseChange,
+  usageCode,
+  usageDisposition = "inform-in-place",
+  usageSurface,
+  usageProjectId,
+  usageCapture,
 }: NoticeBarProps) {
   const classes = [
     styles.notice,
@@ -55,6 +71,37 @@ export default function NoticeBar({
     className,
     className === "toast" ? "show" : null,
   ].filter(Boolean).join(" ");
+  const telemetrySurface = usageSurface
+    || (placement === "canvas" ? "canvas" : "global");
+  const hasUsageAction = Boolean(actionLabel && onAction);
+
+  useEffect(() => {
+    if (!usageCode) return;
+    usageCapture?.("notification_presented", {
+      notice_code: usageCode,
+      tone,
+      disposition: usageDisposition,
+      surface: telemetrySurface,
+      has_action: hasUsageAction,
+    }, usageProjectId);
+  }, [
+    hasUsageAction,
+    telemetrySurface,
+    tone,
+    usageCode,
+    usageDisposition,
+    usageProjectId,
+    usageCapture,
+  ]);
+
+  const reportInteraction = (interaction: "action" | "dismiss") => {
+    if (!usageCode) return;
+    usageCapture?.("notification_interacted", {
+      notice_code: usageCode,
+      interaction,
+      surface: telemetrySurface,
+    }, usageProjectId);
+  };
 
   return (
     <section
@@ -85,7 +132,10 @@ export default function NoticeBar({
           <button
             className={styles.action}
             type="button"
-            onClick={onAction}
+            onClick={() => {
+              reportInteraction("action");
+              onAction();
+            }}
           >
             {actionLabel}
           </button>
@@ -94,7 +144,10 @@ export default function NoticeBar({
           className={styles.close}
           type="button"
           aria-label={dismissLabel}
-          onClick={onDismiss}
+          onClick={() => {
+            reportInteraction("dismiss");
+            onDismiss();
+          }}
         >
           <XIcon aria-hidden="true" size={15} weight="bold" />
         </button>

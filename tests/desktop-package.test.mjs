@@ -23,6 +23,7 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
     manualUpdate,
     applicationUpdate,
     userNotice,
+    usageTelemetry,
     afterPack,
     entitlements,
     iconInfo,
@@ -46,6 +47,7 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
     readFile(new URL("../desktop/manual-update.mjs", import.meta.url), "utf8"),
     readFile(new URL("../desktop/application-update.mjs", import.meta.url), "utf8"),
     readFile(new URL("../PageRoot 用户声明与免责声明.txt", import.meta.url), "utf8"),
+    readFile(new URL("../desktop/usage-telemetry.mjs", import.meta.url), "utf8"),
     readFile(new URL("../desktop/after-pack.mjs", import.meta.url), "utf8"),
     readFile(new URL("../desktop/resources/entitlements.mac.plist", import.meta.url), "utf8"),
     stat(new URL("../desktop/resources/icon.icns", import.meta.url)),
@@ -91,6 +93,7 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.ok(packageJson.build.files.includes("desktop/qoder-handoff.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/manual-update.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/application-update.mjs"));
+  assert.ok(packageJson.build.files.includes("desktop/usage-telemetry.mjs"));
   assert.ok(packageJson.build.files.includes("public/brand-logo.png"));
   assert.equal(
     packageJson.build.mac.extendInfo?.NSAppleEventsUsageDescription,
@@ -130,7 +133,9 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
     "schemas",
     "build-info.json",
     "PageRoot 用户声明与免责声明.txt",
+    "usage-telemetry-config.json",
     "LICENSE",
+    "PRIVACY.md",
     "NOTICE",
     "THIRD_PARTY_NOTICES.md",
   ]) {
@@ -406,6 +411,17 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.match(applicationUpdate, /updater\.disableDifferentialDownload = false/);
   assert.match(applicationUpdate, /updater\.downloadUpdate\(\)/);
   assert.match(applicationUpdate, /updater\.quitAndInstall\(\)/);
+  assert.match(mainProcess, /createUsageTelemetry/);
+  assert.match(mainProcess, /html-usage:capture/);
+  assert.match(preload, /exposeInMainWorld\("htmlAIUsage", usageApi\)/);
+  assert.match(usageTelemetry, /\$process_person_profile:\s*false/u);
+  assert.match(usageTelemetry, /\$geoip_disable:\s*true/u);
+  assert.match(usageTelemetry, /\$is_server:\s*false/u);
+  assert.match(usageTelemetry, /createHmac\(\s*"sha256"/u);
+  assert.doesNotMatch(
+    `${mainProcess}\n${usageTelemetry}`,
+    /systemProfiler|serialNumber|hardwareUuid|IOPlatformUUID|ioreg|machineId/iu,
+  );
   assert.match(entitlements, /com\.apple\.security\.cs\.allow-jit/);
   assert.doesNotMatch(entitlements, /disable-library-validation/);
   assert.match(afterPack, /NSMicrophoneUsageDescription/);

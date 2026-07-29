@@ -55,6 +55,13 @@ lane owns the installed-App, Developer ID, notarization, ZIP/blockmap and
 requires a valid Developer ID identity; publication credentials remain in
 GitHub encrypted secrets.
 
+Desktop development and every automated test also leave live usage telemetry
+disabled unless `PAGEROOT_TELEMETRY_DEV=1` is explicitly set. Telemetry tests
+inject a fake fetch implementation and synthetic project token, so local test
+runs never send product events. A distribution package embeds only the public
+PostHog project ingestion token generated from `PAGEROOT_POSTHOG_TOKEN`; never
+use a personal or project secret API key.
+
 Draft Pull Requests run only impact-selected feedback. Marking a final PR tree ready runs parallel Node, three-shard Chromium, real HTML, native Electron and deterministic AI groups. Linux builds and shares only the Web renderer used by Node and Browser. Each macOS job builds the Electron renderer locally, runs the hosted-window preflight, then owns either the native Electron suite or the AI suite; those jobs can be rerun independently. Dependency, Playwright and Electron downloads are cached by lockfile identity.
 
 Critical workflow commands write machine-readable evidence and normalized failure signatures under `output/ci-evidence/`. The full taxonomy, same-SHA rerun rule, two-strike policy and operating metrics are in `docs/RELEASE_PIPELINE_GOVERNANCE.md`.

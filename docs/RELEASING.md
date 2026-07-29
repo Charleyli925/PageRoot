@@ -27,6 +27,8 @@ directly in the repository settings:
 - `APPLE_ID`: the Apple ID used for notarization.
 - `APPLE_APP_SPECIFIC_PASSWORD`: a current app-specific password created for
   CI notarization.
+- `PAGEROOT_POSTHOG_TOKEN`: the `phc_…` Project token from the PageRoot
+  PostHog project. Do not use a project secret API key.
 
 Never paste those values into source, issues, Pull Requests, logs or chat. The
 public Team ID is fixed to `RNK9RB969G` in the release workflow so a candidate
@@ -52,6 +54,8 @@ The workflow:
 - packages on macOS with `electron-builder --publish never`, Developer ID
   signing, Hardened Runtime, App notarization, and final DMG
   notarization/stapling;
+- requires the PostHog Project token and embeds a generated public ingestion
+  configuration whose host is fixed to the selected cloud region;
 - launches the packaged App with isolated data;
 - verifies the App bundle, Bridge resources, schemas, expected Team ID,
   packaged user notice, notarization ticket, Gatekeeper assessment, DMG

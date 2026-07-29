@@ -10,7 +10,11 @@ import {
   utilityProcess,
 } from "electron";
 import electronUpdater from "electron-updater";
-import { randomBytes, randomUUID } from "node:crypto";
+import {
+  createHash,
+  randomBytes,
+  randomUUID,
+} from "node:crypto";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import {
@@ -68,6 +72,12 @@ import {
   recoverPendingSourceRename,
   renameHtmlSource,
 } from "./source-rename.mjs";
+import {
+  createTelemetryBuildConfig,
+  createUsageTelemetry,
+  durationBucket,
+  readTelemetryBuildConfig,
+} from "./usage-telemetry.mjs";
 
 // electron-updater is CommonJS; the default import is the supported ESM bridge.
 const { autoUpdater } = electronUpdater;
@@ -149,6 +159,9 @@ const UPDATE_CHANNELS = Object.freeze({
   openLatestRelease: "html-updates:open-latest-release",
   openRepository: "html-updates:open-repository",
 });
+const USAGE_CHANNELS = Object.freeze({
+  capture: "html-usage:capture",
+});
 
 let bridgeProcess = null;
 let bridgePort = null;
@@ -164,9 +177,80 @@ let projectState = null;
 let stateWriteQueue = Promise.resolve();
 let latestUpdateResult = null;
 let applicationUpdate = null;
+let usageTelemetry = null;
 let workspaceFailurePrompt = null;
 let managedWelcomeRegistration = null;
 const workspaceRecoveryMailbox = createWorkspaceRecoveryMailbox();
+
+function telemetryFingerprint(value) {
+  const text = value instanceof Error
+    ? `${value.name}\n${value.stack || value.message}`
+    : String(value ?? "");
+  return createHash("sha256").update(text).digest("hex").slice(0, 16);
+}
+
+function telemetryReasonCode(value, fallback = "UNKNOWN") {
+  const normalized = String(value || fallback)
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/gu, "_")
+    .replace(/^_+|_+$/gu, "")
+    .slice(0, 80);
+  return normalized || fallback;
+}
+
+function captureUsage(event, properties = {}, context = {}) {
+  try {
+    return usageTelemetry?.capture(event, properties, context) ?? false;
+  } catch {
+    return false;
+  }
+}
+
+async function initializeUsageTelemetry() {
+  let environmentConfig;
+  try {
+    environmentConfig = createTelemetryBuildConfig(process.env);
+  } catch {
+    environmentConfig = createTelemetryBuildConfig({});
+  }
+  let packagedConfig = null;
+  if (app.isPackaged) {
+    packagedConfig = await readTelemetryBuildConfig(
+      path.join(process.resourcesPath, "usage-telemetry-config.json"),
+    ).catch(() => null);
+  }
+  const config = environmentConfig.enabled
+    ? environmentConfig
+    : packagedConfig || environmentConfig;
+  const runtimeEnabled = (
+    process.env.PAGEROOT_TELEMETRY_DISABLED !== "1"
+    && process.env.PAGEROOT_E2E !== "1"
+    && (
+      app.isPackaged
+      || process.env.PAGEROOT_TELEMETRY_DEV === "1"
+    )
+  );
+  usageTelemetry = createUsageTelemetry({
+    userDataPath: app.getPath("userData"),
+    projectToken: config.projectToken,
+    host: config.host,
+    enabled: runtimeEnabled && config.enabled,
+    appVersion: app.getVersion(),
+    platform: process.platform,
+    architecture: process.arch,
+    fetchImpl: (url, options) => net.fetch(url, options),
+  });
+  await usageTelemetry.start();
+}
+
+process.on("uncaughtExceptionMonitor", (error) => {
+  captureUsage("runtime_fault", {
+    process: "main",
+    kind: "main_uncaught",
+    reason_code: telemetryReasonCode(error?.name, "UNCAUGHT_EXCEPTION"),
+    fingerprint: telemetryFingerprint(error),
+  });
+});
 
 function requestAboutPageRoot() {
   if (
@@ -1206,8 +1290,12 @@ function registerProjectIpc() {
     assertTrustedEvent(event);
     return handler(...args);
   };
-  const trustedProject = (handler) => async (event, ...args) => (
-    runProjectIpcOperation(
+  const trustedProject = (handler, operationOverride) => async (event, ...args) => {
+    const startedAt = Date.now();
+    const operation = operationOverride || String(handler.name || "desktop_operation")
+      .replace(/([a-z0-9])([A-Z])/gu, "$1_$2")
+      .toLowerCase();
+    const result = await runProjectIpcOperation(
       async () => {
         assertTrustedEvent(event);
         return handler(...args);
@@ -1220,8 +1308,29 @@ function registerProjectIpc() {
           );
         },
       },
-    )
-  );
+    );
+    const projectId = args.find((argument) => (
+      argument
+      && typeof argument === "object"
+      && !Array.isArray(argument)
+      && typeof argument.projectId === "string"
+    ))?.projectId;
+    let operationResult = "failure";
+    if (result.ok) {
+      operationResult = result.value === null ? "cancelled" : "success";
+    }
+    captureUsage(
+      "operation_finished",
+      {
+        operation,
+        result: operationResult,
+        ...(result.ok ? {} : { error_code: result.error.code }),
+        duration_bucket: durationBucket(Date.now() - startedAt),
+      },
+      { projectId },
+    );
+    return result;
+  };
 
   ipcMain.handle(PROJECT_CHANNELS.getActiveProject, trustedProject(getActiveProject));
   ipcMain.handle(PROJECT_CHANNELS.openHtml, trustedProject(openHtml));
@@ -1254,11 +1363,11 @@ function registerProjectIpc() {
         writeClipboard: (message) => clipboard.writeText(message),
         readClipboard: () => clipboard.readText(),
       });
-    }),
+    }, "qoder_handoff"),
   );
   ipcMain.handle(
     UPDATE_CHANNELS.getStatus,
-    trustedProject(() => latestUpdateResult),
+    trustedProject(() => latestUpdateResult, "update_get_status"),
   );
   ipcMain.handle(
     UPDATE_CHANNELS.checkNow,
@@ -1284,7 +1393,7 @@ function registerProjectIpc() {
         installing,
         reason: installing ? null : "close-blocked",
       };
-    }),
+    }, "update_install"),
   );
   ipcMain.handle(
     UPDATE_CHANNELS.openLatestRelease,
@@ -1311,6 +1420,14 @@ function registerProjectIpc() {
       relaunched: await coordinateApplicationRelaunch("user-relaunch"),
     })),
   );
+  ipcMain.on(USAGE_CHANNELS.capture, (event, payload) => {
+    try {
+      assertTrustedEvent(event);
+      usageTelemetry?.captureFromRenderer(payload);
+    } catch {
+      // Usage reporting is deliberately best-effort and never changes product flow.
+    }
+  });
 }
 
 function findAvailablePort() {
@@ -1473,6 +1590,7 @@ function unregisterIpc() {
   ]) {
     ipcMain.removeHandler(channel);
   }
+  ipcMain.removeAllListeners(USAGE_CHANNELS.capture);
   projectIpcRegistered = false;
 }
 
@@ -1501,6 +1619,12 @@ async function coordinateApplicationExit(reason, intent = "quit") {
   coordinatedExit = (async () => {
     const result = await requestRendererClose(reason);
     if (!result.ready) {
+      captureUsage("interruption_changed", {
+        interruption_code: "close_safety",
+        phase: "started",
+        result: "unknown",
+        surface: "native",
+      });
       notifyRendererCloseAborted(result.requestId, result.reason);
       const messageBoxOptions = {
         type: "warning",
@@ -1516,6 +1640,12 @@ async function coordinateApplicationExit(reason, intent = "quit") {
       } else {
         await dialog.showMessageBox(messageBoxOptions);
       }
+      captureUsage("interruption_changed", {
+        interruption_code: "close_safety",
+        phase: "resolved",
+        result: "continued",
+        surface: "native",
+      });
       coordinatedExit = null;
       return false;
     }
@@ -1533,6 +1663,9 @@ async function coordinateApplicationExit(reason, intent = "quit") {
         },
       });
     }
+    await usageTelemetry?.shutdown({
+      reason: intent === "quit" ? "quit" : intent,
+    }).catch(() => {});
     await runGuardedFinalExit({
       armFinalExit: () => {
         unregisterIpc();
@@ -1557,6 +1690,7 @@ async function coordinateApplicationExit(reason, intent = "quit") {
         let restartError = null;
         try {
           await startBridge();
+          await initializeUsageTelemetry();
         } catch (caught) {
           restartError = caught;
         } finally {
@@ -1588,6 +1722,11 @@ async function coordinateApplicationUpdateInstall(reason) {
 }
 
 async function showWorkspaceUnavailableRecovery() {
+  captureUsage("runtime_fault", {
+    process: "bridge",
+    kind: "bridge_exit",
+    reason_code: "BRIDGE_UNAVAILABLE",
+  });
   const delivery = workspaceRecoveryMailbox.publish({
     title: "本地项目资料暂时不可用",
     message: "当前页面内容仍保留。可先导出当前编辑，再重新打开源页恢复本地服务。",
@@ -1604,6 +1743,12 @@ async function showWorkspaceUnavailableRecovery() {
     return;
   }
   if (workspaceFailurePrompt) return workspaceFailurePrompt;
+  captureUsage("interruption_changed", {
+    interruption_code: "workspace_unavailable",
+    phase: "started",
+    result: "unknown",
+    surface: "native",
+  });
   const options = {
     type: "warning",
     title: delivery.issue.title,
@@ -1620,7 +1765,20 @@ async function showWorkspaceUnavailableRecovery() {
       : dialog.showMessageBox(options)
   ).then(async (result) => {
     if (result.response === 1) {
+      captureUsage("interruption_changed", {
+        interruption_code: "workspace_unavailable",
+        phase: "resolved",
+        result: "recovered",
+        surface: "native",
+      });
       await coordinateApplicationRelaunch("workspace-unavailable");
+    } else {
+      captureUsage("interruption_changed", {
+        interruption_code: "workspace_unavailable",
+        phase: "resolved",
+        result: "continued",
+        surface: "native",
+      });
     }
   }).finally(() => {
     workspaceFailurePrompt = null;
@@ -1725,13 +1883,27 @@ async function startBridge() {
     child.once("exit", (code) => {
       bridgeProcess = null;
       bridgePort = null;
-      if (!settled) finish(new Error(`本地工作区服务意外退出（${code}）。${errorOutput ? `\n${errorOutput}` : ""}`));
+      if (!settled) {
+        captureUsage("runtime_fault", {
+          process: "bridge",
+          kind: "bridge_start",
+          reason_code: "BRIDGE_EXITED_BEFORE_READY",
+          exit_code: Number.isInteger(code) ? code : -1,
+        });
+        finish(new Error(`本地工作区服务意外退出（${code}）。${errorOutput ? `\n${errorOutput}` : ""}`));
+      }
       else if (!isQuitting) {
         void showWorkspaceUnavailableRecovery();
       }
     });
 
     child.once("error", (_type, _location, report) => {
+      captureUsage("runtime_fault", {
+        process: "bridge",
+        kind: "bridge_start",
+        reason_code: "BRIDGE_PROCESS_ERROR",
+        fingerprint: telemetryFingerprint(report || "bridge-process-error"),
+      });
       finish(new Error(report || "无法启动本地工作区服务。"));
     });
   });
@@ -1790,6 +1962,30 @@ async function createWindow() {
     rendererHasLoaded = true;
     ensureApplicationUpdateController().startAutomaticChecks();
   });
+  mainWindow.webContents.on("render-process-gone", (_event, details) => {
+    captureUsage("runtime_fault", {
+      process: "renderer",
+      kind: "renderer_gone",
+      reason_code: telemetryReasonCode(details?.reason, "RENDERER_GONE"),
+      exit_code: Number.isInteger(details?.exitCode)
+        ? Math.max(-1, Math.min(255, details.exitCode))
+        : -1,
+    });
+  });
+  mainWindow.webContents.on("unresponsive", () => {
+    captureUsage("runtime_fault", {
+      process: "renderer",
+      kind: "renderer_unresponsive",
+      reason_code: "UNRESPONSIVE",
+    });
+  });
+  mainWindow.webContents.on("responsive", () => {
+    captureUsage("runtime_fault", {
+      process: "renderer",
+      kind: "renderer_responsive",
+      reason_code: "RESPONSIVE",
+    });
+  });
   mainWindow.once("ready-to-show", () => mainWindow?.show());
   mainWindow.on("close", (event) => {
     if (finalExitStarted) return;
@@ -1818,6 +2014,7 @@ if (!hasSingleInstanceLock) {
   app.quit();
 } else {
   app.on("second-instance", () => {
+    captureUsage("app_launched", { launch_reason: "second_instance" });
     if (!mainWindow) return;
     if (mainWindow.isMinimized()) mainWindow.restore();
     mainWindow.show();
@@ -1830,8 +2027,16 @@ if (!hasSingleInstanceLock) {
     }
     installApplicationMenu();
     ensureApplicationUpdateController();
+    await initializeUsageTelemetry();
     await createWindow();
-  }).catch((error) => {
+  }).catch(async (error) => {
+    captureUsage("runtime_fault", {
+      process: "main",
+      kind: "startup_failure",
+      reason_code: telemetryReasonCode(error?.name, "STARTUP_FAILURE"),
+      fingerprint: telemetryFingerprint(error),
+    });
+    await usageTelemetry?.shutdown({ reason: "quit" }).catch(() => {});
     dialog.showErrorBox(
       "源页启动失败",
       error instanceof Error ? error.message : String(error),
