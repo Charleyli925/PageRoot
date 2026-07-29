@@ -91,6 +91,8 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.ok(packageJson.build.files.includes("desktop/project-path-policy.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/welcome-project-content.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/export-copy.mjs"));
+  assert.ok(packageJson.build.files.includes("desktop/open-in-default-browser.mjs"));
+  assert.ok(packageJson.build.files.includes("desktop/project-ipc-security.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/bridge-shutdown.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/close-recovery.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/product-contract.mjs"));
@@ -99,6 +101,15 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.ok(packageJson.build.files.includes("desktop/application-update.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/usage-telemetry.mjs"));
   assert.ok(packageJson.build.files.includes("public/brand-logo.png"));
+  const mainLocalImports = [...mainProcess.matchAll(
+    /from\s+"\.\/([^"]+)";/gu,
+  )].map((match) => `desktop/${match[1]}`);
+  for (const runtimeModule of mainLocalImports) {
+    assert.ok(
+      packageJson.build.files.includes(runtimeModule),
+      `Electron main-process dependency must be packaged: ${runtimeModule}`,
+    );
+  }
   assert.equal(
     packageJson.build.mac.extendInfo?.NSAppleEventsUsageDescription,
     undefined,
