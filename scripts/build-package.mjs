@@ -12,6 +12,12 @@ import {
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  DEVELOPER_PREVIEW_ARTIFACT_PATTERN,
+  developerPreviewBuilderArguments,
+  developerPreviewEnvironment,
+  developerPreviewReleaseDirectory,
+} from "./developer-preview.mjs";
 import { writeBuildInfo } from "./release-provenance.mjs";
 import { expectedArtifactLayout } from "./verify-packaged-artifact.mjs";
 import { createTelemetryBuildConfig } from "../desktop/usage-telemetry.mjs";
@@ -19,11 +25,36 @@ import { createTelemetryBuildConfig } from "../desktop/usage-telemetry.mjs";
 const scriptPath = fileURLToPath(import.meta.url);
 const productRoot = path.resolve(path.dirname(scriptPath), "..");
 
-function parseArchitecture(argv) {
-  if (argv.length !== 2 || argv[0] !== "--arch" || !/^(?:arm64|x64)$/u.test(argv[1])) {
-    throw new Error("Usage: node scripts/build-package.mjs --arch <arm64|x64>");
+export function parseBuildOptions(argv) {
+  const options = {
+    architecture: null,
+    profile: "release",
+  };
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
+    if (argument === "--arch") {
+      options.architecture = argv[index + 1] ?? null;
+      index += 1;
+      continue;
+    }
+    if (argument === "--profile") {
+      options.profile = argv[index + 1] ?? "";
+      index += 1;
+      continue;
+    }
+    throw new Error(`Unknown package-build argument: ${argument}`);
   }
-  return argv[1];
+  if (!/^(?:arm64|x64)$/u.test(options.architecture ?? "")) {
+    throw new Error("--arch must be arm64 or x64.");
+  }
+  if (!/^(?:release|developer)$/u.test(options.profile)) {
+    throw new Error("--profile must be release or developer.");
+  }
+  return options;
+}
+
+export function releasePackageBuilderArguments(architecture) {
+  return ["--mac", "dmg", "zip", `--${architecture}`, "--publish", "never"];
 }
 
 async function runCommand(command, arguments_, { environment = process.env } = {}) {
@@ -188,15 +219,34 @@ export async function writeUsageTelemetryBuildConfig({
 }
 
 async function main() {
-  const architecture = parseArchitecture(process.argv.slice(2));
+  const { architecture, profile } = parseBuildOptions(process.argv.slice(2));
+  const isDeveloperPreview = profile === "developer";
   const packageJson = JSON.parse(
     await readFile(path.join(productRoot, "package.json"), "utf8"),
   );
-  const layout = expectedArtifactLayout({ productRoot, packageJson, arch: architecture });
+  const releaseDirectory = isDeveloperPreview
+    ? developerPreviewReleaseDirectory(productRoot)
+    : undefined;
+  const layout = expectedArtifactLayout({
+    productRoot,
+    packageJson,
+    arch: architecture,
+    releaseDirectory,
+    artifactName: isDeveloperPreview
+      ? DEVELOPER_PREVIEW_ARTIFACT_PATTERN
+      : undefined,
+  });
+  const buildEnvironment = isDeveloperPreview
+    ? developerPreviewEnvironment(process.env)
+    : process.env;
   const { buildInfo, destination } = await writeBuildInfo({ productRoot, architecture });
-  const telemetryConfig = await writeUsageTelemetryBuildConfig({ productRoot });
+  const telemetryConfig = await writeUsageTelemetryBuildConfig({
+    productRoot,
+    environment: buildEnvironment,
+  });
   console.log(`Build provenance: ${destination}`);
   console.log(`Git commit: ${buildInfo.commitSha}`);
+  console.log(`Package profile: ${profile}`);
   console.log(
     telemetryConfig.enabled
       ? `Usage telemetry configured for ${telemetryConfig.host}`
@@ -212,12 +262,18 @@ async function main() {
   // A release tag makes electron-builder infer `--publish onTagOrDraft` unless
   // publishing is disabled explicitly. PageRoot publishes only after the DMG
   // and updater assets have passed the artifact gate in the Release workflow.
+  const builderArguments = isDeveloperPreview
+    ? developerPreviewBuilderArguments({
+      architecture,
+      releaseDirectory,
+    })
+    : releasePackageBuilderArguments(architecture);
   const child = spawn(
     executable,
-    ["--mac", "dmg", "zip", `--${architecture}`, "--publish", "never"],
+    builderArguments,
     {
       cwd: productRoot,
-      env: process.env,
+      env: buildEnvironment,
       stdio: "inherit",
     },
   );
@@ -233,7 +289,10 @@ async function main() {
     return;
   }
 
-  const notarization = await notarizeAndStapleDmg({ dmgPath: layout.dmgPath });
+  const notarization = await notarizeAndStapleDmg({
+    dmgPath: layout.dmgPath,
+    environment: buildEnvironment,
+  });
   if (!notarization.skipped) {
     const metadata = await refreshDmgUpdateMetadata({
       dmgPath: layout.dmgPath,

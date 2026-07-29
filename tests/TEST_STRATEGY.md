@@ -11,10 +11,11 @@
 | Draft PR `draft-feedback` | PR 仍在迭代 | 按影响映射选择 Node/编译检查 | 不因每次推送重复消费完整矩阵 |
 | Ready PR `release-gate` | 最终 PR Tree | 全量 Node、三分片完整 Browser、独立 Native Electron、独立确定性 AI 闭环、真实 HTML 发现式门禁 | 完整源码回归只跑一次并签发 Tree Hash 凭证 |
 | `npm run gate:main:auto` | 合并到 `main` | 校验 PR 结果/Tree Hash/版本后，固定 Node 与 Browser 冒烟 | 快速证明合并结果没有漂移，不重复全量源码测试 |
+| 按需 `Developer Preview` | 仅在开发者明确要求时 | 干净 Tree、最新 renderer、ad-hoc DMG、包内容完整性和一次隔离启动 | 在消耗签名/公证时间前发现“漏打包或根本跑不起来”；不成为正式门禁 |
 | `Release Candidate` | 打标签之前，凭证新鲜且 Tree/版本完全一致 | Developer ID 签名与公证、打包 App 实机启动、DMG/ZIP/blockmap/更新元数据/包内容校验，冻结候选字节 | 失败时不消耗不可变版本 tag |
 | `Release` | 候选包通过且不超过 72 小时 | 重新校验候选凭证和每个文件 Hash，创建 tag 并发布原字节 | 发布阶段不重新构建、不悄悄替换文件 |
 
-本地 `release` 和完整 `artifact` 不根据改动缩减范围。`artifact-only` 不是开发者手工跳过源码测试的捷径：执行器会拒绝缺少 CI 信任决定、Tree Hash 或版本不一致的调用，只允许 `Release Candidate` 在七天内成功 PR 凭证与当前 Tree Hash、版本完全一致时进入。发布工作流只接受同一 Tree/版本、已验证且 72 小时内的候选包。`edit` 和 `task` 的选择由 `tests/test-impact-map.json` 决定，模型或开发者只选择门禁层级，不临时拼接测试命令。
+本地 `release` 和完整 `artifact` 不根据改动缩减范围。`Developer Preview` 是独立的可选入口，正式 `release`、`artifact` 和 `artifact-only` 都不会自动调用它；自动部分不等待人工安装结果，开发者的短验证仅是反馈，不签发正式凭证。`artifact-only` 不是开发者手工跳过源码测试的捷径：执行器会拒绝缺少 CI 信任决定、Tree Hash 或版本不一致的调用，只允许 `Release Candidate` 在七天内成功 PR 凭证与当前 Tree Hash、版本完全一致时进入。发布工作流只接受同一 Tree/版本、已验证且 72 小时内的候选包。`edit` 和 `task` 的选择由 `tests/test-impact-map.json` 决定，模型或开发者只选择门禁层级，不临时拼接测试命令。
 
 工作区有未提交修改时，`edit/task` 自动读取 staged、unstaged 和 untracked 文件。任务已经提交后应运行 `npm run gate:task -- --base <基准分支或提交>`；干净工作区又没有 `--base` 时门禁会明确失败，不会把“零测试”伪装成通过。
 
@@ -33,6 +34,7 @@
   项目 ID 只以 HMAC 假名出现、编辑聚合、队列上限和失败重试。负向样本
   必须同时注入 HTML、评论、Prompt、附件名、文件路径和原始异常，最终
   批次及本地队列都不得出现这些值；测试永不访问真实 PostHog。
+- 开发者测试包：先对 ad-hoc `.app` 做 app.asar、Bridge、Schema、资源、版本和 DMG 静态校验，再从真实可执行文件做一次首窗/Bridge/Workbench/正常退出冒烟；不复制完整业务矩阵，不检查 Apple 公证或更新资产。
 - 候选包：从 `.app` 的真实可执行文件启动，使用隔离 userData，完成源码字节 oracle；随后校验 app.asar、Bridge、Schema、Developer ID Team、Hardened Runtime、公证票据、Gatekeeper、DMG、ZIP、blockmap、`latest-mac.yml` 和只读挂载内容。
 
 持久状态只保留四个跨层不变量：过期 revision 自动读取权威草稿并 rebase、结果未知时按 operation ID 查询、已确认的相同聚合 drain 为 no-op、草稿文件领先 runtime pointer 最多只允许一个已校验的崩溃窗口。纯函数和 Session 是主证明，Bridge 只证明持久边界；候选包把四者压缩为一个真实 App 冒烟，不在 Browser、Electron 和打包层各复制整套排列。

@@ -17,6 +17,10 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { gunzipSync } from "node:zlib";
 import { extractFile, listPackage, statFile } from "@electron/asar";
+import {
+  DEVELOPER_PREVIEW_ARTIFACT_PATTERN,
+  developerPreviewReleaseDirectory,
+} from "./developer-preview.mjs";
 import { assertBuildInfo, expectedBuildInfo } from "./release-provenance.mjs";
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
@@ -104,7 +108,11 @@ const RUNTIME_TEXT_EXTENSIONS = new Set([
 ]);
 
 function parseArguments(argv) {
-  const options = { arch: "arm64", releaseDirectory: undefined };
+  const options = {
+    arch: "arm64",
+    profile: "release",
+    releaseDirectory: undefined,
+  };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === "--arch") {
@@ -117,9 +125,19 @@ function parseArguments(argv) {
       index += 1;
       continue;
     }
+    if (argument === "--profile") {
+      options.profile = argv[index + 1];
+      index += 1;
+      continue;
+    }
     throw new Error(`Unknown argument: ${argument}`);
   }
   assert.match(options.arch ?? "", /^(arm64|x64)$/, "--arch must be arm64 or x64");
+  assert.match(
+    options.profile ?? "",
+    /^(release|developer)$/,
+    "--profile must be release or developer",
+  );
   return options;
 }
 
@@ -128,12 +146,13 @@ export function expectedArtifactLayout({
   packageJson,
   arch = "arm64",
   releaseDirectory,
+  artifactName: artifactNameOverride,
 }) {
   const resolvedReleaseDirectory = path.resolve(
     releaseDirectory ?? path.join(productRoot, packageJson.build?.directories?.output ?? "release"),
   );
   const productName = packageJson.build?.productName;
-  const artifactName = packageJson.build?.artifactName;
+  const artifactName = artifactNameOverride ?? packageJson.build?.artifactName;
   assert.equal(typeof productName, "string", "build.productName must be configured");
   assert.equal(typeof artifactName, "string", "build.artifactName must be configured");
   assert.equal(typeof packageJson.version, "string", "package version must be configured");
@@ -360,8 +379,16 @@ export async function verifyAppBundle({
   appPath,
   packageJson,
   verifySignature = true,
+  signaturePolicy,
   expectedProvenance,
 }) {
+  const effectiveSignaturePolicy = signaturePolicy
+    ?? (verifySignature ? "developer-id" : "none");
+  assert.match(
+    effectiveSignaturePolicy,
+    /^(?:developer-id|adhoc|none)$/u,
+    "signaturePolicy must be developer-id, adhoc or none",
+  );
   const resourcesPath = path.join(appPath, "Contents", "Resources");
   const infoPlistPath = path.join(appPath, "Contents", "Info.plist");
   const asarPath = path.join(resourcesPath, "app.asar");
@@ -512,7 +539,7 @@ export async function verifyAppBundle({
         },
       },
     );
-  } else if (verifySignature && process.platform === "darwin") {
+  } else if (effectiveSignaturePolicy !== "none" && process.platform === "darwin") {
     assert.fail(`packaged Electron Helper is missing: ${helperExecutable}`);
   }
 
@@ -545,7 +572,7 @@ export async function verifyAppBundle({
   }
 
   if (
-    verifySignature
+    effectiveSignaturePolicy !== "none"
     && process.platform === "darwin"
     && commandExists("/usr/bin/codesign")
   ) {
@@ -559,22 +586,33 @@ export async function verifyAppBundle({
       ["--display", "--verbose=4", appPath],
       "Developer ID signature inspection",
     );
-    assert.match(
-      signatureDetails,
-      /Authority=Developer ID Application:/u,
-      "packaged app is not signed with a Developer ID Application certificate",
-    );
-    assert.match(
-      signatureDetails,
-      new RegExp(`TeamIdentifier=${EXPECTED_MAC_TEAM_ID}`),
-      "packaged app was signed by an unexpected Apple team",
-    );
-    assert.doesNotMatch(
-      signatureDetails,
-      /Signature=adhoc/u,
-      "packaged app must not use an ad-hoc signature",
-    );
-    if (process.env.PAGEROOT_REQUIRE_NOTARIZATION === "1") {
+    if (effectiveSignaturePolicy === "developer-id") {
+      assert.match(
+        signatureDetails,
+        /Authority=Developer ID Application:/u,
+        "packaged app is not signed with a Developer ID Application certificate",
+      );
+      assert.match(
+        signatureDetails,
+        new RegExp(`TeamIdentifier=${EXPECTED_MAC_TEAM_ID}`),
+        "packaged app was signed by an unexpected Apple team",
+      );
+      assert.doesNotMatch(
+        signatureDetails,
+        /Signature=adhoc/u,
+        "packaged app must not use an ad-hoc signature",
+      );
+    } else {
+      assert.match(
+        signatureDetails,
+        /Signature=adhoc/u,
+        "developer preview app must use an ad-hoc signature",
+      );
+    }
+    if (
+      effectiveSignaturePolicy === "developer-id"
+      && process.env.PAGEROOT_REQUIRE_NOTARIZATION === "1"
+    ) {
       runCommand(
         "/usr/bin/xcrun",
         ["stapler", "validate", appPath],
@@ -610,6 +648,7 @@ async function verifyDmg({
   productRoot,
   packageJson,
   expectedProvenance,
+  signaturePolicy = "developer-id",
 }) {
   const dmgInfo = await stat(dmgPath);
   assert.ok(dmgInfo.isFile(), `DMG is not a file: ${dmgPath}`);
@@ -644,7 +683,7 @@ async function verifyDmg({
       productRoot,
       appPath: mountedAppPath,
       packageJson,
-      verifySignature: true,
+      signaturePolicy,
       expectedProvenance,
     });
     return { mounted: true, mountedAppPath };
@@ -756,22 +795,55 @@ async function verifyUpdateAssets({
 export async function verifyPackagedArtifact({
   productRoot = DEFAULT_PRODUCT_ROOT,
   arch = "arm64",
+  profile = "release",
   releaseDirectory,
 } = {}) {
+  assert.match(profile, /^(?:release|developer)$/u, "profile must be release or developer");
   const packageJson = JSON.parse(
     await readFile(path.join(productRoot, "package.json"), "utf8"),
   );
+  const isDeveloperPreview = profile === "developer";
   const layout = expectedArtifactLayout({
     productRoot,
     packageJson,
     arch,
-    releaseDirectory,
+    releaseDirectory: releaseDirectory
+      ?? (isDeveloperPreview ? developerPreviewReleaseDirectory(productRoot) : undefined),
+    artifactName: isDeveloperPreview
+      ? DEVELOPER_PREVIEW_ARTIFACT_PATTERN
+      : undefined,
   });
   const provenance = await expectedBuildInfo({
     productRoot,
     architecture: arch,
     requireClean: true,
   });
+  if (isDeveloperPreview) {
+    const [app, dmg] = await Promise.all([
+      verifyAppBundle({
+        productRoot,
+        appPath: layout.appPath,
+        packageJson,
+        signaturePolicy: "adhoc",
+        expectedProvenance: provenance,
+      }),
+      verifyDmg({
+        dmgPath: layout.dmgPath,
+        productName: layout.productName,
+        productRoot,
+        packageJson,
+        expectedProvenance: provenance,
+        signaturePolicy: "adhoc",
+      }),
+    ]);
+    return {
+      ...layout,
+      profile,
+      app,
+      dmg,
+      update: null,
+    };
+  }
   const [app, dmg, update] = await Promise.all([
     verifyAppBundle({
       productRoot,
@@ -798,17 +870,19 @@ export async function verifyPackagedArtifact({
       expectedProvenance: provenance,
     }),
   ]);
-  return { ...layout, app, dmg, update };
+  return { ...layout, profile, app, dmg, update };
 }
 
 async function main() {
   const options = parseArguments(process.argv.slice(2));
   const result = await verifyPackagedArtifact({
     arch: options.arch,
+    profile: options.profile,
     releaseDirectory: options.releaseDirectory,
   });
   console.log(`Packaged artifact verified: ${result.dmgPath}`);
-  console.log(`Updater ZIP verified: ${result.zipPath}`);
+  if (result.update) console.log(`Updater ZIP verified: ${result.zipPath}`);
+  else console.log("Developer preview skips updater ZIP and release metadata verification.");
   console.log(
     `App ${result.version}: ${result.app.asarFileCount} app.asar files, ${result.app.schemaFileCount} schemas`,
   );

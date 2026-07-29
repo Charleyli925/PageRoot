@@ -76,6 +76,13 @@ After merge, CI authenticates the successful PR result against the exact `main` 
 
 Before a tag exists, the manual `Release Candidate` workflow uses that source attestation to run only the installer lane on macOS. It freezes the verified, Developer ID signed and notarized DMG plus update ZIP/blockmap/metadata, checksums, legacy update manifest, build provenance and candidate attestation for the exact tree. The manual `Release` workflow accepts only a matching candidate no older than 72 hours, verifies every downloaded byte, creates the annotated tag and publishes those same files without rebuilding. See `docs/RELEASE_PIPELINE_GOVERNANCE.md` for failure classification, rerun policy and metrics.
 
+“给我开发者测试包”或等价的明确请求只触发可选
+`Developer Preview`：干净提交、ad-hoc DMG、包内容校验和一次最小启动，不
+执行完整源码矩阵、签名、公证、tag 或发布。“正式打包/发布”本身不隐含这
+一步。若开发者没有明确要求，代理不得为了保险而自动生成测试包；若请求写
+明“不真实打包”，只能修改或检查流程定义。完整操作边界见
+`docs/DEVELOPER_PREVIEW_PLAYBOOK.md`。
+
 ## Documentation impact
 
 Behavior and its documentation form one change. Use this routing table:

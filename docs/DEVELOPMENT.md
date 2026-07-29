@@ -42,18 +42,22 @@ npm run task:finish
 | `npm run gate:task` | Static checks plus impacted Node/browser/Electron coverage |
 | `npm run gate:main:auto` | Internal post-merge Node/browser smoke after exact-tree PR provenance verification |
 | `npm run gate:release:auto` | Complete source gate on a clean commit |
+| `npm run package:developer` | Optional arm64 developer preview requested explicitly: ad-hoc DMG, packaged-content verification and one isolated startup; no notarization or publication |
+| `npm run package:developer:x64` | The same optional developer preview for Intel Macs |
 | `npm run gate:artifact-only:auto` | Guarded internal installer lane; it refuses to run without CI's fresh matching tree/version decision |
 | `npm run release:mac` | Complete source gate, signed arm64 DMG/ZIP package, packaged runtime test and artifact verification; release credentials are required for notarization proof |
 | `npm run test:electron:ci-preflight:prepared` | Synthetic hosted-macOS window, timer and animation-frame preflight used before Electron product suites |
 
-The release and artifact lanes stop if the worktree is dirty or if HEAD/tree changes during the run. Reports are written to the ignored `output/test-runs/` directory.
+The developer-preview, release and artifact lanes stop if the worktree is dirty or if HEAD/tree changes during the run. Reports are written to the ignored `output/test-runs/` directory. `package:developer` is never called by another lane: run it only after an explicit developer request. Its ad-hoc, unnotarized DMG is retained for short installation feedback and is never release-eligible. See `docs/DEVELOPER_PREVIEW_PLAYBOOK.md`.
 
 Desktop development and Electron E2E disable live update checks. The pure
 application-update controller is covered by Node tests; the Release Candidate
 lane owns the installed-App, Developer ID, notarization, ZIP/blockmap and
-`latest-mac.yml` evidence. Local packaging is a distribution build and therefore
-requires a valid Developer ID identity; publication credentials remain in
-GitHub encrypted secrets.
+`latest-mac.yml` evidence. Formal local packaging is a distribution build and
+therefore requires a valid Developer ID identity; publication credentials
+remain in GitHub encrypted secrets. The separate developer-preview profile
+removes those credentials from its child environment and intentionally uses
+only an ad-hoc signature.
 
 Desktop development and every automated test also leave live usage telemetry
 disabled unless `PAGEROOT_TELEMETRY_DEV=1` is explicitly set. Telemetry tests
