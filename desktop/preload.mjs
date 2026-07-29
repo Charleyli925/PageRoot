@@ -44,6 +44,10 @@ const updateChannels = Object.freeze({
 const usageChannels = Object.freeze({
   capture: "html-usage:capture",
 });
+const previewChannels = Object.freeze({
+  createSession: "html-preview:create-session",
+  revokeSession: "html-preview:revoke-session",
+});
 const PROJECT_IPC_PROTOCOL = "html-ai-project-result";
 const PROJECT_IPC_VERSION = 1;
 
@@ -156,12 +160,21 @@ const runtimeCapabilities = Object.freeze({
   projectOpening: "desktop-dialog",
   attachmentPersistence: "bridge",
   closeCoordination: "electron-handshake",
+  interactivePreview: "independent-url",
 });
 const runtimeConfig = Object.freeze({
   bridgePort,
   bridgeAuthToken,
   appVersion,
   capabilities: runtimeCapabilities,
+});
+
+const previewApi = Object.freeze({
+  createSession: (payload) => invokeProject(previewChannels.createSession, payload),
+  revokeSession: (sessionId) => invokeProject(
+    previewChannels.revokeSession,
+    sessionId,
+  ),
 });
 
 const closeListeners = new Map();
@@ -302,6 +315,7 @@ const usageApi = Object.freeze({
 contextBridge.exposeInMainWorld("htmlAIProjects", projectsApi);
 contextBridge.exposeInMainWorld("htmlAIIntegrations", integrationsApi);
 contextBridge.exposeInMainWorld("htmlAIUpdates", updatesApi);
+contextBridge.exposeInMainWorld("htmlAIPreview", previewApi);
 contextBridge.exposeInMainWorld("htmlAIRuntime", runtimeConfig);
 contextBridge.exposeInMainWorld("htmlAIAppLifecycle", appLifecycleApi);
 contextBridge.exposeInMainWorld("htmlAIUsage", usageApi);

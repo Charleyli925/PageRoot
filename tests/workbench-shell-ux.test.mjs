@@ -254,13 +254,28 @@ test("editing and interactive preview are separate canvas modes", () => {
   assert.match(interactionPreview, /title="HTML 交互预览"/);
   assert.match(
     interactionPreview,
-    /sandbox="allow-scripts allow-forms allow-modals allow-popups allow-downloads"/,
+    /INDEPENDENT_PREVIEW_SANDBOX =[\s\S]*?"allow-scripts allow-same-origin allow-forms allow-modals allow-popups allow-downloads"/,
   );
-  assert.doesNotMatch(interactionPreview, /allow-same-origin|allow-top-navigation/);
-  assert.match(interactionPreview, /srcDoc=\{previewHtml\}/);
+  assert.match(
+    interactionPreview,
+    /SRCDOC_PREVIEW_SANDBOX =[\s\S]*?"allow-scripts allow-forms allow-modals allow-popups allow-downloads"/,
+  );
+  assert.match(interactionPreview, /sandbox=\{frameSandbox\}/);
+  assert.doesNotMatch(interactionPreview, /allow-top-navigation/);
+  assert.match(interactionPreview, /transport = "srcdoc"/);
+  assert.match(interactionPreview, /previewApi\.createSession\(\{/);
+  assert.match(interactionPreview, /\? \{ src: frameSource \?\? "about:blank" \}/);
+  assert.match(interactionPreview, /: \{ srcDoc: prepared\.html \}/);
+  assert.match(interactionPreview, /capturePageViewContext:/);
+  assert.match(interactionPreview, /createPageViewContext\(\{/);
   assert.match(interactionPreview, /PREVIEW_STORAGE_BOOTSTRAP/);
   assert.match(interactionPreview, /预览模式 · 页面操作不会保存/);
   assert.match(workbench, /<HtmlInteractionPreview[\s\S]*?height="100%"/);
+  assert.match(
+    workbench,
+    /capturePageViewContext\(\)[\s\S]*?applyPageViewContext\(nextContext\)[\s\S]*?setCanvasMode\("edit"\)/,
+  );
+  assert.match(workbench, /transport=\{interactivePreviewTransport\}/);
   assert.doesNotMatch(interactionPreview, /隔离交互预览|运行时 DOM、表单和存储不会写回源码/);
   assert.doesNotMatch(interactionPreview, /onChange|HtmlCanvasEditor|disableExecutableMarkup/);
   assert.match(interactionPreviewStyles, /\.preview\s*\{[\s\S]*?grid-template-rows:\s*36px minmax\(0, 1fr\)/);
@@ -268,6 +283,14 @@ test("editing and interactive preview are separate canvas modes", () => {
 
   assert.match(canvas, /sandbox="allow-same-origin"/);
   assert.doesNotMatch(canvas, /sandbox="[^"]*allow-scripts/);
+  assert.match(
+    canvas,
+    /a\[href\], area\[href\], button, form, input, select, textarea/,
+  );
+  assert.doesNotMatch(
+    canvas,
+    /setAttribute\(["']inert["']|\.inert\s*=/,
+  );
   assert.match(previewSandbox, /type="application\/x-html-canvas-disabled"/);
 });
 

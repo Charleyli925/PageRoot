@@ -4,6 +4,13 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+- Run desktop interactive previews in a short-lived isolated document so
+  authored scripts, relative assets, Tab controls, SVG, Canvas and dynamic
+  tables work without weakening the PageRoot renderer CSP.
+- Make “Edit” return to the source-backed Tab selected in preview while keeping
+  the normal script-disabled editable-island canvas, source bytes and existing
+  native-action interception authoritative.
+
 ## [0.9.4] - 2026-07-29
 
 - Increased the workbench header height and bottom breathing room so the

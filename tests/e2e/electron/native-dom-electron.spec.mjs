@@ -519,6 +519,153 @@ test("Electron safely renames the saved current HTML without starting a new proj
   }
 });
 
+test("Electron interactive preview runs authored scripts and edits the selected Tab", async () => {
+  const sourceDirectory = mkdtempSync(
+    path.join(tmpdir(), "pageroot-preview-source-e2e-"),
+  );
+  const sourcePath = path.join(sourceDirectory, "interactive-report.html");
+  const runtimePath = path.join(sourceDirectory, "runtime.js");
+  writeFileSync(
+    sourcePath,
+    `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    .panel { display: none; }
+    .panel.active { display: block; }
+  </style>
+</head>
+<body>
+  <nav>
+    <button id="tab-one" class="tab active" aria-selected="true">第一页</button>
+    <button id="tab-two" class="tab" aria-selected="false">第二页</button>
+  </nav>
+  <section id="panel-one" class="panel active"><p>第一页正文</p></section>
+  <section id="panel-two" class="panel">
+    <p data-native-case="preview-tab-copy" data-native-mode="native-editable">第二页可编辑正文</p>
+    <svg id="static-chart" viewBox="0 0 10 10"><circle cx="5" cy="5" r="3"></circle></svg>
+    <canvas id="runtime-canvas" width="32" height="16"></canvas>
+    <table><tbody id="runtime-table"><tr data-static-row><td>静态回退行</td></tr></tbody></table>
+  </section>
+  <script src="./runtime.js"></script>
+</body>
+</html>`,
+    "utf8",
+  );
+  writeFileSync(
+    runtimePath,
+    `(() => {
+  const tabs = [
+    ["tab-one", "panel-one"],
+    ["tab-two", "panel-two"],
+  ];
+  for (const [tabId, panelId] of tabs) {
+    document.getElementById(tabId).addEventListener("click", () => {
+      for (const [otherTabId, otherPanelId] of tabs) {
+        const active = otherTabId === tabId;
+        document.getElementById(otherTabId).classList.toggle("active", active);
+        document.getElementById(otherTabId).setAttribute("aria-selected", String(active));
+        document.getElementById(otherPanelId).classList.toggle("active", active);
+      }
+    });
+  }
+  const canvas = document.getElementById("runtime-canvas");
+  canvas.getContext("2d").fillRect(0, 0, 16, 8);
+  canvas.dataset.drawn = "true";
+  document.getElementById("runtime-table").innerHTML =
+    '<tr data-runtime-row><td>动态行一</td></tr><tr data-runtime-row><td>动态行二</td></tr>';
+  const runtimeSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  runtimeSvg.setAttribute("data-runtime-chart", "true");
+  document.getElementById("panel-two").append(runtimeSvg);
+  document.body.dataset.runtimeReady = "true";
+})();`,
+    "utf8",
+  );
+
+  let electronApp = null;
+  let isolatedUserData = null;
+  try {
+    const launched = await launchPageRoot({ activeSourcePath: sourcePath });
+    electronApp = launched.electronApp;
+    isolatedUserData = launched.isolatedUserData;
+    const { frame: editFrame } = await loadedDiskFrame(
+      launched.page,
+      sourcePath,
+      "preview-tab-copy",
+    );
+
+    await launched.page.getByRole("button", {
+      name: "预览",
+      exact: true,
+    }).click();
+    const previewIframe = launched.page.locator(
+      'iframe[title="HTML 交互预览"]',
+    );
+    await expect(previewIframe).toBeVisible();
+    const previewHandle = await previewIframe.elementHandle();
+    const previewFrame = await previewHandle?.contentFrame();
+    if (!previewFrame) {
+      throw new Error("PageRoot Electron did not expose its interactive preview frame.");
+    }
+    await previewFrame.waitForFunction(
+      () => document.body.dataset.runtimeReady === "true",
+    );
+    expect(previewFrame.url()).toMatch(/^pageroot-preview:/u);
+    expect(await previewFrame.evaluate(() => ({
+      projects: typeof window.htmlAIProjects,
+      preview: typeof window.htmlAIPreview,
+      runtime: typeof window.htmlAIRuntime,
+    }))).toEqual({
+      projects: "undefined",
+      preview: "undefined",
+      runtime: "undefined",
+    });
+    await expect(previewFrame.locator("#runtime-canvas"))
+      .toHaveAttribute("data-drawn", "true");
+    await expect(previewFrame.locator("[data-runtime-row]")).toHaveCount(2);
+    await expect(previewFrame.locator("[data-runtime-chart]")).toHaveCount(1);
+
+    await previewFrame.locator("#tab-two").click();
+    await expect(previewFrame.locator("#panel-two")).toBeVisible();
+    await expect(previewFrame.locator("#panel-one")).toBeHidden();
+
+    await launched.page.getByRole("button", {
+      name: "编辑",
+      exact: true,
+    }).click();
+    await expect(launched.page.getByRole("button", {
+      name: "编辑",
+      exact: true,
+    })).toHaveAttribute("aria-pressed", "true");
+
+    await expect(editFrame.locator("#panel-two")).toBeVisible();
+    await expect(editFrame.locator("#panel-two")).toHaveClass(/active/u);
+    await expect(editFrame.locator("#panel-one")).toBeHidden();
+    await expect(editFrame.locator("#static-chart")).toBeVisible();
+    await expect(editFrame.locator("[data-static-row]")).toHaveCount(1);
+    await expect(editFrame.locator("[data-runtime-row]")).toHaveCount(0);
+    await expect(editFrame.locator("[data-runtime-chart]")).toHaveCount(0);
+    await expect(editFrame.locator("#runtime-canvas"))
+      .not.toHaveAttribute("data-drawn", "true");
+    expect(readFileSync(sourcePath, "utf8")).not.toMatch(
+      /data-runtime-row|data-runtime-chart|data-drawn/u,
+    );
+
+    await activateNativeEdit(editFrame, "preview-tab-copy");
+    await expect(editFrame.locator(caseSelector("preview-tab-copy")))
+      .toHaveAttribute("contenteditable", "true");
+  } finally {
+    if (electronApp && isolatedUserData) {
+      await stopPageRoot(electronApp, isolatedUserData);
+    }
+    removeValidatedTemporaryDirectory(
+      sourceDirectory,
+      "pageroot-preview-source-e2e-",
+    );
+  }
+});
+
 test("Electron uses the authored DOM caret, Selection and controlled beforeinput", async () => {
   const { electronApp, page, isolatedUserData } = await launchPageRoot();
   try {
