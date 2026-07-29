@@ -9254,6 +9254,16 @@ export default function Workbench() {
                   {currentSourceFileStem}
                 </strong>
               )}
+              <button
+                className="window-file-open-action"
+                type="button"
+                aria-label="打开新的本地 HTML"
+                title="打开新的本地 HTML"
+                disabled={fileRenameEditing || fileRenameBusy}
+                onClick={() => void openProject()}
+              >
+                <PlusIcon aria-hidden="true" size={16} weight="bold" />
+              </button>
               {fileRenameError ? (
                 <span
                   id="window-file-rename-error"

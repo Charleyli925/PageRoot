@@ -4,6 +4,12 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-07-29
+
+- Added an always-visible, bolder plus action beside the current filename that
+  opens the local HTML picker through the existing safe project-switch flow,
+  while keeping the rename pencil hover-only and independently clickable.
+
 ## [0.9.2] - 2026-07-29
 
 - Reframed the first-run welcome project and bilingual GitHub homepage around

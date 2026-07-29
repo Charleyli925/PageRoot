@@ -939,6 +939,24 @@ test("a safely saved source can be renamed in place without exposing its extensi
   );
 });
 
+test("the filename keeps a distinct always-visible quick-open action", () => {
+  assert.match(
+    workbench,
+    /\)\}\s*<button[\s\S]*?className="window-file-open-action"[\s\S]*?aria-label="打开新的本地 HTML"[\s\S]*?disabled=\{fileRenameEditing \|\| fileRenameBusy\}[\s\S]*?onClick=\{\(\) => void openProject\(\)\}[\s\S]*?<PlusIcon aria-hidden="true" size=\{16\} weight="bold" \/>/,
+  );
+  assert.match(
+    styles,
+    /\.window-file-open-action\s*\{[\s\S]*?width:\s*28px[\s\S]*?height:\s*28px[\s\S]*?color:\s*#6c65d5/,
+  );
+  assert.match(
+    styles,
+    /\.window-file-open-action:hover:not\(:disabled\),\s*\.window-file-open-action:focus-visible\s*\{[\s\S]*?background:\s*rgb\(81 71 220 \/ 8%\)/,
+  );
+  const plusRule = styles.match(/\.window-file-open-action\s*\{([\s\S]*?)\n\}/u);
+  assert.ok(plusRule);
+  assert.doesNotMatch(plusRule[1], /opacity:\s*0(?:\D|$)/u);
+});
+
 test("project panel keeps actions clear without technical paths in the header", () => {
   assert.match(workbench, /className="project-button"[\s\S]*?项目/);
   assert.match(workbench, /const closeFileView = useCallback/);
