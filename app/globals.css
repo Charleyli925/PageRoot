@@ -3633,7 +3633,7 @@ body {
   top: 14px;
   right: 14px;
   left: 14px;
-  height: 62px;
+  min-height: 62px;
   padding: 0 17px;
   border: 1px solid #e5e6ea;
   border-radius: 14px;
@@ -3642,7 +3642,8 @@ body {
   backdrop-filter: blur(16px);
 }
 
-.comment-rail-header > div {
+.comment-rail-header-main {
+  min-height: 60px;
   width: 100%;
   display: flex;
   align-items: center;
@@ -3678,6 +3679,85 @@ body {
   color: #898b94;
   font-size: 9px;
   white-space: nowrap;
+}
+
+.comment-rail-header-actions {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.other-tab-comments-toggle {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 9px;
+  border: 1px solid #e5e3f7;
+  border-radius: 999px;
+  background: #f6f5ff;
+  color: #5a55b9;
+  box-shadow: none;
+  font-size: 9px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.other-tab-comments-toggle:hover {
+  border-color: #d4d1f2;
+  background: #f0efff;
+  color: #45419d;
+}
+
+.other-tab-comments-toggle svg {
+  transition: transform 140ms ease;
+}
+
+.other-tab-comments-toggle[aria-expanded="true"] svg {
+  transform: rotate(90deg);
+}
+
+.other-tab-comment-groups {
+  display: grid;
+  gap: 6px;
+  padding: 9px 0 12px;
+  border-top: 1px solid #eff0f3;
+}
+
+.other-tab-comment-groups > button {
+  min-height: 34px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 0 9px 0 11px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: #f7f8fb;
+  color: #555761;
+  box-shadow: none;
+  text-align: left;
+}
+
+.other-tab-comment-groups > button:hover {
+  border-color: #e2e0f5;
+  background: #f4f3fc;
+  color: #45419d;
+}
+
+.other-tab-comment-groups > button > span {
+  overflow: hidden;
+  font-size: 10px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.other-tab-comment-groups > button > small {
+  color: #8d8f98;
+  font-size: 9px;
 }
 
 .rail-comment-composer,

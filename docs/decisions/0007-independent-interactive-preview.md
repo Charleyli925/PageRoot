@@ -13,10 +13,12 @@ expand application authority and conflict with the source-faithful editable
 island model.
 
 A full runtime DOM snapshot is also not a safe editing projection. Script-added
-table rows, chart labels, rewritten text and moved nodes have no stable source
-identity. Copying them into `HtmlCanvasEditor` would trip its source/DOM
-consistency checks, invite runtime data into SourcePatch, and destabilize
-Selection and IME.
+text, moved nodes and arbitrary child structure have no stable source identity.
+Copying them into `HtmlCanvasEditor` would trip its source/DOM consistency
+checks, invite runtime data into SourcePatch, and destabilize Selection and IME.
+At the same time, reports commonly leave authored chart containers and table
+bodies empty for a bounded script to fill. Hiding those visuals in Edit makes
+the surrounding source-authored analysis hard to review.
 
 ## Decision
 
@@ -32,25 +34,31 @@ Selection and IME.
   admits the preview scheme.
 - Returning from preview captures a bounded `PageViewContext`. It may carry
   source-backed active/inactive class transitions plus `hidden`, `open`,
-  `aria-selected` and `aria-expanded`. Stale Hashes, duplicated/unknown nodes,
-  truncated captures, arbitrary runtime classes and all text/HTML/style/form/
+  `aria-selected` and `aria-expanded`.
+- The same context may also carry a small read-only visual projection for a
+  uniquely source-backed placeholder that is still empty in source:
+  a bounded PNG snapshot of a visible Canvas, or sanitized table rows for an
+  authored empty `tbody`. The visual payload has strict count, byte and
+  dimension limits. Table markup is allowlisted and scripts, event handlers,
+  images and unsafe styles are removed.
+- Stale Hashes, duplicated/unknown nodes, non-empty source targets, truncated
+  captures, arbitrary runtime classes and all other text/HTML/style/form/
   scroll/runtime-child state are rejected.
 - `HtmlCanvasEditor` remains mounted, script-disabled and source-authored. It
-  applies the accepted context as disposable presentation attributes, then
-  continues to use the existing editable-island and SourcePatch path.
-- Reports that must remain visually complete while editing provide static
-  source fallbacks: inline SVG first, static table HTML, and PNG only where a
-  static vector/HTML representation is not practical. JavaScript is progressive
-  enhancement.
+  applies the accepted state and visual payload as disposable, non-editable
+  presentation nodes, then continues to use the existing editable-island and
+  SourcePatch path. These nodes are removed before context replacement and are
+  never serialized or passed to SourcePatch.
 
 ## Consequences
 
 Desktop preview behaves like the authored page without weakening PageRoot's
 renderer CSP. Clicking Edit preserves the selected source-backed Tab with no
 new mode or user step, and existing text editing, Selection and IME keep their
-current source/DOM assumptions.
+current source/DOM assumptions. Script-rendered charts and empty authored table
+bodies remain visible for review in Edit, but are deliberately not selectable
+or editable.
 
-Runtime-only content remains visible only in preview. Supporting arbitrary
-runtime visuals in the editing surface would require a separate read-only
-visual layer with geometry, scroll and lifecycle synchronization; that is
-deliberately outside this decision.
+Arbitrary runtime DOM, rewritten prose, SVG trees, form values and scroll state
+remain preview-only. Extending the projection beyond the two bounded,
+source-empty visual cases requires a new decision and source-fidelity proof.

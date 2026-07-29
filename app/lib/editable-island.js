@@ -67,7 +67,7 @@ const INLINE_CONTENT_TAGS = new Set([
   "wbr",
 ]);
 
-const IMMUTABLE_ATOM_TAGS = new Set(["img"]);
+const IMMUTABLE_ATOM_TAGS = new Set(["img", "wbr"]);
 const IMMUTABLE_EMBED_TAGS = new Set([
   "audio",
   "canvas",
@@ -76,9 +76,11 @@ const IMMUTABLE_EMBED_TAGS = new Set([
   "input",
   "math",
   "object",
+  "ol",
   "select",
   "svg",
   "textarea",
+  "ul",
   "video",
 ]);
 const RUNTIME_ATTRIBUTE_NAMES = new Set([
@@ -142,7 +144,7 @@ function isProtectedAttribute(name) {
 
 function isImmutableAtomNode(node, tagName, attributes) {
   if (IMMUTABLE_ATOM_TAGS.has(tagName)) return true;
-  if (tagName === "br" || tagName === "wbr") return false;
+  if (tagName === "br") return false;
   return childNodesFor(node).length === 0 && attributes.length > 0;
 }
 
@@ -297,7 +299,12 @@ function sourceDescendants(index, element) {
     const node = index.byNodeId.get(pending.shift());
     if (!node) continue;
     descendants.push(node);
-    pending.unshift(...(node.childIds ?? []));
+    if (
+      node.type !== "element"
+      || !IMMUTABLE_EMBED_TAGS.has(node.tagName)
+    ) {
+      pending.unshift(...(node.childIds ?? []));
+    }
   }
   return descendants;
 }

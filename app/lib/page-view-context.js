@@ -3,12 +3,19 @@ import {
   createTargetRef,
   resolveTargetRef,
 } from "./target-resolver.js";
+import {
+  isSafePngDataUrl,
+  sanitizeReadOnlyTableBodyHtml,
+} from "./read-only-visual.js";
 
 export const PAGE_VIEW_CONTEXT_PROTOCOL = "pageroot-page-view-context";
-export const PAGE_VIEW_CONTEXT_VERSION = 1;
+export const PAGE_VIEW_CONTEXT_VERSION = 2;
 
 const MAX_SNAPSHOT_ENTRIES = 512;
 const MAX_CONTEXT_ENTRIES = 64;
+const MAX_SNAPSHOT_VISUALS = 24;
+const MAX_CONTEXT_VISUALS = 16;
+const MAX_VISUAL_PIXEL_DIMENSION = 4_096;
 const MAX_CLASS_TOKENS = 128;
 const MAX_QUALIFIED_CLASS_TOKENS = 8;
 const MAX_CLASS_TOKEN_LENGTH = 96;
@@ -126,6 +133,63 @@ function frozenTargetRef(targetRef) {
   });
 }
 
+function sourceVisualPlaceholder(sourceIndex, element) {
+  if (
+    !element?.contentRange
+    || !Number.isInteger(element.contentRange.startOffset)
+    || !Number.isInteger(element.contentRange.endOffset)
+  ) return false;
+  const innerHtml = sourceIndex.source.slice(
+    element.contentRange.startOffset,
+    element.contentRange.endOffset,
+  );
+  return innerHtml.replace(/<!--[\s\S]*?-->/gu, "").trim().length === 0;
+}
+
+function normalizedReadOnlyVisual(sourceIndex, rawVisual, sourceNodeCounts) {
+  const sourceNodeId = String(rawVisual?.sourceNodeId ?? "");
+  if (!sourceNodeId || sourceNodeCounts.get(sourceNodeId) !== 1) return null;
+  const element = sourceIndex.byNodeId.get(sourceNodeId);
+  if (
+    !element
+    || element.type !== "element"
+    || !sourceVisualPlaceholder(sourceIndex, element)
+  ) return null;
+
+  const targetRef = frozenTargetRef(createTargetRef(sourceIndex, element, {
+    level: "subregion",
+  }));
+  if (
+    rawVisual?.kind === "canvas-bitmap"
+    && element.tagName === "div"
+    && Number.isInteger(rawVisual.width)
+    && Number.isInteger(rawVisual.height)
+    && rawVisual.width >= 1
+    && rawVisual.height >= 1
+    && rawVisual.width <= MAX_VISUAL_PIXEL_DIMENSION
+    && rawVisual.height <= MAX_VISUAL_PIXEL_DIMENSION
+    && isSafePngDataUrl(rawVisual.dataUrl)
+  ) {
+    return Object.freeze({
+      targetRef,
+      kind: "canvas-bitmap",
+      width: rawVisual.width,
+      height: rawVisual.height,
+      dataUrl: String(rawVisual.dataUrl),
+    });
+  }
+  if (rawVisual?.kind === "table-body" && element.tagName === "tbody") {
+    const html = sanitizeReadOnlyTableBodyHtml(rawVisual.html);
+    if (!html) return null;
+    return Object.freeze({
+      targetRef,
+      kind: "table-body",
+      html,
+    });
+  }
+  return null;
+}
+
 function contextStateDiff(sourceState, currentState) {
   const hidden = sourceState.hidden === currentState.hidden
     ? undefined
@@ -211,6 +275,11 @@ export function createPageViewContext({
     || snapshot?.truncated === true
     || !Array.isArray(snapshot?.entries)
     || snapshot.entries.length > MAX_SNAPSHOT_ENTRIES
+    || (
+      snapshot?.visuals !== undefined
+      && !Array.isArray(snapshot.visuals)
+    )
+    || (snapshot?.visuals?.length ?? 0) > MAX_SNAPSHOT_VISUALS
   ) return null;
 
   const sourceIndex = buildSourceIndex(html);
@@ -285,7 +354,27 @@ export function createPageViewContext({
     if (entries.length >= MAX_CONTEXT_ENTRIES) break;
   }
 
-  if (entries.length === 0) return null;
+  const visualSourceNodeCounts = new Map();
+  for (const rawVisual of snapshot.visuals ?? []) {
+    const sourceNodeId = String(rawVisual?.sourceNodeId ?? "");
+    visualSourceNodeCounts.set(
+      sourceNodeId,
+      (visualSourceNodeCounts.get(sourceNodeId) ?? 0) + 1,
+    );
+  }
+  const visuals = [];
+  for (const rawVisual of snapshot.visuals ?? []) {
+    const visual = normalizedReadOnlyVisual(
+      sourceIndex,
+      rawVisual,
+      visualSourceNodeCounts,
+    );
+    if (!visual) continue;
+    visuals.push(visual);
+    if (visuals.length >= MAX_CONTEXT_VISUALS) break;
+  }
+
+  if (entries.length === 0 && visuals.length === 0) return null;
   return Object.freeze({
     protocol: PAGE_VIEW_CONTEXT_PROTOCOL,
     version: PAGE_VIEW_CONTEXT_VERSION,
@@ -293,6 +382,7 @@ export function createPageViewContext({
     generation,
     sourceSha256: sourceIndex.sourceSha256,
     entries: Object.freeze(entries),
+    visuals: Object.freeze(visuals),
   });
 }
 
@@ -303,8 +393,10 @@ export function resolvePageViewContext(html, context) {
     || context?.version !== PAGE_VIEW_CONTEXT_VERSION
     || !Array.isArray(context?.entries)
     || context.entries.length > MAX_CONTEXT_ENTRIES
+    || !Array.isArray(context?.visuals)
+    || context.visuals.length > MAX_CONTEXT_VISUALS
   ) {
-    return { sourceIndex, entries: [] };
+    return { sourceIndex, entries: [], visuals: [] };
   }
   const entries = [];
   for (const entry of context.entries) {
@@ -327,5 +419,46 @@ export function resolvePageViewContext(html, context) {
       sourceState,
     });
   }
-  return { sourceIndex, entries };
+  const visuals = [];
+  for (const visual of context.visuals) {
+    let resolution;
+    try {
+      resolution = resolveTargetRef(sourceIndex, visual.targetRef);
+    } catch {
+      continue;
+    }
+    if (
+      !["exact", "rebound"].includes(resolution.resolution)
+      || resolution.target?.type !== "element"
+      || !sourceVisualPlaceholder(sourceIndex, resolution.target)
+    ) continue;
+    if (
+      visual.kind === "canvas-bitmap"
+      && resolution.target.tagName === "div"
+      && Number.isInteger(visual.width)
+      && Number.isInteger(visual.height)
+      && visual.width >= 1
+      && visual.height >= 1
+      && visual.width <= MAX_VISUAL_PIXEL_DIMENSION
+      && visual.height <= MAX_VISUAL_PIXEL_DIMENSION
+      && isSafePngDataUrl(visual.dataUrl)
+    ) {
+      visuals.push({
+        visual,
+        sourceNodeId: resolution.target.nodeId,
+        resolution: resolution.resolution,
+      });
+    } else if (
+      visual.kind === "table-body"
+      && resolution.target.tagName === "tbody"
+      && sanitizeReadOnlyTableBodyHtml(visual.html) === visual.html
+    ) {
+      visuals.push({
+        visual,
+        sourceNodeId: resolution.target.nodeId,
+        resolution: resolution.resolution,
+      });
+    }
+  }
+  return { sourceIndex, entries, visuals };
 }

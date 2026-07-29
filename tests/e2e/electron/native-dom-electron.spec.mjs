@@ -545,8 +545,8 @@ test("Electron interactive preview runs authored scripts and edits the selected 
   <section id="panel-two" class="panel">
     <p data-native-case="preview-tab-copy" data-native-mode="native-editable">第二页可编辑正文</p>
     <svg id="static-chart" viewBox="0 0 10 10"><circle cx="5" cy="5" r="3"></circle></svg>
-    <canvas id="runtime-canvas" width="32" height="16"></canvas>
-    <table><tbody id="runtime-table"><tr data-static-row><td>静态回退行</td></tr></tbody></table>
+    <div id="runtime-canvas" style="width: 32px; height: 16px"></div>
+    <table><tbody id="runtime-table"></tbody></table>
   </section>
   <script src="./runtime.js"></script>
 </body>
@@ -570,9 +570,12 @@ test("Electron interactive preview runs authored scripts and edits the selected 
       }
     });
   }
-  const canvas = document.getElementById("runtime-canvas");
-  canvas.getContext("2d").fillRect(0, 0, 16, 8);
+  const canvas = document.createElement("canvas");
+  canvas.width = 32;
+  canvas.height = 16;
   canvas.dataset.drawn = "true";
+  document.getElementById("runtime-canvas").append(canvas);
+  canvas.getContext("2d").fillRect(0, 0, 16, 8);
   document.getElementById("runtime-table").innerHTML =
     '<tr data-runtime-row><td>动态行一</td></tr><tr data-runtime-row><td>动态行二</td></tr>';
   const runtimeSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -621,7 +624,7 @@ test("Electron interactive preview runs authored scripts and edits the selected 
       preview: "undefined",
       runtime: "undefined",
     });
-    await expect(previewFrame.locator("#runtime-canvas"))
+    await expect(previewFrame.locator("#runtime-canvas canvas"))
       .toHaveAttribute("data-drawn", "true");
     await expect(previewFrame.locator("[data-runtime-row]")).toHaveCount(2);
     await expect(previewFrame.locator("[data-runtime-chart]")).toHaveCount(1);
@@ -643,13 +646,18 @@ test("Electron interactive preview runs authored scripts and edits the selected 
     await expect(editFrame.locator("#panel-two")).toHaveClass(/active/u);
     await expect(editFrame.locator("#panel-one")).toBeHidden();
     await expect(editFrame.locator("#static-chart")).toBeVisible();
-    await expect(editFrame.locator("[data-static-row]")).toHaveCount(1);
-    await expect(editFrame.locator("[data-runtime-row]")).toHaveCount(0);
+    await expect(editFrame.locator(
+      '#runtime-canvas img[data-pageroot-readonly-visual="canvas-bitmap"]',
+    )).toBeVisible();
+    await expect(editFrame.locator("#runtime-canvas canvas")).toHaveCount(0);
+    await expect(editFrame.locator(
+      '#runtime-table > tr[data-pageroot-readonly-visual="table-body"]',
+    )).toHaveCount(2);
+    await expect(editFrame.locator("#runtime-table")).toContainText("动态行一");
+    await expect(editFrame.locator("#runtime-table")).toContainText("动态行二");
     await expect(editFrame.locator("[data-runtime-chart]")).toHaveCount(0);
-    await expect(editFrame.locator("#runtime-canvas"))
-      .not.toHaveAttribute("data-drawn", "true");
     expect(readFileSync(sourcePath, "utf8")).not.toMatch(
-      /data-runtime-row|data-runtime-chart|data-drawn/u,
+      /data-pageroot-readonly-visual|data-runtime-row|data-runtime-chart|data-drawn/u,
     );
 
     await activateNativeEdit(editFrame, "preview-tab-copy");

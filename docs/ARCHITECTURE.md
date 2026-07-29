@@ -36,9 +36,11 @@ Comments + frozen input
   files beside the known source HTML.
 - Preview-to-edit carries only a bounded `PageViewContext`: source-backed
   active/inactive class transitions and `hidden`, `open`, `aria-selected` or
-  `aria-expanded` state. The edit frame is still rebuilt from source bytes;
-  runtime nodes, text, Canvas pixels, form values and scroll positions are
-  never copied into it.
+  `aria-expanded` state, plus a strictly bounded read-only visual projection
+  for a source-empty chart container or `tbody`. The edit frame is still
+  rebuilt from source bytes. Canvas snapshots and sanitized table rows are
+  disposable and non-editable; arbitrary runtime nodes, rewritten text, form
+  values and scroll positions are never copied into it or serialized.
 - `IslandEditingController` is the only production text-edit engine in PageRoot 0.9.0. `contenteditable="true"` supplies focus, caret, Selection and IME composition, while the controller owns insertion, deletion, line breaks, paste and formatting. Chromium DOM serialization never has commit authority.
 - `editable-island` owns the V2 capability and normalization contract. An accepted edit replaces only the selected element's parsed `contentRange`; bytes outside that range remain exact. Inside the range, parse5 may perform the smallest safe normalization needed to preserve inline semantics, comments and immutable authored atoms.
 - `native-edit-policy` owns shared session attributes and checkpoint timing. `native-edit-runtime-preflight` still proves that enabling the island does not change geometry or text style; `HtmlCanvasEditor` only coordinates selection, the island session and SourcePatch.
@@ -65,7 +67,7 @@ protocols.
 | Pseudonymous identity, strict event schemas, local queue and PostHog delivery | `desktop/usage-telemetry.mjs` |
 | Preview sanitization and verified frame injection | `app/components/html-preview-sandbox.js` |
 | Volatile desktop preview sessions and contained local-asset serving | `desktop/preview-protocol.mjs` |
-| Source-backed preview-to-edit display-state filtering and rebinding | `app/lib/page-view-context.js` |
+| Source-backed preview-to-edit state, bounded visual filtering and rebinding | `app/lib/page-view-context.js`, `app/lib/read-only-visual.js` |
 | Run lifecycle decoding and transition policy | `app/domain/run-lifecycle.js` |
 
 The V2 source-fidelity path remains a protected core: `SourceIndex`,

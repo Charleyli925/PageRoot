@@ -367,6 +367,21 @@ async function loadRealHtml(page, sourcePath, source, { navigate = true } = {}) 
   return { editor, iframe, frame };
 }
 
+async function showAuthoredTab(frame, panelId) {
+  await frame.evaluate((activePanelId) => {
+    const controls = Array.from(document.querySelectorAll('[role="tab"][aria-controls]'));
+    for (const control of controls) {
+      const selected = control.getAttribute("aria-controls") === activePanelId;
+      control.setAttribute("aria-selected", String(selected));
+      control.tabIndex = selected ? 0 : -1;
+      const panel = document.getElementById(control.getAttribute("aria-controls") || "");
+      if (panel) panel.hidden = !selected;
+    }
+    window.dispatchEvent(new Event("resize"));
+  }, panelId);
+  await expect(frame.locator(`#${panelId}`)).toBeVisible();
+}
+
 async function waitForFreshFenceFrame(page, editor, previousDocumentToken) {
   await expect.poll(async () => {
     try {
@@ -999,6 +1014,95 @@ test(`the real complex page edits every visible V2 host at start, middle and end
   expect(afterStat.mtimeMs).toBe(beforeStat.mtimeMs);
 });
 }
+
+test("reported nested-list headings and wbr text preserve real authored structure", async ({
+  page,
+}) => {
+  test.skip(
+    !process.env.PAGEROOT_REAL_HTML_PATH,
+    "The reported structural regressions run only against the explicit real HTML.",
+  );
+  const sourcePath = validatedRealHtmlPath();
+  const original = readFileSync(sourcePath);
+  const beforeStat = statSync(sourcePath);
+  const originalSha = sha256(original);
+  const loaded = await loadRealHtml(page, sourcePath, original);
+  const { editor } = loaded;
+  let { frame } = loaded;
+
+  await showAuthoredTab(frame, "panel-outline");
+  const nested = frame.locator("#panel-outline > ol > li").first();
+  const nestedHandle = await nested.elementHandle();
+  if (!nestedHandle) throw new Error("The reported nested-list heading is missing.");
+  const nestedSourceId = await nested.getAttribute("data-html-ai-source-node-id");
+  if (!nestedSourceId) throw new Error("The nested-list heading lost source identity.");
+  await nested.dblclick({
+    position: await renderedTokenPosition(nestedHandle, "发现阶段"),
+  });
+  await waitForEditableHost(frame, editor, nested, "reported nested-list heading");
+  await expect(nested.locator(":scope > ul")).toHaveAttribute("contenteditable", "false");
+  const nestedText = await nested.textContent();
+  const nestedStart = nestedText.indexOf("发现阶段");
+  await setHandleTextSelection(
+    nestedHandle,
+    nestedStart,
+    nestedStart + "发现阶段".length,
+  );
+  await page.keyboard.insertText("发现与验证阶段");
+  await page.keyboard.press("Escape");
+  await expect(nested).not.toHaveAttribute("contenteditable", "true");
+  const nestedExpected = replaceEditableIslandTextBytes(
+    original,
+    nestedSourceId,
+    "发现阶段",
+    "发现与验证阶段",
+  );
+  const nestedDocumentToken = await documentToken(page);
+  expect((await exportCurrentHtml(page)).equals(nestedExpected)).toBe(true);
+  frame = await waitForFreshFenceFrame(page, editor, nestedDocumentToken);
+
+  await showAuthoredTab(frame, "panel-terms");
+  const wbrCandidate = frame.locator("#panel-terms p").filter({
+    hasText: "软换行机会：HypertextMarkupLanguage",
+  });
+  const wbrSourceId = await wbrCandidate.getAttribute("data-html-ai-source-node-id");
+  if (!wbrSourceId) throw new Error("The wbr paragraph lost source identity.");
+  const wbr = frame.locator(
+    `[data-html-ai-source-node-id="${escapeAttributeValue(wbrSourceId)}"]`,
+  );
+  const wbrHandle = await wbr.elementHandle();
+  if (!wbrHandle) throw new Error("The reported wbr paragraph is missing.");
+  await wbr.dblclick({
+    position: await renderedTokenPosition(wbrHandle, "Hypertext"),
+  });
+  await waitForEditableHost(frame, editor, wbr, "reported wbr paragraph");
+  const wbrText = await wbr.textContent();
+  const wbrStart = wbrText.indexOf("Hypertext");
+  await setHandleTextSelection(
+    wbrHandle,
+    wbrStart,
+    wbrStart + "Hypertext".length,
+  );
+  await page.keyboard.insertText("Hypertextual");
+  const updatedWbr = frame.locator("#panel-terms p").filter({
+    hasText: "软换行机会：HypertextualMarkupLanguage",
+  });
+  await expect(updatedWbr.locator("wbr")).toHaveCount(2);
+  await page.keyboard.press("Escape");
+  await expect(frame.locator('[contenteditable="true"]')).toHaveCount(0);
+  const expected = replaceEditableIslandTextBytes(
+    nestedExpected,
+    wbrSourceId,
+    "Hypertext",
+    "Hypertextual",
+  );
+  expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
+
+  const afterStat = statSync(sourcePath);
+  expect(sha256(readFileSync(sourcePath))).toBe(originalSha);
+  expect(afterStat.size).toBe(beforeStat.size);
+  expect(afterStat.mtimeMs).toBe(beforeStat.mtimeMs);
+});
 
 test("reported real-page end boundaries round-trip with only island normalization", async ({ page }, testInfo) => {
   test.skip(

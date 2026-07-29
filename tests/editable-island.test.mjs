@@ -106,6 +106,58 @@ test("editable island admits mixed inline markup, empty text and hard breaks", (
   assert.equal(emptied.html, "<button></button>");
 });
 
+test("editable island edits a nested-list heading while preserving the child list as an atom", () => {
+  const html = [
+    "<main><ol><li>",
+    "发现阶段",
+    "<ul data-keep='yes'><li>访谈 12 位内容创作者</li><li>审计现有流程</li></ul>",
+    "</li></ol><p>外部字节保持不变</p></main>",
+  ].join("");
+  const { index, targetRef } = targetFor(html, "li");
+  const island = editableIslandForTarget(index, targetRef);
+  assert.match(island.innerHtml, /^发现阶段<ul/u);
+
+  const result = applyPatchPlan(planSourcePatch({
+    type: "replace-editable-island",
+    targetRef,
+    beforeInnerHtml: island.innerHtml,
+    nextInnerHtml: [
+      "发现与验证阶段",
+      '<ul data-keep="yes" contenteditable="false">',
+      "<li>访谈 12 位内容创作者</li><li>审计现有流程</li></ul>",
+    ].join(""),
+  }, index), html);
+
+  assert.equal(
+    result.html,
+    [
+      "<main><ol><li>",
+      "发现与验证阶段",
+      '<ul data-keep="yes"><li>访谈 12 位内容创作者</li><li>审计现有流程</li></ul>',
+      "</li></ol><p>外部字节保持不变</p></main>",
+    ].join(""),
+  );
+  assert.equal(result.scopeReport.outsideUnchanged, true);
+});
+
+test("editable island keeps wbr atoms while allowing adjacent words to change", () => {
+  const baseline = "软换行机会：Hypertext<wbr>Markup<wbr>Language";
+  assert.equal(
+    normalizeEditableIslandHtml(
+      "软换行机会：Hypertextual<wbr>Markup<wbr>Language",
+      { baselineInnerHtml: baseline },
+    ),
+    "软换行机会：Hypertextual<wbr>Markup<wbr>Language",
+  );
+  assertIslandError(
+    "EDITABLE_ISLAND_ATOM_CHANGED",
+    () => normalizeEditableIslandHtml(
+      "软换行机会：HypertextMarkup<wbr>Language",
+      { baselineInnerHtml: baseline },
+    ),
+  );
+});
+
 test("editable island rejects block structure, new protected semantics and atom loss", () => {
   assertIslandError(
     "EDITABLE_ISLAND_STRUCTURE_UNSUPPORTED",

@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>标签页评论布局</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 36px;
+      font: 16px/1.7 system-ui, sans-serif;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 24px;
+    }
+
+    .tab {
+      padding: 8px 14px;
+      border: 1px solid #d8d9df;
+      border-radius: 8px;
+    }
+
+    .tab.active {
+      color: #fff;
+      background: #5b55d9;
+    }
+
+    .panel {
+      display: none;
+      min-height: 520px;
+      padding: 24px;
+      border: 1px solid #e1e2e7;
+      border-radius: 14px;
+    }
+
+    .panel.active {
+      display: block;
+    }
+
+    .comment-target {
+      max-width: 520px;
+      margin: 180px 0 0;
+      padding: 20px;
+      background: #f7f8fb;
+    }
+  </style>
+</head>
+<body>
+  <nav class="tabs">
+    <button class="tab active" data-p="panel-one" type="button">第一页</button>
+    <button class="tab" data-p="panel-two" type="button">第二页</button>
+  </nav>
+  <section class="panel active" id="panel-one">
+    <p class="comment-target" data-native-case="tab-comment-one">第一页评论目标</p>
+  </section>
+  <section class="panel" id="panel-two">
+    <p class="comment-target" data-native-case="tab-comment-two">第二页评论目标</p>
+  </section>
+  <script>
+    document.querySelectorAll("[data-p]").forEach((tab) => {
+      tab.addEventListener("click", () => {
+        const targetId = tab.getAttribute("data-p");
+        document.querySelectorAll("[data-p]").forEach((candidate) => {
+          candidate.classList.toggle("active", candidate === tab);
+        });
+        document.querySelectorAll(".panel").forEach((panel) => {
+          panel.classList.toggle("active", panel.id === targetId);
+        });
+      });
+    });
+  </script>
+</body>
+</html>

@@ -247,6 +247,10 @@ function insertFragmentAtSelection(
 ): boolean {
   const range = selectionRangeInsideHost(hostElement);
   if (!range) return false;
+  if (
+    !range.collapsed
+    && selectionCrossesImmutableStructure(hostElement, range)
+  ) return false;
   const insertedNodes = Array.from(fragment.childNodes);
   range.deleteContents();
   range.insertNode(fragment);
@@ -269,6 +273,10 @@ function insertTextAtSelection(
   const range = selectionRangeInsideHost(hostElement);
   if (!range) return false;
   if (!value) {
+    if (
+      !range.collapsed
+      && selectionCrossesImmutableStructure(hostElement, range)
+    ) return false;
     range.deleteContents();
     range.collapse(true);
     const selection = hostElement.ownerDocument.getSelection();
@@ -289,6 +297,7 @@ function deleteSelection(
   const range = selectionRangeInsideHost(hostElement);
   if (!selection || !range) return false;
   if (!range.collapsed) {
+    if (selectionCrossesImmutableStructure(hostElement, range)) return false;
     range.deleteContents();
     range.collapse(true);
     selection.removeAllRanges();
@@ -338,6 +347,9 @@ function deleteSelection(
       const deletionRange = hostElement.ownerDocument.createRange();
       deletionRange.setStart(startPoint.node, startPoint.offset);
       deletionRange.setEnd(endPoint.node, endPoint.offset);
+      if (selectionCrossesImmutableStructure(hostElement, deletionRange)) {
+        return false;
+      }
       deletionRange.deleteContents();
       deletionRange.collapse(true);
       selection.removeAllRanges();
@@ -368,6 +380,14 @@ function deleteSelection(
         || hostElement.contains(deletionRange.endContainer)
       )
     ) {
+      if (selectionCrossesImmutableStructure(hostElement, deletionRange)) {
+        setSelectionValue(hostElement, {
+          anchor: logical,
+          focus: logical,
+          affinity: logical === 0 ? "right" : "left",
+        });
+        return false;
+      }
       deletionRange.deleteContents();
       deletionRange.collapse(true);
       selection.removeAllRanges();
@@ -416,6 +436,9 @@ function deleteSelection(
   const deletionRange = hostElement.ownerDocument.createRange();
   deletionRange.setStart(startPoint.node, startPoint.offset);
   deletionRange.setEnd(endPoint.node, endPoint.offset);
+  if (selectionCrossesImmutableStructure(hostElement, deletionRange)) {
+    return false;
+  }
   deletionRange.deleteContents();
   deletionRange.collapse(true);
   selection.removeAllRanges();
@@ -449,13 +472,17 @@ const IMMUTABLE_FORMATTING_TAGS = new Set([
   "input",
   "math",
   "object",
+  "ol",
   "optgroup",
   "option",
   "select",
   "svg",
   "textarea",
+  "ul",
   "video",
+  "wbr",
 ]);
+const IMMUTABLE_EDIT_CONTAINER_TAGS = new Set(["ol", "ul"]);
 
 function isRuntimeAttributeName(name: string): boolean {
   const normalized = name.toLowerCase();
@@ -476,7 +503,7 @@ function isImmutableFormattingNode(node: Node): boolean {
     element.namespaceURI !== HTML_NAMESPACE
     || IMMUTABLE_FORMATTING_TAGS.has(tagName)
   ) return true;
-  if (tagName === "br" || tagName === "wbr") return false;
+  if (tagName === "br") return false;
   const authoredAttributes = Array.from(element.attributes).filter(
     (attribute) => !isRuntimeAttributeName(attribute.name),
   );
@@ -528,6 +555,11 @@ export class IslandEditingController {
   >;
 
   private readonly savedAttributes = new Map<string, SavedAttribute>();
+
+  private readonly immutableContainerAttributes: Array<{
+    index: number;
+    saved: SavedAttribute;
+  }> = [];
 
   private readonly cleanup: Array<() => void> = [];
 
@@ -592,6 +624,15 @@ export class IslandEditingController {
         );
       }
     }
+    Array.from(this.hostElement.querySelectorAll<HTMLElement>("ol, ul"))
+      .filter((element) => IMMUTABLE_EDIT_CONTAINER_TAGS.has(element.localName))
+      .forEach((element, index) => {
+        this.immutableContainerAttributes.push({
+          index,
+          saved: captureAttribute(element, "contenteditable"),
+        });
+        element.setAttribute("contenteditable", "false");
+      });
     this.ownedCanonicalInnerHtml = this.baselineCanonicalInnerHtml;
     this.baselineChildren = Array.from(this.hostElement.childNodes).map(
       (node) => node.cloneNode(true),
@@ -1375,6 +1416,13 @@ export class IslandEditingController {
     this.detach();
     for (const [name, saved] of this.savedAttributes) {
       restoreAttribute(this.hostElement, name, saved);
+    }
+    const immutableContainers = Array.from(
+      this.hostElement.querySelectorAll<HTMLElement>("ol, ul"),
+    ).filter((element) => IMMUTABLE_EDIT_CONTAINER_TAGS.has(element.localName));
+    for (const item of this.immutableContainerAttributes) {
+      const element = immutableContainers[item.index];
+      if (element) restoreAttribute(element, "contenteditable", item.saved);
     }
     this.pendingCommand = null;
     this.compositionSnapshot = null;
