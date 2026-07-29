@@ -107,6 +107,7 @@ Source visual truth:
 
 - `codex-clipboard-bb90f74c-2ac3-4652-b498-dc0d2fd33f92.png` — user-provided temporary reference attachment, `248 × 118` pixels, intentionally excluded from the public repository.
 - User direction: preserve the existing badge and the rest of the welcome page, while moving the badge to the upper-right corner of the full hero.
+- Scope baseline: commit `9541d13`, the existing PR #52 head before this badge-alignment request. Statements about unchanged surrounding content in this section apply only to the later alignment subchange; the PR's earlier agent-positioning rewrite is documented by the other welcome-page QA evidence.
 
 Implementation evidence:
 
@@ -134,7 +135,7 @@ Viewport and state:
 - Spacing and layout rhythm: on desktop the badge is positioned `44px` from the hero top and `50px` from its right edge. At the compact breakpoint it is `30px` from the top and `24px` from the right. It does not overlap the brand lockup or source card at either viewport.
 - Colors and visual tokens: the existing translucent violet surface, white border, muted text, and rounded shape are unchanged.
 - Image quality and asset fidelity: the provided reference and final focused region were inspected together. The implemented badge preserves the same visual treatment and renders sharply; no new image or icon asset was introduced.
-- Copy and content: the label remains exactly “内置介绍页”. All other welcome-page content and visible controls remain unchanged.
+- Copy and content: relative to the `9541d13` scope baseline, the label remains exactly “内置介绍页” and this alignment subchange does not alter other welcome-page content or visible controls.
 - Responsiveness: desktop and compact renders have no horizontal overflow, clipping, or collision.
 
 ## Comparison history
