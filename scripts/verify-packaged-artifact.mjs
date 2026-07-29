@@ -72,6 +72,8 @@ const REQUIRED_APP_SOURCE_FILES = [
   "desktop/project-path-policy.mjs",
   "desktop/welcome-project-content.mjs",
   "desktop/export-copy.mjs",
+  "desktop/open-in-default-browser.mjs",
+  "desktop/project-ipc-security.mjs",
   "desktop/bridge-shutdown.mjs",
   "desktop/close-recovery.mjs",
   "desktop/product-contract.mjs",
