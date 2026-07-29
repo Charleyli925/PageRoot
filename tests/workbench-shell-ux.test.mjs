@@ -958,8 +958,13 @@ test("the filename keeps distinct quick actions with non-layout tooltips", () =>
   );
   assert.match(
     styles,
-    /\.window-file-quick-action::after\s*\{[\s\S]*?content:\s*attr\(data-tooltip\)[\s\S]*?position:\s*absolute[\s\S]*?pointer-events:\s*none/,
+    /\.window-file-quick-action::after\s*\{[\s\S]*?content:\s*attr\(data-tooltip\)[\s\S]*?position:\s*absolute[\s\S]*?border:\s*1px solid #e1e2e8[\s\S]*?background:\s*rgb\(255 255 255 \/ 98%\)[\s\S]*?color:\s*#555864[\s\S]*?pointer-events:\s*none/,
   );
+  const tooltipRule = styles.match(
+    /\.window-file-quick-action::after\s*\{([\s\S]*?)\n\}/u,
+  );
+  assert.ok(tooltipRule);
+  assert.doesNotMatch(tooltipRule[1], /rgb\(35 36 44|#000|black/u);
   assert.match(
     styles,
     /\.window-file-quick-action:hover::after,\s*\.window-file-quick-action:focus-visible::after\s*\{[\s\S]*?opacity:\s*1/,

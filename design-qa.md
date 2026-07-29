@@ -100,6 +100,9 @@ Comparison history:
    edge and inherited disabled opacity; moving it down `3px` and scoping
    disabled opacity to the SVG made the hint fully legible without affecting
    layout.
+5. User review rejected the dark tooltip surface. The final treatment uses the
+   header's near-white surface, a `#e1e2e8` border, muted gray text and a soft
+   shadow; geometry and placement remain unchanged.
 
 Interaction checks:
 
