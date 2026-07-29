@@ -1,5 +1,67 @@
 # Design QA
 
+## Qoder handoff progress-card redesign
+
+Date: 2026-07-29
+
+Source visual truth:
+
+- User-provided approved flow-panel capture
+  (`codex-clipboard-207a9bc1-c4a1-40f8-a453-b1c0a386fd81.png`, local-only).
+- The capture was reviewed locally and remains outside the repository.
+
+Implementation evidence:
+
+- `output/design-qa/2026-07-29-handoff-redesign/handoff-waiting-final-1400x900.png`
+- `output/design-qa/2026-07-29-handoff-redesign/handoff-waiting-final-1280x720.png`
+
+Combined comparison input:
+
+- `output/design-qa/2026-07-29-handoff-redesign/comparison-reference-vs-final.png`
+
+Viewport and normalization:
+
+- Full-height application viewport: `1400 × 900` CSS pixels. The handoff drawer
+  measured `1040 × 760` pixels and the process panel measured
+  `504.398 × 489` pixels.
+- Compact application viewport: `1280 × 720` CSS pixels. The process panel
+  measured `504.398 × 353` pixels.
+- The source process-panel crop (`1010 × 977`) and full-height implementation
+  process-panel crop (`504 × 489`) were each normalized to `600` pixels wide
+  without stretching their heights.
+- State: one completed handoff stage, AI stage in progress, validation and
+  result pending.
+
+Visible comparison:
+
+- The four cards retain the approved green, indigo and neutral hierarchy with
+  numbered circles, stage-specific icon wells, aligned copy and right-edge
+  status.
+- The validation card uses the approved Phosphor floppy-disk outline, centered
+  in the same `40 × 40` icon well as the other stages.
+- The active AI card keeps its dashed icon ring and status pill. The bright
+  blue outline and dotted text boxes visible in the source are Figma selection
+  chrome and are intentionally absent from production.
+- The footer divider is removed. The existing actions keep their order and
+  button treatment while aligning to the footer top edge, closer to the content.
+- Header, summary and body padding were tightened enough to preserve the tall
+  card rhythm at the full-height viewport without changing the right-side
+  record hierarchy.
+
+Measured checks:
+
+- At `1280 × 720`, all four card rows remain visible at approximately
+  `65.95` pixels high.
+- Every row's number, icon and status share the same measured vertical center.
+- The process panel has no horizontal or vertical overflow.
+- The longer validation detail has no text clipping.
+- The computed footer top border is `0px`.
+- A clean page load produced no browser warnings or errors.
+
+final result: passed
+
+---
+
 ## Comment card hierarchy and progressive actions
 
 Date: 2026-07-28
