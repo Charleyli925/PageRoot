@@ -82,8 +82,13 @@ async function createPackagedFixture(t) {
           from: "PageRoot 用户声明与免责声明.txt",
           to: "PageRoot 用户声明与免责声明.txt",
         },
+        {
+          from: "output/release-metadata/usage-telemetry-config.json",
+          to: "usage-telemetry-config.json",
+        },
         { from: "LICENSE", to: "LICENSE" },
         { from: "NOTICE", to: "NOTICE" },
+        { from: "PRIVACY.md", to: "PRIVACY.md" },
         { from: "THIRD_PARTY_NOTICES.md", to: "THIRD_PARTY_NOTICES.md" },
       ],
     },
@@ -123,6 +128,7 @@ async function createPackagedFixture(t) {
     "desktop/qoder-handoff.mjs",
     "desktop/manual-update.mjs",
     "desktop/application-update.mjs",
+    "desktop/usage-telemetry.mjs",
     "public/brand-logo.png",
     "dist-desktop/renderer/index.html",
   ]) {
@@ -178,6 +184,7 @@ async function createPackagedFixture(t) {
     "PageRoot 用户声明与免责声明.txt",
     "LICENSE",
     "NOTICE",
+    "PRIVACY.md",
     "THIRD_PARTY_NOTICES.md",
   ]) {
     await writeFixtureFile(fixtureProductRoot, fileName, `fixture:${fileName}\n`);
@@ -210,6 +217,7 @@ async function createPackagedFixture(t) {
     "desktop/qoder-handoff.mjs",
     "desktop/manual-update.mjs",
     "desktop/application-update.mjs",
+    "desktop/usage-telemetry.mjs",
     "public/brand-logo.png",
     "package.json",
   ]) {
@@ -291,6 +299,22 @@ async function createPackagedFixture(t) {
       builtAt: "2026-07-23T00:00:00.000Z",
     }, null, 2)}\n`,
   );
+  const telemetryConfig = `${JSON.stringify({
+    version: 1,
+    enabled: true,
+    host: "https://us.i.posthog.com",
+    projectToken: "phc_pagerootsynthetic",
+  }, null, 2)}\n`;
+  await writeFixtureFile(
+    fixtureProductRoot,
+    "output/release-metadata/usage-telemetry-config.json",
+    telemetryConfig,
+  );
+  await writeFixtureFile(
+    resourcesPath,
+    "usage-telemetry-config.json",
+    telemetryConfig,
+  );
 
   return { appPath, fixtureProductRoot, packageJson, resourcesPath };
 }
@@ -348,6 +372,11 @@ test("release commands use one automated artifact lane with full tests and packa
     "electron-builder must never publish before PageRoot verifies the complete release asset set",
   );
   assert.ok(packageJson.build.extraResources.some((entry) => entry.to === "build-info.json"));
+  assert.ok(
+    packageJson.build.extraResources.some(
+      (entry) => entry.to === "usage-telemetry-config.json",
+    ),
+  );
   assert.match(packageJson.scripts["verify:packaged"], /verify-packaged-artifact\.mjs/);
   assert.match(verifier, /codesign/);
   assert.match(verifier, /hdiutil/);
@@ -522,9 +551,10 @@ test("the app-bundle gate compares app.asar, Bridge scripts, schemas and plist v
     verifySignature: false,
   });
   assert.equal(result.version, "0.7.0");
-  assert.equal(result.asarFileCount, 16);
+  assert.equal(result.asarFileCount, 17);
   assert.equal(result.schemaFileCount, 3);
-  assert.equal(result.legalResourceCount, 4);
+  assert.equal(result.legalResourceCount, 5);
+  assert.equal(result.telemetry.enabled, true);
   assert.equal(result.provenance.commitSha, "a".repeat(40));
 
   await writeFile(

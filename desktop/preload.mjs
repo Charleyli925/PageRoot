@@ -40,6 +40,9 @@ const updateChannels = Object.freeze({
   openLatestRelease: "html-updates:open-latest-release",
   openRepository: "html-updates:open-repository",
 });
+const usageChannels = Object.freeze({
+  capture: "html-usage:capture",
+});
 const PROJECT_IPC_PROTOCOL = "html-ai-project-result";
 const PROJECT_IPC_VERSION = 1;
 
@@ -259,8 +262,41 @@ const appLifecycleApi = Object.freeze({
   openUserNotice: () => invokeProject(appChannels.openUserNotice),
 });
 
+const usageApi = Object.freeze({
+  capture: (event, properties = {}, projectId) => {
+    if (
+      typeof event !== "string"
+      || event.length > 80
+      || !properties
+      || typeof properties !== "object"
+      || Array.isArray(properties)
+      || Object.keys(properties).length > 12
+      || Object.values(properties).some((value) => (
+        value !== null
+        && value !== undefined
+        && typeof value !== "string"
+        && typeof value !== "number"
+        && typeof value !== "boolean"
+      ))
+      || (
+        projectId !== undefined
+        && (
+          typeof projectId !== "string"
+          || !/^project_[A-Za-z0-9_-]{1,180}$/.test(projectId)
+        )
+      )
+    ) return;
+    ipcRenderer.send(usageChannels.capture, {
+      event,
+      properties: { ...properties },
+      ...(projectId ? { projectId } : {}),
+    });
+  },
+});
+
 contextBridge.exposeInMainWorld("htmlAIProjects", projectsApi);
 contextBridge.exposeInMainWorld("htmlAIIntegrations", integrationsApi);
 contextBridge.exposeInMainWorld("htmlAIUpdates", updatesApi);
 contextBridge.exposeInMainWorld("htmlAIRuntime", runtimeConfig);
 contextBridge.exposeInMainWorld("htmlAIAppLifecycle", appLifecycleApi);
+contextBridge.exposeInMainWorld("htmlAIUsage", usageApi);

@@ -24,6 +24,7 @@
   · <a href="#english">English</a>
   · <a href="#chinese">中文</a>
   · <a href="docs/ARCHITECTURE.md">Architecture</a>
+  · <a href="PRIVACY.md">Usage data</a>
   · <a href="https://github.com/Charleyli925/PageRoot/issues/new/choose">Report an issue</a>
 </p>
 
@@ -98,6 +99,7 @@ The current HTML bytes are authoritative. Preview DOM is disposable and is never
 - Current desktop interface: Simplified Chinese
 - Current builds use ad-hoc signing and are not Apple-notarized. On first launch, Control-click PageRoot and choose **Open** if macOS blocks it.
 - Verify the DMG with the release’s `SHA256SUMS.txt`. Every official release also includes `update-manifest.json` and `build-info.json` for version and source provenance.
+- Packaged desktop builds send limited allowlisted usage and fault statistics by default. They do not send HTML, comments, attachments, filenames, paths, clipboard contents, Mac serial numbers, or raw errors. See the [usage data notice](PRIVACY.md).
 
 <a id="chinese"></a>
 
@@ -158,6 +160,7 @@ The current HTML bytes are authoritative. Preview DOM is disposable and is never
 - 当前桌面界面语言：简体中文
 - 当前构建使用 ad-hoc 签名，尚未完成 Apple 公证。首次启动如被 macOS 拦截，请按住 Control 点击 PageRoot，然后选择“打开”。
 - 可使用 Release 中的 `SHA256SUMS.txt` 校验 DMG；正式 Release 还包含 `update-manifest.json` 与 `build-info.json`，用于核对版本和源码来源。
+- 正式桌面版本默认回传有限、白名单化的使用与故障统计，不回传 HTML、评论、附件、文件名/路径、剪贴板、电脑序列号或原始错误。详见[使用数据说明](PRIVACY.md)。
 
 ## Build and contribute / 开发与贡献
 
@@ -190,9 +193,9 @@ npm run gate:release:auto  # full clean-source release gate
 npm run release:mac        # build and verify the arm64 DMG
 ```
 
-Release and artifact gates accept only committed, clean source trees. See the [development guide](docs/DEVELOPMENT.md), [test strategy](tests/TEST_STRATEGY.md), and [release guide](docs/RELEASING.md).
+Release and artifact gates accept only committed, clean source trees. See the [development guide](docs/DEVELOPMENT.md), [test strategy](tests/TEST_STRATEGY.md), [usage telemetry operations](docs/USAGE_TELEMETRY.md), and [release guide](docs/RELEASING.md).
 
-发布与安装包门禁只接受已经提交且工作区干净的源码。详见[开发指南](docs/DEVELOPMENT.md)、[测试策略](tests/TEST_STRATEGY.md)和[发布指南](docs/RELEASING.md)。
+发布与安装包门禁只接受已经提交且工作区干净的源码。详见[开发指南](docs/DEVELOPMENT.md)、[测试策略](tests/TEST_STRATEGY.md)、[使用数据运维说明](docs/USAGE_TELEMETRY.md)和[发布指南](docs/RELEASING.md)。
 
 ### Repository map / 仓库结构
 
@@ -212,9 +215,9 @@ The public `main` branch is the canonical source. Task branches are temporary wo
 
 公开仓库的 `main` 分支是项目源码的唯一真相。任务分支只是临时工作面；DMG、`.app`、`release/` 和 `output/` 都是可重新生成的产物，不是源码。
 
-Before contributing, read [CONTRIBUTING.md](CONTRIBUTING.md), the [Code of Conduct](CODE_OF_CONDUCT.md), and the [public-source boundary](docs/OPEN_SOURCE_BOUNDARY.md). Report security issues privately through [SECURITY.md](SECURITY.md), not through a public Issue.
+Before contributing, read [CONTRIBUTING.md](CONTRIBUTING.md), the [Code of Conduct](CODE_OF_CONDUCT.md), the [usage data notice](PRIVACY.md), and the [public-source boundary](docs/OPEN_SOURCE_BOUNDARY.md). Report security issues privately through [SECURITY.md](SECURITY.md), not through a public Issue.
 
-参与贡献前，请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)、[行为准则](CODE_OF_CONDUCT.md)与[公开源码边界](docs/OPEN_SOURCE_BOUNDARY.md)。安全问题请按 [SECURITY.md](SECURITY.md) 私下报告，不要提交公开 Issue。
+参与贡献前，请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)、[行为准则](CODE_OF_CONDUCT.md)、[使用数据说明](PRIVACY.md)与[公开源码边界](docs/OPEN_SOURCE_BOUNDARY.md)。安全问题请按 [SECURITY.md](SECURITY.md) 私下报告，不要提交公开 Issue。
 
 ## License / 许可证
 

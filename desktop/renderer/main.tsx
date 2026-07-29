@@ -1,6 +1,10 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import Home from "../../app/page";
+import {
+  captureUsageEvent,
+  usageFingerprint,
+} from "../../app/application/usage-telemetry";
 import "../../app/globals.css";
 
 type PrepareCloseRequest = {
@@ -51,6 +55,22 @@ declare global {
 
 const PREPARE_CLOSE_EVENT = "html-ai:prepare-close";
 const CLOSE_ABORTED_EVENT = "html-ai:close-aborted";
+
+window.addEventListener("error", (event) => {
+  captureUsageEvent("renderer_fault", {
+    kind: "window_error",
+    fingerprint: usageFingerprint(event.error || event.message),
+    fatal: false,
+  });
+});
+
+window.addEventListener("unhandledrejection", (event) => {
+  captureUsageEvent("renderer_fault", {
+    kind: "unhandled_rejection",
+    fingerprint: usageFingerprint(event.reason),
+    fatal: false,
+  });
+});
 
 window.htmlAIAppLifecycle?.onCloseAborted((request) => {
   window.dispatchEvent(new CustomEvent<CloseAbortedRequest>(CLOSE_ABORTED_EVENT, {
@@ -109,7 +129,35 @@ if (!root) {
   throw new Error("Desktop renderer root is missing.");
 }
 
-createRoot(root).render(
+createRoot(root, {
+  onCaughtError(error, errorInfo) {
+    captureUsageEvent("renderer_fault", {
+      kind: "react_caught",
+      fingerprint: usageFingerprint(
+        `${usageFingerprint(error)}\n${errorInfo.componentStack || ""}`,
+      ),
+      fatal: false,
+    });
+  },
+  onRecoverableError(error, errorInfo) {
+    captureUsageEvent("renderer_fault", {
+      kind: "react_recoverable",
+      fingerprint: usageFingerprint(
+        `${usageFingerprint(error)}\n${errorInfo.componentStack || ""}`,
+      ),
+      fatal: false,
+    });
+  },
+  onUncaughtError(error, errorInfo) {
+    captureUsageEvent("renderer_fault", {
+      kind: "react_uncaught",
+      fingerprint: usageFingerprint(
+        `${usageFingerprint(error)}\n${errorInfo.componentStack || ""}`,
+      ),
+      fatal: true,
+    });
+  },
+}).render(
   <React.StrictMode>
     <Home />
   </React.StrictMode>,

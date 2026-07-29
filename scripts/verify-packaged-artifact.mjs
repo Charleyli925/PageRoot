@@ -60,6 +60,7 @@ const REQUIRED_LEGAL_RESOURCES = [
   "PageRoot 用户声明与免责声明.txt",
   "LICENSE",
   "NOTICE",
+  "PRIVACY.md",
   "THIRD_PARTY_NOTICES.md",
 ];
 const EXPECTED_MAC_TEAM_ID = "RNK9RB969G";
@@ -77,6 +78,7 @@ const REQUIRED_APP_SOURCE_FILES = [
   "desktop/qoder-handoff.mjs",
   "desktop/manual-update.mjs",
   "desktop/application-update.mjs",
+  "desktop/usage-telemetry.mjs",
   "public/brand-logo.png",
 ];
 const RETIRED_EDITOR_ARTIFACTS = [
@@ -297,6 +299,41 @@ async function assertSchemaBundleMatches({
   return packagedFiles;
 }
 
+async function assertUsageTelemetryConfig({
+  productRoot,
+  resourcesPath,
+  packageJson,
+}) {
+  const telemetryResource = packageJson.build?.extraResources?.find(
+    (entry) => entry?.to === "usage-telemetry-config.json",
+  );
+  assert.equal(
+    telemetryResource?.from,
+    "output/release-metadata/usage-telemetry-config.json",
+    "the packaged telemetry config must come from release metadata",
+  );
+  const sourcePath = path.resolve(productRoot, telemetryResource.from);
+  const packagedPath = path.join(resourcesPath, "usage-telemetry-config.json");
+  await assertFilesEqual(sourcePath, packagedPath, "usage-telemetry-config.json");
+  const config = JSON.parse(await readFile(packagedPath, "utf8"));
+  assert.equal(config.version, 1, "telemetry config schema is unsupported");
+  assert.equal(typeof config.enabled, "boolean", "telemetry enabled must be boolean");
+  assert.match(config.host ?? "", /^https:\/\/[^/]+$/u, "telemetry host is not an HTTPS origin");
+  if (config.enabled) {
+    assert.match(
+      config.projectToken ?? "",
+      /^phc_[A-Za-z0-9_-]{12,256}$/u,
+      "telemetry config does not contain a public PostHog Project token",
+    );
+  } else {
+    assert.equal(config.projectToken, "", "disabled telemetry must not carry a token");
+  }
+  if (process.env.PAGEROOT_REQUIRE_TELEMETRY_CONFIG === "1") {
+    assert.equal(config.enabled, true, "release telemetry configuration is disabled");
+  }
+  return config;
+}
+
 function commandExists(commandPath) {
   return existsSync(commandPath);
 }
@@ -492,6 +529,11 @@ export async function verifyAppBundle({
       ...(expectedProvenance || {}),
     },
   );
+  const telemetry = await assertUsageTelemetryConfig({
+    productRoot,
+    resourcesPath,
+    packageJson,
+  });
   for (const fileName of REQUIRED_LEGAL_RESOURCES) {
     await assertFilesEqual(
       path.join(productRoot, fileName),
@@ -556,6 +598,7 @@ export async function verifyAppBundle({
     schemaFileCount: schemas.length,
     legalResourceCount: REQUIRED_LEGAL_RESOURCES.length,
     provenance,
+    telemetry,
   };
 }
 

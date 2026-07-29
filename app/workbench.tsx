@@ -99,6 +99,13 @@ import {
   type RuntimeCapabilities,
 } from "./application/runtime-capabilities.js";
 import {
+  captureUsageEvent,
+  countBucket,
+  editPropertyGroup,
+  noticeUsageCode,
+  usageFingerprint,
+} from "./application/usage-telemetry";
+import {
   createDraftOperationId,
   isDraftOperationId,
   rebaseDraftMutation,
@@ -1742,6 +1749,11 @@ export default function Workbench() {
   const resolvingRunsRef = useRef<Set<string>>(new Set());
   const statusPollBusyRef = useRef<Set<string>>(new Set());
   const toastRef = useRef<Toast>(null);
+  const previousPersistStateRef = useRef(new Map<string, PersistState>());
+  const previousRunStateRef = useRef(
+    new Map<string, LifecycleState | "none">(),
+  );
+  const interruptionPresenceRef = useRef(new Map<string, boolean>());
   const pendingReconcileBusyRef = useRef(false);
   const relinkingTargetRef = useRef<string | null>(null);
   const relinkSelectionArmedRef = useRef(false);
@@ -1859,10 +1871,152 @@ export default function Workbench() {
   const noticeTimerPaused = Boolean(
     noticeIdentity && pausedNoticeIdentity === noticeIdentity,
   );
+  const reportInterruptionPresence = useCallback((
+    interruptionCode: string,
+    present: boolean,
+    surface: "canvas" | "global" | "native" | "panel",
+    resolvedResult: "dismissed" | "recovered" = "recovered",
+    eventProjectId?: string,
+    localScope?: string,
+  ) => {
+    const identity = `${localScope || eventProjectId || "global"}:${interruptionCode}`;
+    const previous = interruptionPresenceRef.current.get(identity) || false;
+    if (previous === present) return;
+    interruptionPresenceRef.current.set(identity, present);
+    captureUsageEvent("interruption_changed", {
+      interruption_code: interruptionCode,
+      phase: present ? "started" : "resolved",
+      result: present ? "unknown" : resolvedResult,
+      surface,
+    }, eventProjectId);
+  }, []);
 
   useEffect(() => {
     toastRef.current = toast;
   }, [toast]);
+
+  useEffect(() => {
+    if (!sourcePath) return;
+    captureUsageEvent("project_context_opened", {
+      registered: Boolean(projectId),
+      view_mode: viewMode,
+    }, projectId || undefined);
+  }, [projectId, sourcePath, viewMode]);
+
+  useEffect(() => {
+    if (drawer) {
+      captureUsageEvent("module_viewed", {
+        module: drawer === "files" ? "project_files" : drawer,
+      }, projectId || undefined);
+    }
+  }, [drawer, projectId]);
+
+  useEffect(() => {
+    captureUsageEvent("module_viewed", {
+      module: canvasMode === "preview" ? "canvas_preview" : "canvas_edit",
+    }, projectId || undefined);
+  }, [canvasMode, projectId]);
+
+  useEffect(() => {
+    if (aboutOpen) {
+      captureUsageEvent("module_viewed", { module: "about" }, projectId || undefined);
+    }
+  }, [aboutOpen, projectId]);
+
+  useEffect(() => {
+    if (fileView?.path === "PROJECT.md") {
+      captureUsageEvent(
+        "module_viewed",
+        { module: "project_rules" },
+        projectId || undefined,
+      );
+    }
+  }, [fileView?.path, projectId]);
+
+  useEffect(() => {
+    const localScope = projectId || usageFingerprint(sourcePath || "unregistered");
+    const previous = previousPersistStateRef.current.get(localScope);
+    previousPersistStateRef.current.set(localScope, persistState);
+    if (previous && previous !== persistState) {
+      captureUsageEvent("source_persistence_changed", {
+        from_state: previous,
+        to_state: persistState,
+      }, projectId || undefined);
+    }
+    reportInterruptionPresence(
+      "source_conflict",
+      persistState === "conflict",
+      "canvas",
+      "recovered",
+      projectId || undefined,
+      localScope,
+    );
+  }, [persistState, projectId, reportInterruptionPresence, sourcePath]);
+
+  useEffect(() => {
+    const nextState = activeRun?.status || "none";
+    const eventProjectId = activeRun?.projectId || projectId || undefined;
+    const localScope = eventProjectId || usageFingerprint(sourcePath || "unregistered");
+    const previous = previousRunStateRef.current.get(localScope);
+    previousRunStateRef.current.set(localScope, nextState);
+    if (previous && previous !== nextState) {
+      captureUsageEvent("ai_run_state_changed", {
+        from_state: previous,
+        to_state: nextState,
+        comment_count: countBucket(activeRun?.commentCount || 0),
+        edit_count: countBucket(activeRun?.changeEventCount || 0),
+      }, eventProjectId);
+    }
+    reportInterruptionPresence(
+      "ai_conflict_resolution",
+      nextState === "awaiting-conflict-resolution",
+      "panel",
+      "recovered",
+      eventProjectId,
+      localScope,
+    );
+  }, [activeRun, projectId, reportInterruptionPresence, sourcePath]);
+
+  useEffect(() => {
+    reportInterruptionPresence(
+      "workspace_unavailable",
+      Boolean(workspaceIssue),
+      "global",
+    );
+  }, [reportInterruptionPresence, workspaceIssue]);
+
+  useEffect(() => {
+    reportInterruptionPresence(
+      "startup_recovery",
+      Boolean(startupIssue),
+      "global",
+    );
+  }, [reportInterruptionPresence, startupIssue]);
+
+  useEffect(() => {
+    reportInterruptionPresence(
+      "project_load_failure",
+      Boolean(projectLoadError),
+      "canvas",
+      "recovered",
+      projectId || undefined,
+      projectId || usageFingerprint(sourcePath || "unregistered"),
+    );
+  }, [
+    projectId,
+    projectLoadError,
+    reportInterruptionPresence,
+    sourcePath,
+  ]);
+
+  useEffect(() => {
+    reportInterruptionPresence(
+      "update_restart_confirmation",
+      restartUpdateOpen,
+      "panel",
+      "dismissed",
+    );
+  }, [reportInterruptionPresence, restartUpdateOpen]);
 
   useEffect(() => {
     const updates = window.htmlAIUpdates;
@@ -3052,6 +3206,12 @@ export default function Workbench() {
       auditPendingRef.current = nextEvents.pendingEvents;
       setChangeEvents(nextEvents.events);
       persistCurrentDraftRecovery(commentsRef.current, nextEvents.events);
+      captureUsageEvent("direct_edit_committed", {
+        edit_kind: mutation.kind,
+        property_group: mutation.kind === "text"
+          ? "text"
+          : editPropertyGroup(mutation.property),
+      }, projectIdRef.current || undefined);
     }
 
     if (!sourcePathRef.current) {
@@ -4269,7 +4429,14 @@ export default function Workbench() {
     if (noticeTimerPaused) return;
     const dismissAfter = noticeAutoDismissMs(toast);
     if (dismissAfter === null) return;
-    const timeout = window.setTimeout(() => setToast(null), dismissAfter);
+    const timeout = window.setTimeout(() => {
+      captureUsageEvent("notification_interacted", {
+        notice_code: noticeUsageCode(toast.dedupeKey),
+        interaction: "auto-dismiss",
+        surface: "global",
+      }, projectIdRef.current || undefined);
+      setToast(null);
+    }, dismissAfter);
     return () => window.clearTimeout(timeout);
   }, [noticeTimerPaused, toast]);
 
@@ -6650,6 +6817,15 @@ export default function Workbench() {
     updateFocusedComment(commentId);
     persistCurrentDraftRecovery(nextComments);
     queueReviewPairReveal(commentTarget, commentId);
+    captureUsageEvent("comment_saved", {
+      target_level: commentTarget.level === "insertion"
+        ? "insertion"
+        : commentTarget.level === "part" ? "part" : "module",
+      has_text: Boolean(currentText),
+      attachment_count: countBucket(currentAttachments.length),
+      has_image: currentAttachments.some((attachment) => attachment.kind === "image"),
+      has_file: currentAttachments.some((attachment) => attachment.kind === "file"),
+    }, projectIdRef.current || undefined);
   }, [
     currentBasedOnVersionId,
     draft,
@@ -9424,6 +9600,8 @@ export default function Workbench() {
                     }
                   }}
                   reloadActionLabel={sourcePath ? "重新载入" : "重新选择"}
+                  usageProjectId={projectId || undefined}
+                  usageCapture={captureUsageEvent}
                   commentedTargets={commentedTargets}
                   trackedTargets={trackedAuditTargets}
                   locked={
@@ -10735,6 +10913,11 @@ export default function Workbench() {
           actionLabel={toast.action?.label}
           onAction={toast.action ? handleToastAction : undefined}
           onDismiss={() => setToast(null)}
+          usageCode={noticeUsageCode(toast.dedupeKey)}
+          usageDisposition={toast.disposition || "inform-in-place"}
+          usageSurface="global"
+          usageProjectId={projectId || undefined}
+          usageCapture={captureUsageEvent}
           onPauseChange={(paused) => {
             setPausedNoticeIdentity(paused ? noticeIdentity : null);
           }}

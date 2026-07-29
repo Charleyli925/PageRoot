@@ -24,7 +24,7 @@ Comments + frozen input
   asynchronous outcome and drain contract. `docs/STATE_OWNERSHIP.md` names the
   sole owner of each mutable fact.
 - `app/` owns the visual workbench, source mapping and direct-edit transaction model.
-- `desktop/` owns privileged filesystem access, windows, lifecycle, update checks and safe IPC exposure.
+- `desktop/` owns privileged filesystem access, windows, lifecycle, update checks, usage telemetry and safe IPC exposure.
 - `scripts/` owns the local Bridge, protocol finalization, scope validation and automated gates.
 - `schemas/` defines persisted and exchanged records. `fixtures/` proves strict current and legacy behavior.
 - Preview DOM is disposable. It is never a persistence source.
@@ -50,6 +50,7 @@ protocols.
 | Crash-only browser recovery | `app/application/recovery-store.js` |
 | Renderer, project-picker and attachment capabilities | `app/application/runtime-capabilities.js` |
 | Same-directory source rename, operation journal and active/recent path rebase | `desktop/source-rename.mjs` |
+| Pseudonymous identity, strict event schemas, local queue and PostHog delivery | `desktop/usage-telemetry.mjs` |
 | Preview sanitization and verified frame injection | `app/components/html-preview-sandbox.js` |
 | Run lifecycle decoding and transition policy | `app/domain/run-lifecycle.js` |
 
@@ -124,9 +125,19 @@ authority. Restart installation is a second explicit intent that reuses the
 same Electron drain coordinator before invoking the signed updater. Ordinary
 app quit never installs a pending update.
 
+The main-process usage-telemetry controller is the sole owner of analytics
+identity, filtering, persistence and delivery. A narrow preload channel accepts
+only renderer intent; the main process drops every event or property outside
+the exact allowlist. One random installation UUID and one installation-local
+HMAC secret persist in `usage-telemetry.json`; every launch gets a new session
+UUID, and raw project IDs are converted to installation-specific pseudonyms
+before entering the queue. Direct edits and successful saves are aggregated,
+then all events use a bounded queue and batched best-effort delivery. Telemetry
+never participates in editor authority or close/navigation drains.
+
 ## Trust model
 
-The renderer is sandboxed with context isolation and no Node integration. The preload exposes narrow validated IPC methods. The Bridge uses a per-process authentication token and only operates on managed project paths. AI output is untrusted until protocol, identity, Hash, path and HTML checks succeed. Scope validation remains strict evidence: managed metadata, scripts and unresolved targets hard-stop; ordinary out-of-target content/style findings are persisted as `observed` audit records and do not create a separate user-waiver state.
+The renderer is sandboxed with context isolation and no Node integration. The preload exposes narrow validated IPC methods. The Bridge uses a per-process authentication token and only operates on managed project paths. AI output is untrusted until protocol, identity, Hash, path and HTML checks succeed. Scope validation remains strict evidence: managed metadata, scripts and unresolved targets hard-stop; ordinary out-of-target content/style findings are persisted as `observed` audit records and do not create a separate user-waiver state. Telemetry schemas have no fields for HTML, user text, attachments, clipboard data, filenames, paths, raw exceptions, account identity or hardware identity.
 
 Every renderer request to the Bridge is bounded: ordinary state/file operations use 15 seconds, attachments use 30 seconds, and Request creation uses 60 seconds. Busy refs are released in `finally`, so an unresponsive local service cannot leave a permanent UI lock. An unknown Request POST outcome remains fail-closed and is reconciled against the durable workspace state before editing resumes.
 

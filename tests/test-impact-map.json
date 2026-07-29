@@ -319,6 +319,25 @@
       ]
     },
     {
+      "id": "usage-telemetry",
+      "patterns": [
+        "^desktop/usage-telemetry\\.mjs$",
+        "^app/application/usage-telemetry\\.ts$",
+        "^tests/usage-telemetry\\.test\\.mjs$",
+        "^docs/decisions/0006-pseudonymous-usage-telemetry\\.md$",
+        "^docs/USAGE_TELEMETRY\\.md$",
+        "^PRIVACY\\.md$"
+      ],
+      "suites": ["typecheck"],
+      "nodeTests": [
+        "tests/usage-telemetry.test.mjs",
+        "tests/desktop-preload-ipc.test.mjs",
+        "tests/desktop-package.test.mjs",
+        "tests/notification-ui.test.mjs",
+        "tests/workbench-shell-ux.test.mjs"
+      ]
+    },
+    {
       "id": "desktop-runtime",
       "patterns": ["^desktop/.*\\.(?:mjs|tsx|ts|html)$"],
       "suites": ["electron-smoke"],
@@ -330,7 +349,8 @@
         "tests/source-rename.test.mjs",
         "tests/bridge-shutdown.test.mjs",
         "tests/export-copy.test.mjs",
-        "tests/desktop-package.test.mjs"
+        "tests/desktop-package.test.mjs",
+        "tests/usage-telemetry.test.mjs"
       ]
     },
     {
@@ -392,7 +412,8 @@
         "tests/desktop-package.test.mjs",
         "tests/packaged-artifact-gate.test.mjs",
         "tests/release-provenance.test.mjs",
-        "tests/source-gate-provenance.test.mjs"
+        "tests/source-gate-provenance.test.mjs",
+        "tests/usage-telemetry.test.mjs"
       ]
     },
     {

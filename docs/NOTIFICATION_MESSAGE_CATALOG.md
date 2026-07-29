@@ -22,6 +22,12 @@
 
 ## 2. 统计口径
 
+源页只回传提醒的稳定编号、tone、disposition、surface、是否有操作按钮
+以及 action/dismiss/auto-dismiss 结果；不会回传标题、正文、动态路径、
+文件名或错误消息。Canvas 编辑受阻使用 `canvas_c01` 至 `canvas_c12`
+范围内的稳定原因码，未进入台账的动态消息统一降为 `uncatalogued`。
+提醒统计只用于判断哪些流程真正打断用户，不改变本台账的显示准入规则。
+
 ### 2.1 本文包含什么
 
 - Canvas 顶部的全局 `NoticeBar`。

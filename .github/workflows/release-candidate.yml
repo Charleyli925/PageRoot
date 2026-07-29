@@ -64,8 +64,9 @@ jobs:
           CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          PAGEROOT_POSTHOG_TOKEN: ${{ secrets.PAGEROOT_POSTHOG_TOKEN }}
         run: |
-          for name in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD; do
+          for name in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD PAGEROOT_POSTHOG_TOKEN; do
             test -n "${!name}" || {
               echo "Required release credential is not configured: $name" >&2
               exit 1
@@ -87,6 +88,9 @@ jobs:
           PAGEROOT_SOURCE_GATE_TREE: ${{ steps.source-gate.outputs.tree_sha }}
           PAGEROOT_SOURCE_GATE_VERSION: ${{ steps.source-gate.outputs.package_version }}
           PAGEROOT_REQUIRE_NOTARIZATION: "1"
+          PAGEROOT_REQUIRE_TELEMETRY_CONFIG: "1"
+          PAGEROOT_POSTHOG_TOKEN: ${{ secrets.PAGEROOT_POSTHOG_TOKEN }}
+          PAGEROOT_POSTHOG_HOST: "https://us.i.posthog.com"
           CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}

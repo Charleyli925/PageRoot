@@ -10,6 +10,9 @@ Notable user-visible changes are documented here. This project follows Semantic 
 - Added concise AI Agent collaboration positioning to About PageRoot, replaced
   its duplicate update-schedule footer with a fixed local user notice entry,
   and packaged the complete statement and disclaimer with the macOS app.
+- Added default-on, pseudonymous product telemetry for module use, project
+  flows, edits, saves, faults, notifications and interruptions, with a strict
+  no-content allowlist, local batching and an in-product usage-data notice.
 - Redesigned the four-stage Qoder handoff flow with aligned numbered cards,
   stage-specific icons and explicit status pills, while moving the divider-free
   footer actions closer to the content.

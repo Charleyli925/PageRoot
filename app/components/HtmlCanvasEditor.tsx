@@ -52,7 +52,7 @@ import {
   sameNativeLayout,
   sameNativeTextStyle,
 } from "./native-edit-runtime-preflight";
-import NoticeBar from "./NoticeBar";
+import NoticeBar, { type NoticeUsageCapture } from "./NoticeBar";
 import {
   EDITOR_STYLE_ATTRIBUTE,
   FRAME_VERIFICATION_ATTRIBUTE,
@@ -286,6 +286,9 @@ export type HtmlCanvasEditorProps = {
   reloadActionLabel?: string;
   /** Reports a fail-closed edit whose source target could not be patched safely. */
   onEditBlocked?: (message: string) => void;
+  /** Project identity is used only by the main process to derive a local pseudonymous key. */
+  usageProjectId?: string;
+  usageCapture?: NoticeUsageCapture;
   /** Optional base URL for relative assets. The injected base element is not included in serialized output. */
   baseHref?: string;
   /** Absolute path or file URL of the source HTML. Used to derive baseHref when baseHref is absent. */
@@ -467,6 +470,7 @@ type NativeEditCommitResult = {
 };
 
 type EditFeedback = {
+  code: string;
   title: string;
   message: string;
   tone: "warning" | "error";
@@ -1839,6 +1843,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     onRequestReload,
     reloadActionLabel = "重新载入",
     onEditBlocked,
+    usageProjectId,
+    usageCapture,
     baseHref,
     sourcePath,
     className,
@@ -2086,6 +2092,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       void cause;
       const message = "页面仍可正常浏览。请重新载入后再试，或添加评论说明要改什么。";
       setEditFeedback({
+        code: "canvas_c01_source_map",
         title: "暂时不能直接编辑这个页面",
         message,
         tone: "error",
@@ -2771,31 +2778,40 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     );
     let title = "这处内容暂时不能直接编辑";
     let message = "页面内容没有改变。你仍可以选择文字，或添加评论说明要怎么改。";
+    let code = "canvas_c02_edit_blocked";
     if (/两种样式的边界|文字属于哪一侧|样式内一个字的位置/iu.test(rawDetail)) {
+      code = "canvas_c03_style_boundary";
       title = "请把光标移入文字内部";
       message = "这里正好是两种文字样式的边界，直接输入可能跑到错误一侧。请把光标移到样式内一个字的位置后输入，或添加评论。";
     } else if (/空的排版元素|输入可能跑到错误位置/iu.test(rawDetail)) {
+      code = "canvas_c04_empty_formatting";
       title = "这里暂时不能直接改字";
       message = "这段文字旁有一个空的排版元素，直接输入可能跑到错误位置。你仍可以选中文字，或添加评论交给 AI 处理。";
     } else if (
       /复杂网页结构|暂不支持直接改字|source structure|structural command/iu.test(rawDetail)
     ) {
+      code = "canvas_c05_complex_structure";
       title = "这里暂时不能直接改字";
       message = "这段内容里有需要保留的网页结构。你仍可以选中文字，或添加评论交给 AI 处理。";
     } else if (/transform|zoom|多栏|flex|grid|布局|盒子|光标错位|间距变化/iu.test(rawDetail)) {
+      code = "canvas_c06_special_layout";
       title = "这里暂时不能直接改字";
       message = "这段文字的排版比较特殊。你仍可以选中文字调整样式，或添加评论交给 AI 处理。";
     } else if (/图片|图标|嵌入组件|结构边界|删除键|退格/iu.test(rawDetail)) {
+      code = "canvas_c09_structure_delete";
       title = "这处内容不能这样删除";
       message = "请只修改文字，或添加评论说明要删除的图片、图标或组件。";
     } else if (/输入法|输入事件|输入过程中|浏览器没有完成这次输入|候选/iu.test(rawDetail)) {
+      code = "canvas_c10_ime_incomplete";
       title = "已恢复输入前的文字";
       message = "输入法没有完整确认这次输入。请点回文字后重新输入；如果仍然失败，可以选中文字添加评论。";
     } else if (/源码地图|源码节点|目标|定位|映射|漂移|唯一静态文字/iu.test(rawDetail)) {
+      code = "canvas_c11_target_drift";
       title = "请重新选择这段文字";
       message = "页面内容可能刚刚发生了变化。请再点一次要修改的文字，或添加评论。";
     }
     setEditFeedback({
+      code,
       title,
       message,
       tone: "warning",
@@ -4468,6 +4484,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
 
   const showCommitBlocked = useCallback((reason?: string) => {
     setEditFeedback({
+      code: "canvas_c12_edit_in_progress",
       title: "当前文字还在处理中",
       message: reason
         || "请点回文字完成输入；已输入的内容仍保留在画布中。",
@@ -5486,6 +5503,13 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           onDismiss={() => setEditFeedback(null)}
           onPauseChange={setEditFeedbackPaused}
           dismissLabel="关闭修改提示"
+          usageCode={editFeedback.code}
+          usageDisposition={editFeedback.recovery === "none"
+            ? "inform-in-place"
+            : "direct-action"}
+          usageSurface="canvas"
+          usageProjectId={usageProjectId}
+          usageCapture={usageCapture}
         />
       ) : null}
 

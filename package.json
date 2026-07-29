@@ -146,6 +146,7 @@
       "desktop/qoder-handoff.mjs",
       "desktop/manual-update.mjs",
       "desktop/application-update.mjs",
+      "desktop/usage-telemetry.mjs",
       "public/brand-logo.png",
       "dist-desktop/renderer/**/*",
       "package.json",
@@ -358,8 +359,16 @@
         "to": "PageRoot 用户声明与免责声明.txt"
       },
       {
+        "from": "output/release-metadata/usage-telemetry-config.json",
+        "to": "usage-telemetry-config.json"
+      },
+      {
         "from": "LICENSE",
         "to": "LICENSE"
+      },
+      {
+        "from": "PRIVACY.md",
+        "to": "PRIVACY.md"
       },
       {
         "from": "NOTICE",
