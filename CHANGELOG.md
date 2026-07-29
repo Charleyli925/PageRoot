@@ -10,6 +10,13 @@ Notable user-visible changes are documented here. This project follows Semantic 
 - Make “Edit” return to the source-backed Tab selected in preview while keeping
   the normal script-disabled editable-island canvas, source bytes and existing
   native-action interception authoritative.
+- Keep script-rendered Canvas charts and dynamic table rows visible in Edit as
+  bounded, non-editable projections without copying them into source HTML.
+- Keep current-tab comments aligned with the Canvas, fold other-tab comments
+  into the comment header, and place an existing unsaved-comment recovery card
+  without overlapping saved comments.
+- Allow direct text edits beside preserved nested lists and `<wbr>` boundaries
+  while keeping those authored structures byte-safe and non-editable.
 
 ## [0.9.4] - 2026-07-29
 

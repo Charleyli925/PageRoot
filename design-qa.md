@@ -704,8 +704,8 @@ final result: passed
 ## Comparison target
 
 - Source visual truth:
-  - `/tmp/codex-remote-attachments/019fad88-a910-73c0-8840-414499126a83/300F605D-B05A-41EF-A242-B571A8BCA3D3/1-Photo-1.jpg`
-  - `/tmp/codex-remote-attachments/019fad88-a910-73c0-8840-414499126a83/300F605D-B05A-41EF-A242-B571A8BCA3D3/2-Photo-2.jpg`
+  - `1-Photo-1.jpg` — user-provided, local-only Figma review capture.
+  - `2-Photo-2.jpg` — user-provided, local-only Figma review capture.
 - Superseding product direction: keep the existing saved-comment and unsaved-recovery card visuals unchanged; fix their positions only. Move other-tab summaries into the comment header, collapsed by default, with a compact expanded state.
 - Rendered implementation:
   - `output/playwright/native-dom-browser/results/native-dom-comment-tabs-co-bf6b9-der-and-avoid-draft-overlap/comment-rail-folded.png`
