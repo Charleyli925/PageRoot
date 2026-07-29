@@ -4,6 +4,17 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+## [0.9.4] - 2026-07-29
+
+- Increased the workbench header height and bottom breathing room so the
+  two-line file summary and all primary actions remain inside the title bar.
+- Added compact filename actions for opening another local HTML and opening
+  the current known HTML in the system default browser, with small hover and
+  keyboard-focus tooltips that do not change header geometry.
+- Made default-browser launch wait for the exact current edit revision to be
+  safely written, and added fail-closed executable coverage for malformed,
+  unknown, unsafe and unauthorized launch requests.
+
 ## [0.9.3] - 2026-07-29
 
 - Added an always-visible, bolder plus action beside the current filename that
@@ -150,7 +161,8 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 - Published the first public macOS release in this repository under the earlier YuanYe artifact name.
 
-[Unreleased]: https://github.com/Charleyli925/PageRoot/compare/v0.9.3...HEAD
+[Unreleased]: https://github.com/Charleyli925/PageRoot/compare/v0.9.4...HEAD
+[0.9.4]: https://github.com/Charleyli925/PageRoot/compare/v0.9.3...v0.9.4
 [0.9.3]: https://github.com/Charleyli925/PageRoot/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/Charleyli925/PageRoot/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/Charleyli925/PageRoot/compare/v0.9.0...v0.9.1

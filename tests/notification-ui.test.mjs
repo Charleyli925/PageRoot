@@ -181,6 +181,10 @@ test("exceptional notices are legible and their close action cannot wrap", () =>
   assert.match(noticeStyles, /backdrop-filter:\s*blur\(22px\)/);
   assert.match(
     noticeStyles,
+    /top:\s*calc\(var\(--notice-header-height,\s*88px\) \+ 12px\)/,
+  );
+  assert.match(
+    noticeStyles,
     /left:\s*calc\(\(100vw - var\(--notice-rail-width, 376px\)\) \/ 2\)/,
   );
   assert.doesNotMatch(styles, /\.toast/u);

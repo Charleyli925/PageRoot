@@ -51,7 +51,7 @@
 
 .viewport {
   position: fixed;
-  top: calc(var(--notice-header-height, 76px) + 12px);
+  top: calc(var(--notice-header-height, 88px) + 12px);
   left: calc((100vw - var(--notice-rail-width, 376px)) / 2);
   width: min(
     520px,

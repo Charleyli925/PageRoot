@@ -1,5 +1,125 @@
 # Design QA
 
+## Workbench header height and overflow
+
+Date: 2026-07-29
+
+Source visual truth:
+
+- `/var/folders/jx/w52403cs2hx39vwhd1sb3tg80000gn/T/codex-clipboard-974aae8e-4a7d-462d-a653-2e355f6f0802.png`
+  — user-provided macOS application capture showing the two-line file summary
+  and primary actions touching or crossing the old header divider.
+- The source attachment is local-only and remains outside the repository.
+- User direction: preserve the existing header hierarchy and styling while
+  adding enough height for every icon and label to remain inside the bar.
+- User follow-up direction: add a diagonal default-browser action beside the
+  filename plus action, give both icons concise upper-right hover hints, and
+  keep the already approved header height unchanged.
+
+Implementation evidence:
+
+- `output/design-qa/2026-07-29-header-height/implementation-cdp-full.png`
+- `output/design-qa/2026-07-29-header-height/implementation-compact-full.png`
+- `output/design-qa/2026-07-29-header-file-actions/implementation-wide-open-tooltip.png`
+- `output/design-qa/2026-07-29-header-file-actions/implementation-compact-browser-tooltip.png`
+
+Combined comparison inputs:
+
+- `output/design-qa/2026-07-29-header-height/comparison-source-vs-implementation.png`
+- `output/design-qa/2026-07-29-header-height/comparison-actions-focused.png`
+
+Viewport and normalization:
+
+- Source pixels: `2872 × 182`, representing a `1436 × 91` CSS-pixel Retina
+  application crop at 2× density.
+- Wide implementation: `2560 × 1440` pixels from a `1280 × 720` CSS viewport
+  at 2× density.
+- Compact implementation: `1800 × 1440` pixels from a `900 × 720` CSS
+  viewport at 2× density.
+- The full comparison keeps the source at its native pixels and centers the
+  implementation's top `2560 × 220` pixels in a same-width white comparison
+  frame. The focused comparison uses native-density right-action crops.
+- The source contains macOS traffic lights and a desktop project state. The
+  browser implementation omits native window chrome and uses the read-only
+  welcome project; those state differences are excluded from layout judgment.
+
+Full-view and focused comparison evidence:
+
+- The workbench header now measures exactly `88px`; the review stage begins at
+  `y = 88px`, so the shared grid row and header box remain synchronized.
+- Header padding computes to `30px 16px 12px 22px` at the wide viewport and
+  `30px 12px 12px 20px` at the compact breakpoint.
+- At both widths, every measured header descendant is inside the header.
+  The lowest elements are the file metadata and send button at
+  `y = 77.75px`, leaving `10.25px` before the divider.
+- The compact `900px` viewport keeps the complete title, quick-open action,
+  edit/preview group, project, global comment and send button within the
+  horizontal viewport; `scrollWidth` equals `clientWidth`.
+- The two filename actions form one fixed `57 × 28px` group. A synthetic long
+  filename shrinks to `161px` with ellipsis at the compact viewport while the
+  complete action group remains inside its `220px` title row.
+- Both tooltip boxes are absolutely positioned and therefore do not change the
+  title row or header box. The longer browser tooltip measures about
+  `107 × 24px`, remains fully inside the viewport, and starts at `y = 2px`
+  rather than clipping against the top edge.
+- The focused right-action comparison shows the intentional new bottom
+  breathing room while retaining the existing control order, spacing, radii,
+  icon scale and visual hierarchy.
+
+Findings:
+
+- No actionable P0, P1 or P2 mismatch remains.
+- Fonts and typography: font family, size, weight, line height, wrapping and
+  labels are unchanged by this patch. Different source/implementation labels
+  come only from the desktop versus browser-preview state.
+- Spacing and layout rhythm: header height increases from `76px` to `88px`,
+  bottom padding from `8px` to `12px`, and the notification offset consumes
+  the same shared height variable.
+- Colors and visual tokens: backgrounds, borders, state colors, shadows and
+  translucency are unchanged.
+- Image and icon fidelity: the existing Phosphor plus icon is retained and the
+  matching Phosphor `ArrowSquareOut` icon supplies the requested lower-left to
+  upper-right direction; no approximate SVG or image asset was introduced.
+- Copy and content: the two tooltips use exactly “打开本地HTML” and
+  “在默认浏览器中打开”. In the browser-only preview the latter icon is visibly
+  disabled while its explanatory tooltip remains full-contrast.
+
+Comparison history:
+
+1. The source exposed a P1 persistent-header containment failure: the old
+   `76px` row left the two-line file metadata and `38px` send button on the
+   divider, with visible content/shadows extending below it.
+2. The row height, header minimum height and notice offset were unified behind
+   `--notice-header-height: 88px`; wide and compact bottom padding became
+   `12px`.
+3. Post-fix wide and compact measurements show a minimum `10.25px` bottom gap,
+   no descendant outside the header, no page-width overflow and no console
+   warning or error.
+4. The follow-up action cluster preserves the same `88px` header and
+   `10.25px` minimum bottom gap. The first tooltip draft touched the viewport
+   edge and inherited disabled opacity; moving it down `3px` and scoping
+   disabled opacity to the SVG made the hint fully legible without affecting
+   layout.
+5. User review rejected the dark tooltip surface. The final treatment uses the
+   header's near-white surface, a `#e1e2e8` border, muted gray text and a soft
+   shadow; geometry and placement remain unchanged.
+
+Interaction checks:
+
+- The header's unique “项目” button opened its panel with
+  `aria-expanded="true"` and closed it again with `aria-expanded="false"`.
+- The project panel content was visible while expanded.
+- Hover-state inspection showed each exact tooltip after its short delay; the
+  default-browser action stays unavailable when the desktop preload bridge is
+  absent.
+- The desktop bridge accepts only a validated known HTML path, converts it to a
+  `file:` URL in the main process, and exposes no renderer-controlled URL.
+- Browser console warnings and errors: none.
+
+final result: passed
+
+---
+
 ## Qoder handoff progress-card redesign
 
 Date: 2026-07-29

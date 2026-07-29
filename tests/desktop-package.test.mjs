@@ -12,6 +12,8 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
     projectFiles,
     sourceRename,
     exportCopy,
+    openInDefaultBrowser,
+    projectIpcSecurity,
     bridge,
     finalizer,
     lifecycleCore,
@@ -36,6 +38,8 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
     readFile(new URL("../desktop/project-files.mjs", import.meta.url), "utf8"),
     readFile(new URL("../desktop/source-rename.mjs", import.meta.url), "utf8"),
     readFile(new URL("../desktop/export-copy.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../desktop/open-in-default-browser.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../desktop/project-ipc-security.mjs", import.meta.url), "utf8"),
     readFile(new URL("../scripts/workspace-bridge.mjs", import.meta.url), "utf8"),
     readFile(new URL("../scripts/finalize-attempt.mjs", import.meta.url), "utf8"),
     readFile(new URL("../scripts/lifecycle-core.mjs", import.meta.url), "utf8"),
@@ -178,6 +182,7 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.match(mainProcess, /PROJECT_CHANNELS\.exportHtmlCopy/);
   assert.match(mainProcess, /PROJECT_CHANNELS\.readHtml/);
   assert.match(mainProcess, /PROJECT_CHANNELS\.showInFolder/);
+  assert.match(mainProcess, /PROJECT_CHANNELS\.openInDefaultBrowser/);
   assert.match(mainProcess, /PROJECT_CHANNELS\.renameHtml/);
   assert.match(mainProcess, /PROJECT_CHANNELS\.revealRequestFolder/);
   assert.match(mainProcess, /PROJECT_CHANNELS\.forgetRecent/);
@@ -214,6 +219,16 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.match(
     mainProcess,
     /async function showInFolder[\s\S]*?assertReadPayload\(sourcePathInput\)[\s\S]*?assertKnownProjectPath\(sourcePath\)[\s\S]*?inspectHtmlFile\(sourcePath\)/,
+  );
+  assert.match(
+    openInDefaultBrowser,
+    /return async function openInDefaultBrowser[\s\S]*?assertDefaultBrowserSourcePath\(sourcePathInput\)[\s\S]*?assertKnownProjectPath\(sourcePath\)[\s\S]*?inspectHtmlFile\(sourcePath\)[\s\S]*?pathToFileURL\(sourcePath\)\.href[\s\S]*?openExternal\(sourceUrl\)/,
+  );
+  assert.match(mainProcess, /createOpenInDefaultBrowserOperation\(\{/);
+  assert.match(mainProcess, /assertTrustedRendererEvent\(event,\s*\{/);
+  assert.match(
+    projectIpcSecurity,
+    /event\?\.sender !== webContents[\s\S]*?senderFrame !== webContents\.mainFrame[\s\S]*?!isTrustedRendererUrl\(senderFrame\?\.url\)[\s\S]*?UNAUTHORIZED_FILE_REQUEST/,
   );
   assert.match(
     mainProcess,

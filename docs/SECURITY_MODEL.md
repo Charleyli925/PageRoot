@@ -17,6 +17,9 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
 - Clipboard-only third-party AI handoff
 - Fixed app-resource lookup for the packaged user statement and disclaimer;
   the renderer can request it but cannot choose a local path
+- Default-browser opening accepts only an already known HTML source path,
+  revalidates that file in the main process, and converts it there to a local
+  file URL; the renderer cannot supply an arbitrary URL or protocol
 - Strict schemas, frozen inputs and identity/Hash checks before accepting AI output; scope evidence is always recorded, with protocol/script/target-integrity findings hard-blocked and ordinary breadth findings observed without a user-waiver loop
 - Main-process-only usage telemetry with exact event/property allowlists,
   random installation/session UUIDs and HMAC project pseudonyms; no hardware
@@ -52,6 +55,13 @@ Pure-browser preview is a different, strictly weaker capability: authored script
 ## Untrusted inputs
 
 HTML, attachments, AI output, update manifests and IPC payloads are treated as untrusted. Tests and fixtures must use synthetic data. A renderer compromise should not provide arbitrary Node or filesystem access; any new privileged API needs explicit validation and negative tests.
+
+The default-browser HTML action first drains the exact renderer edit revision
+to the authoritative source file. Its main-process operation accepts only an
+authorized main-frame sender and a known ordinary `.html` or `.htm` project
+path, then derives the `file:` URL itself. Executable negative tests prove
+malformed, non-HTML, unknown, unsafe and unauthorized requests cannot reach
+the shell launch adapter.
 
 The telemetry preload method is fire-and-forget and does not expose a generic
 network API. The main process verifies the sender frame and independently

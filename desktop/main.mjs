@@ -47,6 +47,8 @@ import {
   createWorkspaceRecoveryMailbox,
   stopBridgeProcessGracefully,
 } from "./bridge-shutdown.mjs";
+import { createOpenInDefaultBrowserOperation } from "./open-in-default-browser.mjs";
+import { assertTrustedRendererEvent } from "./project-ipc-security.mjs";
 import {
   closeAbortPayload,
   runGuardedFinalExit,
@@ -129,6 +131,7 @@ const PROJECT_CHANNELS = Object.freeze({
   readHtml: "html-projects:read",
   exportHtmlCopy: "html-projects:export-copy",
   showInFolder: "html-projects:show-in-folder",
+  openInDefaultBrowser: "html-projects:open-in-default-browser",
   renameHtml: "html-projects:rename",
   activateGeneratedVersion: "html-projects:activate-generated-version",
   revealVersionFile: "html-projects:reveal-version-file",
@@ -707,6 +710,12 @@ async function showInFolder(sourcePathInput) {
   return { sourcePath };
 }
 
+const openInDefaultBrowser = createOpenInDefaultBrowserOperation({
+  assertKnownProjectPath,
+  inspectHtmlFile,
+  openExternal: (sourceUrl) => shell.openExternal(sourceUrl),
+});
+
 async function resolveKnownRenameSource(sourcePathInput) {
   const sourcePath = assertReadPayload(sourcePathInput);
   const state = await loadProjectState();
@@ -1273,19 +1282,10 @@ function registerProjectIpc() {
   if (projectIpcRegistered) return;
   projectIpcRegistered = true;
 
-  const assertTrustedEvent = (event) => {
-    if (
-      !mainWindow
-      || event.sender !== mainWindow.webContents
-      || event.senderFrame !== mainWindow.webContents.mainFrame
-      || !isTrustedRendererUrl(event.senderFrame.url)
-    ) {
-      throw new ProjectFileError(
-        "UNAUTHORIZED_FILE_REQUEST",
-        "文件请求未获授权。",
-      );
-    }
-  };
+  const assertTrustedEvent = (event) => assertTrustedRendererEvent(event, {
+    mainWindow,
+    isTrustedRendererUrl,
+  });
   const trusted = (handler) => async (event, ...args) => {
     assertTrustedEvent(event);
     return handler(...args);
@@ -1337,6 +1337,10 @@ function registerProjectIpc() {
   ipcMain.handle(PROJECT_CHANNELS.readHtml, trustedProject(readHtml));
   ipcMain.handle(PROJECT_CHANNELS.exportHtmlCopy, trustedProject(exportHtmlCopy));
   ipcMain.handle(PROJECT_CHANNELS.showInFolder, trustedProject(showInFolder));
+  ipcMain.handle(
+    PROJECT_CHANNELS.openInDefaultBrowser,
+    trustedProject(openInDefaultBrowser),
+  );
   ipcMain.handle(PROJECT_CHANNELS.renameHtml, trustedProject(renameHtml));
   ipcMain.handle(
     PROJECT_CHANNELS.activateGeneratedVersion,

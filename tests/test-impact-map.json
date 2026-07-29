@@ -339,7 +339,10 @@
     },
     {
       "id": "desktop-runtime",
-      "patterns": ["^desktop/.*\\.(?:mjs|tsx|ts|html)$"],
+      "patterns": [
+        "^desktop/.*\\.(?:mjs|tsx|ts|html)$",
+        "^tests/open-in-default-browser\\.test\\.mjs$"
+      ],
       "suites": ["electron-smoke"],
       "nodeTests": [
         "tests/application-update.test.mjs",
@@ -349,6 +352,7 @@
         "tests/source-rename.test.mjs",
         "tests/bridge-shutdown.test.mjs",
         "tests/export-copy.test.mjs",
+        "tests/open-in-default-browser.test.mjs",
         "tests/desktop-package.test.mjs",
         "tests/usage-telemetry.test.mjs"
       ]
