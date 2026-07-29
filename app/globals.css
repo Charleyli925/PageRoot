@@ -6530,8 +6530,17 @@ body {
   transform: translateX(0);
 }
 
-.window-file-open-action {
+.window-file-quick-actions {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  margin-left: 2px;
+}
+
+.window-file-quick-action {
   appearance: none;
+  position: relative;
   width: 28px;
   height: 28px;
   flex: none;
@@ -6539,7 +6548,6 @@ body {
   align-items: center;
   justify-content: center;
   padding: 0;
-  margin-left: 2px;
   border: 0;
   border-radius: 6px;
   background: transparent;
@@ -6552,24 +6560,65 @@ body {
     transform 100ms ease;
 }
 
-.window-file-open-action:hover:not(:disabled),
-.window-file-open-action:focus-visible {
+.window-file-quick-action:hover:not(:disabled),
+.window-file-quick-action:focus-visible {
   background: rgb(81 71 220 / 8%);
   color: #5750c8;
 }
 
-.window-file-open-action:focus-visible {
+.window-file-quick-action:focus-visible {
   outline: 2px solid rgb(81 71 220 / 24%);
   outline-offset: 1px;
 }
 
-.window-file-open-action:active:not(:disabled) {
+.window-file-quick-action:active:not(:disabled) {
   transform: scale(0.94);
 }
 
-.window-file-open-action:disabled {
-  opacity: 0.48;
+.window-file-quick-action:disabled {
+  opacity: 1;
   cursor: default;
+}
+
+.window-file-quick-action:disabled > svg {
+  opacity: 0.48;
+}
+
+.window-file-quick-action::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  z-index: 80;
+  bottom: calc(100% + 4px);
+  left: calc(100% - 3px);
+  width: max-content;
+  max-width: 180px;
+  padding: 5px 7px;
+  border: 1px solid rgb(255 255 255 / 15%);
+  border-radius: 6px;
+  background: rgb(35 36 44 / 94%);
+  box-shadow: 0 5px 16px rgb(27 29 39 / 18%);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 620;
+  line-height: 1.2;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  transform: translate(-3px, 3px);
+  pointer-events: none;
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease,
+    visibility 0s linear 120ms;
+}
+
+.window-file-quick-action:hover::after,
+.window-file-quick-action:focus-visible::after {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(0, 0);
+  transition-delay: 180ms;
 }
 
 .window-file-rename-field {
@@ -6937,7 +6986,8 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .window-file-title-action,
   .window-file-rename-icon,
-  .window-file-open-action {
+  .window-file-quick-action,
+  .window-file-quick-action::after {
     transition: none;
   }
 

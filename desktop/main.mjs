@@ -28,7 +28,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   ProjectFileError,
   ensureManagedWelcomeHtml,
@@ -129,6 +129,7 @@ const PROJECT_CHANNELS = Object.freeze({
   readHtml: "html-projects:read",
   exportHtmlCopy: "html-projects:export-copy",
   showInFolder: "html-projects:show-in-folder",
+  openInDefaultBrowser: "html-projects:open-in-default-browser",
   renameHtml: "html-projects:rename",
   activateGeneratedVersion: "html-projects:activate-generated-version",
   revealVersionFile: "html-projects:reveal-version-file",
@@ -704,6 +705,15 @@ async function showInFolder(sourcePathInput) {
   await assertKnownProjectPath(sourcePath);
   await inspectHtmlFile(sourcePath);
   shell.showItemInFolder(sourcePath);
+  return { sourcePath };
+}
+
+async function openInDefaultBrowser(sourcePathInput) {
+  const sourcePath = assertReadPayload(sourcePathInput);
+  await assertKnownProjectPath(sourcePath);
+  await inspectHtmlFile(sourcePath);
+  const sourceUrl = pathToFileURL(sourcePath).href;
+  await shell.openExternal(sourceUrl);
   return { sourcePath };
 }
 
@@ -1337,6 +1347,10 @@ function registerProjectIpc() {
   ipcMain.handle(PROJECT_CHANNELS.readHtml, trustedProject(readHtml));
   ipcMain.handle(PROJECT_CHANNELS.exportHtmlCopy, trustedProject(exportHtmlCopy));
   ipcMain.handle(PROJECT_CHANNELS.showInFolder, trustedProject(showInFolder));
+  ipcMain.handle(
+    PROJECT_CHANNELS.openInDefaultBrowser,
+    trustedProject(openInDefaultBrowser),
+  );
   ipcMain.handle(PROJECT_CHANNELS.renameHtml, trustedProject(renameHtml));
   ipcMain.handle(
     PROJECT_CHANNELS.activateGeneratedVersion,

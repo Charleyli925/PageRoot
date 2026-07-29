@@ -50,6 +50,7 @@ protocols.
 | Crash-only browser recovery | `app/application/recovery-store.js` |
 | Renderer, project-picker and attachment capabilities | `app/application/runtime-capabilities.js` |
 | Same-directory source rename, operation journal and active/recent path rebase | `desktop/source-rename.mjs` |
+| Known-source Finder reveal and default-browser file launch | narrow project IPC in `desktop/main.mjs` |
 | Pseudonymous identity, strict event schemas, local queue and PostHog delivery | `desktop/usage-telemetry.mjs` |
 | Preview sanitization and verified frame injection | `app/components/html-preview-sandbox.js` |
 | Run lifecycle decoding and transition policy | `app/domain/run-lifecycle.js` |

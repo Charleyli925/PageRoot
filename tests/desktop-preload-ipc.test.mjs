@@ -157,6 +157,23 @@ test("preload exposes the structured Finder reveal operation", async () => {
   ]);
 });
 
+test("preload exposes the narrow default-browser HTML operation", async () => {
+  const calls = [];
+  const api = await loadPreload(async (...args) => {
+    calls.push(args);
+    return success({ sourcePath: "/Users/demo/report.html" });
+  });
+
+  assert.deepEqual(
+    await api.openInDefaultBrowser("/Users/demo/report.html"),
+    { sourcePath: "/Users/demo/report.html" },
+  );
+  assert.deepEqual(calls[0], [
+    "html-projects:open-in-default-browser",
+    "/Users/demo/report.html",
+  ]);
+});
+
 test("preload exposes the narrow source rename operation", async () => {
   const calls = [];
   const api = await loadPreload(async (...args) => {

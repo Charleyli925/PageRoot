@@ -943,22 +943,39 @@ test("a safely saved source can be renamed in place without exposing its extensi
   );
 });
 
-test("the filename keeps a distinct always-visible quick-open action", () => {
+test("the filename keeps distinct quick actions with non-layout tooltips", () => {
   assert.match(
     workbench,
-    /\)\}\s*<button[\s\S]*?className="window-file-open-action"[\s\S]*?aria-label="打开新的本地 HTML"[\s\S]*?disabled=\{fileRenameEditing \|\| fileRenameBusy\}[\s\S]*?onClick=\{\(\) => void openProject\(\)\}[\s\S]*?<PlusIcon aria-hidden="true" size=\{16\} weight="bold" \/>/,
+    /className="window-file-quick-actions"[\s\S]*?className="window-file-quick-action"[\s\S]*?data-tooltip="打开本地HTML"[\s\S]*?aria-label="打开新的本地 HTML"[\s\S]*?onClick=\{\(\) => void openProject\(\)\}[\s\S]*?<PlusIcon[\s\S]*?data-tooltip="在默认浏览器中打开"[\s\S]*?onClick=\{\(\) => void openCurrentHtmlInDefaultBrowser\(\)\}[\s\S]*?<ArrowSquareOutIcon/,
   );
   assert.match(
     styles,
-    /\.window-file-open-action\s*\{[\s\S]*?width:\s*28px[\s\S]*?height:\s*28px[\s\S]*?color:\s*#6c65d5/,
+    /\.window-file-quick-actions\s*\{[\s\S]*?display:\s*inline-flex[\s\S]*?flex:\s*none/,
   );
   assert.match(
     styles,
-    /\.window-file-open-action:hover:not\(:disabled\),\s*\.window-file-open-action:focus-visible\s*\{[\s\S]*?background:\s*rgb\(81 71 220 \/ 8%\)/,
+    /\.window-file-quick-action\s*\{[\s\S]*?position:\s*relative[\s\S]*?width:\s*28px[\s\S]*?height:\s*28px[\s\S]*?color:\s*#6c65d5/,
   );
-  const plusRule = styles.match(/\.window-file-open-action\s*\{([\s\S]*?)\n\}/u);
-  assert.ok(plusRule);
-  assert.doesNotMatch(plusRule[1], /opacity:\s*0(?:\D|$)/u);
+  assert.match(
+    styles,
+    /\.window-file-quick-action::after\s*\{[\s\S]*?content:\s*attr\(data-tooltip\)[\s\S]*?position:\s*absolute[\s\S]*?pointer-events:\s*none/,
+  );
+  assert.match(
+    styles,
+    /\.window-file-quick-action:hover::after,\s*\.window-file-quick-action:focus-visible::after\s*\{[\s\S]*?opacity:\s*1/,
+  );
+  assert.match(
+    styles,
+    /\.window-file-quick-action:disabled\s*\{[\s\S]*?opacity:\s*1[\s\S]*?\.window-file-quick-action:disabled > svg\s*\{[\s\S]*?opacity:\s*0\.48/,
+  );
+  assert.match(
+    styles,
+    /\.workbench\s*\{[\s\S]*?--notice-header-height:\s*88px/,
+  );
+  assert.match(
+    workbench,
+    /const openInDefaultBrowser = window\.htmlAIProjects\?\.openInDefaultBrowser[\s\S]*?withOneAutomaticRetry\(\(\) => openInDefaultBrowser\(activeSourcePath\)\)/,
+  );
 });
 
 test("project panel keeps actions clear without technical paths in the header", () => {

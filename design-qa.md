@@ -12,11 +12,16 @@ Source visual truth:
 - The source attachment is local-only and remains outside the repository.
 - User direction: preserve the existing header hierarchy and styling while
   adding enough height for every icon and label to remain inside the bar.
+- User follow-up direction: add a diagonal default-browser action beside the
+  filename plus action, give both icons concise upper-right hover hints, and
+  keep the already approved header height unchanged.
 
 Implementation evidence:
 
 - `output/design-qa/2026-07-29-header-height/implementation-cdp-full.png`
 - `output/design-qa/2026-07-29-header-height/implementation-compact-full.png`
+- `output/design-qa/2026-07-29-header-file-actions/implementation-wide-open-tooltip.png`
+- `output/design-qa/2026-07-29-header-file-actions/implementation-compact-browser-tooltip.png`
 
 Combined comparison inputs:
 
@@ -50,6 +55,13 @@ Full-view and focused comparison evidence:
 - The compact `900px` viewport keeps the complete title, quick-open action,
   edit/preview group, project, global comment and send button within the
   horizontal viewport; `scrollWidth` equals `clientWidth`.
+- The two filename actions form one fixed `57 × 28px` group. A synthetic long
+  filename shrinks to `161px` with ellipsis at the compact viewport while the
+  complete action group remains inside its `220px` title row.
+- Both tooltip boxes are absolutely positioned and therefore do not change the
+  title row or header box. The longer browser tooltip measures about
+  `107 × 24px`, remains fully inside the viewport, and starts at `y = 2px`
+  rather than clipping against the top edge.
 - The focused right-action comparison shows the intentional new bottom
   breathing room while retaining the existing control order, spacing, radii,
   icon scale and visual hierarchy.
@@ -65,10 +77,12 @@ Findings:
   the same shared height variable.
 - Colors and visual tokens: backgrounds, borders, state colors, shadows and
   translucency are unchanged.
-- Image and icon fidelity: existing Phosphor icons and the HTML file icon are
-  retained; no image asset or approximate replacement was introduced.
-- Copy and content: the visible application copy and action order are
-  unchanged.
+- Image and icon fidelity: the existing Phosphor plus icon is retained and the
+  matching Phosphor `ArrowSquareOut` icon supplies the requested lower-left to
+  upper-right direction; no approximate SVG or image asset was introduced.
+- Copy and content: the two tooltips use exactly “打开本地HTML” and
+  “在默认浏览器中打开”. In the browser-only preview the latter icon is visibly
+  disabled while its explanatory tooltip remains full-contrast.
 
 Comparison history:
 
@@ -81,12 +95,22 @@ Comparison history:
 3. Post-fix wide and compact measurements show a minimum `10.25px` bottom gap,
    no descendant outside the header, no page-width overflow and no console
    warning or error.
+4. The follow-up action cluster preserves the same `88px` header and
+   `10.25px` minimum bottom gap. The first tooltip draft touched the viewport
+   edge and inherited disabled opacity; moving it down `3px` and scoping
+   disabled opacity to the SVG made the hint fully legible without affecting
+   layout.
 
 Interaction checks:
 
 - The header's unique “项目” button opened its panel with
   `aria-expanded="true"` and closed it again with `aria-expanded="false"`.
 - The project panel content was visible while expanded.
+- Hover-state inspection showed each exact tooltip after its short delay; the
+  default-browser action stays unavailable when the desktop preload bridge is
+  absent.
+- The desktop bridge accepts only a validated known HTML path, converts it to a
+  `file:` URL in the main process, and exposes no renderer-controlled URL.
 - Browser console warnings and errors: none.
 
 final result: passed

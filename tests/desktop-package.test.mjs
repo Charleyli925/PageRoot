@@ -178,6 +178,7 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.match(mainProcess, /PROJECT_CHANNELS\.exportHtmlCopy/);
   assert.match(mainProcess, /PROJECT_CHANNELS\.readHtml/);
   assert.match(mainProcess, /PROJECT_CHANNELS\.showInFolder/);
+  assert.match(mainProcess, /PROJECT_CHANNELS\.openInDefaultBrowser/);
   assert.match(mainProcess, /PROJECT_CHANNELS\.renameHtml/);
   assert.match(mainProcess, /PROJECT_CHANNELS\.revealRequestFolder/);
   assert.match(mainProcess, /PROJECT_CHANNELS\.forgetRecent/);
@@ -214,6 +215,10 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.match(
     mainProcess,
     /async function showInFolder[\s\S]*?assertReadPayload\(sourcePathInput\)[\s\S]*?assertKnownProjectPath\(sourcePath\)[\s\S]*?inspectHtmlFile\(sourcePath\)/,
+  );
+  assert.match(
+    mainProcess,
+    /async function openInDefaultBrowser[\s\S]*?assertReadPayload\(sourcePathInput\)[\s\S]*?assertKnownProjectPath\(sourcePath\)[\s\S]*?inspectHtmlFile\(sourcePath\)[\s\S]*?pathToFileURL\(sourcePath\)\.href[\s\S]*?shell\.openExternal\(sourceUrl\)/,
   );
   assert.match(
     mainProcess,

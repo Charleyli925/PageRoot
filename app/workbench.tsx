@@ -14,6 +14,7 @@ import {
   type ReactNode,
 } from "react";
 import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowCounterClockwise";
+import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/csr/ArrowSquareOut";
 import { CaretRightIcon } from "@phosphor-icons/react/dist/csr/CaretRight";
 import { ChatCircleTextIcon } from "@phosphor-icons/react/dist/csr/ChatCircleText";
 import { CheckCircleIcon } from "@phosphor-icons/react/dist/csr/CheckCircle";
@@ -162,6 +163,9 @@ type DesktopProjectsApi = {
   getActiveProject: () => Promise<HtmlProject | null>;
   openHtml: () => Promise<HtmlProject | null>;
   showInFolder?: (sourcePath: string) => Promise<{ sourcePath: string }>;
+  openInDefaultBrowser?: (
+    sourcePath: string,
+  ) => Promise<{ sourcePath: string }>;
   renameHtml?: (payload: {
     operationId: string;
     sourcePath: string;
@@ -5654,6 +5658,26 @@ export default function Workbench() {
     }
   }, []);
 
+  const openCurrentHtmlInDefaultBrowser = useCallback(async () => {
+    const activeSourcePath = sourcePathRef.current;
+    const openInDefaultBrowser = window.htmlAIProjects?.openInDefaultBrowser;
+    if (!activeSourcePath || !openInDefaultBrowser) return;
+    try {
+      await withOneAutomaticRetry(() => openInDefaultBrowser(activeSourcePath));
+    } catch (cause) {
+      setToast({
+        title: "无法在默认浏览器中打开",
+        message: productErrorMessage(
+          cause,
+          "源 HTML 可能已移动；当前项目仍保持打开，可以重试。",
+        ),
+        tone: "warning",
+        disposition: "background-result",
+        dedupeKey: "open-project-in-default-browser-error",
+      });
+    }
+  }, []);
+
   const cancelFileRename = useCallback(() => {
     if (fileRenameBusyRef.current) return;
     fileRenameEditingRef.current = false;
@@ -8655,6 +8679,11 @@ export default function Workbench() {
     && typeof window !== "undefined"
     && window.htmlAIProjects?.showInFolder,
   );
+  const canOpenCurrentHtmlInDefaultBrowser = Boolean(
+    sourcePath
+    && typeof window !== "undefined"
+    && window.htmlAIProjects?.openInDefaultBrowser,
+  );
   const visibleRecentProjects = recentProjects
     .filter((project) => !sameLocalSourcePath(project.sourcePath, sourcePath))
     .slice(0, 3);
@@ -9254,16 +9283,36 @@ export default function Workbench() {
                   {currentSourceFileStem}
                 </strong>
               )}
-              <button
-                className="window-file-open-action"
-                type="button"
-                aria-label="打开新的本地 HTML"
-                title="打开新的本地 HTML"
-                disabled={fileRenameEditing || fileRenameBusy}
-                onClick={() => void openProject()}
-              >
-                <PlusIcon aria-hidden="true" size={16} weight="bold" />
-              </button>
+              <span className="window-file-quick-actions">
+                <button
+                  className="window-file-quick-action"
+                  type="button"
+                  data-tooltip="打开本地HTML"
+                  aria-label="打开新的本地 HTML"
+                  disabled={fileRenameEditing || fileRenameBusy}
+                  onClick={() => void openProject()}
+                >
+                  <PlusIcon aria-hidden="true" size={16} weight="bold" />
+                </button>
+                <button
+                  className="window-file-quick-action"
+                  type="button"
+                  data-tooltip="在默认浏览器中打开"
+                  aria-label={`在默认浏览器中打开 ${currentSourceFileName}`}
+                  disabled={
+                    !canOpenCurrentHtmlInDefaultBrowser
+                    || fileRenameEditing
+                    || fileRenameBusy
+                  }
+                  onClick={() => void openCurrentHtmlInDefaultBrowser()}
+                >
+                  <ArrowSquareOutIcon
+                    aria-hidden="true"
+                    size={16}
+                    weight="bold"
+                  />
+                </button>
+              </span>
               {fileRenameError ? (
                 <span
                   id="window-file-rename-error"

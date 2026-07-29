@@ -17,6 +17,9 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
 - Clipboard-only third-party AI handoff
 - Fixed app-resource lookup for the packaged user statement and disclaimer;
   the renderer can request it but cannot choose a local path
+- Default-browser opening accepts only an already known HTML source path,
+  revalidates that file in the main process, and converts it there to a local
+  file URL; the renderer cannot supply an arbitrary URL or protocol
 - Strict schemas, frozen inputs and identity/Hash checks before accepting AI output; scope evidence is always recorded, with protocol/script/target-integrity findings hard-blocked and ordinary breadth findings observed without a user-waiver loop
 - Main-process-only usage telemetry with exact event/property allowlists,
   random installation/session UUIDs and HMAC project pseudonyms; no hardware
