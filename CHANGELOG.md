@@ -150,7 +150,8 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 - Published the first public macOS release in this repository under the earlier YuanYe artifact name.
 
-[Unreleased]: https://github.com/Charleyli925/PageRoot/compare/v0.9.2...HEAD
+[Unreleased]: https://github.com/Charleyli925/PageRoot/compare/v0.9.3...HEAD
+[0.9.3]: https://github.com/Charleyli925/PageRoot/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/Charleyli925/PageRoot/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/Charleyli925/PageRoot/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/Charleyli925/PageRoot/compare/v0.8.10...v0.9.0
