@@ -4,6 +4,10 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+- Reframed the first-run welcome project and bilingual GitHub homepage around
+  agent-agnostic local handoff, with Claude Code, Codex, WorkBuddy, Qoder and
+  other filesystem-capable AI agents presented as compatible choices.
+
 ## [0.9.1] - 2026-07-28
 
 - Upgrade complete 0.9.0 project records additively on first start while

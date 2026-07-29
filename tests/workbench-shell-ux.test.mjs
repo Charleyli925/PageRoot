@@ -53,10 +53,12 @@ test("startup welcome HTML is provisioned as a normal registered project", () =>
   );
   assert.match(sampleHtml, /顺畅的文本编辑/);
   assert.match(sampleHtml, /指哪改哪的局部修改/);
-  assert.match(sampleHtml, /轻松完整的评论体验/);
-  assert.match(sampleHtml, /完整的安全校验/);
-  assert.match(sampleHtml, /真实 HTML 是唯一事实源/);
-  assert.match(sampleHtml, /发送、校验，再打开最新版/);
+  assert.match(sampleHtml, /AI Agent 拿到完整上下文/);
+  assert.match(sampleHtml, /AI Agent 结果安全接回/);
+  assert.match(sampleHtml, /Claude Code · Codex · WorkBuddy · Qoder/);
+  assert.match(sampleHtml, /无需复制整页 HTML 或重新描述位置/);
+  assert.match(sampleHtml, /交给你正在使用的 AI Agent/);
+  assert.match(sampleHtml, /校验后生成独立新版本/);
   assert.match(
     sampleHtml,
     /WELCOME_LOGO_RELATIVE_PATH = "brand-logo\.png"/,
@@ -65,9 +67,8 @@ test("startup welcome HTML is provisioned as a normal registered project", () =>
     sampleHtml,
     /src="\.\/\$\{WELCOME_LOGO_RELATIVE_PATH\}"/,
   );
-  assert.match(sampleHtml, /在桌面版中，这张欢迎页可以直接体验编辑、选择和评论/);
-  assert.match(sampleHtml, /桌面版会把它建立为本地 HTML/);
-  assert.match(sampleHtml, /修改会自动保存到「欢迎来到源页\.html」/);
+  assert.match(sampleHtml, /这张欢迎页本身，就是一次完整的 AI Agent 协作入口/);
+  assert.match(sampleHtml, /双击即可直接编辑，也可以选中内容添加评论/);
   assert.match(sampleHtml, /从顶部「项目」打开其他 HTML/);
   assert.doesNotMatch(sampleHtml, /尚未绑定本地文件/);
   assert.doesNotMatch(sampleHtml, /利率拐点前的仓位选择|美国 10 年期|市场策略周报/);
