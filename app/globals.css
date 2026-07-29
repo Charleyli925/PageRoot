@@ -6983,6 +6983,79 @@ body {
   outline-offset: 2px;
 }
 
+.cancel-ai-run-dialog {
+  width: min(460px, calc(100vw - 32px));
+  max-width: none;
+  padding: 0;
+  overflow: visible;
+  border: 0;
+  border-radius: 18px;
+  background: transparent;
+  color: var(--ink);
+}
+
+.cancel-ai-run-dialog::backdrop {
+  background: rgb(40 37 56 / 52%);
+}
+
+.cancel-ai-run-card {
+  padding: 26px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--paper);
+  box-shadow: 0 10px 24px rgb(20 19 28 / 22%);
+}
+
+.cancel-ai-run-card h2 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 18px;
+  font-weight: 680;
+  line-height: 1.35;
+}
+
+.cancel-ai-run-card p {
+  margin: 11px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.cancel-ai-run-card footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.cancel-ai-run-card button {
+  min-height: 36px;
+  padding: 0 16px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.cancel-ai-run-end {
+  border: 1px solid #d89b96;
+  background: #fff7f6;
+  color: #a94d47;
+}
+
+.cancel-ai-run-wait {
+  border: 1px solid var(--indigo);
+  background: var(--indigo);
+  color: #fff;
+}
+
+.cancel-ai-run-card button:focus-visible {
+  outline: 3px solid rgb(90 85 223 / 24%);
+  outline-offset: 2px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .window-file-title-action,
   .window-file-rename-icon,

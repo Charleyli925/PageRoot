@@ -398,6 +398,7 @@ function runOfficialFinalizer(requestRoot, changeRequest) {
   if (result.status !== 0) {
     throw new Error(`Finalizer failed:\n${result.stdout}\n${result.stderr}`);
   }
+  return JSON.parse(result.stdout);
 }
 
 function recordOfficialSupplement(workspace, requestRoot, changeRequest, payload) {
@@ -920,6 +921,89 @@ test("a rapid double click creates exactly one durable Request", async () => {
   }
 });
 
+test("ending a copied run warns first and late AI finalization stops cleanly", async () => {
+  test.setTimeout(120_000);
+  const fixture = createSourceFixture("cancel-copied-run.html");
+  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  try {
+    const request = await addCommentAndSubmit(
+      launched.page,
+      launched.electronApp,
+      fixture.sourcePath,
+    );
+    const endRound = launched.page.getByRole("button", {
+      name: "结束本轮并继续编辑",
+    }).filter({ visible: true }).first();
+    await expect(endRound).toBeEnabled();
+    await endRound.click();
+
+    const warning = launched.page.getByRole("dialog", {
+      name: "AI Agent 可能仍在修改",
+    });
+    await expect(warning).toBeVisible();
+    await expect(warning.getByText(
+      "结束本轮后，AI Agent 的修改将不会保存到源页。建议先停止 AI Agent。",
+      { exact: true },
+    )).toBeVisible();
+    const continueWaiting = warning.getByRole("button", { name: "继续等待" });
+    await expect(continueWaiting).toBeFocused();
+    await continueWaiting.click();
+    await expect(warning).toBeHidden();
+    await expect(endRound).toBeEnabled();
+
+    await endRound.click();
+    await warning.getByRole("button", {
+      name: "结束本轮并继续编辑",
+    }).click();
+    await expect(warning).toBeHidden();
+    const cancellationNotice = launched.page.locator(".toast.show").filter({
+      hasText: "本轮已结束，已恢复编辑",
+    });
+    await expect(cancellationNotice).toBeVisible();
+    await expect(cancellationNotice.getByText(
+      "AI Agent 不会被自动停止；如仍在运行，请手动停止。",
+      { exact: true },
+    )).toBeVisible();
+    await expect(launched.page.getByRole("button", {
+      name: "全局评论",
+      exact: true,
+    })).toBeEnabled();
+    expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
+
+    writeAiOutput(request.requestRoot, (base) => (
+      base.replace(ORIGINAL_TEXT, UPDATED_TEXT)
+    ));
+    const lateFinalization = runOfficialFinalizer(
+      request.requestRoot,
+      request.changeRequest,
+    );
+    expect(lateFinalization).toMatchObject({
+      ok: true,
+      status: "cancelled",
+      accepted: false,
+      retryable: false,
+    });
+    expect(lateFinalization.message)
+      .toBe("本轮已在源页结束。请停止 AI Agent，不要重试。");
+    expect(existsSync(path.join(
+      request.requestRoot,
+      "attempts",
+      "attempt_001",
+      "completion.json",
+    ))).toBe(false);
+    expect(
+      workingHtmlFiles(
+        launched.workspace,
+        request.changeRequest.projectId,
+      ),
+    ).toHaveLength(0);
+    expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
 test("an unknown Request outcome stays fail-closed and reconciles automatically", async () => {
   test.setTimeout(120_000);
   const fixture = createSourceFixture("unknown-request-outcome.html");
@@ -974,7 +1058,7 @@ test("an unknown Request outcome stays fail-closed and reconciles automatically"
     )).toBeVisible({ timeout: 20_000 });
     await launched.page.unroute(bridgeRoute, injectUnknownRequestOutcome);
     await expect(launched.page.getByRole("button", {
-      name: "取消发送，继续编辑",
+      name: "结束本轮并继续编辑",
     })).toBeEnabled();
     expect(requestDirectoryCount(launched.workspace)).toBe(1);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);

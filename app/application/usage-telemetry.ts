@@ -52,6 +52,7 @@ export function noticeUsageCode(dedupeKey?: string): string {
   if (key.startsWith("attachment-batch-")) return "attachment_batch";
   if (key.startsWith("attachment-preview-")) return "attachment_preview";
   if (key.startsWith("attachment-download-")) return "attachment_download";
+  if (key.startsWith("ai-run-cancelled:")) return "ai_run_cancelled";
   if (key.startsWith("background-version:")) return "background_version";
   if (key.startsWith("qoder-handoff:")) return "qoder_handoff";
   if (key.startsWith("reveal-version-file-")) return "reveal_version_file";

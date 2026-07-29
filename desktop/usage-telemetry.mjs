@@ -66,6 +66,7 @@ const RUN_STATES = new Set([
   "error",
 ]);
 const NOTICE_CODES = new Set([
+  "ai_run_cancelled",
   "attachment_batch",
   "attachment_cleanup",
   "attachment_download",

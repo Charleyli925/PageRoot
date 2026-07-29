@@ -4,6 +4,10 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+- Added a concise AI Agent warning before ending a copied run, restored editing
+  with a clear manual-stop reminder, and made late official finalization return
+  a non-retryable cancelled result without creating a new Version.
+
 ## [0.9.4] - 2026-07-29
 
 - Increased the workbench header height and bottom breathing room so the

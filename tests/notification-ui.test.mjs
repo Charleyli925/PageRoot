@@ -343,6 +343,10 @@ test("notification analytics uses stable codes and never forwards visible copy",
     /projectId \|\| usageFingerprint\(sourcePath \|\| "unregistered"\)/u,
   );
   assert.match(usageTelemetry, /window\.htmlAIUsage\?\.capture/u);
+  assert.match(
+    usageTelemetry,
+    /key\.startsWith\("ai-run-cancelled:"\)\) return "ai_run_cancelled"/u,
+  );
   assert.match(usageTelemetry, /:\s*"uncatalogued"/u);
   assert.doesNotMatch(
     usageTelemetry,
