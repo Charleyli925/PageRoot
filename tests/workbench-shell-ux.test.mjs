@@ -185,11 +185,15 @@ test("canvas chrome stays compact and keeps project actions visually clear", () 
   );
   assert.match(
     unifiedSurfaceStyles,
-    /\.workbench\s*\{[\s\S]*?grid-template-rows:\s*76px minmax\(0, 1fr\)/,
+    /\.workbench\s*\{[\s\S]*?--notice-header-height:\s*88px[\s\S]*?grid-template-rows:\s*var\(--notice-header-height\) minmax\(0, 1fr\)/,
   );
   assert.match(
     unifiedSurfaceStyles,
-    /\.workbench-header\s*\{[\s\S]*?padding:\s*30px 16px 8px 22px/,
+    /\.workbench-header\s*\{[\s\S]*?min-height:\s*var\(--notice-header-height\)[\s\S]*?padding:\s*30px 16px 12px 22px/,
+  );
+  assert.match(
+    unifiedSurfaceStyles,
+    /@media \(max-width:\s*940px\)\s*\{[\s\S]*?\.workbench-header\s*\{[\s\S]*?padding:\s*30px 12px 12px 20px/,
   );
   assert.match(
     unifiedSurfaceStyles,

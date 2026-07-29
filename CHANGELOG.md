@@ -4,6 +4,9 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+- Increased the workbench header height and bottom breathing room so the
+  two-line file summary and all primary actions remain inside the title bar.
+
 ## [0.9.3] - 2026-07-29
 
 - Added an always-visible, bolder plus action beside the current filename that
