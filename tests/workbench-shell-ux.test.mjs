@@ -475,14 +475,24 @@ test("header prioritizes the filename and keeps the approved action order", () =
   assert.match(mainProcess, /LATEST_RELEASE_PAGE_URL/);
   assert.match(mainProcess, /shell\.openExternal\(LATEST_RELEASE_PAGE_URL\)/);
   assert.match(mainProcess, /shell\.openExternal\(PROJECT_REPOSITORY_URL\)/);
+  assert.match(mainProcess, /APP_CHANNELS\.openUserNotice/);
+  assert.match(mainProcess, /shell\.openPath\(userNoticePath\(\)\)/);
   assert.doesNotMatch(preload, /openLatestRelease:\s*\([^)]*url/);
   assert.doesNotMatch(preload, /openRepository:\s*\([^)]*url/);
+  assert.doesNotMatch(preload, /openUserNotice:\s*\([^)]*(?:path|url)/);
   assert.match(aboutDialog, /<dialog[\s\S]*?className="about-dialog"/);
   assert.match(aboutDialog, /id="about-pageroot-title">源页</);
+  assert.match(aboutDialog, /AI Agent 无缝接力/);
   assert.match(aboutDialog, /立即检查/);
   assert.match(aboutDialog, /下载更新/);
   assert.match(aboutDialog, /PageRoot on GitHub/);
-  assert.match(aboutDialog, /每 4 小时自动检查/);
+  assert.match(aboutDialog, /用户声明与免责声明/);
+  assert.match(aboutDialog, /userNoticeOpenFailed[\s\S]*?声明文件没有打开/);
+  assert.doesNotMatch(aboutDialog, /每 4 小时自动检查/);
+  assert.match(
+    workbench,
+    /const openUserNotice = useCallback[\s\S]*?htmlAIAppLifecycle\?\.openUserNotice\(\)[\s\S]*?setUserNoticeOpenFailed\(true\)/,
+  );
   assert.match(aboutDialog, /aria-live="polite"/);
   assert.doesNotMatch(aboutDialog, /role="progressbar"|about-check-spinner/);
   assert.match(restartUpdateDialog, /className="restart-update-dialog"/);

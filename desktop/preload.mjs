@@ -26,6 +26,7 @@ const appChannels = Object.freeze({
   workspaceUnavailable: "html-app:workspace-unavailable",
   workspaceRecoveryReady: "html-app:workspace-recovery-ready",
   relaunch: "html-app:relaunch",
+  openUserNotice: "html-app:open-user-notice",
 });
 const integrationChannels = Object.freeze({
   qoderHandoff: "html-integrations:qoder-handoff",
@@ -255,6 +256,7 @@ const appLifecycleApi = Object.freeze({
     };
   },
   relaunch: () => ipcRenderer.invoke(appChannels.relaunch),
+  openUserNotice: () => invokeProject(appChannels.openUserNotice),
 });
 
 contextBridge.exposeInMainWorld("htmlAIProjects", projectsApi);

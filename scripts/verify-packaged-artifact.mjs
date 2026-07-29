@@ -56,7 +56,12 @@ const REQUIRED_PACKAGED_MODULES = [
   "universalify",
 ];
 const REQUIRED_SHARED_FILES = ["draft-aggregate.mjs"];
-const REQUIRED_LEGAL_RESOURCES = ["LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md"];
+const REQUIRED_LEGAL_RESOURCES = [
+  "PageRoot 用户声明与免责声明.txt",
+  "LICENSE",
+  "NOTICE",
+  "THIRD_PARTY_NOTICES.md",
+];
 const EXPECTED_MAC_TEAM_ID = "RNK9RB969G";
 const REQUIRED_APP_SOURCE_FILES = [
   "desktop/main.mjs",

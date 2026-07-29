@@ -7,6 +7,9 @@ Notable user-visible changes are documented here. This project follows Semantic 
 - Reframed the first-run welcome project and bilingual GitHub homepage around
   agent-agnostic local handoff, with Claude Code, Codex, WorkBuddy, Qoder and
   other filesystem-capable AI agents presented as compatible choices.
+- Added concise AI Agent collaboration positioning to About PageRoot, replaced
+  its duplicate update-schedule footer with a fixed local user notice entry,
+  and packaged the complete statement and disclaimer with the macOS app.
 
 ## [0.9.1] - 2026-07-28
 

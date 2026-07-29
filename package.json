@@ -354,6 +354,10 @@
         "to": "build-info.json"
       },
       {
+        "from": "PageRoot 用户声明与免责声明.txt",
+        "to": "PageRoot 用户声明与免责声明.txt"
+      },
+      {
         "from": "LICENSE",
         "to": "LICENSE"
       },

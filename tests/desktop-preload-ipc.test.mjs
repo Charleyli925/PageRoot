@@ -212,6 +212,20 @@ test("preload exposes workspace failure recovery and a narrow relaunch action", 
   unsubscribe();
 });
 
+test("preload opens only the fixed packaged user notice", async () => {
+  const calls = [];
+  const { lifecycle } = await loadPreloadApis(async (...args) => {
+    calls.push(args);
+    return success({ opened: true });
+  });
+
+  assert.deepEqual(
+    await lifecycle.openUserNotice(),
+    { opened: true },
+  );
+  assert.deepEqual(calls, [["html-app:open-user-notice"]]);
+});
+
 test("preload exposes the narrow generated-version activation operation", async () => {
   const calls = [];
   const api = await loadPreload(async (...args) => {

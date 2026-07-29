@@ -78,6 +78,10 @@ async function createPackagedFixture(t) {
           from: "output/release-metadata/build-info.json",
           to: "build-info.json",
         },
+        {
+          from: "PageRoot 用户声明与免责声明.txt",
+          to: "PageRoot 用户声明与免责声明.txt",
+        },
         { from: "LICENSE", to: "LICENSE" },
         { from: "NOTICE", to: "NOTICE" },
         { from: "THIRD_PARTY_NOTICES.md", to: "THIRD_PARTY_NOTICES.md" },
@@ -170,7 +174,12 @@ async function createPackagedFixture(t) {
   );
   const resourcesPath = path.join(appPath, "Contents/Resources");
   await mkdir(resourcesPath, { recursive: true });
-  for (const fileName of ["LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md"]) {
+  for (const fileName of [
+    "PageRoot 用户声明与免责声明.txt",
+    "LICENSE",
+    "NOTICE",
+    "THIRD_PARTY_NOTICES.md",
+  ]) {
     await writeFixtureFile(fixtureProductRoot, fileName, `fixture:${fileName}\n`);
     await writeFixtureFile(resourcesPath, fileName, `fixture:${fileName}\n`);
   }
@@ -515,7 +524,7 @@ test("the app-bundle gate compares app.asar, Bridge scripts, schemas and plist v
   assert.equal(result.version, "0.7.0");
   assert.equal(result.asarFileCount, 16);
   assert.equal(result.schemaFileCount, 3);
-  assert.equal(result.legalResourceCount, 3);
+  assert.equal(result.legalResourceCount, 4);
   assert.equal(result.provenance.commitSha, "a".repeat(40));
 
   await writeFile(
