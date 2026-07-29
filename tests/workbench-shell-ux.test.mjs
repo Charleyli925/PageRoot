@@ -529,6 +529,16 @@ test("QoderWork handoff exposes a truthful process board and manual open action"
   assert.match(workbench, /在 Finder 中查看本轮文件/);
   assert.match(workbench, /revealRequestFolder/);
   assert.match(workbench, />本轮记录</);
+  assert.match(workbench, /className="process-step-index"/);
+  assert.match(workbench, /className="process-step-status"/);
+  assert.match(workbench, /processStepStatusLabel\(step\.state\)/);
+  assert.match(workbench, /ShieldCheckIcon/);
+  assert.match(workbench, /FloppyDiskIcon/);
+  assert.match(workbench, /FlagCheckeredIcon/);
+  assert.match(
+    workbench,
+    /case "validation":[\s\S]*?<FloppyDiskIcon size=\{22\} weight="regular"/,
+  );
   const footerStart = workbench.indexOf('<footer className="processing-footer">');
   const footer = workbench.slice(footerStart, workbench.indexOf("</footer>", footerStart));
   const cancel = footer.indexOf("取消发送，继续编辑");
@@ -554,15 +564,35 @@ test("QoderWork handoff exposes a truthful process board and manual open action"
   );
   assert.match(
     styles,
-    /\.handoff-process-board ol\s*\{[\s\S]*?gap:\s*8px/,
+    /\.handoff-process-board ol\s*\{[\s\S]*?grid-template-rows:\s*repeat\(4,\s*minmax\(56px,\s*1fr\)\)[\s\S]*?gap:\s*9px/,
   );
   assert.match(
     styles,
-    /\.handoff-process-board li\s*\{[\s\S]*?min-height:\s*64px[\s\S]*?border-radius:\s*10px/,
+    /\.handoff-process-board li\s*\{[\s\S]*?min-height:\s*56px[\s\S]*?grid-template-columns:\s*28px 40px minmax\(0,\s*1fr\) auto[\s\S]*?border-radius:\s*14px/,
   );
   assert.doesNotMatch(
     styles,
-    /\.handoff-process-board li:not\(:last-child\)::after/,
+    /\.timeline-panel li:not\(:last-child\)::after/,
+  );
+  assert.match(
+    styles,
+    /\.process-step-status\[data-state="current"\]\s*\{[\s\S]*?background:\s*#efedff/,
+  );
+  assert.match(
+    styles,
+    /\.processing-footer\s*\{[\s\S]*?align-items:\s*flex-start[\s\S]*?padding:\s*0 26px 18px[\s\S]*?border-top:\s*0/,
+  );
+  assert.match(
+    styles,
+    /\.processing-header\s*\{[\s\S]*?min-height:\s*84px[\s\S]*?padding:\s*16px 26px/,
+  );
+  assert.match(
+    styles,
+    /\.side-drawer\[data-drawer="handoff"\] > \.drawer-body\s*\{[\s\S]*?padding:\s*14px 26px 10px/,
+  );
+  assert.match(
+    styles,
+    /\.processing-summary-bar\s*\{[\s\S]*?min-height:\s*58px/,
   );
   assert.match(
     styles,

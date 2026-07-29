@@ -4,6 +4,10 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+- Redesigned the four-stage Qoder handoff flow with aligned numbered cards,
+  stage-specific icons and explicit status pills, while moving the divider-free
+  footer actions closer to the content.
+
 ## [0.9.1] - 2026-07-28
 
 - Upgrade complete 0.9.0 project records additively on first start while
