@@ -159,6 +159,7 @@
       "desktop/manual-update.mjs",
       "desktop/application-update.mjs",
       "desktop/usage-telemetry.mjs",
+      "desktop/preview-protocol.mjs",
       "public/brand-logo.png",
       "dist-desktop/renderer/**/*",
       "package.json",

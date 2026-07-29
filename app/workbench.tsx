@@ -48,7 +48,9 @@ import type {
   NativeDeferredCommandDiscardReason,
 } from "./components/HtmlCanvasEditor";
 import AboutPageRootDialog from "./components/AboutPageRootDialog";
-import HtmlInteractionPreview from "./components/HtmlInteractionPreview";
+import HtmlInteractionPreview, {
+  type HtmlInteractionPreviewHandle,
+} from "./components/HtmlInteractionPreview";
 import NoticeBar from "./components/NoticeBar";
 import RestartUpdateDialog from "./components/RestartUpdateDialog";
 import { rebindCanvasSelectionTargets } from "./lib/canvas-target-rebind.js";
@@ -92,6 +94,7 @@ import {
   type DraftSnapshot,
 } from "./application/draft-session.js";
 import { DrainCoordinator } from "./application/drain-coordinator.js";
+import type { PageViewContext } from "./lib/page-view-context.js";
 import { ProjectQueryFence } from "./application/project-query-fence.js";
 import { createBrowserRecoveryStore } from "./application/recovery-store.js";
 import {
@@ -1617,6 +1620,9 @@ function CommentAttachmentStrip({
 
 export default function Workbench() {
   const editorRef = useRef<HtmlCanvasEditorHandle>(null);
+  const interactionPreviewRef = useRef<HtmlInteractionPreviewHandle>(null);
+  const previewToEditPendingRef = useRef(false);
+  const pageViewDocumentKeyRef = useRef("");
   const deferredEditorReplayRef = useRef<{
     refreshWorkspace?: (
       sourceOverride: string | null | undefined,
@@ -1832,6 +1838,12 @@ export default function Workbench() {
   const [restoredFromVersionId, setRestoredFromVersionId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("current");
   const [canvasMode, setCanvasMode] = useState<CanvasMode>("edit");
+  const [pageViewContext, setPageViewContext] =
+    useState<PageViewContext | null>(null);
+  const [interactivePreviewTransport, setInteractivePreviewTransport] =
+    useState<RuntimeCapabilities["interactivePreview"]>(
+      BROWSER_RUNTIME_CAPABILITIES.interactivePreview,
+    );
   const [viewingVersionId, setViewingVersionId] = useState<string | null>(null);
   const [renderedContentSha256, setRenderedContentSha256] = useState<string | null>(null);
   const [, setBridgeConnected] = useState<boolean | null>(null);
@@ -2246,6 +2258,13 @@ export default function Workbench() {
     html,
     projectName,
   ]);
+  const pageViewDocumentKey = [
+    viewMode,
+    sourcePath || documentId || projectId || "memory",
+  ].join(":");
+  const activePageViewContext = (
+    pageViewContext?.documentKey === pageViewDocumentKey
+  ) ? pageViewContext : null;
   const visibleCommentItems = useMemo(
     () => (
       viewMode === "history" && viewingVersion
@@ -2261,6 +2280,9 @@ export default function Workbench() {
   useEffect(() => {
     sourcePathRef.current = sourcePath;
   }, [sourcePath]);
+  useEffect(() => {
+    pageViewDocumentKeyRef.current = pageViewDocumentKey;
+  }, [pageViewDocumentKey]);
   useEffect(() => {
     sourceShaRef.current = sourceSha256;
   }, [sourceSha256]);
@@ -2309,6 +2331,7 @@ export default function Workbench() {
     const previewOnly = capabilities.sourceEditing !== "enabled";
     const frame = window.requestAnimationFrame(() => {
       setBrowserPreviewOnly(previewOnly);
+      setInteractivePreviewTransport(capabilities.interactivePreview);
       if (previewOnly) setCanvasMode("preview");
       setRuntimeCapabilitiesReady(true);
     });
@@ -3349,6 +3372,8 @@ export default function Workbench() {
     setPersistError("");
     setLastModifiedAt(project.lastModifiedAt || null);
     setSelection(null);
+    setPageViewContext(null);
+    editorRef.current?.applyPageViewContext(null);
     setComposerOpen(false);
     setDraftTarget(null);
     setDraft("");
@@ -9418,8 +9443,33 @@ export default function Workbench() {
               disabled={browserPreviewOnly || runInProgress || viewMode === "history"}
               title={browserPreviewOnly ? "浏览器预览为只读模式" : undefined}
               onClick={() => {
-                setCanvasMode("edit");
                 setProjectMenuOpen(false);
+                if (canvasMode !== "preview") {
+                  setCanvasMode("edit");
+                  return;
+                }
+                if (previewToEditPendingRef.current) return;
+                previewToEditPendingRef.current = true;
+                const expectedDocumentKey = pageViewDocumentKeyRef.current;
+                const captureContext = interactionPreviewRef.current
+                  ?.capturePageViewContext() ?? Promise.resolve(null);
+                void captureContext
+                  .catch(() => null)
+                  .then((capturedContext) => {
+                    if (
+                      pageViewDocumentKeyRef.current !== expectedDocumentKey
+                      || viewTransitioningRef.current
+                    ) return;
+                    const nextContext = (
+                      capturedContext?.documentKey === expectedDocumentKey
+                    ) ? capturedContext : null;
+                    setPageViewContext(nextContext);
+                    editorRef.current?.applyPageViewContext(nextContext);
+                    setCanvasMode("edit");
+                  })
+                  .finally(() => {
+                    previewToEditPendingRef.current = false;
+                  });
               }}
             >
               <PencilSimpleIcon aria-hidden="true" size={16} weight="bold" />
@@ -9452,6 +9502,8 @@ export default function Workbench() {
                     return;
                   }
                   editorRef.current?.clearSelection();
+                  setPageViewContext(null);
+                  editorRef.current?.applyPageViewContext(null);
                   setSelection(null);
                   updateFocusedComment(null);
                   setProjectMenuOpen(false);
@@ -9704,6 +9756,7 @@ export default function Workbench() {
                   usageCapture={captureUsageEvent}
                   commentedTargets={commentedTargets}
                   trackedTargets={trackedAuditTargets}
+                  pageViewContext={activePageViewContext}
                   locked={
                     runInProgress
                     || projectHydrating
@@ -9724,9 +9777,12 @@ export default function Workbench() {
           </div>
           {canvasMode === "preview" ? (
             <HtmlInteractionPreview
+              ref={interactionPreviewRef}
               html={interactionPreviewHtml}
+              documentKey={pageViewDocumentKey}
               sourcePath={sourcePath || undefined}
               height="100%"
+              transport={interactivePreviewTransport}
               onInteraction={() => setProjectMenuOpen(false)}
             />
           ) : null}
