@@ -81,6 +81,9 @@ function orderForFastFailure(suiteIds, selectedNodeTests) {
     if (suiteId === "build-desktop") return 60;
     if (suiteId.startsWith("electron-")) return 70;
     if (suiteId === "ai-closed-loop" || suiteId === "ai-smoke") return 80;
+    if (suiteId === "developer-package-build") return 90;
+    if (suiteId === "developer-packaged-verify") return 95;
+    if (suiteId === "developer-packaged-startup") return 100;
     if (suiteId === "package-build") return 90;
     if (suiteId === "packaged-runtime") return 100;
     if (suiteId === "packaged-verify") return 110;

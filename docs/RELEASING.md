@@ -7,6 +7,21 @@ Official releases use two explicit GitHub Actions stages from reviewed `main`:
 
 Do not push a release tag manually. A tag is an output of successful candidate verification, not the input that starts packaging.
 
+## Optional developer preview
+
+When the developer explicitly asks for an installable test package, manually
+dispatch `Developer Preview` for the intended branch and architecture, or run
+`npm run package:developer` on a clean committed tree. The default preview
+builds one ad-hoc, unnotarized DMG, verifies packaged contents and performs one
+isolated startup. Its Actions artifact is retained for seven days and its
+`developer-preview.json` always says `releaseEligible: false`.
+
+This step is optional. A request to make a formal candidate or publish a
+release does not imply a developer preview, and the formal workflows never
+depend on its result or reuse its DMG. See
+`docs/DEVELOPER_PREVIEW_PLAYBOOK.md` for the exact trigger, installation and
+failure boundaries.
+
 ## Prepare the source
 
 1. Update `package.json` and the package-lock root to the same semantic version.

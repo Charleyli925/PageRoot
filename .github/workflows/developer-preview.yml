@@ -1,0 +1,90 @@
+name: Developer Preview
+run-name: Developer preview ${{ inputs.architecture }} for ${{ github.sha }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      architecture:
+        description: Mac architecture
+        required: true
+        default: arm64
+        type: choice
+        options:
+          - arm64
+          - x64
+
+permissions:
+  contents: read
+
+concurrency:
+  group: developer-preview-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  preview:
+    name: build-lightweight-developer-preview
+    runs-on: macos-14
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        timeout-minutes: 5
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - name: Restore Electron and builder downloads
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        timeout-minutes: 10
+        with:
+          path: |
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+          key: ${{ runner.os }}-electron-builder-${{ hashFiles('package-lock.json') }}
+      - run: npm ci
+        timeout-minutes: 10
+      - name: Build and smoke-check the requested preview
+        timeout-minutes: 25
+        run: >-
+          node scripts/ci-evidence.mjs run
+          --suite developer-preview
+          --stage developer-preview
+          --
+          node scripts/test-gate.mjs developer-package
+          --arch "${{ inputs.architecture }}"
+      - name: Explain preview trust boundary
+        run: |
+          {
+            echo "### PageRoot developer preview"
+            echo ""
+            echo "- Built only because this workflow was dispatched explicitly."
+            echo "- Uses an ad-hoc signature and is not notarized."
+            echo "- Is not eligible for a tag, GitHub Release, or updater publication."
+            echo "- Automated scope: latest packaged contents, basic artifact integrity, and one clean startup."
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload developer preview
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        timeout-minutes: 10
+        with:
+          name: PageRoot-developer-preview-${{ inputs.architecture }}-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            output/developer-preview/release/*.dmg
+            output/developer-preview/developer-preview.json
+            output/test-runs
+            output/ci-evidence
+          if-no-files-found: error
+          retention-days: 7
+      - name: Upload preview failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        timeout-minutes: 10
+        with:
+          name: PageRoot-developer-preview-diagnostics-${{ github.run_attempt }}
+          path: |
+            output/test-runs
+            output/playwright
+            output/ci-evidence
+          if-no-files-found: warn
+          retention-days: 7

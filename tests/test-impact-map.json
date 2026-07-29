@@ -81,6 +81,18 @@
       "description": "Build the requested macOS candidate without rebuilding the renderer.",
       "prerequisites": ["build-desktop"]
     },
+    "developer-package-build": {
+      "description": "Build one ad-hoc macOS developer preview DMG from the exact clean tree.",
+      "prerequisites": ["build-desktop"]
+    },
+    "developer-packaged-verify": {
+      "description": "Verify developer preview app.asar, Bridge resources, schemas, ad-hoc signature and DMG integrity.",
+      "prerequisites": ["developer-package-build"]
+    },
+    "developer-packaged-startup": {
+      "description": "Launch the developer preview with isolated data and prove version, first window, readiness and clean exit.",
+      "prerequisites": ["developer-packaged-verify"]
+    },
     "packaged-runtime": {
       "description": "Launch the packaged .app with isolated data and verify source bytes, stale-draft reconciliation and clean close/reopen.",
       "prerequisites": ["package-build"]
@@ -141,6 +153,12 @@
         "real-html"
       ]
     },
+    "developer-package": {
+      "description": "Optional on-demand developer preview from one clean committed source state.",
+      "fullSuites": [
+        "developer-packaged-startup"
+      ]
+    },
     "artifact": {
       "description": "Release gate plus package build, packaged runtime smoke and artifact verification.",
       "fullSuites": [
@@ -182,7 +200,7 @@
       "patterns": [
         "^scripts/source-gate-provenance\\.mjs$",
         "^tests/source-gate-provenance\\.test\\.mjs$",
-        "^\\.github/workflows/(?:ci|release|release-candidate)\\.yml$"
+        "^\\.github/workflows/(?:ci|developer-preview|release|release-candidate)\\.yml$"
       ],
       "suites": [],
       "nodeTests": ["tests/source-gate-provenance.test.mjs"]
@@ -409,11 +427,12 @@
     {
       "id": "packaging",
       "patterns": [
-        "^(?:package(?:-lock)?\\.json|PageRoot 用户声明与免责声明\\.txt|desktop/after-pack\\.mjs|desktop/resources/.*|scripts/(?:build-package|create-release-assets|release-candidate-provenance|release-provenance|source-gate-provenance|verify-packaged-artifact)\\.mjs)$"
+        "^(?:package(?:-lock)?\\.json|PageRoot 用户声明与免责声明\\.txt|desktop/after-pack\\.mjs|desktop/resources/.*|scripts/(?:build-package|create-release-assets|developer-preview|release-candidate-provenance|release-provenance|source-gate-provenance|verify-packaged-artifact)\\.mjs)$"
       ],
       "suites": [],
       "nodeTests": [
         "tests/desktop-package.test.mjs",
+        "tests/developer-preview-package.test.mjs",
         "tests/packaged-artifact-gate.test.mjs",
         "tests/release-provenance.test.mjs",
         "tests/source-gate-provenance.test.mjs",
@@ -446,7 +465,7 @@
     {
       "id": "packaged-runtime-e2e",
       "patterns": [
-        "^tests/e2e/electron/(?:packaged-runtime-smoke\\.spec|playwright\\.packaged\\.config)\\.mjs$"
+        "^tests/e2e/electron/(?:packaged-runtime-smoke\\.spec|packaged-startup-smoke\\.spec|playwright\\.packaged(?:-startup)?\\.config)\\.mjs$"
       ],
       "suites": [],
       "nodeTests": []
@@ -454,7 +473,7 @@
     {
       "id": "electron-e2e",
       "patterns": [
-        "^tests/e2e/electron/(?!ai-handoff-closed-loop|packaged-runtime-smoke\\.spec|playwright\\.packaged\\.config).*\\.mjs$"
+        "^tests/e2e/electron/(?!ai-handoff-closed-loop|packaged-(?:runtime|startup)-smoke\\.spec|playwright\\.packaged(?:-startup)?\\.config).*\\.mjs$"
       ],
       "suites": ["electron-smoke"],
       "nodeTests": []

@@ -10,6 +10,11 @@ import {
   selectGatePlan,
   validateImpactMap,
 } from "./test-gate-core.mjs";
+import {
+  DEVELOPER_PREVIEW_ARTIFACT_PATTERN,
+  developerPreviewReleaseDirectory,
+  writeDeveloperPreviewAttestation,
+} from "./developer-preview.mjs";
 import { expectedArtifactLayout } from "./verify-packaged-artifact.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
@@ -33,8 +38,10 @@ function parseArguments(argv) {
     else if (argument === "--real-html") options.realHtmlPath = argv.shift() || null;
     else throw new Error(`Unknown argument: ${argument}`);
   }
-  if (!/^(?:edit|task|main|release|artifact-only|artifact)$/u.test(options.lane)) {
-    throw new Error("Lane must be edit, task, main, release, artifact-only or artifact.");
+  if (!/^(?:edit|task|main|release|developer-package|artifact-only|artifact)$/u.test(options.lane)) {
+    throw new Error(
+      "Lane must be edit, task, main, release, developer-package, artifact-only or artifact.",
+    );
   }
   if (!/^(?:arm64|x64)$/u.test(options.arch)) throw new Error("--arch must be arm64 or x64.");
   if (options.realHtmlPath) {
@@ -148,13 +155,40 @@ function commandForSuite(suiteId, context) {
       args: [path.join(productRoot, "scripts/build-package.mjs"), "--arch", context.options.arch],
     };
   }
+  if (suiteId === "developer-package-build") {
+    return {
+      command: process.execPath,
+      args: [
+        path.join(productRoot, "scripts/build-package.mjs"),
+        "--arch",
+        context.options.arch,
+        "--profile",
+        "developer",
+      ],
+    };
+  }
   if (suiteId === "packaged-runtime") {
     return packageCommand("test:packaged-runtime:prepared");
+  }
+  if (suiteId === "developer-packaged-startup") {
+    return packageCommand("test:packaged-startup:prepared");
   }
   if (suiteId === "packaged-verify") {
     return {
       command: process.execPath,
       args: [path.join(productRoot, "scripts/verify-packaged-artifact.mjs"), "--arch", context.options.arch],
+    };
+  }
+  if (suiteId === "developer-packaged-verify") {
+    return {
+      command: process.execPath,
+      args: [
+        path.join(productRoot, "scripts/verify-packaged-artifact.mjs"),
+        "--arch",
+        context.options.arch,
+        "--profile",
+        "developer",
+      ],
     };
   }
   throw new Error(`No command is defined for suite ${suiteId}.`);
@@ -199,7 +233,13 @@ async function main() {
       + "Pass --base <git-ref> for a committed task, or use the release gate for complete coverage.",
     );
   }
-  const cleanSourceLane = ["main", "release", "artifact-only", "artifact"].includes(options.lane);
+  const cleanSourceLane = [
+    "main",
+    "release",
+    "developer-package",
+    "artifact-only",
+    "artifact",
+  ].includes(options.lane);
   if (cleanSourceLane && files.length > 0) {
     throw new Error(
       `${options.lane} gates require a clean Git worktree. Commit every source change first.`,
@@ -223,6 +263,12 @@ async function main() {
     productRoot,
     packageJson,
     arch: options.arch,
+    releaseDirectory: options.lane === "developer-package"
+      ? developerPreviewReleaseDirectory(productRoot)
+      : undefined,
+    artifactName: options.lane === "developer-package"
+      ? DEVELOPER_PREVIEW_ARTIFACT_PATTERN
+      : undefined,
   });
   const startedAt = new Date();
   const runId = `${startedAt.toISOString().replace(/[:.]/gu, "-")}-${options.lane}`;
@@ -269,7 +315,7 @@ async function main() {
         ...(options.realHtmlPath && suite.id === "real-html"
           ? { PAGEROOT_REAL_HTML_PATH: options.realHtmlPath }
           : {}),
-        ...(suite.id === "packaged-runtime"
+        ...((suite.id === "packaged-runtime" || suite.id === "developer-packaged-startup")
           ? {
             PAGEROOT_PACKAGED_APP_PATH: artifact.appPath,
             PAGEROOT_TEST_ARCH: options.arch,
@@ -303,8 +349,25 @@ async function main() {
     }
   }
 
-  const completedAt = new Date();
   const failed = results.find((result) => result.status === "failed");
+  let developerPreviewAttestation = null;
+  if (
+    !options.dryRun
+    && !failed
+    && options.lane === "developer-package"
+  ) {
+    const record = await writeDeveloperPreviewAttestation({
+      productRoot,
+      artifact,
+      repository,
+      version: packageJson.version,
+      architecture: options.arch,
+      results,
+    });
+    developerPreviewAttestation = path.relative(productRoot, record.destination);
+    console.log(`Developer preview attestation: ${record.destination}`);
+  }
+  const completedAt = new Date();
   const summary = {
     schemaVersion: 1,
     runId,
@@ -317,6 +380,7 @@ async function main() {
     executedCount: results.length,
     passedCount: results.filter((result) => result.status === "passed").length,
     failedSuite: failed?.id || null,
+    developerPreviewAttestation,
     results,
   };
   await writeJson(path.join(reportDirectory, "results.json"), summary);

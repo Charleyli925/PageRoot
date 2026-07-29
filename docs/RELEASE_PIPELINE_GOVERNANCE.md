@@ -9,10 +9,17 @@ PageRoot keeps the release standard high while avoiding repeated proof of the sa
 | Draft feedback | Draft Pull Request open or update | Impact-selected Node/compiler feedback | Run the complete browser and Electron matrix |
 | Source candidate | Pull Request becomes ready or its ready head changes | Full Node, three Browser shards, real HTML, native Electron and deterministic AI; exact-tree attestation | Package or publish an installer |
 | Main integrity | Source candidate is merged | Match merge commit, Tree Hash, version and fresh PR attestation; fixed Node/Browser smoke | Repeat the complete source gate |
+| Developer preview | Explicit manual request only | Clean Tree, ad-hoc DMG, packaged-content audit, isolated startup and non-release attestation | Sign/notarize, create updater assets, become a prerequisite, tag or publish |
 | Release candidate | Manual `Release Candidate` dispatch on current `main` | Packaged App launch, Developer ID/notarization, DMG/ZIP/update-metadata/content checks, release asset hashes and candidate attestation | Create a tag or GitHub Release |
 | Publication | Manual `Release` dispatch for the exact version on current `main` | Fresh matching candidate, downloaded byte hashes and provenance | Rebuild, replace or silently mutate candidate bytes |
 
 The publication workflow creates the annotated tag only after the pre-tag candidate has passed. It publishes the exact downloaded candidate files. A failed candidate therefore does not consume a version tag.
+
+The `Developer Preview` workflow exists only to move cheap package-content and
+startup feedback ahead of an optionally requested installation check. No
+push, Pull Request, schedule, formal candidate or publication event triggers
+it. Its seven-day artifact cannot be promoted; formal release evidence starts
+independently from reviewed `main`.
 
 ## CI ownership and isolation
 

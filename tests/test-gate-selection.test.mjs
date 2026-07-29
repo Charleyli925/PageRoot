@@ -88,6 +88,19 @@ test("packaged-runtime test changes wait for the artifact boundary instead of ru
   assert.deepEqual(plan.selectedNodeTests, []);
 });
 
+test("developer-preview startup changes also stay outside the ordinary Electron smoke lane", () => {
+  const plan = selectGatePlan({
+    map,
+    lane: "task",
+    changedFiles: [
+      "tests/e2e/electron/packaged-startup-smoke.spec.mjs",
+      "tests/e2e/electron/playwright.packaged-startup.config.mjs",
+    ],
+  });
+  assert.deepEqual(suiteIds(plan), ["typecheck", "lint"]);
+  assert.deepEqual(plan.selectedNodeTests, []);
+});
+
 test("desktop handoff changes select Electron and deterministic AI closed-loop coverage", () => {
   const plan = selectGatePlan({
     map,
@@ -148,6 +161,26 @@ test("release and artifact lanes use complete automated coverage and never smoke
     "packaged-runtime",
     "packaged-verify",
   ]);
+});
+
+test("developer package is opt-in, lightweight and verifies contents before startup", () => {
+  const developerPackage = assertFullyAutomatedPlan(
+    selectGatePlan({ map, lane: "developer-package" }),
+  );
+  assert.deepEqual(suiteIds(developerPackage), [
+    "build-desktop",
+    "developer-package-build",
+    "developer-packaged-verify",
+    "developer-packaged-startup",
+  ]);
+  for (const formalLane of ["release", "artifact", "artifact-only"]) {
+    const formal = selectGatePlan({ map, lane: formalLane });
+    assert.equal(
+      suiteIds(formal).some((id) => id.startsWith("developer-")),
+      false,
+      `${formalLane} must not trigger the optional developer package`,
+    );
+  }
 });
 
 test("Node groups partition every top-level test exactly once outside full", async () => {

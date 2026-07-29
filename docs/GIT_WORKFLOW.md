@@ -45,6 +45,12 @@ git push -u origin feature/short-name
 
 Open a Pull Request, wait for required CI, review the final diff, then squash-merge. Delete the merged branch. Never use a DMG, `.app`, copied folder or local backup as the basis for a new edit.
 
+An installable developer preview is an optional side output of an exact clean
+commit, not a branch stage. Generate it only after an explicit developer
+request; never commit its `output/developer-preview/` files, merge because it
+passed, or promote its ad-hoc DMG into a formal release. See
+`docs/DEVELOPER_PREVIEW_PLAYBOOK.md`.
+
 Recommended prefixes are `agent/`, `feature/`, `fix/`, `docs/`, `test/`, `refactor/`, `chore/` and `recovery/`. Commits should be small enough to explain and restore. Avoid mixing formatting, generated output and behavioral changes.
 
 Codex and other coding agents follow `AGENTS.md`; detailed authorization, worktree, documentation and final-report behavior is in `docs/CODEX_WORKFLOW.md`. Implementation tasks normally end at a tested Pull Request. Merge and release remain separate explicit decisions.
