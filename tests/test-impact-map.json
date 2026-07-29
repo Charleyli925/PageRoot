@@ -93,6 +93,18 @@
       "description": "Launch the developer preview with isolated data and prove version, first window, readiness and clean exit.",
       "prerequisites": ["developer-packaged-verify"]
     },
+    "candidate-app-build": {
+      "description": "Assemble the formal candidate app without Developer ID signing or Apple notarization.",
+      "prerequisites": ["build-desktop"]
+    },
+    "candidate-app-verify": {
+      "description": "Verify candidate app contents and dependency closure before release credentials are used.",
+      "prerequisites": ["candidate-app-build"]
+    },
+    "candidate-app-runtime": {
+      "description": "Run the full packaged runtime oracle against the verified pre-sign candidate app.",
+      "prerequisites": ["candidate-app-verify"]
+    },
     "packaged-runtime": {
       "description": "Launch the packaged .app with isolated data and verify source bytes, stale-draft reconciliation and clean close/reopen.",
       "prerequisites": ["package-build"]
@@ -157,6 +169,12 @@
       "description": "Optional on-demand developer preview from one clean committed source state.",
       "fullSuites": [
         "developer-packaged-startup"
+      ]
+    },
+    "candidate-app": {
+      "description": "Internal exact-tree pre-sign app gate used by the formal release candidate workflow.",
+      "fullSuites": [
+        "candidate-app-runtime"
       ]
     },
     "artifact": {
@@ -427,13 +445,14 @@
     {
       "id": "packaging",
       "patterns": [
-        "^(?:package(?:-lock)?\\.json|PageRoot 用户声明与免责声明\\.txt|desktop/after-pack\\.mjs|desktop/resources/.*|scripts/(?:build-package|create-release-assets|developer-preview|release-candidate-provenance|release-provenance|source-gate-provenance|verify-packaged-artifact)\\.mjs)$"
+        "^(?:package(?:-lock)?\\.json|PageRoot 用户声明与免责声明\\.txt|desktop/after-pack\\.mjs|desktop/resources/.*|scripts/(?:build-package|create-release-assets|developer-preview|release-app-(?:checkpoint|stage)|release-candidate-provenance|release-provenance|source-gate-provenance|verify-packaged-artifact)\\.mjs)$"
       ],
       "suites": [],
       "nodeTests": [
         "tests/desktop-package.test.mjs",
         "tests/developer-preview-package.test.mjs",
         "tests/packaged-artifact-gate.test.mjs",
+        "tests/release-app-stage.test.mjs",
         "tests/release-provenance.test.mjs",
         "tests/source-gate-provenance.test.mjs",
         "tests/usage-telemetry.test.mjs"

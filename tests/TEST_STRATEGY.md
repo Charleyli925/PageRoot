@@ -12,7 +12,7 @@
 | Ready PR `release-gate` | 最终 PR Tree | 全量 Node、三分片完整 Browser、独立 Native Electron、独立确定性 AI 闭环、真实 HTML 发现式门禁 | 完整源码回归只跑一次并签发 Tree Hash 凭证 |
 | `npm run gate:main:auto` | 合并到 `main` | 校验 PR 结果/Tree Hash/版本后，固定 Node 与 Browser 冒烟 | 快速证明合并结果没有漂移，不重复全量源码测试 |
 | 按需 `Developer Preview` | 仅在开发者明确要求时 | 干净 Tree、最新 renderer、ad-hoc DMG、包内容完整性和一次隔离启动 | 在消耗签名/公证时间前发现“漏打包或根本跑不起来”；不成为正式门禁 |
-| `Release Candidate` | 打标签之前，凭证新鲜且 Tree/版本完全一致 | Developer ID 签名与公证、打包 App 实机启动、DMG/ZIP/blockmap/更新元数据/包内容校验，冻结候选字节 | 失败时不消耗不可变版本 tag |
+| `Release Candidate` | 打标签之前，凭证新鲜且 Tree/版本完全一致 | 预签名 App 内容/完整运行校验 → Developer ID 签名后启动 → App 公证 checkpoint → 从同一 App 生成并公证 DMG → 最终字节校验 | 内容错误不消耗 Apple 队列；后段失败只重跑后段 |
 | `Release` | 候选包通过且不超过 72 小时 | 重新校验候选凭证和每个文件 Hash，创建 tag 并发布原字节 | 发布阶段不重新构建、不悄悄替换文件 |
 
 本地 `release` 和完整 `artifact` 不根据改动缩减范围。`Developer Preview` 是独立的可选入口，正式 `release`、`artifact` 和 `artifact-only` 都不会自动调用它；自动部分不等待人工安装结果，开发者的短验证仅是反馈，不签发正式凭证。`artifact-only` 不是开发者手工跳过源码测试的捷径：执行器会拒绝缺少 CI 信任决定、Tree Hash 或版本不一致的调用，只允许 `Release Candidate` 在七天内成功 PR 凭证与当前 Tree Hash、版本完全一致时进入。发布工作流只接受同一 Tree/版本、已验证且 72 小时内的候选包。`edit` 和 `task` 的选择由 `tests/test-impact-map.json` 决定，模型或开发者只选择门禁层级，不临时拼接测试命令。
@@ -35,7 +35,7 @@
   必须同时注入 HTML、评论、Prompt、附件名、文件路径和原始异常，最终
   批次及本地队列都不得出现这些值；测试永不访问真实 PostHog。
 - 开发者测试包：先对 ad-hoc `.app` 做 app.asar、Bridge、Schema、资源、版本和 DMG 静态校验，再从真实可执行文件做一次首窗/Bridge/Workbench/正常退出冒烟；不复制完整业务矩阵，不检查 Apple 公证或更新资产。
-- 候选包：从 `.app` 的真实可执行文件启动，使用隔离 userData，完成源码字节 oracle；随后校验 app.asar、Bridge、Schema、Developer ID Team、Hardened Runtime、公证票据、Gatekeeper、DMG、ZIP、blockmap、`latest-mac.yml` 和只读挂载内容。
+- 候选包：先对 ad-hoc 预签名 `.app` 校验 app.asar、Bridge、Schema、资源闭包并从真实可执行文件运行完整源码字节 oracle；通过后才做 Developer ID 签名，并在 Apple 请求前做一次 Hardened Runtime 启动。App 公证后冻结 archive/payload/Tree Hash checkpoint，下一 job 只把同一 App 作为 `--prepackaged` 输入生成 DMG、ZIP、blockmap 和 `latest-mac.yml`，再校验 Team、App/DMG 公证票据、Gatekeeper、只读挂载与 ZIP 解包内容。
 
 持久状态只保留四个跨层不变量：过期 revision 自动读取权威草稿并 rebase、结果未知时按 operation ID 查询、已确认的相同聚合 drain 为 no-op、草稿文件领先 runtime pointer 最多只允许一个已校验的崩溃窗口。纯函数和 Session 是主证明，Bridge 只证明持久边界；候选包把四者压缩为一个真实 App 冒烟，不在 Browser、Electron 和打包层各复制整套排列。
 
@@ -43,7 +43,7 @@
 
 顶层 Node 测试在一次执行中只出现一次。精确影响映射优先；只有找不到任何精确用例时才启用 `node-core` 兜底。PR CI 在 Linux 构建一次 Web renderer，供 Node 和 Browser 共享；每个 macOS Electron job 在目标系统本地构建 renderer，并先用独立 preflight 证明窗口可见、计时器和 animation frame 正常推进。Native Electron 与 AI 闭环分成两个 job，Browser 保持每个分片单 worker、零重试，但跨三个独立分片并发。
 
-关键 CI 命令通过 `scripts/ci-evidence.mjs` 记录 commit、Tree、job、耗时、退出状态、标准化失败摘要与稳定签名。环境 preflight 失败可直接归类为 `ci_environment`；源码测试失败先标 `needs_triage`，再依据独立 oracle 归为 `product`、`test_script` 或 `ci_environment`。同一 SHA 的环境嫌疑只重跑失败 job；相同签名连续两次失败且本地不复现时冻结候选并登记 CI incident。完整规则见 `docs/RELEASE_PIPELINE_GOVERNANCE.md`。
+关键 CI 命令通过 `scripts/ci-evidence.mjs` 记录 commit、Tree、job、耗时、退出状态、标准化失败摘要与稳定签名。环境 preflight 失败可直接归类为 `ci_environment`；源码测试失败先标 `needs_triage`，再依据独立 oracle 归为 `product`、`test_script` 或 `ci_environment`。同一 SHA 的环境嫌疑只重跑失败 job；正式流程第二 job 失败时保留并复用第一 job 的签名 App checkpoint，不重新做已通过的构建、运行、签名和 App 公证。相同签名连续两次失败且本地不复现时冻结候选并登记 CI incident。完整规则见 `docs/RELEASE_PIPELINE_GOVERNANCE.md`。
 
 ## 判断标准优先级
 

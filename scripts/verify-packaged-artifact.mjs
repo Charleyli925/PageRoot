@@ -21,6 +21,7 @@ import {
   DEVELOPER_PREVIEW_ARTIFACT_PATTERN,
   developerPreviewReleaseDirectory,
 } from "./developer-preview.mjs";
+import { candidateAppReleaseDirectory } from "./release-app-stage.mjs";
 import { assertBuildInfo, expectedBuildInfo } from "./release-provenance.mjs";
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
@@ -110,6 +111,7 @@ const RUNTIME_TEXT_EXTENSIONS = new Set([
 function parseArguments(argv) {
   const options = {
     arch: "arm64",
+    appPath: undefined,
     profile: "release",
     releaseDirectory: undefined,
   };
@@ -130,14 +132,23 @@ function parseArguments(argv) {
       index += 1;
       continue;
     }
+    if (argument === "--app-path") {
+      options.appPath = argv[index + 1];
+      index += 1;
+      continue;
+    }
     throw new Error(`Unknown argument: ${argument}`);
   }
   assert.match(options.arch ?? "", /^(arm64|x64)$/, "--arch must be arm64 or x64");
   assert.match(
     options.profile ?? "",
-    /^(release|developer)$/,
-    "--profile must be release or developer",
+    /^(release|developer|candidate-app|candidate-app-signed)$/,
+    "--profile must be release, developer, candidate-app or candidate-app-signed",
   );
+  if (options.appPath !== undefined) {
+    assert.equal(path.isAbsolute(options.appPath), true, "--app-path must be absolute");
+    assert.equal(path.extname(options.appPath), ".app", "--app-path must name an app");
+  }
   return options;
 }
 
@@ -795,24 +806,42 @@ async function verifyUpdateAssets({
 export async function verifyPackagedArtifact({
   productRoot = DEFAULT_PRODUCT_ROOT,
   arch = "arm64",
+  appPath,
   profile = "release",
   releaseDirectory,
 } = {}) {
-  assert.match(profile, /^(?:release|developer)$/u, "profile must be release or developer");
+  assert.match(
+    profile,
+    /^(?:release|developer|candidate-app|candidate-app-signed)$/u,
+    "profile must be release, developer, candidate-app or candidate-app-signed",
+  );
   const packageJson = JSON.parse(
     await readFile(path.join(productRoot, "package.json"), "utf8"),
   );
   const isDeveloperPreview = profile === "developer";
-  const layout = expectedArtifactLayout({
+  const isCandidateApp = profile === "candidate-app" || profile === "candidate-app-signed";
+  const expectedLayout = expectedArtifactLayout({
     productRoot,
     packageJson,
     arch,
     releaseDirectory: releaseDirectory
-      ?? (isDeveloperPreview ? developerPreviewReleaseDirectory(productRoot) : undefined),
+      ?? (isDeveloperPreview
+        ? developerPreviewReleaseDirectory(productRoot)
+        : isCandidateApp
+          ? candidateAppReleaseDirectory(productRoot)
+          : undefined),
     artifactName: isDeveloperPreview
       ? DEVELOPER_PREVIEW_ARTIFACT_PATTERN
       : undefined,
   });
+  if (appPath !== undefined) {
+    assert.equal(path.isAbsolute(appPath), true, "appPath must be absolute");
+    assert.equal(path.extname(appPath), ".app", "appPath must name an app");
+  }
+  const layout = {
+    ...expectedLayout,
+    appPath: appPath ?? expectedLayout.appPath,
+  };
   const provenance = await expectedBuildInfo({
     productRoot,
     architecture: arch,
@@ -841,6 +870,22 @@ export async function verifyPackagedArtifact({
       profile,
       app,
       dmg,
+      update: null,
+    };
+  }
+  if (isCandidateApp) {
+    const app = await verifyAppBundle({
+      productRoot,
+      appPath: layout.appPath,
+      packageJson,
+      signaturePolicy: profile === "candidate-app-signed" ? "developer-id" : "adhoc",
+      expectedProvenance: provenance,
+    });
+    return {
+      ...layout,
+      profile,
+      app,
+      dmg: null,
       update: null,
     };
   }
@@ -877,16 +922,22 @@ async function main() {
   const options = parseArguments(process.argv.slice(2));
   const result = await verifyPackagedArtifact({
     arch: options.arch,
+    appPath: options.appPath,
     profile: options.profile,
     releaseDirectory: options.releaseDirectory,
   });
-  console.log(`Packaged artifact verified: ${result.dmgPath}`);
+  if (result.dmg) console.log(`Packaged artifact verified: ${result.dmgPath}`);
+  else console.log(`Candidate app verified: ${result.appPath}`);
   if (result.update) console.log(`Updater ZIP verified: ${result.zipPath}`);
-  else console.log("Developer preview skips updater ZIP and release metadata verification.");
+  else if (result.profile === "developer") {
+    console.log("Developer preview skips updater ZIP and release metadata verification.");
+  }
   console.log(
     `App ${result.version}: ${result.app.asarFileCount} app.asar files, ${result.app.schemaFileCount} schemas`,
   );
-  if (!result.dmg.mounted) console.log(`DMG mount skipped: ${result.dmg.reason}`);
+  if (result.dmg && !result.dmg.mounted) {
+    console.log(`DMG mount skipped: ${result.dmg.reason}`);
+  }
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === SCRIPT_PATH) {

@@ -367,7 +367,7 @@ test("release commands use one automated artifact lane with full tests and packa
   assert.match(packageJson.scripts["audit:dependencies"], /check-dependency-audit\.mjs/);
   assert.match(gateRunner, /require a clean Git worktree/);
   assert.match(gateRunner, /Clean source changed while the gate was running/);
-  assert.match(gateRunner, /artifact-only requires a trusted source-gate decision from CI/);
+  assert.match(gateRunner, /requires a trusted source-gate decision from CI/);
   assert.match(gateRunner, /PAGEROOT_SOURCE_GATE_TREE/);
   assert.match(packageJson.scripts["desktop:pack:prepared"], /build-package\.mjs --arch arm64/);
   assert.match(

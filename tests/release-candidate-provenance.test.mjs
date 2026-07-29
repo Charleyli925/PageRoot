@@ -235,18 +235,20 @@ test("release workflows build before tagging and publish the verified candidate 
     readFile(path.join(productRoot, ".github/workflows/release.yml"), "utf8"),
   ]);
   assert.match(candidate, /workflow_dispatch/u);
-  assert.match(candidate, /gate:artifact-only:auto/u);
+  assert.match(candidate, /gate:candidate-app:auto/u);
   assert.match(candidate, /source-gate-provenance\.mjs verify/u);
+  assert.match(candidate, /release-app-checkpoint\.mjs create/u);
+  assert.match(candidate, /release-app-checkpoint\.mjs restore/u);
+  assert.match(candidate, /--profile candidate-artifacts/u);
   assert.match(candidate, /release-candidate-provenance\.mjs create/u);
   assert.match(candidate, /MAC_CSC_LINK/u);
   assert.match(candidate, /APPLE_APP_SPECIFIC_PASSWORD/u);
   assert.match(candidate, /PAGEROOT_REQUIRE_NOTARIZATION/u);
   assert.match(candidate, /PAGEROOT_POSTHOG_TOKEN/u);
-  assert.match(candidate, /PAGEROOT_REQUIRE_TELEMETRY_CONFIG/u);
   assert.match(candidate, /https:\/\/us\.i\.posthog\.com/u);
   assert.match(
     candidate,
-    /build-and-verify-candidate[\s\S]+timeout-minutes: 120[\s\S]+Build and verify the exact pre-tag installer[\s\S]+timeout-minutes: 110/u,
+    /preflight-sign-and-notarize-app[\s\S]+timeout-minutes: 90[\s\S]+package-and-verify-candidate[\s\S]+timeout-minutes: 75/u,
   );
   assert.match(
     candidate,
@@ -256,6 +258,7 @@ test("release workflows build before tagging and publish the verified candidate 
     candidate,
     /Upload exact candidate bundle[\s\S]+timeout-minutes: 10/u,
   );
+  assert.doesNotMatch(candidate, /gate:artifact-only:auto/u);
   assert.doesNotMatch(candidate, /gh release create/u);
   assert.doesNotMatch(candidate, /git tag/u);
 

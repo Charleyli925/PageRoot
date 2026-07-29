@@ -18,6 +18,14 @@ import {
   developerPreviewEnvironment,
   developerPreviewReleaseDirectory,
 } from "./developer-preview.mjs";
+import {
+  candidateAppBuilderArguments,
+  candidateAppEnvironment,
+  candidateAppReleaseDirectory,
+  candidateArtifactBuilderArguments,
+  candidateArtifactBuilderEnvironment,
+  restoreReleaseMetadataFromApp,
+} from "./release-app-stage.mjs";
 import { writeBuildInfo } from "./release-provenance.mjs";
 import { expectedArtifactLayout } from "./verify-packaged-artifact.mjs";
 import { createTelemetryBuildConfig } from "../desktop/usage-telemetry.mjs";
@@ -28,6 +36,7 @@ const productRoot = path.resolve(path.dirname(scriptPath), "..");
 export function parseBuildOptions(argv) {
   const options = {
     architecture: null,
+    prepackagedAppPath: null,
     profile: "release",
   };
   for (let index = 0; index < argv.length; index += 1) {
@@ -42,13 +51,31 @@ export function parseBuildOptions(argv) {
       index += 1;
       continue;
     }
+    if (argument === "--prepackaged") {
+      options.prepackagedAppPath = argv[index + 1] ?? "";
+      index += 1;
+      continue;
+    }
     throw new Error(`Unknown package-build argument: ${argument}`);
   }
   if (!/^(?:arm64|x64)$/u.test(options.architecture ?? "")) {
     throw new Error("--arch must be arm64 or x64.");
   }
-  if (!/^(?:release|developer)$/u.test(options.profile)) {
-    throw new Error("--profile must be release or developer.");
+  if (!/^(?:release|developer|candidate-app|candidate-artifacts)$/u.test(options.profile)) {
+    throw new Error(
+      "--profile must be release, developer, candidate-app or candidate-artifacts.",
+    );
+  }
+  if (options.profile === "candidate-artifacts") {
+    if (
+      typeof options.prepackagedAppPath !== "string"
+      || !path.isAbsolute(options.prepackagedAppPath)
+      || path.extname(options.prepackagedAppPath) !== ".app"
+    ) {
+      throw new Error("candidate-artifacts requires --prepackaged with an absolute .app path.");
+    }
+  } else if (options.prepackagedAppPath !== null) {
+    throw new Error("--prepackaged is allowed only with the candidate-artifacts profile.");
   }
   return options;
 }
@@ -219,14 +246,25 @@ export async function writeUsageTelemetryBuildConfig({
 }
 
 async function main() {
-  const { architecture, profile } = parseBuildOptions(process.argv.slice(2));
+  const {
+    architecture,
+    prepackagedAppPath,
+    profile,
+  } = parseBuildOptions(process.argv.slice(2));
   const isDeveloperPreview = profile === "developer";
+  const isCandidateApp = profile === "candidate-app";
+  const isCandidateArtifacts = profile === "candidate-artifacts";
   const packageJson = JSON.parse(
     await readFile(path.join(productRoot, "package.json"), "utf8"),
   );
   const releaseDirectory = isDeveloperPreview
     ? developerPreviewReleaseDirectory(productRoot)
-    : undefined;
+    : isCandidateApp
+      ? candidateAppReleaseDirectory(productRoot)
+      : path.resolve(
+        productRoot,
+        packageJson.build?.directories?.output ?? "release",
+      );
   const layout = expectedArtifactLayout({
     productRoot,
     packageJson,
@@ -238,13 +276,31 @@ async function main() {
   });
   const buildEnvironment = isDeveloperPreview
     ? developerPreviewEnvironment(process.env)
-    : process.env;
-  const { buildInfo, destination } = await writeBuildInfo({ productRoot, architecture });
-  const telemetryConfig = await writeUsageTelemetryBuildConfig({
-    productRoot,
-    environment: buildEnvironment,
-  });
-  console.log(`Build provenance: ${destination}`);
+    : isCandidateApp
+      ? candidateAppEnvironment(process.env)
+      : isCandidateArtifacts
+        ? candidateArtifactBuilderEnvironment(process.env)
+        : process.env;
+  let buildInfo;
+  let telemetryConfig;
+  if (isCandidateArtifacts) {
+    const restored = await restoreReleaseMetadataFromApp({
+      productRoot,
+      appPath: prepackagedAppPath,
+      architecture,
+    });
+    buildInfo = restored.buildInfo;
+    telemetryConfig = restored.telemetry;
+    console.log(`Build provenance restored from signed app: ${prepackagedAppPath}`);
+  } else {
+    const provenance = await writeBuildInfo({ productRoot, architecture });
+    buildInfo = provenance.buildInfo;
+    telemetryConfig = await writeUsageTelemetryBuildConfig({
+      productRoot,
+      environment: buildEnvironment,
+    });
+    console.log(`Build provenance: ${provenance.destination}`);
+  }
   console.log(`Git commit: ${buildInfo.commitSha}`);
   console.log(`Package profile: ${profile}`);
   console.log(
@@ -267,7 +323,18 @@ async function main() {
       architecture,
       releaseDirectory,
     })
-    : releasePackageBuilderArguments(architecture);
+    : isCandidateApp
+      ? candidateAppBuilderArguments({
+        architecture,
+        releaseDirectory,
+      })
+      : isCandidateArtifacts
+        ? candidateArtifactBuilderArguments({
+          architecture,
+          prepackagedAppPath,
+          releaseDirectory,
+        })
+        : releasePackageBuilderArguments(architecture);
   const child = spawn(
     executable,
     builderArguments,
@@ -289,9 +356,14 @@ async function main() {
     return;
   }
 
+  if (isCandidateApp) {
+    console.log(`Pre-sign candidate app assembled in ${releaseDirectory}`);
+    return;
+  }
+
   const notarization = await notarizeAndStapleDmg({
     dmgPath: layout.dmgPath,
-    environment: buildEnvironment,
+    environment: isCandidateArtifacts ? process.env : buildEnvironment,
   });
   if (!notarization.skipped) {
     const metadata = await refreshDmgUpdateMetadata({

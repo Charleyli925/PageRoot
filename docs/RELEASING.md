@@ -53,35 +53,55 @@ In GitHub Actions:
 
 1. Select the `Release Candidate` workflow.
 2. Choose `main`.
-3. Run the workflow and wait for `build-and-verify-candidate`.
+3. Run the workflow and wait for both `preflight-sign-and-notarize-app` and
+   `package-and-verify-candidate`.
 
-The workflow allows up to 110 minutes specifically for the combined
-build/sign/notarize/install-verification operation, within a 120-minute outer
-job guard. The App and the final DMG are submitted to Apple independently; the
-DMG is stapled and validated after its own acceptance. All other steps have
-explicit 2–10 minute limits, so an unrelated checkout, dependency, metadata,
-provenance or upload stall still fails quickly.
+The candidate is deliberately split at a signed-App checkpoint. The first job
+has a 90-minute guard and the second has a 75-minute guard. App notarization
+and final-DMG notarization remain independent Apple submissions with narrow
+45- and 50-minute step budgets. Checkout, dependency installation, source
+evidence, checkpoint transfer, metadata, provenance and upload retain 2–10
+minute limits.
 
 The workflow:
 
 - refuses any ref other than current `main`;
 - requires a successful PR source-gate attestation for the exact Tree Hash and package/lockfile version, no older than seven days;
-- packages on macOS with `electron-builder --publish never`, Developer ID
-  signing, Hardened Runtime, App notarization, and final DMG
-  notarization/stapling;
 - requires the PostHog Project token and embeds a generated public ingestion
   configuration whose host is fixed to the selected cloud region;
-- launches the packaged App with isolated data;
-- verifies the App bundle, Bridge resources, schemas, expected Team ID,
-  packaged user notice, notarization ticket, Gatekeeper assessment, DMG
-  integrity, update ZIP, blockmap, `latest-mac.yml` and read-only mount;
+- first assembles one ad-hoc App with `electron-builder --publish never`, then
+  verifies app.asar, Bridge, schemas, resources and the complete packaged
+  runtime oracle before it exposes signing or Apple credentials to a build
+  process;
+- Developer ID signs that already-verified App, launches it once under
+  Hardened Runtime before any Apple submission, then notarizes, staples and
+  re-verifies it;
+- archives the exact signed/notarized App plus source, payload and archive
+  hashes as an attempt-qualified checkpoint retained for 14 days;
+- starts a separate job from that checkpoint, validates every checkpoint byte,
+  and passes the same App to electron-builder with `--prepackaged` rather than
+  rebuilding it;
+- creates the DMG, update ZIP, blockmap and `latest-mac.yml`, submits only the
+  final DMG to Apple in that job, then verifies Team ID, tickets, Gatekeeper,
+  DMG integrity, updater metadata and read-only mounted/extracted contents;
 - creates checksums for every public payload and metadata file, retains the
   legacy `update-manifest.json`, and copies `build-info.json`;
 - freezes those files with `release-candidate.json` in an artifact named for the exact Tree Hash, version, architecture and workflow run attempt.
 
 It does not create a tag or GitHub Release. A failed build or verification therefore leaves the version namespace untouched.
 
-Candidate artifacts are retained for 14 days. Publication accepts only a successful matching candidate no older than 72 hours. If the source changes for any reason, build a new candidate for the new Tree Hash.
+Candidate artifacts and the internal signed-App checkpoint are retained for 14
+days. Publication accepts only a successful matching candidate no older than
+72 hours. If the source changes for any reason, build a new candidate for the
+new Tree Hash.
+
+If `package-and-verify-candidate` alone fails for an environment, transfer,
+DMG-notary or final-asset reason, use **Re-run failed jobs**, not **Re-run all
+jobs**. GitHub then reuses the successful attempt-qualified signed-App
+checkpoint, so it does not rebuild, rerun the packaged runtime oracle, resign
+or renotarize the App. A failure in the first job has no reusable checkpoint;
+rerun that job only for a classified same-SHA environment incident. Any source
+or test-script fix creates a new Tree and invalidates the old checkpoint.
 
 ## Publish the candidate
 

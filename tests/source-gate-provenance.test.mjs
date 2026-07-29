@@ -144,12 +144,16 @@ test("GitHub workflows keep one ready-PR source boundary, a light main boundary 
   assert.doesNotMatch(ci, /push:[\s\S]{0,300}gate:release:auto/u);
 
   assert.match(candidate, /source-gate-provenance\.mjs verify/u);
-  assert.match(candidate, /gate:artifact-only:auto/u);
+  assert.match(candidate, /gate:candidate-app:auto/u);
   assert.match(candidate, /PAGEROOT_SOURCE_GATE_TRUSTED/u);
   assert.match(candidate, /PAGEROOT_SOURCE_GATE_TREE/u);
+  assert.match(candidate, /release-app-checkpoint\.mjs create/u);
+  assert.match(candidate, /release-app-checkpoint\.mjs restore/u);
+  assert.match(candidate, /--profile candidate-artifacts/u);
   assert.match(candidate, /release-candidate-provenance\.mjs create/u);
   assert.match(candidate, /test:electron:ci-preflight:prepared/u);
   assert.doesNotMatch(candidate, /npm run release:mac/u);
+  assert.doesNotMatch(candidate, /gate:artifact-only:auto/u);
   assert.doesNotMatch(candidate, /gh release create/u);
 
   assert.match(release, /release-candidate-provenance\.mjs resolve/u);

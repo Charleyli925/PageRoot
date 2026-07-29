@@ -15,6 +15,7 @@ import {
   developerPreviewReleaseDirectory,
   writeDeveloperPreviewAttestation,
 } from "./developer-preview.mjs";
+import { candidateAppReleaseDirectory } from "./release-app-stage.mjs";
 import { expectedArtifactLayout } from "./verify-packaged-artifact.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
@@ -38,9 +39,9 @@ function parseArguments(argv) {
     else if (argument === "--real-html") options.realHtmlPath = argv.shift() || null;
     else throw new Error(`Unknown argument: ${argument}`);
   }
-  if (!/^(?:edit|task|main|release|developer-package|artifact-only|artifact)$/u.test(options.lane)) {
+  if (!/^(?:edit|task|main|release|developer-package|candidate-app|artifact-only|artifact)$/u.test(options.lane)) {
     throw new Error(
-      "Lane must be edit, task, main, release, developer-package, artifact-only or artifact.",
+      "Lane must be edit, task, main, release, developer-package, candidate-app, artifact-only or artifact.",
     );
   }
   if (!/^(?:arm64|x64)$/u.test(options.arch)) throw new Error("--arch must be arm64 or x64.");
@@ -167,11 +168,26 @@ function commandForSuite(suiteId, context) {
       ],
     };
   }
+  if (suiteId === "candidate-app-build") {
+    return {
+      command: process.execPath,
+      args: [
+        path.join(productRoot, "scripts/build-package.mjs"),
+        "--arch",
+        context.options.arch,
+        "--profile",
+        "candidate-app",
+      ],
+    };
+  }
   if (suiteId === "packaged-runtime") {
     return packageCommand("test:packaged-runtime:prepared");
   }
   if (suiteId === "developer-packaged-startup") {
     return packageCommand("test:packaged-startup:prepared");
+  }
+  if (suiteId === "candidate-app-runtime") {
+    return packageCommand("test:packaged-runtime:prepared");
   }
   if (suiteId === "packaged-verify") {
     return {
@@ -188,6 +204,18 @@ function commandForSuite(suiteId, context) {
         context.options.arch,
         "--profile",
         "developer",
+      ],
+    };
+  }
+  if (suiteId === "candidate-app-verify") {
+    return {
+      command: process.execPath,
+      args: [
+        path.join(productRoot, "scripts/verify-packaged-artifact.mjs"),
+        "--arch",
+        context.options.arch,
+        "--profile",
+        "candidate-app",
       ],
     };
   }
@@ -237,6 +265,7 @@ async function main() {
     "main",
     "release",
     "developer-package",
+    "candidate-app",
     "artifact-only",
     "artifact",
   ].includes(options.lane);
@@ -248,15 +277,17 @@ async function main() {
   const plan = assertFullyAutomatedPlan(selectGatePlan({ map, lane: options.lane, changedFiles: files }));
   const repository = await repositoryEvidence(files);
   const packageJson = JSON.parse(await readFile(path.join(productRoot, "package.json"), "utf8"));
-  if (options.lane === "artifact-only") {
+  if (options.lane === "artifact-only" || options.lane === "candidate-app") {
     if (process.env.PAGEROOT_SOURCE_GATE_TRUSTED !== "true") {
-      throw new Error("artifact-only requires a trusted source-gate decision from CI.");
+      throw new Error(`${options.lane} requires a trusted source-gate decision from CI.`);
     }
     if (
       process.env.PAGEROOT_SOURCE_GATE_TREE !== repository.tree
       || process.env.PAGEROOT_SOURCE_GATE_VERSION !== packageJson.version
     ) {
-      throw new Error("artifact-only source-gate tree or version does not match the clean checkout.");
+      throw new Error(
+        `${options.lane} source-gate tree or version does not match the clean checkout.`,
+      );
     }
   }
   const artifact = expectedArtifactLayout({
@@ -265,7 +296,9 @@ async function main() {
     arch: options.arch,
     releaseDirectory: options.lane === "developer-package"
       ? developerPreviewReleaseDirectory(productRoot)
-      : undefined,
+      : options.lane === "candidate-app"
+        ? candidateAppReleaseDirectory(productRoot)
+        : undefined,
     artifactName: options.lane === "developer-package"
       ? DEVELOPER_PREVIEW_ARTIFACT_PATTERN
       : undefined,
@@ -315,7 +348,9 @@ async function main() {
         ...(options.realHtmlPath && suite.id === "real-html"
           ? { PAGEROOT_REAL_HTML_PATH: options.realHtmlPath }
           : {}),
-        ...((suite.id === "packaged-runtime" || suite.id === "developer-packaged-startup")
+        ...((suite.id === "packaged-runtime"
+          || suite.id === "developer-packaged-startup"
+          || suite.id === "candidate-app-runtime")
           ? {
             PAGEROOT_PACKAGED_APP_PATH: artifact.appPath,
             PAGEROOT_TEST_ARCH: options.arch,
