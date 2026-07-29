@@ -44,6 +44,7 @@ declare global {
         listener: (issue: WorkspaceUnavailable) => void,
       ) => () => void;
       relaunch: () => Promise<{ relaunched: boolean }>;
+      openUserNotice: () => Promise<{ opened: boolean }>;
     };
   }
 }

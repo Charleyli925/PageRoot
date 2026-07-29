@@ -64,6 +64,10 @@ export const DEFAULT_PROJECT_HTML = `<!doctype html>
     .brand-lockup strong { display: block; font-size: 15px; letter-spacing: .02em; }
     .brand-lockup small { display: block; margin-top: 2px; color: rgba(248, 246, 255, .55); font-size: 10px; letter-spacing: .12em; }
     .demo-badge {
+      position: absolute;
+      top: 44px;
+      right: 50px;
+      z-index: 2;
       padding: 7px 11px;
       border: 1px solid rgba(255, 255, 255, .18);
       border-radius: 999px;
@@ -216,6 +220,7 @@ export const DEFAULT_PROJECT_HTML = `<!doctype html>
     @media (max-width: 760px) {
       .page { width: 100%; margin: 0; border: 0; border-radius: 0; }
       .hero { grid-template-columns: 1fr; gap: 40px; padding: 30px 24px 40px; }
+      .demo-badge { top: 30px; right: 24px; }
       .brand-row { margin-bottom: 48px; }
       .content { padding: 42px 24px 36px; }
       .section-heading { display: block; }
@@ -235,27 +240,27 @@ export const DEFAULT_PROJECT_HTML = `<!doctype html>
 <body>
   <article class="page">
     <header class="hero">
+      <span class="demo-badge">内置介绍页</span>
       <div>
         <div class="brand-row">
           <div class="brand-lockup">
             <img src="./${WELCOME_LOGO_RELATIVE_PATH}" alt="源页 Logo" />
             <div><strong>源页</strong><small>PAGEROOT</small></div>
           </div>
-          <span class="demo-badge">内置介绍页</span>
         </div>
-        <p class="eyebrow">Write smoothly. Change precisely.</p>
+        <p class="eyebrow">Visual HTML × AI Agents</p>
         <h1><span>所见，即可落笔。</span><span>所改，止于所选。</span></h1>
-        <p class="intro">在真实 HTML 上直接双击文字，光标准确落点，输入、删除、选择与中文输入都自然顺畅。简单修改即时完成，复杂要求则用评论清楚交给 AI。</p>
-        <div class="hero-foot"><span>原生光标与输入法</span><span>源码级局部 Patch</span><span>评论与附件</span></div>
+        <p class="intro">在真实 HTML 上直接修改，也可以在页面上指出位置、写下评论并附上参考文件。源页把完整上下文整理成 AI Agent 可直接执行的本地任务，让复杂修改自然接力。</p>
+        <div class="hero-foot"><span>可视化直接编辑</span><span>AI Agent 无缝交接</span><span>源码级安全接回</span></div>
       </div>
       <aside class="source-card">
-        <small>SAFE BY DEFAULT</small>
-        <h2>每一次写回，都经过完整校验。</h2>
-        <p>源页只相信真实 HTML。目标、源码和返回结果没有全部对上，就不会写入，也不会生成新版本。</p>
+        <small>AGENT-READY BY DESIGN</small>
+        <h2>你指出哪里，AI Agent 就从哪里开始。</h2>
+        <p>真实 HTML、精确目标、评论、附件和项目规则会被冻结为本地任务包。AI Agent 写回后，源页自动检测、校验并生成独立版本。</p>
         <div class="source-path">
-          <span><i></i>真实 HTML 是唯一事实源</span>
-          <span><i></i>只修改被明确选中的范围</span>
-          <span><i></i>AI 新版独立保留，不覆盖提交前文件</span>
+          <span><i></i>Claude Code · Codex · WorkBuddy · Qoder</span>
+          <span><i></i>无需复制整页 HTML 或重新描述位置</span>
+          <span><i></i>AI Agent 新版独立保留，不覆盖原文件</span>
         </div>
       </aside>
     </header>
@@ -263,33 +268,34 @@ export const DEFAULT_PROJECT_HTML = `<!doctype html>
     <div class="content">
       <section>
         <div class="section-heading">
-          <div><small>CORE EXPERIENCE</small><h2>把网页修改，变成四件自然的事。</h2></div>
-          <p>不用在源码里找标签，也不必向 AI 解释整张页面。你专注于内容和意见，源页负责守住修改边界。</p>
+          <div><small>CORE EXPERIENCE</small><h2>让人与 AI Agent 自然接力。</h2></div>
+          <p>不用在源码里找标签，也不必反复解释整张页面。你指出意图，AI Agent 执行，源页负责守住源码与版本边界。</p>
         </div>
         <div class="promise-grid">
           <article class="promise"><span class="promise-index">01 / TYPE</span><h3>顺畅的文本编辑</h3><p>安全可编辑的文字，双击就能把光标放到点击位置。输入、删除、选择、粘贴和中文输入法都沿用熟悉的原生体验。</p></article>
           <article class="promise"><span class="promise-index">02 / TARGET</span><h3>指哪改哪的局部修改</h3><p>选中标题就只改标题，选中正文就只改正文。修改以最小源码 Patch 写回，其余 HTML 结构和格式保持不动。</p></article>
-          <article class="promise"><span class="promise-index">03 / COMMENT</span><h3>轻松完整的评论体验</h3><p>评论可以跟随整个页面、模块或具体文字；图片和文件也能一起附上，意见、目标与历史版本始终对应。</p></article>
-          <article class="promise"><span class="promise-index">04 / VERIFY</span><h3>完整的安全校验</h3><p>写回前核对目标、源码与外部改动；AI 结果还会检查身份、文件完整性和修改范围，任何异常都会停止。</p></article>
+          <article class="promise"><span class="promise-index">03 / HANDOFF</span><h3>AI Agent 拿到完整上下文</h3><p>页面目标、评论、图片、文件、项目规则和冻结 HTML 会组成一项本地任务，不用再复制代码或重复说明位置。</p></article>
+          <article class="promise"><span class="promise-index">04 / VERIFY</span><h3>AI Agent 结果安全接回</h3><p>返回结果会核对身份、源码 Hash、文件完整性和修改范围；通过后独立建版，提交前文件始终保留。</p></article>
         </div>
       </section>
 
       <section class="workflow">
-        <div class="workflow-copy"><small>HOW IT FEELS</small><h2>打开 HTML，直接开始。</h2><p>当前文件、保存状态、评论数量和 AI 处理进度都清楚可见，你始终知道内容正处在哪一步。</p></div>
+        <div class="workflow-copy"><small>AI AGENT WORKFLOW</small><h2>你指出。<br />AI Agent 执行。<br />源页校验接回。</h2><p>Claude Code、Codex、WorkBuddy、Qoder，以及其他能读取本地文件并执行命令的 AI Agent 都可以使用。</p></div>
         <div class="steps">
-          <div class="step"><b>01</b><div><strong>双击文字，光标落点即编辑</strong><span>简单内容自然输入；不能安全直改的区域不会被冒险写回，仍可用评论说明要求。</span></div></div>
-          <div class="step"><b>02</b><div><strong>评论具体位置，带上图片或文件</strong><span>选中目标后写下要求，右侧评论与页面位置保持关系，集中查看、补充和复核都更方便。</span></div></div>
-          <div class="step"><b>03</b><div><strong>发送、校验，再打开最新版</strong><span>源页冻结本轮内容；AI 返回后执行完整校验。通过后由你打开最新版，提交前文件与历史版本仍会保留。</span></div></div>
+          <div class="step"><b>01</b><div><strong>在页面上选择和说明</strong><span>直接修改简单内容；复杂要求则锚定到页面、模块或文字，并附上图片和文件。</span></div></div>
+          <div class="step"><b>02</b><div><strong>源页冻结可执行任务</strong><span>准确 HTML、目标、评论、附件和项目规则被整理到受管本地文件，交接信息自动复制。</span></div></div>
+          <div class="step"><b>03</b><div><strong>交给你正在使用的 AI Agent</strong><span>AI Agent 按任务内的路径和规则读取、修改并最终化，不需要专用云端 API。</span></div></div>
+          <div class="step"><b>04</b><div><strong>校验后生成独立新版本</strong><span>源页检测返回结果并完成校验；通过后由你打开最新版，原文件和历史版本继续保留。</span></div></div>
         </div>
       </section>
 
       <aside class="notice">
-        <div><strong>在桌面版中，这张欢迎页可以直接体验编辑、选择和评论。</strong><span>桌面版会把它建立为本地 HTML；修改会自动保存到「欢迎来到源页.html」，AI 新版也会进入独立版本历史。</span></div>
+        <div><strong>这张欢迎页本身，就是一次完整的 AI Agent 协作入口。</strong><span>双击即可直接编辑，也可以选中内容添加评论；发送后，把交接信息粘贴给 Claude Code、Codex、WorkBuddy、Qoder 等 AI Agent 即可。</span></div>
         <em>从顶部「项目」打开其他 HTML</em>
       </aside>
     </div>
 
-    <footer><span>源页 · PageRoot</span><span>Editable islands. Byte-exact outside.</span></footer>
+    <footer><span>源页 · PageRoot</span><span>Visual intent in context. AI Agents in flow.</span></footer>
   </article>
 </body>
 </html>`;
@@ -311,7 +317,7 @@ export const BLANK_PROJECT_HTML = `<!doctype html>
 <body>
   <main>
     <h1>未命名页面</h1>
-    <p>双击这段文字开始编辑，或选择内容后添加评论交给内部 AI。</p>
+    <p>双击这段文字开始编辑，或选择内容后添加评论交给 AI Agent。</p>
   </main>
 </body>
 </html>`;

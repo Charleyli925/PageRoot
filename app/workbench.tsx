@@ -1846,6 +1846,7 @@ export default function Workbench() {
   const [manualUpdateCheckPending, setManualUpdateCheckPending] = useState(false);
   const [manualUpdateCheckFailed, setManualUpdateCheckFailed] = useState(false);
   const [repositoryOpenFailed, setRepositoryOpenFailed] = useState(false);
+  const [userNoticeOpenFailed, setUserNoticeOpenFailed] = useState(false);
   const promptedUpdateVersionRef = useRef<string | null>(null);
   const [, setOpenedAiVersionNotice] =
     useState<OpenedAiVersionNotice | null>(null);
@@ -1924,6 +1925,7 @@ export default function Workbench() {
     return lifecycle.onAboutRequested(() => {
       setManualUpdateCheckFailed(false);
       setRepositoryOpenFailed(false);
+      setUserNoticeOpenFailed(false);
       setAboutOpen(true);
     });
   }, []);
@@ -1958,6 +1960,16 @@ export default function Workbench() {
       window.open(PROJECT_REPOSITORY_URL, "_blank", "noopener,noreferrer");
     } catch {
       setRepositoryOpenFailed(true);
+    }
+  }, []);
+
+  const openUserNotice = useCallback(async () => {
+    setUserNoticeOpenFailed(false);
+    try {
+      const result = await window.htmlAIAppLifecycle?.openUserNotice();
+      if (!result?.opened) throw new Error("User notice did not open.");
+    } catch {
+      setUserNoticeOpenFailed(true);
     }
   }, []);
 
@@ -10702,6 +10714,7 @@ export default function Workbench() {
         manualCheckPending={manualUpdateCheckPending}
         manualCheckFailed={manualUpdateCheckFailed}
         repositoryOpenFailed={repositoryOpenFailed}
+        userNoticeOpenFailed={userNoticeOpenFailed}
         onClose={closeAboutPageRoot}
         onCheckForUpdates={() => void checkForApplicationUpdates()}
         onDownloadUpdate={() => void downloadAvailableUpdate()}
@@ -10710,6 +10723,7 @@ export default function Workbench() {
           setRestartUpdateOpen(true);
         }}
         onOpenRepository={() => void openProjectRepository()}
+        onOpenUserNotice={() => void openUserNotice()}
       />
 
       {toast ? (

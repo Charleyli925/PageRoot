@@ -115,7 +115,10 @@ channel checks, the startup-plus-four-hour schedule, coalesced manual checks,
 download progress and downloaded-install readiness. It exposes only immutable
 status snapshots and narrow check/download/install intents through preload IPC. The
 renderer can also request the fixed project repository URL, but cannot supply
-an arbitrary external URL. A renderer download intent is accepted only while
+an arbitrary external URL. The About surface may request the packaged user
+notice through one app-level IPC intent; the main process resolves the fixed
+resource name for development or the signed app bundle, and the renderer cannot
+supply a local path. A renderer download intent is accepted only while
 the controller owns an available stable update; it does not grant exit
 authority. Restart installation is a second explicit intent that reuses the
 same Electron drain coordinator before invoking the signed updater. Ordinary

@@ -54,8 +54,8 @@ The workflow:
   notarization/stapling;
 - launches the packaged App with isolated data;
 - verifies the App bundle, Bridge resources, schemas, expected Team ID,
-  notarization ticket, Gatekeeper assessment, DMG integrity, update ZIP,
-  blockmap, `latest-mac.yml` and read-only mount;
+  packaged user notice, notarization ticket, Gatekeeper assessment, DMG
+  integrity, update ZIP, blockmap, `latest-mac.yml` and read-only mount;
 - creates checksums for every public payload and metadata file, retains the
   legacy `update-manifest.json`, and copies `build-info.json`;
 - freezes those files with `release-candidate.json` in an artifact named for the exact Tree Hash, version, architecture and workflow run attempt.

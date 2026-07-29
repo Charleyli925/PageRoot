@@ -22,6 +22,7 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
     qoderHandoff,
     manualUpdate,
     applicationUpdate,
+    userNotice,
     afterPack,
     entitlements,
     iconInfo,
@@ -44,6 +45,7 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
     readFile(new URL("../desktop/qoder-handoff.mjs", import.meta.url), "utf8"),
     readFile(new URL("../desktop/manual-update.mjs", import.meta.url), "utf8"),
     readFile(new URL("../desktop/application-update.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../PageRoot 用户声明与免责声明.txt", import.meta.url), "utf8"),
     readFile(new URL("../desktop/after-pack.mjs", import.meta.url), "utf8"),
     readFile(new URL("../desktop/resources/entitlements.mac.plist", import.meta.url), "utf8"),
     stat(new URL("../desktop/resources/icon.icns", import.meta.url)),
@@ -127,6 +129,7 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
     "node_modules/universalify",
     "schemas",
     "build-info.json",
+    "PageRoot 用户声明与免责声明.txt",
     "LICENSE",
     "NOTICE",
     "THIRD_PARTY_NOTICES.md",
@@ -135,6 +138,9 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   }
   assert.equal(packageJson.scripts["release:mac"], "npm run gate:artifact:auto");
   assert.ok(iconInfo.size > 100_000);
+  assert.match(userNotice, /AI Agent 生成或修改的内容可能不准确/);
+  assert.match(userNotice, /只会把交接内容复制到本机剪贴板/);
+  assert.match(userNotice, /Apache License 2\.0/);
 
   assert.match(mainProcess, /utilityProcess\.fork/);
   assert.match(mainProcess, /requestSingleInstanceLock/);
@@ -220,6 +226,11 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.match(mainProcess, /APP_CHANNELS\.closeAborted/);
   assert.match(mainProcess, /APP_CHANNELS\.workspaceUnavailable/);
   assert.match(mainProcess, /APP_CHANNELS\.relaunch/);
+  assert.match(mainProcess, /APP_CHANNELS\.openUserNotice/);
+  assert.match(
+    mainProcess,
+    /shell\.openPath\(userNoticePath\(\)\)/,
+  );
   assert.match(mainProcess, /coordinateApplicationRelaunch/);
   assert.match(
     mainProcess,
@@ -317,6 +328,10 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
     /ipcRenderer\.invoke\(appChannels\.workspaceRecoveryReady\)/,
   );
   assert.match(preload, /relaunch:\s*\(\) => ipcRenderer\.invoke\(appChannels\.relaunch\)/);
+  assert.match(
+    preload,
+    /openUserNotice:\s*\(\) => invokeProject\(appChannels\.openUserNotice\)/,
+  );
   assert.match(preload, /forgetRecent:\s*\(sourcePath\)/);
   assert.match(
     preload,

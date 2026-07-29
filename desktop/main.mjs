@@ -73,6 +73,7 @@ import {
 const { autoUpdater } = electronUpdater;
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
+const USER_NOTICE_FILE_NAME = "PageRoot 用户声明与免责声明.txt";
 const e2eUserDataPath = (() => {
   if (process.env.PAGEROOT_E2E !== "1") return null;
   const candidate = process.env.PAGEROOT_E2E_USER_DATA_DIR;
@@ -134,6 +135,7 @@ const APP_CHANNELS = Object.freeze({
   workspaceUnavailable: "html-app:workspace-unavailable",
   workspaceRecoveryReady: "html-app:workspace-recovery-ready",
   relaunch: "html-app:relaunch",
+  openUserNotice: "html-app:open-user-notice",
 });
 const INTEGRATION_CHANNELS = Object.freeze({
   qoderHandoff: "html-integrations:qoder-handoff",
@@ -1166,6 +1168,23 @@ async function openProjectRepository() {
   return { opened: true };
 }
 
+function userNoticePath() {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, USER_NOTICE_FILE_NAME)
+    : path.join(directory, "..", USER_NOTICE_FILE_NAME);
+}
+
+async function openUserNotice() {
+  const openError = await shell.openPath(userNoticePath());
+  if (openError) {
+    throw new ProjectFileError(
+      "USER_NOTICE_OPEN_FAILED",
+      "声明文件没有打开，请重新安装源页后重试。",
+    );
+  }
+  return { opened: true };
+}
+
 function registerProjectIpc() {
   if (projectIpcRegistered) return;
   projectIpcRegistered = true;
@@ -1274,6 +1293,10 @@ function registerProjectIpc() {
   ipcMain.handle(
     UPDATE_CHANNELS.openRepository,
     trustedProject(openProjectRepository),
+  );
+  ipcMain.handle(
+    APP_CHANNELS.openUserNotice,
+    trustedProject(openUserNotice),
   );
   ipcMain.handle(APP_CHANNELS.closeResult, trusted(reportCloseResult));
   ipcMain.handle(

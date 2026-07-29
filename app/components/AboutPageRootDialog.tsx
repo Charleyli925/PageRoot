@@ -39,11 +39,13 @@ type AboutPageRootDialogProps = {
   manualCheckPending: boolean;
   manualCheckFailed: boolean;
   repositoryOpenFailed: boolean;
+  userNoticeOpenFailed: boolean;
   onClose: () => void;
   onCheckForUpdates: () => void;
   onDownloadUpdate: () => void;
   onRequestRestart: () => void;
   onOpenRepository: () => void;
+  onOpenUserNotice: () => void;
 };
 
 type UpdatePresentation = {
@@ -174,11 +176,13 @@ export default function AboutPageRootDialog({
   manualCheckPending,
   manualCheckFailed,
   repositoryOpenFailed,
+  userNoticeOpenFailed,
   onClose,
   onCheckForUpdates,
   onDownloadUpdate,
   onRequestRestart,
   onOpenRepository,
+  onOpenUserNotice,
 }: AboutPageRootDialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
@@ -263,7 +267,9 @@ export default function AboutPageRootDialog({
             <span>PageRoot for macOS</span>
             <h2 id="about-pageroot-title">源页</h2>
             <p id="about-pageroot-description">
-              源码级本地 HTML 编辑器。真实 HTML，是唯一事实源。
+              源码级本地 HTML 编辑器。
+              <br />
+              所见即可改，AI Agent 无缝接力，源码始终是真相。
             </p>
           </div>
         </header>
@@ -328,9 +334,20 @@ export default function AboutPageRootDialog({
         ) : null}
 
         <footer className="about-footer">
-          <span>Stable 频道</span>
-          <i aria-hidden="true" />
-          <span>每 4 小时自动检查</span>
+          <button
+            className="about-user-notice"
+            type="button"
+            title="使用默认文本应用打开本地文件"
+            onClick={onOpenUserNotice}
+          >
+            <span>用户声明与免责声明</span>
+            <ArrowSquareOutIcon aria-hidden="true" size={11} weight="bold" />
+          </button>
+          {userNoticeOpenFailed ? (
+            <p role="alert">
+              声明文件没有打开，请重新安装源页后重试。
+            </p>
+          ) : null}
         </footer>
       </article>
     </dialog>
