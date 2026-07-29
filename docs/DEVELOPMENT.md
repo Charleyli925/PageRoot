@@ -44,6 +44,7 @@ npm run task:finish
 | `npm run gate:release:auto` | Complete source gate on a clean commit |
 | `npm run package:developer` | Optional arm64 developer preview requested explicitly: ad-hoc DMG, packaged-content verification and one isolated startup; no notarization or publication |
 | `npm run package:developer:x64` | The same optional developer preview for Intel Macs |
+| `npm run gate:candidate-app:auto` | Guarded internal formal-candidate preflight: assemble one ad-hoc App, verify contents, then run the complete packaged-runtime oracle before signing |
 | `npm run gate:artifact-only:auto` | Guarded internal installer lane; it refuses to run without CI's fresh matching tree/version decision |
 | `npm run release:mac` | Complete source gate, signed arm64 DMG/ZIP package, packaged runtime test and artifact verification; release credentials are required for notarization proof |
 | `npm run test:electron:ci-preflight:prepared` | Synthetic hosted-macOS window, timer and animation-frame preflight used before Electron product suites |
@@ -52,12 +53,14 @@ The developer-preview, release and artifact lanes stop if the worktree is dirty 
 
 Desktop development and Electron E2E disable live update checks. The pure
 application-update controller is covered by Node tests; the Release Candidate
-lane owns the installed-App, Developer ID, notarization, ZIP/blockmap and
-`latest-mac.yml` evidence. Formal local packaging is a distribution build and
-therefore requires a valid Developer ID identity; publication credentials
-remain in GitHub encrypted secrets. The separate developer-preview profile
-removes those credentials from its child environment and intentionally uses
-only an ad-hoc signature.
+lane owns the installed-App, Developer ID, notarization, signed-App checkpoint,
+ZIP/blockmap and `latest-mac.yml` evidence. It validates contents and full
+packaged runtime against a pre-sign App, proves signed startup, then passes the
+same notarized App to the final artifact job without rebuilding. Formal local
+packaging is a distribution build and therefore requires a valid Developer ID
+identity; publication credentials remain in GitHub encrypted secrets. The
+separate developer-preview profile removes those credentials from its child
+environment and intentionally uses only an ad-hoc signature.
 
 Desktop development and every automated test also leave live usage telemetry
 disabled unless `PAGEROOT_TELEMETRY_DEV=1` is explicitly set. Telemetry tests

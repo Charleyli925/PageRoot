@@ -25,6 +25,7 @@ const PACKAGE_TESTS = new Set([
   "developer-preview-package.test.mjs",
   "packaged-artifact-gate.test.mjs",
   "release-candidate-provenance.test.mjs",
+  "release-app-stage.test.mjs",
   "release-provenance.test.mjs",
   "source-gate-provenance.test.mjs",
 ]);

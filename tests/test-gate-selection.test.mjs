@@ -183,6 +183,18 @@ test("developer package is opt-in, lightweight and verifies contents before star
   }
 });
 
+test("formal candidate app proves contents and runtime before signing stages can begin", () => {
+  const candidateApp = assertFullyAutomatedPlan(
+    selectGatePlan({ map, lane: "candidate-app" }),
+  );
+  assert.deepEqual(suiteIds(candidateApp), [
+    "build-desktop",
+    "candidate-app-build",
+    "candidate-app-verify",
+    "candidate-app-runtime",
+  ]);
+});
+
 test("Node groups partition every top-level test exactly once outside full", async () => {
   const groups = await nodeTestGroups(path.join(productRoot, "tests"));
   const relative = (file) => path.basename(file);

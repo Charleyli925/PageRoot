@@ -84,6 +84,9 @@ function orderForFastFailure(suiteIds, selectedNodeTests) {
     if (suiteId === "developer-package-build") return 90;
     if (suiteId === "developer-packaged-verify") return 95;
     if (suiteId === "developer-packaged-startup") return 100;
+    if (suiteId === "candidate-app-build") return 90;
+    if (suiteId === "candidate-app-verify") return 95;
+    if (suiteId === "candidate-app-runtime") return 100;
     if (suiteId === "package-build") return 90;
     if (suiteId === "packaged-runtime") return 100;
     if (suiteId === "packaged-verify") return 110;

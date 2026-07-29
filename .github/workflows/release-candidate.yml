@@ -14,12 +14,15 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  candidate:
-    name: build-and-verify-candidate
+  signed-app:
+    name: preflight-sign-and-notarize-app
     runs-on: macos-14
-    # Outer safety budget; only the measured build/sign/notarize step below
-    # receives an extended allowance. Every other step remains narrowly bounded.
-    timeout-minutes: 120
+    timeout-minutes: 90
+    outputs:
+      checkpoint_artifact: ${{ steps.checkpoint.outputs.artifact_name }}
+      source_gate_run_id: ${{ steps.source-gate.outputs.run_id }}
+      source_gate_tree: ${{ steps.source-gate.outputs.tree_sha }}
+      source_gate_version: ${{ steps.source-gate.outputs.package_version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         timeout-minutes: 5
@@ -57,7 +60,7 @@ jobs:
           key: ${{ runner.os }}-electron-builder-${{ hashFiles('package-lock.json') }}
       - run: npm ci
         timeout-minutes: 10
-      - name: Require Developer ID signing and notarization credentials
+      - name: Require formal app credentials
         timeout-minutes: 2
         env:
           CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
@@ -72,7 +75,7 @@ jobs:
               exit 1
             }
           done
-      - name: Prove hosted Electron scheduling before packaging
+      - name: Prove hosted Electron scheduling before product checks
         timeout-minutes: 5
         run: >-
           node scripts/ci-evidence.mjs run
@@ -80,34 +83,234 @@ jobs:
           --stage environment-preflight
           --
           npm run test:electron:ci-preflight:prepared
-      - name: Build and verify the exact pre-tag installer
-        # Apple notarization is the only externally queued operation in this job.
-        timeout-minutes: 110
+      - name: Assemble and verify the app before release credentials are used
+        timeout-minutes: 20
         env:
           PAGEROOT_SOURCE_GATE_TRUSTED: ${{ steps.source-gate.outputs.trusted }}
           PAGEROOT_SOURCE_GATE_TREE: ${{ steps.source-gate.outputs.tree_sha }}
           PAGEROOT_SOURCE_GATE_VERSION: ${{ steps.source-gate.outputs.package_version }}
-          PAGEROOT_REQUIRE_NOTARIZATION: "1"
-          PAGEROOT_REQUIRE_TELEMETRY_CONFIG: "1"
           PAGEROOT_POSTHOG_TOKEN: ${{ secrets.PAGEROOT_POSTHOG_TOKEN }}
           PAGEROOT_POSTHOG_HOST: "https://us.i.posthog.com"
+        run: >-
+          node scripts/ci-evidence.mjs run
+          --suite release-candidate-app-preflight
+          --stage artifact-preflight
+          --
+          npm run gate:candidate-app:auto
+      - name: Developer ID sign the already-verified app
+        timeout-minutes: 10
+        env:
           CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+        run: >-
+          node scripts/ci-evidence.mjs run
+          --suite release-candidate-app-sign
+          --stage artifact-sign
+          --
+          node scripts/release-app-checkpoint.mjs sign
+          --arch arm64
+      - name: Launch the signed app before sending bytes to Apple
+        timeout-minutes: 5
+        env:
+          PAGEROOT_PACKAGED_APP_PATH: ${{ github.workspace }}/output/release-candidate/staged/mac-arm64/PageRoot.app
+          PAGEROOT_TEST_ARCH: arm64
+        run: >-
+          node scripts/ci-evidence.mjs run
+          --suite release-candidate-signed-startup
+          --stage artifact-sign
+          --
+          npm run test:packaged-startup:prepared
+      - name: Notarize and staple the verified signed app
+        timeout-minutes: 45
+        env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: RNK9RB969G
         run: >-
           node scripts/ci-evidence.mjs run
-          --suite release-candidate-artifact
-          --stage artifact-candidate
+          --suite release-candidate-app-notarize
+          --stage artifact-notarize-app
           --
-          npm run gate:artifact-only:auto
+          node scripts/release-app-checkpoint.mjs notarize
+          --arch arm64
+      - name: Verify the signed and notarized app checkpoint
+        timeout-minutes: 5
+        env:
+          PAGEROOT_REQUIRE_NOTARIZATION: "1"
+        run: >-
+          node scripts/ci-evidence.mjs run
+          --suite release-candidate-app-verify
+          --stage artifact-notarize-app
+          --
+          node scripts/verify-packaged-artifact.mjs
+          --arch arm64
+          --profile candidate-app-signed
+      - name: Freeze the reusable signed-app checkpoint
+        id: checkpoint
+        timeout-minutes: 10
+        run: >-
+          node scripts/ci-evidence.mjs run
+          --suite release-candidate-app-checkpoint
+          --stage artifact-checkpoint
+          --
+          node scripts/release-app-checkpoint.mjs create
+          --arch arm64
+          --repository "$GITHUB_REPOSITORY"
+          --source-gate-run-id "${{ steps.source-gate.outputs.run_id }}"
+          --source-gate-tree "${{ steps.source-gate.outputs.tree_sha }}"
+          --source-gate-version "${{ steps.source-gate.outputs.package_version }}"
+          --run-id "$GITHUB_RUN_ID"
+          --run-attempt "$GITHUB_RUN_ATTEMPT"
+          --output output/release-app-checkpoint/bundle
+          --github-output "$GITHUB_OUTPUT"
+      - name: Upload signed-app checkpoint
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        timeout-minutes: 10
+        with:
+          name: ${{ steps.checkpoint.outputs.artifact_name }}
+          path: ${{ steps.checkpoint.outputs.checkpoint_directory }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Upload app-stage failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        timeout-minutes: 10
+        with:
+          name: PageRoot-release-app-diagnostics-${{ github.run_attempt }}
+          path: |
+            output/test-runs
+            output/playwright
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Upload app-stage CI evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        timeout-minutes: 10
+        with:
+          name: PageRoot-release-app-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: output/ci-evidence
+          if-no-files-found: warn
+          retention-days: 30
+
+  candidate:
+    name: package-and-verify-candidate
+    needs: signed-app
+    runs-on: macos-14
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        timeout-minutes: 5
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - name: Require the same current main tree and version
+        timeout-minutes: 2
+        env:
+          SOURCE_GATE_TREE: ${{ needs.signed-app.outputs.source_gate_tree }}
+          SOURCE_GATE_VERSION: ${{ needs.signed-app.outputs.source_gate_version }}
+        run: |
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$GITHUB_SHA" = "$(git rev-parse origin/main)"
+          test "$SOURCE_GATE_TREE" = "$(git rev-parse HEAD^{tree})"
+          test "$SOURCE_GATE_VERSION" = "$(node -p "require('./package.json').version")"
+          test "$SOURCE_GATE_VERSION" = "$(node -p "require('./package-lock.json').packages[''].version")"
+      - name: Restore Electron and builder downloads
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        timeout-minutes: 10
+        with:
+          path: |
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+          key: ${{ runner.os }}-electron-builder-${{ hashFiles('package-lock.json') }}
+      - run: npm ci
+        timeout-minutes: 10
+      - name: Require final DMG notarization credentials
+        timeout-minutes: 2
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: |
+          for name in APPLE_ID APPLE_APP_SPECIFIC_PASSWORD; do
+            test -n "${!name}" || {
+              echo "Required release credential is not configured: $name" >&2
+              exit 1
+            }
+          done
+      - name: Download the exact signed-app checkpoint
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        timeout-minutes: 10
+        with:
+          name: ${{ needs.signed-app.outputs.checkpoint_artifact }}
+          path: output/release-app-checkpoint/downloaded
+      - name: Verify and restore the signed-app checkpoint
+        id: restore
+        timeout-minutes: 10
+        run: >-
+          node scripts/ci-evidence.mjs run
+          --suite release-candidate-app-restore
+          --stage artifact-checkpoint
+          --
+          node scripts/release-app-checkpoint.mjs restore
+          --arch arm64
+          --repository "$GITHUB_REPOSITORY"
+          --source-gate-run-id "${{ needs.signed-app.outputs.source_gate_run_id }}"
+          --run-id "$GITHUB_RUN_ID"
+          --directory output/release-app-checkpoint/downloaded
+          --output output/release-candidate/restored
+          --github-output "$GITHUB_OUTPUT"
+      - name: Revalidate the restored signature, notarization and payload
+        timeout-minutes: 5
+        env:
+          PAGEROOT_REQUIRE_NOTARIZATION: "1"
+        run: >-
+          node scripts/ci-evidence.mjs run
+          --suite release-candidate-app-revalidate
+          --stage artifact-checkpoint
+          --
+          node scripts/verify-packaged-artifact.mjs
+          --arch arm64
+          --profile candidate-app-signed
+          --app-path "${{ steps.restore.outputs.app_path }}"
+      - name: Package the checkpoint and notarize only the final DMG
+        timeout-minutes: 50
+        env:
+          PAGEROOT_REQUIRE_NOTARIZATION: "1"
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: RNK9RB969G
+        run: >-
+          node scripts/ci-evidence.mjs run
+          --suite release-candidate-distributables
+          --stage artifact-notarize-dmg
+          --
+          node scripts/build-package.mjs
+          --arch arm64
+          --profile candidate-artifacts
+          --prepackaged "${{ steps.restore.outputs.app_path }}"
+      - name: Verify final DMG, updater assets and frozen app payload
+        timeout-minutes: 10
+        env:
+          PAGEROOT_REQUIRE_NOTARIZATION: "1"
+        run: >-
+          node scripts/ci-evidence.mjs run
+          --suite release-candidate-artifact-verify
+          --stage artifact-final
+          --
+          node scripts/verify-packaged-artifact.mjs
+          --arch arm64
+          --profile release
+          --app-path "${{ steps.restore.outputs.app_path }}"
       - name: Create public release metadata
         timeout-minutes: 5
         run: >-
           node scripts/ci-evidence.mjs run
           --suite release-candidate-assets
-          --stage artifact-candidate
+          --stage artifact-final
           --
           npm run release:assets -- --arch arm64
       - name: Freeze candidate bytes and provenance
@@ -116,7 +319,7 @@ jobs:
         run: >-
           node scripts/ci-evidence.mjs run
           --suite release-candidate-provenance
-          --stage artifact-candidate
+          --stage artifact-final
           --
           node scripts/release-candidate-provenance.mjs create
           --repository "$GITHUB_REPOSITORY"
@@ -125,9 +328,9 @@ jobs:
           --output output/release-candidate/bundle
           --run-id "$GITHUB_RUN_ID"
           --run-attempt "$GITHUB_RUN_ATTEMPT"
-          --source-gate-run-id "${{ steps.source-gate.outputs.run_id }}"
-          --source-gate-tree "${{ steps.source-gate.outputs.tree_sha }}"
-          --source-gate-version "${{ steps.source-gate.outputs.package_version }}"
+          --source-gate-run-id "${{ needs.signed-app.outputs.source_gate_run_id }}"
+          --source-gate-tree "${{ needs.signed-app.outputs.source_gate_tree }}"
+          --source-gate-version "${{ needs.signed-app.outputs.source_gate_version }}"
           --github-output "$GITHUB_OUTPUT"
       - name: Upload exact candidate bundle
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

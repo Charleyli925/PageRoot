@@ -34,11 +34,11 @@ const productRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "
 test("developer preview is an explicit ad-hoc DMG profile while release packaging stays unchanged", () => {
   assert.deepEqual(
     parseBuildOptions(["--arch", "arm64"]),
-    { architecture: "arm64", profile: "release" },
+    { architecture: "arm64", prepackagedAppPath: null, profile: "release" },
   );
   assert.deepEqual(
     parseBuildOptions(["--profile", "developer", "--arch", "x64"]),
-    { architecture: "x64", profile: "developer" },
+    { architecture: "x64", prepackagedAppPath: null, profile: "developer" },
   );
   assert.deepEqual(
     releasePackageBuilderArguments("arm64"),
