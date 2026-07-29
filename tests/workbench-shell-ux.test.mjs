@@ -981,6 +981,50 @@ test("the filename keeps distinct quick actions with non-layout tooltips", () =>
     workbench,
     /const openInDefaultBrowser = window\.htmlAIProjects\?\.openInDefaultBrowser[\s\S]*?withOneAutomaticRetry\(\(\) => openInDefaultBrowser\(activeSourcePath\)\)/,
   );
+  const browserOpenFlow = workbench.slice(
+    workbench.indexOf("const openCurrentHtmlInDefaultBrowser"),
+    workbench.indexOf("const cancelFileRename"),
+  );
+  const browserOpenFence = browserOpenFlow.indexOf(
+    "editorRef.current?.fencePendingEdit({",
+  );
+  const browserOpenFenceGuard = browserOpenFlow.indexOf(
+    "if (!committed || !committed.ok)",
+    browserOpenFence,
+  );
+  const browserOpenEnqueue = browserOpenFlow.indexOf(
+    "enqueueAutosave(",
+    browserOpenFenceGuard,
+  );
+  const browserOpenFlush = browserOpenFlow.indexOf(
+    "await flushAutosave(launchRevision)",
+    browserOpenEnqueue,
+  );
+  const browserOpenPersistenceGuard = browserOpenFlow.indexOf(
+    "lastPersistedRevisionRef.current < launchRevision",
+    browserOpenFlush,
+  );
+  const browserOpenBridge = browserOpenFlow.indexOf(
+    "openInDefaultBrowser(activeSourcePath)",
+    browserOpenPersistenceGuard,
+  );
+  assert.match(
+    browserOpenFlow.slice(browserOpenFence, browserOpenFenceGuard),
+    /resumeEditing: true,[\s\S]*?trigger: "save"/u,
+  );
+  assert.ok(
+    browserOpenFence >= 0
+      && browserOpenFenceGuard > browserOpenFence
+      && browserOpenEnqueue > browserOpenFenceGuard
+      && browserOpenFlush > browserOpenEnqueue
+      && browserOpenPersistenceGuard > browserOpenFlush
+      && browserOpenBridge > browserOpenPersistenceGuard,
+    "default-browser launch must fence, enqueue and acknowledge the exact source revision before IPC",
+  );
+  assert.match(
+    workbench,
+    /!canOpenCurrentHtmlInDefaultBrowser[\s\S]*?persistState !== "idle"[\s\S]*?editRevision !== lastPersistedRevision/,
+  );
 });
 
 test("project panel keeps actions clear without technical paths in the header", () => {

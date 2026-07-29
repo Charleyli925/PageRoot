@@ -56,6 +56,13 @@ Pure-browser preview is a different, strictly weaker capability: authored script
 
 HTML, attachments, AI output, update manifests and IPC payloads are treated as untrusted. Tests and fixtures must use synthetic data. A renderer compromise should not provide arbitrary Node or filesystem access; any new privileged API needs explicit validation and negative tests.
 
+The default-browser HTML action first drains the exact renderer edit revision
+to the authoritative source file. Its main-process operation accepts only an
+authorized main-frame sender and a known ordinary `.html` or `.htm` project
+path, then derives the `file:` URL itself. Executable negative tests prove
+malformed, non-HTML, unknown, unsafe and unauthorized requests cannot reach
+the shell launch adapter.
+
 The telemetry preload method is fire-and-forget and does not expose a generic
 network API. The main process verifies the sender frame and independently
 sanitizes the event through a closed schema. Persistent telemetry state is

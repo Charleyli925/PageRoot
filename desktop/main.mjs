@@ -28,7 +28,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import {
   ProjectFileError,
   ensureManagedWelcomeHtml,
@@ -47,6 +47,8 @@ import {
   createWorkspaceRecoveryMailbox,
   stopBridgeProcessGracefully,
 } from "./bridge-shutdown.mjs";
+import { createOpenInDefaultBrowserOperation } from "./open-in-default-browser.mjs";
+import { assertTrustedRendererEvent } from "./project-ipc-security.mjs";
 import {
   closeAbortPayload,
   runGuardedFinalExit,
@@ -708,14 +710,11 @@ async function showInFolder(sourcePathInput) {
   return { sourcePath };
 }
 
-async function openInDefaultBrowser(sourcePathInput) {
-  const sourcePath = assertReadPayload(sourcePathInput);
-  await assertKnownProjectPath(sourcePath);
-  await inspectHtmlFile(sourcePath);
-  const sourceUrl = pathToFileURL(sourcePath).href;
-  await shell.openExternal(sourceUrl);
-  return { sourcePath };
-}
+const openInDefaultBrowser = createOpenInDefaultBrowserOperation({
+  assertKnownProjectPath,
+  inspectHtmlFile,
+  openExternal: (sourceUrl) => shell.openExternal(sourceUrl),
+});
 
 async function resolveKnownRenameSource(sourcePathInput) {
   const sourcePath = assertReadPayload(sourcePathInput);
@@ -1283,19 +1282,10 @@ function registerProjectIpc() {
   if (projectIpcRegistered) return;
   projectIpcRegistered = true;
 
-  const assertTrustedEvent = (event) => {
-    if (
-      !mainWindow
-      || event.sender !== mainWindow.webContents
-      || event.senderFrame !== mainWindow.webContents.mainFrame
-      || !isTrustedRendererUrl(event.senderFrame.url)
-    ) {
-      throw new ProjectFileError(
-        "UNAUTHORIZED_FILE_REQUEST",
-        "文件请求未获授权。",
-      );
-    }
-  };
+  const assertTrustedEvent = (event) => assertTrustedRendererEvent(event, {
+    mainWindow,
+    isTrustedRendererUrl,
+  });
   const trusted = (handler) => async (event, ...args) => {
     assertTrustedEvent(event);
     return handler(...args);

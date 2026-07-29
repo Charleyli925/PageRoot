@@ -11,6 +11,9 @@ Notable user-visible changes are documented here. This project follows Semantic 
 - Added compact filename actions for opening another local HTML and opening
   the current known HTML in the system default browser, with small hover and
   keyboard-focus tooltips that do not change header geometry.
+- Made default-browser launch wait for the exact current edit revision to be
+  safely written, and added fail-closed executable coverage for malformed,
+  unknown, unsafe and unauthorized launch requests.
 
 ## [0.9.3] - 2026-07-29
 

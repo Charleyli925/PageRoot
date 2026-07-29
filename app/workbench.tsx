@@ -5660,23 +5660,62 @@ export default function Workbench() {
 
   const openCurrentHtmlInDefaultBrowser = useCallback(async () => {
     const activeSourcePath = sourcePathRef.current;
+    const activeEpoch = projectEpochRef.current;
     const openInDefaultBrowser = window.htmlAIProjects?.openInDefaultBrowser;
     if (!activeSourcePath || !openInDefaultBrowser) return;
     try {
+      // The browser reads the on-disk file, so this action is a source-authority
+      // boundary: capture delivered native input and wait for its exact revision
+      // to be acknowledged before asking the main process to launch the file.
+      const committed = editorRef.current?.fencePendingEdit({
+        resumeEditing: true,
+        trigger: "save",
+      });
+      if (!committed || !committed.ok) {
+        editorRef.current?.showCommitBlocked(
+          committed?.reason
+            || "请点回文字完成输入，再在默认浏览器中打开。",
+        );
+        return;
+      }
+      let launchRevision = editRevisionRef.current;
+      if (
+        committed.html !== htmlRef.current
+        || committed.pendingMutation
+      ) {
+        launchRevision = enqueueAutosave(
+          committed.html,
+          committed.pendingMutation || undefined,
+        );
+      }
+      const persisted = await flushAutosave(launchRevision);
+      if (
+        !persisted
+        || activeEpoch !== projectEpochRef.current
+        || !sameLocalSourcePath(sourcePathRef.current, activeSourcePath)
+        || pendingWriteRef.current
+        || flushPromiseRef.current
+        || persistStateRef.current !== "idle"
+        || lastPersistedRevisionRef.current < launchRevision
+      ) {
+        throw new Error(
+          "当前修改尚未安全写入源 HTML，因此没有打开浏览器。请稍后重试。",
+        );
+      }
       await withOneAutomaticRetry(() => openInDefaultBrowser(activeSourcePath));
     } catch (cause) {
       setToast({
         title: "无法在默认浏览器中打开",
         message: productErrorMessage(
           cause,
-          "源 HTML 可能已移动；当前项目仍保持打开，可以重试。",
+          "请确认顶部显示“已同步更新”后重试；当前项目仍保持打开。",
         ),
         tone: "warning",
         disposition: "background-result",
         dedupeKey: "open-project-in-default-browser-error",
       });
     }
-  }, []);
+  }, [enqueueAutosave, flushAutosave]);
 
   const cancelFileRename = useCallback(() => {
     if (fileRenameBusyRef.current) return;
@@ -9303,6 +9342,8 @@ export default function Workbench() {
                     !canOpenCurrentHtmlInDefaultBrowser
                     || fileRenameEditing
                     || fileRenameBusy
+                    || persistState !== "idle"
+                    || editRevision !== lastPersistedRevision
                   }
                   onClick={() => void openCurrentHtmlInDefaultBrowser()}
                 >
