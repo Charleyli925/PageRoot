@@ -43,6 +43,16 @@ function removeIsolatedDirectory(directory) {
   });
 }
 
+async function stopPackagedAppForCleanup(electronApp) {
+  const electronProcess = electronApp.process();
+  const closed = electronApp.waitForEvent("close", { timeout: 5_000 }).catch(() => null);
+  await electronApp.evaluate(({ app }) => app.exit(0)).catch(() => {});
+  await closed;
+  if (electronProcess.exitCode === null && electronProcess.signalCode === null) {
+    electronProcess.kill("SIGKILL");
+  }
+}
+
 test("developer preview opens the latest runtime and closes cleanly", async () => {
   test.setTimeout(60_000);
   const isolatedUserData = mkdtempSync(
@@ -68,9 +78,13 @@ test("developer preview opens the latest runtime and closes cleanly", async () =
       () => page.locator("main.workbench").getAttribute("data-project-state"),
       { timeout: 30_000 },
     ).toMatch(/^(?:ready|unbound)$/u);
+    await expect(
+      page.getByTestId("html-canvas-editor").filter({ visible: true }).first(),
+    ).toHaveAttribute("data-render-verified", "true", { timeout: 30_000 });
     const runtime = await page.evaluate(() => window.htmlAIRuntime);
     expect(runtime?.appVersion).toBe(packageVersion);
-    expect(runtime?.bridgePort).toBeGreaterThan(0);
+    expect(runtime?.bridgePort).toMatch(/^[1-9]\d{0,4}$/u);
+    expect(Number(runtime?.bridgePort)).toBeLessThanOrEqual(65_535);
 
     const closed = electronApp.waitForEvent("close", { timeout: 30_000 });
     await electronApp.evaluate(({ BrowserWindow }) => {
@@ -79,7 +93,7 @@ test("developer preview opens the latest runtime and closes cleanly", async () =
     await closed;
     electronApp = null;
   } finally {
-    await electronApp?.close().catch(() => {});
+    if (electronApp) await stopPackagedAppForCleanup(electronApp);
     removeIsolatedDirectory(isolatedUserData);
   }
 });
