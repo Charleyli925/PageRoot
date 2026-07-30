@@ -24,6 +24,9 @@ Notable user-visible changes are documented here. This project follows Semantic 
 - Added a concise AI Agent warning before ending a copied run, restored editing
   with a clear manual-stop reminder, and made late official finalization return
   a non-retryable cancelled result without creating a new Version.
+- Save an in-place filename edit when the user clicks blank title-bar space,
+  matching the existing Enter and click-away behavior without changing file
+  identity or version history.
 
 ## [0.9.4] - 2026-07-29
 

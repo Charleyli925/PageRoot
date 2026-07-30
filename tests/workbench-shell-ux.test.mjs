@@ -432,7 +432,8 @@ test("external source adoption invalidates the active native editing session", (
 });
 
 test("header prioritizes the filename and keeps the approved action order", () => {
-  const headerStart = workbench.indexOf('<header className="workbench-header">');
+  const headerClass = workbench.indexOf('className="workbench-header"');
+  const headerStart = workbench.lastIndexOf("<header", headerClass);
   const header = workbench.slice(
     headerStart,
     workbench.indexOf("</header>", headerStart),
@@ -1000,7 +1001,15 @@ test("a safely saved source can be renamed in place without exposing its extensi
   );
   assert.match(
     workbench,
+    /className="workbench-header"[\s\S]*?data-file-renaming=\{fileRenameEditing \? "true" : undefined\}/,
+  );
+  assert.match(
+    workbench,
     /event\.key === "Enter"[\s\S]*?commitFileRename\(\)[\s\S]*?event\.key === "Escape"[\s\S]*?cancelFileRename\(\)/,
+  );
+  assert.match(
+    styles,
+    /\.workbench-header\[data-file-renaming="true"\]\s*\{[\s\S]*?-webkit-app-region:\s*no-drag/,
   );
   assert.match(
     styles,
