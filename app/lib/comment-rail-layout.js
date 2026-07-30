@@ -24,15 +24,18 @@ export function layoutCommentRailItems({
     : 0;
   const safeGap = Number.isFinite(gap) ? Math.max(0, gap) : 0;
   const orderedItems = items
-    .map((item, inputIndex) => ({
-      ...item,
-      inputIndex,
-      targetTop: Number.isFinite(item.targetTop)
-        ? Math.max(safeMinimumTop, item.targetTop)
-        : safeMinimumTop,
-      height: Number.isFinite(item.height) ? Math.max(0, item.height) : 0,
-      order: Number.isFinite(item.order) ? item.order : inputIndex,
-    }))
+    .map((item, inputIndex) => {
+      if (!Number.isFinite(item.targetTop)) {
+        throw new TypeError(`Comment rail target "${item.key}" has no measured coordinate.`);
+      }
+      return {
+        ...item,
+        inputIndex,
+        targetTop: Math.max(safeMinimumTop, item.targetTop),
+        height: Number.isFinite(item.height) ? Math.max(0, item.height) : 0,
+        order: Number.isFinite(item.order) ? item.order : inputIndex,
+      };
+    })
     .sort((left, right) => (
       left.targetTop - right.targetTop
       || left.order - right.order

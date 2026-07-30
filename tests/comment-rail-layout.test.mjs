@@ -68,3 +68,15 @@ test("measured heights and the shared gap prevent overlapping cards", () => {
   assert.equal(result.positions.three, 367);
   assert.equal(result.bottom, 453);
 });
+
+test("comment rail rejects a target without a measured coordinate", () => {
+  assert.throws(
+    () => layoutCommentRailItems({
+      minimumTop: 80,
+      items: [
+        { key: "missing", targetTop: Number.NaN, height: 120, order: 1 },
+      ],
+    }),
+    /has no measured coordinate/u,
+  );
+});

@@ -87,7 +87,41 @@ test("comments keep current-tab alignment, render other tabs as neutral header c
   if (!previewFrame) throw new Error("Interactive preview frame is unavailable.");
   await previewFrame.locator('[data-p="panel-two"]').click();
   await expect(previewFrame.locator("#panel-two")).toBeVisible();
+  await page.evaluate(() => {
+    window.__PAGEROOT_COMMENT_LAYOUT_STATES__ = [];
+    const recordState = () => {
+      const rail = document.querySelector('aside[aria-label="本轮评论"]');
+      const state = rail?.getAttribute("data-layout-ready");
+      if (
+        state
+        && window.__PAGEROOT_COMMENT_LAYOUT_STATES__.at(-1) !== state
+      ) {
+        window.__PAGEROOT_COMMENT_LAYOUT_STATES__.push(state);
+      }
+    };
+    window.__PAGEROOT_COMMENT_LAYOUT_OBSERVER__ = new MutationObserver(
+      recordState,
+    );
+    window.__PAGEROOT_COMMENT_LAYOUT_OBSERVER__.observe(document.body, {
+      attributes: true,
+      childList: true,
+      subtree: true,
+      attributeFilter: ["data-layout-ready"],
+    });
+    recordState();
+  });
   await page.getByRole("button", { name: "编辑", exact: true }).click();
+  const returningRail = page.locator('aside[aria-label="本轮评论"]');
+  await expect(returningRail).toHaveAttribute("data-layout-ready", "true");
+  const layoutTransition = await page.evaluate(() => {
+    window.__PAGEROOT_COMMENT_LAYOUT_OBSERVER__?.disconnect();
+    return window.__PAGEROOT_COMMENT_LAYOUT_STATES__ ?? [];
+  });
+  expect(layoutTransition).toContain("false");
+  expect(layoutTransition.at(-1)).toBe("true");
+  expect(Number(
+    await returningRail.getAttribute("data-layout-generation"),
+  )).toBeGreaterThan(0);
   await expect(frame.locator("#panel-two")).toBeVisible();
   await expect(frame.locator("#panel-one")).toBeHidden();
 

@@ -1297,6 +1297,10 @@ function canLocateTarget(target: HtmlCanvasSelection): boolean {
   return target.resolution === "exact" || target.resolution === "rebound";
 }
 
+function canSaveCommentTarget(target: HtmlCanvasSelection): boolean {
+  return target.resolution === "exact";
+}
+
 function changeKindLabel(event: DirectEditEvent): string {
   if (event.kind === "text") return "文字修改";
   if (event.kind === "reorder") return "位置移动";
@@ -1714,6 +1718,7 @@ export default function Workbench() {
   const attachmentCounter = useRef(1);
   const focusedCommentIdRef = useRef<string | null>(null);
   const reviewRevealRequestRef = useRef(0);
+  const commentLayoutWasReadyRef = useRef(false);
   const projectEpochRef = useRef(0);
   const projectOpenRequestRef = useRef(0);
   const projectQueryFenceRef = useRef(new ProjectQueryFence());
@@ -1843,6 +1848,11 @@ export default function Workbench() {
   const [commentTargetLayouts, setCommentTargetLayouts] = useState<
     Record<string, HtmlCanvasCommentLayoutState["targets"][number]>
   >({});
+  const [commentLayoutAuthority, setCommentLayoutAuthority] = useState({
+    sourceSha256: "",
+    viewContextGeneration: -1,
+    ready: false,
+  });
   const [commentHeaderHeight, setCommentHeaderHeight] = useState(62);
   const [expandedOtherTabCommentsKey, setExpandedOtherTabCommentsKey] = useState("");
   const [commentViewport, setCommentViewport] = useState({ top: 0, height: 800 });
@@ -2286,6 +2296,8 @@ export default function Workbench() {
   const activePageViewContext = (
     pageViewContext?.documentKey === pageViewDocumentKey
   ) ? pageViewContext : null;
+  const expectedCommentLayoutSourceSha256 =
+    renderedContentSha256 || sourceSha256;
   const otherTabCommentsContextKey = [
     canvasMode,
     pageViewDocumentKey,
@@ -2308,12 +2320,39 @@ export default function Workbench() {
     && draftTarget
     && (draft.trim() || draftAttachments.length > 0),
   );
+  const expectedCommentLayoutTargetIds = useMemo(() => [
+    ...visibleCommentItems.map((comment) => comment.target.id),
+    ...(
+      (hasCommentDraft || composerOpen) && draftTarget
+        ? [draftTarget.id]
+        : []
+    ),
+  ], [
+    composerOpen,
+    draftTarget,
+    hasCommentDraft,
+    visibleCommentItems,
+  ]);
+  const commentLayoutReady = Boolean(
+    canvasMode === "edit"
+    && commentLayoutAuthority.ready
+    && (
+      !expectedCommentLayoutSourceSha256
+      || commentLayoutAuthority.sourceSha256
+        === expectedCommentLayoutSourceSha256
+    )
+    && commentLayoutAuthority.viewContextGeneration
+      === (activePageViewContext?.generation ?? 0)
+    && expectedCommentLayoutTargetIds.every(
+      (targetId) => Boolean(commentTargetLayouts[targetId]),
+    )
+  );
   const draftTargetLayout = draftTarget
     ? commentTargetLayouts[draftTarget.id]
     : undefined;
   const draftTargetInOtherTab = Boolean(
     draftTarget?.tagName !== "body"
-    && draftTargetLayout?.visible === false
+    && draftTargetLayout?.status === "hidden"
     && draftTargetLayout.tabGroupKey,
   );
   const draftInOtherTab = hasCommentDraft && draftTargetInOtherTab;
@@ -2323,15 +2362,18 @@ export default function Workbench() {
   );
   const commentTargetTops = useMemo(() => Object.fromEntries(
     Object.entries(commentTargetLayouts)
-      .filter(([, layout]) => layout.visible)
-      .map(([targetId, layout]) => [targetId, layout.top]),
+      .filter(([, layout]) => (
+        layout.status === "visible"
+        && Number.isFinite(layout.top)
+      ))
+      .map(([targetId, layout]) => [targetId, layout.top as number]),
   ), [commentTargetLayouts]);
   const otherTabCommentItems = useMemo(() => visibleCommentItems.filter(
     (comment) => {
       const layout = commentTargetLayouts[comment.target.id];
       return Boolean(
         comment.target.tagName !== "body"
-        && layout?.visible === false
+        && layout?.status === "hidden"
         && layout.tabGroupKey
       );
     },
@@ -2405,8 +2447,8 @@ export default function Workbench() {
           return 0;
         }
         const position = (
-          (left.target.boundingBox?.y ?? Number.MAX_SAFE_INTEGER)
-          - (right.target.boundingBox?.y ?? Number.MAX_SAFE_INTEGER)
+          (left.target.sourceAnchor?.startOffset ?? Number.MAX_SAFE_INTEGER)
+          - (right.target.sourceAnchor?.startOffset ?? Number.MAX_SAFE_INTEGER)
         );
         if (position !== 0) return position;
         if (left.kind !== right.kind) return left.kind === "saved" ? -1 : 1;
@@ -2527,6 +2569,18 @@ export default function Workbench() {
   }, []);
 
   const handleCommentLayout = useCallback((layout: HtmlCanvasCommentLayoutState) => {
+    setCommentLayoutAuthority((current) => (
+      current.sourceSha256 === layout.sourceSha256
+      && current.viewContextGeneration === layout.viewContextGeneration
+      && current.ready === layout.ready
+        ? current
+        : {
+            sourceSha256: layout.sourceSha256,
+            viewContextGeneration: layout.viewContextGeneration,
+            ready: layout.ready,
+          }
+    ));
+    if (!layout.ready) return;
     setCommentRailHeight((current) => (
       Math.abs(current - layout.scrollHeight) > 1 ? layout.scrollHeight : current
     ));
@@ -2542,7 +2596,7 @@ export default function Workbench() {
           const previous = current[targetId];
           return previous?.top === next.top
             && previous?.height === next.height
-            && previous?.visible === next.visible
+            && previous?.status === next.status
             && previous?.tabGroupKey === next.tabGroupKey
             && previous?.tabGroupLabel === next.tabGroupLabel;
         })
@@ -3620,6 +3674,11 @@ export default function Workbench() {
     setCommentCardHeights({});
     setCommentRailHeight(0);
     setCommentTargetLayouts({});
+    setCommentLayoutAuthority({
+      sourceSha256: "",
+      viewContextGeneration: -1,
+      ready: false,
+    });
     focusedCommentIdRef.current = null;
     setFocusedCommentId(null);
     reviewRevealRequestRef.current += 1;
@@ -6382,6 +6441,7 @@ export default function Workbench() {
       }
     }
     enqueueAutosave(nextHtml, mutation);
+    setRenderedContentSha256(null);
     void browserSha256(nextHtml).then((renderedSha256) => {
       if (htmlRef.current === nextHtml) setRenderedContentSha256(renderedSha256);
     });
@@ -6743,9 +6803,9 @@ export default function Workbench() {
           .find((node) => node.dataset.commentMeasure === itemKey);
         const targetTop = target.tagName === "body"
           ? commentRailMinimumTop
-          : commentTargetTops[target.id]
-            ?? target.boundingBox?.y
-            ?? commentRailMinimumTop;
+          : commentTargetTops[target.id];
+        if (!Number.isFinite(targetTop)) return;
+        if (itemKey && !item) return;
         const itemTop = item?.offsetTop ?? targetTop;
         const desiredTop = Math.max(
           0,
@@ -6784,7 +6844,7 @@ export default function Workbench() {
     if (
       !relinkingId
       || !relinkSelectionArmedRef.current
-      || !canLocateTarget(target)
+      || !canSaveCommentTarget(target)
     ) return false;
     if (relinkingId === "__composer") {
       const currentTarget = draftTargetRef.current;
@@ -6886,7 +6946,7 @@ export default function Workbench() {
   const resumeCurrentComposer = useCallback(() => {
     const target = draftTargetRef.current;
     if (!target) return;
-    if (!canLocateTarget(target)) {
+    if (!canSaveCommentTarget(target)) {
       beginTargetRelink("__composer");
       return;
     }
@@ -6918,6 +6978,9 @@ export default function Workbench() {
       || persistStateRef.current === "conflict"
       || viewMode === "history"
     ) return;
+    if (!canSaveCommentTarget(target)) {
+      return;
+    }
     // Opening a composer is the first durable project action for a lazily
     // registered HTML. Start identity creation before accepting text so crash
     // recovery and the Bridge draft share one authority.
@@ -7067,7 +7130,7 @@ export default function Workbench() {
       editorRef.current?.clearSelection();
       return;
     }
-    if (!canLocateTarget(draftTarget)) {
+    if (!canSaveCommentTarget(draftTarget)) {
       return;
     }
     if (!draft.trim() && draftAttachments.length === 0) {
@@ -7109,7 +7172,7 @@ export default function Workbench() {
       || String(persistStateRef.current) === "conflict"
       || !currentTarget
       || currentTarget.id !== requestedTargetId
-      || !canLocateTarget(currentTarget)
+      || !canSaveCommentTarget(currentTarget)
     ) return;
     const currentText = composerDraftRef.current.trim();
     const currentAttachments = [...composerAttachmentsRef.current];
@@ -9083,70 +9146,89 @@ export default function Workbench() {
     && draftTarget
     && !composerOpen
   );
+  const missingCommentLayoutItem = (() => {
+    if (!commentLayoutReady) return null;
+    for (const comment of visibleCommentItems) {
+      if (commentTargetLayouts[comment.target.id]?.status === "missing") {
+        return {
+          itemKey: comment.commentId,
+          target: comment.target,
+        };
+      }
+    }
+    if (
+      (hasCommentDraft || composerOpen)
+      && draftTarget
+      && commentTargetLayouts[draftTarget.id]?.status === "missing"
+    ) {
+      return {
+        itemKey: "__composer",
+        target: draftTarget,
+      };
+    }
+    return null;
+  })();
   const commentRailTargetTops = useMemo(() => {
+    if (!commentLayoutReady || missingCommentLayoutItem) return {};
     const targets = [
       ...railCommentItems.map((comment) => comment.target),
       ...(draftInCurrentTab && draftTarget ? [draftTarget] : []),
     ];
     const measuredGroupTops = new Map<string, number>();
-    const fallbackGroupTops = new Map<string, number>();
     for (const target of targets) {
       const measuredTop = target.tagName === "body"
         ? commentRailMinimumTop
         : commentTargetTops[target.id];
-      const fallbackTop = target.boundingBox?.y
-        ?? commentRailHeight
-        ?? commentRailMinimumTop;
+      if (!Number.isFinite(measuredTop)) continue;
       const groupKey = commentMarkerGroupKey(target);
-      if (measuredTop !== undefined) {
-        measuredGroupTops.set(
-          groupKey,
-          Math.min(
-            measuredGroupTops.get(groupKey) ?? Number.MAX_SAFE_INTEGER,
-            measuredTop,
-          ),
-        );
-      }
-      fallbackGroupTops.set(
+      measuredGroupTops.set(
         groupKey,
         Math.min(
-          fallbackGroupTops.get(groupKey) ?? Number.MAX_SAFE_INTEGER,
-          fallbackTop,
+          measuredGroupTops.get(groupKey) ?? Number.MAX_SAFE_INTEGER,
+          measuredTop as number,
         ),
       );
     }
-    return Object.fromEntries(targets.map((target) => [
-      target.id,
-      measuredGroupTops.get(commentMarkerGroupKey(target))
-        ?? fallbackGroupTops.get(commentMarkerGroupKey(target))
-        ?? commentRailMinimumTop,
-    ]));
+    return Object.fromEntries(targets.flatMap((target) => {
+      const top = measuredGroupTops.get(commentMarkerGroupKey(target));
+      return Number.isFinite(top) ? [[target.id, top as number]] : [];
+    }));
   }, [
-    commentRailHeight,
+    commentLayoutReady,
     commentRailMinimumTop,
     commentTargetTops,
     draftInCurrentTab,
     draftTarget,
+    missingCommentLayoutItem,
     railCommentItems,
   ]);
-  const sortedVisibleCommentItems = useMemo(() => (
-    railCommentItems
-      .map((comment, index) => ({
-        comment,
-        index,
-        targetTop: comment.target.tagName === "body"
+  const sortedVisibleCommentItems = useMemo(() => {
+    if (!commentLayoutReady || missingCommentLayoutItem) return [];
+    return railCommentItems
+      .flatMap((comment, index) => {
+        const targetTop = comment.target.tagName === "body"
           ? commentRailMinimumTop
-          : commentRailTargetTops[comment.target.id]
-            ?? comment.target.boundingBox?.y
-            ?? Number.MAX_SAFE_INTEGER,
-      }))
+          : commentRailTargetTops[comment.target.id];
+        if (!Number.isFinite(targetTop)) return [];
+        return [{
+          comment,
+          index,
+          targetTop: targetTop as number,
+        }];
+      })
       .sort((left, right) => (
         left.targetTop - right.targetTop
         || left.comment.createdAt.localeCompare(right.comment.createdAt)
         || left.index - right.index
       ))
-      .map(({ comment }) => comment)
-  ), [commentRailMinimumTop, commentRailTargetTops, railCommentItems]);
+      .map(({ comment }) => comment);
+  }, [
+    commentLayoutReady,
+    commentRailMinimumTop,
+    commentRailTargetTops,
+    missingCommentLayoutItem,
+    railCommentItems,
+  ]);
   const commentRailLayout = useMemo(() => {
     const items: Array<{
       key: string;
@@ -9164,43 +9246,36 @@ export default function Workbench() {
         key: comment.commentId,
         targetTop: comment.target.tagName === "body"
           ? commentRailMinimumTop
-          : Math.max(
-              commentRailMinimumTop,
-              commentRailTargetTops[comment.target.id]
-                ?? comment.target.boundingBox?.y
-                ?? commentRailHeight
-                ?? commentRailMinimumTop,
-            ),
+          : commentRailTargetTops[comment.target.id],
         fallbackHeight: 104 + textLines * 19 + imageRows * 78 + fileCount * 48,
         order: index + 1,
       };
     });
-    if (composerInCurrentTab && draftTarget) {
+    const draftTargetTop = draftTarget?.tagName === "body"
+      ? commentRailMinimumTop
+      : draftTarget
+        ? commentRailTargetTops[draftTarget.id]
+        : undefined;
+    if (
+      composerInCurrentTab
+      && draftTarget
+      && Number.isFinite(draftTargetTop)
+    ) {
       items.push({
         key: "__composer",
-        targetTop: draftTarget.tagName === "body"
-          ? commentRailMinimumTop
-          : Math.max(
-              commentRailMinimumTop,
-              commentRailTargetTops[draftTarget.id]
-                ?? draftTarget.boundingBox?.y
-                ?? commentRailMinimumTop,
-            ),
+        targetTop: draftTargetTop as number,
         fallbackHeight: 276,
         order: Number.MAX_SAFE_INTEGER,
       });
     }
-    if (hasCollapsedCommentDraft && draftTarget) {
+    if (
+      hasCollapsedCommentDraft
+      && draftTarget
+      && Number.isFinite(draftTargetTop)
+    ) {
       items.push({
         key: "__draft_recovery",
-        targetTop: draftTarget.tagName === "body"
-          ? commentRailMinimumTop
-          : Math.max(
-              commentRailMinimumTop,
-              commentRailTargetTops[draftTarget.id]
-                ?? draftTarget.boundingBox?.y
-                ?? commentRailMinimumTop,
-            ),
+        targetTop: draftTargetTop as number,
         fallbackHeight: 142,
         order: Number.MAX_SAFE_INTEGER,
       });
@@ -9217,14 +9292,11 @@ export default function Workbench() {
     });
     return {
       ...layout,
-      composerTop: layout.positions.__composer ?? commentRailMinimumTop,
-      draftRecoveryTop: (
-        layout.positions.__draft_recovery ?? commentRailMinimumTop
-      ),
+      composerTop: layout.positions.__composer,
+      draftRecoveryTop: layout.positions.__draft_recovery,
     };
   }, [
     commentCardHeights,
-    commentRailHeight,
     commentRailMinimumTop,
     commentRailTargetTops,
     composerInCurrentTab,
@@ -9262,6 +9334,30 @@ export default function Workbench() {
   );
   const composerTop = commentRailLayout.composerTop;
   const draftRecoveryTop = commentRailLayout.draftRecoveryTop;
+  useEffect(() => {
+    const becameReady =
+      commentLayoutReady && !commentLayoutWasReadyRef.current;
+    commentLayoutWasReadyRef.current = commentLayoutReady;
+    if (!becameReady || missingCommentLayoutItem) return;
+    if (composerInCurrentTab && draftTarget) {
+      queueReviewPairReveal(draftTarget, "__composer");
+      return;
+    }
+    if (!focusedCommentId) return;
+    const comment = visibleCommentItems.find(
+      (item) => item.commentId === focusedCommentId,
+    );
+    if (comment) queueReviewPairReveal(comment.target, comment.commentId);
+  }, [
+    commentLayoutReady,
+    commentTargetTops,
+    composerInCurrentTab,
+    draftTarget,
+    focusedCommentId,
+    missingCommentLayoutItem,
+    queueReviewPairReveal,
+    visibleCommentItems,
+  ]);
   const commentRailContentHeight = Math.max(
     commentRailHeight,
     commentRailLayout.bottom + 24,
@@ -10064,6 +10160,9 @@ export default function Workbench() {
             ref={commentsPanelRef}
             className="comments-panel comment-rail"
             aria-label={viewMode === "history" ? "历史版本评论" : "本轮评论"}
+            aria-busy={!commentLayoutReady}
+            data-layout-ready={commentLayoutReady ? "true" : "false"}
+            data-layout-generation={commentLayoutAuthority.viewContextGeneration}
             tabIndex={-1}
           >
           <div
@@ -10074,11 +10173,16 @@ export default function Workbench() {
               ref={commentsHeaderRef}
               className="comments-header comment-rail-header"
               data-has-header-actions={
-                draftInCurrentTab || otherTabCommentEntryCount > 0
+                commentLayoutReady
+                && (draftInCurrentTab || otherTabCommentEntryCount > 0)
                   ? "true"
                   : undefined
               }
-              data-other-tabs-open={otherTabCommentsOpen ? "true" : undefined}
+              data-other-tabs-open={
+                commentLayoutReady && otherTabCommentsOpen
+                  ? "true"
+                  : undefined
+              }
             >
               <div className="comment-rail-header-main">
                 <h1>评论 <span>{visibleCommentItems.length}</span></h1>
@@ -10092,7 +10196,7 @@ export default function Workbench() {
                         : "与正文同步滚动"}
                     </small>
                   ) : null}
-                  {draftInCurrentTab ? (
+                  {commentLayoutReady && draftInCurrentTab ? (
                     <button
                       className="comment-header-action unsaved-comment-shortcut"
                       type="button"
@@ -10103,7 +10207,7 @@ export default function Workbench() {
                       <CaretRightIcon aria-hidden="true" size={12} weight="bold" />
                     </button>
                   ) : null}
-                  {otherTabCommentEntryCount > 0 ? (
+                  {commentLayoutReady && otherTabCommentEntryCount > 0 ? (
                     <button
                       className="comment-header-action other-tab-comments-toggle"
                       type="button"
@@ -10124,7 +10228,9 @@ export default function Workbench() {
                   {activeCommentCount} 条评论 · {changeEvents.length} 项直接编辑记录
                 </span>
               </div>
-              {otherTabCommentsOpen && otherTabCommentGroups.length > 0 ? (
+              {commentLayoutReady
+              && otherTabCommentsOpen
+              && otherTabCommentGroups.length > 0 ? (
                 <div
                   id="other-tab-comment-groups"
                   className="other-tab-comment-groups"
@@ -10236,13 +10342,34 @@ export default function Workbench() {
                   void refreshWorkspace(activeSource, hydrationEpoch, false, hydrationEpoch);
                 }}>重试读取</button>
               </section>
+            ) : !commentLayoutReady ? null
+            : missingCommentLayoutItem ? (
+              <section
+                className="round-lock-card rail-status-card"
+                aria-label="评论位置无法定位"
+                style={{ top: `${commentRailMinimumTop}px` }}
+              >
+                <strong>评论位置无法确认</strong>
+                <span>
+                  页面已恢复，但“{insertionLabel(missingCommentLayoutItem.target)}”
+                  没有可用坐标。请重新选择可定位的源码元素。
+                </span>
+                {viewMode === "current" && !interactionLocked ? (
+                  <button
+                    type="button"
+                    onClick={() => beginTargetRelink(
+                      missingCommentLayoutItem.itemKey,
+                    )}
+                  >重新选择目标</button>
+                ) : null}
+              </section>
             ) : composerInCurrentTab && draftTarget && !interactionLocked ? (
               <section
                 className="comment-composer rail-comment-composer"
                 aria-label="添加评论"
                 data-comment-measure="__composer"
                 data-focused="true"
-                style={{ top: `${composerTop}px` }}
+                style={{ top: `${composerTop as number}px` }}
               >
                 <header>
                   <div className="composer-target" data-empty={!draftTarget ? "true" : "false"}>
@@ -10261,7 +10388,7 @@ export default function Workbench() {
                   </button>
                 </header>
                 <label htmlFor="round-comment-draft">评论内容</label>
-                {!canLocateTarget(draftTarget) ? (
+                {!canSaveCommentTarget(draftTarget) ? (
                   <div className="comment-target-recovery" role="status">
                     <span>
                       <strong>原位置已变化</strong>
@@ -10280,7 +10407,7 @@ export default function Workbench() {
                   id="round-comment-draft"
                   ref={composerRef}
                   value={draft}
-                  disabled={!draftTarget || !canLocateTarget(draftTarget) || interactionLocked}
+                  disabled={!draftTarget || !canSaveCommentTarget(draftTarget) || interactionLocked}
                   placeholder={draftTarget.tagName === "body"
                     ? "输入对整个页面的修改要求…"
                     : "输入对这部分内容的修改要求…"}
@@ -10381,7 +10508,7 @@ export default function Workbench() {
                       className="add-comment-button"
                       type="button"
                       disabled={
-                        !canLocateTarget(draftTarget)
+                        !canSaveCommentTarget(draftTarget)
                         || (!draft.trim() && draftAttachments.length === 0)
                         || attachmentUploadCount > 0
                         || interactionLocked
@@ -10397,7 +10524,9 @@ export default function Workbench() {
                   </footer>
                 )}
               </section>
-            ) : hasCollapsedCommentDraft && draftTarget ? (
+            ) : hasCollapsedCommentDraft
+              && draftTarget
+              && draftRecoveryTop !== undefined ? (
               <button
                 className="comment-card draft-comment-card"
                 type="button"
@@ -10418,7 +10547,9 @@ export default function Workbench() {
               </button>
             ) : null}
 
-            {railCommentItems.length === 0
+            {commentLayoutReady
+            && !missingCommentLayoutItem
+            && railCommentItems.length === 0
             && !composerInCurrentTab
             && !hasCollapsedCommentDraft ? (
               <div
@@ -10453,10 +10584,7 @@ export default function Workbench() {
                   tabIndex={editable && canLocateTarget(comment.target) ? 0 : -1}
                   aria-label={`${insertionLabel(comment.target)}：${comment.text}`}
                   style={{
-                    top: `${
-                      visibleCommentPositions[comment.commentId]
-                      ?? commentRailMinimumTop
-                    }px`,
+                    top: `${visibleCommentPositions[comment.commentId]}px`,
                   }}
                   onClick={() => {
                     if (!editing && !deleting && editable && canLocateTarget(comment.target)) {

@@ -62,7 +62,11 @@ for one current document key and preview generation. A capture result may apply
 only while that complete identity is still current. Project/source changes,
 history navigation, a newer preview generation or a failed capture discard it.
 It never registers a drain obligation and never changes source, Draft or
-Version authority.
+Version authority. Comment layout is measured only after this projection is
+applied. The Workbench accepts no card coordinates until the Canvas reports a
+complete target set for the current rendered source Hash and applied generation;
+missing coordinates remain an explicit recovery state and are never synthesized
+from historical geometry.
 
 Opening a user HTML may remain lazy until the first durable product action.
 During that interval the renderer owns only an `epoch + sourcePath` locator,
