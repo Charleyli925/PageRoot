@@ -255,8 +255,12 @@
     {
       "id": "task-workflow",
       "patterns": [
+        "^\\.github/workflows/ci\\.yml$",
         "^AGENTS\\.md$",
-        "^docs/CODEX_WORKFLOW\\.md$",
+        "^CONTRIBUTING\\.md$",
+        "^docs/(?:CODEX_WORKFLOW|DEVELOPMENT|GIT_WORKFLOW)\\.md$",
+        "^docs/decisions/0008-worktree-branch-lifecycle\\.md$",
+        "^package\\.json$",
         "^scripts/task-workflow\\.mjs$",
         "^tests/task-workflow\\.test\\.mjs$"
       ],
