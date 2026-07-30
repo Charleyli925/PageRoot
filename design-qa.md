@@ -770,3 +770,65 @@ The Figma screenshots show the earlier expanded-card proposals, not a same-viewp
 - P3: with many unusually long tab names, a future density pass could add a bounded two-line label. This is not visible in the tested state and does not block acceptance.
 
 final result: passed
+
+---
+
+# Tab comment hierarchy follow-up QA
+
+## Superseding direction
+
+- This follow-up supersedes the earlier compact grouped-summary treatment in
+  “Comment rail design QA”.
+- Source visual truth:
+  - `output/design-qa/2026-07-30-tab-comments/source-tab-markers.png`
+  - `output/design-qa/2026-07-30-tab-comments/source-comment-header.png`
+  - `output/design-qa/2026-07-30-tab-comments/source-comment-expanded.png`
+- Rendered implementation:
+  - `output/playwright/native-dom-browser/results/native-dom-comment-tabs-co-5d63e-rds-and-avoid-draft-overlap/comment-rail-folded.png`
+  - `output/playwright/native-dom-browser/results/native-dom-comment-tabs-co-5d63e-rds-and-avoid-draft-overlap/comment-rail-expanded.png`
+- Combined comparisons:
+  - `output/design-qa/2026-07-30-tab-comments/compare-tab-markers.png`
+  - `output/design-qa/2026-07-30-tab-comments/compare-comment-header.png`
+  - `output/design-qa/2026-07-30-tab-comments/compare-comment-expanded.png`
+
+## Findings
+
+- Tab comment counts now reuse the existing violet Canvas comment marker and
+  render `评N` as one floating badge. Tab controls use a top-right placement so
+  the count is not styled as authored Tab text and does not cover the next Tab.
+- The redundant current-Tab label and count are removed from the comment
+  header. The total comment count remains the primary header fact.
+- The other-Tab trigger retains the existing full-width secondary-row
+  hierarchy. Its expanded content increases the height of the same measured
+  header instead of creating accordion cards outside it.
+- Every expanded comment is a specific neutral saved-comment card, with the
+  existing white surface, 16 px radius, subtle violet edge and quiet shadow.
+  There is no selected or editing treatment until the user chooses the card.
+- Clicking a card activates its authored Tab, collapses the header expansion
+  and focuses that exact saved comment in the normal Canvas-aligned rail.
+
+## Automated evidence
+
+- The focused Browser case passed at 1600 × 900 with zero unexpected console
+  or page errors.
+- Geometry asserts that the center of the `评2` badge sits beyond the Tab's
+  right edge and its bottom remains within the upper eight pixels of the Tab,
+  keeping it visually floating rather than embedded.
+- DOM ownership asserts that the expanded other-Tab region is a child of the
+  comment header, and computed style asserts the neutral comment card has a
+  white background and 16 px radius.
+- The same case verifies the current-Tab label is absent, the exact other-Tab
+  card switches the authored Tab and focuses its comment, and draft recovery
+  retains at least 16 px clearance from the next saved card.
+
+## Checklist
+
+- [x] `评1` / `评2` use the existing Canvas marker visual.
+- [x] Tab markers float outside the authored label treatment.
+- [x] Current-Tab summary is omitted.
+- [x] Other-Tab comments expand inside the top comment header.
+- [x] Expanded entries use the neutral saved-comment card visual.
+- [x] A specific card switches Tab and focuses the matching comment.
+- [x] Keyboard focus and accessible names remain available.
+
+final result: passed

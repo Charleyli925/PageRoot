@@ -32,7 +32,7 @@ async function saveComment(page, frame, caseId, text) {
   await composer.getByRole("button", { name: "评论", exact: true }).click();
 }
 
-test("comments keep current-tab alignment, fold other tabs into the header, and avoid draft overlap", async ({
+test("comments keep current-tab alignment, render other tabs as neutral header cards, and avoid draft overlap", async ({
   page,
 }, testInfo) => {
   const browserErrors = [];
@@ -56,6 +56,24 @@ test("comments keep current-tab alignment, fold other tabs into the header, and 
   const secondText = "第二页已保存评论";
 
   await saveComment(page, frame, "tab-comment-one", firstText);
+  await saveComment(page, frame, "tab-control-one", "第一页标签评论一");
+  await saveComment(page, frame, "tab-control-one", "第一页标签评论二");
+  const firstTabMarker = page.getByRole("button", {
+    name: /第一页已有2条评论/u,
+  });
+  await expect(firstTabMarker).toHaveText("评2");
+  await expect(firstTabMarker).toHaveAttribute("data-placement", "tab-side");
+  const [firstTabBox, firstTabMarkerBox] = await Promise.all([
+    frame.locator(caseSelector("tab-control-one")).boundingBox(),
+    firstTabMarker.boundingBox(),
+  ]);
+  expect(firstTabBox).not.toBeNull();
+  expect(firstTabMarkerBox).not.toBeNull();
+  expect(
+    firstTabMarkerBox.x + (firstTabMarkerBox.width / 2),
+  ).toBeGreaterThan(firstTabBox.x + firstTabBox.width);
+  expect(firstTabMarkerBox.y + firstTabMarkerBox.height)
+    .toBeLessThanOrEqual(firstTabBox.y + 8);
   await switchTab(frame, "panel-two");
   await saveComment(page, frame, "tab-comment-two", secondText);
 
@@ -71,29 +89,63 @@ test("comments keep current-tab alignment, fold other tabs into the header, and 
   await expect(frame.locator("#panel-one")).toBeHidden();
 
   const rail = page.locator('aside[aria-label="本轮评论"]');
-  await expect(rail.locator(".comments-header h1")).toContainText("2");
-  await expect(rail.locator(".comment-card")).toHaveCount(1);
-  await expect(rail.locator(".comment-card")).toContainText(secondText);
-  await expect(rail.getByRole("button", { name: "其他标签页 1" })).toBeVisible();
+  const header = rail.locator(".comment-rail-header");
+  const currentCards = rail.locator(".comment-rail-content > .comment-card");
+  await expect(header.locator("h1")).toContainText("4");
+  await expect(header).not.toContainText("当前标签页");
+  await expect(currentCards).toHaveCount(3);
+  await expect(currentCards.filter({ hasText: secondText })).toBeVisible();
+  const otherTabsToggle = rail.getByRole("button", {
+    name: "其他标签页评论 1",
+  });
+  await expect(otherTabsToggle).toBeVisible();
+  const [foldedHeaderBox, otherTabsToggleBox] = await Promise.all([
+    header.boundingBox(),
+    otherTabsToggle.boundingBox(),
+  ]);
+  expect(foldedHeaderBox).not.toBeNull();
+  expect(otherTabsToggleBox).not.toBeNull();
+  expect(otherTabsToggleBox.width)
+    .toBeGreaterThanOrEqual(foldedHeaderBox.width - 40);
   await page.screenshot({
     path: testInfo.outputPath("comment-rail-folded.png"),
   });
 
-  await rail.getByRole("button", { name: "其他标签页 1" }).click();
+  await otherTabsToggle.click();
   const otherTabRegion = rail.getByRole("region", { name: "其他标签页评论" });
   await expect(otherTabRegion).toBeVisible();
-  await expect(otherTabRegion.getByRole("button", { name: /第一页.*1 条/u }))
-    .toBeVisible();
+  const firstTabGroup = otherTabRegion.getByRole("region", {
+    name: "第一页的评论",
+  });
+  const firstOtherTabCard = firstTabGroup.getByRole("button", {
+    name: new RegExp(firstText, "u"),
+  });
+  await expect(firstOtherTabCard)
+    .toHaveClass(/comment-card other-tab-comment-card/u);
+  expect(await otherTabRegion.evaluate((element) => (
+    element.parentElement?.classList.contains("comment-rail-header")
+  ))).toBe(true);
+  expect(await firstOtherTabCard.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      backgroundColor: style.backgroundColor,
+      borderRadius: style.borderRadius,
+    };
+  })).toEqual({
+    backgroundColor: "rgb(255, 255, 255)",
+    borderRadius: "16px",
+  });
   await page.screenshot({
     path: testInfo.outputPath("comment-rail-expanded.png"),
   });
-  await otherTabRegion.getByRole("button", { name: /第一页.*1 条/u }).click();
+  await firstOtherTabCard.click();
 
   await expect(frame.locator("#panel-one")).toBeVisible();
   await expect(frame.locator("#panel-two")).toBeHidden();
-  await expect(rail.locator(".comment-card")).toHaveCount(1);
-  await expect(rail.locator(".comment-card")).toContainText(firstText);
-  await expect(rail.locator(".comment-card")).toHaveAttribute("data-focused", "true");
+  await expect(currentCards).toHaveCount(3);
+  await expect(currentCards.filter({ hasText: firstText })).toBeVisible();
+  await expect(currentCards.filter({ hasText: firstText }))
+    .toHaveAttribute("data-focused", "true");
 
   const firstTarget = frame.locator(caseSelector("tab-comment-one"));
   await firstTarget.click();

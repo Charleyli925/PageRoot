@@ -12,9 +12,11 @@ Notable user-visible changes are documented here. This project follows Semantic 
   native-action interception authoritative.
 - Keep script-rendered Canvas charts and dynamic table rows visible in Edit as
   bounded, non-editable projections without copying them into source HTML.
-- Keep current-tab comments aligned with the Canvas, fold other-tab comments
-  into the comment header, and place an existing unsaved-comment recovery card
-  without overlapping saved comments.
+- Keep current-tab comments aligned with the Canvas, render Tab comment counts
+  as the existing floating violet `评N` marker, and remove redundant current-Tab
+  metadata from the comment header. Other-Tab comments now expand as neutral
+  saved-comment cards inside that header, while unsaved recovery remains clear
+  of saved comments.
 - Allow direct text edits beside preserved nested lists and `<wbr>` boundaries
   while keeping those authored structures byte-safe and non-editable.
 

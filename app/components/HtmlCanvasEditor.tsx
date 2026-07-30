@@ -419,6 +419,7 @@ type CommentMarker = {
   selection: HtmlCanvasSelection;
   count?: number;
   label?: string;
+  placement?: "target-corner" | "tab-side";
   left: number;
   top: number;
 };
@@ -2774,17 +2775,51 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       if (targetRect.bottom < 0 || targetRect.top > frameHeight) return;
       const isGlobalPageTarget = isPageRootElement(targetElement)
         && target.level === "module";
+      const tabControl = commentTabAssociations.find((association) => (
+        association.control === targetElement
+        || association.control.contains(targetElement)
+      ))?.control ?? null;
+      const markerAnchorRect = tabControl?.getBoundingClientRect() ?? targetRect;
       nextCommentMarkers.push({
         key: target.id || `${target.selector}:${targetIndex}`,
         selection: selectionForElement(targetElement, sourceIndexRef.current, target),
         count: rawTarget.count,
         label: rawTarget.label,
+        placement: tabControl ? "tab-side" : "target-corner",
         left: isGlobalPageTarget
           ? Math.max(18, Math.min(containerRect.width - 28, frameOffsetLeft + 18))
-          : Math.max(18, Math.min(containerRect.width - 28, frameOffsetLeft + targetRect.right - 12)),
+          : tabControl
+            ? Math.max(
+                18,
+                Math.min(
+                  containerRect.width - 28,
+                  frameOffsetLeft + markerAnchorRect.right + 10,
+                ),
+              )
+            : Math.max(
+                18,
+                Math.min(
+                  containerRect.width - 28,
+                  frameOffsetLeft + targetRect.right - 12,
+                ),
+              ),
         top: isGlobalPageTarget
           ? Math.max(18, Math.min(containerRect.height - 18, frameOffsetTop + 18))
-          : Math.max(18, Math.min(containerRect.height - 18, frameOffsetTop + targetRect.top - 10)),
+          : tabControl
+            ? Math.max(
+                18,
+                Math.min(
+                  containerRect.height - 18,
+                  frameOffsetTop + markerAnchorRect.top - 4,
+                ),
+              )
+            : Math.max(
+                18,
+                Math.min(
+                  containerRect.height - 18,
+                  frameOffsetTop + targetRect.top - 10,
+                ),
+              ),
       });
     });
     setCommentMarkers(nextCommentMarkers);
@@ -5895,9 +5930,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           type="button"
           className={styles.commentMarker}
           data-global={isPageRootSelection(marker.selection) ? "true" : undefined}
+          data-placement={marker.placement}
           style={{ left: marker.left, top: marker.top }}
-          aria-label={marker.label || `${marker.selection.label}已有${marker.count || 1}条评论`}
-          title={marker.label || "查看已有评论"}
+          aria-label={marker.count && marker.count > 1
+            ? `${marker.label || marker.selection.label}已有${marker.count}条评论`
+            : marker.label || `${marker.selection.label}已有1条评论`}
+          title={`查看${marker.label || marker.selection.label}的${marker.count || 1}条评论`}
           onClick={() => {
             if (lockedRef.current) return;
             // The marker was clicked at the user's current Canvas position.
@@ -5906,8 +5944,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             selectTarget(marker.selection, { reveal: false, showToolbar: true });
           }}
         >
-          <span className={styles.commentGlyph} aria-hidden="true">评</span>
-          {marker.count && marker.count > 1 ? <span className={styles.commentCount}>{marker.count}</span> : null}
+          <span className={styles.commentGlyph} aria-hidden="true">
+            评{marker.count || 1}
+          </span>
         </button>
       )) : null}
 

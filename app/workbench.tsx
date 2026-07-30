@@ -9929,18 +9929,21 @@ export default function Workbench() {
             <header
               ref={commentsHeaderRef}
               className="comments-header comment-rail-header"
+              data-has-other-tabs={otherTabCommentItems.length > 0 ? "true" : undefined}
               data-other-tabs-open={otherTabCommentsOpen ? "true" : undefined}
             >
               <div className="comment-rail-header-main">
                 <h1>评论 <span>{visibleCommentItems.length}</span></h1>
                 <div className="comment-rail-header-actions">
-                  <small>{viewMode === "history"
-                    ? "历史版本 · 只读"
-                    : otherTabCommentItems.length > 0
-                      ? `当前标签页 ${railCommentItems.length}`
-                      : visibleCommentItems.length > COMMENT_VIRTUALIZATION_THRESHOLD
+                  {viewMode === "history" ? (
+                    <small>历史版本 · 只读</small>
+                  ) : otherTabCommentItems.length === 0 ? (
+                    <small>
+                      {visibleCommentItems.length > COMMENT_VIRTUALIZATION_THRESHOLD
                         ? `当前加载 ${renderedVisibleCommentItems.length} 条`
-                        : "与正文同步滚动"}</small>
+                        : "与正文同步滚动"}
+                    </small>
+                  ) : null}
                   {otherTabCommentItems.length > 0 ? (
                     <button
                       className="other-tab-comments-toggle"
@@ -9953,7 +9956,7 @@ export default function Workbench() {
                           : otherTabCommentsContextKey
                       ))}
                     >
-                      <span>其他标签页 {otherTabCommentItems.length}</span>
+                      <span>其他标签页评论 {otherTabCommentItems.length}</span>
                       <CaretRightIcon aria-hidden="true" size={12} weight="bold" />
                     </button>
                   ) : null}
@@ -9970,21 +9973,48 @@ export default function Workbench() {
                   aria-label="其他标签页评论"
                 >
                   {otherTabCommentGroups.map((group) => (
-                    <button
-                      type="button"
+                    <section
+                      className="other-tab-comment-group"
+                      aria-label={`${group.label}的评论`}
                       key={group.key}
-                      onClick={() => {
-                        const comment = group.comments[0];
-                        setExpandedOtherTabCommentsKey("");
-                        window.requestAnimationFrame(() => {
-                          focusCommentTarget(comment.target, comment.commentId);
-                        });
-                      }}
                     >
-                      <span>{group.label}</span>
-                      <small>{group.comments.length} 条</small>
-                      <CaretRightIcon aria-hidden="true" size={12} weight="bold" />
-                    </button>
+                      <div className="other-tab-comment-group-header">
+                        <strong>{group.label}</strong>
+                        <span>{group.comments.length}</span>
+                      </div>
+                      <div className="other-tab-comment-list">
+                        {group.comments.map((comment) => {
+                          const previewText = comment.text.trim()
+                            || `已添加 ${(comment.attachments ?? []).length} 个附件`;
+                          return (
+                            <button
+                              className="comment-card other-tab-comment-card"
+                              type="button"
+                              aria-label={`${group.label}：${insertionLabel(comment.target)}：${previewText}`}
+                              key={comment.commentId}
+                              onClick={() => {
+                                setExpandedOtherTabCommentsKey("");
+                                window.requestAnimationFrame(() => {
+                                  focusCommentTarget(comment.target, comment.commentId);
+                                });
+                              }}
+                            >
+                              <span className="comment-card-header">
+                                <span className="comment-target">
+                                  {insertionLabel(comment.target)}
+                                </span>
+                                <time dateTime={comment.updatedAt || comment.createdAt}>
+                                  {formatTime(comment.updatedAt || comment.createdAt, true)}
+                                </time>
+                              </span>
+                              <span className="other-tab-comment-card-body">
+                                {previewText}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </section>
                   ))}
                 </div>
               ) : null}
@@ -10165,10 +10195,10 @@ export default function Workbench() {
               >
                 <ChatCircleTextIcon aria-hidden="true" size={24} weight="duotone" />
                 <strong>{otherTabCommentItems.length > 0
-                  ? "当前标签页没有评论"
+                  ? "这个标签页还没有评论"
                   : "评论会显示在这里"}</strong>
                 <span>{otherTabCommentItems.length > 0
-                  ? "其他标签页的评论已收起在顶部。"
+                  ? "其他标签页的评论可从顶部展开。"
                   : "可以评论整个页面、模块或其中的小区块。"}</span>
               </div>
             ) : renderedVisibleCommentItems.map((comment) => {
