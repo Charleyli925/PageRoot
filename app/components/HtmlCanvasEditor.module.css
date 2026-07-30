@@ -108,10 +108,7 @@
 .commentGlyph {
   display: block;
   font: 750 10px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-}
-
-.commentCount {
-  font: 700 9px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  white-space: nowrap;
 }
 
 .commentMarker:hover {

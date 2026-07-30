@@ -1,5 +1,122 @@
 # Design QA
 
+## Unsaved comment routing and stable rail order
+
+Date: 2026-07-30
+
+Source visual truth:
+
+- `/Users/lizexuan/.codex/generated_images/019fb1a9-d408-79e0-92bb-8962dbbd6c62/call_vmf1XsAudns5T3A0z08yp0YG.png`
+  — approved current-Tab header hierarchy.
+- `/Users/lizexuan/.codex/generated_images/019fb1a9-d408-79e0-92bb-8962dbbd6c62/call_19kVCvSNRl6CgHmLJUXF0T92.png`
+  — approved other-Tab expansion and neutral card hierarchy.
+- `/Users/lizexuan/.codex/generated_images/019fb1a9-d408-79e0-92bb-8962dbbd6c62/call_xompAKi2e8R8iC43fKaZ0y4B.png`
+  — approved resumed-composer styling.
+- Final user annotations supersede two details in those images: a hidden-Tab
+  draft has no duplicate “有一条未保存评论” shortcut, and every saved card,
+  collapsed draft and composer follows page-position order rather than giving
+  the composer priority.
+
+Implementation evidence:
+
+- `output/playwright/native-dom-browser/results/native-dom-comment-tabs-co-5d63e-rds-and-avoid-draft-overlap/comment-rail-draft-recovery.png`
+- `output/playwright/native-dom-browser/results/native-dom-comment-tabs-co-5d63e-rds-and-avoid-draft-overlap/comment-rail-other-tab-draft.png`
+- `output/playwright/native-dom-browser/results/native-dom-comment-tabs-co-5d63e-rds-and-avoid-draft-overlap/comment-rail-hidden-draft-resumed.png`
+
+Combined comparison inputs:
+
+- `output/design-qa/2026-07-30-comment-draft-routing/comparison-current-draft.png`
+- `output/design-qa/2026-07-30-comment-draft-routing/comparison-other-tab-draft.png`
+- `output/design-qa/2026-07-30-comment-draft-routing/comparison-resumed-composer.png`
+
+Viewport and normalization:
+
+- Implementation viewport: `1600 × 900` CSS pixels at 1× density; the visible
+  comment rail crop is `376 × 812` pixels from below the application header.
+- Source images: `906 × 1736`, `940 × 1672` and `906 × 1736` pixels. Each
+  source rail was proportionally downsampled to `376` pixels wide and placed
+  at the top of a `376 × 812` neutral canvas.
+- Each combined comparison places the normalized source on the left and the
+  final implementation rail on the right, separated by a `20px` neutral gutter.
+- States: current-Tab collapsed draft; other-Tab group expanded with one saved
+  card and one tagged draft; hidden draft selected and resumed in its original
+  current-Tab composer.
+
+Full-view and focused comparison evidence:
+
+- The current-Tab header keeps the approved `评论 4` hierarchy and two compact
+  full-width actions. The page-position draft card uses the same unselected
+  saved-card surface, with only a small “未保存” status pill.
+- The other-Tab state has one header action, keeps expansion inside the header,
+  removes the redundant group count pill, and shows exactly the two cards
+  counted by “其他标签页评论 2”.
+- The resumed composer keeps the existing PageRoot target summary, textarea,
+  attachment tools and primary action. The new trash action uses the same
+  Phosphor tool-button treatment and leads to an inline confirmation.
+- Focused comparisons are the rail crops themselves: every label, badge,
+  border, icon and card gap remains readable at the implementation’s exact
+  1× density, so a narrower secondary crop would not add evidence.
+
+Required fidelity surfaces:
+
+- Fonts and typography: existing PageRoot system-font family, optical weights,
+  9–15px control hierarchy, line heights and truncation are retained. The
+  generated source was normalized by rail width; its larger raster text is not
+  treated as an implementation font-size requirement.
+- Spacing and layout rhythm: header actions retain the approved stacked rhythm.
+  Saved cards, collapsed drafts and composers use measured heights plus at
+  least `16px` visible separation; the Browser oracle confirms the order
+  remains `Tab comment 1 → Tab comment 2 → page comment → composer`.
+- Colors and visual tokens: white surfaces, cool gray rail, violet status and
+  focus tokens, neutral borders and shadows all reuse the existing comment
+  card system. “未保存” is a quiet state label rather than a warning banner.
+- Image quality and asset fidelity: this flow contains no raster product
+  assets. Existing Phosphor caret, attachment, image, trash, close and comment
+  icons are reused; no handcrafted icon or placeholder asset was added.
+- Copy and content: “有一条未保存评论”, “其他标签页评论 N” and “未保存”
+  match the approved copy. Close still means preserve; only the explicit
+  “删除未保存评论” path can discard the draft.
+
+Comparison history:
+
+1. The pre-change rail gave the composer/focused item layout priority, which
+   could move earlier page comments below it and let the recovery surface
+   compete with saved cards. This was a P1 ordering and comprehension issue.
+2. The first implementation removed focus-based ordering and unified all
+   current-Tab items under one deterministic page-position layout. Browser QA
+   then exposed a transient same-target fallback that could split two Tab
+   comments while a hidden draft was restored.
+3. Target positions are now normalized by shared Canvas marker identity,
+   preferring measured positions over stale selection fallback coordinates.
+   Post-fix Browser assertions wait for ResizeObserver measurement and prove
+   the complete order plus a minimum `16px` gap before the final screenshots.
+
+Interaction checks:
+
+- Current-Tab shortcut locates and focuses the original composer without
+  disappearing.
+- Preview-to-Edit Tab switching moves the draft into the correct other-Tab
+  group and removes the duplicate current shortcut.
+- Clicking the entire hidden draft card switches back, restores the exact text
+  and focuses the composer.
+- Saving removes the shortcut in the recovery suite; explicit deletion removes
+  shortcut, draft card and composer together.
+- Main `评论 4`, send count and Canvas `评1` remain unchanged while the draft
+  exists.
+- Header expansion moves the rail items down without changing their relative
+  order, and measured hover/composer states do not overlap.
+- Browser console warnings and errors: none.
+
+Findings:
+
+- No actionable P0, P1 or P2 mismatch remains.
+- Intentional differences from the generated images are limited to the two
+  later user decisions documented under source visual truth.
+
+final result: passed
+
+---
+
 ## Workbench header height and overflow
 
 Date: 2026-07-29
@@ -768,5 +885,67 @@ The Figma screenshots show the earlier expanded-card proposals, not a same-viewp
 ## Follow-up polish
 
 - P3: with many unusually long tab names, a future density pass could add a bounded two-line label. This is not visible in the tested state and does not block acceptance.
+
+final result: passed
+
+---
+
+# Tab comment hierarchy follow-up QA
+
+## Superseding direction
+
+- This follow-up supersedes the earlier compact grouped-summary treatment in
+  “Comment rail design QA”.
+- Source visual truth:
+  - `output/design-qa/2026-07-30-tab-comments/source-tab-markers.png`
+  - `output/design-qa/2026-07-30-tab-comments/source-comment-header.png`
+  - `output/design-qa/2026-07-30-tab-comments/source-comment-expanded.png`
+- Rendered implementation:
+  - `output/playwright/native-dom-browser/results/native-dom-comment-tabs-co-5d63e-rds-and-avoid-draft-overlap/comment-rail-folded.png`
+  - `output/playwright/native-dom-browser/results/native-dom-comment-tabs-co-5d63e-rds-and-avoid-draft-overlap/comment-rail-expanded.png`
+- Combined comparisons:
+  - `output/design-qa/2026-07-30-tab-comments/compare-tab-markers.png`
+  - `output/design-qa/2026-07-30-tab-comments/compare-comment-header.png`
+  - `output/design-qa/2026-07-30-tab-comments/compare-comment-expanded.png`
+
+## Findings
+
+- Tab comment counts now reuse the existing violet Canvas comment marker and
+  render `评N` as one floating badge. Tab controls use a top-right placement so
+  the count is not styled as authored Tab text and does not cover the next Tab.
+- The redundant current-Tab label and count are removed from the comment
+  header. The total comment count remains the primary header fact.
+- The other-Tab trigger retains the existing full-width secondary-row
+  hierarchy. Its expanded content increases the height of the same measured
+  header instead of creating accordion cards outside it.
+- Every expanded comment is a specific neutral saved-comment card, with the
+  existing white surface, 16 px radius, subtle violet edge and quiet shadow.
+  There is no selected or editing treatment until the user chooses the card.
+- Clicking a card activates its authored Tab, collapses the header expansion
+  and focuses that exact saved comment in the normal Canvas-aligned rail.
+
+## Automated evidence
+
+- The focused Browser case passed at 1600 × 900 with zero unexpected console
+  or page errors.
+- Geometry asserts that the center of the `评2` badge sits beyond the Tab's
+  right edge and its bottom remains within the upper eight pixels of the Tab,
+  keeping it visually floating rather than embedded.
+- DOM ownership asserts that the expanded other-Tab region is a child of the
+  comment header, and computed style asserts the neutral comment card has a
+  white background and 16 px radius.
+- The same case verifies the current-Tab label is absent, the exact other-Tab
+  card switches the authored Tab and focuses its comment, and draft recovery
+  retains at least 16 px clearance from the next saved card.
+
+## Checklist
+
+- [x] `评1` / `评2` use the existing Canvas marker visual.
+- [x] Tab markers float outside the authored label treatment.
+- [x] Current-Tab summary is omitted.
+- [x] Other-Tab comments expand inside the top comment header.
+- [x] Expanded entries use the neutral saved-comment card visual.
+- [x] A specific card switches Tab and focuses the matching comment.
+- [x] Keyboard focus and accessible names remain available.
 
 final result: passed

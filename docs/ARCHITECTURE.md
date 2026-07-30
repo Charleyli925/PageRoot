@@ -41,6 +41,14 @@ Comments + frozen input
   rebuilt from source bytes. Canvas snapshots and sanitized table rows are
   disposable and non-editable; arbitrary runtime nodes, rewritten text, form
   values and scroll positions are never copied into it or serialized.
+- Comment selection remains source-node exact inside foreign content. Authored
+  SVG children retain their own instrumented SourceIndex identity; runtime-only
+  children fail closed and are never promoted to an ancestor `svg`.
+- Comment-rail coordinates are a disposable Canvas measurement projection.
+  Every snapshot is tagged with the rendered source Hash and the generation of
+  the `PageViewContext` actually applied to the edit document. Workbench renders
+  cards only after that complete snapshot is current; a missing coordinate is
+  a recovery state, not permission to use saved geometry or a page-end fallback.
 - `IslandEditingController` is the only production text-edit engine in PageRoot 0.9.0. `contenteditable="true"` supplies focus, caret, Selection and IME composition, while the controller owns insertion, deletion, line breaks, paste and formatting. Chromium DOM serialization never has commit authority.
 - `editable-island` owns the V2 capability and normalization contract. An accepted edit replaces only the selected element's parsed `contentRange`; bytes outside that range remain exact. Inside the range, parse5 may perform the smallest safe normalization needed to preserve inline semantics, comments and immutable authored atoms.
 - `native-edit-policy` owns shared session attributes and checkpoint timing. `native-edit-runtime-preflight` still proves that enabling the island does not change geometry or text style; `HtmlCanvasEditor` only coordinates selection, the island session and SourcePatch.

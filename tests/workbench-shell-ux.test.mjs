@@ -1178,19 +1178,25 @@ test("user-opened HTML stays lazily registered until a real project action", () 
 
 test("comment composer is explicit, transient and horizontally contained", () => {
   const unifiedSurfaceStyles = styles.slice(styles.indexOf("PageRoot V5.1"));
-  assert.match(workbench, /composerOpen && draftTarget && !interactionLocked \?/);
+  assert.match(workbench, /composerInCurrentTab && draftTarget && !interactionLocked \?/);
   assert.match(workbench, /setComposerOpen\(true\)/);
   assert.match(workbench, /setComposerOpen\(false\)/);
   assert.match(workbench, /draftTargetRef\.current\?\.id === target\.id/);
   assert.match(workbench, /if \(!resumesRecoveredDraft\)/);
-  assert.match(workbench, /className="draft-recovery-card[^"]*"/);
-  assert.match(workbench, /canLocateTarget\(draftTarget\) \? "继续填写" : "重新选择目标"/);
+  assert.match(workbench, /className="comment-card draft-comment-card"/);
+  assert.match(workbench, /className="comment-header-action unsaved-comment-shortcut"/);
+  assert.match(workbench, /const draftInOtherTab = hasCommentDraft && draftTargetInOtherTab/);
+  assert.match(workbench, /className="unsaved-comment-status">未保存/);
   assert.match(workbench, /beginTargetRelink\("__composer"\)/);
   assert.match(workbench, /评论和附件仍保留，重新关联后即可发送/);
   assert.match(workbench, /recoveredDraftTarget\.id !== target\.id/);
   assert.match(workbench, /上一条评论还未保存/);
   assert.match(workbench, /请先点击“评论”保存；保存后仍可修改/);
   assert.match(workbench, /const resumeCurrentComposer = useCallback/);
+  assert.match(
+    workbench,
+    /const recoveredComposerTarget = recoveredDraft\.composerTarget[\s\S]*?setDraftTarget\(recoveredComposerTarget\);[\s\S]*?setComposerOpen\(false\);/,
+  );
   assert.doesNotMatch(workbench, /saved-comment-drafts|review-comment-drafts/);
   assert.match(workbench, /const activeCommentCount = activeCommentItems\.length/);
   assert.match(workbench, /const pendingSendItemCount = activeCommentCount;/);
@@ -1211,9 +1217,16 @@ test("comment composer is explicit, transient and horizontally contained", () =>
   assert.doesNotMatch(workbench, /comment-target[\s\S]{0,300}targetResolutionLabel/);
   const composer = workbench.slice(
     workbench.indexOf('className="comment-composer rail-comment-composer"'),
-    workbench.indexOf('className="draft-recovery-card rail-status-card"'),
+    workbench.indexOf(") : hasCollapsedCommentDraft && draftTarget ? ("),
   );
   assert.doesNotMatch(composer, /targetResolutionLabel|className="target-resolution"/);
+  assert.match(composer, /aria-label="删除未保存评论"/);
+  assert.match(composer, /删除这条未保存评论？/);
+  assert.match(workbench, /const discardCurrentComposer = useCallback/);
+  assert.match(
+    workbench,
+    /discardedCommentId[\s\S]*?deletedCommentIdsRef\.current\.add\(discardedCommentId\)/,
+  );
   assert.match(workbench, /className="comments-panel comment-rail"/);
   assert.match(workbench, /className="comment-rail-content"/);
   assert.match(
@@ -1227,8 +1240,8 @@ test("comment composer is explicit, transient and horizontally contained", () =>
   assert.match(styles, /\.comment-rail-content > \.comment-card\s*\{[\s\S]*?position:\s*absolute/);
   assert.match(unifiedSurfaceStyles, /\.comment-card-tools\s*\{[\s\S]*?gap:\s*9px/);
   assert.match(workbench, /data-comment-measure=\{comment\.commentId\}/);
-  assert.match(workbench, /const focusKey = composerOpen && draftTarget \? "__composer" : focusedCommentId/);
-  assert.match(workbench, /deferredItems\.unshift\(item\)/);
+  assert.match(workbench, /layoutCommentRailItems\(\{/);
+  assert.doesNotMatch(workbench, /const focusKey =|deferredItems\.unshift\(item\)/);
   assert.match(workbench, /queueReviewPairReveal\(target, "__composer"\)/);
   const canvasSelectionHandler = workbench.slice(
     workbench.indexOf("const handleCanvasSelection = useCallback"),

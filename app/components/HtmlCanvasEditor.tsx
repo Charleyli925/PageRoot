@@ -235,17 +235,22 @@ export type HtmlCanvasCommentedTarget = {
   layoutTargets?: readonly HtmlCanvasSelection[];
   count?: number;
   label?: string;
+  /** Report target layout without rendering a saved-comment marker. */
+  showMarker?: boolean;
 };
 
 export type HtmlCanvasCommentLayoutState = {
+  sourceSha256: string;
+  viewContextGeneration: number;
+  ready: boolean;
   scrollTop: number;
   scrollHeight: number;
   clientHeight: number;
   targets: Array<{
     targetId: string;
-    top: number;
-    height: number;
-    visible: boolean;
+    status: "visible" | "hidden" | "missing";
+    top?: number;
+    height?: number;
     tabGroupKey?: string;
     tabGroupLabel?: string;
   }>;
@@ -419,6 +424,7 @@ type CommentMarker = {
   selection: HtmlCanvasSelection;
   count?: number;
   label?: string;
+  placement?: "target-corner" | "tab-side";
   left: number;
   top: number;
 };
@@ -1011,6 +1017,28 @@ function visibleText(element: HTMLElement): string {
   return value.length > 42 ? `${value.slice(0, 42)}…` : value;
 }
 
+function svgSourceLabel(element: HTMLElement): string {
+  const tagName = element.tagName.toLowerCase();
+  const directTitle = Array.from(element.children).find(
+    (child) => child.tagName.toLowerCase() === "title",
+  )?.textContent;
+  const value = (
+    element.getAttribute("aria-label")
+    || element.getAttribute("title")
+    || directTitle
+    || (tagName === "text" ? element.textContent : "")
+    || element.id
+    || ""
+  ).replace(/\s+/g, " ").trim();
+  return value.length > 42 ? `${value.slice(0, 42)}…` : value;
+}
+
+function selectionText(element: HTMLElement): string {
+  return element.namespaceURI === "http://www.w3.org/2000/svg"
+    ? svgSourceLabel(element)
+    : visibleText(element);
+}
+
 function readableLabel(element: HTMLElement): string {
   const tagName = element.tagName.toLowerCase();
   const typeLabel: Record<string, string> = {
@@ -1035,12 +1063,26 @@ function readableLabel(element: HTMLElement): string {
     table: "表格",
     ul: "列表",
     ol: "列表",
+    svg: "SVG 图形",
+    g: "SVG 分组",
+    path: "SVG 路径",
+    line: "SVG 线条",
+    text: "SVG 文字",
+    circle: "SVG 圆形",
+    ellipse: "SVG 椭圆",
+    rect: "SVG 矩形",
+    polyline: "SVG 折线",
+    polygon: "SVG 多边形",
+    use: "SVG 图形引用",
   };
-  const label =
-    element.getAttribute("aria-label") ||
-    element.getAttribute("alt") ||
-    element.getAttribute("title") ||
-    visibleText(element);
+  const label = element.namespaceURI === "http://www.w3.org/2000/svg"
+    ? svgSourceLabel(element)
+    : (
+        element.getAttribute("aria-label")
+        || element.getAttribute("alt")
+        || element.getAttribute("title")
+        || visibleText(element)
+      );
   const prefix = typeLabel[tagName] || tagName.toUpperCase();
   return label ? `${prefix} · ${label}` : prefix;
 }
@@ -1050,7 +1092,7 @@ function inferSelectionLevel(element: HTMLElement): HtmlCanvasSelectionLevel {
   if (explicitLevel === "module" || explicitLevel === "part") return explicitLevel;
 
   const moduleTags = new Set(["ARTICLE", "ASIDE", "FOOTER", "HEADER", "MAIN", "NAV", "SECTION"]);
-  const identity = `${element.id} ${element.className}`.toLowerCase();
+  const identity = `${element.id} ${element.getAttribute("class") || ""}`.toLowerCase();
   const hasModuleIdentity = /(^|[\s_-])(module|section|panel|card|block|container)([\s_-]|$)/.test(identity);
   const directBodyBlock = element.parentElement === element.ownerDocument.body &&
     !["A", "BUTTON", "H1", "H2", "H3", "H4", "H5", "H6", "IMG", "P", "SPAN"].includes(element.tagName);
@@ -1303,7 +1345,7 @@ function selectionForElement(
     selector: targetRef?.selector || selector,
     level,
     tagName: element.tagName.toLowerCase(),
-    text: visibleText(element),
+    text: selectionText(element),
     resolution: resolutionOverride || (targetRef ? "exact" : "orphaned"),
     ...(targetRef?.textQuote ? { textQuote: targetRef.textQuote } : {}),
     ...(targetRef?.sourceAnchor ? { sourceAnchor: targetRef.sourceAnchor } : {}),
@@ -2057,9 +2099,6 @@ function findSelectableElement(target: EventTarget | null): HTMLElement | null {
   if (!target || typeof target !== "object" || !("nodeType" in target) || target.nodeType !== 1) return null;
   const element = target as HTMLElement;
   if (["HTML", "BODY", "HEAD", "SCRIPT", "STYLE"].includes(element.tagName)) return null;
-  if (element.namespaceURI === "http://www.w3.org/2000/svg") {
-    return element.closest("svg") as unknown as HTMLElement | null;
-  }
   if (element.namespaceURI === "http://www.w3.org/1998/Math/MathML") {
     return element.closest("math") as unknown as HTMLElement | null;
   }
@@ -2507,7 +2546,19 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     const iframe = iframeRef.current;
     const documentNode = iframe?.contentDocument;
     const element = selectedElementRef.current;
+    const sourceSha256 = sourceIndexRef.current?.sourceSha256 ?? "";
+    const viewContextGeneration =
+      appliedPageViewContextRef.current?.generation ?? 0;
     if (!container || !iframe || !documentNode?.body) {
+      onCommentLayoutRef.current?.({
+        sourceSha256,
+        viewContextGeneration,
+        ready: false,
+        scrollTop: 0,
+        scrollHeight: 0,
+        clientHeight: 0,
+        targets: [],
+      });
       setOverlayPosition(null);
       setInsertionPoints([]);
       setCommentMarkers([]);
@@ -2527,46 +2578,100 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       0,
       Number(frameView?.scrollY || scrollingElement.scrollTop || 0),
     );
+    const measurementReady = Boolean(
+      sourceSha256
+      && renderedSourceHtmlRef.current === frameSourceHtmlRef.current
+      && container.getClientRects().length > 0
+      && iframe.getClientRects().length > 0
+      && frameHeight > 0
+      && frameWidth > 0
+    );
+    if (!measurementReady) {
+      onCommentLayoutRef.current?.({
+        sourceSha256,
+        viewContextGeneration,
+        ready: false,
+        scrollTop,
+        scrollHeight: Math.max(
+          scrollingElement.scrollHeight,
+          documentNode.documentElement.scrollHeight,
+          documentNode.body.scrollHeight,
+        ),
+        clientHeight: frameHeight,
+        targets: [],
+      });
+      setOverlayPosition(null);
+      setInsertionPoints([]);
+      setCommentMarkers([]);
+      insertionPointsRef.current = [];
+      return;
+    }
     const commentTabAssociations = tabAssociations(documentNode);
     const commentLayouts = commentedTargetsRef.current.flatMap((rawTarget) => (
       rawTarget.layoutTargets ?? [rawTarget.target]
-    ).flatMap((target) => {
+    )).map((target) => {
+      const missing = {
+        targetId: target.id,
+        status: "missing" as const,
+      };
       try {
-        const sourceIndex = sourceIndexRef.current;
-        const resolution = sourceIndex
-          ? resolveTargetRef(sourceIndex, sourceTargetRefForSelection(target))
-          : null;
-        if (resolution?.target?.type !== "element") return [];
-        const escapedNodeId = String(resolution.target.nodeId)
-          .replace(/\\/g, "\\\\")
-          .replace(/"/g, '\\"');
-        const targetElement = documentNode.querySelector<HTMLElement>(
-          `[${SOURCE_NODE_ATTRIBUTE}="${escapedNodeId}"]`,
-        );
-        if (!targetElement) return [];
+        let targetElement: HTMLElement | null = null;
+        if (isPageRootSelection(target)) {
+          targetElement = defaultGlobalCommentElement(documentNode);
+        } else {
+          const sourceIndex = sourceIndexRef.current;
+          const resolution = sourceIndex
+            ? resolveTargetRef(sourceIndex, sourceTargetRefForSelection(target))
+            : null;
+          if (resolution?.target?.type !== "element") return missing;
+          const escapedNodeId = String(resolution.target.nodeId)
+            .replace(/\\/g, "\\\\")
+            .replace(/"/g, '\\"');
+          targetElement = documentNode.querySelector<HTMLElement>(
+            `[${SOURCE_NODE_ATTRIBUTE}="${escapedNodeId}"]`,
+          );
+        }
+        if (!targetElement) return missing;
         const targetRect = targetElement.getBoundingClientRect();
         const visible = isRenderedCommentTarget(targetElement);
         const tabAssociation = tabAssociationForElement(
           targetElement,
           commentTabAssociations,
         );
-        return [{
+        if (!visible) {
+          return tabAssociation
+            ? {
+                targetId: target.id,
+                status: "hidden" as const,
+                tabGroupKey: tabAssociation.key,
+                tabGroupLabel: tabAssociation.label,
+              }
+            : missing;
+        }
+        const top = targetRect.top + scrollTop;
+        if (!Number.isFinite(top) || !Number.isFinite(targetRect.height)) {
+          return missing;
+        }
+        return {
           targetId: target.id,
-          top: visible ? Math.max(0, targetRect.top + scrollTop) : 0,
+          status: "visible" as const,
+          top: Math.max(0, top),
           height: Math.max(0, targetRect.height),
-          visible,
           ...(tabAssociation
             ? {
                 tabGroupKey: tabAssociation.key,
                 tabGroupLabel: tabAssociation.label,
               }
             : {}),
-        }];
+        };
       } catch {
-        return [];
+        return missing;
       }
-    }));
+    });
     onCommentLayoutRef.current?.({
+      sourceSha256,
+      viewContextGeneration,
+      ready: true,
       scrollTop,
       scrollHeight: Math.max(
         scrollingElement.scrollHeight,
@@ -2751,6 +2856,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
 
     const nextCommentMarkers: CommentMarker[] = [];
     commentedTargetsRef.current.forEach((rawTarget, targetIndex) => {
+      if (rawTarget.showMarker === false) return;
       const target = rawTarget.target;
       let targetElement: HTMLElement | null = null;
       try {
@@ -2774,17 +2880,51 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       if (targetRect.bottom < 0 || targetRect.top > frameHeight) return;
       const isGlobalPageTarget = isPageRootElement(targetElement)
         && target.level === "module";
+      const tabControl = commentTabAssociations.find((association) => (
+        association.control === targetElement
+        || association.control.contains(targetElement)
+      ))?.control ?? null;
+      const markerAnchorRect = tabControl?.getBoundingClientRect() ?? targetRect;
       nextCommentMarkers.push({
         key: target.id || `${target.selector}:${targetIndex}`,
         selection: selectionForElement(targetElement, sourceIndexRef.current, target),
         count: rawTarget.count,
         label: rawTarget.label,
+        placement: tabControl ? "tab-side" : "target-corner",
         left: isGlobalPageTarget
           ? Math.max(18, Math.min(containerRect.width - 28, frameOffsetLeft + 18))
-          : Math.max(18, Math.min(containerRect.width - 28, frameOffsetLeft + targetRect.right - 12)),
+          : tabControl
+            ? Math.max(
+                18,
+                Math.min(
+                  containerRect.width - 28,
+                  frameOffsetLeft + markerAnchorRect.right + 10,
+                ),
+              )
+            : Math.max(
+                18,
+                Math.min(
+                  containerRect.width - 28,
+                  frameOffsetLeft + targetRect.right - 12,
+                ),
+              ),
         top: isGlobalPageTarget
           ? Math.max(18, Math.min(containerRect.height - 18, frameOffsetTop + 18))
-          : Math.max(18, Math.min(containerRect.height - 18, frameOffsetTop + targetRect.top - 10)),
+          : tabControl
+            ? Math.max(
+                18,
+                Math.min(
+                  containerRect.height - 18,
+                  frameOffsetTop + markerAnchorRect.top - 4,
+                ),
+              )
+            : Math.max(
+                18,
+                Math.min(
+                  containerRect.height - 18,
+                  frameOffsetTop + targetRect.top - 10,
+                ),
+              ),
       });
     });
     setCommentMarkers(nextCommentMarkers);
@@ -3932,6 +4072,22 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     [finishNativeEditing, observeSelectedElement, updateMoveAvailability, updateOverlayPosition, updateSelectedStyle],
   );
 
+  const requestCommentForTarget = useCallback((target: HtmlCanvasSelection): boolean => {
+    if (target.resolution !== "exact") {
+      setEditFeedback({
+        code: "canvas_c13_comment_target_not_exact",
+        title: "请选择可定位的源码元素",
+        message: "这部分内容由页面运行时生成，无法对应到源码。请重新选择可定位的折线、文字、数据点或其他源码元素。",
+        tone: "warning",
+        sticky: false,
+        recovery: "none",
+      });
+      return false;
+    }
+    onRequestCommentRef.current?.(target);
+    return true;
+  }, []);
+
   const requestGlobalComment = useCallback(() => {
     if (lockedRef.current) return;
     const documentNode = iframeRef.current?.contentDocument;
@@ -3939,8 +4095,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     const globalElement = defaultGlobalCommentElement(documentNode);
     if (!globalElement) return;
     const target = selectElement(globalElement, "module");
-    onRequestCommentRef.current?.(target);
-  }, [selectElement]);
+    requestCommentForTarget(target);
+  }, [requestCommentForTarget, selectElement]);
 
   const startEditing = useCallback((
     caretPoint?: TextCaretPoint,
@@ -4406,10 +4562,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       setSelection(point.selection);
       onSelectRef.current?.(point.selection);
       requestAnimationFrame(updateOverlayPosition);
-      if (requestComment) onRequestCommentRef.current?.(point.selection);
+      if (requestComment) requestCommentForTarget(point.selection);
       return point.selection;
     },
-    [finishNativeEditing, updateOverlayPosition],
+    [finishNativeEditing, requestCommentForTarget, updateOverlayPosition],
   );
 
   const selectTarget = useCallback(
@@ -5805,11 +5961,16 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     if (recovery !== "comment") return;
     const target = selectedSourceSelectionRef.current;
     if (target) {
-      onRequestCommentRef.current?.(target);
+      requestCommentForTarget(target);
     } else {
       requestGlobalComment();
     }
-  }, [editFeedback?.recovery, onRequestReload, requestGlobalComment]);
+  }, [
+    editFeedback?.recovery,
+    onRequestReload,
+    requestCommentForTarget,
+    requestGlobalComment,
+  ]);
   const editFeedbackActionAvailable = editFeedback?.recovery === "reload"
     ? Boolean(onRequestReload)
     : editFeedback?.recovery === "comment" && Boolean(onRequestComment);
@@ -5895,9 +6056,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           type="button"
           className={styles.commentMarker}
           data-global={isPageRootSelection(marker.selection) ? "true" : undefined}
+          data-placement={marker.placement}
           style={{ left: marker.left, top: marker.top }}
-          aria-label={marker.label || `${marker.selection.label}已有${marker.count || 1}条评论`}
-          title={marker.label || "查看已有评论"}
+          aria-label={marker.count && marker.count > 1
+            ? `${marker.label || marker.selection.label}已有${marker.count}条评论`
+            : marker.label || `${marker.selection.label}已有1条评论`}
+          title={`查看${marker.label || marker.selection.label}的${marker.count || 1}条评论`}
           onClick={() => {
             if (lockedRef.current) return;
             // The marker was clicked at the user's current Canvas position.
@@ -5906,8 +6070,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             selectTarget(marker.selection, { reveal: false, showToolbar: true });
           }}
         >
-          <span className={styles.commentGlyph} aria-hidden="true">评</span>
-          {marker.count && marker.count > 1 ? <span className={styles.commentCount}>{marker.count}</span> : null}
+          <span className={styles.commentGlyph} aria-hidden="true">
+            评{marker.count || 1}
+          </span>
         </button>
       )) : null}
 
@@ -5962,7 +6127,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
                   const committed = finishNativeEditing(true, "manual");
                   if (!committed.ok) return;
                 }
-                onRequestCommentRef.current?.(selection);
+                requestCommentForTarget(selection);
               };
               if (deferNativeCommandRef.current("comment", openComment)) return;
               openComment();
