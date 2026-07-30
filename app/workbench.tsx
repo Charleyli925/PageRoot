@@ -2265,6 +2265,17 @@ export default function Workbench() {
   const activePageViewContext = (
     pageViewContext?.documentKey === pageViewDocumentKey
   ) ? pageViewContext : null;
+  const acceptPageViewContext = useCallback((
+    nextContext: PageViewContext | null,
+    documentKey: string,
+  ): boolean => {
+    if (
+      pageViewDocumentKeyRef.current !== documentKey
+      || (nextContext && nextContext.documentKey !== documentKey)
+    ) return false;
+    setPageViewContext(nextContext);
+    return true;
+  }, []);
   const visibleCommentItems = useMemo(
     () => (
       viewMode === "history" && viewingVersion
@@ -9757,6 +9768,8 @@ export default function Workbench() {
                   commentedTargets={commentedTargets}
                   trackedTargets={trackedAuditTargets}
                   pageViewContext={activePageViewContext}
+                  pageViewDocumentKey={pageViewDocumentKey}
+                  onPageViewContextChange={acceptPageViewContext}
                   locked={
                     runInProgress
                     || projectHydrating

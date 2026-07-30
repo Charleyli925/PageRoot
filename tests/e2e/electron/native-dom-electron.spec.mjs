@@ -666,6 +666,66 @@ test("Electron interactive preview runs authored scripts and edits the selected 
   }
 });
 
+test("Electron edit mode reveals safe semantic content without changing disk bytes", async () => {
+  const sourceDirectory = mkdtempSync(
+    path.join(tmpdir(), "pageroot-presentation-source-e2e-"),
+  );
+  const sourcePath = path.join(sourceDirectory, "presentation-actions.html");
+  const original = fixtureBuffer("presentation-actions.html");
+  writeFileSync(sourcePath, original);
+
+  let electronApp = null;
+  let isolatedUserData = null;
+  try {
+    const launched = await launchPageRoot({ activeSourcePath: sourcePath });
+    electronApp = launched.electronApp;
+    isolatedUserData = launched.isolatedUserData;
+    const { editor, frame } = await loadedDiskFrame(
+      launched.page,
+      sourcePath,
+      "presentation-root",
+    );
+
+    await frame.locator(caseSelector("details-tab")).click();
+    await editor.getByRole("button", {
+      name: "切换到此页签",
+      exact: true,
+    }).click();
+    await expect(frame.locator(caseSelector("overview-panel"))).toBeHidden();
+    await expect(frame.locator(caseSelector("details-panel"))).toBeVisible();
+
+    await frame.locator(caseSelector("native-summary")).click({
+      modifiers: ["Alt"],
+    });
+    await expect(frame.locator(caseSelector("native-details")))
+      .toHaveAttribute("open", "");
+
+    await frame.locator(caseSelector("more-toggle")).click({
+      modifiers: ["Alt"],
+    });
+    await expect(frame.locator(caseSelector("more-toggle")))
+      .toHaveAttribute("aria-expanded", "true");
+    await expect(frame.locator(caseSelector("more-content"))).toBeVisible();
+
+    expect(await frame.evaluate(() => ({
+      authorAction: document.documentElement.dataset.authorAction ?? null,
+      authorScriptRan: document.documentElement.dataset.authorScriptRan ?? null,
+    }))).toEqual({
+      authorAction: null,
+      authorScriptRan: null,
+    });
+    expect(readFileSync(sourcePath).equals(original)).toBe(true);
+  } finally {
+    if (electronApp && isolatedUserData) {
+      await stopPageRoot(electronApp, isolatedUserData);
+    }
+    removeValidatedTemporaryDirectory(
+      sourceDirectory,
+      "pageroot-presentation-source-e2e-",
+    );
+  }
+});
+
 test("Electron uses the authored DOM caret, Selection and controlled beforeinput", async () => {
   const { electronApp, page, isolatedUserData } = await launchPageRoot();
   try {

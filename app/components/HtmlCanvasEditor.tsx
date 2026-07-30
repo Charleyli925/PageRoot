@@ -14,7 +14,9 @@ import {
 import { flushSync } from "react-dom";
 
 import {
+  createPagePresentationAction,
   resolvePageViewContext,
+  type PagePresentationAction,
   type PageViewContext,
 } from "../lib/page-view-context.js";
 import {
@@ -264,7 +266,7 @@ export type HtmlCanvasEditorHandle = {
     payload?: unknown,
     options?: NativeDeferredCommandOptions,
   ) => boolean;
-  /** Applies disposable preview presentation state without changing source bytes. */
+  /** Applies disposable source-backed presentation state without changing source bytes. */
   applyPageViewContext: (context: PageViewContext | null) => boolean;
 };
 
@@ -315,8 +317,15 @@ export type HtmlCanvasEditorProps = {
   commentedTargets?: readonly HtmlCanvasCommentedTarget[];
   /** Non-visual audit targets that must retain identity through later source patches. */
   trackedTargets?: readonly HtmlCanvasSelection[];
-  /** Disposable Tab/panel presentation state captured from interactive preview. */
+  /** Disposable source-backed presentation state for the current document. */
   pageViewContext?: PageViewContext | null;
+  /** Stable host-owned identity for disposable presentation state. */
+  pageViewDocumentKey?: string;
+  /** Accepts source-backed presentation state without treating it as an HTML edit. */
+  onPageViewContextChange?: (
+    context: PageViewContext | null,
+    documentKey: string,
+  ) => boolean;
 };
 
 type OverlayPosition = {
@@ -1911,7 +1920,18 @@ function findCanvasSelectionElement(target: EventTarget | null): HTMLElement | n
 function findNativeActionTarget(target: EventTarget | null): HTMLElement | null {
   const element = findSelectableElement(target);
   return element?.closest<HTMLElement>(
-    "a[href], area[href], button, form, input, select, textarea",
+    [
+      "a[href]",
+      "area[href]",
+      "button",
+      "form",
+      "input",
+      "select",
+      "summary",
+      "textarea",
+      "[role=\"tab\"]",
+      "[aria-expanded][aria-controls]",
+    ].join(", "),
   ) ?? null;
 }
 
@@ -1961,6 +1981,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     commentedTargets = EMPTY_COMMENTED_TARGETS,
     trackedTargets = EMPTY_TRACKED_TARGETS,
     pageViewContext = null,
+    pageViewDocumentKey = "",
+    onPageViewContextChange,
   },
   forwardedRef,
 ) {
@@ -2049,7 +2071,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const commentedTargetsRef = useRef(commentedTargets);
   const trackedTargetsRef = useRef(trackedTargets);
   const pageViewContextRef = useRef<PageViewContext | null>(pageViewContext);
+  const lastPageViewContextPropRef = useRef<PageViewContext | null>(pageViewContext);
   const appliedPageViewContextRef = useRef<PageViewContext | null>(null);
+  const pageViewDocumentKeyRef = useRef(pageViewDocumentKey);
+  const onPageViewContextChangeRef = useRef(onPageViewContextChange);
   const controlledMode = locked ? "processing" : interactionMode;
   const controlledInteractionLocked = controlledMode !== "editing";
   const [imperativeLocked, setImperativeLocked] = useState(false);
@@ -2074,7 +2099,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   enableReorderRef.current = enableReorder && !lockedRef.current;
   commentedTargetsRef.current = commentedTargets;
   trackedTargetsRef.current = trackedTargets;
-  pageViewContextRef.current = pageViewContext;
+  if (lastPageViewContextPropRef.current !== pageViewContext) {
+    lastPageViewContextPropRef.current = pageViewContext;
+    pageViewContextRef.current = pageViewContext;
+  }
+  pageViewDocumentKeyRef.current = pageViewDocumentKey;
+  onPageViewContextChangeRef.current = onPageViewContextChange;
 
   // Keep the server and hydration value deterministic, then normalize through DOMParser after mount.
   const [frameRender, setFrameRender] = useState(() => ({
@@ -4619,6 +4649,89 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     return true;
   }, [updateOverlayPosition]);
 
+  const resolvePagePresentationAction = useCallback((
+    target: HtmlCanvasSelection | null,
+  ): PagePresentationAction | null => {
+    const documentKey = pageViewDocumentKeyRef.current;
+    const sourceIndex = sourceIndexRef.current;
+    if (
+      !target
+      || target.level === "insertion"
+      || !documentKey
+      || !onPageViewContextChangeRef.current
+      || lockedRef.current
+      || readOnlyRef.current
+      || !sourceIndex
+      || sourceIndex.source !== frameSourceHtmlRef.current
+    ) return null;
+    return createPagePresentationAction({
+      html: frameSourceHtmlRef.current,
+      sourceIndex,
+      documentKey,
+      generation: frameLoadGenerationRef.current,
+      currentContext: pageViewContextRef.current,
+      targetRef: sourceTargetRefForSelection(target),
+    });
+  }, []);
+
+  const executePagePresentationAction = useCallback((
+    target: HtmlCanvasSelection,
+    options: { selectTargetAfter?: boolean } = {},
+  ): boolean => {
+    const perform = (): boolean => {
+      if (lockedRef.current || readOnlyRef.current) return false;
+      let frameReloading = false;
+      if (activeNativeEditRef.current) {
+        const committed = finishNativeEditing(true, "manual");
+        if (!committed.ok) return false;
+        frameReloading = Boolean(committed.frameReloading);
+      }
+      const action = resolvePagePresentationAction(target);
+      if (!action) return false;
+      if (options.selectTargetAfter) {
+        if (frameReloading) {
+          pendingSelectionRef.current = target;
+          pendingToolbarVisibleRef.current = true;
+        } else {
+          selectTarget(target, { reveal: false, showToolbar: true });
+        }
+      }
+      if (action.isCurrent) {
+        requestAnimationFrame(updateOverlayPosition);
+        return true;
+      }
+      const documentKey = pageViewDocumentKeyRef.current;
+      let accepted = false;
+      try {
+        accepted = onPageViewContextChangeRef.current?.(
+          action.nextContext,
+          documentKey,
+        ) === true;
+      } catch {
+        accepted = false;
+      }
+      if (!accepted) return false;
+      applyPageViewContextNow(action.nextContext);
+      return true;
+    };
+    if (
+      deferNativeCommandRef.current(
+        "presentation-action",
+        () => {
+          perform();
+        },
+        { targetId: target.id },
+      )
+    ) return true;
+    return perform();
+  }, [
+    applyPageViewContextNow,
+    finishNativeEditing,
+    resolvePagePresentationAction,
+    selectTarget,
+    updateOverlayPosition,
+  ]);
+
   const api = useMemo<HtmlCanvasEditorHandle>(
     () => ({
       getSourceHtml: () => frameSourceHtmlRef.current,
@@ -4825,8 +4938,27 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       const target = findCanvasSelectionElement(event.target);
       if (!target) return;
       if (lockedRef.current) {
-        if (target.closest("a, button, form, input, select, textarea, [contenteditable]")) {
+        if (target.closest(
+          "a, button, form, input, select, summary, textarea, [contenteditable], [role=\"tab\"], [aria-expanded][aria-controls]",
+        )) {
           event.preventDefault();
+        }
+        return;
+      }
+      const targetSelection = selectionForElement(
+        target,
+        sourceIndexRef.current,
+      );
+      if (
+        event.altKey
+        && resolvePagePresentationAction(targetSelection)
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.detail === 1) {
+          executePagePresentationAction(targetSelection, {
+            selectTargetAfter: true,
+          });
         }
         return;
       }
@@ -4851,6 +4983,17 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       if (findNativeActionTarget(event.target)) event.preventDefault();
       const target = findCanvasSelectionElement(event.target);
       if (!target) return;
+      if (
+        event.altKey
+        && resolvePagePresentationAction(selectionForElement(
+          target,
+          sourceIndexRef.current,
+        ))
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
       if (activeNativeEditRef.current?.rootElement.contains(event.target as Node)) return;
       const caretPoint = caretPointFromMouseEvent(event);
       const nativeSelection = documentNode.getSelection();
@@ -5230,9 +5373,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   }, [
     captureTextRange,
     clearSelection,
+    executePagePresentationAction,
     fencePendingEdit,
     finishNativeEditing,
     moveSelected,
+    resolvePagePresentationAction,
     selectElement,
     selectTarget,
     startEditing,
@@ -5575,6 +5720,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const selectedNativeEditHost = selectedElementRef.current && sourceIndexRef.current
     ? nativeEditHostForElement(selectedElementRef.current, sourceIndexRef.current)
     : null;
+  const selectedPagePresentationAction = (
+    !readOnly
+    && !interactionLocked
+    && selection
+  ) ? resolvePagePresentationAction(selection) : null;
   const textFormatRequiresSelection = isEditing && !hasTextRange;
   const handleEditFeedbackAction = useCallback(() => {
     const recovery = editFeedback?.recovery;
@@ -5733,6 +5883,31 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             }
           }}
         >
+          {selectedPagePresentationAction ? (
+            <button
+              type="button"
+              className={`${styles.toolButton} ${styles.presentationToolButton}`}
+              data-presentation-kind={selectedPagePresentationAction.kind}
+              data-current={selectedPagePresentationAction.isCurrent ? "true" : undefined}
+              aria-label={selectedPagePresentationAction.label}
+              aria-pressed={
+                selectedPagePresentationAction.kind === "activate-tab"
+                  ? selectedPagePresentationAction.isCurrent
+                  : undefined
+              }
+              title={
+                selectedPagePresentationAction.isCurrent
+                  ? "当前页签"
+                  : "快捷操作：按住 ⌥ 并单击页面中的这个控件"
+              }
+              onClick={() => {
+                executePagePresentationAction(selection);
+              }}
+            >
+              {selectedPagePresentationAction.label}
+            </button>
+          ) : null}
+
           <button
             type="button"
             className={styles.commentToolButton}

@@ -31,6 +31,10 @@
   PageViewContext 的 source-backed allowlist；Electron 用一份合成报告
   证明宿主 CSP 下的相对脚本、SVG/Canvas/动态表格、Tab 切换，以及返回
   编辑后只保留当前 Tab 且仍能进入原有文字编辑岛。
+- 编辑模式安全内容切换：Node 证明 Tab/details/disclosure 的严格白名单和
+  链接、弹窗、分组 details、歧义标记的失败关闭；Browser 证明单击选择、
+  双击编辑、工具条和 `Option + 单击`不冲突且导出字节不变；Electron
+  独立重读真实源文件，证明作者事件未运行且磁盘字节不变。
 - AI 闭环：任务级只跑正常闭环和越界失败 2 个代表场景；发布级跑完整 6 个场景，包括复制失败、缺失 finalizer、非法 HTML 和版本激活失败。测试自动生成受控 AI 输出并执行正式 finalizer，不等待外部模型或真人接力。
 - 应用更新：Node 用伪 updater 证明 stable-only、点击后单次下载、差分开启、普通退出不安装、仅 downloaded 状态可安装和错误降级；Preload/Workbench 合同证明状态快照、下载/安装意图、无 Canvas 完成横幅与重启确认保持窄边界。
 - 默认浏览器打开：Node 直接执行主进程操作与 sender 权限门，证明 malformed、非 HTML、未知项目、非普通文件和非可信 frame 均不会调用 shell；Workbench 合同只补充证明精确 edit revision 的围栏、写回和 IPC 顺序。

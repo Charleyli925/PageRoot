@@ -173,10 +173,36 @@
   padding: 0 10px;
 }
 
+.presentationToolButton {
+  color: #4338ca;
+  background: #eceae6;
+  white-space: nowrap;
+}
+
+.presentationToolButton[data-presentation-kind="activate-tab"] {
+  min-width: 96px;
+}
+
+.presentationToolButton[data-current="true"] {
+  color: #65606c;
+  background: #f1f0ed;
+  cursor: default;
+}
+
 .toolButton:hover,
 .formatButton:hover,
 .iconButton:hover:not(:disabled) {
   color: #25232a;
+  background: #f1f0ed;
+}
+
+.presentationToolButton:hover {
+  color: #25232a;
+  background: #dedbe5;
+}
+
+.presentationToolButton[data-current="true"]:hover {
+  color: #65606c;
   background: #f1f0ed;
 }
 

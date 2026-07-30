@@ -66,6 +66,14 @@ one-sided runtime classes, text/HTML, inline style, form state and runtime
 children. The normal script-disabled editing iframe and SourcePatch checks
 remain unchanged.
 
+Edit-mode reveal actions use the same trust boundary. They accept only strict
+Tabs whose selected panel is proved by `aria-selected` plus `hidden`, native
+details with one direct summary, and local button/region disclosures whose
+`aria-controls`, `aria-labelledby`, `aria-expanded` and `hidden` states agree.
+Links, forms, class-only controls, grouped details, popups, popovers, drawers
+and authored event handlers are never executed. The action changes disposable
+attributes only and has no source-write, filesystem or navigation authority.
+
 ## Untrusted inputs
 
 HTML, attachments, AI output, update manifests and IPC payloads are treated as untrusted. Tests and fixtures must use synthetic data. A renderer compromise should not provide arbitrary Node or filesystem access; any new privileged API needs explicit validation and negative tests.

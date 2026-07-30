@@ -627,7 +627,20 @@ test("preview native links and forms cannot navigate the editing canvas on doubl
     canvas.indexOf("const handleKeyDown = (event: KeyboardEvent) =>"),
   );
   assert.match(canvas, /function findNativeActionTarget/u);
-  assert.match(canvas, /"a\[href\], area\[href\], button, form, input, select, textarea"/u);
+  for (const selector of [
+    "a[href]",
+    "area[href]",
+    "button",
+    "form",
+    "input",
+    "select",
+    "summary",
+    "textarea",
+    '[role="tab"]',
+    "[aria-expanded][aria-controls]",
+  ]) {
+    assert.match(canvas, new RegExp(JSON.stringify(selector).replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
+  }
   const lockedGuard = doubleClickHandler.indexOf("if (lockedRef.current) return;");
   const startEdit = doubleClickHandler.indexOf("const editingStarted = capturedRange");
   const acceptedEditGuard = doubleClickHandler.indexOf("if (editingStarted)", startEdit);

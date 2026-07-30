@@ -10,6 +10,9 @@ Notable user-visible changes are documented here. This project follows Semantic 
 - Make “Edit” return to the source-backed Tab selected in preview while keeping
   the normal script-disabled editable-island canvas, source bytes and existing
   native-action interception authoritative.
+- Let edit mode reveal source-backed Tab panels, native details and strict
+  local disclosure regions from the selection toolbar or Option-click, while
+  links, forms, popups, drawers and authored scripts remain inert.
 
 ## [0.9.4] - 2026-07-29
 
