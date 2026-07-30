@@ -1790,6 +1790,78 @@ export async function finalizeAttempt({
       "runtime-state.json",
       LIFECYCLE_SCHEMA_VERSION,
     );
+    const requestRoot = path.join(projectRoot, "requests", requestId);
+    const attemptRoot = path.join(
+      requestRoot,
+      "attempts",
+      attemptId,
+    );
+    const cancellationPath = path.join(attemptRoot, "cancelled.json");
+    const cancellationInformation = await lstat(cancellationPath).catch(
+      (error) => {
+        if (error?.code === "ENOENT") return null;
+        throw error;
+      },
+    );
+    if (cancellationInformation) {
+      if (
+        cancellationInformation.isSymbolicLink()
+        || !cancellationInformation.isFile()
+      ) {
+        throw new LifecycleError(
+          "UNSAFE_CANCELLATION_MARKER",
+          "cancelled.json must be a regular file.",
+          undefined,
+          409,
+        );
+      }
+      const cancellation = await readVersionedJson(
+        cancellationPath,
+        "cancelled.json",
+        LIFECYCLE_SCHEMA_VERSION,
+      );
+      const identityPairs = [
+        ["projectId", project.projectId],
+        ["documentId", project.documentId],
+        ["requestId", requestId],
+        ["attemptId", attemptId],
+      ];
+      const mismatch = identityPairs.find(
+        ([key, expected]) => cancellation[key] !== expected,
+      );
+      if (mismatch) {
+        throw new LifecycleError(
+          "CANCELLATION_IDENTITY_MISMATCH",
+          `cancelled.json ${mismatch[0]} does not match this Attempt.`,
+          undefined,
+          409,
+        );
+      }
+      if (
+        cancellation.status !== "cancelled"
+        || typeof cancellation.cancelledAt !== "string"
+        || !cancellation.cancelledAt.trim()
+      ) {
+        throw new LifecycleError(
+          "CANCELLATION_MARKER_INVALID",
+          "cancelled.json is not a valid cancellation marker.",
+          undefined,
+          409,
+        );
+      }
+      return {
+        ok: true,
+        status: "cancelled",
+        accepted: false,
+        retryable: false,
+        projectId: project.projectId,
+        documentId: project.documentId,
+        requestId,
+        attemptId,
+        cancelledAt: cancellation.cancelledAt,
+        message: "本轮已在源页结束。请停止 AI Agent，不要重试。",
+      };
+    }
     const activeRun = runtime.activeRun
       ? {
           ...runtime.activeRun,
@@ -1821,26 +1893,12 @@ export async function finalizeAttempt({
       );
     }
 
-    const requestRoot = path.join(projectRoot, "requests", requestId);
-    const attemptRoot = path.join(
-      requestRoot,
-      "attempts",
-      attemptId,
-    );
     if (!(await exists(attemptRoot))) {
       throw new LifecycleError(
         "ATTEMPT_NOT_FOUND",
         "The Attempt directory was not found.",
         undefined,
         404,
-      );
-    }
-    if (await exists(path.join(attemptRoot, "cancelled.json"))) {
-      throw new LifecycleError(
-        "ATTEMPT_CANCELLED",
-        "A cancelled Attempt cannot be finalized.",
-        undefined,
-        409,
       );
     }
     const changeRequest = await readVersionedJson(

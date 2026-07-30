@@ -1213,6 +1213,14 @@ test("AI readOrder excludes the full audit archive and compacts long module quot
   assert.match(prompt, /不要读取未列入 readOrder 的审计归档/);
   assert.match(
     prompt,
+    /status=cancelled.*立即停止，不要重试，也不要改写到其他路径/s,
+  );
+  assert.match(
+    aiRules,
+    /status=cancelled.*立即停止，不要重试，也不要写入其他路径/s,
+  );
+  assert.match(
+    prompt,
     new RegExp(`${submitted.body.projectId}.*${submitted.body.documentId}`),
   );
   assert.match(
@@ -2778,9 +2786,10 @@ test("mandatory finalizer controls completion, identity, no-change, and cancella
     })
   ).body;
   assert.equal(cancelledRun.candidateVersionId, "ver_0003");
+  const lateCandidateHtml = htmlPage("迟到结果", "<p>不得建版</p>");
   await writeFile(
     cancelledRun.outputPath,
-    htmlPage("迟到结果", "<p>不得建版</p>"),
+    lateCandidateHtml,
     "utf8",
   );
   const cancelled = await postJson(
@@ -2793,7 +2802,67 @@ test("mandatory finalizer controls completion, identity, no-change, and cancella
     },
   );
   assert.equal(cancelled.body.status, "cancelled");
-  await assert.rejects(runFinalizer(environment.workspace, cancelledRun));
+  const lateFinalization = await runFinalizer(
+    environment.workspace,
+    cancelledRun,
+  );
+  assert.equal(lateFinalization.stderr, "");
+  const lateTerminal = JSON.parse(lateFinalization.stdout);
+  assert.deepEqual(
+    {
+      ok: lateTerminal.ok,
+      status: lateTerminal.status,
+      accepted: lateTerminal.accepted,
+      retryable: lateTerminal.retryable,
+      requestId: lateTerminal.requestId,
+      attemptId: lateTerminal.attemptId,
+    },
+    {
+      ok: true,
+      status: "cancelled",
+      accepted: false,
+      retryable: false,
+      requestId: cancelledRun.requestId,
+      attemptId: cancelledRun.attemptId,
+    },
+  );
+  assert.equal(
+    lateTerminal.message,
+    "本轮已在源页结束。请停止 AI Agent，不要重试。",
+  );
+  assert.equal(
+    await readFile(cancelledRun.outputPath, "utf8"),
+    lateCandidateHtml,
+  );
+  await assert.rejects(access(cancelledRun.completionPath));
+  const repeatedLateTerminal = JSON.parse(
+    (await runFinalizer(environment.workspace, cancelledRun)).stdout,
+  );
+  assert.equal(repeatedLateTerminal.status, "cancelled");
+  assert.equal(repeatedLateTerminal.accepted, false);
+  assert.equal(repeatedLateTerminal.retryable, false);
+
+  const cancellationPath = join(cancelledRun.attemptPath, "cancelled.json");
+  const cancellationMarker = JSON.parse(
+    await readFile(cancellationPath, "utf8"),
+  );
+  await writeFile(
+    cancellationPath,
+    `${JSON.stringify({
+      ...cancellationMarker,
+      requestId: "req_9999",
+    }, null, 2)}\n`,
+    "utf8",
+  );
+  await assert.rejects(
+    runFinalizer(environment.workspace, cancelledRun),
+    /CANCELLATION_IDENTITY_MISMATCH/,
+  );
+  await writeFile(
+    cancellationPath,
+    `${JSON.stringify(cancellationMarker, null, 2)}\n`,
+    "utf8",
+  );
   assert.equal((await openWorkspace(bridge.baseUrl, sourcePath)).body.versions.length, 2);
 });
 

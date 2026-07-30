@@ -110,6 +110,19 @@ test("renderer data is reduced to the allowlist before queueing or sending", asy
     telemetry.captureFromRenderer({
       event: "notification_presented",
       properties: {
+        notice_code: "ai_run_cancelled",
+        tone: "info",
+        disposition: "background-result",
+        surface: "global",
+        has_action: false,
+      },
+    }),
+    true,
+  );
+  assert.equal(
+    telemetry.captureFromRenderer({
+      event: "notification_presented",
+      properties: {
         notice_code: "source_reload",
         tone: "warning",
         disposition: "direct-action",
@@ -152,6 +165,10 @@ test("renderer data is reduced to the allowlist before queueing or sending", asy
   assert.equal(notice.properties.html, undefined);
   assert.equal(notice.properties.source_path, undefined);
   assert.equal(notice.properties.error_message, undefined);
+  assert.ok(calls[0].payload.batch.some((item) => (
+    item.event === "pageroot notification presented"
+    && item.properties.notice_code === "ai_run_cancelled"
+  )));
   await telemetry.shutdown();
 });
 

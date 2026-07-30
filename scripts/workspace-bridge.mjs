@@ -4472,6 +4472,7 @@ function managedAiRules() {
 
 - 写完 output/index.html 后，最后运行 PROMPT.md 中的最终化（finalizer）命令。
 - 不得手写 completion.json；只有 finalizer 生成有效的 completion.json，PageRoot 才会创建新版本。
+- 如果 finalizer 返回 \`status=cancelled\`，本轮已在源页结束；立即停止，不要重试，也不要写入其他路径。
 `;
 }
 
@@ -4614,6 +4615,7 @@ ${command}
 \`\`\`
 
 不要手写 completion.json。只有 finalizer 生成有效的 completion.json，PageRoot 才会创建新版本。
+如果命令返回 \`status=cancelled\`，表示本轮已在源页结束：立即停止，不要重试，也不要改写到其他路径。
 `;
 }
 

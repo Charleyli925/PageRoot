@@ -48,6 +48,7 @@ import type {
   NativeDeferredCommandDiscardReason,
 } from "./components/HtmlCanvasEditor";
 import AboutPageRootDialog from "./components/AboutPageRootDialog";
+import CancelAiRunDialog from "./components/CancelAiRunDialog";
 import HtmlInteractionPreview, {
   type HtmlInteractionPreviewHandle,
 } from "./components/HtmlInteractionPreview";
@@ -1862,6 +1863,8 @@ export default function Workbench() {
   const [draftPersistError, setDraftPersistError] = useState("");
   const [generating, setGenerating] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [cancelRunConfirmationKey, setCancelRunConfirmationKey] =
+    useState<string | null>(null);
   const [openingReadyVersion, setOpeningReadyVersion] = useState(false);
   const [resolvingConflict, setResolvingConflict] = useState(false);
   const [pendingReconcileBusy, setPendingReconcileBusy] = useState(false);
@@ -2204,6 +2207,13 @@ export default function Workbench() {
   )
     ? qoderHandoffState.status
     : "idle";
+  const cancelRunConfirmationOpen = Boolean(
+    cancelRunConfirmationKey
+    && activeRun
+    && activeRunOperationKey(activeRun) === cancelRunConfirmationKey
+    && activeRun.status === "processing"
+    && currentQoderHandoffStatus === "copied",
+  );
   const updateActionVisible = Boolean(
     (
       updateResult?.status === "available"
@@ -8442,11 +8452,25 @@ export default function Workbench() {
     sourcePath,
   ]);
 
-  const cancelActiveRun = useCallback(async () => {
+  const cancelActiveRun = useCallback(async ({
+    agentMayBeRunning = false,
+  }: {
+    agentMayBeRunning?: boolean;
+  } = {}) => {
     if (!activeRun || !activeRun.requestId || activeRun.requestId === "pending") return;
     const run = { ...activeRun };
     const operationKey = activeRunOperationKey(run);
     if (cancellingRunsRef.current.has(operationKey)) return;
+    const showAgentReminder = (title: string) => {
+      if (!agentMayBeRunning) return;
+      setToast({
+        title,
+        message: "AI Agent 不会被自动停止；如仍在运行，请手动停止。",
+        tone: "info",
+        disposition: "background-result",
+        dedupeKey: `ai-run-cancelled:${run.sourcePath}`,
+      });
+    };
     if (run.sourcePath === "preview://welcome") {
       projectLockedRef.current = false;
       setProjectLocked(false);
@@ -8457,6 +8481,7 @@ export default function Workbench() {
       setHandoffPreviewOpen(false);
       setCanvasMode("edit");
       setDrawer(null);
+      showAgentReminder("本轮已结束，已恢复编辑");
       return;
     }
     cancellingRunsRef.current.add(operationKey);
@@ -8477,6 +8502,9 @@ export default function Workbench() {
         sourcePath: run.sourcePath,
         requestId: run.requestId,
         attemptId: run.attemptId,
+        reason: agentMayBeRunning
+          ? "cancelled-by-user-after-agent-handoff"
+          : "cancelled-by-user",
       });
       const tracked = backgroundRunsRef.current.get(run.sourcePath);
       if (
@@ -8492,13 +8520,18 @@ export default function Workbench() {
         setHandoffPreviewOpen(false);
         setCanvasMode("edit");
         setDrawer(null);
+        showAgentReminder("本轮已结束，已恢复编辑");
       } else {
-        setToast({
-          title: `${run.candidateVersionLabel} 已取消`,
-          message: "对应项目的评论仍然保留，迟到的完成信号不会被接纳。",
-          tone: "success",
-          dedupeKey: `background-version:${run.sourcePath}`,
-        });
+        if (agentMayBeRunning) {
+          showAgentReminder("本轮已结束");
+        } else {
+          setToast({
+            title: `${run.candidateVersionLabel} 已取消`,
+            message: "对应项目的评论仍然保留，迟到的完成信号不会被接纳。",
+            tone: "success",
+            dedupeKey: `background-version:${run.sourcePath}`,
+          });
+        }
       }
     } catch (cause) {
       if (context && !isCurrentProjectContext(context)) return;
@@ -11178,11 +11211,21 @@ export default function Workbench() {
                 <button
                   className="cancel-action"
                   type="button"
-                  disabled={cancelling || activeRun.requestId === "pending"}
-                  onClick={() => void cancelActiveRun()}
+                  disabled={
+                    cancelling
+                    || activeRun.requestId === "pending"
+                    || currentQoderHandoffStatus === "copying"
+                  }
+                  onClick={() => {
+                    if (currentQoderHandoffStatus === "copied") {
+                      setCancelRunConfirmationKey(activeRunOperationKey(activeRun));
+                    } else {
+                      void cancelActiveRun();
+                    }
+                  }}
                 >
                   <ArrowCounterClockwiseIcon aria-hidden="true" size={17} weight="bold" />
-                  {cancelling ? "正在恢复编辑…" : "取消发送，继续编辑"}
+                  {cancelling ? "正在恢复编辑…" : "结束本轮并继续编辑"}
                 </button>
                 <button
                   className="secondary-action"
@@ -11220,6 +11263,23 @@ export default function Workbench() {
           </footer>
         ) : null}
       </aside>
+
+      <CancelAiRunDialog
+        open={cancelRunConfirmationOpen}
+        onClose={() => setCancelRunConfirmationKey(null)}
+        onConfirm={() => {
+          const currentRun = activeRunRef.current;
+          const matchesConfirmation = Boolean(
+            currentRun
+            && cancelRunConfirmationKey
+            && activeRunOperationKey(currentRun) === cancelRunConfirmationKey,
+          );
+          setCancelRunConfirmationKey(null);
+          if (matchesConfirmation) {
+            void cancelActiveRun({ agentMayBeRunning: true });
+          }
+        }}
+      />
 
       <RestartUpdateDialog
         open={restartUpdateOpen && updateDownloaded}

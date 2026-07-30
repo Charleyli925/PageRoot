@@ -6,6 +6,7 @@ const [
   workbench,
   aboutDialog,
   restartUpdateDialog,
+  cancelAiRunDialog,
   styles,
   mainProcess,
   preload,
@@ -19,6 +20,7 @@ const [
   readFile(new URL("../app/workbench.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/components/AboutPageRootDialog.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/components/RestartUpdateDialog.tsx", import.meta.url), "utf8"),
+  readFile(new URL("../app/components/CancelAiRunDialog.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
   readFile(new URL("../desktop/main.mjs", import.meta.url), "utf8"),
   readFile(new URL("../desktop/preload.mjs", import.meta.url), "utf8"),
@@ -595,7 +597,7 @@ test("QoderWork handoff exposes a truthful process board and manual open action"
   );
   const footerStart = workbench.indexOf('<footer className="processing-footer">');
   const footer = workbench.slice(footerStart, workbench.indexOf("</footer>", footerStart));
-  const cancel = footer.indexOf("取消发送，继续编辑");
+  const cancel = footer.indexOf("结束本轮并继续编辑");
   const preview = footer.indexOf("预览已发送 HTML");
   const copy = footer.indexOf("再次复制本轮要求");
   assert.ok(cancel >= 0 && preview > cancel && copy > preview);
@@ -694,6 +696,50 @@ test("QoderWork handoff exposes a truthful process board and manual open action"
   );
 });
 
+test("ending a copied AI run warns clearly and restores editing with a stop reminder", () => {
+  assert.match(cancelAiRunDialog, /AI Agent 可能仍在修改/);
+  assert.match(
+    cancelAiRunDialog,
+    /结束本轮后，AI Agent 的修改将不会保存到源页。建议先停止 AI Agent。/,
+  );
+  assert.doesNotMatch(cancelAiRunDialog, /Qoder(?:Work)?/u);
+  assert.match(cancelAiRunDialog, /aria-labelledby="cancel-ai-run-title"/);
+  assert.match(cancelAiRunDialog, /aria-describedby="cancel-ai-run-description"/);
+  assert.match(
+    cancelAiRunDialog,
+    /requestAnimationFrame\([\s\S]*?waitButtonRef\.current\?\.focus\(\)[\s\S]*?cancelAnimationFrame\(focusFrame\)/,
+  );
+  assert.match(
+    cancelAiRunDialog,
+    /onCancel=\{\(event\) => \{[\s\S]*?event\.preventDefault\(\);[\s\S]*?onClose\(\)/,
+  );
+  assert.match(
+    cancelAiRunDialog,
+    /结束本轮并继续编辑[\s\S]*?继续等待/,
+  );
+  assert.match(
+    workbench,
+    /currentQoderHandoffStatus === "copied"[\s\S]*?setCancelRunConfirmationKey\(activeRunOperationKey\(activeRun\)\)/,
+  );
+  assert.match(
+    workbench,
+    /<CancelAiRunDialog[\s\S]*?cancelActiveRun\(\{ agentMayBeRunning: true \}\)/,
+  );
+  assert.match(
+    workbench,
+    /reason: agentMayBeRunning[\s\S]*?"cancelled-by-user-after-agent-handoff"[\s\S]*?"cancelled-by-user"/,
+  );
+  assert.match(workbench, /本轮已结束，已恢复编辑/);
+  assert.match(
+    workbench,
+    /AI Agent 不会被自动停止；如仍在运行，请手动停止。/,
+  );
+  assert.match(workbench, /dedupeKey: `ai-run-cancelled:\$\{run\.sourcePath\}`/);
+  assert.match(workbench, /disposition: "background-result"/);
+  assert.match(styles, /\.cancel-ai-run-dialog::backdrop/);
+  assert.match(styles, /\.cancel-ai-run-card button:focus-visible/);
+});
+
 test("processing keeps its decision surface dismissible and project navigation available", () => {
   const recoveredRunStart = workbench.indexOf(
     "if (recoveredRun && isLockedLifecycle(recoveredRun.status))",
@@ -725,7 +771,7 @@ test("processing keeps its decision surface dismissible and project navigation a
     workbench,
     /className="project-file-editor"[\s\S]*?disabled=\{fileView\.loading \|\| runInProgress\}/,
   );
-  assert.match(workbench, /取消发送，继续编辑/);
+  assert.match(workbench, /结束本轮并继续编辑/);
   assert.match(workbench, /预览已发送 HTML/);
   assert.match(workbench, /再次复制本轮要求/);
   assert.match(
