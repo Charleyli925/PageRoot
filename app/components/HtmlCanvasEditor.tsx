@@ -235,6 +235,8 @@ export type HtmlCanvasCommentedTarget = {
   layoutTargets?: readonly HtmlCanvasSelection[];
   count?: number;
   label?: string;
+  /** Report target layout without rendering a saved-comment marker. */
+  showMarker?: boolean;
 };
 
 export type HtmlCanvasCommentLayoutState = {
@@ -2752,6 +2754,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
 
     const nextCommentMarkers: CommentMarker[] = [];
     commentedTargetsRef.current.forEach((rawTarget, targetIndex) => {
+      if (rawTarget.showMarker === false) return;
       const target = rawTarget.target;
       let targetElement: HTMLElement | null = null;
       try {

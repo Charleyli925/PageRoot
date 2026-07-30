@@ -33,7 +33,9 @@
   编辑后只保留当前 Tab 且仍能进入原有文字编辑岛。Browser 的确定性
   Tab 评论用例同时证明 `评N` 标记悬浮于标签控制右上角、顶部栏不重复
   显示当前标签、其他标签评论以中性评论卡片在顶部栏内部展开，并可从
-  具体卡片切换标签并定位对应评论。
+  具体卡片切换标签并定位对应评论。未保存评论在当前标签页保留持久入口，
+  切换标签后只作为对应分组中带“未保存”状态的卡片出现；点击恢复不会移除
+  入口，保存或明确删除才会移除，且草稿不增加主评论数或 `评N`。
 - AI 闭环：任务级只跑正常闭环和越界失败 2 个代表场景；发布级跑完整 6 个场景，包括复制失败、缺失 finalizer、非法 HTML 和版本激活失败。测试自动生成受控 AI 输出并执行正式 finalizer，不等待外部模型或真人接力。
 - 应用更新：Node 用伪 updater 证明 stable-only、点击后单次下载、差分开启、普通退出不安装、仅 downloaded 状态可安装和错误降级；Preload/Workbench 合同证明状态快照、下载/安装意图、无 Canvas 完成横幅与重启确认保持窄边界。
 - 默认浏览器打开：Node 直接执行主进程操作与 sender 权限门，证明 malformed、非 HTML、未知项目、非普通文件和非可信 frame 均不会调用 shell；Workbench 合同只补充证明精确 edit revision 的围栏、写回和 IPC 顺序。
@@ -47,6 +49,10 @@
 持久状态只保留四个跨层不变量：过期 revision 自动读取权威草稿并 rebase、结果未知时按 operation ID 查询、已确认的相同聚合 drain 为 no-op、草稿文件领先 runtime pointer 最多只允许一个已校验的崩溃窗口。纯函数和 Session 是主证明，Bridge 只证明持久边界；候选包把四者压缩为一个真实 App 冒烟，不在 Browser、Electron 和打包层各复制整套排列。
 
 评论虚拟化的数量算法由 Node 使用 100 条确定性记录验证；Browser 只创建 `threshold + 1` 条跨过真实渲染边界，再新增一条证明交互仍接通。不得用上百次重复 UI 创建来充当测试数据生成器，也不得为了注入测试数据给产品增加测试专用接口。
+
+评论栏纵向布局由 Node 对页面位置、同目标顺序、实测高度、固定间距和顶部栏
+展开位移做确定性验证；Browser 只验证真实 DOM 中保存卡片、草稿卡片和输入框
+在当前/其他标签页切换、聚焦和展开后的相对顺序与无重叠结果。
 
 顶层 Node 测试在一次执行中只出现一次。精确影响映射优先；只有找不到任何精确用例时才启用 `node-core` 兜底。PR CI 在 Linux 构建一次 Web renderer，供 Node 和 Browser 共享；每个 macOS Electron job 在目标系统本地构建 renderer，并先用独立 preflight 证明窗口可见、计时器和 animation frame 正常推进。Native Electron 与 AI 闭环分成两个 job，Browser 保持每个分片单 worker、零重试，但跨三个独立分片并发。
 

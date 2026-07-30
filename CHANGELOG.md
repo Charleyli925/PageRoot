@@ -15,8 +15,10 @@ Notable user-visible changes are documented here. This project follows Semantic 
 - Keep current-tab comments aligned with the Canvas, render Tab comment counts
   as the existing floating violet `评N` marker, and remove redundant current-Tab
   metadata from the comment header. Other-Tab comments now expand as neutral
-  saved-comment cards inside that header, while unsaved recovery remains clear
-  of saved comments.
+  saved-comment cards inside that header. Unsaved comments now stay at their
+  page position, use one persistent current-Tab shortcut or a tagged card in
+  the appropriate other-Tab group, and keep stable document order through
+  focus, expansion and Tab changes until explicitly saved or deleted.
 - Allow direct text edits beside preserved nested lists and `<wbr>` boundaries
   while keeping those authored structures byte-safe and non-editable.
 

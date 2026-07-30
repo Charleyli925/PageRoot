@@ -332,11 +332,28 @@
       ]
     },
     {
+      "id": "comment-rail-layout",
+      "patterns": [
+        "^app/lib/comment-rail-layout\\.js$",
+        "^tests/comment-rail-layout\\.test\\.mjs$"
+      ],
+      "suites": ["typecheck", "browser-smoke"],
+      "nodeTests": [
+        "tests/comment-rail-layout.test.mjs",
+        "tests/workbench-shell-ux.test.mjs"
+      ]
+    },
+    {
       "id": "workbench-lifecycle",
-      "patterns": ["^app/workbench\\.tsx$"],
+      "patterns": [
+        "^app/workbench\\.tsx$",
+        "^app/lib/comment-rail-layout\\.js$",
+        "^tests/comment-rail-layout\\.test\\.mjs$"
+      ],
       "suites": ["typecheck", "browser-smoke", "electron-smoke", "ai-smoke"],
       "nodeTests": [
         "tests/direct-edit-events.test.mjs",
+        "tests/comment-rail-layout.test.mjs",
         "tests/frontend-target-refresh.test.mjs",
         "tests/notification-policy.test.mjs",
         "tests/notification-ui.test.mjs",

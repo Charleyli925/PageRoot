@@ -64,6 +64,7 @@ import {
   COMMENT_VIRTUALIZATION_THRESHOLD,
   virtualizedCommentIds,
 } from "./lib/comment-virtualization.js";
+import { layoutCommentRailItems } from "./lib/comment-rail-layout.js";
 import {
   auditEventKey,
   removeAcknowledgedAuditEvents,
@@ -310,6 +311,21 @@ type CommentItem = {
   attemptId?: string;
   resultVersionId?: string;
 };
+
+type OtherTabCommentEntry =
+  | {
+      kind: "saved";
+      key: string;
+      target: HtmlCanvasSelection;
+      comment: CommentItem;
+      previewText: string;
+    }
+  | {
+      kind: "draft";
+      key: "__composer";
+      target: HtmlCanvasSelection;
+      previewText: string;
+    };
 
 type DirectEditEvent = {
   eventId: string;
@@ -2286,6 +2302,25 @@ export default function Workbench() {
     ),
     [activeCommentItems, viewMode, viewingVersion],
   );
+  const hasCommentDraft = Boolean(
+    viewMode === "current"
+    && !interactionLocked
+    && draftTarget
+    && (draft.trim() || draftAttachments.length > 0),
+  );
+  const draftTargetLayout = draftTarget
+    ? commentTargetLayouts[draftTarget.id]
+    : undefined;
+  const draftTargetInOtherTab = Boolean(
+    draftTarget?.tagName !== "body"
+    && draftTargetLayout?.visible === false
+    && draftTargetLayout.tabGroupKey,
+  );
+  const draftInOtherTab = hasCommentDraft && draftTargetInOtherTab;
+  const draftInCurrentTab = hasCommentDraft && !draftInOtherTab;
+  const composerInCurrentTab = Boolean(
+    composerOpen && draftTarget && !draftTargetInOtherTab,
+  );
   const commentTargetTops = useMemo(() => Object.fromEntries(
     Object.entries(commentTargetLayouts)
       .filter(([, layout]) => layout.visible)
@@ -2315,24 +2350,84 @@ export default function Workbench() {
     const grouped = new Map<string, {
       key: string;
       label: string;
-      comments: CommentItem[];
+      entries: OtherTabCommentEntry[];
     }>();
+    const appendEntry = (
+      key: string,
+      label: string,
+      entry: OtherTabCommentEntry,
+    ) => {
+      const current = grouped.get(key);
+      if (current) current.entries.push(entry);
+      else grouped.set(key, { key, label, entries: [entry] });
+    };
     for (const comment of otherTabCommentItems) {
       const layout = commentTargetLayouts[comment.target.id];
       const key = layout?.tabGroupKey || comment.target.id;
-      const current = grouped.get(key);
-      if (current) {
-        current.comments.push(comment);
-      } else {
-        grouped.set(key, {
-          key,
-          label: layout?.tabGroupLabel || "其他标签页",
-          comments: [comment],
-        });
-      }
+      appendEntry(
+        key,
+        layout?.tabGroupLabel || "其他标签页",
+        {
+          kind: "saved",
+          key: comment.commentId,
+          target: comment.target,
+          comment,
+          previewText: comment.text.trim()
+            || `已添加 ${(comment.attachments ?? []).length} 个附件`,
+        },
+      );
     }
-    return [...grouped.values()];
-  }, [commentTargetLayouts, otherTabCommentItems]);
+    if (draftInOtherTab && draftTarget && draftTargetLayout?.tabGroupKey) {
+      appendEntry(
+        draftTargetLayout.tabGroupKey,
+        draftTargetLayout.tabGroupLabel || "其他标签页",
+        {
+          kind: "draft",
+          key: "__composer",
+          target: draftTarget,
+          previewText: draft.trim()
+            || `已添加 ${draftAttachments.length} 个附件`,
+        },
+      );
+    }
+    return [...grouped.values()].map((group) => ({
+      ...group,
+      entries: [...group.entries].sort((left, right) => {
+        const sameTarget = (
+          commentMarkerGroupKey(left.target)
+          === commentMarkerGroupKey(right.target)
+        );
+        if (sameTarget) {
+          if (left.kind !== right.kind) return left.kind === "saved" ? -1 : 1;
+          if (left.kind === "saved" && right.kind === "saved") {
+            return left.comment.createdAt.localeCompare(right.comment.createdAt);
+          }
+          return 0;
+        }
+        const position = (
+          (left.target.boundingBox?.y ?? Number.MAX_SAFE_INTEGER)
+          - (right.target.boundingBox?.y ?? Number.MAX_SAFE_INTEGER)
+        );
+        if (position !== 0) return position;
+        if (left.kind !== right.kind) return left.kind === "saved" ? -1 : 1;
+        if (left.kind === "saved" && right.kind === "saved") {
+          return left.comment.createdAt.localeCompare(right.comment.createdAt);
+        }
+        return 0;
+      }),
+    }));
+  }, [
+    commentTargetLayouts,
+    draft,
+    draftAttachments.length,
+    draftInOtherTab,
+    draftTarget,
+    draftTargetLayout,
+    otherTabCommentItems,
+  ]);
+  const otherTabCommentEntryCount = (
+    otherTabCommentItems.length + (draftInOtherTab ? 1 : 0)
+  );
   const commentRailMinimumTop = Math.max(82, 14 + commentHeaderHeight + 16);
   const commentViewportBucket = Math.floor(commentViewport.top / 600);
   useEffect(() => {
@@ -2513,11 +2608,10 @@ export default function Workbench() {
       ]));
       const activeKeys = new Set([
         ...railCommentItems.map((comment) => comment.commentId),
-        ...(composerOpen ? ["__composer"] : []),
+        ...(composerInCurrentTab ? ["__composer"] : []),
         ...(
-          draftTarget
+          draftInCurrentTab
           && !composerOpen
-          && (draft.trim() || draftAttachments.length > 0)
             ? ["__draft_recovery"]
             : []
         ),
@@ -2541,9 +2635,11 @@ export default function Workbench() {
     return () => observer.disconnect();
   }, [
     attachmentObjectUrls,
+    composerInCurrentTab,
     composerOpen,
     draft,
     draftAttachments,
+    draftInCurrentTab,
     draftTarget,
     editingCommentId,
     commentViewport.height,
@@ -2557,6 +2653,7 @@ export default function Workbench() {
       layoutTargets: HtmlCanvasSelection[];
       count: number;
       label: string;
+      showMarker?: boolean;
     }>();
     for (const comment of visibleCommentItems) {
       const markerKey = commentMarkerGroupKey(comment.target);
@@ -2574,8 +2671,25 @@ export default function Workbench() {
         });
       }
     }
+    if ((hasCommentDraft || composerOpen) && draftTarget) {
+      const markerKey = commentMarkerGroupKey(draftTarget);
+      const current = grouped.get(markerKey);
+      if (current) {
+        if (!current.layoutTargets.some((target) => target.id === draftTarget.id)) {
+          current.layoutTargets.push(draftTarget);
+        }
+      } else {
+        grouped.set(markerKey, {
+          target: draftTarget,
+          layoutTargets: [draftTarget],
+          count: 0,
+          label: insertionLabel(draftTarget),
+          showMarker: false,
+        });
+      }
+    }
     return [...grouped.values()];
-  }, [visibleCommentItems]);
+  }, [composerOpen, draftTarget, hasCommentDraft, visibleCommentItems]);
 
   const trackedAuditTargets = useMemo(() => {
     const byTargetId = new Map<string, HtmlCanvasSelection>();
@@ -6765,6 +6879,7 @@ export default function Workbench() {
     setDraftAttachments([]);
     setDraftTarget(null);
     setComposerOpen(false);
+    setPendingDeleteCommentId(null);
     updateFocusedComment(null);
   }, [updateFocusedComment]);
 
@@ -6781,6 +6896,7 @@ export default function Workbench() {
     setSelection(nextTarget);
     setDraftTarget(nextTarget);
     updateFocusedComment(null);
+    setPendingDeleteCommentId(null);
     setComposerOpen(true);
     queueReviewPairReveal(nextTarget, "__composer");
     if (toastRef.current?.dedupeKey === "unfinished-comment-draft") {
@@ -6892,6 +7008,7 @@ export default function Workbench() {
 
   const closeCommentComposer = useCallback(() => {
     if (attachmentUploadCountRef.current > 0) return;
+    setPendingDeleteCommentId(null);
     if (
       composerDraftRef.current.trim()
       || composerAttachmentsRef.current.length > 0
@@ -6907,6 +7024,34 @@ export default function Workbench() {
     clearCurrentComposer,
     persistCurrentDraftRecovery,
     updateFocusedComment,
+  ]);
+
+  const discardCurrentComposer = useCallback(() => {
+    if (attachmentUploadCountRef.current > 0) return;
+    const discardedCommentId = composerCommentIdRef.current;
+    const discardedAttachments = [...composerAttachmentsRef.current];
+    if (relinkingTargetRef.current === "__composer") {
+      relinkingTargetRef.current = null;
+      relinkSelectionArmedRef.current = false;
+      setRelinkingTarget(null);
+    }
+    if (discardedCommentId) {
+      deletedCommentIdsRef.current.add(discardedCommentId);
+    }
+    clearCurrentComposer();
+    persistCurrentDraftRecovery();
+    for (const attachment of discardedAttachments) {
+      forgetAttachmentObjectUrl(attachment.attachmentId);
+      void deleteAttachmentFile(attachment);
+    }
+    if (toastRef.current?.dedupeKey === "unfinished-comment-draft") {
+      setToast(null);
+    }
+  }, [
+    clearCurrentComposer,
+    deleteAttachmentFile,
+    forgetAttachmentObjectUrl,
+    persistCurrentDraftRecovery,
   ]);
 
   const addComment = useCallback(async () => {
@@ -7001,6 +7146,7 @@ export default function Workbench() {
     setDraftAttachments([]);
     setDraftTarget(null);
     setComposerOpen(false);
+    setPendingDeleteCommentId(null);
     if (toastRef.current?.dedupeKey === "unfinished-comment-draft") {
       setToast(null);
     }
@@ -8933,11 +9079,56 @@ export default function Workbench() {
         ? "添加位置"
         : "页面内容";
   const hasCollapsedCommentDraft = Boolean(
-    draftTarget
+    draftInCurrentTab
+    && draftTarget
     && !composerOpen
-    && !interactionLocked
-    && (draft.trim() || draftAttachments.length > 0),
   );
+  const commentRailTargetTops = useMemo(() => {
+    const targets = [
+      ...railCommentItems.map((comment) => comment.target),
+      ...(draftInCurrentTab && draftTarget ? [draftTarget] : []),
+    ];
+    const measuredGroupTops = new Map<string, number>();
+    const fallbackGroupTops = new Map<string, number>();
+    for (const target of targets) {
+      const measuredTop = target.tagName === "body"
+        ? commentRailMinimumTop
+        : commentTargetTops[target.id];
+      const fallbackTop = target.boundingBox?.y
+        ?? commentRailHeight
+        ?? commentRailMinimumTop;
+      const groupKey = commentMarkerGroupKey(target);
+      if (measuredTop !== undefined) {
+        measuredGroupTops.set(
+          groupKey,
+          Math.min(
+            measuredGroupTops.get(groupKey) ?? Number.MAX_SAFE_INTEGER,
+            measuredTop,
+          ),
+        );
+      }
+      fallbackGroupTops.set(
+        groupKey,
+        Math.min(
+          fallbackGroupTops.get(groupKey) ?? Number.MAX_SAFE_INTEGER,
+          fallbackTop,
+        ),
+      );
+    }
+    return Object.fromEntries(targets.map((target) => [
+      target.id,
+      measuredGroupTops.get(commentMarkerGroupKey(target))
+        ?? fallbackGroupTops.get(commentMarkerGroupKey(target))
+        ?? commentRailMinimumTop,
+    ]));
+  }, [
+    commentRailHeight,
+    commentRailMinimumTop,
+    commentTargetTops,
+    draftInCurrentTab,
+    draftTarget,
+    railCommentItems,
+  ]);
   const sortedVisibleCommentItems = useMemo(() => (
     railCommentItems
       .map((comment, index) => ({
@@ -8945,7 +9136,7 @@ export default function Workbench() {
         index,
         targetTop: comment.target.tagName === "body"
           ? commentRailMinimumTop
-          : commentTargetTops[comment.target.id]
+          : commentRailTargetTops[comment.target.id]
             ?? comment.target.boundingBox?.y
             ?? Number.MAX_SAFE_INTEGER,
       }))
@@ -8955,7 +9146,7 @@ export default function Workbench() {
         || left.index - right.index
       ))
       .map(({ comment }) => comment)
-  ), [commentRailMinimumTop, commentTargetTops, railCommentItems]);
+  ), [commentRailMinimumTop, commentRailTargetTops, railCommentItems]);
   const commentRailLayout = useMemo(() => {
     const items: Array<{
       key: string;
@@ -8975,7 +9166,7 @@ export default function Workbench() {
           ? commentRailMinimumTop
           : Math.max(
               commentRailMinimumTop,
-              commentTargetTops[comment.target.id]
+              commentRailTargetTops[comment.target.id]
                 ?? comment.target.boundingBox?.y
                 ?? commentRailHeight
                 ?? commentRailMinimumTop,
@@ -8984,19 +9175,19 @@ export default function Workbench() {
         order: index + 1,
       };
     });
-    if (composerOpen && draftTarget) {
+    if (composerInCurrentTab && draftTarget) {
       items.push({
         key: "__composer",
         targetTop: draftTarget.tagName === "body"
           ? commentRailMinimumTop
           : Math.max(
               commentRailMinimumTop,
-              commentTargetTops[draftTarget.id]
+              commentRailTargetTops[draftTarget.id]
                 ?? draftTarget.boundingBox?.y
                 ?? commentRailMinimumTop,
             ),
         fallbackHeight: 276,
-        order: 0,
+        order: Number.MAX_SAFE_INTEGER,
       });
     }
     if (hasCollapsedCommentDraft && draftTarget) {
@@ -9006,85 +9197,38 @@ export default function Workbench() {
           ? commentRailMinimumTop
           : Math.max(
               commentRailMinimumTop,
-              commentTargetTops[draftTarget.id]
+              commentRailTargetTops[draftTarget.id]
                 ?? draftTarget.boundingBox?.y
                 ?? commentRailMinimumTop,
             ),
-        fallbackHeight: 84,
-        order: 0,
+        fallbackHeight: 142,
+        order: Number.MAX_SAFE_INTEGER,
       });
     }
-    items.sort((left, right) => (
-      left.targetTop - right.targetTop || left.order - right.order
-    ));
-    const positions: Record<string, number> = {};
-    const minimumTop = commentRailMinimumTop;
-    const itemGap = 20;
-    const itemHeight = (item: (typeof items)[number]) => (
-      commentCardHeights[item.key] || item.fallbackHeight
-    );
-    const focusKey = composerOpen && draftTarget ? "__composer" : focusedCommentId;
-    const focusIndex = focusKey
-      ? items.findIndex((item) => item.key === focusKey)
-      : -1;
-
-    if (focusIndex >= 0) {
-      const focusedItem = items[focusIndex];
-      const focusedTop = Math.max(minimumTop, focusedItem.targetTop);
-      positions[focusedItem.key] = focusedTop;
-
-      let upperCursor = focusedTop;
-      const deferredItems: typeof items = [];
-      for (let index = focusIndex - 1; index >= 0; index -= 1) {
-        const item = items[index];
-        const availableTop = upperCursor - itemHeight(item) - itemGap;
-        if (availableTop < minimumTop) {
-          deferredItems.unshift(item);
-          continue;
-        }
-        const top = Math.min(Math.max(minimumTop, item.targetTop), availableTop);
-        positions[item.key] = top;
-        upperCursor = top;
-      }
-
-      let lowerCursor = focusedTop + itemHeight(focusedItem) + itemGap;
-      for (const item of [...deferredItems, ...items.slice(focusIndex + 1)]) {
-        const top = Math.max(lowerCursor, item.targetTop);
-        positions[item.key] = top;
-        lowerCursor = top + itemHeight(item) + itemGap;
-      }
-    } else {
-      let cursor = minimumTop;
-      for (const item of items) {
-        const top = Math.max(cursor, item.targetTop);
-        positions[item.key] = top;
-        cursor = top + itemHeight(item) + itemGap;
-      }
-    }
-    const bottom = items.reduce((maximum, item) => (
-      Math.max(
-        maximum,
-        (positions[item.key] ?? minimumTop) + itemHeight(item) + itemGap,
-      )
-    ), minimumTop);
-    const heights = Object.fromEntries(
-      items.map((item) => [item.key, itemHeight(item)]),
-    );
+    const layout = layoutCommentRailItems({
+      minimumTop: commentRailMinimumTop,
+      gap: 20,
+      items: items.map((item) => ({
+        key: item.key,
+        targetTop: item.targetTop,
+        height: commentCardHeights[item.key] || item.fallbackHeight,
+        order: item.order,
+      })),
+    });
     return {
-      positions,
-      heights,
-      bottom,
-      composerTop: positions.__composer ?? commentRailMinimumTop,
-      draftRecoveryTop: positions.__draft_recovery ?? commentRailMinimumTop,
+      ...layout,
+      composerTop: layout.positions.__composer ?? commentRailMinimumTop,
+      draftRecoveryTop: (
+        layout.positions.__draft_recovery ?? commentRailMinimumTop
+      ),
     };
   }, [
     commentCardHeights,
     commentRailHeight,
     commentRailMinimumTop,
-    commentTargetTops,
-    composerOpen,
+    commentRailTargetTops,
+    composerInCurrentTab,
     draftTarget,
-    focusedCommentId,
     hasCollapsedCommentDraft,
     sortedVisibleCommentItems,
   ]);
@@ -9929,7 +10073,11 @@ export default function Workbench() {
             <header
               ref={commentsHeaderRef}
               className="comments-header comment-rail-header"
-              data-has-other-tabs={otherTabCommentItems.length > 0 ? "true" : undefined}
+              data-has-header-actions={
+                draftInCurrentTab || otherTabCommentEntryCount > 0
+                  ? "true"
+                  : undefined
+              }
               data-other-tabs-open={otherTabCommentsOpen ? "true" : undefined}
             >
               <div className="comment-rail-header-main">
@@ -9937,16 +10085,27 @@ export default function Workbench() {
                 <div className="comment-rail-header-actions">
                   {viewMode === "history" ? (
                     <small>历史版本 · 只读</small>
-                  ) : otherTabCommentItems.length === 0 ? (
+                  ) : !draftInCurrentTab && otherTabCommentEntryCount === 0 ? (
                     <small>
                       {visibleCommentItems.length > COMMENT_VIRTUALIZATION_THRESHOLD
                         ? `当前加载 ${renderedVisibleCommentItems.length} 条`
                         : "与正文同步滚动"}
                     </small>
                   ) : null}
-                  {otherTabCommentItems.length > 0 ? (
+                  {draftInCurrentTab ? (
                     <button
-                      className="other-tab-comments-toggle"
+                      className="comment-header-action unsaved-comment-shortcut"
+                      type="button"
+                      aria-label="有一条未保存评论"
+                      onClick={resumeCurrentComposer}
+                    >
+                      <span>有一条未保存评论</span>
+                      <CaretRightIcon aria-hidden="true" size={12} weight="bold" />
+                    </button>
+                  ) : null}
+                  {otherTabCommentEntryCount > 0 ? (
+                    <button
+                      className="comment-header-action other-tab-comments-toggle"
                       type="button"
                       aria-expanded={otherTabCommentsOpen}
                       aria-controls="other-tab-comment-groups"
@@ -9956,7 +10115,7 @@ export default function Workbench() {
                           : otherTabCommentsContextKey
                       ))}
                     >
-                      <span>其他标签页评论 {otherTabCommentItems.length}</span>
+                      <span>其他标签页评论 {otherTabCommentEntryCount}</span>
                       <CaretRightIcon aria-hidden="true" size={12} weight="bold" />
                     </button>
                   ) : null}
@@ -9980,35 +10139,70 @@ export default function Workbench() {
                     >
                       <div className="other-tab-comment-group-header">
                         <strong>{group.label}</strong>
-                        <span>{group.comments.length}</span>
                       </div>
                       <div className="other-tab-comment-list">
-                        {group.comments.map((comment) => {
-                          const previewText = comment.text.trim()
-                            || `已添加 ${(comment.attachments ?? []).length} 个附件`;
+                        {group.entries.map((entry) => {
+                          if (entry.kind === "draft") {
+                            return (
+                              <button
+                                className="comment-card other-tab-comment-card draft-comment-card"
+                                type="button"
+                                aria-label={`${group.label}：未保存评论：${insertionLabel(entry.target)}：${entry.previewText}`}
+                                key={entry.key}
+                                onClick={() => {
+                                  setExpandedOtherTabCommentsKey("");
+                                  window.requestAnimationFrame(resumeCurrentComposer);
+                                }}
+                              >
+                                <span className="comment-card-header">
+                                  <span className="comment-target">
+                                    {insertionLabel(entry.target)}
+                                  </span>
+                                  <span className="unsaved-comment-status">未保存</span>
+                                </span>
+                                <span className="other-tab-comment-card-body">
+                                  {entry.previewText}
+                                </span>
+                              </button>
+                            );
+                          }
                           return (
                             <button
                               className="comment-card other-tab-comment-card"
                               type="button"
-                              aria-label={`${group.label}：${insertionLabel(comment.target)}：${previewText}`}
-                              key={comment.commentId}
+                              aria-label={`${group.label}：${insertionLabel(entry.target)}：${entry.previewText}`}
+                              key={entry.key}
                               onClick={() => {
                                 setExpandedOtherTabCommentsKey("");
+                                setComposerOpen(false);
+                                setPendingDeleteCommentId(null);
                                 window.requestAnimationFrame(() => {
-                                  focusCommentTarget(comment.target, comment.commentId);
+                                  focusCommentTarget(
+                                    entry.target,
+                                    entry.comment.commentId,
+                                  );
                                 });
                               }}
                             >
                               <span className="comment-card-header">
                                 <span className="comment-target">
-                                  {insertionLabel(comment.target)}
+                                  {insertionLabel(entry.target)}
                                 </span>
-                                <time dateTime={comment.updatedAt || comment.createdAt}>
-                                  {formatTime(comment.updatedAt || comment.createdAt, true)}
+                                <time
+                                  dateTime={
+                                    entry.comment.updatedAt
+                                    || entry.comment.createdAt
+                                  }
+                                >
+                                  {formatTime(
+                                    entry.comment.updatedAt
+                                    || entry.comment.createdAt,
+                                    true,
+                                  )}
                                 </time>
                               </span>
                               <span className="other-tab-comment-card-body">
-                                {previewText}
+                                {entry.previewText}
                               </span>
                             </button>
                           );
@@ -10020,7 +10214,7 @@ export default function Workbench() {
               ) : null}
             </header>
             <span className="sr-only" role="status" aria-live="polite">
-              {composerOpen
+              {composerInCurrentTab
                 ? "评论输入框已与画布目标同时定位"
                 : focusedCommentId
                   ? "评论与画布目标已同时定位"
@@ -10042,7 +10236,7 @@ export default function Workbench() {
                   void refreshWorkspace(activeSource, hydrationEpoch, false, hydrationEpoch);
                 }}>重试读取</button>
               </section>
-            ) : composerOpen && draftTarget && !interactionLocked ? (
+            ) : composerInCurrentTab && draftTarget && !interactionLocked ? (
               <section
                 className="comment-composer rail-comment-composer"
                 aria-label="添加评论"
@@ -10115,89 +10309,127 @@ export default function Workbench() {
                   onDownload={(attachment) => void downloadAttachment(attachment)}
                   onRemove={removeComposerAttachment}
                 />
-                <footer className="composer-actions">
-                  <div className="composer-footer-tools">
-                    <button
-                      className="comment-tool-button"
-                      type="button"
-                      aria-label="添加附件"
-                      title="添加附件"
-                      disabled={interactionLocked || !draftCommentId}
-                      onClick={() => {
-                        if (draftCommentId) {
-                          openAttachmentPicker(
-                            { kind: "composer", commentId: draftCommentId },
-                            "all",
-                          );
+                {pendingDeleteCommentId === "__composer" ? (
+                  <footer className="comment-delete-confirm composer-delete-confirm" role="alert">
+                    <span>删除这条未保存评论？</span>
+                    <div>
+                      <button
+                        type="button"
+                        onClick={() => setPendingDeleteCommentId(null)}
+                      >取消</button>
+                      <button
+                        className="confirm-delete"
+                        type="button"
+                        onClick={discardCurrentComposer}
+                      >删除</button>
+                    </div>
+                  </footer>
+                ) : (
+                  <footer className="composer-actions">
+                    <div className="composer-footer-tools">
+                      <button
+                        className="comment-tool-button"
+                        type="button"
+                        aria-label="添加附件"
+                        title="添加附件"
+                        disabled={interactionLocked || !draftCommentId}
+                        onClick={() => {
+                          if (draftCommentId) {
+                            openAttachmentPicker(
+                              { kind: "composer", commentId: draftCommentId },
+                              "all",
+                            );
+                          }
+                        }}
+                      >
+                        <PaperclipIcon aria-hidden="true" size={15} weight="bold" />
+                      </button>
+                      <button
+                        className="comment-tool-button"
+                        type="button"
+                        aria-label="添加图片"
+                        title="添加图片"
+                        disabled={interactionLocked || !draftCommentId}
+                        onClick={() => {
+                          if (draftCommentId) {
+                            openAttachmentPicker(
+                              { kind: "composer", commentId: draftCommentId },
+                              "image",
+                            );
+                          }
+                        }}
+                      >
+                        <ImageIcon aria-hidden="true" size={15} weight="bold" />
+                      </button>
+                      <button
+                        className="comment-tool-button danger"
+                        type="button"
+                        aria-label="删除未保存评论"
+                        title="删除未保存评论"
+                        disabled={
+                          interactionLocked
+                          || attachmentUploadCount > 0
+                          || (!draft.trim() && draftAttachments.length === 0)
                         }
+                        onClick={() => setPendingDeleteCommentId("__composer")}
+                      >
+                        <TrashIcon aria-hidden="true" size={15} weight="bold" />
+                      </button>
+                      {attachmentUploadCount > 0 ? <small>正在添加附件…</small> : null}
+                    </div>
+                    <button
+                      className="add-comment-button"
+                      type="button"
+                      disabled={
+                        !canLocateTarget(draftTarget)
+                        || (!draft.trim() && draftAttachments.length === 0)
+                        || attachmentUploadCount > 0
+                        || interactionLocked
+                      }
+                      onClick={(event) => {
+                        event.currentTarget.blur();
+                        void addComment();
                       }}
                     >
-                      <PaperclipIcon aria-hidden="true" size={15} weight="bold" />
+                      <ChatCircleTextIcon aria-hidden="true" size={15} weight="bold" />
+                      评论
                     </button>
-                    <button
-                      className="comment-tool-button"
-                      type="button"
-                      aria-label="添加图片"
-                      title="添加图片"
-                      disabled={interactionLocked || !draftCommentId}
-                      onClick={() => {
-                        if (draftCommentId) {
-                          openAttachmentPicker(
-                            { kind: "composer", commentId: draftCommentId },
-                            "image",
-                          );
-                        }
-                      }}
-                    >
-                      <ImageIcon aria-hidden="true" size={15} weight="bold" />
-                    </button>
-                    {attachmentUploadCount > 0 ? <small>正在添加附件…</small> : null}
-                  </div>
-                  <button
-                    className="add-comment-button"
-                    type="button"
-                    disabled={
-                      !canLocateTarget(draftTarget)
-                      || (!draft.trim() && draftAttachments.length === 0)
-                      || attachmentUploadCount > 0
-                      || interactionLocked
-                    }
-                    onClick={(event) => {
-                      event.currentTarget.blur();
-                      void addComment();
-                    }}
-                  >
-                    <ChatCircleTextIcon aria-hidden="true" size={15} weight="bold" />
-                    评论
-                  </button>
-                </footer>
+                  </footer>
+                )}
               </section>
             ) : hasCollapsedCommentDraft && draftTarget ? (
-              <section
-                className="draft-recovery-card rail-status-card"
-                aria-label="未保存评论"
+              <button
+                className="comment-card draft-comment-card"
+                type="button"
+                aria-label={`未保存评论：${insertionLabel(draftTarget)}：${draft.trim() || `已添加 ${draftAttachments.length} 个附件`}`}
                 data-comment-measure="__draft_recovery"
                 style={{ top: `${draftRecoveryTop}px` }}
+                onClick={resumeCurrentComposer}
               >
-                <div><strong>有一条未保存评论</strong><span>{insertionLabel(draftTarget)}</span></div>
-                <button
-                  className="resume-comment-button"
-                  type="button"
-                  onClick={resumeCurrentComposer}
-                >{canLocateTarget(draftTarget) ? "继续填写" : "重新选择目标"}</button>
-              </section>
+                <span className="comment-card-header">
+                  <span className="comment-target">
+                    {insertionLabel(draftTarget)}
+                  </span>
+                  <span className="unsaved-comment-status">未保存</span>
+                </span>
+                <span className="other-tab-comment-card-body">
+                  {draft.trim() || `已添加 ${draftAttachments.length} 个附件`}
+                </span>
+              </button>
             ) : null}
 
-            {railCommentItems.length === 0 && !composerOpen && !hasCollapsedCommentDraft ? (
+            {railCommentItems.length === 0
+            && !composerInCurrentTab
+            && !hasCollapsedCommentDraft ? (
               <div
                 className="comments-empty"
                 style={{ top: `${commentRailMinimumTop}px` }}
               >
                 <ChatCircleTextIcon aria-hidden="true" size={24} weight="duotone" />
-                <strong>{otherTabCommentItems.length > 0
+                <strong>{otherTabCommentEntryCount > 0
                   ? "这个标签页还没有评论"
                   : "评论会显示在这里"}</strong>
-                <span>{otherTabCommentItems.length > 0
+                <span>{otherTabCommentEntryCount > 0
                   ? "其他标签页的评论可从顶部展开。"
                   : "可以评论整个页面、模块或其中的小区块。"}</span>
               </div>

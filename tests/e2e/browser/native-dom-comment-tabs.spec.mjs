@@ -15,6 +15,9 @@ async function switchTab(frame, panelId) {
       panel.classList.toggle("active", panel.id === nextPanelId);
     });
     window.dispatchEvent(new Event("resize"));
+    window.requestAnimationFrame(() => {
+      window.dispatchEvent(new Event("resize"));
+    });
   }, panelId);
   await frame.waitForFunction((nextPanelId) => {
     const panel = document.getElementById(nextPanelId);
@@ -90,7 +93,9 @@ test("comments keep current-tab alignment, render other tabs as neutral header c
 
   const rail = page.locator('aside[aria-label="本轮评论"]');
   const header = rail.locator(".comment-rail-header");
-  const currentCards = rail.locator(".comment-rail-content > .comment-card");
+  const currentCards = rail.locator(
+    ".comment-rail-content > .comment-card:not(.draft-comment-card)",
+  );
   await expect(header.locator("h1")).toContainText("4");
   await expect(header).not.toContainText("当前标签页");
   await expect(currentCards).toHaveCount(3);
@@ -120,6 +125,9 @@ test("comments keep current-tab alignment, render other tabs as neutral header c
   const firstOtherTabCard = firstTabGroup.getByRole("button", {
     name: new RegExp(firstText, "u"),
   });
+  await expect(firstTabGroup.locator(
+    ".other-tab-comment-group-header > span",
+  )).toHaveCount(0);
   await expect(firstOtherTabCard)
     .toHaveClass(/comment-card other-tab-comment-card/u);
   expect(await otherTabRegion.evaluate((element) => (
@@ -146,6 +154,7 @@ test("comments keep current-tab alignment, render other tabs as neutral header c
   await expect(currentCards.filter({ hasText: firstText })).toBeVisible();
   await expect(currentCards.filter({ hasText: firstText }))
     .toHaveAttribute("data-focused", "true");
+  await expect(page.getByRole("region", { name: "添加评论" })).toHaveCount(0);
 
   const firstTarget = frame.locator(caseSelector("tab-comment-one"));
   await firstTarget.click();
@@ -157,18 +166,144 @@ test("comments keep current-tab alignment, render other tabs as neutral header c
     .fill("尚未保存但必须保留原样");
   await composer.getByRole("button", { name: "关闭评论编辑器" }).click();
 
-  const recovery = rail.getByRole("region", { name: "未保存评论" });
+  const unsavedShortcut = rail.getByRole("button", {
+    name: "有一条未保存评论",
+  });
+  const recovery = rail.locator(
+    ".comment-rail-content > .draft-comment-card",
+  );
   const saved = rail.locator(".comment-card").filter({ hasText: firstText });
-  await expect(recovery).toHaveClass(/draft-recovery-card rail-status-card/u);
+  await expect(unsavedShortcut).toBeVisible();
+  await expect(recovery).toHaveAttribute(
+    "aria-label",
+    /未保存评论：.*第一页评论目标：尚未保存但必须保留原样/u,
+  );
+  await expect(recovery.getByText("未保存", { exact: true })).toBeVisible();
   await expect(saved).toHaveClass(/comment-card/u);
   await expect.poll(async () => {
     const recoveryBox = await recovery.boundingBox();
     const savedBox = await saved.boundingBox();
     if (!recoveryBox || !savedBox) return -1;
-    return Math.floor(savedBox.y - (recoveryBox.y + recoveryBox.height));
+    return Math.floor(recoveryBox.y - (savedBox.y + savedBox.height));
   }).toBeGreaterThanOrEqual(16);
   await page.screenshot({
     path: testInfo.outputPath("comment-rail-draft-recovery.png"),
   });
+
+  const firstTargetMarker = page.getByTestId("html-canvas-editor")
+    .getByRole("button", {
+      name: "正文 · 第一页评论目标",
+      exact: true,
+    })
+    .filter({ hasText: "评1" });
+  await expect(firstTargetMarker).toHaveText("评1");
+  await expect(header.locator("h1")).toContainText("4");
+
+  await unsavedShortcut.click();
+  await expect(composer.getByRole("textbox", { name: "评论内容" }))
+    .toBeFocused();
+  await expect(unsavedShortcut).toBeVisible();
+  await expect.poll(async () => {
+    const composerBox = await composer.boundingBox();
+    const savedBox = await saved.boundingBox();
+    if (!composerBox || !savedBox) return -1;
+    return Math.floor(composerBox.y - (savedBox.y + savedBox.height));
+  }).toBeGreaterThanOrEqual(16);
+
+  await page.getByRole("button", { name: "预览", exact: true }).click();
+  const draftPreviewIframe = page.locator('iframe[title="HTML 交互预览"]');
+  await expect(draftPreviewIframe).toBeVisible();
+  const draftPreviewFrame = await (
+    await draftPreviewIframe.elementHandle()
+  )?.contentFrame();
+  if (!draftPreviewFrame) {
+    throw new Error("Draft preview frame is unavailable.");
+  }
+  await draftPreviewFrame.locator('[data-p="panel-two"]').click();
+  await expect(draftPreviewFrame.locator("#panel-two")).toBeVisible();
+  await page.getByRole("button", { name: "编辑", exact: true }).click();
+  await expect(frame.locator("#panel-two")).toBeVisible();
+  await expect(unsavedShortcut).toHaveCount(0);
+  const otherTabsWithDraft = rail.getByRole("button", {
+    name: "其他标签页评论 2",
+  });
+  await expect(otherTabsWithDraft).toBeVisible();
+  await otherTabsWithDraft.click();
+
+  const expandedWithDraft = rail.getByRole("region", {
+    name: "其他标签页评论",
+  });
+  const firstTabGroupWithDraft = expandedWithDraft.getByRole("region", {
+    name: "第一页的评论",
+  });
+  const hiddenDraftCard = firstTabGroupWithDraft.getByRole("button", {
+    name: /第一页：未保存评论：.*第一页评论目标：尚未保存但必须保留原样/u,
+  });
+  await expect(hiddenDraftCard).toBeVisible();
+  await expect(hiddenDraftCard.getByText("未保存", { exact: true })).toBeVisible();
+  await expect(firstTabGroupWithDraft.getByRole("button")).toHaveCount(2);
+  await expect.poll(async () => {
+    const headerBox = await header.boundingBox();
+    const firstCurrentCardBox = await currentCards.first().boundingBox();
+    if (!headerBox || !firstCurrentCardBox) return -1;
+    return Math.floor(
+      firstCurrentCardBox.y - (headerBox.y + headerBox.height),
+    );
+  }).toBeGreaterThanOrEqual(16);
+  await page.screenshot({
+    path: testInfo.outputPath("comment-rail-other-tab-draft.png"),
+  });
+
+  await hiddenDraftCard.click();
+  await expect(frame.locator("#panel-one")).toBeVisible();
+  await expect(frame.locator("#panel-two")).toBeHidden();
+  await expect(composer.getByRole("textbox", { name: "评论内容" }))
+    .toHaveValue("尚未保存但必须保留原样");
+  await expect(composer.getByRole("textbox", { name: "评论内容" }))
+    .toBeFocused();
+  await expect(unsavedShortcut).toBeVisible();
+  await expect.poll(() => rail.locator("[data-comment-measure]")
+    .evaluateAll((nodes) => nodes
+      .map((node) => ({
+        key: node.getAttribute("data-comment-measure"),
+        top: Number.parseFloat(getComputedStyle(node).top),
+        text: node.textContent || "",
+      }))
+      .sort((left, right) => left.top - right.top)
+      .map((entry) => {
+        if (entry.key === "__composer") return "__composer";
+        if (entry.text.includes("第一页标签评论一")) return "tab-one";
+        if (entry.text.includes("第一页标签评论二")) return "tab-two";
+        if (entry.text.includes("第一页已保存评论")) return "first-saved";
+        return entry.key;
+      }))).toEqual([
+    "tab-one",
+    "tab-two",
+    "first-saved",
+    "__composer",
+  ]);
+  await expect.poll(() => rail.locator("[data-comment-measure]")
+    .evaluateAll((nodes) => {
+      const boxes = nodes
+        .map((node) => node.getBoundingClientRect())
+        .sort((left, right) => left.top - right.top);
+      return boxes.slice(1).reduce((minimum, box, index) => (
+        Math.min(minimum, box.top - boxes[index].bottom)
+      ), Number.MAX_SAFE_INTEGER);
+    })).toBeGreaterThanOrEqual(16);
+  await page.screenshot({
+    path: testInfo.outputPath("comment-rail-hidden-draft-resumed.png"),
+  });
+
+  await composer.getByRole("button", { name: "删除未保存评论" }).click();
+  await expect(composer.getByRole("alert")).toContainText(
+    "删除这条未保存评论？",
+  );
+  await composer.getByRole("button", { name: "删除", exact: true }).click();
+  await expect(composer).toHaveCount(0);
+  await expect(unsavedShortcut).toHaveCount(0);
+  await expect(recovery).toHaveCount(0);
+  await expect(header.locator("h1")).toContainText("4");
+  await expect(firstTargetMarker).toHaveText("评1");
   expect(browserErrors).toEqual([]);
 });
