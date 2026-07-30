@@ -11,6 +11,7 @@ import {
   useState,
   type ChangeEvent,
   type ClipboardEvent,
+  type CSSProperties,
   type ReactNode,
 } from "react";
 import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowCounterClockwise";
@@ -64,7 +65,11 @@ import {
   COMMENT_VIRTUALIZATION_THRESHOLD,
   virtualizedCommentIds,
 } from "./lib/comment-virtualization.js";
-import { layoutCommentRailItems } from "./lib/comment-rail-layout.js";
+import {
+  computeAlignedRailOffset,
+  layoutCommentRailItems,
+  routeCommentRailWheel,
+} from "./lib/comment-rail-layout.js";
 import {
   auditEventKey,
   removeAcknowledgedAuditEvents,
@@ -312,6 +317,14 @@ type CommentItem = {
   resultVersionId?: string;
 };
 
+type CommentEditSession = {
+  commentId: string;
+  baselineText: string;
+  baselineAttachments: CommentAttachment[];
+  draftText: string;
+  draftAttachments: CommentAttachment[];
+};
+
 type OtherTabCommentEntry =
   | {
       kind: "saved";
@@ -417,7 +430,8 @@ type ToastAction =
   | { id: "retry-draft-persist"; label: string }
   | { id: "review-project-rules"; label: string }
   | { id: "retry-submit"; label: string }
-  | { id: "resume-draft"; label: string };
+  | { id: "resume-draft"; label: string }
+  | { id: "resume-comment-edit"; label: string; commentId: string };
 type Toast = {
   title: string;
   message: string;
@@ -761,6 +775,24 @@ function persistedAttachment(attachment: CommentAttachment): CommentAttachment {
       : {}),
     ...(attachment.source ? { source: attachment.source } : {}),
   };
+}
+
+function commentAttachmentFingerprint(
+  attachments: readonly CommentAttachment[],
+): string {
+  return attachments
+    .map((attachment) => attachment.attachmentId)
+    .sort()
+    .join("\u0000");
+}
+
+function commentEditSessionHasChanges(
+  session: CommentEditSession | null,
+): boolean {
+  if (!session) return false;
+  return session.draftText !== session.baselineText
+    || commentAttachmentFingerprint(session.draftAttachments)
+      !== commentAttachmentFingerprint(session.baselineAttachments);
 }
 
 function attachmentFromRecord(value: unknown): CommentAttachment | null {
@@ -1717,7 +1749,14 @@ export default function Workbench() {
   const changeCounter = useRef(1);
   const attachmentCounter = useRef(1);
   const focusedCommentIdRef = useRef<string | null>(null);
+  const commentEditSessionRef = useRef<CommentEditSession | null>(null);
+  const commentEditResumePendingRef = useRef<string | null>(null);
+  const commentRailOffsetRef = useRef(0);
   const reviewRevealRequestRef = useRef(0);
+  const reviewRevealPendingRef = useRef<{
+    target: HtmlCanvasSelection;
+    itemKey: string;
+  } | null>(null);
   const commentLayoutWasReadyRef = useRef(false);
   const projectEpochRef = useRef(0);
   const projectOpenRequestRef = useRef(0);
@@ -1840,7 +1879,8 @@ export default function Workbench() {
   const [drawer, setDrawer] = useState<Drawer>(null);
   const [expandedVersionId, setExpandedVersionId] = useState<string | null>(null);
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
-  const [commentEditDraft, setCommentEditDraft] = useState("");
+  const [commentEditSession, setCommentEditSession] =
+    useState<CommentEditSession | null>(null);
   const [pendingDeleteCommentId, setPendingDeleteCommentId] = useState<string | null>(null);
   const [handoffPreviewOpen, setHandoffPreviewOpen] = useState(false);
   const [commentRailHeight, setCommentRailHeight] = useState(0);
@@ -1858,6 +1898,8 @@ export default function Workbench() {
   const [expandedOtherTabCommentsKey, setExpandedOtherTabCommentsKey] = useState("");
   const [commentViewport, setCommentViewport] = useState({ top: 0, height: 800 });
   const [focusedCommentId, setFocusedCommentId] = useState<string | null>(null);
+  const [commentRailOffset, setCommentRailOffset] = useState(0);
+  const [commentRailFollowsFocus, setCommentRailFollowsFocus] = useState(false);
   const [fileView, setFileView] = useState<WorkspaceFileView | null>(null);
   const [projectRulesSaving, setProjectRulesSaving] = useState(false);
   const [projectRulesSaveError, setProjectRulesSaveError] = useState("");
@@ -2278,6 +2320,18 @@ export default function Workbench() {
     [comments],
   );
   const activeCommentCount = activeCommentItems.length;
+  const commentEditDraft = commentEditSession?.draftText ?? "";
+  const commentEditAttachments = commentEditSession?.draftAttachments ?? [];
+  const unfinishedEditedComment = commentEditSession
+    ? activeCommentItems.find(
+        (comment) => comment.commentId === commentEditSession.commentId,
+      ) ?? null
+    : null;
+  const hasUnsavedCommentEdit = Boolean(
+    viewMode === "current"
+    && unfinishedEditedComment
+    && commentEditSessionHasChanges(commentEditSession),
+  );
   const pendingSendItemCount = activeCommentCount;
   const interactionPreviewHtml = useMemo(() => {
     if (!browserPreviewOnly || projectName !== WELCOME_PROJECT_NAME) return html;
@@ -2508,6 +2562,12 @@ export default function Workbench() {
   useEffect(() => {
     focusedCommentIdRef.current = focusedCommentId;
   }, [focusedCommentId]);
+  useEffect(() => {
+    commentEditSessionRef.current = commentEditSession;
+  }, [commentEditSession]);
+  useEffect(() => {
+    commentRailOffsetRef.current = commentRailOffset;
+  }, [commentRailOffset]);
   useEffect(() => {
     composerDraftRef.current = draft;
   }, [draft]);
@@ -3086,6 +3146,11 @@ export default function Workbench() {
       const composerText = composerDraftRef.current;
       const composerTarget = draftTargetRef.current;
       const composerAttachments = composerAttachmentsRef.current;
+      const commentEdit = commentEditSessionHasChanges(
+        commentEditSessionRef.current,
+      )
+        ? commentEditSessionRef.current
+        : null;
       if (
         snapshot.comments.length === 0
         && snapshot.changeEvents.length === 0
@@ -3093,12 +3158,13 @@ export default function Workbench() {
         && !composerText.trim()
         && composerAttachments.length === 0
         && !composerTarget
+        && !commentEdit
       ) {
         recoveryStore.remove(keys);
         return;
       }
       recoveryStore.write(keys, {
-        schemaVersion: "3.1.0",
+        schemaVersion: "3.2.0",
         projectId: snapshot.projectId,
         documentId: snapshot.documentId,
         sourcePath: snapshot.sourcePath,
@@ -3113,6 +3179,15 @@ export default function Workbench() {
         composerCommentId: composerCommentIdRef.current,
         composerAttachments: composerAttachments.map(persistedAttachment),
         composerTarget: composerTarget ? persistedTargetRef(composerTarget) : null,
+        commentEdit: commentEdit
+          ? {
+              commentId: commentEdit.commentId,
+              draftText: commentEdit.draftText,
+              draftAttachments: commentEdit.draftAttachments.map(
+                persistedAttachment,
+              ),
+            }
+          : null,
       });
     // The Bridge remains authoritative after acknowledgement; this is only a
     // crash fallback and storage failure cannot downgrade the Bridge result.
@@ -3674,7 +3749,9 @@ export default function Workbench() {
     setAttachmentUploadCount(0);
     setPreviewAttachment(null);
     setEditingCommentId(null);
-    setCommentEditDraft("");
+    commentEditSessionRef.current = null;
+    commentEditResumePendingRef.current = null;
+    setCommentEditSession(null);
     setPendingDeleteCommentId(null);
     relinkingTargetRef.current = null;
     relinkSelectionArmedRef.current = false;
@@ -3683,6 +3760,9 @@ export default function Workbench() {
     setRelinkingTarget(null);
     setCommentCardHeights({});
     setCommentRailHeight(0);
+    commentRailOffsetRef.current = 0;
+    setCommentRailOffset(0);
+    setCommentRailFollowsFocus(false);
     setCommentTargetLayouts({});
     setCommentLayoutAuthority({
       sourceSha256: "",
@@ -4052,6 +4132,11 @@ export default function Workbench() {
     composerCommentId: string | null;
     composerAttachments: CommentAttachment[];
     composerTarget: HtmlCanvasSelection | null;
+    commentEdit: {
+      commentId: string;
+      draftText: string;
+      draftAttachments: CommentAttachment[];
+    } | null;
   } => {
     const keys = [
       `html-ai-draft-recovery:${context.documentId}`,
@@ -4082,6 +4167,7 @@ export default function Workbench() {
         composerCommentId: null,
         composerAttachments: [],
         composerTarget: null,
+        commentEdit: null,
       };
     }
     const localComments = Array.isArray(latest.comments)
@@ -4141,6 +4227,24 @@ export default function Workbench() {
         : [],
       composerTarget: isRecord(latest.composerTarget)
         ? selectionFromRecord(latest.composerTarget)
+        : null,
+      commentEdit: isRecord(latest.commentEdit)
+        && /^comment_[A-Za-z0-9_-]+$/.test(
+          String(latest.commentEdit.commentId || ""),
+        )
+        ? {
+            commentId: String(latest.commentEdit.commentId),
+            draftText: String(latest.commentEdit.draftText || ""),
+            draftAttachments: Array.isArray(
+              latest.commentEdit.draftAttachments,
+            )
+              ? latest.commentEdit.draftAttachments
+                  .map(attachmentFromRecord)
+                  .filter(
+                    (item): item is CommentAttachment => Boolean(item),
+                  )
+              : [],
+          }
         : null,
     };
   }, []);
@@ -4420,6 +4524,37 @@ export default function Workbench() {
         recoveredEvents = recoveredDraft.changeEvents;
         setComments(recoveredComments);
         commentsRef.current = recoveredComments;
+        const recoveredEditComment = recoveredDraft.commentEdit
+          ? recoveredComments.find(
+              (comment) => (
+                comment.commentId === recoveredDraft.commentEdit?.commentId
+              ),
+            ) ?? null
+          : null;
+        const recoveredEditSession = (
+          recoveredDraft.commentEdit
+          && recoveredEditComment
+        )
+          ? {
+              commentId: recoveredEditComment.commentId,
+              baselineText: recoveredEditComment.text,
+              baselineAttachments: [
+                ...(recoveredEditComment.attachments ?? []),
+              ],
+              draftText: recoveredDraft.commentEdit.draftText,
+              draftAttachments: [
+                ...recoveredDraft.commentEdit.draftAttachments,
+              ],
+            }
+          : null;
+        commentEditSessionRef.current = (
+          commentEditSessionHasChanges(recoveredEditSession)
+            ? recoveredEditSession
+            : null
+        );
+        commentEditResumePendingRef.current = null;
+        setCommentEditSession(commentEditSessionRef.current);
+        setEditingCommentId(null);
         changeEventsRef.current = recoveredEvents;
         setChangeEvents(recoveredEvents);
         draftPersistenceAuthorityRef.current = {
@@ -4916,6 +5051,7 @@ export default function Workbench() {
           || composerDraftRef.current.trim()
           || composerAttachmentsRef.current.length > 0
           || draftTargetRef.current
+          || commentEditSessionHasChanges(commentEditSessionRef.current)
         );
         if (
           (projectLockedRef.current && boundary !== "submit")
@@ -4956,6 +5092,7 @@ export default function Workbench() {
           || composerDraftRef.current.trim()
           || composerAttachmentsRef.current.length > 0
           || draftTargetRef.current
+          || commentEditSessionHasChanges(commentEditSessionRef.current)
         );
         let context = captureProjectContext();
         if (
@@ -5107,23 +5244,29 @@ export default function Workbench() {
     commentId: string,
     attachment: CommentAttachment,
   ) => {
-    const nextComments = commentsRef.current.map((comment) => (
-      comment.commentId === commentId
-        ? {
-            ...comment,
-            attachments: (comment.attachments ?? []).filter(
-              (item) => item.attachmentId !== attachment.attachmentId,
-            ),
-            updatedAt: new Date().toISOString(),
-          }
-        : comment
-    ));
-    commentsRef.current = nextComments;
-    setComments(nextComments);
+    const current = commentEditSessionRef.current;
+    if (!current || current.commentId !== commentId) return;
+    const wasSavedBeforeEdit = current.baselineAttachments.some(
+      (item) => item.attachmentId === attachment.attachmentId,
+    );
+    const nextSession = {
+      ...current,
+      draftAttachments: current.draftAttachments.filter(
+        (item) => item.attachmentId !== attachment.attachmentId,
+      ),
+    };
+    commentEditSessionRef.current = nextSession;
+    setCommentEditSession(nextSession);
     forgetAttachmentObjectUrl(attachment.attachmentId);
-    persistCurrentDraftRecovery(nextComments);
-    void deleteAttachmentFile(attachment);
-  }, [deleteAttachmentFile, forgetAttachmentObjectUrl, persistCurrentDraftRecovery]);
+    persistCurrentDraftRecovery();
+    if (!wasSavedBeforeEdit) {
+      void deleteAttachmentFile(attachment);
+    }
+  }, [
+    deleteAttachmentFile,
+    forgetAttachmentObjectUrl,
+    persistCurrentDraftRecovery,
+  ]);
 
   const uploadAttachments = useCallback(async (
     files: File[],
@@ -5133,12 +5276,16 @@ export default function Workbench() {
     if (files.length === 0) return;
     const targetIsOpen = target.kind === "composer"
       ? composerCommentIdRef.current === target.commentId
-      : commentsRef.current.some((comment) => comment.commentId === target.commentId);
+      : (
+          commentEditSessionRef.current?.commentId === target.commentId
+          && commentsRef.current.some(
+            (comment) => comment.commentId === target.commentId,
+          )
+        );
     if (!targetIsOpen) return;
     const existingCount = target.kind === "composer"
       ? composerAttachmentsRef.current.length
-      : commentsRef.current.find((comment) => comment.commentId === target.commentId)
-          ?.attachments?.length ?? 0;
+      : commentEditSessionRef.current?.draftAttachments.length ?? 0;
     const attachmentPlan = planAttachmentSelection(files, existingCount);
     const selected = attachmentPlan.accepted;
     const issueNotes: string[] = [];
@@ -5218,20 +5365,18 @@ export default function Workbench() {
         composerAttachmentsRef.current = next;
         setDraftAttachments(next);
       } else {
-        const nextComments = commentsRef.current.map((comment) => (
-          comment.commentId === target.commentId
-            ? {
-                ...comment,
-                attachments: [
-                  ...(comment.attachments ?? []),
-                  ...memoryAttachments,
-                ],
-                updatedAt: new Date().toISOString(),
-              }
-            : comment
-        ));
-        commentsRef.current = nextComments;
-        setComments(nextComments);
+        const current = commentEditSessionRef.current;
+        if (!current || current.commentId !== target.commentId) return;
+        const nextSession = {
+          ...current,
+          draftAttachments: [
+            ...current.draftAttachments,
+            ...memoryAttachments,
+          ],
+        };
+        commentEditSessionRef.current = nextSession;
+        setCommentEditSession(nextSession);
+        persistCurrentDraftRecovery();
       }
       addedAttachmentCount = memoryAttachments.length;
       if (issueNotes.length > 0) {
@@ -5339,7 +5484,14 @@ export default function Workbench() {
           persistCurrentDraftRecovery();
           addedAttachmentCount += 1;
         } else {
-          if (!commentsRef.current.some((comment) => comment.commentId === target.commentId)) {
+          const current = commentEditSessionRef.current;
+          if (
+            !current
+            || current.commentId !== target.commentId
+            || !commentsRef.current.some(
+              (comment) => comment.commentId === target.commentId,
+            )
+          ) {
             void deleteAttachmentFile(attachment);
             continue;
           }
@@ -5349,18 +5501,13 @@ export default function Workbench() {
               URL.createObjectURL(file),
             );
           }
-          const nextComments = commentsRef.current.map((comment) => (
-            comment.commentId === target.commentId
-              ? {
-                  ...comment,
-                  attachments: [...(comment.attachments ?? []), attachment],
-                  updatedAt: new Date().toISOString(),
-                }
-              : comment
-          ));
-          commentsRef.current = nextComments;
-          setComments(nextComments);
-          persistCurrentDraftRecovery(nextComments);
+          const nextSession = {
+            ...current,
+            draftAttachments: [...current.draftAttachments, attachment],
+          };
+          commentEditSessionRef.current = nextSession;
+          setCommentEditSession(nextSession);
+          persistCurrentDraftRecovery();
           addedAttachmentCount += 1;
         }
       } catch (cause) {
@@ -5385,11 +5532,10 @@ export default function Workbench() {
     if (issueNotes.length > 0) {
       const targetStillOpen = target.kind === "composer"
         ? composerCommentIdRef.current === target.commentId
-        : commentsRef.current.some((comment) => comment.commentId === target.commentId);
+        : commentEditSessionRef.current?.commentId === target.commentId;
       const currentAttachmentCount = target.kind === "composer"
         ? composerAttachmentsRef.current.length
-        : commentsRef.current.find((comment) => comment.commentId === target.commentId)
-            ?.attachments?.length ?? 0;
+        : commentEditSessionRef.current?.draftAttachments.length ?? 0;
       const needsRemoval = attachmentPlan.overLimit.length > 0
         && currentAttachmentCount >= MAX_COMMENT_ATTACHMENTS;
       setToast({
@@ -6803,6 +6949,7 @@ export default function Workbench() {
     target: HtmlCanvasSelection,
     itemKey: string,
   ) => {
+    reviewRevealPendingRef.current = { target, itemKey };
     const requestId = ++reviewRevealRequestRef.current;
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(() => {
@@ -6810,17 +6957,31 @@ export default function Workbench() {
         const stage = reviewStageRef.current;
         const rail = commentsPanelRef.current;
         if (!stage || !rail) return;
+        if (!itemKey) {
+          commentRailOffsetRef.current = 0;
+          setCommentRailFollowsFocus(false);
+          setCommentRailOffset(0);
+          reviewRevealPendingRef.current = null;
+          return;
+        }
         const item = [...rail.querySelectorAll<HTMLElement>("[data-comment-measure]")]
           .find((node) => node.dataset.commentMeasure === itemKey);
         const targetTop = target.tagName === "body"
           ? commentRailMinimumTop
           : commentTargetTops[target.id];
         if (!Number.isFinite(targetTop)) return;
-        if (itemKey && !item) return;
+        if (!item) return;
         const itemTop = item?.offsetTop ?? targetTop;
+        const nextRailOffset = computeAlignedRailOffset({
+          targetTop: targetTop as number,
+          cardTop: itemTop,
+        });
+        commentRailOffsetRef.current = nextRailOffset;
+        setCommentRailFollowsFocus(true);
+        setCommentRailOffset(nextRailOffset);
         const desiredTop = Math.max(
           0,
-          Math.min(targetTop, itemTop) - commentRailMinimumTop - 10,
+          (targetTop as number) - commentRailMinimumTop - 10,
         );
         const maxTop = Math.max(0, stage.scrollHeight - stage.clientHeight);
         const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -6828,9 +6989,57 @@ export default function Workbench() {
           top: Math.min(desiredTop, maxTop),
           behavior: reduceMotion ? "auto" : "smooth",
         });
+        if (requestId === reviewRevealRequestRef.current) {
+          reviewRevealPendingRef.current = null;
+        }
       });
     });
   }, [commentRailMinimumTop, commentTargetTops]);
+
+  useEffect(() => {
+    if (canvasMode !== "edit") return undefined;
+    const rail = commentsPanelRef.current;
+    if (!rail) return undefined;
+    const handleWheel = (event: WheelEvent) => {
+      const stage = reviewStageRef.current;
+      if (!stage) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const currentRailOffset = commentRailOffsetRef.current;
+      const routed = routeCommentRailWheel({
+        pageScrollTop: stage.scrollTop,
+        pageMaxScrollTop: Math.max(
+          0,
+          stage.scrollHeight - stage.clientHeight,
+        ),
+        railOffset: currentRailOffset,
+        deltaY: event.deltaY,
+      });
+      if (Math.abs(routed.railOffset - currentRailOffset) > 0.01) {
+        commentRailOffsetRef.current = routed.railOffset;
+        setCommentRailFollowsFocus(false);
+        setCommentRailOffset(routed.railOffset);
+      }
+      if (Math.abs(routed.pageScrollTop - stage.scrollTop) > 0.01) {
+        stage.scrollTop = routed.pageScrollTop;
+      }
+    };
+    rail.addEventListener("wheel", handleWheel, { passive: false });
+    return () => rail.removeEventListener("wheel", handleWheel);
+  }, [canvasMode]);
+
+  useEffect(() => {
+    if (
+      canvasMode === "edit"
+      && (focusedCommentId || composerOpen || editingCommentId)
+    ) return undefined;
+    const frame = window.requestAnimationFrame(() => {
+      commentRailOffsetRef.current = 0;
+      setCommentRailFollowsFocus(false);
+      setCommentRailOffset(0);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [canvasMode, composerOpen, editingCommentId, focusedCommentId]);
 
   const beginTargetRelink = useCallback((itemId: string) => {
     relinkingTargetRef.current = itemId;
@@ -6838,7 +7047,11 @@ export default function Workbench() {
     setRelinkingTarget(itemId);
     setPendingDeleteCommentId(null);
     setEditingCommentId(null);
-    setCommentEditDraft("");
+    if (!commentEditSessionHasChanges(commentEditSessionRef.current)) {
+      commentEditSessionRef.current = null;
+      commentEditResumePendingRef.current = null;
+      setCommentEditSession(null);
+    }
     editorRef.current?.clearSelection();
     setSelection(null);
     if (itemId !== "__composer") {
@@ -6978,6 +7191,24 @@ export default function Workbench() {
     });
   }, [beginTargetRelink, queueReviewPairReveal, updateFocusedComment]);
 
+  const showUnfinishedCommentEditNotice = useCallback((
+    session: CommentEditSession,
+  ) => {
+    setToast({
+      title: "上一条评论修改还未确认",
+      message: "请先确认或取消这次修改，再新建或编辑其他评论。",
+      tone: "warning",
+      sticky: true,
+      disposition: "direct-action",
+      dedupeKey: "unfinished-comment-edit",
+      action: {
+        id: "resume-comment-edit",
+        label: "继续修改",
+        commentId: session.commentId,
+      },
+    });
+  }, []);
+
   const openCommentComposer = useCallback((target: HtmlCanvasSelection) => {
     if (relinkingTargetRef.current && finishTargetRelink(target)) return;
     if (attachmentUploadCountRef.current > 0) return;
@@ -6991,6 +7222,17 @@ export default function Workbench() {
     ) return;
     if (!canSaveCommentTarget(target)) {
       return;
+    }
+    const currentEdit = commentEditSessionRef.current;
+    if (currentEdit && commentEditSessionHasChanges(currentEdit)) {
+      showUnfinishedCommentEditNotice(currentEdit);
+      return;
+    }
+    if (currentEdit) {
+      commentEditSessionRef.current = null;
+      commentEditResumePendingRef.current = null;
+      setCommentEditSession(null);
+      setEditingCommentId(null);
     }
     // Opening a composer is the first durable project action for a lazily
     // registered HTML. Start identity creation before accepting text so crash
@@ -7043,6 +7285,7 @@ export default function Workbench() {
     finishTargetRelink,
     prepareProjectRecords,
     queueReviewPairReveal,
+    showUnfinishedCommentEditNotice,
     updateFocusedComment,
     viewMode,
   ]);
@@ -7258,54 +7501,214 @@ export default function Workbench() {
     queueReviewPairReveal(target, commentId);
   }, [queueReviewPairReveal, updateFocusedComment]);
 
-  const beginCommentEdit = useCallback((comment: CommentItem) => {
+  const beginCommentEdit = useCallback((
+    comment: CommentItem,
+    focusText = true,
+  ): boolean => {
+    if (
+      draftTargetRef.current
+      && (
+        composerDraftRef.current.trim()
+        || composerAttachmentsRef.current.length > 0
+      )
+    ) {
+      setToast({
+        title: "上一条评论还未保存",
+        message: "请先保存或删除未保存评论，再修改已有评论。",
+        tone: "warning",
+        sticky: true,
+        disposition: "direct-action",
+        dedupeKey: "unfinished-comment-draft",
+        action: { id: "resume-draft", label: "继续填写" },
+      });
+      return false;
+    }
+    if (draftTargetRef.current) clearCurrentComposer();
+    const currentSession = commentEditSessionRef.current;
+    if (
+      currentSession
+      && currentSession.commentId !== comment.commentId
+      && commentEditSessionHasChanges(currentSession)
+    ) {
+      showUnfinishedCommentEditNotice(currentSession);
+      return false;
+    }
+    const nextSession = (
+      currentSession?.commentId === comment.commentId
+        ? currentSession
+        : {
+            commentId: comment.commentId,
+            baselineText: comment.text,
+            baselineAttachments: [...(comment.attachments ?? [])],
+            draftText: comment.text,
+            draftAttachments: [...(comment.attachments ?? [])],
+          }
+    );
+    commentEditSessionRef.current = nextSession;
+    setCommentEditSession(nextSession);
     setPendingDeleteCommentId(null);
-    setCommentEditDraft(comment.text);
     setEditingCommentId(comment.commentId);
     queueReviewCommentFocus(comment.target, comment.commentId);
-    window.requestAnimationFrame(() => {
-      commentEditRef.current?.focus({ preventScroll: true });
-      commentEditRef.current?.select();
-    });
-  }, [queueReviewCommentFocus]);
+    if (focusText) {
+      window.requestAnimationFrame(() => {
+        commentEditRef.current?.focus({ preventScroll: true });
+        if (!commentEditSessionHasChanges(nextSession)) {
+          commentEditRef.current?.select();
+        }
+      });
+    }
+    return true;
+  }, [
+    clearCurrentComposer,
+    queueReviewCommentFocus,
+    showUnfinishedCommentEditNotice,
+  ]);
 
-  const cancelCommentEdit = useCallback(() => {
+  const cancelCommentEdit = useCallback((revealComment = true) => {
+    if (attachmentUploadCountRef.current > 0) return;
+    const session = commentEditSessionRef.current;
     const current = commentsRef.current.find(
-      (comment) => comment.commentId === editingCommentId,
+      (comment) => comment.commentId === session?.commentId,
     );
-    setCommentEditDraft("");
+    const baselineIds = new Set(
+      session?.baselineAttachments.map(
+        (attachment) => attachment.attachmentId,
+      ) ?? [],
+    );
+    const stagedAttachments = session?.draftAttachments.filter(
+      (attachment) => !baselineIds.has(attachment.attachmentId),
+    ) ?? [];
+    commentEditSessionRef.current = null;
+    commentEditResumePendingRef.current = null;
+    setCommentEditSession(null);
     setEditingCommentId(null);
-    if (current) queueReviewCommentFocus(current.target, current.commentId);
-  }, [editingCommentId, queueReviewCommentFocus]);
+    persistCurrentDraftRecovery();
+    for (const attachment of stagedAttachments) {
+      forgetAttachmentObjectUrl(attachment.attachmentId);
+      void deleteAttachmentFile(attachment);
+    }
+    if (toastRef.current?.dedupeKey === "unfinished-comment-edit") {
+      setToast(null);
+    }
+    if (revealComment && current) {
+      queueReviewCommentFocus(current.target, current.commentId);
+    }
+  }, [
+    deleteAttachmentFile,
+    forgetAttachmentObjectUrl,
+    persistCurrentDraftRecovery,
+    queueReviewCommentFocus,
+  ]);
+
+  const resumeCommentEdit = useCallback((commentId?: string) => {
+    const session = commentEditSessionRef.current;
+    if (!session || (commentId && session.commentId !== commentId)) return;
+    const current = commentsRef.current.find(
+      (comment) => comment.commentId === session.commentId,
+    );
+    if (!current) {
+      commentEditSessionRef.current = null;
+      commentEditResumePendingRef.current = null;
+      setCommentEditSession(null);
+      setEditingCommentId(null);
+      persistCurrentDraftRecovery();
+      return;
+    }
+    const located = editorRef.current?.select(
+      current.target,
+      { showToolbar: false },
+    );
+    const nextTarget = located || current.target;
+    setSelection(nextTarget);
+    const targetVisible = (
+      current.target.tagName === "body"
+      || commentTargetLayouts[current.target.id]?.status === "visible"
+    );
+    commentEditResumePendingRef.current = targetVisible
+      ? null
+      : current.commentId;
+    if (targetVisible) setEditingCommentId(current.commentId);
+    queueReviewCommentFocus(nextTarget, current.commentId);
+    if (toastRef.current?.dedupeKey === "unfinished-comment-edit") {
+      setToast(null);
+    }
+    if (targetVisible) {
+      window.requestAnimationFrame(() => {
+        commentEditRef.current?.focus({ preventScroll: true });
+      });
+    }
+  }, [
+    commentTargetLayouts,
+    persistCurrentDraftRecovery,
+    queueReviewCommentFocus,
+  ]);
+
+  const updateCommentEditDraft = useCallback((draftText: string) => {
+    const current = commentEditSessionRef.current;
+    if (!current) return;
+    const nextSession = { ...current, draftText };
+    commentEditSessionRef.current = nextSession;
+    setCommentEditSession(nextSession);
+    persistCurrentDraftRecovery();
+  }, [persistCurrentDraftRecovery]);
 
   const confirmCommentEdit = useCallback((commentId: string) => {
     const current = commentsRef.current.find((comment) => comment.commentId === commentId);
-    if (!current) {
+    const session = commentEditSessionRef.current;
+    if (!current || !session || session.commentId !== commentId) {
       cancelCommentEdit();
       return;
     }
-    const nextText = commentEditDraft.trim();
-    if (!nextText && !(current.attachments?.length)) return;
+    if (attachmentUploadCountRef.current > 0) return;
+    const nextText = session.draftText.trim();
+    const nextAttachments = session.draftAttachments.map(persistedAttachment);
+    if (!nextText && nextAttachments.length === 0) return;
     const nextComments = commentsRef.current.map((comment) => (
       comment.commentId === commentId
-        ? { ...comment, text: nextText, updatedAt: new Date().toISOString() }
+        ? {
+            ...comment,
+            text: nextText,
+            ...(nextAttachments.length > 0
+              ? { attachments: nextAttachments }
+              : { attachments: undefined }),
+            updatedAt: new Date().toISOString(),
+          }
         : comment
     ));
+    const nextAttachmentIds = new Set(
+      nextAttachments.map((attachment) => attachment.attachmentId),
+    );
+    const removedAttachments = session.baselineAttachments.filter(
+      (attachment) => !nextAttachmentIds.has(attachment.attachmentId),
+    );
     commentsRef.current = nextComments;
     setComments(nextComments);
-    setCommentEditDraft("");
+    commentEditSessionRef.current = null;
+    commentEditResumePendingRef.current = null;
+    setCommentEditSession(null);
     setEditingCommentId(null);
     persistCurrentDraftRecovery(nextComments);
+    for (const attachment of removedAttachments) {
+      forgetAttachmentObjectUrl(attachment.attachmentId);
+      void deleteAttachmentFile(attachment);
+    }
+    if (toastRef.current?.dedupeKey === "unfinished-comment-edit") {
+      setToast(null);
+    }
     queueReviewCommentFocus(current.target, current.commentId);
   }, [
     cancelCommentEdit,
-    commentEditDraft,
+    deleteAttachmentFile,
+    forgetAttachmentObjectUrl,
     persistCurrentDraftRecovery,
     queueReviewCommentFocus,
   ]);
 
   const deleteComment = useCallback((commentId: string) => {
     const deleted = commentsRef.current.find((item) => item.commentId === commentId);
+    const editSession = commentEditSessionRef.current?.commentId === commentId
+      ? commentEditSessionRef.current
+      : null;
     deletedCommentIdsRef.current.add(commentId);
     const nextComments = commentsRef.current.filter(
       (item) => item.commentId !== commentId,
@@ -7313,12 +7716,20 @@ export default function Workbench() {
     commentsRef.current = nextComments;
     setComments(nextComments);
     setPendingDeleteCommentId(null);
-    if (editingCommentId === commentId) {
+    if (editSession) {
+      commentEditSessionRef.current = null;
+      commentEditResumePendingRef.current = null;
+      setCommentEditSession(null);
       setEditingCommentId(null);
-      setCommentEditDraft("");
     }
     persistCurrentDraftRecovery(nextComments);
-    for (const attachment of deleted?.attachments ?? []) {
+    const attachmentsToDelete = new Map(
+      [
+        ...(deleted?.attachments ?? []),
+        ...(editSession?.draftAttachments ?? []),
+      ].map((attachment) => [attachment.attachmentId, attachment]),
+    );
+    for (const attachment of attachmentsToDelete.values()) {
       forgetAttachmentObjectUrl(attachment.attachmentId);
       void deleteAttachmentFile(attachment);
     }
@@ -7328,11 +7739,83 @@ export default function Workbench() {
     }
   }, [
     deleteAttachmentFile,
-    editingCommentId,
     forgetAttachmentObjectUrl,
     persistCurrentDraftRecovery,
     queueReviewPairReveal,
     updateFocusedComment,
+  ]);
+
+  useEffect(() => {
+    const session = commentEditSessionRef.current;
+    if (!session) return;
+    const editedComment = commentsRef.current.find(
+      (comment) => comment.commentId === session.commentId,
+    );
+    if (!editedComment) {
+      commentEditSessionRef.current = null;
+      commentEditResumePendingRef.current = null;
+      setCommentEditSession(null);
+      setEditingCommentId(null);
+      return;
+    }
+    const targetStatus = commentTargetLayouts[editedComment.target.id]?.status;
+    const leftEditingContext = (
+      canvasMode !== "edit"
+      || targetStatus === "hidden"
+      || (
+        Boolean(focusedCommentId)
+        && focusedCommentId !== session.commentId
+      )
+    );
+    if (!leftEditingContext) return;
+    if (!commentEditSessionHasChanges(session)) {
+      cancelCommentEdit(false);
+      return;
+    }
+    if (editingCommentId === session.commentId) {
+      setEditingCommentId(null);
+    }
+  }, [
+    cancelCommentEdit,
+    canvasMode,
+    commentEditSession,
+    commentTargetLayouts,
+    editingCommentId,
+    focusedCommentId,
+  ]);
+
+  useEffect(() => {
+    const pendingId = commentEditResumePendingRef.current;
+    const session = commentEditSessionRef.current;
+    if (
+      canvasMode !== "edit"
+      || !pendingId
+      || !session
+      || session.commentId !== pendingId
+    ) return;
+    const current = commentsRef.current.find(
+      (comment) => comment.commentId === pendingId,
+    );
+    if (!current) {
+      commentEditResumePendingRef.current = null;
+      return;
+    }
+    const targetVisible = (
+      current.target.tagName === "body"
+      || commentTargetLayouts[current.target.id]?.status === "visible"
+    );
+    if (!targetVisible) return;
+    commentEditResumePendingRef.current = null;
+    setEditingCommentId(current.commentId);
+    queueReviewCommentFocus(current.target, current.commentId);
+    window.requestAnimationFrame(() => {
+      commentEditRef.current?.focus({ preventScroll: true });
+    });
+  }, [
+    canvasMode,
+    commentEditSession,
+    commentTargetLayouts,
+    queueReviewCommentFocus,
   ]);
 
   const focusCommentTarget = useCallback((
@@ -7353,6 +7836,9 @@ export default function Workbench() {
   }, [queueReviewPairReveal, updateFocusedComment]);
 
   const handleCanvasSelection = useCallback((target: HtmlCanvasSelection | null) => {
+    commentRailOffsetRef.current = 0;
+    setCommentRailFollowsFocus(false);
+    setCommentRailOffset(0);
     setSelection(target);
     if (!target) {
       if (!composerOpen) updateFocusedComment(null);
@@ -7681,6 +8167,11 @@ export default function Workbench() {
         dedupeKey: "unfinished-comment-draft",
         action: { id: "resume-draft", label: "继续填写" },
       });
+      return;
+    }
+    const unfinishedEdit = commentEditSessionRef.current;
+    if (unfinishedEdit && commentEditSessionHasChanges(unfinishedEdit)) {
+      showUnfinishedCommentEditNotice(unfinishedEdit);
       return;
     }
     if (
@@ -8017,6 +8508,7 @@ export default function Workbench() {
     openProject,
     projectName,
     sendToQoderWork,
+    showUnfinishedCommentEditNotice,
     viewMode,
   ]);
   useEffect(() => {
@@ -8243,6 +8735,10 @@ export default function Workbench() {
     setDraft("");
     setDraftCommentId(null);
     setDraftAttachments([]);
+    commentEditSessionRef.current = null;
+    commentEditResumePendingRef.current = null;
+    setCommentEditSession(null);
+    setEditingCommentId(null);
     setPreviewAttachment(null);
     viewTransitioningRef.current = true;
     setViewTransitioning(true);
@@ -9318,7 +9814,7 @@ export default function Workbench() {
     ids: sortedVisibleCommentItems.map((comment) => comment.commentId),
     positions: commentRailLayout.positions,
     heights: commentRailLayout.heights,
-    viewportTop: commentViewport.top,
+    viewportTop: Math.max(0, commentViewport.top - commentRailOffset),
     viewportHeight: commentViewport.height,
     forcedIds: [
       focusedCommentId,
@@ -9330,6 +9826,7 @@ export default function Workbench() {
     commentRailLayout.positions,
     commentViewport.height,
     commentViewport.top,
+    commentRailOffset,
     editingCommentId,
     focusedCommentId,
     pendingDeleteCommentId,
@@ -9343,6 +9840,19 @@ export default function Workbench() {
   );
   const composerTop = commentRailLayout.composerTop;
   const draftRecoveryTop = commentRailLayout.draftRecoveryTop;
+  useEffect(() => {
+    if (!commentLayoutReady) return;
+    const pending = reviewRevealPendingRef.current;
+    if (!pending) return;
+    queueReviewPairReveal(pending.target, pending.itemKey);
+  }, [
+    commentLayoutReady,
+    commentTargetTops,
+    composerTop,
+    draftRecoveryTop,
+    queueReviewPairReveal,
+    renderedVisibleCommentItems,
+  ]);
   useEffect(() => {
     const becameReady =
       commentLayoutReady && !commentLayoutWasReadyRef.current;
@@ -9455,6 +9965,12 @@ export default function Workbench() {
       setCanvasMode("edit");
       setDrawer(null);
       resumeCurrentComposer();
+    } else if (action.id === "resume-comment-edit") {
+      setCanvasMode("edit");
+      setDrawer(null);
+      window.requestAnimationFrame(() => {
+        resumeCommentEdit(action.commentId);
+      });
     } else if (action.id === "retry-submit") {
       void generateRequest();
     }
@@ -10176,18 +10692,26 @@ export default function Workbench() {
             aria-busy={!commentLayoutReady}
             data-layout-ready={commentLayoutReady ? "true" : "false"}
             data-layout-generation={commentLayoutAuthority.viewContextGeneration}
+            data-rail-following={commentRailFollowsFocus ? "true" : "false"}
             tabIndex={-1}
           >
           <div
             className="comment-rail-content"
-            style={{ minHeight: `${commentRailContentHeight}px` }}
+            style={{
+              minHeight: `${commentRailContentHeight}px`,
+              "--comment-rail-offset": `${commentRailOffset}px`,
+            } as CSSProperties}
           >
             <header
               ref={commentsHeaderRef}
               className="comments-header comment-rail-header"
               data-has-header-actions={
                 commentLayoutReady
-                && (draftInCurrentTab || otherTabCommentEntryCount > 0)
+                && (
+                  draftInCurrentTab
+                  || hasUnsavedCommentEdit
+                  || otherTabCommentEntryCount > 0
+                )
                   ? "true"
                   : undefined
               }
@@ -10202,7 +10726,9 @@ export default function Workbench() {
                 <div className="comment-rail-header-actions">
                   {viewMode === "history" ? (
                     <small>历史版本 · 只读</small>
-                  ) : !draftInCurrentTab && otherTabCommentEntryCount === 0 ? (
+                  ) : !draftInCurrentTab
+                    && !hasUnsavedCommentEdit
+                    && otherTabCommentEntryCount === 0 ? (
                     <small>
                       {visibleCommentItems.length > COMMENT_VIRTUALIZATION_THRESHOLD
                         ? `当前加载 ${renderedVisibleCommentItems.length} 条`
@@ -10217,6 +10743,21 @@ export default function Workbench() {
                       onClick={resumeCurrentComposer}
                     >
                       <span>有一条未保存评论</span>
+                      <CaretRightIcon aria-hidden="true" size={12} weight="bold" />
+                    </button>
+                  ) : null}
+                  {commentLayoutReady
+                  && hasUnsavedCommentEdit
+                  && unfinishedEditedComment ? (
+                    <button
+                      className="comment-header-action unsaved-comment-edit-shortcut"
+                      type="button"
+                      aria-label="有一条未保存修改"
+                      onClick={() => resumeCommentEdit(
+                        unfinishedEditedComment.commentId,
+                      )}
+                    >
+                      <span>有一条未保存修改</span>
                       <CaretRightIcon aria-hidden="true" size={12} weight="bold" />
                     </button>
                   ) : null}
@@ -10564,7 +11105,19 @@ export default function Workbench() {
                 (item) => item.commentId === comment.commentId,
               );
               const editable = viewMode === "current" && !interactionLocked;
-              const editing = editingCommentId === comment.commentId;
+              const editing = (
+                editingCommentId === comment.commentId
+                && commentEditSession?.commentId === comment.commentId
+              );
+              const activeEditSession = (
+                editing
+                && commentEditSession?.commentId === comment.commentId
+              )
+                ? commentEditSession
+                : null;
+              const shownAttachments = activeEditSession
+                ? activeEditSession.draftAttachments
+                : comment.attachments;
               const deleting = pendingDeleteCommentId === comment.commentId;
               const targetLayout = commentTargetLayouts[comment.target.id];
               const targetResolution =
@@ -10639,7 +11192,9 @@ export default function Workbench() {
                       aria-label={`编辑评论 ${index + 1}`}
                       value={commentEditDraft}
                       onClick={(event) => event.stopPropagation()}
-                      onChange={(event) => setCommentEditDraft(event.target.value)}
+                      onChange={(event) => updateCommentEditDraft(
+                        event.target.value,
+                      )}
                       onKeyDown={(event) => {
                         if (event.key === "Escape") {
                           event.preventDefault();
@@ -10659,9 +11214,9 @@ export default function Workbench() {
                     />
                   ) : <p>{comment.text || "已添加参考附件"}</p>}
                   <CommentAttachmentStrip
-                    attachments={comment.attachments}
+                    attachments={shownAttachments}
                     objectUrls={attachmentObjectUrls}
-                    editable={editable}
+                    editable={editable && editing}
                     onEnsurePreview={ensureAttachmentObjectUrl}
                     onPreview={(attachment) => void openAttachmentPreview(attachment)}
                     onDownload={(attachment) => void downloadAttachment(attachment)}
@@ -10699,8 +11254,8 @@ export default function Workbench() {
                       </footer>
                     ) : (
                       <footer className="comment-card-footer">
-                        {comment.attachments?.length ? (
-                          <span>{comment.attachments.length} 个附件</span>
+                        {shownAttachments?.length ? (
+                          <span>{shownAttachments.length} 个附件</span>
                         ) : null}
                         <div className="comment-card-tools">
                           <button
@@ -10710,10 +11265,17 @@ export default function Workbench() {
                             title="添加附件"
                             onClick={(event) => {
                               event.stopPropagation();
-                              openAttachmentPicker(
-                                { kind: "comment", commentId: comment.commentId },
-                                "all",
-                              );
+                              if (beginCommentEdit(comment, false)) {
+                                window.requestAnimationFrame(() => {
+                                  openAttachmentPicker(
+                                    {
+                                      kind: "comment",
+                                      commentId: comment.commentId,
+                                    },
+                                    "all",
+                                  );
+                                });
+                              }
                             }}
                           >
                             <PaperclipIcon aria-hidden="true" size={15} weight="bold" />
@@ -10725,10 +11287,17 @@ export default function Workbench() {
                             title="添加图片"
                             onClick={(event) => {
                               event.stopPropagation();
-                              openAttachmentPicker(
-                                { kind: "comment", commentId: comment.commentId },
-                                "image",
-                              );
+                              if (beginCommentEdit(comment, false)) {
+                                window.requestAnimationFrame(() => {
+                                  openAttachmentPicker(
+                                    {
+                                      kind: "comment",
+                                      commentId: comment.commentId,
+                                    },
+                                    "image",
+                                  );
+                                });
+                              }
                             }}
                           >
                             <ImageIcon aria-hidden="true" size={15} weight="bold" />
@@ -10740,6 +11309,7 @@ export default function Workbench() {
                                 type="button"
                                 aria-label="取消编辑"
                                 title="取消编辑"
+                                disabled={attachmentUploadCount > 0}
                                 onClick={(event) => {
                                   event.stopPropagation();
                                   event.currentTarget.blur();
@@ -10753,7 +11323,13 @@ export default function Workbench() {
                                 type="button"
                                 aria-label="确认修改"
                                 title="确认修改"
-                                disabled={!commentEditDraft.trim() && !(comment.attachments?.length)}
+                                disabled={
+                                  attachmentUploadCount > 0
+                                  || (
+                                    !commentEditDraft.trim()
+                                    && commentEditAttachments.length === 0
+                                  )
+                                }
                                 onClick={(event) => {
                                   event.stopPropagation();
                                   event.currentTarget.blur();
@@ -10782,6 +11358,7 @@ export default function Workbench() {
                             type="button"
                             aria-label="删除评论"
                             title="删除评论"
+                            disabled={attachmentUploadCount > 0}
                             onClick={(event) => {
                               event.stopPropagation();
                               event.currentTarget.blur();

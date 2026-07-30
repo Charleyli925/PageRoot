@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { layoutCommentRailItems } from "../app/lib/comment-rail-layout.js";
+import {
+  computeAlignedRailOffset,
+  consumeRailRestoreWheel,
+  layoutCommentRailItems,
+  routeCommentRailWheel,
+} from "../app/lib/comment-rail-layout.js";
 
 test("comment rail follows page position even when another item is focused", () => {
   const result = layoutCommentRailItems({
@@ -79,4 +84,75 @@ test("comment rail rejects a target without a measured coordinate", () => {
     }),
     /has no measured coordinate/u,
   );
+});
+
+test("focused alignment translates the queue without changing its order", () => {
+  const result = layoutCommentRailItems({
+    minimumTop: 80,
+    items: [
+      { key: "first", targetTop: 120, height: 140, order: 1 },
+      { key: "second", targetTop: 180, height: 140, order: 2 },
+      { key: "third", targetTop: 260, height: 140, order: 3 },
+    ],
+  });
+  const offset = computeAlignedRailOffset({
+    targetTop: 260,
+    cardTop: result.positions.third,
+  });
+
+  assert.deepEqual(result.orderedKeys, ["first", "second", "third"]);
+  assert.equal(result.positions.third + offset, 260);
+  assert.ok(offset < 0);
+});
+
+test("aligned queue never translates below its natural position", () => {
+  assert.equal(computeAlignedRailOffset({
+    targetTop: 320,
+    cardTop: 180,
+  }), 0);
+});
+
+test("upward wheel restores hidden comments only after the page reaches top", () => {
+  const pageFirst = routeCommentRailWheel({
+    pageScrollTop: 90,
+    pageMaxScrollTop: 900,
+    railOffset: -140,
+    deltaY: -120,
+  });
+  assert.equal(pageFirst.pageScrollTop, 0);
+  assert.equal(pageFirst.railOffset, -110);
+  assert.equal(pageFirst.remainder, 0);
+
+  const restoreOnly = routeCommentRailWheel({
+    pageScrollTop: 0,
+    pageMaxScrollTop: 900,
+    railOffset: -110,
+    deltaY: -50,
+  });
+  assert.equal(restoreOnly.pageScrollTop, 0);
+  assert.equal(restoreOnly.railOffset, -60);
+  assert.equal(restoreOnly.remainder, 0);
+});
+
+test("rail restore returns unused upward wheel after reaching natural position", () => {
+  assert.deepEqual(consumeRailRestoreWheel({
+    offset: -30,
+    deltaY: -80,
+  }), {
+    offset: 0,
+    consumed: 30,
+    remainder: -50,
+  });
+});
+
+test("downward wheel keeps aligned queue stable and scrolls the page", () => {
+  const result = routeCommentRailWheel({
+    pageScrollTop: 40,
+    pageMaxScrollTop: 900,
+    railOffset: -140,
+    deltaY: 75,
+  });
+  assert.equal(result.pageScrollTop, 115);
+  assert.equal(result.railOffset, -140);
+  assert.equal(result.remainder, 0);
 });

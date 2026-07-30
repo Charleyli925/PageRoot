@@ -436,3 +436,171 @@ test("comments keep current-tab alignment, render other tabs as neutral header c
   await expect(firstTargetMarker).toHaveText("评1");
   expect(browserErrors).toEqual([]);
 });
+
+test("saved comment edits auto-cancel while clean and survive Tab changes while dirty", async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await page.goto("/");
+  const { frame } = await loadFixture(page, "tabbed-comments.html", {
+    buffer: fixtureBuffer("tabbed-comments.html"),
+  });
+  const savedText = "需要保留的原评论";
+  const editedText = "需要保留的原评论，已经修改但尚未确认";
+  await saveComment(page, frame, "tab-comment-one", savedText);
+
+  const rail = page.locator('aside[aria-label="本轮评论"]');
+  const initialCard = rail.locator(".comment-card").filter({ hasText: savedText });
+  const commentId = await initialCard.getAttribute("data-comment-measure");
+  if (!commentId) throw new Error("Saved comment did not expose its stable ID.");
+  const card = rail.locator(`[data-comment-measure="${commentId}"]`);
+  await card.hover();
+  await card.getByRole("button", { name: "编辑评论" }).click();
+  await expect(card.getByRole("textbox", { name: "编辑评论 1" })).toBeVisible();
+
+  await switchTab(frame, "panel-two");
+  await expect(rail.getByRole("button", {
+    name: "有一条未保存修改",
+  })).toHaveCount(0);
+  await switchTab(frame, "panel-one");
+  await expect(card.getByRole("textbox", { name: "编辑评论 1" })).toHaveCount(0);
+  await expect(card).toContainText(savedText);
+
+  await card.hover();
+  await card.getByRole("button", { name: "编辑评论" }).click();
+  await card.getByRole("textbox", { name: "编辑评论 1" }).fill(editedText);
+  await expect(rail.getByRole("button", {
+    name: "有一条未保存修改",
+  })).toBeVisible();
+  await switchTab(frame, "panel-two");
+  const unfinishedEditShortcut = rail.getByRole("button", {
+    name: "有一条未保存修改",
+  });
+  await expect(unfinishedEditShortcut).toBeVisible();
+
+  await unfinishedEditShortcut.click();
+  await expect(frame.locator("#panel-one")).toBeVisible();
+  await expect(frame.locator("#panel-two")).toBeHidden();
+  await expect(frame.locator(caseSelector("tab-comment-one")))
+    .toHaveAttribute("data-html-canvas-selected", "part");
+  await expect(card.getByRole("textbox", { name: "编辑评论 1" }))
+    .toHaveValue(editedText);
+  await expect(card.getByRole("textbox", { name: "编辑评论 1" }))
+    .toBeFocused();
+  await page.screenshot({
+    path: testInfo.outputPath("comment-edit-dirty-resumed.png"),
+  });
+  await card.getByRole("button", { name: "确认修改" }).click();
+  await expect(unfinishedEditShortcut).toHaveCount(0);
+  await expect(card).toContainText(editedText);
+});
+
+test("comment card hover keeps geometry stable while focus aligns one unchanged queue", async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/");
+  const { frame } = await loadFixture(page, "indexed-script-tabs.html", {
+    buffer: fixtureBuffer("indexed-script-tabs.html"),
+  });
+  await page.getByRole("button", { name: "预览", exact: true }).click();
+  const previewIframe = page.locator('iframe[title="HTML 交互预览"]');
+  const previewFrame = await (await previewIframe.elementHandle())?.contentFrame();
+  if (!previewFrame) throw new Error("Interactive preview frame is unavailable.");
+  await previewFrame.locator(caseSelector("indexed-tab-two")).click();
+  await expect(previewFrame.locator("#chart1")).toBeVisible();
+  await page.getByRole("button", { name: "编辑", exact: true }).click();
+  await expect(frame.locator("#chart1")).toBeVisible();
+  const texts = ["同一位置评论一", "同一位置评论二", "同一位置评论三"];
+  for (const text of texts) {
+    await saveComment(page, frame, "indexed-comment-two", text);
+  }
+
+  const stage = page.locator(".review-scroll-stage");
+  const rail = page.locator('aside[aria-label="本轮评论"]');
+  const cards = texts.map((text) => (
+    rail.locator(".comment-card").filter({ hasText: text })
+  ));
+  const mountedCards = rail.locator(
+    ".comment-rail-content > .comment-card:not(.draft-comment-card)",
+  );
+  await expect(mountedCards).toHaveCount(3);
+  const beforeOrder = await mountedCards.evaluateAll(
+    (nodes) => nodes.map((node) => node.getAttribute("data-comment-measure")),
+  );
+  await cards[1].hover();
+  await page.getByRole("button", { name: "项目", exact: true }).hover();
+  const secondBefore = await cards[1].boundingBox();
+  const thirdBefore = await cards[2].boundingBox();
+  await cards[1].hover();
+  await expect(cards[1].getByRole("button", { name: "编辑评论" })).toBeVisible();
+  const secondAfter = await cards[1].boundingBox();
+  const thirdAfter = await cards[2].boundingBox();
+  expect(secondBefore).not.toBeNull();
+  expect(secondAfter).not.toBeNull();
+  expect(thirdBefore).not.toBeNull();
+  expect(thirdAfter).not.toBeNull();
+  expect(Math.abs(secondAfter.height - secondBefore.height)).toBeLessThanOrEqual(1);
+  expect(Math.abs(thirdAfter.y - thirdBefore.y)).toBeLessThanOrEqual(1);
+
+  await cards[2].click();
+  await expect(cards[2]).toHaveAttribute("data-focused", "true");
+  await expect(frame.locator(caseSelector("indexed-comment-two")))
+    .toHaveAttribute("data-html-canvas-selected", "part");
+  await expect.poll(async () => {
+    const [targetBox, cardBox] = await Promise.all([
+      frame.locator(caseSelector("indexed-comment-two")).boundingBox(),
+      cards[2].boundingBox(),
+    ]);
+    if (!targetBox || !cardBox) return Number.MAX_SAFE_INTEGER;
+    return Math.abs(Math.round(cardBox.y - targetBox.y));
+  }).toBeLessThanOrEqual(3);
+  const focusedStyle = await cards[2].evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      borderColor: style.borderTopColor,
+      shadow: style.boxShadow,
+    };
+  });
+  expect(focusedStyle.borderColor).toBe("rgb(143, 138, 232)");
+  expect(focusedStyle.shadow).toContain("rgb(94, 88, 217)");
+  await page.screenshot({
+    path: testInfo.outputPath("comment-queue-selected-aligned.png"),
+  });
+  const afterOrder = await mountedCards.evaluateAll(
+    (nodes) => nodes.map((node) => node.getAttribute("data-comment-measure")),
+  );
+  expect(afterOrder).toEqual(beforeOrder);
+
+  const railContent = rail.locator(".comment-rail-content");
+  const alignedOffset = await railContent.evaluate((element) => (
+    Number.parseFloat(getComputedStyle(element).getPropertyValue(
+      "--comment-rail-offset",
+    ))
+  ));
+  expect(alignedOffset).toBeLessThan(-1);
+
+  await stage.evaluate((element) => {
+    element.scrollTop = 120;
+  });
+  await cards[2].dispatchEvent("wheel", { deltaY: -50 });
+  await expect.poll(() => stage.evaluate((element) => element.scrollTop))
+    .toBe(70);
+  const offsetAfterPageScroll = await railContent.evaluate((element) => (
+    Number.parseFloat(getComputedStyle(element).getPropertyValue(
+      "--comment-rail-offset",
+    ))
+  ));
+  expect(offsetAfterPageScroll).toBeCloseTo(alignedOffset, 1);
+
+  await stage.evaluate((element) => {
+    element.scrollTop = 0;
+  });
+  await cards[2].dispatchEvent("wheel", { deltaY: -50 });
+  await expect.poll(() => railContent.evaluate((element) => (
+    Number.parseFloat(getComputedStyle(element).getPropertyValue(
+      "--comment-rail-offset",
+    ))
+  ))).toBeGreaterThan(alignedOffset);
+});

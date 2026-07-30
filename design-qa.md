@@ -1,5 +1,73 @@
 # Design QA
 
+## Fixed comment geometry, queue alignment and recoverable edits
+
+Date: 2026-07-31
+
+Source visual truth:
+
+- `/var/folders/jx/w52403cs2hx39vwhd1sb3tg80000gn/T/codex-clipboard-c40e5c4c-7e32-45e2-9496-c49de7bac4eb.png`
+  — original PageRoot Canvas and comment-rail composition.
+- `/var/folders/jx/w52403cs2hx39vwhd1sb3tg80000gn/T/codex-clipboard-b731eecd-f7b9-4463-9baf-9d91a56ffaf9.png`
+  — requested stronger selected-card boundary.
+- `/var/folders/jx/w52403cs2hx39vwhd1sb3tg80000gn/T/codex-clipboard-c66d38f6-dc35-491b-b723-d1f60d39e040.png`
+  — saved-comment edit with changed text but no confirmation.
+- The approved interactive behavior fixture in
+  `/Users/lizexuan/Documents/HTML编辑器/comment-card-interaction-preview`
+  supplies the queue-translation and wheel-handoff oracle.
+
+Implementation evidence:
+
+- `tests/e2e/browser/native-dom-comment-tabs.spec.mjs` covers clean/dirty edit
+  switching, exact draft resumption, stable hover geometry, selected boundary,
+  Canvas framing, unchanged DOM order, aligned queue offset and wheel routing.
+- `tests/comment-rail-layout.test.mjs` covers deterministic queue layout,
+  aligned offset, page-first wheel routing and page-top rail restoration.
+- The approved fixture's live 1280 × 720 comparison was rechecked beside the
+  original PageRoot capture after the hint removal and fixed-height update.
+
+Required fidelity surfaces:
+
+- Card geometry: the 30px action row plus 6px gap is reserved in default,
+  hover, selected and edit states. Only opacity and pointer availability
+  change, so ResizeObserver does not move neighboring cards on pointer entry.
+- Focus boundary: the selected card keeps one physical boundary, strengthens
+  it to `#8f8ae8`, and adds the `#5e58d9` leading emphasis without a second
+  outer halo or a width-changing state transition.
+- Queue behavior: natural `top` values and DOM order remain source-position
+  based. Explicit card/draft navigation changes one shared CSS translation;
+  target and selected card settle within 3px in the browser oracle.
+- Wheel behavior: input over the right rail changes the shared review stage.
+  Upward input restores a negative rail offset only after the stage reaches
+  its top; down and non-top movement retain page priority.
+- Edit transaction: text and attachment changes stay outside the saved
+  `CommentItem` until confirmation. A clean edit cancels when its target leaves
+  the active Tab; a dirty edit persists one local recovery record and resumes
+  at the original framed target from “有一条未保存修改”.
+- Copy: no “向上滑动找回隐藏评论” hint is introduced in production or the
+  approved fixture.
+
+Interaction checks:
+
+- Existing current/other-Tab draft route suite: passed.
+- New clean/dirty saved-edit Tab suite: passed.
+- New fixed-height, selected alignment, order and wheel suite: passed.
+- Pure rail helper suite: 10/10 passed.
+- TypeScript and architecture contract: passed.
+- Full task gate: passed (430 Node assertions, browser smoke, real-HTML
+  discovery, Electron smoke and AI closed-loop smoke; no failures).
+- Browser console/page errors in the covered flows: none.
+
+Findings:
+
+- No actionable P0, P1 or P2 mismatch remains in this scope.
+- The queue translation is deliberately presentation-only; it never changes
+  source anchors, comment identity, timestamps or persistence order.
+
+final result: passed
+
+---
+
 ## Unsaved comment routing and stable rail order
 
 Date: 2026-07-30
