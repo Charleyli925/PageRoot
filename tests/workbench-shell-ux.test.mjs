@@ -285,10 +285,21 @@ test("editing and interactive preview are separate canvas modes", () => {
 
   assert.match(canvas, /sandbox="allow-same-origin"/);
   assert.doesNotMatch(canvas, /sandbox="[^"]*allow-scripts/);
-  assert.match(
-    canvas,
-    /a\[href\], area\[href\], button, form, input, select, textarea/,
-  );
+  assert.match(canvas, /function findNativeActionTarget/u);
+  for (const selector of [
+    "a[href]",
+    "area[href]",
+    "button",
+    "form",
+    "input",
+    "select",
+    "summary",
+    "textarea",
+    '[role="tab"]',
+    "[aria-expanded][aria-controls]",
+  ]) {
+    assert.match(canvas, new RegExp(JSON.stringify(selector).replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
+  }
   assert.doesNotMatch(
     canvas,
     /setAttribute\(["']inert["']|\.inert\s*=/,

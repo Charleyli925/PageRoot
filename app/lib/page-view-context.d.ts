@@ -19,6 +19,27 @@ export type PageViewTargetRef = Readonly<{
   resolution: "exact" | "rebound" | "ambiguous" | "orphaned";
 }>;
 
+export type PagePresentationTargetRef = Readonly<{
+  targetId: string;
+  label: string;
+  level: "module" | "subregion" | "insertion-point";
+  selector?: string;
+  textQuote?: string;
+  sourceAnchor?: Readonly<{
+    startOffset: number;
+    endOffset: number;
+    sourceSha256: string;
+  }>;
+  fingerprint?: Readonly<{
+    tagName: string;
+    stableAttributes: Readonly<Record<string, string>>;
+    ancestorFingerprint: readonly string[];
+    textPrefix?: string;
+    textSuffix?: string;
+  }>;
+  resolution: "exact" | "rebound" | "ambiguous" | "orphaned";
+}>;
+
 export type PageViewContextEntry = Readonly<{
   targetRef: PageViewTargetRef;
   classAdd: readonly string[];
@@ -52,6 +73,13 @@ export type PageViewContext = Readonly<{
   sourceSha256: string;
   entries: readonly PageViewContextEntry[];
   visuals: readonly PageViewContextVisual[];
+}>;
+
+export type PagePresentationAction = Readonly<{
+  kind: "activate-tab" | "toggle-details" | "toggle-disclosure";
+  label: "当前页签" | "切换到此页签" | "展开内容" | "收起内容";
+  isCurrent: boolean;
+  nextContext: PageViewContext | null;
 }>;
 
 export type RawPageViewSnapshot = {
@@ -118,3 +146,12 @@ export function resolvePageViewContext(
     resolution: "exact" | "rebound";
   }>;
 };
+
+export function createPagePresentationAction(options?: {
+  html?: string;
+  sourceIndex?: unknown;
+  documentKey?: string;
+  generation?: number;
+  currentContext?: PageViewContext | null;
+  targetRef?: PagePresentationTargetRef | null;
+}): PagePresentationAction | null;

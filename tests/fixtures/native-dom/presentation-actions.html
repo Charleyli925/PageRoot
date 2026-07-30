@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>安全内容切换测试</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 48px;
+      color: #242129;
+      background: #f6f5f2;
+      font: 16px/1.6 system-ui, sans-serif;
+    }
+
+    main {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 32px;
+      border-radius: 18px;
+      background: #fff;
+    }
+
+    [role="tablist"] {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 20px;
+    }
+
+    button,
+    summary,
+    a {
+      font: inherit;
+    }
+
+    .tab {
+      padding: 8px 14px;
+    }
+
+    [role="tabpanel"],
+    details,
+    .disclosure {
+      margin-top: 18px;
+      padding: 18px;
+      border: 1px solid #dedbe5;
+      border-radius: 12px;
+    }
+  </style>
+</head>
+<body>
+  <main data-native-case="presentation-root">
+    <h1>安全内容切换</h1>
+
+    <nav role="tablist" aria-label="报告页签">
+      <div
+        id="overview-tab"
+        data-native-case="overview-tab"
+        class="tab"
+        role="tab"
+        tabindex="0"
+        aria-controls="overview-panel"
+        aria-selected="true"
+        onclick="document.documentElement.dataset.authorAction = 'tab-one'"
+      >概览</div>
+      <div
+        id="details-tab"
+        data-native-case="details-tab"
+        class="tab"
+        role="tab"
+        tabindex="-1"
+        aria-controls="details-panel"
+        aria-selected="false"
+        onclick="document.documentElement.dataset.authorAction = 'tab-two'"
+      >详情页签</div>
+    </nav>
+
+    <section id="overview-panel" role="tabpanel" data-native-case="overview-panel">
+      <p>概览正文保持可见。</p>
+    </section>
+    <section id="details-panel" role="tabpanel" data-native-case="details-panel" hidden>
+      <p>详情正文只通过临时页面状态显示。</p>
+    </section>
+
+    <details data-native-case="native-details">
+      <summary data-native-case="native-summary">查看原生详情</summary>
+      <p>原生 details 中的可编辑内容。</p>
+    </details>
+
+    <section class="disclosure">
+      <h2>
+        <button
+          id="more-toggle"
+          data-native-case="more-toggle"
+          type="button"
+          aria-expanded="false"
+          aria-controls="more-content"
+          onclick="document.documentElement.dataset.authorAction = 'disclosure'"
+        >更多内容</button>
+      </h2>
+      <div
+        id="more-content"
+        data-native-case="more-content"
+        role="region"
+        aria-labelledby="more-toggle"
+        hidden
+      >
+        <p>折叠区中新增出现的可编辑内容。</p>
+      </div>
+    </section>
+
+    <p>
+      <a
+        data-native-case="outside-link"
+        href="https://example.com/"
+        onclick="document.documentElement.dataset.authorAction = 'link'"
+      >不会在编辑模式中打开的链接</a>
+    </p>
+  </main>
+
+  <script>
+    document.documentElement.dataset.authorScriptRan = "true";
+  </script>
+</body>
+</html>

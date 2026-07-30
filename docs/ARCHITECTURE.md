@@ -53,6 +53,11 @@ Comments + frozen input
   only after that complete snapshot is current; one missing coordinate degrades
   only its owning item and is not permission to use saved geometry or a page-end
   fallback. Iframe viewport height is never fed back as authored content height.
+- Edit-mode presentation actions reuse that same context. A pure allowlist
+  resolver recognizes strict source-backed Tabs, native details and local
+  disclosures; one Canvas executor applies the accepted context. It never
+  invokes authored handlers, serializes the preview DOM or creates a second
+  interaction mode.
 - `IslandEditingController` is the only production text-edit engine in PageRoot 0.9.0. `contenteditable="true"` supplies focus, caret, Selection and IME composition, while the controller owns insertion, deletion, line breaks, paste and formatting. Chromium DOM serialization never has commit authority.
 - `editable-island` owns the V2 capability and normalization contract. An accepted edit replaces only the selected element's parsed `contentRange`; bytes outside that range remain exact. Inside the range, parse5 may perform the smallest safe normalization needed to preserve inline semantics, comments and immutable authored atoms.
 - `native-edit-policy` owns shared session attributes and checkpoint timing. `native-edit-runtime-preflight` still proves that enabling the island does not change geometry or text style; `HtmlCanvasEditor` only coordinates selection, the island session and SourcePatch.
@@ -79,7 +84,7 @@ protocols.
 | Pseudonymous identity, strict event schemas, local queue and PostHog delivery | `desktop/usage-telemetry.mjs` |
 | Preview sanitization and verified frame injection | `app/components/html-preview-sandbox.js` |
 | Volatile desktop preview sessions and contained local-asset serving | `desktop/preview-protocol.mjs` |
-| Source-backed preview-to-edit state, bounded visual filtering and rebinding | `app/lib/page-view-context.js`, `app/lib/read-only-visual.js` |
+| Source-backed preview/edit display-state filtering, bounded visual filtering and rebinding, and safe action resolution | `app/lib/page-view-context.js`, `app/lib/read-only-visual.js` |
 | Run lifecycle decoding and transition policy | `app/domain/run-lifecycle.js` |
 
 The V2 source-fidelity path remains a protected core: `SourceIndex`,

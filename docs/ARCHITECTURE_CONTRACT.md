@@ -68,6 +68,13 @@ complete target set for the current rendered source Hash and applied generation;
 missing coordinates remain an explicit recovery state and are never synthesized
 from historical geometry.
 
+Edit-mode content reveal is another transition of that same projection, not a
+new owner. `HtmlCanvasEditor` may propose only an allowlisted source-backed
+presentation action; Workbench accepts it only for the current document key.
+The Canvas then applies the accepted context without calling `onChange`,
+SourcePatch, authored handlers or persistence. No React view may keep a second
+copy of this state for shortcut handling or toolbar rendering.
+
 Opening a user HTML may remain lazy until the first durable product action.
 During that interval the renderer owns only an `epoch + sourcePath` locator,
 not a registered project context. A registered context always has non-empty
