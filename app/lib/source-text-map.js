@@ -293,6 +293,11 @@ export function buildSourceTextMap(index, target, options = {}) {
       return;
     }
     if (node.type !== "element") return;
+    // <wbr> is an authored zero-width line-break opportunity. It contributes
+    // no logical character in Chromium, so keeping it out of the text stream
+    // makes source and DOM offsets agree while editable-island preserves the
+    // element itself as an immutable atom.
+    if (node.tagName === "wbr") return;
     if (node.tagName === "br") {
       textOffset = pushBoundary(runs, "hard-break", node, textOffset);
       return;

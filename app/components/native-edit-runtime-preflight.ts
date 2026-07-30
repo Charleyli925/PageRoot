@@ -10,7 +10,10 @@ import {
   type NativeEditHostMode,
 } from "../lib/native-edit-policy.js";
 import type { NativeEditRuntimePreflight } from "../lib/native-edit-capability.js";
-import { nativeLogicalText } from "../lib/native-dom-logical-index.js";
+import {
+  isNativeDomAtomElement,
+  nativeLogicalText,
+} from "../lib/native-dom-logical-index.js";
 import { RuntimeDomSourceMap } from "../lib/runtime-dom-source-map.js";
 import type { SourceTextMap } from "../lib/source-text-map.js";
 
@@ -220,6 +223,19 @@ export function buildRuntimeDomMap(
   let current = walker.nextNode();
   while (current) {
     const textNode = current as Text;
+    let ancestor = textNode.parentElement;
+    let insideAtom = false;
+    while (ancestor && ancestor !== rootElement) {
+      if (isNativeDomAtomElement(ancestor)) {
+        insideAtom = true;
+        break;
+      }
+      ancestor = ancestor.parentElement;
+    }
+    if (insideAtom) {
+      current = walker.nextNode();
+      continue;
+    }
     const spans = [];
     let domOffset = 0;
     while (domOffset < textNode.data.length) {

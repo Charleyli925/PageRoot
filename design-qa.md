@@ -696,3 +696,77 @@ Viewport and state:
 - None required for this focused refinement.
 
 final result: passed
+
+---
+
+# Comment rail design QA
+
+## Comparison target
+
+- Source visual truth:
+  - `1-Photo-1.jpg` — user-provided, local-only Figma review capture.
+  - `2-Photo-2.jpg` — user-provided, local-only Figma review capture.
+- Superseding product direction: keep the existing saved-comment and unsaved-recovery card visuals unchanged; fix their positions only. Move other-tab summaries into the comment header, collapsed by default, with a compact expanded state.
+- Rendered implementation:
+  - `output/playwright/native-dom-browser/results/native-dom-comment-tabs-co-bf6b9-der-and-avoid-draft-overlap/comment-rail-folded.png`
+  - `output/playwright/native-dom-browser/results/native-dom-comment-tabs-co-bf6b9-der-and-avoid-draft-overlap/comment-rail-expanded.png`
+  - `output/playwright/native-dom-browser/results/native-dom-comment-tabs-co-bf6b9-der-and-avoid-draft-overlap/comment-rail-draft-recovery.png`
+- Combined focused comparisons:
+  - `output/design-qa/other-tabs-comparison.png`
+  - `output/design-qa/draft-position-comparison.png`
+
+## Capture normalization
+
+- Source images: 589 × 1280 px mobile screenshots of the Figma canvas.
+- Implementation captures: 1600 × 900 CSS px, device scale factor 1, Desktop Chrome test runtime.
+- Comparison crops: the source's visible comment-rail concept and the implementation's 400 px comment rail were normalized to a shared 760 px height. Browser/device chrome and the unrelated Canvas area were excluded from the judgment.
+- State coverage:
+  - other-tab summary folded by default;
+  - compact expanded other-tab group and tab-location action;
+  - current-tab saved comment aligned to its Canvas target;
+  - existing unsaved-recovery card above a saved card without collision.
+
+The Figma screenshots show the earlier expanded-card proposals, not a same-viewport production screen. Pixel-for-pixel comparison of the full frames would therefore be misleading. The focused comparison evaluates the revised information hierarchy, card preservation and spacing requested after those screenshots.
+
+## Findings
+
+- No actionable P0, P1 or P2 differences remain.
+- Accepted intentional difference: the implementation does not reproduce the large unsaved draft card shown in Photo 1. It keeps PageRoot's existing `draft-recovery-card rail-status-card` presentation, as explicitly requested, and changes only its computed rail position.
+- Accepted intentional difference: the large “其他标签页” card shown in Photo 2 is replaced by a compact header control. It is closed on entry and expands in place to show grouped tab labels, counts and a location action.
+- Saved comment cards retain their existing component markup and visual classes. No `comment-card` visual rules were changed.
+
+## Required fidelity surfaces
+
+- Fonts and typography: existing PageRoot font family, optical weights, sizes and line heights remain unchanged for saved and recovery cards. New header metadata uses the existing compact UI scale and remains legible without wrapping the primary count.
+- Spacing and layout rhythm: the header owns its measured height; Canvas-aligned cards begin below it. Saved comments, composer and recovery card share one collision-avoidance layout with a 20 px item gap. The tested recovery-to-saved-card gap is at least 16 px.
+- Colors and visual tokens: existing neutral surfaces, borders, violet focus/accent color and shadows are reused. No new palette or gradients were introduced.
+- Image quality and asset fidelity: this rail contains no custom raster imagery, illustration or logo asset. Existing icon components and product chrome remain unchanged.
+- Copy and content: “其他标签页 N” communicates the folded total; expanded rows use the authored tab label and comment count. Existing saved-comment and unsaved-recovery copy is unchanged.
+
+## Interaction and browser evidence
+
+- Tested: save comments in two tabs, enter Preview, switch tabs, return to Edit, confirm only the preview-selected tab's card is Canvas-aligned, open the folded summary, switch/locate the other tab, and recover an unsaved draft without overlap.
+- The interaction test passed at 1600 × 900.
+- No actionable browser console errors or page errors occurred. The test runtime's expected sandbox message for intentionally blocked edit-frame scripts was excluded from the error set.
+
+## Comparison history
+
+- Initial Figma review: the proposed unsaved draft and other-tab sections consumed too much vertical space and changed existing card presentation.
+- Product correction applied: preserve card visuals, move only the recovery position into the shared rail layout, and collapse other-tab content into the header.
+- Post-fix visual evidence: the two combined focused comparisons above show the preserved card boundary, non-overlapping recovery position and compact header grouping.
+
+## Implementation checklist
+
+- [x] Existing saved-comment card styles unchanged.
+- [x] Existing unsaved-recovery card styles unchanged.
+- [x] Recovery and saved cards cannot overlap.
+- [x] Other-tab comments are folded by default.
+- [x] Expanded other-tab summaries remain inside the compact header.
+- [x] Switching a summary activates and locates the corresponding tab comment.
+- [x] Preview/Edit or tab context changes return the header to its folded state.
+
+## Follow-up polish
+
+- P3: with many unusually long tab names, a future density pass could add a bounded two-line label. This is not visible in the tested state and does not block acceptance.
+
+final result: passed

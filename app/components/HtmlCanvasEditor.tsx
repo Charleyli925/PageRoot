@@ -14,6 +14,10 @@ import {
 import { flushSync } from "react-dom";
 
 import {
+  resolvePageViewContext,
+  type PageViewContext,
+} from "../lib/page-view-context.js";
+import {
   SOURCE_NODE_ATTRIBUTE,
   applyPatchPlan,
   buildSourceIndex,
@@ -63,6 +67,9 @@ import {
 import styles from "./HtmlCanvasEditor.module.css";
 
 const GLOBAL_SELECTION_ATTRIBUTE = "data-html-canvas-global-selected";
+const PAGE_VIEW_CONTEXT_ATTRIBUTE = "data-pageroot-view-context";
+const READ_ONLY_VISUAL_ATTRIBUTE = "data-pageroot-readonly-visual";
+const READ_ONLY_VISUAL_HOST_ATTRIBUTE = "data-pageroot-readonly-visual-host";
 
 const EDITOR_DOCUMENT_STYLES = `
   ::selection {
@@ -119,6 +126,20 @@ const EDITOR_DOCUMENT_STYLES = `
   html:not([data-html-canvas-locked]) body * {
     -webkit-user-select: text !important;
     user-select: text !important;
+  }
+
+  [data-pageroot-readonly-visual],
+  [data-pageroot-readonly-visual] * {
+    pointer-events: none !important;
+    -webkit-user-select: none !important;
+    user-select: none !important;
+  }
+
+  img[data-pageroot-readonly-visual] {
+    width: 100% !important;
+    height: 100% !important;
+    display: block !important;
+    object-fit: contain !important;
   }
 `;
 
@@ -206,6 +227,12 @@ export type NativeDeferredCommandOptions = {
 
 export type HtmlCanvasCommentedTarget = {
   target: HtmlCanvasSelection;
+  /**
+   * Every persisted comment keeps an independent target id even when several
+   * comments share one canvas marker. Layout reporting must retain those ids so
+   * the rail can position and group each card independently.
+   */
+  layoutTargets?: readonly HtmlCanvasSelection[];
   count?: number;
   label?: string;
 };
@@ -218,6 +245,9 @@ export type HtmlCanvasCommentLayoutState = {
     targetId: string;
     top: number;
     height: number;
+    visible: boolean;
+    tabGroupKey?: string;
+    tabGroupLabel?: string;
   }>;
 };
 
@@ -259,6 +289,8 @@ export type HtmlCanvasEditorHandle = {
     payload?: unknown,
     options?: NativeDeferredCommandOptions,
   ) => boolean;
+  /** Applies disposable preview presentation state without changing source bytes. */
+  applyPageViewContext: (context: PageViewContext | null) => boolean;
 };
 
 export type HtmlCanvasEditorProps = {
@@ -308,6 +340,8 @@ export type HtmlCanvasEditorProps = {
   commentedTargets?: readonly HtmlCanvasCommentedTarget[];
   /** Non-visual audit targets that must retain identity through later source patches. */
   trackedTargets?: readonly HtmlCanvasSelection[];
+  /** Disposable Tab/panel presentation state captured from interactive preview. */
+  pageViewContext?: PageViewContext | null;
 };
 
 type OverlayPosition = {
@@ -1382,6 +1416,274 @@ function escapedSourceNodeId(nodeId: string): string {
   return nodeId.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
+function pageViewContextElement(
+  documentNode: Document,
+  sourceNodeId: string,
+): HTMLElement | null {
+  const matches = documentNode.querySelectorAll<HTMLElement>(
+    `[${SOURCE_NODE_ATTRIBUTE}="${escapedSourceNodeId(sourceNodeId)}"]`,
+  );
+  return matches.length === 1 ? matches[0] : null;
+}
+
+type TabAssociation = {
+  panel: HTMLElement;
+  control: HTMLElement;
+  key: string;
+  label: string;
+};
+
+function controlledPanelIds(control: HTMLElement): string[] {
+  const values = [
+    control.getAttribute("aria-controls"),
+    control.getAttribute("data-p"),
+    control.getAttribute("data-tab"),
+    control.getAttribute("href"),
+  ];
+  const ids = new Set<string>();
+  for (const value of values) {
+    for (const token of String(value ?? "").split(/\s+/u)) {
+      const normalized = token.trim().replace(/^#/u, "");
+      if (normalized && !/[\s"'<>]/u.test(normalized)) ids.add(normalized);
+    }
+  }
+  return [...ids];
+}
+
+function tabAssociations(documentNode: Document): TabAssociation[] {
+  const associations: TabAssociation[] = [];
+  const controls = documentNode.querySelectorAll<HTMLElement>(
+    [
+      '[role="tab"][aria-controls]',
+      '[role="tab"][href^="#"]',
+      "[data-p]",
+      "[data-tab]",
+    ].join(", "),
+  );
+  for (const control of controls) {
+    for (const panelId of controlledPanelIds(control)) {
+      const panel = documentNode.getElementById(panelId);
+      if (!panel) continue;
+      const label = (control.textContent ?? "").replace(/\s+/gu, " ").trim();
+      associations.push({
+        panel,
+        control,
+        key: panel.getAttribute(SOURCE_NODE_ATTRIBUTE) || panel.id || panelId,
+        label: label || panel.getAttribute("aria-label") || "其他标签页",
+      });
+    }
+  }
+  for (const panel of documentNode.querySelectorAll<HTMLElement>(
+    '[role="tabpanel"][aria-labelledby]',
+  )) {
+    const labelledBy = panel.getAttribute("aria-labelledby");
+    if (!labelledBy || associations.some((entry) => entry.panel === panel)) continue;
+    const control = documentNode.getElementById(labelledBy);
+    if (!control) continue;
+    associations.push({
+      panel,
+      control,
+      key: panel.getAttribute(SOURCE_NODE_ATTRIBUTE) || panel.id || labelledBy,
+      label: (control.textContent ?? "").replace(/\s+/gu, " ").trim()
+        || panel.getAttribute("aria-label")
+        || "其他标签页",
+    });
+  }
+  return associations;
+}
+
+function tabAssociationForElement(
+  element: HTMLElement,
+  associations: readonly TabAssociation[],
+): TabAssociation | null {
+  let candidate: HTMLElement | null = element;
+  while (candidate) {
+    const association = associations.find((entry) => entry.panel === candidate);
+    if (association) return association;
+    candidate = candidate.parentElement;
+  }
+  return null;
+}
+
+function isRenderedCommentTarget(element: HTMLElement): boolean {
+  if (!element.isConnected || element.closest("[hidden]")) return false;
+  const style = element.ownerDocument.defaultView?.getComputedStyle(element);
+  if (
+    style?.display === "none"
+    || style?.visibility === "hidden"
+    || style?.visibility === "collapse"
+  ) return false;
+  return element.getClientRects().length > 0;
+}
+
+function activateContainingTab(element: HTMLElement): boolean {
+  const associations = tabAssociations(element.ownerDocument);
+  const target = tabAssociationForElement(element, associations);
+  if (!target) return false;
+  const controlParent = target.control.parentElement;
+  const group = associations.filter((entry) => (
+    entry.control.parentElement === controlParent
+  ));
+  if (group.length < 2) return false;
+  const stateClasses = ["active", "is-active", "selected", "current"].filter(
+    (className) => group.some((entry) => (
+      entry.control.classList.contains(className)
+      || entry.panel.classList.contains(className)
+    )),
+  );
+  for (const entry of group) {
+    const active = entry === target;
+    for (const className of stateClasses) {
+      entry.control.classList.toggle(className, active);
+      entry.panel.classList.toggle(className, active);
+    }
+    if (
+      entry.control.hasAttribute("aria-selected")
+      || entry.control.getAttribute("role") === "tab"
+    ) {
+      entry.control.setAttribute("aria-selected", String(active));
+    }
+    if (
+      entry.control.hasAttribute("tabindex")
+      || entry.control.getAttribute("role") === "tab"
+    ) {
+      entry.control.tabIndex = active ? 0 : -1;
+    }
+    entry.panel.toggleAttribute("hidden", !active);
+  }
+  return isRenderedCommentTarget(element);
+}
+
+function writeAriaState(
+  element: HTMLElement,
+  name: "aria-selected" | "aria-expanded",
+  value: "true" | "false" | null,
+) {
+  if (value === null) element.removeAttribute(name);
+  else element.setAttribute(name, value);
+}
+
+function restorePageViewContext(
+  documentNode: Document,
+  sourceHtml: string,
+  context: PageViewContext | null,
+) {
+  documentNode.querySelectorAll<HTMLElement>(
+    `[${READ_ONLY_VISUAL_ATTRIBUTE}]`,
+  ).forEach((element) => element.remove());
+  documentNode.querySelectorAll<HTMLElement>(
+    `[${READ_ONLY_VISUAL_HOST_ATTRIBUTE}]`,
+  ).forEach((element) => element.removeAttribute(READ_ONLY_VISUAL_HOST_ATTRIBUTE));
+  if (!context) return;
+  const resolved = resolvePageViewContext(sourceHtml, context);
+  for (const item of resolved.entries) {
+    const element = pageViewContextElement(documentNode, item.sourceNodeId);
+    if (!element) continue;
+    if (item.sourceState.classTokens.length > 0) {
+      element.setAttribute("class", item.sourceState.classTokens.join(" "));
+    } else {
+      element.removeAttribute("class");
+    }
+    element.toggleAttribute("hidden", item.sourceState.hidden);
+    element.toggleAttribute("open", item.sourceState.open);
+    writeAriaState(element, "aria-selected", (
+      item.sourceState.ariaSelected === "true"
+      || item.sourceState.ariaSelected === "false"
+    ) ? item.sourceState.ariaSelected : null);
+    writeAriaState(element, "aria-expanded", (
+      item.sourceState.ariaExpanded === "true"
+      || item.sourceState.ariaExpanded === "false"
+    ) ? item.sourceState.ariaExpanded : null);
+    element.removeAttribute(PAGE_VIEW_CONTEXT_ATTRIBUTE);
+  }
+}
+
+function applyPageViewContextToDocument(
+  documentNode: Document,
+  sourceHtml: string,
+  nextContext: PageViewContext | null,
+  previousContext: PageViewContext | null,
+): number {
+  restorePageViewContext(documentNode, sourceHtml, previousContext);
+  if (!nextContext) return 0;
+  const resolved = resolvePageViewContext(sourceHtml, nextContext);
+  let applied = 0;
+  for (const item of resolved.entries) {
+    const element = pageViewContextElement(documentNode, item.sourceNodeId);
+    if (!element) continue;
+    const classNames = new Set(item.sourceState.classTokens);
+    item.entry.classRemove.forEach((token) => classNames.delete(token));
+    item.entry.classAdd.forEach((token) => classNames.add(token));
+    if (classNames.size > 0) {
+      element.setAttribute("class", [...classNames].join(" "));
+    } else {
+      element.removeAttribute("class");
+    }
+    if (item.entry.hidden !== undefined) {
+      element.toggleAttribute("hidden", item.entry.hidden);
+    }
+    if (item.entry.open !== undefined) {
+      element.toggleAttribute("open", item.entry.open);
+    }
+    if ("ariaSelected" in item.entry) {
+      writeAriaState(
+        element,
+        "aria-selected",
+        item.entry.ariaSelected ?? null,
+      );
+    }
+    if ("ariaExpanded" in item.entry) {
+      writeAriaState(
+        element,
+        "aria-expanded",
+        item.entry.ariaExpanded ?? null,
+      );
+    }
+    element.setAttribute(PAGE_VIEW_CONTEXT_ATTRIBUTE, "true");
+    applied += 1;
+  }
+  for (const item of resolved.visuals) {
+    const element = pageViewContextElement(documentNode, item.sourceNodeId);
+    const hasAuthoredVisualContent = element
+      ? Array.from(element.childNodes).some((node) => (
+          node.nodeType === Node.ELEMENT_NODE
+          || (node.nodeType === Node.TEXT_NODE && (node.textContent ?? "").trim().length > 0)
+        ))
+      : true;
+    if (!element || hasAuthoredVisualContent) continue;
+    element.setAttribute(READ_ONLY_VISUAL_HOST_ATTRIBUTE, "true");
+    if (item.visual.kind === "canvas-bitmap") {
+      const image = documentNode.createElement("img");
+      image.setAttribute(READ_ONLY_VISUAL_ATTRIBUTE, "canvas-bitmap");
+      image.setAttribute("contenteditable", "false");
+      image.setAttribute("aria-hidden", "true");
+      image.setAttribute("alt", "");
+      image.setAttribute("draggable", "false");
+      image.width = item.visual.width;
+      image.height = item.visual.height;
+      image.src = item.visual.dataUrl;
+      element.append(image);
+      applied += 1;
+      continue;
+    }
+    const parser = new (documentNode.defaultView?.DOMParser ?? DOMParser)();
+    const parsedVisual = parser.parseFromString(
+      `<table><tbody>${item.visual.html}</tbody></table>`,
+      "text/html",
+    );
+    const projectedRows = Array.from(
+      parsedVisual.querySelector("tbody")?.children ?? [],
+    ).map((row) => documentNode.importNode(row, true));
+    for (const row of projectedRows) {
+      row.setAttribute(READ_ONLY_VISUAL_ATTRIBUTE, "table-body");
+      row.setAttribute("contenteditable", "false");
+    }
+    element.append(...projectedRows);
+    if (projectedRows.length > 0) applied += 1;
+  }
+  return applied;
+}
+
 function isCanonicalSourceElement(
   element: HTMLElement,
   sourceIndex: SourceIndexValue,
@@ -1856,6 +2158,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     enableReorder = true,
     commentedTargets = EMPTY_COMMENTED_TARGETS,
     trackedTargets = EMPTY_TRACKED_TARGETS,
+    pageViewContext = null,
   },
   forwardedRef,
 ) {
@@ -1943,6 +2246,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const enableReorderRef = useRef(enableReorder);
   const commentedTargetsRef = useRef(commentedTargets);
   const trackedTargetsRef = useRef(trackedTargets);
+  const pageViewContextRef = useRef<PageViewContext | null>(pageViewContext);
+  const appliedPageViewContextRef = useRef<PageViewContext | null>(null);
   const controlledMode = locked ? "processing" : interactionMode;
   const controlledInteractionLocked = controlledMode !== "editing";
   const [imperativeLocked, setImperativeLocked] = useState(false);
@@ -1967,6 +2272,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   enableReorderRef.current = enableReorder && !lockedRef.current;
   commentedTargetsRef.current = commentedTargets;
   trackedTargetsRef.current = trackedTargets;
+  pageViewContextRef.current = pageViewContext;
 
   // Keep the server and hydration value deterministic, then normalize through DOMParser after mount.
   const [frameRender, setFrameRender] = useState(() => ({
@@ -2221,8 +2527,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       0,
       Number(frameView?.scrollY || scrollingElement.scrollTop || 0),
     );
-    const commentLayouts = commentedTargetsRef.current.flatMap((rawTarget) => {
-      const target = rawTarget.target;
+    const commentTabAssociations = tabAssociations(documentNode);
+    const commentLayouts = commentedTargetsRef.current.flatMap((rawTarget) => (
+      rawTarget.layoutTargets ?? [rawTarget.target]
+    ).flatMap((target) => {
       try {
         const sourceIndex = sourceIndexRef.current;
         const resolution = sourceIndex
@@ -2237,15 +2545,27 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         );
         if (!targetElement) return [];
         const targetRect = targetElement.getBoundingClientRect();
+        const visible = isRenderedCommentTarget(targetElement);
+        const tabAssociation = tabAssociationForElement(
+          targetElement,
+          commentTabAssociations,
+        );
         return [{
           targetId: target.id,
-          top: Math.max(0, targetRect.top + scrollTop),
+          top: visible ? Math.max(0, targetRect.top + scrollTop) : 0,
           height: Math.max(0, targetRect.height),
+          visible,
+          ...(tabAssociation
+            ? {
+                tabGroupKey: tabAssociation.key,
+                tabGroupLabel: tabAssociation.label,
+              }
+            : {}),
         }];
       } catch {
         return [];
       }
-    });
+    }));
     onCommentLayoutRef.current?.({
       scrollTop,
       scrollHeight: Math.max(
@@ -4157,6 +4477,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           ...target,
           resolution: "orphaned",
         };
+        if (
+          options.reveal !== false
+          && !isRenderedCommentTarget(element)
+        ) {
+          activateContainingTab(element);
+        }
         const selectedValue = selectionForElement(
           element,
           sourceIndex,
@@ -4494,6 +4820,23 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     });
   }, []);
 
+  const applyPageViewContextNow = useCallback((
+    nextContext: PageViewContext | null,
+  ): boolean => {
+    pageViewContextRef.current = nextContext;
+    const documentNode = iframeRef.current?.contentDocument;
+    if (!documentNode?.documentElement) return false;
+    applyPageViewContextToDocument(
+      documentNode,
+      frameSourceHtmlRef.current,
+      nextContext,
+      appliedPageViewContextRef.current,
+    );
+    appliedPageViewContextRef.current = nextContext;
+    requestAnimationFrame(updateOverlayPosition);
+    return true;
+  }, [updateOverlayPosition]);
+
   const api = useMemo<HtmlCanvasEditorHandle>(
     () => ({
       getSourceHtml: () => frameSourceHtmlRef.current,
@@ -4514,8 +4857,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       startEditing,
       moveSelected,
       deferNativeCommand,
+      applyPageViewContext: applyPageViewContextNow,
     }),
     [
+      applyPageViewContextNow,
       clearSelection,
       checkpointPendingEdit,
       fencePendingEdit,
@@ -4531,6 +4876,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   );
 
   useImperativeHandle(forwardedRef, () => api, [api]);
+
+  useEffect(() => {
+    applyPageViewContextNow(pageViewContext);
+  }, [applyPageViewContextNow, pageViewContext]);
 
   useEffect(() => {
     onReady?.(api);
@@ -4668,6 +5017,13 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       documentNode.head.appendChild(editorStyle);
     }
     documentNode.documentElement.toggleAttribute("data-html-canvas-locked", lockedRef.current);
+    applyPageViewContextToDocument(
+      documentNode,
+      frameSourceHtmlRef.current,
+      pageViewContextRef.current,
+      null,
+    );
+    appliedPageViewContextRef.current = pageViewContextRef.current;
 
     const handleClick = (event: MouseEvent) => {
       if (isCanvasRootElement(event.target)) {

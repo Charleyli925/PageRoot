@@ -14,7 +14,9 @@
 | Close/switch/submit/history readiness and desktop close lifecycle | Drain coordinator plus one renderer close lifecycle | composed owner snapshots and request identity; no copied dirty booleans | Electron close handshake, browser fallback and navigation |
 | Bridge transport, timeouts, error details and unknown outcomes | Typed Bridge client | no durable state | application sessions |
 | Undelivered Bridge-unavailable recovery issue and renderer-listener readiness | Main-process recovery mailbox | in-memory for the current app process | preload handshake, native fallback and Workbench banner |
-| Renderer edit, project-picker, attachment-persistence and close-coordination capabilities | Runtime capability resolver | immutable preload manifest; fail-closed browser default | Workbench composition root |
+| Renderer edit, project-picker, attachment-persistence, close-coordination and interactive-preview capabilities | Runtime capability resolver | immutable preload manifest; fail-closed browser default | Workbench composition root |
+| Volatile interactive-preview document, bootstrap and allowed source-relative asset root | Main-process preview protocol controller | none; bounded in-memory session only | isolated preview iframe |
+| Current preview-to-edit display context, bounded read-only visuals and capture generation | Workbench page-view context state | none; source-bound in-memory projection only | `HtmlCanvasEditor` presentation layer |
 | Stable application update schedule, coalesced manual check, download progress and restart-install readiness | Main-process application-update controller | signed GitHub Release metadata plus updater cache; no editor authority | preload status snapshot, About PageRoot, Workbench update notice, drain coordinator |
 | Random installation identity, project pseudonym secret, aggregate counters and unsent usage events | Main-process usage-telemetry controller | bounded `usage-telemetry.json` under PageRoot Application Support | PostHog batch ingestion only |
 | Crash-only renderer recovery records | Recovery store adapter | browser storage, subordinate to Bridge authority | document and draft sessions |
@@ -36,6 +38,10 @@ Rules:
   `projectId` and `documentId`.
 - Runtime features are declared independently. The presence of a project-picker
   API never implies source-edit or attachment-persistence authority.
+- Interactive-preview sessions and page-view context are disposable. They do
+  not participate in save, switch, submit or close drains, and cannot become a
+  second copy of the source HTML. Bounded Canvas/table visual projections are
+  presentation-only and never enter the source patch or persistence paths.
 - Runtime state is not a second copy of draft contents. It carries lifecycle
   state and a revisioned pointer to the draft repository.
 - Local recovery records are an outbox/fallback, never an equal authority to an

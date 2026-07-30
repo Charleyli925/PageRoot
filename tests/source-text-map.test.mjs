@@ -225,6 +225,28 @@ test("keeps hard breaks and structural children explicit and rejects text-only e
   );
 });
 
+test("treats wbr as a preserved zero-width source boundary", () => {
+  const index = buildSourceIndex(
+    `<p id="copy">Hypertext<wbr>Markup<wbr>Language</p>`,
+  );
+  const map = buildSourceTextMap(index, elementById(index, "copy").nodeId);
+
+  assert.equal(map.text, "HypertextMarkupLanguage");
+  assert.equal(map.boundaryCount, 0);
+  assert.deepEqual(map.runs.map((run) => run.kind), ["text", "text", "text"]);
+});
+
+test("projects a nested child list as one immutable structure beside its heading", () => {
+  const index = buildSourceIndex(
+    `<li id="copy">发现阶段<ul><li>访谈</li><li>审计</li></ul></li>`,
+  );
+  const map = buildSourceTextMap(index, elementById(index, "copy").nodeId);
+
+  assert.equal(map.text, `发现阶段\ufffc`);
+  assert.deepEqual(map.runs.map((run) => run.kind), ["text", "structure"]);
+  assert.equal(map.runs[1].tagName, "ul");
+});
+
 test("uses source text-node offsets rather than invented raw entity offsets", () => {
   const index = buildSourceIndex(`<p id="copy">&amp;&#x1F600;X</p>`);
   const map = buildSourceTextMap(index, elementById(index, "copy").nodeId);

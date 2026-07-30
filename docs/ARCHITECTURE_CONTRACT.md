@@ -34,8 +34,9 @@ Bridge route adapters
 - `scripts/check-architecture.mjs` enforces the dependency direction. Do not
   weaken the gate to land a feature.
 - Runtime capability decoding has one ingress:
-  `app/application/runtime-capabilities.js`. Source editing, project opening
-  attachment persistence and close coordination are independent declarations;
+  `app/application/runtime-capabilities.js`. Source editing, project opening,
+  attachment persistence, close coordination and interactive preview transport
+  are independent declarations;
   consumers may not infer the whole runtime from the presence of one preload
   API. Electron owns desktop close safety through its acknowledged handshake;
   `beforeunload` is only the browser fallback.
@@ -55,6 +56,13 @@ projectId + documentId + sourcePath + session generation + query sequence
 
 Revisions are monotonic. A query result with an older revision may never
 replace an acknowledged state, even if the project identity is unchanged.
+
+The preview-to-edit context is a non-durable projection owned by the Workbench
+for one current document key and preview generation. A capture result may apply
+only while that complete identity is still current. Project/source changes,
+history navigation, a newer preview generation or a failed capture discard it.
+It never registers a drain obligation and never changes source, Draft or
+Version authority.
 
 Opening a user HTML may remain lazy until the first durable product action.
 During that interval the renderer owns only an `epoch + sourcePath` locator,
