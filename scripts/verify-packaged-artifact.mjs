@@ -86,6 +86,7 @@ const REQUIRED_APP_SOURCE_FILES = [
   "desktop/manual-update.mjs",
   "desktop/application-update.mjs",
   "desktop/usage-telemetry.mjs",
+  "desktop/preview-protocol.mjs",
   "public/brand-logo.png",
 ];
 const RETIRED_EDITOR_ARTIFACTS = [
