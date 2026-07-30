@@ -5,6 +5,7 @@
 - macOS 12 or newer for the Electron and packaging gates
 - Node.js 22.13.0 or a compatible Node 22 release
 - npm, Git and Chromium installed through Playwright
+- Authenticated GitHub CLI (`gh`) for Pull Request-aware worktree audits
 
 ```bash
 nvm use
@@ -28,11 +29,22 @@ npm run desktop:dev     # build renderer and launch Electron
 ```bash
 npm run task:status
 npm run task:start -- fix/short-description
-# edit
+# enter the reported .codex-worktrees/fix/short-description path, then edit
 npm run task:finish
 ```
 
-`task:start` requires clean synchronized `main`. `task:finish` runs the task gate against `origin/main` and reports committed plus uncommitted task files. Neither command commits, pushes, merges or releases. See `AGENTS.md` and `docs/CODEX_WORKFLOW.md` for the complete automation and authorization boundary.
+`task:start` requires the clean synchronized primary `main`, leaves it unchanged
+and creates an isolated worktree under `.codex-worktrees/<prefix>/<name>`.
+`task:finish` runs the task gate against `origin/main` and reports committed
+plus uncommitted task files. Neither command commits, pushes, merges or
+releases.
+
+Use `npm run task:audit` for a read-only inventory. After a squash merge, preview
+the exact local cleanup with `npm run task:retire -- <branch>` and add `--apply`
+only after reviewing its actions. Use `task:attach` for an existing local branch
+and `task:sync-main` to fast-forward the clean primary checkout. See `AGENTS.md`
+and `docs/CODEX_WORKFLOW.md` for the complete automation and authorization
+boundary.
 
 ## Test lanes
 

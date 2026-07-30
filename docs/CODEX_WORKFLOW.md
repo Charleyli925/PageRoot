@@ -35,14 +35,24 @@ npm run task:start -- fix/short-description
 
 `task:start`:
 
-1. verifies that the command is running at the PageRoot Git root;
+1. verifies that the command is running at the primary PageRoot Git root;
 2. refuses a dirty worktree or detached/non-`main` checkout;
 3. fetches and prunes `origin`;
 4. fast-forwards local `main` to `origin/main`;
 5. refuses divergent `main` or an existing local/remote branch;
-6. creates the requested short-lived branch.
+6. creates the requested short-lived branch in
+   `.codex-worktrees/<prefix>/<name>`;
+7. leaves the primary checkout on clean `main` and prints the isolated path.
 
 It never stashes, resets, deletes or force-pushes.
+
+Use `integration/` only for an explicit combination of multiple pending task
+branches. `test/` is reserved for test infrastructure. To reopen an existing
+local task branch in the standard location, run:
+
+```bash
+npm run task:attach -- fix/existing-task
+```
 
 ### Finish
 
@@ -58,6 +68,41 @@ npm run gate:task -- --base origin/main
 
 The comparison base is fixed to `origin/main`; `task:finish` does not accept a custom `--base`. This prevents a newer branch ref from hiding earlier task commits from impact selection. The command covers committed, staged, unstaged and untracked task files, rejects source changes that occur while the gate is running, then prints a final repository report. It does not stage, commit, push, merge or release; the agent must still inspect and intentionally perform those actions.
 
+### Audit and retire
+
+Run the read-only lifecycle audit from the primary checkout:
+
+```bash
+npm run task:audit
+npm run task:audit -- --json
+```
+
+It derives state from Git worktrees, local and remote refs, divergence from
+`origin/main`, file status and GitHub Pull Requests. Results distinguish the
+protected primary checkout, open PRs, dirty work, local-only commits, merged
+tasks ready for retirement, explicit abandonment review, detached temporary
+worktrees and stale registrations. A missing `gh` session makes PR data
+unavailable and therefore prevents merged-state cleanup; it never downgrades to
+an unsafe ancestry guess after squash merge.
+
+Retirement is a dry run unless `--apply` is present:
+
+```bash
+npm run task:retire -- fix/merged-task
+npm run task:retire -- fix/merged-task --apply
+```
+
+Merged clean tasks may be retired after preview. An intentionally abandoned
+task requires `--abandon`; discarding dirty files additionally requires
+`--discard-changes`, and deleting its still-existing remote branch additionally
+requires `--delete-remote`. Retirement always refuses `main`, the primary
+checkout, locked worktrees and open Pull Requests. It removes the exact
+worktree before deleting the local branch, then fetches and prunes `origin`.
+
+Use `npm run task:sync-main` only from the clean primary checkout. It fetches,
+prunes, switches to `main` when available, and fast-forwards without reset or
+stash.
+
 ## Branch and Pull Request flow
 
 1. Use a short-lived branch with an approved prefix.
@@ -66,7 +111,7 @@ The comparison base is fixed to `origin/main`; `task:finish` does not accept a c
 4. The PR body must state outcome, boundary, verification, documentation impact and release impact.
 5. When the final intended GitHub diff is reviewable, mark the PR ready. This triggers the one complete `release-gate` for that tree.
 6. Wait for the required `release-gate` and review the final GitHub diff, not only the local working diff.
-7. Squash-merge only after authorization, delete the remote task branch, then fast-forward local `main`.
+7. Squash-merge only after authorization. GitHub deletes the remote task branch; then audit and explicitly retire the local task before fast-forwarding primary `main`.
 
 Do not use an installed app, DMG, backup folder or another checkout as a source for new edits. If the local checkout contains unrelated work, create an isolated Git worktree rather than stashing or mixing changes.
 
@@ -149,5 +194,8 @@ Scheduled monitoring is read-only unless a later instruction explicitly authoriz
 - Weekdays: summarize open PageRoot PRs, failed or pending required checks, review requests and merge blockers. Report only actionable changes.
 - Weekly: review the read-only `CI Health` report against the release-pipeline targets; do not rerun or mutate workflows automatically.
 - Weekly: inspect Dependabot PRs and run or verify the dependency-audit policy. Report new, expired or changed advisories; do not merge dependency updates automatically.
+- Weekly: run the read-only task audit and report `ACTIVE_DIRTY`, `LOCAL_ONLY`,
+  `MERGED_READY`, `ABANDON_REVIEW`, `STALE_REGISTRATION` and primary-worktree
+  violations. Do not pass `--apply` from a scheduled job.
 
 Use a GitHub-connected task when only remote state is needed. Use an isolated PageRoot worktree when local commands are required. Never run scheduled modification work directly in a checkout that may contain active user edits.
