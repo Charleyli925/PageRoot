@@ -1,5 +1,84 @@
 # Design QA
 
+## About dialog simplification
+
+Date: 2026-07-30
+
+Source visual truth:
+
+- `/var/folders/jx/w52403cs2hx39vwhd1sb3tg80000gn/T/codex-clipboard-ed1c3a2f-92b8-4966-8314-55d2417d7d52.png`
+- User direction: remove the four red-marked regions—“PageRoot for macOS”,
+  “Apache-2.0”, the complete usage-data notice, and the update-channel
+  eyebrow—then realign the remaining content into a balanced compact dialog.
+
+Implementation evidence:
+
+- `output/about-dialog-after.png`
+- `output/about-dialog-comparison.png`
+- `output/about-dialog-focused-comparison.png`
+
+Viewport and normalization:
+
+- Source and implementation full captures are both `1252 × 1128` pixels.
+- Implementation browser viewport: `1252 × 1128` CSS pixels at 1× density.
+- The source dialog is a Retina-style capture. For the authoritative focused
+  comparison, its `1160 × 1078` dialog crop is downsampled to `580 × 539`.
+  The implementation dialog is compared at its native `580 × 388` CSS-pixel
+  size, aligned at the same normalized width.
+- State: current stable application version, Apple silicon, About dialog open.
+
+Full-view and focused comparison evidence:
+
+- All four requested regions are absent from the rendered dialog; a bounded
+  text check also confirms no hidden residual copy remains.
+- The remaining identity, metadata, update, GitHub, and footer surfaces share
+  the same `518px` left/right content baseline.
+- The dialog measures `580 × 388px` and does not scroll. Removing the long
+  notice therefore reduces height without leaving a blank middle region.
+- Vertical rhythm is compact and regular: identity to metadata `18px`,
+  metadata to update card `20px`, update card to GitHub card `12px`, and
+  GitHub card to footer `15px`.
+- The update title now becomes the first text line beside its icon, preserving
+  the status hierarchy after the eyebrow is removed.
+
+Findings:
+
+- No actionable P0, P1, or P2 mismatch remains.
+- Fonts and typography: the established family, weights, sizes, line heights,
+  truncation behavior, and Chinese hierarchy remain unchanged; only the
+  explicitly removed eyebrow text is gone.
+- Spacing and layout rhythm: the dialog is centered, all major sections use
+  the same horizontal baseline, and the reduced height has no dead space,
+  clipping, overlap, or scrollbar.
+- Colors and visual tokens: the existing white/indigo identity surface, green
+  current-version card, borders, radii, blur, and shadows remain intact.
+- Image and icon fidelity: the supplied PageRoot logo and existing Phosphor
+  icons are unchanged and remain sharp at their intended sizes.
+- Copy and content: exactly the four marked content groups are removed. Version,
+  architecture, update state, GitHub description, and disclaimer entry remain.
+
+Comparison history:
+
+1. The source contained four user-marked regions that lengthened the dialog
+   and diluted the primary product/update hierarchy.
+2. The first implementation removed those regions and tightened metadata and
+   update-card margins.
+3. Post-fix rendering confirmed a `580 × 388px` non-scrolling dialog, aligned
+   `518px` content tracks, no residual marked copy, and no page or console
+   errors. No subsequent P0/P1/P2 fix was required.
+
+Interaction checks:
+
+- The unique close button closes the dialog and the local desktop-state fixture
+  reopens it successfully.
+- The current-version action remains enabled and visually aligned.
+- Page errors: none.
+- Browser console warnings and errors: none.
+
+final result: passed
+
+---
+
 ## Unsaved comment routing and stable rail order
 
 Date: 2026-07-30
