@@ -6464,6 +6464,10 @@ body {
 
 /* Safe, in-place source filename editing */
 
+.workbench-header[data-file-renaming="true"] {
+  -webkit-app-region: no-drag;
+}
+
 .window-file-title-row {
   position: relative;
   min-width: 0;

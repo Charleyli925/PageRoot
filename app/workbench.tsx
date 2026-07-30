@@ -9250,7 +9250,10 @@ export default function Workbench() {
       }
       aria-label="HTML AI 可视化编辑工作台"
     >
-      <header className="workbench-header">
+      <header
+        className="workbench-header"
+        data-file-renaming={fileRenameEditing ? "true" : undefined}
+      >
         <div className="window-file">
           <span className="window-file-icon" aria-hidden="true">
             <FileHtmlIcon size={20} weight="duotone" />

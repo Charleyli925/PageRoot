@@ -4,6 +4,10 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+- Save an in-place filename edit when the user clicks blank title-bar space,
+  matching the existing Enter and click-away behavior without changing file
+  identity or version history.
+
 ## [0.9.4] - 2026-07-29
 
 - Increased the workbench header height and bottom breathing room so the

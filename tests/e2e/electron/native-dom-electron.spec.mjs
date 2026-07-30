@@ -465,9 +465,20 @@ test("Electron safely renames the saved current HTML without starting a new proj
     await expect(input).toHaveValue("欢迎来到源页");
     await expect(input.locator("..")).toContainText(".html");
     await input.fill("我的页面");
-    await input.press("Enter");
+    const header = launched.page.locator("header.workbench-header");
+    await expect(header).toHaveAttribute("data-file-renaming", "true");
+    const fileHeader = launched.page.locator(".window-file");
+    const fileHeaderBox = await fileHeader.boundingBox();
+    expect(fileHeaderBox).not.toBeNull();
+    await fileHeader.click({
+      position: {
+        x: fileHeaderBox.width - 8,
+        y: fileHeaderBox.height / 2,
+      },
+    });
 
     await expect(input).toHaveCount(0);
+    await expect(header).not.toHaveAttribute("data-file-renaming", "true");
     await expect.poll(
       async () => (
         await launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject())
