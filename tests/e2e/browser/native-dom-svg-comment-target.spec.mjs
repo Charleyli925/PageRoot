@@ -90,10 +90,11 @@ test("SVG comments keep the exact source node and reject runtime-only children",
   await page.setViewportSize({ width: 1279, height: 720 });
   const rail = page.locator('aside[aria-label="本轮评论"]');
   await expect(rail).toHaveAttribute("data-layout-ready", "true");
-  await expect(page.getByRole("region", {
-    name: "评论位置无法定位",
-  })).toBeVisible();
   await expect(page.getByText("评论位置无法确认", { exact: true }))
-    .toBeVisible();
+    .toHaveCount(0);
   await expect(savedCard).toHaveCount(0);
+  await expect(page.getByTestId("html-canvas-editor").getByRole("button", {
+    name: "SVG 折线 · 第二季度折线",
+    exact: true,
+  }).filter({ hasText: "评1" })).toHaveCount(0);
 });

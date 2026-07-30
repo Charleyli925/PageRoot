@@ -243,12 +243,14 @@ export type HtmlCanvasCommentLayoutState = {
   sourceSha256: string;
   viewContextGeneration: number;
   ready: boolean;
+  targetIds: string[];
   scrollTop: number;
-  scrollHeight: number;
+  contentHeight: number;
   clientHeight: number;
   targets: Array<{
     targetId: string;
     status: "visible" | "hidden" | "missing";
+    resolution: HtmlCanvasTargetResolution;
     top?: number;
     height?: number;
     tabGroupKey?: string;
@@ -1475,6 +1477,62 @@ type TabAssociation = {
   label: string;
 };
 
+const TAB_STATE_CLASS_NAMES = new Set([
+  "active",
+  "is-active",
+  "selected",
+  "current",
+]);
+
+function isRenderedCommentTarget(element: HTMLElement): boolean {
+  if (!element.isConnected || element.closest("[hidden]")) return false;
+  const style = element.ownerDocument.defaultView?.getComputedStyle(element);
+  if (
+    style?.display === "none"
+    || style?.visibility === "hidden"
+    || style?.visibility === "collapse"
+  ) return false;
+  return element.getClientRects().length > 0;
+}
+
+function commentLayoutTargets(
+  commentedTargets: readonly HtmlCanvasCommentedTarget[],
+): HtmlCanvasSelection[] {
+  return commentedTargets.flatMap((rawTarget) => (
+    rawTarget.layoutTargets ?? [rawTarget.target]
+  ));
+}
+
+function sortedCommentLayoutTargetIds(
+  targets: readonly HtmlCanvasSelection[],
+): string[] {
+  return [...new Set(targets.map((target) => target.id))].sort();
+}
+
+function naturalDocumentContentHeight(
+  documentNode: Document,
+  clientHeight: number,
+): number {
+  const scrollingElement = documentNode.scrollingElement || documentNode.documentElement;
+  const offsetHeight = Math.max(
+    documentNode.documentElement.offsetHeight,
+    documentNode.body.offsetHeight,
+  );
+  const scrollHeight = Math.max(
+    scrollingElement.scrollHeight,
+    documentNode.documentElement.scrollHeight,
+    documentNode.body.scrollHeight,
+  );
+  return Math.max(
+    0,
+    Math.ceil(
+      scrollHeight > clientHeight + 1
+        ? Math.max(offsetHeight, scrollHeight)
+        : offsetHeight,
+    ),
+  );
+}
+
 function controlledPanelIds(control: HTMLElement): string[] {
   const values = [
     control.getAttribute("aria-controls"),
@@ -1490,6 +1548,135 @@ function controlledPanelIds(control: HTMLElement): string[] {
     }
   }
   return [...ids];
+}
+
+type SiblingClassGroup = {
+  parent: HTMLElement;
+  members: HTMLElement[];
+};
+
+function stableSiblingClassKeys(element: HTMLElement): string[] {
+  return [...element.classList]
+    .filter((token) => !TAB_STATE_CLASS_NAMES.has(token))
+    .sort()
+    .map((token) => `${element.tagName.toLowerCase()}:${token}`);
+}
+
+function siblingClassGroups(documentNode: Document): SiblingClassGroup[] {
+  const parents = new Set<HTMLElement>();
+  documentNode.querySelectorAll<HTMLElement>("[class]").forEach((element) => {
+    if (element.parentElement) parents.add(element.parentElement);
+  });
+  const groups: SiblingClassGroup[] = [];
+  for (const parent of parents) {
+    const byClass = new Map<string, HTMLElement[]>();
+    const children = Array.from(parent.children) as HTMLElement[];
+    for (const child of children) {
+      for (const key of stableSiblingClassKeys(child)) {
+        const members = byClass.get(key);
+        if (members) members.push(child);
+        else byClass.set(key, [child]);
+      }
+    }
+    const seenMemberSets = new Set<string>();
+    for (const members of byClass.values()) {
+      if (members.length < 2 || members.length > 16) continue;
+      const memberSetKey = members
+        .map((member) => children.indexOf(member))
+        .join(",");
+      if (seenMemberSets.has(memberSetKey)) continue;
+      seenMemberSets.add(memberSetKey);
+      groups.push({ parent, members });
+    }
+  }
+  return groups;
+}
+
+function isIndexedTabControl(element: HTMLElement): boolean {
+  return element.getAttribute("role") === "tab"
+    || element.hasAttribute("onclick")
+    || element.hasAttribute("data-p")
+    || element.hasAttribute("data-tab")
+    || ["BUTTON", "A"].includes(element.tagName);
+}
+
+function hasIndexedTabActiveState(element: HTMLElement): boolean {
+  return element.getAttribute("aria-selected") === "true"
+    || [...TAB_STATE_CLASS_NAMES].some((className) => (
+      element.classList.contains(className)
+    ));
+}
+
+function relatedTabGroupParents(
+  controlParent: HTMLElement,
+  panelParent: HTMLElement,
+): boolean {
+  return controlParent === panelParent
+    || controlParent.parentElement === panelParent
+    || (
+      controlParent.parentElement !== null
+      && controlParent.parentElement === panelParent.parentElement
+    );
+}
+
+function inferredIndexedTabAssociations(
+  documentNode: Document,
+  existing: readonly TabAssociation[],
+): TabAssociation[] {
+  const groups = siblingClassGroups(documentNode);
+  const documentOrder = new Map<HTMLElement, number>(
+    [...documentNode.querySelectorAll<HTMLElement>("body *")]
+      .map((element, index) => [element, index]),
+  );
+  const controlGroups = groups.filter((group) => (
+    group.members.every((element) => (
+      isIndexedTabControl(element) && isRenderedCommentTarget(element)
+    ))
+  ));
+  const panelGroups = groups.filter((group) => {
+    if (
+      group.members.some((element) => existing.some((entry) => entry.panel === element))
+      || !group.members.every((element) => (
+        element.hasAttribute(SOURCE_NODE_ATTRIBUTE)
+        && !isIndexedTabControl(element)
+      ))
+    ) return false;
+    const visibleCount = group.members.filter(isRenderedCommentTarget).length;
+    return visibleCount === 1;
+  });
+
+  const associations: TabAssociation[] = [];
+  for (const panels of panelGroups) {
+    const firstPanelIndex = documentOrder.get(panels.members[0]) ?? Number.MAX_SAFE_INTEGER;
+    const visiblePanelIndex = panels.members.findIndex(isRenderedCommentTarget);
+    const controls = controlGroups
+      .filter((candidate) => (
+        candidate.members.length === panels.members.length
+        && relatedTabGroupParents(candidate.parent, panels.parent)
+        && (documentOrder.get(candidate.members.at(-1)!) ?? -1) < firstPanelIndex
+        && candidate.members.filter(hasIndexedTabActiveState).length === 1
+        && candidate.members.findIndex(hasIndexedTabActiveState) === visiblePanelIndex
+      ))
+      .sort((left, right) => {
+        const leftDistance = firstPanelIndex
+          - (documentOrder.get(left.members.at(-1)!) ?? 0);
+        const rightDistance = firstPanelIndex
+          - (documentOrder.get(right.members.at(-1)!) ?? 0);
+        return leftDistance - rightDistance;
+      })[0];
+    if (!controls) continue;
+    panels.members.forEach((panel, index) => {
+      const control = controls.members[index];
+      const label = (control.textContent ?? "").replace(/\s+/gu, " ").trim();
+      associations.push({
+        panel,
+        control,
+        key: panel.getAttribute(SOURCE_NODE_ATTRIBUTE) || panel.id,
+        label: label || panel.getAttribute("aria-label") || "其他标签页",
+      });
+    });
+  }
+  return associations;
 }
 
 function tabAssociations(documentNode: Document): TabAssociation[] {
@@ -1528,9 +1715,10 @@ function tabAssociations(documentNode: Document): TabAssociation[] {
       key: panel.getAttribute(SOURCE_NODE_ATTRIBUTE) || panel.id || labelledBy,
       label: (control.textContent ?? "").replace(/\s+/gu, " ").trim()
         || panel.getAttribute("aria-label")
-        || "其他标签页",
+      || "其他标签页",
     });
   }
+  associations.push(...inferredIndexedTabAssociations(documentNode, associations));
   return associations;
 }
 
@@ -1547,17 +1735,6 @@ function tabAssociationForElement(
   return null;
 }
 
-function isRenderedCommentTarget(element: HTMLElement): boolean {
-  if (!element.isConnected || element.closest("[hidden]")) return false;
-  const style = element.ownerDocument.defaultView?.getComputedStyle(element);
-  if (
-    style?.display === "none"
-    || style?.visibility === "hidden"
-    || style?.visibility === "collapse"
-  ) return false;
-  return element.getClientRects().length > 0;
-}
-
 function activateContainingTab(element: HTMLElement): boolean {
   const associations = tabAssociations(element.ownerDocument);
   const target = tabAssociationForElement(element, associations);
@@ -1567,7 +1744,7 @@ function activateContainingTab(element: HTMLElement): boolean {
     entry.control.parentElement === controlParent
   ));
   if (group.length < 2) return false;
-  const stateClasses = ["active", "is-active", "selected", "current"].filter(
+  const stateClasses = [...TAB_STATE_CLASS_NAMES].filter(
     (className) => group.some((entry) => (
       entry.control.classList.contains(className)
       || entry.panel.classList.contains(className)
@@ -2549,13 +2726,16 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     const sourceSha256 = sourceIndexRef.current?.sourceSha256 ?? "";
     const viewContextGeneration =
       appliedPageViewContextRef.current?.generation ?? 0;
+    const layoutTargets = commentLayoutTargets(commentedTargetsRef.current);
+    const targetIds = sortedCommentLayoutTargetIds(layoutTargets);
     if (!container || !iframe || !documentNode?.body) {
       onCommentLayoutRef.current?.({
         sourceSha256,
         viewContextGeneration,
         ready: false,
+        targetIds,
         scrollTop: 0,
-        scrollHeight: 0,
+        contentHeight: 0,
         clientHeight: 0,
         targets: [],
       });
@@ -2591,12 +2771,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         sourceSha256,
         viewContextGeneration,
         ready: false,
+        targetIds,
         scrollTop,
-        scrollHeight: Math.max(
-          scrollingElement.scrollHeight,
-          documentNode.documentElement.scrollHeight,
-          documentNode.body.scrollHeight,
-        ),
+        contentHeight: naturalDocumentContentHeight(documentNode, frameHeight),
         clientHeight: frameHeight,
         targets: [],
       });
@@ -2607,23 +2784,27 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       return;
     }
     const commentTabAssociations = tabAssociations(documentNode);
-    const commentLayouts = commentedTargetsRef.current.flatMap((rawTarget) => (
-      rawTarget.layoutTargets ?? [rawTarget.target]
-    )).map((target) => {
-      const missing = {
+    const commentLayouts = layoutTargets.map((target) => {
+      const missing = (resolution: HtmlCanvasTargetResolution) => ({
         targetId: target.id,
         status: "missing" as const,
-      };
+        resolution,
+      });
       try {
         let targetElement: HTMLElement | null = null;
+        let targetResolution: HtmlCanvasTargetResolution = target.resolution;
         if (isPageRootSelection(target)) {
           targetElement = defaultGlobalCommentElement(documentNode);
+          targetResolution = "exact";
         } else {
           const sourceIndex = sourceIndexRef.current;
           const resolution = sourceIndex
             ? resolveTargetRef(sourceIndex, sourceTargetRefForSelection(target))
             : null;
-          if (resolution?.target?.type !== "element") return missing;
+          targetResolution = (
+            resolution?.resolution ?? "orphaned"
+          ) as HtmlCanvasTargetResolution;
+          if (resolution?.target?.type !== "element") return missing(targetResolution);
           const escapedNodeId = String(resolution.target.nodeId)
             .replace(/\\/g, "\\\\")
             .replace(/"/g, '\\"');
@@ -2631,7 +2812,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             `[${SOURCE_NODE_ATTRIBUTE}="${escapedNodeId}"]`,
           );
         }
-        if (!targetElement) return missing;
+        if (!targetElement) return missing(targetResolution);
         const targetRect = targetElement.getBoundingClientRect();
         const visible = isRenderedCommentTarget(targetElement);
         const tabAssociation = tabAssociationForElement(
@@ -2643,18 +2824,24 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             ? {
                 targetId: target.id,
                 status: "hidden" as const,
+                resolution: targetResolution,
                 tabGroupKey: tabAssociation.key,
                 tabGroupLabel: tabAssociation.label,
               }
-            : missing;
+            : {
+                targetId: target.id,
+                status: "hidden" as const,
+                resolution: targetResolution,
+              };
         }
         const top = targetRect.top + scrollTop;
         if (!Number.isFinite(top) || !Number.isFinite(targetRect.height)) {
-          return missing;
+          return missing(targetResolution);
         }
         return {
           targetId: target.id,
           status: "visible" as const,
+          resolution: targetResolution,
           top: Math.max(0, top),
           height: Math.max(0, targetRect.height),
           ...(tabAssociation
@@ -2665,19 +2852,19 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             : {}),
         };
       } catch {
-        return missing;
+        return missing("orphaned");
       }
     });
+    const commentLayoutsByTargetId = new Map(
+      commentLayouts.map((layout) => [layout.targetId, layout]),
+    );
     onCommentLayoutRef.current?.({
       sourceSha256,
       viewContextGeneration,
       ready: true,
+      targetIds,
       scrollTop,
-      scrollHeight: Math.max(
-        scrollingElement.scrollHeight,
-        documentNode.documentElement.scrollHeight,
-        documentNode.body.scrollHeight,
-      ),
+      contentHeight: naturalDocumentContentHeight(documentNode, frameHeight),
       clientHeight: frameHeight,
       targets: commentLayouts,
     });
@@ -2858,6 +3045,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     commentedTargetsRef.current.forEach((rawTarget, targetIndex) => {
       if (rawTarget.showMarker === false) return;
       const target = rawTarget.target;
+      if (commentLayoutsByTargetId.get(target.id)?.status !== "visible") return;
       let targetElement: HTMLElement | null = null;
       try {
         const sourceIndex = sourceIndexRef.current;

@@ -477,7 +477,7 @@ test("handoff fails closed before locking when a comment target is unsafe", asyn
     "beginTargetRelink",
     "选择新位置",
     "activeComments.length === 0",
-    "data-resolution={comment.target.resolution}",
+    "data-resolution={targetResolution}",
     "targets: targets.map(persistedTargetRef)",
   ]) {
     assert.match(

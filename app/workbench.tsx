@@ -1851,6 +1851,7 @@ export default function Workbench() {
   const [commentLayoutAuthority, setCommentLayoutAuthority] = useState({
     sourceSha256: "",
     viewContextGeneration: -1,
+    targetIdsKey: "",
     ready: false,
   });
   const [commentHeaderHeight, setCommentHeaderHeight] = useState(62);
@@ -2320,19 +2321,21 @@ export default function Workbench() {
     && draftTarget
     && (draft.trim() || draftAttachments.length > 0),
   );
-  const expectedCommentLayoutTargetIds = useMemo(() => [
+  const expectedCommentLayoutTargetIds = useMemo(() => [...new Set([
     ...visibleCommentItems.map((comment) => comment.target.id),
     ...(
       (hasCommentDraft || composerOpen) && draftTarget
         ? [draftTarget.id]
         : []
     ),
-  ], [
+  ])].sort(), [
     composerOpen,
     draftTarget,
     hasCommentDraft,
     visibleCommentItems,
   ]);
+  const expectedCommentLayoutTargetIdsKey =
+    expectedCommentLayoutTargetIds.join("\u0000");
   const commentLayoutReady = Boolean(
     canvasMode === "edit"
     && commentLayoutAuthority.ready
@@ -2343,6 +2346,8 @@ export default function Workbench() {
     )
     && commentLayoutAuthority.viewContextGeneration
       === (activePageViewContext?.generation ?? 0)
+    && commentLayoutAuthority.targetIdsKey
+      === expectedCommentLayoutTargetIdsKey
     && expectedCommentLayoutTargetIds.every(
       (targetId) => Boolean(commentTargetLayouts[targetId]),
     )
@@ -2356,10 +2361,11 @@ export default function Workbench() {
     && draftTargetLayout.tabGroupKey,
   );
   const draftInOtherTab = hasCommentDraft && draftTargetInOtherTab;
-  const draftInCurrentTab = hasCommentDraft && !draftInOtherTab;
-  const composerInCurrentTab = Boolean(
-    composerOpen && draftTarget && !draftTargetInOtherTab,
+  const draftTargetInCurrentTab = Boolean(
+    draftTarget && !draftTargetInOtherTab,
   );
+  const draftInCurrentTab = hasCommentDraft && draftTargetInCurrentTab;
+  const composerInCurrentTab = composerOpen && draftTargetInCurrentTab;
   const commentTargetTops = useMemo(() => Object.fromEntries(
     Object.entries(commentTargetLayouts)
       .filter(([, layout]) => (
@@ -2569,20 +2575,23 @@ export default function Workbench() {
   }, []);
 
   const handleCommentLayout = useCallback((layout: HtmlCanvasCommentLayoutState) => {
+    const targetIdsKey = layout.targetIds.join("\u0000");
     setCommentLayoutAuthority((current) => (
       current.sourceSha256 === layout.sourceSha256
       && current.viewContextGeneration === layout.viewContextGeneration
+      && current.targetIdsKey === targetIdsKey
       && current.ready === layout.ready
         ? current
         : {
             sourceSha256: layout.sourceSha256,
             viewContextGeneration: layout.viewContextGeneration,
+            targetIdsKey,
             ready: layout.ready,
           }
     ));
     if (!layout.ready) return;
     setCommentRailHeight((current) => (
-      Math.abs(current - layout.scrollHeight) > 1 ? layout.scrollHeight : current
+      Math.abs(current - layout.contentHeight) > 1 ? layout.contentHeight : current
     ));
     const nextLayouts = Object.fromEntries(
       layout.targets.map((target) => [target.targetId, target]),
@@ -2597,6 +2606,7 @@ export default function Workbench() {
           return previous?.top === next.top
             && previous?.height === next.height
             && previous?.status === next.status
+            && previous?.resolution === next.resolution
             && previous?.tabGroupKey === next.tabGroupKey
             && previous?.tabGroupLabel === next.tabGroupLabel;
         })
@@ -3677,6 +3687,7 @@ export default function Workbench() {
     setCommentLayoutAuthority({
       sourceSha256: "",
       viewContextGeneration: -1,
+      targetIdsKey: "",
       ready: false,
     });
     focusedCommentIdRef.current = null;
@@ -9146,37 +9157,35 @@ export default function Workbench() {
     && draftTarget
     && !composerOpen
   );
-  const missingCommentLayoutItem = (() => {
-    if (!commentLayoutReady) return null;
-    for (const comment of visibleCommentItems) {
-      if (commentTargetLayouts[comment.target.id]?.status === "missing") {
-        return {
-          itemKey: comment.commentId,
-          target: comment.target,
-        };
-      }
-    }
-    if (
-      (hasCommentDraft || composerOpen)
-      && draftTarget
-      && commentTargetLayouts[draftTarget.id]?.status === "missing"
-    ) {
-      return {
-        itemKey: "__composer",
-        target: draftTarget,
-      };
-    }
-    return null;
-  })();
+  const commentTargetIsLocatable = (target: HtmlCanvasSelection): boolean => {
+    const layout = commentTargetLayouts[target.id];
+    const resolution = layout?.resolution ?? target.resolution;
+    return layout?.status !== "missing"
+      && (resolution === "exact" || resolution === "rebound");
+  };
+  const draftTargetCanSave = Boolean(
+    draftTarget
+    && commentTargetLayouts[draftTarget.id]?.status !== "missing"
+    && (commentTargetLayouts[draftTarget.id]?.resolution ?? draftTarget.resolution)
+      === "exact"
+  );
   const commentRailTargetTops = useMemo(() => {
-    if (!commentLayoutReady || missingCommentLayoutItem) return {};
+    if (!commentLayoutReady) return {};
     const targets = [
       ...railCommentItems.map((comment) => comment.target),
-      ...(draftInCurrentTab && draftTarget ? [draftTarget] : []),
+      ...(
+        (composerInCurrentTab || hasCollapsedCommentDraft) && draftTarget
+          ? [draftTarget]
+          : []
+      ),
     ];
     const measuredGroupTops = new Map<string, number>();
     for (const target of targets) {
-      const measuredTop = target.tagName === "body"
+      const layout = commentTargetLayouts[target.id];
+      const measuredTop = (
+        target.tagName === "body"
+        || layout?.status === "missing"
+      )
         ? commentRailMinimumTop
         : commentTargetTops[target.id];
       if (!Number.isFinite(measuredTop)) continue;
@@ -9196,14 +9205,15 @@ export default function Workbench() {
   }, [
     commentLayoutReady,
     commentRailMinimumTop,
+    commentTargetLayouts,
     commentTargetTops,
-    draftInCurrentTab,
+    composerInCurrentTab,
     draftTarget,
-    missingCommentLayoutItem,
+    hasCollapsedCommentDraft,
     railCommentItems,
   ]);
   const sortedVisibleCommentItems = useMemo(() => {
-    if (!commentLayoutReady || missingCommentLayoutItem) return [];
+    if (!commentLayoutReady) return [];
     return railCommentItems
       .flatMap((comment, index) => {
         const targetTop = comment.target.tagName === "body"
@@ -9226,7 +9236,6 @@ export default function Workbench() {
     commentLayoutReady,
     commentRailMinimumTop,
     commentRailTargetTops,
-    missingCommentLayoutItem,
     railCommentItems,
   ]);
   const commentRailLayout = useMemo(() => {
@@ -9338,8 +9347,12 @@ export default function Workbench() {
     const becameReady =
       commentLayoutReady && !commentLayoutWasReadyRef.current;
     commentLayoutWasReadyRef.current = commentLayoutReady;
-    if (!becameReady || missingCommentLayoutItem) return;
-    if (composerInCurrentTab && draftTarget) {
+    if (!becameReady) return;
+    if (
+      composerInCurrentTab
+      && draftTarget
+      && Number.isFinite(composerTop)
+    ) {
       queueReviewPairReveal(draftTarget, "__composer");
       return;
     }
@@ -9351,10 +9364,10 @@ export default function Workbench() {
   }, [
     commentLayoutReady,
     commentTargetTops,
+    composerTop,
     composerInCurrentTab,
     draftTarget,
     focusedCommentId,
-    missingCommentLayoutItem,
     queueReviewPairReveal,
     visibleCommentItems,
   ]);
@@ -10320,7 +10333,7 @@ export default function Workbench() {
               ) : null}
             </header>
             <span className="sr-only" role="status" aria-live="polite">
-              {composerInCurrentTab
+              {composerInCurrentTab && Number.isFinite(composerTop)
                 ? "评论输入框已与画布目标同时定位"
                 : focusedCommentId
                   ? "评论与画布目标已同时定位"
@@ -10343,27 +10356,10 @@ export default function Workbench() {
                 }}>重试读取</button>
               </section>
             ) : !commentLayoutReady ? null
-            : missingCommentLayoutItem ? (
-              <section
-                className="round-lock-card rail-status-card"
-                aria-label="评论位置无法定位"
-                style={{ top: `${commentRailMinimumTop}px` }}
-              >
-                <strong>评论位置无法确认</strong>
-                <span>
-                  页面已恢复，但“{insertionLabel(missingCommentLayoutItem.target)}”
-                  没有可用坐标。请重新选择可定位的源码元素。
-                </span>
-                {viewMode === "current" && !interactionLocked ? (
-                  <button
-                    type="button"
-                    onClick={() => beginTargetRelink(
-                      missingCommentLayoutItem.itemKey,
-                    )}
-                  >重新选择目标</button>
-                ) : null}
-              </section>
-            ) : composerInCurrentTab && draftTarget && !interactionLocked ? (
+            : composerInCurrentTab
+              && draftTarget
+              && Number.isFinite(composerTop)
+              && !interactionLocked ? (
               <section
                 className="comment-composer rail-comment-composer"
                 aria-label="添加评论"
@@ -10388,7 +10384,7 @@ export default function Workbench() {
                   </button>
                 </header>
                 <label htmlFor="round-comment-draft">评论内容</label>
-                {!canSaveCommentTarget(draftTarget) ? (
+                {!draftTargetCanSave ? (
                   <div className="comment-target-recovery" role="status">
                     <span>
                       <strong>原位置已变化</strong>
@@ -10407,7 +10403,7 @@ export default function Workbench() {
                   id="round-comment-draft"
                   ref={composerRef}
                   value={draft}
-                  disabled={!draftTarget || !canSaveCommentTarget(draftTarget) || interactionLocked}
+                  disabled={!draftTargetCanSave || interactionLocked}
                   placeholder={draftTarget.tagName === "body"
                     ? "输入对整个页面的修改要求…"
                     : "输入对这部分内容的修改要求…"}
@@ -10508,7 +10504,7 @@ export default function Workbench() {
                       className="add-comment-button"
                       type="button"
                       disabled={
-                        !canSaveCommentTarget(draftTarget)
+                        !draftTargetCanSave
                         || (!draft.trim() && draftAttachments.length === 0)
                         || attachmentUploadCount > 0
                         || interactionLocked
@@ -10547,9 +10543,8 @@ export default function Workbench() {
               </button>
             ) : null}
 
-            {commentLayoutReady
-            && !missingCommentLayoutItem
-            && railCommentItems.length === 0
+            {(commentLayoutReady || expectedCommentLayoutTargetIds.length === 0)
+            && sortedVisibleCommentItems.length === 0
             && !composerInCurrentTab
             && !hasCollapsedCommentDraft ? (
               <div
@@ -10571,23 +10566,27 @@ export default function Workbench() {
               const editable = viewMode === "current" && !interactionLocked;
               const editing = editingCommentId === comment.commentId;
               const deleting = pendingDeleteCommentId === comment.commentId;
+              const targetLayout = commentTargetLayouts[comment.target.id];
+              const targetResolution =
+                targetLayout?.resolution ?? comment.target.resolution;
+              const targetLocatable = commentTargetIsLocatable(comment.target);
               return (
                 <article
                   className="comment-card"
                   data-comment-measure={comment.commentId}
                   data-selected={selection?.selector === comment.target.selector ? "true" : "false"}
                   data-focused={focusedCommentId === comment.commentId ? "true" : undefined}
-                  data-resolution={comment.target.resolution}
+                  data-resolution={targetResolution}
                   data-editing={editing ? "true" : undefined}
                   role="group"
                   aria-current={focusedCommentId === comment.commentId ? "location" : undefined}
-                  tabIndex={editable && canLocateTarget(comment.target) ? 0 : -1}
+                  tabIndex={editable && targetLocatable ? 0 : -1}
                   aria-label={`${insertionLabel(comment.target)}：${comment.text}`}
                   style={{
                     top: `${visibleCommentPositions[comment.commentId]}px`,
                   }}
                   onClick={() => {
-                    if (!editing && !deleting && editable && canLocateTarget(comment.target)) {
+                    if (!editing && !deleting && editable && targetLocatable) {
                       focusCommentTarget(comment.target, comment.commentId);
                     }
                   }}
@@ -10597,7 +10596,7 @@ export default function Workbench() {
                       && !editing
                       && !deleting
                       && editable
-                      && canLocateTarget(comment.target)
+                      && targetLocatable
                       && (event.key === "Enter" || event.key === " ")
                     ) {
                       event.preventDefault();
@@ -10612,7 +10611,7 @@ export default function Workbench() {
                       {formatTime(comment.updatedAt || comment.createdAt, true)}
                     </time>
                   </header>
-                  {!canLocateTarget(comment.target) && editable ? (
+                  {!targetLocatable && editable ? (
                     <div
                       className="comment-target-recovery"
                       role="status"

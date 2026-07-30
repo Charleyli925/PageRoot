@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>索引脚本标签页评论布局</title>
+  <style>
+    html,
+    body {
+      margin: 0;
+    }
+
+    body {
+      padding: 32px;
+      font: 16px/1.7 system-ui, sans-serif;
+    }
+
+    .chart-shell {
+      max-width: 980px;
+    }
+
+    .chart-tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 20px;
+    }
+
+    .chart-tab {
+      padding: 8px 14px;
+      border: 1px solid #d8d9df;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+
+    .chart-tab.active {
+      color: #fff;
+      background: #5b55d9;
+    }
+
+    .chart-panel {
+      display: none;
+      padding: 24px;
+      border: 1px solid #e1e2e7;
+      border-radius: 14px;
+    }
+
+    .chart-panel.active {
+      display: block;
+    }
+
+    .short-panel {
+      min-height: 460px;
+    }
+
+    .tall-panel {
+      min-height: 1760px;
+    }
+
+    .comment-target {
+      max-width: 520px;
+      margin: 180px 0 0;
+      padding: 20px;
+      background: #f7f8fb;
+    }
+
+    .tall-panel .comment-target {
+      margin-top: 760px;
+    }
+  </style>
+</head>
+<body>
+  <main class="chart-shell">
+    <div class="chart-tabs">
+      <div
+        class="chart-tab active"
+        data-native-case="indexed-tab-one"
+        onclick="switchChart(0)"
+      >锁单确收增幅</div>
+      <div
+        class="chart-tab"
+        data-native-case="indexed-tab-two"
+        onclick="switchChart(1)"
+      >IPV增幅</div>
+    </div>
+    <div class="chart-panels">
+      <section class="chart-panel short-panel active" id="chart0">
+        <p
+          class="comment-target"
+          data-native-case="indexed-comment-one"
+        >锁单确收评论目标</p>
+      </section>
+      <section class="chart-panel tall-panel" id="chart1">
+        <p
+          class="comment-target"
+          data-native-case="indexed-comment-two"
+        >IPV评论目标</p>
+      </section>
+    </div>
+  </main>
+  <script>
+    function switchChart(index) {
+      document.querySelectorAll(".chart-tab").forEach((tab, tabIndex) => {
+        tab.classList.toggle("active", tabIndex === index);
+      });
+      document.querySelectorAll(".chart-panel").forEach((panel, panelIndex) => {
+        panel.classList.toggle("active", panelIndex === index);
+      });
+    }
+  </script>
+</body>
+</html>

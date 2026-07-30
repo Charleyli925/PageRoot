@@ -31,9 +31,104 @@ async function saveComment(page, frame, caseId, text) {
     .getByRole("button", { name: /留评论/u })
     .click();
   const composer = page.getByRole("region", { name: "添加评论" });
+  await expect(composer).toBeVisible();
+  await expect.poll(() => composer.evaluate((element) => (
+    Number.isFinite(Number.parseFloat(getComputedStyle(element).top))
+  ))).toBe(true);
+  await expect.poll(async () => {
+    const [targetBox, composerBox] = await Promise.all([
+      frame.locator(caseSelector(caseId)).boundingBox(),
+      composer.boundingBox(),
+    ]);
+    if (!targetBox || !composerBox) return Number.NEGATIVE_INFINITY;
+    return Math.floor(composerBox.y - targetBox.y);
+  }).toBeGreaterThanOrEqual(-32);
   await composer.getByRole("textbox", { name: "评论内容" }).fill(text);
   await composer.getByRole("button", { name: "评论", exact: true }).click();
 }
+
+test("indexed script tabs keep hidden comments grouped, suppress ghost markers, and shrink the canvas", async ({
+  page,
+}) => {
+  const browserErrors = [];
+  page.on("console", (message) => {
+    if (
+      message.type() === "error"
+      && !message.text().includes(
+        "Blocked script execution in 'about:srcdoc' because the document's frame is sandboxed",
+      )
+    ) {
+      browserErrors.push(message.text());
+    }
+  });
+  page.on("pageerror", (error) => browserErrors.push(error.message));
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await page.goto("/");
+  const { frame, iframe } = await loadFixture(page, "indexed-script-tabs.html", {
+    buffer: fixtureBuffer("indexed-script-tabs.html"),
+  });
+
+  const firstText = "锁单确收页评论";
+  const secondText = "IPV页评论";
+  await saveComment(page, frame, "indexed-comment-one", firstText);
+
+  await page.getByRole("button", { name: "预览", exact: true }).click();
+  const previewIframe = page.locator('iframe[title="HTML 交互预览"]');
+  await expect(previewIframe).toBeVisible();
+  const previewFrame = await (await previewIframe.elementHandle())?.contentFrame();
+  if (!previewFrame) throw new Error("Interactive preview frame is unavailable.");
+  await previewFrame.locator(caseSelector("indexed-tab-two")).click();
+  await expect(previewFrame.locator("#chart1")).toBeVisible();
+
+  await page.getByRole("button", { name: "编辑", exact: true }).click();
+  const rail = page.locator('aside[aria-label="本轮评论"]');
+  await expect(rail).toHaveAttribute("data-layout-ready", "true");
+  await expect(frame.locator("#chart1")).toBeVisible();
+  await expect(frame.locator("#chart0")).toBeHidden();
+  await expect(rail.getByText("评论位置无法确认", { exact: true })).toHaveCount(0);
+  await expect(rail.getByRole("button", {
+    name: "其他标签页评论 1",
+  })).toBeVisible();
+  await expect(rail.locator(
+    ".comment-rail-content > .comment-card:not(.draft-comment-card)",
+  )).toHaveCount(0);
+  await expect(page.getByTestId("html-canvas-editor").getByRole("button", {
+    name: /锁单确收评论目标/u,
+  })).toHaveCount(0);
+
+  await saveComment(page, frame, "indexed-comment-two", secondText);
+  const currentCards = rail.locator(
+    ".comment-rail-content > .comment-card:not(.draft-comment-card)",
+  );
+  await expect(currentCards).toHaveCount(1);
+  await expect(currentCards.filter({ hasText: secondText })).toBeVisible();
+  await expect(rail.getByText("原位置已变化", { exact: true })).toHaveCount(0);
+
+  await expect.poll(async () => {
+    const box = await iframe.boundingBox();
+    return Math.round(box?.height ?? 0);
+  }).toBeGreaterThan(1600);
+  const tallHeight = Math.round((await iframe.boundingBox())?.height ?? 0);
+
+  await rail.getByRole("button", { name: "其他标签页评论 1" }).click();
+  const firstOtherTabCard = rail
+    .getByRole("region", { name: "其他标签页评论" })
+    .getByRole("button", { name: new RegExp(firstText, "u") });
+  await expect(firstOtherTabCard).toBeVisible();
+  await firstOtherTabCard.click();
+
+  await expect(frame.locator("#chart0")).toBeVisible();
+  await expect(frame.locator("#chart1")).toBeHidden();
+  await expect(currentCards.filter({ hasText: firstText })).toBeVisible();
+  await expect(page.getByTestId("html-canvas-editor").getByRole("button", {
+    name: /锁单确收评论目标/u,
+  })).toHaveText("评1");
+  await expect.poll(async () => {
+    const box = await iframe.boundingBox();
+    return Math.round(box?.height ?? 0);
+  }).toBeLessThan(tallHeight - 700);
+  expect(browserErrors).toEqual([]);
+});
 
 test("comments keep current-tab alignment, render other tabs as neutral header cards, and avoid draft overlap", async ({
   page,

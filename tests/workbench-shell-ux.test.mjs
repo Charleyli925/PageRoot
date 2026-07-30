@@ -1132,7 +1132,10 @@ test("user-opened HTML stays lazily registered until a real project action", () 
 
 test("comment composer is explicit, transient and horizontally contained", () => {
   const unifiedSurfaceStyles = styles.slice(styles.indexOf("PageRoot V5.1"));
-  assert.match(workbench, /composerInCurrentTab && draftTarget && !interactionLocked \?/);
+  assert.match(
+    workbench,
+    /composerInCurrentTab[\s\S]*?Number\.isFinite\(composerTop\)[\s\S]*?!interactionLocked \?/,
+  );
   assert.match(workbench, /setComposerOpen\(true\)/);
   assert.match(workbench, /setComposerOpen\(false\)/);
   assert.match(workbench, /draftTargetRef\.current\?\.id === target\.id/);
@@ -1224,6 +1227,31 @@ test("comment composer is explicit, transient and horizontally contained", () =>
   assert.match(workbench, /typeof input\.showPicker === "function"/);
   assert.match(workbench, /editorRef\.current\?\.select\(target, \{ showToolbar: false \}\)/);
   assert.match(workbench, /openGlobalCommentComposer[\s\S]*?tagName: "body"[\s\S]*?openCommentComposer\(globalTarget\)/);
+});
+
+test("comment layout uses one current snapshot and isolates recovery per item", () => {
+  assert.match(canvas, /targetIds: string\[\]/);
+  assert.match(canvas, /contentHeight: number/);
+  assert.match(canvas, /function naturalDocumentContentHeight/);
+  assert.match(canvas, /visibleCount === 1/);
+  assert.match(
+    canvas,
+    /findIndex\(hasIndexedTabActiveState\) === visiblePanelIndex/,
+  );
+  assert.match(
+    canvas,
+    /commentLayoutsByTargetId\.get\(target\.id\)\?\.status !== "visible"/,
+  );
+  assert.match(workbench, /commentLayoutAuthority\.targetIdsKey/);
+  assert.match(
+    workbench,
+    /layout\?\.status === "missing"[\s\S]*?\?\s*commentRailMinimumTop/,
+  );
+  assert.match(
+    workbench,
+    /\(composerInCurrentTab \|\| hasCollapsedCommentDraft\) && draftTarget/,
+  );
+  assert.doesNotMatch(workbench, /missingCommentLayoutItem/);
 });
 
 test("comment cards show one two-line target label without duplicate copy", () => {

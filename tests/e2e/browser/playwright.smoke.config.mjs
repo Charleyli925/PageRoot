@@ -16,6 +16,7 @@ const smokeTitles = [
   "IME confirmation replays at the frozen left-style caret",
   "out-of-band mutation restores the last safe draft and reports in the viewport",
   "one unsaved comment blocks a second target and Canvas selection keeps its scroll",
+  "indexed script tabs keep hidden comments grouped, suppress ghost markers, and shrink the canvas",
 ];
 const escapedTitles = smokeTitles.map((title) => title.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"));
 
