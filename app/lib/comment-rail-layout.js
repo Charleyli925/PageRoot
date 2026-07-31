@@ -9,6 +9,7 @@
  *     targetTop: number;
  *     height: number;
  *     order: number;
+ *     scopeRank?: number;
  *   }>;
  *   minimumTop: number;
  *   gap?: number;
@@ -34,10 +35,14 @@ export function layoutCommentRailItems({
         targetTop: Math.max(safeMinimumTop, item.targetTop),
         height: Number.isFinite(item.height) ? Math.max(0, item.height) : 0,
         order: Number.isFinite(item.order) ? item.order : inputIndex,
+        scopeRank: Number.isFinite(item.scopeRank)
+          ? item.scopeRank
+          : 1,
       };
     })
     .sort((left, right) => (
-      left.targetTop - right.targetTop
+      left.scopeRank - right.scopeRank
+      || left.targetTop - right.targetTop
       || left.order - right.order
       || left.inputIndex - right.inputIndex
     ));
@@ -67,11 +72,80 @@ export function layoutCommentRailItems({
  * order, so one explicitly focused card can share a viewport Y coordinate
  * with its Canvas target.
  *
- * @param {{ targetTop: number; cardTop: number }} input
+ * @param {{ targetTop: number; cardTop: number; minimumTop?: number }} input
  */
-export function computeAlignedRailOffset({ targetTop, cardTop }) {
+export function computeAlignedRailOffset({
+  targetTop,
+  cardTop,
+  minimumTop = 0,
+}) {
   if (!Number.isFinite(targetTop) || !Number.isFinite(cardTop)) return 0;
-  return Math.min(0, targetTop - cardTop);
+  const safeMinimumTop = Number.isFinite(minimumTop)
+    ? Math.max(0, minimumTop)
+    : 0;
+  return Math.min(0, Math.max(safeMinimumTop, targetTop) - cardTop);
+}
+
+/**
+ * Preserve the measured rail anchors while native source text is being edited.
+ * Chromium can transiently resize or rebuild the editable island on every
+ * keystroke; those intermediate coordinates must not make adjacent cards jump.
+ * Status and tab metadata still come from the newest authoritative layout.
+ *
+ * @template T
+ * @param {{
+ *   previous: Record<string, T & {
+ *     status?: string;
+ *     top?: number;
+ *     height?: number;
+ *   }>;
+ *   next: Record<string, T & {
+ *     status?: string;
+ *     top?: number;
+ *     height?: number;
+ *   }>;
+ *   textEditing: boolean;
+ * }} input
+ */
+export function stabilizeCommentTargetLayouts({
+  previous,
+  next,
+  textEditing,
+}) {
+  if (!textEditing) return next;
+  return Object.fromEntries(Object.entries(next).map(([targetId, layout]) => {
+    const prior = previous[targetId];
+    if (
+      !prior
+      || prior.status !== "visible"
+      || layout.status !== "visible"
+      || !Number.isFinite(prior.top)
+      || !Number.isFinite(prior.height)
+    ) return [targetId, layout];
+    return [targetId, {
+      ...layout,
+      top: prior.top,
+      height: prior.height,
+    }];
+  }));
+}
+
+/**
+ * Comment textareas use the common chat convention: Enter submits and
+ * Shift+Enter inserts a newline. IME composition must always win.
+ *
+ * @param {{
+ *   key: string;
+ *   shiftKey?: boolean;
+ *   isComposing?: boolean;
+ * }} input
+ */
+export function shouldSubmitCommentOnEnter({
+  key,
+  shiftKey = false,
+  isComposing = false,
+}) {
+  return key === "Enter" && !shiftKey && !isComposing;
 }
 
 /**

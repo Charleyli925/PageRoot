@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import {
+  activateNativeEdit,
   caseSelector,
   fixtureBuffer,
   loadFixture,
@@ -32,6 +33,8 @@ async function saveComment(page, frame, caseId, text) {
     .click();
   const composer = page.getByRole("region", { name: "添加评论" });
   await expect(composer).toBeVisible();
+  const textbox = composer.getByRole("textbox", { name: "评论内容" });
+  await expect(textbox).toBeFocused();
   await expect.poll(() => composer.evaluate((element) => (
     Number.isFinite(Number.parseFloat(getComputedStyle(element).top))
   ))).toBe(true);
@@ -43,9 +46,141 @@ async function saveComment(page, frame, caseId, text) {
     if (!targetBox || !composerBox) return Number.NEGATIVE_INFINITY;
     return Math.floor(composerBox.y - targetBox.y);
   }).toBeGreaterThanOrEqual(-32);
-  await composer.getByRole("textbox", { name: "评论内容" }).fill(text);
+  await textbox.fill(text);
   await composer.getByRole("button", { name: "评论", exact: true }).click();
 }
+
+test("comment textareas focus immediately and use Enter to save with Shift+Enter for new lines", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await page.goto("/");
+  const { frame } = await loadFixture(page, "tabbed-comments.html", {
+    buffer: fixtureBuffer("tabbed-comments.html"),
+  });
+  await frame.locator(caseSelector("tab-comment-one")).click();
+  await page.getByRole("toolbar", { name: /编辑/u })
+    .getByRole("button", { name: /留评论/u })
+    .click();
+
+  const composer = page.getByRole("region", { name: "添加评论" });
+  const textbox = composer.getByRole("textbox", { name: "评论内容" });
+  await expect(textbox).toBeFocused();
+  await textbox.fill("第一行");
+  await textbox.press("Shift+Enter");
+  await textbox.pressSequentially("第二行");
+  await expect(textbox).toHaveValue("第一行\n第二行");
+  await textbox.press("Enter");
+  await expect(composer).toHaveCount(0);
+
+  const savedCard = page.locator(
+    ".comment-rail-content > .comment-card:not(.draft-comment-card)",
+  ).filter({ hasText: "第一行" });
+  await expect(savedCard).toBeVisible();
+  await savedCard.hover();
+  await savedCard.getByRole("button", { name: "编辑评论" }).click();
+  const editBox = savedCard.getByRole("textbox", { name: /编辑评论/u });
+  await expect(editBox).toBeFocused();
+  await editBox.fill("修改第一行");
+  await editBox.press("Shift+Enter");
+  await editBox.pressSequentially("修改第二行");
+  await expect(editBox).toHaveValue("修改第一行\n修改第二行");
+  await editBox.press("Enter");
+  await expect(editBox).toHaveCount(0);
+  await expect(savedCard).toContainText("修改第二行");
+});
+
+test("focused comments remain below the sticky rail header and global comments sort first", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await page.goto("/");
+  const { frame } = await loadFixture(page, "tabbed-comments.html", {
+    buffer: fixtureBuffer("tabbed-comments.html"),
+  });
+  const localText = "顶部页签局部评论";
+  await saveComment(page, frame, "tab-control-one", localText);
+
+  const rail = page.locator('aside[aria-label="本轮评论"]');
+  const header = rail.locator(".comment-rail-header");
+  const localCard = rail.locator(
+    ".comment-rail-content > .comment-card:not(.draft-comment-card)",
+  ).filter({ hasText: localText });
+  await expect(localCard).toHaveAttribute("data-focused", "true");
+  const [headerBox, localCardBox] = await Promise.all([
+    header.boundingBox(),
+    localCard.boundingBox(),
+  ]);
+  expect(headerBox).not.toBeNull();
+  expect(localCardBox).not.toBeNull();
+  expect(localCardBox.y).toBeGreaterThanOrEqual(
+    headerBox.y + headerBox.height + 14,
+  );
+
+  await page.getByRole("button", {
+    name: "全局评论",
+    exact: true,
+  }).click();
+  const globalComposer = page.getByRole("region", { name: "添加评论" });
+  const globalTextbox = globalComposer.getByRole("textbox", {
+    name: "评论内容",
+  });
+  await expect(globalTextbox).toBeFocused();
+  await globalTextbox.fill("整个页面优先处理");
+  await globalTextbox.press("Enter");
+
+  const cards = rail.locator(
+    ".comment-rail-content > .comment-card:not(.draft-comment-card)",
+  );
+  await expect(cards).toHaveCount(2);
+  await expect(cards.nth(0)).toContainText("整个页面优先处理");
+  await expect(cards.nth(1)).toContainText(localText);
+});
+
+test("comment cards keep stable anchors while nearby source text is being edited", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await page.goto("/");
+  const { frame } = await loadFixture(page, "tabbed-comments.html", {
+    buffer: fixtureBuffer("tabbed-comments.html"),
+  });
+  await saveComment(page, frame, "tab-control-one", "页签锚点评论");
+  await saveComment(page, frame, "tab-comment-one", "正文锚点评论");
+
+  const target = await activateNativeEdit(frame, "tab-comment-one");
+  await expect(target).toHaveAttribute(
+    "contenteditable",
+    /^(?:plaintext-only|true)$/u,
+  );
+  const cards = page.locator(
+    ".comment-rail-content > .comment-card:not(.draft-comment-card)",
+  );
+  await expect(cards).toHaveCount(2);
+  await page.waitForTimeout(420);
+  const before = await cards.evaluateAll((elements) => elements.map(
+    (element) => element.getBoundingClientRect().top,
+  ));
+
+  await target.press("End");
+  await target.pressSequentially(
+    " 持续输入一段足够长的文字来触发正文重新排版，但评论卡在输入完成前保持稳定。",
+    { delay: 5 },
+  );
+  const during = await cards.evaluateAll((elements) => elements.map(
+    (element) => element.getBoundingClientRect().top,
+  ));
+  expect(during).toHaveLength(before.length);
+  during.forEach((top, index) => {
+    expect(Math.abs(top - before[index])).toBeLessThanOrEqual(1);
+  });
+
+  await target.press("Escape");
+  await expect(target).not.toHaveAttribute(
+    "contenteditable",
+    /^(?:plaintext-only|true)$/u,
+  );
+});
 
 test("indexed script tabs keep hidden comments grouped, suppress ghost markers, and shrink the canvas", async ({
   page,

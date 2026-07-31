@@ -1,5 +1,119 @@
 # Design QA
 
+## Comment, safe page-switching and update-header polish
+
+Date: 2026-07-31
+
+Source visual truth:
+
+- `/var/folders/jx/w52403cs2hx39vwhd1sb3tg80000gn/T/codex-clipboard-446927b3-9de2-4e56-bff8-2bde38ad0588.png`
+  — a focused comment is obscured by the sticky comment header.
+- `/var/folders/jx/w52403cs2hx39vwhd1sb3tg80000gn/T/codex-clipboard-9957b77d-1a88-4d36-a915-f24af179b443.png`
+  — “切换到此页签” must not reset the document scroll position.
+- `/var/folders/jx/w52403cs2hx39vwhd1sb3tg80000gn/T/codex-clipboard-94fa91f6-be78-454f-ae78-c486b282432b.png`
+  — whole-page comments should lead the current-Tab queue.
+- `/var/folders/jx/w52403cs2hx39vwhd1sb3tg80000gn/T/codex-clipboard-6990e527-9c2a-4aee-a78e-14ac82b05312.png`
+  — the existing HTML identity control and available header space.
+- `/var/folders/jx/w52403cs2hx39vwhd1sb3tg80000gn/T/codex-clipboard-89c6e667-57e4-46f5-aec7-81b33c31d9d6.png`
+  — a real `data-p` authored tab group that previously had no safe PageRoot
+  presentation action.
+
+Implementation evidence:
+
+- `output/design-qa/comment-presentation-header-polish/new-update.png`
+- `output/design-qa/comment-presentation-header-polish/restart-update.png`
+- `output/design-qa/comment-presentation-header-polish/reference-comparison.png`
+- `output/design-qa/comment-presentation-header-polish/header-geometry.json`
+- `tests/e2e/browser/native-dom-comment-tabs.spec.mjs`
+- `tests/e2e/browser/native-dom-presentation-actions.spec.mjs`
+- `tests/e2e/electron/ai-handoff-closed-loop.spec.mjs`
+
+Viewport, density and state:
+
+- Header captures come from the real Electron renderer at a `1440px` CSS
+  viewport. Each screenshot clips the top-left `900 × 88` CSS-pixel region
+  and is saved at Retina 2× density as `1800 × 176` pixels.
+- `new-update.png` uses the real update-available IPC state. The downloaded
+  state dismisses the normal restart confirmation with “稍后” before
+  `restart-update.png` is captured, so the header is evaluated without a
+  modal overlay.
+- The browser interaction oracle runs at `1600 × 900` CSS pixels with normal
+  mouse, keyboard, textarea and scroll input.
+- `reference-comparison.png` places the supplied header reference above the
+  final `New!` and `New! 重启更新` states for one visual inspection surface.
+
+Full-view and focused comparison evidence:
+
+- The HTML icon remains `34 × 34px` inside a fixed `60 × 42px` interaction
+  cluster. Both update labels occupy the lower part of that same cluster and
+  overlap the icon vertically by `12px`, producing the requested attached
+  badge treatment without increasing the header height.
+- The `88px` header contains the cluster at `y=32.875…74.875`, leaving
+  `13.125px` below it. The visible update text ends at `y=71.375`, so neither
+  state crosses the header boundary.
+- The longer visible label ends at `x=82.992`; the title/metainfo column begins
+  at `x=92`, retaining a measured `9.008px` gap. The compact `New!` label has
+  substantially more space. Neither label touches the title, metadata, plus
+  action or open-in-folder action.
+- Clicking the HTML icon opens the existing About dialog; the icon remains a
+  single accessible button, and its update child action has its own accessible
+  label.
+
+Behavioral evidence:
+
+- Opening a new comment requests focus after the composer mounts. Enter saves;
+  Shift+Enter inserts a newline; IME composition never submits. The same
+  keyboard contract applies when editing a saved comment.
+- A selected comment is aligned no higher than the sticky header's measured
+  safe bottom. Whole-page comments use an explicit leading scope rank, while
+  all other page-position ordering remains stable.
+- During native text editing, visible comment targets retain their last stable
+  top and height. Runtime text reflow therefore cannot make adjacent cards
+  jump, while the next settled layout can still refresh normally.
+- Page-presentation switching captures the shared Canvas scroll position and
+  restores it after the presentation mutation. The old unconditional
+  “presentation became ready” reveal is removed; explicit user navigation still
+  reveals its intended target.
+- The legacy page switcher is deliberately narrow: one uniform `data-p` or
+  `data-tab` control group, unique panel IDs, one active control and one active
+  panel, matching base classes, and only disposable `active` class changes.
+  Authored scripts are never executed and source bytes are never written.
+- The supplied `26Q2搜索市场概览(1).html` resolves three safe controls, exposes
+  “切换到此页签” for `p2`, changes only the isolated rendered presentation and
+  leaves the source unchanged. Ambiguous, mixed, duplicate and multi-active
+  fixtures fail closed.
+
+Findings:
+
+- No actionable P0, P1 or P2 visual or interaction defect remains in this
+  scope.
+- The update label is intentionally small and attached to the HTML icon. It
+  stays readable in both states without displacing or obscuring any neighboring
+  header element.
+- The comment and page-switching changes are presentation-only. They do not
+  reorder persisted comments, execute authored page scripts, or modify source
+  bytes.
+
+Interaction and regression history:
+
+1. Pure helpers established the sticky-header clamp, whole-page-first rank,
+   text-edit geometry freeze and keyboard submission contract.
+2. Browser tests exercised real focus, Enter/Shift+Enter, saved-comment edit,
+   native content reflow, queue ordering and preserved scroll.
+3. Electron tests injected both real update states, opened About through the
+   HTML icon, measured all header rectangles and captured the final images.
+4. The final visual comparison found no clipping, overlap, header overflow or
+   unintended spacing change; no subsequent P0/P1/P2 repair was required.
+5. The complete task gate passed: architecture, TypeScript, lint, 310 Node
+   assertions, production web build, 10 browser smoke tests, real-HTML
+   authority, desktop build, 6 Electron smoke tests and 2 AI closed-loop
+   tests. The report is
+   `output/test-runs/2026-07-31T05-05-54-402Z-task/results.json`.
+
+final result: passed
+
+---
+
 ## About dialog simplification
 
 Date: 2026-07-30

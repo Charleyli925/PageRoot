@@ -20,6 +20,9 @@ const MAX_PRESENTATION_TAB_COUNT = 24;
 const MAX_CLASS_TOKENS = 128;
 const MAX_QUALIFIED_CLASS_TOKENS = 8;
 const MAX_CLASS_TOKEN_LENGTH = 96;
+const LEGACY_TAB_STATE_CLASS = "active";
+const LEGACY_TAB_ATTRIBUTES = Object.freeze(["data-p", "data-tab"]);
+const LEGACY_TAB_CONTROL_TAGS = new Set(["button", "div"]);
 const EXCLUDED_TAGS = new Set([
   "html",
   "head",
@@ -833,6 +836,187 @@ function resolveTabAction({
   });
 }
 
+function legacyTabDescriptor(element) {
+  const attributes = LEGACY_TAB_ATTRIBUTES.map((name) => ({
+    name,
+    attribute: sourceAttribute(element, name),
+  }));
+  if (attributes.some(({ attribute }) => !attribute.valid)) return null;
+  const present = attributes.filter(({ attribute }) => attribute.present);
+  if (present.length !== 1) return null;
+  const panelId = String(present[0].attribute.value ?? "").trim();
+  if (!panelId || /[\t\n\f\r ]/u.test(panelId)) return null;
+  return {
+    attributeName: present[0].name,
+    panelId,
+  };
+}
+
+function classTokensWithoutLegacyTabState(state) {
+  return state.classTokens.filter(
+    (token) => token !== LEGACY_TAB_STATE_CLASS,
+  );
+}
+
+/**
+ * Some authored reports use an explicit `data-p`/`data-tab` → panel id
+ * mapping instead of ARIA tabs. The edit sandbox does not execute their
+ * scripts, so we reproduce only the disposable `active` class transition.
+ * Ambiguous or structurally inferred markup remains inert.
+ */
+function resolveDataLinkedTabAction({
+  sourceIndex,
+  states,
+  visuals,
+  target,
+  documentKey,
+  generation,
+}) {
+  const control = closestSourceElement(
+    sourceIndex,
+    target,
+    (candidate) => (
+      LEGACY_TAB_CONTROL_TAGS.has(candidate.tagName)
+      && legacyTabDescriptor(candidate)
+    ),
+  );
+  if (
+    !control
+    || !sourceAttributeIsAbsent(control, "disabled")
+    || !sourceAriaBooleanIsAbsentOrFalse(control, "aria-disabled")
+    || !sourceAttributeIsAbsent(control, "aria-haspopup")
+    || !sourceAttributeIsAbsent(control, "popovertarget")
+    || sourceAncestors(sourceIndex, control).some(
+      (ancestor) => ancestor.tagName === "form",
+    )
+  ) return null;
+  const descriptor = legacyTabDescriptor(control);
+  const controlParent = sourceParent(sourceIndex, control);
+  if (!descriptor || !controlParent) return null;
+
+  const controls = controlParent.childElementIds
+    .map((nodeId) => sourceIndex.byNodeId.get(nodeId))
+    .filter((candidate) => candidate?.type === "element")
+    .filter((candidate) => legacyTabDescriptor(candidate));
+  if (
+    controls.length < 2
+    || controls.length > MAX_PRESENTATION_TAB_COUNT
+    || !controls.some((candidate) => candidate.nodeId === control.nodeId)
+    || controls.some((candidate) => (
+      candidate.tagName !== control.tagName
+      || legacyTabDescriptor(candidate)?.attributeName
+        !== descriptor.attributeName
+      || !sourceAttributeIsAbsent(candidate, "disabled")
+      || !sourceAriaBooleanIsAbsentOrFalse(candidate, "aria-disabled")
+      || !sourceAttributeIsAbsent(candidate, "aria-haspopup")
+      || !sourceAttributeIsAbsent(candidate, "popovertarget")
+    ))
+  ) return null;
+
+  const panels = [];
+  const seenPanelIds = new Set();
+  for (const candidate of controls) {
+    const candidateDescriptor = legacyTabDescriptor(candidate);
+    const panel = uniqueElementById(
+      sourceIndex,
+      candidateDescriptor?.panelId,
+    );
+    if (
+      !candidateDescriptor
+      || !panel
+      || seenPanelIds.has(candidateDescriptor.panelId)
+      || sourceContains(sourceIndex, controlParent, panel)
+      || sourceContains(sourceIndex, panel, controlParent)
+      || !sourceContentExists(sourceIndex, panel)
+    ) return null;
+    seenPanelIds.add(candidateDescriptor.panelId);
+    panels.push(panel);
+  }
+  const panelParentId = panels[0]?.parentId;
+  if (
+    !panelParentId
+    || panels.some((panel) => panel.parentId !== panelParentId)
+  ) return null;
+
+  const controlStates = controls.map((candidate) => (
+    effectiveStateFor(sourceIndex, states, candidate)
+  ));
+  const panelStates = panels.map((panel) => (
+    effectiveStateFor(sourceIndex, states, panel)
+  ));
+  if (
+    controlStates.some((state) => !state)
+    || panelStates.some((state) => !state)
+  ) return null;
+  const controlBaseClasses = controlStates.map(
+    classTokensWithoutLegacyTabState,
+  );
+  const panelBaseClasses = panelStates.map(
+    classTokensWithoutLegacyTabState,
+  );
+  if (
+    controlBaseClasses.some((tokens) => tokens.length === 0)
+    || panelBaseClasses.some((tokens) => tokens.length === 0)
+    || new Set(controlBaseClasses.map((tokens) => (
+      [...tokens].sort().join("\u0000")
+    ))).size !== 1
+    || new Set(panelBaseClasses.map((tokens) => (
+      [...tokens].sort().join("\u0000")
+    ))).size !== 1
+  ) return null;
+
+  const selectedIndexes = controlStates.flatMap((state, index) => (
+    state.classTokens.includes(LEGACY_TAB_STATE_CLASS) ? [index] : []
+  ));
+  const visibleIndexes = panelStates.flatMap((state, index) => (
+    state.classTokens.includes(LEGACY_TAB_STATE_CLASS) ? [index] : []
+  ));
+  if (
+    selectedIndexes.length !== 1
+    || visibleIndexes.length !== 1
+    || selectedIndexes[0] !== visibleIndexes[0]
+  ) return null;
+
+  const targetIndex = controls.findIndex(
+    (candidate) => candidate.nodeId === control.nodeId,
+  );
+  const isCurrent = selectedIndexes[0] === targetIndex;
+  if (!isCurrent) {
+    controls.forEach((candidate, index) => {
+      states.set(candidate.nodeId, {
+        ...controlStates[index],
+        classTokens: [
+          ...controlBaseClasses[index],
+          ...(index === targetIndex ? [LEGACY_TAB_STATE_CLASS] : []),
+        ],
+      });
+    });
+    panels.forEach((panel, index) => {
+      states.set(panel.nodeId, {
+        ...panelStates[index],
+        classTokens: [
+          ...panelBaseClasses[index],
+          ...(index === targetIndex ? [LEGACY_TAB_STATE_CLASS] : []),
+        ],
+      });
+    });
+  }
+  const nextContext = contextFromPresentationStates({
+    sourceIndex,
+    states,
+    visuals,
+    documentKey,
+    generation,
+  });
+  if (nextContext === undefined) return null;
+  return Object.freeze({
+    kind: "activate-tab",
+    label: isCurrent ? "当前页签" : "切换到此页签",
+    isCurrent,
+    nextContext,
+  });
+}
+
 function resolveDetailsAction({
   sourceIndex,
   states,
@@ -1032,6 +1216,7 @@ export function createPagePresentationAction({
     generation: currentContext?.generation ?? generation,
   };
   return resolveTabAction(options)
+    ?? resolveDataLinkedTabAction(options)
     ?? resolveDetailsAction(options)
     ?? resolveDisclosureAction(options);
 }

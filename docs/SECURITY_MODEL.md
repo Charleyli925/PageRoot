@@ -70,9 +70,14 @@ Edit-mode reveal actions use the same trust boundary. They accept only strict
 Tabs whose selected panel is proved by `aria-selected` plus `hidden`, native
 details with one direct summary, and local button/region disclosures whose
 `aria-controls`, `aria-labelledby`, `aria-expanded` and `hidden` states agree.
-Links, forms, class-only controls, grouped details, popups, popovers, drawers
-and authored event handlers are never executed. The action changes disposable
-attributes only and has no source-write, filesystem or navigation authority.
+The only legacy Tab adapter accepts sibling `button`/`div` controls with one
+uniform `data-p` or `data-tab` attribute, a unique one-to-one panel-ID mapping,
+uniform base classes, and exactly one matching `active` control/panel pair. It
+can transfer only that `active` class. Duplicate mappings, mixed attributes,
+index-only or class-only inference fail closed. Links, forms, grouped details,
+popups, popovers, drawers and authored event handlers are never executed. The
+action changes disposable attributes only and has no source-write, filesystem,
+navigation or implicit scroll authority.
 
 ## Untrusted inputs
 

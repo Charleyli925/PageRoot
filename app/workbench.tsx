@@ -5,6 +5,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useReducer,
   useRef,
@@ -70,6 +71,8 @@ import {
   computeAlignedRailOffset,
   layoutCommentRailItems,
   routeCommentRailWheel,
+  shouldSubmitCommentOnEnter,
+  stabilizeCommentTargetLayouts,
 } from "./lib/comment-rail-layout.js";
 import {
   auditEventKey,
@@ -1740,6 +1743,7 @@ export default function Workbench() {
     commentId: string;
   } | null>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  const composerFocusPendingRef = useRef(false);
   const commentEditRef = useRef<HTMLTextAreaElement>(null);
   const commentsPanelRef = useRef<HTMLElement>(null);
   const commentsHeaderRef = useRef<HTMLElement>(null);
@@ -1758,7 +1762,7 @@ export default function Workbench() {
     target: HtmlCanvasSelection;
     itemKey: string;
   } | null>(null);
-  const commentLayoutWasReadyRef = useRef(false);
+  const pagePresentationScrollRequestRef = useRef(0);
   const projectEpochRef = useRef(0);
   const projectOpenRequestRef = useRef(0);
   const projectQueryFenceRef = useRef(new ProjectQueryFence());
@@ -1894,6 +1898,7 @@ export default function Workbench() {
     viewContextGeneration: -1,
     targetIdsKey: "",
     ready: false,
+    textEditing: false,
   });
   const [commentHeaderHeight, setCommentHeaderHeight] = useState(62);
   const [expandedOtherTabCommentsKey, setExpandedOtherTabCommentsKey] = useState("");
@@ -2153,6 +2158,13 @@ export default function Workbench() {
     }
   }, []);
 
+  const openAboutPageRoot = useCallback(() => {
+    setManualUpdateCheckFailed(false);
+    setRepositoryOpenFailed(false);
+    setUserNoticeOpenFailed(false);
+    setAboutOpen(true);
+  }, []);
+
   useEffect(() => {
     const lifecycle = window.htmlAIAppLifecycle;
     if (!lifecycle?.onWorkspaceUnavailable) return undefined;
@@ -2169,13 +2181,8 @@ export default function Workbench() {
   useEffect(() => {
     const lifecycle = window.htmlAIAppLifecycle;
     if (!lifecycle?.onAboutRequested) return undefined;
-    return lifecycle.onAboutRequested(() => {
-      setManualUpdateCheckFailed(false);
-      setRepositoryOpenFailed(false);
-      setUserNoticeOpenFailed(false);
-      setAboutOpen(true);
-    });
-  }, []);
+    return lifecycle.onAboutRequested(openAboutPageRoot);
+  }, [openAboutPageRoot]);
 
   const checkForApplicationUpdates = useCallback(async () => {
     const updates = window.htmlAIUpdates;
@@ -2379,7 +2386,23 @@ export default function Workbench() {
       pageViewDocumentKeyRef.current !== documentKey
       || (nextContext && nextContext.documentKey !== documentKey)
     ) return false;
+    const stage = reviewStageRef.current;
+    const scrollTop = stage?.scrollTop ?? 0;
+    const requestId = ++pagePresentationScrollRequestRef.current;
     setPageViewContext(nextContext);
+    window.requestAnimationFrame(() => {
+      if (requestId !== pagePresentationScrollRequestRef.current) return;
+      const currentStage = reviewStageRef.current;
+      if (!currentStage) return;
+      const maxTop = Math.max(
+        0,
+        currentStage.scrollHeight - currentStage.clientHeight,
+      );
+      currentStage.scrollTo({
+        top: Math.min(scrollTop, maxTop),
+        behavior: "auto",
+      });
+    });
     return true;
   }, []);
   const visibleCommentItems = useMemo(
@@ -2415,7 +2438,8 @@ export default function Workbench() {
     canvasMode === "edit"
     && commentLayoutAuthority.ready
     && (
-      !expectedCommentLayoutSourceSha256
+      commentLayoutAuthority.textEditing
+      || !expectedCommentLayoutSourceSha256
       || commentLayoutAuthority.sourceSha256
         === expectedCommentLayoutSourceSha256
     )
@@ -2657,27 +2681,41 @@ export default function Workbench() {
 
   const handleCommentLayout = useCallback((layout: HtmlCanvasCommentLayoutState) => {
     const targetIdsKey = layout.targetIds.join("\u0000");
-    setCommentLayoutAuthority((current) => (
-      current.sourceSha256 === layout.sourceSha256
-      && current.viewContextGeneration === layout.viewContextGeneration
-      && current.targetIdsKey === targetIdsKey
-      && current.ready === layout.ready
-        ? current
+    setCommentLayoutAuthority((current) => {
+      const next = (
+        layout.textEditing
+        && !layout.ready
+        && current.ready
+      )
+        ? { ...current, textEditing: true }
         : {
             sourceSha256: layout.sourceSha256,
             viewContextGeneration: layout.viewContextGeneration,
             targetIdsKey,
             ready: layout.ready,
-          }
-    ));
+            textEditing: layout.textEditing,
+          };
+      return (
+        current.sourceSha256 === next.sourceSha256
+        && current.viewContextGeneration === next.viewContextGeneration
+        && current.targetIdsKey === next.targetIdsKey
+        && current.ready === next.ready
+        && current.textEditing === next.textEditing
+      ) ? current : next;
+    });
     if (!layout.ready) return;
     setCommentRailHeight((current) => (
       Math.abs(current - layout.contentHeight) > 1 ? layout.contentHeight : current
     ));
-    const nextLayouts = Object.fromEntries(
+    const measuredLayouts = Object.fromEntries(
       layout.targets.map((target) => [target.targetId, target]),
     );
     setCommentTargetLayouts((current) => {
+      const nextLayouts = stabilizeCommentTargetLayouts({
+        previous: current,
+        next: measuredLayouts,
+        textEditing: layout.textEditing,
+      });
       const currentEntries = Object.entries(current);
       const nextEntries = Object.entries(nextLayouts);
       if (
@@ -3790,6 +3828,7 @@ export default function Workbench() {
       viewContextGeneration: -1,
       targetIdsKey: "",
       ready: false,
+      textEditing: false,
     });
     focusedCommentIdRef.current = null;
     setFocusedCommentId(null);
@@ -6992,17 +7031,22 @@ export default function Workbench() {
           : commentTargetTops[target.id];
         if (!Number.isFinite(targetTop)) return;
         if (!item) return;
-        const itemTop = item?.offsetTop ?? targetTop;
+        const safeTargetTop = Math.max(
+          commentRailMinimumTop,
+          targetTop as number,
+        );
+        const itemTop = item?.offsetTop ?? safeTargetTop;
         const nextRailOffset = computeAlignedRailOffset({
-          targetTop: targetTop as number,
+          targetTop: safeTargetTop,
           cardTop: itemTop,
+          minimumTop: commentRailMinimumTop,
         });
         commentRailOffsetRef.current = nextRailOffset;
         setCommentRailFollowsFocus(true);
         setCommentRailOffset(nextRailOffset);
         const desiredTop = Math.max(
           0,
-          (targetTop as number) - commentRailMinimumTop - 10,
+          safeTargetTop - commentRailMinimumTop - 10,
         );
         const maxTop = Math.max(0, stage.scrollHeight - stage.clientHeight);
         const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -7016,6 +7060,14 @@ export default function Workbench() {
       });
     });
   }, [commentRailMinimumTop, commentTargetTops]);
+
+  const requestComposerFocus = useCallback(() => {
+    composerFocusPendingRef.current = true;
+    const composer = composerRef.current;
+    if (!composer || composer.disabled) return;
+    composerFocusPendingRef.current = false;
+    composer.focus({ preventScroll: true });
+  }, []);
 
   useEffect(() => {
     if (canvasMode !== "edit") return undefined;
@@ -7105,9 +7157,7 @@ export default function Workbench() {
       setComposerOpen(true);
       persistCurrentDraftRecovery();
       queueReviewPairReveal(nextTarget, "__composer");
-      window.requestAnimationFrame(() => {
-        composerRef.current?.focus({ preventScroll: true });
-      });
+      requestComposerFocus();
       return true;
     }
     const current = commentsRef.current.find(
@@ -7158,6 +7208,7 @@ export default function Workbench() {
     beginTargetRelink,
     persistCurrentDraftRecovery,
     queueReviewPairReveal,
+    requestComposerFocus,
     updateFocusedComment,
   ]);
 
@@ -7168,13 +7219,12 @@ export default function Workbench() {
     resumeSubmissionAfterRelinkRef.current = false;
     setRelinkingTarget(null);
     if (relinkingId === "__composer") {
-      window.requestAnimationFrame(() => {
-        composerRef.current?.focus({ preventScroll: true });
-      });
+      requestComposerFocus();
     }
-  }, []);
+  }, [requestComposerFocus]);
 
   const clearCurrentComposer = useCallback(() => {
+    composerFocusPendingRef.current = false;
     composerDraftRef.current = "";
     composerCommentIdRef.current = null;
     composerAttachmentsRef.current = [];
@@ -7207,10 +7257,13 @@ export default function Workbench() {
     if (toastRef.current?.dedupeKey === "unfinished-comment-draft") {
       setToast(null);
     }
-    window.requestAnimationFrame(() => {
-      composerRef.current?.focus({ preventScroll: true });
-    });
-  }, [beginTargetRelink, queueReviewPairReveal, updateFocusedComment]);
+    requestComposerFocus();
+  }, [
+    beginTargetRelink,
+    queueReviewPairReveal,
+    requestComposerFocus,
+    updateFocusedComment,
+  ]);
 
   const showUnfinishedCommentEditNotice = useCallback((
     session: CommentEditSession,
@@ -7299,13 +7352,12 @@ export default function Workbench() {
     setComposerOpen(true);
     setDraftTarget(target);
     queueReviewPairReveal(target, "__composer");
-    window.requestAnimationFrame(() => {
-      composerRef.current?.focus({ preventScroll: true });
-    });
+    requestComposerFocus();
   }, [
     finishTargetRelink,
     prepareProjectRecords,
     queueReviewPairReveal,
+    requestComposerFocus,
     showUnfinishedCommentEditNotice,
     updateFocusedComment,
     viewMode,
@@ -7409,7 +7461,7 @@ export default function Workbench() {
       return;
     }
     if (!draft.trim() && draftAttachments.length === 0) {
-      composerRef.current?.focus();
+      requestComposerFocus();
       return;
     }
     if (attachmentUploadCount > 0) return;
@@ -7433,7 +7485,7 @@ export default function Workbench() {
           dedupeKey: "project-registration",
           action: { id: "resume-draft", label: "继续填写" },
         });
-        composerRef.current?.focus();
+        requestComposerFocus();
         return;
       }
     }
@@ -7452,7 +7504,7 @@ export default function Workbench() {
     const currentText = composerDraftRef.current.trim();
     const currentAttachments = [...composerAttachmentsRef.current];
     if (!currentText && currentAttachments.length === 0) {
-      composerRef.current?.focus();
+      requestComposerFocus();
       return;
     }
     const now = new Date().toISOString();
@@ -7510,6 +7562,7 @@ export default function Workbench() {
     ensureProjectRegistered,
     persistCurrentDraftRecovery,
     queueReviewPairReveal,
+    requestComposerFocus,
     updateFocusedComment,
     viewMode,
   ]);
@@ -8218,7 +8271,7 @@ export default function Workbench() {
     }
     let activeComments = normalizeCurrentGlobalComments();
     if (activeComments.length === 0) {
-      composerRef.current?.focus();
+      requestComposerFocus();
       return;
     }
     const unsafeTargets = activeComments.filter(
@@ -8273,7 +8326,7 @@ export default function Workbench() {
     }
     activeComments = normalizeCurrentGlobalComments();
     if (activeComments.length === 0) {
-      composerRef.current?.focus();
+      requestComposerFocus();
       releaseSubmissionIntent();
       return;
     }
@@ -8528,6 +8581,7 @@ export default function Workbench() {
     normalizeCurrentGlobalComments,
     openProject,
     projectName,
+    requestComposerFocus,
     sendToQoderWork,
     showUnfinishedCommentEditNotice,
     viewMode,
@@ -9763,11 +9817,13 @@ export default function Workbench() {
         return [{
           comment,
           index,
+          scopeRank: comment.target.tagName === "body" ? 0 : 1,
           targetTop: targetTop as number,
         }];
       })
       .sort((left, right) => (
-        left.targetTop - right.targetTop
+        left.scopeRank - right.scopeRank
+        || left.targetTop - right.targetTop
         || left.comment.createdAt.localeCompare(right.comment.createdAt)
         || left.index - right.index
       ))
@@ -9784,6 +9840,7 @@ export default function Workbench() {
       targetTop: number;
       fallbackHeight: number;
       order: number;
+      scopeRank: number;
     }> = sortedVisibleCommentItems.map((comment, index) => {
       const imageCount = (comment.attachments ?? []).filter(
         (attachment) => attachment.kind === "image",
@@ -9798,6 +9855,7 @@ export default function Workbench() {
           : commentRailTargetTops[comment.target.id],
         fallbackHeight: 104 + textLines * 19 + imageRows * 78 + fileCount * 48,
         order: index + 1,
+        scopeRank: comment.target.tagName === "body" ? 0 : 1,
       };
     });
     const draftTargetTop = draftTarget?.tagName === "body"
@@ -9815,6 +9873,7 @@ export default function Workbench() {
         targetTop: draftTargetTop as number,
         fallbackHeight: 276,
         order: Number.MAX_SAFE_INTEGER,
+        scopeRank: draftTarget.tagName === "body" ? 0 : 1,
       });
     }
     if (
@@ -9827,6 +9886,7 @@ export default function Workbench() {
         targetTop: draftTargetTop as number,
         fallbackHeight: 142,
         order: Number.MAX_SAFE_INTEGER,
+        scopeRank: draftTarget.tagName === "body" ? 0 : 1,
       });
     }
     const layout = layoutCommentRailItems({
@@ -9837,6 +9897,7 @@ export default function Workbench() {
         targetTop: item.targetTop,
         height: commentCardHeights[item.key] || item.fallbackHeight,
         order: item.order,
+        scopeRank: item.scopeRank,
       })),
     });
     return {
@@ -9884,6 +9945,22 @@ export default function Workbench() {
   );
   const composerTop = commentRailLayout.composerTop;
   const draftRecoveryTop = commentRailLayout.draftRecoveryTop;
+  useLayoutEffect(() => {
+    if (
+      !composerFocusPendingRef.current
+      || !composerInCurrentTab
+      || !commentLayoutReady
+      || !Number.isFinite(composerTop)
+      || interactionLocked
+    ) return;
+    requestComposerFocus();
+  }, [
+    commentLayoutReady,
+    composerInCurrentTab,
+    composerTop,
+    interactionLocked,
+    requestComposerFocus,
+  ]);
   useEffect(() => {
     if (!commentLayoutReady) return;
     const pending = reviewRevealPendingRef.current;
@@ -9896,34 +9973,6 @@ export default function Workbench() {
     draftRecoveryTop,
     queueReviewPairReveal,
     renderedVisibleCommentItems,
-  ]);
-  useEffect(() => {
-    const becameReady =
-      commentLayoutReady && !commentLayoutWasReadyRef.current;
-    commentLayoutWasReadyRef.current = commentLayoutReady;
-    if (!becameReady) return;
-    if (
-      composerInCurrentTab
-      && draftTarget
-      && Number.isFinite(composerTop)
-    ) {
-      queueReviewPairReveal(draftTarget, "__composer");
-      return;
-    }
-    if (!focusedCommentId) return;
-    const comment = visibleCommentItems.find(
-      (item) => item.commentId === focusedCommentId,
-    );
-    if (comment) queueReviewPairReveal(comment.target, comment.commentId);
-  }, [
-    commentLayoutReady,
-    commentTargetTops,
-    composerTop,
-    composerInCurrentTab,
-    draftTarget,
-    focusedCommentId,
-    queueReviewPairReveal,
-    visibleCommentItems,
   ]);
   const commentRailContentHeight = Math.max(
     commentRailHeight,
@@ -9983,9 +10032,7 @@ export default function Workbench() {
         ) {
           setComposerOpen(true);
           queueReviewPairReveal(target, "__composer");
-          window.requestAnimationFrame(() => {
-            composerRef.current?.focus({ preventScroll: true });
-          });
+          requestComposerFocus();
         }
       } else {
         const comment = commentsRef.current.find(
@@ -10220,8 +10267,47 @@ export default function Workbench() {
         data-file-renaming={fileRenameEditing ? "true" : undefined}
       >
         <div className="window-file">
-          <span className="window-file-icon" aria-hidden="true">
-            <FileHtmlIcon size={20} weight="duotone" />
+          <span
+            className="window-file-icon-cluster"
+            data-update-visible={updateActionVisible ? "true" : undefined}
+            data-update-downloaded={updateDownloaded ? "true" : undefined}
+          >
+            <button
+              className="window-file-icon window-file-about-button"
+              type="button"
+              aria-label="关于源页"
+              title="关于源页"
+              onClick={openAboutPageRoot}
+            >
+              <FileHtmlIcon aria-hidden="true" size={20} weight="duotone" />
+            </button>
+            {updateActionVisible ? (
+              <button
+                className="header-update-badge window-file-update-badge"
+                type="button"
+                data-update-downloaded={updateDownloaded ? "true" : undefined}
+                aria-label={updateDownloaded
+                  ? `PageRoot ${updateResult?.latestVersion || "新版本"} 已下载，重启更新`
+                  : updateDownloading
+                    ? `正在下载 PageRoot ${updateResult?.latestVersion || "新版本"}`
+                    : `发现 PageRoot ${updateResult?.latestVersion || "新版本"}，下载更新`}
+                title={updateDownloaded
+                  ? `重启更新 PageRoot ${updateResult?.latestVersion || "新版本"}`
+                  : updateDownloading
+                    ? `正在下载 PageRoot ${updateResult?.latestVersion || "新版本"}`
+                    : `下载 PageRoot ${updateResult?.latestVersion || "新版本"}`}
+                disabled={updateDownloading}
+                onClick={() => {
+                  if (updateDownloaded) {
+                    setRestartUpdateOpen(true);
+                  } else if (updateResult?.status === "available") {
+                    void downloadAvailableUpdate();
+                  }
+                }}
+              >
+                <span>{updateBadgeLabel}</span>
+              </button>
+            ) : null}
           </span>
           <div className="window-file-copy">
             <div
@@ -10488,82 +10574,54 @@ export default function Workbench() {
             <ChatCircleTextIcon aria-hidden="true" size={18} weight="duotone" />
             全局评论
           </button>
-          <div className="header-send-cluster">
-            {updateActionVisible ? (
-              <button
-                className="header-update-badge"
-                type="button"
-                aria-label={updateDownloaded
-                  ? `PageRoot ${updateResult?.latestVersion || "新版本"} 已下载，重启更新`
-                  : updateDownloading
-                    ? `正在下载 PageRoot ${updateResult?.latestVersion || "新版本"}`
-                    : `发现 PageRoot ${updateResult?.latestVersion || "新版本"}，下载更新`}
-                title={updateDownloaded
-                  ? `重启更新 PageRoot ${updateResult?.latestVersion || "新版本"}`
-                  : updateDownloading
-                    ? `正在下载 PageRoot ${updateResult?.latestVersion || "新版本"}`
-                    : `下载 PageRoot ${updateResult?.latestVersion || "新版本"}`}
-                disabled={updateDownloading}
-                onClick={() => {
-                  if (updateDownloaded) {
-                    setRestartUpdateOpen(true);
-                  } else if (updateResult?.status === "available") {
-                    void downloadAvailableUpdate();
-                  }
-                }}
-              >
-                {updateBadgeLabel}
-              </button>
-            ) : null}
-            <button
-              className="header-send-button"
-              type="button"
-              data-handoff-status={currentQoderHandoffStatus}
-              data-copied={currentQoderHandoffStatus === "copied" ? "true" : undefined}
-              disabled={
-                generating
-                || projectHydrating
-                || Boolean(projectLoadError)
-                || viewTransitioning
-                || viewMode === "history"
-                || (!runInProgress && (
-                  pendingSendItemCount === 0
-                  || interactionLocked
-                  || persistState === "failed"
-                  || Boolean(draftPersistError)
-                ))
+          <button
+            className="header-send-button"
+            type="button"
+            data-handoff-status={currentQoderHandoffStatus}
+            data-copied={currentQoderHandoffStatus === "copied" ? "true" : undefined}
+            disabled={
+              generating
+              || projectHydrating
+              || Boolean(projectLoadError)
+              || viewTransitioning
+              || viewMode === "history"
+              || (!runInProgress && (
+                pendingSendItemCount === 0
+                || interactionLocked
+                || persistState === "failed"
+                || Boolean(draftPersistError)
+              ))
+            }
+            onClick={() => {
+              if (runInProgress) {
+                setHandoffPreviewOpen(false);
+                setCanvasMode("edit");
+                setDrawer("handoff");
+              } else {
+                void generateRequest();
               }
-              onClick={() => {
-                if (runInProgress) {
-                  setHandoffPreviewOpen(false);
-                  setCanvasMode("edit");
-                  setDrawer("handoff");
-                } else {
-                  void generateRequest();
-                }
-              }}
-            >
-              {currentQoderHandoffStatus === "copied" ? (
-                <CheckCircleIcon aria-hidden="true" size={18} weight="fill" />
-              ) : (
-                <PaperPlaneTiltIcon aria-hidden="true" size={18} weight="fill" />
-              )}
-              <span>
-                {generating
-                  ? "正在准备…"
-                  : currentQoderHandoffStatus === "copying"
-                    ? "正在复制交接内容…"
-                    : currentQoderHandoffStatus === "copied"
-                      ? "本轮要求已复制"
-                      : currentQoderHandoffStatus === "failed"
-                        ? "复制失败 · 查看"
-                        : "发送至 Qoder"}
-              </span>
-              {!runInProgress && currentQoderHandoffStatus !== "copied"
-                ? <small>{pendingSendItemCount}</small>
-                : null}
-            </button>
-          </div>
+            }}
+          >
+            {currentQoderHandoffStatus === "copied" ? (
+              <CheckCircleIcon aria-hidden="true" size={18} weight="fill" />
+            ) : (
+              <PaperPlaneTiltIcon aria-hidden="true" size={18} weight="fill" />
+            )}
+            <span>
+              {generating
+                ? "正在准备…"
+                : currentQoderHandoffStatus === "copying"
+                  ? "正在复制交接内容…"
+                  : currentQoderHandoffStatus === "copied"
+                    ? "本轮要求已复制"
+                    : currentQoderHandoffStatus === "failed"
+                      ? "复制失败 · 查看"
+                      : "发送至 Qoder"}
+            </span>
+            {!runInProgress && currentQoderHandoffStatus !== "copied"
+              ? <small>{pendingSendItemCount}</small>
+              : null}
+          </button>
         </nav>
         <input
           ref={fileInputRef}
@@ -10741,6 +10799,9 @@ export default function Workbench() {
             aria-busy={!commentLayoutReady}
             data-layout-ready={commentLayoutReady ? "true" : "false"}
             data-layout-generation={commentLayoutAuthority.viewContextGeneration}
+            data-layout-text-editing={
+              commentLayoutAuthority.textEditing ? "true" : undefined
+            }
             data-rail-following={commentRailFollowsFocus ? "true" : "false"}
             tabIndex={-1}
           >
@@ -11007,7 +11068,11 @@ export default function Workbench() {
                     if (commentId) pasteImages(event, { kind: "composer", commentId });
                   }}
                   onKeyDown={(event) => {
-                    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                    if (shouldSubmitCommentOnEnter({
+                      key: event.key,
+                      shiftKey: event.shiftKey,
+                      isComposing: event.nativeEvent.isComposing,
+                    })) {
                       event.preventDefault();
                       void addComment();
                     }
@@ -11248,10 +11313,11 @@ export default function Workbench() {
                         if (event.key === "Escape") {
                           event.preventDefault();
                           cancelCommentEdit();
-                        } else if (
-                          (event.metaKey || event.ctrlKey)
-                          && event.key === "Enter"
-                        ) {
+                        } else if (shouldSubmitCommentOnEnter({
+                          key: event.key,
+                          shiftKey: event.shiftKey,
+                          isComposing: event.nativeEvent.isComposing,
+                        })) {
                           event.preventDefault();
                           confirmCommentEdit(comment.commentId);
                         }

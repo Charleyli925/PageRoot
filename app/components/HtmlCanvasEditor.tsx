@@ -245,6 +245,7 @@ export type HtmlCanvasCommentLayoutState = {
   sourceSha256: string;
   viewContextGeneration: number;
   ready: boolean;
+  textEditing: boolean;
   targetIds: string[];
   scrollTop: number;
   contentHeight: number;
@@ -2758,11 +2759,16 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       appliedPageViewContextRef.current?.generation ?? 0;
     const layoutTargets = commentLayoutTargets(commentedTargetsRef.current);
     const targetIds = sortedCommentLayoutTargetIds(layoutTargets);
+    const textEditing = Boolean(
+      activeNativeEditRef.current
+      || pendingNativeEditResumeRef.current,
+    );
     if (!container || !iframe || !documentNode?.body) {
       onCommentLayoutRef.current?.({
         sourceSha256,
         viewContextGeneration,
         ready: false,
+        textEditing,
         targetIds,
         scrollTop: 0,
         contentHeight: 0,
@@ -2801,6 +2807,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         sourceSha256,
         viewContextGeneration,
         ready: false,
+        textEditing,
         targetIds,
         scrollTop,
         contentHeight: naturalDocumentContentHeight(documentNode, frameHeight),
@@ -2892,6 +2899,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       sourceSha256,
       viewContextGeneration,
       ready: true,
+      textEditing,
       targetIds,
       scrollTop,
       contentHeight: naturalDocumentContentHeight(documentNode, frameHeight),

@@ -6,6 +6,8 @@ import {
   consumeRailRestoreWheel,
   layoutCommentRailItems,
   routeCommentRailWheel,
+  shouldSubmitCommentOnEnter,
+  stabilizeCommentTargetLayouts,
 } from "../app/lib/comment-rail-layout.js";
 
 test("comment rail follows page position even when another item is focused", () => {
@@ -105,11 +107,111 @@ test("focused alignment translates the queue without changing its order", () => 
   assert.ok(offset < 0);
 });
 
+test("focused alignment never hides the focused card behind the rail header", () => {
+  assert.equal(computeAlignedRailOffset({
+    targetTop: 24,
+    cardTop: 220,
+    minimumTop: 118,
+  }), -102);
+  assert.equal(220 + computeAlignedRailOffset({
+    targetTop: 24,
+    cardTop: 220,
+    minimumTop: 118,
+  }), 118);
+});
+
 test("aligned queue never translates below its natural position", () => {
   assert.equal(computeAlignedRailOffset({
     targetTop: 320,
     cardTop: 180,
   }), 0);
+});
+
+test("global comments stay before local comments regardless of canvas position", () => {
+  const result = layoutCommentRailItems({
+    minimumTop: 80,
+    items: [
+      {
+        key: "local-near-top",
+        targetTop: 90,
+        height: 100,
+        order: 1,
+        scopeRank: 1,
+      },
+      {
+        key: "global",
+        targetTop: 80,
+        height: 100,
+        order: 2,
+        scopeRank: 0,
+      },
+      {
+        key: "local-later",
+        targetTop: 320,
+        height: 100,
+        order: 3,
+        scopeRank: 1,
+      },
+    ],
+  });
+
+  assert.deepEqual(result.orderedKeys, [
+    "global",
+    "local-near-top",
+    "local-later",
+  ]);
+});
+
+test("native text editing freezes visible target coordinates until editing ends", () => {
+  const previous = {
+    one: {
+      targetId: "one",
+      status: "visible",
+      resolution: "exact",
+      top: 120,
+      height: 42,
+    },
+  };
+  const next = {
+    one: {
+      targetId: "one",
+      status: "visible",
+      resolution: "rebound",
+      top: 260,
+      height: 88,
+      tabGroupKey: "report-tabs",
+    },
+  };
+
+  assert.deepEqual(stabilizeCommentTargetLayouts({
+    previous,
+    next,
+    textEditing: true,
+  }), {
+    one: {
+      ...next.one,
+      top: 120,
+      height: 42,
+    },
+  });
+  assert.equal(stabilizeCommentTargetLayouts({
+    previous,
+    next,
+    textEditing: false,
+  }), next);
+});
+
+test("Enter submits comments, Shift+Enter and IME composition do not", () => {
+  assert.equal(shouldSubmitCommentOnEnter({ key: "Enter" }), true);
+  assert.equal(shouldSubmitCommentOnEnter({
+    key: "Enter",
+    shiftKey: true,
+  }), false);
+  assert.equal(shouldSubmitCommentOnEnter({
+    key: "Enter",
+    isComposing: true,
+  }), false);
+  assert.equal(shouldSubmitCommentOnEnter({ key: "a" }), false);
 });
 
 test("upward wheel restores hidden comments only after the page reaches top", () => {

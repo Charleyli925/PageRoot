@@ -1300,11 +1300,69 @@ test("multiple orphaned comments relink in sequence and resume the original send
   }
 });
 
-test("an automatic update result appears above the Qoder action", async () => {
+test("automatic update actions sit on the HTML icon and the icon opens About", async () => {
   const fixture = createSourceFixture("update-indicator.html");
   const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
   try {
     await loadedDiskFrame(launched.page, fixture.sourcePath);
+    const evidenceDirectory = path.join(
+      productRoot,
+      "output/design-qa/comment-presentation-header-polish",
+    );
+    mkdirSync(evidenceDirectory, { recursive: true });
+    const captureHeader = async (fileName) => {
+      const geometry = await launched.page.evaluate(() => {
+        const rect = (selector) => {
+          const element = document.querySelector(selector);
+          if (!element) return null;
+          const box = element.getBoundingClientRect();
+          return {
+            left: box.left,
+            top: box.top,
+            right: box.right,
+            bottom: box.bottom,
+            width: box.width,
+            height: box.height,
+          };
+        };
+        return {
+          viewportWidth: window.innerWidth,
+          header: rect(".workbench-header"),
+          cluster: rect(".window-file-icon-cluster"),
+          icon: rect(".window-file-about-button"),
+          badge: rect(".window-file-update-badge"),
+          badgeLabel: rect(".window-file-update-badge > span"),
+          fileCopy: rect(".window-file-copy"),
+        };
+      });
+      expect(geometry.header).not.toBeNull();
+      expect(geometry.cluster).not.toBeNull();
+      expect(geometry.icon).not.toBeNull();
+      expect(geometry.badge).not.toBeNull();
+      expect(geometry.badgeLabel).not.toBeNull();
+      expect(geometry.fileCopy).not.toBeNull();
+      expect(geometry.badgeLabel.top).toBeGreaterThanOrEqual(
+        geometry.header.top,
+      );
+      expect(geometry.badgeLabel.bottom).toBeLessThanOrEqual(
+        geometry.header.bottom,
+      );
+      expect(geometry.badgeLabel.right).toBeLessThanOrEqual(
+        geometry.fileCopy.left - 8,
+      );
+      expect(geometry.badgeLabel.top).toBeLessThan(geometry.icon.bottom);
+      await launched.page.screenshot({
+        path: path.join(evidenceDirectory, fileName),
+        clip: {
+          x: 0,
+          y: 0,
+          width: Math.min(900, geometry.viewportWidth),
+          height: geometry.header.height,
+        },
+      });
+      return geometry;
+    };
+
     await launched.electronApp.evaluate(({ BrowserWindow }) => {
       BrowserWindow.getAllWindows()[0]?.webContents.send(
         "html-updates:status",
@@ -1321,14 +1379,25 @@ test("an automatic update result appears above the Qoder action", async () => {
     await expect(launched.page.getByRole("button", {
       name: "发现 PageRoot 9.9.9，下载更新",
     })).toBeVisible();
+    const newGeometry = await captureHeader("new-update.png");
+
+    await launched.page.getByRole("button", { name: "关于源页" }).click();
+    await expect(launched.page.getByRole("dialog", { name: "源页" }))
+      .toBeVisible();
+    await launched.page.getByRole("button", { name: "关闭关于源页" }).click();
+    await expect(launched.page.locator("dialog.about-dialog[open]"))
+      .toHaveCount(0);
+    await launched.page.evaluate(() => new Promise((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(resolve));
+    }));
 
     await launched.electronApp.evaluate(({ BrowserWindow }) => {
       BrowserWindow.getAllWindows()[0]?.webContents.send(
         "html-updates:status",
         {
-          status: "current",
+          status: "downloaded",
           currentVersion: "0.8.6",
-          latestVersion: "0.8.6",
+          latestVersion: "9.9.9",
           minimumMacOS: "12.0",
           architecture: "arm64",
           publishedAt: "2026-07-23T00:00:00.000Z",
@@ -1336,8 +1405,27 @@ test("an automatic update result appears above the Qoder action", async () => {
       );
     });
     await expect(launched.page.getByRole("button", {
-      name: "发现 PageRoot 9.9.9，下载更新",
-    })).toHaveCount(0);
+      name: "PageRoot 9.9.9 已下载，重启更新",
+    })).toBeVisible();
+    await expect(launched.page.getByRole("dialog", {
+      name: "现在重启并安装更新？",
+    })).toBeVisible();
+    await launched.page.getByRole("button", { name: "稍后" }).click();
+    await expect(launched.page.locator("dialog.restart-update-dialog[open]"))
+      .toHaveCount(0);
+    await launched.page.evaluate(() => new Promise((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(resolve));
+    }));
+    const restartGeometry = await captureHeader("restart-update.png");
+    writeFileSync(
+      path.join(evidenceDirectory, "header-geometry.json"),
+      JSON.stringify({
+        viewport: { width: newGeometry.viewportWidth },
+        available: newGeometry,
+        downloaded: restartGeometry,
+      }, null, 2),
+      "utf8",
+    );
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);

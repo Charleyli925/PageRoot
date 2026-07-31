@@ -14,6 +14,10 @@
       font: 16px/1.7 system-ui, sans-serif;
     }
 
+    .top-spacer {
+      height: 720px;
+    }
+
     .chart-shell {
       max-width: 980px;
     }
@@ -47,11 +51,11 @@
       display: block;
     }
 
-    .short-panel {
+    #chart0 {
       min-height: 460px;
     }
 
-    .tall-panel {
+    #chart1 {
       min-height: 1760px;
     }
 
@@ -62,33 +66,36 @@
       background: #f7f8fb;
     }
 
-    .tall-panel .comment-target {
+    #chart1 .comment-target {
       margin-top: 760px;
     }
   </style>
 </head>
 <body>
+  <div class="top-spacer" aria-hidden="true"></div>
   <main class="chart-shell">
     <div class="chart-tabs">
       <div
         class="chart-tab active"
         data-native-case="indexed-tab-one"
+        data-p="chart0"
         onclick="switchChart(0)"
       >锁单确收增幅</div>
       <div
         class="chart-tab"
         data-native-case="indexed-tab-two"
+        data-p="chart1"
         onclick="switchChart(1)"
       >IPV增幅</div>
     </div>
     <div class="chart-panels">
-      <section class="chart-panel short-panel active" id="chart0">
+      <section class="chart-panel active" id="chart0">
         <p
           class="comment-target"
           data-native-case="indexed-comment-one"
         >锁单确收评论目标</p>
       </section>
-      <section class="chart-panel tall-panel" id="chart1">
+      <section class="chart-panel" id="chart1">
         <p
           class="comment-target"
           data-native-case="indexed-comment-two"

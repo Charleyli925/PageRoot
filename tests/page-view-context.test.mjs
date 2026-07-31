@@ -48,6 +48,33 @@ const PRESENTATION_HTML = `<!doctype html>
 </body>
 </html>`;
 
+const DATA_LINKED_TAB_HTML = `<!doctype html>
+<html>
+<head>
+  <style>
+    .report-panel { display: none; }
+    .report-panel.active { display: block; }
+  </style>
+</head>
+<body>
+  <nav class="report-tabs">
+    <div id="legacy-tab-one" class="report-tab active" data-p="legacy-panel-one">第一页</div>
+    <div id="legacy-tab-two" class="report-tab" data-p="legacy-panel-two"><span id="legacy-tab-two-label">第二页</span></div>
+  </nav>
+  <main>
+    <section id="legacy-panel-one" class="report-panel active"><p>第一页正文</p></section>
+    <section id="legacy-panel-two" class="report-panel"><p>第二页正文</p></section>
+  </main>
+  <script>
+    document.querySelectorAll("[data-p]").forEach((tab) => {
+      tab.addEventListener("click", () => {
+        document.documentElement.dataset.authorAction = tab.dataset.p;
+      });
+    });
+  </script>
+</body>
+</html>`;
+
 function sourceNodeId(index, id) {
   const element = index.elements.find(
     (candidate) => candidate.stableAttributes.id === id,
@@ -368,6 +395,90 @@ test("semantic Tab actions switch only disposable presentation context", () => {
   assert.equal(currentAction.label, "当前页签");
   assert.equal(currentAction.isCurrent, true);
   assert.deepEqual(currentAction.nextContext, action.nextContext);
+});
+
+test("explicit data-linked tabs switch only the bounded active-class context", () => {
+  const html = DATA_LINKED_TAB_HTML;
+  const index = buildSourceIndex(html);
+  const action = createPagePresentationAction({
+    html,
+    sourceIndex: index,
+    documentKey: "editing:/tmp/legacy-report.html",
+    generation: 4,
+    targetRef: targetRef(index, "legacy-tab-two-label"),
+  });
+
+  assert.ok(action);
+  assert.equal(action.kind, "activate-tab");
+  assert.equal(action.label, "切换到此页签");
+  assert.equal(action.isCurrent, false);
+  assert.equal(index.source, html);
+
+  const resolved = resolvePageViewContext(html, action.nextContext);
+  const stateById = new Map(resolved.entries.map((item) => [
+    resolved.sourceIndex.byNodeId.get(item.sourceNodeId)?.stableAttributes.id,
+    item.entry,
+  ]));
+  assert.deepEqual(stateById.get("legacy-tab-one")?.classRemove, ["active"]);
+  assert.deepEqual(stateById.get("legacy-tab-two")?.classAdd, ["active"]);
+  assert.deepEqual(stateById.get("legacy-panel-one")?.classRemove, ["active"]);
+  assert.deepEqual(stateById.get("legacy-panel-two")?.classAdd, ["active"]);
+  assert.equal(stateById.size, 4);
+
+  const currentAction = createPagePresentationAction({
+    html,
+    sourceIndex: index,
+    documentKey: "editing:/tmp/legacy-report.html",
+    generation: 99,
+    currentContext: action.nextContext,
+    targetRef: targetRef(index, "legacy-tab-two"),
+  });
+  assert.ok(currentAction);
+  assert.equal(currentAction.label, "当前页签");
+  assert.equal(currentAction.isCurrent, true);
+  assert.deepEqual(currentAction.nextContext, action.nextContext);
+});
+
+test("ambiguous data-linked tabs fail closed", () => {
+  const cases = [
+    DATA_LINKED_TAB_HTML.replace(
+      'data-p="legacy-panel-two"',
+      'data-p="legacy-panel-one"',
+    ),
+    DATA_LINKED_TAB_HTML.replace(
+      'class="report-tab" data-p="legacy-panel-two"',
+      'class="report-tab" data-tab="legacy-panel-two"',
+    ),
+    DATA_LINKED_TAB_HTML.replace(
+      'class="report-panel"><p>第二页正文',
+      'class="report-panel active"><p>第二页正文',
+    ),
+    DATA_LINKED_TAB_HTML.replace(
+      'class="report-tab" data-p="legacy-panel-two"',
+      'class="other-tab" data-p="legacy-panel-two"',
+    ),
+  ];
+
+  for (const html of cases) {
+    const index = buildSourceIndex(html);
+    assert.equal(createPagePresentationAction({
+      html,
+      sourceIndex: index,
+      documentKey: "editing:ambiguous",
+      targetRef: targetRef(index, "legacy-tab-two"),
+    }), null);
+  }
+
+  const onclickOnly = DATA_LINKED_TAB_HTML
+    .replace(/ data-p="legacy-panel-one"/u, ' onclick="showOne()"')
+    .replace(/ data-p="legacy-panel-two"/u, ' onclick="showTwo()"');
+  const onclickIndex = buildSourceIndex(onclickOnly);
+  assert.equal(createPagePresentationAction({
+    html: onclickOnly,
+    sourceIndex: onclickIndex,
+    documentKey: "editing:onclick-only",
+    targetRef: targetRef(onclickIndex, "legacy-tab-two"),
+  }), null);
 });
 
 test("presentation actions preserve bounded read-only visuals", () => {

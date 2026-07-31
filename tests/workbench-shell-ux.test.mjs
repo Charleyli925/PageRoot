@@ -450,7 +450,10 @@ test("header prioritizes the filename and keeps the approved action order", () =
     workbench.indexOf("</header>", headerStart),
   );
   assert.match(header, /className="window-file"/);
-  assert.match(header, /className="window-file-icon"[\s\S]*?<FileHtmlIcon/);
+  assert.match(
+    header,
+    /className="window-file-icon window-file-about-button"[\s\S]*?aria-label="关于源页"[\s\S]*?onClick=\{openAboutPageRoot\}[\s\S]*?<FileHtmlIcon/,
+  );
   assert.match(header, /className="save-status"/);
   assert.match(
     workbench,
@@ -463,7 +466,7 @@ test("header prioritizes the filename and keeps the approved action order", () =
   assert.doesNotMatch(header, /brand-logo\.png|className="brand"|className="update-badge"/);
   assert.match(
     header,
-    /updateActionVisible[\s\S]*?className="header-update-badge"[\s\S]*?updateDownloaded[\s\S]*?setRestartUpdateOpen\(true\)[\s\S]*?downloadAvailableUpdate\(\)[\s\S]*?\{updateBadgeLabel\}/,
+    /className="window-file-icon-cluster"[\s\S]*?updateActionVisible[\s\S]*?className="header-update-badge window-file-update-badge"[\s\S]*?updateDownloaded[\s\S]*?setRestartUpdateOpen\(true\)[\s\S]*?downloadAvailableUpdate\(\)[\s\S]*?\{updateBadgeLabel\}/,
   );
   assert.match(
     styles,
@@ -485,7 +488,7 @@ test("header prioritizes the filename and keeps the approved action order", () =
   const project = header.indexOf('className="project-button"');
   const globalComment = header.indexOf('className="global-comment-button"');
   const send = header.indexOf('className="header-send-button"');
-  const about = header.indexOf('className="about-trigger-button"');
+  const about = header.indexOf("window-file-about-button");
   assert.ok(
     editPreview >= 0
       && project > editPreview
@@ -493,8 +496,8 @@ test("header prioritizes the filename and keeps the approved action order", () =
       && send > globalComment,
     "header actions must remain edit/preview, project, global comment, then send",
   );
-  assert.equal(about, -1);
-  assert.doesNotMatch(header, /InfoIcon|关于源页/);
+  assert.ok(about >= 0 && about < editPreview);
+  assert.doesNotMatch(header, /InfoIcon|about-trigger-button/);
   assert.match(workbench, /window\.htmlAIUpdates/);
   assert.match(workbench, /updates\.getStatus\(\)/);
   assert.match(workbench, /updates\.onStatus\(receiveStatus\)/);
@@ -507,7 +510,7 @@ test("header prioritizes the filename and keeps the approved action order", () =
   assert.match(styles, /\.header-actions button,[\s\S]*?border:\s*0[\s\S]*?box-shadow:\s*none/);
   assert.match(
     styles,
-    /\.header-actions \.header-update-badge\s*\{[\s\S]*?right:\s*0[\s\S]*?padding:\s*0[\s\S]*?border:\s*0[\s\S]*?background:\s*transparent[\s\S]*?color:\s*var\(--red\)[\s\S]*?font-style:\s*italic/,
+    /\.window-file-icon-cluster\s*\{[\s\S]*?width:\s*60px[\s\S]*?height:\s*42px[\s\S]*?\.window-file-update-badge\s*\{[\s\S]*?top:\s*22px[\s\S]*?width:\s*60px[\s\S]*?height:\s*20px[\s\S]*?background:\s*transparent[\s\S]*?font-size:\s*8px/,
   );
   assert.match(mainProcess, /startAutomaticChecks\(\)/);
   assert.match(mainProcess, /createApplicationUpdateController/);
@@ -1235,7 +1238,18 @@ test("comment composer is explicit, transient and horizontally contained", () =>
     workbench,
     /focusCommentTarget\(comment\.target, comment\.commentId\)/,
   );
-  assert.match(workbench, /\(event\.metaKey \|\| event\.ctrlKey\) && event\.key === "Enter"/);
+  assert.match(
+    workbench,
+    /shouldSubmitCommentOnEnter\(\{[\s\S]*?key: event\.key,[\s\S]*?shiftKey: event\.shiftKey,[\s\S]*?isComposing: event\.nativeEvent\.isComposing/,
+  );
+  assert.match(
+    workbench,
+    /const requestComposerFocus = useCallback[\s\S]*?composerFocusPendingRef\.current = true[\s\S]*?focus\(\{ preventScroll: true \}\)/,
+  );
+  assert.match(
+    workbench,
+    /useLayoutEffect\(\(\) => \{[\s\S]*?composerFocusPendingRef\.current[\s\S]*?requestComposerFocus\(\)/,
+  );
   assert.doesNotMatch(workbench, /自动记录 · ⌘ Enter 发送/);
   assert.doesNotMatch(workbench, /comment-target[\s\S]{0,300}targetResolutionLabel/);
   const composer = workbench.slice(
@@ -1298,6 +1312,7 @@ test("comment composer is explicit, transient and horizontally contained", () =>
 test("comment layout uses one current snapshot and isolates recovery per item", () => {
   assert.match(canvas, /targetIds: string\[\]/);
   assert.match(canvas, /contentHeight: number/);
+  assert.match(canvas, /textEditing: boolean/);
   assert.match(canvas, /function naturalDocumentContentHeight/);
   assert.match(canvas, /visibleCount === 1/);
   assert.match(
@@ -1309,6 +1324,11 @@ test("comment layout uses one current snapshot and isolates recovery per item", 
     /commentLayoutsByTargetId\.get\(target\.id\)\?\.status !== "visible"/,
   );
   assert.match(workbench, /commentLayoutAuthority\.targetIdsKey/);
+  assert.match(
+    workbench,
+    /commentLayoutAuthority\.textEditing[\s\S]*?\|\|[\s\S]*?!expectedCommentLayoutSourceSha256/,
+  );
+  assert.match(workbench, /stabilizeCommentTargetLayouts\(\{/);
   assert.match(
     workbench,
     /layout\?\.status === "missing"[\s\S]*?\?\s*commentRailMinimumTop/,
@@ -1418,7 +1438,10 @@ test("saved-comment edits are staged, recoverable, and auto-cancel only while cl
 });
 
 test("explicit comment navigation translates one stable queue and rail wheel drives the shared page", () => {
-  assert.match(workbench, /computeAlignedRailOffset\(\{/u);
+  assert.match(
+    workbench,
+    /computeAlignedRailOffset\(\{[\s\S]*?minimumTop: commentRailMinimumTop/u,
+  );
   assert.match(workbench, /routeCommentRailWheel\(\{/u);
   assert.match(workbench, /rail\.addEventListener\("wheel", handleWheel, \{ passive: false \}\)/u);
   assert.match(workbench, /viewportTop:\s*Math\.max\(0, commentViewport\.top - commentRailOffset\)/u);
@@ -1428,6 +1451,11 @@ test("explicit comment navigation translates one stable queue and rail wheel dri
     /transform:\s*translate3d\(0, var\(--comment-rail-offset\), 0\)/u,
   );
   assert.match(styles, /\.comment-rail-header\s*\{[\s\S]*?z-index:\s*8/u);
+  assert.doesNotMatch(workbench, /commentLayoutWasReadyRef|const becameReady/u);
+  assert.match(
+    workbench,
+    /const acceptPageViewContext[\s\S]*?const scrollTop = stage\?\.scrollTop[\s\S]*?currentStage\.scrollTo\(\{[\s\S]*?behavior: "auto"/u,
+  );
 });
 
 test("comment attachments support paste, upload, removal, preview, and AI handoff metadata", () => {

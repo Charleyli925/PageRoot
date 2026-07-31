@@ -46,6 +46,11 @@ test("edit mode reveals semantic source content without running authored actions
   await tabAction.click();
   await expect(overviewPanel).toBeHidden();
   await expect(detailsPanel).toBeVisible();
+  const reviewStage = page.locator(".review-scroll-stage");
+  const scrollTopAfterSwitch = await reviewStage.evaluate(
+    (element) => element.scrollTop,
+  );
+  expect(scrollTopAfterSwitch).toBeGreaterThan(100);
   const currentTabAction = editor.getByRole("button", {
     name: "当前页签",
     exact: true,
@@ -80,6 +85,54 @@ test("edit mode reveals semantic source content without running authored actions
   await expect(editor.getByRole("button", {
     name: /^(?:切换到此页签|当前页签|展开内容|收起内容)$/u,
   })).toHaveCount(0);
+
+  expect(await frame.evaluate(() => ({
+    authorAction: document.documentElement.dataset.authorAction ?? null,
+    authorScriptRan: document.documentElement.dataset.authorScriptRan ?? null,
+  }))).toEqual({
+    authorAction: null,
+    authorScriptRan: null,
+  });
+  expect((await exportCurrentHtml(page)).equals(original)).toBe(true);
+});
+
+test("explicit data-linked tabs switch safely without running scripts, changing bytes, or resetting page scroll", async ({
+  page,
+}) => {
+  const original = fixtureBuffer("indexed-script-tabs.html");
+  const { editor, frame } = await loadFixture(
+    page,
+    "indexed-script-tabs.html",
+    { buffer: original },
+  );
+  const firstPanel = frame.locator("#chart0");
+  const secondPanel = frame.locator("#chart1");
+  const secondTab = frame.locator(caseSelector("indexed-tab-two"));
+  const reviewStage = page.locator(".review-scroll-stage");
+
+  await expect(firstPanel).toBeVisible();
+  await expect(secondPanel).toBeHidden();
+  await secondTab.click();
+  await expect(firstPanel).toBeVisible();
+  await expect(secondPanel).toBeHidden();
+
+  const action = editor.getByRole("button", {
+    name: "切换到此页签",
+    exact: true,
+  });
+  await expect(action).toBeVisible();
+  const scrollTopBefore = await reviewStage.evaluate(
+    (element) => element.scrollTop,
+  );
+  expect(scrollTopBefore).toBeGreaterThan(0);
+
+  await action.click();
+  await expect(firstPanel).toBeHidden();
+  await expect(secondPanel).toBeVisible();
+  await expect.poll(async () => Math.abs(
+    (await reviewStage.evaluate((element) => element.scrollTop))
+      - scrollTopBefore,
+  )).toBeLessThanOrEqual(1);
 
   expect(await frame.evaluate(() => ({
     authorAction: document.documentElement.dataset.authorAction ?? null,
