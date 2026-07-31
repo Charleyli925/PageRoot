@@ -13,6 +13,7 @@ import {
   type ChangeEvent,
   type ClipboardEvent,
   type CSSProperties,
+  type SetStateAction,
 } from "react";
 import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowCounterClockwise";
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/csr/ArrowSquareOut";
@@ -104,6 +105,10 @@ import {
   type ProjectRulesSnapshot,
 } from "./application/project-rules-session.js";
 import { ProjectSession } from "./application/project-session.js";
+import {
+  RunSession,
+  type RunSessionSnapshot,
+} from "./application/run-session.js";
 import { createBrowserRecoveryStore } from "./application/recovery-store.js";
 import { SourceHistorySession } from "./application/source-history-session.js";
 import type { SourceHistoryDirection } from "./domain/source-history.js";
@@ -272,6 +277,12 @@ const INITIAL_PROJECT_RULES_SNAPSHOT: ProjectRulesSnapshot = {
   saveError: "",
   compositionActive: false,
   editorGeneration: 0,
+};
+const INITIAL_RUN_SNAPSHOT: RunSessionSnapshot = {
+  activeSourcePath: null,
+  activeRun: null,
+  activeHandoff: null,
+  backgroundResults: [],
 };
 
 function waitFor(delayMs: number): Promise<void> {
@@ -452,22 +463,15 @@ export default function Workbench() {
   const draftRecoveryOperationIdRef = useRef<string | null>(null);
   const projectRegistrationPromiseRef =
     useRef<Promise<ProjectContext | null> | null>(null);
-  const backgroundRunsRef = useRef<Map<string, ActiveRun>>(new Map());
-  const backgroundProjectResultsRef =
-    useRef<Map<string, BackgroundProjectResult>>(new Map());
-  const qoderHandoffStatesRef =
-    useRef<Map<string, ProjectQoderHandoffState>>(new Map());
-  const activeRunRef = useRef<ActiveRun | null>(null);
+  const runSessionRef = useRef(new RunSession({
+    sourcePath: WELCOME_PROJECT.sourcePath,
+  }));
   const submissionIntentRef = useRef<{
     token: number;
     epoch: number;
     sourcePath: string;
   } | null>(null);
   const submissionIntentCounterRef = useRef(0);
-  const activatingRunsRef = useRef<Set<string>>(new Set());
-  const cancellingRunsRef = useRef<Set<string>>(new Set());
-  const resolvingRunsRef = useRef<Set<string>>(new Set());
-  const statusPollBusyRef = useRef<Set<string>>(new Set());
   const toastRef = useRef<Toast>(null);
   const previousPersistStateRef = useRef(new Map<string, PersistState>());
   const previousRunStateRef = useRef(
@@ -520,8 +524,15 @@ export default function Workbench() {
   const [draftAttachments, setDraftAttachments] = useState<CommentAttachment[]>([]);
   const [attachmentObjectUrls, setAttachmentObjectUrls] = useState<Record<string, string>>({});
   const [attachmentUploadCount, setAttachmentUploadCount] = useState(0);
-  const [backgroundProjectResults, setBackgroundProjectResults] =
-    useState<Map<string, BackgroundProjectResult>>(new Map());
+  const [runSnapshot, setRunSnapshot] = useState<RunSessionSnapshot>(
+    INITIAL_RUN_SNAPSHOT,
+  );
+  const backgroundProjectResults = useMemo(
+    () => new Map<string, BackgroundProjectResult>(
+      runSnapshot.backgroundResults,
+    ),
+    [runSnapshot.backgroundResults],
+  );
   const [previewAttachment, setPreviewAttachment] = useState<CommentAttachment | null>(null);
   const [composerOpen, setComposerOpen] = useState(false);
   const [comments, setComments] = useState<CommentItem[]>([]);
@@ -577,7 +588,15 @@ export default function Workbench() {
   const [viewingVersionId, setViewingVersionId] = useState<string | null>(null);
   const [renderedContentSha256, setRenderedContentSha256] = useState<string | null>(null);
   const [, setBridgeConnected] = useState<boolean | null>(null);
-  const [activeRun, setActiveRun] = useState<ActiveRun | null>(null);
+  const activeRun = runSnapshot.activeRun;
+  const setActiveRun = useCallback((
+    next: SetStateAction<ActiveRun | null>,
+  ) => {
+    const session = runSessionRef.current;
+    session.setActiveRun(
+      typeof next === "function" ? next(session.activeRun) : next,
+    );
+  }, []);
   const [projectLocked, setProjectLocked] = useState(false);
   const [projectHydrating, setProjectHydrating] = useState(false);
   const [projectLoadError, setProjectLoadError] = useState<string | null>(null);
@@ -595,8 +614,7 @@ export default function Workbench() {
   const [relinkingTarget, setRelinkingTarget] = useState<string | null>(null);
   const [runtimeCapabilitiesReady, setRuntimeCapabilitiesReady] = useState(false);
   const [browserPreviewOnly, setBrowserPreviewOnly] = useState(false);
-  const [qoderHandoffState, setQoderHandoffState] =
-    useState<ProjectQoderHandoffState | null>(null);
+  const qoderHandoffState = runSnapshot.activeHandoff;
   const [updateResult, setUpdateResult] =
     useState<ApplicationUpdateResult | null>(null);
   const [aboutOpen, setAboutOpen] = useState(false);
@@ -645,6 +663,11 @@ export default function Workbench() {
         return current?.path === "PROJECT.md" ? null : current;
       });
     });
+    return () => session.setObserver(null);
+  }, []);
+  useEffect(() => {
+    const session = runSessionRef.current;
+    session.setObserver(setRunSnapshot);
     return () => session.setObserver(null);
   }, []);
   const reportInterruptionPresence = useCallback((
@@ -1265,9 +1288,6 @@ export default function Workbench() {
     sourceShaRef.current = sourceSha256;
   }, [sourceSha256]);
   useEffect(() => {
-    activeRunRef.current = activeRun;
-  }, [activeRun]);
-  useEffect(() => {
     changeEventsRef.current = changeEvents;
   }, [changeEvents]);
   useEffect(() => {
@@ -1326,26 +1346,11 @@ export default function Workbench() {
     activeSourcePath: string,
     result: BackgroundProjectResult,
   ) => {
-    for (const key of backgroundProjectResultsRef.current.keys()) {
-      if (sameLocalSourcePath(key, activeSourcePath)) {
-        backgroundProjectResultsRef.current.delete(key);
-      }
-    }
-    backgroundProjectResultsRef.current.set(activeSourcePath, result);
-    setBackgroundProjectResults(new Map(backgroundProjectResultsRef.current));
+    runSessionRef.current.markResult(activeSourcePath, result);
   }, []);
 
   const clearBackgroundProjectResult = useCallback((activeSourcePath: string) => {
-    let changed = false;
-    for (const key of backgroundProjectResultsRef.current.keys()) {
-      if (sameLocalSourcePath(key, activeSourcePath)) {
-        backgroundProjectResultsRef.current.delete(key);
-        changed = true;
-      }
-    }
-    if (changed) {
-      setBackgroundProjectResults(new Map(backgroundProjectResultsRef.current));
-    }
+    runSessionRef.current.clearResult(activeSourcePath);
   }, []);
 
   const handleCommentLayout = useCallback((layout: HtmlCanvasCommentLayoutState) => {
@@ -2408,7 +2413,7 @@ export default function Workbench() {
     lastModifiedAt?: string;
   }) => {
     markProjectHydrationStage("apply-start");
-    const outgoingRun = activeRunRef.current;
+    const outgoingRun = runSessionRef.current.activeRun;
     const outgoingSourcePath = projectSessionRef.current.sourcePath;
     if (
       outgoingRun
@@ -2436,24 +2441,14 @@ export default function Workbench() {
       }
     }
     const backgroundRun = project.sourcePath
-      ? backgroundRunsRef.current.get(project.sourcePath)
-        || [...backgroundRunsRef.current.values()].find(
-          (run) => sameLocalSourcePath(run.sourcePath, project.sourcePath),
-        )
-        || null
+      ? runSessionRef.current.runForSource(project.sourcePath)
       : null;
     const backgroundRunKey = backgroundRun
       ? activeRunOperationKey(backgroundRun)
       : "";
-    const projectQoderHandoff = project.sourcePath
-      ? qoderHandoffStatesRef.current.get(project.sourcePath)
-        || [...qoderHandoffStatesRef.current.values()].find(
-          (state) => sameLocalSourcePath(state.sourcePath, project.sourcePath),
-        )
-        || null
-      : null;
     const opensLockedProject = isLockedLifecycle(backgroundRun?.status);
     projectSessionRef.current.openLocator(project.sourcePath || null);
+    runSessionRef.current.activate(project.sourcePath || null);
     clearAutosaveTimer();
     pendingWriteRef.current = null;
     auditPendingRef.current = [];
@@ -2554,9 +2549,6 @@ export default function Workbench() {
     );
     setViewingVersionId(null);
     setRenderedContentSha256(null);
-    activeRunRef.current = backgroundRun;
-    setActiveRun(backgroundRun);
-    setQoderHandoffState(projectQoderHandoff);
     setProjectLocked(opensLockedProject);
     setProjectHydrating(Boolean(project.sourcePath));
     setProjectLoadError(null);
@@ -2571,13 +2563,13 @@ export default function Workbench() {
       sameLocalSourcePath(submissionIntentRef.current?.sourcePath, project.sourcePath),
     );
     setCancelling(
-      Boolean(backgroundRunKey && cancellingRunsRef.current.has(backgroundRunKey)),
+      runSessionRef.current.isOperationBusy("cancel", backgroundRunKey),
     );
     setOpeningReadyVersion(
-      Boolean(backgroundRunKey && activatingRunsRef.current.has(backgroundRunKey)),
+      runSessionRef.current.isOperationBusy("activate", backgroundRunKey),
     );
     setResolvingConflict(
-      Boolean(backgroundRunKey && resolvingRunsRef.current.has(backgroundRunKey)),
+      runSessionRef.current.isOperationBusy("resolve", backgroundRunKey),
     );
     setDrawer(null);
     setFileView(null);
@@ -2690,42 +2682,11 @@ export default function Workbench() {
     if (!updatesCurrentProject) return null;
 
     if (projectSessionRef.current.sourcePath !== nextSourcePath) {
-      const trackedRun = backgroundRunsRef.current.get(previousSourcePath)
-        || [...backgroundRunsRef.current.values()].find(
-          (run) => (
-            run.projectId === nextProjectId
-            || sameLocalSourcePath(run.sourcePath, previousSourcePath)
-          ),
-        );
-      for (const [trackedPath, run] of backgroundRunsRef.current) {
-        if (
-          run.projectId === nextProjectId
-          || sameLocalSourcePath(trackedPath, previousSourcePath)
-        ) {
-          backgroundRunsRef.current.delete(trackedPath);
-        }
-      }
-      if (trackedRun) {
-        backgroundRunsRef.current.set(nextSourcePath, {
-          ...trackedRun,
-          sourcePath: nextSourcePath,
-        });
-      }
-      const trackedHandoff = qoderHandoffStatesRef.current.get(previousSourcePath)
-        || [...qoderHandoffStatesRef.current.values()].find(
-          (state) => sameLocalSourcePath(state.sourcePath, previousSourcePath),
-        );
-      for (const [trackedPath] of qoderHandoffStatesRef.current) {
-        if (sameLocalSourcePath(trackedPath, previousSourcePath)) {
-          qoderHandoffStatesRef.current.delete(trackedPath);
-        }
-      }
-      if (trackedHandoff) {
-        qoderHandoffStatesRef.current.set(nextSourcePath, {
-          ...trackedHandoff,
-          sourcePath: nextSourcePath,
-        });
-      }
+      runSessionRef.current.rebaseSource({
+        previousSourcePath,
+        sourcePath: nextSourcePath,
+        projectId: nextProjectId,
+      });
       const transitionedContext = projectSessionRef.current.transitionSource({
         previousSourcePath,
         sourcePath: nextSourcePath,
@@ -3374,18 +3335,18 @@ export default function Workbench() {
           : null,
       );
       if (recoveredRun && isLockedLifecycle(recoveredRun.status)) {
-        setActiveRun(recoveredRun);
+        runSessionRef.current.trackRun(recoveredRun);
         setProjectLocked(true);
         projectLockedRef.current = true;
-        backgroundRunsRef.current.set(activeSource, recoveredRun);
         if (projectHydratingRef.current) {
           setHandoffPreviewOpen(false);
           setCanvasMode("edit");
           setDrawer("handoff");
         }
       } else {
-        setActiveRun(null);
-        backgroundRunsRef.current.delete(activeSource);
+        const trackedRun = runSessionRef.current.runForSource(activeSource);
+        if (trackedRun) runSessionRef.current.removeRun(trackedRun);
+        else runSessionRef.current.clearActiveRun();
         setProjectLocked(false);
         projectLockedRef.current = false;
         if (!sourceBoundaryFrozen && !projectHydratingRef.current) {
@@ -3572,7 +3533,7 @@ export default function Workbench() {
           : null,
       );
       if (recoveredRun && isLockedLifecycle(recoveredRun.status)) {
-        backgroundRunsRef.current.set(recentSourcePath, recoveredRun);
+        runSessionRef.current.trackRun(recoveredRun, { activate: "never" });
       }
     }));
   }, []);
@@ -5141,64 +5102,11 @@ export default function Workbench() {
       renameCommitted = true;
       const nextSourcePath = result.sourcePath;
 
-      const trackedRun = backgroundRunsRef.current.get(previousSourcePath)
-        || [...backgroundRunsRef.current.values()].find(
-          (run) => sameLocalSourcePath(run.sourcePath, previousSourcePath),
-        );
-      for (const [trackedPath] of backgroundRunsRef.current) {
-        if (sameLocalSourcePath(trackedPath, previousSourcePath)) {
-          backgroundRunsRef.current.delete(trackedPath);
-        }
-      }
-      if (trackedRun) {
-        backgroundRunsRef.current.set(nextSourcePath, {
-          ...trackedRun,
-          sourcePath: nextSourcePath,
-        });
-      }
-      const trackedHandoff = qoderHandoffStatesRef.current.get(previousSourcePath)
-        || [...qoderHandoffStatesRef.current.values()].find(
-          (state) => sameLocalSourcePath(state.sourcePath, previousSourcePath),
-        );
-      for (const [trackedPath] of qoderHandoffStatesRef.current) {
-        if (sameLocalSourcePath(trackedPath, previousSourcePath)) {
-          qoderHandoffStatesRef.current.delete(trackedPath);
-        }
-      }
-      if (trackedHandoff) {
-        const nextHandoff = {
-          ...trackedHandoff,
-          sourcePath: nextSourcePath,
-        };
-        qoderHandoffStatesRef.current.set(nextSourcePath, nextHandoff);
-        setQoderHandoffState((current) => (
-          sameLocalSourcePath(current?.sourcePath, previousSourcePath)
-            ? nextHandoff
-            : current
-        ));
-      }
-      const trackedBackgroundResult =
-        backgroundProjectResultsRef.current.get(previousSourcePath)
-        || [...backgroundProjectResultsRef.current.entries()].find(
-          ([trackedPath]) => sameLocalSourcePath(
-            trackedPath,
-            previousSourcePath,
-          ),
-        )?.[1];
-      for (const [trackedPath] of backgroundProjectResultsRef.current) {
-        if (sameLocalSourcePath(trackedPath, previousSourcePath)) {
-          backgroundProjectResultsRef.current.delete(trackedPath);
-        }
-      }
-      if (trackedBackgroundResult) {
-        backgroundProjectResultsRef.current.set(
-          nextSourcePath,
-          trackedBackgroundResult,
-        );
-        setBackgroundProjectResults(
-          new Map(backgroundProjectResultsRef.current),
-        );
-      }
+      runSessionRef.current.rebaseSource({
+        previousSourcePath,
+        sourcePath: nextSourcePath,
+        projectId: previousProjectId,
+      });
 
       const transitionedProject = projectSessionRef.current.transitionSource({
         previousSourcePath,
@@ -5427,7 +5335,7 @@ export default function Workbench() {
     });
     setActiveRun((run) => run?.status === "complete" ? null : run);
     return true;
-  }, [enqueueAutosave, viewMode]);
+  }, [enqueueAutosave, setActiveRun, viewMode]);
 
   const exportCurrentHtml = useCallback(async (fromDeferred = false) => {
     if (viewTransitioningRef.current) return;
@@ -7172,30 +7080,13 @@ export default function Workbench() {
     ) return;
 
     const publishStatus = (status: QoderHandoffUiStatus) => {
-      const previousState = qoderHandoffStatesRef.current.get(run.sourcePath);
-      if (
-        status !== "copying"
-        && previousState
-        && (
-          previousState.requestId !== run.requestId
-          || previousState.attemptId !== run.attemptId
-        )
-      ) return;
       const nextState: ProjectQoderHandoffState = {
         sourcePath: run.sourcePath,
         requestId: run.requestId,
         attemptId: run.attemptId,
         status,
       };
-      qoderHandoffStatesRef.current.set(run.sourcePath, nextState);
-      const visibleRun = activeRunRef.current;
-      if (
-        sameLocalSourcePath(projectSessionRef.current.sourcePath, run.sourcePath)
-        && visibleRun?.requestId === run.requestId
-        && visibleRun.attemptId === run.attemptId
-      ) {
-        setQoderHandoffState(nextState);
-      }
+      runSessionRef.current.publishHandoff(nextState);
     };
     publishStatus("copying");
 
@@ -7212,7 +7103,7 @@ export default function Workbench() {
       publishStatus("copied");
     } catch (cause) {
       publishStatus("failed");
-      const visibleRun = activeRunRef.current;
+      const visibleRun = runSessionRef.current.activeRun;
       if (
         sameLocalSourcePath(projectSessionRef.current.sourcePath, run.sourcePath)
         && visibleRun?.requestId === run.requestId
@@ -7471,7 +7362,6 @@ export default function Workbench() {
       commentCount: activeComments.length,
       changeEventCount: submissionContext.changeEvents.length,
     };
-    activeRunRef.current = pendingRun;
     setActiveRun(pendingRun);
     setHandoffPreviewOpen(false);
     setCanvasMode("edit");
@@ -7567,10 +7457,8 @@ export default function Workbench() {
       if (!run) throw new Error("任务已创建，但缺少可验证的 Request 身份。");
       durableRun = run;
       submissionPendingRef.current = false;
-      backgroundRunsRef.current.set(run.sourcePath, run);
+      runSessionRef.current.trackRun(run);
       if (isCurrentProjectContext(submissionContext)) {
-        activeRunRef.current = run;
-        setActiveRun(run);
         setBridgeConnected(true);
         setDrawer("handoff");
       }
@@ -7587,17 +7475,12 @@ export default function Workbench() {
             || reconcilePayload.activeRun,
           );
           if (durableRun) {
-            backgroundRunsRef.current.set(submissionContext.sourcePath, durableRun);
-            if (isCurrentProjectContext(submissionContext)) {
-              activeRunRef.current = durableRun;
-              setActiveRun(durableRun);
-            }
+            runSessionRef.current.trackRun(durableRun);
           } else if (isCurrentProjectContext(submissionContext)) {
             confirmedNoRun = true;
             projectLockedRef.current = false;
             setProjectLocked(false);
-            activeRunRef.current = null;
-            setActiveRun(null);
+            runSessionRef.current.clearActiveRun();
             editorRef.current?.unlockNow?.();
           }
         } catch {
@@ -7608,8 +7491,7 @@ export default function Workbench() {
         projectLockedRef.current = false;
         setProjectLocked(false);
         editorRef.current?.unlockNow?.();
-        activeRunRef.current = null;
-        setActiveRun(null);
+        runSessionRef.current.clearActiveRun();
       }
       if (
         !durableRun
@@ -7622,7 +7504,6 @@ export default function Workbench() {
           status: "error",
           error: "本轮任务状态暂时无法确认。当前项目保持只读，避免重复建立任务。",
         } as ActiveRun;
-        activeRunRef.current = unknownRun;
         setActiveRun(unknownRun);
       }
       if (!durableRun && requestDispatched && !confirmedNoRun) {
@@ -7636,7 +7517,6 @@ export default function Workbench() {
             "这次发送没有成功。页面和评论仍然保留。",
           ),
         };
-        activeRunRef.current = failedRun;
         setActiveRun(failedRun);
         setDrawer("handoff");
       }
@@ -7659,6 +7539,7 @@ export default function Workbench() {
     projectName,
     requestComposerFocus,
     sendToQoderWork,
+    setActiveRun,
     showUnfinishedCommentEditNotice,
     viewMode,
   ]);
@@ -7900,7 +7781,6 @@ export default function Workbench() {
       status: protocolViolation ? "error" : "complete",
       completionObserved: true,
     };
-    activeRunRef.current = completedRun;
     setActiveRun(completedRun);
     setHandoffPreviewOpen(false);
     setCanvasMode("edit");
@@ -7932,7 +7812,6 @@ export default function Workbench() {
         error: warning,
         completionObserved: true,
       };
-      activeRunRef.current = warningRun;
       setActiveRun(warningRun);
       setDrawer("handoff");
       setToast({
@@ -7960,6 +7839,7 @@ export default function Workbench() {
     persistDraftRecovery,
     persistRecoveryLog,
     refreshWorkspace,
+    setActiveRun,
     verifyCanvasRendered,
   ]);
   useEffect(() => {
@@ -7981,11 +7861,9 @@ export default function Workbench() {
       || !run.readyPayload
     ) return;
     const operationKey = activeRunOperationKey(run);
-    if (activatingRunsRef.current.has(operationKey)) return;
-    activatingRunsRef.current.add(operationKey);
+    if (!runSessionRef.current.beginOperation("activate", operationKey)) return;
     setOpeningReadyVersion(true);
     const clearedRun = { ...run, error: undefined };
-    activeRunRef.current = clearedRun;
     setActiveRun(clearedRun);
     try {
       const activatedPayload = await bridgeClient.activateReadyVersion({
@@ -8004,30 +7882,23 @@ export default function Workbench() {
         version: activatedPayload.version || run.readyPayload.version,
       };
       await openCommittedVersion(run, mergedPayload);
-      for (const [trackedPath, tracked] of backgroundRunsRef.current) {
-        if (
-          tracked.requestId === run.requestId
-          && tracked.attemptId === run.attemptId
-        ) backgroundRunsRef.current.delete(trackedPath);
-      }
+      runSessionRef.current.removeRun(run, { clearActive: false });
     } catch (cause) {
       if (isDeferredEditorCommandDiscardedError(cause)) return;
       const error = productErrorMessage(cause, "最新版暂时无法打开。");
       const nextRun = { ...run, status: "ready-to-open" as const, error };
-      backgroundRunsRef.current.set(run.sourcePath, nextRun);
-      const visibleRun = activeRunRef.current;
+      runSessionRef.current.trackRun(nextRun);
+      const visibleRun = runSessionRef.current.activeRun;
       if (
         sameLocalSourcePath(projectSessionRef.current.sourcePath, run.sourcePath)
         && visibleRun?.requestId === run.requestId
         && visibleRun.attemptId === run.attemptId
       ) {
-        activeRunRef.current = nextRun;
-        setActiveRun(nextRun);
         setDrawer("handoff");
       }
     } finally {
-      activatingRunsRef.current.delete(operationKey);
-      const visibleRun = activeRunRef.current;
+      runSessionRef.current.endOperation("activate", operationKey);
+      const visibleRun = runSessionRef.current.activeRun;
       if (
         sameLocalSourcePath(projectSessionRef.current.sourcePath, run.sourcePath)
         || (
@@ -8038,27 +7909,20 @@ export default function Workbench() {
         setOpeningReadyVersion(false);
       }
     }
-  }, [activeRun, openCommittedVersion]);
+  }, [activeRun, openCommittedVersion, setActiveRun]);
 
   const processRunStatus = useCallback(async (
     run: ActiveRun,
     payload: Record<string, unknown>,
   ) => {
-    const trackedRun = backgroundRunsRef.current.get(run.sourcePath);
+    const trackedRun = runSessionRef.current.runForSource(run.sourcePath);
     if (
       !trackedRun
       || trackedRun.requestId !== run.requestId
       || trackedRun.attemptId !== run.attemptId
     ) return;
     const deleteTrackedRun = () => {
-      for (const [trackedPath, current] of backgroundRunsRef.current) {
-        if (
-          current.requestId === run.requestId
-          && current.attemptId === run.attemptId
-        ) {
-          backgroundRunsRef.current.delete(trackedPath);
-        }
-      }
+      runSessionRef.current.removeRun(run);
     };
     const rawState = String(payload.status || payload.lifecycleState || "processing");
     const state = canonicalLifecycleState(rawState, {
@@ -8072,7 +7936,8 @@ export default function Workbench() {
       )
       || sameLocalSourcePath(projectSessionRef.current.sourcePath, run.sourcePath)
     );
-    const previousBackgroundState = backgroundRunsRef.current.get(run.sourcePath)?.status;
+    const previousBackgroundState =
+      runSessionRef.current.runForSource(run.sourcePath)?.status;
     if (state === "ready-to-open") {
       const validationReview = validationReviewFromRecord(payload.validationReview);
       const nextRun: ActiveRun = {
@@ -8084,10 +7949,11 @@ export default function Workbench() {
           ? { scopeReport: payload.scopeReport }
           : {}),
       };
-      backgroundRunsRef.current.set(run.sourcePath, nextRun);
+      runSessionRef.current.trackRun(nextRun, {
+        activate: isCurrentProject ? "always" : "never",
+      });
       if (isCurrentProject) {
         clearBackgroundProjectResult(run.sourcePath);
-        setActiveRun(nextRun);
         setProjectLocked(true);
         projectLockedRef.current = true;
         setDrawer("handoff");
@@ -8121,7 +7987,6 @@ export default function Workbench() {
         setProjectLocked(false);
         editorRef.current?.unlockNow?.();
         const noChangeRun = { ...run, status: "no-change" as const };
-        activeRunRef.current = noChangeRun;
         setActiveRun(noChangeRun);
         setDrawer("handoff");
       } else {
@@ -8140,7 +8005,7 @@ export default function Workbench() {
         projectLockedRef.current = false;
         setProjectLocked(false);
         editorRef.current?.unlockNow?.();
-        setActiveRun(null);
+        runSessionRef.current.clearActiveRun();
         setDrawer(null);
       }
       return;
@@ -8160,7 +8025,6 @@ export default function Workbench() {
           error,
           completionObserved: payload.completionObserved === true,
         };
-        activeRunRef.current = errorRun;
         setActiveRun(errorRun);
         setDrawer("handoff");
       } else {
@@ -8178,10 +8042,11 @@ export default function Workbench() {
         : { ...run, ...payload, status: state },
     )
       || { ...run, status: state };
-    backgroundRunsRef.current.set(run.sourcePath, nextRun);
+    runSessionRef.current.trackRun(nextRun, {
+      activate: isCurrentProject ? "always" : "never",
+    });
     if (isCurrentProject) {
       clearBackgroundProjectResult(run.sourcePath);
-      setActiveRun(nextRun);
       setProjectLocked(isLockedLifecycle(nextRun.status));
       projectLockedRef.current = isLockedLifecycle(nextRun.status);
       if (nextRun.status === "awaiting-conflict-resolution"
@@ -8204,17 +8069,23 @@ export default function Workbench() {
         updatedAt: Date.now(),
       });
     }
-  }, [clearBackgroundProjectResult, markBackgroundProjectResult]);
+  }, [
+    clearBackgroundProjectResult,
+    markBackgroundProjectResult,
+    setActiveRun,
+  ]);
 
   useEffect(() => {
     const poll = async () => {
-      if (backgroundRunsRef.current.size === 0) return;
+      const runs = runSessionRef.current.runs;
+      if (runs.length === 0) return;
       await Promise.allSettled(
-        [...backgroundRunsRef.current.values()].map(async (run) => {
+        runs.map(async (run) => {
           if (!run.requestId || run.requestId === "pending") return;
           const operationKey = activeRunOperationKey(run);
-          if (statusPollBusyRef.current.has(operationKey)) return;
-          statusPollBusyRef.current.add(operationKey);
+          if (!runSessionRef.current.beginOperation("poll", operationKey)) {
+            return;
+          }
           try {
             const payload = await bridgeClient.status(
               run.sourcePath,
@@ -8226,7 +8097,7 @@ export default function Workbench() {
             // Temporary polling failures are recovered by the next automatic pass.
             // The workspace-level unavailable state remains the user-facing boundary.
           } finally {
-            statusPollBusyRef.current.delete(operationKey);
+            runSessionRef.current.endOperation("poll", operationKey);
           }
         }),
       );
@@ -8237,7 +8108,7 @@ export default function Workbench() {
   }, [processRunStatus]);
 
   const reconcilePendingRun = useCallback(async (): Promise<void> => {
-    const pendingRun = activeRunRef.current;
+    const pendingRun = runSessionRef.current.activeRun;
     if (
       pendingReconcileBusyRef.current
       || submissionPendingRef.current
@@ -8265,9 +8136,7 @@ export default function Workbench() {
           : null,
       );
       if (recoveredRun) {
-        backgroundRunsRef.current.set(context.sourcePath, recoveredRun);
-        activeRunRef.current = recoveredRun;
-        setActiveRun(recoveredRun);
+        runSessionRef.current.trackRun(recoveredRun, { activate: "always" });
         setProjectLocked(isLockedLifecycle(recoveredRun.status));
         projectLockedRef.current = isLockedLifecycle(recoveredRun.status);
         setBridgeConnected(true);
@@ -8277,8 +8146,7 @@ export default function Workbench() {
       projectLockedRef.current = false;
       setProjectLocked(false);
       editorRef.current?.unlockNow?.();
-      activeRunRef.current = null;
-      setActiveRun(null);
+      runSessionRef.current.clearActiveRun();
       setDrawer(null);
     } catch {
       if (!isCurrentProjectContext(context)) return;
@@ -8317,7 +8185,7 @@ export default function Workbench() {
     if (!activeRun || !activeRun.requestId || activeRun.requestId === "pending") return;
     const run = { ...activeRun };
     const operationKey = activeRunOperationKey(run);
-    if (cancellingRunsRef.current.has(operationKey)) return;
+    if (!runSessionRef.current.beginOperation("cancel", operationKey)) return;
     const showAgentReminder = (title: string) => {
       if (!agentMayBeRunning) return;
       setToast({
@@ -8332,16 +8200,15 @@ export default function Workbench() {
       projectLockedRef.current = false;
       setProjectLocked(false);
       editorRef.current?.unlockNow?.();
-      activeRunRef.current = null;
-      setActiveRun(null);
-      setQoderHandoffState(null);
+      runSessionRef.current.clearActiveRun();
+      runSessionRef.current.clearActiveHandoff();
       setHandoffPreviewOpen(false);
       setCanvasMode("edit");
       setDrawer(null);
       showAgentReminder("本轮已结束，已恢复编辑");
+      runSessionRef.current.endOperation("cancel", operationKey);
       return;
     }
-    cancellingRunsRef.current.add(operationKey);
     const context = (
       (
         Boolean(run.projectId)
@@ -8363,17 +8230,14 @@ export default function Workbench() {
           ? "cancelled-by-user-after-agent-handoff"
           : "cancelled-by-user",
       });
-      const tracked = backgroundRunsRef.current.get(run.sourcePath);
-      if (
-        tracked?.requestId === run.requestId
-        && tracked.attemptId === run.attemptId
-      ) backgroundRunsRef.current.delete(run.sourcePath);
+      if (runSessionRef.current.hasRun(run)) {
+        runSessionRef.current.removeRun(run);
+      }
       if (context && isCurrentProjectContext(context)) {
         projectLockedRef.current = false;
         setProjectLocked(false);
         editorRef.current?.unlockNow?.();
-        activeRunRef.current = null;
-        setActiveRun(null);
+        runSessionRef.current.clearActiveRun();
         setHandoffPreviewOpen(false);
         setCanvasMode("edit");
         setDrawer(null);
@@ -8400,12 +8264,10 @@ export default function Workbench() {
             "取消结果暂时无法确认。源页会继续在后台核对。",
           ),
         };
-        backgroundRunsRef.current.set(run.sourcePath, nextRun);
-        activeRunRef.current = nextRun;
-        setActiveRun(nextRun);
+        runSessionRef.current.trackRun(nextRun, { activate: "always" });
       }
     } finally {
-      cancellingRunsRef.current.delete(operationKey);
+      runSessionRef.current.endOperation("cancel", operationKey);
       if (context && isCurrentProjectContext(context)) {
         setCancelling(false);
       }
@@ -8420,8 +8282,7 @@ export default function Workbench() {
     if (!activeRun || activeRun.status !== "awaiting-conflict-resolution") return;
     const run = { ...activeRun };
     const operationKey = activeRunOperationKey(run);
-    if (resolvingRunsRef.current.has(operationKey)) return;
-    resolvingRunsRef.current.add(operationKey);
+    if (!runSessionRef.current.beginOperation("resolve", operationKey)) return;
     const context = (
       (
         Boolean(run.projectId)
@@ -8443,16 +8304,14 @@ export default function Workbench() {
         action,
       });
       if (action === "keep-external") {
-        const tracked = backgroundRunsRef.current.get(run.sourcePath);
-        if (
-          tracked?.requestId === run.requestId
-          && tracked.attemptId === run.attemptId
-        ) backgroundRunsRef.current.delete(run.sourcePath);
+        if (runSessionRef.current.hasRun(run)) {
+          runSessionRef.current.removeRun(run);
+        }
         if (context && isCurrentProjectContext(context)) {
           projectLockedRef.current = false;
           setProjectLocked(false);
           editorRef.current?.unlockNow?.();
-          setActiveRun(null);
+          runSessionRef.current.clearActiveRun();
           await reloadCurrentSource(true);
         } else {
           setToast({
@@ -8471,8 +8330,10 @@ export default function Workbench() {
           ...run,
           status: "committing" as LifecycleState,
         };
-        backgroundRunsRef.current.set(nextRun.sourcePath, nextRun);
-        if (context && isCurrentProjectContext(context)) setActiveRun(nextRun);
+        runSessionRef.current.trackRun(nextRun, {
+          activate:
+            context && isCurrentProjectContext(context) ? "always" : "never",
+        });
       }
     } catch (cause) {
       if (context && !isCurrentProjectContext(context)) return;
@@ -8483,14 +8344,14 @@ export default function Workbench() {
           "这次选择还没有记录，外部文件和 AI 候选都仍被保留。",
         ),
       };
-      backgroundRunsRef.current.set(run.sourcePath, nextRun);
+      runSessionRef.current.trackRun(nextRun, {
+        activate: context ? "always" : "never",
+      });
       if (context) {
-        activeRunRef.current = nextRun;
-        setActiveRun(nextRun);
         setDrawer("handoff");
       }
     } finally {
-      resolvingRunsRef.current.delete(operationKey);
+      runSessionRef.current.endOperation("resolve", operationKey);
       if (context && isCurrentProjectContext(context)) {
         setResolvingConflict(false);
       }
@@ -9073,13 +8934,12 @@ export default function Workbench() {
     setCommentRailOffset(commentRailMinimumOffset);
   }, [commentRailFollowsFocus, commentRailMinimumOffset]);
   const returnToEditingFromTerminalRun = (adjustRequirements: boolean) => {
-    const completedRun = activeRunRef.current;
+    const completedRun = runSessionRef.current.activeRun;
     if (completedRun?.sourcePath) {
-      qoderHandoffStatesRef.current.delete(completedRun.sourcePath);
+      runSessionRef.current.clearHandoff(completedRun.sourcePath);
     }
-    activeRunRef.current = null;
-    setActiveRun(null);
-    setQoderHandoffState(null);
+    runSessionRef.current.clearActiveRun();
+    runSessionRef.current.clearActiveHandoff();
     setHandoffPreviewOpen(false);
     setCanvasMode("edit");
     setDrawer(null);
@@ -11420,7 +11280,7 @@ export default function Workbench() {
         open={cancelRunConfirmationOpen}
         onClose={() => setCancelRunConfirmationKey(null)}
         onConfirm={() => {
-          const currentRun = activeRunRef.current;
+          const currentRun = runSessionRef.current.activeRun;
           const matchesConfirmation = Boolean(
             currentRun
             && cancelRunConfirmationKey

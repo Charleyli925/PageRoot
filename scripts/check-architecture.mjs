@@ -20,6 +20,8 @@ const RETIRED_SOURCE_PATCH_OPERATIONS =
   /\b(?:replace-text|replace-text-range|replace-text-flow-range|delete-hard-break|split-text-block|planTextPatch|planTextRangePatch|planTextFlowRangePatch|planDeleteHardBreakPatch|planSplitTextBlockPatch|textRangeToSourceEdit)\b/;
 const LEGACY_RENDERER_STATE =
   /["'](?:waiting|importing|result-ready|awaiting-check-decision|version-created|completed|canceled|waived)["']/;
+const RETIRED_WORKBENCH_RUN_AUTHORITIES =
+  /\b(?:backgroundRunsRef|backgroundProjectResultsRef|qoderHandoffStatesRef|activeRunRef|activatingRunsRef|cancellingRunsRef|resolvingRunsRef|statusPollBusyRef)\b/;
 
 async function sourceFiles(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
@@ -211,6 +213,14 @@ export async function architectureViolations() {
   if (/const previewOnly = !window\.htmlAIProjects/.test(workbench)) {
     violations.push(
       "app/workbench.tsx: project IPC presence cannot own renderer edit capability",
+    );
+  }
+  if (
+    !workbench.includes("const runSessionRef = useRef(new RunSession(")
+    || RETIRED_WORKBENCH_RUN_AUTHORITIES.test(workbench)
+  ) {
+    violations.push(
+      "app/workbench.tsx: AI run state and operation locks belong to RunSession",
     );
   }
   for (const boundary of ["close", "switch", "submit", "history"]) {

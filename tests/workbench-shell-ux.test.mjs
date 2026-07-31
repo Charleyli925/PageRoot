@@ -586,7 +586,10 @@ test("QoderWork handoff exposes a truthful process board and manual open action"
   const sendToQoderStart = workbench.indexOf("const sendToQoderWork = useCallback");
   const sendToQoderEnd = workbench.indexOf("const revealActiveRunInFinder", sendToQoderStart);
   const sendToQoderWork = workbench.slice(sendToQoderStart, sendToQoderEnd);
-  assert.match(sendToQoderWork, /qoderHandoffStatesRef\.current\.set\(run\.sourcePath, nextState\)/);
+  assert.match(
+    sendToQoderWork,
+    /runSessionRef\.current\.publishHandoff\(nextState\)/,
+  );
   assert.match(sendToQoderWork, /publishStatus\("copying"\)/);
   assert.match(sendToQoderWork, /publishStatus\("copied"\)/);
   assert.match(sendToQoderWork, /publishStatus\("failed"\)/);
@@ -874,25 +877,34 @@ test("AI submission and run operations remain isolated by project and run identi
     generate,
     /submissionIntentRef\.current\?\.token !== submissionIntent\.token[\s\S]*?projectSessionRef\.current\.epoch !== submissionIntent\.epoch[\s\S]*?!sameLocalSourcePath\(projectSessionRef\.current\.sourcePath, submissionIntent\.sourcePath\)/,
   );
-  assert.match(workbench, /qoderHandoffStatesRef\s*=\s*useRef<Map<string, ProjectQoderHandoffState>>/);
-  assert.match(workbench, /activatingRunsRef = useRef<Set<string>>/);
+  assert.match(
+    workbench,
+    /const runSessionRef = useRef\(new RunSession\(/,
+  );
+  assert.match(
+    workbench,
+    /beginOperation\("activate", operationKey\)/,
+  );
   assert.doesNotMatch(workbench, /waivingRunsRef|\/validation\/waive/);
-  assert.match(workbench, /cancellingRunsRef = useRef<Set<string>>/);
   assert.match(
     workbench,
-    /statusPollBusyRef = useRef<Set<string>>\(new Set\(\)\)[\s\S]*?statusPollBusyRef\.current\.has\(operationKey\)[\s\S]*?statusPollBusyRef\.current\.delete\(operationKey\)/,
+    /beginOperation\("cancel", operationKey\)/,
   );
   assert.match(
     workbench,
-    /await Promise\.allSettled\([\s\S]*?backgroundRunsRef\.current\.values\(\)/,
+    /beginOperation\("poll", operationKey\)[\s\S]*?endOperation\("poll", operationKey\)/,
   );
   assert.match(
     workbench,
-    /const projectQoderHandoff = project\.sourcePath[\s\S]*?qoderHandoffStatesRef\.current\.get\(project\.sourcePath\)/,
+    /const runs = runSessionRef\.current\.runs[\s\S]*?await Promise\.allSettled\([\s\S]*?runs\.map/,
   );
   assert.match(
     workbench,
-    /const previousState = qoderHandoffStatesRef\.current\.get\(run\.sourcePath\)[\s\S]*?previousState\.requestId !== run\.requestId[\s\S]*?previousState\.attemptId !== run\.attemptId/,
+    /runSessionRef\.current\.activate\(project\.sourcePath \|\| null\)/,
+  );
+  assert.match(
+    workbench,
+    /state\.status !== "copying"[\s\S]*?previous\.requestId !== state\.requestId[\s\S]*?previous\.attemptId !== state\.attemptId/,
   );
 });
 

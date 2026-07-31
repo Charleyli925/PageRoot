@@ -25,6 +25,7 @@ export async function readWorkbenchArchitecture() {
   const sources = await readSources([
     "../app/application/project-session.js",
     "../app/application/project-rules-session.js",
+    "../app/application/run-session.js",
     "../app/workbench/comment-model.ts",
     "../app/workbench/project-model.ts",
     "../app/workbench/record-model.ts",
