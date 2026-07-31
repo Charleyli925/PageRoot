@@ -227,7 +227,8 @@
       "id": "ci-evidence",
       "patterns": [
         "^scripts/ci-evidence\\.mjs$",
-        "^tests/ci-evidence\\.test\\.mjs$"
+        "^tests/ci-evidence\\.test\\.mjs$",
+        "^\\.github/workflows/(?:ci|developer-preview|release|release-candidate)\\.yml$"
       ],
       "suites": [],
       "nodeTests": ["tests/ci-evidence.test.mjs"]

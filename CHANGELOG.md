@@ -68,6 +68,9 @@ Notable user-visible changes are documented here. This project follows Semantic 
 - Added governed task worktree audit, synchronization and retirement commands
   so active changes remain visible and protected throughout parallel work, with
   merged retirement proof bound to the exact current branch head.
+- Aligned developer-preview and formal-candidate CI evidence validation with
+  their preflight, signing, notarization, checkpoint and final-artifact stages
+  so packaging cannot stop because of an unsupported stage name.
 
 ## [0.9.4] - 2026-07-29
 

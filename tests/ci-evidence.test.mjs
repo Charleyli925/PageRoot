@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
   classificationForStage,
   failureFingerprint,
+  isAllowedCiEvidenceStage,
   normalizeFailureText,
 } from "../scripts/ci-evidence.mjs";
 
@@ -51,6 +53,27 @@ test("CI stages produce explicit triage categories without calling source failur
     "packaged_artifact",
   );
   assert.equal(classificationForStage("source-test", false).category, null);
+});
+
+test("formal release workflows use supported packaged-artifact evidence stages", async () => {
+  const workflows = await Promise.all([
+    readFile(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8"),
+    readFile(new URL("../.github/workflows/developer-preview.yml", import.meta.url), "utf8"),
+    readFile(new URL("../.github/workflows/release-candidate.yml", import.meta.url), "utf8"),
+    readFile(new URL("../.github/workflows/release.yml", import.meta.url), "utf8"),
+  ]);
+  const workflowStages = workflows.flatMap((workflow) => (
+    [...workflow.matchAll(/--stage ([a-z0-9-]+)/gu)].map((match) => match[1])
+  ));
+
+  assert.ok(workflowStages.length > 0);
+  for (const stage of workflowStages) {
+    assert.equal(isAllowedCiEvidenceStage(stage), true, `${stage} must be accepted`);
+    if (stage === "developer-preview" || stage.startsWith("artifact-")) {
+      assert.equal(classificationForStage(stage, true).category, "packaged_artifact");
+    }
+  }
+  assert.equal(isAllowedCiEvidenceStage("artifact-unknown"), false);
 });
 
 test("failure normalization retains diagnostic lines and removes ANSI escapes", () => {
