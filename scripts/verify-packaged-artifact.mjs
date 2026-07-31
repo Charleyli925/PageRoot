@@ -39,6 +39,7 @@ const REQUIRED_BRIDGE_FILES = [
   "attachment-storage.mjs",
   "draft-aggregate.mjs",
   "draft-service.mjs",
+  "project-context-service.mjs",
   "source-history-service.mjs",
 ];
 const REQUIRED_PACKAGED_MODULES = [

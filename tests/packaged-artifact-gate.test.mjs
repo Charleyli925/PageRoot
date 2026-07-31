@@ -155,6 +155,7 @@ async function createPackagedFixture(t) {
     "attachment-storage.mjs",
     "draft-aggregate.mjs",
     "draft-service.mjs",
+    "project-context-service.mjs",
     "source-history-service.mjs",
   ]) {
     await writeFixtureFile(
@@ -248,6 +249,7 @@ async function createPackagedFixture(t) {
     "attachment-storage.mjs",
     "draft-aggregate.mjs",
     "draft-service.mjs",
+    "project-context-service.mjs",
     "source-history-service.mjs",
   ]) {
     const destination = path.join(resourcesPath, "bridge", fileName);

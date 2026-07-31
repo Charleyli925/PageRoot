@@ -131,6 +131,8 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
     "bridge/attachment-storage.mjs",
     "bridge/draft-aggregate.mjs",
     "bridge/draft-service.mjs",
+    "bridge/project-context-service.mjs",
+    "bridge/source-history-service.mjs",
     "node_modules/parse5",
     "node_modules/entities",
     "node_modules/electron-updater",
