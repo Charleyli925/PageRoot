@@ -129,6 +129,18 @@ export async function architectureViolations() {
         }
       }
     }
+    if (
+      file === "app/workbench/presentation.tsx"
+      || /^app\/workbench\/.*-view\.tsx$/.test(file)
+    ) {
+      for (const specifier of imports) {
+        if (/(?:^|\/)application(?:\/|$)/.test(specifier)) {
+          violations.push(
+            `${file}: Workbench presentation components cannot import application services`,
+          );
+        }
+      }
+    }
   }
 
   const scriptFiles = await sourceFiles(path.join(PRODUCT_ROOT, "scripts"));

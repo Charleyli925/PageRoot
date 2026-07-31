@@ -36,6 +36,7 @@ export async function readWorkbenchArchitecture() {
     "../app/workbench/browser-io.ts",
     "../app/workbench/types.ts",
     "../app/workbench/presentation.tsx",
+    "../app/workbench/handoff-view.tsx",
     "../app/workbench.tsx",
   ]);
   return sources.join("\n");

@@ -960,7 +960,11 @@ test("history opens concise immutable versions in the canvas with their comments
   );
   assert.match(
     workbench,
-    /window\.htmlAIProjects\?\.revealVersionFile[\s\S]*?onClick=\{\(\) => void revealVersionInFinder\(version\)\}[\s\S]*?Finder/,
+    /onReveal \? \([\s\S]*?onClick=\{onReveal\}[\s\S]*?Finder/,
+  );
+  assert.match(
+    workbench,
+    /window\.htmlAIProjects\?\.revealVersionFile[\s\S]*?\? \(\) => void revealVersionInFinder\(version\)/,
   );
   assert.match(styles, /\.version-list\s*\{[\s\S]*?border-radius:\s*15px/);
   assert.match(styles, /\.version-row\s*\{[\s\S]*?grid-template-columns:\s*42px minmax\(0, 1fr\) auto 14px/);

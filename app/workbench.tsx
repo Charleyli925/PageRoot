@@ -15,24 +15,20 @@ import {
   type CSSProperties,
   type SetStateAction,
 } from "react";
-import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowCounterClockwise";
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/csr/ArrowSquareOut";
 import { CaretRightIcon } from "@phosphor-icons/react/dist/csr/CaretRight";
 import { ChatCircleTextIcon } from "@phosphor-icons/react/dist/csr/ChatCircleText";
 import { CheckCircleIcon } from "@phosphor-icons/react/dist/csr/CheckCircle";
 import { ClockCounterClockwiseIcon } from "@phosphor-icons/react/dist/csr/ClockCounterClockwise";
-import { CopyIcon } from "@phosphor-icons/react/dist/csr/Copy";
 import { EyeIcon } from "@phosphor-icons/react/dist/csr/Eye";
 import { FileIcon } from "@phosphor-icons/react/dist/csr/File";
 import { FileHtmlIcon } from "@phosphor-icons/react/dist/csr/FileHtml";
 import { FolderOpenIcon } from "@phosphor-icons/react/dist/csr/FolderOpen";
 import { ImageIcon } from "@phosphor-icons/react/dist/csr/Image";
-import { LockKeyIcon } from "@phosphor-icons/react/dist/csr/LockKey";
 import { PaperclipIcon } from "@phosphor-icons/react/dist/csr/Paperclip";
 import { PaperPlaneTiltIcon } from "@phosphor-icons/react/dist/csr/PaperPlaneTilt";
 import { PencilSimpleIcon } from "@phosphor-icons/react/dist/csr/PencilSimple";
 import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
-import { SealCheckIcon } from "@phosphor-icons/react/dist/csr/SealCheck";
 import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
 import { TriangleIcon } from "@phosphor-icons/react/dist/csr/Triangle";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
@@ -176,16 +172,19 @@ import {
   rebindTargetsPreservingGlobal,
   recordId,
   selectionFromRecord,
-  targetResolutionLabel,
   uniqueTargets,
   unsafeCommentTargetsNotice,
 } from "./workbench/comment-model";
 import {
   CommentAttachmentStrip,
+  HistoryVersionItem,
   PreviewNavigationBanner,
-  ProcessStepGlyph,
-  processStepStatusLabel,
 } from "./workbench/presentation";
+import {
+  HandoffDrawerHeader,
+  HandoffFooter,
+  HandoffPanel,
+} from "./workbench/handoff-view";
 import {
   activeRunOperationKey,
   fileExtension,
@@ -212,10 +211,7 @@ import {
   sourceHistoryOperationsFromRecord,
 } from "./workbench/record-model";
 import {
-  changeKindLabel,
   changesFromRecords,
-  historyRecordValue,
-  summarizeChangeEvents,
   versionsFromWorkspace,
 } from "./workbench/version-model";
 import type {
@@ -8923,184 +8919,6 @@ export default function Workbench() {
       void generateRequest();
     }
   };
-  const renderHistoryItem = (version: Version) => {
-    const expanded = expandedVersionId === version.id;
-    const attachmentCount = version.comments.reduce(
-      (count, comment) => count + (comment.attachments?.length ?? 0),
-      0,
-    );
-    return (
-      <article
-        className="history-item version-entry"
-        data-current={version.id === latestVersionId ? "true" : undefined}
-        key={version.id}
-      >
-        <button
-          className="version-row"
-          type="button"
-          aria-expanded={expanded}
-          onClick={() => setExpandedVersionId(expanded ? null : version.id)}
-        >
-          <span className="version-index">V{version.ordinal}</span>
-          <span>
-            <strong>{version.label}</strong>
-            <small>
-              {version.ordinal === 1 ? "原始导入" : `${version.comments.length} 条评论 · 已安全保留`}
-            </small>
-          </span>
-          <time dateTime={version.generatedAt}>{formatTime(version.generatedAt)}</time>
-          <CaretRightIcon aria-hidden="true" size={14} weight="bold" />
-        </button>
-        {expanded ? (
-          <section className="version-inline-detail" aria-label={`${version.label} 详情`}>
-            <header>
-              <span>{viewingVersionId === version.id ? "当前浏览" : "只读备份"}</span>
-              <small>{formatTime(version.generatedAt, true)} 保存</small>
-            </header>
-            <div className="version-summary-facts">
-              <div><strong>{version.comments.length}</strong><span>条评论</span></div>
-              <div><strong>{attachmentCount}</strong><span>个附件</span></div>
-              <div><strong>网页</strong><span>画布类型</span></div>
-            </div>
-            <div className="version-change-summary">
-              <strong>这个版本包含</strong>
-              <ul>
-                <li>{version.summary || "完整 HTML 内容与页面结构"}</li>
-                <li>评论、图片与附件的完整保留</li>
-                <li>{version.validationReview?.softViolationCodes.length
-                  ? "硬边界已通过，额外范围变化已记录"
-                  : "版本与文件完整性已校验"}</li>
-              </ul>
-            </div>
-            {version.comments.length > 0
-              || version.directEdits.length > 0
-              || version.supplements.length > 0
-              || version.validationReview ? (
-              <details className="history-records">
-                <summary>查看本版修改来源与校验</summary>
-                <section className="history-source-group">
-                  <header><strong>源页原始评论</strong><span>{version.comments.length}</span></header>
-                  {version.comments.map((comment) => (
-                    <article className="history-record" key={comment.commentId}>
-                      <div>
-                        <strong>{insertionLabel(comment.target)}</strong>
-                        <span
-                          className="target-resolution"
-                          data-resolution={comment.target.resolution}
-                        >{targetResolutionLabel(comment.target.resolution)}</span>
-                        <time dateTime={comment.updatedAt || comment.createdAt}>
-                          {formatTime(comment.updatedAt || comment.createdAt, true)}
-                        </time>
-                      </div>
-                      {comment.text ? <p>{comment.text}</p> : null}
-                      <CommentAttachmentStrip
-                        attachments={comment.attachments}
-                        objectUrls={attachmentObjectUrls}
-                        onEnsurePreview={ensureAttachmentObjectUrl}
-                        onPreview={(attachment) => void openAttachmentPreview(attachment)}
-                        onDownload={(attachment) => void downloadAttachment(attachment)}
-                      />
-                    </article>
-                  ))}
-                  {version.comments.length === 0 ? <small>本版没有源页评论。</small> : null}
-                </section>
-                <section className="history-source-group">
-                  <header><strong>内部 AI 对话补充</strong><span>{version.supplements.length}</span></header>
-                  {version.supplements.map((supplement) => (
-                    <article className="history-record" key={supplement.recordId}>
-                      <div>
-                        <strong>
-                          {supplement.action === "add"
-                            ? "新增要求"
-                            : supplement.action === "amend"
-                              ? "补充修改"
-                              : "撤回要求"}
-                        </strong>
-                        <time dateTime={supplement.createdAt}>
-                          {formatTime(supplement.createdAt, true)}
-                        </time>
-                      </div>
-                      <p>{supplement.text}</p>
-                      {supplement.attachments.length > 0 ? (
-                        <small>
-                          已归档原件：
-                          {supplement.attachments.map((item) => item.fileName).join("、")}
-                        </small>
-                      ) : supplement.evidenceState === "description-only" ? (
-                        <small>原件未归档 · {supplement.evidenceDescription}</small>
-                      ) : null}
-                    </article>
-                  ))}
-                  {version.supplements.length === 0 ? <small>本版没有内部 AI 对话补充。</small> : null}
-                </section>
-                <section className="history-source-group">
-                  <header>
-                    <strong>本地编辑</strong>
-                    <span>{summarizeChangeEvents(version.directEdits).length}</span>
-                  </header>
-                  {summarizeChangeEvents(version.directEdits).map((event) => (
-                    <article
-                      className="history-record history-change-record"
-                      key={event.eventId}
-                    >
-                      <div>
-                        <strong>
-                          {changeKindLabel(event)} · {insertionLabel(event.target)}
-                        </strong>
-                        <time dateTime={event.createdAt}>
-                          {formatTime(event.createdAt, true)}
-                        </time>
-                      </div>
-                      <div className="history-change-values">
-                        <span>
-                          <small>修改前</small>
-                          <del>{historyRecordValue(event, event.before)}</del>
-                        </span>
-                        <CaretRightIcon aria-hidden="true" size={14} weight="bold" />
-                        <span>
-                          <small>修改后</small>
-                          <ins>{historyRecordValue(event, event.after)}</ins>
-                        </span>
-                      </div>
-                    </article>
-                  ))}
-                  {version.directEdits.length === 0 ? <small>本版没有本地编辑。</small> : null}
-                </section>
-                <section className="history-source-group">
-                  <header><strong>AI 结果与校验</strong><span>已归档</span></header>
-                  <p>{version.validationReview?.softViolationCodes.length
-                    ? "不可忽略的硬边界已通过；评论范围外的额外变化已随版本记录。"
-                    : "版本与文件内容已经校验并保存。"}</p>
-                </section>
-              </details>
-            ) : null}
-            <div className="version-detail-actions">
-              <button
-                className="view-version-button"
-                type="button"
-                disabled={
-                  runInProgress
-                  || projectHydrating
-                  || Boolean(projectLoadError)
-                  || Boolean(workspaceIssue)
-                  || viewTransitioning
-                }
-                onClick={() => void viewHistoryVersion(version)}
-              >
-                <EyeIcon aria-hidden="true" size={15} weight="bold" />
-                在画布中查看
-              </button>
-              {typeof window !== "undefined" && window.htmlAIProjects?.revealVersionFile ? (
-                <button type="button" onClick={() => void revealVersionInFinder(version)}>
-                  Finder
-                </button>
-              ) : null}
-            </div>
-          </section>
-        ) : null}
-      </article>
-    );
-  };
 
   return (
     <main
@@ -10423,21 +10241,10 @@ export default function Workbench() {
         aria-label={drawer === "history" ? "版本历史" : drawer === "files" ? "项目文件" : "本轮处理"}
       >
         {drawer === "handoff" ? (
-          <header className="drawer-header processing-header">
-            <div className="processing-title">
-              <span className="processing-brand">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src="./qoder-logo.png" alt="" />
-              </span>
-              <span>
-                <small>本轮处理</small>
-                <strong>{processPanelTitle}</strong>
-              </span>
-            </div>
-            <div className="processing-header-actions">
-              <span className="round-version">{activeRun?.candidateVersionLabel || "下一版"}</span>
-            </div>
-          </header>
+          <HandoffDrawerHeader
+            panelTitle={processPanelTitle}
+            candidateVersionLabel={activeRun?.candidateVersionLabel}
+          />
         ) : drawer ? (
           <>
             <header className="drawer-header project-panel-header">
@@ -10492,7 +10299,42 @@ export default function Workbench() {
               {versions.length === 0 ? (
                 <div className="drawer-empty">首次编辑或发送给 AI 后，会建立版本 1。</div>
               ) : (
-                <div className="version-list">{versions.map(renderHistoryItem)}</div>
+                <div className="version-list">
+                  {versions.map((version) => (
+                    <HistoryVersionItem
+                      key={version.id}
+                      version={version}
+                      expanded={expandedVersionId === version.id}
+                      current={version.id === latestVersionId}
+                      viewing={viewingVersionId === version.id}
+                      viewDisabled={
+                        runInProgress
+                        || projectHydrating
+                        || Boolean(projectLoadError)
+                        || Boolean(workspaceIssue)
+                        || viewTransitioning
+                      }
+                      attachmentObjectUrls={attachmentObjectUrls}
+                      onToggle={() => setExpandedVersionId(
+                        expandedVersionId === version.id ? null : version.id,
+                      )}
+                      onView={() => void viewHistoryVersion(version)}
+                      onReveal={
+                        typeof window !== "undefined"
+                        && window.htmlAIProjects?.revealVersionFile
+                          ? () => void revealVersionInFinder(version)
+                          : undefined
+                      }
+                      onEnsureAttachmentPreview={ensureAttachmentObjectUrl}
+                      onPreviewAttachment={(attachment) => {
+                        void openAttachmentPreview(attachment);
+                      }}
+                      onDownloadAttachment={(attachment) => {
+                        void downloadAttachment(attachment);
+                      }}
+                    />
+                  ))}
+                </div>
               )}
               <p className="version-note">
                 在画布中查看不会覆盖当前 HTML；历史内容与当时的评论都保持只读。
@@ -10838,350 +10680,66 @@ export default function Workbench() {
           ) : null}
 
           {drawer === "handoff" ? (
-            <div className="handoff-panel">
-              {activeRun ? (
-                <>
-                  <div className="processing-summary-bar">
-                    <div>
-                      {terminalRun ? (
-                        <TriangleIcon aria-hidden="true" size={19} weight="duotone" />
-                      ) : (
-                        <LockKeyIcon aria-hidden="true" size={19} weight="duotone" />
-                      )}
-                      <span>
-                        <strong>{processSummaryTitle}</strong>
-                        <small>{processSummaryDetail}</small>
-                      </span>
-                    </div>
-                    <span className="status-chip">
-                      <span aria-hidden="true" />
-                      {processStatusLabel}
-                    </span>
-                  </div>
-
-                  <div className="processing-content">
-                    <section
-                      className="handoff-process-board timeline-panel"
-                      data-status={activeRun.status}
-                      aria-live="polite"
-                    >
-                      <header>
-                        <span>本轮流程</span>
-                        <strong>
-                          {processSteps.length} 个阶段 · 已完成 {processSteps.filter((step) => step.state === "done").length} 个
-                        </strong>
-                      </header>
-                      <ol>
-                        {processSteps.map((step, index) => (
-                          <li key={step.key} data-state={step.state}>
-                            <span className="process-step-index" aria-hidden="true">
-                              {index + 1}
-                            </span>
-                            <span className="process-step-icon" aria-hidden="true">
-                              <ProcessStepGlyph
-                                stepKey={step.key}
-                                state={step.state}
-                              />
-                            </span>
-                            <span className="process-step-copy">
-                              <strong>{step.label}</strong>
-                              <small>{step.detail}</small>
-                            </span>
-                            <span
-                              className="process-step-status"
-                              data-state={step.state}
-                            >
-                              {step.state === "done" ? (
-                                <>
-                                  <CheckCircleIcon
-                                    aria-hidden="true"
-                                    size={22}
-                                    weight="regular"
-                                  />
-                                  <span className="sr-only">
-                                    {processStepStatusLabel(step.state)}
-                                  </span>
-                                </>
-                              ) : processStepStatusLabel(step.state)}
-                            </span>
-                          </li>
-                        ))}
-                      </ol>
-                    </section>
-
-                    <section className="round-detail-panel" aria-label="本轮记录">
-                      <header>
-                        <div>
-                          <span>本轮记录</span>
-                          <strong>{activeCommentCount} 条评论</strong>
-                        </div>
-                        <SealCheckIcon aria-hidden="true" size={24} weight="duotone" />
-                      </header>
-                      <div className="round-facts">
-                        <div><span>基于版本</span><strong>{runBasisLabel}</strong></div>
-                        <div><span>目标版本</span><strong>{activeRun.candidateVersionLabel}</strong></div>
-                        <div><span>提交时间</span><strong>{runSubmittedLabel}</strong></div>
-                      </div>
-                      <div className="round-comment-list">
-                        {activeCommentItems.map((comment, index) => (
-                          <article key={comment.commentId}>
-                            <span>{index + 1}</span>
-                            <div>
-                              <strong>{insertionLabel(comment.target)}</strong>
-                              <p>{comment.text || "已添加参考附件"}</p>
-                              {comment.attachments?.length ? (
-                                <small>
-                                  <PaperclipIcon aria-hidden="true" size={12} weight="bold" />
-                                  {comment.attachments.length} 个附件
-                                </small>
-                              ) : null}
-                            </div>
-                          </article>
-                        ))}
-                      </div>
-                      {activeRun.requestPath
-                        && typeof window !== "undefined"
-                        && window.htmlAIProjects?.revealRequestFolder ? (
-                        <button
-                          className="handoff-folder-link finder-link"
-                          type="button"
-                          onClick={() => void revealActiveRunInFinder()}
-                        >
-                          <FolderOpenIcon aria-hidden="true" size={18} weight="duotone" />
-                          <span>在 Finder 中查看本轮文件</span>
-                          <CaretRightIcon aria-hidden="true" size={14} weight="bold" />
-                        </button>
-                      ) : null}
-                    </section>
-                  </div>
-
-                  <div className="processing-decisions">
-                    {activeRun.validationReview?.softViolationCodes.length
-                      && activeRun.status === "ready-to-open" ? (
-                      <section className="validation-decision" role="status">
-                        <strong>已记录评论范围外的额外变化</strong>
-                        <p>{activeScopeDecision?.message
-                          || "这些变化没有触及不可忽略的文件、身份或脚本边界，因此没有中断版本生成。"}</p>
-                        {activeScopeDecision?.examples.length ? (
-                          <ul className="scope-change-preview">
-                            {activeScopeDecision.examples.map((example) => (
-                              <li key={example}>{example}</li>
-                            ))}
-                          </ul>
-                        ) : null}
-                      </section>
-                    ) : null}
-                    {activeRun.status === "awaiting-conflict-resolution" ? (
-                      <section className="ai-conflict-panel" role="alert">
-                        <strong>请选择哪份内容成为当前 HTML</strong>
-                        <p>外部文件和 AI 候选都已保留，系统不会静默覆盖任一侧。</p>
-                        {activeRun.error ? <small>{activeRun.error}</small> : null}
-                      </section>
-                    ) : null}
-                    {activeRun.status === "recovering-transaction" ? (
-                      <section className="ai-conflict-panel" role="status">
-                        <strong>正在恢复尚未保存完成的修改</strong>
-                        <p>恢复完成前页面保持只读，评论和修改记录不会丢失。</p>
-                      </section>
-                    ) : null}
-                    {pendingRunOutcome ? (
-                      <section className="ai-conflict-panel" role="status">
-                        <strong>正在确认这次发送是否成功</strong>
-                        <p>
-                          源页会在后台继续核对，不会重复发送同一轮要求。
-                        </p>
-                      </section>
-                    ) : null}
-                    {!pendingRunOutcome
-                      && activeRun.status === "ready-to-open"
-                      && activeRun.error ? (
-                      <section className="validation-decision" role="status">
-                        <strong>最新版仍已安全保留</strong>
-                        <p>{activeRun.error} 可在下方再次打开，不需要重新生成。</p>
-                      </section>
-                    ) : null}
-                    {!pendingRunOutcome && activeRun.status === "no-change" ? (
-                      <section className="validation-decision" role="status">
-                        <strong>这次没有可采用的变化</strong>
-                        <p>没有创建新版本。原评论、附件和当前 HTML 都已保留。</p>
-                      </section>
-                    ) : null}
-                    {!pendingRunOutcome && activeRun.status === "error" ? (
-                      <section className="validation-decision" role="alert">
-                        <strong>本轮没有改动当前 HTML</strong>
-                        <p>{activeRun.error || "结果没有通过安全检查。"}</p>
-                      </section>
-                    ) : null}
-                  </div>
-                </>
-              ) : (
-                <div className="drawer-empty">发送评论后，这里会显示处理进度和本轮记录。</div>
+            <HandoffPanel
+              activeRun={activeRun}
+              terminalRun={terminalRun}
+              processSummaryTitle={processSummaryTitle}
+              processSummaryDetail={processSummaryDetail}
+              processStatusLabel={processStatusLabel}
+              processSteps={processSteps}
+              activeCommentCount={activeCommentCount}
+              activeCommentItems={activeCommentItems}
+              runBasisLabel={runBasisLabel}
+              runSubmittedLabel={runSubmittedLabel}
+              activeScopeDecision={activeScopeDecision}
+              pendingRunOutcome={pendingRunOutcome}
+              canRevealRequestFolder={Boolean(
+                typeof window !== "undefined"
+                && window.htmlAIProjects?.revealRequestFolder,
               )}
-            </div>
+              onRevealRequestFolder={() => void revealActiveRunInFinder()}
+            />
           ) : null}
         </div>
         {drawer === "handoff" && activeRun ? (
-          <footer className="processing-footer">
-            {activeRun.status === "ready-to-open" ? (
-              <>
-                <button
-                  className="primary-action"
-                  type="button"
-                  disabled={openingReadyVersion || !activeRun.readyPayload}
-                  onClick={() => void activateReadyResult()}
-                >
-                  <FileHtmlIcon aria-hidden="true" size={18} weight="duotone" />
-                  {openingReadyVersion ? "正在打开并核对…" : "打开最新版"}
-                </button>
-                <button
-                  className="secondary-action"
-                  type="button"
-                  onClick={() => setDrawer(null)}
-                >
-                  <ClockCounterClockwiseIcon aria-hidden="true" size={17} weight="duotone" />
-                  稍后处理
-                </button>
-              </>
-            ) : pendingRunOutcome ? (
-              <span className="processing-auto-status" role="status">
-                {pendingReconcileBusy ? "正在自动确认发送结果…" : "等待下一次自动确认…"}
-              </span>
-            ) : handoffCopyFailed ? (
-              <>
-                <button
-                  className="primary-action"
-                  type="button"
-                  disabled={
-                    !activeRun.handoffMessage
-                    || currentQoderHandoffStatus === "copying"
-                  }
-                  onClick={() => void sendToQoderWork(
-                    activeRun.handoffMessage,
-                    activeRun,
-                  )}
-                >
-                  <CopyIcon aria-hidden="true" size={18} weight="bold" />
-                  重新复制
-                </button>
-                <button
-                  className="cancel-action"
-                  type="button"
-                  disabled={cancelling}
-                  onClick={() => void cancelActiveRun()}
-                >
-                  <ArrowCounterClockwiseIcon aria-hidden="true" size={17} weight="bold" />
-                  {cancelling ? "正在取消…" : "取消本轮"}
-                </button>
-              </>
-            ) : activeRun.status === "awaiting-conflict-resolution" ? (
-              <>
-                <button
-                  className="primary-action"
-                  type="button"
-                  disabled={resolvingConflict}
-                  onClick={() => void resolveAiConflict("adopt-ai")}
-                >
-                  <FileHtmlIcon aria-hidden="true" size={18} weight="duotone" />
-                  {resolvingConflict ? "正在处理…" : "采用 AI 版本"}
-                </button>
-                <button
-                  className="secondary-action"
-                  type="button"
-                  disabled={resolvingConflict}
-                  onClick={() => void resolveAiConflict("keep-external")}
-                >
-                  <FileIcon aria-hidden="true" size={17} weight="duotone" />
-                  保留外部版本
-                </button>
-              </>
-            ) : checkingRun ? (
-              <button
-                className="secondary-action"
-                type="button"
-                disabled={
-                  !activeRun.requestPath
-                  || typeof window === "undefined"
-                  || !window.htmlAIProjects?.revealRequestFolder
-                }
-                onClick={() => void revealActiveRunInFinder()}
-              >
-                <FolderOpenIcon aria-hidden="true" size={18} weight="duotone" />
-                查看本轮文件
-              </button>
-            ) : terminalRun ? (
-              <>
-                <button
-                  className="primary-action"
-                  type="button"
-                  onClick={() => returnToEditingFromTerminalRun(true)}
-                >
-                  <PencilSimpleIcon aria-hidden="true" size={17} weight="bold" />
-                  修改要求
-                </button>
-                <button
-                  className="secondary-action"
-                  type="button"
-                  onClick={() => returnToEditingFromTerminalRun(false)}
-                >
-                  <ArrowCounterClockwiseIcon aria-hidden="true" size={17} weight="bold" />
-                  返回编辑
-                </button>
-              </>
-            ) : (
-              <>
-                <button
-                  className="cancel-action"
-                  type="button"
-                  disabled={
-                    cancelling
-                    || activeRun.requestId === "pending"
-                    || currentQoderHandoffStatus === "copying"
-                  }
-                  onClick={() => {
-                    if (currentQoderHandoffStatus === "copied") {
-                      setCancelRunConfirmationKey(activeRunOperationKey(activeRun));
-                    } else {
-                      void cancelActiveRun();
-                    }
-                  }}
-                >
-                  <ArrowCounterClockwiseIcon aria-hidden="true" size={17} weight="bold" />
-                  {cancelling ? "正在恢复编辑…" : "结束本轮并继续编辑"}
-                </button>
-                <button
-                  className="secondary-action"
-                  type="button"
-                  onClick={() => {
-                    setHandoffPreviewOpen(true);
-                    setCanvasMode("preview");
-                    setDrawer(null);
-                  }}
-                >
-                  <EyeIcon aria-hidden="true" size={17} weight="bold" />
-                  预览已发送 HTML
-                </button>
-                <button
-                  className="primary-action"
-                  type="button"
-                  disabled={
-                    !activeRun.handoffMessage
-                    || currentQoderHandoffStatus === "copying"
-                  }
-                  onClick={() => void sendToQoderWork(
-                    activeRun.handoffMessage,
-                    activeRun,
-                  )}
-                >
-                  <CopyIcon aria-hidden="true" size={18} weight="bold" />
-                  {currentQoderHandoffStatus === "copying"
-                    ? "正在复制并核对…"
-                    : currentQoderHandoffStatus === "failed"
-                      ? "重新复制本轮要求"
-                      : "再次复制本轮要求"}
-                </button>
-              </>
+          <HandoffFooter
+            activeRun={activeRun}
+            openingReadyVersion={openingReadyVersion}
+            pendingRunOutcome={pendingRunOutcome}
+            pendingReconcileBusy={pendingReconcileBusy}
+            handoffCopyFailed={handoffCopyFailed}
+            currentQoderHandoffStatus={currentQoderHandoffStatus}
+            cancelling={cancelling}
+            resolvingConflict={resolvingConflict}
+            checkingRun={checkingRun}
+            terminalRun={terminalRun}
+            canRevealRequestFolder={Boolean(
+              typeof window !== "undefined"
+              && window.htmlAIProjects?.revealRequestFolder,
             )}
-          </footer>
+            onActivateReadyResult={() => void activateReadyResult()}
+            onClose={() => setDrawer(null)}
+            onSend={() => void sendToQoderWork(
+              activeRun.handoffMessage,
+              activeRun,
+            )}
+            onCancel={() => void cancelActiveRun()}
+            onResolveConflict={(choice) => void resolveAiConflict(choice)}
+            onRevealRequestFolder={() => void revealActiveRunInFinder()}
+            onReturnToEditing={returnToEditingFromTerminalRun}
+            onRequestEnd={() => {
+              if (currentQoderHandoffStatus === "copied") {
+                setCancelRunConfirmationKey(activeRunOperationKey(activeRun));
+              } else {
+                void cancelActiveRun();
+              }
+            }}
+            onPreviewSentHtml={() => {
+              setHandoffPreviewOpen(true);
+              setCanvasMode("preview");
+              setDrawer(null);
+            }}
+          />
         ) : null}
       </aside>
 
