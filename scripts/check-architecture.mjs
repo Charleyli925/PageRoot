@@ -16,6 +16,8 @@ const RETIRED_V1_MODULES = new Set([
 ]);
 const RETIRED_V1_IMPORT =
   /(?:^|\/)(?:NativeEditingController|format-skeleton|native-block-edit-draft|native-edit-transaction|native-input-intent|native-structural-edit-planner)(?:\.[^/]+)?$/;
+const RETIRED_SOURCE_PATCH_OPERATIONS =
+  /\b(?:replace-text|replace-text-range|replace-text-flow-range|delete-hard-break|split-text-block|planTextPatch|planTextRangePatch|planTextFlowRangePatch|planDeleteHardBreakPatch|planSplitTextBlockPatch|textRangeToSourceEdit)\b/;
 const LEGACY_RENDERER_STATE =
   /["'](?:waiting|importing|result-ready|awaiting-check-decision|version-created|completed|canceled|waived)["']/;
 
@@ -51,6 +53,9 @@ export async function architectureViolations() {
     const source = await readFile(filePath, "utf8");
     if (RETIRED_V1_MODULES.has(file)) {
       violations.push(`${file}: retired V1 editing modules cannot return to production`);
+    }
+    if (RETIRED_SOURCE_PATCH_OPERATIONS.test(source)) {
+      violations.push(`${file}: retired V1 source patch operations cannot return to production`);
     }
     if (
       /\bfetch\s*\(/.test(source)

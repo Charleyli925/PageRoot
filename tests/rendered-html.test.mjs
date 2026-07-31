@@ -414,7 +414,6 @@ test("canvas persistence has one SourcePatchEngine path and clean v3 TargetRefs"
     /onChangeRef\.current\([^)]*outerHTML/s,
     "outerHTML is limited to preview sanitization and load verification",
   );
-  assert.match(sourceTextMap, /export function textRangeToSourceEdit/u);
   assert.match(sourceTextMap, /export function textRangeToSourceSegments/u);
   assert.match(sourceTextMap, /export function sourceSegmentsToTextRange/u);
   assert.match(runtimeDomSourceMap, /export class RuntimeDomSourceMap/u);
@@ -423,10 +422,14 @@ test("canvas persistence has one SourcePatchEngine path and clean v3 TargetRefs"
   assert.match(nativeCapability, /EDITABLE: "native-editable"/u);
   assert.match(nativeCapability, /SELECT_COMMENT: "select-comment"/u);
   assert.match(nativeCapability, /COMMENT_ONLY: "comment-only"/u);
-  assert.match(sourcePatchEngine, /Object\.hasOwn\(command, "replacements"\)/u);
-  assert.match(sourcePatchEngine, /inputs = command\.replacements/u);
-  assert.match(sourcePatchEngine, /Text replacements contain overlapping deletion ranges/u);
-  assert.match(sourcePatchEngine, /metadataReplacements = replacements\.map/u);
+  assert.match(sourcePatchEngine, /export function planEditableIslandPatch/u);
+  assert.match(sourcePatchEngine, /normalizeEditableIslandHtml\(/u);
+  assert.match(sourcePatchEngine, /type: "replace-editable-island"/u);
+  assert.match(sourcePatchEngine, /writeScope: "editable-island-inner-html"/u);
+  assert.doesNotMatch(
+    `${sourcePatchEngine}\n${sourceTextMap}`,
+    /replace-text(?:-range|-flow-range)?|delete-hard-break|split-text-block|textRangeToSourceEdit/u,
+  );
   assert.match(nativeController, /applyExternalIslandBaseline\(/u);
   assert.match(nativeController, /if \(!this\.hasCurrentLease\(\)\)/u);
   assert.match(nativeController, /if \(this\.composing\)/u);

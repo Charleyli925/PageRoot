@@ -103,10 +103,10 @@ test("fixed Unicode/style/reorder fixtures enforce exact source patches and fail
     (element) => element.tagName === "h1",
   );
   const textResult = applyPatchPlan(planSourcePatch({
-    type: "replace-text",
-    targetRef: createTargetRef(unicodeIndex, heading.nodeId, { level: "text" }),
-    beforeText: "中文标题😀",
-    nextText: "中文标题😀已验证",
+    type: "replace-editable-island",
+    targetRef: createTargetRef(unicodeIndex, heading.nodeId, { level: "subregion" }),
+    beforeInnerHtml: "中文标题😀",
+    nextInnerHtml: "中文标题😀已验证",
   }, unicodeIndex), unicodeHtml);
   assert.equal(textResult.scopeReport.outsideUnchanged, true);
   assert.equal(applyPatchPlan(textResult.inversePlan, textResult.html).html, unicodeHtml);
@@ -219,10 +219,10 @@ test("the committed desktop QA fixture reproduces text, style, reorder, and full
     (element) => element.tagName === "h1",
   );
   const textResult = applyPatchPlan(planSourcePatch({
-    type: "replace-text",
-    targetRef: createTargetRef(firstIndex, heading.nodeId, { level: "text" }),
-    beforeText: "桌面自动写回验收",
-    nextText: "Desktop Source Patch Verified",
+    type: "replace-editable-island",
+    targetRef: createTargetRef(firstIndex, heading.nodeId, { level: "subregion" }),
+    beforeInnerHtml: "桌面自动写回验收",
+    nextInnerHtml: "Desktop Source Patch Verified",
   }, firstIndex), original);
 
   const secondIndex = textResult.sourceIndex;

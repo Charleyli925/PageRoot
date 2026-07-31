@@ -532,8 +532,8 @@ test("DMG stapling refreshes only its final latest-mac metadata entry", async (t
 test("retired editor guard rejects dependencies, bundled code, and legacy editing surfaces", () => {
   for (const contents of [
     "const nativeEditing = true; data-pageroot-runtime-node",
-    "replace-text-flow-range",
-    "planTextFlowRangePatch()",
+    "replace-editable-island",
+    "planEditableIslandPatch()",
     "plainTextFlow",
   ]) {
     assert.doesNotThrow(() => assertNoRetiredEditorArtifacts(

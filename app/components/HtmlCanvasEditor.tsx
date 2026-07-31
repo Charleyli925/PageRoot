@@ -1255,17 +1255,10 @@ function uniqueSelections(
   return [...byTargetId.values()];
 }
 
-function sourcePatchOperationType(plan: SourcePatchPlan): string {
-  const metadata = plan.metadata as Record<string, unknown> | undefined;
-  const value = String(metadata?.operationType ?? plan.type ?? "");
-  return value.replace(/^(?:inverse:)+/, "");
-}
-
 function trackedSourceTargetRefs(
   targets: readonly HtmlCanvasSelection[],
   operationTargetRefs: readonly SourceTargetRef[],
   options: {
-    includeOperationTargetIds?: boolean;
     includeUnresolvedTargetIds?: ReadonlySet<string>;
   } = {},
 ): SourceTargetRef[] {
@@ -1276,7 +1269,6 @@ function trackedSourceTargetRefs(
     if (
       (
         operationTargetIds.has(target.id)
-        && !options.includeOperationTargetIds
       )
       || (
         (
@@ -3272,10 +3264,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     originalMutation: HtmlCanvasMutation,
     appliedMutation: HtmlCanvasMutation,
   ): boolean => {
-    // A partial text replacement can live inside mixed inline markup. Reloading
-    // the verified preview keeps every sibling element intact instead of
-    // flattening the selected parent through textContent.
-    if (plan.type === "replace-text-range") return false;
     if (
       originalMutation.kind !== "style"
       && originalMutation.kind !== "text"
@@ -3646,12 +3634,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         mutation.target,
         ...ambientTargets,
       ]);
-      const mapsOneTargetToMany =
-        sourcePatchOperationType(forwardPlan) === "split-text-block";
       const trackedTargetRefs = trackedSourceTargetRefs(
         ambientTargets,
         forwardPlan.targetRefs,
-        { includeOperationTargetIds: mapsOneTargetToMany },
       );
       const result = applyPatchPlan(
         forwardPlan,

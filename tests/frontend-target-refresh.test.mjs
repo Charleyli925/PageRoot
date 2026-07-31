@@ -33,10 +33,10 @@ test("a tracked comment stays on the same unstable element after text edit and i
     level: "subregion",
   });
   const plan = planSourcePatch({
-    type: "replace-text",
+    type: "replace-editable-island",
     targetRef: editTarget,
-    beforeText: "before",
-    nextText: "after",
+    beforeInnerHtml: "before",
+    nextInnerHtml: "after",
     expectedSourceSha256: index.sourceSha256,
   }, index);
   const applied = applyPatchPlan(plan, source, {
@@ -62,82 +62,6 @@ test("a tracked comment stays on the same unstable element after text edit and i
   assert.ok(restored);
   assert.equal(restored.targetId, commentTarget.targetId);
   assert.equal(resolvedElement(restoredResult.sourceIndex, restored).textContent, "before");
-});
-
-test("a comment on a split block never silently follows the wrong half", () => {
-  const source = "<!doctype html><html><body><main><p id=\"copy\">前段评论后段</p></main></body></html>";
-  const index = buildSourceIndex(source);
-  const paragraph = index.elements.find((element) => element.tagName === "p");
-  assert.ok(paragraph);
-  const editTarget = createTargetRef(index, paragraph, {
-    targetId: "target_shared",
-    level: "subregion",
-  });
-  const fullBlockComment = createTargetRef(index, paragraph, {
-    targetId: "target_shared",
-    level: "subregion",
-  });
-  const narrowedComment = (targetId, textQuote) => ({
-    ...createTargetRef(index, paragraph, {
-      targetId,
-      level: "subregion",
-    }),
-    textQuote,
-  });
-  const plan = planSourcePatch({
-    type: "split-text-block",
-    targetRef: editTarget,
-    splitOffset: 4,
-    expectedSourceSha256: index.sourceSha256,
-  }, index);
-  const applied = applyPatchPlan(plan, source, {
-    trackedTargetRefs: [
-      fullBlockComment,
-      narrowedComment("target_first", "前段"),
-      narrowedComment("target_second", "后段"),
-      narrowedComment("target_crossing", "评论后"),
-    ],
-  });
-  const mappings = applied.targetMappings;
-  const mapping = (targetId, tracked = true) => mappings.find((candidate) => (
-    candidate.targetId === targetId && candidate.tracked === tracked
-  ));
-
-  assert.equal(mapping("target_shared", false).resolution, "exact");
-  assert.equal(
-    applied.sourceIndex.byNodeId.get(mapping("target_shared", false).afterNodeId).textContent,
-    "前段评论",
-  );
-  assert.equal(mapping("target_shared").resolution, "ambiguous");
-  assert.equal(mapping("target_shared").afterNodeId, null);
-  assert.equal(mapping("target_shared").afterTargetRef.sourceAnchor, undefined);
-  assert.equal(
-    applied.sourceIndex.byNodeId.get(mapping("target_first").afterNodeId).textContent,
-    "前段评论",
-  );
-  assert.equal(
-    applied.sourceIndex.byNodeId.get(mapping("target_second").afterNodeId).textContent,
-    "后段",
-  );
-  assert.equal(mapping("target_crossing").resolution, "ambiguous");
-
-  const restoredResult = applyPatchPlan(applied.inversePlan, applied.html);
-  assert.equal(restoredResult.html, source);
-  for (const targetId of [
-    "target_shared",
-    "target_first",
-    "target_second",
-    "target_crossing",
-  ]) {
-    const restored = restoredResult.targetMappings.find((candidate) => (
-      candidate.targetId === targetId && candidate.tracked
-    ));
-    assert.equal(restored.resolution, "exact");
-    assert.equal(
-      restoredResult.sourceIndex.byNodeId.get(restored.afterNodeId).textContent,
-      "前段评论后段",
-    );
-  }
 });
 
 test("a tracked comment follows its exact sibling through reorder and inverse restoration", () => {
@@ -314,7 +238,7 @@ test("canvas and workbench consume deterministic mappings before generic fallbac
     "targetUpdates",
     "trackedTargetIds",
     "const ambientTargets = uniqueSelections([",
-    "{ includeOperationTargetIds: mapsOneTargetToMany }",
+    "const trackedTargetRefs = trackedSourceTargetRefs(",
     "deterministicOperationTargetUpdate",
     "const deterministicById = new Map(",
     "if (trackedTargetIds.has(target.id))",
@@ -331,6 +255,11 @@ test("canvas and workbench consume deterministic mappings before generic fallbac
       new RegExp(required.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
     );
   }
+  assert.doesNotMatch(
+    canvas,
+    /split-text-block|includeOperationTargetIds/u,
+    "retired one-to-many V1 target mapping must not remain in the V2 canvas",
+  );
 });
 
 test("legacy whole-page comments normalize before recovery and submission", async () => {

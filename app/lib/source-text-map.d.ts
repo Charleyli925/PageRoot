@@ -107,11 +107,4 @@ export declare function sourceSegmentsToTextRange(
   segments: readonly SourceTextSegment[],
 ): { startOffset: number; endOffset: number };
 
-export declare function textRangeToSourceEdit(
-  map: SourceTextMap,
-  startOffset: number,
-  endOffset: number,
-  affinity?: SourceAffinity,
-): { deleteSegments: SourceTextSegment[]; insertAt: SourceAnchor };
-
 export declare function isTransparentSourceTextElement(tagName: unknown): boolean;

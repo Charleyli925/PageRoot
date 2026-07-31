@@ -311,7 +311,6 @@
         "tests/runtime-dom-source-map.test.mjs",
         "tests/native-edit-capability.test.mjs",
         "tests/native-edit-policy.test.mjs",
-        "tests/native-source-map-fuzz.test.mjs",
         "tests/generated-source-invariants.test.mjs"
       ]
     },

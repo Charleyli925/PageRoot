@@ -512,41 +512,6 @@ export function sourceSegmentsToTextRange(map, segments) {
   return { startOffset, endOffset };
 }
 
-export function textRangeToSourceEdit(map, startOffset, endOffset, affinity = "right") {
-  assertMap(map);
-  assertTextRange(map, startOffset, endOffset);
-  const deleteSegments = textRangeToSourceSegments(map, startOffset, endOffset);
-  const crossedInlineRange = deleteSegments.length > 0
-    ? [...(map.inlineRanges ?? [])]
-        .filter((range) => (
-          range.textStart === startOffset
-          && range.textEnd > range.textStart
-          && endOffset > range.textEnd
-        ))
-        .sort((left, right) => left.depth - right.depth)[0] ?? null
-    : null;
-  // A replacement normally belongs at the beginning of the first deleted
-  // source text node. Chromium makes one observable boundary distinction: if
-  // the selection begins at a transparent inline boundary and continues past
-  // that inline, it inserts before the outermost crossed inline. The source
-  // map records those authored ranges explicitly, avoiding a run-neighbour
-  // heuristic that could incorrectly move root text into a preceding wrapper.
-  // Affinity remains ambiguous only for a collapsed insertion.
-  const insertAt = deleteSegments.length > 0
-    ? crossedInlineRange
-      ? crossedInlineRange.beforeAnchor
-      : textAnchor(
-          deleteSegments[0].textNodeId,
-          deleteSegments[0].startOffset,
-          "right",
-        )
-    : textOffsetToSourceAnchor(map, startOffset, affinity);
-  return {
-    deleteSegments,
-    insertAt,
-  };
-}
-
 export function isTransparentSourceTextElement(tagName) {
   return TRANSPARENT_TEXT_ELEMENTS.has(String(tagName ?? "").toLowerCase());
 }

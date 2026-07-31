@@ -8,7 +8,6 @@ import {
   sourceAnchorToTextOffset,
   sourceSegmentsToTextRange,
   textOffsetToSourceAnchor,
-  textRangeToSourceEdit,
   textRangeToSourceSegments,
 } from "../app/lib/source-text-map.js";
 
@@ -71,138 +70,6 @@ test("round-trips text and child-boundary source anchors with explicit affinity"
   assert.equal(sourceAnchorToTextOffset(map, map.endAnchor), map.textLength);
 });
 
-test("a non-collapsed replacement stays inside the first emptied inline text node", () => {
-  const index = buildSourceIndex(`<p id="copy"><span>replace me</span></p>`);
-  const map = buildSourceTextMap(index, elementById(index, "copy").nodeId);
-  const edit = textRangeToSourceEdit(map, 0, map.textLength, "left");
-
-  assert.deepEqual(edit.insertAt, {
-    kind: "text",
-    textNodeId: map.runs[0].textNodeId,
-    utf16Offset: 0,
-    affinity: "right",
-  });
-  assert.deepEqual(edit.deleteSegments, [{
-    textNodeId: map.runs[0].textNodeId,
-    startOffset: 0,
-    endOffset: map.textLength,
-  }]);
-});
-
-test("a replacement crossing from an exact run boundary uses the surviving left source owner", () => {
-  const index = buildSourceIndex(
-    `<p id="copy">真实 <strong>DOM</strong> 光标要像</p>`,
-  );
-  const map = buildSourceTextMap(index, elementById(index, "copy").nodeId);
-  const [, strongRun, trailingRun] = map.runs;
-  const strong = index.elements.find((element) => element.tagName === "strong");
-  assert.ok(strong);
-
-  assert.deepEqual(textRangeToSourceEdit(map, 3, 9, "left"), {
-    deleteSegments: [
-      {
-        textNodeId: strongRun.textNodeId,
-        startOffset: 0,
-        endOffset: strongRun.text.length,
-      },
-      {
-        textNodeId: trailingRun.textNodeId,
-        startOffset: 0,
-        endOffset: 3,
-      },
-    ],
-    insertAt: {
-      kind: "child-boundary",
-      parentNodeId: elementById(index, "copy").nodeId,
-      beforeNodeId: strong.nodeId,
-      affinity: "right",
-    },
-  });
-});
-
-test("inline range ownership never leaks root text into a preceding wrapper", () => {
-  const index = buildSourceIndex(
-    `<p id="copy"><strong>A</strong>B<i>C</i></p>`,
-  );
-  const map = buildSourceTextMap(index, elementById(index, "copy").nodeId);
-  const [, rootRun, italicRun] = map.runs;
-
-  assert.deepEqual(textRangeToSourceEdit(map, 1, 3, "left"), {
-    deleteSegments: [
-      { textNodeId: rootRun.textNodeId, startOffset: 0, endOffset: 1 },
-      { textNodeId: italicRun.textNodeId, startOffset: 0, endOffset: 1 },
-    ],
-    insertAt: {
-      kind: "text",
-      textNodeId: rootRun.textNodeId,
-      utf16Offset: 0,
-      affinity: "right",
-    },
-  });
-});
-
-test("nested inline ranges choose only the outermost wrapper actually crossed", () => {
-  const index = buildSourceIndex(
-    `<p id="copy"><strong><em>A</em>B</strong>C</p>`,
-  );
-  const paragraph = elementById(index, "copy");
-  const strong = index.elements.find((element) => element.tagName === "strong");
-  const emphasis = index.elements.find((element) => element.tagName === "em");
-  assert.ok(strong && emphasis);
-  const map = buildSourceTextMap(index, paragraph.nodeId);
-  const [emphasisRun, strongRun, rootRun] = map.runs;
-  const deleteSegments = [
-    { textNodeId: emphasisRun.textNodeId, startOffset: 0, endOffset: 1 },
-    { textNodeId: strongRun.textNodeId, startOffset: 0, endOffset: 1 },
-  ];
-
-  assert.deepEqual(textRangeToSourceEdit(map, 0, 2, "left"), {
-    deleteSegments,
-    insertAt: {
-      kind: "child-boundary",
-      parentNodeId: strong.nodeId,
-      beforeNodeId: emphasis.nodeId,
-      affinity: "right",
-    },
-  });
-  assert.deepEqual(textRangeToSourceEdit(map, 0, 3, "left"), {
-    deleteSegments: [
-      ...deleteSegments,
-      { textNodeId: rootRun.textNodeId, startOffset: 0, endOffset: 1 },
-    ],
-    insertAt: {
-      kind: "child-boundary",
-      parentNodeId: paragraph.nodeId,
-      beforeNodeId: strong.nodeId,
-      affinity: "right",
-    },
-  });
-});
-
-test("an empty transparent wrapper cannot steal boundary insertion ownership", () => {
-  const index = buildSourceIndex(
-    `<p id="copy"><span></span><strong>A</strong>B</p>`,
-  );
-  const paragraph = elementById(index, "copy");
-  const strong = index.elements.find((element) => element.tagName === "strong");
-  assert.ok(strong);
-  const map = buildSourceTextMap(index, paragraph.nodeId);
-  const [strongRun, rootRun] = map.runs;
-
-  assert.deepEqual(textRangeToSourceEdit(map, 0, 2, "left"), {
-    deleteSegments: [
-      { textNodeId: strongRun.textNodeId, startOffset: 0, endOffset: 1 },
-      { textNodeId: rootRun.textNodeId, startOffset: 0, endOffset: 1 },
-    ],
-    insertAt: {
-      kind: "child-boundary",
-      parentNodeId: paragraph.nodeId,
-      beforeNodeId: strong.nodeId,
-      affinity: "right",
-    },
-  });
-});
-
 test("keeps hard breaks and structural children explicit and rejects text-only edits across them", () => {
   const index = buildSourceIndex(`<p id="copy">A<br>B<img src=x>C</p>`);
   const paragraph = elementById(index, "copy");
@@ -258,14 +125,11 @@ test("uses source text-node offsets rather than invented raw entity offsets", ()
     startOffset: 1,
     endOffset: 3,
   }]);
-  assert.deepEqual(textRangeToSourceEdit(map, 3, 3, "left"), {
-    deleteSegments: [],
-    insertAt: {
-      kind: "text",
-      textNodeId: run.textNodeId,
-      utf16Offset: 3,
-      affinity: "left",
-    },
+  assert.deepEqual(textOffsetToSourceAnchor(map, 3, "left"), {
+    kind: "text",
+    textNodeId: run.textNodeId,
+    utf16Offset: 3,
+    affinity: "left",
   });
   assert.throws(
     () => textRangeToSourceSegments(map, 1, 2),
