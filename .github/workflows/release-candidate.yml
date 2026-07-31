@@ -263,6 +263,14 @@ jobs:
           --directory output/release-app-checkpoint/downloaded
           --output output/release-candidate/restored
           --github-output "$GITHUB_OUTPUT"
+      - name: Build the renderer oracle for restored payload verification
+        timeout-minutes: 5
+        run: >-
+          node scripts/ci-evidence.mjs run
+          --suite release-candidate-app-renderer
+          --stage artifact-checkpoint
+          --
+          npm run desktop:renderer
       - name: Revalidate the restored signature, notarization and payload
         timeout-minutes: 5
         env:

@@ -68,7 +68,9 @@ application-update controller is covered by Node tests; the Release Candidate
 lane owns the installed-App, Developer ID, notarization, signed-App checkpoint,
 ZIP/blockmap and `latest-mac.yml` evidence. It validates contents and full
 packaged runtime against a pre-sign App, proves signed startup, then passes the
-same notarized App to the final artifact job without rebuilding. Formal local
+same notarized App to the final artifact job without rebuilding. That fresh job
+builds only the deterministic Electron renderer used to compare the restored
+App payload against the identical source tree. Formal local
 packaging is a distribution build and therefore requires a valid Developer ID
 identity; publication credentials remain in GitHub encrypted secrets. The
 separate developer-preview profile removes those credentials from its child
