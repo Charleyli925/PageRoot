@@ -6,6 +6,16 @@ import { fileURLToPath } from "node:url";
 
 const PRODUCT_ROOT = fileURLToPath(new URL("../", import.meta.url));
 const SOURCE_EXTENSIONS = new Set([".js", ".mjs", ".ts", ".tsx"]);
+const RETIRED_V1_MODULES = new Set([
+  "app/components/NativeEditingController.ts",
+  "app/lib/format-skeleton.js",
+  "app/lib/native-block-edit-draft.js",
+  "app/lib/native-edit-transaction.js",
+  "app/lib/native-input-intent.js",
+  "app/lib/native-structural-edit-planner.js",
+]);
+const RETIRED_V1_IMPORT =
+  /(?:^|\/)(?:NativeEditingController|format-skeleton|native-block-edit-draft|native-edit-transaction|native-input-intent|native-structural-edit-planner)(?:\.[^/]+)?$/;
 const LEGACY_RENDERER_STATE =
   /["'](?:waiting|importing|result-ready|awaiting-check-decision|version-created|completed|canceled|waived)["']/;
 
@@ -39,6 +49,9 @@ export async function architectureViolations() {
   for (const filePath of files) {
     const file = relative(filePath);
     const source = await readFile(filePath, "utf8");
+    if (RETIRED_V1_MODULES.has(file)) {
+      violations.push(`${file}: retired V1 editing modules cannot return to production`);
+    }
     if (
       /\bfetch\s*\(/.test(source)
       && file !== "app/application/bridge-client.js"
@@ -74,6 +87,11 @@ export async function architectureViolations() {
     }
 
     const imports = importedSpecifiers(source);
+    for (const specifier of imports) {
+      if (RETIRED_V1_IMPORT.test(specifier)) {
+        violations.push(`${file}: production code cannot import retired V1 module ${specifier}`);
+      }
+    }
     if (file.startsWith("app/domain/")) {
       for (const specifier of imports) {
         if (

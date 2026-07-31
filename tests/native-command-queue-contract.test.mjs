@@ -2,14 +2,14 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const [canvas, workbench, nativeController] = await Promise.all([
+const [canvas, workbench, islandController] = await Promise.all([
   readFile(
     new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url),
     "utf8",
   ),
   readFile(new URL("../app/workbench.tsx", import.meta.url), "utf8"),
   readFile(
-    new URL("../app/components/NativeEditingController.ts", import.meta.url),
+    new URL("../app/components/IslandEditingController.ts", import.meta.url),
     "utf8",
   ),
 ]);
@@ -117,48 +117,6 @@ test("Workbench header drawers defer until the active composition is settled", (
   );
 });
 
-test.skip("retired V1 blur-retention source contract", () => {
-  const blur = section(
-    canvas,
-    "onBlur: () => {",
-    "onEscape:",
-  );
-  const toolbar = section(
-    canvas,
-    "onPointerDownCapture={(event) => {",
-    "onMouseDownCapture={(event) => {",
-  );
-
-  assert.match(
-    canvas,
-    /type RetainedNativeEditFocus = \{[\s\S]*?session: NativeEditingController;[\s\S]*?lease: ActiveNativeEdit\["lease"\];[\s\S]*?\};/u,
-  );
-  assertOrdered(
-    toolbar,
-    [
-      "activeNativeEdit.session.isComposing()",
-      "event.preventDefault()",
-      "return",
-      "retainNativeEditFocusRef.current = {",
-      "session: activeNativeEdit.session",
-      "lease: { ...activeNativeEdit.lease }",
-    ],
-    "prevented composition gestures must not mint a stale focus-retention token",
-  );
-  assert.match(
-    blur,
-    /retainNativeEditFocusRef\.current\?\.session === session[\s\S]*?retainNativeEditFocusRef\.current = null;[\s\S]*?return;/u,
-    "an obsolete session must clear its own token before returning",
-  );
-  assert.match(
-    blur,
-    /retainedFocus\?\.session === session[\s\S]*?nativeEditLeasesMatch\(retainedFocus\.lease, blurredLease\)/u,
-    "a valid toolbar-focus exception must match both session and lease",
-  );
-  assert.match(canvas, /discardPendingNativeCommands\("session-ended"\);\s*retainNativeEditFocusRef\.current = null;/u);
-  assert.match(canvas, /discardPendingNativeCommands\("unmounted"\);\s*retainNativeEditFocusRef\.current = null;/u);
-});
-
 test("format replay rebinds the live element after its checkpoint", () => {
   const format = section(
     canvas,
@@ -232,25 +190,42 @@ test("source-authority fences defer preview reconcile and retire the editable DO
   );
 });
 
-test("composition checkpoints and source revision advance both use hard generation boundaries", () => {
-  assert.match(
-    nativeController,
-    /this\.tracker\.replaceCurrentRange\([\s\S]*?this\.requiresCanonicalReconcile = true;/u,
-    "a strictly accepted IME value must still restart the island before an old tail can reach a new revision",
+test("V2 composition and source revision advance both use hard generation boundaries", () => {
+  const composition = section(
+    islandController,
+    "private handleCompositionStart",
+    "private handleBlur",
+  );
+  assertOrdered(
+    composition,
+    [
+      "this.compositionSnapshot = {",
+      "children: Array.from(this.hostElement.childNodes)",
+      "selection: this.getSelection()",
+      "this.composing = true",
+      "this.composing = false",
+      "restoreChildren(this.hostElement, snapshot.children)",
+      "setSelectionValue(this.hostElement, snapshot.selection)",
+      "insertTextAtSelection(this.hostElement, event.data ?? \"\")",
+      "this.validateDom()",
+    ],
+    "V2 IME completion must replay one final value into the frozen island and selection",
   );
   const rebase = section(
-    nativeController,
-    "const draftRebased = this.blockDraft.rebaseFromSource({",
-    "this.leaseStamp = nextLease",
+    islandController,
+    "applyExternalIslandBaseline(",
+    "applyExternalBaseline(",
   );
   assertOrdered(
     rebase,
     [
-      "advanceLease: (expected, next)",
-      "this.leaseAdvance(currentLease, nextLease)",
-      "if (!draftRebased.accepted)",
+      "leaseStampsMatch(",
+      "normalizeEditableIslandHtml(",
+      "this.ownedCanonicalInnerHtml !== canonical",
+      "this.lease.advance(currentLease, nextLease)",
+      "this.leaseStamp = nextLease",
     ],
-    "the shadow draft must validate before it performs the only outer lease CAS",
+    "V2 must validate the canonical island before advancing its only outer lease",
   );
 });
 

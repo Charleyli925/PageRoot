@@ -1,4 +1,4 @@
-# ADR 0008: Short-lived branches use managed isolated worktrees
+# ADR 0010: Short-lived branches use managed isolated worktrees
 
 - Status: Accepted
 - Date: 2026-07-30

@@ -259,7 +259,7 @@
         "^AGENTS\\.md$",
         "^CONTRIBUTING\\.md$",
         "^docs/(?:CODEX_WORKFLOW|DEVELOPMENT|GIT_WORKFLOW)\\.md$",
-        "^docs/decisions/0008-worktree-branch-lifecycle\\.md$",
+        "^docs/decisions/0010-worktree-branch-lifecycle\\.md$",
         "^package\\.json$",
         "^scripts/task-workflow\\.mjs$",
         "^tests/task-workflow\\.test\\.mjs$"
@@ -276,7 +276,7 @@
         "^scripts/(?:check-architecture|draft-aggregate|draft-service|source-history-service)\\.mjs$",
         "^tests/(?:architecture-boundaries|bridge-client|draft-aggregate|draft-service|draft-session|drain-coordinator|project-query-fence|recovery-store|run-lifecycle|runtime-capabilities|source-history|source-history-session)\\.test\\.mjs$",
         "^(?:CONTRIBUTING|docs/(?:ARCHITECTURE|ARCHITECTURE_CONTRACT|STATE_OWNERSHIP|ENGINEERING_STANDARDS))\\.md$",
-        "^docs/decisions/(?:0003-session-ownership-and-mutation-outcomes|0004-v2-editable-islands|0007-(?:independent-interactive-preview|persistent-source-patch-history)|0008-safe-presentation-actions-in-edit-mode)\\.md$"
+        "^docs/decisions/(?:0003-session-ownership-and-mutation-outcomes|0004-v2-editable-islands|0007-independent-interactive-preview|0008-safe-presentation-actions-in-edit-mode|0009-persistent-source-patch-history)\\.md$"
       ],
       "suites": ["typecheck"],
       "nodeTests": [
@@ -297,7 +297,7 @@
     {
       "id": "source-editing-core",
       "patterns": [
-        "^app/lib/(?:canvas-target-rebind|editable-island|page-view-context|source-(?:index|patch-core|patch-engine|text-map)|target-resolver|runtime-dom-source-map|format-skeleton|native-(?:edit-capability|edit-policy|edit-transaction|input-intent|structural-edit-planner|source-map|block-edit-draft))\\.(?:js|ts|d\\.ts)$",
+        "^app/lib/(?:canvas-target-rebind|editable-island|native-dom-logical-index|page-view-context|source-(?:index|patch-core|patch-engine|text-map)|target-resolver|runtime-dom-source-map|native-(?:edit-capability|edit-policy))\\.(?:js|ts|d\\.ts)$",
         "^scripts/(?:source-index|source-patch-engine|target-resolver)\\.mjs$"
       ],
       "suites": ["typecheck", "browser-smoke", "electron-smoke"],
@@ -309,29 +309,22 @@
         "tests/editable-island.test.mjs",
         "tests/source-text-map.test.mjs",
         "tests/runtime-dom-source-map.test.mjs",
-        "tests/format-skeleton.test.mjs",
         "tests/native-edit-capability.test.mjs",
         "tests/native-edit-policy.test.mjs",
-        "tests/native-input-intent.test.mjs",
-        "tests/native-structural-edit-planner.test.mjs",
-        "tests/native-edit-transaction.test.mjs",
-        "tests/native-block-edit-draft.test.mjs",
         "tests/native-source-map-fuzz.test.mjs",
         "tests/generated-source-invariants.test.mjs"
       ]
     },
     {
-      "id": "native-controller",
+      "id": "v2-island-controller",
       "patterns": [
-        "^app/components/(?:HtmlCanvasEditor|IslandEditingController|NativeEditingController|native-edit-types|native-edit-runtime-preflight|html-preview-sandbox)\\.(?:tsx|ts|js|d\\.ts)$"
+        "^app/components/(?:HtmlCanvasEditor|IslandEditingController|native-edit-types|native-edit-runtime-preflight|html-preview-sandbox)\\.(?:tsx|ts|js|d\\.ts)$"
       ],
       "suites": ["typecheck", "browser-smoke", "electron-smoke"],
       "nodeTests": [
-        "tests/native-edit-transaction.test.mjs",
         "tests/editable-island.test.mjs",
         "tests/runtime-dom-source-map.test.mjs",
         "tests/source-text-map.test.mjs",
-        "tests/format-skeleton.test.mjs",
         "tests/native-command-queue-contract.test.mjs",
         "tests/native-layout-guard.test.mjs",
         "tests/html-preview-sandbox.test.mjs",

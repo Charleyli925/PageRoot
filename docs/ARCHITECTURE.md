@@ -98,7 +98,10 @@ The V2 source-fidelity path remains a protected core: `SourceIndex`,
 `TargetResolver`, `editable-island`, `IslandEditingController`,
 `SourcePatchEngine` and the atomic source writer may be split only around a
 proven invariant, not to satisfy a line-count target. The retired V1
-`NativeEditingController` is not imported by the production V2 route.
+`NativeEditingController`, its per-keystroke tracker, shadow block draft,
+FormatSkeleton and structural planner have been removed. The architecture gate
+rejects reintroducing those files or imports; production text editing has one
+V2 editable-island route.
 
 ## Persistence
 

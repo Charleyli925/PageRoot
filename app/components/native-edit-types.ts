@@ -1,7 +1,3 @@
-import type {
-  NativeBlockPendingCommand,
-} from "../lib/native-block-edit-draft.js";
-
 export type NativeEditSelection = {
   anchor: number;
   focus: number;
@@ -47,7 +43,13 @@ export type NativeEditPendingCommandRequest = {
   payload?: unknown;
 };
 
-export type NativeEditQueuedCommand = NativeBlockPendingCommand;
+export type NativeEditQueuedCommand<TPayload = unknown> = {
+  readonly sequence: number;
+  readonly kind: string;
+  readonly authority: "user-explicit" | "system";
+  readonly payload?: TPayload;
+  readonly compositionId: string | null;
+};
 
 export type NativeEditQueueCommandResult =
   | { queued: false }

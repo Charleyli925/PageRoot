@@ -44,8 +44,9 @@ split must create a real invariant boundary and preserve byte, Selection, IME
 and transaction coverage. New product persistence or lifecycle behavior may
 not be added directly to `workbench.tsx`, `HtmlCanvasEditor.tsx`,
 `IslandEditingController.ts` or `workspace-bridge.mjs`; first introduce or use
-the owning application/domain/service module. The retired V1
-`NativeEditingController.ts` is not a PageRoot 0.9.0 extension point.
+the owning application/domain/service module. The retired V1 controller and
+its tracker/draft/planner modules are deleted and forbidden by the architecture
+gate; they are not compatibility or extension points.
 
 ## Effects and asynchronous work
 

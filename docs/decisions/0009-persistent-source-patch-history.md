@@ -1,4 +1,4 @@
-# ADR 0007: Canvas undo uses one persistent exact-Patch journal
+# ADR 0009: Canvas undo uses one persistent exact-Patch journal
 
 - Status: Accepted
 - Date: 2026-07-31
