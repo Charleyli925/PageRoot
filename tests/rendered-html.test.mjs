@@ -337,7 +337,6 @@ test("canvas persistence has one SourcePatchEngine path and clean v3 TargetRefs"
     'from "../lib/source-patch-core.js"',
     "instrumentPreviewHtml",
     "SOURCE_NODE_ATTRIBUTE",
-    "if (!onChangeRef.current(result.html, appliedMutation))",
     'type: "replace-editable-island"',
     "islandTextCommit",
     "editableIslandForTarget",
@@ -359,6 +358,12 @@ test("canvas persistence has one SourcePatchEngine path and clean v3 TargetRefs"
       new RegExp(required.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
     );
   }
+
+  assert.match(
+    canvasEditor,
+    /if \(!onChangeRef\.current\(\s*result\.html,\s*appliedMutation,\s*sourceTransaction,\s*\)\)/u,
+    "the single SourcePatch persistence path must carry its exact history transaction",
+  );
 
   assert.doesNotMatch(
     canvasEditor,
