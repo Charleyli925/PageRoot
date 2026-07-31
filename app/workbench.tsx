@@ -333,6 +333,19 @@ async function waitUntilResolved(predicate: () => boolean): Promise<void> {
   while (!predicate()) await waitFor(40);
 }
 
+function commentMeasurementKey(
+  itemKey: string,
+  layoutState: unknown,
+): string {
+  const text = JSON.stringify(layoutState);
+  let hash = 2_166_136_261;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16_777_619);
+  }
+  return `${itemKey}::${text.length}-${(hash >>> 0).toString(36)}`;
+}
+
 async function withOneAutomaticRetry<T>(
   work: () => Promise<T>,
 ): Promise<T> {
@@ -1494,13 +1507,21 @@ export default function Workbench() {
     return () => observer.disconnect();
   }, [canvasMode]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const root = commentsPanelRef.current;
     if (!root || typeof ResizeObserver === "undefined") return undefined;
-    const nodes = [...root.querySelectorAll<HTMLElement>("[data-comment-measure]")];
     const update = () => {
+      const nodes = [
+        ...root.querySelectorAll<HTMLElement>("[data-comment-measure]"),
+      ];
       const measured = Object.fromEntries(nodes.map((node) => [
-        String(node.dataset.commentMeasure),
+        String(
+          node.dataset.commentMeasureKey
+          || commentMeasurementKey(
+            String(node.dataset.commentMeasure),
+            { compatibility: true },
+          )
+        ),
         Math.ceil(node.getBoundingClientRect().height),
       ]));
       const activeKeys = new Set([
@@ -1516,7 +1537,7 @@ export default function Workbench() {
       setCommentCardHeights((current) => {
         const next = Object.fromEntries(
           Object.entries({ ...current, ...measured })
-            .filter(([key]) => activeKeys.has(key)),
+            .filter(([key]) => activeKeys.has(key.split("::", 1)[0])),
         );
         const entries = Object.entries(next);
         if (
@@ -1527,9 +1548,37 @@ export default function Workbench() {
       });
     };
     const observer = new ResizeObserver(update);
-    nodes.forEach((node) => observer.observe(node));
-    update();
-    return () => observer.disconnect();
+    const observed = new Set<HTMLElement>();
+    const refreshObservedNodes = () => {
+      const nodes = new Set([
+        ...root.querySelectorAll<HTMLElement>("[data-comment-measure]"),
+      ]);
+      for (const node of observed) {
+        if (nodes.has(node)) continue;
+        observer.unobserve(node);
+        observed.delete(node);
+      }
+      for (const node of nodes) {
+        if (observed.has(node)) continue;
+        observed.add(node);
+        observer.observe(node);
+      }
+      update();
+    };
+    const mutationObserver = typeof MutationObserver === "undefined"
+      ? null
+      : new MutationObserver(refreshObservedNodes);
+    mutationObserver?.observe(root, {
+      attributes: true,
+      attributeFilter: ["data-comment-measure-key"],
+      childList: true,
+      subtree: true,
+    });
+    refreshObservedNodes();
+    return () => {
+      mutationObserver?.disconnect();
+      observer.disconnect();
+    };
   }, [
     attachmentObjectUrls,
     composerInCurrentTab,
@@ -1539,6 +1588,8 @@ export default function Workbench() {
     draftInCurrentTab,
     draftTarget,
     editingCommentId,
+    pendingDeleteCommentId,
+    relinkingTarget,
     commentViewport.height,
     commentViewportBucket,
     railCommentItems,
@@ -3927,14 +3978,14 @@ export default function Workbench() {
 
   const deleteAttachmentFile = useCallback(async (
     attachment: CommentAttachment,
+    context: ProjectContext | null = captureProjectContext(),
   ) => {
-    const activeSource = projectSessionRef.current.sourcePath;
-    if (!activeSource) return;
+    if (!context) return;
     try {
       await bridgeClient.deleteAttachment({
-        projectId: projectSessionRef.current.projectId,
-        documentId: projectSessionRef.current.documentId,
-        sourcePath: activeSource,
+        projectId: context.projectId,
+        documentId: context.documentId,
+        sourcePath: context.sourcePath,
         relativePath: attachment.relativePath,
       });
     } catch (cause) {
@@ -3945,7 +3996,7 @@ export default function Workbench() {
         dedupeKey: `attachment-cleanup-${attachment.attachmentId}`,
       });
     }
-  }, []);
+  }, [captureProjectContext]);
 
   const removeComposerAttachment = useCallback((attachment: CommentAttachment) => {
     const next = commentSessionRef.current.composerAttachments.filter(
@@ -4131,9 +4182,11 @@ export default function Workbench() {
       });
       return;
     }
+    let attachmentContext: ProjectContext;
     try {
       const registered = await ensureProjectRegistered(activeSource);
       if (!registered) throw new Error("当前项目已经切换，请重试。");
+      attachmentContext = registered;
     } catch (cause) {
       setToast({
         title: "附件尚未加入",
@@ -4165,9 +4218,9 @@ export default function Workbench() {
       try {
         const attachmentId = recordId("attachment", attachmentCounter.current++);
         const payload = await bridgeClient.saveAttachment({
-          projectId: projectSessionRef.current.projectId,
-          documentId: projectSessionRef.current.documentId,
-          sourcePath: activeSource,
+          projectId: attachmentContext.projectId,
+          documentId: attachmentContext.documentId,
+          sourcePath: attachmentContext.sourcePath,
           commentId: target.commentId,
           attachmentId,
           fileName: file.name || "附件",
@@ -4183,7 +4236,7 @@ export default function Workbench() {
         if (!attachment) throw new Error("附件已写入，但返回的记录不完整。");
         if (target.kind === "composer") {
           if (commentSessionRef.current.composerCommentId !== target.commentId) {
-            void deleteAttachmentFile(attachment);
+            void deleteAttachmentFile(attachment, attachmentContext);
             continue;
           }
           if (attachment.kind === "image") {
@@ -4205,7 +4258,7 @@ export default function Workbench() {
               (comment) => comment.commentId === target.commentId,
             )
           ) {
-            void deleteAttachmentFile(attachment);
+            void deleteAttachmentFile(attachment, attachmentContext);
             continue;
           }
           if (attachment.kind === "image") {
@@ -8146,6 +8199,7 @@ export default function Workbench() {
     try {
       await bridgeClient.cancelActiveRun({
         projectId: run.projectId,
+        documentId: run.documentId,
         sourcePath: run.sourcePath,
         requestId: run.requestId,
         attemptId: run.attemptId,
@@ -8220,6 +8274,7 @@ export default function Workbench() {
     try {
       const payload = await bridgeClient.resolveConflict({
         projectId: run.projectId,
+        documentId: run.documentId,
         sourcePath: run.sourcePath,
         requestId: run.requestId,
         attemptId: run.attemptId,
@@ -8592,12 +8647,12 @@ export default function Workbench() {
     && draftTarget
     && !composerOpen
   );
-  const commentTargetIsLocatable = (target: HtmlCanvasSelection): boolean => {
+  const commentTargetIsLocatable = useCallback((target: HtmlCanvasSelection): boolean => {
     const layout = commentTargetLayouts[target.id];
     const resolution = layout?.resolution ?? target.resolution;
     return layout?.status !== "missing"
       && (resolution === "exact" || resolution === "rebound");
-  };
+  }, [commentTargetLayouts]);
   const draftTargetCanSave = Boolean(
     draftTarget
     && commentTargetLayouts[draftTarget.id]?.status !== "missing"
@@ -8675,9 +8730,69 @@ export default function Workbench() {
     commentRailTargetTops,
     railCommentItems,
   ]);
+  const commentMeasurementKeys = useMemo(() => Object.fromEntries(
+    sortedVisibleCommentItems.map((comment) => {
+      const layout = commentTargetLayouts[comment.target.id];
+      const resolution = layout?.resolution ?? comment.target.resolution;
+      const locatable = layout?.status !== "missing"
+        && (resolution === "exact" || resolution === "rebound");
+      return [comment.commentId, commentMeasurementKey(comment.commentId, {
+        resolution,
+        locatable,
+        editable: viewMode === "current" && !interactionLocked,
+        editing: editingCommentId === comment.commentId,
+        deleting: pendingDeleteCommentId === comment.commentId,
+        relinking: relinkingTarget === comment.commentId,
+        text: comment.text,
+        attachments: (comment.attachments ?? []).map((attachment) => ({
+          id: attachment.attachmentId,
+          kind: attachment.kind,
+          bytes: attachment.byteLength,
+        })),
+      })];
+    }),
+  ), [
+    commentTargetLayouts,
+    editingCommentId,
+    interactionLocked,
+    pendingDeleteCommentId,
+    relinkingTarget,
+    sortedVisibleCommentItems,
+    viewMode,
+  ]);
+  const composerMeasurementKey = useMemo(() => commentMeasurementKey(
+    "__composer",
+    {
+      canSave: draftTargetCanSave,
+      deleting: pendingDeleteCommentId === "__composer",
+      relinking: relinkingTarget === "__composer",
+      text: draft,
+      attachments: draftAttachments.map((attachment) => ({
+        id: attachment.attachmentId,
+        kind: attachment.kind,
+        bytes: attachment.byteLength,
+      })),
+      uploading: attachmentUploadCount > 0,
+    },
+  ), [
+    attachmentUploadCount,
+    draft,
+    draftAttachments,
+    draftTargetCanSave,
+    pendingDeleteCommentId,
+    relinkingTarget,
+  ]);
+  const draftRecoveryMeasurementKey = useMemo(() => commentMeasurementKey(
+    "__draft_recovery",
+    {
+      text: draft,
+      attachments: draftAttachments.length,
+    },
+  ), [draft, draftAttachments.length]);
   const commentRailLayout = useMemo(() => {
     const items: Array<{
       key: string;
+      measurementKey: string;
       targetTop: number;
       fallbackHeight: number;
       order: number;
@@ -8691,10 +8806,18 @@ export default function Workbench() {
       const imageRows = Math.ceil(imageCount / 3);
       return {
         key: comment.commentId,
+        measurementKey: commentMeasurementKeys[comment.commentId],
         targetTop: comment.target.tagName === "body"
           ? commentRailMinimumTop
           : commentRailTargetTops[comment.target.id],
-        fallbackHeight: 104 + textLines * 19 + imageRows * 78 + fileCount * 48,
+        fallbackHeight:
+          104
+          + textLines * 19
+          + imageRows * 78
+          + fileCount * 48
+          + (!commentTargetIsLocatable(comment.target) && viewMode === "current" ? 70 : 0)
+          + (editingCommentId === comment.commentId ? 92 : 0)
+          + (pendingDeleteCommentId === comment.commentId ? 46 : 0),
         order: index + 1,
         scopeRank: comment.target.tagName === "body" ? 0 : 1,
       };
@@ -8711,8 +8834,12 @@ export default function Workbench() {
     ) {
       items.push({
         key: "__composer",
+        measurementKey: composerMeasurementKey,
         targetTop: draftTargetTop as number,
-        fallbackHeight: 276,
+        fallbackHeight:
+          276
+          + (!draftTargetCanSave ? 70 : 0)
+          + (pendingDeleteCommentId === "__composer" ? 46 : 0),
         order: Number.MAX_SAFE_INTEGER,
         scopeRank: draftTarget.tagName === "body" ? 0 : 1,
       });
@@ -8724,6 +8851,7 @@ export default function Workbench() {
     ) {
       items.push({
         key: "__draft_recovery",
+        measurementKey: draftRecoveryMeasurementKey,
         targetTop: draftTargetTop as number,
         fallbackHeight: 142,
         order: Number.MAX_SAFE_INTEGER,
@@ -8736,7 +8864,9 @@ export default function Workbench() {
       items: items.map((item) => ({
         key: item.key,
         targetTop: item.targetTop,
-        height: commentCardHeights[item.key] || item.fallbackHeight,
+        height:
+          commentCardHeights[item.measurementKey]
+          || item.fallbackHeight,
         order: item.order,
         scopeRank: item.scopeRank,
       })),
@@ -8748,12 +8878,20 @@ export default function Workbench() {
     };
   }, [
     commentCardHeights,
+    commentMeasurementKeys,
     commentRailMinimumTop,
     commentRailTargetTops,
+    commentTargetIsLocatable,
+    composerMeasurementKey,
     composerInCurrentTab,
+    draftRecoveryMeasurementKey,
     draftTarget,
+    draftTargetCanSave,
+    editingCommentId,
     hasCollapsedCommentDraft,
+    pendingDeleteCommentId,
     sortedVisibleCommentItems,
+    viewMode,
   ]);
   const visibleCommentPositions = commentRailLayout.positions;
   const renderedCommentIds = useMemo(() => virtualizedCommentIds({
@@ -9356,7 +9494,31 @@ export default function Workbench() {
             <span>{persistError || "工作台保留了当前编辑内容，不会假装已经更新。"}</span>
           </div>
           <button type="button" onClick={() => void exportCurrentHtml()}>导出当前编辑</button>
-          <button type="button" onClick={() => void reloadCurrentSource()}>重新载入外部文件</button>
+          <button
+            type="button"
+            onClick={() => {
+              if (persistState === "conflict") void reloadCurrentSource();
+              else requestUserFlush();
+            }}
+          >{persistState === "conflict" ? "重新载入外部文件" : "重试更新文件"}</button>
+        </section>
+      ) : null}
+
+      {!workspaceIssue
+      && persistState !== "conflict"
+      && persistState !== "failed"
+      && draftPersistError ? (
+        <section className="source-conflict-banner" role="alert">
+          <div>
+            <strong>评论还没有安全记录</strong>
+            <span>{productErrorMessage(
+              draftPersistError,
+              "本轮评论暂时无法记录；当前内容仍保留在页面中。",
+            )}</span>
+          </div>
+          <button type="button" onClick={() => void flushDraftPersistence()}>
+            重试记录评论
+          </button>
         </section>
       ) : null}
 
@@ -9697,6 +9859,7 @@ export default function Workbench() {
                 className="comment-composer rail-comment-composer"
                 aria-label="添加评论"
                 data-comment-measure="__composer"
+                data-comment-measure-key={composerMeasurementKey}
                 data-focused="true"
                 style={{ top: `${composerTop as number}px` }}
               >
@@ -9866,6 +10029,7 @@ export default function Workbench() {
                 type="button"
                 aria-label={`未保存评论：${insertionLabel(draftTarget)}：${draft.trim() || `已添加 ${draftAttachments.length} 个附件`}`}
                 data-comment-measure="__draft_recovery"
+                data-comment-measure-key={draftRecoveryMeasurementKey}
                 style={{ top: `${draftRecoveryTop}px` }}
                 onClick={resumeCurrentComposer}
               >
@@ -9924,6 +10088,7 @@ export default function Workbench() {
                 <article
                   className="comment-card"
                   data-comment-measure={comment.commentId}
+                  data-comment-measure-key={commentMeasurementKeys[comment.commentId]}
                   data-selected={selection?.selector === comment.target.selector ? "true" : "false"}
                   data-focused={focusedCommentId === comment.commentId ? "true" : undefined}
                   data-resolution={targetResolution}
@@ -10174,18 +10339,6 @@ export default function Workbench() {
               );
             })}
 
-            {draftPersistError ? (
-              <section className="comment-persist-error rail-persist-error" role="alert">
-                <div>
-                  <strong>评论还没有安全记录</strong>
-                  <span>{productErrorMessage(
-                    draftPersistError,
-                    "本轮评论暂时无法记录；当前内容仍保留在页面中。",
-                  )}</span>
-                </div>
-                <button type="button" onClick={() => void flushDraftPersistence()}>重试记录</button>
-              </section>
-            ) : null}
           </div>
           </aside>
         ) : null}

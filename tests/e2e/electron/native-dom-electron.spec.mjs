@@ -672,8 +672,14 @@ test("Electron interactive preview runs authored scripts and edits the selected 
       'iframe[title="HTML 交互预览"]',
     );
     await expect(previewIframe).toBeVisible();
-    const previewHandle = await previewIframe.elementHandle();
-    const previewFrame = await previewHandle?.contentFrame();
+    await expect.poll(() => launched.page.frames().some(
+      (frame) => /^pageroot-preview:/u.test(frame.url()),
+    ), {
+      message: "PageRoot Electron should expose its interactive preview frame.",
+    }).toBe(true);
+    const previewFrame = launched.page.frames().find(
+      (frame) => /^pageroot-preview:/u.test(frame.url()),
+    );
     if (!previewFrame) {
       throw new Error("PageRoot Electron did not expose its interactive preview frame.");
     }

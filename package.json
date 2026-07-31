@@ -225,6 +225,10 @@
         "to": "bridge/source-history-service.mjs"
       },
       {
+        "from": "scripts/project-context-service.mjs",
+        "to": "bridge/project-context-service.mjs"
+      },
+      {
         "from": "shared/draft-aggregate.mjs",
         "to": "shared/draft-aggregate.mjs"
       },

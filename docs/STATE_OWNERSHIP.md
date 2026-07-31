@@ -3,6 +3,7 @@
 | Mutable fact | Sole owner | Durable authority | Consumers |
 | --- | --- | --- | --- |
 | Open source locator before first durable action, registered identity, renderer generation and late-query fence | Renderer `ProjectSession` | active-file record before registration; project registry and `project.json` afterwards | Workbench composition root and all durable sessions |
+| Registered mutation context resolution and atomic-replacement source observation | Bridge project-context service | project/document registry graph plus the owning runtime `pendingWrite` target Hash | Bridge mutation routes and `/project/ensure` |
 | Explicit source filename transition, pending operation and active/recent path rebase | Desktop source-rename transaction | active-file `pendingRename` / `lastRename`, then filesystem path | project session, Bridge relink, views |
 | Current source bytes, Hash, edit revision, persistence projection, pending write and single-flight source flush | Renderer `DocumentSession` | source HTML, runtime autosave record and recovery log | Canvas, source-history session and drain coordinator |
 | Canvas source-history context, pending Patch operations, cursor and applied action IDs | Renderer `SourceHistorySession` for pending intent; Bridge source-history service for acknowledged authority | `history/source-operations.json`, committed with the source through the runtime `pendingWrite` outbox | Canvas, Document session, desktop Edit intent router |
@@ -27,6 +28,7 @@
 | Crash-only renderer recovery records | Recovery store adapter | browser storage, subordinate to Bridge authority | document and draft sessions |
 | V2 editable-island lease, draft DOM, logical Selection and IME snapshot | `IslandEditingController` | in-memory until the exact island SourcePatch is acknowledged | Canvas coordinator and document session |
 | Last proven comment-target geometry during Canvas replacement | Comment-rail layout session | in-memory and cleared on project transition | comment rail only |
+| Current source/Draft persistence recovery banner | Workbench status-banner projection, with source failure priority | owner snapshots only; no independent durable state | workspace view and recovery actions |
 
 Rules:
 
@@ -42,6 +44,11 @@ Rules:
 - The first durable action atomically registers the project identity and binds
   the Draft session to the returned authoritative draft before local aggregate
   state can be acknowledged.
+- A registered mutation captures one complete `projectId + documentId +
+  sourcePath` context. The Bridge resolves both IDs before validating the path;
+  only `/project/ensure` may create a new registration. A `pendingWrite` target
+  Hash may repair PageRoot's own atomic-replacement window but never authorize
+  an unrelated external replacement.
 - Cross-owner operations are coordinated explicitly; they do not synchronize
   through incidental React effects.
 - A filename transition never owns HTML bytes or Document identity. It may
@@ -61,6 +68,9 @@ Rules:
   lifecycle state and a revisioned pointer to the draft repository.
 - Local recovery records are an outbox/fallback, never an equal authority to an
   acknowledged Bridge revision.
+- A persistence issue has one visible owner. Source persistence takes priority
+  on the workspace banner; otherwise Draft persistence uses that same surface.
+  The comment rail and Toast layer do not repeat either issue.
 - Canvas never owns a parallel snapshot or DOM undo stack. A pending history
   operation is built only from the accepted SourcePatch result; after
   acknowledgement, the Bridge journal cursor is authoritative. Optional

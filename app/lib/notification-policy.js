@@ -9,6 +9,45 @@ const IPC_ERROR_PREFIX =
   /^Error invoking remote method ['"][^'"]+['"]:\s*/i;
 const ERROR_CLASS_PREFIX =
   /^(?:ProjectFileError|TypeError|RangeError|Error):\s*/i;
+const INTERNAL_FIELD_OR_PATH =
+  /(?:\b(?:projectId|documentId|sourcePath|expectedSourceSha256|actualSourceSha256|storageDirectoryName|pendingWrite)\b|(?:^|\s)\/(?:Users|private|var|tmp)\/|file:\/\/|[A-Za-z]:\\)/u;
+
+const PRODUCT_ERROR_MESSAGES = Object.freeze({
+  PROJECT_ID_MISMATCH:
+    "项目身份暂时无法核对。当前内容仍保留，请重新打开源页后再试。",
+  DOCUMENT_ID_MISMATCH:
+    "项目身份暂时无法核对。当前内容仍保留，请重新打开源页后再试。",
+  PROJECT_CONTEXT_MISMATCH:
+    "项目身份暂时无法核对。当前内容仍保留，请重新打开源页后再试。",
+  PROJECT_CONTEXT_PATH_MISMATCH:
+    "当前文件与项目记录暂时无法对应。内容仍保留，请重新打开源页后再试。",
+  INCOMPLETE_PROJECT_CONTEXT:
+    "当前操作缺少完整的项目身份。内容仍保留，请重新打开源页后再试。",
+  REGISTERED_PROJECT_NOT_FOUND:
+    "当前项目记录暂时不可用。内容仍保留，请重新打开源页后再试。",
+  PROJECT_IDENTITY_MISMATCH:
+    "项目记录暂时无法核对。PageRoot 没有覆盖源文件，请重新打开后再试。",
+  SOURCE_REGISTRY_MISMATCH:
+    "当前文件与项目记录暂时无法对应。PageRoot 没有覆盖源文件。",
+  CANONICAL_SOURCE_IDENTITY_MISMATCH:
+    "当前源 HTML 的身份已经变化。PageRoot 没有覆盖它，请重新载入后再试。",
+  ACTIVE_SOURCE_PATH_COLLISION:
+    "当前文件已关联到另一份项目记录。PageRoot 没有覆盖它，请重新打开源页。",
+  SOURCE_CHANGED:
+    "源 HTML 已在其他位置发生变化；PageRoot 没有覆盖它。",
+  SOURCE_HASH_CONFLICT:
+    "源 HTML 已在其他位置发生变化；PageRoot 没有覆盖它。",
+  DRAFT_REVISION_CONFLICT:
+    "评论记录已在另一项操作中更新。当前内容仍保留，请重新载入后再试。",
+  AUTOSAVE_NOT_FLUSHED:
+    "最后一次修改尚未安全写入源 HTML，请等待保存完成后再发送。",
+  FREEZE_REVISION_NOT_PERSISTED:
+    "最后一次修改尚未安全写入源 HTML，请等待保存完成后再发送。",
+  INVALID_AUTOSAVE_ACK:
+    "保存结果无法核对。当前编辑仍保留，PageRoot 不会采用不一致的内容。",
+  INVALID_SOURCE_HISTORY_ACK:
+    "撤销结果无法核对。本次结果未采用，请重新打开源页后再试。",
+});
 
 const NOTICE_DISPOSITIONS = new Set([
   "silent-recover",
@@ -123,6 +162,12 @@ export function shouldReplaceNotice(current, next) {
  * @param {string} fallback
  */
 export function productErrorMessage(cause, fallback) {
+  const code = cause && typeof cause === "object"
+    ? String(cause.code || "")
+    : "";
+  if (code && PRODUCT_ERROR_MESSAGES[code]) {
+    return PRODUCT_ERROR_MESSAGES[code];
+  }
   const raw = cause instanceof Error
     ? cause.message
     : typeof cause === "string"
@@ -146,6 +191,11 @@ export function productErrorMessage(cause, fallback) {
     || (
       cause instanceof Error
       && /^(?:AbortError|TimeoutError)$/i.test(cause.name)
+    )
+    || INTERNAL_FIELD_OR_PATH.test(message)
+    || (
+      !/[\u3400-\u9fff]/u.test(message)
+      && /[A-Za-z]{4}/u.test(message)
     )
   ) {
     message = fallback;

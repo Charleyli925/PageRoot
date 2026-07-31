@@ -79,6 +79,12 @@ import {
   sourceHistoryResponse,
   writeSourceHistory,
 } from "./source-history-service.mjs";
+import {
+  classifySourceObservation,
+  ProjectContextPolicyError,
+  registeredCommandIdentity,
+  registeredProjectRecord,
+} from "./project-context-service.mjs";
 
 const HOST = "127.0.0.1";
 const DEFAULT_PORT = 4317;
@@ -1226,6 +1232,34 @@ function projectRootFromRegistryRecord(projectId, record) {
   );
 }
 
+function projectContextHttpError(error) {
+  if (!(error instanceof ProjectContextPolicyError)) return error;
+  return new HttpError(
+    error.status,
+    error.code,
+    error.message,
+    error.details,
+  );
+}
+
+async function readRegisteredObservationState(registry, record) {
+  const projectRoot = projectRootFromRegistryRecord(
+    record.projectId,
+    registry.projects[record.projectId],
+  );
+  const [project, runtime] = await Promise.all([
+    readLifecycleJson(
+      path.join(projectRoot, "project.json"),
+      "project.json",
+    ),
+    readLifecycleJson(
+      path.join(projectRoot, "runtime-state.json"),
+      "runtime-state.json",
+    ),
+  ]);
+  return { project, runtime };
+}
+
 async function availableProjectStorageDirectory({
   displayName,
   createdAt,
@@ -2040,24 +2074,23 @@ async function loadContextBySource(
       let physicalReplacement = false;
       if (record && isSourceFileIdentity(record.fileIdentity)) {
         if (!sameSourceFileIdentity(record.fileIdentity, observedFileIdentity)) {
-          const project = await readLifecycleJson(
-            path.join(
-              projectRootFromRegistryRecord(
-                record.projectId,
-                registry.projects[record.projectId],
-              ),
-              "project.json",
-            ),
-            "project.json",
+          const { project, runtime } = await readRegisteredObservationState(
+            registry,
+            record,
           );
           // Repair the narrow crash window after a PageRoot-owned atomic
-          // replacement reached disk/project.json but before the registry
-          // sidecar was refreshed. Legacy stamped files receive the same
+          // replacement reached disk but before project.json and the registry
+          // sidecar were refreshed. pendingWrite is the durable proof for the
+          // earlier half of that window. Legacy stamped files receive the same
           // one-time compatibility repair; neither path writes source bytes.
-          if (
-            source.sha256 === project.currentHtmlSha256
-            || embeddedDocumentId === record.documentId
-          ) {
+          const observation = classifySourceObservation({
+            sourceSha256: source.sha256,
+            embeddedDocumentId,
+            registeredDocumentId: record.documentId,
+            projectCurrentHtmlSha256: project.currentHtmlSha256,
+            pendingTargetHtmlSha256: runtime.pendingWrite?.targetHtmlSha256,
+          });
+          if (observation !== "external-replacement") {
             registry.sources[fingerprint] = {
               ...record,
               ...sourceIdentityState(source),
@@ -2082,20 +2115,18 @@ async function loadContextBySource(
           }
         }
       } else if (record) {
-        const project = await readLifecycleJson(
-          path.join(
-            projectRootFromRegistryRecord(
-              record.projectId,
-              registry.projects[record.projectId],
-            ),
-            "project.json",
-          ),
-          "project.json",
+        const { project, runtime } = await readRegisteredObservationState(
+          registry,
+          record,
         );
-        if (
-          embeddedDocumentId === record.documentId
-          || source.sha256 === project.currentHtmlSha256
-        ) {
+        const observation = classifySourceObservation({
+          sourceSha256: source.sha256,
+          embeddedDocumentId,
+          registeredDocumentId: record.documentId,
+          projectCurrentHtmlSha256: project.currentHtmlSha256,
+          pendingTargetHtmlSha256: runtime.pendingWrite?.targetHtmlSha256,
+        });
+        if (observation !== "external-replacement") {
           registry.sources[fingerprint] = {
             ...record,
             ...sourceIdentityState(source),
@@ -2236,6 +2267,84 @@ async function loadContextBySource(
     projectRoot: projectRootFromRegistryRecord(
       record.projectId,
       registeredProjectRecord,
+    ),
+  };
+}
+
+async function loadMutationContext(body) {
+  let identity;
+  try {
+    identity = registeredCommandIdentity(body);
+  } catch (error) {
+    throw projectContextHttpError(error);
+  }
+
+  // Backward-compatible tests and older local clients may omit both IDs. They
+  // can address an existing registration by path, but only /project/ensure is
+  // allowed to create one.
+  if (!identity) return loadContextBySource(body.sourcePath, false);
+
+  await initializeRoot();
+  const requestedSourcePath = await canonicalExistingSourcePath(body.sourcePath);
+  if (!(await exists(WORKSPACE_ROOT))) {
+    throw new HttpError(
+      404,
+      "REGISTERED_PROJECT_NOT_FOUND",
+      "The registered project is no longer available.",
+    );
+  }
+
+  let contextRecord;
+  await registryQueue.run(() =>
+    withProjectFileLock(WORKSPACE_ROOT, async () => {
+      const registry = await readRegistry();
+      let selected;
+      try {
+        selected = registeredProjectRecord(registry, identity);
+      } catch (error) {
+        throw projectContextHttpError(error);
+      }
+      const registeredSourcePath = await canonicalExistingSourcePath(
+        selected.project.sourcePath ?? selected.document.sourcePath,
+      );
+      const requestedRecord = registry.sources[
+        sourceFingerprint(requestedSourcePath)
+      ];
+      const requestedAliasMatches = Boolean(
+        requestedRecord
+        && requestedRecord.projectId === identity.projectId
+        && requestedRecord.documentId === identity.documentId
+      );
+      if (
+        registeredSourcePath !== requestedSourcePath
+        && !requestedAliasMatches
+      ) {
+        throw new HttpError(
+          409,
+          "PROJECT_CONTEXT_PATH_MISMATCH",
+          "The command source path does not belong to its registered project.",
+        );
+      }
+      contextRecord = {
+        project: selected.project,
+        sourcePath: registeredSourcePath,
+      };
+    }),
+  );
+
+  await readSourceFile(contextRecord.sourcePath);
+  return {
+    workspaceRoot: WORKSPACE_ROOT,
+    projectId: identity.projectId,
+    documentId: identity.documentId,
+    sourcePath: contextRecord.sourcePath,
+    requestedSourcePath,
+    displayName: contextRecord.project.displayName,
+    createdAt: contextRecord.project.createdAt,
+    storageDirectoryName: contextRecord.project.storageDirectoryName,
+    projectRoot: projectRootFromRegistryRecord(
+      identity.projectId,
+      contextRecord.project,
     ),
   };
 }
@@ -2487,7 +2596,10 @@ async function readRuntime(context, { hydrateArtifacts = true } = {}) {
 }
 
 async function recoverPendingWriteRaw(context) {
-  const runtime = await readRuntime(context);
+  // Pending-write recovery needs only the durable runtime envelope. Display
+  // artifacts such as frozen annotations may be damaged independently and
+  // must not prevent identity reconciliation or cancellation.
+  const runtime = await readRuntime(context, { hydrateArtifacts: false });
   const pending = runtime.pendingWrite;
   if (!pending) return null;
   const revision = pending.revision;
@@ -3694,7 +3806,7 @@ async function ensureProject(body) {
 }
 
 async function saveAutosave(body) {
-  const context = await loadContextBySource(body.sourcePath, true);
+  const context = await loadMutationContext(body);
   assertBodyContext(context, body);
   const rawHtml = body.html ?? body.baseHtml;
   requireCompleteHtml(rawHtml, "autosave html");
@@ -3713,6 +3825,7 @@ async function saveAutosave(body) {
   );
 
   return withProjectMutation(context, async () => {
+    await recoverPendingWriteRaw(context);
     await recoverTransactionsRaw(context);
     const project = await readProject(context);
     const runtime = await readRuntime(context);
@@ -3996,7 +4109,7 @@ async function saveAutosave(body) {
 }
 
 async function runSourceHistoryAction(body) {
-  const context = await loadContextBySource(body.sourcePath, true);
+  const context = await loadMutationContext(body);
   assertBodyContext(context, body);
   const expectedSourceSha256 = requireSha256(
     body.expectedSourceSha256,
@@ -4649,9 +4762,10 @@ function normalizeFrozenEditEvents(events, frozenAt, revision, basedOnVersionId)
 }
 
 async function saveDraft(body) {
-  const context = await loadContextBySource(body.sourcePath, true);
+  const context = await loadMutationContext(body);
   assertBodyContext(context, body);
   return withProjectMutation(context, async () => {
+    await recoverPendingWriteRaw(context);
     const runtime = await readRuntime(context);
     assertProjectMutable(runtime);
     const command = applyDraftCommand(runtime.draft, body, {
@@ -4718,9 +4832,10 @@ async function saveDraft(body) {
 }
 
 async function saveDraftAttachment(body) {
-  const context = await loadContextBySource(body.sourcePath, true);
+  const context = await loadMutationContext(body);
   assertBodyContext(context, body);
   return withProjectMutation(context, async () => {
+    await recoverPendingWriteRaw(context);
     const runtime = await readRuntime(context);
     assertProjectMutable(runtime);
     const commentId = attachmentRecordId(body.commentId, "comment");
@@ -4796,9 +4911,10 @@ async function readAttachment(sourcePath, relativePath) {
 }
 
 async function deleteDraftAttachment(body) {
-  const context = await loadContextBySource(body.sourcePath, false);
+  const context = await loadMutationContext(body);
   assertBodyContext(context, body);
   return withProjectMutation(context, async () => {
+    await recoverPendingWriteRaw(context);
     const runtime = await readRuntime(context);
     assertProjectMutable(runtime);
     const relativePath = String(body.relativePath ?? "").replaceAll("\\", "/");
@@ -5002,9 +5118,10 @@ async function requestFileRecord(root, relativePath, role, mediaType) {
 }
 
 async function createRequest(body) {
-  const context = await loadContextBySource(body.sourcePath, true);
+  const context = await loadMutationContext(body);
   assertBodyContext(context, body);
   return withProjectMutation(context, async () => {
+    await recoverPendingWriteRaw(context);
     await recoverTransactionsRaw(context);
     const project = await readProject(context);
     const runtime = await readRuntime(context);
@@ -6584,9 +6701,10 @@ async function finalizeCommittedTransactionRaw(
 }
 
 async function activateReadyVersion(body) {
-  const context = await loadContextBySource(body.sourcePath, false);
+  const context = await loadMutationContext(body);
   assertBodyContext(context, body);
   return withProjectMutation(context, async () => {
+    await recoverPendingWriteRaw(context);
     const runtime = await readRuntime(context);
     const project = await readProject(context);
     const requestedVersionId = cleanText(body.versionId, 100);
@@ -7486,9 +7604,10 @@ async function statusFor(sourcePath, requestId, attemptId = "attempt_001") {
 }
 
 async function cancelActiveRun(body) {
-  const context = await loadContextBySource(body.sourcePath, false);
+  const context = await loadMutationContext(body);
   assertBodyContext(context, body);
   return withProjectMutation(context, async () => {
+    await recoverPendingWriteRaw(context);
     // Cancellation only needs the durable lifecycle identity. Corrupt display
     // artifacts must never strand a project in a locked state.
     const runtime = await readRuntime(context, { hydrateArtifacts: false });
@@ -7607,9 +7726,10 @@ async function cancelActiveRun(body) {
 }
 
 async function resolveConflict(body) {
-  const context = await loadContextBySource(body.sourcePath, false);
+  const context = await loadMutationContext(body);
   assertBodyContext(context, body);
   return withProjectMutation(context, async () => {
+    await recoverPendingWriteRaw(context);
     const runtime = await readRuntime(context);
     const conflict = runtime.conflict;
     if (!conflict) {
@@ -8031,7 +8151,7 @@ async function projectFileGet(sourcePath) {
 }
 
 async function projectFileUpdate(body) {
-  const context = await loadContextBySource(body.sourcePath, true);
+  const context = await loadMutationContext(body);
   assertBodyContext(context, body);
   if (typeof body.content !== "string" || !body.content.trim()) {
     throw new HttpError(
@@ -8041,6 +8161,7 @@ async function projectFileUpdate(body) {
     );
   }
   return withProjectMutation(context, async () => {
+    await recoverPendingWriteRaw(context);
     const runtime = await readRuntime(context);
     assertProjectMutable(runtime);
     const filePath = path.join(context.projectRoot, "PROJECT.md");

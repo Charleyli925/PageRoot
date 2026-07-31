@@ -1467,49 +1467,6 @@ input:focus-visible,
   background: #fffefa;
 }
 
-.comment-persist-error {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 10px;
-  padding: 11px 11px 11px 13px;
-  border: 1px solid #d78077;
-  border-radius: 11px;
-  background: #fff1ef;
-  color: #7b302b;
-  box-shadow: 0 8px 22px rgb(111 42 36 / 10%);
-}
-
-.comment-persist-error > div {
-  min-width: 0;
-  display: grid;
-  gap: 3px;
-}
-
-.comment-persist-error strong {
-  font-size: 12px;
-}
-
-.comment-persist-error span {
-  overflow-wrap: anywhere;
-  color: #87443e;
-  font-size: 10px;
-  line-height: 1.5;
-}
-
-.comment-persist-error button {
-  min-height: 34px;
-  padding: 0 11px;
-  border: 1px solid currentColor;
-  border-radius: 8px;
-  background: #fff;
-  color: inherit;
-  font-size: 10px;
-  font-weight: 700;
-  white-space: nowrap;
-}
-
 .handoff-button {
   width: 100%;
   min-height: 45px;
@@ -3804,8 +3761,7 @@ body {
 .rail-comment-composer,
 .comment-rail-content > .comment-card,
 .comment-rail-content > .rail-status-card,
-.comment-rail-content > .comments-empty,
-.comment-rail-content > .rail-persist-error {
+.comment-rail-content > .comments-empty {
   position: absolute;
   right: 14px;
   left: 14px;
@@ -4080,11 +4036,6 @@ body {
 
 .comment-rail-content > .rail-status-card {
   top: 92px;
-}
-
-.comment-rail-content > .rail-persist-error {
-  z-index: 4;
-  bottom: 14px;
 }
 
 .comment-attachments .file-attachment {
@@ -5873,7 +5824,6 @@ body {
 .comment-rail-content > .comment-card {
   transform: translate3d(0, var(--comment-rail-offset), 0);
   transition:
-    top 260ms cubic-bezier(0.22, 1, 0.36, 1),
     transform 320ms cubic-bezier(0.22, 1, 0.36, 1),
     border-color 180ms ease,
     box-shadow 180ms ease,
@@ -5883,7 +5833,7 @@ body {
 
 .comments-panel[data-rail-following="true"] .rail-comment-composer,
 .comments-panel[data-rail-following="true"] .comment-rail-content > .comment-card {
-  transition-duration: 260ms, 300ms, 180ms, 180ms, 180ms;
+  transition-duration: 300ms, 180ms, 180ms, 180ms;
 }
 
 .rail-comment-composer[data-focused="true"] {

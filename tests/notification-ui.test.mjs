@@ -113,13 +113,28 @@ test("redundant feedback was removed and comment persistence is contextual", () 
   ]) {
     assert.doesNotMatch(workbench, new RegExp(removedCopy));
   }
-  assert.match(workbench, /className="comment-persist-error[^"]*"/);
-  assert.match(workbench, />重试记录<\/button>/);
+  assert.doesNotMatch(workbench, /rail-persist-error|comment-persist-error/u);
+  assert.match(workbench, /<strong>评论还没有安全记录<\/strong>/u);
+  assert.match(workbench, /重试记录评论/u);
+  assert.match(workbench, /persistState === "conflict" \? "重新载入外部文件" : "重试更新文件"/u);
   assert.match(
     workbench,
     /activeRun\.status === "recovering-transaction"[\s\S]*?role="status"/,
   );
   assert.doesNotMatch(workbench, /title: "直接编辑已阻止"|source-patch-blocked/);
+});
+
+test("comment rail invalidates stale measurements before dynamic cards can overlap", () => {
+  assert.match(workbench, /function commentMeasurementKey\(/u);
+  assert.match(workbench, /useLayoutEffect\(\(\) => \{[\s\S]*?data-comment-measure/u);
+  assert.match(workbench, /new MutationObserver\(refreshObservedNodes\)/u);
+  assert.match(workbench, /data-comment-measure-key=\{commentMeasurementKeys\[comment\.commentId\]\}/u);
+  const pairedRailStyles = styles.slice(
+    styles.indexOf(".rail-comment-composer,\n.comment-rail-content > .comment-card {", 100_000),
+    styles.indexOf(".rail-comment-composer[data-focused=", 100_000),
+  );
+  assert.doesNotMatch(pairedRailStyles, /\btop\s+\d+ms/u);
+  assert.match(pairedRailStyles, /transform 320ms/u);
 });
 
 test("canvas edit feedback is contextual, plain-language, and not duplicated globally", () => {
@@ -193,7 +208,7 @@ test("exceptional notices are legible and their close action cannot wrap", () =>
     /left:\s*calc\(\(100vw - var\(--notice-rail-width, 376px\)\) \/ 2\)/,
   );
   assert.doesNotMatch(styles, /\.toast/u);
-  assert.match(styles, /\.comment-persist-error\s*\{/);
+  assert.doesNotMatch(styles, /\.comment-persist-error|\.rail-persist-error/u);
 });
 
 test("file and attachment failures keep a real recovery path", () => {

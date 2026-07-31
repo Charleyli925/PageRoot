@@ -3658,6 +3658,103 @@ test("native text autosave intent and source-application crash boundaries recove
   }
 });
 
+test("a registered attachment cannot split the project during an atomic autosave recovery window", async (t) => {
+  const environment = await createEnvironment(t);
+  const sourcePath = join(environment.sources, "atomic-identity-window.html");
+  const initial = htmlPage("原子身份窗口");
+  const target = htmlPage("原子身份窗口", "<p>已更新</p>");
+  await writeFile(sourcePath, initial, "utf8");
+  const bridge = await environment.start({
+    HTML_AI_FAILPOINT: "after-autosave-source-applied",
+  });
+  const opened = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+
+  const interrupted = await postJson(bridge.baseUrl, "/autosave", {
+    sourcePath,
+    projectId: opened.projectId,
+    documentId: opened.documentId,
+    editRevision: 1,
+    expectedSourceSha256: opened.currentHtmlSha256,
+    html: target,
+  });
+  assert.equal(interrupted.response.status, 500);
+  assert.equal(await readFile(sourcePath, "utf8"), target);
+
+  const bytes = Buffer.from("attachment-during-pending-write");
+  const uploaded = await postJson(bridge.baseUrl, "/attachment", {
+    sourcePath,
+    projectId: opened.projectId,
+    documentId: opened.documentId,
+    commentId: "comment_atomic_identity",
+    attachmentId: "attachment_atomic_identity",
+    fileName: "identity.txt",
+    mediaType: "text/plain",
+    byteLength: bytes.byteLength,
+    kind: "file",
+    source: "file-picker",
+    dataBase64: bytes.toString("base64"),
+  });
+  assert.equal(uploaded.response.status, 201, JSON.stringify(uploaded.body));
+  assert.equal(uploaded.body.projectId, opened.projectId);
+  assert.equal(uploaded.body.documentId, opened.documentId);
+
+  const registry = JSON.parse(
+    await readFile(join(environment.workspace, "project-registry.json"), "utf8"),
+  );
+  assert.deepEqual(Object.keys(registry.projects), [opened.projectId]);
+  assert.deepEqual(Object.keys(registry.documents), [opened.documentId]);
+  assert.equal(
+    Object.values(registry.sources).every(
+      (record) => record.projectId === opened.projectId,
+    ),
+    true,
+  );
+  const recovered = await openWorkspace(bridge.baseUrl, sourcePath);
+  assert.equal(recovered.response.status, 200, JSON.stringify(recovered.body));
+  assert.equal(recovered.body.projectId, opened.projectId);
+  assert.equal(recovered.body.runtimeState.pendingWrite, null);
+  assert.equal(recovered.body.currentHtmlSha256, hash(target));
+});
+
+test("project ensure reuses the registered identity during an atomic autosave recovery window", async (t) => {
+  const environment = await createEnvironment(t);
+  const sourcePath = join(environment.sources, "atomic-ensure-window.html");
+  const initial = htmlPage("原子 ensure 窗口");
+  const target = htmlPage("原子 ensure 窗口", "<p>已更新</p>");
+  await writeFile(sourcePath, initial, "utf8");
+  const bridge = await environment.start({
+    HTML_AI_FAILPOINT: "after-autosave-source-applied",
+  });
+  const opened = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+
+  const interrupted = await postJson(bridge.baseUrl, "/autosave", {
+    sourcePath,
+    projectId: opened.projectId,
+    documentId: opened.documentId,
+    editRevision: 1,
+    expectedSourceSha256: opened.currentHtmlSha256,
+    html: target,
+  });
+  assert.equal(interrupted.response.status, 500);
+  assert.equal(await readFile(sourcePath, "utf8"), target);
+
+  const ensured = await postJson(bridge.baseUrl, "/project/ensure", {
+    sourcePath,
+    expectedSourceSha256: hash(target),
+  });
+  assert.equal(ensured.response.status, 200, JSON.stringify(ensured.body));
+  assert.equal(ensured.body.projectId, opened.projectId);
+  assert.equal(ensured.body.documentId, opened.documentId);
+  assert.equal(ensured.body.runtimeState.pendingWrite, null);
+  assert.equal(ensured.body.currentHtmlSha256, hash(target));
+
+  const registry = JSON.parse(
+    await readFile(join(environment.workspace, "project-registry.json"), "utf8"),
+  );
+  assert.deepEqual(Object.keys(registry.projects), [opened.projectId]);
+  assert.deepEqual(Object.keys(registry.documents), [opened.documentId]);
+});
+
 test("draft writes use monotonic CAS and reject a stale client snapshot", async (t) => {
   const environment = await createEnvironment(t);
   const sourcePath = join(environment.sources, "draft-cas.html");

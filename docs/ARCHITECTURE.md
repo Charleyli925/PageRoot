@@ -56,7 +56,11 @@ Comments + frozen input
   fallback. That natural Canvas height also owns the comment rail's fixed bottom:
   a longer comment queue is clipped and translated inside the rail instead of
   feeding height back into the Grid or shared page. Iframe viewport height is
-  never fed back as authored content height.
+  never fed back as authored content height. Each visible card is measured
+  against a signature of every height-changing state (content, attachments,
+  edit/delete/relink controls and target recovery). A DOM or size change
+  invalidates the old measurement before layout; absolute `top` is applied
+  without interpolation so two cards never animate through one another.
 - Edit-mode presentation actions reuse that same context. A pure allowlist
   resolver recognizes strict source-backed Tabs, bounded explicit-ID and
   constant-index legacy Tabs, native details and local disclosures; one Canvas
@@ -90,6 +94,7 @@ they do not import application services.
 | Pure source-history validation, cursor transitions and exact Patch replay | `shared/source-history.mjs`, re-exported through `app/domain/source-history.js` |
 | Bridge-side draft command validation and CAS | `scripts/draft-service.mjs` |
 | Bridge-side source-history repository, autosave preparation and action application | `scripts/source-history-service.mjs` |
+| Bridge-side registered command identity and source-observation classification | `scripts/project-context-service.mjs` |
 | Close, switch, submit and history obligations | `app/application/drain-coordinator.js` |
 | Late query rejection and monotonic draft reads | `app/application/project-query-fence.js` |
 | Crash-only browser recovery | `app/application/recovery-store.js` |
@@ -125,6 +130,17 @@ the only production text and source-mutation route.
 ## Persistence
 
 Direct edits form ordered revisions and are written through a single queue. Every write checks the expected source Hash, uses a same-directory temporary file and atomic replacement, then rereads the result. External modification causes a fail-closed conflict.
+
+A durable command for an already registered project carries one captured
+`projectId + documentId + sourcePath` context. The Bridge resolves the registry
+graph by both opaque IDs first and treats the path only as a scope assertion;
+it never creates a project while serving a registered mutation. Only
+`/project/ensure` may establish a new identity. During PageRoot's own atomic
+source replacement, the durable `pendingWrite.targetHtmlSha256` proves the
+narrow interval in which the inode has changed but registry sidecars have not;
+the Bridge reconciles that interval to the existing identity. Any other inode
+replacement remains an external replacement and fails closed. This decision is
+recorded in `docs/decisions/0012-id-first-project-context.md`.
 
 Every accepted Canvas SourcePatch also emits one operation containing the
 actual forward patches, the exact inverse patches returned by the engine, the
@@ -177,6 +193,13 @@ directory. The clean-cutover decision is recorded in
 Initial and accepted AI results are immutable versions. Routine local edits do not create versions. A validated AI result is not activated until the user explicitly chooses it.
 
 `PROJECT.md` uses debounced autosave and is flushed before project switch or close. One recoverable unsaved comment composer is allowed at a time. Attachment uploads, rule saves and ordinary source writes are finished or surfaced in their owning panel before navigation proceeds.
+
+Persistent source and Draft failures share the single workspace status-banner
+surface, ordered by safety priority. The source failure owns its export and
+reload/retry action; otherwise the Draft failure owns the comment retry action.
+The comment rail does not render a duplicate failure card. Product copy is
+selected from stable error codes and strips local paths, IDs, Hash fields and
+raw English exception text before rendering.
 
 Draft mutations carry stable operation identities. Deletion tombstones and
 processed-operation acknowledgements live in `draft/annotations.json`. A stale

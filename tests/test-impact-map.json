@@ -273,10 +273,10 @@
         "^app/application/(?:bridge-client|comment-session|document-session|draft-session|drain-coordinator|project-query-fence|project-rules-session|project-session|recovery-store|run-session|runtime-capabilities|source-history-session|version-session)\\.(?:js|d\\.ts)$",
         "^app/domain/(?:draft-aggregate|run-lifecycle|source-history)\\.(?:js|d\\.ts)$",
         "^shared/(?:draft-aggregate|source-history)\\.mjs$",
-        "^scripts/(?:check-architecture|draft-aggregate|draft-service|source-history-service)\\.mjs$",
+        "^scripts/(?:check-architecture|draft-aggregate|draft-service|project-context-service|source-history-service)\\.mjs$",
         "^tests/(?:architecture-boundaries|bridge-client|comment-session|document-session|draft-aggregate|draft-service|draft-session|drain-coordinator|project-query-fence|project-rules-session|project-session|recovery-store|run-lifecycle|run-session|runtime-capabilities|source-history|source-history-session|version-session)\\.test\\.mjs$",
         "^(?:CONTRIBUTING|docs/(?:ARCHITECTURE|ARCHITECTURE_CONTRACT|STATE_OWNERSHIP|ENGINEERING_STANDARDS))\\.md$",
-        "^docs/decisions/(?:0003-session-ownership-and-mutation-outcomes|0004-v2-editable-islands|0007-independent-interactive-preview|0008-safe-presentation-actions-in-edit-mode|0009-persistent-source-patch-history|0011-workbench-session-decomposition)\\.md$"
+        "^docs/decisions/(?:0003-session-ownership-and-mutation-outcomes|0004-v2-editable-islands|0007-independent-interactive-preview|0008-safe-presentation-actions-in-edit-mode|0009-persistent-source-patch-history|0011-workbench-session-decomposition|0012-id-first-project-context)\\.md$"
       ],
       "suites": ["typecheck"],
       "nodeTests": [
@@ -289,6 +289,7 @@
         "tests/draft-session.test.mjs",
         "tests/drain-coordinator.test.mjs",
         "tests/project-query-fence.test.mjs",
+        "tests/project-context-service.test.mjs",
         "tests/project-rules-session.test.mjs",
         "tests/project-session.test.mjs",
         "tests/recovery-store.test.mjs",
@@ -430,7 +431,7 @@
     {
       "id": "bridge-lifecycle",
       "patterns": [
-        "^scripts/(?:workspace-bridge|lifecycle-core|finalize-attempt|record-user-supplement|user-supplement-core|scope-validator|html-source-parser|attachment-storage|draft-aggregate|draft-service|source-history-service|product-contract|target-identity)\\.mjs$"
+        "^scripts/(?:workspace-bridge|lifecycle-core|finalize-attempt|record-user-supplement|user-supplement-core|scope-validator|html-source-parser|attachment-storage|draft-aggregate|draft-service|project-context-service|source-history-service|product-contract|target-identity)\\.mjs$"
       ],
       "suites": ["ai-smoke"],
       "nodeTests": [
@@ -440,6 +441,7 @@
         "tests/html-source-parser.test.mjs",
         "tests/attachment-storage.test.mjs",
         "tests/product-contract.test.mjs",
+        "tests/project-context-service.test.mjs",
         "tests/targeted-change-schema.test.mjs",
         "tests/user-supplement.test.mjs"
       ]

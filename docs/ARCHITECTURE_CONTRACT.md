@@ -119,6 +119,15 @@ Draft session inactive or bound to another context, it queries current
 workspace authority and safely rebinds before creating a mutation; it does not
 leave an unchangeable close blocker.
 
+Every registered mutation captures that complete ProjectContext once. The
+Bridge resolves `projectId + documentId` against the registry before consulting
+the mutable path and uses `sourcePath` only to prove that the command remains
+inside the registered source or an explicit alias. Supplying exactly one ID is
+invalid. Omitting both IDs is a temporary compatibility route that may address
+an existing registration but may not create one; `/project/ensure` is the sole
+creation boundary. Attachments and their compensating cleanup use the same
+captured context for their complete asynchronous lifetime.
+
 Canvas operation history has split but non-overlapping ownership:
 `SourceHistorySession` owns the renderer context, unsaved operation outbox and
 one in-flight action intent; `history/source-operations.json` owned by the
@@ -161,6 +170,13 @@ Hash. A forward edit after undo truncates redo. Source mismatch never attempts
 best-effort patching and never serializes preview DOM; it creates a new history
 boundary or reports the existing source conflict.
 
+An inode change is not by itself proof of a new document because PageRoot's
+same-directory atomic replacement intentionally changes it. The Bridge may
+repair the registered file identity only when current source bytes match the
+registered current Hash, a compatible legacy document stamp, or the durable
+target Hash in the existing project's `pendingWrite`. No other Hash or path
+observation may silently relink or create a project.
+
 Comment deletion tombstones and processed operation identities are durable
 draft data. Attachments must be tied to a durable comment operation or cleaned
 as unreferenced staged data. The draft artifact carries the authoritative
@@ -173,6 +189,13 @@ action: registration may begin eagerly, and confirming the comment must await
 that identity so the visible comment and its recovery record have one owner.
 The pure browser preview is explicitly non-durable and may demonstrate a
 temporary comment without claiming that it was saved.
+
+One unresolved failure has one visible recovery owner. A source persistence
+failure takes precedence over a Draft persistence failure on the workspace
+status-banner surface; when it clears, an outstanding Draft failure may own the
+same surface. Views must not duplicate either issue in the comment rail or a
+Toast. User-visible error text is derived from stable product codes and must
+not expose bridge fields, local paths, Hashes or raw exception messages.
 
 ## React effects
 

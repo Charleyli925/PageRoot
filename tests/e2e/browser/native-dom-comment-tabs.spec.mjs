@@ -728,6 +728,44 @@ test("saved comment edits auto-cancel while clean and survive Tab changes while 
   await expect(card).toContainText(editedText);
 });
 
+test("dynamic comment-card controls remeasure the queue without overlap", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await page.goto("/");
+  const { frame } = await loadFixture(page, "tabbed-comments.html", {
+    buffer: fixtureBuffer("tabbed-comments.html"),
+  });
+  await saveComment(page, frame, "tab-comment-one", "动态高度评论一");
+  await saveComment(page, frame, "tab-comment-one", "动态高度评论二");
+
+  const rail = page.locator('aside[aria-label="本轮评论"]');
+  const first = rail.locator(".comment-card").filter({
+    hasText: "动态高度评论一",
+  });
+  const second = rail.locator(".comment-card").filter({
+    hasText: "动态高度评论二",
+  });
+  const minimumGap = async () => {
+    const boxes = await Promise.all([first.boundingBox(), second.boundingBox()]);
+    if (!boxes[0] || !boxes[1]) return -1;
+    const [top, bottom] = [...boxes].sort((left, right) => left.y - right.y);
+    return Math.floor(bottom.y - (top.y + top.height));
+  };
+
+  await first.hover();
+  await first.getByRole("button", { name: "编辑评论" }).click();
+  await expect(first.getByRole("textbox", { name: /编辑评论/u })).toBeVisible();
+  await expect.poll(minimumGap).toBeGreaterThanOrEqual(16);
+
+  await first.getByRole("button", { name: "取消编辑" }).click();
+  await first.hover();
+  await first.getByRole("button", { name: "删除评论" }).click();
+  await expect(first.getByRole("alert")).toContainText("删除这条评论？");
+  await expect.poll(minimumGap).toBeGreaterThanOrEqual(16);
+  await first.getByRole("button", { name: "取消", exact: true }).click();
+});
+
 test("comment card hover keeps geometry stable while focus aligns one unchanged queue", async ({
   page,
 }, testInfo) => {
