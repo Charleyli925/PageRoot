@@ -6,6 +6,8 @@
 | Explicit source filename transition, pending operation and active/recent path rebase | Desktop source-rename transaction | active-file `pendingRename` / `lastRename`, then filesystem path | project session, Bridge relink, views |
 | Registered project/document/source identity, readable storage locator and session generation | Project session | project registry and `project.json` | views, all durable sessions |
 | Current source bytes, Hash, edit revision and pending write | Document session | source HTML, runtime autosave record and recovery log | Canvas, drain coordinator |
+| Canvas source-history context, pending Patch operations, cursor and applied action IDs | Renderer `SourceHistorySession` for pending intent; Bridge source-history service for acknowledged authority | `history/source-operations.json`, committed with the source through the runtime `pendingWrite` outbox | Canvas, Document session, desktop Edit intent router |
+| Focused comment/rules/filename text input undo history | The native text control and Electron/Chromium editing engine | in-memory control-local history only | desktop Edit intent router |
 | Active renderer draft revision, pending command and unknown-outcome reconciliation | Draft session | acknowledged aggregate fingerprint plus crash-only recovery outbox | comment rail, drain coordinator |
 | Comments, edit events, tombstones and operation acknowledgements | Draft aggregate and Bridge draft service | `draft/annotations.json`; runtime stores only its pointer and revision | draft session, Request freeze |
 | Staged comment attachments and references | Draft aggregate attachment repository | managed draft attachment directory plus draft references | composer and Request freeze |
@@ -49,6 +51,12 @@ Rules:
   state and a revisioned pointer to the draft repository.
 - Local recovery records are an outbox/fallback, never an equal authority to an
   acknowledged Bridge revision.
+- Canvas never owns a parallel snapshot or DOM undo stack. A pending history
+  operation is built only from the accepted SourcePatch result; after
+  acknowledgement, the Bridge journal cursor is authoritative.
+- The desktop Edit menu owns no history. It routes focused native text controls
+  to platform undo and all eligible Canvas intent to `SourceHistorySession`.
+  Comment cards, attachments and project actions are outside both histories.
 - Telemetry is observational and best effort. It never owns product state,
   never receives content or paths, and never registers a drain obligation for
   edit, save, switch, submit, close or update installation.

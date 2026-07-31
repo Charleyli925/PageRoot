@@ -1536,6 +1536,232 @@ test("autosave writes the real source without Versions and projects stay isolate
   assert.equal(auditLines.length, 20);
 });
 
+test("source history survives restart and routes exact undo and redo through the Bridge", async (t) => {
+  const environment = await createEnvironment(t);
+  const sourcePath = join(environment.sources, "source-history.html");
+  const before = htmlPage("one");
+  const after = before.replace("<h1>one</h1>", "<h1>two</h1>");
+  await writeFile(sourcePath, before, "utf8");
+  const firstBridge = await environment.start();
+  const opened = await openWorkspace(firstBridge.baseUrl, sourcePath);
+  assert.equal(opened.response.status, 200);
+  const startOffset = before.indexOf("<h1>one</h1>") + 4;
+  const operation = {
+    operationId: "sourceop_workspace_history_001",
+    kind: "text",
+    editRevision: 1,
+    createdAt: "2026-07-31T08:00:00.000Z",
+    beforeSourceSha256: hash(before),
+    afterSourceSha256: hash(after),
+    forwardPatches: [{
+      startOffset,
+      endOffset: startOffset + 3,
+      before: "one",
+      after: "two",
+      kind: "text",
+    }],
+    reversePatches: [{
+      startOffset,
+      endOffset: startOffset + 3,
+      before: "two",
+      after: "one",
+      kind: "inverse:text",
+    }],
+    beforeTarget: { id: "heading", text: "one", resolution: "exact" },
+    afterTarget: { id: "heading", text: "two", resolution: "exact" },
+  };
+  const saved = await postJson(firstBridge.baseUrl, "/autosave", {
+    sourcePath,
+    projectId: opened.body.projectId,
+    documentId: opened.body.documentId,
+    editRevision: 1,
+    expectedSourceSha256: hash(before),
+    html: after,
+    sourceHistoryOperations: [operation],
+    changeEvents: [{
+      eventId: "history_edit_1",
+      kind: "text",
+      before: "one",
+      after: "two",
+    }],
+  });
+  assert.equal(saved.response.status, 200, JSON.stringify(saved.body));
+  assert.equal(saved.body.sourceHistory.capabilities.canUndo, true);
+  assert.equal(saved.body.sourceHistory.capabilities.canRedo, false);
+  assert.equal(await readFile(sourcePath, "utf8"), after);
+
+  await stopChild(firstBridge.child);
+  const secondBridge = await environment.start();
+  const reopened = await openWorkspace(secondBridge.baseUrl, sourcePath);
+  assert.equal(reopened.body.sourceHistory.cursor, 1);
+  assert.equal(reopened.body.sourceHistory.entries.length, 1);
+
+  const undoBody = {
+    sourcePath,
+    projectId: opened.body.projectId,
+    documentId: opened.body.documentId,
+    direction: "undo",
+    actionId: "sourceaction_workspace_undo_001",
+    expectedSourceSha256: hash(after),
+    expectedHistoryRevision: 1,
+    expectedHistoryCursor: 1,
+  };
+  const undone = await postJson(
+    secondBridge.baseUrl,
+    "/source-history/action",
+    undoBody,
+  );
+  assert.equal(undone.response.status, 200, JSON.stringify(undone.body));
+  assert.equal(undone.body.content, before);
+  assert.equal(undone.body.sourceHistory.capabilities.canRedo, true);
+  assert.deepEqual(
+    undone.body.target,
+    { id: "heading", text: "one", resolution: "exact" },
+  );
+  assert.equal(await readFile(sourcePath, "utf8"), before);
+
+  const replayed = await postJson(
+    secondBridge.baseUrl,
+    "/source-history/action",
+    undoBody,
+  );
+  assert.equal(replayed.response.status, 200, JSON.stringify(replayed.body));
+  assert.equal(replayed.body.status, "history-action-replayed");
+  assert.equal(replayed.body.content, before);
+
+  const redone = await postJson(
+    secondBridge.baseUrl,
+    "/source-history/action",
+    {
+      sourcePath,
+      projectId: opened.body.projectId,
+      documentId: opened.body.documentId,
+      direction: "redo",
+      actionId: "sourceaction_workspace_redo_001",
+      expectedSourceSha256: hash(before),
+      expectedHistoryRevision: 2,
+      expectedHistoryCursor: 0,
+    },
+  );
+  assert.equal(redone.response.status, 200, JSON.stringify(redone.body));
+  assert.equal(redone.body.content, after);
+  assert.equal(redone.body.sourceHistory.capabilities.canUndo, true);
+  assert.equal(await readFile(sourcePath, "utf8"), after);
+});
+
+test("source history recovery fails safe on both sides of the source commit point", async (t) => {
+  for (const {
+    failpoint,
+    expectedSource,
+    expectedHistoryDepth,
+  } of [
+    {
+      failpoint: "after-autosave-prepared",
+      expectedSource: "before",
+      expectedHistoryDepth: 0,
+    },
+    {
+      failpoint: "after-autosave-source-applied",
+      expectedSource: "after",
+      expectedHistoryDepth: 1,
+    },
+  ]) {
+    const environment = await createEnvironment(t);
+    const sourcePath = join(
+      environment.sources,
+      `source-history-recovery-${failpoint}.html`,
+    );
+    const before = htmlPage(`history ${failpoint}`);
+    const after = before.replace(
+      `<h1>history ${failpoint}</h1>`,
+      `<h1>recovered ${failpoint}</h1>`,
+    );
+    await writeFile(sourcePath, before, "utf8");
+    const bridge = await environment.start({
+      HTML_AI_FAILPOINT: failpoint,
+    });
+    const opened = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+    const beforeText = `history ${failpoint}`;
+    const afterText = `recovered ${failpoint}`;
+    const startOffset = before.indexOf(`<h1>${beforeText}</h1>`) + 4;
+    const interrupted = await postJson(bridge.baseUrl, "/autosave", {
+      sourcePath,
+      projectId: opened.projectId,
+      documentId: opened.documentId,
+      editRevision: 1,
+      expectedSourceSha256: hash(before),
+      html: after,
+      sourceHistoryOperations: [{
+        operationId:
+          `sourceop_recovery_${failpoint.replaceAll("-", "_")}_001`,
+        kind: "text",
+        editRevision: 1,
+        createdAt: "2026-07-31T08:00:00.000Z",
+        beforeSourceSha256: hash(before),
+        afterSourceSha256: hash(after),
+        forwardPatches: [{
+          startOffset,
+          endOffset: startOffset + beforeText.length,
+          before: beforeText,
+          after: afterText,
+          kind: "text",
+        }],
+        reversePatches: [{
+          startOffset,
+          endOffset: startOffset + afterText.length,
+          before: afterText,
+          after: beforeText,
+          kind: "inverse:text",
+        }],
+        beforeTarget: { id: "recovery-heading" },
+        afterTarget: { id: "recovery-heading" },
+      }],
+      changeEvents: [{
+        eventId: `history_recovery_${failpoint.replaceAll("-", "_")}`,
+        kind: "text",
+        before: beforeText,
+        after: afterText,
+      }],
+    });
+    assert.equal(interrupted.response.status, 500);
+
+    const projectRoot = await registeredProjectRoot(
+      environment.workspace,
+      opened.projectId,
+    );
+    const runtime = JSON.parse(
+      await readFile(join(projectRoot, "runtime-state.json"), "utf8"),
+    );
+    const historyRecoveryPath = join(
+      projectRoot,
+      ...runtime.pendingWrite.recoverySourceHistoryRelativePath.split("/"),
+    );
+    await stopChild(bridge.child);
+    await rm(historyRecoveryPath, { force: true });
+
+    const restarted = await environment.start();
+    const recovered = await openWorkspace(restarted.baseUrl, sourcePath);
+    assert.equal(
+      recovered.response.status,
+      200,
+      JSON.stringify(recovered.body),
+    );
+    assert.equal(
+      await readFile(sourcePath, "utf8"),
+      expectedSource === "before" ? before : after,
+    );
+    assert.equal(recovered.body.runtimeState.pendingWrite, null);
+    assert.equal(
+      recovered.body.sourceHistory.entries.length,
+      expectedHistoryDepth,
+    );
+    assert.equal(
+      recovered.body.sourceHistory.cursor,
+      expectedHistoryDepth,
+    );
+  }
+});
+
 test("version history stays read-only and the restore endpoint is unavailable", async (t) => {
   const environment = await createEnvironment(t);
   const sourcePath = join(environment.sources, "read-only-history.html");

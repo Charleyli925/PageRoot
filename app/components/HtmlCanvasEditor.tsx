@@ -193,6 +193,29 @@ export type HtmlCanvasMutation = {
   trackedTargetIds?: string[];
 };
 
+export type HtmlCanvasSourceTransaction = {
+  kind: HtmlCanvasMutation["kind"];
+  property?: string;
+  beforeSourceSha256: string;
+  afterSourceSha256: string;
+  forwardPatches: Array<{
+    startOffset: number;
+    endOffset: number;
+    before: string;
+    after: string;
+    kind: string;
+  }>;
+  reversePatches: Array<{
+    startOffset: number;
+    endOffset: number;
+    before: string;
+    after: string;
+    kind: string;
+  }>;
+  beforeTarget: HtmlCanvasSelection;
+  afterTarget: HtmlCanvasSelection;
+};
+
 export type HtmlCanvasInteractionMode = "editing" | "processing" | "history";
 
 export type HtmlCanvasFreezeSnapshot = {
@@ -292,6 +315,11 @@ export type HtmlCanvasEditorHandle = {
   ) => HtmlCanvasSelection | null;
   startEditing: () => boolean;
   moveSelected: (direction: "up" | "down") => boolean;
+  /** Adopts one Bridge-validated history result without serializing preview DOM. */
+  adoptHistorySource: (
+    source: string,
+    target: HtmlCanvasSelection | null,
+  ) => boolean;
   /** Defers one explicit user command until the current native composition is stable/cancelled. */
   deferNativeCommand: (
     kind: string,
@@ -307,7 +335,11 @@ export type HtmlCanvasEditorProps = {
   /** A complete document or an HTML fragment. Fragments are normalized to a complete document. */
   html: string;
   /** Called with the exact next source produced by SourcePatchEngine. */
-  onChange: (nextSourceHtml: string, mutation?: HtmlCanvasMutation) => boolean;
+  onChange: (
+    nextSourceHtml: string,
+    mutation?: HtmlCanvasMutation,
+    transaction?: HtmlCanvasSourceTransaction,
+  ) => boolean;
   /** Called when an element is selected or the selection is cleared. */
   onSelect?: (selection: HtmlCanvasSelection | null) => void;
   /** Notifies the host about any pointer interaction inside the isolated iframe. */
@@ -322,6 +354,8 @@ export type HtmlCanvasEditorProps = {
   onRequestFlush?: () => void;
   /** Handles Shift+Cmd/Ctrl+E inside the iframe using the host product's source-safe export path. */
   onRequestExport?: () => void;
+  /** Routes canvas-owned undo/redo shortcuts to the persistent source history owner. */
+  onRequestHistory?: (direction: "undo" | "redo") => void;
   /** Reloads the current source after the editor cannot build a safe source map. */
   onRequestReload?: () => void;
   /** Labels the source-map recovery action when the host must ask for the file again. */
@@ -2350,12 +2384,17 @@ function findNativeActionTarget(target: EventTarget | null): HTMLElement | null 
   ) ?? null;
 }
 
-function isBlockedSourceReversalShortcut(event: {
+function sourceHistoryDirectionForShortcut(event: {
   metaKey: boolean;
   ctrlKey: boolean;
+  shiftKey: boolean;
   key: string;
-}): boolean {
-  return (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z";
+}): "undo" | "redo" | null {
+  if (!(event.metaKey || event.ctrlKey)) return null;
+  const key = event.key.toLowerCase();
+  if (key === "y" && event.ctrlKey && !event.metaKey) return "redo";
+  if (key !== "z") return null;
+  return event.shiftKey ? "redo" : "undo";
 }
 
 function isCanvasRootElement(target: EventTarget | null): boolean {
@@ -2379,6 +2418,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     onReady,
     onRequestFlush,
     onRequestExport,
+    onRequestHistory,
     onRequestReload,
     reloadActionLabel = "重新载入",
     onEditBlocked,
@@ -2479,6 +2519,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const onRequestCommentRef = useRef(onRequestComment);
   const onRequestFlushRef = useRef(onRequestFlush);
   const onRequestExportRef = useRef(onRequestExport);
+  const onRequestHistoryRef = useRef(onRequestHistory);
   const onEditBlockedRef = useRef(onEditBlocked);
   const readOnlyRef = useRef(readOnly);
   const lockedRef = useRef(locked);
@@ -2508,6 +2549,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   onRequestCommentRef.current = onRequestComment;
   onRequestFlushRef.current = onRequestFlush;
   onRequestExportRef.current = onRequestExport;
+  onRequestHistoryRef.current = onRequestHistory;
   onEditBlockedRef.current = onEditBlocked;
   readOnlyRef.current = readOnly || controlledInteractionLocked || imperativeLockRef.current;
   lockedRef.current = controlledInteractionLocked || imperativeLockRef.current;
@@ -3602,7 +3644,23 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           pendingHtmlEchoesRef.current.length - 16,
         );
       }
-      if (!onChangeRef.current(result.html, appliedMutation)) {
+      const sourceTransaction: HtmlCanvasSourceTransaction = {
+        kind: appliedMutation.kind,
+        ...(appliedMutation.property
+          ? { property: appliedMutation.property }
+          : {}),
+        beforeSourceSha256: result.previousSourceSha256,
+        afterSourceSha256: result.sourceSha256,
+        forwardPatches: result.patches.map((patch) => ({ ...patch })),
+        reversePatches: result.inversePlan.patches.map((patch) => ({ ...patch })),
+        beforeTarget: mutation.target,
+        afterTarget: appliedMutation.target,
+      };
+      if (!onChangeRef.current(
+        result.html,
+        appliedMutation,
+        sourceTransaction,
+      )) {
         lastEmittedHtmlRef.current = previousLastEmittedHtml;
         pendingHtmlEchoesRef.current.pop();
         reportBlockedEdit(new Error("宿主状态已锁定，本次画布修改未被接受。"));
@@ -5143,6 +5201,19 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     fencePendingEdit({ resumeEditing: false })
   ), [fencePendingEdit]);
 
+  const adoptHistorySource = useCallback((
+    source: string,
+    target: HtmlCanvasSelection | null,
+  ): boolean => {
+    if (activeNativeEditRef.current) detachNativeEditForFence();
+    pendingNativeEditResumeRef.current = null;
+    nativeSessionNeedsCanonicalFenceRef.current = false;
+    lastEmittedHtmlRef.current = source;
+    pendingHtmlEchoesRef.current = [];
+    queueNativeFenceReload(source, null, target);
+    return true;
+  }, [detachNativeEditForFence, queueNativeFenceReload]);
+
   const freezeNow = useCallback((): HtmlCanvasFreezeSnapshot => {
     const committed = commitPendingEdit();
     if (!committed.ok) return committed;
@@ -5321,6 +5392,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       select: selectTarget,
       startEditing,
       moveSelected,
+      adoptHistorySource,
       deferNativeCommand,
       applyPageViewContext: applyPageViewContextNow,
     }),
@@ -5333,6 +5405,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       deferNativeCommand,
       freezeNow,
       moveSelected,
+      adoptHistorySource,
       selectTarget,
       showCommitBlocked,
       startEditing,
@@ -5719,9 +5792,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           applyNativeFormatShortcutRef.current(formatShortcut);
           return;
         }
-        if (isBlockedSourceReversalShortcut(event)) {
+        const historyDirection = sourceHistoryDirectionForShortcut(event);
+        if (historyDirection) {
           event.preventDefault();
           event.stopPropagation();
+          onRequestHistoryRef.current?.(historyDirection);
           return;
         }
         if (event.key === "Escape") {
@@ -5746,9 +5821,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         event.preventDefault();
       }
       if (lockedRef.current) return;
-      if (isBlockedSourceReversalShortcut(event)) {
+      const historyDirection = sourceHistoryDirectionForShortcut(event);
+      if (historyDirection) {
         event.preventDefault();
         event.stopPropagation();
+        onRequestHistoryRef.current?.(historyDirection);
         return;
       }
       if (event.key === "Escape") {
@@ -6261,9 +6338,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   applyNativeFormatShortcutRef.current = applyNativeFormatShortcut;
 
   const handleToolbarKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (isBlockedSourceReversalShortcut(event)) {
+    const historyDirection = sourceHistoryDirectionForShortcut(event);
+    if (historyDirection) {
       event.preventDefault();
       event.stopPropagation();
+      onRequestHistoryRef.current?.(historyDirection);
       return;
     }
     if (event.key === "Escape") {

@@ -1,0 +1,44 @@
+{
+  "schemaVersion": "1.0.0",
+  "projectId": "project_metrics",
+  "documentId": "doc_dashboard",
+  "baseSourceSha256": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "cursor": 1,
+  "revision": 1,
+  "entries": [
+    {
+      "operationId": "sourceop_fixture_000001",
+      "kind": "text",
+      "editRevision": 42,
+      "createdAt": "2026-07-31T08:00:00Z",
+      "beforeSourceSha256": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "afterSourceSha256": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "forwardPatches": [
+        {
+          "startOffset": 10,
+          "endOffset": 13,
+          "before": "one",
+          "after": "two",
+          "kind": "text"
+        }
+      ],
+      "reversePatches": [
+        {
+          "startOffset": 10,
+          "endOffset": 13,
+          "before": "two",
+          "after": "one",
+          "kind": "inverse:text"
+        }
+      ],
+      "beforeTarget": {
+        "id": "heading"
+      },
+      "afterTarget": {
+        "id": "heading"
+      }
+    }
+  ],
+  "appliedActions": [],
+  "updatedAt": "2026-07-31T08:00:00Z"
+}
