@@ -1,5 +1,74 @@
 # Design QA
 
+## AI 修改审阅交互 Demo
+
+Date: 2026-07-31
+
+Source visual truth:
+
+- `/tmp/pageroot-review-audit.lIl2eJ/01-current-shell.png` — 当前 PageRoot
+  浏览器工作台实拍，作为顶部文件栏、纸张画布、紫色语义色、控件圆角与整体密度的视觉基线。
+- 这是现有产品的样式基线，不是同一业务状态的逐像素稿；新的“修改审阅”状态因此只比较设计语言与区域比例，不对正文内容做伪精确匹配。
+
+Implementation evidence:
+
+- `output/design-qa/ai-review-demo/01-waiting-1280x720.png`
+- `output/design-qa/ai-review-demo/02-ready-1280x720.png`
+- `output/design-qa/ai-review-demo/03-review-after-1280x720.png`
+- `output/design-qa/ai-review-demo/04-review-overlay-1280x720.png`
+- `output/design-qa/ai-review-demo/05-kept-outcome-1280x720.png`
+- `output/design-qa/ai-review-demo/06-accepted-outcome-1280x720.png`
+
+Combined comparison inputs:
+
+- `output/design-qa/ai-review-demo/comparison-full-2560x720.jpg`
+- `output/design-qa/ai-review-demo/comparison-header-2560x120.jpg`
+
+Viewport and normalization:
+
+- Source file: `1280 × 720` pixels. Its original CSS viewport and device density are unavailable, so it is used only as a same-size visual-language baseline.
+- Implementation: `1280 × 720` CSS viewport, runtime `devicePixelRatio = 2`; the in-app browser screenshot API normalizes the saved evidence to `1280 × 720` pixels.
+- Full comparison: source and implementation remain at equal `1280 × 720` pixel dimensions and are placed side by side without scaling.
+- Focused comparison: equal top `1280 × 120` pixel header crops are placed side by side without scaling.
+- State: source is the current read-only PageRoot shell; implementation is the new “修改后”审阅状态. Waiting, ready, overlay and both version decisions were checked separately.
+
+Full-view and focused comparison evidence:
+
+- The Demo keeps the existing white 64px-style top file bar, purple brand asset and semantic accent, cool-gray shell, centered paper surface and a clearly separated right rail.
+- At `1280 × 720`, `body.scrollWidth = 1280` and `body.scrollHeight = 720`; no persistent control is outside the viewport. The report and change list scroll inside their own regions.
+- The focused header comparison retains the product's two-line file identity, restrained mode/control surfaces, spacing rhythm, border color and icon treatment.
+- The waiting and ready captures retain the existing four equal-stage handoff rhythm. The review capture intentionally gives more width to the paper and reserves a stable right rail for comment-to-change pairing.
+- Focused region comparison was limited to the header because the source capture does not contain the proposed review rail; the rail was instead judged from its rendered screenshot and interaction states.
+
+Findings:
+
+- No actionable P0, P1 or P2 issue remains.
+- Fonts and typography: the UI uses the existing system/PingFang fallback and the current product's compact hierarchy. Headings, metric emphasis, comments and action labels remain legible at the target viewport.
+- Spacing and layout rhythm: header, toolbar, paper and rail align to stable horizontal boundaries. The main report and rail have independent scrolling, while both decision buttons remain visible.
+- Colors and visual tokens: shell, paper, line, indigo, green and red diff colors follow the existing PageRoot palette and preserve semantic contrast.
+- Image quality and asset fidelity: the existing `/public/brand-logo.png` is reused. All visible interface symbols use the project's Phosphor icon library; no emoji, handcrafted SVG, CSS illustration or placeholder asset was introduced.
+- Copy and content: the flow consistently uses user-facing version language (`V1.3`, `候选 V1.4`, `当前 HTML`) and labels the route as a non-writing Demo. Comments, before/after content and the one extra AI change are paired in one rail.
+- P3 follow-up: the right-rail explanatory copy is intentionally dense in this quick first pass; a production refinement could increase the smallest text by about 1px after real-content testing.
+
+Interaction checks:
+
+- Waiting → `模拟 AI 返回` → ready.
+- Ready → `审阅修改`; `修改后`、`修改前`、`叠加对比` all changed the report state.
+- Previous/next change navigation advanced the active change from `1 / 4` to `2 / 4`.
+- `保留当前版本` opened a confirmation dialog; confirmation produced the V1.3-kept outcome while retaining candidate V1.4.
+- `接受全部并打开` produced the V1.4-current outcome while retaining V1.3.
+- `稍后处理` showed the intended persistence explanation; `直接打开` produced the explicit skip-review outcome.
+- A fresh browser tab completed the full page load with no console warning or error. One earlier development tab recorded a transient dynamic-import error during Vinext dependency optimization; it did not reproduce after the server stabilized.
+
+Comparison history:
+
+1. The first normalized full and header comparisons found no actionable P0, P1 or P2 mismatch, so no visual fix iteration was required.
+2. All core states were then exercised in the rendered browser. The final fresh-load check remained visually stable and console-clean.
+
+final result: passed
+
+---
+
 ## Workbench header height and overflow
 
 Date: 2026-07-29
