@@ -50,7 +50,6 @@ type AboutPageRootDialogProps = {
 
 type UpdatePresentation = {
   tone: "neutral" | "checking" | "current" | "available" | "ready" | "unavailable";
-  eyebrow: string;
   title: string;
   detail: string;
 };
@@ -75,7 +74,6 @@ function updatePresentation({
   if (!updatesAvailable) {
     return {
       tone: "neutral",
-      eyebrow: "桌面更新",
       title: "浏览器预览不检查应用更新",
       detail: "自动更新只在正式签名的 macOS 应用中启用。",
     };
@@ -83,7 +81,6 @@ function updatePresentation({
   if (manualCheckFailed) {
     return {
       tone: "unavailable",
-      eyebrow: "检查未完成",
       title: "本机更新服务暂时不可用",
       detail: "当前编辑不受影响，可以稍后重新检查。",
     };
@@ -91,7 +88,6 @@ function updatePresentation({
   if (!result) {
     return {
       tone: "checking",
-      eyebrow: "Stable 频道",
       title: "正在读取更新状态",
       detail: "源页正在连接本机更新服务。",
     };
@@ -99,7 +95,6 @@ function updatePresentation({
   if (manualCheckPending || result.status === "checking") {
     return {
       tone: "checking",
-      eyebrow: "Stable 频道",
       title: "正在检查更新",
       detail: "正在核对 GitHub 上最新的正式版本。",
     };
@@ -107,7 +102,6 @@ function updatePresentation({
   if (result.status === "current") {
     return {
       tone: "current",
-      eyebrow: "Stable 频道",
       title: "当前已是最新版本",
       detail: `PageRoot ${result.currentVersion} 已是最新的正式版本。`,
     };
@@ -115,7 +109,6 @@ function updatePresentation({
   if (result.status === "available") {
     return {
       tone: "available",
-      eyebrow: "发现新版本",
       title: `PageRoot ${result.latestVersion || "新版本"} 可以下载`,
       detail: "点击下载后仍可继续编辑；下载完成时再决定是否重启。",
     };
@@ -123,7 +116,6 @@ function updatePresentation({
   if (result.status === "downloading") {
     return {
       tone: "available",
-      eyebrow: "后台下载",
       title: `正在下载 PageRoot ${result.latestVersion || "新版本"}`,
       detail: "你可以继续编辑；下载完成后源页会询问是否现在重启。",
     };
@@ -131,7 +123,6 @@ function updatePresentation({
   if (result.status === "downloaded") {
     return {
       tone: "ready",
-      eyebrow: "可以安装",
       title: `PageRoot ${result.latestVersion || "新版本"} 已准备好`,
       detail: "重启前会先确认当前编辑、评论和项目资料已经安全写入。",
     };
@@ -139,7 +130,6 @@ function updatePresentation({
   if (result.status === "installing") {
     return {
       tone: "ready",
-      eyebrow: "正在安装",
       title: "源页即将重新打开",
       detail: "新版本安装完成后会自动回到源页。",
     };
@@ -147,7 +137,6 @@ function updatePresentation({
   if (result.status === "unavailable") {
     return {
       tone: "unavailable",
-      eyebrow: "检查未完成",
       title: "暂时无法连接更新服务",
       detail: "当前编辑不受影响，可以稍后重新检查。",
     };
@@ -155,14 +144,12 @@ function updatePresentation({
   if (result.status === "unsupported") {
     return {
       tone: "neutral",
-      eyebrow: "桌面更新",
       title: "当前构建不检查应用更新",
       detail: "自动更新只在正式签名的 macOS 应用中启用。",
     };
   }
   return {
     tone: "neutral",
-    eyebrow: "Stable 频道",
     title: "自动更新已开启",
     detail: "启动后会检查一次；应用保持打开时，每 4 小时检查一次。",
   };
@@ -264,7 +251,6 @@ export default function AboutPageRootDialog({
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="./brand-logo.png" alt="" />
           <div>
-            <span>PageRoot for macOS</span>
             <h2 id="about-pageroot-title">源页</h2>
             <p id="about-pageroot-description">
               源码级本地 HTML 编辑器。
@@ -277,18 +263,7 @@ export default function AboutPageRootDialog({
         <div className="about-product-meta" aria-label="应用信息">
           <span>版本 {appVersion || updateResult?.currentVersion || "—"}</span>
           <span>{architectureLabel(updateResult?.architecture)}</span>
-          <span>Apache-2.0</span>
         </div>
-
-        <section className="about-data-notice" aria-labelledby="about-data-title">
-          <strong id="about-data-title">使用数据说明</strong>
-          <p>
-            为改进产品，源页默认发送有限的使用与故障统计，包括功能与项目流程、提醒、中断和稳定错误码；这些统计不含用户内容和直接身份信息。
-          </p>
-          <small>
-            不发送 HTML、评论、附件、剪贴板、文件名或路径；不读取电脑序列号、设备名或 Apple 账号。应用使用首次运行随机生成的安装标识，数据存储于 PostHog US Cloud。
-          </small>
-        </section>
 
         <section
           className="about-update-card"
@@ -303,7 +278,6 @@ export default function AboutPageRootDialog({
             )}
           </div>
           <div className="about-update-copy" aria-live="polite" aria-atomic="true">
-            <span>{presentation.eyebrow}</span>
             <strong id="about-update-title">{presentation.title}</strong>
             <p>{presentation.detail}</p>
           </div>

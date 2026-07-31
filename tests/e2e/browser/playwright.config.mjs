@@ -11,11 +11,6 @@ const baseURL = externalBaseUrl || `http://localhost:${localPort}`;
 export default defineConfig({
   testDir: currentDirectory,
   testMatch: /native-dom-.*\.spec\.mjs/,
-  // These suites specify the retired V1 per-keystroke tracker, format
-  // skeleton and IME-tail state machine. V2 replaces them with the single
-  // editable-island contract covered by native-dom-v2-editable-island plus
-  // the source, boundary, zero-boundary and lease suites.
-  testIgnore: /native-dom-(?:controller-command-policy|editing|format-skeleton|ime-epoch-regressions|session-finalization|structure-guard)\.spec\.mjs/,
   outputDir: path.join(productRoot, "output/playwright/native-dom-browser/results"),
   fullyParallel: false,
   workers: 1,

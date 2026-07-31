@@ -2,10 +2,16 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
+import {
+  readCanvasArchitecture,
+  readWorkbenchArchitecture,
+} from "./source-architecture-fixture.mjs";
+
 const [
   workbench,
   aboutDialog,
   restartUpdateDialog,
+  cancelAiRunDialog,
   styles,
   mainProcess,
   preload,
@@ -16,13 +22,14 @@ const [
   previewSandbox,
   bridgeClient,
 ] = await Promise.all([
-  readFile(new URL("../app/workbench.tsx", import.meta.url), "utf8"),
+  readWorkbenchArchitecture(),
   readFile(new URL("../app/components/AboutPageRootDialog.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/components/RestartUpdateDialog.tsx", import.meta.url), "utf8"),
+  readFile(new URL("../app/components/CancelAiRunDialog.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
   readFile(new URL("../desktop/main.mjs", import.meta.url), "utf8"),
   readFile(new URL("../desktop/preload.mjs", import.meta.url), "utf8"),
-  readFile(new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url), "utf8"),
+  readCanvasArchitecture(),
   readFile(new URL("../desktop/welcome-project-content.mjs", import.meta.url), "utf8"),
   readFile(new URL("../app/components/HtmlInteractionPreview.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/components/HtmlInteractionPreview.module.css", import.meta.url), "utf8"),
@@ -246,7 +253,7 @@ test("editing and interactive preview are separate canvas modes", () => {
   assert.match(workbench, /setCanvasMode\("edit"\);[\s\S]*?setDrawer\("history"\)/);
   assert.match(
     workbench,
-    /const applyProject[\s\S]*?setViewMode\("current"\);[\s\S]*?setCanvasMode\([\s\S]*?runtimeCapabilitiesRef\.current\.sourceEditing !== "enabled"[\s\S]*?\? "preview"[\s\S]*?: "edit"/,
+    /const applyProject[\s\S]*?versionSessionRef\.current\.reset\(\);[\s\S]*?setCanvasMode\([\s\S]*?runtimeCapabilitiesRef\.current\.sourceEditing !== "enabled"[\s\S]*?\? "preview"[\s\S]*?: "edit"/,
   );
   assert.match(styles, /\.workbench\[data-canvas-mode="preview"\]\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\)/);
   assert.match(styles, /\.workbench\[data-canvas-mode="preview"\] \.canvas-column\s*\{[\s\S]*?grid-column:\s*1 \/ -1/);
@@ -254,13 +261,28 @@ test("editing and interactive preview are separate canvas modes", () => {
   assert.match(interactionPreview, /title="HTML 交互预览"/);
   assert.match(
     interactionPreview,
-    /sandbox="allow-scripts allow-forms allow-modals allow-popups allow-downloads"/,
+    /INDEPENDENT_PREVIEW_SANDBOX =[\s\S]*?"allow-scripts allow-same-origin allow-forms allow-modals allow-popups allow-downloads"/,
   );
-  assert.doesNotMatch(interactionPreview, /allow-same-origin|allow-top-navigation/);
-  assert.match(interactionPreview, /srcDoc=\{previewHtml\}/);
+  assert.match(
+    interactionPreview,
+    /SRCDOC_PREVIEW_SANDBOX =[\s\S]*?"allow-scripts allow-forms allow-modals allow-popups allow-downloads"/,
+  );
+  assert.match(interactionPreview, /sandbox=\{frameSandbox\}/);
+  assert.doesNotMatch(interactionPreview, /allow-top-navigation/);
+  assert.match(interactionPreview, /transport = "srcdoc"/);
+  assert.match(interactionPreview, /previewApi\.createSession\(\{/);
+  assert.match(interactionPreview, /\? \{ src: frameSource \?\? "about:blank" \}/);
+  assert.match(interactionPreview, /: \{ srcDoc: prepared\.html \}/);
+  assert.match(interactionPreview, /capturePageViewContext:/);
+  assert.match(interactionPreview, /createPageViewContext\(\{/);
   assert.match(interactionPreview, /PREVIEW_STORAGE_BOOTSTRAP/);
   assert.match(interactionPreview, /预览模式 · 页面操作不会保存/);
   assert.match(workbench, /<HtmlInteractionPreview[\s\S]*?height="100%"/);
+  assert.match(
+    workbench,
+    /capturePageViewContext\(\)[\s\S]*?applyPageViewContext\(nextContext\)[\s\S]*?setCanvasMode\("edit"\)/,
+  );
+  assert.match(workbench, /transport=\{interactivePreviewTransport\}/);
   assert.doesNotMatch(interactionPreview, /隔离交互预览|运行时 DOM、表单和存储不会写回源码/);
   assert.doesNotMatch(interactionPreview, /onChange|HtmlCanvasEditor|disableExecutableMarkup/);
   assert.match(interactionPreviewStyles, /\.preview\s*\{[\s\S]*?grid-template-rows:\s*36px minmax\(0, 1fr\)/);
@@ -268,6 +290,25 @@ test("editing and interactive preview are separate canvas modes", () => {
 
   assert.match(canvas, /sandbox="allow-same-origin"/);
   assert.doesNotMatch(canvas, /sandbox="[^"]*allow-scripts/);
+  assert.match(canvas, /function findNativeActionTarget/u);
+  for (const selector of [
+    "a[href]",
+    "area[href]",
+    "button",
+    "form",
+    "input",
+    "select",
+    "summary",
+    "textarea",
+    '[role="tab"]',
+    "[aria-expanded][aria-controls]",
+  ]) {
+    assert.match(canvas, new RegExp(JSON.stringify(selector).replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
+  }
+  assert.doesNotMatch(
+    canvas,
+    /setAttribute\(["']inert["']|\.inert\s*=/,
+  );
   assert.match(previewSandbox, /type="application\/x-html-canvas-disabled"/);
 });
 
@@ -282,7 +323,7 @@ test("workbench transitions fail closed when a native DOM edit cannot commit or 
   );
   assert.match(
     closeFlow,
-    /lastPersistedRevisionRef\.current !== cutoffRevision[\s\S]*?sourceShaRef\.current !== frozenSourceSha256/u,
+    /documentSessionRef\.current\.lastPersistedRevision !== cutoffRevision[\s\S]*?documentSessionRef\.current\.sourceSha256 !== frozenSourceSha256/u,
   );
 
   const projectSwitch = workbench.slice(
@@ -295,7 +336,7 @@ test("workbench transitions fail closed when a native DOM edit cannot commit or 
     switchFence,
   );
   const switchCutoff = projectSwitch.indexOf(
-    "const switchCutoffRevision = editRevisionRef.current;",
+    "const switchCutoffRevision = documentSessionRef.current.editRevision;",
     switchFenceGuard,
   );
   const switchDrain = projectSwitch.indexOf(
@@ -315,7 +356,7 @@ test("workbench transitions fail closed when a native DOM edit cannot commit or 
   );
   assert.match(
     projectSwitch,
-    /lastPersistedRevisionRef\.current !== switchCutoffRevision[\s\S]*?sourceShaRef\.current !== committed\.sourceSha256/u,
+    /documentSessionRef\.current\.lastPersistedRevision !== switchCutoffRevision[\s\S]*?documentSessionRef\.current\.sourceSha256 !== committed\.sourceSha256/u,
   );
 
   const navigation = workbench.slice(
@@ -373,17 +414,22 @@ test("workbench transitions fail closed when a native DOM edit cannot commit or 
   );
 });
 
-test("outer source reversal shortcuts are blocked without exposing reversal APIs", () => {
+test("outer source reversal shortcuts route to persistent source history without a canvas-local stack", () => {
   const shortcutFlow = workbench.slice(
     workbench.indexOf("const requestUserFlush"),
     workbench.indexOf("const openCommentComposer"),
   );
   assert.match(
     shortcutFlow,
-    /event\.key\.toLowerCase\(\) === "z"[\s\S]*?target\?\.isContentEditable[\s\S]*?event\.preventDefault\(\);[\s\S]*?return;/u,
+    /const requestSourceHistoryAction = useCallback[\s\S]*?sourceHistorySessionRef\.current\.createAction[\s\S]*?bridgeClient\.sourceHistoryAction/u,
+  );
+  assert.match(
+    shortcutFlow,
+    /ownsNativeTextHistory\(target\)[\s\S]*?requestSourceHistoryAction\(/u,
   );
   assert.doesNotMatch(canvas, /\b(?:undo|redo): \(\) => boolean/u);
   assert.doesNotMatch(shortcutFlow, /editorRef\.current\?\.(?:undo|redo)/u);
+  assert.doesNotMatch(canvas, /undoStackRef|redoStackRef/u);
 });
 
 test("external source adoption invalidates the active native editing session", () => {
@@ -402,18 +448,22 @@ test("external source adoption invalidates the active native editing session", (
   );
   assert.match(
     completedVersion,
-    /const transitionAffectsCurrentCanvas[\s\S]*?sameLocalSourcePath\(sourcePathRef\.current, run\.sourcePath\)[\s\S]*?sameLocalSourcePath\(sourcePathRef\.current, committedSourcePath\)[\s\S]*?const transitionContext = captureProjectContext\(\)[\s\S]*?fenceAndFreezeCurrentCanvas\([\s\S]*?if \(!frozen\.ok\)[\s\S]*?isCurrentProjectContext\(transitionContext\)[\s\S]*?await adoptGeneratedSourcePath\(\{[\s\S]*?htmlRef\.current = content;[\s\S]*?setHtml\(content\)/u,
+    /const transitionAffectsCurrentCanvas[\s\S]*?sameLocalSourcePath\(projectSessionRef\.current\.sourcePath, run\.sourcePath\)[\s\S]*?sameLocalSourcePath\(projectSessionRef\.current\.sourcePath, committedSourcePath\)[\s\S]*?const transitionContext = captureProjectContext\(\)[\s\S]*?fenceAndFreezeCurrentCanvas\([\s\S]*?if \(!frozen\.ok\)[\s\S]*?isCurrentProjectContext\(transitionContext\)[\s\S]*?await adoptGeneratedSourcePath\(\{[\s\S]*?documentSessionRef\.current\.update\(\{[\s\S]*?html: content,[\s\S]*?sourceSha256: sourceHash/u,
   );
 });
 
 test("header prioritizes the filename and keeps the approved action order", () => {
-  const headerStart = workbench.indexOf('<header className="workbench-header">');
+  const headerClass = workbench.indexOf('className="workbench-header"');
+  const headerStart = workbench.lastIndexOf("<header", headerClass);
   const header = workbench.slice(
     headerStart,
     workbench.indexOf("</header>", headerStart),
   );
   assert.match(header, /className="window-file"/);
-  assert.match(header, /className="window-file-icon"[\s\S]*?<FileHtmlIcon/);
+  assert.match(
+    header,
+    /className="window-file-icon window-file-about-button"[\s\S]*?aria-label="关于源页"[\s\S]*?onClick=\{openAboutPageRoot\}[\s\S]*?<FileHtmlIcon/,
+  );
   assert.match(header, /className="save-status"/);
   assert.match(
     workbench,
@@ -426,7 +476,7 @@ test("header prioritizes the filename and keeps the approved action order", () =
   assert.doesNotMatch(header, /brand-logo\.png|className="brand"|className="update-badge"/);
   assert.match(
     header,
-    /updateActionVisible[\s\S]*?className="header-update-badge"[\s\S]*?updateDownloaded[\s\S]*?setRestartUpdateOpen\(true\)[\s\S]*?downloadAvailableUpdate\(\)[\s\S]*?\{updateBadgeLabel\}/,
+    /className="window-file-icon-cluster"[\s\S]*?updateActionVisible[\s\S]*?className="header-update-badge window-file-update-badge"[\s\S]*?updateDownloaded[\s\S]*?setRestartUpdateOpen\(true\)[\s\S]*?downloadAvailableUpdate\(\)[\s\S]*?\{updateBadgeLabel\}/,
   );
   assert.match(
     styles,
@@ -448,7 +498,7 @@ test("header prioritizes the filename and keeps the approved action order", () =
   const project = header.indexOf('className="project-button"');
   const globalComment = header.indexOf('className="global-comment-button"');
   const send = header.indexOf('className="header-send-button"');
-  const about = header.indexOf('className="about-trigger-button"');
+  const about = header.indexOf("window-file-about-button");
   assert.ok(
     editPreview >= 0
       && project > editPreview
@@ -456,8 +506,8 @@ test("header prioritizes the filename and keeps the approved action order", () =
       && send > globalComment,
     "header actions must remain edit/preview, project, global comment, then send",
   );
-  assert.equal(about, -1);
-  assert.doesNotMatch(header, /InfoIcon|关于源页/);
+  assert.ok(about >= 0 && about < editPreview);
+  assert.doesNotMatch(header, /InfoIcon|about-trigger-button/);
   assert.match(workbench, /window\.htmlAIUpdates/);
   assert.match(workbench, /updates\.getStatus\(\)/);
   assert.match(workbench, /updates\.onStatus\(receiveStatus\)/);
@@ -470,7 +520,7 @@ test("header prioritizes the filename and keeps the approved action order", () =
   assert.match(styles, /\.header-actions button,[\s\S]*?border:\s*0[\s\S]*?box-shadow:\s*none/);
   assert.match(
     styles,
-    /\.header-actions \.header-update-badge\s*\{[\s\S]*?right:\s*0[\s\S]*?padding:\s*0[\s\S]*?border:\s*0[\s\S]*?background:\s*transparent[\s\S]*?color:\s*var\(--red\)[\s\S]*?font-style:\s*italic/,
+    /\.window-file-icon-cluster\s*\{[\s\S]*?width:\s*60px[\s\S]*?height:\s*42px[\s\S]*?\.window-file-icon\s*\{[\s\S]*?top:\s*50%[\s\S]*?transform:\s*translate\(-50%, -50%\)[\s\S]*?\.window-file-update-badge\s*\{[\s\S]*?top:\s*26px[\s\S]*?width:\s*60px[\s\S]*?height:\s*20px[\s\S]*?background:\s*transparent[\s\S]*?font-size:\s*8px/,
   );
   assert.match(mainProcess, /startAutomaticChecks\(\)/);
   assert.match(mainProcess, /createApplicationUpdateController/);
@@ -497,10 +547,10 @@ test("header prioritizes the filename and keeps the approved action order", () =
     workbench,
     /const openUserNotice = useCallback[\s\S]*?htmlAIAppLifecycle\?\.openUserNotice\(\)[\s\S]*?setUserNoticeOpenFailed\(true\)/,
   );
-  assert.match(aboutDialog, /使用数据说明/);
-  assert.match(aboutDialog, /默认发送有限的使用与故障统计/);
-  assert.match(aboutDialog, /不读取电脑序列号、设备名或 Apple 账号/);
-  assert.match(aboutDialog, /PostHog US Cloud/);
+  assert.doesNotMatch(aboutDialog, /PageRoot for macOS/);
+  assert.doesNotMatch(aboutDialog, /Apache-2\.0/);
+  assert.doesNotMatch(aboutDialog, /使用数据说明/);
+  assert.doesNotMatch(aboutDialog, /Stable 频道/);
   assert.doesNotMatch(
     aboutDialog,
     /type="checkbox"|关闭数据收集|停止收集|opt.?out/iu,
@@ -536,13 +586,16 @@ test("QoderWork handoff exposes a truthful process board and manual open action"
   const sendToQoderStart = workbench.indexOf("const sendToQoderWork = useCallback");
   const sendToQoderEnd = workbench.indexOf("const revealActiveRunInFinder", sendToQoderStart);
   const sendToQoderWork = workbench.slice(sendToQoderStart, sendToQoderEnd);
-  assert.match(sendToQoderWork, /qoderHandoffStatesRef\.current\.set\(run\.sourcePath, nextState\)/);
+  assert.match(
+    sendToQoderWork,
+    /runSessionRef\.current\.publishHandoff\(nextState\)/,
+  );
   assert.match(sendToQoderWork, /publishStatus\("copying"\)/);
   assert.match(sendToQoderWork, /publishStatus\("copied"\)/);
   assert.match(sendToQoderWork, /publishStatus\("failed"\)/);
   assert.match(
     sendToQoderWork,
-    /sameLocalSourcePath\(sourcePathRef\.current, run\.sourcePath\)[\s\S]*?visibleRun\?\.requestId === run\.requestId[\s\S]*?visibleRun\.attemptId === run\.attemptId/,
+    /sameLocalSourcePath\(projectSessionRef\.current\.sourcePath, run\.sourcePath\)[\s\S]*?visibleRun\?\.requestId === run\.requestId[\s\S]*?visibleRun\.attemptId === run\.attemptId/,
   );
   assert.doesNotMatch(sendToQoderWork, /setDrawer\("handoff"\)|tone: "success"/);
   assert.match(workbench, /qoder-logo\.png/);
@@ -572,7 +625,7 @@ test("QoderWork handoff exposes a truthful process board and manual open action"
   );
   const footerStart = workbench.indexOf('<footer className="processing-footer">');
   const footer = workbench.slice(footerStart, workbench.indexOf("</footer>", footerStart));
-  const cancel = footer.indexOf("取消发送，继续编辑");
+  const cancel = footer.indexOf("结束本轮并继续编辑");
   const preview = footer.indexOf("预览已发送 HTML");
   const copy = footer.indexOf("再次复制本轮要求");
   assert.ok(cancel >= 0 && preview > cancel && copy > preview);
@@ -671,6 +724,50 @@ test("QoderWork handoff exposes a truthful process board and manual open action"
   );
 });
 
+test("ending a copied AI run warns clearly and restores editing with a stop reminder", () => {
+  assert.match(cancelAiRunDialog, /AI Agent 可能仍在修改/);
+  assert.match(
+    cancelAiRunDialog,
+    /结束本轮后，AI Agent 的修改将不会保存到源页。建议先停止 AI Agent。/,
+  );
+  assert.doesNotMatch(cancelAiRunDialog, /Qoder(?:Work)?/u);
+  assert.match(cancelAiRunDialog, /aria-labelledby="cancel-ai-run-title"/);
+  assert.match(cancelAiRunDialog, /aria-describedby="cancel-ai-run-description"/);
+  assert.match(
+    cancelAiRunDialog,
+    /requestAnimationFrame\([\s\S]*?waitButtonRef\.current\?\.focus\(\)[\s\S]*?cancelAnimationFrame\(focusFrame\)/,
+  );
+  assert.match(
+    cancelAiRunDialog,
+    /onCancel=\{\(event\) => \{[\s\S]*?event\.preventDefault\(\);[\s\S]*?onClose\(\)/,
+  );
+  assert.match(
+    cancelAiRunDialog,
+    /结束本轮并继续编辑[\s\S]*?继续等待/,
+  );
+  assert.match(
+    workbench,
+    /currentQoderHandoffStatus === "copied"[\s\S]*?setCancelRunConfirmationKey\(activeRunOperationKey\(activeRun\)\)/,
+  );
+  assert.match(
+    workbench,
+    /<CancelAiRunDialog[\s\S]*?cancelActiveRun\(\{ agentMayBeRunning: true \}\)/,
+  );
+  assert.match(
+    workbench,
+    /reason: agentMayBeRunning[\s\S]*?"cancelled-by-user-after-agent-handoff"[\s\S]*?"cancelled-by-user"/,
+  );
+  assert.match(workbench, /本轮已结束，已恢复编辑/);
+  assert.match(
+    workbench,
+    /AI Agent 不会被自动停止；如仍在运行，请手动停止。/,
+  );
+  assert.match(workbench, /dedupeKey: `ai-run-cancelled:\$\{run\.sourcePath\}`/);
+  assert.match(workbench, /disposition: "background-result"/);
+  assert.match(styles, /\.cancel-ai-run-dialog::backdrop/);
+  assert.match(styles, /\.cancel-ai-run-card button:focus-visible/);
+});
+
 test("processing keeps its decision surface dismissible and project navigation available", () => {
   const recoveredRunStart = workbench.indexOf(
     "if (recoveredRun && isLockedLifecycle(recoveredRun.status))",
@@ -702,7 +799,7 @@ test("processing keeps its decision surface dismissible and project navigation a
     workbench,
     /className="project-file-editor"[\s\S]*?disabled=\{fileView\.loading \|\| runInProgress\}/,
   );
-  assert.match(workbench, /取消发送，继续编辑/);
+  assert.match(workbench, /结束本轮并继续编辑/);
   assert.match(workbench, /预览已发送 HTML/);
   assert.match(workbench, /再次复制本轮要求/);
   assert.match(
@@ -730,7 +827,11 @@ test("first project registration is part of the recoverable autosave transaction
   const flushEnd = workbench.indexOf("const enqueueAutosave = useCallback", flushStart);
   assert.ok(flushStart >= 0 && flushEnd > flushStart);
   const flush = workbench.slice(flushStart, flushEnd);
-  const writing = flush.indexOf('persistStateRef.current = "writing"');
+  const writingState = flush.indexOf('state: "writing"');
+  const writing = flush.lastIndexOf(
+    "documentSessionRef.current.setPersistence({",
+    writingState,
+  );
   const transactionTry = flush.indexOf("try {", writing);
   const registration = flush.indexOf("await ensureProjectRegistered(", transactionTry);
   const transactionCatch = flush.indexOf("} catch (cause) {", registration);
@@ -745,23 +846,26 @@ test("first project registration is part of the recoverable autosave transaction
     /const command = \([\s\S]*?timeoutMs = DEFAULT_WRITE_TIMEOUT_MS/,
   );
   const recovery = flush.slice(transactionCatch);
-  assert.match(recovery, /pendingWriteRef\.current = recoveryWrite/);
   assert.match(
     recovery,
-    /fenceAndFreezeCurrentCanvas\([\s\S]*?persistRecoveryLog\(recoveryWrite, writeContext\)[\s\S]*?persistStateRef\.current = "conflict"/u,
+    /documentSessionRef\.current\.setPendingWrite\(recoveryWrite\)/,
+  );
+  assert.match(
+    recovery,
+    /fenceAndFreezeCurrentCanvas\([\s\S]*?persistRecoveryLog\(recoveryWrite, writeContext\)[\s\S]*?documentSessionRef\.current\.setPersistence\(\{[\s\S]*?state: "conflict"/u,
   );
   assert.match(recovery, /persistRecoveryLog\(recoveryWrite, writeContext\)/);
   assert.match(
     flush,
-    /editRevisionRef\.current > lastPersistedRevisionRef\.current[\s\S]*?const reconstructedWrite: PendingWrite[\s\S]*?html: htmlRef\.current[\s\S]*?pendingWriteRef\.current = reconstructedWrite/,
+    /documentSessionRef\.current\.editRevision > documentSessionRef\.current\.lastPersistedRevision[\s\S]*?const reconstructedWrite: PendingWrite[\s\S]*?html: documentSessionRef\.current\.html[\s\S]*?documentSessionRef\.current\.setPendingWrite\(reconstructedWrite\)/,
   );
   assert.match(
     recovery,
-    /isCurrentProjectContext\(writeContext\)[\s\S]*?pendingWriteRef\.current = recoveryWrite/,
+    /isCurrentProjectContext\(writeContext\)[\s\S]*?documentSessionRef\.current\.setPendingWrite\(recoveryWrite\)/,
   );
   assert.match(
     workbench,
-    /targetSha256 === currentSourceSha256[\s\S]*?const reconciledRevision = Math\.max\(serverRevision, recoveredRevision\)[\s\S]*?lastPersistedRevisionRef\.current = reconciledRevision/,
+    /targetSha256 === currentSourceSha256[\s\S]*?const reconciledRevision = Math\.max\(serverRevision, recoveredRevision\)[\s\S]*?documentSessionRef\.current\.update\(\{[\s\S]*?lastPersistedRevision: reconciledRevision/,
   );
 });
 
@@ -778,27 +882,36 @@ test("AI submission and run operations remain isolated by project and run identi
   assert.match(generate, /if \(submissionIntentRef\.current\) return/);
   assert.match(
     generate,
-    /submissionIntentRef\.current\?\.token !== submissionIntent\.token[\s\S]*?projectEpochRef\.current !== submissionIntent\.epoch[\s\S]*?!sameLocalSourcePath\(sourcePathRef\.current, submissionIntent\.sourcePath\)/,
+    /submissionIntentRef\.current\?\.token !== submissionIntent\.token[\s\S]*?projectSessionRef\.current\.epoch !== submissionIntent\.epoch[\s\S]*?!sameLocalSourcePath\(projectSessionRef\.current\.sourcePath, submissionIntent\.sourcePath\)/,
   );
-  assert.match(workbench, /qoderHandoffStatesRef\s*=\s*useRef<Map<string, ProjectQoderHandoffState>>/);
-  assert.match(workbench, /activatingRunsRef = useRef<Set<string>>/);
+  assert.match(
+    workbench,
+    /const runSessionRef = useRef\(new RunSession\(/,
+  );
+  assert.match(
+    workbench,
+    /beginOperation\("activate", operationKey\)/,
+  );
   assert.doesNotMatch(workbench, /waivingRunsRef|\/validation\/waive/);
-  assert.match(workbench, /cancellingRunsRef = useRef<Set<string>>/);
   assert.match(
     workbench,
-    /statusPollBusyRef = useRef<Set<string>>\(new Set\(\)\)[\s\S]*?statusPollBusyRef\.current\.has\(operationKey\)[\s\S]*?statusPollBusyRef\.current\.delete\(operationKey\)/,
+    /beginOperation\("cancel", operationKey\)/,
   );
   assert.match(
     workbench,
-    /await Promise\.allSettled\([\s\S]*?backgroundRunsRef\.current\.values\(\)/,
+    /beginOperation\("poll", operationKey\)[\s\S]*?endOperation\("poll", operationKey\)/,
   );
   assert.match(
     workbench,
-    /const projectQoderHandoff = project\.sourcePath[\s\S]*?qoderHandoffStatesRef\.current\.get\(project\.sourcePath\)/,
+    /const runs = runSessionRef\.current\.runs[\s\S]*?await Promise\.allSettled\([\s\S]*?runs\.map/,
   );
   assert.match(
     workbench,
-    /const previousState = qoderHandoffStatesRef\.current\.get\(run\.sourcePath\)[\s\S]*?previousState\.requestId !== run\.requestId[\s\S]*?previousState\.attemptId !== run\.attemptId/,
+    /runSessionRef\.current\.activate\(project\.sourcePath \|\| null\)/,
+  );
+  assert.match(
+    workbench,
+    /state\.status !== "copying"[\s\S]*?previous\.requestId !== state\.requestId[\s\S]*?previous\.attemptId !== state\.attemptId/,
   );
 });
 
@@ -817,7 +930,10 @@ test("forward edit events remain exact-once after persistence starts", () => {
   );
   assert.match(workbench, /const nextEvents = appendDirectEditEvent\(\{/);
   assert.match(workbench, /inFlightKeys: auditInFlightKeysRef\.current/);
-  assert.match(workbench, /persistCurrentDraftRecovery\(commentsRef\.current, nextEvents\.events\)/);
+  assert.match(
+    workbench,
+    /persistCurrentDraftRecovery\(commentSessionRef\.current\.comments, nextEvents\.events\)/,
+  );
   assert.doesNotMatch(workbench, /undoFolds|redoFolds|undoesEventId/u);
 });
 
@@ -844,7 +960,11 @@ test("history opens concise immutable versions in the canvas with their comments
   );
   assert.match(
     workbench,
-    /window\.htmlAIProjects\?\.revealVersionFile[\s\S]*?onClick=\{\(\) => void revealVersionInFinder\(version\)\}[\s\S]*?Finder/,
+    /onReveal \? \([\s\S]*?onClick=\{onReveal\}[\s\S]*?Finder/,
+  );
+  assert.match(
+    workbench,
+    /window\.htmlAIProjects\?\.revealVersionFile[\s\S]*?\? \(\) => void revealVersionInFinder\(version\)/,
   );
   assert.match(styles, /\.version-list\s*\{[\s\S]*?border-radius:\s*15px/);
   assert.match(styles, /\.version-row\s*\{[\s\S]*?grid-template-columns:\s*42px minmax\(0, 1fr\) auto 14px/);
@@ -862,7 +982,7 @@ test("AI completion adopts the generated semantic file before editing resumes", 
   );
   assert.match(
     workbench,
-    /sourcePathRef\.current = nextSourcePath;[\s\S]*?setSourcePath\(nextSourcePath\);[\s\S]*?setSourceSha256\(expectedSha256\)/,
+    /projectSessionRef\.current\.transitionSource\(\{[\s\S]*?sourcePath: nextSourcePath,[\s\S]*?projectId: nextProjectId,[\s\S]*?documentId: nextDocumentId,[\s\S]*?documentSessionRef\.current\.update\(\{[\s\S]*?sourceSha256: expectedSha256,[\s\S]*?pendingWrite: null/,
   );
   const adoptionStart = workbench.indexOf("const adoptGeneratedSourcePath = useCallback");
   const adoptionEnd = workbench.indexOf("const recoverAutosaveLog", adoptionStart);
@@ -931,7 +1051,15 @@ test("a safely saved source can be renamed in place without exposing its extensi
   );
   assert.match(
     workbench,
+    /className="workbench-header"[\s\S]*?data-file-renaming=\{fileRenameEditing \? "true" : undefined\}/,
+  );
+  assert.match(
+    workbench,
     /event\.key === "Enter"[\s\S]*?commitFileRename\(\)[\s\S]*?event\.key === "Escape"[\s\S]*?cancelFileRename\(\)/,
+  );
+  assert.match(
+    styles,
+    /\.workbench-header\[data-file-renaming="true"\]\s*\{[\s\S]*?-webkit-app-region:\s*no-drag/,
   );
   assert.match(
     styles,
@@ -1001,7 +1129,7 @@ test("the filename keeps distinct quick actions with non-layout tooltips", () =>
     browserOpenEnqueue,
   );
   const browserOpenPersistenceGuard = browserOpenFlow.indexOf(
-    "lastPersistedRevisionRef.current < launchRevision",
+    "documentSessionRef.current.lastPersistedRevision < launchRevision",
     browserOpenFlush,
   );
   const browserOpenBridge = browserOpenFlow.indexOf(
@@ -1085,7 +1213,7 @@ test("user-opened HTML stays lazily registered until a real project action", () 
   );
   assert.match(
     workbench,
-    /const drained = await drainCoordinatorRef\.current\.drain\("submit"[\s\S]*?const persistedComments = commentsRef\.current\.filter\(commentHasContent\)[\s\S]*?submissionContext\.comments = persistedComments\.map[\s\S]*?submissionContext\.changeEvents = changeEventsRef\.current\.map/,
+    /const drained = await drainCoordinatorRef\.current\.drain\("submit"[\s\S]*?const persistedComments = commentSessionRef\.current\.comments\.filter\(commentHasContent\)[\s\S]*?submissionContext\.comments = persistedComments\.map[\s\S]*?submissionContext\.changeEvents = commentSessionRef\.current\.changeEvents\.map/,
   );
   assert.match(
     workbench,
@@ -1109,19 +1237,31 @@ test("user-opened HTML stays lazily registered until a real project action", () 
 
 test("comment composer is explicit, transient and horizontally contained", () => {
   const unifiedSurfaceStyles = styles.slice(styles.indexOf("PageRoot V5.1"));
-  assert.match(workbench, /composerOpen && draftTarget && !interactionLocked \?/);
+  assert.match(
+    workbench,
+    /composerInCurrentTab[\s\S]*?Number\.isFinite\(composerTop\)[\s\S]*?!interactionLocked \?/,
+  );
   assert.match(workbench, /setComposerOpen\(true\)/);
   assert.match(workbench, /setComposerOpen\(false\)/);
-  assert.match(workbench, /draftTargetRef\.current\?\.id === target\.id/);
+  assert.match(
+    workbench,
+    /commentSessionRef\.current\.composerTarget\?\.id === target\.id/,
+  );
   assert.match(workbench, /if \(!resumesRecoveredDraft\)/);
-  assert.match(workbench, /className="draft-recovery-card[^"]*"/);
-  assert.match(workbench, /canLocateTarget\(draftTarget\) \? "继续填写" : "重新选择目标"/);
+  assert.match(workbench, /className="comment-card draft-comment-card"/);
+  assert.match(workbench, /className="comment-header-action unsaved-comment-shortcut"/);
+  assert.match(workbench, /const draftInOtherTab = hasCommentDraft && draftTargetInOtherTab/);
+  assert.match(workbench, /className="unsaved-comment-status">未保存/);
   assert.match(workbench, /beginTargetRelink\("__composer"\)/);
   assert.match(workbench, /评论和附件仍保留，重新关联后即可发送/);
   assert.match(workbench, /recoveredDraftTarget\.id !== target\.id/);
   assert.match(workbench, /上一条评论还未保存/);
   assert.match(workbench, /请先点击“评论”保存；保存后仍可修改/);
   assert.match(workbench, /const resumeCurrentComposer = useCallback/);
+  assert.match(
+    workbench,
+    /const recoveredComposerTarget = recoveredDraft\.composerTarget[\s\S]*?commentSessionRef\.current\.update\(\{[\s\S]*?composerTarget: recoveredComposerTarget,[\s\S]*?setComposerOpen\(false\);/,
+  );
   assert.doesNotMatch(workbench, /saved-comment-drafts|review-comment-drafts/);
   assert.match(workbench, /const activeCommentCount = activeCommentItems\.length/);
   assert.match(workbench, /const pendingSendItemCount = activeCommentCount;/);
@@ -1137,14 +1277,32 @@ test("comment composer is explicit, transient and horizontally contained", () =>
     workbench,
     /focusCommentTarget\(comment\.target, comment\.commentId\)/,
   );
-  assert.match(workbench, /\(event\.metaKey \|\| event\.ctrlKey\) && event\.key === "Enter"/);
+  assert.match(
+    workbench,
+    /shouldSubmitCommentOnEnter\(\{[\s\S]*?key: event\.key,[\s\S]*?shiftKey: event\.shiftKey,[\s\S]*?isComposing: event\.nativeEvent\.isComposing/,
+  );
+  assert.match(
+    workbench,
+    /const requestComposerFocus = useCallback[\s\S]*?composerFocusPendingRef\.current = true[\s\S]*?focus\(\{ preventScroll: true \}\)/,
+  );
+  assert.match(
+    workbench,
+    /useLayoutEffect\(\(\) => \{[\s\S]*?composerFocusPendingRef\.current[\s\S]*?requestComposerFocus\(\)/,
+  );
   assert.doesNotMatch(workbench, /自动记录 · ⌘ Enter 发送/);
   assert.doesNotMatch(workbench, /comment-target[\s\S]{0,300}targetResolutionLabel/);
   const composer = workbench.slice(
     workbench.indexOf('className="comment-composer rail-comment-composer"'),
-    workbench.indexOf('className="draft-recovery-card rail-status-card"'),
+    workbench.indexOf(") : hasCollapsedCommentDraft && draftTarget ? ("),
   );
   assert.doesNotMatch(composer, /targetResolutionLabel|className="target-resolution"/);
+  assert.match(composer, /aria-label="删除未保存评论"/);
+  assert.match(composer, /删除这条未保存评论？/);
+  assert.match(workbench, /const discardCurrentComposer = useCallback/);
+  assert.match(
+    workbench,
+    /discardedCommentId[\s\S]*?commentSessionRef\.current\.markDeleted\(discardedCommentId\)/,
+  );
   assert.match(workbench, /className="comments-panel comment-rail"/);
   assert.match(workbench, /className="comment-rail-content"/);
   assert.match(
@@ -1158,8 +1316,8 @@ test("comment composer is explicit, transient and horizontally contained", () =>
   assert.match(styles, /\.comment-rail-content > \.comment-card\s*\{[\s\S]*?position:\s*absolute/);
   assert.match(unifiedSurfaceStyles, /\.comment-card-tools\s*\{[\s\S]*?gap:\s*9px/);
   assert.match(workbench, /data-comment-measure=\{comment\.commentId\}/);
-  assert.match(workbench, /const focusKey = composerOpen && draftTarget \? "__composer" : focusedCommentId/);
-  assert.match(workbench, /deferredItems\.unshift\(item\)/);
+  assert.match(workbench, /layoutCommentRailItems\(\{/);
+  assert.doesNotMatch(workbench, /const focusKey =|deferredItems\.unshift\(item\)/);
   assert.match(workbench, /queueReviewPairReveal\(target, "__composer"\)/);
   const canvasSelectionHandler = workbench.slice(
     workbench.indexOf("const handleCanvasSelection = useCallback"),
@@ -1190,6 +1348,37 @@ test("comment composer is explicit, transient and horizontally contained", () =>
   assert.match(workbench, /openGlobalCommentComposer[\s\S]*?tagName: "body"[\s\S]*?openCommentComposer\(globalTarget\)/);
 });
 
+test("comment layout uses one current snapshot and isolates recovery per item", () => {
+  assert.match(canvas, /targetIds: string\[\]/);
+  assert.match(canvas, /contentHeight: number/);
+  assert.match(canvas, /textEditing: boolean/);
+  assert.match(canvas, /function naturalDocumentContentHeight/);
+  assert.match(canvas, /visibleCount === 1/);
+  assert.match(
+    canvas,
+    /findIndex\(hasIndexedTabActiveState\) === visiblePanelIndex/,
+  );
+  assert.match(
+    canvas,
+    /commentLayoutsByTargetId\.get\(target\.id\)\?\.status !== "visible"/,
+  );
+  assert.match(workbench, /commentLayoutAuthority\.targetIdsKey/);
+  assert.match(
+    workbench,
+    /commentLayoutAuthority\.textEditing[\s\S]*?\|\|[\s\S]*?!expectedCommentLayoutSourceSha256/,
+  );
+  assert.match(workbench, /stabilizeCommentTargetLayouts\(\{/);
+  assert.match(
+    workbench,
+    /layout\?\.status === "missing"[\s\S]*?\?\s*commentRailMinimumTop/,
+  );
+  assert.match(
+    workbench,
+    /\(composerInCurrentTab \|\| hasCollapsedCommentDraft\) && draftTarget/,
+  );
+  assert.doesNotMatch(workbench, /missingCommentLayoutItem/);
+});
+
 test("comment cards show one two-line target label without duplicate copy", () => {
   assert.doesNotMatch(workbench, /<q\b|可添加附件/u);
   assert.match(
@@ -1210,25 +1399,26 @@ test("comment cards show one two-line target label without duplicate copy", () =
   );
   assert.match(
     workbench,
-    /\{comment\.attachments\?\.length \? \([\s\S]*?\{comment\.attachments\.length\} 个附件/u,
+    /\{shownAttachments\?\.length \? \([\s\S]*?\{shownAttachments\.length\} 个附件/u,
   );
 });
 
-test("comment cards keep one visual boundary and reveal compact actions progressively", () => {
+test("comment cards keep one boundary and reserve stable action geometry", () => {
   const footerRule = styles.match(/\.comment-card-footer\s*\{(?<rule>[^}]*)\}/u)
     ?.groups?.rule;
   assert.ok(footerRule);
-  assert.match(footerRule, /height:\s*0/u);
+  assert.match(footerRule, /height:\s*30px/u);
   assert.match(footerRule, /min-height:\s*0/u);
-  assert.match(footerRule, /margin-top:\s*0/u);
+  assert.match(footerRule, /margin-top:\s*6px/u);
   assert.match(footerRule, /padding:\s*0/u);
   assert.match(footerRule, /border:\s*0/u);
   assert.match(footerRule, /opacity:\s*0/u);
   assert.match(footerRule, /pointer-events:\s*none/u);
+  assert.doesNotMatch(footerRule, /height 170ms|margin-top 170ms/u);
   assert.doesNotMatch(footerRule, /border-top/u);
   assert.match(
     styles,
-    /\.comment-card:hover \.comment-card-footer,[\s\S]*?\.comment-card:focus-within \.comment-card-footer,[\s\S]*?\.comment-card\[data-editing="true"\] \.comment-card-footer\s*\{[\s\S]*?height:\s*30px;[\s\S]*?margin-top:\s*6px;[\s\S]*?opacity:\s*1;[\s\S]*?pointer-events:\s*auto/u,
+    /\.comment-card:hover \.comment-card-footer,[\s\S]*?\.comment-card:focus-within \.comment-card-footer,[\s\S]*?\.comment-card\[data-editing="true"\] \.comment-card-footer\s*\{[\s\S]*?opacity:\s*1;[\s\S]*?pointer-events:\s*auto/u,
   );
   assert.match(
     styles,
@@ -1252,10 +1442,71 @@ test("comment cards keep one visual boundary and reveal compact actions progress
   )?.groups?.rule;
   assert.ok(singleBoundaryRule);
   assert.match(singleBoundaryRule, /outline:\s*0/u);
-  assert.match(singleBoundaryRule, /box-shadow:\s*0 15px 32px rgb\(45 42 104 \/ 7%\)/u);
+  assert.match(singleBoundaryRule, /border-color:\s*#8f8ae8/u);
+  assert.match(singleBoundaryRule, /inset 3px 0 0 #5e58d9/u);
+  assert.match(singleBoundaryRule, /0 15px 32px rgb\(45 42 104 \/ 11%\)/u);
   assert.match(singleBoundaryRule, /animation:\s*none/u);
-  assert.doesNotMatch(singleBoundaryRule, /0 0 0/u);
   assert.match(workbench, /data-editing=\{editing \? "true" : undefined\}/u);
+});
+
+test("saved-comment edits are staged, recoverable, and auto-cancel only while clean", () => {
+  assert.match(workbench, /type CommentEditSession = \{/u);
+  assert.match(workbench, /baselineText:\s*comment\.text/u);
+  assert.match(workbench, /baselineAttachments:\s*\[\.\.\.\(comment\.attachments \?\? \[\]\)\]/u);
+  assert.match(workbench, /commentEditSessionHasChanges\(session\)/u);
+  assert.match(workbench, /schemaVersion:\s*"3\.2\.0"/u);
+  assert.match(workbench, /commentEdit:\s*commentEdit/u);
+  assert.match(workbench, /aria-label="有一条未保存修改"/u);
+  assert.match(workbench, /id:\s*"resume-comment-edit"/u);
+  assert.match(
+    workbench,
+    /if \(!commentEditSessionHasChanges\(session\)\) \{[\s\S]*?cancelCommentEdit\(false\)/u,
+  );
+  assert.match(
+    workbench,
+    /draftAttachments:\s*\[\.\.\.current\.draftAttachments, attachment\]/u,
+  );
+  assert.match(
+    workbench,
+    /const wasSavedBeforeEdit = current\.baselineAttachments\.some\([\s\S]*?if \(!wasSavedBeforeEdit\) \{[\s\S]*?deleteAttachmentFile\(attachment\)/u,
+  );
+  assert.doesNotMatch(
+    workbench,
+    /comment\.commentId === target\.commentId[\s\S]{0,180}attachments:\s*\[\.\.\.\(comment\.attachments/u,
+  );
+});
+
+test("explicit comment navigation translates one stable queue and rail wheel drives the shared page", () => {
+  assert.match(
+    workbench,
+    /computeAlignedRailOffset\(\{[\s\S]*?minimumTop: commentRailMinimumTop/u,
+  );
+  assert.match(workbench, /routeCommentRailWheel\(\{/u);
+  assert.match(
+    workbench,
+    /railMinOffset:\s*commentRailMinimumOffsetRef\.current/u,
+  );
+  assert.match(
+    workbench,
+    /computeCommentRailMinimumOffset\(\{[\s\S]*?contentBottom:[\s\S]*?viewportBottom:/u,
+  );
+  assert.match(workbench, /rail\.addEventListener\("wheel", handleWheel, \{ passive: false \}\)/u);
+  assert.match(workbench, /viewportTop:\s*Math\.max\(0, commentViewport\.top - commentRailOffset\)/u);
+  assert.match(workbench, /"--comment-rail-offset":\s*`\$\{commentRailOffset\}px`/u);
+  assert.match(
+    styles,
+    /transform:\s*translate3d\(0, var\(--comment-rail-offset\), 0\)/u,
+  );
+  assert.match(styles, /\.comment-rail-header\s*\{[\s\S]*?z-index:\s*8/u);
+  assert.match(
+    styles,
+    /\.comments-panel\.comment-rail\s*\{[\s\S]*?height:\s*var\(--comment-rail-height\)[\s\S]*?overflow-y:\s*clip/u,
+  );
+  assert.doesNotMatch(workbench, /commentLayoutWasReadyRef|const becameReady/u);
+  assert.match(
+    workbench,
+    /const acceptPageViewContext[\s\S]*?const scrollTop = stage\?\.scrollTop[\s\S]*?currentStage\.scrollTo\(\{[\s\S]*?behavior: "auto"/u,
+  );
 });
 
 test("comment attachments support paste, upload, removal, preview, and AI handoff metadata", () => {

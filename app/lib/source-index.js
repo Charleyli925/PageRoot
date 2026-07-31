@@ -33,6 +33,26 @@ const STABLE_ATTRIBUTE_NAMES = new Set([
   "type",
   "value",
   "for",
+  // Source-authored geometry is the only stable identity available for many
+  // anonymous SVG shapes. Patch transactions refresh these values when the
+  // shape itself changes; unrelated edits can then rebind the same rect/path
+  // without guessing between every element of the same tag.
+  "x",
+  "y",
+  "width",
+  "height",
+  "rx",
+  "ry",
+  "cx",
+  "cy",
+  "r",
+  "x1",
+  "y1",
+  "x2",
+  "y2",
+  "points",
+  "viewbox",
+  "preserveaspectratio",
 ]);
 
 const HTML_WHITESPACE = /[\t\n\f\r ]/;

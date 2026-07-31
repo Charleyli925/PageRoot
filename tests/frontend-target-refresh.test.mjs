@@ -9,6 +9,10 @@ import {
   planSourcePatch,
   resolveTargetRef,
 } from "../app/lib/source-patch-core.js";
+import {
+  readCanvasArchitecture,
+  readWorkbenchArchitecture,
+} from "./source-architecture-fixture.mjs";
 
 function resolvedElement(index, targetRef) {
   const resolution = resolveTargetRef(index, targetRef);
@@ -33,10 +37,10 @@ test("a tracked comment stays on the same unstable element after text edit and i
     level: "subregion",
   });
   const plan = planSourcePatch({
-    type: "replace-text",
+    type: "replace-editable-island",
     targetRef: editTarget,
-    beforeText: "before",
-    nextText: "after",
+    beforeInnerHtml: "before",
+    nextInnerHtml: "after",
     expectedSourceSha256: index.sourceSha256,
   }, index);
   const applied = applyPatchPlan(plan, source, {
@@ -62,82 +66,6 @@ test("a tracked comment stays on the same unstable element after text edit and i
   assert.ok(restored);
   assert.equal(restored.targetId, commentTarget.targetId);
   assert.equal(resolvedElement(restoredResult.sourceIndex, restored).textContent, "before");
-});
-
-test("a comment on a split block never silently follows the wrong half", () => {
-  const source = "<!doctype html><html><body><main><p id=\"copy\">前段评论后段</p></main></body></html>";
-  const index = buildSourceIndex(source);
-  const paragraph = index.elements.find((element) => element.tagName === "p");
-  assert.ok(paragraph);
-  const editTarget = createTargetRef(index, paragraph, {
-    targetId: "target_shared",
-    level: "subregion",
-  });
-  const fullBlockComment = createTargetRef(index, paragraph, {
-    targetId: "target_shared",
-    level: "subregion",
-  });
-  const narrowedComment = (targetId, textQuote) => ({
-    ...createTargetRef(index, paragraph, {
-      targetId,
-      level: "subregion",
-    }),
-    textQuote,
-  });
-  const plan = planSourcePatch({
-    type: "split-text-block",
-    targetRef: editTarget,
-    splitOffset: 4,
-    expectedSourceSha256: index.sourceSha256,
-  }, index);
-  const applied = applyPatchPlan(plan, source, {
-    trackedTargetRefs: [
-      fullBlockComment,
-      narrowedComment("target_first", "前段"),
-      narrowedComment("target_second", "后段"),
-      narrowedComment("target_crossing", "评论后"),
-    ],
-  });
-  const mappings = applied.targetMappings;
-  const mapping = (targetId, tracked = true) => mappings.find((candidate) => (
-    candidate.targetId === targetId && candidate.tracked === tracked
-  ));
-
-  assert.equal(mapping("target_shared", false).resolution, "exact");
-  assert.equal(
-    applied.sourceIndex.byNodeId.get(mapping("target_shared", false).afterNodeId).textContent,
-    "前段评论",
-  );
-  assert.equal(mapping("target_shared").resolution, "ambiguous");
-  assert.equal(mapping("target_shared").afterNodeId, null);
-  assert.equal(mapping("target_shared").afterTargetRef.sourceAnchor, undefined);
-  assert.equal(
-    applied.sourceIndex.byNodeId.get(mapping("target_first").afterNodeId).textContent,
-    "前段评论",
-  );
-  assert.equal(
-    applied.sourceIndex.byNodeId.get(mapping("target_second").afterNodeId).textContent,
-    "后段",
-  );
-  assert.equal(mapping("target_crossing").resolution, "ambiguous");
-
-  const restoredResult = applyPatchPlan(applied.inversePlan, applied.html);
-  assert.equal(restoredResult.html, source);
-  for (const targetId of [
-    "target_shared",
-    "target_first",
-    "target_second",
-    "target_crossing",
-  ]) {
-    const restored = restoredResult.targetMappings.find((candidate) => (
-      candidate.targetId === targetId && candidate.tracked
-    ));
-    assert.equal(restored.resolution, "exact");
-    assert.equal(
-      restoredResult.sourceIndex.byNodeId.get(restored.afterNodeId).textContent,
-      "前段评论后段",
-    );
-  }
 });
 
 test("a tracked comment follows its exact sibling through reorder and inverse restoration", () => {
@@ -258,10 +186,7 @@ test("consecutive source-backed moves remain serializable through inverse round 
 });
 
 test("canvas keeps a logical reorder target through in-place refresh and reload fallback", async () => {
-  const canvas = await readFile(
-    new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url),
-    "utf8",
-  );
+  const canvas = await readCanvasArchitecture();
   const applyCommand = canvas.slice(
     canvas.indexOf("const applySourceCommand = useCallback"),
     canvas.indexOf("const resetSelection = useCallback", canvas.indexOf("const applySourceCommand = useCallback")),
@@ -300,11 +225,8 @@ test("canvas keeps a logical reorder target through in-place refresh and reload 
 
 test("canvas and workbench consume deterministic mappings before generic fallback", async () => {
   const [canvas, workbench] = await Promise.all([
-    readFile(
-      new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url),
-      "utf8",
-    ),
-    readFile(new URL("../app/workbench.tsx", import.meta.url), "utf8"),
+    readCanvasArchitecture(),
+    readWorkbenchArchitecture(),
   ]);
 
   for (const required of [
@@ -314,7 +236,7 @@ test("canvas and workbench consume deterministic mappings before generic fallbac
     "targetUpdates",
     "trackedTargetIds",
     "const ambientTargets = uniqueSelections([",
-    "{ includeOperationTargetIds: mapsOneTargetToMany }",
+    "const trackedTargetRefs = trackedSourceTargetRefs(",
     "deterministicOperationTargetUpdate",
     "const deterministicById = new Map(",
     "if (trackedTargetIds.has(target.id))",
@@ -331,13 +253,15 @@ test("canvas and workbench consume deterministic mappings before generic fallbac
       new RegExp(required.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
     );
   }
+  assert.doesNotMatch(
+    canvas,
+    /split-text-block|includeOperationTargetIds/u,
+    "retired one-to-many V1 target mapping must not remain in the V2 canvas",
+  );
 });
 
 test("legacy whole-page comments normalize before recovery and submission", async () => {
-  const workbench = await readFile(
-    new URL("../app/workbench.tsx", import.meta.url),
-    "utf8",
-  );
+  const workbench = await readWorkbenchArchitecture();
   const globalTargetPolicy = workbench.slice(
     workbench.indexOf("function isGlobalPageTarget"),
     workbench.indexOf("function displayVersionLabel"),
@@ -377,10 +301,7 @@ test("legacy whole-page comments normalize before recovery and submission", asyn
 
 test("style writes use source-safe values, canonical target identity, and only active cascade rules", async () => {
   const [canvas, directEditEvents] = await Promise.all([
-    readFile(
-      new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url),
-      "utf8",
-    ),
+    readCanvasArchitecture(),
     readFile(new URL("../app/lib/direct-edit-events.js", import.meta.url), "utf8"),
   ]);
 
@@ -446,10 +367,7 @@ test("style writes use source-safe values, canonical target identity, and only a
 });
 
 test("ordinary patches keep the mounted iframe while source-authority fences use a fresh frame", async () => {
-  const canvas = await readFile(
-    new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url),
-    "utf8",
-  );
+  const canvas = await readCanvasArchitecture();
   const stablePreview = canvas.slice(
     canvas.indexOf("const synchronizeStablePreview = useCallback"),
     canvas.indexOf("const applySourceCommand = useCallback", canvas.indexOf("const synchronizeStablePreview = useCallback")),
@@ -563,7 +481,7 @@ test("ordinary patches keep the mounted iframe while source-authority fences use
 
 test("canvas hides insertion and source-reversal affordances while retaining target recovery", async () => {
   const [canvas, css] = await Promise.all([
-    readFile(new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url), "utf8"),
+    readCanvasArchitecture(),
     readFile(new URL("../app/components/HtmlCanvasEditor.module.css", import.meta.url), "utf8"),
   ]);
 
@@ -591,7 +509,7 @@ test("canvas hides insertion and source-reversal affordances while retaining tar
 
 test("the canvas has no persistent global-comment button while global targets remain addressable", async () => {
   const [canvas, css] = await Promise.all([
-    readFile(new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url), "utf8"),
+    readCanvasArchitecture(),
     readFile(new URL("../app/components/HtmlCanvasEditor.module.css", import.meta.url), "utf8"),
   ]);
 
@@ -618,16 +536,26 @@ test("the canvas has no persistent global-comment button while global targets re
 });
 
 test("preview native links and forms cannot navigate the editing canvas on double click", async () => {
-  const canvas = await readFile(
-    new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url),
-    "utf8",
-  );
+  const canvas = await readCanvasArchitecture();
   const doubleClickHandler = canvas.slice(
     canvas.indexOf("const handleDoubleClick = (event: MouseEvent) =>"),
     canvas.indexOf("const handleKeyDown = (event: KeyboardEvent) =>"),
   );
   assert.match(canvas, /function findNativeActionTarget/u);
-  assert.match(canvas, /"a\[href\], area\[href\], button, form, input, select, textarea"/u);
+  for (const selector of [
+    "a[href]",
+    "area[href]",
+    "button",
+    "form",
+    "input",
+    "select",
+    "summary",
+    "textarea",
+    '[role="tab"]',
+    "[aria-expanded][aria-controls]",
+  ]) {
+    assert.match(canvas, new RegExp(JSON.stringify(selector).replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
+  }
   const lockedGuard = doubleClickHandler.indexOf("if (lockedRef.current) return;");
   const startEdit = doubleClickHandler.indexOf("const editingStarted = capturedRange");
   const acceptedEditGuard = doubleClickHandler.indexOf("if (editingStarted)", startEdit);
@@ -653,163 +581,8 @@ test("preview native links and forms cannot navigate the editing canvas on doubl
   assert.match(canvas, /documentNode\.addEventListener\("submit", handleSubmit, true\)/u);
 });
 
-test.skip("retired V1 native-controller source contract", async () => {
-  const [canvas, nativeController, capability, preflight, policy] = await Promise.all([
-    readFile(
-      new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url),
-      "utf8",
-    ),
-    readFile(
-      new URL("../app/components/NativeEditingController.ts", import.meta.url),
-      "utf8",
-    ),
-    readFile(
-      new URL("../app/lib/native-edit-capability.js", import.meta.url),
-      "utf8",
-    ),
-    readFile(
-      new URL("../app/components/native-edit-runtime-preflight.ts", import.meta.url),
-      "utf8",
-    ),
-    readFile(
-      new URL("../app/lib/native-edit-policy.js", import.meta.url),
-      "utf8",
-    ),
-  ]);
-
-  assert.match(
-    canvas,
-    /const session(?:: NativeEditingController)? = new NativeEditingController\(\{[\s\S]*?hostElement,[\s\S]*?baseline,/u,
-  );
-  const caretPointHelper = canvas.slice(
-    canvas.indexOf("function caretPointFromMouseEvent"),
-    canvas.indexOf("function wordBoundsAtOffset"),
-  );
-  assert.match(caretPointHelper, /event\.clientX[\s\S]*?event\.clientY/u);
-  assert.doesNotMatch(
-    caretPointHelper,
-    /event\.offset[XY]/u,
-    "nested inline clicks must use viewport coordinates shared with Range rects",
-  );
-  assert.match(
-    canvas,
-    /const startEditing = useCallback\(\([\s\S]*?caretPoint\?: TextCaretPoint,[\s\S]*?restoredSelection\?: NativeEditSelection,[\s\S]*?session\.focusAtPoint\(caretPoint\)/u,
-  );
-  assert.match(
-    canvas,
-    /const caretPoint = caretPointFromMouseEvent\(event\)[\s\S]*?nativeTextRangeMatchesActivation\(nativeRange, target, caretPoint\)[\s\S]*?const editingStarted = capturedRange \? startEditing\(\) : false/u,
-  );
-  assert.match(
-    canvas,
-    /caretPositionFromPoint[\s\S]*?Never turn that proximity[\s\S]*?nativeTextRangeContainsPoint\(range, point\)/u,
-    "an inert media surface or empty box must not fall back to nearby authored text",
-  );
-  assert.match(canvas, /inspectNativeEditRuntime\(/u);
-  assert.match(
-    preflight,
-    /function hasGeneratedPseudoContent[\s\S]*?querySelectorAll<HTMLElement>\("\*"\)[\s\S]*?hasContent\(candidate, "::before"\)[\s\S]*?hasContent\(candidate, "::after"\)/u,
-    "generated content on a descendant must block the whole native text island",
-  );
-  assert.match(
-    preflight,
-    /hasDisplayContents[\s\S]*?classifyNativeEventDelivery\([\s\S]*?observerReady:/u,
-    "display:contents must use the explicit native or observer-guarded lane",
-  );
-  assert.match(canvas, /classifyNativeEditCapability\(/u);
-  assert.match(canvas, /isNativeEditableCapability\(capability\)/u);
-  assert.match(canvas, /reportBlockedEdit\(new Error\(capability\.userMessage\)\)/u);
-  assert.match(canvas, /nativeLogicalText\(hostElement\) !== projection\.text/u);
-  assert.match(canvas, /可选中文字后添加评论/u);
-  assert.match(canvas, /这处内容暂时不能直接编辑/u);
-  assert.match(canvas, /页面内容没有改变。你仍可以选择文字，或添加评论说明要怎么改。/u);
-  assert.match(capability, /EDITABLE: "native-editable"/u);
-  assert.match(capability, /SELECT_COMMENT: "select-comment"/u);
-  assert.match(capability, /COMMENT_ONLY: "comment-only"/u);
-  assert.match(capability, /nativeEventDeliveryProven/u);
-  assert.match(capability, /nativeEventDeliveryGuarded/u);
-
-  const nativeBlur = canvas.slice(
-    canvas.indexOf("onBlur: () => {"),
-    canvas.indexOf("onEscape:", canvas.indexOf("onBlur: () => {")),
-  );
-  assert.match(
-    nativeBlur,
-    /const blurredLease = \{ \.\.\.activeAtBlur\.lease \};[\s\S]*?nativeEditLeasesMatch\(currentNativeEditLeaseRef\.current, blurredLease\)/u,
-    "a deferred blur must stay bound to the lease that scheduled it",
-  );
-  assert.match(
-    nativeBlur,
-    /retainedFocus\?\.session === session[\s\S]*?nativeEditLeasesMatch\(retainedFocus\.lease, blurredLease\)[\s\S]*?retainNativeEditFocusRef\.current = null;[\s\S]*?return;/u,
-    "toolbar focus must preserve only its exact native editing session",
-  );
-  assert.doesNotMatch(
-    nativeBlur,
-    /session\.focusSelection\(\)/u,
-    "number and color inputs must retain focus instead of being stolen back by the iframe",
-  );
-
-  assert.match(nativeController, /applyNativeEditSessionAttributes\(this\.hostElement/u);
-  assert.match(policy, /element\.setAttribute\("contenteditable", hostMode\)/u);
-  assert.match(policy, /element\.setAttribute\("role", "textbox"\)/u);
-  assert.match(nativeController, /this\.hostElement\.addEventListener\("beforeinput"/u);
-  assert.match(nativeController, /documentNode\.addEventListener\("selectionchange"/u);
-  assert.match(nativeController, /compositionstart/u);
-  assert.match(nativeController, /compositionend/u);
-  assert.match(
-    nativeController,
-    /export type NativeEditLeaseStamp = \{[\s\S]*?sessionId: string;[\s\S]*?domGeneration: number;[\s\S]*?sourceRevision: string;[\s\S]*?hostId: string;/u,
-  );
-  assert.match(
-    canvas,
-    /const lease: ActiveNativeEdit\["lease"\] = \{[\s\S]*?sessionId:[\s\S]*?domGeneration:[\s\S]*?sourceRevision:[\s\S]*?hostId:/u,
-  );
-  assert.match(
-    canvas,
-    /currentNativeEditLeaseRef\.current = null;[\s\S]*?activeNativeEditRef\.current = null;[\s\S]*?active\.session\.fenceDispose\(\)/u,
-    "a source-authority fence must invalidate ownership before retiring the old controller",
-  );
-  assert.match(
-    nativeController,
-    /observer\.takeRecords\(\);[\s\S]*?observer\.disconnect\(\);[\s\S]*?observer\.takeRecords\(\)/u,
-    "fencing must drain and disconnect MutationObserver records",
-  );
-  assert.match(
-    nativeController,
-    /this\.disposed = true;[\s\S]*?this\.detachSessionInfrastructure\(\);[\s\S]*?this\.cancelAllScheduledWork\(\)/u,
-    "late native work must see a retired lease before listener and timer cleanup",
-  );
-  assert.match(canvas, /nativeSessionNeedsCanonicalFenceRef\.current = true/u);
-  assert.match(canvas, /nativeSessionNeedsCanonicalFenceRef\.current = false/u);
-  assert.match(
-    canvas,
-    /const needsCanonicalFence = Boolean\(bookmark\)[\s\S]*?\|\| nativeSessionNeedsCanonicalFenceRef\.current/u,
-    "save and export fences must replace a retired editable Document after the controller has blurred",
-  );
-  assert.match(nativeController, /focusAtPoint\(point\?: \{ clientX: number; clientY: number \}\)/u);
-  assert.match(nativeController, /documentNode\.caretPositionFromPoint/u);
-  assert.match(nativeController, /documentNode\.caretRangeFromPoint/u);
-  assert.match(
-    nativeController,
-    /offsetNode === this\.hostElement \|\| this\.hostElement\.contains\(offsetNode\)/u,
-  );
-  assert.match(nativeController, /restoreNativeEditSessionAttributes\(/u);
-  assert.doesNotMatch(
-    `${canvas}\n${nativeController}`,
-    /InlineEditSession|LexicalEditor|createEditor\(|registerPlainText|pageroot-text-editor|pageroot-text-ghost/u,
-  );
-  assert.doesNotMatch(nativeController, /documentNode\.body\.appendChild|surfaceElement/u);
-  assert.doesNotMatch(
-    canvas,
-    /liveTarget\.textContent\s*=/u,
-    "a preview refresh must never flatten semantic inline children",
-  );
-});
-
 test("spacing menu is controlled and closes for outside toolbar and canvas interactions", async () => {
-  const canvas = await readFile(
-    new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url),
-    "utf8",
-  );
+  const canvas = await readCanvasArchitecture();
   assert.match(canvas, /const spacingMenuRef = useRef<HTMLDetailsElement>/u);
   assert.match(canvas, /const \[spacingMenuOpen, setSpacingMenuOpen\] = useState\(false\)/u);
   assert.match(canvas, /documentNode\.addEventListener\("pointerdown", closeOutsideSpacingMenu, true\)/u);
@@ -819,10 +592,7 @@ test("spacing menu is controlled and closes for outside toolbar and canvas inter
 });
 
 test("canvas root whitespace clears selection instead of selecting the document body", async () => {
-  const canvas = await readFile(
-    new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url),
-    "utf8",
-  );
+  const canvas = await readCanvasArchitecture();
   const selectableHelper = canvas.slice(
     canvas.indexOf("function findSelectableElement"),
     canvas.indexOf("const HtmlCanvasEditor =", canvas.indexOf("function findSelectableElement")),
@@ -842,178 +612,8 @@ test("canvas root whitespace clears selection instead of selecting the document 
   );
 });
 
-test.skip("retired V1 range-tracker source contract", async () => {
-  const [
-    canvas,
-    nativeController,
-    sourceMap,
-    sourcePatch,
-    workbench,
-    preflight,
-    previewSandbox,
-  ] = await Promise.all([
-    readFile(
-      new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url),
-      "utf8",
-    ),
-    readFile(
-      new URL("../app/components/NativeEditingController.ts", import.meta.url),
-      "utf8",
-    ),
-    readFile(
-      new URL("../app/lib/source-text-map.js", import.meta.url),
-      "utf8",
-    ),
-    readFile(
-      new URL("../app/lib/source-patch-engine.js", import.meta.url),
-      "utf8",
-    ),
-    readFile(
-      new URL("../app/workbench.tsx", import.meta.url),
-      "utf8",
-    ),
-    readFile(
-      new URL("../app/components/native-edit-runtime-preflight.ts", import.meta.url),
-      "utf8",
-    ),
-    readFile(
-      new URL("../app/components/html-preview-sandbox.js", import.meta.url),
-      "utf8",
-    ),
-  ]);
-
-  // Native Selection is the editing surface; persisted text still goes through
-  // the source map and SourcePatchEngine rather than DOM serialization.
-  const doubleClickHandler = canvas.slice(
-    canvas.indexOf("const handleDoubleClick = (event: MouseEvent) =>"),
-    canvas.indexOf("const handleKeyDown = (event: KeyboardEvent) =>"),
-  );
-  assert.match(canvas, /function activeTextRangeFromDocument/u);
-  assert.match(canvas, /sourceTextNodeForDomText/u);
-  assert.match(canvas, /range\.intersectsNode\(textNode\)/u);
-  assert.match(canvas, /preserveTextSelection: true/u);
-  assert.match(canvas, /documentNode\.addEventListener\("mouseup", handleMouseUp, true\)/u);
-  assert.match(canvas, /if \(captureTextRange\(\)\)[\s\S]*?return;/u);
-  const cloneRange = doubleClickHandler.indexOf(".cloneRange()");
-  const selectWord = doubleClickHandler.indexOf("nativeRange = selectWordAtPoint(");
-  const restoreNativeRange = doubleClickHandler.indexOf("selection?.addRange(nativeRange)");
-  const captureRange = doubleClickHandler.indexOf("const capturedRange = nativeRange ? captureTextRange() : null;");
-  const preserveSelection = doubleClickHandler.indexOf("preserveTextSelection: Boolean(nativeRange)");
-  const startEditingAtRange = doubleClickHandler.indexOf(
-    "const editingStarted = capturedRange ? startEditing() : false;",
-  );
-  assert.ok(cloneRange >= 0, "Chromium's double-click range must be cloned before DOM ownership changes");
-  assert.ok(selectWord > cloneRange, "the word fallback must only run when Chromium supplied no range");
-  assert.ok(restoreNativeRange > selectWord && captureRange > restoreNativeRange);
-  assert.ok(preserveSelection > captureRange && startEditingAtRange > preserveSelection);
-  assert.match(canvas, /function wordBoundsAtOffset[\s\S]*?new Intl\.Segmenter\([^)]*\{ granularity: "word" \}/u);
-  assert.match(canvas, /function selectWordAtPoint[\s\S]*?selection\?\.addRange\(range\)/u);
-  assert.match(
-    doubleClickHandler,
-    /!editingStarted[\s\S]*?restoredSelection\?\.addRange\(nativeRange\);[\s\S]*?captureTextRange\(\)/u,
-    "a rejected direct edit must restore the user's native word selection",
-  );
-  assert.match(
-    doubleClickHandler,
-    /!nativeTextRangeMatchesActivation\(nativeRange, target, caretPoint\)[\s\S]*?nativeSelection\?\.removeAllRanges\(\)/u,
-    "an invalid browser proximity range must be cleared before source capture",
-  );
-  assert.match(canvas, /if \(initialSelection\) session\.focusSelection\(\)/u);
-  assert.match(canvas, /else if \(caretPoint\) session\.focusAtPoint\(caretPoint\)/u);
-  assert.match(canvas, /type: "set-text-range-style"/u);
-  assert.match(canvas, /segments: activeRange\.segments/u);
-  assert.match(canvas, /TEXT_RANGE_EDITABLE_PROPERTIES/u);
-  assert.match(canvas, /plan\.type === "set-text-range-style"/u);
-  assert.match(canvas, /replaceChildren\([\s\S]*?documentNode\.importNode/u);
-  assert.match(canvas, /data-text-range=\{hasTextRange \? "true"/u);
-
-  assert.match(canvas, /classifyNativeEditCapability/u);
-  assert.match(canvas, /buildSourceTextMap\(/u);
-  assert.match(preflight, /function buildRuntimeDomMap\(/u);
-  assert.match(canvas, /const captured = active\.session\.captureCheckpoint\(trigger\)/u);
-  assert.match(
-    canvas,
-    /validateFormatSkeletonTransaction\([\s\S]*?replacements: replacements\.map\([\s\S]*?startOffset: replacement\.startOffset,[\s\S]*?endOffset: replacement\.endOffset/u,
-  );
-  assert.doesNotMatch(
-    canvas,
-    /textRangeToSourceEdit\(/u,
-    "native DOM commits must use source-owned FormatSkeleton descriptors",
-  );
-  assert.match(canvas, /type: "replace-text-range"/u);
-  assert.match(canvas, /const mappedReplacements = replacements\.map/u);
-  assert.match(canvas, /const descriptorsByInput = new Map/u);
-  assert.match(canvas, /replacements: mappedReplacements\.map[\s\S]*?deleteSegments: replacement\.deleteSegments[\s\S]*?insertAt: replacement\.insertAt/u);
-  assert.match(canvas, /validateResult: \(candidate\)[\s\S]*?candidate\.refreshedTargetRefs[\s\S]*?projection\.text !== nextText/u);
-  assert.match(canvas, /plan\.type === "replace-text-range"\) return false/u);
-  assert.match(canvas, /NATIVE_EDIT_CHECKPOINT_DELAY_MS/u);
-  assert.match(canvas, /state\.dirty && !state\.composing/u);
-  assert.match(canvas, /patch\.kind === "text-range-style-open"/u);
-  assert.match(
-    nativeController,
-    /if \(this\.composing \|\| this\.draftCompositionUnsettled\) \{[\s\S]*?reason: "composing"/u,
-  );
-  assert.match(nativeController, /NativeTextChangeTracker/u);
-  assert.match(sourceMap, /export function textRangeToSourceEdit/u);
-  assert.match(sourceMap, /export function textRangeToSourceSegments/u);
-
-  // The patch protocol is plural even for one minimal diff so it can safely
-  // map selections spanning more than one source text node.
-  assert.match(sourcePatch, /Object\.hasOwn\(command, "replacements"\)/u);
-  assert.match(sourcePatch, /inputs = command\.replacements/u);
-  assert.match(sourcePatch, /Text replacements contain overlapping deletion ranges/u);
-  assert.match(sourcePatch, /metadataReplacements = replacements\.map/u);
-  assert.match(
-    sourcePatch,
-    /const TEXT_RANGE_LAYOUT_GUARD = "all: unset; display: inline !important"/u,
-  );
-  assert.doesNotMatch(
-    sourcePatch,
-    /TEXT_RANGE_LAYOUT_GUARD\s*=\s*["'][^"']*display\s*:\s*contents/iu,
-  );
-  assert.match(
-    canvas,
-    /hasFlexOrGridTextParent[\s\S]*?\["flex", "inline-flex", "grid", "inline-grid"\][\s\S]*?createsRangeWrapper[\s\S]*?hasFlexOrGridTextParent/u,
-  );
-  assert.match(
-    canvas,
-    /createsRangeWrapper && property === "backgroundColor"/u,
-  );
-
-  assert.doesNotMatch(canvas, /className=\{styles\.textRangeEditor\}|commitTextRangeEditing|directEditableTextRangeForElement/u);
-  assert.doesNotMatch(
-    `${canvas}\n${nativeController}`,
-    /InlineEditSession|LexicalEditor|registerPlainText|pageroot-text-editor|pageroot-text-ghost/u,
-  );
-  assert.match(nativeController, /applyNativeEditSessionAttributes\(this\.hostElement/u);
-  assert.doesNotMatch(canvas, /data-pageroot-text-flow-item/u);
-  assert.match(canvas, /MEDIA_SURFACE_SELECTOR/u);
-  assert.match(canvas, /element\.querySelector\(MEDIA_SURFACE_SELECTOR\)/u);
-  assert.match(canvas, /inferSelectionLevel\(candidate\) === "module"/u);
-  assert.match(canvas, /pointer-events: none !important/u);
-  assert.match(canvas, /noscript \{[\s\S]*?display: none !important/u);
-  assert.match(canvas, /prepareVerifiedFrameDocument[\s\S]*?editorStyles: EDITOR_DOCUMENT_STYLES/u);
-  assert.match(
-    previewSandbox,
-    /prepareVerifiedFrameDocument[\s\S]*?editorStyle\.textContent = String\(editorStyles \|\| ""\)/u,
-  );
-  assert.match(canvas, /pendingToolbarVisibleRef\.current = toolbarVisibleRef\.current/u);
-  assert.match(canvas, /showToolbar: pendingToolbarVisible/u);
-  assert.match(canvas, /rangeComputedStyles\.every\(styleIsBold\)/u);
-  assert.match(canvas, /trackedTargetsRef\.current/u);
-  assert.match(canvas, /preservesTextRange/u);
-  assert.match(workbench, /trackedTargets=\{trackedAuditTargets\}/u);
-  assert.match(
-    workbench,
-    /changeEventsRef\.current\.map\(\(event\) => event\.target\)/u,
-  );
-});
-
 test("handoff commits a pending source edit before recapturing and freezing comment targets", async () => {
-  const workbench = await readFile(
-    new URL("../app/workbench.tsx", import.meta.url),
-    "utf8",
-  );
+  const workbench = await readWorkbenchArchitecture();
   const handoffStart = workbench.indexOf("const generateRequest = useCallback");
   const commit = workbench.indexOf(
     "const committed = editorRef.current?.fencePendingEdit({",
@@ -1083,7 +683,7 @@ test("handoff commits a pending source edit before recapturing and freezing comm
   assert.ok(requestDispatch > drain);
   assert.match(
     workbench.slice(drain, requestDispatch),
-    /!drained\.ok[\s\S]*?lastPersistedRevisionRef\.current !== freezeCutoffRevision[\s\S]*?editRevisionRef\.current !== freezeCutoffRevision[\s\S]*?persistedSourceSha256 !== frozen\.sourceSha256/u,
+    /!drained\.ok[\s\S]*?documentSessionRef\.current\.lastPersistedRevision !== freezeCutoffRevision[\s\S]*?documentSessionRef\.current\.editRevision !== freezeCutoffRevision[\s\S]*?persistedSourceSha256 !== frozen\.sourceSha256/u,
     "handoff must prove that the exact frozen revision and hash were persisted before dispatch",
   );
 });

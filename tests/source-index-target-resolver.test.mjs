@@ -208,6 +208,34 @@ test("TargetResolver returns exact, rebound after reorder/class change, ambiguou
   assert.equal(resolveTargetRef(buildSourceIndex(removed), alphaRef).resolution, "orphaned");
 });
 
+test("anonymous SVG shapes rebind through authored geometry without weakening true ambiguity", () => {
+  const base = `<svg viewBox="0 0 100 40"><rect x="4" y="4" width="24" height="12"></rect><rect x="36" y="4" width="24" height="12"></rect></svg>`;
+  const baseIndex = buildSourceIndex(base);
+  const firstRect = baseIndex.elements.find(
+    (element) => element.tagName === "rect" && element.stableAttributes.x === "4",
+  );
+  assert.ok(firstRect);
+  const targetRef = createTargetRef(baseIndex, firstRect.nodeId);
+  const shifted = `<!-- unrelated source edit -->${base}`;
+  const rebound = resolveTargetRef(buildSourceIndex(shifted), targetRef);
+  assert.equal(rebound.resolution, "rebound");
+  assert.equal(rebound.target?.stableAttributes.x, "4");
+  assert.equal(rebound.target?.stableAttributes.width, "24");
+
+  const trulyRepeated = `<svg><rect x="4" y="4" width="24" height="12"></rect><rect x="4" y="4" width="24" height="12"></rect></svg>`;
+  const repeatedIndex = buildSourceIndex(trulyRepeated);
+  const repeatedRect = repeatedIndex.elements.find(
+    (element) => element.tagName === "rect",
+  );
+  const repeatedRef = createTargetRef(repeatedIndex, repeatedRect.nodeId);
+  const ambiguous = resolveTargetRef(
+    buildSourceIndex(`<!-- shifted -->${trulyRepeated}`),
+    repeatedRef,
+  );
+  assert.equal(ambiguous.resolution, "ambiguous");
+  assert.equal(ambiguous.candidates.length, 2);
+});
+
 test("inline formatting wrappers preserve complete element TargetRef text identity", () => {
   const original = `<section><p>打开原生对话框</p><p>其他文字</p></section>`;
   const originalIndex = buildSourceIndex(original);

@@ -14,12 +14,18 @@ Thank you for helping improve PageRoot.
 ```bash
 git switch main
 git pull --ff-only
-git switch -c fix/short-description
+git worktree add -b fix/short-description ../.codex-worktrees/fix/short-description origin/main
 npm ci
 npx playwright install chromium
 ```
 
-Repository agents may use `npm run task:start -- fix/short-description` for the first three Git commands. Run `npm run gate:edit` while working and `npm run task:finish` before committing. Update tests and the routed documentation in `AGENTS.md` with behavioral, contract or workflow changes. Use a clear imperative commit message such as `fix: preserve selection across source refresh`.
+Repository agents may use `npm run task:start -- fix/short-description` for the
+first three Git commands. It keeps the primary checkout on clean `main` and
+prints the isolated task path. Run `npm run gate:edit` while working and
+`npm run task:finish` before committing. Update tests and the routed
+documentation in `AGENTS.md` with behavioral, contract or workflow changes. Use
+a clear imperative commit message such as `fix: preserve selection across
+source refresh`.
 
 State, persistence and lifecycle changes must follow
 `docs/ARCHITECTURE_CONTRACT.md`, `docs/STATE_OWNERSHIP.md` and
@@ -28,6 +34,12 @@ mutation outcomes, reuse the shared drain boundaries and remove any workaround
 the new invariant supersedes. `npm run architecture:check` is mandatory.
 
 Push the branch and open a Pull Request. The PR must explain the problem, the chosen boundary, verification performed and any user-visible impact. Maintainers may request a smaller change when a PR mixes unrelated concerns.
+
+GitHub removes the remote task branch after squash merge. Maintainers use the
+read-only `npm run task:audit` report and an explicit
+`npm run task:retire -- <branch> --apply` to remove the corresponding local
+worktree and branch. Dirty, local-only, locked or open-PR work is never retired
+implicitly.
 
 ## Pull Request requirements
 

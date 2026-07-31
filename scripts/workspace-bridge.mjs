@@ -71,6 +71,20 @@ import {
   activeDraftSnapshot,
   applyDraftCommand,
 } from "./draft-service.mjs";
+import {
+  applySourceHistoryCommand,
+  normalizeSourceHistoryCandidate,
+  prepareAutosaveSourceHistory,
+  readSourceHistory,
+  sourceHistoryResponse,
+  writeSourceHistory,
+} from "./source-history-service.mjs";
+import {
+  classifySourceObservation,
+  ProjectContextPolicyError,
+  registeredCommandIdentity,
+  registeredProjectRecord,
+} from "./project-context-service.mjs";
 
 const HOST = "127.0.0.1";
 const DEFAULT_PORT = 4317;
@@ -1218,6 +1232,34 @@ function projectRootFromRegistryRecord(projectId, record) {
   );
 }
 
+function projectContextHttpError(error) {
+  if (!(error instanceof ProjectContextPolicyError)) return error;
+  return new HttpError(
+    error.status,
+    error.code,
+    error.message,
+    error.details,
+  );
+}
+
+async function readRegisteredObservationState(registry, record) {
+  const projectRoot = projectRootFromRegistryRecord(
+    record.projectId,
+    registry.projects[record.projectId],
+  );
+  const [project, runtime] = await Promise.all([
+    readLifecycleJson(
+      path.join(projectRoot, "project.json"),
+      "project.json",
+    ),
+    readLifecycleJson(
+      path.join(projectRoot, "runtime-state.json"),
+      "runtime-state.json",
+    ),
+  ]);
+  return { project, runtime };
+}
+
 async function availableProjectStorageDirectory({
   displayName,
   createdAt,
@@ -1743,6 +1785,7 @@ async function createInitialProject(
     "transactions",
     "recovery",
     "draft",
+    "history",
     "working",
   ]) {
     await ensureDirectory(path.join(projectRoot, directory));
@@ -2031,24 +2074,23 @@ async function loadContextBySource(
       let physicalReplacement = false;
       if (record && isSourceFileIdentity(record.fileIdentity)) {
         if (!sameSourceFileIdentity(record.fileIdentity, observedFileIdentity)) {
-          const project = await readLifecycleJson(
-            path.join(
-              projectRootFromRegistryRecord(
-                record.projectId,
-                registry.projects[record.projectId],
-              ),
-              "project.json",
-            ),
-            "project.json",
+          const { project, runtime } = await readRegisteredObservationState(
+            registry,
+            record,
           );
           // Repair the narrow crash window after a PageRoot-owned atomic
-          // replacement reached disk/project.json but before the registry
-          // sidecar was refreshed. Legacy stamped files receive the same
+          // replacement reached disk but before project.json and the registry
+          // sidecar were refreshed. pendingWrite is the durable proof for the
+          // earlier half of that window. Legacy stamped files receive the same
           // one-time compatibility repair; neither path writes source bytes.
-          if (
-            source.sha256 === project.currentHtmlSha256
-            || embeddedDocumentId === record.documentId
-          ) {
+          const observation = classifySourceObservation({
+            sourceSha256: source.sha256,
+            embeddedDocumentId,
+            registeredDocumentId: record.documentId,
+            projectCurrentHtmlSha256: project.currentHtmlSha256,
+            pendingTargetHtmlSha256: runtime.pendingWrite?.targetHtmlSha256,
+          });
+          if (observation !== "external-replacement") {
             registry.sources[fingerprint] = {
               ...record,
               ...sourceIdentityState(source),
@@ -2073,20 +2115,18 @@ async function loadContextBySource(
           }
         }
       } else if (record) {
-        const project = await readLifecycleJson(
-          path.join(
-            projectRootFromRegistryRecord(
-              record.projectId,
-              registry.projects[record.projectId],
-            ),
-            "project.json",
-          ),
-          "project.json",
+        const { project, runtime } = await readRegisteredObservationState(
+          registry,
+          record,
         );
-        if (
-          embeddedDocumentId === record.documentId
-          || source.sha256 === project.currentHtmlSha256
-        ) {
+        const observation = classifySourceObservation({
+          sourceSha256: source.sha256,
+          embeddedDocumentId,
+          registeredDocumentId: record.documentId,
+          projectCurrentHtmlSha256: project.currentHtmlSha256,
+          pendingTargetHtmlSha256: runtime.pendingWrite?.targetHtmlSha256,
+        });
+        if (observation !== "external-replacement") {
           registry.sources[fingerprint] = {
             ...record,
             ...sourceIdentityState(source),
@@ -2227,6 +2267,169 @@ async function loadContextBySource(
     projectRoot: projectRootFromRegistryRecord(
       record.projectId,
       registeredProjectRecord,
+    ),
+  };
+}
+
+async function loadMutationContext(body) {
+  let identity;
+  try {
+    identity = registeredCommandIdentity(body);
+  } catch (error) {
+    throw projectContextHttpError(error);
+  }
+
+  // Backward-compatible tests and older local clients may omit both IDs. They
+  // can address an existing registration by path, but only /project/ensure is
+  // allowed to create one.
+  if (!identity) return loadContextBySource(body.sourcePath, false);
+
+  await initializeRoot();
+  const requestedSourcePath = await canonicalExistingSourcePath(body.sourcePath);
+  if (!(await exists(WORKSPACE_ROOT))) {
+    throw new HttpError(
+      404,
+      "REGISTERED_PROJECT_NOT_FOUND",
+      "The registered project is no longer available.",
+    );
+  }
+
+  let contextRecord;
+  await registryQueue.run(() =>
+    withProjectFileLock(WORKSPACE_ROOT, async () => {
+      const registry = await readRegistry();
+      let selected;
+      try {
+        selected = registeredProjectRecord(registry, identity);
+      } catch (error) {
+        throw projectContextHttpError(error);
+      }
+      const registeredSourcePath = await canonicalExistingSourcePath(
+        selected.project.sourcePath ?? selected.document.sourcePath,
+      );
+      const requestedRecord = registry.sources[
+        sourceFingerprint(requestedSourcePath)
+      ];
+      const requestedAliasMatches = Boolean(
+        requestedRecord
+        && requestedRecord.projectId === identity.projectId
+        && requestedRecord.documentId === identity.documentId
+      );
+      if (
+        registeredSourcePath !== requestedSourcePath
+        && !requestedAliasMatches
+      ) {
+        throw new HttpError(
+          409,
+          "PROJECT_CONTEXT_PATH_MISMATCH",
+          "The command source path does not belong to its registered project.",
+        );
+      }
+      const source = await readSourceFile(registeredSourcePath);
+      const observedFileIdentity = sourceFileIdentity(source);
+      const registeredSourceRecord = registry.sources[
+        sourceFingerprint(registeredSourcePath)
+      ];
+      const registryObservationMatches = Boolean(
+        registeredSourceRecord
+        && registeredSourceRecord.projectId === identity.projectId
+        && registeredSourceRecord.documentId === identity.documentId
+        && [registeredSourceRecord, selected.project, selected.document]
+          .every((record) => (
+            sameSourceFileIdentity(record.fileIdentity, observedFileIdentity)
+            && record.confirmedSourceSha256 === source.sha256
+          )),
+      );
+      if (!registryObservationMatches) {
+        const { project, runtime } = await readRegisteredObservationState(
+          registry,
+          { projectId: identity.projectId },
+        );
+        const observation = classifySourceObservation({
+          sourceSha256: source.sha256,
+          embeddedDocumentId: documentIdFromHtml(source.html),
+          registeredDocumentId: identity.documentId,
+          projectCurrentHtmlSha256: project.currentHtmlSha256,
+          pendingTargetHtmlSha256: runtime.pendingWrite?.targetHtmlSha256,
+        });
+        const activeConflictOwnsSource = Boolean(
+          runtime.lifecycleState === "awaiting-conflict-resolution"
+          && ["autosave-source", "ai-source"].includes(runtime.conflict?.type)
+          && runtime.conflict.externalSourceSha256 === source.sha256,
+        );
+        const readyTransactionId =
+          runtime.lifecycleState === "ready-to-open"
+          && runtime.activeRun?.requestId
+          && runtime.activeRun?.attemptId
+            ? `txn_${runtime.activeRun.requestId}_${runtime.activeRun.attemptId}`
+            : null;
+        let readyTransactionOwnsSource = false;
+        if (
+          observation === "external-replacement"
+          && !activeConflictOwnsSource
+          && readyTransactionId
+        ) {
+          const projectRoot = projectRootFromRegistryRecord(
+            identity.projectId,
+            selected.project,
+          );
+          const transaction = await readAuxiliaryJson(
+            path.join(
+              projectRoot,
+              "transactions",
+              readyTransactionId,
+              "transaction.json",
+            ),
+            "transaction.json",
+          );
+          readyTransactionOwnsSource = Boolean(
+            transaction.state === "ready-to-open"
+            && transaction.projectId === identity.projectId
+            && transaction.documentId === identity.documentId
+            && transaction.expectedSourceSha256 === source.sha256,
+          );
+        }
+        const durableExternalObservation =
+          activeConflictOwnsSource || readyTransactionOwnsSource;
+        if (
+          observation === "external-replacement"
+          && !durableExternalObservation
+        ) {
+          throw new HttpError(
+            409,
+            "PROJECT_CONTEXT_SOURCE_REPLACED",
+            "The registered project HTML was replaced by an unrelated file.",
+          );
+        }
+        if (!durableExternalObservation) {
+          assignCurrentSourceIdentity(registry, {
+            sourcePath: registeredSourcePath,
+            projectId: identity.projectId,
+            documentId: identity.documentId,
+            source,
+          });
+          await writeRegistry(registry);
+        }
+      }
+      contextRecord = {
+        project: selected.project,
+        sourcePath: registeredSourcePath,
+      };
+    }),
+  );
+
+  return {
+    workspaceRoot: WORKSPACE_ROOT,
+    projectId: identity.projectId,
+    documentId: identity.documentId,
+    sourcePath: contextRecord.sourcePath,
+    requestedSourcePath,
+    displayName: contextRecord.project.displayName,
+    createdAt: contextRecord.project.createdAt,
+    storageDirectoryName: contextRecord.project.storageDirectoryName,
+    projectRoot: projectRootFromRegistryRecord(
+      identity.projectId,
+      contextRecord.project,
     ),
   };
 }
@@ -2478,7 +2681,10 @@ async function readRuntime(context, { hydrateArtifacts = true } = {}) {
 }
 
 async function recoverPendingWriteRaw(context) {
-  const runtime = await readRuntime(context);
+  // Pending-write recovery needs only the durable runtime envelope. Display
+  // artifacts such as frozen annotations may be damaged independently and
+  // must not prevent identity reconciliation or cancellation.
+  const runtime = await readRuntime(context, { hydrateArtifacts: false });
   const pending = runtime.pendingWrite;
   if (!pending) return null;
   const revision = pending.revision;
@@ -2488,8 +2694,18 @@ async function recoverPendingWriteRaw(context) {
   const recoveryPath = recoveryRelativePath
     ? path.join(context.projectRoot, ...recoveryRelativePath.split("/"))
     : null;
+  const historyRecoveryRelativePath =
+    pending.recoverySourceHistoryRelativePath;
+  const historyRecoveryPath = historyRecoveryRelativePath
+    ? path.join(
+        context.projectRoot,
+        ...historyRecoveryRelativePath.split("/"),
+      )
+    : null;
   const source = await readSourceFile(context.sourcePath);
   let candidateBuffer = null;
+  let historyCandidate = null;
+  let historyRecoveryFailure = null;
   if (recoveryPath && await exists(recoveryPath)) {
     candidateBuffer = await readFile(recoveryPath);
     if (sha256(candidateBuffer) !== targetSha256) {
@@ -2510,6 +2726,76 @@ async function recoverPendingWriteRaw(context) {
       await writeRuntime(context.projectRoot, runtime);
       return { status: "rolled-back", reason: "candidate-hash-mismatch" };
     }
+  }
+  if (historyRecoveryPath) {
+    const expectedHistorySha256 = pending.recoverySourceHistorySha256;
+    if (!await exists(historyRecoveryPath)) {
+      historyRecoveryFailure = {
+        code: "RECOVERY_SOURCE_HISTORY_MISSING",
+        message: "The durable source history recovery candidate is missing.",
+        reason: "history-candidate-missing",
+      };
+    } else {
+      const historyBuffer = await readFile(historyRecoveryPath);
+      if (sha256(historyBuffer) !== expectedHistorySha256) {
+        historyRecoveryFailure = {
+          code: "RECOVERY_SOURCE_HISTORY_HASH_MISMATCH",
+          message:
+            "The durable source history recovery candidate was corrupted.",
+          reason: "history-candidate-hash-mismatch",
+        };
+      } else {
+        try {
+          historyCandidate = normalizeSourceHistoryCandidate(
+            JSON.parse(historyBuffer.toString("utf8")),
+            context,
+            targetSha256,
+          );
+        } catch {
+          historyRecoveryFailure = {
+            code: "RECOVERY_SOURCE_HISTORY_INVALID",
+            message:
+              "The durable source history recovery candidate is invalid.",
+            reason: "history-candidate-invalid",
+          };
+        }
+      }
+    }
+  }
+  if (
+    historyRecoveryFailure
+    && source.sha256 === expectedSourceSha256
+    && source.sha256 !== targetSha256
+  ) {
+    runtime.pendingWrite = null;
+    runtime.lifecycleState = "editing";
+    runtime.lastWriteError = {
+      code: historyRecoveryFailure.code,
+      message: historyRecoveryFailure.message,
+      at: nowIso(),
+    };
+    runtime.autosave = {
+      status: "error",
+      expectedSourceSha256,
+      recoveryLogRelativePath: "recovery/autosave-log.json",
+      errorCode: runtime.lastWriteError.code,
+      errorMessage: runtime.lastWriteError.message,
+    };
+    await writeRuntime(context.projectRoot, runtime);
+    if (recoveryPath) await rm(recoveryPath, { force: true });
+    if (historyRecoveryPath) {
+      await rm(historyRecoveryPath, { force: true });
+    }
+    return {
+      status: "rolled-back",
+      reason: historyRecoveryFailure.reason,
+    };
+  }
+  if (historyRecoveryFailure && source.sha256 === targetSha256) {
+    // The source commit point has already passed. Never roll the user's HTML
+    // back through an unverified candidate: retain any matching durable
+    // journal, or create a fresh boundary at the committed bytes.
+    historyCandidate = await readSourceHistory(context, targetSha256);
   }
   if (source.sha256 !== targetSha256 && source.sha256 !== expectedSourceSha256) {
     if (!candidateBuffer) {
@@ -2584,6 +2870,9 @@ async function recoverPendingWriteRaw(context) {
       candidateBuffer,
     );
   }
+  if (historyCandidate) {
+    await writeSourceHistory(context, historyCandidate);
+  }
   await syncCurrentSourceIdentity(context, written);
   runtime.editRevision = Math.max(runtime.editRevision, revision);
   runtime.lastPersistedRevision = Math.max(
@@ -2638,6 +2927,9 @@ async function recoverPendingWriteRaw(context) {
   };
   await writeRuntime(context.projectRoot, runtime);
   if (recoveryPath) await rm(recoveryPath, { force: true });
+  if (historyRecoveryPath) {
+    await rm(historyRecoveryPath, { force: true });
+  }
   return {
     status: "source-updated",
     recovered: true,
@@ -3526,6 +3818,10 @@ async function workspaceState(sourcePath) {
     const refreshedProject = await readProject(context);
     const refreshedRuntime = await readRuntime(context);
     const currentSource = await readSourceFile(context.sourcePath);
+    const sourceHistory = await readSourceHistory(
+      context,
+      currentSource.sha256,
+    );
     const currentExactVersionId =
       currentSource.sha256 === refreshedProject.currentHtmlSha256
         ? refreshedProject.currentExactVersionId
@@ -3565,6 +3861,7 @@ async function workspaceState(sourcePath) {
       activeRun: refreshedRuntime.activeRun,
       activeDraft: refreshedRuntime.draft,
       recoveryIdentity,
+      sourceHistory: sourceHistoryResponse(sourceHistory),
       versions,
       current: {
         path: context.sourcePath,
@@ -3594,7 +3891,7 @@ async function ensureProject(body) {
 }
 
 async function saveAutosave(body) {
-  const context = await loadContextBySource(body.sourcePath, true);
+  const context = await loadMutationContext(body);
   assertBodyContext(context, body);
   const rawHtml = body.html ?? body.baseHtml;
   requireCompleteHtml(rawHtml, "autosave html");
@@ -3613,6 +3910,7 @@ async function saveAutosave(body) {
   );
 
   return withProjectMutation(context, async () => {
+    await recoverPendingWriteRaw(context);
     await recoverTransactionsRaw(context);
     const project = await readProject(context);
     const runtime = await readRuntime(context);
@@ -3620,6 +3918,10 @@ async function saveAutosave(body) {
     const source = await readSourceFile(context.sourcePath);
     const targetBuffer = Buffer.from(html, "utf8");
     const targetSha256 = sha256(targetBuffer);
+    const currentSourceHistory = await readSourceHistory(
+      context,
+      source.sha256,
+    );
     if (editRevision <= runtime.lastPersistedRevision) {
       return {
         ok: true,
@@ -3635,6 +3937,7 @@ async function saveAutosave(body) {
         sha256: source.sha256,
         content: source.html,
         lastModifiedAt: source.lastModifiedAt,
+        sourceHistory: sourceHistoryResponse(currentSourceHistory),
         versionCreated: false,
       };
     }
@@ -3679,13 +3982,35 @@ async function saveAutosave(body) {
         runtime.conflict,
       );
     }
+    const nextSourceHistory = prepareAutosaveSourceHistory(
+      currentSourceHistory,
+      body.sourceHistoryOperations,
+      {
+        context,
+        sourceHtml: source.html,
+        sourceSha256: source.sha256,
+        targetHtml: html,
+        targetSourceSha256: targetSha256,
+      },
+    );
     const recoveryId = `write_${editRevision}_${randomUUID()}`;
     const recoveryPath = path.join(
       context.projectRoot,
       "recovery",
       `${recoveryId}.html`,
     );
+    const historyRecoveryPath = path.join(
+      context.projectRoot,
+      "recovery",
+      `${recoveryId}.source-history.json`,
+    );
+    const historyRecoveryBuffer = Buffer.from(
+      jsonText(nextSourceHistory),
+      "utf8",
+    );
+    const historyRecoverySha256 = sha256(historyRecoveryBuffer);
     await atomicWriteFile(recoveryPath, targetBuffer);
+    await atomicWriteFile(historyRecoveryPath, historyRecoveryBuffer);
     const rawEvents =
       Array.isArray(body.changeEvents) && body.changeEvents.length > 0
         ? body.changeEvents
@@ -3708,6 +4033,9 @@ async function saveAutosave(body) {
       targetHtmlSha256: targetSha256,
       recoveryHtmlRelativePath: `recovery/${recoveryId}.html`,
       recoveryHtmlSha256: targetSha256,
+      recoverySourceHistoryRelativePath:
+        `recovery/${recoveryId}.source-history.json`,
+      recoverySourceHistorySha256: historyRecoverySha256,
       auditEvents,
       queuedAt: nowIso(),
     };
@@ -3733,6 +4061,7 @@ async function saveAutosave(body) {
               expectedSourceSha256,
               targetBuffer,
             );
+      await writeSourceHistory(context, nextSourceHistory);
       await maybeFailpoint(
         "after-autosave-source-applied",
         path.join(context.projectRoot, "recovery"),
@@ -3836,6 +4165,7 @@ async function saveAutosave(body) {
     };
     await writeRuntime(context.projectRoot, runtime);
     await rm(recoveryPath, { force: true });
+    await rm(historyRecoveryPath, { force: true });
     return {
       ok: true,
       status: "source-updated",
@@ -3857,6 +4187,245 @@ async function saveAutosave(body) {
         runtime,
         written.sha256,
       ),
+      sourceHistory: sourceHistoryResponse(nextSourceHistory),
+      versionCreated: false,
+    };
+  });
+}
+
+async function runSourceHistoryAction(body) {
+  const context = await loadMutationContext(body);
+  assertBodyContext(context, body);
+  const expectedSourceSha256 = requireSha256(
+    body.expectedSourceSha256,
+    "expectedSourceSha256",
+  );
+
+  return withProjectMutation(context, async () => {
+    await recoverPendingWriteRaw(context);
+    await recoverTransactionsRaw(context);
+    const project = await readProject(context);
+    const runtime = await readRuntime(context);
+    assertProjectMutable(runtime);
+    const source = await readSourceFile(context.sourcePath);
+    const currentSourceHistory = await readSourceHistory(
+      context,
+      source.sha256,
+    );
+    const actionWasApplied = currentSourceHistory.appliedActions.some(
+      (action) => action.actionId === body.actionId,
+    );
+    if (source.sha256 !== expectedSourceSha256 && !actionWasApplied) {
+      throw new HttpError(
+        409,
+        "SOURCE_CHANGED",
+        "The source HTML changed before the history action.",
+        {
+          expectedSourceSha256,
+          actualSourceSha256: source.sha256,
+        },
+      );
+    }
+    const action = applySourceHistoryCommand(
+      currentSourceHistory,
+      source.html,
+      body,
+      context,
+    );
+    if (!action.changed) {
+      return {
+        ok: true,
+        status: action.replayed ? "history-action-replayed" : "history-no-op",
+        replayed: action.replayed,
+        projectId: context.projectId,
+        documentId: context.documentId,
+        persistedRevision: runtime.lastPersistedRevision,
+        lastPersistedRevision: runtime.lastPersistedRevision,
+        currentHtmlSha256: source.sha256,
+        sourceSha256: source.sha256,
+        sha256: source.sha256,
+        content: source.html,
+        lastModifiedAt: source.lastModifiedAt,
+        sourceHistory: sourceHistoryResponse(action.history),
+        target: action.target,
+        selection: action.selection,
+        targetTransition: action.targetTransition,
+        versionCreated: false,
+      };
+    }
+
+    const editRevision = Math.max(
+      runtime.editRevision,
+      runtime.lastPersistedRevision,
+    ) + 1;
+    const targetBuffer = Buffer.from(action.html, "utf8");
+    const recoveryId = `history_${editRevision}_${randomUUID()}`;
+    const recoveryPath = path.join(
+      context.projectRoot,
+      "recovery",
+      `${recoveryId}.html`,
+    );
+    const historyRecoveryPath = path.join(
+      context.projectRoot,
+      "recovery",
+      `${recoveryId}.source-history.json`,
+    );
+    const historyRecoveryBuffer = Buffer.from(
+      jsonText(action.history),
+      "utf8",
+    );
+    const historyRecoverySha256 = sha256(historyRecoveryBuffer);
+    await atomicWriteFile(recoveryPath, targetBuffer);
+    await atomicWriteFile(historyRecoveryPath, historyRecoveryBuffer);
+    const directionLabel = body.direction === "undo" ? "撤销" : "重做";
+    const auditEvent = autosaveAuditEvent(
+      context,
+      project,
+      editRevision,
+      {
+        eventId: `history_${body.actionId}`,
+        kind: action.entry?.kind || "document",
+        property: action.entry?.property,
+        target: action.target,
+        before: { sha256: source.sha256 },
+        after: { sha256: action.sourceSha256 },
+        summary: `${directionLabel}画布源码操作`,
+        historyAction: {
+          actionId: body.actionId,
+          direction: body.direction,
+          operationId: action.entry?.operationId || null,
+        },
+      },
+    );
+    runtime.editRevision = editRevision;
+    runtime.pendingWrite = {
+      revision: editRevision,
+      expectedSourceSha256: source.sha256,
+      targetHtmlSha256: action.sourceSha256,
+      recoveryHtmlRelativePath: `recovery/${recoveryId}.html`,
+      recoveryHtmlSha256: action.sourceSha256,
+      recoverySourceHistoryRelativePath:
+        `recovery/${recoveryId}.source-history.json`,
+      recoverySourceHistorySha256: historyRecoverySha256,
+      auditEvents: [auditEvent],
+      queuedAt: nowIso(),
+    };
+    runtime.autosave = {
+      status: "updating",
+      expectedSourceSha256: source.sha256,
+      recoveryLogRelativePath: "recovery/autosave-log.json",
+    };
+    runtime.lastWriteError = null;
+    await writeRuntime(context.projectRoot, runtime);
+    await maybeFailpoint(
+      "after-autosave-prepared",
+      path.join(context.projectRoot, "recovery"),
+    );
+
+    let written;
+    try {
+      written = await atomicReplaceSource(
+        context.sourcePath,
+        source.sha256,
+        targetBuffer,
+      );
+      await writeSourceHistory(context, action.history);
+      await maybeFailpoint(
+        "after-autosave-source-applied",
+        path.join(context.projectRoot, "recovery"),
+      );
+    } catch (error) {
+      runtime.lastWriteError = {
+        code: error?.code ?? "SOURCE_HISTORY_WRITE_FAILED",
+        message: error instanceof Error
+          ? error.message
+          : "Source history write failed.",
+        at: nowIso(),
+      };
+      runtime.autosave = {
+        status: "error",
+        expectedSourceSha256: source.sha256,
+        recoveryLogRelativePath: "recovery/autosave-log.json",
+        errorCode: runtime.lastWriteError.code,
+        errorMessage: runtime.lastWriteError.message,
+      };
+      await writeRuntime(context.projectRoot, runtime);
+      if (error?.code === "SOURCE_HASH_CONFLICT") {
+        throw new HttpError(
+          409,
+          "SOURCE_CHANGED",
+          "The source HTML changed during the history action.",
+        );
+      }
+      throw error;
+    }
+
+    runtime.lastPersistedRevision = editRevision;
+    await syncCurrentSourceIdentity(context, written);
+    project.currentHtmlSha256 = written.sha256;
+    project.currentExactVersionId = await exactVersionForHash(
+      context,
+      written.sha256,
+    );
+    project.lastModifiedAt = written.lastModifiedAt;
+    await writeProject(context, project);
+    runtime.view = {
+      viewMode: "current",
+      latestVersionId: project.latestVersionId,
+      currentBasedOnVersionId: project.currentBasedOnVersionId,
+      currentExactVersionId: project.currentExactVersionId,
+      viewingVersionId: null,
+      renderedContentSha256: written.sha256,
+    };
+    await writeRuntime(context.projectRoot, runtime);
+    await maybeFailpoint(
+      "after-autosave-project-applied",
+      path.join(context.projectRoot, "recovery"),
+    );
+    await appendAuditOnce(context, auditEvent);
+    await maybeFailpoint(
+      "after-autosave-audit-applied",
+      path.join(context.projectRoot, "recovery"),
+    );
+    runtime.pendingWrite = null;
+    runtime.lifecycleState = "editing";
+    runtime.lastWriteError = null;
+    runtime.autosave = {
+      status: "updated",
+      expectedSourceSha256: written.sha256,
+      lastPersistedAt: nowIso(),
+      recoveryLogRelativePath: "recovery/autosave-log.json",
+    };
+    await writeRuntime(context.projectRoot, runtime);
+    await rm(recoveryPath, { force: true });
+    await rm(historyRecoveryPath, { force: true });
+    return {
+      ok: true,
+      status: "history-source-updated",
+      replayed: false,
+      projectId: context.projectId,
+      documentId: context.documentId,
+      editRevision,
+      persistedRevision: editRevision,
+      lastPersistedRevision: editRevision,
+      currentHtmlSha256: written.sha256,
+      sourceSha256: written.sha256,
+      sha256: written.sha256,
+      content: written.html,
+      lastModifiedAt: written.lastModifiedAt,
+      currentBasedOnVersionId: project.currentBasedOnVersionId,
+      currentExactVersionId: project.currentExactVersionId,
+      recoveryIdentity: recoveryIdentityFor(
+        context,
+        project,
+        runtime,
+        written.sha256,
+      ),
+      sourceHistory: sourceHistoryResponse(action.history),
+      target: action.target,
+      selection: action.selection,
+      targetTransition: action.targetTransition,
+      operationId: action.entry?.operationId || null,
       versionCreated: false,
     };
   });
@@ -4278,9 +4847,10 @@ function normalizeFrozenEditEvents(events, frozenAt, revision, basedOnVersionId)
 }
 
 async function saveDraft(body) {
-  const context = await loadContextBySource(body.sourcePath, true);
+  const context = await loadMutationContext(body);
   assertBodyContext(context, body);
   return withProjectMutation(context, async () => {
+    await recoverPendingWriteRaw(context);
     const runtime = await readRuntime(context);
     assertProjectMutable(runtime);
     const command = applyDraftCommand(runtime.draft, body, {
@@ -4347,9 +4917,10 @@ async function saveDraft(body) {
 }
 
 async function saveDraftAttachment(body) {
-  const context = await loadContextBySource(body.sourcePath, true);
+  const context = await loadMutationContext(body);
   assertBodyContext(context, body);
   return withProjectMutation(context, async () => {
+    await recoverPendingWriteRaw(context);
     const runtime = await readRuntime(context);
     assertProjectMutable(runtime);
     const commentId = attachmentRecordId(body.commentId, "comment");
@@ -4425,9 +4996,10 @@ async function readAttachment(sourcePath, relativePath) {
 }
 
 async function deleteDraftAttachment(body) {
-  const context = await loadContextBySource(body.sourcePath, false);
+  const context = await loadMutationContext(body);
   assertBodyContext(context, body);
   return withProjectMutation(context, async () => {
+    await recoverPendingWriteRaw(context);
     const runtime = await readRuntime(context);
     assertProjectMutable(runtime);
     const relativePath = String(body.relativePath ?? "").replaceAll("\\", "/");
@@ -4472,6 +5044,7 @@ function managedAiRules() {
 
 - 写完 output/index.html 后，最后运行 PROMPT.md 中的最终化（finalizer）命令。
 - 不得手写 completion.json；只有 finalizer 生成有效的 completion.json，PageRoot 才会创建新版本。
+- 如果 finalizer 返回 \`status=cancelled\`，本轮已在源页结束；立即停止，不要重试，也不要写入其他路径。
 `;
 }
 
@@ -4614,6 +5187,7 @@ ${command}
 \`\`\`
 
 不要手写 completion.json。只有 finalizer 生成有效的 completion.json，PageRoot 才会创建新版本。
+如果命令返回 \`status=cancelled\`，表示本轮已在源页结束：立即停止，不要重试，也不要改写到其他路径。
 `;
 }
 
@@ -4629,9 +5203,10 @@ async function requestFileRecord(root, relativePath, role, mediaType) {
 }
 
 async function createRequest(body) {
-  const context = await loadContextBySource(body.sourcePath, true);
+  const context = await loadMutationContext(body);
   assertBodyContext(context, body);
   return withProjectMutation(context, async () => {
+    await recoverPendingWriteRaw(context);
     await recoverTransactionsRaw(context);
     const project = await readProject(context);
     const runtime = await readRuntime(context);
@@ -6211,9 +6786,10 @@ async function finalizeCommittedTransactionRaw(
 }
 
 async function activateReadyVersion(body) {
-  const context = await loadContextBySource(body.sourcePath, false);
+  const context = await loadMutationContext(body);
   assertBodyContext(context, body);
   return withProjectMutation(context, async () => {
+    await recoverPendingWriteRaw(context);
     const runtime = await readRuntime(context);
     const project = await readProject(context);
     const requestedVersionId = cleanText(body.versionId, 100);
@@ -7113,9 +7689,10 @@ async function statusFor(sourcePath, requestId, attemptId = "attempt_001") {
 }
 
 async function cancelActiveRun(body) {
-  const context = await loadContextBySource(body.sourcePath, false);
+  const context = await loadMutationContext(body);
   assertBodyContext(context, body);
   return withProjectMutation(context, async () => {
+    await recoverPendingWriteRaw(context);
     // Cancellation only needs the durable lifecycle identity. Corrupt display
     // artifacts must never strand a project in a locked state.
     const runtime = await readRuntime(context, { hydrateArtifacts: false });
@@ -7234,9 +7811,10 @@ async function cancelActiveRun(body) {
 }
 
 async function resolveConflict(body) {
-  const context = await loadContextBySource(body.sourcePath, false);
+  const context = await loadMutationContext(body);
   assertBodyContext(context, body);
   return withProjectMutation(context, async () => {
+    await recoverPendingWriteRaw(context);
     const runtime = await readRuntime(context);
     const conflict = runtime.conflict;
     if (!conflict) {
@@ -7658,7 +8236,7 @@ async function projectFileGet(sourcePath) {
 }
 
 async function projectFileUpdate(body) {
-  const context = await loadContextBySource(body.sourcePath, true);
+  const context = await loadMutationContext(body);
   assertBodyContext(context, body);
   if (typeof body.content !== "string" || !body.content.trim()) {
     throw new HttpError(
@@ -7668,6 +8246,7 @@ async function projectFileUpdate(body) {
     );
   }
   return withProjectMutation(context, async () => {
+    await recoverPendingWriteRaw(context);
     const runtime = await readRuntime(context);
     assertProjectMutable(runtime);
     const filePath = path.join(context.projectRoot, "PROJECT.md");
@@ -7883,6 +8462,11 @@ async function route(request, response) {
   if (request.method === "POST" && url.pathname === "/autosave") {
     const body = await readBody(request);
     sendJson(response, 200, await saveAutosave(body));
+    return;
+  }
+  if (request.method === "POST" && url.pathname === "/source-history/action") {
+    const body = await readBody(request);
+    sendJson(response, 200, await runSourceHistoryAction(body));
     return;
   }
   if (request.method === "POST" && url.pathname === "/version") {

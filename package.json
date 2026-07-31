@@ -1,6 +1,6 @@
 {
   "name": "pageroot",
-  "version": "0.9.4",
+  "version": "0.9.5",
   "description": "源页（PageRoot）— Editable islands with byte-exact source outside every edited region.",
   "author": "源页",
   "license": "Apache-2.0",
@@ -70,7 +70,12 @@
     "lint": "eslint . --ignore-pattern dist --ignore-pattern dist-desktop --ignore-pattern release --ignore-pattern .next",
     "task:status": "node scripts/task-workflow.mjs status",
     "task:start": "node scripts/task-workflow.mjs start",
+    "task:attach": "node scripts/task-workflow.mjs attach",
     "task:finish": "node scripts/task-workflow.mjs finish",
+    "task:audit": "node scripts/task-workflow.mjs audit",
+    "task:retire": "node scripts/task-workflow.mjs retire",
+    "task:sync-main": "node scripts/task-workflow.mjs sync-main",
+    "task:policy": "node scripts/task-workflow.mjs policy",
     "gate:edit": "node scripts/test-gate.mjs edit",
     "gate:task": "node scripts/test-gate.mjs task",
     "gate:main:auto": "node scripts/test-gate.mjs main",
@@ -159,6 +164,7 @@
       "desktop/manual-update.mjs",
       "desktop/application-update.mjs",
       "desktop/usage-telemetry.mjs",
+      "desktop/preview-protocol.mjs",
       "public/brand-logo.png",
       "dist-desktop/renderer/**/*",
       "package.json",
@@ -215,8 +221,20 @@
         "to": "bridge/draft-service.mjs"
       },
       {
+        "from": "scripts/source-history-service.mjs",
+        "to": "bridge/source-history-service.mjs"
+      },
+      {
+        "from": "scripts/project-context-service.mjs",
+        "to": "bridge/project-context-service.mjs"
+      },
+      {
         "from": "shared/draft-aggregate.mjs",
         "to": "shared/draft-aggregate.mjs"
+      },
+      {
+        "from": "shared/source-history.mjs",
+        "to": "shared/source-history.mjs"
       },
       {
         "from": "node_modules/parse5",
@@ -357,6 +375,7 @@
           "project-state.v3.schema.json",
           "runtime-state.v3.schema.json",
           "scope-report.v1.schema.json",
+          "source-history.v1.schema.json",
           "user-supplement.v1.schema.json",
           "version-manifest.v3.schema.json",
           "version-transaction.v1.schema.json"

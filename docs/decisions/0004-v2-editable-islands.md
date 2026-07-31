@@ -37,8 +37,11 @@ PageRoot 0.9.0 has one production text engine, `IslandEditingController`.
   closed.
 - Preview DOM is never serialized as a document.
 
-The V1 `NativeEditingController` remains only as non-production historical test
-material during the comparison period. No PageRoot runtime module imports it.
+The V1 `NativeEditingController` and its implementation-specific tracker,
+shadow draft, FormatSkeleton, structural planner and ignored browser suites
+were removed after the V2 source-byte, Selection, composition and structural
+fixtures became authoritative. The architecture gate prevents production
+files or imports from reintroducing that parallel route.
 
 ## Consequences
 

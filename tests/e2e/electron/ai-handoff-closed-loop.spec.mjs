@@ -398,6 +398,7 @@ function runOfficialFinalizer(requestRoot, changeRequest) {
   if (result.status !== 0) {
     throw new Error(`Finalizer failed:\n${result.stdout}\n${result.stderr}`);
   }
+  return JSON.parse(result.stdout);
 }
 
 function recordOfficialSupplement(workspace, requestRoot, changeRequest, payload) {
@@ -920,6 +921,89 @@ test("a rapid double click creates exactly one durable Request", async () => {
   }
 });
 
+test("ending a copied run warns first and late AI finalization stops cleanly", async () => {
+  test.setTimeout(120_000);
+  const fixture = createSourceFixture("cancel-copied-run.html");
+  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  try {
+    const request = await addCommentAndSubmit(
+      launched.page,
+      launched.electronApp,
+      fixture.sourcePath,
+    );
+    const endRound = launched.page.getByRole("button", {
+      name: "结束本轮并继续编辑",
+    }).filter({ visible: true }).first();
+    await expect(endRound).toBeEnabled();
+    await endRound.click();
+
+    const warning = launched.page.getByRole("dialog", {
+      name: "AI Agent 可能仍在修改",
+    });
+    await expect(warning).toBeVisible();
+    await expect(warning.getByText(
+      "结束本轮后，AI Agent 的修改将不会保存到源页。建议先停止 AI Agent。",
+      { exact: true },
+    )).toBeVisible();
+    const continueWaiting = warning.getByRole("button", { name: "继续等待" });
+    await expect(continueWaiting).toBeFocused();
+    await continueWaiting.click();
+    await expect(warning).toBeHidden();
+    await expect(endRound).toBeEnabled();
+
+    await endRound.click();
+    await warning.getByRole("button", {
+      name: "结束本轮并继续编辑",
+    }).click();
+    await expect(warning).toBeHidden();
+    const cancellationNotice = launched.page.locator(".toast.show").filter({
+      hasText: "本轮已结束，已恢复编辑",
+    });
+    await expect(cancellationNotice).toBeVisible();
+    await expect(cancellationNotice.getByText(
+      "AI Agent 不会被自动停止；如仍在运行，请手动停止。",
+      { exact: true },
+    )).toBeVisible();
+    await expect(launched.page.getByRole("button", {
+      name: "全局评论",
+      exact: true,
+    })).toBeEnabled();
+    expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
+
+    writeAiOutput(request.requestRoot, (base) => (
+      base.replace(ORIGINAL_TEXT, UPDATED_TEXT)
+    ));
+    const lateFinalization = runOfficialFinalizer(
+      request.requestRoot,
+      request.changeRequest,
+    );
+    expect(lateFinalization).toMatchObject({
+      ok: true,
+      status: "cancelled",
+      accepted: false,
+      retryable: false,
+    });
+    expect(lateFinalization.message)
+      .toBe("本轮已在源页结束。请停止 AI Agent，不要重试。");
+    expect(existsSync(path.join(
+      request.requestRoot,
+      "attempts",
+      "attempt_001",
+      "completion.json",
+    ))).toBe(false);
+    expect(
+      workingHtmlFiles(
+        launched.workspace,
+        request.changeRequest.projectId,
+      ),
+    ).toHaveLength(0);
+    expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
 test("an unknown Request outcome stays fail-closed and reconciles automatically", async () => {
   test.setTimeout(120_000);
   const fixture = createSourceFixture("unknown-request-outcome.html");
@@ -974,7 +1058,7 @@ test("an unknown Request outcome stays fail-closed and reconciles automatically"
     )).toBeVisible({ timeout: 20_000 });
     await launched.page.unroute(bridgeRoute, injectUnknownRequestOutcome);
     await expect(launched.page.getByRole("button", {
-      name: "取消发送，继续编辑",
+      name: "结束本轮并继续编辑",
     })).toBeEnabled();
     expect(requestDirectoryCount(launched.workspace)).toBe(1);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
@@ -1216,11 +1300,82 @@ test("multiple orphaned comments relink in sequence and resume the original send
   }
 });
 
-test("an automatic update result appears above the Qoder action", async () => {
+test("automatic update actions sit on the HTML icon and the icon opens About", async () => {
   const fixture = createSourceFixture("update-indicator.html");
   const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
   try {
     await loadedDiskFrame(launched.page, fixture.sourcePath);
+    const evidenceDirectory = path.join(
+      productRoot,
+      "output/design-qa/comment-presentation-header-polish",
+    );
+    mkdirSync(evidenceDirectory, { recursive: true });
+    const captureHeader = async (fileName, { badgeExpected = true } = {}) => {
+      const geometry = await launched.page.evaluate(() => {
+        const rect = (selector) => {
+          const element = document.querySelector(selector);
+          if (!element) return null;
+          const box = element.getBoundingClientRect();
+          return {
+            left: box.left,
+            top: box.top,
+            right: box.right,
+            bottom: box.bottom,
+            width: box.width,
+            height: box.height,
+          };
+        };
+        return {
+          viewportWidth: window.innerWidth,
+          header: rect(".workbench-header"),
+          cluster: rect(".window-file-icon-cluster"),
+          icon: rect(".window-file-about-button"),
+          badge: rect(".window-file-update-badge"),
+          badgeLabel: rect(".window-file-update-badge > span"),
+          fileCopy: rect(".window-file-copy"),
+        };
+      });
+      expect(geometry.header).not.toBeNull();
+      expect(geometry.cluster).not.toBeNull();
+      expect(geometry.icon).not.toBeNull();
+      expect(geometry.fileCopy).not.toBeNull();
+      expect(Math.abs(
+        (geometry.icon.top + geometry.icon.bottom) / 2
+        - (geometry.cluster.top + geometry.cluster.bottom) / 2,
+      )).toBeLessThanOrEqual(0.5);
+      if (badgeExpected) {
+        expect(geometry.badge).not.toBeNull();
+        expect(geometry.badgeLabel).not.toBeNull();
+        expect(geometry.badgeLabel.top).toBeGreaterThanOrEqual(
+          geometry.header.top,
+        );
+        expect(geometry.badgeLabel.bottom).toBeLessThanOrEqual(
+          geometry.header.bottom,
+        );
+        expect(geometry.badgeLabel.right).toBeLessThanOrEqual(
+          geometry.fileCopy.left - 8,
+        );
+        expect(geometry.badgeLabel.top).toBeLessThan(geometry.icon.bottom);
+      } else {
+        expect(geometry.badge).toBeNull();
+        expect(geometry.badgeLabel).toBeNull();
+      }
+      await launched.page.screenshot({
+        path: path.join(evidenceDirectory, fileName),
+        clip: {
+          x: 0,
+          y: 0,
+          width: Math.min(900, geometry.viewportWidth),
+          height: geometry.header.height,
+        },
+      });
+      return geometry;
+    };
+
+    const noUpdateGeometry = await captureHeader("no-update.png", {
+      badgeExpected: false,
+    });
+
     await launched.electronApp.evaluate(({ BrowserWindow }) => {
       BrowserWindow.getAllWindows()[0]?.webContents.send(
         "html-updates:status",
@@ -1237,14 +1392,25 @@ test("an automatic update result appears above the Qoder action", async () => {
     await expect(launched.page.getByRole("button", {
       name: "发现 PageRoot 9.9.9，下载更新",
     })).toBeVisible();
+    const newGeometry = await captureHeader("new-update.png");
+
+    await launched.page.getByRole("button", { name: "关于源页" }).click();
+    await expect(launched.page.getByRole("dialog", { name: "源页" }))
+      .toBeVisible();
+    await launched.page.getByRole("button", { name: "关闭关于源页" }).click();
+    await expect(launched.page.locator("dialog.about-dialog[open]"))
+      .toHaveCount(0);
+    await launched.page.evaluate(() => new Promise((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(resolve));
+    }));
 
     await launched.electronApp.evaluate(({ BrowserWindow }) => {
       BrowserWindow.getAllWindows()[0]?.webContents.send(
         "html-updates:status",
         {
-          status: "current",
+          status: "downloaded",
           currentVersion: "0.8.6",
-          latestVersion: "0.8.6",
+          latestVersion: "9.9.9",
           minimumMacOS: "12.0",
           architecture: "arm64",
           publishedAt: "2026-07-23T00:00:00.000Z",
@@ -1252,8 +1418,33 @@ test("an automatic update result appears above the Qoder action", async () => {
       );
     });
     await expect(launched.page.getByRole("button", {
-      name: "发现 PageRoot 9.9.9，下载更新",
-    })).toHaveCount(0);
+      name: "PageRoot 9.9.9 已下载，重启更新",
+    })).toBeVisible();
+    await expect(launched.page.getByRole("dialog", {
+      name: "现在重启并安装更新？",
+    })).toBeVisible();
+    await launched.page.getByRole("button", { name: "稍后" }).click();
+    await expect(launched.page.locator("dialog.restart-update-dialog[open]"))
+      .toHaveCount(0);
+    await launched.page.evaluate(() => new Promise((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(resolve));
+    }));
+    const restartGeometry = await captureHeader("restart-update.png");
+    for (const geometry of [newGeometry, restartGeometry]) {
+      expect(geometry.icon).toEqual(noUpdateGeometry.icon);
+      expect(geometry.cluster).toEqual(noUpdateGeometry.cluster);
+      expect(geometry.fileCopy).toEqual(noUpdateGeometry.fileCopy);
+    }
+    writeFileSync(
+      path.join(evidenceDirectory, "header-geometry.json"),
+      JSON.stringify({
+        viewport: { width: newGeometry.viewportWidth },
+        none: noUpdateGeometry,
+        available: newGeometry,
+        downloaded: restartGeometry,
+      }, null, 2),
+      "utf8",
+    );
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);

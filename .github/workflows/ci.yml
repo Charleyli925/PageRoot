@@ -17,6 +17,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  branch-policy:
+    name: branch-policy
+    if: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.13.0
+      - name: Enforce PageRoot branch naming
+        env:
+          BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
+        run: npm run task:policy -- "$BRANCH_NAME"
+
   draft-feedback:
     name: draft-feedback
     if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
@@ -333,6 +348,7 @@ jobs:
     name: release-gate
     if: ${{ always() && (github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.draft == false)) }}
     needs:
+      - branch-policy
       - source-build
       - source-node
       - source-browser
@@ -343,12 +359,14 @@ jobs:
     steps:
       - name: Require every source lane
         env:
+          POLICY_RESULT: ${{ needs.branch-policy.result }}
           BUILD_RESULT: ${{ needs.source-build.result }}
           NODE_RESULT: ${{ needs.source-node.result }}
           BROWSER_RESULT: ${{ needs.source-browser.result }}
           ELECTRON_NATIVE_RESULT: ${{ needs.source-electron-native.result }}
           ELECTRON_AI_RESULT: ${{ needs.source-electron-ai.result }}
         run: |
+          test "$POLICY_RESULT" = "success"
           test "$BUILD_RESULT" = "success"
           test "$NODE_RESULT" = "success"
           test "$BROWSER_RESULT" = "success"

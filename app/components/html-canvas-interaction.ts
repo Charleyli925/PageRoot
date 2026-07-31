@@ -1,0 +1,332 @@
+import { SOURCE_NODE_ATTRIBUTE } from "../lib/source-patch-core.js";
+import { inferSelectionLevel, selectionForElement } from "./html-canvas-selection";
+import { sourceTextNodeForDomText } from "./html-canvas-preview-sync";
+import type { ActiveTextRange, SourceIndexValue, TextRangeSegment } from "./html-canvas-internal-types";
+import type { NativeEditSelection } from "./native-edit-types";
+
+export function activeTextRangeFromDocument(
+  documentNode: Document,
+  sourceIndex: SourceIndexValue | null,
+): ActiveTextRange | null {
+  const domSelection = documentNode.getSelection();
+  if (!sourceIndex || !domSelection || domSelection.rangeCount !== 1 || domSelection.isCollapsed) {
+    return null;
+  }
+  const range = domSelection.getRangeAt(0);
+  const commonNode = range.commonAncestorContainer;
+  const commonElement = commonNode.nodeType === 1
+    ? commonNode as HTMLElement
+    : commonNode.parentElement;
+  const targetElement = commonElement?.closest<HTMLElement>(`[${SOURCE_NODE_ATTRIBUTE}]`) ?? null;
+  if (
+    !targetElement
+    || ["BODY", "HTML", "HEAD", "SCRIPT", "STYLE", "NOSCRIPT"].includes(targetElement.tagName)
+  ) return null;
+
+  const showText = documentNode.defaultView?.NodeFilter.SHOW_TEXT ?? 4;
+  const walker = documentNode.createTreeWalker(targetElement, showText);
+  const segments: TextRangeSegment[] = [];
+  const styleElements: HTMLElement[] = [];
+  let currentNode = walker.nextNode();
+  while (currentNode) {
+    const textNode = currentNode as Text;
+    let intersects = false;
+    try {
+      intersects = range.intersectsNode(textNode);
+    } catch {
+      return null;
+    }
+    if (intersects) {
+      const startOffset = range.startContainer === textNode ? range.startOffset : 0;
+      const endOffset = range.endContainer === textNode ? range.endOffset : textNode.data.length;
+      if (endOffset > startOffset) {
+        const sourceText = sourceTextNodeForDomText(textNode, sourceIndex);
+        if (!sourceText || endOffset > sourceText.value.length) return null;
+        segments.push({
+          textNodeId: sourceText.nodeId,
+          startOffset,
+          endOffset,
+        });
+        const textParent = textNode.parentElement;
+        if (textParent && !styleElements.includes(textParent)) styleElements.push(textParent);
+      }
+    }
+    currentNode = walker.nextNode();
+  }
+  if (segments.length === 0 || styleElements.length === 0) return null;
+  let direction: ActiveTextRange["direction"] = "forward";
+  if (domSelection.anchorNode && domSelection.focusNode) {
+    try {
+      const anchorRange = documentNode.createRange();
+      anchorRange.setStart(domSelection.anchorNode, domSelection.anchorOffset);
+      anchorRange.collapse(true);
+      const focusRange = documentNode.createRange();
+      focusRange.setStart(domSelection.focusNode, domSelection.focusOffset);
+      focusRange.collapse(true);
+      direction = anchorRange.compareBoundaryPoints(0, focusRange) <= 0
+        ? "forward"
+        : "backward";
+    } catch {
+      direction = "forward";
+    }
+  }
+  return {
+    target: selectionForElement(targetElement, sourceIndex, undefined, undefined, "part"),
+    segments,
+    text: range.toString(),
+    styleElements,
+    direction,
+  };
+}
+
+export type TextCaretPoint = {
+  clientX: number;
+  clientY: number;
+};
+
+export function caretPointFromMouseEvent(event: MouseEvent): TextCaretPoint {
+  // clientX/clientY are already in the same viewport coordinate system as
+  // Range.getClientRects(). MouseEvent.offsetX/offsetY are not reliable for
+  // inline descendants such as <pre><code>: Chromium can report them relative
+  // to a different padding/offset parent and make a real glyph click look like
+  // empty space.
+  return {
+    clientX: event.clientX,
+    clientY: event.clientY,
+  };
+}
+
+function wordBoundsAtOffset(text: string, requestedOffset: number): {
+  startOffset: number;
+  endOffset: number;
+} | null {
+  if (!text || !text.trim()) return null;
+  const offset = Math.max(0, Math.min(text.length, requestedOffset));
+  if (typeof Intl.Segmenter === "function") {
+    const segments = new Intl.Segmenter(undefined, { granularity: "word" }).segment(text);
+    let nearest: { startOffset: number; endOffset: number; distance: number } | null = null;
+    for (const segment of segments) {
+      if (!segment.segment.trim()) continue;
+      const startOffset = segment.index;
+      const endOffset = segment.index + segment.segment.length;
+      if (offset >= startOffset && offset <= endOffset) return { startOffset, endOffset };
+      const distance = Math.min(
+        Math.abs(offset - startOffset),
+        Math.abs(offset - endOffset),
+      );
+      if (!nearest || distance < nearest.distance) {
+        nearest = { startOffset, endOffset, distance };
+      }
+    }
+    if (nearest) return nearest;
+  }
+
+  let characterOffset = Math.min(offset, text.length - 1);
+  while (characterOffset > 0 && /\s/u.test(text[characterOffset])) characterOffset -= 1;
+  if (/\p{Script=Han}/u.test(text[characterOffset])) {
+    return { startOffset: characterOffset, endOffset: characterOffset + 1 };
+  }
+  const isWordCharacter = (character: string) => /[\p{L}\p{N}_-]/u.test(character);
+  let startOffset = characterOffset;
+  let endOffset = characterOffset + 1;
+  while (startOffset > 0 && isWordCharacter(text[startOffset - 1])) startOffset -= 1;
+  while (endOffset < text.length && isWordCharacter(text[endOffset])) endOffset += 1;
+  return { startOffset, endOffset };
+}
+
+export function selectWordAtPoint(
+  documentNode: Document,
+  target: HTMLElement,
+  point: TextCaretPoint,
+): Range | null {
+  const caretPosition = documentNode.caretPositionFromPoint?.(point.clientX, point.clientY);
+  const caretRange = !caretPosition
+    ? documentNode.caretRangeFromPoint?.(point.clientX, point.clientY)
+    : null;
+  const pointNode = caretPosition?.offsetNode || caretRange?.startContainer;
+  const pointOffset = caretPosition?.offset ?? caretRange?.startOffset;
+  const textNode = pointNode?.nodeType === 3 ? pointNode as Text : null;
+  const textOffset = typeof pointOffset === "number" ? pointOffset : 0;
+  // caretPositionFromPoint may return the nearest text when the pointer is on
+  // an inert iframe/canvas or on empty layout space. Never turn that proximity
+  // guess into an edit target: the point must lie on the chosen text glyphs.
+  if (!textNode || !target.contains(textNode) || !textNode.data.trim()) return null;
+  if (!textNode) return null;
+  const bounds = wordBoundsAtOffset(textNode.data, textOffset);
+  if (!bounds) return null;
+  const range = documentNode.createRange();
+  range.setStart(textNode, bounds.startOffset);
+  range.setEnd(textNode, bounds.endOffset);
+  if (!nativeTextRangeContainsPoint(range, point)) return null;
+  const selection = documentNode.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+  return range;
+}
+
+function nativeTextRangeContainsPoint(
+  range: Range,
+  point: TextCaretPoint,
+): boolean {
+  if (
+    range.collapsed
+    || !range.startContainer.isConnected
+    || !range.endContainer.isConnected
+  ) return false;
+  const tolerance = 2;
+  return Array.from(range.getClientRects()).some((rect) => (
+    rect.width > 0
+    && rect.height > 0
+    && point.clientX >= rect.left - tolerance
+    && point.clientX <= rect.right + tolerance
+    && point.clientY >= rect.top - tolerance
+    && point.clientY <= rect.bottom + tolerance
+  ));
+}
+
+export function nativeTextRangeMatchesActivation(
+  range: Range,
+  target: HTMLElement,
+  point: TextCaretPoint,
+): boolean {
+  return target.contains(range.startContainer)
+    && target.contains(range.endContainer)
+    && nativeTextRangeContainsPoint(range, point);
+}
+
+function findSelectableElement(target: EventTarget | null): HTMLElement | null {
+  if (!target || typeof target !== "object" || !("nodeType" in target) || target.nodeType !== 1) return null;
+  const element = target as HTMLElement;
+  if (["HTML", "BODY", "HEAD", "SCRIPT", "STYLE"].includes(element.tagName)) return null;
+  if (element.namespaceURI === "http://www.w3.org/1998/Math/MathML") {
+    return element.closest("math") as unknown as HTMLElement | null;
+  }
+  return element;
+}
+
+const MEDIA_SURFACE_SELECTOR = "iframe, audio, video, canvas, object, embed";
+const COMPOUND_VALUE_AFFIX_TAGS = new Set(["SMALL", "SUP", "SUB"]);
+
+function compoundValueSelectionRoot(element: HTMLElement): HTMLElement {
+  if (!COMPOUND_VALUE_AFFIX_TAGS.has(element.tagName)) return element;
+  const parent = element.parentElement;
+  if (!parent || parent === parent.ownerDocument.body) return element;
+  const directText = Array.from(parent.childNodes)
+    .filter((node) => node.nodeType === 3)
+    .map((node) => node.textContent ?? "")
+    .join("")
+    .trim();
+  const combinedText = (parent.textContent ?? "").replace(/\s+/g, "");
+  if (
+    !/\d/u.test(directText)
+    || combinedText.length === 0
+    || combinedText.length > 40
+    || parent.querySelector("div, section, article, header, footer, main, aside, table, ul, ol")
+  ) return element;
+  return parent;
+}
+
+export function findCanvasSelectionElement(target: EventTarget | null): HTMLElement | null {
+  const selected = findSelectableElement(target);
+  if (!selected) return null;
+  const element = compoundValueSelectionRoot(selected);
+  const ownsMediaSurface = element.matches(MEDIA_SURFACE_SELECTOR)
+    || Boolean(element.querySelector(MEDIA_SURFACE_SELECTOR));
+  if (!ownsMediaSurface) return element;
+  let candidate: HTMLElement | null = element;
+  while (candidate && candidate !== candidate.ownerDocument.body) {
+    if (
+      candidate.hasAttribute(SOURCE_NODE_ATTRIBUTE)
+      && inferSelectionLevel(candidate) === "module"
+    ) return candidate;
+    candidate = candidate.parentElement;
+  }
+  return element;
+}
+
+export function findNativeActionTarget(target: EventTarget | null): HTMLElement | null {
+  const element = findSelectableElement(target);
+  return element?.closest<HTMLElement>(
+    [
+      "a[href]",
+      "area[href]",
+      "button",
+      "form",
+      "input",
+      "select",
+      "summary",
+      "textarea",
+      "[role=\"tab\"]",
+      "[aria-expanded][aria-controls]",
+    ].join(", "),
+  ) ?? null;
+}
+
+export function sourceHistoryDirectionForShortcut(event: {
+  metaKey: boolean;
+  ctrlKey: boolean;
+  shiftKey: boolean;
+  key: string;
+}): "undo" | "redo" | null {
+  if (!(event.metaKey || event.ctrlKey)) return null;
+  const key = event.key.toLowerCase();
+  if (key === "y" && event.ctrlKey && !event.metaKey) return "redo";
+  if (key !== "z") return null;
+  return event.shiftKey ? "redo" : "undo";
+}
+
+export function historySelectionFromMutationValue(
+  value: unknown,
+): NativeEditSelection | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const selection = (value as { selection?: unknown }).selection;
+  if (!selection || typeof selection !== "object" || Array.isArray(selection)) {
+    return undefined;
+  }
+  const candidate = selection as Partial<NativeEditSelection>;
+  if (
+    !Number.isSafeInteger(candidate.anchor)
+    || !Number.isSafeInteger(candidate.focus)
+    || Number(candidate.anchor) < 0
+    || Number(candidate.focus) < 0
+    || (candidate.affinity !== "left" && candidate.affinity !== "right")
+  ) return undefined;
+  return {
+    anchor: Number(candidate.anchor),
+    focus: Number(candidate.focus),
+    affinity: candidate.affinity,
+  };
+}
+
+function safeHistorySelectionOffset(text: string, rawOffset: number): number {
+  let offset = Math.min(text.length, Math.max(0, rawOffset));
+  if (
+    offset > 0
+    && offset < text.length
+    && /[\uD800-\uDBFF]/u.test(text[offset - 1])
+    && /[\uDC00-\uDFFF]/u.test(text[offset])
+  ) offset -= 1;
+  return offset;
+}
+
+export function boundedHistorySelection(
+  selection: NativeEditSelection | undefined,
+  text: string,
+): NativeEditSelection | undefined {
+  if (!selection) return undefined;
+  return {
+    anchor: safeHistorySelectionOffset(text, selection.anchor),
+    focus: safeHistorySelectionOffset(text, selection.focus),
+    affinity: selection.affinity,
+  };
+}
+
+export function isCanvasRootElement(target: EventTarget | null): boolean {
+  return Boolean(
+    target
+    && typeof target === "object"
+    && "nodeType" in target
+    && target.nodeType === 1
+    && ["HTML", "BODY"].includes((target as HTMLElement).tagName),
+  );
+}

@@ -6,6 +6,7 @@ import {
   ipcMain,
   Menu,
   net,
+  protocol,
   shell,
   utilityProcess,
 } from "electron";
@@ -80,9 +81,17 @@ import {
   durationBucket,
   readTelemetryBuildConfig,
 } from "./usage-telemetry.mjs";
+import {
+  PREVIEW_PROTOCOL_SCHEME,
+  createPreviewProtocolController,
+  createPreviewSessionOperation,
+  registerPreviewProtocolScheme,
+} from "./preview-protocol.mjs";
 
 // electron-updater is CommonJS; the default import is the supported ESM bridge.
 const { autoUpdater } = electronUpdater;
+
+registerPreviewProtocolScheme(protocol);
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
 const USER_NOTICE_FILE_NAME = "PageRoot 用户声明与免责声明.txt";
@@ -165,6 +174,14 @@ const UPDATE_CHANNELS = Object.freeze({
 const USAGE_CHANNELS = Object.freeze({
   capture: "html-usage:capture",
 });
+const PREVIEW_CHANNELS = Object.freeze({
+  createSession: "html-preview:create-session",
+  revokeSession: "html-preview:revoke-session",
+});
+const EDIT_CHANNELS = Object.freeze({
+  historyRequested: "html-edit:history-requested",
+  nativeHistory: "html-edit:native-history",
+});
 
 let bridgeProcess = null;
 let bridgePort = null;
@@ -183,7 +200,20 @@ let applicationUpdate = null;
 let usageTelemetry = null;
 let workspaceFailurePrompt = null;
 let managedWelcomeRegistration = null;
+let previewProtocolController = null;
 const workspaceRecoveryMailbox = createWorkspaceRecoveryMailbox();
+
+function ensurePreviewProtocolController() {
+  if (!previewProtocolController) {
+    previewProtocolController = createPreviewProtocolController({
+      protocolApi: protocol,
+      netFetch: (url, options) => net.fetch(url, options),
+      maxHtmlBytes: MAX_HTML_BYTES,
+    });
+    previewProtocolController.install();
+  }
+  return previewProtocolController;
+}
 
 function telemetryFingerprint(value) {
   const text = value instanceof Error
@@ -269,6 +299,15 @@ function requestAboutPageRoot() {
   mainWindow.webContents.send(APP_CHANNELS.aboutRequested);
 }
 
+function requestRendererHistory(direction) {
+  if (
+    !rendererHasLoaded
+    || !mainWindow
+    || mainWindow.isDestroyed()
+  ) return;
+  mainWindow.webContents.send(EDIT_CHANNELS.historyRequested, { direction });
+}
+
 function installApplicationMenu() {
   if (process.platform !== "darwin") return;
   const menu = Menu.buildFromTemplate([
@@ -289,7 +328,31 @@ function installApplicationMenu() {
         { role: "quit" },
       ],
     },
-    { role: "editMenu" },
+    {
+      role: "editMenu",
+      submenu: [
+        {
+          label: "Undo",
+          accelerator: "CommandOrControl+Z",
+          click: () => requestRendererHistory("undo"),
+        },
+        {
+          label: "Redo",
+          accelerator: "CommandOrControl+Shift+Z",
+          click: () => requestRendererHistory("redo"),
+        },
+        { type: "separator" },
+        { role: "cut" },
+        { role: "copy" },
+        { role: "paste" },
+        { role: "pasteAndMatchStyle" },
+        { role: "delete" },
+        { role: "selectAll" },
+        { type: "separator" },
+        { role: "startSpeaking" },
+        { role: "stopSpeaking" },
+      ],
+    },
     { role: "windowMenu" },
   ]);
   Menu.setApplicationMenu(menu);
@@ -714,6 +777,17 @@ const openInDefaultBrowser = createOpenInDefaultBrowserOperation({
   assertKnownProjectPath,
   inspectHtmlFile,
   openExternal: (sourceUrl) => shell.openExternal(sourceUrl),
+});
+
+const createPreviewSession = createPreviewSessionOperation({
+  createSession: (payload) => (
+    ensurePreviewProtocolController().createSession(payload)
+  ),
+  authorizeSourcePath: async (sourcePathInput) => {
+    const sourcePath = assertReadPayload(sourcePathInput);
+    await assertKnownProjectPath(sourcePath);
+    return inspectHtmlFile(sourcePath);
+  },
 });
 
 async function resolveKnownRenameSource(sourcePathInput) {
@@ -1411,6 +1485,20 @@ function registerProjectIpc() {
     APP_CHANNELS.openUserNotice,
     trustedProject(openUserNotice),
   );
+  ipcMain.handle(
+    PREVIEW_CHANNELS.createSession,
+    trustedProject(
+      createPreviewSession,
+      "preview_create_session",
+    ),
+  );
+  ipcMain.handle(
+    PREVIEW_CHANNELS.revokeSession,
+    trustedProject(
+      (sessionId) => ensurePreviewProtocolController().revokeSession(sessionId),
+      "preview_revoke_session",
+    ),
+  );
   ipcMain.handle(APP_CHANNELS.closeResult, trusted(reportCloseResult));
   ipcMain.handle(
     APP_CHANNELS.workspaceRecoveryReady,
@@ -1423,6 +1511,20 @@ function registerProjectIpc() {
     trusted(async () => ({
       relaunched: await coordinateApplicationRelaunch("user-relaunch"),
     })),
+  );
+  ipcMain.handle(
+    EDIT_CHANNELS.nativeHistory,
+    trusted((direction) => {
+      if (direction !== "undo" && direction !== "redo") {
+        throw new TypeError("原生编辑历史方向无效。");
+      }
+      if (!mainWindow || mainWindow.isDestroyed()) {
+        return { applied: false };
+      }
+      if (direction === "undo") mainWindow.webContents.undo();
+      else mainWindow.webContents.redo();
+      return { applied: true };
+    }),
   );
   ipcMain.on(USAGE_CHANNELS.capture, (event, payload) => {
     try {
@@ -1591,6 +1693,7 @@ function unregisterIpc() {
     APP_CHANNELS.closeResult,
     APP_CHANNELS.workspaceRecoveryReady,
     APP_CHANNELS.relaunch,
+    EDIT_CHANNELS.nativeHistory,
   ]) {
     ipcMain.removeHandler(channel);
   }
@@ -1915,6 +2018,7 @@ async function startBridge() {
 
 async function createWindow() {
   const port = await startBridge();
+  ensurePreviewProtocolController();
 
   rendererHasLoaded = false;
   workspaceRecoveryMailbox.beginRendererLoad();
@@ -1953,6 +2057,18 @@ async function createWindow() {
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   mainWindow.webContents.on("will-navigate", (event, url) => {
     if (!isTrustedRendererUrl(url)) event.preventDefault();
+  });
+  mainWindow.webContents.on("will-frame-navigate", (event, details) => {
+    if (details.isMainFrame) return;
+    const parentFrame = details.frame?.parent;
+    if (parentFrame !== mainWindow?.webContents.mainFrame) return;
+    try {
+      if (new URL(details.frame?.url || "").protocol === `${PREVIEW_PROTOCOL_SCHEME}:`) {
+        event.preventDefault();
+      }
+    } catch {
+      event.preventDefault();
+    }
   });
   mainWindow.webContents.on(
     "did-start-navigation",
@@ -1998,6 +2114,7 @@ async function createWindow() {
   });
   mainWindow.on("closed", () => {
     applicationUpdate?.stopAutomaticChecks();
+    previewProtocolController?.dispose();
     rendererHasLoaded = false;
     workspaceRecoveryMailbox.beginRendererLoad();
     mainWindow = null;
