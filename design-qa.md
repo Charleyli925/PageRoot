@@ -6,25 +6,15 @@ Date: 2026-07-31
 
 Source visual truth:
 
-- `/var/folders/jx/w52403cs2hx39vwhd1sb3tg80000gn/T/codex-clipboard-446927b3-9de2-4e56-bff8-2bde38ad0588.png`
-  — a focused comment is obscured by the sticky comment header.
-- `/var/folders/jx/w52403cs2hx39vwhd1sb3tg80000gn/T/codex-clipboard-9957b77d-1a88-4d36-a915-f24af179b443.png`
-  — “切换到此页签” must not reset the document scroll position.
-- `/var/folders/jx/w52403cs2hx39vwhd1sb3tg80000gn/T/codex-clipboard-94fa91f6-be78-454f-ae78-c486b282432b.png`
-  — whole-page comments should lead the current-Tab queue.
-- `/var/folders/jx/w52403cs2hx39vwhd1sb3tg80000gn/T/codex-clipboard-6990e527-9c2a-4aee-a78e-14ac82b05312.png`
-  — the existing HTML identity control and available header space.
-- `/var/folders/jx/w52403cs2hx39vwhd1sb3tg80000gn/T/codex-clipboard-89c6e667-57e4-46f5-aec7-81b33c31d9d6.png`
-  — a real `data-p` authored tab group that previously had no safe PageRoot
-  presentation action.
-- `/var/folders/jx/w52403cs2hx39vwhd1sb3tg80000gn/T/codex-clipboard-6de7aa63-29a4-41a6-99d1-2e5cac135217.png`
-  — dense comments must stop at the authored page bottom instead of stretching
-  the whole review stage.
-- `/var/folders/jx/w52403cs2hx39vwhd1sb3tg80000gn/T/codex-clipboard-c9020c92-7bfb-4d9c-9ec2-a81ad6402a13.png`
-  — the HTML icon must align with the title/metainfo block when no update label
-  is visible.
-- `/var/folders/jx/w52403cs2hx39vwhd1sb3tg80000gn/T/codex-clipboard-6617e5cc-a6ff-43b5-a838-db2b7a437dae.png`
-  — a constant-index `onclick` report Tab group needs a safe edit-mode switch.
+- User-provided local captures (not committed) showed a focused comment hidden
+  by the sticky header, a page-switch action that must preserve scroll, and the
+  required whole-page-first comment order.
+- Additional local captures established the existing HTML identity control,
+  available header space and centered no-update geometry.
+- Two real-report captures established the supported `data-p` and
+  constant-index `onclick` Tab patterns; another showed that dense comments
+  must stop at the authored page bottom rather than stretching the review
+  stage.
 
 Implementation evidence:
 
@@ -141,7 +131,7 @@ Date: 2026-07-30
 
 Source visual truth:
 
-- `/var/folders/jx/w52403cs2hx39vwhd1sb3tg80000gn/T/codex-clipboard-ed1c3a2f-92b8-4966-8314-55d2417d7d52.png`
+- User-provided local reference image (not committed).
 - User direction: remove the four red-marked regions—“PageRoot for macOS”,
   “Apache-2.0”, the complete usage-data notice, and the update-channel
   eyebrow—then realign the remaining content into a balanced compact dialog.
@@ -220,15 +210,11 @@ Date: 2026-07-31
 
 Source visual truth:
 
-- `/var/folders/jx/w52403cs2hx39vwhd1sb3tg80000gn/T/codex-clipboard-c40e5c4c-7e32-45e2-9496-c49de7bac4eb.png`
-  — original PageRoot Canvas and comment-rail composition.
-- `/var/folders/jx/w52403cs2hx39vwhd1sb3tg80000gn/T/codex-clipboard-b731eecd-f7b9-4463-9baf-9d91a56ffaf9.png`
-  — requested stronger selected-card boundary.
-- `/var/folders/jx/w52403cs2hx39vwhd1sb3tg80000gn/T/codex-clipboard-c66d38f6-dc35-491b-b723-d1f60d39e040.png`
-  — saved-comment edit with changed text but no confirmation.
-- The approved interactive behavior fixture in
-  `/Users/lizexuan/Documents/HTML编辑器/comment-card-interaction-preview`
-  supplies the queue-translation and wheel-handoff oracle.
+- Three user-provided local captures (not committed) established the original
+  Canvas/comment-rail composition, the stronger selected-card boundary and the
+  recovery state for a changed but unconfirmed saved-comment edit.
+- The approved external interaction fixture (not committed) supplies the
+  queue-translation and wheel-handoff oracle.
 
 Implementation evidence:
 
@@ -288,12 +274,9 @@ Date: 2026-07-30
 
 Source visual truth:
 
-- `/Users/lizexuan/.codex/generated_images/019fb1a9-d408-79e0-92bb-8962dbbd6c62/call_vmf1XsAudns5T3A0z08yp0YG.png`
-  — approved current-Tab header hierarchy.
-- `/Users/lizexuan/.codex/generated_images/019fb1a9-d408-79e0-92bb-8962dbbd6c62/call_19kVCvSNRl6CgHmLJUXF0T92.png`
-  — approved other-Tab expansion and neutral card hierarchy.
-- `/Users/lizexuan/.codex/generated_images/019fb1a9-d408-79e0-92bb-8962dbbd6c62/call_xompAKi2e8R8iC43fKaZ0y4B.png`
-  — approved resumed-composer styling.
+- Three approved generated references (not committed) define the current-Tab
+  header hierarchy, other-Tab expansion with neutral cards and the resumed
+  composer styling.
 - Final user annotations supersede two details in those images: a hidden-Tab
   draft has no duplicate “有一条未保存评论” shortcut, and every saved card,
   collapsed draft and composer follows page-position order rather than giving
@@ -405,9 +388,8 @@ Date: 2026-07-29
 
 Source visual truth:
 
-- `/var/folders/jx/w52403cs2hx39vwhd1sb3tg80000gn/T/codex-clipboard-974aae8e-4a7d-462d-a653-2e355f6f0802.png`
-  — user-provided macOS application capture showing the two-line file summary
-  and primary actions touching or crossing the old header divider.
+- User-provided macOS application capture (not committed) showing the two-line
+  file summary and primary actions touching or crossing the old header divider.
 - The source attachment is local-only and remains outside the repository.
 - User direction: preserve the existing header hierarchy and styling while
   adding enough height for every icon and label to remain inside the bar.

@@ -4,6 +4,8 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+## [0.9.5] - 2026-07-31
+
 - Run desktop interactive previews in a short-lived isolated document so
   authored scripts, relative assets, Tab controls, SVG, Canvas and dynamic
   tables work without weakening the PageRoot renderer CSP.
@@ -52,6 +54,18 @@ Notable user-visible changes are documented here. This project follows Semantic 
 - Restored the active Canvas text host and caret without a visible intermediate
   reload, kept comment anchors stable through undo/redo, and prevented late
   Chinese-composition input from reappearing after project-rule restore.
+- Simplified About PageRoot by removing redundant platform, license, telemetry
+  and update-channel labels while preserving the current version, architecture,
+  update action, repository link and local user notice.
+- Made project identity ID-first across comments, attachments, history, AI
+  handoff and rapid project switching; equivalent local paths are canonicalized,
+  stale project callbacks fail closed and internal identifiers or paths are no
+  longer surfaced as user-facing recovery messages.
+- Refactored Workbench state into explicit project, document, comment, history,
+  version and AI-run sessions, extracted presentation and Canvas modules, and
+  retired the unused V1 editing path while keeping the V2 source-patch contract.
+- Added governed task worktree audit, synchronization and retirement commands
+  so active changes remain visible and protected throughout parallel work.
 
 ## [0.9.4] - 2026-07-29
 
@@ -210,7 +224,8 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 - Published the first public macOS release in this repository under the earlier YuanYe artifact name.
 
-[Unreleased]: https://github.com/Charleyli925/PageRoot/compare/v0.9.4...HEAD
+[Unreleased]: https://github.com/Charleyli925/PageRoot/compare/v0.9.5...HEAD
+[0.9.5]: https://github.com/Charleyli925/PageRoot/compare/v0.9.4...v0.9.5
 [0.9.4]: https://github.com/Charleyli925/PageRoot/compare/v0.9.3...v0.9.4
 [0.9.3]: https://github.com/Charleyli925/PageRoot/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/Charleyli925/PageRoot/compare/v0.9.1...v0.9.2
