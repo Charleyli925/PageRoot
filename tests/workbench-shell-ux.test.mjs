@@ -510,7 +510,7 @@ test("header prioritizes the filename and keeps the approved action order", () =
   assert.match(styles, /\.header-actions button,[\s\S]*?border:\s*0[\s\S]*?box-shadow:\s*none/);
   assert.match(
     styles,
-    /\.window-file-icon-cluster\s*\{[\s\S]*?width:\s*60px[\s\S]*?height:\s*42px[\s\S]*?\.window-file-update-badge\s*\{[\s\S]*?top:\s*22px[\s\S]*?width:\s*60px[\s\S]*?height:\s*20px[\s\S]*?background:\s*transparent[\s\S]*?font-size:\s*8px/,
+    /\.window-file-icon-cluster\s*\{[\s\S]*?width:\s*60px[\s\S]*?height:\s*42px[\s\S]*?\.window-file-icon\s*\{[\s\S]*?top:\s*50%[\s\S]*?transform:\s*translate\(-50%, -50%\)[\s\S]*?\.window-file-update-badge\s*\{[\s\S]*?top:\s*26px[\s\S]*?width:\s*60px[\s\S]*?height:\s*20px[\s\S]*?background:\s*transparent[\s\S]*?font-size:\s*8px/,
   );
   assert.match(mainProcess, /startAutomaticChecks\(\)/);
   assert.match(mainProcess, /createApplicationUpdateController/);
@@ -1443,6 +1443,14 @@ test("explicit comment navigation translates one stable queue and rail wheel dri
     /computeAlignedRailOffset\(\{[\s\S]*?minimumTop: commentRailMinimumTop/u,
   );
   assert.match(workbench, /routeCommentRailWheel\(\{/u);
+  assert.match(
+    workbench,
+    /railMinOffset:\s*commentRailMinimumOffsetRef\.current/u,
+  );
+  assert.match(
+    workbench,
+    /computeCommentRailMinimumOffset\(\{[\s\S]*?contentBottom:[\s\S]*?viewportBottom:/u,
+  );
   assert.match(workbench, /rail\.addEventListener\("wheel", handleWheel, \{ passive: false \}\)/u);
   assert.match(workbench, /viewportTop:\s*Math\.max\(0, commentViewport\.top - commentRailOffset\)/u);
   assert.match(workbench, /"--comment-rail-offset":\s*`\$\{commentRailOffset\}px`/u);
@@ -1451,6 +1459,10 @@ test("explicit comment navigation translates one stable queue and rail wheel dri
     /transform:\s*translate3d\(0, var\(--comment-rail-offset\), 0\)/u,
   );
   assert.match(styles, /\.comment-rail-header\s*\{[\s\S]*?z-index:\s*8/u);
+  assert.match(
+    styles,
+    /\.comments-panel\.comment-rail\s*\{[\s\S]*?height:\s*var\(--comment-rail-height\)[\s\S]*?overflow-y:\s*clip/u,
+  );
   assert.doesNotMatch(workbench, /commentLayoutWasReadyRef|const becameReady/u);
   assert.match(
     workbench,

@@ -87,6 +87,26 @@ export function computeAlignedRailOffset({
 }
 
 /**
+ * The authored Canvas owns the review surface height. A longer comment queue
+ * is translated inside that fixed paper boundary instead of increasing the
+ * shared document height.
+ *
+ * @param {{ contentBottom: number; viewportBottom: number }} input
+ */
+export function computeCommentRailMinimumOffset({
+  contentBottom,
+  viewportBottom,
+}) {
+  if (!Number.isFinite(contentBottom) || !Number.isFinite(viewportBottom)) {
+    return 0;
+  }
+  return Math.min(
+    0,
+    Math.max(0, viewportBottom) - Math.max(0, contentBottom),
+  );
+}
+
+/**
  * Preserve the measured rail anchors while native source text is being edited.
  * Chromium can transiently resize or rebuild the editable island on every
  * keystroke; those intermediate coordinates must not make adjacent cards jump.
@@ -186,6 +206,7 @@ export function consumeRailRestoreWheel({ offset, deltaY }) {
  *   pageScrollTop: number;
  *   pageMaxScrollTop: number;
  *   railOffset: number;
+ *   railMinOffset?: number;
  *   deltaY: number;
  * }} input
  */
@@ -193,6 +214,7 @@ export function routeCommentRailWheel({
   pageScrollTop,
   pageMaxScrollTop,
   railOffset,
+  railMinOffset = 0,
   deltaY,
 }) {
   const safeMaxScrollTop = Number.isFinite(pageMaxScrollTop)
@@ -203,6 +225,9 @@ export function routeCommentRailWheel({
     : 0;
   const safeRailOffset = Number.isFinite(railOffset)
     ? Math.min(0, railOffset)
+    : 0;
+  const safeRailMinOffset = Number.isFinite(railMinOffset)
+    ? Math.min(0, railMinOffset)
     : 0;
   const safeDeltaY = Number.isFinite(deltaY) ? deltaY : 0;
 
@@ -215,15 +240,21 @@ export function routeCommentRailWheel({
     const pageDistance = Math.min(safeDeltaY, availablePageDistance);
     nextPageScrollTop += pageDistance;
     remainder -= pageDistance;
+    if (remainder > 0 && nextRailOffset > safeRailMinOffset) {
+      const availableRailDistance = nextRailOffset - safeRailMinOffset;
+      const railDistance = Math.min(remainder, availableRailDistance);
+      nextRailOffset -= railDistance;
+      remainder -= railDistance;
+    }
   } else if (safeDeltaY < 0) {
     const requestedPageDistance = -safeDeltaY;
     const pageDistance = Math.min(requestedPageDistance, safePageScrollTop);
     nextPageScrollTop -= pageDistance;
     remainder += pageDistance;
 
-    if (nextPageScrollTop <= 0 && remainder < 0 && safeRailOffset < 0) {
+    if (nextPageScrollTop <= 0 && remainder < 0 && nextRailOffset < 0) {
       const restored = consumeRailRestoreWheel({
-        offset: safeRailOffset,
+        offset: nextRailOffset,
         deltaY: remainder,
       });
       nextRailOffset = restored.offset;

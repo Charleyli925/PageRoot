@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   computeAlignedRailOffset,
+  computeCommentRailMinimumOffset,
   consumeRailRestoreWheel,
   layoutCommentRailItems,
   routeCommentRailWheel,
@@ -124,6 +125,21 @@ test("aligned queue never translates below its natural position", () => {
   assert.equal(computeAlignedRailOffset({
     targetTop: 320,
     cardTop: 180,
+  }), 0);
+});
+
+test("comment overflow stays inside the authored page bottom", () => {
+  assert.equal(computeCommentRailMinimumOffset({
+    contentBottom: 1_180,
+    viewportBottom: 744,
+  }), -436);
+  assert.equal(computeCommentRailMinimumOffset({
+    contentBottom: 620,
+    viewportBottom: 744,
+  }), 0);
+  assert.equal(computeCommentRailMinimumOffset({
+    contentBottom: Number.NaN,
+    viewportBottom: 744,
   }), 0);
 });
 
@@ -257,4 +273,28 @@ test("downward wheel keeps aligned queue stable and scrolls the page", () => {
   assert.equal(result.pageScrollTop, 115);
   assert.equal(result.railOffset, -140);
   assert.equal(result.remainder, 0);
+});
+
+test("downward wheel pulls hidden comments in only after the page reaches bottom", () => {
+  const pageThenRail = routeCommentRailWheel({
+    pageScrollTop: 860,
+    pageMaxScrollTop: 900,
+    railOffset: 0,
+    railMinOffset: -260,
+    deltaY: 100,
+  });
+  assert.equal(pageThenRail.pageScrollTop, 900);
+  assert.equal(pageThenRail.railOffset, -60);
+  assert.equal(pageThenRail.remainder, 0);
+
+  const shortPage = routeCommentRailWheel({
+    pageScrollTop: 0,
+    pageMaxScrollTop: 0,
+    railOffset: 0,
+    railMinOffset: -260,
+    deltaY: 400,
+  });
+  assert.equal(shortPage.pageScrollTop, 0);
+  assert.equal(shortPage.railOffset, -260);
+  assert.equal(shortPage.remainder, 140);
 });

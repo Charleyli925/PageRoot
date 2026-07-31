@@ -52,12 +52,15 @@ Comments + frozen input
   and the authored document's natural content height. Workbench renders cards
   only after that complete snapshot is current; one missing coordinate degrades
   only its owning item and is not permission to use saved geometry or a page-end
-  fallback. Iframe viewport height is never fed back as authored content height.
+  fallback. That natural Canvas height also owns the comment rail's fixed bottom:
+  a longer comment queue is clipped and translated inside the rail instead of
+  feeding height back into the Grid or shared page. Iframe viewport height is
+  never fed back as authored content height.
 - Edit-mode presentation actions reuse that same context. A pure allowlist
-  resolver recognizes strict source-backed Tabs, native details and local
-  disclosures; one Canvas executor applies the accepted context. It never
-  invokes authored handlers, serializes the preview DOM or creates a second
-  interaction mode.
+  resolver recognizes strict source-backed Tabs, bounded explicit-ID and
+  constant-index legacy Tabs, native details and local disclosures; one Canvas
+  executor applies the accepted context. It never invokes authored handlers,
+  serializes the preview DOM or creates a second interaction mode.
 - `IslandEditingController` is the only production text-edit engine in PageRoot 0.9.0. `contenteditable="true"` supplies focus, caret, Selection and IME composition, while the controller owns insertion, deletion, line breaks, paste and formatting. Chromium DOM serialization never has commit authority.
 - `editable-island` owns the V2 capability and normalization contract. An accepted edit replaces only the selected element's parsed `contentRange`; bytes outside that range remain exact. Inside the range, parse5 may perform the smallest safe normalization needed to preserve inline semantics, comments and immutable authored atoms.
 - `native-edit-policy` owns shared session attributes and checkpoint timing. `native-edit-runtime-preflight` still proves that enabling the island does not change geometry or text style; `HtmlCanvasEditor` only coordinates selection, the island session and SourcePatch.

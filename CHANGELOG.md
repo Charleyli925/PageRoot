@@ -22,7 +22,9 @@ Notable user-visible changes are documented here. This project follows Semantic 
 - Keep comment-card geometry fixed while actions appear, strengthen the focused
   boundary, align an explicitly selected card by translating the unchanged
   queue, and route wheel input over the rail through the shared page before
-  restoring comments hidden above the top edge.
+  restoring comments hidden above the top edge. Dense comments are now clipped
+  at the Canvas page bottom instead of stretching a short HTML page; continued
+  wheel input at that bottom pulls the remaining queue into view.
 - Treat saved-comment text and attachment edits as one recoverable transaction:
   unchanged edits cancel automatically on Tab changes, while changed but
   unconfirmed edits remain available from an “unsaved modification” shortcut.
@@ -34,9 +36,13 @@ Notable user-visible changes are documented here. This project follows Semantic 
 - Save an in-place filename edit when the user clicks blank title-bar space,
   matching the existing Enter and click-away behavior without changing file
   identity or version history.
-- Let edit mode reveal source-backed Tab panels, native details and strict
-  local disclosure regions from the selection toolbar or Option-click, while
-  links, forms, popups, drawers and authored scripts remain inert.
+- Let edit mode reveal source-backed Tab panels, including strict explicit-ID
+  and constant-number indexed report Tabs, plus native details and local
+  disclosure regions from the selection toolbar or Option-click, while links,
+  forms, popups, drawers and authored scripts remain inert.
+- Keep the HTML identity icon centered on the two-line file summary in all
+  three no-update, `New!` and `New! 重启更新` states; the update label overlays
+  the icon independently without shifting the title-bar layout.
 
 ## [0.9.4] - 2026-07-29
 

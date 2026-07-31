@@ -70,12 +70,16 @@ from historical geometry.
 
 Edit-mode content reveal is another transition of that same projection, not a
 new owner. `HtmlCanvasEditor` may propose only an allowlisted source-backed
-presentation action: either the strict ARIA/HTML semantic adapter or the
-bounded explicit `data-p`/`data-tab` → panel-ID adapter. Workbench accepts it
-only for the current document key and preserves the shared page scroll position.
-The Canvas then applies the accepted context without calling `onChange`,
-SourcePatch, authored handlers or persistence. No React view may keep a second
-copy of this state for shortcut handling or toolbar rendering.
+presentation action: the strict ARIA/HTML semantic adapter, the bounded explicit
+`data-p`/`data-tab` → panel-ID adapter, or the bounded constant-index handler
+adapter whose controls and unique related panel group prove the same active
+position. Workbench accepts it only for the current document key and preserves
+the shared page scroll position. The Canvas then applies the accepted context
+without calling `onChange`, SourcePatch, authored handlers or persistence. No
+React view may keep a second copy of this state for shortcut handling or toolbar
+rendering. The rail's transient vertical offset is likewise Workbench-owned
+presentation state: Canvas natural height supplies its bottom bound, and neither
+the offset nor queued card height may become source, Draft or Version authority.
 
 Opening a user HTML may remain lazy until the first durable product action.
 During that interval the renderer owns only an `epoch + sourcePath` locator,

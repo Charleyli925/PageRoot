@@ -17,12 +17,20 @@ Source visual truth:
 - `/var/folders/jx/w52403cs2hx39vwhd1sb3tg80000gn/T/codex-clipboard-89c6e667-57e4-46f5-aec7-81b33c31d9d6.png`
   — a real `data-p` authored tab group that previously had no safe PageRoot
   presentation action.
+- `/var/folders/jx/w52403cs2hx39vwhd1sb3tg80000gn/T/codex-clipboard-6de7aa63-29a4-41a6-99d1-2e5cac135217.png`
+  — dense comments must stop at the authored page bottom instead of stretching
+  the whole review stage.
+- `/var/folders/jx/w52403cs2hx39vwhd1sb3tg80000gn/T/codex-clipboard-c9020c92-7bfb-4d9c-9ec2-a81ad6402a13.png`
+  — the HTML icon must align with the title/metainfo block when no update label
+  is visible.
+- `/var/folders/jx/w52403cs2hx39vwhd1sb3tg80000gn/T/codex-clipboard-6617e5cc-a6ff-43b5-a838-db2b7a437dae.png`
+  — a constant-index `onclick` report Tab group needs a safe edit-mode switch.
 
 Implementation evidence:
 
+- `output/design-qa/comment-presentation-header-polish/no-update.png`
 - `output/design-qa/comment-presentation-header-polish/new-update.png`
 - `output/design-qa/comment-presentation-header-polish/restart-update.png`
-- `output/design-qa/comment-presentation-header-polish/reference-comparison.png`
 - `output/design-qa/comment-presentation-header-polish/header-geometry.json`
 - `tests/e2e/browser/native-dom-comment-tabs.spec.mjs`
 - `tests/e2e/browser/native-dom-presentation-actions.spec.mjs`
@@ -33,24 +41,25 @@ Viewport, density and state:
 - Header captures come from the real Electron renderer at a `1440px` CSS
   viewport. Each screenshot clips the top-left `900 × 88` CSS-pixel region
   and is saved at Retina 2× density as `1800 × 176` pixels.
-- `new-update.png` uses the real update-available IPC state. The downloaded
-  state dismisses the normal restart confirmation with “稍后” before
+- `no-update.png` captures the normal identity control before update state is
+  injected. `new-update.png` uses the real update-available IPC state. The
+  downloaded state dismisses the normal restart confirmation with “稍后” before
   `restart-update.png` is captured, so the header is evaluated without a
   modal overlay.
 - The browser interaction oracle runs at `1600 × 900` CSS pixels with normal
   mouse, keyboard, textarea and scroll input.
-- `reference-comparison.png` places the supplied header reference above the
-  final `New!` and `New! 重启更新` states for one visual inspection surface.
 
 Full-view and focused comparison evidence:
 
 - The HTML icon remains `34 × 34px` inside a fixed `60 × 42px` interaction
-  cluster. Both update labels occupy the lower part of that same cluster and
-  overlap the icon vertically by `12px`, producing the requested attached
-  badge treatment without increasing the header height.
-- The `88px` header contains the cluster at `y=32.875…74.875`, leaving
-  `13.125px` below it. The visible update text ends at `y=71.375`, so neither
-  state crosses the header boundary.
+  cluster and uses the cluster's exact vertical center in all three states.
+  Both update labels are absolutely positioned in the lower part of that same
+  cluster, producing the attached badge treatment without changing icon,
+  cluster or neighboring title geometry.
+- The cluster, icon and two-line title/metainfo block all share the exact
+  `y=53.875` center. The icon remains at `y=36.875…70.875` in the no-update,
+  available and downloaded captures. The visible update text ends at
+  `y=75.375`, leaving `12.625px` above the `88px` header boundary.
 - The longer visible label ends at `x=82.992`; the title/metainfo column begins
   at `x=92`, retaining a measured `9.008px` gap. The compact `New!` label has
   substantially more space. Neither label touches the title, metadata, plus
@@ -67,6 +76,10 @@ Behavioral evidence:
 - A selected comment is aligned no higher than the sticky header's measured
   safe bottom. Whole-page comments use an explicit leading scope rank, while
   all other page-position ordering remains stable.
+- The Canvas natural height owns the rail bottom. A dense queue is vertically
+  clipped rather than increasing shared-page height; after the page reaches its
+  bottom, continued downward wheel input translates later cards into view and
+  reverse input restores the natural queue.
 - During native text editing, visible comment targets retain their last stable
   top and height. Runtime text reflow therefore cannot make adjacent cards
   jump, while the next settled layout can still refresh normally.
@@ -74,14 +87,22 @@ Behavioral evidence:
   restores it after the presentation mutation. The old unconditional
   “presentation became ready” reveal is removed; explicit user navigation still
   reveals its intended target.
-- The legacy page switcher is deliberately narrow: one uniform `data-p` or
-  `data-tab` control group, unique panel IDs, one active control and one active
-  panel, matching base classes, and only disposable `active` class changes.
-  Authored scripts are never executed and source bytes are never written.
+- The legacy page switchers are deliberately narrow: either one uniform
+  `data-p` / `data-tab` control group with unique panel IDs, or one sibling
+  control group with the same exact constant-index handler and one uniquely
+  related uniform panel group. Both require a single matching active pair and
+  permit only disposable `active` class changes. Authored scripts are never
+  executed and source bytes are never written.
 - The supplied `26Q2搜索市场概览(1).html` resolves three safe controls, exposes
   “切换到此页签” for `p2`, changes only the isolated rendered presentation and
   leaves the source unchanged. Ambiguous, mixed, duplicate and multi-active
   fixtures fail closed.
+- The newly supplied four-Tab report resolves the exact
+  `switchChart(0…3)` sequence to four controls. Selecting its second control
+  proposes one `activate-tab` action with exactly four disposable class
+  transitions; no source write or handler execution is involved. Duplicate,
+  skipped, mixed, compound, multi-active and multi-panel-candidate variants
+  remain inert.
 
 Findings:
 

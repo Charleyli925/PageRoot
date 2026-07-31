@@ -69,6 +69,7 @@ import {
 } from "./lib/comment-virtualization.js";
 import {
   computeAlignedRailOffset,
+  computeCommentRailMinimumOffset,
   layoutCommentRailItems,
   routeCommentRailWheel,
   shouldSubmitCommentOnEnter,
@@ -1757,6 +1758,7 @@ export default function Workbench() {
   const commentEditSessionRef = useRef<CommentEditSession | null>(null);
   const commentEditResumePendingRef = useRef<string | null>(null);
   const commentRailOffsetRef = useRef(0);
+  const commentRailMinimumOffsetRef = useRef(0);
   const reviewRevealRequestRef = useRef(0);
   const reviewRevealPendingRef = useRef<{
     target: HtmlCanvasSelection;
@@ -7086,6 +7088,7 @@ export default function Workbench() {
           stage.scrollHeight - stage.clientHeight,
         ),
         railOffset: currentRailOffset,
+        railMinOffset: commentRailMinimumOffsetRef.current,
         deltaY: event.deltaY,
       });
       if (Math.abs(routed.railOffset - currentRailOffset) > 0.01) {
@@ -9974,15 +9977,28 @@ export default function Workbench() {
     queueReviewPairReveal,
     renderedVisibleCommentItems,
   ]);
-  const commentRailContentHeight = Math.max(
-    commentRailHeight,
-    commentRailLayout.bottom + 24,
-    720,
-  );
   const canvasDocumentHeight = Math.max(
     760,
     Math.ceil(commentRailHeight || 0),
   );
+  const commentRailContentHeight = Math.max(
+    canvasDocumentHeight,
+    commentRailLayout.bottom + 24,
+  );
+  const commentRailMinimumOffset = computeCommentRailMinimumOffset({
+    contentBottom: commentRailLayout.bottom + 14,
+    viewportBottom: canvasDocumentHeight - 14,
+  });
+  useLayoutEffect(() => {
+    commentRailMinimumOffsetRef.current = commentRailMinimumOffset;
+    const currentOffset = commentRailOffsetRef.current;
+    if (
+      commentRailFollowsFocus
+      || currentOffset >= commentRailMinimumOffset
+    ) return;
+    commentRailOffsetRef.current = commentRailMinimumOffset;
+    setCommentRailOffset(commentRailMinimumOffset);
+  }, [commentRailFollowsFocus, commentRailMinimumOffset]);
   const returnToEditingFromTerminalRun = (adjustRequirements: boolean) => {
     const completedRun = activeRunRef.current;
     if (completedRun?.sourcePath) {
@@ -10802,7 +10818,11 @@ export default function Workbench() {
             data-layout-text-editing={
               commentLayoutAuthority.textEditing ? "true" : undefined
             }
+            data-rail-min-offset={commentRailMinimumOffset}
             data-rail-following={commentRailFollowsFocus ? "true" : "false"}
+            style={{
+              "--comment-rail-height": `${canvasDocumentHeight}px`,
+            } as CSSProperties}
             tabIndex={-1}
           >
           <div

@@ -50,6 +50,19 @@ async function saveComment(page, frame, caseId, text) {
   await composer.getByRole("button", { name: "评论", exact: true }).click();
 }
 
+async function saveGlobalComment(page, text) {
+  await page.getByRole("button", {
+    name: "全局评论",
+    exact: true,
+  }).click();
+  const composer = page.getByRole("region", { name: "添加评论" });
+  const textbox = composer.getByRole("textbox", { name: "评论内容" });
+  await expect(textbox).toBeFocused();
+  await textbox.fill(text);
+  await textbox.press("Enter");
+  await expect(composer).toHaveCount(0);
+}
+
 test("comment textareas focus immediately and use Enter to save with Shift+Enter for new lines", async ({
   page,
 }) => {
@@ -135,6 +148,91 @@ test("focused comments remain below the sticky rail header and global comments s
   await expect(cards).toHaveCount(2);
   await expect(cards.nth(0)).toContainText("整个页面优先处理");
   await expect(cards.nth(1)).toContainText(localText);
+});
+
+test("dense comments stay inside the Canvas bottom and wheel into view without stretching the page", async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/");
+  const { frame } = await loadFixture(page, "tabbed-comments.html", {
+    buffer: fixtureBuffer("tabbed-comments.html"),
+  });
+  const stage = page.locator(".review-scroll-stage");
+  const rail = page.locator('aside[aria-label="本轮评论"]');
+  const canvas = page.getByTestId("html-canvas-editor");
+  const baselineStageHeight = await stage.evaluate(
+    (element) => element.scrollHeight,
+  );
+
+  const commentTexts = Array.from(
+    { length: 7 },
+    (_, index) => `页面顶部密集评论 ${index + 1}`,
+  );
+  for (const text of commentTexts) {
+    await saveGlobalComment(page, text);
+  }
+  await frame.locator(caseSelector("tab-control-one")).click();
+
+  const cards = rail.locator(
+    ".comment-rail-content > .comment-card:not(.draft-comment-card)",
+  );
+  await expect(cards).toHaveCount(commentTexts.length);
+  await expect.poll(() => rail.evaluate((element) => (
+    Number.parseFloat(
+      getComputedStyle(element).getPropertyValue("--comment-rail-height"),
+    )
+  ))).toBeGreaterThan(0);
+  const [stageAfter, railBox, canvasBox] = await Promise.all([
+    stage.evaluate((element) => ({
+      clientHeight: element.clientHeight,
+      scrollHeight: element.scrollHeight,
+    })),
+    rail.boundingBox(),
+    canvas.boundingBox(),
+  ]);
+  expect(railBox).not.toBeNull();
+  expect(canvasBox).not.toBeNull();
+  expect(stageAfter.scrollHeight).toBeLessThanOrEqual(
+    Math.max(baselineStageHeight, stageAfter.clientHeight) + 1,
+  );
+  expect(Math.abs(railBox.height - canvasBox.height)).toBeLessThanOrEqual(1);
+
+  const lastCard = cards.last();
+  const lastBefore = await lastCard.boundingBox();
+  expect(lastBefore).not.toBeNull();
+  expect(lastBefore.y + lastBefore.height)
+    .toBeGreaterThan(railBox.y + railBox.height);
+
+  await page.mouse.move(
+    railBox.x + Math.floor(railBox.width / 2),
+    railBox.y + Math.min(railBox.height - 40, 260),
+  );
+  await page.mouse.wheel(0, 2_000);
+  await expect.poll(() => rail.locator(".comment-rail-content").evaluate(
+    (element) => Number.parseFloat(
+      getComputedStyle(element).getPropertyValue("--comment-rail-offset"),
+    ),
+  )).toBeLessThan(-1);
+  const lastAfter = await lastCard.boundingBox();
+  expect(lastAfter).not.toBeNull();
+  expect(lastAfter.y + lastAfter.height)
+    .toBeLessThanOrEqual(railBox.y + railBox.height - 20);
+  expect(await stage.evaluate((element) => element.scrollHeight))
+    .toBeLessThanOrEqual(
+      Math.max(baselineStageHeight, stageAfter.clientHeight) + 1,
+    );
+  await page.screenshot({
+    path: testInfo.outputPath("comment-rail-bottom-boundary.png"),
+  });
+
+  await page.mouse.wheel(0, -2_000);
+  await expect.poll(() => rail.locator(".comment-rail-content").evaluate(
+    (element) => Number.parseFloat(
+      getComputedStyle(element).getPropertyValue("--comment-rail-offset"),
+    ),
+  )).toBe(0);
 });
 
 test("comment cards keep stable anchors while nearby source text is being edited", async ({

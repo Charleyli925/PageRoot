@@ -1310,7 +1310,7 @@ test("automatic update actions sit on the HTML icon and the icon opens About", a
       "output/design-qa/comment-presentation-header-polish",
     );
     mkdirSync(evidenceDirectory, { recursive: true });
-    const captureHeader = async (fileName) => {
+    const captureHeader = async (fileName, { badgeExpected = true } = {}) => {
       const geometry = await launched.page.evaluate(() => {
         const rect = (selector) => {
           const element = document.querySelector(selector);
@@ -1338,19 +1338,28 @@ test("automatic update actions sit on the HTML icon and the icon opens About", a
       expect(geometry.header).not.toBeNull();
       expect(geometry.cluster).not.toBeNull();
       expect(geometry.icon).not.toBeNull();
-      expect(geometry.badge).not.toBeNull();
-      expect(geometry.badgeLabel).not.toBeNull();
       expect(geometry.fileCopy).not.toBeNull();
-      expect(geometry.badgeLabel.top).toBeGreaterThanOrEqual(
-        geometry.header.top,
-      );
-      expect(geometry.badgeLabel.bottom).toBeLessThanOrEqual(
-        geometry.header.bottom,
-      );
-      expect(geometry.badgeLabel.right).toBeLessThanOrEqual(
-        geometry.fileCopy.left - 8,
-      );
-      expect(geometry.badgeLabel.top).toBeLessThan(geometry.icon.bottom);
+      expect(Math.abs(
+        (geometry.icon.top + geometry.icon.bottom) / 2
+        - (geometry.cluster.top + geometry.cluster.bottom) / 2,
+      )).toBeLessThanOrEqual(0.5);
+      if (badgeExpected) {
+        expect(geometry.badge).not.toBeNull();
+        expect(geometry.badgeLabel).not.toBeNull();
+        expect(geometry.badgeLabel.top).toBeGreaterThanOrEqual(
+          geometry.header.top,
+        );
+        expect(geometry.badgeLabel.bottom).toBeLessThanOrEqual(
+          geometry.header.bottom,
+        );
+        expect(geometry.badgeLabel.right).toBeLessThanOrEqual(
+          geometry.fileCopy.left - 8,
+        );
+        expect(geometry.badgeLabel.top).toBeLessThan(geometry.icon.bottom);
+      } else {
+        expect(geometry.badge).toBeNull();
+        expect(geometry.badgeLabel).toBeNull();
+      }
       await launched.page.screenshot({
         path: path.join(evidenceDirectory, fileName),
         clip: {
@@ -1362,6 +1371,10 @@ test("automatic update actions sit on the HTML icon and the icon opens About", a
       });
       return geometry;
     };
+
+    const noUpdateGeometry = await captureHeader("no-update.png", {
+      badgeExpected: false,
+    });
 
     await launched.electronApp.evaluate(({ BrowserWindow }) => {
       BrowserWindow.getAllWindows()[0]?.webContents.send(
@@ -1417,10 +1430,16 @@ test("automatic update actions sit on the HTML icon and the icon opens About", a
       requestAnimationFrame(() => requestAnimationFrame(resolve));
     }));
     const restartGeometry = await captureHeader("restart-update.png");
+    for (const geometry of [newGeometry, restartGeometry]) {
+      expect(geometry.icon).toEqual(noUpdateGeometry.icon);
+      expect(geometry.cluster).toEqual(noUpdateGeometry.cluster);
+      expect(geometry.fileCopy).toEqual(noUpdateGeometry.fileCopy);
+    }
     writeFileSync(
       path.join(evidenceDirectory, "header-geometry.json"),
       JSON.stringify({
         viewport: { width: newGeometry.viewportWidth },
+        none: noUpdateGeometry,
         available: newGeometry,
         downloaded: restartGeometry,
       }, null, 2),

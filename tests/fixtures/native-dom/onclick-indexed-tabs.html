@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>常量索引脚本标签页</title>
+  <style>
+    html,
+    body {
+      margin: 0;
+    }
+
+    body {
+      padding: 48px;
+      color: #272532;
+      background: #f5f6fa;
+      font: 16px/1.6 system-ui, sans-serif;
+    }
+
+    .report-card {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 28px;
+      border-radius: 16px;
+      background: #fff;
+    }
+
+    .chart-tabs {
+      display: flex;
+    }
+
+    .chart-tab {
+      padding: 8px 16px;
+      border: 1px solid #ddd;
+      border-bottom: 0;
+      background: #f8f9fa;
+      cursor: pointer;
+    }
+
+    .chart-tab.active {
+      color: #5a55df;
+      background: #fff;
+      font-weight: 700;
+    }
+
+    .chart-panel {
+      display: none;
+      min-height: 420px;
+      padding: 24px;
+      border: 1px solid #ddd;
+      background: #fff;
+    }
+
+    .chart-panel.active {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <main class="report-card">
+    <h1>趋势监控</h1>
+    <div class="chart-tabs">
+      <div
+        class="chart-tab active"
+        data-native-case="onclick-indexed-tab-one"
+        onclick="switchChart(0)"
+      >锁单确收增幅</div>
+      <div
+        class="chart-tab"
+        data-native-case="onclick-indexed-tab-two"
+        onclick="switchChart(1)"
+      >IPV增幅</div>
+      <div
+        class="chart-tab"
+        data-native-case="onclick-indexed-tab-three"
+        onclick="switchChart(2)"
+      >CVR增幅</div>
+      <div
+        class="chart-tab"
+        data-native-case="onclick-indexed-tab-four"
+        onclick="switchChart(3)"
+      >EBITA率对比</div>
+    </div>
+    <div class="chart-panel active" id="chart0">
+      <p>锁单确收趋势保持可见。</p>
+    </div>
+    <div class="chart-panel" id="chart1">
+      <p>IPV 趋势通过临时页面状态显示。</p>
+    </div>
+    <div class="chart-panel" id="chart2">
+      <p>CVR 趋势通过临时页面状态显示。</p>
+    </div>
+    <div class="chart-panel" id="chart3">
+      <p>EBITA 趋势通过临时页面状态显示。</p>
+    </div>
+  </main>
+  <script>
+    function switchChart(index) {
+      document.querySelectorAll(".chart-tab").forEach((tab, tabIndex) => {
+        tab.classList.toggle("active", tabIndex === index);
+      });
+      document.querySelectorAll(".chart-panel").forEach((panel, panelIndex) => {
+        panel.classList.toggle("active", panelIndex === index);
+      });
+      document.documentElement.dataset.authorAction = String(index);
+    }
+  </script>
+</body>
+</html>

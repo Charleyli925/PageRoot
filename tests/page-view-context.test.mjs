@@ -75,6 +75,38 @@ const DATA_LINKED_TAB_HTML = `<!doctype html>
 </body>
 </html>`;
 
+const INDEXED_HANDLER_TAB_HTML = `<!doctype html>
+<html>
+<head>
+  <style>
+    .chart-panel { display: none; }
+    .chart-panel.active { display: block; }
+  </style>
+</head>
+<body>
+  <section class="report-card">
+    <div class="chart-tabs">
+      <div id="indexed-tab-one" class="chart-tab active" onclick="switchChart(0)">第一页</div>
+      <div id="indexed-tab-two" class="chart-tab" onclick="switchChart(1)"><span id="indexed-tab-two-label">第二页</span></div>
+      <div id="indexed-tab-three" class="chart-tab" onclick="switchChart(2)">第三页</div>
+    </div>
+    <div id="indexed-panel-one" class="chart-panel active"><p>第一页正文</p></div>
+    <div id="indexed-panel-two" class="chart-panel"><p>第二页正文</p></div>
+    <div id="indexed-panel-three" class="chart-panel"><p>第三页正文</p></div>
+  </section>
+  <script>
+    function switchChart(index) {
+      document.querySelectorAll(".chart-tab").forEach((tab, tabIndex) => {
+        tab.classList.toggle("active", tabIndex === index);
+      });
+      document.querySelectorAll(".chart-panel").forEach((panel, panelIndex) => {
+        panel.classList.toggle("active", panelIndex === index);
+      });
+    }
+  </script>
+</body>
+</html>`;
+
 function sourceNodeId(index, id) {
   const element = index.elements.find(
     (candidate) => candidate.stableAttributes.id === id,
@@ -439,6 +471,47 @@ test("explicit data-linked tabs switch only the bounded active-class context", (
   assert.deepEqual(currentAction.nextContext, action.nextContext);
 });
 
+test("constant-index handler tabs switch without evaluating authored code", () => {
+  const html = INDEXED_HANDLER_TAB_HTML;
+  const index = buildSourceIndex(html);
+  const action = createPagePresentationAction({
+    html,
+    sourceIndex: index,
+    documentKey: "editing:/tmp/indexed-report.html",
+    generation: 6,
+    targetRef: targetRef(index, "indexed-tab-two-label"),
+  });
+
+  assert.ok(action);
+  assert.equal(action.kind, "activate-tab");
+  assert.equal(action.label, "切换到此页签");
+  assert.equal(action.isCurrent, false);
+  assert.equal(index.source, html);
+
+  const resolved = resolvePageViewContext(html, action.nextContext);
+  const stateById = new Map(resolved.entries.map((item) => [
+    resolved.sourceIndex.byNodeId.get(item.sourceNodeId)?.stableAttributes.id,
+    item.entry,
+  ]));
+  assert.deepEqual(stateById.get("indexed-tab-one")?.classRemove, ["active"]);
+  assert.deepEqual(stateById.get("indexed-tab-two")?.classAdd, ["active"]);
+  assert.deepEqual(stateById.get("indexed-panel-one")?.classRemove, ["active"]);
+  assert.deepEqual(stateById.get("indexed-panel-two")?.classAdd, ["active"]);
+  assert.equal(stateById.size, 4);
+
+  const currentAction = createPagePresentationAction({
+    html,
+    sourceIndex: index,
+    documentKey: "editing:/tmp/indexed-report.html",
+    currentContext: action.nextContext,
+    targetRef: targetRef(index, "indexed-tab-two"),
+  });
+  assert.ok(currentAction);
+  assert.equal(currentAction.label, "当前页签");
+  assert.equal(currentAction.isCurrent, true);
+  assert.deepEqual(currentAction.nextContext, action.nextContext);
+});
+
 test("ambiguous data-linked tabs fail closed", () => {
   const cases = [
     DATA_LINKED_TAB_HTML.replace(
@@ -479,6 +552,48 @@ test("ambiguous data-linked tabs fail closed", () => {
     documentKey: "editing:onclick-only",
     targetRef: targetRef(onclickIndex, "legacy-tab-two"),
   }), null);
+});
+
+test("ambiguous constant-index handler tabs fail closed", () => {
+  const cases = [
+    INDEXED_HANDLER_TAB_HTML.replace(
+      'onclick="switchChart(1)"',
+      'onclick="switchChart(0)"',
+    ),
+    INDEXED_HANDLER_TAB_HTML.replace(
+      'onclick="switchChart(1)"',
+      'onclick="showChart(1)"',
+    ),
+    INDEXED_HANDLER_TAB_HTML.replace(
+      'onclick="switchChart(1)"',
+      'onclick="switchChart(1); reportClick()"',
+    ),
+    INDEXED_HANDLER_TAB_HTML.replace(
+      'class="chart-tab" onclick="switchChart(1)"',
+      'class="chart-tab active" onclick="switchChart(1)"',
+    ),
+    INDEXED_HANDLER_TAB_HTML.replace(
+      'class="chart-panel"><p>第二页正文',
+      'class="chart-panel active"><p>第二页正文',
+    ),
+    INDEXED_HANDLER_TAB_HTML.replace(
+      "</section>",
+      `<div class="alternate-panel active"><p>另一组第一页</p></div>
+       <div class="alternate-panel"><p>另一组第二页</p></div>
+       <div class="alternate-panel"><p>另一组第三页</p></div>
+       </section>`,
+    ),
+  ];
+
+  for (const html of cases) {
+    const index = buildSourceIndex(html);
+    assert.equal(createPagePresentationAction({
+      html,
+      sourceIndex: index,
+      documentKey: "editing:indexed-ambiguous",
+      targetRef: targetRef(index, "indexed-tab-two"),
+    }), null);
+  }
 });
 
 test("presentation actions preserve bounded read-only visuals", () => {
