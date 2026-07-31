@@ -373,17 +373,22 @@ test("workbench transitions fail closed when a native DOM edit cannot commit or 
   );
 });
 
-test("outer source reversal shortcuts are blocked without exposing reversal APIs", () => {
+test("outer source reversal shortcuts route to persistent source history without a canvas-local stack", () => {
   const shortcutFlow = workbench.slice(
     workbench.indexOf("const requestUserFlush"),
     workbench.indexOf("const openCommentComposer"),
   );
   assert.match(
     shortcutFlow,
-    /event\.key\.toLowerCase\(\) === "z"[\s\S]*?target\?\.isContentEditable[\s\S]*?event\.preventDefault\(\);[\s\S]*?return;/u,
+    /const requestSourceHistoryAction = useCallback[\s\S]*?sourceHistorySessionRef\.current\.createAction[\s\S]*?bridgeClient\.sourceHistoryAction/u,
+  );
+  assert.match(
+    shortcutFlow,
+    /ownsNativeTextHistory\(target\)[\s\S]*?requestSourceHistoryAction\(/u,
   );
   assert.doesNotMatch(canvas, /\b(?:undo|redo): \(\) => boolean/u);
   assert.doesNotMatch(shortcutFlow, /editorRef\.current\?\.(?:undo|redo)/u);
+  assert.doesNotMatch(canvas, /undoStackRef|redoStackRef/u);
 });
 
 test("external source adoption invalidates the active native editing session", () => {

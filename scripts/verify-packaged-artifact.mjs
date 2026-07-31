@@ -39,6 +39,7 @@ const REQUIRED_BRIDGE_FILES = [
   "attachment-storage.mjs",
   "draft-aggregate.mjs",
   "draft-service.mjs",
+  "source-history-service.mjs",
 ];
 const REQUIRED_PACKAGED_MODULES = [
   "argparse",
@@ -60,7 +61,7 @@ const REQUIRED_PACKAGED_MODULES = [
   "tiny-typed-emitter",
   "universalify",
 ];
-const REQUIRED_SHARED_FILES = ["draft-aggregate.mjs"];
+const REQUIRED_SHARED_FILES = ["draft-aggregate.mjs", "source-history.mjs"];
 const REQUIRED_LEGAL_RESOURCES = [
   "PageRoot 用户声明与免责声明.txt",
   "LICENSE",

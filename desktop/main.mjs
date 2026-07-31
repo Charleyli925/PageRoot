@@ -165,6 +165,10 @@ const UPDATE_CHANNELS = Object.freeze({
 const USAGE_CHANNELS = Object.freeze({
   capture: "html-usage:capture",
 });
+const EDIT_CHANNELS = Object.freeze({
+  historyRequested: "html-edit:history-requested",
+  nativeHistory: "html-edit:native-history",
+});
 
 let bridgeProcess = null;
 let bridgePort = null;
@@ -269,6 +273,15 @@ function requestAboutPageRoot() {
   mainWindow.webContents.send(APP_CHANNELS.aboutRequested);
 }
 
+function requestRendererHistory(direction) {
+  if (
+    !rendererHasLoaded
+    || !mainWindow
+    || mainWindow.isDestroyed()
+  ) return;
+  mainWindow.webContents.send(EDIT_CHANNELS.historyRequested, { direction });
+}
+
 function installApplicationMenu() {
   if (process.platform !== "darwin") return;
   const menu = Menu.buildFromTemplate([
@@ -289,7 +302,31 @@ function installApplicationMenu() {
         { role: "quit" },
       ],
     },
-    { role: "editMenu" },
+    {
+      role: "editMenu",
+      submenu: [
+        {
+          label: "Undo",
+          accelerator: "CommandOrControl+Z",
+          click: () => requestRendererHistory("undo"),
+        },
+        {
+          label: "Redo",
+          accelerator: "CommandOrControl+Shift+Z",
+          click: () => requestRendererHistory("redo"),
+        },
+        { type: "separator" },
+        { role: "cut" },
+        { role: "copy" },
+        { role: "paste" },
+        { role: "pasteAndMatchStyle" },
+        { role: "delete" },
+        { role: "selectAll" },
+        { type: "separator" },
+        { role: "startSpeaking" },
+        { role: "stopSpeaking" },
+      ],
+    },
     { role: "windowMenu" },
   ]);
   Menu.setApplicationMenu(menu);
@@ -1424,6 +1461,20 @@ function registerProjectIpc() {
       relaunched: await coordinateApplicationRelaunch("user-relaunch"),
     })),
   );
+  ipcMain.handle(
+    EDIT_CHANNELS.nativeHistory,
+    trusted((direction) => {
+      if (direction !== "undo" && direction !== "redo") {
+        throw new TypeError("原生编辑历史方向无效。");
+      }
+      if (!mainWindow || mainWindow.isDestroyed()) {
+        return { applied: false };
+      }
+      if (direction === "undo") mainWindow.webContents.undo();
+      else mainWindow.webContents.redo();
+      return { applied: true };
+    }),
+  );
   ipcMain.on(USAGE_CHANNELS.capture, (event, payload) => {
     try {
       assertTrustedEvent(event);
@@ -1591,6 +1642,7 @@ function unregisterIpc() {
     APP_CHANNELS.closeResult,
     APP_CHANNELS.workspaceRecoveryReady,
     APP_CHANNELS.relaunch,
+    EDIT_CHANNELS.nativeHistory,
   ]) {
     ipcMain.removeHandler(channel);
   }

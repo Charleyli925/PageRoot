@@ -4,6 +4,13 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+- Added persistent, source-exact undo and redo for Canvas text, style, safe
+  structure and sibling-order edits through the existing macOS Edit menu and
+  keyboard shortcuts, including continuation after reopening a project.
+- Kept comment, project-rule and other focused text inputs on their native
+  field-local undo history without adding a Canvas toolbar action or extending
+  product-level undo to cards, attachments and other project operations.
+
 ## [0.9.4] - 2026-07-29
 
 - Increased the workbench header height and bottom breathing room so the

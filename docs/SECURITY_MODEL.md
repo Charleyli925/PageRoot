@@ -10,10 +10,16 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
 - Registry-bound readable project-directory validation; names are one safe path
   segment and must carry the short token of their internal `projectId`
 - Hash-checked atomic writes that stop on external modification
+- Bounded source-history writes that accept only the actual forward and inverse
+  SourcePatch ranges, verify the complete before/after Hash chain, and reject a
+  stale cursor, reused action identity or inconsistent replay ledger
 - Same-directory filename changes with a fixed HTML extension, source Hash
   precondition, no-overwrite destination check and a crash-recoverable
   operation journal
 - Per-process Bridge authentication token and managed workspace boundaries
+- Narrow Edit-menu IPC: the main process sends only `undo`/`redo` intent, and
+  native field history exposes only Electron's fixed undo/redo commands; the
+  renderer cannot submit a filesystem path or arbitrary editing command
 - Clipboard-only third-party AI handoff
 - Fixed app-resource lookup for the packaged user statement and disclaimer;
   the renderer can request it but cannot choose a local path
@@ -49,6 +55,11 @@ route:
 - SourcePatch may replace only the selected element's exact content range.
   Outside bytes and source Hash preconditions remain exact; only the edited
   island may be minimally normalized and reparsed.
+- Canvas undo/redo never serializes that preview DOM. The Bridge applies only a
+  retained exact inverse/forward Patch after matching project/document
+  identity, source Hash, history revision and cursor. Source HTML and the
+  bounded journal share one crash-recoverable pending-write boundary; an
+  external write or broken chain establishes a fresh boundary or fails closed.
 
 Pure-browser preview is a different, strictly weaker capability: authored scripts and interactions may run inside the sandbox, but PageRoot editing, comments, attachments, local persistence and AI submission are unavailable. Its transient page state is never treated as unsaved PageRoot content.
 

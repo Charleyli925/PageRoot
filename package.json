@@ -215,8 +215,16 @@
         "to": "bridge/draft-service.mjs"
       },
       {
+        "from": "scripts/source-history-service.mjs",
+        "to": "bridge/source-history-service.mjs"
+      },
+      {
         "from": "shared/draft-aggregate.mjs",
         "to": "shared/draft-aggregate.mjs"
+      },
+      {
+        "from": "shared/source-history.mjs",
+        "to": "shared/source-history.mjs"
       },
       {
         "from": "node_modules/parse5",
@@ -357,6 +365,7 @@
           "project-state.v3.schema.json",
           "runtime-state.v3.schema.json",
           "scope-report.v1.schema.json",
+          "source-history.v1.schema.json",
           "user-supplement.v1.schema.json",
           "version-manifest.v3.schema.json",
           "version-transaction.v1.schema.json"

@@ -283,6 +283,41 @@ async function expectCheckpointPersisted(page, afterRevision) {
   return Number(await indicator.getAttribute("data-persisted-revision"));
 }
 
+async function clickEditHistoryMenu(electronApp, direction) {
+  await electronApp.evaluate(
+    ({ BrowserWindow, Menu }, requestedDirection) => {
+      const menu = Menu.getApplicationMenu();
+      const expectedLabel = requestedDirection === "undo" ? "Undo" : "Redo";
+      const editMenu = menu?.items.find((item) => (
+        item.submenu?.items.some(
+          (candidate) => candidate.label === expectedLabel,
+        )
+      ));
+      const item = editMenu?.submenu?.items.find(
+        (candidate) => candidate.label === expectedLabel,
+      );
+      if (!item?.click) {
+        throw new Error(`Edit > ${expectedLabel} is not installed.`);
+      }
+      item.click(item, BrowserWindow.getAllWindows()[0], {});
+    },
+    direction,
+  );
+}
+
+async function selectAuthoredCase(frame, caseId) {
+  await frame.locator(caseSelector(caseId)).evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    element.dispatchEvent(new MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+      clientX: rect.left + Math.min(4, rect.width / 2),
+      clientY: rect.top + Math.min(4, rect.height / 2),
+      view: window,
+    }));
+  });
+}
+
 async function replayApplePinyinStyledWrapperCommit(frame, caseId) {
   const target = frame.locator(caseSelector(caseId));
   const originalText = await target.textContent();
@@ -808,6 +843,255 @@ test("Electron autosaves one authorized disk patch and reopens the same forward 
     });
     expect(await reopenedFrame.locator("[data-lexical-editor]").count()).toBe(0);
     expect(readFileSync(sourcePath).equals(expected)).toBe(true);
+
+    await closePageRootGracefully(reopenedApp);
+    reopenedApp = null;
+  } finally {
+    if (firstApp) await stopPageRoot(firstApp, isolatedUserData, { cleanup: false });
+    if (reopenedApp) await stopPageRoot(reopenedApp, isolatedUserData, { cleanup: false });
+    removeIsolatedUserData(isolatedUserData);
+    removeValidatedTemporaryDirectory(
+      sourceDirectory,
+      "pageroot-native-source-e2e-",
+    );
+  }
+});
+
+test("Electron persists text, style, structure, and reorder undo while focused fields stay native", async () => {
+  test.setTimeout(120_000);
+  const sourceDirectory = mkdtempSync(path.join(tmpdir(), "pageroot-native-source-e2e-"));
+  const sourcePath = path.join(sourceDirectory, "persistent-source-history.html");
+  const originalToken = "SOURCE_FIDELITY_TOKEN_001";
+  const replacement = "撤销历史已持久化";
+  const original = withBomAndCrLf(fixtureBuffer("source-fidelity.html"));
+  const expected = replaceEditableIslandBytes(
+    original,
+    "source-fidelity",
+    `<span title='single-quoted' data-order-b="2" data-order-a='1'>${replacement}</span>`,
+  );
+  writeFileSync(sourcePath, original);
+
+  const isolatedUserData = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-"));
+  let firstApp = null;
+  let reopenedApp = null;
+  try {
+    const firstLaunch = await launchPageRoot({
+      isolatedUserData,
+      activeSourcePath: sourcePath,
+    });
+    firstApp = firstLaunch.electronApp;
+    const { frame } = await loadedDiskFrame(
+      firstLaunch.page,
+      sourcePath,
+      "source-fidelity",
+    );
+    await activateNativeEdit(frame, "source-fidelity");
+    await setTextSelection(frame, "source-fidelity", 0, originalToken.length);
+    await firstLaunch.page.keyboard.insertText(replacement);
+    await firstLaunch.page.keyboard.press(keyShortcut("S"));
+    const firstPersistedRevision = await expectCheckpointPersisted(
+      firstLaunch.page,
+      0,
+    );
+    expect(readFileSync(sourcePath).equals(expected)).toBe(true);
+    await closePageRootGracefully(firstApp);
+    firstApp = null;
+
+    const reopened = await launchPageRoot({ isolatedUserData });
+    reopenedApp = reopened.electronApp;
+    let { frame: reopenedFrame } = await loadedDiskFrame(
+      reopened.page,
+      sourcePath,
+      "source-fidelity",
+    );
+    await reopened.page.getByRole("button", { name: "全局评论" }).click();
+    const commentInput = reopened.page.getByRole("textbox", {
+      name: "评论内容",
+    });
+    await commentInput.fill("原文");
+    await commentInput.focus();
+    await reopened.page.keyboard.press("End");
+    await reopened.page.keyboard.insertText("新增");
+    await expect(commentInput).toHaveValue("原文新增");
+    await clickEditHistoryMenu(reopenedApp, "undo");
+    await expect(commentInput).toHaveValue("原文");
+    expect(
+      readFileSync(sourcePath).equals(expected),
+      "native comment undo must not touch the source journal",
+    ).toBe(true);
+
+    await reopenedFrame.locator(caseSelector("source-fidelity")).click();
+    await clickEditHistoryMenu(reopenedApp, "undo");
+    const undoRevision = await expectCheckpointPersisted(
+      reopened.page,
+      firstPersistedRevision,
+    );
+    expect(
+      readFileSync(sourcePath).equals(original),
+      "Edit > Undo must restore the exact pre-edit source bytes after restart",
+    ).toBe(true);
+    reopenedFrame = await currentEditorFrame(reopened.page);
+    await reopenedFrame.locator(caseSelector("source-fidelity")).click();
+    await reopened.page.keyboard.press(keyShortcut("Shift+Z"));
+    let latestRevision = await expectCheckpointPersisted(
+      reopened.page,
+      undoRevision,
+    );
+    expect(
+      readFileSync(sourcePath).equals(expected),
+      "Shift+Cmd/Ctrl+Z must reapply the exact retained source patch",
+    ).toBe(true);
+
+    reopenedFrame = await currentEditorFrame(reopened.page);
+    await selectAuthoredCase(reopenedFrame, "source-fidelity");
+    const boldButton = reopened.page.getByRole("button", {
+      name: "加粗",
+      exact: true,
+    });
+    await expect(boldButton).toBeEnabled();
+    await boldButton.click();
+    latestRevision = await expectCheckpointPersisted(
+      reopened.page,
+      latestRevision,
+    );
+    const styledBytes = readFileSync(sourcePath);
+    expect(styledBytes.equals(expected)).toBe(false);
+    expect(styledBytes.toString("utf8")).toContain("font-weight: 700");
+    await clickEditHistoryMenu(reopenedApp, "undo");
+    latestRevision = await expectCheckpointPersisted(
+      reopened.page,
+      latestRevision,
+    );
+    expect(
+      readFileSync(sourcePath).equals(expected),
+      "style undo must restore the exact bytes before the toolbar command",
+    ).toBe(true);
+    await clickEditHistoryMenu(reopenedApp, "redo");
+    latestRevision = await expectCheckpointPersisted(
+      reopened.page,
+      latestRevision,
+    );
+    expect(readFileSync(sourcePath).equals(styledBytes)).toBe(true);
+
+    reopenedFrame = await currentEditorFrame(reopened.page);
+    await activateNativeEdit(reopenedFrame, "source-fidelity");
+    const styledText = await reopenedFrame
+      .locator(caseSelector("source-fidelity"))
+      .textContent();
+    await setTextSelection(
+      reopenedFrame,
+      "source-fidelity",
+      styledText.length,
+    );
+    await reopened.page.keyboard.press("Enter");
+    await reopened.page.keyboard.press(keyShortcut("S"));
+    latestRevision = await expectCheckpointPersisted(
+      reopened.page,
+      latestRevision,
+    );
+    const structuredBytes = readFileSync(sourcePath);
+    expect(structuredBytes.equals(styledBytes)).toBe(false);
+    expect(structuredBytes.toString("utf8")).toContain("<br>");
+    await clickEditHistoryMenu(reopenedApp, "undo");
+    latestRevision = await expectCheckpointPersisted(
+      reopened.page,
+      latestRevision,
+    );
+    expect(
+      readFileSync(sourcePath).equals(styledBytes),
+      "editable-island structure undo must remove only the inserted break",
+    ).toBe(true);
+    await clickEditHistoryMenu(reopenedApp, "redo");
+    latestRevision = await expectCheckpointPersisted(
+      reopened.page,
+      latestRevision,
+    );
+    expect(readFileSync(sourcePath).equals(structuredBytes)).toBe(true);
+
+    reopenedFrame = await currentEditorFrame(reopened.page);
+    await selectAuthoredCase(reopenedFrame, "source-fidelity");
+    const moveDownButton = reopened.page.getByRole("button", {
+      name: "下移",
+      exact: true,
+    });
+    await expect(moveDownButton).toBeEnabled();
+    await moveDownButton.click();
+    latestRevision = await expectCheckpointPersisted(
+      reopened.page,
+      latestRevision,
+    );
+    const reorderedBytes = readFileSync(sourcePath);
+    const reorderedText = reorderedBytes.toString("utf8");
+    expect(reorderedBytes.equals(structuredBytes)).toBe(false);
+    expect(reorderedText.indexOf('title="entity spellings"'))
+      .toBeLessThan(reorderedText.indexOf('data-native-case="source-fidelity"'));
+    await clickEditHistoryMenu(reopenedApp, "undo");
+    latestRevision = await expectCheckpointPersisted(
+      reopened.page,
+      latestRevision,
+    );
+    expect(
+      readFileSync(sourcePath).equals(structuredBytes),
+      "move undo must restore the exact sibling order and bytes",
+    ).toBe(true);
+    await clickEditHistoryMenu(reopenedApp, "redo");
+    await expectCheckpointPersisted(reopened.page, latestRevision);
+    expect(readFileSync(sourcePath).equals(reorderedBytes)).toBe(true);
+
+    await reopened.page.getByRole("button", {
+      name: "项目",
+      exact: true,
+    }).click();
+    await reopened.page.locator(".project-advanced > summary").click();
+    await reopened.page.locator(".project-rule-card").click();
+    const projectRules = reopened.page.getByRole("textbox", {
+      name: "项目长期规则",
+      exact: true,
+    });
+    await expect(projectRules).toBeEnabled();
+    const originalRules = await projectRules.inputValue();
+    await projectRules.focus();
+    await reopened.page.keyboard.press("End");
+    await reopened.page.keyboard.insertText("\n临时新增规则");
+    await expect(projectRules).toHaveValue(`${originalRules}\n临时新增规则`);
+    await clickEditHistoryMenu(reopenedApp, "undo");
+    await expect(projectRules).toHaveValue(originalRules);
+    expect(
+      readFileSync(sourcePath).equals(reorderedBytes),
+      "native project-rule undo must not alter canvas source history",
+    ).toBe(true);
+
+    const workspace = path.join(isolatedUserData, "workspace");
+    const registry = JSON.parse(
+      readFileSync(path.join(workspace, "project-registry.json"), "utf8"),
+    );
+    const project = Object.values(registry.projects).find(
+      (record) => record.sourcePath === realpathSync(sourcePath),
+    );
+    const history = JSON.parse(readFileSync(
+      path.join(
+        workspace,
+        "projects",
+        project.storageDirectoryName,
+        "history",
+        "source-operations.json",
+      ),
+      "utf8",
+    ));
+    expect(history.cursor).toBe(4);
+    expect(history.entries.map((entry) => entry.kind))
+      .toEqual(["text", "style", "text", "reorder"]);
+    expect(history.appliedActions.map((action) => action.direction))
+      .toEqual([
+        "undo",
+        "redo",
+        "undo",
+        "redo",
+        "undo",
+        "redo",
+        "undo",
+        "redo",
+      ]);
 
     await closePageRootGracefully(reopenedApp);
     reopenedApp = null;

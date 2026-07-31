@@ -66,6 +66,14 @@ Draft session inactive or bound to another context, it queries current
 workspace authority and safely rebinds before creating a mutation; it does not
 leave an unchangeable close blocker.
 
+Canvas operation history has split but non-overlapping ownership:
+`SourceHistorySession` owns the renderer context, unsaved operation outbox and
+one in-flight action intent; `history/source-operations.json` owned by the
+Bridge is the durable cursor, operation and applied-action authority. React
+state may display capabilities, but it cannot maintain a parallel undo stack.
+The preview DOM, browser editing history and edit-audit list are not history
+authorities.
+
 ## Mutation protocol
 
 Every durable command defines:
@@ -81,6 +89,22 @@ Network failure after a mutation is an **unknown outcome**, not a rejection.
 The client queries authority before retrying. A retry action must change its
 precondition through reconciliation, refreshed identity, backoff or new user
 information; resending the same known-stale command is forbidden.
+
+A persisted source-history operation is created only from an accepted
+SourcePatch result. It carries stable operation identity, exact forward and
+reverse patch lists, before/after source Hashes and bounded logical target
+snapshots. Autosave validates the full operation chain before placing the HTML
+candidate and history candidate in the same recoverable `pendingWrite`.
+Undo/redo is another durable command with stable action ID, expected source
+Hash, expected history revision and expected cursor. An unknown response is
+reconciled by querying workspace authority; the same action ID may be replayed
+once only when authority proves it was already applied or its original
+preconditions still hold.
+
+The history journal is bounded and may be reset only at a proven current source
+Hash. A forward edit after undo truncates redo. Source mismatch never attempts
+best-effort patching and never serializes preview DOM; it creates a new history
+boundary or reports the existing source conflict.
 
 Comment deletion tombstones and processed operation identities are durable
 draft data. Attachments must be tied to a durable comment operation or cleaned
@@ -113,6 +137,12 @@ registered obligations:
 - attachment staging;
 - project-rule persistence;
 - Request freeze or outcome reconciliation.
+
+A Canvas undo/redo request uses the same native-edit checkpoint and source
+autosave obligations before it reads the durable history cursor. It does not
+drain or mutate comment cards, attachments or project rules. Focused native
+text controls keep their platform-local input history and do not invoke this
+Canvas drain.
 
 Each obligation reports pending, draining, resolved or blocked. A blocked
 result includes an action that changes the condition. Entry points must not

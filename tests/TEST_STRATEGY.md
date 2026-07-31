@@ -54,7 +54,19 @@
 
 `tests/generated-source-invariants.test.mjs` 用固定种子生成 BOM、LF/CRLF、单双引号、多语言 Unicode、entity、注释和脚本文本组合。每个失败都带 seed；测试用独立字节替换 oracle 验证未命中范围、inverse 原子恢复和同一计划重放，而不是复用被测实现计算期望值。
 
-画布不提供用户级撤销或重做，也不维护产品历史栈。源码画布内的 `Cmd/Ctrl+Z` 与 `Cmd/Ctrl+Shift+Z` 必须被阻止，避免 Chromium 绕过源码映射；真实表单和评论输入框仍保留浏览器自己的局部输入历史。SourcePatch 的 inverse plan 只作为同一事务失败恢复和字节不变量证明，不得重新暴露为产品能力。
+画布撤销/重做不得使用 Chromium DOM history，也不得维护整页 HTML
+快照栈。每次被接受的 SourcePatch 把实际 forward Patch、exact inverse
+Patch、前后 Hash 和目标写入有界持久日志；Node 证明文字、样式、结构和
+排序共享一个严格 cursor，新修改截断 redo，篡改或不连续 Hash
+fail-closed。Bridge 故障注入分别覆盖 source commit point 前后的
+HTML/历史联合恢复，以及稳定 action ID 的结果未知重放。
+
+Native Electron 是最终交互 oracle：真实 Edit 菜单和快捷键依次执行文字、
+工具栏样式、岛内换行结构和同级下移，关闭重开后仍能撤销，并以原始
+Buffer 验证每次 undo/redo。焦点在评论正文或 `PROJECT.md` 时，同一个
+Edit 菜单必须只触发原生控件文字撤销，源 HTML、评论卡片与附件保持
+不变。Browser 测试继续证明 SourcePatch forward/inverse 和各编辑入口，
+但不把无持久权限的浏览器预览伪装成跨重启历史证明。
 
 ## 真实 HTML 与输入法边界
 

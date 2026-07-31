@@ -22,10 +22,15 @@ records.
 - `attempt-outcome.v1.schema.json`
 - `version-transaction.v1.schema.json`
 - `committed-marker.v1.schema.json`
+- `source-history.v1.schema.json`
 
 The v1 suffix here is local to each auxiliary artifact and remains its current
 strict contract. These files are not compatibility readers for old main
 records.
+
+`source-history.v1.schema.json` is the bounded, document-owned journal of
+byte-exact canvas source operations. Its cursor is independent from immutable
+Versions; comments, attachments, and project-rule edits are not entries.
 
 Deprecated main v1/v2 schemas and `migration-report.v1.schema.json` are not
 kept in the active source tree or release package. Their evidence exists only

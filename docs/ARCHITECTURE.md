@@ -8,6 +8,7 @@ User HTML bytes
   -> isolated authored-DOM preview
   -> native Selection + V2 Editable Island controller
   -> canonical island + exact content-range SourcePatch
+  -> renderer SourceHistorySession + durable exact Patch journal
   -> serialized atomic file writer
 
 Comments + frozen input
@@ -43,8 +44,11 @@ protocols.
 | --- | --- |
 | Bridge routes, timeouts and structured outcomes | `app/application/bridge-client.js` |
 | Renderer draft revision, pending operations and reconciliation | `app/application/draft-session.js` |
+| Renderer source-history context, pending Patch operations and action intent | `app/application/source-history-session.js` |
 | Pure comment/edit-event/tombstone transition rules | `shared/draft-aggregate.mjs` |
+| Pure source-history validation, cursor transitions and exact Patch replay | `shared/source-history.mjs`, re-exported through `app/domain/source-history.js` |
 | Bridge-side draft command validation and CAS | `scripts/draft-service.mjs` |
+| Bridge-side source-history repository, autosave preparation and action application | `scripts/source-history-service.mjs` |
 | Close, switch, submit and history obligations | `app/application/drain-coordinator.js` |
 | Late query rejection and monotonic draft reads | `app/application/project-query-fence.js` |
 | Crash-only browser recovery | `app/application/recovery-store.js` |
@@ -65,6 +69,31 @@ proven invariant, not to satisfy a line-count target. The retired V1
 ## Persistence
 
 Direct edits form ordered revisions and are written through a single queue. Every write checks the expected source Hash, uses a same-directory temporary file and atomic replacement, then rereads the result. External modification causes a fail-closed conflict.
+
+Every accepted Canvas SourcePatch also emits one operation containing the
+actual forward patches, the exact inverse patches returned by the engine, the
+before/after source Hashes and the logical before/after target. The renderer
+`SourceHistorySession` owns unsaved operations and the current action intent;
+the Bridge owns the authoritative bounded journal at
+`history/source-operations.json`. Autosave prepares the next journal against
+the same source Hash chain and places both HTML and journal candidates in one
+`pendingWrite` recovery boundary. The source HTML remains the content
+authority; the journal is never a second HTML snapshot or a source for preview
+serialization.
+
+Undo and redo first checkpoint any active editable island and drain the source
+queue. The Bridge then validates project/document identity, source Hash,
+journal revision/cursor and every exact patch before atomically applying the
+inverse or forward bytes. Stable action IDs make lost responses idempotent;
+the renderer queries workspace authority before its single replay. A new
+forward operation truncates redo. If current source bytes cannot be chained to
+the journal—external modification or a new working file—the Bridge establishes
+a fresh boundary at those bytes rather than crossing unknown content.
+
+The desktop `Edit` menu is a router, not another history owner. Focused native
+text inputs use Electron/Chromium's local text undo. Canvas focus routes
+Undo/Redo intent to the renderer source-history session. Comment/card,
+attachment and project actions never enter the source journal.
 
 An explicit filename change is a separate desktop source-path transaction, not
 an HTML write. `desktop/source-rename.mjs` validates one stable operation ID,

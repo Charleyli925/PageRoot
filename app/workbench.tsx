@@ -44,6 +44,7 @@ import type {
   HtmlCanvasEditorHandle,
   HtmlCanvasMutation,
   HtmlCanvasSelection,
+  HtmlCanvasSourceTransaction,
   NativeDeferredCommandAuthority,
   NativeDeferredCommandDiscardReason,
 } from "./components/HtmlCanvasEditor";
@@ -94,6 +95,11 @@ import {
 import { DrainCoordinator } from "./application/drain-coordinator.js";
 import { ProjectQueryFence } from "./application/project-query-fence.js";
 import { createBrowserRecoveryStore } from "./application/recovery-store.js";
+import { SourceHistorySession } from "./application/source-history-session.js";
+import type {
+  SourceHistoryEntry,
+  SourceHistoryDirection,
+} from "./domain/source-history.js";
 import {
   BROWSER_RUNTIME_CAPABILITIES,
   resolveRuntimeCapabilities,
@@ -273,6 +279,14 @@ declare global {
     htmlAIProjects?: DesktopProjectsApi;
     htmlAIIntegrations?: DesktopIntegrationsApi;
     htmlAIUpdates?: DesktopUpdatesApi;
+    htmlAIEdit?: {
+      onHistoryRequested: (
+        listener: (direction: SourceHistoryDirection) => void,
+      ) => () => void;
+      runNativeHistory: (
+        direction: SourceHistoryDirection,
+      ) => Promise<{ applied: boolean }>;
+    };
     htmlAIRuntime?: {
       bridgePort: string;
       bridgeAuthToken: string;
@@ -438,6 +452,7 @@ type PendingWrite = {
   html: string;
   revision: number;
   events: DirectEditEvent[];
+  historyOperations: SourceHistoryEntry[];
   recoveryIdentity: RecoveryIdentity | null;
 };
 type RecoveryIdentity = {
@@ -827,6 +842,46 @@ function isImageFile(file: File): boolean {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function sourceHistoryOperationsFromRecord(value: unknown): SourceHistoryEntry[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((entry): entry is Record<string, unknown> => (
+      isRecord(entry)
+      && /^sourceop_[A-Za-z0-9_-]{12,180}$/.test(
+        String(entry.operationId || ""),
+      )
+      && Array.isArray(entry.forwardPatches)
+      && Array.isArray(entry.reversePatches)
+    ))
+    .map((entry) => structuredClone(entry) as unknown as SourceHistoryEntry);
+}
+
+function ownsNativeTextHistory(target: Element | null): boolean {
+  if (!target) return false;
+  const editable = target.closest<HTMLElement>(
+    "textarea, input, [contenteditable='true']",
+  );
+  if (!editable) return false;
+  if (editable.isContentEditable) return true;
+  if (editable instanceof HTMLTextAreaElement) {
+    return !editable.disabled && !editable.readOnly;
+  }
+  if (!(editable instanceof HTMLInputElement)) return false;
+  return (
+    !editable.disabled
+    && !editable.readOnly
+    && [
+      "email",
+      "number",
+      "password",
+      "search",
+      "tel",
+      "text",
+      "url",
+    ].includes(editable.type)
+  );
 }
 
 function draftAuthorityFromWorkspace(
@@ -1628,6 +1683,9 @@ export default function Workbench() {
     exportCurrentHtml?: () => void;
     reloadCurrentSource?: () => void;
     requestUserFlush?: () => void;
+    requestSourceHistoryAction?: (
+      direction: SourceHistoryDirection,
+    ) => Promise<boolean>;
     generateRequest?: () => void;
     openCommittedVersion?: (
       run: ActiveRun,
@@ -1702,6 +1760,7 @@ export default function Workbench() {
     encodeComment: persistedComment,
     encodeChangeEvent: persistedChangeEvent,
   }));
+  const sourceHistorySessionRef = useRef(new SourceHistorySession());
   const htmlRef = useRef(DEFAULT_PROJECT_HTML);
   const sourcePathRef = useRef<string | null>(null);
   const sourceShaRef = useRef<string | null>(null);
@@ -1719,6 +1778,7 @@ export default function Workbench() {
   const persistStateRef = useRef<PersistState>("idle");
   const pendingWriteRef = useRef<PendingWrite | null>(null);
   const flushPromiseRef = useRef<Promise<boolean> | null>(null);
+  const historyActionPromiseRef = useRef<Promise<boolean> | null>(null);
   const autosaveTimerRef = useRef<number | null>(null);
   const changeEventsRef = useRef<DirectEditEvent[]>([]);
   const auditPendingRef = useRef<DirectEditEvent[]>([]);
@@ -2633,6 +2693,14 @@ export default function Workbench() {
         authoritativeDraftRevision(authoritativeDraft),
         authoritativeDraft,
       );
+      if (isRecord(payload.sourceHistory)) {
+        sourceHistorySessionRef.current.activate(
+          registeredContext,
+          nextSourceSha256,
+          payload.sourceHistory,
+          { preservePending: true },
+        );
+      }
       draftPersistenceAuthorityRef.current = registeredContext;
       return registeredContext;
     })();
@@ -2764,6 +2832,7 @@ export default function Workbench() {
       revision: write.revision,
       html: write.html,
       changeEvents: write.events.map(persistedChangeEvent),
+      sourceHistoryOperations: write.historyOperations,
     });
   }, []);
 
@@ -2882,6 +2951,7 @@ export default function Workbench() {
         html: htmlRef.current,
         revision: editRevisionRef.current,
         events: [...auditPendingRef.current],
+        historyOperations: sourceHistorySessionRef.current.pendingOperations,
         recoveryIdentity: recoveryIdentityRef.current,
       };
       pendingWriteRef.current = reconstructedWrite;
@@ -2966,6 +3036,7 @@ export default function Workbench() {
             expectedSourceSha256: write.expectedSourceSha256,
             editRevision: write.revision,
             changeEvents: write.events.map(persistedChangeEvent),
+            sourceHistoryOperations: write.historyOperations,
           });
           if (payload.ok === false) {
             throw new Error("无法把修改更新到源 HTML。");
@@ -2995,6 +3066,25 @@ export default function Workbench() {
             invalidAck.code = "INVALID_AUTOSAVE_ACK";
             throw invalidAck;
           }
+          if (!isRecord(payload.sourceHistory)) {
+            const invalidHistoryAck = new Error(
+              "自动写回缺少与源码一致的持久化撤销历史。",
+            ) as Error & { code?: string };
+            invalidHistoryAck.code = "INVALID_AUTOSAVE_ACK";
+            throw invalidHistoryAck;
+          }
+          if (!sourceHistorySessionRef.current.acknowledge(
+            writeContext,
+            write.historyOperations,
+            payload.sourceHistory,
+            nextHash,
+          )) {
+            sourceHistorySessionRef.current.activate(
+              writeContext,
+              nextHash,
+              payload.sourceHistory,
+            );
+          }
           const queuedWrite = pendingWriteRef.current as PendingWrite | null;
           if (
             queuedWrite
@@ -3010,6 +3100,8 @@ export default function Workbench() {
                 recoveryIdentityFromRecord(payload.recoveryIdentity)
                 || queuedWrite.recoveryIdentity,
               events: removeAcknowledgedAuditEvents(queuedWrite.events, write.events),
+              historyOperations:
+                sourceHistorySessionRef.current.pendingOperations,
             };
             persistRecoveryLog(pendingWriteRef.current, writeContext);
           } else {
@@ -3183,11 +3275,24 @@ export default function Workbench() {
   const enqueueAutosave = useCallback((
     nextHtml: string,
     mutation?: HtmlCanvasMutation,
+    sourceTransaction?: HtmlCanvasSourceTransaction,
   ): number => {
     if (persistStateRef.current === "conflict") {
       return editRevisionRef.current;
     }
     const nextRevision = editRevisionRef.current + 1;
+    if (sourceTransaction && sourcePathRef.current) {
+      sourceHistorySessionRef.current.record(
+        {
+          epoch: projectEpochRef.current,
+          projectId: projectIdRef.current,
+          documentId: documentIdRef.current,
+          sourcePath: sourcePathRef.current,
+        },
+        sourceTransaction,
+        nextRevision,
+      );
+    }
     editRevisionRef.current = nextRevision;
     setEditRevision(nextRevision);
     htmlRef.current = nextHtml;
@@ -3236,6 +3341,7 @@ export default function Workbench() {
       html: nextHtml,
       revision: nextRevision,
       events: [...auditPendingRef.current],
+      historyOperations: sourceHistorySessionRef.current.pendingOperations,
       recoveryIdentity: recoveryIdentityRef.current,
     };
     pendingWriteRef.current = write;
@@ -3331,6 +3437,7 @@ export default function Workbench() {
     navigationOperationRef.current += 1;
     submissionPendingRef.current = false;
     draftSessionRef.current.deactivate();
+    sourceHistorySessionRef.current.deactivate();
     draftPersistenceAuthorityRef.current = null;
     draftRecoveryOperationIdRef.current = null;
     htmlRef.current = project.html;
@@ -3579,6 +3686,7 @@ export default function Workbench() {
       recoveryIdentityRef.current = null;
       pendingWriteRef.current = null;
       draftSessionRef.current.deactivate();
+      sourceHistorySessionRef.current.deactivate();
       draftRecoveryOperationIdRef.current = null;
       setSourcePath(nextSourcePath);
       setSourceSha256(expectedSha256);
@@ -3674,8 +3782,15 @@ export default function Workbench() {
       html: recoveredHtml,
       revision,
       events: recoveredEvents,
+      historyOperations: sourceHistoryOperationsFromRecord(
+        raw.sourceHistoryOperations,
+      ),
       recoveryIdentity: currentRecoveryIdentity,
     };
+    sourceHistorySessionRef.current.restorePending(
+      context,
+      job.historyOperations,
+    );
     editRevisionRef.current = revision;
     pendingWriteRef.current = job;
     auditPendingRef.current = recoveredEvents;
@@ -4076,6 +4191,19 @@ export default function Workbench() {
         documentId: nextDocumentId,
         sourcePath: activeSource,
       };
+      if (
+        nextProjectId
+        && nextDocumentId
+        && authoritativeSourceHash
+        && isRecord(payload.sourceHistory)
+      ) {
+        sourceHistorySessionRef.current.activate(
+          draftContext,
+          authoritativeSourceHash,
+          payload.sourceHistory,
+          { preservePending: Boolean(pendingWriteRef.current) },
+        );
+      }
       const draftSession = draftSessionRef.current;
       const canApplyDraftAuthority = !draftSession.isActive(draftContext)
         || serverDraftRevision >= draftSession.revision;
@@ -4214,6 +4342,7 @@ export default function Workbench() {
               html: candidateHtml,
               revision,
               events: recoveredEvents,
+              historyOperations: [],
               recoveryIdentity: recoveryIdentityRef.current,
             };
             pendingWriteRef.current = conflictWrite;
@@ -4588,6 +4717,7 @@ export default function Workbench() {
         if (
           pendingWriteRef.current
           || flushPromiseRef.current
+          || historyActionPromiseRef.current
           || editRevisionRef.current > lastPersistedRevisionRef.current
         ) {
           return {
@@ -4597,7 +4727,13 @@ export default function Workbench() {
         }
         return { state: "resolved" };
       },
-      drain: () => flushAutosave(editRevisionRef.current),
+      drain: async () => {
+        if (
+          historyActionPromiseRef.current
+          && !await historyActionPromiseRef.current
+        ) return false;
+        return flushAutosave(editRevisionRef.current);
+      },
     });
     coordinator.replace("draft", {
       label: "等待评论记录写入",
@@ -5306,11 +5442,24 @@ export default function Workbench() {
             return { ready: false, reason: "项目状态尚未读取完成，已取消关闭以避免覆盖未知编辑状态。" };
           }
           if (projectLoadErrorRef.current) {
-            if (pendingWriteRef.current || flushPromiseRef.current) {
+            if (
+              pendingWriteRef.current
+              || flushPromiseRef.current
+              || historyActionPromiseRef.current
+            ) {
               return { ready: false, reason: "项目读取失败且仍有待恢复的 HTML 修改，请先重试读取或导出副本。" };
             }
             ready = true;
             return { ready: true };
+          }
+          if (
+            historyActionPromiseRef.current
+            && !await historyActionPromiseRef.current
+          ) {
+            return {
+              ready: false,
+              reason: "当前撤销或重做没有安全完成，已取消关闭。",
+            };
           }
 
           if (viewMode !== "history" && !projectLockedRef.current) {
@@ -5488,6 +5637,7 @@ export default function Workbench() {
     }
     if (projectLoadErrorRef.current) {
       draftSessionRef.current.deactivate();
+      sourceHistorySessionRef.current.deactivate();
       return true;
     }
     if (projectLockedRef.current) {
@@ -5496,6 +5646,13 @@ export default function Workbench() {
       });
       if (!drained.ok) rememberProjectOpen();
       return drained.ok;
+    }
+    if (
+      historyActionPromiseRef.current
+      && !await historyActionPromiseRef.current
+    ) {
+      rememberProjectOpen();
+      return false;
     }
     const shouldCommitCurrentCanvas = viewMode !== "history";
     const committed = shouldCommitCurrentCanvas
@@ -5522,6 +5679,7 @@ export default function Workbench() {
       editRevisionRef.current !== switchCutoffRevision
       || pendingWriteRef.current
       || flushPromiseRef.current
+      || historyActionPromiseRef.current
     ) {
       rememberProjectOpen();
       return false;
@@ -5695,6 +5853,7 @@ export default function Workbench() {
         || !sameLocalSourcePath(sourcePathRef.current, activeSourcePath)
         || pendingWriteRef.current
         || flushPromiseRef.current
+        || historyActionPromiseRef.current
         || persistStateRef.current !== "idle"
         || lastPersistedRevisionRef.current < launchRevision
       ) {
@@ -5733,6 +5892,7 @@ export default function Workbench() {
       || editorRef.current?.hasPendingNativeEdit()
       || pendingWriteRef.current
       || flushPromiseRef.current
+      || historyActionPromiseRef.current
       || editRevisionRef.current !== lastPersistedRevisionRef.current
     ) return;
     fileRenameEditingRef.current = true;
@@ -5814,6 +5974,7 @@ export default function Workbench() {
         || !sameLocalSourcePath(sourcePathRef.current, previousSourcePath)
         || pendingWriteRef.current
         || flushPromiseRef.current
+        || historyActionPromiseRef.current
         || persistStateRef.current !== "idle"
         || editRevisionRef.current !== lastPersistedRevisionRef.current
       ) {
@@ -5959,6 +6120,7 @@ export default function Workbench() {
       draftPersistenceAuthorityRef.current = null;
       draftRecoveryOperationIdRef.current = null;
       draftSessionRef.current.deactivate();
+      sourceHistorySessionRef.current.deactivate();
       recoveryStore.remove([
         `html-ai-recovery:${previousSourcePath}`,
         `html-ai-draft-recovery:${previousSourcePath}`,
@@ -6084,7 +6246,11 @@ export default function Workbench() {
     }
   }, [applyProject, prepareProjectSwitch]);
 
-  const handleCanvasChange = useCallback((nextHtml: string, mutation?: HtmlCanvasMutation): boolean => {
+  const handleCanvasChange = useCallback((
+    nextHtml: string,
+    mutation?: HtmlCanvasMutation,
+    sourceTransaction?: HtmlCanvasSourceTransaction,
+  ): boolean => {
     if (
       runtimeCapabilitiesRef.current.sourceEditing !== "enabled"
       ||
@@ -6092,10 +6258,26 @@ export default function Workbench() {
       || projectHydratingRef.current
       || projectLoadErrorRef.current
       || viewTransitioningRef.current
+      || historyActionPromiseRef.current
       || String(persistStateRef.current) === "conflict"
       || viewMode === "history"
     ) return false;
     setOpenedAiVersionNotice(null);
+    try {
+      enqueueAutosave(nextHtml, mutation, sourceTransaction);
+    } catch (cause) {
+      setToast({
+        title: "这次编辑没有进入撤销历史",
+        message: productErrorMessage(
+          cause,
+          "源码历史与当前页面不一致，已停止接受这次修改。",
+        ),
+        tone: "warning",
+        disposition: "background-result",
+        dedupeKey: "source-history-record-failed",
+      });
+      return false;
+    }
     const activeTargets = [
       ...commentsRef.current.map((comment) => comment.target),
       ...changeEventsRef.current.map((event) => event.target),
@@ -6145,7 +6327,6 @@ export default function Workbench() {
         setDraftTarget(nextDraftTarget);
       }
     }
-    enqueueAutosave(nextHtml, mutation);
     void browserSha256(nextHtml).then((renderedSha256) => {
       if (htmlRef.current === nextHtml) setRenderedContentSha256(renderedSha256);
     });
@@ -6271,6 +6452,7 @@ export default function Workbench() {
   ) => {
     const context = captureProjectContext();
     if (!context || projectLoadErrorRef.current) return;
+    if (historyActionPromiseRef.current) return;
     if (
       !fromDeferred
       && deferEditorCommand(
@@ -6463,16 +6645,313 @@ export default function Workbench() {
     deferredEditorReplayRef.current.requestUserFlush = () => requestUserFlush(true);
   }, [requestUserFlush]);
 
+  const requestSourceHistoryAction = useCallback(async (
+    direction: SourceHistoryDirection,
+    fromDeferred = false,
+  ): Promise<boolean> => {
+    if (
+      runtimeCapabilitiesRef.current.sourceEditing !== "enabled"
+      || !sourcePathRef.current
+      || projectLockedRef.current
+      || projectHydratingRef.current
+      || projectLoadErrorRef.current
+      || viewTransitioningRef.current
+      || viewMode === "history"
+      || persistStateRef.current === "conflict"
+    ) return false;
+    if (!fromDeferred) {
+      let resolveDeferred: ((value: boolean) => void) | null = null;
+      const deferred = new Promise<boolean>((resolve) => {
+        resolveDeferred = resolve;
+      });
+      if (deferEditorCommand(
+        `source-history:${direction}`,
+        () => {
+          const replay =
+            deferredEditorReplayRef.current.requestSourceHistoryAction;
+          if (!replay) {
+            resolveDeferred?.(false);
+            return;
+          }
+          void replay(direction).then((value) => resolveDeferred?.(value));
+        },
+        undefined,
+        { onDiscard: () => resolveDeferred?.(false) },
+      )) return deferred;
+    }
+    if (historyActionPromiseRef.current) {
+      return historyActionPromiseRef.current;
+    }
+
+    const run = async (): Promise<boolean> => {
+      const fenced = editorRef.current?.fencePendingEdit({
+        resumeEditing: false,
+        trigger: "fence",
+      });
+      if (!fenced || !fenced.ok) {
+        editorRef.current?.showCommitBlocked(
+          fenced?.reason || "请先完成当前文字输入，再撤销或重做。",
+        );
+        return false;
+      }
+      if (!await flushAutosave(editRevisionRef.current)) {
+        setToast({
+          title: direction === "undo" ? "暂时不能撤销" : "暂时不能重做",
+          message: "当前修改还没有安全写入源 HTML，本次操作未执行；保存状态区会保留具体原因。",
+          tone: "warning",
+          disposition: "background-result",
+          dedupeKey: "source-history-flush-blocked",
+        });
+        return false;
+      }
+      const context = captureProjectContext();
+      if (!context) return false;
+      const action = sourceHistorySessionRef.current.createAction(
+        context,
+        direction,
+      );
+      if (!action) return false;
+      const requestBody = {
+        ...context,
+        ...action,
+      };
+      persistStateRef.current = "writing";
+      setPersistState("writing");
+      setPersistError("");
+
+      let payload: Record<string, unknown>;
+      try {
+        payload = await bridgeClient.sourceHistoryAction(requestBody);
+      } catch (cause) {
+        if (
+          !isBridgeRequestError(cause)
+          || (cause.outcome !== "unknown" && cause.status < 500)
+        ) {
+          throw cause;
+        }
+        const authority = await bridgeClient.workspace(context.sourcePath);
+        const authoritativeHistory = isRecord(authority.sourceHistory)
+          ? authority.sourceHistory
+          : null;
+        const authoritativeCapabilities = isRecord(
+          authoritativeHistory?.capabilities,
+        )
+          ? authoritativeHistory.capabilities
+          : null;
+        const actionApplied = Array.isArray(
+          authoritativeHistory?.appliedActions,
+        ) && authoritativeHistory.appliedActions.some((entry) => (
+          isRecord(entry) && entry.actionId === action.actionId
+        ));
+        const actionStillEligible = (
+          authority.projectId === context.projectId
+          && authority.documentId === context.documentId
+          && authority.sourcePath === context.sourcePath
+          && authority.currentHtmlSha256 === action.expectedSourceSha256
+          && Number(authoritativeCapabilities?.revision)
+            === action.expectedHistoryRevision
+          && Number(authoritativeCapabilities?.cursor)
+            === action.expectedHistoryCursor
+        );
+        if (
+          !isCurrentProjectContext(context)
+          || (!actionApplied && !actionStillEligible)
+        ) {
+          const conflict = new Error(
+            "无法确认上一次撤销或重做的结果，已停止重复操作。",
+          ) as Error & { code?: string };
+          conflict.code = "SOURCE_HISTORY_RECONCILIATION_CONFLICT";
+          throw conflict;
+        }
+        // Querying workspace authority either confirms the original action or
+        // proves that its original preconditions still hold. The same stable
+        // actionId can now be replayed once without double-applying a patch.
+        payload = await bridgeClient.sourceHistoryAction(requestBody);
+      }
+      const canonicalHtml =
+        typeof payload.content === "string" ? payload.content : "";
+      const nextSourceSha256 = String(
+        payload.sha256
+        || payload.sourceSha256
+        || payload.currentHtmlSha256
+        || "",
+      );
+      const persistedRevision = Number(
+        payload.persistedRevision
+        || payload.lastPersistedRevision,
+      );
+      if (
+        !canonicalHtml
+        || !/^sha256:[a-f0-9]{64}$/.test(nextSourceSha256)
+        || await browserSha256(canonicalHtml) !== nextSourceSha256
+        || !Number.isSafeInteger(persistedRevision)
+        || persistedRevision < lastPersistedRevisionRef.current
+        || !isRecord(payload.sourceHistory)
+      ) {
+        const invalid = new Error(
+          "撤销结果与持久化源码历史不一致。",
+        ) as Error & { code?: string };
+        invalid.code = "INVALID_SOURCE_HISTORY_ACK";
+        throw invalid;
+      }
+      if (!isCurrentProjectContext(context)) return false;
+      if (!sourceHistorySessionRef.current.replaceAuthority(
+        context,
+        payload.sourceHistory,
+        nextSourceSha256,
+      )) {
+        sourceHistorySessionRef.current.activate(
+          context,
+          nextSourceSha256,
+          payload.sourceHistory,
+        );
+      }
+
+      const rawHistoryTarget = isRecord(payload.target)
+        ? selectionFromRecord(payload.target)
+        : null;
+      const targets = [
+        ...commentsRef.current.map((comment) => comment.target),
+        ...changeEventsRef.current.map((event) => event.target),
+        ...(draftTargetRef.current ? [draftTargetRef.current] : []),
+        ...(rawHistoryTarget ? [rawHistoryTarget] : []),
+      ];
+      const reboundTargets = rebindTargetsPreservingGlobal(
+        canonicalHtml,
+        targets,
+      );
+      const reboundById = new Map(
+        reboundTargets.map((target) => [target.id, target]),
+      );
+      const nextComments = commentsRef.current.map((comment) => ({
+        ...comment,
+        target: reboundById.get(comment.target.id) || {
+          ...comment.target,
+          resolution: "orphaned" as const,
+        },
+      }));
+      const nextEvents = changeEventsRef.current.map((event) => ({
+        ...event,
+        target: reboundById.get(event.target.id) || {
+          ...event.target,
+          resolution: "orphaned" as const,
+        },
+      }));
+      commentsRef.current = nextComments;
+      changeEventsRef.current = nextEvents;
+      setComments(nextComments);
+      setChangeEvents(nextEvents);
+      if (draftTargetRef.current) {
+        const nextDraftTarget =
+          reboundById.get(draftTargetRef.current.id)
+          || { ...draftTargetRef.current, resolution: "orphaned" as const };
+        draftTargetRef.current = nextDraftTarget;
+        setDraftTarget(nextDraftTarget);
+      }
+      const nextHistoryTarget = rawHistoryTarget
+        ? reboundById.get(rawHistoryTarget.id) || rawHistoryTarget
+        : null;
+      editorRef.current?.adoptHistorySource(
+        canonicalHtml,
+        nextHistoryTarget,
+      );
+      htmlRef.current = canonicalHtml;
+      sourceShaRef.current = nextSourceSha256;
+      editRevisionRef.current = Math.max(
+        editRevisionRef.current,
+        persistedRevision,
+      );
+      lastPersistedRevisionRef.current = Math.max(
+        lastPersistedRevisionRef.current,
+        persistedRevision,
+      );
+      recoveryIdentityRef.current =
+        recoveryIdentityFromRecord(payload.recoveryIdentity)
+        || recoveryIdentityRef.current;
+      pendingWriteRef.current = null;
+      setHtml(canonicalHtml);
+      setSourceSha256(nextSourceSha256);
+      setEditRevision(editRevisionRef.current);
+      setLastPersistedRevision(lastPersistedRevisionRef.current);
+      setLastModifiedAt(String(payload.lastModifiedAt || ""));
+      setCurrentExactVersionId(
+        payload.currentExactVersionId
+          ? String(payload.currentExactVersionId)
+          : null,
+      );
+      setRenderedContentSha256(null);
+      persistRecoveryLog(null, context);
+      persistStateRef.current = "idle";
+      setPersistState("idle");
+      setPersistError("");
+      setBridgeConnected(true);
+      return true;
+    };
+
+    const promise = run().catch((cause) => {
+      const message = productErrorMessage(
+        cause,
+        direction === "undo"
+          ? "这次撤销没有完成，源 HTML 保持不变。"
+          : "这次重做没有完成，源 HTML 保持不变。",
+      );
+      persistStateRef.current = "failed";
+      setPersistState("failed");
+      setPersistError(message);
+      setToast({
+        title: direction === "undo" ? "撤销未完成" : "重做未完成",
+        message,
+        tone: "warning",
+        disposition: "background-result",
+        dedupeKey: `source-history-${direction}-failed`,
+      });
+      return false;
+    });
+    historyActionPromiseRef.current = promise;
+    try {
+      return await promise;
+    } finally {
+      if (historyActionPromiseRef.current === promise) {
+        historyActionPromiseRef.current = null;
+      }
+    }
+  }, [
+    captureProjectContext,
+    deferEditorCommand,
+    flushAutosave,
+    isCurrentProjectContext,
+    persistRecoveryLog,
+    viewMode,
+  ]);
+  useEffect(() => {
+    deferredEditorReplayRef.current.requestSourceHistoryAction = (
+      direction,
+    ) => requestSourceHistoryAction(direction, true);
+  }, [requestSourceHistoryAction]);
+
+  useEffect(() => {
+    const editApi = window.htmlAIEdit;
+    if (!editApi) return undefined;
+    return editApi.onHistoryRequested((direction) => {
+      if (ownsNativeTextHistory(document.activeElement)) {
+        void editApi.runNativeHistory(direction);
+        return;
+      }
+      void requestSourceHistoryAction(direction);
+    });
+  }, [requestSourceHistoryAction]);
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey)) return;
-      if (event.key.toLowerCase() === "z") {
+      const key = event.key.toLowerCase();
+      if (key === "z" || (key === "y" && event.ctrlKey && !event.metaKey)) {
         const target = event.target as HTMLElement | null;
-        if (
-          target?.isContentEditable
-          || target?.closest("input, textarea, select, [contenteditable='true']")
-        ) return;
+        if (ownsNativeTextHistory(target)) return;
         event.preventDefault();
+        void requestSourceHistoryAction(
+          key === "y" || event.shiftKey ? "redo" : "undo",
+        );
         return;
       }
       if (event.key.toLowerCase() === "e" && event.shiftKey) {
@@ -6485,7 +6964,7 @@ export default function Workbench() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [exportCurrentHtml, requestUserFlush]);
+  }, [exportCurrentHtml, requestSourceHistoryAction, requestUserFlush]);
 
   const updateFocusedComment = useCallback((commentId: string | null) => {
     focusedCommentIdRef.current = commentId;
@@ -9691,6 +10170,9 @@ export default function Workbench() {
                   onRequestFlush={requestUserFlush}
                   onRequestExport={() => {
                     void exportCurrentHtml();
+                  }}
+                  onRequestHistory={(direction) => {
+                    void requestSourceHistoryAction(direction);
                   }}
                   onRequestReload={() => {
                     if (sourcePathRef.current) {

@@ -218,6 +218,11 @@ export function createBridgeClient({
       body,
       "无法把修改更新到源 HTML。",
     ),
+    sourceHistoryAction: (body) => command(
+      "/source-history/action",
+      body,
+      "无法完成这次撤销或重做。",
+    ),
     saveDraft: (body) => command(
       "/draft",
       body,

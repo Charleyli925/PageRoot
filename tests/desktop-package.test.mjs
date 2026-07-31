@@ -440,6 +440,9 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.match(mainProcess, /createUsageTelemetry/);
   assert.match(mainProcess, /html-usage:capture/);
   assert.match(preload, /exposeInMainWorld\("htmlAIUsage", usageApi\)/);
+  assert.match(preload, /exposeInMainWorld\("htmlAIEdit", editApi\)/);
+  assert.match(mainProcess, /html-edit:history-requested/);
+  assert.match(mainProcess, /html-edit:native-history/);
   assert.match(usageTelemetry, /\$process_person_profile:\s*false/u);
   assert.match(usageTelemetry, /\$geoip_disable:\s*true/u);
   assert.match(usageTelemetry, /\$is_server:\s*false/u);

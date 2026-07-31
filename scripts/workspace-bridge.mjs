@@ -71,6 +71,14 @@ import {
   activeDraftSnapshot,
   applyDraftCommand,
 } from "./draft-service.mjs";
+import {
+  applySourceHistoryCommand,
+  normalizeSourceHistoryCandidate,
+  prepareAutosaveSourceHistory,
+  readSourceHistory,
+  sourceHistoryResponse,
+  writeSourceHistory,
+} from "./source-history-service.mjs";
 
 const HOST = "127.0.0.1";
 const DEFAULT_PORT = 4317;
@@ -1743,6 +1751,7 @@ async function createInitialProject(
     "transactions",
     "recovery",
     "draft",
+    "history",
     "working",
   ]) {
     await ensureDirectory(path.join(projectRoot, directory));
@@ -2488,8 +2497,18 @@ async function recoverPendingWriteRaw(context) {
   const recoveryPath = recoveryRelativePath
     ? path.join(context.projectRoot, ...recoveryRelativePath.split("/"))
     : null;
+  const historyRecoveryRelativePath =
+    pending.recoverySourceHistoryRelativePath;
+  const historyRecoveryPath = historyRecoveryRelativePath
+    ? path.join(
+        context.projectRoot,
+        ...historyRecoveryRelativePath.split("/"),
+      )
+    : null;
   const source = await readSourceFile(context.sourcePath);
   let candidateBuffer = null;
+  let historyCandidate = null;
+  let historyRecoveryFailure = null;
   if (recoveryPath && await exists(recoveryPath)) {
     candidateBuffer = await readFile(recoveryPath);
     if (sha256(candidateBuffer) !== targetSha256) {
@@ -2510,6 +2529,76 @@ async function recoverPendingWriteRaw(context) {
       await writeRuntime(context.projectRoot, runtime);
       return { status: "rolled-back", reason: "candidate-hash-mismatch" };
     }
+  }
+  if (historyRecoveryPath) {
+    const expectedHistorySha256 = pending.recoverySourceHistorySha256;
+    if (!await exists(historyRecoveryPath)) {
+      historyRecoveryFailure = {
+        code: "RECOVERY_SOURCE_HISTORY_MISSING",
+        message: "The durable source history recovery candidate is missing.",
+        reason: "history-candidate-missing",
+      };
+    } else {
+      const historyBuffer = await readFile(historyRecoveryPath);
+      if (sha256(historyBuffer) !== expectedHistorySha256) {
+        historyRecoveryFailure = {
+          code: "RECOVERY_SOURCE_HISTORY_HASH_MISMATCH",
+          message:
+            "The durable source history recovery candidate was corrupted.",
+          reason: "history-candidate-hash-mismatch",
+        };
+      } else {
+        try {
+          historyCandidate = normalizeSourceHistoryCandidate(
+            JSON.parse(historyBuffer.toString("utf8")),
+            context,
+            targetSha256,
+          );
+        } catch {
+          historyRecoveryFailure = {
+            code: "RECOVERY_SOURCE_HISTORY_INVALID",
+            message:
+              "The durable source history recovery candidate is invalid.",
+            reason: "history-candidate-invalid",
+          };
+        }
+      }
+    }
+  }
+  if (
+    historyRecoveryFailure
+    && source.sha256 === expectedSourceSha256
+    && source.sha256 !== targetSha256
+  ) {
+    runtime.pendingWrite = null;
+    runtime.lifecycleState = "editing";
+    runtime.lastWriteError = {
+      code: historyRecoveryFailure.code,
+      message: historyRecoveryFailure.message,
+      at: nowIso(),
+    };
+    runtime.autosave = {
+      status: "error",
+      expectedSourceSha256,
+      recoveryLogRelativePath: "recovery/autosave-log.json",
+      errorCode: runtime.lastWriteError.code,
+      errorMessage: runtime.lastWriteError.message,
+    };
+    await writeRuntime(context.projectRoot, runtime);
+    if (recoveryPath) await rm(recoveryPath, { force: true });
+    if (historyRecoveryPath) {
+      await rm(historyRecoveryPath, { force: true });
+    }
+    return {
+      status: "rolled-back",
+      reason: historyRecoveryFailure.reason,
+    };
+  }
+  if (historyRecoveryFailure && source.sha256 === targetSha256) {
+    // The source commit point has already passed. Never roll the user's HTML
+    // back through an unverified candidate: retain any matching durable
+    // journal, or create a fresh boundary at the committed bytes.
+    historyCandidate = await readSourceHistory(context, targetSha256);
   }
   if (source.sha256 !== targetSha256 && source.sha256 !== expectedSourceSha256) {
     if (!candidateBuffer) {
@@ -2584,6 +2673,9 @@ async function recoverPendingWriteRaw(context) {
       candidateBuffer,
     );
   }
+  if (historyCandidate) {
+    await writeSourceHistory(context, historyCandidate);
+  }
   await syncCurrentSourceIdentity(context, written);
   runtime.editRevision = Math.max(runtime.editRevision, revision);
   runtime.lastPersistedRevision = Math.max(
@@ -2638,6 +2730,9 @@ async function recoverPendingWriteRaw(context) {
   };
   await writeRuntime(context.projectRoot, runtime);
   if (recoveryPath) await rm(recoveryPath, { force: true });
+  if (historyRecoveryPath) {
+    await rm(historyRecoveryPath, { force: true });
+  }
   return {
     status: "source-updated",
     recovered: true,
@@ -3526,6 +3621,10 @@ async function workspaceState(sourcePath) {
     const refreshedProject = await readProject(context);
     const refreshedRuntime = await readRuntime(context);
     const currentSource = await readSourceFile(context.sourcePath);
+    const sourceHistory = await readSourceHistory(
+      context,
+      currentSource.sha256,
+    );
     const currentExactVersionId =
       currentSource.sha256 === refreshedProject.currentHtmlSha256
         ? refreshedProject.currentExactVersionId
@@ -3565,6 +3664,7 @@ async function workspaceState(sourcePath) {
       activeRun: refreshedRuntime.activeRun,
       activeDraft: refreshedRuntime.draft,
       recoveryIdentity,
+      sourceHistory: sourceHistoryResponse(sourceHistory),
       versions,
       current: {
         path: context.sourcePath,
@@ -3620,6 +3720,10 @@ async function saveAutosave(body) {
     const source = await readSourceFile(context.sourcePath);
     const targetBuffer = Buffer.from(html, "utf8");
     const targetSha256 = sha256(targetBuffer);
+    const currentSourceHistory = await readSourceHistory(
+      context,
+      source.sha256,
+    );
     if (editRevision <= runtime.lastPersistedRevision) {
       return {
         ok: true,
@@ -3635,6 +3739,7 @@ async function saveAutosave(body) {
         sha256: source.sha256,
         content: source.html,
         lastModifiedAt: source.lastModifiedAt,
+        sourceHistory: sourceHistoryResponse(currentSourceHistory),
         versionCreated: false,
       };
     }
@@ -3679,13 +3784,35 @@ async function saveAutosave(body) {
         runtime.conflict,
       );
     }
+    const nextSourceHistory = prepareAutosaveSourceHistory(
+      currentSourceHistory,
+      body.sourceHistoryOperations,
+      {
+        context,
+        sourceHtml: source.html,
+        sourceSha256: source.sha256,
+        targetHtml: html,
+        targetSourceSha256: targetSha256,
+      },
+    );
     const recoveryId = `write_${editRevision}_${randomUUID()}`;
     const recoveryPath = path.join(
       context.projectRoot,
       "recovery",
       `${recoveryId}.html`,
     );
+    const historyRecoveryPath = path.join(
+      context.projectRoot,
+      "recovery",
+      `${recoveryId}.source-history.json`,
+    );
+    const historyRecoveryBuffer = Buffer.from(
+      jsonText(nextSourceHistory),
+      "utf8",
+    );
+    const historyRecoverySha256 = sha256(historyRecoveryBuffer);
     await atomicWriteFile(recoveryPath, targetBuffer);
+    await atomicWriteFile(historyRecoveryPath, historyRecoveryBuffer);
     const rawEvents =
       Array.isArray(body.changeEvents) && body.changeEvents.length > 0
         ? body.changeEvents
@@ -3708,6 +3835,9 @@ async function saveAutosave(body) {
       targetHtmlSha256: targetSha256,
       recoveryHtmlRelativePath: `recovery/${recoveryId}.html`,
       recoveryHtmlSha256: targetSha256,
+      recoverySourceHistoryRelativePath:
+        `recovery/${recoveryId}.source-history.json`,
+      recoverySourceHistorySha256: historyRecoverySha256,
       auditEvents,
       queuedAt: nowIso(),
     };
@@ -3733,6 +3863,7 @@ async function saveAutosave(body) {
               expectedSourceSha256,
               targetBuffer,
             );
+      await writeSourceHistory(context, nextSourceHistory);
       await maybeFailpoint(
         "after-autosave-source-applied",
         path.join(context.projectRoot, "recovery"),
@@ -3836,6 +3967,7 @@ async function saveAutosave(body) {
     };
     await writeRuntime(context.projectRoot, runtime);
     await rm(recoveryPath, { force: true });
+    await rm(historyRecoveryPath, { force: true });
     return {
       ok: true,
       status: "source-updated",
@@ -3857,6 +3989,241 @@ async function saveAutosave(body) {
         runtime,
         written.sha256,
       ),
+      sourceHistory: sourceHistoryResponse(nextSourceHistory),
+      versionCreated: false,
+    };
+  });
+}
+
+async function runSourceHistoryAction(body) {
+  const context = await loadContextBySource(body.sourcePath, true);
+  assertBodyContext(context, body);
+  const expectedSourceSha256 = requireSha256(
+    body.expectedSourceSha256,
+    "expectedSourceSha256",
+  );
+
+  return withProjectMutation(context, async () => {
+    await recoverPendingWriteRaw(context);
+    await recoverTransactionsRaw(context);
+    const project = await readProject(context);
+    const runtime = await readRuntime(context);
+    assertProjectMutable(runtime);
+    const source = await readSourceFile(context.sourcePath);
+    const currentSourceHistory = await readSourceHistory(
+      context,
+      source.sha256,
+    );
+    const actionWasApplied = currentSourceHistory.appliedActions.some(
+      (action) => action.actionId === body.actionId,
+    );
+    if (source.sha256 !== expectedSourceSha256 && !actionWasApplied) {
+      throw new HttpError(
+        409,
+        "SOURCE_CHANGED",
+        "The source HTML changed before the history action.",
+        {
+          expectedSourceSha256,
+          actualSourceSha256: source.sha256,
+        },
+      );
+    }
+    const action = applySourceHistoryCommand(
+      currentSourceHistory,
+      source.html,
+      body,
+      context,
+    );
+    if (!action.changed) {
+      return {
+        ok: true,
+        status: action.replayed ? "history-action-replayed" : "history-no-op",
+        replayed: action.replayed,
+        projectId: context.projectId,
+        documentId: context.documentId,
+        persistedRevision: runtime.lastPersistedRevision,
+        lastPersistedRevision: runtime.lastPersistedRevision,
+        currentHtmlSha256: source.sha256,
+        sourceSha256: source.sha256,
+        sha256: source.sha256,
+        content: source.html,
+        lastModifiedAt: source.lastModifiedAt,
+        sourceHistory: sourceHistoryResponse(action.history),
+        target: action.target,
+        versionCreated: false,
+      };
+    }
+
+    const editRevision = Math.max(
+      runtime.editRevision,
+      runtime.lastPersistedRevision,
+    ) + 1;
+    const targetBuffer = Buffer.from(action.html, "utf8");
+    const recoveryId = `history_${editRevision}_${randomUUID()}`;
+    const recoveryPath = path.join(
+      context.projectRoot,
+      "recovery",
+      `${recoveryId}.html`,
+    );
+    const historyRecoveryPath = path.join(
+      context.projectRoot,
+      "recovery",
+      `${recoveryId}.source-history.json`,
+    );
+    const historyRecoveryBuffer = Buffer.from(
+      jsonText(action.history),
+      "utf8",
+    );
+    const historyRecoverySha256 = sha256(historyRecoveryBuffer);
+    await atomicWriteFile(recoveryPath, targetBuffer);
+    await atomicWriteFile(historyRecoveryPath, historyRecoveryBuffer);
+    const directionLabel = body.direction === "undo" ? "撤销" : "重做";
+    const auditEvent = autosaveAuditEvent(
+      context,
+      project,
+      editRevision,
+      {
+        eventId: `history_${body.actionId}`,
+        kind: action.entry?.kind || "document",
+        property: action.entry?.property,
+        target: action.target,
+        before: { sha256: source.sha256 },
+        after: { sha256: action.sourceSha256 },
+        summary: `${directionLabel}画布源码操作`,
+        historyAction: {
+          actionId: body.actionId,
+          direction: body.direction,
+          operationId: action.entry?.operationId || null,
+        },
+      },
+    );
+    runtime.editRevision = editRevision;
+    runtime.pendingWrite = {
+      revision: editRevision,
+      expectedSourceSha256: source.sha256,
+      targetHtmlSha256: action.sourceSha256,
+      recoveryHtmlRelativePath: `recovery/${recoveryId}.html`,
+      recoveryHtmlSha256: action.sourceSha256,
+      recoverySourceHistoryRelativePath:
+        `recovery/${recoveryId}.source-history.json`,
+      recoverySourceHistorySha256: historyRecoverySha256,
+      auditEvents: [auditEvent],
+      queuedAt: nowIso(),
+    };
+    runtime.autosave = {
+      status: "updating",
+      expectedSourceSha256: source.sha256,
+      recoveryLogRelativePath: "recovery/autosave-log.json",
+    };
+    runtime.lastWriteError = null;
+    await writeRuntime(context.projectRoot, runtime);
+    await maybeFailpoint(
+      "after-autosave-prepared",
+      path.join(context.projectRoot, "recovery"),
+    );
+
+    let written;
+    try {
+      written = await atomicReplaceSource(
+        context.sourcePath,
+        source.sha256,
+        targetBuffer,
+      );
+      await writeSourceHistory(context, action.history);
+      await maybeFailpoint(
+        "after-autosave-source-applied",
+        path.join(context.projectRoot, "recovery"),
+      );
+    } catch (error) {
+      runtime.lastWriteError = {
+        code: error?.code ?? "SOURCE_HISTORY_WRITE_FAILED",
+        message: error instanceof Error
+          ? error.message
+          : "Source history write failed.",
+        at: nowIso(),
+      };
+      runtime.autosave = {
+        status: "error",
+        expectedSourceSha256: source.sha256,
+        recoveryLogRelativePath: "recovery/autosave-log.json",
+        errorCode: runtime.lastWriteError.code,
+        errorMessage: runtime.lastWriteError.message,
+      };
+      await writeRuntime(context.projectRoot, runtime);
+      if (error?.code === "SOURCE_HASH_CONFLICT") {
+        throw new HttpError(
+          409,
+          "SOURCE_CHANGED",
+          "The source HTML changed during the history action.",
+        );
+      }
+      throw error;
+    }
+
+    runtime.lastPersistedRevision = editRevision;
+    await syncCurrentSourceIdentity(context, written);
+    project.currentHtmlSha256 = written.sha256;
+    project.currentExactVersionId = await exactVersionForHash(
+      context,
+      written.sha256,
+    );
+    project.lastModifiedAt = written.lastModifiedAt;
+    await writeProject(context, project);
+    runtime.view = {
+      viewMode: "current",
+      latestVersionId: project.latestVersionId,
+      currentBasedOnVersionId: project.currentBasedOnVersionId,
+      currentExactVersionId: project.currentExactVersionId,
+      viewingVersionId: null,
+      renderedContentSha256: written.sha256,
+    };
+    await writeRuntime(context.projectRoot, runtime);
+    await maybeFailpoint(
+      "after-autosave-project-applied",
+      path.join(context.projectRoot, "recovery"),
+    );
+    await appendAuditOnce(context, auditEvent);
+    await maybeFailpoint(
+      "after-autosave-audit-applied",
+      path.join(context.projectRoot, "recovery"),
+    );
+    runtime.pendingWrite = null;
+    runtime.lifecycleState = "editing";
+    runtime.lastWriteError = null;
+    runtime.autosave = {
+      status: "updated",
+      expectedSourceSha256: written.sha256,
+      lastPersistedAt: nowIso(),
+      recoveryLogRelativePath: "recovery/autosave-log.json",
+    };
+    await writeRuntime(context.projectRoot, runtime);
+    await rm(recoveryPath, { force: true });
+    await rm(historyRecoveryPath, { force: true });
+    return {
+      ok: true,
+      status: "history-source-updated",
+      replayed: false,
+      projectId: context.projectId,
+      documentId: context.documentId,
+      editRevision,
+      persistedRevision: editRevision,
+      lastPersistedRevision: editRevision,
+      currentHtmlSha256: written.sha256,
+      sourceSha256: written.sha256,
+      sha256: written.sha256,
+      content: written.html,
+      lastModifiedAt: written.lastModifiedAt,
+      currentBasedOnVersionId: project.currentBasedOnVersionId,
+      currentExactVersionId: project.currentExactVersionId,
+      recoveryIdentity: recoveryIdentityFor(
+        context,
+        project,
+        runtime,
+        written.sha256,
+      ),
+      sourceHistory: sourceHistoryResponse(action.history),
+      target: action.target,
+      operationId: action.entry?.operationId || null,
       versionCreated: false,
     };
   });
@@ -7883,6 +8250,11 @@ async function route(request, response) {
   if (request.method === "POST" && url.pathname === "/autosave") {
     const body = await readBody(request);
     sendJson(response, 200, await saveAutosave(body));
+    return;
+  }
+  if (request.method === "POST" && url.pathname === "/source-history/action") {
+    const body = await readBody(request);
+    sendJson(response, 200, await runSourceHistoryAction(body));
     return;
   }
   if (request.method === "POST" && url.pathname === "/version") {

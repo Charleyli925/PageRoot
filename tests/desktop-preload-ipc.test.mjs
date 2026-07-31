@@ -52,6 +52,7 @@ async function loadPreloadApis(invoke) {
     runtime: exposed.get("htmlAIRuntime"),
     lifecycle: exposed.get("htmlAIAppLifecycle"),
     usage: exposed.get("htmlAIUsage"),
+    edit: exposed.get("htmlAIEdit"),
     sent,
     emit(channel, payload) {
       listeners.get(channel)?.({}, payload);
@@ -124,6 +125,33 @@ test("preload exposes one fire-and-forget usage channel with a narrow payload", 
   );
   assert.equal(preload.sent.length, 1);
   assert.deepEqual(Object.keys(preload.usage), ["capture"]);
+});
+
+test("preload exposes one narrow native/source history router", async () => {
+  const calls = [];
+  const preload = await loadPreloadApis(async (...args) => {
+    calls.push(args);
+    return { applied: true };
+  });
+  const requested = [];
+  const unsubscribe = preload.edit.onHistoryRequested((direction) => {
+    requested.push(direction);
+  });
+  preload.emit("html-edit:history-requested", { direction: "undo" });
+  preload.emit("html-edit:history-requested", { direction: "invalid" });
+  assert.deepEqual(requested, ["undo"]);
+  assert.deepEqual(
+    await preload.edit.runNativeHistory("redo"),
+    { applied: true },
+  );
+  assert.deepEqual(calls, [["html-edit:native-history", "redo"]]);
+  assert.throws(
+    () => preload.edit.runNativeHistory("invalid"),
+    /direction must be undo or redo/,
+  );
+  unsubscribe();
+  preload.emit("html-edit:history-requested", { direction: "redo" });
+  assert.deepEqual(requested, ["undo"]);
 });
 
 test("preload unwraps structured project IPC success results", async () => {

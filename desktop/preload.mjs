@@ -44,6 +44,10 @@ const updateChannels = Object.freeze({
 const usageChannels = Object.freeze({
   capture: "html-usage:capture",
 });
+const editChannels = Object.freeze({
+  historyRequested: "html-edit:history-requested",
+  nativeHistory: "html-edit:native-history",
+});
 const PROJECT_IPC_PROTOCOL = "html-ai-project-result";
 const PROJECT_IPC_VERSION = 1;
 
@@ -298,6 +302,32 @@ const usageApi = Object.freeze({
     });
   },
 });
+const historyRequestListeners = new Map();
+const editApi = Object.freeze({
+  onHistoryRequested: (listener) => {
+    if (typeof listener !== "function") {
+      throw new TypeError("onHistoryRequested listener must be a function.");
+    }
+    const wrapped = (_event, payload) => {
+      const direction = payload?.direction;
+      if (direction === "undo" || direction === "redo") listener(direction);
+    };
+    historyRequestListeners.set(listener, wrapped);
+    ipcRenderer.on(editChannels.historyRequested, wrapped);
+    return () => {
+      const registered = historyRequestListeners.get(listener);
+      if (!registered) return;
+      historyRequestListeners.delete(listener);
+      ipcRenderer.removeListener(editChannels.historyRequested, registered);
+    };
+  },
+  runNativeHistory: (direction) => {
+    if (direction !== "undo" && direction !== "redo") {
+      throw new TypeError("direction must be undo or redo.");
+    }
+    return ipcRenderer.invoke(editChannels.nativeHistory, direction);
+  },
+});
 
 contextBridge.exposeInMainWorld("htmlAIProjects", projectsApi);
 contextBridge.exposeInMainWorld("htmlAIIntegrations", integrationsApi);
@@ -305,3 +335,4 @@ contextBridge.exposeInMainWorld("htmlAIUpdates", updatesApi);
 contextBridge.exposeInMainWorld("htmlAIRuntime", runtimeConfig);
 contextBridge.exposeInMainWorld("htmlAIAppLifecycle", appLifecycleApi);
 contextBridge.exposeInMainWorld("htmlAIUsage", usageApi);
+contextBridge.exposeInMainWorld("htmlAIEdit", editApi);
