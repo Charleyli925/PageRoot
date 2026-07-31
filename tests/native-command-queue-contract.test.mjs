@@ -2,12 +2,14 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
+import {
+  readCanvasArchitecture,
+  readWorkbenchArchitecture,
+} from "./source-architecture-fixture.mjs";
+
 const [canvas, workbench, islandController] = await Promise.all([
-  readFile(
-    new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url),
-    "utf8",
-  ),
-  readFile(new URL("../app/workbench.tsx", import.meta.url), "utf8"),
+  readCanvasArchitecture(),
+  readWorkbenchArchitecture(),
   readFile(
     new URL("../app/components/IslandEditingController.ts", import.meta.url),
     "utf8",

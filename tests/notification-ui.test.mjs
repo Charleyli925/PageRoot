@@ -3,6 +3,11 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import ts from "typescript";
 
+import {
+  readCanvasArchitecture,
+  readWorkbenchArchitecture,
+} from "./source-architecture-fixture.mjs";
+
 const [
   workbench,
   styles,
@@ -13,9 +18,9 @@ const [
   bridgeClient,
   usageTelemetry,
 ] = await Promise.all([
-  readFile(new URL("../app/workbench.tsx", import.meta.url), "utf8"),
+  readWorkbenchArchitecture(),
   readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
-  readFile(new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url), "utf8"),
+  readCanvasArchitecture(),
   readFile(new URL("../app/components/HtmlCanvasEditor.module.css", import.meta.url), "utf8"),
   readFile(new URL("../app/components/NoticeBar.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/components/NoticeBar.module.css", import.meta.url), "utf8"),

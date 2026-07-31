@@ -317,7 +317,7 @@
     {
       "id": "v2-island-controller",
       "patterns": [
-        "^app/components/(?:HtmlCanvasEditor|IslandEditingController|native-edit-types|native-edit-runtime-preflight|html-preview-sandbox)\\.(?:tsx|ts|js|d\\.ts)$"
+        "^app/components/(?:HtmlCanvasEditor(?:\\.types)?|html-canvas-(?:dom|interaction|internal-types|page-view|preview-sync|selection|style-inspector)|IslandEditingController|native-edit-types|native-edit-runtime-preflight|html-preview-sandbox)\\.(?:tsx|ts|js|d\\.ts)$"
       ],
       "suites": ["typecheck", "browser-smoke", "electron-smoke"],
       "nodeTests": [
@@ -346,9 +346,9 @@
     {
       "id": "workbench-lifecycle",
       "patterns": [
-        "^app/workbench\\.tsx$",
+        "^app/workbench(?:\\.tsx|/.*\\.(?:ts|tsx))$",
         "^app/lib/comment-rail-layout\\.js$",
-        "^tests/comment-rail-layout\\.test\\.mjs$"
+        "^tests/(?:comment-rail-layout\\.test|source-architecture-fixture)\\.mjs$"
       ],
       "suites": ["typecheck", "browser-smoke", "electron-smoke", "ai-smoke"],
       "nodeTests": [

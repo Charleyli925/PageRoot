@@ -9,6 +9,10 @@ import {
   planSourcePatch,
   resolveTargetRef,
 } from "../app/lib/source-patch-core.js";
+import {
+  readCanvasArchitecture,
+  readWorkbenchArchitecture,
+} from "./source-architecture-fixture.mjs";
 
 function resolvedElement(index, targetRef) {
   const resolution = resolveTargetRef(index, targetRef);
@@ -182,10 +186,7 @@ test("consecutive source-backed moves remain serializable through inverse round 
 });
 
 test("canvas keeps a logical reorder target through in-place refresh and reload fallback", async () => {
-  const canvas = await readFile(
-    new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url),
-    "utf8",
-  );
+  const canvas = await readCanvasArchitecture();
   const applyCommand = canvas.slice(
     canvas.indexOf("const applySourceCommand = useCallback"),
     canvas.indexOf("const resetSelection = useCallback", canvas.indexOf("const applySourceCommand = useCallback")),
@@ -224,11 +225,8 @@ test("canvas keeps a logical reorder target through in-place refresh and reload 
 
 test("canvas and workbench consume deterministic mappings before generic fallback", async () => {
   const [canvas, workbench] = await Promise.all([
-    readFile(
-      new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url),
-      "utf8",
-    ),
-    readFile(new URL("../app/workbench.tsx", import.meta.url), "utf8"),
+    readCanvasArchitecture(),
+    readWorkbenchArchitecture(),
   ]);
 
   for (const required of [
@@ -263,10 +261,7 @@ test("canvas and workbench consume deterministic mappings before generic fallbac
 });
 
 test("legacy whole-page comments normalize before recovery and submission", async () => {
-  const workbench = await readFile(
-    new URL("../app/workbench.tsx", import.meta.url),
-    "utf8",
-  );
+  const workbench = await readWorkbenchArchitecture();
   const globalTargetPolicy = workbench.slice(
     workbench.indexOf("function isGlobalPageTarget"),
     workbench.indexOf("function displayVersionLabel"),
@@ -306,10 +301,7 @@ test("legacy whole-page comments normalize before recovery and submission", asyn
 
 test("style writes use source-safe values, canonical target identity, and only active cascade rules", async () => {
   const [canvas, directEditEvents] = await Promise.all([
-    readFile(
-      new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url),
-      "utf8",
-    ),
+    readCanvasArchitecture(),
     readFile(new URL("../app/lib/direct-edit-events.js", import.meta.url), "utf8"),
   ]);
 
@@ -375,10 +367,7 @@ test("style writes use source-safe values, canonical target identity, and only a
 });
 
 test("ordinary patches keep the mounted iframe while source-authority fences use a fresh frame", async () => {
-  const canvas = await readFile(
-    new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url),
-    "utf8",
-  );
+  const canvas = await readCanvasArchitecture();
   const stablePreview = canvas.slice(
     canvas.indexOf("const synchronizeStablePreview = useCallback"),
     canvas.indexOf("const applySourceCommand = useCallback", canvas.indexOf("const synchronizeStablePreview = useCallback")),
@@ -492,7 +481,7 @@ test("ordinary patches keep the mounted iframe while source-authority fences use
 
 test("canvas hides insertion and source-reversal affordances while retaining target recovery", async () => {
   const [canvas, css] = await Promise.all([
-    readFile(new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url), "utf8"),
+    readCanvasArchitecture(),
     readFile(new URL("../app/components/HtmlCanvasEditor.module.css", import.meta.url), "utf8"),
   ]);
 
@@ -520,7 +509,7 @@ test("canvas hides insertion and source-reversal affordances while retaining tar
 
 test("the canvas has no persistent global-comment button while global targets remain addressable", async () => {
   const [canvas, css] = await Promise.all([
-    readFile(new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url), "utf8"),
+    readCanvasArchitecture(),
     readFile(new URL("../app/components/HtmlCanvasEditor.module.css", import.meta.url), "utf8"),
   ]);
 
@@ -547,10 +536,7 @@ test("the canvas has no persistent global-comment button while global targets re
 });
 
 test("preview native links and forms cannot navigate the editing canvas on double click", async () => {
-  const canvas = await readFile(
-    new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url),
-    "utf8",
-  );
+  const canvas = await readCanvasArchitecture();
   const doubleClickHandler = canvas.slice(
     canvas.indexOf("const handleDoubleClick = (event: MouseEvent) =>"),
     canvas.indexOf("const handleKeyDown = (event: KeyboardEvent) =>"),
@@ -596,10 +582,7 @@ test("preview native links and forms cannot navigate the editing canvas on doubl
 });
 
 test("spacing menu is controlled and closes for outside toolbar and canvas interactions", async () => {
-  const canvas = await readFile(
-    new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url),
-    "utf8",
-  );
+  const canvas = await readCanvasArchitecture();
   assert.match(canvas, /const spacingMenuRef = useRef<HTMLDetailsElement>/u);
   assert.match(canvas, /const \[spacingMenuOpen, setSpacingMenuOpen\] = useState\(false\)/u);
   assert.match(canvas, /documentNode\.addEventListener\("pointerdown", closeOutsideSpacingMenu, true\)/u);
@@ -609,10 +592,7 @@ test("spacing menu is controlled and closes for outside toolbar and canvas inter
 });
 
 test("canvas root whitespace clears selection instead of selecting the document body", async () => {
-  const canvas = await readFile(
-    new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url),
-    "utf8",
-  );
+  const canvas = await readCanvasArchitecture();
   const selectableHelper = canvas.slice(
     canvas.indexOf("function findSelectableElement"),
     canvas.indexOf("const HtmlCanvasEditor =", canvas.indexOf("function findSelectableElement")),
@@ -633,10 +613,7 @@ test("canvas root whitespace clears selection instead of selecting the document 
 });
 
 test("handoff commits a pending source edit before recapturing and freezing comment targets", async () => {
-  const workbench = await readFile(
-    new URL("../app/workbench.tsx", import.meta.url),
-    "utf8",
-  );
+  const workbench = await readWorkbenchArchitecture();
   const handoffStart = workbench.indexOf("const generateRequest = useCallback");
   const commit = workbench.indexOf(
     "const committed = editorRef.current?.fencePendingEdit({",

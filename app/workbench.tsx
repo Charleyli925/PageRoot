@@ -13,7 +13,6 @@ import {
   type ChangeEvent,
   type ClipboardEvent,
   type CSSProperties,
-  type ReactNode,
 } from "react";
 import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowCounterClockwise";
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/csr/ArrowSquareOut";
@@ -25,18 +24,14 @@ import { CopyIcon } from "@phosphor-icons/react/dist/csr/Copy";
 import { EyeIcon } from "@phosphor-icons/react/dist/csr/Eye";
 import { FileIcon } from "@phosphor-icons/react/dist/csr/File";
 import { FileHtmlIcon } from "@phosphor-icons/react/dist/csr/FileHtml";
-import { FlagCheckeredIcon } from "@phosphor-icons/react/dist/csr/FlagCheckered";
-import { FloppyDiskIcon } from "@phosphor-icons/react/dist/csr/FloppyDisk";
 import { FolderOpenIcon } from "@phosphor-icons/react/dist/csr/FolderOpen";
 import { ImageIcon } from "@phosphor-icons/react/dist/csr/Image";
 import { LockKeyIcon } from "@phosphor-icons/react/dist/csr/LockKey";
-import { MinusCircleIcon } from "@phosphor-icons/react/dist/csr/MinusCircle";
 import { PaperclipIcon } from "@phosphor-icons/react/dist/csr/Paperclip";
 import { PaperPlaneTiltIcon } from "@phosphor-icons/react/dist/csr/PaperPlaneTilt";
 import { PencilSimpleIcon } from "@phosphor-icons/react/dist/csr/PencilSimple";
 import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
 import { SealCheckIcon } from "@phosphor-icons/react/dist/csr/SealCheck";
-import { ShieldCheckIcon } from "@phosphor-icons/react/dist/csr/ShieldCheck";
 import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
 import { TriangleIcon } from "@phosphor-icons/react/dist/csr/Triangle";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
@@ -57,10 +52,6 @@ import HtmlInteractionPreview, {
 } from "./components/HtmlInteractionPreview";
 import NoticeBar from "./components/NoticeBar";
 import RestartUpdateDialog from "./components/RestartUpdateDialog";
-import {
-  rebindCanvasSelectionTargets,
-  rebindCanvasSelectionTargetsAcrossHistory,
-} from "./lib/canvas-target-rebind.js";
 import {
   MAX_ATTACHMENT_BYTES,
   MAX_COMMENT_ATTACHMENTS,
@@ -94,7 +85,6 @@ import {
   DEFAULT_PROJECT_HTML,
   WELCOME_PROJECT_NAME,
 } from "./lib/sample-html";
-import { versionAuditCollections } from "./lib/version-audit-records";
 import {
   canCloseDuringHydration,
   shouldRecoverEditorAfterCloseAbort,
@@ -106,17 +96,13 @@ import {
 import {
   DraftSession,
   type DraftSessionEvent,
-  type DraftSnapshot,
 } from "./application/draft-session.js";
 import { DrainCoordinator } from "./application/drain-coordinator.js";
 import type { PageViewContext } from "./lib/page-view-context.js";
 import { ProjectQueryFence } from "./application/project-query-fence.js";
 import { createBrowserRecoveryStore } from "./application/recovery-store.js";
 import { SourceHistorySession } from "./application/source-history-session.js";
-import type {
-  SourceHistoryEntry,
-  SourceHistoryDirection,
-} from "./domain/source-history.js";
+import type { SourceHistoryDirection } from "./domain/source-history.js";
 import {
   BROWSER_RUNTIME_CAPABILITIES,
   resolveRuntimeCapabilities,
@@ -142,8 +128,108 @@ import {
   validationReviewFromRecord,
   type ActiveRun,
   type LifecycleState,
-  type ValidationReview,
 } from "./domain/run-lifecycle.js";
+import {
+  browserSha256,
+  copyText,
+  downloadHtml,
+  fileAsBase64,
+  isImageFile,
+} from "./workbench/browser-io";
+import {
+  attachmentFromRecord,
+  canLocateTarget,
+  canSaveCommentTarget,
+  commentEditSessionHasChanges,
+  commentHasContent,
+  commentsFromRecords,
+  formatFileSize,
+  independentCommentTarget,
+  insertionLabel,
+  normalizeGlobalCommentTargets,
+  persistedAttachment,
+  persistedChangeEvent,
+  persistedComment,
+  persistedTargetRef,
+  rebindTargetsAcrossHistoryPreservingGlobal,
+  rebindTargetsPreservingGlobal,
+  recordId,
+  selectionFromRecord,
+  targetResolutionLabel,
+  uniqueTargets,
+  unsafeCommentTargetsNotice,
+} from "./workbench/comment-model";
+import {
+  CommentAttachmentStrip,
+  PreviewNavigationBanner,
+  ProcessStepGlyph,
+  processStepStatusLabel,
+} from "./workbench/presentation";
+import {
+  activeRunOperationKey,
+  fileExtension,
+  fileNameFromSourcePath,
+  fileStem,
+  folderFromSourcePath,
+  formatProjectTimestamp,
+  formatTime,
+  localFileNameFromSourcePath,
+  projectMarkdown,
+  safeVersionLabel,
+  sameLocalSourcePath,
+  sourceRenameOperationId,
+  workspaceFileLabel,
+} from "./workbench/project-model";
+import {
+  authoritativeDraftRevision,
+  draftAuthorityFromWorkspace,
+  historyTextSelectionFromRecord,
+  isRecord,
+  ownsNativeTextHistory,
+  recoveryIdentityFromRecord,
+  scopeDecisionSummary,
+  sourceHistoryOperationsFromRecord,
+} from "./workbench/record-model";
+import {
+  changeKindLabel,
+  changesFromRecords,
+  historyRecordValue,
+  summarizeChangeEvents,
+  versionsFromWorkspace,
+} from "./workbench/version-model";
+import type {
+  ApplicationUpdateResult,
+  BackgroundProjectResult,
+  CanvasMode,
+  CloseAbortedDetail,
+  CloseLifecycle,
+  CloseReadiness,
+  CommentAttachment,
+  CommentEditSession,
+  CommentItem,
+  DirectEditEvent,
+  DesktopProjectsApi,
+  Drawer,
+  HtmlProject,
+  OpenedAiVersionNotice,
+  OtherTabCommentEntry,
+  PendingDraft,
+  PendingWrite,
+  PersistState,
+  PrepareCloseDetail,
+  ProjectContext,
+  ProjectQoderHandoffState,
+  QoderHandoffUiStatus,
+  RecentProject,
+  RecoveryIdentity,
+  StartupIssue,
+  Toast,
+  ToastAction,
+  Version,
+  ViewMode,
+  WorkspaceFileView,
+  WorkspaceIssue,
+} from "./workbench/types";
 
 const HtmlCanvasEditor = lazy(() => import("./components/HtmlCanvasEditor"));
 const BROWSER_PREVIEW_LOGO_PLACEHOLDER =
@@ -165,377 +251,6 @@ function isDeferredEditorCommandDiscardedError(
 ): value is DeferredEditorCommandDiscardedError {
   return value instanceof DeferredEditorCommandDiscardedError;
 }
-
-type HtmlProject = {
-  path: string;
-  sourcePath: string;
-  name: string;
-  html: string;
-  sha256: string;
-  lastModifiedAt?: string;
-};
-
-type RecentProject = {
-  path: string;
-  sourcePath: string;
-  name: string;
-  lastOpenedAt: number;
-};
-
-type DesktopProjectsApi = {
-  getActiveProject: () => Promise<HtmlProject | null>;
-  openHtml: () => Promise<HtmlProject | null>;
-  showInFolder?: (sourcePath: string) => Promise<{ sourcePath: string }>;
-  openInDefaultBrowser?: (
-    sourcePath: string,
-  ) => Promise<{ sourcePath: string }>;
-  renameHtml?: (payload: {
-    operationId: string;
-    sourcePath: string;
-    stem: string;
-    expectedSha256: string;
-  }) => Promise<HtmlProject & {
-    operationId: string;
-    previousSourcePath: string;
-    fileName: string;
-    stem: string;
-    extension: string;
-    renamed: boolean;
-    replayed: boolean;
-    workspaceRelinked: boolean;
-  }>;
-  revealRequestFolder?: (payload: {
-    sourcePath: string;
-    requestPath: string;
-  }) => Promise<{ requestPath: string }>;
-  revealVersionFile?: (payload: {
-    sourcePath: string;
-    versionId: string;
-  }) => Promise<{ versionPath: string }>;
-  activateGeneratedVersion?: (payload: {
-    previousSourcePath: string;
-    nextSourcePath: string;
-    expectedSha256: string;
-    projectId: string;
-    versionId: string;
-  }) => Promise<HtmlProject & {
-    previousSourcePath: string;
-    versionId: string;
-  }>;
-  exportHtmlCopy?: (payload: {
-    html: string;
-    sourcePath?: string | null;
-    suggestedName?: string;
-  }) => Promise<{ path: string; name: string } | null>;
-  readHtml?: (sourcePath: string) => Promise<HtmlProject>;
-  listRecentProjects: () => Promise<RecentProject[]>;
-  openRecent: (sourcePath: string) => Promise<HtmlProject>;
-  forgetRecent?: (sourcePath: string) => Promise<{ sourcePath: string }>;
-};
-
-type QoderHandoffResult = {
-  status: "copied";
-  copied: boolean;
-  opened: boolean;
-  pasted: boolean;
-  reason: string | null;
-};
-
-type QoderHandoffUiStatus = "copying" | "copied" | "failed";
-
-type ProjectQoderHandoffState = {
-  sourcePath: string;
-  requestId: string;
-  attemptId: string;
-  status: QoderHandoffUiStatus;
-};
-
-type DesktopIntegrationsApi = {
-  handoffToQoderWork: (payload: {
-    message: string;
-  }) => Promise<QoderHandoffResult>;
-};
-
-type ApplicationUpdateStatus =
-  | "idle"
-  | "checking"
-  | "available"
-  | "downloading"
-  | "downloaded"
-  | "installing"
-  | "current"
-  | "unsupported"
-  | "unavailable";
-
-type ApplicationUpdateResult = {
-  status: ApplicationUpdateStatus;
-  currentVersion: string;
-  latestVersion: string | null;
-  architecture: string;
-  downloadPercent: number | null;
-  publishedAt: string | null;
-};
-
-type DesktopUpdatesApi = {
-  getStatus: () => Promise<ApplicationUpdateResult | null>;
-  checkNow: () => Promise<ApplicationUpdateResult>;
-  downloadAvailable: () => Promise<ApplicationUpdateResult>;
-  onStatus: (
-    listener: (result: ApplicationUpdateResult | null) => void,
-  ) => () => void;
-  installDownloaded: () => Promise<{
-    installing: boolean;
-    reason: "not-ready" | "close-blocked" | null;
-  }>;
-  openLatestRelease: () => Promise<{ opened: boolean }>;
-  openRepository: () => Promise<{ opened: boolean }>;
-};
-
-declare global {
-  interface Window {
-    htmlAIProjects?: DesktopProjectsApi;
-    htmlAIIntegrations?: DesktopIntegrationsApi;
-    htmlAIUpdates?: DesktopUpdatesApi;
-    htmlAIEdit?: {
-      onHistoryRequested: (
-        listener: (direction: SourceHistoryDirection) => void,
-      ) => () => void;
-      runNativeHistory: (
-        direction: SourceHistoryDirection,
-      ) => Promise<{ applied: boolean }>;
-    };
-    htmlAIRuntime?: {
-      bridgePort: string;
-      bridgeAuthToken: string;
-      appVersion: string;
-      capabilities?: RuntimeCapabilities;
-    };
-    __PAGEROOT_HYDRATION_STAGE__?: string;
-  }
-}
-
-type CommentAttachment = {
-  attachmentId: string;
-  kind: "image" | "file";
-  fileName: string;
-  mediaType: string;
-  byteLength: number;
-  sha256: string;
-  relativePath: string;
-  requestRelativePath?: string;
-  source?: "clipboard" | "file-picker";
-};
-
-type CommentItem = {
-  commentId: string;
-  createdAt: string;
-  updatedAt: string;
-  target: HtmlCanvasSelection;
-  text: string;
-  attachments?: CommentAttachment[];
-  baseVersionId: string | null;
-  requestId?: string;
-  attemptId?: string;
-  resultVersionId?: string;
-};
-
-type CommentEditSession = {
-  commentId: string;
-  baselineText: string;
-  baselineAttachments: CommentAttachment[];
-  draftText: string;
-  draftAttachments: CommentAttachment[];
-};
-
-type OtherTabCommentEntry =
-  | {
-      kind: "saved";
-      key: string;
-      target: HtmlCanvasSelection;
-      comment: CommentItem;
-      previewText: string;
-    }
-  | {
-      kind: "draft";
-      key: "__composer";
-      target: HtmlCanvasSelection;
-      previewText: string;
-    };
-
-type DirectEditEvent = {
-  eventId: string;
-  createdAt: string;
-  kind: "text" | "style" | "reorder" | "structure";
-  target: HtmlCanvasSelection;
-  property?: string;
-  before: unknown;
-  after: unknown;
-  baseVersionId: string | null;
-  capturedRevision?: number;
-  inherited?: boolean;
-  inheritedFromVersionId?: string;
-};
-
-type Version = {
-  id: string;
-  ordinal: number;
-  label: string;
-  summary: string;
-  generatedAt: string;
-  source: "初始页面" | "内部 AI";
-  contentSha256: string;
-  previousVersionId: string | null;
-  basedOnVersionId: string | null;
-  requestId: string | null;
-  attemptId: string | null;
-  committed: boolean;
-  comments: CommentItem[];
-  directEdits: DirectEditEvent[];
-  supplements: UserSupplementRecord[];
-  validationReview: ValidationReview | null;
-};
-
-type UserSupplementAttachment = {
-  attachmentId: string;
-  fileName: string;
-  mediaType: string;
-  relativePath?: string;
-  sha256?: string;
-};
-
-type UserSupplementRecord = {
-  recordId: string;
-  action: "add" | "amend" | "retract";
-  text: string;
-  createdAt: string;
-  referenceId?: string;
-  evidenceState: "text-only" | "original-file" | "description-only";
-  evidenceDescription?: string;
-  attachments: UserSupplementAttachment[];
-};
-
-type PersistState = "idle" | "preview-dirty" | "queued" | "writing" | "failed" | "conflict";
-type ViewMode = "current" | "history";
-type CanvasMode = "edit" | "preview";
-type Drawer = "files" | "history" | "handoff" | null;
-type ToastTone = "success" | "info" | "warning" | "error";
-type ToastDisposition =
-  | "silent-recover"
-  | "defer-and-resume"
-  | "direct-action"
-  | "user-choice"
-  | "background-result"
-  | "inform-in-place";
-type ToastAction =
-  | { id: "retry-export"; label: string }
-  | { id: "open-handoff"; label: string }
-  | { id: "open-project"; label: string; sourcePath: string }
-  | { id: "retry-project-open"; label: string; sourcePath?: string }
-  | {
-      id: "open-attachment-picker";
-      label: string;
-      target: { kind: "composer" | "comment"; commentId: string };
-      accept?: "all" | "image";
-    }
-  | {
-      id: "review-comment-attachments";
-      label: string;
-      target: { kind: "composer" | "comment"; commentId: string };
-    }
-  | {
-      id: "relink-target";
-      label: string;
-      commentId: string;
-      resumeSubmission?: boolean;
-    }
-  | { id: "relaunch-app"; label: string }
-  | { id: "retry-draft-persist"; label: string }
-  | { id: "review-project-rules"; label: string }
-  | { id: "retry-submit"; label: string }
-  | { id: "resume-draft"; label: string }
-  | { id: "resume-comment-edit"; label: string; commentId: string };
-type Toast = {
-  title: string;
-  message: string;
-  tone: ToastTone;
-  sticky?: boolean;
-  dedupeKey?: string;
-  disposition?: ToastDisposition;
-  action?: ToastAction;
-} | null;
-type StartupIssue = {
-  title: string;
-  message: string;
-};
-type WorkspaceIssue = {
-  title: string;
-  message: string;
-};
-type OpenedAiVersionNotice = {
-  sourcePath: string;
-  fileName: string;
-  versionLabel: string;
-  generatedAt: string;
-};
-type WorkspaceFileView = {
-  path: string;
-  content: string;
-  savedContent: string;
-  loading: boolean;
-  error?: string;
-};
-type PendingWrite = {
-  epoch: number;
-  projectId: string;
-  documentId: string;
-  sourcePath: string | null;
-  expectedSourceSha256: string | null;
-  html: string;
-  revision: number;
-  events: DirectEditEvent[];
-  historyOperations: SourceHistoryEntry[];
-  recoveryIdentity: RecoveryIdentity | null;
-};
-type RecoveryIdentity = {
-  schemaVersion: "1.0.0";
-  projectId: string;
-  documentId: string;
-  sourcePath: string;
-  basedOnVersionId: string;
-  sourceSha256: string;
-  editRevision: number;
-  token: string;
-};
-type ProjectContext = {
-  epoch: number;
-  projectId: string;
-  documentId: string;
-  sourcePath: string;
-};
-type PendingDraft = DraftSnapshot<CommentItem, DirectEditEvent>;
-type BackgroundProjectResult = {
-  state: "processing" | "ready" | "no-change" | "error" | "conflict";
-  label: string;
-  updatedAt: number;
-};
-type CloseReadiness =
-  | { ready: true }
-  | { ready: false; reason: string };
-type PrepareCloseDetail = {
-  requestId: string;
-  reason: string;
-  deadlineAt: number;
-  waitUntil: (readiness: Promise<CloseReadiness>) => void;
-};
-type CloseAbortedDetail = {
-  requestId: string;
-  reason: string;
-};
-type CloseLifecycle = {
-  preparingRequestId: string | null;
-  frozenRequestId: string | null;
-  abortedRequestIds: Set<string>;
-};
 
 const AUTOSAVE_DELAY_MS = 700;
 const bridgeClient = createRuntimeBridgeClient();
@@ -572,972 +287,6 @@ const WELCOME_PROJECT = {
   sourcePath: null as string | null,
 };
 
-function fileStem(name: string): string {
-  return name.replace(/\.html?$/i, "") || "未命名页面";
-}
-
-function localFileNameFromSourcePath(
-  sourcePath: string | null | undefined,
-): string {
-  if (!sourcePath) return "";
-  const separatorIndex = Math.max(
-    sourcePath.lastIndexOf("/"),
-    sourcePath.lastIndexOf("\\"),
-  );
-  return sourcePath.slice(separatorIndex + 1) || sourcePath;
-}
-
-function fileExtension(name: string): string {
-  const matched = name.match(/(\.html?)$/iu);
-  return matched?.[1] || "";
-}
-
-function sourceRenameOperationId(): string {
-  const randomId = globalThis.crypto?.randomUUID?.()
-    || `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 14)}`;
-  return `rename_${randomId}`;
-}
-
-function comparableLocalSourcePath(sourcePath: string | null | undefined): string {
-  if (!sourcePath) return "";
-  if (sourcePath === "/private/var" || sourcePath.startsWith("/private/var/")) {
-    return sourcePath.slice("/private".length);
-  }
-  if (sourcePath === "/private/tmp" || sourcePath.startsWith("/private/tmp/")) {
-    return sourcePath.slice("/private".length);
-  }
-  return sourcePath;
-}
-
-function sameLocalSourcePath(
-  left: string | null | undefined,
-  right: string | null | undefined,
-): boolean {
-  return Boolean(
-    left
-    && right
-    && comparableLocalSourcePath(left) === comparableLocalSourcePath(right),
-  );
-}
-
-function folderFromSourcePath(sourcePath: string | null): string {
-  if (!sourcePath) return "尚未打开本地文件";
-  const separatorIndex = Math.max(
-    sourcePath.lastIndexOf("/"),
-    sourcePath.lastIndexOf("\\"),
-  );
-  if (separatorIndex < 0) return sourcePath;
-  return separatorIndex === 0 ? sourcePath.slice(0, 1) : sourcePath.slice(0, separatorIndex);
-}
-
-function safeVersionLabel(versionId: string): string {
-  const match = versionId.match(/(\d+)$/);
-  return match ? `版本 ${Number(match[1])}` : versionId;
-}
-
-function isGlobalPageTarget(target: HtmlCanvasSelection): boolean {
-  return target.selector.trim().toLowerCase() === "body"
-    && target.level === "module";
-}
-
-function exactGlobalPageTarget(target: HtmlCanvasSelection): HtmlCanvasSelection {
-  return {
-    ...target,
-    label: "整个页面",
-    selector: "body",
-    level: "module",
-    tagName: "body",
-    text: "",
-    resolution: "exact",
-  };
-}
-
-function rebindTargetsPreservingGlobal(
-  nextHtml: string,
-  targets: HtmlCanvasSelection[],
-): HtmlCanvasSelection[] {
-  const localTargets = targets.filter((target) => (
-    !isGlobalPageTarget(target) && canLocateTarget(target)
-  ));
-  const reboundById = new Map(
-    rebindCanvasSelectionTargets(nextHtml, localTargets)
-      .map((target) => [target.id, target]),
-  );
-  return targets.map((target) => (
-    isGlobalPageTarget(target)
-      ? exactGlobalPageTarget(target)
-      : canLocateTarget(target)
-        ? reboundById.get(target.id) || target
-        : target
-  ));
-}
-
-function rebindTargetsAcrossHistoryPreservingGlobal(
-  currentHtml: string,
-  nextHtml: string,
-  targets: HtmlCanvasSelection[],
-  transition: {
-    fromTarget: HtmlCanvasSelection | null;
-    toTarget: HtmlCanvasSelection | null;
-  },
-): HtmlCanvasSelection[] {
-  const localTargets = targets.filter((target) => (
-    !isGlobalPageTarget(target) && canLocateTarget(target)
-  ));
-  const reboundById = new Map(
-    rebindCanvasSelectionTargetsAcrossHistory(
-      currentHtml,
-      nextHtml,
-      localTargets,
-      transition,
-    ).map((target) => [target.id, target]),
-  );
-  return targets.map((target) => (
-    isGlobalPageTarget(target)
-      ? exactGlobalPageTarget(target)
-      : canLocateTarget(target)
-        ? reboundById.get(target.id) || target
-        : target
-  ));
-}
-
-function normalizeGlobalCommentTargets(comments: CommentItem[]): {
-  comments: CommentItem[];
-  changed: boolean;
-} {
-  let changed = false;
-  const normalized = comments.map((comment) => {
-    if (!isGlobalPageTarget(comment.target)) return comment;
-    const target = exactGlobalPageTarget(comment.target);
-    if (
-      comment.target.tagName === target.tagName
-      && comment.target.label === target.label
-      && comment.target.text === target.text
-      && comment.target.resolution === target.resolution
-    ) return comment;
-    changed = true;
-    return { ...comment, target };
-  });
-  return { comments: changed ? normalized : comments, changed };
-}
-
-function displayVersionLabel(ordinal: number): string {
-  return Number.isSafeInteger(ordinal) && ordinal > 0
-    ? `版本 ${ordinal}`
-    : "下一版";
-}
-
-function fileNameFromSourcePath(sourcePath: string): string {
-  return sourcePath.split(/[\\/]/).at(-1) || "新版本.html";
-}
-
-function activeRunOperationKey(run: Pick<
-  ActiveRun,
-  "sourcePath" | "requestId" | "attemptId"
->): string {
-  return `${run.sourcePath}\n${run.requestId}\n${run.attemptId}`;
-}
-
-function workspaceFileLabel(relativePath: string): string {
-  if (relativePath === "PROJECT.md") return "项目规则";
-  if (relativePath === "runtime-state.json") return "运行状态";
-  if (relativePath === "edit-audit.jsonl") return "编辑记录";
-  if (relativePath.endsWith("/PROMPT.md")) return "本轮 Prompt";
-  if (relativePath.endsWith("/change-request.json")) return "本轮修改要求";
-  if (relativePath.endsWith("/input/AI_RULES.md")) return "本轮 AI 规则";
-  return "项目记录";
-}
-
-function formatTime(value: unknown, includeSeconds = false): string {
-  if (typeof value !== "string" || !value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  return new Intl.DateTimeFormat("zh-CN", {
-    month: "numeric",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    ...(includeSeconds ? { second: "2-digit" } : {}),
-    hour12: false,
-  }).format(date);
-}
-
-function formatProjectTimestamp(value: unknown): string {
-  if ((typeof value !== "string" && typeof value !== "number") || !value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  const now = new Date();
-  const startOfToday = Date.UTC(
-    now.getFullYear(),
-    now.getMonth(),
-    now.getDate(),
-  );
-  const startOfDate = Date.UTC(
-    date.getFullYear(),
-    date.getMonth(),
-    date.getDate(),
-  );
-  const dayDifference = Math.round(
-    (startOfToday - startOfDate) / (24 * 60 * 60 * 1000),
-  );
-  const time = new Intl.DateTimeFormat("zh-CN", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(date);
-  if (dayDifference === 0) return `今天 ${time}`;
-  if (dayDifference === 1) return `昨天 ${time}`;
-  if (dayDifference === -1) return `明天 ${time}`;
-  if (date.getFullYear() === now.getFullYear()) {
-    return `${date.getMonth() + 1}月${date.getDate()}日`;
-  }
-  return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`;
-}
-
-function recordId(
-  prefix: "comment" | "change" | "attachment",
-  counter: number,
-): string {
-  return `${prefix}_${Date.now().toString(36)}_${String(counter).padStart(4, "0")}`;
-}
-
-function independentCommentTarget(
-  target: HtmlCanvasSelection,
-  commentId: string,
-): HtmlCanvasSelection {
-  const safeCommentId = commentId.replace(/[^A-Za-z0-9_-]/gu, "_")
-    || "comment_unknown";
-  return {
-    ...target,
-    id: `target_${safeCommentId}`,
-  };
-}
-
-function persistedAttachment(attachment: CommentAttachment): CommentAttachment {
-  return {
-    attachmentId: attachment.attachmentId,
-    kind: attachment.kind,
-    fileName: attachment.fileName,
-    mediaType: attachment.mediaType,
-    byteLength: attachment.byteLength,
-    sha256: attachment.sha256,
-    relativePath: attachment.relativePath,
-    ...(attachment.requestRelativePath
-      ? { requestRelativePath: attachment.requestRelativePath }
-      : {}),
-    ...(attachment.source ? { source: attachment.source } : {}),
-  };
-}
-
-function commentAttachmentFingerprint(
-  attachments: readonly CommentAttachment[],
-): string {
-  return attachments
-    .map((attachment) => attachment.attachmentId)
-    .sort()
-    .join("\u0000");
-}
-
-function commentEditSessionHasChanges(
-  session: CommentEditSession | null,
-): boolean {
-  if (!session) return false;
-  return session.draftText !== session.baselineText
-    || commentAttachmentFingerprint(session.draftAttachments)
-      !== commentAttachmentFingerprint(session.baselineAttachments);
-}
-
-function attachmentFromRecord(value: unknown): CommentAttachment | null {
-  if (!isRecord(value)) return null;
-  const attachmentId = String(value.attachmentId || "");
-  const fileName = String(value.fileName || "");
-  const relativePath = String(value.relativePath || "");
-  const sha256 = String(value.sha256 || "");
-  const byteLength = Number(value.byteLength || 0);
-  if (
-    !/^attachment_[A-Za-z0-9_-]+$/.test(attachmentId)
-    || !fileName
-    || !relativePath
-    || !/^sha256:[a-f0-9]{64}$/.test(sha256)
-    || !Number.isSafeInteger(byteLength)
-    || byteLength <= 0
-  ) return null;
-  return {
-    attachmentId,
-    kind: value.kind === "image" ? "image" : "file",
-    fileName,
-    mediaType: String(value.mediaType || "application/octet-stream"),
-    byteLength,
-    sha256,
-    relativePath,
-    ...(value.requestRelativePath
-      ? { requestRelativePath: String(value.requestRelativePath) }
-      : {}),
-    ...(value.source === "clipboard" || value.source === "file-picker"
-      ? { source: value.source }
-      : {}),
-  };
-}
-
-function commentHasContent(comment: Pick<CommentItem, "text" | "attachments">): boolean {
-  return Boolean(comment.text.trim() || comment.attachments?.length);
-}
-
-function unsafeCommentTargetsNotice(comments: CommentItem[]): NonNullable<Toast> {
-  const count = comments.length;
-  return {
-    title: `${count} 条评论需要重新定位`,
-    message: count === 1
-      ? "请选择这条评论的新位置，评论和附件已保留。"
-      : `将从第 1 条开始，完成后自动进入下一条。`,
-    tone: "warning",
-    sticky: true,
-    disposition: "user-choice",
-    dedupeKey: "unsafe-comment-targets",
-    action: {
-      id: "relink-target",
-      label: count === 1 ? "选择新位置" : "开始重新定位",
-      commentId: comments[0].commentId,
-      resumeSubmission: true,
-    },
-  };
-}
-
-function formatFileSize(byteLength: number): string {
-  if (byteLength < 1024) return `${byteLength} B`;
-  if (byteLength < 1024 * 1024) return `${Math.ceil(byteLength / 1024)} KB`;
-  return `${(byteLength / (1024 * 1024)).toFixed(byteLength < 10 * 1024 * 1024 ? 1 : 0)} MB`;
-}
-
-function fileAsBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(reader.error || new Error("无法读取附件。"));
-    reader.onload = () => {
-      const result = String(reader.result || "");
-      const comma = result.indexOf(",");
-      if (comma < 0) reject(new Error("附件读取结果无效。"));
-      else resolve(result.slice(comma + 1));
-    };
-    reader.readAsDataURL(file);
-  });
-}
-
-function isImageFile(file: File): boolean {
-  return file.type.startsWith("image/")
-    || /\.(?:avif|bmp|gif|heic|heif|jpe?g|png|svg|webp)$/i.test(file.name);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-function sourceHistoryOperationsFromRecord(value: unknown): SourceHistoryEntry[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .filter((entry): entry is Record<string, unknown> => (
-      isRecord(entry)
-      && /^sourceop_[A-Za-z0-9_-]{12,180}$/.test(
-        String(entry.operationId || ""),
-      )
-      && Array.isArray(entry.forwardPatches)
-      && Array.isArray(entry.reversePatches)
-    ))
-    .map((entry) => structuredClone(entry) as unknown as SourceHistoryEntry);
-}
-
-function ownsNativeTextHistory(target: Element | null): boolean {
-  if (!target) return false;
-  const editable = target.closest<HTMLElement>(
-    "textarea, input, [contenteditable='true']",
-  );
-  if (!editable) return false;
-  if (editable.isContentEditable) return true;
-  if (editable instanceof HTMLTextAreaElement) {
-    return !editable.disabled && !editable.readOnly;
-  }
-  if (!(editable instanceof HTMLInputElement)) return false;
-  return (
-    !editable.disabled
-    && !editable.readOnly
-    && [
-      "email",
-      "number",
-      "password",
-      "search",
-      "tel",
-      "text",
-      "url",
-    ].includes(editable.type)
-  );
-}
-
-function draftAuthorityFromWorkspace(
-  payload: Record<string, unknown>,
-): Record<string, unknown> {
-  const runtime = isRecord(payload.runtimeState) ? payload.runtimeState : {};
-  return isRecord(runtime.draft)
-    ? runtime.draft
-    : isRecord(payload.activeDraft)
-      ? payload.activeDraft
-      : {};
-}
-
-function authoritativeDraftRevision(
-  draft: Record<string, unknown>,
-): number {
-  const revision = Number(draft.draftRevision || 0);
-  return Number.isSafeInteger(revision) && revision >= 0 ? revision : 0;
-}
-
-function scopeDifferenceKindLabel(kind: unknown): string {
-  if (kind === "text") return "文字";
-  if (kind === "attribute") return "元素属性";
-  if (kind === "structure") return "页面结构";
-  if (kind === "inline-style") return "局部样式";
-  if (kind === "shared-css") return "共享样式";
-  return "页面内容";
-}
-
-function compactScopePreview(value: unknown): string {
-  const text = String(value || "").replace(/\s+/gu, " ").trim();
-  return text.length > 80 ? `${text.slice(0, 77)}…` : text;
-}
-
-function scopeDecisionSummary(report: Record<string, unknown> | undefined): {
-  message: string;
-  examples: string[];
-} {
-  const differences = Array.isArray(report?.differences)
-    ? report.differences.filter((item) => (
-        isRecord(item)
-        && item.allowed === false
-        && item.material !== false
-      ))
-    : [];
-  if (differences.length === 0) {
-    return {
-      message: "AI 结果包含评论范围外的变化。当前 HTML 尚未改变。",
-      examples: [],
-    };
-  }
-  const kinds = [...new Set(
-    differences.map((item) => scopeDifferenceKindLabel(
-      isRecord(item) ? item.kind : null,
-    )),
-  )];
-  const examples = differences.slice(0, 3).map((item) => {
-    if (!isRecord(item)) return "";
-    const before = isRecord(item.before)
-      ? compactScopePreview(item.before.preview)
-      : "";
-    const after = isRecord(item.after)
-      ? compactScopePreview(item.after.preview)
-      : "";
-    const label = scopeDifferenceKindLabel(item.kind);
-    if (before && after) return `${label}：“${before}” → “${after}”`;
-    if (after) return `${label}：新增“${after}”`;
-    if (before) return `${label}：移除“${before}”`;
-    return `${label}发生了额外变化`;
-  }).filter(Boolean);
-  return {
-    message: `AI 还修改了评论范围外的${kinds.join("、")}，共 ${differences.length} 处。当前 HTML 尚未改变。`,
-    examples,
-  };
-}
-
-function recoveryIdentityFromRecord(value: unknown): RecoveryIdentity | null {
-  if (!isRecord(value)) return null;
-  const identity = {
-    schemaVersion: String(value.schemaVersion || ""),
-    projectId: String(value.projectId || ""),
-    documentId: String(value.documentId || ""),
-    sourcePath: String(value.sourcePath || ""),
-    basedOnVersionId: String(value.basedOnVersionId || ""),
-    sourceSha256: String(value.sourceSha256 || ""),
-    editRevision: Number(value.editRevision),
-    token: String(value.token || ""),
-  };
-  if (
-    identity.schemaVersion !== "1.0.0"
-    || !identity.projectId
-    || !identity.documentId
-    || !identity.sourcePath
-    || !identity.basedOnVersionId
-    || !/^sha256:[a-f0-9]{64}$/u.test(identity.sourceSha256)
-    || !Number.isSafeInteger(identity.editRevision)
-    || identity.editRevision < 0
-    || !/^sha256:[a-f0-9]{64}$/u.test(identity.token)
-  ) return null;
-  return identity as RecoveryIdentity;
-}
-
-function historyTextSelectionFromRecord(raw: unknown): {
-  anchor: number;
-  focus: number;
-  affinity: "left" | "right";
-} | null {
-  if (!isRecord(raw)) return null;
-  const anchor = Number(raw.anchor);
-  const focus = Number(raw.focus);
-  const affinity = String(raw.affinity || "");
-  if (
-    !Number.isSafeInteger(anchor)
-    || !Number.isSafeInteger(focus)
-    || anchor < 0
-    || focus < 0
-    || (affinity !== "left" && affinity !== "right")
-  ) return null;
-  return {
-    anchor,
-    focus,
-    affinity,
-  };
-}
-
-function selectionFromRecord(raw: unknown): HtmlCanvasSelection {
-  const item = isRecord(raw) ? raw : {};
-  const selector = String(
-    item.selector
-    || "",
-  );
-  const levelValue = String(item.level || "part");
-  const resolutionValue = String(item.resolution || "");
-  const resolution = (
-    ["exact", "rebound", "ambiguous", "orphaned"].includes(resolutionValue)
-      ? resolutionValue
-      : "orphaned"
-  ) as HtmlCanvasSelection["resolution"];
-  const selection: HtmlCanvasSelection = {
-    id: String(item.targetId || ""),
-    label: String(item.label || selector || "页面内容"),
-    selector,
-    level: levelValue === "module"
-      ? "module"
-      : levelValue === "insertion" || levelValue === "insertion-point"
-        ? "insertion"
-        : "part",
-    tagName: isRecord(item.fingerprint)
-      ? String(item.fingerprint.tagName || "")
-      : levelValue === "insertion" || levelValue === "insertion-point"
-        ? "insertion"
-        : "",
-    text: String(item.textQuote || ""),
-    resolution,
-    ...(item.textQuote ? { textQuote: String(item.textQuote) } : {}),
-    ...(isRecord(item.sourceAnchor)
-      ? {
-          sourceAnchor: {
-            startOffset: Number(item.sourceAnchor.startOffset || 0),
-            endOffset: Number(item.sourceAnchor.endOffset || 0),
-            sourceSha256: String(item.sourceAnchor.sourceSha256 || ""),
-          },
-        }
-      : {}),
-    ...(isRecord(item.fingerprint)
-      ? {
-          fingerprint: {
-            tagName: String(item.fingerprint.tagName || ""),
-            stableAttributes: isRecord(item.fingerprint.stableAttributes)
-              ? Object.fromEntries(
-                  Object.entries(item.fingerprint.stableAttributes).map(([key, value]) => [
-                    key,
-                    String(value),
-                  ]),
-                )
-              : {},
-            ancestorFingerprint: Array.isArray(item.fingerprint.ancestorFingerprint)
-              ? item.fingerprint.ancestorFingerprint.map(String)
-              : [],
-            ...(item.fingerprint.textPrefix
-              ? { textPrefix: String(item.fingerprint.textPrefix) }
-              : {}),
-            ...(item.fingerprint.textSuffix
-              ? { textSuffix: String(item.fingerprint.textSuffix) }
-              : {}),
-          },
-        }
-      : {}),
-  };
-  return isGlobalPageTarget(selection)
-    ? exactGlobalPageTarget(selection)
-    : selection;
-}
-
-type PersistedTargetRef = {
-  targetId: string;
-  label: string;
-  level: "module" | "subregion" | "insertion-point";
-  selector: string;
-  textQuote?: string;
-  sourceAnchor?: HtmlCanvasSelection["sourceAnchor"];
-  fingerprint?: HtmlCanvasSelection["fingerprint"];
-  resolution: HtmlCanvasSelection["resolution"];
-};
-
-function persistedTargetRef(target: HtmlCanvasSelection): PersistedTargetRef {
-  return {
-    targetId: target.id,
-    label: target.level === "insertion"
-      ? (
-          target.label.includes("添加内容")
-            ? target.label
-            : `${target.label.replace(/[。；;，,\s]+$/u, "")}添加内容`
-        )
-      : target.label,
-    level: target.level === "part"
-      ? "subregion"
-      : target.level === "insertion"
-        ? "insertion-point"
-        : "module",
-    selector: target.selector,
-    ...(target.textQuote !== undefined ? { textQuote: target.textQuote } : {}),
-    ...(target.sourceAnchor ? { sourceAnchor: { ...target.sourceAnchor } } : {}),
-    ...(target.fingerprint
-      ? {
-          fingerprint: {
-            ...target.fingerprint,
-            stableAttributes: { ...target.fingerprint.stableAttributes },
-            ancestorFingerprint: [...target.fingerprint.ancestorFingerprint],
-          },
-        }
-      : {}),
-    resolution: target.resolution,
-  };
-}
-
-function persistedComment(comment: CommentItem) {
-  return {
-    ...comment,
-    ...(comment.attachments?.length
-      ? { attachments: comment.attachments.map(persistedAttachment) }
-      : {}),
-    target: persistedTargetRef(comment.target),
-  };
-}
-
-function persistedChangeEvent(event: DirectEditEvent) {
-  return {
-    ...event,
-    target: persistedTargetRef(event.target),
-  };
-}
-
-function commentsFromRecords(raw: unknown): CommentItem[] {
-  if (!Array.isArray(raw)) return [];
-  return raw.flatMap((value, index) => {
-    if (!isRecord(value)) return [];
-    const createdAt = String(value.createdAt || "");
-    const commentId = String(
-      value.commentId || value.id || `comment_unknown_${index + 1}`,
-    );
-    return [{
-      commentId,
-      createdAt,
-      updatedAt: String(value.updatedAt || createdAt),
-      target: independentCommentTarget(
-        selectionFromRecord(value.target || value),
-        commentId,
-      ),
-      text: String(value.text || ""),
-      ...(Array.isArray(value.attachments)
-        ? {
-            attachments: value.attachments
-              .map(attachmentFromRecord)
-              .filter((item): item is CommentAttachment => Boolean(item)),
-          }
-        : {}),
-      baseVersionId: value.baseVersionId ? String(value.baseVersionId) : null,
-      ...(value.requestId ? { requestId: String(value.requestId) } : {}),
-      ...(value.attemptId ? { attemptId: String(value.attemptId) } : {}),
-      ...(value.resultVersionId ? { resultVersionId: String(value.resultVersionId) } : {}),
-    }];
-  });
-}
-
-function changesFromRecords(raw: unknown): DirectEditEvent[] {
-  if (!Array.isArray(raw)) return [];
-  return raw.flatMap((value, index) => {
-    if (!isRecord(value)) return [];
-    const kind = String(value.kind || "");
-    if (!["text", "style", "reorder", "structure"].includes(kind)) return [];
-    return [{
-      eventId: String(value.eventId || value.id || `change_unknown_${index + 1}`),
-      createdAt: String(value.createdAt || ""),
-      kind: kind as DirectEditEvent["kind"],
-      target: selectionFromRecord(value.target || value),
-      ...(value.property ? { property: String(value.property) } : {}),
-      before: value.before,
-      after: value.after,
-      baseVersionId: value.baseVersionId || value.basedOnVersionId
-        ? String(value.baseVersionId || value.basedOnVersionId)
-        : null,
-      ...(Number.isFinite(Number(value.capturedRevision ?? value.revision))
-        ? {
-            capturedRevision: Number(
-              value.capturedRevision ?? value.revision,
-            ),
-          }
-        : {}),
-      ...(value.inherited === true ? { inherited: true } : {}),
-      ...(value.inheritedFromVersionId
-        ? { inheritedFromVersionId: String(value.inheritedFromVersionId) }
-        : {}),
-    }];
-  });
-}
-
-function supplementsFromRecords(raw: unknown): UserSupplementRecord[] {
-  if (!Array.isArray(raw)) return [];
-  return raw.flatMap((value) => {
-    if (!isRecord(value)) return [];
-    const action = String(value.action || "");
-    const evidenceState = String(value.evidenceState || "text-only");
-    if (!(["add", "amend", "retract"] as const).includes(
-      action as "add" | "amend" | "retract",
-    )) return [];
-    if (!(["text-only", "original-file", "description-only"] as const).includes(
-      evidenceState as "text-only" | "original-file" | "description-only",
-    )) return [];
-    const attachments = Array.isArray(value.attachments)
-      ? value.attachments.flatMap((attachment) => {
-          if (!isRecord(attachment)) return [];
-          return [{
-            attachmentId: String(attachment.attachmentId || ""),
-            fileName: String(attachment.fileName || "附件"),
-            mediaType: String(attachment.mediaType || "application/octet-stream"),
-            ...(attachment.relativePath
-              ? { relativePath: String(attachment.relativePath) }
-              : {}),
-            ...(attachment.sha256 ? { sha256: String(attachment.sha256) } : {}),
-          }];
-        })
-      : [];
-    const refersTo = Array.isArray(value.refersTo)
-      ? value.refersTo.map(String).filter(Boolean)
-      : [];
-    return [{
-      recordId: String(value.recordId || ""),
-      action: action as UserSupplementRecord["action"],
-      text: String(value.userText || ""),
-      createdAt: String(value.recordedAt || ""),
-      ...(refersTo[0] ? { referenceId: refersTo[0] } : {}),
-      evidenceState: evidenceState as UserSupplementRecord["evidenceState"],
-      ...(value.evidenceDescription
-        ? { evidenceDescription: String(value.evidenceDescription) }
-        : {}),
-      attachments,
-    }];
-  });
-}
-
-function versionsFromWorkspace(payload: Record<string, unknown>): Version[] {
-  if (!Array.isArray(payload.versions)) return [];
-  return payload.versions.flatMap((raw) => {
-    if (!isRecord(raw)) return [];
-    if (!isRecord(raw.manifest) || raw.manifest.schemaVersion !== "3.0.0") return [];
-    const manifest = raw.manifest;
-    const id = String(manifest.versionId || "");
-    if (!id) return [];
-    const sourceType = String(manifest.sourceType || "");
-    if (sourceType !== "initial" && sourceType !== "internal-ai") return [];
-    const auditCollections = versionAuditCollections(raw);
-    return [{
-      id,
-      ordinal: Number(manifest.versionOrdinal),
-      label: displayVersionLabel(Number(manifest.versionOrdinal)),
-      summary: String(manifest.summary),
-      generatedAt: String(manifest.generatedAt),
-      source: (
-        sourceType === "internal-ai" ? "内部 AI" : "初始页面"
-      ) as Version["source"],
-      contentSha256: String(manifest.contentSha256 || raw.contentSha256 || ""),
-      previousVersionId: manifest.previousVersionId ? String(manifest.previousVersionId) : null,
-      basedOnVersionId: manifest.basedOnVersionId ? String(manifest.basedOnVersionId) : null,
-      requestId: manifest.requestId ? String(manifest.requestId) : null,
-      attemptId: manifest.attemptId ? String(manifest.attemptId) : null,
-      committed: raw.committed !== false,
-      comments: commentsFromRecords(auditCollections.comments).map((comment) => ({
-        ...comment,
-        ...(manifest.requestId && !comment.requestId
-          ? { requestId: String(manifest.requestId) }
-          : {}),
-        ...(manifest.attemptId && !comment.attemptId
-          ? { attemptId: String(manifest.attemptId) }
-          : {}),
-        resultVersionId: id,
-      })),
-      directEdits: changesFromRecords(auditCollections.editEvents),
-      supplements: supplementsFromRecords(raw.supplements),
-      validationReview: validationReviewFromRecord(raw.validationReview),
-    }];
-  }).sort((a, b) => b.ordinal - a.ordinal);
-}
-
-async function copyText(value: string): Promise<void> {
-  if (navigator.clipboard?.writeText) {
-    try {
-      await navigator.clipboard.writeText(value);
-      return;
-    } catch {
-      // Fall back to a temporary textarea when clipboard permission is unavailable.
-    }
-  }
-  const textarea = document.createElement("textarea");
-  textarea.value = value;
-  textarea.style.position = "fixed";
-  textarea.style.opacity = "0";
-  document.body.appendChild(textarea);
-  try {
-    textarea.select();
-    if (!document.execCommand("copy")) {
-      throw new Error("浏览器没有确认剪贴板写入成功。");
-    }
-  } finally {
-    textarea.remove();
-  }
-}
-
-async function browserSha256(value: string): Promise<string> {
-  const bytes = new TextEncoder().encode(value);
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return `sha256:${[...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("")}`;
-}
-
-function projectMarkdown(name: string): string {
-  return `# ${fileStem(name)}\n\n- 入口文件：${name}\n- 默认延续当前页面的视觉语言、组件样式和响应式行为。\n- 在这里补充页面用途、长期风格和需要跨轮次持续遵循的约束。\n`;
-}
-
-function downloadHtml(html: string, name: string): void {
-  const url = URL.createObjectURL(new Blob([html], { type: "text/html;charset=utf-8" }));
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = name.endsWith(".html") || name.endsWith(".htm") ? name : `${name}.html`;
-  anchor.click();
-  window.setTimeout(() => URL.revokeObjectURL(url), 0);
-}
-
-function uniqueTargets(comments: CommentItem[]): HtmlCanvasSelection[] {
-  const seen = new Set<string>();
-  return comments.flatMap((comment) => {
-    if (seen.has(comment.target.id)) return [];
-    seen.add(comment.target.id);
-    return [comment.target];
-  });
-}
-
-function insertionLabel(target: HtmlCanvasSelection): string {
-  const label = persistedTargetRef(target).label;
-  return target.level === "insertion" ? `添加位置：${label}` : label;
-}
-
-function targetResolutionLabel(resolution: HtmlCanvasSelection["resolution"]): string {
-  if (resolution === "exact") return "精确定位";
-  if (resolution === "rebound") return "已唯一重绑";
-  if (resolution === "ambiguous") return "多个候选，已阻止定位";
-  return "目标已失联";
-}
-
-function canLocateTarget(target: HtmlCanvasSelection): boolean {
-  return target.resolution === "exact" || target.resolution === "rebound";
-}
-
-function canSaveCommentTarget(target: HtmlCanvasSelection): boolean {
-  return target.resolution === "exact";
-}
-
-function changeKindLabel(event: DirectEditEvent): string {
-  if (event.kind === "text") return "文字修改";
-  if (event.kind === "reorder") return "位置移动";
-  if (event.kind === "structure") return "结构调整";
-  const labels: Record<string, string> = {
-    fontSize: "字号",
-    color: "文字颜色",
-    backgroundColor: "模块填充",
-    fontWeight: "加粗",
-    fontStyle: "斜体",
-    padding: "内边距",
-    margin: "外间距",
-    lineHeight: "行距",
-  };
-  return labels[event.property || ""] || "样式调整";
-}
-
-function compactHistoryText(value: unknown): string {
-  if (value === null || value === undefined || value === "") return "未设置";
-  const text = String(value).replace(/\s+/g, " ").trim();
-  return text.length > 72 ? `${text.slice(0, 72)}…` : text;
-}
-
-function recordValueScalar(value: unknown): unknown {
-  if (!isRecord(value)) return value;
-  if (value.sourceValue !== null && value.sourceValue !== undefined && value.sourceValue !== "") {
-    return value.sourceValue;
-  }
-  if (value.computedValue !== null && value.computedValue !== undefined && value.computedValue !== "") {
-    return value.computedValue;
-  }
-  return value.value ?? value.index ?? value.toIndex ?? value.fromIndex ?? null;
-}
-
-function friendlyStyleValue(property: string | undefined, value: unknown): string {
-  const scalar = recordValueScalar(value);
-  const normalized = String(scalar ?? "").trim().toLowerCase();
-  if (!normalized) return "未设置";
-  if (property === "fontWeight") {
-    const numeric = Number.parseInt(normalized, 10);
-    if (normalized === "bold" || Number.isFinite(numeric) && numeric >= 600) return "加粗";
-    if (normalized === "normal" || Number.isFinite(numeric) && numeric < 600) return "常规";
-  }
-  if (property === "fontStyle") {
-    if (normalized === "italic" || normalized === "oblique") return "斜体";
-    if (normalized === "normal") return "常规";
-  }
-  if (property === "backgroundColor" && ["transparent", "rgba(0, 0, 0, 0)"].includes(normalized)) {
-    return "透明";
-  }
-  return compactHistoryText(scalar);
-}
-
-function historyRecordValue(
-  event: DirectEditEvent,
-  value: unknown,
-): string {
-  if (event.kind === "reorder" && isRecord(value)) {
-    const index = Number(value.index ?? value.toIndex ?? value.fromIndex);
-    return Number.isFinite(index) ? `第 ${index + 1} 位` : "原位置";
-  }
-  if (event.kind === "text") {
-    const text = compactHistoryText(value);
-    return text === "未设置" ? text : `“${text}”`;
-  }
-  if (event.kind === "style") return friendlyStyleValue(event.property, value);
-  return compactHistoryText(recordValueScalar(value));
-}
-
-function summarizeChangeEvents(events: DirectEditEvent[]): DirectEditEvent[] {
-  const summaries = new Map<string, DirectEditEvent>();
-  for (const event of events) {
-    const key = [
-      event.target.id || event.target.selector,
-      event.kind,
-      event.property || "",
-    ].join("::");
-    const existing = summaries.get(key);
-    summaries.set(key, existing
-      ? {
-          ...event,
-          eventId: existing.eventId,
-          before: existing.before,
-          createdAt: event.createdAt,
-        }
-      : event);
-  }
-  return [...summaries.values()];
-}
-
 function isLockedLifecycle(state: LifecycleState | undefined): boolean {
   return isLockedLifecycleState(state);
 }
@@ -1545,244 +294,6 @@ function isLockedLifecycle(state: LifecycleState | undefined): boolean {
 function noticeReducer(current: Toast, next: Toast): Toast {
   if (!shouldPresentNotice(next)) return current;
   return shouldReplaceNotice(current, next) ? next : current;
-}
-
-function processStepStatusLabel(state: string): string {
-  switch (state) {
-    case "done":
-      return "已完成";
-    case "current":
-      return "进行中";
-    case "neutral":
-      return "已结束";
-    case "error":
-      return "需处理";
-    case "attention":
-      return "待确认";
-    default:
-      return "待进行";
-  }
-}
-
-function ProcessStepGlyph({
-  stepKey,
-  state,
-}: {
-  stepKey: string;
-  state: string;
-}) {
-  if (state === "error") {
-    return <TriangleIcon size={21} weight="fill" />;
-  }
-  if (state === "neutral") {
-    return <MinusCircleIcon size={22} weight="duotone" />;
-  }
-
-  switch (stepKey) {
-    case "handoff":
-      return (
-        <ShieldCheckIcon
-          size={23}
-          weight={state === "done" ? "fill" : "duotone"}
-        />
-      );
-    case "validation":
-      return <FloppyDiskIcon size={22} weight="regular" />;
-    case "result":
-      return <FlagCheckeredIcon size={22} weight="regular" />;
-    default:
-      return <ClockCounterClockwiseIcon size={22} weight="duotone" />;
-  }
-}
-
-const PREVIEW_NAVIGATION_AUTO_COLLAPSE_MS = 3_500;
-
-function PreviewNavigationBanner({
-  icon,
-  title,
-  detail,
-  actionLabel,
-  actionDisabled = false,
-  className,
-  onAction,
-}: {
-  icon: ReactNode;
-  title: ReactNode;
-  detail: ReactNode;
-  actionLabel: string;
-  actionDisabled?: boolean;
-  className?: string;
-  onAction: () => void;
-}) {
-  const [collapsed, setCollapsed] = useState(false);
-  const [focusWithin, setFocusWithin] = useState(false);
-
-  useEffect(() => {
-    if (collapsed || focusWithin) return;
-    const timer = window.setTimeout(() => {
-      setCollapsed(true);
-    }, PREVIEW_NAVIGATION_AUTO_COLLAPSE_MS);
-    return () => window.clearTimeout(timer);
-  }, [collapsed, focusWithin]);
-
-  return (
-    <section
-      className={[
-        "history-view-banner",
-        "preview-navigation-banner",
-        className,
-      ].filter(Boolean).join(" ")}
-      data-collapsed={collapsed ? "true" : "false"}
-      role="status"
-      onMouseEnter={() => setCollapsed(false)}
-      onMouseMove={() => {
-        if (collapsed) setCollapsed(false);
-      }}
-      onFocusCapture={() => {
-        setFocusWithin(true);
-        setCollapsed(false);
-      }}
-      onBlurCapture={(event) => {
-        const next = event.relatedTarget;
-        if (!(next instanceof Node) || !event.currentTarget.contains(next)) {
-          setFocusWithin(false);
-        }
-      }}
-    >
-      <div>
-        {icon}
-        <span>
-          <strong>{title}</strong>
-          <small>{detail}</small>
-        </span>
-      </div>
-      <button
-        type="button"
-        disabled={actionDisabled}
-        onClick={onAction}
-      >
-        <ArrowCounterClockwiseIcon aria-hidden="true" size={15} weight="bold" />
-        {actionLabel}
-      </button>
-      <button
-        className="preview-banner-reveal"
-        type="button"
-        aria-label="显示预览导航提示"
-        onClick={() => setCollapsed(false)}
-      />
-    </section>
-  );
-}
-
-function CommentAttachmentStrip({
-  attachments,
-  objectUrls,
-  editable = false,
-  onEnsurePreview,
-  onPreview,
-  onDownload,
-  onRemove,
-}: {
-  attachments?: CommentAttachment[];
-  objectUrls: Record<string, string>;
-  editable?: boolean;
-  onEnsurePreview?: (
-    attachment: CommentAttachment,
-  ) => Promise<string> | void;
-  onPreview: (attachment: CommentAttachment) => void;
-  onDownload: (attachment: CommentAttachment) => void;
-  onRemove?: (attachment: CommentAttachment) => void;
-}) {
-  useEffect(() => {
-    if (!onEnsurePreview) return;
-    for (const attachment of attachments ?? []) {
-      if (
-        attachment.kind !== "image"
-        || objectUrls[attachment.attachmentId]
-      ) continue;
-      void Promise.resolve(onEnsurePreview(attachment)).catch(() => {});
-    }
-  }, [attachments, objectUrls, onEnsurePreview]);
-
-  if (!attachments?.length) return null;
-  return (
-    <div className="comment-attachments" aria-label={`${attachments.length} 个附件`}>
-      {attachments.map((attachment) => (
-        attachment.kind === "image" ? (
-          <div className="image-attachment" key={attachment.attachmentId}>
-            <button
-              className="image-attachment-preview"
-              type="button"
-              title={`预览 ${attachment.fileName}`}
-              aria-label={`预览图片 ${attachment.fileName}`}
-              onClick={(event) => {
-                event.stopPropagation();
-                onPreview(attachment);
-              }}
-            >
-              {objectUrls[attachment.attachmentId] ? (
-                // Blob URLs are project-local attachment previews and cannot use next/image.
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={objectUrls[attachment.attachmentId]}
-                  alt={attachment.fileName}
-                />
-              ) : (
-                <span className="attachment-loading">读取中…</span>
-              )}
-              <span className="image-attachment-name">{attachment.fileName}</span>
-            </button>
-            {editable && onRemove ? (
-              <button
-                className="remove-attachment-button"
-                type="button"
-                title="移除图片"
-                aria-label={`移除图片 ${attachment.fileName}`}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onRemove(attachment);
-                }}
-              >
-                <XIcon aria-hidden="true" size={11} weight="bold" />
-              </button>
-            ) : null}
-          </div>
-        ) : (
-          <div className="file-attachment" key={attachment.attachmentId}>
-            <button
-              className="file-attachment-open"
-              type="button"
-              title={`下载 ${attachment.fileName}`}
-              onClick={(event) => {
-                event.stopPropagation();
-                onDownload(attachment);
-              }}
-            >
-              <FileIcon aria-hidden="true" size={15} weight="regular" />
-              <span>
-                <strong>{attachment.fileName}</strong>
-                <small>{formatFileSize(attachment.byteLength)}</small>
-              </span>
-            </button>
-            {editable && onRemove ? (
-              <button
-                className="remove-file-attachment-button"
-                type="button"
-                title="移除文件"
-                aria-label={`移除文件 ${attachment.fileName}`}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onRemove(attachment);
-                }}
-              >
-                <XIcon aria-hidden="true" size={11} weight="bold" />
-              </button>
-            ) : null}
-          </div>
-        )
-      ))}
-    </div>
-  );
 }
 
 export default function Workbench() {

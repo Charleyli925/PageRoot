@@ -2,6 +2,11 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
+import {
+  readCanvasArchitecture,
+  readWorkbenchArchitecture,
+} from "./source-architecture-fixture.mjs";
+
 const [
   workbench,
   aboutDialog,
@@ -17,14 +22,14 @@ const [
   previewSandbox,
   bridgeClient,
 ] = await Promise.all([
-  readFile(new URL("../app/workbench.tsx", import.meta.url), "utf8"),
+  readWorkbenchArchitecture(),
   readFile(new URL("../app/components/AboutPageRootDialog.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/components/RestartUpdateDialog.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/components/CancelAiRunDialog.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
   readFile(new URL("../desktop/main.mjs", import.meta.url), "utf8"),
   readFile(new URL("../desktop/preload.mjs", import.meta.url), "utf8"),
-  readFile(new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url), "utf8"),
+  readCanvasArchitecture(),
   readFile(new URL("../desktop/welcome-project-content.mjs", import.meta.url), "utf8"),
   readFile(new URL("../app/components/HtmlInteractionPreview.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/components/HtmlInteractionPreview.module.css", import.meta.url), "utf8"),

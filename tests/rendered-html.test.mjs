@@ -2,6 +2,11 @@ import assert from "node:assert/strict";
 import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 
+import {
+  readCanvasArchitecture,
+  readWorkbenchArchitecture,
+} from "./source-architecture-fixture.mjs";
+
 const productRoot = new URL("../", import.meta.url);
 
 async function render(pathname = "/") {
@@ -85,12 +90,12 @@ test("application boundaries encode the v3 single-source lifecycle instead of sa
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
-    readFile(new URL("../app/workbench.tsx", import.meta.url), "utf8"),
+    readWorkbenchArchitecture(),
     readFile(new URL("../app/application/bridge-client.js", import.meta.url), "utf8"),
     readFile(new URL("../app/application/draft-session.js", import.meta.url), "utf8"),
     readFile(new URL("../app/application/drain-coordinator.js", import.meta.url), "utf8"),
     readFile(new URL("../app/domain/run-lifecycle.js", import.meta.url), "utf8"),
-    readFile(new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url), "utf8"),
+    readCanvasArchitecture(),
     readFile(new URL("../app/components/IslandEditingController.ts", import.meta.url), "utf8"),
     readFile(new URL("../vite.config.ts", import.meta.url), "utf8"),
   ]);
@@ -283,7 +288,7 @@ test("application boundaries encode the v3 single-source lifecycle instead of sa
 
 test("history cards read only v3 immutable annotations and show audit details", async () => {
   const [workbench, archiveSelector] = await Promise.all([
-    readFile(new URL("../app/workbench.tsx", import.meta.url), "utf8"),
+    readWorkbenchArchitecture(),
     readFile(
       new URL("../app/lib/version-audit-records.js", import.meta.url),
       "utf8",
@@ -322,9 +327,9 @@ test("canvas persistence has one SourcePatchEngine path and clean v3 TargetRefs"
     nativeCapability,
     globals,
   ] = await Promise.all([
-    readFile(new URL("../app/workbench.tsx", import.meta.url), "utf8"),
+    readWorkbenchArchitecture(),
     readFile(new URL("../app/application/draft-session.js", import.meta.url), "utf8"),
-    readFile(new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url), "utf8"),
+    readCanvasArchitecture(),
     readFile(new URL("../app/components/IslandEditingController.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/lib/source-patch-engine.js", import.meta.url), "utf8"),
     readFile(new URL("../app/lib/source-text-map.js", import.meta.url), "utf8"),
@@ -466,10 +471,7 @@ test("canvas persistence has one SourcePatchEngine path and clean v3 TargetRefs"
 });
 
 test("handoff fails closed before locking when a comment target is unsafe", async () => {
-  const workbench = await readFile(
-    new URL("../app/workbench.tsx", import.meta.url),
-    "utf8",
-  );
+  const workbench = await readWorkbenchArchitecture();
 
   const locatorGuard = workbench.match(
     /function canLocateTarget\(target: HtmlCanvasSelection\): boolean \{[\s\S]*?\n\}/u,
