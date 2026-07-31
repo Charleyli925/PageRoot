@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile, stat } from "node:fs/promises";
 import test from "node:test";
+import semver from "semver";
 
 test("desktop package carries the v3 single patch engine, scope gate and active schemas", async () => {
   const [
@@ -64,7 +65,7 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.equal(packageJson.name, "pageroot");
   assert.match(packageJson.description, /源页（PageRoot）— Editable islands/);
   assert.equal(packageJson.build.appId, "com.htmlai.workbench");
-  assert.match(packageJson.version, /^\d+\.\d+\.\d+$/u);
+  assert.equal(semver.valid(packageJson.version), packageJson.version);
   assert.equal(packageJson.build.productName, "PageRoot");
   assert.equal(packageJson.build.artifactName, "PageRoot-${version}-${arch}.${ext}");
   assert.equal(packageJson.build.forceCodeSigning, true);

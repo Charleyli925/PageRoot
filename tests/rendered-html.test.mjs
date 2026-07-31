@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { access, readFile } from "node:fs/promises";
 import test from "node:test";
+import semver from "semver";
 
 import {
   readCanvasArchitecture,
@@ -116,7 +117,7 @@ test("application boundaries encode the v3 single-source lifecycle instead of sa
   assert.equal(packageJson.dependencies?.["@lexical/history"], undefined);
   assert.equal(packageJson.dependencies?.["@lexical/plain-text"], undefined);
   assert.equal(packageJson.dependencies?.["@lexical/selection"], undefined);
-  assert.match(packageJson.version, /^\d+\.\d+\.\d+$/u);
+  assert.equal(semver.valid(packageJson.version), packageJson.version);
   assert.equal(packageJson.build?.mac?.extendInfo?.NSMicrophoneUsageDescription, undefined);
   assert.equal(packageJson.build?.mac?.extendInfo?.NSSpeechRecognitionUsageDescription, undefined);
 
