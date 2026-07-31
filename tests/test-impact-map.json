@@ -330,6 +330,7 @@
         "tests/native-command-queue-contract.test.mjs",
         "tests/native-layout-guard.test.mjs",
         "tests/html-preview-sandbox.test.mjs",
+        "tests/rendered-html.test.mjs",
         "tests/workbench-source-fence-contract.test.mjs"
       ]
     },
