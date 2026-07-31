@@ -19,6 +19,7 @@ import { fileURLToPath } from "node:url";
 import {
   candidateAppPath,
   notarizeCandidateApp,
+  restoreReleaseMetadataFromApp,
   signCandidateApp,
 } from "./release-app-stage.mjs";
 import {
@@ -352,6 +353,7 @@ export async function restoreReleaseAppCheckpoint({
   githubOutput,
   commandRunner = defaultCommandRunner,
   identity,
+  expectedBuildInfoResolver,
 }) {
   const verified = await verifyReleaseAppCheckpoint({
     productRoot: root,
@@ -376,8 +378,14 @@ export async function restoreReleaseAppCheckpoint({
     verified.attestation.payload,
     "restored candidate payload changed",
   );
+  const metadata = await restoreReleaseMetadataFromApp({
+    productRoot: root,
+    appPath,
+    architecture,
+    ...(expectedBuildInfoResolver ? { expectedBuildInfoResolver } : {}),
+  });
   await writeOutputs(githubOutput, { app_path: appPath });
-  return { ...verified, appPath };
+  return { ...verified, appPath, metadata };
 }
 
 function parseArguments(argv) {

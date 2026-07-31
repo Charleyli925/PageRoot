@@ -79,8 +79,9 @@ The workflow:
 - archives the exact signed/notarized App plus source, payload and archive
   hashes as an attempt-qualified checkpoint retained for 14 days;
 - starts a separate job from that checkpoint, validates every checkpoint byte,
-  rebuilds only the deterministic renderer comparison output from the same
-  source tree, and passes the unchanged App to electron-builder with
+  restores the exact embedded build and telemetry metadata as local comparison
+  inputs, rebuilds only the deterministic renderer comparison output from the
+  same source tree, and passes the unchanged App to electron-builder with
   `--prepackaged` rather than rebuilding it;
 - creates the DMG, update ZIP, blockmap and `latest-mac.yml`, submits only the
   final DMG to Apple in that job, then verifies Team ID, tickets, Gatekeeper,

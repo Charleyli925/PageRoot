@@ -62,6 +62,18 @@ function fixtureIdentity() {
   };
 }
 
+async function fixtureExpectedBuildInfo() {
+  return {
+    schemaVersion: 1,
+    name: "pageroot",
+    version: packageVersion,
+    architecture: "arm64",
+    sourceRepository: "https://github.com/Charleyli925/PageRoot",
+    commitSha,
+    treeSha,
+  };
+}
+
 async function writeCandidateApp(root) {
   const appPath = path.join(
     root,
@@ -216,17 +228,7 @@ test("final artifact packaging restores the exact embedded provenance and teleme
       productRoot: root,
       appPath,
       architecture: "arm64",
-      async expectedBuildInfoResolver() {
-        return {
-          schemaVersion: 1,
-          name: "pageroot",
-          version: packageVersion,
-          architecture: "arm64",
-          sourceRepository: "https://github.com/Charleyli925/PageRoot",
-          commitSha,
-          treeSha,
-        };
-      },
+      expectedBuildInfoResolver: fixtureExpectedBuildInfo,
     });
     assert.equal(record.buildInfo.builtAt, builtAt);
     assert.equal(record.telemetry.enabled, true);
@@ -395,6 +397,7 @@ test("signed-app checkpoint binds source and archive bytes and restores the same
       sourceGateRunId: 400,
       workflowRunId: 500,
       identity,
+      expectedBuildInfoResolver: fixtureExpectedBuildInfo,
       async commandRunner(_command, arguments_) {
         const destination = arguments_.at(-1);
         await cp(appPath, path.join(destination, "PageRoot.app"), { recursive: true });
@@ -404,6 +407,15 @@ test("signed-app checkpoint binds source and archive bytes and restores the same
       root,
       "output/release-candidate/restored/PageRoot.app",
     ));
+    const restoredResources = path.join(restored.appPath, "Contents/Resources");
+    assert.deepEqual(
+      await readFile(path.join(root, "output/release-metadata/build-info.json")),
+      await readFile(path.join(restoredResources, "build-info.json")),
+    );
+    assert.deepEqual(
+      await readFile(path.join(root, "output/release-metadata/usage-telemetry-config.json")),
+      await readFile(path.join(restoredResources, "usage-telemetry-config.json")),
+    );
 
     await writeFile(record.archivePath, "tampered archive");
     await assert.rejects(
