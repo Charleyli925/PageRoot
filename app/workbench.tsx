@@ -7878,6 +7878,10 @@ export default function Workbench() {
       if (
         sameLocalSourcePath(projectSessionRef.current.sourcePath, run.sourcePath)
         || (
+          projectSessionRef.current.projectId === run.projectId
+          && projectSessionRef.current.documentId === run.documentId
+        )
+        || (
           visibleRun?.requestId === run.requestId
           && visibleRun.attemptId === run.attemptId
         )

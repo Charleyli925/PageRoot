@@ -15,13 +15,15 @@ const CONTEXT = Object.freeze({
 test("project rules session owns load, edit, save, and unknown-outcome reconciliation", async () => {
   let persisted = "# Original";
   let rejectAfterWrite = true;
+  let savedPayload = null;
   const session = new ProjectRulesSession({
     bridgeClient: {
       async projectFile() {
         return { content: persisted };
       },
-      async updateProjectFile({ content }) {
-        persisted = content;
+      async updateProjectFile(payload) {
+        savedPayload = payload;
+        persisted = payload.content;
         if (rejectAfterWrite) {
           rejectAfterWrite = false;
           throw new Error("response lost");
@@ -38,6 +40,12 @@ test("project rules session owns load, edit, save, and unknown-outcome reconcili
   assert.equal(session.snapshot.content, "# Updated");
   assert.equal(session.snapshot.savedContent, "# Updated");
   assert.equal(session.inspect().state, "resolved");
+  assert.deepEqual(savedPayload, {
+    sourcePath: CONTEXT.sourcePath,
+    projectId: CONTEXT.projectId,
+    documentId: CONTEXT.documentId,
+    content: "# Updated",
+  });
 });
 
 test("project rules composition fences autosave and explicit restore retires late input", async () => {

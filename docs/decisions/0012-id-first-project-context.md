@@ -25,7 +25,9 @@ the old operation with a newer project's identity.
 - An already registered Bridge mutation resolves the registry graph by both
   opaque IDs first. The submitted path is then validated as that project's
   canonical source or an explicit registered alias; it is not an identity
-  lookup key.
+  lookup key. Before accepting the mutation, the canonical source inode and
+  Hash are revalidated against the registry and the same durable observation
+  evidence used by path-based project loading.
 - Supplying only one ID is invalid. Omitting both IDs remains a bounded
   compatibility path for older local callers, but it can address only an
   existing registration.
@@ -34,8 +36,10 @@ the old operation with a newer project's identity.
   PageRoot's own atomic-replacement interval. When current source bytes match
   that Hash, the Bridge repairs file identity in place and continues recovery.
   A matching registered current Hash and the bounded legacy document stamp are
-  the other accepted observations. All unrelated physical replacements fail
-  closed.
+  the other accepted observations. A recorded conflict external Hash and a
+  ready transaction's exact expected Hash permit only the existing locked
+  conflict or activation flow to continue; they do not update source identity.
+  All unrelated physical replacements fail closed.
 - Attachment upload and compensating deletion retain the same captured
   ProjectContext for their complete asynchronous lifetime.
 
@@ -64,6 +68,8 @@ and would not protect the pre-stamp concurrency window.
   second Project for a registered Document.
 - A source-path mismatch is reported as a structured conflict without writing
   source bytes or managed artifacts into another project.
+- An unrelated same-path replacement is rejected before a registered metadata
+  mutation can write Draft, attachment, Request or project-rule artifacts.
 - The registry, `project.json` and runtime outbox remain the durable identity
   and recovery evidence; preview DOM and renderer-current refs are not used.
 - Failure-injection coverage must exercise both registered mutation and

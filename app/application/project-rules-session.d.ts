@@ -28,6 +28,7 @@ export class ProjectRulesSession {
       updateProjectFile: (payload: {
         sourcePath: string;
         projectId: string;
+        documentId: string;
         content: string;
       }) => Promise<unknown>;
     };

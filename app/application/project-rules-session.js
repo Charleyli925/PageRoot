@@ -270,6 +270,7 @@ export class ProjectRulesSession {
         await this.#bridgeClient.updateProjectFile({
           sourcePath: context.sourcePath,
           projectId: context.projectId,
+          documentId: context.documentId,
           content: nextContent,
         });
         if (!this.#isCurrent(context, generation)) return false;

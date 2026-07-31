@@ -176,6 +176,7 @@ test("task audit distinguishes primary, open PR and local-only work", async (t) 
   await writeFile(path.join(task.worktreePath, "README.md"), "# integrated\n", "utf8");
   await run(task.worktreePath, "git", ["add", "README.md"]);
   await run(task.worktreePath, "git", ["commit", "-m", "integrate pending work"]);
+  const taskHead = await run(task.worktreePath, "git", ["rev-parse", "HEAD"]);
   const worktreesBefore = await run(repository, "git", ["worktree", "list", "--porcelain"]);
   const localAudit = await auditRepository({
     root: repository,
@@ -194,6 +195,7 @@ test("task audit distinguishes primary, open PR and local-only work", async (t) 
       state: "OPEN",
       mergedAt: null,
       headRefName: "integration/pending-release",
+      headRefOid: taskHead,
       baseRefName: "main",
       updatedAt: "2026-07-30T11:00:00Z",
       url: "https://example.invalid/pr/12",
@@ -212,11 +214,13 @@ test("task retirement is a dry run by default and removes only merged clean work
   await writeFile(path.join(task.worktreePath, "README.md"), "# merged task\n", "utf8");
   await run(task.worktreePath, "git", ["add", "README.md"]);
   await run(task.worktreePath, "git", ["commit", "-m", "fix merged task"]);
+  const taskHead = await run(task.worktreePath, "git", ["rev-parse", "HEAD"]);
   const pullRequests = [{
     number: 14,
     state: "MERGED",
     mergedAt: "2026-07-30T10:00:00Z",
     headRefName: "fix/merged-task",
+    headRefOid: taskHead,
     baseRefName: "main",
     updatedAt: "2026-07-30T10:00:00Z",
     url: "https://example.invalid/pr/14",
@@ -237,6 +241,44 @@ test("task retirement is a dry run by default and removes only merged clean work
   assert.equal(applied.applied, true);
   assert.equal(await lstat(task.worktreePath).catch(() => null), null);
   assert.equal(await run(repository, "git", ["branch", "--list", "fix/merged-task"]), "");
+});
+
+test("task retirement does not trust a merged PR from a reused branch name", async (t) => {
+  const repository = await createRepository(t);
+  const historicalHead = await run(repository, "git", ["rev-parse", "origin/main"]);
+  const task = await startTask({ root: repository, branch: "fix/reused-task" });
+  await writeFile(path.join(task.worktreePath, "README.md"), "# new work\n", "utf8");
+  await run(task.worktreePath, "git", ["add", "README.md"]);
+  await run(task.worktreePath, "git", ["commit", "-m", "new work on reused branch"]);
+  const currentHead = await run(task.worktreePath, "git", ["rev-parse", "HEAD"]);
+  assert.notEqual(currentHead, historicalHead);
+  const pullRequests = [{
+    number: 15,
+    state: "MERGED",
+    mergedAt: "2026-07-30T10:00:00Z",
+    headRefName: "fix/reused-task",
+    headRefOid: historicalHead,
+    baseRefName: "main",
+    updatedAt: "2026-07-30T10:00:00Z",
+    url: "https://example.invalid/pr/15",
+  }];
+  const audit = await auditRepository({ root: repository, pullRequests });
+  const item = audit.items.find((candidate) => candidate.branch === "fix/reused-task");
+  assert.equal(item.pullRequest, null);
+  assert.equal(item.classification, "LOCAL_ONLY");
+  await assert.rejects(
+    retireTask({
+      root: repository,
+      branch: "fix/reused-task",
+      pullRequests,
+      apply: true,
+    }),
+    /no merged Pull Request was found/u,
+  );
+  assert.equal(
+    await run(task.worktreePath, "git", ["branch", "--show-current"]),
+    "fix/reused-task",
+  );
 });
 
 test("task retirement refuses dirty work unless abandonment and discard are both explicit", async (t) => {
@@ -267,6 +309,7 @@ test("task retirement refuses dirty work unless abandonment and discard are both
 test("task retirement never removes an open Pull Request branch", async (t) => {
   const repository = await createRepository(t);
   const task = await startTask({ root: repository, branch: "fix/open-task" });
+  const taskHead = await run(task.worktreePath, "git", ["rev-parse", "HEAD"]);
   await assert.rejects(
     retireTask({
       root: repository,
@@ -276,6 +319,7 @@ test("task retirement never removes an open Pull Request branch", async (t) => {
         state: "OPEN",
         mergedAt: null,
         headRefName: "fix/open-task",
+        headRefOid: taskHead,
         baseRefName: "main",
         updatedAt: "2026-07-30T11:00:00Z",
         url: "https://example.invalid/pr/18",

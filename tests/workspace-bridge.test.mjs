@@ -2072,6 +2072,46 @@ test("document identity survives a move and same-path replacement starts isolate
   );
 });
 
+test("registered mutations reject an unrelated same-path source replacement", async (t) => {
+  const environment = await createEnvironment(t);
+  const sourcePath = join(environment.sources, "mutation-source-replaced.html");
+  const replacementPath = join(environment.sources, "mutation-source-replaced.tmp");
+  const initial = htmlPage("Mutation source identity");
+  const replacement = htmlPage("External replacement", "<p>unrelated bytes</p>");
+  await writeFile(sourcePath, initial, "utf8");
+  const bridge = await environment.start();
+  const opened = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+
+  await writeFile(replacementPath, replacement, "utf8");
+  await rename(replacementPath, sourcePath);
+  const bytes = Buffer.from("must-not-be-attached");
+  const rejected = await postJson(bridge.baseUrl, "/attachment", {
+    sourcePath,
+    projectId: opened.projectId,
+    documentId: opened.documentId,
+    commentId: "comment_replaced_source",
+    attachmentId: "attachment_replaced_source",
+    fileName: "rejected.txt",
+    mediaType: "text/plain",
+    byteLength: bytes.byteLength,
+    kind: "file",
+    source: "file-picker",
+    dataBase64: bytes.toString("base64"),
+  });
+
+  assert.equal(rejected.response.status, 409, JSON.stringify(rejected.body));
+  assert.equal(
+    rejected.body.error.code,
+    "PROJECT_CONTEXT_SOURCE_REPLACED",
+  );
+  assert.equal(await readFile(sourcePath, "utf8"), replacement);
+  assert.equal(
+    await access(join(opened.projectRoot, "draft", "attachments"))
+      .then(() => true, () => false),
+    false,
+  );
+});
+
 test("a legacy embedded document id only relinks a registry that has no file identity", async (t) => {
   const environment = await createEnvironment(t);
   const sourcePath = join(environment.sources, "legacy-sidecar-source.html");

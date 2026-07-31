@@ -83,7 +83,9 @@ protected primary checkout, open PRs, dirty work, local-only commits, merged
 tasks ready for retirement, explicit abandonment review, detached temporary
 worktrees and stale registrations. A missing `gh` session makes PR data
 unavailable and therefore prevents merged-state cleanup; it never downgrades to
-an unsafe ancestry guess after squash merge.
+an unsafe ancestry guess after squash merge. A Pull Request is retirement proof
+only when its recorded head OID matches the current local branch head; reusing a
+historical branch name cannot make new work appear merged.
 
 Retirement is a dry run unless `--apply` is present:
 

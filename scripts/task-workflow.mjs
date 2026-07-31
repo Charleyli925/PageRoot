@@ -495,7 +495,7 @@ async function discoverPullRequests(root) {
         "--limit",
         "200",
         "--json",
-        "number,state,isDraft,mergedAt,closedAt,headRefName,baseRefName,updatedAt,url",
+        "number,state,isDraft,mergedAt,closedAt,headRefName,headRefOid,baseRefName,updatedAt,url",
       ],
       { allowFailure: true },
     );
@@ -547,12 +547,14 @@ async function worktreeStatus(entry) {
   };
 }
 
-function newestPullRequestByBranch(pullRequests) {
+function newestPullRequestByBranchHead(pullRequests) {
   const values = new Map();
   for (const pullRequest of pullRequests) {
-    const existing = values.get(pullRequest.headRefName);
+    if (!pullRequest.headRefName || !pullRequest.headRefOid) continue;
+    const key = `${pullRequest.headRefName}\0${pullRequest.headRefOid}`;
+    const existing = values.get(key);
     if (!existing || String(pullRequest.updatedAt) > String(existing.updatedAt)) {
-      values.set(pullRequest.headRefName, pullRequest);
+      values.set(key, pullRequest);
     }
   }
   return values;
@@ -605,11 +607,15 @@ export async function auditRepository({
   const worktreeByBranch = new Map(
     inspectedWorktrees.filter((entry) => entry.branch).map((entry) => [entry.branch, entry]),
   );
-  const pullRequestByBranch = newestPullRequestByBranch(discovered.pullRequests);
+  const pullRequestByBranchHead = newestPullRequestByBranchHead(
+    discovered.pullRequests,
+  );
   const items = [];
   for (const branchInfo of branches) {
     const worktree = worktreeByBranch.get(branchInfo.branch) || null;
-    const pullRequest = pullRequestByBranch.get(branchInfo.branch) || null;
+    const pullRequest = pullRequestByBranchHead.get(
+      `${branchInfo.branch}\0${branchInfo.head}`,
+    ) || null;
     const divergence = await git(
       root,
       ["rev-list", "--left-right", "--count", `${DEFAULT_BASE}...${branchInfo.branch}`],

@@ -59,13 +59,15 @@ Notable user-visible changes are documented here. This project follows Semantic 
   update action, repository link and local user notice.
 - Made project identity ID-first across comments, attachments, history, AI
   handoff and rapid project switching; equivalent local paths are canonicalized,
-  stale project callbacks fail closed and internal identifiers or paths are no
-  longer surfaced as user-facing recovery messages.
+  stale project callbacks and unrelated same-path replacements fail closed,
+  project-rule saves retain complete identity, and internal identifiers or paths
+  are no longer surfaced as user-facing recovery messages.
 - Refactored Workbench state into explicit project, document, comment, history,
   version and AI-run sessions, extracted presentation and Canvas modules, and
   retired the unused V1 editing path while keeping the V2 source-patch contract.
 - Added governed task worktree audit, synchronization and retirement commands
-  so active changes remain visible and protected throughout parallel work.
+  so active changes remain visible and protected throughout parallel work, with
+  merged retirement proof bound to the exact current branch head.
 
 ## [0.9.4] - 2026-07-29
 

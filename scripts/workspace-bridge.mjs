@@ -2325,6 +2325,92 @@ async function loadMutationContext(body) {
           "The command source path does not belong to its registered project.",
         );
       }
+      const source = await readSourceFile(registeredSourcePath);
+      const observedFileIdentity = sourceFileIdentity(source);
+      const registeredSourceRecord = registry.sources[
+        sourceFingerprint(registeredSourcePath)
+      ];
+      const registryObservationMatches = Boolean(
+        registeredSourceRecord
+        && registeredSourceRecord.projectId === identity.projectId
+        && registeredSourceRecord.documentId === identity.documentId
+        && [registeredSourceRecord, selected.project, selected.document]
+          .every((record) => (
+            sameSourceFileIdentity(record.fileIdentity, observedFileIdentity)
+            && record.confirmedSourceSha256 === source.sha256
+          )),
+      );
+      if (!registryObservationMatches) {
+        const { project, runtime } = await readRegisteredObservationState(
+          registry,
+          { projectId: identity.projectId },
+        );
+        const observation = classifySourceObservation({
+          sourceSha256: source.sha256,
+          embeddedDocumentId: documentIdFromHtml(source.html),
+          registeredDocumentId: identity.documentId,
+          projectCurrentHtmlSha256: project.currentHtmlSha256,
+          pendingTargetHtmlSha256: runtime.pendingWrite?.targetHtmlSha256,
+        });
+        const activeConflictOwnsSource = Boolean(
+          runtime.lifecycleState === "awaiting-conflict-resolution"
+          && ["autosave-source", "ai-source"].includes(runtime.conflict?.type)
+          && runtime.conflict.externalSourceSha256 === source.sha256,
+        );
+        const readyTransactionId =
+          runtime.lifecycleState === "ready-to-open"
+          && runtime.activeRun?.requestId
+          && runtime.activeRun?.attemptId
+            ? `txn_${runtime.activeRun.requestId}_${runtime.activeRun.attemptId}`
+            : null;
+        let readyTransactionOwnsSource = false;
+        if (
+          observation === "external-replacement"
+          && !activeConflictOwnsSource
+          && readyTransactionId
+        ) {
+          const projectRoot = projectRootFromRegistryRecord(
+            identity.projectId,
+            selected.project,
+          );
+          const transaction = await readAuxiliaryJson(
+            path.join(
+              projectRoot,
+              "transactions",
+              readyTransactionId,
+              "transaction.json",
+            ),
+            "transaction.json",
+          );
+          readyTransactionOwnsSource = Boolean(
+            transaction.state === "ready-to-open"
+            && transaction.projectId === identity.projectId
+            && transaction.documentId === identity.documentId
+            && transaction.expectedSourceSha256 === source.sha256,
+          );
+        }
+        const durableExternalObservation =
+          activeConflictOwnsSource || readyTransactionOwnsSource;
+        if (
+          observation === "external-replacement"
+          && !durableExternalObservation
+        ) {
+          throw new HttpError(
+            409,
+            "PROJECT_CONTEXT_SOURCE_REPLACED",
+            "The registered project HTML was replaced by an unrelated file.",
+          );
+        }
+        if (!durableExternalObservation) {
+          assignCurrentSourceIdentity(registry, {
+            sourcePath: registeredSourcePath,
+            projectId: identity.projectId,
+            documentId: identity.documentId,
+            source,
+          });
+          await writeRegistry(registry);
+        }
+      }
       contextRecord = {
         project: selected.project,
         sourcePath: registeredSourcePath,
@@ -2332,7 +2418,6 @@ async function loadMutationContext(body) {
     }),
   );
 
-  await readSourceFile(contextRecord.sourcePath);
   return {
     workspaceRoot: WORKSPACE_ROOT,
     projectId: identity.projectId,
