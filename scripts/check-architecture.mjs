@@ -26,6 +26,8 @@ const RETIRED_WORKBENCH_VERSION_WRITERS =
   /\b(?:setVersions|setLatestVersionId|setCurrentBasedOnVersionId|setCurrentExactVersionId|setRestoredFromVersionId|setViewMode|setViewingVersionId)\b/;
 const RETIRED_WORKBENCH_DOCUMENT_AUTHORITIES =
   /\b(?:htmlRef|sourceShaRef|editRevisionRef|lastPersistedRevisionRef|persistStateRef|pendingWriteRef|flushPromiseRef)\b/;
+const RETIRED_WORKBENCH_COMMENT_AUTHORITIES =
+  /\b(?:commentsRef|changeEventsRef|deletedCommentIdsRef|composerDraftRef|composerCommentIdRef|composerAttachmentsRef|draftTargetRef|commentEditSessionRef)\b/;
 
 async function sourceFiles(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
@@ -245,6 +247,14 @@ export async function architectureViolations() {
   ) {
     violations.push(
       "app/workbench.tsx: source bytes, revisions and write state belong to DocumentSession",
+    );
+  }
+  if (
+    !workbench.includes("const commentSessionRef = useRef(new CommentSession<")
+    || RETIRED_WORKBENCH_COMMENT_AUTHORITIES.test(workbench)
+  ) {
+    violations.push(
+      "app/workbench.tsx: comment working-copy state belongs to CommentSession",
     );
   }
   for (const boundary of ["close", "switch", "submit", "history"]) {

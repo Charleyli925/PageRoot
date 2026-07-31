@@ -292,7 +292,7 @@ test("ready polling never opens automatically; the adopted marker ends on first 
   );
   assert.match(
     workbench,
-    /const addComment[\s\S]*?setComments\(nextComments\);\s*setOpenedAiVersionNotice\(null\);/,
+    /const addComment[\s\S]*?commentSessionRef\.current\.update\(\{[\s\S]*?comments: nextComments,[\s\S]*?\}\);\s*setOpenedAiVersionNotice\(null\);/,
   );
   assert.match(
     workbench,

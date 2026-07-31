@@ -930,7 +930,10 @@ test("forward edit events remain exact-once after persistence starts", () => {
   );
   assert.match(workbench, /const nextEvents = appendDirectEditEvent\(\{/);
   assert.match(workbench, /inFlightKeys: auditInFlightKeysRef\.current/);
-  assert.match(workbench, /persistCurrentDraftRecovery\(commentsRef\.current, nextEvents\.events\)/);
+  assert.match(
+    workbench,
+    /persistCurrentDraftRecovery\(commentSessionRef\.current\.comments, nextEvents\.events\)/,
+  );
   assert.doesNotMatch(workbench, /undoFolds|redoFolds|undoesEventId/u);
 });
 
@@ -1206,7 +1209,7 @@ test("user-opened HTML stays lazily registered until a real project action", () 
   );
   assert.match(
     workbench,
-    /const drained = await drainCoordinatorRef\.current\.drain\("submit"[\s\S]*?const persistedComments = commentsRef\.current\.filter\(commentHasContent\)[\s\S]*?submissionContext\.comments = persistedComments\.map[\s\S]*?submissionContext\.changeEvents = changeEventsRef\.current\.map/,
+    /const drained = await drainCoordinatorRef\.current\.drain\("submit"[\s\S]*?const persistedComments = commentSessionRef\.current\.comments\.filter\(commentHasContent\)[\s\S]*?submissionContext\.comments = persistedComments\.map[\s\S]*?submissionContext\.changeEvents = commentSessionRef\.current\.changeEvents\.map/,
   );
   assert.match(
     workbench,
@@ -1236,7 +1239,10 @@ test("comment composer is explicit, transient and horizontally contained", () =>
   );
   assert.match(workbench, /setComposerOpen\(true\)/);
   assert.match(workbench, /setComposerOpen\(false\)/);
-  assert.match(workbench, /draftTargetRef\.current\?\.id === target\.id/);
+  assert.match(
+    workbench,
+    /commentSessionRef\.current\.composerTarget\?\.id === target\.id/,
+  );
   assert.match(workbench, /if \(!resumesRecoveredDraft\)/);
   assert.match(workbench, /className="comment-card draft-comment-card"/);
   assert.match(workbench, /className="comment-header-action unsaved-comment-shortcut"/);
@@ -1250,7 +1256,7 @@ test("comment composer is explicit, transient and horizontally contained", () =>
   assert.match(workbench, /const resumeCurrentComposer = useCallback/);
   assert.match(
     workbench,
-    /const recoveredComposerTarget = recoveredDraft\.composerTarget[\s\S]*?setDraftTarget\(recoveredComposerTarget\);[\s\S]*?setComposerOpen\(false\);/,
+    /const recoveredComposerTarget = recoveredDraft\.composerTarget[\s\S]*?commentSessionRef\.current\.update\(\{[\s\S]*?composerTarget: recoveredComposerTarget,[\s\S]*?setComposerOpen\(false\);/,
   );
   assert.doesNotMatch(workbench, /saved-comment-drafts|review-comment-drafts/);
   assert.match(workbench, /const activeCommentCount = activeCommentItems\.length/);
@@ -1291,7 +1297,7 @@ test("comment composer is explicit, transient and horizontally contained", () =>
   assert.match(workbench, /const discardCurrentComposer = useCallback/);
   assert.match(
     workbench,
-    /discardedCommentId[\s\S]*?deletedCommentIdsRef\.current\.add\(discardedCommentId\)/,
+    /discardedCommentId[\s\S]*?commentSessionRef\.current\.markDeleted\(discardedCommentId\)/,
   );
   assert.match(workbench, /className="comments-panel comment-rail"/);
   assert.match(workbench, /className="comment-rail-content"/);

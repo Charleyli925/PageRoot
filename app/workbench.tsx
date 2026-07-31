@@ -95,6 +95,10 @@ import {
   isBridgeRequestError,
 } from "./application/bridge-client.js";
 import {
+  CommentSession,
+  type CommentSessionSnapshot,
+} from "./application/comment-session.js";
+import {
   DraftSession,
   type DraftSessionEvent,
 } from "./application/draft-session.js";
@@ -308,6 +312,22 @@ const INITIAL_DOCUMENT_SNAPSHOT: DocumentSessionSnapshot = {
   persistState: "idle",
   persistError: "",
 };
+const INITIAL_COMMENT_SNAPSHOT: CommentSessionSnapshot<
+  CommentItem,
+  DirectEditEvent,
+  CommentAttachment,
+  HtmlCanvasSelection,
+  CommentEditSession
+> = {
+  comments: [],
+  changeEvents: [],
+  deletedCommentIds: [],
+  composerDraft: "",
+  composerCommentId: null,
+  composerAttachments: [],
+  composerTarget: null,
+  editSession: null,
+};
 
 function waitFor(delayMs: number): Promise<void> {
   return new Promise((resolve) => globalThis.setTimeout(resolve, delayMs));
@@ -430,7 +450,6 @@ export default function Workbench() {
   const changeCounter = useRef(1);
   const attachmentCounter = useRef(1);
   const focusedCommentIdRef = useRef<string | null>(null);
-  const commentEditSessionRef = useRef<CommentEditSession | null>(null);
   const commentEditResumePendingRef = useRef<string | null>(null);
   const commentRailOffsetRef = useRef(0);
   const commentRailMinimumOffsetRef = useRef(0);
@@ -455,6 +474,13 @@ export default function Workbench() {
   const documentSessionRef = useRef(new DocumentSession<PendingWrite>({
     html: DEFAULT_PROJECT_HTML,
   }));
+  const commentSessionRef = useRef(new CommentSession<
+    CommentItem,
+    DirectEditEvent,
+    CommentAttachment,
+    HtmlCanvasSelection,
+    CommentEditSession
+  >());
   const projectRulesSessionRef = useRef(new ProjectRulesSession({
     bridgeClient,
     errorMessage: productErrorMessage,
@@ -468,15 +494,8 @@ export default function Workbench() {
   const submissionPendingRef = useRef(false);
   const historyActionPromiseRef = useRef<Promise<boolean> | null>(null);
   const autosaveTimerRef = useRef<number | null>(null);
-  const changeEventsRef = useRef<DirectEditEvent[]>([]);
   const auditPendingRef = useRef<DirectEditEvent[]>([]);
   const auditInFlightKeysRef = useRef<Set<string>>(new Set());
-  const commentsRef = useRef<CommentItem[]>([]);
-  const deletedCommentIdsRef = useRef<Set<string>>(new Set());
-  const composerDraftRef = useRef("");
-  const composerCommentIdRef = useRef<string | null>(null);
-  const composerAttachmentsRef = useRef<CommentAttachment[]>([]);
-  const draftTargetRef = useRef<HtmlCanvasSelection | null>(null);
   const attachmentUploadCountRef = useRef(0);
   const attachmentObjectUrlsRef = useRef<Map<string, string>>(new Map());
   const draftPersistenceAuthorityRef = useRef<ProjectContext | null>(null);
@@ -541,10 +560,16 @@ export default function Workbench() {
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
   const [recentProjectsError, setRecentProjectsError] = useState("");
   const [selection, setSelection] = useState<HtmlCanvasSelection | null>(null);
-  const [draftTarget, setDraftTarget] = useState<HtmlCanvasSelection | null>(null);
-  const [draft, setDraft] = useState("");
-  const [draftCommentId, setDraftCommentId] = useState<string | null>(null);
-  const [draftAttachments, setDraftAttachments] = useState<CommentAttachment[]>([]);
+  const [commentSnapshot, setCommentSnapshot] = useState(
+    INITIAL_COMMENT_SNAPSHOT,
+  );
+  const draftTarget = commentSnapshot.composerTarget;
+  const draft = commentSnapshot.composerDraft;
+  const draftCommentId = commentSnapshot.composerCommentId;
+  const draftAttachments = commentSnapshot.composerAttachments;
+  const comments = commentSnapshot.comments;
+  const changeEvents = commentSnapshot.changeEvents;
+  const commentEditSession = commentSnapshot.editSession;
   const [attachmentObjectUrls, setAttachmentObjectUrls] = useState<Record<string, string>>({});
   const [attachmentUploadCount, setAttachmentUploadCount] = useState(0);
   const [runSnapshot, setRunSnapshot] = useState<RunSessionSnapshot>(
@@ -558,13 +583,9 @@ export default function Workbench() {
   );
   const [previewAttachment, setPreviewAttachment] = useState<CommentAttachment | null>(null);
   const [composerOpen, setComposerOpen] = useState(false);
-  const [comments, setComments] = useState<CommentItem[]>([]);
-  const [changeEvents, setChangeEvents] = useState<DirectEditEvent[]>([]);
   const [drawer, setDrawer] = useState<Drawer>(null);
   const [expandedVersionId, setExpandedVersionId] = useState<string | null>(null);
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
-  const [commentEditSession, setCommentEditSession] =
-    useState<CommentEditSession | null>(null);
   const [pendingDeleteCommentId, setPendingDeleteCommentId] = useState<string | null>(null);
   const [handoffPreviewOpen, setHandoffPreviewOpen] = useState(false);
   const [commentRailHeight, setCommentRailHeight] = useState(0);
@@ -703,6 +724,11 @@ export default function Workbench() {
   useEffect(() => {
     const session = documentSessionRef.current;
     session.setObserver(setDocumentSnapshot);
+    return () => session.setObserver(null);
+  }, []);
+  useEffect(() => {
+    const session = commentSessionRef.current;
+    session.setObserver(setCommentSnapshot);
     return () => session.setObserver(null);
   }, []);
   const reportInterruptionPresence = useCallback((
@@ -1317,32 +1343,11 @@ export default function Workbench() {
     pageViewDocumentKeyRef.current = pageViewDocumentKey;
   }, [pageViewDocumentKey]);
   useEffect(() => {
-    changeEventsRef.current = changeEvents;
-  }, [changeEvents]);
-  useEffect(() => {
-    commentsRef.current = comments;
-  }, [comments]);
-  useEffect(() => {
     focusedCommentIdRef.current = focusedCommentId;
   }, [focusedCommentId]);
   useEffect(() => {
-    commentEditSessionRef.current = commentEditSession;
-  }, [commentEditSession]);
-  useEffect(() => {
     commentRailOffsetRef.current = commentRailOffset;
   }, [commentRailOffset]);
-  useEffect(() => {
-    composerDraftRef.current = draft;
-  }, [draft]);
-  useEffect(() => {
-    composerCommentIdRef.current = draftCommentId;
-  }, [draftCommentId]);
-  useEffect(() => {
-    composerAttachmentsRef.current = draftAttachments;
-  }, [draftAttachments]);
-  useEffect(() => {
-    draftTargetRef.current = draftTarget;
-  }, [draftTarget]);
   useEffect(() => {
     attachmentUploadCountRef.current = attachmentUploadCount;
   }, [attachmentUploadCount]);
@@ -1709,25 +1714,23 @@ export default function Workbench() {
         const reboundTargets = rebindTargetsPreservingGlobal(
           canonicalSource,
           [
-            ...commentsRef.current.map((comment) => comment.target),
-            ...(draftTargetRef.current ? [draftTargetRef.current] : []),
+            ...commentSessionRef.current.comments.map((comment) => comment.target),
+            ...(commentSessionRef.current.composerTarget ? [commentSessionRef.current.composerTarget] : []),
           ],
         );
         const reboundById = new Map(
           reboundTargets.map((target) => [target.id, target]),
         );
-        const reboundComments = commentsRef.current.map((comment) => ({
+        const reboundComments = commentSessionRef.current.comments.map((comment) => ({
           ...comment,
           target: reboundById.get(comment.target.id) || comment.target,
         }));
-        commentsRef.current = reboundComments;
-        setComments(reboundComments);
-        if (draftTargetRef.current) {
+        commentSessionRef.current.setComments(reboundComments);
+        if (commentSessionRef.current.composerTarget) {
           const reboundDraftTarget =
-            reboundById.get(draftTargetRef.current.id)
-            || draftTargetRef.current;
-          draftTargetRef.current = reboundDraftTarget;
-          setDraftTarget(reboundDraftTarget);
+            reboundById.get(commentSessionRef.current.composerTarget.id)
+            || commentSessionRef.current.composerTarget;
+          commentSessionRef.current.setComposerTarget(reboundDraftTarget);
         }
         documentSessionRef.current.setHtml(canonicalSource);
         setRenderedContentSha256(null);
@@ -1899,13 +1902,13 @@ export default function Workbench() {
       recoveryStore.remove(keys);
       return;
     }
-      const composerText = composerDraftRef.current;
-      const composerTarget = draftTargetRef.current;
-      const composerAttachments = composerAttachmentsRef.current;
+      const composerText = commentSessionRef.current.composerDraft;
+      const composerTarget = commentSessionRef.current.composerTarget;
+      const composerAttachments = commentSessionRef.current.composerAttachments;
       const commentEdit = commentEditSessionHasChanges(
-        commentEditSessionRef.current,
+        commentSessionRef.current.editSession,
       )
-        ? commentEditSessionRef.current
+        ? commentSessionRef.current.editSession
         : null;
       if (
         snapshot.comments.length === 0
@@ -1932,7 +1935,7 @@ export default function Workbench() {
         changeEvents: snapshot.changeEvents.map(persistedChangeEvent),
         deletedCommentIds: snapshot.deletedCommentIds,
         composerDraft: composerText,
-        composerCommentId: composerCommentIdRef.current,
+        composerCommentId: commentSessionRef.current.composerCommentId,
         composerAttachments: composerAttachments.map(persistedAttachment),
         composerTarget: composerTarget ? persistedTargetRef(composerTarget) : null,
         commentEdit: commentEdit
@@ -1950,8 +1953,8 @@ export default function Workbench() {
   }, []);
 
   const persistCurrentDraftRecovery = useCallback((
-    nextComments = commentsRef.current,
-    nextEvents = changeEventsRef.current,
+    nextComments = commentSessionRef.current.comments,
+    nextEvents = commentSessionRef.current.changeEvents,
   ) => {
     const context = captureProjectContext();
     if (!context) return;
@@ -1960,7 +1963,7 @@ export default function Workbench() {
       basedOnVersionId: currentBasedOnVersionId,
       comments: nextComments,
       changeEvents: nextEvents,
-      deletedCommentIds: deletedCommentIdsRef.current,
+      deletedCommentIds: commentSessionRef.current.deletedCommentIds,
       operationId: draftRecoveryOperationIdRef.current || undefined,
     });
     if (snapshot) persistDraftRecovery(snapshot);
@@ -1968,17 +1971,16 @@ export default function Workbench() {
 
   const normalizeCurrentGlobalComments = useCallback((): CommentItem[] => {
     const normalized = normalizeGlobalCommentTargets(
-      commentsRef.current.filter(commentHasContent),
+      commentSessionRef.current.comments.filter(commentHasContent),
     );
     if (!normalized.changed) return normalized.comments;
     const normalizedById = new Map(
       normalized.comments.map((comment) => [comment.commentId, comment]),
     );
-    const nextComments = commentsRef.current.map(
+    const nextComments = commentSessionRef.current.comments.map(
       (comment) => normalizedById.get(comment.commentId) || comment,
     );
-    commentsRef.current = nextComments;
-    setComments(nextComments);
+    commentSessionRef.current.setComments(nextComments);
     persistCurrentDraftRecovery(nextComments);
     return nextComments.filter(commentHasContent);
   }, [persistCurrentDraftRecovery]);
@@ -2189,32 +2191,31 @@ export default function Workbench() {
               const reboundTargets = rebindTargetsPreservingGlobal(
                 acknowledgedHtml,
                 [
-                  ...commentsRef.current.map((comment) => comment.target),
-                  ...changeEventsRef.current.map((event) => event.target),
-                  ...(draftTargetRef.current ? [draftTargetRef.current] : []),
+                  ...commentSessionRef.current.comments.map((comment) => comment.target),
+                  ...commentSessionRef.current.changeEvents.map((event) => event.target),
+                  ...(commentSessionRef.current.composerTarget ? [commentSessionRef.current.composerTarget] : []),
                 ],
               );
               const reboundById = new Map(
                 reboundTargets.map((target) => [target.id, target]),
               );
-              const reboundComments = commentsRef.current.map((comment) => ({
+              const reboundComments = commentSessionRef.current.comments.map((comment) => ({
                 ...comment,
                 target: reboundById.get(comment.target.id) || comment.target,
               }));
-              const reboundEvents = changeEventsRef.current.map((event) => ({
+              const reboundEvents = commentSessionRef.current.changeEvents.map((event) => ({
                 ...event,
                 target: reboundById.get(event.target.id) || event.target,
               }));
-              commentsRef.current = reboundComments;
-              changeEventsRef.current = reboundEvents;
-              setComments(reboundComments);
-              setChangeEvents(reboundEvents);
-              if (draftTargetRef.current) {
+              commentSessionRef.current.update({
+                comments: reboundComments,
+                changeEvents: reboundEvents,
+              });
+              if (commentSessionRef.current.composerTarget) {
                 const reboundDraftTarget =
-                  reboundById.get(draftTargetRef.current.id)
-                  || draftTargetRef.current;
-                draftTargetRef.current = reboundDraftTarget;
-                setDraftTarget(reboundDraftTarget);
+                  reboundById.get(commentSessionRef.current.composerTarget.id)
+                  || commentSessionRef.current.composerTarget;
+                commentSessionRef.current.setComposerTarget(reboundDraftTarget);
               }
               documentSessionRef.current.setHtml(acknowledgedHtml);
               setRenderedContentSha256(nextHash);
@@ -2369,15 +2370,14 @@ export default function Workbench() {
         capturedRevision: nextRevision,
         createdAt: new Date().toISOString(),
         baseVersionId: currentBasedOnVersionId,
-        events: changeEventsRef.current,
+        events: commentSessionRef.current.changeEvents,
         pendingEvents: auditPendingRef.current,
         inFlightKeys: auditInFlightKeysRef.current,
         nextEventId: () => recordId("change", changeCounter.current++),
       });
-      changeEventsRef.current = nextEvents.events;
+      commentSessionRef.current.setChangeEvents(nextEvents.events);
       auditPendingRef.current = nextEvents.pendingEvents;
-      setChangeEvents(nextEvents.events);
-      persistCurrentDraftRecovery(commentsRef.current, nextEvents.events);
+      persistCurrentDraftRecovery(commentSessionRef.current.comments, nextEvents.events);
       captureUsageEvent("direct_edit_committed", {
         edit_kind: mutation.kind,
         property_group: mutation.kind === "text"
@@ -2501,17 +2501,7 @@ export default function Workbench() {
     setPageViewContext(null);
     editorRef.current?.applyPageViewContext(null);
     setComposerOpen(false);
-    setDraftTarget(null);
-    setDraft("");
-    setDraftCommentId(null);
-    setDraftAttachments([]);
-    setComments([]);
-    commentsRef.current = [];
-    deletedCommentIdsRef.current.clear();
-    composerDraftRef.current = "";
-    composerCommentIdRef.current = null;
-    composerAttachmentsRef.current = [];
-    draftTargetRef.current = null;
+    commentSessionRef.current.reset();
     for (const url of attachmentObjectUrlsRef.current.values()) {
       try {
         URL.revokeObjectURL(url);
@@ -2525,9 +2515,7 @@ export default function Workbench() {
     setAttachmentUploadCount(0);
     setPreviewAttachment(null);
     setEditingCommentId(null);
-    commentEditSessionRef.current = null;
     commentEditResumePendingRef.current = null;
-    setCommentEditSession(null);
     setPendingDeleteCommentId(null);
     relinkingTargetRef.current = null;
     relinkSelectionArmedRef.current = false;
@@ -2550,8 +2538,6 @@ export default function Workbench() {
     focusedCommentIdRef.current = null;
     setFocusedCommentId(null);
     reviewRevealRequestRef.current += 1;
-    changeEventsRef.current = [];
-    setChangeEvents([]);
     versionSessionRef.current.reset();
     setCanvasMode(
       runtimeCapabilitiesRef.current.sourceEditing !== "enabled"
@@ -2769,9 +2755,9 @@ export default function Workbench() {
       Number.isSafeInteger(Number(raw.revision)) ? Number(raw.revision) : 0,
     ) + 1;
     const recoveredEvents = changesFromRecords(raw.changeEvents);
-    const existingIds = new Set(changeEventsRef.current.map((event) => event.eventId));
+    const existingIds = new Set(commentSessionRef.current.changeEvents.map((event) => event.eventId));
     const mergedEvents = [
-      ...changeEventsRef.current,
+      ...commentSessionRef.current.changeEvents,
       ...recoveredEvents.filter((event) => !existingIds.has(event.eventId)),
     ];
     const recoveredExpectedSha256 = String(raw.expectedSourceSha256 || "");
@@ -2810,13 +2796,12 @@ export default function Workbench() {
       job.historyOperations,
     );
     auditPendingRef.current = recoveredEvents;
-    changeEventsRef.current = mergedEvents;
+    commentSessionRef.current.setChangeEvents(mergedEvents);
     documentSessionRef.current.update({
       html: recoveredHtml,
       editRevision: revision,
       pendingWrite: job,
     });
-    setChangeEvents(mergedEvents);
     versionSessionRef.current.markSourceEdited();
     setRenderedContentSha256(null);
     persistRecoveryLog(job);
@@ -2951,9 +2936,9 @@ export default function Workbench() {
       changeEvents: serverEvents,
       deletedCommentIds: serverDeletedCommentIds,
     });
-    deletedCommentIdsRef.current = operationAlreadyApplied
-      ? new Set()
-      : new Set(rebased.deletedCommentIds);
+    commentSessionRef.current.replaceDeletedCommentIds(
+      operationAlreadyApplied ? [] : rebased.deletedCommentIds,
+    );
     draftRecoveryOperationIdRef.current = operationAlreadyApplied
       ? null
       : recoveredOperationId;
@@ -3217,7 +3202,7 @@ export default function Workbench() {
 
       const draftRecord = draftAuthorityFromWorkspace(payload);
       const serverDraftRevision = authoritativeDraftRevision(draftRecord);
-      let recoveredEvents = changeEventsRef.current;
+      let recoveredEvents = commentSessionRef.current.changeEvents;
       const draftContext = registeredContext;
       if (
         nextProjectId
@@ -3268,8 +3253,6 @@ export default function Workbench() {
           },
         }));
         recoveredEvents = recoveredDraft.changeEvents;
-        setComments(recoveredComments);
-        commentsRef.current = recoveredComments;
         const recoveredEditComment = recoveredDraft.commentEdit
           ? recoveredComments.find(
               (comment) => (
@@ -3293,34 +3276,32 @@ export default function Workbench() {
               ],
             }
           : null;
-        commentEditSessionRef.current = (
+        const nextRecoveredEditSession = (
           commentEditSessionHasChanges(recoveredEditSession)
             ? recoveredEditSession
             : null
         );
         commentEditResumePendingRef.current = null;
-        setCommentEditSession(commentEditSessionRef.current);
         setEditingCommentId(null);
-        changeEventsRef.current = recoveredEvents;
-        setChangeEvents(recoveredEvents);
         draftPersistenceAuthorityRef.current = {
           epoch,
           projectId: nextProjectId,
           documentId: nextDocumentId,
           sourcePath: activeSource,
         };
-        composerDraftRef.current = recoveredDraft.composerDraft;
-        composerCommentIdRef.current = recoveredDraft.composerCommentId;
-        composerAttachmentsRef.current = recoveredDraft.composerAttachments;
         const recoveredComposerTarget = recoveredDraft.composerTarget
           ? recoveredTargetById.get(recoveredDraft.composerTarget.id)
             || { ...recoveredDraft.composerTarget, resolution: "orphaned" as const }
           : null;
-        draftTargetRef.current = recoveredComposerTarget;
-        setDraft(recoveredDraft.composerDraft);
-        setDraftCommentId(recoveredDraft.composerCommentId);
-        setDraftAttachments(recoveredDraft.composerAttachments);
-        setDraftTarget(recoveredComposerTarget);
+        commentSessionRef.current.update({
+          comments: recoveredComments,
+          changeEvents: recoveredEvents,
+          composerDraft: recoveredDraft.composerDraft,
+          composerCommentId: recoveredDraft.composerCommentId,
+          composerAttachments: recoveredDraft.composerAttachments,
+          composerTarget: recoveredComposerTarget,
+          editSession: nextRecoveredEditSession,
+        });
         setComposerOpen(false);
       }
 
@@ -3672,15 +3653,15 @@ export default function Workbench() {
     );
     const sessionState = draftSessionRef.current.inspect();
     if (event.rebaseCount > 0 && !sessionState.pending) {
-      commentsRef.current = acknowledgedComments;
-      changeEventsRef.current = acknowledgedEvents;
-      setComments(acknowledgedComments);
-      setChangeEvents(acknowledgedEvents);
+      commentSessionRef.current.update({
+        comments: acknowledgedComments,
+        changeEvents: acknowledgedEvents,
+      });
     }
     setDraftPersistError("");
     setBridgeConnected(true);
     if (!sessionState.pending) {
-      deletedCommentIdsRef.current.clear();
+      commentSessionRef.current.clearDeletedCommentIds();
       persistDraftRecovery({
         ...event.write,
         expectedDraftRevision: event.authoritative.draftRevision,
@@ -3787,13 +3768,13 @@ export default function Workbench() {
       alwaysDrain: true,
       inspect: (boundary) => {
         const hasLocalDraftMaterial = Boolean(
-          commentsRef.current.length > 0
-          || changeEventsRef.current.length > 0
-          || deletedCommentIdsRef.current.size > 0
-          || composerDraftRef.current.trim()
-          || composerAttachmentsRef.current.length > 0
-          || draftTargetRef.current
-          || commentEditSessionHasChanges(commentEditSessionRef.current)
+          commentSessionRef.current.comments.length > 0
+          || commentSessionRef.current.changeEvents.length > 0
+          || commentSessionRef.current.deletedCommentIds.size > 0
+          || commentSessionRef.current.composerDraft.trim()
+          || commentSessionRef.current.composerAttachments.length > 0
+          || commentSessionRef.current.composerTarget
+          || commentEditSessionHasChanges(commentSessionRef.current.editSession)
         );
         if (
           (projectLockedRef.current && boundary !== "submit")
@@ -3828,13 +3809,13 @@ export default function Workbench() {
       },
       drain: async ({ boundary }) => {
         const hasLocalDraftMaterial = Boolean(
-          commentsRef.current.length > 0
-          || changeEventsRef.current.length > 0
-          || deletedCommentIdsRef.current.size > 0
-          || composerDraftRef.current.trim()
-          || composerAttachmentsRef.current.length > 0
-          || draftTargetRef.current
-          || commentEditSessionHasChanges(commentEditSessionRef.current)
+          commentSessionRef.current.comments.length > 0
+          || commentSessionRef.current.changeEvents.length > 0
+          || commentSessionRef.current.deletedCommentIds.size > 0
+          || commentSessionRef.current.composerDraft.trim()
+          || commentSessionRef.current.composerAttachments.length > 0
+          || commentSessionRef.current.composerTarget
+          || commentEditSessionHasChanges(commentSessionRef.current.editSession)
         );
         let context = captureProjectContext();
         if (
@@ -3860,9 +3841,9 @@ export default function Workbench() {
         const snapshot = draftSessionRef.current.createSnapshot({
           context,
           basedOnVersionId: currentBasedOnVersionId,
-          comments: commentsRef.current,
-          changeEvents: changeEventsRef.current,
-          deletedCommentIds: deletedCommentIdsRef.current,
+          comments: commentSessionRef.current.comments,
+          changeEvents: commentSessionRef.current.changeEvents,
+          deletedCommentIds: commentSessionRef.current.deletedCommentIds,
           operationId: draftRecoveryOperationIdRef.current || undefined,
         });
         if (!snapshot) {
@@ -3971,11 +3952,10 @@ export default function Workbench() {
   }, []);
 
   const removeComposerAttachment = useCallback((attachment: CommentAttachment) => {
-    const next = composerAttachmentsRef.current.filter(
+    const next = commentSessionRef.current.composerAttachments.filter(
       (item) => item.attachmentId !== attachment.attachmentId,
     );
-    composerAttachmentsRef.current = next;
-    setDraftAttachments(next);
+    commentSessionRef.current.setComposerAttachments(next);
     forgetAttachmentObjectUrl(attachment.attachmentId);
     persistCurrentDraftRecovery();
     void deleteAttachmentFile(attachment);
@@ -3985,7 +3965,7 @@ export default function Workbench() {
     commentId: string,
     attachment: CommentAttachment,
   ) => {
-    const current = commentEditSessionRef.current;
+    const current = commentSessionRef.current.editSession;
     if (!current || current.commentId !== commentId) return;
     const wasSavedBeforeEdit = current.baselineAttachments.some(
       (item) => item.attachmentId === attachment.attachmentId,
@@ -3996,8 +3976,7 @@ export default function Workbench() {
         (item) => item.attachmentId !== attachment.attachmentId,
       ),
     };
-    commentEditSessionRef.current = nextSession;
-    setCommentEditSession(nextSession);
+    commentSessionRef.current.setEditSession(nextSession);
     forgetAttachmentObjectUrl(attachment.attachmentId);
     persistCurrentDraftRecovery();
     if (!wasSavedBeforeEdit) {
@@ -4016,17 +3995,17 @@ export default function Workbench() {
   ) => {
     if (files.length === 0) return;
     const targetIsOpen = target.kind === "composer"
-      ? composerCommentIdRef.current === target.commentId
+      ? commentSessionRef.current.composerCommentId === target.commentId
       : (
-          commentEditSessionRef.current?.commentId === target.commentId
-          && commentsRef.current.some(
+          commentSessionRef.current.editSession?.commentId === target.commentId
+          && commentSessionRef.current.comments.some(
             (comment) => comment.commentId === target.commentId,
           )
         );
     if (!targetIsOpen) return;
     const existingCount = target.kind === "composer"
-      ? composerAttachmentsRef.current.length
-      : commentEditSessionRef.current?.draftAttachments.length ?? 0;
+      ? commentSessionRef.current.composerAttachments.length
+      : commentSessionRef.current.editSession?.draftAttachments.length ?? 0;
     const attachmentPlan = planAttachmentSelection(files, existingCount);
     const selected = attachmentPlan.accepted;
     const issueNotes: string[] = [];
@@ -4102,11 +4081,10 @@ export default function Workbench() {
         return attachment;
       });
       if (target.kind === "composer") {
-        const next = [...composerAttachmentsRef.current, ...memoryAttachments];
-        composerAttachmentsRef.current = next;
-        setDraftAttachments(next);
+        const next = [...commentSessionRef.current.composerAttachments, ...memoryAttachments];
+        commentSessionRef.current.setComposerAttachments(next);
       } else {
-        const current = commentEditSessionRef.current;
+        const current = commentSessionRef.current.editSession;
         if (!current || current.commentId !== target.commentId) return;
         const nextSession = {
           ...current,
@@ -4115,8 +4093,7 @@ export default function Workbench() {
             ...memoryAttachments,
           ],
         };
-        commentEditSessionRef.current = nextSession;
-        setCommentEditSession(nextSession);
+        commentSessionRef.current.setEditSession(nextSession);
         persistCurrentDraftRecovery();
       }
       addedAttachmentCount = memoryAttachments.length;
@@ -4209,7 +4186,7 @@ export default function Workbench() {
         );
         if (!attachment) throw new Error("附件已写入，但返回的记录不完整。");
         if (target.kind === "composer") {
-          if (composerCommentIdRef.current !== target.commentId) {
+          if (commentSessionRef.current.composerCommentId !== target.commentId) {
             void deleteAttachmentFile(attachment);
             continue;
           }
@@ -4219,17 +4196,16 @@ export default function Workbench() {
               URL.createObjectURL(file),
             );
           }
-          const next = [...composerAttachmentsRef.current, attachment];
-          composerAttachmentsRef.current = next;
-          setDraftAttachments(next);
+          const next = [...commentSessionRef.current.composerAttachments, attachment];
+          commentSessionRef.current.setComposerAttachments(next);
           persistCurrentDraftRecovery();
           addedAttachmentCount += 1;
         } else {
-          const current = commentEditSessionRef.current;
+          const current = commentSessionRef.current.editSession;
           if (
             !current
             || current.commentId !== target.commentId
-            || !commentsRef.current.some(
+            || !commentSessionRef.current.comments.some(
               (comment) => comment.commentId === target.commentId,
             )
           ) {
@@ -4246,8 +4222,7 @@ export default function Workbench() {
             ...current,
             draftAttachments: [...current.draftAttachments, attachment],
           };
-          commentEditSessionRef.current = nextSession;
-          setCommentEditSession(nextSession);
+          commentSessionRef.current.setEditSession(nextSession);
           persistCurrentDraftRecovery();
           addedAttachmentCount += 1;
         }
@@ -4272,11 +4247,11 @@ export default function Workbench() {
     }
     if (issueNotes.length > 0) {
       const targetStillOpen = target.kind === "composer"
-        ? composerCommentIdRef.current === target.commentId
-        : commentEditSessionRef.current?.commentId === target.commentId;
+        ? commentSessionRef.current.composerCommentId === target.commentId
+        : commentSessionRef.current.editSession?.commentId === target.commentId;
       const currentAttachmentCount = target.kind === "composer"
-        ? composerAttachmentsRef.current.length
-        : commentEditSessionRef.current?.draftAttachments.length ?? 0;
+        ? commentSessionRef.current.composerAttachments.length
+        : commentSessionRef.current.editSession?.draftAttachments.length ?? 0;
       const needsRemoval = attachmentPlan.overLimit.length > 0
         && currentAttachmentCount >= MAX_COMMENT_ATTACHMENTS;
       setToast({
@@ -4408,7 +4383,7 @@ export default function Workbench() {
       basedOnVersionId: currentBasedOnVersionId,
       comments,
       changeEvents,
-      deletedCommentIds: deletedCommentIdsRef.current,
+      deletedCommentIds: commentSessionRef.current.deletedCommentIds,
       operationId: draftRecoveryOperationIdRef.current || undefined,
     });
     if (!snapshot) return;
@@ -4448,9 +4423,9 @@ export default function Workbench() {
         sourcePath,
       },
       basedOnVersionId: currentBasedOnVersionId,
-      comments: commentsRef.current,
-      changeEvents: changeEventsRef.current,
-      deletedCommentIds: deletedCommentIdsRef.current,
+      comments: commentSessionRef.current.comments,
+      changeEvents: commentSessionRef.current.changeEvents,
+      deletedCommentIds: commentSessionRef.current.deletedCommentIds,
       operationId: draftRecoveryOperationIdRef.current || undefined,
     });
     if (snapshot) persistDraftRecovery(snapshot);
@@ -5282,9 +5257,9 @@ export default function Workbench() {
       return false;
     }
     const activeTargets = [
-      ...commentsRef.current.map((comment) => comment.target),
-      ...changeEventsRef.current.map((event) => event.target),
-      ...(draftTargetRef.current ? [draftTargetRef.current] : []),
+      ...commentSessionRef.current.comments.map((comment) => comment.target),
+      ...commentSessionRef.current.changeEvents.map((event) => event.target),
+      ...(commentSessionRef.current.composerTarget ? [commentSessionRef.current.composerTarget] : []),
     ];
     if (activeTargets.length > 0) {
       const deterministicById = new Map(
@@ -5311,24 +5286,22 @@ export default function Workbench() {
           resolution: "orphaned",
         };
       };
-      const nextComments = commentsRef.current.map((comment) => ({
+      const nextComments = commentSessionRef.current.comments.map((comment) => ({
         ...comment,
         target: refreshedTarget(comment.target),
       }));
-      commentsRef.current = nextComments;
-      setComments(nextComments);
-      const nextEvents = changeEventsRef.current.map((event) => ({
+      const nextEvents = commentSessionRef.current.changeEvents.map((event) => ({
         ...event,
         target: refreshedTarget(event.target),
       }));
-      changeEventsRef.current = nextEvents;
-      setChangeEvents(nextEvents);
-      const currentDraftTarget = draftTargetRef.current;
-      if (currentDraftTarget) {
-        const nextDraftTarget = refreshedTarget(currentDraftTarget);
-        draftTargetRef.current = nextDraftTarget;
-        setDraftTarget(nextDraftTarget);
-      }
+      const currentDraftTarget = commentSessionRef.current.composerTarget;
+      commentSessionRef.current.update({
+        comments: nextComments,
+        changeEvents: nextEvents,
+        ...(currentDraftTarget
+          ? { composerTarget: refreshedTarget(currentDraftTarget) }
+          : {}),
+      });
     }
     void browserSha256(nextHtml).then((renderedSha256) => {
       if (documentSessionRef.current.html === nextHtml) setRenderedContentSha256(renderedSha256);
@@ -5527,8 +5500,7 @@ export default function Workbench() {
         || !isCurrentProjectContext(context)
       ) return;
       auditPendingRef.current = [];
-      changeEventsRef.current = [];
-      setChangeEvents([]);
+      commentSessionRef.current.setChangeEvents([]);
       persistRecoveryLog(null, context);
       documentSessionRef.current.update({
         sourceSha256: hash,
@@ -5827,9 +5799,9 @@ export default function Workbench() {
         payload.selection,
       );
       const targets = [
-        ...commentsRef.current.map((comment) => comment.target),
-        ...changeEventsRef.current.map((event) => event.target),
-        ...(draftTargetRef.current ? [draftTargetRef.current] : []),
+        ...commentSessionRef.current.comments.map((comment) => comment.target),
+        ...commentSessionRef.current.changeEvents.map((event) => event.target),
+        ...(commentSessionRef.current.composerTarget ? [commentSessionRef.current.composerTarget] : []),
         ...(rawHistoryTarget ? [rawHistoryTarget] : []),
       ];
       const reboundTargets = historyTransition.fromTarget
@@ -5844,30 +5816,29 @@ export default function Workbench() {
       const reboundById = new Map(
         reboundTargets.map((target) => [target.id, target]),
       );
-      const nextComments = commentsRef.current.map((comment) => ({
+      const nextComments = commentSessionRef.current.comments.map((comment) => ({
         ...comment,
         target: reboundById.get(comment.target.id) || {
           ...comment.target,
           resolution: "orphaned" as const,
         },
       }));
-      const nextEvents = changeEventsRef.current.map((event) => ({
+      const nextEvents = commentSessionRef.current.changeEvents.map((event) => ({
         ...event,
         target: reboundById.get(event.target.id) || {
           ...event.target,
           resolution: "orphaned" as const,
         },
       }));
-      commentsRef.current = nextComments;
-      changeEventsRef.current = nextEvents;
-      setComments(nextComments);
-      setChangeEvents(nextEvents);
-      if (draftTargetRef.current) {
+      commentSessionRef.current.update({
+        comments: nextComments,
+        changeEvents: nextEvents,
+      });
+      if (commentSessionRef.current.composerTarget) {
         const nextDraftTarget =
-          reboundById.get(draftTargetRef.current.id)
-          || { ...draftTargetRef.current, resolution: "orphaned" as const };
-        draftTargetRef.current = nextDraftTarget;
-        setDraftTarget(nextDraftTarget);
+          reboundById.get(commentSessionRef.current.composerTarget.id)
+          || { ...commentSessionRef.current.composerTarget, resolution: "orphaned" as const };
+        commentSessionRef.current.setComposerTarget(nextDraftTarget);
       }
       const nextHistoryTarget = rawHistoryTarget
         ? reboundById.get(rawHistoryTarget.id) || rawHistoryTarget
@@ -6108,16 +6079,15 @@ export default function Workbench() {
     setRelinkingTarget(itemId);
     setPendingDeleteCommentId(null);
     setEditingCommentId(null);
-    if (!commentEditSessionHasChanges(commentEditSessionRef.current)) {
-      commentEditSessionRef.current = null;
+    if (!commentEditSessionHasChanges(commentSessionRef.current.editSession)) {
+      commentSessionRef.current.setEditSession(null);
       commentEditResumePendingRef.current = null;
-      setCommentEditSession(null);
     }
     editorRef.current?.clearSelection();
     setSelection(null);
     if (itemId !== "__composer") {
       updateFocusedComment(itemId);
-      const comment = commentsRef.current.find(
+      const comment = commentSessionRef.current.comments.find(
         (item) => item.commentId === itemId,
       );
       if (comment) queueReviewPairReveal(comment.target, itemId);
@@ -6132,12 +6102,11 @@ export default function Workbench() {
       || !canSaveCommentTarget(target)
     ) return false;
     if (relinkingId === "__composer") {
-      const currentTarget = draftTargetRef.current;
+      const currentTarget = commentSessionRef.current.composerTarget;
       const nextTarget = currentTarget
         ? { ...target, id: currentTarget.id }
         : target;
-      draftTargetRef.current = nextTarget;
-      setDraftTarget(nextTarget);
+      commentSessionRef.current.setComposerTarget(nextTarget);
       setSelection(nextTarget);
       relinkingTargetRef.current = null;
       relinkSelectionArmedRef.current = false;
@@ -6148,7 +6117,7 @@ export default function Workbench() {
       requestComposerFocus();
       return true;
     }
-    const current = commentsRef.current.find(
+    const current = commentSessionRef.current.comments.find(
       (comment) => comment.commentId === relinkingId,
     );
     if (!current) {
@@ -6158,7 +6127,7 @@ export default function Workbench() {
       return false;
     }
     const nextTarget = { ...target, id: current.target.id };
-    const nextComments = commentsRef.current.map((comment) => (
+    const nextComments = commentSessionRef.current.comments.map((comment) => (
       comment.commentId === relinkingId
         ? {
             ...comment,
@@ -6167,8 +6136,7 @@ export default function Workbench() {
           }
         : comment
     ));
-    commentsRef.current = nextComments;
-    setComments(nextComments);
+    commentSessionRef.current.setComments(nextComments);
     setSelection(nextTarget);
     relinkingTargetRef.current = null;
     relinkSelectionArmedRef.current = false;
@@ -6213,21 +6181,14 @@ export default function Workbench() {
 
   const clearCurrentComposer = useCallback(() => {
     composerFocusPendingRef.current = false;
-    composerDraftRef.current = "";
-    composerCommentIdRef.current = null;
-    composerAttachmentsRef.current = [];
-    draftTargetRef.current = null;
-    setDraft("");
-    setDraftCommentId(null);
-    setDraftAttachments([]);
-    setDraftTarget(null);
+    commentSessionRef.current.clearComposer();
     setComposerOpen(false);
     setPendingDeleteCommentId(null);
     updateFocusedComment(null);
   }, [updateFocusedComment]);
 
   const resumeCurrentComposer = useCallback(() => {
-    const target = draftTargetRef.current;
+    const target = commentSessionRef.current.composerTarget;
     if (!target) return;
     if (!canSaveCommentTarget(target)) {
       beginTargetRelink("__composer");
@@ -6235,9 +6196,8 @@ export default function Workbench() {
     }
     const located = editorRef.current?.select(target, { showToolbar: false });
     const nextTarget = located || target;
-    draftTargetRef.current = nextTarget;
+    commentSessionRef.current.setComposerTarget(nextTarget);
     setSelection(nextTarget);
-    setDraftTarget(nextTarget);
     updateFocusedComment(null);
     setPendingDeleteCommentId(null);
     setComposerOpen(true);
@@ -6285,28 +6245,27 @@ export default function Workbench() {
     if (!canSaveCommentTarget(target)) {
       return;
     }
-    const currentEdit = commentEditSessionRef.current;
+    const currentEdit = commentSessionRef.current.editSession;
     if (currentEdit && commentEditSessionHasChanges(currentEdit)) {
       showUnfinishedCommentEditNotice(currentEdit);
       return;
     }
     if (currentEdit) {
-      commentEditSessionRef.current = null;
+      commentSessionRef.current.setEditSession(null);
       commentEditResumePendingRef.current = null;
-      setCommentEditSession(null);
       setEditingCommentId(null);
     }
     // Opening a composer is the first durable project action for a lazily
     // registered HTML. Start identity creation before accepting text so crash
     // recovery and the Bridge draft share one authority.
     void prepareProjectRecords();
-    const recoveredDraftTarget = draftTargetRef.current;
+    const recoveredDraftTarget = commentSessionRef.current.composerTarget;
     if (
       recoveredDraftTarget
       && recoveredDraftTarget.id !== target.id
       && (
-        composerDraftRef.current.trim()
-        || composerAttachmentsRef.current.length > 0
+        commentSessionRef.current.composerDraft.trim()
+        || commentSessionRef.current.composerAttachments.length > 0
       )
     ) {
       setToast({
@@ -6321,24 +6280,26 @@ export default function Workbench() {
       return;
     }
     setSelection(target);
-    const resumesRecoveredDraft = draftTargetRef.current?.id === target.id;
+    const resumesRecoveredDraft = commentSessionRef.current.composerTarget?.id === target.id;
     if (!resumesRecoveredDraft) {
-      composerDraftRef.current = "";
-      composerAttachmentsRef.current = [];
       const nextCommentId = recordId("comment", commentCounter.current++);
-      composerCommentIdRef.current = nextCommentId;
-      setDraft("");
-      setDraftCommentId(nextCommentId);
-      setDraftAttachments([]);
-    } else if (!composerCommentIdRef.current) {
+      commentSessionRef.current.update({
+        composerDraft: "",
+        composerCommentId: nextCommentId,
+        composerAttachments: [],
+        composerTarget: target,
+      });
+    } else if (!commentSessionRef.current.composerCommentId) {
       const nextCommentId = recordId("comment", commentCounter.current++);
-      composerCommentIdRef.current = nextCommentId;
-      setDraftCommentId(nextCommentId);
+      commentSessionRef.current.update({
+        composerCommentId: nextCommentId,
+        composerTarget: target,
+      });
+    } else {
+      commentSessionRef.current.setComposerTarget(target);
     }
-    draftTargetRef.current = target;
     updateFocusedComment(null);
     setComposerOpen(true);
-    setDraftTarget(target);
     queueReviewPairReveal(target, "__composer");
     requestComposerFocus();
   }, [
@@ -6388,8 +6349,8 @@ export default function Workbench() {
     if (attachmentUploadCountRef.current > 0) return;
     setPendingDeleteCommentId(null);
     if (
-      composerDraftRef.current.trim()
-      || composerAttachmentsRef.current.length > 0
+      commentSessionRef.current.composerDraft.trim()
+      || commentSessionRef.current.composerAttachments.length > 0
     ) {
       setComposerOpen(false);
       updateFocusedComment(null);
@@ -6406,15 +6367,15 @@ export default function Workbench() {
 
   const discardCurrentComposer = useCallback(() => {
     if (attachmentUploadCountRef.current > 0) return;
-    const discardedCommentId = composerCommentIdRef.current;
-    const discardedAttachments = [...composerAttachmentsRef.current];
+    const discardedCommentId = commentSessionRef.current.composerCommentId;
+    const discardedAttachments = [...commentSessionRef.current.composerAttachments];
     if (relinkingTargetRef.current === "__composer") {
       relinkingTargetRef.current = null;
       relinkSelectionArmedRef.current = false;
       setRelinkingTarget(null);
     }
     if (discardedCommentId) {
-      deletedCommentIdsRef.current.add(discardedCommentId);
+      commentSessionRef.current.markDeleted(discardedCommentId);
     }
     clearCurrentComposer();
     persistCurrentDraftRecovery();
@@ -6477,7 +6438,7 @@ export default function Workbench() {
         return;
       }
     }
-    const currentTarget = draftTargetRef.current;
+    const currentTarget = commentSessionRef.current.composerTarget;
     if (
       commentEpoch !== projectSessionRef.current.epoch
       || projectLockedRef.current
@@ -6489,18 +6450,18 @@ export default function Workbench() {
       || currentTarget.id !== requestedTargetId
       || !canSaveCommentTarget(currentTarget)
     ) return;
-    const currentText = composerDraftRef.current.trim();
-    const currentAttachments = [...composerAttachmentsRef.current];
+    const currentText = commentSessionRef.current.composerDraft.trim();
+    const currentAttachments = [...commentSessionRef.current.composerAttachments];
     if (!currentText && currentAttachments.length === 0) {
       requestComposerFocus();
       return;
     }
     const now = new Date().toISOString();
-    const commentId = composerCommentIdRef.current
+    const commentId = commentSessionRef.current.composerCommentId
       || draftCommentId
       || recordId("comment", commentCounter.current++);
     const commentTarget = independentCommentTarget(currentTarget, commentId);
-    const nextComments = [...commentsRef.current, {
+    const nextComments = [...commentSessionRef.current.comments, {
       commentId,
       createdAt: now,
       updatedAt: now,
@@ -6511,18 +6472,17 @@ export default function Workbench() {
         : {}),
       baseVersionId: currentBasedOnVersionId,
     }];
-    deletedCommentIdsRef.current.delete(nextComments.at(-1)?.commentId || "");
-    commentsRef.current = nextComments;
-    composerDraftRef.current = "";
-    composerCommentIdRef.current = null;
-    composerAttachmentsRef.current = [];
-    draftTargetRef.current = null;
-    setComments(nextComments);
+    const nextDeletedCommentIds = commentSessionRef.current.deletedCommentIds;
+    nextDeletedCommentIds.delete(nextComments.at(-1)?.commentId || "");
+    commentSessionRef.current.update({
+      comments: nextComments,
+      deletedCommentIds: nextDeletedCommentIds,
+      composerDraft: "",
+      composerCommentId: null,
+      composerAttachments: [],
+      composerTarget: null,
+    });
     setOpenedAiVersionNotice(null);
-    setDraft("");
-    setDraftCommentId(null);
-    setDraftAttachments([]);
-    setDraftTarget(null);
     setComposerOpen(false);
     setPendingDeleteCommentId(null);
     if (toastRef.current?.dedupeKey === "unfinished-comment-draft") {
@@ -6568,10 +6528,10 @@ export default function Workbench() {
     focusText = true,
   ): boolean => {
     if (
-      draftTargetRef.current
+      commentSessionRef.current.composerTarget
       && (
-        composerDraftRef.current.trim()
-        || composerAttachmentsRef.current.length > 0
+        commentSessionRef.current.composerDraft.trim()
+        || commentSessionRef.current.composerAttachments.length > 0
       )
     ) {
       setToast({
@@ -6585,8 +6545,8 @@ export default function Workbench() {
       });
       return false;
     }
-    if (draftTargetRef.current) clearCurrentComposer();
-    const currentSession = commentEditSessionRef.current;
+    if (commentSessionRef.current.composerTarget) clearCurrentComposer();
+    const currentSession = commentSessionRef.current.editSession;
     if (
       currentSession
       && currentSession.commentId !== comment.commentId
@@ -6606,8 +6566,7 @@ export default function Workbench() {
             draftAttachments: [...(comment.attachments ?? [])],
           }
     );
-    commentEditSessionRef.current = nextSession;
-    setCommentEditSession(nextSession);
+    commentSessionRef.current.setEditSession(nextSession);
     setPendingDeleteCommentId(null);
     setEditingCommentId(comment.commentId);
     queueReviewCommentFocus(comment.target, comment.commentId);
@@ -6628,8 +6587,8 @@ export default function Workbench() {
 
   const cancelCommentEdit = useCallback((revealComment = true) => {
     if (attachmentUploadCountRef.current > 0) return;
-    const session = commentEditSessionRef.current;
-    const current = commentsRef.current.find(
+    const session = commentSessionRef.current.editSession;
+    const current = commentSessionRef.current.comments.find(
       (comment) => comment.commentId === session?.commentId,
     );
     const baselineIds = new Set(
@@ -6640,9 +6599,8 @@ export default function Workbench() {
     const stagedAttachments = session?.draftAttachments.filter(
       (attachment) => !baselineIds.has(attachment.attachmentId),
     ) ?? [];
-    commentEditSessionRef.current = null;
+    commentSessionRef.current.setEditSession(null);
     commentEditResumePendingRef.current = null;
-    setCommentEditSession(null);
     setEditingCommentId(null);
     persistCurrentDraftRecovery();
     for (const attachment of stagedAttachments) {
@@ -6663,15 +6621,14 @@ export default function Workbench() {
   ]);
 
   const resumeCommentEdit = useCallback((commentId?: string) => {
-    const session = commentEditSessionRef.current;
+    const session = commentSessionRef.current.editSession;
     if (!session || (commentId && session.commentId !== commentId)) return;
-    const current = commentsRef.current.find(
+    const current = commentSessionRef.current.comments.find(
       (comment) => comment.commentId === session.commentId,
     );
     if (!current) {
-      commentEditSessionRef.current = null;
+      commentSessionRef.current.setEditSession(null);
       commentEditResumePendingRef.current = null;
-      setCommentEditSession(null);
       setEditingCommentId(null);
       persistCurrentDraftRecovery();
       return;
@@ -6706,17 +6663,16 @@ export default function Workbench() {
   ]);
 
   const updateCommentEditDraft = useCallback((draftText: string) => {
-    const current = commentEditSessionRef.current;
+    const current = commentSessionRef.current.editSession;
     if (!current) return;
     const nextSession = { ...current, draftText };
-    commentEditSessionRef.current = nextSession;
-    setCommentEditSession(nextSession);
+    commentSessionRef.current.setEditSession(nextSession);
     persistCurrentDraftRecovery();
   }, [persistCurrentDraftRecovery]);
 
   const confirmCommentEdit = useCallback((commentId: string) => {
-    const current = commentsRef.current.find((comment) => comment.commentId === commentId);
-    const session = commentEditSessionRef.current;
+    const current = commentSessionRef.current.comments.find((comment) => comment.commentId === commentId);
+    const session = commentSessionRef.current.editSession;
     if (!current || !session || session.commentId !== commentId) {
       cancelCommentEdit();
       return;
@@ -6725,7 +6681,7 @@ export default function Workbench() {
     const nextText = session.draftText.trim();
     const nextAttachments = session.draftAttachments.map(persistedAttachment);
     if (!nextText && nextAttachments.length === 0) return;
-    const nextComments = commentsRef.current.map((comment) => (
+    const nextComments = commentSessionRef.current.comments.map((comment) => (
       comment.commentId === commentId
         ? {
             ...comment,
@@ -6743,11 +6699,11 @@ export default function Workbench() {
     const removedAttachments = session.baselineAttachments.filter(
       (attachment) => !nextAttachmentIds.has(attachment.attachmentId),
     );
-    commentsRef.current = nextComments;
-    setComments(nextComments);
-    commentEditSessionRef.current = null;
+    commentSessionRef.current.update({
+      comments: nextComments,
+      editSession: null,
+    });
     commentEditResumePendingRef.current = null;
-    setCommentEditSession(null);
     setEditingCommentId(null);
     persistCurrentDraftRecovery(nextComments);
     for (const attachment of removedAttachments) {
@@ -6767,21 +6723,24 @@ export default function Workbench() {
   ]);
 
   const deleteComment = useCallback((commentId: string) => {
-    const deleted = commentsRef.current.find((item) => item.commentId === commentId);
-    const editSession = commentEditSessionRef.current?.commentId === commentId
-      ? commentEditSessionRef.current
+    const deleted = commentSessionRef.current.comments.find((item) => item.commentId === commentId);
+    const editSession = commentSessionRef.current.editSession?.commentId === commentId
+      ? commentSessionRef.current.editSession
       : null;
-    deletedCommentIdsRef.current.add(commentId);
-    const nextComments = commentsRef.current.filter(
+    const nextComments = commentSessionRef.current.comments.filter(
       (item) => item.commentId !== commentId,
     );
-    commentsRef.current = nextComments;
-    setComments(nextComments);
+    commentSessionRef.current.update({
+      comments: nextComments,
+      deletedCommentIds: [
+        ...commentSessionRef.current.deletedCommentIds,
+        commentId,
+      ],
+      ...(editSession ? { editSession: null } : {}),
+    });
     setPendingDeleteCommentId(null);
     if (editSession) {
-      commentEditSessionRef.current = null;
       commentEditResumePendingRef.current = null;
-      setCommentEditSession(null);
       setEditingCommentId(null);
     }
     persistCurrentDraftRecovery(nextComments);
@@ -6808,15 +6767,14 @@ export default function Workbench() {
   ]);
 
   useEffect(() => {
-    const session = commentEditSessionRef.current;
+    const session = commentSessionRef.current.editSession;
     if (!session) return;
-    const editedComment = commentsRef.current.find(
+    const editedComment = commentSessionRef.current.comments.find(
       (comment) => comment.commentId === session.commentId,
     );
     if (!editedComment) {
-      commentEditSessionRef.current = null;
+      commentSessionRef.current.setEditSession(null);
       commentEditResumePendingRef.current = null;
-      setCommentEditSession(null);
       setEditingCommentId(null);
       return;
     }
@@ -6848,14 +6806,14 @@ export default function Workbench() {
 
   useEffect(() => {
     const pendingId = commentEditResumePendingRef.current;
-    const session = commentEditSessionRef.current;
+    const session = commentSessionRef.current.editSession;
     if (
       canvasMode !== "edit"
       || !pendingId
       || !session
       || session.commentId !== pendingId
     ) return;
-    const current = commentsRef.current.find(
+    const current = commentSessionRef.current.comments.find(
       (comment) => comment.commentId === pendingId,
     );
     if (!current) {
@@ -7179,10 +7137,10 @@ export default function Workbench() {
       return;
     }
     if (
-      draftTargetRef.current
+      commentSessionRef.current.composerTarget
       && (
-        composerDraftRef.current.trim()
-        || composerAttachmentsRef.current.length > 0
+        commentSessionRef.current.composerDraft.trim()
+        || commentSessionRef.current.composerAttachments.length > 0
       )
     ) {
       setToast({
@@ -7196,7 +7154,7 @@ export default function Workbench() {
       });
       return;
     }
-    const unfinishedEdit = commentEditSessionRef.current;
+    const unfinishedEdit = commentSessionRef.current.editSession;
     if (unfinishedEdit && commentEditSessionHasChanges(unfinishedEdit)) {
       showUnfinishedCommentEditNotice(unfinishedEdit);
       return;
@@ -7322,7 +7280,7 @@ export default function Workbench() {
       sourcePath: projectSessionRef.current.sourcePath,
       projectName,
       comments: activeComments.map((comment) => ({ ...comment })),
-      changeEvents: changeEventsRef.current.map((event) => ({ ...event })),
+      changeEvents: commentSessionRef.current.changeEvents.map((event) => ({ ...event })),
     };
     const pendingRun: ActiveRun = {
       projectId: submissionContext.projectId,
@@ -7378,7 +7336,7 @@ export default function Workbench() {
       ) {
         throw new Error("冻结 HTML 的 Hash 与已写回源文件不一致。");
       }
-      const persistedComments = commentsRef.current.filter(commentHasContent);
+      const persistedComments = commentSessionRef.current.comments.filter(commentHasContent);
       const unsafePersistedTargets = persistedComments.filter(
         (comment) => (
           !canLocateTarget(comment.target)
@@ -7398,7 +7356,7 @@ export default function Workbench() {
       submissionContext.comments = persistedComments.map(
         (comment) => ({ ...comment }),
       );
-      submissionContext.changeEvents = changeEventsRef.current.map(
+      submissionContext.changeEvents = commentSessionRef.current.changeEvents.map(
         (event) => ({ ...event }),
       );
       if (!isCurrentProjectContext(submissionContext)) {
@@ -7727,11 +7685,7 @@ export default function Workbench() {
       error: "",
     });
     persistDraftRecovery(null, adoptedContext);
-    commentsRef.current = [];
-    composerDraftRef.current = "";
-    composerCommentIdRef.current = null;
-    composerAttachmentsRef.current = [];
-    draftTargetRef.current = null;
+    commentSessionRef.current.reset();
     draftSessionRef.current.replaceAuthority(adoptedContext, 0, {
       draftRevision: 0,
       comments: [],
@@ -7740,18 +7694,9 @@ export default function Workbench() {
       appliedOperationIds: [],
     });
     draftRecoveryOperationIdRef.current = null;
-    setComments([]);
-    changeEventsRef.current = [];
-    setChangeEvents([]);
     setSelection(null);
     setComposerOpen(false);
-    setDraftTarget(null);
-    setDraft("");
-    setDraftCommentId(null);
-    setDraftAttachments([]);
-    commentEditSessionRef.current = null;
     commentEditResumePendingRef.current = null;
-    setCommentEditSession(null);
     setEditingCommentId(null);
     setPreviewAttachment(null);
     viewTransitioningRef.current = true;
@@ -8910,7 +8855,7 @@ export default function Workbench() {
     projectLockedRef.current = false;
     editorRef.current?.unlockNow?.();
     if (!adjustRequirements) return;
-    const firstComment = commentsRef.current.find(commentHasContent);
+    const firstComment = commentSessionRef.current.comments.find(commentHasContent);
     window.requestAnimationFrame(() => {
       if (!firstComment) {
         openGlobalCommentComposer();
@@ -8937,9 +8882,9 @@ export default function Workbench() {
       openAttachmentPicker(action.target, action.accept || "all");
     } else if (action.id === "review-comment-attachments") {
       if (action.target.kind === "composer") {
-        const target = draftTargetRef.current;
+        const target = commentSessionRef.current.composerTarget;
         if (
-          composerCommentIdRef.current === action.target.commentId
+          commentSessionRef.current.composerCommentId === action.target.commentId
           && target
         ) {
           setComposerOpen(true);
@@ -8947,7 +8892,7 @@ export default function Workbench() {
           requestComposerFocus();
         }
       } else {
-        const comment = commentsRef.current.find(
+        const comment = commentSessionRef.current.comments.find(
           (item) => item.commentId === action.target.commentId,
         );
         if (comment) focusCommentTarget(comment.target, comment.commentId);
@@ -9978,12 +9923,13 @@ export default function Workbench() {
                     ? "输入对整个页面的修改要求…"
                     : "输入对这部分内容的修改要求…"}
                   onChange={(event) => {
-                    composerDraftRef.current = event.target.value;
-                    setDraft(event.target.value);
+                    commentSessionRef.current.setComposerDraft(
+                      event.target.value,
+                    );
                     persistCurrentDraftRecovery();
                   }}
                   onPaste={(event) => {
-                    const commentId = draftCommentId || composerCommentIdRef.current;
+                    const commentId = draftCommentId || commentSessionRef.current.composerCommentId;
                     if (commentId) pasteImages(event, { kind: "composer", commentId });
                   }}
                   onKeyDown={(event) => {
