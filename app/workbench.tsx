@@ -111,6 +111,10 @@ import {
 } from "./application/run-session.js";
 import { createBrowserRecoveryStore } from "./application/recovery-store.js";
 import { SourceHistorySession } from "./application/source-history-session.js";
+import {
+  VersionSession,
+  type VersionSessionSnapshot,
+} from "./application/version-session.js";
 import type { SourceHistoryDirection } from "./domain/source-history.js";
 import {
   BROWSER_RUNTIME_CAPABILITIES,
@@ -235,7 +239,6 @@ import type {
   Toast,
   ToastAction,
   Version,
-  ViewMode,
   WorkspaceFileView,
   WorkspaceIssue,
 } from "./workbench/types";
@@ -283,6 +286,15 @@ const INITIAL_RUN_SNAPSHOT: RunSessionSnapshot = {
   activeRun: null,
   activeHandoff: null,
   backgroundResults: [],
+};
+const INITIAL_VERSION_SNAPSHOT: VersionSessionSnapshot<Version> = {
+  versions: [],
+  latestVersionId: null,
+  currentBasedOnVersionId: null,
+  currentExactVersionId: null,
+  restoredFromVersionId: null,
+  viewMode: "current",
+  viewingVersionId: null,
 };
 
 function waitFor(delayMs: number): Promise<void> {
@@ -427,6 +439,7 @@ export default function Workbench() {
     encodeChangeEvent: persistedChangeEvent,
   }));
   const sourceHistorySessionRef = useRef(new SourceHistorySession());
+  const versionSessionRef = useRef(new VersionSession<Version>());
   const projectRulesSessionRef = useRef(new ProjectRulesSession({
     bridgeClient,
     errorMessage: productErrorMessage,
@@ -572,12 +585,14 @@ export default function Workbench() {
   const projectRulesSaveError = projectRulesSnapshot.saveError;
   const [projectRecordsPreparing, setProjectRecordsPreparing] = useState(false);
   const [projectRecordsError, setProjectRecordsError] = useState("");
-  const [versions, setVersions] = useState<Version[]>([]);
-  const [latestVersionId, setLatestVersionId] = useState<string | null>(null);
-  const [currentBasedOnVersionId, setCurrentBasedOnVersionId] = useState<string | null>(null);
-  const [, setCurrentExactVersionId] = useState<string | null>(null);
-  const [restoredFromVersionId, setRestoredFromVersionId] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<ViewMode>("current");
+  const [versionSnapshot, setVersionSnapshot] =
+    useState<VersionSessionSnapshot<Version>>(INITIAL_VERSION_SNAPSHOT);
+  const versions = versionSnapshot.versions;
+  const latestVersionId = versionSnapshot.latestVersionId;
+  const currentBasedOnVersionId =
+    versionSnapshot.currentBasedOnVersionId;
+  const restoredFromVersionId = versionSnapshot.restoredFromVersionId;
+  const viewMode = versionSnapshot.viewMode;
   const [canvasMode, setCanvasMode] = useState<CanvasMode>("edit");
   const [pageViewContext, setPageViewContext] =
     useState<PageViewContext | null>(null);
@@ -585,7 +600,7 @@ export default function Workbench() {
     useState<RuntimeCapabilities["interactivePreview"]>(
       BROWSER_RUNTIME_CAPABILITIES.interactivePreview,
     );
-  const [viewingVersionId, setViewingVersionId] = useState<string | null>(null);
+  const viewingVersionId = versionSnapshot.viewingVersionId;
   const [renderedContentSha256, setRenderedContentSha256] = useState<string | null>(null);
   const [, setBridgeConnected] = useState<boolean | null>(null);
   const activeRun = runSnapshot.activeRun;
@@ -668,6 +683,11 @@ export default function Workbench() {
   useEffect(() => {
     const session = runSessionRef.current;
     session.setObserver(setRunSnapshot);
+    return () => session.setObserver(null);
+  }, []);
+  useEffect(() => {
+    const session = versionSessionRef.current;
+    session.setObserver(setVersionSnapshot);
     return () => session.setObserver(null);
   }, []);
   const reportInterruptionPresence = useCallback((
@@ -1666,20 +1686,12 @@ export default function Workbench() {
       if (projectRecord.displayName) {
         setProjectName(String(projectRecord.displayName));
       }
-      setVersions(versionsFromWorkspace(payload));
-      setLatestVersionId(
-        payload.latestVersionId ? String(payload.latestVersionId) : null,
-      );
-      setCurrentBasedOnVersionId(
-        payload.currentBasedOnVersionId
-          ? String(payload.currentBasedOnVersionId)
-          : null,
-      );
-      setCurrentExactVersionId(
-        payload.currentExactVersionId
-          ? String(payload.currentExactVersionId)
-          : null,
-      );
+      versionSessionRef.current.hydrate({
+        versions: versionsFromWorkspace(payload),
+        latestVersionId: payload.latestVersionId,
+        currentBasedOnVersionId: payload.currentBasedOnVersionId,
+        currentExactVersionId: payload.currentExactVersionId,
+      });
       if (
         adoptCanonicalSource
         && canonicalSource
@@ -2197,11 +2209,9 @@ export default function Workbench() {
               htmlRef.current = acknowledgedHtml;
               setHtml(acknowledgedHtml);
               setRenderedContentSha256(nextHash);
-              setCurrentExactVersionId(
-                payload.currentExactVersionId
-                  ? String(payload.currentExactVersionId)
-                  : null,
-              );
+              versionSessionRef.current.updateAuthority({
+                currentExactVersionId: payload.currentExactVersionId,
+              });
             }
             setBridgeConnected(true);
             auditPendingRef.current = removeAcknowledgedAuditEvents(
@@ -2338,7 +2348,7 @@ export default function Workbench() {
     setEditRevision(nextRevision);
     htmlRef.current = nextHtml;
     setHtml(nextHtml);
-    setCurrentExactVersionId(null);
+    versionSessionRef.current.markSourceEdited();
     setRenderedContentSha256(null);
 
     if (mutation) {
@@ -2536,18 +2546,12 @@ export default function Workbench() {
     reviewRevealRequestRef.current += 1;
     changeEventsRef.current = [];
     setChangeEvents([]);
-    setVersions([]);
-    setLatestVersionId(null);
-    setCurrentBasedOnVersionId(null);
-    setCurrentExactVersionId(null);
-    setRestoredFromVersionId(null);
-    setViewMode("current");
+    versionSessionRef.current.reset();
     setCanvasMode(
       runtimeCapabilitiesRef.current.sourceEditing !== "enabled"
         ? "preview"
         : "edit",
     );
-    setViewingVersionId(null);
     setRenderedContentSha256(null);
     setProjectLocked(opensLockedProject);
     setProjectHydrating(Boolean(project.sourcePath));
@@ -2807,7 +2811,7 @@ export default function Workbench() {
     setEditRevision(revision);
     setHtml(recoveredHtml);
     setChangeEvents(mergedEvents);
-    setCurrentExactVersionId(null);
+    versionSessionRef.current.markSourceEdited();
     setRenderedContentSha256(null);
     persistRecoveryLog(job);
 
@@ -3113,15 +3117,16 @@ export default function Workbench() {
         sourcePath: activeSource,
       });
       if (!registeredContext) return;
-      setVersions(versionsFromWorkspace(payload));
-      setLatestVersionId(payload.latestVersionId ? String(payload.latestVersionId) : null);
-      setCurrentBasedOnVersionId(
-        payload.currentBasedOnVersionId ? String(payload.currentBasedOnVersionId) : null,
-      );
-      setCurrentExactVersionId(
-        payload.currentExactVersionId ? String(payload.currentExactVersionId) : null,
-      );
       const projectRecord = isRecord(payload.project) ? payload.project : {};
+      versionSessionRef.current.hydrate({
+        versions: versionsFromWorkspace(payload),
+        latestVersionId: payload.latestVersionId,
+        currentBasedOnVersionId: payload.currentBasedOnVersionId,
+        currentExactVersionId: payload.currentExactVersionId,
+        restoredFromVersionId:
+          payload.restoredFromVersionId
+          || projectRecord.restoredFromVersionId,
+      });
       const workspacePaths = isRecord(payload.paths) ? payload.paths : {};
       if (projectRecord.displayName) {
         setProjectName(String(projectRecord.displayName));
@@ -3132,13 +3137,6 @@ export default function Workbench() {
           || payload.projectRoot
           || "",
         ) || null,
-      );
-      setRestoredFromVersionId(
-        payload.restoredFromVersionId
-          ? String(payload.restoredFromVersionId)
-          : projectRecord.restoredFromVersionId
-            ? String(projectRecord.restoredFromVersionId)
-            : null,
       );
       const workspaceHash = String(payload.currentHtmlSha256 || "");
       let authoritativeSourceHash = workspaceHash;
@@ -3170,25 +3168,18 @@ export default function Workbench() {
         setSourceSha256(authoritativeSourceHash);
         setRenderedContentSha256(null);
         setLastModifiedAt(String(sourcePayload.lastModifiedAt || payload.lastModifiedAt || ""));
-        setCurrentBasedOnVersionId(
-          sourcePayload.currentBasedOnVersionId
-            ? String(sourcePayload.currentBasedOnVersionId)
-            : payload.currentBasedOnVersionId
-              ? String(payload.currentBasedOnVersionId)
-              : null,
-        );
-        setCurrentExactVersionId(
-          sourcePayload.currentExactVersionId
-            ? String(sourcePayload.currentExactVersionId)
-            : null,
-        );
-        setRestoredFromVersionId(
-          sourcePayload.restoredFromVersionId
-            ? String(sourcePayload.restoredFromVersionId)
-            : payload.restoredFromVersionId
-              ? String(payload.restoredFromVersionId)
-              : null,
-        );
+        versionSessionRef.current.updateAuthority({
+          currentBasedOnVersionId:
+            sourcePayload.currentBasedOnVersionId
+            || payload.currentBasedOnVersionId
+            || null,
+          currentExactVersionId:
+            sourcePayload.currentExactVersionId || null,
+          restoredFromVersionId:
+            sourcePayload.restoredFromVersionId
+            || payload.restoredFromVersionId
+            || null,
+        });
       } else if (workspaceHash) {
         sourceShaRef.current = workspaceHash;
         setSourceSha256(workspaceHash);
@@ -3409,7 +3400,7 @@ export default function Workbench() {
             htmlRef.current = candidateHtml;
             setEditRevision(revision);
             setHtml(candidateHtml);
-            setCurrentExactVersionId(null);
+            versionSessionRef.current.markSourceEdited();
             setRenderedContentSha256(null);
             persistRecoveryLog(conflictWrite, context);
           }
@@ -5480,8 +5471,7 @@ export default function Workbench() {
     const operationId = beginNavigationOperation();
     if (operationId === null) return;
     const previousHtml = htmlRef.current;
-    const previousViewMode = viewMode;
-    const previousViewingVersionId = viewingVersionId;
+    const previousVersionView = versionSessionRef.current.captureView();
     let externalAccepted = false;
     try {
       if (persistState === "conflict") {
@@ -5539,19 +5529,12 @@ export default function Workbench() {
       persistStateRef.current = "idle";
       setPersistState("idle");
       setPersistError("");
-      setCurrentExactVersionId(payload.currentExactVersionId ? String(payload.currentExactVersionId) : null);
-      setCurrentBasedOnVersionId(
-        payload.currentBasedOnVersionId
-          ? String(payload.currentBasedOnVersionId)
-          : currentBasedOnVersionId,
-      );
-      setRestoredFromVersionId(
-        payload.restoredFromVersionId
-          ? String(payload.restoredFromVersionId)
-          : null,
-      );
-      setViewMode("current");
-      setViewingVersionId(null);
+      versionSessionRef.current.returnCurrent({
+        currentExactVersionId: payload.currentExactVersionId || null,
+        currentBasedOnVersionId:
+          payload.currentBasedOnVersionId || currentBasedOnVersionId,
+        restoredFromVersionId: payload.restoredFromVersionId || null,
+      });
       await refreshWorkspace(context.sourcePath, context.epoch);
       if (
         navigationOperationRef.current !== operationId
@@ -5569,8 +5552,7 @@ export default function Workbench() {
         if (!externalAccepted) {
           htmlRef.current = previousHtml;
           setHtml(previousHtml);
-          setViewMode(previousViewMode);
-          setViewingVersionId(previousViewingVersionId);
+          versionSessionRef.current.restoreView(previousVersionView);
           setRenderedContentSha256(null);
           try {
             await verifyCanvasRendered(
@@ -5611,8 +5593,6 @@ export default function Workbench() {
     persistState,
     refreshWorkspace,
     verifyCanvasRendered,
-    viewingVersionId,
-    viewMode,
   ]);
   useEffect(() => {
     deferredEditorReplayRef.current.reloadCurrentSource = () => {
@@ -5908,11 +5888,9 @@ export default function Workbench() {
       setEditRevision(editRevisionRef.current);
       setLastPersistedRevision(lastPersistedRevisionRef.current);
       setLastModifiedAt(String(payload.lastModifiedAt || ""));
-      setCurrentExactVersionId(
-        payload.currentExactVersionId
-          ? String(payload.currentExactVersionId)
-          : null,
-      );
+      versionSessionRef.current.updateAuthority({
+        currentExactVersionId: payload.currentExactVersionId,
+      });
       setRenderedContentSha256(null);
       persistRecoveryLog(null, context);
       persistStateRef.current = "idle";
@@ -7734,12 +7712,7 @@ export default function Workbench() {
     setRenderedContentSha256(null);
     await verifyCanvasRendered(content, versionHash, adoptedContext);
     if (!isCurrentProjectContext(adoptedContext)) return;
-    setLatestVersionId(versionId);
-    setCurrentBasedOnVersionId(versionId);
-    setCurrentExactVersionId(versionId);
-    setRestoredFromVersionId(null);
-    setViewMode("current");
-    setViewingVersionId(null);
+    versionSessionRef.current.adoptCommitted(versionId);
     setLastModifiedAt(sourceLastModifiedAt);
     persistStateRef.current = "idle";
     setPersistState("idle");
@@ -8385,8 +8358,7 @@ export default function Workbench() {
     const operationId = beginNavigationOperation();
     if (operationId === null) return;
     const previousHtml = htmlRef.current;
-    const previousViewMode = viewMode;
-    const previousViewingVersionId = viewingVersionId;
+    const previousVersionView = versionSessionRef.current.captureView();
     try {
       if (viewMode === "current") {
         const drained = await drainCoordinatorRef.current.drain("history", {
@@ -8418,8 +8390,7 @@ export default function Workbench() {
         navigationOperationRef.current !== operationId
         || !isCurrentProjectContext(context)
       ) return;
-      setViewMode("history");
-      setViewingVersionId(version.id);
+      versionSessionRef.current.enterHistory(version.id);
       setDrawer(null);
       editorRef.current?.clearSelection();
     } catch (cause) {
@@ -8427,8 +8398,7 @@ export default function Workbench() {
       if (navigationOperationRef.current === operationId) {
         htmlRef.current = previousHtml;
         setHtml(previousHtml);
-        setViewMode(previousViewMode);
-        setViewingVersionId(previousViewingVersionId);
+        versionSessionRef.current.restoreView(previousVersionView);
         setRenderedContentSha256(null);
         try {
           await verifyCanvasRendered(
@@ -8461,7 +8431,6 @@ export default function Workbench() {
     isCurrentProjectContext,
     runInProgress,
     verifyCanvasRendered,
-    viewingVersionId,
     viewMode,
   ]);
   useEffect(() => {
@@ -8484,8 +8453,7 @@ export default function Workbench() {
     const operationId = beginNavigationOperation();
     if (operationId === null) return;
     const previousHtml = htmlRef.current;
-    const previousViewMode = viewMode;
-    const previousViewingVersionId = viewingVersionId;
+    const previousVersionView = versionSessionRef.current.captureView();
     try {
       const payload = await bridgeClient.source(context.sourcePath);
       if (
@@ -8514,26 +8482,19 @@ export default function Workbench() {
       sourceShaRef.current = hash;
       setSourceSha256(hash);
       setLastModifiedAt(String(payload.lastModifiedAt || ""));
-      setCurrentBasedOnVersionId(
-        payload.currentBasedOnVersionId
-          ? String(payload.currentBasedOnVersionId)
-          : currentBasedOnVersionId,
-      );
-      setCurrentExactVersionId(payload.currentExactVersionId ? String(payload.currentExactVersionId) : null);
-      setRestoredFromVersionId(
-        payload.restoredFromVersionId
-          ? String(payload.restoredFromVersionId)
-          : restoredFromVersionId,
-      );
-      setViewMode("current");
-      setViewingVersionId(null);
+      versionSessionRef.current.returnCurrent({
+        currentBasedOnVersionId:
+          payload.currentBasedOnVersionId || currentBasedOnVersionId,
+        currentExactVersionId: payload.currentExactVersionId || null,
+        restoredFromVersionId:
+          payload.restoredFromVersionId || restoredFromVersionId,
+      });
     } catch (cause) {
       if (!isCurrentProjectContext(context)) return;
       if (navigationOperationRef.current === operationId) {
         htmlRef.current = previousHtml;
         setHtml(previousHtml);
-        setViewMode(previousViewMode);
-        setViewingVersionId(previousViewingVersionId);
+        versionSessionRef.current.restoreView(previousVersionView);
         setRenderedContentSha256(null);
         try {
           await verifyCanvasRendered(
@@ -8567,8 +8528,6 @@ export default function Workbench() {
     isCurrentProjectContext,
     restoredFromVersionId,
     verifyCanvasRendered,
-    viewingVersionId,
-    viewMode,
   ]);
   useEffect(() => {
     deferredEditorReplayRef.current.returnToCurrent = () => {

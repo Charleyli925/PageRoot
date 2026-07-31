@@ -22,6 +22,8 @@ const LEGACY_RENDERER_STATE =
   /["'](?:waiting|importing|result-ready|awaiting-check-decision|version-created|completed|canceled|waived)["']/;
 const RETIRED_WORKBENCH_RUN_AUTHORITIES =
   /\b(?:backgroundRunsRef|backgroundProjectResultsRef|qoderHandoffStatesRef|activeRunRef|activatingRunsRef|cancellingRunsRef|resolvingRunsRef|statusPollBusyRef)\b/;
+const RETIRED_WORKBENCH_VERSION_WRITERS =
+  /\b(?:setVersions|setLatestVersionId|setCurrentBasedOnVersionId|setCurrentExactVersionId|setRestoredFromVersionId|setViewMode|setViewingVersionId)\b/;
 
 async function sourceFiles(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
@@ -221,6 +223,16 @@ export async function architectureViolations() {
   ) {
     violations.push(
       "app/workbench.tsx: AI run state and operation locks belong to RunSession",
+    );
+  }
+  if (
+    !workbench.includes(
+      "const versionSessionRef = useRef(new VersionSession<Version>());",
+    )
+    || RETIRED_WORKBENCH_VERSION_WRITERS.test(workbench)
+  ) {
+    violations.push(
+      "app/workbench.tsx: Version authority and history view transitions belong to VersionSession",
     );
   }
   for (const boundary of ["close", "switch", "submit", "history"]) {

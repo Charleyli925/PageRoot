@@ -253,7 +253,7 @@ test("editing and interactive preview are separate canvas modes", () => {
   assert.match(workbench, /setCanvasMode\("edit"\);[\s\S]*?setDrawer\("history"\)/);
   assert.match(
     workbench,
-    /const applyProject[\s\S]*?setViewMode\("current"\);[\s\S]*?setCanvasMode\([\s\S]*?runtimeCapabilitiesRef\.current\.sourceEditing !== "enabled"[\s\S]*?\? "preview"[\s\S]*?: "edit"/,
+    /const applyProject[\s\S]*?versionSessionRef\.current\.reset\(\);[\s\S]*?setCanvasMode\([\s\S]*?runtimeCapabilitiesRef\.current\.sourceEditing !== "enabled"[\s\S]*?\? "preview"[\s\S]*?: "edit"/,
   );
   assert.match(styles, /\.workbench\[data-canvas-mode="preview"\]\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\)/);
   assert.match(styles, /\.workbench\[data-canvas-mode="preview"\] \.canvas-column\s*\{[\s\S]*?grid-column:\s*1 \/ -1/);
