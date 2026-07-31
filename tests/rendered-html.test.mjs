@@ -337,6 +337,8 @@ test("canvas persistence has one SourcePatchEngine path and clean v3 TargetRefs"
     'from "../lib/source-patch-core.js"',
     "instrumentPreviewHtml",
     "SOURCE_NODE_ATTRIBUTE",
+    "if (!onChangeRef.current(",
+    "sourceTransaction",
     'type: "replace-editable-island"',
     "islandTextCommit",
     "editableIslandForTarget",
