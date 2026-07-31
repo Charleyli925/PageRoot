@@ -69,13 +69,22 @@ Comments + frozen input
 ## Module map
 
 `app/workbench.tsx` is the composition root for the review workspace. It
-renders owner snapshots and dispatches user intent; it does not own persistence
-protocols.
+subscribes to owner snapshots, derives presentation values and dispatches user
+intent; it does not own persistence protocols or duplicate the sessions'
+mutable facts. Pure Workbench models hold deterministic formatting and
+transition helpers. Presentation modules receive snapshots and callbacks only;
+they do not import application services.
 
 | Boundary | Owner |
 | --- | --- |
 | Bridge routes, timeouts and structured outcomes | `app/application/bridge-client.js` |
+| Open/registered project identity, session generation and late-query fencing | `app/application/project-session.js` |
+| Current source bytes, Hash, revisions, persistence projection and source-write single flight | `app/application/document-session.js` |
 | Renderer draft revision, pending operations and reconciliation | `app/application/draft-session.js` |
+| Renderer comment working copy, composer and saved-comment edit projection | `app/application/comment-session.js` |
+| Active/background runs, Qoder status, background outcomes and operation locks | `app/application/run-session.js` |
+| Immutable Version projection and history-view transition | `app/application/version-session.js` |
+| `PROJECT.md` editor, composition fence, autosave and reconciliation | `app/application/project-rules-session.js` |
 | Renderer source-history context, pending Patch operations and action intent | `app/application/source-history-session.js` |
 | Pure comment/edit-event/tombstone transition rules | `shared/draft-aggregate.mjs` |
 | Pure source-history validation, cursor transitions and exact Patch replay | `shared/source-history.mjs`, re-exported through `app/domain/source-history.js` |
@@ -93,6 +102,9 @@ protocols.
 | Volatile desktop preview sessions and contained local-asset serving | `desktop/preview-protocol.mjs` |
 | Source-backed preview/edit display-state filtering, bounded visual filtering and rebinding, and safe action resolution | `app/lib/page-view-context.js`, `app/lib/read-only-visual.js` |
 | Run lifecycle decoding and transition policy | `app/domain/run-lifecycle.js` |
+| Workbench pure record/comment/project/version/browser helpers | `app/workbench/*-model.ts`, `app/workbench/browser-io.ts` |
+| History, attachment and preview presentation | `app/workbench/presentation.tsx` |
+| AI handoff drawer presentation | `app/workbench/handoff-view.tsx` |
 
 The V2 source-fidelity path remains a protected core: `SourceIndex`,
 `TargetResolver`, `editable-island`, `IslandEditingController`,
@@ -102,6 +114,13 @@ proven invariant, not to satisfy a line-count target. The retired V1
 FormatSkeleton and structural planner have been removed. The architecture gate
 rejects reintroducing those files or imports; production text editing has one
 V2 editable-island route.
+
+`HtmlCanvasEditor.tsx` remains the Canvas coordinator. Parsing, DOM
+instrumentation, interaction policy, preview synchronization, selection,
+source-backed page view and style inspection live in the adjacent
+`html-canvas-*.ts` modules. Those helpers do not gain a second source or
+editing authority; `IslandEditingController` and `SourcePatchEngine` remain
+the only production text and source-mutation route.
 
 ## Persistence
 

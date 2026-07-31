@@ -22,6 +22,13 @@ Bridge route adapters
 
 - Views render snapshots and dispatch user intent. They do not know Bridge
   routes, use raw `fetch`, or read and write browser persistence.
+- `app/workbench.tsx` is the renderer composition root. It may connect
+  application-session snapshots to view props and callbacks, but it may not
+  recreate a session-owned fact as an independently writable ref or state
+  variable.
+- Workbench presentation files (`presentation.tsx` and `*-view.tsx`) are
+  snapshot-and-callback views. They may import domain types and pure Workbench
+  models, but not `app/application` sessions or services.
 - Application modules own session identity, request generations, mutation
   outcomes, recovery and orchestration.
 - Domain modules are pure and may be shared by the renderer and Bridge. They do
@@ -46,6 +53,27 @@ Bridge route adapters
 Every mutable fact has exactly one owner, listed in `docs/STATE_OWNERSHIP.md`.
 React state may project an owner snapshot for rendering, but a state/ref pair
 must not become two independent authorities.
+
+The renderer's main workspace facts are partitioned as follows:
+
+- `ProjectSession`: open/registered identity, generation and query fencing;
+- `DocumentSession`: current HTML bytes, Hash, edit/persist revisions,
+  persistence projection, pending write and flush single flight;
+- `CommentSession`: disposable comment working copy, composer, tombstones and
+  saved-comment edit session;
+- `DraftSession`: acknowledged Draft revision, pending mutation and
+  unknown-outcome reconciliation;
+- `ProjectRulesSession`: `PROJECT.md` working copy, composition fence,
+  autosave and reconciliation;
+- `RunSession`: current/background run projections, Qoder status, background
+  outcomes and operation locks;
+- `VersionSession`: immutable Version projection and history-view transition;
+- `SourceHistorySession`: pending exact Patch operations and history action.
+
+`CommentSession` does not replace the Draft aggregate or Bridge CAS authority,
+and `VersionSession` does not make mutable copies of immutable Version files.
+The composition root may derive labels, availability and other read-only view
+data from these snapshots, but all writes return to the listed owner.
 
 An asynchronous result may update state only when its complete identity is
 current:

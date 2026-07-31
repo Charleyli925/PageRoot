@@ -276,7 +276,7 @@
         "^scripts/(?:check-architecture|draft-aggregate|draft-service|source-history-service)\\.mjs$",
         "^tests/(?:architecture-boundaries|bridge-client|comment-session|document-session|draft-aggregate|draft-service|draft-session|drain-coordinator|project-query-fence|project-rules-session|project-session|recovery-store|run-lifecycle|run-session|runtime-capabilities|source-history|source-history-session|version-session)\\.test\\.mjs$",
         "^(?:CONTRIBUTING|docs/(?:ARCHITECTURE|ARCHITECTURE_CONTRACT|STATE_OWNERSHIP|ENGINEERING_STANDARDS))\\.md$",
-        "^docs/decisions/(?:0003-session-ownership-and-mutation-outcomes|0004-v2-editable-islands|0007-independent-interactive-preview|0008-safe-presentation-actions-in-edit-mode|0009-persistent-source-patch-history)\\.md$"
+        "^docs/decisions/(?:0003-session-ownership-and-mutation-outcomes|0004-v2-editable-islands|0007-independent-interactive-preview|0008-safe-presentation-actions-in-edit-mode|0009-persistent-source-patch-history|0011-workbench-session-decomposition)\\.md$"
       ],
       "suites": ["typecheck"],
       "nodeTests": [
