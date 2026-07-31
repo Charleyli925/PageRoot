@@ -148,7 +148,7 @@ test("workspace source adoption requires an explicit hydration token or a live s
   assert.match(refresh, /sourceTransitionToken\?: number/u);
   assert.match(
     refresh,
-    /sourceTransitionToken === epoch[\s\S]*?sourceTransitionToken === projectEpochRef\.current[\s\S]*?projectHydratingRef\.current/u,
+    /sourceTransitionToken === epoch[\s\S]*?sourceTransitionToken === projectSessionRef\.current\.epoch[\s\S]*?projectHydratingRef\.current/u,
   );
   assertOrdered(
     refresh,

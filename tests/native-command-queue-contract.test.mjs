@@ -291,8 +291,8 @@ test("a background project result never attaches to the current Canvas queue", (
   assertOrdered(
     openVersion,
     [
-      "const affectsCurrentCanvas = Boolean(sourcePathRef.current)",
-      "projectIdRef.current === run.projectId",
+      "const affectsCurrentCanvas = Boolean(projectSessionRef.current.sourcePath)",
+      "projectSessionRef.current.projectId === run.projectId",
       "if (!fromDeferred && affectsCurrentCanvas)",
       "deferEditorCommand(",
     ],
@@ -337,7 +337,7 @@ test("refresh and project-switch awaiters always settle when replayed or discard
   );
   assert.match(
     refresh,
-    /finally \{[\s\S]*?hydrationSourceTransitionAuthorized[\s\S]*?epoch === projectEpochRef\.current[\s\S]*?sameLocalSourcePath\(sourcePathRef\.current, activeSource\)[\s\S]*?setProjectHydrating\(false\)/u,
+    /finally \{[\s\S]*?hydrationSourceTransitionAuthorized[\s\S]*?epoch === projectSessionRef\.current\.epoch[\s\S]*?sameLocalSourcePath\(projectSessionRef\.current\.sourcePath, activeSource\)[\s\S]*?setProjectHydrating\(false\)/u,
     "the current hydration owner must release its lock on every exit path",
   );
   assert.match(

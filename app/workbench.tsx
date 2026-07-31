@@ -99,7 +99,11 @@ import {
 } from "./application/draft-session.js";
 import { DrainCoordinator } from "./application/drain-coordinator.js";
 import type { PageViewContext } from "./lib/page-view-context.js";
-import { ProjectQueryFence } from "./application/project-query-fence.js";
+import {
+  ProjectRulesSession,
+  type ProjectRulesSnapshot,
+} from "./application/project-rules-session.js";
+import { ProjectSession } from "./application/project-session.js";
 import { createBrowserRecoveryStore } from "./application/recovery-store.js";
 import { SourceHistorySession } from "./application/source-history-session.js";
 import type { SourceHistoryDirection } from "./domain/source-history.js";
@@ -257,6 +261,18 @@ const bridgeClient = createRuntimeBridgeClient();
 const recoveryStore = createBrowserRecoveryStore();
 const LOCAL_ACTION_RETRY_DELAY_MS = 180;
 const PROJECT_RULES_AUTOSAVE_DELAY_MS = 700;
+const INITIAL_PROJECT_RULES_SNAPSHOT: ProjectRulesSnapshot = {
+  open: false,
+  path: "PROJECT.md",
+  content: "",
+  savedContent: "",
+  loading: false,
+  error: "",
+  saving: false,
+  saveError: "",
+  compositionActive: false,
+  editorGeneration: 0,
+};
 
 function waitFor(delayMs: number): Promise<void> {
   return new Promise((resolve) => globalThis.setTimeout(resolve, delayMs));
@@ -389,9 +405,8 @@ export default function Workbench() {
     itemKey: string;
   } | null>(null);
   const pagePresentationScrollRequestRef = useRef(0);
-  const projectEpochRef = useRef(0);
   const projectOpenRequestRef = useRef(0);
-  const projectQueryFenceRef = useRef(new ProjectQueryFence());
+  const projectSessionRef = useRef(new ProjectSession());
   const drainCoordinatorRef = useRef(new DrainCoordinator());
   const runtimeCapabilitiesRef =
     useRef<RuntimeCapabilities>(BROWSER_RUNTIME_CAPABILITIES);
@@ -401,12 +416,13 @@ export default function Workbench() {
     encodeChangeEvent: persistedChangeEvent,
   }));
   const sourceHistorySessionRef = useRef(new SourceHistorySession());
+  const projectRulesSessionRef = useRef(new ProjectRulesSession({
+    bridgeClient,
+    errorMessage: productErrorMessage,
+  }));
   const htmlRef = useRef(DEFAULT_PROJECT_HTML);
-  const sourcePathRef = useRef<string | null>(null);
   const sourceShaRef = useRef<string | null>(null);
   const recoveryIdentityRef = useRef<RecoveryIdentity | null>(null);
-  const projectIdRef = useRef("");
-  const documentIdRef = useRef("");
   const projectLockedRef = useRef(false);
   const projectHydratingRef = useRef(false);
   const projectLoadErrorRef = useRef<string | null>(null);
@@ -473,13 +489,6 @@ export default function Workbench() {
   });
   const saveProjectRulesRef = useRef<() => Promise<boolean>>(async () => false);
   const projectRulesEditorRef = useRef<HTMLTextAreaElement | null>(null);
-  const projectRulesCompositionRef = useRef<{
-    epoch: number;
-    target: HTMLTextAreaElement;
-    baselineValue: string;
-    restoreRequested: boolean;
-  } | null>(null);
-  const projectRulesCompositionEpochRef = useRef(0);
   const fileRenameInputRef = useRef<HTMLInputElement | null>(null);
   const fileRenameEditingRef = useRef(false);
   const fileRenameBusyRef = useRef(false);
@@ -543,12 +552,13 @@ export default function Workbench() {
   const [commentRailOffset, setCommentRailOffset] = useState(0);
   const [commentRailFollowsFocus, setCommentRailFollowsFocus] = useState(false);
   const [fileView, setFileView] = useState<WorkspaceFileView | null>(null);
-  const [projectRulesEditorGeneration, setProjectRulesEditorGeneration] =
-    useState(0);
-  const [projectRulesCompositionActive, setProjectRulesCompositionActive] =
-    useState(false);
-  const [projectRulesSaving, setProjectRulesSaving] = useState(false);
-  const [projectRulesSaveError, setProjectRulesSaveError] = useState("");
+  const [projectRulesSnapshot, setProjectRulesSnapshot] =
+    useState<ProjectRulesSnapshot>(INITIAL_PROJECT_RULES_SNAPSHOT);
+  const projectRulesEditorGeneration = projectRulesSnapshot.editorGeneration;
+  const projectRulesCompositionActive =
+    projectRulesSnapshot.compositionActive;
+  const projectRulesSaving = projectRulesSnapshot.saving;
+  const projectRulesSaveError = projectRulesSnapshot.saveError;
   const [projectRecordsPreparing, setProjectRecordsPreparing] = useState(false);
   const [projectRecordsError, setProjectRecordsError] = useState("");
   const [versions, setVersions] = useState<Version[]>([]);
@@ -609,6 +619,34 @@ export default function Workbench() {
   const noticeTimerPaused = Boolean(
     noticeIdentity && pausedNoticeIdentity === noticeIdentity,
   );
+  useEffect(() => {
+    const session = projectSessionRef.current;
+    session.setObserver((snapshot) => {
+      setSourcePath(snapshot.sourcePath);
+      setProjectId(snapshot.projectId);
+      setDocumentId(snapshot.documentId);
+    });
+    return () => session.setObserver(null);
+  }, []);
+  useEffect(() => {
+    const session = projectRulesSessionRef.current;
+    session.setObserver((snapshot) => {
+      setProjectRulesSnapshot(snapshot);
+      setFileView((current) => {
+        if (snapshot.open) {
+          return {
+            path: snapshot.path,
+            content: snapshot.content,
+            savedContent: snapshot.savedContent,
+            loading: snapshot.loading,
+            ...(snapshot.error ? { error: snapshot.error } : {}),
+          };
+        }
+        return current?.path === "PROJECT.md" ? null : current;
+      });
+    });
+    return () => session.setObserver(null);
+  }, []);
   const reportInterruptionPresence = useCallback((
     interruptionCode: string,
     present: boolean,
@@ -1221,9 +1259,6 @@ export default function Workbench() {
     htmlRef.current = html;
   }, [html]);
   useEffect(() => {
-    sourcePathRef.current = sourcePath;
-  }, [sourcePath]);
-  useEffect(() => {
     pageViewDocumentKeyRef.current = pageViewDocumentKey;
   }, [pageViewDocumentKey]);
   useEffect(() => {
@@ -1232,12 +1267,6 @@ export default function Workbench() {
   useEffect(() => {
     activeRunRef.current = activeRun;
   }, [activeRun]);
-  useEffect(() => {
-    projectIdRef.current = projectId;
-  }, [projectId]);
-  useEffect(() => {
-    documentIdRef.current = documentId;
-  }, [documentId]);
   useEffect(() => {
     changeEventsRef.current = changeEvents;
   }, [changeEvents]);
@@ -1533,45 +1562,33 @@ export default function Workbench() {
   }, [changeEvents]);
 
   const captureProjectContext = useCallback((): ProjectContext | null => {
-    const activeSource = sourcePathRef.current;
-    const activeProjectId = projectIdRef.current;
-    const activeDocumentId = documentIdRef.current;
-    if (!activeSource || !activeProjectId || !activeDocumentId) return null;
-    return {
-      epoch: projectEpochRef.current,
-      projectId: activeProjectId,
-      documentId: activeDocumentId,
-      sourcePath: activeSource,
-    };
+    return projectSessionRef.current.context;
   }, []);
 
-  const isCurrentProjectContext = useCallback((context: ProjectContext): boolean => (
-    projectEpochRef.current === context.epoch
-    && sameLocalSourcePath(sourcePathRef.current, context.sourcePath)
-    && (!context.projectId || projectIdRef.current === context.projectId)
-  ), []);
+  const isCurrentProjectContext = useCallback(
+    (context: ProjectContext): boolean => (
+      projectSessionRef.current.matches(context)
+    ),
+    [],
+  );
 
   const ensureProjectRegistered = useCallback(async (
     sourceOverride?: string,
     expectedHashOverride?: string | null,
     adoptCanonicalSource = true,
   ): Promise<ProjectContext | null> => {
-    const activeSource = sourceOverride || sourcePathRef.current;
+    const activeSource = sourceOverride || projectSessionRef.current.sourcePath;
     const expectedSourceSha256 =
       expectedHashOverride || sourceShaRef.current;
     if (!activeSource || !expectedSourceSha256) return null;
-    if (projectIdRef.current && documentIdRef.current) {
-      const existingContext = {
-        epoch: projectEpochRef.current,
-        projectId: projectIdRef.current,
-        documentId: documentIdRef.current,
-        sourcePath: activeSource,
-      };
+    const currentContext = projectSessionRef.current.context;
+    if (currentContext) {
+      const existingContext = currentContext;
       if (!draftSessionRef.current.isActive(existingContext)) {
         const payload = await bridgeClient.workspace(activeSource);
         if (
-          existingContext.epoch !== projectEpochRef.current
-          || !sameLocalSourcePath(sourcePathRef.current, activeSource)
+          existingContext.epoch !== projectSessionRef.current.epoch
+          || !sameLocalSourcePath(projectSessionRef.current.sourcePath, activeSource)
         ) return null;
         if (
           String(payload.projectId || "") !== existingContext.projectId
@@ -1596,7 +1613,7 @@ export default function Workbench() {
     if (projectRegistrationPromiseRef.current) {
       return projectRegistrationPromiseRef.current;
     }
-    const epoch = projectEpochRef.current;
+    const epoch = projectSessionRef.current.epoch;
     const registration = (async () => {
       const payload = await bridgeClient.ensureProject({
         sourcePath: activeSource,
@@ -1604,8 +1621,8 @@ export default function Workbench() {
       });
       if (payload.ok === false) throw new Error("无法建立项目记录。");
       if (
-        epoch !== projectEpochRef.current
-        || !sameLocalSourcePath(sourcePathRef.current, activeSource)
+        epoch !== projectSessionRef.current.epoch
+        || !sameLocalSourcePath(projectSessionRef.current.sourcePath, activeSource)
       ) return null;
       const nextProjectId = String(payload.projectId || "");
       const nextDocumentId = String(payload.documentId || "");
@@ -1627,13 +1644,16 @@ export default function Workbench() {
       }
       const projectRecord = isRecord(payload.project) ? payload.project : {};
       const paths = isRecord(payload.paths) ? payload.paths : {};
-      projectIdRef.current = nextProjectId;
-      documentIdRef.current = nextDocumentId;
+      const registeredContext = projectSessionRef.current.register({
+        epoch,
+        projectId: nextProjectId,
+        documentId: nextDocumentId,
+        sourcePath: activeSource,
+      });
+      if (!registeredContext) return null;
       sourceShaRef.current = nextSourceSha256;
       recoveryIdentityRef.current =
         recoveryIdentityFromRecord(payload.recoveryIdentity);
-      setProjectId(nextProjectId);
-      setDocumentId(nextDocumentId);
       setSourceSha256(nextSourceSha256);
       setProjectRecordsPath(
         String(paths.projectRecords || payload.projectRoot || "") || null,
@@ -1688,12 +1708,6 @@ export default function Workbench() {
         setHtml(canonicalSource);
         setRenderedContentSha256(null);
       }
-      const registeredContext = {
-        epoch,
-        projectId: nextProjectId,
-        documentId: nextDocumentId,
-        sourcePath: activeSource,
-      };
       const authoritativeDraft = draftAuthorityFromWorkspace(payload);
       draftSessionRef.current.replaceAuthority(
         registeredContext,
@@ -1722,11 +1736,11 @@ export default function Workbench() {
   }, []);
 
   const prepareProjectRecords = useCallback(async () => {
-    const activeSource = sourcePathRef.current;
-    const epoch = projectEpochRef.current;
+    const activeSource = projectSessionRef.current.sourcePath;
+    const epoch = projectSessionRef.current.epoch;
     if (
       !activeSource
-      || (projectIdRef.current && documentIdRef.current)
+      || (projectSessionRef.current.projectId && projectSessionRef.current.documentId)
       || projectRegistrationPromiseRef.current
     ) return;
     setProjectRecordsPreparing(true);
@@ -1735,15 +1749,15 @@ export default function Workbench() {
       const registered = await ensureProjectRegistered();
       if (
         !registered
-        && projectEpochRef.current === epoch
-        && sameLocalSourcePath(sourcePathRef.current, activeSource)
+        && projectSessionRef.current.epoch === epoch
+        && sameLocalSourcePath(projectSessionRef.current.sourcePath, activeSource)
       ) {
         throw new Error("项目资料没有完成初始化。");
       }
     } catch (cause) {
       if (
-        projectEpochRef.current !== epoch
-        || !sameLocalSourcePath(sourcePathRef.current, activeSource)
+        projectSessionRef.current.epoch !== epoch
+        || !sameLocalSourcePath(projectSessionRef.current.sourcePath, activeSource)
       ) return;
       setProjectRecordsError(productErrorMessage(
         cause,
@@ -1751,8 +1765,8 @@ export default function Workbench() {
       ));
     } finally {
       if (
-        projectEpochRef.current === epoch
-        && sameLocalSourcePath(sourcePathRef.current, activeSource)
+        projectSessionRef.current.epoch === epoch
+        && sameLocalSourcePath(projectSessionRef.current.sourcePath, activeSource)
       ) {
         setProjectRecordsPreparing(false);
       }
@@ -1817,10 +1831,10 @@ export default function Workbench() {
   ) => {
     const keyPart = write?.documentId
       || context?.documentId
-      || documentIdRef.current
+      || projectSessionRef.current.documentId
       || write?.sourcePath
       || context?.sourcePath
-      || sourcePathRef.current
+      || projectSessionRef.current.sourcePath
       || "unbound";
     const key = `html-ai-recovery:${keyPart}`;
     if (!write) {
@@ -1849,10 +1863,10 @@ export default function Workbench() {
   ) => {
     const documentKeyPart = snapshot?.documentId
       || context?.documentId
-      || documentIdRef.current;
+      || projectSessionRef.current.documentId;
     const sourceKeyPart = snapshot?.sourcePath
       || context?.sourcePath
-      || sourcePathRef.current;
+      || projectSessionRef.current.sourcePath;
     const keys = [
       documentKeyPart ? `html-ai-draft-recovery:${documentKeyPart}` : "",
       sourceKeyPart ? `html-ai-draft-recovery:${sourceKeyPart}` : "",
@@ -1961,14 +1975,14 @@ export default function Workbench() {
     }
     if (
       !pendingWriteRef.current
-      && sourcePathRef.current
+      && projectSessionRef.current.sourcePath
       && editRevisionRef.current > lastPersistedRevisionRef.current
     ) {
       const reconstructedWrite: PendingWrite = {
-        epoch: projectEpochRef.current,
-        projectId: projectIdRef.current,
-        documentId: documentIdRef.current,
-        sourcePath: sourcePathRef.current,
+        epoch: projectSessionRef.current.epoch,
+        projectId: projectSessionRef.current.projectId,
+        documentId: projectSessionRef.current.documentId,
+        sourcePath: projectSessionRef.current.sourcePath,
         expectedSourceSha256: sourceShaRef.current,
         html: htmlRef.current,
         revision: editRevisionRef.current,
@@ -1982,7 +1996,7 @@ export default function Workbench() {
       setPersistState("queued");
       setPersistError("");
     }
-    if (!sourcePathRef.current && !pendingWriteRef.current?.sourcePath) return false;
+    if (!projectSessionRef.current.sourcePath && !pendingWriteRef.current?.sourcePath) return false;
     if (
       throughRevision !== undefined
       && lastPersistedRevisionRef.current >= throughRevision
@@ -2303,13 +2317,13 @@ export default function Workbench() {
       return editRevisionRef.current;
     }
     const nextRevision = editRevisionRef.current + 1;
-    if (sourceTransaction && sourcePathRef.current) {
+    if (sourceTransaction && projectSessionRef.current.sourcePath) {
       sourceHistorySessionRef.current.record(
         {
-          epoch: projectEpochRef.current,
-          projectId: projectIdRef.current,
-          documentId: documentIdRef.current,
-          sourcePath: sourcePathRef.current,
+          epoch: projectSessionRef.current.epoch,
+          projectId: projectSessionRef.current.projectId,
+          documentId: projectSessionRef.current.documentId,
+          sourcePath: projectSessionRef.current.sourcePath,
         },
         sourceTransaction,
         nextRevision,
@@ -2342,10 +2356,10 @@ export default function Workbench() {
         property_group: mutation.kind === "text"
           ? "text"
           : editPropertyGroup(mutation.property),
-      }, projectIdRef.current || undefined);
+      }, projectSessionRef.current.projectId || undefined);
     }
 
-    if (!sourcePathRef.current) {
+    if (!projectSessionRef.current.sourcePath) {
       pendingWriteRef.current = null;
       persistStateRef.current = "preview-dirty";
       setPersistState("preview-dirty");
@@ -2355,10 +2369,10 @@ export default function Workbench() {
     }
 
     const write: PendingWrite = {
-      epoch: projectEpochRef.current,
-      projectId: projectIdRef.current,
-      documentId: documentIdRef.current,
-      sourcePath: sourcePathRef.current,
+      epoch: projectSessionRef.current.epoch,
+      projectId: projectSessionRef.current.projectId,
+      documentId: projectSessionRef.current.documentId,
+      sourcePath: projectSessionRef.current.sourcePath,
       expectedSourceSha256: sourceShaRef.current,
       html: nextHtml,
       revision: nextRevision,
@@ -2372,7 +2386,7 @@ export default function Workbench() {
     setPersistState("queued");
     setPersistError("");
     clearAutosaveTimer();
-    if (sourcePathRef.current) {
+    if (projectSessionRef.current.sourcePath) {
       autosaveTimerRef.current = window.setTimeout(() => {
         void flushAutosave();
       }, AUTOSAVE_DELAY_MS);
@@ -2395,7 +2409,7 @@ export default function Workbench() {
   }) => {
     markProjectHydrationStage("apply-start");
     const outgoingRun = activeRunRef.current;
-    const outgoingSourcePath = sourcePathRef.current;
+    const outgoingSourcePath = projectSessionRef.current.sourcePath;
     if (
       outgoingRun
       && outgoingSourcePath
@@ -2439,18 +2453,15 @@ export default function Workbench() {
         || null
       : null;
     const opensLockedProject = isLockedLifecycle(backgroundRun?.status);
-    projectEpochRef.current += 1;
+    projectSessionRef.current.openLocator(project.sourcePath || null);
     clearAutosaveTimer();
     pendingWriteRef.current = null;
     auditPendingRef.current = [];
     editRevisionRef.current = 0;
     lastPersistedRevisionRef.current = 0;
-    sourcePathRef.current = project.sourcePath || null;
     sourceShaRef.current = project.sha256 || null;
     recoveryIdentityRef.current = null;
     projectRegistrationPromiseRef.current = null;
-    projectIdRef.current = "";
-    documentIdRef.current = "";
     projectLockedRef.current = opensLockedProject;
     projectHydratingRef.current = Boolean(project.sourcePath);
     markProjectHydrationStage("apply-authority");
@@ -2460,16 +2471,14 @@ export default function Workbench() {
     submissionPendingRef.current = false;
     draftSessionRef.current.deactivate();
     sourceHistorySessionRef.current.deactivate();
+    projectRulesSessionRef.current.close();
     draftPersistenceAuthorityRef.current = null;
     draftRecoveryOperationIdRef.current = null;
     htmlRef.current = project.html;
     setProjectName(project.name);
     setOpenedAiVersionNotice(null);
-    setSourcePath(project.sourcePath || null);
     setSourceSha256(project.sha256 || null);
     setHtml(project.html);
-    setProjectId("");
-    setDocumentId("");
     setProjectRecordsPath(null);
     setEditRevision(0);
     setLastPersistedRevision(0);
@@ -2554,8 +2563,6 @@ export default function Workbench() {
     setViewTransitioning(false);
     setDraftPersistError("");
     setProjectMenuOpen(false);
-    setProjectRulesSaving(false);
-    setProjectRulesSaveError("");
     setProjectRecordsPreparing(false);
     setProjectRecordsError("");
     pendingReconcileBusyRef.current = false;
@@ -2648,24 +2655,27 @@ export default function Workbench() {
     versionId: string;
   }): Promise<ProjectContext | null> => {
     if (!nextSourcePath || nextSourcePath === previousSourcePath) {
-      return sameLocalSourcePath(sourcePathRef.current, nextSourcePath)
-        ? {
-            epoch: projectEpochRef.current,
-            projectId: nextProjectId,
-            documentId: nextDocumentId,
-            sourcePath: nextSourcePath,
-          }
-        : null;
+      if (!sameLocalSourcePath(
+        projectSessionRef.current.sourcePath,
+        nextSourcePath,
+      )) return null;
+      return projectSessionRef.current.context
+        || projectSessionRef.current.register({
+          epoch: projectSessionRef.current.epoch,
+          projectId: nextProjectId,
+          documentId: nextDocumentId,
+          sourcePath: nextSourcePath,
+        });
     }
 
     const updatesCurrentProject =
       (
         Boolean(nextProjectId)
-        && Boolean(projectIdRef.current)
-        && projectIdRef.current === nextProjectId
+        && Boolean(projectSessionRef.current.projectId)
+        && projectSessionRef.current.projectId === nextProjectId
       )
-      || sameLocalSourcePath(sourcePathRef.current, previousSourcePath)
-      || sameLocalSourcePath(sourcePathRef.current, nextSourcePath);
+      || sameLocalSourcePath(projectSessionRef.current.sourcePath, previousSourcePath)
+      || sameLocalSourcePath(projectSessionRef.current.sourcePath, nextSourcePath);
     const api = window.htmlAIProjects;
     if (api?.activateGeneratedVersion) {
       await api.activateGeneratedVersion({
@@ -2679,7 +2689,7 @@ export default function Workbench() {
     }
     if (!updatesCurrentProject) return null;
 
-    if (sourcePathRef.current !== nextSourcePath) {
+    if (projectSessionRef.current.sourcePath !== nextSourcePath) {
       const trackedRun = backgroundRunsRef.current.get(previousSourcePath)
         || [...backgroundRunsRef.current.values()].find(
           (run) => (
@@ -2716,23 +2726,24 @@ export default function Workbench() {
           sourcePath: nextSourcePath,
         });
       }
-      projectEpochRef.current += 1;
-      sourcePathRef.current = nextSourcePath;
+      const transitionedContext = projectSessionRef.current.transitionSource({
+        previousSourcePath,
+        sourcePath: nextSourcePath,
+        projectId: nextProjectId,
+        documentId: nextDocumentId,
+      });
+      if (!transitionedContext || !("projectId" in transitionedContext)) {
+        return null;
+      }
       sourceShaRef.current = expectedSha256;
       recoveryIdentityRef.current = null;
       pendingWriteRef.current = null;
       draftSessionRef.current.deactivate();
       sourceHistorySessionRef.current.deactivate();
       draftRecoveryOperationIdRef.current = null;
-      setSourcePath(nextSourcePath);
       setSourceSha256(expectedSha256);
     }
-    return {
-      epoch: projectEpochRef.current,
-      projectId: nextProjectId,
-      documentId: nextDocumentId,
-      sourcePath: nextSourcePath,
-    };
+    return projectSessionRef.current.context;
   }, [refreshRecents]);
 
   const recoverAutosaveLog = useCallback(async (
@@ -3051,27 +3062,25 @@ export default function Workbench() {
         },
       )) return deferredResult;
     }
-    let activeSource = sourceOverride === undefined ? sourcePathRef.current : sourceOverride;
+    let activeSource = sourceOverride === undefined ? projectSessionRef.current.sourcePath : sourceOverride;
     if (!activeSource) {
       setBridgeConnected(null);
       return;
     }
-    let epoch = epochOverride ?? projectEpochRef.current;
-    const workspaceQueryTicket = projectQueryFenceRef.current.begin({
-      epoch,
-      projectId: projectIdRef.current,
-      documentId: documentIdRef.current,
-      sourcePath: activeSource,
-    }, "workspace");
+    let epoch = epochOverride ?? projectSessionRef.current.epoch;
+    const workspaceQueryTicket = projectSessionRef.current.beginQuery(
+      "workspace",
+      { sourcePath: activeSource },
+    );
     const workspaceQueryIsCurrent = () => (
-      projectQueryFenceRef.current.isCurrent(workspaceQueryTicket)
-      && epoch === projectEpochRef.current
-      && sameLocalSourcePath(sourcePathRef.current, activeSource)
+      projectSessionRef.current.isQueryCurrent(workspaceQueryTicket)
+      && epoch === projectSessionRef.current.epoch
+      && sameLocalSourcePath(projectSessionRef.current.sourcePath, activeSource)
     );
     const hydrationSourceTransitionAuthorized =
       sourceTransitionToken !== undefined
       && sourceTransitionToken === epoch
-      && sourceTransitionToken === projectEpochRef.current
+      && sourceTransitionToken === projectSessionRef.current.epoch
       && projectHydratingRef.current;
     let sourceBoundaryFrozen = false;
     let mustAdoptAuthoritativeSource = hydrationSourceTransitionAuthorized;
@@ -3131,15 +3140,18 @@ export default function Workbench() {
         mustAdoptAuthoritativeSource = true;
       }
       if (
-        epoch !== projectEpochRef.current
-        || !sameLocalSourcePath(sourcePathRef.current, activeSource)
+        epoch !== projectSessionRef.current.epoch
+        || !sameLocalSourcePath(projectSessionRef.current.sourcePath, activeSource)
       ) return;
       recoveryIdentityRef.current =
         recoveryIdentityFromRecord(payload.recoveryIdentity);
-      projectIdRef.current = nextProjectId;
-      documentIdRef.current = nextDocumentId;
-      setProjectId(nextProjectId);
-      setDocumentId(nextDocumentId);
+      const registeredContext = projectSessionRef.current.register({
+        epoch,
+        projectId: nextProjectId,
+        documentId: nextDocumentId,
+        sourcePath: activeSource,
+      });
+      if (!registeredContext) return;
       setVersions(versionsFromWorkspace(payload));
       setLatestVersionId(payload.latestVersionId ? String(payload.latestVersionId) : null);
       setCurrentBasedOnVersionId(
@@ -3245,12 +3257,7 @@ export default function Workbench() {
       const draftRecord = draftAuthorityFromWorkspace(payload);
       const serverDraftRevision = authoritativeDraftRevision(draftRecord);
       let recoveredEvents = changeEventsRef.current;
-      const draftContext = {
-        epoch,
-        projectId: nextProjectId,
-        documentId: nextDocumentId,
-        sourcePath: activeSource,
-      };
+      const draftContext = registeredContext;
       if (
         nextProjectId
         && nextDocumentId
@@ -3460,8 +3467,8 @@ export default function Workbench() {
           sourcePath: activeSource,
         });
         if (
-          epoch !== projectEpochRef.current
-          || !sameLocalSourcePath(sourcePathRef.current, activeSource)
+          epoch !== projectSessionRef.current.epoch
+          || !sameLocalSourcePath(projectSessionRef.current.sourcePath, activeSource)
         ) return;
       }
       if (recoveredAutosaveConflict) {
@@ -3487,7 +3494,7 @@ export default function Workbench() {
         window.requestAnimationFrame(() => editorRef.current?.unlockNow?.());
       }
     } catch (cause) {
-      if (epoch === projectEpochRef.current) {
+      if (epoch === projectSessionRef.current.epoch) {
         const message = productErrorMessage(
           cause,
           "项目状态读取超时，请重试；源文件没有被改动。",
@@ -3507,8 +3514,8 @@ export default function Workbench() {
       if (
         hydrationSourceTransitionAuthorized
         && projectHydratingRef.current
-        && epoch === projectEpochRef.current
-        && sameLocalSourcePath(sourcePathRef.current, activeSource)
+        && epoch === projectSessionRef.current.epoch
+        && sameLocalSourcePath(projectSessionRef.current.sourcePath, activeSource)
       ) {
         projectHydratingRef.current = false;
         setProjectHydrating(false);
@@ -3615,7 +3622,7 @@ export default function Workbench() {
           void hydrateRecentProjectRuns(recent, active?.sourcePath || null);
           if (active) {
             applyProject(active);
-            const epoch = projectEpochRef.current;
+            const epoch = projectSessionRef.current.epoch;
             await refreshWorkspace(active.sourcePath, epoch, false, epoch);
             await refreshRecents();
           }
@@ -3658,7 +3665,7 @@ export default function Workbench() {
         notice_code: noticeUsageCode(toast.dedupeKey),
         interaction: "auto-dismiss",
         surface: "global",
-      }, projectIdRef.current || undefined);
+      }, projectSessionRef.current.projectId || undefined);
       setToast(null);
     }, dismissAfter);
     return () => window.clearTimeout(timeout);
@@ -3770,20 +3777,9 @@ export default function Workbench() {
     });
     coordinator.replace("project-rules", {
       label: "等待项目规则保存",
-      inspect: () => {
-        const dirty = Boolean(
-          fileView?.path === "PROJECT.md"
-          && fileView.content !== fileView.savedContent,
-        );
-        if (!dirty) return { state: "resolved" };
-        if (fileView?.error) {
-          return {
-            state: "blocked",
-            reason: "项目规则当前无法读取，请返回项目面板处理后再继续。",
-          };
-        }
-        return { state: "pending", reason: "项目规则还没有保存。" };
-      },
+      inspect: () => projectRulesSessionRef.current.inspect({
+        locked: projectLockedRef.current,
+      }),
       drain: () => saveProjectRulesRef.current(),
     });
     coordinator.replace("source", {
@@ -3793,7 +3789,7 @@ export default function Workbench() {
           projectLockedRef.current
           && boundary !== "submit"
         ) return { state: "resolved" };
-        if (!sourcePathRef.current && editRevisionRef.current > 0) {
+        if (!projectSessionRef.current.sourcePath && editRevisionRef.current > 0) {
           return {
             state: "blocked",
             reason: "当前编辑尚未绑定本地 HTML，请先导出或打开本地文件。",
@@ -3944,7 +3940,6 @@ export default function Workbench() {
     captureProjectContext,
     currentBasedOnVersionId,
     ensureProjectRegistered,
-    fileView,
     flushAutosave,
     flushDraftPersistence,
     persistDraftRecovery,
@@ -3978,7 +3973,7 @@ export default function Workbench() {
   const attachmentBlob = useCallback(async (
     attachment: CommentAttachment,
   ): Promise<Blob> => {
-    const activeSource = sourcePathRef.current;
+    const activeSource = projectSessionRef.current.sourcePath;
     if (!activeSource) throw new Error("当前评论还没有绑定本地项目。");
     return bridgeClient.attachment(activeSource, attachment.relativePath);
   }, []);
@@ -3996,12 +3991,12 @@ export default function Workbench() {
   const deleteAttachmentFile = useCallback(async (
     attachment: CommentAttachment,
   ) => {
-    const activeSource = sourcePathRef.current;
+    const activeSource = projectSessionRef.current.sourcePath;
     if (!activeSource) return;
     try {
       await bridgeClient.deleteAttachment({
-        projectId: projectIdRef.current,
-        documentId: documentIdRef.current,
+        projectId: projectSessionRef.current.projectId,
+        documentId: projectSessionRef.current.documentId,
         sourcePath: activeSource,
         relativePath: attachment.relativePath,
       });
@@ -4191,7 +4186,7 @@ export default function Workbench() {
       return;
     }
     if (attachmentPersistence !== "bridge") return;
-    const activeSource = sourcePathRef.current;
+    const activeSource = projectSessionRef.current.sourcePath;
     if (!activeSource) {
       setToast({
         title: "请先打开本地 HTML",
@@ -4237,8 +4232,8 @@ export default function Workbench() {
       try {
         const attachmentId = recordId("attachment", attachmentCounter.current++);
         const payload = await bridgeClient.saveAttachment({
-          projectId: projectIdRef.current,
-          documentId: documentIdRef.current,
+          projectId: projectSessionRef.current.projectId,
+          documentId: projectSessionRef.current.documentId,
           sourcePath: activeSource,
           commentId: target.commentId,
           attachmentId,
@@ -4436,7 +4431,7 @@ export default function Workbench() {
     const authority = draftPersistenceAuthorityRef.current;
     if (
       !authority
-      || authority.epoch !== projectEpochRef.current
+      || authority.epoch !== projectSessionRef.current.epoch
       || authority.projectId !== projectId
       || authority.documentId !== documentId
       || !sameLocalSourcePath(authority.sourcePath, sourcePath)
@@ -4445,7 +4440,7 @@ export default function Workbench() {
     ) return;
     const snapshot = draftSessionRef.current.createSnapshot({
       context: {
-      epoch: projectEpochRef.current,
+      epoch: projectSessionRef.current.epoch,
       projectId,
       documentId,
       sourcePath,
@@ -4479,7 +4474,7 @@ export default function Workbench() {
     const authority = draftPersistenceAuthorityRef.current;
     if (
       !authority
-      || authority.epoch !== projectEpochRef.current
+      || authority.epoch !== projectSessionRef.current.epoch
       || authority.projectId !== projectId
       || authority.documentId !== documentId
       || !sameLocalSourcePath(authority.sourcePath, sourcePath)
@@ -4487,7 +4482,7 @@ export default function Workbench() {
     ) return;
     const snapshot = draftSessionRef.current.createSnapshot({
       context: {
-        epoch: projectEpochRef.current,
+        epoch: projectSessionRef.current.epoch,
         projectId,
         documentId,
         sourcePath,
@@ -4580,7 +4575,7 @@ export default function Workbench() {
             closeLifecycle.frozenRequestId = detail.requestId;
             if (
               frozen.html !== htmlRef.current
-              && (Boolean(sourcePathRef.current) || Boolean(frozen.pendingMutation))
+              && (Boolean(projectSessionRef.current.sourcePath) || Boolean(frozen.pendingMutation))
             ) {
               enqueueAutosave(frozen.html, frozen.pendingMutation || undefined);
             }
@@ -4595,7 +4590,7 @@ export default function Workbench() {
           }
           if (
             imposedEditorFreeze
-            && sourcePathRef.current
+            && projectSessionRef.current.sourcePath
             && (
               lastPersistedRevisionRef.current !== cutoffRevision
               || !frozenSourceSha256
@@ -4787,7 +4782,7 @@ export default function Workbench() {
       return false;
     }
     if (
-      sourcePathRef.current
+      projectSessionRef.current.sourcePath
       && committed
       && (
         lastPersistedRevisionRef.current !== switchCutoffRevision
@@ -4830,7 +4825,7 @@ export default function Workbench() {
       if (!project || openRequest !== projectOpenRequestRef.current) return;
       setStartupIssue(null);
       applyProject(project);
-      const epoch = projectEpochRef.current;
+      const epoch = projectSessionRef.current.epoch;
       await Promise.all([
         refreshRecents(),
         refreshWorkspace(project.sourcePath, epoch, false, epoch),
@@ -4861,10 +4856,8 @@ export default function Workbench() {
   useEffect(() => {
     const pending = pendingProjectOpenRef.current;
     if (!pending) return;
-    const projectRulesUnsaved = Boolean(
-      fileView?.path === "PROJECT.md"
-      && fileView.content !== fileView.savedContent,
-    );
+    const projectRulesUnsaved = projectRulesSessionRef.current
+      .inspect({ locked: projectLockedRef.current }).state !== "resolved";
     const draftState = draftSessionRef.current.inspect();
     if (
       generating
@@ -4888,17 +4881,17 @@ export default function Workbench() {
     draftPersistError,
     attachmentUploadCount,
     editRevision,
-    fileView,
     generating,
     lastPersistedRevision,
     openProject,
     persistState,
+    projectRulesSnapshot,
     projectHydrating,
     viewTransitioning,
   ]);
 
   const showProjectInFolder = useCallback(async (requestedSourcePath?: string) => {
-    const activeSourcePath = requestedSourcePath || sourcePathRef.current;
+    const activeSourcePath = requestedSourcePath || projectSessionRef.current.sourcePath;
     const showInFolder = window.htmlAIProjects?.showInFolder;
     if (!activeSourcePath || !showInFolder) return;
     try {
@@ -4919,8 +4912,8 @@ export default function Workbench() {
   }, []);
 
   const openCurrentHtmlInDefaultBrowser = useCallback(async () => {
-    const activeSourcePath = sourcePathRef.current;
-    const activeEpoch = projectEpochRef.current;
+    const activeSourcePath = projectSessionRef.current.sourcePath;
+    const activeEpoch = projectSessionRef.current.epoch;
     const openInDefaultBrowser = window.htmlAIProjects?.openInDefaultBrowser;
     if (!activeSourcePath || !openInDefaultBrowser) return;
     try {
@@ -4951,8 +4944,8 @@ export default function Workbench() {
       const persisted = await flushAutosave(launchRevision);
       if (
         !persisted
-        || activeEpoch !== projectEpochRef.current
-        || !sameLocalSourcePath(sourcePathRef.current, activeSourcePath)
+        || activeEpoch !== projectSessionRef.current.epoch
+        || !sameLocalSourcePath(projectSessionRef.current.sourcePath, activeSourcePath)
         || pendingWriteRef.current
         || flushPromiseRef.current
         || historyActionPromiseRef.current
@@ -5011,10 +5004,10 @@ export default function Workbench() {
     if (!fileRenameEditingRef.current || fileRenameBusyRef.current) return;
     const api = window.htmlAIProjects;
     const renameFile = api?.renameHtml;
-    const previousSourcePath = sourcePathRef.current;
-    const previousEpoch = projectEpochRef.current;
-    const previousProjectId = projectIdRef.current;
-    const previousDocumentId = documentIdRef.current;
+    const previousSourcePath = projectSessionRef.current.sourcePath;
+    const previousEpoch = projectSessionRef.current.epoch;
+    const previousProjectId = projectSessionRef.current.projectId;
+    const previousDocumentId = projectSessionRef.current.documentId;
     const extension = fileExtension(
       localFileNameFromSourcePath(previousSourcePath),
     );
@@ -5072,8 +5065,8 @@ export default function Workbench() {
       });
       if (!drained.ok) throw new Error(drained.reason);
       if (
-        previousEpoch !== projectEpochRef.current
-        || !sameLocalSourcePath(sourcePathRef.current, previousSourcePath)
+        previousEpoch !== projectSessionRef.current.epoch
+        || !sameLocalSourcePath(projectSessionRef.current.sourcePath, previousSourcePath)
         || pendingWriteRef.current
         || flushPromiseRef.current
         || historyActionPromiseRef.current
@@ -5148,12 +5141,6 @@ export default function Workbench() {
       renameCommitted = true;
       const nextSourcePath = result.sourcePath;
 
-      projectQueryFenceRef.current.retire({
-        epoch: previousEpoch,
-        projectId: previousProjectId,
-        documentId: previousDocumentId,
-        sourcePath: previousSourcePath,
-      });
       const trackedRun = backgroundRunsRef.current.get(previousSourcePath)
         || [...backgroundRunsRef.current.values()].find(
           (run) => sameLocalSourcePath(run.sourcePath, previousSourcePath),
@@ -5213,8 +5200,15 @@ export default function Workbench() {
         );
       }
 
-      projectEpochRef.current += 1;
-      sourcePathRef.current = nextSourcePath;
+      const transitionedProject = projectSessionRef.current.transitionSource({
+        previousSourcePath,
+        sourcePath: nextSourcePath,
+        projectId: previousProjectId,
+        documentId: previousDocumentId,
+      });
+      if (!transitionedProject) {
+        throw new Error("文件已重命名，但当前项目身份已经变化。");
+      }
       sourceShaRef.current = result.sha256;
       recoveryIdentityRef.current = null;
       pendingWriteRef.current = null;
@@ -5227,7 +5221,6 @@ export default function Workbench() {
         `html-ai-recovery:${previousSourcePath}`,
         `html-ai-draft-recovery:${previousSourcePath}`,
       ]);
-      setSourcePath(nextSourcePath);
       setSourceSha256(result.sha256);
       setProjectName(result.stem || requestedStem);
       setLastModifiedAt(result.lastModifiedAt || null);
@@ -5237,7 +5230,7 @@ export default function Workbench() {
         refreshRecents(),
         refreshWorkspace(
           nextSourcePath,
-          projectEpochRef.current,
+          projectSessionRef.current.epoch,
           true,
         ),
       ]);
@@ -5293,7 +5286,7 @@ export default function Workbench() {
   ]);
 
   const showProjectRecordsInFolder = useCallback(async () => {
-    const activeSourcePath = sourcePathRef.current;
+    const activeSourcePath = projectSessionRef.current.sourcePath;
     if (!activeSourcePath || !projectRecordsPath) return;
     try {
       await withOneAutomaticRetry(async () => {
@@ -5476,7 +5469,7 @@ export default function Workbench() {
     try {
       const result = await api.exportHtmlCopy({
         html: nextHtml,
-        sourcePath: sourcePathRef.current,
+        sourcePath: projectSessionRef.current.sourcePath,
         suggestedName: projectName,
       });
       if (result) {
@@ -5753,7 +5746,7 @@ export default function Workbench() {
   ): Promise<boolean> => {
     if (
       runtimeCapabilitiesRef.current.sourceEditing !== "enabled"
-      || !sourcePathRef.current
+      || !projectSessionRef.current.sourcePath
       || projectLockedRef.current
       || projectHydratingRef.current
       || projectLoadErrorRef.current
@@ -6566,14 +6559,14 @@ export default function Workbench() {
       return;
     }
     if (attachmentUploadCount > 0) return;
-    const commentEpoch = projectEpochRef.current;
+    const commentEpoch = projectSessionRef.current.epoch;
     const requestedTargetId = draftTarget.id;
-    if (sourcePathRef.current) {
+    if (projectSessionRef.current.sourcePath) {
       try {
         const registered = await ensureProjectRegistered();
         if (!registered) throw new Error("当前项目已经切换，请重试。");
       } catch (cause) {
-        if (commentEpoch !== projectEpochRef.current) return;
+        if (commentEpoch !== projectSessionRef.current.epoch) return;
         setToast({
           title: "评论尚未保存",
           message: productErrorMessage(
@@ -6592,7 +6585,7 @@ export default function Workbench() {
     }
     const currentTarget = draftTargetRef.current;
     if (
-      commentEpoch !== projectEpochRef.current
+      commentEpoch !== projectSessionRef.current.epoch
       || projectLockedRef.current
       || projectHydratingRef.current
       || projectLoadErrorRef.current
@@ -6652,7 +6645,7 @@ export default function Workbench() {
       attachment_count: countBucket(currentAttachments.length),
       has_image: currentAttachments.some((attachment) => attachment.kind === "image"),
       has_file: currentAttachments.some((attachment) => attachment.kind === "file"),
-    }, projectIdRef.current || undefined);
+    }, projectSessionRef.current.projectId || undefined);
   }, [
     currentBasedOnVersionId,
     draft,
@@ -7063,8 +7056,11 @@ export default function Workbench() {
   const viewFile = useCallback(async (path: string) => {
     const context = captureProjectContext();
     if (!context) return;
-    projectRulesCompositionRef.current = null;
-    setProjectRulesCompositionActive(false);
+    if (path === "PROJECT.md") {
+      await projectRulesSessionRef.current.open(context);
+      return;
+    }
+    projectRulesSessionRef.current.close();
     setFileView({
       path,
       content: "正在读取…",
@@ -7093,64 +7089,28 @@ export default function Workbench() {
   const beginProjectRulesComposition = useCallback((
     target: HTMLTextAreaElement,
   ) => {
-    projectRulesCompositionEpochRef.current += 1;
-    projectRulesCompositionRef.current = {
-      epoch: projectRulesCompositionEpochRef.current,
-      target,
-      baselineValue: target.value,
-      restoreRequested: false,
-    };
-    setProjectRulesCompositionActive(true);
+    projectRulesSessionRef.current.beginComposition(target, target.value);
   }, []);
 
   const finishProjectRulesComposition = useCallback((
     target: HTMLTextAreaElement,
   ) => {
-    const active = projectRulesCompositionRef.current;
-    if (!active || active.target !== target) return;
-    if (!active.restoreRequested) {
-      projectRulesCompositionRef.current = null;
-      setProjectRulesCompositionActive(false);
-    }
+    projectRulesSessionRef.current.finishComposition(target);
   }, []);
 
   useEffect(() => {
     if (drawer === "files" && fileView?.path === "PROJECT.md") return;
-    const active = projectRulesCompositionRef.current;
-    if (!active) return;
-    projectRulesCompositionRef.current = null;
-    setProjectRulesCompositionActive(false);
-    if (active.restoreRequested) return;
-    setFileView((current) => (
-      current?.path === "PROJECT.md"
-        ? { ...current, content: active.baselineValue }
-        : current
-    ));
+    projectRulesSessionRef.current.leaveEditor();
   }, [drawer, fileView?.path]);
 
   const restoreProjectRules = useCallback(() => {
-    const activeComposition = projectRulesCompositionRef.current;
-    if (activeComposition) activeComposition.restoreRequested = true;
-    setProjectRulesCompositionActive(false);
-    setProjectRulesSaveError("");
-    setFileView((current) => (
-      current?.path === "PROJECT.md"
-        ? { ...current, content: current.savedContent }
-        : current
-    ));
+    const restoreEpoch = projectRulesSessionRef.current.restore();
     // Retire the exact textarea that owns macOS marked text. A late
     // composition input from that detached control can no longer overwrite
     // the explicit restore result.
-    setProjectRulesEditorGeneration((current) => current + 1);
-    const restoreEpoch = activeComposition?.epoch ?? null;
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(() => {
-        if (
-          restoreEpoch !== null
-          && projectRulesCompositionRef.current?.epoch === restoreEpoch
-        ) {
-          projectRulesCompositionRef.current = null;
-        }
+        projectRulesSessionRef.current.settleRestore(restoreEpoch);
         const editor = projectRulesEditorRef.current;
         editor?.focus({ preventScroll: true });
         editor?.setSelectionRange(editor.value.length, editor.value.length);
@@ -7159,74 +7119,15 @@ export default function Workbench() {
   }, []);
 
   const saveProjectRules = useCallback(async (): Promise<boolean> => {
-    if (projectRulesCompositionRef.current) return false;
-    if (
-      fileView?.path === "PROJECT.md"
-      && !fileView.loading
-      && !fileView.error
-      && fileView.content === fileView.savedContent
-    ) return true;
-    if (
-      !fileView
-      || fileView.path !== "PROJECT.md"
-      || fileView.loading
-      || fileView.error
-      || runInProgress
-    ) return false;
-    const context = captureProjectContext();
-    if (!context) return false;
-    const nextContent = fileView.content;
-    setProjectRulesSaveError("");
-    setProjectRulesSaving(true);
-    const markRulesSaved = () => {
-      setFileView((current) => current?.path === "PROJECT.md"
-        ? { ...current, savedContent: nextContent }
-        : current);
-      setProjectRulesSaveError("");
-    };
-    try {
-      await bridgeClient.updateProjectFile({
-        sourcePath: context.sourcePath,
-        projectId: context.projectId,
-        content: nextContent,
-      });
-      if (!isCurrentProjectContext(context)) return false;
-      markRulesSaved();
-      return true;
-    } catch (cause) {
-      if (!isCurrentProjectContext(context)) return false;
-      try {
-        const persisted = await readWorkspaceFile("PROJECT.md", context.sourcePath);
-        if (!isCurrentProjectContext(context)) return false;
-        if (persisted === nextContent) {
-          markRulesSaved();
-          return true;
-        }
-      } catch {
-        // The original write error is the most useful local explanation.
-      }
-      setProjectRulesSaveError(productErrorMessage(
-        cause,
-        "项目规则暂时没有保存；内容仍保留在这里，可以再次保存。",
-      ));
-      return false;
-    } finally {
-      if (isCurrentProjectContext(context)) setProjectRulesSaving(false);
-    }
-  }, [
-    captureProjectContext,
-    fileView,
-    isCurrentProjectContext,
-    readWorkspaceFile,
-    runInProgress,
-  ]);
+    return projectRulesSessionRef.current.save({ locked: runInProgress });
+  }, [runInProgress]);
 
   useEffect(() => {
     if (
-      fileView?.path !== "PROJECT.md"
-      || fileView.loading
-      || fileView.error
-      || fileView.content === fileView.savedContent
+      !projectRulesSnapshot.open
+      || projectRulesSnapshot.loading
+      || projectRulesSnapshot.error
+      || projectRulesSnapshot.content === projectRulesSnapshot.savedContent
       || projectRulesSaving
       || projectRulesCompositionActive
       || runInProgress
@@ -7236,7 +7137,7 @@ export default function Workbench() {
     }, PROJECT_RULES_AUTOSAVE_DELAY_MS);
     return () => window.clearTimeout(timer);
   }, [
-    fileView,
+    projectRulesSnapshot,
     projectRulesCompositionActive,
     projectRulesSaving,
     runInProgress,
@@ -7245,16 +7146,15 @@ export default function Workbench() {
 
   const closeFileView = useCallback(async (): Promise<boolean> => {
     if (
-      fileView?.path === "PROJECT.md"
-      && !fileView.error
-      && fileView.content !== fileView.savedContent
+      projectRulesSnapshot.open
+      && !projectRulesSnapshot.error
+      && projectRulesSnapshot.content !== projectRulesSnapshot.savedContent
       && !await saveProjectRules()
     ) return false;
-    projectRulesCompositionRef.current = null;
-    setProjectRulesCompositionActive(false);
+    projectRulesSessionRef.current.close();
     setFileView(null);
     return true;
-  }, [fileView, saveProjectRules]);
+  }, [projectRulesSnapshot, saveProjectRules]);
 
   useEffect(() => {
     saveProjectRulesRef.current = saveProjectRules;
@@ -7290,7 +7190,7 @@ export default function Workbench() {
       qoderHandoffStatesRef.current.set(run.sourcePath, nextState);
       const visibleRun = activeRunRef.current;
       if (
-        sameLocalSourcePath(sourcePathRef.current, run.sourcePath)
+        sameLocalSourcePath(projectSessionRef.current.sourcePath, run.sourcePath)
         && visibleRun?.requestId === run.requestId
         && visibleRun.attemptId === run.attemptId
       ) {
@@ -7314,7 +7214,7 @@ export default function Workbench() {
       publishStatus("failed");
       const visibleRun = activeRunRef.current;
       if (
-        sameLocalSourcePath(sourcePathRef.current, run.sourcePath)
+        sameLocalSourcePath(projectSessionRef.current.sourcePath, run.sourcePath)
         && visibleRun?.requestId === run.requestId
         && visibleRun.attemptId === run.attemptId
       ) {
@@ -7334,7 +7234,7 @@ export default function Workbench() {
   }, []);
 
   const revealActiveRunInFinder = useCallback(async () => {
-    const activeSourcePath = sourcePathRef.current;
+    const activeSourcePath = projectSessionRef.current.sourcePath;
     const requestPath = activeRun?.requestPath;
     const revealRequestFolder = window.htmlAIProjects?.revealRequestFolder;
     if (!activeSourcePath || !requestPath || !revealRequestFolder) return;
@@ -7358,7 +7258,7 @@ export default function Workbench() {
   }, [activeRun?.requestPath]);
 
   const revealVersionInFinder = useCallback(async (version: Version) => {
-    const activeSourcePath = sourcePathRef.current;
+    const activeSourcePath = projectSessionRef.current.sourcePath;
     const revealVersionFile = window.htmlAIProjects?.revealVersionFile;
     if (!activeSourcePath || !revealVersionFile) return;
     try {
@@ -7379,7 +7279,7 @@ export default function Workbench() {
 
   const generateRequest = useCallback(async (fromDeferred = false) => {
     if (submissionIntentRef.current) return;
-    if (!sourcePathRef.current) {
+    if (!projectSessionRef.current.sourcePath) {
       if (typeof window !== "undefined" && !window.htmlAIProjects) return;
       void openProject();
       return;
@@ -7460,8 +7360,8 @@ export default function Workbench() {
 
     const submissionIntent = {
       token: ++submissionIntentCounterRef.current,
-      epoch: projectEpochRef.current,
-      sourcePath: sourcePathRef.current,
+      epoch: projectSessionRef.current.epoch,
+      sourcePath: projectSessionRef.current.sourcePath,
     };
     submissionIntentRef.current = submissionIntent;
     setGenerating(true);
@@ -7469,7 +7369,7 @@ export default function Workbench() {
       if (submissionIntentRef.current?.token === submissionIntent.token) {
         submissionIntentRef.current = null;
       }
-      if (sameLocalSourcePath(sourcePathRef.current, submissionIntent.sourcePath)) {
+      if (sameLocalSourcePath(projectSessionRef.current.sourcePath, submissionIntent.sourcePath)) {
         setGenerating(false);
       }
     };
@@ -7479,8 +7379,8 @@ export default function Workbench() {
       if (!registered) throw new Error("当前项目已经切换，请重试。");
       if (
         submissionIntentRef.current?.token !== submissionIntent.token
-        || projectEpochRef.current !== submissionIntent.epoch
-        || !sameLocalSourcePath(sourcePathRef.current, submissionIntent.sourcePath)
+        || projectSessionRef.current.epoch !== submissionIntent.epoch
+        || !sameLocalSourcePath(projectSessionRef.current.sourcePath, submissionIntent.sourcePath)
       ) {
         throw new Error("当前项目已经切换，请重试。");
       }
@@ -7539,10 +7439,10 @@ export default function Workbench() {
     }
     const freezeCutoffRevision = editRevisionRef.current;
     const submissionContext = {
-      epoch: projectEpochRef.current,
-      projectId: projectIdRef.current,
-      documentId: documentIdRef.current,
-      sourcePath: sourcePathRef.current,
+      epoch: projectSessionRef.current.epoch,
+      projectId: projectSessionRef.current.projectId,
+      documentId: projectSessionRef.current.documentId,
+      sourcePath: projectSessionRef.current.sourcePath,
       projectName,
       comments: activeComments.map((comment) => ({ ...comment })),
       changeEvents: changeEventsRef.current.map((event) => ({ ...event })),
@@ -7773,8 +7673,8 @@ export default function Workbench() {
     payload: Record<string, unknown>,
     fromDeferred = false,
   ) => {
-    const affectsCurrentCanvas = Boolean(sourcePathRef.current)
-      && projectIdRef.current === run.projectId;
+    const affectsCurrentCanvas = Boolean(projectSessionRef.current.sourcePath)
+      && projectSessionRef.current.projectId === run.projectId;
     if (!fromDeferred && affectsCurrentCanvas) {
       let resolveDeferred: (() => void) | null = null;
       let rejectDeferred: ((reason: unknown) => void) | null = null;
@@ -7893,11 +7793,11 @@ export default function Workbench() {
       throw new Error("当前源 HTML 缺少独立的最后修改时间，已停止打开。");
     }
     const transitionAffectsCurrentCanvas =
-      projectIdRef.current === run.projectId
-      && Boolean(sourcePathRef.current)
+      projectSessionRef.current.projectId === run.projectId
+      && Boolean(projectSessionRef.current.sourcePath)
       && (
-        sameLocalSourcePath(sourcePathRef.current, run.sourcePath)
-        || sameLocalSourcePath(sourcePathRef.current, committedSourcePath)
+        sameLocalSourcePath(projectSessionRef.current.sourcePath, run.sourcePath)
+        || sameLocalSourcePath(projectSessionRef.current.sourcePath, committedSourcePath)
       );
     if (transitionAffectsCurrentCanvas) {
       const transitionContext = captureProjectContext();
@@ -8117,7 +8017,7 @@ export default function Workbench() {
       backgroundRunsRef.current.set(run.sourcePath, nextRun);
       const visibleRun = activeRunRef.current;
       if (
-        sameLocalSourcePath(sourcePathRef.current, run.sourcePath)
+        sameLocalSourcePath(projectSessionRef.current.sourcePath, run.sourcePath)
         && visibleRun?.requestId === run.requestId
         && visibleRun.attemptId === run.attemptId
       ) {
@@ -8129,7 +8029,7 @@ export default function Workbench() {
       activatingRunsRef.current.delete(operationKey);
       const visibleRun = activeRunRef.current;
       if (
-        sameLocalSourcePath(sourcePathRef.current, run.sourcePath)
+        sameLocalSourcePath(projectSessionRef.current.sourcePath, run.sourcePath)
         || (
           visibleRun?.requestId === run.requestId
           && visibleRun.attemptId === run.attemptId
@@ -8167,10 +8067,10 @@ export default function Workbench() {
     const isCurrentProject = (
       (
         Boolean(run.projectId)
-        && Boolean(projectIdRef.current)
-        && run.projectId === projectIdRef.current
+        && Boolean(projectSessionRef.current.projectId)
+        && run.projectId === projectSessionRef.current.projectId
       )
-      || sameLocalSourcePath(sourcePathRef.current, run.sourcePath)
+      || sameLocalSourcePath(projectSessionRef.current.sourcePath, run.sourcePath)
     );
     const previousBackgroundState = backgroundRunsRef.current.get(run.sourcePath)?.status;
     if (state === "ready-to-open") {
@@ -8343,7 +8243,7 @@ export default function Workbench() {
       || submissionPendingRef.current
       || !projectLockedRef.current
       || pendingRun?.requestId !== "pending"
-      || !sourcePathRef.current
+      || !projectSessionRef.current.sourcePath
     ) return;
     const context = captureProjectContext();
     if (!context) return;
@@ -8445,10 +8345,10 @@ export default function Workbench() {
     const context = (
       (
         Boolean(run.projectId)
-        && Boolean(projectIdRef.current)
-        && run.projectId === projectIdRef.current
+        && Boolean(projectSessionRef.current.projectId)
+        && run.projectId === projectSessionRef.current.projectId
       )
-      || sameLocalSourcePath(sourcePathRef.current, run.sourcePath)
+      || sameLocalSourcePath(projectSessionRef.current.sourcePath, run.sourcePath)
     )
       ? captureProjectContext()
       : null;
@@ -8525,10 +8425,10 @@ export default function Workbench() {
     const context = (
       (
         Boolean(run.projectId)
-        && Boolean(projectIdRef.current)
-        && run.projectId === projectIdRef.current
+        && Boolean(projectSessionRef.current.projectId)
+        && run.projectId === projectSessionRef.current.projectId
       )
-      || sameLocalSourcePath(sourcePathRef.current, run.sourcePath)
+      || sameLocalSourcePath(projectSessionRef.current.sourcePath, run.sourcePath)
     )
       ? captureProjectContext()
       : null;
@@ -9938,7 +9838,7 @@ export default function Workbench() {
                     void requestSourceHistoryAction(direction);
                   }}
                   onRequestReload={() => {
-                    if (sourcePathRef.current) {
+                    if (projectSessionRef.current.sourcePath) {
                       void reloadCurrentSource();
                     } else {
                       void openProject();
@@ -10192,13 +10092,13 @@ export default function Workbench() {
                 <strong>当前项目暂不可编辑</strong>
                 <span>{projectLoadError}</span>
                 <button type="button" onClick={() => {
-                  const activeSource = sourcePathRef.current;
+                  const activeSource = projectSessionRef.current.sourcePath;
                   if (!activeSource) return;
                   projectHydratingRef.current = true;
                   projectLoadErrorRef.current = null;
                   setProjectHydrating(true);
                   setProjectLoadError(null);
-                  const hydrationEpoch = projectEpochRef.current;
+                  const hydrationEpoch = projectSessionRef.current.epoch;
                   void refreshWorkspace(activeSource, hydrationEpoch, false, hydrationEpoch);
                 }}>重试读取</button>
               </section>
@@ -10919,15 +10819,9 @@ export default function Workbench() {
                         finishProjectRulesComposition(event.currentTarget);
                       }}
                       onChange={(event) => {
-                        if (
-                          projectRulesCompositionRef.current?.restoreRequested
-                        ) return;
-                        setProjectRulesSaveError("");
-                        setFileView((current) => (
-                          current?.path === "PROJECT.md"
-                            ? { ...current, content: event.target.value }
-                            : current
-                        ));
+                        projectRulesSessionRef.current.updateContent(
+                          event.target.value,
+                        );
                       }}
                     />
                     {projectRulesSaveError ? (
@@ -10952,12 +10846,12 @@ export default function Workbench() {
                           || fileView.content === fileView.savedContent
                         }
                         onPointerDown={(event) => {
-                          if (projectRulesCompositionRef.current) {
+                          if (projectRulesSessionRef.current.compositionActive) {
                             event.preventDefault();
                           }
                         }}
                         onMouseDown={(event) => {
-                          if (projectRulesCompositionRef.current) {
+                          if (projectRulesSessionRef.current.compositionActive) {
                             event.preventDefault();
                           }
                         }}

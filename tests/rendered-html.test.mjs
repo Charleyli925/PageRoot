@@ -158,7 +158,7 @@ test("application boundaries encode the v3 single-source lifecycle instead of sa
     "removeAcknowledgedAuditEvents",
     "hydrateRecentProjectRuns",
     '.drain("submit"',
-    "projectIdRef.current === run.projectId",
+    "projectSessionRef.current.projectId === run.projectId",
     "transitionAffectsCurrentCanvas",
     "isCurrentProjectContext(transitionContext)",
     "已打开，但需要检查",
@@ -187,7 +187,7 @@ test("application boundaries encode the v3 single-source lifecycle instead of sa
   assert.match(workbench, /版本号没有变化/);
   assert.match(
     workbench,
-    /Boolean\(sourcePathRef\.current\) \|\| Boolean\(frozen\.pendingMutation\)/,
+    /Boolean\(projectSessionRef\.current\.sourcePath\) \|\| Boolean\(frozen\.pendingMutation\)/,
     "closing an untouched unbound sample must ignore a source-equal freeze",
   );
 

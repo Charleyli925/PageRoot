@@ -146,7 +146,7 @@ test("canvas edit feedback is contextual, plain-language, and not duplicated glo
     /editFeedback\.recovery === "comment"[\s\S]*?\? "添加评论"[\s\S]*?: undefined/u,
   );
   assert.match(canvas, /onRequestReload\?\.\(\)/u);
-  assert.match(workbench, /if \(sourcePathRef\.current\)[\s\S]*?reloadCurrentSource\(\)[\s\S]*?openProject\(\)/u);
+  assert.match(workbench, /if \(projectSessionRef\.current\.sourcePath\)[\s\S]*?reloadCurrentSource\(\)[\s\S]*?openProject\(\)/u);
   assert.match(workbench, /reloadActionLabel=\{sourcePath \? "重新载入" : "重新选择"\}/u);
   assert.match(canvas, /editFeedbackPaused/u);
   assert.match(canvas, /\}, 5_000\);/u);

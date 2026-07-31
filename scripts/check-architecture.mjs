@@ -152,6 +152,15 @@ export async function architectureViolations() {
     path.join(PRODUCT_ROOT, "app", "workbench.tsx"),
     "utf8",
   );
+  const projectSession = await readFile(
+    path.join(
+      PRODUCT_ROOT,
+      "app",
+      "application",
+      "project-session.js",
+    ),
+    "utf8",
+  );
   const registrationStart = workbench.indexOf(
     "const ensureProjectRegistered = useCallback",
   );
@@ -171,12 +180,13 @@ export async function architectureViolations() {
     );
   }
   if (
-    !/if \(!activeSource \|\| !activeProjectId \|\| !activeDocumentId\) return null;/.test(
-      workbench,
+    !projectSession.includes(
+      "if (!this.#sourcePath || !this.#projectId || !this.#documentId) return null;",
     )
+    || !workbench.includes("return projectSessionRef.current.context;")
   ) {
     violations.push(
-      "app/workbench.tsx: registered project contexts cannot contain empty identities",
+      "app/application/project-session.js: registered contexts cannot contain empty identities",
     );
   }
   if (

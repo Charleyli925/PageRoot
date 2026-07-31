@@ -448,7 +448,7 @@ test("external source adoption invalidates the active native editing session", (
   );
   assert.match(
     completedVersion,
-    /const transitionAffectsCurrentCanvas[\s\S]*?sameLocalSourcePath\(sourcePathRef\.current, run\.sourcePath\)[\s\S]*?sameLocalSourcePath\(sourcePathRef\.current, committedSourcePath\)[\s\S]*?const transitionContext = captureProjectContext\(\)[\s\S]*?fenceAndFreezeCurrentCanvas\([\s\S]*?if \(!frozen\.ok\)[\s\S]*?isCurrentProjectContext\(transitionContext\)[\s\S]*?await adoptGeneratedSourcePath\(\{[\s\S]*?htmlRef\.current = content;[\s\S]*?setHtml\(content\)/u,
+    /const transitionAffectsCurrentCanvas[\s\S]*?sameLocalSourcePath\(projectSessionRef\.current\.sourcePath, run\.sourcePath\)[\s\S]*?sameLocalSourcePath\(projectSessionRef\.current\.sourcePath, committedSourcePath\)[\s\S]*?const transitionContext = captureProjectContext\(\)[\s\S]*?fenceAndFreezeCurrentCanvas\([\s\S]*?if \(!frozen\.ok\)[\s\S]*?isCurrentProjectContext\(transitionContext\)[\s\S]*?await adoptGeneratedSourcePath\(\{[\s\S]*?htmlRef\.current = content;[\s\S]*?setHtml\(content\)/u,
   );
 });
 
@@ -592,7 +592,7 @@ test("QoderWork handoff exposes a truthful process board and manual open action"
   assert.match(sendToQoderWork, /publishStatus\("failed"\)/);
   assert.match(
     sendToQoderWork,
-    /sameLocalSourcePath\(sourcePathRef\.current, run\.sourcePath\)[\s\S]*?visibleRun\?\.requestId === run\.requestId[\s\S]*?visibleRun\.attemptId === run\.attemptId/,
+    /sameLocalSourcePath\(projectSessionRef\.current\.sourcePath, run\.sourcePath\)[\s\S]*?visibleRun\?\.requestId === run\.requestId[\s\S]*?visibleRun\.attemptId === run\.attemptId/,
   );
   assert.doesNotMatch(sendToQoderWork, /setDrawer\("handoff"\)|tone: "success"/);
   assert.match(workbench, /qoder-logo\.png/);
@@ -872,7 +872,7 @@ test("AI submission and run operations remain isolated by project and run identi
   assert.match(generate, /if \(submissionIntentRef\.current\) return/);
   assert.match(
     generate,
-    /submissionIntentRef\.current\?\.token !== submissionIntent\.token[\s\S]*?projectEpochRef\.current !== submissionIntent\.epoch[\s\S]*?!sameLocalSourcePath\(sourcePathRef\.current, submissionIntent\.sourcePath\)/,
+    /submissionIntentRef\.current\?\.token !== submissionIntent\.token[\s\S]*?projectSessionRef\.current\.epoch !== submissionIntent\.epoch[\s\S]*?!sameLocalSourcePath\(projectSessionRef\.current\.sourcePath, submissionIntent\.sourcePath\)/,
   );
   assert.match(workbench, /qoderHandoffStatesRef\s*=\s*useRef<Map<string, ProjectQoderHandoffState>>/);
   assert.match(workbench, /activatingRunsRef = useRef<Set<string>>/);
@@ -956,7 +956,7 @@ test("AI completion adopts the generated semantic file before editing resumes", 
   );
   assert.match(
     workbench,
-    /sourcePathRef\.current = nextSourcePath;[\s\S]*?setSourcePath\(nextSourcePath\);[\s\S]*?setSourceSha256\(expectedSha256\)/,
+    /projectSessionRef\.current\.transitionSource\(\{[\s\S]*?sourcePath: nextSourcePath,[\s\S]*?projectId: nextProjectId,[\s\S]*?documentId: nextDocumentId,[\s\S]*?setSourceSha256\(expectedSha256\)/,
   );
   const adoptionStart = workbench.indexOf("const adoptGeneratedSourcePath = useCallback");
   const adoptionEnd = workbench.indexOf("const recoverAutosaveLog", adoptionStart);
