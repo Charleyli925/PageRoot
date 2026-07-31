@@ -1187,7 +1187,10 @@ test("user-opened HTML stays lazily registered until a real project action", () 
 
 test("comment composer is explicit, transient and horizontally contained", () => {
   const unifiedSurfaceStyles = styles.slice(styles.indexOf("PageRoot V5.1"));
-  assert.match(workbench, /composerInCurrentTab && draftTarget && !interactionLocked \?/);
+  assert.match(
+    workbench,
+    /composerInCurrentTab[\s\S]*?Number\.isFinite\(composerTop\)[\s\S]*?!interactionLocked \?/,
+  );
   assert.match(workbench, /setComposerOpen\(true\)/);
   assert.match(workbench, /setComposerOpen\(false\)/);
   assert.match(workbench, /draftTargetRef\.current\?\.id === target\.id/);
@@ -1281,6 +1284,31 @@ test("comment composer is explicit, transient and horizontally contained", () =>
   assert.match(workbench, /openGlobalCommentComposer[\s\S]*?tagName: "body"[\s\S]*?openCommentComposer\(globalTarget\)/);
 });
 
+test("comment layout uses one current snapshot and isolates recovery per item", () => {
+  assert.match(canvas, /targetIds: string\[\]/);
+  assert.match(canvas, /contentHeight: number/);
+  assert.match(canvas, /function naturalDocumentContentHeight/);
+  assert.match(canvas, /visibleCount === 1/);
+  assert.match(
+    canvas,
+    /findIndex\(hasIndexedTabActiveState\) === visiblePanelIndex/,
+  );
+  assert.match(
+    canvas,
+    /commentLayoutsByTargetId\.get\(target\.id\)\?\.status !== "visible"/,
+  );
+  assert.match(workbench, /commentLayoutAuthority\.targetIdsKey/);
+  assert.match(
+    workbench,
+    /layout\?\.status === "missing"[\s\S]*?\?\s*commentRailMinimumTop/,
+  );
+  assert.match(
+    workbench,
+    /\(composerInCurrentTab \|\| hasCollapsedCommentDraft\) && draftTarget/,
+  );
+  assert.doesNotMatch(workbench, /missingCommentLayoutItem/);
+});
+
 test("comment cards show one two-line target label without duplicate copy", () => {
   assert.doesNotMatch(workbench, /<q\b|可添加附件/u);
   assert.match(
@@ -1301,25 +1329,26 @@ test("comment cards show one two-line target label without duplicate copy", () =
   );
   assert.match(
     workbench,
-    /\{comment\.attachments\?\.length \? \([\s\S]*?\{comment\.attachments\.length\} 个附件/u,
+    /\{shownAttachments\?\.length \? \([\s\S]*?\{shownAttachments\.length\} 个附件/u,
   );
 });
 
-test("comment cards keep one visual boundary and reveal compact actions progressively", () => {
+test("comment cards keep one boundary and reserve stable action geometry", () => {
   const footerRule = styles.match(/\.comment-card-footer\s*\{(?<rule>[^}]*)\}/u)
     ?.groups?.rule;
   assert.ok(footerRule);
-  assert.match(footerRule, /height:\s*0/u);
+  assert.match(footerRule, /height:\s*30px/u);
   assert.match(footerRule, /min-height:\s*0/u);
-  assert.match(footerRule, /margin-top:\s*0/u);
+  assert.match(footerRule, /margin-top:\s*6px/u);
   assert.match(footerRule, /padding:\s*0/u);
   assert.match(footerRule, /border:\s*0/u);
   assert.match(footerRule, /opacity:\s*0/u);
   assert.match(footerRule, /pointer-events:\s*none/u);
+  assert.doesNotMatch(footerRule, /height 170ms|margin-top 170ms/u);
   assert.doesNotMatch(footerRule, /border-top/u);
   assert.match(
     styles,
-    /\.comment-card:hover \.comment-card-footer,[\s\S]*?\.comment-card:focus-within \.comment-card-footer,[\s\S]*?\.comment-card\[data-editing="true"\] \.comment-card-footer\s*\{[\s\S]*?height:\s*30px;[\s\S]*?margin-top:\s*6px;[\s\S]*?opacity:\s*1;[\s\S]*?pointer-events:\s*auto/u,
+    /\.comment-card:hover \.comment-card-footer,[\s\S]*?\.comment-card:focus-within \.comment-card-footer,[\s\S]*?\.comment-card\[data-editing="true"\] \.comment-card-footer\s*\{[\s\S]*?opacity:\s*1;[\s\S]*?pointer-events:\s*auto/u,
   );
   assert.match(
     styles,
@@ -1343,10 +1372,51 @@ test("comment cards keep one visual boundary and reveal compact actions progress
   )?.groups?.rule;
   assert.ok(singleBoundaryRule);
   assert.match(singleBoundaryRule, /outline:\s*0/u);
-  assert.match(singleBoundaryRule, /box-shadow:\s*0 15px 32px rgb\(45 42 104 \/ 7%\)/u);
+  assert.match(singleBoundaryRule, /border-color:\s*#8f8ae8/u);
+  assert.match(singleBoundaryRule, /inset 3px 0 0 #5e58d9/u);
+  assert.match(singleBoundaryRule, /0 15px 32px rgb\(45 42 104 \/ 11%\)/u);
   assert.match(singleBoundaryRule, /animation:\s*none/u);
-  assert.doesNotMatch(singleBoundaryRule, /0 0 0/u);
   assert.match(workbench, /data-editing=\{editing \? "true" : undefined\}/u);
+});
+
+test("saved-comment edits are staged, recoverable, and auto-cancel only while clean", () => {
+  assert.match(workbench, /type CommentEditSession = \{/u);
+  assert.match(workbench, /baselineText:\s*comment\.text/u);
+  assert.match(workbench, /baselineAttachments:\s*\[\.\.\.\(comment\.attachments \?\? \[\]\)\]/u);
+  assert.match(workbench, /commentEditSessionHasChanges\(session\)/u);
+  assert.match(workbench, /schemaVersion:\s*"3\.2\.0"/u);
+  assert.match(workbench, /commentEdit:\s*commentEdit/u);
+  assert.match(workbench, /aria-label="有一条未保存修改"/u);
+  assert.match(workbench, /id:\s*"resume-comment-edit"/u);
+  assert.match(
+    workbench,
+    /if \(!commentEditSessionHasChanges\(session\)\) \{[\s\S]*?cancelCommentEdit\(false\)/u,
+  );
+  assert.match(
+    workbench,
+    /draftAttachments:\s*\[\.\.\.current\.draftAttachments, attachment\]/u,
+  );
+  assert.match(
+    workbench,
+    /const wasSavedBeforeEdit = current\.baselineAttachments\.some\([\s\S]*?if \(!wasSavedBeforeEdit\) \{[\s\S]*?deleteAttachmentFile\(attachment\)/u,
+  );
+  assert.doesNotMatch(
+    workbench,
+    /comment\.commentId === target\.commentId[\s\S]{0,180}attachments:\s*\[\.\.\.\(comment\.attachments/u,
+  );
+});
+
+test("explicit comment navigation translates one stable queue and rail wheel drives the shared page", () => {
+  assert.match(workbench, /computeAlignedRailOffset\(\{/u);
+  assert.match(workbench, /routeCommentRailWheel\(\{/u);
+  assert.match(workbench, /rail\.addEventListener\("wheel", handleWheel, \{ passive: false \}\)/u);
+  assert.match(workbench, /viewportTop:\s*Math\.max\(0, commentViewport\.top - commentRailOffset\)/u);
+  assert.match(workbench, /"--comment-rail-offset":\s*`\$\{commentRailOffset\}px`/u);
+  assert.match(
+    styles,
+    /transform:\s*translate3d\(0, var\(--comment-rail-offset\), 0\)/u,
+  );
+  assert.match(styles, /\.comment-rail-header\s*\{[\s\S]*?z-index:\s*8/u);
 });
 
 test("comment attachments support paste, upload, removal, preview, and AI handoff metadata", () => {

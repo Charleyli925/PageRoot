@@ -19,6 +19,13 @@ Notable user-visible changes are documented here. This project follows Semantic 
   page position, use one persistent current-Tab shortcut or a tagged card in
   the appropriate other-Tab group, and keep stable document order through
   focus, expansion and Tab changes until explicitly saved or deleted.
+- Keep comment-card geometry fixed while actions appear, strengthen the focused
+  boundary, align an explicitly selected card by translating the unchanged
+  queue, and route wheel input over the rail through the shared page before
+  restoring comments hidden above the top edge.
+- Treat saved-comment text and attachment edits as one recoverable transaction:
+  unchanged edits cancel automatically on Tab changes, while changed but
+  unconfirmed edits remain available from an “unsaved modification” shortcut.
 - Allow direct text edits beside preserved nested lists and `<wbr>` boundaries
   while keeping those authored structures byte-safe and non-editable.
 - Added a concise AI Agent warning before ending a copied run, restored editing
