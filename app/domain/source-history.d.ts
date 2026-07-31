@@ -21,6 +21,16 @@ export type SourceHistoryEntry = {
   reversePatches: SourceHistoryPatch[];
   beforeTarget: Record<string, unknown> | null;
   afterTarget: Record<string, unknown> | null;
+  beforeSelection?: {
+    anchor: number;
+    focus: number;
+    affinity: "left" | "right";
+  };
+  afterSelection?: {
+    anchor: number;
+    focus: number;
+    affinity: "left" | "right";
+  };
 };
 
 export type SourceHistoryState = {

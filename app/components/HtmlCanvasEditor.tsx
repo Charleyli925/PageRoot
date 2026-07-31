@@ -191,6 +191,8 @@ export type HtmlCanvasSourceTransaction = {
   }>;
   beforeTarget: HtmlCanvasSelection;
   afterTarget: HtmlCanvasSelection;
+  beforeSelection?: NativeEditSelection;
+  afterSelection?: NativeEditSelection;
 };
 
 export type HtmlCanvasInteractionMode = "editing" | "processing" | "history";
@@ -257,6 +259,8 @@ export type HtmlCanvasEditorHandle = {
   /** Retires the editable DOM, reloads canonical source, and optionally resumes editing. */
   fencePendingEdit: (options?: {
     resumeEditing?: boolean;
+    /** Keeps the active target/caret bookmark for the pending history result. */
+    preserveForHistory?: boolean;
     trigger?: NativeEditCheckpointTrigger;
   }) => HtmlCanvasCommitResult;
   commitPendingEdit: () => HtmlCanvasCommitResult;
@@ -279,7 +283,10 @@ export type HtmlCanvasEditorHandle = {
   adoptHistorySource: (
     source: string,
     target: HtmlCanvasSelection | null,
+    selection?: NativeEditSelection | null,
   ) => boolean;
+  /** Restores the pre-action target/caret when a history request fails or becomes ineligible. */
+  cancelHistoryAction: (options?: { restore?: boolean }) => boolean;
   /** Defers one explicit user command until the current native composition is stable/cancelled. */
   deferNativeCommand: (
     kind: string,
@@ -1858,6 +1865,52 @@ function sourceHistoryDirectionForShortcut(event: {
   return event.shiftKey ? "redo" : "undo";
 }
 
+function historySelectionFromMutationValue(
+  value: unknown,
+): NativeEditSelection | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const selection = (value as { selection?: unknown }).selection;
+  if (!selection || typeof selection !== "object" || Array.isArray(selection)) {
+    return undefined;
+  }
+  const candidate = selection as Partial<NativeEditSelection>;
+  if (
+    !Number.isSafeInteger(candidate.anchor)
+    || !Number.isSafeInteger(candidate.focus)
+    || Number(candidate.anchor) < 0
+    || Number(candidate.focus) < 0
+    || (candidate.affinity !== "left" && candidate.affinity !== "right")
+  ) return undefined;
+  return {
+    anchor: Number(candidate.anchor),
+    focus: Number(candidate.focus),
+    affinity: candidate.affinity,
+  };
+}
+
+function safeHistorySelectionOffset(text: string, rawOffset: number): number {
+  let offset = Math.min(text.length, Math.max(0, rawOffset));
+  if (
+    offset > 0
+    && offset < text.length
+    && /[\uD800-\uDBFF]/u.test(text[offset - 1])
+    && /[\uDC00-\uDFFF]/u.test(text[offset])
+  ) offset -= 1;
+  return offset;
+}
+
+function boundedHistorySelection(
+  selection: NativeEditSelection | undefined,
+  text: string,
+): NativeEditSelection | undefined {
+  if (!selection) return undefined;
+  return {
+    anchor: safeHistorySelectionOffset(text, selection.anchor),
+    focus: safeHistorySelectionOffset(text, selection.focus),
+    affinity: selection.affinity,
+  };
+}
+
 function isCanvasRootElement(target: EventTarget | null): boolean {
   return Boolean(
     target
@@ -1927,6 +1980,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const nativeEditFenceSequenceRef = useRef(0);
   const currentNativeEditLeaseRef = useRef<ActiveNativeEdit["lease"] | null>(null);
   const pendingNativeEditResumeRef = useRef<PendingNativeEditResume | null>(null);
+  const pendingHistoryBookmarkRef = useRef<NativeEditFenceBookmark | null>(null);
+  const pendingHistoryCanonicalFenceRef = useRef(false);
   const fencedDocumentCleanupRef = useRef<() => void>(() => undefined);
   const installFencedDocumentGuardRef = useRef<(documentNode: Document) => void>(
     () => undefined,
@@ -2958,6 +3013,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           pendingHtmlEchoesRef.current.length - 16,
         );
       }
+      const beforeHistorySelection = historySelectionFromMutationValue(
+        mutation.before,
+      );
+      const afterHistorySelection = historySelectionFromMutationValue(
+        mutation.after,
+      );
       const sourceTransaction: HtmlCanvasSourceTransaction = {
         kind: appliedMutation.kind,
         ...(appliedMutation.property
@@ -2969,6 +3030,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         reversePatches: result.inversePlan.patches.map((patch) => ({ ...patch })),
         beforeTarget: mutation.target,
         afterTarget: appliedMutation.target,
+        ...(beforeHistorySelection
+          ? { beforeSelection: beforeHistorySelection }
+          : {}),
+        ...(afterHistorySelection
+          ? { afterSelection: afterHistorySelection }
+          : {}),
       };
       if (!onChangeRef.current(
         result.html,
@@ -3758,7 +3825,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         return false;
       }
       const layoutBeforeEditing = nativeLayoutFingerprint(hostElement);
-      let initialSelection: NativeEditSelection | undefined = restoredSelection;
+      let initialSelection = boundedHistorySelection(
+        restoredSelection,
+        projection.text,
+      );
       if (!initialSelection && priorRange && activationLogicalRange) {
         initialSelection = {
           anchor: priorRange.direction === "backward"
@@ -4004,8 +4074,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           },
           { direction },
         )) return true;
-        finishNativeEditing(true, "manual");
-        return false;
+        const committed = finishNativeEditing(true, "manual");
+        if (!committed.ok || committed.frameReloading) return false;
       }
       const element = selectedElementRef.current;
       if (
@@ -4444,10 +4514,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const fencePendingEdit = useCallback((
     options: {
       resumeEditing?: boolean;
+      preserveForHistory?: boolean;
       trigger?: NativeEditCheckpointTrigger;
     } = {},
   ): HtmlCanvasCommitResult => {
     const resumeEditing = options.resumeEditing ?? true;
+    const preserveForHistory = options.preserveForHistory ?? false;
     const committed = checkpointNativeEdit(options.trigger ?? "fence", {
       deferPreviewReconcile: true,
     });
@@ -4465,7 +4537,13 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     const bookmark = detachNativeEditForFence();
     const needsCanonicalFence = Boolean(bookmark)
       || nativeSessionNeedsCanonicalFenceRef.current;
-    if (needsCanonicalFence) {
+    pendingHistoryBookmarkRef.current = preserveForHistory
+      ? bookmark
+      : null;
+    pendingHistoryCanonicalFenceRef.current = preserveForHistory
+      ? needsCanonicalFence
+      : false;
+    if (needsCanonicalFence && !preserveForHistory) {
       const target = resumeEditing
         ? bookmark?.target ?? selectedSourceSelectionRef.current
         : null;
@@ -4475,7 +4553,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         target,
         bookmark?.selection,
       );
-    } else if (!resumeEditing) {
+    } else if (!resumeEditing && !preserveForHistory) {
       pendingFrameRestoreEpochRef.current += 1;
       pendingNativeEditResumeRef.current = null;
       pendingSelectionRef.current = null;
@@ -4496,15 +4574,45 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const adoptHistorySource = useCallback((
     source: string,
     target: HtmlCanvasSelection | null,
+    selection?: NativeEditSelection | null,
   ): boolean => {
     if (activeNativeEditRef.current) detachNativeEditForFence();
-    pendingNativeEditResumeRef.current = null;
+    const bookmark = pendingHistoryBookmarkRef.current;
+    pendingHistoryBookmarkRef.current = null;
+    pendingHistoryCanonicalFenceRef.current = false;
     nativeSessionNeedsCanonicalFenceRef.current = false;
     lastEmittedHtmlRef.current = source;
     pendingHtmlEchoesRef.current = [];
-    queueNativeFenceReload(source, null, target);
+    const resumeTarget = bookmark
+      ? target ?? bookmark.target
+      : target;
+    queueNativeFenceReload(
+      source,
+      bookmark,
+      resumeTarget,
+      selection ?? bookmark?.selection,
+    );
     return true;
   }, [detachNativeEditForFence, queueNativeFenceReload]);
+
+  const cancelHistoryAction = useCallback((
+    options: { restore?: boolean } = {},
+  ): boolean => {
+    const bookmark = pendingHistoryBookmarkRef.current;
+    const needsCanonicalFence = pendingHistoryCanonicalFenceRef.current;
+    pendingHistoryBookmarkRef.current = null;
+    pendingHistoryCanonicalFenceRef.current = false;
+    if (!bookmark && !needsCanonicalFence) return false;
+    if (options.restore === false) return true;
+    nativeSessionNeedsCanonicalFenceRef.current = false;
+    queueNativeFenceReload(
+      frameSourceHtmlRef.current,
+      bookmark,
+      bookmark?.target ?? selectedSourceSelectionRef.current,
+      bookmark?.selection,
+    );
+    return true;
+  }, [queueNativeFenceReload]);
 
   const freezeNow = useCallback((): HtmlCanvasFreezeSnapshot => {
     const committed = commitPendingEdit();
@@ -4585,6 +4693,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       startEditing,
       moveSelected,
       adoptHistorySource,
+      cancelHistoryAction,
       deferNativeCommand,
     }),
     [
@@ -4596,6 +4705,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       freezeNow,
       moveSelected,
       adoptHistorySource,
+      cancelHistoryAction,
       selectTarget,
       showCommitBlocked,
       startEditing,
@@ -4631,6 +4741,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     if (html === lastEmittedHtmlRef.current && previous.baseHref === resolvedBaseHref) return;
     if (activeNativeEditRef.current) detachNativeEditForFence();
     pendingNativeEditResumeRef.current = null;
+    pendingHistoryBookmarkRef.current = null;
+    pendingHistoryCanonicalFenceRef.current = false;
     resetSelection(false);
     lastEmittedHtmlRef.current = null;
     pendingHtmlEchoesRef.current = [];
@@ -4694,6 +4806,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       discardPendingNativeCommands("unmounted");
       retainNativeEditFocusRef.current = null;
       pendingNativeEditResumeRef.current = null;
+      pendingHistoryBookmarkRef.current = null;
+      pendingHistoryCanonicalFenceRef.current = false;
       fencedDocumentCleanupRef.current();
       cleanupFrameRef.current();
       resizeObserverRef.current?.disconnect();

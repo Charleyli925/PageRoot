@@ -81,6 +81,32 @@ function boundedJsonRecord(value, label) {
   return JSON.parse(serialized);
 }
 
+function cleanSelection(value, label) {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) {
+    throw historyError(
+      "INVALID_SOURCE_HISTORY_SELECTION",
+      `${label} must be an object when present.`,
+    );
+  }
+  const anchor = Number(value.anchor);
+  const focus = Number(value.focus);
+  const affinity = String(value.affinity || "");
+  if (
+    !Number.isSafeInteger(anchor)
+    || !Number.isSafeInteger(focus)
+    || anchor < 0
+    || focus < 0
+    || (affinity !== "left" && affinity !== "right")
+  ) {
+    throw historyError(
+      "INVALID_SOURCE_HISTORY_SELECTION",
+      `${label} must contain safe logical offsets and affinity.`,
+    );
+  }
+  return { anchor, focus, affinity };
+}
+
 function cleanPatch(raw, label) {
   if (!isRecord(raw)) {
     throw historyError(
@@ -198,6 +224,22 @@ function cleanEntry(raw) {
     reversePatches: cleanPatches(raw.reversePatches, "entry.reversePatches"),
     beforeTarget: boundedJsonRecord(raw.beforeTarget, "entry.beforeTarget"),
     afterTarget: boundedJsonRecord(raw.afterTarget, "entry.afterTarget"),
+    ...(raw.beforeSelection !== undefined
+      ? {
+          beforeSelection: cleanSelection(
+            raw.beforeSelection,
+            "entry.beforeSelection",
+          ),
+        }
+      : {}),
+    ...(raw.afterSelection !== undefined
+      ? {
+          afterSelection: cleanSelection(
+            raw.afterSelection,
+            "entry.afterSelection",
+          ),
+        }
+      : {}),
   };
 }
 
@@ -731,6 +773,21 @@ export function applySourceHistoryAction(
           ? replayedEntry.beforeTarget
           : replayedEntry.afterTarget
         : null,
+      selection: replayedEntry
+        ? direction === "undo"
+          ? replayedEntry.beforeSelection ?? null
+          : replayedEntry.afterSelection ?? null
+        : null,
+      targetTransition: replayedEntry
+        ? {
+            fromTarget: direction === "undo"
+              ? replayedEntry.afterTarget
+              : replayedEntry.beforeTarget,
+            toTarget: direction === "undo"
+              ? replayedEntry.beforeTarget
+              : replayedEntry.afterTarget,
+          }
+        : null,
     };
   }
   if (
@@ -760,6 +817,8 @@ export function applySourceHistoryAction(
       history,
       entry: null,
       target: null,
+      selection: null,
+      targetTransition: null,
     };
   }
   const patches = direction === "undo"
@@ -818,6 +877,17 @@ export function applySourceHistoryAction(
     },
     entry,
     target: direction === "undo" ? entry.beforeTarget : entry.afterTarget,
+    selection: direction === "undo"
+      ? entry.beforeSelection ?? null
+      : entry.afterSelection ?? null,
+    targetTransition: {
+      fromTarget: direction === "undo"
+        ? entry.afterTarget
+        : entry.beforeTarget,
+      toTarget: direction === "undo"
+        ? entry.beforeTarget
+        : entry.afterTarget,
+    },
   };
 }
 

@@ -4050,6 +4050,8 @@ async function runSourceHistoryAction(body) {
         lastModifiedAt: source.lastModifiedAt,
         sourceHistory: sourceHistoryResponse(action.history),
         target: action.target,
+        selection: action.selection,
+        targetTransition: action.targetTransition,
         versionCreated: false,
       };
     }
@@ -4223,6 +4225,8 @@ async function runSourceHistoryAction(body) {
       ),
       sourceHistory: sourceHistoryResponse(action.history),
       target: action.target,
+      selection: action.selection,
+      targetTransition: action.targetTransition,
       operationId: action.entry?.operationId || null,
       versionCreated: false,
     };

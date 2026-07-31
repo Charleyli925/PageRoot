@@ -42,6 +42,8 @@ function replacementOperation(before, after, operationId = "sourceop_12345678901
     }],
     beforeTarget: { id: "target-a", text: "one" },
     afterTarget: { id: "target-a", text: "two" },
+    beforeSelection: { anchor: 0, focus: 3, affinity: "right" },
+    afterSelection: { anchor: 3, focus: 3, affinity: "right" },
   };
 }
 
@@ -131,6 +133,15 @@ test("persistent source history applies exact undo and redo patches", () => {
   });
   assert.equal(undone.html, before);
   assert.deepEqual(undone.target, { id: "target-a", text: "one" });
+  assert.deepEqual(undone.selection, {
+    anchor: 0,
+    focus: 3,
+    affinity: "right",
+  });
+  assert.deepEqual(undone.targetTransition, {
+    fromTarget: { id: "target-a", text: "two" },
+    toTarget: { id: "target-a", text: "one" },
+  });
   assert.equal(undone.history.cursor, 0);
 
   const redone = applySourceHistoryAction(undone.history, before, {
@@ -145,7 +156,42 @@ test("persistent source history applies exact undo and redo patches", () => {
   });
   assert.equal(redone.html, after);
   assert.deepEqual(redone.target, { id: "target-a", text: "two" });
+  assert.deepEqual(redone.selection, {
+    anchor: 3,
+    focus: 3,
+    affinity: "right",
+  });
+  assert.deepEqual(redone.targetTransition, {
+    fromTarget: { id: "target-a", text: "one" },
+    toTarget: { id: "target-a", text: "two" },
+  });
   assert.equal(redone.history.cursor, 1);
+});
+
+test("persistent source history rejects malformed logical selection metadata", () => {
+  const before = "<p>one</p>";
+  const after = "<p>two</p>";
+  const operation = replacementOperation(before, after);
+  operation.beforeSelection = null;
+  assert.throws(
+    () => appendSourceHistoryOperations(
+      createEmptySourceHistory({
+        projectId,
+        documentId,
+        sourceSha256: sha256(before),
+        now,
+      }),
+      [operation],
+      {
+        projectId,
+        documentId,
+        sourceSha256: sha256(before),
+        targetSourceSha256: sha256(after),
+        now,
+      },
+    ),
+    (error) => error.code === "INVALID_SOURCE_HISTORY_SELECTION",
+  );
 });
 
 test("text, style, structure, and sibling reorder share one exact durable cursor", () => {

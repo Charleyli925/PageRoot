@@ -293,11 +293,12 @@
     {
       "id": "source-editing-core",
       "patterns": [
-        "^app/lib/(?:editable-island|source-(?:index|patch-core|patch-engine|text-map)|target-resolver|runtime-dom-source-map|format-skeleton|native-(?:edit-capability|edit-policy|edit-transaction|input-intent|structural-edit-planner|source-map|block-edit-draft))\\.(?:js|ts|d\\.ts)$",
+        "^app/lib/(?:canvas-target-rebind|editable-island|source-(?:index|patch-core|patch-engine|text-map)|target-resolver|runtime-dom-source-map|format-skeleton|native-(?:edit-capability|edit-policy|edit-transaction|input-intent|structural-edit-planner|source-map|block-edit-draft))\\.(?:js|ts|d\\.ts)$",
         "^scripts/(?:source-index|source-patch-engine|target-resolver)\\.mjs$"
       ],
       "suites": ["typecheck", "browser-smoke", "electron-smoke"],
       "nodeTests": [
+        "tests/canvas-target-rebind.test.mjs",
         "tests/source-index-target-resolver.test.mjs",
         "tests/source-patch-engine.test.mjs",
         "tests/editable-island.test.mjs",

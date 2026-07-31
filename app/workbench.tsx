@@ -52,7 +52,10 @@ import AboutPageRootDialog from "./components/AboutPageRootDialog";
 import HtmlInteractionPreview from "./components/HtmlInteractionPreview";
 import NoticeBar from "./components/NoticeBar";
 import RestartUpdateDialog from "./components/RestartUpdateDialog";
-import { rebindCanvasSelectionTargets } from "./lib/canvas-target-rebind.js";
+import {
+  rebindCanvasSelectionTargets,
+  rebindCanvasSelectionTargetsAcrossHistory,
+} from "./lib/canvas-target-rebind.js";
 import {
   MAX_ATTACHMENT_BYTES,
   MAX_COMMENT_ATTACHMENTS,
@@ -631,6 +634,35 @@ function rebindTargetsPreservingGlobal(
   ));
 }
 
+function rebindTargetsAcrossHistoryPreservingGlobal(
+  currentHtml: string,
+  nextHtml: string,
+  targets: HtmlCanvasSelection[],
+  transition: {
+    fromTarget: HtmlCanvasSelection | null;
+    toTarget: HtmlCanvasSelection | null;
+  },
+): HtmlCanvasSelection[] {
+  const localTargets = targets.filter((target) => (
+    !isGlobalPageTarget(target) && canLocateTarget(target)
+  ));
+  const reboundById = new Map(
+    rebindCanvasSelectionTargetsAcrossHistory(
+      currentHtml,
+      nextHtml,
+      localTargets,
+      transition,
+    ).map((target) => [target.id, target]),
+  );
+  return targets.map((target) => (
+    isGlobalPageTarget(target)
+      ? exactGlobalPageTarget(target)
+      : canLocateTarget(target)
+        ? reboundById.get(target.id) || target
+        : target
+  ));
+}
+
 function normalizeGlobalCommentTargets(comments: CommentItem[]): {
   comments: CommentItem[];
   changed: boolean;
@@ -982,6 +1014,29 @@ function recoveryIdentityFromRecord(value: unknown): RecoveryIdentity | null {
     || !/^sha256:[a-f0-9]{64}$/u.test(identity.token)
   ) return null;
   return identity as RecoveryIdentity;
+}
+
+function historyTextSelectionFromRecord(raw: unknown): {
+  anchor: number;
+  focus: number;
+  affinity: "left" | "right";
+} | null {
+  if (!isRecord(raw)) return null;
+  const anchor = Number(raw.anchor);
+  const focus = Number(raw.focus);
+  const affinity = String(raw.affinity || "");
+  if (
+    !Number.isSafeInteger(anchor)
+    || !Number.isSafeInteger(focus)
+    || anchor < 0
+    || focus < 0
+    || (affinity !== "left" && affinity !== "right")
+  ) return null;
+  return {
+    anchor,
+    focus,
+    affinity,
+  };
 }
 
 function selectionFromRecord(raw: unknown): HtmlCanvasSelection {
@@ -1832,6 +1887,14 @@ export default function Workbench() {
     abortedRequestIds: new Set(),
   });
   const saveProjectRulesRef = useRef<() => Promise<boolean>>(async () => false);
+  const projectRulesEditorRef = useRef<HTMLTextAreaElement | null>(null);
+  const projectRulesCompositionRef = useRef<{
+    epoch: number;
+    target: HTMLTextAreaElement;
+    baselineValue: string;
+    restoreRequested: boolean;
+  } | null>(null);
+  const projectRulesCompositionEpochRef = useRef(0);
   const fileRenameInputRef = useRef<HTMLInputElement | null>(null);
   const fileRenameEditingRef = useRef(false);
   const fileRenameBusyRef = useRef(false);
@@ -1881,6 +1944,10 @@ export default function Workbench() {
   const [commentViewport, setCommentViewport] = useState({ top: 0, height: 800 });
   const [focusedCommentId, setFocusedCommentId] = useState<string | null>(null);
   const [fileView, setFileView] = useState<WorkspaceFileView | null>(null);
+  const [projectRulesEditorGeneration, setProjectRulesEditorGeneration] =
+    useState(0);
+  const [projectRulesCompositionActive, setProjectRulesCompositionActive] =
+    useState(false);
   const [projectRulesSaving, setProjectRulesSaving] = useState(false);
   const [projectRulesSaveError, setProjectRulesSaveError] = useState("");
   const [projectRecordsPreparing, setProjectRecordsPreparing] = useState(false);
@@ -2415,13 +2482,18 @@ export default function Workbench() {
       layout.targets.map((target) => [target.targetId, target.top]),
     );
     setCommentTargetTops((current) => {
+      // A keyed Canvas source replacement briefly has no resolvable DOM
+      // targets. Keep each card's last proven top until the replacement frame
+      // reports its new geometry; active comments alone consume this map, and
+      // project transitions clear it explicitly.
+      const merged = { ...current, ...nextTops };
       const currentEntries = Object.entries(current);
-      const nextEntries = Object.entries(nextTops);
+      const nextEntries = Object.entries(merged);
       if (
         currentEntries.length === nextEntries.length
         && nextEntries.every(([targetId, top]) => current[targetId] === top)
       ) return current;
-      return nextTops;
+      return merged;
     });
   }, []);
 
@@ -6686,6 +6758,7 @@ export default function Workbench() {
     const run = async (): Promise<boolean> => {
       const fenced = editorRef.current?.fencePendingEdit({
         resumeEditing: false,
+        preserveForHistory: true,
         trigger: "fence",
       });
       if (!fenced || !fenced.ok) {
@@ -6695,6 +6768,7 @@ export default function Workbench() {
         return false;
       }
       if (!await flushAutosave(editRevisionRef.current)) {
+        editorRef.current?.cancelHistoryAction();
         setToast({
           title: direction === "undo" ? "暂时不能撤销" : "暂时不能重做",
           message: "当前修改还没有安全写入源 HTML，本次操作未执行；保存状态区会保留具体原因。",
@@ -6705,12 +6779,18 @@ export default function Workbench() {
         return false;
       }
       const context = captureProjectContext();
-      if (!context) return false;
+      if (!context) {
+        editorRef.current?.cancelHistoryAction();
+        return false;
+      }
       const action = sourceHistorySessionRef.current.createAction(
         context,
         direction,
       );
-      if (!action) return false;
+      if (!action) {
+        editorRef.current?.cancelHistoryAction();
+        return false;
+      }
       const requestBody = {
         ...context,
         ...action,
@@ -6794,7 +6874,10 @@ export default function Workbench() {
         invalid.code = "INVALID_SOURCE_HISTORY_ACK";
         throw invalid;
       }
-      if (!isCurrentProjectContext(context)) return false;
+      if (!isCurrentProjectContext(context)) {
+        editorRef.current?.cancelHistoryAction({ restore: false });
+        return false;
+      }
       if (!sourceHistorySessionRef.current.replaceAuthority(
         context,
         payload.sourceHistory,
@@ -6810,16 +6893,35 @@ export default function Workbench() {
       const rawHistoryTarget = isRecord(payload.target)
         ? selectionFromRecord(payload.target)
         : null;
+      const rawTransition = isRecord(payload.targetTransition)
+        ? payload.targetTransition
+        : null;
+      const historyTransition = {
+        fromTarget: isRecord(rawTransition?.fromTarget)
+          ? selectionFromRecord(rawTransition.fromTarget)
+          : null,
+        toTarget: isRecord(rawTransition?.toTarget)
+          ? selectionFromRecord(rawTransition.toTarget)
+          : null,
+      };
+      const historyTextSelection = historyTextSelectionFromRecord(
+        payload.selection,
+      );
       const targets = [
         ...commentsRef.current.map((comment) => comment.target),
         ...changeEventsRef.current.map((event) => event.target),
         ...(draftTargetRef.current ? [draftTargetRef.current] : []),
         ...(rawHistoryTarget ? [rawHistoryTarget] : []),
       ];
-      const reboundTargets = rebindTargetsPreservingGlobal(
-        canonicalHtml,
-        targets,
-      );
+      const reboundTargets = historyTransition.fromTarget
+        && historyTransition.toTarget
+        ? rebindTargetsAcrossHistoryPreservingGlobal(
+            htmlRef.current,
+            canonicalHtml,
+            targets,
+            historyTransition,
+          )
+        : rebindTargetsPreservingGlobal(canonicalHtml, targets);
       const reboundById = new Map(
         reboundTargets.map((target) => [target.id, target]),
       );
@@ -6854,6 +6956,7 @@ export default function Workbench() {
       editorRef.current?.adoptHistorySource(
         canonicalHtml,
         nextHistoryTarget,
+        historyTextSelection,
       );
       htmlRef.current = canonicalHtml;
       sourceShaRef.current = nextSourceSha256;
@@ -6889,6 +6992,7 @@ export default function Workbench() {
     };
 
     const promise = run().catch((cause) => {
+      editorRef.current?.cancelHistoryAction();
       const message = productErrorMessage(
         cause,
         direction === "undo"
@@ -7534,6 +7638,8 @@ export default function Workbench() {
   const viewFile = useCallback(async (path: string) => {
     const context = captureProjectContext();
     if (!context) return;
+    projectRulesCompositionRef.current = null;
+    setProjectRulesCompositionActive(false);
     setFileView({
       path,
       content: "正在读取…",
@@ -7559,7 +7665,76 @@ export default function Workbench() {
     }
   }, [captureProjectContext, isCurrentProjectContext, readWorkspaceFile]);
 
+  const beginProjectRulesComposition = useCallback((
+    target: HTMLTextAreaElement,
+  ) => {
+    projectRulesCompositionEpochRef.current += 1;
+    projectRulesCompositionRef.current = {
+      epoch: projectRulesCompositionEpochRef.current,
+      target,
+      baselineValue: target.value,
+      restoreRequested: false,
+    };
+    setProjectRulesCompositionActive(true);
+  }, []);
+
+  const finishProjectRulesComposition = useCallback((
+    target: HTMLTextAreaElement,
+  ) => {
+    const active = projectRulesCompositionRef.current;
+    if (!active || active.target !== target) return;
+    if (!active.restoreRequested) {
+      projectRulesCompositionRef.current = null;
+      setProjectRulesCompositionActive(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (drawer === "files" && fileView?.path === "PROJECT.md") return;
+    const active = projectRulesCompositionRef.current;
+    if (!active) return;
+    projectRulesCompositionRef.current = null;
+    setProjectRulesCompositionActive(false);
+    if (active.restoreRequested) return;
+    setFileView((current) => (
+      current?.path === "PROJECT.md"
+        ? { ...current, content: active.baselineValue }
+        : current
+    ));
+  }, [drawer, fileView?.path]);
+
+  const restoreProjectRules = useCallback(() => {
+    const activeComposition = projectRulesCompositionRef.current;
+    if (activeComposition) activeComposition.restoreRequested = true;
+    setProjectRulesCompositionActive(false);
+    setProjectRulesSaveError("");
+    setFileView((current) => (
+      current?.path === "PROJECT.md"
+        ? { ...current, content: current.savedContent }
+        : current
+    ));
+    // Retire the exact textarea that owns macOS marked text. A late
+    // composition input from that detached control can no longer overwrite
+    // the explicit restore result.
+    setProjectRulesEditorGeneration((current) => current + 1);
+    const restoreEpoch = activeComposition?.epoch ?? null;
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        if (
+          restoreEpoch !== null
+          && projectRulesCompositionRef.current?.epoch === restoreEpoch
+        ) {
+          projectRulesCompositionRef.current = null;
+        }
+        const editor = projectRulesEditorRef.current;
+        editor?.focus({ preventScroll: true });
+        editor?.setSelectionRange(editor.value.length, editor.value.length);
+      });
+    });
+  }, []);
+
   const saveProjectRules = useCallback(async (): Promise<boolean> => {
+    if (projectRulesCompositionRef.current) return false;
     if (
       fileView?.path === "PROJECT.md"
       && !fileView.loading
@@ -7628,6 +7803,7 @@ export default function Workbench() {
       || fileView.error
       || fileView.content === fileView.savedContent
       || projectRulesSaving
+      || projectRulesCompositionActive
       || runInProgress
     ) return;
     const timer = window.setTimeout(() => {
@@ -7636,6 +7812,7 @@ export default function Workbench() {
     return () => window.clearTimeout(timer);
   }, [
     fileView,
+    projectRulesCompositionActive,
     projectRulesSaving,
     runInProgress,
     saveProjectRules,
@@ -7648,6 +7825,8 @@ export default function Workbench() {
       && fileView.content !== fileView.savedContent
       && !await saveProjectRules()
     ) return false;
+    projectRulesCompositionRef.current = null;
+    setProjectRulesCompositionActive(false);
     setFileView(null);
     return true;
   }, [fileView, saveProjectRules]);
@@ -10862,13 +11041,24 @@ export default function Workbench() {
                         : "修改会自动保存。每次发送至 Qoder 时，源页都会把这份规则与本轮要求一起交接；规则只影响后续任务，不会修改当前 HTML。"}
                     </p>
                     <textarea
+                      key={projectRulesEditorGeneration}
+                      ref={projectRulesEditorRef}
                       className="project-file-editor"
                       aria-label="项目长期规则"
                       aria-describedby="project-rules-help"
                       spellCheck={false}
                       disabled={fileView.loading || runInProgress}
                       value={fileView.content}
+                      onCompositionStart={(event) => {
+                        beginProjectRulesComposition(event.currentTarget);
+                      }}
+                      onCompositionEnd={(event) => {
+                        finishProjectRulesComposition(event.currentTarget);
+                      }}
                       onChange={(event) => {
+                        if (
+                          projectRulesCompositionRef.current?.restoreRequested
+                        ) return;
                         setProjectRulesSaveError("");
                         setFileView((current) => (
                           current?.path === "PROJECT.md"
@@ -10898,14 +11088,17 @@ export default function Workbench() {
                           || runInProgress
                           || fileView.content === fileView.savedContent
                         }
-                        onClick={() => {
-                          setProjectRulesSaveError("");
-                          setFileView((current) => (
-                            current?.path === "PROJECT.md"
-                              ? { ...current, content: current.savedContent }
-                              : current
-                          ));
+                        onPointerDown={(event) => {
+                          if (projectRulesCompositionRef.current) {
+                            event.preventDefault();
+                          }
                         }}
+                        onMouseDown={(event) => {
+                          if (projectRulesCompositionRef.current) {
+                            event.preventDefault();
+                          }
+                        }}
+                        onClick={restoreProjectRules}
                       >还原修改</button>
                       {projectRulesSaveError ? (
                         <button

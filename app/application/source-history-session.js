@@ -73,6 +73,12 @@ export class SourceHistorySession {
       reversePatches: transaction.reversePatches,
       beforeTarget: transaction.beforeTarget,
       afterTarget: transaction.afterTarget,
+      ...(transaction.beforeSelection
+        ? { beforeSelection: transaction.beforeSelection }
+        : {}),
+      ...(transaction.afterSelection
+        ? { afterSelection: transaction.afterSelection }
+        : {}),
     };
     const expectedSourceSha256 = this.#pending.at(-1)?.afterSourceSha256
       || (this.#history

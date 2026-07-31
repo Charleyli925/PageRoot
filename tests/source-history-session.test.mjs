@@ -42,6 +42,8 @@ const transaction = {
   }],
   beforeTarget: { id: "target" },
   afterTarget: { id: "target" },
+  beforeSelection: { anchor: 0, focus: 1, affinity: "right" },
+  afterSelection: { anchor: 1, focus: 1, affinity: "right" },
 };
 
 test("SourceHistorySession preserves a pre-registration edit through authority binding", () => {
@@ -70,6 +72,8 @@ test("SourceHistorySession acknowledges only sent operations and then enables ac
     1,
     "2026-07-31T00:00:00.000Z",
   );
+  assert.deepEqual(operation.beforeSelection, transaction.beforeSelection);
+  assert.deepEqual(operation.afterSelection, transaction.afterSelection);
   const persisted = {
     ...empty,
     cursor: 1,
