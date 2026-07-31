@@ -30,6 +30,17 @@ test("the demo pairs comments with several visible change types", () => {
   assert.match(page, /第一版先按整份候选做决定/);
 });
 
+test("overlay comparison stress-tests compound changes without altering other views", () => {
+  assert.match(page, /isOverlay \? <OverlayLegend \/> : null/);
+  assert.match(page, /isOverlay \? <ComplexOverlayCases \/> : null/);
+  assert.match(page, /局部文字 \+ 纯样式变化/);
+  assert.match(page, /布局重排 \+ 指标层级变化/);
+  assert.match(page, /模块删除、新增与跨区移动/);
+  assert.match(page, /列表重序 \+ 拆分与合并/);
+  assert.match(page, /整块重做：故事线和组件结构都变了/);
+  assert.match(page, /不会把移动误显示成一次删除加一次新增/);
+});
+
 test("the demo remains isolated from the production AI and persistence bridges", () => {
   assert.doesNotMatch(page, /htmlAIProjects|workspace-bridge|activate-generated-version|fetch\(/);
   assert.match(page, /交互 Demo · 不写入文件/);

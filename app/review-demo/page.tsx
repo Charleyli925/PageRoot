@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ArrowLeftIcon } from "@phosphor-icons/react/dist/csr/ArrowLeft";
 import { ArrowRightIcon } from "@phosphor-icons/react/dist/csr/ArrowRight";
 import { ArrowsClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowsClockwise";
+import { ArrowsDownUpIcon } from "@phosphor-icons/react/dist/csr/ArrowsDownUp";
 import { ChatCircleTextIcon } from "@phosphor-icons/react/dist/csr/ChatCircleText";
 import { CheckCircleIcon } from "@phosphor-icons/react/dist/csr/CheckCircle";
 import { CircleNotchIcon } from "@phosphor-icons/react/dist/csr/CircleNotch";
@@ -15,8 +16,12 @@ import { FloppyDiskIcon } from "@phosphor-icons/react/dist/csr/FloppyDisk";
 import { GitDiffIcon } from "@phosphor-icons/react/dist/csr/GitDiff";
 import { LockKeyIcon } from "@phosphor-icons/react/dist/csr/LockKey";
 import { MagicWandIcon } from "@phosphor-icons/react/dist/csr/MagicWand";
+import { MinusCircleIcon } from "@phosphor-icons/react/dist/csr/MinusCircle";
+import { PlusCircleIcon } from "@phosphor-icons/react/dist/csr/PlusCircle";
+import { RowsIcon } from "@phosphor-icons/react/dist/csr/Rows";
 import { ShieldCheckIcon } from "@phosphor-icons/react/dist/csr/ShieldCheck";
 import { SparkleIcon } from "@phosphor-icons/react/dist/csr/Sparkle";
+import { TableIcon } from "@phosphor-icons/react/dist/csr/Table";
 import { WarningCircleIcon } from "@phosphor-icons/react/dist/csr/WarningCircle";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 
@@ -341,6 +346,173 @@ function ChangePin({
   );
 }
 
+function OverlayLegend() {
+  return (
+    <section className={styles.overlayLegend} aria-label="叠加对比包含的复杂变化类型">
+      <span>
+        <GitDiffIcon aria-hidden="true" size={15} weight="duotone" />
+        <strong>复合变化预演</strong>
+      </span>
+      <ul>
+        <li data-tone="replace">文字替换</li>
+        <li data-tone="style">纯样式</li>
+        <li data-tone="move">布局与移动</li>
+        <li data-tone="remove">删除</li>
+        <li data-tone="add">新增</li>
+        <li data-tone="rebuild">整块重做</li>
+      </ul>
+    </section>
+  );
+}
+
+function ComplexOverlayCases() {
+  return (
+    <section className={styles.overlayStressTest} aria-label="复杂修改对比示例">
+      <header className={styles.complexIntro}>
+        <span>复杂差异压力测试</span>
+        <h2>同一轮修改，可能同时改变文字、样式和页面结构</h2>
+        <p>这些示例只在“叠加对比”里展开，用来验证真实复杂 HTML 返回时仍能清楚说明发生了什么。</p>
+      </header>
+
+      <article className={styles.overlayCase}>
+        <header className={styles.overlayCaseHeader}>
+          <span>01</span>
+          <div><strong>局部文字 + 纯样式变化</strong><small>保留没变的上下文，只标出真正变化的词和视觉属性</small></div>
+        </header>
+        <div className={styles.wordLevelDiff}>
+          <p>
+            搜索广告<del>带来最多新增访问</del><ins>负责拉新规模</ins>，内容渠道
+            <del>访问量较少，但收藏率更好</del><ins>贡献了最高质量的高意向访问</ins>。
+          </p>
+          <div className={styles.styleChangePair}>
+            <div data-side="before">
+              <small>修改前 · 普通正文</small>
+              <p>高意向人群是本轮增长来源</p>
+              <span>14px · 常规 · 灰色</span>
+            </div>
+            <ArrowRightIcon aria-hidden="true" size={17} weight="bold" />
+            <div data-side="after">
+              <small>修改后 · 关键结论</small>
+              <p>高意向人群是本轮增长来源</p>
+              <span>18px · 加粗 · 强调色</span>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article className={styles.overlayCase}>
+        <header className={styles.overlayCaseHeader}>
+          <span>02</span>
+          <div><strong>布局重排 + 指标层级变化</strong><small>内容没有全部消失，但列数、面积和阅读顺序发生了变化</small></div>
+        </header>
+        <div className={styles.layoutComparison}>
+          <section data-side="before">
+            <header><span>修改前</span><small>等宽三列</small></header>
+            <div className={styles.metricLayoutPreview} data-layout="before">
+              <div><span>新增成交</span><strong>¥286k</strong></div>
+              <div><span>转化率</span><strong>8.7%</strong></div>
+              <div><span>获客成本</span><strong>¥42.8</strong></div>
+            </div>
+          </section>
+          <section data-side="after">
+            <header><span>修改后</span><small>主指标占双列</small></header>
+            <div className={styles.metricLayoutPreview} data-layout="after">
+              <div data-featured="true"><span>核心转化率</span><strong>12.4%</strong><small>成为第一阅读焦点</small></div>
+              <div><span>新增成交</span><strong>¥286k</strong></div>
+              <div><span>获客成本</span><strong>¥42.8</strong></div>
+            </div>
+          </section>
+        </div>
+      </article>
+
+      <article className={styles.overlayCase}>
+        <header className={styles.overlayCaseHeader}>
+          <span>03</span>
+          <div><strong>模块删除、新增与跨区移动</strong><small>不把结构变化伪装成几行普通文字修改</small></div>
+        </header>
+        <div className={styles.structureEvents}>
+          <section data-tone="remove">
+            <MinusCircleIcon aria-hidden="true" size={20} weight="duotone" />
+            <div><span>整个模块已删除</span><strong>渠道明细表</strong><small>原位置：渠道表现之后 · 6 行数据</small></div>
+            <TableIcon aria-hidden="true" size={24} weight="duotone" />
+          </section>
+          <section data-tone="add">
+            <PlusCircleIcon aria-hidden="true" size={20} weight="duotone" />
+            <div><span>新增模块</span><strong>异常渠道提醒</strong><small>新位置：下一步行动之前 · AI 额外补充</small></div>
+            <WarningCircleIcon aria-hidden="true" size={24} weight="duotone" />
+          </section>
+          <section data-tone="move">
+            <ArrowsDownUpIcon aria-hidden="true" size={20} weight="duotone" />
+            <div><span>模块跨区移动</span><strong>人群洞察</strong><small>页面底部 → 核心结论之后 · 内容本身未删除</small></div>
+            <RowsIcon aria-hidden="true" size={24} weight="duotone" />
+          </section>
+        </div>
+      </article>
+
+      <article className={styles.overlayCase}>
+        <header className={styles.overlayCaseHeader}>
+          <span>04</span>
+          <div><strong>列表重序 + 拆分与合并</strong><small>同时告诉用户哪项被删除、哪项只是换了位置</small></div>
+        </header>
+        <div className={styles.orderComparison}>
+          <section data-side="before">
+            <header><span>修改前</span><small>按渠道组织</small></header>
+            <ol>
+              <li><span>1</span><p>扩大搜索广告覆盖</p><small data-tone="remove">删除</small></li>
+              <li><span>2</span><p>继续观察内容渠道</p><small data-tone="merge">合并</small></li>
+              <li><span>3</span><p>周末汇总完整周报</p><small data-tone="move">后移</small></li>
+            </ol>
+          </section>
+          <ArrowRightIcon aria-hidden="true" size={18} weight="bold" />
+          <section data-side="after">
+            <header><span>修改后</span><small>按执行优先级组织</small></header>
+            <ol>
+              <li><span>1</span><p>暂停联盟渠道新增预算</p><small data-tone="add">新增</small></li>
+              <li><span>2</span><p>预算集中到高意向人群</p><small data-tone="merge">合并</small></li>
+              <li><span>3</span><p>48 小时后快速复盘</p><small data-tone="move">前移</small></li>
+            </ol>
+          </section>
+        </div>
+      </article>
+
+      <article className={styles.overlayCase}>
+        <header className={styles.overlayCaseHeader}>
+          <span>05</span>
+          <div><strong>整块重做：故事线和组件结构都变了</strong><small>旧模块完整保留为参考，新模块完整展示为候选</small></div>
+        </header>
+        <div className={styles.moduleRebuildComparison}>
+          <section data-side="before">
+            <header><MinusCircleIcon aria-hidden="true" size={16} weight="duotone" /><span>原模块 · 整块替换</span></header>
+            <div className={styles.oldModuleExample}>
+              <small>渠道周报</small>
+              <h3>继续扩大覆盖面</h3>
+              <p>搜索广告带来更多访问，后续继续观察各渠道表现并在周末汇总。</p>
+              <span>查看渠道详情</span>
+            </div>
+          </section>
+          <section data-side="after">
+            <header><PlusCircleIcon aria-hidden="true" size={16} weight="duotone" /><span>新模块 · 完整候选</span></header>
+            <div className={styles.newModuleExample}>
+              <div><small>决策建议</small><span>优先级 P1</span></div>
+              <h3>未来 48 小时先做三件事</h3>
+              <ul>
+                <li><strong>预算</strong><span>高意向人群 +20%</span></li>
+                <li><strong>渠道</strong><span>暂停联盟新增投放</span></li>
+                <li><strong>复盘</strong><span>负责人：运营组 · 明晚</span></li>
+              </ul>
+            </div>
+          </section>
+        </div>
+      </article>
+
+      <footer className={styles.overlayRuleNote}>
+        <ShieldCheckIcon aria-hidden="true" size={18} weight="duotone" />
+        <p><strong>复杂变化按“用户能理解的语义”分组</strong>不要求用户理解 DOM 节点，也不会把移动误显示成一次删除加一次新增。</p>
+      </footer>
+    </section>
+  );
+}
+
 function ReportReview({
   view,
   activeIndex,
@@ -392,6 +564,8 @@ function ReportReview({
           <p>{isBefore ? CHANGES[0].before : CHANGES[0].after}</p>
         )}
       </header>
+
+      {isOverlay ? <OverlayLegend /> : null}
 
       <section className={styles.reviewMetrics}>
         <div>
@@ -460,6 +634,8 @@ function ReportReview({
           <span><strong>人群洞察原位置</strong>模块已移动到核心结论之后</span>
         </section>
       ) : null}
+
+      {isOverlay ? <ComplexOverlayCases /> : null}
     </article>
   );
 }

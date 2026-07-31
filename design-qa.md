@@ -1,5 +1,74 @@
 # Design QA
 
+## 复杂叠加对比扩展
+
+Date: 2026-07-31
+
+Source visual truth:
+
+- `/var/folders/jx/w52403cs2hx39vwhd1sb3tg80000gn/T/codex-clipboard-f863824d-12c6-49bc-8b88-017f916f18ef.png`
+  — 用户提供的当前“叠加对比”实拍，作为纸张层级、红删绿增、紫色修改标记、指标卡和页面密度的视觉基线。
+- 用户明确认可现有叠加样式，并要求只扩展复杂差异的表现；等待页、返回页、修改前/后、右侧决策栏不在本轮视觉改动范围内。
+
+Implementation evidence:
+
+- `output/design-qa/ai-review-demo-complex/overlay-top.png`
+- `output/design-qa/ai-review-demo-complex/overlay-cases-a.png`
+- `output/design-qa/ai-review-demo-complex/overlay-cases-b.png`
+- `output/design-qa/ai-review-demo-complex/overlay-cases-c.png`
+- `output/design-qa/ai-review-demo-complex/overlay-normalized-1020x815.png`
+- `output/design-qa/ai-review-demo-complex/overlay-responsive-1020x815.png`
+
+Combined comparison inputs:
+
+- `output/design-qa/ai-review-demo-complex/comparison-full.png`
+- `output/design-qa/ai-review-demo-complex/comparison-focused.png`
+
+Viewport and normalization:
+
+- Source pixels: `2040 × 1630`; the capture is consistent with a `1020 × 815` CSS-pixel Retina viewport at 2× density.
+- Source normalization: exact 50% downsample to `1020 × 815`, without crop or aspect-ratio change.
+- Implementation normalized capture: explicit `1020 × 815` CSS viewport at `devicePixelRatio = 1`, saved as `1020 × 815` pixels.
+- Full comparison: normalized source and implementation are placed side by side at equal pixel dimensions.
+- Focused paper comparison: source paper crop `1620 × 1080` is downsampled to `810 × 540` and padded to `817 × 540`; implementation uses an `817 × 540` paper crop from the `1280 × 720` evidence. This comparison isolates hierarchy, typography, diff colors and metric-card rhythm from the persistent review rail.
+- State: both captures show “叠加对比”. The source capture does not expose the right review rail, while the existing Demo deliberately keeps that rail persistent; this pre-existing, out-of-scope frame difference is excluded from fidelity judgment.
+
+Full-view and focused comparison evidence:
+
+- The existing headline, metric and moved-module treatments retain the source hierarchy; the new legend adds a compact semantic key without replacing the approved red/green inline treatment.
+- Five complex examples continue the same white-paper surface, subtle gray separators, indigo structural cues, semantic red/green backgrounds and Phosphor icon treatment.
+- The five scenarios cover word replacement plus style-only change, layout reprioritization, module add/delete/move, list reordering plus split/merge, and a whole-module story/component rebuild.
+- At `1020 × 815`, the layout and whole-module pairs stack vertically, the report keeps independent scrolling, `documentElement.scrollWidth = clientWidth = 1020`, and no descendant has horizontal overflow.
+- Focused comparison was required because the full frame makes the paper text too small for reliable typography and token judgment. The focused paper pair shows consistent title weight, rounded diff highlights, metric grid borders, purple pins and cool-gray section surfaces.
+
+Findings:
+
+- No actionable P0, P1 or P2 issue remains.
+- Fonts and typography: the implementation preserves the existing system/PingFang fallback, compact small-label hierarchy and heavy report headings. Deleted and inserted text remain legible without losing unchanged sentence context.
+- Spacing and layout rhythm: every new case uses a repeated number/header/content rhythm, aligned to the paper's established inset. Dense comparisons separate old and new states with borders and whitespace rather than additional chrome.
+- Colors and visual tokens: red is reserved for removal, green for addition, and indigo for structural/style/movement semantics. These colors match the approved source treatment and remain visually distinct.
+- Image quality and asset fidelity: no new raster artwork is required. The existing brand asset is preserved, and all visible symbols use the project's Phosphor icon set; no emoji, handcrafted SVG or CSS illustration was introduced.
+- Copy and content: each complex case names both the change mechanism and its user meaning. The footer explicitly states that semantic grouping avoids presenting a move as an unrelated delete plus add.
+- Expected difference: the implementation retains the previously approved right-side change rail and therefore gives the paper less full-frame width than the user capture. The user explicitly asked to leave other areas unchanged, so this was not treated as a regression.
+- P3 follow-up: production data may require truncation rules for exceptionally long module names; the current stress-test copy fits at both checked widths.
+
+Interaction checks:
+
+- Waiting → `模拟 AI 返回` → `审阅修改` → `叠加对比` reached the expanded comparison.
+- All five complex scenario headings and the semantic legend were present in the rendered accessibility tree.
+- Switching to `修改后` and `修改前` removed the stress-test content (`0` matches); switching back to `叠加对比` restored it (`1` match).
+- Persistent review actions and both version-decision buttons remained available.
+- Browser console warnings and errors: none.
+
+Comparison history:
+
+1. The first equal-size full comparison confirmed the approved visual language but exposed the intentional frame difference caused by the pre-existing persistent review rail; no in-scope visual fix was required.
+2. The focused paper comparison confirmed matching typography, diff tokens, metric rhythm and pin treatment. The new complex regions were then checked at `1280 × 720` and the responsive `1020 × 815` viewport; no actionable P0, P1 or P2 issue was found.
+
+final result: passed
+
+---
+
 ## AI 修改审阅交互 Demo
 
 Date: 2026-07-31
