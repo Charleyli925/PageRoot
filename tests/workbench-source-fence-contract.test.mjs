@@ -65,7 +65,9 @@ test("autosave accepts only a byte-identical acknowledgement and fences protocol
       "const protocolError = error.code === \"INVALID_AUTOSAVE_ACK\"",
       "fenceAndFreezeCurrentCanvas(",
       "persistRecoveryLog(recoveryWrite, writeContext)",
-      "persistStateRef.current = \"conflict\"",
+      "// editing host is frozen; only now may the conflict lock appear.",
+      "documentSessionRef.current.setPersistence({",
+      "state: \"conflict\"",
     ],
     "conflict state must be published only after the native draft is frozen and recovered",
   );
@@ -89,9 +91,11 @@ test("an identity-mismatched recovery candidate freezes before becoming a confli
       "await verifyCanvasRendered(recoveredHtml, targetSha256, context)",
       "fenceAndFreezeCurrentCanvas(",
       "if (!frozen.ok)",
-      "persistStateRef.current = \"failed\"",
+      "documentSessionRef.current.setPersistence({",
+      "state: \"failed\"",
       "throw new Error(failClosedMessage)",
-      "persistStateRef.current = \"conflict\"",
+      "documentSessionRef.current.setPersistence({",
+      "state: \"conflict\"",
     ],
     "recovered bytes must be rendered and frozen before the conflict lock is published",
   );
@@ -111,7 +115,10 @@ test("beforeunload observes native composition drafts and unacknowledged revisio
 
   assert.match(unload, /hasPending\("close"\)/u);
   assert.match(unload, /event\.preventDefault\(\)/u);
-  assert.match(obligations, /editRevisionRef\.current > lastPersistedRevisionRef\.current/u);
+  assert.match(
+    obligations,
+    /documentSessionRef\.current\.editRevision > documentSessionRef\.current\.lastPersistedRevision/u,
+  );
   assert.match(obligations, /editorRef\.current\?\.hasPendingNativeEdit\(\)/u);
 });
 

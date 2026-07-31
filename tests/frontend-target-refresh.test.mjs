@@ -683,7 +683,7 @@ test("handoff commits a pending source edit before recapturing and freezing comm
   assert.ok(requestDispatch > drain);
   assert.match(
     workbench.slice(drain, requestDispatch),
-    /!drained\.ok[\s\S]*?lastPersistedRevisionRef\.current !== freezeCutoffRevision[\s\S]*?editRevisionRef\.current !== freezeCutoffRevision[\s\S]*?persistedSourceSha256 !== frozen\.sourceSha256/u,
+    /!drained\.ok[\s\S]*?documentSessionRef\.current\.lastPersistedRevision !== freezeCutoffRevision[\s\S]*?documentSessionRef\.current\.editRevision !== freezeCutoffRevision[\s\S]*?persistedSourceSha256 !== frozen\.sourceSha256/u,
     "handoff must prove that the exact frozen revision and hash were persisted before dispatch",
   );
 });

@@ -24,6 +24,8 @@ const RETIRED_WORKBENCH_RUN_AUTHORITIES =
   /\b(?:backgroundRunsRef|backgroundProjectResultsRef|qoderHandoffStatesRef|activeRunRef|activatingRunsRef|cancellingRunsRef|resolvingRunsRef|statusPollBusyRef)\b/;
 const RETIRED_WORKBENCH_VERSION_WRITERS =
   /\b(?:setVersions|setLatestVersionId|setCurrentBasedOnVersionId|setCurrentExactVersionId|setRestoredFromVersionId|setViewMode|setViewingVersionId)\b/;
+const RETIRED_WORKBENCH_DOCUMENT_AUTHORITIES =
+  /\b(?:htmlRef|sourceShaRef|editRevisionRef|lastPersistedRevisionRef|persistStateRef|pendingWriteRef|flushPromiseRef)\b/;
 
 async function sourceFiles(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
@@ -233,6 +235,16 @@ export async function architectureViolations() {
   ) {
     violations.push(
       "app/workbench.tsx: Version authority and history view transitions belong to VersionSession",
+    );
+  }
+  if (
+    !workbench.includes(
+      "const documentSessionRef = useRef(new DocumentSession<PendingWrite>({",
+    )
+    || RETIRED_WORKBENCH_DOCUMENT_AUTHORITIES.test(workbench)
+  ) {
+    violations.push(
+      "app/workbench.tsx: source bytes, revisions and write state belong to DocumentSession",
     );
   }
   for (const boundary of ["close", "switch", "submit", "history"]) {

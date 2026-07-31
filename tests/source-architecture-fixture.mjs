@@ -23,6 +23,7 @@ export async function readCanvasArchitecture() {
 
 export async function readWorkbenchArchitecture() {
   const sources = await readSources([
+    "../app/application/document-session.js",
     "../app/application/project-session.js",
     "../app/application/project-rules-session.js",
     "../app/application/run-session.js",

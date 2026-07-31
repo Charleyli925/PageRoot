@@ -323,7 +323,7 @@ test("workbench transitions fail closed when a native DOM edit cannot commit or 
   );
   assert.match(
     closeFlow,
-    /lastPersistedRevisionRef\.current !== cutoffRevision[\s\S]*?sourceShaRef\.current !== frozenSourceSha256/u,
+    /documentSessionRef\.current\.lastPersistedRevision !== cutoffRevision[\s\S]*?documentSessionRef\.current\.sourceSha256 !== frozenSourceSha256/u,
   );
 
   const projectSwitch = workbench.slice(
@@ -336,7 +336,7 @@ test("workbench transitions fail closed when a native DOM edit cannot commit or 
     switchFence,
   );
   const switchCutoff = projectSwitch.indexOf(
-    "const switchCutoffRevision = editRevisionRef.current;",
+    "const switchCutoffRevision = documentSessionRef.current.editRevision;",
     switchFenceGuard,
   );
   const switchDrain = projectSwitch.indexOf(
@@ -356,7 +356,7 @@ test("workbench transitions fail closed when a native DOM edit cannot commit or 
   );
   assert.match(
     projectSwitch,
-    /lastPersistedRevisionRef\.current !== switchCutoffRevision[\s\S]*?sourceShaRef\.current !== committed\.sourceSha256/u,
+    /documentSessionRef\.current\.lastPersistedRevision !== switchCutoffRevision[\s\S]*?documentSessionRef\.current\.sourceSha256 !== committed\.sourceSha256/u,
   );
 
   const navigation = workbench.slice(
@@ -448,7 +448,7 @@ test("external source adoption invalidates the active native editing session", (
   );
   assert.match(
     completedVersion,
-    /const transitionAffectsCurrentCanvas[\s\S]*?sameLocalSourcePath\(projectSessionRef\.current\.sourcePath, run\.sourcePath\)[\s\S]*?sameLocalSourcePath\(projectSessionRef\.current\.sourcePath, committedSourcePath\)[\s\S]*?const transitionContext = captureProjectContext\(\)[\s\S]*?fenceAndFreezeCurrentCanvas\([\s\S]*?if \(!frozen\.ok\)[\s\S]*?isCurrentProjectContext\(transitionContext\)[\s\S]*?await adoptGeneratedSourcePath\(\{[\s\S]*?htmlRef\.current = content;[\s\S]*?setHtml\(content\)/u,
+    /const transitionAffectsCurrentCanvas[\s\S]*?sameLocalSourcePath\(projectSessionRef\.current\.sourcePath, run\.sourcePath\)[\s\S]*?sameLocalSourcePath\(projectSessionRef\.current\.sourcePath, committedSourcePath\)[\s\S]*?const transitionContext = captureProjectContext\(\)[\s\S]*?fenceAndFreezeCurrentCanvas\([\s\S]*?if \(!frozen\.ok\)[\s\S]*?isCurrentProjectContext\(transitionContext\)[\s\S]*?await adoptGeneratedSourcePath\(\{[\s\S]*?documentSessionRef\.current\.update\(\{[\s\S]*?html: content,[\s\S]*?sourceSha256: sourceHash/u,
   );
 });
 
@@ -827,7 +827,11 @@ test("first project registration is part of the recoverable autosave transaction
   const flushEnd = workbench.indexOf("const enqueueAutosave = useCallback", flushStart);
   assert.ok(flushStart >= 0 && flushEnd > flushStart);
   const flush = workbench.slice(flushStart, flushEnd);
-  const writing = flush.indexOf('persistStateRef.current = "writing"');
+  const writingState = flush.indexOf('state: "writing"');
+  const writing = flush.lastIndexOf(
+    "documentSessionRef.current.setPersistence({",
+    writingState,
+  );
   const transactionTry = flush.indexOf("try {", writing);
   const registration = flush.indexOf("await ensureProjectRegistered(", transactionTry);
   const transactionCatch = flush.indexOf("} catch (cause) {", registration);
@@ -842,23 +846,26 @@ test("first project registration is part of the recoverable autosave transaction
     /const command = \([\s\S]*?timeoutMs = DEFAULT_WRITE_TIMEOUT_MS/,
   );
   const recovery = flush.slice(transactionCatch);
-  assert.match(recovery, /pendingWriteRef\.current = recoveryWrite/);
   assert.match(
     recovery,
-    /fenceAndFreezeCurrentCanvas\([\s\S]*?persistRecoveryLog\(recoveryWrite, writeContext\)[\s\S]*?persistStateRef\.current = "conflict"/u,
+    /documentSessionRef\.current\.setPendingWrite\(recoveryWrite\)/,
+  );
+  assert.match(
+    recovery,
+    /fenceAndFreezeCurrentCanvas\([\s\S]*?persistRecoveryLog\(recoveryWrite, writeContext\)[\s\S]*?documentSessionRef\.current\.setPersistence\(\{[\s\S]*?state: "conflict"/u,
   );
   assert.match(recovery, /persistRecoveryLog\(recoveryWrite, writeContext\)/);
   assert.match(
     flush,
-    /editRevisionRef\.current > lastPersistedRevisionRef\.current[\s\S]*?const reconstructedWrite: PendingWrite[\s\S]*?html: htmlRef\.current[\s\S]*?pendingWriteRef\.current = reconstructedWrite/,
+    /documentSessionRef\.current\.editRevision > documentSessionRef\.current\.lastPersistedRevision[\s\S]*?const reconstructedWrite: PendingWrite[\s\S]*?html: documentSessionRef\.current\.html[\s\S]*?documentSessionRef\.current\.setPendingWrite\(reconstructedWrite\)/,
   );
   assert.match(
     recovery,
-    /isCurrentProjectContext\(writeContext\)[\s\S]*?pendingWriteRef\.current = recoveryWrite/,
+    /isCurrentProjectContext\(writeContext\)[\s\S]*?documentSessionRef\.current\.setPendingWrite\(recoveryWrite\)/,
   );
   assert.match(
     workbench,
-    /targetSha256 === currentSourceSha256[\s\S]*?const reconciledRevision = Math\.max\(serverRevision, recoveredRevision\)[\s\S]*?lastPersistedRevisionRef\.current = reconciledRevision/,
+    /targetSha256 === currentSourceSha256[\s\S]*?const reconciledRevision = Math\.max\(serverRevision, recoveredRevision\)[\s\S]*?documentSessionRef\.current\.update\(\{[\s\S]*?lastPersistedRevision: reconciledRevision/,
   );
 });
 
@@ -968,7 +975,7 @@ test("AI completion adopts the generated semantic file before editing resumes", 
   );
   assert.match(
     workbench,
-    /projectSessionRef\.current\.transitionSource\(\{[\s\S]*?sourcePath: nextSourcePath,[\s\S]*?projectId: nextProjectId,[\s\S]*?documentId: nextDocumentId,[\s\S]*?setSourceSha256\(expectedSha256\)/,
+    /projectSessionRef\.current\.transitionSource\(\{[\s\S]*?sourcePath: nextSourcePath,[\s\S]*?projectId: nextProjectId,[\s\S]*?documentId: nextDocumentId,[\s\S]*?documentSessionRef\.current\.update\(\{[\s\S]*?sourceSha256: expectedSha256,[\s\S]*?pendingWrite: null/,
   );
   const adoptionStart = workbench.indexOf("const adoptGeneratedSourcePath = useCallback");
   const adoptionEnd = workbench.indexOf("const recoverAutosaveLog", adoptionStart);
@@ -1115,7 +1122,7 @@ test("the filename keeps distinct quick actions with non-layout tooltips", () =>
     browserOpenEnqueue,
   );
   const browserOpenPersistenceGuard = browserOpenFlow.indexOf(
-    "lastPersistedRevisionRef.current < launchRevision",
+    "documentSessionRef.current.lastPersistedRevision < launchRevision",
     browserOpenFlush,
   );
   const browserOpenBridge = browserOpenFlow.indexOf(

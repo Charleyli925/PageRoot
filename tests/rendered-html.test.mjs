@@ -121,9 +121,10 @@ test("application boundaries encode the v3 single-source lifecycle instead of sa
   assert.equal(packageJson.build?.mac?.extendInfo?.NSSpeechRecognitionUsageDescription, undefined);
 
   for (const required of [
-    "editRevisionRef",
-    "lastPersistedRevisionRef",
-    "pendingWriteRef",
+    "DocumentSession",
+    "documentSessionRef.current.editRevision",
+    "documentSessionRef.current.lastPersistedRevision",
+    "documentSessionRef.current.pendingWrite",
     "flushAutosave",
     "expectedSourceSha256",
     "freezeCutoffRevision",
