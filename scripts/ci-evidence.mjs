@@ -15,15 +15,29 @@ import { fileURLToPath } from "node:url";
 const scriptPath = fileURLToPath(import.meta.url);
 const productRoot = path.resolve(path.dirname(scriptPath), "..");
 const MAX_CAPTURE_BYTES = 512 * 1024;
+const PACKAGED_ARTIFACT_STAGES = new Set([
+  "developer-preview",
+  "artifact-candidate",
+  "artifact-preflight",
+  "artifact-sign",
+  "artifact-notarize-app",
+  "artifact-checkpoint",
+  "artifact-notarize-dmg",
+  "artifact-final",
+]);
 const ALLOWED_STAGES = new Set([
   "draft-feedback",
   "source-build",
   "source-test",
   "environment-preflight",
   "post-merge",
-  "artifact-candidate",
+  ...PACKAGED_ARTIFACT_STAGES,
   "publish",
 ]);
+
+export function isAllowedCiEvidenceStage(stage) {
+  return ALLOWED_STAGES.has(stage);
+}
 
 function git(args) {
   const result = spawnSync("git", args, {
@@ -61,7 +75,7 @@ function parseArguments(argv) {
     else throw new Error(`Unknown argument: ${argument}`);
   }
   safeSegment(options.suite, "suite");
-  if (!ALLOWED_STAGES.has(options.stage)) {
+  if (!isAllowedCiEvidenceStage(options.stage)) {
     throw new Error(`Unknown stage ${JSON.stringify(options.stage)}.`);
   }
   if (!options.command) throw new Error("A command is required after --.");
@@ -125,7 +139,7 @@ export function classificationForStage(stage, failed) {
       candidateCategories: ["ci_environment"],
     });
   }
-  if (stage === "artifact-candidate" || stage === "publish") {
+  if (PACKAGED_ARTIFACT_STAGES.has(stage) || stage === "publish") {
     return Object.freeze({
       category: "packaged_artifact",
       categorySource: "stage_hint",
