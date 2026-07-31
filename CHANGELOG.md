@@ -71,6 +71,9 @@ Notable user-visible changes are documented here. This project follows Semantic 
 - Aligned developer-preview and formal-candidate CI evidence validation with
   their preflight, signing, notarization, checkpoint and final-artifact stages
   so packaging cannot stop because of an unsupported stage name.
+- Rebuilt the deterministic renderer comparison input in the candidate's fresh
+  final-artifact job before revalidating the restored notarized App, while
+  keeping the signed checkpoint App immutable.
 
 ## [0.9.4] - 2026-07-29
 

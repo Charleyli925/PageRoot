@@ -440,6 +440,10 @@ test("formal workflow verifies before Apple and resumes final packaging from a s
     workflow,
     /Upload signed-app checkpoint[\s\S]+Download the exact signed-app checkpoint[\s\S]+--profile candidate-artifacts[\s\S]+Verify final DMG/u,
   );
+  assert.match(
+    workflow,
+    /Verify and restore the signed-app checkpoint[\s\S]+Build the renderer oracle for restored payload verification[\s\S]+npm run desktop:renderer[\s\S]+Revalidate the restored signature, notarization and payload[\s\S]+--profile candidate-app-signed[\s\S]+--profile candidate-artifacts/u,
+  );
   assert.match(workflow, /compression-level:\s*0/u);
   assert.match(workflow, /retention-days:\s*14/u);
   assert.doesNotMatch(workflow, /gate:artifact-only:auto/u);
