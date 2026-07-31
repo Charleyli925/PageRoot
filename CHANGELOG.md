@@ -74,6 +74,9 @@ Notable user-visible changes are documented here. This project follows Semantic 
 - Rebuilt the deterministic renderer comparison input in the candidate's fresh
   final-artifact job before revalidating the restored notarized App, while
   keeping the signed checkpoint App immutable.
+- Restored the exact embedded build provenance and telemetry configuration from
+  that checkpoint before fresh-job payload verification, without regenerating
+  configuration or exposing its project token to final packaging.
 
 ## [0.9.4] - 2026-07-29
 

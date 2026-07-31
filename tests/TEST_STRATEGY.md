@@ -54,8 +54,9 @@
   批次及本地队列都不得出现这些值；测试永不访问真实 PostHog。
 - 开发者测试包：先对 ad-hoc `.app` 做 app.asar、Bridge、Schema、资源、版本和 DMG 静态校验，再从真实可执行文件做一次首窗/Bridge/Workbench/正常退出冒烟；不复制完整业务矩阵，不检查 Apple 公证或更新资产。
 - 候选包：先对 ad-hoc 预签名 `.app` 校验 app.asar、Bridge、Schema、资源闭包并从真实可执行文件运行完整源码字节 oracle；通过后才做 Developer ID 签名，并在 Apple 请求前做一次 Hardened Runtime 启动。App 公证后冻结 archive/payload/Tree Hash checkpoint，下一 job 只把同一 App 作为 `--prepackaged` 输入生成 DMG、ZIP、blockmap 和 `latest-mac.yml`，再校验 Team、App/DMG 公证票据、Gatekeeper、只读挂载与 ZIP 解包内容。
-  新 job 会从同一源码 Tree 重建确定性的 Electron renderer，仅作为还原 App
-  的 payload 比较 oracle；不得重新组装、签名、公证或替换 checkpoint App。
+  新 job 会先从 checkpoint App 原样恢复 build-info 与遥测配置作为比较输入，
+  再从同一源码 Tree 重建确定性的 Electron renderer 作为 payload oracle；
+  不得重新生成遥测配置，也不得重新组装、签名、公证或替换 checkpoint App。
 
 持久状态只保留四个跨层不变量：过期 revision 自动读取权威草稿并 rebase、结果未知时按 operation ID 查询、已确认的相同聚合 drain 为 no-op、草稿文件领先 runtime pointer 最多只允许一个已校验的崩溃窗口。纯函数和 Session 是主证明，Bridge 只证明持久边界；候选包把四者压缩为一个真实 App 冒烟，不在 Browser、Electron 和打包层各复制整套排列。
 
