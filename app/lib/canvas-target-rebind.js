@@ -97,3 +97,74 @@ export function rebindCanvasSelectionTargets(sourceHtml, targets) {
     }
   });
 }
+
+function resolvedNodeIdentity(sourceIndex, target) {
+  try {
+    const resolved = resolveTargetRef(
+      sourceIndex,
+      sourceTargetRefForSelection(target),
+    );
+    if (!resolved.target) return null;
+    if (resolved.target.type === "insertion-point") {
+      return `insertion:${resolved.target.parentId}:${resolved.target.offset}`;
+    }
+    return `${resolved.target.type}:${resolved.target.nodeId}`;
+  } catch {
+    return null;
+  }
+}
+
+function transitionTargetIdentity(target, nextTarget) {
+  const transitioned = {
+    ...target,
+    nodeId: nextTarget.nodeId,
+    selector: nextTarget.selector,
+    tagName: nextTarget.tagName,
+    text: nextTarget.text,
+    resolution: nextTarget.resolution,
+    textQuote: nextTarget.textQuote,
+    sourceAnchor: nextTarget.sourceAnchor,
+    fingerprint: nextTarget.fingerprint,
+  };
+  if (!transitioned.nodeId) delete transitioned.nodeId;
+  if (transitioned.textQuote === undefined) delete transitioned.textQuote;
+  if (!transitioned.sourceAnchor) delete transitioned.sourceAnchor;
+  if (!transitioned.fingerprint) delete transitioned.fingerprint;
+  return transitioned;
+}
+
+/**
+ * Rebinds live comment/audit targets across one exact history operation.
+ *
+ * A comment and the edit operation can intentionally use different targetIds
+ * for the same authored element. Generic post-hoc resolution can lose that
+ * element when undo restores its previous text fingerprint. The history
+ * operation's before/after target pair provides a deterministic identity
+ * bridge for aliases that resolve to the same current source node.
+ */
+export function rebindCanvasSelectionTargetsAcrossHistory(
+  currentSourceHtml,
+  nextSourceHtml,
+  targets,
+  { fromTarget, toTarget } = {},
+) {
+  if (!fromTarget || !toTarget) {
+    return rebindCanvasSelectionTargets(nextSourceHtml, targets);
+  }
+  let currentIndex;
+  try {
+    currentIndex = buildSourceIndex(currentSourceHtml);
+  } catch {
+    return rebindCanvasSelectionTargets(nextSourceHtml, targets);
+  }
+  const transitionIdentity = resolvedNodeIdentity(currentIndex, fromTarget);
+  if (!transitionIdentity) {
+    return rebindCanvasSelectionTargets(nextSourceHtml, targets);
+  }
+  const transitioned = targets.map((target) => (
+    resolvedNodeIdentity(currentIndex, target) === transitionIdentity
+      ? transitionTargetIdentity(target, toTarget)
+      : target
+  ));
+  return rebindCanvasSelectionTargets(nextSourceHtml, transitioned);
+}

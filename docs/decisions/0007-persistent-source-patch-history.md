@@ -33,13 +33,23 @@ Canvas undo and redo use one bounded, persistent exact-Patch journal.
 - Undo/redo carries a stable action ID, expected source Hash, history revision
   and cursor. The Bridge validates and applies exact inverse/forward patches,
   then returns canonical source bytes for the Canvas to adopt.
+- Text operations may retain bounded before/after logical Selection metadata.
+  The renderer fences the old editable document, adopts the canonical history
+  result in one replacement, and resumes the same source-backed host and caret;
+  Selection metadata is never HTML authority.
+- The operation's before/after TargetRef pair is also the deterministic
+  identity bridge for comments that point at the same source element through a
+  different target ID. Generic rebinding remains the fallback for unrelated
+  targets and genuine orphans.
 - An unknown response is reconciled against workspace authority before the
   same action ID is replayed once. Replays cannot apply a patch twice.
 - A forward edit after undo truncates redo. An external source change, working
   file transition or broken Hash chain establishes a new history boundary.
 - The existing desktop Edit menu routes intent by focus. Native text controls
   use Electron/Chromium local undo; eligible Canvas focus uses persistent
-  source history. No toolbar entry is added.
+  source history. A composing project-rule field pauses autosave, and explicit
+  restore retires the marked-text control before accepting more input. No
+  toolbar entry is added.
 
 ## Rejected alternatives
 
@@ -78,6 +88,10 @@ their existing native input history.
   Version.
 - Field-local native undo is session-local and intentionally does not survive
   application restart.
+- A canonical history replacement keeps the last proven comment geometry until
+  the new Canvas reports its targets, so transient iframe absence is not
+  presented as a moved/orphaned comment.
 - Tests must cover all four Canvas mutation categories, menu/shortcut routing,
-  exact bytes, cold reopen, idempotent replay, and both sides of the source
-  commit point.
+  exact bytes, active host/Selection restoration, comment identity and
+  geometry, cold reopen, idempotent replay, both sides of the source commit
+  point, and late native composition delivery after project-rule restore.

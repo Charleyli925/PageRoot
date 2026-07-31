@@ -118,8 +118,10 @@ information; resending the same known-stale command is forbidden.
 A persisted source-history operation is created only from an accepted
 SourcePatch result. It carries stable operation identity, exact forward and
 reverse patch lists, before/after source Hashes and bounded logical target
-snapshots. Autosave validates the full operation chain before placing the HTML
-candidate and history candidate in the same recoverable `pendingWrite`.
+snapshots, plus optional bounded before/after logical Selection for text-focus
+restoration. Selection is presentation metadata, not a patch precondition or
+source authority. Autosave validates the full operation chain before placing
+the HTML candidate and history candidate in the same recoverable `pendingWrite`.
 Undo/redo is another durable command with stable action ID, expected source
 Hash, expected history revision and expected cursor. An unknown response is
 reconciled by querying workspace authority; the same action ID may be replayed
@@ -167,7 +169,9 @@ A Canvas undo/redo request uses the same native-edit checkpoint and source
 autosave obligations before it reads the durable history cursor. It does not
 drain or mutate comment cards, attachments or project rules. Focused native
 text controls keep their platform-local input history and do not invoke this
-Canvas drain.
+Canvas drain. Project-rule autosave is not eligible while its native control
+owns an active composition; explicit restore retires that control before
+adopting the saved value.
 
 Each obligation reports pending, draining, resolved or blocked. A blocked
 result includes an action that changes the condition. Entry points must not

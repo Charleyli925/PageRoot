@@ -49,6 +49,9 @@ Notable user-visible changes are documented here. This project follows Semantic 
 - Kept comment, project-rule and other focused text inputs on their native
   field-local undo history without adding a Canvas toolbar action or extending
   product-level undo to cards, attachments and other project operations.
+- Restored the active Canvas text host and caret without a visible intermediate
+  reload, kept comment anchors stable through undo/redo, and prevented late
+  Chinese-composition input from reappearing after project-rule restore.
 
 ## [0.9.4] - 2026-07-29
 

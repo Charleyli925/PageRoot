@@ -89,8 +89,12 @@ Native Electron 是最终交互 oracle：真实 Edit 菜单和快捷键依次执
 工具栏样式、岛内换行结构和同级下移，关闭重开后仍能撤销，并以原始
 Buffer 验证每次 undo/redo。焦点在评论正文或 `PROJECT.md` 时，同一个
 Edit 菜单必须只触发原生控件文字撤销，源 HTML、评论卡片与附件保持
-不变。Browser 测试继续证明 SourcePatch forward/inverse 和各编辑入口，
-但不把无持久权限的浏览器预览伪装成跨重启历史证明。
+不变。文字撤销还必须证明 canonical 重建后焦点、逻辑 Selection 和评论
+TargetRef 仍落在原源码宿主，逐帧评论位置不消失、不掉底且不产生伪
+orphan。`PROJECT.md` 覆盖 composition 中的局部撤销，以及显式还原后从
+已废弃输入节点迟到的 input/compositionend；两者都不得留下中间拼音。
+Browser 测试继续证明 SourcePatch forward/inverse 和各编辑入口，但不把
+无持久权限的浏览器预览伪装成跨重启历史证明。
 
 ## 真实 HTML 与输入法边界
 

@@ -20,6 +20,8 @@ export type CanvasSourceTransaction = {
   reversePatches: SourceHistoryEntry["reversePatches"];
   beforeTarget: SourceHistoryEntry["beforeTarget"];
   afterTarget: SourceHistoryEntry["afterTarget"];
+  beforeSelection?: SourceHistoryEntry["beforeSelection"];
+  afterSelection?: SourceHistoryEntry["afterSelection"];
 };
 
 export class SourceHistorySession {

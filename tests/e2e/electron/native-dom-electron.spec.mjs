@@ -29,6 +29,7 @@ import {
   recordedInputEvents,
   replaceEditableIslandBytes,
   replaceUniqueBytes,
+  selectionSnapshot,
   setTextSelection,
   withBomAndCrLf,
 } from "../browser/pageroot-driver.mjs";
@@ -316,6 +317,25 @@ async function selectAuthoredCase(frame, caseId) {
       view: window,
     }));
   });
+}
+
+async function addCanvasComment(page, frame, caseId, text) {
+  await page.keyboard.press("Escape");
+  await frame.locator("body").click({ position: { x: 2, y: 2 } });
+  const target = frame.locator(caseSelector(caseId));
+  await target.scrollIntoViewIfNeeded();
+  await target.click();
+  const commentButton = page.getByRole("button", { name: /给.+留评论/u })
+    .filter({ visible: true })
+    .first();
+  await expect(commentButton).toBeVisible();
+  await commentButton.click();
+  await page.getByRole("textbox", { name: "评论内容" }).fill(text);
+  await page.getByRole("button", { name: "评论", exact: true }).click();
+  const card = page.locator(".comment-card").filter({ hasText: text });
+  await expect(card).toHaveCount(1);
+  await expect(card).toHaveAttribute("data-resolution", /^(?:exact|rebound)$/u);
+  return card;
 }
 
 async function replayApplePinyinStyledWrapperCommit(frame, caseId) {
@@ -1329,6 +1349,191 @@ test("Electron persists text, style, structure, and reorder undo while focused f
       sourceDirectory,
       "pageroot-native-source-e2e-",
     );
+  }
+});
+
+test("Electron restores the active text selection and keeps comment anchors stable through source undo", async () => {
+  test.setTimeout(90_000);
+  const sourceDirectory = mkdtempSync(path.join(tmpdir(), "pageroot-native-source-e2e-"));
+  const sourcePath = path.join(sourceDirectory, "history-selection-comments.html");
+  const originalToken = "SOURCE_FIDELITY_TOKEN_001";
+  const replacement = "无感撤回";
+  const original = withBomAndCrLf(fixtureBuffer("source-fidelity.html"));
+  writeFileSync(sourcePath, original);
+
+  const isolatedUserData = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-"));
+  let electronApp = null;
+  try {
+    const launched = await launchPageRoot({
+      isolatedUserData,
+      activeSourcePath: sourcePath,
+    });
+    electronApp = launched.electronApp;
+    let { frame } = await loadedDiskFrame(
+      launched.page,
+      sourcePath,
+      "source-fidelity",
+    );
+    const commentText = "撤回后仍然定位在这一段。";
+    const commentCard = await addCanvasComment(
+      launched.page,
+      frame,
+      "source-fidelity",
+      commentText,
+    );
+
+    await activateNativeEdit(frame, "source-fidelity");
+    await setTextSelection(frame, "source-fidelity", 0, originalToken.length);
+    await launched.page.keyboard.insertText(replacement);
+    await launched.page.keyboard.press(keyShortcut("S"));
+    const persistedRevision = await expectCheckpointPersisted(launched.page, 0);
+    frame = await currentEditorFrame(launched.page);
+    await expect.poll(() => nativeEditingState(frame, "source-fidelity"))
+      .toMatchObject({
+        targetIsActive: true,
+        activeCase: "source-fidelity",
+        selectionInside: true,
+      });
+
+    await commentCard.evaluate((element) => {
+      element.setAttribute("data-history-qa-card", "true");
+      window.__PAGEROOT_HISTORY_VISUAL_SAMPLES__ = [];
+      window.__PAGEROOT_HISTORY_VISUAL_SAMPLING__ = true;
+      const sample = () => {
+        const card = document.querySelector('[data-history-qa-card="true"]');
+        window.__PAGEROOT_HISTORY_VISUAL_SAMPLES__.push(card
+          ? {
+              top: card.getBoundingClientRect().top,
+              resolution: card.getAttribute("data-resolution"),
+              recovery: card.textContent.includes("原位置已变化"),
+            }
+          : null);
+        if (window.__PAGEROOT_HISTORY_VISUAL_SAMPLING__) {
+          requestAnimationFrame(sample);
+        }
+      };
+      requestAnimationFrame(sample);
+    });
+
+    await clickEditHistoryMenu(electronApp, "undo");
+    await expectCheckpointPersisted(launched.page, persistedRevision);
+    await expect.poll(() => readFileSync(sourcePath).equals(original)).toBe(true);
+    frame = await currentEditorFrame(launched.page);
+    await expect.poll(() => nativeEditingState(frame, "source-fidelity"))
+      .toMatchObject({
+        targetIsActive: true,
+        contenteditable: "true",
+        activeCase: "source-fidelity",
+        selectionInside: true,
+      });
+    await expect.poll(() => selectionSnapshot(frame, "source-fidelity"))
+      .toMatchObject({
+        anchorOffset: 0,
+        focusOffset: originalToken.length,
+        text: originalToken,
+      });
+    await expect(commentCard).toHaveAttribute("data-resolution", /^(?:exact|rebound)$/u);
+    await expect(commentCard.getByText("原位置已变化")).toHaveCount(0);
+
+    const visualSamples = await launched.page.evaluate(() => {
+      window.__PAGEROOT_HISTORY_VISUAL_SAMPLING__ = false;
+      return window.__PAGEROOT_HISTORY_VISUAL_SAMPLES__;
+    });
+    expect(visualSamples.every(Boolean)).toBe(true);
+    expect(visualSamples.some((sample) => (
+      sample.recovery
+      || !["exact", "rebound"].includes(sample.resolution)
+    ))).toBe(false);
+    const sampledTops = visualSamples.map((sample) => sample.top);
+    expect(Math.max(...sampledTops) - Math.min(...sampledTops))
+      .toBeLessThanOrEqual(2);
+  } finally {
+    if (electronApp) {
+      await stopPageRoot(electronApp, isolatedUserData, { cleanup: false });
+    }
+    removeIsolatedUserData(isolatedUserData);
+    removeValidatedTemporaryDirectory(
+      sourceDirectory,
+      "pageroot-native-source-e2e-",
+    );
+  }
+});
+
+test("Electron native field undo consumes a live composition without leaving interim pinyin", async () => {
+  test.setTimeout(60_000);
+  const launched = await launchPageRoot();
+  try {
+    await waitForProjectReady(launched.page);
+    await launched.page.getByRole("button", { name: "项目", exact: true }).click();
+    await launched.page.locator(".project-advanced > summary").click();
+    await launched.page.locator(".project-rule-card").click();
+    const projectRules = launched.page.getByRole("textbox", {
+      name: "项目长期规则",
+      exact: true,
+    });
+    await expect(projectRules).toBeEnabled();
+    const originalRules = await projectRules.inputValue();
+    await projectRules.evaluate((element) => {
+      element.focus();
+      element.setSelectionRange(element.value.length, element.value.length);
+    });
+    const cdp = await launched.page.context().newCDPSession(launched.page);
+    await cdp.send("Input.imeSetComposition", {
+      text: "shui",
+      selectionStart: 4,
+      selectionEnd: 4,
+    });
+    await cdp.send("Input.imeSetComposition", {
+      text: "shuifei",
+      selectionStart: 7,
+      selectionEnd: 7,
+    });
+    await cdp.send("Input.insertText", { text: "水费" });
+    await expect(projectRules).toHaveValue(`${originalRules}水费`);
+
+    await launched.page.keyboard.press(keyShortcut("Z"));
+    await expect(projectRules).toHaveValue(originalRules);
+    await expect(projectRules).not.toHaveValue(/shui|shuifei/u);
+
+    await projectRules.evaluate((element) => {
+      element.focus();
+      element.setSelectionRange(element.value.length, element.value.length);
+    });
+    await cdp.send("Input.imeSetComposition", {
+      text: "dianfei",
+      selectionStart: 7,
+      selectionEnd: 7,
+    });
+    await expect(projectRules).toHaveValue(`${originalRules}dianfei`);
+    const restoreRules = launched.page.getByRole("button", { name: "还原修改" });
+    await expect(restoreRules).toBeEnabled();
+    await projectRules.evaluate((element) => {
+      window.__PAGEROOT_RETIRED_PROJECT_RULES_EDITOR__ = element;
+    });
+    await restoreRules.click();
+    await launched.page.evaluate((lateValue) => {
+      const retired = window.__PAGEROOT_RETIRED_PROJECT_RULES_EDITOR__;
+      const valueSetter = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        "value",
+      )?.set;
+      valueSetter?.call(retired, lateValue);
+      retired?.dispatchEvent(new InputEvent("input", {
+        bubbles: true,
+        data: "dianfei",
+        inputType: "insertCompositionText",
+        isComposing: true,
+      }));
+      retired?.dispatchEvent(new CompositionEvent("compositionend", {
+        bubbles: true,
+        data: "dianfei",
+      }));
+      delete window.__PAGEROOT_RETIRED_PROJECT_RULES_EDITOR__;
+    }, `${originalRules}dianfei`);
+    await expect(projectRules).toHaveValue(originalRules);
+    await expect(projectRules).not.toHaveValue(/dianfei/u);
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
   }
 });
 
