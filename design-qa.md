@@ -1,5 +1,7 @@
 # Design QA
 
+> Historical 2026-08-01 baseline. The 2026-08-02 pass below supersedes its slider range, toolbar, clause-diff, and scroll-sync observations.
+
 ## 双画布审阅降噪与内容地图交互
 
 Date: 2026-08-01
@@ -61,5 +63,35 @@ No actionable P0, P1, or P2 finding remains.
 4. P2 — stacked badges covered headings, rows, and cards. Labels are now hidden at rest, merged per target, and reveal only for the relevant hovered/focused diff.
 5. P2 — the entire rail opened on hover and blocked its own navigation. Drawer opening is now limited to the explicit map button or the far-right edge strip.
 6. Post-fix combined visual comparison, desktop interaction checks, slider verification, navigation stability checks, and responsive captures found no remaining P0/P1/P2 issue.
+
+final result: passed
+
+---
+
+
+# AI review demo design QA
+
+Date: 2026-08-02
+
+## Source comparisons
+
+- Text diff reference vs. implementation: `output/design-qa/ai-review-demo-v2/comparison-text-before-after.png`
+  - The implementation keeps the real HTML background and typography visible.
+  - Changed clauses receive a red or green outline; character-level deletion and addition evidence remains a strike-through or underline.
+  - Persistent text badges and solid annotation fills no longer cover the document.
+- Pane header reference vs. implementation: `output/design-qa/ai-review-demo-v2/comparison-toolbar-before-after.png`
+  - The duplicated per-pane header row is removed.
+  - Version identity and full-page links now live in the review toolbar.
+- Bottom-scroll reference vs. implementation: `output/design-qa/ai-review-demo-v2/comparison-scroll-before-after.png`
+  - Both documents align at their true bottom boundary.
+  - Continuing to scroll the leader pane at the bottom does not move the other pane to an earlier semantic anchor.
+
+## Browser checks
+
+- 1280 × 720: overview, text diff, structure diff, style diff, sparse all-changes mode, content-map navigation, and bottom scroll alignment checked.
+- 960 × 720: compact toolbar and dual-canvas layout checked; controls remain reachable and the review rail stays independent from previous/next buttons.
+- Context visibility range verified at 0, 72, and 100; default is 72.
+- The initial overview consistently opens at the top of both documents.
+- A development-runtime `MutationObserver` error occurs on the initial route before entering review; opening and using the review canvas introduces no additional browser errors.
 
 final result: passed

@@ -2,7 +2,6 @@
 
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/csr/ArrowSquareOut";
-import { ArrowsDownUpIcon } from "@phosphor-icons/react/dist/csr/ArrowsDownUp";
 import { ArrowsClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowsClockwise";
 import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
 import { CaretUpIcon } from "@phosphor-icons/react/dist/csr/CaretUp";
@@ -35,6 +34,7 @@ import {
   applyReviewPresentationPair,
   clearReviewPresentation,
   setReviewPresentationMaskTransparency,
+  setReviewPresentationScale,
   type ReviewDiffFilter,
   type ReviewDiffTargets,
   type ReviewSide,
@@ -49,6 +49,7 @@ type DiffFilter = ReviewDiffFilter;
 type ScrollMode = "linked" | "independent";
 type ZoomMode = "fit" | "actual";
 type ReviewMode = "overview" | DiffFilter;
+type ExpectedFrameScroll = { top: number; operationId: number; expiresAt: number };
 
 const DIFF_FILTER_LABELS: Record<DiffFilter, string> = {
   all: "全部变化",
@@ -831,16 +832,22 @@ const DOCUMENT_URLS = {
   after: "/review-demo-local/after.html",
 } as const;
 
+function reviewDocumentUrl(side: ReviewSide, reviewSessionId: string) {
+  return `${DOCUMENT_URLS[side]}?review-canvas=${side}&session=${encodeURIComponent(reviewSessionId)}#top`;
+}
+
 function RealDocumentPane({
   side,
   zoom,
   reviewSessionId,
   onFrameReady,
+  onScaleChange,
 }: {
   side: ReviewSide;
   zoom: ZoomMode;
   reviewSessionId: string;
   onFrameReady: (side: ReviewSide, frame: HTMLIFrameElement) => void;
+  onScaleChange: (scale: number) => void;
 }) {
   const isBefore = side === "before";
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -868,21 +875,19 @@ function RealDocumentPane({
     : 1;
   const renderedWidth = targetViewportWidth * scale;
   const iframeHeight = Math.max(620, viewportSize.height / scale);
-  const url = `${DOCUMENT_URLS[side]}?review-canvas=${side}&session=${encodeURIComponent(reviewSessionId)}#top`;
+  const url = reviewDocumentUrl(side, reviewSessionId);
+
+  useEffect(() => {
+    setReviewPresentationScale(iframeRef.current, scale);
+    onScaleChange(scale);
+  }, [onScaleChange, scale]);
 
   return (
-    <section className={styles.canvasDocumentPane} data-side={side}>
-      <header>
-        <div>
-          <span>{isBefore ? "修改前" : "修改后"}</span>
-          <strong>{isBefore ? "原版 V1.3" : "AI 候选 V1.4"}</strong>
-          <small>固定桌面画布 · {Math.round(scale * 100)}%</small>
-        </div>
-        <a href={url} target="_blank" rel="noreferrer">
-          <ArrowSquareOutIcon aria-hidden="true" size={14} weight="bold" />
-          全页打开
-        </a>
-      </header>
+    <section
+      className={styles.canvasDocumentPane}
+      data-side={side}
+      aria-label={`${isBefore ? "修改前原版 V1.3" : "修改后 AI 候选 V1.4"}完整页面`}
+    >
       <div className={styles.canvasDocumentViewport} ref={viewportRef} data-zoom={zoom}>
         <div
           className={styles.canvasDocumentScale}
@@ -900,7 +905,11 @@ function RealDocumentPane({
               transform: `scale(${scale})`,
               transformOrigin: "top left",
             }}
-            onLoad={() => iframeRef.current && onFrameReady(side, iframeRef.current)}
+            onLoad={() => {
+              if (!iframeRef.current) return;
+              setReviewPresentationScale(iframeRef.current, scale);
+              onFrameReady(side, iframeRef.current);
+            }}
           />
         </div>
       </div>
@@ -912,6 +921,7 @@ function scrollFramesToEvidence(
   frames: Record<ReviewSide, HTMLIFrameElement | null>,
   anchor: string,
   filter: DiffFilter,
+  writeScroll: (side: ReviewSide, frameWindow: Window, top: number, behavior: ScrollBehavior) => void,
   behavior: ScrollBehavior = "auto",
 ) {
   const selector = filter === "text"
@@ -937,8 +947,18 @@ function scrollFramesToEvidence(
     : Math.max(0, Math.min(1, (source.evidenceTop - source.sectionTop) / Math.max(1, source.section.offsetHeight)));
   entries.forEach((entry) => {
     const targetTop = entry.evidenceTop ?? entry.sectionTop + sourceProgress * entry.section.offsetHeight;
-    entry.frameWindow.scrollTo({ top: Math.max(0, targetTop - 72), behavior });
+    writeScroll(entry.side, entry.frameWindow, Math.max(0, targetTop - 72), behavior);
   });
+}
+
+function maximumScrollTop(frameWindow: Window) {
+  const document = frameWindow.document;
+  const scrollHeight = Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight ?? 0);
+  return Math.max(0, scrollHeight - frameWindow.innerHeight);
+}
+
+function clampScrollTop(frameWindow: Window, top: number) {
+  return Math.max(0, Math.min(maximumScrollTop(frameWindow), top));
 }
 
 function getSemanticScrollPosition(source: Window, target: Window) {
@@ -953,16 +973,24 @@ function getSemanticScrollPosition(source: Window, target: Window) {
     .filter((entry): entry is { anchor: string; element: HTMLElement } => entry.element !== null)
     .map((entry) => ({ anchor: entry.anchor, top: entry.element.offsetTop }));
 
+  const sourceScrollMax = maximumScrollTop(source);
+  const targetScrollMax = maximumScrollTop(target);
+  if (source.scrollY <= 1) return 0;
+  if (sourceScrollMax - source.scrollY <= 2) return targetScrollMax;
+
   if (sourcePoints.length < 2 || targetPoints.length < 2) {
-    const sourceMax = Math.max(1, sourceDocument.documentElement.scrollHeight - source.innerHeight);
-    const targetMax = Math.max(0, targetDocument.documentElement.scrollHeight - target.innerHeight);
+    const sourceMax = Math.max(1, sourceScrollMax);
+    const targetMax = targetScrollMax;
     return (source.scrollY / sourceMax) * targetMax;
   }
 
-  const probe = source.scrollY + source.innerHeight * 0.22;
-  let sourceIndex = sourcePoints.findIndex((point) => point.top > probe) - 1;
-  if (sourceIndex < 0) sourceIndex = sourcePoints.length - 1;
-  sourceIndex = Math.min(sourceIndex, sourcePoints.length - 1);
+  const sourceProbeOffset = source.innerHeight * .22;
+  const targetProbeOffset = target.innerHeight * .22;
+  const probe = source.scrollY + sourceProbeOffset;
+  let sourceIndex = 0;
+  sourcePoints.forEach((point, index) => {
+    if (point.top <= probe) sourceIndex = index;
+  });
 
   const sourceStart = sourcePoints[sourceIndex];
   const sourceEnd = sourcePoints[sourceIndex + 1];
@@ -973,10 +1001,10 @@ function getSemanticScrollPosition(source: Window, target: Window) {
   const targetEnd = sourceEnd
     ? targetPoints.find((point) => point.anchor === sourceEnd.anchor)
     : undefined;
-  const sourceMax = sourceEnd?.top ?? Math.max(sourceStart.top + 1, sourceDocument.documentElement.scrollHeight - source.innerHeight);
-  const targetMax = targetEnd?.top ?? Math.max(targetStart.top + 1, targetDocument.documentElement.scrollHeight - target.innerHeight);
-  const progress = Math.max(0, Math.min(1, (probe - sourceStart.top) / Math.max(1, sourceMax - sourceStart.top)));
-  return Math.max(0, targetStart.top + progress * (targetMax - targetStart.top) - target.innerHeight * 0.22);
+  const sourceEndTop = sourceEnd?.top ?? Math.max(sourceStart.top + 1, sourceScrollMax + sourceProbeOffset);
+  const targetEndTop = targetEnd?.top ?? Math.max(targetStart.top + 1, targetScrollMax + targetProbeOffset);
+  const progress = Math.max(0, Math.min(1, (probe - sourceStart.top) / Math.max(1, sourceEndTop - sourceStart.top)));
+  return clampScrollTop(target, targetStart.top + progress * (targetEndTop - targetStart.top) - targetProbeOffset);
 }
 
 function ContentMap({
@@ -1066,29 +1094,52 @@ function ReviewScreen({
   const [toolbarPeeked, setToolbarPeeked] = useState(false);
   const [toolbarPinned, setToolbarPinned] = useState(false);
   const [maskTransparency, setMaskTransparency] = useState(72);
+  const [canvasScale, setCanvasScale] = useState(.5);
   const [leaderSide, setLeaderSide] = useState<ReviewSide>("before");
   const leaderSideRef = useRef<ReviewSide>("before");
   const [frameRevision, setFrameRevision] = useState(0);
   const [reviewSessionId] = useState(() => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`);
   const frameRefs = useRef<Record<ReviewSide, HTMLIFrameElement | null>>({ before: null, after: null });
   const frameCleanup = useRef<Partial<Record<ReviewSide, () => void>>>({});
-  const syncingFrames = useRef(false);
-  const frameScrollSuppressed = useRef<Record<ReviewSide, boolean>>({ before: false, after: false });
-  const frameScrollSuppressionTimers = useRef<Partial<Record<ReviewSide, number>>>({});
-  const temporaryIndependent = useRef(false);
+  const expectedFrameScroll = useRef<Partial<Record<ReviewSide, ExpectedFrameScroll>>>({});
+  const scrollOperationId = useRef(0);
+  const scrollSyncAnimationFrame = useRef(0);
+  const temporaryIndependentUntil = useRef(0);
   const initialOverviewPositioned = useRef(false);
   const scrollModeRef = useRef<ScrollMode>(scrollMode);
   const activeChange = CONTENT_CHANGES[activeIndex];
   const mapOpen = mapPinned || mapPeeked;
   const toolbarOpen = toolbarIntroduced || toolbarPinned || toolbarPeeked;
 
-  const suppressFrameScroll = useCallback((side: ReviewSide, duration: number) => {
-    frameScrollSuppressed.current[side] = true;
-    window.clearTimeout(frameScrollSuppressionTimers.current[side]);
-    frameScrollSuppressionTimers.current[side] = window.setTimeout(() => {
-      frameScrollSuppressed.current[side] = false;
-    }, duration);
+  const writeFrameScroll = useCallback((
+    side: ReviewSide,
+    frameWindow: Window,
+    top: number,
+    behavior: ScrollBehavior = "auto",
+  ) => {
+    const targetTop = clampScrollTop(frameWindow, top);
+    scrollOperationId.current += 1;
+    expectedFrameScroll.current[side] = {
+      top: targetTop,
+      operationId: scrollOperationId.current,
+      expiresAt: performance.now() + (behavior === "smooth" ? 700 : 240),
+    };
+    if (behavior === "smooth") {
+      frameWindow.scrollTo({ top: targetTop, behavior });
+      return;
+    }
+
+    // The reviewed documents opt into CSS smooth scrolling. Assigning scrollTop
+    // keeps linked and initial positioning atomic, so the two panes cannot take
+    // turns treating an in-flight programmatic animation as a new scroll leader.
+    const scrollingElement = frameWindow.document.scrollingElement;
+    if (scrollingElement) scrollingElement.scrollTop = targetTop;
+    else frameWindow.scrollTo(0, targetTop);
   }, []);
+
+  const positionFramesToEvidence = useCallback((anchor: string, filter: DiffFilter, behavior: ScrollBehavior = "auto") => {
+    scrollFramesToEvidence(frameRefs.current, anchor, filter, writeFrameScroll, behavior);
+  }, [writeFrameScroll]);
 
   useEffect(() => {
     scrollModeRef.current = scrollMode;
@@ -1110,8 +1161,7 @@ function ReviewScreen({
   useEffect(() => () => {
     frameCleanup.current.before?.();
     frameCleanup.current.after?.();
-    window.clearTimeout(frameScrollSuppressionTimers.current.before);
-    window.clearTimeout(frameScrollSuppressionTimers.current.after);
+    window.cancelAnimationFrame(scrollSyncAnimationFrame.current);
     clearReviewPresentation(frameRefs.current.before);
     clearReviewPresentation(frameRefs.current.after);
   }, []);
@@ -1127,55 +1177,39 @@ function ReviewScreen({
     );
 
     if (!focused) return undefined;
-    syncingFrames.current = true;
-    suppressFrameScroll("before", 440);
-    suppressFrameScroll("after", 440);
-    let releaseTimer = 0;
     const timer = window.setTimeout(() => {
-      scrollFramesToEvidence(frameRefs.current, activeChange.anchor, diffFilter, "auto");
-      releaseTimer = window.setTimeout(() => { syncingFrames.current = false; }, 100);
+      positionFramesToEvidence(activeChange.anchor, diffFilter);
     }, 40);
-    return () => {
-      window.clearTimeout(timer);
-      window.clearTimeout(releaseTimer);
-      syncingFrames.current = false;
-    };
-  }, [activeChange, diffFilter, focused, frameRevision, suppressFrameScroll]);
+    return () => window.clearTimeout(timer);
+  }, [activeChange, diffFilter, focused, frameRevision, positionFramesToEvidence]);
 
   useEffect(() => {
     const beforeWindow = frameRefs.current.before?.contentWindow;
     const afterWindow = frameRefs.current.after?.contentWindow;
     if (focused || initialOverviewPositioned.current || !beforeWindow || !afterWindow) return undefined;
 
-    syncingFrames.current = true;
-    suppressFrameScroll("before", 520);
-    suppressFrameScroll("after", 520);
     const positionAtTop = () => {
-      beforeWindow.scrollTo({ top: 0, behavior: "auto" });
-      afterWindow.scrollTo({ top: 0, behavior: "auto" });
+      writeFrameScroll("before", beforeWindow, 0);
+      writeFrameScroll("after", afterWindow, 0);
     };
     positionAtTop();
     const settleTimer = window.setTimeout(positionAtTop, 120);
     const finishTimer = window.setTimeout(() => {
       positionAtTop();
       initialOverviewPositioned.current = true;
-      syncingFrames.current = false;
     }, 360);
     return () => {
       window.clearTimeout(settleTimer);
       window.clearTimeout(finishTimer);
     };
-  }, [focused, frameRevision, suppressFrameScroll]);
+  }, [focused, frameRevision, writeFrameScroll]);
 
   const alignFrom = (sourceSide: ReviewSide) => {
     const targetSide: ReviewSide = sourceSide === "before" ? "after" : "before";
     const sourceWindow = frameRefs.current[sourceSide]?.contentWindow;
     const targetWindow = frameRefs.current[targetSide]?.contentWindow;
     if (!sourceWindow || !targetWindow) return;
-    syncingFrames.current = true;
-    suppressFrameScroll(targetSide, 520);
-    targetWindow.scrollTo({ top: getSemanticScrollPosition(sourceWindow, targetWindow), behavior: "smooth" });
-    window.setTimeout(() => { syncingFrames.current = false; }, 440);
+    writeFrameScroll(targetSide, targetWindow, getSemanticScrollPosition(sourceWindow, targetWindow));
   };
 
   const bindFrame = (side: ReviewSide, frame: HTMLIFrameElement) => {
@@ -1184,35 +1218,67 @@ function ReviewScreen({
     const frameWindow = frame.contentWindow;
     if (!frameWindow) return;
 
-    let wheelTimer = 0;
-    const onWheel = (event: WheelEvent) => {
+    const claimLeader = (temporaryIndependent = false) => {
       leaderSideRef.current = side;
-      setLeaderSide(side);
-      temporaryIndependent.current = event.altKey;
-      window.clearTimeout(wheelTimer);
-      wheelTimer = window.setTimeout(() => { temporaryIndependent.current = false; }, 120);
-    };
-    const onScroll = () => {
-      if (
-        scrollModeRef.current !== "linked"
-        || syncingFrames.current
-        || temporaryIndependent.current
-        || leaderSideRef.current !== side
-        || frameScrollSuppressed.current[side]
-      ) return;
-      const targetSide: ReviewSide = side === "before" ? "after" : "before";
-      const targetWindow = frameRefs.current[targetSide]?.contentWindow;
-      if (!targetWindow) return;
-      suppressFrameScroll(targetSide, 180);
-      targetWindow.scrollTo({ top: getSemanticScrollPosition(frameWindow, targetWindow) });
+      setLeaderSide((current) => current === side ? current : side);
+      expectedFrameScroll.current[side] = undefined;
+      temporaryIndependentUntil.current = temporaryIndependent ? performance.now() + 180 : 0;
     };
 
+    const scheduleLinkedScroll = () => {
+      if (
+        scrollModeRef.current !== "linked"
+        || performance.now() < temporaryIndependentUntil.current
+        || leaderSideRef.current !== side
+      ) return;
+      window.cancelAnimationFrame(scrollSyncAnimationFrame.current);
+      scrollSyncAnimationFrame.current = window.requestAnimationFrame(() => {
+        if (scrollModeRef.current !== "linked" || leaderSideRef.current !== side) return;
+        const targetSide: ReviewSide = side === "before" ? "after" : "before";
+        const targetWindow = frameRefs.current[targetSide]?.contentWindow;
+        if (!targetWindow) return;
+        writeFrameScroll(targetSide, targetWindow, getSemanticScrollPosition(frameWindow, targetWindow));
+      });
+    };
+
+    const onWheel = (event: WheelEvent) => {
+      claimLeader(event.altKey);
+    };
+    const onPointerDown = (event: PointerEvent) => claimLeader(event.altKey);
+    const onTouchStart = () => claimLeader(false);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (["ArrowDown", "ArrowUp", "PageDown", "PageUp", "Home", "End", " "].includes(event.key)) {
+        claimLeader(event.altKey);
+      }
+    };
+    const onScroll = () => {
+      const expected = expectedFrameScroll.current[side];
+      const now = performance.now();
+      if (expected && now <= expected.expiresAt && leaderSideRef.current !== side) return;
+      if (expected && Math.abs(frameWindow.scrollY - expected.top) <= 2) {
+        expectedFrameScroll.current[side] = undefined;
+        return;
+      }
+      expectedFrameScroll.current[side] = undefined;
+      if (scrollModeRef.current !== "linked" || now < temporaryIndependentUntil.current) return;
+      if (leaderSideRef.current !== side) claimLeader(false);
+      scheduleLinkedScroll();
+    };
+    const onScrollEnd = () => scheduleLinkedScroll();
+
     frameWindow.addEventListener("wheel", onWheel, { passive: true });
+    frameWindow.addEventListener("pointerdown", onPointerDown, { passive: true });
+    frameWindow.addEventListener("touchstart", onTouchStart, { passive: true });
+    frameWindow.addEventListener("keydown", onKeyDown);
     frameWindow.addEventListener("scroll", onScroll, { passive: true });
+    frameWindow.addEventListener("scrollend", onScrollEnd, { passive: true });
     frameCleanup.current[side] = () => {
-      window.clearTimeout(wheelTimer);
       frameWindow.removeEventListener("wheel", onWheel);
+      frameWindow.removeEventListener("pointerdown", onPointerDown);
+      frameWindow.removeEventListener("touchstart", onTouchStart);
+      frameWindow.removeEventListener("keydown", onKeyDown);
       frameWindow.removeEventListener("scroll", onScroll);
+      frameWindow.removeEventListener("scrollend", onScrollEnd);
     };
     applyReviewPresentationPair(
       frameRefs.current.before,
@@ -1226,21 +1292,10 @@ function ReviewScreen({
     setFrameRevision((current) => current + 1);
   };
 
-  const scheduleAnchorPosition = (anchor: string, filter: DiffFilter = diffFilter) => {
-    syncingFrames.current = true;
-    suppressFrameScroll("before", 520);
-    suppressFrameScroll("after", 520);
-    window.setTimeout(() => {
-      scrollFramesToEvidence(frameRefs.current, anchor, filter, "auto");
-      window.setTimeout(() => { syncingFrames.current = false; }, 160);
-    }, 120);
-  };
-
   const navigate = (direction: -1 | 1) => {
     const nextIndex = (activeIndex + direction + CONTENT_CHANGES.length) % CONTENT_CHANGES.length;
     setActiveIndex(nextIndex);
     setFocused(true);
-    scheduleAnchorPosition(CONTENT_CHANGES[nextIndex].anchor);
   };
 
   const selectChange = (changeId: string) => {
@@ -1248,7 +1303,6 @@ function ReviewScreen({
     if (nextIndex >= 0) {
       setActiveIndex(nextIndex);
       setFocused(true);
-      scheduleAnchorPosition(CONTENT_CHANGES[nextIndex].anchor);
       if (!mapPinned) setMapPeeked(false);
     }
   };
@@ -1271,7 +1325,6 @@ function ReviewScreen({
     }
     setDiffFilter(mode);
     setFocused(true);
-    scheduleAnchorPosition(activeChange.anchor, mode);
   };
 
   return (
@@ -1302,15 +1355,28 @@ function ReviewScreen({
                 </span>
               </div>
 
+              <div className={styles.canvasVersionPair} aria-label="对比版本与全页打开">
+                <a data-side="before" href={reviewDocumentUrl("before", reviewSessionId)} target="_blank" rel="noreferrer">
+                  <span>左 · 修改前</span>
+                  <strong>原版 V1.3</strong>
+                  <ArrowSquareOutIcon aria-hidden="true" size={13} weight="bold" />
+                </a>
+                <a data-side="after" href={reviewDocumentUrl("after", reviewSessionId)} target="_blank" rel="noreferrer">
+                  <span>右 · 修改后</span>
+                  <strong>AI 候选 V1.4</strong>
+                  <ArrowSquareOutIcon aria-hidden="true" size={13} weight="bold" />
+                </a>
+              </div>
+
               <label className={styles.maskTransparencyControl}>
-                <span>蒙层透明度</span>
+                <span>上下文可见度</span>
                 <input
                   type="range"
-                  min="40"
-                  max="95"
+                  min="0"
+                  max="100"
                   step="1"
                   value={maskTransparency}
-                  aria-label="非修改区域蒙层透明度"
+                  aria-label="非修改区域上下文可见度"
                   onInput={(event) => setMaskTransparency(Number(event.currentTarget.value))}
                 />
                 <output>{maskTransparency}%</output>
@@ -1346,10 +1412,10 @@ function ReviewScreen({
                   {scrollMode === "linked"
                     ? <LinkIcon aria-hidden="true" size={15} weight="bold" />
                     : <LinkBreakIcon aria-hidden="true" size={15} weight="bold" />}
-                  <span>{scrollMode === "linked" ? "同步滚动" : "独立滚动"}</span>
+                  <span>{scrollMode === "linked" ? `同步 · ${leaderSide === "before" ? "左侧" : "右侧"}主控` : "独立滚动"}</span>
                 </button>
                 <div className={styles.zoomSwitch} aria-label="画布缩放">
-                  <button type="button" aria-pressed={zoom === "fit"} onClick={() => setZoom("fit")}><CornersOutIcon aria-hidden="true" size={14} />适应</button>
+                  <button type="button" aria-pressed={zoom === "fit"} onClick={() => setZoom("fit")}><CornersOutIcon aria-hidden="true" size={14} /><span>适应 {Math.round(canvasScale * 100)}%</span></button>
                   <button type="button" aria-pressed={zoom === "actual"} onClick={() => setZoom("actual")}>100%</button>
                 </div>
               </div>
@@ -1373,8 +1439,8 @@ function ReviewScreen({
 
           <div className={styles.canvasReviewBody} data-focused={focused ? "true" : undefined}>
             <div className={styles.canvasGrid}>
-              <RealDocumentPane side="before" zoom={zoom} reviewSessionId={reviewSessionId} onFrameReady={bindFrame} />
-              <RealDocumentPane side="after" zoom={zoom} reviewSessionId={reviewSessionId} onFrameReady={bindFrame} />
+              <RealDocumentPane side="before" zoom={zoom} reviewSessionId={reviewSessionId} onFrameReady={bindFrame} onScaleChange={setCanvasScale} />
+              <RealDocumentPane side="after" zoom={zoom} reviewSessionId={reviewSessionId} onFrameReady={bindFrame} onScaleChange={setCanvasScale} />
             </div>
 
             <aside
@@ -1434,10 +1500,6 @@ function ReviewScreen({
               onMouseEnter={() => { if (!mapPinned) setMapPeeked(true); }}
             />
 
-            <div className={styles.canvasHint} data-visible={focused ? "true" : undefined}>
-              <ArrowsDownUpIcon aria-hidden="true" size={14} weight="duotone" />
-              <span>{scrollMode === "linked" ? `由${leaderSide === "before" ? "左侧" : "右侧"}带动同步 · Option 临时单独滚动` : "鼠标所在画布独立滚动"}</span>
-            </div>
           </div>
         </section>
         <span className={styles.srAnnouncement} aria-live="polite">

@@ -32,6 +32,15 @@ type TextToken = {
   end: number;
 };
 
+type TextRange = {
+  start: number;
+  end: number;
+};
+
+type ClauseRange = TextRange & {
+  value: string;
+};
+
 const REVIEW_MODE_CLASSES = [
   "pageroot-mode-all",
   "pageroot-mode-text",
@@ -57,6 +66,7 @@ const REVIEW_FRAME_STYLE = `
     --pageroot-context-grayscale: .28;
     --pageroot-context-saturation: .72;
     --pageroot-focus-mask-opacity: .28;
+    --pageroot-review-ui-scale: 1;
   }
 
   html, body { scroll-behavior: auto !important; overflow-anchor: none !important; }
@@ -94,7 +104,7 @@ const REVIEW_FRAME_STYLE = `
   }
 
   body.pageroot-mode-text .pageroot-focus-mask {
-    backdrop-filter: blur(.45px) saturate(.72) !important;
+    backdrop-filter: saturate(.76) !important;
   }
 
   body.pageroot-mode-structure .pageroot-focus-mask {
@@ -109,9 +119,9 @@ const REVIEW_FRAME_STYLE = `
     position: relative !important;
     z-index: 2147483020 !important;
     display: inline !important;
-    margin-inline: .025em !important;
-    padding: .025em .08em .045em !important;
-    border-radius: .28em !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border-radius: 0 !important;
     background: transparent !important;
     color: inherit !important;
     opacity: 1 !important;
@@ -125,8 +135,8 @@ const REVIEW_FRAME_STYLE = `
     color: inherit !important;
     text-decoration-line: line-through !important;
     text-decoration-color: #c04e48 !important;
-    text-decoration-thickness: 1.5px !important;
-    box-shadow: inset 0 0 0 1px rgba(196, 72, 66, .72) !important;
+    text-decoration-thickness: calc(2px * var(--pageroot-review-ui-scale)) !important;
+    box-shadow: none !important;
   }
 
   .pageroot-token-added {
@@ -134,13 +144,38 @@ const REVIEW_FRAME_STYLE = `
     color: inherit !important;
     text-decoration-line: underline !important;
     text-decoration-color: #249269 !important;
-    text-decoration-thickness: 1.5px !important;
+    text-decoration-thickness: calc(2px * var(--pageroot-review-ui-scale)) !important;
     text-underline-offset: .16em !important;
-    box-shadow: inset 0 0 0 1px rgba(31, 143, 99, .72) !important;
+    box-shadow: none !important;
+  }
+
+  [data-pageroot-clause='true'] {
+    position: relative !important;
+    z-index: 2147483018 !important;
+    display: inline !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: calc(3px * var(--pageroot-review-ui-scale)) !important;
+    background: transparent !important;
+    color: inherit !important;
+    opacity: 1 !important;
+    filter: none !important;
+    box-decoration-break: clone !important;
+    -webkit-box-decoration-break: clone !important;
+  }
+
+  .pageroot-clause-removed {
+    box-shadow: 0 0 0 calc(2px * var(--pageroot-review-ui-scale)) rgba(207, 82, 76, .82) !important;
+  }
+
+  .pageroot-clause-added {
+    box-shadow: 0 0 0 calc(2px * var(--pageroot-review-ui-scale)) rgba(35, 148, 103, .86) !important;
   }
 
   .pageroot-diff-text {
     position: relative !important;
+    overflow: visible !important;
   }
 
   .pageroot-structure-from,
@@ -154,39 +189,56 @@ const REVIEW_FRAME_STYLE = `
   }
 
   .pageroot-structure-from {
-    outline: 1.5px dashed rgba(111, 106, 125, .78) !important;
-    outline-offset: 2px !important;
-    box-shadow: inset 3px 0 0 rgba(111, 106, 125, .82) !important;
+    outline: calc(2px * var(--pageroot-review-ui-scale)) dashed rgba(111, 106, 125, .82) !important;
+    outline-offset: calc(2px * var(--pageroot-review-ui-scale)) !important;
+    box-shadow: inset calc(4px * var(--pageroot-review-ui-scale)) 0 0 rgba(111, 106, 125, .86) !important;
   }
 
   .pageroot-structure-to {
-    outline: 2px solid rgba(98, 87, 210, .86) !important;
-    outline-offset: 2px !important;
-    box-shadow: inset 0 -3px 0 rgba(98, 87, 210, .88) !important;
+    outline: calc(2.5px * var(--pageroot-review-ui-scale)) solid rgba(98, 87, 210, .9) !important;
+    outline-offset: calc(2px * var(--pageroot-review-ui-scale)) !important;
+    box-shadow: inset 0 calc(-4px * var(--pageroot-review-ui-scale)) 0 rgba(98, 87, 210, .9) !important;
   }
 
   .pageroot-structure-removed {
-    outline: 1.5px solid rgba(207, 90, 83, .82) !important;
-    outline-offset: 2px !important;
-    box-shadow: inset 3px 0 0 #cf5a53 !important;
+    outline: calc(2px * var(--pageroot-review-ui-scale)) solid rgba(207, 90, 83, .88) !important;
+    outline-offset: calc(2px * var(--pageroot-review-ui-scale)) !important;
+    box-shadow: inset calc(4px * var(--pageroot-review-ui-scale)) 0 0 #cf5a53 !important;
   }
 
   .pageroot-structure-added {
-    outline: 1.5px solid rgba(38, 151, 107, .84) !important;
-    outline-offset: 2px !important;
-    box-shadow: inset 0 -3px 0 #26976b !important;
+    outline: calc(2px * var(--pageroot-review-ui-scale)) solid rgba(38, 151, 107, .9) !important;
+    outline-offset: calc(2px * var(--pageroot-review-ui-scale)) !important;
+    box-shadow: inset 0 calc(-4px * var(--pageroot-review-ui-scale)) 0 #26976b !important;
   }
 
   .pageroot-style-reference {
-    outline: 1.5px dashed rgba(80, 103, 121, .7) !important;
-    outline-offset: 2px !important;
+    outline: calc(2px * var(--pageroot-review-ui-scale)) dashed rgba(80, 103, 121, .76) !important;
+    outline-offset: calc(2px * var(--pageroot-review-ui-scale)) !important;
     box-shadow: none !important;
   }
 
   .pageroot-style-change {
-    outline: 2px solid rgba(25, 127, 167, .84) !important;
-    outline-offset: 2px !important;
+    outline: calc(2.5px * var(--pageroot-review-ui-scale)) solid rgba(25, 127, 167, .9) !important;
+    outline-offset: calc(2px * var(--pageroot-review-ui-scale)) !important;
     box-shadow: none !important;
+  }
+
+  .pageroot-summary-before,
+  .pageroot-summary-after {
+    position: relative !important;
+    z-index: 2147483010 !important;
+    outline-offset: calc(3px * var(--pageroot-review-ui-scale)) !important;
+  }
+
+  .pageroot-summary-before {
+    outline: calc(2px * var(--pageroot-review-ui-scale)) solid rgba(191, 91, 84, .58) !important;
+    box-shadow: inset calc(4px * var(--pageroot-review-ui-scale)) 0 0 rgba(191, 91, 84, .72) !important;
+  }
+
+  .pageroot-summary-after {
+    outline: calc(2px * var(--pageroot-review-ui-scale)) solid rgba(61, 129, 104, .62) !important;
+    box-shadow: inset calc(4px * var(--pageroot-review-ui-scale)) 0 0 rgba(61, 129, 104, .78) !important;
   }
 
   .pageroot-review-label {
@@ -195,14 +247,17 @@ const REVIEW_FRAME_STYLE = `
     display: inline-flex !important;
     align-items: center !important;
     width: max-content !important;
-    max-width: min(320px, calc(100% - 12px)) !important;
+    max-width: min(calc(320px * var(--pageroot-review-ui-scale)), calc(100vw - 24px * var(--pageroot-review-ui-scale))) !important;
     min-height: 0 !important;
     padding: 0 !important;
     border: 0 !important;
     border-radius: 0 !important;
     background: transparent !important;
     color: #5b55bd !important;
-    font: 760 10.5px/1.25 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
+    font-size: calc(11.5px * var(--pageroot-review-ui-scale)) !important;
+    font-weight: 780 !important;
+    line-height: 1.2 !important;
     letter-spacing: .01em !important;
     white-space: nowrap !important;
     overflow: hidden !important;
@@ -217,16 +272,13 @@ const REVIEW_FRAME_STYLE = `
   }
 
   .pageroot-label-text {
-    top: 4px !important;
-    left: 5px !important;
+    color: #514ba9 !important;
   }
 
   .pageroot-label-removed { color: #b0443f !important; }
   .pageroot-label-added { color: #197b56 !important; }
 
   .pageroot-label-structure {
-    top: 4px !important;
-    left: 5px !important;
     color: #5d56bf !important;
   }
 
@@ -234,9 +286,6 @@ const REVIEW_FRAME_STYLE = `
   .pageroot-label-structure-after { color: #5d56bf !important; }
 
   .pageroot-label-style {
-    top: 4px !important;
-    right: auto !important;
-    left: 5px !important;
     color: #176f93 !important;
   }
 
@@ -244,6 +293,26 @@ const REVIEW_FRAME_STYLE = `
   .pageroot-label-style-after { color: #176f93 !important; }
 
   .pageroot-label-mixed { color: #514ba9 !important; }
+
+  .pageroot-review-label[data-pageroot-placement='top'] {
+    top: auto !important;
+    bottom: calc(100% + 5px * var(--pageroot-review-ui-scale)) !important;
+  }
+
+  .pageroot-review-label[data-pageroot-placement='bottom'] {
+    top: calc(100% + 5px * var(--pageroot-review-ui-scale)) !important;
+    bottom: auto !important;
+  }
+
+  .pageroot-review-label[data-pageroot-align='start'] {
+    right: auto !important;
+    left: 0 !important;
+  }
+
+  .pageroot-review-label[data-pageroot-align='end'] {
+    right: 0 !important;
+    left: auto !important;
+  }
 
   [data-pageroot-diff]:hover > .pageroot-review-label,
   [data-pageroot-diff]:focus-within > .pageroot-review-label {
@@ -346,6 +415,64 @@ function tokenize(text: string) {
   return tokens;
 }
 
+function trimRange(text: string, start: number, end: number): TextRange | null {
+  let trimmedStart = start;
+  let trimmedEnd = end;
+  while (trimmedStart < trimmedEnd && /\s/u.test(text[trimmedStart])) trimmedStart += 1;
+  while (trimmedEnd > trimmedStart && /\s/u.test(text[trimmedEnd - 1])) trimmedEnd -= 1;
+  return trimmedEnd > trimmedStart ? { start: trimmedStart, end: trimmedEnd } : null;
+}
+
+function isCompactClauseElement(element: HTMLElement) {
+  return /^(H[1-6]|BUTTON|A|LABEL|LEGEND|TH|TD|DATA)$/u.test(element.tagName);
+}
+
+function clauseRanges(entry: ElementEntry): ClauseRange[] {
+  const text = entry.rawText;
+  if (!text.trim()) return [];
+  if (isCompactClauseElement(entry.element)) {
+    const range = trimRange(text, 0, text.length);
+    return range ? [{ ...range, value: text.slice(range.start, range.end) }] : [];
+  }
+
+  const ranges: ClauseRange[] = [];
+  let start = 0;
+  let visibleLength = 0;
+  const pushRange = (end: number) => {
+    const range = trimRange(text, start, end);
+    if (range) ranges.push({ ...range, value: text.slice(range.start, range.end) });
+    start = end;
+    visibleLength = 0;
+  };
+
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    if (!/\s/u.test(character)) visibleLength += 1;
+    const strongBoundary = /[\n\r。！？；!?;]/u.test(character);
+    const secondaryBoundary = /[，,:\uff1a]/u.test(character)
+      && visibleLength >= 8
+      && !(/\d/u.test(text[index - 1] ?? "") && /\d/u.test(text[index + 1] ?? ""));
+    if (strongBoundary || secondaryBoundary) pushRange(index + 1);
+  }
+  pushRange(text.length);
+  return ranges;
+}
+
+function normalizeClause(value: string) {
+  return value.replace(/\s+/gu, " ").trim().toLocaleLowerCase("zh-CN");
+}
+
+function mergeRanges(ranges: TextRange[]) {
+  return [...ranges]
+    .sort((left, right) => left.start - right.start)
+    .reduce<TextRange[]>((merged, range) => {
+      const previous = merged.at(-1);
+      if (previous && range.start <= previous.end) previous.end = Math.max(previous.end, range.end);
+      else merged.push({ ...range });
+      return merged;
+    }, []);
+}
+
 function lcsMatches(beforeTokens: TextToken[], afterTokens: TextToken[]) {
   const rows = beforeTokens.length + 1;
   const columns = afterTokens.length + 1;
@@ -436,11 +563,11 @@ function pairEntries(beforeEntries: ElementEntry[], afterEntries: ElementEntry[]
   };
 }
 
-function rangesForUnmatched(tokens: TextToken[], matched: Set<number>) {
+function rangesForUnmatched(tokens: TextToken[], matched: Set<number>, offset = 0) {
   const ranges = tokens
     .filter((_, index) => !matched.has(index))
-    .map((token) => ({ start: token.start, end: token.end }));
-  return ranges.reduce<Array<{ start: number; end: number }>>((merged, range) => {
+    .map((token) => ({ start: token.start + offset, end: token.end + offset }));
+  return ranges.reduce<TextRange[]>((merged, range) => {
     const previous = merged.at(-1);
     if (previous && range.start <= previous.end + 1) previous.end = Math.max(previous.end, range.end);
     else merged.push({ ...range });
@@ -448,7 +575,83 @@ function rangesForUnmatched(tokens: TextToken[], matched: Set<number>) {
   }, []);
 }
 
-function wrapTextRanges(element: HTMLElement, ranges: Array<{ start: number; end: number }>, side: ReviewSide) {
+function pairClauses(before: ClauseRange[], after: ClauseRange[]) {
+  const usedBefore = new Set<number>();
+  const usedAfter = new Set<number>();
+  const pairs: Array<{ before: ClauseRange; after: ClauseRange }> = [];
+
+  before.forEach((beforeClause, beforeIndex) => {
+    const value = normalizeClause(beforeClause.value);
+    const afterIndex = after.findIndex((afterClause, candidateIndex) => (
+      !usedAfter.has(candidateIndex) && normalizeClause(afterClause.value) === value
+    ));
+    if (afterIndex < 0) return;
+    usedBefore.add(beforeIndex);
+    usedAfter.add(afterIndex);
+    pairs.push({ before: beforeClause, after: after[afterIndex] });
+  });
+
+  before.forEach((beforeClause, beforeIndex) => {
+    if (usedBefore.has(beforeIndex)) return;
+    let bestAfterIndex = -1;
+    let bestScore = 0;
+    after.forEach((afterClause, afterIndex) => {
+      if (usedAfter.has(afterIndex)) return;
+      const score = textSimilarity(beforeClause.value, afterClause.value);
+      if (score > bestScore) {
+        bestScore = score;
+        bestAfterIndex = afterIndex;
+      }
+    });
+    if (bestAfterIndex < 0 || bestScore < .3) return;
+    usedBefore.add(beforeIndex);
+    usedAfter.add(bestAfterIndex);
+    pairs.push({ before: beforeClause, after: after[bestAfterIndex] });
+  });
+
+  return {
+    pairs,
+    beforeOnly: before.filter((_, index) => !usedBefore.has(index)),
+    afterOnly: after.filter((_, index) => !usedAfter.has(index)),
+  };
+}
+
+function changedTextRanges(beforeEntry: ElementEntry, afterEntry: ElementEntry) {
+  const result = pairClauses(clauseRanges(beforeEntry), clauseRanges(afterEntry));
+  const beforeClauses: TextRange[] = [];
+  const afterClauses: TextRange[] = [];
+  const beforeCharacters: TextRange[] = [];
+  const afterCharacters: TextRange[] = [];
+
+  result.pairs.forEach((pair) => {
+    if (normalizeClause(pair.before.value) === normalizeClause(pair.after.value)) return;
+    const beforeTokens = tokenize(pair.before.value);
+    const afterTokens = tokenize(pair.after.value);
+    const matches = lcsMatches(beforeTokens, afterTokens);
+    beforeClauses.push(pair.before);
+    afterClauses.push(pair.after);
+    beforeCharacters.push(...rangesForUnmatched(beforeTokens, matches.beforeMatched, pair.before.start));
+    afterCharacters.push(...rangesForUnmatched(afterTokens, matches.afterMatched, pair.after.start));
+  });
+
+  result.beforeOnly.forEach((clause) => {
+    beforeClauses.push(clause);
+    beforeCharacters.push(...rangesForUnmatched(tokenize(clause.value), new Set(), clause.start));
+  });
+  result.afterOnly.forEach((clause) => {
+    afterClauses.push(clause);
+    afterCharacters.push(...rangesForUnmatched(tokenize(clause.value), new Set(), clause.start));
+  });
+
+  return {
+    beforeClauses: mergeRanges(beforeClauses),
+    afterClauses: mergeRanges(afterClauses),
+    beforeCharacters: mergeRanges(beforeCharacters),
+    afterCharacters: mergeRanges(afterCharacters),
+  };
+}
+
+function wrapTextRanges(element: HTMLElement, ranges: TextRange[], side: ReviewSide) {
   if (!ranges.length) return false;
   const document = element.ownerDocument;
   const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, {
@@ -494,6 +697,63 @@ function wrapTextRanges(element: HTMLElement, ranges: Array<{ start: number; end
   return true;
 }
 
+function wrapClauseRanges(element: HTMLElement, ranges: TextRange[], side: ReviewSide) {
+  if (!ranges.length) return false;
+  const document = element.ownerDocument;
+  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      const parent = node.parentElement;
+      if (!parent || parent.closest("[data-pageroot-overlay='true'], [data-pageroot-clause='true'], [data-pageroot-token='true']")) {
+        return NodeFilter.FILTER_REJECT;
+      }
+      if (parent.matches("script, style, noscript")) return NodeFilter.FILTER_REJECT;
+      return NodeFilter.FILTER_ACCEPT;
+    },
+  });
+  const nodes: Array<{ node: Text; start: number; end: number }> = [];
+  let offset = 0;
+  let current = walker.nextNode();
+  while (current) {
+    const text = current.textContent ?? "";
+    nodes.push({ node: current as Text, start: offset, end: offset + text.length });
+    offset += text.length;
+    current = walker.nextNode();
+  }
+
+  nodes.forEach(({ node, start, end }) => {
+    const intersections = ranges
+      .map((range) => ({ start: Math.max(start, range.start), end: Math.min(end, range.end) }))
+      .filter((range) => range.end > range.start);
+    if (!intersections.length) return;
+    const source = node.textContent ?? "";
+    const fragment = document.createDocumentFragment();
+    let cursor = 0;
+    intersections.forEach((range) => {
+      const localStart = range.start - start;
+      const localEnd = range.end - start;
+      if (localStart > cursor) fragment.append(source.slice(cursor, localStart));
+      const span = document.createElement("span");
+      span.dataset.pagerootClause = "true";
+      span.className = side === "before" ? "pageroot-clause-removed" : "pageroot-clause-added";
+      span.textContent = source.slice(localStart, localEnd);
+      fragment.append(span);
+      cursor = localEnd;
+    });
+    if (cursor < source.length) fragment.append(source.slice(cursor));
+    node.replaceWith(fragment);
+  });
+  return true;
+}
+
+function placeLabel(label: HTMLElement, element: HTMLElement) {
+  const document = element.ownerDocument;
+  const frameWindow = document.defaultView;
+  const uiScale = Number.parseFloat(document.documentElement.style.getPropertyValue("--pageroot-review-ui-scale")) || 1;
+  const bounds = element.getBoundingClientRect();
+  label.dataset.pagerootPlacement = bounds.top > 34 * uiScale ? "top" : "bottom";
+  label.dataset.pagerootAlign = frameWindow && frameWindow.innerWidth - bounds.right < 180 * uiScale ? "end" : "start";
+}
+
 function appendLabel(element: HTMLElement, tone: "removed" | "added" | "structure" | "style", text: string) {
   let label = element.querySelector<HTMLElement>(":scope > .pageroot-review-label");
   if (!label) {
@@ -512,6 +772,7 @@ function appendLabel(element: HTMLElement, tone: "removed" | "added" | "structur
   );
   label.classList.toggle("pageroot-label-mixed", parts.length > 1);
   label.textContent = parts.join(" · ");
+  placeLabel(label, element);
   return label;
 }
 
@@ -523,8 +784,9 @@ function appendFocusMask(section: HTMLElement) {
   section.append(mask);
 }
 
-function markText(entry: ElementEntry, side: ReviewSide, ranges: Array<{ start: number; end: number }>) {
-  if (!wrapTextRanges(entry.element, ranges, side)) return;
+function markText(entry: ElementEntry, side: ReviewSide, clauses: TextRange[], characters: TextRange[]) {
+  if (!wrapClauseRanges(entry.element, clauses, side)) return;
+  wrapTextRanges(entry.element, characters, side);
   entry.element.dataset.pagerootDiff = "text";
   entry.element.classList.add("pageroot-diff-text");
   appendLabel(entry.element, side === "before" ? "removed" : "added", side === "before" ? "删除" : "新增");
@@ -534,14 +796,18 @@ function applyTextDiff(beforeSection: HTMLElement, afterSection: HTMLElement, se
   const result = pairEntries(collectEntries(beforeSection, selectors), collectEntries(afterSection, selectors), false);
   result.pairs.forEach((pair) => {
     if (pair.before.text === pair.after.text) return;
-    const beforeTokens = tokenize(pair.before.rawText);
-    const afterTokens = tokenize(pair.after.rawText);
-    const matches = lcsMatches(beforeTokens, afterTokens);
-    markText(pair.before, "before", rangesForUnmatched(beforeTokens, matches.beforeMatched));
-    markText(pair.after, "after", rangesForUnmatched(afterTokens, matches.afterMatched));
+    const ranges = changedTextRanges(pair.before, pair.after);
+    markText(pair.before, "before", ranges.beforeClauses, ranges.beforeCharacters);
+    markText(pair.after, "after", ranges.afterClauses, ranges.afterCharacters);
   });
-  result.beforeOnly.forEach((entry) => markText(entry, "before", rangesForUnmatched(tokenize(entry.rawText), new Set())));
-  result.afterOnly.forEach((entry) => markText(entry, "after", rangesForUnmatched(tokenize(entry.rawText), new Set())));
+  result.beforeOnly.forEach((entry) => {
+    const clauses = clauseRanges(entry);
+    markText(entry, "before", clauses, rangesForUnmatched(tokenize(entry.rawText), new Set()));
+  });
+  result.afterOnly.forEach((entry) => {
+    const clauses = clauseRanges(entry);
+    markText(entry, "after", clauses, rangesForUnmatched(tokenize(entry.rawText), new Set()));
+  });
 }
 
 function relativeRect(element: HTMLElement, section: HTMLElement) {
@@ -611,6 +877,11 @@ function applyStyleDiff(beforeSection: HTMLElement, afterSection: HTMLElement, s
   result.afterOnly.forEach((entry) => markStyle(entry.element, "after", "新增视觉样式"));
 }
 
+function applySummaryDiff(beforeSection: HTMLElement, afterSection: HTMLElement) {
+  beforeSection.classList.add("pageroot-summary-before");
+  afterSection.classList.add("pageroot-summary-after");
+}
+
 function ensurePresentationStyle(document: Document) {
   let style = document.getElementById("pageroot-review-presentation") as HTMLStyleElement | null;
   if (!style) {
@@ -623,13 +894,13 @@ function ensurePresentationStyle(document: Document) {
 
 function setDocumentMaskTransparency(document: Document | null | undefined, value: number) {
   if (!document?.documentElement) return;
-  const transparency = Math.max(40, Math.min(95, value)) / 100;
+  const transparency = Math.max(0, Math.min(100, value)) / 100;
   const maskOpacity = 1 - transparency;
-  const contextOpacity = .18 + transparency * .45;
+  const contextOpacity = .22 + transparency * .78;
   document.documentElement.style.setProperty("--pageroot-focus-mask-opacity", maskOpacity.toFixed(2));
   document.documentElement.style.setProperty("--pageroot-context-opacity", contextOpacity.toFixed(2));
   document.documentElement.style.setProperty("--pageroot-context-grayscale", (maskOpacity * .55).toFixed(2));
-  document.documentElement.style.setProperty("--pageroot-context-saturation", (.72 + transparency * .22).toFixed(2));
+  document.documentElement.style.setProperty("--pageroot-context-saturation", (.7 + transparency * .3).toFixed(2));
 }
 
 export function setReviewPresentationMaskTransparency(
@@ -641,6 +912,13 @@ export function setReviewPresentationMaskTransparency(
   setDocumentMaskTransparency(afterFrame?.contentDocument, value);
 }
 
+export function setReviewPresentationScale(frame: HTMLIFrameElement | null, scale: number) {
+  const document = frame?.contentDocument;
+  if (!document?.documentElement) return;
+  const compensation = 1 / Math.max(.32, Math.min(1, scale));
+  document.documentElement.style.setProperty("--pageroot-review-ui-scale", compensation.toFixed(3));
+}
+
 function removeInjectedPresentation(document: Document) {
   document.querySelectorAll<HTMLElement>("[data-pageroot-overlay='true']").forEach((element) => element.remove());
   document.querySelectorAll<HTMLElement>("[data-pageroot-token='true']").forEach((element) => {
@@ -648,8 +926,16 @@ function removeInjectedPresentation(document: Document) {
     element.replaceWith(...element.childNodes);
     parent?.normalize();
   });
+  document.querySelectorAll<HTMLElement>("[data-pageroot-clause='true']").forEach((element) => {
+    const parent = element.parentNode;
+    element.replaceWith(...element.childNodes);
+    parent?.normalize();
+  });
   document.body?.classList.remove("pageroot-section-focus", "pageroot-diff-focus", ...REVIEW_MODE_CLASSES);
   document.querySelectorAll<HTMLElement>("[data-pageroot-active]").forEach((element) => element.removeAttribute("data-pageroot-active"));
+  document.querySelectorAll<HTMLElement>(".pageroot-summary-before, .pageroot-summary-after").forEach((element) => {
+    element.classList.remove("pageroot-summary-before", "pageroot-summary-after");
+  });
   document.querySelectorAll<HTMLElement>("[data-pageroot-diff]").forEach((element) => {
     element.removeAttribute("data-pageroot-diff");
     element.classList.remove(
@@ -697,15 +983,14 @@ export function applyReviewPresentationPair(
   appendFocusMask(beforeSection);
   appendFocusMask(afterSection);
 
-  const activeFilters: Exclude<ReviewDiffFilter, "all">[] = filter === "all"
-    ? ["style", "structure", "text"]
-    : [filter];
+  if (filter === "all") {
+    applySummaryDiff(beforeSection, afterSection);
+    return;
+  }
 
-  activeFilters.forEach((activeFilter) => {
-    if (activeFilter === "style") applyStyleDiff(beforeSection, afterSection, targets.style);
-    if (activeFilter === "structure") applyStructureDiff(beforeSection, afterSection, targets.structure);
-    if (activeFilter === "text") applyTextDiff(beforeSection, afterSection, targets.text);
-  });
+  if (filter === "style") applyStyleDiff(beforeSection, afterSection, targets.style);
+  if (filter === "structure") applyStructureDiff(beforeSection, afterSection, targets.structure);
+  if (filter === "text") applyTextDiff(beforeSection, afterSection, targets.text);
 }
 
 export function clearReviewPresentation(frame: HTMLIFrameElement | null) {

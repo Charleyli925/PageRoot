@@ -3685,7 +3685,7 @@ li[data-state="current"] .stepState {
   min-width: 0;
   min-height: 58px;
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) auto auto auto;
+  grid-template-columns: minmax(170px, 1fr) auto auto auto auto;
   align-items: center;
   gap: 10px;
   padding: 0 14px 0 18px;
@@ -3693,6 +3693,71 @@ li[data-state="current"] .stepState {
   background: rgb(250 250 252 / 97%);
   box-shadow: 0 1px 5px rgb(31 32 41 / 4%);
   backdrop-filter: blur(16px) saturate(145%);
+}
+
+.canvasVersionPair {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 4px;
+}
+
+.canvasVersionPair a {
+  min-height: 33px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  align-items: center;
+  column-gap: 6px;
+  padding: 4px 8px;
+  border: 1px solid #e1d8d6;
+  border-radius: 9px;
+  background: #fff8f7;
+  color: #7f514d;
+  text-decoration: none;
+}
+
+.canvasVersionPair a[data-side="after"] {
+  border-color: #d2e5dc;
+  background: #f4fbf7;
+  color: #356d55;
+}
+
+.canvasVersionPair a:hover {
+  border-color: #d5b5b1;
+  background: #fff2f0;
+}
+
+.canvasVersionPair a[data-side="after"]:hover {
+  border-color: #afd2c0;
+  background: #edf9f2;
+}
+
+.canvasVersionPair a span,
+.canvasVersionPair a strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.canvasVersionPair a span {
+  grid-column: 1;
+  color: currentColor;
+  font-size: 7px;
+  font-weight: 760;
+  opacity: .72;
+}
+
+.canvasVersionPair a strong {
+  grid-column: 1;
+  color: currentColor;
+  font-size: 8.5px;
+  font-weight: 780;
+}
+
+.canvasVersionPair a svg {
+  grid-column: 2;
+  grid-row: 1 / 3;
 }
 
 .canvasToolbarHandle {
@@ -3900,9 +3965,10 @@ li[data-state="current"] .stepState {
 
 .canvasDocumentPane {
   display: grid;
-  grid-template-rows: 45px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   overflow: hidden;
   border: 1px solid #d9dbe1;
+  border-top-width: 2px;
   border-radius: 13px;
   background: #fff;
   box-shadow: 0 13px 32px rgb(35 37 46 / 9%), 0 2px 5px rgb(35 37 46 / 5%);
@@ -3914,74 +3980,6 @@ li[data-state="current"] .stepState {
 
 .canvasDocumentPane[data-side="after"] {
   border-top-color: #bddfce;
-}
-
-.canvasDocumentPane > header {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 0 10px 0 12px;
-  border-bottom: 1px solid #e5e6ea;
-  background: rgb(255 255 255 / 96%);
-}
-
-.canvasDocumentPane > header > div {
-  min-width: 0;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 7px;
-}
-
-.canvasDocumentPane > header span {
-  padding: 4px 6px;
-  border-radius: 6px;
-  background: #fff0ef;
-  color: #9b514b;
-  font-size: 8.5px;
-  font-weight: 800;
-}
-
-.canvasDocumentPane[data-side="after"] > header span {
-  background: #e9f8f0;
-  color: #2f7658;
-}
-
-.canvasDocumentPane > header strong {
-  min-width: 0;
-  overflow: hidden;
-  color: #414249;
-  font-size: 10px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.canvasDocumentPane > header small {
-  color: #9a9ca3;
-  font-size: 8px;
-  white-space: nowrap;
-}
-
-.canvasDocumentPane > header a {
-  flex: none;
-  min-height: 27px;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 0 7px;
-  border: 1px solid #e0e1e5;
-  border-radius: 7px;
-  color: #65618f;
-  font-size: 8.5px;
-  font-weight: 720;
-  text-decoration: none;
-}
-
-.canvasDocumentPane > header a:hover {
-  border-color: #c9c6eb;
-  background: #f7f6ff;
 }
 
 .canvasDocumentViewport {
@@ -4231,44 +4229,10 @@ li[data-state="current"] .stepState {
 .mapLegend span[data-tone="structure"] { border-left-style: dashed; border-color: #675bd7; }
 .mapLegend span[data-tone="style"] { border-color: #2a84c6; }
 
-.canvasHint {
-  position: absolute;
-  z-index: 8;
-  bottom: 20px;
-  left: 50%;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  max-width: min(420px, calc(100% - 120px));
-  padding: 7px 10px;
-  border: 1px solid rgb(207 205 232 / 86%);
-  border-radius: 999px;
-  background: rgb(255 255 255 / 91%);
-  color: #666179;
-  box-shadow: 0 7px 20px rgb(35 37 47 / 11%);
-  opacity: .42;
-  transform: translateX(-50%);
-  transition: opacity 160ms ease;
-  pointer-events: none;
-  backdrop-filter: blur(14px);
-}
-
-.canvasHint[data-visible="true"] {
-  opacity: .92;
-}
-
-.canvasHint span {
-  overflow: hidden;
-  font-size: 8.5px;
-  font-weight: 680;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .canvasToolbar button:focus-visible,
 .canvasToolbarHandle:focus-visible,
 .canvasMapDrawer button:focus-visible,
-.canvasDocumentPane a:focus-visible,
+.canvasVersionPair a:focus-visible,
 .headerPrimaryAction:focus-visible,
 .headerIconButton:focus-visible {
   outline: 2px solid #6b63dc;
@@ -4277,7 +4241,7 @@ li[data-state="current"] .stepState {
 
 @media (max-width: 1180px) {
   .canvasToolbar {
-    grid-template-columns: minmax(150px, 1fr) auto auto auto;
+    grid-template-columns: minmax(145px, 1fr) auto auto auto auto;
     gap: 8px;
   }
 
@@ -4287,6 +4251,18 @@ li[data-state="current"] .stepState {
 
   .diffFilterSwitch button span,
   .scrollModeButton span {
+    display: none;
+  }
+
+  .canvasVersionPair a {
+    width: 34px;
+    display: flex;
+    justify-content: center;
+    padding-inline: 6px;
+  }
+
+  .canvasVersionPair a span,
+  .canvasVersionPair a strong {
     display: none;
   }
 }
@@ -4299,7 +4275,7 @@ li[data-state="current"] .stepState {
   .appHeader .demoBadge,
   .appHeader .headerButton,
   .canvasReviewTitle,
-  .canvasHint {
+  .canvasVersionPair {
     display: none;
   }
 
@@ -4346,8 +4322,7 @@ li[data-state="current"] .stepState {
 
 @media (prefers-reduced-motion: reduce) {
   .canvasControlsDock,
-  .canvasMapDrawer,
-  .canvasHint {
+  .canvasMapDrawer {
     transition: none;
   }
 }

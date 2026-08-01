@@ -56,10 +56,13 @@ test("the content map uses headings and visible copy from the complex HTML fixtu
   assert.match(styles, /background: rgb\(238 234 255 \/ 78%\)/);
   assert.match(page, /aria-label="上一处变化"/);
   assert.match(page, /aria-label="下一处变化"/);
-  assert.match(page, /frameScrollSuppressed/);
-  assert.match(page, /suppressFrameScroll\(targetSide, 180\)/);
+  assert.match(page, /expectedFrameScroll/);
+  assert.match(page, /operationId: scrollOperationId\.current/);
+  assert.match(page, /requestAnimationFrame/);
+  assert.match(page, /scrollingElement\.scrollTop = targetTop/);
   assert.match(page, /leaderSideRef\.current !== side/);
-  assert.match(page, /frameScrollSuppressed\.current\[side\]/);
+  assert.match(page, /addEventListener\("scrollend"/);
+  assert.match(page, /sourceScrollMax - source\.scrollY <= 2/);
   assert.match(styles, /\.mapHandleNavigator/);
 });
 
@@ -71,7 +74,7 @@ test("canvas review exposes orthogonal focus, difference, scroll, and zoom contr
   assert.match(page, /视觉样式/);
   assert.match(page, /同步滚动/);
   assert.match(page, /独立滚动/);
-  assert.match(page, /Option 临时单独滚动/);
+  assert.match(page, /Option 可临时单独滚动/);
   assert.match(page, /查看整页/);
   assert.match(page, /适应/);
   assert.match(page, /100%/);
@@ -81,8 +84,10 @@ test("canvas review exposes orthogonal focus, difference, scroll, and zoom contr
   assert.match(page, /inert=\{!mapOpen \? true : undefined\}/);
   assert.match(page, /toolbarIntroduced/);
   assert.match(page, /toolbarPinned/);
-  assert.match(page, /蒙层透明度/);
-  assert.match(page, /aria-label="非修改区域蒙层透明度"/);
+  assert.match(page, /上下文可见度/);
+  assert.match(page, /min="0"/);
+  assert.match(page, /max="100"/);
+  assert.match(page, /aria-label="非修改区域上下文可见度"/);
   assert.match(page, /onInput=\{\(event\) => setMaskTransparency/);
   assert.match(page, /setReviewPresentationMaskTransparency/);
   assert.match(styles, /\.maskTransparencyControl/);
@@ -92,13 +97,18 @@ test("canvas review exposes orthogonal focus, difference, scroll, and zoom contr
 
 test("the paired diff presentation separates text, structure, and style evidence", () => {
   assert.match(presentation, /function lcsMatches/);
+  assert.match(presentation, /function clauseRanges/);
+  assert.match(presentation, /function pairClauses/);
+  assert.match(presentation, /function changedTextRanges/);
   assert.match(presentation, /if \(pair\.before\.text === pair\.after\.text\) return/);
+  assert.match(presentation, /pageroot-clause-removed/);
+  assert.match(presentation, /pageroot-clause-added/);
   assert.match(presentation, /pageroot-token-removed/);
   assert.match(presentation, /pageroot-token-added/);
   assert.match(presentation, /text-decoration-line: line-through/);
   assert.match(presentation, /text-decoration-line: underline/);
-  assert.match(presentation, /box-shadow: inset 0 0 0 1px rgba\(196, 72, 66, \.72\)/);
-  assert.match(presentation, /box-shadow: inset 0 0 0 1px rgba\(31, 143, 99, \.72\)/);
+  assert.match(presentation, /text-decoration-thickness: calc\(2px \* var\(--pageroot-review-ui-scale\)\)/);
+  assert.match(presentation, /box-shadow: 0 0 0 calc\(2px \* var\(--pageroot-review-ui-scale\)\) rgba\(207, 82, 76, \.82\)/);
   assert.match(presentation, /overflow-anchor: none/);
   assert.match(presentation, /pageroot-structure-from/);
   assert.match(presentation, /pageroot-structure-to/);
@@ -113,19 +123,22 @@ test("the paired diff presentation separates text, structure, and style evidence
   assert.match(presentation, /parts\.join\(" · "\)/);
   assert.match(presentation, /pageroot-focus-mask/);
   assert.match(presentation, /appendFocusMask\(beforeSection\)/);
+  assert.match(presentation, /applySummaryDiff\(beforeSection, afterSection\)/);
+  assert.match(presentation, /Math\.max\(0, Math\.min\(100, value\)\)/);
+  assert.match(presentation, /setReviewPresentationScale/);
   assert.doesNotMatch(presentation, /\[data-pageroot-active='true'\]::after/);
 });
 
 test("the review surface renders the two complete local HTML documents", () => {
   assert.match(page, /\/review-demo-local\/before\.html/);
   assert.match(page, /\/review-demo-local\/after\.html/);
-  assert.match(page, /固定桌面画布/);
   assert.match(page, /targetViewportWidth = 1180/);
   assert.match(page, /复杂 HTML 完整页面/);
-  assert.match(page, /side="before" zoom=\{zoom\} reviewSessionId=\{reviewSessionId\}/);
-  assert.match(page, /side="after" zoom=\{zoom\} reviewSessionId=\{reviewSessionId\}/);
+  assert.match(page, /side="before" zoom=\{zoom\} reviewSessionId=\{reviewSessionId\} onFrameReady=\{bindFrame\} onScaleChange=\{setCanvasScale\}/);
+  assert.match(page, /side="after" zoom=\{zoom\} reviewSessionId=\{reviewSessionId\} onFrameReady=\{bindFrame\} onScaleChange=\{setCanvasScale\}/);
   assert.match(page, /session=\$\{encodeURIComponent\(reviewSessionId\)\}/);
-  assert.match(page, /全页打开/);
+  assert.match(page, /对比版本与全页打开/);
+  assert.match(styles, /\.canvasVersionPair/);
   assert.match(page, /sandbox="allow-scripts allow-forms allow-modals allow-popups allow-same-origin"/);
   assert.match(page, /anchor: "top"/);
   assert.match(page, /anchor: "form-lab"/);
