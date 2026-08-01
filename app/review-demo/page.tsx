@@ -4,22 +4,30 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeftIcon } from "@phosphor-icons/react/dist/csr/ArrowLeft";
 import { ArrowRightIcon } from "@phosphor-icons/react/dist/csr/ArrowRight";
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/csr/ArrowSquareOut";
+import { ArrowsDownUpIcon } from "@phosphor-icons/react/dist/csr/ArrowsDownUp";
 import { ArrowsClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowsClockwise";
 import { ChatCircleTextIcon } from "@phosphor-icons/react/dist/csr/ChatCircleText";
 import { CheckCircleIcon } from "@phosphor-icons/react/dist/csr/CheckCircle";
 import { CircleNotchIcon } from "@phosphor-icons/react/dist/csr/CircleNotch";
 import { ClockCounterClockwiseIcon } from "@phosphor-icons/react/dist/csr/ClockCounterClockwise";
+import { CornersOutIcon } from "@phosphor-icons/react/dist/csr/CornersOut";
 import { EyeIcon } from "@phosphor-icons/react/dist/csr/Eye";
 import { FileHtmlIcon } from "@phosphor-icons/react/dist/csr/FileHtml";
 import { FlagCheckeredIcon } from "@phosphor-icons/react/dist/csr/FlagCheckered";
 import { FloppyDiskIcon } from "@phosphor-icons/react/dist/csr/FloppyDisk";
 import { GitDiffIcon } from "@phosphor-icons/react/dist/csr/GitDiff";
+import { LinkIcon } from "@phosphor-icons/react/dist/csr/Link";
+import { LinkBreakIcon } from "@phosphor-icons/react/dist/csr/LinkBreak";
 import { LockKeyIcon } from "@phosphor-icons/react/dist/csr/LockKey";
 import { MagicWandIcon } from "@phosphor-icons/react/dist/csr/MagicWand";
-import { RowsIcon } from "@phosphor-icons/react/dist/csr/Rows";
+import { PaletteIcon } from "@phosphor-icons/react/dist/csr/Palette";
+import { PushPinIcon } from "@phosphor-icons/react/dist/csr/PushPin";
 import { ShieldCheckIcon } from "@phosphor-icons/react/dist/csr/ShieldCheck";
+import { SidebarSimpleIcon } from "@phosphor-icons/react/dist/csr/SidebarSimple";
 import { SparkleIcon } from "@phosphor-icons/react/dist/csr/Sparkle";
 import { TableIcon } from "@phosphor-icons/react/dist/csr/Table";
+import { TextTIcon } from "@phosphor-icons/react/dist/csr/TextT";
+import { TreeStructureIcon } from "@phosphor-icons/react/dist/csr/TreeStructure";
 import { WarningCircleIcon } from "@phosphor-icons/react/dist/csr/WarningCircle";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 
@@ -29,11 +37,16 @@ type DemoState = "awaiting-ai" | "ready" | "review" | "accepted" | "kept";
 type ReviewView = "after" | "before" | "overlay";
 type DecisionSource = "review" | "direct";
 type CompareKind = "rebuild" | "layout" | "sequence" | "collection" | "table" | "form" | "behavior";
+type ReviewSide = "before" | "after";
+type DiffFilter = "all" | "text" | "structure" | "style";
+type ScrollMode = "linked" | "independent";
+type ZoomMode = "fit" | "actual";
 
-const VIEW_LABELS: Record<ReviewView, string> = {
-  after: "修改后",
-  before: "修改前",
-  overlay: "对照",
+const DIFF_FILTER_LABELS: Record<DiffFilter, string> = {
+  all: "全部变化",
+  text: "文字与数据",
+  structure: "结构与顺序",
+  style: "视觉样式",
 };
 
 type ContentChange = {
@@ -222,12 +235,129 @@ const CONTENT_OUTLINE: OutlineGroup[] = [
   },
 ];
 
+type DiffTargets = Record<Exclude<DiffFilter, "all">, string[]>;
+
+const REVIEW_DIFF_TARGETS: Record<string, DiffTargets> = {
+  opening: {
+    text: ["h1", ".hero-lede", ".floating-card"],
+    structure: [".button-row", ".hero-note"],
+    style: [".hero-visual", ".hero-note"],
+  },
+  dashboard: {
+    text: [".metric-label", ".metric-value", ".trend"],
+    structure: [".dashboard-grid", ".activity-panel", ".chart-panel"],
+    style: ["[data-card='north-star']", ".featured-metric"],
+  },
+  story: {
+    text: [".article-copy h2", ".article-copy h3", ".article-copy > p", ".article-copy blockquote"],
+    structure: [".editorial-grid", ".article-copy", ".article-copy ol"],
+    style: [".section-heading h2", ".article-copy"],
+  },
+  catalog: {
+    text: [".catalog-card h3", ".catalog-card p", ".catalog-card data"],
+    structure: [".catalog-grid", ".catalog-card"],
+    style: [".catalog-card:nth-child(1)", ".catalog-card:nth-child(4)"],
+  },
+  operations: {
+    text: ["#project-table thead th:last-child", "#project-table tbody tr", "#project-table tfoot"],
+    structure: [".admin-layout", "#project-table tbody tr"],
+    style: [".table-wrap", ".timeline"],
+  },
+  form: {
+    text: [".review-form-steps", ".form-card legend", "#approval-note-wrap", ".form-actions"],
+    structure: [".form-layout", ".form-card fieldset", ".review-form-steps"],
+    style: [".review-form-steps", ".form-feedback"],
+  },
+  media: {
+    text: [".gallery-item figcaption", ".media-card h3", ".media-card p"],
+    structure: [".gallery-grid", ".gallery-item", ".media-grid"],
+    style: [".gallery-item", ".canvas-card"],
+  },
+};
+
+const SEMANTIC_SCROLL_ANCHORS = [
+  "top",
+  "dashboard",
+  "story",
+  "catalog",
+  "operations",
+  "form-lab",
+  "media",
+  "documentation",
+  "faq",
+];
+
+const REVIEW_FRAME_STYLE = `
+  html { scroll-behavior: auto !important; }
+  body.pageroot-section-focus [data-test-module] {
+    transition: opacity 180ms ease, filter 180ms ease !important;
+  }
+  body.pageroot-section-focus [data-test-module]:not([data-pageroot-active='true']) {
+    opacity: .13 !important;
+    filter: grayscale(.72) saturate(.35) !important;
+  }
+  [data-pageroot-active='true'] {
+    position: relative !important;
+    isolation: isolate !important;
+    opacity: 1 !important;
+    filter: none !important;
+    outline: 3px solid rgba(100, 91, 214, .76) !important;
+    outline-offset: -3px !important;
+  }
+  body.pageroot-diff-focus [data-pageroot-active='true']::after {
+    position: absolute !important;
+    z-index: 2147483000 !important;
+    inset: 0 !important;
+    content: '' !important;
+    background: rgba(247, 248, 251, .78) !important;
+    backdrop-filter: blur(1.6px) saturate(.55) !important;
+    pointer-events: none !important;
+  }
+  [data-pageroot-diff='true'] {
+    position: relative !important;
+    z-index: 2147483001 !important;
+    opacity: 1 !important;
+    filter: none !important;
+    transition: box-shadow 160ms ease, outline-color 160ms ease !important;
+  }
+  html[data-pageroot-side='before'] .pageroot-diff-text {
+    outline: 3px solid rgba(210, 87, 81, .9) !important;
+    outline-offset: 3px !important;
+    background-color: rgba(255, 231, 229, .72) !important;
+    box-shadow: 0 0 0 7px rgba(210, 87, 81, .1) !important;
+  }
+  html[data-pageroot-side='after'] .pageroot-diff-text {
+    outline: 3px solid rgba(38, 151, 107, .9) !important;
+    outline-offset: 3px !important;
+    background-color: rgba(222, 248, 236, .72) !important;
+    box-shadow: 0 0 0 7px rgba(38, 151, 107, .11) !important;
+  }
+  .pageroot-diff-structure {
+    outline: 4px dashed rgba(103, 91, 215, .95) !important;
+    outline-offset: 4px !important;
+    box-shadow: 0 0 0 9px rgba(103, 91, 215, .11) !important;
+  }
+  .pageroot-diff-style {
+    outline: 3px solid rgba(42, 132, 198, .92) !important;
+    outline-offset: 3px !important;
+    box-shadow: 0 0 0 7px rgba(42, 132, 198, .12) !important;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    body.pageroot-section-focus [data-test-module],
+    [data-pageroot-diff='true'] { transition: none !important; }
+  }
+`;
+
 function BrandHeader({
   state,
   onBackToReview,
+  onAccept,
+  onKeep,
 }: {
   state: DemoState;
   onBackToReview?: () => void;
+  onAccept?: () => void;
+  onKeep?: () => void;
 }) {
   const isReview = state === "review";
 
@@ -251,10 +381,19 @@ function BrandHeader({
       <div className={styles.headerActions}>
         <span className={styles.demoBadge}>交互 Demo · 不写入文件</span>
         {isReview ? (
-          <button className={styles.headerButton} type="button" onClick={onBackToReview}>
-            <XIcon aria-hidden="true" size={15} weight="bold" />
-            退出审阅
-          </button>
+          <>
+            <button className={styles.headerButton} type="button" onClick={onKeep}>
+              <ClockCounterClockwiseIcon aria-hidden="true" size={15} weight="duotone" />
+              保留当前版本
+            </button>
+            <button className={styles.headerPrimaryAction} type="button" onClick={onAccept}>
+              <CheckCircleIcon aria-hidden="true" size={15} weight="fill" />
+              接受全部并打开
+            </button>
+            <button className={styles.headerIconButton} type="button" aria-label="退出审阅" title="退出审阅" onClick={onBackToReview}>
+              <XIcon aria-hidden="true" size={16} weight="bold" />
+            </button>
+          </>
         ) : (
           <div className={styles.lockedModes} aria-label="当前页面模式">
             <button type="button" disabled>编辑</button>
@@ -732,6 +871,9 @@ function AdaptiveComparison({ change, view }: { change: ContentChange; view: Rev
   return <MediaComparison view={view} />;
 }
 
+// Preserve the earlier extracted examples as an internal visual reference while the canvas-first UI is evaluated.
+void AdaptiveComparison;
+
 const DOCUMENT_URLS = {
   before: "/review-demo-local/before.html",
   after: "/review-demo-local/after.html",
@@ -739,72 +881,190 @@ const DOCUMENT_URLS = {
 
 function RealDocumentPane({
   side,
-  anchor,
-  compact,
-  onLoad,
+  zoom,
+  onFrameReady,
 }: {
-  side: "before" | "after";
-  anchor: string;
-  compact: boolean;
-  onLoad: () => void;
+  side: ReviewSide;
+  zoom: ZoomMode;
+  onFrameReady: (side: ReviewSide, frame: HTMLIFrameElement) => void;
 }) {
   const isBefore = side === "before";
-  const url = `${DOCUMENT_URLS[side]}#${anchor}`;
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const [viewportSize, setViewportSize] = useState({ width: 590, height: 620 });
+  const targetViewportWidth = 1180;
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return undefined;
+
+    const updateSize = () => {
+      const bounds = viewport.getBoundingClientRect();
+      setViewportSize({ width: Math.max(320, bounds.width), height: Math.max(360, bounds.height) });
+    };
+
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, []);
+
+  const scale = zoom === "fit"
+    ? Math.min(1, Math.max(0.32, viewportSize.width / targetViewportWidth))
+    : 1;
+  const renderedWidth = targetViewportWidth * scale;
+  const iframeHeight = Math.max(620, viewportSize.height / scale);
+  const url = `${DOCUMENT_URLS[side]}#top`;
+
   return (
-    <section className={styles.realDocumentPane} data-side={side}>
+    <section className={styles.canvasDocumentPane} data-side={side}>
       <header>
         <div>
-          <span>{isBefore ? "原版" : "AI 候选版"}</span>
-          <strong>{isBefore ? "用户提供的完整 HTML" : "基于原版生成的完整修改版"}</strong>
-          <small>{isBefore ? "122,014 字节 · 3701 行" : "127,417 字节 · 3779 行"}</small>
+          <span>{isBefore ? "修改前" : "修改后"}</span>
+          <strong>{isBefore ? "原版 V1.3" : "AI 候选 V1.4"}</strong>
+          <small>固定桌面画布 · {Math.round(scale * 100)}%</small>
         </div>
         <a href={url} target="_blank" rel="noreferrer">
           <ArrowSquareOutIcon aria-hidden="true" size={14} weight="bold" />
           全页打开
         </a>
       </header>
-      <div className={styles.realDocumentViewport} data-compact={compact ? "true" : undefined}>
-        <iframe
-          key={`${side}-${anchor}`}
-          src={url}
-          title={`${isBefore ? "原版" : "AI 候选版"}：${anchor} 内容区`}
-          loading="eager"
-          sandbox="allow-scripts allow-forms allow-modals allow-popups allow-same-origin"
-          onLoad={onLoad}
-        />
+      <div className={styles.canvasDocumentViewport} ref={viewportRef} data-zoom={zoom}>
+        <div
+          className={styles.canvasDocumentScale}
+          style={{ width: renderedWidth, height: viewportSize.height }}
+        >
+          <iframe
+            ref={iframeRef}
+            src={url}
+            title={`${isBefore ? "修改前" : "修改后"}的复杂 HTML 完整页面`}
+            loading="eager"
+            sandbox="allow-scripts allow-forms allow-modals allow-popups allow-same-origin"
+            style={{
+              width: targetViewportWidth,
+              height: iframeHeight,
+              transform: `scale(${scale})`,
+              transformOrigin: "top left",
+            }}
+            onLoad={() => iframeRef.current && onFrameReady(side, iframeRef.current)}
+          />
+        </div>
       </div>
     </section>
   );
 }
 
-function RealDocumentComparison({ change, view, onDocumentLoad }: { change: ContentChange; view: ReviewView; onDocumentLoad: () => void }) {
-  const sides: ("before" | "after")[] = view === "overlay" ? ["before", "after"] : [view];
-  return (
-    <section className={styles.realDocumentComparison}>
-      <header className={styles.realDocumentIntro}>
-        <div>
-          <span>真实完整页面</span>
-          <strong>已定位到“{change.heading}”</strong>
-          <p>下面不是重画的示意图，而是浏览器直接载入原版和候选版；两边都可以独立滚动。</p>
-        </div>
-        <small>跳转依据：页面可见标题 + 锚点</small>
-      </header>
-      <div className={styles.realDocumentGrid} data-single={sides.length === 1 ? "true" : undefined}>
-        {sides.map((side) => <RealDocumentPane key={side} side={side} anchor={change.anchor} compact={sides.length === 2} onLoad={onDocumentLoad} />)}
-      </div>
-    </section>
-  );
+function removeReviewPresentation(document: Document) {
+  document.body?.classList.remove("pageroot-section-focus", "pageroot-diff-focus");
+  document.querySelectorAll("[data-pageroot-active]").forEach((element) => element.removeAttribute("data-pageroot-active"));
+  document.querySelectorAll("[data-pageroot-diff]").forEach((element) => {
+    element.removeAttribute("data-pageroot-diff");
+    element.classList.remove("pageroot-diff-text", "pageroot-diff-structure", "pageroot-diff-style");
+  });
+}
+
+function applyReviewPresentation(
+  frame: HTMLIFrameElement,
+  side: ReviewSide,
+  change: ContentChange,
+  filter: DiffFilter,
+  focused: boolean,
+) {
+  const document = frame.contentDocument;
+  if (!document?.body) return;
+
+  let reviewStyle = document.getElementById("pageroot-review-presentation") as HTMLStyleElement | null;
+  if (!reviewStyle) {
+    reviewStyle = document.createElement("style");
+    reviewStyle.id = "pageroot-review-presentation";
+    reviewStyle.textContent = REVIEW_FRAME_STYLE;
+    document.head.append(reviewStyle);
+  }
+
+  removeReviewPresentation(document);
+  document.documentElement.dataset.pagerootSide = side;
+  if (!focused) return;
+
+  const activeSection = document.getElementById(change.anchor);
+  const targets = REVIEW_DIFF_TARGETS[change.id];
+  if (!activeSection || !targets) return;
+
+  document.body.classList.add("pageroot-section-focus", "pageroot-diff-focus");
+  activeSection.setAttribute("data-pageroot-active", "true");
+
+  const activeFilters: Exclude<DiffFilter, "all">[] = filter === "all"
+    ? ["text", "structure", "style"]
+    : [filter];
+
+  activeFilters.forEach((activeFilter) => {
+    targets[activeFilter].forEach((selector) => {
+      activeSection.querySelectorAll(selector).forEach((element) => {
+        element.setAttribute("data-pageroot-diff", "true");
+        element.classList.add(`pageroot-diff-${activeFilter}`);
+      });
+    });
+  });
+}
+
+function scrollFrameToAnchor(frame: HTMLIFrameElement, anchor: string, behavior: ScrollBehavior = "smooth") {
+  const frameWindow = frame.contentWindow;
+  const target = frame.contentDocument?.getElementById(anchor);
+  if (!frameWindow || !target) return;
+  const targetTop = target.getBoundingClientRect().top + frameWindow.scrollY;
+  frameWindow.scrollTo({ top: Math.max(0, targetTop - 18), behavior });
+}
+
+function getSemanticScrollPosition(source: Window, target: Window) {
+  const sourceDocument = source.document;
+  const targetDocument = target.document;
+  const sourcePoints = SEMANTIC_SCROLL_ANCHORS
+    .map((anchor) => ({ anchor, element: sourceDocument.getElementById(anchor) }))
+    .filter((entry): entry is { anchor: string; element: HTMLElement } => entry.element !== null)
+    .map((entry) => ({ anchor: entry.anchor, top: entry.element.offsetTop }));
+  const targetPoints = SEMANTIC_SCROLL_ANCHORS
+    .map((anchor) => ({ anchor, element: targetDocument.getElementById(anchor) }))
+    .filter((entry): entry is { anchor: string; element: HTMLElement } => entry.element !== null)
+    .map((entry) => ({ anchor: entry.anchor, top: entry.element.offsetTop }));
+
+  if (sourcePoints.length < 2 || targetPoints.length < 2) {
+    const sourceMax = Math.max(1, sourceDocument.documentElement.scrollHeight - source.innerHeight);
+    const targetMax = Math.max(0, targetDocument.documentElement.scrollHeight - target.innerHeight);
+    return (source.scrollY / sourceMax) * targetMax;
+  }
+
+  const probe = source.scrollY + source.innerHeight * 0.22;
+  let sourceIndex = sourcePoints.findIndex((point) => point.top > probe) - 1;
+  if (sourceIndex < 0) sourceIndex = sourcePoints.length - 1;
+  sourceIndex = Math.min(sourceIndex, sourcePoints.length - 1);
+
+  const sourceStart = sourcePoints[sourceIndex];
+  const sourceEnd = sourcePoints[sourceIndex + 1];
+  const targetIndex = targetPoints.findIndex((point) => point.anchor === sourceStart.anchor);
+  if (targetIndex < 0) return target.scrollY;
+
+  const targetStart = targetPoints[targetIndex];
+  const targetEnd = sourceEnd
+    ? targetPoints.find((point) => point.anchor === sourceEnd.anchor)
+    : undefined;
+  const sourceMax = sourceEnd?.top ?? Math.max(sourceStart.top + 1, sourceDocument.documentElement.scrollHeight - source.innerHeight);
+  const targetMax = targetEnd?.top ?? Math.max(targetStart.top + 1, targetDocument.documentElement.scrollHeight - target.innerHeight);
+  const progress = Math.max(0, Math.min(1, (probe - sourceStart.top) / Math.max(1, sourceMax - sourceStart.top)));
+  return Math.max(0, targetStart.top + progress * (targetMax - targetStart.top) - target.innerHeight * 0.22);
 }
 
 function ContentMap({
   activeId,
+  focused,
   showAll,
   onToggleAll,
+  onClearFocus,
   onSelect,
 }: {
   activeId: string;
+  focused: boolean;
   showAll: boolean;
   onToggleAll: () => void;
+  onClearFocus: () => void;
   onSelect: (changeId: string) => void;
 }) {
   const visibleGroups = CONTENT_OUTLINE.map((group) => ({
@@ -815,8 +1075,8 @@ function ContentMap({
   return (
     <div className={styles.contentMapScroll}>
       <section className={styles.contentMapIntro}>
-        <div><strong>按页面里的标题整理</strong><span>不显示代码名称，只显示用户在页面上能找到的内容。</span></div>
-        <button type="button" aria-pressed={!showAll} onClick={onToggleAll}>{showAll ? "只看有变化" : "显示完整页面"}</button>
+        <div><strong>按页面里的内容整理</strong><span>选择一处后，两边会同时定位并压暗无关内容。</span></div>
+        <button type="button" onClick={focused ? onClearFocus : onToggleAll}>{focused ? "查看整页" : showAll ? "只看变化" : "显示全部"}</button>
       </section>
 
       <nav className={styles.contentMap} aria-label="页面内容与变化位置">
@@ -833,7 +1093,7 @@ function ContentMap({
                   <button
                     key={item.title}
                     className={styles.contentMapItem}
-                    data-active={change?.id === activeId ? "true" : undefined}
+                    data-active={focused && change?.id === activeId ? "true" : undefined}
                     data-state={change ? "changed" : item.generatedName ? "named" : "unchanged"}
                     type="button"
                     disabled={!change}
@@ -850,23 +1110,15 @@ function ContentMap({
         ))}
       </nav>
 
-      <section className={styles.contentMapAccuracy}>
-        <ShieldCheckIcon aria-hidden="true" size={17} weight="duotone" />
-        <span><strong>10 个名称直接来自页面标题</strong>页尾直接使用可见品牌文字；顶部导航没有独立标题，根据导航文字整理并明确标出。</span>
-      </section>
+      <div className={styles.mapLegend} aria-label="差异颜色说明">
+        <span data-tone="before">修改前</span>
+        <span data-tone="after">修改后</span>
+        <span data-tone="structure">结构变化</span>
+        <span data-tone="style">样式变化</span>
+      </div>
     </div>
   );
 }
-
-const COMPARE_HINTS: Record<CompareKind, string> = {
-  rebuild: "这一块改动太大，直接展开完整前后内容，避免红绿叠在一起。",
-  layout: "内容仍能对应，左右并排展示面积、顺序和数字变化。",
-  sequence: "重点追踪章节从哪里移动到哪里，移动不会显示成删除再新增。",
-  collection: "重复卡片很多，按项目逐项标记保留、移动、删除和新增。",
-  table: "直接按表头、行和单元格归纳，不要求用户扫两张完整大表。",
-  form: "除了步骤标题，也对比输入条件、必填关系和提交结果。",
-  behavior: "静态布局并排看，脚本与媒体变化另外用操作结果说明。",
-};
 
 function ReviewScreen({
   onExit,
@@ -877,141 +1129,241 @@ function ReviewScreen({
   onAccept: () => void;
   onKeep: () => void;
 }) {
-  const [view, setView] = useState<ReviewView>("overlay");
   const [activeIndex, setActiveIndex] = useState(0);
   const [showAll, setShowAll] = useState(true);
-  const [showDetails, setShowDetails] = useState(true);
-  const reviewCanvasRef = useRef<HTMLDivElement>(null);
+  const [focused, setFocused] = useState(false);
+  const [diffFilter, setDiffFilter] = useState<DiffFilter>("all");
+  const [scrollMode, setScrollMode] = useState<ScrollMode>("linked");
+  const [zoom, setZoom] = useState<ZoomMode>("fit");
+  const [mapPeeked, setMapPeeked] = useState(false);
+  const [mapPinned, setMapPinned] = useState(false);
+  const [leaderSide, setLeaderSide] = useState<ReviewSide>("before");
+  const [frameRevision, setFrameRevision] = useState(0);
+  const frameRefs = useRef<Record<ReviewSide, HTMLIFrameElement | null>>({ before: null, after: null });
+  const frameCleanup = useRef<Partial<Record<ReviewSide, () => void>>>({});
+  const syncingFrames = useRef(false);
+  const temporaryIndependent = useRef(false);
+  const scrollModeRef = useRef<ScrollMode>(scrollMode);
   const activeChange = CONTENT_CHANGES[activeIndex];
+  const mapOpen = mapPinned || mapPeeked;
 
   useEffect(() => {
-    const timer = window.setTimeout(() => reviewCanvasRef.current?.scrollTo({ top: 0 }), 320);
-    return () => window.clearTimeout(timer);
+    scrollModeRef.current = scrollMode;
+  }, [scrollMode]);
+
+  useEffect(() => () => {
+    frameCleanup.current.before?.();
+    frameCleanup.current.after?.();
   }, []);
 
-  const showChangeAtTop = () => {
-    window.requestAnimationFrame(() => reviewCanvasRef.current?.scrollTo({ top: 0, behavior: "smooth" }));
+  useEffect(() => {
+    (Object.keys(frameRefs.current) as ReviewSide[]).forEach((side) => {
+      const frame = frameRefs.current[side];
+      if (frame) applyReviewPresentation(frame, side, activeChange, diffFilter, focused);
+    });
+
+    if (!focused) return undefined;
+    syncingFrames.current = true;
+    let releaseTimer = 0;
+    const timer = window.setTimeout(() => {
+      (Object.values(frameRefs.current) as (HTMLIFrameElement | null)[]).forEach((frame) => {
+        if (frame) scrollFrameToAnchor(frame, activeChange.anchor, "auto");
+      });
+      releaseTimer = window.setTimeout(() => { syncingFrames.current = false; }, 100);
+    }, 40);
+    return () => {
+      window.clearTimeout(timer);
+      window.clearTimeout(releaseTimer);
+      syncingFrames.current = false;
+    };
+  }, [activeChange, diffFilter, focused, frameRevision]);
+
+  const alignFrom = (sourceSide: ReviewSide) => {
+    const targetSide: ReviewSide = sourceSide === "before" ? "after" : "before";
+    const sourceWindow = frameRefs.current[sourceSide]?.contentWindow;
+    const targetWindow = frameRefs.current[targetSide]?.contentWindow;
+    if (!sourceWindow || !targetWindow) return;
+    syncingFrames.current = true;
+    targetWindow.scrollTo({ top: getSemanticScrollPosition(sourceWindow, targetWindow), behavior: "smooth" });
+    window.setTimeout(() => { syncingFrames.current = false; }, 260);
+  };
+
+  const bindFrame = (side: ReviewSide, frame: HTMLIFrameElement) => {
+    frameCleanup.current[side]?.();
+    frameRefs.current[side] = frame;
+    const frameWindow = frame.contentWindow;
+    if (!frameWindow) return;
+
+    let wheelTimer = 0;
+    const onWheel = (event: WheelEvent) => {
+      setLeaderSide(side);
+      temporaryIndependent.current = event.altKey;
+      window.clearTimeout(wheelTimer);
+      wheelTimer = window.setTimeout(() => { temporaryIndependent.current = false; }, 120);
+    };
+    const onScroll = () => {
+      if (scrollModeRef.current !== "linked" || syncingFrames.current || temporaryIndependent.current) return;
+      const targetSide: ReviewSide = side === "before" ? "after" : "before";
+      const targetWindow = frameRefs.current[targetSide]?.contentWindow;
+      if (!targetWindow) return;
+      syncingFrames.current = true;
+      targetWindow.scrollTo({ top: getSemanticScrollPosition(frameWindow, targetWindow) });
+      frameWindow.requestAnimationFrame(() => { syncingFrames.current = false; });
+    };
+
+    frameWindow.addEventListener("wheel", onWheel, { passive: true });
+    frameWindow.addEventListener("scroll", onScroll, { passive: true });
+    frameCleanup.current[side] = () => {
+      window.clearTimeout(wheelTimer);
+      frameWindow.removeEventListener("wheel", onWheel);
+      frameWindow.removeEventListener("scroll", onScroll);
+    };
+    applyReviewPresentation(frame, side, activeChange, diffFilter, focused);
+    setFrameRevision((current) => current + 1);
   };
 
   const navigate = (direction: -1 | 1) => {
     setActiveIndex((current) => (current + direction + CONTENT_CHANGES.length) % CONTENT_CHANGES.length);
-    setShowDetails(true);
-    showChangeAtTop();
+    setFocused(true);
   };
 
   const selectChange = (changeId: string) => {
     const nextIndex = CONTENT_CHANGES.findIndex((change) => change.id === changeId);
     if (nextIndex >= 0) {
       setActiveIndex(nextIndex);
-      setShowDetails(true);
-      showChangeAtTop();
+      setFocused(true);
+      if (!mapPinned) setMapPeeked(false);
     }
+  };
+
+  const changeScrollMode = () => {
+    const nextMode: ScrollMode = scrollMode === "linked" ? "independent" : "linked";
+    setScrollMode(nextMode);
+    if (nextMode === "linked") window.setTimeout(() => alignFrom(leaderSide), 20);
   };
 
   return (
     <div className={styles.demoRoot}>
-      <BrandHeader state="review" onBackToReview={onExit} />
-      <main className={styles.reviewStage}>
-        <section className={styles.reviewWorkspace}>
-          <div className={styles.reviewToolbar}>
-            <div className={styles.reviewTitle}>
-              <GitDiffIcon aria-hidden="true" size={20} weight="duotone" />
-              <span><strong>审阅 AI 修改</strong><small>真实复杂页面大改演示 · 7 处变化 · 1 处额外修改</small></span>
+      <BrandHeader state="review" onBackToReview={onExit} onAccept={onAccept} onKeep={onKeep} />
+      <main className={styles.canvasReviewStage}>
+        <section className={styles.canvasReviewWorkspace}>
+          <div className={styles.canvasToolbar}>
+            <div className={styles.canvasReviewTitle}>
+              <span className={styles.canvasReviewIcon}><GitDiffIcon aria-hidden="true" size={18} weight="duotone" /></span>
+              <span>
+                <strong>{focused ? activeChange.heading : "整页总览"}</strong>
+                <small>{focused ? `${activeChange.kind} · 第 ${activeIndex + 1} 处，共 ${CONTENT_CHANGES.length} 处` : "修改前与修改后完整页面"}</small>
+              </span>
             </div>
-            <div className={styles.viewSwitch} aria-label="对比方式">
-              {(Object.keys(VIEW_LABELS) as ReviewView[]).map((item) => (
-                <button key={item} type="button" aria-pressed={view === item} onClick={() => setView(item)}>{VIEW_LABELS[item]}</button>
+
+            <div className={styles.diffFilterSwitch} aria-label="筛选变化类型">
+              {(Object.keys(DIFF_FILTER_LABELS) as DiffFilter[]).map((filter) => (
+                <button
+                  key={filter}
+                  type="button"
+                  aria-pressed={diffFilter === filter}
+                  onClick={() => { setDiffFilter(filter); setFocused(true); }}
+                >
+                  {filter === "all" ? <GitDiffIcon aria-hidden="true" size={14} weight="duotone" /> : null}
+                  {filter === "text" ? <TextTIcon aria-hidden="true" size={14} weight="bold" /> : null}
+                  {filter === "structure" ? <TreeStructureIcon aria-hidden="true" size={14} weight="duotone" /> : null}
+                  {filter === "style" ? <PaletteIcon aria-hidden="true" size={14} weight="duotone" /> : null}
+                  <span>{DIFF_FILTER_LABELS[filter]}</span>
+                </button>
               ))}
             </div>
+
+            <div className={styles.changeNavigator} aria-label="变化位置">
+              <button type="button" aria-label="上一处变化" onClick={() => navigate(-1)}><ArrowLeftIcon aria-hidden="true" size={14} weight="bold" /></button>
+              <span><strong>{activeIndex + 1}</strong> / {CONTENT_CHANGES.length}</span>
+              <button type="button" aria-label="下一处变化" onClick={() => navigate(1)}><ArrowRightIcon aria-hidden="true" size={14} weight="bold" /></button>
+            </div>
+
+            <div className={styles.canvasToolGroup}>
+              <button
+                className={styles.scrollModeButton}
+                type="button"
+                data-active={scrollMode === "linked" ? "true" : undefined}
+                aria-pressed={scrollMode === "linked"}
+                title={scrollMode === "linked" ? "当前同步滚动；按住 Option 可临时单独滚动" : "当前独立滚动"}
+                onClick={changeScrollMode}
+              >
+                {scrollMode === "linked"
+                  ? <LinkIcon aria-hidden="true" size={15} weight="bold" />
+                  : <LinkBreakIcon aria-hidden="true" size={15} weight="bold" />}
+                <span>{scrollMode === "linked" ? "同步滚动" : "独立滚动"}</span>
+              </button>
+              <div className={styles.zoomSwitch} aria-label="画布缩放">
+                <button type="button" aria-pressed={zoom === "fit"} onClick={() => setZoom("fit")}><CornersOutIcon aria-hidden="true" size={14} />适应</button>
+                <button type="button" aria-pressed={zoom === "actual"} onClick={() => setZoom("actual")}>100%</button>
+              </div>
+              {focused ? (
+                <button className={styles.clearFocusButton} type="button" onClick={() => setFocused(false)}>查看整页</button>
+              ) : null}
+            </div>
           </div>
 
-          <div className={styles.reviewCanvas} ref={reviewCanvasRef}>
-            <article className={styles.adaptiveReview} key={activeChange.id}>
-              <header className={styles.adaptiveHeader}>
-                <div className={styles.changeBreadcrumb}><span>{activeChange.group}</span><ArrowRightIcon aria-hidden="true" size={12} weight="bold" /><strong>{activeChange.heading}</strong></div>
-                <div className={styles.adaptiveTitleRow}>
-                  <span>{activeChange.number}</span>
-                  <div><small>{activeChange.kind}</small><h1>{activeChange.title}</h1></div>
-                </div>
-                <p>{activeChange.summary}</p>
-              </header>
+          <div className={styles.canvasReviewBody} data-focused={focused ? "true" : undefined}>
+            <div className={styles.canvasGrid}>
+              <RealDocumentPane side="before" zoom={zoom} onFrameReady={bindFrame} />
+              <RealDocumentPane side="after" zoom={zoom} onFrameReady={bindFrame} />
+            </div>
 
-              <section className={styles.reviewIntent}>
-                <ChatCircleTextIcon aria-hidden="true" size={18} weight="duotone" />
-                <div><span>你的要求</span><q>{activeChange.request}</q></div>
-              </section>
-
-              <section className={styles.adaptiveMethod}>
-                <div><span>本处对照方式</span><strong>{view === "overlay" ? activeChange.compareLabel : `完整${VIEW_LABELS[view]}内容`}</strong></div>
-                <p>{view === "overlay" ? COMPARE_HINTS[activeChange.compareKind] : `当前只显示这一部分的${VIEW_LABELS[view]}状态，可随时切回“对照”。`}</p>
-              </section>
-
-              <div className={styles.adaptiveBody}>
-                <RealDocumentComparison
-                  change={activeChange}
-                  view={view}
-                  onDocumentLoad={() => window.setTimeout(() => reviewCanvasRef.current?.scrollTo({ top: 0 }), 80)}
+            <aside
+              className={styles.canvasMapDrawer}
+              data-open={mapOpen ? "true" : undefined}
+              data-pinned={mapPinned ? "true" : undefined}
+              aria-label="页面内容地图"
+              onMouseEnter={() => setMapPeeked(true)}
+              onMouseLeave={() => { if (!mapPinned) setMapPeeked(false); }}
+              onFocusCapture={() => setMapPeeked(true)}
+              onBlurCapture={(event) => {
+                if (!mapPinned && !event.currentTarget.contains(event.relatedTarget as Node | null)) setMapPeeked(false);
+              }}
+            >
+              <button
+                className={styles.mapHandle}
+                type="button"
+                aria-expanded={mapOpen}
+                onClick={() => setMapPinned((current) => !current)}
+              >
+                <SidebarSimpleIcon aria-hidden="true" size={17} weight="duotone" />
+                <span>内容地图</span>
+                <strong>{CONTENT_CHANGES.length}</strong>
+              </button>
+              <div className={styles.canvasMapPanel} aria-hidden={!mapOpen} inert={!mapOpen ? true : undefined}>
+                <header>
+                  <div><span>页面内容地图</span><strong>{focused ? `正在看：${activeChange.group}` : "整页总览"}</strong></div>
+                  <button
+                    type="button"
+                    aria-label={mapPinned ? "取消固定内容地图" : "固定内容地图"}
+                    title={mapPinned ? "取消固定" : "固定打开"}
+                    aria-pressed={mapPinned}
+                    onClick={() => setMapPinned((current) => !current)}
+                  >
+                    <PushPinIcon aria-hidden="true" size={15} weight={mapPinned ? "fill" : "duotone"} />
+                  </button>
+                </header>
+                <ContentMap
+                  activeId={activeChange.id}
+                  focused={focused}
+                  showAll={showAll}
+                  onToggleAll={() => setShowAll((current) => !current)}
+                  onClearFocus={() => setFocused(false)}
+                  onSelect={selectChange}
                 />
-                <section className={styles.extractedComparison}>
-                  <header><span>系统提炼的变化说明</span><small>帮助快速判断；最终以完整页面为准</small></header>
-                  <AdaptiveComparison change={activeChange} view={view} />
-                </section>
               </div>
+            </aside>
 
-              <section className={styles.changeBreakdown}>
-                <button type="button" aria-expanded={showDetails} onClick={() => setShowDetails((current) => !current)}>
-                  <span><RowsIcon aria-hidden="true" size={17} weight="duotone" /><strong>这部分具体改了什么</strong><small>{activeChange.details.length} 项</small></span>
-                  <span>{showDetails ? "收起" : "展开"}</span>
-                </button>
-                {showDetails ? (
-                  <div>
-                    <ol>{activeChange.details.map((detail) => <li key={detail}>{detail}</li>)}</ol>
-                    <section className={styles.beforeAfterSummary}>
-                      <div><span>原来</span><p>{activeChange.before}</p></div>
-                      <ArrowRightIcon aria-hidden="true" size={16} weight="bold" />
-                      <div><span>现在</span><p>{activeChange.after}</p></div>
-                    </section>
-                    {activeChange.extra ? (
-                      <div className={styles.extraChange}>
-                        <WarningCircleIcon aria-hidden="true" size={16} weight="fill" />
-                        <span><strong>评论范围外</strong>{activeChange.extra}</span>
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null}
-              </section>
-            </article>
+            <div className={styles.canvasHint} data-visible={focused ? "true" : undefined}>
+              <ArrowsDownUpIcon aria-hidden="true" size={14} weight="duotone" />
+              <span>{scrollMode === "linked" ? `由${leaderSide === "before" ? "左侧" : "右侧"}带动同步 · Option 临时单独滚动` : "鼠标所在画布独立滚动"}</span>
+            </div>
           </div>
         </section>
-
-        <aside className={styles.changeRail}>
-          <header className={styles.changeRailHeader}>
-            <div><span>页面内容地图</span><strong>正在看第 {activeIndex + 1} 处 · 共 {CONTENT_CHANGES.length} 处</strong></div>
-            <div>
-              <button type="button" aria-label="上一处变化" onClick={() => navigate(-1)}><ArrowLeftIcon aria-hidden="true" size={16} weight="bold" /></button>
-              <button type="button" aria-label="下一处变化" onClick={() => navigate(1)}><ArrowRightIcon aria-hidden="true" size={16} weight="bold" /></button>
-            </div>
-          </header>
-
-          <ContentMap
-            activeId={activeChange.id}
-            showAll={showAll}
-            onToggleAll={() => setShowAll((current) => !current)}
-            onSelect={selectChange}
-          />
-
-          <footer className={styles.reviewFooter}>
-            <p>第一版先按整份候选做决定，原版与候选都会保留。</p>
-            <button className={styles.primaryAction} type="button" onClick={onAccept}>
-              <CheckCircleIcon aria-hidden="true" size={18} weight="fill" />
-              接受全部并打开
-            </button>
-            <button className={styles.secondaryAction} type="button" onClick={onKeep}>
-              <ClockCounterClockwiseIcon aria-hidden="true" size={17} weight="duotone" />
-              保留当前版本
-            </button>
-          </footer>
-        </aside>
+        <span className={styles.srAnnouncement} aria-live="polite">
+          {focused ? `已聚焦${activeChange.heading}，当前筛选${DIFF_FILTER_LABELS[diffFilter]}` : "正在查看完整页面"}
+        </span>
       </main>
     </div>
   );

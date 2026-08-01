@@ -16,13 +16,13 @@ test("the AI review demo covers the complete version-level decision path", () =>
   assert.match(page, /直接打开/);
   assert.match(page, /修改后/);
   assert.match(page, /修改前/);
-  assert.match(page, /overlay: "对照"/);
+  assert.match(page, /type ReviewSide = "before" \| "after"/);
   assert.match(page, /接受全部并打开/);
   assert.match(page, /保留当前版本/);
   assert.match(page, /AI 候选 V1\.4 和本轮评论仍会保留/);
 });
 
-test("the demo pairs real content requirements with several complex change types", () => {
+test("the demo keeps realistic complex changes available to the canvas review", () => {
   assert.match(page, /整段重做/);
   assert.match(page, /布局和数字/);
   assert.match(page, /章节调整/);
@@ -30,51 +30,60 @@ test("the demo pairs real content requirements with several complex change types
   assert.match(page, /表格变化/);
   assert.match(page, /字段与反馈/);
   assert.match(page, /布局与交互/);
-  assert.match(page, /你的要求/);
-  assert.match(page, /评论范围外/);
-  assert.match(page, /第一版先按整份候选做决定/);
+  assert.match(page, /AI 同时调整了 Image Map 的热区/);
+  assert.match(page, /REVIEW_DIFF_TARGETS/);
+  assert.match(page, /pageroot-diff-structure/);
 });
 
 test("the content map uses headings and visible copy from the complex HTML fixture", () => {
   assert.match(page, /页面内容地图/);
-  assert.match(page, /按页面里的标题整理/);
-  assert.match(page, /不显示代码名称/);
+  assert.match(page, /按页面里的内容整理/);
+  assert.match(page, /两边会同时定位并压暗无关内容/);
   assert.match(page, /为复杂页面而生 \/ 数字实验场/);
   assert.match(page, /从宏观指标到微观事件，保持同一条数据叙事/);
   assert.match(page, /一份包含多层语义结构的长篇阅读样本/);
   assert.match(page, /可筛选、可扩展的项目目录/);
   assert.match(page, /包含完整表格语义的运营后台/);
   assert.match(page, /画廊、嵌入内容与可编程画布/);
-  assert.match(page, /10 个名称直接来自页面标题/);
   assert.match(page, /根据页面里的导航文字整理/);
+  assert.match(page, /mapPinned/);
+  assert.match(page, /onMouseEnter=\{\(\) => setMapPeeked\(true\)\}/);
+  assert.match(styles, /\.canvasMapDrawer\[data-open="true"\]/);
 });
 
-test("adaptive comparison covers complex changes with user-facing comparison methods", () => {
-  assert.match(page, /完整前后/);
-  assert.match(page, /并排布局/);
-  assert.match(page, /顺序追踪/);
-  assert.match(page, /逐项清单/);
-  assert.match(page, /表格差异/);
-  assert.match(page, /表单与反馈/);
-  assert.match(page, /操作结果/);
-  assert.match(page, /移动不会显示成删除再新增/);
-  assert.match(page, /这部分具体改了什么/);
-  assert.match(page, /评论范围外/);
+test("canvas review exposes orthogonal focus, difference, scroll, and zoom controls", () => {
+  assert.match(page, /const \[focused, setFocused\] = useState\(false\)/);
+  assert.match(page, /全部变化/);
+  assert.match(page, /文字与数据/);
+  assert.match(page, /结构与顺序/);
+  assert.match(page, /视觉样式/);
+  assert.match(page, /同步滚动/);
+  assert.match(page, /独立滚动/);
+  assert.match(page, /Option 临时单独滚动/);
+  assert.match(page, /查看整页/);
+  assert.match(page, /适应/);
+  assert.match(page, /100%/);
+  assert.match(page, /getSemanticScrollPosition/);
+  assert.match(page, /SEMANTIC_SCROLL_ANCHORS/);
+  assert.match(page, /aria-hidden=\{!mapOpen\}/);
+  assert.match(page, /inert=\{!mapOpen \? true : undefined\}/);
 });
 
 test("the review surface renders the two complete local HTML documents", () => {
   assert.match(page, /\/review-demo-local\/before\.html/);
   assert.match(page, /\/review-demo-local\/after\.html/);
-  assert.match(page, /真实完整页面/);
-  assert.match(page, /下面不是重画的示意图/);
-  assert.match(page, /两边都可以独立滚动/);
+  assert.match(page, /固定桌面画布/);
+  assert.match(page, /targetViewportWidth = 1180/);
+  assert.match(page, /复杂 HTML 完整页面/);
+  assert.match(page, /side="before" zoom=\{zoom\}/);
+  assert.match(page, /side="after" zoom=\{zoom\}/);
   assert.match(page, /全页打开/);
   assert.match(page, /sandbox="allow-scripts allow-forms allow-modals allow-popups allow-same-origin"/);
   assert.match(page, /anchor: "top"/);
   assert.match(page, /anchor: "form-lab"/);
-  assert.match(page, /系统提炼的变化说明/);
-  assert.match(styles, /\.realDocumentComparison/);
-  assert.match(styles, /\.realDocumentViewport iframe/);
+  assert.match(styles, /\.canvasGrid/);
+  assert.match(styles, /\.canvasDocumentScale iframe/);
+  assert.match(styles, /grid-template-columns: minmax\(0, 1fr\) minmax\(0, 1fr\)/);
 });
 
 test("the local fixture generator creates a full candidate without committing user HTML", () => {
