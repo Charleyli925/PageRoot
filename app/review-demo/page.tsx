@@ -833,10 +833,12 @@ const DOCUMENT_URLS = {
 function RealDocumentPane({
   side,
   zoom,
+  reviewSessionId,
   onFrameReady,
 }: {
   side: ReviewSide;
   zoom: ZoomMode;
+  reviewSessionId: string;
   onFrameReady: (side: ReviewSide, frame: HTMLIFrameElement) => void;
 }) {
   const isBefore = side === "before";
@@ -865,7 +867,7 @@ function RealDocumentPane({
     : 1;
   const renderedWidth = targetViewportWidth * scale;
   const iframeHeight = Math.max(620, viewportSize.height / scale);
-  const url = `${DOCUMENT_URLS[side]}?review-canvas=${side}#top`;
+  const url = `${DOCUMENT_URLS[side]}?review-canvas=${side}&session=${encodeURIComponent(reviewSessionId)}#top`;
 
   return (
     <section className={styles.canvasDocumentPane} data-side={side}>
@@ -1064,6 +1066,7 @@ function ReviewScreen({
   const [toolbarPinned, setToolbarPinned] = useState(false);
   const [leaderSide, setLeaderSide] = useState<ReviewSide>("before");
   const [frameRevision, setFrameRevision] = useState(0);
+  const [reviewSessionId] = useState(() => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`);
   const frameRefs = useRef<Record<ReviewSide, HTMLIFrameElement | null>>({ before: null, after: null });
   const frameCleanup = useRef<Partial<Record<ReviewSide, () => void>>>({});
   const syncingFrames = useRef(false);
@@ -1315,8 +1318,8 @@ function ReviewScreen({
 
           <div className={styles.canvasReviewBody} data-focused={focused ? "true" : undefined}>
             <div className={styles.canvasGrid}>
-              <RealDocumentPane side="before" zoom={zoom} onFrameReady={bindFrame} />
-              <RealDocumentPane side="after" zoom={zoom} onFrameReady={bindFrame} />
+              <RealDocumentPane side="before" zoom={zoom} reviewSessionId={reviewSessionId} onFrameReady={bindFrame} />
+              <RealDocumentPane side="after" zoom={zoom} reviewSessionId={reviewSessionId} onFrameReady={bindFrame} />
             </div>
 
             <aside

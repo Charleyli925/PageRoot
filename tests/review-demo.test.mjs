@@ -100,8 +100,9 @@ test("the review surface renders the two complete local HTML documents", () => {
   assert.match(page, /固定桌面画布/);
   assert.match(page, /targetViewportWidth = 1180/);
   assert.match(page, /复杂 HTML 完整页面/);
-  assert.match(page, /side="before" zoom=\{zoom\}/);
-  assert.match(page, /side="after" zoom=\{zoom\}/);
+  assert.match(page, /side="before" zoom=\{zoom\} reviewSessionId=\{reviewSessionId\}/);
+  assert.match(page, /side="after" zoom=\{zoom\} reviewSessionId=\{reviewSessionId\}/);
+  assert.match(page, /session=\$\{encodeURIComponent\(reviewSessionId\)\}/);
   assert.match(page, /全页打开/);
   assert.match(page, /sandbox="allow-scripts allow-forms allow-modals allow-popups allow-same-origin"/);
   assert.match(page, /anchor: "top"/);
