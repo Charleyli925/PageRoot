@@ -1,10 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { ArrowLeftIcon } from "@phosphor-icons/react/dist/csr/ArrowLeft";
 import { ArrowRightIcon } from "@phosphor-icons/react/dist/csr/ArrowRight";
 import { ArrowsClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowsClockwise";
-import { ArrowsDownUpIcon } from "@phosphor-icons/react/dist/csr/ArrowsDownUp";
 import { ChatCircleTextIcon } from "@phosphor-icons/react/dist/csr/ChatCircleText";
 import { CheckCircleIcon } from "@phosphor-icons/react/dist/csr/CheckCircle";
 import { CircleNotchIcon } from "@phosphor-icons/react/dist/csr/CircleNotch";
@@ -16,8 +15,6 @@ import { FloppyDiskIcon } from "@phosphor-icons/react/dist/csr/FloppyDisk";
 import { GitDiffIcon } from "@phosphor-icons/react/dist/csr/GitDiff";
 import { LockKeyIcon } from "@phosphor-icons/react/dist/csr/LockKey";
 import { MagicWandIcon } from "@phosphor-icons/react/dist/csr/MagicWand";
-import { MinusCircleIcon } from "@phosphor-icons/react/dist/csr/MinusCircle";
-import { PlusCircleIcon } from "@phosphor-icons/react/dist/csr/PlusCircle";
 import { RowsIcon } from "@phosphor-icons/react/dist/csr/Rows";
 import { ShieldCheckIcon } from "@phosphor-icons/react/dist/csr/ShieldCheck";
 import { SparkleIcon } from "@phosphor-icons/react/dist/csr/Sparkle";
@@ -30,6 +27,7 @@ import styles from "./review-demo.module.css";
 type DemoState = "awaiting-ai" | "ready" | "review" | "accepted" | "kept";
 type ReviewView = "after" | "before" | "overlay";
 type DecisionSource = "review" | "direct";
+type CompareKind = "rebuild" | "layout" | "sequence" | "collection" | "table" | "form" | "behavior";
 
 type DemoChange = {
   id: string;
@@ -90,8 +88,186 @@ const CHANGES: DemoChange[] = [
 const VIEW_LABELS: Record<ReviewView, string> = {
   after: "修改后",
   before: "修改前",
-  overlay: "叠加对比",
+  overlay: "对照",
 };
+
+type ContentChange = {
+  id: string;
+  number: number;
+  group: string;
+  heading: string;
+  kind: string;
+  compareKind: CompareKind;
+  compareLabel: string;
+  title: string;
+  summary: string;
+  request: string;
+  before: string;
+  after: string;
+  details: string[];
+  extra?: string;
+};
+
+type OutlineItem = {
+  title: string;
+  helper: string;
+  changeId?: string;
+  generatedName?: boolean;
+};
+
+type OutlineGroup = {
+  label: string;
+  items: OutlineItem[];
+};
+
+const CONTENT_CHANGES: ContentChange[] = [
+  {
+    id: "opening",
+    number: 1,
+    group: "页面开头",
+    heading: "为复杂页面而生 / 数字实验场",
+    kind: "整段重做",
+    compareKind: "rebuild",
+    compareLabel: "完整前后",
+    title: "开场从“测试说明”改成“任务入口”",
+    summary: "标题、说明、按钮和右侧展示一起重组，已经不是几处文字替换。",
+    request: "让页面开头更像真实产品入口，先告诉用户能做什么，再引导继续浏览。",
+    before: "用大段说明介绍综合测试页，并同时摆放 3 个测试按钮和 4 个特性标签。",
+    after: "改成一句明确承诺、两个主要入口和一张“本页包含什么”的内容摘要。",
+    details: ["主标题与故事线整体改写", "3 个测试按钮收拢为 2 个主要入口", "右侧装饰预览改为页面内容摘要", "“48+ 种组合”移动到辅助说明"],
+  },
+  {
+    id: "dashboard",
+    number: 2,
+    group: "数据与阅读",
+    heading: "从宏观指标到微观事件，保持同一条数据叙事",
+    kind: "布局和数字",
+    compareKind: "layout",
+    compareLabel: "并排布局",
+    title: "四张并列指标卡改成“一主三辅”",
+    summary: "指标内容大体保留，但面积、顺序、数字和阅读重点同时变化。",
+    request: "突出综合体验健康度，把实时动态提到图表前面，数字也更新到最新一轮。",
+    before: "4 张等宽指标卡在最上方，趋势图占大面积，实时动态位于右下。",
+    after: "健康度成为横跨两列的主指标，实时动态前移，趋势图缩为辅助内容。",
+    details: ["健康度 87.4 → 91.6", "活跃项目 18 → 24", "实时动态从末位移到第二阅读位", "趋势图由主区域缩为辅助区域"],
+  },
+  {
+    id: "story",
+    number: 3,
+    group: "数据与阅读",
+    heading: "一份包含多层语义结构的长篇阅读样本",
+    kind: "章节调整",
+    compareKind: "sequence",
+    compareLabel: "顺序追踪",
+    title: "文章先讲“结构保真”，再解释上下文",
+    summary: "段落被重写、合并和移动；用章节顺序比把移动显示成删除加新增更清楚。",
+    request: "把最重要的产品结论提前，删掉重复解释，目录要跟正文一起更新。",
+    before: "开场 → 上下文边界 → 结构保真 → 持续协作。",
+    after: "结构保真前移为第一章，上下文与协作合并，结尾补充验证清单。",
+    details: ["“结构保真”由第 2 章移到第 1 章", "“上下文边界”与“持续协作”合并", "开场文字做词级改写", "目录、锚点与阅读进度一起更新"],
+  },
+  {
+    id: "catalog",
+    number: 4,
+    group: "项目与运营",
+    heading: "可筛选、可扩展的项目目录",
+    kind: "卡片增删与排序",
+    compareKind: "collection",
+    compareLabel: "逐项清单",
+    title: "项目卡片按优先级重排，并替换两项内容",
+    summary: "重复卡片很多，逐项列出保留、移动、删除和新增比整块叠色更容易核对。",
+    request: "把高优先级项目放前面，移除已经结束的样本，再补一个新的系统项目。",
+    before: "6 个项目按类别交错排列，动态生成卡片位于列表尾部。",
+    after: "6 个项目按优先级排列；删除 1 项、新增 1 项、移动 3 项。",
+    details: ["“证据链版本引擎”移到第 1 位", "删除“公共空间温度计划”", "新增“跨端内容审阅器”", "其余 3 张卡片调整顺序但内容保持"],
+  },
+  {
+    id: "operations",
+    number: 5,
+    group: "项目与运营",
+    heading: "包含完整表格语义的运营后台",
+    kind: "表格变化",
+    compareKind: "table",
+    compareLabel: "表格差异",
+    title: "风险列改成下一动作，并同步两行状态",
+    summary: "按表头、行和单元格解释变化，避免用户在两张大表里自己找数字。",
+    request: "表格不要只报风险，要直接告诉运营下一步做什么，并更新本周进度。",
+    before: "项目、负责人、状态、完成度、截止日期、风险，共 5 行。",
+    after: "“风险”改为“下一动作”；新增 1 行、移除 1 行，2 个状态和 3 个进度更新。",
+    details: ["表头“风险”改为“下一动作”", "低视力阅读组件库：待复核 → 进行中", "离线优先知识仓库：18% → 34%", "新增“跨端内容审阅器”项目行"],
+  },
+  {
+    id: "form",
+    number: 6,
+    group: "项目与运营",
+    heading: "几乎把常见输入类型放进同一张表单",
+    kind: "字段与反馈",
+    compareKind: "form",
+    compareLabel: "表单与反馈",
+    title: "长表单改成三步填写，并补充即时校验",
+    summary: "字段位置只是表面变化，真正需要确认的是必填关系、出现条件和提交反馈。",
+    request: "减少一次看到的字段数量，让必填项和错误提示更容易理解。",
+    before: "4 组字段全部展开；依赖浏览器默认校验；提交后只显示简单提示。",
+    after: "拆成联系人、项目偏好、确认提交三步；预算会触发补充说明；错误就地显示。",
+    details: ["姓名与邮箱保留在第 1 步", "日期和预算归到第 2 步", "高预算时新增“审批说明”", "提交反馈从顶部提示改为字段旁说明"],
+  },
+  {
+    id: "media",
+    number: 7,
+    group: "媒体与文档",
+    heading: "画廊、嵌入内容与可编程画布",
+    kind: "布局与交互",
+    compareKind: "behavior",
+    compareLabel: "操作结果",
+    title: "媒体画廊重排，画布和播放行为也变化",
+    summary: "静态截图无法完整说明脚本变化，因此把可见布局与操作前后结果放在一起。",
+    request: "让画廊在窄屏更稳定，并保证 Canvas、音频和视频的操作反馈一致。",
+    before: "画廊混合跨列卡片；窗口变化时重绘波形；离线媒体只依赖浏览器回退。",
+    after: "画廊改为稳定分组；重绘时保留当前点位；离线媒体显示明确状态和重试入口。",
+    details: ["“潮汐档案”由跨列首图改为普通卡片", "Canvas 重绘后保留当前选中点", "音频与视频增加离线状态", "Image Map 热区随布局同步更新"],
+    extra: "AI 同时调整了 Image Map 的热区，这是评论没有明确要求的额外变化。",
+  },
+];
+
+const CONTENT_OUTLINE: OutlineGroup[] = [
+  {
+    label: "页面开头",
+    items: [
+      { title: "顶部导航：数据总览、深度文章、项目目录…", helper: "根据页面里的导航文字整理", generatedName: true },
+      { title: "为复杂页面而生 / 数字实验场", helper: "页面主标题", changeId: "opening" },
+    ],
+  },
+  {
+    label: "数据与阅读",
+    items: [
+      { title: "从宏观指标到微观事件，保持同一条数据叙事", helper: "数据概览", changeId: "dashboard" },
+      { title: "一份包含多层语义结构的长篇阅读样本", helper: "长篇文章", changeId: "story" },
+    ],
+  },
+  {
+    label: "项目与运营",
+    items: [
+      { title: "可筛选、可扩展的项目目录", helper: "项目卡片", changeId: "catalog" },
+      { title: "包含完整表格语义的运营后台", helper: "项目表格", changeId: "operations" },
+      { title: "几乎把常见输入类型放进同一张表单", helper: "长表单", changeId: "form" },
+    ],
+  },
+  {
+    label: "媒体与文档",
+    items: [
+      { title: "画廊、嵌入内容与可编程画布", helper: "图片与媒体", changeId: "media" },
+      { title: "代码、终端输出和可展开文档", helper: "代码与说明" },
+    ],
+  },
+  {
+    label: "页面结尾",
+    items: [
+      { title: "最后，用一组常见问题验证长页面尾部体验", helper: "常见问题" },
+      { title: "你已经抵达这份长页面的底部", helper: "联系入口" },
+      { title: "Atlas Lab · 2030", helper: "页尾信息" },
+    ],
+  },
+];
 
 function BrandHeader({
   state,
@@ -112,7 +288,7 @@ function BrandHeader({
           <img src="/brand-logo.png" alt="源页" />
         </a>
         <div>
-          <strong>AI 商品运营效果分析.html</strong>
+          <strong>{isReview ? "复杂 HTML 综合测试页.html" : "AI 商品运营效果分析.html"}</strong>
           <span>
             {isReview ? "V1.3 → AI 候选 V1.4" : "V1.3 · 已安全保存"}
           </span>
@@ -324,321 +500,374 @@ function HandoffPanel({
   );
 }
 
-function ChangePin({
-  number,
-  active,
-  onClick,
+function ReviewStateFrame({
+  side,
+  title,
+  caption,
+  children,
 }: {
-  number: number;
-  active: boolean;
-  onClick: () => void;
+  side: "before" | "after";
+  title: string;
+  caption: string;
+  children: ReactNode;
 }) {
   return (
-    <button
-      className={styles.changePin}
-      data-active={active ? "true" : undefined}
-      type="button"
-      aria-label={`查看修改 ${number}`}
-      onClick={onClick}
-    >
-      {number}
-    </button>
-  );
-}
-
-function OverlayLegend() {
-  return (
-    <section className={styles.overlayLegend} aria-label="叠加对比包含的复杂变化类型">
-      <span>
-        <GitDiffIcon aria-hidden="true" size={15} weight="duotone" />
-        <strong>复合变化预演</strong>
-      </span>
-      <ul>
-        <li data-tone="replace">文字替换</li>
-        <li data-tone="style">纯样式</li>
-        <li data-tone="move">布局与移动</li>
-        <li data-tone="remove">删除</li>
-        <li data-tone="add">新增</li>
-        <li data-tone="rebuild">整块重做</li>
-      </ul>
-    </section>
-  );
-}
-
-function ComplexOverlayCases() {
-  return (
-    <section className={styles.overlayStressTest} aria-label="复杂修改对比示例">
-      <header className={styles.complexIntro}>
-        <span>复杂差异压力测试</span>
-        <h2>同一轮修改，可能同时改变文字、样式和页面结构</h2>
-        <p>这些示例只在“叠加对比”里展开，用来验证真实复杂 HTML 返回时仍能清楚说明发生了什么。</p>
+    <section className={styles.reviewStateFrame} data-side={side}>
+      <header>
+        <span>{side === "before" ? "修改前" : "修改后"}</span>
+        <div><strong>{title}</strong><small>{caption}</small></div>
       </header>
-
-      <article className={styles.overlayCase}>
-        <header className={styles.overlayCaseHeader}>
-          <span>01</span>
-          <div><strong>局部文字 + 纯样式变化</strong><small>保留没变的上下文，只标出真正变化的词和视觉属性</small></div>
-        </header>
-        <div className={styles.wordLevelDiff}>
-          <p>
-            搜索广告<del>带来最多新增访问</del><ins>负责拉新规模</ins>，内容渠道
-            <del>访问量较少，但收藏率更好</del><ins>贡献了最高质量的高意向访问</ins>。
-          </p>
-          <div className={styles.styleChangePair}>
-            <div data-side="before">
-              <small>修改前 · 普通正文</small>
-              <p>高意向人群是本轮增长来源</p>
-              <span>14px · 常规 · 灰色</span>
-            </div>
-            <ArrowRightIcon aria-hidden="true" size={17} weight="bold" />
-            <div data-side="after">
-              <small>修改后 · 关键结论</small>
-              <p>高意向人群是本轮增长来源</p>
-              <span>18px · 加粗 · 强调色</span>
-            </div>
-          </div>
-        </div>
-      </article>
-
-      <article className={styles.overlayCase}>
-        <header className={styles.overlayCaseHeader}>
-          <span>02</span>
-          <div><strong>布局重排 + 指标层级变化</strong><small>内容没有全部消失，但列数、面积和阅读顺序发生了变化</small></div>
-        </header>
-        <div className={styles.layoutComparison}>
-          <section data-side="before">
-            <header><span>修改前</span><small>等宽三列</small></header>
-            <div className={styles.metricLayoutPreview} data-layout="before">
-              <div><span>新增成交</span><strong>¥286k</strong></div>
-              <div><span>转化率</span><strong>8.7%</strong></div>
-              <div><span>获客成本</span><strong>¥42.8</strong></div>
-            </div>
-          </section>
-          <section data-side="after">
-            <header><span>修改后</span><small>主指标占双列</small></header>
-            <div className={styles.metricLayoutPreview} data-layout="after">
-              <div data-featured="true"><span>核心转化率</span><strong>12.4%</strong><small>成为第一阅读焦点</small></div>
-              <div><span>新增成交</span><strong>¥286k</strong></div>
-              <div><span>获客成本</span><strong>¥42.8</strong></div>
-            </div>
-          </section>
-        </div>
-      </article>
-
-      <article className={styles.overlayCase}>
-        <header className={styles.overlayCaseHeader}>
-          <span>03</span>
-          <div><strong>模块删除、新增与跨区移动</strong><small>不把结构变化伪装成几行普通文字修改</small></div>
-        </header>
-        <div className={styles.structureEvents}>
-          <section data-tone="remove">
-            <MinusCircleIcon aria-hidden="true" size={20} weight="duotone" />
-            <div><span>整个模块已删除</span><strong>渠道明细表</strong><small>原位置：渠道表现之后 · 6 行数据</small></div>
-            <TableIcon aria-hidden="true" size={24} weight="duotone" />
-          </section>
-          <section data-tone="add">
-            <PlusCircleIcon aria-hidden="true" size={20} weight="duotone" />
-            <div><span>新增模块</span><strong>异常渠道提醒</strong><small>新位置：下一步行动之前 · AI 额外补充</small></div>
-            <WarningCircleIcon aria-hidden="true" size={24} weight="duotone" />
-          </section>
-          <section data-tone="move">
-            <ArrowsDownUpIcon aria-hidden="true" size={20} weight="duotone" />
-            <div><span>模块跨区移动</span><strong>人群洞察</strong><small>页面底部 → 核心结论之后 · 内容本身未删除</small></div>
-            <RowsIcon aria-hidden="true" size={24} weight="duotone" />
-          </section>
-        </div>
-      </article>
-
-      <article className={styles.overlayCase}>
-        <header className={styles.overlayCaseHeader}>
-          <span>04</span>
-          <div><strong>列表重序 + 拆分与合并</strong><small>同时告诉用户哪项被删除、哪项只是换了位置</small></div>
-        </header>
-        <div className={styles.orderComparison}>
-          <section data-side="before">
-            <header><span>修改前</span><small>按渠道组织</small></header>
-            <ol>
-              <li><span>1</span><p>扩大搜索广告覆盖</p><small data-tone="remove">删除</small></li>
-              <li><span>2</span><p>继续观察内容渠道</p><small data-tone="merge">合并</small></li>
-              <li><span>3</span><p>周末汇总完整周报</p><small data-tone="move">后移</small></li>
-            </ol>
-          </section>
-          <ArrowRightIcon aria-hidden="true" size={18} weight="bold" />
-          <section data-side="after">
-            <header><span>修改后</span><small>按执行优先级组织</small></header>
-            <ol>
-              <li><span>1</span><p>暂停联盟渠道新增预算</p><small data-tone="add">新增</small></li>
-              <li><span>2</span><p>预算集中到高意向人群</p><small data-tone="merge">合并</small></li>
-              <li><span>3</span><p>48 小时后快速复盘</p><small data-tone="move">前移</small></li>
-            </ol>
-          </section>
-        </div>
-      </article>
-
-      <article className={styles.overlayCase}>
-        <header className={styles.overlayCaseHeader}>
-          <span>05</span>
-          <div><strong>整块重做：故事线和组件结构都变了</strong><small>旧模块完整保留为参考，新模块完整展示为候选</small></div>
-        </header>
-        <div className={styles.moduleRebuildComparison}>
-          <section data-side="before">
-            <header><MinusCircleIcon aria-hidden="true" size={16} weight="duotone" /><span>原模块 · 整块替换</span></header>
-            <div className={styles.oldModuleExample}>
-              <small>渠道周报</small>
-              <h3>继续扩大覆盖面</h3>
-              <p>搜索广告带来更多访问，后续继续观察各渠道表现并在周末汇总。</p>
-              <span>查看渠道详情</span>
-            </div>
-          </section>
-          <section data-side="after">
-            <header><PlusCircleIcon aria-hidden="true" size={16} weight="duotone" /><span>新模块 · 完整候选</span></header>
-            <div className={styles.newModuleExample}>
-              <div><small>决策建议</small><span>优先级 P1</span></div>
-              <h3>未来 48 小时先做三件事</h3>
-              <ul>
-                <li><strong>预算</strong><span>高意向人群 +20%</span></li>
-                <li><strong>渠道</strong><span>暂停联盟新增投放</span></li>
-                <li><strong>复盘</strong><span>负责人：运营组 · 明晚</span></li>
-              </ul>
-            </div>
-          </section>
-        </div>
-      </article>
-
-      <footer className={styles.overlayRuleNote}>
-        <ShieldCheckIcon aria-hidden="true" size={18} weight="duotone" />
-        <p><strong>复杂变化按“用户能理解的语义”分组</strong>不要求用户理解 DOM 节点，也不会把移动误显示成一次删除加一次新增。</p>
-      </footer>
+      <div className={styles.reviewStateBody}>{children}</div>
     </section>
   );
 }
 
-function ReportReview({
+function ComparisonPair({
   view,
-  activeIndex,
-  onSelectChange,
+  before,
+  after,
 }: {
   view: ReviewView;
-  activeIndex: number;
-  onSelectChange: (index: number) => void;
+  before: ReactNode;
+  after: ReactNode;
 }) {
-  const isBefore = view === "before";
-  const isOverlay = view === "overlay";
+  if (view === "before") return <div className={styles.comparisonPair} data-single="true">{before}</div>;
+  if (view === "after") return <div className={styles.comparisonPair} data-single="true">{after}</div>;
+  return <div className={styles.comparisonPair}>{before}{after}</div>;
+}
 
-  const sectionProps = (index: number) => ({
-    "data-active": activeIndex === index ? "true" : undefined,
-    "data-change": String(index + 1),
-  });
-
-  const audienceModule = (
-    <section className={styles.audienceModule} {...sectionProps(2)}>
-      <ChangePin number={3} active={activeIndex === 2} onClick={() => onSelectChange(2)} />
-      <div className={styles.sectionEyebrow}>人群洞察</div>
-      <h2>高意向人群规模不大，但贡献了主要增量</h2>
-      <div className={styles.audienceFacts}>
-        <div><span>人群占比</span><strong>31%</strong></div>
-        <div><span>新增成交贡献</span><strong>68%</strong></div>
-        <div><span>二次访问率</span><strong>42%</strong></div>
+function OpeningComparison({ view }: { view: ReviewView }) {
+  const before = (
+    <ReviewStateFrame side="before" title="原开场" caption="说明型落地页">
+      <div className={styles.openingSnapshot} data-side="before">
+        <span>Complex HTML Test Document · v1.0</span>
+        <h3>为复杂页面而生<br /><em>数字实验场</em></h3>
+        <p>这是一份刻意“内容过载”的综合测试页面，用来验证真实世界中的选择、修改、重排和保存。</p>
+        <div className={styles.snapshotActions}><span>开始浏览</span><span>打开原生对话框</span><span>查看测试提示</span></div>
+        <ul><li>单文件自包含</li><li>响应式样式</li><li>原生交互</li><li>无框架依赖</li></ul>
       </div>
-      {isOverlay ? (
-        <span className={styles.moveLabel}>
-          <ArrowsClockwiseIcon aria-hidden="true" size={14} weight="bold" />
-          从页面底部移动到这里
-        </span>
-      ) : null}
-    </section>
+    </ReviewStateFrame>
   );
+  const after = (
+    <ReviewStateFrame side="after" title="新开场" caption="任务型入口">
+      <div className={styles.openingSnapshot} data-side="after">
+        <span>复杂页面综合测试</span>
+        <h3>一次看清复杂页面<br /><em>能不能被可靠修改</em></h3>
+        <p>从数据、文章、目录到表格和媒体，选择一个真实场景开始验证，页面里的其他内容保持不变。</p>
+        <div className={styles.snapshotActions}><span>查看数据与文章</span><span>测试表单与媒体</span></div>
+        <div className={styles.contentSummaryMini}>
+          <div><strong>12</strong><small>个内容区域</small></div>
+          <div><strong>48+</strong><small>种元素与状态</small></div>
+          <div><strong>1</strong><small>份完整 HTML</small></div>
+        </div>
+      </div>
+    </ReviewStateFrame>
+  );
+  return <ComparisonPair view={view} before={before} after={after} />;
+}
 
+function DashboardComparison({ view }: { view: ReviewView }) {
+  const before = (
+    <ReviewStateFrame side="before" title="原数据概览" caption="四张等宽指标卡">
+      <div className={styles.dashboardSnapshot} data-layout="before">
+        <div><span>北极星指标</span><strong>87.4</strong><small>↑ 12.8%</small></div>
+        <div><span>活跃项目</span><strong>18</strong><small>过去 30 天</small></div>
+        <div><span>交付周期</span><strong>4.3 天</strong><small>↓ 0.7 天</small></div>
+        <div><span>自动化覆盖率</span><strong>76%</strong><small>目标 85%</small></div>
+        <section><strong>双轨增长趋势</strong><span>占据主要阅读区域</span></section>
+        <section><strong>实时动态</strong><span>位于页面右下</span></section>
+      </div>
+    </ReviewStateFrame>
+  );
+  const after = (
+    <ReviewStateFrame side="after" title="新数据概览" caption="一主三辅，动态前移">
+      <div className={styles.dashboardSnapshot} data-layout="after">
+        <div data-featured="true"><span>综合体验健康度</span><strong>91.6</strong><small>成为第一阅读焦点</small></div>
+        <section data-priority="true"><strong>实时动态</strong><span>4 条 · 刚刚更新</span></section>
+        <div><span>活跃项目</span><strong>24</strong><small>↑ 6 个</small></div>
+        <div><span>交付周期</span><strong>3.8 天</strong><small>↓ 0.5 天</small></div>
+        <div><span>自动化覆盖率</span><strong>81%</strong><small>接近目标</small></div>
+        <section><strong>双轨增长趋势</strong><span>缩为辅助区域</span></section>
+      </div>
+    </ReviewStateFrame>
+  );
+  return <ComparisonPair view={view} before={before} after={after} />;
+}
+
+function StoryComparison({ view }: { view: ReviewView }) {
+  const before = (
+    <ReviewStateFrame side="before" title="原文章顺序" caption="4 个连续章节">
+      <ol className={styles.sequenceSnapshot}>
+        <li><span>开场</span><strong>当工具开始理解“局部”</strong><small>保留，文字改写</small></li>
+        <li><span>第一章</span><strong>上下文不是越多越好</strong><small>与第三章合并</small></li>
+        <li><span>第二章</span><strong>结构保真是一种产品能力</strong><small>移动到最前</small></li>
+        <li><span>第三章</span><strong>从一次编辑到持续协作</strong><small>与第一章合并</small></li>
+      </ol>
+    </ReviewStateFrame>
+  );
+  const after = (
+    <ReviewStateFrame side="after" title="新文章顺序" caption="3 章正文 + 验证清单">
+      <ol className={styles.sequenceSnapshot} data-side="after">
+        <li data-tone="move"><span>第一章</span><strong>结构保真是一种产品能力</strong><small>原第 2 章</small></li>
+        <li data-tone="merge"><span>第二章</span><strong>上下文如何进入持续协作</strong><small>由两章合并</small></li>
+        <li><span>第三章</span><strong>让修改结果局部可验证</strong><small>重新组织</small></li>
+        <li data-tone="add"><span>新增</span><strong>提交前验证清单</strong><small>5 项</small></li>
+      </ol>
+    </ReviewStateFrame>
+  );
   return (
-    <article className={styles.reviewReport} data-view={view}>
-      <header className={styles.reviewHero} {...sectionProps(0)}>
-        <ChangePin number={1} active={activeIndex === 0} onClick={() => onSelectChange(0)} />
-        <span>投放复盘 · 07.08—07.28</span>
-        <h1>AI 商品运营效果分析</h1>
-        {isOverlay ? (
-          <p className={styles.inlineDiff}>
-            <del>本轮活动覆盖更广，但增长主要来自新增流量。</del>
-            <ins>高意向人群贡献了 68% 的新增成交。</ins>
-          </p>
-        ) : (
-          <p>{isBefore ? CHANGES[0].before : CHANGES[0].after}</p>
-        )}
-      </header>
-
-      {isOverlay ? <OverlayLegend /> : null}
-
-      <section className={styles.reviewMetrics}>
-        <div>
-          <span>新增成交</span>
-          <strong>¥ 286,400</strong>
-          <small>同比 +18.6%</small>
-        </div>
-        <div className={styles.changedMetric} {...sectionProps(1)}>
-          <ChangePin number={2} active={activeIndex === 1} onClick={() => onSelectChange(1)} />
-          <span>{isBefore ? "转化率" : "核心转化率"}</span>
-          {isOverlay ? (
-            <strong className={styles.metricDiff}><del>8.7%</del><ins>12.4%</ins></strong>
-          ) : (
-            <strong>{isBefore ? "8.7%" : "12.4%"}</strong>
-          )}
-          <small>{isBefore ? "同比 +0.4pp" : "同比 +3.7pp"}</small>
-        </div>
-        <div>
-          <span>获客成本</span>
-          <strong>¥ 42.8</strong>
-          <small>同比 -6.2%</small>
-        </div>
-      </section>
-
-      {!isBefore ? audienceModule : null}
-
-      <section className={styles.channelModule}>
-        <div className={styles.sectionEyebrow}>渠道表现</div>
-        <h2>内容渠道更适合承接高意向用户</h2>
-        <p>搜索广告带来最多新增访问；内容渠道访问量较少，但收藏率与二次访问率更好。</p>
-        <div className={styles.channelRows}>
-          <div><span>搜索广告</span><strong>规模最高</strong><small>转化稳定</small></div>
-          <div><span>内容渠道</span><strong>意向最高</strong><small>值得加码</small></div>
-          <div><span>联盟渠道</span><strong>成本偏高</strong><small>建议收缩</small></div>
-        </div>
-      </section>
-
-      <section className={styles.actionModule} {...sectionProps(3)}>
-        <ChangePin number={4} active={activeIndex === 3} onClick={() => onSelectChange(3)} />
-        <div className={styles.sectionEyebrow}>下一步行动</div>
-        {isOverlay ? (
-          <>
-            <h2 className={styles.blockDiffTitle}><del>继续扩大覆盖面</del><ins>把预算收拢到有效人群</ins></h2>
-            <p className={styles.blockDiffCopy}>
-              <del>扩大覆盖面，继续观察各渠道变化。</del>
-              <ins>1. 预算集中到高意向人群；2. 暂停低效渠道；3. 48 小时后复盘。</ins>
-            </p>
-          </>
-        ) : isBefore ? (
-          <><h2>继续扩大覆盖面</h2><p>扩大覆盖面，继续观察各渠道变化。</p></>
-        ) : (
-          <>
-            <h2>把预算收拢到有效人群</h2>
-            <ol>
-              <li><strong>集中预算</strong><span>高意向人群预算提高 20%</span></li>
-              <li><strong>暂停低效渠道</strong><span>联盟渠道暂停新增预算</span></li>
-              <li><strong>快速复盘</strong><span>48 小时后核对转化与成本</span></li>
-            </ol>
-          </>
-        )}
-      </section>
-
-      {isBefore ? audienceModule : isOverlay ? (
-        <section className={styles.oldLocation} aria-label="模块原位置">
-          <ArrowsClockwiseIcon aria-hidden="true" size={18} weight="duotone" />
-          <span><strong>人群洞察原位置</strong>模块已移动到核心结论之后</span>
-        </section>
+    <>
+      <ComparisonPair view={view} before={before} after={after} />
+      {view === "overlay" ? (
+        <p className={styles.focusedTextDiff}>
+          <del>网页工具善于生成完整页面，可靠的编辑还要理解用户只想改哪里。</del>
+          <ins>可靠的编辑不是重做整页，而是让每一次变化都有清楚边界。</ins>
+        </p>
       ) : null}
-
-      {isOverlay ? <ComplexOverlayCases /> : null}
-    </article>
+    </>
   );
 }
+
+const BEFORE_CATALOG = [
+  ["未来工作方式观察站", "保留"],
+  ["城市慢行信息系统", "后移"],
+  ["证据链版本引擎", "移到第 1 位"],
+  ["公共空间温度计划", "删除"],
+  ["低视力阅读组件库", "保留"],
+  ["离线优先知识仓库", "前移"],
+];
+
+const AFTER_CATALOG = [
+  ["证据链版本引擎", "从第 3 位移入"],
+  ["离线优先知识仓库", "从第 6 位移入"],
+  ["未来工作方式观察站", "保留"],
+  ["跨端内容审阅器", "新增"],
+  ["低视力阅读组件库", "保留"],
+  ["城市慢行信息系统", "从第 2 位移入"],
+];
+
+function CatalogSnapshot({ side }: { side: "before" | "after" }) {
+  const items = side === "before" ? BEFORE_CATALOG : AFTER_CATALOG;
+  return (
+    <div className={styles.catalogSnapshot}>
+      {items.map(([title, status], index) => (
+        <div
+          key={title}
+          data-tone={status === "删除" ? "remove" : status === "新增" ? "add" : status.includes("移") ? "move" : undefined}
+        >
+          <span>{index + 1}</span>
+          <strong>{title}</strong>
+          <small>{status}</small>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function CatalogComparison({ view }: { view: ReviewView }) {
+  const before = <ReviewStateFrame side="before" title="原项目顺序" caption="按类别交错排列"><CatalogSnapshot side="before" /></ReviewStateFrame>;
+  const after = <ReviewStateFrame side="after" title="新项目顺序" caption="按优先级排列"><CatalogSnapshot side="after" /></ReviewStateFrame>;
+  return <ComparisonPair view={view} before={before} after={after} />;
+}
+
+function OperationsSnapshot({ side }: { side: "before" | "after" }) {
+  const after = side === "after";
+  return (
+    <div className={styles.compactTableWrap}>
+      <table>
+        <thead><tr><th>项目</th><th>状态</th><th>完成度</th><th>{after ? "下一动作" : "风险"}</th></tr></thead>
+        <tbody>
+          <tr><th>证据链版本引擎</th><td>进行中</td><td>{after ? "88%" : "84%"}</td><td>{after ? "准备上线检查" : "中"}</td></tr>
+          <tr data-tone={after ? "change" : undefined}><th>低视力阅读组件库</th><td>{after ? "进行中" : "待复核"}</td><td>{after ? "71%" : "62%"}</td><td>{after ? "补齐键盘测试" : "高"}</td></tr>
+          <tr><th>离线优先知识仓库</th><td>已阻塞</td><td>{after ? "34%" : "18%"}</td><td>{after ? "确认缓存策略" : "高"}</td></tr>
+          {after ? <tr data-tone="add"><th>跨端内容审阅器</th><td>新建</td><td>12%</td><td>分配负责人</td></tr> : null}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function OperationsComparison({ view }: { view: ReviewView }) {
+  if (view === "overlay") {
+    return (
+      <section className={styles.tableDiffCard}>
+        <header><TableIcon aria-hidden="true" size={18} weight="duotone" /><span><strong>按表格位置归纳</strong><small>只列发生变化的表头、行和数字</small></span></header>
+        <div className={styles.compactTableWrap}>
+          <table>
+            <thead><tr><th>变化位置</th><th>修改前</th><th>修改后</th><th>变化</th></tr></thead>
+            <tbody>
+              <tr><th>最后一列</th><td><del>风险</del></td><td><ins>下一动作</ins></td><td><span data-tone="replace">整列改写</span></td></tr>
+              <tr><th>低视力阅读组件库</th><td><del>待复核 · 62%</del></td><td><ins>进行中 · 71%</ins></td><td><span data-tone="replace">状态和数字</span></td></tr>
+              <tr><th>离线优先知识仓库</th><td><del>18%</del></td><td><ins>34%</ins></td><td><span data-tone="replace">数字</span></td></tr>
+              <tr><th>跨端内容审阅器</th><td>—</td><td><ins>新建 · 12%</ins></td><td><span data-tone="add">新增一行</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    );
+  }
+  return (
+    <ComparisonPair
+      view={view}
+      before={<ReviewStateFrame side="before" title="原运营表格" caption="风险只用高、中、低表示"><OperationsSnapshot side="before" /></ReviewStateFrame>}
+      after={<ReviewStateFrame side="after" title="新运营表格" caption="直接给出下一动作"><OperationsSnapshot side="after" /></ReviewStateFrame>}
+    />
+  );
+}
+
+function FormSnapshot({ side }: { side: "before" | "after" }) {
+  const after = side === "after";
+  return (
+    <div className={styles.formSnapshot}>
+      <header>{after ? <><span>1 联系人</span><span>2 项目偏好</span><span>3 确认</span></> : <strong>全部字段同时展开</strong>}</header>
+      <div className={styles.formFields}>
+        <label><span>姓名 *</span><i>{after ? "请输入联系人姓名" : ""}</i></label>
+        <label><span>电子邮箱 *</span><i data-error={after ? "true" : undefined}>{after ? "请输入有效邮箱" : ""}</i></label>
+        <label><span>预算区间</span><i>{after ? "¥100,000 以上" : "请选择"}</i></label>
+        {after ? <label data-tone="add"><span>审批说明 *</span><i>高预算时出现</i></label> : <label><span>上传测试附件</span><i>选择文件</i></label>}
+      </div>
+      <span className={styles.formActionPreview}>{after ? "保存并继续" : "模拟提交"}</span>
+    </div>
+  );
+}
+
+function FormComparison({ view }: { view: ReviewView }) {
+  if (view === "overlay") {
+    return (
+      <section className={styles.behaviorMatrix}>
+        <header><strong>用户操作</strong><span>修改前</span><span>修改后</span></header>
+        <div><strong>进入表单</strong><span>全部字段一次展开</span><span>先看到联系人信息</span></div>
+        <div><strong>选择高预算</strong><span>没有额外说明</span><span data-tone="add">出现“审批说明”必填项</span></div>
+        <div><strong>邮箱格式错误</strong><span>提交时统一提示</span><span data-tone="change">输入框旁立即说明</span></div>
+        <div><strong>提交成功</strong><span>顶部短暂提示</span><span data-tone="change">停留原位并显示完成摘要</span></div>
+      </section>
+    );
+  }
+  return (
+    <ComparisonPair
+      view={view}
+      before={<ReviewStateFrame side="before" title="原长表单" caption="4 组字段全部展开"><FormSnapshot side="before" /></ReviewStateFrame>}
+      after={<ReviewStateFrame side="after" title="新三步表单" caption="字段、条件和反馈一起变化"><FormSnapshot side="after" /></ReviewStateFrame>}
+    />
+  );
+}
+
+function MediaSnapshot({ side }: { side: "before" | "after" }) {
+  const after = side === "after";
+  return (
+    <div className={styles.mediaSnapshot}>
+      <div className={styles.mediaGrid} data-layout={side}>
+        <span data-wide={!after ? "true" : undefined}>潮汐档案</span>
+        <span>图片元素样本</span>
+        <span>风向记录</span>
+        <span>地表纹理</span>
+      </div>
+      <div className={styles.mediaStates}>
+        <div><strong>Canvas 数据波形</strong><small>{after ? "重绘后保留选中点" : "调整宽度后重新绘制"}</small></div>
+        <div><strong>Audio / Video</strong><small>{after ? "离线时显示状态与重试" : "依赖浏览器默认回退"}</small></div>
+        <div><strong>Image Map</strong><small>{after ? "热区跟随新布局更新" : "左右各一个固定热区"}</small></div>
+      </div>
+    </div>
+  );
+}
+
+function MediaComparison({ view }: { view: ReviewView }) {
+  const before = <ReviewStateFrame side="before" title="原媒体区域" caption="混合跨列画廊"><MediaSnapshot side="before" /></ReviewStateFrame>;
+  const after = <ReviewStateFrame side="after" title="新媒体区域" caption="稳定分组并补齐操作反馈"><MediaSnapshot side="after" /></ReviewStateFrame>;
+  return (
+    <>
+      <ComparisonPair view={view} before={before} after={after} />
+      {view === "overlay" ? (
+        <section className={styles.behaviorSummary}>
+          <ArrowsClockwiseIcon aria-hidden="true" size={18} weight="duotone" />
+          <div><strong>静态画面之外，还有 3 个操作结果变化</strong><span>调整窗口宽度、离线播放、点击图片热区都需要单独验证。</span></div>
+        </section>
+      ) : null}
+    </>
+  );
+}
+
+function AdaptiveComparison({ change, view }: { change: ContentChange; view: ReviewView }) {
+  if (change.compareKind === "rebuild") return <OpeningComparison view={view} />;
+  if (change.compareKind === "layout") return <DashboardComparison view={view} />;
+  if (change.compareKind === "sequence") return <StoryComparison view={view} />;
+  if (change.compareKind === "collection") return <CatalogComparison view={view} />;
+  if (change.compareKind === "table") return <OperationsComparison view={view} />;
+  if (change.compareKind === "form") return <FormComparison view={view} />;
+  return <MediaComparison view={view} />;
+}
+
+function ContentMap({
+  activeId,
+  showAll,
+  onToggleAll,
+  onSelect,
+}: {
+  activeId: string;
+  showAll: boolean;
+  onToggleAll: () => void;
+  onSelect: (changeId: string) => void;
+}) {
+  const visibleGroups = CONTENT_OUTLINE.map((group) => ({
+    ...group,
+    items: showAll ? group.items : group.items.filter((item) => item.changeId),
+  })).filter((group) => group.items.length > 0);
+
+  return (
+    <div className={styles.contentMapScroll}>
+      <section className={styles.contentMapIntro}>
+        <div><strong>按页面里的标题整理</strong><span>不显示代码名称，只显示用户在页面上能找到的内容。</span></div>
+        <button type="button" aria-pressed={!showAll} onClick={onToggleAll}>{showAll ? "只看有变化" : "显示完整页面"}</button>
+      </section>
+
+      <nav className={styles.contentMap} aria-label="页面内容与变化位置">
+        {visibleGroups.map((group) => (
+          <section key={group.label}>
+            <header>
+              <span>{group.label}</span>
+              <small>{group.items.some((item) => item.changeId) ? `${group.items.filter((item) => item.changeId).length} 处变化` : "未修改"}</small>
+            </header>
+            <div>
+              {group.items.map((item) => {
+                const change = item.changeId ? CONTENT_CHANGES.find((candidate) => candidate.id === item.changeId) : undefined;
+                return (
+                  <button
+                    key={item.title}
+                    className={styles.contentMapItem}
+                    data-active={change?.id === activeId ? "true" : undefined}
+                    data-state={change ? "changed" : item.generatedName ? "named" : "unchanged"}
+                    type="button"
+                    disabled={!change}
+                    onClick={() => change && onSelect(change.id)}
+                  >
+                    <span className={styles.mapIndex}>{change ? change.number : "—"}</span>
+                    <span className={styles.mapCopy}><strong>{item.title}</strong><small>{item.helper}</small></span>
+                    <span className={styles.mapState}>{change ? change.kind : item.generatedName ? "根据内容命名" : "未修改"}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        ))}
+      </nav>
+
+      <section className={styles.contentMapAccuracy}>
+        <ShieldCheckIcon aria-hidden="true" size={17} weight="duotone" />
+        <span><strong>10 个名称直接来自页面标题</strong>页尾直接使用可见品牌文字；顶部导航没有独立标题，根据导航文字整理并明确标出。</span>
+      </section>
+    </div>
+  );
+}
+
+const COMPARE_HINTS: Record<CompareKind, string> = {
+  rebuild: "这一块改动太大，直接展开完整前后内容，避免红绿叠在一起。",
+  layout: "内容仍能对应，左右并排展示面积、顺序和数字变化。",
+  sequence: "重点追踪章节从哪里移动到哪里，移动不会显示成删除再新增。",
+  collection: "重复卡片很多，按项目逐项标记保留、移动、删除和新增。",
+  table: "直接按表头、行和单元格归纳，不要求用户扫两张完整大表。",
+  form: "除了字段位置，也对比输入条件、错误提示和提交结果。",
+  behavior: "静态布局并排看，脚本与媒体变化另外用操作结果说明。",
+};
 
 function ReviewScreen({
   onExit,
@@ -649,12 +878,23 @@ function ReviewScreen({
   onAccept: () => void;
   onKeep: () => void;
 }) {
-  const [view, setView] = useState<ReviewView>("after");
+  const [view, setView] = useState<ReviewView>("overlay");
   const [activeIndex, setActiveIndex] = useState(0);
-  const activeChange = CHANGES[activeIndex];
+  const [showAll, setShowAll] = useState(true);
+  const [showDetails, setShowDetails] = useState(true);
+  const activeChange = CONTENT_CHANGES[activeIndex];
 
   const navigate = (direction: -1 | 1) => {
-    setActiveIndex((current) => (current + direction + CHANGES.length) % CHANGES.length);
+    setActiveIndex((current) => (current + direction + CONTENT_CHANGES.length) % CONTENT_CHANGES.length);
+    setShowDetails(true);
+  };
+
+  const selectChange = (changeId: string) => {
+    const nextIndex = CONTENT_CHANGES.findIndex((change) => change.id === changeId);
+    if (nextIndex >= 0) {
+      setActiveIndex(nextIndex);
+      setShowDetails(true);
+    }
   };
 
   return (
@@ -665,77 +905,81 @@ function ReviewScreen({
           <div className={styles.reviewToolbar}>
             <div className={styles.reviewTitle}>
               <GitDiffIcon aria-hidden="true" size={20} weight="duotone" />
-              <span><strong>审阅 AI 修改</strong><small>4 处变化 · 3 条评论已响应 · 1 处额外补充</small></span>
+              <span><strong>审阅 AI 修改</strong><small>真实复杂页面大改演示 · 7 处变化 · 1 处额外修改</small></span>
             </div>
             <div className={styles.viewSwitch} aria-label="对比方式">
               {(Object.keys(VIEW_LABELS) as ReviewView[]).map((item) => (
-                <button
-                  key={item}
-                  type="button"
-                  aria-pressed={view === item}
-                  onClick={() => setView(item)}
-                >
-                  {VIEW_LABELS[item]}
-                </button>
+                <button key={item} type="button" aria-pressed={view === item} onClick={() => setView(item)}>{VIEW_LABELS[item]}</button>
               ))}
             </div>
           </div>
+
           <div className={styles.reviewCanvas}>
-            <ReportReview view={view} activeIndex={activeIndex} onSelectChange={setActiveIndex} />
+            <article className={styles.adaptiveReview} key={activeChange.id}>
+              <header className={styles.adaptiveHeader}>
+                <div className={styles.changeBreadcrumb}><span>{activeChange.group}</span><ArrowRightIcon aria-hidden="true" size={12} weight="bold" /><strong>{activeChange.heading}</strong></div>
+                <div className={styles.adaptiveTitleRow}>
+                  <span>{activeChange.number}</span>
+                  <div><small>{activeChange.kind}</small><h1>{activeChange.title}</h1></div>
+                </div>
+                <p>{activeChange.summary}</p>
+              </header>
+
+              <section className={styles.reviewIntent}>
+                <ChatCircleTextIcon aria-hidden="true" size={18} weight="duotone" />
+                <div><span>你的要求</span><q>{activeChange.request}</q></div>
+              </section>
+
+              <section className={styles.adaptiveMethod}>
+                <div><span>本处对照方式</span><strong>{view === "overlay" ? activeChange.compareLabel : `完整${VIEW_LABELS[view]}内容`}</strong></div>
+                <p>{view === "overlay" ? COMPARE_HINTS[activeChange.compareKind] : `当前只显示这一部分的${VIEW_LABELS[view]}状态，可随时切回“对照”。`}</p>
+              </section>
+
+              <div className={styles.adaptiveBody}>
+                <AdaptiveComparison change={activeChange} view={view} />
+              </div>
+
+              <section className={styles.changeBreakdown}>
+                <button type="button" aria-expanded={showDetails} onClick={() => setShowDetails((current) => !current)}>
+                  <span><RowsIcon aria-hidden="true" size={17} weight="duotone" /><strong>这部分具体改了什么</strong><small>{activeChange.details.length} 项</small></span>
+                  <span>{showDetails ? "收起" : "展开"}</span>
+                </button>
+                {showDetails ? (
+                  <div>
+                    <ol>{activeChange.details.map((detail) => <li key={detail}>{detail}</li>)}</ol>
+                    <section className={styles.beforeAfterSummary}>
+                      <div><span>原来</span><p>{activeChange.before}</p></div>
+                      <ArrowRightIcon aria-hidden="true" size={16} weight="bold" />
+                      <div><span>现在</span><p>{activeChange.after}</p></div>
+                    </section>
+                    {activeChange.extra ? (
+                      <div className={styles.extraChange}>
+                        <WarningCircleIcon aria-hidden="true" size={16} weight="fill" />
+                        <span><strong>评论范围外</strong>{activeChange.extra}</span>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </section>
+            </article>
           </div>
         </section>
 
         <aside className={styles.changeRail}>
           <header className={styles.changeRailHeader}>
+            <div><span>页面内容地图</span><strong>正在看第 {activeIndex + 1} 处 · 共 {CONTENT_CHANGES.length} 处</strong></div>
             <div>
-              <span>修改清单</span>
-              <strong>{activeIndex + 1} / {CHANGES.length}</strong>
-            </div>
-            <div>
-              <button type="button" aria-label="上一处修改" onClick={() => navigate(-1)}>
-                <ArrowLeftIcon aria-hidden="true" size={16} weight="bold" />
-              </button>
-              <button type="button" aria-label="下一处修改" onClick={() => navigate(1)}>
-                <ArrowRightIcon aria-hidden="true" size={16} weight="bold" />
-              </button>
+              <button type="button" aria-label="上一处变化" onClick={() => navigate(-1)}><ArrowLeftIcon aria-hidden="true" size={16} weight="bold" /></button>
+              <button type="button" aria-label="下一处变化" onClick={() => navigate(1)}><ArrowRightIcon aria-hidden="true" size={16} weight="bold" /></button>
             </div>
           </header>
 
-          <div className={styles.changeList}>
-            {CHANGES.map((change, index) => (
-              <button
-                className={styles.changeCard}
-                data-active={index === activeIndex ? "true" : undefined}
-                key={change.id}
-                type="button"
-                onClick={() => setActiveIndex(index)}
-              >
-                <span className={styles.changeCardTop}>
-                  <span>{change.number}</span>
-                  <strong>{change.location}</strong>
-                  <small>{change.kind}</small>
-                </span>
-                <span className={styles.changeCardTitle}>{change.title}</span>
-              </button>
-            ))}
-
-            <section className={styles.changeDetail} aria-live="polite">
-              <div className={styles.commentQuote}>
-                <ChatCircleTextIcon aria-hidden="true" size={17} weight="duotone" />
-                <span><small>你的评论</small><q>{activeChange.comment}</q></span>
-              </div>
-              <div className={styles.beforeAfter}>
-                <div><span>修改前</span><p>{activeChange.before}</p></div>
-                <div><span>修改后</span><p>{activeChange.after}</p></div>
-              </div>
-              {activeChange.extra ? (
-                <div className={styles.extraChange}>
-                  <WarningCircleIcon aria-hidden="true" size={16} weight="fill" />
-                  <span><strong>额外变化</strong>{activeChange.extra}</span>
-                </div>
-              ) : null}
-            </section>
-          </div>
+          <ContentMap
+            activeId={activeChange.id}
+            showAll={showAll}
+            onToggleAll={() => setShowAll((current) => !current)}
+            onSelect={selectChange}
+          />
 
           <footer className={styles.reviewFooter}>
             <p>第一版先按整份候选做决定，原版与候选都会保留。</p>
@@ -804,8 +1048,8 @@ function OutcomeScreen({
             <div><dt>修改前</dt><dd>V1.3 · 已保留</dd></div>
             <div><dt>AI 候选</dt><dd>V1.4 · 已保留</dd></div>
             <div><dt>当前 HTML</dt><dd>{accepted ? "V1.4" : "V1.3"}</dd></div>
-            <div><dt>本轮评论</dt><dd>3 条</dd></div>
-            <div><dt>可见变化</dt><dd>4 处</dd></div>
+            <div><dt>本轮要求</dt><dd>{source === "review" ? "6 条" : "3 条评论"}</dd></div>
+            <div><dt>可见变化</dt><dd>{source === "review" ? "7 处" : "4 处"}</dd></div>
           </dl>
           <p>Demo 采用整份版本决策，因此不会产生局部回退后的结构冲突。</p>
         </aside>

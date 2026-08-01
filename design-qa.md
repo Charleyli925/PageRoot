@@ -1,5 +1,77 @@
 # Design QA
 
+## 内容地图与自适应对照
+
+Date: 2026-08-01
+
+Source visual truth:
+
+- `/var/folders/jx/w52403cs2hx39vwhd1sb3tg80000gn/T/codex-clipboard-f863824d-12c6-49bc-8b88-017f916f18ef.png`
+  — 用户提供的原审阅页实拍，作为 PageRoot 顶部栏、浅灰画布、白色内容纸张、紫色语义色与整体验证密度的视觉基线。
+- `/Users/lizexuan/Desktop/复杂HTML综合测试页.html`
+  — 只读结构依据。实现没有复制这份真实文件；Demo 数据由其可见标题、栏目类型与交互种类脱敏整理。
+- 用户明确要求把“变化脊柱”改成用户能读懂的内容骨架，并用真实复杂页面的大改剧本替换通用技术术语；因此本轮是有意的信息架构改版，不做原截图逐像素复刻。
+
+Implementation evidence:
+
+- `/Users/lizexuan/.codex/visualizations/2026/07/31/019fb79d-e227-7901-a293-bcb645ae9516/complex-diff-audit/09-content-map-adaptive-compare-passed.png`
+- `/Users/lizexuan/.codex/visualizations/2026/07/31/019fb79d-e227-7901-a293-bcb645ae9516/complex-diff-audit/06-adaptive-table-diff.png`
+- `/Users/lizexuan/.codex/visualizations/2026/07/31/019fb79d-e227-7901-a293-bcb645ae9516/complex-diff-audit/05-adaptive-media-behavior.png`
+
+Combined comparison input:
+
+- The source screenshot and the final implementation screenshot were opened together in one visual comparison input before this report was written.
+- Focused evidence uses the table and media screenshots above because those adaptive states do not exist in the original source capture.
+
+Viewport and normalization:
+
+- Source pixels: `2040 × 1630`, consistent with a `1020 × 815` Retina capture at 2× density.
+- Implementation CSS viewport: `1280 × 720`; runtime `devicePixelRatio = 2`; the in-app Browser screenshot is normalized to `1280 × 720` pixels.
+- State: source shows the old universal overlay; implementation shows the new content-map review with adaptive `完整前后`. The different state and aspect ratio are intentional, so the comparison judges retained visual language, hierarchy and clarity rather than false pixel parity.
+- Final document geometry: `scrollWidth = clientWidth = 1280`, `scrollHeight = clientHeight = 720`. The content canvas and right map scroll independently.
+
+Full-view comparison evidence:
+
+- The new screen keeps the established 64px file bar, cool-gray workspace, centered white review surface, restrained borders, compact Phosphor icons and indigo PageRoot accent.
+- The right rail now presents 12 user-recognizable content areas grouped as 页面开头、数据与阅读、项目与运营、媒体与文档、页面结尾. Ten labels come directly from visible headings; the footer uses visible brand text; the top navigation fallback is explicitly marked `根据内容命名`.
+- The main surface replaces the old universal overlay with one repeated shell: content breadcrumb, user request, chosen comparison method, adaptive evidence and an expandable concrete-change list.
+
+Focused comparison evidence:
+
+- Whole-section rebuild uses two clean full snapshots instead of overlapping red/green surfaces.
+- Layout changes use aligned before/after mini-layouts; article moves use chapter order; repeated cards use per-item add/delete/move labels; tables use row/column/cell summaries; forms use a user-action matrix; media changes pair visible layout with operation-result notes.
+- Deletion, addition, movement and uncertain naming always include text labels, so meaning does not depend on color alone.
+
+Findings:
+
+- No actionable P0, P1 or P2 issue remains.
+- Fonts and typography: the original PageRoot system/PingFang fallback and heavy report-title hierarchy are preserved. The first pass made map helper/state text too small at the `1280 × 720` target; final map headings are `10px`, helper/state labels are `8px`, and core request text is `10.5px`. Miniature page previews intentionally use smaller type because they are diagrams, not primary reading content.
+- Spacing and layout rhythm: title, request, method, evidence and detail sections follow a stable vertical rhythm. The decision actions remain fixed and the content map scrolls without covering them.
+- Colors and visual tokens: red remains removal, green addition, indigo structure/move and amber uncertain naming or extra AI work. Surfaces and shadows stay within the existing PageRoot palette.
+- Image quality and asset fidelity: no new raster artwork is required by this information-design prototype. The real brand asset and project Phosphor icons are reused. Media tiles are labeled comparison miniatures for a source page that itself uses CSS-driven sample visuals; they are not substituted product imagery.
+- Copy and content: the map uses visible Chinese headings from the supplied HTML rather than `hero`, `dashboard` or other implementation terms. The source-count copy was corrected from an inaccurate 11-title claim to `10 个名称直接来自页面标题`, plus one visible footer label and one explicit navigation fallback.
+- Icons: all interface icons come from the existing Phosphor set and align to the surrounding label baseline.
+- Accessibility and states: view buttons expose `aria-pressed`, detail disclosure exposes `aria-expanded`, unchanged map rows are disabled, the map has a navigation label, and reduced-motion handling remains present. All seven adaptive states include non-color labels.
+- Responsive scope: this is a desktop-app prototype. At the tested target there is no page-level horizontal overflow. The pre-existing compact breakpoint that collapses to the review rail remains outside this scoped desktop exploration.
+
+Interaction checks:
+
+- Waiting → `模拟 AI 返回` → `审阅修改` reached the new review screen.
+- All seven content-map changes opened their matching method: `完整前后`, `并排布局`, `顺序追踪`, `逐项清单`, `表格差异`, `表单与反馈`, `操作结果`.
+- `修改前`, `修改后` and `对照` each showed the correct state; `只看有变化` hid unchanged areas and `显示完整页面` restored them.
+- The concrete-change disclosure collapsed and reopened. `保留当前版本` opened its confirmation dialog and `继续审阅` returned safely.
+- Browser console warning/error count: `0`. Only Vite connection and React development info logs were present.
+
+Comparison history:
+
+1. Initial rendered comparison preserved the product shell and passed core interactions, but exposed a P2 clarity/trust issue: right-map helper/state text was too small and the provenance note incorrectly claimed 11 direct headings.
+2. Map typography was increased, group counts were rewritten as `N 处变化`, the rail header became `正在看第 N 处 · 共 7 处`, and provenance was corrected to ten headings plus footer text plus one explicit navigation fallback.
+3. Final browser evidence at `1280 × 720` shows the corrected labels, no horizontal overflow, all seven adaptive methods and no browser warning/error. No actionable P0, P1 or P2 finding remains.
+
+final result: passed
+
+---
+
 ## 复杂叠加对比扩展
 
 Date: 2026-07-31
