@@ -1,5 +1,79 @@
 # Design QA
 
+## 真实复杂 HTML 完整对照
+
+Date: 2026-08-01
+
+Source visual truth:
+
+- `local-only attachment / codex-clipboard-f863824d-12c6-49bc-8b88-017f916f18ef.png`
+  — 用户提供的原审阅页实拍，用于核对顶部栏、浅灰画布、白色内容纸张、紫色结构语义与右侧固定决策栏。
+- `local-only source HTML / 复杂HTML综合测试页.html`
+  — 本轮真实内容与视觉基线。原版 Demo 资产的 SHA-256 为 `9075e126f270b41c0320f1f5dd761e1eaf0cf645ec20850e61462583a52618dc`，与该文件逐字节一致；候选版由原版执行 7 组受检修改得到。
+- 原版与候选版只生成在被 Git 忽略的 `public/review-demo-local/` 中，不进入版本库。
+
+Implementation evidence:
+
+- `session visualization / complex-real-html-review/01-original-html.png`
+- `session visualization / complex-real-html-review/03-candidate-html.png`
+- `session visualization / complex-real-html-review/04-review-dashboard-post-fix.png`
+
+Viewport and normalization:
+
+- User review screenshot: `2040 × 1630` pixels; original CSS viewport and density are unavailable, so it is treated as a visual-language reference rather than a pixel-perfect same-state target.
+- Original HTML, candidate HTML and review implementation: `1280 × 720` CSS viewport, runtime `devicePixelRatio = 2`; in-app Browser screenshots are normalized to `1280 × 720` output pixels.
+- State: implementation shows `对照` mode on the real `#dashboard` section, with both complete documents loaded and independently scrollable.
+- The user screenshot and rendered implementation were opened together in one visual comparison input. A second combined input placed the standalone original HTML and rendered review implementation together to verify that the real source styling survives inside the comparison frames.
+
+Full-view comparison evidence:
+
+- Waiting state now renders the complete original HTML rather than an invented report; the existing four-stage return flow and fixed right panel remain intact.
+- Review state keeps the established PageRoot shell, but its main evidence area now loads `/review-demo-local/before.html#<anchor>` and `/review-demo-local/after.html#<anchor>` directly. The visible page title and anchor drive all seven jumps.
+- `修改前` and `修改后` each show one full-width document; `对照` shows two real documents side by side. Each pane identifies provenance, byte/line size and provides a full-page open action.
+- The explanatory mini-comparison remains below the real documents and is explicitly labeled `系统提炼的变化说明 / 最终以完整页面为准`, so it supports scanning without pretending to be the source of truth.
+
+Focused comparison evidence:
+
+- Original and candidate standalone captures confirm preservation of the source typography, grid, brand header and CSS-driven illustration; the candidate hero visibly contains the new title, two actions, content counts and `7 类真实修改` count.
+- The post-fix dashboard review capture shows both real pages at the same `#dashboard` anchor. The original and candidate headings, sticky navigation and responsive wrapping are visibly derived from the supplied HTML, not recreated cards.
+- DOM checks confirmed the exact candidate values `91.6 / 24 / 3.8 天 / 81%`, catalog order, five operations rows, four step legends, online media statuses and the reordered gallery classes.
+
+Findings:
+
+- No actionable P0, P1 or P2 issue remains.
+- Fonts and typography: the review shell preserves the product system/PingFang hierarchy; iframe content uses the exact source document fonts and sizing. At the two-pane width the real document intentionally enters its own responsive layout rather than being illegibly scaled down.
+- Spacing and layout rhythm: the source review shell retains its header, toolbar and persistent decision rail. Real-document provenance, frame and extracted explanation use a repeated 12–16px grouping rhythm with clear section boundaries.
+- Colors and visual tokens: PageRoot indigo remains the structural/action color; red and green label before/after provenance without coloring the actual source content. The source Atlas palette is rendered untouched inside each frame.
+- Image quality and asset fidelity: the original HTML is loaded directly, so its logo, CSS-driven sample artwork, embedded media placeholders and data-URI assets are preserved. No substitute illustration, custom SVG or placeholder image was introduced by the review UI.
+- Copy and content: every map label comes from a visible heading or clearly marked content-derived name. The extracted summaries were checked against the actual generated HTML and corrected to use the real title, counts, chapter names, row status, form behavior and media order.
+- Icons: all review-shell icons continue to use the existing Phosphor set; source-document controls remain native to the source HTML.
+- Accessibility and state: view controls expose `aria-pressed`; the details control exposes `aria-expanded`; iframes have version-and-section titles; full-page links are semantic anchors; map buttons and decision actions remain keyboard-addressable.
+- Responsive scope: the tested desktop viewport has no page-level overflow and keeps persistent actions visible. Each embedded page becomes responsive within its own pane and remains independently scrollable.
+
+Primary interactions tested:
+
+- Waiting → `模拟 AI 返回` → `审阅修改` loads two complete HTML documents.
+- Selecting data, story and other content-map entries updates both iframe URLs to their corresponding real anchors and returns the review surface to the top.
+- `修改后` produces one candidate iframe; returning to `对照` restores original plus candidate.
+- Candidate form: selecting `large` reveals `高预算审批说明` and sets it to required.
+- Candidate media: clicking Canvas shows `已保留当前波形点位`; both media status rows report connection state; the gallery order and Image Map regions are updated.
+- Candidate standalone document has no console warning or error. The in-app Browser recorded one source-less `MutationObserver.observe(null)` error only while instrumenting the two sandboxed same-origin iframes; neither the review source nor generated HTML contains that observer, the error does not reproduce on the standalone documents, and all product interactions remain functional.
+
+Comparison history:
+
+1. First real-document integration exposed a P2 first-view issue: iframe anchor loading moved the outer review canvas down by 535px and hid the change title. The iframe load handler now restores the outer canvas to `scrollTop = 0`; post-fix evidence shows the change title and context first.
+2. The first extracted summaries still contained invented counts, chapter merges, form behavior and row states from the earlier mock. They were corrected against the generated candidate DOM so every visible explanation now matches the complete HTML.
+3. Post-fix combined visual evidence and interaction checks found no remaining P0/P1/P2 issue. Build, lint, typecheck and focused review tests pass.
+
+Follow-up polish:
+
+- P3: a production renderer should serve untrusted user HTML from a dedicated isolated origin instead of the same-origin local Demo path.
+- P3: production can replace hard-coded byte/line labels with values from the generation manifest.
+
+final result: passed
+
+---
+
 ## 内容地图与自适应对照
 
 Date: 2026-08-01

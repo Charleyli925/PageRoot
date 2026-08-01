@@ -51,6 +51,7 @@ next-env.d.ts
 /.wrangler/
 /outputs/
 /work/
+/public/review-demo-local/
 
 # local IDE and scratch files
 /.idea/

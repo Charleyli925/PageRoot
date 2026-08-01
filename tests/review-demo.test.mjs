@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const [page, styles] = await Promise.all([
+const [page, styles, generator, gitignore] = await Promise.all([
   readFile(new URL("../app/review-demo/page.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/review-demo/review-demo.module.css", import.meta.url), "utf8"),
+  readFile(new URL("../scripts/generate-review-demo-fixtures.mjs", import.meta.url), "utf8"),
+  readFile(new URL("../.gitignore", import.meta.url), "utf8"),
 ]);
 
 test("the AI review demo covers the complete version-level decision path", () => {
@@ -20,11 +22,14 @@ test("the AI review demo covers the complete version-level decision path", () =>
   assert.match(page, /AI 候选 V1\.4 和本轮评论仍会保留/);
 });
 
-test("the demo pairs comments with several visible change types", () => {
-  assert.match(page, /文案修改/);
-  assert.match(page, /数字与样式/);
-  assert.match(page, /模块移动/);
-  assert.match(page, /整段重写/);
+test("the demo pairs real content requirements with several complex change types", () => {
+  assert.match(page, /整段重做/);
+  assert.match(page, /布局和数字/);
+  assert.match(page, /章节调整/);
+  assert.match(page, /卡片增删与排序/);
+  assert.match(page, /表格变化/);
+  assert.match(page, /字段与反馈/);
+  assert.match(page, /布局与交互/);
   assert.match(page, /你的要求/);
   assert.match(page, /评论范围外/);
   assert.match(page, /第一版先按整份候选做决定/);
@@ -55,6 +60,33 @@ test("adaptive comparison covers complex changes with user-facing comparison met
   assert.match(page, /移动不会显示成删除再新增/);
   assert.match(page, /这部分具体改了什么/);
   assert.match(page, /评论范围外/);
+});
+
+test("the review surface renders the two complete local HTML documents", () => {
+  assert.match(page, /\/review-demo-local\/before\.html/);
+  assert.match(page, /\/review-demo-local\/after\.html/);
+  assert.match(page, /真实完整页面/);
+  assert.match(page, /下面不是重画的示意图/);
+  assert.match(page, /两边都可以独立滚动/);
+  assert.match(page, /全页打开/);
+  assert.match(page, /sandbox="allow-scripts allow-forms allow-modals allow-popups allow-same-origin"/);
+  assert.match(page, /anchor: "top"/);
+  assert.match(page, /anchor: "form-lab"/);
+  assert.match(page, /系统提炼的变化说明/);
+  assert.match(styles, /\.realDocumentComparison/);
+  assert.match(styles, /\.realDocumentViewport iframe/);
+});
+
+test("the local fixture generator creates a full candidate without committing user HTML", () => {
+  assert.match(generator, /export function createCandidate/);
+  assert.match(generator, /validateDocuments/);
+  assert.match(generator, /sourceSha256/);
+  assert.match(generator, /changedAreas: \["top", "dashboard", "story", "catalog", "operations", "form-lab", "media"\]/);
+  assert.match(generator, /跨端内容审阅器/);
+  assert.match(generator, /高预算审批说明/);
+  assert.match(generator, /selectedSignalRatio/);
+  assert.doesNotMatch(generator, /\/Users\/lizexuan|复杂HTML综合测试页\.html/);
+  assert.match(gitignore, /\/public\/review-demo-local\//);
 });
 
 test("the demo remains isolated from the production AI and persistence bridges", () => {

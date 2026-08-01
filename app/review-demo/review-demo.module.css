@@ -209,6 +209,27 @@
   filter: saturate(0.82);
 }
 
+.frozenDocument {
+  width: min(900px, 100%);
+  height: calc(100vh - 142px);
+  min-height: 560px;
+  margin: 0 auto;
+  overflow: hidden;
+  border: 1px solid #dfe1e6;
+  border-radius: 17px;
+  background: #fff;
+  box-shadow: 0 18px 48px rgb(38 40 49 / 9%), 0 2px 7px rgb(38 40 49 / 4%);
+  opacity: 0.9;
+  filter: saturate(0.88);
+}
+
+.frozenDocument iframe {
+  width: 100%;
+  height: 100%;
+  display: block;
+  border: 0;
+}
+
 .reportHero,
 .reviewHero {
   position: relative;
@@ -2047,6 +2068,209 @@ li[data-state="current"] .stepState {
   padding: 18px 32px 8px;
 }
 
+.realDocumentComparison {
+  display: grid;
+  gap: 12px;
+}
+
+.realDocumentIntro {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 14px;
+  border: 1px solid #dedcf3;
+  border-radius: 11px;
+  background: linear-gradient(135deg, #f8f7ff, #fff);
+}
+
+.realDocumentIntro > div {
+  min-width: 0;
+}
+
+.realDocumentIntro span,
+.realDocumentIntro strong {
+  display: block;
+}
+
+.realDocumentIntro span {
+  color: #6a64cf;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.realDocumentIntro strong {
+  margin-top: 4px;
+  color: #35363d;
+  font-size: 11px;
+  font-weight: 760;
+}
+
+.realDocumentIntro p {
+  margin: 4px 0 0;
+  color: #777983;
+  font-size: 8.5px;
+  line-height: 1.45;
+}
+
+.realDocumentIntro > small {
+  flex: none;
+  padding: 5px 7px;
+  border-radius: 6px;
+  background: #eeecff;
+  color: #5e58c7;
+  font-size: 7.5px;
+  font-weight: 720;
+  white-space: nowrap;
+}
+
+.realDocumentGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.realDocumentGrid[data-single="true"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.realDocumentPane {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid #e3d8d6;
+  border-radius: 12px;
+  background: #fffafa;
+  box-shadow: 0 8px 22px rgb(39 40 48 / 5%);
+}
+
+.realDocumentPane[data-side="after"] {
+  border-color: #d2e4da;
+  background: #f9fdfa;
+}
+
+.realDocumentPane > header {
+  min-height: 53px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 9px;
+  padding: 9px 10px 9px 12px;
+  border-bottom: 1px solid #eadfdd;
+}
+
+.realDocumentPane[data-side="after"] > header {
+  border-color: #dbe9e1;
+}
+
+.realDocumentPane > header > div {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 2px 7px;
+}
+
+.realDocumentPane > header span {
+  grid-row: 1 / span 2;
+  padding: 4px 6px;
+  border-radius: 6px;
+  background: #fff0ef;
+  color: #9a4f49;
+  font-size: 7.5px;
+  font-weight: 800;
+}
+
+.realDocumentPane[data-side="after"] > header span {
+  background: #e9f7ef;
+  color: #32755a;
+}
+
+.realDocumentPane > header strong,
+.realDocumentPane > header small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.realDocumentPane > header strong {
+  color: #3d3e45;
+  font-size: 8.5px;
+}
+
+.realDocumentPane > header small {
+  color: #94969e;
+  font-size: 7px;
+}
+
+.realDocumentPane > header a {
+  flex: none;
+  min-height: 27px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 7px;
+  border: 1px solid #dedfe4;
+  border-radius: 7px;
+  background: #fff;
+  color: #5f61a7;
+  font-size: 7.5px;
+  font-weight: 740;
+  text-decoration: none;
+}
+
+.realDocumentPane > header a:hover {
+  border-color: #c9c6eb;
+  background: #f7f6ff;
+}
+
+.realDocumentViewport {
+  height: 500px;
+  overflow: hidden;
+  background: #f2f2f2;
+}
+
+.realDocumentGrid[data-single="true"] .realDocumentViewport {
+  height: 620px;
+}
+
+.realDocumentViewport iframe {
+  width: 100%;
+  height: 100%;
+  display: block;
+  border: 0;
+  background: #fff;
+}
+
+.extractedComparison {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 13px;
+  border: 1px solid #e3e4e8;
+  border-radius: 12px;
+  background: #fafbfc;
+}
+
+.extractedComparison > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.extractedComparison > header span {
+  color: #3d3e45;
+  font-size: 9px;
+  font-weight: 760;
+}
+
+.extractedComparison > header small {
+  color: #9698a0;
+  font-size: 7.5px;
+}
+
 .comparisonPair {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3292,6 +3516,11 @@ li[data-state="current"] .stepState {
 
   .reviewCanvas {
     padding-inline: 20px;
+  }
+
+  .realDocumentIntro {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .reportHero,

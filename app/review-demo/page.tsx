@@ -1,8 +1,9 @@
 "use client";
 
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeftIcon } from "@phosphor-icons/react/dist/csr/ArrowLeft";
 import { ArrowRightIcon } from "@phosphor-icons/react/dist/csr/ArrowRight";
+import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/csr/ArrowSquareOut";
 import { ArrowsClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowsClockwise";
 import { ChatCircleTextIcon } from "@phosphor-icons/react/dist/csr/ChatCircleText";
 import { CheckCircleIcon } from "@phosphor-icons/react/dist/csr/CheckCircle";
@@ -29,62 +30,6 @@ type ReviewView = "after" | "before" | "overlay";
 type DecisionSource = "review" | "direct";
 type CompareKind = "rebuild" | "layout" | "sequence" | "collection" | "table" | "form" | "behavior";
 
-type DemoChange = {
-  id: string;
-  number: number;
-  kind: string;
-  location: string;
-  title: string;
-  comment: string;
-  before: string;
-  after: string;
-  extra?: string;
-};
-
-const CHANGES: DemoChange[] = [
-  {
-    id: "story",
-    number: 1,
-    kind: "文案修改",
-    location: "核心结论",
-    title: "先讲清增长来自哪里",
-    comment: "首页要先讲结论，不要从过程开始。",
-    before: "本轮活动覆盖更广，但增长主要来自新增流量。",
-    after: "高意向人群贡献了 68% 的新增成交。",
-  },
-  {
-    id: "metric",
-    number: 2,
-    kind: "数字与样式",
-    location: "关键指标",
-    title: "把转化率升级为主指标",
-    comment: "把真正重要的指标凸显出来，弱化装饰。",
-    before: "转化率 8.7%，与其他指标使用相同层级。",
-    after: "转化率 12.4%，同比 +3.7pp，并作为主指标强调。",
-  },
-  {
-    id: "audience",
-    number: 3,
-    kind: "模块移动",
-    location: "人群洞察",
-    title: "先解释原因，再给投放建议",
-    comment: "把人群洞察放到投放策略前，先解释为什么。",
-    before: "人群洞察位于页面底部。",
-    after: "人群洞察移动到核心结论之后。",
-  },
-  {
-    id: "actions",
-    number: 4,
-    kind: "整段重写",
-    location: "下一步行动",
-    title: "从泛泛建议改成三步动作",
-    comment: "建议不要泛泛讲扩大投放，要落到可执行动作。",
-    before: "扩大覆盖面，继续观察各渠道变化。",
-    after: "预算集中到高意向人群，暂停低效渠道，并在 48 小时后复盘。",
-    extra: "AI 额外补充了“48 小时后复盘”，不在原评论文字内。",
-  },
-];
-
 const VIEW_LABELS: Record<ReviewView, string> = {
   after: "修改后",
   before: "修改前",
@@ -93,6 +38,7 @@ const VIEW_LABELS: Record<ReviewView, string> = {
 
 type ContentChange = {
   id: string;
+  anchor: string;
   number: number;
   group: string;
   heading: string;
@@ -123,6 +69,7 @@ type OutlineGroup = {
 const CONTENT_CHANGES: ContentChange[] = [
   {
     id: "opening",
+    anchor: "top",
     number: 1,
     group: "页面开头",
     heading: "为复杂页面而生 / 数字实验场",
@@ -130,14 +77,15 @@ const CONTENT_CHANGES: ContentChange[] = [
     compareKind: "rebuild",
     compareLabel: "完整前后",
     title: "开场从“测试说明”改成“任务入口”",
-    summary: "标题、说明、按钮和右侧展示一起重组，已经不是几处文字替换。",
+    summary: "标题、说明、按钮、内容摘要和右侧计数一起变化，已经不是几处文字替换。",
     request: "让页面开头更像真实产品入口，先告诉用户能做什么，再引导继续浏览。",
     before: "用大段说明介绍综合测试页，并同时摆放 3 个测试按钮和 4 个特性标签。",
-    after: "改成一句明确承诺、两个主要入口和一张“本页包含什么”的内容摘要。",
-    details: ["主标题与故事线整体改写", "3 个测试按钮收拢为 2 个主要入口", "右侧装饰预览改为页面内容摘要", "“48+ 种组合”移动到辅助说明"],
+    after: "改成一句明确承诺、两个主要入口和一组可核对的页面内容数字。",
+    details: ["主标题与故事线整体改写", "3 个测试按钮收拢为 2 个主要入口", "4 个技术特性改成页面内容摘要", "右侧“48+ 种组合”改为“7 类真实修改”"],
   },
   {
     id: "dashboard",
+    anchor: "dashboard",
     number: 2,
     group: "数据与阅读",
     heading: "从宏观指标到微观事件，保持同一条数据叙事",
@@ -148,11 +96,12 @@ const CONTENT_CHANGES: ContentChange[] = [
     summary: "指标内容大体保留，但面积、顺序、数字和阅读重点同时变化。",
     request: "突出综合体验健康度，把实时动态提到图表前面，数字也更新到最新一轮。",
     before: "4 张等宽指标卡在最上方，趋势图占大面积，实时动态位于右下。",
-    after: "健康度成为横跨两列的主指标，实时动态前移，趋势图缩为辅助内容。",
-    details: ["健康度 87.4 → 91.6", "活跃项目 18 → 24", "实时动态从末位移到第二阅读位", "趋势图由主区域缩为辅助区域"],
+    after: "健康度成为横跨两倍宽度的主指标，其他三项变窄，实时动态移动到趋势图之前。",
+    details: ["健康度 87.4 → 91.6", "活跃项目 18 → 24；周期 4.34534 → 3.8 天", "自动化覆盖率 76% → 81%", "实时动态从趋势图之后移动到之前"],
   },
   {
     id: "story",
+    anchor: "story",
     number: 3,
     group: "数据与阅读",
     heading: "一份包含多层语义结构的长篇阅读样本",
@@ -160,14 +109,15 @@ const CONTENT_CHANGES: ContentChange[] = [
     compareKind: "sequence",
     compareLabel: "顺序追踪",
     title: "文章先讲“结构保真”，再解释上下文",
-    summary: "段落被重写、合并和移动；用章节顺序比把移动显示成删除加新增更清楚。",
+    summary: "段落被重写和移动；用章节顺序比把移动显示成删除加新增更清楚。",
     request: "把最重要的产品结论提前，删掉重复解释，目录要跟正文一起更新。",
     before: "开场 → 上下文边界 → 结构保真 → 持续协作。",
-    after: "结构保真前移为第一章，上下文与协作合并，结尾补充验证清单。",
-    details: ["“结构保真”由第 2 章移到第 1 章", "“上下文边界”与“持续协作”合并", "开场文字做词级改写", "目录、锚点与阅读进度一起更新"],
+    after: "结构保真前移为第一章，三章全部重写，正文结尾增加交付前验证清单。",
+    details: ["“结构保真”由第 2 章移到第 1 章", "三章标题与段落重新组织", "开场文字做词级改写", "目录、锚点与验证清单一起更新"],
   },
   {
     id: "catalog",
+    anchor: "catalog",
     number: 4,
     group: "项目与运营",
     heading: "可筛选、可扩展的项目目录",
@@ -183,6 +133,7 @@ const CONTENT_CHANGES: ContentChange[] = [
   },
   {
     id: "operations",
+    anchor: "operations",
     number: 5,
     group: "项目与运营",
     heading: "包含完整表格语义的运营后台",
@@ -194,25 +145,27 @@ const CONTENT_CHANGES: ContentChange[] = [
     request: "表格不要只报风险，要直接告诉运营下一步做什么，并更新本周进度。",
     before: "项目、负责人、状态、完成度、截止日期、风险，共 5 行。",
     after: "“风险”改为“下一动作”；新增 1 行、移除 1 行，2 个状态和 3 个进度更新。",
-    details: ["表头“风险”改为“下一动作”", "低视力阅读组件库：待复核 → 进行中", "离线优先知识仓库：18% → 34%", "新增“跨端内容审阅器”项目行"],
+    details: ["表头“风险”改为“下一动作”", "低视力阅读组件库：待复核 → 进行中", "离线优先知识仓库：18% → 34%", "移出“城市慢行信息系统”", "新增“跨端内容审阅器”项目行"],
   },
   {
     id: "form",
+    anchor: "form-lab",
     number: 6,
     group: "项目与运营",
     heading: "几乎把常见输入类型放进同一张表单",
     kind: "字段与反馈",
     compareKind: "form",
     compareLabel: "表单与反馈",
-    title: "长表单改成三步填写，并补充即时校验",
-    summary: "字段位置只是表面变化，真正需要确认的是必填关系、出现条件和提交反馈。",
-    request: "减少一次看到的字段数量，让必填项和错误提示更容易理解。",
+    title: "长表单增加三步引导和条件字段",
+    summary: "步骤标题只是表面变化，真正需要确认的是高预算时的必填关系和提交反馈。",
+    request: "把长表单的填写顺序讲清楚，高预算时再让用户补审批说明，并把提交结果留在表单里。",
     before: "4 组字段全部展开；依赖浏览器默认校验；提交后只显示简单提示。",
-    after: "拆成联系人、项目偏好、确认提交三步；预算会触发补充说明；错误就地显示。",
-    details: ["姓名与邮箱保留在第 1 步", "日期和预算归到第 2 步", "高预算时新增“审批说明”", "提交反馈从顶部提示改为字段旁说明"],
+    after: "增加联系人、项目偏好、确认提交三步引导；高预算会出现必填说明；提交结果停留在表单内。",
+    details: ["4 个字段组改成带步骤语义的标题", "顶部增加三步填写指引", "高预算时新增“审批说明”必填项", "提交反馈从短暂提示改为表单内说明"],
   },
   {
     id: "media",
+    anchor: "media",
     number: 7,
     group: "媒体与文档",
     heading: "画廊、嵌入内容与可编程画布",
@@ -288,9 +241,9 @@ function BrandHeader({
           <img src="/brand-logo.png" alt="源页" />
         </a>
         <div>
-          <strong>{isReview ? "复杂 HTML 综合测试页.html" : "AI 商品运营效果分析.html"}</strong>
+          <strong>复杂 HTML 综合测试页.html</strong>
           <span>
-            {isReview ? "V1.3 → AI 候选 V1.4" : "V1.3 · 已安全保存"}
+            {isReview ? "原版 → AI 完整候选版" : "原版 · 已安全保存"}
           </span>
         </div>
       </div>
@@ -320,28 +273,13 @@ function FrozenReport() {
         <LockKeyIcon aria-hidden="true" size={16} weight="duotone" />
         <span>本轮处理期间，这一版保持只读；你仍可切换其他项目。</span>
       </div>
-      <article className={styles.frozenReport} aria-label="提交给 AI 前的冻结页面">
-        <header className={styles.reportHero}>
-          <span>投放复盘 · 07.08—07.28</span>
-          <h1>AI 商品运营效果分析</h1>
-          <p>本轮活动覆盖更广，但增长主要来自新增流量。</p>
-        </header>
-        <section className={styles.metricGrid}>
-          <div><span>新增成交</span><strong>¥ 286,400</strong><small>同比 +18.6%</small></div>
-          <div><span>转化率</span><strong>8.7%</strong><small>同比 +0.4pp</small></div>
-          <div><span>获客成本</span><strong>¥ 42.8</strong><small>同比 -6.2%</small></div>
-        </section>
-        <section className={styles.reportSection}>
-          <span>渠道表现</span>
-          <h2>新增流量带来规模，高意向人群仍有提升空间</h2>
-          <p>搜索广告带来最多新增访问，内容渠道带来的访问量较少，但停留与收藏更好。</p>
-        </section>
-        <section className={styles.reportSection}>
-          <span>下一步行动</span>
-          <h2>继续扩大覆盖面</h2>
-          <p>扩大覆盖面，继续观察各渠道变化。</p>
-        </section>
-      </article>
+      <div className={styles.frozenDocument} aria-label="提交给 AI 前的完整冻结页面">
+        <iframe
+          src="/review-demo-local/before.html#top"
+          title="复杂 HTML 综合测试页原版"
+          sandbox="allow-scripts allow-forms allow-modals allow-popups allow-same-origin"
+        />
+      </div>
     </div>
   );
 }
@@ -429,7 +367,7 @@ function HandoffPanel({
           <header>
             <div>
               <span>本轮记录</span>
-              <strong>3 条评论</strong>
+              <strong>7 条审阅要求</strong>
             </div>
             <ShieldCheckIcon aria-hidden="true" size={23} weight="duotone" />
           </header>
@@ -439,10 +377,10 @@ function HandoffPanel({
             <div><span>提交时间</span><strong>14:28</strong></div>
           </div>
           <div className={styles.commentPreview}>
-            {CHANGES.slice(0, 3).map((change) => (
+            {CONTENT_CHANGES.slice(0, 3).map((change) => (
               <div key={change.id}>
                 <ChatCircleTextIcon aria-hidden="true" size={15} weight="duotone" />
-                <span><strong>{change.location}</strong>{change.comment}</span>
+                <span><strong>{change.heading}</strong>{change.request}</span>
               </div>
             ))}
           </div>
@@ -454,8 +392,8 @@ function HandoffPanel({
               <SparkleIcon aria-hidden="true" size={23} weight="fill" />
             </div>
             <div>
-              <strong>发现 4 处可见变化</strong>
-              <p>3 条评论已响应，另有 1 处 AI 补充。你可以先审阅，也可以直接打开候选版本。</p>
+              <strong>发现 7 个内容区发生变化</strong>
+              <p>7 条要求已响应，另有 1 处 AI 补充。原版和候选版都是可独立打开的完整 HTML。</p>
               <span>
                 <WarningCircleIcon aria-hidden="true" size={14} weight="fill" />
                 含 1 处评论范围外的补充
@@ -551,14 +489,14 @@ function OpeningComparison({ view }: { view: ReviewView }) {
   const after = (
     <ReviewStateFrame side="after" title="新开场" caption="任务型入口">
       <div className={styles.openingSnapshot} data-side="after">
-        <span>复杂页面综合测试</span>
+        <span>Complex HTML Test Document · v1.0</span>
         <h3>一次看清复杂页面<br /><em>能不能被可靠修改</em></h3>
-        <p>从数据、文章、目录到表格和媒体，选择一个真实场景开始验证，页面里的其他内容保持不变。</p>
-        <div className={styles.snapshotActions}><span>查看数据与文章</span><span>测试表单与媒体</span></div>
+        <p>从数据看板、长文章、项目目录到表格和媒体，选择一个真实场景开始验证；没有被点名的内容会保持原样。</p>
+        <div className={styles.snapshotActions}><span>先看数据变化</span><span>打开交互样本</span></div>
         <div className={styles.contentSummaryMini}>
-          <div><strong>12</strong><small>个内容区域</small></div>
-          <div><strong>48+</strong><small>种元素与状态</small></div>
-          <div><strong>1</strong><small>份完整 HTML</small></div>
+          <div><strong>8</strong><small>个主要内容区</small></div>
+          <div><strong>6</strong><small>张项目卡片</small></div>
+          <div><strong>5</strong><small>条运营项目</small></div>
         </div>
       </div>
     </ReviewStateFrame>
@@ -572,7 +510,7 @@ function DashboardComparison({ view }: { view: ReviewView }) {
       <div className={styles.dashboardSnapshot} data-layout="before">
         <div><span>北极星指标</span><strong>87.4</strong><small>↑ 12.8%</small></div>
         <div><span>活跃项目</span><strong>18</strong><small>过去 30 天</small></div>
-        <div><span>交付周期</span><strong>4.3 天</strong><small>↓ 0.7 天</small></div>
+        <div><span>交付周期</span><strong>4.34534</strong><small>↓ 0.7 天</small></div>
         <div><span>自动化覆盖率</span><strong>76%</strong><small>目标 85%</small></div>
         <section><strong>双轨增长趋势</strong><span>占据主要阅读区域</span></section>
         <section><strong>实时动态</strong><span>位于页面右下</span></section>
@@ -596,22 +534,21 @@ function DashboardComparison({ view }: { view: ReviewView }) {
 
 function StoryComparison({ view }: { view: ReviewView }) {
   const before = (
-    <ReviewStateFrame side="before" title="原文章顺序" caption="4 个连续章节">
+    <ReviewStateFrame side="before" title="原文章顺序" caption="3 个连续章节">
       <ol className={styles.sequenceSnapshot}>
-        <li><span>开场</span><strong>当工具开始理解“局部”</strong><small>保留，文字改写</small></li>
-        <li><span>第一章</span><strong>上下文不是越多越好</strong><small>与第三章合并</small></li>
-        <li><span>第二章</span><strong>结构保真是一种产品能力</strong><small>移动到最前</small></li>
-        <li><span>第三章</span><strong>从一次编辑到持续协作</strong><small>与第一章合并</small></li>
+        <li><span>第一章</span><strong>上下文不是越多越好</strong><small>移动到第 2 章</small></li>
+        <li><span>第二章</span><strong>结构保真是一种产品能力</strong><small>移动到第 1 章</small></li>
+        <li><span>第三章</span><strong>从一次编辑到持续协作</strong><small>保留位置，重写</small></li>
       </ol>
     </ReviewStateFrame>
   );
   const after = (
     <ReviewStateFrame side="after" title="新文章顺序" caption="3 章正文 + 验证清单">
       <ol className={styles.sequenceSnapshot} data-side="after">
-        <li data-tone="move"><span>第一章</span><strong>结构保真是一种产品能力</strong><small>原第 2 章</small></li>
-        <li data-tone="merge"><span>第二章</span><strong>上下文如何进入持续协作</strong><small>由两章合并</small></li>
-        <li><span>第三章</span><strong>让修改结果局部可验证</strong><small>重新组织</small></li>
-        <li data-tone="add"><span>新增</span><strong>提交前验证清单</strong><small>5 项</small></li>
+        <li data-tone="move"><span>第一章</span><strong>先保证结构能够被可靠核对</strong><small>原第 2 章</small></li>
+        <li data-tone="move"><span>第二章</span><strong>再给每一次变化足够的上下文</strong><small>原第 1 章</small></li>
+        <li><span>第三章</span><strong>把一次修改变成持续协作</strong><small>重新组织</small></li>
+        <li data-tone="add"><span>新增</span><strong>交付前验证清单</strong><small>3 项</small></li>
       </ol>
     </ReviewStateFrame>
   );
@@ -621,7 +558,7 @@ function StoryComparison({ view }: { view: ReviewView }) {
       {view === "overlay" ? (
         <p className={styles.focusedTextDiff}>
           <del>网页工具善于生成完整页面，可靠的编辑还要理解用户只想改哪里。</del>
-          <ins>可靠的编辑不是重做整页，而是让每一次变化都有清楚边界。</ins>
+          <ins>网页工具不仅要生成完整页面，更要让人一眼看懂哪里变了。</ins>
         </p>
       ) : null}
     </>
@@ -679,8 +616,8 @@ function OperationsSnapshot({ side }: { side: "before" | "after" }) {
         <tbody>
           <tr><th>证据链版本引擎</th><td>进行中</td><td>{after ? "88%" : "84%"}</td><td>{after ? "准备上线检查" : "中"}</td></tr>
           <tr data-tone={after ? "change" : undefined}><th>低视力阅读组件库</th><td>{after ? "进行中" : "待复核"}</td><td>{after ? "71%" : "62%"}</td><td>{after ? "补齐键盘测试" : "高"}</td></tr>
-          <tr><th>离线优先知识仓库</th><td>已阻塞</td><td>{after ? "34%" : "18%"}</td><td>{after ? "确认缓存策略" : "高"}</td></tr>
-          {after ? <tr data-tone="add"><th>跨端内容审阅器</th><td>新建</td><td>12%</td><td>分配负责人</td></tr> : null}
+          <tr><th>离线优先知识仓库</th><td>{after ? "进行中" : "已阻塞"}</td><td>{after ? "34%" : "18%"}</td><td>{after ? "确认缓存策略" : "高"}</td></tr>
+          {after ? <tr data-tone="add"><th>跨端内容审阅器</th><td>待启动</td><td>12%</td><td>分配负责人</td></tr> : null}
         </tbody>
       </table>
     </div>
@@ -699,7 +636,7 @@ function OperationsComparison({ view }: { view: ReviewView }) {
               <tr><th>最后一列</th><td><del>风险</del></td><td><ins>下一动作</ins></td><td><span data-tone="replace">整列改写</span></td></tr>
               <tr><th>低视力阅读组件库</th><td><del>待复核 · 62%</del></td><td><ins>进行中 · 71%</ins></td><td><span data-tone="replace">状态和数字</span></td></tr>
               <tr><th>离线优先知识仓库</th><td><del>18%</del></td><td><ins>34%</ins></td><td><span data-tone="replace">数字</span></td></tr>
-              <tr><th>跨端内容审阅器</th><td>—</td><td><ins>新建 · 12%</ins></td><td><span data-tone="add">新增一行</span></td></tr>
+              <tr><th>跨端内容审阅器</th><td>—</td><td><ins>待启动 · 12%</ins></td><td><span data-tone="add">新增一行</span></td></tr>
             </tbody>
           </table>
         </div>
@@ -721,12 +658,12 @@ function FormSnapshot({ side }: { side: "before" | "after" }) {
     <div className={styles.formSnapshot}>
       <header>{after ? <><span>1 联系人</span><span>2 项目偏好</span><span>3 确认</span></> : <strong>全部字段同时展开</strong>}</header>
       <div className={styles.formFields}>
-        <label><span>姓名 *</span><i>{after ? "请输入联系人姓名" : ""}</i></label>
-        <label><span>电子邮箱 *</span><i data-error={after ? "true" : undefined}>{after ? "请输入有效邮箱" : ""}</i></label>
+        <label><span>姓名 *</span><i /></label>
+        <label><span>电子邮箱 *</span><i /></label>
         <label><span>预算区间</span><i>{after ? "¥100,000 以上" : "请选择"}</i></label>
         {after ? <label data-tone="add"><span>审批说明 *</span><i>高预算时出现</i></label> : <label><span>上传测试附件</span><i>选择文件</i></label>}
       </div>
-      <span className={styles.formActionPreview}>{after ? "保存并继续" : "模拟提交"}</span>
+      <span className={styles.formActionPreview}>{after ? "检查并提交" : "模拟提交"}</span>
     </div>
   );
 }
@@ -736,10 +673,10 @@ function FormComparison({ view }: { view: ReviewView }) {
     return (
       <section className={styles.behaviorMatrix}>
         <header><strong>用户操作</strong><span>修改前</span><span>修改后</span></header>
-        <div><strong>进入表单</strong><span>全部字段一次展开</span><span>先看到联系人信息</span></div>
+        <div><strong>浏览填写结构</strong><span>4 组字段连续展开</span><span data-tone="change">顶部增加三步索引，字段仍连续展示</span></div>
         <div><strong>选择高预算</strong><span>没有额外说明</span><span data-tone="add">出现“审批说明”必填项</span></div>
-        <div><strong>邮箱格式错误</strong><span>提交时统一提示</span><span data-tone="change">输入框旁立即说明</span></div>
-        <div><strong>提交成功</strong><span>顶部短暂提示</span><span data-tone="change">停留原位并显示完成摘要</span></div>
+        <div><strong>必填项校验</strong><span>浏览器默认校验</span><span>保持浏览器默认校验</span></div>
+        <div><strong>提交成功</strong><span>顶部短暂提示</span><span data-tone="change">停留原位并显示表单内说明</span></div>
       </section>
     );
   }
@@ -747,20 +684,18 @@ function FormComparison({ view }: { view: ReviewView }) {
     <ComparisonPair
       view={view}
       before={<ReviewStateFrame side="before" title="原长表单" caption="4 组字段全部展开"><FormSnapshot side="before" /></ReviewStateFrame>}
-      after={<ReviewStateFrame side="after" title="新三步表单" caption="字段、条件和反馈一起变化"><FormSnapshot side="after" /></ReviewStateFrame>}
+      after={<ReviewStateFrame side="after" title="带步骤引导的长表单" caption="字段关系和提交反馈一起变化"><FormSnapshot side="after" /></ReviewStateFrame>}
     />
   );
 }
 
 function MediaSnapshot({ side }: { side: "before" | "after" }) {
   const after = side === "after";
+  const items = after ? ["图片元素样本", "潮汐档案", "地表纹理", "风向记录"] : ["潮汐档案", "图片元素样本", "风向记录", "地表纹理"];
   return (
     <div className={styles.mediaSnapshot}>
       <div className={styles.mediaGrid} data-layout={side}>
-        <span data-wide={!after ? "true" : undefined}>潮汐档案</span>
-        <span>图片元素样本</span>
-        <span>风向记录</span>
-        <span>地表纹理</span>
+        {items.map((item) => <span key={item} data-wide={item === (after ? "地表纹理" : "潮汐档案") ? "true" : undefined}>{item}</span>)}
       </div>
       <div className={styles.mediaStates}>
         <div><strong>Canvas 数据波形</strong><small>{after ? "重绘后保留选中点" : "调整宽度后重新绘制"}</small></div>
@@ -795,6 +730,70 @@ function AdaptiveComparison({ change, view }: { change: ContentChange; view: Rev
   if (change.compareKind === "table") return <OperationsComparison view={view} />;
   if (change.compareKind === "form") return <FormComparison view={view} />;
   return <MediaComparison view={view} />;
+}
+
+const DOCUMENT_URLS = {
+  before: "/review-demo-local/before.html",
+  after: "/review-demo-local/after.html",
+} as const;
+
+function RealDocumentPane({
+  side,
+  anchor,
+  compact,
+  onLoad,
+}: {
+  side: "before" | "after";
+  anchor: string;
+  compact: boolean;
+  onLoad: () => void;
+}) {
+  const isBefore = side === "before";
+  const url = `${DOCUMENT_URLS[side]}#${anchor}`;
+  return (
+    <section className={styles.realDocumentPane} data-side={side}>
+      <header>
+        <div>
+          <span>{isBefore ? "原版" : "AI 候选版"}</span>
+          <strong>{isBefore ? "用户提供的完整 HTML" : "基于原版生成的完整修改版"}</strong>
+          <small>{isBefore ? "122,014 字节 · 3701 行" : "127,417 字节 · 3779 行"}</small>
+        </div>
+        <a href={url} target="_blank" rel="noreferrer">
+          <ArrowSquareOutIcon aria-hidden="true" size={14} weight="bold" />
+          全页打开
+        </a>
+      </header>
+      <div className={styles.realDocumentViewport} data-compact={compact ? "true" : undefined}>
+        <iframe
+          key={`${side}-${anchor}`}
+          src={url}
+          title={`${isBefore ? "原版" : "AI 候选版"}：${anchor} 内容区`}
+          loading="eager"
+          sandbox="allow-scripts allow-forms allow-modals allow-popups allow-same-origin"
+          onLoad={onLoad}
+        />
+      </div>
+    </section>
+  );
+}
+
+function RealDocumentComparison({ change, view, onDocumentLoad }: { change: ContentChange; view: ReviewView; onDocumentLoad: () => void }) {
+  const sides: ("before" | "after")[] = view === "overlay" ? ["before", "after"] : [view];
+  return (
+    <section className={styles.realDocumentComparison}>
+      <header className={styles.realDocumentIntro}>
+        <div>
+          <span>真实完整页面</span>
+          <strong>已定位到“{change.heading}”</strong>
+          <p>下面不是重画的示意图，而是浏览器直接载入原版和候选版；两边都可以独立滚动。</p>
+        </div>
+        <small>跳转依据：页面可见标题 + 锚点</small>
+      </header>
+      <div className={styles.realDocumentGrid} data-single={sides.length === 1 ? "true" : undefined}>
+        {sides.map((side) => <RealDocumentPane key={side} side={side} anchor={change.anchor} compact={sides.length === 2} onLoad={onDocumentLoad} />)}
+      </div>
+    </section>
+  );
 }
 
 function ContentMap({
@@ -865,7 +864,7 @@ const COMPARE_HINTS: Record<CompareKind, string> = {
   sequence: "重点追踪章节从哪里移动到哪里，移动不会显示成删除再新增。",
   collection: "重复卡片很多，按项目逐项标记保留、移动、删除和新增。",
   table: "直接按表头、行和单元格归纳，不要求用户扫两张完整大表。",
-  form: "除了字段位置，也对比输入条件、错误提示和提交结果。",
+  form: "除了步骤标题，也对比输入条件、必填关系和提交结果。",
   behavior: "静态布局并排看，脚本与媒体变化另外用操作结果说明。",
 };
 
@@ -882,11 +881,22 @@ function ReviewScreen({
   const [activeIndex, setActiveIndex] = useState(0);
   const [showAll, setShowAll] = useState(true);
   const [showDetails, setShowDetails] = useState(true);
+  const reviewCanvasRef = useRef<HTMLDivElement>(null);
   const activeChange = CONTENT_CHANGES[activeIndex];
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => reviewCanvasRef.current?.scrollTo({ top: 0 }), 320);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  const showChangeAtTop = () => {
+    window.requestAnimationFrame(() => reviewCanvasRef.current?.scrollTo({ top: 0, behavior: "smooth" }));
+  };
 
   const navigate = (direction: -1 | 1) => {
     setActiveIndex((current) => (current + direction + CONTENT_CHANGES.length) % CONTENT_CHANGES.length);
     setShowDetails(true);
+    showChangeAtTop();
   };
 
   const selectChange = (changeId: string) => {
@@ -894,6 +904,7 @@ function ReviewScreen({
     if (nextIndex >= 0) {
       setActiveIndex(nextIndex);
       setShowDetails(true);
+      showChangeAtTop();
     }
   };
 
@@ -914,7 +925,7 @@ function ReviewScreen({
             </div>
           </div>
 
-          <div className={styles.reviewCanvas}>
+          <div className={styles.reviewCanvas} ref={reviewCanvasRef}>
             <article className={styles.adaptiveReview} key={activeChange.id}>
               <header className={styles.adaptiveHeader}>
                 <div className={styles.changeBreadcrumb}><span>{activeChange.group}</span><ArrowRightIcon aria-hidden="true" size={12} weight="bold" /><strong>{activeChange.heading}</strong></div>
@@ -936,7 +947,15 @@ function ReviewScreen({
               </section>
 
               <div className={styles.adaptiveBody}>
-                <AdaptiveComparison change={activeChange} view={view} />
+                <RealDocumentComparison
+                  change={activeChange}
+                  view={view}
+                  onDocumentLoad={() => window.setTimeout(() => reviewCanvasRef.current?.scrollTo({ top: 0 }), 80)}
+                />
+                <section className={styles.extractedComparison}>
+                  <header><span>系统提炼的变化说明</span><small>帮助快速判断；最终以完整页面为准</small></header>
+                  <AdaptiveComparison change={activeChange} view={view} />
+                </section>
               </div>
 
               <section className={styles.changeBreakdown}>
