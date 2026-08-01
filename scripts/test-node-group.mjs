@@ -34,6 +34,7 @@ const PACKAGE_TESTS = new Set([
 const INTEGRATION_TESTS = new Set([
   "application-update.test.mjs",
   "attachment-storage.test.mjs",
+  "bridge-startup.test.mjs",
   "bridge-shutdown.test.mjs",
   "desktop-close-recovery.test.mjs",
   "desktop-file-writer.test.mjs",
