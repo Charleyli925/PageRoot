@@ -1,11 +1,11 @@
 "use client";
 
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeftIcon } from "@phosphor-icons/react/dist/csr/ArrowLeft";
-import { ArrowRightIcon } from "@phosphor-icons/react/dist/csr/ArrowRight";
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/csr/ArrowSquareOut";
 import { ArrowsDownUpIcon } from "@phosphor-icons/react/dist/csr/ArrowsDownUp";
 import { ArrowsClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowsClockwise";
+import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
+import { CaretUpIcon } from "@phosphor-icons/react/dist/csr/CaretUp";
 import { ChatCircleTextIcon } from "@phosphor-icons/react/dist/csr/ChatCircleText";
 import { CheckCircleIcon } from "@phosphor-icons/react/dist/csr/CheckCircle";
 import { CircleNotchIcon } from "@phosphor-icons/react/dist/csr/CircleNotch";
@@ -31,22 +31,34 @@ import { TreeStructureIcon } from "@phosphor-icons/react/dist/csr/TreeStructure"
 import { WarningCircleIcon } from "@phosphor-icons/react/dist/csr/WarningCircle";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 
+import {
+  applyReviewPresentationPair,
+  clearReviewPresentation,
+  type ReviewDiffFilter,
+  type ReviewDiffTargets,
+  type ReviewSide,
+} from "./review-presentation";
 import styles from "./review-demo.module.css";
 
 type DemoState = "awaiting-ai" | "ready" | "review" | "accepted" | "kept";
 type ReviewView = "after" | "before" | "overlay";
 type DecisionSource = "review" | "direct";
 type CompareKind = "rebuild" | "layout" | "sequence" | "collection" | "table" | "form" | "behavior";
-type ReviewSide = "before" | "after";
-type DiffFilter = "all" | "text" | "structure" | "style";
+type DiffFilter = ReviewDiffFilter;
 type ScrollMode = "linked" | "independent";
 type ZoomMode = "fit" | "actual";
+type ReviewMode = "overview" | DiffFilter;
 
 const DIFF_FILTER_LABELS: Record<DiffFilter, string> = {
   all: "全部变化",
   text: "文字与数据",
   structure: "结构与顺序",
   style: "视觉样式",
+};
+
+const REVIEW_MODE_LABELS: Record<ReviewMode, string> = {
+  overview: "查看整页",
+  ...DIFF_FILTER_LABELS,
 };
 
 type ContentChange = {
@@ -235,43 +247,43 @@ const CONTENT_OUTLINE: OutlineGroup[] = [
   },
 ];
 
-type DiffTargets = Record<Exclude<DiffFilter, "all">, string[]>;
+type DiffTargets = ReviewDiffTargets;
 
 const REVIEW_DIFF_TARGETS: Record<string, DiffTargets> = {
   opening: {
-    text: ["h1", ".hero-lede", ".floating-card"],
-    structure: [".button-row", ".hero-note"],
+    text: ["h1", ".hero-lede", ".button-row > *", ".hero-note > li", ".floating-card strong", ".floating-card span"],
+    structure: [".button-row > *", ".hero-note > li", ".floating-card"],
     style: [".hero-visual", ".hero-note"],
   },
   dashboard: {
-    text: [".metric-label", ".metric-value", ".trend"],
-    structure: [".dashboard-grid", ".activity-panel", ".chart-panel"],
-    style: ["[data-card='north-star']", ".featured-metric"],
+    text: [".metric-label", ".metric-value", ".trend", ".activity-panel h3", ".chart-panel h3"],
+    structure: [".metric-card", ".activity-panel", ".chart-panel"],
+    style: ["[data-card='north-star']", "[data-card='active-projects']", "[data-card='cycle-time']", "[data-card='automation']"],
   },
   story: {
-    text: [".article-copy h2", ".article-copy h3", ".article-copy > p", ".article-copy blockquote"],
-    structure: [".editorial-grid", ".article-copy", ".article-copy ol"],
-    style: [".section-heading h2", ".article-copy"],
+    text: [".article-copy h2", ".article-copy h3", ".article-copy > p", ".article-copy blockquote p", ".toc li"],
+    structure: [".article-copy > h3", ".article-copy > p", ".article-copy > blockquote", ".article-copy > .article-checklist", ".toc li"],
+    style: [".article-copy blockquote", ".article-copy > .article-checklist"],
   },
   catalog: {
     text: [".catalog-card h3", ".catalog-card p", ".catalog-card data"],
-    structure: [".catalog-grid", ".catalog-card"],
-    style: [".catalog-card:nth-child(1)", ".catalog-card:nth-child(4)"],
+    structure: [".catalog-card"],
+    style: [".catalog-card"],
   },
   operations: {
-    text: ["#project-table thead th:last-child", "#project-table tbody tr", "#project-table tfoot"],
-    structure: [".admin-layout", "#project-table tbody tr"],
-    style: [".table-wrap", ".timeline"],
+    text: ["#project-table thead th", "#project-table tbody tr", "#project-table tfoot td"],
+    structure: ["#project-table thead th", "#project-table tbody tr"],
+    style: ["#project-table tbody .status"],
   },
   form: {
-    text: [".review-form-steps", ".form-card legend", "#approval-note-wrap", ".form-actions"],
-    structure: [".form-layout", ".form-card fieldset", ".review-form-steps"],
-    style: [".review-form-steps", ".form-feedback"],
+    text: [".review-form-steps > li", ".form-card legend", "#approval-note-wrap label", "#approval-note-wrap small", ".form-actions > *"],
+    structure: [".review-form-steps > li", ".form-card fieldset", "#approval-note-wrap", ".form-actions > *"],
+    style: [".review-form-steps > li", "#approval-note-wrap", ".form-feedback"],
   },
   media: {
-    text: [".gallery-item figcaption", ".media-card h3", ".media-card p"],
-    structure: [".gallery-grid", ".gallery-item", ".media-grid"],
-    style: [".gallery-item", ".canvas-card"],
+    text: [".gallery-item figcaption", ".media-lab > .panel .panel-topline h3", ".media-lab > .panel .panel-topline p", ".media-lab > .panel > p"],
+    structure: [".gallery-item", ".media-lab > .panel"],
+    style: [".media-status", ".gallery-item"],
   },
 };
 
@@ -286,67 +298,6 @@ const SEMANTIC_SCROLL_ANCHORS = [
   "documentation",
   "faq",
 ];
-
-const REVIEW_FRAME_STYLE = `
-  html { scroll-behavior: auto !important; }
-  body.pageroot-section-focus [data-test-module] {
-    transition: opacity 180ms ease, filter 180ms ease !important;
-  }
-  body.pageroot-section-focus [data-test-module]:not([data-pageroot-active='true']) {
-    opacity: .13 !important;
-    filter: grayscale(.72) saturate(.35) !important;
-  }
-  [data-pageroot-active='true'] {
-    position: relative !important;
-    isolation: isolate !important;
-    opacity: 1 !important;
-    filter: none !important;
-    outline: 3px solid rgba(100, 91, 214, .76) !important;
-    outline-offset: -3px !important;
-  }
-  body.pageroot-diff-focus [data-pageroot-active='true']::after {
-    position: absolute !important;
-    z-index: 2147483000 !important;
-    inset: 0 !important;
-    content: '' !important;
-    background: rgba(247, 248, 251, .78) !important;
-    backdrop-filter: blur(1.6px) saturate(.55) !important;
-    pointer-events: none !important;
-  }
-  [data-pageroot-diff='true'] {
-    position: relative !important;
-    z-index: 2147483001 !important;
-    opacity: 1 !important;
-    filter: none !important;
-    transition: box-shadow 160ms ease, outline-color 160ms ease !important;
-  }
-  html[data-pageroot-side='before'] .pageroot-diff-text {
-    outline: 3px solid rgba(210, 87, 81, .9) !important;
-    outline-offset: 3px !important;
-    background-color: rgba(255, 231, 229, .72) !important;
-    box-shadow: 0 0 0 7px rgba(210, 87, 81, .1) !important;
-  }
-  html[data-pageroot-side='after'] .pageroot-diff-text {
-    outline: 3px solid rgba(38, 151, 107, .9) !important;
-    outline-offset: 3px !important;
-    background-color: rgba(222, 248, 236, .72) !important;
-    box-shadow: 0 0 0 7px rgba(38, 151, 107, .11) !important;
-  }
-  .pageroot-diff-structure {
-    outline: 4px dashed rgba(103, 91, 215, .95) !important;
-    outline-offset: 4px !important;
-    box-shadow: 0 0 0 9px rgba(103, 91, 215, .11) !important;
-  }
-  .pageroot-diff-style {
-    outline: 3px solid rgba(42, 132, 198, .92) !important;
-    outline-offset: 3px !important;
-    box-shadow: 0 0 0 7px rgba(42, 132, 198, .12) !important;
-  }
-  @media (prefers-reduced-motion: reduce) {
-    body.pageroot-section-focus [data-test-module],
-    [data-pageroot-diff='true'] { transition: none !important; }
-  }
-`;
 
 function BrandHeader({
   state,
@@ -914,7 +865,7 @@ function RealDocumentPane({
     : 1;
   const renderedWidth = targetViewportWidth * scale;
   const iframeHeight = Math.max(620, viewportSize.height / scale);
-  const url = `${DOCUMENT_URLS[side]}#top`;
+  const url = `${DOCUMENT_URLS[side]}?review-canvas=${side}#top`;
 
   return (
     <section className={styles.canvasDocumentPane} data-side={side}>
@@ -954,64 +905,37 @@ function RealDocumentPane({
   );
 }
 
-function removeReviewPresentation(document: Document) {
-  document.body?.classList.remove("pageroot-section-focus", "pageroot-diff-focus");
-  document.querySelectorAll("[data-pageroot-active]").forEach((element) => element.removeAttribute("data-pageroot-active"));
-  document.querySelectorAll("[data-pageroot-diff]").forEach((element) => {
-    element.removeAttribute("data-pageroot-diff");
-    element.classList.remove("pageroot-diff-text", "pageroot-diff-structure", "pageroot-diff-style");
-  });
-}
-
-function applyReviewPresentation(
-  frame: HTMLIFrameElement,
-  side: ReviewSide,
-  change: ContentChange,
+function scrollFramesToEvidence(
+  frames: Record<ReviewSide, HTMLIFrameElement | null>,
+  anchor: string,
   filter: DiffFilter,
-  focused: boolean,
+  behavior: ScrollBehavior = "auto",
 ) {
-  const document = frame.contentDocument;
-  if (!document?.body) return;
-
-  let reviewStyle = document.getElementById("pageroot-review-presentation") as HTMLStyleElement | null;
-  if (!reviewStyle) {
-    reviewStyle = document.createElement("style");
-    reviewStyle.id = "pageroot-review-presentation";
-    reviewStyle.textContent = REVIEW_FRAME_STYLE;
-    document.head.append(reviewStyle);
-  }
-
-  removeReviewPresentation(document);
-  document.documentElement.dataset.pagerootSide = side;
-  if (!focused) return;
-
-  const activeSection = document.getElementById(change.anchor);
-  const targets = REVIEW_DIFF_TARGETS[change.id];
-  if (!activeSection || !targets) return;
-
-  document.body.classList.add("pageroot-section-focus", "pageroot-diff-focus");
-  activeSection.setAttribute("data-pageroot-active", "true");
-
-  const activeFilters: Exclude<DiffFilter, "all">[] = filter === "all"
-    ? ["text", "structure", "style"]
-    : [filter];
-
-  activeFilters.forEach((activeFilter) => {
-    targets[activeFilter].forEach((selector) => {
-      activeSection.querySelectorAll(selector).forEach((element) => {
-        element.setAttribute("data-pageroot-diff", "true");
-        element.classList.add(`pageroot-diff-${activeFilter}`);
-      });
-    });
+  const selector = filter === "text"
+    ? "[data-pageroot-token='true']"
+    : filter === "structure"
+      ? ".pageroot-structure-from, .pageroot-structure-to, .pageroot-structure-removed, .pageroot-structure-added"
+      : filter === "style"
+        ? ".pageroot-style-reference, .pageroot-style-change"
+        : "[data-pageroot-token='true'], .pageroot-structure-from, .pageroot-structure-to, .pageroot-structure-removed, .pageroot-structure-added, .pageroot-style-reference, .pageroot-style-change";
+  const entries = (Object.keys(frames) as ReviewSide[]).map((side) => {
+    const frame = frames[side];
+    const frameWindow = frame?.contentWindow;
+    const section = frame?.contentDocument?.getElementById(anchor);
+    const evidence = section?.querySelector<HTMLElement>(selector) ?? null;
+    if (!frameWindow || !section) return null;
+    const sectionTop = section.getBoundingClientRect().top + frameWindow.scrollY;
+    const evidenceTop = evidence ? evidence.getBoundingClientRect().top + frameWindow.scrollY : null;
+    return { side, frameWindow, section, sectionTop, evidenceTop };
+  }).filter((entry): entry is NonNullable<typeof entry> => entry !== null);
+  const source = entries.find((entry) => entry.evidenceTop !== null);
+  const sourceProgress = source?.evidenceTop === null || !source
+    ? 0
+    : Math.max(0, Math.min(1, (source.evidenceTop - source.sectionTop) / Math.max(1, source.section.offsetHeight)));
+  entries.forEach((entry) => {
+    const targetTop = entry.evidenceTop ?? entry.sectionTop + sourceProgress * entry.section.offsetHeight;
+    entry.frameWindow.scrollTo({ top: Math.max(0, targetTop - 72), behavior });
   });
-}
-
-function scrollFrameToAnchor(frame: HTMLIFrameElement, anchor: string, behavior: ScrollBehavior = "smooth") {
-  const frameWindow = frame.contentWindow;
-  const target = frame.contentDocument?.getElementById(anchor);
-  if (!frameWindow || !target) return;
-  const targetTop = target.getBoundingClientRect().top + frameWindow.scrollY;
-  frameWindow.scrollTo({ top: Math.max(0, targetTop - 18), behavior });
 }
 
 function getSemanticScrollPosition(source: Window, target: Window) {
@@ -1057,14 +981,12 @@ function ContentMap({
   focused,
   showAll,
   onToggleAll,
-  onClearFocus,
   onSelect,
 }: {
   activeId: string;
   focused: boolean;
   showAll: boolean;
   onToggleAll: () => void;
-  onClearFocus: () => void;
   onSelect: (changeId: string) => void;
 }) {
   const visibleGroups = CONTENT_OUTLINE.map((group) => ({
@@ -1076,7 +998,7 @@ function ContentMap({
     <div className={styles.contentMapScroll}>
       <section className={styles.contentMapIntro}>
         <div><strong>按页面里的内容整理</strong><span>选择一处后，两边会同时定位并压暗无关内容。</span></div>
-        <button type="button" onClick={focused ? onClearFocus : onToggleAll}>{focused ? "查看整页" : showAll ? "只看变化" : "显示全部"}</button>
+        <button type="button" onClick={onToggleAll}>{showAll ? "只看变化" : "显示全部"}</button>
       </section>
 
       <nav className={styles.contentMap} aria-label="页面内容与变化位置">
@@ -1111,10 +1033,10 @@ function ContentMap({
       </nav>
 
       <div className={styles.mapLegend} aria-label="差异颜色说明">
-        <span data-tone="before">修改前</span>
-        <span data-tone="after">修改后</span>
-        <span data-tone="structure">结构变化</span>
-        <span data-tone="style">样式变化</span>
+        <span data-tone="before">删除文字</span>
+        <span data-tone="after">新增文字</span>
+        <span data-tone="structure">原位置 / 新位置</span>
+        <span data-tone="style">视觉样式热区</span>
       </div>
     </div>
   );
@@ -1137,38 +1059,52 @@ function ReviewScreen({
   const [zoom, setZoom] = useState<ZoomMode>("fit");
   const [mapPeeked, setMapPeeked] = useState(false);
   const [mapPinned, setMapPinned] = useState(false);
+  const [toolbarIntroduced, setToolbarIntroduced] = useState(true);
+  const [toolbarPeeked, setToolbarPeeked] = useState(false);
+  const [toolbarPinned, setToolbarPinned] = useState(false);
   const [leaderSide, setLeaderSide] = useState<ReviewSide>("before");
   const [frameRevision, setFrameRevision] = useState(0);
   const frameRefs = useRef<Record<ReviewSide, HTMLIFrameElement | null>>({ before: null, after: null });
   const frameCleanup = useRef<Partial<Record<ReviewSide, () => void>>>({});
   const syncingFrames = useRef(false);
   const temporaryIndependent = useRef(false);
+  const initialOverviewPositioned = useRef(false);
   const scrollModeRef = useRef<ScrollMode>(scrollMode);
   const activeChange = CONTENT_CHANGES[activeIndex];
   const mapOpen = mapPinned || mapPeeked;
+  const toolbarOpen = toolbarIntroduced || toolbarPinned || toolbarPeeked;
 
   useEffect(() => {
     scrollModeRef.current = scrollMode;
   }, [scrollMode]);
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => setToolbarIntroduced(false), 1800);
+    return () => window.clearTimeout(timer);
+  }, []);
+
   useEffect(() => () => {
     frameCleanup.current.before?.();
     frameCleanup.current.after?.();
+    clearReviewPresentation(frameRefs.current.before);
+    clearReviewPresentation(frameRefs.current.after);
   }, []);
 
   useEffect(() => {
-    (Object.keys(frameRefs.current) as ReviewSide[]).forEach((side) => {
-      const frame = frameRefs.current[side];
-      if (frame) applyReviewPresentation(frame, side, activeChange, diffFilter, focused);
-    });
+    applyReviewPresentationPair(
+      frameRefs.current.before,
+      frameRefs.current.after,
+      activeChange,
+      diffFilter,
+      focused,
+      REVIEW_DIFF_TARGETS,
+    );
 
     if (!focused) return undefined;
     syncingFrames.current = true;
     let releaseTimer = 0;
     const timer = window.setTimeout(() => {
-      (Object.values(frameRefs.current) as (HTMLIFrameElement | null)[]).forEach((frame) => {
-        if (frame) scrollFrameToAnchor(frame, activeChange.anchor, "auto");
-      });
+      scrollFramesToEvidence(frameRefs.current, activeChange.anchor, diffFilter, "auto");
       releaseTimer = window.setTimeout(() => { syncingFrames.current = false; }, 100);
     }, 40);
     return () => {
@@ -1177,6 +1113,29 @@ function ReviewScreen({
       syncingFrames.current = false;
     };
   }, [activeChange, diffFilter, focused, frameRevision]);
+
+  useEffect(() => {
+    const beforeWindow = frameRefs.current.before?.contentWindow;
+    const afterWindow = frameRefs.current.after?.contentWindow;
+    if (focused || initialOverviewPositioned.current || !beforeWindow || !afterWindow) return undefined;
+
+    syncingFrames.current = true;
+    const positionAtTop = () => {
+      beforeWindow.scrollTo({ top: 0, behavior: "auto" });
+      afterWindow.scrollTo({ top: 0, behavior: "auto" });
+    };
+    positionAtTop();
+    const settleTimer = window.setTimeout(positionAtTop, 120);
+    const finishTimer = window.setTimeout(() => {
+      positionAtTop();
+      initialOverviewPositioned.current = true;
+      syncingFrames.current = false;
+    }, 360);
+    return () => {
+      window.clearTimeout(settleTimer);
+      window.clearTimeout(finishTimer);
+    };
+  }, [focused, frameRevision]);
 
   const alignFrom = (sourceSide: ReviewSide) => {
     const targetSide: ReviewSide = sourceSide === "before" ? "after" : "before";
@@ -1218,13 +1177,31 @@ function ReviewScreen({
       frameWindow.removeEventListener("wheel", onWheel);
       frameWindow.removeEventListener("scroll", onScroll);
     };
-    applyReviewPresentation(frame, side, activeChange, diffFilter, focused);
+    applyReviewPresentationPair(
+      frameRefs.current.before,
+      frameRefs.current.after,
+      activeChange,
+      diffFilter,
+      focused,
+      REVIEW_DIFF_TARGETS,
+    );
+
     setFrameRevision((current) => current + 1);
   };
 
+  const scheduleAnchorPosition = (anchor: string, filter: DiffFilter = diffFilter) => {
+    syncingFrames.current = true;
+    window.setTimeout(() => {
+      scrollFramesToEvidence(frameRefs.current, anchor, filter, "auto");
+      window.setTimeout(() => { syncingFrames.current = false; }, 160);
+    }, 120);
+  };
+
   const navigate = (direction: -1 | 1) => {
-    setActiveIndex((current) => (current + direction + CONTENT_CHANGES.length) % CONTENT_CHANGES.length);
+    const nextIndex = (activeIndex + direction + CONTENT_CHANGES.length) % CONTENT_CHANGES.length;
+    setActiveIndex(nextIndex);
     setFocused(true);
+    scheduleAnchorPosition(CONTENT_CHANGES[nextIndex].anchor);
   };
 
   const selectChange = (changeId: string) => {
@@ -1232,6 +1209,7 @@ function ReviewScreen({
     if (nextIndex >= 0) {
       setActiveIndex(nextIndex);
       setFocused(true);
+      scheduleAnchorPosition(CONTENT_CHANGES[nextIndex].anchor);
       if (!mapPinned) setMapPeeked(false);
     }
   };
@@ -1242,65 +1220,97 @@ function ReviewScreen({
     if (nextMode === "linked") window.setTimeout(() => alignFrom(leaderSide), 20);
   };
 
+  const selectReviewMode = (mode: ReviewMode) => {
+    if (mode === "overview") {
+      setFocused(false);
+      return;
+    }
+    setDiffFilter(mode);
+    setFocused(true);
+    scheduleAnchorPosition(activeChange.anchor, mode);
+  };
+
   return (
     <div className={styles.demoRoot}>
       <BrandHeader state="review" onBackToReview={onExit} onAccept={onAccept} onKeep={onKeep} />
       <main className={styles.canvasReviewStage}>
         <section className={styles.canvasReviewWorkspace}>
-          <div className={styles.canvasToolbar}>
-            <div className={styles.canvasReviewTitle}>
-              <span className={styles.canvasReviewIcon}><GitDiffIcon aria-hidden="true" size={18} weight="duotone" /></span>
-              <span>
-                <strong>{focused ? activeChange.heading : "整页总览"}</strong>
-                <small>{focused ? `${activeChange.kind} · 第 ${activeIndex + 1} 处，共 ${CONTENT_CHANGES.length} 处` : "修改前与修改后完整页面"}</small>
-              </span>
-            </div>
-
-            <div className={styles.diffFilterSwitch} aria-label="筛选变化类型">
-              {(Object.keys(DIFF_FILTER_LABELS) as DiffFilter[]).map((filter) => (
-                <button
-                  key={filter}
-                  type="button"
-                  aria-pressed={diffFilter === filter}
-                  onClick={() => { setDiffFilter(filter); setFocused(true); }}
-                >
-                  {filter === "all" ? <GitDiffIcon aria-hidden="true" size={14} weight="duotone" /> : null}
-                  {filter === "text" ? <TextTIcon aria-hidden="true" size={14} weight="bold" /> : null}
-                  {filter === "structure" ? <TreeStructureIcon aria-hidden="true" size={14} weight="duotone" /> : null}
-                  {filter === "style" ? <PaletteIcon aria-hidden="true" size={14} weight="duotone" /> : null}
-                  <span>{DIFF_FILTER_LABELS[filter]}</span>
-                </button>
-              ))}
-            </div>
-
-            <div className={styles.changeNavigator} aria-label="变化位置">
-              <button type="button" aria-label="上一处变化" onClick={() => navigate(-1)}><ArrowLeftIcon aria-hidden="true" size={14} weight="bold" /></button>
-              <span><strong>{activeIndex + 1}</strong> / {CONTENT_CHANGES.length}</span>
-              <button type="button" aria-label="下一处变化" onClick={() => navigate(1)}><ArrowRightIcon aria-hidden="true" size={14} weight="bold" /></button>
-            </div>
-
-            <div className={styles.canvasToolGroup}>
-              <button
-                className={styles.scrollModeButton}
-                type="button"
-                data-active={scrollMode === "linked" ? "true" : undefined}
-                aria-pressed={scrollMode === "linked"}
-                title={scrollMode === "linked" ? "当前同步滚动；按住 Option 可临时单独滚动" : "当前独立滚动"}
-                onClick={changeScrollMode}
-              >
-                {scrollMode === "linked"
-                  ? <LinkIcon aria-hidden="true" size={15} weight="bold" />
-                  : <LinkBreakIcon aria-hidden="true" size={15} weight="bold" />}
-                <span>{scrollMode === "linked" ? "同步滚动" : "独立滚动"}</span>
-              </button>
-              <div className={styles.zoomSwitch} aria-label="画布缩放">
-                <button type="button" aria-pressed={zoom === "fit"} onClick={() => setZoom("fit")}><CornersOutIcon aria-hidden="true" size={14} />适应</button>
-                <button type="button" aria-pressed={zoom === "actual"} onClick={() => setZoom("actual")}>100%</button>
+          <div
+            className={styles.canvasControlsDock}
+            data-open={toolbarOpen ? "true" : undefined}
+            data-pinned={toolbarPinned ? "true" : undefined}
+            onMouseEnter={() => setToolbarPeeked(true)}
+            onMouseLeave={() => {
+              setToolbarIntroduced(false);
+              if (!toolbarPinned) setToolbarPeeked(false);
+            }}
+            onFocusCapture={() => setToolbarPeeked(true)}
+            onBlurCapture={(event) => {
+              if (!toolbarPinned && !event.currentTarget.contains(event.relatedTarget as Node | null)) setToolbarPeeked(false);
+            }}
+          >
+            <div className={styles.canvasToolbar}>
+              <div className={styles.canvasReviewTitle}>
+                <span className={styles.canvasReviewIcon}><GitDiffIcon aria-hidden="true" size={18} weight="duotone" /></span>
+                <span>
+                  <strong>{focused ? activeChange.heading : "整页总览"}</strong>
+                  <small>{focused ? `${activeChange.kind} · 第 ${activeIndex + 1} 处，共 ${CONTENT_CHANGES.length} 处` : "修改前与修改后完整页面"}</small>
+                </span>
               </div>
-              {focused ? (
-                <button className={styles.clearFocusButton} type="button" onClick={() => setFocused(false)}>查看整页</button>
-              ) : null}
+
+              <div className={styles.diffFilterSwitch} aria-label="审阅显示方式">
+                {(["overview", "all", "text", "structure", "style"] as ReviewMode[]).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    aria-pressed={(focused ? diffFilter : "overview") === mode}
+                    onClick={() => selectReviewMode(mode)}
+                  >
+                    {mode === "overview" ? <EyeIcon aria-hidden="true" size={14} weight="duotone" /> : null}
+                    {mode === "all" ? <GitDiffIcon aria-hidden="true" size={14} weight="duotone" /> : null}
+                    {mode === "text" ? <TextTIcon aria-hidden="true" size={14} weight="bold" /> : null}
+                    {mode === "structure" ? <TreeStructureIcon aria-hidden="true" size={14} weight="duotone" /> : null}
+                    {mode === "style" ? <PaletteIcon aria-hidden="true" size={14} weight="duotone" /> : null}
+                    <span>{REVIEW_MODE_LABELS[mode]}</span>
+                  </button>
+                ))}
+              </div>
+
+              <div className={styles.canvasToolGroup}>
+                <button
+                  className={styles.scrollModeButton}
+                  type="button"
+                  data-active={scrollMode === "linked" ? "true" : undefined}
+                  aria-pressed={scrollMode === "linked"}
+                  title={scrollMode === "linked" ? "当前同步滚动；按住 Option 可临时单独滚动" : "当前独立滚动"}
+                  onClick={changeScrollMode}
+                >
+                  {scrollMode === "linked"
+                    ? <LinkIcon aria-hidden="true" size={15} weight="bold" />
+                    : <LinkBreakIcon aria-hidden="true" size={15} weight="bold" />}
+                  <span>{scrollMode === "linked" ? "同步滚动" : "独立滚动"}</span>
+                </button>
+                <div className={styles.zoomSwitch} aria-label="画布缩放">
+                  <button type="button" aria-pressed={zoom === "fit"} onClick={() => setZoom("fit")}><CornersOutIcon aria-hidden="true" size={14} />适应</button>
+                  <button type="button" aria-pressed={zoom === "actual"} onClick={() => setZoom("actual")}>100%</button>
+                </div>
+              </div>
             </div>
+            <button
+              className={styles.canvasToolbarHandle}
+              type="button"
+              aria-expanded={toolbarOpen}
+              aria-label={toolbarPinned ? "取消固定审阅工具" : "显示并固定审阅工具"}
+              onClick={() => {
+                setToolbarIntroduced(false);
+                setToolbarPinned((current) => !current);
+              }}
+            >
+              {toolbarOpen
+                ? <CaretUpIcon aria-hidden="true" size={12} weight="bold" />
+                : <CaretDownIcon aria-hidden="true" size={12} weight="bold" />}
+              <span>审阅工具</span>
+            </button>
           </div>
 
           <div className={styles.canvasReviewBody} data-focused={focused ? "true" : undefined}>
@@ -1321,16 +1331,27 @@ function ReviewScreen({
                 if (!mapPinned && !event.currentTarget.contains(event.relatedTarget as Node | null)) setMapPeeked(false);
               }}
             >
-              <button
-                className={styles.mapHandle}
-                type="button"
-                aria-expanded={mapOpen}
-                onClick={() => setMapPinned((current) => !current)}
-              >
-                <SidebarSimpleIcon aria-hidden="true" size={17} weight="duotone" />
-                <span>内容地图</span>
-                <strong>{CONTENT_CHANGES.length}</strong>
-              </button>
+              <div className={styles.mapHandle}>
+                <button
+                  className={styles.mapHandleMain}
+                  type="button"
+                  aria-expanded={mapOpen}
+                  aria-label={mapPinned ? "收起并取消固定内容地图" : "打开并固定内容地图"}
+                  onClick={() => setMapPinned((current) => !current)}
+                >
+                  <SidebarSimpleIcon aria-hidden="true" size={17} weight="duotone" />
+                  <span>内容地图</span>
+                </button>
+                <div className={styles.mapHandleNavigator} aria-label="逐处查看变化">
+                  <button type="button" aria-label="上一处变化" title="上一处变化" onClick={() => navigate(-1)}>
+                    <CaretUpIcon aria-hidden="true" size={11} weight="bold" />
+                  </button>
+                  <span><strong>{activeIndex + 1}</strong><small>/{CONTENT_CHANGES.length}</small></span>
+                  <button type="button" aria-label="下一处变化" title="下一处变化" onClick={() => navigate(1)}>
+                    <CaretDownIcon aria-hidden="true" size={11} weight="bold" />
+                  </button>
+                </div>
+              </div>
               <div className={styles.canvasMapPanel} aria-hidden={!mapOpen} inert={!mapOpen ? true : undefined}>
                 <header>
                   <div><span>页面内容地图</span><strong>{focused ? `正在看：${activeChange.group}` : "整页总览"}</strong></div>
@@ -1349,7 +1370,6 @@ function ReviewScreen({
                   focused={focused}
                   showAll={showAll}
                   onToggleAll={() => setShowAll((current) => !current)}
-                  onClearFocus={() => setFocused(false)}
                   onSelect={selectChange}
                 />
               </div>

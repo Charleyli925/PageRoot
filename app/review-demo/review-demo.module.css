@@ -3658,18 +3658,34 @@ li[data-state="current"] .stepState {
 }
 
 .canvasReviewWorkspace {
+  position: relative;
   height: 100%;
-  display: grid;
-  grid-template-rows: 58px minmax(0, 1fr);
   overflow: hidden;
+}
+
+.canvasControlsDock {
+  position: absolute;
+  z-index: 30;
+  top: 0;
+  right: 0;
+  left: 0;
+  padding-bottom: 18px;
+  transform: translateY(calc(-100% + 18px));
+  transition: transform 210ms cubic-bezier(.2, .8, .2, 1);
+}
+
+.canvasControlsDock[data-open="true"],
+.canvasControlsDock:hover,
+.canvasControlsDock:focus-within {
+  transform: translateY(0);
 }
 
 .canvasToolbar {
   position: relative;
-  z-index: 12;
   min-width: 0;
+  min-height: 58px;
   display: grid;
-  grid-template-columns: minmax(210px, 1fr) auto auto auto;
+  grid-template-columns: minmax(210px, 1fr) auto auto;
   align-items: center;
   gap: 12px;
   padding: 0 14px 0 18px;
@@ -3677,6 +3693,33 @@ li[data-state="current"] .stepState {
   background: rgb(250 250 252 / 97%);
   box-shadow: 0 1px 5px rgb(31 32 41 / 4%);
   backdrop-filter: blur(16px) saturate(145%);
+}
+
+.canvasToolbarHandle {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  min-height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 11px;
+  border: 1px solid #d9dae0;
+  border-top: 0;
+  border-radius: 0 0 9px 9px;
+  background: rgb(255 255 255 / 96%);
+  color: #6d697c;
+  box-shadow: 0 5px 12px rgb(33 34 43 / 9%);
+  font-size: 8.5px;
+  font-weight: 740;
+  transform: translateX(-50%);
+  backdrop-filter: blur(12px);
+}
+
+.canvasToolbarHandle:hover,
+.canvasToolbarHandle[aria-expanded="true"] {
+  color: #5c55c5;
 }
 
 .canvasReviewTitle {
@@ -3737,9 +3780,7 @@ li[data-state="current"] .stepState {
 
 .diffFilterSwitch button,
 .zoomSwitch button,
-.scrollModeButton,
-.clearFocusButton,
-.changeNavigator button {
+.scrollModeButton {
   border: 0;
   background: transparent;
   color: #6e7079;
@@ -3765,53 +3806,16 @@ li[data-state="current"] .stepState {
   box-shadow: 0 1px 4px rgb(31 33 42 / 11%);
 }
 
-.diffFilterSwitch button:nth-child(2)[aria-pressed="true"] {
-  color: #267454;
-}
-
 .diffFilterSwitch button:nth-child(3)[aria-pressed="true"] {
-  color: #5f58c9;
+  color: #8e4d63;
 }
 
 .diffFilterSwitch button:nth-child(4)[aria-pressed="true"] {
+  color: #5f58c9;
+}
+
+.diffFilterSwitch button:nth-child(5)[aria-pressed="true"] {
   color: #2774a9;
-}
-
-.changeNavigator {
-  display: grid;
-  grid-template-columns: 27px auto 27px;
-  align-items: center;
-  gap: 3px;
-  padding: 3px;
-  border: 1px solid #e0e1e5;
-  border-radius: 10px;
-  background: #fff;
-}
-
-.changeNavigator button {
-  width: 27px;
-  height: 27px;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  border-radius: 7px;
-}
-
-.changeNavigator button:hover {
-  background: #f1f0ff;
-  color: #5d56ca;
-}
-
-.changeNavigator span {
-  min-width: 35px;
-  color: #92949c;
-  font-size: 9px;
-  text-align: center;
-}
-
-.changeNavigator strong {
-  color: #474950;
-  font-size: 10px;
 }
 
 .canvasToolGroup {
@@ -3821,8 +3825,7 @@ li[data-state="current"] .stepState {
   gap: 6px;
 }
 
-.scrollModeButton,
-.clearFocusButton {
+.scrollModeButton {
   min-height: 33px;
   display: inline-flex;
   align-items: center;
@@ -3841,18 +3844,14 @@ li[data-state="current"] .stepState {
   color: #5d56c8;
 }
 
-.clearFocusButton {
-  color: #5d57c3;
-}
-
-.scrollModeButton:hover,
-.clearFocusButton:hover {
+.scrollModeButton:hover {
   border-color: #c9c6eb;
   background: #f7f6ff;
 }
 
 .canvasReviewBody {
   position: relative;
+  height: 100%;
   overflow: hidden;
   padding: 11px;
   background: #e9ebef;
@@ -3985,8 +3984,8 @@ li[data-state="current"] .stepState {
   bottom: 11px;
   width: min(366px, calc(100% - 22px));
   display: grid;
-  grid-template-columns: 36px minmax(0, 1fr);
-  transform: translateX(calc(100% - 36px));
+  grid-template-columns: 44px minmax(0, 1fr);
+  transform: translateX(calc(100% - 44px));
   transition: transform 190ms cubic-bezier(.2, .8, .2, 1);
   pointer-events: auto;
 }
@@ -3996,15 +3995,15 @@ li[data-state="current"] .stepState {
 }
 
 .mapHandle {
-  width: 36px;
-  height: 144px;
+  width: 44px;
+  min-height: 214px;
   align-self: center;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-direction: column;
-  gap: 7px;
-  padding: 9px 0;
+  gap: 8px;
+  padding: 8px 0;
   border: 1px solid #d8d6ef;
   border-right: 0;
   border-radius: 11px 0 0 11px;
@@ -4014,7 +4013,21 @@ li[data-state="current"] .stepState {
   backdrop-filter: blur(14px);
 }
 
-.mapHandle span {
+.mapHandleMain {
+  min-width: 35px;
+  min-height: 111px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 7px;
+  padding: 6px 0;
+  border: 0;
+  background: transparent;
+  color: #5e58c8;
+}
+
+.mapHandleMain span {
   color: #555260;
   font-size: 9px;
   font-weight: 760;
@@ -4022,14 +4035,47 @@ li[data-state="current"] .stepState {
   writing-mode: vertical-rl;
 }
 
-.mapHandle strong {
-  width: 20px;
-  height: 20px;
+.mapHandleNavigator {
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+  padding-top: 7px;
+  border-top: 1px solid #e1dff3;
+}
+
+.mapHandleNavigator button {
+  width: 24px;
+  height: 22px;
   display: grid;
   place-items: center;
-  border-radius: 50%;
-  background: #655ed4;
-  color: #fff;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: #f0eeff;
+  color: #6059c9;
+}
+
+.mapHandleNavigator button:hover {
+  background: #e5e1ff;
+}
+
+.mapHandleNavigator > span {
+  min-width: 28px;
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 1px;
+  color: #8a8798;
+  font-size: 7px;
+  writing-mode: initial;
+}
+
+.mapHandleNavigator strong {
+  color: #514ab9;
+  font-size: 10px;
+}
+
+.mapHandleNavigator small {
   font-size: 8px;
 }
 
@@ -4167,6 +4213,7 @@ li[data-state="current"] .stepState {
 }
 
 .canvasToolbar button:focus-visible,
+.canvasToolbarHandle:focus-visible,
 .canvasMapDrawer button:focus-visible,
 .canvasDocumentPane a:focus-visible,
 .headerPrimaryAction:focus-visible,
@@ -4177,12 +4224,11 @@ li[data-state="current"] .stepState {
 
 @media (max-width: 1180px) {
   .canvasToolbar {
-    grid-template-columns: minmax(175px, 1fr) auto auto;
+    grid-template-columns: minmax(175px, 1fr) auto;
     gap: 8px;
   }
 
-  .canvasReviewIcon,
-  .canvasToolGroup .clearFocusButton {
+  .canvasReviewIcon {
     display: none;
   }
 
@@ -4204,12 +4250,8 @@ li[data-state="current"] .stepState {
     display: none;
   }
 
-  .canvasReviewWorkspace {
-    grid-template-rows: 52px minmax(0, 1fr);
-  }
-
   .canvasToolbar {
-    grid-template-columns: auto auto 1fr;
+    grid-template-columns: auto 1fr;
     padding-inline: 8px;
   }
 
@@ -4236,6 +4278,7 @@ li[data-state="current"] .stepState {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .canvasControlsDock,
   .canvasMapDrawer,
   .canvasHint {
     transition: none;

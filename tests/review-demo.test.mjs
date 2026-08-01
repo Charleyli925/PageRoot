@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const [page, styles, generator, gitignore] = await Promise.all([
+const [page, styles, presentation, generator, gitignore] = await Promise.all([
   readFile(new URL("../app/review-demo/page.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/review-demo/review-demo.module.css", import.meta.url), "utf8"),
+  readFile(new URL("../app/review-demo/review-presentation.ts", import.meta.url), "utf8"),
   readFile(new URL("../scripts/generate-review-demo-fixtures.mjs", import.meta.url), "utf8"),
   readFile(new URL("../.gitignore", import.meta.url), "utf8"),
 ]);
@@ -16,7 +17,7 @@ test("the AI review demo covers the complete version-level decision path", () =>
   assert.match(page, /直接打开/);
   assert.match(page, /修改后/);
   assert.match(page, /修改前/);
-  assert.match(page, /type ReviewSide = "before" \| "after"/);
+  assert.match(presentation, /export type ReviewSide = "before" \| "after"/);
   assert.match(page, /接受全部并打开/);
   assert.match(page, /保留当前版本/);
   assert.match(page, /AI 候选 V1\.4 和本轮评论仍会保留/);
@@ -32,7 +33,7 @@ test("the demo keeps realistic complex changes available to the canvas review", 
   assert.match(page, /布局与交互/);
   assert.match(page, /AI 同时调整了 Image Map 的热区/);
   assert.match(page, /REVIEW_DIFF_TARGETS/);
-  assert.match(page, /pageroot-diff-structure/);
+  assert.match(presentation, /applyReviewPresentationPair/);
 });
 
 test("the content map uses headings and visible copy from the complex HTML fixture", () => {
@@ -49,6 +50,9 @@ test("the content map uses headings and visible copy from the complex HTML fixtu
   assert.match(page, /mapPinned/);
   assert.match(page, /onMouseEnter=\{\(\) => setMapPeeked\(true\)\}/);
   assert.match(styles, /\.canvasMapDrawer\[data-open="true"\]/);
+  assert.match(page, /aria-label="上一处变化"/);
+  assert.match(page, /aria-label="下一处变化"/);
+  assert.match(styles, /\.mapHandleNavigator/);
 });
 
 test("canvas review exposes orthogonal focus, difference, scroll, and zoom controls", () => {
@@ -67,6 +71,27 @@ test("canvas review exposes orthogonal focus, difference, scroll, and zoom contr
   assert.match(page, /SEMANTIC_SCROLL_ANCHORS/);
   assert.match(page, /aria-hidden=\{!mapOpen\}/);
   assert.match(page, /inert=\{!mapOpen \? true : undefined\}/);
+  assert.match(page, /toolbarIntroduced/);
+  assert.match(page, /toolbarPinned/);
+  assert.match(styles, /translateY\(calc\(-100% \+ 18px\)\)/);
+  assert.match(styles, /\.canvasControlsDock:hover/);
+});
+
+test("the paired diff presentation separates text, structure, and style evidence", () => {
+  assert.match(presentation, /function lcsMatches/);
+  assert.match(presentation, /if \(pair\.before\.text === pair\.after\.text\) return/);
+  assert.match(presentation, /pageroot-token-removed/);
+  assert.match(presentation, /pageroot-token-added/);
+  assert.match(presentation, /text-decoration-line: line-through/);
+  assert.match(presentation, /text-decoration-line: underline/);
+  assert.match(presentation, /overflow-anchor: none/);
+  assert.match(presentation, /pageroot-structure-from/);
+  assert.match(presentation, /pageroot-structure-to/);
+  assert.match(presentation, /原第 \$\{pair\.before\.order \+ 1\} 位/);
+  assert.match(presentation, /移到第 \$\{pair\.after\.order \+ 1\} 位/);
+  assert.match(presentation, /pageroot-style-reference/);
+  assert.match(presentation, /pageroot-style-change/);
+  assert.match(presentation, /新样式 · \$\{labels\.slice\(0, 3\)\.join\("、"\)\}/);
 });
 
 test("the review surface renders the two complete local HTML documents", () => {
