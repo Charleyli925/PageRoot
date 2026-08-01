@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/csr/ArrowSquareOut";
 import { ArrowsDownUpIcon } from "@phosphor-icons/react/dist/csr/ArrowsDownUp";
 import { ArrowsClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowsClockwise";
@@ -34,6 +34,7 @@ import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 import {
   applyReviewPresentationPair,
   clearReviewPresentation,
+  setReviewPresentationMaskTransparency,
   type ReviewDiffFilter,
   type ReviewDiffTargets,
   type ReviewSide,
@@ -1064,12 +1065,16 @@ function ReviewScreen({
   const [toolbarIntroduced, setToolbarIntroduced] = useState(true);
   const [toolbarPeeked, setToolbarPeeked] = useState(false);
   const [toolbarPinned, setToolbarPinned] = useState(false);
+  const [maskTransparency, setMaskTransparency] = useState(72);
   const [leaderSide, setLeaderSide] = useState<ReviewSide>("before");
+  const leaderSideRef = useRef<ReviewSide>("before");
   const [frameRevision, setFrameRevision] = useState(0);
   const [reviewSessionId] = useState(() => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`);
   const frameRefs = useRef<Record<ReviewSide, HTMLIFrameElement | null>>({ before: null, after: null });
   const frameCleanup = useRef<Partial<Record<ReviewSide, () => void>>>({});
   const syncingFrames = useRef(false);
+  const frameScrollSuppressed = useRef<Record<ReviewSide, boolean>>({ before: false, after: false });
+  const frameScrollSuppressionTimers = useRef<Partial<Record<ReviewSide, number>>>({});
   const temporaryIndependent = useRef(false);
   const initialOverviewPositioned = useRef(false);
   const scrollModeRef = useRef<ScrollMode>(scrollMode);
@@ -1077,9 +1082,25 @@ function ReviewScreen({
   const mapOpen = mapPinned || mapPeeked;
   const toolbarOpen = toolbarIntroduced || toolbarPinned || toolbarPeeked;
 
+  const suppressFrameScroll = useCallback((side: ReviewSide, duration: number) => {
+    frameScrollSuppressed.current[side] = true;
+    window.clearTimeout(frameScrollSuppressionTimers.current[side]);
+    frameScrollSuppressionTimers.current[side] = window.setTimeout(() => {
+      frameScrollSuppressed.current[side] = false;
+    }, duration);
+  }, []);
+
   useEffect(() => {
     scrollModeRef.current = scrollMode;
   }, [scrollMode]);
+
+  useEffect(() => {
+    setReviewPresentationMaskTransparency(
+      frameRefs.current.before,
+      frameRefs.current.after,
+      maskTransparency,
+    );
+  }, [frameRevision, maskTransparency]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setToolbarIntroduced(false), 1800);
@@ -1089,6 +1110,8 @@ function ReviewScreen({
   useEffect(() => () => {
     frameCleanup.current.before?.();
     frameCleanup.current.after?.();
+    window.clearTimeout(frameScrollSuppressionTimers.current.before);
+    window.clearTimeout(frameScrollSuppressionTimers.current.after);
     clearReviewPresentation(frameRefs.current.before);
     clearReviewPresentation(frameRefs.current.after);
   }, []);
@@ -1105,6 +1128,8 @@ function ReviewScreen({
 
     if (!focused) return undefined;
     syncingFrames.current = true;
+    suppressFrameScroll("before", 440);
+    suppressFrameScroll("after", 440);
     let releaseTimer = 0;
     const timer = window.setTimeout(() => {
       scrollFramesToEvidence(frameRefs.current, activeChange.anchor, diffFilter, "auto");
@@ -1115,7 +1140,7 @@ function ReviewScreen({
       window.clearTimeout(releaseTimer);
       syncingFrames.current = false;
     };
-  }, [activeChange, diffFilter, focused, frameRevision]);
+  }, [activeChange, diffFilter, focused, frameRevision, suppressFrameScroll]);
 
   useEffect(() => {
     const beforeWindow = frameRefs.current.before?.contentWindow;
@@ -1123,6 +1148,8 @@ function ReviewScreen({
     if (focused || initialOverviewPositioned.current || !beforeWindow || !afterWindow) return undefined;
 
     syncingFrames.current = true;
+    suppressFrameScroll("before", 520);
+    suppressFrameScroll("after", 520);
     const positionAtTop = () => {
       beforeWindow.scrollTo({ top: 0, behavior: "auto" });
       afterWindow.scrollTo({ top: 0, behavior: "auto" });
@@ -1138,7 +1165,7 @@ function ReviewScreen({
       window.clearTimeout(settleTimer);
       window.clearTimeout(finishTimer);
     };
-  }, [focused, frameRevision]);
+  }, [focused, frameRevision, suppressFrameScroll]);
 
   const alignFrom = (sourceSide: ReviewSide) => {
     const targetSide: ReviewSide = sourceSide === "before" ? "after" : "before";
@@ -1146,8 +1173,9 @@ function ReviewScreen({
     const targetWindow = frameRefs.current[targetSide]?.contentWindow;
     if (!sourceWindow || !targetWindow) return;
     syncingFrames.current = true;
+    suppressFrameScroll(targetSide, 520);
     targetWindow.scrollTo({ top: getSemanticScrollPosition(sourceWindow, targetWindow), behavior: "smooth" });
-    window.setTimeout(() => { syncingFrames.current = false; }, 260);
+    window.setTimeout(() => { syncingFrames.current = false; }, 440);
   };
 
   const bindFrame = (side: ReviewSide, frame: HTMLIFrameElement) => {
@@ -1158,19 +1186,25 @@ function ReviewScreen({
 
     let wheelTimer = 0;
     const onWheel = (event: WheelEvent) => {
+      leaderSideRef.current = side;
       setLeaderSide(side);
       temporaryIndependent.current = event.altKey;
       window.clearTimeout(wheelTimer);
       wheelTimer = window.setTimeout(() => { temporaryIndependent.current = false; }, 120);
     };
     const onScroll = () => {
-      if (scrollModeRef.current !== "linked" || syncingFrames.current || temporaryIndependent.current) return;
+      if (
+        scrollModeRef.current !== "linked"
+        || syncingFrames.current
+        || temporaryIndependent.current
+        || leaderSideRef.current !== side
+        || frameScrollSuppressed.current[side]
+      ) return;
       const targetSide: ReviewSide = side === "before" ? "after" : "before";
       const targetWindow = frameRefs.current[targetSide]?.contentWindow;
       if (!targetWindow) return;
-      syncingFrames.current = true;
+      suppressFrameScroll(targetSide, 180);
       targetWindow.scrollTo({ top: getSemanticScrollPosition(frameWindow, targetWindow) });
-      frameWindow.requestAnimationFrame(() => { syncingFrames.current = false; });
     };
 
     frameWindow.addEventListener("wheel", onWheel, { passive: true });
@@ -1194,6 +1228,8 @@ function ReviewScreen({
 
   const scheduleAnchorPosition = (anchor: string, filter: DiffFilter = diffFilter) => {
     syncingFrames.current = true;
+    suppressFrameScroll("before", 520);
+    suppressFrameScroll("after", 520);
     window.setTimeout(() => {
       scrollFramesToEvidence(frameRefs.current, anchor, filter, "auto");
       window.setTimeout(() => { syncingFrames.current = false; }, 160);
@@ -1221,6 +1257,11 @@ function ReviewScreen({
     const nextMode: ScrollMode = scrollMode === "linked" ? "independent" : "linked";
     setScrollMode(nextMode);
     if (nextMode === "linked") window.setTimeout(() => alignFrom(leaderSide), 20);
+  };
+
+  const toggleMapPinned = () => {
+    setMapPeeked(false);
+    setMapPinned((current) => !current);
   };
 
   const selectReviewMode = (mode: ReviewMode) => {
@@ -1260,6 +1301,20 @@ function ReviewScreen({
                   <small>{focused ? `${activeChange.kind} · 第 ${activeIndex + 1} 处，共 ${CONTENT_CHANGES.length} 处` : "修改前与修改后完整页面"}</small>
                 </span>
               </div>
+
+              <label className={styles.maskTransparencyControl}>
+                <span>蒙层透明度</span>
+                <input
+                  type="range"
+                  min="40"
+                  max="95"
+                  step="1"
+                  value={maskTransparency}
+                  aria-label="非修改区域蒙层透明度"
+                  onInput={(event) => setMaskTransparency(Number(event.currentTarget.value))}
+                />
+                <output>{maskTransparency}%</output>
+              </label>
 
               <div className={styles.diffFilterSwitch} aria-label="审阅显示方式">
                 {(["overview", "all", "text", "structure", "style"] as ReviewMode[]).map((mode) => (
@@ -1327,12 +1382,7 @@ function ReviewScreen({
               data-open={mapOpen ? "true" : undefined}
               data-pinned={mapPinned ? "true" : undefined}
               aria-label="页面内容地图"
-              onMouseEnter={() => setMapPeeked(true)}
               onMouseLeave={() => { if (!mapPinned) setMapPeeked(false); }}
-              onFocusCapture={() => setMapPeeked(true)}
-              onBlurCapture={(event) => {
-                if (!mapPinned && !event.currentTarget.contains(event.relatedTarget as Node | null)) setMapPeeked(false);
-              }}
             >
               <div className={styles.mapHandle}>
                 <button
@@ -1340,7 +1390,7 @@ function ReviewScreen({
                   type="button"
                   aria-expanded={mapOpen}
                   aria-label={mapPinned ? "收起并取消固定内容地图" : "打开并固定内容地图"}
-                  onClick={() => setMapPinned((current) => !current)}
+                  onClick={toggleMapPinned}
                 >
                   <SidebarSimpleIcon aria-hidden="true" size={17} weight="duotone" />
                   <span>内容地图</span>
@@ -1363,7 +1413,7 @@ function ReviewScreen({
                     aria-label={mapPinned ? "取消固定内容地图" : "固定内容地图"}
                     title={mapPinned ? "取消固定" : "固定打开"}
                     aria-pressed={mapPinned}
-                    onClick={() => setMapPinned((current) => !current)}
+                    onClick={toggleMapPinned}
                   >
                     <PushPinIcon aria-hidden="true" size={15} weight={mapPinned ? "fill" : "duotone"} />
                   </button>
@@ -1377,6 +1427,12 @@ function ReviewScreen({
                 />
               </div>
             </aside>
+
+            <div
+              className={styles.mapEdgeTrigger}
+              aria-hidden="true"
+              onMouseEnter={() => { if (!mapPinned) setMapPeeked(true); }}
+            />
 
             <div className={styles.canvasHint} data-visible={focused ? "true" : undefined}>
               <ArrowsDownUpIcon aria-hidden="true" size={14} weight="duotone" />

@@ -48,10 +48,18 @@ test("the content map uses headings and visible copy from the complex HTML fixtu
   assert.match(page, /画廊、嵌入内容与可编程画布/);
   assert.match(page, /根据页面里的导航文字整理/);
   assert.match(page, /mapPinned/);
-  assert.match(page, /onMouseEnter=\{\(\) => setMapPeeked\(true\)\}/);
+  assert.match(page, /className=\{styles\.mapEdgeTrigger\}/);
+  assert.match(page, /onMouseEnter=\{\(\) => \{ if \(!mapPinned\) setMapPeeked\(true\); \}\}/);
+  assert.match(page, /onClick=\{toggleMapPinned\}/);
   assert.match(styles, /\.canvasMapDrawer\[data-open="true"\]/);
+  assert.match(styles, /\.mapEdgeTrigger:hover/);
+  assert.match(styles, /background: rgb\(238 234 255 \/ 78%\)/);
   assert.match(page, /aria-label="上一处变化"/);
   assert.match(page, /aria-label="下一处变化"/);
+  assert.match(page, /frameScrollSuppressed/);
+  assert.match(page, /suppressFrameScroll\(targetSide, 180\)/);
+  assert.match(page, /leaderSideRef\.current !== side/);
+  assert.match(page, /frameScrollSuppressed\.current\[side\]/);
   assert.match(styles, /\.mapHandleNavigator/);
 });
 
@@ -73,6 +81,11 @@ test("canvas review exposes orthogonal focus, difference, scroll, and zoom contr
   assert.match(page, /inert=\{!mapOpen \? true : undefined\}/);
   assert.match(page, /toolbarIntroduced/);
   assert.match(page, /toolbarPinned/);
+  assert.match(page, /蒙层透明度/);
+  assert.match(page, /aria-label="非修改区域蒙层透明度"/);
+  assert.match(page, /onInput=\{\(event\) => setMaskTransparency/);
+  assert.match(page, /setReviewPresentationMaskTransparency/);
+  assert.match(styles, /\.maskTransparencyControl/);
   assert.match(styles, /translateY\(calc\(-100% \+ 18px\)\)/);
   assert.match(styles, /\.canvasControlsDock:hover/);
 });
@@ -84,6 +97,8 @@ test("the paired diff presentation separates text, structure, and style evidence
   assert.match(presentation, /pageroot-token-added/);
   assert.match(presentation, /text-decoration-line: line-through/);
   assert.match(presentation, /text-decoration-line: underline/);
+  assert.match(presentation, /box-shadow: inset 0 0 0 1px rgba\(196, 72, 66, \.72\)/);
+  assert.match(presentation, /box-shadow: inset 0 0 0 1px rgba\(31, 143, 99, \.72\)/);
   assert.match(presentation, /overflow-anchor: none/);
   assert.match(presentation, /pageroot-structure-from/);
   assert.match(presentation, /pageroot-structure-to/);
@@ -92,6 +107,13 @@ test("the paired diff presentation separates text, structure, and style evidence
   assert.match(presentation, /pageroot-style-reference/);
   assert.match(presentation, /pageroot-style-change/);
   assert.match(presentation, /新样式 · \$\{labels\.slice\(0, 3\)\.join\("、"\)\}/);
+  assert.match(presentation, /\.pageroot-review-label \{[\s\S]*?background: transparent !important;[\s\S]*?opacity: 0 !important;/);
+  assert.match(presentation, /\[data-pageroot-diff\]:has\(\[data-pageroot-diff\]:hover\)/);
+  assert.match(presentation, /:scope > \.pageroot-review-label/);
+  assert.match(presentation, /parts\.join\(" · "\)/);
+  assert.match(presentation, /pageroot-focus-mask/);
+  assert.match(presentation, /appendFocusMask\(beforeSection\)/);
+  assert.doesNotMatch(presentation, /\[data-pageroot-active='true'\]::after/);
 });
 
 test("the review surface renders the two complete local HTML documents", () => {

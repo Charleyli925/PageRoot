@@ -52,6 +52,13 @@ const STYLE_PROPERTIES = [
 ] as const;
 
 const REVIEW_FRAME_STYLE = `
+  html {
+    --pageroot-context-opacity: .5;
+    --pageroot-context-grayscale: .28;
+    --pageroot-context-saturation: .72;
+    --pageroot-focus-mask-opacity: .28;
+  }
+
   html, body { scroll-behavior: auto !important; overflow-anchor: none !important; }
 
   body.pageroot-section-focus [data-test-module] {
@@ -59,8 +66,8 @@ const REVIEW_FRAME_STYLE = `
   }
 
   body.pageroot-section-focus [data-test-module]:not([data-pageroot-active='true']) {
-    opacity: .1 !important;
-    filter: grayscale(.82) saturate(.24) blur(1.3px) !important;
+    opacity: var(--pageroot-context-opacity) !important;
+    filter: grayscale(var(--pageroot-context-grayscale)) saturate(var(--pageroot-context-saturation)) !important;
   }
 
   [data-pageroot-active='true'] {
@@ -70,38 +77,43 @@ const REVIEW_FRAME_STYLE = `
     filter: none !important;
   }
 
-  body.pageroot-diff-focus [data-pageroot-active='true']::after {
+  .pageroot-focus-mask {
     position: absolute !important;
     z-index: 2147483000 !important;
     inset: 0 !important;
-    content: '' !important;
-    background: rgba(247, 248, 251, .7) !important;
-    backdrop-filter: blur(1.4px) saturate(.52) !important;
+    display: block !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: rgb(247 248 251 / var(--pageroot-focus-mask-opacity)) !important;
+    box-shadow: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+    animation: none !important;
+    backdrop-filter: saturate(.82) !important;
     pointer-events: none !important;
   }
 
-  body.pageroot-mode-text [data-pageroot-active='true']::after {
-    background: rgba(247, 248, 251, .8) !important;
-    backdrop-filter: blur(2.7px) saturate(.38) !important;
+  body.pageroot-mode-text .pageroot-focus-mask {
+    backdrop-filter: blur(.45px) saturate(.72) !important;
   }
 
-  body.pageroot-mode-structure [data-pageroot-active='true']::after {
-    background: rgba(247, 248, 251, .67) !important;
-    backdrop-filter: blur(1.2px) saturate(.55) !important;
+  body.pageroot-mode-structure .pageroot-focus-mask {
+    backdrop-filter: saturate(.82) !important;
   }
 
-  body.pageroot-mode-style [data-pageroot-active='true']::after {
-    background: rgba(246, 249, 252, .74) !important;
-    backdrop-filter: blur(2px) grayscale(.45) saturate(.38) !important;
+  body.pageroot-mode-style .pageroot-focus-mask {
+    backdrop-filter: grayscale(.12) saturate(.72) !important;
   }
 
   [data-pageroot-token='true'] {
     position: relative !important;
     z-index: 2147483020 !important;
     display: inline !important;
-    margin-inline: .04em !important;
-    padding: .08em .17em .11em !important;
-    border-radius: .55em !important;
+    margin-inline: .025em !important;
+    padding: .025em .08em .045em !important;
+    border-radius: .28em !important;
+    background: transparent !important;
+    color: inherit !important;
     opacity: 1 !important;
     filter: none !important;
     box-decoration-break: clone !important;
@@ -109,22 +121,22 @@ const REVIEW_FRAME_STYLE = `
   }
 
   .pageroot-token-removed {
-    background: rgba(255, 224, 222, .96) !important;
-    color: #9c403b !important;
+    background: transparent !important;
+    color: inherit !important;
     text-decoration-line: line-through !important;
     text-decoration-color: #c04e48 !important;
     text-decoration-thickness: 1.5px !important;
-    box-shadow: 0 0 0 4px rgba(218, 88, 81, .1), 0 8px 22px rgba(171, 61, 55, .16) !important;
+    box-shadow: inset 0 0 0 1px rgba(196, 72, 66, .72) !important;
   }
 
   .pageroot-token-added {
-    background: rgba(216, 250, 234, .98) !important;
-    color: #176d4c !important;
+    background: transparent !important;
+    color: inherit !important;
     text-decoration-line: underline !important;
     text-decoration-color: #249269 !important;
-    text-decoration-thickness: 2px !important;
+    text-decoration-thickness: 1.5px !important;
     text-underline-offset: .16em !important;
-    box-shadow: 0 0 0 4px rgba(38, 151, 107, .1), 0 8px 22px rgba(22, 119, 82, .16) !important;
+    box-shadow: inset 0 0 0 1px rgba(31, 143, 99, .72) !important;
   }
 
   .pageroot-diff-text {
@@ -139,41 +151,42 @@ const REVIEW_FRAME_STYLE = `
   .pageroot-style-change {
     position: relative !important;
     z-index: 2147483010 !important;
-    opacity: 1 !important;
-    filter: none !important;
   }
 
   .pageroot-structure-from {
-    background-color: rgba(242, 240, 248, .72) !important;
-    opacity: .72 !important;
-    filter: grayscale(.34) saturate(.42) !important;
-    box-shadow: inset 4px 0 0 #87819c, 0 10px 22px rgba(72, 68, 86, .12) !important;
+    outline: 1.5px dashed rgba(111, 106, 125, .78) !important;
+    outline-offset: 2px !important;
+    box-shadow: inset 3px 0 0 rgba(111, 106, 125, .82) !important;
   }
 
   .pageroot-structure-to {
-    background-color: rgba(234, 232, 255, .82) !important;
-    filter: saturate(1.08) contrast(1.02) !important;
-    box-shadow: inset 0 -4px 0 #6257d2, 0 0 0 4px rgba(98, 87, 210, .11), 0 16px 34px rgba(76, 65, 172, .25) !important;
+    outline: 2px solid rgba(98, 87, 210, .86) !important;
+    outline-offset: 2px !important;
+    box-shadow: inset 0 -3px 0 rgba(98, 87, 210, .88) !important;
   }
 
   .pageroot-structure-removed {
-    background-color: rgba(255, 231, 229, .86) !important;
-    box-shadow: inset 4px 0 0 #cf5a53 !important;
+    outline: 1.5px solid rgba(207, 90, 83, .82) !important;
+    outline-offset: 2px !important;
+    box-shadow: inset 3px 0 0 #cf5a53 !important;
   }
 
   .pageroot-structure-added {
-    background-color: rgba(222, 248, 236, .9) !important;
-    box-shadow: inset 0 -4px 0 #26976b !important;
+    outline: 1.5px solid rgba(38, 151, 107, .84) !important;
+    outline-offset: 2px !important;
+    box-shadow: inset 0 -3px 0 #26976b !important;
   }
 
   .pageroot-style-reference {
-    box-shadow: inset 0 0 0 1px rgba(80, 103, 121, .64) !important;
-    filter: saturate(.68) !important;
+    outline: 1.5px dashed rgba(80, 103, 121, .7) !important;
+    outline-offset: 2px !important;
+    box-shadow: none !important;
   }
 
   .pageroot-style-change {
-    filter: saturate(1.16) contrast(1.02) !important;
-    box-shadow: 0 0 0 5px rgba(30, 154, 198, .16), 0 0 34px 10px rgba(30, 154, 198, .25) !important;
+    outline: 2px solid rgba(25, 127, 167, .84) !important;
+    outline-offset: 2px !important;
+    box-shadow: none !important;
   }
 
   .pageroot-review-label {
@@ -183,45 +196,67 @@ const REVIEW_FRAME_STYLE = `
     align-items: center !important;
     width: max-content !important;
     max-width: min(320px, calc(100% - 12px)) !important;
-    min-height: 27px !important;
-    padding: 4px 9px !important;
-    border: 1px solid rgba(255, 255, 255, .72) !important;
-    border-radius: 999px !important;
-    color: #fff !important;
-    font: 760 14px/1.25 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    color: #5b55bd !important;
+    font: 760 10.5px/1.25 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
     letter-spacing: .01em !important;
     white-space: nowrap !important;
     overflow: hidden !important;
     text-overflow: ellipsis !important;
-    box-shadow: 0 6px 18px rgba(34, 36, 44, .2) !important;
+    box-shadow: none !important;
+    text-shadow: 0 1px 2px rgba(255, 255, 255, .98), 0 0 5px rgba(255, 255, 255, .96) !important;
+    opacity: 0 !important;
+    visibility: hidden !important;
+    transform: translateY(-2px) !important;
+    transition: opacity 120ms ease, transform 120ms ease, visibility 120ms ease !important;
     pointer-events: none !important;
   }
 
   .pageroot-label-text {
-    top: -31px !important;
-    left: 0 !important;
+    top: 4px !important;
+    left: 5px !important;
   }
 
-  .pageroot-label-removed { background: #bd504a !important; }
-  .pageroot-label-added { background: #25865f !important; }
+  .pageroot-label-removed { color: #b0443f !important; }
+  .pageroot-label-added { color: #197b56 !important; }
 
   .pageroot-label-structure {
-    top: 9px !important;
-    left: 9px !important;
-    background: #6258c7 !important;
+    top: 4px !important;
+    left: 5px !important;
+    color: #5d56bf !important;
   }
 
-  .pageroot-label-structure-before { background: #777184 !important; }
-  .pageroot-label-structure-after { background: #6258c7 !important; }
+  .pageroot-label-structure-before { color: #6f6a7d !important; }
+  .pageroot-label-structure-after { color: #5d56bf !important; }
 
   .pageroot-label-style {
-    top: 9px !important;
-    right: 9px !important;
-    background: #197fa7 !important;
+    top: 4px !important;
+    right: auto !important;
+    left: 5px !important;
+    color: #176f93 !important;
   }
 
-  .pageroot-label-style-before { background: #5c7180 !important; }
-  .pageroot-label-style-after { background: #197fa7 !important; }
+  .pageroot-label-style-before { color: #536b7b !important; }
+  .pageroot-label-style-after { color: #176f93 !important; }
+
+  .pageroot-label-mixed { color: #514ba9 !important; }
+
+  [data-pageroot-diff]:hover > .pageroot-review-label,
+  [data-pageroot-diff]:focus-within > .pageroot-review-label {
+    opacity: 1 !important;
+    visibility: visible !important;
+    transform: translateY(0) !important;
+  }
+
+  [data-pageroot-diff]:has([data-pageroot-diff]:hover) > .pageroot-review-label,
+  [data-pageroot-diff]:has([data-pageroot-diff]:focus-within) > .pageroot-review-label {
+    opacity: 0 !important;
+    visibility: hidden !important;
+  }
 
   @media (prefers-reduced-motion: reduce) {
     body.pageroot-section-focus [data-test-module] { transition: none !important; }
@@ -460,13 +495,32 @@ function wrapTextRanges(element: HTMLElement, ranges: Array<{ start: number; end
 }
 
 function appendLabel(element: HTMLElement, tone: "removed" | "added" | "structure" | "style", text: string) {
-  const label = element.ownerDocument.createElement("span");
-  label.dataset.pagerootOverlay = "true";
-  label.setAttribute("aria-hidden", "true");
-  label.className = `pageroot-review-label pageroot-label-${tone === "removed" || tone === "added" ? "text" : tone} pageroot-label-${tone}`;
-  label.textContent = text;
-  element.append(label);
+  let label = element.querySelector<HTMLElement>(":scope > .pageroot-review-label");
+  if (!label) {
+    label = element.ownerDocument.createElement("span");
+    label.dataset.pagerootOverlay = "true";
+    label.setAttribute("aria-hidden", "true");
+    label.className = "pageroot-review-label";
+    element.append(label);
+  }
+  const parts = (label.dataset.pagerootLabelParts ?? "").split("\n").filter(Boolean);
+  if (!parts.includes(text)) parts.push(text);
+  label.dataset.pagerootLabelParts = parts.join("\n");
+  label.classList.add(
+    `pageroot-label-${tone === "removed" || tone === "added" ? "text" : tone}`,
+    `pageroot-label-${tone}`,
+  );
+  label.classList.toggle("pageroot-label-mixed", parts.length > 1);
+  label.textContent = parts.join(" · ");
   return label;
+}
+
+function appendFocusMask(section: HTMLElement) {
+  const mask = section.ownerDocument.createElement("span");
+  mask.dataset.pagerootOverlay = "true";
+  mask.setAttribute("aria-hidden", "true");
+  mask.className = "pageroot-focus-mask";
+  section.append(mask);
 }
 
 function markText(entry: ElementEntry, side: ReviewSide, ranges: Array<{ start: number; end: number }>) {
@@ -567,6 +621,26 @@ function ensurePresentationStyle(document: Document) {
   style.textContent = REVIEW_FRAME_STYLE;
 }
 
+function setDocumentMaskTransparency(document: Document | null | undefined, value: number) {
+  if (!document?.documentElement) return;
+  const transparency = Math.max(40, Math.min(95, value)) / 100;
+  const maskOpacity = 1 - transparency;
+  const contextOpacity = .18 + transparency * .45;
+  document.documentElement.style.setProperty("--pageroot-focus-mask-opacity", maskOpacity.toFixed(2));
+  document.documentElement.style.setProperty("--pageroot-context-opacity", contextOpacity.toFixed(2));
+  document.documentElement.style.setProperty("--pageroot-context-grayscale", (maskOpacity * .55).toFixed(2));
+  document.documentElement.style.setProperty("--pageroot-context-saturation", (.72 + transparency * .22).toFixed(2));
+}
+
+export function setReviewPresentationMaskTransparency(
+  beforeFrame: HTMLIFrameElement | null,
+  afterFrame: HTMLIFrameElement | null,
+  value: number,
+) {
+  setDocumentMaskTransparency(beforeFrame?.contentDocument, value);
+  setDocumentMaskTransparency(afterFrame?.contentDocument, value);
+}
+
 function removeInjectedPresentation(document: Document) {
   document.querySelectorAll<HTMLElement>("[data-pageroot-overlay='true']").forEach((element) => element.remove());
   document.querySelectorAll<HTMLElement>("[data-pageroot-token='true']").forEach((element) => {
@@ -620,6 +694,8 @@ export function applyReviewPresentationPair(
   });
   beforeSection.dataset.pagerootActive = "true";
   afterSection.dataset.pagerootActive = "true";
+  appendFocusMask(beforeSection);
+  appendFocusMask(afterSection);
 
   const activeFilters: Exclude<ReviewDiffFilter, "all">[] = filter === "all"
     ? ["style", "structure", "text"]

@@ -1,6 +1,6 @@
 # Design QA
 
-## 双画布审阅 Demo
+## 双画布审阅降噪与内容地图交互
 
 Date: 2026-08-01
 
@@ -8,76 +8,58 @@ Date: 2026-08-01
 
 Source visual truth:
 
-- `output/design-qa/ai-review-demo-canvas/source-current-review-1280x720.jpg`
-  — 上一版真实复杂 HTML 审阅页，用于核对产品外壳、内容密度、颜色和已有审阅语言。
-- `public/review-demo-local/before.html` 与 `public/review-demo-local/after.html`
-  — 完整修改前/修改后页面；由本地 fixture 脚本生成并被 Git 忽略，不提交用户 HTML。
+- `codex-clipboard-f24bb5f5-e036-499c-b75c-b18b2f657956.png` — 双画布标签相互遮挡的主要问题证据。
+- `codex-clipboard-50f2dcca-2617-43d1-adb4-962c9a8baad8.png` — 过高、白色且 hover 会整体展开的内容地图把手。
+- `codex-clipboard-7410309b-ccf7-4c1d-8923-f7093caf49e4.png` — 用户指定的蒙层透明度控件位置。
+- 其余用户截图用于核对伪元素圆形、实色差异底色、“新增视觉样式”与结构标签遮字等具体症状。
 
 Implementation evidence:
 
-- `output/design-qa/ai-review-demo-canvas/07-final-default-overview-1280x720.jpg`
-  — 默认整页总览：两个固定桌面宽度的完整 HTML 画布，内容地图收起。
-- `output/design-qa/ai-review-demo-canvas/08-final-dashboard-focus-1280x720.jpg`
-  — “从宏观指标到微观事件，保持同一条数据叙事”聚焦态，全部差异可见。
-- `output/design-qa/ai-review-demo-canvas/03-content-map-open-1280x720.jpg`
-  — 右侧内容地图展开态。
-- `output/design-qa/ai-review-demo-canvas/06-text-filter-1280x720.jpg`
-  — 只看文字与数据变化。
-- `output/design-qa/ai-review-demo-canvas/05-structure-filter-1280x720.jpg`
-  — 只看结构与顺序变化。
-- `output/design-qa/ai-review-demo-canvas/qa-side-by-side-dashboard.jpg`
-  — 同一内容段的上一版与本轮实现并排视觉对照。
+- `output/design-qa/ai-review-demo-polish/13-final-desktop-opening-1280x720.png` — 最终桌面聚焦态，内容地图收起。
+- `output/design-qa/ai-review-demo-polish/08-content-map-open-aligned-1280x720.png` — 用户主动打开内容地图后的展开态。
+- `output/design-qa/ai-review-demo-polish/10-tablet-dashboard-stable-1024x768.png` — 窄桌面的第 2 处变化与稳定双画布定位。
+- `output/design-qa/ai-review-demo-polish/12-mobile-390x844.png` — 移动宽度下改为上下画布，控件仍可用。
+- `output/design-qa/ai-review-demo-polish/14-reference-vs-implementation.png` — 主问题截图与最终实现的同一比较输入。
+- `output/design-qa/ai-review-demo-polish/15-rail-reference-vs-implementation.png` — 内容地图把手的同区域对照。
 
 Viewport and normalization:
 
-- Source and implementation: `1280 × 720` CSS viewport.
-- Runtime `devicePixelRatio = 2`; in-app Browser captures normalized to `1280 × 720` output pixels.
-- Focused state: change `2 / 7`, difference filter `全部变化`, linked scrolling, fit zoom, content map collapsed.
-- The source and implementation were opened together in the same visual comparison input before this pass was accepted.
+- Primary implementation viewport: `1280 × 720` CSS pixels.
+- Responsive passes: `1024 × 768`, `768 × 900`, and `390 × 844`.
+- The source material consists of issue crops rather than a canonical full-screen mock. The comparison boards therefore normalize the relevant review state and crop height instead of claiming pixel-for-pixel page fidelity.
+- Reference and implementation were inspected together in the combined comparison inputs before this pass was accepted.
 
 ### Product behavior verified
 
 - Waiting → `模拟 AI 返回` → `审阅修改` enters the complete two-document review.
-- Default review opens in `整页总览`; no artificial blur or highlight is applied before the user asks to focus.
-- Both panes preserve one fixed `1180px` desktop document width and receive the same scale, so a responsive reflow cannot masquerade as a content change.
-- `同步滚动` follows matching semantic anchors rather than raw scroll percentage. Scrolling the original moved both documents through the corresponding content region.
-- `独立滚动` keeps the other pane still. Switching back to linked mode aligns it to the last active pane's semantic position.
-- Holding Option/Alt temporarily allows independent scrolling while linked mode stays selected.
-- `适应` and `100%` both work; at 100% both iframe document bounds measured `1180px` wide.
-- Clicking a content-map item positions both documents at the matching user-facing section, dims unrelated modules, and highlights the relevant targets.
-- `全部变化`, `文字与数据`, `结构与顺序`, and `视觉样式` alter the visible evidence without changing the selected content section.
-- Previous/next navigation traverses the seven changes. `查看整页` removes all review classes from both documents.
-- The collapsed map is removed from keyboard focus with `inert`, `aria-hidden`, `visibility`, and disabled pointer events; hover peeks it and pinning keeps it open.
-- `接受全部并打开` reaches `已打开 AI 版本 V1.4`; `保留当前版本` reaches `已保留当前版本 V1.3`.
+- The collapsed content-map rail is compact and translucent purple. Hovering the rail body no longer opens the drawer; the named `内容地图` button pins it, while a dedicated 4px far-right edge trigger supports peek-open.
+- Previous/next buttons remain available while the map is closed. Moving from change 1 to change 2 left the map button at `aria-expanded="false"` and positioned both documents at the dashboard evidence.
+- Programmatic positioning and user-led linked scrolling are isolated. Change navigation remained at the dashboard after a 3-second stability wait and after resizing from 1280px to 1024px; no feedback loop drifted to a later section.
+- The `蒙层透明度` range updates both frames. At 90%, the output read `90%`, context opacity was `.58`, and focus-mask opacity was `.10`; it was restored to the 72% default for handoff.
+- Each active section contains one real `.pageroot-focus-mask`; the previous active-section `::after` injection is absent, so source pseudo-elements keep their own geometry and the unintended giant circle is gone.
+- Default label visibility measured zero in both frames while all 12 review labels remained available for hover/focus reveal. Labels on the same target merge into one `·`-separated line and ancestor labels yield to the innermost hovered diff.
+- Removed and added text use thin red/green line boxes; the red strike-through and green underline remain. Structure and visual-style changes use outline/edge treatments without replacing the target's real background.
+- At 390px the two canvases stack vertically, the toolbar condenses to icons, the transparency slider remains reachable, and no visible horizontal page overflow or label collision appears.
 
 ### Fidelity review
 
 No actionable P0, P1, or P2 finding remains.
 
-- Typography: product-shell labels remain legible at the tested viewport; source HTML typography is rendered directly inside both iframes rather than recreated.
-- Spacing and layout: the review body is devoted to two equal canvases. The overlay map no longer reserves permanent width, and the toolbar remains one compact row.
-- Color and semantics: red marks removed/original evidence, green marks added/current evidence, purple dashed outlines mark structure, and blue marks visual styling. Labels and filter names provide non-color cues.
-- Content clarity: map entries use visible HTML headings and content phrases, not implementation terms such as “Hero” or “Dashboard”.
-- Asset quality: the two complete HTML files and their original assets are rendered directly; no replacement screenshot, custom SVG, emoji, placeholder illustration, or CSS drawing was introduced.
-- Interaction clarity: page-section focus, difference type, scrolling mode, and zoom are independent controls, so the user can answer one comparison question at a time.
-- Accessibility: icon controls have accessible names, toggles expose pressed/expanded state, iframes have version-aware titles, and hidden overlay content is inert.
-- Motion: transitions are brief and respect `prefers-reduced-motion`.
+- Typography: difference labels are reduced to 10.5px, background-free, hidden at rest, and no longer cover HTML copy.
+- Spacing and layout: the rail's active footprint is materially shorter; internal gaps and blank space are reduced while its navigation buttons retain practical hit areas.
+- Color and surfaces: purple translucency distinguishes the map affordance without creating an opaque slab. Semantic red, green, purple, and blue evidence is expressed primarily through lines rather than solid fills.
+- Content visibility: the default 72% mask preserves enough surrounding-page context to orient the user, and the slider allows a 40–95% range.
+- Interaction clarity: opening the content map, traversing changes, choosing a diff filter, changing zoom/scroll behavior, and tuning mask transparency remain separate controls.
+- Accessibility: the slider has an explicit accessible name and live numeric output; map and filter buttons expose expanded/pressed state; hidden labels are `aria-hidden`; reduced-motion handling is retained.
+- Assets and source fidelity: the original HTML and its assets render directly inside both frames. No replacement illustration, SVG approximation, emoji, or placeholder asset was introduced.
 
 ### Comparison history
 
-1. P1 — the first linked-navigation pass could land near the media section because initial iframe scrolling triggered a feedback loop. Both-frame navigation now acquires the synchronization lock and uses immediate anchor positioning. Post-fix evidence: `02-canvas-overview-fixed-1280x720.jpg`, `07-final-default-overview-1280x720.jpg`, and `08-final-dashboard-focus-1280x720.jpg`.
-2. P2 — the visually hidden map could still receive keyboard focus. The closed drawer now applies `inert`, `aria-hidden`, `visibility: hidden`, and pointer-event blocking. A browser check confirmed the attributes in the collapsed state.
-3. P2 — early toolbar and vertical-handle labels were too small at the final viewport. Their type sizes and contrast were increased; the final overview and focused captures show the corrected hierarchy.
-4. Post-fix visual comparison and interaction checks found no remaining P0/P1/P2 issue.
-
-### Console and tooling note
-
-- No product interaction failed during the verified journey.
-- The in-app semantic browser reports one source-less `MutationObserver.observe` type error before Vite connects when the review route contains nested same-origin iframes. It does not reproduce on the app root or either standalone HTML file, has no application URL or stack, and does not recur after Vite connection. This is recorded as an instrumentation limitation rather than a product-console failure.
-
-### Follow-up polish
-
-- P3: a later iteration can add movement connectors or a short “before → after” structure replay for very large module moves.
-- P3: production should serve untrusted user HTML from a dedicated isolated origin.
+1. P1 — the injected review `::after` inherited the source hero pseudo-element's 460px circular geometry. Replacing it with a dedicated child mask removed the unexplained circle without changing the source design.
+2. P1 — linked scroll events could bounce between the two frames after next/previous navigation and eventually drift to the media section. Programmatic scroll suppression plus a single wheel-designated leader frame removed the feedback loop.
+3. P2 — solid red/green fills and solid structure/style surfaces obscured the HTML being reviewed. These are now line-only treatments that preserve original backgrounds and text colors.
+4. P2 — stacked badges covered headings, rows, and cards. Labels are now hidden at rest, merged per target, and reveal only for the relevant hovered/focused diff.
+5. P2 — the entire rail opened on hover and blocked its own navigation. Drawer opening is now limited to the explicit map button or the far-right edge strip.
+6. Post-fix combined visual comparison, desktop interaction checks, slider verification, navigation stability checks, and responsive captures found no remaining P0/P1/P2 issue.
 
 final result: passed
