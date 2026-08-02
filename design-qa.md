@@ -68,6 +68,59 @@ final result: passed
 
 ---
 
+# AI review demo design QA · v4
+
+Date: 2026-08-02
+
+## Source visual truth
+
+- `/var/folders/jx/w52403cs2hx39vwhd1sb3tg80000gn/T/codex-clipboard-64ce49be-f181-4dfd-b09c-b342027f63d4.png` (`2778 × 1140`) — 多行文字按行生成多个边框、相互叠加的问题证据。
+
+## Rendered implementation evidence
+
+- `output/design-qa/ai-review-demo-v4/merged-text-frames-top-1280x720.png` (`1280 × 720`) — 修改后的首屏双画布；标题和段落各自只保留一个整体虚线框。
+- `output/design-qa/ai-review-demo-v4/comparison-merged-frames.png` (`1600 × 1581`) — 原问题截图与修改后浏览器实现的同一比较输入。
+
+Viewport and normalization:
+
+- Browser/CSS viewport: `1280 × 720`; device scale factor: `1`.
+- Source and implementation were normalized to the same `1600px` comparison width while retaining aspect ratio. The source is an issue crop, so this pass judges marker grammar and overlap rather than full-page pixel fidelity.
+- State: review mode, opening section, `全部变化`, context visibility `22%`, actual-size `100%`, toolbar open, both document windows at the top-left.
+
+## Findings
+
+No actionable P0, P1, or P2 finding remains.
+
+- Fonts and typography: the reviewed HTML's font, size, line height, wrapping, and color are untouched. Character-level removed text still uses a dashed strike-through; inline clause spans themselves no longer draw boxes.
+- Spacing and layout rhythm: each changed text target receives one non-layout overlay calculated from the union of all clause client rectangles. A two-line title and a four-line paragraph therefore have one continuous outer frame instead of one frame per line, without changing document flow.
+- Colors and visual tokens: merged before/after frames retain the existing semantic red/green `2px dashed` outlines, transparent fill, and no bottom accent or shadow.
+- Image and asset fidelity: both original local HTML documents and their native assets continue to render directly; the change adds only review overlays and does not replace imagery or source styling.
+- Copy and content: document copy is unchanged. Review labels remain hidden at rest and character-level evidence remains available inside the merged frame.
+- Accessibility and interaction: merged overlays are pointer-transparent and `aria-hidden`, so text selection, buttons, links, focus, and the review controls remain operable.
+
+## Browser interaction checks
+
+- In `全部变化`, the before document contained `19` inline clause spans but only `11` merged target frames; the after document contained `12` clause spans but only `10` merged target frames.
+- The opening title measured as a single `477 × 167` red frame on the before side and a single `545 × 167` green frame on the after side. The adjacent multiline body copy likewise rendered as one frame per paragraph target.
+- Representative merged frames computed to `2px dashed`; representative inline clause spans computed to `outline-style: none`.
+- Switching to `文字与数据` preserved the same merged-frame counts and zero inline outlines, then returning to `全部变化` restored the combined review state.
+- Console checked. The long-lived development browser log still contains the previously documented route-initialization `MutationObserver` error; this interaction introduced no feature-specific error.
+
+## Full-view and focused comparison
+
+- The combined board shows the original repeated per-line boxes above and the revised one-frame-per-target treatment below. The title, paragraph, buttons, and short metrics are all readable at the board's native width.
+- A separate focused crop was not needed because the relevant line joins, dashed stroke, character strike-through, and adjacent controls remain legible in the full comparison input.
+
+## Comparison history
+
+1. P2 — multiline titles and paragraphs accumulated a dashed rectangle for every visual line, producing doubled horizontal edges and excessive density.
+2. Fix — inline clause spans stopped drawing outlines; their rendered client rectangles are now unioned into one absolutely positioned, pointer-transparent frame per changed text target.
+3. Post-fix evidence — the comparison board and computed-style/count checks confirm single overall title/paragraph frames while preserving character-level deletion evidence. No additional P0/P1/P2 issue was found.
+
+final result: passed
+
+---
+
 
 # AI review demo design QA
 

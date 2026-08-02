@@ -164,15 +164,38 @@ const REVIEW_FRAME_STYLE = `
   }
 
   .pageroot-clause-removed {
-    outline: calc(2px * var(--pageroot-review-ui-scale)) dashed rgba(207, 82, 76, .86) !important;
-    outline-offset: 0 !important;
+    outline: 0 !important;
     box-shadow: none !important;
   }
 
   .pageroot-clause-added {
-    outline: calc(2px * var(--pageroot-review-ui-scale)) dashed rgba(35, 148, 103, .9) !important;
-    outline-offset: 0 !important;
+    outline: 0 !important;
     box-shadow: none !important;
+  }
+
+  .pageroot-clause-frame {
+    position: absolute !important;
+    z-index: 2147483018 !important;
+    display: block !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: calc(4px * var(--pageroot-review-ui-scale)) !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+    pointer-events: none !important;
+  }
+
+  .pageroot-clause-frame-removed {
+    outline: calc(2px * var(--pageroot-review-ui-scale)) dashed rgba(207, 82, 76, .86) !important;
+    outline-offset: calc(1px * var(--pageroot-review-ui-scale)) !important;
+  }
+
+  .pageroot-clause-frame-added {
+    outline: calc(2px * var(--pageroot-review-ui-scale)) dashed rgba(35, 148, 103, .9) !important;
+    outline-offset: calc(1px * var(--pageroot-review-ui-scale)) !important;
   }
 
   .pageroot-diff-text {
@@ -683,7 +706,7 @@ function wrapTextRanges(element: HTMLElement, ranges: TextRange[], side: ReviewS
 }
 
 function wrapClauseRanges(element: HTMLElement, ranges: TextRange[], side: ReviewSide) {
-  if (!ranges.length) return false;
+  if (!ranges.length) return [];
   const document = element.ownerDocument;
   const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, {
     acceptNode(node) {
@@ -696,6 +719,7 @@ function wrapClauseRanges(element: HTMLElement, ranges: TextRange[], side: Revie
     },
   });
   const nodes: Array<{ node: Text; start: number; end: number }> = [];
+  const clauses: HTMLElement[] = [];
   let offset = 0;
   let current = walker.nextNode();
   while (current) {
@@ -721,13 +745,40 @@ function wrapClauseRanges(element: HTMLElement, ranges: TextRange[], side: Revie
       span.dataset.pagerootClause = "true";
       span.className = side === "before" ? "pageroot-clause-removed" : "pageroot-clause-added";
       span.textContent = source.slice(localStart, localEnd);
+      clauses.push(span);
       fragment.append(span);
       cursor = localEnd;
     });
     if (cursor < source.length) fragment.append(source.slice(cursor));
     node.replaceWith(fragment);
   });
-  return true;
+  return clauses;
+}
+
+function appendMergedClauseFrame(clauses: HTMLElement[], side: ReviewSide) {
+  const firstClause = clauses[0];
+  const document = firstClause?.ownerDocument;
+  const frameWindow = document?.defaultView;
+  if (!document?.body || !frameWindow) return;
+
+  const rects = clauses.flatMap((clause) => [...clause.getClientRects()])
+    .filter((rect) => rect.width > 0 && rect.height > 0);
+  if (!rects.length) return;
+
+  const left = Math.min(...rects.map((rect) => rect.left)) + frameWindow.scrollX;
+  const top = Math.min(...rects.map((rect) => rect.top)) + frameWindow.scrollY;
+  const right = Math.max(...rects.map((rect) => rect.right)) + frameWindow.scrollX;
+  const bottom = Math.max(...rects.map((rect) => rect.bottom)) + frameWindow.scrollY;
+  const frame = document.createElement("span");
+  frame.dataset.pagerootOverlay = "true";
+  frame.dataset.pagerootClauseFrame = "true";
+  frame.setAttribute("aria-hidden", "true");
+  frame.className = `pageroot-clause-frame pageroot-clause-frame-${side === "before" ? "removed" : "added"}`;
+  frame.style.left = `${left}px`;
+  frame.style.top = `${top}px`;
+  frame.style.width = `${right - left}px`;
+  frame.style.height = `${bottom - top}px`;
+  document.body.append(frame);
 }
 
 function placeLabel(label: HTMLElement, element: HTMLElement) {
@@ -770,8 +821,10 @@ function appendFocusMask(section: HTMLElement) {
 }
 
 function markText(entry: ElementEntry, side: ReviewSide, clauses: TextRange[], characters: TextRange[]) {
-  if (!wrapClauseRanges(entry.element, clauses, side)) return;
+  const clauseElements = wrapClauseRanges(entry.element, clauses, side);
+  if (!clauseElements.length) return;
   wrapTextRanges(entry.element, characters, side);
+  appendMergedClauseFrame(clauseElements, side);
   entry.element.dataset.pagerootDiff = "text";
   entry.element.classList.add("pageroot-diff-text");
   appendLabel(entry.element, side === "before" ? "removed" : "added", side === "before" ? "删除" : "新增");

@@ -120,7 +120,12 @@ test("the paired diff presentation separates text, structure, and style evidence
   assert.match(presentation, /text-decoration-style: dashed/);
   assert.match(presentation, /\.pageroot-token-added \{[\s\S]*?text-decoration: none !important;/);
   assert.match(presentation, /text-decoration-thickness: calc\(2px \* var\(--pageroot-review-ui-scale\)\)/);
-  assert.match(presentation, /\.pageroot-clause-removed \{[\s\S]*?outline: calc\(2px \* var\(--pageroot-review-ui-scale\)\) dashed/);
+  assert.match(presentation, /\.pageroot-clause-removed \{[\s\S]*?outline: 0 !important;/);
+  assert.match(presentation, /\.pageroot-clause-frame-removed \{[\s\S]*?outline: calc\(2px \* var\(--pageroot-review-ui-scale\)\) dashed/);
+  assert.match(presentation, /function appendMergedClauseFrame/);
+  assert.match(presentation, /clause\.getClientRects\(\)/);
+  assert.match(presentation, /frame\.dataset\.pagerootClauseFrame = "true"/);
+  assert.match(presentation, /appendMergedClauseFrame\(clauseElements, side\)/);
   assert.doesNotMatch(presentation, /outline:[^;]* solid /);
   assert.doesNotMatch(presentation, /box-shadow: inset/);
   assert.match(presentation, /overflow-anchor: none/);
