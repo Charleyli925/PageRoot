@@ -36,6 +36,12 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   base URLs. The application renderer's CSP remains strict and the preview
   scheme does not receive `bypassCSP`.
 - Strict schemas, frozen inputs and identity/Hash checks before accepting AI output; scope evidence is always recorded, with protocol/script/target-integrity findings hard-blocked and ordinary breadth findings observed without a user-waiver loop
+- Review-before-open reads only the frozen current HTML and immutable candidate
+  Version after rechecking their identities and Hashes. Both copies render in
+  unique-origin sandboxed frames; authored scripts, refresh directives and
+  inline handlers are removed, nested frames are re-sandboxed, and links/forms
+  cannot navigate or submit. Only the injected review scroll/focus bridge may
+  execute, and its messages are bound to the exact frame and review session.
 - Main-process-only usage telemetry with exact event/property allowlists,
   random installation/session UUIDs and HMAC project pseudonyms; no hardware
   identifier, content, path, filename, raw exception or stack is accepted
@@ -80,6 +86,14 @@ unknown or duplicated source nodes, stale Hashes, truncated captures, arbitrary
 one-sided runtime classes, text/HTML, inline style, form state and runtime
 children. The normal script-disabled editing iframe and SourcePatch checks
 remain unchanged.
+
+The AI review workspace is not an interactive preview and has no activation or
+persistence authority. Entering it does not change `project.json.sourcePath`,
+the current Canvas, the immutable Version or the activation transaction. The
+renderer accepts review messages only when the session ID, side, declared
+message source and `MessageEvent.source` all match the registered frame. A user
+must still invoke the existing fail-closed ready-version activation path through
+“直接打开” or “接受全部并打开”.
 
 Edit-mode reveal actions use the same trust boundary. They accept only strict
 Tabs whose selected panel is proved by `aria-selected` plus `hidden`, native

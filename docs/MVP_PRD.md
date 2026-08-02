@@ -285,7 +285,8 @@ editing
   → processing
   → validating
   → committing
-  → ready
+  → ready-to-open
+  ↔ review view（只读；runtime 仍为 ready-to-open）
   → editing
 ```
 
@@ -294,7 +295,7 @@ editing
 - `awaiting-conflict-resolution`
 - `recovering-transaction`
 
-`submitting`、`processing`、`validating`、`committing`、冲突和事务恢复均锁定当前项目。`ready` 表示新版已经完整打开，可短暂展示成功提示后回到 `editing`。
+`submitting`、`processing`、`validating`、`committing`、冲突和事务恢复均锁定当前项目。`ready-to-open` 表示新版已经安全生成但尚未成为当前源；界面默认突出“审阅对比”，同时保留“直接打开”。正式审阅页只读展示冻结当前版与 AI 候选，保留当前版本或退出审阅会回到同一待处理页面，候选不会丢失；确认打开并完成三侧 Hash 校验后才回到 `editing`。
 
 状态与 active run 的唯一事实源是该项目自己的 `runtime-state.json`。`project.json` 不保存第二份 active run。
 

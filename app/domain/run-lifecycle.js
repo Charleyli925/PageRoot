@@ -160,7 +160,7 @@ export function deriveRunProgressSteps(run, handoffStatus = "idle") {
     validationStep.detail = "完整性与范围校验通过";
     validationStep.state = "done";
     resultStep.label = "新版本已准备好";
-    resultStep.detail = "旧版未被覆盖，等待你确认打开最新版";
+    resultStep.detail = "旧版未被覆盖，等待你审阅或直接打开";
     resultStep.state = "current";
   } else if (status === "complete") {
     validationStep.detail = "完整性与范围校验通过";

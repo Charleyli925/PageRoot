@@ -90,7 +90,7 @@ v3 是干净切换后的唯一运行时协议。v1/v2 记录在切换前整体�
   `storageDirectoryName=projectId`；v1/v2、记录不完整或身份不一致的旧目录不迁移。
 - `PROJECT.md` 是整个项目长期使用的 AI 修改规则，不只属于某一次 Request；项目空闲时允许用户修改并由工作台自动保存，处理期间只读。Request 会把当时已持久化规则冻结到 `input/PROJECT.md`。
 - `runtime-state.json` 与 `edit-audit.jsonl` 是系统运行和本地直接编辑的审计文件，只建议查看，不提供普通用户编辑入口。
-- `working/V1.x.html` 是有效 AI 结果通过校验后创建的完整 HTML。它先进入“可打开”状态；只有用户点击“打开 Qoder 返回的最新版”后才成为项目当前源。旧工作文件永不原地改写。
+- `working/V1.x.html` 是有效 AI 结果通过校验后创建的完整 HTML。它先进入“可审阅/打开”状态；审阅只读不会切换项目当前源，只有用户点击“直接打开”或在审阅页点击“接受全部并打开”后才成为项目当前源。旧工作文件永不原地改写。
 - input manifest、冻结 annotation 等可移植索引只使用项目或 Request 内相对路径。
 - `PROMPT.md` 可以包含本机绝对 Attempt 路径和可直接执行的 finalizer 命令。
 - `change-request.json` 的附件项可以额外包含由系统生成的 Request 内本机绝对 `localPath`，供当前电脑上的内部 AI / QoderWork 直接读取；同一项必须保留可移植的 `requestRelativePath`。
@@ -589,9 +589,11 @@ Scope report 仍以严格目标合同标记 `pass|fail`，完整记录目标外�
 9. 只推进 `project.json.latestVersionId`，保留 `sourcePath`、current exact Version 与当前画布不变。
 10. 写入 Attempt outcome，将 runtime 与 transaction 标记为 `ready-to-open`；重启后仍可恢复这项待打开结果。
 
-### 14.3 用户确认打开
+### 14.3 用户审阅或确认打开
 
-用户点击“打开 Qoder 返回的最新版”后：
+`ready-to-open` 的正式处理页必须同时提供“审阅对比”和“直接打开”，其中“审阅对比”为默认强调操作。“审阅对比”读取冻结基础 HTML 与不可变候选 Version，不调用激活事务；正式审阅页不得带 Demo 标记，并提供双页完整画布、变化类型筛选、内容地图、缩放与同步/独立滚动。
+
+审阅页点击“保留当前版本”必须先展示确认提醒，明确当前 HTML 不会改变、确认后返回本轮处理页、候选仍会保留且可再次进入审阅。退出审阅同样返回本轮处理页，不释放候选。用户点击“直接打开”或在审阅页点击“接受全部并打开”后：
 
 1. 重新核对 active run、transaction、Version、commit marker 与全部身份。
 2. 确认当前源 HTML 仍等于校验时的旧 Hash；若已变化，保留新 Version 但拒绝切换。
@@ -626,7 +628,7 @@ Version 目录发布但 marker 未写入时，对用户不可见。
 | `source-applied`，候选工作文件为候选 Hash | 继续发布与提交 |
 | `version-published`，无 marker | 校验后写 marker |
 | `committed` | 完成校验与工作文件落盘，进入 `ready-to-open`，不切换当前画布 |
-| `ready-to-open` | 重启后继续等待用户确认；确认时重新核对旧源 Hash 后切换 canonical path |
+| `ready-to-open` | 重启后继续等待用户审阅或打开；审阅不切换当前源，确认打开时重新核对旧源 Hash 后切换 canonical path |
 | 提交前当前 HTML 不再是旧 Hash | 进入持久冲突，绝不覆盖 |
 | 同名候选工作文件为其他 Hash | `WORKING_COPY_COLLISION`，绝不覆盖 |
 | `cache-rebuilt` | 幂等核对并结束 |
@@ -714,7 +716,7 @@ Schema 使用 `sourceType` 常量区分严格分支。
 - Request 尚未发布时的 `pendingSubmission`：冻结 revision、基础 Hash、预留的 Request/Attempt/候选版本身份和锁定时间；此时 `activeRun=null`。
 - current/history view state。
 - 当前评论和 edit event 草稿的权威文件路径、Hash、ID 与更新时间。
-- active run；其中 `ready-to-open` 必须保留候选 Version 与 transaction 身份，直到用户打开、显式取消或进入可审计错误。
+- active run；其中 `ready-to-open` 必须保留候选 Version 与 transaction 身份，直到用户确认打开、显式取消或进入可审计错误。仅退出审阅或“保留当前版本”不得释放候选。
 - `activeTransaction`：提交、AI 冲突或恢复中的唯一 transaction ID 与日志路径，禁止扫描目录猜测。
 - 外部冲突。
 - 事务恢复。
@@ -746,7 +748,7 @@ Attempt 的 `outcome.json` 是工作台写入的严格诊断终态，不是完�
 - `submitting/processing/validating`：标记 Attempt 取消，恢复冻结评论，释放候选，回到 editing。
 - `awaiting-conflict-resolution`：放弃未提交候选，保留源外部内容，恢复评论。
 - `committing` 且 commit marker 尚未写入：按事务恢复规则完整回退或完成，不能直接删除。
-- commit marker 已写入：Version 已提交，不能以“取消”撤销；候选进入只读历史并等待用户按正常“打开最新版”流程处理。
+- commit marker 已写入：Version 已提交，不能以“取消”撤销；候选进入只读历史并等待用户按正常“审阅对比”或“直接打开”流程处理。
 
 迟到 completion 在取消后无效。若 AI Agent 在取消后才执行官方 finalizer，finalizer 必须返回 11.4 的 `status=cancelled`、`accepted=false`、`retryable=false` 终态，而不是通用写入失败；不得生成 completion 或 Version。取消标记身份不匹配时必须失败关闭，不能把另一个 Attempt 的取消状态套用到本轮。
 

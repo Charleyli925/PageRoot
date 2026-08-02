@@ -32,6 +32,10 @@ Notable user-visible changes are documented here. This project follows Semantic 
   canvases now acknowledge the same generation, safe-save status cannot reuse
   stale content, and the “+” project picker automatically repairs one clean
   projection mismatch instead of silently doing nothing.
+- Made AI results review-first: ready results now offer a highlighted
+  side-by-side review and a secondary direct-open action, with full-page
+  change filters, synchronized navigation, and reversible “keep current”
+  confirmation before the same audited activation path is used.
 
 ## [0.9.5] - 2026-07-31
 

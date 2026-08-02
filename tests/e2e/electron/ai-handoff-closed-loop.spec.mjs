@@ -508,7 +508,7 @@ test("a verified AI result stays pending until the user opens the new HTML", asy
     ).toBe(1);
 
     await launched.page.getByRole("button", {
-      name: "打开最新版",
+      name: "直接打开",
     }).click();
     await expect.poll(async () => (
       launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject())
@@ -581,7 +581,7 @@ test("two AI versions activate in order and survive relaunch without identity dr
       "修改结果已通过检查",
       { exact: true },
     ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
-    await launched.page.getByRole("button", { name: "打开最新版" }).click();
+    await launched.page.getByRole("button", { name: "直接打开" }).click();
     await expect.poll(async () => (
       launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject())
     ), { timeout: 30_000 }).toMatchObject({
@@ -610,7 +610,7 @@ test("two AI versions activate in order and survive relaunch without identity dr
       "修改结果已通过检查",
       { exact: true },
     ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
-    await launched.page.getByRole("button", { name: "打开最新版" }).click();
+    await launched.page.getByRole("button", { name: "直接打开" }).click();
     await expect.poll(async () => (
       launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject())
     ), { timeout: 30_000 }).toMatchObject({
@@ -718,7 +718,7 @@ test("an internal AI supplement is sealed, scope-authorized, opened, and shown i
     expect(archive.records).toHaveLength(1);
     expect(archive.records[0].refersTo).toContain(instructionId);
 
-    await launched.page.getByRole("button", { name: "打开最新版" }).click();
+    await launched.page.getByRole("button", { name: "直接打开" }).click();
     await expect.poll(async () => (
       launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject())
     ), { timeout: 30_000 }).toMatchObject({
@@ -1674,7 +1674,7 @@ test("a committed version that the desktop cannot activate stays visibly blocked
       { exact: true },
     ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
     await launched.page.getByRole("button", {
-      name: "打开最新版",
+      name: "直接打开",
     }).click();
     await expect(launched.page.getByText(/新版本文件暂时无法打开|最新版暂时无法打开/u)
       .filter({ visible: true }).first())

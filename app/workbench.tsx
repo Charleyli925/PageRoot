@@ -185,6 +185,7 @@ import {
   HandoffFooter,
   HandoffPanel,
 } from "./workbench/handoff-view";
+import AiReviewWorkspace from "./workbench/AiReviewWorkspace";
 import {
   activeRunOperationKey,
   fileExtension,
@@ -341,6 +342,14 @@ const INITIAL_COMMENT_SNAPSHOT: CommentSessionSnapshot<
   composerAttachments: [],
   composerTarget: null,
   editSession: null,
+};
+
+type ReadyReviewSession = {
+  operationKey: string;
+  beforeHtml: string;
+  afterHtml: string;
+  beforeLabel: string;
+  afterLabel: string;
 };
 
 function waitFor(delayMs: number): Promise<void> {
@@ -712,6 +721,9 @@ export default function Workbench() {
   const [cancelling, setCancelling] = useState(false);
   const [cancelRunConfirmationKey, setCancelRunConfirmationKey] =
     useState<string | null>(null);
+  const [reviewPreparing, setReviewPreparing] = useState(false);
+  const [readyReviewSession, setReadyReviewSession] =
+    useState<ReadyReviewSession | null>(null);
   const [openingReadyVersion, setOpeningReadyVersion] = useState(false);
   const [resolvingConflict, setResolvingConflict] = useState(false);
   const [pendingReconcileBusy, setPendingReconcileBusy] = useState(false);
@@ -8236,6 +8248,102 @@ export default function Workbench() {
     }
   }, [activeRun, openCommittedVersion, setActiveRun]);
 
+  const reviewReadyResult = useCallback(async () => {
+    const run = runSessionRef.current.activeRun;
+    if (
+      !run
+      || run.status !== "ready-to-open"
+      || !run.readyPayload
+      || reviewPreparing
+    ) return;
+    const operationKey = activeRunOperationKey(run);
+    setReviewPreparing(true);
+    try {
+      const payload = await bridgeClient.versionFile(
+        run.sourcePath,
+        run.candidateVersionId,
+      );
+      const currentRun = runSessionRef.current.activeRun;
+      if (
+        !currentRun
+        || currentRun.status !== "ready-to-open"
+        || activeRunOperationKey(currentRun) !== operationKey
+      ) return;
+      const declaredIdentities: Array<[string, string, unknown]> = [
+        ["projectId", run.projectId, payload.projectId],
+        ["documentId", run.documentId, payload.documentId],
+        ["versionId", run.candidateVersionId, payload.versionId],
+      ];
+      for (const [field, expected, actual] of declaredIdentities) {
+        if (String(actual || "") !== expected) {
+          throw new Error(`审阅版本的 ${field} 与当前冻结任务不一致。`);
+        }
+      }
+      const candidateHtml = String(payload.content || "");
+      const candidateHash = String(payload.sha256 || payload.contentSha256 || "");
+      const expectedCandidateHash = String(
+        run.readyPayload.contentSha256
+        || (isRecord(run.readyPayload.version)
+          ? run.readyPayload.version.contentSha256
+          : "")
+        || candidateHash,
+      );
+      if (
+        !candidateHtml
+        || !candidateHash
+        || candidateHash !== expectedCandidateHash
+        || await browserSha256(candidateHtml) !== candidateHash
+      ) {
+        throw new Error("审阅候选与已校验版本的内容 Hash 不一致。");
+      }
+      const frozenHtml = documentSessionRef.current.html;
+      if (
+        !run.baseSnapshotSha256
+        || await browserSha256(frozenHtml) !== run.baseSnapshotSha256
+      ) {
+        throw new Error("当前冻结 HTML 已发生变化，无法开始安全对比。");
+      }
+      setReadyReviewSession({
+        operationKey,
+        beforeHtml: frozenHtml,
+        afterHtml: candidateHtml,
+        beforeLabel: run.basedOnVersionId
+          ? safeVersionLabel(run.basedOnVersionId)
+          : "当前版本",
+        afterLabel: String(
+          run.readyPayload.candidateDisplayVersionLabel
+          || safeVersionLabel(run.candidateVersionId),
+        ),
+      });
+      setDrawer(null);
+    } catch (cause) {
+      setToast({
+        title: "暂时无法开始审阅",
+        message: productErrorMessage(
+          cause,
+          "候选版本仍已安全保留，可以稍后重试。",
+        ),
+        tone: "error",
+        sticky: true,
+        dedupeKey: "ready-version-review",
+      });
+    } finally {
+      setReviewPreparing(false);
+    }
+  }, [reviewPreparing]);
+
+  useEffect(() => {
+    if (!readyReviewSession) return;
+    const currentRun = runSessionRef.current.activeRun;
+    if (
+      !currentRun
+      || currentRun.status !== "ready-to-open"
+      || activeRunOperationKey(currentRun) !== readyReviewSession.operationKey
+    ) {
+      setReadyReviewSession(null);
+    }
+  }, [activeRun, readyReviewSession]);
+
   const processRunStatus = useCallback(async (
     run: ActiveRun,
     payload: Record<string, unknown>,
@@ -9466,6 +9574,36 @@ export default function Workbench() {
       void generateRequest();
     }
   };
+
+  if (readyReviewSession) {
+    return (
+      <AiReviewWorkspace
+        fileName={currentSourceFileName}
+        beforeLabel={readyReviewSession.beforeLabel}
+        afterLabel={readyReviewSession.afterLabel}
+        beforeHtml={readyReviewSession.beforeHtml}
+        afterHtml={readyReviewSession.afterHtml}
+        sourcePath={sourcePath || undefined}
+        accepting={openingReadyVersion}
+        error={activeRun?.status === "ready-to-open" ? activeRun.error : undefined}
+        onExit={() => {
+          setReadyReviewSession(null);
+          setDrawer("handoff");
+        }}
+        onKeepCurrent={() => {
+          setReadyReviewSession(null);
+          setDrawer("handoff");
+          setToast({
+            title: `已保留${readyReviewSession.beforeLabel}`,
+            message: `${readyReviewSession.afterLabel} 仍保留在本轮处理里，可以随时再次进入审阅对比。`,
+            tone: "success",
+            dedupeKey: "ready-version-kept",
+          });
+        }}
+        onAccept={() => void activateReadyResult()}
+      />
+    );
+  }
 
   return (
     <main
@@ -11264,6 +11402,7 @@ export default function Workbench() {
         {drawer === "handoff" && activeRun ? (
           <HandoffFooter
             activeRun={activeRun}
+            reviewPreparing={reviewPreparing}
             openingReadyVersion={openingReadyVersion}
             pendingRunOutcome={pendingRunOutcome}
             pendingReconcileBusy={pendingReconcileBusy}
@@ -11277,8 +11416,8 @@ export default function Workbench() {
               typeof window !== "undefined"
               && window.htmlAIProjects?.revealRequestFolder,
             )}
+            onReviewReadyResult={() => void reviewReadyResult()}
             onActivateReadyResult={() => void activateReadyResult()}
-            onClose={() => setDrawer(null)}
             onSend={() => void sendToQoderWork(
               activeRun.handoffMessage,
               activeRun,

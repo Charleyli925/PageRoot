@@ -11,6 +11,7 @@ import { FileHtmlIcon } from "@phosphor-icons/react/dist/csr/FileHtml";
 import { FlagCheckeredIcon } from "@phosphor-icons/react/dist/csr/FlagCheckered";
 import { FloppyDiskIcon } from "@phosphor-icons/react/dist/csr/FloppyDisk";
 import { FolderOpenIcon } from "@phosphor-icons/react/dist/csr/FolderOpen";
+import { GitDiffIcon } from "@phosphor-icons/react/dist/csr/GitDiff";
 import { LockKeyIcon } from "@phosphor-icons/react/dist/csr/LockKey";
 import { MinusCircleIcon } from "@phosphor-icons/react/dist/csr/MinusCircle";
 import { PaperclipIcon } from "@phosphor-icons/react/dist/csr/Paperclip";
@@ -335,6 +336,7 @@ export function HandoffPanel({
 
 export function HandoffFooter({
   activeRun,
+  reviewPreparing,
   openingReadyVersion,
   pendingRunOutcome,
   pendingReconcileBusy,
@@ -345,8 +347,8 @@ export function HandoffFooter({
   checkingRun,
   terminalRun,
   canRevealRequestFolder,
+  onReviewReadyResult,
   onActivateReadyResult,
-  onClose,
   onSend,
   onCancel,
   onResolveConflict,
@@ -356,6 +358,7 @@ export function HandoffFooter({
   onPreviewSentHtml,
 }: {
   activeRun: ActiveRun;
+  reviewPreparing: boolean;
   openingReadyVersion: boolean;
   pendingRunOutcome: boolean;
   pendingReconcileBusy: boolean;
@@ -366,8 +369,8 @@ export function HandoffFooter({
   checkingRun: boolean;
   terminalRun: boolean;
   canRevealRequestFolder: boolean;
+  onReviewReadyResult: () => void;
   onActivateReadyResult: () => void;
-  onClose: () => void;
   onSend: () => void;
   onCancel: () => void;
   onResolveConflict: (choice: "adopt-ai" | "keep-external") => void;
@@ -383,23 +386,20 @@ export function HandoffFooter({
           <button
             className="primary-action"
             type="button"
-            disabled={openingReadyVersion || !activeRun.readyPayload}
-            onClick={onActivateReadyResult}
+            disabled={reviewPreparing || openingReadyVersion || !activeRun.readyPayload}
+            onClick={onReviewReadyResult}
           >
-            <FileHtmlIcon aria-hidden="true" size={18} weight="duotone" />
-            {openingReadyVersion ? "正在打开并核对…" : "打开最新版"}
+            <GitDiffIcon aria-hidden="true" size={18} weight="bold" />
+            {reviewPreparing ? "正在准备对比…" : "审阅对比"}
           </button>
           <button
             className="secondary-action"
             type="button"
-            onClick={onClose}
+            disabled={reviewPreparing || openingReadyVersion || !activeRun.readyPayload}
+            onClick={onActivateReadyResult}
           >
-            <ClockCounterClockwiseIcon
-              aria-hidden="true"
-              size={17}
-              weight="duotone"
-            />
-            稍后处理
+            <FileHtmlIcon aria-hidden="true" size={18} weight="duotone" />
+            {openingReadyVersion ? "正在打开并核对…" : "直接打开"}
           </button>
         </>
       ) : pendingRunOutcome ? (

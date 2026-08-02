@@ -116,7 +116,7 @@ test("run progress keeps completion, validation, and result facts separate", () 
     ["done", "done", "done", "current"],
   );
   assert.equal(ready[3].label, "新版本已准备好");
-  assert.equal(ready[3].detail, "旧版未被覆盖，等待你确认打开最新版");
+  assert.equal(ready[3].detail, "旧版未被覆盖，等待你审阅或直接打开");
 
   const noChange = deriveRunProgressSteps({
     requestId: "req_0001",

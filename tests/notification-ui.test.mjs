@@ -266,7 +266,8 @@ test("blocking paths auto-recover or expose one in-context decision", () => {
 test("the verified AI file identity appears only after the user opens the ready Version", () => {
   assert.doesNotMatch(workbench, /className="ai-file-opened-card"/);
   assert.doesNotMatch(workbench, /关闭新文件打开提示/);
-  assert.match(workbench, /打开最新版/);
+  assert.match(workbench, /审阅对比/);
+  assert.match(workbench, /直接打开/);
   assert.match(workbench, /bridgeClient\.activateReadyVersion/);
   assert.match(bridgeClient, /"\/ready-version\/activate"/);
   assert.match(

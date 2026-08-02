@@ -570,7 +570,7 @@ test("header prioritizes the filename and keeps the approved action order", () =
   assert.match(styles, /\.restart-update-dialog::backdrop/);
 });
 
-test("QoderWork handoff exposes a truthful process board and manual open action", () => {
+test("QoderWork handoff exposes a truthful process board with review-first ready actions", () => {
   assert.match(workbench, /发送至 Qoder/);
   assert.match(workbench, /等待 QoderWork 返回修改结果/);
   assert.match(workbench, /画布已锁定，仅可浏览/);
@@ -586,7 +586,8 @@ test("QoderWork handoff exposes a truthful process board and manual open action"
   assert.doesNotMatch(workbench, /const returnedStates/);
   assert.match(workbench, /已记录评论范围外的额外变化/);
   assert.doesNotMatch(workbench, /采用这些额外变化|AI 还修改了评论范围外的内容/);
-  assert.match(workbench, /打开最新版/);
+  assert.match(workbench, /审阅对比/);
+  assert.match(workbench, /直接打开/);
   const sendToQoderStart = workbench.indexOf("const sendToQoderWork = useCallback");
   const sendToQoderEnd = workbench.indexOf("const revealActiveRunInFinder", sendToQoderStart);
   const sendToQoderWork = workbench.slice(sendToQoderStart, sendToQoderEnd);
@@ -635,7 +636,7 @@ test("QoderWork handoff exposes a truthful process board and manual open action"
   assert.ok(cancel >= 0 && preview > cancel && copy > preview);
   assert.match(
     footer,
-    /activeRun\.status === "ready-to-open"[\s\S]*?打开最新版[\s\S]*?稍后处理/,
+    /activeRun\.status === "ready-to-open"[\s\S]*?审阅对比[\s\S]*?直接打开/,
   );
   assert.match(
     footer,
@@ -1032,7 +1033,7 @@ test("AI completion adopts the generated semantic file before editing resumes", 
   );
   assert.match(
     workbench,
-    /activeRun\.status === "ready-to-open"[\s\S]*?打开最新版/u,
+    /activeRun\.status === "ready-to-open"[\s\S]*?审阅对比[\s\S]*?直接打开/u,
   );
   assert.doesNotMatch(workbench, /className="ai-file-opened-card"/u);
   assert.doesNotMatch(workbench, /QoderWork 返回的新文件已打开|原文件已保留/u);
