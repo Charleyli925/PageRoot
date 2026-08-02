@@ -65,64 +65,6 @@ export function authoritativeDraftRevision(
   return Number.isSafeInteger(revision) && revision >= 0 ? revision : 0;
 }
 
-function scopeDifferenceKindLabel(kind: unknown): string {
-  if (kind === "text") return "文字";
-  if (kind === "attribute") return "元素属性";
-  if (kind === "structure") return "页面结构";
-  if (kind === "inline-style") return "局部样式";
-  if (kind === "shared-css") return "共享样式";
-  return "页面内容";
-}
-
-function compactScopePreview(value: unknown): string {
-  const text = String(value || "").replace(/\s+/gu, " ").trim();
-  return text.length > 80 ? `${text.slice(0, 77)}…` : text;
-}
-
-export function scopeDecisionSummary(
-  report: Record<string, unknown> | undefined,
-): {
-  message: string;
-  examples: string[];
-} {
-  const differences = Array.isArray(report?.differences)
-    ? report.differences.filter((item) => (
-        isRecord(item)
-        && item.allowed === false
-        && item.material !== false
-      ))
-    : [];
-  if (differences.length === 0) {
-    return {
-      message: "AI 结果包含评论范围外的变化。当前 HTML 尚未改变。",
-      examples: [],
-    };
-  }
-  const kinds = [...new Set(
-    differences.map((item) => scopeDifferenceKindLabel(
-      isRecord(item) ? item.kind : null,
-    )),
-  )];
-  const examples = differences.slice(0, 3).map((item) => {
-    if (!isRecord(item)) return "";
-    const before = isRecord(item.before)
-      ? compactScopePreview(item.before.preview)
-      : "";
-    const after = isRecord(item.after)
-      ? compactScopePreview(item.after.preview)
-      : "";
-    const label = scopeDifferenceKindLabel(item.kind);
-    if (before && after) return `${label}：“${before}” → “${after}”`;
-    if (after) return `${label}：新增“${after}”`;
-    if (before) return `${label}：移除“${before}”`;
-    return `${label}发生了额外变化`;
-  }).filter(Boolean);
-  return {
-    message: `AI 还修改了评论范围外的${kinds.join("、")}，共 ${differences.length} 处。当前 HTML 尚未改变。`,
-    examples,
-  };
-}
-
 export function recoveryIdentityFromRecord(
   value: unknown,
 ): RecoveryIdentity | null {

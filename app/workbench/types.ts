@@ -2,7 +2,10 @@ import type { HtmlCanvasSelection } from "../components/HtmlCanvasEditor";
 import type { DraftSnapshot } from "../application/draft-session.js";
 import type { RuntimeCapabilities } from "../application/runtime-capabilities.js";
 import type { SourceHistoryDirection, SourceHistoryEntry } from "../domain/source-history.js";
-import type { ValidationReview } from "../domain/run-lifecycle.js";
+import type {
+  CandidateAssessment,
+  ValidationReview,
+} from "../domain/run-lifecycle.js";
 
 export type HtmlProject = {
   path: string;
@@ -231,6 +234,7 @@ export type Version = {
   directEdits: DirectEditEvent[];
   supplements: UserSupplementRecord[];
   validationReview: ValidationReview | null;
+  candidateAssessment: CandidateAssessment | null;
 };
 
 export type UserSupplementAttachment = {

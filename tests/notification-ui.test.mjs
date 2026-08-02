@@ -258,7 +258,8 @@ test("blocking paths auto-recover or expose one in-context decision", () => {
   );
   assert.match(workbench, /terminalRun \?/);
   assert.match(workbench, /返回编辑/);
-  assert.match(workbench, /修改要求/);
+  assert.match(workbench, /上轮处理/);
+  assert.doesNotMatch(workbench, />\s*修改要求\s*</);
   assert.match(workbench, /className="project-resource-error" role="alert"/);
   assert.match(workbench, /className="recent-projects-error" role="status"/);
 });

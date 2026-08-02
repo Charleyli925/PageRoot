@@ -298,15 +298,20 @@ export function HistoryVersionItem({
               <li>{version.summary || "完整 HTML 内容与页面结构"}</li>
               <li>评论、图片与附件的完整保留</li>
               <li>
-                {version.validationReview?.softViolationCodes.length
-                  ? "硬边界已通过，额外范围变化已记录"
-                  : "版本与文件完整性已校验"}
+                {version.candidateAssessment?.status === "attention"
+                  ? "HTML 可以打开，版本连续性已标记为需审阅"
+                  : version.candidateAssessment
+                    ? "HTML 可用性与版本连续性已检查"
+                    : version.validationReview
+                      ? "旧版范围校验记录已归档"
+                      : "版本与文件完整性已校验"}
               </li>
             </ul>
           </div>
           {version.comments.length > 0
             || version.directEdits.length > 0
             || version.supplements.length > 0
+            || version.candidateAssessment
             || version.validationReview ? (
             <details className="history-records">
               <summary>查看本版修改来源与校验</summary>
@@ -429,9 +434,13 @@ export function HistoryVersionItem({
                   <span>已归档</span>
                 </header>
                 <p>
-                  {version.validationReview?.softViolationCodes.length
-                    ? "不可忽略的硬边界已通过；评论范围外的额外变化已随版本记录。"
-                    : "版本与文件内容已经校验并保存。"}
+                  {version.candidateAssessment?.status === "attention"
+                    ? "候选 HTML 可以打开，但系统找到的上一版共同特征较少；审阅提醒已随版本归档。"
+                    : version.candidateAssessment
+                      ? "HTML 可用性、可执行内容和上一版连续性已经检查并保存。"
+                      : version.validationReview
+                        ? "这是旧版本保留的范围校验记录。"
+                        : "版本与文件内容已经校验并保存。"}
                 </p>
               </section>
             </details>

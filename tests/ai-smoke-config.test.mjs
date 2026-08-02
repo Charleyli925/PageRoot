@@ -4,7 +4,7 @@ import test from "node:test";
 
 import smokeConfig from "./e2e/electron/playwright.ai-smoke.config.mjs";
 
-test("AI smoke configuration selects one success and one fail-closed scope path", async () => {
+test("AI smoke configuration selects review activation and broad-edit regression paths", async () => {
   const source = await readFile(
     new URL("./e2e/electron/ai-handoff-closed-loop.spec.mjs", import.meta.url),
     "utf8",
@@ -13,7 +13,7 @@ test("AI smoke configuration selects one success and one fail-closed scope path"
   const selected = titles.filter((title) => smokeConfig.grep.test(title));
   assert.deepEqual(selected, [
     "a verified AI result stays pending through desktop review until the user accepts it",
-    "a soft out-of-scope AI return is audited without blocking the ready version",
+    "a broad but related AI return is accepted without a target-scope error",
   ]);
   assert.match(
     source,

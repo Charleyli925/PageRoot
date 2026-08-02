@@ -146,10 +146,12 @@ export function deriveRunProgressSteps(run, handoffStatus = "idle") {
     resultStep.state = "current";
   } else if (status === "error") {
     validationStep.detail = completionObserved
-      ? run.error || "结果未通过完整性或范围检查"
+      ? run.error || "返回的 HTML 无法使用"
       : "尚未开始";
     validationStep.state = completionObserved ? "error" : "pending";
-    resultStep.detail = "没有生成新版本";
+    resultStep.label = "本轮未生成新版本";
+    resultStep.detail = "当前 HTML 保持不变";
+    resultStep.state = "neutral";
   } else if (status === "no-change") {
     validationStep.detail = "校验完成，未发现有效差异";
     validationStep.state = "done";
@@ -157,19 +159,26 @@ export function deriveRunProgressSteps(run, handoffStatus = "idle") {
     resultStep.detail = "当前 HTML 保持不变";
     resultStep.state = "neutral";
   } else if (status === "ready-to-open") {
-    validationStep.detail = "完整性与范围校验通过";
-    validationStep.state = "done";
-    resultStep.label = "新版本已准备好";
-    resultStep.detail = "旧版未被覆盖，等待你审阅或直接打开";
+    const continuityNeedsReview = run.candidateAssessment?.status === "attention";
+    validationStep.detail = continuityNeedsReview
+      ? "HTML 可以打开，但与上一版的连续性需要确认"
+      : "HTML 健康检查与版本连续性检查完成";
+    validationStep.state = continuityNeedsReview ? "attention" : "done";
+    resultStep.label = continuityNeedsReview
+      ? "候选版本已保留"
+      : "新版本已准备好";
+    resultStep.detail = continuityNeedsReview
+      ? "页面变化较大，请先对比审阅再决定是否采用"
+      : "旧版未被覆盖，等待你审阅或直接打开";
     resultStep.state = "current";
   } else if (status === "complete") {
-    validationStep.detail = "完整性与范围校验通过";
+    validationStep.detail = "HTML 健康检查与版本连续性检查完成";
     validationStep.state = "done";
     resultStep.label = "最新版已打开";
     resultStep.detail = "当前画布已切换到新版本";
     resultStep.state = "done";
   } else if (status === "validating") {
-    validationStep.detail = "正在核对完整性、修改范围和文件";
+    validationStep.detail = "正在检查 HTML 是否可用并核对上一版连续性";
     validationStep.state = "current";
   } else if (status === "committing") {
     validationStep.detail = "检查已通过，正在安全保存新版本";
@@ -205,6 +214,29 @@ export function validationReviewFromRecord(value) {
   };
 }
 
+export function candidateAssessmentFromRecord(value) {
+  if (!isRecord(value)) return null;
+  const status = String(value.status || "");
+  if (!["ready", "attention", "blocked"].includes(status)) return null;
+  const health = isRecord(value.health) ? value.health : {};
+  const continuity = isRecord(value.continuity) ? value.continuity : {};
+  return {
+    status,
+    issueCodes: Array.isArray(value.issueCodes)
+      ? value.issueCodes.map(String).filter(Boolean)
+      : [],
+    health: {
+      completeDocument: health.completeDocument === true,
+      bodyHasContent: health.bodyHasContent === true,
+      executableSurfaceUnchanged:
+        health.executableSurfaceUnchanged === true,
+    },
+    continuity: {
+      status: continuity.status === "related" ? "related" : "uncertain",
+    },
+  };
+}
+
 function isRecord(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -220,6 +252,40 @@ function safeVersionLabel(versionId) {
   return match ? `版本 ${Number(match[1])}` : String(versionId || "");
 }
 
+const ERROR_COPY_BY_CODE = new Map([
+  ["INCOMPLETE_HTML", "返回的 HTML 不完整，无法打开。"],
+  ["HTML_DOCUMENT_INCOMPLETE", "返回的 HTML 不完整，无法打开。"],
+  ["HTML_BODY_EMPTY", "返回的 HTML 没有可显示的页面内容。"],
+  ["EXECUTABLE_CONTENT_CHANGED", "返回内容新增或修改了可执行脚本，未自动采用。"],
+  ["OUTPUT_HASH_MISMATCH", "返回文件在完成后发生了变化，当前 HTML 没有被覆盖。"],
+  ["BASE_SNAPSHOT_HASH_MISMATCH", "本轮基准 HTML 与提交时不一致，当前 HTML 没有被覆盖。"],
+  ["COMPARISON_HASH_MISMATCH", "返回结果与完成记录不一致，当前 HTML 没有被覆盖。"],
+  ["COMPLETION_IDENTITY_MISMATCH", "返回结果不属于当前这一轮，当前 HTML 没有被覆盖。"],
+  ["OUTPUT_MANAGED_META_MISMATCH", "返回结果的页面身份与当前项目不一致，当前 HTML 没有被覆盖。"],
+  ["OUTPUT_PROTOCOL_VIOLATION", "返回文件不符合本轮约定，当前 HTML 没有被覆盖。"],
+  ["UNEXPECTED_ATTEMPT_OUTPUT", "本轮返回了约定之外的文件，当前 HTML 没有被覆盖。"],
+  ["UNEXPECTED_OUTPUT_FILE", "本轮返回了约定之外的文件，当前 HTML 没有被覆盖。"],
+]);
+
+function localizedRunError(rawError, completionObserved) {
+  const error = isRecord(rawError) ? rawError : {};
+  const code = isRecord(rawError) ? String(error.code || "") : "";
+  const rawMessage = isRecord(rawError)
+    ? String(error.message || "")
+    : String(rawError || "");
+  const mapped = ERROR_COPY_BY_CODE.get(code);
+  if (mapped) return { message: mapped, code };
+  if (/^[\s\S]*[\u3400-\u9fff][\s\S]*$/u.test(rawMessage)) {
+    return { message: rawMessage, code };
+  }
+  return {
+    message: completionObserved
+      ? "返回的 HTML 无法安全采用，当前页面没有被覆盖。"
+      : "本轮没有收到可用的完成结果，页面和评论仍然保留。",
+    code,
+  };
+}
+
 export function activeRunFromRecord(raw) {
   if (!isRecord(raw)) return null;
   const conflict = isRecord(raw.conflict) ? raw.conflict : raw;
@@ -227,6 +293,17 @@ export function activeRunFromRecord(raw) {
   if (!requestId) return null;
   const candidateVersionId = String(raw.candidateVersionId || "");
   const candidateVersionOrdinal = Number(raw.candidateVersionOrdinal);
+  const status = canonicalLifecycleState(
+    raw.status || raw.lifecycleState || "processing",
+  );
+  const completionObserved = raw.completionObserved === true
+    || COMPLETION_OBSERVED.has(status);
+  const localizedError = raw.error
+    ? localizedRunError(raw.error, completionObserved)
+    : null;
+  const candidateAssessment = candidateAssessmentFromRecord(
+    raw.candidateAssessment,
+  );
   return {
     projectId: String(raw.projectId || ""),
     documentId: String(raw.documentId || ""),
@@ -235,9 +312,7 @@ export function activeRunFromRecord(raw) {
     requestPath: String(raw.requestPath || ""),
     attemptPath: String(raw.attemptPath || ""),
     handoffMessage: String(raw.handoffMessage || ""),
-    status: canonicalLifecycleState(
-      raw.status || raw.lifecycleState || "processing",
-    ),
+    status,
     sourcePath: String(raw.sourcePath || ""),
     baseSnapshotSha256: String(raw.baseSnapshotSha256 || raw.sourceSha256 || ""),
     previousVersionId: raw.previousVersionId
@@ -267,14 +342,9 @@ export function activeRunFromRecord(raw) {
     ...(Number.isFinite(Number(raw.changeEventCount))
       ? { changeEventCount: Number(raw.changeEventCount) }
       : {}),
-    ...(raw.error
-      ? {
-          error: isRecord(raw.error)
-            ? String(raw.error.message || "")
-            : String(raw.error),
-        }
-      : {}),
-    ...(raw.completionObserved === true ? { completionObserved: true } : {}),
+    ...(localizedError?.message ? { error: localizedError.message } : {}),
+    ...(localizedError?.code ? { errorCode: localizedError.code } : {}),
+    ...(completionObserved ? { completionObserved: true } : {}),
     ...(raw.conflictId || conflict.conflictId
       ? { conflictId: String(raw.conflictId || conflict.conflictId) }
       : {}),
@@ -296,5 +366,6 @@ export function activeRunFromRecord(raw) {
       ? { validationReview: validationReviewFromRecord(raw.validationReview) }
       : {}),
     ...(isRecord(raw.scopeReport) ? { scopeReport: raw.scopeReport } : {}),
+    ...(candidateAssessment ? { candidateAssessment } : {}),
   };
 }

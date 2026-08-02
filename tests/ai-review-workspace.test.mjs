@@ -30,7 +30,7 @@ test("formal review loads and verifies the immutable candidate without activatin
   assert.doesNotMatch(loader, /activateReadyVersion/);
   assert.match(
     workbench,
-    /onAccept=\{\(\) => \{[\s\S]*?setReadyReviewSession\(null\)[\s\S]*?requestAnimationFrame\(\(\) => void activateReadyResult\(\)\)/,
+    /onAccept=\{\(\) => \{[\s\S]*?setReadyReviewSession\(null\)[\s\S]*?requestAnimationFrame\(\(\) => void activateReadyResult\(\{[\s\S]*?reviewed: true[\s\S]*?\}\)\)/,
   );
 });
 

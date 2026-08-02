@@ -74,7 +74,8 @@ v3 是干净切换后的唯一运行时协议。v1/v2 记录在切换前整体�
                     └── <attemptId>/
                         ├── USER_SUPPLEMENT.json
                         ├── supplement-attachments/
-                        ├── validation-review.json
+                        ├── candidate-assessment.json
+                        ├── validation-review.json (legacy only)
                         ├── annotations.json
                         ├── output/index.html
                         ├── completion.json
@@ -364,7 +365,7 @@ Prompt 不让 AI 手写 `completion.json`，也不让 AI猜候选版本号。
 
 `USER_SUPPLEMENT.json` 只能由受控 helper 追加，内部 AI 不得直接编辑。helper 可把内部 AI 当前对话新增的文件或图片复制到 `supplement-attachments/` 并记录字节数与 SHA-256；无法取得原件时只能写 `description-only`，历史中明确显示“原件未归档”。旧记录不可覆盖，只能通过 `add / amend / retract` 形成审计链。`add.refersTo` 可以指向它所补充的原始 `instructionId`；`amend / retract` 必须引用原始 instruction 或更早的 supplement record。所有写入、封存、建版与历史读取都使用同一组冻结 instruction 身份校验。
 
-`amend` 会替代它引用的旧 supplement record，`retract` 会撤销它引用的 record；范围校验只消费最终仍有效的记录。有效补充可以授权原始 TargetRef 之外的精确文字、属性或行内样式值，但 before/after 必须同时能由补充原话证明；脚本、共享 CSS、身份、Hash、歧义目标和未提及的其他变化仍按硬边界拒绝。
+`amend` 会替代它引用的旧 supplement record，`retract` 会撤销它引用的 record；Prompt 和历史只消费最终仍有效的记录。有效补充与原始 TargetRef 一起解释用户想改什么，但不充当候选 Version 的逐节点授权表。脚本/handler/可执行 URL、身份、Hash、路径与协议仍按硬边界拒绝；普通正文、属性、结构和样式由审阅流程确认。
 
 finalizer 可写：
 
@@ -519,21 +520,28 @@ Completion 必须在 output 完全关闭后最后写入。完成后 output 封�
 - Request、Attempt、评论和诊断保留。
 - runtime state 回到 editing。
 
-### 12.1 强制 ScopeValidator
+### 12.1 候选 HTML 健康与连续性评估
 
-比较 Hash 不同不代表可以直接建版。工作台必须以冻结 base、AI output 和 v3 TargetRef 独立生成：
+比较 Hash 不同不代表可以直接打开。Bridge 必须以冻结 base 和 AI output 生成：
 
-[scope-report.v1.schema.json](../schemas/scope-report.v1.schema.json)
+[candidate-assessment.v1.schema.json](../schemas/candidate-assessment.v1.schema.json)
 
-报告必须记录：
+`candidate-assessment.json` 记录：
 
-- base/output 精确 Hash 与比较 Hash。
-- Request、Attempt 和允许修改的 TargetRef。
-- 每个文字、属性、结构、inline style、共享 CSS、JavaScript、受管 metadata 或语义规范化差异。
-- 差异两侧的 UTF-16 位置、分类、目标归属、证据摘要和允许状态。
-- `enforcementMode=enforce` 与最终 `pass|fail`。
+- base/output 精确 Hash 与比较 Hash，以及 Request、Attempt、候选 Version 身份；
+- 完整文档、非空可显示 body、可执行表面不变三项健康结果；
+- 可见文字 shingles、稳定 id/data 锚点、class、资源引用和 title 的粗粒度重合证据；
+- `ready | attention | blocked` 与稳定 issue code。
 
-Scope report 仍以严格目标合同标记 `pass|fail`，完整记录目标外正文、属性、结构、CSS、JavaScript和无法唯一解析的目标。Bridge 再按风险分级：受管 meta、目标歧义/失联与目标外脚本是硬阻断；其余目标外正文、属性、普通结构与样式属于软观察，保存 `validation-review.json` 后可以进入 Version 事务。硬阻断的 Attempt 保留 output、completion、scope report 和失败 outcome，但不得进入 Version 事务，也不得消耗候选版本号。
+`blocked` 只用于候选无法作为正常 HTML 使用，或可执行表面发生变化。协议、身份、Hash、
+路径、受管 metadata 和 completion 封存仍在 assessment 之前硬阻断。`attention` 表示 HTML
+可以打开，但系统无法充分证明它继承了上一版；Bridge 仍创建不可变候选 Version，界面必须
+移除“直接打开”并要求先进入隔离对比审阅。`ready` 允许审阅或直接打开。
+
+v3 TargetRef、评论和 supplement 继续作为生成指令与历史证据，但不再逐节点限制候选
+Version。旧 Attempt 的 `scope-report.json` 与 `validation-review.json` 仍可只读展示；新
+Attempt 不生成它们。`scope-validator.mjs` 继续服务直接 source patch、兼容性和独立合同测试，
+不得重新接入 AI Version 的接受门禁。
 
 ## 13. 校验矩阵
 
@@ -549,13 +557,15 @@ Scope report 仍以严格目标合同标记 `pass|fail`，完整记录目标外�
 | 比较 Hash | `comparison-hash-mismatch` |
 | canonicalizationVersion | `canonicalization-mismatch` |
 | output 完整性 | `invalid-html` |
+| output body 无可显示内容 | `HTML_BODY_EMPTY`，阻断 |
+| 脚本、inline handler、`javascript:` URL 或 meta refresh 变化 | `EXECUTABLE_CONTENT_CHANGED`，阻断 |
+| 与上一版共同特征不足 | `PAGE_CONTINUITY_UNCERTAIN`，保留候选并强制先审阅 |
 | completion 后 output 改变 | `sealed-output-modified` |
 | active run 已取消/替代 | `stale-completion` |
-| TargetRef 无法唯一解析 | `scope-target-unresolved` |
-| 身份、脚本或 TargetRef 完整性错误 | 硬阻断，不可忽略 |
-| 目标外正文、属性、普通结构或样式变化 | 记录为 `observed`，展示变化摘要但不阻断 Version |
 
-硬校验失败不得创建 Version 或推进 latest Version。范围/质量类软观察必须写入 `validation-review.json`，并在产品界面用少量前后示例说明“已记录评论范围外的额外变化”，不直接暴露内部校验代码，也不要求用户先豁免。旧运行态中的 `pending` 记录在恢复时转换为 `observed`，继续使用同一个不可变候选。身份、脚本、协议、路径、Hash、目标歧义和完整性仍是不可忽略的硬边界。
+硬校验失败不得创建 Version 或推进 latest Version。前端只把内部 error code 映射为稳定的
+中文原因，不显示原始英文异常或代码串。失败与 no-change outcome 由 workspace API 作为
+`recentRunOutcome` 恢复；用户返回编辑后仍可通过“上轮处理”再次打开，重启也不丢失。
 
 ## 14. 两阶段 Version 事务
 
@@ -569,7 +579,7 @@ Scope report 仍以严格目标合同标记 `pass|fail`，完整记录目标外�
 2. 分配 `transactionId`。
 3. 写 `transaction.json`，包含 `previousSourcePath`、冻结源 Hash、候选 Hash、`activeWorkingCopyRelativePath=working/V1.x.html` 与全部身份。
 4. 将 output 复制到 `prepared-version/files/index.html`。
-5. 写 v3 `version.json`、scope report 引用和 annotations archive。
+5. 写 v3 `version.json` 和 annotations archive；assessment 留在 Attempt，并由同一 `requestId + attemptId` 关联。
 6. 校验准备内容 Hash。
 7. 读取提交前项目当前指向的 HTML。
 8. 若源 Hash 已变化，事务进入 `awaiting-conflict-resolution`。
@@ -787,7 +797,7 @@ Attempt 的 `outcome.json` 是工作台写入的严格诊断终态，不是完�
 - 拒绝路径穿越、软链接逃逸和跨项目引用。
 - 校验每个声明文件的 byte length 与 SHA-256。
 - 记录受支持的 Schema/finalizer/canonicalization 版本。
-- 对 completion、ScopeValidator、事务恢复和 commit marker 保持幂等。
+- 对 completion、candidate assessment、事务恢复和 commit marker 保持幂等。
 - 将日志与用户内容分开，避免在诊断中泄露完整 HTML 或评论。
 
 ## 22. 协议验收

@@ -491,7 +491,7 @@ test("a verified AI result stays pending through desktop review until the user a
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
 
     await expect(launched.page.getByText(
-      "修改结果已通过检查",
+      "修改结果已完成检查",
       { exact: true },
     ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
     await expect(
@@ -602,7 +602,7 @@ test("two AI versions activate in order and survive relaunch without identity dr
     );
     runOfficialFinalizer(firstRequest.requestRoot, firstRequest.changeRequest);
     await expect(launched.page.getByText(
-      "修改结果已通过检查",
+      "修改结果已完成检查",
       { exact: true },
     ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
     await launched.page.getByRole("button", { name: "直接打开" }).click();
@@ -631,7 +631,7 @@ test("two AI versions activate in order and survive relaunch without identity dr
     );
     runOfficialFinalizer(secondRequest.requestRoot, secondRequest.changeRequest);
     await expect(launched.page.getByText(
-      "修改结果已通过检查",
+      "修改结果已完成检查",
       { exact: true },
     ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
     await launched.page.getByRole("button", { name: "直接打开" }).click();
@@ -690,7 +690,7 @@ test("two AI versions activate in order and survive relaunch without identity dr
   }
 });
 
-test("an internal AI supplement is sealed, scope-authorized, opened, and shown in history", async () => {
+test("an internal AI supplement is sealed, applied, opened, and shown in history", async () => {
   test.setTimeout(180_000);
   const fixture = createSourceFixture("supplement-ai-loop.html");
   const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
@@ -724,7 +724,7 @@ test("an internal AI supplement is sealed, scope-authorized, opened, and shown i
       .replace("校验通过", "补充指令已回写"));
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
     await expect(launched.page.getByText(
-      "修改结果已通过检查",
+      "修改结果已完成检查",
       { exact: true },
     ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
     await expect(launched.page.getByText(
@@ -773,7 +773,7 @@ test("an internal AI supplement is sealed, scope-authorized, opened, and shown i
   }
 });
 
-test("a no-change result returns to editable requirements without a dead end", async () => {
+test("a no-change result returns to editing and remains reopenable", async () => {
   test.setTimeout(120_000);
   const fixture = createSourceFixture("no-change-recovery.html");
   const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
@@ -797,15 +797,19 @@ test("a no-change result returns to editable requirements without a dead end", a
     await expect(launched.page.getByRole("button", { name: "返回编辑" }))
       .toBeVisible();
     await expect(launched.page.getByRole("button", { name: "修改要求" }))
-      .toBeVisible();
+      .toHaveCount(0);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
 
-    await launched.page.getByRole("button", { name: "修改要求" }).click();
-    const editor = launched.page.getByRole("textbox", { name: /编辑评论/u });
-    await expect(editor).toBeVisible();
-    await expect(editor).toHaveValue(new RegExp(UPDATED_TEXT, "u"));
+    await launched.page.getByRole("button", { name: "返回编辑" }).click();
+    await expect(launched.page.getByRole("button", { name: "上轮处理" }))
+      .toBeVisible();
     await expect(launched.page.getByRole("button", { name: /发送至 Qoder/u }))
       .toBeEnabled();
+    await launched.page.getByRole("button", { name: "上轮处理" }).click();
+    await expect(launched.page.getByText(
+      "这次没有产生有效变化",
+      { exact: true },
+    ).filter({ visible: true }).first()).toBeVisible();
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
@@ -1639,7 +1643,7 @@ test("a malformed AI HTML return is rejected before completion or opening", asyn
   }
 });
 
-test("a soft out-of-scope AI return is audited without blocking the ready version", async () => {
+test("a broad but related AI return is accepted without a target-scope error", async () => {
   const fixture = createSourceFixture();
   const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
   try {
@@ -1655,13 +1659,12 @@ test("a soft out-of-scope AI return is audited without blocking the ready versio
         "<title>unauthorized title mutation</title>",
       ));
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
-    await expect(launched.page.getByText("已记录评论范围外的额外变化", { exact: true })
-      .filter({ visible: true }).first())
-      .toBeVisible({ timeout: 30_000 });
     await expect(launched.page.getByText(
-      "修改结果已通过检查",
+      "修改结果已完成检查",
       { exact: true },
     ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+    await expect(launched.page.getByText("已记录评论范围外的额外变化", { exact: true }))
+      .toHaveCount(0);
     await expect(launched.page.getByRole("button", { name: "采用这些额外变化" }))
       .toHaveCount(0);
     const active = await launched.page.evaluate(
@@ -1694,7 +1697,7 @@ test("a committed version that the desktop cannot activate stays visibly blocked
     writeAiOutput(request.requestRoot, (base) => base.replace(ORIGINAL_TEXT, UPDATED_TEXT));
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
     await expect(launched.page.getByText(
-      "修改结果已通过检查",
+      "修改结果已完成检查",
       { exact: true },
     ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
     await launched.page.getByRole("button", {

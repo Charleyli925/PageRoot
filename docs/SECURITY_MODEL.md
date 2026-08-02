@@ -35,7 +35,7 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   exposed. The document response blocks `file:` resource loading and authored
   base URLs. The application renderer's CSP remains strict and the preview
   scheme does not receive `bypassCSP`.
-- Strict schemas, frozen inputs and identity/Hash checks before accepting AI output; scope evidence is always recorded, with protocol/script/target-integrity findings hard-blocked and ordinary breadth findings observed without a user-waiver loop
+- Strict schemas, frozen inputs and identity/Hash/path checks before accepting AI output; complete-document, non-empty-body and unchanged executable-surface checks remain hard boundaries, while weak page continuity forces isolated review instead of silently opening or falsely rejecting the candidate
 - Review-before-open reads only the frozen current HTML and immutable candidate
   Version after rechecking their identities and Hashes. Both copies render in
   unique-origin sandboxed frames; authored scripts, refresh directives and

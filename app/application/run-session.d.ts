@@ -20,6 +20,7 @@ export type RunSessionSnapshot = {
   activeRun: ActiveRun | null;
   activeHandoff: RunHandoffState | null;
   activeHandoffMayBeRunning: boolean;
+  recentOutcome: ActiveRun | null;
   backgroundResults: ReadonlyArray<readonly [string, RunBackgroundResult]>;
 };
 
@@ -48,6 +49,11 @@ export class RunSession {
   ): RunHandoffState | null;
   clearHandoff(sourcePath: string | null | undefined): boolean;
   clearActiveHandoff(): boolean;
+  rememberOutcome(run: ActiveRun): ActiveRun | null;
+  forgetOutcome(sourcePath: string | null | undefined): boolean;
+  outcomeForSource(
+    sourcePath: string | null | undefined,
+  ): ActiveRun | null;
   markResult(
     sourcePath: string,
     result: RunBackgroundResult,

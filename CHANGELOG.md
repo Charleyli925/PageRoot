@@ -32,6 +32,14 @@ Notable user-visible changes are documented here. This project follows Semantic 
   canvases now acknowledge the same generation, safe-save status cannot reuse
   stale content, and the “+” project picker automatically repairs one clean
   projection mismatch instead of silently doing nothing.
+- Replaced subtree-exact AI acceptance with a simpler candidate check: complete
+  visible HTML and an unchanged executable surface remain hard requirements,
+  while coarse page continuity now routes uncertain results into mandatory
+  side-by-side review instead of falsely failing broad but valid edits.
+- Localized terminal AI errors, fixed long error text overlapping the process
+  timeline, reduced duplicate terminal actions to one “Return to editing”
+  action, and added a restart-safe “Previous run” entry for reopening the last
+  error or no-change outcome.
 - Made AI results review-first: ready results now offer a highlighted
   side-by-side review and a secondary direct-open action, with full-page
   change filters, synchronized navigation, and reversible “keep current”

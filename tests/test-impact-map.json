@@ -74,7 +74,7 @@
       "prerequisites": ["build-desktop"]
     },
     "ai-smoke": {
-      "description": "Run one successful deterministic AI loop and one out-of-scope fail-closed path.",
+      "description": "Run one deterministic review/activation loop and one broad related-edit regression path.",
       "prerequisites": ["build-desktop"]
     },
     "package-build": {
@@ -443,7 +443,7 @@
     {
       "id": "bridge-lifecycle",
       "patterns": [
-        "^scripts/(?:workspace-bridge|lifecycle-core|finalize-attempt|record-user-supplement|user-supplement-core|scope-validator|html-source-parser|attachment-storage|draft-aggregate|draft-service|project-context-service|source-history-service|product-contract|target-identity)\\.mjs$"
+        "^scripts/(?:workspace-bridge|lifecycle-core|finalize-attempt|record-user-supplement|user-supplement-core|candidate-assessment|scope-validator|html-source-parser|attachment-storage|draft-aggregate|draft-service|project-context-service|source-history-service|product-contract|target-identity)\\.mjs$"
       ],
       "suites": ["ai-smoke"],
       "nodeTests": [

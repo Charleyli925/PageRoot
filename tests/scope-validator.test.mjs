@@ -25,6 +25,7 @@ import {
   createInsertionPointTargetRef,
   createTargetRef,
 } from "../app/lib/target-resolver.js";
+import { assessHtmlCandidate } from "../scripts/candidate-assessment.mjs";
 import { injectManagedMeta, sha256 } from "../scripts/lifecycle-core.mjs";
 import { validateScope } from "../scripts/scope-validator.mjs";
 
@@ -110,6 +111,45 @@ async function scopeSchemaValidator() {
   );
   return ajv.compile(schema);
 }
+
+test("candidate assessment distinguishes usable edits, uncertain continuity, and unusable HTML", () => {
+  const baseHtml = documentHtml();
+  const related = assessHtmlCandidate({
+    baseHtml,
+    outputHtml: baseHtml
+      .replace('<p id="inside">', '<div id="inside">')
+      .replace("</p>", "</div>"),
+  });
+  assert.equal(related.status, "ready");
+  assert.equal(related.health.completeDocument, true);
+
+  const unrelated = assessHtmlCandidate({
+    baseHtml,
+    outputHtml: `<!doctype html><html><head><title>另一页</title><script id="shared-script">window.scopeFixture = 1;</script></head><body><article>全新的内容与结构</article></body></html>`,
+  });
+  assert.equal(unrelated.status, "attention");
+  assert.deepEqual(unrelated.issueCodes, ["PAGE_CONTINUITY_UNCERTAIN"]);
+
+  const empty = assessHtmlCandidate({
+    baseHtml,
+    outputHtml: `<!doctype html><html><head><title>空页</title><script id="shared-script">window.scopeFixture = 1;</script></head><body></body></html>`,
+  });
+  assert.equal(empty.status, "blocked");
+  assert.deepEqual(empty.issueCodes, ["HTML_BODY_EMPTY"]);
+
+  const executableChange = assessHtmlCandidate({
+    baseHtml,
+    outputHtml: baseHtml.replace(
+      "window.scopeFixture = 1",
+      "window.scopeFixture = 2",
+    ),
+  });
+  assert.equal(executableChange.status, "blocked");
+  assert.deepEqual(
+    executableChange.issueCodes,
+    ["EXECUTABLE_CONTENT_CHANGED"],
+  );
+});
 
 test("scope report is strict and classifies target-inside text, attributes, structure and inline style", async () => {
   const output = documentHtml()
@@ -945,7 +985,7 @@ async function runFinalizer(workspace, run) {
   ]);
 }
 
-test("workspace lifecycle keeps text scope exact and hard-blocks identity or script widening", async (t) => {
+test("workspace lifecycle treats comment targets as guidance and blocks executable changes", async (t) => {
   const root = await realpath(
     await mkdtemp(join(tmpdir(), "html-ai-text-scope-")),
   );
@@ -989,7 +1029,7 @@ test("workspace lifecycle keeps text scope exact and hard-blocks identity or scr
       "attribute",
       (html) => html.replace(
         '<p id="inside">',
-        '<p id="inside" id="shadow">',
+        '<p id="inside" data-shadow="true">',
       ),
     ],
     [
@@ -998,8 +1038,9 @@ test("workspace lifecycle keeps text scope exact and hard-blocks identity or scr
     ],
   ];
 
-  let hardCaseCount = 0;
-  let softCaseCount = 0;
+  let blockedCaseCount = 0;
+  let readyCaseCount = 0;
+  let nextVersionOrdinal = 2;
   for (const [expectedKind, mutate] of rejectedCases) {
     const run = (
       await postJson(bridge.baseUrl, "/request", {
@@ -1019,7 +1060,10 @@ test("workspace lifecycle keeps text scope exact and hard-blocks identity or scr
         ],
       })
     ).body;
-    assert.equal(run.candidateVersionId, "ver_0002");
+    assert.equal(
+      run.candidateVersionId,
+      `ver_${String(nextVersionOrdinal).padStart(4, "0")}`,
+    );
     const base = await readFile(run.inputPath, "utf8");
     await writeFile(run.outputPath, mutate(base), "utf8");
     await runFinalizer(workspace, run);
@@ -1027,50 +1071,37 @@ test("workspace lifecycle keeps text scope exact and hard-blocks identity or scr
       bridge.baseUrl,
       `/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
     );
-    const scopeReport = status.body.scopeReport || JSON.parse(
-      await readFile(join(run.attemptPath, "scope-report.json"), "utf8"),
+    const candidateAssessment = status.body.candidateAssessment || JSON.parse(
+      await readFile(join(run.attemptPath, "candidate-assessment.json"), "utf8"),
     );
     if (status.body.status === "error") {
-      hardCaseCount += 1;
-      assert.equal(status.body.error.code, "HARD_VALIDATION_FAILED");
-      assert.ok(status.body.error.details.hardViolationCodes.length > 0);
+      blockedCaseCount += 1;
+      assert.equal(expectedKind, "script");
+      assert.equal(status.body.error.code, "EXECUTABLE_CONTENT_CHANGED");
+      assert.equal(candidateAssessment.status, "blocked");
     } else {
-      softCaseCount += 1;
-      assert.ok(
-        ["ready-to-open", "no-change"].includes(status.body.status),
-        status.body.status,
+      readyCaseCount += 1;
+      assert.equal(status.body.status, "ready-to-open");
+      assert.equal(candidateAssessment.status, "ready");
+      const cancelled = await postJson(
+        bridge.baseUrl,
+        "/active-run/cancel",
+        {
+          sourcePath,
+          requestId: run.requestId,
+          attemptId: run.attemptId,
+        },
       );
-      const validationReview = status.body.validationReview || JSON.parse(
-        await readFile(join(run.attemptPath, "validation-review.json"), "utf8"),
-      );
-      assert.equal(validationReview.status, "observed");
-      assert.deepEqual(validationReview.hardViolationCodes, []);
-      if (status.body.status === "ready-to-open") {
-        const cancelled = await postJson(
-          bridge.baseUrl,
-          "/active-run/cancel",
-          {
-            sourcePath,
-            requestId: run.requestId,
-            attemptId: run.attemptId,
-          },
-        );
-        assert.equal(cancelled.response.status, 200);
-        assert.equal(cancelled.body.status, "cancelled");
-      }
+      assert.equal(cancelled.response.status, 200);
+      assert.equal(cancelled.body.status, "cancelled");
+      nextVersionOrdinal += 1;
     }
-    assert.ok(
-      scopeReport.differences.some(
-        (difference) =>
-          difference.kind === expectedKind
-          && difference.classification === "target-outside",
-      ),
-      expectedKind,
-    );
+    await assert.rejects(access(join(run.attemptPath, "scope-report.json")));
+    await assert.rejects(access(join(run.attemptPath, "validation-review.json")));
     assert.equal(await readFile(sourcePath, "utf8"), frozenSource);
   }
-  assert.ok(hardCaseCount > 0, "at least one identity/security widening must hard-fail");
-  assert.ok(softCaseCount > 0, "reviewable breadth findings must be recorded automatically");
+  assert.equal(blockedCaseCount, 1);
+  assert.equal(readyCaseCount, 2);
 
   const acceptedRun = (
     await postJson(bridge.baseUrl, "/request", {
@@ -1104,9 +1135,10 @@ test("workspace lifecycle keeps text scope exact and hard-blocks identity or scr
   );
   assert.equal(accepted.body.status, "ready-to-open");
   assert.equal(accepted.body.versionId, acceptedRun.candidateVersionId);
+  assert.equal(accepted.body.candidateAssessment.status, "ready");
 });
 
-test("a soft scope finding is audited without blocking the ready Version", async (t) => {
+test("an unrelated but usable HTML candidate is preserved with mandatory-review attention", async (t) => {
   const root = await realpath(
     await mkdtemp(join(tmpdir(), "html-ai-soft-scope-observed-")),
   );
@@ -1157,7 +1189,17 @@ test("a soft scope finding is audited without blocking the ready Version", async
   const frozenHtml = await readFile(run.inputPath, "utf8");
   await writeFile(
     run.outputPath,
-    frozenHtml.replace("目标外正文", "用户确认保留的范围外调整"),
+    `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>完全不同的页面</title>
+  <script id="shared-script">window.scopeFixture = 1;</script>
+</head>
+<body>
+  <article><h1>另一份产品说明</h1><p>这里没有沿用原页面内容。</p></article>
+</body>
+</html>`,
     "utf8",
   );
   await runFinalizer(workspace, run);
@@ -1168,22 +1210,42 @@ test("a soft scope finding is audited without blocking the ready Version", async
   );
   assert.equal(ready.response.status, 200, JSON.stringify(ready.body));
   assert.equal(ready.body.status, "ready-to-open");
-  assert.equal(ready.body.validationReview.status, "observed");
-  assert.deepEqual(ready.body.validationReview.hardViolationCodes, []);
-  assert.ok(ready.body.validationReview.softViolationCodes.length > 0);
+  assert.equal(ready.body.candidateAssessment.status, "attention");
+  assert.deepEqual(
+    ready.body.candidateAssessment.issueCodes,
+    ["PAGE_CONTINUITY_UNCERTAIN"],
+  );
   assert.equal(ready.body.versionId, "ver_0002");
   assert.equal(ready.body.currentPath, sourcePath);
   assert.notEqual(ready.body.workingCopyPath, sourcePath);
   assert.equal(await readFile(sourcePath, "utf8"), originalHtml);
 
-  const persistedReview = JSON.parse(
-    await readFile(join(run.attemptPath, "validation-review.json"), "utf8"),
+  const persistedAssessment = JSON.parse(
+    await readFile(join(run.attemptPath, "candidate-assessment.json"), "utf8"),
   );
-  assert.equal(persistedReview.status, "observed");
-  assert.equal(persistedReview.waiver, undefined);
+  assert.equal(persistedAssessment.status, "attention");
+  await assert.rejects(access(join(run.attemptPath, "scope-report.json")));
+  await assert.rejects(access(join(run.attemptPath, "validation-review.json")));
+  assert.notEqual(frozenHtml, await readFile(run.outputPath, "utf8"));
+
+  persistedAssessment.requestId = "req_tampered";
+  await writeFile(
+    join(run.attemptPath, "candidate-assessment.json"),
+    `${JSON.stringify(persistedAssessment, null, 2)}\n`,
+    "utf8",
+  );
+  const tampered = await requestJson(
+    bridge.baseUrl,
+    `/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
+  );
+  assert.equal(tampered.response.status, 409);
+  assert.equal(
+    tampered.body.error.code,
+    "CANDIDATE_ASSESSMENT_IDENTITY_MISMATCH",
+  );
 });
 
-test("workspace lifecycle records soft scope classes without blocking the candidate", async (t) => {
+test("workspace lifecycle accepts broad page edits but still blocks changed executable content", async (t) => {
   const root = await realpath(
     await mkdtemp(join(tmpdir(), "html-ai-scope-lifecycle-")),
   );
@@ -1282,49 +1344,30 @@ test("workspace lifecycle records soft scope classes without blocking the candid
       expectedKind,
     );
     if (hardFailure) {
-      assert.equal(status.body.error.code, "HARD_VALIDATION_FAILED");
-      assert.ok(status.body.error.details.hardViolationCodes.length > 0);
+      assert.equal(status.body.error.code, "EXECUTABLE_CONTENT_CHANGED");
+      assert.equal(status.body.candidateAssessment.status, "blocked");
     } else {
-      assert.equal(status.body.validationReview.status, "observed", expectedKind);
-      assert.deepEqual(
-        status.body.validationReview.hardViolationCodes,
-        [],
-        expectedKind,
-      );
-      assert.ok(
-        status.body.validationReview.softViolationCodes.length > 0,
-        expectedKind,
-      );
+      assert.equal(status.body.candidateAssessment.status, "ready", expectedKind);
     }
-    const scopeReportPath = join(run.attemptPath, "scope-report.json");
-    const validationReviewPath = join(
-      run.attemptPath,
-      "validation-review.json",
-    );
+    const assessmentPath = join(run.attemptPath, "candidate-assessment.json");
     const outcomePath = join(run.attemptPath, "outcome.json");
     await Promise.all([
       access(run.outputPath),
       access(run.completionPath),
-      access(scopeReportPath),
-      ...(hardFailure ? [access(outcomePath)] : [access(validationReviewPath)]),
+      access(assessmentPath),
+      access(outcomePath),
     ]);
-    const persistedReport = JSON.parse(
-      await readFile(scopeReportPath, "utf8"),
+    const persistedAssessment = JSON.parse(
+      await readFile(assessmentPath, "utf8"),
     );
-    assert.equal(persistedReport.verdict, "fail", expectedKind);
-    assert.ok(
-      persistedReport.differences.some(
-        (difference) =>
-          difference.kind === expectedKind
-          && difference.classification === "target-outside",
-      ),
+    assert.equal(
+      persistedAssessment.status,
+      hardFailure ? "blocked" : "ready",
       expectedKind,
     );
+    await assert.rejects(access(join(run.attemptPath, "scope-report.json")));
+    await assert.rejects(access(join(run.attemptPath, "validation-review.json")));
     if (!hardFailure) {
-      const persistedReview = JSON.parse(
-        await readFile(validationReviewPath, "utf8"),
-      );
-      assert.equal(persistedReview.status, "observed", expectedKind);
       const cancelled = await postJson(
         bridge.baseUrl,
         "/active-run/cancel",
@@ -1342,7 +1385,6 @@ test("workspace lifecycle records soft scope classes without blocking the candid
     const persistedOutcome = JSON.parse(
       await readFile(outcomePath, "utf8"),
     );
-    assert.equal(persistedReport.verdict, "fail", expectedKind);
     assert.equal(
       persistedOutcome.status,
       hardFailure ? "failed" : "cancelled",
@@ -1351,7 +1393,7 @@ test("workspace lifecycle records soft scope classes without blocking the candid
     if (hardFailure) {
       assert.equal(
         persistedOutcome.error.code,
-        "HARD_VALIDATION_FAILED",
+        "EXECUTABLE_CONTENT_CHANGED",
         expectedKind,
       );
     }
@@ -1410,22 +1452,13 @@ test("workspace lifecycle records soft scope classes without blocking the candid
   assert.equal(accepted.response.status, 200);
   assert.equal(accepted.body.status, "ready-to-open");
   assert.equal(accepted.body.versionId, acceptedVersionId);
-  const acceptedReport = JSON.parse(
+  const acceptedAssessment = JSON.parse(
     await readFile(
-      join(acceptedRun.attemptPath, "scope-report.json"),
+      join(acceptedRun.attemptPath, "candidate-assessment.json"),
       "utf8",
     ),
   );
-  assert.equal(acceptedReport.verdict, "pass");
-  assert.equal(acceptedReport.summary.violationCount, 0);
-  assert.ok(
-    acceptedReport.differences.some(
-      (difference) =>
-        difference.kind === "finalizer-metadata"
-        && difference.allowed
-        && !difference.material,
-    ),
-  );
+  assert.equal(acceptedAssessment.status, "ready");
   assert.equal(
     (await readdir(
       join(opened.projectRoot, "versions"),

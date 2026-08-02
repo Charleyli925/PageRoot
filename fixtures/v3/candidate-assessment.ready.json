@@ -1,0 +1,41 @@
+{
+  "schemaVersion": "1.0.0",
+  "status": "ready",
+  "projectId": "project_metrics",
+  "documentId": "doc_dashboard",
+  "requestId": "req_metrics_cards",
+  "attemptId": "attempt_001",
+  "candidateVersionId": "ver_0009",
+  "baseSha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "outputSha256": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "baseComparisonSha256": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "outputComparisonSha256": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "issueCodes": [],
+  "health": {
+    "completeDocument": true,
+    "bodyHasContent": true,
+    "executableSurfaceUnchanged": true
+  },
+  "continuity": {
+    "status": "related",
+    "evidencePoints": 5,
+    "sameTitle": true,
+    "text": { "score": 0.8125, "shared": 52, "base": 64, "output": 68 },
+    "anchors": { "score": 0.75, "shared": 3, "base": 4, "output": 5 },
+    "classes": { "score": 0.6, "shared": 6, "base": 10, "output": 12 },
+    "assets": { "score": 1, "shared": 2, "base": 2, "output": 2 },
+    "baseVisibleTextLength": 180,
+    "outputVisibleTextLength": 204,
+    "baseBodyElementCount": 24,
+    "outputBodyElementCount": 29,
+    "baseParseErrorCount": 0,
+    "outputParseErrorCount": 0
+  },
+  "executable": {
+    "unchanged": true,
+    "baseCount": 1,
+    "outputCount": 1,
+    "changedCount": 0
+  },
+  "assessedAt": "2026-07-17T08:40:00Z"
+}

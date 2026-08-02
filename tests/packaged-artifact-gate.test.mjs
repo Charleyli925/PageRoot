@@ -69,6 +69,7 @@ async function createPackagedFixture(t) {
           from: "schemas",
           to: "schemas",
           filter: [
+            "candidate-assessment.v1.schema.json",
             "runtime-state.v3.schema.json",
             "scope-report.v1.schema.json",
             "source-history.v1.schema.json",
@@ -150,6 +151,7 @@ async function createPackagedFixture(t) {
     "user-supplement-core.mjs",
     "record-user-supplement.mjs",
     "html-source-parser.mjs",
+    "candidate-assessment.mjs",
     "scope-validator.mjs",
     "target-identity.mjs",
     "product-contract.mjs",
@@ -178,6 +180,7 @@ async function createPackagedFixture(t) {
     );
   }
   await writeFixtureFile(fixtureProductRoot, "schemas/runtime-state.v3.schema.json", "{\"type\":\"object\"}\n");
+  await writeFixtureFile(fixtureProductRoot, "schemas/candidate-assessment.v1.schema.json", "{\"type\":\"object\"}\n");
   await writeFixtureFile(fixtureProductRoot, "schemas/scope-report.v1.schema.json", "{\"type\":\"object\"}\n");
   await writeFixtureFile(fixtureProductRoot, "schemas/source-history.v1.schema.json", "{\"type\":\"object\"}\n");
   await writeFixtureFile(fixtureProductRoot, "schemas/user-supplement.v1.schema.json", "{\"type\":\"object\"}\n");
@@ -245,6 +248,7 @@ async function createPackagedFixture(t) {
     "user-supplement-core.mjs",
     "record-user-supplement.mjs",
     "html-source-parser.mjs",
+    "candidate-assessment.mjs",
     "scope-validator.mjs",
     "target-identity.mjs",
     "product-contract.mjs",
@@ -308,6 +312,7 @@ async function createPackagedFixture(t) {
     }
   }
   for (const fileName of [
+    "candidate-assessment.v1.schema.json",
     "runtime-state.v3.schema.json",
     "scope-report.v1.schema.json",
     "source-history.v1.schema.json",
@@ -586,7 +591,7 @@ test("the app-bundle gate compares app.asar, Bridge scripts, schemas and plist v
   });
   assert.equal(result.version, "0.7.0");
   assert.equal(result.asarFileCount, 21);
-  assert.equal(result.schemaFileCount, 4);
+  assert.equal(result.schemaFileCount, 5);
   assert.equal(result.legalResourceCount, 5);
   assert.equal(result.telemetry.enabled, true);
   assert.equal(result.provenance.commitSha, "a".repeat(40));

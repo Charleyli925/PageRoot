@@ -140,6 +140,7 @@ test("run session rebases run, handoff and result through a source rename", () =
     label: "正在处理",
     updatedAt: 1,
   });
+  session.rememberOutcome({ ...current, status: "error" });
 
   assert.equal(session.rebaseSource({
     previousSourcePath: current.sourcePath,
@@ -152,7 +153,27 @@ test("run session rebases run, handoff and result through a source rename", () =
     session.resultForSource("/tmp/renamed.html").state,
     "processing",
   );
+  assert.equal(
+    session.outcomeForSource("/tmp/renamed.html").sourcePath,
+    "/tmp/renamed.html",
+  );
   assert.equal(session.runForSource(current.sourcePath), null);
+});
+
+test("terminal outcomes remain reopenable after the active panel is dismissed", () => {
+  const session = new RunSession({ sourcePath: "/tmp/page.html" });
+  const terminal = run({ status: "error", error: "返回结果无法使用。" });
+  session.setActiveRun(terminal);
+  session.rememberOutcome(terminal);
+  session.clearActiveRun();
+
+  assert.equal(session.snapshot.activeRun, null);
+  assert.equal(session.snapshot.recentOutcome, terminal);
+  session.setActiveRun(session.outcomeForSource(terminal.sourcePath));
+  assert.equal(session.snapshot.activeRun, terminal);
+
+  assert.equal(session.forgetOutcome(terminal.sourcePath), true);
+  assert.equal(session.snapshot.recentOutcome, null);
 });
 
 test("run session owns exact-once operation locks", () => {

@@ -58,6 +58,8 @@ export class RunSession {
 
   #activeHandoff = null;
 
+  #activeOutcome = null;
+
   #runs = new Map();
 
   #results = new Map();
@@ -67,6 +69,8 @@ export class RunSession {
   #copiedHandoffs = new Map();
 
   #recoveredRuns = new Map();
+
+  #outcomes = new Map();
 
   #busy = new Map(
     OPERATION_KINDS.map((kind) => [kind, new Set()]),
@@ -131,6 +135,7 @@ export class RunSession {
     this.#activeSourcePath = normalizedPath(sourcePath);
     this.#activeRun = this.runForSource(this.#activeSourcePath);
     this.#activeHandoff = this.handoffForSource(this.#activeSourcePath);
+    this.#activeOutcome = this.outcomeForSource(this.#activeSourcePath);
     this.#emit();
     return this.snapshot;
   }
@@ -265,6 +270,30 @@ export class RunSession {
     return true;
   }
 
+  rememberOutcome(run) {
+    if (!run?.sourcePath) return null;
+    this.#deleteBySource(this.#outcomes, run.sourcePath);
+    this.#outcomes.set(run.sourcePath, run);
+    if (samePath(this.#activeSourcePath, run.sourcePath)) {
+      this.#activeOutcome = run;
+    }
+    this.#emit();
+    return run;
+  }
+
+  forgetOutcome(sourcePath) {
+    const changed = this.#deleteBySource(this.#outcomes, sourcePath);
+    if (samePath(this.#activeOutcome?.sourcePath, sourcePath)) {
+      this.#activeOutcome = null;
+    }
+    if (changed) this.#emit();
+    return changed;
+  }
+
+  outcomeForSource(sourcePath) {
+    return this.#findBySource(this.#outcomes, sourcePath);
+  }
+
   markResult(sourcePath, result) {
     const activeSourcePath = normalizedPath(sourcePath);
     if (!activeSourcePath || !result) return false;
@@ -349,16 +378,27 @@ export class RunSession {
     this.#deleteBySource(this.#results, previousSourcePath);
     if (trackedResult) this.#results.set(nextSourcePath, trackedResult);
 
+    const trackedOutcome = this.outcomeForSource(previousSourcePath);
+    this.#deleteBySource(this.#outcomes, previousSourcePath);
+    const nextOutcome = trackedOutcome
+      ? { ...trackedOutcome, sourcePath: nextSourcePath }
+      : null;
+    if (nextOutcome) this.#outcomes.set(nextSourcePath, nextOutcome);
+
     if (samePath(this.#activeSourcePath, previousSourcePath)) {
       this.#activeSourcePath = nextSourcePath;
       this.#activeRun = nextRun;
       this.#activeHandoff = nextHandoff;
+      this.#activeOutcome = nextOutcome;
     } else {
       if (samePath(this.#activeRun?.sourcePath, previousSourcePath)) {
         this.#activeRun = nextRun;
       }
       if (samePath(this.#activeHandoff?.sourcePath, previousSourcePath)) {
         this.#activeHandoff = nextHandoff;
+      }
+      if (samePath(this.#activeOutcome?.sourcePath, previousSourcePath)) {
+        this.#activeOutcome = nextOutcome;
       }
     }
     this.#emit();
@@ -407,6 +447,7 @@ export class RunSession {
       activeRun: this.#activeRun,
       activeHandoff: this.#activeHandoff,
       activeHandoffMayBeRunning: this.activeHandoffMayBeRunning,
+      recentOutcome: this.#activeOutcome,
       backgroundResults: frozenEntries(this.#results),
     });
   }

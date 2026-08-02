@@ -22,7 +22,6 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import {
   assertSchemaVersion,
-  activeUserSupplementRecords,
   atomicWriteFile,
   atomicWriteJson,
   AUXILIARY_SCHEMA_VERSION,
@@ -57,9 +56,8 @@ import {
 } from "./html-source-parser.mjs";
 import {
   rawStartTagAttributes,
-  targetsReferencedByRequest,
-  validateScope,
 } from "./scope-validator.mjs";
+import { assessHtmlCandidate } from "./candidate-assessment.mjs";
 import {
   PRODUCT_MAX_BRIDGE_BODY_BYTES,
   PRODUCT_MAX_HTML_BYTES,
@@ -114,16 +112,6 @@ const MAX_REQUEST_ATTACHMENT_BYTES = 100 * 1024 * 1024;
 const MAX_EXECUTION_MODULE_TEXT_QUOTE_CHARS = 500;
 const BRIDGE_AUTH_TOKEN = process.env.HTML_AI_BRIDGE_AUTH_TOKEN || null;
 const execFileAsync = promisify(execFile);
-
-// These checks protect the immutable Request/Attempt/Version chain and always
-// stop the candidate. Other scope findings are recorded as observations
-// because they describe quality or breadth, not protocol integrity.
-const HARD_SCOPE_VIOLATION_CODES = new Set([
-  "OUTPUT_MANAGED_META_MISMATCH",
-  "SCRIPT_OUTSIDE_TARGET",
-  "TARGET_AMBIGUOUS",
-  "TARGET_ORPHANED",
-]);
 
 const configuredPort = Number.parseInt(
   process.env.HTML_AI_BRIDGE_PORT ?? String(DEFAULT_PORT),
@@ -3666,6 +3654,7 @@ async function listVersions(context) {
     let supplements = [];
     let supplementArchive = null;
     let validationReview = null;
+    let candidateAssessment = null;
     if (manifest.requestId && manifest.attemptId) {
       const requestRoot = path.join(
         context.projectRoot,
@@ -3699,6 +3688,22 @@ async function listVersions(context) {
         validationReview = await readAuxiliaryJson(
           validationReviewPath,
           "validation-review.json",
+        );
+      }
+      const candidateAssessmentPath = path.join(
+        attemptRoot,
+        "candidate-assessment.json",
+      );
+      if (await exists(candidateAssessmentPath)) {
+        candidateAssessment = await readCandidateAssessment(
+          candidateAssessmentPath,
+          {
+            projectId: context.projectId,
+            documentId: context.documentId,
+            requestId: manifest.requestId,
+            attemptId: manifest.attemptId,
+            candidateVersionId: versionId,
+          },
         );
       }
     }
@@ -3737,10 +3742,83 @@ async function listVersions(context) {
           }
         : {}),
       ...(validationReview ? { validationReview } : {}),
+      ...(candidateAssessment ? { candidateAssessment } : {}),
       manifest,
     });
   }
   return versions;
+}
+
+async function latestTerminalRunOutcome(context) {
+  const requestIds = await listIds(
+    path.join(context.projectRoot, "requests"),
+    /^req_\d{4,}$/,
+  );
+  const requestId = requestIds.at(-1);
+  if (!requestId) return null;
+  const requestRoot = path.join(context.projectRoot, "requests", requestId);
+  const outcomePath = path.join(requestRoot, "outcome.json");
+  if (!(await exists(outcomePath))) return null;
+  const outcome = await readAuxiliaryJson(outcomePath, "outcome.json");
+  if (!["failed", "no-change"].includes(outcome.status)) return null;
+  if (
+    outcome.projectId !== context.projectId
+    || outcome.documentId !== context.documentId
+    || outcome.requestId !== requestId
+  ) {
+    throw new HttpError(
+      409,
+      "OUTCOME_IDENTITY_MISMATCH",
+      "The latest Attempt outcome does not match its project identity.",
+    );
+  }
+  const changeRequest = await readLifecycleJson(
+    path.join(requestRoot, "change-request.json"),
+    "change-request.json",
+  );
+  const attemptId = outcome.attemptId;
+  const attemptRoot = path.join(requestRoot, "attempts", attemptId);
+  const assessmentPath = path.join(
+    attemptRoot,
+    "candidate-assessment.json",
+  );
+  const candidateAssessment = await exists(assessmentPath)
+    ? await readCandidateAssessment(
+        assessmentPath,
+        {
+          projectId: context.projectId,
+          documentId: context.documentId,
+          requestId,
+          attemptId,
+          candidateVersionId: outcome.candidateVersionId,
+          baseSha256: outcome.baseSnapshotSha256,
+        },
+      )
+    : null;
+  return {
+    projectId: context.projectId,
+    documentId: context.documentId,
+    requestId,
+    attemptId,
+    status: outcome.status === "failed" ? "error" : "no-change",
+    sourcePath: context.sourcePath,
+    requestPath: requestRoot,
+    attemptPath: attemptRoot,
+    baseSnapshotSha256: outcome.baseSnapshotSha256,
+    previousVersionId: outcome.previousVersionId,
+    basedOnVersionId: outcome.basedOnVersionId,
+    freezeCutoffRevision: changeRequest.freezeCutoffRevision,
+    candidateVersionId: outcome.candidateVersionId,
+    candidateVersionOrdinal: outcome.candidateVersionOrdinal,
+    candidateVersionLabel: outcome.candidateVersionLabel,
+    submittedAt: changeRequest.createdAt,
+    summary: changeRequest.requirements?.summary ?? "",
+    commentCount: outcome.annotationArchive?.commentCount ?? 0,
+    changeEventCount: outcome.annotationArchive?.editEventCount ?? 0,
+    completionObserved: await exists(path.join(attemptRoot, "completion.json")),
+    ...(outcome.error ? { error: outcome.error } : {}),
+    ...(candidateAssessment ? { candidateAssessment } : {}),
+  };
 }
 
 function recoveryIdentityFor(context, project, runtime, sourceSha256) {
@@ -3798,6 +3876,7 @@ async function workspaceState(sourcePath) {
         conflict: null,
       },
       activeRun: null,
+      recentRunOutcome: null,
       activeDraft: null,
       recoveryIdentity: null,
       versions: [],
@@ -3827,6 +3906,9 @@ async function workspaceState(sourcePath) {
         ? refreshedProject.currentExactVersionId
         : await exactVersionForHash(context, currentSource.sha256);
     const versions = await listVersions(context);
+    const recentRunOutcome = refreshedRuntime.activeRun
+      ? null
+      : await latestTerminalRunOutcome(context);
     const recoveryIdentity = recoveryIdentityFor(
       context,
       refreshedProject,
@@ -3859,6 +3941,7 @@ async function workspaceState(sourcePath) {
         conflict: refreshedRuntime.conflict ?? null,
       },
       activeRun: refreshedRuntime.activeRun,
+      recentRunOutcome,
       activeDraft: refreshedRuntime.draft,
       recoveryIdentity,
       sourceHistory: sourceHistoryResponse(sourceHistory),
@@ -5896,92 +5979,7 @@ async function validateCompletionRaw(context, runtime) {
   };
 }
 
-async function writeEnforcedScopeReportRaw(context, runtime, validated) {
-  const activeRun = runtime.activeRun;
-  const allowedTargets = targetsReferencedByRequest(
-    validated.changeRequest,
-  );
-  if (allowedTargets.length === 0) {
-    throw new HttpError(
-      422,
-      "SCOPE_TARGETS_MISSING",
-      "The frozen Request does not contain an allowed target.",
-    );
-  }
-  const report = validateScope({
-    baseHtml: validated.baseBuffer.toString("utf8"),
-    outputHtml: validated.outputBuffer.toString("utf8"),
-    allowedTargets,
-    projectId: context.projectId,
-    documentId: context.documentId,
-    requestId: activeRun.requestId,
-    attemptId: activeRun.attemptId,
-    supplementRecords: activeUserSupplementRecords(
-      validated.supplement.records,
-    ),
-    expectedManagedMetadata: {
-      "html-ai-document-id": activeRun.documentId,
-      "html-ai-version-id": activeRun.candidateVersionId,
-      "html-ai-version-label": activeRun.candidateVersionLabel,
-      "html-ai-based-on-version-id": activeRun.basedOnVersionId,
-      "html-ai-request-id": activeRun.requestId,
-    },
-    generatedAt: validated.completion.completedAt,
-  });
-  const expectedIdentity = {
-    baseSha256: activeRun.baseSnapshotSha256,
-    outputSha256: validated.completion.outputSha256,
-    baseComparisonSha256:
-      validated.completion.baseComparisonSha256,
-    outputComparisonSha256:
-      validated.completion.outputComparisonSha256,
-  };
-  const actualIdentity = {
-    baseSha256: report.base.sha256,
-    outputSha256: report.output.sha256,
-    baseComparisonSha256: report.base.comparisonSha256,
-    outputComparisonSha256: report.output.comparisonSha256,
-  };
-  for (const [key, expected] of Object.entries(expectedIdentity)) {
-    if (actualIdentity[key] !== expected) {
-      throw new HttpError(
-        422,
-        "SCOPE_REPORT_HASH_MISMATCH",
-        `Scope report ${key} does not match completion evidence.`,
-        { key, expected, actual: actualIdentity[key] },
-      );
-    }
-  }
-  const reportPath = path.join(
-    validated.attemptRoot,
-    "scope-report.json",
-  );
-  await atomicWriteJson(reportPath, report);
-  return {
-    report,
-    reportPath,
-    reportRelativePath:
-      `requests/${activeRun.requestId}/attempts/${activeRun.attemptId}/scope-report.json`,
-  };
-}
-
-function classifyScopeViolationCodes(report) {
-  const codes = [...new Set(
-    Array.isArray(report?.violationCodes)
-      ? report.violationCodes.filter((code) => typeof code === "string")
-      : [],
-  )].sort();
-  return {
-    hardViolationCodes: codes.filter((code) =>
-      HARD_SCOPE_VIOLATION_CODES.has(code)
-    ),
-    softViolationCodes: codes.filter((code) =>
-      !HARD_SCOPE_VIOLATION_CODES.has(code)
-    ),
-  };
-}
-
-function validationReviewIdentity(context, activeRun, scoped) {
+function candidateAssessmentIdentity(context, activeRun, validated) {
   return {
     schemaVersion: AUXILIARY_SCHEMA_VERSION,
     projectId: context.projectId,
@@ -5989,70 +5987,110 @@ function validationReviewIdentity(context, activeRun, scoped) {
     requestId: activeRun.requestId,
     attemptId: activeRun.attemptId,
     candidateVersionId: activeRun.candidateVersionId,
-    scopeReportSha256: sha256(jsonText(scoped.report)),
-    scopeReportRelativePath: scoped.reportRelativePath,
+    baseSha256: activeRun.baseSnapshotSha256,
+    outputSha256: validated.completion.outputSha256,
+    baseComparisonSha256: validated.completion.baseComparisonSha256,
+    outputComparisonSha256: validated.completion.outputComparisonSha256,
   };
 }
 
-async function readValidationReviewRaw(context, runtime, scoped) {
-  const activeRun = runtime.activeRun;
-  const reviewPath = path.join(scoped.reportPath, "..", "validation-review.json");
-  const classification = classifyScopeViolationCodes(scoped.report);
-  const identity = validationReviewIdentity(context, activeRun, scoped);
-  if (!(await exists(reviewPath))) {
-    const review = {
-      ...identity,
-      status: "observed",
-      ...classification,
-      createdAt: nowIso(),
-      updatedAt: nowIso(),
-    };
-    await atomicWriteJson(reviewPath, review);
-    return { review, reviewPath };
+function assertCandidateAssessmentRecord(
+  assessment,
+  expected = {},
+  label = "candidate-assessment.json",
+) {
+  assertAuxiliarySchemaVersion(assessment, label);
+  if (!["ready", "attention", "blocked"].includes(assessment.status)) {
+    throw new HttpError(
+      409,
+      "CANDIDATE_ASSESSMENT_INVALID",
+      `${label} has an unsupported status.`,
+    );
   }
-  const review = await readAuxiliaryJson(
-    reviewPath,
-    "validation-review.json",
-  );
-  for (const [field, expected] of Object.entries(identity)) {
-    if (review[field] !== expected) {
-      throw new HttpError(
-        409,
-        "VALIDATION_REVIEW_IDENTITY_MISMATCH",
-        `validation-review.json ${field} does not match the current scope report.`,
-      );
-    }
-  }
-  const actualHard = Array.isArray(review.hardViolationCodes)
-    ? [...review.hardViolationCodes].sort()
-    : [];
-  const actualSoft = Array.isArray(review.softViolationCodes)
-    ? [...review.softViolationCodes].sort()
-    : [];
   if (
-    JSON.stringify(actualHard) !== JSON.stringify(classification.hardViolationCodes)
-    || JSON.stringify(actualSoft) !== JSON.stringify(classification.softViolationCodes)
+    !Array.isArray(assessment.issueCodes)
+    || !assessment.issueCodes.every((value) => typeof value === "string")
+    || !assessment.health
+    || typeof assessment.health.completeDocument !== "boolean"
+    || typeof assessment.health.bodyHasContent !== "boolean"
+    || typeof assessment.health.executableSurfaceUnchanged !== "boolean"
+    || !["related", "uncertain"].includes(assessment.continuity?.status)
   ) {
     throw new HttpError(
       409,
-      "VALIDATION_REVIEW_CODES_MISMATCH",
-      "validation-review.json does not match the current validation findings.",
+      "CANDIDATE_ASSESSMENT_INVALID",
+      `${label} is structurally invalid.`,
     );
   }
-  if (!["observed", "pending", "waived"].includes(review.status)) {
-    throw new HttpError(
-      409,
-      "VALIDATION_REVIEW_STATUS_INVALID",
-      "validation-review.json has an unsupported status.",
+  for (const field of [
+    "baseSha256",
+    "outputSha256",
+    "baseComparisonSha256",
+    "outputComparisonSha256",
+  ]) {
+    requireSha256(assessment[field], `${label}.${field}`);
+  }
+  for (const [field, expectedValue] of Object.entries(expected)) {
+    if (
+      expectedValue !== undefined
+      && expectedValue !== null
+      && assessment[field] !== expectedValue
+    ) {
+      throw new HttpError(
+        409,
+        "CANDIDATE_ASSESSMENT_IDENTITY_MISMATCH",
+        `${label} ${field} does not match its lifecycle record.`,
+        { field, expected: expectedValue, actual: assessment[field] },
+      );
+    }
+  }
+  return assessment;
+}
+
+async function readCandidateAssessment(assessmentPath, expected = {}) {
+  return assertCandidateAssessmentRecord(
+    await readAuxiliaryJson(
+      assessmentPath,
+      "candidate-assessment.json",
+    ),
+    expected,
+  );
+}
+
+async function writeCandidateAssessmentRaw(context, runtime, validated) {
+  const activeRun = runtime.activeRun;
+  const assessment = {
+    ...candidateAssessmentIdentity(context, activeRun, validated),
+    ...assessHtmlCandidate({
+      baseHtml: validated.baseBuffer.toString("utf8"),
+      outputHtml: validated.outputBuffer.toString("utf8"),
+    }),
+    assessedAt: validated.completion.completedAt,
+  };
+  const assessmentPath = path.join(
+    validated.attemptRoot,
+    "candidate-assessment.json",
+  );
+  if (await exists(assessmentPath)) {
+    const existing = await readCandidateAssessment(
+      assessmentPath,
+      candidateAssessmentIdentity(context, activeRun, validated),
     );
+    if (jsonText(existing) !== jsonText(assessment)) {
+      throw new HttpError(
+        409,
+        "CANDIDATE_ASSESSMENT_MISMATCH",
+        "The persisted candidate assessment does not match the sealed HTML.",
+      );
+    }
+    return { assessment: existing, assessmentPath };
   }
-  if (review.status === "pending") {
-    review.status = "observed";
-    review.updatedAt = nowIso();
-    review.automaticDecision = "record-and-continue";
-    await atomicWriteJson(reviewPath, review);
-  }
-  return { review, reviewPath };
+  assertCandidateAssessmentRecord(
+    assessment,
+    candidateAssessmentIdentity(context, activeRun, validated),
+  );
+  await atomicWriteJson(assessmentPath, assessment);
+  return { assessment, assessmentPath };
 }
 
 function transactionDirectory(context, transactionId) {
@@ -6704,6 +6742,24 @@ async function finalizeCommittedTransactionRaw(
         "validation-review.json",
       )
     : null;
+  const candidateAssessmentPath = path.join(
+    attemptRoot,
+    "candidate-assessment.json",
+  );
+  const candidateAssessment = await exists(candidateAssessmentPath)
+    ? await readCandidateAssessment(
+        candidateAssessmentPath,
+        {
+          projectId: context.projectId,
+          documentId: context.documentId,
+          requestId: transaction.requestId,
+          attemptId: transaction.attemptId,
+          candidateVersionId: transaction.candidateVersionId,
+          baseSha256: transaction.baseSnapshotSha256,
+          outputSha256: transaction.candidateContentSha256,
+        },
+      )
+    : null;
   const supplement = await validateAttemptSupplement(context, {
     requestId: transaction.requestId,
     attemptId: transaction.attemptId,
@@ -6765,6 +6821,7 @@ async function finalizeCommittedTransactionRaw(
     },
     supplement,
     ...(validationReview ? { validationReview } : {}),
+    ...(candidateAssessment ? { candidateAssessment } : {}),
     outcome,
     contentSha256: transaction.candidateContentSha256,
     sourceSha256: currentSource.sha256,
@@ -7340,6 +7397,23 @@ async function statusFor(sourcePath, requestId, attemptId = "attempt_001") {
           const validationReview = await exists(reviewPath)
             ? await readAuxiliaryJson(reviewPath, "validation-review.json")
             : null;
+          const assessmentPath = path.join(
+            attemptRoot,
+            "candidate-assessment.json",
+          );
+          const candidateAssessment = await exists(assessmentPath)
+            ? await readCandidateAssessment(
+                assessmentPath,
+                {
+                  projectId: context.projectId,
+                  documentId: context.documentId,
+                  requestId,
+                  attemptId,
+                  candidateVersionId: outcome.versionId,
+                  outputSha256: outcome.contentSha256,
+                },
+              )
+            : null;
           const supplement = await validateAttemptSupplement(context, {
             requestId,
             attemptId,
@@ -7381,6 +7455,7 @@ async function statusFor(sourcePath, requestId, attemptId = "attempt_001") {
             versionEntryPath: validatedVersion.entryPath,
             supplement,
             ...(validationReview ? { validationReview } : {}),
+            ...(candidateAssessment ? { candidateAssessment } : {}),
           };
         }
         const source = await readSourceFile(context.sourcePath);
@@ -7566,86 +7641,6 @@ async function statusFor(sourcePath, requestId, attemptId = "attempt_001") {
     runtime.activeRun.status = "validating";
     runtime.activeRun.updatedAt = nowIso();
     await writeRuntime(context.projectRoot, runtime);
-    let scoped;
-    try {
-      scoped = await writeEnforcedScopeReportRaw(
-        context,
-        runtime,
-        validated,
-      );
-    } catch (error) {
-      const outcome = {
-        schemaVersion: LIFECYCLE_SCHEMA_VERSION,
-        status: "error",
-        projectId: context.projectId,
-        documentId: context.documentId,
-        requestId,
-        attemptId,
-        candidateVersionId: runtime.activeRun.candidateVersionId,
-        error: {
-          code: error?.code ?? "SCOPE_VALIDATION_FAILED",
-          message:
-            error instanceof Error
-              ? error.message
-              : "Scope validation failed.",
-          ...(error?.details === undefined ? {} : { details: error.details }),
-        },
-        completedAt: nowIso(),
-      };
-      await archiveAttemptOutcomeRaw(context, runtime.activeRun, outcome);
-      runtime.lifecycleState = "editing";
-      runtime.activeRun = null;
-      runtime.conflict = null;
-      runtime.lastCompleted = outcome;
-      await writeRuntime(context.projectRoot, runtime);
-      return { ok: true, ...outcome, completionObserved: true };
-    }
-    if (scoped.report.verdict !== "pass") {
-      const classification = classifyScopeViolationCodes(scoped.report);
-      const violationSummary = scoped.report.violationCodes.join(", ");
-      if (classification.hardViolationCodes.length === 0) {
-        await readValidationReviewRaw(
-          context,
-          runtime,
-          scoped,
-        );
-      } else {
-        const outcome = {
-          schemaVersion: LIFECYCLE_SCHEMA_VERSION,
-          status: "error",
-          projectId: context.projectId,
-          documentId: context.documentId,
-          requestId,
-          attemptId,
-          candidateVersionId: runtime.activeRun.candidateVersionId,
-          error: {
-            code: "HARD_VALIDATION_FAILED",
-            message:
-              `AI output failed a non-waivable protocol or security check${
-                violationSummary ? `: ${violationSummary}` : "."
-              }`,
-            details: {
-              hardViolationCodes: classification.hardViolationCodes,
-              softViolationCodes: classification.softViolationCodes,
-            },
-          },
-          completedAt: nowIso(),
-        };
-        await archiveAttemptOutcomeRaw(context, runtime.activeRun, outcome);
-        runtime.lifecycleState = "editing";
-        runtime.activeRun = null;
-        runtime.conflict = null;
-        runtime.lastCompleted = outcome;
-        await writeRuntime(context.projectRoot, runtime);
-        return {
-          ok: true,
-          ...outcome,
-          completionObserved: true,
-          scopeReport: scoped.report,
-          scopeReportPath: scoped.reportPath,
-        };
-      }
-    }
     if (
       validated.completion.baseComparisonSha256
       === validated.completion.outputComparisonSha256
@@ -7666,11 +7661,71 @@ async function statusFor(sourcePath, requestId, attemptId = "attempt_001") {
       runtime.conflict = null;
       runtime.lastCompleted = outcome;
       await writeRuntime(context.projectRoot, runtime);
+      return { ok: true, ...outcome, completionObserved: true };
+    }
+
+    let assessed;
+    try {
+      assessed = await writeCandidateAssessmentRaw(
+        context,
+        runtime,
+        validated,
+      );
+    } catch (error) {
+      const outcome = {
+        schemaVersion: LIFECYCLE_SCHEMA_VERSION,
+        status: "error",
+        projectId: context.projectId,
+        documentId: context.documentId,
+        requestId,
+        attemptId,
+        candidateVersionId: runtime.activeRun.candidateVersionId,
+        error: {
+          code: error?.code ?? "CANDIDATE_ASSESSMENT_FAILED",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Candidate assessment failed.",
+          ...(error?.details === undefined ? {} : { details: error.details }),
+        },
+        completedAt: nowIso(),
+      };
+      await archiveAttemptOutcomeRaw(context, runtime.activeRun, outcome);
+      runtime.lifecycleState = "editing";
+      runtime.activeRun = null;
+      runtime.conflict = null;
+      runtime.lastCompleted = outcome;
+      await writeRuntime(context.projectRoot, runtime);
+      return { ok: true, ...outcome, completionObserved: true };
+    }
+    if (assessed.assessment.status === "blocked") {
+      const issueCode = assessed.assessment.issueCodes[0]
+        ?? "CANDIDATE_UNUSABLE";
+      const outcome = {
+        schemaVersion: LIFECYCLE_SCHEMA_VERSION,
+        status: "error",
+        projectId: context.projectId,
+        documentId: context.documentId,
+        requestId,
+        attemptId,
+        candidateVersionId: runtime.activeRun.candidateVersionId,
+        error: {
+          code: issueCode,
+          message: "The candidate HTML could not be safely adopted.",
+        },
+        completedAt: nowIso(),
+      };
+      await archiveAttemptOutcomeRaw(context, runtime.activeRun, outcome);
+      runtime.lifecycleState = "editing";
+      runtime.activeRun = null;
+      runtime.conflict = null;
+      runtime.lastCompleted = outcome;
+      await writeRuntime(context.projectRoot, runtime);
       return {
         ok: true,
         ...outcome,
-        scopeReport: scoped.report,
-        scopeReportPath: scoped.reportPath,
+        completionObserved: true,
+        candidateAssessment: assessed.assessment,
       };
     }
     const prepared = await prepareTransactionRaw(

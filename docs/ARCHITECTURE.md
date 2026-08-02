@@ -14,7 +14,7 @@ User HTML bytes
 Comments + frozen input
   -> Change Request / Attempt
   -> clipboard-only AI handoff
-  -> completion + scope validation
+  -> completion + candidate health/continuity assessment
   -> immutable Version
   -> explicit user-controlled activation
 ```
@@ -26,7 +26,7 @@ Comments + frozen input
   sole owner of each mutable fact.
 - `app/` owns the visual workbench, source mapping and direct-edit transaction model.
 - `desktop/` owns privileged filesystem access, windows, lifecycle, update checks, usage telemetry and safe IPC exposure.
-- `scripts/` owns the local Bridge, protocol finalization, scope validation and automated gates.
+- `scripts/` owns the local Bridge, protocol finalization, AI candidate assessment, direct-edit/legacy scope evidence and automated gates.
 - `schemas/` defines persisted and exchanged records. `fixtures/` proves strict current and legacy behavior.
 - Preview DOM is disposable. It is never a persistence source.
 - Current-source and generated-Version changes use prepare-then-publish: all
@@ -260,7 +260,7 @@ never participates in editor authority or close/navigation drains.
 
 ## Trust model
 
-The renderer is sandboxed with context isolation and no Node integration. The preload exposes narrow validated IPC methods. The Bridge uses a per-process authentication token and only operates on managed project paths. AI output is untrusted until protocol, identity, Hash, path and HTML checks succeed. Scope validation remains strict evidence: managed metadata, scripts and unresolved targets hard-stop; ordinary out-of-target content/style findings are persisted as `observed` audit records and do not create a separate user-waiver state. Telemetry schemas have no fields for HTML, user text, attachments, clipboard data, filenames, paths, raw exceptions, account identity or hardware identity.
+The renderer is sandboxed with context isolation and no Node integration. The preload exposes narrow validated IPC methods. The Bridge uses a per-process authentication token and only operates on managed project paths. AI output is untrusted until protocol, identity, Hash, path, complete-document and unchanged-executable-surface checks succeed. A coarse continuity fingerprint compares visible text, stable anchors, classes, assets and title with the frozen base. Strong continuity enters the normal ready flow; weak continuity preserves the immutable candidate but removes direct-open and requires side-by-side review. Frozen comment targets remain generation and review context, not a subtree-exact acceptance gate. Telemetry schemas have no fields for HTML, user text, attachments, clipboard data, filenames, paths, raw exceptions, account identity or hardware identity.
 
 Every renderer request to the Bridge is bounded: ordinary state/file operations use 15 seconds, attachments use 30 seconds, and Request creation uses 60 seconds. Busy refs are released in `finally`, so an unresponsive local service cannot leave a permanent UI lock. An unknown Request POST outcome remains fail-closed and is reconciled against the durable workspace state before editing resumes.
 

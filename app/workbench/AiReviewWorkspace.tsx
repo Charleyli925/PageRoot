@@ -207,6 +207,7 @@ export default function AiReviewWorkspace({
   sourcePath,
   accepting,
   error,
+  notice,
   onExit,
   onKeepCurrent,
   onAccept,
@@ -219,6 +220,7 @@ export default function AiReviewWorkspace({
   sourcePath?: string;
   accepting: boolean;
   error?: string;
+  notice?: string;
   onExit: () => void;
   onKeepCurrent: () => void;
   onAccept: () => void;
@@ -459,6 +461,13 @@ export default function AiReviewWorkspace({
         <div className={styles.reviewError} role="alert">
           <WarningCircleIcon aria-hidden="true" size={17} weight="fill" />
           <span>{error}</span>
+        </div>
+      ) : null}
+
+      {!error && notice ? (
+        <div className={styles.reviewNotice} role="status">
+          <WarningCircleIcon aria-hidden="true" size={17} weight="fill" />
+          <span>{notice}</span>
         </div>
       ) : null}
 

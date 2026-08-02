@@ -49,7 +49,7 @@ Tree，不在测试执行期间自动合并分支。组合 Tree 含任何未合�
   单击选择、双击编辑、工具条和 `Option + 单击` 不冲突，切换前后共享滚动
   位置不变、作者处理器未运行且导出字节不变；Electron
   独立重读真实源文件，证明作者事件未运行且磁盘字节不变。
-- AI 闭环：任务级只跑正常闭环和越界失败 2 个代表场景；发布级跑完整 6 个场景，包括复制失败、缺失 finalizer、非法 HTML 和版本激活失败。测试自动生成受控 AI 输出并执行正式 finalizer，不等待外部模型或真人接力。
+- AI 闭环：Node 集成必须分别证明普通/跨标签相关改动可建版、不相关但可用 HTML 进入 `attention` 并强制审阅、可执行表面变化被阻断，以及失败/no-change 可从 workspace 恢复。任务级跑正常闭环和一个硬失败代表场景；发布级覆盖复制失败、缺失 finalizer、非法 HTML、版本激活失败与终态返回/重开。测试自动生成受控 AI 输出并执行正式 finalizer，不等待外部模型或真人接力。
 - 应用更新：Node 用伪 updater 证明 stable-only、点击后单次下载、差分开启、普通退出不安装、仅 downloaded 状态可安装和错误降级；Preload/Workbench 合同证明状态快照、下载/安装意图、无 Canvas 完成横幅与重启确认保持窄边界。
 - 默认浏览器打开：Node 直接执行主进程操作与 sender 权限门，证明 malformed、非 HTML、未知项目、非普通文件和非可信 frame 均不会调用 shell；Workbench 合同只补充证明精确 edit revision 的围栏、写回和 IPC 顺序。
 - 使用数据：Node 使用伪网络端点证明安装 ID 持久、会话 ID 轮换、

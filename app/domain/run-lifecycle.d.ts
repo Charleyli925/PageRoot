@@ -31,6 +31,7 @@ export type RunProgressStepState =
   | "current"
   | "pending"
   | "error"
+  | "attention"
   | "neutral";
 
 export type RunProgressStep = {
@@ -43,7 +44,11 @@ export type RunProgressStep = {
 export function deriveRunProgressSteps(
   run: Pick<
     ActiveRun,
-    "requestId" | "status" | "error" | "completionObserved"
+    | "requestId"
+    | "status"
+    | "error"
+    | "completionObserved"
+    | "candidateAssessment"
   > | null | undefined,
   handoffStatus?: "idle" | "copying" | "copied" | "failed",
 ): RunProgressStep[];
@@ -53,6 +58,23 @@ export type ValidationReview = {
   hardViolationCodes: string[];
   softViolationCodes: string[];
 };
+
+export type CandidateAssessment = {
+  status: "ready" | "attention" | "blocked";
+  issueCodes: string[];
+  health: {
+    completeDocument: boolean;
+    bodyHasContent: boolean;
+    executableSurfaceUnchanged: boolean;
+  };
+  continuity: {
+    status: "related" | "uncertain";
+  };
+};
+
+export function candidateAssessmentFromRecord(
+  value: unknown,
+): CandidateAssessment | null;
 
 export function validationReviewFromRecord(
   value: unknown,
@@ -79,6 +101,7 @@ export type ActiveRun = {
   commentCount?: number;
   changeEventCount?: number;
   error?: string;
+  errorCode?: string;
   completionObserved?: boolean;
   conflictId?: string;
   externalSourceSha256?: string;
@@ -87,6 +110,7 @@ export type ActiveRun = {
   readyPayload?: Record<string, unknown>;
   validationReview?: ValidationReview;
   scopeReport?: Record<string, unknown>;
+  candidateAssessment?: CandidateAssessment;
 };
 
 export function activeRunFromRecord(value: unknown): ActiveRun | null;

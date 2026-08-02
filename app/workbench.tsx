@@ -139,10 +139,10 @@ import {
 } from "./domain/draft-aggregate.js";
 import {
   activeRunFromRecord,
+  candidateAssessmentFromRecord,
   canonicalLifecycleState,
   deriveRunProgressSteps,
   isLockedLifecycleState,
-  validationReviewFromRecord,
   type ActiveRun,
   type LifecycleState,
 } from "./domain/run-lifecycle.js";
@@ -208,7 +208,6 @@ import {
   isRecord,
   ownsNativeTextHistory,
   recoveryIdentityFromRecord,
-  scopeDecisionSummary,
   sourceHistoryOperationsFromRecord,
 } from "./workbench/record-model";
 import {
@@ -307,6 +306,7 @@ const INITIAL_RUN_SNAPSHOT: RunSessionSnapshot = {
   activeRun: null,
   activeHandoff: null,
   activeHandoffMayBeRunning: false,
+  recentOutcome: null,
   backgroundResults: [],
 };
 const INITIAL_VERSION_SNAPSHOT: VersionSessionSnapshot<Version> = {
@@ -702,6 +702,7 @@ export default function Workbench() {
   }, [acknowledgeCanvasRender, canvasGeneration]);
   const [, setBridgeConnected] = useState<boolean | null>(null);
   const activeRun = runSnapshot.activeRun;
+  const recentRunOutcome = runSnapshot.recentOutcome;
   const setActiveRun = useCallback((
     next: SetStateAction<ActiveRun | null>,
   ) => {
@@ -3599,6 +3600,12 @@ export default function Workbench() {
           ? { ...recoveredRunRecord, ...(runtimeConflict ? { conflict: runtimeConflict } : {}) }
           : null,
       );
+      const recoveredOutcome = activeRunFromRecord(payload.recentRunOutcome);
+      if (recoveredOutcome) {
+        runSessionRef.current.rememberOutcome(recoveredOutcome);
+      } else if (!recoveredRun) {
+        runSessionRef.current.forgetOutcome(activeSource);
+      }
       if (recoveredRun && isLockedLifecycle(recoveredRun.status)) {
         runSessionRef.current.trackRun(recoveredRun, { recovered: true });
         setProjectLocked(true);
@@ -3611,7 +3618,17 @@ export default function Workbench() {
       } else {
         const trackedRun = runSessionRef.current.runForSource(activeSource);
         if (trackedRun) runSessionRef.current.removeRun(trackedRun);
-        else runSessionRef.current.clearActiveRun();
+        else {
+          const visibleTerminal = runSessionRef.current.activeRun;
+          const keepVisibleTerminal = Boolean(
+            recoveredOutcome
+            && visibleTerminal
+            && ["error", "no-change"].includes(visibleTerminal.status)
+            && visibleTerminal.requestId === recoveredOutcome.requestId
+            && visibleTerminal.attemptId === recoveredOutcome.attemptId,
+          );
+          if (!keepVisibleTerminal) runSessionRef.current.clearActiveRun();
+        }
         setProjectLocked(false);
         projectLockedRef.current = false;
         if (!sourceBoundaryFrozen && !projectHydratingRef.current) {
@@ -3799,6 +3816,10 @@ export default function Workbench() {
           ? { ...recoveredRunRecord, ...(runtimeConflict ? { conflict: runtimeConflict } : {}) }
           : null,
       );
+      const recoveredOutcome = activeRunFromRecord(payload.recentRunOutcome);
+      if (recoveredOutcome) {
+        runSessionRef.current.rememberOutcome(recoveredOutcome);
+      }
       if (recoveredRun && isLockedLifecycle(recoveredRun.status)) {
         runSessionRef.current.trackRun(recoveredRun, {
           activate: "never",
@@ -7709,6 +7730,7 @@ export default function Workbench() {
       commentCount: activeComments.length,
       changeEventCount: submissionContext.changeEvents.length,
     };
+    runSessionRef.current.forgetOutcome(submissionContext.sourcePath);
     setActiveRun(pendingRun);
     setHandoffPreviewOpen(false);
     setCanvasMode("edit");
@@ -8186,12 +8208,18 @@ export default function Workbench() {
     };
   }, [openCommittedVersion]);
 
-  const activateReadyResult = useCallback(async () => {
+  const activateReadyResult = useCallback(async (
+    { reviewed = false }: { reviewed?: boolean } = {},
+  ) => {
     const run = activeRun;
     if (
       !run
       || run.status !== "ready-to-open"
       || !run.readyPayload
+      || (
+        run.candidateAssessment?.status === "attention"
+        && !reviewed
+      )
     ) return;
     const operationKey = activeRunOperationKey(run);
     if (!runSessionRef.current.beginOperation("activate", operationKey)) return;
@@ -8372,15 +8400,15 @@ export default function Workbench() {
     const previousBackgroundState =
       runSessionRef.current.runForSource(run.sourcePath)?.status;
     if (state === "ready-to-open") {
-      const validationReview = validationReviewFromRecord(payload.validationReview);
+      const candidateAssessment = candidateAssessmentFromRecord(
+        payload.candidateAssessment,
+      );
       const nextRun: ActiveRun = {
         ...run,
         status: "ready-to-open",
         readyPayload: payload,
-        ...(validationReview ? { validationReview } : {}),
-        ...(isRecord(payload.scopeReport)
-          ? { scopeReport: payload.scopeReport }
-          : {}),
+        ...(candidateAssessment ? { candidateAssessment } : {}),
+        completionObserved: true,
       };
       runSessionRef.current.trackRun(nextRun, {
         activate: isCurrentProject ? "always" : "never",
@@ -8414,12 +8442,17 @@ export default function Workbench() {
     }
     if (state === "no-change") {
       deleteTrackedRun();
+      const noChangeRun = activeRunFromRecord({
+        ...run,
+        ...payload,
+        status: "no-change",
+      }) || { ...run, status: "no-change" as const, completionObserved: true };
+      runSessionRef.current.rememberOutcome(noChangeRun);
       if (isCurrentProject) {
         clearBackgroundProjectResult(run.sourcePath);
         projectLockedRef.current = false;
         setProjectLocked(false);
         editorRef.current?.unlockNow?.();
-        const noChangeRun = { ...run, status: "no-change" as const };
         setActiveRun(noChangeRun);
         setDrawer("handoff");
       } else {
@@ -8445,19 +8478,21 @@ export default function Workbench() {
     }
     if (state === "error") {
       deleteTrackedRun();
+      const errorRun = activeRunFromRecord({
+        ...run,
+        ...payload,
+        status: "error",
+      }) || {
+        ...run,
+        status: "error" as const,
+        error: "返回的 HTML 无法安全采用，当前页面没有被覆盖。",
+        completionObserved: payload.completionObserved === true,
+      };
+      runSessionRef.current.rememberOutcome(errorRun);
       if (isCurrentProject) {
         projectLockedRef.current = false;
         setProjectLocked(false);
         editorRef.current?.unlockNow?.();
-        const error = isRecord(payload.error)
-          ? String(payload.error.message || "完成校验失败")
-          : String(payload.error || "完成校验失败");
-        const errorRun = {
-          ...run,
-          status: "error" as const,
-          error,
-          completionObserved: payload.completionObserved === true,
-        };
         setActiveRun(errorRun);
         setDrawer("handoff");
       } else {
@@ -8576,6 +8611,16 @@ export default function Workbench() {
         setProjectLocked(isLockedLifecycle(recoveredRun.status));
         projectLockedRef.current = isLockedLifecycle(recoveredRun.status);
         setBridgeConnected(true);
+        setDrawer("handoff");
+        return;
+      }
+      const recoveredOutcome = activeRunFromRecord(payload.recentRunOutcome);
+      if (recoveredOutcome) {
+        runSessionRef.current.rememberOutcome(recoveredOutcome);
+        runSessionRef.current.setActiveRun(recoveredOutcome);
+        projectLockedRef.current = false;
+        setProjectLocked(false);
+        editorRef.current?.unlockNow?.();
         setDrawer("handoff");
         return;
       }
@@ -9109,22 +9154,25 @@ export default function Workbench() {
     activeRun
     && ["validating", "committing", "recovering-transaction"].includes(activeRun.status),
   );
-  const activeScopeDecision = activeRun?.validationReview?.softViolationCodes.length
-    ? scopeDecisionSummary(activeRun.scopeReport)
-    : null;
+  const candidateNeedsReview =
+    activeRun?.candidateAssessment?.status === "attention";
   const processPanelTitle = pendingRunOutcome
     ? "正在确认这次发送是否成功"
     : activeRun?.status === "ready-to-open"
-      ? "修改结果已通过检查"
+      ? candidateNeedsReview
+        ? "页面变化较大，请先审阅"
+        : "修改结果已完成检查"
       : activeRun?.status === "no-change"
         ? "这次没有产生有效变化"
         : activeRun?.status === "error"
-          ? "本轮需要处理后再试"
+          ? "返回的 HTML 无法使用"
           : "等待 QoderWork 返回修改结果";
   const processSummaryTitle = pendingRunOutcome
     ? "为避免重复任务，画布暂时保持只读"
     : activeRun?.status === "ready-to-open"
-      ? "新版本已保留，等待你确认打开"
+      ? candidateNeedsReview
+        ? "候选版本已保留，等待你对比确认"
+        : "新版本已保留，等待你确认打开"
       : activeRun?.status === "no-change"
         ? "页面与评论可以继续编辑"
         : activeRun?.status === "error"
@@ -9135,12 +9183,14 @@ export default function Workbench() {
     : activeRun?.status === "no-change"
       ? "原评论和附件都已保留，调整要求后可以重新发送"
       : activeRun?.status === "error"
-        ? "错误详情保留在本轮记录中，返回编辑后可调整并重试"
+        ? "当前 HTML 没有被覆盖；返回编辑后仍可查看上轮处理"
+        : candidateNeedsReview
+          ? "HTML 可以打开，但与上一版的共同特征较少，不会直接替换当前页面"
         : "原始评论和本地内容均已冻结，返回结果不会覆盖它们";
   const processStatusLabel = pendingRunOutcome
     ? "正在等待修改结果"
     : activeRun?.status === "ready-to-open"
-      ? "等待确认打开"
+      ? candidateNeedsReview ? "请先审阅" : "等待确认打开"
       : activeRun?.status === "no-change"
         ? "没有新版本"
         : activeRun?.status === "error"
@@ -9492,9 +9542,10 @@ export default function Workbench() {
     commentRailOffsetRef.current = commentRailMinimumOffset;
     setCommentRailOffset(commentRailMinimumOffset);
   }, [commentRailFollowsFocus, commentRailMinimumOffset]);
-  const returnToEditingFromTerminalRun = (adjustRequirements: boolean) => {
+  const returnToEditingFromTerminalRun = () => {
     const completedRun = runSessionRef.current.activeRun;
     if (completedRun?.sourcePath) {
+      runSessionRef.current.rememberOutcome(completedRun);
       runSessionRef.current.clearHandoff(completedRun.sourcePath);
     }
     runSessionRef.current.clearActiveRun();
@@ -9505,17 +9556,14 @@ export default function Workbench() {
     setProjectLocked(false);
     projectLockedRef.current = false;
     editorRef.current?.unlockNow?.();
-    if (!adjustRequirements) return;
-    const firstComment = commentSessionRef.current.comments.find(commentHasContent);
-    window.requestAnimationFrame(() => {
-      if (!firstComment) {
-        openGlobalCommentComposer();
-      } else if (!canLocateTarget(firstComment.target)) {
-        beginTargetRelink(firstComment.commentId);
-      } else {
-        beginCommentEdit(firstComment);
-      }
-    });
+  };
+  const reopenRecentRunOutcome = () => {
+    const outcome = runSessionRef.current.outcomeForSource(sourcePath);
+    if (!outcome) return;
+    runSessionRef.current.setActiveRun(outcome);
+    setHandoffPreviewOpen(false);
+    setCanvasMode("edit");
+    setDrawer("handoff");
   };
   const handleToastAction = () => {
     const action = toast?.action;
@@ -9586,6 +9634,9 @@ export default function Workbench() {
         sourcePath={sourcePath || undefined}
         accepting={openingReadyVersion}
         error={activeRun?.status === "ready-to-open" ? activeRun.error : undefined}
+        notice={activeRun?.candidateAssessment?.status === "attention"
+          ? "这个候选可以打开，但与上一版的共同特征较少。请重点核对整页内容，再决定是否接受。"
+          : undefined}
         onExit={() => {
           setReadyReviewSession(null);
           setDrawer("handoff");
@@ -9603,7 +9654,9 @@ export default function Workbench() {
         onAccept={() => {
           setReadyReviewSession(null);
           setDrawer("handoff");
-          window.requestAnimationFrame(() => void activateReadyResult());
+          window.requestAnimationFrame(() => void activateReadyResult({
+            reviewed: true,
+          }));
         }}
       />
     );
@@ -9935,6 +9988,21 @@ export default function Workbench() {
             <ChatCircleTextIcon aria-hidden="true" size={18} weight="duotone" />
             全局评论
           </button>
+          {recentRunOutcome && !runInProgress && !terminalRun ? (
+            <button
+              className="recent-run-button"
+              type="button"
+              aria-expanded={drawer === "handoff"}
+              onClick={reopenRecentRunOutcome}
+            >
+              <ClockCounterClockwiseIcon
+                aria-hidden="true"
+                size={18}
+                weight="duotone"
+              />
+              上轮处理
+            </button>
+          ) : null}
           <button
             className="header-send-button"
             type="button"
@@ -11393,7 +11461,6 @@ export default function Workbench() {
               activeCommentItems={activeCommentItems}
               runBasisLabel={runBasisLabel}
               runSubmittedLabel={runSubmittedLabel}
-              activeScopeDecision={activeScopeDecision}
               pendingRunOutcome={pendingRunOutcome}
               canRevealRequestFolder={Boolean(
                 typeof window !== "undefined"

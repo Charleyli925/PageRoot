@@ -584,7 +584,8 @@ test("QoderWork handoff exposes a truthful process board with review-first ready
   );
   assert.match(workbench, /processSteps\.length\} 个阶段/);
   assert.doesNotMatch(workbench, /const returnedStates/);
-  assert.match(workbench, /已记录评论范围外的额外变化/);
+  assert.match(workbench, /页面变化较大，建议先审阅/);
+  assert.match(workbench, /PAGE_CONTINUITY_UNCERTAIN|candidateAssessment/);
   assert.doesNotMatch(workbench, /采用这些额外变化|AI 还修改了评论范围外的内容/);
   assert.match(workbench, /审阅对比/);
   assert.match(workbench, /直接打开/);
@@ -640,6 +641,10 @@ test("QoderWork handoff exposes a truthful process board with review-first ready
   );
   assert.match(
     footer,
+    /candidateAssessment\?\.status !== "attention"[\s\S]*?直接打开/,
+  );
+  assert.match(
+    footer,
     /handoffCopyFailed[\s\S]*?重新复制[\s\S]*?取消本轮/,
   );
   assert.match(
@@ -649,11 +654,12 @@ test("QoderWork handoff exposes a truthful process board with review-first ready
   assert.match(footer, /checkingRun[\s\S]*?查看本轮文件/);
   assert.match(
     footer,
-    /terminalRun[\s\S]*?修改要求[\s\S]*?返回编辑/,
+    /terminalRun[\s\S]*?onClick=\{onReturnToEditing\}[\s\S]*?返回编辑/,
   );
+  assert.doesNotMatch(footer, /修改要求/);
   assert.match(
     styles,
-    /\.handoff-process-board ol\s*\{[\s\S]*?grid-template-rows:\s*repeat\(4,\s*minmax\(56px,\s*1fr\)\)[\s\S]*?gap:\s*9px/,
+    /\.handoff-process-board ol\s*\{[\s\S]*?grid-auto-rows:\s*minmax\(56px,\s*auto\)[\s\S]*?align-content:\s*start[\s\S]*?gap:\s*9px/,
   );
   assert.match(
     styles,
@@ -685,6 +691,16 @@ test("QoderWork handoff exposes a truthful process board with review-first ready
   );
   assert.match(
     styles,
+    /\.side-drawer\[data-drawer="handoff"\] \.timeline-panel\s*\{[\s\S]*?overflow-y:\s*auto/,
+  );
+  assert.match(styles, /\.status-chip\[data-tone="error"\]/);
+  assert.match(styles, /\.status-chip\[data-tone="attention"\]/);
+  assert.match(
+    styles,
+    /\.status-chip\[data-tone="processing"\] > span\s*\{[\s\S]*?animation:/,
+  );
+  assert.match(
+    styles,
     /\.processing-footer button\s*\{[\s\S]*?min-height:\s*42px[\s\S]*?border-radius:\s*11px/,
   );
   assert.match(workbench, /正在预览已发送 HTML[\s\S]*?返回等待处理/);
@@ -710,6 +726,9 @@ test("QoderWork handoff exposes a truthful process board with review-first ready
     /\.preview-navigation-banner\[data-collapsed="true"\]\s*\{[\s\S]*?translateY\(-100%\)/,
   );
   assert.match(styles, /\.preview-banner-reveal:focus-visible/);
+  assert.match(workbench, />\s*上轮处理\s*</);
+  assert.match(workbench, /runSessionRef\.current\.rememberOutcome\(completedRun\)/);
+  assert.match(workbench, /outcomeForSource\(sourcePath\)/);
   assert.match(
     styles,
     /@media \(prefers-reduced-motion: reduce\)\s*\{[\s\S]*?\.preview-navigation-banner/,
