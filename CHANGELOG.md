@@ -22,6 +22,11 @@ Notable user-visible changes are documented here. This project follows Semantic 
 - Keep the desktop workspace Bridge startup pending while macOS is waiting for
   Documents-folder authorization, then resume the same launch automatically
   once the service reports ready instead of showing a false 12-second timeout.
+- Restrict desktop interactive preview to declared local assets and reject
+   dotfiles, undeclared sibling files, escaping symlinks and `file:` resource
+   bases.
+- Preserve the AI-Agent cancellation warning after reopening a processing
+  Request whose prior clipboard handoff can no longer be proven.
 
 ## [0.9.5] - 2026-07-31
 

@@ -747,7 +747,11 @@ test("ending a copied AI run warns clearly and restores editing with a stop remi
   );
   assert.match(
     workbench,
-    /currentQoderHandoffStatus === "copied"[\s\S]*?setCancelRunConfirmationKey\(activeRunOperationKey\(activeRun\)\)/,
+    /handoffCancellationNeedsConfirmation[\s\S]*?setCancelRunConfirmationKey\(activeRunOperationKey\(activeRun\)\)/,
+  );
+  assert.match(
+    workbench,
+    /activeRun\?\.status === "processing"[\s\S]*?runSnapshot\.activeHandoffMayBeRunning/,
   );
   assert.match(
     workbench,

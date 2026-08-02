@@ -19,6 +19,7 @@ export type RunSessionSnapshot = {
   activeSourcePath: string | null;
   activeRun: ActiveRun | null;
   activeHandoff: RunHandoffState | null;
+  activeHandoffMayBeRunning: boolean;
   backgroundResults: ReadonlyArray<readonly [string, RunBackgroundResult]>;
 };
 
@@ -29,7 +30,10 @@ export class RunSession {
   setActiveRun(run: ActiveRun | null): ActiveRun | null;
   trackRun(
     run: ActiveRun,
-    options?: { activate?: "if-current" | "never" | "always" },
+    options?: {
+      activate?: "if-current" | "never" | "always";
+      recovered?: boolean;
+    },
   ): ActiveRun | null;
   runForSource(sourcePath: string | null | undefined): ActiveRun | null;
   hasRun(run: ActiveRun | null | undefined): boolean;
@@ -62,6 +66,7 @@ export class RunSession {
   isOperationBusy(kind: RunOperationKind, key: string): boolean;
   readonly activeRun: ActiveRun | null;
   readonly activeHandoff: RunHandoffState | null;
+  readonly activeHandoffMayBeRunning: boolean;
   readonly runs: ReadonlyArray<ActiveRun>;
   readonly snapshot: RunSessionSnapshot;
 }

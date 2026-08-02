@@ -289,6 +289,7 @@ const INITIAL_RUN_SNAPSHOT: RunSessionSnapshot = {
   activeSourcePath: null,
   activeRun: null,
   activeHandoff: null,
+  activeHandoffMayBeRunning: false,
   backgroundResults: [],
 };
 const INITIAL_VERSION_SNAPSHOT: VersionSessionSnapshot<Version> = {
@@ -1054,12 +1055,16 @@ export default function Workbench() {
   )
     ? qoderHandoffState.status
     : "idle";
+  const handoffCancellationNeedsConfirmation = Boolean(
+    activeRun?.status === "processing"
+    && runSnapshot.activeHandoffMayBeRunning,
+  );
   const cancelRunConfirmationOpen = Boolean(
     cancelRunConfirmationKey
     && activeRun
     && activeRunOperationKey(activeRun) === cancelRunConfirmationKey
     && activeRun.status === "processing"
-    && currentQoderHandoffStatus === "copied",
+    && handoffCancellationNeedsConfirmation,
   );
   const updateActionVisible = Boolean(
     (
@@ -3363,7 +3368,7 @@ export default function Workbench() {
           : null,
       );
       if (recoveredRun && isLockedLifecycle(recoveredRun.status)) {
-        runSessionRef.current.trackRun(recoveredRun);
+        runSessionRef.current.trackRun(recoveredRun, { recovered: true });
         setProjectLocked(true);
         projectLockedRef.current = true;
         if (projectHydratingRef.current) {
@@ -3560,7 +3565,10 @@ export default function Workbench() {
           : null,
       );
       if (recoveredRun && isLockedLifecycle(recoveredRun.status)) {
-        runSessionRef.current.trackRun(recoveredRun, { activate: "never" });
+        runSessionRef.current.trackRun(recoveredRun, {
+          activate: "never",
+          recovered: true,
+        });
       }
     }));
   }, []);
@@ -8116,7 +8124,10 @@ export default function Workbench() {
           : null,
       );
       if (recoveredRun) {
-        runSessionRef.current.trackRun(recoveredRun, { activate: "always" });
+        runSessionRef.current.trackRun(recoveredRun, {
+          activate: "always",
+          recovered: true,
+        });
         setProjectLocked(isLockedLifecycle(recoveredRun.status));
         projectLockedRef.current = isLockedLifecycle(recoveredRun.status);
         setBridgeConnected(true);
@@ -10885,7 +10896,7 @@ export default function Workbench() {
             onRevealRequestFolder={() => void revealActiveRunInFinder()}
             onReturnToEditing={returnToEditingFromTerminalRun}
             onRequestEnd={() => {
-              if (currentQoderHandoffStatus === "copied") {
+              if (handoffCancellationNeedsConfirmation) {
                 setCancelRunConfirmationKey(activeRunOperationKey(activeRun));
               } else {
                 void cancelActiveRun();

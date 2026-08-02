@@ -27,9 +27,12 @@ the surrounding source-authored analysis hard to review.
 - The main process owns bounded, short-lived preview sessions. A trusted
   application main frame may create or revoke a session through two narrow IPC
   methods. Preview subframes receive no PageRoot preload API.
-- A session serves prepared HTML, one fixed bootstrap script and ordinary files
-  realpath-contained by the known source HTML directory. It does not expose an
-  arbitrary filesystem reader.
+- A session serves prepared HTML, one fixed bootstrap script and a bounded
+  manifest of declared relative script, style, image, font and media assets.
+  The manifest follows safe CSS and module dependencies, but rejects dotfiles,
+  undeclared siblings and symlink escapes; the source directory is never an
+  arbitrary filesystem reader. The document CSP also rejects authored `file:`
+  bases and resource loads.
 - The application renderer CSP remains `script-src 'self'`; only `frame-src`
   admits the preview scheme.
 - Returning from preview captures a bounded `PageViewContext`. It may carry
