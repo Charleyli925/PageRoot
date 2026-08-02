@@ -95,3 +95,61 @@ Date: 2026-08-02
 - A development-runtime `MutationObserver` error occurs on the initial route before entering review; opening and using the review canvas introduces no additional browser errors.
 
 final result: passed
+
+---
+
+# AI review demo design QA · v3
+
+Date: 2026-08-02
+
+## Source visual truth
+
+- `/var/folders/jx/w52403cs2hx39vwhd1sb3tg80000gn/T/codex-clipboard-d03405b0-5582-41dc-a5da-9e5af953b962.png` (`2552 × 790`) — 删除线、红/绿/蓝差异框和底部强调线的问题证据。
+- `/var/folders/jx/w52403cs2hx39vwhd1sb3tg80000gn/T/codex-clipboard-a2a22a53-f155-4f2b-80ef-e092a04df898.png` (`2808 × 1084`) — 上下文可见度和“全部变化”状态。
+- `/var/folders/jx/w52403cs2hx39vwhd1sb3tg80000gn/T/codex-clipboard-a84dd663-1c3b-4e72-9102-846fa7fa223e.png` (`634 × 544`) — 内容地图顶部介绍卡的删除目标。
+- `/var/folders/jx/w52403cs2hx39vwhd1sb3tg80000gn/T/codex-clipboard-3d722624-197a-494f-a1b4-341b7b33723f.png` (`2920 × 174`) 与 `/var/folders/jx/w52403cs2hx39vwhd1sb3tg80000gn/T/codex-clipboard-cf3d3544-24b3-4f1d-888b-82b66528e8fb.png` (`362 × 150`) — 可收起工具条和默认 `100%` 缩放目标。
+
+## Rendered implementation evidence
+
+- `output/design-qa/ai-review-demo-v3/all-changes-1280x720.png` — 两栏“全部变化”主状态。
+- `output/design-qa/ai-review-demo-v3/content-map-1280x720.png` — 内容地图打开状态。
+- `output/design-qa/ai-review-demo-v3/comparison-markers.png` — 差异标记全视图同屏对比。
+- `output/design-qa/ai-review-demo-v3/comparison-controls.png` — 工具条、上下文可见度和画布的全视图同屏对比。
+- `output/design-qa/ai-review-demo-v3/comparison-map.png` — 内容地图的同屏对比。
+- `output/design-qa/ai-review-demo-v3/comparison-controls-focused.png` — 收起把手和 `100%` 选中态的局部对比。
+
+Viewport and normalization:
+
+- Browser viewport and CSS viewport: `1280 × 720`; implementation screenshot: `1280 × 720`; device scale factor normalized to `1`.
+- Source images are issue-specific crops rather than a single canonical mock. Comparison boards retain each source crop's aspect ratio, resize with `contain`, and pair it with the matching implementation state; no pixel-perfect full-page claim is made.
+- State: review mode, opening section, `全部变化`, context visibility `22%`, linked scrolling, actual-size `100%`, toolbar pinned open. The map comparison additionally pins the content-map drawer.
+
+## Findings
+
+No actionable P0, P1, or P2 finding remains.
+
+- Typography: reviewed HTML typography remains unchanged; labels stay hidden at rest and no longer add a persistent baseline under added content. Removed text retains a dashed strike-through.
+- Spacing and layout rhythm: removing the map intro card lets the list begin directly with `页面开头`. The toolbar opens and closes only from its handle, so hover cannot trap it open.
+- Colors and visual tokens: red, green, gray, purple, and blue review evidence is outline-only. Computed evidence reports a `2px dashed` outline and `box-shadow: none`; changed elements keep their real fill and border appearance.
+- Image and asset fidelity: both original local HTML documents and their native assets render directly in the frames; no assets were replaced or approximated.
+- Copy and content: `按页面里的内容整理` and its helper text are absent. The remaining map section names and seven change summaries match the page content.
+- Accessibility: canvas scroll regions are keyboard focusable and named; filter, zoom, map, toolbar, and linked-scroll controls expose pressed/expanded states.
+
+## Browser interaction checks
+
+- Fresh load → `模拟 AI 返回` → `审阅修改` opened both documents at horizontal position `0` with `22%` and `100%` selected.
+- `全部变化` produced visible evidence instead of an empty canvas: before side `21` tokens, `19` clauses, `8` structure marks; after side `14` tokens, `12` clauses, `7` structure marks, and `1` style mark.
+- Computed style checks: removed text is `line-through` with `text-decoration-style: dashed`; added text has `text-decoration-line: none`; representative review frames are `2px dashed` with no shadow/accent line.
+- The review toolbar was collapsed and reopened successfully in the same session.
+- At `100%`, scrolling the left canvas horizontally synchronized both sides to the same `511.5 / 557` position.
+- The content map opened by its explicit control, and its accessibility snapshot contained no `按页面里的内容整理` text.
+- Responsive evidence from the preceding pass at `960 × 720` remains applicable; this pass changed marker grammar and scroll behavior without changing the responsive grid.
+- Console checked. The long-lived development browser log contains the previously documented dev-runtime `MutationObserver` error during route initialization; this review session added no feature-specific error and all tested controls remained operational.
+
+## Comparison history
+
+1. The first evidence capture reused the automation tab's prior scroll position and therefore did not represent a fresh product state. It was rejected as invalid comparison input, the page was hard-reloaded, and all final evidence was recaptured from top-left at `100%`.
+2. Post-normalization full-view comparison confirmed that all difference categories are simultaneously visible, use dashed frame-only treatment, and preserve the underlying HTML.
+3. Focused comparisons confirmed the removed map intro, deterministic toolbar toggle, `22%` default, and selected `100%` zoom. No subsequent visual fix was required.
+
+final result: passed

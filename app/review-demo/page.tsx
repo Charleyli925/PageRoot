@@ -833,7 +833,7 @@ const DOCUMENT_URLS = {
 } as const;
 
 function reviewDocumentUrl(side: ReviewSide, reviewSessionId: string) {
-  return `${DOCUMENT_URLS[side]}?review-canvas=${side}&session=${encodeURIComponent(reviewSessionId)}#top`;
+  return `${DOCUMENT_URLS[side]}?review-canvas=${side}&session=${encodeURIComponent(reviewSessionId)}`;
 }
 
 function RealDocumentPane({
@@ -842,12 +842,16 @@ function RealDocumentPane({
   reviewSessionId,
   onFrameReady,
   onScaleChange,
+  onViewportReady,
+  onViewportScroll,
 }: {
   side: ReviewSide;
   zoom: ZoomMode;
   reviewSessionId: string;
   onFrameReady: (side: ReviewSide, frame: HTMLIFrameElement) => void;
   onScaleChange: (scale: number) => void;
+  onViewportReady: (side: ReviewSide, viewport: HTMLDivElement | null) => void;
+  onViewportScroll: (side: ReviewSide) => void;
 }) {
   const isBefore = side === "before";
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -876,6 +880,10 @@ function RealDocumentPane({
   const renderedWidth = targetViewportWidth * scale;
   const iframeHeight = Math.max(620, viewportSize.height / scale);
   const url = reviewDocumentUrl(side, reviewSessionId);
+  const assignViewport = useCallback((viewport: HTMLDivElement | null) => {
+    viewportRef.current = viewport;
+    onViewportReady(side, viewport);
+  }, [onViewportReady, side]);
 
   useEffect(() => {
     setReviewPresentationScale(iframeRef.current, scale);
@@ -888,7 +896,14 @@ function RealDocumentPane({
       data-side={side}
       aria-label={`${isBefore ? "修改前原版 V1.3" : "修改后 AI 候选 V1.4"}完整页面`}
     >
-      <div className={styles.canvasDocumentViewport} ref={viewportRef} data-zoom={zoom}>
+      <div
+        className={styles.canvasDocumentViewport}
+        ref={assignViewport}
+        data-zoom={zoom}
+        tabIndex={0}
+        aria-label={`${isBefore ? "修改前" : "修改后"}画布滚动区`}
+        onScroll={() => onViewportScroll(side)}
+      >
         <div
           className={styles.canvasDocumentScale}
           style={{ width: renderedWidth, height: viewportSize.height }}
@@ -907,6 +922,13 @@ function RealDocumentPane({
             }}
             onLoad={() => {
               if (!iframeRef.current) return;
+              const viewport = viewportRef.current;
+              if (viewport) {
+                viewport.scrollLeft = 0;
+                window.requestAnimationFrame(() => {
+                  if (viewportRef.current === viewport) viewport.scrollLeft = 0;
+                });
+              }
               setReviewPresentationScale(iframeRef.current, scale);
               onFrameReady(side, iframeRef.current);
             }}
@@ -961,6 +983,18 @@ function clampScrollTop(frameWindow: Window, top: number) {
   return Math.max(0, Math.min(maximumScrollTop(frameWindow), top));
 }
 
+function maximumHorizontalScroll(viewport: HTMLElement) {
+  return Math.max(0, viewport.scrollWidth - viewport.clientWidth);
+}
+
+function getHorizontalScrollPosition(source: HTMLElement, target: HTMLElement) {
+  const sourceMax = maximumHorizontalScroll(source);
+  const targetMax = maximumHorizontalScroll(target);
+  if (source.scrollLeft <= 1 || sourceMax <= 0) return 0;
+  if (sourceMax - source.scrollLeft <= 1) return targetMax;
+  return (source.scrollLeft / sourceMax) * targetMax;
+}
+
 function getSemanticScrollPosition(source: Window, target: Window) {
   const sourceDocument = source.document;
   const targetDocument = target.document;
@@ -1010,30 +1044,16 @@ function getSemanticScrollPosition(source: Window, target: Window) {
 function ContentMap({
   activeId,
   focused,
-  showAll,
-  onToggleAll,
   onSelect,
 }: {
   activeId: string;
   focused: boolean;
-  showAll: boolean;
-  onToggleAll: () => void;
   onSelect: (changeId: string) => void;
 }) {
-  const visibleGroups = CONTENT_OUTLINE.map((group) => ({
-    ...group,
-    items: showAll ? group.items : group.items.filter((item) => item.changeId),
-  })).filter((group) => group.items.length > 0);
-
   return (
     <div className={styles.contentMapScroll}>
-      <section className={styles.contentMapIntro}>
-        <div><strong>按页面里的内容整理</strong><span>选择一处后，两边会同时定位并压暗无关内容。</span></div>
-        <button type="button" onClick={onToggleAll}>{showAll ? "只看变化" : "显示全部"}</button>
-      </section>
-
       <nav className={styles.contentMap} aria-label="页面内容与变化位置">
-        {visibleGroups.map((group) => (
+        {CONTENT_OUTLINE.map((group) => (
           <section key={group.label}>
             <header>
               <span>{group.label}</span>
@@ -1083,33 +1103,71 @@ function ReviewScreen({
   onKeep: () => void;
 }) {
   const [activeIndex, setActiveIndex] = useState(0);
-  const [showAll, setShowAll] = useState(true);
   const [focused, setFocused] = useState(false);
   const [diffFilter, setDiffFilter] = useState<DiffFilter>("all");
   const [scrollMode, setScrollMode] = useState<ScrollMode>("linked");
-  const [zoom, setZoom] = useState<ZoomMode>("fit");
+  const [zoom, setZoom] = useState<ZoomMode>("actual");
   const [mapPeeked, setMapPeeked] = useState(false);
   const [mapPinned, setMapPinned] = useState(false);
   const [toolbarIntroduced, setToolbarIntroduced] = useState(true);
-  const [toolbarPeeked, setToolbarPeeked] = useState(false);
   const [toolbarPinned, setToolbarPinned] = useState(false);
-  const [maskTransparency, setMaskTransparency] = useState(72);
-  const [canvasScale, setCanvasScale] = useState(.5);
+  const [maskTransparency, setMaskTransparency] = useState(22);
+  const [canvasScale, setCanvasScale] = useState(1);
   const [leaderSide, setLeaderSide] = useState<ReviewSide>("before");
   const leaderSideRef = useRef<ReviewSide>("before");
   const [frameRevision, setFrameRevision] = useState(0);
   const [reviewSessionId] = useState(() => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`);
   const frameRefs = useRef<Record<ReviewSide, HTMLIFrameElement | null>>({ before: null, after: null });
+  const viewportRefs = useRef<Record<ReviewSide, HTMLDivElement | null>>({ before: null, after: null });
   const frameCleanup = useRef<Partial<Record<ReviewSide, () => void>>>({});
   const expectedFrameScroll = useRef<Partial<Record<ReviewSide, ExpectedFrameScroll>>>({});
+  const expectedViewportScroll = useRef<Partial<Record<ReviewSide, number>>>({});
   const scrollOperationId = useRef(0);
   const scrollSyncAnimationFrame = useRef(0);
+  const horizontalSyncAnimationFrame = useRef(0);
   const temporaryIndependentUntil = useRef(0);
   const initialOverviewPositioned = useRef(false);
   const scrollModeRef = useRef<ScrollMode>(scrollMode);
   const activeChange = CONTENT_CHANGES[activeIndex];
   const mapOpen = mapPinned || mapPeeked;
-  const toolbarOpen = toolbarIntroduced || toolbarPinned || toolbarPeeked;
+  const toolbarOpen = toolbarIntroduced || toolbarPinned;
+
+  const registerViewport = useCallback((side: ReviewSide, viewport: HTMLDivElement | null) => {
+    viewportRefs.current[side] = viewport;
+  }, []);
+
+  const writeViewportScroll = useCallback((side: ReviewSide, viewport: HTMLElement, left: number) => {
+    const targetLeft = Math.max(0, Math.min(maximumHorizontalScroll(viewport), left));
+    expectedViewportScroll.current[side] = targetLeft;
+    viewport.scrollLeft = targetLeft;
+  }, []);
+
+  const alignHorizontalFrom = useCallback((sourceSide: ReviewSide) => {
+    const targetSide: ReviewSide = sourceSide === "before" ? "after" : "before";
+    const sourceViewport = viewportRefs.current[sourceSide];
+    const targetViewport = viewportRefs.current[targetSide];
+    if (!sourceViewport || !targetViewport) return;
+    const targetLeft = getHorizontalScrollPosition(sourceViewport, targetViewport);
+    writeViewportScroll(targetSide, targetViewport, targetLeft);
+  }, [writeViewportScroll]);
+
+  const handleViewportScroll = useCallback((side: ReviewSide) => {
+    const viewport = viewportRefs.current[side];
+    if (!viewport) return;
+    const expectedLeft = expectedViewportScroll.current[side];
+    if (expectedLeft !== undefined && Math.abs(viewport.scrollLeft - expectedLeft) <= 1) {
+      expectedViewportScroll.current[side] = undefined;
+      return;
+    }
+    expectedViewportScroll.current[side] = undefined;
+    if (scrollModeRef.current !== "linked" || performance.now() < temporaryIndependentUntil.current) return;
+    leaderSideRef.current = side;
+    setLeaderSide((current) => current === side ? current : side);
+    window.cancelAnimationFrame(horizontalSyncAnimationFrame.current);
+    horizontalSyncAnimationFrame.current = window.requestAnimationFrame(() => {
+      if (scrollModeRef.current === "linked" && leaderSideRef.current === side) alignHorizontalFrom(side);
+    });
+  }, [alignHorizontalFrom]);
 
   const writeFrameScroll = useCallback((
     side: ReviewSide,
@@ -1162,6 +1220,7 @@ function ReviewScreen({
     frameCleanup.current.before?.();
     frameCleanup.current.after?.();
     window.cancelAnimationFrame(scrollSyncAnimationFrame.current);
+    window.cancelAnimationFrame(horizontalSyncAnimationFrame.current);
     clearReviewPresentation(frameRefs.current.before);
     clearReviewPresentation(frameRefs.current.after);
   }, []);
@@ -1177,20 +1236,24 @@ function ReviewScreen({
     );
 
     if (!focused) return undefined;
-    const timer = window.setTimeout(() => {
+    const settleTimers = [40, 180, 360].map((delay) => window.setTimeout(() => {
       positionFramesToEvidence(activeChange.anchor, diffFilter);
-    }, 40);
-    return () => window.clearTimeout(timer);
+    }, delay));
+    return () => settleTimers.forEach((timer) => window.clearTimeout(timer));
   }, [activeChange, diffFilter, focused, frameRevision, positionFramesToEvidence]);
 
   useEffect(() => {
     const beforeWindow = frameRefs.current.before?.contentWindow;
     const afterWindow = frameRefs.current.after?.contentWindow;
+    const beforeViewport = viewportRefs.current.before;
+    const afterViewport = viewportRefs.current.after;
     if (focused || initialOverviewPositioned.current || !beforeWindow || !afterWindow) return undefined;
 
     const positionAtTop = () => {
       writeFrameScroll("before", beforeWindow, 0);
       writeFrameScroll("after", afterWindow, 0);
+      if (beforeViewport) writeViewportScroll("before", beforeViewport, 0);
+      if (afterViewport) writeViewportScroll("after", afterViewport, 0);
     };
     positionAtTop();
     const settleTimer = window.setTimeout(positionAtTop, 120);
@@ -1202,7 +1265,7 @@ function ReviewScreen({
       window.clearTimeout(settleTimer);
       window.clearTimeout(finishTimer);
     };
-  }, [focused, frameRevision, writeFrameScroll]);
+  }, [focused, frameRevision, writeFrameScroll, writeViewportScroll]);
 
   const alignFrom = (sourceSide: ReviewSide) => {
     const targetSide: ReviewSide = sourceSide === "before" ? "after" : "before";
@@ -1210,11 +1273,13 @@ function ReviewScreen({
     const targetWindow = frameRefs.current[targetSide]?.contentWindow;
     if (!sourceWindow || !targetWindow) return;
     writeFrameScroll(targetSide, targetWindow, getSemanticScrollPosition(sourceWindow, targetWindow));
+    alignHorizontalFrom(sourceSide);
   };
 
   const bindFrame = (side: ReviewSide, frame: HTMLIFrameElement) => {
     frameCleanup.current[side]?.();
     frameRefs.current[side] = frame;
+    initialOverviewPositioned.current = false;
     const frameWindow = frame.contentWindow;
     if (!frameWindow) return;
 
@@ -1243,6 +1308,17 @@ function ReviewScreen({
 
     const onWheel = (event: WheelEvent) => {
       claimLeader(event.altKey);
+      const viewport = viewportRefs.current[side];
+      const horizontalDelta = Math.abs(event.deltaX) > Math.abs(event.deltaY)
+        ? event.deltaX
+        : event.shiftKey ? event.deltaY : 0;
+      if (viewport && horizontalDelta !== 0 && maximumHorizontalScroll(viewport) > 0) {
+        event.preventDefault();
+        viewport.scrollLeft = Math.max(
+          0,
+          Math.min(maximumHorizontalScroll(viewport), viewport.scrollLeft + horizontalDelta),
+        );
+      }
     };
     const onPointerDown = (event: PointerEvent) => claimLeader(event.altKey);
     const onTouchStart = () => claimLeader(false);
@@ -1266,7 +1342,7 @@ function ReviewScreen({
     };
     const onScrollEnd = () => scheduleLinkedScroll();
 
-    frameWindow.addEventListener("wheel", onWheel, { passive: true });
+    frameWindow.addEventListener("wheel", onWheel, { passive: false });
     frameWindow.addEventListener("pointerdown", onPointerDown, { passive: true });
     frameWindow.addEventListener("touchstart", onTouchStart, { passive: true });
     frameWindow.addEventListener("keydown", onKeyDown);
@@ -1310,7 +1386,12 @@ function ReviewScreen({
   const changeScrollMode = () => {
     const nextMode: ScrollMode = scrollMode === "linked" ? "independent" : "linked";
     setScrollMode(nextMode);
-    if (nextMode === "linked") window.setTimeout(() => alignFrom(leaderSide), 20);
+    if (nextMode === "linked") window.setTimeout(() => alignFrom(leaderSideRef.current), 20);
+  };
+
+  const changeZoom = (nextZoom: ZoomMode) => {
+    setZoom(nextZoom);
+    window.setTimeout(() => alignHorizontalFrom(leaderSideRef.current), 60);
   };
 
   const toggleMapPinned = () => {
@@ -1336,15 +1417,6 @@ function ReviewScreen({
             className={styles.canvasControlsDock}
             data-open={toolbarOpen ? "true" : undefined}
             data-pinned={toolbarPinned ? "true" : undefined}
-            onMouseEnter={() => setToolbarPeeked(true)}
-            onMouseLeave={() => {
-              setToolbarIntroduced(false);
-              if (!toolbarPinned) setToolbarPeeked(false);
-            }}
-            onFocusCapture={() => setToolbarPeeked(true)}
-            onBlurCapture={(event) => {
-              if (!toolbarPinned && !event.currentTarget.contains(event.relatedTarget as Node | null)) setToolbarPeeked(false);
-            }}
           >
             <div className={styles.canvasToolbar}>
               <div className={styles.canvasReviewTitle}>
@@ -1406,7 +1478,7 @@ function ReviewScreen({
                   type="button"
                   data-active={scrollMode === "linked" ? "true" : undefined}
                   aria-pressed={scrollMode === "linked"}
-                  title={scrollMode === "linked" ? "当前同步滚动；按住 Option 可临时单独滚动" : "当前独立滚动"}
+                  title={scrollMode === "linked" ? "当前横向与纵向同步滚动；按住 Option 可临时单独滚动" : "当前独立滚动"}
                   onClick={changeScrollMode}
                 >
                   {scrollMode === "linked"
@@ -1415,8 +1487,8 @@ function ReviewScreen({
                   <span>{scrollMode === "linked" ? `同步 · ${leaderSide === "before" ? "左侧" : "右侧"}主控` : "独立滚动"}</span>
                 </button>
                 <div className={styles.zoomSwitch} aria-label="画布缩放">
-                  <button type="button" aria-pressed={zoom === "fit"} onClick={() => setZoom("fit")}><CornersOutIcon aria-hidden="true" size={14} /><span>适应 {Math.round(canvasScale * 100)}%</span></button>
-                  <button type="button" aria-pressed={zoom === "actual"} onClick={() => setZoom("actual")}>100%</button>
+                  <button type="button" aria-pressed={zoom === "fit"} onClick={() => changeZoom("fit")}><CornersOutIcon aria-hidden="true" size={14} /><span>适应 {Math.round(canvasScale * 100)}%</span></button>
+                  <button type="button" aria-pressed={zoom === "actual"} onClick={() => changeZoom("actual")}>100%</button>
                 </div>
               </div>
             </div>
@@ -1424,10 +1496,10 @@ function ReviewScreen({
               className={styles.canvasToolbarHandle}
               type="button"
               aria-expanded={toolbarOpen}
-              aria-label={toolbarPinned ? "取消固定审阅工具" : "显示并固定审阅工具"}
+              aria-label={toolbarOpen ? "收起审阅工具" : "显示并固定审阅工具"}
               onClick={() => {
                 setToolbarIntroduced(false);
-                setToolbarPinned((current) => !current);
+                setToolbarPinned(!toolbarOpen);
               }}
             >
               {toolbarOpen
@@ -1439,8 +1511,24 @@ function ReviewScreen({
 
           <div className={styles.canvasReviewBody} data-focused={focused ? "true" : undefined}>
             <div className={styles.canvasGrid}>
-              <RealDocumentPane side="before" zoom={zoom} reviewSessionId={reviewSessionId} onFrameReady={bindFrame} onScaleChange={setCanvasScale} />
-              <RealDocumentPane side="after" zoom={zoom} reviewSessionId={reviewSessionId} onFrameReady={bindFrame} onScaleChange={setCanvasScale} />
+              <RealDocumentPane
+                side="before"
+                zoom={zoom}
+                reviewSessionId={reviewSessionId}
+                onFrameReady={bindFrame}
+                onScaleChange={setCanvasScale}
+                onViewportReady={registerViewport}
+                onViewportScroll={handleViewportScroll}
+              />
+              <RealDocumentPane
+                side="after"
+                zoom={zoom}
+                reviewSessionId={reviewSessionId}
+                onFrameReady={bindFrame}
+                onScaleChange={setCanvasScale}
+                onViewportReady={registerViewport}
+                onViewportScroll={handleViewportScroll}
+              />
             </div>
 
             <aside
@@ -1487,8 +1575,6 @@ function ReviewScreen({
                 <ContentMap
                   activeId={activeChange.id}
                   focused={focused}
-                  showAll={showAll}
-                  onToggleAll={() => setShowAll((current) => !current)}
                   onSelect={selectChange}
                 />
               </div>

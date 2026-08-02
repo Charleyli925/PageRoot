@@ -38,8 +38,9 @@ test("the demo keeps realistic complex changes available to the canvas review", 
 
 test("the content map uses headings and visible copy from the complex HTML fixture", () => {
   assert.match(page, /页面内容地图/);
-  assert.match(page, /按页面里的内容整理/);
-  assert.match(page, /两边会同时定位并压暗无关内容/);
+  assert.doesNotMatch(page, /按页面里的内容整理/);
+  assert.doesNotMatch(page, /两边会同时定位并压暗无关内容/);
+  assert.doesNotMatch(styles, /\.contentMapIntro/);
   assert.match(page, /为复杂页面而生 \/ 数字实验场/);
   assert.match(page, /从宏观指标到微观事件，保持同一条数据叙事/);
   assert.match(page, /一份包含多层语义结构的长篇阅读样本/);
@@ -84,7 +85,10 @@ test("canvas review exposes orthogonal focus, difference, scroll, and zoom contr
   assert.match(page, /inert=\{!mapOpen \? true : undefined\}/);
   assert.match(page, /toolbarIntroduced/);
   assert.match(page, /toolbarPinned/);
+  assert.doesNotMatch(page, /toolbarPeeked/);
+  assert.match(page, /aria-label=\{toolbarOpen \? "收起审阅工具" : "显示并固定审阅工具"\}/);
   assert.match(page, /上下文可见度/);
+  assert.match(page, /useState\(22\)/);
   assert.match(page, /min="0"/);
   assert.match(page, /max="100"/);
   assert.match(page, /aria-label="非修改区域上下文可见度"/);
@@ -92,7 +96,14 @@ test("canvas review exposes orthogonal focus, difference, scroll, and zoom contr
   assert.match(page, /setReviewPresentationMaskTransparency/);
   assert.match(styles, /\.maskTransparencyControl/);
   assert.match(styles, /translateY\(calc\(-100% \+ 18px\)\)/);
-  assert.match(styles, /\.canvasControlsDock:hover/);
+  assert.doesNotMatch(styles, /\.canvasControlsDock:hover/);
+  assert.match(page, /useState<ZoomMode>\("actual"\)/);
+  assert.match(page, /getHorizontalScrollPosition/);
+  assert.match(page, /viewport\.scrollLeft = targetLeft/);
+  assert.match(page, /initialOverviewPositioned\.current = false/);
+  assert.match(page, /writeViewportScroll\("before", beforeViewport, 0\)/);
+  assert.match(page, /tabIndex=\{0\}/);
+  assert.match(page, /当前横向与纵向同步滚动/);
 });
 
 test("the paired diff presentation separates text, structure, and style evidence", () => {
@@ -106,9 +117,12 @@ test("the paired diff presentation separates text, structure, and style evidence
   assert.match(presentation, /pageroot-token-removed/);
   assert.match(presentation, /pageroot-token-added/);
   assert.match(presentation, /text-decoration-line: line-through/);
-  assert.match(presentation, /text-decoration-line: underline/);
+  assert.match(presentation, /text-decoration-style: dashed/);
+  assert.match(presentation, /\.pageroot-token-added \{[\s\S]*?text-decoration: none !important;/);
   assert.match(presentation, /text-decoration-thickness: calc\(2px \* var\(--pageroot-review-ui-scale\)\)/);
-  assert.match(presentation, /box-shadow: 0 0 0 calc\(2px \* var\(--pageroot-review-ui-scale\)\) rgba\(207, 82, 76, \.82\)/);
+  assert.match(presentation, /\.pageroot-clause-removed \{[\s\S]*?outline: calc\(2px \* var\(--pageroot-review-ui-scale\)\) dashed/);
+  assert.doesNotMatch(presentation, /outline:[^;]* solid /);
+  assert.doesNotMatch(presentation, /box-shadow: inset/);
   assert.match(presentation, /overflow-anchor: none/);
   assert.match(presentation, /pageroot-structure-from/);
   assert.match(presentation, /pageroot-structure-to/);
@@ -123,7 +137,7 @@ test("the paired diff presentation separates text, structure, and style evidence
   assert.match(presentation, /parts\.join\(" · "\)/);
   assert.match(presentation, /pageroot-focus-mask/);
   assert.match(presentation, /appendFocusMask\(beforeSection\)/);
-  assert.match(presentation, /applySummaryDiff\(beforeSection, afterSection\)/);
+  assert.match(presentation, /if \(filter === "all"\) \{[\s\S]*?applyTextDiff[\s\S]*?applyStructureDiff[\s\S]*?applyStyleDiff/);
   assert.match(presentation, /Math\.max\(0, Math\.min\(100, value\)\)/);
   assert.match(presentation, /setReviewPresentationScale/);
   assert.doesNotMatch(presentation, /\[data-pageroot-active='true'\]::after/);
@@ -134,8 +148,8 @@ test("the review surface renders the two complete local HTML documents", () => {
   assert.match(page, /\/review-demo-local\/after\.html/);
   assert.match(page, /targetViewportWidth = 1180/);
   assert.match(page, /复杂 HTML 完整页面/);
-  assert.match(page, /side="before" zoom=\{zoom\} reviewSessionId=\{reviewSessionId\} onFrameReady=\{bindFrame\} onScaleChange=\{setCanvasScale\}/);
-  assert.match(page, /side="after" zoom=\{zoom\} reviewSessionId=\{reviewSessionId\} onFrameReady=\{bindFrame\} onScaleChange=\{setCanvasScale\}/);
+  assert.match(page, /side="before"[\s\S]*?onFrameReady=\{bindFrame\}[\s\S]*?onViewportReady=\{registerViewport\}[\s\S]*?onViewportScroll=\{handleViewportScroll\}/);
+  assert.match(page, /side="after"[\s\S]*?onFrameReady=\{bindFrame\}[\s\S]*?onViewportReady=\{registerViewport\}[\s\S]*?onViewportScroll=\{handleViewportScroll\}/);
   assert.match(page, /session=\$\{encodeURIComponent\(reviewSessionId\)\}/);
   assert.match(page, /对比版本与全页打开/);
   assert.match(styles, /\.canvasVersionPair/);

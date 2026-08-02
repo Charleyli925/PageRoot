@@ -3095,56 +3095,9 @@ li[data-state="current"] .stepState {
   padding: 13px 14px 20px;
 }
 
-.contentMapIntro {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-  padding: 11px 12px;
-  border: 1px solid #dedcf3;
-  border-radius: 10px;
-  background: #f8f7ff;
-}
-
-.contentMapIntro > div {
-  min-width: 0;
-  display: flex;
-  align-items: flex-start;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.contentMapIntro strong {
-  color: #4d4992;
-  font-size: 10.5px;
-}
-
-.contentMapIntro span {
-  color: #777487;
-  font-size: 9px;
-  line-height: 1.4;
-}
-
-.contentMapIntro button {
-  min-height: 27px;
-  padding: 0 8px;
-  border: 1px solid #d4d1ef;
-  border-radius: 7px;
-  background: #fff;
-  color: #5d57c3;
-  font-size: 9px;
-  font-weight: 720;
-  white-space: nowrap;
-}
-
-.contentMapIntro button:hover {
-  background: #f1efff;
-}
-
 .contentMap {
   display: grid;
   gap: 11px;
-  margin-top: 13px;
 }
 
 .contentMap > section {
@@ -3674,9 +3627,7 @@ li[data-state="current"] .stepState {
   transition: transform 210ms cubic-bezier(.2, .8, .2, 1);
 }
 
-.canvasControlsDock[data-open="true"],
-.canvasControlsDock:hover,
-.canvasControlsDock:focus-within {
+.canvasControlsDock[data-open="true"] {
   transform: translateY(0);
 }
 
@@ -3985,8 +3936,15 @@ li[data-state="current"] .stepState {
 .canvasDocumentViewport {
   position: relative;
   overflow: auto;
+  overflow-anchor: none;
   overscroll-behavior: contain;
+  scroll-behavior: auto;
   background: #f1f2f4;
+  outline: none;
+}
+
+.canvasDocumentViewport:focus-visible {
+  box-shadow: inset 0 0 0 2px rgb(102 94 209 / 52%);
 }
 
 .canvasDocumentScale {

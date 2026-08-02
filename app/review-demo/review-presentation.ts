@@ -62,10 +62,10 @@ const STYLE_PROPERTIES = [
 
 const REVIEW_FRAME_STYLE = `
   html {
-    --pageroot-context-opacity: .5;
-    --pageroot-context-grayscale: .28;
-    --pageroot-context-saturation: .72;
-    --pageroot-focus-mask-opacity: .28;
+    --pageroot-context-opacity: .39;
+    --pageroot-context-grayscale: .43;
+    --pageroot-context-saturation: .77;
+    --pageroot-focus-mask-opacity: .78;
     --pageroot-review-ui-scale: 1;
   }
 
@@ -134,6 +134,7 @@ const REVIEW_FRAME_STYLE = `
     background: transparent !important;
     color: inherit !important;
     text-decoration-line: line-through !important;
+    text-decoration-style: dashed !important;
     text-decoration-color: #c04e48 !important;
     text-decoration-thickness: calc(2px * var(--pageroot-review-ui-scale)) !important;
     box-shadow: none !important;
@@ -142,10 +143,7 @@ const REVIEW_FRAME_STYLE = `
   .pageroot-token-added {
     background: transparent !important;
     color: inherit !important;
-    text-decoration-line: underline !important;
-    text-decoration-color: #249269 !important;
-    text-decoration-thickness: calc(2px * var(--pageroot-review-ui-scale)) !important;
-    text-underline-offset: .16em !important;
+    text-decoration: none !important;
     box-shadow: none !important;
   }
 
@@ -166,11 +164,15 @@ const REVIEW_FRAME_STYLE = `
   }
 
   .pageroot-clause-removed {
-    box-shadow: 0 0 0 calc(2px * var(--pageroot-review-ui-scale)) rgba(207, 82, 76, .82) !important;
+    outline: calc(2px * var(--pageroot-review-ui-scale)) dashed rgba(207, 82, 76, .86) !important;
+    outline-offset: 0 !important;
+    box-shadow: none !important;
   }
 
   .pageroot-clause-added {
-    box-shadow: 0 0 0 calc(2px * var(--pageroot-review-ui-scale)) rgba(35, 148, 103, .86) !important;
+    outline: calc(2px * var(--pageroot-review-ui-scale)) dashed rgba(35, 148, 103, .9) !important;
+    outline-offset: 0 !important;
+    box-shadow: none !important;
   }
 
   .pageroot-diff-text {
@@ -191,25 +193,25 @@ const REVIEW_FRAME_STYLE = `
   .pageroot-structure-from {
     outline: calc(2px * var(--pageroot-review-ui-scale)) dashed rgba(111, 106, 125, .82) !important;
     outline-offset: calc(2px * var(--pageroot-review-ui-scale)) !important;
-    box-shadow: inset calc(4px * var(--pageroot-review-ui-scale)) 0 0 rgba(111, 106, 125, .86) !important;
+    box-shadow: none !important;
   }
 
   .pageroot-structure-to {
-    outline: calc(2.5px * var(--pageroot-review-ui-scale)) solid rgba(98, 87, 210, .9) !important;
+    outline: calc(2px * var(--pageroot-review-ui-scale)) dashed rgba(98, 87, 210, .9) !important;
     outline-offset: calc(2px * var(--pageroot-review-ui-scale)) !important;
-    box-shadow: inset 0 calc(-4px * var(--pageroot-review-ui-scale)) 0 rgba(98, 87, 210, .9) !important;
+    box-shadow: none !important;
   }
 
   .pageroot-structure-removed {
-    outline: calc(2px * var(--pageroot-review-ui-scale)) solid rgba(207, 90, 83, .88) !important;
+    outline: calc(2px * var(--pageroot-review-ui-scale)) dashed rgba(207, 90, 83, .88) !important;
     outline-offset: calc(2px * var(--pageroot-review-ui-scale)) !important;
-    box-shadow: inset calc(4px * var(--pageroot-review-ui-scale)) 0 0 #cf5a53 !important;
+    box-shadow: none !important;
   }
 
   .pageroot-structure-added {
-    outline: calc(2px * var(--pageroot-review-ui-scale)) solid rgba(38, 151, 107, .9) !important;
+    outline: calc(2px * var(--pageroot-review-ui-scale)) dashed rgba(38, 151, 107, .9) !important;
     outline-offset: calc(2px * var(--pageroot-review-ui-scale)) !important;
-    box-shadow: inset 0 calc(-4px * var(--pageroot-review-ui-scale)) 0 #26976b !important;
+    box-shadow: none !important;
   }
 
   .pageroot-style-reference {
@@ -219,26 +221,9 @@ const REVIEW_FRAME_STYLE = `
   }
 
   .pageroot-style-change {
-    outline: calc(2.5px * var(--pageroot-review-ui-scale)) solid rgba(25, 127, 167, .9) !important;
+    outline: calc(2px * var(--pageroot-review-ui-scale)) dashed rgba(25, 127, 167, .9) !important;
     outline-offset: calc(2px * var(--pageroot-review-ui-scale)) !important;
     box-shadow: none !important;
-  }
-
-  .pageroot-summary-before,
-  .pageroot-summary-after {
-    position: relative !important;
-    z-index: 2147483010 !important;
-    outline-offset: calc(3px * var(--pageroot-review-ui-scale)) !important;
-  }
-
-  .pageroot-summary-before {
-    outline: calc(2px * var(--pageroot-review-ui-scale)) solid rgba(191, 91, 84, .58) !important;
-    box-shadow: inset calc(4px * var(--pageroot-review-ui-scale)) 0 0 rgba(191, 91, 84, .72) !important;
-  }
-
-  .pageroot-summary-after {
-    outline: calc(2px * var(--pageroot-review-ui-scale)) solid rgba(61, 129, 104, .62) !important;
-    box-shadow: inset calc(4px * var(--pageroot-review-ui-scale)) 0 0 rgba(61, 129, 104, .78) !important;
   }
 
   .pageroot-review-label {
@@ -877,11 +862,6 @@ function applyStyleDiff(beforeSection: HTMLElement, afterSection: HTMLElement, s
   result.afterOnly.forEach((entry) => markStyle(entry.element, "after", "新增视觉样式"));
 }
 
-function applySummaryDiff(beforeSection: HTMLElement, afterSection: HTMLElement) {
-  beforeSection.classList.add("pageroot-summary-before");
-  afterSection.classList.add("pageroot-summary-after");
-}
-
 function ensurePresentationStyle(document: Document) {
   let style = document.getElementById("pageroot-review-presentation") as HTMLStyleElement | null;
   if (!style) {
@@ -933,9 +913,6 @@ function removeInjectedPresentation(document: Document) {
   });
   document.body?.classList.remove("pageroot-section-focus", "pageroot-diff-focus", ...REVIEW_MODE_CLASSES);
   document.querySelectorAll<HTMLElement>("[data-pageroot-active]").forEach((element) => element.removeAttribute("data-pageroot-active"));
-  document.querySelectorAll<HTMLElement>(".pageroot-summary-before, .pageroot-summary-after").forEach((element) => {
-    element.classList.remove("pageroot-summary-before", "pageroot-summary-after");
-  });
   document.querySelectorAll<HTMLElement>("[data-pageroot-diff]").forEach((element) => {
     element.removeAttribute("data-pageroot-diff");
     element.classList.remove(
@@ -984,7 +961,9 @@ export function applyReviewPresentationPair(
   appendFocusMask(afterSection);
 
   if (filter === "all") {
-    applySummaryDiff(beforeSection, afterSection);
+    applyTextDiff(beforeSection, afterSection, targets.text);
+    applyStructureDiff(beforeSection, afterSection, targets.structure);
+    applyStyleDiff(beforeSection, afterSection, targets.style);
     return;
   }
 
