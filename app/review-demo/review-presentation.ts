@@ -48,6 +48,8 @@ const REVIEW_MODE_CLASSES = [
   "pageroot-mode-style",
 ];
 
+let reviewFrameOwnerSequence = 0;
+
 const STYLE_PROPERTIES = [
   ["background-color", "背景"],
   ["color", "文字颜色"],
@@ -331,6 +333,33 @@ const REVIEW_FRAME_STYLE = `
 
   [data-pageroot-diff]:has([data-pageroot-diff]:hover) > .pageroot-review-label,
   [data-pageroot-diff]:has([data-pageroot-diff]:focus-within) > .pageroot-review-label {
+    opacity: 0 !important;
+    visibility: hidden !important;
+  }
+
+  body.pageroot-mode-all .pageroot-all-change-root:not(.pageroot-all-change-text-root) {
+    outline: calc(2px * var(--pageroot-review-ui-scale)) dashed rgba(98, 87, 210, .92) !important;
+    outline-offset: calc(2px * var(--pageroot-review-ui-scale)) !important;
+    box-shadow: none !important;
+  }
+
+  body.pageroot-mode-all .pageroot-all-change-child {
+    outline: 0 !important;
+    box-shadow: none !important;
+  }
+
+  body.pageroot-mode-all .pageroot-clause-frame-all {
+    outline-color: rgba(98, 87, 210, .92) !important;
+  }
+
+  body.pageroot-mode-all .pageroot-all-change-root > .pageroot-label-summary {
+    color: #514ba9 !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    transform: translateY(0) !important;
+  }
+
+  body.pageroot-mode-all .pageroot-all-change-child > .pageroot-review-label {
     opacity: 0 !important;
     visibility: hidden !important;
   }
@@ -755,7 +784,7 @@ function wrapClauseRanges(element: HTMLElement, ranges: TextRange[], side: Revie
   return clauses;
 }
 
-function appendMergedClauseFrame(clauses: HTMLElement[], side: ReviewSide) {
+function appendMergedClauseFrame(clauses: HTMLElement[], side: ReviewSide, owner: HTMLElement) {
   const firstClause = clauses[0];
   const document = firstClause?.ownerDocument;
   const frameWindow = document?.defaultView;
@@ -770,8 +799,11 @@ function appendMergedClauseFrame(clauses: HTMLElement[], side: ReviewSide) {
   const right = Math.max(...rects.map((rect) => rect.right)) + frameWindow.scrollX;
   const bottom = Math.max(...rects.map((rect) => rect.bottom)) + frameWindow.scrollY;
   const frame = document.createElement("span");
+  const ownerId = owner.dataset.pagerootFrameOwner || `pageroot-frame-${++reviewFrameOwnerSequence}`;
+  owner.dataset.pagerootFrameOwner = ownerId;
   frame.dataset.pagerootOverlay = "true";
   frame.dataset.pagerootClauseFrame = "true";
+  frame.dataset.pagerootFrameOwner = ownerId;
   frame.setAttribute("aria-hidden", "true");
   frame.className = `pageroot-clause-frame pageroot-clause-frame-${side === "before" ? "removed" : "added"}`;
   frame.style.left = `${left}px`;
@@ -824,7 +856,7 @@ function markText(entry: ElementEntry, side: ReviewSide, clauses: TextRange[], c
   const clauseElements = wrapClauseRanges(entry.element, clauses, side);
   if (!clauseElements.length) return;
   wrapTextRanges(entry.element, characters, side);
-  appendMergedClauseFrame(clauseElements, side);
+  appendMergedClauseFrame(clauseElements, side, entry.element);
   entry.element.dataset.pagerootDiff = "text";
   entry.element.classList.add("pageroot-diff-text");
   appendLabel(entry.element, side === "before" ? "removed" : "added", side === "before" ? "删除" : "新增");
@@ -915,6 +947,62 @@ function applyStyleDiff(beforeSection: HTMLElement, afterSection: HTMLElement, s
   result.afterOnly.forEach((entry) => markStyle(entry.element, "after", "新增视觉样式"));
 }
 
+function allChangeSummary(elements: HTMLElement[]) {
+  const hasText = elements.some((element) => element.classList.contains("pageroot-diff-text"));
+  const structureElements = elements.filter((element) => [...element.classList]
+    .some((className) => className.startsWith("pageroot-structure-")));
+  const hasStyle = elements.some((element) => [...element.classList]
+    .some((className) => className.startsWith("pageroot-style-")));
+  const structureLabels = structureElements.flatMap((element) => (
+    element.querySelector<HTMLElement>(":scope > .pageroot-review-label")?.dataset.pagerootLabelParts ?? ""
+  ).split("\n").filter(Boolean));
+  const structureSummary = structureLabels.some((label) => label.includes("结构新增") || label.includes("结构删除"))
+    ? "结构"
+    : structureLabels.some((label) => label.includes("第 "))
+      ? "顺序"
+      : structureElements.length
+        ? "布局"
+        : null;
+  return [hasText ? "文字" : null, structureSummary, hasStyle ? "样式" : null].filter(Boolean) as string[];
+}
+
+function consolidateAllChangeMarkers(document: Document) {
+  const changedElements = [...document.querySelectorAll<HTMLElement>("[data-pageroot-diff]")];
+  const roots = changedElements.filter((element) => !element.parentElement?.closest("[data-pageroot-diff]"));
+
+  roots.forEach((root) => {
+    const groupedElements = [root, ...root.querySelectorAll<HTMLElement>("[data-pageroot-diff]")];
+    const rootHasElementFrame = groupedElements.length > 1 || [...root.classList].some((className) => (
+      className.startsWith("pageroot-structure-") || className.startsWith("pageroot-style-")
+    ));
+    root.classList.add("pageroot-all-change-root");
+    root.classList.toggle("pageroot-all-change-text-root", !rootHasElementFrame);
+    groupedElements.slice(1).forEach((element) => element.classList.add("pageroot-all-change-child"));
+
+    const summary = allChangeSummary(groupedElements);
+    let label = root.querySelector<HTMLElement>(":scope > .pageroot-review-label");
+    if (!label && summary.length) label = appendLabel(root, "structure", summary[0]);
+    if (label) {
+      label.dataset.pagerootLabelParts = summary.join("\n");
+      label.textContent = summary.join(" · ");
+      label.classList.add("pageroot-label-summary");
+      placeLabel(label, root);
+    }
+    root.dataset.pagerootAllChangeSummary = summary.join(" · ");
+
+    const ownerIds = groupedElements
+      .map((element) => element.dataset.pagerootFrameOwner)
+      .filter(Boolean) as string[];
+    ownerIds.forEach((ownerId) => {
+      document.querySelectorAll<HTMLElement>(`[data-pageroot-clause-frame][data-pageroot-frame-owner='${ownerId}']`)
+        .forEach((frame) => {
+          if (rootHasElementFrame) frame.remove();
+          else frame.classList.add("pageroot-clause-frame-all");
+        });
+    });
+  });
+}
+
 function ensurePresentationStyle(document: Document) {
   let style = document.getElementById("pageroot-review-presentation") as HTMLStyleElement | null;
   if (!style) {
@@ -968,8 +1056,13 @@ function removeInjectedPresentation(document: Document) {
   document.querySelectorAll<HTMLElement>("[data-pageroot-active]").forEach((element) => element.removeAttribute("data-pageroot-active"));
   document.querySelectorAll<HTMLElement>("[data-pageroot-diff]").forEach((element) => {
     element.removeAttribute("data-pageroot-diff");
+    element.removeAttribute("data-pageroot-frame-owner");
+    element.removeAttribute("data-pageroot-all-change-summary");
     element.classList.remove(
       "pageroot-diff-text",
+      "pageroot-all-change-root",
+      "pageroot-all-change-text-root",
+      "pageroot-all-change-child",
       "pageroot-structure-from",
       "pageroot-structure-to",
       "pageroot-structure-removed",
@@ -1017,6 +1110,8 @@ export function applyReviewPresentationPair(
     applyTextDiff(beforeSection, afterSection, targets.text);
     applyStructureDiff(beforeSection, afterSection, targets.structure);
     applyStyleDiff(beforeSection, afterSection, targets.style);
+    consolidateAllChangeMarkers(beforeDocument);
+    consolidateAllChangeMarkers(afterDocument);
     return;
   }
 

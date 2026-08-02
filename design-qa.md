@@ -206,3 +206,58 @@ No actionable P0, P1, or P2 finding remains.
 3. Focused comparisons confirmed the removed map intro, deterministic toolbar toggle, `22%` default, and selected `100%` zoom. No subsequent visual fix was required.
 
 final result: passed
+
+---
+
+# AI review demo design QA · v5
+
+Date: 2026-08-02
+
+## Source visual truth
+
+- `/var/folders/jx/w52403cs2hx39vwhd1sb3tg80000gn/T/codex-clipboard-3faf00c4-1d00-4668-83dd-c080e09f7f58.png` (`2762 × 406`) — `全部变化` 中文字、结构和样式边框在同一元素或容器内重复叠加的问题证据。
+
+## Rendered implementation evidence
+
+- `output/design-qa/ai-review-demo-v5/all-changes-consolidated-1280x720.png` (`1280 × 720`) — 首屏整体效果；文字块、段落和容器各只保留一个主边框。
+- `output/design-qa/ai-review-demo-v5/all-changes-consolidated-detail-1280x720.png` (`1280 × 720`) — 按钮与特性列表的实际浏览器状态。
+- `output/design-qa/ai-review-demo-v5/all-changes-consolidated-focus.png` (`1256 × 278`) — 去除浏览器外围的对应内容区域。
+- `output/design-qa/ai-review-demo-v5/comparison-all-changes-consolidated.png` (`1600 × 613`) — 原问题截图与修改后聚焦区域的同一比较输入。
+
+Viewport and normalization:
+
+- Browser/CSS viewport: `1280 × 720`; device scale factor: `1`.
+- Source and focused implementation regions were resized to the same `1600px` comparison width with aspect ratio preserved. The source is an issue crop, so the comparison targets marker density, hierarchy, and legibility rather than full-page pixel fidelity.
+- State: review mode, opening section, `全部变化`, context visibility `22%`, actual-size `100%`, toolbar pinned open. The detail capture positions both document windows at the button/list area.
+
+## Findings
+
+No actionable P0, P1, or P2 finding remains.
+
+- Fonts and typography: source HTML typography, wrapping, and character-level dashed deletion evidence remain unchanged. The new overview labels reuse the existing compact review-label typography and contain at most three short terms.
+- Spacing and layout rhythm: nested changed targets now collapse to the outermost meaningful target. Buttons keep one button-sized frame; the changed feature list becomes one list-sized frame when its parent also changes. No annotation changes document flow or control dimensions.
+- Colors and visual tokens: `全部变化` uses one neutral purple `2px dashed` outline per consolidated target. Detailed modes retain red/green text frames and their existing structure/style colors.
+- Image and asset fidelity: both original HTML documents and their native assets render directly. No image, icon, illustration, or source decoration was replaced.
+- Copy and content: persistent overview labels use only `文字`, `布局`, `结构`, `顺序`, and `样式`, combined as needed (for example `文字 · 布局`). Detailed old/new wording remains available in the dedicated review modes.
+- Accessibility and interaction: labels remain pointer-transparent and review-only; consolidated frames add no fill and do not intercept links, buttons, selection, or focus.
+
+## Browser interaction checks
+
+- In `全部变化`, the before side reduced to `10` root frames with `2` nested markers absorbed; the after side reduced to `6` root frames with `6` nested markers absorbed.
+- Both sides reported `0` root targets retaining a duplicate nested clause frame. Text-only title/paragraph targets retain one clause frame; element-level and grouped targets retain one element frame.
+- All root summaries computed visible (`opacity: 1`, `visibility: visible`) and used concise values such as `文字`, `文字 · 布局`, and `文字 · 顺序 · 样式`.
+- Switching to `文字与数据` removed all overview-root classes, restored `11` red before frames and `10` green after frames, and returned labels to `opacity: 0`; switching back restored the consolidated overview.
+- Console checked. The persistent development log still contains the previously documented route-initialization `MutationObserver` error; this change introduced no feature-specific browser error.
+
+## Full-view and focused comparison
+
+- The full-view capture confirms that titles, paragraphs, controls, and the content-map rail remain aligned and readable after consolidation.
+- The focused comparison makes the requested change directly legible: the original has inner text boxes plus outer structure/style boxes, while the implementation has one purple frame and one short adjacent summary per meaningful target.
+
+## Comparison history
+
+1. P2 — `全部变化` rendered every category independently, so the same button or list region showed nested red/green, gray/purple, and blue frames.
+2. Fix — nested changed elements are grouped under their outermost changed target; redundant clause frames and child outlines are suppressed only in `全部变化`, and the root receives one concise category summary.
+3. Post-fix evidence — the combined comparison, zero-duplicate computed check, label visibility check, and detailed-mode regression check found no remaining P0/P1/P2 issue.
+
+final result: passed

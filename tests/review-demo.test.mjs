@@ -125,7 +125,14 @@ test("the paired diff presentation separates text, structure, and style evidence
   assert.match(presentation, /function appendMergedClauseFrame/);
   assert.match(presentation, /clause\.getClientRects\(\)/);
   assert.match(presentation, /frame\.dataset\.pagerootClauseFrame = "true"/);
-  assert.match(presentation, /appendMergedClauseFrame\(clauseElements, side\)/);
+  assert.match(presentation, /appendMergedClauseFrame\(clauseElements, side, entry\.element\)/);
+  assert.match(presentation, /function consolidateAllChangeMarkers/);
+  assert.match(presentation, /pageroot-all-change-root/);
+  assert.match(presentation, /pageroot-all-change-child/);
+  assert.match(presentation, /pageroot-label-summary/);
+  assert.match(presentation, /summary\.join\(" · "\)/);
+  assert.match(presentation, /consolidateAllChangeMarkers\(beforeDocument\)/);
+  assert.match(presentation, /consolidateAllChangeMarkers\(afterDocument\)/);
   assert.doesNotMatch(presentation, /outline:[^;]* solid /);
   assert.doesNotMatch(presentation, /box-shadow: inset/);
   assert.match(presentation, /overflow-anchor: none/);
