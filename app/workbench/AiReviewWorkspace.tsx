@@ -38,6 +38,13 @@ import styles from "./ai-review-workspace.module.css";
 
 type ScrollMode = "linked" | "independent";
 type ZoomMode = "fit" | "actual";
+type ReviewDesktopSession = { sessionId: string; url: string };
+type ReviewDesktopSessions = Record<ReviewSide, ReviewDesktopSession>;
+type ReviewDesktopSessionResult = {
+  documents: ReviewDocuments;
+  sessions: ReviewDesktopSessions | null;
+  failed: boolean;
+};
 
 const FILTER_LABELS: Record<ReviewFilter, string> = {
   overview: "整页",
@@ -80,6 +87,9 @@ function ReviewDocumentPane({
   onScale,
   onViewport,
   onHorizontalScroll,
+  independentTransport,
+  frameUrl,
+  loadFailed,
 }: {
   side: ReviewSide;
   html: string;
@@ -89,6 +99,9 @@ function ReviewDocumentPane({
   onScale: (side: ReviewSide, scale: number) => void;
   onViewport: (side: ReviewSide, viewport: HTMLDivElement | null) => void;
   onHorizontalScroll: (side: ReviewSide) => void;
+  independentTransport: boolean;
+  frameUrl?: string;
+  loadFailed: boolean;
 }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -143,15 +156,24 @@ function ReviewDocumentPane({
         data-zoom={zoom}
         tabIndex={0}
         aria-label={`${side === "before" ? "修改前" : "修改后"}画布滚动区`}
+        aria-busy={independentTransport && !frameUrl && !loadFailed}
         onScroll={() => onHorizontalScroll(side)}
       >
+        {loadFailed ? (
+          <div className={styles.frameError} role="alert">
+            审阅画布未能安全载入，请返回本轮处理页面后重试。
+          </div>
+        ) : null}
         <div
           className={styles.documentScale}
           style={{ width: renderedWidth, height: viewportSize.height }}
         >
           <iframe
             ref={iframeRef}
-            srcDoc={html}
+            key={independentTransport ? frameUrl || `${side}-pending` : side}
+            {...(independentTransport
+              ? { src: frameUrl || "about:blank" }
+              : { srcDoc: html })}
             title={`${side === "before" ? "修改前" : "修改后"} ${label}`}
             loading="eager"
             sandbox="allow-scripts"
@@ -163,6 +185,7 @@ function ReviewDocumentPane({
               transformOrigin: "top left",
             }}
             onLoad={() => {
+              if (loadFailed || (independentTransport && !frameUrl)) return;
               const frame = iframeRef.current;
               if (!frame) return;
               onFrame(side, frame);
@@ -202,15 +225,21 @@ export default function AiReviewWorkspace({
 }) {
   const sessionId = `review-${useId().replace(/:/g, "-")}`;
   const hydrated = useSyncExternalStore(subscribeHydration, () => true, () => false);
+  const independentTransport = hydrated && Boolean(window.htmlAIPreview);
   const documents = useMemo<ReviewDocuments>(() => (
     hydrated
-      ? buildReviewDocuments(beforeHtml, afterHtml, { sessionId, sourcePath })
+      ? buildReviewDocuments(beforeHtml, afterHtml, {
+          sessionId,
+          sourcePath,
+          externalBootstrap: independentTransport,
+        })
       : {
           before: EMPTY_REVIEW_DOCUMENT,
           after: EMPTY_REVIEW_DOCUMENT,
+          bootstrapJavaScript: { before: "", after: "" },
           changes: [],
         }
-  ), [afterHtml, beforeHtml, hydrated, sessionId, sourcePath]);
+  ), [afterHtml, beforeHtml, hydrated, independentTransport, sessionId, sourcePath]);
   const [filter, setFilter] = useState<ReviewFilter>("overview");
   const [focus, setFocus] = useState("all");
   const [scrollMode, setScrollMode] = useState<ScrollMode>("linked");
@@ -220,6 +249,8 @@ export default function AiReviewWorkspace({
   const [mapPinned, setMapPinned] = useState(false);
   const [mapPeeked, setMapPeeked] = useState(false);
   const [showKeepConfirm, setShowKeepConfirm] = useState(false);
+  const [desktopSessionResult, setDesktopSessionResult] =
+    useState<ReviewDesktopSessionResult | null>(null);
   const continueReviewButtonRef = useRef<HTMLButtonElement>(null);
   const framesRef = useRef<Record<ReviewSide, HTMLIFrameElement | null>>({
     before: null,
@@ -231,28 +262,80 @@ export default function AiReviewWorkspace({
   });
   const scalesRef = useRef<Record<ReviewSide, number>>({ before: 1, after: 1 });
   const horizontalSyncingRef = useRef(false);
+  const reviewStateRef = useRef({ filter, focus, transparency });
+  const desktopSessions = desktopSessionResult?.documents === documents
+    ? desktopSessionResult.sessions
+    : null;
+  const reviewLoadFailed = desktopSessionResult?.documents === documents
+    ? desktopSessionResult.failed
+    : false;
   const activeIndex = Math.max(0, documents.changes.findIndex((change) => change.id === focus));
   const activeChange = documents.changes[activeIndex] || null;
   const mapOpen = mapPinned || mapPeeked;
 
+  useEffect(() => {
+    reviewStateRef.current = { filter, focus, transparency };
+  }, [filter, focus, transparency]);
+
   const sendState = useCallback((side?: ReviewSide) => {
+    const state = reviewStateRef.current;
     const sides: ReviewSide[] = side ? [side] : ["before", "after"];
     sides.forEach((targetSide) => {
       postToFrame(framesRef.current[targetSide], sessionId, {
         type: "state",
         state: {
-          filter,
-          focus,
-          transparency,
+          filter: state.filter,
+          focus: state.focus,
+          transparency: state.transparency,
           scale: scalesRef.current[targetSide],
         },
       });
     });
-  }, [filter, focus, sessionId, transparency]);
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (!independentTransport) return undefined;
+    const previewApi = window.htmlAIPreview;
+    if (!previewApi) return undefined;
+    let cancelled = false;
+    const createdSessions: ReviewDesktopSession[] = [];
+    void (async () => {
+      try {
+        const beforeSession = await previewApi.createSession({
+          html: documents.before,
+          bootstrapJavaScript: documents.bootstrapJavaScript.before,
+          ...(sourcePath ? { sourcePath } : {}),
+        });
+        createdSessions.push(beforeSession);
+        const afterSession = await previewApi.createSession({
+          html: documents.after,
+          bootstrapJavaScript: documents.bootstrapJavaScript.after,
+          ...(sourcePath ? { sourcePath } : {}),
+        });
+        createdSessions.push(afterSession);
+        if (cancelled) return;
+        setDesktopSessionResult({
+          documents,
+          sessions: { before: beforeSession, after: afterSession },
+          failed: false,
+        });
+      } catch {
+        if (!cancelled) {
+          setDesktopSessionResult({ documents, sessions: null, failed: true });
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+      createdSessions.forEach((createdSession) => {
+        void previewApi.revokeSession(createdSession.sessionId);
+      });
+    };
+  }, [documents, independentTransport, sourcePath]);
 
   useEffect(() => {
     sendState();
-  }, [sendState]);
+  }, [filter, focus, sendState, transparency]);
 
   useEffect(() => {
     if (!showKeepConfirm) return undefined;
@@ -299,11 +382,17 @@ export default function AiReviewWorkspace({
 
   const updateScale = useCallback((side: ReviewSide, scale: number) => {
     scalesRef.current[side] = scale;
+    const state = reviewStateRef.current;
     postToFrame(framesRef.current[side], sessionId, {
       type: "state",
-      state: { filter, focus, transparency, scale },
+      state: {
+        filter: state.filter,
+        focus: state.focus,
+        transparency: state.transparency,
+        scale,
+      },
     });
-  }, [filter, focus, sessionId, transparency]);
+  }, [sessionId]);
 
   const handleHorizontalScroll = useCallback((side: ReviewSide) => {
     if (scrollMode !== "linked" || horizontalSyncingRef.current) return;
@@ -422,7 +511,11 @@ export default function AiReviewWorkspace({
                     <button
                       key={mode}
                       type="button"
-                      aria-label={mode === "overview" ? "查看整页" : `${FILTER_LABELS[mode]}变化`}
+                      aria-label={mode === "overview"
+                        ? "查看整页"
+                        : mode === "all"
+                          ? "查看全部变化"
+                          : `${FILTER_LABELS[mode]}变化`}
                       aria-pressed={filter === mode}
                       onClick={() => {
                         setFilter(mode);
@@ -488,6 +581,9 @@ export default function AiReviewWorkspace({
                 onScale={updateScale}
                 onViewport={registerViewport}
                 onHorizontalScroll={handleHorizontalScroll}
+                independentTransport={independentTransport}
+                frameUrl={desktopSessions?.before.url}
+                loadFailed={reviewLoadFailed}
               />
               <ReviewDocumentPane
                 side="after"
@@ -498,6 +594,9 @@ export default function AiReviewWorkspace({
                 onScale={updateScale}
                 onViewport={registerViewport}
                 onHorizontalScroll={handleHorizontalScroll}
+                independentTransport={independentTransport}
+                frameUrl={desktopSessions?.after.url}
+                loadFailed={reviewLoadFailed}
               />
             </div>
 

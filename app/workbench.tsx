@@ -9600,7 +9600,11 @@ export default function Workbench() {
             dedupeKey: "ready-version-kept",
           });
         }}
-        onAccept={() => void activateReadyResult()}
+        onAccept={() => {
+          setReadyReviewSession(null);
+          setDrawer("handoff");
+          window.requestAnimationFrame(() => void activateReadyResult());
+        }}
       />
     );
   }

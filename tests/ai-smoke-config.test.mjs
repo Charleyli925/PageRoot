@@ -12,7 +12,7 @@ test("AI smoke configuration selects one success and one fail-closed scope path"
   const titles = [...source.matchAll(/test\("([^"]+)"/gu)].map((match) => match[1]);
   const selected = titles.filter((title) => smokeConfig.grep.test(title));
   assert.deepEqual(selected, [
-    "a verified AI result stays pending until the user opens the new HTML",
+    "a verified AI result stays pending through desktop review until the user accepts it",
     "a soft out-of-scope AI return is audited without blocking the ready version",
   ]);
   assert.match(

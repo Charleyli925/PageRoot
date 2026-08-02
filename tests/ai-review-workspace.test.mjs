@@ -28,7 +28,10 @@ test("formal review loads and verifies the immutable candidate without activatin
   assert.match(loader, /await browserSha256\(candidateHtml\) !== candidateHash/);
   assert.match(loader, /await browserSha256\(frozenHtml\) !== run\.baseSnapshotSha256/);
   assert.doesNotMatch(loader, /activateReadyVersion/);
-  assert.match(workbench, /onAccept=\{\(\) => void activateReadyResult\(\)\}/);
+  assert.match(
+    workbench,
+    /onAccept=\{\(\) => \{[\s\S]*?setReadyReviewSession\(null\)[\s\S]*?requestAnimationFrame\(\(\) => void activateReadyResult\(\)\)/,
+  );
 });
 
 test("formal review keeps the selected demo hierarchy without demo chrome", () => {
@@ -64,4 +67,19 @@ test("the review canvas preserves untrusted-document isolation", () => {
   assert.match(reviewDocument, /element\.setAttribute\("sandbox", ""\)/);
   assert.match(reviewDocument, /source: "pageroot-ai-review"/);
   assert.match(review, /event\.source !== framesRef\.current/);
+});
+
+test("desktop review serves its bootstrap outside the renderer CSP and keeps registrations stable", () => {
+  assert.match(reviewDocument, /bootstrap\.src = REVIEW_BOOTSTRAP_PATH/);
+  assert.match(review, /window\.htmlAIPreview/);
+  assert.match(review, /previewApi\.createSession/);
+  assert.match(review, /previewApi\.revokeSession/);
+  assert.match(review, /const reviewStateRef = useRef/);
+  assert.match(review, /const sendState = useCallback[\s\S]*?\}, \[sessionId\]\)/);
+});
+
+test("change discovery covers surrounding regions and descendant presentation attributes", () => {
+  assert.match(reviewDocument, /bodyChildren\.forEach\(collectCoveredRegions\)/);
+  assert.match(reviewDocument, /\[element, \.\.\.element\.querySelectorAll\("\*"\)\]/);
+  assert.match(reviewDocument, /!structureChanged[\s\S]*?presentationSignature/);
 });

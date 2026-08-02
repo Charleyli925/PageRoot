@@ -442,7 +442,7 @@ function workingHtmlFiles(workspace, projectId) {
     .map((fileName) => path.join(directory, fileName));
 }
 
-test("a verified AI result stays pending until the user opens the new HTML", async () => {
+test("a verified AI result stays pending through desktop review until the user accepts it", async () => {
   test.setTimeout(180_000);
   const fixture = createSourceFixture();
   const pickerSourcePath = path.join(fixture.sourceDirectory, "picker-target.html");
@@ -507,8 +507,32 @@ test("a verified AI result stays pending until the user opens the new HTML", asy
       { timeout: 20_000 },
     ).toBe(1);
 
+    await launched.page.getByRole("button", { name: "审阅对比" }).click();
+    await expect(launched.page.getByTestId("ai-review-workspace"))
+      .toBeVisible({ timeout: 30_000 });
     await launched.page.getByRole("button", {
-      name: "直接打开",
+      name: "显示并固定审阅工具",
+    }).click();
+    const beforeReviewFrame = launched.page.frameLocator(
+      'iframe[title^="修改前"]',
+    );
+    await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
+      "data-pageroot-review-filter",
+    ), { timeout: 30_000 }).toBe("overview");
+    await launched.page.getByRole("button", { name: "查看全部变化" }).click();
+    await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
+      "data-pageroot-review-filter",
+    )).toBe("all");
+    await launched.page.getByRole("button", { name: "文案变化" }).click();
+    await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
+      "data-pageroot-review-filter",
+    )).toBe("text");
+    await launched.page.getByRole("button", { name: "查看全部变化" }).click();
+    await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
+      "data-pageroot-review-filter",
+    )).toBe("all");
+    await launched.page.getByRole("button", {
+      name: "接受全部并打开",
     }).click();
     await expect.poll(async () => (
       launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject())

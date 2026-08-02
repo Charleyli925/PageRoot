@@ -14,12 +14,14 @@ export type ReviewChange = {
 export type ReviewDocuments = {
   before: string;
   after: string;
+  bootstrapJavaScript: Record<ReviewSide, string>;
   changes: ReviewChange[];
 };
 
 const REVIEW_STYLE_ID = "pageroot-ai-review-style";
 const REVIEW_BOOTSTRAP_ATTRIBUTE = "data-pageroot-ai-review-bootstrap";
 const REVIEW_BASE_ATTRIBUTE = "data-pageroot-ai-review-base";
+const REVIEW_BOOTSTRAP_PATH = "/.pageroot/preview-bootstrap.js";
 
 const REVIEW_DOCUMENT_STYLE = String.raw`
   html {
@@ -135,14 +137,17 @@ function structureSignature(element: Element): string {
 }
 
 function presentationSignature(element: Element): string {
-  return [
-    element.getAttribute("class") || "",
-    element.getAttribute("style") || "",
-    element.getAttribute("hidden") || "",
-    element.getAttribute("width") || "",
-    element.getAttribute("height") || "",
-    element.getAttribute("data-state") || "",
-  ].join("|");
+  return [element, ...element.querySelectorAll("*")]
+    .slice(0, 501)
+    .map((candidate) => [
+      candidate.getAttribute("class") || "",
+      candidate.getAttribute("style") || "",
+      candidate.getAttribute("hidden") || "",
+      candidate.getAttribute("width") || "",
+      candidate.getAttribute("height") || "",
+      candidate.getAttribute("data-state") || "",
+    ].join("\u001f"))
+    .join("\u001e");
 }
 
 function directHeading(element: Element): Element | null {
@@ -188,12 +193,32 @@ function candidateSections(document: Document): Element[] {
       possibleParent !== candidate && possibleParent.contains(candidate)
     ))
   ));
-  if (roots.length) return roots;
+  const eligibleChildren = (element: Element): Element[] => (
+    [...element.children].filter((child) => (
+      !["SCRIPT", "STYLE", "LINK", "META", "TEMPLATE"].includes(child.tagName)
+    ))
+  );
+  const bodyChildren = document.body ? eligibleChildren(document.body) : [];
+  if (!roots.length) {
+    return bodyChildren.length ? bodyChildren : document.body ? [document.body] : [];
+  }
 
-  const bodyChildren = [...(document.body?.children || [])].filter((element) => (
-    !["SCRIPT", "STYLE", "LINK", "META", "TEMPLATE"].includes(element.tagName)
-  ));
-  return bodyChildren.length ? bodyChildren : document.body ? [document.body] : [];
+  const rootSet = new Set(roots);
+  const regions: Element[] = [];
+  const collectCoveredRegions = (element: Element) => {
+    if (rootSet.has(element)) {
+      regions.push(element);
+      return;
+    }
+    const containsRoot = roots.some((root) => element.contains(root));
+    if (!containsRoot) {
+      regions.push(element);
+      return;
+    }
+    eligibleChildren(element).forEach(collectCoveredRegions);
+  };
+  bodyChildren.forEach(collectCoveredRegions);
+  return regions.length ? regions : roots;
 }
 
 function pairKey(element: Element): string | null {
@@ -236,8 +261,12 @@ function changeTypes(before: Element | null, after: Element | null): ReviewChang
   if (!before || !after) return ["text", "structure"];
   const types: ReviewChangeType[] = [];
   if (normalizedText(before) !== normalizedText(after)) types.push("text");
-  if (structureSignature(before) !== structureSignature(after)) types.push("structure");
-  if (presentationSignature(before) !== presentationSignature(after)) types.push("style");
+  const structureChanged = structureSignature(before) !== structureSignature(after);
+  if (structureChanged) types.push("structure");
+  if (
+    !structureChanged
+    && presentationSignature(before) !== presentationSignature(after)
+  ) types.push("style");
   if (!types.length && normalizedMarkup(before) !== normalizedMarkup(after)) {
     types.push("structure");
   }
@@ -359,7 +388,8 @@ function prepareDocument(
   side: ReviewSide,
   sessionId: string,
   sourcePath?: string,
-): string {
+  externalBootstrap = false,
+): { html: string; bootstrapJavaScript: string } {
   document.querySelectorAll('script, meta[http-equiv="refresh" i]').forEach((element) => {
     element.remove();
   });
@@ -383,9 +413,14 @@ function prepareDocument(
 
   const bootstrap = document.createElement("script");
   bootstrap.setAttribute(REVIEW_BOOTSTRAP_ATTRIBUTE, "true");
-  bootstrap.textContent = reviewBootstrap(sessionId, side);
+  const bootstrapJavaScript = reviewBootstrap(sessionId, side);
+  if (externalBootstrap) {
+    bootstrap.src = REVIEW_BOOTSTRAP_PATH;
+  } else {
+    bootstrap.textContent = bootstrapJavaScript;
+  }
 
-  const baseHref = baseHrefFromSourcePath(sourcePath);
+  const baseHref = externalBootstrap ? undefined : baseHrefFromSourcePath(sourcePath);
   if (baseHref && !document.head.querySelector("base")) {
     const base = document.createElement("base");
     base.href = baseHref;
@@ -393,16 +428,31 @@ function prepareDocument(
     document.head.insertBefore(base, document.head.firstChild);
   }
   document.head.append(style, bootstrap);
-  return `${doctypeString(document.doctype)}\n${document.documentElement.outerHTML}`;
+  return {
+    html: `${doctypeString(document.doctype)}\n${document.documentElement.outerHTML}`,
+    bootstrapJavaScript,
+  };
 }
 
 export function buildReviewDocuments(
   beforeHtml: string,
   afterHtml: string,
-  options: { sessionId: string; sourcePath?: string },
+  options: {
+    sessionId: string;
+    sourcePath?: string;
+    externalBootstrap?: boolean;
+  },
 ): ReviewDocuments {
   if (typeof DOMParser === "undefined") {
-    return { before: beforeHtml, after: afterHtml, changes: [] };
+    return {
+      before: beforeHtml,
+      after: afterHtml,
+      bootstrapJavaScript: {
+        before: reviewBootstrap(options.sessionId, "before"),
+        after: reviewBootstrap(options.sessionId, "after"),
+      },
+      changes: [],
+    };
   }
   const parser = new DOMParser();
   const beforeDocument = parser.parseFromString(beforeHtml, "text/html");
@@ -460,9 +510,27 @@ export function buildReviewDocuments(
     });
   }
 
+  const preparedBefore = prepareDocument(
+    beforeDocument,
+    "before",
+    options.sessionId,
+    options.sourcePath,
+    options.externalBootstrap,
+  );
+  const preparedAfter = prepareDocument(
+    afterDocument,
+    "after",
+    options.sessionId,
+    options.sourcePath,
+    options.externalBootstrap,
+  );
   return {
-    before: prepareDocument(beforeDocument, "before", options.sessionId, options.sourcePath),
-    after: prepareDocument(afterDocument, "after", options.sessionId, options.sourcePath),
+    before: preparedBefore.html,
+    after: preparedAfter.html,
+    bootstrapJavaScript: {
+      before: preparedBefore.bootstrapJavaScript,
+      after: preparedAfter.bootstrapJavaScript,
+    },
     changes,
   };
 }

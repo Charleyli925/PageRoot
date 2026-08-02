@@ -40,8 +40,11 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   Version after rechecking their identities and Hashes. Both copies render in
   unique-origin sandboxed frames; authored scripts, refresh directives and
   inline handlers are removed, nested frames are re-sandboxed, and links/forms
-  cannot navigate or submit. Only the injected review scroll/focus bridge may
-  execute, and its messages are bound to the exact frame and review session.
+  cannot navigate or submit. On desktop, each sanitized copy uses a bounded
+  `pageroot-preview:` session so the exact review bootstrap loads as an external
+  script without weakening the application renderer CSP; the root sandbox still
+  grants only scripts. Only that review scroll/focus bridge may execute, and its
+  messages are bound to the exact frame and review session.
 - Main-process-only usage telemetry with exact event/property allowlists,
   random installation/session UUIDs and HMAC project pseudonyms; no hardware
   identifier, content, path, filename, raw exception or stack is accepted
