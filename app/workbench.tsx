@@ -9641,14 +9641,14 @@ export default function Workbench() {
           setReadyReviewSession(null);
           setDrawer("handoff");
         }}
-        onKeepCurrent={() => {
+        onReturnBefore={() => {
           setReadyReviewSession(null);
           setDrawer("handoff");
           setToast({
-            title: `已保留${readyReviewSession.beforeLabel}`,
-            message: `${readyReviewSession.afterLabel} 仍保留在本轮处理里，可以随时再次进入审阅对比。`,
+            title: `已返回 AI 修改前的${readyReviewSession.beforeLabel}`,
+            message: `这次 AI 返回未被采用；${readyReviewSession.afterLabel} 仍保留在本轮处理里，可以随时再次进入审阅对比。`,
             tone: "success",
-            dedupeKey: "ready-version-kept",
+            dedupeKey: "ready-version-returned-before",
           });
         }}
         onAccept={() => {

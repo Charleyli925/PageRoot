@@ -90,13 +90,22 @@ one-sided runtime classes, text/HTML, inline style, form state and runtime
 children. The normal script-disabled editing iframe and SourcePatch checks
 remain unchanged.
 
-The AI review workspace is not an interactive preview and has no activation or
-persistence authority. Entering it does not change `project.json.sourcePath`,
-the current Canvas, the immutable Version or the activation transaction. The
-renderer accepts review messages only when the session ID, side, declared
-message source and `MessageEvent.source` all match the registered frame. A user
-must still invoke the existing fail-closed ready-version activation path through
-“直接打开” or “接受全部并打开”.
+The AI review workspace is an isolated interactive review preview with no
+activation or persistence authority. It preserves the already-validated authored
+scripts and inline events in a disposable review copy so source-backed Tabs,
+disclosures and local controls can be inspected. The review iframe uses only
+`allow-scripts`: it has no same-origin authority, form submission, navigation,
+popup, download, modal or host IPC capability. Parent-side capture also blocks
+anchor navigation and form submission, nested iframes receive an empty sandbox,
+and refresh/CSP meta directives are removed only from the disposable review copy
+so they cannot navigate the frame or suppress the trusted review bootstrap.
+
+Entering review does not change `project.json.sourcePath`, the current Canvas,
+the immutable Version or the activation transaction, and runtime interaction
+state is never serialized. The renderer accepts review messages only when the
+session ID, side, declared message source and `MessageEvent.source` all match the
+registered frame. A user must still invoke the existing fail-closed ready-version
+activation path through “直接打开” or “接受全部并打开”.
 
 Edit-mode reveal actions use the same trust boundary. They accept only strict
 Tabs whose selected panel is proved by `aria-selected` plus `hidden`, native

@@ -156,12 +156,16 @@ async function closePageRootGracefully(electronApp) {
   await closed;
 }
 
-function createSourceFixture(fileName = "generated-ai-loop.html") {
+function createSourceFixture(
+  fileName = "generated-ai-loop.html",
+  transform = (source) => source,
+) {
   const sourceDirectory = mkdtempSync(
     path.join(tmpdir(), "pageroot-ai-loop-source-"),
   );
   const sourcePath = path.join(sourceDirectory, fileName);
-  writeFileSync(sourcePath, fixtureBuffer("complex-layout.html"));
+  const source = fixtureBuffer("complex-layout.html").toString("utf8");
+  writeFileSync(sourcePath, transform(source), "utf8");
   return { sourceDirectory, sourcePath, original: readFileSync(sourcePath) };
 }
 
@@ -444,7 +448,31 @@ function workingHtmlFiles(workspace, projectId) {
 
 test("a verified AI result stays pending through desktop review until the user accepts it", async () => {
   test.setTimeout(180_000);
-  const fixture = createSourceFixture();
+  const fixture = createSourceFixture("generated-ai-loop.html", (source) => source.replace(
+    "  </main>",
+    `    <div class="tabs" role="tablist" aria-label="Review interaction fixture">
+      <button type="button" data-review-tab-button data-p="review-p1">审阅标签一</button>
+      <button type="button" data-review-tab-button data-p="review-p2">审阅标签二</button>
+    </div>
+    <div class="panel" id="review-p1" data-review-tab-panel="one">
+      <article><h2>标签一概览</h2><p>第一块完整内容</p></article>
+      <article><h2>标签一详情</h2><p>第二块完整内容</p></article>
+    </div>
+    <div class="panel" id="review-p2" data-review-tab-panel="two" hidden>
+      <article><h2>标签二概览</h2><p>第三块完整内容</p></article>
+      <article><h2>标签二详情</h2><p>第四块完整内容</p></article>
+    </div>
+    <script>
+      document.querySelectorAll("[data-review-tab-button]").forEach((button) => {
+        button.addEventListener("click", () => {
+          document.querySelectorAll("[data-review-tab-panel]").forEach((panel) => {
+            panel.hidden = panel.id !== button.dataset.p;
+          });
+        });
+      });
+    </script>
+  </main>`,
+  ));
   const pickerSourcePath = path.join(fixture.sourceDirectory, "picker-target.html");
   writeFileSync(
     pickerSourcePath,
@@ -516,9 +544,21 @@ test("a verified AI result stays pending through desktop review until the user a
     const beforeReviewFrame = launched.page.frameLocator(
       'iframe[title^="修改前"]',
     );
+    const afterReviewFrame = launched.page.frameLocator(
+      'iframe[title^="修改后"]',
+    );
     await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
       "data-pageroot-review-filter",
     ), { timeout: 30_000 }).toBe("overview");
+    await expect(beforeReviewFrame.locator("html"))
+      .toHaveAttribute("data-author-script-ran", "true");
+    await expect(beforeReviewFrame.locator('meta[http-equiv="refresh"]'))
+      .toHaveCount(0);
+    await expect(beforeReviewFrame.locator('[data-review-tab-panel="two"]'))
+      .toBeHidden();
+    await beforeReviewFrame.getByRole("button", { name: "审阅标签二" }).click();
+    await expect(beforeReviewFrame.locator('[data-review-tab-panel="two"]'))
+      .toBeVisible();
     await launched.page.getByRole("button", { name: "查看全部变化" }).click();
     await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
       "data-pageroot-review-filter",
@@ -527,6 +567,45 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
       "data-pageroot-review-filter",
     )).toBe("text");
+    await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
+      "data-pageroot-review-focus",
+    )).not.toBe("all");
+    await expect(beforeReviewFrame.locator(
+      '[data-pageroot-review-text="removed"]',
+    ).filter({ hasText: ORIGINAL_TEXT })).toBeVisible();
+    await expect(afterReviewFrame.locator(
+      '[data-pageroot-review-text="added"]',
+    ).filter({ hasText: UPDATED_TEXT })).toBeVisible();
+    await launched.page.getByRole("slider", {
+      name: "非修改区域上下文可见度",
+    }).fill("64");
+    await expect.poll(async () => Number(await beforeReviewFrame.locator("html").evaluate(
+      (element) => element.style.getPropertyValue("--pageroot-review-context-opacity"),
+    ))).toBeCloseTo(0.7192, 4);
+    await launched.page.getByRole("button", {
+      name: "打开并固定内容地图",
+    }).click();
+    const outlineItems = launched.page.getByTestId("review-outline-item");
+    await expect.poll(() => outlineItems.count()).toBeGreaterThan(5);
+    await expect(launched.page.getByText("审阅标签一", { exact: true })).toBeVisible();
+    await expect(launched.page.getByText("审阅标签二", { exact: true })).toBeVisible();
+    expect(await launched.page.locator(
+      '[data-testid="review-outline-item"][data-changed="false"]',
+    ).count()).toBeGreaterThan(0);
+    const mapButtonBox = await launched.page.getByRole("button", {
+      name: "收起并取消固定内容地图",
+    }).boundingBox();
+    expect(mapButtonBox).not.toBeNull();
+    const viewportWidth = await launched.page.evaluate(() => window.innerWidth);
+    expect(Math.abs((mapButtonBox?.x || 0) + (mapButtonBox?.width || 0) - viewportWidth))
+      .toBeLessThanOrEqual(1);
+    await launched.page.getByRole("button", {
+      name: /单独查看修改前版本/,
+    }).click();
+    await expect(launched.page.locator('[data-view="before"]')).toBeVisible();
+    await expect(launched.page.locator('section[data-side="after"]')).toHaveAttribute("hidden", "");
+    await launched.page.getByRole("button", { name: /返回并排对比/ }).click();
+    await expect(launched.page.locator('[data-view="split"]')).toBeVisible();
     await launched.page.getByRole("button", { name: "查看全部变化" }).click();
     await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
       "data-pageroot-review-filter",

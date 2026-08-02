@@ -42,8 +42,13 @@ Notable user-visible changes are documented here. This project follows Semantic 
   error or no-change outcome.
 - Made AI results review-first: ready results now offer a highlighted
   side-by-side review and a secondary direct-open action, with full-page
-  change filters, synchronized navigation, and reversible “keep current”
+  change filters, synchronized navigation, and a reversible return-before-AI
   confirmation before the same audited activation path is used.
+- Completed the formal AI review workspace with token-level text additions and
+  removals, structure and visual markers, auto-focused filters, an expanded full
+  page outline, context visibility, single-version canvas switching and isolated
+  source-page Tab interactions. The ambiguous keep action is now explicitly
+  labeled as returning to the version before the AI change.
 
 ## [0.9.5] - 2026-07-31
 

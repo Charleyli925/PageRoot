@@ -26,7 +26,6 @@ import { SidebarSimpleIcon } from "@phosphor-icons/react/dist/csr/SidebarSimple"
 import { TextTIcon } from "@phosphor-icons/react/dist/csr/TextT";
 import { TreeStructureIcon } from "@phosphor-icons/react/dist/csr/TreeStructure";
 import { WarningCircleIcon } from "@phosphor-icons/react/dist/csr/WarningCircle";
-import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 
 import {
   buildReviewDocuments,
@@ -38,6 +37,7 @@ import styles from "./ai-review-workspace.module.css";
 
 type ScrollMode = "linked" | "independent";
 type ZoomMode = "fit" | "actual";
+type CanvasView = "split" | ReviewSide;
 type ReviewDesktopSession = { sessionId: string; url: string };
 type ReviewDesktopSessions = Record<ReviewSide, ReviewDesktopSession>;
 type ReviewDesktopSessionResult = {
@@ -64,6 +64,7 @@ type ReviewMessage = {
   type?: string;
   top?: number;
   left?: number;
+  outlineId?: string;
 };
 
 function postToFrame(
@@ -90,6 +91,7 @@ function ReviewDocumentPane({
   independentTransport,
   frameUrl,
   loadFailed,
+  visible,
 }: {
   side: ReviewSide;
   html: string;
@@ -102,6 +104,7 @@ function ReviewDocumentPane({
   independentTransport: boolean;
   frameUrl?: string;
   loadFailed: boolean;
+  visible: boolean;
 }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -148,6 +151,7 @@ function ReviewDocumentPane({
     <section
       className={styles.documentPane}
       data-side={side}
+      hidden={!visible}
       aria-label={`${side === "before" ? "修改前" : "修改后"}${label}完整页面`}
     >
       <div
@@ -209,7 +213,7 @@ export default function AiReviewWorkspace({
   error,
   notice,
   onExit,
-  onKeepCurrent,
+  onReturnBefore,
   onAccept,
 }: {
   fileName: string;
@@ -222,7 +226,7 @@ export default function AiReviewWorkspace({
   error?: string;
   notice?: string;
   onExit: () => void;
-  onKeepCurrent: () => void;
+  onReturnBefore: () => void;
   onAccept: () => void;
 }) {
   const sessionId = `review-${useId().replace(/:/g, "-")}`;
@@ -240,12 +244,14 @@ export default function AiReviewWorkspace({
           after: EMPTY_REVIEW_DOCUMENT,
           bootstrapJavaScript: { before: "", after: "" },
           changes: [],
+          outline: [],
         }
   ), [afterHtml, beforeHtml, hydrated, independentTransport, sessionId, sourcePath]);
   const [filter, setFilter] = useState<ReviewFilter>("overview");
   const [focus, setFocus] = useState("all");
   const [scrollMode, setScrollMode] = useState<ScrollMode>("linked");
   const [zoom, setZoom] = useState<ZoomMode>("actual");
+  const [canvasView, setCanvasView] = useState<CanvasView>("split");
   const [transparency, setTransparency] = useState(22);
   const [toolbarPinned, setToolbarPinned] = useState(false);
   const [mapPinned, setMapPinned] = useState(false);
@@ -271,8 +277,26 @@ export default function AiReviewWorkspace({
   const reviewLoadFailed = desktopSessionResult?.documents === documents
     ? desktopSessionResult.failed
     : false;
-  const activeIndex = Math.max(0, documents.changes.findIndex((change) => change.id === focus));
-  const activeChange = documents.changes[activeIndex] || null;
+  const navigableChanges = useMemo(() => (
+    filter === "overview" || filter === "all"
+      ? documents.changes
+      : documents.changes.filter((change) => change.types.includes(filter))
+  ), [documents.changes, filter]);
+  const activeChange = focus === "all"
+    ? null
+    : documents.changes.find((change) => change.id === focus) || null;
+  const activeIndex = activeChange
+    ? navigableChanges.findIndex((change) => change.id === activeChange.id)
+    : -1;
+  const outlineGroups = useMemo(() => {
+    const grouped = new Map<string, ReviewDocuments["outline"]>();
+    documents.outline.forEach((item) => {
+      const items = grouped.get(item.group) || [];
+      items.push(item);
+      grouped.set(item.group, items);
+    });
+    return [...grouped.entries()].map(([label, items]) => ({ label, items }));
+  }, [documents.outline]);
   const mapOpen = mapPinned || mapPeeked;
 
   useEffect(() => {
@@ -409,9 +433,19 @@ export default function AiReviewWorkspace({
     });
   }, [scrollMode]);
 
-  const selectChange = useCallback((changeId: string) => {
+  const selectChange = useCallback((changeId: string, preferredFilter?: ReviewFilter) => {
+    const selectedChange = documents.changes.find((change) => change.id === changeId);
     setFocus(changeId);
-    setFilter((current) => current === "overview" ? "all" : current);
+    setFilter((current) => {
+      const requested = preferredFilter || (current === "overview" ? "all" : current);
+      if (
+        selectedChange
+        && requested !== "overview"
+        && requested !== "all"
+        && !selectedChange.types.includes(requested)
+      ) return "all";
+      return requested;
+    });
     (["before", "after"] as ReviewSide[]).forEach((side) => {
       postToFrame(framesRef.current[side], sessionId, {
         type: "focus-change",
@@ -419,14 +453,49 @@ export default function AiReviewWorkspace({
         behavior: "smooth",
       });
     });
-  }, [sessionId]);
+  }, [documents.changes, sessionId]);
+
+  const selectReviewMode = useCallback((mode: ReviewFilter) => {
+    if (mode === "overview") {
+      setFilter("overview");
+      setFocus("all");
+      return;
+    }
+    const candidates = mode === "all"
+      ? documents.changes
+      : documents.changes.filter((change) => change.types.includes(mode));
+    const current = candidates.find((change) => change.id === focus);
+    const target = current || candidates[0];
+    if (!target) {
+      setFilter(mode);
+      setFocus("all");
+      return;
+    }
+    selectChange(target.id, mode);
+  }, [documents.changes, focus, selectChange]);
+
+  const selectOutlineItem = useCallback((item: ReviewDocuments["outline"][number]) => {
+    if (item.changeId) {
+      selectChange(item.changeId);
+      return;
+    }
+    setFilter("overview");
+    setFocus(item.id);
+    (["before", "after"] as ReviewSide[]).forEach((side) => {
+      postToFrame(framesRef.current[side], sessionId, {
+        type: "focus-outline",
+        outlineId: item.id,
+        behavior: "smooth",
+      });
+    });
+  }, [selectChange, sessionId]);
 
   const navigate = useCallback((direction: -1 | 1) => {
-    if (!documents.changes.length) return;
-    const currentIndex = focus === "all" ? (direction > 0 ? -1 : 0) : activeIndex;
-    const nextIndex = (currentIndex + direction + documents.changes.length) % documents.changes.length;
-    selectChange(documents.changes[nextIndex].id);
-  }, [activeIndex, documents.changes, focus, selectChange]);
+    if (!navigableChanges.length) return;
+    const currentIndex = activeIndex >= 0 ? activeIndex : (direction > 0 ? -1 : 0);
+    const nextIndex = (currentIndex + direction + navigableChanges.length) % navigableChanges.length;
+    selectChange(navigableChanges[nextIndex].id);
+  }, [activeIndex, navigableChanges, selectChange]);
 
   return (
     <div className={styles.reviewRoot} data-testid="ai-review-workspace">
@@ -445,14 +514,11 @@ export default function AiReviewWorkspace({
         <div className={styles.headerActions}>
           <button className={styles.headerButton} type="button" disabled={accepting} onClick={() => setShowKeepConfirm(true)}>
             <ClockCounterClockwiseIcon aria-hidden="true" size={15} weight="duotone" />
-            保留当前版本
+            返回 AI 修改前
           </button>
           <button className={styles.headerPrimaryAction} type="button" disabled={accepting} onClick={onAccept}>
             <CheckCircleIcon aria-hidden="true" size={15} weight="fill" />
             {accepting ? "正在核对并打开…" : "接受全部并打开"}
-          </button>
-          <button className={styles.headerIconButton} type="button" aria-label="退出审阅" title="退出审阅" disabled={accepting} onClick={onExit}>
-            <XIcon aria-hidden="true" size={16} weight="bold" />
           </button>
         </div>
       </header>
@@ -482,21 +548,33 @@ export default function AiReviewWorkspace({
                 <span className={styles.canvasReviewIcon}><EyeIcon aria-hidden="true" size={20} weight="duotone" /></span>
                 <span>
                   <strong>审阅模式</strong>
-                  <small>双页对比 · {documents.changes.length} 处变化</small>
+                  <small>{canvasView === "split" ? "双页对比" : canvasView === "before" ? "单独查看修改前" : "单独查看 AI 修改后"} · {documents.changes.length} 处变化</small>
                 </span>
               </div>
 
               <div className={styles.canvasVersionPair} aria-label="对比版本">
-                <span data-side="before">
+                <button
+                  type="button"
+                  data-side="before"
+                  aria-pressed={canvasView === "before"}
+                  aria-label={`${canvasView === "before" ? "返回并排对比" : "单独查看修改前版本"} ${beforeLabel}`}
+                  onClick={() => setCanvasView((current) => current === "before" ? "split" : "before")}
+                >
                   <small>左 · 修改前</small>
                   <strong>{beforeLabel}</strong>
                   <ArrowSquareOutIcon aria-hidden="true" size={13} weight="bold" />
-                </span>
-                <span data-side="after">
+                </button>
+                <button
+                  type="button"
+                  data-side="after"
+                  aria-pressed={canvasView === "after"}
+                  aria-label={`${canvasView === "after" ? "返回并排对比" : "单独查看 AI 修改后版本"} ${afterLabel}`}
+                  onClick={() => setCanvasView((current) => current === "after" ? "split" : "after")}
+                >
                   <small>右 · 修改后</small>
                   <strong>AI 候选 {afterLabel}</strong>
                   <ArrowSquareOutIcon aria-hidden="true" size={13} weight="bold" />
-                </span>
+                </button>
               </div>
 
               <label className={styles.transparencyControl}>
@@ -508,8 +586,14 @@ export default function AiReviewWorkspace({
                   step="1"
                   value={transparency}
                   aria-label="非修改区域上下文可见度"
+                  title="调整非修改区域；如果当前是整页视图，会先聚焦第一处变化"
                   style={{ "--mask-position": `${transparency}%` } as CSSProperties}
-                  onInput={(event) => setTransparency(Number(event.currentTarget.value))}
+                  onInput={(event) => {
+                    setTransparency(Number(event.currentTarget.value));
+                    if (focus === "all" && documents.changes[0]) {
+                      selectChange(documents.changes[0].id);
+                    }
+                  }}
                 />
               </label>
 
@@ -526,10 +610,7 @@ export default function AiReviewWorkspace({
                           ? "查看全部变化"
                           : `${FILTER_LABELS[mode]}变化`}
                       aria-pressed={filter === mode}
-                      onClick={() => {
-                        setFilter(mode);
-                        if (mode === "overview") setFocus("all");
-                      }}
+                      onClick={() => selectReviewMode(mode)}
                     >
                       {mode === "overview" ? <EyeIcon aria-hidden="true" size={14} weight="duotone" /> : null}
                       {mode === "all" ? <GitDiffIcon aria-hidden="true" size={14} weight="duotone" /> : null}
@@ -580,7 +661,12 @@ export default function AiReviewWorkspace({
           </div>
 
           <div className={styles.canvasReviewBody}>
-            <div className={styles.canvasGrid}>
+            {filter !== "overview" && filter !== "all" && !navigableChanges.length ? (
+              <div className={styles.emptyFilterNotice} role="status">
+                本轮没有检测到{FILTER_LABELS[filter]}变化，仍可切回整页或其他类型继续审阅
+              </div>
+            ) : null}
+            <div className={styles.canvasGrid} data-view={canvasView}>
               <ReviewDocumentPane
                 side="before"
                 html={documents.before}
@@ -593,6 +679,7 @@ export default function AiReviewWorkspace({
                 independentTransport={independentTransport}
                 frameUrl={desktopSessions?.before.url}
                 loadFailed={reviewLoadFailed}
+                visible={canvasView === "split" || canvasView === "before"}
               />
               <ReviewDocumentPane
                 side="after"
@@ -606,6 +693,7 @@ export default function AiReviewWorkspace({
                 independentTransport={independentTransport}
                 frameUrl={desktopSessions?.after.url}
                 loadFailed={reviewLoadFailed}
+                visible={canvasView === "split" || canvasView === "after"}
               />
             </div>
 
@@ -632,13 +720,13 @@ export default function AiReviewWorkspace({
                 </button>
                 <div className={styles.mapNavigator} aria-label="逐处查看变化">
                   <button type="button" aria-label="上一处变化" onClick={() => navigate(-1)}><CaretUpIcon aria-hidden="true" size={11} weight="bold" /></button>
-                  <span><strong>{focus === "all" ? 0 : activeIndex + 1}</strong><small>/{documents.changes.length}</small></span>
+                  <span><strong>{activeIndex >= 0 ? activeIndex + 1 : 0}</strong><small>/{navigableChanges.length}</small></span>
                   <button type="button" aria-label="下一处变化" onClick={() => navigate(1)}><CaretDownIcon aria-hidden="true" size={11} weight="bold" /></button>
                 </div>
               </div>
               <div className={styles.mapPanel} aria-hidden={!mapOpen} inert={!mapOpen ? true : undefined}>
                 <header>
-                  <div><span>页面内容地图</span><strong>{activeChange ? `正在看：${activeChange.label}` : "整页总览"}</strong></div>
+                  <div><span>页面内容地图 · {documents.outline.length} 个区域</span><strong>{activeChange ? `正在看：${activeChange.label}` : focus === "all" ? "整页总览" : "正在看未修改区域"}</strong></div>
                   <button type="button" aria-label={mapPinned ? "取消固定内容地图" : "固定内容地图"} aria-pressed={mapPinned} onClick={() => setMapPinned((current) => !current)}>
                     <PushPinIcon aria-hidden="true" size={15} weight={mapPinned ? "fill" : "duotone"} />
                   </button>
@@ -652,16 +740,33 @@ export default function AiReviewWorkspace({
                   <EyeIcon aria-hidden="true" size={15} weight="duotone" />
                   <span><strong>完整页面</strong><small>查看修改前与修改后</small></span>
                 </button>
-                <ol className={styles.mapList}>
-                  {documents.changes.map((change, index) => (
-                    <li key={change.id}>
-                      <button type="button" aria-pressed={focus === change.id} onClick={() => selectChange(change.id)}>
-                        <span>{index + 1}</span>
-                        <span><strong>{change.label}</strong><small>{change.helper}</small></span>
-                      </button>
-                    </li>
+                <div className={styles.mapGroups}>
+                  {outlineGroups.map((group) => (
+                    <section className={styles.mapGroup} key={group.label}>
+                      <h3><span>{group.label}</span><small>{group.items.filter((item) => item.changeId).length}/{group.items.length} 处变化</small></h3>
+                      <ol className={styles.mapList}>
+                        {group.items.map((item) => {
+                          const itemIndex = documents.outline.findIndex((candidate) => candidate.id === item.id);
+                          const selected = focus === (item.changeId || item.id);
+                          return (
+                            <li key={item.id}>
+                              <button
+                                type="button"
+                                data-testid="review-outline-item"
+                                data-changed={item.changeId ? "true" : "false"}
+                                aria-pressed={selected}
+                                onClick={() => selectOutlineItem(item)}
+                              >
+                                <span>{itemIndex + 1}</span>
+                                <span><strong>{item.label}</strong><small>{item.helper}</small></span>
+                              </button>
+                            </li>
+                          );
+                        })}
+                      </ol>
+                    </section>
                   ))}
-                </ol>
+                </div>
               </div>
             </aside>
             <div className={styles.mapEdgeTrigger} aria-hidden="true" onMouseEnter={() => { if (!mapPinned) setMapPeeked(true); }} />
@@ -691,11 +796,11 @@ export default function AiReviewWorkspace({
             }}
           >
             <div className={styles.confirmIcon}><ClockCounterClockwiseIcon aria-hidden="true" size={25} weight="duotone" /></div>
-            <h2 id="keep-current-title">保留当前版本 {beforeLabel}？</h2>
-            <p id="keep-current-description">当前 HTML 不会改变。确认后会返回本轮处理页面；AI 候选 {afterLabel} 仍会保留，你可以随时再次回到这个审阅页面。</p>
+            <h2 id="keep-current-title">返回 AI 修改前（{beforeLabel}）？</h2>
+            <p id="keep-current-description">确认后不会采用这次 AI 返回的 {afterLabel}；当前 HTML 将继续使用 {beforeLabel}（AI 修改前），并返回本轮处理页面。AI 返回仍保留在本轮记录中，之后可以重新审阅。</p>
             <div>
               <button ref={continueReviewButtonRef} className={styles.dialogSecondary} type="button" onClick={() => setShowKeepConfirm(false)}>继续审阅</button>
-              <button className={styles.dialogPrimary} type="button" onClick={() => { setShowKeepConfirm(false); onKeepCurrent(); }}>确认保留 {beforeLabel}</button>
+              <button className={styles.dialogPrimary} type="button" onClick={() => { setShowKeepConfirm(false); onReturnBefore(); }}>返回修改前版本</button>
             </div>
           </section>
         </div>
