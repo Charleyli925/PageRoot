@@ -46,6 +46,10 @@ test("formal review loads and verifies the immutable candidate without activatin
     workbench,
     /await openCommittedVersion\(run, mergedPayload\)[\s\S]*?setDrawer\(null\)[\s\S]*?requestAnimationFrame[\s\S]*?requestAnimationFrame[\s\S]*?setReadyReviewSession\(null\)/,
   );
+  assert.match(
+    workbench,
+    /removeRun\(run, \{ clearActive: false \}\);[\s\S]*?clearActiveHandoff\(\)/,
+  );
   assert.match(styles, /\.reviewRoot \{[\s\S]*?position: fixed;[\s\S]*?inset: 0;/);
 });
 

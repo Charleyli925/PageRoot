@@ -8266,6 +8266,7 @@ export default function Workbench() {
         setReadyReviewSession(null);
       }
       runSessionRef.current.removeRun(run, { clearActive: false });
+      runSessionRef.current.clearActiveHandoff();
     } catch (cause) {
       if (isDeferredEditorCommandDiscardedError(cause)) return;
       const error = productErrorMessage(cause, "最新版暂时无法打开。");
@@ -10311,6 +10312,7 @@ export default function Workbench() {
             ref={commentsPanelRef}
             className="comments-panel comment-rail"
             aria-label={viewMode === "history" ? "历史版本评论" : "本轮评论"}
+            data-html-canvas-preserve-selection="true"
             aria-busy={!commentLayoutReady}
             data-layout-ready={commentLayoutReady ? "true" : "false"}
             data-layout-generation={commentLayoutAuthority.viewContextGeneration}

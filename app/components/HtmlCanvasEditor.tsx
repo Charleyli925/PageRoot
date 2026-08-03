@@ -2218,7 +2218,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     const clearOnOutsidePointer = (event: PointerEvent) => {
       if (!selectedElementRef.current) return;
       const target = event.target;
-      if (target instanceof Node && toolbarRef.current?.contains(target)) return;
+      if (!(target instanceof Node)) return;
+      if (toolbarRef.current?.contains(target)) return;
+      const targetElement = target instanceof Element ? target : target.parentElement;
+      if (targetElement?.closest('[data-html-canvas-preserve-selection="true"]')) return;
       clearSelection();
     };
     documentNode.addEventListener("pointerdown", clearOnOutsidePointer, true);

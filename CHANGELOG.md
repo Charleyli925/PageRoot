@@ -67,7 +67,8 @@ Notable user-visible changes are documented here. This project follows Semantic 
   until the candidate is rendered, eliminating the waiting-page flash.
 - End Canvas selection and native text editing when the user clicks elsewhere
   in the page or App, committing the current checkpoint and removing the edit
-  toolbar and selection together.
+  toolbar and selection together. Selection-bound toolbar and comment actions
+  remain stable long enough to complete their intended operation.
 
 ## [0.9.5] - 2026-07-31
 

@@ -136,7 +136,7 @@ PageRoot 让用户在真实本地 HTML 上完成两类工作：
 每次本地修改：
 
 1. 文字双击时由 `IslandEditingController` 为当前源码宿主建立唯一可编辑岛；浏览器只负责光标、Selection 和 IME，Controller 接管输入、删除、换行、粘贴与格式变更。
-2. 约 700ms、格式、Cmd+S、目标切换、关闭或发送边界生成带目标身份、源 Hash、精确岛内 before/after 和操作类型的 `replace-editable-island` 命令；编辑工具栏内的焦点迁移不结束会话，点击当前选区之外的页面或 App 区域则提交 checkpoint，并同时清除编辑态、选区与工具栏。
+2. 约 700ms、格式、Cmd+S、目标切换、关闭或发送边界生成带目标身份、源 Hash、精确岛内 before/after 和操作类型的 `replace-editable-island` 命令；编辑工具栏及与当前选区绑定的评论操作不结束会话，点击除此之外的页面或 App 区域则提交 checkpoint，并同时清除编辑态、选区与工具栏。
 3. SourceIndex/TargetResolver 唯一定位真实源码范围；无法唯一定位时保留草稿并阻止操作。
 4. SourcePatchEngine 只替换目标元素的精确 `contentRange`，并验证岛外源码逐字节不变。岛内可进行最小 parse5 规范化；成功事务把实际 forward Patch 和对应 exact inverse Patch 作为同一操作写入有界源码历史，不保存整页 DOM 快照。
 5. 用 Patch 结果更新内存 HTML 并原子重建 projection；失败时保留原会话和草稿。

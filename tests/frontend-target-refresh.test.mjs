@@ -601,6 +601,15 @@ test("outside app or canvas clicks commit editing and clear the active selection
     canvas,
     /toolbarRef\.current\?\.contains\(target\)[\s\S]*?clearSelection\(\)/u,
   );
+  assert.match(
+    canvas,
+    /targetElement\?\.closest\('\[data-html-canvas-preserve-selection="true"\]'\)[\s\S]*?clearSelection\(\)/u,
+  );
+  const workbench = await readWorkbenchArchitecture();
+  assert.match(
+    workbench,
+    /className="comments-panel comment-rail"[\s\S]*?data-html-canvas-preserve-selection="true"/u,
+  );
   const handleClick = canvas.slice(
     canvas.indexOf("const handleClick = (event: MouseEvent) =>"),
     canvas.indexOf("const handleDoubleClick", canvas.indexOf("const handleClick = (event: MouseEvent) =>")),
