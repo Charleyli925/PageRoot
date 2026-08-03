@@ -109,8 +109,8 @@ test("system work cannot replace a queued or scheduled user command", () => {
 test("Workbench header drawers defer until the active composition is settled", () => {
   const headerActions = section(
     workbench,
-    '<nav className="header-actions"',
-    "</nav>",
+    "<WorkbenchHeaderActions",
+    "</WorkbenchHeaderActions>",
   );
 
   assert.match(
