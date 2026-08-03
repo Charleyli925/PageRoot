@@ -41,6 +41,18 @@ function doctypeString(doctype) {
   return `<!DOCTYPE ${doctype.name}${publicId}${systemId}>`;
 }
 
+export function resolvePreviewBaseHref(authoredHref, sourceBaseUrl) {
+  const sourceBase = new URL(sourceBaseUrl);
+  const resolved = new URL(String(authoredHref ?? "").trim(), sourceBase);
+  if (resolved.protocol === "http:" || resolved.protocol === "https:") return resolved.href;
+  if (resolved.protocol !== sourceBase.protocol) return sourceBase.href;
+  if (
+    sourceBase.protocol === "pageroot-preview:"
+    && resolved.host !== sourceBase.host
+  ) return sourceBase.href;
+  return resolved.href;
+}
+
 export function sanitizePreviewDocument(source, baseUrl) {
   const disabledSource = disableExecutableMarkup(source);
   if (typeof DOMParser === "undefined") return disabledSource;
@@ -54,11 +66,21 @@ export function sanitizePreviewDocument(source, baseUrl) {
     }
   });
 
-  if (baseUrl && !parsed.head.querySelector("base")) {
-    const base = parsed.createElement("base");
-    base.href = baseUrl;
-    base.setAttribute(INJECTED_BASE_ATTRIBUTE, "true");
-    parsed.head.prepend(base);
+  if (baseUrl) {
+    const authoredBase = parsed.head.querySelector("base");
+    if (!authoredBase) {
+      const base = parsed.createElement("base");
+      base.href = baseUrl;
+      base.setAttribute(INJECTED_BASE_ATTRIBUTE, "true");
+      parsed.head.prepend(base);
+    } else {
+      const authoredHref = authoredBase.getAttribute("href")?.trim() ?? "";
+      try {
+        authoredBase.href = resolvePreviewBaseHref(authoredHref, baseUrl);
+      } catch {
+        authoredBase.href = baseUrl;
+      }
+    }
   }
   return `${doctypeString(parsed.doctype)}\n${parsed.documentElement.outerHTML}`;
 }
@@ -117,4 +139,12 @@ export function baseHrefFromSourcePath(sourcePath) {
     .map((segment) => encodeURIComponent(segment))
     .join("/");
   return `file://${encodedPath}`;
+}
+
+export function previewSessionBaseUrl(sessionUrl) {
+  const url = new URL(sessionUrl);
+  url.pathname = "/";
+  url.search = "";
+  url.hash = "";
+  return url.href;
 }

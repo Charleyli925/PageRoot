@@ -3176,7 +3176,8 @@ li[data-state="current"] .stepState {
 }
 
 .contentMapItem[data-state="unchanged"] .mapIndex,
-.contentMapItem[data-state="named"] .mapIndex {
+.contentMapItem[data-state="named"] .mapIndex,
+.contentMapItem[data-state="checking"] .mapIndex {
   background: #f0f1f4;
   color: #a2a4ab;
 }
@@ -3220,6 +3221,11 @@ li[data-state="current"] .stepState {
 .contentMapItem[data-state="unchanged"] .mapState {
   background: #f2f3f5;
   color: #999ba3;
+}
+
+.contentMapItem[data-state="checking"] .mapState {
+  background: #f3f2f8;
+  color: #85828f;
 }
 
 .contentMapItem[data-state="named"] .mapState {
@@ -3854,6 +3860,12 @@ li[data-state="current"] .stepState {
   background: #fff;
   color: #4e49ae;
   box-shadow: 0 1px 4px rgb(31 33 42 / 11%);
+}
+
+.diffFilterSwitch button:disabled {
+  color: #aaaab1;
+  cursor: not-allowed;
+  opacity: .58;
 }
 
 .diffFilterSwitch button:nth-child(3)[aria-pressed="true"] {

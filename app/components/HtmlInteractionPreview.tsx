@@ -22,6 +22,7 @@ import {
   buildSourceIndex,
   instrumentPreviewHtml,
 } from "../lib/source-index.js";
+import type { DesktopPreviewSession } from "./desktop-preview-api";
 import styles from "./HtmlInteractionPreview.module.css";
 
 export type HtmlInteractionPreviewHandle = {
@@ -36,26 +37,6 @@ type HtmlInteractionPreviewProps = {
   transport?: "independent-url" | "srcdoc";
   onInteraction?: () => void;
 };
-
-type DesktopPreviewSession = {
-  sessionId: string;
-  url: string;
-};
-
-type DesktopPreviewApi = {
-  createSession: (payload: {
-    html: string;
-    bootstrapJavaScript: string;
-    sourcePath?: string;
-  }) => Promise<DesktopPreviewSession>;
-  revokeSession: (sessionId: string) => Promise<{ revoked: boolean }>;
-};
-
-declare global {
-  interface Window {
-    htmlAIPreview?: DesktopPreviewApi;
-  }
-}
 
 const PREVIEW_BOOTSTRAP_ATTRIBUTE = "data-pageroot-preview-bootstrap";
 const PREVIEW_BASE_ATTRIBUTE = "data-pageroot-preview-base";

@@ -35,6 +35,10 @@ Comments + frozen input
   `script-src 'self'` policy. The main process owns the volatile session and
   serves only its prepared HTML, its fixed bootstrap and realpath-contained
   files beside the known source HTML.
+- The script-disabled desktop edit iframe reuses that same bounded session only
+  as its relative-asset base. Its sanitized source document still comes from
+  the renderer, authored scripts remain disabled, and source changes revoke the
+  old session before a new resource root can be adopted.
 - Preview-to-edit carries only a bounded `PageViewContext`: source-backed
   active/inactive class transitions and `hidden`, `open`, `aria-selected` or
   `aria-expanded` state, plus a strictly bounded read-only visual projection
@@ -104,6 +108,7 @@ they do not import application services.
 | Validated default-browser HTML launch | `desktop/open-in-default-browser.mjs`, behind `desktop/project-ipc-security.mjs` sender authority |
 | Pseudonymous identity, strict event schemas, local queue and PostHog delivery | `desktop/usage-telemetry.mjs` |
 | Preview sanitization and verified frame injection | `app/components/html-preview-sandbox.js` |
+| Renderer declaration of the shared volatile preview-session capability | `app/components/desktop-preview-api.ts` |
 | Volatile desktop preview sessions and contained local-asset serving | `desktop/preview-protocol.mjs` |
 | Source-backed preview/edit display-state filtering, bounded visual filtering and rebinding, and safe action resolution | `app/lib/page-view-context.js`, `app/lib/read-only-visual.js` |
 | Run lifecycle decoding and transition policy | `app/domain/run-lifecycle.js` |

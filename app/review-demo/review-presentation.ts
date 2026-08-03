@@ -1,6 +1,27 @@
+import {
+  pairReviewEntries,
+} from "./review-entry-pairing.js";
+
 export type ReviewSide = "before" | "after";
 export type ReviewDiffFilter = "all" | "text" | "structure" | "style";
 export type ReviewDiffTargets = Record<Exclude<ReviewDiffFilter, "all">, string[]>;
+
+export type ReviewComment = {
+  id: string;
+  anchor: string;
+  selector: string;
+  text: string;
+};
+
+export type ReviewPresentationEvidence = {
+  ready: boolean;
+  before: number;
+  after: number;
+  text: number;
+  structure: number;
+  style: number;
+  total: number;
+};
 
 type ReviewChange = {
   id: string;
@@ -10,20 +31,11 @@ type ReviewChange = {
 type ElementEntry = {
   element: HTMLElement;
   identity: string;
+  context: string;
   rawText: string;
   text: string;
+  tagName: string;
   order: number;
-};
-
-type ElementPair = {
-  before: ElementEntry;
-  after: ElementEntry;
-};
-
-type PairResult = {
-  pairs: ElementPair[];
-  beforeOnly: ElementEntry[];
-  afterOnly: ElementEntry[];
 };
 
 type TextToken = {
@@ -49,6 +61,8 @@ const REVIEW_MODE_CLASSES = [
 ];
 
 let reviewFrameOwnerSequence = 0;
+const commentPresentationCleanup = new WeakMap<Document, () => void>();
+const openCommentByDocument = new WeakMap<Document, string | null>();
 
 const STYLE_PROPERTIES = [
   ["background-color", "背景"],
@@ -364,8 +378,104 @@ const REVIEW_FRAME_STYLE = `
     visibility: hidden !important;
   }
 
+  .pageroot-comment-pin {
+    position: absolute !important;
+    z-index: 2147483060 !important;
+    display: block !important;
+    width: 0 !important;
+    height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    pointer-events: none !important;
+  }
+
+  .pageroot-comment-marker {
+    position: absolute !important;
+    inset: 0 auto auto 0 !important;
+    display: grid !important;
+    place-items: center !important;
+    width: calc(30px * var(--pageroot-review-ui-scale)) !important;
+    height: calc(30px * var(--pageroot-review-ui-scale)) !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: calc(1px * var(--pageroot-review-ui-scale)) solid rgba(107, 99, 220, .22) !important;
+    border-radius: 999px !important;
+    background: rgba(255, 255, 255, .97) !important;
+    color: #5b55d4 !important;
+    font: 760 calc(12px * var(--pageroot-review-ui-scale))/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
+    letter-spacing: 0 !important;
+    box-shadow: 0 calc(3px * var(--pageroot-review-ui-scale)) calc(14px * var(--pageroot-review-ui-scale)) rgba(45, 42, 94, .13) !important;
+    cursor: pointer !important;
+    pointer-events: auto !important;
+    transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease !important;
+  }
+
+  .pageroot-comment-marker:hover,
+  .pageroot-comment-marker[aria-expanded='true'] {
+    border-color: rgba(94, 86, 211, .5) !important;
+    box-shadow: 0 calc(5px * var(--pageroot-review-ui-scale)) calc(18px * var(--pageroot-review-ui-scale)) rgba(45, 42, 94, .18) !important;
+    transform: translateY(calc(-1px * var(--pageroot-review-ui-scale))) !important;
+  }
+
+  .pageroot-comment-marker:focus-visible {
+    outline: 0 !important;
+    box-shadow:
+      0 0 0 calc(2px * var(--pageroot-review-ui-scale)) #fff,
+      0 0 0 calc(4px * var(--pageroot-review-ui-scale)) #6b63dc !important;
+  }
+
+  .pageroot-comment-bubble {
+    position: absolute !important;
+    top: calc(36px * var(--pageroot-review-ui-scale)) !important;
+    right: calc(-30px * var(--pageroot-review-ui-scale)) !important;
+    display: grid !important;
+    gap: calc(6px * var(--pageroot-review-ui-scale)) !important;
+    width: min(calc(280px * var(--pageroot-review-ui-scale)), calc(100vw - 32px * var(--pageroot-review-ui-scale))) !important;
+    margin: 0 !important;
+    padding: calc(12px * var(--pageroot-review-ui-scale)) calc(13px * var(--pageroot-review-ui-scale)) !important;
+    border: calc(1px * var(--pageroot-review-ui-scale)) solid rgba(103, 94, 210, .2) !important;
+    border-radius: calc(12px * var(--pageroot-review-ui-scale)) !important;
+    background: rgba(255, 255, 255, .985) !important;
+    color: #3f4050 !important;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
+    text-align: left !important;
+    box-shadow: 0 calc(12px * var(--pageroot-review-ui-scale)) calc(34px * var(--pageroot-review-ui-scale)) rgba(38, 35, 82, .16) !important;
+    opacity: 0 !important;
+    visibility: hidden !important;
+    transform: translateY(calc(-4px * var(--pageroot-review-ui-scale))) scale(.985) !important;
+    transform-origin: top right !important;
+    transition: opacity 160ms ease, transform 160ms ease, visibility 160ms ease !important;
+    pointer-events: none !important;
+  }
+
+  .pageroot-comment-pin[data-open='true'] .pageroot-comment-bubble {
+    opacity: 1 !important;
+    visibility: visible !important;
+    transform: translateY(0) scale(1) !important;
+    pointer-events: auto !important;
+  }
+
+  .pageroot-comment-bubble strong {
+    margin: 0 !important;
+    color: #5b55c7 !important;
+    font-size: calc(10.5px * var(--pageroot-review-ui-scale)) !important;
+    font-weight: 760 !important;
+    line-height: 1.2 !important;
+  }
+
+  .pageroot-comment-bubble p {
+    margin: 0 !important;
+    color: #4b4c58 !important;
+    font-size: calc(12px * var(--pageroot-review-ui-scale)) !important;
+    font-weight: 500 !important;
+    line-height: 1.55 !important;
+  }
+
   @media (prefers-reduced-motion: reduce) {
-    body.pageroot-section-focus [data-test-module] { transition: none !important; }
+    body.pageroot-section-focus [data-test-module],
+    .pageroot-comment-marker,
+    .pageroot-comment-bubble { transition: none !important; }
   }
 `;
 
@@ -391,26 +501,64 @@ function cleanText(element: Element) {
   return rawElementText(element).replace(/\s+/g, " ").trim();
 }
 
-function elementIdentity(element: HTMLElement) {
-  const direct = [
-    element.id,
-    element.dataset.card,
-    element.getAttribute("name"),
-    element.getAttribute("aria-label"),
-    element.getAttribute("href"),
-  ].find(Boolean);
-  if (direct) return `${element.tagName}:${direct}`;
+function directSemanticKey(element: HTMLElement) {
+  const attributes = [
+    ["id", element.id],
+    ["review-key", element.dataset.reviewKey],
+    ["card", element.dataset.card],
+    ["key", element.dataset.key],
+    ["data-id", element.dataset.id],
+    ["name", element.getAttribute("name")],
+    ["aria-label", element.getAttribute("aria-label")],
+    ["href", element.getAttribute("href")],
+  ] as const;
+  const semantic = attributes.find(([, value]) => value?.trim());
+  return semantic ? `${element.tagName}:${semantic[0]}:${semantic[1]?.trim()}` : "";
+}
 
-  const identityChild = element.matches("tr")
-    ? element.querySelector("th")
-    : element.querySelector("h1, h2, h3, h4, legend, figcaption strong, [data-review-key]");
-  if (identityChild) return `${element.tagName}:${cleanText(identityChild)}`;
+function rowSemanticKey(row: HTMLTableRowElement) {
+  const direct = directSemanticKey(row);
+  if (direct) return direct;
+  const leadingCell = [...row.cells].find((cell) => cleanText(cell));
+  return leadingCell ? `TR:first-cell:${cleanText(leadingCell)}` : "";
+}
+
+function elementIdentity(element: HTMLElement) {
+  const direct = directSemanticKey(element);
+  if (direct) return direct;
+
+  if (element.tagName === "TR") return rowSemanticKey(element as HTMLTableRowElement);
+  if (element.tagName === "TD" || element.tagName === "TH") {
+    const row = element.closest("tr");
+    const rowKey = row ? rowSemanticKey(row as HTMLTableRowElement) : "";
+    const cell = element as HTMLTableCellElement;
+    const columnIndex = row ? [...row.cells].indexOf(cell) : cell.cellIndex;
+    return rowKey ? `${element.tagName}:${rowKey}:column:${columnIndex}` : "";
+  }
+
+  const identityChild = element.querySelector<HTMLElement>(
+    ":scope > h1, :scope > h2, :scope > h3, :scope > h4, :scope > legend, :scope > figcaption strong, :scope > [data-review-key]",
+  );
+  const childText = identityChild ? cleanText(identityChild) : "";
+  return childText ? `${element.tagName}:heading:${childText}` : "";
+}
+
+function elementContext(element: HTMLElement) {
+  const row = element.closest("tr");
+  if (row) return rowSemanticKey(row as HTMLTableRowElement);
+
+  let ancestor = element.parentElement;
+  while (ancestor) {
+    const semantic = directSemanticKey(ancestor);
+    if (semantic) return semantic;
+    ancestor = ancestor.parentElement;
+  }
 
   const classKey = [...element.classList]
     .filter((className) => !className.startsWith("pageroot-"))
     .sort()
     .join(".");
-  return `${element.tagName}:${classKey}`;
+  return `${element.parentElement?.tagName ?? "ROOT"}>${element.tagName}:${classKey}`;
 }
 
 function collectEntries(section: HTMLElement, selectors: string[]) {
@@ -434,8 +582,10 @@ function collectEntries(section: HTMLElement, selectors: string[]) {
     return {
       element,
       identity: elementIdentity(element),
+      context: elementContext(element),
       rawText,
       text: rawText.replace(/\s+/g, " ").trim(),
+      tagName: element.tagName,
       order,
     };
   });
@@ -513,7 +663,7 @@ function mergeRanges(ranges: TextRange[]) {
 function lcsMatches(beforeTokens: TextToken[], afterTokens: TextToken[]) {
   const rows = beforeTokens.length + 1;
   const columns = afterTokens.length + 1;
-  const table = Array.from({ length: rows }, () => new Uint16Array(columns));
+  const table = Array.from({ length: rows }, () => new Uint32Array(columns));
   for (let beforeIndex = beforeTokens.length - 1; beforeIndex >= 0; beforeIndex -= 1) {
     for (let afterIndex = afterTokens.length - 1; afterIndex >= 0; afterIndex -= 1) {
       table[beforeIndex][afterIndex] = beforeTokens[beforeIndex].value === afterTokens[afterIndex].value
@@ -546,58 +696,6 @@ function textSimilarity(beforeText: string, afterText: string) {
   const afterTokens = tokenize(afterText);
   if (!beforeTokens.length || !afterTokens.length) return 0;
   return lcsMatches(beforeTokens, afterTokens).length / Math.max(beforeTokens.length, afterTokens.length);
-}
-
-function pairEntries(beforeEntries: ElementEntry[], afterEntries: ElementEntry[], identityFirst: boolean): PairResult {
-  const usedBefore = new Set<number>();
-  const usedAfter = new Set<number>();
-  const pairs: ElementPair[] = [];
-
-  const matchExact = (mode: "identity" | "text") => {
-    beforeEntries.forEach((before, beforeIndex) => {
-      if (usedBefore.has(beforeIndex)) return;
-      const afterIndex = afterEntries.findIndex((after, candidateIndex) => (
-        !usedAfter.has(candidateIndex)
-        && (mode === "identity" ? before.identity === after.identity : before.text === after.text)
-      ));
-      if (afterIndex < 0) return;
-      usedBefore.add(beforeIndex);
-      usedAfter.add(afterIndex);
-      pairs.push({ before, after: afterEntries[afterIndex] });
-    });
-  };
-
-  if (identityFirst) {
-    matchExact("identity");
-    matchExact("text");
-  } else {
-    matchExact("text");
-    matchExact("identity");
-  }
-
-  beforeEntries.forEach((before, beforeIndex) => {
-    if (usedBefore.has(beforeIndex)) return;
-    let bestAfterIndex = -1;
-    let bestScore = 0;
-    afterEntries.forEach((after, afterIndex) => {
-      if (usedAfter.has(afterIndex) || before.element.tagName !== after.element.tagName) return;
-      const score = textSimilarity(before.text, after.text);
-      if (score > bestScore) {
-        bestScore = score;
-        bestAfterIndex = afterIndex;
-      }
-    });
-    if (bestAfterIndex < 0 || bestScore < .28) return;
-    usedBefore.add(beforeIndex);
-    usedAfter.add(bestAfterIndex);
-    pairs.push({ before, after: afterEntries[bestAfterIndex] });
-  });
-
-  return {
-    pairs,
-    beforeOnly: beforeEntries.filter((_, index) => !usedBefore.has(index)),
-    afterOnly: afterEntries.filter((_, index) => !usedAfter.has(index)),
-  };
 }
 
 function rangesForUnmatched(tokens: TextToken[], matched: Set<number>, offset = 0) {
@@ -863,7 +961,7 @@ function markText(entry: ElementEntry, side: ReviewSide, clauses: TextRange[], c
 }
 
 function applyTextDiff(beforeSection: HTMLElement, afterSection: HTMLElement, selectors: string[]) {
-  const result = pairEntries(collectEntries(beforeSection, selectors), collectEntries(afterSection, selectors), false);
+  const result = pairReviewEntries(collectEntries(beforeSection, selectors), collectEntries(afterSection, selectors));
   result.pairs.forEach((pair) => {
     if (pair.before.text === pair.after.text) return;
     const ranges = changedTextRanges(pair.before, pair.after);
@@ -910,7 +1008,7 @@ function markStructure(entry: ElementEntry, side: ReviewSide, label: string, add
 }
 
 function applyStructureDiff(beforeSection: HTMLElement, afterSection: HTMLElement, selectors: string[]) {
-  const result = pairEntries(collectEntries(beforeSection, selectors), collectEntries(afterSection, selectors), true);
+  const result = pairReviewEntries(collectEntries(beforeSection, selectors), collectEntries(afterSection, selectors));
   result.pairs.forEach((pair) => {
     if (!geometryChanged(pair.before, pair.after, beforeSection, afterSection)) return;
     const moved = pair.before.order !== pair.after.order;
@@ -937,7 +1035,7 @@ function markStyle(element: HTMLElement, side: ReviewSide, label: string) {
 }
 
 function applyStyleDiff(beforeSection: HTMLElement, afterSection: HTMLElement, selectors: string[]) {
-  const result = pairEntries(collectEntries(beforeSection, selectors), collectEntries(afterSection, selectors), true);
+  const result = pairReviewEntries(collectEntries(beforeSection, selectors), collectEntries(afterSection, selectors));
   result.pairs.forEach((pair) => {
     const labels = changedStyleLabels(pair.before.element, pair.after.element);
     if (!labels.length) return;
@@ -1013,6 +1111,169 @@ function ensurePresentationStyle(document: Document) {
   style.textContent = REVIEW_FRAME_STYLE;
 }
 
+function installReviewComments(
+  document: Document,
+  comments: ReviewComment[],
+  dismissalDocuments: Document[] = [],
+) {
+  commentPresentationCleanup.get(document)?.();
+  commentPresentationCleanup.delete(document);
+  if (!document.body || !comments.length) return;
+
+  const frameWindow = document.defaultView;
+  if (!frameWindow) return;
+  const pins: Array<{ comment: ReviewComment; target: HTMLElement; pin: HTMLElement; marker: HTMLButtonElement; bubble: HTMLElement }> = [];
+
+  comments.forEach((comment) => {
+    const section = document.getElementById(comment.anchor);
+    const target = section?.querySelector<HTMLElement>(comment.selector)
+      ?? (section?.matches(comment.selector) ? section : null);
+    if (!target) return;
+
+    const pin = document.createElement("div");
+    pin.dataset.pagerootOverlay = "true";
+    pin.dataset.pagerootCommentId = comment.id;
+    pin.className = "pageroot-comment-pin";
+
+    const marker = document.createElement("button");
+    const bubbleId = `pageroot-comment-${comment.id.replace(/[^a-z\d_-]/giu, "-")}`;
+    marker.type = "button";
+    marker.className = "pageroot-comment-marker";
+    marker.textContent = "评";
+    marker.setAttribute("aria-label", "查看此前评论");
+    marker.setAttribute("aria-controls", bubbleId);
+    marker.setAttribute("aria-expanded", "false");
+
+    const bubble = document.createElement("div");
+    bubble.id = bubbleId;
+    bubble.className = "pageroot-comment-bubble";
+    bubble.setAttribute("role", "note");
+    bubble.setAttribute("aria-hidden", "true");
+    const heading = document.createElement("strong");
+    heading.textContent = "此前评论";
+    const copy = document.createElement("p");
+    copy.textContent = comment.text;
+    bubble.append(heading, copy);
+    pin.append(marker, bubble);
+    document.body.append(pin);
+    pins.push({ comment, target, pin, marker, bubble });
+  });
+
+  const setOpenComment = (commentId: string | null) => {
+    openCommentByDocument.set(document, commentId);
+    pins.forEach(({ comment, pin, marker, bubble }) => {
+      const open = comment.id === commentId;
+      if (open) pin.dataset.open = "true";
+      else delete pin.dataset.open;
+      marker.setAttribute("aria-expanded", String(open));
+      bubble.setAttribute("aria-hidden", String(!open));
+    });
+  };
+
+  pins.forEach(({ comment, marker }) => {
+    marker.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const nextId = openCommentByDocument.get(document) === comment.id ? null : comment.id;
+      setOpenComment(nextId);
+    });
+  });
+
+  const handleOutsidePointer = (event: PointerEvent) => {
+    const target = event.target as Element | null;
+    if (target?.closest?.(".pageroot-comment-marker, .pageroot-comment-bubble")) return;
+    setOpenComment(null);
+  };
+  const handleEscape = (event: KeyboardEvent) => {
+    if (event.key !== "Escape" || !openCommentByDocument.get(document)) return;
+    setOpenComment(null);
+  };
+
+  let positionFrame = 0;
+  const updatePositions = () => {
+    positionFrame = 0;
+    pins.forEach(({ target, pin }) => {
+      if (!target.isConnected) return;
+      const bounds = target.getBoundingClientRect();
+      pin.style.left = `${Math.max(10, bounds.right + frameWindow.scrollX - 19)}px`;
+      pin.style.top = `${Math.max(10, bounds.top + frameWindow.scrollY - 12)}px`;
+    });
+  };
+  const schedulePositions = () => {
+    if (positionFrame) return;
+    positionFrame = frameWindow.requestAnimationFrame(updatePositions);
+  };
+  const observer = typeof frameWindow.ResizeObserver === "function"
+    ? new frameWindow.ResizeObserver(schedulePositions)
+    : null;
+  pins.forEach(({ target }) => observer?.observe(target));
+  const eventDocuments = [...new Set([document, ...dismissalDocuments])];
+  eventDocuments.forEach((eventDocument) => {
+    eventDocument.addEventListener("pointerdown", handleOutsidePointer, true);
+    eventDocument.addEventListener("keydown", handleEscape, true);
+  });
+  frameWindow.addEventListener("resize", schedulePositions, { passive: true });
+  frameWindow.addEventListener("scroll", schedulePositions, { passive: true });
+  updatePositions();
+  const rememberedComment = openCommentByDocument.get(document);
+  setOpenComment(pins.some(({ comment }) => comment.id === rememberedComment) ? rememberedComment ?? null : null);
+
+  const cleanup = () => {
+    if (positionFrame) frameWindow.cancelAnimationFrame(positionFrame);
+    observer?.disconnect();
+    eventDocuments.forEach((eventDocument) => {
+      eventDocument.removeEventListener("pointerdown", handleOutsidePointer, true);
+      eventDocument.removeEventListener("keydown", handleEscape, true);
+    });
+    frameWindow.removeEventListener("resize", schedulePositions);
+    frameWindow.removeEventListener("scroll", schedulePositions);
+  };
+  commentPresentationCleanup.set(document, cleanup);
+}
+
+function hasRenderedRect(element: Element) {
+  return [...element.getClientRects()].some((rect) => rect.width > 0 && rect.height > 0);
+}
+
+function evidenceForSection(section: HTMLElement | null) {
+  if (!section) return { total: 0, text: 0, structure: 0, style: 0 };
+  const changed = [
+    ...(section.matches("[data-pageroot-diff]") ? [section] : []),
+    ...section.querySelectorAll<HTMLElement>("[data-pageroot-diff]"),
+  ];
+  const evidence = changed.map((element) => {
+    const elementVisible = hasRenderedRect(element);
+    const text = element.classList.contains("pageroot-diff-text")
+      && [...element.querySelectorAll<HTMLElement>("[data-pageroot-clause='true'], [data-pageroot-token='true']")]
+        .some(hasRenderedRect);
+    const structure = elementVisible && [...element.classList]
+      .some((className) => className.startsWith("pageroot-structure-"));
+    const style = elementVisible && [...element.classList]
+      .some((className) => className.startsWith("pageroot-style-"));
+    return { text, structure, style, total: text || structure || style };
+  });
+  return {
+    total: evidence.filter((item) => item.total).length,
+    text: evidence.filter((item) => item.text).length,
+    structure: evidence.filter((item) => item.structure).length,
+    style: evidence.filter((item) => item.style).length,
+  };
+}
+
+function presentationEvidence(beforeSection: HTMLElement | null, afterSection: HTMLElement | null): ReviewPresentationEvidence {
+  const before = evidenceForSection(beforeSection);
+  const after = evidenceForSection(afterSection);
+  return {
+    ready: true,
+    before: before.total,
+    after: after.total,
+    text: before.text + after.text,
+    structure: before.structure + after.structure,
+    style: before.style + after.style,
+    total: before.total + after.total,
+  };
+}
+
 function setDocumentMaskTransparency(document: Document | null | undefined, value: number) {
   if (!document?.documentElement) return;
   const transparency = Math.max(0, Math.min(100, value)) / 100;
@@ -1041,6 +1302,8 @@ export function setReviewPresentationScale(frame: HTMLIFrameElement | null, scal
 }
 
 function removeInjectedPresentation(document: Document) {
+  commentPresentationCleanup.get(document)?.();
+  commentPresentationCleanup.delete(document);
   document.querySelectorAll<HTMLElement>("[data-pageroot-overlay='true']").forEach((element) => element.remove());
   document.querySelectorAll<HTMLElement>("[data-pageroot-token='true']").forEach((element) => {
     const parent = element.parentNode;
@@ -1080,10 +1343,13 @@ export function applyReviewPresentationPair(
   filter: ReviewDiffFilter,
   focused: boolean,
   targetsByChange: Record<string, ReviewDiffTargets>,
-) {
+  comments: ReviewComment[] = [],
+): ReviewPresentationEvidence {
   const beforeDocument = beforeFrame?.contentDocument;
   const afterDocument = afterFrame?.contentDocument;
-  if (!beforeDocument?.body || !afterDocument?.body) return;
+  if (!beforeDocument?.body || !afterDocument?.body) {
+    return { ready: false, before: 0, after: 0, text: 0, structure: 0, style: 0, total: 0 };
+  }
 
   ensurePresentationStyle(beforeDocument);
   ensurePresentationStyle(afterDocument);
@@ -1091,12 +1357,18 @@ export function applyReviewPresentationPair(
   removeInjectedPresentation(afterDocument);
   beforeDocument.documentElement.dataset.pagerootSide = "before";
   afterDocument.documentElement.dataset.pagerootSide = "after";
-  if (!focused) return;
+  const hostDocument = beforeFrame?.ownerDocument;
+  installReviewComments(
+    beforeDocument,
+    comments,
+    hostDocument ? [afterDocument, hostDocument] : [afterDocument],
+  );
+  if (!focused) return presentationEvidence(null, null);
 
   const beforeSection = beforeDocument.getElementById(change.anchor);
   const afterSection = afterDocument.getElementById(change.anchor);
   const targets = targetsByChange[change.id];
-  if (!beforeSection || !afterSection || !targets) return;
+  if (!beforeSection || !afterSection || !targets) return presentationEvidence(beforeSection, afterSection);
 
   [beforeDocument, afterDocument].forEach((document) => {
     document.body.classList.add("pageroot-section-focus", "pageroot-diff-focus", `pageroot-mode-${filter}`);
@@ -1112,12 +1384,13 @@ export function applyReviewPresentationPair(
     applyStyleDiff(beforeSection, afterSection, targets.style);
     consolidateAllChangeMarkers(beforeDocument);
     consolidateAllChangeMarkers(afterDocument);
-    return;
+    return presentationEvidence(beforeSection, afterSection);
   }
 
   if (filter === "style") applyStyleDiff(beforeSection, afterSection, targets.style);
   if (filter === "structure") applyStructureDiff(beforeSection, afterSection, targets.structure);
   if (filter === "text") applyTextDiff(beforeSection, afterSection, targets.text);
+  return presentationEvidence(beforeSection, afterSection);
 }
 
 export function clearReviewPresentation(frame: HTMLIFrameElement | null) {

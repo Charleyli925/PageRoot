@@ -10,6 +10,8 @@ const productRoot = path.resolve(currentDirectory, "../../..");
 const smokeTitles = [
   "pure browser use stays in a formal read-only preview",
   "the edit iframe is same-origin but never executes author scripts or refresh",
+  "clicking outside the editor surface dismisses its selection and toolbar",
+  "review evidence, table pairing, and historical comment pins stay truthful",
   "edit mode reveals semantic source content without running authored actions or changing bytes",
   "source reversal shortcuts are blocked and never change committed bytes",
   "one text edit changes only the authorized UTF-8 bytes, including BOM and CRLF",

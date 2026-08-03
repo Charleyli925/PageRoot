@@ -107,6 +107,9 @@ test("canvas review exposes orthogonal focus, difference, scroll, and zoom contr
 });
 
 test("the paired diff presentation separates text, structure, and style evidence", () => {
+  assert.match(presentation, /pairReviewEntries/);
+  assert.match(presentation, /TR:first-cell/);
+  assert.match(presentation, /column:\$\{columnIndex\}/);
   assert.match(presentation, /function lcsMatches/);
   assert.match(presentation, /function clauseRanges/);
   assert.match(presentation, /function pairClauses/);
@@ -153,6 +156,27 @@ test("the paired diff presentation separates text, structure, and style evidence
   assert.match(presentation, /Math\.max\(0, Math\.min\(100, value\)\)/);
   assert.match(presentation, /setReviewPresentationScale/);
   assert.doesNotMatch(presentation, /\[data-pageroot-active='true'\]::after/);
+});
+
+test("review navigation is driven by rendered evidence and remeasured after layout settles", () => {
+  assert.match(presentation, /export type ReviewPresentationEvidence/);
+  assert.match(page, /const \[evidenceById, setEvidenceById\]/);
+  assert.match(page, /measured\[change\.id\] = applyReviewPresentationPair/);
+  assert.match(page, /evidence\.total > 0/);
+  assert.match(page, /未检测到变化/);
+  assert.match(page, /document\.fonts\?\.ready/);
+  assert.match(page, /new Observer/);
+  assert.match(page, /refreshPresentation\(delay === 600\)/);
+});
+
+test("the before document exposes compact dismissible historical comment pins", () => {
+  assert.match(page, /const REVIEW_COMMENTS: ReviewComment\[\]/);
+  assert.match(presentation, /marker\.textContent = "评"/);
+  assert.match(presentation, /pageroot-comment-bubble/);
+  assert.match(presentation, /handleOutsidePointer/);
+  assert.match(presentation, /target\?\.closest\?\.\("\.pageroot-comment-marker, \.pageroot-comment-bubble"\)/);
+  assert.match(presentation, /event\.key !== "Escape"/);
+  assert.match(presentation, /prefers-reduced-motion/);
 });
 
 test("the review surface renders the two complete local HTML documents", () => {

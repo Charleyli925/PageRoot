@@ -445,6 +445,9 @@ test("Electron first launch registers the welcome HTML and sends its comment to 
       editorHandle,
     );
     const welcomeFrame = await currentEditorFrame(launched.page);
+    await expect.poll(() => welcomeFrame
+      .locator('base[data-html-canvas-injected-base="true"]')
+      .getAttribute("href")).toMatch(/^pageroot-preview:/u);
     await expect.poll(() =>
       welcomeFrame.locator('img[alt="源页 Logo"]').evaluate(
         (image) => image.complete && image.naturalWidth > 0,

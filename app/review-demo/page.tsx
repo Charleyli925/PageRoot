@@ -35,8 +35,10 @@ import {
   clearReviewPresentation,
   setReviewPresentationMaskTransparency,
   setReviewPresentationScale,
+  type ReviewComment,
   type ReviewDiffFilter,
   type ReviewDiffTargets,
+  type ReviewPresentationEvidence,
   type ReviewSide,
 } from "./review-presentation";
 import styles from "./review-demo.module.css";
@@ -206,6 +208,51 @@ const CONTENT_CHANGES: ContentChange[] = [
     after: "画廊改为稳定分组；重绘时保留当前点位；离线媒体显示明确状态和重试入口。",
     details: ["“潮汐档案”由跨列首图改为普通卡片", "Canvas 重绘后保留当前选中点", "音频与视频增加离线状态", "Image Map 热区随布局同步更新"],
     extra: "AI 同时调整了 Image Map 的热区，这是评论没有明确要求的额外变化。",
+  },
+];
+
+const REVIEW_COMMENTS: ReviewComment[] = [
+  {
+    id: "opening-entry",
+    anchor: "top",
+    selector: "h1",
+    text: "让页面开头更像真实产品入口，先告诉用户能做什么，再引导继续浏览。",
+  },
+  {
+    id: "dashboard-priority",
+    anchor: "dashboard",
+    selector: "[data-card='north-star']",
+    text: "突出综合体验健康度，把实时动态提到图表前面，数字也更新到最新一轮。",
+  },
+  {
+    id: "story-order",
+    anchor: "story",
+    selector: ".article-copy h2",
+    text: "把最重要的产品结论提前，删掉重复解释，目录要跟正文一起更新。",
+  },
+  {
+    id: "catalog-priority",
+    anchor: "catalog",
+    selector: "#catalog-grid",
+    text: "把高优先级项目放前面，移除已经结束的样本，再补一个新的系统项目。",
+  },
+  {
+    id: "operations-next-action",
+    anchor: "operations",
+    selector: "#project-table",
+    text: "表格不要只报风险，要直接告诉运营下一步做什么，并更新本周进度。",
+  },
+  {
+    id: "form-guidance",
+    anchor: "form-lab",
+    selector: "#test-form",
+    text: "把长表单的填写顺序讲清楚，高预算时再让用户补审批说明，并把提交结果留在表单里。",
+  },
+  {
+    id: "media-feedback",
+    anchor: "media",
+    selector: ".gallery-grid",
+    text: "让画廊在窄屏更稳定，并保证 Canvas、音频和视频的操作反馈一致。",
   },
 ];
 
@@ -1043,10 +1090,12 @@ function getSemanticScrollPosition(source: Window, target: Window) {
 
 function ContentMap({
   activeId,
+  evidenceById,
   focused,
   onSelect,
 }: {
   activeId: string;
+  evidenceById: Record<string, ReviewPresentationEvidence>;
   focused: boolean;
   onSelect: (changeId: string) => void;
 }) {
@@ -1057,24 +1106,38 @@ function ContentMap({
           <section key={group.label}>
             <header>
               <span>{group.label}</span>
-              <small>{group.items.some((item) => item.changeId) ? `${group.items.filter((item) => item.changeId).length} 处变化` : "未修改"}</small>
+              <small>{(() => {
+                const changeIds = group.items.flatMap((item) => item.changeId ? [item.changeId] : []);
+                if (!changeIds.length) return "未修改";
+                const evidence = changeIds.map((changeId) => evidenceById[changeId]);
+                if (evidence.some((item) => !item?.ready)) return "正在核对";
+                const count = evidence.filter((item) => item.total > 0).length;
+                return count ? `${count} 处变化` : "未修改";
+              })()}</small>
             </header>
             <div>
               {group.items.map((item) => {
                 const change = item.changeId ? CONTENT_CHANGES.find((candidate) => candidate.id === item.changeId) : undefined;
+                const evidence = change ? evidenceById[change.id] : undefined;
+                const confirmedChange = Boolean(evidence?.ready && evidence.total > 0);
+                const state = change
+                  ? evidence?.ready ? confirmedChange ? "changed" : "unchanged" : "checking"
+                  : item.generatedName ? "named" : "unchanged";
                 return (
                   <button
                     key={item.title}
                     className={styles.contentMapItem}
-                    data-active={focused && change?.id === activeId ? "true" : undefined}
-                    data-state={change ? "changed" : item.generatedName ? "named" : "unchanged"}
+                    data-active={focused && confirmedChange && change?.id === activeId ? "true" : undefined}
+                    data-state={state}
                     type="button"
-                    disabled={!change}
-                    onClick={() => change && onSelect(change.id)}
+                    disabled={!confirmedChange}
+                    onClick={() => confirmedChange && change && onSelect(change.id)}
                   >
                     <span className={styles.mapIndex}>{change ? change.number : "—"}</span>
                     <span className={styles.mapCopy}><strong>{item.title}</strong><small>{item.helper}</small></span>
-                    <span className={styles.mapState}>{change ? change.kind : item.generatedName ? "根据内容命名" : "未修改"}</span>
+                    <span className={styles.mapState}>{change
+                      ? evidence?.ready ? confirmedChange ? change.kind : "未检测到变化" : "正在核对"
+                      : item.generatedName ? "根据内容命名" : "未修改"}</span>
                   </button>
                 );
               })}
@@ -1116,6 +1179,8 @@ function ReviewScreen({
   const [leaderSide, setLeaderSide] = useState<ReviewSide>("before");
   const leaderSideRef = useRef<ReviewSide>("before");
   const [frameRevision, setFrameRevision] = useState(0);
+  const [evidenceById, setEvidenceById] = useState<Record<string, ReviewPresentationEvidence>>({});
+  const [activeFilterEvidence, setActiveFilterEvidence] = useState<ReviewPresentationEvidence | null>(null);
   const [reviewSessionId] = useState(() => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`);
   const frameRefs = useRef<Record<ReviewSide, HTMLIFrameElement | null>>({ before: null, after: null });
   const viewportRefs = useRef<Record<ReviewSide, HTMLDivElement | null>>({ before: null, after: null });
@@ -1129,6 +1194,14 @@ function ReviewScreen({
   const initialOverviewPositioned = useRef(false);
   const scrollModeRef = useRef<ScrollMode>(scrollMode);
   const activeChange = CONTENT_CHANGES[activeIndex];
+  const evidenceReady = CONTENT_CHANGES.every((change) => evidenceById[change.id]?.ready);
+  const navigableIndices = useMemo(() => (
+    evidenceReady
+      ? CONTENT_CHANGES.flatMap((change, index) => evidenceById[change.id].total > 0 ? [index] : [])
+      : CONTENT_CHANGES.map((_, index) => index)
+  ), [evidenceById, evidenceReady]);
+  const activeNavigationPosition = navigableIndices.indexOf(activeIndex);
+  const activeNavigationOrdinal = activeNavigationPosition >= 0 ? activeNavigationPosition + 1 : 0;
   const mapOpen = mapPinned || mapPeeked;
   const toolbarOpen = toolbarIntroduced || toolbarPinned;
 
@@ -1226,20 +1299,156 @@ function ReviewScreen({
   }, []);
 
   useEffect(() => {
-    applyReviewPresentationPair(
-      frameRefs.current.before,
-      frameRefs.current.after,
+    const beforeFrame = frameRefs.current.before;
+    const afterFrame = frameRefs.current.after;
+    const beforeDocument = beforeFrame?.contentDocument;
+    const afterDocument = afterFrame?.contentDocument;
+    if (!beforeDocument?.body || !afterDocument?.body) return undefined;
+
+    let disposed = false;
+    let refreshFrame = 0;
+    let navigationResolutionFrame = 0;
+    let auditOnRefresh = false;
+    const imageCleanups: Array<() => void> = [];
+    const observers: ResizeObserver[] = [];
+    const evidenceEqual = (
+      left: ReviewPresentationEvidence | undefined,
+      right: ReviewPresentationEvidence,
+    ) => Boolean(left
+      && left.ready === right.ready
+      && left.before === right.before
+      && left.after === right.after
+      && left.text === right.text
+      && left.structure === right.structure
+      && left.style === right.style
+      && left.total === right.total);
+    const publishEvidence = (next: Record<string, ReviewPresentationEvidence>) => {
+      setEvidenceById((current) => {
+        const keys = Object.keys(next);
+        if (
+          keys.length === Object.keys(current).length
+          && keys.every((key) => evidenceEqual(current[key], next[key]))
+        ) return current;
+        return next;
+      });
+      if (
+        focused
+        && next[activeChange.id]?.ready
+        && next[activeChange.id].total === 0
+        && !navigationResolutionFrame
+      ) {
+        const nextIndex = CONTENT_CHANGES.findIndex((change) => next[change.id]?.total > 0);
+        navigationResolutionFrame = window.requestAnimationFrame(() => {
+          navigationResolutionFrame = 0;
+          if (disposed) return;
+          if (nextIndex >= 0) setActiveIndex(nextIndex);
+          else setFocused(false);
+        });
+      }
+    };
+    const layoutSignature = () => [beforeDocument, afterDocument].map((document) => [
+      ...CONTENT_CHANGES.flatMap((change) => {
+        const section = document.getElementById(change.anchor);
+        const bounds = section?.getBoundingClientRect();
+        return [
+          bounds?.left ?? 0,
+          bounds?.top ?? 0,
+          bounds?.width ?? 0,
+          bounds?.height ?? 0,
+          section?.scrollWidth ?? 0,
+          section?.scrollHeight ?? 0,
+        ];
+      }),
+      document.documentElement.scrollWidth,
+      document.documentElement.scrollHeight,
+    ].map((value) => Math.round(value * 10) / 10).join(":")).join("|");
+    let previousLayoutSignature = layoutSignature();
+
+    const restoreActivePresentation = () => applyReviewPresentationPair(
+      beforeFrame,
+      afterFrame,
       activeChange,
       diffFilter,
       focused,
       REVIEW_DIFF_TARGETS,
+      REVIEW_COMMENTS,
     );
+    const publishActiveEvidence = (evidence: ReviewPresentationEvidence) => {
+      setActiveFilterEvidence((current) => evidenceEqual(current ?? undefined, evidence) ? current : evidence);
+    };
+    const refreshPresentation = (audit: boolean) => {
+      if (disposed) return;
+      if (audit) {
+        const measured: Record<string, ReviewPresentationEvidence> = {};
+        CONTENT_CHANGES.forEach((change) => {
+          measured[change.id] = applyReviewPresentationPair(
+            beforeFrame,
+            afterFrame,
+            change,
+            "all",
+            true,
+            REVIEW_DIFF_TARGETS,
+          );
+        });
+        publishActiveEvidence(restoreActivePresentation());
+        publishEvidence(measured);
+      } else {
+        publishActiveEvidence(restoreActivePresentation());
+      }
+      previousLayoutSignature = layoutSignature();
+      if (focused) positionFramesToEvidence(activeChange.anchor, diffFilter);
+    };
+    const scheduleRefresh = (audit = false) => {
+      auditOnRefresh ||= audit;
+      if (refreshFrame) return;
+      refreshFrame = window.requestAnimationFrame(() => {
+        refreshFrame = 0;
+        const shouldAudit = auditOnRefresh;
+        auditOnRefresh = false;
+        refreshPresentation(shouldAudit);
+      });
+    };
 
-    if (!focused) return undefined;
-    const settleTimers = [40, 180, 360].map((delay) => window.setTimeout(() => {
-      positionFramesToEvidence(activeChange.anchor, diffFilter);
+    refreshPresentation(true);
+    const settleTimers = [60, 220, 600].map((delay) => window.setTimeout(() => {
+      refreshPresentation(delay === 600);
     }, delay));
-    return () => settleTimers.forEach((timer) => window.clearTimeout(timer));
+
+    [beforeDocument, afterDocument].forEach((document) => {
+      document.fonts?.ready.then(() => scheduleRefresh(true)).catch(() => undefined);
+      document.querySelectorAll<HTMLImageElement>("img").forEach((image) => {
+        if (image.complete) return;
+        const handleSettledImage = () => scheduleRefresh(true);
+        image.addEventListener("load", handleSettledImage, { once: true });
+        image.addEventListener("error", handleSettledImage, { once: true });
+        imageCleanups.push(() => {
+          image.removeEventListener("load", handleSettledImage);
+          image.removeEventListener("error", handleSettledImage);
+        });
+      });
+      const Observer = document.defaultView?.ResizeObserver;
+      if (!Observer) return;
+      const observer = new Observer(() => {
+        const nextSignature = layoutSignature();
+        if (nextSignature === previousLayoutSignature) return;
+        previousLayoutSignature = nextSignature;
+        scheduleRefresh(true);
+      });
+      CONTENT_CHANGES.forEach((change) => {
+        const section = document.getElementById(change.anchor);
+        if (section) observer.observe(section);
+      });
+      observers.push(observer);
+    });
+
+    return () => {
+      disposed = true;
+      if (refreshFrame) window.cancelAnimationFrame(refreshFrame);
+      if (navigationResolutionFrame) window.cancelAnimationFrame(navigationResolutionFrame);
+      settleTimers.forEach((timer) => window.clearTimeout(timer));
+      imageCleanups.forEach((cleanup) => cleanup());
+      observers.forEach((observer) => observer.disconnect());
+    };
   }, [activeChange, diffFilter, focused, frameRevision, positionFramesToEvidence]);
 
   useEffect(() => {
@@ -1363,20 +1572,33 @@ function ReviewScreen({
       diffFilter,
       focused,
       REVIEW_DIFF_TARGETS,
+      REVIEW_COMMENTS,
     );
 
     setFrameRevision((current) => current + 1);
   };
 
   const navigate = (direction: -1 | 1) => {
-    const nextIndex = (activeIndex + direction + CONTENT_CHANGES.length) % CONTENT_CHANGES.length;
+    if (!navigableIndices.length) return;
+    const currentPosition = navigableIndices.indexOf(activeIndex);
+    const basePosition = currentPosition >= 0 ? currentPosition : direction > 0 ? -1 : 0;
+    const nextPosition = (basePosition + direction + navigableIndices.length) % navigableIndices.length;
+    const nextIndex = navigableIndices[nextPosition];
+    const nextEvidence = evidenceById[CONTENT_CHANGES[nextIndex].id];
+    if (diffFilter !== "all" && nextEvidence?.ready && nextEvidence[diffFilter] === 0) {
+      setDiffFilter("all");
+    }
     setActiveIndex(nextIndex);
     setFocused(true);
   };
 
   const selectChange = (changeId: string) => {
     const nextIndex = CONTENT_CHANGES.findIndex((change) => change.id === changeId);
-    if (nextIndex >= 0) {
+    if (nextIndex >= 0 && (!evidenceReady || evidenceById[changeId]?.total > 0)) {
+      const nextEvidence = evidenceById[changeId];
+      if (diffFilter !== "all" && nextEvidence?.ready && nextEvidence[diffFilter] === 0) {
+        setDiffFilter("all");
+      }
       setActiveIndex(nextIndex);
       setFocused(true);
       if (!mapPinned) setMapPeeked(false);
@@ -1423,7 +1645,11 @@ function ReviewScreen({
                 <span className={styles.canvasReviewIcon}><GitDiffIcon aria-hidden="true" size={18} weight="duotone" /></span>
                 <span>
                   <strong>{focused ? activeChange.heading : "整页总览"}</strong>
-                  <small>{focused ? `${activeChange.kind} · 第 ${activeIndex + 1} 处，共 ${CONTENT_CHANGES.length} 处` : "修改前与修改后完整页面"}</small>
+                  <small>{focused
+                    ? activeFilterEvidence?.ready && activeFilterEvidence.total === 0
+                      ? `当前“${DIFF_FILTER_LABELS[diffFilter]}”没有可见证据，可查看全部变化`
+                      : `${activeChange.kind} · 第 ${activeNavigationOrdinal} 处，共 ${navigableIndices.length} 处`
+                    : "修改前与修改后完整页面"}</small>
                 </span>
               </div>
 
@@ -1459,6 +1685,13 @@ function ReviewScreen({
                   <button
                     key={mode}
                     type="button"
+                    disabled={Boolean(
+                      focused
+                      && mode !== "overview"
+                      && mode !== "all"
+                      && evidenceById[activeChange.id]?.ready
+                      && evidenceById[activeChange.id][mode] === 0
+                    )}
                     aria-pressed={(focused ? diffFilter : "overview") === mode}
                     onClick={() => selectReviewMode(mode)}
                   >
@@ -1550,11 +1783,11 @@ function ReviewScreen({
                   <span>内容地图</span>
                 </button>
                 <div className={styles.mapHandleNavigator} aria-label="逐处查看变化">
-                  <button type="button" aria-label="上一处变化" title="上一处变化" onClick={() => navigate(-1)}>
+                  <button type="button" disabled={!navigableIndices.length} aria-label="上一处变化" title="上一处变化" onClick={() => navigate(-1)}>
                     <CaretUpIcon aria-hidden="true" size={11} weight="bold" />
                   </button>
-                  <span><strong>{activeIndex + 1}</strong><small>/{CONTENT_CHANGES.length}</small></span>
-                  <button type="button" aria-label="下一处变化" title="下一处变化" onClick={() => navigate(1)}>
+                  <span><strong>{activeNavigationOrdinal}</strong><small>/{navigableIndices.length}</small></span>
+                  <button type="button" disabled={!navigableIndices.length} aria-label="下一处变化" title="下一处变化" onClick={() => navigate(1)}>
                     <CaretDownIcon aria-hidden="true" size={11} weight="bold" />
                   </button>
                 </div>
@@ -1574,6 +1807,7 @@ function ReviewScreen({
                 </header>
                 <ContentMap
                   activeId={activeChange.id}
+                  evidenceById={evidenceById}
                   focused={focused}
                   onSelect={selectChange}
                 />

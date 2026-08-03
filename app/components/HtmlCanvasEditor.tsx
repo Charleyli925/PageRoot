@@ -156,6 +156,7 @@ import {
   baseHrefFromSourcePath,
   disableExecutableMarkup,
   prepareVerifiedFrameDocument,
+  previewSessionBaseUrl,
 } from "./html-preview-sandbox.js";
 import styles from "./HtmlCanvasEditor.module.css";
 
@@ -372,7 +373,25 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   },
   forwardedRef,
 ) {
-  const resolvedBaseHref = baseHref || baseHrefFromSourcePath(sourcePath);
+  const fallbackBaseHref = baseHrefFromSourcePath(sourcePath);
+  const [desktopAssetLocation, setDesktopAssetLocation] = useState<{
+    sourcePath: string;
+    baseHref: string | null;
+  } | null>(null);
+  const desktopAssetApiAvailable = typeof window !== "undefined" && Boolean(window.htmlAIPreview);
+  const awaitingDesktopAssetBase = Boolean(
+    !baseHref
+    && sourcePath
+    && desktopAssetApiAvailable
+    && desktopAssetLocation?.sourcePath !== sourcePath,
+  );
+  const resolvedBaseHref = baseHref
+    || (desktopAssetLocation
+      && desktopAssetLocation.sourcePath === sourcePath
+      && desktopAssetLocation.baseHref
+      ? desktopAssetLocation.baseHref
+      : undefined)
+    || fallbackBaseHref;
   const containerRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
@@ -527,6 +546,40 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const [spacingMenuOpen, setSpacingMenuOpen] = useState(false);
 
   toolbarVisibleRef.current = toolbarVisible;
+
+  useEffect(() => {
+    const previewApi = window.htmlAIPreview;
+    if (baseHref || !sourcePath || !previewApi) {
+      setDesktopAssetLocation(null);
+      return undefined;
+    }
+
+    let cancelled = false;
+    let createdSessionId: string | null = null;
+    setDesktopAssetLocation(null);
+    void previewApi.createSession({
+      html: "<!doctype html><html><head></head><body></body></html>",
+      bootstrapJavaScript: "",
+      sourcePath,
+    }).then((session) => {
+      createdSessionId = session.sessionId;
+      if (cancelled) {
+        void previewApi.revokeSession(session.sessionId);
+        return;
+      }
+      setDesktopAssetLocation({
+        sourcePath,
+        baseHref: previewSessionBaseUrl(session.url),
+      });
+    }).catch(() => {
+      if (!cancelled) setDesktopAssetLocation({ sourcePath, baseHref: null });
+    });
+
+    return () => {
+      cancelled = true;
+      if (createdSessionId) void previewApi.revokeSession(createdSessionId);
+    };
+  }, [baseHref, sourcePath]);
 
   useEffect(() => {
     const documentNode = containerRef.current?.ownerDocument;
@@ -2211,6 +2264,22 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     resetSelection(true);
   }, [resetSelection]);
 
+  useEffect(() => {
+    const container = containerRef.current;
+    const documentNode = container?.ownerDocument;
+    if (!container || !documentNode) return undefined;
+    const clearWhenCanvasLosesFocus = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node) || container.contains(target)) return;
+      if (!selectedElementRef.current && !toolbarVisibleRef.current) return;
+      clearSelection();
+    };
+    documentNode.addEventListener("pointerdown", clearWhenCanvasLosesFocus, true);
+    return () => {
+      documentNode.removeEventListener("pointerdown", clearWhenCanvasLosesFocus, true);
+    };
+  }, [clearSelection]);
+
   const selectElement = useCallback(
     (
       element: HTMLElement,
@@ -3406,6 +3475,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   }, [api, onReady]);
 
   useEffect(() => {
+    if (awaitingDesktopAssetBase) {
+      containerRef.current?.setAttribute("data-render-verified", "false");
+      return;
+    }
     if (!frameInitializedRef.current) {
       frameInitializedRef.current = true;
       loadFrameSource(html);
@@ -3438,6 +3511,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     loadFrameSource,
     resetSelection,
     resolvedBaseHref,
+    awaitingDesktopAssetBase,
   ]);
 
   useEffect(() => {
@@ -3564,7 +3638,14 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       const nativeActionTarget = findNativeActionTarget(event.target);
       if (nativeActionTarget) event.preventDefault();
       const target = findCanvasSelectionElement(event.target);
-      if (!target) return;
+      if (!target) {
+        if (!lockedRef.current) {
+          event.preventDefault();
+          event.stopPropagation();
+          clearSelection();
+        }
+        return;
+      }
       if (lockedRef.current) {
         if (target.closest(
           "a, button, form, input, select, summary, textarea, [contenteditable], [role=\"tab\"], [aria-expanded][aria-controls]",

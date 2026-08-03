@@ -125,6 +125,59 @@ final result: passed
 
 ---
 
+# AI review and edit-canvas systemic QA · v6
+
+Date: 2026-08-04
+
+## Issue evidence
+
+Six supplied captures established the acceptance boundary: duplicate table copy
+was paired across rows, a zero-difference region appeared changed, a frame used
+stale geometry, prior comments lacked readable history, edit selection survived
+outside clicks, and a source-relative image was blank in desktop Edit.
+
+## Rendered implementation evidence
+
+- `output/review-systemic-fixes.png` — production review route with the compact
+  `评` marker and its single read-only comment bubble.
+- `tests/e2e/browser/native-dom-review-demo.spec.mjs` — executable DOM,
+  interaction, evidence-count and geometry oracle for the review surface.
+- `tests/e2e/browser/native-dom-boundaries.spec.mjs` — outside-click selection
+  and toolbar dismissal oracle.
+- `tests/e2e/electron/native-dom-electron.spec.mjs` — real desktop iframe
+  resource-base and decoded local-image oracle.
+
+## Findings
+
+No actionable P0, P1, or P2 finding remains in the reviewed states.
+
+- Evidence accuracy: matching now prefers stable semantic identity and local
+  row/component context before text similarity. Repeated `箱包皮具` copy no
+  longer transfers a deletion to a different brand row.
+- Navigation truth: content-map counts and enabled states come from rendered
+  diff evidence. Removing both sides' evidence for one section lowers the
+  count and disables that entry instead of leaving a phantom change.
+- Geometry: a synthetic 48px layout shift moves the owning frame by more than
+  40px, and every frame encloses all of its current clause rectangles.
+- Comment presentation: the before document shows one compact violet `评` per
+  historical comment. The white 12px-radius bubble uses a subtle border and
+  shadow, only one opens at a time, and outside click or Escape restores the
+  quiet marker-only state.
+- Edit interaction: clicking a Workbench control outside Canvas removes both
+  the selection outline and floating toolbar; Canvas and toolbar interaction
+  remain uninterrupted.
+- Asset fidelity and security: the desktop welcome logo reaches
+  `complete=true` with non-zero natural width in Edit. The resource base uses
+  the contained custom session, while the renderer CSP still excludes that
+  scheme from `script-src`.
+- Motion and access: comment disclosure uses a 160ms transition, honors reduced
+  motion, retains a visible keyboard focus ring, and exposes the bubble as a
+  named note without inserting it into reviewed source content.
+
+final result: passed
+
+---
+
 ## About dialog simplification
 
 Date: 2026-07-30

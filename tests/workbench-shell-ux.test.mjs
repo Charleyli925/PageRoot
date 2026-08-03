@@ -312,6 +312,22 @@ test("editing and interactive preview are separate canvas modes", () => {
   assert.match(previewSandbox, /type="application\/x-html-canvas-disabled"/);
 });
 
+test("the edit canvas clears stale selection chrome when focus leaves the canvas", () => {
+  assert.match(canvas, /const clearWhenCanvasLosesFocus = \(event: PointerEvent\)/);
+  assert.match(canvas, /container\.contains\(target\)/);
+  assert.match(canvas, /documentNode\.addEventListener\("pointerdown", clearWhenCanvasLosesFocus, true\)/);
+  assert.match(canvas, /if \(!target\) \{[\s\S]*?clearSelection\(\)/);
+});
+
+test("the edit canvas resolves local assets through a bounded desktop preview session", () => {
+  assert.match(canvas, /const \[desktopAssetLocation, setDesktopAssetLocation\]/);
+  assert.match(canvas, /previewApi\.createSession\(\{/);
+  assert.match(canvas, /html: "<!doctype html><html><head><\/head><body><\/body><\/html>"/);
+  assert.match(canvas, /previewSessionBaseUrl\(session\.url\)/);
+  assert.match(canvas, /previewApi\.revokeSession\(createdSessionId\)/);
+  assert.match(previewSandbox, /authoredBase\.href = resolvePreviewBaseHref\(authoredHref, baseUrl\)/);
+});
+
 test("workbench transitions fail closed when a native DOM edit cannot commit or freeze", () => {
   const closeFlow = workbench.slice(
     workbench.indexOf("const handlePrepareClose"),

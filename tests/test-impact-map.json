@@ -325,7 +325,7 @@
     {
       "id": "v2-island-controller",
       "patterns": [
-        "^app/components/(?:HtmlCanvasEditor(?:\\.types)?|html-canvas-(?:dom|interaction|internal-types|page-view|preview-sync|selection|style-inspector)|IslandEditingController|native-edit-types|native-edit-runtime-preflight|html-preview-sandbox)\\.(?:tsx|ts|js|d\\.ts)$"
+        "^app/components/(?:HtmlCanvasEditor(?:\\.types)?|desktop-preview-api|html-canvas-(?:dom|interaction|internal-types|page-view|preview-sync|selection|style-inspector)|IslandEditingController|native-edit-types|native-edit-runtime-preflight|html-preview-sandbox)\\.(?:tsx|ts|js|d\\.ts)$"
       ],
       "suites": ["typecheck", "browser-smoke", "electron-smoke"],
       "nodeTests": [
@@ -378,6 +378,20 @@
         "tests/html-preview-sandbox.test.mjs",
         "tests/notification-ui.test.mjs",
         "tests/workbench-shell-ux.test.mjs"
+      ]
+    },
+    {
+      "id": "review-demo",
+      "patterns": [
+        "^app/review-demo/.*\\.(?:tsx|ts|js|d\\.ts|css)$",
+        "^scripts/generate-review-demo-fixtures\\.mjs$",
+        "^tests/review-(?:demo|entry-pairing)\\.test\\.mjs$",
+        "^tests/e2e/browser/native-dom-review-demo\\.spec\\.mjs$"
+      ],
+      "suites": ["typecheck", "browser-smoke"],
+      "nodeTests": [
+        "tests/review-demo.test.mjs",
+        "tests/review-entry-pairing.test.mjs"
       ]
     },
     {

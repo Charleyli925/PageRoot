@@ -4,6 +4,8 @@ import test from "node:test";
 import {
   baseHrefFromSourcePath,
   disableExecutableMarkup,
+  previewSessionBaseUrl,
+  resolvePreviewBaseHref,
 } from "../app/components/html-preview-sandbox.js";
 
 test("preview sandbox disables scripts without losing authored type metadata", () => {
@@ -29,4 +31,30 @@ test("preview sandbox derives an encoded directory base without query state", ()
     "https://example.com/a/",
   );
   assert.equal(baseHrefFromSourcePath("relative/page.html"), undefined);
+});
+
+test("desktop preview sessions expose a stable same-session asset root", () => {
+  assert.equal(
+    previewSessionBaseUrl("pageroot-preview://0123456789abcdef0123456789abcdef/index.html?reload=2#top"),
+    "pageroot-preview://0123456789abcdef0123456789abcdef/",
+  );
+  assert.equal(
+    resolvePreviewBaseHref("assets/", "pageroot-preview://0123456789abcdef0123456789abcdef/"),
+    "pageroot-preview://0123456789abcdef0123456789abcdef/assets/",
+  );
+  assert.equal(
+    resolvePreviewBaseHref("", "pageroot-preview://0123456789abcdef0123456789abcdef/"),
+    "pageroot-preview://0123456789abcdef0123456789abcdef/",
+  );
+  assert.equal(
+    resolvePreviewBaseHref("file:///tmp/outside/", "pageroot-preview://0123456789abcdef0123456789abcdef/"),
+    "pageroot-preview://0123456789abcdef0123456789abcdef/",
+  );
+  assert.equal(
+    resolvePreviewBaseHref(
+      "pageroot-preview://ffffffffffffffffffffffffffffffff/assets/",
+      "pageroot-preview://0123456789abcdef0123456789abcdef/",
+    ),
+    "pageroot-preview://0123456789abcdef0123456789abcdef/",
+  );
 });

@@ -77,6 +77,18 @@ test("clicking a module's blank padding clears selection instead of opening its 
   await expect(frame.locator("[data-html-canvas-selected]")).toHaveCount(0);
 });
 
+test("clicking outside the editor surface dismisses its selection and toolbar", async ({ page }) => {
+  const { editor, frame } = await loadFixture(page, "complex-layout.html");
+  await frame.locator(caseSelector("heading-inline")).click();
+  await expect(editor.getByRole("toolbar")).toBeVisible();
+  await expect(frame.locator("[data-html-canvas-selected]")).toHaveCount(1);
+
+  await page.getByRole("button", { name: "项目", exact: true }).click();
+
+  await expect(editor.getByRole("toolbar")).toHaveCount(0);
+  await expect(frame.locator("[data-html-canvas-selected]")).toHaveCount(0);
+});
+
 test("typing never replaces the iframe Document or jumps a scroll container", async ({ page }) => {
   const { frame } = await loadFixture(page, "complex-layout.html");
   const beforeDocument = await documentToken(frame);

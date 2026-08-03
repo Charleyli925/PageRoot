@@ -4,6 +4,18 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+- Made AI review evidence semantic and render-backed: repeated copy is paired
+  within its real row or component context, zero-evidence map entries are
+  disabled and skipped, and difference frames remeasure after fonts, images or
+  layout changes instead of retaining stale coordinates.
+- Added compact historical-comment `评` markers to the before side of AI
+  review, with one restrained read-only popover that closes on outside click or
+  Escape without contributing false difference evidence.
+- Clear the Canvas selection and floating edit toolbar when interaction leaves
+  the editor, and load source-relative images in desktop Edit through the
+  existing contained `pageroot-preview:` resource session without enabling
+  authored scripts.
+
 ## [0.9.5] - 2026-07-31
 
 - Run desktop interactive previews in a short-lived isolated document so

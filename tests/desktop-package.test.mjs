@@ -405,8 +405,13 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.match(rendererHtml, /script-src 'self'/);
   assert.match(rendererHtml, /connect-src http:\/\/127\.0\.0\.1:\*/);
   assert.match(rendererHtml, /frame-src 'self' data: blob: pageroot-preview:/);
+  assert.match(rendererHtml, /img-src 'self' file: pageroot-preview:/);
+  assert.match(rendererHtml, /style-src 'self' 'unsafe-inline' file: pageroot-preview:/);
+  assert.match(rendererHtml, /font-src 'self' file: pageroot-preview:/);
+  assert.match(rendererHtml, /media-src 'self' file: pageroot-preview:/);
   assert.match(rendererHtml, /object-src 'none'/);
   assert.match(rendererHtml, /base-uri 'self' file:/);
+  assert.match(rendererHtml, /base-uri 'self' file: pageroot-preview:/);
   assert.match(rendererHtml, /<title>源页<\/title>/);
   assert.match(rendererHtml, /源页（PageRoot）— Editable islands/);
   assert.doesNotMatch(rendererHtml, /frame-ancestors/);

@@ -31,6 +31,10 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   PageRoot preload bridge, and serves relative local assets only after source
   path authority, realpath and containment checks. The application renderer's
   CSP remains strict and the preview scheme does not receive `bypassCSP`.
+- The edit iframe may use the same session root for images, fonts, styles and
+  media, but not for renderer or authored scripts: `pageroot-preview:` is absent
+  from `script-src`, the edit document remains sandboxed without script
+  capability, and every source transition revokes the previous session.
 - Strict schemas, frozen inputs and identity/Hash checks before accepting AI output; scope evidence is always recorded, with protocol/script/target-integrity findings hard-blocked and ordinary breadth findings observed without a user-waiver loop
 - Main-process-only usage telemetry with exact event/property allowlists,
   random installation/session UUIDs and HMAC project pseudonyms; no hardware
