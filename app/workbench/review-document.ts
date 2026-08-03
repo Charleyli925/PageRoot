@@ -256,36 +256,44 @@ const NON_CONTENT_TAGS = new Set([
 type ReviewTextInventory = {
   text: string;
   nodes: Array<{ node: Text; start: number; end: number }>;
+  breakOffsets: number[];
 };
 
-function reviewTextInventory(element: Element | null): ReviewTextInventory {
-  if (!element) return { text: "", nodes: [] };
+function reviewTextInventoryForNodes(sourceNodes: Iterable<Node>): ReviewTextInventory {
   const nodes: ReviewTextInventory["nodes"] = [];
-  const walker = element.ownerDocument.createTreeWalker(
-    element,
-    NodeFilter.SHOW_TEXT,
-    {
-      acceptNode(node) {
-        const parent = node.parentElement;
-        if (
-          !parent
-          || parent.closest("script, style, noscript, template")
-          || parent.namespaceURI !== "http://www.w3.org/1999/xhtml"
-        ) return NodeFilter.FILTER_REJECT;
-        return NodeFilter.FILTER_ACCEPT;
-      },
-    },
-  );
+  const breakOffsets: number[] = [];
   let text = "";
-  let current = walker.nextNode();
-  while (current) {
-    const value = current.textContent || "";
-    const start = text.length;
-    text += value;
-    nodes.push({ node: current as Text, start, end: text.length });
-    current = walker.nextNode();
-  }
-  return { text, nodes };
+  const visit = (node: Node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const parent = node.parentElement;
+      if (
+        !parent
+        || parent.closest("script, style, noscript, template")
+        || parent.namespaceURI !== "http://www.w3.org/1999/xhtml"
+      ) return;
+      const value = node.textContent || "";
+      const start = text.length;
+      text += value;
+      nodes.push({ node: node as Text, start, end: text.length });
+      return;
+    }
+    if (!(node instanceof Element)) return;
+    if (NON_CONTENT_TAGS.has(node.tagName)) return;
+    if (node.namespaceURI !== "http://www.w3.org/1999/xhtml") return;
+    if (node.tagName === "BR") {
+      breakOffsets.push(text.length);
+      return;
+    }
+    node.childNodes.forEach(visit);
+  };
+  for (const node of sourceNodes) visit(node);
+  return { text, nodes, breakOffsets };
+}
+
+function reviewTextInventory(element: Element | null): ReviewTextInventory {
+  return element
+    ? reviewTextInventoryForNodes(element.childNodes)
+    : { text: "", nodes: [], breakOffsets: [] };
 }
 
 function normalizedText(element: Element | null): string {
@@ -953,7 +961,7 @@ type TextRange = { start: number; end: number };
 
 function tokenizeReviewText(value: string): TextToken[] {
   const tokens: TextToken[] = [];
-  const matcher = /[\p{Script=Han}]|[\p{L}\p{N}_]+|[^\s]/gu;
+  const matcher = /[\p{Script=Han}]|[\p{Script=Latin}\p{N}_]+|[\p{L}]|[^\s]/gu;
   for (const match of value.matchAll(matcher)) {
     const start = match.index ?? 0;
     tokens.push({ value: match[0], start, end: start + match[0].length });
@@ -1061,7 +1069,7 @@ function rangesForTokens(
 function reviewSentenceRanges(value: string): TextRange[] {
   if (!value) return [];
   const ranges: TextRange[] = [];
-  const boundary = /[。！？!?；;，,、：:]+|\n+/gu;
+  const boundary = /[。！？!?；;]+|\n+/gu;
   let start = 0;
   const pushRange = (rangeStart: number, rangeEnd: number) => {
     let cursor = rangeStart;
@@ -1233,8 +1241,8 @@ function sentenceAwareTextDifferences(
       start: afterRange.start + range.start,
       end: afterRange.start + range.end,
     }));
-    beforeDifferences.push(...(beforeTokenRanges.length ? beforeTokenRanges : [beforeRange]));
-    afterDifferences.push(...(afterTokenRanges.length ? afterTokenRanges : [afterRange]));
+    beforeDifferences.push(...beforeTokenRanges);
+    afterDifferences.push(...afterTokenRanges);
   });
   beforeIndexes.forEach((index) => {
     if (!pairedBefore.has(index)) beforeDifferences.push(beforeSentences[index]);
@@ -1253,6 +1261,7 @@ function wrapTextRanges(
   inventory: ReviewTextInventory,
   ranges: TextRange[],
   tone: "removed" | "added",
+  changeKind: "added" | "removed" | "before" | "after" = tone,
 ) {
   if (!ranges.length) return;
   const mergedRanges = mergeTextRanges(ranges);
@@ -1267,6 +1276,7 @@ function wrapTextRanges(
       if (!value) return;
       const marker = node.ownerDocument.createElement("span");
       marker.dataset.pagerootReviewText = tone;
+      marker.dataset.pagerootReviewTextChange = changeKind;
       marker.textContent = value;
       fragment.append(marker);
     };
@@ -1287,134 +1297,224 @@ function wrapTextRanges(
   });
 }
 
-function isTextBlock(element: Element): boolean {
-  return element.matches(
-    "h1, h2, h3, h4, h5, h6, p, li, dt, dd, th, td, caption, figcaption, blockquote, label, button, a, summary, [role='heading']",
-  ) || hasClassRole(element, ["copy", "heading", "header", "label", "note", "subtitle", "title"]);
+function wrapTextContext(
+  inventory: ReviewTextInventory,
+  tone: "removed" | "added",
+  changeKind: "before" | "after",
+) {
+  inventory.nodes.forEach(({ node }) => {
+    const value = node.textContent || "";
+    if (!value.trim()) return;
+    const marker = node.ownerDocument.createElement("span");
+    marker.dataset.pagerootReviewTextContext = tone;
+    marker.dataset.pagerootReviewTextChange = changeKind;
+    marker.textContent = value;
+    node.replaceWith(marker);
+  });
 }
 
-function isLeafInlineText(element: Element): boolean {
-  return element.childElementCount === 0
-    && element.matches("span, strong, em, b, i, small, code, data, output, time")
-    && normalizedText(element).length > 0;
-}
-
-const GENERIC_TEXT_CONTAINER_TAGS = new Set([
+const REVIEW_TEXT_BLOCK_TAGS = new Set([
+  "ADDRESS",
   "ARTICLE",
   "ASIDE",
+  "BLOCKQUOTE",
+  "BUTTON",
+  "CAPTION",
+  "DD",
+  "DETAILS",
+  "DIALOG",
   "DIV",
+  "DL",
+  "DT",
+  "FIELDSET",
+  "FIGCAPTION",
+  "FIGURE",
   "FOOTER",
+  "FORM",
+  "H1",
+  "H2",
+  "H3",
+  "H4",
+  "H5",
+  "H6",
   "HEADER",
+  "LI",
+  "MAIN",
+  "NAV",
+  "OL",
+  "P",
+  "PRE",
   "SECTION",
+  "SUMMARY",
+  "TABLE",
+  "TBODY",
+  "TD",
+  "TFOOT",
+  "TH",
+  "THEAD",
+  "TR",
+  "UL",
 ]);
 
-function hasDirectReviewText(element: Element): boolean {
-  return GENERIC_TEXT_CONTAINER_TAGS.has(element.tagName)
-    && [...element.childNodes].some((node) => (
-      node.nodeType === 3 && Boolean((node.textContent || "").replace(/\s+/gu, "").trim())
-    ));
+type ReviewTextBlock = {
+  anchor: Element;
+  inventory: ReviewTextInventory;
+};
+
+function isReviewTextBlockElement(element: Element): boolean {
+  return element.namespaceURI === "http://www.w3.org/1999/xhtml"
+    && REVIEW_TEXT_BLOCK_TAGS.has(element.tagName);
 }
 
-function reviewTextBlocks(region: Element): Element[] {
-  const explicitBlockSelector = "h1, h2, h3, h4, h5, h6, p, li, dt, dd, th, td, caption, figcaption, blockquote, label, button, summary, span, strong, em, b, i, small, code, data, output, time, [role='heading']";
-  const candidates = [region, ...region.querySelectorAll("*")].filter((element) => (
-    !NON_CONTENT_TAGS.has(element.tagName)
-    && normalizedText(element).length > 0
-    && (isTextBlock(element) || isLeafInlineText(element) || hasDirectReviewText(element))
-    && (
-      !GENERIC_TEXT_CONTAINER_TAGS.has(element.tagName)
-      || !element.querySelector(explicitBlockSelector)
-    )
+function sliceReviewTextInventory(
+  inventory: ReviewTextInventory,
+  start: number,
+  end: number,
+): ReviewTextInventory {
+  return {
+    text: inventory.text.slice(start, end),
+    nodes: inventory.nodes
+      .filter((entry) => entry.end > start && entry.start < end)
+      .map((entry) => ({
+        node: entry.node,
+        start: Math.max(entry.start, start) - start,
+        end: Math.min(entry.end, end) - start,
+      })),
+    breakOffsets: inventory.breakOffsets
+      .filter((offset) => offset > start && offset < end)
+      .map((offset) => offset - start),
+  };
+}
+
+function semanticTextInventories(sourceNodes: Node[]): ReviewTextInventory[] {
+  const inventory = reviewTextInventoryForNodes(sourceNodes);
+  if (!inventory.text.trim()) return [];
+  const boundaries = [...new Set(inventory.breakOffsets)]
+    .filter((offset) => /[\u3002\uff01\uff1f!?\uff1b;]\s*$/u.test(inventory.text.slice(0, offset)))
+    .filter((offset) => offset > 0 && offset < inventory.text.length);
+  const ranges: TextRange[] = [];
+  let start = 0;
+  boundaries.forEach((end) => {
+    if (inventory.text.slice(start, end).trim()) ranges.push({ start, end });
+    start = end;
+  });
+  if (inventory.text.slice(start).trim()) ranges.push({ start, end: inventory.text.length });
+  return ranges.map((range) => sliceReviewTextInventory(inventory, range.start, range.end));
+}
+
+function flowEndsAtHardBoundary(nodes: Node[]): boolean {
+  const inventory = reviewTextInventoryForNodes(nodes);
+  if (/[\u3002\uff01\uff1f!?\uff1b;]\s*$/u.test(inventory.text)) return true;
+  const meaningfulElements = nodes.filter((node) => (
+    node instanceof Element && node.tagName !== "BR" && normalizedText(node).length > 0
   ));
-  const blocks = candidates.filter((candidate) => !candidates.some((possibleParent) => (
-    possibleParent !== candidate
-    && possibleParent.contains(candidate)
-    && !GENERIC_TEXT_CONTAINER_TAGS.has(possibleParent.tagName)
-  )));
-  return blocks.length ? blocks : [region];
+  const directCopy = nodes.some((node) => (
+    node.nodeType === Node.TEXT_NODE && Boolean((node.textContent || "").trim())
+  ));
+  return meaningfulElements.length === 1 && !directCopy;
+}
+
+function reviewTextBlocks(region: Element): ReviewTextBlock[] {
+  const blocks: ReviewTextBlock[] = [];
+  const collect = (container: Element) => {
+    let flow: Node[] = [];
+    const flush = () => {
+      if (!flow.length) return;
+      semanticTextInventories(flow).forEach((inventory) => {
+        blocks.push({ anchor: container, inventory });
+      });
+      flow = [];
+    };
+    container.childNodes.forEach((node) => {
+      if (node instanceof Element && NON_CONTENT_TAGS.has(node.tagName)) return;
+      if (node instanceof Element && isReviewTextBlockElement(node)) {
+        flush();
+        collect(node);
+        return;
+      }
+      flow.push(node);
+      if (node instanceof Element && node.tagName === "BR" && flowEndsAtHardBoundary(flow)) {
+        flush();
+      }
+    });
+    flush();
+  };
+  collect(region);
+  if (!blocks.length) {
+    const inventory = reviewTextInventory(region);
+    if (inventory.text.trim()) blocks.push({ anchor: region, inventory });
+  }
+  return blocks;
+}
+
+function textBlockPairScore(
+  before: ReviewTextBlock,
+  after: ReviewTextBlock,
+  beforeIndex: number,
+  afterIndex: number,
+): number {
+  if (before.anchor.tagName !== after.anchor.tagName) return Number.NEGATIVE_INFINITY;
+  const beforeKey = pairKey(before.anchor);
+  const afterKey = pairKey(after.anchor);
+  if ((beforeKey || afterKey) && beforeKey !== afterKey) return Number.NEGATIVE_INFINITY;
+  const beforeText = before.inventory.text.replace(/\s+/g, " ").trim();
+  const afterText = after.inventory.text.replace(/\s+/g, " ").trim();
+  const exactText = beforeText === afterText;
+  const similarity = reviewTextSimilarity(beforeText, afterText);
+  const beforeClasses = new Set(classTokens(before.anchor));
+  const sharedClasses = classTokens(after.anchor).filter((token) => beforeClasses.has(token));
+  const distinctiveClasses = sharedClasses.filter((token) => ![
+    "active", "card", "col", "column", "container", "content", "grid", "item",
+    "main", "panel", "row", "section", "selected", "wrap", "wrapper",
+  ].includes(token));
+  if (!exactText && similarity < .48 && !(distinctiveClasses.length && similarity >= .24)) {
+    return Number.NEGATIVE_INFINITY;
+  }
+  return (beforeKey ? 600 : 0)
+    + (exactText ? 420 : 0)
+    + Math.round(similarity * 160)
+    + Math.min(80, distinctiveClasses.length * 24)
+    + Math.max(0, 24 - Math.abs(beforeIndex - afterIndex) * 2);
 }
 
 function pairTextBlocks(
-  before: Element[],
-  after: Element[],
-): Array<{ before: Element | null; after: Element | null }> {
-  const assignments = new Map<Element, Element>();
-  const usedAfter = new Set<Element>();
-  const afterByKey = new Map<string, Element>();
-  after.forEach((element) => {
-    const key = pairKey(element);
-    if (key && !afterByKey.has(key)) afterByKey.set(key, element);
-  });
-  before.forEach((beforeElement) => {
-    const key = pairKey(beforeElement);
-    const afterElement = key ? afterByKey.get(key) || null : null;
-    if (!afterElement || usedAfter.has(afterElement)) return;
-    assignments.set(beforeElement, afterElement);
-    usedAfter.add(afterElement);
-  });
-
-  before.forEach((beforeElement) => {
-    if (assignments.has(beforeElement)) return;
-    const beforeText = normalizedText(beforeElement);
-    const exact = after
-      .map((candidate, afterIndex) => ({ candidate, afterIndex }))
-      .filter(({ candidate }) => (
-        !usedAfter.has(candidate)
-        && candidate.tagName === beforeElement.tagName
-        && normalizedText(candidate) === beforeText
-      ))
-      .sort((left, right) => (
-        Math.abs(before.indexOf(beforeElement) - left.afterIndex)
-        - Math.abs(before.indexOf(beforeElement) - right.afterIndex)
-      ))[0]?.candidate;
-    if (!exact) return;
-    assignments.set(beforeElement, exact);
-    usedAfter.add(exact);
+  before: ReviewTextBlock[],
+  after: ReviewTextBlock[],
+): Array<{ before: ReviewTextBlock | null; after: ReviewTextBlock | null }> {
+  const assignments = new Map<ReviewTextBlock, ReviewTextBlock>();
+  const usedAfter = new Set<ReviewTextBlock>();
+  const edges = before.flatMap((beforeBlock, beforeIndex) => after.map((afterBlock, afterIndex) => ({
+    beforeBlock,
+    afterBlock,
+    score: textBlockPairScore(beforeBlock, afterBlock, beforeIndex, afterIndex),
+  }))).filter((edge) => Number.isFinite(edge.score))
+    .sort((left, right) => right.score - left.score);
+  edges.forEach(({ beforeBlock, afterBlock }) => {
+    if (assignments.has(beforeBlock) || usedAfter.has(afterBlock)) return;
+    assignments.set(beforeBlock, afterBlock);
+    usedAfter.add(afterBlock);
   });
 
-  const edges = before.flatMap((beforeElement, beforeIndex) => (
-    assignments.has(beforeElement) || pairKey(beforeElement)
-      ? []
-      : after.map((candidate, afterIndex) => {
-        if (
-          usedAfter.has(candidate)
-          || pairKey(candidate)
-          || candidate.tagName !== beforeElement.tagName
-        ) return null;
-        const similarity = reviewTextSimilarity(
-          reviewTextInventory(beforeElement).text,
-          reviewTextInventory(candidate).text,
-        );
-        if (similarity < .5) return null;
-        return {
-          beforeElement,
-          candidate,
-          score: similarity * 100 + Math.max(0, 12 - Math.abs(beforeIndex - afterIndex) * 2),
-        };
-      }).filter((edge): edge is NonNullable<typeof edge> => Boolean(edge))
-  )).sort((left, right) => right.score - left.score);
-  edges.forEach(({ beforeElement, candidate }) => {
-    if (assignments.has(beforeElement) || usedAfter.has(candidate)) return;
-    assignments.set(beforeElement, candidate);
-    usedAfter.add(candidate);
-  });
-
-  const pairs: Array<{ before: Element | null; after: Element | null }> = before.map((beforeElement) => ({
-    before: beforeElement,
-    after: assignments.get(beforeElement) || null,
+  const pairs: Array<{ before: ReviewTextBlock | null; after: ReviewTextBlock | null }> = before.map((beforeBlock) => ({
+    before: beforeBlock,
+    after: assignments.get(beforeBlock) || null,
   }));
-  after.forEach((afterElement) => {
-    if (!usedAfter.has(afterElement)) pairs.push({ before: null, after: afterElement });
+  after.forEach((afterBlock) => {
+    if (!usedAfter.has(afterBlock)) pairs.push({ before: null, after: afterBlock });
   });
   return pairs;
 }
 
-function markAllText(element: Element, tone: "removed" | "added"): boolean {
-  const inventory = reviewTextInventory(element);
+function markAllText(block: ReviewTextBlock, tone: "removed" | "added"): boolean {
+  const { inventory } = block;
   if (!inventory.text.trim()) return false;
-  element.setAttribute("data-pageroot-review-text-group", tone);
   wrapTextRanges(inventory, [{ start: 0, end: inventory.text.length }], tone);
   return true;
+}
+
+function sameBreakLayout(before: ReviewTextInventory, after: ReviewTextInventory): boolean {
+  return before.breakOffsets.length === after.breakOffsets.length
+    && before.breakOffsets.every((offset, index) => offset === after.breakOffsets[index]);
 }
 
 function markTextDifferences(before: Element | null, after: Element | null): boolean {
@@ -1442,21 +1542,43 @@ function markTextDifferences(before: Element | null, after: Element | null): boo
       return;
     }
     if (!pair.before || !pair.after) return;
-    const beforeInventory = reviewTextInventory(pair.before);
-    const afterInventory = reviewTextInventory(pair.after);
-    if (beforeInventory.text === afterInventory.text) return;
+    const beforeInventory = pair.before.inventory;
+    const afterInventory = pair.after.inventory;
+    const layoutChanged = !sameBreakLayout(beforeInventory, afterInventory);
+    if (beforeInventory.text === afterInventory.text) {
+      if (!layoutChanged) return;
+      wrapTextContext(beforeInventory, "removed", "before");
+      wrapTextContext(afterInventory, "added", "after");
+      changed = true;
+      return;
+    }
     const differences = sentenceAwareTextDifferences(
       beforeInventory.text,
       afterInventory.text,
     );
+    if (!differences.before.length && !differences.after.length && !layoutChanged) return;
     if (differences.before.length) {
-      pair.before.setAttribute("data-pageroot-review-text-group", "changed");
-      wrapTextRanges(beforeInventory, differences.before, "removed");
+      wrapTextRanges(
+        beforeInventory,
+        differences.before,
+        "removed",
+        differences.after.length ? "before" : "removed",
+      );
+      changed = true;
+    } else {
+      wrapTextContext(beforeInventory, "removed", "before");
       changed = true;
     }
     if (differences.after.length) {
-      pair.after.setAttribute("data-pageroot-review-text-group", "changed");
-      wrapTextRanges(afterInventory, differences.after, "added");
+      wrapTextRanges(
+        afterInventory,
+        differences.after,
+        "added",
+        differences.before.length ? "after" : "added",
+      );
+      changed = true;
+    } else {
+      wrapTextContext(afterInventory, "added", "after");
       changed = true;
     }
   });
@@ -1559,6 +1681,41 @@ function structuralSelfSignature(element: Element): string {
     .join("|");
 }
 
+const STRUCTURE_TRANSPARENT_TAGS = new Set([
+  "ABBR",
+  "B",
+  "BDI",
+  "BDO",
+  "BR",
+  "CITE",
+  "CODE",
+  "DATA",
+  "EM",
+  "I",
+  "KBD",
+  "MARK",
+  "Q",
+  "S",
+  "SAMP",
+  "SMALL",
+  "SPAN",
+  "STRONG",
+  "SUB",
+  "SUP",
+  "TIME",
+  "U",
+  "VAR",
+  "WBR",
+]);
+
+function structuralChildren(element: Element): Element[] {
+  return eligibleChildren(element).flatMap((child) => (
+    STRUCTURE_TRANSPARENT_TAGS.has(child.tagName)
+      ? structuralChildren(child)
+      : [child]
+  ));
+}
+
 function markStructureElement(element: Element, tone: string) {
   element.setAttribute("data-pageroot-review-structure", tone);
 }
@@ -1603,8 +1760,8 @@ function markStructureDifferences(pair: SectionPair): boolean {
         markStructureElement(afterParent, "after");
         stats.replaced.push(semanticElementName(afterParent));
       }
-      const beforeChildren = eligibleChildren(beforeParent);
-      const afterChildren = eligibleChildren(afterParent);
+      const beforeChildren = structuralChildren(beforeParent);
+      const afterChildren = structuralChildren(afterParent);
       const assignments = pairSiblingElements(beforeChildren, afterChildren);
       const usedAfter = new Set(assignments.values());
       const matchedBeforeOrder = beforeChildren.filter((element) => assignments.has(element));
@@ -1745,18 +1902,31 @@ function attachChangeMarkerMetadata(
   [pair.before, pair.after].forEach((root) => {
     if (!root) return;
     const markerElements = [root, ...root.querySelectorAll("*")].filter((element) => (
-      element.hasAttribute("data-pageroot-review-text-group")
+      element.hasAttribute("data-pageroot-review-text")
+      || element.hasAttribute("data-pageroot-review-text-context")
       || element.hasAttribute("data-pageroot-review-structure")
       || element.hasAttribute("data-pageroot-review-style")
     ));
     markerElements.forEach((element, index) => {
       const markerTypes: ReviewChangeType[] = [];
-      if (element.hasAttribute("data-pageroot-review-text-group")) markerTypes.push("text");
+      const textMarker = element.hasAttribute("data-pageroot-review-text")
+        || element.hasAttribute("data-pageroot-review-text-context");
+      if (textMarker) markerTypes.push("text");
       if (element.hasAttribute("data-pageroot-review-structure")) markerTypes.push("structure");
       if (element.hasAttribute("data-pageroot-review-style")) markerTypes.push("style");
+      const textChange = element.getAttribute("data-pageroot-review-text-change");
+      const summary = textMarker
+        ? textChange === "added"
+          ? "新增文案"
+          : textChange === "removed"
+            ? "删除文案"
+            : textChange === "before"
+              ? "文案修改前"
+              : "文案修改后"
+        : helper;
       element.setAttribute("data-pageroot-review-marker", changeId);
       element.setAttribute("data-pageroot-review-marker-types", markerTypes.join(" "));
-      element.setAttribute("data-pageroot-review-summary", helper);
+      element.setAttribute("data-pageroot-review-summary", summary);
       element.setAttribute("data-pageroot-review-active", "false");
       if (index === 0) element.setAttribute("data-pageroot-review-primary", "true");
     });
@@ -2051,6 +2221,7 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
     bottom: Math.max(...records.map((record) => record.bottom)),
     types: [...new Set(records.flatMap((record) => record.types))],
     tones: [...new Set(records.flatMap((record) => record.tones))],
+    textKinds: [...new Set(records.flatMap((record) => record.textKinds || []))],
   });
   const mergeConnectedRecords = (records, canMerge) => {
     const remaining = [...records];
@@ -2070,12 +2241,26 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
     }
     return merged;
   };
-  const allModeSummary = (types) => {
+  const allModeSummary = (types, textKinds) => {
     const labels = [];
-    if (types.includes("text")) labels.push("文案");
+    if (types.includes("text")) {
+      labels.push(textKinds.length === 1
+        ? textKinds[0] === "added"
+          ? "新增文案"
+          : textKinds[0] === "removed"
+            ? "删除文案"
+            : textKinds[0] === "before"
+              ? "文案修改前"
+              : "文案修改后"
+        : "文案");
+    }
     if (types.includes("structure")) labels.push("结构");
     if (types.includes("style")) labels.push("视觉");
-    return labels.length ? labels.join("、") + "变化" : "变化";
+    return labels.length
+      ? labels.map((label) => label.endsWith("文案") || label.endsWith("前") || label.endsWith("后")
+        ? label
+        : label + "变化").join("、")
+      : "变化";
   };
   const recordsOverlapStrongly = (left, right) => {
     const width = Math.max(0, Math.min(left.right, right.right) - Math.max(left.left, right.left));
@@ -2090,25 +2275,25 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
     const filter = currentState.filter || "all";
     const records = [];
     if (filter === "all" || filter === "text") {
-      document.querySelectorAll('[data-pageroot-review-text-group]').forEach((group) => {
-        group.querySelectorAll('[data-pageroot-review-text]').forEach((element) => {
-          const textTone = element.getAttribute("data-pageroot-review-text") === "removed"
-            ? "text-removed"
-            : "text-added";
-          [...element.getClientRects()]
-            .filter((rect) => rect.width > 1 && rect.height > 1)
-            .forEach((rect) => records.push({
-              changeId: group.getAttribute("data-pageroot-review-marker") || "",
-              summary: group.getAttribute("data-pageroot-review-summary") || "",
-              tone: textTone,
-              tones: [textTone],
-              types: ["text"],
-              left: rect.left + scrollX,
-              top: rect.top + scrollY,
-              right: rect.right + scrollX,
-              bottom: rect.bottom + scrollY,
-            }));
-        });
+      document.querySelectorAll('[data-pageroot-review-marker-types~="text"]').forEach((element) => {
+        const textToneValue = element.getAttribute("data-pageroot-review-text")
+          || element.getAttribute("data-pageroot-review-text-context");
+        const textTone = textToneValue === "removed" ? "text-removed" : "text-added";
+        const textKind = element.getAttribute("data-pageroot-review-text-change") || "";
+        [...element.getClientRects()]
+          .filter((rect) => rect.width > 1 && rect.height > 1)
+          .forEach((rect) => records.push({
+            changeId: element.getAttribute("data-pageroot-review-marker") || "",
+            summary: element.getAttribute("data-pageroot-review-summary") || "",
+            tone: textTone,
+            tones: [textTone],
+            types: ["text"],
+            textKinds: textKind ? [textKind] : [],
+            left: rect.left + scrollX,
+            top: rect.top + scrollY,
+            right: rect.right + scrollX,
+            bottom: rect.bottom + scrollY,
+          }));
       });
     }
     const selector = filter === "all"
@@ -2126,6 +2311,7 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
           tone: type,
           tones: [type],
           types: [type],
+          textKinds: [],
           left: rect.left + scrollX,
           top: rect.top + scrollY,
           right: rect.right + scrollX,
@@ -2156,7 +2342,7 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
       )).map((record) => ({
         ...record,
         tone: record.tones.length > 1 ? "mixed" : record.tones[0],
-        summary: allModeSummary(record.types),
+        summary: allModeSummary(record.types, record.textKinds),
       }));
     }
     const inset = 3;

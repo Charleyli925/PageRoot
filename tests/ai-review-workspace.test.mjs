@@ -149,7 +149,8 @@ test("change discovery builds a complete outline and precise change markers", ()
   assert.match(reviewDocument, /outline\.push/);
   assert.match(reviewDocument, /markTextDifferences/);
   assert.match(reviewDocument, /sentenceAwareTextDifferences/);
-  assert.match(reviewDocument, /data-pageroot-review-text-group/);
+  assert.match(reviewDocument, /data-pageroot-review-text-context/);
+  assert.match(reviewDocument, /data-pageroot-review-text-change/);
   assert.match(reviewDocument, /data-pageroot-review-text/);
   assert.match(reviewDocument, /data-pageroot-review-marker/);
   assert.match(reviewDocument, /attachChangeMarkerMetadata/);
@@ -164,7 +165,11 @@ test("change discovery builds a complete outline and precise change markers", ()
   assert.match(reviewDocument, /similarity >= \.46/);
   assert.match(reviewDocument, /markStructureDifferences/);
   assert.match(reviewDocument, /changedStylesheetSelectors/);
-  assert.match(reviewDocument, /hasDirectReviewText/);
+  assert.match(reviewDocument, /reviewTextInventoryForNodes/);
+  assert.match(reviewDocument, /semanticTextInventories/);
+  assert.match(reviewDocument, /STRUCTURE_TRANSPARENT_TAGS/);
+  assert.doesNotMatch(reviewDocument, /beforeTokenRanges\.length \?/);
+  assert.doesNotMatch(reviewDocument, /afterTokenRanges\.length \?/);
   assert.match(reviewDocument, /const structureChanged = markStructureDifferences\(pair\)/);
   assert.match(reviewDocument, /const styleChanged = markStyleDifferences\(pair\.before, pair\.after\)/);
   assert.match(reviewDocument, /const textChanged = markTextDifferences\(pair\.before, pair\.after\)/);
@@ -208,8 +213,12 @@ test("all-change review keeps text treatment precise and mirrors authored action
   assert.doesNotMatch(reviewDocument, /data-pageroot-review-filter="all"\] \[data-pageroot-review-id\]/);
   assert.match(reviewDocument, /data-pageroot-review-filter="all"\] \[data-pageroot-review-text="removed"\]/);
   assert.match(reviewDocument, /color: inherit !important;[\s\S]*?text-decoration: none !important/);
-  assert.match(reviewDocument, /querySelectorAll\('\[data-pageroot-review-text\]'\)/);
+  assert.match(reviewDocument, /querySelectorAll\('\[data-pageroot-review-marker-types~="text"\]'\)/);
   assert.match(reviewDocument, /textTone[\s\S]*?"text-removed"[\s\S]*?"text-added"/);
+  assert.match(reviewDocument, /"新增文案"/);
+  assert.match(reviewDocument, /"删除文案"/);
+  assert.match(reviewDocument, /"文案修改前"/);
+  assert.match(reviewDocument, /"文案修改后"/);
   assert.match(reviewDocument, /mergeConnectedRecords/);
   assert.match(reviewDocument, /minimalRecords/);
   assert.match(reviewDocument, /tone: record\.tones\.length > 1 \? "mixed" : record\.tones\[0\]/);

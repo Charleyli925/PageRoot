@@ -458,6 +458,16 @@ test("a verified AI result stays pending through desktop review until the user a
         <article data-review-metric="ipv"><strong>+4.49%</strong><span>IPV 增幅（显著 p&lt;0.01）</span><small>日均 63.4 万 vs 60.7 万</small></article>
         <article data-review-metric="cvr"><strong>+6.85%</strong><span>CVR 增幅（显著 p&lt;0.01）</span><small>0.217% vs 0.203%</small></article>
       </div>
+      <div data-review-mixed-copy>
+        <p data-review-reference>参考：示例日均确收约207万，增量4.12万/天约占2.0%。</p>
+        <p data-review-warning>⚠️ 近6天(7/23-<span><strong>7/28)增幅收窄至负值区间，需</strong></span>持续关注。</p>
+      </div>
+      <div data-review-break-layout><span>日均63<br><br>.4万<br>60.7万</span></div>
+      <div data-review-deleted-copy><strong>品均拆解：</strong>总确收增长来自覆盖扩大。<br>待删除第一行<br>待删除第二行<br>待删除第三行<br>AI托管的核心价值保持不变。</div>
+    </section>
+    <section data-review-ebita-section>
+      <h2>3EBITA分析</h2>
+      <div data-review-ebita-copy><strong>结论：</strong>EBITA差异均在波动范围<br>内（0.06~0.13pt），AI托管未恶化盈利能力。</div>
     </section>
     <div class="tabs" role="tablist" aria-label="Review interaction fixture">
       <button type="button" data-review-tab-button data-p="review-p1">审阅标签一</button>
@@ -548,6 +558,26 @@ test("a verified AI result stays pending through desktop review until the user a
         .replace(
           '    <div data-review-priority><strong>优先顺序：</strong>先处理稳定性，再补齐体验细节。</div>\n',
           "",
+        )
+        .replace(
+          '<p data-review-reference>参考：示例日均确收约207万，增量4.12万/天约占2.0%。</p>',
+          '<p data-review-reference>参考：示例日均确收约207万，本实验增量4.12万/天约占2.0%。</p>',
+        )
+        .replace(
+          '<p data-review-warning>⚠️ 近6天(7/23-<span><strong>7/28)增幅收窄至负值区间，需</strong></span>持续关注。</p>',
+          '<p data-review-warning>⚠️ 近6天（7/23—<strong>7/28）增幅收窄至负值区间，需</strong>持续关注定价调整和转化波动。</p>',
+        )
+        .replace(
+          '<div data-review-break-layout><span>日均63<br><br>.4万<br>60.7万</span></div>',
+          '<div data-review-break-layout>日均63.4万 vs 60.7万</div>',
+        )
+        .replace(
+          '<div data-review-deleted-copy><strong>品均拆解：</strong>总确收增长来自覆盖扩大。<br>待删除第一行<br>待删除第二行<br>待删除第三行<br>AI托管的核心价值保持不变。</div>',
+          '<div data-review-deleted-copy><strong>品均拆解：</strong>总确收增长来自覆盖扩大。<br>AI托管的核心价值保持不变，并应继续关注留存质量。</div>',
+        )
+        .replace(
+          '<div data-review-ebita-copy><strong>结论：</strong>EBITA差异均在波动范围<br>内（0.06~0.13pt），AI托管未恶化盈利能力。</div>',
+          '<div data-review-ebita-copy><strong>结论：</strong>EBITA差异均在波动范围内（0.06~0.13pt），AI托管未恶化盈利能力，建议继续保留实验策略。</div>',
         )
         .replace(
           "<article><h2>标签一概览</h2><p>第一块完整内容</p></article>\n      <article><h2>标签一详情</h2><p>第二块完整内容</p></article>",
@@ -659,22 +689,36 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect.poll(() => afterReviewFrame.locator(
       '[data-pageroot-review-overlay-box][data-tone="text-added"], [data-pageroot-review-overlay-box][data-tone="structure"], [data-pageroot-review-overlay-box][data-tone="style"], [data-pageroot-review-overlay-box][data-tone="mixed"]',
     ).count()).toBeGreaterThan(0);
-    expect(await afterReviewFrame.locator(
+    const nestedOverlayPairs = await afterReviewFrame.locator(
       "[data-pageroot-review-overlay-box]",
-    ).evaluateAll((boxes) => boxes.some((outer, outerIndex) => {
+    ).evaluateAll((boxes) => boxes.flatMap((outer, outerIndex) => {
       const outerRect = outer.getBoundingClientRect();
-      return boxes.some((inner, innerIndex) => {
-        if (outerIndex === innerIndex) return false;
+      return boxes.flatMap((inner, innerIndex) => {
+        if (outerIndex === innerIndex) return [];
         const innerRect = inner.getBoundingClientRect();
-        return outer.getAttribute("data-pageroot-review-overlay-box")
+        const nested = outer.getAttribute("data-pageroot-review-overlay-box")
           === inner.getAttribute("data-pageroot-review-overlay-box")
           && innerRect.width * innerRect.height < outerRect.width * outerRect.height * .86
           && innerRect.left >= outerRect.left - 2
           && innerRect.top >= outerRect.top - 2
           && innerRect.right <= outerRect.right + 2
           && innerRect.bottom <= outerRect.bottom + 2;
+        return nested ? [{
+          changeId: outer.getAttribute("data-pageroot-review-overlay-box"),
+          outer: {
+            summary: outer.textContent,
+            tone: outer.getAttribute("data-tone"),
+            rect: [outerRect.x, outerRect.y, outerRect.width, outerRect.height],
+          },
+          inner: {
+            summary: inner.textContent,
+            tone: inner.getAttribute("data-tone"),
+            rect: [innerRect.x, innerRect.y, innerRect.width, innerRect.height],
+          },
+        }] : [];
       });
-    }))).toBe(false);
+    }));
+    expect(nestedOverlayPairs).toEqual([]);
     await expect.poll(async () => beforeReviewFrame.locator(
       "[data-pageroot-review-id]",
     ).first().evaluate((element) => getComputedStyle(element).outlineStyle)).toBe("none");
@@ -731,6 +775,39 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect(afterReviewFrame.locator(
       '[data-review-added-chart] [data-pageroot-review-text="added"]',
     ).filter({ hasText: "实验效果概览" })).toHaveCount(1);
+    await expect(afterReviewFrame.locator(
+      '[data-review-added-chart] [data-pageroot-review-text="added"]',
+    ).filter({ hasText: "实验效果概览" }))
+      .toHaveAttribute("data-pageroot-review-summary", "新增文案");
+    await expect(beforeReviewFrame.locator(
+      '[data-review-reference] [data-pageroot-review-text-context="removed"]',
+    )).toHaveCount(1);
+    await expect(afterReviewFrame.locator(
+      '[data-review-reference] [data-pageroot-review-text="added"]',
+    ).filter({ hasText: "本实验" })).toHaveAttribute(
+      "data-pageroot-review-summary",
+      "新增文案",
+    );
+    const warningRemovedText = await beforeReviewFrame.locator(
+      '[data-review-warning] [data-pageroot-review-text="removed"]',
+    ).allTextContents();
+    expect(warningRemovedText.join(""))
+      .not.toContain("7/28)增幅收窄至负值区间，需");
+    await expect(beforeReviewFrame.locator(
+      '[data-review-deleted-copy] [data-pageroot-review-text="removed"]',
+    ).filter({ hasText: /^待删除第/u })).toHaveCount(3);
+    await expect(beforeReviewFrame.locator(
+      '[data-review-break-layout] [data-pageroot-review-text-context="removed"]',
+    )).toHaveCount(3);
+    await expect(afterReviewFrame.locator(
+      '[data-review-break-layout] [data-pageroot-review-text="added"]',
+    ).filter({ hasText: "vs" })).toHaveCount(1);
+    await expect(beforeReviewFrame.locator(
+      '[data-review-ebita-copy] [data-pageroot-review-text-context="removed"]',
+    ).first()).toBeVisible();
+    await expect(afterReviewFrame.locator(
+      '[data-review-ebita-copy] [data-pageroot-review-text="added"]',
+    ).filter({ hasText: "建议继续保留实验策略" })).toBeVisible();
     await expect(afterReviewFrame.locator(
       '[data-review-regression-summary] [data-pageroot-review-text]',
     )).toHaveCount(0);
@@ -881,6 +958,19 @@ test("a verified AI result stays pending through desktop review until the user a
       .toBe("1");
     expect(Number(await unchangedMapItem.evaluate((element) => getComputedStyle(element).opacity)))
       .toBeLessThan(0.7);
+    const ebitaChangeId = await beforeReviewFrame.locator(
+      "[data-review-ebita-section]",
+    ).getAttribute("data-pageroot-review-id");
+    expect(ebitaChangeId).toBeTruthy();
+    await launched.page.getByRole("button", {
+      name: /3EBITA分析：文案变化/u,
+    }).click();
+    await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
+      "data-pageroot-review-focus",
+    )).toBe(ebitaChangeId);
+    await expect.poll(() => beforeReviewFrame.locator(
+      `[data-pageroot-review-overlay-box="${ebitaChangeId}"]`,
+    ).count()).toBeGreaterThan(0);
     await beforeCounter.click();
     await expect(afterCounter).toHaveAttribute("data-count", "3");
     await expect(launched.page.getByRole("button", { name: "打开内容地图" }))
@@ -941,6 +1031,12 @@ test("a verified AI result stays pending through desktop review until the user a
     )).toHaveCount(0);
     await expect(afterReviewFrame.locator(
       '[data-review-metrics] [data-pageroot-review-structure]',
+    )).toHaveCount(0);
+    await expect(beforeReviewFrame.locator(
+      '[data-review-mixed-copy] [data-pageroot-review-structure], [data-review-break-layout] [data-pageroot-review-structure], [data-review-ebita-copy] [data-pageroot-review-structure]',
+    )).toHaveCount(0);
+    await expect(afterReviewFrame.locator(
+      '[data-review-mixed-copy] [data-pageroot-review-structure], [data-review-break-layout] [data-pageroot-review-structure], [data-review-ebita-copy] [data-pageroot-review-structure]',
     )).toHaveCount(0);
     await launched.page.getByRole("button", { name: "视觉变化" }).click();
     await expect.poll(async () => afterReviewFrame.locator("html").getAttribute(
