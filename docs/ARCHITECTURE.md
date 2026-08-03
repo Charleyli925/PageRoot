@@ -79,6 +79,15 @@ Comments + frozen input
   constant-index legacy Tabs, native details and local disclosures; one Canvas
   executor applies the accepted context. It never invokes authored handlers,
   serializes the preview DOM or creates a second interaction mode.
+- Formal AI review owns one disposable reducer with independent page, change
+  filter, context visibility, navigation, scroll and zoom fields. The document
+  analyzer emits one typed canonical change footprint; global context masking
+  and overlay geometry are two projections of that same footprint. Stable
+  outline regions remain navigation-only. Before/after panel and action keys
+  are assigned as pairs before either isolated document is prepared, so safe
+  runtime actions mirror bidirectionally even when copy or order differs.
+  Scroll mode controls only scroll following. No review state or authored
+  runtime mutation has source, Version or project authority.
 - `IslandEditingController` is the only production text-edit engine in PageRoot 0.9.0. `contenteditable="true"` supplies focus, caret, Selection and IME composition, while the controller owns insertion, deletion, line breaks, paste and formatting. Chromium DOM serialization never has commit authority.
 - `editable-island` owns the V2 capability and normalization contract. An accepted edit replaces only the selected element's parsed `contentRange`; bytes outside that range remain exact. Inside the range, parse5 may perform the smallest safe normalization needed to preserve inline semantics, comments and immutable authored atoms.
 - `native-edit-policy` owns shared session attributes and checkpoint timing. `native-edit-runtime-preflight` still proves that enabling the island does not change geometry or text style; `HtmlCanvasEditor` only coordinates selection, the island session and SourcePatch.
@@ -123,6 +132,9 @@ they do not import application services.
 | Workbench pure record/comment/project/version/browser helpers | `app/workbench/*-model.ts`, `app/workbench/browser-io.ts` |
 | History, attachment and preview presentation | `app/workbench/presentation.tsx` |
 | AI handoff drawer presentation | `app/workbench/handoff-view.tsx` |
+| Formal AI review state transitions | `app/workbench/review-state.ts` |
+| Formal AI review analysis, paired runtime mapping, global mask and overlay projection | `app/workbench/review-document.ts` |
+| Formal AI review composition and isolated-frame coordination | `app/workbench/AiReviewWorkspace.tsx` |
 
 The V2 source-fidelity path remains a protected core: `SourceIndex`,
 `TargetResolver`, `editable-island`, `IslandEditingController`,

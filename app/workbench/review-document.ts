@@ -1,5 +1,5 @@
-export type ReviewFilter = "overview" | "all" | "text" | "structure" | "style";
-export type ReviewChangeType = Exclude<ReviewFilter, "overview" | "all">;
+export type ReviewFilter = "all" | "text" | "structure" | "style";
+export type ReviewChangeType = Exclude<ReviewFilter, "all">;
 export type ReviewSide = "before" | "after";
 
 export type ReviewChange = {
@@ -56,22 +56,6 @@ const REVIEW_DOCUMENT_STYLE = String.raw`
     transition: opacity 160ms ease, filter 160ms ease, outline-color 120ms ease !important;
   }
 
-  html[data-pageroot-review-focus]:not([data-pageroot-review-focus="all"])[data-pageroot-review-filter="all"]
-    [data-pageroot-outline-id][data-pageroot-review-active="false"] {
-    opacity: var(--pageroot-review-context-opacity) !important;
-    filter: grayscale(var(--pageroot-review-context-grayscale))
-      saturate(var(--pageroot-review-context-saturation)) !important;
-  }
-
-  html[data-pageroot-review-focus]:not([data-pageroot-review-focus="all"])
-    [data-pageroot-outline-id][data-pageroot-review-active="true"] {
-    position: relative !important;
-    z-index: 2147480000 !important;
-    isolation: isolate !important;
-    opacity: 1 !important;
-    filter: none !important;
-  }
-
   html[data-pageroot-review-filter="all"] [data-pageroot-review-marker-types~="structure"],
   html[data-pageroot-review-filter="all"] [data-pageroot-review-marker-types~="style"],
   html[data-pageroot-review-filter="structure"] [data-pageroot-review-marker-types~="structure"],
@@ -106,18 +90,10 @@ const REVIEW_DOCUMENT_STYLE = String.raw`
     text-decoration: none !important;
   }
 
-  html[data-pageroot-review-focus]:not([data-pageroot-review-focus="all"])
-    [data-pageroot-outline-id][data-pageroot-review-active="true"]
-    [data-pageroot-review-context-types~="all"],
-  html[data-pageroot-review-focus]:not([data-pageroot-review-focus="all"])[data-pageroot-review-filter="text"]
-    [data-pageroot-outline-id][data-pageroot-review-active="true"]
-    [data-pageroot-review-context-types~="text"],
-  html[data-pageroot-review-focus]:not([data-pageroot-review-focus="all"])[data-pageroot-review-filter="structure"]
-    [data-pageroot-outline-id][data-pageroot-review-active="true"]
-    [data-pageroot-review-context-types~="structure"],
-  html[data-pageroot-review-focus]:not([data-pageroot-review-focus="all"])[data-pageroot-review-filter="style"]
-    [data-pageroot-outline-id][data-pageroot-review-active="true"]
-    [data-pageroot-review-context-types~="style"] {
+  html[data-pageroot-review-filter="all"] [data-pageroot-review-context-types~="all"],
+  html[data-pageroot-review-filter="text"] [data-pageroot-review-context-types~="text"],
+  html[data-pageroot-review-filter="structure"] [data-pageroot-review-context-types~="structure"],
+  html[data-pageroot-review-filter="style"] [data-pageroot-review-context-types~="style"] {
     opacity: var(--pageroot-review-context-opacity) !important;
     filter: grayscale(var(--pageroot-review-context-grayscale))
       saturate(var(--pageroot-review-context-saturation)) !important;
@@ -194,7 +170,7 @@ const REVIEW_DOCUMENT_STYLE = String.raw`
     text-overflow: ellipsis !important;
   }
 
-  html:not([data-pageroot-review-overlays="true"])[data-pageroot-review-filter]:not([data-pageroot-review-filter="overview"])
+  html:not([data-pageroot-review-overlays="true"])[data-pageroot-review-filter]
     [data-pageroot-review-marker][data-pageroot-review-primary="true"][data-pageroot-review-active="true"]::after {
     position: absolute !important;
     z-index: 2147483000 !important;
@@ -523,79 +499,158 @@ function normalizedPanelLabel(value: string): string {
     .slice(0, 80);
 }
 
-function stablePanelToken(value: string): string {
-  let hash = 2166136261;
-  for (const character of value) {
-    hash ^= character.codePointAt(0) || 0;
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0).toString(36);
-}
+type PanelDescriptor = {
+  panel: Element;
+  control: Element | null;
+  explicitIdentity: string;
+  label: string;
+  index: number;
+};
 
-function annotateActionKeys(document: Document) {
-  const actions = [...document.querySelectorAll(
-    'a[href], area[href], button, input, select, textarea, summary, [role="button"], [role="tab"], [aria-expanded][aria-controls], [onclick]',
-  )];
-  const occurrences = new Map<string, number>();
-  actions.forEach((element, index) => {
-    const panelKey = element.getAttribute("data-pageroot-review-panel-key") || "";
-    const explicitIdentity = [
-      element.id,
-      element.getAttribute("name"),
-      element.getAttribute("aria-controls"),
-      element.getAttribute("data-p"),
-      element.getAttribute("data-tab"),
-      element.getAttribute("data-page"),
-      element.getAttribute("href"),
-    ].find((value) => Boolean(value?.trim())) || "";
-    const label = normalizedPanelLabel(
-      element.getAttribute("aria-label")
-      || element.getAttribute("title")
-      || conciseElementText(element),
-    );
-    const base = panelKey
-      ? `panel:${panelKey}`
-      : explicitIdentity
-        ? `${element.tagName}:identity:${explicitIdentity}`
-        : label
-          ? `${element.tagName}:label:${label}`
-          : `${element.tagName}:index:${index + 1}`;
-    const occurrence = occurrences.get(base) || 0;
-    occurrences.set(base, occurrence + 1);
-    element.setAttribute(
-      "data-pageroot-review-action-key",
-      `action-${stablePanelToken(base)}-${occurrence + 1}`,
-    );
+function panelDescriptors(document: Document): PanelDescriptor[] {
+  const panels = [...document.querySelectorAll("body *")].filter(isPanelContainer);
+  const controls = safePanelControls(document);
+  return panels.map((panel, index) => {
+    const control = controls.find((candidate) => controlMatchesPanel(candidate, panel))
+      || (controls.length === panels.length ? controls[index] : null);
+    return {
+      panel,
+      control,
+      explicitIdentity: normalizedPanelLabel(
+        panel.id
+        || panel.getAttribute("data-page")
+        || panel.getAttribute("data-tab-panel")
+        || panelControlTarget(control || panel),
+      ),
+      label: normalizedPanelLabel(
+        conciseElementText(control)
+        || panel.getAttribute("aria-label")
+        || conciseElementText(directHeading(panel)),
+      ),
+      index,
+    };
   });
 }
 
-function annotatePanelKeys(document: Document) {
-  const panels = [...document.querySelectorAll("body *")].filter(isPanelContainer);
-  const controls = safePanelControls(document);
-  const seenLabels = new Map<string, number>();
-  panels.forEach((panel, panelIndex) => {
-    const control = controls.find((candidate) => controlMatchesPanel(candidate, panel))
-      || (controls.length === panels.length ? controls[panelIndex] : null);
-    const label = normalizedPanelLabel(
-      conciseElementText(control)
-      || panel.getAttribute("aria-label")
-      || conciseElementText(directHeading(panel)),
-    );
-    const explicitIdentity = normalizedPanelLabel(
-      panel.id
-      || panel.getAttribute("data-page")
-      || panel.getAttribute("data-tab-panel")
-      || panelControlTarget(control || panel),
-    );
-    const occurrence = label ? (seenLabels.get(label) || 0) : 0;
-    if (label) seenLabels.set(label, occurrence + 1);
-    const key = explicitIdentity
-      ? `target-${stablePanelToken(explicitIdentity)}`
-      : label
-        ? `label-${stablePanelToken(label)}-${occurrence + 1}`
-      : `index-${panelIndex + 1}`;
-    panel.setAttribute("data-pageroot-review-panel-key", key);
-    control?.setAttribute("data-pageroot-review-panel-key", key);
+function setPanelDescriptorKey(descriptor: PanelDescriptor, key: string) {
+  descriptor.panel.setAttribute("data-pageroot-review-panel-key", key);
+  descriptor.control?.setAttribute("data-pageroot-review-panel-key", key);
+}
+
+function annotatePanelPairs(before: Document, after: Document) {
+  const beforePanels = panelDescriptors(before);
+  const afterPanels = panelDescriptors(after);
+  const usedAfter = new Set<PanelDescriptor>();
+  let pairIndex = 0;
+  beforePanels.forEach((beforePanel) => {
+    const ranked = afterPanels
+      .filter((candidate) => !usedAfter.has(candidate))
+      .map((candidate) => ({
+        candidate,
+        score:
+          (beforePanel.explicitIdentity
+            && beforePanel.explicitIdentity === candidate.explicitIdentity ? 160 : 0)
+          + (beforePanel.label && beforePanel.label === candidate.label ? 90 : 0)
+          + Math.max(0, 35 - Math.abs(beforePanel.index - candidate.index) * 8),
+      }))
+      .sort((left, right) => right.score - left.score);
+    const match = (ranked[0]?.score || 0) >= 27 ? ranked[0].candidate : null;
+    pairIndex += 1;
+    const key = `panel-${pairIndex}`;
+    setPanelDescriptorKey(beforePanel, key);
+    if (match) {
+      usedAfter.add(match);
+      setPanelDescriptorKey(match, key);
+    }
+  });
+  afterPanels.forEach((descriptor) => {
+    if (usedAfter.has(descriptor)) return;
+    pairIndex += 1;
+    setPanelDescriptorKey(descriptor, `panel-${pairIndex}`);
+  });
+}
+
+type ActionDescriptor = {
+  element: Element;
+  explicitIdentity: string;
+  label: string;
+  kind: string;
+  panelKey: string;
+  ordinal: number;
+  index: number;
+};
+
+function actionDescriptors(document: Document): ActionDescriptor[] {
+  const actions = [...document.querySelectorAll(
+    'a[href], area[href], button, input, select, textarea, summary, [role="button"], [role="tab"], [aria-expanded][aria-controls], [onclick]',
+  )];
+  const ordinals = new Map<string, number>();
+  return actions.map((element, index) => {
+    const panelKey = element.closest("[data-pageroot-review-panel-key]")
+      ?.getAttribute("data-pageroot-review-panel-key") || "";
+    const kind = `${element.tagName.toLowerCase()}:${element.getAttribute("role") || ""}:${element.getAttribute("type") || ""}`;
+    const ordinalGroup = `${panelKey || "page"}:${kind}`;
+    const ordinal = (ordinals.get(ordinalGroup) || 0) + 1;
+    ordinals.set(ordinalGroup, ordinal);
+    return {
+      element,
+      panelKey,
+      kind,
+      ordinal,
+      index,
+      explicitIdentity: normalizedPanelLabel([
+        element.id,
+        element.getAttribute("name"),
+        element.getAttribute("aria-controls"),
+        element.getAttribute("data-p"),
+        element.getAttribute("data-tab"),
+        element.getAttribute("data-page"),
+        element.getAttribute("href"),
+      ].find((value) => Boolean(value?.trim())) || ""),
+      label: normalizedPanelLabel(
+        element.getAttribute("aria-label")
+        || element.getAttribute("title")
+        || conciseElementText(element),
+      ),
+    };
+  });
+}
+
+function annotateActionPairs(before: Document, after: Document) {
+  const beforeActions = actionDescriptors(before);
+  const afterActions = actionDescriptors(after);
+  const usedAfter = new Set<ActionDescriptor>();
+  let pairIndex = 0;
+  beforeActions.forEach((beforeAction) => {
+    const ranked = afterActions
+      .filter((candidate) => !usedAfter.has(candidate))
+      .map((candidate) => {
+        if (beforeAction.kind !== candidate.kind) return { candidate, score: -1 };
+        if (beforeAction.panelKey !== candidate.panelKey) return { candidate, score: -1 };
+        return {
+          candidate,
+          score: 45
+            + (beforeAction.explicitIdentity
+              && beforeAction.explicitIdentity === candidate.explicitIdentity ? 120 : 0)
+            + (beforeAction.label && beforeAction.label === candidate.label ? 55 : 0)
+            + (beforeAction.ordinal === candidate.ordinal ? 35 : 0)
+            + Math.max(0, 18 - Math.abs(beforeAction.index - candidate.index) * 3),
+        };
+      })
+      .sort((left, right) => right.score - left.score);
+    const match = (ranked[0]?.score || 0) >= 45 ? ranked[0].candidate : null;
+    pairIndex += 1;
+    const key = `action-${pairIndex}`;
+    beforeAction.element.setAttribute("data-pageroot-review-action-key", key);
+    if (match) {
+      usedAfter.add(match);
+      match.element.setAttribute("data-pageroot-review-action-key", key);
+    }
+  });
+  afterActions.forEach((descriptor) => {
+    if (usedAfter.has(descriptor)) return;
+    pairIndex += 1;
+    descriptor.element.setAttribute("data-pageroot-review-action-key", `action-${pairIndex}`);
   });
 }
 
@@ -1191,13 +1246,20 @@ function hasDirectReviewText(element: Element): boolean {
 }
 
 function reviewTextBlocks(region: Element): Element[] {
+  const explicitBlockSelector = "h1, h2, h3, h4, h5, h6, p, li, dt, dd, th, td, caption, figcaption, blockquote, label, button, summary, [role='heading']";
   const candidates = [region, ...region.querySelectorAll("*")].filter((element) => (
     !NON_CONTENT_TAGS.has(element.tagName)
     && normalizedText(element).length > 0
     && (isTextBlock(element) || hasDirectReviewText(element))
+    && (
+      !GENERIC_TEXT_CONTAINER_TAGS.has(element.tagName)
+      || !element.querySelector(explicitBlockSelector)
+    )
   ));
   const blocks = candidates.filter((candidate) => !candidates.some((possibleParent) => (
-    possibleParent !== candidate && possibleParent.contains(candidate)
+    possibleParent !== candidate
+    && possibleParent.contains(candidate)
+    && !GENERIC_TEXT_CONTAINER_TAGS.has(possibleParent.tagName)
   )));
   return blocks.length ? blocks : [region];
 }
@@ -1665,6 +1727,17 @@ function annotateUnchangedSubtrees(
 ) {
   if (!root) return;
   const visit = (parent: Element) => {
+    const parentContainsChange = parent.matches(changedSelector)
+      || Boolean(parent.querySelector(changedSelector));
+    if (parentContainsChange) {
+      [...parent.childNodes].forEach((node) => {
+        if (node.nodeType !== 3 || !(node.textContent || "").trim()) return;
+        const context = parent.ownerDocument.createElement("span");
+        addReviewContextType(context, type);
+        context.textContent = node.textContent;
+        node.replaceWith(context);
+      });
+    }
     eligibleChildren(parent).forEach((child) => {
       const changed = child.matches(changedSelector);
       const containsChange = Boolean(child.querySelector(changedSelector));
@@ -1678,6 +1751,19 @@ function annotateUnchangedSubtrees(
   visit(root);
 }
 
+function annotateDocumentContexts(document: Document) {
+  const root = document.body;
+  if (!root) return;
+  annotateUnchangedSubtrees(root, "text", "[data-pageroot-review-text]");
+  annotateUnchangedSubtrees(root, "structure", "[data-pageroot-review-structure]");
+  annotateUnchangedSubtrees(root, "style", "[data-pageroot-review-style]");
+  annotateUnchangedSubtrees(
+    root,
+    "all",
+    "[data-pageroot-review-text], [data-pageroot-review-structure], [data-pageroot-review-style]",
+  );
+}
+
 function annotateChangePair(
   pair: SectionPair,
   types: ReviewChangeType[],
@@ -1687,22 +1773,6 @@ function annotateChangePair(
   }
   if (types.includes("structure")) markStructureDifferences(pair);
   if (types.includes("style")) markStyleDifferences(pair.before, pair.after);
-  [pair.before, pair.after].forEach((root) => {
-    if (types.includes("text")) {
-      annotateUnchangedSubtrees(root, "text", "[data-pageroot-review-text]");
-    }
-    if (types.includes("structure")) {
-      annotateUnchangedSubtrees(root, "structure", "[data-pageroot-review-structure]");
-    }
-    if (types.includes("style")) {
-      annotateUnchangedSubtrees(root, "style", "[data-pageroot-review-style]");
-    }
-    annotateUnchangedSubtrees(
-      root,
-      "all",
-      "[data-pageroot-review-text], [data-pageroot-review-structure], [data-pageroot-review-style]",
-    );
-  });
 }
 
 function attachChangeMarkerMetadata(
@@ -1852,8 +1922,16 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
   const mirrorAction = (message) => {
     const actionKey = safeKey(message.actionKey);
     if (!actionKey) return;
-    const action = actionForKey(actionKey);
-    if (!(action instanceof HTMLElement) || action.matches(":disabled")) return;
+    let action = actionForKey(actionKey);
+    const actionActivatesRequestedPanel = action
+      && isSafePanelControl(action)
+      && action.getAttribute("data-pageroot-review-panel-key") === safeKey(message.panelKey);
+    if (message.panelKey && !actionActivatesRequestedPanel) activatePanelKey(message.panelKey);
+    action = actionForKey(actionKey);
+    if (!(action instanceof HTMLElement) || action.matches(":disabled")) {
+      post("action-applied", { actionKey, applied: false });
+      return;
+    }
     mirroringAction = true;
     try {
       if (message.actionType === "control-state") {
@@ -1872,6 +1950,7 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
       queueMicrotask(() => {
         mirroringAction = false;
         scheduleOverlayRender();
+        requestAnimationFrame(() => post("action-applied", { actionKey, applied: true }));
       });
     }
   };
@@ -1988,20 +2067,56 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
     scrollTo({ top: programmaticScrollTop, left: Number(message.left || 0), behavior: "auto" });
     releaseProgrammaticScroll(token);
   };
-  const markerTone = (element, filter) => {
-    const types = String(element.getAttribute("data-pageroot-review-marker-types") || "").split(/\s+/);
-    if (filter !== "all") return filter;
-    if (types.includes("structure")) return "structure";
-    if (types.includes("style")) return "style";
-    return "text";
+  const markerTypes = (element) => String(
+    element.getAttribute("data-pageroot-review-marker-types") || "",
+  ).split(/\s+/).filter(Boolean);
+  const recordsAreClose = (left, right, gap = 10) => {
+    const horizontalOverlap = Math.max(0, Math.min(left.right, right.right) - Math.max(left.left, right.left));
+    const verticalOverlap = Math.max(0, Math.min(left.bottom, right.bottom) - Math.max(left.top, right.top));
+    const minimumWidth = Math.max(1, Math.min(left.right - left.left, right.right - right.left));
+    const minimumHeight = Math.max(1, Math.min(left.bottom - left.top, right.bottom - right.top));
+    const horizontalGap = Math.max(0, Math.max(left.left, right.left) - Math.min(left.right, right.right));
+    const verticalGap = Math.max(0, Math.max(left.top, right.top) - Math.min(left.bottom, right.bottom));
+    return (horizontalOverlap > 0 && verticalOverlap > 0)
+      || (verticalGap <= gap && horizontalOverlap / minimumWidth >= .35)
+      || (horizontalGap <= gap && verticalOverlap / minimumHeight >= .35);
+  };
+  const mergeRecordGroup = (records) => ({
+    ...records[0],
+    left: Math.min(...records.map((record) => record.left)),
+    top: Math.min(...records.map((record) => record.top)),
+    right: Math.max(...records.map((record) => record.right)),
+    bottom: Math.max(...records.map((record) => record.bottom)),
+    types: [...new Set(records.flatMap((record) => record.types))],
+  });
+  const mergeConnectedRecords = (records, canMerge) => {
+    const remaining = [...records];
+    const merged = [];
+    while (remaining.length) {
+      const group = [remaining.shift()];
+      let expanded = true;
+      while (expanded) {
+        expanded = false;
+        for (let index = remaining.length - 1; index >= 0; index -= 1) {
+          if (!group.some((record) => canMerge(record, remaining[index]))) continue;
+          group.push(remaining.splice(index, 1)[0]);
+          expanded = true;
+        }
+      }
+      merged.push(mergeRecordGroup(group));
+    }
+    return merged;
+  };
+  const allModeSummary = (types) => {
+    const labels = [];
+    if (types.includes("text")) labels.push("文案");
+    if (types.includes("structure")) labels.push("结构");
+    if (types.includes("style")) labels.push("视觉");
+    return labels.length ? labels.join("、") + "变化" : "变化";
   };
   function renderReviewOverlays() {
     document.querySelector('[data-pageroot-review-overlay-layer]')?.remove();
     const filter = currentState.filter || "all";
-    if (filter === "overview") {
-      document.documentElement.dataset.pagerootReviewOverlays = "false";
-      return;
-    }
     const records = [];
     if ((filter === "all" || filter === "text") && side === "after") {
       document.querySelectorAll('[data-pageroot-review-text-group]').forEach((group) => {
@@ -2009,26 +2124,16 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
           .flatMap((element) => [...element.getClientRects()])
           .filter((rect) => rect.width > 1 && rect.height > 1);
         if (!rectangles.length) return;
-        const bounds = rectangles.reduce((current, rect) => ({
-          left: Math.min(current.left, rect.left),
-          top: Math.min(current.top, rect.top),
-          right: Math.max(current.right, rect.right),
-          bottom: Math.max(current.bottom, rect.bottom),
-        }), {
-          left: Number.POSITIVE_INFINITY,
-          top: Number.POSITIVE_INFINITY,
-          right: Number.NEGATIVE_INFINITY,
-          bottom: Number.NEGATIVE_INFINITY,
-        });
-        records.push({
+        rectangles.forEach((rect) => records.push({
           changeId: group.getAttribute("data-pageroot-review-marker") || "",
           summary: group.getAttribute("data-pageroot-review-summary") || "",
           tone: "text",
-          left: bounds.left + scrollX,
-          top: bounds.top + scrollY,
-          right: bounds.right + scrollX,
-          bottom: bounds.bottom + scrollY,
-        });
+          types: ["text"],
+          left: rect.left + scrollX,
+          top: rect.top + scrollY,
+          right: rect.right + scrollX,
+          bottom: rect.bottom + scrollY,
+        }));
       });
     }
     const selector = filter === "all"
@@ -2039,43 +2144,46 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
     if (selector) [...document.querySelectorAll(selector)]
       .filter((element) => !element.hasAttribute("data-pageroot-review-text-group"))
       .forEach((element) => {
-      const rect = element.getBoundingClientRect();
-      records.push({
-        changeId: element.getAttribute("data-pageroot-review-marker") || "",
-        summary: element.getAttribute("data-pageroot-review-summary") || "",
-        tone: markerTone(element, filter),
-        left: rect.left + scrollX,
-        top: rect.top + scrollY,
-        right: rect.right + scrollX,
-        bottom: rect.bottom + scrollY,
+        const rect = element.getBoundingClientRect();
+        const types = markerTypes(element).filter((type) => filter === "all" || type === filter);
+        records.push({
+          changeId: element.getAttribute("data-pageroot-review-marker") || "",
+          summary: element.getAttribute("data-pageroot-review-summary") || "",
+          tone: filter === "all" ? (types[0] || "structure") : filter,
+          types,
+          left: rect.left + scrollX,
+          top: rect.top + scrollY,
+          right: rect.right + scrollX,
+          bottom: rect.bottom + scrollY,
+        });
       });
-    });
     const visibleRecords = records
       .filter((rect) => rect.right - rect.left > 1 && rect.bottom - rect.top > 1)
       .sort((left, right) => left.changeId.localeCompare(right.changeId) || left.top - right.top || left.left - right.left);
-    const merged = [];
-    visibleRecords.forEach((record) => {
-      const previous = merged.at(-1);
-      const horizontalOverlap = previous
-        ? Math.max(0, Math.min(previous.right, record.right) - Math.max(previous.left, record.left))
-        : 0;
-      const minimumWidth = previous
-        ? Math.max(1, Math.min(previous.right - previous.left, record.right - record.left))
-        : 1;
-      const close = previous
-        && previous.changeId === record.changeId
-        && previous.tone === record.tone
-        && record.top <= previous.bottom + 12
-        && (horizontalOverlap / minimumWidth >= .2 || record.left <= previous.right + 12);
-      if (!close) {
-        merged.push({ ...record });
-        return;
-      }
-      previous.left = Math.min(previous.left, record.left);
-      previous.top = Math.min(previous.top, record.top);
-      previous.right = Math.max(previous.right, record.right);
-      previous.bottom = Math.max(previous.bottom, record.bottom);
-    });
+    const minimalRecords = visibleRecords.filter((record, index) => !visibleRecords.some((candidate, candidateIndex) => {
+      if (index === candidateIndex || record.changeId !== candidate.changeId || record.tone !== candidate.tone) return false;
+      const recordArea = (record.right - record.left) * (record.bottom - record.top);
+      const candidateArea = (candidate.right - candidate.left) * (candidate.bottom - candidate.top);
+      return candidateArea < recordArea * .86
+        && candidate.left >= record.left - 2
+        && candidate.top >= record.top - 2
+        && candidate.right <= record.right + 2
+        && candidate.bottom <= record.bottom + 2;
+    }));
+    let merged = mergeConnectedRecords(minimalRecords, (left, right) => (
+      left.changeId === right.changeId
+      && left.tone === right.tone
+      && recordsAreClose(left, right)
+    ));
+    if (filter === "all") {
+      merged = mergeConnectedRecords(merged, (left, right) => (
+        left.changeId === right.changeId && recordsAreClose(left, right, 8)
+      )).map((record) => ({
+        ...record,
+        tone: "all",
+        summary: allModeSummary(record.types),
+      }));
+    }
     if (!merged.length) {
       document.documentElement.dataset.pagerootReviewOverlays = "false";
       return;
@@ -2151,14 +2259,18 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
       : null;
     if (action && !mirroringAction && !mirroringPanel) {
       const actionKey = action.getAttribute("data-pageroot-review-action-key") || "";
+      const panelKey = action.closest("[data-pageroot-review-panel-key]")
+        ?.getAttribute("data-pageroot-review-panel-key") || "";
+      scheduleOverlayRender();
       requestAnimationFrame(() => {
-        post("action", { actionKey });
+        post("action", { actionKey, panelKey });
+        requestAnimationFrame(scheduleOverlayRender);
       });
     }
     const control = event.target instanceof Element
       ? event.target.closest('[role="tab"][data-pageroot-review-panel-key], button[aria-controls][data-pageroot-review-panel-key], button[data-p][data-pageroot-review-panel-key], button[data-tab][data-pageroot-review-panel-key]')
       : null;
-    if (control && !mirroringPanel && !action) {
+    if (control && !mirroringPanel && !mirroringAction) {
       const panelKey = control.getAttribute("data-pageroot-review-panel-key") || "";
       requestAnimationFrame(() => {
         scheduleOverlayRender();
@@ -2177,6 +2289,8 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
     if (!(action instanceof HTMLInputElement || action instanceof HTMLSelectElement || action instanceof HTMLTextAreaElement)) return;
     post("control-state", {
       actionKey: action.getAttribute("data-pageroot-review-action-key") || "",
+      panelKey: action.closest("[data-pageroot-review-panel-key]")
+        ?.getAttribute("data-pageroot-review-panel-key") || "",
       value: action.value,
       checked: action instanceof HTMLInputElement ? action.checked : undefined,
     });
@@ -2195,6 +2309,28 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
     });
   }, { passive: true });
   addEventListener("resize", scheduleOverlayRender, { passive: true });
+  const mutationObserver = new MutationObserver((mutations) => {
+    const onlyOverlayChanges = mutations.every((mutation) => {
+      const changedNodes = [...mutation.addedNodes, ...mutation.removedNodes];
+      return changedNodes.length > 0 && changedNodes.every((node) => (
+        node instanceof Element
+        && (node.matches("[data-pageroot-review-overlay-layer]")
+          || Boolean(node.closest("[data-pageroot-review-overlay-layer]")))
+      ));
+    });
+    if (!onlyOverlayChanges) scheduleOverlayRender();
+  });
+  if (document.body) mutationObserver.observe(document.body, {
+    subtree: true,
+    childList: true,
+    characterData: true,
+    attributes: true,
+    attributeFilter: ["aria-expanded", "aria-hidden", "aria-selected", "class", "hidden", "open", "style"],
+  });
+  const resizeObserver = typeof ResizeObserver === "function"
+    ? new ResizeObserver(scheduleOverlayRender)
+    : null;
+  if (resizeObserver && document.body) resizeObserver.observe(document.body);
   const announceReady = () => post("ready", {
     height: Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight || 0),
   });
@@ -2289,10 +2425,8 @@ export function buildReviewDocuments(
   const afterDocument = parser.parseFromString(afterHtml, "text/html");
   clearReservedReviewMarkup(beforeDocument);
   clearReservedReviewMarkup(afterDocument);
-  annotatePanelKeys(beforeDocument);
-  annotatePanelKeys(afterDocument);
-  annotateActionKeys(beforeDocument);
-  annotateActionKeys(afterDocument);
+  annotatePanelPairs(beforeDocument, afterDocument);
+  annotateActionPairs(beforeDocument, afterDocument);
   const pairs = pairSections(
     candidateSections(beforeDocument),
     candidateSections(afterDocument),
@@ -2349,6 +2483,9 @@ export function buildReviewDocuments(
       ...(movement ? { movement } : {}),
     });
   });
+
+  annotateDocumentContexts(beforeDocument);
+  annotateDocumentContexts(afterDocument);
 
   const preparedBefore = prepareDocument(
     beforeDocument,

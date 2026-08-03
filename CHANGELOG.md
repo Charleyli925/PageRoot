@@ -44,18 +44,18 @@ Notable user-visible changes are documented here. This project follows Semantic 
   side-by-side review and a secondary direct-open action, with full-page
   change filters, synchronized navigation, and a reversible return-before-AI
   confirmation before the same audited activation path is used.
-- Finalized the formal AI review workspace around one exclusive seven-state
-  model: `Dual / Left-before / Right-after` page preview plus `All / Copy /
-  Structure / Visual` change review. Navigation regions are now separate from
-  precise change markers; unchanged copy is never decorated, nearby changed
-  lines merge into bounded frames, and structure/CSS changes identify affected
-  nodes and properties. Safe authored Tabs, map navigation and next/previous
-  controls switch both pages together, while tokenized semantic scrolling no
-  longer bounces at page boundaries. Context visibility maps linearly from fully
-  hidden at 0 to unobscured at 100. Returning before AI now restores the prior
-  editable HTML with comments intact while preserving the candidate file and
-  audit record; opening the AI version skips the waiting screen and uses the
-  existing audited activation path.
+- Rebuilt the formal AI review workspace around independent page, change
+  filter, context visibility, navigation, page-runtime, scrolling and zoom
+  state. Page and filter buttons now remain selected independently, map
+  navigation no longer changes review display, and single- and dual-page views
+  fill the available Canvas with only minimal framing gaps.
+- Unified review frames and dimming on one typed change footprint. Copy uses
+  leaf-level exact ranges, unchanged content is dimmed across the entire page,
+  connected frames merge without crossing columns, contained ancestor frames
+  are removed, and All Changes fuses overlapping Copy/Structure/Visual frames
+  into one boundary. Before/after controls now use paired stable identities and
+  mirror Tabs, disclosures, buttons and form state in both directions even
+  while scrolling is independent; unsupported matches degrade silently.
 - Made review open directly on the first change in synchronized dual-page All
   mode with 18% context. Added copy keeps the page's authored styling and uses
   one merged dashed frame; removed copy keeps only its deletion treatment, and

@@ -5,6 +5,7 @@ import {
   useEffect,
   useId,
   useMemo,
+  useReducer,
   useRef,
   useState,
   useSyncExternalStore,
@@ -33,23 +34,22 @@ import { WarningCircleIcon } from "@phosphor-icons/react/dist/csr/WarningCircle"
 
 import {
   buildReviewDocuments,
-  type ReviewFilter,
   type ReviewDocuments,
   type ReviewSide,
 } from "./review-document";
+import {
+  DEFAULT_REVIEW_STATE,
+  reduceReviewState,
+  type ReviewChangeFilter,
+  type ReviewPageView,
+  type ReviewZoomMode,
+} from "./review-state";
 import {
   WorkbenchHeaderActions,
   WorkbenchHeaderShell,
 } from "./workbench-header-shell";
 import styles from "./ai-review-workspace.module.css";
 
-type ScrollMode = "linked" | "independent";
-type ZoomMode = "fit" | "actual";
-type CanvasView = "split" | ReviewSide;
-type PreviewDisplayMode = "preview-split" | "preview-before" | "preview-after";
-type ChangeDisplayMode = "diff-all" | "diff-text" | "diff-structure" | "diff-style";
-type ReviewDisplayMode = PreviewDisplayMode | ChangeDisplayMode;
-type ReviewChangeFilter = Exclude<ReviewFilter, "overview">;
 type ConfirmationAction = "return" | "accept";
 type ReviewDesktopSession = { sessionId: string; url: string };
 type ReviewDesktopSessions = Record<ReviewSide, ReviewDesktopSession>;
@@ -59,33 +59,17 @@ type ReviewDesktopSessionResult = {
   failed: boolean;
 };
 
-const FILTER_LABELS: Record<ReviewFilter, string> = {
-  overview: "双页",
+const FILTER_LABELS: Record<ReviewChangeFilter, string> = {
   all: "全部变化",
   text: "文案",
   structure: "结构",
   style: "视觉",
 };
 
-const DISPLAY_MODE_PROJECTION: Record<ReviewDisplayMode, {
-  canvasView: CanvasView;
-  filter: ReviewFilter;
-  label: string;
-}> = {
-  "preview-split": { canvasView: "split", filter: "overview", label: "双页" },
-  "preview-before": { canvasView: "before", filter: "overview", label: "左页 · 修改前" },
-  "preview-after": { canvasView: "after", filter: "overview", label: "右页 · AI 修改后" },
-  "diff-all": { canvasView: "split", filter: "all", label: "全部变化" },
-  "diff-text": { canvasView: "split", filter: "text", label: "文案变化" },
-  "diff-structure": { canvasView: "split", filter: "structure", label: "结构变化" },
-  "diff-style": { canvasView: "split", filter: "style", label: "视觉变化" },
-};
-
-const DISPLAY_MODE_BY_FILTER: Record<ReviewChangeFilter, ChangeDisplayMode> = {
-  all: "diff-all",
-  text: "diff-text",
-  structure: "diff-structure",
-  style: "diff-style",
+const PAGE_VIEW_LABELS: Record<ReviewPageView, string> = {
+  split: "双页",
+  before: "左页 · 修改前",
+  after: "右页 · AI 修改后",
 };
 
 const EMPTY_REVIEW_DOCUMENT = "<!doctype html><html><head><meta charset=\"utf-8\"></head><body></body></html>";
@@ -108,8 +92,6 @@ type ReviewMessage = {
   checked?: boolean;
   boundary?: "top" | "middle" | "bottom";
 };
-
-const DEFAULT_CONTEXT_VISIBILITY = 18;
 
 function postToFrame(
   frame: HTMLIFrameElement | null,
@@ -140,7 +122,7 @@ function ReviewDocumentPane({
   side: ReviewSide;
   html: string;
   label: string;
-  zoom: ZoomMode;
+  zoom: ReviewZoomMode;
   onFrame: (side: ReviewSide, frame: HTMLIFrameElement | null) => void;
   onScale: (side: ReviewSide, scale: number) => void;
   onViewport: (side: ReviewSide, viewport: HTMLDivElement | null) => void;
@@ -153,7 +135,6 @@ function ReviewDocumentPane({
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const [viewportSize, setViewportSize] = useState({ width: 590, height: 620 });
-  const targetViewportWidth = 1180;
 
   const assignViewport = useCallback((element: HTMLDivElement | null) => {
     viewportRef.current = element;
@@ -176,10 +157,11 @@ function ReviewDocumentPane({
     return () => observer.disconnect();
   }, []);
 
+  const documentViewportWidth = Math.max(1180, viewportSize.width);
   const scale = zoom === "fit"
-    ? Math.min(1, Math.max(.32, viewportSize.width / targetViewportWidth))
+    ? Math.min(1, viewportSize.width / documentViewportWidth)
     : 1;
-  const renderedWidth = targetViewportWidth * scale;
+  const renderedWidth = documentViewportWidth * scale;
   const iframeHeight = Math.max(620, viewportSize.height / scale);
 
   useEffect(() => {
@@ -234,7 +216,7 @@ function ReviewDocumentPane({
             sandbox="allow-scripts"
             referrerPolicy="no-referrer"
             style={{
-              width: targetViewportWidth,
+              width: documentViewportWidth,
               height: iframeHeight,
               transform: `scale(${scale})`,
               transformOrigin: "top left",
@@ -301,11 +283,18 @@ export default function AiReviewWorkspace({
           outline: [],
         }
   ), [afterHtml, beforeHtml, hydrated, independentTransport, sessionId, sourcePath]);
-  const [displayMode, setDisplayMode] = useState<ReviewDisplayMode>("diff-all");
-  const [focus, setFocus] = useState("all");
-  const [scrollMode, setScrollMode] = useState<ScrollMode>("linked");
-  const [zoom, setZoom] = useState<ZoomMode>("actual");
-  const [transparency, setTransparency] = useState(DEFAULT_CONTEXT_VISIBILITY);
+  const [reviewState, dispatchReviewState] = useReducer(
+    reduceReviewState,
+    DEFAULT_REVIEW_STATE,
+  );
+  const {
+    pageView: canvasView,
+    changeFilter: filter,
+    contextVisibility: transparency,
+    navigationTarget: focus,
+    scrollMode,
+    zoomMode: zoom,
+  } = reviewState;
   const [toolbarPinned, setToolbarPinned] = useState(false);
   const [mapPinned, setMapPinned] = useState(false);
   const [mapPeeked, setMapPeeked] = useState(false);
@@ -328,7 +317,6 @@ export default function AiReviewWorkspace({
   const scalesRef = useRef<Record<ReviewSide, number>>({ before: 1, after: 1 });
   const horizontalFollowerRef = useRef<ReviewSide | null>(null);
   const scrollSyncSequenceRef = useRef(0);
-  const { canvasView, filter } = DISPLAY_MODE_PROJECTION[displayMode];
   const reviewStateRef = useRef({ filter, focus, transparency });
   const desktopSessions = desktopSessionResult?.documents === documents
     ? desktopSessionResult.sessions
@@ -337,7 +325,7 @@ export default function AiReviewWorkspace({
     ? desktopSessionResult.failed
     : false;
   const navigableChanges = useMemo(() => (
-    filter === "overview" || filter === "all"
+    filter === "all"
       ? documents.changes
       : documents.changes.filter((change) => change.types.includes(filter))
   ), [documents.changes, filter]);
@@ -361,8 +349,10 @@ export default function AiReviewWorkspace({
   useEffect(() => {
     if (!hydrated || reviewInitializedRef.current) return;
     reviewInitializedRef.current = true;
-    setDisplayMode("diff-all");
-    setFocus(documents.changes[0]?.id || "all");
+    dispatchReviewState({
+      type: "set-navigation-target",
+      value: documents.changes[0]?.id || "all",
+    });
   }, [documents.changes, hydrated]);
 
   useEffect(() => {
@@ -487,13 +477,13 @@ export default function AiReviewWorkspace({
       }
       if (
         (message.type === "action" || message.type === "control-state")
-        && scrollMode === "linked"
         && message.actionKey
       ) {
         const follower: ReviewSide = message.side === "before" ? "after" : "before";
         postToFrame(framesRef.current[follower], sessionId, {
           type: "mirror-action",
           actionKey: message.actionKey,
+          panelKey: message.panelKey,
           actionType: message.type === "control-state" ? "control-state" : "click",
           value: message.value,
           checked: message.checked,
@@ -501,7 +491,6 @@ export default function AiReviewWorkspace({
         return;
       }
       if (message.type === "panel-change") {
-        if (scrollMode !== "linked") return;
         const follower: ReviewSide = message.side === "before" ? "after" : "before";
         postToFrame(framesRef.current[follower], sessionId, {
           type: "activate-panel",
@@ -571,16 +560,9 @@ export default function AiReviewWorkspace({
     }));
   }, [scrollMode]);
 
-  const selectChange = useCallback((changeId: string, preferredFilter?: ReviewChangeFilter) => {
+  const selectChange = useCallback((changeId: string) => {
     const selectedChange = documents.changes.find((change) => change.id === changeId);
-    setFocus(changeId);
-    const requested = preferredFilter || (filter === "overview" ? "all" : filter);
-    const resolvedFilter = selectedChange
-      && requested !== "all"
-      && !selectedChange.types.includes(requested)
-      ? "all"
-      : requested;
-    setDisplayMode(DISPLAY_MODE_BY_FILTER[resolvedFilter]);
+    dispatchReviewState({ type: "set-navigation-target", value: changeId });
     (["before", "after"] as ReviewSide[]).forEach((side) => {
       postToFrame(framesRef.current[side], sessionId, {
         type: "focus-change",
@@ -589,25 +571,14 @@ export default function AiReviewWorkspace({
         behavior: "smooth",
       });
     });
-  }, [documents.changes, filter, sessionId]);
+  }, [documents.changes, sessionId]);
 
   const selectReviewMode = useCallback((mode: ReviewChangeFilter) => {
-    const candidates = mode === "all"
-      ? documents.changes
-      : documents.changes.filter((change) => change.types.includes(mode));
-    const current = candidates.find((change) => change.id === focus);
-    const target = current || candidates[0];
-    if (!target) {
-      setDisplayMode(DISPLAY_MODE_BY_FILTER[mode]);
-      setFocus("all");
-      return;
-    }
-    selectChange(target.id, mode);
-  }, [documents.changes, focus, selectChange]);
+    dispatchReviewState({ type: "set-change-filter", value: mode });
+  }, []);
 
-  const selectPreviewMode = useCallback((mode: PreviewDisplayMode) => {
-    setDisplayMode(mode);
-    setFocus("all");
+  const selectPreviewMode = useCallback((mode: ReviewPageView) => {
+    dispatchReviewState({ type: "set-page-view", value: mode });
   }, []);
 
   const selectOutlineItem = useCallback((item: ReviewDocuments["outline"][number]) => {
@@ -615,8 +586,7 @@ export default function AiReviewWorkspace({
       selectChange(item.changeId);
       return;
     }
-    setDisplayMode("preview-split");
-    setFocus(item.id);
+    dispatchReviewState({ type: "set-navigation-target", value: item.id });
     (["before", "after"] as ReviewSide[]).forEach((side) => {
       postToFrame(framesRef.current[side], sessionId, {
         type: "focus-outline",
@@ -626,6 +596,20 @@ export default function AiReviewWorkspace({
       });
     });
   }, [selectChange, sessionId]);
+
+  const selectPageOverview = useCallback(() => {
+    dispatchReviewState({ type: "set-navigation-target", value: "all" });
+    (["before", "after"] as ReviewSide[]).forEach((side) => {
+      postToFrame(framesRef.current[side], sessionId, {
+        type: "sync-scroll",
+        syncToken: `overview-${Date.now()}`,
+        boundary: "top",
+        pageRatio: 0,
+        ratio: 0,
+        left: 0,
+      });
+    });
+  }, [sessionId]);
 
   const navigate = useCallback((direction: -1 | 1) => {
     if (!navigableChanges.length) return;
@@ -784,7 +768,7 @@ export default function AiReviewWorkspace({
                 </span>
               </div>
 
-              <div className={styles.reviewModeControl}>
+              <div className={`${styles.reviewModeControl} ${styles.pagePreviewControl}`}>
                 <span className={styles.toolbarFieldLabel}>页面预览</span>
                 <div
                   className={styles.segmented}
@@ -796,8 +780,8 @@ export default function AiReviewWorkspace({
                     type="button"
                     aria-label="双页对比（修改前与 AI 修改后）"
                     title="双页对比"
-                    aria-pressed={displayMode === "preview-split"}
-                    onClick={() => selectPreviewMode("preview-split")}
+                    aria-pressed={canvasView === "split"}
+                    onClick={() => selectPreviewMode("split")}
                     onKeyDown={handleSegmentedKeyDown}
                   >
                     <BrowsersIcon aria-hidden="true" size={14} weight="duotone" />
@@ -806,8 +790,8 @@ export default function AiReviewWorkspace({
                   <button
                     type="button"
                     aria-label={`单独查看修改前 ${beforeLabel}`}
-                    aria-pressed={displayMode === "preview-before"}
-                    onClick={() => selectPreviewMode("preview-before")}
+                    aria-pressed={canvasView === "before"}
+                    onClick={() => selectPreviewMode("before")}
                     onKeyDown={handleSegmentedKeyDown}
                   >
                     <CaretLeftIcon aria-hidden="true" size={14} weight="bold" />
@@ -816,8 +800,8 @@ export default function AiReviewWorkspace({
                   <button
                     type="button"
                     aria-label={`单独查看 AI 修改后 ${afterLabel}`}
-                    aria-pressed={displayMode === "preview-after"}
-                    onClick={() => selectPreviewMode("preview-after")}
+                    aria-pressed={canvasView === "after"}
+                    onClick={() => selectPreviewMode("after")}
                     onKeyDown={handleSegmentedKeyDown}
                   >
                     <CaretRightIcon aria-hidden="true" size={14} weight="bold" />
@@ -838,14 +822,12 @@ export default function AiReviewWorkspace({
                     step="1"
                     value={transparency}
                     aria-label="非修改区域上下文可见度"
-                    title="调整非修改区域；如果当前是双页总览，会先聚焦第一处变化"
+                    title="调整非修改区域的可见度"
                     style={{ "--mask-position": `${transparency}%` } as CSSProperties}
-                    onInput={(event) => {
-                      setTransparency(Number(event.currentTarget.value));
-                      if (focus === "all" && documents.changes[0]) {
-                        selectChange(documents.changes[0].id);
-                      }
-                    }}
+                    onInput={(event) => dispatchReviewState({
+                      type: "set-context-visibility",
+                      value: Number(event.currentTarget.value),
+                    })}
                   />
                 </label>
               </div>
@@ -881,10 +863,10 @@ export default function AiReviewWorkspace({
                 <div className={styles.toolbarField}>
                   <span className={styles.toolbarFieldLabel}>滚动方式</span>
                   <div className={styles.scrollSwitch} aria-label="滚动方式">
-                    <button type="button" aria-label="同步滚动" aria-pressed={scrollMode === "linked"} onClick={() => setScrollMode("linked")}>
+                    <button type="button" aria-label="同步滚动" aria-pressed={scrollMode === "linked"} onClick={() => dispatchReviewState({ type: "set-scroll-mode", value: "linked" })}>
                       <LinkIcon aria-hidden="true" size={12} weight="bold" /><span>同步</span>
                     </button>
-                    <button type="button" aria-label="独立滚动" aria-pressed={scrollMode === "independent"} onClick={() => setScrollMode("independent")}>
+                    <button type="button" aria-label="独立滚动" aria-pressed={scrollMode === "independent"} onClick={() => dispatchReviewState({ type: "set-scroll-mode", value: "independent" })}>
                       <LinkBreakIcon aria-hidden="true" size={12} weight="bold" /><span>独立</span>
                     </button>
                   </div>
@@ -892,10 +874,10 @@ export default function AiReviewWorkspace({
                 <div className={styles.toolbarField}>
                   <span className={styles.toolbarFieldLabel}>画布缩放</span>
                   <div className={styles.zoomSwitch} aria-label="画布缩放">
-                    <button type="button" aria-pressed={zoom === "fit"} onClick={() => setZoom("fit")}>
+                    <button type="button" aria-pressed={zoom === "fit"} onClick={() => dispatchReviewState({ type: "set-zoom-mode", value: "fit" })}>
                       <CornersOutIcon aria-hidden="true" size={12} /><span>适应</span>
                     </button>
-                    <button type="button" aria-pressed={zoom === "actual"} onClick={() => setZoom("actual")}>100%</button>
+                    <button type="button" aria-pressed={zoom === "actual"} onClick={() => dispatchReviewState({ type: "set-zoom-mode", value: "actual" })}>100%</button>
                   </div>
                 </div>
               </div>
@@ -915,7 +897,7 @@ export default function AiReviewWorkspace({
           </div>
 
           <div className={styles.canvasReviewBody}>
-            {filter !== "overview" && !navigableChanges.length ? (
+            {!navigableChanges.length ? (
               <div className={styles.emptyFilterNotice} role="status">
                 {filter === "all"
                   ? "本轮没有检测到变化，仍可查看双页"
@@ -991,8 +973,8 @@ export default function AiReviewWorkspace({
                 <button
                   className={styles.mapOverview}
                   type="button"
-                  aria-pressed={displayMode === "preview-split" && focus === "all"}
-                  onClick={() => selectPreviewMode("preview-split")}
+                  aria-pressed={focus === "all"}
+                  onClick={selectPageOverview}
                 >
                   <EyeIcon aria-hidden="true" size={15} weight="duotone" />
                   <span><strong>完整页面</strong><small>查看修改前与修改后</small></span>
@@ -1001,7 +983,7 @@ export default function AiReviewWorkspace({
                   {outlineGroups.map((group) => {
                     const matchingCount = group.items.filter((item) => (
                       Boolean(item.changeId)
-                      && (filter === "overview" || filter === "all" || item.types.includes(filter))
+                      && (filter === "all" || item.types.includes(filter))
                     )).length;
                     return (
                     <section className={styles.mapGroup} key={group.label}>
@@ -1010,9 +992,8 @@ export default function AiReviewWorkspace({
                         {group.items.map((item) => {
                           const itemIndex = documents.outline.findIndex((candidate) => candidate.id === item.id);
                           const selected = focus === (item.changeId || item.id);
-                          const matchesFilter = filter === "overview"
-                            || (Boolean(item.changeId)
-                              && (filter === "all" || item.types.includes(filter)));
+                          const matchesFilter = Boolean(item.changeId)
+                            && (filter === "all" || item.types.includes(filter));
                           return (
                             <li key={item.id}>
                               <button
@@ -1044,8 +1025,8 @@ export default function AiReviewWorkspace({
 
       <span className={styles.srAnnouncement} aria-live="polite">
         {focus === "all"
-          ? `已切换为${DISPLAY_MODE_PROJECTION[displayMode].label}`
-          : `已切换为${DISPLAY_MODE_PROJECTION[displayMode].label}，已聚焦${activeChange?.label || "页面区域"}`}
+          ? `${PAGE_VIEW_LABELS[canvasView]}，${FILTER_LABELS[filter]}`
+          : `${PAGE_VIEW_LABELS[canvasView]}，${FILTER_LABELS[filter]}，已定位${activeChange?.label || "页面区域"}`}
       </span>
 
       {confirmationAction ? (

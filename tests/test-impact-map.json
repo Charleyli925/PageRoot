@@ -362,6 +362,18 @@
       ]
     },
     {
+      "id": "ai-review-workspace",
+      "patterns": [
+        "^app/workbench/(?:AiReviewWorkspace|review-document|review-state)\\.(?:ts|tsx)$",
+        "^app/workbench/ai-review-workspace\\.module\\.css$",
+        "^tests/ai-review-workspace\\.test\\.mjs$",
+        "^tests/e2e/electron/ai-handoff-closed-loop\\.spec\\.mjs$",
+        "^docs/(?:AI_SUPPLEMENT_AND_VALIDATION|CHANGE_REQUEST_PROTOCOL|INTERACTION_FLOW|MVP_PRD)\\.md$"
+      ],
+      "suites": ["typecheck", "ai-smoke"],
+      "nodeTests": ["tests/ai-review-workspace.test.mjs"]
+    },
+    {
       "id": "workbench-lifecycle",
       "patterns": [
         "^app/workbench(?:\\.tsx|/.*\\.(?:ts|tsx))$",

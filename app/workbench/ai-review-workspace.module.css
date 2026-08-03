@@ -189,8 +189,8 @@
 .transparencyField > .toolbarFieldLabel {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  justify-content: flex-start;
+  gap: 1ch;
 }
 
 .transparencyField output {
@@ -269,6 +269,15 @@
 
 .segmented[data-items="3"] {
   grid-template-columns: repeat(3, minmax(56px, 1fr));
+}
+
+.pagePreviewControl {
+  align-items: flex-start;
+}
+
+.pagePreviewControl .segmented[data-items="3"] {
+  width: min(216px, 100%);
+  grid-template-columns: repeat(3, minmax(64px, 72px));
 }
 
 .segmented[data-items="4"] {
@@ -393,13 +402,13 @@
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 8px;
-  padding: 10px;
+  gap: 3px;
+  padding: 3px;
   transition: padding-top 210ms cubic-bezier(.2, .8, .2, 1);
 }
 
 .canvasReview[data-toolbar-open="true"] .canvasGrid {
-  padding-top: 118px;
+  padding-top: 117px;
 }
 
 .canvasGrid[data-view="before"],
@@ -418,9 +427,9 @@
   grid-template-rows: 36px minmax(0, 1fr);
   overflow: hidden;
   border: 1px solid #d9dade;
-  border-radius: 12px;
+  border-radius: 7px;
   background: #fff;
-  box-shadow: 0 5px 14px rgb(28 29 37 / 9%);
+  box-shadow: 0 2px 7px rgb(28 29 37 / 7%);
 }
 
 .documentPaneHeader {
