@@ -52,6 +52,7 @@ const pairs = [
   ["runtime-state.v3.schema.json", "runtime-state.ready-to-open.json"],
   ["runtime-state.v3.schema.json", "runtime-state.ready.json"],
   ["runtime-state.v3.schema.json", "runtime-state.submitting.json"],
+  ["source-history.v1.schema.json", "source-history.current.json"],
   [
     "runtime-state.v3.schema.json",
     "runtime-state.recovering-transaction.json",

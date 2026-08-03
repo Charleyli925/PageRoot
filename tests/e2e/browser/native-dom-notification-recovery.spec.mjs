@@ -116,8 +116,14 @@ test.describe("notification recovery paths", () => {
     await composer.getByRole("textbox", { name: "评论内容" }).fill(firstComment);
     await composer.getByRole("button", { name: "关闭评论编辑器" }).click();
 
-    const recoveryCard = page.getByRole("region", { name: "未保存评论" });
+    const recoveryCard = page.locator(
+      ".comment-rail-content > .draft-comment-card",
+    );
+    const unsavedShortcut = page.getByRole("button", {
+      name: "有一条未保存评论",
+    });
     await expect(recoveryCard).toHaveCount(1);
+    await expect(unsavedShortcut).toHaveCount(1);
     await secondTarget.click();
     await commentButton.click();
 
@@ -132,9 +138,11 @@ test.describe("notification recovery paths", () => {
     await notice.getByRole("button", { name: "继续填写" }).click();
     await expect(composer.getByRole("textbox", { name: "评论内容" }))
       .toHaveValue(firstComment);
+    await expect(unsavedShortcut).toHaveCount(1);
     await composer.getByRole("button", { name: "评论", exact: true }).click();
     await expect(page.locator(".comment-card").filter({ hasText: firstComment }))
       .toBeVisible();
+    await expect(unsavedShortcut).toHaveCount(0);
 
     await secondTarget.click();
     await commentButton.click();

@@ -227,7 +227,8 @@
       "id": "ci-evidence",
       "patterns": [
         "^scripts/ci-evidence\\.mjs$",
-        "^tests/ci-evidence\\.test\\.mjs$"
+        "^tests/ci-evidence\\.test\\.mjs$",
+        "^\\.github/workflows/(?:ci|developer-preview|release|release-candidate)\\.yml$"
       ],
       "suites": [],
       "nodeTests": ["tests/ci-evidence.test.mjs"]
@@ -255,8 +256,12 @@
     {
       "id": "task-workflow",
       "patterns": [
+        "^\\.github/workflows/ci\\.yml$",
         "^AGENTS\\.md$",
-        "^docs/CODEX_WORKFLOW\\.md$",
+        "^CONTRIBUTING\\.md$",
+        "^docs/(?:CODEX_WORKFLOW|DEVELOPMENT|GIT_WORKFLOW)\\.md$",
+        "^docs/decisions/0010-worktree-branch-lifecycle\\.md$",
+        "^package\\.json$",
         "^scripts/task-workflow\\.mjs$",
         "^tests/task-workflow\\.test\\.mjs$"
       ],
@@ -266,76 +271,97 @@
     {
       "id": "state-architecture",
       "patterns": [
-        "^app/application/(?:bridge-client|draft-session|drain-coordinator|project-query-fence|recovery-store|runtime-capabilities)\\.(?:js|d\\.ts)$",
-        "^app/domain/(?:draft-aggregate|run-lifecycle)\\.(?:js|d\\.ts)$",
-        "^shared/draft-aggregate\\.mjs$",
-        "^scripts/(?:check-architecture|draft-aggregate|draft-service)\\.mjs$",
-        "^tests/(?:architecture-boundaries|bridge-client|draft-aggregate|draft-service|draft-session|drain-coordinator|project-query-fence|recovery-store|run-lifecycle|runtime-capabilities)\\.test\\.mjs$",
+        "^app/application/(?:bridge-client|comment-session|document-session|draft-session|drain-coordinator|project-query-fence|project-rules-session|project-session|recovery-store|run-session|runtime-capabilities|source-history-session|version-session)\\.(?:js|d\\.ts)$",
+        "^app/domain/(?:draft-aggregate|run-lifecycle|source-history)\\.(?:js|d\\.ts)$",
+        "^shared/(?:draft-aggregate|source-history)\\.mjs$",
+        "^scripts/(?:check-architecture|draft-aggregate|draft-service|project-context-service|source-history-service)\\.mjs$",
+        "^tests/(?:architecture-boundaries|bridge-client|comment-session|document-session|draft-aggregate|draft-service|draft-session|drain-coordinator|project-query-fence|project-rules-session|project-session|recovery-store|run-lifecycle|run-session|runtime-capabilities|source-history|source-history-session|version-session)\\.test\\.mjs$",
         "^(?:CONTRIBUTING|docs/(?:ARCHITECTURE|ARCHITECTURE_CONTRACT|STATE_OWNERSHIP|ENGINEERING_STANDARDS))\\.md$",
-        "^docs/decisions/(?:0003-session-ownership-and-mutation-outcomes|0004-v2-editable-islands)\\.md$"
+        "^docs/decisions/(?:0003-session-ownership-and-mutation-outcomes|0004-v2-editable-islands|0007-independent-interactive-preview|0008-safe-presentation-actions-in-edit-mode|0009-persistent-source-patch-history|0011-workbench-session-decomposition|0012-id-first-project-context)\\.md$"
       ],
       "suites": ["typecheck"],
       "nodeTests": [
         "tests/architecture-boundaries.test.mjs",
         "tests/bridge-client.test.mjs",
+        "tests/comment-session.test.mjs",
+        "tests/document-session.test.mjs",
         "tests/draft-aggregate.test.mjs",
         "tests/draft-service.test.mjs",
         "tests/draft-session.test.mjs",
         "tests/drain-coordinator.test.mjs",
         "tests/project-query-fence.test.mjs",
+        "tests/project-context-service.test.mjs",
+        "tests/project-rules-session.test.mjs",
+        "tests/project-session.test.mjs",
         "tests/recovery-store.test.mjs",
         "tests/run-lifecycle.test.mjs",
-        "tests/runtime-capabilities.test.mjs"
+        "tests/run-session.test.mjs",
+        "tests/runtime-capabilities.test.mjs",
+        "tests/source-history.test.mjs",
+        "tests/source-history-session.test.mjs",
+        "tests/version-session.test.mjs"
       ]
     },
     {
       "id": "source-editing-core",
       "patterns": [
-        "^app/lib/(?:editable-island|source-(?:index|patch-core|patch-engine|text-map)|target-resolver|runtime-dom-source-map|format-skeleton|native-(?:edit-capability|edit-policy|edit-transaction|input-intent|structural-edit-planner|source-map|block-edit-draft))\\.(?:js|ts|d\\.ts)$",
+        "^app/lib/(?:canvas-target-rebind|editable-island|native-dom-logical-index|page-view-context|source-(?:index|patch-core|patch-engine|text-map)|target-resolver|runtime-dom-source-map|native-(?:edit-capability|edit-policy))\\.(?:js|ts|d\\.ts)$",
         "^scripts/(?:source-index|source-patch-engine|target-resolver)\\.mjs$"
       ],
       "suites": ["typecheck", "browser-smoke", "electron-smoke"],
       "nodeTests": [
+        "tests/canvas-target-rebind.test.mjs",
         "tests/source-index-target-resolver.test.mjs",
+        "tests/page-view-context.test.mjs",
         "tests/source-patch-engine.test.mjs",
         "tests/editable-island.test.mjs",
         "tests/source-text-map.test.mjs",
         "tests/runtime-dom-source-map.test.mjs",
-        "tests/format-skeleton.test.mjs",
         "tests/native-edit-capability.test.mjs",
         "tests/native-edit-policy.test.mjs",
-        "tests/native-input-intent.test.mjs",
-        "tests/native-structural-edit-planner.test.mjs",
-        "tests/native-edit-transaction.test.mjs",
-        "tests/native-block-edit-draft.test.mjs",
-        "tests/native-source-map-fuzz.test.mjs",
         "tests/generated-source-invariants.test.mjs"
       ]
     },
     {
-      "id": "native-controller",
+      "id": "v2-island-controller",
       "patterns": [
-        "^app/components/(?:HtmlCanvasEditor|IslandEditingController|NativeEditingController|native-edit-types|native-edit-runtime-preflight|html-preview-sandbox)\\.(?:tsx|ts|js|d\\.ts)$"
+        "^app/components/(?:HtmlCanvasEditor(?:\\.types)?|html-canvas-(?:dom|interaction|internal-types|page-view|preview-sync|selection|style-inspector)|IslandEditingController|native-edit-types|native-edit-runtime-preflight|html-preview-sandbox)\\.(?:tsx|ts|js|d\\.ts)$"
       ],
       "suites": ["typecheck", "browser-smoke", "electron-smoke"],
       "nodeTests": [
-        "tests/native-edit-transaction.test.mjs",
         "tests/editable-island.test.mjs",
         "tests/runtime-dom-source-map.test.mjs",
         "tests/source-text-map.test.mjs",
-        "tests/format-skeleton.test.mjs",
         "tests/native-command-queue-contract.test.mjs",
         "tests/native-layout-guard.test.mjs",
         "tests/html-preview-sandbox.test.mjs",
+        "tests/rendered-html.test.mjs",
         "tests/workbench-source-fence-contract.test.mjs"
       ]
     },
     {
+      "id": "comment-rail-layout",
+      "patterns": [
+        "^app/lib/comment-rail-layout\\.js$",
+        "^tests/comment-rail-layout\\.test\\.mjs$"
+      ],
+      "suites": ["typecheck", "browser-smoke"],
+      "nodeTests": [
+        "tests/comment-rail-layout.test.mjs",
+        "tests/workbench-shell-ux.test.mjs"
+      ]
+    },
+    {
       "id": "workbench-lifecycle",
-      "patterns": ["^app/workbench\\.tsx$"],
+      "patterns": [
+        "^app/workbench(?:\\.tsx|/.*\\.(?:ts|tsx))$",
+        "^app/lib/comment-rail-layout\\.js$",
+        "^tests/(?:comment-rail-layout\\.test|source-architecture-fixture)\\.mjs$"
+      ],
       "suites": ["typecheck", "browser-smoke", "electron-smoke", "ai-smoke"],
       "nodeTests": [
         "tests/direct-edit-events.test.mjs",
+        "tests/comment-rail-layout.test.mjs",
         "tests/frontend-target-refresh.test.mjs",
         "tests/notification-policy.test.mjs",
         "tests/notification-ui.test.mjs",
@@ -377,7 +403,7 @@
       "id": "desktop-runtime",
       "patterns": [
         "^desktop/.*\\.(?:mjs|tsx|ts|html)$",
-        "^tests/open-in-default-browser\\.test\\.mjs$"
+        "^tests/(?:open-in-default-browser|preview-protocol)\\.test\\.mjs$"
       ],
       "suites": ["electron-smoke"],
       "nodeTests": [
@@ -389,6 +415,7 @@
         "tests/bridge-shutdown.test.mjs",
         "tests/export-copy.test.mjs",
         "tests/open-in-default-browser.test.mjs",
+        "tests/preview-protocol.test.mjs",
         "tests/desktop-package.test.mjs",
         "tests/usage-telemetry.test.mjs"
       ]
@@ -405,7 +432,7 @@
     {
       "id": "bridge-lifecycle",
       "patterns": [
-        "^scripts/(?:workspace-bridge|lifecycle-core|finalize-attempt|record-user-supplement|user-supplement-core|scope-validator|html-source-parser|attachment-storage|draft-aggregate|draft-service|product-contract|target-identity)\\.mjs$"
+        "^scripts/(?:workspace-bridge|lifecycle-core|finalize-attempt|record-user-supplement|user-supplement-core|scope-validator|html-source-parser|attachment-storage|draft-aggregate|draft-service|project-context-service|source-history-service|product-contract|target-identity)\\.mjs$"
       ],
       "suites": ["ai-smoke"],
       "nodeTests": [
@@ -415,13 +442,17 @@
         "tests/html-source-parser.test.mjs",
         "tests/attachment-storage.test.mjs",
         "tests/product-contract.test.mjs",
+        "tests/project-context-service.test.mjs",
         "tests/targeted-change-schema.test.mjs",
         "tests/user-supplement.test.mjs"
       ]
     },
     {
       "id": "schemas",
-      "patterns": ["^schemas/.*\\.json$"],
+      "patterns": [
+        "^schemas/.*\\.json$",
+        "^fixtures/v3/source-history\\.current\\.json$"
+      ],
       "suites": [],
       "nodeTests": [
         "tests/schema-contract.test.mjs",
@@ -445,7 +476,7 @@
     {
       "id": "packaging",
       "patterns": [
-        "^(?:package(?:-lock)?\\.json|PageRoot 用户声明与免责声明\\.txt|desktop/after-pack\\.mjs|desktop/resources/.*|scripts/(?:build-package|create-release-assets|developer-preview|release-app-(?:checkpoint|stage)|release-candidate-provenance|release-provenance|source-gate-provenance|verify-packaged-artifact)\\.mjs)$"
+        "^(?:\\.github/workflows/release-candidate\\.yml|package(?:-lock)?\\.json|PageRoot 用户声明与免责声明\\.txt|desktop/after-pack\\.mjs|desktop/resources/.*|scripts/(?:build-package|create-release-assets|developer-preview|release-app-(?:checkpoint|stage)|release-candidate-provenance|release-provenance|source-gate-provenance|verify-packaged-artifact)\\.mjs)$"
       ],
       "suites": [],
       "nodeTests": [

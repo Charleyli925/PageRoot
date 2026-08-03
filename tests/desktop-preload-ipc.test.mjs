@@ -52,6 +52,8 @@ async function loadPreloadApis(invoke) {
     runtime: exposed.get("htmlAIRuntime"),
     lifecycle: exposed.get("htmlAIAppLifecycle"),
     usage: exposed.get("htmlAIUsage"),
+    preview: exposed.get("htmlAIPreview"),
+    edit: exposed.get("htmlAIEdit"),
     sent,
     emit(channel, payload) {
       listeners.get(channel)?.({}, payload);
@@ -78,7 +80,48 @@ test("preload declares one immutable desktop runtime capability manifest", async
   assert.equal(runtime.capabilities.projectOpening, "desktop-dialog");
   assert.equal(runtime.capabilities.attachmentPersistence, "bridge");
   assert.equal(runtime.capabilities.closeCoordination, "electron-handshake");
+  assert.equal(runtime.capabilities.interactivePreview, "independent-url");
   assert.equal(Object.isFrozen(runtime.capabilities), true);
+});
+
+test("preload exposes only preview session creation and revocation", async () => {
+  const calls = [];
+  const { preview } = await loadPreloadApis(async (...args) => {
+    calls.push(args);
+    if (args[0] === "html-preview:create-session") {
+      return success({
+        sessionId: "0123456789abcdef0123456789abcdef",
+        url: "pageroot-preview://0123456789abcdef0123456789abcdef/index.html",
+      });
+    }
+    return success({ revoked: true });
+  });
+  const payload = {
+    html: "<!doctype html><p>preview</p>",
+    bootstrapJavaScript: "void 0;",
+    sourcePath: "/Users/demo/report.html",
+  };
+
+  assert.deepEqual(
+    await preview.createSession(payload),
+    {
+      sessionId: "0123456789abcdef0123456789abcdef",
+      url: "pageroot-preview://0123456789abcdef0123456789abcdef/index.html",
+    },
+  );
+  assert.deepEqual(calls[0], ["html-preview:create-session", payload]);
+  assert.deepEqual(
+    await preview.revokeSession("0123456789abcdef0123456789abcdef"),
+    { revoked: true },
+  );
+  assert.deepEqual(calls[1], [
+    "html-preview:revoke-session",
+    "0123456789abcdef0123456789abcdef",
+  ]);
+  assert.deepEqual(Object.keys(preview).sort(), [
+    "createSession",
+    "revokeSession",
+  ]);
 });
 
 test("preload exposes one fire-and-forget usage channel with a narrow payload", async () => {
@@ -124,6 +167,33 @@ test("preload exposes one fire-and-forget usage channel with a narrow payload", 
   );
   assert.equal(preload.sent.length, 1);
   assert.deepEqual(Object.keys(preload.usage), ["capture"]);
+});
+
+test("preload exposes one narrow native/source history router", async () => {
+  const calls = [];
+  const preload = await loadPreloadApis(async (...args) => {
+    calls.push(args);
+    return { applied: true };
+  });
+  const requested = [];
+  const unsubscribe = preload.edit.onHistoryRequested((direction) => {
+    requested.push(direction);
+  });
+  preload.emit("html-edit:history-requested", { direction: "undo" });
+  preload.emit("html-edit:history-requested", { direction: "invalid" });
+  assert.deepEqual(requested, ["undo"]);
+  assert.deepEqual(
+    await preload.edit.runNativeHistory("redo"),
+    { applied: true },
+  );
+  assert.deepEqual(calls, [["html-edit:native-history", "redo"]]);
+  assert.throws(
+    () => preload.edit.runNativeHistory("invalid"),
+    /direction must be undo or redo/,
+  );
+  unsubscribe();
+  preload.emit("html-edit:history-requested", { direction: "redo" });
+  assert.deepEqual(requested, ["undo"]);
 });
 
 test("preload unwraps structured project IPC success results", async () => {

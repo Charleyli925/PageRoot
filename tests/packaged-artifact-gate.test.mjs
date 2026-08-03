@@ -71,6 +71,7 @@ async function createPackagedFixture(t) {
           filter: [
             "runtime-state.v3.schema.json",
             "scope-report.v1.schema.json",
+            "source-history.v1.schema.json",
             "user-supplement.v1.schema.json",
           ],
         },
@@ -131,6 +132,7 @@ async function createPackagedFixture(t) {
     "desktop/manual-update.mjs",
     "desktop/application-update.mjs",
     "desktop/usage-telemetry.mjs",
+    "desktop/preview-protocol.mjs",
     "public/brand-logo.png",
     "dist-desktop/renderer/index.html",
   ]) {
@@ -153,6 +155,8 @@ async function createPackagedFixture(t) {
     "attachment-storage.mjs",
     "draft-aggregate.mjs",
     "draft-service.mjs",
+    "project-context-service.mjs",
+    "source-history-service.mjs",
   ]) {
     await writeFixtureFile(
       fixtureProductRoot,
@@ -174,6 +178,7 @@ async function createPackagedFixture(t) {
   }
   await writeFixtureFile(fixtureProductRoot, "schemas/runtime-state.v3.schema.json", "{\"type\":\"object\"}\n");
   await writeFixtureFile(fixtureProductRoot, "schemas/scope-report.v1.schema.json", "{\"type\":\"object\"}\n");
+  await writeFixtureFile(fixtureProductRoot, "schemas/source-history.v1.schema.json", "{\"type\":\"object\"}\n");
   await writeFixtureFile(fixtureProductRoot, "schemas/user-supplement.v1.schema.json", "{\"type\":\"object\"}\n");
 
   const appPath = path.join(
@@ -222,6 +227,7 @@ async function createPackagedFixture(t) {
     "desktop/manual-update.mjs",
     "desktop/application-update.mjs",
     "desktop/usage-telemetry.mjs",
+    "desktop/preview-protocol.mjs",
     "public/brand-logo.png",
     "package.json",
   ]) {
@@ -243,6 +249,8 @@ async function createPackagedFixture(t) {
     "attachment-storage.mjs",
     "draft-aggregate.mjs",
     "draft-service.mjs",
+    "project-context-service.mjs",
+    "source-history-service.mjs",
   ]) {
     const destination = path.join(resourcesPath, "bridge", fileName);
     await mkdir(path.dirname(destination), { recursive: true });
@@ -261,6 +269,19 @@ async function createPackagedFixture(t) {
     await writeFixtureFile(
       resourcesPath,
       "shared/draft-aggregate.mjs",
+      "",
+    ),
+  );
+  await writeFixtureFile(
+    fixtureProductRoot,
+    "shared/source-history.mjs",
+    "export const fixtureSourceHistory = true;\n",
+  );
+  await copyFile(
+    path.join(fixtureProductRoot, "shared/source-history.mjs"),
+    await writeFixtureFile(
+      resourcesPath,
+      "shared/source-history.mjs",
       "",
     ),
   );
@@ -284,7 +305,12 @@ async function createPackagedFixture(t) {
       );
     }
   }
-  for (const fileName of ["runtime-state.v3.schema.json", "scope-report.v1.schema.json", "user-supplement.v1.schema.json"]) {
+  for (const fileName of [
+    "runtime-state.v3.schema.json",
+    "scope-report.v1.schema.json",
+    "source-history.v1.schema.json",
+    "user-supplement.v1.schema.json",
+  ]) {
     const destination = path.join(resourcesPath, "schemas", fileName);
     await mkdir(path.dirname(destination), { recursive: true });
     await copyFile(path.join(fixtureProductRoot, "schemas", fileName), destination);
@@ -508,8 +534,8 @@ test("DMG stapling refreshes only its final latest-mac metadata entry", async (t
 test("retired editor guard rejects dependencies, bundled code, and legacy editing surfaces", () => {
   for (const contents of [
     "const nativeEditing = true; data-pageroot-runtime-node",
-    "replace-text-flow-range",
-    "planTextFlowRangePatch()",
+    "replace-editable-island",
+    "planEditableIslandPatch()",
     "plainTextFlow",
   ]) {
     assert.doesNotThrow(() => assertNoRetiredEditorArtifacts(
@@ -555,8 +581,8 @@ test("the app-bundle gate compares app.asar, Bridge scripts, schemas and plist v
     verifySignature: false,
   });
   assert.equal(result.version, "0.7.0");
-  assert.equal(result.asarFileCount, 19);
-  assert.equal(result.schemaFileCount, 3);
+  assert.equal(result.asarFileCount, 20);
+  assert.equal(result.schemaFileCount, 4);
   assert.equal(result.legalResourceCount, 5);
   assert.equal(result.telemetry.enabled, true);
   assert.equal(result.provenance.commitSha, "a".repeat(40));

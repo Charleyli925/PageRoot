@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>SVG 精确评论目标</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 48px;
+      font: 16px/1.6 system-ui, sans-serif;
+    }
+
+    svg {
+      width: 560px;
+      height: 280px;
+      overflow: visible;
+      border: 1px solid #e1e2e7;
+      border-radius: 16px;
+      background: #fff;
+    }
+  </style>
+</head>
+<body>
+  <main data-native-case="svg-chart-shell">
+    <svg
+      data-native-case="svg-chart"
+      viewBox="0 0 560 280"
+      aria-label="季度趋势总览"
+    >
+      <title>季度趋势总览</title>
+      <polyline
+        data-native-case="svg-line"
+        aria-label="第二季度折线"
+        points="40,220 160,170 280,190 400,90 520,60"
+        fill="none"
+        stroke="#5b55d9"
+        stroke-width="8"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+      <circle
+        data-native-case="svg-point"
+        aria-label="第二季度数据点"
+        cx="400"
+        cy="90"
+        r="12"
+        fill="#5b55d9"
+      />
+      <text
+        data-native-case="svg-label"
+        x="372"
+        y="128"
+        fill="#252631"
+      >Q2 42%</text>
+    </svg>
+  </main>
+</body>
+</html>

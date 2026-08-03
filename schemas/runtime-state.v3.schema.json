@@ -665,6 +665,14 @@
         "auditEvents",
         "queuedAt"
       ],
+      "dependentRequired": {
+        "recoverySourceHistoryRelativePath": [
+          "recoverySourceHistorySha256"
+        ],
+        "recoverySourceHistorySha256": [
+          "recoverySourceHistoryRelativePath"
+        ]
+      },
       "properties": {
         "revision": {
           "type": "integer",
@@ -680,6 +688,12 @@
           "$ref": "#/$defs/relativePath"
         },
         "recoveryHtmlSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "recoverySourceHistoryRelativePath": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "recoverySourceHistorySha256": {
           "$ref": "#/$defs/sha256"
         },
         "auditEvents": {

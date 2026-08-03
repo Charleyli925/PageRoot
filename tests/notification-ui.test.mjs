@@ -3,6 +3,11 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import ts from "typescript";
 
+import {
+  readCanvasArchitecture,
+  readWorkbenchArchitecture,
+} from "./source-architecture-fixture.mjs";
+
 const [
   workbench,
   styles,
@@ -13,9 +18,9 @@ const [
   bridgeClient,
   usageTelemetry,
 ] = await Promise.all([
-  readFile(new URL("../app/workbench.tsx", import.meta.url), "utf8"),
+  readWorkbenchArchitecture(),
   readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
-  readFile(new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url), "utf8"),
+  readCanvasArchitecture(),
   readFile(new URL("../app/components/HtmlCanvasEditor.module.css", import.meta.url), "utf8"),
   readFile(new URL("../app/components/NoticeBar.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/components/NoticeBar.module.css", import.meta.url), "utf8"),
@@ -108,13 +113,28 @@ test("redundant feedback was removed and comment persistence is contextual", () 
   ]) {
     assert.doesNotMatch(workbench, new RegExp(removedCopy));
   }
-  assert.match(workbench, /className="comment-persist-error[^"]*"/);
-  assert.match(workbench, />重试记录<\/button>/);
+  assert.doesNotMatch(workbench, /rail-persist-error|comment-persist-error/u);
+  assert.match(workbench, /<strong>评论还没有安全记录<\/strong>/u);
+  assert.match(workbench, /重试记录评论/u);
+  assert.match(workbench, /persistState === "conflict" \? "重新载入外部文件" : "重试更新文件"/u);
   assert.match(
     workbench,
     /activeRun\.status === "recovering-transaction"[\s\S]*?role="status"/,
   );
   assert.doesNotMatch(workbench, /title: "直接编辑已阻止"|source-patch-blocked/);
+});
+
+test("comment rail invalidates stale measurements before dynamic cards can overlap", () => {
+  assert.match(workbench, /function commentMeasurementKey\(/u);
+  assert.match(workbench, /useLayoutEffect\(\(\) => \{[\s\S]*?data-comment-measure/u);
+  assert.match(workbench, /new MutationObserver\(refreshObservedNodes\)/u);
+  assert.match(workbench, /data-comment-measure-key=\{commentMeasurementKeys\[comment\.commentId\]\}/u);
+  const pairedRailStyles = styles.slice(
+    styles.indexOf(".rail-comment-composer,\n.comment-rail-content > .comment-card {", 100_000),
+    styles.indexOf(".rail-comment-composer[data-focused=", 100_000),
+  );
+  assert.doesNotMatch(pairedRailStyles, /\btop\s+\d+ms/u);
+  assert.match(pairedRailStyles, /transform 320ms/u);
 });
 
 test("canvas edit feedback is contextual, plain-language, and not duplicated globally", () => {
@@ -141,7 +161,7 @@ test("canvas edit feedback is contextual, plain-language, and not duplicated glo
     /editFeedback\.recovery === "comment"[\s\S]*?\? "添加评论"[\s\S]*?: undefined/u,
   );
   assert.match(canvas, /onRequestReload\?\.\(\)/u);
-  assert.match(workbench, /if \(sourcePathRef\.current\)[\s\S]*?reloadCurrentSource\(\)[\s\S]*?openProject\(\)/u);
+  assert.match(workbench, /if \(projectSessionRef\.current\.sourcePath\)[\s\S]*?reloadCurrentSource\(\)[\s\S]*?openProject\(\)/u);
   assert.match(workbench, /reloadActionLabel=\{sourcePath \? "重新载入" : "重新选择"\}/u);
   assert.match(canvas, /editFeedbackPaused/u);
   assert.match(canvas, /\}, 5_000\);/u);
@@ -188,7 +208,7 @@ test("exceptional notices are legible and their close action cannot wrap", () =>
     /left:\s*calc\(\(100vw - var\(--notice-rail-width, 376px\)\) \/ 2\)/,
   );
   assert.doesNotMatch(styles, /\.toast/u);
-  assert.match(styles, /\.comment-persist-error\s*\{/);
+  assert.doesNotMatch(styles, /\.comment-persist-error|\.rail-persist-error/u);
 });
 
 test("file and attachment failures keep a real recovery path", () => {
@@ -287,7 +307,7 @@ test("ready polling never opens automatically; the adopted marker ends on first 
   );
   assert.match(
     workbench,
-    /const addComment[\s\S]*?setComments\(nextComments\);\s*setOpenedAiVersionNotice\(null\);/,
+    /const addComment[\s\S]*?commentSessionRef\.current\.update\(\{[\s\S]*?comments: nextComments,[\s\S]*?\}\);\s*setOpenedAiVersionNotice\(null\);/,
   );
   assert.match(
     workbench,
@@ -343,6 +363,10 @@ test("notification analytics uses stable codes and never forwards visible copy",
     /projectId \|\| usageFingerprint\(sourcePath \|\| "unregistered"\)/u,
   );
   assert.match(usageTelemetry, /window\.htmlAIUsage\?\.capture/u);
+  assert.match(
+    usageTelemetry,
+    /key\.startsWith\("ai-run-cancelled:"\)\) return "ai_run_cancelled"/u,
+  );
   assert.match(usageTelemetry, /:\s*"uncatalogued"/u);
   assert.doesNotMatch(
     usageTelemetry,

@@ -1,0 +1,270 @@
+import { SOURCE_NODE_ATTRIBUTE, instrumentPreviewHtml } from "../lib/source-patch-core.js";
+import { isTransparentSourceTextElement } from "../lib/source-text-map.js";
+import { disableExecutableMarkup } from "./html-preview-sandbox.js";
+import { escapedSourceNodeId } from "./html-canvas-page-view";
+import type { SourceElementValue, SourceIndexValue, TextRangeSegment } from "./html-canvas-internal-types";
+import type { IslandEditingController } from "./IslandEditingController";
+
+export function sourceTextNodeForDomText(
+  textNode: Text,
+  sourceIndex: SourceIndexValue,
+): { nodeId: string; value: string } | null {
+  const parentElement = textNode.parentElement;
+  const parentNodeId = parentElement?.getAttribute(SOURCE_NODE_ATTRIBUTE);
+  if (!parentElement || !parentNodeId) return null;
+  const sourceParent = sourceIndex.byNodeId.get(parentNodeId);
+  if (!sourceParent || sourceParent.type !== "element") return null;
+  const childIndex = Array.from(parentElement.childNodes).indexOf(textNode);
+  const sourceChildId = sourceParent.childIds?.[childIndex];
+  const sourceText = sourceChildId ? sourceIndex.byNodeId.get(sourceChildId) : null;
+  if (
+    !sourceText
+    || sourceText.type !== "text"
+    || sourceText.value !== textNode.data
+  ) return null;
+  return { nodeId: sourceText.nodeId, value: sourceText.value };
+}
+
+export function isCanonicalSourceElement(
+  element: HTMLElement,
+  sourceIndex: SourceIndexValue,
+): boolean {
+  const nodeId = element.getAttribute(SOURCE_NODE_ATTRIBUTE);
+  const sourceElement = nodeId ? sourceIndex.byNodeId.get(nodeId) : null;
+  if (!nodeId || sourceElement?.type !== "element") return false;
+  const matches = element.ownerDocument.querySelectorAll(
+    `[${SOURCE_NODE_ATTRIBUTE}="${escapedSourceNodeId(nodeId)}"]`,
+  );
+  if (matches.length !== 1 || matches[0] !== element) return false;
+  const domParent = element.parentElement?.closest<HTMLElement>(
+    `[${SOURCE_NODE_ATTRIBUTE}]`,
+  ) ?? null;
+  const domParentId = domParent?.getAttribute(SOURCE_NODE_ATTRIBUTE) ?? null;
+  return domParentId === sourceElement.parentId;
+}
+
+export function nativeEditHostForElement(
+  element: HTMLElement,
+  sourceIndex: SourceIndexValue,
+): HTMLElement | null {
+  let candidate = element.closest<HTMLElement>(`[${SOURCE_NODE_ATTRIBUTE}]`);
+  while (candidate) {
+    if (!isCanonicalSourceElement(candidate, sourceIndex)) return null;
+    const computedDisplay = candidate.ownerDocument.defaultView
+      ?.getComputedStyle(candidate).display.toLowerCase() ?? "";
+    const tagName = candidate.tagName.toLowerCase();
+    // Inline semantic tags normally join their surrounding sentence. Once an
+    // author turns one into its own rendered box (for example a block metric
+    // implemented with <strong>), it is the text host itself rather than a
+    // reason to climb into a much larger, non-text parent such as <article>.
+    const standaloneTransparentBox = (
+      computedDisplay !== "inline"
+      && computedDisplay !== "contents"
+    );
+    if (!isTransparentSourceTextElement(tagName) || standaloneTransparentBox) break;
+    const parentCandidate = candidate.parentElement?.closest<HTMLElement>(
+      `[${SOURCE_NODE_ATTRIBUTE}]`,
+    ) ?? null;
+    if (
+      !parentCandidate
+      || parentCandidate === candidate.ownerDocument.body
+      || parentCandidate === candidate.ownerDocument.documentElement
+    ) break;
+    candidate = parentCandidate;
+  }
+  if (!candidate) return null;
+  const nodeId = candidate.getAttribute(SOURCE_NODE_ATTRIBUTE);
+  if (!nodeId) return null;
+  return sourceIndex.byNodeId.get(nodeId)?.type === "element" ? candidate : null;
+}
+
+export function sourceTextParentsForSegments(
+  rootElement: HTMLElement,
+  segments: readonly TextRangeSegment[],
+  sourceIndex: SourceIndexValue,
+): HTMLElement[] | null {
+  const wantedIds = new Set(segments.map((segment) => segment.textNodeId));
+  const parentsByTextId = new Map<string, HTMLElement>();
+  const documentNode = rootElement.ownerDocument;
+  const showText = documentNode.defaultView?.NodeFilter.SHOW_TEXT ?? 4;
+  const walker = documentNode.createTreeWalker(rootElement, showText);
+  let current = walker.nextNode();
+  while (current) {
+    const textNode = current as Text;
+    const sourceText = sourceTextNodeForDomText(textNode, sourceIndex);
+    if (sourceText && wantedIds.has(sourceText.nodeId) && textNode.parentElement) {
+      parentsByTextId.set(sourceText.nodeId, textNode.parentElement);
+    }
+    current = walker.nextNode();
+  }
+  if ([...wantedIds].some((nodeId) => !parentsByTextId.has(nodeId))) return null;
+  return [...new Set(
+    segments.map((segment) => parentsByTextId.get(segment.textNodeId)!),
+  )];
+}
+
+export function sourceBackedPreviewElements(documentNode: Document): Element[] {
+  const elements: Element[] = [];
+  const visit = (element: Element) => {
+    if (element.hasAttribute(SOURCE_NODE_ATTRIBUTE)) elements.push(element);
+    const childElements = element.tagName === "TEMPLATE"
+      ? Array.from((element as HTMLTemplateElement).content.children)
+      : Array.from(element.children);
+    childElements.forEach(visit);
+  };
+  if (documentNode.documentElement) visit(documentNode.documentElement);
+  return elements;
+}
+
+export function canonicalNativeHostPreview(
+  rootElement: HTMLElement,
+  nextNodeId: string,
+  nextIndex: SourceIndexValue,
+): HTMLElement | null {
+  const view = rootElement.ownerDocument.defaultView;
+  if (!view) return null;
+  const instrumented = instrumentPreviewHtml(nextIndex, {
+    attributeName: SOURCE_NODE_ATTRIBUTE,
+  }).html;
+  const detachedDocument = new view.DOMParser().parseFromString(
+    disableExecutableMarkup(instrumented),
+    "text/html",
+  );
+  const detachedTarget = detachedDocument.querySelector<HTMLElement>(
+    `[${SOURCE_NODE_ATTRIBUTE}="${escapedSourceNodeId(nextNodeId)}"]`,
+  );
+  return detachedTarget?.tagName === rootElement.tagName ? detachedTarget : null;
+}
+
+type PreviewSourceNodeIdPlan = {
+  apply: () => void;
+  rollback: () => void;
+};
+
+function planMountedPreviewSourceNodeIds(
+  documentNode: Document,
+  previousIndex: SourceIndexValue,
+  nextIndex: SourceIndexValue,
+  options: {
+    excludeRoot?: HTMLElement;
+  } = {},
+): PreviewSourceNodeIdPlan | null {
+  const previousRoots = (previousIndex.elements as SourceElementValue[]).filter((element) => {
+    const parent = element.parentId
+      ? previousIndex.byNodeId.get(element.parentId)
+      : null;
+    return !parent || parent.type !== "element";
+  });
+  const nextRoots = (nextIndex.elements as SourceElementValue[]).filter((element) => {
+    const parent = element.parentId
+      ? nextIndex.byNodeId.get(element.parentId)
+      : null;
+    return !parent || parent.type !== "element";
+  });
+  if (previousRoots.length !== nextRoots.length) return null;
+  const excludedNodeId = options.excludeRoot?.getAttribute(SOURCE_NODE_ATTRIBUTE) ?? null;
+  const nextNodeIdByPreviousNodeId = new Map<string, string>();
+  const pairSubtrees = (
+    previousElement: SourceElementValue,
+    nextElement: SourceElementValue,
+  ): boolean => {
+    if (previousElement.tagName !== nextElement.tagName) return false;
+    nextNodeIdByPreviousNodeId.set(previousElement.nodeId, nextElement.nodeId);
+    if (previousElement.nodeId === excludedNodeId) return true;
+    if (previousElement.childElementIds.length !== nextElement.childElementIds.length) {
+      return false;
+    }
+    for (let index = 0; index < previousElement.childElementIds.length; index += 1) {
+      const previousChild = previousIndex.byNodeId.get(
+        previousElement.childElementIds[index],
+      );
+      const nextChild = nextIndex.byNodeId.get(nextElement.childElementIds[index]);
+      if (
+        !previousChild
+        || previousChild.type !== "element"
+        || !nextChild
+        || nextChild.type !== "element"
+        || !pairSubtrees(previousChild, nextChild)
+      ) return false;
+    }
+    return true;
+  };
+  for (let index = 0; index < previousRoots.length; index += 1) {
+    if (!pairSubtrees(previousRoots[index], nextRoots[index])) return null;
+  }
+
+  const liveNodes = sourceBackedPreviewElements(documentNode).filter((node) => (
+    !options.excludeRoot
+    || (
+      node !== options.excludeRoot
+      && !options.excludeRoot.contains(node)
+    )
+  ));
+  const updates: Array<{ node: Element; nextNodeId: string }> = [];
+  for (const node of liveNodes) {
+    const previousNodeId = node.getAttribute(SOURCE_NODE_ATTRIBUTE);
+    const nextNodeId = previousNodeId
+      ? nextNodeIdByPreviousNodeId.get(previousNodeId)
+      : null;
+    const nextElement = nextNodeId ? nextIndex.byNodeId.get(nextNodeId) : null;
+    if (
+      !nextElement
+      || node.tagName.toLowerCase() !== nextElement.tagName
+    ) return null;
+    updates.push({ node, nextNodeId: nextElement.nodeId });
+  }
+  const previousValues = updates.map(({ node }) => ({
+    node,
+    present: node.hasAttribute(SOURCE_NODE_ATTRIBUTE),
+    value: node.getAttribute(SOURCE_NODE_ATTRIBUTE),
+  }));
+  const rollback = () => {
+    for (let index = previousValues.length - 1; index >= 0; index -= 1) {
+      const previous = previousValues[index];
+      if (previous.present && previous.value !== null) {
+        previous.node.setAttribute(SOURCE_NODE_ATTRIBUTE, previous.value);
+      } else {
+        previous.node.removeAttribute(SOURCE_NODE_ATTRIBUTE);
+      }
+    }
+  };
+  return {
+    apply: () => {
+      try {
+        updates.forEach(({ node, nextNodeId }) => {
+          node.setAttribute(SOURCE_NODE_ATTRIBUTE, nextNodeId);
+        });
+      } catch (cause) {
+        rollback();
+        throw cause;
+      }
+    },
+    rollback,
+  };
+}
+
+export function refreshMountedPreviewSourceNodeIds(
+  documentNode: Document,
+  previousIndex: SourceIndexValue,
+  nextIndex: SourceIndexValue,
+  options: {
+    session?: IslandEditingController;
+    excludeRoot?: HTMLElement;
+  } = {},
+): boolean {
+  const plan = planMountedPreviewSourceNodeIds(
+    documentNode,
+    previousIndex,
+    nextIndex,
+    { excludeRoot: options.excludeRoot },
+  );
+  if (!plan) return false;
+  if (options.session) {
+    return options.session.runExpectedMutation(() => {
+      plan.apply();
+      return true;
+    }) === true;
+  }
+  plan.apply();
+  return true;
+}

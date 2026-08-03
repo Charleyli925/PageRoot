@@ -349,6 +349,7 @@ Prompt 必须是当前 Attempt 的精简入口，至少包含：
 - 唯一 output 路径。
 - 完整 finalizer 命令。
 - “完成全部写入后最后执行 finalizer”的明确要求。
+- finalizer 返回 `status=cancelled` 时立即停止、不重试、也不改写到其他路径的明确要求。
 - 不得修改冻结输入、不得扫描其他任务；`preserveOutsideTargets=true` 是默认边界，只有已经通过 helper 记录的用户补充可以明确扩大本轮范围。
 - 对话补充 helper 的完整命令、追加式 `add / amend / retract` 规则，以及“记录成功后才可执行”的停止条件。
 - `input/PROJECT.md` 只读；长期项目规则不得在本轮任务中修改。
@@ -411,13 +412,14 @@ finalizer 必须：
 1. 解析受控 Attempt 路径。
 2. 向上定位唯一冻结 Request。
 3. 校验路径未逃逸项目。
-4. 读取该项目 `runtime-state.json`。
-5. 确认 active run 身份完全匹配，且状态允许完成。
-6. 确认未取消、未失败、未被替代。
-7. 校验完整 HTML。
-8. 写入受控 meta。
-9. 计算精确与比较 Hash。
-10. 用临时文件、刷盘、原子 rename 最后写入 completion。
+4. 读取项目身份与 `runtime-state.json`。
+5. 在拒绝非活动 Attempt 之前，检查当前确切 Attempt 是否已有普通文件 `cancelled.json`。
+6. 若取消标记存在，校验其 Schema、project/document/request/attempt 身份、`status=cancelled` 与非空 `cancelledAt`；匹配时返回 11.4 的取消终态，身份不符或软链接等不安全标记必须失败关闭。
+7. 若没有取消标记，确认 active run 身份完全匹配、状态允许完成，且未失败或被替代。
+8. 校验完整 HTML。
+9. 写入受控 meta。
+10. 计算精确与比较 Hash。
+11. 用临时文件、刷盘、原子 rename 最后写入 completion。
 
 ### 11.2 Completion v1
 
@@ -466,6 +468,27 @@ Completion 必须在 output 完全关闭后最后写入。完成后 output 封�
 
 不扫描其他 Request，不按目录时间猜测，不复用旧 completion。
 界面只根据 completion 是否已经出现显示“AI 已返回”；完成信号出现前的文件错误不得冒充 AI 返回。
+
+### 11.4 已取消 Attempt 的 finalizer 结果
+
+用户结束本轮后，官方 finalizer 对同一 Request/Attempt 返回成功退出的机器可读终态：
+
+```json
+{
+  "ok": true,
+  "status": "cancelled",
+  "accepted": false,
+  "retryable": false,
+  "projectId": "project_metrics",
+  "documentId": "doc_dashboard",
+  "requestId": "req_metrics_cards",
+  "attemptId": "attempt_001",
+  "cancelledAt": "2026-07-29T08:40:00Z",
+  "message": "本轮已在源页结束。请停止 AI Agent，不要重试。"
+}
+```
+
+这是幂等的正常终态，不是 completion，也不表示候选已被接纳。finalizer 不修改 output、不写受控 meta 或 `completion.json`，工作台不创建 Version。重复执行返回同一类不可重试结果；AI Agent 必须停止，不能把它当作路径或保存故障重试。
 
 ## 12. 规范化比较
 
@@ -725,7 +748,7 @@ Attempt 的 `outcome.json` 是工作台写入的严格诊断终态，不是完�
 - `committing` 且 commit marker 尚未写入：按事务恢复规则完整回退或完成，不能直接删除。
 - commit marker 已写入：Version 已提交，不能以“取消”撤销；候选进入只读历史并等待用户按正常“打开最新版”流程处理。
 
-迟到 completion 在取消后无效。
+迟到 completion 在取消后无效。若 AI Agent 在取消后才执行官方 finalizer，finalizer 必须返回 11.4 的 `status=cancelled`、`accepted=false`、`retryable=false` 终态，而不是通用写入失败；不得生成 completion 或 Version。取消标记身份不匹配时必须失败关闭，不能把另一个 Attempt 的取消状态套用到本轮。
 
 ## 19. 外部冲突
 
@@ -783,6 +806,7 @@ Attempt 的 `outcome.json` 是工作台写入的严格诊断终态，不是完�
 - unsupported finalizer 不建版。
 - completion 后 output 改变不建版。
 - no-change 不建版。
+- 取消后的 finalizer 可重复返回不可重试的 `cancelled` 终态，且不修改 output、不写 completion、不建版。
 
 ### 22.3 Transaction
 

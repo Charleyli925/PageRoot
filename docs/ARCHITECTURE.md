@@ -8,6 +8,7 @@ User HTML bytes
   -> isolated authored-DOM preview
   -> native Selection + V2 Editable Island controller
   -> canonical island + exact content-range SourcePatch
+  -> renderer SourceHistorySession + durable exact Patch journal
   -> serialized atomic file writer
 
 Comments + frozen input
@@ -29,6 +30,42 @@ Comments + frozen input
 - `schemas/` defines persisted and exchanged records. `fixtures/` proves strict current and legacy behavior.
 - Preview DOM is disposable. It is never a persistence source.
 - Pure-browser preview is a supported read-only route. It may run authored page interactions inside the sandbox, but it exposes no PageRoot edit, comment, attachment, project-write, or AI-submit authority.
+- Desktop interactive preview uses a short-lived `pageroot-preview:` document
+  instead of `srcdoc`, so the authored page does not inherit the renderer's
+  `script-src 'self'` policy. The main process owns the volatile session and
+  serves only its prepared HTML, its fixed bootstrap and realpath-contained
+  files beside the known source HTML.
+- Preview-to-edit carries only a bounded `PageViewContext`: source-backed
+  active/inactive class transitions and `hidden`, `open`, `aria-selected` or
+  `aria-expanded` state, plus a strictly bounded read-only visual projection
+  for a source-empty chart container or `tbody`. The edit frame is still
+  rebuilt from source bytes. Canvas snapshots and sanitized table rows are
+  disposable and non-editable; arbitrary runtime nodes, rewritten text, form
+  values and scroll positions are never copied into it or serialized.
+- Comment selection remains source-node exact inside foreign content. Authored
+  SVG children retain their own instrumented SourceIndex identity; runtime-only
+  children fail closed and are never promoted to an ancestor `svg`.
+- Comment-rail coordinates are a disposable Canvas measurement projection.
+  Every snapshot is tagged with the rendered source Hash, the generation of
+  the `PageViewContext` actually applied to the edit document and the exact
+  sorted target-ID set. The same snapshot owns fresh source resolution,
+  visible/hidden/missing presentation status, coordinates, marker eligibility
+  and the authored document's natural content height. Workbench renders cards
+  only after that complete snapshot is current; one missing coordinate degrades
+  only its owning item and is not permission to use saved geometry or a page-end
+  fallback. That natural Canvas height also owns the comment rail's fixed bottom:
+  a longer comment queue is clipped and translated inside the rail instead of
+  feeding height back into the Grid or shared page. Iframe viewport height is
+  never fed back as authored content height. Each visible card is measured
+  against a signature of every height-changing state (content, attachments,
+  edit/delete/relink controls and target recovery). A DOM or size change
+  invalidates the old measurement before layout; absolute `top` is applied
+  without interpolation so two cards never animate through one another.
+- Edit-mode presentation actions reuse that same context. A pure allowlist
+  resolver recognizes strict source-backed Tabs, bounded explicit-ID and
+  constant-index legacy Tabs, native details and local disclosures; one Canvas
+  executor applies the accepted context. It never invokes authored handlers,
+  serializes the preview DOM or creates a second interaction mode.
 - `IslandEditingController` is the only production text-edit engine in PageRoot 0.9.0. `contenteditable="true"` supplies focus, caret, Selection and IME composition, while the controller owns insertion, deletion, line breaks, paste and formatting. Chromium DOM serialization never has commit authority.
 - `editable-island` owns the V2 capability and normalization contract. An accepted edit replaces only the selected element's parsed `contentRange`; bytes outside that range remain exact. Inside the range, parse5 may perform the smallest safe normalization needed to preserve inline semantics, comments and immutable authored atoms.
 - `native-edit-policy` owns shared session attributes and checkpoint timing. `native-edit-runtime-preflight` still proves that enabling the island does not change geometry or text style; `HtmlCanvasEditor` only coordinates selection, the island session and SourcePatch.
@@ -36,35 +73,99 @@ Comments + frozen input
 ## Module map
 
 `app/workbench.tsx` is the composition root for the review workspace. It
-renders owner snapshots and dispatches user intent; it does not own persistence
-protocols.
+subscribes to owner snapshots, derives presentation values and dispatches user
+intent; it does not own persistence protocols or duplicate the sessions'
+mutable facts. Pure Workbench models hold deterministic formatting and
+transition helpers. Presentation modules receive snapshots and callbacks only;
+they do not import application services.
 
 | Boundary | Owner |
 | --- | --- |
 | Bridge routes, timeouts and structured outcomes | `app/application/bridge-client.js` |
+| Open/registered project identity, session generation and late-query fencing | `app/application/project-session.js` |
+| Current source bytes, Hash, revisions, persistence projection and source-write single flight | `app/application/document-session.js` |
 | Renderer draft revision, pending operations and reconciliation | `app/application/draft-session.js` |
+| Renderer comment working copy, composer and saved-comment edit projection | `app/application/comment-session.js` |
+| Active/background runs, Qoder status, background outcomes and operation locks | `app/application/run-session.js` |
+| Immutable Version projection and history-view transition | `app/application/version-session.js` |
+| `PROJECT.md` editor, composition fence, autosave and reconciliation | `app/application/project-rules-session.js` |
+| Renderer source-history context, pending Patch operations and action intent | `app/application/source-history-session.js` |
 | Pure comment/edit-event/tombstone transition rules | `shared/draft-aggregate.mjs` |
+| Pure source-history validation, cursor transitions and exact Patch replay | `shared/source-history.mjs`, re-exported through `app/domain/source-history.js` |
 | Bridge-side draft command validation and CAS | `scripts/draft-service.mjs` |
+| Bridge-side source-history repository, autosave preparation and action application | `scripts/source-history-service.mjs` |
+| Bridge-side registered command identity and source-observation classification | `scripts/project-context-service.mjs` |
 | Close, switch, submit and history obligations | `app/application/drain-coordinator.js` |
 | Late query rejection and monotonic draft reads | `app/application/project-query-fence.js` |
 | Crash-only browser recovery | `app/application/recovery-store.js` |
-| Renderer, project-picker and attachment capabilities | `app/application/runtime-capabilities.js` |
+| Renderer, project-picker, attachment and interactive-preview capabilities | `app/application/runtime-capabilities.js` |
 | Same-directory source rename, operation journal and active/recent path rebase | `desktop/source-rename.mjs` |
 | Known-source Finder reveal | narrow project IPC in `desktop/main.mjs` |
 | Validated default-browser HTML launch | `desktop/open-in-default-browser.mjs`, behind `desktop/project-ipc-security.mjs` sender authority |
 | Pseudonymous identity, strict event schemas, local queue and PostHog delivery | `desktop/usage-telemetry.mjs` |
 | Preview sanitization and verified frame injection | `app/components/html-preview-sandbox.js` |
+| Volatile desktop preview sessions and contained local-asset serving | `desktop/preview-protocol.mjs` |
+| Source-backed preview/edit display-state filtering, bounded visual filtering and rebinding, and safe action resolution | `app/lib/page-view-context.js`, `app/lib/read-only-visual.js` |
 | Run lifecycle decoding and transition policy | `app/domain/run-lifecycle.js` |
+| Workbench pure record/comment/project/version/browser helpers | `app/workbench/*-model.ts`, `app/workbench/browser-io.ts` |
+| History, attachment and preview presentation | `app/workbench/presentation.tsx` |
+| AI handoff drawer presentation | `app/workbench/handoff-view.tsx` |
 
 The V2 source-fidelity path remains a protected core: `SourceIndex`,
 `TargetResolver`, `editable-island`, `IslandEditingController`,
 `SourcePatchEngine` and the atomic source writer may be split only around a
 proven invariant, not to satisfy a line-count target. The retired V1
-`NativeEditingController` is not imported by the production V2 route.
+`NativeEditingController`, its per-keystroke tracker, shadow block draft,
+FormatSkeleton and structural planner have been removed. The architecture gate
+rejects reintroducing those files or imports; production text editing has one
+V2 editable-island route.
+
+`HtmlCanvasEditor.tsx` remains the Canvas coordinator. Parsing, DOM
+instrumentation, interaction policy, preview synchronization, selection,
+source-backed page view and style inspection live in the adjacent
+`html-canvas-*.ts` modules. Those helpers do not gain a second source or
+editing authority; `IslandEditingController` and `SourcePatchEngine` remain
+the only production text and source-mutation route.
 
 ## Persistence
 
 Direct edits form ordered revisions and are written through a single queue. Every write checks the expected source Hash, uses a same-directory temporary file and atomic replacement, then rereads the result. External modification causes a fail-closed conflict.
+
+A durable command for an already registered project carries one captured
+`projectId + documentId + sourcePath` context. The Bridge resolves the registry
+graph by both opaque IDs first and treats the path only as a scope assertion;
+it never creates a project while serving a registered mutation. Only
+`/project/ensure` may establish a new identity. During PageRoot's own atomic
+source replacement, the durable `pendingWrite.targetHtmlSha256` proves the
+narrow interval in which the inode has changed but registry sidecars have not;
+the Bridge reconciles that interval to the existing identity. Any other inode
+replacement remains an external replacement and fails closed. This decision is
+recorded in `docs/decisions/0012-id-first-project-context.md`.
+
+Every accepted Canvas SourcePatch also emits one operation containing the
+actual forward patches, the exact inverse patches returned by the engine, the
+before/after source Hashes and the logical before/after target. The renderer
+`SourceHistorySession` owns unsaved operations and the current action intent;
+the Bridge owns the authoritative bounded journal at
+`history/source-operations.json`. Autosave prepares the next journal against
+the same source Hash chain and places both HTML and journal candidates in one
+`pendingWrite` recovery boundary. The source HTML remains the content
+authority; the journal is never a second HTML snapshot or a source for preview
+serialization.
+
+Undo and redo first checkpoint any active editable island and drain the source
+queue. The Bridge then validates project/document identity, source Hash,
+journal revision/cursor and every exact patch before atomically applying the
+inverse or forward bytes. Stable action IDs make lost responses idempotent;
+the renderer queries workspace authority before its single replay. A new
+forward operation truncates redo. If current source bytes cannot be chained to
+the journal—external modification or a new working file—the Bridge establishes
+a fresh boundary at those bytes rather than crossing unknown content.
+
+The desktop `Edit` menu is a router, not another history owner. Focused native
+text inputs use Electron/Chromium's local text undo. Canvas focus routes
+Undo/Redo intent to the renderer source-history session. Comment/card,
+attachment and project actions never enter the source journal.
 
 An explicit filename change is a separate desktop source-path transaction, not
 an HTML write. `desktop/source-rename.mjs` validates one stable operation ID,
@@ -92,6 +193,13 @@ directory. The clean-cutover decision is recorded in
 Initial and accepted AI results are immutable versions. Routine local edits do not create versions. A validated AI result is not activated until the user explicitly chooses it.
 
 `PROJECT.md` uses debounced autosave and is flushed before project switch or close. One recoverable unsaved comment composer is allowed at a time. Attachment uploads, rule saves and ordinary source writes are finished or surfaced in their owning panel before navigation proceeds.
+
+Persistent source and Draft failures share the single workspace status-banner
+surface, ordered by safety priority. The source failure owns its export and
+reload/retry action; otherwise the Draft failure owns the comment retry action.
+The comment rail does not render a duplicate failure card. Product copy is
+selected from stable error codes and strips local paths, IDs, Hash fields and
+raw English exception text before rendering.
 
 Draft mutations carry stable operation identities. Deletion tombstones and
 processed-operation acknowledgements live in `draft/annotations.json`. A stale

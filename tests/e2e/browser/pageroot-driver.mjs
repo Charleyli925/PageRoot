@@ -122,6 +122,7 @@ export async function ensureSourceEditingTestRuntime(page) {
           projectOpening: "browser-file",
           attachmentPersistence: "memory",
           closeCoordination: "browser-beforeunload",
+          interactivePreview: "srcdoc",
         },
       },
     });

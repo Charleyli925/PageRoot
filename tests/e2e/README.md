@@ -105,10 +105,11 @@ The capability assertions use the same production contract as the canvas:
 Every source test treats the imported HTML bytes as the oracle. BOM, line
 endings, entities, quotes, comments, duplicate attributes, formatting, and all
 other bytes outside the approved SourcePatch ranges must remain unchanged.
-The canvas has no user undo/redo stack; source-reversal shortcuts must not
-mutate committed bytes. Inverse plans remain transaction-local proof for
-atomic recovery only. A DOM serialization that merely renders the same page
-is a failure.
+The canvas has no DOM or component-local undo/redo stack. Source-reversal
+shortcuts route through the document-owned, persistent byte-patch journal;
+every undo/redo must validate the exact current and resulting source hashes.
+Native undo remains local to focused comment and project-rule text fields.
+A DOM serialization that merely renders the same page is a failure.
 
 Playwright traces, screenshots, videos and reports are written only below
 `output/playwright/`.

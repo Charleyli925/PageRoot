@@ -5,6 +5,7 @@
 - macOS 12 or newer for the Electron and packaging gates
 - Node.js 22.13.0 or a compatible Node 22 release
 - npm, Git and Chromium installed through Playwright
+- Authenticated GitHub CLI (`gh`) for Pull Request-aware worktree audits
 
 ```bash
 nvm use
@@ -28,11 +29,22 @@ npm run desktop:dev     # build renderer and launch Electron
 ```bash
 npm run task:status
 npm run task:start -- fix/short-description
-# edit
+# enter the reported .codex-worktrees/fix/short-description path, then edit
 npm run task:finish
 ```
 
-`task:start` requires clean synchronized `main`. `task:finish` runs the task gate against `origin/main` and reports committed plus uncommitted task files. Neither command commits, pushes, merges or releases. See `AGENTS.md` and `docs/CODEX_WORKFLOW.md` for the complete automation and authorization boundary.
+`task:start` requires the clean synchronized primary `main`, leaves it unchanged
+and creates an isolated worktree under `.codex-worktrees/<prefix>/<name>`.
+`task:finish` runs the task gate against `origin/main` and reports committed
+plus uncommitted task files. Neither command commits, pushes, merges or
+releases.
+
+Use `npm run task:audit` for a read-only inventory. After a squash merge, preview
+the exact local cleanup with `npm run task:retire -- <branch>` and add `--apply`
+only after reviewing its actions. Use `task:attach` for an existing local branch
+and `task:sync-main` to fast-forward the clean primary checkout. See `AGENTS.md`
+and `docs/CODEX_WORKFLOW.md` for the complete automation and authorization
+boundary.
 
 ## Test lanes
 
@@ -56,7 +68,11 @@ application-update controller is covered by Node tests; the Release Candidate
 lane owns the installed-App, Developer ID, notarization, signed-App checkpoint,
 ZIP/blockmap and `latest-mac.yml` evidence. It validates contents and full
 packaged runtime against a pre-sign App, proves signed startup, then passes the
-same notarized App to the final artifact job without rebuilding. Formal local
+same notarized App to the final artifact job without rebuilding. That fresh job
+restores the App's exact embedded build and telemetry metadata, then builds only
+the deterministic Electron renderer used to compare the restored App payload
+against the identical source tree. It does not regenerate telemetry
+configuration or receive the project token. Formal local
 packaging is a distribution build and therefore requires a valid Developer ID
 identity; publication credentials remain in GitHub encrypted secrets. The
 separate developer-preview profile removes those credentials from its child
@@ -72,6 +88,9 @@ use a personal or project secret API key.
 Draft Pull Requests run only impact-selected feedback. Marking a final PR tree ready runs parallel Node, three-shard Chromium, real HTML, native Electron and deterministic AI groups. Linux builds and shares only the Web renderer used by Node and Browser. Each macOS job builds the Electron renderer locally, runs the hosted-window preflight, then owns either the native Electron suite or the AI suite; those jobs can be rerun independently. Dependency, Playwright and Electron downloads are cached by lockfile identity.
 
 Critical workflow commands write machine-readable evidence and normalized failure signatures under `output/ci-evidence/`. The full taxonomy, same-SHA rerun rule, two-strike policy and operating metrics are in `docs/RELEASE_PIPELINE_GOVERNANCE.md`.
+The CI-evidence contract test enumerates every stage used by the active source,
+developer-preview, candidate and publication workflows, so an unsupported stage
+name fails during source review rather than after formal packaging begins.
 
 The weekly/manual read-only `CI Health` workflow computes a rolling 30-day report from GitHub Actions history. It measures complete-gate attempts, wall-time percentiles, repeated-green runner time, environment-preflight failures and candidate/publication conclusions; reports are written under `output/ci-health/`.
 
@@ -79,6 +98,8 @@ The weekly/manual read-only `CI Health` workflow computes a rolling 30-day repor
 
 - Treat the current HTML bytes as authoritative.
 - Route edits through SourcePatchEngine and preserve unrelated bytes.
+- Derive Canvas history only from accepted SourcePatch forward/exact-inverse
+  results; never add a preview-DOM or component-local snapshot stack.
 - Fail closed on ambiguous mapping, scope or identity.
 - Keep local filesystem operations behind the Electron/Bridge boundary.
 - Add schema fixtures and compatibility tests for protocol changes.

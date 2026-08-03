@@ -34,6 +34,9 @@ PageRoot 让用户在真实本地 HTML 上完成两类工作：
 - 连续 AI 修改后，用户最初打开的 HTML、每一份旧工作文件、每轮冻结输入和每份不可变历史 HTML 都完整保留。
 - 历史查看与创建新 Version 是两个不同动作；历史页只读，不提供覆盖当前 HTML 的恢复旁路。
 - 纯浏览器预览是正式只读能力：可运行页面自身交互，但不能编辑 PageRoot HTML、添加评论、附件或发送 AI，且所有页面操作都不会保存。
+- 桌面交互预览真实运行当前 HTML；从预览点击“编辑”时直接打开刚才
+  选择的 source-backed Tab/显示状态，不增加第三种模式、额外确认或
+  滚动定位。
 - 崩溃、外部冲突、取消、失败和 no-change 不丢评论、不留半提交。
 - 旧项目记录和 0.6.1 完整、只读、Hash 可校验地归档；v3 从干净工作区开始。
 
@@ -46,6 +49,9 @@ PageRoot 让用户在真实本地 HTML 上完成两类工作：
 - 不依赖固定时间窗口推断内部 AI 已完成。
 - 不维护一个会被反复覆盖、可能与项目当前路径分叉的含糊 `current/index.html`。有效 AI 成功创建按版本命名的 `working/V1.x.html` 并自动切换项目路径，不要求用户手动管理副本。
 - 不让预览 DOM 序列化结果成为保存事实源。
+- 不把运行时生成的节点、文字、Canvas 像素、表单值或滚动位置伪装成
+  可编辑源码；编辑态完整视觉内容由源码内联 SVG、静态 HTML 或 PNG
+  回退提供。
 - 不提供 legacy DOM、v2 Reader、迁移器或新旧引擎开关。
 - 不修改共享 CSS Rule、CSS variable、断点、伪状态或外部 CSS。
 
@@ -110,20 +116,29 @@ PageRoot 让用户在真实本地 HTML 上完成两类工作：
 
 支持的直接编辑至少包括：
 
+- 从交互预览返回编辑时保留当前 source-backed Tab/显示状态；该状态
+  只影响本次画布展示，不产生 SourcePatch，也不改变源码默认 Tab。
+- 编辑模式中，语义完整且能唯一映射到源码的 Tab、原生 details 和本地
+  disclosure 可从选框工具条或 `Option + 单击` 切换；普通单击仍只选择，
+  双击仍进入文字编辑。快捷提示只在悬停动作按钮时出现。
+- Hyperlink、表单、任意作者脚本、仅靠 class 识别的控件、弹窗、Popover
+  和抽屉在编辑模式中继续保持禁用；真实页面行为只在隔离预览中运行。
 - 双击 source-backed 静态文字后，光标直接出现在点击位置；普通文字和安全的混合行内文字都可输入、删除和选择。
 - 可编辑宿主的可视段首、段尾和非空样式交界均可输入：可视段首继承右侧首字符，其他交界继承左侧字符，工具栏显示与下一次输入一致的样式。
 - 文字 checkpoint 可以跨多个源码 text node，但不得拍平或序列化既有行内标签。
 - 字体、字号、字重、斜体和颜色。
 - 背景、填充、边框和常用间距。
 - 同级模块顺序。
-- 不提供画布级撤销或重做；源码画布拦截 `Cmd/Ctrl+Z`，避免 Chromium 绕过 SourcePatch 直接改 DOM。表单输入框保留自己的本地输入历史，评论在评论区独立删除。
+- 画布文字、样式、安全结构变化和同级模块顺序共享一条可持久化的撤销/重做历史；关闭并重开项目后仍可继续。
+- 不在画布工具栏增加撤销入口。沿用系统 `Edit > Undo/Redo`，并支持 `Cmd/Ctrl+Z` 撤销、`Cmd/Ctrl+Shift+Z` 与 `Ctrl+Y` 重做。
+- 焦点位于评论正文、项目长期规则或其他真实文字输入框时，撤销/重做只使用该输入框的原生局部输入历史，不触碰画布源码历史。评论卡片、评论/附件的新增删除和其他项目操作不纳入本轮撤销范围。
 
 每次本地修改：
 
 1. 文字双击时由 `IslandEditingController` 为当前源码宿主建立唯一可编辑岛；浏览器只负责光标、Selection 和 IME，Controller 接管输入、删除、换行、粘贴与格式变更。
 2. 约 700ms、格式、Cmd+S、目标切换、关闭或发送边界生成带目标身份、源 Hash、精确岛内 before/after 和操作类型的 `replace-editable-island` 命令；短暂失焦不结束会话。
 3. SourceIndex/TargetResolver 唯一定位真实源码范围；无法唯一定位时保留草稿并阻止操作。
-4. SourcePatchEngine 只替换目标元素的精确 `contentRange`，并验证岛外源码逐字节不变。岛内可进行最小 parse5 规范化；inverse 只用于同一事务失败时的原子恢复与测试证明，不保存为用户可操作的历史栈。
+4. SourcePatchEngine 只替换目标元素的精确 `contentRange`，并验证岛外源码逐字节不变。岛内可进行最小 parse5 规范化；成功事务把实际 forward Patch 和对应 exact inverse Patch 作为同一操作写入有界源码历史，不保存整页 DOM 快照。
 5. 用 Patch 结果更新内存 HTML 并原子重建 projection；失败时保留原会话和草稿。
 6. 增加 `editRevision` 并追加稳定 ID 的 edit event。
 7. 触发有上限 debounce 的同一条串行写入队列。
@@ -182,6 +197,8 @@ Selection 重放 IME 最终文本。
 - 主编辑流程不显示“保存”或“另存为”按钮。
 - “导出 HTML 副本”放在次级文件菜单，只复制内容，不改变项目绑定，不创建 Version。
 - `Cmd+S` 只立即刷新当前自动写入队列，并反馈“内容已更新到文件”或真实错误。
+- 系统 `Edit` 菜单中的既有 Undo/Redo 是唯一菜单入口，不在画布编辑栏重复增加按钮。画布撤销前必须先完成当前 IME/文字 checkpoint 并刷盘；结果通过同一 Hash 校验与原子写入链路落盘，不创建 Version。
+- 新的画布修改会截断当前位置之后的 redo。外部源码变化、AI 工作文件切换或无法证明连续 Hash 时建立新的历史边界，绝不把旧 Patch 套到未知字节上。
 - 原生菜单和右键菜单不得存在另一条会创建 Version 的保存链路。
 
 ### 5.4 评论与目标
@@ -459,6 +476,8 @@ editing
         ├── PROJECT.md
         ├── runtime-state.json
         ├── edit-audit.jsonl
+        ├── history/
+        │   └── source-operations.json
         ├── working/
         │   ├── V1.1.html
         │   └── V1.2.html
@@ -477,6 +496,7 @@ editing
 | 整个项目长期使用的 AI 规则 | `PROJECT.md` |
 | active run、项目锁、冲突与恢复事务 | `runtime-state.json` |
 | 当前评论、edit event、删除 tombstone、草稿 revision 与已处理 operation ID | `draft/annotations.json`；`runtime-state.json` 只保存其指针与 revision |
+| 画布撤销/重做 cursor、精确 Patch 与已处理 action ID | `history/source-operations.json`；最多保留最近 100 个、合计不超过 32 MiB 的连续源码操作 |
 | 本地直接编辑审计 | `edit-audit.jsonl` |
 | 冻结输入 | Request 的 `input/` |
 | AI 完成 | Attempt 的 `completion.json` |
@@ -505,6 +525,7 @@ Prompt、AI 返回、附件、剪贴板、文件名/路径、账号、电脑序�
 - `annotation-records.v3.schema.json`
 - `project-state.v3.schema.json`
 - `runtime-state.v3.schema.json`
+- `source-history.v1.schema.json`
 - `scope-report.v1.schema.json`
 - `completion.v1.schema.json`
 - `input-manifest.v1.schema.json`

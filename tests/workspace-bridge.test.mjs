@@ -1213,6 +1213,14 @@ test("AI readOrder excludes the full audit archive and compacts long module quot
   assert.match(prompt, /不要读取未列入 readOrder 的审计归档/);
   assert.match(
     prompt,
+    /status=cancelled.*立即停止，不要重试，也不要改写到其他路径/s,
+  );
+  assert.match(
+    aiRules,
+    /status=cancelled.*立即停止，不要重试，也不要写入其他路径/s,
+  );
+  assert.match(
+    prompt,
     new RegExp(`${submitted.body.projectId}.*${submitted.body.documentId}`),
   );
   assert.match(
@@ -1528,6 +1536,232 @@ test("autosave writes the real source without Versions and projects stay isolate
   assert.equal(auditLines.length, 20);
 });
 
+test("source history survives restart and routes exact undo and redo through the Bridge", async (t) => {
+  const environment = await createEnvironment(t);
+  const sourcePath = join(environment.sources, "source-history.html");
+  const before = htmlPage("one");
+  const after = before.replace("<h1>one</h1>", "<h1>two</h1>");
+  await writeFile(sourcePath, before, "utf8");
+  const firstBridge = await environment.start();
+  const opened = await openWorkspace(firstBridge.baseUrl, sourcePath);
+  assert.equal(opened.response.status, 200);
+  const startOffset = before.indexOf("<h1>one</h1>") + 4;
+  const operation = {
+    operationId: "sourceop_workspace_history_001",
+    kind: "text",
+    editRevision: 1,
+    createdAt: "2026-07-31T08:00:00.000Z",
+    beforeSourceSha256: hash(before),
+    afterSourceSha256: hash(after),
+    forwardPatches: [{
+      startOffset,
+      endOffset: startOffset + 3,
+      before: "one",
+      after: "two",
+      kind: "text",
+    }],
+    reversePatches: [{
+      startOffset,
+      endOffset: startOffset + 3,
+      before: "two",
+      after: "one",
+      kind: "inverse:text",
+    }],
+    beforeTarget: { id: "heading", text: "one", resolution: "exact" },
+    afterTarget: { id: "heading", text: "two", resolution: "exact" },
+  };
+  const saved = await postJson(firstBridge.baseUrl, "/autosave", {
+    sourcePath,
+    projectId: opened.body.projectId,
+    documentId: opened.body.documentId,
+    editRevision: 1,
+    expectedSourceSha256: hash(before),
+    html: after,
+    sourceHistoryOperations: [operation],
+    changeEvents: [{
+      eventId: "history_edit_1",
+      kind: "text",
+      before: "one",
+      after: "two",
+    }],
+  });
+  assert.equal(saved.response.status, 200, JSON.stringify(saved.body));
+  assert.equal(saved.body.sourceHistory.capabilities.canUndo, true);
+  assert.equal(saved.body.sourceHistory.capabilities.canRedo, false);
+  assert.equal(await readFile(sourcePath, "utf8"), after);
+
+  await stopChild(firstBridge.child);
+  const secondBridge = await environment.start();
+  const reopened = await openWorkspace(secondBridge.baseUrl, sourcePath);
+  assert.equal(reopened.body.sourceHistory.cursor, 1);
+  assert.equal(reopened.body.sourceHistory.entries.length, 1);
+
+  const undoBody = {
+    sourcePath,
+    projectId: opened.body.projectId,
+    documentId: opened.body.documentId,
+    direction: "undo",
+    actionId: "sourceaction_workspace_undo_001",
+    expectedSourceSha256: hash(after),
+    expectedHistoryRevision: 1,
+    expectedHistoryCursor: 1,
+  };
+  const undone = await postJson(
+    secondBridge.baseUrl,
+    "/source-history/action",
+    undoBody,
+  );
+  assert.equal(undone.response.status, 200, JSON.stringify(undone.body));
+  assert.equal(undone.body.content, before);
+  assert.equal(undone.body.sourceHistory.capabilities.canRedo, true);
+  assert.deepEqual(
+    undone.body.target,
+    { id: "heading", text: "one", resolution: "exact" },
+  );
+  assert.equal(await readFile(sourcePath, "utf8"), before);
+
+  const replayed = await postJson(
+    secondBridge.baseUrl,
+    "/source-history/action",
+    undoBody,
+  );
+  assert.equal(replayed.response.status, 200, JSON.stringify(replayed.body));
+  assert.equal(replayed.body.status, "history-action-replayed");
+  assert.equal(replayed.body.content, before);
+
+  const redone = await postJson(
+    secondBridge.baseUrl,
+    "/source-history/action",
+    {
+      sourcePath,
+      projectId: opened.body.projectId,
+      documentId: opened.body.documentId,
+      direction: "redo",
+      actionId: "sourceaction_workspace_redo_001",
+      expectedSourceSha256: hash(before),
+      expectedHistoryRevision: 2,
+      expectedHistoryCursor: 0,
+    },
+  );
+  assert.equal(redone.response.status, 200, JSON.stringify(redone.body));
+  assert.equal(redone.body.content, after);
+  assert.equal(redone.body.sourceHistory.capabilities.canUndo, true);
+  assert.equal(await readFile(sourcePath, "utf8"), after);
+});
+
+test("source history recovery fails safe on both sides of the source commit point", async (t) => {
+  for (const {
+    failpoint,
+    expectedSource,
+    expectedHistoryDepth,
+  } of [
+    {
+      failpoint: "after-autosave-prepared",
+      expectedSource: "before",
+      expectedHistoryDepth: 0,
+    },
+    {
+      failpoint: "after-autosave-source-applied",
+      expectedSource: "after",
+      expectedHistoryDepth: 1,
+    },
+  ]) {
+    const environment = await createEnvironment(t);
+    const sourcePath = join(
+      environment.sources,
+      `source-history-recovery-${failpoint}.html`,
+    );
+    const before = htmlPage(`history ${failpoint}`);
+    const after = before.replace(
+      `<h1>history ${failpoint}</h1>`,
+      `<h1>recovered ${failpoint}</h1>`,
+    );
+    await writeFile(sourcePath, before, "utf8");
+    const bridge = await environment.start({
+      HTML_AI_FAILPOINT: failpoint,
+    });
+    const opened = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+    const beforeText = `history ${failpoint}`;
+    const afterText = `recovered ${failpoint}`;
+    const startOffset = before.indexOf(`<h1>${beforeText}</h1>`) + 4;
+    const interrupted = await postJson(bridge.baseUrl, "/autosave", {
+      sourcePath,
+      projectId: opened.projectId,
+      documentId: opened.documentId,
+      editRevision: 1,
+      expectedSourceSha256: hash(before),
+      html: after,
+      sourceHistoryOperations: [{
+        operationId:
+          `sourceop_recovery_${failpoint.replaceAll("-", "_")}_001`,
+        kind: "text",
+        editRevision: 1,
+        createdAt: "2026-07-31T08:00:00.000Z",
+        beforeSourceSha256: hash(before),
+        afterSourceSha256: hash(after),
+        forwardPatches: [{
+          startOffset,
+          endOffset: startOffset + beforeText.length,
+          before: beforeText,
+          after: afterText,
+          kind: "text",
+        }],
+        reversePatches: [{
+          startOffset,
+          endOffset: startOffset + afterText.length,
+          before: afterText,
+          after: beforeText,
+          kind: "inverse:text",
+        }],
+        beforeTarget: { id: "recovery-heading" },
+        afterTarget: { id: "recovery-heading" },
+      }],
+      changeEvents: [{
+        eventId: `history_recovery_${failpoint.replaceAll("-", "_")}`,
+        kind: "text",
+        before: beforeText,
+        after: afterText,
+      }],
+    });
+    assert.equal(interrupted.response.status, 500);
+
+    const projectRoot = await registeredProjectRoot(
+      environment.workspace,
+      opened.projectId,
+    );
+    const runtime = JSON.parse(
+      await readFile(join(projectRoot, "runtime-state.json"), "utf8"),
+    );
+    const historyRecoveryPath = join(
+      projectRoot,
+      ...runtime.pendingWrite.recoverySourceHistoryRelativePath.split("/"),
+    );
+    await stopChild(bridge.child);
+    await rm(historyRecoveryPath, { force: true });
+
+    const restarted = await environment.start();
+    const recovered = await openWorkspace(restarted.baseUrl, sourcePath);
+    assert.equal(
+      recovered.response.status,
+      200,
+      JSON.stringify(recovered.body),
+    );
+    assert.equal(
+      await readFile(sourcePath, "utf8"),
+      expectedSource === "before" ? before : after,
+    );
+    assert.equal(recovered.body.runtimeState.pendingWrite, null);
+    assert.equal(
+      recovered.body.sourceHistory.entries.length,
+      expectedHistoryDepth,
+    );
+    assert.equal(
+      recovered.body.sourceHistory.cursor,
+      expectedHistoryDepth,
+    );
+  }
+});
+
 test("version history stays read-only and the restore endpoint is unavailable", async (t) => {
   const environment = await createEnvironment(t);
   const sourcePath = join(environment.sources, "read-only-history.html");
@@ -1835,6 +2069,46 @@ test("document identity survives a move and same-path replacement starts isolate
       "utf8",
     ),
     initial,
+  );
+});
+
+test("registered mutations reject an unrelated same-path source replacement", async (t) => {
+  const environment = await createEnvironment(t);
+  const sourcePath = join(environment.sources, "mutation-source-replaced.html");
+  const replacementPath = join(environment.sources, "mutation-source-replaced.tmp");
+  const initial = htmlPage("Mutation source identity");
+  const replacement = htmlPage("External replacement", "<p>unrelated bytes</p>");
+  await writeFile(sourcePath, initial, "utf8");
+  const bridge = await environment.start();
+  const opened = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+
+  await writeFile(replacementPath, replacement, "utf8");
+  await rename(replacementPath, sourcePath);
+  const bytes = Buffer.from("must-not-be-attached");
+  const rejected = await postJson(bridge.baseUrl, "/attachment", {
+    sourcePath,
+    projectId: opened.projectId,
+    documentId: opened.documentId,
+    commentId: "comment_replaced_source",
+    attachmentId: "attachment_replaced_source",
+    fileName: "rejected.txt",
+    mediaType: "text/plain",
+    byteLength: bytes.byteLength,
+    kind: "file",
+    source: "file-picker",
+    dataBase64: bytes.toString("base64"),
+  });
+
+  assert.equal(rejected.response.status, 409, JSON.stringify(rejected.body));
+  assert.equal(
+    rejected.body.error.code,
+    "PROJECT_CONTEXT_SOURCE_REPLACED",
+  );
+  assert.equal(await readFile(sourcePath, "utf8"), replacement);
+  assert.equal(
+    await access(join(opened.projectRoot, "draft", "attachments"))
+      .then(() => true, () => false),
+    false,
   );
 });
 
@@ -2778,9 +3052,10 @@ test("mandatory finalizer controls completion, identity, no-change, and cancella
     })
   ).body;
   assert.equal(cancelledRun.candidateVersionId, "ver_0003");
+  const lateCandidateHtml = htmlPage("迟到结果", "<p>不得建版</p>");
   await writeFile(
     cancelledRun.outputPath,
-    htmlPage("迟到结果", "<p>不得建版</p>"),
+    lateCandidateHtml,
     "utf8",
   );
   const cancelled = await postJson(
@@ -2793,7 +3068,67 @@ test("mandatory finalizer controls completion, identity, no-change, and cancella
     },
   );
   assert.equal(cancelled.body.status, "cancelled");
-  await assert.rejects(runFinalizer(environment.workspace, cancelledRun));
+  const lateFinalization = await runFinalizer(
+    environment.workspace,
+    cancelledRun,
+  );
+  assert.equal(lateFinalization.stderr, "");
+  const lateTerminal = JSON.parse(lateFinalization.stdout);
+  assert.deepEqual(
+    {
+      ok: lateTerminal.ok,
+      status: lateTerminal.status,
+      accepted: lateTerminal.accepted,
+      retryable: lateTerminal.retryable,
+      requestId: lateTerminal.requestId,
+      attemptId: lateTerminal.attemptId,
+    },
+    {
+      ok: true,
+      status: "cancelled",
+      accepted: false,
+      retryable: false,
+      requestId: cancelledRun.requestId,
+      attemptId: cancelledRun.attemptId,
+    },
+  );
+  assert.equal(
+    lateTerminal.message,
+    "本轮已在源页结束。请停止 AI Agent，不要重试。",
+  );
+  assert.equal(
+    await readFile(cancelledRun.outputPath, "utf8"),
+    lateCandidateHtml,
+  );
+  await assert.rejects(access(cancelledRun.completionPath));
+  const repeatedLateTerminal = JSON.parse(
+    (await runFinalizer(environment.workspace, cancelledRun)).stdout,
+  );
+  assert.equal(repeatedLateTerminal.status, "cancelled");
+  assert.equal(repeatedLateTerminal.accepted, false);
+  assert.equal(repeatedLateTerminal.retryable, false);
+
+  const cancellationPath = join(cancelledRun.attemptPath, "cancelled.json");
+  const cancellationMarker = JSON.parse(
+    await readFile(cancellationPath, "utf8"),
+  );
+  await writeFile(
+    cancellationPath,
+    `${JSON.stringify({
+      ...cancellationMarker,
+      requestId: "req_9999",
+    }, null, 2)}\n`,
+    "utf8",
+  );
+  await assert.rejects(
+    runFinalizer(environment.workspace, cancelledRun),
+    /CANCELLATION_IDENTITY_MISMATCH/,
+  );
+  await writeFile(
+    cancellationPath,
+    `${JSON.stringify(cancellationMarker, null, 2)}\n`,
+    "utf8",
+  );
   assert.equal((await openWorkspace(bridge.baseUrl, sourcePath)).body.versions.length, 2);
 });
 
@@ -3361,6 +3696,103 @@ test("native text autosave intent and source-application crash boundaries recove
     assert.equal(recoveredNativeEvents.length, 1);
     assert.equal(recoveredNativeEvents[0].property, "nativeText");
   }
+});
+
+test("a registered attachment cannot split the project during an atomic autosave recovery window", async (t) => {
+  const environment = await createEnvironment(t);
+  const sourcePath = join(environment.sources, "atomic-identity-window.html");
+  const initial = htmlPage("原子身份窗口");
+  const target = htmlPage("原子身份窗口", "<p>已更新</p>");
+  await writeFile(sourcePath, initial, "utf8");
+  const bridge = await environment.start({
+    HTML_AI_FAILPOINT: "after-autosave-source-applied",
+  });
+  const opened = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+
+  const interrupted = await postJson(bridge.baseUrl, "/autosave", {
+    sourcePath,
+    projectId: opened.projectId,
+    documentId: opened.documentId,
+    editRevision: 1,
+    expectedSourceSha256: opened.currentHtmlSha256,
+    html: target,
+  });
+  assert.equal(interrupted.response.status, 500);
+  assert.equal(await readFile(sourcePath, "utf8"), target);
+
+  const bytes = Buffer.from("attachment-during-pending-write");
+  const uploaded = await postJson(bridge.baseUrl, "/attachment", {
+    sourcePath,
+    projectId: opened.projectId,
+    documentId: opened.documentId,
+    commentId: "comment_atomic_identity",
+    attachmentId: "attachment_atomic_identity",
+    fileName: "identity.txt",
+    mediaType: "text/plain",
+    byteLength: bytes.byteLength,
+    kind: "file",
+    source: "file-picker",
+    dataBase64: bytes.toString("base64"),
+  });
+  assert.equal(uploaded.response.status, 201, JSON.stringify(uploaded.body));
+  assert.equal(uploaded.body.projectId, opened.projectId);
+  assert.equal(uploaded.body.documentId, opened.documentId);
+
+  const registry = JSON.parse(
+    await readFile(join(environment.workspace, "project-registry.json"), "utf8"),
+  );
+  assert.deepEqual(Object.keys(registry.projects), [opened.projectId]);
+  assert.deepEqual(Object.keys(registry.documents), [opened.documentId]);
+  assert.equal(
+    Object.values(registry.sources).every(
+      (record) => record.projectId === opened.projectId,
+    ),
+    true,
+  );
+  const recovered = await openWorkspace(bridge.baseUrl, sourcePath);
+  assert.equal(recovered.response.status, 200, JSON.stringify(recovered.body));
+  assert.equal(recovered.body.projectId, opened.projectId);
+  assert.equal(recovered.body.runtimeState.pendingWrite, null);
+  assert.equal(recovered.body.currentHtmlSha256, hash(target));
+});
+
+test("project ensure reuses the registered identity during an atomic autosave recovery window", async (t) => {
+  const environment = await createEnvironment(t);
+  const sourcePath = join(environment.sources, "atomic-ensure-window.html");
+  const initial = htmlPage("原子 ensure 窗口");
+  const target = htmlPage("原子 ensure 窗口", "<p>已更新</p>");
+  await writeFile(sourcePath, initial, "utf8");
+  const bridge = await environment.start({
+    HTML_AI_FAILPOINT: "after-autosave-source-applied",
+  });
+  const opened = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+
+  const interrupted = await postJson(bridge.baseUrl, "/autosave", {
+    sourcePath,
+    projectId: opened.projectId,
+    documentId: opened.documentId,
+    editRevision: 1,
+    expectedSourceSha256: opened.currentHtmlSha256,
+    html: target,
+  });
+  assert.equal(interrupted.response.status, 500);
+  assert.equal(await readFile(sourcePath, "utf8"), target);
+
+  const ensured = await postJson(bridge.baseUrl, "/project/ensure", {
+    sourcePath,
+    expectedSourceSha256: hash(target),
+  });
+  assert.equal(ensured.response.status, 200, JSON.stringify(ensured.body));
+  assert.equal(ensured.body.projectId, opened.projectId);
+  assert.equal(ensured.body.documentId, opened.documentId);
+  assert.equal(ensured.body.runtimeState.pendingWrite, null);
+  assert.equal(ensured.body.currentHtmlSha256, hash(target));
+
+  const registry = JSON.parse(
+    await readFile(join(environment.workspace, "project-registry.json"), "utf8"),
+  );
+  assert.deepEqual(Object.keys(registry.projects), [opened.projectId]);
+  assert.deepEqual(Object.keys(registry.documents), [opened.documentId]);
 });
 
 test("draft writes use monotonic CAS and reject a stale client snapshot", async (t) => {

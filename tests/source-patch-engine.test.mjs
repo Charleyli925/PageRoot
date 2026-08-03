@@ -12,11 +12,6 @@ import {
   sourceSha256,
   validatePatchScope,
 } from "../app/lib/source-patch-core.js";
-import {
-  buildSourceTextMap,
-  textRangeToSourceEdit,
-} from "../app/lib/source-text-map.js";
-
 function elementBy(index, predicate) {
   const element = index.elements.find(predicate);
   assert.ok(element, "expected source element");
@@ -39,893 +34,6 @@ function canonicalTestValue(value) {
   }
   return JSON.stringify(value);
 }
-
-test("text patch handles entities, Chinese, emoji, combining characters, CRLF, outside protection, and inverse", () => {
-  const html = `<!doctype html>\r\n<html>\r\n<head></head>\r\n<body>\r\n  <h2 id='title'>中😀e\u0301 &amp; 末</h2>\r\n  <section data-keep="yes">  untouched  </section>\r\n</body>\r\n</html>`;
-  const index = buildSourceIndex(html);
-  const heading = elementBy(index, (element) => element.tagName === "h2");
-  const targetRef = createTargetRef(index, heading.nodeId, { level: "text" });
-  const plan = planSourcePatch({
-    type: "replace-text",
-    targetRef,
-    beforeText: "中😀e\u0301 & 末",
-    nextText: "新😀e\u0301 < & 文本",
-    expectedSourceSha256: index.sourceSha256,
-  }, index);
-  const result = applyPatchPlan(plan, html);
-
-  assert.match(result.html, /<h2 id='title'>新😀e\u0301 &lt; &amp; 文本<\/h2>/u);
-  assert.match(result.html, /\r\n  <section data-keep="yes">  untouched  <\/section>\r\n/u);
-  assert.equal(result.scopeReport.outsideUnchanged, true);
-  assert.equal(result.scopeReport.verdict, "allowed");
-  assert.equal(result.parseIntegrity.ok, true);
-  assert.equal(result.patches.length, 1);
-  assert.equal(result.patches[0].before, "中😀e\u0301 &amp; 末");
-  const undone = applyPatchPlan(result.inversePlan, result.html);
-  assert.equal(undone.html, html);
-  const redone = applyPatchPlan(undone.inversePlan, undone.html);
-  assert.equal(redone.html, result.html);
-  assert.equal(redone.sourceSha256, result.sourceSha256);
-});
-
-test("text patch fails closed for mixed content, stale hash, and stale before content", () => {
-  const mixed = `<button id="b">保存 <strong>现在</strong></button>`;
-  const mixedIndex = buildSourceIndex(mixed);
-  const button = elementBy(mixedIndex, (element) => element.tagName === "button");
-  const targetRef = createTargetRef(mixedIndex, button.nodeId);
-  assertPatchError("MIXED_TEXT_CONTENT", () => planSourcePatch({
-    type: "replace-text",
-    targetRef,
-    beforeText: "保存 现在",
-    nextText: "完成",
-  }, mixedIndex));
-
-  const html = `<p id="p">before</p>`;
-  const index = buildSourceIndex(html);
-  const paragraph = elementBy(index, (element) => element.tagName === "p");
-  const paragraphRef = createTargetRef(index, paragraph.nodeId, { level: "text" });
-  assertPatchError("STALE_SOURCE_HASH", () => planSourcePatch({
-    type: "replace-text",
-    targetRef: paragraphRef,
-    beforeText: "before",
-    nextText: "after",
-    expectedSourceSha256: "0".repeat(64),
-  }, index));
-  assertPatchError("STALE_BEFORE_CONTENT", () => planSourcePatch({
-    type: "replace-text",
-    targetRef: paragraphRef,
-    beforeText: "already changed",
-    nextText: "after",
-  }, index));
-
-  const plan = planSourcePatch({
-    type: "replace-text",
-    targetRef: paragraphRef,
-    beforeText: "before",
-    nextText: "after",
-  }, index);
-  const externallyChanged = `<p id="p">BEFORE</p>`;
-  const externallyChangedIndex = buildSourceIndex(externallyChanged);
-  const forgedForBeforeCheck = {
-    ...plan,
-    sourceSha256: sourceSha256(externallyChanged),
-    targetRefs: [createTargetRef(
-      externallyChangedIndex,
-      elementBy(externallyChangedIndex, (element) => element.tagName === "p").nodeId,
-      { level: "text" },
-    )],
-  };
-  assertPatchError(
-    "STALE_BEFORE_CONTENT",
-    () => applyPatchPlan(forgedForBeforeCheck, externallyChanged),
-  );
-});
-
-test("text range patch edits mixed inline text without flattening markup and inverts byte-exactly", () => {
-  const html = `<section data-keep="字节不动"><p id="activity"><strong>顾宁</strong> 发布了研&amp;究简报 😀</p><aside>outside</aside></section>`;
-  const index = buildSourceIndex(html);
-  const paragraph = elementBy(
-    index,
-    (element) => element.stableAttributes.id === "activity",
-  );
-  const trailingText = index.byNodeId.get(paragraph.textNodeIds[0]);
-  assert.equal(trailingText.type, "text");
-  assert.equal(trailingText.value, " 发布了研&究简报 😀");
-  const selectedText = "研&究简报";
-  const startOffset = trailingText.value.indexOf(selectedText);
-  const targetRef = createTargetRef(index, paragraph.nodeId, {
-    level: "subregion",
-    targetId: "activity-row",
-  });
-  const result = applyPatchPlan(planSourcePatch({
-    type: "replace-text-range",
-    targetRef,
-    segments: [{
-      textNodeId: trailingText.nodeId,
-      startOffset,
-      endOffset: startOffset + selectedText.length,
-    }],
-    beforeText: selectedText,
-    nextText: "策略<简报 & 纪要",
-    expectedSourceSha256: index.sourceSha256,
-  }, index), html);
-
-  assert.equal(
-    result.html,
-    `<section data-keep="字节不动"><p id="activity"><strong>顾宁</strong> 发布了策略&lt;简报 &amp; 纪要 😀</p><aside>outside</aside></section>`,
-  );
-  assert.match(result.html, /<strong>顾宁<\/strong>/u);
-  assert.match(result.html, /<aside>outside<\/aside>/u);
-  assert.equal(result.scopeReport.outsideUnchanged, true);
-  assert.equal(result.parseIntegrity.ok, true);
-  assert.equal(result.targetMappings[0].targetId, "activity-row");
-  assert.equal(result.targetMappings[0].resolution, "exact");
-  assert.equal(applyPatchPlan(result.inversePlan, result.html).html, html);
-});
-
-test("legacy text range patch inserts once across multiple runs and rejects stale or tampered input", () => {
-  const html = `<p id="activity"><strong>顾宁</strong> 发布了研究简报</p>`;
-  const index = buildSourceIndex(html);
-  const paragraph = elementBy(
-    index,
-    (element) => element.stableAttributes.id === "activity",
-  );
-  const strong = elementBy(index, (element) => element.tagName === "strong");
-  const strongText = index.byNodeId.get(strong.textNodeIds[0]);
-  const trailingText = index.byNodeId.get(paragraph.textNodeIds[0]);
-  const targetRef = createTargetRef(index, paragraph.nodeId, { level: "subregion" });
-
-  const legacyResult = applyPatchPlan(planSourcePatch({
-    type: "replace-text-range",
-    targetRef,
-    segments: [
-      { textNodeId: strongText.nodeId, startOffset: 0, endOffset: 2 },
-      { textNodeId: trailingText.nodeId, startOffset: 0, endOffset: 2 },
-    ],
-    beforeText: "顾宁 发",
-    nextText: "替换",
-  }, index), html);
-  assert.equal(
-    legacyResult.html,
-    `<p id="activity"><strong>替换</strong>布了研究简报</p>`,
-  );
-  assert.equal(
-    legacyResult.html.match(/替换/gu)?.length,
-    1,
-    "legacy multi-segment replacement must insert nextText exactly once",
-  );
-  assert.equal(applyPatchPlan(legacyResult.inversePlan, legacyResult.html).html, html);
-
-  assertPatchError("NON_CONTIGUOUS_TEXT_REPLACEMENT", () => planSourcePatch({
-    type: "replace-text-range",
-    targetRef,
-    segments: [
-      { textNodeId: strongText.nodeId, startOffset: 0, endOffset: 2 },
-      { textNodeId: trailingText.nodeId, startOffset: 1, endOffset: 4 },
-    ],
-    nextText: "替换",
-  }, index));
-  assertPatchError("STALE_BEFORE_CONTENT", () => planSourcePatch({
-    type: "replace-text-range",
-    targetRef,
-    segments: [{
-      textNodeId: trailingText.nodeId,
-      startOffset: 4,
-      endOffset: 8,
-    }],
-    beforeText: "已经变化",
-    nextText: "策略简报",
-  }, index));
-
-  const plan = planSourcePatch({
-    type: "replace-text-range",
-    targetRef,
-    segments: [{
-      textNodeId: trailingText.nodeId,
-      startOffset: 4,
-      endOffset: 8,
-    }],
-    beforeText: "研究简报",
-    nextText: "策略简报",
-  }, index);
-  assertPatchError("PATCH_PLAN_TAMPERED", () => applyPatchPlan({
-    ...plan,
-    patches: plan.patches.map((patch) => ({ ...patch, after: "越界改写" })),
-  }, html));
-});
-
-test("replacement command edits one continuous selection across styled text nodes without duplicate insertion", () => {
-  const html = `<section data-keep="yes"><p>开甲<strong>乙&amp;丙</strong><em>丁😀</em>戊</p><aside>outside</aside></section>`;
-  const index = buildSourceIndex(html);
-  const paragraph = elementBy(index, (element) => element.tagName === "p");
-  const strong = elementBy(index, (element) => element.tagName === "strong");
-  const emphasis = elementBy(index, (element) => element.tagName === "em");
-  const leadingText = index.byNodeId.get(paragraph.textNodeIds[0]);
-  const strongText = index.byNodeId.get(strong.textNodeIds[0]);
-  const emphasisText = index.byNodeId.get(emphasis.textNodeIds[0]);
-  const targetRef = createTargetRef(index, paragraph.nodeId, {
-    level: "subregion",
-    targetId: "flow-root",
-  });
-  const result = applyPatchPlan(planSourcePatch({
-    type: "replace-text-range",
-    targetRef,
-    expectedSourceSha256: index.sourceSha256,
-    replacements: [{
-      deleteSegments: [
-        { textNodeId: leadingText.nodeId, startOffset: 1, endOffset: 2 },
-        { textNodeId: strongText.nodeId, startOffset: 0, endOffset: strongText.value.length },
-        { textNodeId: emphasisText.nodeId, startOffset: 0, endOffset: 1 },
-      ],
-      insertAt: {
-        kind: "text",
-        textNodeId: leadingText.nodeId,
-        utf16Offset: 1,
-        affinity: "right",
-      },
-      beforeText: "甲乙&丙丁",
-      nextText: "新<&",
-    }],
-  }, index), html);
-
-  assert.equal(
-    result.html,
-    `<section data-keep="yes"><p>开新&lt;&amp;<em>😀</em>戊</p><aside>outside</aside></section>`,
-  );
-  assert.equal(result.patches.length, 3);
-  assert.equal(result.html.match(/新/gu)?.length, 1);
-  assert.equal(result.scopeReport.outsideUnchanged, true);
-  assert.equal(result.targetMappings[0].targetId, "flow-root");
-  assert.equal(result.targetMappings[0].resolution, "exact");
-  assert.equal(result.refreshedTargetRefs[0].sourceAnchor.sourceSha256, result.sourceSha256);
-  assert.equal(applyPatchPlan(result.inversePlan, result.html).html, html);
-});
-
-test("full replacement in a flex text island preserves the insertion wrapper and removes only a disposable empty sibling", () => {
-  const html = `<p id="cta" style="display:flex;gap:12px"><span data-run="first">打开</span><span>对话框</span></p><aside data-keep=' bytes '>原样保留</aside>`;
-  const index = buildSourceIndex(html);
-  const textIsland = elementBy(index, (element) => element.stableAttributes.id === "cta");
-  const [firstRun, secondRun] = textIsland.childElementIds.map(
-    (nodeId) => index.byNodeId.get(nodeId),
-  );
-  const firstText = index.byNodeId.get(firstRun.textNodeIds[0]);
-  const secondText = index.byNodeId.get(secondRun.textNodeIds[0]);
-  const plan = planSourcePatch({
-    type: "replace-text-range",
-    targetRef: createTargetRef(index, textIsland.nodeId, { level: "subregion" }),
-    replacements: [{
-      deleteSegments: [
-        { textNodeId: firstText.nodeId, startOffset: 0, endOffset: firstText.value.length },
-        { textNodeId: secondText.nodeId, startOffset: 0, endOffset: secondText.value.length },
-      ],
-      insertAt: {
-        kind: "text",
-        textNodeId: firstText.nodeId,
-        utf16Offset: 0,
-        affinity: "right",
-      },
-      beforeText: "打开对话框",
-      nextText: "继续",
-    }],
-  }, index);
-  const result = applyPatchPlan(plan, html);
-
-  assert.equal(
-    result.html,
-    `<p id="cta" style="display:flex;gap:12px"><span data-run="first">继续</span></p><aside data-keep=' bytes '>原样保留</aside>`,
-  );
-  assert.equal(
-    plan.patches.filter((patch) => patch.cleanup === "empty-transparent-wrapper").length,
-    1,
-  );
-  assert.equal(result.scopeReport.outsideUnchanged, true);
-  assert.equal(applyPatchPlan(result.inversePlan, result.html).html, html);
-});
-
-test("pure deletion removes the outermost disposable style wrapper and preserves entity bytes on inverse", () => {
-  const html = `<p id="flow"><span class="keep"><em>甲</em></span><span style='color:red'><em>乙&amp;丙</em></span></p><aside data-x="1">outside &amp; bytes</aside>`;
-  const index = buildSourceIndex(html);
-  const paragraph = elementBy(index, (element) => element.stableAttributes.id === "flow");
-  const removedSpan = elementBy(
-    index,
-    (element) => element.tagName === "span" && element.attributesByName.has("style"),
-  );
-  const emphasis = index.byNodeId.get(removedSpan.childElementIds[0]);
-  const textNode = index.byNodeId.get(emphasis.textNodeIds[0]);
-  assert.equal(textNode.value, "乙&丙");
-  const plan = planSourcePatch({
-    type: "replace-text-range",
-    targetRef: createTargetRef(index, paragraph.nodeId, { level: "subregion" }),
-    replacements: [{
-      deleteSegments: [{
-        textNodeId: textNode.nodeId,
-        startOffset: 0,
-        endOffset: textNode.value.length,
-      }],
-      insertAt: {
-        kind: "text",
-        textNodeId: textNode.nodeId,
-        utf16Offset: 0,
-        affinity: "right",
-      },
-      beforeText: "乙&丙",
-      nextText: "",
-    }],
-  }, index);
-
-  assert.equal(plan.patches.length, 1, "nested cleanup must produce one non-overlapping patch");
-  assert.equal(plan.patches[0].before, `<span style='color:red'><em>乙&amp;丙</em></span>`);
-  assert.equal(plan.patches[0].cleanup, "empty-transparent-wrapper");
-  const result = applyPatchPlan(plan, html);
-  assert.equal(
-    result.html,
-    `<p id="flow"><span class="keep"><em>甲</em></span></p><aside data-x="1">outside &amp; bytes</aside>`,
-  );
-  assert.equal(result.scopeReport.outsideUnchanged, true);
-  assert.equal(applyPatchPlan(result.inversePlan, result.html).html, html);
-
-  assertPatchError("PATCH_PLAN_TAMPERED", () => applyPatchPlan({
-    ...plan,
-    patches: plan.patches.map((patch) => ({ ...patch, after: "<em></em>" })),
-  }, html));
-});
-
-test("cross-inline cleanup coalesces inverse fragments at one output offset", () => {
-  const html = `<h1 id="title">真实 <strong>DOM</strong> 光标要像 <em>Word</em> 一样自然&nbsp;🙂</h1>`;
-  const index = buildSourceIndex(html);
-  const heading = elementBy(index, (element) => element.stableAttributes.id === "title");
-  const textByValue = (value) => {
-    const textNode = index.textNodes.find((node) => node.value === value);
-    assert.ok(textNode, `expected text node ${value}`);
-    return textNode;
-  };
-  const leading = textByValue("真实 ");
-  const strongText = textByValue("DOM");
-  const middle = textByValue(" 光标要像 ");
-  const emphasisText = textByValue("Word");
-  const result = applyPatchPlan(planSourcePatch({
-    type: "replace-text-range",
-    targetRef: createTargetRef(index, heading.nodeId, { level: "subregion" }),
-    replacements: [{
-      deleteSegments: [
-        { textNodeId: leading.nodeId, startOffset: 2, endOffset: 3 },
-        { textNodeId: strongText.nodeId, startOffset: 0, endOffset: 3 },
-        { textNodeId: middle.nodeId, startOffset: 0, endOffset: 6 },
-        { textNodeId: emphasisText.nodeId, startOffset: 0, endOffset: 3 },
-      ],
-      insertAt: {
-        kind: "text",
-        textNodeId: leading.nodeId,
-        utf16Offset: 2,
-        affinity: "right",
-      },
-      beforeText: " DOM 光标要像 Wor",
-      nextText: "跨行内替换",
-    }],
-  }, index), html);
-
-  assert.equal(
-    result.html,
-    `<h1 id="title">真实跨行内替换<em>d</em> 一样自然&nbsp;🙂</h1>`,
-  );
-  assert.ok(result.inversePlan.patches.some((patch) => (
-    patch.startOffset === patch.endOffset
-    && patch.after === "<strong>DOM</strong> 光标要像 "
-  )));
-  const undone = applyPatchPlan(result.inversePlan, result.html);
-  assert.equal(undone.html, html);
-  const redone = applyPatchPlan(undone.inversePlan, undone.html);
-  assert.equal(redone.html, result.html);
-  assert.equal(redone.sourceSha256, result.sourceSha256);
-});
-
-test("exact leading-wrapper boundary replacement matches native DOM and round-trips bytes", () => {
-  const html = `<h1 id="title">真实 <strong>DOM</strong> 光标要像 <em>Word</em> 一样自然&nbsp;🙂</h1>`;
-  const index = buildSourceIndex(html);
-  const heading = elementBy(index, (element) => element.stableAttributes.id === "title");
-  const map = buildSourceTextMap(index, heading.nodeId);
-  const mapped = textRangeToSourceEdit(map, 3, 9, "left");
-  const result = applyPatchPlan(planSourcePatch({
-    type: "replace-text-range",
-    targetRef: createTargetRef(index, heading.nodeId, { level: "subregion" }),
-    replacements: [{
-      ...mapped,
-      beforeText: "DOM 光标",
-      nextText: "Electron原位",
-    }],
-  }, index), html);
-
-  assert.equal(
-    result.html,
-    `<h1 id="title">真实 Electron原位要像 <em>Word</em> 一样自然&nbsp;🙂</h1>`,
-  );
-  assert.equal(result.scopeReport.outsideUnchanged, true);
-  const undone = applyPatchPlan(result.inversePlan, result.html);
-  assert.equal(undone.html, html);
-  const redone = applyPatchPlan(undone.inversePlan, undone.html);
-  assert.equal(redone.html, result.html);
-  assert.equal(redone.sourceSha256, result.sourceSha256);
-});
-
-test("empty-wrapper cleanup removes only style wrappers and preserves semantic or identified elements", () => {
-  const html = `<p id="flow"><span data-empty></span><span data-partial>甲乙</span><span style="font-weight:700">丙</span><span data-comment>丁<!--keep--></span><span data-atom>戊<img src=x></span><span data-structure>己<button></button></span><a id="bookmark" href="/x">庚</a><time datetime="2026-07-21">辛</time></p>`;
-  const index = buildSourceIndex(html);
-  const paragraph = elementBy(index, (element) => element.stableAttributes.id === "flow");
-  const spanByAttribute = (name) => elementBy(
-    index,
-    (element) => element.tagName === "span" && element.attributesByName.has(name),
-  );
-  const partialText = index.byNodeId.get(spanByAttribute("data-partial").textNodeIds[0]);
-  const removeText = index.byNodeId.get(spanByAttribute("style").textNodeIds[0]);
-  const commentText = index.byNodeId.get(spanByAttribute("data-comment").textNodeIds[0]);
-  const atomText = index.byNodeId.get(spanByAttribute("data-atom").textNodeIds[0]);
-  const structureText = index.byNodeId.get(spanByAttribute("data-structure").textNodeIds[0]);
-  const link = elementBy(index, (element) => element.tagName === "a");
-  const time = elementBy(index, (element) => element.tagName === "time");
-  const linkText = index.byNodeId.get(link.textNodeIds[0]);
-  const timeText = index.byNodeId.get(time.textNodeIds[0]);
-  const replacementFor = (textNode, nextText, endOffset = textNode.value.length) => ({
-    deleteSegments: [{ textNodeId: textNode.nodeId, startOffset: 0, endOffset }],
-    insertAt: {
-      kind: "text",
-      textNodeId: textNode.nodeId,
-      utf16Offset: 0,
-      affinity: "right",
-    },
-    nextText,
-  });
-  const result = applyPatchPlan(planSourcePatch({
-    type: "replace-text-range",
-    targetRef: createTargetRef(index, paragraph.nodeId, { level: "subregion" }),
-    replacements: [
-      replacementFor(partialText, "X", 1),
-      replacementFor(removeText, ""),
-      replacementFor(commentText, ""),
-      replacementFor(atomText, ""),
-      replacementFor(structureText, ""),
-      replacementFor(linkText, ""),
-      replacementFor(timeText, ""),
-    ],
-  }, index), html);
-
-  assert.equal(
-    result.html,
-    `<p id="flow"><span data-empty></span><span data-partial>X乙</span><span data-comment><!--keep--></span><span data-atom><img src=x></span><span data-structure><button></button></span><a id="bookmark" href="/x"></a><time datetime="2026-07-21"></time></p>`,
-  );
-  assert.equal(applyPatchPlan(result.inversePlan, result.html).html, html);
-});
-
-test("pure insertion supports paragraph start, styled-child boundary, paragraph end, and byte-exact inverse", () => {
-  const html = `<p id="flow"><strong>甲</strong><em>乙</em></p>`;
-  const index = buildSourceIndex(html);
-  const paragraph = elementBy(index, (element) => element.stableAttributes.id === "flow");
-  const [strong, emphasis] = paragraph.childElementIds.map((nodeId) => index.byNodeId.get(nodeId));
-  const targetRef = createTargetRef(index, paragraph.nodeId, { level: "subregion" });
-  const result = applyPatchPlan(planSourcePatch({
-    type: "replace-text-range",
-    targetRef,
-    replacements: [
-      {
-        deleteSegments: [],
-        insertAt: {
-          kind: "child-boundary",
-          parentNodeId: paragraph.nodeId,
-          beforeNodeId: strong.nodeId,
-          affinity: "right",
-        },
-        nextText: "首",
-      },
-      {
-        deleteSegments: [],
-        insertAt: {
-          kind: "child-boundary",
-          parentNodeId: paragraph.nodeId,
-          beforeNodeId: emphasis.nodeId,
-          affinity: "right",
-        },
-        nextText: "中",
-      },
-      {
-        deleteSegments: [],
-        insertAt: {
-          kind: "child-boundary",
-          parentNodeId: paragraph.nodeId,
-          beforeNodeId: null,
-          affinity: "left",
-        },
-        nextText: "尾",
-      },
-    ],
-  }, index), html);
-
-  assert.equal(result.html, `<p id="flow">首<strong>甲</strong>中<em>乙</em>尾</p>`);
-  assert.equal(result.patches.length, 3);
-  assert.equal(applyPatchPlan(result.inversePlan, result.html).html, html);
-});
-
-test("text anchors preserve entity and UTF-16 boundaries and reject a surrogate interior", () => {
-  const html = `<p id="flow">甲&amp;&#x1F600;乙</p>`;
-  const index = buildSourceIndex(html);
-  const paragraph = elementBy(index, (element) => element.stableAttributes.id === "flow");
-  const textNode = index.byNodeId.get(paragraph.textNodeIds[0]);
-  const targetRef = createTargetRef(index, paragraph.nodeId, { level: "subregion" });
-  assert.equal(textNode.value, "甲&😀乙");
-
-  const result = applyPatchPlan(planSourcePatch({
-    type: "replace-text-range",
-    targetRef,
-    replacements: [{
-      deleteSegments: [],
-      insertAt: {
-        kind: "text",
-        textNodeId: textNode.nodeId,
-        utf16Offset: 2,
-        affinity: "right",
-      },
-      nextText: "<&",
-    }],
-  }, index), html);
-  assert.equal(result.html, `<p id="flow">甲&amp;&lt;&amp;&#x1F600;乙</p>`);
-  assert.equal(applyPatchPlan(result.inversePlan, result.html).html, html);
-
-  assertPatchError("UNSAFE_TEXT_RANGE_BOUNDARY", () => planSourcePatch({
-    type: "replace-text-range",
-    targetRef,
-    replacements: [{
-      deleteSegments: [],
-      insertAt: {
-        kind: "text",
-        textNodeId: textNode.nodeId,
-        utf16Offset: 3,
-        affinity: "right",
-      },
-      nextText: "x",
-    }],
-  }, index));
-});
-
-test("one command applies multiple non-contiguous replacements and its inverse restores every byte", () => {
-  const html = `<div data-keep='1'><p id="flow">甲乙<strong>丙丁</strong>戊己</p><aside>same</aside></div>`;
-  const index = buildSourceIndex(html);
-  const paragraph = elementBy(index, (element) => element.stableAttributes.id === "flow");
-  const [leadingText, trailingText] = paragraph.textNodeIds.map(
-    (nodeId) => index.byNodeId.get(nodeId),
-  );
-  const targetRef = createTargetRef(index, paragraph.nodeId, { level: "subregion" });
-  const result = applyPatchPlan(planSourcePatch({
-    type: "replace-text-range",
-    targetRef,
-    expectedSourceSha256: index.sourceSha256,
-    beforeText: "乙己",
-    replacements: [
-      {
-        deleteSegments: [{
-          textNodeId: leadingText.nodeId,
-          startOffset: 1,
-          endOffset: 2,
-        }],
-        insertAt: {
-          kind: "text",
-          textNodeId: leadingText.nodeId,
-          utf16Offset: 1,
-          affinity: "right",
-        },
-        beforeText: "乙",
-        nextText: "二",
-      },
-      {
-        deleteSegments: [{
-          textNodeId: trailingText.nodeId,
-          startOffset: 1,
-          endOffset: 2,
-        }],
-        insertAt: {
-          kind: "text",
-          textNodeId: trailingText.nodeId,
-          utf16Offset: 1,
-          affinity: "left",
-        },
-        beforeText: "己",
-        nextText: "六",
-      },
-    ],
-  }, index), html);
-
-  assert.equal(
-    result.html,
-    `<div data-keep='1'><p id="flow">甲二<strong>丙丁</strong>戊六</p><aside>same</aside></div>`,
-  );
-  assert.equal(result.patches.length, 2);
-  assert.equal(applyPatchPlan(result.inversePlan, result.html).html, html);
-});
-
-test("replacement command fails closed for stale, overlap, hard-break, atom, foreign anchor, and tampering", () => {
-  const html = `<p id="flow">甲<br>乙<img src="x">丙丁</p><aside id="outside">外</aside>`;
-  const index = buildSourceIndex(html);
-  const paragraph = elementBy(index, (element) => element.stableAttributes.id === "flow");
-  const outside = elementBy(index, (element) => element.stableAttributes.id === "outside");
-  const [firstText, secondText, thirdText] = paragraph.textNodeIds.map(
-    (nodeId) => index.byNodeId.get(nodeId),
-  );
-  const outsideText = index.byNodeId.get(outside.textNodeIds[0]);
-  const targetRef = createTargetRef(index, paragraph.nodeId, { level: "subregion" });
-  const replacement = {
-    deleteSegments: [{ textNodeId: thirdText.nodeId, startOffset: 0, endOffset: 1 }],
-    insertAt: {
-      kind: "text",
-      textNodeId: thirdText.nodeId,
-      utf16Offset: 0,
-      affinity: "right",
-    },
-    beforeText: "丙",
-    nextText: "C",
-  };
-
-  assertPatchError("STALE_SOURCE_HASH", () => planSourcePatch({
-    type: "replace-text-range",
-    targetRef,
-    expectedSourceSha256: "0".repeat(64),
-    replacements: [replacement],
-  }, index));
-  assertPatchError("STALE_BEFORE_CONTENT", () => planSourcePatch({
-    type: "replace-text-range",
-    targetRef,
-    replacements: [{ ...replacement, beforeText: "changed" }],
-  }, index));
-  assertPatchError("OVERLAPPING_TEXT_REPLACEMENTS", () => planSourcePatch({
-    type: "replace-text-range",
-    targetRef,
-    replacements: [
-      replacement,
-      {
-        ...replacement,
-        deleteSegments: [{ textNodeId: thirdText.nodeId, startOffset: 0, endOffset: 2 }],
-        beforeText: "丙丁",
-        nextText: "D",
-      },
-    ],
-  }, index));
-  assertPatchError("TEXT_RANGE_STRUCTURAL_BOUNDARY", () => planSourcePatch({
-    type: "replace-text-range",
-    targetRef,
-    replacements: [{
-      deleteSegments: [
-        { textNodeId: firstText.nodeId, startOffset: 0, endOffset: 1 },
-        { textNodeId: secondText.nodeId, startOffset: 0, endOffset: 1 },
-      ],
-      insertAt: {
-        kind: "text",
-        textNodeId: firstText.nodeId,
-        utf16Offset: 0,
-        affinity: "right",
-      },
-      nextText: "x",
-    }],
-  }, index));
-  assertPatchError("TEXT_RANGE_STRUCTURAL_BOUNDARY", () => planSourcePatch({
-    type: "replace-text-range",
-    targetRef,
-    replacements: [{
-      deleteSegments: [
-        { textNodeId: secondText.nodeId, startOffset: 0, endOffset: 1 },
-        { textNodeId: thirdText.nodeId, startOffset: 0, endOffset: 1 },
-      ],
-      insertAt: {
-        kind: "text",
-        textNodeId: secondText.nodeId,
-        utf16Offset: 0,
-        affinity: "right",
-      },
-      nextText: "x",
-    }],
-  }, index));
-  assertPatchError("TEXT_RANGE_TARGET_MISMATCH", () => planSourcePatch({
-    type: "replace-text-range",
-    targetRef,
-    replacements: [{
-      deleteSegments: [],
-      insertAt: {
-        kind: "text",
-        textNodeId: outsideText.nodeId,
-        utf16Offset: 0,
-        affinity: "right",
-      },
-      nextText: "x",
-    }],
-  }, index));
-
-  const plan = planSourcePatch({
-    type: "replace-text-range",
-    targetRef,
-    replacements: [replacement],
-  }, index);
-  assertPatchError("PATCH_PLAN_TAMPERED", () => applyPatchPlan({
-    ...plan,
-    patches: plan.patches.map((patch) => ({ ...patch, after: "tampered" })),
-  }, html));
-});
-
-test("plain text flow inserts generated hard breaks, escapes markup, and round-trips bytes", () => {
-  const html = `<section data-keep="yes"><p id="flow">甲&amp;乙</p><aside>outside</aside></section>`;
-  const index = buildSourceIndex(html);
-  const paragraph = elementBy(index, (element) => element.stableAttributes.id === "flow");
-  const map = buildSourceTextMap(index, paragraph.nodeId);
-  const targetRef = createTargetRef(index, paragraph.nodeId, { level: "subregion" });
-  const edit = textRangeToSourceEdit(map, 2, 2, "right");
-  const plan = planSourcePatch({
-    type: "replace-text-flow-range",
-    targetRef,
-    replacements: [{
-      deleteSegments: edit.deleteSegments,
-      insertAt: edit.insertAt,
-      beforeText: "",
-      nextText: `<img src=x>\n第二行 & 保留`,
-    }],
-    beforeText: "",
-    expectedSourceSha256: index.sourceSha256,
-  }, index);
-  const result = applyPatchPlan(plan, html);
-
-  assert.equal(
-    result.html,
-    `<section data-keep="yes"><p id="flow">甲&amp;&lt;img src=x><br>第二行 &amp; 保留乙</p><aside>outside</aside></section>`,
-  );
-  assert.equal(result.patches.length, 1);
-  assert.equal(result.patches[0].kind, "text-flow");
-  assert.equal(result.scopeReport.outsideUnchanged, true);
-  const undone = applyPatchPlan(result.inversePlan, result.html);
-  assert.equal(undone.html, html);
-  assert.equal(applyPatchPlan(undone.inversePlan, undone.html).html, result.html);
-
-  assertPatchError("TEXT_FLOW_BREAK_REQUIRED", () => planSourcePatch({
-    type: "replace-text-flow-range",
-    targetRef,
-    replacements: [{
-      deleteSegments: [],
-      insertAt: edit.insertAt,
-      nextText: "single line",
-    }],
-  }, index));
-  assertPatchError("TEXT_FLOW_NOT_NORMALIZED", () => planSourcePatch({
-    type: "replace-text-flow-range",
-    targetRef,
-    replacements: [{
-      deleteSegments: [],
-      insertAt: edit.insertAt,
-      nextText: "first\r\nsecond",
-    }],
-  }, index));
-  assertPatchError("PATCH_PLAN_TAMPERED", () => applyPatchPlan({
-    ...plan,
-    patches: plan.patches.map((patch) => ({ ...patch, after: "<script>x</script>" })),
-  }, html));
-});
-
-test("one authored hard break can be deleted and restored without rewriting neighbours", () => {
-  const html = `<div data-keep='1'><p id="flow">第一行<br class='authored'>第二行</p><aside>same</aside></div>`;
-  const index = buildSourceIndex(html);
-  const paragraph = elementBy(index, (element) => element.stableAttributes.id === "flow");
-  const hardBreak = elementBy(index, (element) => (
-    element.tagName === "br" && element.parentId === paragraph.nodeId
-  ));
-  const targetRef = createTargetRef(index, paragraph.nodeId, { level: "subregion" });
-  const plan = planSourcePatch({
-    type: "delete-hard-break",
-    targetRef,
-    hardBreakNodeId: hardBreak.nodeId,
-    expectedSourceSha256: index.sourceSha256,
-  }, index);
-  const result = applyPatchPlan(plan, html);
-
-  assert.equal(
-    result.html,
-    `<div data-keep='1'><p id="flow">第一行第二行</p><aside>same</aside></div>`,
-  );
-  assert.deepEqual(result.patches.map(({ before, after, kind }) => ({
-    before,
-    after,
-    kind,
-  })), [{
-    before: `<br class='authored'>`,
-    after: "",
-    kind: "hard-break",
-  }]);
-  const undone = applyPatchPlan(result.inversePlan, result.html);
-  assert.equal(undone.html, html);
-  assert.equal(applyPatchPlan(undone.inversePlan, undone.html).html, result.html);
-
-  assertPatchError("HARD_BREAK_TARGET_INVALID", () => planSourcePatch({
-    type: "delete-hard-break",
-    targetRef,
-    hardBreakNodeId: paragraph.nodeId,
-  }, index));
-});
-
-test("simple paragraph and list-item splits preserve text bytes and omit cloned identity or behavior attributes", () => {
-  const fixtures = [
-    {
-      html: `<main><p id='copy' class="lead" style='color:red' data-item-id='one' data-section="hero" onclick='go()'>甲&amp;乙丙</p><aside>same</aside></main>`,
-      tagName: "p",
-      splitOffset: 2,
-      expectedFirst: "甲&",
-      expectedSecond: "乙丙",
-    },
-    {
-      html: `<ol><li id="item" class='row' value="7">第一项第二项</li></ol>`,
-      tagName: "li",
-      splitOffset: 3,
-      expectedFirst: "第一项",
-      expectedSecond: "第二项",
-    },
-  ];
-
-  for (const fixture of fixtures) {
-    const index = buildSourceIndex(fixture.html);
-    const block = elementBy(index, (element) => (
-      element.tagName === fixture.tagName
-      && element.attributesByName.has("id")
-    ));
-    const targetRef = createTargetRef(index, block.nodeId, { level: "subregion" });
-    const plan = planSourcePatch({
-      type: "split-text-block",
-      targetRef,
-      splitOffset: fixture.splitOffset,
-      expectedSourceSha256: index.sourceSha256,
-    }, index);
-    const result = applyPatchPlan(plan, fixture.html);
-    const blocks = result.sourceIndex.elements.filter(
-      (element) => element.tagName === fixture.tagName,
-    );
-
-    assert.equal(blocks.length, 2);
-    assert.equal(blocks[0].textContent, fixture.expectedFirst);
-    assert.equal(blocks[1].textContent, fixture.expectedSecond);
-    assert.equal(blocks[1].attributesByName.has("id"), false);
-    assert.equal(blocks[1].attributesByName.has("name"), false);
-    assert.equal(blocks[1].attributesByName.has("value"), false);
-    assert.equal(blocks[1].attributes.some(({ name }) => name.startsWith("on")), false);
-    assert.equal(blocks[1].attributesByName.has("class"), true);
-    assert.equal(
-      blocks[1].startTagRange.startOffset,
-      plan.metadata.createdBlockStartOffset,
-    );
-    assert.equal(result.scopeReport.outsideUnchanged, true);
-    if (fixture.tagName === "p") {
-      assert.equal(blocks[1].attributesByName.has("data-item-id"), false);
-      assert.equal(blocks[1].attributesByName.has("data-section"), true);
-      assert.match(result.html, /<aside>same<\/aside>/u);
-    }
-
-    const undone = applyPatchPlan(result.inversePlan, result.html);
-    assert.equal(undone.html, fixture.html);
-    assert.equal(applyPatchPlan(undone.inversePlan, undone.html).html, result.html);
-    assertPatchError("PATCH_PLAN_TAMPERED", () => applyPatchPlan({
-      ...plan,
-      patches: plan.patches.map((patch) => ({
-        ...patch,
-        after: patch.after.replace(fixture.tagName, "section"),
-      })),
-    }, fixture.html));
-  }
-});
-
-test("block splitting refuses complex children, boundary carets, and unsupported roots", () => {
-  for (const [html, id, splitOffset, code] of [
-    [`<p id="copy">甲<strong>乙</strong></p>`, "copy", 1, "BLOCK_SPLIT_COMPLEX_CONTENT"],
-    [`<p id="copy">甲乙</p>`, "copy", 0, "BLOCK_SPLIT_BOUNDARY_UNSUPPORTED"],
-    [`<h2 id="copy">甲乙</h2>`, "copy", 1, "BLOCK_SPLIT_UNSUPPORTED"],
-  ]) {
-    const index = buildSourceIndex(html);
-    const block = elementBy(index, (element) => element.stableAttributes.id === id);
-    const targetRef = createTargetRef(index, block.nodeId, { level: "subregion" });
-    assertPatchError(code, () => planSourcePatch({
-      type: "split-text-block",
-      targetRef,
-      splitOffset,
-      expectedSourceSha256: index.sourceSha256,
-    }, index));
-  }
-});
 
 test("inline style patch preserves quote, attribute order, unrelated declarations, and !important", () => {
   const html = `<button data-x=1 class='cta' style='color : red !important;  padding:4px ; --Token: 10' aria-label="go">Go</button>`;
@@ -1379,13 +487,13 @@ test("apply authorizes patches against exact operation TargetRefs and rejects ta
   const paragraphs = Object.fromEntries(index.elements
     .filter((element) => element.tagName === "p")
     .map((element) => [element.stableAttributes.id, element]));
-  const aRef = createTargetRef(index, paragraphs.a.nodeId, { level: "text" });
-  const bRef = createTargetRef(index, paragraphs.b.nodeId, { level: "text" });
+  const aRef = createTargetRef(index, paragraphs.a.nodeId, { level: "subregion" });
+  const bRef = createTargetRef(index, paragraphs.b.nodeId, { level: "subregion" });
   const plan = planSourcePatch({
-    type: "replace-text",
+    type: "replace-editable-island",
     targetRef: bRef,
-    beforeText: "two",
-    nextText: "changed",
+    beforeInnerHtml: "two",
+    nextInnerHtml: "changed",
   }, index);
 
   assertPatchError("PATCH_TARGETS_REQUIRED", () => applyPatchPlan({
@@ -1414,7 +522,7 @@ test("apply authorizes patches against exact operation TargetRefs and rejects ta
     targetRefs: [createTargetRef(
       applied.sourceIndex,
       elementBy(applied.sourceIndex, (element) => element.stableAttributes.id === "a").nodeId,
-      { level: "text" },
+      { level: "subregion" },
     )],
   }, applied.html));
   const originalInverseAfter = applied.inversePlan.patches[0].after;
@@ -1448,17 +556,17 @@ test("handcrafted self-authenticated inverse plans cannot bypass provenance vali
   const forgedOutput = `<p>evil</p>`;
   const index = buildSourceIndex(html);
   const paragraph = elementBy(index, (element) => element.tagName === "p");
-  const targetRefs = [createTargetRef(index, paragraph.nodeId, { level: "text" })];
+  const targetRefs = [createTargetRef(index, paragraph.nodeId, { level: "subregion" })];
   const provenance = {
     baseSourceSha256: sourceSha256(forgedOutput),
     outputSourceSha256: index.sourceSha256,
-    operationType: "replace-text",
+    operationType: "replace-editable-island",
     appliedPatches: [{
       startOffset: 3,
       endOffset: 7,
       before: "evil",
       after: "safe",
-      kind: "text",
+      kind: "editable-island",
     }],
   };
   provenance.token = sourceSha256(canonicalTestValue({
@@ -1470,18 +578,18 @@ test("handcrafted self-authenticated inverse plans cannot bypass provenance vali
   }));
   const forgedInverse = {
     version: 1,
-    type: "inverse:replace-text",
+    type: "inverse:replace-editable-island",
     sourceSha256: index.sourceSha256,
     patches: [{
       startOffset: 3,
       endOffset: 7,
       before: "safe",
       after: "evil",
-      kind: "inverse:text",
+      kind: "inverse:editable-island",
     }],
     targetRefs,
     metadata: {
-      operationType: "replace-text",
+      operationType: "replace-editable-island",
       inverseProvenance: provenance,
     },
   };
@@ -1510,26 +618,26 @@ test("source scope evidence rejects undeclared changes", () => {
   );
 });
 
-test("target mappings preserve text identity through apply, inverse, and reapplication", () => {
+test("target mappings preserve editable-island identity through apply, inverse, and reapplication", () => {
   const html = `<p>before</p>`;
   const index = buildSourceIndex(html);
   const paragraph = elementBy(index, (element) => element.tagName === "p");
   const targetRef = createTargetRef(index, paragraph.nodeId, {
-    level: "text",
-    targetId: "plain-text-target",
+    level: "subregion",
+    targetId: "editable-island-target",
   });
   const plan = planSourcePatch({
-    type: "replace-text",
+    type: "replace-editable-island",
     targetRef,
-    beforeText: "before",
-    nextText: "after",
+    beforeInnerHtml: "before",
+    nextInnerHtml: "after",
   }, index);
   const result = applyPatchPlan(plan, html);
   const mapping = result.targetMappings[0];
 
-  assert.equal(mapping.targetId, "plain-text-target");
+  assert.equal(mapping.targetId, "editable-island-target");
   assert.equal(mapping.resolution, "exact");
-  assert.equal(mapping.afterTargetRef.targetId, "plain-text-target");
+  assert.equal(mapping.afterTargetRef.targetId, "editable-island-target");
   assert.equal(mapping.afterTargetRef.sourceAnchor.sourceSha256, result.sourceSha256);
   assert.equal(
     resolveTargetRef(result.sourceIndex, mapping.afterTargetRef).resolution,
@@ -1541,7 +649,7 @@ test("target mappings preserve text identity through apply, inverse, and reappli
   assert.equal(restoredResult.html, html);
   const reapplied = applyPatchPlan(restoredResult.inversePlan, restoredResult.html);
   assert.equal(reapplied.html, result.html);
-  assert.equal(reapplied.targetMappings[0].targetId, "plain-text-target");
+  assert.equal(reapplied.targetMappings[0].targetId, "editable-island-target");
   assert.equal(reapplied.targetMappings[0].resolution, "exact");
 });
 
@@ -1557,10 +665,10 @@ test("tracked insertion points refresh deterministically through offset-shifting
     targetId: "insert-before-b",
   });
   const result = applyPatchPlan(planSourcePatch({
-    type: "replace-text",
-    targetRef: createTargetRef(index, paragraph.nodeId, { level: "text" }),
-    beforeText: "A",
-    nextText: "LONGER",
+    type: "replace-editable-island",
+    targetRef: createTargetRef(index, paragraph.nodeId, { level: "subregion" }),
+    beforeInnerHtml: "A",
+    nextInnerHtml: "LONGER",
   }, index), html, {
     trackedTargetRefs: [insertionRef],
   });
@@ -1707,25 +815,11 @@ test("whole-root native text replacement changes only the text bytes and undoes 
   const html = `<p id='b'  data-note="keep">文字</p>`;
   const index = buildSourceIndex(html);
   const paragraph = elementBy(index, (element) => element.stableAttributes.id === "b");
-  const textNode = index.textNodes.find((node) => node.value === "文字");
   const result = applyPatchPlan(planSourcePatch({
-    type: "replace-text-range",
+    type: "replace-editable-island",
     targetRef: createTargetRef(index, paragraph.nodeId, { level: "subregion" }),
-    replacements: [{
-      deleteSegments: [{
-        textNodeId: textNode.nodeId,
-        startOffset: 0,
-        endOffset: textNode.value.length,
-      }],
-      insertAt: {
-        kind: "text",
-        textNodeId: textNode.nodeId,
-        utf16Offset: 0,
-        affinity: "right",
-      },
-      beforeText: "文字",
-      nextText: "新版",
-    }],
+    beforeInnerHtml: "文字",
+    nextInnerHtml: "新版",
   }, index), html);
 
   assert.equal(result.html, `<p id='b'  data-note="keep">新版</p>`);

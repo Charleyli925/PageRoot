@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { access, readFile } from "node:fs/promises";
 import test from "node:test";
+import semver from "semver";
+
+import {
+  readCanvasArchitecture,
+  readWorkbenchArchitecture,
+} from "./source-architecture-fixture.mjs";
 
 const productRoot = new URL("../", import.meta.url);
 
@@ -85,12 +91,12 @@ test("application boundaries encode the v3 single-source lifecycle instead of sa
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
-    readFile(new URL("../app/workbench.tsx", import.meta.url), "utf8"),
+    readWorkbenchArchitecture(),
     readFile(new URL("../app/application/bridge-client.js", import.meta.url), "utf8"),
     readFile(new URL("../app/application/draft-session.js", import.meta.url), "utf8"),
     readFile(new URL("../app/application/drain-coordinator.js", import.meta.url), "utf8"),
     readFile(new URL("../app/domain/run-lifecycle.js", import.meta.url), "utf8"),
-    readFile(new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url), "utf8"),
+    readCanvasArchitecture(),
     readFile(new URL("../app/components/IslandEditingController.ts", import.meta.url), "utf8"),
     readFile(new URL("../vite.config.ts", import.meta.url), "utf8"),
   ]);
@@ -111,14 +117,15 @@ test("application boundaries encode the v3 single-source lifecycle instead of sa
   assert.equal(packageJson.dependencies?.["@lexical/history"], undefined);
   assert.equal(packageJson.dependencies?.["@lexical/plain-text"], undefined);
   assert.equal(packageJson.dependencies?.["@lexical/selection"], undefined);
-  assert.match(packageJson.version, /^\d+\.\d+\.\d+$/u);
+  assert.equal(semver.valid(packageJson.version), packageJson.version);
   assert.equal(packageJson.build?.mac?.extendInfo?.NSMicrophoneUsageDescription, undefined);
   assert.equal(packageJson.build?.mac?.extendInfo?.NSSpeechRecognitionUsageDescription, undefined);
 
   for (const required of [
-    "editRevisionRef",
-    "lastPersistedRevisionRef",
-    "pendingWriteRef",
+    "DocumentSession",
+    "documentSessionRef.current.editRevision",
+    "documentSessionRef.current.lastPersistedRevision",
+    "documentSessionRef.current.pendingWrite",
     "flushAutosave",
     "expectedSourceSha256",
     "freezeCutoffRevision",
@@ -153,7 +160,7 @@ test("application boundaries encode the v3 single-source lifecycle instead of sa
     "removeAcknowledgedAuditEvents",
     "hydrateRecentProjectRuns",
     '.drain("submit"',
-    "projectIdRef.current === run.projectId",
+    "projectSessionRef.current.projectId === run.projectId",
     "transitionAffectsCurrentCanvas",
     "isCurrentProjectContext(transitionContext)",
     "已打开，但需要检查",
@@ -182,7 +189,7 @@ test("application boundaries encode the v3 single-source lifecycle instead of sa
   assert.match(workbench, /版本号没有变化/);
   assert.match(
     workbench,
-    /Boolean\(sourcePathRef\.current\) \|\| Boolean\(frozen\.pendingMutation\)/,
+    /Boolean\(projectSessionRef\.current\.sourcePath\) \|\| Boolean\(frozen\.pendingMutation\)/,
     "closing an untouched unbound sample must ignore a source-equal freeze",
   );
 
@@ -283,7 +290,7 @@ test("application boundaries encode the v3 single-source lifecycle instead of sa
 
 test("history cards read only v3 immutable annotations and show audit details", async () => {
   const [workbench, archiveSelector] = await Promise.all([
-    readFile(new URL("../app/workbench.tsx", import.meta.url), "utf8"),
+    readWorkbenchArchitecture(),
     readFile(
       new URL("../app/lib/version-audit-records.js", import.meta.url),
       "utf8",
@@ -322,9 +329,9 @@ test("canvas persistence has one SourcePatchEngine path and clean v3 TargetRefs"
     nativeCapability,
     globals,
   ] = await Promise.all([
-    readFile(new URL("../app/workbench.tsx", import.meta.url), "utf8"),
+    readWorkbenchArchitecture(),
     readFile(new URL("../app/application/draft-session.js", import.meta.url), "utf8"),
-    readFile(new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url), "utf8"),
+    readCanvasArchitecture(),
     readFile(new URL("../app/components/IslandEditingController.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/lib/source-patch-engine.js", import.meta.url), "utf8"),
     readFile(new URL("../app/lib/source-text-map.js", import.meta.url), "utf8"),
@@ -337,7 +344,8 @@ test("canvas persistence has one SourcePatchEngine path and clean v3 TargetRefs"
     'from "../lib/source-patch-core.js"',
     "instrumentPreviewHtml",
     "SOURCE_NODE_ATTRIBUTE",
-    "if (!onChangeRef.current(result.html, appliedMutation))",
+    "if (!onChangeRef.current(",
+    "sourceTransaction",
     'type: "replace-editable-island"',
     "islandTextCommit",
     "editableIslandForTarget",
@@ -359,6 +367,12 @@ test("canvas persistence has one SourcePatchEngine path and clean v3 TargetRefs"
       new RegExp(required.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
     );
   }
+
+  assert.match(
+    canvasEditor,
+    /if \(!onChangeRef\.current\(\s*result\.html,\s*appliedMutation,\s*sourceTransaction,\s*\)\)/u,
+    "the single SourcePatch persistence path must carry its exact history transaction",
+  );
 
   assert.doesNotMatch(
     canvasEditor,
@@ -407,7 +421,6 @@ test("canvas persistence has one SourcePatchEngine path and clean v3 TargetRefs"
     /onChangeRef\.current\([^)]*outerHTML/s,
     "outerHTML is limited to preview sanitization and load verification",
   );
-  assert.match(sourceTextMap, /export function textRangeToSourceEdit/u);
   assert.match(sourceTextMap, /export function textRangeToSourceSegments/u);
   assert.match(sourceTextMap, /export function sourceSegmentsToTextRange/u);
   assert.match(runtimeDomSourceMap, /export class RuntimeDomSourceMap/u);
@@ -416,10 +429,14 @@ test("canvas persistence has one SourcePatchEngine path and clean v3 TargetRefs"
   assert.match(nativeCapability, /EDITABLE: "native-editable"/u);
   assert.match(nativeCapability, /SELECT_COMMENT: "select-comment"/u);
   assert.match(nativeCapability, /COMMENT_ONLY: "comment-only"/u);
-  assert.match(sourcePatchEngine, /Object\.hasOwn\(command, "replacements"\)/u);
-  assert.match(sourcePatchEngine, /inputs = command\.replacements/u);
-  assert.match(sourcePatchEngine, /Text replacements contain overlapping deletion ranges/u);
-  assert.match(sourcePatchEngine, /metadataReplacements = replacements\.map/u);
+  assert.match(sourcePatchEngine, /export function planEditableIslandPatch/u);
+  assert.match(sourcePatchEngine, /normalizeEditableIslandHtml\(/u);
+  assert.match(sourcePatchEngine, /type: "replace-editable-island"/u);
+  assert.match(sourcePatchEngine, /writeScope: "editable-island-inner-html"/u);
+  assert.doesNotMatch(
+    `${sourcePatchEngine}\n${sourceTextMap}`,
+    /replace-text(?:-range|-flow-range)?|delete-hard-break|split-text-block|textRangeToSourceEdit/u,
+  );
   assert.match(nativeController, /applyExternalIslandBaseline\(/u);
   assert.match(nativeController, /if \(!this\.hasCurrentLease\(\)\)/u);
   assert.match(nativeController, /if \(this\.composing\)/u);
@@ -456,10 +473,7 @@ test("canvas persistence has one SourcePatchEngine path and clean v3 TargetRefs"
 });
 
 test("handoff fails closed before locking when a comment target is unsafe", async () => {
-  const workbench = await readFile(
-    new URL("../app/workbench.tsx", import.meta.url),
-    "utf8",
-  );
+  const workbench = await readWorkbenchArchitecture();
 
   const locatorGuard = workbench.match(
     /function canLocateTarget\(target: HtmlCanvasSelection\): boolean \{[\s\S]*?\n\}/u,
@@ -477,7 +491,7 @@ test("handoff fails closed before locking when a comment target is unsafe", asyn
     "beginTargetRelink",
     "选择新位置",
     "activeComments.length === 0",
-    "data-resolution={comment.target.resolution}",
+    "data-resolution={targetResolution}",
     "targets: targets.map(persistedTargetRef)",
   ]) {
     assert.match(

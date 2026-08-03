@@ -10,9 +10,11 @@ const ATOM_TAGS = new Set([
   "input",
   "math",
   "object",
+  "ol",
   "select",
   "svg",
   "textarea",
+  "ul",
   "video",
 ]);
 

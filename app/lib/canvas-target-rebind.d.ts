@@ -24,3 +24,13 @@ export function rebindCanvasSelectionTargets(
   sourceHtml: string,
   targets: readonly HtmlCanvasSelection[],
 ): HtmlCanvasSelection[];
+
+export function rebindCanvasSelectionTargetsAcrossHistory(
+  currentSourceHtml: string,
+  nextSourceHtml: string,
+  targets: readonly HtmlCanvasSelection[],
+  transition?: {
+    fromTarget?: HtmlCanvasSelection | null;
+    toTarget?: HtmlCanvasSelection | null;
+  },
+): HtmlCanvasSelection[];

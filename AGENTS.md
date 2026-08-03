@@ -14,12 +14,12 @@ This repository is the complete public source boundary for PageRoot. Keep this f
 ## Standard task lifecycle
 
 1. Run `npm run task:status` and inspect `git status -sb` before editing.
-2. From a clean, current `main`, run `npm run task:start -- <prefix/short-name>`. Allowed prefixes are `agent/`, `feature/`, `fix/`, `docs/`, `test/`, `refactor/`, `chore/` and `recovery/`.
+2. From the clean primary `main` worktree, run `npm run task:start -- <prefix/short-name>`. It keeps the primary worktree on `main` and creates an isolated checkout under the shared `.codex-worktrees/` directory. Allowed prefixes are `agent/`, `feature/`, `fix/`, `docs/`, `test/`, `integration/`, `refactor/`, `chore/` and `recovery/`.
 3. Keep the diff focused. Add tests and documentation in the same change when behavior, contracts, commands or public expectations change.
 4. While editing, use `npm run gate:edit`. Before publishing a branch, run `npm run task:finish`.
 5. Review `git diff`, stage only intentional paths, review `git diff --cached`, then commit and push the task branch.
 6. Open a draft PR while work is incomplete. When the final intended diff is reviewable, mark it ready to run the required complete gate once. Squash-merge only with explicit authorization.
-7. End every task with: branch, commit, changed-file summary, tests run and results, documentation impact, PR/Release links, and whether the worktree is clean.
+7. End every task with: branch, commit, changed-file summary, tests run and results, documentation impact, PR/Release links, and whether the worktree is clean. After merge, run the read-only `npm run task:audit` from the primary worktree and retire only the exact merged task with an explicit `task:retire --apply`.
 
 For command behavior, authorization levels, worktrees and reporting format, read `docs/CODEX_WORKFLOW.md`.
 

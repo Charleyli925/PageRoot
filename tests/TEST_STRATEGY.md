@@ -19,14 +19,32 @@
 
 工作区有未提交修改时，`edit/task` 自动读取 staged、unstaged 和 untracked 文件。任务已经提交后应运行 `npm run gate:task -- --base <基准分支或提交>`；干净工作区又没有 `--base` 时门禁会明确失败，不会把“零测试”伪装成通过。
 
-`npm run task:finish` 是 `gate:task -- --base origin/main` 的安全任务包装，不引入新的门禁层。`tests/task-workflow.test.mjs` 在独立临时 Git 仓库中验证分支名、干净 `main`、远端同步、脏工作区拒绝和最终差异报告，不会操作开发者的真实分支。
+`npm run task:finish` 是 `gate:task -- --base origin/main` 的安全任务包装，不引入新的门禁层。`tests/task-workflow.test.mjs` 在独立临时 Git 仓库中验证分支名、干净 primary `main`、远端同步、隔离 worktree 创建、现有分支 attach、脏工作区拒绝、GitHub PR/本地独有提交分类、retire 默认 dry-run、显式放弃围栏和最终差异报告，不会操作开发者的真实分支。
 
 ## 测试类型与去重
 
 - 核心 Node：算法、状态机、序列化、事务、错误关闭和 forward/inverse 不变量。
 - 源码字符串合同：只在其拥有的组件或控制器变化时运行；不把实现文本匹配当作主要正确性证据。
-- Browser 冒烟：固定覆盖脚本隔离、源码字节、可编辑岛、源码权威围栏和能力降级五类关键风险；完整 Browser 包含全部活动 V2 回归。V1 的 per-keystroke tracker、FormatSkeleton 和 IME tail 状态机用例属于已退役路线，不再定义 V2 产品行为；它们由 V2 岛内字节 oracle、输入矩阵和 composition 快照用例替代。
+- Browser 冒烟：固定覆盖脚本隔离、源码字节、可编辑岛、源码权威围栏和能力降级五类关键风险；完整 Browser 包含全部活动 V2 回归。V1 的 per-keystroke tracker、FormatSkeleton 和 IME tail 状态机实现及测试已从仓库删除；V2 岛内字节 oracle、输入矩阵和 composition 快照用例是唯一产品合同。
 - Electron 冒烟：固定覆盖真实 authored DOM 输入和一次带磁盘持久化的 composition；完整 Electron 保留保存、关闭重开和逐字节 forward 结果等全部路径。
+- 交互预览：Node 分别证明短期自定义协议的资源边界和
+  PageViewContext 的 source-backed allowlist；Electron 用一份合成报告
+  证明宿主 CSP 下的相对脚本、SVG/Canvas/动态表格、Tab 切换，以及返回
+  编辑后只保留当前 Tab 且仍能进入原有文字编辑岛。Browser 的确定性
+  Tab 评论用例同时证明 `评N` 标记悬浮于标签控制右上角、顶部栏不重复
+  显示当前标签、其他标签评论以中性评论卡片在顶部栏内部展开，并可从
+  具体卡片切换标签并定位对应评论。未保存评论在当前标签页保留持久入口，
+  切换标签后只作为对应分组中带“未保存”状态的卡片出现；点击恢复不会移除
+  入口，保存或明确删除才会移除，且草稿不增加主评论数或 `评N`。
+  高密度短页面用例还必须证明 Canvas 自然底边保持不变，评论队列不会撑长
+  共享页面；页面到底后可继续向下把底部卡片拉入，反向滚动可恢复自然位置。
+- 编辑模式安全内容切换：Node 证明语义 Tab/details/disclosure 与显式
+  `data-p` / `data-tab` → panel-ID、固定数字处理器 → 唯一索引面板这两类
+  旧式页签适配器的严格白名单，以及链接、弹窗、分组 details、重复/跳号
+  索引、动态或多语句处理器、多候选面板和歧义标记的失败关闭；Browser 证明
+  单击选择、双击编辑、工具条和 `Option + 单击` 不冲突，切换前后共享滚动
+  位置不变、作者处理器未运行且导出字节不变；Electron
+  独立重读真实源文件，证明作者事件未运行且磁盘字节不变。
 - AI 闭环：任务级只跑正常闭环和越界失败 2 个代表场景；发布级跑完整 6 个场景，包括复制失败、缺失 finalizer、非法 HTML 和版本激活失败。测试自动生成受控 AI 输出并执行正式 finalizer，不等待外部模型或真人接力。
 - 应用更新：Node 用伪 updater 证明 stable-only、点击后单次下载、差分开启、普通退出不安装、仅 downloaded 状态可安装和错误降级；Preload/Workbench 合同证明状态快照、下载/安装意图、无 Canvas 完成横幅与重启确认保持窄边界。
 - 默认浏览器打开：Node 直接执行主进程操作与 sender 权限门，证明 malformed、非 HTML、未知项目、非普通文件和非可信 frame 均不会调用 shell；Workbench 合同只补充证明精确 edit revision 的围栏、写回和 IPC 顺序。
@@ -36,14 +54,26 @@
   批次及本地队列都不得出现这些值；测试永不访问真实 PostHog。
 - 开发者测试包：先对 ad-hoc `.app` 做 app.asar、Bridge、Schema、资源、版本和 DMG 静态校验，再从真实可执行文件做一次首窗/Bridge/Workbench/正常退出冒烟；不复制完整业务矩阵，不检查 Apple 公证或更新资产。
 - 候选包：先对 ad-hoc 预签名 `.app` 校验 app.asar、Bridge、Schema、资源闭包并从真实可执行文件运行完整源码字节 oracle；通过后才做 Developer ID 签名，并在 Apple 请求前做一次 Hardened Runtime 启动。App 公证后冻结 archive/payload/Tree Hash checkpoint，下一 job 只把同一 App 作为 `--prepackaged` 输入生成 DMG、ZIP、blockmap 和 `latest-mac.yml`，再校验 Team、App/DMG 公证票据、Gatekeeper、只读挂载与 ZIP 解包内容。
+  新 job 会先从 checkpoint App 原样恢复 build-info 与遥测配置作为比较输入，
+  再从同一源码 Tree 重建确定性的 Electron renderer 作为 payload oracle；
+  不得重新生成遥测配置，也不得重新组装、签名、公证或替换 checkpoint App。
 
 持久状态只保留四个跨层不变量：过期 revision 自动读取权威草稿并 rebase、结果未知时按 operation ID 查询、已确认的相同聚合 drain 为 no-op、草稿文件领先 runtime pointer 最多只允许一个已校验的崩溃窗口。纯函数和 Session 是主证明，Bridge 只证明持久边界；候选包把四者压缩为一个真实 App 冒烟，不在 Browser、Electron 和打包层各复制整套排列。
 
 评论虚拟化的数量算法由 Node 使用 100 条确定性记录验证；Browser 只创建 `threshold + 1` 条跨过真实渲染边界，再新增一条证明交互仍接通。不得用上百次重复 UI 创建来充当测试数据生成器，也不得为了注入测试数据给产品增加测试专用接口。
 
+评论栏纵向布局由 Node 对全局优先级、页面位置、同目标顺序、实测高度、
+固定间距、原位文字编辑期间的坐标冻结和顶部栏安全起点做确定性验证；
+Browser 验证真实 DOM 中保存卡片、草稿卡片和输入框在当前/其他标签页
+切换、聚焦和展开后的相对顺序、无重叠结果，以及输入框自动聚焦、
+`Enter` 保存、`Shift + Enter` 换行。
+
 顶层 Node 测试在一次执行中只出现一次。精确影响映射优先；只有找不到任何精确用例时才启用 `node-core` 兜底。PR CI 在 Linux 构建一次 Web renderer，供 Node 和 Browser 共享；每个 macOS Electron job 在目标系统本地构建 renderer，并先用独立 preflight 证明窗口可见、计时器和 animation frame 正常推进。Native Electron 与 AI 闭环分成两个 job，Browser 保持每个分片单 worker、零重试，但跨三个独立分片并发。
 
 关键 CI 命令通过 `scripts/ci-evidence.mjs` 记录 commit、Tree、job、耗时、退出状态、标准化失败摘要与稳定签名。环境 preflight 失败可直接归类为 `ci_environment`；源码测试失败先标 `needs_triage`，再依据独立 oracle 归为 `product`、`test_script` 或 `ci_environment`。同一 SHA 的环境嫌疑只重跑失败 job；正式流程第二 job 失败时保留并复用第一 job 的签名 App checkpoint，不重新做已通过的构建、运行、签名和 App 公证。相同签名连续两次失败且本地不复现时冻结候选并登记 CI incident。完整规则见 `docs/RELEASE_PIPELINE_GOVERNANCE.md`。
+`tests/ci-evidence.test.mjs` 会枚举源码、开发预览、候选与发布工作流实际使用的
+每个 evidence stage；任何未同步到允许列表的名称必须在源码门禁中失败，不能等到
+正式候选打包才暴露。
 
 ## 判断标准优先级
 
@@ -54,7 +84,23 @@
 
 `tests/generated-source-invariants.test.mjs` 用固定种子生成 BOM、LF/CRLF、单双引号、多语言 Unicode、entity、注释和脚本文本组合。每个失败都带 seed；测试用独立字节替换 oracle 验证未命中范围、inverse 原子恢复和同一计划重放，而不是复用被测实现计算期望值。
 
-画布不提供用户级撤销或重做，也不维护产品历史栈。源码画布内的 `Cmd/Ctrl+Z` 与 `Cmd/Ctrl+Shift+Z` 必须被阻止，避免 Chromium 绕过源码映射；真实表单和评论输入框仍保留浏览器自己的局部输入历史。SourcePatch 的 inverse plan 只作为同一事务失败恢复和字节不变量证明，不得重新暴露为产品能力。
+画布撤销/重做不得使用 Chromium DOM history，也不得维护整页 HTML
+快照栈。每次被接受的 SourcePatch 把实际 forward Patch、exact inverse
+Patch、前后 Hash 和目标写入有界持久日志；Node 证明文字、样式、结构和
+排序共享一个严格 cursor，新修改截断 redo，篡改或不连续 Hash
+fail-closed。Bridge 故障注入分别覆盖 source commit point 前后的
+HTML/历史联合恢复，以及稳定 action ID 的结果未知重放。
+
+Native Electron 是最终交互 oracle：真实 Edit 菜单和快捷键依次执行文字、
+工具栏样式、岛内换行结构和同级下移，关闭重开后仍能撤销，并以原始
+Buffer 验证每次 undo/redo。焦点在评论正文或 `PROJECT.md` 时，同一个
+Edit 菜单必须只触发原生控件文字撤销，源 HTML、评论卡片与附件保持
+不变。文字撤销还必须证明 canonical 重建后焦点、逻辑 Selection 和评论
+TargetRef 仍落在原源码宿主，逐帧评论位置不消失、不掉底且不产生伪
+orphan。`PROJECT.md` 覆盖 composition 中的局部撤销，以及显式还原后从
+已废弃输入节点迟到的 input/compositionend；两者都不得留下中间拼音。
+Browser 测试继续证明 SourcePatch forward/inverse 和各编辑入口，但不把
+无持久权限的浏览器预览伪装成跨重启历史证明。
 
 ## 真实 HTML 与输入法边界
 

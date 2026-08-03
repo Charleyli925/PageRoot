@@ -3,6 +3,7 @@ export type RuntimeCapabilities = Readonly<{
   projectOpening: "desktop-dialog" | "browser-file";
   attachmentPersistence: "bridge" | "memory" | "none";
   closeCoordination: "electron-handshake" | "browser-beforeunload";
+  interactivePreview: "independent-url" | "srcdoc";
 }>;
 
 export const BROWSER_RUNTIME_CAPABILITIES: RuntimeCapabilities;

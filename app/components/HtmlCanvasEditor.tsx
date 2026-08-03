@@ -14,6 +14,11 @@ import {
 import { flushSync } from "react-dom";
 
 import {
+  createPagePresentationAction,
+  type PagePresentationAction,
+  type PageViewContext,
+} from "../lib/page-view-context.js";
+import {
   SOURCE_NODE_ATTRIBUTE,
   applyPatchPlan,
   buildSourceIndex,
@@ -29,11 +34,9 @@ import {
 } from "../lib/editable-island.js";
 import {
   sourceTargetRefForSelection,
-  targetLevelForSelection,
 } from "../lib/canvas-target-rebind.js";
 import {
   buildSourceTextMap,
-  isTransparentSourceTextElement,
   sourceSegmentsToTextRange,
   textRangeToSourceSegments,
   type SourceTextMap,
@@ -52,7 +55,101 @@ import {
   sameNativeLayout,
   sameNativeTextStyle,
 } from "./native-edit-runtime-preflight";
-import NoticeBar, { type NoticeUsageCapture } from "./NoticeBar";
+import { selectorForElement } from "./html-canvas-dom";
+import {
+  STYLE_PROPERTY_CONFIGS,
+  TEXT_RANGE_EDITABLE_PROPERTIES,
+  styleSourcesForElement,
+  toHexColor,
+  type EditableStyleProperty,
+  type SelectedStyle,
+} from "./html-canvas-style-inspector";
+import {
+  defaultGlobalCommentElement,
+  deterministicOperationTargetUpdate,
+  deterministicTargetUpdates,
+  inferSelectionLevel,
+  isModulePaddingHit,
+  isPageRootElement,
+  isPageRootSelection,
+  readableLabel,
+  selectionForElement,
+  selectionFromRefreshedTarget,
+  sourceMoveAvailability,
+  trackedSourceTargetRefs,
+  uniqueSelections,
+  type MoveAvailability,
+} from "./html-canvas-selection";
+import type {
+  ActiveTextRange,
+  SourceElementValue,
+  SourceIndexValue,
+  SourceTargetRef,
+} from "./html-canvas-internal-types";
+import {
+  activateContainingTab,
+  applyPageViewContextToDocument,
+  commentLayoutTargets,
+  isRenderedCommentTarget,
+  naturalDocumentContentHeight,
+  sortedCommentLayoutTargetIds,
+  tabAssociationForElement,
+  tabAssociations,
+} from "./html-canvas-page-view";
+import {
+  canonicalNativeHostPreview,
+  nativeEditHostForElement,
+  refreshMountedPreviewSourceNodeIds,
+  sourceBackedPreviewElements,
+  sourceTextParentsForSegments,
+} from "./html-canvas-preview-sync";
+import {
+  activeTextRangeFromDocument,
+  boundedHistorySelection,
+  caretPointFromMouseEvent,
+  findCanvasSelectionElement,
+  findNativeActionTarget,
+  historySelectionFromMutationValue,
+  isCanvasRootElement,
+  nativeTextRangeMatchesActivation,
+  selectWordAtPoint,
+  sourceHistoryDirectionForShortcut,
+  type TextCaretPoint,
+} from "./html-canvas-interaction";
+import NoticeBar from "./NoticeBar";
+import type {
+  HtmlCanvasCommentedTarget,
+  HtmlCanvasCommitResult,
+  HtmlCanvasEditorHandle,
+  HtmlCanvasEditorProps,
+  HtmlCanvasFreezeSnapshot,
+  HtmlCanvasInteractionMode,
+  HtmlCanvasMutation,
+  HtmlCanvasSelection,
+  HtmlCanvasSelectionLevel,
+  HtmlCanvasSourceTransaction,
+  HtmlCanvasTargetResolution,
+  NativeDeferredCommandAuthority,
+  NativeDeferredCommandDiscardReason,
+  NativeDeferredCommandOptions,
+} from "./HtmlCanvasEditor.types";
+export type {
+  HtmlCanvasCommentedTarget,
+  HtmlCanvasCommentLayoutState,
+  HtmlCanvasCommitResult,
+  HtmlCanvasEditorHandle,
+  HtmlCanvasEditorProps,
+  HtmlCanvasFingerprint,
+  HtmlCanvasFreezeSnapshot,
+  HtmlCanvasInteractionMode,
+  HtmlCanvasMutation,
+  HtmlCanvasSelection,
+  HtmlCanvasSourceTransaction,
+  HtmlCanvasTargetResolution,
+  NativeDeferredCommandAuthority,
+  NativeDeferredCommandDiscardReason,
+  NativeDeferredCommandOptions,
+} from "./HtmlCanvasEditor.types";
 import {
   EDITOR_STYLE_ATTRIBUTE,
   FRAME_VERIFICATION_ATTRIBUTE,
@@ -120,255 +217,28 @@ const EDITOR_DOCUMENT_STYLES = `
     -webkit-user-select: text !important;
     user-select: text !important;
   }
+
+  [data-pageroot-readonly-visual],
+  [data-pageroot-readonly-visual] * {
+    pointer-events: none !important;
+    -webkit-user-select: none !important;
+    user-select: none !important;
+  }
+
+  img[data-pageroot-readonly-visual] {
+    width: 100% !important;
+    height: 100% !important;
+    display: block !important;
+    object-fit: contain !important;
+  }
 `;
-
-export type HtmlCanvasSelectionLevel = "module" | "part" | "insertion";
-export type HtmlCanvasTargetResolution = "exact" | "rebound" | "ambiguous" | "orphaned";
-
-export type HtmlCanvasFingerprint = {
-  tagName: string;
-  stableAttributes: Record<string, string>;
-  ancestorFingerprint: string[];
-  textPrefix?: string;
-  textSuffix?: string;
-};
-
-export type HtmlCanvasSelection = {
-  id: string;
-  /** Ephemeral preview identity. It is never written to the user's source HTML. */
-  nodeId?: string;
-  label: string;
-  selector: string;
-  level: HtmlCanvasSelectionLevel;
-  tagName: string;
-  text: string;
-  resolution: HtmlCanvasTargetResolution;
-  textQuote?: string;
-  sourceAnchor?: {
-    startOffset: number;
-    endOffset: number;
-    sourceSha256: string;
-  };
-  fingerprint?: HtmlCanvasFingerprint;
-  boundingBox?: {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-  };
-};
-
-export type HtmlCanvasMutation = {
-  kind: "text" | "style" | "reorder" | "structure";
-  target: HtmlCanvasSelection;
-  property?: string;
-  before: unknown;
-  after: unknown;
-  /** Ephemeral post-patch refs for host state; never persisted as audit payload. */
-  targetUpdates?: HtmlCanvasSelection[];
-  /** Every input targetId covered by the deterministic patch refresh. */
-  trackedTargetIds?: string[];
-};
-
-export type HtmlCanvasInteractionMode = "editing" | "processing" | "history";
-
-export type HtmlCanvasFreezeSnapshot = {
-  ok: boolean;
-  html: string;
-  sourceSha256: string;
-  pendingMutation: HtmlCanvasMutation | null;
-  reason?: string;
-};
-
-export type HtmlCanvasCommitResult = {
-  ok: boolean;
-  html: string;
-  sourceSha256: string;
-  pendingMutation: HtmlCanvasMutation | null;
-  reason?: string;
-};
-
-export type NativeDeferredCommandAuthority = "user-explicit" | "system";
-
-export type NativeDeferredCommandDiscardReason =
-  | "superseded"
-  | "blocked-by-user-command"
-  | "stale-session"
-  | "session-ended"
-  | "unmounted";
-
-export type NativeDeferredCommandOptions = {
-  /** System work may wait for IME settling, but can never authorize fallback text. */
-  authority?: NativeDeferredCommandAuthority;
-  /** Always called if a queued callback will never execute. */
-  onDiscard?: (reason: NativeDeferredCommandDiscardReason) => void;
-};
-
-export type HtmlCanvasCommentedTarget = {
-  target: HtmlCanvasSelection;
-  count?: number;
-  label?: string;
-};
-
-export type HtmlCanvasCommentLayoutState = {
-  scrollTop: number;
-  scrollHeight: number;
-  clientHeight: number;
-  targets: Array<{
-    targetId: string;
-    top: number;
-    height: number;
-  }>;
-};
 
 const EMPTY_COMMENTED_TARGETS: readonly HtmlCanvasCommentedTarget[] = [];
 const EMPTY_TRACKED_TARGETS: readonly HtmlCanvasSelection[] = [];
 
-export type HtmlCanvasEditorHandle = {
-  /** Returns the exact source string held by the single SourcePatchEngine. */
-  getSourceHtml: () => string;
-  /** Exact source string whose sanitized representation has finished loading in the iframe. */
-  getRenderedSourceHtml: () => string | null;
-  /** Commits delivered native input while keeping the live editing session active. */
-  checkpointPendingEdit: () => HtmlCanvasCommitResult;
-  /** Retires the editable DOM, reloads canonical source, and optionally resumes editing. */
-  fencePendingEdit: (options?: {
-    resumeEditing?: boolean;
-    trigger?: NativeEditCheckpointTrigger;
-  }) => HtmlCanvasCommitResult;
-  commitPendingEdit: () => HtmlCanvasCommitResult;
-  /** Captures pending text and synchronously blocks every mutation entrypoint. */
-  freezeNow: () => HtmlCanvasFreezeSnapshot;
-  /** Releases an imperative freeze when the controlled mode is editing. */
-  unlockNow: () => boolean;
-  /** Keeps a failed commit explanation beside the canvas instead of escalating it globally. */
-  showCommitBlocked: (reason?: string) => void;
-  /** True while source-uncommitted native text or marked text still exists. */
-  hasPendingNativeEdit: () => boolean;
-  clearSelection: () => void;
-  select: (
-    target: HtmlCanvasSelection,
-    options?: { reveal?: boolean; showToolbar?: boolean },
-  ) => HtmlCanvasSelection | null;
-  startEditing: () => boolean;
-  moveSelected: (direction: "up" | "down") => boolean;
-  /** Defers one explicit user command until the current native composition is stable/cancelled. */
-  deferNativeCommand: (
-    kind: string,
-    run: () => void,
-    payload?: unknown,
-    options?: NativeDeferredCommandOptions,
-  ) => boolean;
-};
-
-export type HtmlCanvasEditorProps = {
-  /** A complete document or an HTML fragment. Fragments are normalized to a complete document. */
-  html: string;
-  /** Called with the exact next source produced by SourcePatchEngine. */
-  onChange: (nextSourceHtml: string, mutation?: HtmlCanvasMutation) => boolean;
-  /** Called when an element is selected or the selection is cleared. */
-  onSelect?: (selection: HtmlCanvasSelection | null) => void;
-  /** Notifies the host about any pointer interaction inside the isolated iframe. */
-  onInteraction?: () => void;
-  /** Mirrors the authored page scroll coordinate into the host comment rail. */
-  onCommentLayout?: (state: HtmlCanvasCommentLayoutState) => void;
-  /** Opens the host product's comment composer for the current selection. */
-  onRequestComment?: (selection: HtmlCanvasSelection) => void;
-  /** Callback alternative to using a ref. Receives null when the editor unmounts. */
-  onReady?: (api: HtmlCanvasEditorHandle | null) => void;
-  /** Handles Cmd/Ctrl+S inside the iframe without exposing the browser's native Save dialog. */
-  onRequestFlush?: () => void;
-  /** Handles Shift+Cmd/Ctrl+E inside the iframe using the host product's source-safe export path. */
-  onRequestExport?: () => void;
-  /** Reloads the current source after the editor cannot build a safe source map. */
-  onRequestReload?: () => void;
-  /** Labels the source-map recovery action when the host must ask for the file again. */
-  reloadActionLabel?: string;
-  /** Reports a fail-closed edit whose source target could not be patched safely. */
-  onEditBlocked?: (message: string) => void;
-  /** Project identity is used only by the main process to derive a local pseudonymous key. */
-  usageProjectId?: string;
-  usageCapture?: NoticeUsageCapture;
-  /** Optional base URL for relative assets. The injected base element is not included in serialized output. */
-  baseHref?: string;
-  /** Absolute path or file URL of the source HTML. Used to derive baseHref when baseHref is absent. */
-  sourcePath?: string;
-  className?: string;
-  iframeTitle?: string;
-  height?: number | string;
-  /** Soft read-only mode: blocks direct HTML mutations while selection and comments remain available. */
-  readOnly?: boolean;
-  /** Explicit interaction state. Processing and history are both strongly read-only. */
-  interactionMode?: HtmlCanvasInteractionMode;
-  /** Strong round lock: the canvas becomes browse-only and hides every selection-based action. */
-  locked?: boolean;
-  /** Reordering is limited to safe element siblings and can be disabled by the host. */
-  enableReorder?: boolean;
-  /** CSS selectors that already have comments and should receive a compact canvas marker. */
-  commentedTargets?: readonly HtmlCanvasCommentedTarget[];
-  /** Non-visual audit targets that must retain identity through later source patches. */
-  trackedTargets?: readonly HtmlCanvasSelection[];
-};
-
 type OverlayPosition = {
   toolbarLeft: number;
   toolbarTop: number;
-};
-
-type SelectedStyle = {
-  fontSize: number;
-  color: string;
-  backgroundColor: string;
-  padding: number;
-  margin: number;
-  lineHeight: number;
-  isBold: boolean;
-  isItalic: boolean;
-  isUnderline: boolean;
-  sources: StyleSourceInfo[];
-};
-
-type EditableStyleProperty =
-  | "fontSize"
-  | "color"
-  | "backgroundColor"
-  | "fontWeight"
-  | "fontStyle"
-  | "textDecorationLine"
-  | "padding"
-  | "margin"
-  | "lineHeight";
-
-type StyleSourceKind = "inline" | "rule" | "variable" | "inherit" | "initial" | "default";
-
-type StyleSourceInfo = {
-  property: EditableStyleProperty;
-  cssProperty: string;
-  label: string;
-  computedValue: string;
-  kind: StyleSourceKind;
-  selector: string;
-  source: string;
-  mediaCondition: string;
-  sharedImpactCount: number;
-  important: boolean;
-  variableName?: string;
-};
-
-type StyleDeclarationCandidate = {
-  value: string;
-  important: boolean;
-  selector: string;
-  source: string;
-  mediaCondition: string;
-  sharedImpactCount: number;
-  specificity: [number, number, number, number];
-  order: number;
-};
-
-type MoveAvailability = {
-  up: boolean;
-  down: boolean;
 };
 
 type InsertionPoint = {
@@ -385,22 +255,9 @@ type CommentMarker = {
   selection: HtmlCanvasSelection;
   count?: number;
   label?: string;
+  placement?: "target-corner" | "tab-side";
   left: number;
   top: number;
-};
-
-type TextRangeSegment = {
-  textNodeId: string;
-  startOffset: number;
-  endOffset: number;
-};
-
-type ActiveTextRange = {
-  target: HtmlCanvasSelection;
-  segments: TextRangeSegment[];
-  text: string;
-  styleElements: HTMLElement[];
-  direction: "forward" | "backward";
 };
 
 type ActiveNativeEdit = {
@@ -478,1356 +335,8 @@ type EditFeedback = {
   recovery: "comment" | "reload" | "none";
 };
 
-type SourceIndexValue = ReturnType<typeof buildSourceIndex>;
-type SourceElementValue = {
-  type: "element";
-  nodeId: string;
-  tagName: string;
-  parentId: string | null;
-  previousElementSiblingId: string | null;
-  nextElementSiblingId: string | null;
-  childIds: string[];
-  childElementIds: string[];
-  textNodeIds: string[];
-  textContent: string;
-  attributes: Array<{
-    name: string;
-    rawValue?: string | null;
-    value?: string | null;
-  }>;
-  startTagRange: { startOffset: number; endOffset: number };
-  attributesByName: Map<string, Array<{
-    value?: string | null;
-    rawValue?: string | null;
-  }>>;
-};
-type SourceTargetRef = {
-  targetId: string;
-  label: string;
-  level: "module" | "subregion" | "text" | "insertion-point";
-  selector?: string;
-  textQuote?: string;
-  sourceAnchor?: HtmlCanvasSelection["sourceAnchor"];
-  fingerprint?: HtmlCanvasFingerprint;
-  resolution: HtmlCanvasTargetResolution;
-};
 type SourcePatchCommand = Parameters<typeof planSourcePatch>[0];
 type SourcePatchPlan = NonNullable<ReturnType<typeof planSourcePatch>>;
-
-const STYLE_PROPERTY_CONFIGS: ReadonlyArray<{
-  property: EditableStyleProperty;
-  cssProperty: string;
-  label: string;
-}> = [
-  { property: "fontSize", cssProperty: "font-size", label: "字号" },
-  { property: "color", cssProperty: "color", label: "文字颜色" },
-  { property: "backgroundColor", cssProperty: "background-color", label: "填充" },
-  { property: "fontWeight", cssProperty: "font-weight", label: "字重" },
-  { property: "fontStyle", cssProperty: "font-style", label: "字形" },
-  { property: "textDecorationLine", cssProperty: "text-decoration-line", label: "下划线" },
-  { property: "padding", cssProperty: "padding-top", label: "内边距" },
-  { property: "margin", cssProperty: "margin-top", label: "外间距" },
-  { property: "lineHeight", cssProperty: "line-height", label: "行距" },
-];
-
-const TEXT_RANGE_EDITABLE_PROPERTIES = new Set<EditableStyleProperty>([
-  "fontSize",
-  "color",
-  "backgroundColor",
-  "fontWeight",
-  "fontStyle",
-  "textDecorationLine",
-]);
-
-const NATURALLY_INHERITED_PROPERTIES = new Set([
-  "color",
-  "font-family",
-  "font-size",
-  "font-style",
-  "font-weight",
-  "line-height",
-  "text-align",
-  "text-indent",
-  "text-transform",
-  "visibility",
-  "white-space",
-  "word-spacing",
-]);
-
-function escapeIdentifier(documentNode: Document, value: string): string {
-  const cssApi = documentNode.defaultView?.CSS;
-  if (cssApi?.escape) return cssApi.escape(value);
-  return value.replace(/(^-?\d)|[^a-zA-Z0-9_-]/g, (match, leadingDigit: string | undefined) => {
-    if (leadingDigit) return `\\3${leadingDigit} `;
-    return `\\${match}`;
-  });
-}
-
-function isUniqueSelector(documentNode: Document, selector: string): boolean {
-  try {
-    return documentNode.querySelectorAll(selector).length === 1;
-  } catch {
-    return false;
-  }
-}
-
-function selectorForElement(element: HTMLElement): string {
-  const documentNode = element.ownerDocument;
-  if (element === documentNode.body) return "body";
-  if (element === documentNode.documentElement) return "html";
-
-  if (element.id) {
-    const idSelector = `#${escapeIdentifier(documentNode, element.id)}`;
-    if (isUniqueSelector(documentNode, idSelector)) return idSelector;
-  }
-
-  for (const attributeName of ["data-ai-id", "data-testid", "data-section"]) {
-    const value = element.getAttribute(attributeName);
-    if (!value) continue;
-    const escapedValue = value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-    const attributeSelector = `[${attributeName}="${escapedValue}"]`;
-    if (isUniqueSelector(documentNode, attributeSelector)) return attributeSelector;
-  }
-
-  const parts: string[] = [];
-  let current: HTMLElement | null = element;
-
-  while (current && current !== documentNode.body) {
-    const tagName = current.tagName.toLowerCase();
-    const classSelector = Array.from(current.classList)
-      .filter((className) => !className.startsWith("html-canvas-"))
-      .slice(0, 2)
-      .map((className) => `.${escapeIdentifier(documentNode, className)}`)
-      .join("");
-    let part = `${tagName}${classSelector}`;
-
-    const sameTagSiblings = current.parentElement
-      ? Array.from(current.parentElement.children).filter((sibling) => sibling.tagName === current?.tagName)
-      : [];
-    if (sameTagSiblings.length > 1) {
-      part += `:nth-of-type(${sameTagSiblings.indexOf(current) + 1})`;
-    }
-    parts.unshift(part);
-
-    const candidate = parts.join(" > ");
-    if (isUniqueSelector(documentNode, candidate)) return candidate;
-    current = current.parentElement;
-  }
-
-  return `body > ${parts.join(" > ")}`;
-}
-
-function splitSelectorList(selectorText: string): string[] {
-  const selectors: string[] = [];
-  let current = "";
-  let bracketDepth = 0;
-  let parenthesisDepth = 0;
-  let quote: "'" | '"' | null = null;
-  for (const character of selectorText) {
-    if (quote) {
-      current += character;
-      if (character === quote) quote = null;
-      continue;
-    }
-    if (character === "'" || character === '"') {
-      quote = character;
-      current += character;
-      continue;
-    }
-    if (character === "[") bracketDepth += 1;
-    if (character === "]") bracketDepth = Math.max(0, bracketDepth - 1);
-    if (character === "(") parenthesisDepth += 1;
-    if (character === ")") parenthesisDepth = Math.max(0, parenthesisDepth - 1);
-    if (character === "," && bracketDepth === 0 && parenthesisDepth === 0) {
-      if (current.trim()) selectors.push(current.trim());
-      current = "";
-      continue;
-    }
-    current += character;
-  }
-  if (current.trim()) selectors.push(current.trim());
-  return selectors;
-}
-
-function selectorSpecificity(selector: string): [number, number, number, number] {
-  const withoutWhere = selector.replace(/:where\((?:[^()]|\([^()]*\))*\)/g, "");
-  const idCount = withoutWhere.match(/#[\w-]+/g)?.length ?? 0;
-  const classCount = (
-    withoutWhere.match(/\.[\w-]+/g)?.length ?? 0
-  ) + (
-    withoutWhere.match(/\[[^\]]+\]/g)?.length ?? 0
-  ) + (
-    withoutWhere.match(/:(?!:)[\w-]+(?:\([^)]*\))?/g)?.length ?? 0
-  );
-  const pseudoElementCount = withoutWhere.match(/::[\w-]+/g)?.length ?? 0;
-  const typeCount = withoutWhere.match(/(?:^|[\s>+~,(])(?:[a-z][\w-]*)(?=[#.:[\s>+~),]|$)/gi)?.length ?? 0;
-  return [0, idCount, classCount, typeCount + pseudoElementCount];
-}
-
-function compareSpecificity(
-  left: [number, number, number, number],
-  right: [number, number, number, number],
-): number {
-  for (let index = 0; index < left.length; index += 1) {
-    if (left[index] !== right[index]) return left[index] - right[index];
-  }
-  return 0;
-}
-
-function styleSheetSourceLabel(
-  documentNode: Document,
-  sheet: CSSStyleSheet,
-  sheetIndex: number,
-): string {
-  if (sheet.href) return `<link> ${sheet.href}`;
-  const ownerNode = sheet.ownerNode;
-  if (ownerNode && "nodeName" in ownerNode && ownerNode.nodeName.toLowerCase() === "style") {
-    const styleElements = Array.from(documentNode.querySelectorAll("style"));
-    const styleIndex = styleElements.indexOf(ownerNode as HTMLStyleElement);
-    return `<style> #${styleIndex >= 0 ? styleIndex + 1 : sheetIndex + 1}`;
-  }
-  return `样式表 #${sheetIndex + 1}`;
-}
-
-function matchingSelector(element: HTMLElement, selectorText: string): string | null {
-  const selectors = splitSelectorList(selectorText);
-  const matches = selectors.filter((selector) => {
-    try {
-      return element.matches(selector);
-    } catch {
-      return false;
-    }
-  });
-  if (matches.length === 0) {
-    try {
-      return element.matches(selectorText) ? selectorText : null;
-    } catch {
-      return null;
-    }
-  }
-  return matches.sort((left, right) =>
-    compareSpecificity(selectorSpecificity(right), selectorSpecificity(left))
-  )[0];
-}
-
-function sharedSelectorImpact(documentNode: Document, selectorText: string): number {
-  const impactedElements = new Set<Element>();
-  for (const selector of splitSelectorList(selectorText)) {
-    try {
-      documentNode.querySelectorAll(selector).forEach((element) => {
-        impactedElements.add(element);
-      });
-    } catch {
-      // A malformed selector must not widen the reported shared impact.
-    }
-  }
-  return impactedElements.size;
-}
-
-function activeMediaCondition(view: Window | null, condition: string): boolean {
-  if (!condition) return true;
-  if (!view) return false;
-  try {
-    return view.matchMedia(condition).matches;
-  } catch {
-    return false;
-  }
-}
-
-function activeSupportsCondition(view: Window | null, condition: string): boolean {
-  if (!condition) return true;
-  if (!view) return false;
-  const css = (view as Window & {
-    CSS?: { supports: (conditionText: string) => boolean };
-  }).CSS;
-  if (!css?.supports) return false;
-  try {
-    return css.supports(condition);
-  } catch {
-    return false;
-  }
-}
-
-function styleDeclarationCandidates(
-  element: HTMLElement,
-  cssProperty: string,
-): StyleDeclarationCandidate[] {
-  const documentNode = element.ownerDocument;
-  const view = documentNode.defaultView;
-  const candidates: StyleDeclarationCandidate[] = [];
-  let order = 0;
-
-  const visitRuleList = (
-    rules: CSSRuleList,
-    source: string,
-    inheritedMediaCondition = "",
-  ) => {
-    for (const rule of Array.from(rules)) {
-      order += 1;
-      if ("selectorText" in rule && "style" in rule) {
-        const styleRule = rule as CSSStyleRule;
-        const selector = matchingSelector(element, styleRule.selectorText);
-        if (!selector) continue;
-        const value = styleRule.style.getPropertyValue(cssProperty).trim();
-        if (!value) continue;
-        candidates.push({
-          value,
-          important: styleRule.style.getPropertyPriority(cssProperty) === "important",
-          selector,
-          source,
-          mediaCondition: inheritedMediaCondition,
-          sharedImpactCount: sharedSelectorImpact(documentNode, styleRule.selectorText),
-          specificity: selectorSpecificity(selector),
-          order,
-        });
-        continue;
-      }
-
-      if ("styleSheet" in rule && (rule as CSSImportRule).styleSheet) {
-        const importRule = rule as CSSImportRule;
-        const importMedia = importRule.media?.mediaText || "";
-        if (!activeMediaCondition(view, importMedia)) continue;
-        try {
-          visitRuleList(
-            importRule.styleSheet!.cssRules,
-            importRule.href || source,
-            [inheritedMediaCondition, importMedia].filter(Boolean).join(" and "),
-          );
-        } catch {
-          // Cross-origin styles may affect the computed result while keeping
-          // their rule list intentionally opaque to the renderer.
-        }
-        continue;
-      }
-
-      if ("cssRules" in rule) {
-        const groupingRule = rule as CSSGroupingRule & { conditionText?: string };
-        const condition = typeof groupingRule.conditionText === "string"
-          ? groupingRule.conditionText
-          : "";
-        if (rule.type === 4 && !activeMediaCondition(view, condition)) continue;
-        if (rule.type === 12 && !activeSupportsCondition(view, condition)) continue;
-        visitRuleList(
-          groupingRule.cssRules,
-          source,
-          [inheritedMediaCondition, condition].filter(Boolean).join(" and "),
-        );
-      }
-    }
-  };
-
-  Array.from(documentNode.styleSheets).forEach((sheet, sheetIndex) => {
-    if (sheet.disabled) return;
-    const sheetMedia = sheet.media?.mediaText || "";
-    if (!activeMediaCondition(view, sheetMedia)) return;
-    try {
-      visitRuleList(
-        sheet.cssRules,
-        styleSheetSourceLabel(documentNode, sheet, sheetIndex),
-        sheetMedia,
-      );
-    } catch {
-      // A cross-origin sheet is read-only and may not expose cssRules.
-    }
-  });
-
-  const inlineValue = element.style.getPropertyValue(cssProperty).trim();
-  if (inlineValue) {
-    candidates.push({
-      value: inlineValue,
-      important: element.style.getPropertyPriority(cssProperty) === "important",
-      selector: "inline style",
-      source: "当前元素开始标签的 style 属性",
-      mediaCondition: "",
-      sharedImpactCount: 1,
-      specificity: [1, 0, 0, 0],
-      order: Number.MAX_SAFE_INTEGER,
-    });
-  }
-
-  return candidates;
-}
-
-function winningStyleCandidate(
-  candidates: StyleDeclarationCandidate[],
-): StyleDeclarationCandidate | null {
-  return candidates.reduce<StyleDeclarationCandidate | null>((winner, candidate) => {
-    if (!winner) return candidate;
-    if (winner.important !== candidate.important) {
-      return candidate.important ? candidate : winner;
-    }
-    const specificity = compareSpecificity(candidate.specificity, winner.specificity);
-    if (specificity !== 0) return specificity > 0 ? candidate : winner;
-    return candidate.order >= winner.order ? candidate : winner;
-  }, null);
-}
-
-function styleSourceForProperty(
-  element: HTMLElement,
-  property: EditableStyleProperty,
-  cssProperty: string,
-  label: string,
-): StyleSourceInfo {
-  const documentNode = element.ownerDocument;
-  const view = documentNode.defaultView;
-  const computedValue = view?.getComputedStyle(element).getPropertyValue(cssProperty).trim() || "";
-  const winner = winningStyleCandidate(styleDeclarationCandidates(element, cssProperty));
-  const variableName = winner?.value.match(/var\(\s*(--[\w-]+)/)?.[1];
-  const winnerKeyword = winner?.value.trim().toLowerCase();
-  const naturallyInherited = NATURALLY_INHERITED_PROPERTIES.has(cssProperty);
-  const explicitlyInherited = winnerKeyword === "inherit"
-    || (winnerKeyword === "unset" && naturallyInherited);
-  const explicitlyInitial = winnerKeyword === "initial"
-    || (winnerKeyword === "unset" && !naturallyInherited);
-
-  if (winner && variableName) {
-    return {
-      property,
-      cssProperty,
-      label,
-      computedValue,
-      kind: "variable",
-      selector: winner.selector,
-      source: winner.source,
-      mediaCondition: winner.mediaCondition || "无",
-      sharedImpactCount: winner.sharedImpactCount,
-      important: winner.important,
-      variableName,
-    };
-  }
-
-  if (winner && !explicitlyInherited && !explicitlyInitial) {
-    return {
-      property,
-      cssProperty,
-      label,
-      computedValue,
-      kind: winner.selector === "inline style" ? "inline" : "rule",
-      selector: winner.selector,
-      source: winner.source,
-      mediaCondition: winner.mediaCondition || "无",
-      sharedImpactCount: winner.sharedImpactCount,
-      important: winner.important,
-    };
-  }
-
-  if (winner && explicitlyInitial) {
-    return {
-      property,
-      cssProperty,
-      label,
-      computedValue,
-      kind: "initial",
-      selector: winner.selector,
-      source: winner.source,
-      mediaCondition: winner.mediaCondition || "无",
-      sharedImpactCount: winner.sharedImpactCount,
-      important: winner.important,
-    };
-  }
-
-  const parent = element.parentElement;
-  const parentComputedValue = parent && view
-    ? view.getComputedStyle(parent).getPropertyValue(cssProperty).trim()
-    : "";
-  if (
-    explicitlyInherited
-    || (
-      naturallyInherited
-      && parent
-      && parentComputedValue === computedValue
-    )
-  ) {
-    return {
-      property,
-      cssProperty,
-      label,
-      computedValue,
-      kind: "inherit",
-      selector: winner?.selector || (parent ? selectorForElement(parent) : "父元素"),
-      source: winner?.source || "父元素的 computed style",
-      mediaCondition: winner?.mediaCondition || "无",
-      sharedImpactCount: winner?.sharedImpactCount ?? (parent ? 1 : 0),
-      important: winner?.important || false,
-    };
-  }
-
-  return {
-    property,
-    cssProperty,
-    label,
-    computedValue,
-    kind: "default",
-    selector: "—",
-    source: "浏览器默认样式",
-    mediaCondition: "无",
-    sharedImpactCount: 0,
-    important: false,
-  };
-}
-
-function styleSourcesForElement(element: HTMLElement): StyleSourceInfo[] {
-  return STYLE_PROPERTY_CONFIGS.map(({ property, cssProperty, label }) =>
-    styleSourceForProperty(element, property, cssProperty, label)
-  );
-}
-
-function visibleText(element: HTMLElement): string {
-  const value = (element.innerText || element.textContent || "").replace(/\s+/g, " ").trim();
-  return value.length > 42 ? `${value.slice(0, 42)}…` : value;
-}
-
-function readableLabel(element: HTMLElement): string {
-  const tagName = element.tagName.toLowerCase();
-  const typeLabel: Record<string, string> = {
-    a: "链接",
-    article: "文章模块",
-    aside: "侧边模块",
-    blockquote: "引用",
-    button: "按钮",
-    footer: "页脚",
-    form: "表单",
-    h1: "一级标题",
-    h2: "二级标题",
-    h3: "三级标题",
-    h4: "标题",
-    header: "页头模块",
-    img: "图片",
-    li: "列表项",
-    main: "主内容",
-    nav: "导航模块",
-    p: "正文",
-    section: "内容模块",
-    table: "表格",
-    ul: "列表",
-    ol: "列表",
-  };
-  const label =
-    element.getAttribute("aria-label") ||
-    element.getAttribute("alt") ||
-    element.getAttribute("title") ||
-    visibleText(element);
-  const prefix = typeLabel[tagName] || tagName.toUpperCase();
-  return label ? `${prefix} · ${label}` : prefix;
-}
-
-function inferSelectionLevel(element: HTMLElement): HtmlCanvasSelectionLevel {
-  const explicitLevel = element.getAttribute("data-ai-level");
-  if (explicitLevel === "module" || explicitLevel === "part") return explicitLevel;
-
-  const moduleTags = new Set(["ARTICLE", "ASIDE", "FOOTER", "HEADER", "MAIN", "NAV", "SECTION"]);
-  const identity = `${element.id} ${element.className}`.toLowerCase();
-  const hasModuleIdentity = /(^|[\s_-])(module|section|panel|card|block|container)([\s_-]|$)/.test(identity);
-  const directBodyBlock = element.parentElement === element.ownerDocument.body &&
-    !["A", "BUTTON", "H1", "H2", "H3", "H4", "H5", "H6", "IMG", "P", "SPAN"].includes(element.tagName);
-  return moduleTags.has(element.tagName) || hasModuleIdentity || directBodyBlock ? "module" : "part";
-}
-
-function isModulePaddingHit(
-  element: HTMLElement,
-  point: { clientX: number; clientY: number },
-): boolean {
-  if (inferSelectionLevel(element) !== "module") return false;
-  const view = element.ownerDocument.defaultView;
-  if (!view) return false;
-  const rect = element.getBoundingClientRect();
-  const style = view.getComputedStyle(element);
-  const pixelValue = (value: string) => Number.parseFloat(value) || 0;
-  const contentLeft = rect.left
-    + pixelValue(style.borderLeftWidth)
-    + pixelValue(style.paddingLeft);
-  const contentRight = rect.right
-    - pixelValue(style.borderRightWidth)
-    - pixelValue(style.paddingRight);
-  const contentTop = rect.top
-    + pixelValue(style.borderTopWidth)
-    + pixelValue(style.paddingTop);
-  const contentBottom = rect.bottom
-    - pixelValue(style.borderBottomWidth)
-    - pixelValue(style.paddingBottom);
-  return point.clientX < contentLeft
-    || point.clientX > contentRight
-    || point.clientY < contentTop
-    || point.clientY > contentBottom;
-}
-
-function defaultGlobalCommentElement(documentNode: Document): HTMLElement | null {
-  return documentNode.body;
-}
-
-function isPageRootElement(element: Element | null): element is HTMLElement {
-  return Boolean(
-    element
-    && (
-      element === element.ownerDocument.body
-      || element === element.ownerDocument.documentElement
-    ),
-  );
-}
-
-function isPageRootSelection(selection: HtmlCanvasSelection | null): boolean {
-  return Boolean(
-    selection
-    && selection.level === "module"
-    && (selection.tagName === "body" || selection.tagName === "html"),
-  );
-}
-
-function sourceMoveAvailability(
-  sourceIndex: SourceIndexValue | null,
-  selection: HtmlCanvasSelection | null,
-): MoveAvailability {
-  if (
-    !sourceIndex
-    || !selection
-    || selection.level === "insertion"
-    || selection.resolution === "ambiguous"
-    || selection.resolution === "orphaned"
-  ) {
-    return { up: false, down: false };
-  }
-  try {
-    const resolution = resolveTargetRef(
-      sourceIndex,
-      sourceTargetRefForSelection(selection),
-    );
-    const element = resolution.target;
-    if (!element || element.type !== "element") return { up: false, down: false };
-    const parent = element.parentId ? sourceIndex.byNodeId.get(element.parentId) : null;
-    if (
-      parent?.type !== "element"
-      || ["body", "html"].includes(element.tagName)
-      || ["html", "head"].includes(parent.tagName)
-    ) {
-      return { up: false, down: false };
-    }
-    const previous = element.previousElementSiblingId
-      ? sourceIndex.byNodeId.get(element.previousElementSiblingId)
-      : null;
-    const next = element.nextElementSiblingId
-      ? sourceIndex.byNodeId.get(element.nextElementSiblingId)
-      : null;
-    return {
-      up: previous?.type === "element",
-      down: next?.type === "element",
-    };
-  } catch {
-    return { up: false, down: false };
-  }
-}
-
-function uniqueSelections(
-  targets: readonly HtmlCanvasSelection[],
-): HtmlCanvasSelection[] {
-  const byTargetId = new Map<string, HtmlCanvasSelection>();
-  for (const target of targets) {
-    if (target.id && !byTargetId.has(target.id)) byTargetId.set(target.id, target);
-  }
-  return [...byTargetId.values()];
-}
-
-function sourcePatchOperationType(plan: SourcePatchPlan): string {
-  const metadata = plan.metadata as Record<string, unknown> | undefined;
-  const value = String(metadata?.operationType ?? plan.type ?? "");
-  return value.replace(/^(?:inverse:)+/, "");
-}
-
-function trackedSourceTargetRefs(
-  targets: readonly HtmlCanvasSelection[],
-  operationTargetRefs: readonly SourceTargetRef[],
-  options: {
-    includeOperationTargetIds?: boolean;
-    includeUnresolvedTargetIds?: ReadonlySet<string>;
-  } = {},
-): SourceTargetRef[] {
-  const operationTargetIds = new Set(
-    operationTargetRefs.map((target) => target.targetId),
-  );
-  return uniqueSelections(targets).flatMap((target) => {
-    if (
-      (
-        operationTargetIds.has(target.id)
-        && !options.includeOperationTargetIds
-      )
-      || (
-        (
-          target.resolution === "ambiguous"
-          || target.resolution === "orphaned"
-        )
-        && !options.includeUnresolvedTargetIds?.has(target.id)
-      )
-    ) return [];
-    return [sourceTargetRefForSelection(target)];
-  });
-}
-
-function selectionFromRefreshedTarget(
-  original: HtmlCanvasSelection,
-  targetRef: SourceTargetRef,
-  nodeId?: string,
-): HtmlCanvasSelection {
-  return {
-    id: targetRef.targetId,
-    ...(nodeId ? { nodeId } : {}),
-    label: targetRef.label,
-    selector: targetRef.selector || "",
-    level: original.level,
-    tagName: targetRef.level === "insertion-point"
-      ? "insertion"
-      : targetRef.fingerprint?.tagName || original.tagName,
-    text: targetRef.textQuote || "",
-    resolution: targetRef.resolution,
-    ...(targetRef.textQuote !== undefined ? { textQuote: targetRef.textQuote } : {}),
-    ...(targetRef.sourceAnchor ? { sourceAnchor: targetRef.sourceAnchor } : {}),
-    ...(targetRef.fingerprint ? { fingerprint: targetRef.fingerprint } : {}),
-  };
-}
-
-function deterministicTargetUpdates(
-  result: ReturnType<typeof applyPatchPlan>,
-  originalTargets: readonly HtmlCanvasSelection[],
-): HtmlCanvasSelection[] {
-  const originals = new Map(
-    uniqueSelections(originalTargets).map((target) => [target.id, target]),
-  );
-  const refreshedTargetRefs = [
-    ...result.refreshedTargetRefs.map((targetRef: SourceTargetRef) => ({
-      targetRef,
-      tracked: false,
-    })),
-    ...result.refreshedTrackedTargetRefs.map((targetRef: SourceTargetRef) => ({
-      targetRef,
-      tracked: true,
-    })),
-  ];
-  return refreshedTargetRefs.flatMap(({ targetRef, tracked }) => {
-    const original = originals.get(targetRef.targetId);
-    if (!original) return [];
-    const mapping = result.targetMappings.find((candidate) => (
-      candidate.targetId === targetRef.targetId
-      && Boolean(candidate.tracked) === tracked
-    ));
-    return [
-      selectionFromRefreshedTarget(
-        original,
-        targetRef as SourceTargetRef,
-        mapping?.afterNodeId || undefined,
-      ),
-    ];
-  });
-}
-
-function deterministicOperationTargetUpdate(
-  result: ReturnType<typeof applyPatchPlan>,
-  original: HtmlCanvasSelection,
-): HtmlCanvasSelection | null {
-  const targetRef = result.refreshedTargetRefs.find(
-    (candidate: SourceTargetRef) => candidate.targetId === original.id,
-  ) as SourceTargetRef | undefined;
-  if (!targetRef) return null;
-  const mapping = result.targetMappings.find((candidate) => (
-    candidate.targetId === original.id
-    && !candidate.tracked
-  ));
-  return selectionFromRefreshedTarget(
-    original,
-    targetRef,
-    mapping?.afterNodeId || undefined,
-  );
-}
-
-function selectionForElement(
-  element: HTMLElement,
-  sourceIndex?: SourceIndexValue | null,
-  identityTarget?: HtmlCanvasSelection | null,
-  resolutionOverride?: HtmlCanvasTargetResolution,
-  levelOverride?: HtmlCanvasSelectionLevel,
-): HtmlCanvasSelection {
-  const selector = selectorForElement(element);
-  const level = levelOverride ?? identityTarget?.level ?? inferSelectionLevel(element);
-  const nodeId = element.getAttribute(SOURCE_NODE_ATTRIBUTE) || undefined;
-  let targetRef: SourceTargetRef | null = null;
-  if (sourceIndex && nodeId) {
-    try {
-      targetRef = createTargetRef(sourceIndex, nodeId, {
-        level: targetLevelForSelection(level),
-        ...(identityTarget?.id ? { targetId: identityTarget.id } : {}),
-        ...(identityTarget?.label ? { label: identityTarget.label } : {}),
-      }) as SourceTargetRef;
-    } catch {
-      targetRef = null;
-    }
-  }
-  const rect = element.getBoundingClientRect();
-  const view = element.ownerDocument.defaultView;
-  return {
-    id: targetRef?.targetId || nodeId || element.getAttribute("data-ai-id") || element.id || selector,
-    ...(nodeId ? { nodeId } : {}),
-    label: level === "module" && isPageRootElement(element)
-      ? "整个页面"
-      : readableLabel(element),
-    selector: targetRef?.selector || selector,
-    level,
-    tagName: element.tagName.toLowerCase(),
-    text: visibleText(element),
-    resolution: resolutionOverride || (targetRef ? "exact" : "orphaned"),
-    ...(targetRef?.textQuote ? { textQuote: targetRef.textQuote } : {}),
-    ...(targetRef?.sourceAnchor ? { sourceAnchor: targetRef.sourceAnchor } : {}),
-    ...(targetRef?.fingerprint ? { fingerprint: targetRef.fingerprint } : {}),
-    boundingBox: {
-      x: Math.round((rect.left + (view?.scrollX || 0)) * 100) / 100,
-      y: Math.round((rect.top + (view?.scrollY || 0)) * 100) / 100,
-      width: Math.round(rect.width * 100) / 100,
-      height: Math.round(rect.height * 100) / 100,
-    },
-  };
-}
-
-function sourceTextNodeForDomText(
-  textNode: Text,
-  sourceIndex: SourceIndexValue,
-): { nodeId: string; value: string } | null {
-  const parentElement = textNode.parentElement;
-  const parentNodeId = parentElement?.getAttribute(SOURCE_NODE_ATTRIBUTE);
-  if (!parentElement || !parentNodeId) return null;
-  const sourceParent = sourceIndex.byNodeId.get(parentNodeId);
-  if (!sourceParent || sourceParent.type !== "element") return null;
-  const childIndex = Array.from(parentElement.childNodes).indexOf(textNode);
-  const sourceChildId = sourceParent.childIds?.[childIndex];
-  const sourceText = sourceChildId ? sourceIndex.byNodeId.get(sourceChildId) : null;
-  if (
-    !sourceText
-    || sourceText.type !== "text"
-    || sourceText.value !== textNode.data
-  ) return null;
-  return { nodeId: sourceText.nodeId, value: sourceText.value };
-}
-
-function activeTextRangeFromDocument(
-  documentNode: Document,
-  sourceIndex: SourceIndexValue | null,
-): ActiveTextRange | null {
-  const domSelection = documentNode.getSelection();
-  if (!sourceIndex || !domSelection || domSelection.rangeCount !== 1 || domSelection.isCollapsed) {
-    return null;
-  }
-  const range = domSelection.getRangeAt(0);
-  const commonNode = range.commonAncestorContainer;
-  const commonElement = commonNode.nodeType === 1
-    ? commonNode as HTMLElement
-    : commonNode.parentElement;
-  const targetElement = commonElement?.closest<HTMLElement>(`[${SOURCE_NODE_ATTRIBUTE}]`) ?? null;
-  if (
-    !targetElement
-    || ["BODY", "HTML", "HEAD", "SCRIPT", "STYLE", "NOSCRIPT"].includes(targetElement.tagName)
-  ) return null;
-
-  const showText = documentNode.defaultView?.NodeFilter.SHOW_TEXT ?? 4;
-  const walker = documentNode.createTreeWalker(targetElement, showText);
-  const segments: TextRangeSegment[] = [];
-  const styleElements: HTMLElement[] = [];
-  let currentNode = walker.nextNode();
-  while (currentNode) {
-    const textNode = currentNode as Text;
-    let intersects = false;
-    try {
-      intersects = range.intersectsNode(textNode);
-    } catch {
-      return null;
-    }
-    if (intersects) {
-      const startOffset = range.startContainer === textNode ? range.startOffset : 0;
-      const endOffset = range.endContainer === textNode ? range.endOffset : textNode.data.length;
-      if (endOffset > startOffset) {
-        const sourceText = sourceTextNodeForDomText(textNode, sourceIndex);
-        if (!sourceText || endOffset > sourceText.value.length) return null;
-        segments.push({
-          textNodeId: sourceText.nodeId,
-          startOffset,
-          endOffset,
-        });
-        const textParent = textNode.parentElement;
-        if (textParent && !styleElements.includes(textParent)) styleElements.push(textParent);
-      }
-    }
-    currentNode = walker.nextNode();
-  }
-  if (segments.length === 0 || styleElements.length === 0) return null;
-  let direction: ActiveTextRange["direction"] = "forward";
-  if (domSelection.anchorNode && domSelection.focusNode) {
-    try {
-      const anchorRange = documentNode.createRange();
-      anchorRange.setStart(domSelection.anchorNode, domSelection.anchorOffset);
-      anchorRange.collapse(true);
-      const focusRange = documentNode.createRange();
-      focusRange.setStart(domSelection.focusNode, domSelection.focusOffset);
-      focusRange.collapse(true);
-      direction = anchorRange.compareBoundaryPoints(0, focusRange) <= 0
-        ? "forward"
-        : "backward";
-    } catch {
-      direction = "forward";
-    }
-  }
-  return {
-    target: selectionForElement(targetElement, sourceIndex, undefined, undefined, "part"),
-    segments,
-    text: range.toString(),
-    styleElements,
-    direction,
-  };
-}
-
-function escapedSourceNodeId(nodeId: string): string {
-  return nodeId.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-}
-
-function isCanonicalSourceElement(
-  element: HTMLElement,
-  sourceIndex: SourceIndexValue,
-): boolean {
-  const nodeId = element.getAttribute(SOURCE_NODE_ATTRIBUTE);
-  const sourceElement = nodeId ? sourceIndex.byNodeId.get(nodeId) : null;
-  if (!nodeId || sourceElement?.type !== "element") return false;
-  const matches = element.ownerDocument.querySelectorAll(
-    `[${SOURCE_NODE_ATTRIBUTE}="${escapedSourceNodeId(nodeId)}"]`,
-  );
-  if (matches.length !== 1 || matches[0] !== element) return false;
-  const domParent = element.parentElement?.closest<HTMLElement>(
-    `[${SOURCE_NODE_ATTRIBUTE}]`,
-  ) ?? null;
-  const domParentId = domParent?.getAttribute(SOURCE_NODE_ATTRIBUTE) ?? null;
-  return domParentId === sourceElement.parentId;
-}
-
-function nativeEditHostForElement(
-  element: HTMLElement,
-  sourceIndex: SourceIndexValue,
-): HTMLElement | null {
-  let candidate = element.closest<HTMLElement>(`[${SOURCE_NODE_ATTRIBUTE}]`);
-  while (candidate) {
-    if (!isCanonicalSourceElement(candidate, sourceIndex)) return null;
-    const computedDisplay = candidate.ownerDocument.defaultView
-      ?.getComputedStyle(candidate).display.toLowerCase() ?? "";
-    const tagName = candidate.tagName.toLowerCase();
-    // Inline semantic tags normally join their surrounding sentence. Once an
-    // author turns one into its own rendered box (for example a block metric
-    // implemented with <strong>), it is the text host itself rather than a
-    // reason to climb into a much larger, non-text parent such as <article>.
-    const standaloneTransparentBox = (
-      computedDisplay !== "inline"
-      && computedDisplay !== "contents"
-    );
-    if (!isTransparentSourceTextElement(tagName) || standaloneTransparentBox) break;
-    const parentCandidate = candidate.parentElement?.closest<HTMLElement>(
-      `[${SOURCE_NODE_ATTRIBUTE}]`,
-    ) ?? null;
-    if (
-      !parentCandidate
-      || parentCandidate === candidate.ownerDocument.body
-      || parentCandidate === candidate.ownerDocument.documentElement
-    ) break;
-    candidate = parentCandidate;
-  }
-  if (!candidate) return null;
-  const nodeId = candidate.getAttribute(SOURCE_NODE_ATTRIBUTE);
-  if (!nodeId) return null;
-  return sourceIndex.byNodeId.get(nodeId)?.type === "element" ? candidate : null;
-}
-
-function sourceTextParentsForSegments(
-  rootElement: HTMLElement,
-  segments: readonly TextRangeSegment[],
-  sourceIndex: SourceIndexValue,
-): HTMLElement[] | null {
-  const wantedIds = new Set(segments.map((segment) => segment.textNodeId));
-  const parentsByTextId = new Map<string, HTMLElement>();
-  const documentNode = rootElement.ownerDocument;
-  const showText = documentNode.defaultView?.NodeFilter.SHOW_TEXT ?? 4;
-  const walker = documentNode.createTreeWalker(rootElement, showText);
-  let current = walker.nextNode();
-  while (current) {
-    const textNode = current as Text;
-    const sourceText = sourceTextNodeForDomText(textNode, sourceIndex);
-    if (sourceText && wantedIds.has(sourceText.nodeId) && textNode.parentElement) {
-      parentsByTextId.set(sourceText.nodeId, textNode.parentElement);
-    }
-    current = walker.nextNode();
-  }
-  if ([...wantedIds].some((nodeId) => !parentsByTextId.has(nodeId))) return null;
-  return [...new Set(
-    segments.map((segment) => parentsByTextId.get(segment.textNodeId)!),
-  )];
-}
-
-function sourceBackedPreviewElements(documentNode: Document): Element[] {
-  const elements: Element[] = [];
-  const visit = (element: Element) => {
-    if (element.hasAttribute(SOURCE_NODE_ATTRIBUTE)) elements.push(element);
-    const childElements = element.tagName === "TEMPLATE"
-      ? Array.from((element as HTMLTemplateElement).content.children)
-      : Array.from(element.children);
-    childElements.forEach(visit);
-  };
-  if (documentNode.documentElement) visit(documentNode.documentElement);
-  return elements;
-}
-
-function canonicalNativeHostPreview(
-  rootElement: HTMLElement,
-  nextNodeId: string,
-  nextIndex: SourceIndexValue,
-): HTMLElement | null {
-  const view = rootElement.ownerDocument.defaultView;
-  if (!view) return null;
-  const instrumented = instrumentPreviewHtml(nextIndex, {
-    attributeName: SOURCE_NODE_ATTRIBUTE,
-  }).html;
-  const detachedDocument = new view.DOMParser().parseFromString(
-    disableExecutableMarkup(instrumented),
-    "text/html",
-  );
-  const detachedTarget = detachedDocument.querySelector<HTMLElement>(
-    `[${SOURCE_NODE_ATTRIBUTE}="${escapedSourceNodeId(nextNodeId)}"]`,
-  );
-  return detachedTarget?.tagName === rootElement.tagName ? detachedTarget : null;
-}
-
-type PreviewSourceNodeIdPlan = {
-  apply: () => void;
-  rollback: () => void;
-};
-
-function planMountedPreviewSourceNodeIds(
-  documentNode: Document,
-  previousIndex: SourceIndexValue,
-  nextIndex: SourceIndexValue,
-  options: {
-    excludeRoot?: HTMLElement;
-  } = {},
-): PreviewSourceNodeIdPlan | null {
-  const previousRoots = (previousIndex.elements as SourceElementValue[]).filter((element) => {
-    const parent = element.parentId
-      ? previousIndex.byNodeId.get(element.parentId)
-      : null;
-    return !parent || parent.type !== "element";
-  });
-  const nextRoots = (nextIndex.elements as SourceElementValue[]).filter((element) => {
-    const parent = element.parentId
-      ? nextIndex.byNodeId.get(element.parentId)
-      : null;
-    return !parent || parent.type !== "element";
-  });
-  if (previousRoots.length !== nextRoots.length) return null;
-  const excludedNodeId = options.excludeRoot?.getAttribute(SOURCE_NODE_ATTRIBUTE) ?? null;
-  const nextNodeIdByPreviousNodeId = new Map<string, string>();
-  const pairSubtrees = (
-    previousElement: SourceElementValue,
-    nextElement: SourceElementValue,
-  ): boolean => {
-    if (previousElement.tagName !== nextElement.tagName) return false;
-    nextNodeIdByPreviousNodeId.set(previousElement.nodeId, nextElement.nodeId);
-    if (previousElement.nodeId === excludedNodeId) return true;
-    if (previousElement.childElementIds.length !== nextElement.childElementIds.length) {
-      return false;
-    }
-    for (let index = 0; index < previousElement.childElementIds.length; index += 1) {
-      const previousChild = previousIndex.byNodeId.get(
-        previousElement.childElementIds[index],
-      );
-      const nextChild = nextIndex.byNodeId.get(nextElement.childElementIds[index]);
-      if (
-        !previousChild
-        || previousChild.type !== "element"
-        || !nextChild
-        || nextChild.type !== "element"
-        || !pairSubtrees(previousChild, nextChild)
-      ) return false;
-    }
-    return true;
-  };
-  for (let index = 0; index < previousRoots.length; index += 1) {
-    if (!pairSubtrees(previousRoots[index], nextRoots[index])) return null;
-  }
-
-  const liveNodes = sourceBackedPreviewElements(documentNode).filter((node) => (
-    !options.excludeRoot
-    || (
-      node !== options.excludeRoot
-      && !options.excludeRoot.contains(node)
-    )
-  ));
-  const updates: Array<{ node: Element; nextNodeId: string }> = [];
-  for (const node of liveNodes) {
-    const previousNodeId = node.getAttribute(SOURCE_NODE_ATTRIBUTE);
-    const nextNodeId = previousNodeId
-      ? nextNodeIdByPreviousNodeId.get(previousNodeId)
-      : null;
-    const nextElement = nextNodeId ? nextIndex.byNodeId.get(nextNodeId) : null;
-    if (
-      !nextElement
-      || node.tagName.toLowerCase() !== nextElement.tagName
-    ) return null;
-    updates.push({ node, nextNodeId: nextElement.nodeId });
-  }
-  const previousValues = updates.map(({ node }) => ({
-    node,
-    present: node.hasAttribute(SOURCE_NODE_ATTRIBUTE),
-    value: node.getAttribute(SOURCE_NODE_ATTRIBUTE),
-  }));
-  const rollback = () => {
-    for (let index = previousValues.length - 1; index >= 0; index -= 1) {
-      const previous = previousValues[index];
-      if (previous.present && previous.value !== null) {
-        previous.node.setAttribute(SOURCE_NODE_ATTRIBUTE, previous.value);
-      } else {
-        previous.node.removeAttribute(SOURCE_NODE_ATTRIBUTE);
-      }
-    }
-  };
-  return {
-    apply: () => {
-      try {
-        updates.forEach(({ node, nextNodeId }) => {
-          node.setAttribute(SOURCE_NODE_ATTRIBUTE, nextNodeId);
-        });
-      } catch (cause) {
-        rollback();
-        throw cause;
-      }
-    },
-    rollback,
-  };
-}
-
-function refreshMountedPreviewSourceNodeIds(
-  documentNode: Document,
-  previousIndex: SourceIndexValue,
-  nextIndex: SourceIndexValue,
-  options: {
-    session?: IslandEditingController;
-    excludeRoot?: HTMLElement;
-  } = {},
-): boolean {
-  const plan = planMountedPreviewSourceNodeIds(
-    documentNode,
-    previousIndex,
-    nextIndex,
-    { excludeRoot: options.excludeRoot },
-  );
-  if (!plan) return false;
-  if (options.session) {
-    return options.session.runExpectedMutation(() => {
-      plan.apply();
-      return true;
-    }) === true;
-  }
-  plan.apply();
-  return true;
-}
-
-type TextCaretPoint = {
-  clientX: number;
-  clientY: number;
-};
-
-function caretPointFromMouseEvent(event: MouseEvent): TextCaretPoint {
-  // clientX/clientY are already in the same viewport coordinate system as
-  // Range.getClientRects(). MouseEvent.offsetX/offsetY are not reliable for
-  // inline descendants such as <pre><code>: Chromium can report them relative
-  // to a different padding/offset parent and make a real glyph click look like
-  // empty space.
-  return {
-    clientX: event.clientX,
-    clientY: event.clientY,
-  };
-}
-
-function wordBoundsAtOffset(text: string, requestedOffset: number): {
-  startOffset: number;
-  endOffset: number;
-} | null {
-  if (!text || !text.trim()) return null;
-  const offset = Math.max(0, Math.min(text.length, requestedOffset));
-  if (typeof Intl.Segmenter === "function") {
-    const segments = new Intl.Segmenter(undefined, { granularity: "word" }).segment(text);
-    let nearest: { startOffset: number; endOffset: number; distance: number } | null = null;
-    for (const segment of segments) {
-      if (!segment.segment.trim()) continue;
-      const startOffset = segment.index;
-      const endOffset = segment.index + segment.segment.length;
-      if (offset >= startOffset && offset <= endOffset) return { startOffset, endOffset };
-      const distance = Math.min(
-        Math.abs(offset - startOffset),
-        Math.abs(offset - endOffset),
-      );
-      if (!nearest || distance < nearest.distance) {
-        nearest = { startOffset, endOffset, distance };
-      }
-    }
-    if (nearest) return nearest;
-  }
-
-  let characterOffset = Math.min(offset, text.length - 1);
-  while (characterOffset > 0 && /\s/u.test(text[characterOffset])) characterOffset -= 1;
-  if (/\p{Script=Han}/u.test(text[characterOffset])) {
-    return { startOffset: characterOffset, endOffset: characterOffset + 1 };
-  }
-  const isWordCharacter = (character: string) => /[\p{L}\p{N}_-]/u.test(character);
-  let startOffset = characterOffset;
-  let endOffset = characterOffset + 1;
-  while (startOffset > 0 && isWordCharacter(text[startOffset - 1])) startOffset -= 1;
-  while (endOffset < text.length && isWordCharacter(text[endOffset])) endOffset += 1;
-  return { startOffset, endOffset };
-}
-
-function selectWordAtPoint(
-  documentNode: Document,
-  target: HTMLElement,
-  point: TextCaretPoint,
-): Range | null {
-  const caretPosition = documentNode.caretPositionFromPoint?.(point.clientX, point.clientY);
-  const caretRange = !caretPosition
-    ? documentNode.caretRangeFromPoint?.(point.clientX, point.clientY)
-    : null;
-  const pointNode = caretPosition?.offsetNode || caretRange?.startContainer;
-  const pointOffset = caretPosition?.offset ?? caretRange?.startOffset;
-  const textNode = pointNode?.nodeType === 3 ? pointNode as Text : null;
-  const textOffset = typeof pointOffset === "number" ? pointOffset : 0;
-  // caretPositionFromPoint may return the nearest text when the pointer is on
-  // an inert iframe/canvas or on empty layout space. Never turn that proximity
-  // guess into an edit target: the point must lie on the chosen text glyphs.
-  if (!textNode || !target.contains(textNode) || !textNode.data.trim()) return null;
-  if (!textNode) return null;
-  const bounds = wordBoundsAtOffset(textNode.data, textOffset);
-  if (!bounds) return null;
-  const range = documentNode.createRange();
-  range.setStart(textNode, bounds.startOffset);
-  range.setEnd(textNode, bounds.endOffset);
-  if (!nativeTextRangeContainsPoint(range, point)) return null;
-  const selection = documentNode.getSelection();
-  selection?.removeAllRanges();
-  selection?.addRange(range);
-  return range;
-}
-
-function nativeTextRangeContainsPoint(
-  range: Range,
-  point: TextCaretPoint,
-): boolean {
-  if (
-    range.collapsed
-    || !range.startContainer.isConnected
-    || !range.endContainer.isConnected
-  ) return false;
-  const tolerance = 2;
-  return Array.from(range.getClientRects()).some((rect) => (
-    rect.width > 0
-    && rect.height > 0
-    && point.clientX >= rect.left - tolerance
-    && point.clientX <= rect.right + tolerance
-    && point.clientY >= rect.top - tolerance
-    && point.clientY <= rect.bottom + tolerance
-  ));
-}
-
-function nativeTextRangeMatchesActivation(
-  range: Range,
-  target: HTMLElement,
-  point: TextCaretPoint,
-): boolean {
-  return target.contains(range.startContainer)
-    && target.contains(range.endContainer)
-    && nativeTextRangeContainsPoint(range, point);
-}
-
-function toHexColor(value: string, fallback: string): string {
-  if (/^#[0-9a-f]{6}$/i.test(value)) return value.toLowerCase();
-  const channels = value.match(/[\d.]+/g)?.slice(0, 4).map(Number);
-  if (!channels || channels.length < 3 || (channels.length === 4 && channels[3] === 0)) return fallback;
-  return `#${channels
-    .slice(0, 3)
-    .map((channel) => Math.max(0, Math.min(255, Math.round(channel))).toString(16).padStart(2, "0"))
-    .join("")}`;
-}
-
-function findSelectableElement(target: EventTarget | null): HTMLElement | null {
-  if (!target || typeof target !== "object" || !("nodeType" in target) || target.nodeType !== 1) return null;
-  const element = target as HTMLElement;
-  if (["HTML", "BODY", "HEAD", "SCRIPT", "STYLE"].includes(element.tagName)) return null;
-  if (element.namespaceURI === "http://www.w3.org/2000/svg") {
-    return element.closest("svg") as unknown as HTMLElement | null;
-  }
-  if (element.namespaceURI === "http://www.w3.org/1998/Math/MathML") {
-    return element.closest("math") as unknown as HTMLElement | null;
-  }
-  return element;
-}
-
-const MEDIA_SURFACE_SELECTOR = "iframe, audio, video, canvas, object, embed";
-const COMPOUND_VALUE_AFFIX_TAGS = new Set(["SMALL", "SUP", "SUB"]);
-
-function compoundValueSelectionRoot(element: HTMLElement): HTMLElement {
-  if (!COMPOUND_VALUE_AFFIX_TAGS.has(element.tagName)) return element;
-  const parent = element.parentElement;
-  if (!parent || parent === parent.ownerDocument.body) return element;
-  const directText = Array.from(parent.childNodes)
-    .filter((node) => node.nodeType === 3)
-    .map((node) => node.textContent ?? "")
-    .join("")
-    .trim();
-  const combinedText = (parent.textContent ?? "").replace(/\s+/g, "");
-  if (
-    !/\d/u.test(directText)
-    || combinedText.length === 0
-    || combinedText.length > 40
-    || parent.querySelector("div, section, article, header, footer, main, aside, table, ul, ol")
-  ) return element;
-  return parent;
-}
-
-function findCanvasSelectionElement(target: EventTarget | null): HTMLElement | null {
-  const selected = findSelectableElement(target);
-  if (!selected) return null;
-  const element = compoundValueSelectionRoot(selected);
-  const ownsMediaSurface = element.matches(MEDIA_SURFACE_SELECTOR)
-    || Boolean(element.querySelector(MEDIA_SURFACE_SELECTOR));
-  if (!ownsMediaSurface) return element;
-  let candidate: HTMLElement | null = element;
-  while (candidate && candidate !== candidate.ownerDocument.body) {
-    if (
-      candidate.hasAttribute(SOURCE_NODE_ATTRIBUTE)
-      && inferSelectionLevel(candidate) === "module"
-    ) return candidate;
-    candidate = candidate.parentElement;
-  }
-  return element;
-}
-
-function findNativeActionTarget(target: EventTarget | null): HTMLElement | null {
-  const element = findSelectableElement(target);
-  return element?.closest<HTMLElement>(
-    "a[href], area[href], button, form, input, select, textarea",
-  ) ?? null;
-}
-
-function isBlockedSourceReversalShortcut(event: {
-  metaKey: boolean;
-  ctrlKey: boolean;
-  key: string;
-}): boolean {
-  return (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z";
-}
-
-function isCanvasRootElement(target: EventTarget | null): boolean {
-  return Boolean(
-    target
-    && typeof target === "object"
-    && "nodeType" in target
-    && target.nodeType === 1
-    && ["HTML", "BODY"].includes((target as HTMLElement).tagName),
-  );
-}
 
 const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProps>(function HtmlCanvasEditor(
   {
@@ -1840,6 +349,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     onReady,
     onRequestFlush,
     onRequestExport,
+    onRequestHistory,
     onRequestReload,
     reloadActionLabel = "重新载入",
     onEditBlocked,
@@ -1856,6 +366,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     enableReorder = true,
     commentedTargets = EMPTY_COMMENTED_TARGETS,
     trackedTargets = EMPTY_TRACKED_TARGETS,
+    pageViewContext = null,
+    pageViewDocumentKey = "",
+    onPageViewContextChange,
   },
   forwardedRef,
 ) {
@@ -1887,6 +400,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const nativeEditFenceSequenceRef = useRef(0);
   const currentNativeEditLeaseRef = useRef<ActiveNativeEdit["lease"] | null>(null);
   const pendingNativeEditResumeRef = useRef<PendingNativeEditResume | null>(null);
+  const pendingHistoryBookmarkRef = useRef<NativeEditFenceBookmark | null>(null);
+  const pendingHistoryCanonicalFenceRef = useRef(false);
   const fencedDocumentCleanupRef = useRef<() => void>(() => undefined);
   const installFencedDocumentGuardRef = useRef<(documentNode: Document) => void>(
     () => undefined,
@@ -1937,12 +452,18 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const onRequestCommentRef = useRef(onRequestComment);
   const onRequestFlushRef = useRef(onRequestFlush);
   const onRequestExportRef = useRef(onRequestExport);
+  const onRequestHistoryRef = useRef(onRequestHistory);
   const onEditBlockedRef = useRef(onEditBlocked);
   const readOnlyRef = useRef(readOnly);
   const lockedRef = useRef(locked);
   const enableReorderRef = useRef(enableReorder);
   const commentedTargetsRef = useRef(commentedTargets);
   const trackedTargetsRef = useRef(trackedTargets);
+  const pageViewContextRef = useRef<PageViewContext | null>(pageViewContext);
+  const lastPageViewContextPropRef = useRef<PageViewContext | null>(pageViewContext);
+  const appliedPageViewContextRef = useRef<PageViewContext | null>(null);
+  const pageViewDocumentKeyRef = useRef(pageViewDocumentKey);
+  const onPageViewContextChangeRef = useRef(onPageViewContextChange);
   const controlledMode = locked ? "processing" : interactionMode;
   const controlledInteractionLocked = controlledMode !== "editing";
   const [imperativeLocked, setImperativeLocked] = useState(false);
@@ -1961,12 +482,19 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   onRequestCommentRef.current = onRequestComment;
   onRequestFlushRef.current = onRequestFlush;
   onRequestExportRef.current = onRequestExport;
+  onRequestHistoryRef.current = onRequestHistory;
   onEditBlockedRef.current = onEditBlocked;
   readOnlyRef.current = readOnly || controlledInteractionLocked || imperativeLockRef.current;
   lockedRef.current = controlledInteractionLocked || imperativeLockRef.current;
   enableReorderRef.current = enableReorder && !lockedRef.current;
   commentedTargetsRef.current = commentedTargets;
   trackedTargetsRef.current = trackedTargets;
+  if (lastPageViewContextPropRef.current !== pageViewContext) {
+    lastPageViewContextPropRef.current = pageViewContext;
+    pageViewContextRef.current = pageViewContext;
+  }
+  pageViewDocumentKeyRef.current = pageViewDocumentKey;
+  onPageViewContextChangeRef.current = onPageViewContextChange;
 
   // Keep the server and hydration value deterministic, then normalize through DOMParser after mount.
   const [frameRender, setFrameRender] = useState(() => ({
@@ -2201,7 +729,27 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     const iframe = iframeRef.current;
     const documentNode = iframe?.contentDocument;
     const element = selectedElementRef.current;
+    const sourceSha256 = sourceIndexRef.current?.sourceSha256 ?? "";
+    const viewContextGeneration =
+      appliedPageViewContextRef.current?.generation ?? 0;
+    const layoutTargets = commentLayoutTargets(commentedTargetsRef.current);
+    const targetIds = sortedCommentLayoutTargetIds(layoutTargets);
+    const textEditing = Boolean(
+      activeNativeEditRef.current
+      || pendingNativeEditResumeRef.current,
+    );
     if (!container || !iframe || !documentNode?.body) {
+      onCommentLayoutRef.current?.({
+        sourceSha256,
+        viewContextGeneration,
+        ready: false,
+        textEditing,
+        targetIds,
+        scrollTop: 0,
+        contentHeight: 0,
+        clientHeight: 0,
+        targets: [],
+      });
       setOverlayPosition(null);
       setInsertionPoints([]);
       setCommentMarkers([]);
@@ -2221,38 +769,115 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       0,
       Number(frameView?.scrollY || scrollingElement.scrollTop || 0),
     );
-    const commentLayouts = commentedTargetsRef.current.flatMap((rawTarget) => {
-      const target = rawTarget.target;
+    const measurementReady = Boolean(
+      sourceSha256
+      && renderedSourceHtmlRef.current === frameSourceHtmlRef.current
+      && container.getClientRects().length > 0
+      && iframe.getClientRects().length > 0
+      && frameHeight > 0
+      && frameWidth > 0
+    );
+    if (!measurementReady) {
+      onCommentLayoutRef.current?.({
+        sourceSha256,
+        viewContextGeneration,
+        ready: false,
+        textEditing,
+        targetIds,
+        scrollTop,
+        contentHeight: naturalDocumentContentHeight(documentNode, frameHeight),
+        clientHeight: frameHeight,
+        targets: [],
+      });
+      setOverlayPosition(null);
+      setInsertionPoints([]);
+      setCommentMarkers([]);
+      insertionPointsRef.current = [];
+      return;
+    }
+    const commentTabAssociations = tabAssociations(documentNode);
+    const commentLayouts = layoutTargets.map((target) => {
+      const missing = (resolution: HtmlCanvasTargetResolution) => ({
+        targetId: target.id,
+        status: "missing" as const,
+        resolution,
+      });
       try {
-        const sourceIndex = sourceIndexRef.current;
-        const resolution = sourceIndex
-          ? resolveTargetRef(sourceIndex, sourceTargetRefForSelection(target))
-          : null;
-        if (resolution?.target?.type !== "element") return [];
-        const escapedNodeId = String(resolution.target.nodeId)
-          .replace(/\\/g, "\\\\")
-          .replace(/"/g, '\\"');
-        const targetElement = documentNode.querySelector<HTMLElement>(
-          `[${SOURCE_NODE_ATTRIBUTE}="${escapedNodeId}"]`,
-        );
-        if (!targetElement) return [];
+        let targetElement: HTMLElement | null = null;
+        let targetResolution: HtmlCanvasTargetResolution = target.resolution;
+        if (isPageRootSelection(target)) {
+          targetElement = defaultGlobalCommentElement(documentNode);
+          targetResolution = "exact";
+        } else {
+          const sourceIndex = sourceIndexRef.current;
+          const resolution = sourceIndex
+            ? resolveTargetRef(sourceIndex, sourceTargetRefForSelection(target))
+            : null;
+          targetResolution = (
+            resolution?.resolution ?? "orphaned"
+          ) as HtmlCanvasTargetResolution;
+          if (resolution?.target?.type !== "element") return missing(targetResolution);
+          const escapedNodeId = String(resolution.target.nodeId)
+            .replace(/\\/g, "\\\\")
+            .replace(/"/g, '\\"');
+          targetElement = documentNode.querySelector<HTMLElement>(
+            `[${SOURCE_NODE_ATTRIBUTE}="${escapedNodeId}"]`,
+          );
+        }
+        if (!targetElement) return missing(targetResolution);
         const targetRect = targetElement.getBoundingClientRect();
-        return [{
+        const visible = isRenderedCommentTarget(targetElement);
+        const tabAssociation = tabAssociationForElement(
+          targetElement,
+          commentTabAssociations,
+        );
+        if (!visible) {
+          return tabAssociation
+            ? {
+                targetId: target.id,
+                status: "hidden" as const,
+                resolution: targetResolution,
+                tabGroupKey: tabAssociation.key,
+                tabGroupLabel: tabAssociation.label,
+              }
+            : {
+                targetId: target.id,
+                status: "hidden" as const,
+                resolution: targetResolution,
+              };
+        }
+        const top = targetRect.top + scrollTop;
+        if (!Number.isFinite(top) || !Number.isFinite(targetRect.height)) {
+          return missing(targetResolution);
+        }
+        return {
           targetId: target.id,
-          top: Math.max(0, targetRect.top + scrollTop),
+          status: "visible" as const,
+          resolution: targetResolution,
+          top: Math.max(0, top),
           height: Math.max(0, targetRect.height),
-        }];
+          ...(tabAssociation
+            ? {
+                tabGroupKey: tabAssociation.key,
+                tabGroupLabel: tabAssociation.label,
+              }
+            : {}),
+        };
       } catch {
-        return [];
+        return missing("orphaned");
       }
     });
+    const commentLayoutsByTargetId = new Map(
+      commentLayouts.map((layout) => [layout.targetId, layout]),
+    );
     onCommentLayoutRef.current?.({
+      sourceSha256,
+      viewContextGeneration,
+      ready: true,
+      textEditing,
+      targetIds,
       scrollTop,
-      scrollHeight: Math.max(
-        scrollingElement.scrollHeight,
-        documentNode.documentElement.scrollHeight,
-        documentNode.body.scrollHeight,
-      ),
+      contentHeight: naturalDocumentContentHeight(documentNode, frameHeight),
       clientHeight: frameHeight,
       targets: commentLayouts,
     });
@@ -2431,7 +1056,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
 
     const nextCommentMarkers: CommentMarker[] = [];
     commentedTargetsRef.current.forEach((rawTarget, targetIndex) => {
+      if (rawTarget.showMarker === false) return;
       const target = rawTarget.target;
+      if (commentLayoutsByTargetId.get(target.id)?.status !== "visible") return;
       let targetElement: HTMLElement | null = null;
       try {
         const sourceIndex = sourceIndexRef.current;
@@ -2454,17 +1081,51 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       if (targetRect.bottom < 0 || targetRect.top > frameHeight) return;
       const isGlobalPageTarget = isPageRootElement(targetElement)
         && target.level === "module";
+      const tabControl = commentTabAssociations.find((association) => (
+        association.control === targetElement
+        || association.control.contains(targetElement)
+      ))?.control ?? null;
+      const markerAnchorRect = tabControl?.getBoundingClientRect() ?? targetRect;
       nextCommentMarkers.push({
         key: target.id || `${target.selector}:${targetIndex}`,
         selection: selectionForElement(targetElement, sourceIndexRef.current, target),
         count: rawTarget.count,
         label: rawTarget.label,
+        placement: tabControl ? "tab-side" : "target-corner",
         left: isGlobalPageTarget
           ? Math.max(18, Math.min(containerRect.width - 28, frameOffsetLeft + 18))
-          : Math.max(18, Math.min(containerRect.width - 28, frameOffsetLeft + targetRect.right - 12)),
+          : tabControl
+            ? Math.max(
+                18,
+                Math.min(
+                  containerRect.width - 28,
+                  frameOffsetLeft + markerAnchorRect.right + 10,
+                ),
+              )
+            : Math.max(
+                18,
+                Math.min(
+                  containerRect.width - 28,
+                  frameOffsetLeft + targetRect.right - 12,
+                ),
+              ),
         top: isGlobalPageTarget
           ? Math.max(18, Math.min(containerRect.height - 18, frameOffsetTop + 18))
-          : Math.max(18, Math.min(containerRect.height - 18, frameOffsetTop + targetRect.top - 10)),
+          : tabControl
+            ? Math.max(
+                18,
+                Math.min(
+                  containerRect.height - 18,
+                  frameOffsetTop + markerAnchorRect.top - 4,
+                ),
+              )
+            : Math.max(
+                18,
+                Math.min(
+                  containerRect.height - 18,
+                  frameOffsetTop + targetRect.top - 10,
+                ),
+              ),
       });
     });
     setCommentMarkers(nextCommentMarkers);
@@ -2489,10 +1150,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     originalMutation: HtmlCanvasMutation,
     appliedMutation: HtmlCanvasMutation,
   ): boolean => {
-    // A partial text replacement can live inside mixed inline markup. Reloading
-    // the verified preview keeps every sibling element intact instead of
-    // flattening the selected parent through textContent.
-    if (plan.type === "replace-text-range") return false;
     if (
       originalMutation.kind !== "style"
       && originalMutation.kind !== "text"
@@ -2863,12 +1520,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         mutation.target,
         ...ambientTargets,
       ]);
-      const mapsOneTargetToMany =
-        sourcePatchOperationType(forwardPlan) === "split-text-block";
       const trackedTargetRefs = trackedSourceTargetRefs(
         ambientTargets,
         forwardPlan.targetRefs,
-        { includeOperationTargetIds: mapsOneTargetToMany },
       );
       const result = applyPatchPlan(
         forwardPlan,
@@ -2916,7 +1570,35 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           pendingHtmlEchoesRef.current.length - 16,
         );
       }
-      if (!onChangeRef.current(result.html, appliedMutation)) {
+      const beforeHistorySelection = historySelectionFromMutationValue(
+        mutation.before,
+      );
+      const afterHistorySelection = historySelectionFromMutationValue(
+        mutation.after,
+      );
+      const sourceTransaction: HtmlCanvasSourceTransaction = {
+        kind: appliedMutation.kind,
+        ...(appliedMutation.property
+          ? { property: appliedMutation.property }
+          : {}),
+        beforeSourceSha256: result.previousSourceSha256,
+        afterSourceSha256: result.sourceSha256,
+        forwardPatches: result.patches.map((patch) => ({ ...patch })),
+        reversePatches: result.inversePlan.patches.map((patch) => ({ ...patch })),
+        beforeTarget: mutation.target,
+        afterTarget: appliedMutation.target,
+        ...(beforeHistorySelection
+          ? { beforeSelection: beforeHistorySelection }
+          : {}),
+        ...(afterHistorySelection
+          ? { afterSelection: afterHistorySelection }
+          : {}),
+      };
+      if (!onChangeRef.current(
+        result.html,
+        appliedMutation,
+        sourceTransaction,
+      )) {
         lastEmittedHtmlRef.current = previousLastEmittedHtml;
         pendingHtmlEchoesRef.current.pop();
         reportBlockedEdit(new Error("宿主状态已锁定，本次画布修改未被接受。"));
@@ -3612,6 +2294,22 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     [finishNativeEditing, observeSelectedElement, updateMoveAvailability, updateOverlayPosition, updateSelectedStyle],
   );
 
+  const requestCommentForTarget = useCallback((target: HtmlCanvasSelection): boolean => {
+    if (target.resolution !== "exact") {
+      setEditFeedback({
+        code: "canvas_c13_comment_target_not_exact",
+        title: "请选择可定位的源码元素",
+        message: "这部分内容由页面运行时生成，无法对应到源码。请重新选择可定位的折线、文字、数据点或其他源码元素。",
+        tone: "warning",
+        sticky: false,
+        recovery: "none",
+      });
+      return false;
+    }
+    onRequestCommentRef.current?.(target);
+    return true;
+  }, []);
+
   const requestGlobalComment = useCallback(() => {
     if (lockedRef.current) return;
     const documentNode = iframeRef.current?.contentDocument;
@@ -3619,8 +2317,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     const globalElement = defaultGlobalCommentElement(documentNode);
     if (!globalElement) return;
     const target = selectElement(globalElement, "module");
-    onRequestCommentRef.current?.(target);
-  }, [selectElement]);
+    requestCommentForTarget(target);
+  }, [requestCommentForTarget, selectElement]);
 
   const startEditing = useCallback((
     caretPoint?: TextCaretPoint,
@@ -3700,7 +2398,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         return false;
       }
       const layoutBeforeEditing = nativeLayoutFingerprint(hostElement);
-      let initialSelection: NativeEditSelection | undefined = restoredSelection;
+      let initialSelection = boundedHistorySelection(
+        restoredSelection,
+        projection.text,
+      );
       if (!initialSelection && priorRange && activationLogicalRange) {
         initialSelection = {
           anchor: priorRange.direction === "backward"
@@ -3946,8 +2647,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           },
           { direction },
         )) return true;
-        finishNativeEditing(true, "manual");
-        return false;
+        const committed = finishNativeEditing(true, "manual");
+        if (!committed.ok || committed.frameReloading) return false;
       }
       const element = selectedElementRef.current;
       if (
@@ -4086,10 +2787,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       setSelection(point.selection);
       onSelectRef.current?.(point.selection);
       requestAnimationFrame(updateOverlayPosition);
-      if (requestComment) onRequestCommentRef.current?.(point.selection);
+      if (requestComment) requestCommentForTarget(point.selection);
       return point.selection;
     },
-    [finishNativeEditing, updateOverlayPosition],
+    [finishNativeEditing, requestCommentForTarget, updateOverlayPosition],
   );
 
   const selectTarget = useCallback(
@@ -4157,6 +2858,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           ...target,
           resolution: "orphaned",
         };
+        if (
+          options.reveal !== false
+          && !isRenderedCommentTarget(element)
+        ) {
+          activateContainingTab(element);
+        }
         const selectedValue = selectionForElement(
           element,
           sourceIndex,
@@ -4386,10 +3093,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const fencePendingEdit = useCallback((
     options: {
       resumeEditing?: boolean;
+      preserveForHistory?: boolean;
       trigger?: NativeEditCheckpointTrigger;
     } = {},
   ): HtmlCanvasCommitResult => {
     const resumeEditing = options.resumeEditing ?? true;
+    const preserveForHistory = options.preserveForHistory ?? false;
     const committed = checkpointNativeEdit(options.trigger ?? "fence", {
       deferPreviewReconcile: true,
     });
@@ -4407,7 +3116,13 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     const bookmark = detachNativeEditForFence();
     const needsCanonicalFence = Boolean(bookmark)
       || nativeSessionNeedsCanonicalFenceRef.current;
-    if (needsCanonicalFence) {
+    pendingHistoryBookmarkRef.current = preserveForHistory
+      ? bookmark
+      : null;
+    pendingHistoryCanonicalFenceRef.current = preserveForHistory
+      ? needsCanonicalFence
+      : false;
+    if (needsCanonicalFence && !preserveForHistory) {
       const target = resumeEditing
         ? bookmark?.target ?? selectedSourceSelectionRef.current
         : null;
@@ -4417,7 +3132,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         target,
         bookmark?.selection,
       );
-    } else if (!resumeEditing) {
+    } else if (!resumeEditing && !preserveForHistory) {
       pendingFrameRestoreEpochRef.current += 1;
       pendingNativeEditResumeRef.current = null;
       pendingSelectionRef.current = null;
@@ -4434,6 +3149,49 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const commitPendingEdit = useCallback((): HtmlCanvasCommitResult => (
     fencePendingEdit({ resumeEditing: false })
   ), [fencePendingEdit]);
+
+  const adoptHistorySource = useCallback((
+    source: string,
+    target: HtmlCanvasSelection | null,
+    selection?: NativeEditSelection | null,
+  ): boolean => {
+    if (activeNativeEditRef.current) detachNativeEditForFence();
+    const bookmark = pendingHistoryBookmarkRef.current;
+    pendingHistoryBookmarkRef.current = null;
+    pendingHistoryCanonicalFenceRef.current = false;
+    nativeSessionNeedsCanonicalFenceRef.current = false;
+    lastEmittedHtmlRef.current = source;
+    pendingHtmlEchoesRef.current = [];
+    const resumeTarget = bookmark
+      ? target ?? bookmark.target
+      : target;
+    queueNativeFenceReload(
+      source,
+      bookmark,
+      resumeTarget,
+      selection ?? bookmark?.selection,
+    );
+    return true;
+  }, [detachNativeEditForFence, queueNativeFenceReload]);
+
+  const cancelHistoryAction = useCallback((
+    options: { restore?: boolean } = {},
+  ): boolean => {
+    const bookmark = pendingHistoryBookmarkRef.current;
+    const needsCanonicalFence = pendingHistoryCanonicalFenceRef.current;
+    pendingHistoryBookmarkRef.current = null;
+    pendingHistoryCanonicalFenceRef.current = false;
+    if (!bookmark && !needsCanonicalFence) return false;
+    if (options.restore === false) return true;
+    nativeSessionNeedsCanonicalFenceRef.current = false;
+    queueNativeFenceReload(
+      frameSourceHtmlRef.current,
+      bookmark,
+      bookmark?.target ?? selectedSourceSelectionRef.current,
+      bookmark?.selection,
+    );
+    return true;
+  }, [queueNativeFenceReload]);
 
   const freezeNow = useCallback((): HtmlCanvasFreezeSnapshot => {
     const committed = commitPendingEdit();
@@ -4494,6 +3252,106 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     });
   }, []);
 
+  const applyPageViewContextNow = useCallback((
+    nextContext: PageViewContext | null,
+  ): boolean => {
+    pageViewContextRef.current = nextContext;
+    const documentNode = iframeRef.current?.contentDocument;
+    if (!documentNode?.documentElement) return false;
+    applyPageViewContextToDocument(
+      documentNode,
+      frameSourceHtmlRef.current,
+      nextContext,
+      appliedPageViewContextRef.current,
+    );
+    appliedPageViewContextRef.current = nextContext;
+    requestAnimationFrame(updateOverlayPosition);
+    return true;
+  }, [updateOverlayPosition]);
+
+  const resolvePagePresentationAction = useCallback((
+    target: HtmlCanvasSelection | null,
+  ): PagePresentationAction | null => {
+    const documentKey = pageViewDocumentKeyRef.current;
+    const sourceIndex = sourceIndexRef.current;
+    if (
+      !target
+      || target.level === "insertion"
+      || !documentKey
+      || !onPageViewContextChangeRef.current
+      || lockedRef.current
+      || readOnlyRef.current
+      || !sourceIndex
+      || sourceIndex.source !== frameSourceHtmlRef.current
+    ) return null;
+    return createPagePresentationAction({
+      html: frameSourceHtmlRef.current,
+      sourceIndex,
+      documentKey,
+      generation: frameLoadGenerationRef.current,
+      currentContext: pageViewContextRef.current,
+      targetRef: sourceTargetRefForSelection(target),
+    });
+  }, []);
+
+  const executePagePresentationAction = useCallback((
+    target: HtmlCanvasSelection,
+    options: { selectTargetAfter?: boolean } = {},
+  ): boolean => {
+    const perform = (): boolean => {
+      if (lockedRef.current || readOnlyRef.current) return false;
+      let frameReloading = false;
+      if (activeNativeEditRef.current) {
+        const committed = finishNativeEditing(true, "manual");
+        if (!committed.ok) return false;
+        frameReloading = Boolean(committed.frameReloading);
+      }
+      const action = resolvePagePresentationAction(target);
+      if (!action) return false;
+      if (options.selectTargetAfter) {
+        if (frameReloading) {
+          pendingSelectionRef.current = target;
+          pendingToolbarVisibleRef.current = true;
+        } else {
+          selectTarget(target, { reveal: false, showToolbar: true });
+        }
+      }
+      if (action.isCurrent) {
+        requestAnimationFrame(updateOverlayPosition);
+        return true;
+      }
+      const documentKey = pageViewDocumentKeyRef.current;
+      let accepted = false;
+      try {
+        accepted = onPageViewContextChangeRef.current?.(
+          action.nextContext,
+          documentKey,
+        ) === true;
+      } catch {
+        accepted = false;
+      }
+      if (!accepted) return false;
+      applyPageViewContextNow(action.nextContext);
+      return true;
+    };
+    if (
+      deferNativeCommandRef.current(
+        "presentation-action",
+        () => {
+          perform();
+        },
+        { targetId: target.id },
+      )
+    ) return true;
+    return perform();
+  }, [
+    applyPageViewContextNow,
+    finishNativeEditing,
+    resolvePagePresentationAction,
+    selectTarget,
+    updateOverlayPosition,
+  ]);
+
   const api = useMemo<HtmlCanvasEditorHandle>(
     () => ({
       getSourceHtml: () => frameSourceHtmlRef.current,
@@ -4513,9 +3371,13 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       select: selectTarget,
       startEditing,
       moveSelected,
+      adoptHistorySource,
+      cancelHistoryAction,
       deferNativeCommand,
+      applyPageViewContext: applyPageViewContextNow,
     }),
     [
+      applyPageViewContextNow,
       clearSelection,
       checkpointPendingEdit,
       fencePendingEdit,
@@ -4523,6 +3385,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       deferNativeCommand,
       freezeNow,
       moveSelected,
+      adoptHistorySource,
+      cancelHistoryAction,
       selectTarget,
       showCommitBlocked,
       startEditing,
@@ -4531,6 +3395,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   );
 
   useImperativeHandle(forwardedRef, () => api, [api]);
+
+  useEffect(() => {
+    applyPageViewContextNow(pageViewContext);
+  }, [applyPageViewContextNow, pageViewContext]);
 
   useEffect(() => {
     onReady?.(api);
@@ -4558,6 +3426,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     if (html === lastEmittedHtmlRef.current && previous.baseHref === resolvedBaseHref) return;
     if (activeNativeEditRef.current) detachNativeEditForFence();
     pendingNativeEditResumeRef.current = null;
+    pendingHistoryBookmarkRef.current = null;
+    pendingHistoryCanonicalFenceRef.current = false;
     resetSelection(false);
     lastEmittedHtmlRef.current = null;
     pendingHtmlEchoesRef.current = [];
@@ -4621,6 +3491,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       discardPendingNativeCommands("unmounted");
       retainNativeEditFocusRef.current = null;
       pendingNativeEditResumeRef.current = null;
+      pendingHistoryBookmarkRef.current = null;
+      pendingHistoryCanonicalFenceRef.current = false;
       fencedDocumentCleanupRef.current();
       cleanupFrameRef.current();
       resizeObserverRef.current?.disconnect();
@@ -4668,6 +3540,13 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       documentNode.head.appendChild(editorStyle);
     }
     documentNode.documentElement.toggleAttribute("data-html-canvas-locked", lockedRef.current);
+    applyPageViewContextToDocument(
+      documentNode,
+      frameSourceHtmlRef.current,
+      pageViewContextRef.current,
+      null,
+    );
+    appliedPageViewContextRef.current = pageViewContextRef.current;
 
     const handleClick = (event: MouseEvent) => {
       if (isCanvasRootElement(event.target)) {
@@ -4687,8 +3566,27 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       const target = findCanvasSelectionElement(event.target);
       if (!target) return;
       if (lockedRef.current) {
-        if (target.closest("a, button, form, input, select, textarea, [contenteditable]")) {
+        if (target.closest(
+          "a, button, form, input, select, summary, textarea, [contenteditable], [role=\"tab\"], [aria-expanded][aria-controls]",
+        )) {
           event.preventDefault();
+        }
+        return;
+      }
+      const targetSelection = selectionForElement(
+        target,
+        sourceIndexRef.current,
+      );
+      if (
+        event.altKey
+        && resolvePagePresentationAction(targetSelection)
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.detail === 1) {
+          executePagePresentationAction(targetSelection, {
+            selectTargetAfter: true,
+          });
         }
         return;
       }
@@ -4713,6 +3611,17 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       if (findNativeActionTarget(event.target)) event.preventDefault();
       const target = findCanvasSelectionElement(event.target);
       if (!target) return;
+      if (
+        event.altKey
+        && resolvePagePresentationAction(selectionForElement(
+          target,
+          sourceIndexRef.current,
+        ))
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
       if (activeNativeEditRef.current?.rootElement.contains(event.target as Node)) return;
       const caretPoint = caretPointFromMouseEvent(event);
       const nativeSelection = documentNode.getSelection();
@@ -4868,9 +3777,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           applyNativeFormatShortcutRef.current(formatShortcut);
           return;
         }
-        if (isBlockedSourceReversalShortcut(event)) {
+        const historyDirection = sourceHistoryDirectionForShortcut(event);
+        if (historyDirection) {
           event.preventDefault();
           event.stopPropagation();
+          onRequestHistoryRef.current?.(historyDirection);
           return;
         }
         if (event.key === "Escape") {
@@ -4895,9 +3806,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         event.preventDefault();
       }
       if (lockedRef.current) return;
-      if (isBlockedSourceReversalShortcut(event)) {
+      const historyDirection = sourceHistoryDirectionForShortcut(event);
+      if (historyDirection) {
         event.preventDefault();
         event.stopPropagation();
+        onRequestHistoryRef.current?.(historyDirection);
         return;
       }
       if (event.key === "Escape") {
@@ -5092,9 +4005,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   }, [
     captureTextRange,
     clearSelection,
+    executePagePresentationAction,
     fencePendingEdit,
     finishNativeEditing,
     moveSelected,
+    resolvePagePresentationAction,
     selectElement,
     selectTarget,
     startEditing,
@@ -5408,9 +4323,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   applyNativeFormatShortcutRef.current = applyNativeFormatShortcut;
 
   const handleToolbarKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (isBlockedSourceReversalShortcut(event)) {
+    const historyDirection = sourceHistoryDirectionForShortcut(event);
+    if (historyDirection) {
       event.preventDefault();
       event.stopPropagation();
+      onRequestHistoryRef.current?.(historyDirection);
       return;
     }
     if (event.key === "Escape") {
@@ -5437,6 +4354,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const selectedNativeEditHost = selectedElementRef.current && sourceIndexRef.current
     ? nativeEditHostForElement(selectedElementRef.current, sourceIndexRef.current)
     : null;
+  const selectedPagePresentationAction = (
+    !readOnly
+    && !interactionLocked
+    && selection
+  ) ? resolvePagePresentationAction(selection) : null;
   const textFormatRequiresSelection = isEditing && !hasTextRange;
   const handleEditFeedbackAction = useCallback(() => {
     const recovery = editFeedback?.recovery;
@@ -5449,11 +4371,16 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     if (recovery !== "comment") return;
     const target = selectedSourceSelectionRef.current;
     if (target) {
-      onRequestCommentRef.current?.(target);
+      requestCommentForTarget(target);
     } else {
       requestGlobalComment();
     }
-  }, [editFeedback?.recovery, onRequestReload, requestGlobalComment]);
+  }, [
+    editFeedback?.recovery,
+    onRequestReload,
+    requestCommentForTarget,
+    requestGlobalComment,
+  ]);
   const editFeedbackActionAvailable = editFeedback?.recovery === "reload"
     ? Boolean(onRequestReload)
     : editFeedback?.recovery === "comment" && Boolean(onRequestComment);
@@ -5539,9 +4466,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           type="button"
           className={styles.commentMarker}
           data-global={isPageRootSelection(marker.selection) ? "true" : undefined}
+          data-placement={marker.placement}
           style={{ left: marker.left, top: marker.top }}
-          aria-label={marker.label || `${marker.selection.label}已有${marker.count || 1}条评论`}
-          title={marker.label || "查看已有评论"}
+          aria-label={marker.count && marker.count > 1
+            ? `${marker.label || marker.selection.label}已有${marker.count}条评论`
+            : marker.label || `${marker.selection.label}已有1条评论`}
+          title={`查看${marker.label || marker.selection.label}的${marker.count || 1}条评论`}
           onClick={() => {
             if (lockedRef.current) return;
             // The marker was clicked at the user's current Canvas position.
@@ -5550,8 +4480,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             selectTarget(marker.selection, { reveal: false, showToolbar: true });
           }}
         >
-          <span className={styles.commentGlyph} aria-hidden="true">评</span>
-          {marker.count && marker.count > 1 ? <span className={styles.commentCount}>{marker.count}</span> : null}
+          <span className={styles.commentGlyph} aria-hidden="true">
+            评{marker.count || 1}
+          </span>
         </button>
       )) : null}
 
@@ -5595,6 +4526,31 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             }
           }}
         >
+          {selectedPagePresentationAction ? (
+            <button
+              type="button"
+              className={`${styles.toolButton} ${styles.presentationToolButton}`}
+              data-presentation-kind={selectedPagePresentationAction.kind}
+              data-current={selectedPagePresentationAction.isCurrent ? "true" : undefined}
+              aria-label={selectedPagePresentationAction.label}
+              aria-pressed={
+                selectedPagePresentationAction.kind === "activate-tab"
+                  ? selectedPagePresentationAction.isCurrent
+                  : undefined
+              }
+              title={
+                selectedPagePresentationAction.isCurrent
+                  ? "当前页签"
+                  : "快捷操作：按住 ⌥ 并单击页面中的这个控件"
+              }
+              onClick={() => {
+                executePagePresentationAction(selection);
+              }}
+            >
+              {selectedPagePresentationAction.label}
+            </button>
+          ) : null}
+
           <button
             type="button"
             className={styles.commentToolButton}
@@ -5606,7 +4562,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
                   const committed = finishNativeEditing(true, "manual");
                   if (!committed.ok) return;
                 }
-                onRequestCommentRef.current?.(selection);
+                requestCommentForTarget(selection);
               };
               if (deferNativeCommandRef.current("comment", openComment)) return;
               openComment();

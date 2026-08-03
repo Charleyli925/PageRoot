@@ -220,3 +220,33 @@ test("network timeouts use the product-safe contextual fallback", () => {
     "项目状态读取超时，请重试；源文件没有被改动。",
   );
 });
+
+test("structured project identity errors use one safe product message", () => {
+  const error = new Error(
+    "projectId does not match sourcePath /Users/example/private-report.html",
+  );
+  error.code = "PROJECT_ID_MISMATCH";
+  assert.equal(
+    productErrorMessage(error, "项目操作没有完成。"),
+    "项目身份暂时无法核对。当前内容仍保留，请重新打开源页后再试。",
+  );
+});
+
+test("unknown internal fields and local paths never reach product copy", () => {
+  assert.equal(
+    productErrorMessage(
+      new Error(
+        "documentId doc_secret does not match sourcePath /Users/example/report.html",
+      ),
+      "项目操作没有完成。",
+    ),
+    "项目操作没有完成。",
+  );
+  assert.equal(
+    productErrorMessage(
+      new Error("Unexpected lifecycle invariant violation"),
+      "项目操作没有完成。",
+    ),
+    "项目操作没有完成。",
+  );
+});

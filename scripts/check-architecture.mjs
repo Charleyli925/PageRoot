@@ -6,8 +6,28 @@ import { fileURLToPath } from "node:url";
 
 const PRODUCT_ROOT = fileURLToPath(new URL("../", import.meta.url));
 const SOURCE_EXTENSIONS = new Set([".js", ".mjs", ".ts", ".tsx"]);
+const RETIRED_V1_MODULES = new Set([
+  "app/components/NativeEditingController.ts",
+  "app/lib/format-skeleton.js",
+  "app/lib/native-block-edit-draft.js",
+  "app/lib/native-edit-transaction.js",
+  "app/lib/native-input-intent.js",
+  "app/lib/native-structural-edit-planner.js",
+]);
+const RETIRED_V1_IMPORT =
+  /(?:^|\/)(?:NativeEditingController|format-skeleton|native-block-edit-draft|native-edit-transaction|native-input-intent|native-structural-edit-planner)(?:\.[^/]+)?$/;
+const RETIRED_SOURCE_PATCH_OPERATIONS =
+  /\b(?:replace-text|replace-text-range|replace-text-flow-range|delete-hard-break|split-text-block|planTextPatch|planTextRangePatch|planTextFlowRangePatch|planDeleteHardBreakPatch|planSplitTextBlockPatch|textRangeToSourceEdit)\b/;
 const LEGACY_RENDERER_STATE =
   /["'](?:waiting|importing|result-ready|awaiting-check-decision|version-created|completed|canceled|waived)["']/;
+const RETIRED_WORKBENCH_RUN_AUTHORITIES =
+  /\b(?:backgroundRunsRef|backgroundProjectResultsRef|qoderHandoffStatesRef|activeRunRef|activatingRunsRef|cancellingRunsRef|resolvingRunsRef|statusPollBusyRef)\b/;
+const RETIRED_WORKBENCH_VERSION_WRITERS =
+  /\b(?:setVersions|setLatestVersionId|setCurrentBasedOnVersionId|setCurrentExactVersionId|setRestoredFromVersionId|setViewMode|setViewingVersionId)\b/;
+const RETIRED_WORKBENCH_DOCUMENT_AUTHORITIES =
+  /\b(?:htmlRef|sourceShaRef|editRevisionRef|lastPersistedRevisionRef|persistStateRef|pendingWriteRef|flushPromiseRef)\b/;
+const RETIRED_WORKBENCH_COMMENT_AUTHORITIES =
+  /\b(?:commentsRef|changeEventsRef|deletedCommentIdsRef|composerDraftRef|composerCommentIdRef|composerAttachmentsRef|draftTargetRef|commentEditSessionRef)\b/;
 
 async function sourceFiles(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
@@ -39,6 +59,12 @@ export async function architectureViolations() {
   for (const filePath of files) {
     const file = relative(filePath);
     const source = await readFile(filePath, "utf8");
+    if (RETIRED_V1_MODULES.has(file)) {
+      violations.push(`${file}: retired V1 editing modules cannot return to production`);
+    }
+    if (RETIRED_SOURCE_PATCH_OPERATIONS.test(source)) {
+      violations.push(`${file}: retired V1 source patch operations cannot return to production`);
+    }
     if (
       /\bfetch\s*\(/.test(source)
       && file !== "app/application/bridge-client.js"
@@ -74,6 +100,11 @@ export async function architectureViolations() {
     }
 
     const imports = importedSpecifiers(source);
+    for (const specifier of imports) {
+      if (RETIRED_V1_IMPORT.test(specifier)) {
+        violations.push(`${file}: production code cannot import retired V1 module ${specifier}`);
+      }
+    }
     if (file.startsWith("app/domain/")) {
       for (const specifier of imports) {
         if (
@@ -95,6 +126,18 @@ export async function architectureViolations() {
       for (const specifier of imports) {
         if (/(?:^|\/)application(?:\/|$)/.test(specifier)) {
           violations.push(`${file}: view components cannot import application services`);
+        }
+      }
+    }
+    if (
+      file === "app/workbench/presentation.tsx"
+      || /^app\/workbench\/.*-view\.tsx$/.test(file)
+    ) {
+      for (const specifier of imports) {
+        if (/(?:^|\/)application(?:\/|$)/.test(specifier)) {
+          violations.push(
+            `${file}: Workbench presentation components cannot import application services`,
+          );
         }
       }
     }
@@ -129,6 +172,15 @@ export async function architectureViolations() {
     path.join(PRODUCT_ROOT, "app", "workbench.tsx"),
     "utf8",
   );
+  const projectSession = await readFile(
+    path.join(
+      PRODUCT_ROOT,
+      "app",
+      "application",
+      "project-session.js",
+    ),
+    "utf8",
+  );
   const registrationStart = workbench.indexOf(
     "const ensureProjectRegistered = useCallback",
   );
@@ -148,12 +200,13 @@ export async function architectureViolations() {
     );
   }
   if (
-    !/if \(!activeSource \|\| !activeProjectId \|\| !activeDocumentId\) return null;/.test(
-      workbench,
+    !projectSession.includes(
+      "if (!this.#sourcePath || !this.#projectId || !this.#documentId) return null;",
     )
+    || !workbench.includes("return projectSessionRef.current.context;")
   ) {
     violations.push(
-      "app/workbench.tsx: registered project contexts cannot contain empty identities",
+      "app/application/project-session.js: registered contexts cannot contain empty identities",
     );
   }
   if (
@@ -178,6 +231,42 @@ export async function architectureViolations() {
   if (/const previewOnly = !window\.htmlAIProjects/.test(workbench)) {
     violations.push(
       "app/workbench.tsx: project IPC presence cannot own renderer edit capability",
+    );
+  }
+  if (
+    !workbench.includes("const runSessionRef = useRef(new RunSession(")
+    || RETIRED_WORKBENCH_RUN_AUTHORITIES.test(workbench)
+  ) {
+    violations.push(
+      "app/workbench.tsx: AI run state and operation locks belong to RunSession",
+    );
+  }
+  if (
+    !workbench.includes(
+      "const versionSessionRef = useRef(new VersionSession<Version>());",
+    )
+    || RETIRED_WORKBENCH_VERSION_WRITERS.test(workbench)
+  ) {
+    violations.push(
+      "app/workbench.tsx: Version authority and history view transitions belong to VersionSession",
+    );
+  }
+  if (
+    !workbench.includes(
+      "const documentSessionRef = useRef(new DocumentSession<PendingWrite>({",
+    )
+    || RETIRED_WORKBENCH_DOCUMENT_AUTHORITIES.test(workbench)
+  ) {
+    violations.push(
+      "app/workbench.tsx: source bytes, revisions and write state belong to DocumentSession",
+    );
+  }
+  if (
+    !workbench.includes("const commentSessionRef = useRef(new CommentSession<")
+    || RETIRED_WORKBENCH_COMMENT_AUTHORITIES.test(workbench)
+  ) {
+    violations.push(
+      "app/workbench.tsx: comment working-copy state belongs to CommentSession",
     );
   }
   for (const boundary of ["close", "switch", "submit", "history"]) {

@@ -63,7 +63,7 @@ function generatedProfile(index) {
   return { seed, html, expected, beforeText, nextText, outsideToken, newline, bom };
 }
 
-test("deterministic generated HTML corpus preserves every byte outside one authorized text patch", () => {
+test("deterministic generated HTML corpus preserves every byte outside one editable-island patch", () => {
   const seen = new Set();
   for (let index = 0; index < PROFILE_COUNT; index += 1) {
     const profile = generatedProfile(index);
@@ -76,12 +76,12 @@ test("deterministic generated HTML corpus preserves every byte outside one autho
       (element) => element.stableAttributes.id === "generated-target",
     );
     assert.ok(target, `${label}: target must be source-addressable`);
-    const targetRef = createTargetRef(sourceIndex, target.nodeId, { level: "text" });
+    const targetRef = createTargetRef(sourceIndex, target.nodeId, { level: "subregion" });
     const plan = planSourcePatch({
-      type: "replace-text",
+      type: "replace-editable-island",
       targetRef,
-      beforeText: profile.beforeText,
-      nextText: profile.nextText,
+      beforeInnerHtml: profile.beforeText,
+      nextInnerHtml: escapeHtmlText(profile.nextText),
       expectedSourceSha256: sourceIndex.sourceSha256,
     }, sourceIndex);
     const applied = applyPatchPlan(plan, profile.html);

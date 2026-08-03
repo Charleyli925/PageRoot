@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile, stat } from "node:fs/promises";
 import test from "node:test";
+import semver from "semver";
 
 test("desktop package carries the v3 single patch engine, scope gate and active schemas", async () => {
   const [
@@ -26,6 +27,7 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
     applicationUpdate,
     userNotice,
     usageTelemetry,
+    previewProtocol,
     afterPack,
     entitlements,
     iconInfo,
@@ -52,6 +54,7 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
     readFile(new URL("../desktop/application-update.mjs", import.meta.url), "utf8"),
     readFile(new URL("../PageRoot 用户声明与免责声明.txt", import.meta.url), "utf8"),
     readFile(new URL("../desktop/usage-telemetry.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../desktop/preview-protocol.mjs", import.meta.url), "utf8"),
     readFile(new URL("../desktop/after-pack.mjs", import.meta.url), "utf8"),
     readFile(new URL("../desktop/resources/entitlements.mac.plist", import.meta.url), "utf8"),
     stat(new URL("../desktop/resources/icon.icns", import.meta.url)),
@@ -62,7 +65,7 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.equal(packageJson.name, "pageroot");
   assert.match(packageJson.description, /源页（PageRoot）— Editable islands/);
   assert.equal(packageJson.build.appId, "com.htmlai.workbench");
-  assert.match(packageJson.version, /^\d+\.\d+\.\d+$/u);
+  assert.equal(semver.valid(packageJson.version), packageJson.version);
   assert.equal(packageJson.build.productName, "PageRoot");
   assert.equal(packageJson.build.artifactName, "PageRoot-${version}-${arch}.${ext}");
   assert.equal(packageJson.build.forceCodeSigning, true);
@@ -100,6 +103,7 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.ok(packageJson.build.files.includes("desktop/manual-update.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/application-update.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/usage-telemetry.mjs"));
+  assert.ok(packageJson.build.files.includes("desktop/preview-protocol.mjs"));
   assert.ok(packageJson.build.files.includes("public/brand-logo.png"));
   const mainLocalImports = [...mainProcess.matchAll(
     /from\s+"\.\/([^"]+)";/gu,
@@ -127,6 +131,8 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
     "bridge/attachment-storage.mjs",
     "bridge/draft-aggregate.mjs",
     "bridge/draft-service.mjs",
+    "bridge/project-context-service.mjs",
+    "bridge/source-history-service.mjs",
     "node_modules/parse5",
     "node_modules/entities",
     "node_modules/electron-updater",
@@ -297,6 +303,19 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.match(mainProcess, /nodeIntegration:\s*false/);
   assert.match(mainProcess, /sandbox:\s*true/);
   assert.match(mainProcess, /webSecurity:\s*true/);
+  assert.match(mainProcess, /registerPreviewProtocolScheme\(protocol\)/);
+  assert.match(mainProcess, /createPreviewProtocolController\(\{/);
+  assert.match(
+    mainProcess,
+    /createPreviewSessionOperation\(\{[\s\S]*?assertKnownProjectPath\(sourcePath\)[\s\S]*?inspectHtmlFile\(sourcePath\)/,
+  );
+  assert.match(mainProcess, /PREVIEW_CHANNELS\.createSession/);
+  assert.match(mainProcess, /PREVIEW_CHANNELS\.revokeSession/);
+  assert.match(mainProcess, /will-frame-navigate/);
+  assert.match(previewProtocol, /PREVIEW_PROTOCOL_SCHEME = "pageroot-preview"/);
+  assert.match(previewProtocol, /protocolApi\.handle\(PREVIEW_PROTOCOL_SCHEME/);
+  assert.match(previewProtocol, /isContainedPath\(session\.sourceRoot, resolvedPath\)/);
+  assert.doesNotMatch(previewProtocol, /bypassCSP:\s*true/);
   assert.match(mainProcess, /show:\s*process\.env\.PAGEROOT_E2E === "1"/u);
   assert.match(
     mainProcess,
@@ -347,6 +366,10 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
     preload,
     /exposeInMainWorld\(["']htmlAIUpdates["'],\s*updatesApi\)/,
   );
+  assert.match(
+    preload,
+    /exposeInMainWorld\(["']htmlAIPreview["'],\s*previewApi\)/,
+  );
   assert.match(preload, /exposeInMainWorld\(["']htmlAIRuntime["'],\s*runtimeConfig\)/);
   assert.match(preload, /exposeInMainWorld\(["']htmlAIAppLifecycle["'],\s*appLifecycleApi\)/);
   assert.match(preload, /onPrepareClose/);
@@ -381,7 +404,7 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.match(rendererHtml, /default-src 'none'/);
   assert.match(rendererHtml, /script-src 'self'/);
   assert.match(rendererHtml, /connect-src http:\/\/127\.0\.0\.1:\*/);
-  assert.match(rendererHtml, /frame-src 'self' data: blob:/);
+  assert.match(rendererHtml, /frame-src 'self' data: blob: pageroot-preview:/);
   assert.match(rendererHtml, /object-src 'none'/);
   assert.match(rendererHtml, /base-uri 'self' file:/);
   assert.match(rendererHtml, /<title>源页<\/title>/);
@@ -440,6 +463,9 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.match(mainProcess, /createUsageTelemetry/);
   assert.match(mainProcess, /html-usage:capture/);
   assert.match(preload, /exposeInMainWorld\("htmlAIUsage", usageApi\)/);
+  assert.match(preload, /exposeInMainWorld\("htmlAIEdit", editApi\)/);
+  assert.match(mainProcess, /html-edit:history-requested/);
+  assert.match(mainProcess, /html-edit:native-history/);
   assert.match(usageTelemetry, /\$process_person_profile:\s*false/u);
   assert.match(usageTelemetry, /\$geoip_disable:\s*true/u);
   assert.match(usageTelemetry, /\$is_server:\s*false/u);

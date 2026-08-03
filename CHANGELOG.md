@@ -4,6 +4,80 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+## [0.9.5] - 2026-07-31
+
+- Run desktop interactive previews in a short-lived isolated document so
+  authored scripts, relative assets, Tab controls, SVG, Canvas and dynamic
+  tables work without weakening the PageRoot renderer CSP.
+- Make “Edit” return to the source-backed Tab selected in preview while keeping
+  the normal script-disabled editable-island canvas, source bytes and existing
+  native-action interception authoritative.
+- Keep script-rendered Canvas charts and dynamic table rows visible in Edit as
+  bounded, non-editable projections without copying them into source HTML.
+- Keep current-tab comments aligned with the Canvas, render Tab comment counts
+  as the existing floating violet `评N` marker, and remove redundant current-Tab
+  metadata from the comment header. Other-Tab comments now expand as neutral
+  saved-comment cards inside that header. Unsaved comments now stay at their
+  page position, use one persistent current-Tab shortcut or a tagged card in
+  the appropriate other-Tab group, and keep stable document order through
+  focus, expansion and Tab changes until explicitly saved or deleted.
+- Keep comment-card geometry fixed while actions appear, strengthen the focused
+  boundary, align an explicitly selected card by translating the unchanged
+  queue, and route wheel input over the rail through the shared page before
+  restoring comments hidden above the top edge. Dense comments are now clipped
+  at the Canvas page bottom instead of stretching a short HTML page; continued
+  wheel input at that bottom pulls the remaining queue into view.
+- Treat saved-comment text and attachment edits as one recoverable transaction:
+  unchanged edits cancel automatically on Tab changes, while changed but
+  unconfirmed edits remain available from an “unsaved modification” shortcut.
+- Allow direct text edits beside preserved nested lists and `<wbr>` boundaries
+  while keeping those authored structures byte-safe and non-editable.
+- Added a concise AI Agent warning before ending a copied run, restored editing
+  with a clear manual-stop reminder, and made late official finalization return
+  a non-retryable cancelled result without creating a new Version.
+- Save an in-place filename edit when the user clicks blank title-bar space,
+  matching the existing Enter and click-away behavior without changing file
+  identity or version history.
+- Let edit mode reveal source-backed Tab panels, including strict explicit-ID
+  and constant-number indexed report Tabs, plus native details and local
+  disclosure regions from the selection toolbar or Option-click, while links,
+  forms, popups, drawers and authored scripts remain inert.
+- Keep the HTML identity icon centered on the two-line file summary in all
+  three no-update, `New!` and `New! 重启更新` states; the update label overlays
+  the icon independently without shifting the title-bar layout.
+- Added persistent, source-exact undo and redo for Canvas text, style, safe
+  structure and sibling-order edits through the existing macOS Edit menu and
+  keyboard shortcuts, including continuation after reopening a project.
+- Kept comment, project-rule and other focused text inputs on their native
+  field-local undo history without adding a Canvas toolbar action or extending
+  product-level undo to cards, attachments and other project operations.
+- Restored the active Canvas text host and caret without a visible intermediate
+  reload, kept comment anchors stable through undo/redo, and prevented late
+  Chinese-composition input from reappearing after project-rule restore.
+- Simplified About PageRoot by removing redundant platform, license, telemetry
+  and update-channel labels while preserving the current version, architecture,
+  update action, repository link and local user notice.
+- Made project identity ID-first across comments, attachments, history, AI
+  handoff and rapid project switching; equivalent local paths are canonicalized,
+  stale project callbacks and unrelated same-path replacements fail closed,
+  project-rule saves retain complete identity, and internal identifiers or paths
+  are no longer surfaced as user-facing recovery messages.
+- Refactored Workbench state into explicit project, document, comment, history,
+  version and AI-run sessions, extracted presentation and Canvas modules, and
+  retired the unused V1 editing path while keeping the V2 source-patch contract.
+- Added governed task worktree audit, synchronization and retirement commands
+  so active changes remain visible and protected throughout parallel work, with
+  merged retirement proof bound to the exact current branch head.
+- Aligned developer-preview and formal-candidate CI evidence validation with
+  their preflight, signing, notarization, checkpoint and final-artifact stages
+  so packaging cannot stop because of an unsupported stage name.
+- Rebuilt the deterministic renderer comparison input in the candidate's fresh
+  final-artifact job before revalidating the restored notarized App, while
+  keeping the signed checkpoint App immutable.
+- Restored the exact embedded build provenance and telemetry configuration from
+  that checkpoint before fresh-job payload verification, without regenerating
+  configuration or exposing its project token to final packaging.
+
 ## [0.9.4] - 2026-07-29
 
 - Increased the workbench header height and bottom breathing room so the
@@ -161,7 +235,8 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 - Published the first public macOS release in this repository under the earlier YuanYe artifact name.
 
-[Unreleased]: https://github.com/Charleyli925/PageRoot/compare/v0.9.4...HEAD
+[Unreleased]: https://github.com/Charleyli925/PageRoot/compare/v0.9.5...HEAD
+[0.9.5]: https://github.com/Charleyli925/PageRoot/compare/v0.9.4...v0.9.5
 [0.9.4]: https://github.com/Charleyli925/PageRoot/compare/v0.9.3...v0.9.4
 [0.9.3]: https://github.com/Charleyli925/PageRoot/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/Charleyli925/PageRoot/compare/v0.9.1...v0.9.2
