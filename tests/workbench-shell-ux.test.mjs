@@ -796,7 +796,7 @@ test("ending a copied AI run warns clearly and restores editing with a stop remi
   );
   assert.match(
     workbench,
-    /reason: agentMayBeRunning[\s\S]*?"cancelled-by-user-after-agent-handoff"[\s\S]*?"cancelled-by-user"/,
+    /reason: reason \|\| \(agentMayBeRunning[\s\S]*?"cancelled-by-user-after-agent-handoff"[\s\S]*?"cancelled-by-user"/,
   );
   assert.match(workbench, /本轮已结束，已恢复编辑/);
   assert.match(

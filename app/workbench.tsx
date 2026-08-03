@@ -8664,13 +8664,15 @@ export default function Workbench() {
 
   const cancelActiveRun = useCallback(async ({
     agentMayBeRunning = false,
+    reason,
   }: {
     agentMayBeRunning?: boolean;
+    reason?: string;
   } = {}) => {
-    if (!activeRun || !activeRun.requestId || activeRun.requestId === "pending") return;
+    if (!activeRun || !activeRun.requestId || activeRun.requestId === "pending") return false;
     const run = { ...activeRun };
     const operationKey = activeRunOperationKey(run);
-    if (!runSessionRef.current.beginOperation("cancel", operationKey)) return;
+    if (!runSessionRef.current.beginOperation("cancel", operationKey)) return false;
     const showAgentReminder = (title: string) => {
       if (!agentMayBeRunning) return;
       setToast({
@@ -8692,7 +8694,7 @@ export default function Workbench() {
       setDrawer(null);
       showAgentReminder("本轮已结束，已恢复编辑");
       runSessionRef.current.endOperation("cancel", operationKey);
-      return;
+      return true;
     }
     const context = (
       (
@@ -8712,9 +8714,9 @@ export default function Workbench() {
         sourcePath: run.sourcePath,
         requestId: run.requestId,
         attemptId: run.attemptId,
-        reason: agentMayBeRunning
+        reason: reason || (agentMayBeRunning
           ? "cancelled-by-user-after-agent-handoff"
-          : "cancelled-by-user",
+          : "cancelled-by-user"),
       });
       if (runSessionRef.current.hasRun(run)) {
         runSessionRef.current.removeRun(run);
@@ -8740,8 +8742,9 @@ export default function Workbench() {
           });
         }
       }
+      return true;
     } catch (cause) {
-      if (context && !isCurrentProjectContext(context)) return;
+      if (context && !isCurrentProjectContext(context)) return false;
       if (context) {
         const nextRun = {
           ...run,
@@ -8752,6 +8755,7 @@ export default function Workbench() {
         };
         runSessionRef.current.trackRun(nextRun, { activate: "always" });
       }
+      return false;
     } finally {
       runSessionRef.current.endOperation("cancel", operationKey);
       if (context && isCurrentProjectContext(context)) {
@@ -9646,22 +9650,27 @@ export default function Workbench() {
           setDrawer("handoff");
         }}
         onReturnBefore={() => {
-          setReadyReviewSession(null);
-          setDrawer("handoff");
-          setToast({
-            title: `已返回 AI 修改前的${readyReviewSession.beforeLabel}`,
-            message: `这次 AI 返回未被采用；${readyReviewSession.afterLabel} 仍保留在本轮处理里，可以随时再次进入审阅对比。`,
-            tone: "success",
-            dedupeKey: "ready-version-returned-before",
-          });
+          void (async () => {
+            const restored = await cancelActiveRun({
+              reason: "declined-ai-candidate-after-review",
+            });
+            if (!restored) return;
+            setToast({
+              title: `已返回 AI 修改前的${readyReviewSession.beforeLabel}`,
+              message: `${readyReviewSession.afterLabel} 与本轮记录仍已保留；当前页面可直接继续编辑。`,
+              tone: "success",
+              dedupeKey: "ready-version-returned-before",
+            });
+          })();
         }}
         onAccept={() => {
           setReadyReviewSession(null);
-          setDrawer("handoff");
+          setDrawer(null);
           window.requestAnimationFrame(() => void activateReadyResult({
             reviewed: true,
           }));
         }}
+        onRevealRequestFolder={() => void revealActiveRunInFinder()}
       />
     );
   }

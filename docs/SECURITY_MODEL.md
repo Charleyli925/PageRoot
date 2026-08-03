@@ -105,7 +105,7 @@ the immutable Version or the activation transaction, and runtime interaction
 state is never serialized. The renderer accepts review messages only when the
 session ID, side, declared message source and `MessageEvent.source` all match the
 registered frame. A user must still invoke the existing fail-closed ready-version
-activation path through “直接打开” or “接受全部并打开”.
+activation path through “直接打开” or the review confirmation “打开 AI 修改后”.
 
 Edit-mode reveal actions use the same trust boundary. They accept only strict
 Tabs whose selected panel is proved by `aria-selected` plus `hidden`, native

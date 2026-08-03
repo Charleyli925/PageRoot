@@ -585,10 +585,29 @@ test("a verified AI result stays pending through desktop review until the user a
       .evaluate((button) => button.click());
     await expect(beforeReviewFrame.locator('[data-review-tab-panel="two"]'))
       .toBeVisible();
+    await expect(afterReviewFrame.locator('[data-review-tab-panel="two"]'))
+      .toBeVisible();
     await launched.page.getByRole("button", { name: "查看全部变化" }).click();
     await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
       "data-pageroot-review-filter",
     )).toBe("all");
+    await expect.poll(() => beforeReviewFrame.locator(
+      "[data-pageroot-review-overlay-box]",
+    ).count()).toBeGreaterThan(0);
+    await expect.poll(() => afterReviewFrame.locator(
+      "[data-pageroot-review-overlay-box]",
+    ).count()).toBeGreaterThan(0);
+    await expect.poll(async () => beforeReviewFrame.locator(
+      "[data-pageroot-review-id]",
+    ).first().evaluate((element) => getComputedStyle(element).outlineStyle)).toBe("none");
+    if (process.env.PAGEROOT_CAPTURE_REVIEW) {
+      const captureDirectory = path.join(productRoot, "output", "design-qa");
+      mkdirSync(captureDirectory, { recursive: true });
+      await launched.page.screenshot({
+        path: path.join(captureDirectory, "ai-review-all-changes.png"),
+        animations: "disabled",
+      });
+    }
     await launched.page.getByRole("button", { name: "文案变化" }).click();
     await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
       "data-pageroot-review-filter",
@@ -602,12 +621,30 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect(afterReviewFrame.locator(
       '[data-pageroot-review-text="added"]',
     ).filter({ hasText: UPDATED_TEXT })).toBeVisible();
+    await expect(beforeReviewFrame.locator(
+      '[data-pageroot-review-text]',
+    ).filter({ hasText: "第二块完整内容" })).toHaveCount(0);
+    await expect(afterReviewFrame.locator(
+      '[data-pageroot-review-text]',
+    ).filter({ hasText: "第二块完整内容" })).toHaveCount(0);
     await launched.page.getByRole("slider", {
       name: "非修改区域上下文可见度",
-    }).fill("64");
+    }).fill("0");
     await expect.poll(async () => Number(await beforeReviewFrame.locator("html").evaluate(
       (element) => element.style.getPropertyValue("--pageroot-review-context-opacity"),
-    ))).toBeCloseTo(0.7192, 4);
+    ))).toBe(0);
+    await launched.page.getByRole("slider", {
+      name: "非修改区域上下文可见度",
+    }).fill("50");
+    await expect.poll(async () => Number(await beforeReviewFrame.locator("html").evaluate(
+      (element) => element.style.getPropertyValue("--pageroot-review-context-opacity"),
+    ))).toBeCloseTo(0.5, 4);
+    await launched.page.getByRole("slider", {
+      name: "非修改区域上下文可见度",
+    }).fill("100");
+    await expect.poll(async () => Number(await beforeReviewFrame.locator("html").evaluate(
+      (element) => element.style.getPropertyValue("--pageroot-review-context-opacity"),
+    ))).toBe(1);
     await launched.page.getByRole("button", {
       name: "打开并固定内容地图",
     }).click();
@@ -632,6 +669,8 @@ test("a verified AI result stays pending through desktop review until the user a
     await movedOutlineItem.click();
     await expect(beforeReviewFrame.locator('[data-review-tab-panel="one"]'))
       .toBeVisible();
+    await expect(afterReviewFrame.locator('[data-review-tab-panel="one"]'))
+      .toBeVisible();
     await launched.page.getByRole("button", { name: "结构变化" }).click();
     await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
       "data-pageroot-review-filter",
@@ -643,6 +682,12 @@ test("a verified AI result stays pending through desktop review until the user a
       "data-pageroot-review-filter",
     )).toBe("style");
     await expect(afterReviewFrame.locator("[data-pageroot-review-style]").first())
+      .toBeVisible();
+    await expect(beforeReviewFrame.locator('[data-review-tab-panel="two"]'))
+      .toBeVisible();
+    await expect(afterReviewFrame.locator('[data-review-tab-panel="two"]'))
+      .toBeVisible();
+    await expect(launched.page.getByText(/视觉：.*(?:内边距|圆角)/u).first())
       .toBeVisible();
     await launched.page.getByRole("button", {
       name: /单独查看修改前/,
@@ -681,8 +726,11 @@ test("a verified AI result stays pending through desktop review until the user a
     )).toBe("all");
     const beforeViewport = launched.page.locator('[aria-label="修改前画布滚动区"]');
     const afterViewport = launched.page.locator('[aria-label="修改后画布滚动区"]');
+    await launched.page.waitForTimeout(450);
     const sourceLeft = await beforeViewport.evaluate((element) => {
-      element.scrollLeft = 160;
+      element.scrollLeft = Math.max(1, Math.round(
+        (element.scrollWidth - element.clientWidth) * .35,
+      ));
       element.dispatchEvent(new Event("scroll"));
       return element.scrollLeft;
     });
@@ -690,7 +738,6 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect.poll(() => afterViewport.evaluate((element) => element.scrollLeft))
       .toBe(sourceLeft);
 
-    await launched.page.waitForTimeout(450);
     await beforeReviewFrame.locator("html").evaluate(() => {
       const outlines = [...document.querySelectorAll("[data-pageroot-outline-id]")]
         .filter((element) => element.getBoundingClientRect().height > 0);
@@ -718,6 +765,15 @@ test("a verified AI result stays pending through desktop review until the user a
       return Math.max(0, Math.min(1, (0 - rect.top) / Math.max(1, rect.height)));
     });
     await expect.poll(afterOutlineProgress).toBeCloseTo(beforeOutlineAnchor.ratio, 1);
+    await beforeReviewFrame.locator("html").evaluate(() => window.scrollTo(0, 0));
+    await expect.poll(() => afterReviewFrame.locator("html").evaluate(() => window.scrollY))
+      .toBe(0);
+    await beforeReviewFrame.locator("html").evaluate(() => {
+      window.scrollTo(0, 0);
+      dispatchEvent(new WheelEvent("wheel", { deltaY: -120 }));
+    });
+    await launched.page.waitForTimeout(120);
+    expect(await afterReviewFrame.locator("html").evaluate(() => window.scrollY)).toBe(0);
     if (process.env.PAGEROOT_CAPTURE_REVIEW) {
       const captureDirectory = path.join(productRoot, "output", "design-qa");
       mkdirSync(captureDirectory, { recursive: true });
@@ -750,19 +806,29 @@ test("a verified AI result stays pending through desktop review until the user a
       });
     }
     await launched.page.getByRole("button", {
-      name: "接受全部并打开",
+      name: "打开 AI 修改后",
     }).click();
     await expect(launched.page.getByRole("dialog", {
-      name: /接受全部并打开（.+）？/u,
+      name: /打开 AI 修改后（.+）？/u,
     })).toBeVisible();
     await expect(launched.page.getByRole("button", { name: "继续审阅" }))
       .toBeFocused();
-    await launched.page.getByRole("button", { name: "确认接受并打开" }).click();
-    await expect.poll(async () => (
-      launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject())
-    ), { timeout: 30_000 }).toMatchObject({
-      sourcePath: expect.stringMatching(/\/working\/generated-ai-loop-V1\.1\.html$/u),
+    await launched.page.evaluate(() => {
+      window.__pagerootSawHandoffFlash = false;
+      window.__pagerootHandoffObserver = new MutationObserver(() => {
+        const panel = document.querySelector(".handoff-panel");
+        if (panel && panel.getClientRects().length > 0) window.__pagerootSawHandoffFlash = true;
+      });
+      window.__pagerootHandoffObserver.observe(document.body, { childList: true, subtree: true });
     });
+    await launched.page.getByRole("button", { name: "确认并打开" }).click();
+    await expect.poll(async () => launched.page.evaluate(async () => {
+      const project = await window.htmlAIProjects?.getActiveProject();
+      const reviewVisible = Boolean(document.querySelector('[data-testid="ai-review-workspace"]'));
+      const visibleAlert = [...document.querySelectorAll('[role="alert"]')]
+        .find((element) => element.getClientRects().length > 0)?.textContent || "";
+      return `${project?.sourcePath || ""}|review=${reviewVisible}|alert=${visibleAlert}`;
+    }), { timeout: 30_000 }).toMatch(/\/working\/generated-ai-loop-V1\.1\.html\|review=false/u);
     const opened = await launched.page.evaluate(
       () => window.htmlAIProjects?.getActiveProject(),
     );
@@ -770,6 +836,10 @@ test("a verified AI result stays pending through desktop review until the user a
     expect(opened.sourcePath).toMatch(/\/working\/generated-ai-loop-V1\.1\.html$/u);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
     expect(readFileSync(opened.sourcePath, "utf8")).toContain(UPDATED_TEXT);
+    expect(await launched.page.evaluate(() => {
+      window.__pagerootHandoffObserver?.disconnect();
+      return window.__pagerootSawHandoffFlash;
+    })).toBe(false);
     const openedFrame = await loadedDiskFrame(launched.page, opened.sourcePath);
     await expect(openedFrame.locator(caseSelector("list-item")))
       .toHaveText(UPDATED_TEXT);
@@ -1034,6 +1104,94 @@ test("a no-change result returns to editing and remains reopenable", async () =>
       "这次没有产生有效变化",
       { exact: true },
     ).filter({ visible: true }).first()).toBeVisible();
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("returning from review restores the editable pre-AI version and preserves the candidate", async () => {
+  test.setTimeout(180_000);
+  const fixture = createSourceFixture("return-before-ai.html");
+  const commentText = `只把这个列表项改为“${UPDATED_TEXT}”，其他地方保持不变。`;
+  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  try {
+    const request = await addCommentAndSubmit(
+      launched.page,
+      launched.electronApp,
+      fixture.sourcePath,
+    );
+    writeAiOutput(
+      request.requestRoot,
+      (base) => base.replace(ORIGINAL_TEXT, UPDATED_TEXT),
+    );
+    runOfficialFinalizer(request.requestRoot, request.changeRequest);
+    await expect(launched.page.getByText(
+      "修改结果已完成检查",
+      { exact: true },
+    ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+    const candidateFiles = workingHtmlFiles(
+      launched.workspace,
+      request.changeRequest.projectId,
+    );
+    expect(candidateFiles).toHaveLength(1);
+    expect(readFileSync(candidateFiles[0], "utf8")).toContain(UPDATED_TEXT);
+
+    await launched.page.getByRole("button", { name: "审阅对比" }).click();
+    await expect(launched.page.getByTestId("ai-review-workspace"))
+      .toBeVisible({ timeout: 30_000 });
+    await launched.page.getByRole("button", { name: "返回 AI 修改前" }).click();
+    const dialog = launched.page.getByRole("dialog", {
+      name: /返回 AI 修改前（版本 \d+）？/u,
+    });
+    await expect(dialog).toBeVisible();
+    if (process.env.PAGEROOT_CAPTURE_REVIEW) {
+      const captureDirectory = path.join(productRoot, "output", "design-qa");
+      mkdirSync(captureDirectory, { recursive: true });
+      await launched.page.screenshot({
+        path: path.join(captureDirectory, "ai-review-return-confirmation.png"),
+        animations: "disabled",
+      });
+    }
+    await expect(dialog.getByText(/确认后不会采用这次 AI 返回的 版本 \d+。/u))
+      .toBeVisible();
+    await expect(dialog.getByText(/将继续使用 版本 \d+（AI 修改前）为基线重新修改。/u))
+      .toBeVisible();
+    await expect(dialog.getByRole("button", {
+      name: "AI 返回的 HTML 仍保留在原位置不会被删除。",
+    })).toBeVisible();
+    const [returnBackground, continueBackground] = await Promise.all([
+      dialog.getByRole("button", { name: "返回修改前版本" })
+        .evaluate((element) => getComputedStyle(element).backgroundColor),
+      dialog.getByRole("button", { name: "继续审阅" })
+        .evaluate((element) => getComputedStyle(element).backgroundColor),
+    ]);
+    expect(returnBackground).not.toBe(continueBackground);
+    await dialog.getByRole("button", { name: "返回修改前版本" }).click();
+
+    await expect(launched.page.getByTestId("ai-review-workspace")).toHaveCount(0);
+    await loadedDiskFrame(launched.page, fixture.sourcePath);
+    await expect(launched.page.locator(".comment-card").filter({ hasText: commentText }))
+      .toHaveCount(1);
+    const restored = await launched.page.evaluate(
+      () => window.htmlAIProjects?.getActiveProject(),
+    );
+    expect(restored.sourcePath).toBe(realpathSync(fixture.sourcePath));
+    const registry = JSON.parse(readFileSync(
+      path.join(launched.workspace, "project-registry.json"),
+      "utf8",
+    ));
+    const runtime = JSON.parse(readFileSync(path.join(
+      launched.workspace,
+      "projects",
+      registry.projects[request.changeRequest.projectId].storageDirectoryName,
+      "runtime-state.json",
+    ), "utf8"));
+    expect(runtime.lifecycleState).toBe("editing");
+    expect(runtime.activeRun).toBeNull();
+    expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
+    expect(existsSync(candidateFiles[0])).toBe(true);
+    expect(readFileSync(candidateFiles[0], "utf8")).toContain(UPDATED_TEXT);
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);

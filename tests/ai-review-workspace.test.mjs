@@ -31,7 +31,11 @@ test("formal review loads and verifies the immutable candidate without activatin
   assert.doesNotMatch(loader, /activateReadyVersion/);
   assert.match(
     workbench,
-    /onAccept=\{\(\) => \{[\s\S]*?setReadyReviewSession\(null\)[\s\S]*?requestAnimationFrame\(\(\) => void activateReadyResult\(\{[\s\S]*?reviewed: true[\s\S]*?\}\)\)/,
+    /onAccept=\{\(\) => \{[\s\S]*?setReadyReviewSession\(null\)[\s\S]*?setDrawer\(null\)[\s\S]*?requestAnimationFrame\(\(\) => void activateReadyResult\(\{[\s\S]*?reviewed: true[\s\S]*?\}\)\)/,
+  );
+  assert.doesNotMatch(
+    workbench.slice(workbench.indexOf("onAccept={() =>"), workbench.indexOf("onRevealRequestFolder", workbench.indexOf("onAccept={() =>"))),
+    /setDrawer\("handoff"\)/,
   );
 });
 
@@ -39,12 +43,12 @@ test("formal review reuses the workbench header and exposes the frozen seven-mod
   assert.match(review, /审阅模式/);
   assert.match(review, /页面预览/);
   assert.match(review, /变化审阅/);
-  assert.match(review, /整页/);
+  assert.match(review, /双页/);
   assert.match(review, /左页/);
   assert.match(review, /右页/);
   assert.match(review, /全部变化/);
   assert.match(review, /返回 AI 修改前/);
-  assert.match(review, /接受全部并打开/);
+  assert.match(review, /打开 AI 修改后/);
   assert.match(review, /上下文可见度/);
   assert.match(review, /同步滚动/);
   assert.match(review, /独立滚动/);
@@ -65,22 +69,30 @@ test("formal review reuses the workbench header and exposes the frozen seven-mod
   assert.match(styles, /\.segmented\[data-items="3"\]/);
   assert.match(styles, /\.segmented\[data-items="4"\]/);
   assert.match(styles, /\.canvasToolbarHandle[\s\S]*?font-size: 8px/);
+  assert.doesNotMatch(styles, /\.reviewRoot button,[\s\S]{0,80}font: inherit/);
+  assert.match(styles, /\.reviewRoot button,[\s\S]{0,80}font-family: inherit/);
+  assert.match(styles, /\.previewButtonLabel small[\s\S]*?font-style: italic/);
+  assert.match(styles, /\.transparencyField > \.toolbarFieldLabel/);
+  assert.match(review, /<small>\{documents\.changes\.length\} 处变化<\/small>/);
   assert.match(styles, /\.mapDrawer[\s\S]*?right: 0;[\s\S]*?bottom: 10px/);
 });
 
 test("returning before the AI edit explains the reversible path before leaving review", () => {
   assert.match(review, /不会采用这次 AI 返回的/);
-  assert.match(review, /将继续使用[\s\S]*?AI 修改前/);
-  assert.match(review, /AI 返回仍保留在本轮记录中/);
+  assert.match(review, /将继续使用[\s\S]*?AI 修改前[\s\S]*?为基线重新修改/);
+  assert.match(review, /AI 返回的 HTML 仍保留在原位置不会被删除/);
+  assert.match(review, /onRevealRequestFolder/);
   assert.match(review, /返回修改前版本/);
-  assert.match(review, /确认接受并打开/);
-  assert.match(review, /项目将切换到 AI 修改后的完整候选/);
+  assert.match(review, /确认并打开/);
+  assert.match(review, /确认后将切换到 AI 修改后的/);
+  assert.match(review, /可在历史记录中查看/);
   assert.match(review, /继续审阅/);
   assert.match(review, /continueReviewButtonRef\.current\?\.focus\(\)/);
   assert.match(review, /event\.key === "Escape"/);
   assert.match(review, /event\.key !== "Tab"/);
-  assert.match(workbench, /这次 AI 返回未被采用/);
-  assert.match(workbench, /仍保留在本轮处理里，可以随时再次进入审阅对比/);
+  assert.match(workbench, /declined-ai-candidate-after-review/);
+  assert.match(workbench, /当前页面可直接继续编辑/);
+  assert.match(workbench, /onRevealRequestFolder=\{\(\) => void revealActiveRunInFinder\(\)\}/);
 });
 
 test("the review canvas preserves authored interactions inside untrusted-document isolation", () => {
@@ -116,6 +128,8 @@ test("change discovery builds a complete outline and precise change markers", ()
   assert.match(reviewDocument, /sentenceAwareTextDifferences/);
   assert.match(reviewDocument, /data-pageroot-review-text-group/);
   assert.match(reviewDocument, /data-pageroot-review-text/);
+  assert.match(reviewDocument, /data-pageroot-review-marker/);
+  assert.match(reviewDocument, /attachChangeMarkerMetadata/);
   assert.match(reviewDocument, /data-pageroot-review-structure/);
   assert.match(reviewDocument, /data-pageroot-review-style/);
   assert.match(reviewDocument, /markMovedPairs/);
@@ -124,6 +138,11 @@ test("change discovery builds a complete outline and precise change markers", ()
   assert.match(reviewDocument, /VISUAL_ATTRIBUTE_NAMES/);
   assert.match(reviewDocument, /pairVisualElements/);
   assert.match(reviewDocument, /presentationSignature\(before\) !== presentationSignature\(after\)/);
+  assert.match(reviewDocument, /markStructureDifferences/);
+  assert.match(reviewDocument, /changedStylesheetSelectors/);
+  assert.match(reviewDocument, /STYLE_PROPERTY_LABELS/);
+  assert.match(reviewDocument, /结构：\$\{summaries/);
+  assert.match(reviewDocument, /视觉：\$\{\[\.\.\.labels\]/);
 });
 
 test("review controls produce persistent visual state instead of label-only changes", () => {
@@ -138,9 +157,10 @@ test("review controls produce persistent visual state instead of label-only chan
   assert.match(review, /buttons\[targetIndex\]\.focus\(\)/);
   assert.match(review, /buttons\[targetIndex\]\.click\(\)/);
   assert.match(review, /focus === "all" && documents\.changes\[0\]/);
-  assert.match(review, /本轮没有检测到变化，仍可查看整页/);
+  assert.match(review, /本轮没有检测到变化，仍可查看双页/);
   assert.match(review, /本轮没有检测到\$\{FILTER_LABELS\[filter\]\}变化/);
   assert.match(reviewDocument, /--pageroot-review-context-opacity/);
+  assert.match(reviewDocument, /setProperty\("--pageroot-review-context-opacity", String\(transparency\)\)/);
   assert.match(review, /visible=\{canvasView === "split" \|\| canvasView === "before"\}/);
   assert.match(styles, /\.canvasReview\[data-toolbar-open="true"\] \.canvasGrid[\s\S]*?padding-top: 118px/);
   assert.match(reviewDocument, /element\.dataset\.pagerootReviewId === state\.focus/);
@@ -148,7 +168,8 @@ test("review controls produce persistent visual state instead of label-only chan
 });
 
 test("the all-change overview stays sparse and navigation reveals hidden authored panels", () => {
-  assert.match(reviewDocument, /data-pageroot-review-filter="all"\] \[data-pageroot-review-id\]/);
+  assert.match(reviewDocument, /data-pageroot-review-filter="all"\] \[data-pageroot-review-marker\]/);
+  assert.doesNotMatch(reviewDocument, /data-pageroot-review-filter="all"\] \[data-pageroot-review-id\]/);
   assert.doesNotMatch(
     reviewDocument,
     /data-pageroot-review-filter="all"\] \[data-pageroot-review-text=/,
@@ -157,8 +178,14 @@ test("the all-change overview stays sparse and navigation reveals hidden authore
   assert.doesNotMatch(reviewDocument, /data-pageroot-review-style\][\s\S]{0,180}solid #1980aa/);
   assert.match(reviewDocument, /matchingPanelControl/);
   assert.match(reviewDocument, /revealTarget/);
-  assert.match(reviewDocument, /control instanceof HTMLElement\) control\.click\(\)/);
+  assert.match(reviewDocument, /activatePanelKey/);
+  assert.match(reviewDocument, /post\("panel-change", \{ panelKey \}\)/);
+  assert.match(review, /type: "activate-panel"/);
   assert.match(reviewDocument, /reviewAnchor/);
   assert.match(reviewDocument, /message\.type === "sync-scroll"/);
   assert.match(review, /type: "sync-scroll"/);
+  assert.match(reviewDocument, /message\.boundary === "top"/);
+  assert.match(reviewDocument, /programmaticScrollToken/);
+  assert.match(reviewDocument, /renderReviewOverlays/);
+  assert.match(reviewDocument, /record\.top <= previous\.bottom \+ 12/);
 });

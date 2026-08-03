@@ -45,14 +45,17 @@ Notable user-visible changes are documented here. This project follows Semantic 
   change filters, synchronized navigation, and a reversible return-before-AI
   confirmation before the same audited activation path is used.
 - Finalized the formal AI review workspace around one exclusive seven-state
-  model: `Whole / Left / Right` page preview plus `All / Copy / Structure /
-  Visual` change review. It now defaults to a clean dual-page preview, restores
-  that view through an explicit Whole action, detects sentence-level copy edits,
-  pure movement and broader CSS/attribute presentation changes, keeps the
-  all-change view sparse, reveals hidden authored Tabs from a complete content
-  map, and synchronizes pages by semantic region. The workspace reuses the
-  official header, and both returning before AI and accepting the candidate now
-  require explicit confirmation.
+  model: `Dual / Left-before / Right-after` page preview plus `All / Copy /
+  Structure / Visual` change review. Navigation regions are now separate from
+  precise change markers; unchanged copy is never decorated, nearby changed
+  lines merge into bounded frames, and structure/CSS changes identify affected
+  nodes and properties. Safe authored Tabs, map navigation and next/previous
+  controls switch both pages together, while tokenized semantic scrolling no
+  longer bounces at page boundaries. Context visibility maps linearly from fully
+  hidden at 0 to unobscured at 100. Returning before AI now restores the prior
+  editable HTML with comments intact while preserving the candidate file and
+  audit record; opening the AI version skips the waiting screen and uses the
+  existing audited activation path.
 
 ## [0.9.5] - 2026-07-31
 
