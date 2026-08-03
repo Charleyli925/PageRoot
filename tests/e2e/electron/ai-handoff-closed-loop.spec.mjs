@@ -450,7 +450,16 @@ test("a verified AI result stays pending through desktop review until the user a
   test.setTimeout(180_000);
   const fixture = createSourceFixture("generated-ai-loop.html", (source) => source.replace(
     "  </main>",
-    `    <div class="tabs" role="tablist" aria-label="Review interaction fixture">
+    `    <section data-review-regression>
+      <h2>核心结论</h2>
+      <div data-review-regression-summary>在守住 EBITA 率底线的基础上，锁单确收实现 +8.52% 增长；21 天日均增量 +4.12 万，累计增量 +86.6 万。</div>
+      <div data-review-metrics>
+        <article data-review-metric="lock"><strong>+8.52%</strong><span>锁单确收增幅（显著 p&lt;0.01）</span><small>日均 52.5 万 vs 48.4 万</small></article>
+        <article data-review-metric="ipv"><strong>+4.49%</strong><span>IPV 增幅（显著 p&lt;0.01）</span><small>日均 63.4 万 vs 60.7 万</small></article>
+        <article data-review-metric="cvr"><strong>+6.85%</strong><span>CVR 增幅（显著 p&lt;0.01）</span><small>0.217% vs 0.203%</small></article>
+      </div>
+    </section>
+    <div class="tabs" role="tablist" aria-label="Review interaction fixture">
       <button type="button" data-review-tab-button data-p="review-p1">审阅标签一</button>
       <button type="button" data-review-tab-button data-p="review-p2">审阅标签二</button>
     </div>
@@ -527,6 +536,16 @@ test("a verified AI result stays pending through desktop review until the user a
       return base
         .replace(ORIGINAL_TEXT, UPDATED_TEXT)
         .replace(
+          "      <div data-review-regression-summary>",
+          `      <div data-review-added-chart>
+        <strong>实验效果概览</strong>
+        <div><span>锁单确收</span><progress max="100" value="82"></progress></div>
+        <div><span>CVR</span><progress max="100" value="69"></progress></div>
+        <p>读图：规模增长由转化效率提升与动销覆盖扩大共同驱动。</p>
+      </div>
+      <div data-review-regression-summary>`,
+        )
+        .replace(
           '    <div data-review-priority><strong>优先顺序：</strong>先处理稳定性，再补齐体验细节。</div>\n',
           "",
         )
@@ -601,6 +620,8 @@ test("a verified AI result stays pending through desktop review until the user a
       .toHaveAttribute("data-author-script-ran", "true");
     await expect(beforeReviewFrame.locator("html"))
       .toHaveAttribute("data-review-fixture-ready", "true");
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-fixture-ready", "true");
     await expect(beforeReviewFrame.locator('meta[http-equiv="refresh"]'))
       .toHaveCount(0);
     await expect(beforeReviewFrame.locator('[data-review-tab-panel="two"]'))
@@ -613,7 +634,7 @@ test("a verified AI result stays pending through desktop review until the user a
       .toBeVisible();
     const beforeCounter = beforeReviewFrame.locator("[data-review-counter]");
     const afterCounter = afterReviewFrame.locator("[data-review-counter]");
-    await beforeCounter.click();
+    await beforeCounter.evaluate((button) => button.click());
     await expect(beforeCounter).toHaveAttribute("data-count", "1");
     await expect(afterCounter).toHaveAttribute("data-count", "1");
     await beforeReviewFrame.getByRole("textbox", { name: "审阅同步输入" })
@@ -621,7 +642,7 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect(afterReviewFrame.getByRole("textbox", { name: "审阅同步输入" }))
       .toHaveValue("双页动作同步");
     await launched.page.getByRole("button", { name: "独立滚动" }).click();
-    await afterCounter.click();
+    await afterCounter.evaluate((button) => button.click());
     await expect(beforeCounter).toHaveAttribute("data-count", "2");
     await expect(afterCounter).toHaveAttribute("data-count", "2");
     await afterReviewFrame.getByRole("textbox", { name: "审阅同步输入" })
@@ -636,7 +657,7 @@ test("a verified AI result stays pending through desktop review until the user a
       "[data-pageroot-review-overlay-box]",
     ).count()).toBeGreaterThan(0);
     await expect.poll(() => afterReviewFrame.locator(
-      '[data-pageroot-review-overlay-box][data-tone="all"]',
+      '[data-pageroot-review-overlay-box][data-tone="text-added"], [data-pageroot-review-overlay-box][data-tone="structure"], [data-pageroot-review-overlay-box][data-tone="style"], [data-pageroot-review-overlay-box][data-tone="mixed"]',
     ).count()).toBeGreaterThan(0);
     expect(await afterReviewFrame.locator(
       "[data-pageroot-review-overlay-box]",
@@ -694,8 +715,31 @@ test("a verified AI result stays pending through desktop review until the user a
     expect(await addedText.evaluate((element) => getComputedStyle(element).color))
       .toBe(await addedText.evaluate((element) => getComputedStyle(element.parentElement).color));
     await expect.poll(() => afterReviewFrame.locator(
-      '[data-pageroot-review-overlay-box][data-tone="text"]',
+      '[data-pageroot-review-overlay-box][data-tone="text-added"]',
     ).count()).toBeGreaterThan(0);
+    await expect.poll(() => beforeReviewFrame.locator(
+      '[data-pageroot-review-overlay-box][data-tone="text-removed"]',
+    ).count()).toBeGreaterThan(0);
+    expect(await afterReviewFrame.locator(
+      '[data-pageroot-review-overlay-box][data-tone="text-added"]',
+    ).first().evaluate((element) => getComputedStyle(element).borderTopColor))
+      .toBe("rgb(35, 155, 86)");
+    expect(await beforeReviewFrame.locator(
+      '[data-pageroot-review-overlay-box][data-tone="text-removed"]',
+    ).first().evaluate((element) => getComputedStyle(element).borderTopColor))
+      .toBe("rgb(209, 75, 68)");
+    await expect(afterReviewFrame.locator(
+      '[data-review-added-chart] [data-pageroot-review-text="added"]',
+    ).filter({ hasText: "实验效果概览" })).toHaveCount(1);
+    await expect(afterReviewFrame.locator(
+      '[data-review-regression-summary] [data-pageroot-review-text]',
+    )).toHaveCount(0);
+    await expect(beforeReviewFrame.locator(
+      '[data-review-metrics] [data-pageroot-review-text]',
+    )).toHaveCount(0);
+    await expect(afterReviewFrame.locator(
+      '[data-review-metrics] [data-pageroot-review-text]',
+    )).toHaveCount(0);
     if (process.env.PAGEROOT_CAPTURE_REVIEW) {
       const captureDirectory = path.join(productRoot, "output", "design-qa");
       mkdirSync(captureDirectory, { recursive: true });
@@ -710,31 +754,100 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect(afterReviewFrame.locator(
       '[data-pageroot-review-text]',
     ).filter({ hasText: "第二块完整内容" })).toHaveCount(0);
-    const granularTextContext = afterReviewFrame.locator(
-      '[data-pageroot-review-context-types~="text"]',
-    ).first();
-    await expect(granularTextContext).toBeAttached();
-    await expect.poll(() => granularTextContext.evaluate(
-      (element) => Number(getComputedStyle(element).opacity),
-    )).toBeCloseTo(0.18, 2);
+    const textMask = afterReviewFrame.locator(
+      '[data-pageroot-review-mask-dim]',
+    );
+    await expect(textMask).toBeAttached();
+    await expect.poll(() => textMask.getAttribute("fill-opacity"))
+      .toBe("0.82");
+    await expect.poll(() => afterReviewFrame.locator(
+      '[data-pageroot-review-mask-layer]',
+    ).evaluate((element) => ({
+      background: getComputedStyle(element).backgroundColor,
+      borderWidth: getComputedStyle(element).borderTopWidth,
+    }))).toEqual({ background: "rgba(0, 0, 0, 0)", borderWidth: "0px" });
+    await expect.poll(async () => {
+      const boxes = await afterReviewFrame.locator(
+        '[data-pageroot-review-overlay-box]',
+      ).evaluateAll((elements) => elements.map((element) => ({
+        left: Number.parseFloat(element.style.left),
+        top: Number.parseFloat(element.style.top),
+        width: Number.parseFloat(element.style.width),
+        height: Number.parseFloat(element.style.height),
+      })));
+      const holes = await afterReviewFrame.locator(
+        '[data-pageroot-review-mask-hole]',
+      ).evaluateAll((elements) => elements.map((element) => ({
+        left: Number(element.getAttribute("x")),
+        top: Number(element.getAttribute("y")),
+        width: Number(element.getAttribute("width")),
+        height: Number(element.getAttribute("height")),
+      })));
+      return boxes.length === holes.length && boxes.every((box, index) => (
+        Math.abs(box.left - holes[index].left) < 0.02
+        && Math.abs(box.top - holes[index].top) < 0.02
+        && Math.abs(box.width - holes[index].width) < 0.02
+        && Math.abs(box.height - holes[index].height) < 0.02
+      ));
+    }).toBe(true);
+    await expect.poll(() => afterReviewFrame.locator("html").evaluate(() => {
+      const path = document.querySelector("[data-pageroot-review-mask-dim]");
+      const boxes = [...document.querySelectorAll("[data-pageroot-review-overlay-box]")]
+        .map((element) => ({
+          left: Number.parseFloat(element.style.left),
+          top: Number.parseFloat(element.style.top),
+          width: Number.parseFloat(element.style.width),
+          height: Number.parseFloat(element.style.height),
+        }));
+      const first = boxes[0];
+      if (!(path instanceof SVGGeometryElement) || !first) return false;
+      const insideFrameIsDimmed = path.isPointInFill(new DOMPoint(
+        first.left + first.width / 2,
+        first.top + first.height / 2,
+      ));
+      let outsidePointIsDimmed = false;
+      for (let y = 8; y < Math.min(400, document.documentElement.scrollHeight); y += 24) {
+        for (let x = 8; x < Math.min(600, document.documentElement.scrollWidth); x += 24) {
+          const inFrame = boxes.some((box) => (
+            x >= box.left && x <= box.left + box.width
+            && y >= box.top && y <= box.top + box.height
+          ));
+          if (!inFrame && path.isPointInFill(new DOMPoint(x, y))) {
+            outsidePointIsDimmed = true;
+            break;
+          }
+        }
+        if (outsidePointIsDimmed) break;
+      }
+      return !insideFrameIsDimmed && outsidePointIsDimmed;
+    })).toBe(true);
     await launched.page.getByRole("slider", {
       name: "非修改区域上下文可见度",
     }).fill("0");
     await expect.poll(async () => Number(await beforeReviewFrame.locator("html").evaluate(
       (element) => element.style.getPropertyValue("--pageroot-review-context-opacity"),
     ))).toBe(0);
+    await expect.poll(() => beforeReviewFrame.locator(
+      '[data-pageroot-review-mask-dim]',
+    ).getAttribute("fill-opacity")).toBe("1");
     await launched.page.getByRole("slider", {
       name: "非修改区域上下文可见度",
     }).fill("50");
     await expect.poll(async () => Number(await beforeReviewFrame.locator("html").evaluate(
       (element) => element.style.getPropertyValue("--pageroot-review-context-opacity"),
     ))).toBeCloseTo(0.5, 4);
+    await expect.poll(() => beforeReviewFrame.locator(
+      '[data-pageroot-review-mask-dim]',
+    ).getAttribute("fill-opacity")).toBe("0.5");
     await launched.page.getByRole("slider", {
       name: "非修改区域上下文可见度",
     }).fill("100");
     await expect.poll(async () => Number(await beforeReviewFrame.locator("html").evaluate(
       (element) => element.style.getPropertyValue("--pageroot-review-context-opacity"),
     ))).toBe(1);
+    await expect.poll(() => beforeReviewFrame.locator(
+      '[data-pageroot-review-mask-dim]',
+    ).getAttribute("fill-opacity")).toBe("0");
     await launched.page.getByRole("slider", {
       name: "非修改区域上下文可见度",
     }).fill("18");
@@ -814,8 +927,21 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect(beforeReviewFrame.locator("[data-pageroot-review-structure]").first())
       .toBeVisible();
     await expect(beforeReviewFrame.locator(
-      '[data-pageroot-review-context-types~="structure"]',
+      '[data-pageroot-review-overlay-box][data-tone="structure"]',
     ).first()).toBeAttached();
+    expect(await beforeReviewFrame.locator(
+      '[data-pageroot-review-overlay-box][data-tone="structure"]',
+    ).first().evaluate((element) => getComputedStyle(element).borderTopColor))
+      .toBe("rgb(22, 119, 200)");
+    await expect(afterReviewFrame.locator(
+      '[data-review-added-chart][data-pageroot-review-structure]',
+    )).toHaveCount(1);
+    await expect(beforeReviewFrame.locator(
+      '[data-review-metrics] [data-pageroot-review-structure]',
+    )).toHaveCount(0);
+    await expect(afterReviewFrame.locator(
+      '[data-review-metrics] [data-pageroot-review-structure]',
+    )).toHaveCount(0);
     await launched.page.getByRole("button", { name: "视觉变化" }).click();
     await expect.poll(async () => afterReviewFrame.locator("html").getAttribute(
       "data-pageroot-review-filter",
@@ -823,8 +949,18 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect(afterReviewFrame.locator("[data-pageroot-review-style]").first())
       .toBeVisible();
     await expect(afterReviewFrame.locator(
-      '[data-pageroot-review-context-types~="style"]',
+      '[data-pageroot-review-overlay-box][data-tone="style"]',
     ).first()).toBeAttached();
+    expect(await afterReviewFrame.locator(
+      '[data-pageroot-review-overlay-box][data-tone="style"]',
+    ).first().evaluate((element) => getComputedStyle(element).borderTopColor))
+      .toBe("rgb(109, 92, 231)");
+    await expect(beforeReviewFrame.locator(
+      '[data-review-regression] [data-pageroot-review-style]',
+    )).toHaveCount(0);
+    await expect(afterReviewFrame.locator(
+      '[data-review-regression] [data-pageroot-review-style]',
+    )).toHaveCount(0);
     await expect(beforeReviewFrame.locator('[data-review-tab-panel="two"]'))
       .toBeVisible();
     await expect(afterReviewFrame.locator('[data-review-tab-panel="two"]'))

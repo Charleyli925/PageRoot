@@ -50,16 +50,20 @@ Notable user-visible changes are documented here. This project follows Semantic 
   navigation no longer changes review display, and single- and dual-page views
   fill the available Canvas with only minimal framing gaps.
 - Unified review frames and dimming on one typed change footprint. Copy uses
-  leaf-level exact ranges, unchanged content is dimmed across the entire page,
-  connected frames merge without crossing columns, contained ancestor frames
-  are removed, and All Changes fuses overlapping Copy/Structure/Visual frames
-  into one boundary. Before/after controls now use paired stable identities and
+  leaf-level exact ranges and high-confidence pairing instead of tag/position
+  guesses. Connected frames merge without crossing columns, contained ancestor
+  frames are removed, and the context mask now punches transparent holes from
+  those exact final rectangles so frame interiors remain clear. Added copy uses
+  green frames, removed copy red, structure blue and visual changes purple;
+  repeated short copy and inserted structures no longer create unrelated text
+  or visual frames. Before/after controls now use paired stable identities and
   mirror Tabs, disclosures, buttons and form state in both directions even
   while scrolling is independent; unsupported matches degrade silently.
 - Made review open directly on the first change in synchronized dual-page All
   mode with 18% context. Added copy keeps the page's authored styling and uses
-  one merged dashed frame; removed copy keeps only its deletion treatment, and
-  unchanged descendants now fade at the selected Copy/Structure/Visual level.
+  one merged dashed frame; removed copy keeps its deletion treatment, while the
+  final frame rectangle—not incidental DOM ancestry—defines the fully clear
+  region for each Copy/Structure/Visual projection.
   The content map opens to the right of its handle, distinguishes changed rows,
   and dismisses on outside interaction. Linked review now mirrors authored
   page actions and form state, not only Tabs. Return confirmation locates the

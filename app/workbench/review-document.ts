@@ -61,16 +61,16 @@ const REVIEW_DOCUMENT_STYLE = String.raw`
   html[data-pageroot-review-filter="structure"] [data-pageroot-review-marker-types~="structure"],
   html[data-pageroot-review-filter="style"] [data-pageroot-review-marker-types~="style"] {
     position: relative !important;
-    outline: calc(2px * var(--pageroot-review-ui-scale)) dashed #6258d6 !important;
+    outline: calc(2px * var(--pageroot-review-ui-scale)) dashed #1677c8 !important;
     outline-offset: calc(2px * var(--pageroot-review-ui-scale)) !important;
   }
 
   html[data-pageroot-review-filter="structure"] [data-pageroot-review-marker-types~="structure"] {
-    outline-color: #6258d6 !important;
+    outline-color: #1677c8 !important;
   }
 
   html[data-pageroot-review-filter="style"] [data-pageroot-review-marker-types~="style"] {
-    outline-color: #1980aa !important;
+    outline-color: #6d5ce7 !important;
   }
 
   html[data-pageroot-review-filter="all"] [data-pageroot-review-text="removed"],
@@ -90,25 +90,6 @@ const REVIEW_DOCUMENT_STYLE = String.raw`
     text-decoration: none !important;
   }
 
-  html[data-pageroot-review-filter="all"] [data-pageroot-review-context-types~="all"],
-  html[data-pageroot-review-filter="text"] [data-pageroot-review-context-types~="text"],
-  html[data-pageroot-review-filter="structure"] [data-pageroot-review-context-types~="structure"],
-  html[data-pageroot-review-filter="style"] [data-pageroot-review-context-types~="style"] {
-    opacity: var(--pageroot-review-context-opacity) !important;
-    filter: grayscale(var(--pageroot-review-context-grayscale))
-      saturate(var(--pageroot-review-context-saturation)) !important;
-  }
-
-  html[data-pageroot-review-side="before"][data-pageroot-review-filter="structure"]
-    [data-pageroot-review-marker-types~="structure"] {
-    outline-color: #8b65c9 !important;
-  }
-
-  html[data-pageroot-review-side="after"][data-pageroot-review-filter="structure"]
-    [data-pageroot-review-marker-types~="structure"] {
-    outline-color: #5b55c9 !important;
-  }
-
   html[data-pageroot-review-filter="style"] [data-pageroot-review-marker-types~="style"] {
     box-shadow: none !important;
   }
@@ -117,36 +98,95 @@ const REVIEW_DOCUMENT_STYLE = String.raw`
     outline: none !important;
   }
 
-  [data-pageroot-review-overlay-layer] {
+  [data-pageroot-review-projection-layer] {
     position: absolute !important;
     z-index: 2147482500 !important;
     top: 0 !important;
     left: 0 !important;
-    width: 0 !important;
-    height: 0 !important;
+    display: block !important;
     overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    opacity: 1 !important;
+    filter: none !important;
+    transform: none !important;
     pointer-events: none !important;
+  }
+
+  [data-pageroot-review-mask-layer] {
+    position: absolute !important;
+    z-index: 0 !important;
+    top: 0 !important;
+    left: 0 !important;
+    display: block !important;
+    overflow: visible !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    max-width: none !important;
+    max-height: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    opacity: 1 !important;
+    filter: none !important;
+    transform: none !important;
+    pointer-events: none !important;
+  }
+
+  [data-pageroot-review-mask-dim] {
+    fill: #ffffff !important;
+    fill-rule: evenodd !important;
+    stroke: none !important;
+  }
+
+  [data-pageroot-review-mask-hole] {
+    display: none !important;
+    fill: none !important;
+    stroke: none !important;
   }
 
   [data-pageroot-review-overlay-box] {
     position: absolute !important;
+    z-index: 1 !important;
+    display: block !important;
+    overflow: visible !important;
     box-sizing: border-box !important;
-    border: calc(2px * var(--pageroot-review-ui-scale)) dashed #6258d6 !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    max-width: none !important;
+    max-height: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: calc(2px * var(--pageroot-review-ui-scale)) dashed #1677c8 !important;
     border-radius: calc(5px * var(--pageroot-review-ui-scale)) !important;
     background: transparent !important;
+    box-shadow: none !important;
+    opacity: 1 !important;
+    filter: none !important;
+    transform: none !important;
     pointer-events: none !important;
   }
 
-  html[data-pageroot-review-side="before"] [data-pageroot-review-overlay-box][data-tone="text"] {
-    border-color: #c74f4a !important;
+  [data-pageroot-review-overlay-box][data-tone="text-removed"] {
+    border-color: #d14b44 !important;
   }
 
-  html[data-pageroot-review-side="after"] [data-pageroot-review-overlay-box][data-tone="text"] {
-    border-color: #6258d6 !important;
+  [data-pageroot-review-overlay-box][data-tone="text-added"] {
+    border-color: #239b56 !important;
   }
 
-  [data-pageroot-review-overlay-box][data-tone="style"] {
-    border-color: #1980aa !important;
+  [data-pageroot-review-overlay-box][data-tone="structure"] {
+    border-color: #1677c8 !important;
+  }
+
+  [data-pageroot-review-overlay-box][data-tone="style"],
+  [data-pageroot-review-overlay-box][data-tone="mixed"] {
+    border-color: #6d5ce7 !important;
   }
 
   [data-pageroot-review-overlay-box][data-active="true"]::after {
@@ -259,19 +299,6 @@ function normalizedMarkup(element: Element): string {
     .trim();
 }
 
-function structureSignature(element: Element): string {
-  return [element, ...element.querySelectorAll("*")]
-    .slice(0, 501)
-    .map((child) => {
-      const parent = child.parentElement;
-      const siblingIndex = child === element || !parent
-        ? 0
-        : [...parent.children].indexOf(child);
-      return `${child.tagName.toLowerCase()}#${child.id || ""}@${siblingIndex}`;
-    })
-    .join("|");
-}
-
 const VISUAL_ATTRIBUTE_NAMES = new Set([
   "align",
   "aria-hidden",
@@ -309,50 +336,6 @@ function elementVisualSignature(element: Element): string {
     .sort((left, right) => left.name.localeCompare(right.name))
     .map((attribute) => `${attribute.name.toLowerCase()}=${attribute.value}`)
     .join("\u001f");
-}
-
-function selectorAppliesToRegion(region: Element, rawSelector: string): boolean {
-  const selector = rawSelector.trim();
-  if (!selector) return false;
-  if (/^(?:\*|:root|html|body)(?:\b|$)/iu.test(selector)) return true;
-  const inspectableSelector = selector
-    .replace(/::[\w-]+/gu, "")
-    .replace(/:(?:active|checked|disabled|enabled|focus|focus-visible|focus-within|hover|link|target|visited)(?:\([^)]*\))?/gu, "")
-    .trim();
-  if (!inspectableSelector) return true;
-  try {
-    return region.matches(inspectableSelector) || Boolean(region.querySelector(inspectableSelector));
-  } catch {
-    return false;
-  }
-}
-
-function matchingStylesheetSignature(element: Element): string {
-  const document = element.ownerDocument;
-  const matches: string[] = [];
-  document.querySelectorAll("style").forEach((styleElement, styleIndex) => {
-    const css = styleElement.textContent || "";
-    const ruleMatcher = /([^{}]+)\{([^{}]*)\}/gu;
-    for (const match of css.matchAll(ruleMatcher)) {
-      const selectorText = match[1].trim();
-      if (selectorText.startsWith("@")) continue;
-      const selectors = selectorText.split(",");
-      if (!selectors.some((selector) => selectorAppliesToRegion(element, selector))) continue;
-      matches.push(`${styleIndex}:${normalizedCss(selectorText)}{${normalizedCss(match[2])}}`);
-    }
-  });
-  document.querySelectorAll('link[rel~="stylesheet"]').forEach((link, index) => {
-    matches.push(`link:${index}:${link.getAttribute("href") || ""}:${link.getAttribute("media") || ""}`);
-  });
-  return matches.join("\u001d");
-}
-
-function presentationSignature(element: Element): string {
-  return [element, ...element.querySelectorAll("*")]
-    .slice(0, 501)
-    .map(elementVisualSignature)
-    .concat(matchingStylesheetSignature(element))
-    .join("\u001e");
 }
 
 function classTokens(element: Element): string[] {
@@ -745,21 +728,97 @@ function sectionPairScore(
   beforeIndex: number,
   afterIndex: number,
 ): number {
-  let score = before.tagName === after.tagName ? 14 : -24;
+  if (before.tagName !== after.tagName) return Number.NEGATIVE_INFINITY;
+  const beforeKey = pairKey(before);
+  const afterKey = pairKey(after);
+  if (beforeKey || afterKey) {
+    return beforeKey && beforeKey === afterKey
+      ? 1_000 - Math.abs(beforeIndex - afterIndex)
+      : Number.NEGATIVE_INFINITY;
+  }
+
+  let score = 0;
   const beforeContext = regionContextKey(before);
   const afterContext = regionContextKey(after);
-  score += beforeContext === afterContext ? 34 : -20;
+  if (beforeContext !== afterContext) return Number.NEGATIVE_INFINITY;
 
   const beforeClasses = new Set(classTokens(before));
-  const sharedClasses = classTokens(after).filter((token) => beforeClasses.has(token)).length;
-  score += Math.min(24, sharedClasses * 8);
+  const sharedClasses = classTokens(after).filter((token) => beforeClasses.has(token));
+  const distinctiveClasses = sharedClasses.filter((token) => ![
+    "active", "card", "col", "column", "container", "content", "grid", "item",
+    "main", "panel", "row", "section", "selected", "wrap", "wrapper",
+  ].includes(token));
 
   const beforeHeading = conciseElementText(directHeading(before));
   const afterHeading = conciseElementText(directHeading(after));
-  if (beforeHeading && afterHeading && beforeHeading === afterHeading) score += 28;
-  if (normalizedText(before) === normalizedText(after)) score += 36;
-  score += Math.max(0, 9 - Math.abs(beforeIndex - afterIndex));
+  const headingMatches = Boolean(beforeHeading && beforeHeading === afterHeading);
+  const beforeText = normalizedText(before);
+  const afterText = normalizedText(after);
+  const exactText = Boolean(beforeText && beforeText === afterText);
+  const similarity = reviewTextSimilarity(beforeText, afterText);
+  const accessibleIdentity = ["aria-label", "data-title", "name", "title"].some((attribute) => {
+    const value = before.getAttribute(attribute)?.trim();
+    return Boolean(value && value === after.getAttribute(attribute)?.trim());
+  });
+  const hasEvidence = exactText
+    || headingMatches
+    || accessibleIdentity
+    || similarity >= .46
+    || (distinctiveClasses.length > 0 && similarity >= .2)
+    || (distinctiveClasses.length > 0 && !beforeText && !afterText);
+  if (!hasEvidence) return Number.NEGATIVE_INFINITY;
+
+  if (exactText) score += 220;
+  if (headingMatches) score += 130;
+  if (accessibleIdentity) score += 120;
+  score += Math.round(similarity * 100);
+  score += Math.min(48, distinctiveClasses.length * 16);
+  score += Math.max(0, 16 - Math.abs(beforeIndex - afterIndex) * 3);
   return score;
+}
+
+function elementPairScore(
+  before: Element,
+  after: Element,
+  beforeIndex: number,
+  afterIndex: number,
+): number {
+  if (before.tagName !== after.tagName) return Number.NEGATIVE_INFINITY;
+  const beforeKey = pairKey(before);
+  const afterKey = pairKey(after);
+  if (beforeKey || afterKey) {
+    return beforeKey && beforeKey === afterKey
+      ? 1_000 - Math.abs(beforeIndex - afterIndex)
+      : Number.NEGATIVE_INFINITY;
+  }
+  if (normalizedMarkup(before) === normalizedMarkup(after)) {
+    return 800 - Math.abs(beforeIndex - afterIndex);
+  }
+  const beforeText = normalizedText(before);
+  const afterText = normalizedText(after);
+  const exactText = Boolean(beforeText && beforeText === afterText);
+  const similarity = reviewTextSimilarity(beforeText, afterText);
+  const beforeClasses = new Set(classTokens(before));
+  const sharedClasses = classTokens(after).filter((token) => beforeClasses.has(token));
+  const distinctiveClasses = sharedClasses.filter((token) => ![
+    "active", "card", "col", "column", "container", "content", "grid", "item",
+    "main", "panel", "row", "section", "selected", "wrap", "wrapper",
+  ].includes(token));
+  const sameIdentityAttribute = ["aria-label", "name", "title", "alt"].some((attribute) => {
+    const value = before.getAttribute(attribute)?.trim();
+    return Boolean(value && value === after.getAttribute(attribute)?.trim());
+  });
+  const hasEvidence = exactText
+    || sameIdentityAttribute
+    || similarity >= .52
+    || (distinctiveClasses.length > 0 && similarity >= .24)
+    || (distinctiveClasses.length > 0 && !beforeText && !afterText);
+  if (!hasEvidence) return Number.NEGATIVE_INFINITY;
+  return (exactText ? 260 : 0)
+    + (sameIdentityAttribute ? 180 : 0)
+    + Math.round(similarity * 100)
+    + Math.min(60, distinctiveClasses.length * 20)
+    + Math.max(0, 16 - Math.abs(beforeIndex - afterIndex) * 2);
 }
 
 type SectionPair = {
@@ -782,7 +841,7 @@ function markMovedPairs(pairs: SectionPair[]): SectionPair[] {
 }
 
 function pairSections(before: Element[], after: Element[]): SectionPair[] {
-  const pairs: SectionPair[] = [];
+  const assignments = new Map<Element, Element>();
   const usedAfter = new Set<Element>();
   const afterByKey = new Map<string, Element>();
   after.forEach((element) => {
@@ -790,29 +849,40 @@ function pairSections(before: Element[], after: Element[]): SectionPair[] {
     if (key && !afterByKey.has(key)) afterByKey.set(key, element);
   });
 
-  before.forEach((beforeElement, index) => {
+  before.forEach((beforeElement) => {
     const key = pairKey(beforeElement);
-    let afterElement = key ? afterByKey.get(key) || null : null;
-    if (afterElement && usedAfter.has(afterElement)) afterElement = null;
-    if (!afterElement) {
-      const ranked = after
-        .map((candidate, afterIndex) => ({
-          candidate,
-          afterIndex,
-          score: usedAfter.has(candidate)
-            ? Number.NEGATIVE_INFINITY
-            : sectionPairScore(beforeElement, candidate, index, afterIndex),
-        }))
-        .sort((left, right) => right.score - left.score);
-      if (ranked[0]?.score >= 20) afterElement = ranked[0].candidate;
-    }
-    if (afterElement) usedAfter.add(afterElement);
-    pairs.push({
+    const afterElement = key ? afterByKey.get(key) || null : null;
+    if (!afterElement || usedAfter.has(afterElement)) return;
+    assignments.set(beforeElement, afterElement);
+    usedAfter.add(afterElement);
+  });
+
+  const edges = before.flatMap((beforeElement, beforeIndex) => (
+    assignments.has(beforeElement) || pairKey(beforeElement)
+      ? []
+      : after.map((afterElement, afterIndex) => ({
+        beforeElement,
+        afterElement,
+        score: pairKey(afterElement)
+          ? Number.NEGATIVE_INFINITY
+          : sectionPairScore(beforeElement, afterElement, beforeIndex, afterIndex),
+      }))
+  )).filter((edge) => Number.isFinite(edge.score))
+    .sort((left, right) => right.score - left.score);
+  edges.forEach(({ beforeElement, afterElement }) => {
+    if (assignments.has(beforeElement) || usedAfter.has(afterElement)) return;
+    assignments.set(beforeElement, afterElement);
+    usedAfter.add(afterElement);
+  });
+
+  const pairs: SectionPair[] = before.map((beforeElement, index) => {
+    const afterElement = assignments.get(beforeElement) || null;
+    return {
       before: beforeElement,
       after: afterElement,
       beforeIndex: index,
       afterIndex: afterElement ? after.indexOf(afterElement) : -1,
-    });
+    };
   });
   after.forEach((afterElement, index) => {
     if (!usedAfter.has(afterElement)) {
@@ -820,21 +890,6 @@ function pairSections(before: Element[], after: Element[]): SectionPair[] {
     }
   });
   return markMovedPairs(pairs);
-}
-
-function changeTypes(pair: SectionPair): ReviewChangeType[] {
-  const { before, after } = pair;
-  if (!before || !after) return ["text", "structure"];
-  const types: ReviewChangeType[] = [];
-  if (normalizedText(before) !== normalizedText(after)) types.push("text");
-  const structureChanged = pair.moved
-    || structureSignature(before) !== structureSignature(after);
-  if (structureChanged) types.push("structure");
-  if (presentationSignature(before) !== presentationSignature(after)) types.push("style");
-  if (!types.length && normalizedMarkup(before) !== normalizedMarkup(after)) {
-    types.push("structure");
-  }
-  return types;
 }
 
 function helperText(
@@ -904,6 +959,20 @@ function tokenizeReviewText(value: string): TextToken[] {
     tokens.push({ value: match[0], start, end: start + match[0].length });
   }
   return tokens;
+}
+
+function reviewTextSimilarity(left: string, right: string): number {
+  if (!left || !right) return 0;
+  if (left === right) return 1;
+  const leftTokens = tokenizeReviewText(left);
+  const rightTokens = tokenizeReviewText(right);
+  if (!leftTokens.length || !rightTokens.length) return 0;
+  const unmatched = unmatchedTokenIndexes(leftTokens, rightTokens);
+  const matched = Math.min(
+    leftTokens.length - unmatched.before.size,
+    rightTokens.length - unmatched.after.size,
+  );
+  return matched / Math.max(leftTokens.length, rightTokens.length);
 }
 
 function unmatchedTokenIndexes(
@@ -1110,20 +1179,29 @@ function sentenceAwareTextDifferences(
   const afterIndexes = [...unmatchedSentences.after].sort((left, right) => left - right);
   const beforeDifferences: TextRange[] = [];
   const afterDifferences: TextRange[] = [];
-  const pairCount = Math.max(beforeIndexes.length, afterIndexes.length);
-
-  for (let index = 0; index < pairCount; index += 1) {
-    const beforeRange = beforeSentences[beforeIndexes[index]];
-    const afterRange = afterSentences[afterIndexes[index]];
-    if (!beforeRange && afterRange) {
-      afterDifferences.push(afterRange);
-      continue;
-    }
-    if (beforeRange && !afterRange) {
-      beforeDifferences.push(beforeRange);
-      continue;
-    }
-    if (!beforeRange || !afterRange) continue;
+  const sentencePairs = beforeIndexes.flatMap((beforeIndex) => afterIndexes.map((afterIndex) => {
+    const beforeRange = beforeSentences[beforeIndex];
+    const afterRange = afterSentences[afterIndex];
+    const similarity = reviewTextSimilarity(
+      beforeText.slice(beforeRange.start, beforeRange.end),
+      afterText.slice(afterRange.start, afterRange.end),
+    );
+    const orderDistance = Math.abs(
+      beforeIndexes.indexOf(beforeIndex) - afterIndexes.indexOf(afterIndex),
+    );
+    return { beforeIndex, afterIndex, similarity, orderDistance };
+  })).filter((pair) => pair.similarity >= .28)
+    .sort((left, right) => (
+      right.similarity - left.similarity || left.orderDistance - right.orderDistance
+    ));
+  const pairedBefore = new Set<number>();
+  const pairedAfter = new Set<number>();
+  sentencePairs.forEach((pair) => {
+    if (pairedBefore.has(pair.beforeIndex) || pairedAfter.has(pair.afterIndex)) return;
+    pairedBefore.add(pair.beforeIndex);
+    pairedAfter.add(pair.afterIndex);
+    const beforeRange = beforeSentences[pair.beforeIndex];
+    const afterRange = afterSentences[pair.afterIndex];
     const beforeSentence = beforeText.slice(beforeRange.start, beforeRange.end);
     const afterSentence = afterText.slice(afterRange.start, afterRange.end);
     const beforeTokens = tokenizeReviewText(beforeSentence);
@@ -1137,7 +1215,7 @@ function sentenceAwareTextDifferences(
     if (similarity < .2) {
       beforeDifferences.push(beforeRange);
       afterDifferences.push(afterRange);
-      continue;
+      return;
     }
     const beforeTokenRanges = rangesForTokens(
       beforeSentence,
@@ -1157,7 +1235,13 @@ function sentenceAwareTextDifferences(
     }));
     beforeDifferences.push(...(beforeTokenRanges.length ? beforeTokenRanges : [beforeRange]));
     afterDifferences.push(...(afterTokenRanges.length ? afterTokenRanges : [afterRange]));
-  }
+  });
+  beforeIndexes.forEach((index) => {
+    if (!pairedBefore.has(index)) beforeDifferences.push(beforeSentences[index]);
+  });
+  afterIndexes.forEach((index) => {
+    if (!pairedAfter.has(index)) afterDifferences.push(afterSentences[index]);
+  });
 
   return {
     before: mergeTextRanges(beforeDifferences),
@@ -1165,21 +1249,10 @@ function sentenceAwareTextDifferences(
   };
 }
 
-function addReviewContextType(element: Element, type: ReviewChangeType | "all") {
-  const current = new Set(
-    (element.getAttribute("data-pageroot-review-context-types") || "")
-      .split(/\s+/u)
-      .filter(Boolean),
-  );
-  current.add(type);
-  element.setAttribute("data-pageroot-review-context-types", [...current].join(" "));
-}
-
 function wrapTextRanges(
   inventory: ReviewTextInventory,
   ranges: TextRange[],
   tone: "removed" | "added",
-  markContext = false,
 ) {
   if (!ranges.length) return;
   const mergedRanges = mergeTextRanges(ranges);
@@ -1187,18 +1260,13 @@ function wrapTextRanges(
     const intersections = mergedRanges
       .map((range) => ({ start: Math.max(start, range.start), end: Math.min(end, range.end) }))
       .filter((range) => range.end > range.start);
-    if (!intersections.length && !markContext) return;
+    if (!intersections.length) return;
     const source = node.textContent || "";
     const fragment = node.ownerDocument.createDocumentFragment();
-    const appendSegment = (value: string, kind: "difference" | "context") => {
+    const appendDifference = (value: string) => {
       if (!value) return;
       const marker = node.ownerDocument.createElement("span");
-      if (kind === "difference") {
-        marker.dataset.pagerootReviewText = tone;
-      } else {
-        marker.setAttribute("data-pageroot-review-text-context", "true");
-        addReviewContextType(marker, "text");
-      }
+      marker.dataset.pagerootReviewText = tone;
       marker.textContent = value;
       fragment.append(marker);
     };
@@ -1207,17 +1275,13 @@ function wrapTextRanges(
       const localStart = range.start - start;
       const localEnd = range.end - start;
       if (localStart > cursor) {
-        const context = source.slice(cursor, localStart);
-        if (markContext) appendSegment(context, "context");
-        else fragment.append(context);
+        fragment.append(source.slice(cursor, localStart));
       }
-      appendSegment(source.slice(localStart, localEnd), "difference");
+      appendDifference(source.slice(localStart, localEnd));
       cursor = localEnd;
     });
     if (cursor < source.length) {
-      const context = source.slice(cursor);
-      if (markContext) appendSegment(context, "context");
-      else fragment.append(context);
+      fragment.append(source.slice(cursor));
     }
     node.replaceWith(fragment);
   });
@@ -1227,6 +1291,12 @@ function isTextBlock(element: Element): boolean {
   return element.matches(
     "h1, h2, h3, h4, h5, h6, p, li, dt, dd, th, td, caption, figcaption, blockquote, label, button, a, summary, [role='heading']",
   ) || hasClassRole(element, ["copy", "heading", "header", "label", "note", "subtitle", "title"]);
+}
+
+function isLeafInlineText(element: Element): boolean {
+  return element.childElementCount === 0
+    && element.matches("span, strong, em, b, i, small, code, data, output, time")
+    && normalizedText(element).length > 0;
 }
 
 const GENERIC_TEXT_CONTAINER_TAGS = new Set([
@@ -1246,11 +1316,11 @@ function hasDirectReviewText(element: Element): boolean {
 }
 
 function reviewTextBlocks(region: Element): Element[] {
-  const explicitBlockSelector = "h1, h2, h3, h4, h5, h6, p, li, dt, dd, th, td, caption, figcaption, blockquote, label, button, summary, [role='heading']";
+  const explicitBlockSelector = "h1, h2, h3, h4, h5, h6, p, li, dt, dd, th, td, caption, figcaption, blockquote, label, button, summary, span, strong, em, b, i, small, code, data, output, time, [role='heading']";
   const candidates = [region, ...region.querySelectorAll("*")].filter((element) => (
     !NON_CONTENT_TAGS.has(element.tagName)
     && normalizedText(element).length > 0
-    && (isTextBlock(element) || hasDirectReviewText(element))
+    && (isTextBlock(element) || isLeafInlineText(element) || hasDirectReviewText(element))
     && (
       !GENERIC_TEXT_CONTAINER_TAGS.has(element.tagName)
       || !element.querySelector(explicitBlockSelector)
@@ -1286,42 +1356,47 @@ function pairTextBlocks(
   before.forEach((beforeElement) => {
     if (assignments.has(beforeElement)) return;
     const beforeText = normalizedText(beforeElement);
-    const exact = after.find((candidate) => (
-      !usedAfter.has(candidate)
-      && candidate.tagName === beforeElement.tagName
-      && normalizedText(candidate) === beforeText
-    ));
+    const exact = after
+      .map((candidate, afterIndex) => ({ candidate, afterIndex }))
+      .filter(({ candidate }) => (
+        !usedAfter.has(candidate)
+        && candidate.tagName === beforeElement.tagName
+        && normalizedText(candidate) === beforeText
+      ))
+      .sort((left, right) => (
+        Math.abs(before.indexOf(beforeElement) - left.afterIndex)
+        - Math.abs(before.indexOf(beforeElement) - right.afterIndex)
+      ))[0]?.candidate;
     if (!exact) return;
     assignments.set(beforeElement, exact);
     usedAfter.add(exact);
   });
 
-  const similarity = (left: Element, right: Element) => {
-    const leftTokens = tokenizeReviewText(reviewTextInventory(left).text);
-    const rightTokens = tokenizeReviewText(reviewTextInventory(right).text);
-    if (!leftTokens.length || !rightTokens.length) return 0;
-    const unmatched = unmatchedTokenIndexes(leftTokens, rightTokens);
-    const matched = Math.min(
-      leftTokens.length - unmatched.before.size,
-      rightTokens.length - unmatched.after.size,
-    );
-    return matched / Math.max(leftTokens.length, rightTokens.length);
-  };
-
-  before.forEach((beforeElement, beforeIndex) => {
-    if (assignments.has(beforeElement)) return;
-    const ranked = after
-      .map((candidate, afterIndex) => ({
-        candidate,
-        score: usedAfter.has(candidate) || candidate.tagName !== beforeElement.tagName
-          ? Number.NEGATIVE_INFINITY
-          : similarity(beforeElement, candidate) * 100
-            + Math.max(0, 12 - Math.abs(beforeIndex - afterIndex) * 3),
-      }))
-      .sort((left, right) => right.score - left.score);
-    if ((ranked[0]?.score || 0) < 34) return;
-    assignments.set(beforeElement, ranked[0].candidate);
-    usedAfter.add(ranked[0].candidate);
+  const edges = before.flatMap((beforeElement, beforeIndex) => (
+    assignments.has(beforeElement) || pairKey(beforeElement)
+      ? []
+      : after.map((candidate, afterIndex) => {
+        if (
+          usedAfter.has(candidate)
+          || pairKey(candidate)
+          || candidate.tagName !== beforeElement.tagName
+        ) return null;
+        const similarity = reviewTextSimilarity(
+          reviewTextInventory(beforeElement).text,
+          reviewTextInventory(candidate).text,
+        );
+        if (similarity < .5) return null;
+        return {
+          beforeElement,
+          candidate,
+          score: similarity * 100 + Math.max(0, 12 - Math.abs(beforeIndex - afterIndex) * 2),
+        };
+      }).filter((edge): edge is NonNullable<typeof edge> => Boolean(edge))
+  )).sort((left, right) => right.score - left.score);
+  edges.forEach(({ beforeElement, candidate }) => {
+    if (assignments.has(beforeElement) || usedAfter.has(candidate)) return;
+    assignments.set(beforeElement, candidate);
+    usedAfter.add(candidate);
   });
 
   const pairs: Array<{ before: Element | null; after: Element | null }> = before.map((beforeElement) => ({
@@ -1334,31 +1409,36 @@ function pairTextBlocks(
   return pairs;
 }
 
-function markAllText(element: Element, tone: "removed" | "added") {
-  element.setAttribute("data-pageroot-review-text-group", tone);
+function markAllText(element: Element, tone: "removed" | "added"): boolean {
   const inventory = reviewTextInventory(element);
-  if (inventory.text.length) {
-    wrapTextRanges(inventory, [{ start: 0, end: inventory.text.length }], tone);
-  }
+  if (!inventory.text.trim()) return false;
+  element.setAttribute("data-pageroot-review-text-group", tone);
+  wrapTextRanges(inventory, [{ start: 0, end: inventory.text.length }], tone);
+  return true;
 }
 
-function markTextDifferences(before: Element | null, after: Element | null) {
+function markTextDifferences(before: Element | null, after: Element | null): boolean {
+  let changed = false;
   if (!before && after) {
-    reviewTextBlocks(after).forEach((element) => markAllText(element, "added"));
-    return;
+    reviewTextBlocks(after).forEach((element) => {
+      changed = markAllText(element, "added") || changed;
+    });
+    return changed;
   }
   if (before && !after) {
-    reviewTextBlocks(before).forEach((element) => markAllText(element, "removed"));
-    return;
+    reviewTextBlocks(before).forEach((element) => {
+      changed = markAllText(element, "removed") || changed;
+    });
+    return changed;
   }
-  if (!before || !after) return;
+  if (!before || !after) return false;
   pairTextBlocks(reviewTextBlocks(before), reviewTextBlocks(after)).forEach((pair) => {
     if (!pair.before && pair.after) {
-      markAllText(pair.after, "added");
+      changed = markAllText(pair.after, "added") || changed;
       return;
     }
     if (pair.before && !pair.after) {
-      markAllText(pair.before, "removed");
+      changed = markAllText(pair.before, "removed") || changed;
       return;
     }
     if (!pair.before || !pair.after) return;
@@ -1371,13 +1451,16 @@ function markTextDifferences(before: Element | null, after: Element | null) {
     );
     if (differences.before.length) {
       pair.before.setAttribute("data-pageroot-review-text-group", "changed");
-      wrapTextRanges(beforeInventory, differences.before, "removed", true);
+      wrapTextRanges(beforeInventory, differences.before, "removed");
+      changed = true;
     }
     if (differences.after.length) {
       pair.after.setAttribute("data-pageroot-review-text-group", "changed");
-      wrapTextRanges(afterInventory, differences.after, "added", true);
+      wrapTextRanges(afterInventory, differences.after, "added");
+      changed = true;
     }
   });
+  return changed;
 }
 
 function selfPresentationSignature(element: Element): string {
@@ -1413,38 +1496,37 @@ function pairVisualElements(
     afterBuckets.set(key, bucket);
   });
   const usedAfter = new Set<Element>();
-  const pairs: Array<{ before: Element; after: Element }> = [];
-  beforeElements.forEach((beforeElement, index) => {
+  const assignments = new Map<Element, Element>();
+  beforeElements.forEach((beforeElement) => {
     const key = visualPairKey(beforeElement);
     const keyed = key && afterBuckets.get(key)?.length === 1
       ? afterBuckets.get(key)?.[0] || null
       : null;
-    let afterElement = keyed && !usedAfter.has(keyed) ? keyed : null;
-    if (!afterElement) {
-      const beforeText = beforeElement.childElementCount <= 3
-        ? (beforeElement.textContent || "").replace(/\s+/g, " ").trim()
-        : "";
-      afterElement = afterElements.find((candidate) => (
-        !usedAfter.has(candidate)
-        && candidate.tagName === beforeElement.tagName
-        && beforeText.length > 0
-        && candidate.childElementCount <= 3
-        && (candidate.textContent || "").replace(/\s+/g, " ").trim() === beforeText
-      )) || null;
-    }
-    if (!afterElement) {
-      const positional = afterElements[index];
-      if (
-        positional
-        && positional.tagName === beforeElement.tagName
-        && !usedAfter.has(positional)
-      ) afterElement = positional;
-    }
-    if (!afterElement) return;
-    usedAfter.add(afterElement);
-    pairs.push({ before: beforeElement, after: afterElement });
+    if (!keyed || usedAfter.has(keyed)) return;
+    assignments.set(beforeElement, keyed);
+    usedAfter.add(keyed);
   });
-  return pairs;
+  const edges = beforeElements.flatMap((beforeElement, beforeIndex) => (
+    assignments.has(beforeElement)
+      ? []
+      : afterElements.map((afterElement, afterIndex) => ({
+        beforeElement,
+        afterElement,
+        score: usedAfter.has(afterElement)
+          ? Number.NEGATIVE_INFINITY
+          : elementPairScore(beforeElement, afterElement, beforeIndex, afterIndex),
+      }))
+  )).filter((edge) => Number.isFinite(edge.score))
+    .sort((left, right) => right.score - left.score);
+  edges.forEach(({ beforeElement, afterElement }) => {
+    if (assignments.has(beforeElement) || usedAfter.has(afterElement)) return;
+    assignments.set(beforeElement, afterElement);
+    usedAfter.add(afterElement);
+  });
+  return [...assignments].map(([beforeElement, afterElement]) => ({
+    before: beforeElement,
+    after: afterElement,
+  }));
 }
 
 function semanticElementName(element: Element): string {
@@ -1481,7 +1563,24 @@ function markStructureElement(element: Element, tone: string) {
   element.setAttribute("data-pageroot-review-structure", tone);
 }
 
-function markStructureDifferences(pair: SectionPair): string {
+function pairSiblingElements(before: Element[], after: Element[]): Map<Element, Element> {
+  const assignments = new Map<Element, Element>();
+  const usedAfter = new Set<Element>();
+  const edges = before.flatMap((beforeElement, beforeIndex) => after.map((afterElement, afterIndex) => ({
+    beforeElement,
+    afterElement,
+    score: elementPairScore(beforeElement, afterElement, beforeIndex, afterIndex),
+  }))).filter((edge) => Number.isFinite(edge.score))
+    .sort((left, right) => right.score - left.score);
+  edges.forEach(({ beforeElement, afterElement }) => {
+    if (assignments.has(beforeElement) || usedAfter.has(afterElement)) return;
+    assignments.set(beforeElement, afterElement);
+    usedAfter.add(afterElement);
+  });
+  return assignments;
+}
+
+function markStructureDifferences(pair: SectionPair): boolean {
   const stats: StructureDifferenceStats = { added: [], removed: [], moved: [], replaced: [] };
   if (!pair.before && pair.after) {
     markStructureElement(pair.after, "added");
@@ -1506,63 +1605,23 @@ function markStructureDifferences(pair: SectionPair): string {
       }
       const beforeChildren = eligibleChildren(beforeParent);
       const afterChildren = eligibleChildren(afterParent);
-      const assignments = new Map<Element, Element>();
-      const usedAfter = new Set<Element>();
-      const afterByKey = new Map<string, Element>();
-      afterChildren.forEach((element) => {
-        const key = pairKey(element);
-        if (key && !afterByKey.has(key)) afterByKey.set(key, element);
-      });
+      const assignments = pairSiblingElements(beforeChildren, afterChildren);
+      const usedAfter = new Set(assignments.values());
+      const matchedBeforeOrder = beforeChildren.filter((element) => assignments.has(element));
+      const matchedAfterOrder = [...matchedBeforeOrder].sort((left, right) => (
+        afterChildren.indexOf(assignments.get(left) as Element)
+        - afterChildren.indexOf(assignments.get(right) as Element)
+      ));
+      const afterRank = new Map(matchedAfterOrder.map((element, index) => [element, index]));
       beforeChildren.forEach((element) => {
-        const key = pairKey(element);
-        const match = key ? afterByKey.get(key) || null : null;
-        if (!match || usedAfter.has(match)) return;
-        assignments.set(element, match);
-        usedAfter.add(match);
-      });
-      beforeChildren.forEach((element) => {
-        if (assignments.has(element)) return;
-        const exact = afterChildren.find((candidate) => (
-          !usedAfter.has(candidate)
-          && candidate.tagName === element.tagName
-          && normalizedMarkup(candidate) === normalizedMarkup(element)
-        ));
-        if (!exact) return;
-        assignments.set(element, exact);
-        usedAfter.add(exact);
-      });
-      beforeChildren.forEach((element, index) => {
-        if (assignments.has(element)) return;
-        const exactText = afterChildren.find((candidate) => (
-          !usedAfter.has(candidate)
-          && candidate.tagName === element.tagName
-          && normalizedText(candidate) === normalizedText(element)
-        ));
-        const positional = afterChildren[index];
-        const match = exactText || (
-          positional
-          && !usedAfter.has(positional)
-          && positional.tagName === element.tagName
-            ? positional
-            : null
-        );
-        if (!match) return;
-        assignments.set(element, match);
-        usedAfter.add(match);
-      });
-      beforeChildren.forEach((element, index) => {
         const match = assignments.get(element);
         if (!match) {
           markStructureElement(element, "removed");
           stats.removed.push(semanticElementName(element));
           return;
         }
-        const afterIndex = afterChildren.indexOf(match);
-        if (
-          beforeChildren.length === afterChildren.length
-          && index !== afterIndex
-          && normalizedMarkup(element) === normalizedMarkup(match)
-        ) {
+        const matchedIndex = matchedBeforeOrder.indexOf(element);
+        if (matchedIndex !== afterRank.get(element)) {
           markStructureElement(element, "from");
           markStructureElement(match, "to");
           stats.moved.push(semanticElementName(match));
@@ -1577,30 +1636,8 @@ function markStructureDifferences(pair: SectionPair): string {
     };
     compareChildren(pair.before, pair.after, 0);
   }
-  const summaries: string[] = [];
-  if (stats.added.length) summaries.push(`新增 ${stats.added.length} 个${stats.added[0]}`);
-  if (stats.removed.length) summaries.push(`移除 ${stats.removed.length} 个${stats.removed[0]}`);
-  if (stats.moved.length) summaries.push(`移动 ${stats.moved.length} 个${stats.moved[0]}`);
-  if (stats.replaced.length) summaries.push(`${stats.replaced[0]}属性发生变化`);
-  return `结构：${summaries.slice(0, 3).join("，") || "层级或节点发生变化"}`;
+  return Object.values(stats).some((entries) => entries.length > 0);
 }
-
-const STYLE_PROPERTY_LABELS: Record<string, string> = {
-  "background": "背景",
-  "background-color": "背景色",
-  "border": "边框",
-  "border-radius": "圆角",
-  "color": "文字颜色",
-  "display": "显示方式",
-  "font-size": "字号",
-  "font-weight": "字重",
-  "gap": "间距",
-  "height": "高度",
-  "margin": "外边距",
-  "opacity": "透明度",
-  "padding": "内边距",
-  "width": "宽度",
-};
 
 function styleDeclarationMap(value: string): Map<string, string> {
   const declarations = new Map<string, string>();
@@ -1613,27 +1650,6 @@ function styleDeclarationMap(value: string): Map<string, string> {
     );
   });
   return declarations;
-}
-
-function changedStyleLabels(before: Element, after: Element): string[] {
-  const labels = new Set<string>();
-  const beforeStyle = styleDeclarationMap(before.getAttribute("style") || "");
-  const afterStyle = styleDeclarationMap(after.getAttribute("style") || "");
-  new Set([...beforeStyle.keys(), ...afterStyle.keys()]).forEach((property) => {
-    if (beforeStyle.get(property) !== afterStyle.get(property)) {
-      labels.add(STYLE_PROPERTY_LABELS[property] || property);
-    }
-  });
-  const attributeNames = new Set([
-    ...[...before.attributes].map((attribute) => attribute.name.toLowerCase()),
-    ...[...after.attributes].map((attribute) => attribute.name.toLowerCase()),
-  ]);
-  attributeNames.forEach((name) => {
-    if (!VISUAL_ATTRIBUTE_NAMES.has(name) || name === "style") return;
-    if (before.getAttribute(name) === after.getAttribute(name)) return;
-    labels.add(name === "class" ? "样式类" : STYLE_PROPERTY_LABELS[name] || name);
-  });
-  return [...labels];
 }
 
 function stylesheetRules(document: Document): Map<string, string> {
@@ -1683,96 +1699,42 @@ function elementsMatchingSelector(root: Element, rawSelector: string): Element[]
   }
 }
 
-function markStyleDifferences(before: Element | null, after: Element | null): string {
-  const labels = new Set<string>();
-  if (!before || !after) {
-    (after || before)?.setAttribute("data-pageroot-review-style", after ? "after" : "before");
-    return "视觉：新增或移除的元素样式";
-  }
+function markStyleDifferences(before: Element | null, after: Element | null): boolean {
+  if (!before || !after) return false;
   let marked = 0;
   for (const pair of pairVisualElements(before, after)) {
     if (selfPresentationSignature(pair.before) === selfPresentationSignature(pair.after)) continue;
     pair.before.setAttribute("data-pageroot-review-style", "before");
     pair.after.setAttribute("data-pageroot-review-style", "after");
-    changedStyleLabels(pair.before, pair.after).forEach((label) => labels.add(label));
     marked += 1;
     if (marked >= 40) break;
   }
   const changedRules = changedStylesheetSelectors(before.ownerDocument, after.ownerDocument);
-  changedRules.forEach(({ selector, labels: properties }) => {
+  changedRules.forEach(({ selector }) => {
     selector.split(",").forEach((part) => {
-      elementsMatchingSelector(before, part).slice(0, 20).forEach((element) => {
-        element.setAttribute("data-pageroot-review-style", "before");
-        marked += 1;
-      });
-      elementsMatchingSelector(after, part).slice(0, 20).forEach((element) => {
-        element.setAttribute("data-pageroot-review-style", "after");
+      const beforeMatches = elementsMatchingSelector(before, part).slice(0, 40);
+      const afterMatches = elementsMatchingSelector(after, part).slice(0, 40);
+      pairSiblingElements(beforeMatches, afterMatches).forEach((afterElement, beforeElement) => {
+        beforeElement.setAttribute("data-pageroot-review-style", "before");
+        afterElement.setAttribute("data-pageroot-review-style", "after");
         marked += 1;
       });
     });
-    properties.forEach((property) => labels.add(STYLE_PROPERTY_LABELS[property] || property));
   });
-  if (!marked) {
-    before.setAttribute("data-pageroot-review-style", "before");
-    after.setAttribute("data-pageroot-review-style", "after");
-    labels.add("CSS 规则");
-  }
-  return `视觉：${[...labels].slice(0, 3).join("、") || "呈现样式"}发生变化`;
-}
-
-function annotateUnchangedSubtrees(
-  root: Element | null,
-  type: ReviewChangeType | "all",
-  changedSelector: string,
-) {
-  if (!root) return;
-  const visit = (parent: Element) => {
-    const parentContainsChange = parent.matches(changedSelector)
-      || Boolean(parent.querySelector(changedSelector));
-    if (parentContainsChange) {
-      [...parent.childNodes].forEach((node) => {
-        if (node.nodeType !== 3 || !(node.textContent || "").trim()) return;
-        const context = parent.ownerDocument.createElement("span");
-        addReviewContextType(context, type);
-        context.textContent = node.textContent;
-        node.replaceWith(context);
-      });
-    }
-    eligibleChildren(parent).forEach((child) => {
-      const changed = child.matches(changedSelector);
-      const containsChange = Boolean(child.querySelector(changedSelector));
-      if (!changed && !containsChange) {
-        addReviewContextType(child, type);
-        return;
-      }
-      visit(child);
-    });
-  };
-  visit(root);
-}
-
-function annotateDocumentContexts(document: Document) {
-  const root = document.body;
-  if (!root) return;
-  annotateUnchangedSubtrees(root, "text", "[data-pageroot-review-text]");
-  annotateUnchangedSubtrees(root, "structure", "[data-pageroot-review-structure]");
-  annotateUnchangedSubtrees(root, "style", "[data-pageroot-review-style]");
-  annotateUnchangedSubtrees(
-    root,
-    "all",
-    "[data-pageroot-review-text], [data-pageroot-review-structure], [data-pageroot-review-style]",
-  );
+  return marked > 0;
 }
 
 function annotateChangePair(
   pair: SectionPair,
-  types: ReviewChangeType[],
-): void {
-  if (types.includes("text")) {
-    markTextDifferences(pair.before, pair.after);
-  }
-  if (types.includes("structure")) markStructureDifferences(pair);
-  if (types.includes("style")) markStyleDifferences(pair.before, pair.after);
+): ReviewChangeType[] {
+  const structureChanged = markStructureDifferences(pair);
+  const styleChanged = markStyleDifferences(pair.before, pair.after);
+  const textChanged = markTextDifferences(pair.before, pair.after);
+  return [
+    ...(textChanged ? ["text" as const] : []),
+    ...(structureChanged ? ["structure" as const] : []),
+    ...(styleChanged ? ["style" as const] : []),
+  ];
 }
 
 function attachChangeMarkerMetadata(
@@ -2088,6 +2050,7 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
     right: Math.max(...records.map((record) => record.right)),
     bottom: Math.max(...records.map((record) => record.bottom)),
     types: [...new Set(records.flatMap((record) => record.types))],
+    tones: [...new Set(records.flatMap((record) => record.tones))],
   });
   const mergeConnectedRecords = (records, canMerge) => {
     const remaining = [...records];
@@ -2114,26 +2077,38 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
     if (types.includes("style")) labels.push("视觉");
     return labels.length ? labels.join("、") + "变化" : "变化";
   };
+  const recordsOverlapStrongly = (left, right) => {
+    const width = Math.max(0, Math.min(left.right, right.right) - Math.max(left.left, right.left));
+    const height = Math.max(0, Math.min(left.bottom, right.bottom) - Math.max(left.top, right.top));
+    const intersection = width * height;
+    const leftArea = Math.max(1, (left.right - left.left) * (left.bottom - left.top));
+    const rightArea = Math.max(1, (right.right - right.left) * (right.bottom - right.top));
+    return intersection / Math.min(leftArea, rightArea) >= .62;
+  };
   function renderReviewOverlays() {
-    document.querySelector('[data-pageroot-review-overlay-layer]')?.remove();
+    document.querySelector('[data-pageroot-review-projection-layer]')?.remove();
     const filter = currentState.filter || "all";
     const records = [];
-    if ((filter === "all" || filter === "text") && side === "after") {
+    if (filter === "all" || filter === "text") {
       document.querySelectorAll('[data-pageroot-review-text-group]').forEach((group) => {
-        const rectangles = [...group.querySelectorAll('[data-pageroot-review-text="added"]')]
-          .flatMap((element) => [...element.getClientRects()])
-          .filter((rect) => rect.width > 1 && rect.height > 1);
-        if (!rectangles.length) return;
-        rectangles.forEach((rect) => records.push({
-          changeId: group.getAttribute("data-pageroot-review-marker") || "",
-          summary: group.getAttribute("data-pageroot-review-summary") || "",
-          tone: "text",
-          types: ["text"],
-          left: rect.left + scrollX,
-          top: rect.top + scrollY,
-          right: rect.right + scrollX,
-          bottom: rect.bottom + scrollY,
-        }));
+        group.querySelectorAll('[data-pageroot-review-text]').forEach((element) => {
+          const textTone = element.getAttribute("data-pageroot-review-text") === "removed"
+            ? "text-removed"
+            : "text-added";
+          [...element.getClientRects()]
+            .filter((rect) => rect.width > 1 && rect.height > 1)
+            .forEach((rect) => records.push({
+              changeId: group.getAttribute("data-pageroot-review-marker") || "",
+              summary: group.getAttribute("data-pageroot-review-summary") || "",
+              tone: textTone,
+              tones: [textTone],
+              types: ["text"],
+              left: rect.left + scrollX,
+              top: rect.top + scrollY,
+              right: rect.right + scrollX,
+              bottom: rect.bottom + scrollY,
+            }));
+        });
       });
     }
     const selector = filter === "all"
@@ -2142,20 +2117,20 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
         ? ""
         : '[data-pageroot-review-marker-types~="' + filter + '"]';
     if (selector) [...document.querySelectorAll(selector)]
-      .filter((element) => !element.hasAttribute("data-pageroot-review-text-group"))
       .forEach((element) => {
         const rect = element.getBoundingClientRect();
         const types = markerTypes(element).filter((type) => filter === "all" || type === filter);
-        records.push({
+        types.forEach((type) => records.push({
           changeId: element.getAttribute("data-pageroot-review-marker") || "",
           summary: element.getAttribute("data-pageroot-review-summary") || "",
-          tone: filter === "all" ? (types[0] || "structure") : filter,
-          types,
+          tone: type,
+          tones: [type],
+          types: [type],
           left: rect.left + scrollX,
           top: rect.top + scrollY,
           right: rect.right + scrollX,
           bottom: rect.bottom + scrollY,
-        });
+        }));
       });
     const visibleRecords = records
       .filter((rect) => rect.right - rect.left > 1 && rect.bottom - rect.top > 1)
@@ -2177,37 +2152,86 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
     ));
     if (filter === "all") {
       merged = mergeConnectedRecords(merged, (left, right) => (
-        left.changeId === right.changeId && recordsAreClose(left, right, 8)
+        left.changeId === right.changeId && recordsOverlapStrongly(left, right)
       )).map((record) => ({
         ...record,
-        tone: "all",
+        tone: record.tones.length > 1 ? "mixed" : record.tones[0],
         summary: allModeSummary(record.types),
       }));
     }
-    if (!merged.length) {
-      document.documentElement.dataset.pagerootReviewOverlays = "false";
-      return;
-    }
+    const inset = 3;
+    const documentWidth = Math.max(
+      innerWidth,
+      document.documentElement.scrollWidth,
+      document.body?.scrollWidth || 0,
+    );
+    const height = Math.max(innerHeight, documentHeight());
     const layer = document.createElement("div");
-    layer.setAttribute("data-pageroot-review-overlay-layer", "true");
+    layer.setAttribute("data-pageroot-review-projection-layer", "true");
+    layer.style.setProperty("width", documentWidth + "px", "important");
+    layer.style.setProperty("height", height + "px", "important");
+    const namespace = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(namespace, "svg");
+    svg.setAttribute("data-pageroot-review-mask-layer", "true");
+    svg.setAttribute("width", String(documentWidth));
+    svg.setAttribute("height", String(height));
+    svg.setAttribute("viewBox", "0 0 " + documentWidth + " " + height);
+    svg.style.setProperty("width", documentWidth + "px", "important");
+    svg.style.setProperty("height", height + "px", "important");
+    const holePaths = [];
+    merged.forEach((record) => {
+      const hole = document.createElementNS(namespace, "rect");
+      hole.setAttribute("data-pageroot-review-mask-hole", record.changeId);
+      const left = record.left - inset;
+      const top = record.top - inset;
+      const width = record.right - record.left + inset * 2;
+      const holeHeight = record.bottom - record.top + inset * 2;
+      hole.setAttribute("x", String(left));
+      hole.setAttribute("y", String(top));
+      hole.setAttribute("width", String(width));
+      hole.setAttribute("height", String(holeHeight));
+      hole.setAttribute("rx", String(5));
+      hole.setAttribute("fill", "none");
+      holePaths.push(
+        "M " + left + " " + top
+        + " H " + (left + width)
+        + " V " + (top + holeHeight)
+        + " H " + left + " Z",
+      );
+      svg.append(hole);
+    });
+    const dim = document.createElementNS(namespace, "path");
+    dim.setAttribute("data-pageroot-review-mask-dim", "true");
+    dim.setAttribute(
+      "d",
+      "M 0 0 H " + documentWidth + " V " + height + " H 0 Z " + holePaths.join(" "),
+    );
+    dim.setAttribute("fill", "#ffffff");
+    dim.setAttribute("fill-rule", "evenodd");
+    dim.setAttribute("clip-rule", "evenodd");
+    const contextVisibility = Math.max(0, Math.min(100, Number(currentState.transparency ?? 18))) / 100;
+    dim.setAttribute("fill-opacity", String(Math.round((1 - contextVisibility) * 1_000) / 1_000));
+    svg.prepend(dim);
+    layer.append(svg);
     const firstByChange = new Set();
     merged.forEach((record) => {
       const box = document.createElement("div");
       box.setAttribute("data-pageroot-review-overlay-box", record.changeId);
       box.dataset.tone = record.tone;
+      box.dataset.tones = record.tones.join(" ");
+      box.dataset.types = record.types.join(" ");
       box.dataset.summary = record.summary;
       const active = currentState.focus !== "all" && currentState.focus === record.changeId && !firstByChange.has(record.changeId);
       box.dataset.active = active ? "true" : "false";
       firstByChange.add(record.changeId);
-      const inset = 3;
-      box.style.left = (record.left - inset) + "px";
-      box.style.top = (record.top - inset) + "px";
-      box.style.width = (record.right - record.left + inset * 2) + "px";
-      box.style.height = (record.bottom - record.top + inset * 2) + "px";
+      box.style.setProperty("left", (record.left - inset) + "px", "important");
+      box.style.setProperty("top", (record.top - inset) + "px", "important");
+      box.style.setProperty("width", (record.right - record.left + inset * 2) + "px", "important");
+      box.style.setProperty("height", (record.bottom - record.top + inset * 2) + "px", "important");
       layer.append(box);
     });
     document.body.append(layer);
-    document.documentElement.dataset.pagerootReviewOverlays = "true";
+    document.documentElement.dataset.pagerootReviewOverlays = merged.length ? "true" : "false";
   }
   const applyState = (state) => {
     currentState = { ...currentState, ...state };
@@ -2314,8 +2338,8 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
       const changedNodes = [...mutation.addedNodes, ...mutation.removedNodes];
       return changedNodes.length > 0 && changedNodes.every((node) => (
         node instanceof Element
-        && (node.matches("[data-pageroot-review-overlay-layer]")
-          || Boolean(node.closest("[data-pageroot-review-overlay-layer]")))
+        && (node.matches("[data-pageroot-review-projection-layer]")
+          || Boolean(node.closest("[data-pageroot-review-projection-layer]")))
       ));
     });
     if (!onlyOverlayChanges) scheduleOverlayRender();
@@ -2437,9 +2461,8 @@ export function buildReviewDocuments(
   pairs.forEach((pair, pairIndex) => {
     const outlineId = `outline-${outline.length + 1}`;
     const label = changeLabel(pair.before, pair.after, pairIndex);
-    const types = changeTypes(pair);
+    const types = annotateChangePair(pair);
     const changeId = types.length ? `change-${changes.length + 1}` : undefined;
-    if (changeId) annotateChangePair(pair, types);
     const helper = types.length
       ? helperText(types, Boolean(pair.before), Boolean(pair.after), pair)
       : "本轮未修改";
@@ -2483,9 +2506,6 @@ export function buildReviewDocuments(
       ...(movement ? { movement } : {}),
     });
   });
-
-  annotateDocumentContexts(beforeDocument);
-  annotateDocumentContexts(afterDocument);
 
   const preparedBefore = prepareDocument(
     beforeDocument,

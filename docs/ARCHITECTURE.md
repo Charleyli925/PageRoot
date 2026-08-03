@@ -81,8 +81,14 @@ Comments + frozen input
   serializes the preview DOM or creates a second interaction mode.
 - Formal AI review owns one disposable reducer with independent page, change
   filter, context visibility, navigation, scroll and zoom fields. The document
-  analyzer emits one typed canonical change footprint; global context masking
-  and overlay geometry are two projections of that same footprint. Stable
+  analyzer first establishes high-confidence before/after node pairs, derives
+  copy, structure and visual facts from those pairs, and only then emits one
+  typed canonical change footprint. It never promotes tag/position proximity
+  alone into a change fact. Global context masking punches holes from the exact
+  final overlay rectangles, so mask and frame cannot diverge. The disposable
+  projection uses reserved attributes plus an explicit presentation reset and
+  important geometry, preventing authored `svg`/`div` rules from restyling its
+  mask or frames. Stable
   outline regions remain navigation-only. Before/after panel and action keys
   are assigned as pairs before either isolated document is prepared, so safe
   runtime actions mirror bidirectionally even when copy or order differs.
