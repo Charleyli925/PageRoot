@@ -102,8 +102,14 @@ type ReviewMessage = {
   pageRatio?: number;
   outlineId?: string;
   panelKey?: string;
+  actionKey?: string;
+  actionType?: "click" | "control-state";
+  value?: string;
+  checked?: boolean;
   boundary?: "top" | "middle" | "bottom";
 };
+
+const DEFAULT_CONTEXT_VISIBILITY = 18;
 
 function postToFrame(
   frame: HTMLIFrameElement | null,
@@ -260,7 +266,7 @@ export default function AiReviewWorkspace({
   onExit,
   onReturnBefore,
   onAccept,
-  onRevealRequestFolder,
+  onRevealCandidateHtml,
 }: {
   fileName: string;
   beforeLabel: string;
@@ -274,7 +280,7 @@ export default function AiReviewWorkspace({
   onExit: () => void;
   onReturnBefore: () => void;
   onAccept: () => void;
-  onRevealRequestFolder: () => void;
+  onRevealCandidateHtml: () => void;
 }) {
   const sessionId = `review-${useId().replace(/:/g, "-")}`;
   const fileTitle = fileName.replace(/\.(?:html?|xhtml)$/iu, "") || fileName;
@@ -295,11 +301,11 @@ export default function AiReviewWorkspace({
           outline: [],
         }
   ), [afterHtml, beforeHtml, hydrated, independentTransport, sessionId, sourcePath]);
-  const [displayMode, setDisplayMode] = useState<ReviewDisplayMode>("preview-split");
+  const [displayMode, setDisplayMode] = useState<ReviewDisplayMode>("diff-all");
   const [focus, setFocus] = useState("all");
   const [scrollMode, setScrollMode] = useState<ScrollMode>("linked");
   const [zoom, setZoom] = useState<ZoomMode>("actual");
-  const [transparency, setTransparency] = useState(22);
+  const [transparency, setTransparency] = useState(DEFAULT_CONTEXT_VISIBILITY);
   const [toolbarPinned, setToolbarPinned] = useState(false);
   const [mapPinned, setMapPinned] = useState(false);
   const [mapPeeked, setMapPeeked] = useState(false);
@@ -309,6 +315,8 @@ export default function AiReviewWorkspace({
   const continueReviewButtonRef = useRef<HTMLButtonElement>(null);
   const confirmationTriggerRef = useRef<HTMLButtonElement | null>(null);
   const confirmDialogRef = useRef<HTMLElement>(null);
+  const mapDrawerRef = useRef<HTMLElement>(null);
+  const reviewInitializedRef = useRef(false);
   const framesRef = useRef<Record<ReviewSide, HTMLIFrameElement | null>>({
     before: null,
     after: null,
@@ -351,6 +359,25 @@ export default function AiReviewWorkspace({
   const mapOpen = mapPinned || mapPeeked;
 
   useEffect(() => {
+    if (!hydrated || reviewInitializedRef.current) return;
+    reviewInitializedRef.current = true;
+    setDisplayMode("diff-all");
+    setFocus(documents.changes[0]?.id || "all");
+  }, [documents.changes, hydrated]);
+
+  useEffect(() => {
+    if (!mapOpen) return undefined;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && mapDrawerRef.current?.contains(target)) return;
+      setMapPinned(false);
+      setMapPeeked(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePointer, true);
+    return () => document.removeEventListener("pointerdown", closeOnOutsidePointer, true);
+  }, [mapOpen]);
+
+  useEffect(() => {
     reviewStateRef.current = { filter, focus, transparency };
   }, [filter, focus, transparency]);
 
@@ -369,6 +396,19 @@ export default function AiReviewWorkspace({
       });
     });
   }, [sessionId]);
+
+  const focusCurrentSelection = useCallback((side: ReviewSide) => {
+    const currentFocus = reviewStateRef.current.focus;
+    if (currentFocus === "all") return;
+    const selectedChange = documents.changes.find((change) => change.id === currentFocus);
+    if (!selectedChange) return;
+    postToFrame(framesRef.current[side], sessionId, {
+      type: "focus-change",
+      changeId: currentFocus,
+      panelKey: selectedChange.panelKey,
+      behavior: "auto",
+    });
+  }, [documents.changes, sessionId]);
 
   useEffect(() => {
     if (!independentTransport) return undefined;
@@ -434,6 +474,30 @@ export default function AiReviewWorkspace({
       ) return;
       if (message.type === "ready") {
         sendState(message.side);
+        focusCurrentSelection(message.side);
+        return;
+      }
+      if (
+        message.type === "interaction"
+        || message.type === "action"
+        || message.type === "control-state"
+      ) {
+        setMapPinned(false);
+        setMapPeeked(false);
+      }
+      if (
+        (message.type === "action" || message.type === "control-state")
+        && scrollMode === "linked"
+        && message.actionKey
+      ) {
+        const follower: ReviewSide = message.side === "before" ? "after" : "before";
+        postToFrame(framesRef.current[follower], sessionId, {
+          type: "mirror-action",
+          actionKey: message.actionKey,
+          actionType: message.type === "control-state" ? "control-state" : "click",
+          value: message.value,
+          checked: message.checked,
+        });
         return;
       }
       if (message.type === "panel-change") {
@@ -460,12 +524,15 @@ export default function AiReviewWorkspace({
     };
     window.addEventListener("message", handleMessage);
     return () => window.removeEventListener("message", handleMessage);
-  }, [scrollMode, sendState, sessionId]);
+  }, [focusCurrentSelection, scrollMode, sendState, sessionId]);
 
   const registerFrame = useCallback((side: ReviewSide, frame: HTMLIFrameElement | null) => {
     framesRef.current[side] = frame;
-    if (frame) window.requestAnimationFrame(() => sendState(side));
-  }, [sendState]);
+    if (frame) window.requestAnimationFrame(() => {
+      sendState(side);
+      focusCurrentSelection(side);
+    });
+  }, [focusCurrentSelection, sendState]);
 
   const registerViewport = useCallback((side: ReviewSide, viewport: HTMLDivElement | null) => {
     viewportsRef.current[side] = viewport;
@@ -887,6 +954,7 @@ export default function AiReviewWorkspace({
             </div>
 
             <aside
+              ref={mapDrawerRef}
               className={styles.mapDrawer}
               data-open={mapOpen ? "true" : undefined}
               data-pinned={mapPinned ? "true" : undefined}
@@ -898,7 +966,7 @@ export default function AiReviewWorkspace({
                   className={styles.mapHandleMain}
                   type="button"
                   aria-expanded={mapOpen}
-                  aria-label={mapPinned ? "收起并取消固定内容地图" : "打开并固定内容地图"}
+                  aria-label={mapOpen ? "收起内容地图" : "打开内容地图"}
                   onClick={() => {
                     setMapPinned((current) => !current);
                     setMapPeeked(false);
@@ -916,7 +984,7 @@ export default function AiReviewWorkspace({
               <div className={styles.mapPanel} aria-hidden={!mapOpen} inert={!mapOpen ? true : undefined}>
                 <header>
                   <div><span>页面内容地图 · {documents.outline.length} 个区域</span><strong>{activeChange ? `正在看：${activeChange.label}` : focus === "all" ? "整页总览" : "正在看未修改区域"}</strong></div>
-                  <button type="button" aria-label={mapPinned ? "取消固定内容地图" : "固定内容地图"} aria-pressed={mapPinned} onClick={() => setMapPinned((current) => !current)}>
+                  <button type="button" aria-label={mapPinned ? "收起内容地图" : "保持内容地图展开"} aria-pressed={mapPinned} onClick={() => setMapPinned((current) => !current)}>
                     <PushPinIcon aria-hidden="true" size={15} weight={mapPinned ? "fill" : "duotone"} />
                   </button>
                 </header>
@@ -1011,7 +1079,7 @@ export default function AiReviewWorkspace({
                 ? <>
                     <span>确认后不会采用这次 AI 返回的 {afterLabel}。</span>
                     <span>将继续使用 {beforeLabel}（AI 修改前）为基线重新修改。</span>
-                    <button type="button" onClick={onRevealRequestFolder}>AI 返回的 HTML 仍保留在原位置不会被删除。</button>
+                    <button type="button" onClick={onRevealCandidateHtml}>AI 返回的 HTML 已自动保留，点击在 Finder 中显示。</button>
                   </>
                 : <>
                     <span>确认后将切换到 AI 修改后的{afterLabel}。</span>

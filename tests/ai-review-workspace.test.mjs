@@ -28,15 +28,25 @@ test("formal review loads and verifies the immutable candidate without activatin
   assert.match(loader, /bridgeClient\.versionFile\(/);
   assert.match(loader, /await browserSha256\(candidateHtml\) !== candidateHash/);
   assert.match(loader, /await browserSha256\(frozenHtml\) !== run\.baseSnapshotSha256/);
+  assert.match(loader, /fenceAndFreezeCurrentCanvas\(/);
   assert.doesNotMatch(loader, /activateReadyVersion/);
   assert.match(
     workbench,
-    /onAccept=\{\(\) => \{[\s\S]*?setReadyReviewSession\(null\)[\s\S]*?setDrawer\(null\)[\s\S]*?requestAnimationFrame\(\(\) => void activateReadyResult\(\{[\s\S]*?reviewed: true[\s\S]*?\}\)\)/,
+    /onAccept=\{\(\) => \{[\s\S]*?void activateReadyResult\(\{[\s\S]*?reviewed: true[\s\S]*?\}\);[\s\S]*?\}\}/,
   );
   assert.doesNotMatch(
-    workbench.slice(workbench.indexOf("onAccept={() =>"), workbench.indexOf("onRevealRequestFolder", workbench.indexOf("onAccept={() =>"))),
-    /setDrawer\("handoff"\)/,
+    workbench.slice(workbench.indexOf("onAccept={() =>"), workbench.indexOf("onRevealCandidateHtml", workbench.indexOf("onAccept={() =>"))),
+    /setReadyReviewSession\(null\)|setDrawer\(|requestAnimationFrame/,
   );
+  assert.match(workbench, /const candidateVersionId = activeRun\?\.candidateVersionId/);
+  assert.match(workbench, /revealVersionInFinder\(\{ id: candidateVersionId \}\)/);
+  assert.match(workbench, /const readyReviewOverlay = readyReviewSession \? \(/);
+  assert.match(workbench, /inert=\{readyReviewSession \? true : undefined\}/);
+  assert.match(
+    workbench,
+    /await openCommittedVersion\(run, mergedPayload\)[\s\S]*?setDrawer\(null\)[\s\S]*?requestAnimationFrame[\s\S]*?requestAnimationFrame[\s\S]*?setReadyReviewSession\(null\)/,
+  );
+  assert.match(styles, /\.reviewRoot \{[\s\S]*?position: fixed;[\s\S]*?inset: 0;/);
 });
 
 test("formal review reuses the workbench header and exposes the frozen seven-mode hierarchy", () => {
@@ -59,12 +69,16 @@ test("formal review reuses the workbench header and exposes the frozen seven-mod
   assert.match(review, /WorkbenchHeaderShell/);
   assert.match(workbench, /WorkbenchHeaderShell/);
   assert.match(headerShell, /className=\{joinClassNames\("workbench-header", className\)\}/);
-  assert.match(review, /const \[displayMode, setDisplayMode\] = useState<ReviewDisplayMode>\("preview-split"\)/);
+  assert.match(review, /const DEFAULT_CONTEXT_VISIBILITY = 18/);
+  assert.match(review, /const \[displayMode, setDisplayMode\] = useState<ReviewDisplayMode>\("diff-all"\)/);
+  assert.match(review, /setFocus\(documents\.changes\[0\]\?\.id \|\| "all"\)/);
   assert.match(review, /"diff-style": \{ canvasView: "split", filter: "style"/);
   assert.doesNotMatch(review, /aria-label="退出审阅"/);
   assert.doesNotMatch(review, /交互 Demo|重新体验 Demo|模拟 AI 返回/);
   assert.doesNotMatch(review, /setCanvasView|canvasVersionPair|返回并排对比/);
-  assert.match(styles, /translateY\(calc\(-100% \+ 22px\)\)/);
+  assert.match(styles, /\.mapHandle[\s\S]*?transform: translate\(var\(--map-panel-width\), -50%\)/);
+  assert.match(styles, /\.mapPanel[\s\S]*?left: 42px;[\s\S]*?transform: translateX\(calc\(100% \+ 42px\)\)/);
+  assert.match(styles, /\.mapDrawer\[data-open="true"\] \.mapHandle[\s\S]*?transform: translate\(0, -50%\)/);
   assert.doesNotMatch(styles, /\.appHeader|\.canvasVersionPair/);
   assert.match(styles, /\.segmented\[data-items="3"\]/);
   assert.match(styles, /\.segmented\[data-items="4"\]/);
@@ -80,8 +94,8 @@ test("formal review reuses the workbench header and exposes the frozen seven-mod
 test("returning before the AI edit explains the reversible path before leaving review", () => {
   assert.match(review, /不会采用这次 AI 返回的/);
   assert.match(review, /将继续使用[\s\S]*?AI 修改前[\s\S]*?为基线重新修改/);
-  assert.match(review, /AI 返回的 HTML 仍保留在原位置不会被删除/);
-  assert.match(review, /onRevealRequestFolder/);
+  assert.match(review, /AI 返回的 HTML 已自动保留，点击在 Finder 中显示/);
+  assert.match(review, /onRevealCandidateHtml/);
   assert.match(review, /返回修改前版本/);
   assert.match(review, /确认并打开/);
   assert.match(review, /确认后将切换到 AI 修改后的/);
@@ -92,7 +106,7 @@ test("returning before the AI edit explains the reversible path before leaving r
   assert.match(review, /event\.key !== "Tab"/);
   assert.match(workbench, /declined-ai-candidate-after-review/);
   assert.match(workbench, /当前页面可直接继续编辑/);
-  assert.match(workbench, /onRevealRequestFolder=\{\(\) => void revealActiveRunInFinder\(\)\}/);
+  assert.match(workbench, /onRevealCandidateHtml=\{\(\) => \{/);
 });
 
 test("the review canvas preserves authored interactions inside untrusted-document isolation", () => {
@@ -133,7 +147,7 @@ test("change discovery builds a complete outline and precise change markers", ()
   assert.match(reviewDocument, /data-pageroot-review-structure/);
   assert.match(reviewDocument, /data-pageroot-review-style/);
   assert.match(reviewDocument, /markMovedPairs/);
-  assert.match(reviewDocument, /第 \$\{pair\.beforeIndex \+ 1\} 区移至第 \$\{pair\.afterIndex \+ 1\} 区/);
+  assert.match(reviewDocument, /if \(pair\?\.moved[\s\S]*?return "结构变化"/);
   assert.match(reviewDocument, /matchingStylesheetSignature/);
   assert.match(reviewDocument, /VISUAL_ATTRIBUTE_NAMES/);
   assert.match(reviewDocument, /pairVisualElements/);
@@ -141,8 +155,11 @@ test("change discovery builds a complete outline and precise change markers", ()
   assert.match(reviewDocument, /markStructureDifferences/);
   assert.match(reviewDocument, /changedStylesheetSelectors/);
   assert.match(reviewDocument, /STYLE_PROPERTY_LABELS/);
-  assert.match(reviewDocument, /结构：\$\{summaries/);
-  assert.match(reviewDocument, /视觉：\$\{\[\.\.\.labels\]/);
+  assert.match(reviewDocument, /return `\$\{\[\.\.\.new Set\(labels\)\]\.join\("、"\)\}变化`/);
+  assert.match(reviewDocument, /hasDirectReviewText/);
+  assert.match(reviewDocument, /data-pageroot-review-text-context/);
+  assert.match(reviewDocument, /annotateUnchangedSubtrees/);
+  assert.match(reviewDocument, /annotateActionKeys/);
 });
 
 test("review controls produce persistent visual state instead of label-only changes", () => {
@@ -167,20 +184,23 @@ test("review controls produce persistent visual state instead of label-only chan
   assert.match(reviewDocument, /element\.dataset\.pagerootOutlineId === state\.focus/);
 });
 
-test("the all-change overview stays sparse and navigation reveals hidden authored panels", () => {
-  assert.match(reviewDocument, /data-pageroot-review-filter="all"\] \[data-pageroot-review-marker\]/);
+test("all-change review keeps text treatment precise and mirrors authored actions", () => {
+  assert.match(reviewDocument, /data-pageroot-review-filter="all"\] \[data-pageroot-review-marker-types~="structure"\]/);
   assert.doesNotMatch(reviewDocument, /data-pageroot-review-filter="all"\] \[data-pageroot-review-id\]/);
-  assert.doesNotMatch(
-    reviewDocument,
-    /data-pageroot-review-filter="all"\] \[data-pageroot-review-text=/,
-  );
+  assert.match(reviewDocument, /data-pageroot-review-filter="all"\] \[data-pageroot-review-text="removed"\]/);
+  assert.match(reviewDocument, /color: inherit !important;[\s\S]*?text-decoration: none !important/);
+  assert.match(reviewDocument, /side === "after"[\s\S]*?getClientRects\(\)/);
+  assert.match(reviewDocument, /previous\.tone === record\.tone/);
   assert.doesNotMatch(reviewDocument, /background: #fff0ef|background: #eaf8f1/);
   assert.doesNotMatch(reviewDocument, /data-pageroot-review-style\][\s\S]{0,180}solid #1980aa/);
   assert.match(reviewDocument, /matchingPanelControl/);
   assert.match(reviewDocument, /revealTarget/);
   assert.match(reviewDocument, /activatePanelKey/);
-  assert.match(reviewDocument, /post\("panel-change", \{ panelKey \}\)/);
+  assert.match(reviewDocument, /post\("action", \{ actionKey \}\)/);
   assert.match(review, /type: "activate-panel"/);
+  assert.match(review, /type: "mirror-action"/);
+  assert.match(reviewDocument, /message\.type === "mirror-action"/);
+  assert.match(reviewDocument, /post\("control-state"/);
   assert.match(reviewDocument, /reviewAnchor/);
   assert.match(reviewDocument, /message\.type === "sync-scroll"/);
   assert.match(review, /type: "sync-scroll"/);
@@ -188,4 +208,5 @@ test("the all-change overview stays sparse and navigation reveals hidden authore
   assert.match(reviewDocument, /programmaticScrollToken/);
   assert.match(reviewDocument, /renderReviewOverlays/);
   assert.match(reviewDocument, /record\.top <= previous\.bottom \+ 12/);
+  assert.match(review, /document\.addEventListener\("pointerdown", closeOnOutsidePointer, true\)/);
 });

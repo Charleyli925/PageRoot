@@ -454,6 +454,9 @@ test("a verified AI result stays pending through desktop review until the user a
       <button type="button" data-review-tab-button data-p="review-p1">审阅标签一</button>
       <button type="button" data-review-tab-button data-p="review-p2">审阅标签二</button>
     </div>
+    <div data-review-priority><strong>优先顺序：</strong>先处理稳定性，再补齐体验细节。</div>
+    <button type="button" id="review-counter" data-review-counter>交互计数 <span>0</span></button>
+    <input id="review-sync-input" aria-label="审阅同步输入" value="">
     <div class="panel" id="review-p1" data-review-tab-panel="one">
       <article><h2>标签一概览</h2><p>第一块完整内容</p></article>
       <article><h2>标签一详情</h2><p>第二块完整内容</p></article>
@@ -469,6 +472,12 @@ test("a verified AI result stays pending through desktop review until the user a
             panel.hidden = panel.id !== button.dataset.p;
           });
         });
+      });
+      document.querySelector("[data-review-counter]").addEventListener("click", (event) => {
+        const button = event.currentTarget;
+        const nextCount = Number(button.dataset.count || 0) + 1;
+        button.dataset.count = String(nextCount);
+        button.querySelector("span").textContent = String(nextCount);
       });
       document.documentElement.dataset.reviewFixtureReady = "true";
     </script>
@@ -517,6 +526,10 @@ test("a verified AI result stays pending through desktop review until the user a
       expect(base.match(new RegExp(ORIGINAL_TEXT, "gu"))).toHaveLength(1);
       return base
         .replace(ORIGINAL_TEXT, UPDATED_TEXT)
+        .replace(
+          '    <div data-review-priority><strong>优先顺序：</strong>先处理稳定性，再补齐体验细节。</div>\n',
+          "",
+        )
         .replace(
           "<article><h2>标签一概览</h2><p>第一块完整内容</p></article>\n      <article><h2>标签一详情</h2><p>第二块完整内容</p></article>",
           "<article><h2>标签一详情</h2><p>第二块完整内容</p></article>\n      <article><h2>标签一概览</h2><p>第一块完整内容</p></article>",
@@ -571,7 +584,13 @@ test("a verified AI result stays pending through desktop review until the user a
     );
     await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
       "data-pageroot-review-filter",
-    ), { timeout: 30_000 }).toBe("overview");
+    ), { timeout: 30_000 }).toBe("all");
+    await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
+      "data-pageroot-review-focus",
+    )).not.toBe("all");
+    await expect(launched.page.getByRole("slider", {
+      name: "非修改区域上下文可见度",
+    })).toHaveValue("18");
     await expect(launched.page.locator('[data-view="split"]')).toBeVisible();
     await expect(beforeReviewFrame.locator("html"))
       .toHaveAttribute("data-author-script-ran", "true");
@@ -587,10 +606,15 @@ test("a verified AI result stays pending through desktop review until the user a
       .toBeVisible();
     await expect(afterReviewFrame.locator('[data-review-tab-panel="two"]'))
       .toBeVisible();
-    await launched.page.getByRole("button", { name: "查看全部变化" }).click();
-    await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
-      "data-pageroot-review-filter",
-    )).toBe("all");
+    const beforeCounter = beforeReviewFrame.locator("[data-review-counter]");
+    const afterCounter = afterReviewFrame.locator("[data-review-counter]");
+    await beforeCounter.click();
+    await expect(beforeCounter).toHaveAttribute("data-count", "1");
+    await expect(afterCounter).toHaveAttribute("data-count", "1");
+    await beforeReviewFrame.getByRole("textbox", { name: "审阅同步输入" })
+      .fill("双页动作同步");
+    await expect(afterReviewFrame.getByRole("textbox", { name: "审阅同步输入" }))
+      .toHaveValue("双页动作同步");
     await expect.poll(() => beforeReviewFrame.locator(
       "[data-pageroot-review-overlay-box]",
     ).count()).toBeGreaterThan(0);
@@ -621,12 +645,45 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect(afterReviewFrame.locator(
       '[data-pageroot-review-text="added"]',
     ).filter({ hasText: UPDATED_TEXT })).toBeVisible();
+    const deletedPriority = beforeReviewFrame.locator(
+      '[data-pageroot-review-text="removed"]',
+    ).filter({ hasText: /优先顺序/u });
+    await expect(deletedPriority).toHaveCount(1);
+    await expect.poll(() => deletedPriority.evaluate(
+      (element) => getComputedStyle(element).textDecorationLine,
+    )).toContain("line-through");
+    const addedText = afterReviewFrame.locator(
+      '[data-pageroot-review-text="added"]',
+    ).filter({ hasText: UPDATED_TEXT });
+    await expect.poll(() => addedText.evaluate(
+      (element) => getComputedStyle(element).textDecorationLine,
+    )).toBe("none");
+    expect(await addedText.evaluate((element) => getComputedStyle(element).color))
+      .toBe(await addedText.evaluate((element) => getComputedStyle(element.parentElement).color));
+    await expect.poll(() => afterReviewFrame.locator(
+      '[data-pageroot-review-overlay-box][data-tone="text"]',
+    ).count()).toBeGreaterThan(0);
+    if (process.env.PAGEROOT_CAPTURE_REVIEW) {
+      const captureDirectory = path.join(productRoot, "output", "design-qa");
+      mkdirSync(captureDirectory, { recursive: true });
+      await launched.page.screenshot({
+        path: path.join(captureDirectory, "ai-review-text-changes.png"),
+        animations: "disabled",
+      });
+    }
     await expect(beforeReviewFrame.locator(
       '[data-pageroot-review-text]',
     ).filter({ hasText: "第二块完整内容" })).toHaveCount(0);
     await expect(afterReviewFrame.locator(
       '[data-pageroot-review-text]',
     ).filter({ hasText: "第二块完整内容" })).toHaveCount(0);
+    const granularTextContext = afterReviewFrame.locator(
+      '[data-pageroot-outline-id][data-pageroot-review-active="true"] [data-pageroot-review-context-types~="text"]',
+    ).first();
+    await expect(granularTextContext).toBeAttached();
+    await expect.poll(() => granularTextContext.evaluate(
+      (element) => Number(getComputedStyle(element).opacity),
+    )).toBeCloseTo(0.18, 2);
     await launched.page.getByRole("slider", {
       name: "非修改区域上下文可见度",
     }).fill("0");
@@ -645,8 +702,11 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect.poll(async () => Number(await beforeReviewFrame.locator("html").evaluate(
       (element) => element.style.getPropertyValue("--pageroot-review-context-opacity"),
     ))).toBe(1);
+    await launched.page.getByRole("slider", {
+      name: "非修改区域上下文可见度",
+    }).fill("18");
     await launched.page.getByRole("button", {
-      name: "打开并固定内容地图",
+      name: "打开内容地图",
     }).click();
     const outlineItems = launched.page.getByTestId("review-outline-item");
     await expect.poll(() => outlineItems.count()).toBeGreaterThan(5);
@@ -655,15 +715,33 @@ test("a verified AI result stays pending through desktop review until the user a
     expect(await launched.page.locator(
       '[data-testid="review-outline-item"][data-changed="false"]',
     ).count()).toBeGreaterThan(0);
-    const mapButtonBox = await launched.page.getByRole("button", {
-      name: "收起并取消固定内容地图",
-    }).boundingBox();
-    expect(mapButtonBox).not.toBeNull();
     const viewportWidth = await launched.page.evaluate(() => window.innerWidth);
-    expect(Math.abs((mapButtonBox?.x || 0) + (mapButtonBox?.width || 0) - viewportWidth))
-      .toBeLessThanOrEqual(1);
+    await expect.poll(async () => {
+      const drawer = launched.page.locator('aside[aria-label="页面内容地图"]');
+      const handleBox = await drawer.locator(":scope > div").first().boundingBox();
+      const panelBox = await drawer.locator(':scope > div[aria-hidden="false"]').boundingBox();
+      if (!handleBox || !panelBox) return false;
+      const handleGap = panelBox.x - (handleBox.x + handleBox.width);
+      const rightGap = panelBox.x + panelBox.width - viewportWidth;
+      return Math.abs(handleGap) <= 1 && Math.abs(rightGap) <= 1;
+    }).toBe(true);
+    const changedMapItem = launched.page.locator(
+      '[data-testid="review-outline-item"][data-changed="true"]',
+    ).first();
+    const unchangedMapItem = launched.page.locator(
+      '[data-testid="review-outline-item"][data-changed="false"]',
+    ).first();
+    expect(await changedMapItem.evaluate((element) => getComputedStyle(element).opacity))
+      .toBe("1");
+    expect(Number(await unchangedMapItem.evaluate((element) => getComputedStyle(element).opacity)))
+      .toBeLessThan(0.7);
+    await beforeCounter.click();
+    await expect(afterCounter).toHaveAttribute("data-count", "2");
+    await expect(launched.page.getByRole("button", { name: "打开内容地图" }))
+      .toBeVisible();
+    await launched.page.getByRole("button", { name: "打开内容地图" }).click();
     const movedOutlineItem = launched.page.getByRole("button", {
-      name: /标签一详情：第 \d+ 区移至第 \d+ 区/u,
+      name: /标签一详情：结构变化/u,
     });
     await expect(movedOutlineItem).toBeVisible();
     await movedOutlineItem.click();
@@ -671,23 +749,45 @@ test("a verified AI result stays pending through desktop review until the user a
       .toBeVisible();
     await expect(afterReviewFrame.locator('[data-review-tab-panel="one"]'))
       .toBeVisible();
+    const nextChangeButton = launched.page.getByRole("button", { name: "下一处变化" });
+    const totalChanges = Number((await nextChangeButton.locator("xpath=..")
+      .locator("small").textContent())?.replace("/", "") || 0);
+    let navigatorReachedSecondPanel = false;
+    for (let index = 0; index < totalChanges; index += 1) {
+      await nextChangeButton.click();
+      if (await beforeReviewFrame.locator('[data-review-tab-panel="two"]').isVisible()) {
+        navigatorReachedSecondPanel = true;
+        break;
+      }
+    }
+    expect(navigatorReachedSecondPanel).toBe(true);
+    await expect(afterReviewFrame.locator('[data-review-tab-panel="two"]'))
+      .toBeVisible();
     await launched.page.getByRole("button", { name: "结构变化" }).click();
+    await expect(launched.page.getByRole("button", { name: "打开内容地图" }))
+      .toBeVisible();
     await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
       "data-pageroot-review-filter",
     )).toBe("structure");
     await expect(beforeReviewFrame.locator("[data-pageroot-review-structure]").first())
       .toBeVisible();
+    await expect(beforeReviewFrame.locator(
+      '[data-pageroot-outline-id][data-pageroot-review-active="true"] [data-pageroot-review-context-types~="structure"]',
+    ).first()).toBeAttached();
     await launched.page.getByRole("button", { name: "视觉变化" }).click();
     await expect.poll(async () => afterReviewFrame.locator("html").getAttribute(
       "data-pageroot-review-filter",
     )).toBe("style");
     await expect(afterReviewFrame.locator("[data-pageroot-review-style]").first())
       .toBeVisible();
+    await expect(afterReviewFrame.locator(
+      '[data-pageroot-outline-id][data-pageroot-review-active="true"] [data-pageroot-review-context-types~="style"]',
+    ).first()).toBeAttached();
     await expect(beforeReviewFrame.locator('[data-review-tab-panel="two"]'))
       .toBeVisible();
     await expect(afterReviewFrame.locator('[data-review-tab-panel="two"]'))
       .toBeVisible();
-    await expect(launched.page.getByText(/视觉：.*(?:内边距|圆角)/u).first())
+    await expect(launched.page.getByText(/视觉变化/u).first())
       .toBeVisible();
     await launched.page.getByRole("button", {
       name: /单独查看修改前/,
@@ -779,7 +879,7 @@ test("a verified AI result stays pending through desktop review until the user a
       mkdirSync(captureDirectory, { recursive: true });
       await launched.page.getByRole("slider", {
         name: "非修改区域上下文可见度",
-      }).fill("22");
+      }).fill("18");
       await wholePageButton.click();
       await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
         "data-pageroot-review-filter",
@@ -790,15 +890,16 @@ test("a verified AI result stays pending through desktop review until the user a
         beforeReviewFrame.locator("html").evaluate(() => window.scrollTo(0, 0)),
         afterReviewFrame.locator("html").evaluate(() => window.scrollTo(0, 0)),
       ]);
-      await launched.page.getByRole("button", {
-        name: "收起并取消固定内容地图",
-      }).click();
+      const closeMapButton = launched.page.getByRole("button", {
+        name: "收起内容地图",
+      }).first();
+      if (await closeMapButton.isVisible()) await closeMapButton.click();
       await launched.page.screenshot({
         path: path.join(captureDirectory, "ai-review-final.png"),
         animations: "disabled",
       });
       await launched.page.getByRole("button", {
-        name: "打开并固定内容地图",
+        name: "打开内容地图",
       }).click();
       await launched.page.screenshot({
         path: path.join(captureDirectory, "ai-review-map.png"),
@@ -815,9 +916,24 @@ test("a verified AI result stays pending through desktop review until the user a
       .toBeFocused();
     await launched.page.evaluate(() => {
       window.__pagerootSawHandoffFlash = false;
+      window.__pagerootHandoffFlashEvents = [];
       window.__pagerootHandoffObserver = new MutationObserver(() => {
         const panel = document.querySelector(".handoff-panel");
-        if (panel && panel.getClientRects().length > 0) window.__pagerootSawHandoffFlash = true;
+        const review = document.querySelector('[data-testid="ai-review-workspace"]');
+        const reviewCoversWindow = Boolean(
+          review
+          && review.getClientRects().length > 0
+          && getComputedStyle(review).position === "fixed",
+        );
+        if (panel && panel.getClientRects().length > 0 && !reviewCoversWindow) {
+          window.__pagerootSawHandoffFlash = true;
+          window.__pagerootHandoffFlashEvents.push({
+            panelText: panel.textContent?.slice(0, 120) || "",
+            reviewPresent: Boolean(review),
+            drawer: document.querySelector(".side-drawer")?.getAttribute("data-drawer") || "",
+            sourceTitle: document.querySelector(".window-file-title-row strong")?.textContent || "",
+          });
+        }
       });
       window.__pagerootHandoffObserver.observe(document.body, { childList: true, subtree: true });
     });
@@ -838,8 +954,10 @@ test("a verified AI result stays pending through desktop review until the user a
     expect(readFileSync(opened.sourcePath, "utf8")).toContain(UPDATED_TEXT);
     expect(await launched.page.evaluate(() => {
       window.__pagerootHandoffObserver?.disconnect();
-      return window.__pagerootSawHandoffFlash;
-    })).toBe(false);
+      return window.__pagerootHandoffFlashEvents;
+    })).toEqual([]);
+    await expect(launched.page.locator(".handoff-panel").filter({ visible: true }))
+      .toHaveCount(0);
     const openedFrame = await loadedDiskFrame(launched.page, opened.sourcePath);
     await expect(openedFrame.locator(caseSelector("list-item")))
       .toHaveText(UPDATED_TEXT);
@@ -1158,7 +1276,7 @@ test("returning from review restores the editable pre-AI version and preserves t
     await expect(dialog.getByText(/将继续使用 版本 \d+（AI 修改前）为基线重新修改。/u))
       .toBeVisible();
     await expect(dialog.getByRole("button", {
-      name: "AI 返回的 HTML 仍保留在原位置不会被删除。",
+      name: "AI 返回的 HTML 已自动保留，点击在 Finder 中显示。",
     })).toBeVisible();
     const [returnBackground, continueBackground] = await Promise.all([
       dialog.getByRole("button", { name: "返回修改前版本" })

@@ -39,9 +39,9 @@ const REVIEW_BOOTSTRAP_PATH = "/.pageroot/preview-bootstrap.js";
 
 const REVIEW_DOCUMENT_STYLE = String.raw`
   html {
-    --pageroot-review-context-opacity: .39;
-    --pageroot-review-context-grayscale: .43;
-    --pageroot-review-context-saturation: .77;
+    --pageroot-review-context-opacity: .18;
+    --pageroot-review-context-grayscale: .45;
+    --pageroot-review-context-saturation: .75;
     --pageroot-review-ui-scale: 1;
     scroll-behavior: auto !important;
     overflow-anchor: none !important;
@@ -56,7 +56,7 @@ const REVIEW_DOCUMENT_STYLE = String.raw`
     transition: opacity 160ms ease, filter 160ms ease, outline-color 120ms ease !important;
   }
 
-  html[data-pageroot-review-focus]:not([data-pageroot-review-focus="all"])
+  html[data-pageroot-review-focus]:not([data-pageroot-review-focus="all"])[data-pageroot-review-filter="all"]
     [data-pageroot-outline-id][data-pageroot-review-active="false"] {
     opacity: var(--pageroot-review-context-opacity) !important;
     filter: grayscale(var(--pageroot-review-context-grayscale))
@@ -72,7 +72,8 @@ const REVIEW_DOCUMENT_STYLE = String.raw`
     filter: none !important;
   }
 
-  html[data-pageroot-review-filter="all"] [data-pageroot-review-marker],
+  html[data-pageroot-review-filter="all"] [data-pageroot-review-marker-types~="structure"],
+  html[data-pageroot-review-filter="all"] [data-pageroot-review-marker-types~="style"],
   html[data-pageroot-review-filter="structure"] [data-pageroot-review-marker-types~="structure"],
   html[data-pageroot-review-filter="style"] [data-pageroot-review-marker-types~="style"] {
     position: relative !important;
@@ -88,6 +89,7 @@ const REVIEW_DOCUMENT_STYLE = String.raw`
     outline-color: #1980aa !important;
   }
 
+  html[data-pageroot-review-filter="all"] [data-pageroot-review-text="removed"],
   html[data-pageroot-review-filter="text"] [data-pageroot-review-text="removed"] {
     background: transparent !important;
     color: #a13f3b !important;
@@ -97,14 +99,28 @@ const REVIEW_DOCUMENT_STYLE = String.raw`
     text-decoration-thickness: calc(2px * var(--pageroot-review-ui-scale)) !important;
   }
 
+  html[data-pageroot-review-filter="all"] [data-pageroot-review-text="added"],
   html[data-pageroot-review-filter="text"] [data-pageroot-review-text="added"] {
     background: transparent !important;
-    color: #217452 !important;
-    text-decoration-line: underline !important;
-    text-decoration-style: dashed !important;
-    text-decoration-color: #239467 !important;
-    text-decoration-thickness: calc(2px * var(--pageroot-review-ui-scale)) !important;
-    text-underline-offset: calc(2px * var(--pageroot-review-ui-scale)) !important;
+    color: inherit !important;
+    text-decoration: none !important;
+  }
+
+  html[data-pageroot-review-focus]:not([data-pageroot-review-focus="all"])
+    [data-pageroot-outline-id][data-pageroot-review-active="true"]
+    [data-pageroot-review-context-types~="all"],
+  html[data-pageroot-review-focus]:not([data-pageroot-review-focus="all"])[data-pageroot-review-filter="text"]
+    [data-pageroot-outline-id][data-pageroot-review-active="true"]
+    [data-pageroot-review-context-types~="text"],
+  html[data-pageroot-review-focus]:not([data-pageroot-review-focus="all"])[data-pageroot-review-filter="structure"]
+    [data-pageroot-outline-id][data-pageroot-review-active="true"]
+    [data-pageroot-review-context-types~="structure"],
+  html[data-pageroot-review-focus]:not([data-pageroot-review-focus="all"])[data-pageroot-review-filter="style"]
+    [data-pageroot-outline-id][data-pageroot-review-active="true"]
+    [data-pageroot-review-context-types~="style"] {
+    opacity: var(--pageroot-review-context-opacity) !important;
+    filter: grayscale(var(--pageroot-review-context-grayscale))
+      saturate(var(--pageroot-review-context-saturation)) !important;
   }
 
   html[data-pageroot-review-side="before"][data-pageroot-review-filter="structure"]
@@ -150,7 +166,7 @@ const REVIEW_DOCUMENT_STYLE = String.raw`
   }
 
   html[data-pageroot-review-side="after"] [data-pageroot-review-overlay-box][data-tone="text"] {
-    border-color: #239467 !important;
+    border-color: #6258d6 !important;
   }
 
   [data-pageroot-review-overlay-box][data-tone="style"] {
@@ -449,8 +465,12 @@ function hasReviewableContent(element: Element): boolean {
 function isPanelContainer(element: Element): boolean {
   const role = element.getAttribute("role");
   if (role === "tabpanel") return true;
-  if (element.hasAttribute("data-tab-panel")) return true;
-  return Boolean(element.id) && hasClassRole(element, ["panel", "page", "slide"]);
+  if (
+    element.hasAttribute("data-tab-panel")
+    || element.hasAttribute("data-page")
+    || element.hasAttribute("data-panel")
+  ) return true;
+  return Boolean(element.id) && hasClassRole(element, ["panel", "page", "slide", "tab", "view"]);
 }
 
 function closestPanelContainer(element: Element): Element | null {
@@ -463,9 +483,16 @@ function closestPanelContainer(element: Element): Element | null {
 }
 
 function safePanelControls(document: Document): Element[] {
-  return [...document.querySelectorAll(
+  const explicit = [...document.querySelectorAll(
     '[role="tab"], button[aria-controls], button[data-p], button[data-tab]',
   )];
+  const likely = [...document.querySelectorAll(
+    'button, a[href^="#"], [role="button"], input[type="radio"]',
+  )].filter((element) => (
+    hasClassRole(element, ["tab", "nav", "page"])
+    || Boolean(element.closest('[role="tablist"], nav, [class*="tab" i], [class*="nav" i]'))
+  ));
+  return [...new Set([...explicit, ...likely])];
 }
 
 function panelControlTarget(control: Element): string {
@@ -503,6 +530,43 @@ function stablePanelToken(value: string): string {
     hash = Math.imul(hash, 16777619);
   }
   return (hash >>> 0).toString(36);
+}
+
+function annotateActionKeys(document: Document) {
+  const actions = [...document.querySelectorAll(
+    'a[href], area[href], button, input, select, textarea, summary, [role="button"], [role="tab"], [aria-expanded][aria-controls], [onclick]',
+  )];
+  const occurrences = new Map<string, number>();
+  actions.forEach((element, index) => {
+    const panelKey = element.getAttribute("data-pageroot-review-panel-key") || "";
+    const explicitIdentity = [
+      element.id,
+      element.getAttribute("name"),
+      element.getAttribute("aria-controls"),
+      element.getAttribute("data-p"),
+      element.getAttribute("data-tab"),
+      element.getAttribute("data-page"),
+      element.getAttribute("href"),
+    ].find((value) => Boolean(value?.trim())) || "";
+    const label = normalizedPanelLabel(
+      element.getAttribute("aria-label")
+      || element.getAttribute("title")
+      || conciseElementText(element),
+    );
+    const base = panelKey
+      ? `panel:${panelKey}`
+      : explicitIdentity
+        ? `${element.tagName}:identity:${explicitIdentity}`
+        : label
+          ? `${element.tagName}:label:${label}`
+          : `${element.tagName}:index:${index + 1}`;
+    const occurrence = occurrences.get(base) || 0;
+    occurrences.set(base, occurrence + 1);
+    element.setAttribute(
+      "data-pageroot-review-action-key",
+      `action-${stablePanelToken(base)}-${occurrence + 1}`,
+    );
+  });
 }
 
 function annotatePanelKeys(document: Document) {
@@ -723,23 +787,14 @@ function helperText(
   beforePresent: boolean,
   afterPresent: boolean,
   pair?: SectionPair,
-  details: Partial<Record<ReviewChangeType, string>> = {},
 ): string {
-  const described = types
-    .map((type) => details[type])
-    .filter((detail): detail is string => Boolean(detail));
-  if (pair?.moved) {
-    const movement = `第 ${pair.beforeIndex + 1} 区移至第 ${pair.afterIndex + 1} 区`;
-    const otherDetails = described.filter((detail) => !detail.startsWith("结构："));
-    return otherDetails.length ? `${movement}；${otherDetails.join("；")}` : movement;
-  }
-  if (described.length) return described.join("；");
-  if (!beforePresent) return "AI 候选中新增";
-  if (!afterPresent) return "AI 候选中移除";
+  if (!beforePresent) return "新增内容";
+  if (!afterPresent) return "删除内容";
+  if (pair?.moved && types.length === 1 && types[0] === "structure") return "结构变化";
   const labels = types.map((type) => (
     type === "text" ? "文案" : type === "structure" ? "结构" : "视觉"
   ));
-  return `${labels.join("、")}发生变化`;
+  return `${[...new Set(labels)].join("、")}变化`;
 }
 
 function panelControlLabel(document: Document, panel: Element): string {
@@ -1055,31 +1110,60 @@ function sentenceAwareTextDifferences(
   };
 }
 
+function addReviewContextType(element: Element, type: ReviewChangeType | "all") {
+  const current = new Set(
+    (element.getAttribute("data-pageroot-review-context-types") || "")
+      .split(/\s+/u)
+      .filter(Boolean),
+  );
+  current.add(type);
+  element.setAttribute("data-pageroot-review-context-types", [...current].join(" "));
+}
+
 function wrapTextRanges(
   inventory: ReviewTextInventory,
   ranges: TextRange[],
   tone: "removed" | "added",
+  markContext = false,
 ) {
   if (!ranges.length) return;
+  const mergedRanges = mergeTextRanges(ranges);
   inventory.nodes.forEach(({ node, start, end }) => {
-    const intersections = ranges
+    const intersections = mergedRanges
       .map((range) => ({ start: Math.max(start, range.start), end: Math.min(end, range.end) }))
       .filter((range) => range.end > range.start);
-    if (!intersections.length) return;
+    if (!intersections.length && !markContext) return;
     const source = node.textContent || "";
     const fragment = node.ownerDocument.createDocumentFragment();
+    const appendSegment = (value: string, kind: "difference" | "context") => {
+      if (!value) return;
+      const marker = node.ownerDocument.createElement("span");
+      if (kind === "difference") {
+        marker.dataset.pagerootReviewText = tone;
+      } else {
+        marker.setAttribute("data-pageroot-review-text-context", "true");
+        addReviewContextType(marker, "text");
+      }
+      marker.textContent = value;
+      fragment.append(marker);
+    };
     let cursor = 0;
     intersections.forEach((range) => {
       const localStart = range.start - start;
       const localEnd = range.end - start;
-      if (localStart > cursor) fragment.append(source.slice(cursor, localStart));
-      const marker = node.ownerDocument.createElement("span");
-      marker.dataset.pagerootReviewText = tone;
-      marker.textContent = source.slice(localStart, localEnd);
-      fragment.append(marker);
+      if (localStart > cursor) {
+        const context = source.slice(cursor, localStart);
+        if (markContext) appendSegment(context, "context");
+        else fragment.append(context);
+      }
+      appendSegment(source.slice(localStart, localEnd), "difference");
       cursor = localEnd;
     });
-    if (cursor < source.length) fragment.append(source.slice(cursor));
+    if (cursor < source.length) {
+      const context = source.slice(cursor);
+      if (markContext) appendSegment(context, "context");
+      else fragment.append(context);
+    }
     node.replaceWith(fragment);
   });
 }
@@ -1090,14 +1174,32 @@ function isTextBlock(element: Element): boolean {
   ) || hasClassRole(element, ["copy", "heading", "header", "label", "note", "subtitle", "title"]);
 }
 
+const GENERIC_TEXT_CONTAINER_TAGS = new Set([
+  "ARTICLE",
+  "ASIDE",
+  "DIV",
+  "FOOTER",
+  "HEADER",
+  "SECTION",
+]);
+
+function hasDirectReviewText(element: Element): boolean {
+  return GENERIC_TEXT_CONTAINER_TAGS.has(element.tagName)
+    && [...element.childNodes].some((node) => (
+      node.nodeType === 3 && Boolean((node.textContent || "").replace(/\s+/gu, "").trim())
+    ));
+}
+
 function reviewTextBlocks(region: Element): Element[] {
-  const candidates = [region, ...region.querySelectorAll(
-    "h1, h2, h3, h4, h5, h6, p, li, dt, dd, th, td, caption, figcaption, blockquote, label, button, a, summary, [role='heading'], [class]",
-  )].filter((element) => isTextBlock(element) && normalizedText(element).length > 0);
-  const leaves = candidates.filter((candidate) => !candidates.some((possibleChild) => (
-    possibleChild !== candidate && candidate.contains(possibleChild)
+  const candidates = [region, ...region.querySelectorAll("*")].filter((element) => (
+    !NON_CONTENT_TAGS.has(element.tagName)
+    && normalizedText(element).length > 0
+    && (isTextBlock(element) || hasDirectReviewText(element))
+  ));
+  const blocks = candidates.filter((candidate) => !candidates.some((possibleParent) => (
+    possibleParent !== candidate && possibleParent.contains(candidate)
   )));
-  return leaves.length ? leaves : [region];
+  return blocks.length ? blocks : [region];
 }
 
 function pairTextBlocks(
@@ -1207,11 +1309,11 @@ function markTextDifferences(before: Element | null, after: Element | null) {
     );
     if (differences.before.length) {
       pair.before.setAttribute("data-pageroot-review-text-group", "changed");
-      wrapTextRanges(beforeInventory, differences.before, "removed");
+      wrapTextRanges(beforeInventory, differences.before, "removed", true);
     }
     if (differences.after.length) {
       pair.after.setAttribute("data-pageroot-review-text-group", "changed");
-      wrapTextRanges(afterInventory, differences.after, "added");
+      wrapTextRanges(afterInventory, differences.after, "added", true);
     }
   });
 }
@@ -1556,18 +1658,51 @@ function markStyleDifferences(before: Element | null, after: Element | null): st
   return `视觉：${[...labels].slice(0, 3).join("、") || "呈现样式"}发生变化`;
 }
 
+function annotateUnchangedSubtrees(
+  root: Element | null,
+  type: ReviewChangeType | "all",
+  changedSelector: string,
+) {
+  if (!root) return;
+  const visit = (parent: Element) => {
+    eligibleChildren(parent).forEach((child) => {
+      const changed = child.matches(changedSelector);
+      const containsChange = Boolean(child.querySelector(changedSelector));
+      if (!changed && !containsChange) {
+        addReviewContextType(child, type);
+        return;
+      }
+      visit(child);
+    });
+  };
+  visit(root);
+}
+
 function annotateChangePair(
   pair: SectionPair,
   types: ReviewChangeType[],
-): Partial<Record<ReviewChangeType, string>> {
-  const details: Partial<Record<ReviewChangeType, string>> = {};
+): void {
   if (types.includes("text")) {
     markTextDifferences(pair.before, pair.after);
-    details.text = "文案：短句内容发生变化";
   }
-  if (types.includes("structure")) details.structure = markStructureDifferences(pair);
-  if (types.includes("style")) details.style = markStyleDifferences(pair.before, pair.after);
-  return details;
+  if (types.includes("structure")) markStructureDifferences(pair);
+  if (types.includes("style")) markStyleDifferences(pair.before, pair.after);
+  [pair.before, pair.after].forEach((root) => {
+    if (types.includes("text")) {
+      annotateUnchangedSubtrees(root, "text", "[data-pageroot-review-text]");
+    }
+    if (types.includes("structure")) {
+      annotateUnchangedSubtrees(root, "structure", "[data-pageroot-review-structure]");
+    }
+    if (types.includes("style")) {
+      annotateUnchangedSubtrees(root, "style", "[data-pageroot-review-style]");
+    }
+    annotateUnchangedSubtrees(
+      root,
+      "all",
+      "[data-pageroot-review-text], [data-pageroot-review-structure], [data-pageroot-review-style]",
+    );
+  });
 }
 
 function attachChangeMarkerMetadata(
@@ -1655,7 +1790,8 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
   let programmaticScrollToken = "";
   let programmaticScrollTop = 0;
   let mirroringPanel = false;
-  let currentState = { filter: "overview", focus: "all", transparency: 22, scale: 1 };
+  let mirroringAction = false;
+  let currentState = { filter: "all", focus: "all", transparency: 18, scale: 1 };
   const post = (type, extra = {}) => parent.postMessage({
     source: "pageroot-ai-review",
     sessionId,
@@ -1680,6 +1816,11 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
   )].find((candidate) => (
     candidate.getAttribute("data-pageroot-review-panel-key") === panelKey
     && !isSafePanelControl(candidate)
+  )) || null;
+  const actionForKey = (actionKey) => [...document.querySelectorAll(
+    '[data-pageroot-review-action-key]',
+  )].find((candidate) => (
+    candidate.getAttribute("data-pageroot-review-action-key") === actionKey
   )) || null;
   const scheduleOverlayRender = () => {
     cancelAnimationFrame(overlayFrame);
@@ -1707,6 +1848,32 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
       candidate.setAttribute("aria-expanded", active ? "true" : "false");
     });
     requestAnimationFrame(scheduleOverlayRender);
+  };
+  const mirrorAction = (message) => {
+    const actionKey = safeKey(message.actionKey);
+    if (!actionKey) return;
+    const action = actionForKey(actionKey);
+    if (!(action instanceof HTMLElement) || action.matches(":disabled")) return;
+    mirroringAction = true;
+    try {
+      if (message.actionType === "control-state") {
+        if (action instanceof HTMLInputElement) {
+          if (typeof message.checked === "boolean") action.checked = message.checked;
+          if (typeof message.value === "string") action.value = message.value;
+        } else if (action instanceof HTMLSelectElement || action instanceof HTMLTextAreaElement) {
+          if (typeof message.value === "string") action.value = message.value;
+        }
+        action.dispatchEvent(new Event("input", { bubbles: true }));
+        action.dispatchEvent(new Event("change", { bubbles: true }));
+      } else {
+        action.click();
+      }
+    } finally {
+      queueMicrotask(() => {
+        mirroringAction = false;
+        scheduleOverlayRender();
+      });
+    }
   };
   const reviewAnchor = () => {
     const elements = [...document.querySelectorAll("[data-pageroot-outline-id]")]
@@ -1830,17 +1997,50 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
   };
   function renderReviewOverlays() {
     document.querySelector('[data-pageroot-review-overlay-layer]')?.remove();
-    const filter = currentState.filter || "overview";
-    if (filter === "overview" || filter === "text") {
+    const filter = currentState.filter || "all";
+    if (filter === "overview") {
       document.documentElement.dataset.pagerootReviewOverlays = "false";
       return;
     }
+    const records = [];
+    if ((filter === "all" || filter === "text") && side === "after") {
+      document.querySelectorAll('[data-pageroot-review-text-group]').forEach((group) => {
+        const rectangles = [...group.querySelectorAll('[data-pageroot-review-text="added"]')]
+          .flatMap((element) => [...element.getClientRects()])
+          .filter((rect) => rect.width > 1 && rect.height > 1);
+        if (!rectangles.length) return;
+        const bounds = rectangles.reduce((current, rect) => ({
+          left: Math.min(current.left, rect.left),
+          top: Math.min(current.top, rect.top),
+          right: Math.max(current.right, rect.right),
+          bottom: Math.max(current.bottom, rect.bottom),
+        }), {
+          left: Number.POSITIVE_INFINITY,
+          top: Number.POSITIVE_INFINITY,
+          right: Number.NEGATIVE_INFINITY,
+          bottom: Number.NEGATIVE_INFINITY,
+        });
+        records.push({
+          changeId: group.getAttribute("data-pageroot-review-marker") || "",
+          summary: group.getAttribute("data-pageroot-review-summary") || "",
+          tone: "text",
+          left: bounds.left + scrollX,
+          top: bounds.top + scrollY,
+          right: bounds.right + scrollX,
+          bottom: bounds.bottom + scrollY,
+        });
+      });
+    }
     const selector = filter === "all"
-      ? '[data-pageroot-review-marker]'
-      : '[data-pageroot-review-marker-types~="' + filter + '"]';
-    const records = [...document.querySelectorAll(selector)].map((element) => {
+      ? '[data-pageroot-review-marker-types~="structure"], [data-pageroot-review-marker-types~="style"]'
+      : filter === "text"
+        ? ""
+        : '[data-pageroot-review-marker-types~="' + filter + '"]';
+    if (selector) [...document.querySelectorAll(selector)]
+      .filter((element) => !element.hasAttribute("data-pageroot-review-text-group"))
+      .forEach((element) => {
       const rect = element.getBoundingClientRect();
-      return {
+      records.push({
         changeId: element.getAttribute("data-pageroot-review-marker") || "",
         summary: element.getAttribute("data-pageroot-review-summary") || "",
         tone: markerTone(element, filter),
@@ -1848,11 +2048,13 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
         top: rect.top + scrollY,
         right: rect.right + scrollX,
         bottom: rect.bottom + scrollY,
-      };
-    }).filter((rect) => rect.right - rect.left > 1 && rect.bottom - rect.top > 1)
+      });
+    });
+    const visibleRecords = records
+      .filter((rect) => rect.right - rect.left > 1 && rect.bottom - rect.top > 1)
       .sort((left, right) => left.changeId.localeCompare(right.changeId) || left.top - right.top || left.left - right.left);
     const merged = [];
-    records.forEach((record) => {
+    visibleRecords.forEach((record) => {
       const previous = merged.at(-1);
       const horizontalOverlap = previous
         ? Math.max(0, Math.min(previous.right, record.right) - Math.max(previous.left, record.left))
@@ -1862,6 +2064,7 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
         : 1;
       const close = previous
         && previous.changeId === record.changeId
+        && previous.tone === record.tone
         && record.top <= previous.bottom + 12
         && (horizontalOverlap / minimumWidth >= .2 || record.left <= previous.right + 12);
       if (!close) {
@@ -1872,7 +2075,6 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
       previous.top = Math.min(previous.top, record.top);
       previous.right = Math.max(previous.right, record.right);
       previous.bottom = Math.max(previous.bottom, record.bottom);
-      if (previous.tone !== record.tone) previous.tone = "structure";
     });
     if (!merged.length) {
       document.documentElement.dataset.pagerootReviewOverlays = "false";
@@ -1902,9 +2104,9 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
   const applyState = (state) => {
     currentState = { ...currentState, ...state };
     const root = document.documentElement;
-    root.dataset.pagerootReviewFilter = state.filter || "overview";
+    root.dataset.pagerootReviewFilter = state.filter || "all";
     root.dataset.pagerootReviewFocus = state.focus || "all";
-    const transparency = Math.max(0, Math.min(100, Number(state.transparency ?? 22))) / 100;
+    const transparency = Math.max(0, Math.min(100, Number(state.transparency ?? 18))) / 100;
     root.style.setProperty("--pageroot-review-context-opacity", String(transparency));
     root.style.setProperty("--pageroot-review-context-grayscale", String((1 - transparency) * .55));
     root.style.setProperty("--pageroot-review-context-saturation", String(.7 + transparency * .3));
@@ -1930,6 +2132,7 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
     if (message.type === "state") applyState(message.state || {});
     if (message.type === "sync-scroll") syncScroll(message);
     if (message.type === "activate-panel") activatePanelKey(message.panelKey);
+    if (message.type === "mirror-action") mirrorAction(message);
     if (message.type === "focus-change") {
       const changeId = String(message.changeId || "").replace(/[^a-z0-9-]/gi, "");
       const target = document.querySelector('[data-pageroot-review-id="' + changeId + '"]');
@@ -1942,10 +2145,20 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
     }
   });
   addEventListener("click", (event) => {
+    post("interaction");
+    const action = event.target instanceof Element
+      ? event.target.closest("[data-pageroot-review-action-key]")
+      : null;
+    if (action && !mirroringAction && !mirroringPanel) {
+      const actionKey = action.getAttribute("data-pageroot-review-action-key") || "";
+      requestAnimationFrame(() => {
+        post("action", { actionKey });
+      });
+    }
     const control = event.target instanceof Element
       ? event.target.closest('[role="tab"][data-pageroot-review-panel-key], button[aria-controls][data-pageroot-review-panel-key], button[data-p][data-pageroot-review-panel-key], button[data-tab][data-pageroot-review-panel-key]')
       : null;
-    if (control && !mirroringPanel) {
+    if (control && !mirroringPanel && !action) {
       const panelKey = control.getAttribute("data-pageroot-review-panel-key") || "";
       requestAnimationFrame(() => {
         scheduleOverlayRender();
@@ -1956,6 +2169,20 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
       event.preventDefault();
     }
   }, true);
+  const postControlState = (event) => {
+    if (mirroringAction || mirroringPanel) return;
+    const action = event.target instanceof Element
+      ? event.target.closest("[data-pageroot-review-action-key]")
+      : null;
+    if (!(action instanceof HTMLInputElement || action instanceof HTMLSelectElement || action instanceof HTMLTextAreaElement)) return;
+    post("control-state", {
+      actionKey: action.getAttribute("data-pageroot-review-action-key") || "",
+      value: action.value,
+      checked: action instanceof HTMLInputElement ? action.checked : undefined,
+    });
+  };
+  addEventListener("input", postControlState, true);
+  addEventListener("change", postControlState, true);
   addEventListener("submit", (event) => event.preventDefault(), true);
   addEventListener("scroll", () => {
     if (programmaticScrollToken) {
@@ -2005,7 +2232,7 @@ function prepareDocument(
   });
 
   document.documentElement.dataset.pagerootReviewSide = side;
-  document.documentElement.dataset.pagerootReviewFilter = "overview";
+  document.documentElement.dataset.pagerootReviewFilter = "all";
   document.documentElement.dataset.pagerootReviewFocus = "all";
 
   const style = document.createElement("style");
@@ -2064,6 +2291,8 @@ export function buildReviewDocuments(
   clearReservedReviewMarkup(afterDocument);
   annotatePanelKeys(beforeDocument);
   annotatePanelKeys(afterDocument);
+  annotateActionKeys(beforeDocument);
+  annotateActionKeys(afterDocument);
   const pairs = pairSections(
     candidateSections(beforeDocument),
     candidateSections(afterDocument),
@@ -2076,9 +2305,9 @@ export function buildReviewDocuments(
     const label = changeLabel(pair.before, pair.after, pairIndex);
     const types = changeTypes(pair);
     const changeId = types.length ? `change-${changes.length + 1}` : undefined;
-    const details = changeId ? annotateChangePair(pair, types) : {};
+    if (changeId) annotateChangePair(pair, types);
     const helper = types.length
-      ? helperText(types, Boolean(pair.before), Boolean(pair.after), pair, details)
+      ? helperText(types, Boolean(pair.before), Boolean(pair.after), pair)
       : "本轮未修改";
     if (changeId) attachChangeMarkerMetadata(pair, changeId, helper);
     const movement = pair.moved

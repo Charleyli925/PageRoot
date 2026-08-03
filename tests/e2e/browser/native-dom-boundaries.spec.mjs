@@ -77,6 +77,24 @@ test("clicking a module's blank padding clears selection instead of opening its 
   await expect(frame.locator("[data-html-canvas-selected]")).toHaveCount(0);
 });
 
+test("clicking outside the canvas commits editing and clears its toolbar and selection", async ({
+  page,
+}) => {
+  const { editor, frame } = await loadFixture(page, "complex-layout.html");
+  const target = frame.locator(caseSelector("paragraph-entities"));
+
+  await activateNativeEdit(frame, "paragraph-entities");
+  await expect(target).toHaveAttribute("contenteditable", "true");
+  await expect(editor.getByRole("toolbar")).toBeVisible();
+  await expect(frame.locator("[data-html-canvas-selected]")).toHaveCount(1);
+
+  await page.locator(".window-file-title-row").click();
+
+  await expect(editor.getByRole("toolbar")).toHaveCount(0);
+  await expect(frame.locator("[data-html-canvas-selected]")).toHaveCount(0);
+  await expect(target).not.toHaveAttribute("contenteditable", "true");
+});
+
 test("typing never replaces the iframe Document or jumps a scroll container", async ({ page }) => {
   const { frame } = await loadFixture(page, "complex-layout.html");
   const beforeDocument = await documentToken(frame);

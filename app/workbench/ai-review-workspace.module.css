@@ -1,5 +1,8 @@
 .reviewRoot {
   --notice-header-height: 88px;
+  position: fixed;
+  z-index: 300;
+  inset: 0;
   width: 100vw;
   height: 100vh;
   min-width: 920px;
@@ -517,12 +520,13 @@
 }
 
 .mapDrawer {
+  --map-panel-width: min(310px, 28vw);
   position: absolute;
   z-index: 62;
   top: 10px;
   right: 0;
   bottom: 10px;
-  width: 42px;
+  width: calc(42px + var(--map-panel-width));
   pointer-events: none;
 }
 
@@ -534,7 +538,7 @@
   position: absolute;
   z-index: 2;
   top: 50%;
-  right: 0;
+  left: 0;
   width: 42px;
   display: flex;
   flex-direction: column;
@@ -544,7 +548,8 @@
   background: rgb(255 255 255 / 95%);
   box-shadow: -4px 7px 16px rgb(31 31 48 / 12%);
   pointer-events: auto;
-  transform: translateY(-50%);
+  transform: translate(var(--map-panel-width), -50%);
+  transition: transform 180ms cubic-bezier(.2, .8, .2, 1), box-shadow 160ms ease;
   backdrop-filter: blur(14px);
 }
 
@@ -613,9 +618,9 @@
 .mapPanel {
   position: absolute;
   top: 0;
-  right: 42px;
+  left: 42px;
   bottom: 0;
-  width: min(310px, 28vw);
+  width: var(--map-panel-width);
   min-width: 250px;
   display: flex;
   flex-direction: column;
@@ -626,7 +631,7 @@
   box-shadow: -10px 10px 30px rgb(31 31 48 / 15%);
   opacity: 0;
   pointer-events: none;
-  transform: translateX(14px);
+  transform: translateX(calc(100% + 42px));
   transition: opacity 160ms ease, transform 180ms ease;
   backdrop-filter: blur(18px) saturate(145%);
 }
@@ -638,9 +643,10 @@
 }
 
 .mapDrawer[data-open="true"] .mapHandle {
-  border-left-color: transparent;
-  border-radius: 0 10px 10px 0;
-  box-shadow: 6px 7px 16px rgb(31 31 48 / 8%);
+  border-right-color: transparent;
+  border-radius: 10px 0 0 10px;
+  box-shadow: -6px 7px 16px rgb(31 31 48 / 9%);
+  transform: translate(0, -50%);
 }
 
 .mapPanel > header {
@@ -709,6 +715,16 @@
 
 .mapOverview[aria-pressed="true"],
 .mapList button[aria-pressed="true"] {
+  background: #f0efff;
+}
+
+.mapList button[data-changed="true"] {
+  background: #f8f7ff;
+  box-shadow: inset 2px 0 #6258d6;
+}
+
+.mapList button[data-changed="true"]:hover,
+.mapList button[data-changed="true"][aria-pressed="true"] {
   background: #f0efff;
 }
 
@@ -794,13 +810,22 @@
   background: #f6f6f9;
 }
 
-.mapList button[data-matches-filter="false"] {
-  opacity: .46;
+.mapList button[data-changed="false"] {
+  opacity: .56;
 }
 
-.mapList button[data-matches-filter="false"]:hover,
-.mapList button[data-matches-filter="false"]:focus-visible {
-  opacity: .78;
+.mapList button[data-changed="false"]:hover,
+.mapList button[data-changed="false"]:focus-visible {
+  opacity: .82;
+}
+
+.mapList button[data-changed="false"] strong {
+  color: #737580;
+  font-weight: 560;
+}
+
+.mapList button[data-changed="false"] small {
+  color: #9b9ca5;
 }
 
 .mapList button > span:first-child {
@@ -969,13 +994,18 @@
   }
 
   .mapPanel {
-    width: 270px;
+    width: var(--map-panel-width);
+  }
+
+  .mapDrawer {
+    --map-panel-width: 270px;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .canvasToolbarDock,
   .canvasGrid,
+  .mapHandle,
   .mapPanel {
     transition: none;
   }

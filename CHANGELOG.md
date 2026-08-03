@@ -56,6 +56,18 @@ Notable user-visible changes are documented here. This project follows Semantic 
   editable HTML with comments intact while preserving the candidate file and
   audit record; opening the AI version skips the waiting screen and uses the
   existing audited activation path.
+- Made review open directly on the first change in synchronized dual-page All
+  mode with 18% context. Added copy keeps the page's authored styling and uses
+  one merged dashed frame; removed copy keeps only its deletion treatment, and
+  unchanged descendants now fade at the selected Copy/Structure/Visual level.
+  The content map opens to the right of its handle, distinguishes changed rows,
+  and dismisses on outside interaction. Linked review now mirrors authored
+  page actions and form state, not only Tabs. Return confirmation locates the
+  exact candidate HTML, while acceptance keeps review covering the live editor
+  until the candidate is rendered, eliminating the waiting-page flash.
+- End Canvas selection and native text editing when the user clicks elsewhere
+  in the page or App, committing the current checkpoint and removing the edit
+  toolbar and selection together.
 
 ## [0.9.5] - 2026-07-31
 

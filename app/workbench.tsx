@@ -7520,7 +7520,7 @@ export default function Workbench() {
     }
   }, [activeRun?.requestPath]);
 
-  const revealVersionInFinder = useCallback(async (version: Version) => {
+  const revealVersionInFinder = useCallback(async (version: Pick<Version, "id">) => {
     const activeSourcePath = projectSessionRef.current.sourcePath;
     const revealVersionFile = window.htmlAIProjects?.revealVersionFile;
     if (!activeSourcePath || !revealVersionFile) return;
@@ -8058,11 +8058,18 @@ export default function Workbench() {
       if (!transitionContext) {
         throw new Error("新版本已生成，但当前画布缺少可核对的项目身份。");
       }
-      const frozen = fenceAndFreezeCurrentCanvas(
-        "新版本已生成，但当前编辑画布尚未就绪。",
+      const alreadyFencedForReview = Boolean(
+        readyReviewSession
+        && readyReviewSession.operationKey === activeRunOperationKey(run)
+        && readyReviewSession.beforeHtml === documentSessionRef.current.html,
       );
-      if (!frozen.ok) {
-        throw new Error(frozen.reason || "新版本已生成，但当前编辑会话尚未安全收口。");
+      if (!alreadyFencedForReview) {
+        const frozen = fenceAndFreezeCurrentCanvas(
+          "新版本已生成，但当前编辑画布尚未就绪。",
+        );
+        if (!frozen.ok) {
+          throw new Error(frozen.reason || "新版本已生成，但当前编辑会话尚未安全收口。");
+        }
       }
       if (!isCurrentProjectContext(transitionContext)) {
         throw new DeferredEditorCommandDiscardedError("stale-session");
@@ -8139,7 +8146,6 @@ export default function Workbench() {
       status: protocolViolation ? "error" : "complete",
       completionObserved: true,
     };
-    setActiveRun(completedRun);
     setHandoffPreviewOpen(false);
     setCanvasMode("edit");
     setDrawer(null);
@@ -8149,6 +8155,8 @@ export default function Workbench() {
     if (projectLoadErrorRef.current) {
       throw new Error(`新版本已精确打开，但项目状态复核失败：${projectLoadErrorRef.current}`);
     }
+    setActiveRun(completedRun);
+    setDrawer(null);
     setProjectLocked(false);
     projectLockedRef.current = false;
     viewTransitioningRef.current = false;
@@ -8198,6 +8206,7 @@ export default function Workbench() {
     persistRecoveryLog,
     prepareGeneratedSourceTransition,
     refreshWorkspace,
+    readyReviewSession,
     setActiveRun,
     verifyCanvasRendered,
   ]);
@@ -8247,6 +8256,15 @@ export default function Workbench() {
         version: activatedPayload.version || run.readyPayload.version,
       };
       await openCommittedVersion(run, mergedPayload);
+      if (readyReviewSession?.operationKey === operationKey) {
+        setDrawer(null);
+        await new Promise<void>((resolve) => {
+          window.requestAnimationFrame(() => {
+            window.requestAnimationFrame(() => resolve());
+          });
+        });
+        setReadyReviewSession(null);
+      }
       runSessionRef.current.removeRun(run, { clearActive: false });
     } catch (cause) {
       if (isDeferredEditorCommandDiscardedError(cause)) return;
@@ -8278,7 +8296,7 @@ export default function Workbench() {
         setOpeningReadyVersion(false);
       }
     }
-  }, [activeRun, openCommittedVersion, setActiveRun]);
+  }, [activeRun, openCommittedVersion, readyReviewSession, setActiveRun]);
 
   const reviewReadyResult = useCallback(async () => {
     const run = runSessionRef.current.activeRun;
@@ -8328,7 +8346,20 @@ export default function Workbench() {
       ) {
         throw new Error("审阅候选与已校验版本的内容 Hash 不一致。");
       }
-      const frozenHtml = documentSessionRef.current.html;
+      const reviewContext = captureProjectContext();
+      if (!reviewContext) {
+        throw new Error("当前画布缺少可核对的项目身份，无法开始安全审阅。");
+      }
+      const frozen = fenceAndFreezeCurrentCanvas(
+        "当前编辑画布尚未就绪，无法开始安全审阅。",
+      );
+      if (!frozen.ok) {
+        throw new Error(frozen.reason || "当前编辑会话尚未安全收口。");
+      }
+      if (!isCurrentProjectContext(reviewContext)) {
+        throw new DeferredEditorCommandDiscardedError("stale-session");
+      }
+      const frozenHtml = frozen.html;
       if (
         !run.baseSnapshotSha256
         || await browserSha256(frozenHtml) !== run.baseSnapshotSha256
@@ -8362,7 +8393,12 @@ export default function Workbench() {
     } finally {
       setReviewPreparing(false);
     }
-  }, [reviewPreparing]);
+  }, [
+    captureProjectContext,
+    fenceAndFreezeCurrentCanvas,
+    isCurrentProjectContext,
+    reviewPreparing,
+  ]);
 
   useEffect(() => {
     if (!readyReviewSession) return;
@@ -8372,9 +8408,14 @@ export default function Workbench() {
       || currentRun.status !== "ready-to-open"
       || activeRunOperationKey(currentRun) !== readyReviewSession.operationKey
     ) {
-      setReadyReviewSession(null);
+      if (openingReadyVersion) return;
+      const frame = window.requestAnimationFrame(() => {
+        setReadyReviewSession(null);
+      });
+      return () => window.cancelAnimationFrame(frame);
     }
-  }, [activeRun, readyReviewSession]);
+    return undefined;
+  }, [activeRun, openingReadyVersion, readyReviewSession]);
 
   const processRunStatus = useCallback(async (
     run: ActiveRun,
@@ -9631,67 +9672,70 @@ export default function Workbench() {
     }
   };
 
-  if (readyReviewSession) {
-    return (
-      <AiReviewWorkspace
-        fileName={currentSourceFileName}
-        beforeLabel={readyReviewSession.beforeLabel}
-        afterLabel={readyReviewSession.afterLabel}
-        beforeHtml={readyReviewSession.beforeHtml}
-        afterHtml={readyReviewSession.afterHtml}
-        sourcePath={sourcePath || undefined}
-        accepting={openingReadyVersion}
-        error={activeRun?.status === "ready-to-open" ? activeRun.error : undefined}
-        notice={activeRun?.candidateAssessment?.status === "attention"
-          ? "这个候选可以打开，但与上一版的共同特征较少。请重点核对整页内容，再决定是否接受。"
-          : undefined}
-        onExit={() => {
-          setReadyReviewSession(null);
-          setDrawer("handoff");
-        }}
-        onReturnBefore={() => {
-          void (async () => {
-            const restored = await cancelActiveRun({
-              reason: "declined-ai-candidate-after-review",
-            });
-            if (!restored) return;
-            setToast({
-              title: `已返回 AI 修改前的${readyReviewSession.beforeLabel}`,
-              message: `${readyReviewSession.afterLabel} 与本轮记录仍已保留；当前页面可直接继续编辑。`,
-              tone: "success",
-              dedupeKey: "ready-version-returned-before",
-            });
-          })();
-        }}
-        onAccept={() => {
-          setReadyReviewSession(null);
-          setDrawer(null);
-          window.requestAnimationFrame(() => void activateReadyResult({
-            reviewed: true,
-          }));
-        }}
-        onRevealRequestFolder={() => void revealActiveRunInFinder()}
-      />
-    );
-  }
+  const readyReviewOverlay = readyReviewSession ? (
+    <AiReviewWorkspace
+      fileName={currentSourceFileName}
+      beforeLabel={readyReviewSession.beforeLabel}
+      afterLabel={readyReviewSession.afterLabel}
+      beforeHtml={readyReviewSession.beforeHtml}
+      afterHtml={readyReviewSession.afterHtml}
+      sourcePath={sourcePath || undefined}
+      accepting={openingReadyVersion}
+      error={activeRun?.status === "ready-to-open" ? activeRun.error : undefined}
+      notice={activeRun?.candidateAssessment?.status === "attention"
+        ? "这个候选可以打开，但与上一版的共同特征较少。请重点核对整页内容，再决定是否接受。"
+        : undefined}
+      onExit={() => {
+        setReadyReviewSession(null);
+        setDrawer("handoff");
+      }}
+      onReturnBefore={() => {
+        void (async () => {
+          const restored = await cancelActiveRun({
+            reason: "declined-ai-candidate-after-review",
+          });
+          if (!restored) return;
+          setToast({
+            title: `已返回 AI 修改前的${readyReviewSession.beforeLabel}`,
+            message: `${readyReviewSession.afterLabel} 与本轮记录仍已保留；当前页面可直接继续编辑。`,
+            tone: "success",
+            dedupeKey: "ready-version-returned-before",
+          });
+        })();
+      }}
+      onAccept={() => {
+        void activateReadyResult({
+          reviewed: true,
+        });
+      }}
+      onRevealCandidateHtml={() => {
+        const candidateVersionId = activeRun?.candidateVersionId;
+        if (candidateVersionId) {
+          void revealVersionInFinder({ id: candidateVersionId });
+        }
+      }}
+    />
+  ) : null;
 
   return (
-    <main
-      className="workbench"
-      data-round-state={runInProgress ? "processing" : viewMode}
-      data-canvas-mode={canvasMode}
-      data-handoff-preview={runInProgress && handoffPreviewOpen ? "true" : undefined}
-      data-project-state={
-        projectLoadError
-          ? "failed"
-          : projectHydrating
-            ? "hydrating"
-            : sourcePath
-              ? "ready"
-              : "unbound"
-      }
-      aria-label="HTML AI 可视化编辑工作台"
-    >
+    <>
+      <main
+        className="workbench"
+        data-round-state={runInProgress ? "processing" : viewMode}
+        data-canvas-mode={canvasMode}
+        data-handoff-preview={runInProgress && handoffPreviewOpen ? "true" : undefined}
+        data-project-state={
+          projectLoadError
+            ? "failed"
+            : projectHydrating
+              ? "hydrating"
+              : sourcePath
+                ? "ready"
+                : "unbound"
+        }
+        aria-label="HTML AI 可视化编辑工作台"
+        inert={readyReviewSession ? true : undefined}
+      >
       <WorkbenchHeaderShell
         data-file-renaming={fileRenameEditing ? "true" : undefined}
       >
@@ -11585,6 +11629,8 @@ export default function Workbench() {
           }}
         />
       ) : null}
-    </main>
+      </main>
+      {readyReviewOverlay}
+    </>
   );
 }

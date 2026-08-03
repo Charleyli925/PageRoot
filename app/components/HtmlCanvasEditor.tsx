@@ -2211,6 +2211,20 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     resetSelection(true);
   }, [resetSelection]);
 
+  useEffect(() => {
+    const container = containerRef.current;
+    const documentNode = container?.ownerDocument;
+    if (!container || !documentNode) return undefined;
+    const clearOnOutsidePointer = (event: PointerEvent) => {
+      if (!selectedElementRef.current) return;
+      const target = event.target;
+      if (target instanceof Node && toolbarRef.current?.contains(target)) return;
+      clearSelection();
+    };
+    documentNode.addEventListener("pointerdown", clearOnOutsidePointer, true);
+    return () => documentNode.removeEventListener("pointerdown", clearOnOutsidePointer, true);
+  }, [clearSelection]);
+
   const selectElement = useCallback(
     (
       element: HTMLElement,
@@ -3591,6 +3605,17 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         return;
       }
       if (isModulePaddingHit(target, event)) {
+        event.preventDefault();
+        event.stopPropagation();
+        clearSelection();
+        return;
+      }
+      const selectedElement = selectedElementRef.current;
+      if (
+        selectedElement
+        && event.target instanceof Node
+        && !selectedElement.contains(event.target)
+      ) {
         event.preventDefault();
         event.stopPropagation();
         clearSelection();

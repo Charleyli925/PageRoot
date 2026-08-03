@@ -136,7 +136,7 @@ PageRoot 让用户在真实本地 HTML 上完成两类工作：
 每次本地修改：
 
 1. 文字双击时由 `IslandEditingController` 为当前源码宿主建立唯一可编辑岛；浏览器只负责光标、Selection 和 IME，Controller 接管输入、删除、换行、粘贴与格式变更。
-2. 约 700ms、格式、Cmd+S、目标切换、关闭或发送边界生成带目标身份、源 Hash、精确岛内 before/after 和操作类型的 `replace-editable-island` 命令；短暂失焦不结束会话。
+2. 约 700ms、格式、Cmd+S、目标切换、关闭或发送边界生成带目标身份、源 Hash、精确岛内 before/after 和操作类型的 `replace-editable-island` 命令；编辑工具栏内的焦点迁移不结束会话，点击当前选区之外的页面或 App 区域则提交 checkpoint，并同时清除编辑态、选区与工具栏。
 3. SourceIndex/TargetResolver 唯一定位真实源码范围；无法唯一定位时保留草稿并阻止操作。
 4. SourcePatchEngine 只替换目标元素的精确 `contentRange`，并验证岛外源码逐字节不变。岛内可进行最小 parse5 规范化；成功事务把实际 forward Patch 和对应 exact inverse Patch 作为同一操作写入有界源码历史，不保存整页 DOM 快照。
 5. 用 Patch 结果更新内存 HTML 并原子重建 projection；失败时保留原会话和草稿。
@@ -295,7 +295,7 @@ editing
 - `awaiting-conflict-resolution`
 - `recovering-transaction`
 
-`submitting`、`processing`、`validating`、`committing`、冲突和事务恢复均锁定当前项目。`ready-to-open` 表示新版已经安全生成但尚未成为当前源；界面默认突出“审阅对比”，同时保留“直接打开”。正式审阅页在无保存与激活权限的隔离沙箱中展示冻结当前版与 AI 候选，允许点击原页面 Tab 等纯页内控件。审阅显示是一个互斥七状态模型：默认无标记的“双页”，单独的“左页·修改前/右页·修改后”，以及自动恢复双页并聚焦匹配变化的“全部变化/文案/结构/视觉”。导航区域与变化 marker 分离，文案使用短句内字符级差异，结构与视觉说明具体变化；完整内容地图、0–100 线性上下文可见度、缩放、成对 Tab 与防回跳语义同步滚动均不改变候选。通过左上角项目标识退出审阅会回到同一待处理页面；确认“返回 AI 修改前”则结束 active run 并直接恢复修改前 HTML 的编辑状态，但不删除评论、编辑记录、候选 Version、working HTML 或本轮记录。“打开 AI 修改后”需要确认，且不得闪现等待 AI 页面；完成三侧 Hash 校验后回到 `editing`。
+`submitting`、`processing`、`validating`、`committing`、冲突和事务恢复均锁定当前项目。`ready-to-open` 表示新版已经安全生成但尚未成为当前源；界面默认突出“审阅对比”，同时保留“直接打开”。正式审阅页在无保存与激活权限的隔离沙箱中展示冻结当前版与 AI 候选。进入审阅默认直接显示“双页 + 同步 + 全部变化”，上下文可见度为 18%，并定位第一处变化；“左页·修改前/右页·修改后”与“文案/结构/视觉”仍是同一互斥七状态模型。新增文字保留页面原有颜色和样式，以合并后的紫色虚线框标示；删除文字只保留红色删除线。过滤器按具体子元素虚化未变化内容，变化说明只使用“文案/结构/视觉变化”等简短文案。内容地图在把手右侧展开，清楚区分变化与未变化区域，并在点击地图外部后收起。同步状态会镜像双页中的页签、折叠、按钮和表单控件状态，同时继续按区域语义同步滚动；所有运行态都不改变候选。通过左上角项目标识退出审阅会回到同一待处理页面；确认“返回 AI 修改前”则结束 active run 并直接恢复修改前 HTML 的编辑状态，但不删除评论、编辑记录、候选 Version、working HTML 或本轮记录，确认提示中的链接直接在 Finder 定位该候选 HTML。“打开 AI 修改后”需要确认；审阅层保持覆盖到候选编辑画布完全就绪后再一次性移除，不得闪现等待 AI 页面，完成三侧 Hash 校验后回到 `editing`。
 
 状态与 active run 的唯一事实源是该项目自己的 `runtime-state.json`。`project.json` 不保存第二份 active run。
 

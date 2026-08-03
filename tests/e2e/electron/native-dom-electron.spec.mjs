@@ -809,7 +809,7 @@ test("Electron edit mode reveals safe semantic content without changing disk byt
 test("Electron uses the authored DOM caret, Selection and controlled beforeinput", async () => {
   const { electronApp, page, isolatedUserData } = await launchPageRoot();
   try {
-    const { frame } = await loadFixture(page, "complex-layout.html");
+    const { editor, frame } = await loadFixture(page, "complex-layout.html");
     const initialDocument = await documentToken(frame);
     await activateNativeEdit(frame, "heading-inline");
     expect(await nativeEditingState(frame, "heading-inline")).toMatchObject({
@@ -827,6 +827,12 @@ test("Electron uses the authored DOM caret, Selection and controlled beforeinput
     const events = await recordedInputEvents(frame);
     expect(events.some(({ type, inputType }) => type === "beforeinput" && inputType === "insertText")).toBe(true);
     expect(events.some(({ type }) => type === "input")).toBe(false);
+
+    await page.locator(".window-file-title-row").click();
+    await expect(editor.getByRole("toolbar")).toHaveCount(0);
+    await expect(frame.locator("[data-html-canvas-selected]")).toHaveCount(0);
+    await expect(frame.locator(caseSelector("heading-inline")))
+      .not.toHaveAttribute("contenteditable", "true");
   } finally {
     await stopPageRoot(electronApp, isolatedUserData);
   }
