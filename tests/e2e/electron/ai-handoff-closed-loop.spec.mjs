@@ -470,6 +470,7 @@ test("a verified AI result stays pending through desktop review until the user a
           });
         });
       });
+      document.documentElement.dataset.reviewFixtureReady = "true";
     </script>
   </main>`,
   ));
@@ -514,7 +515,16 @@ test("a verified AI result stays pending through desktop review until the user a
     ).toHaveAttribute("data-state", "current");
     writeAiOutput(request.requestRoot, (base) => {
       expect(base.match(new RegExp(ORIGINAL_TEXT, "gu"))).toHaveLength(1);
-      return base.replace(ORIGINAL_TEXT, UPDATED_TEXT);
+      return base
+        .replace(ORIGINAL_TEXT, UPDATED_TEXT)
+        .replace(
+          "<article><h2>标签一概览</h2><p>第一块完整内容</p></article>\n      <article><h2>标签一详情</h2><p>第二块完整内容</p></article>",
+          "<article><h2>标签一详情</h2><p>第二块完整内容</p></article>\n      <article><h2>标签一概览</h2><p>第一块完整内容</p></article>",
+        )
+        .replace(
+          "<article><h2>标签二详情</h2><p>第四块完整内容</p></article>",
+          "<article style=\"padding: 24px; border-radius: 16px\"><h2>标签二详情</h2><p>第四块完整内容</p></article>",
+        );
     });
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
 
@@ -541,6 +551,18 @@ test("a verified AI result stays pending through desktop review until the user a
     await launched.page.getByRole("button", {
       name: "显示并固定审阅工具",
     }).click();
+    const pinnedToolbarHandle = launched.page.getByRole("button", {
+      name: "收起审阅工具",
+    });
+    await expect(pinnedToolbarHandle).toBeVisible();
+    await expect.poll(async () => {
+      const toolbarHandleBox = await pinnedToolbarHandle.boundingBox();
+      const beforePaneHeaderBox = await launched.page
+        .locator('section[data-side="before"] > header')
+        .boundingBox();
+      if (!toolbarHandleBox || !beforePaneHeaderBox) return -100;
+      return beforePaneHeaderBox.y - (toolbarHandleBox.y + toolbarHandleBox.height);
+    }).toBeGreaterThanOrEqual(-1);
     const beforeReviewFrame = launched.page.frameLocator(
       'iframe[title^="修改前"]',
     );
@@ -550,13 +572,17 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
       "data-pageroot-review-filter",
     ), { timeout: 30_000 }).toBe("overview");
+    await expect(launched.page.locator('[data-view="split"]')).toBeVisible();
     await expect(beforeReviewFrame.locator("html"))
       .toHaveAttribute("data-author-script-ran", "true");
+    await expect(beforeReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-fixture-ready", "true");
     await expect(beforeReviewFrame.locator('meta[http-equiv="refresh"]'))
       .toHaveCount(0);
     await expect(beforeReviewFrame.locator('[data-review-tab-panel="two"]'))
       .toBeHidden();
-    await beforeReviewFrame.getByRole("button", { name: "审阅标签二" }).click();
+    await beforeReviewFrame.getByRole("button", { name: "审阅标签二" })
+      .evaluate((button) => button.click());
     await expect(beforeReviewFrame.locator('[data-review-tab-panel="two"]'))
       .toBeVisible();
     await launched.page.getByRole("button", { name: "查看全部变化" }).click();
@@ -599,20 +625,139 @@ test("a verified AI result stays pending through desktop review until the user a
     const viewportWidth = await launched.page.evaluate(() => window.innerWidth);
     expect(Math.abs((mapButtonBox?.x || 0) + (mapButtonBox?.width || 0) - viewportWidth))
       .toBeLessThanOrEqual(1);
+    const movedOutlineItem = launched.page.getByRole("button", {
+      name: /标签一详情：第 \d+ 区移至第 \d+ 区/u,
+    });
+    await expect(movedOutlineItem).toBeVisible();
+    await movedOutlineItem.click();
+    await expect(beforeReviewFrame.locator('[data-review-tab-panel="one"]'))
+      .toBeVisible();
+    await launched.page.getByRole("button", { name: "结构变化" }).click();
+    await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
+      "data-pageroot-review-filter",
+    )).toBe("structure");
+    await expect(beforeReviewFrame.locator("[data-pageroot-review-structure]").first())
+      .toBeVisible();
+    await launched.page.getByRole("button", { name: "视觉变化" }).click();
+    await expect.poll(async () => afterReviewFrame.locator("html").getAttribute(
+      "data-pageroot-review-filter",
+    )).toBe("style");
+    await expect(afterReviewFrame.locator("[data-pageroot-review-style]").first())
+      .toBeVisible();
     await launched.page.getByRole("button", {
-      name: /单独查看修改前版本/,
+      name: /单独查看修改前/,
     }).click();
     await expect(launched.page.locator('[data-view="before"]')).toBeVisible();
     await expect(launched.page.locator('section[data-side="after"]')).toHaveAttribute("hidden", "");
-    await launched.page.getByRole("button", { name: /返回并排对比/ }).click();
+    await launched.page.getByRole("button", {
+      name: "双页对比（修改前与 AI 修改后）",
+    }).click();
     await expect(launched.page.locator('[data-view="split"]')).toBeVisible();
+    await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
+      "data-pageroot-review-filter",
+    )).toBe("overview");
+    const wholePageButton = launched.page.getByRole("button", {
+      name: "双页对比（修改前与 AI 修改后）",
+    });
+    await wholePageButton.focus();
+    await wholePageButton.press("ArrowRight");
+    await expect(launched.page.locator('[data-view="before"]')).toBeVisible();
+    const leftPageButton = launched.page.getByRole("button", {
+      name: /单独查看修改前/u,
+    });
+    await expect(leftPageButton).toBeFocused();
+    await leftPageButton.press("ArrowLeft");
+    await expect(launched.page.locator('[data-view="split"]')).toBeVisible();
+    await expect(wholePageButton).toBeFocused();
+    await launched.page.getByRole("button", {
+      name: /单独查看 AI 修改后/,
+    }).click();
+    await expect(launched.page.locator('[data-view="after"]')).toBeVisible();
+    await expect(launched.page.locator('section[data-side="before"]')).toHaveAttribute("hidden", "");
     await launched.page.getByRole("button", { name: "查看全部变化" }).click();
+    await expect(launched.page.locator('[data-view="split"]')).toBeVisible();
     await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
       "data-pageroot-review-filter",
     )).toBe("all");
+    const beforeViewport = launched.page.locator('[aria-label="修改前画布滚动区"]');
+    const afterViewport = launched.page.locator('[aria-label="修改后画布滚动区"]');
+    const sourceLeft = await beforeViewport.evaluate((element) => {
+      element.scrollLeft = 160;
+      element.dispatchEvent(new Event("scroll"));
+      return element.scrollLeft;
+    });
+    expect(sourceLeft).toBeGreaterThan(0);
+    await expect.poll(() => afterViewport.evaluate((element) => element.scrollLeft))
+      .toBe(sourceLeft);
+
+    await launched.page.waitForTimeout(450);
+    await beforeReviewFrame.locator("html").evaluate(() => {
+      const outlines = [...document.querySelectorAll("[data-pageroot-outline-id]")]
+        .filter((element) => element.getBoundingClientRect().height > 0);
+      const target = outlines[Math.floor(outlines.length / 2)];
+      target?.scrollIntoView({ block: "start", behavior: "auto" });
+    });
+    const visibleOutlineAnchor = (frame) => frame.locator("html").evaluate(() => {
+      const outlines = [...document.querySelectorAll("[data-pageroot-outline-id]")]
+        .filter((element) => element.getBoundingClientRect().height > 0);
+      const anchor = outlines.find((element) => element.getBoundingClientRect().bottom > 1)
+        || outlines.at(-1);
+      if (!anchor) return { outlineId: "", ratio: 0 };
+      const rect = anchor.getBoundingClientRect();
+      return {
+        outlineId: anchor.getAttribute("data-pageroot-outline-id") || "",
+        ratio: Math.max(0, Math.min(1, (0 - rect.top) / Math.max(1, rect.height))),
+      };
+    });
+    const beforeOutlineAnchor = await visibleOutlineAnchor(beforeReviewFrame);
+    expect(beforeOutlineAnchor.outlineId).not.toBe("");
+    const afterOutlineProgress = () => afterReviewFrame.locator(
+      `[data-pageroot-outline-id="${beforeOutlineAnchor.outlineId}"]`,
+    ).evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      return Math.max(0, Math.min(1, (0 - rect.top) / Math.max(1, rect.height)));
+    });
+    await expect.poll(afterOutlineProgress).toBeCloseTo(beforeOutlineAnchor.ratio, 1);
+    if (process.env.PAGEROOT_CAPTURE_REVIEW) {
+      const captureDirectory = path.join(productRoot, "output", "design-qa");
+      mkdirSync(captureDirectory, { recursive: true });
+      await launched.page.getByRole("slider", {
+        name: "非修改区域上下文可见度",
+      }).fill("22");
+      await wholePageButton.click();
+      await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
+        "data-pageroot-review-filter",
+      )).toBe("overview");
+      await Promise.all([
+        beforeViewport.evaluate((element) => { element.scrollLeft = 0; }),
+        afterViewport.evaluate((element) => { element.scrollLeft = 0; }),
+        beforeReviewFrame.locator("html").evaluate(() => window.scrollTo(0, 0)),
+        afterReviewFrame.locator("html").evaluate(() => window.scrollTo(0, 0)),
+      ]);
+      await launched.page.getByRole("button", {
+        name: "收起并取消固定内容地图",
+      }).click();
+      await launched.page.screenshot({
+        path: path.join(captureDirectory, "ai-review-final.png"),
+        animations: "disabled",
+      });
+      await launched.page.getByRole("button", {
+        name: "打开并固定内容地图",
+      }).click();
+      await launched.page.screenshot({
+        path: path.join(captureDirectory, "ai-review-map.png"),
+        animations: "disabled",
+      });
+    }
     await launched.page.getByRole("button", {
       name: "接受全部并打开",
     }).click();
+    await expect(launched.page.getByRole("dialog", {
+      name: /接受全部并打开（.+）？/u,
+    })).toBeVisible();
+    await expect(launched.page.getByRole("button", { name: "继续审阅" }))
+      .toBeFocused();
+    await launched.page.getByRole("button", { name: "确认接受并打开" }).click();
     await expect.poll(async () => (
       launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject())
     ), { timeout: 30_000 }).toMatchObject({

@@ -9,14 +9,18 @@ import {
   useState,
   useSyncExternalStore,
   type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
-import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/csr/ArrowSquareOut";
+import { BrowsersIcon } from "@phosphor-icons/react/dist/csr/Browsers";
 import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
+import { CaretLeftIcon } from "@phosphor-icons/react/dist/csr/CaretLeft";
+import { CaretRightIcon } from "@phosphor-icons/react/dist/csr/CaretRight";
 import { CaretUpIcon } from "@phosphor-icons/react/dist/csr/CaretUp";
 import { CheckCircleIcon } from "@phosphor-icons/react/dist/csr/CheckCircle";
 import { ClockCounterClockwiseIcon } from "@phosphor-icons/react/dist/csr/ClockCounterClockwise";
 import { CornersOutIcon } from "@phosphor-icons/react/dist/csr/CornersOut";
 import { EyeIcon } from "@phosphor-icons/react/dist/csr/Eye";
+import { FileHtmlIcon } from "@phosphor-icons/react/dist/csr/FileHtml";
 import { GitDiffIcon } from "@phosphor-icons/react/dist/csr/GitDiff";
 import { LinkBreakIcon } from "@phosphor-icons/react/dist/csr/LinkBreak";
 import { LinkIcon } from "@phosphor-icons/react/dist/csr/Link";
@@ -33,11 +37,20 @@ import {
   type ReviewDocuments,
   type ReviewSide,
 } from "./review-document";
+import {
+  WorkbenchHeaderActions,
+  WorkbenchHeaderShell,
+} from "./workbench-header-shell";
 import styles from "./ai-review-workspace.module.css";
 
 type ScrollMode = "linked" | "independent";
 type ZoomMode = "fit" | "actual";
 type CanvasView = "split" | ReviewSide;
+type PreviewDisplayMode = "preview-split" | "preview-before" | "preview-after";
+type ChangeDisplayMode = "diff-all" | "diff-text" | "diff-structure" | "diff-style";
+type ReviewDisplayMode = PreviewDisplayMode | ChangeDisplayMode;
+type ReviewChangeFilter = Exclude<ReviewFilter, "overview">;
+type ConfirmationAction = "return" | "accept";
 type ReviewDesktopSession = { sessionId: string; url: string };
 type ReviewDesktopSessions = Record<ReviewSide, ReviewDesktopSession>;
 type ReviewDesktopSessionResult = {
@@ -48,10 +61,31 @@ type ReviewDesktopSessionResult = {
 
 const FILTER_LABELS: Record<ReviewFilter, string> = {
   overview: "整页",
-  all: "变化",
+  all: "全部变化",
   text: "文案",
   structure: "结构",
   style: "视觉",
+};
+
+const DISPLAY_MODE_PROJECTION: Record<ReviewDisplayMode, {
+  canvasView: CanvasView;
+  filter: ReviewFilter;
+  label: string;
+}> = {
+  "preview-split": { canvasView: "split", filter: "overview", label: "整页 · 双页预览" },
+  "preview-before": { canvasView: "before", filter: "overview", label: "左页 · 修改前" },
+  "preview-after": { canvasView: "after", filter: "overview", label: "右页 · AI 修改后" },
+  "diff-all": { canvasView: "split", filter: "all", label: "全部变化" },
+  "diff-text": { canvasView: "split", filter: "text", label: "文案变化" },
+  "diff-structure": { canvasView: "split", filter: "structure", label: "结构变化" },
+  "diff-style": { canvasView: "split", filter: "style", label: "视觉变化" },
+};
+
+const DISPLAY_MODE_BY_FILTER: Record<ReviewChangeFilter, ChangeDisplayMode> = {
+  all: "diff-all",
+  text: "diff-text",
+  structure: "diff-structure",
+  style: "diff-style",
 };
 
 const EMPTY_REVIEW_DOCUMENT = "<!doctype html><html><head><meta charset=\"utf-8\"></head><body></body></html>";
@@ -64,6 +98,8 @@ type ReviewMessage = {
   type?: string;
   top?: number;
   left?: number;
+  ratio?: number;
+  pageRatio?: number;
   outlineId?: string;
 };
 
@@ -154,6 +190,13 @@ function ReviewDocumentPane({
       hidden={!visible}
       aria-label={`${side === "before" ? "修改前" : "修改后"}${label}完整页面`}
     >
+      <header className={styles.documentPaneHeader}>
+        <span aria-hidden="true" />
+        <div>
+          <strong>{side === "before" ? "修改前" : "AI 修改后"}</strong>
+          <small>{label}</small>
+        </div>
+      </header>
       <div
         className={styles.documentViewport}
         ref={assignViewport}
@@ -230,6 +273,7 @@ export default function AiReviewWorkspace({
   onAccept: () => void;
 }) {
   const sessionId = `review-${useId().replace(/:/g, "-")}`;
+  const fileTitle = fileName.replace(/\.(?:html?|xhtml)$/iu, "") || fileName;
   const hydrated = useSyncExternalStore(subscribeHydration, () => true, () => false);
   const independentTransport = hydrated && Boolean(window.htmlAIPreview);
   const documents = useMemo<ReviewDocuments>(() => (
@@ -247,19 +291,20 @@ export default function AiReviewWorkspace({
           outline: [],
         }
   ), [afterHtml, beforeHtml, hydrated, independentTransport, sessionId, sourcePath]);
-  const [filter, setFilter] = useState<ReviewFilter>("overview");
+  const [displayMode, setDisplayMode] = useState<ReviewDisplayMode>("preview-split");
   const [focus, setFocus] = useState("all");
   const [scrollMode, setScrollMode] = useState<ScrollMode>("linked");
   const [zoom, setZoom] = useState<ZoomMode>("actual");
-  const [canvasView, setCanvasView] = useState<CanvasView>("split");
   const [transparency, setTransparency] = useState(22);
   const [toolbarPinned, setToolbarPinned] = useState(false);
   const [mapPinned, setMapPinned] = useState(false);
   const [mapPeeked, setMapPeeked] = useState(false);
-  const [showKeepConfirm, setShowKeepConfirm] = useState(false);
+  const [confirmationAction, setConfirmationAction] = useState<ConfirmationAction | null>(null);
   const [desktopSessionResult, setDesktopSessionResult] =
     useState<ReviewDesktopSessionResult | null>(null);
   const continueReviewButtonRef = useRef<HTMLButtonElement>(null);
+  const confirmationTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const confirmDialogRef = useRef<HTMLElement>(null);
   const framesRef = useRef<Record<ReviewSide, HTMLIFrameElement | null>>({
     before: null,
     after: null,
@@ -270,6 +315,7 @@ export default function AiReviewWorkspace({
   });
   const scalesRef = useRef<Record<ReviewSide, number>>({ before: 1, after: 1 });
   const horizontalSyncingRef = useRef(false);
+  const { canvasView, filter } = DISPLAY_MODE_PROJECTION[displayMode];
   const reviewStateRef = useRef({ filter, focus, transparency });
   const desktopSessions = desktopSessionResult?.documents === documents
     ? desktopSessionResult.sessions
@@ -364,12 +410,12 @@ export default function AiReviewWorkspace({
   }, [filter, focus, sendState, transparency]);
 
   useEffect(() => {
-    if (!showKeepConfirm) return undefined;
+    if (!confirmationAction) return undefined;
     const focusFrame = window.requestAnimationFrame(() => {
       continueReviewButtonRef.current?.focus();
     });
     return () => window.cancelAnimationFrame(focusFrame);
-  }, [showKeepConfirm]);
+  }, [confirmationAction]);
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent<ReviewMessage>) => {
@@ -388,8 +434,10 @@ export default function AiReviewWorkspace({
       if (message.type !== "scroll" || scrollMode !== "linked") return;
       const follower: ReviewSide = message.side === "before" ? "after" : "before";
       postToFrame(framesRef.current[follower], sessionId, {
-        type: "scroll-to",
-        top: Number(message.top || 0),
+        type: "sync-scroll",
+        outlineId: message.outlineId,
+        ratio: Number(message.ratio || 0),
+        pageRatio: Number(message.pageRatio || 0),
         left: Number(message.left || 0),
       });
     };
@@ -433,19 +481,16 @@ export default function AiReviewWorkspace({
     });
   }, [scrollMode]);
 
-  const selectChange = useCallback((changeId: string, preferredFilter?: ReviewFilter) => {
+  const selectChange = useCallback((changeId: string, preferredFilter?: ReviewChangeFilter) => {
     const selectedChange = documents.changes.find((change) => change.id === changeId);
     setFocus(changeId);
-    setFilter((current) => {
-      const requested = preferredFilter || (current === "overview" ? "all" : current);
-      if (
-        selectedChange
-        && requested !== "overview"
-        && requested !== "all"
-        && !selectedChange.types.includes(requested)
-      ) return "all";
-      return requested;
-    });
+    const requested = preferredFilter || (filter === "overview" ? "all" : filter);
+    const resolvedFilter = selectedChange
+      && requested !== "all"
+      && !selectedChange.types.includes(requested)
+      ? "all"
+      : requested;
+    setDisplayMode(DISPLAY_MODE_BY_FILTER[resolvedFilter]);
     (["before", "after"] as ReviewSide[]).forEach((side) => {
       postToFrame(framesRef.current[side], sessionId, {
         type: "focus-change",
@@ -453,33 +498,33 @@ export default function AiReviewWorkspace({
         behavior: "smooth",
       });
     });
-  }, [documents.changes, sessionId]);
+  }, [documents.changes, filter, sessionId]);
 
-  const selectReviewMode = useCallback((mode: ReviewFilter) => {
-    if (mode === "overview") {
-      setFilter("overview");
-      setFocus("all");
-      return;
-    }
+  const selectReviewMode = useCallback((mode: ReviewChangeFilter) => {
     const candidates = mode === "all"
       ? documents.changes
       : documents.changes.filter((change) => change.types.includes(mode));
     const current = candidates.find((change) => change.id === focus);
     const target = current || candidates[0];
     if (!target) {
-      setFilter(mode);
+      setDisplayMode(DISPLAY_MODE_BY_FILTER[mode]);
       setFocus("all");
       return;
     }
     selectChange(target.id, mode);
   }, [documents.changes, focus, selectChange]);
 
+  const selectPreviewMode = useCallback((mode: PreviewDisplayMode) => {
+    setDisplayMode(mode);
+    setFocus("all");
+  }, []);
+
   const selectOutlineItem = useCallback((item: ReviewDocuments["outline"][number]) => {
     if (item.changeId) {
       selectChange(item.changeId);
       return;
     }
-    setFilter("overview");
+    setDisplayMode("preview-split");
     setFocus(item.id);
     (["before", "after"] as ReviewSide[]).forEach((side) => {
       postToFrame(framesRef.current[side], sessionId, {
@@ -497,31 +542,126 @@ export default function AiReviewWorkspace({
     selectChange(navigableChanges[nextIndex].id);
   }, [activeIndex, navigableChanges, selectChange]);
 
+  const handleSegmentedKeyDown = useCallback((event: ReactKeyboardEvent<HTMLButtonElement>) => {
+    const buttons = [...(event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>(
+      "button:not(:disabled)",
+    ) || [])];
+    const currentIndex = buttons.indexOf(event.currentTarget);
+    if (currentIndex < 0 || !buttons.length) return;
+
+    let targetIndex: number | null = null;
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+      targetIndex = (currentIndex + 1) % buttons.length;
+    } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+      targetIndex = (currentIndex - 1 + buttons.length) % buttons.length;
+    } else if (event.key === "Home") {
+      targetIndex = 0;
+    } else if (event.key === "End") {
+      targetIndex = buttons.length - 1;
+    }
+
+    if (targetIndex === null) return;
+    event.preventDefault();
+    buttons[targetIndex].focus();
+    buttons[targetIndex].click();
+  }, []);
+
+  const openConfirmation = useCallback((
+    action: ConfirmationAction,
+    trigger: HTMLButtonElement,
+  ) => {
+    confirmationTriggerRef.current = trigger;
+    setConfirmationAction(action);
+  }, []);
+
+  const closeConfirmation = useCallback(() => {
+    setConfirmationAction(null);
+    const trigger = confirmationTriggerRef.current;
+    window.requestAnimationFrame(() => trigger?.focus());
+  }, []);
+
+  const confirmAndContinue = useCallback(() => {
+    const action = confirmationAction;
+    setConfirmationAction(null);
+    if (action === "return") onReturnBefore();
+    if (action === "accept") onAccept();
+  }, [confirmationAction, onAccept, onReturnBefore]);
+
+  const handleConfirmDialogKeyDown = useCallback((event: ReactKeyboardEvent<HTMLElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeConfirmation();
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const focusable = [...(confirmDialogRef.current?.querySelectorAll<HTMLButtonElement>(
+      "button:not(:disabled)",
+    ) || [])];
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable.at(-1) || first;
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }, [closeConfirmation]);
+
   return (
     <div className={styles.reviewRoot} data-testid="ai-review-workspace">
-      <header className={styles.appHeader}>
-        <div className={styles.fileIdentity}>
-          <button className={styles.brandButton} type="button" aria-label="返回源页工作台" onClick={onExit}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="./brand-logo.png" alt="源页" />
-          </button>
-          <div>
-            <strong>{fileName}</strong>
-            <span>{beforeLabel} → AI 完整候选版</span>
+      <WorkbenchHeaderShell
+        className={styles.reviewHeader}
+        inert={confirmationAction ? true : undefined}
+      >
+        <div className="window-file">
+          <span className="window-file-icon-cluster">
+            <button
+              className="window-file-icon window-file-about-button"
+              type="button"
+              aria-label="返回本轮处理页面"
+              title="返回本轮处理页面"
+              onClick={onExit}
+            >
+              <FileHtmlIcon aria-hidden="true" size={20} weight="duotone" />
+            </button>
+          </span>
+          <div className="window-file-copy">
+            <div className="window-file-title-row">
+              <strong title={fileName}>{fileTitle}</strong>
+            </div>
+            <span className="file-meta">
+              <span className="file-version-label">审阅 AI 候选</span>
+              <span className="save-status" data-persist-state="idle" role="status">
+                <span aria-hidden="true" />
+                只读对比 · 尚未采用
+              </span>
+            </span>
           </div>
         </div>
 
-        <div className={styles.headerActions}>
-          <button className={styles.headerButton} type="button" disabled={accepting} onClick={() => setShowKeepConfirm(true)}>
-            <ClockCounterClockwiseIcon aria-hidden="true" size={15} weight="duotone" />
+        <WorkbenchHeaderActions aria-label="审阅结果操作">
+          <button
+            className="recent-run-button"
+            type="button"
+            disabled={accepting}
+            onClick={(event) => openConfirmation("return", event.currentTarget)}
+          >
+            <ClockCounterClockwiseIcon aria-hidden="true" size={18} weight="duotone" />
             返回 AI 修改前
           </button>
-          <button className={styles.headerPrimaryAction} type="button" disabled={accepting} onClick={onAccept}>
-            <CheckCircleIcon aria-hidden="true" size={15} weight="fill" />
+          <button
+            className="header-send-button"
+            type="button"
+            disabled={accepting}
+            onClick={(event) => openConfirmation("accept", event.currentTarget)}
+          >
+            <CheckCircleIcon aria-hidden="true" size={18} weight="fill" />
             {accepting ? "正在核对并打开…" : "接受全部并打开"}
           </button>
-        </div>
-      </header>
+        </WorkbenchHeaderActions>
+      </WorkbenchHeaderShell>
 
       {error ? (
         <div className={styles.reviewError} role="alert">
@@ -537,7 +677,7 @@ export default function AiReviewWorkspace({
         </div>
       ) : null}
 
-      <main className={styles.reviewMain}>
+      <main className={styles.reviewMain} inert={confirmationAction ? true : undefined}>
         <section
           className={styles.canvasReview}
           data-toolbar-open={toolbarPinned ? "true" : undefined}
@@ -548,33 +688,50 @@ export default function AiReviewWorkspace({
                 <span className={styles.canvasReviewIcon}><EyeIcon aria-hidden="true" size={20} weight="duotone" /></span>
                 <span>
                   <strong>审阅模式</strong>
-                  <small>{canvasView === "split" ? "双页对比" : canvasView === "before" ? "单独查看修改前" : "单独查看 AI 修改后"} · {documents.changes.length} 处变化</small>
+                  <small>{DISPLAY_MODE_PROJECTION[displayMode].label} · {documents.changes.length} 处变化</small>
                 </span>
               </div>
 
-              <div className={styles.canvasVersionPair} aria-label="对比版本">
-                <button
-                  type="button"
-                  data-side="before"
-                  aria-pressed={canvasView === "before"}
-                  aria-label={`${canvasView === "before" ? "返回并排对比" : "单独查看修改前版本"} ${beforeLabel}`}
-                  onClick={() => setCanvasView((current) => current === "before" ? "split" : "before")}
+              <div className={styles.reviewModeControl}>
+                <span className={styles.toolbarFieldLabel}>页面预览</span>
+                <div
+                  className={styles.segmented}
+                  data-items="3"
+                  role="group"
+                  aria-label="页面预览"
                 >
-                  <small>左 · 修改前</small>
-                  <strong>{beforeLabel}</strong>
-                  <ArrowSquareOutIcon aria-hidden="true" size={13} weight="bold" />
-                </button>
-                <button
-                  type="button"
-                  data-side="after"
-                  aria-pressed={canvasView === "after"}
-                  aria-label={`${canvasView === "after" ? "返回并排对比" : "单独查看 AI 修改后版本"} ${afterLabel}`}
-                  onClick={() => setCanvasView((current) => current === "after" ? "split" : "after")}
-                >
-                  <small>右 · 修改后</small>
-                  <strong>AI 候选 {afterLabel}</strong>
-                  <ArrowSquareOutIcon aria-hidden="true" size={13} weight="bold" />
-                </button>
+                  <button
+                    type="button"
+                    aria-label="双页对比（修改前与 AI 修改后）"
+                    title="双页对比"
+                    aria-pressed={displayMode === "preview-split"}
+                    onClick={() => selectPreviewMode("preview-split")}
+                    onKeyDown={handleSegmentedKeyDown}
+                  >
+                    <BrowsersIcon aria-hidden="true" size={14} weight="duotone" />
+                    <span>整页</span>
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`单独查看修改前 ${beforeLabel}`}
+                    aria-pressed={displayMode === "preview-before"}
+                    onClick={() => selectPreviewMode("preview-before")}
+                    onKeyDown={handleSegmentedKeyDown}
+                  >
+                    <CaretLeftIcon aria-hidden="true" size={14} weight="bold" />
+                    <span>左页</span>
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`单独查看 AI 修改后 ${afterLabel}`}
+                    aria-pressed={displayMode === "preview-after"}
+                    onClick={() => selectPreviewMode("preview-after")}
+                    onKeyDown={handleSegmentedKeyDown}
+                  >
+                    <CaretRightIcon aria-hidden="true" size={14} weight="bold" />
+                    <span>右页</span>
+                  </button>
+                </div>
               </div>
 
               <label className={styles.transparencyControl}>
@@ -598,21 +755,22 @@ export default function AiReviewWorkspace({
               </label>
 
               <div className={styles.reviewModeControl}>
-                <span className={styles.toolbarFieldLabel}>审阅显示方式</span>
-                <div className={styles.segmented} aria-label="审阅显示方式">
-                  {(["overview", "all", "text", "structure", "style"] as ReviewFilter[]).map((mode) => (
+                <span className={styles.toolbarFieldLabel}>变化审阅</span>
+                <div
+                  className={styles.segmented}
+                  data-items="4"
+                  role="group"
+                  aria-label="变化审阅"
+                >
+                  {(["all", "text", "structure", "style"] as ReviewChangeFilter[]).map((mode) => (
                     <button
                       key={mode}
                       type="button"
-                      aria-label={mode === "overview"
-                        ? "查看整页"
-                        : mode === "all"
-                          ? "查看全部变化"
-                          : `${FILTER_LABELS[mode]}变化`}
+                      aria-label={mode === "all" ? "查看全部变化" : `${FILTER_LABELS[mode]}变化`}
                       aria-pressed={filter === mode}
                       onClick={() => selectReviewMode(mode)}
+                      onKeyDown={handleSegmentedKeyDown}
                     >
-                      {mode === "overview" ? <EyeIcon aria-hidden="true" size={14} weight="duotone" /> : null}
                       {mode === "all" ? <GitDiffIcon aria-hidden="true" size={14} weight="duotone" /> : null}
                       {mode === "text" ? <TextTIcon aria-hidden="true" size={14} weight="bold" /> : null}
                       {mode === "structure" ? <TreeStructureIcon aria-hidden="true" size={14} weight="duotone" /> : null}
@@ -661,9 +819,11 @@ export default function AiReviewWorkspace({
           </div>
 
           <div className={styles.canvasReviewBody}>
-            {filter !== "overview" && filter !== "all" && !navigableChanges.length ? (
+            {filter !== "overview" && !navigableChanges.length ? (
               <div className={styles.emptyFilterNotice} role="status">
-                本轮没有检测到{FILTER_LABELS[filter]}变化，仍可切回整页或其他类型继续审阅
+                {filter === "all"
+                  ? "本轮没有检测到变化，仍可查看整页"
+                  : `本轮没有检测到${FILTER_LABELS[filter]}变化，仍可切回整页或其他类型继续审阅`}
               </div>
             ) : null}
             <div className={styles.canvasGrid} data-view={canvasView}>
@@ -719,9 +879,9 @@ export default function AiReviewWorkspace({
                   <span>内容地图</span>
                 </button>
                 <div className={styles.mapNavigator} aria-label="逐处查看变化">
-                  <button type="button" aria-label="上一处变化" onClick={() => navigate(-1)}><CaretUpIcon aria-hidden="true" size={11} weight="bold" /></button>
+                  <button type="button" aria-label="上一处变化" disabled={!navigableChanges.length} onClick={() => navigate(-1)}><CaretUpIcon aria-hidden="true" size={11} weight="bold" /></button>
                   <span><strong>{activeIndex >= 0 ? activeIndex + 1 : 0}</strong><small>/{navigableChanges.length}</small></span>
-                  <button type="button" aria-label="下一处变化" onClick={() => navigate(1)}><CaretDownIcon aria-hidden="true" size={11} weight="bold" /></button>
+                  <button type="button" aria-label="下一处变化" disabled={!navigableChanges.length} onClick={() => navigate(1)}><CaretDownIcon aria-hidden="true" size={11} weight="bold" /></button>
                 </div>
               </div>
               <div className={styles.mapPanel} aria-hidden={!mapOpen} inert={!mapOpen ? true : undefined}>
@@ -734,27 +894,37 @@ export default function AiReviewWorkspace({
                 <button
                   className={styles.mapOverview}
                   type="button"
-                  aria-pressed={focus === "all"}
-                  onClick={() => { setFocus("all"); setFilter("overview"); }}
+                  aria-pressed={displayMode === "preview-split" && focus === "all"}
+                  onClick={() => selectPreviewMode("preview-split")}
                 >
                   <EyeIcon aria-hidden="true" size={15} weight="duotone" />
                   <span><strong>完整页面</strong><small>查看修改前与修改后</small></span>
                 </button>
                 <div className={styles.mapGroups}>
-                  {outlineGroups.map((group) => (
+                  {outlineGroups.map((group) => {
+                    const matchingCount = group.items.filter((item) => (
+                      Boolean(item.changeId)
+                      && (filter === "overview" || filter === "all" || item.types.includes(filter))
+                    )).length;
+                    return (
                     <section className={styles.mapGroup} key={group.label}>
-                      <h3><span>{group.label}</span><small>{group.items.filter((item) => item.changeId).length}/{group.items.length} 处变化</small></h3>
+                      <h3><span>{group.label}</span><small>{matchingCount}/{group.items.length} 处匹配</small></h3>
                       <ol className={styles.mapList}>
                         {group.items.map((item) => {
                           const itemIndex = documents.outline.findIndex((candidate) => candidate.id === item.id);
                           const selected = focus === (item.changeId || item.id);
+                          const matchesFilter = filter === "overview"
+                            || (Boolean(item.changeId)
+                              && (filter === "all" || item.types.includes(filter)));
                           return (
                             <li key={item.id}>
                               <button
                                 type="button"
                                 data-testid="review-outline-item"
                                 data-changed={item.changeId ? "true" : "false"}
+                                data-matches-filter={matchesFilter ? "true" : "false"}
                                 aria-pressed={selected}
+                                aria-label={`${item.label}：${item.helper}`}
                                 onClick={() => selectOutlineItem(item)}
                               >
                                 <span>{itemIndex + 1}</span>
@@ -765,7 +935,8 @@ export default function AiReviewWorkspace({
                         })}
                       </ol>
                     </section>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             </aside>
@@ -775,32 +946,58 @@ export default function AiReviewWorkspace({
       </main>
 
       <span className={styles.srAnnouncement} aria-live="polite">
-        {focus === "all" ? "正在查看完整页面" : `已聚焦${activeChange?.label || "变化区域"}`}
+        {focus === "all"
+          ? `已切换为${DISPLAY_MODE_PROJECTION[displayMode].label}`
+          : `已切换为${DISPLAY_MODE_PROJECTION[displayMode].label}，已聚焦${activeChange?.label || "页面区域"}`}
       </span>
 
-      {showKeepConfirm ? (
+      {confirmationAction ? (
         <div
           className={styles.modalBackdrop}
           onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setShowKeepConfirm(false);
+            if (event.target === event.currentTarget) closeConfirmation();
           }}
         >
           <section
+            ref={confirmDialogRef}
             className={styles.confirmDialog}
             role="dialog"
             aria-modal="true"
-            aria-labelledby="keep-current-title"
-            aria-describedby="keep-current-description"
-            onKeyDown={(event) => {
-              if (event.key === "Escape") setShowKeepConfirm(false);
-            }}
+            aria-labelledby="review-confirm-title"
+            aria-describedby="review-confirm-description"
+            onKeyDown={handleConfirmDialogKeyDown}
           >
-            <div className={styles.confirmIcon}><ClockCounterClockwiseIcon aria-hidden="true" size={25} weight="duotone" /></div>
-            <h2 id="keep-current-title">返回 AI 修改前（{beforeLabel}）？</h2>
-            <p id="keep-current-description">确认后不会采用这次 AI 返回的 {afterLabel}；当前 HTML 将继续使用 {beforeLabel}（AI 修改前），并返回本轮处理页面。AI 返回仍保留在本轮记录中，之后可以重新审阅。</p>
+            <div className={styles.confirmIcon}>
+              {confirmationAction === "return"
+                ? <ClockCounterClockwiseIcon aria-hidden="true" size={25} weight="duotone" />
+                : <CheckCircleIcon aria-hidden="true" size={25} weight="duotone" />}
+            </div>
+            <h2 id="review-confirm-title">
+              {confirmationAction === "return"
+                ? `返回 AI 修改前（${beforeLabel}）？`
+                : `接受全部并打开（${afterLabel}）？`}
+            </h2>
+            <p id="review-confirm-description">
+              {confirmationAction === "return"
+                ? `确认后不会采用这次 AI 返回的 ${afterLabel}；当前 HTML 将继续使用 ${beforeLabel}（AI 修改前），并返回本轮处理页面。AI 返回仍保留在本轮记录中，之后可以重新审阅。`
+                : `确认后项目将切换到 AI 修改后的完整候选 ${afterLabel}。修改前的 ${beforeLabel} 与本轮记录仍会保留，但当前页面会打开 AI 修改后的版本。`}
+            </p>
             <div>
-              <button ref={continueReviewButtonRef} className={styles.dialogSecondary} type="button" onClick={() => setShowKeepConfirm(false)}>继续审阅</button>
-              <button className={styles.dialogPrimary} type="button" onClick={() => { setShowKeepConfirm(false); onReturnBefore(); }}>返回修改前版本</button>
+              <button
+                ref={continueReviewButtonRef}
+                className={styles.dialogSecondary}
+                type="button"
+                onClick={closeConfirmation}
+              >
+                继续审阅
+              </button>
+              <button
+                className={styles.dialogPrimary}
+                type="button"
+                onClick={confirmAndContinue}
+              >
+                {confirmationAction === "return" ? "返回修改前版本" : "确认接受并打开"}
+              </button>
             </div>
           </section>
         </div>

@@ -187,6 +187,10 @@ import {
 } from "./workbench/handoff-view";
 import AiReviewWorkspace from "./workbench/AiReviewWorkspace";
 import {
+  WorkbenchHeaderActions,
+  WorkbenchHeaderShell,
+} from "./workbench/workbench-header-shell";
+import {
   activeRunOperationKey,
   fileExtension,
   fileNameFromSourcePath,
@@ -9679,8 +9683,7 @@ export default function Workbench() {
       }
       aria-label="HTML AI 可视化编辑工作台"
     >
-      <header
-        className="workbench-header"
+      <WorkbenchHeaderShell
         data-file-renaming={fileRenameEditing ? "true" : undefined}
       >
         <div className="window-file">
@@ -9877,7 +9880,7 @@ export default function Workbench() {
           </div>
         </div>
 
-        <nav className="header-actions" aria-label="画布模式、项目和版本操作">
+        <WorkbenchHeaderActions aria-label="画布模式、项目和版本操作">
           <div className="canvas-mode-switch" role="group" aria-label="画布模式">
             <button
               type="button"
@@ -10051,7 +10054,7 @@ export default function Workbench() {
               ? <small>{pendingSendItemCount}</small>
               : null}
           </button>
-        </nav>
+        </WorkbenchHeaderActions>
         <input
           ref={fileInputRef}
           className="sr-only"
@@ -10071,7 +10074,7 @@ export default function Workbench() {
             if (target) void uploadAttachments(files, target, "file-picker");
           }}
         />
-      </header>
+      </WorkbenchHeaderShell>
 
       {startupIssue ? (
         <section className="startup-issue" role="alert">

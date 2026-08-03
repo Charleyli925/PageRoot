@@ -21,6 +21,7 @@ const [
   interactionPreviewStyles,
   previewSandbox,
   bridgeClient,
+  headerShell,
 ] = await Promise.all([
   readWorkbenchArchitecture(),
   readFile(new URL("../app/components/AboutPageRootDialog.tsx", import.meta.url), "utf8"),
@@ -35,6 +36,7 @@ const [
   readFile(new URL("../app/components/HtmlInteractionPreview.module.css", import.meta.url), "utf8"),
   readFile(new URL("../app/components/html-preview-sandbox.js", import.meta.url), "utf8"),
   readFile(new URL("../app/application/bridge-client.js", import.meta.url), "utf8"),
+  readFile(new URL("../app/workbench/workbench-header-shell.tsx", import.meta.url), "utf8"),
 ]);
 
 test("startup welcome HTML is provisioned as a normal registered project", () => {
@@ -457,12 +459,12 @@ test("external source adoption invalidates the active native editing session", (
 });
 
 test("header prioritizes the filename and keeps the approved action order", () => {
-  const headerClass = workbench.indexOf('className="workbench-header"');
-  const headerStart = workbench.lastIndexOf("<header", headerClass);
+  const headerStart = workbench.indexOf("<WorkbenchHeaderShell");
   const header = workbench.slice(
     headerStart,
-    workbench.indexOf("</header>", headerStart),
+    workbench.indexOf("</WorkbenchHeaderShell>", headerStart),
   );
+  assert.match(headerShell, /className=\{joinClassNames\("workbench-header", className\)\}/);
   assert.match(header, /className="window-file"/);
   assert.match(
     header,
@@ -1090,7 +1092,7 @@ test("a safely saved source can be renamed in place without exposing its extensi
   );
   assert.match(
     workbench,
-    /className="workbench-header"[\s\S]*?data-file-renaming=\{fileRenameEditing \? "true" : undefined\}/,
+    /<WorkbenchHeaderShell[\s\S]*?data-file-renaming=\{fileRenameEditing \? "true" : undefined\}/,
   );
   assert.match(
     workbench,
@@ -1210,10 +1212,10 @@ test("project panel keeps actions clear without technical paths in the header", 
   assert.match(workbench, /修改会自动保存/);
   assert.doesNotMatch(workbench, /项目规则还有未保存修改/);
   assert.match(workbench, /<details[\s\S]*?className="project-advanced"/);
-  const headerStart = workbench.indexOf('<header className="workbench-header">');
+  const headerStart = workbench.indexOf("<WorkbenchHeaderShell");
   const header = workbench.slice(
     headerStart,
-    workbench.indexOf("</header>", headerStart),
+    workbench.indexOf("</WorkbenchHeaderShell>", headerStart),
   );
   assert.doesNotMatch(header, /sourcePath|folderFromSourcePath|projectRecordsPath|\/Users\//);
   assert.doesNotMatch(workbench, /<strong>\{activeRun\.requestId\}/);

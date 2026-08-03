@@ -295,7 +295,7 @@ editing
 - `awaiting-conflict-resolution`
 - `recovering-transaction`
 
-`submitting`、`processing`、`validating`、`committing`、冲突和事务恢复均锁定当前项目。`ready-to-open` 表示新版已经安全生成但尚未成为当前源；界面默认突出“审阅对比”，同时保留“直接打开”。正式审阅页在无保存与激活权限的隔离沙箱中展示冻结当前版与 AI 候选，允许点击原页面 Tab 等纯页内控件；“返回 AI 修改前”或通过左上角项目标识退出审阅会回到同一待处理页面，候选不会丢失；确认打开并完成三侧 Hash 校验后才回到 `editing`。
+`submitting`、`processing`、`validating`、`committing`、冲突和事务恢复均锁定当前项目。`ready-to-open` 表示新版已经安全生成但尚未成为当前源；界面默认突出“审阅对比”，同时保留“直接打开”。正式审阅页在无保存与激活权限的隔离沙箱中展示冻结当前版与 AI 候选，允许点击原页面 Tab 等纯页内控件。审阅显示是一个互斥七状态模型：默认无标记双页的“整页”，单独的“左页/右页”，以及自动恢复双页并聚焦匹配变化的“全部变化/文案/结构/视觉”；完整内容地图、上下文可见度、缩放与语义同步滚动均不改变候选。“返回 AI 修改前”或通过左上角项目标识退出审阅会回到同一待处理页面，候选不会丢失；“返回 AI 修改前”和“接受全部并打开”都需要确认，确认打开并完成三侧 Hash 校验后才回到 `editing`。
 
 状态与 active run 的唯一事实源是该项目自己的 `runtime-state.json`。`project.json` 不保存第二份 active run。
 

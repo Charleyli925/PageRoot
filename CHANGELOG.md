@@ -44,11 +44,15 @@ Notable user-visible changes are documented here. This project follows Semantic 
   side-by-side review and a secondary direct-open action, with full-page
   change filters, synchronized navigation, and a reversible return-before-AI
   confirmation before the same audited activation path is used.
-- Completed the formal AI review workspace with token-level text additions and
-  removals, structure and visual markers, auto-focused filters, an expanded full
-  page outline, context visibility, single-version canvas switching and isolated
-  source-page Tab interactions. The ambiguous keep action is now explicitly
-  labeled as returning to the version before the AI change.
+- Finalized the formal AI review workspace around one exclusive seven-state
+  model: `Whole / Left / Right` page preview plus `All / Copy / Structure /
+  Visual` change review. It now defaults to a clean dual-page preview, restores
+  that view through an explicit Whole action, detects sentence-level copy edits,
+  pure movement and broader CSS/attribute presentation changes, keeps the
+  all-change view sparse, reveals hidden authored Tabs from a complete content
+  map, and synchronizes pages by semantic region. The workspace reuses the
+  official header, and both returning before AI and accepting the candidate now
+  require explicit confirmation.
 
 ## [0.9.5] - 2026-07-31
 
