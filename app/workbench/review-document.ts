@@ -2565,7 +2565,10 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
     if (!target) return;
     const topDelta = target.top - scrollY;
     const leftDelta = target.left - scrollX;
-    const finished = Math.abs(topDelta) < .75 && Math.abs(leftDelta) < .75;
+    // Chromium may quantize scroll positions to whole CSS pixels. Treat that
+    // final pixel as complete and snap to the exact target; otherwise a 1px
+    // delta eased by .28 can keep rounding back to the same position forever.
+    const finished = Math.abs(topDelta) <= 1 && Math.abs(leftDelta) <= 1;
     const nextTop = finished ? target.top : scrollY + topDelta * .28;
     const nextLeft = finished ? target.left : scrollX + leftDelta * .28;
     programmaticScrollTop = nextTop;

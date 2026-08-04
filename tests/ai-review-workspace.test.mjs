@@ -295,6 +295,7 @@ test("all-change review keeps text treatment precise and mirrors authored action
   assert.match(reviewDocument, /if \(projectionTransitioning\) \{[\s\S]*?renderTransitionMask\(\);[\s\S]*?schedulePresentationReady/);
   assert.match(reviewDocument, /animateFollowerScroll/);
   assert.match(reviewDocument, /topDelta \* \.28/);
+  assert.match(reviewDocument, /Math\.abs\(topDelta\) <= 1/);
   assert.doesNotMatch(reviewDocument, /annotateUnchangedSubtrees/);
   const actionMirrorStart = review.indexOf('(message.type === "action" || message.type === "control-state")');
   const actionMirrorEnd = review.indexOf('if (message.type === "panel-change")', actionMirrorStart);
