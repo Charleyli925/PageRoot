@@ -3071,8 +3071,17 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
   addEventListener("scroll", () => {
     scheduleCommentLayoutReport();
     if (programmaticScrollToken) {
-      if (Math.abs(scrollY - programmaticScrollTop) <= 1) scheduleOverlayRender();
-      return;
+      if (Math.abs(scrollY - programmaticScrollTop) <= 1) {
+        scheduleOverlayRender();
+        return;
+      }
+      // A new scroll that diverges from the animation target is fresh input,
+      // not an echo. Stop the stale follower animation so it cannot suppress
+      // or overwrite a user-return-to-top (or any later source scroll).
+      cancelAnimationFrame(followerScrollFrame);
+      followerScrollFrame = 0;
+      followerScrollTarget = null;
+      programmaticScrollToken = "";
     }
     cancelAnimationFrame(scrollFrame);
     scrollFrame = requestAnimationFrame(() => {
