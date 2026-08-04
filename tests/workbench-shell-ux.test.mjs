@@ -439,7 +439,7 @@ test("external source adoption invalidates the active native editing session", (
   );
   assert.match(
     refreshWorkspace,
-    /sourceTransitionToken === epoch[\s\S]*?projectHydratingRef\.current[\s\S]*?if \(projectHydratingRef\.current && !hydrationSourceTransitionAuthorized\)[\s\S]*?if \(canonicalSourcePath !== activeSource\)[\s\S]*?fenceAndFreezeCurrentCanvas\([\s\S]*?await adoptGeneratedSourcePath\([\s\S]*?if \(mustAdoptAuthoritativeSource\)[\s\S]*?await verifyCanvasRendered/u,
+    /sourceTransitionToken === epoch[\s\S]*?projectHydratingRef\.current[\s\S]*?if \(projectHydratingRef\.current && !hydrationSourceTransitionAuthorized\)[\s\S]*?!sameLocalSourcePath\(canonicalSourcePath, activeSource\)[\s\S]*?fenceAndFreezeCurrentCanvas\([\s\S]*?await prepareGeneratedSourceTransition\([\s\S]*?const currentHtmlSha256 = await browserSha256[\s\S]*?commitGeneratedSourceTransition\([\s\S]*?await verifyCanvasRendered/u,
   );
 
   const completedVersion = workbench.slice(
@@ -448,7 +448,7 @@ test("external source adoption invalidates the active native editing session", (
   );
   assert.match(
     completedVersion,
-    /const transitionAffectsCurrentCanvas[\s\S]*?sameLocalSourcePath\(projectSessionRef\.current\.sourcePath, run\.sourcePath\)[\s\S]*?sameLocalSourcePath\(projectSessionRef\.current\.sourcePath, committedSourcePath\)[\s\S]*?const transitionContext = captureProjectContext\(\)[\s\S]*?fenceAndFreezeCurrentCanvas\([\s\S]*?if \(!frozen\.ok\)[\s\S]*?isCurrentProjectContext\(transitionContext\)[\s\S]*?await adoptGeneratedSourcePath\(\{[\s\S]*?documentSessionRef\.current\.update\(\{[\s\S]*?html: content,[\s\S]*?sourceSha256: sourceHash/u,
+    /const transitionAffectsCurrentCanvas[\s\S]*?sameLocalSourcePath\(projectSessionRef\.current\.sourcePath, run\.sourcePath\)[\s\S]*?sameLocalSourcePath\(projectSessionRef\.current\.sourcePath, committedSourcePath\)[\s\S]*?const transitionContext = captureProjectContext\(\)[\s\S]*?fenceAndFreezeCurrentCanvas\([\s\S]*?if \(!frozen\.ok\)[\s\S]*?isCurrentProjectContext\(transitionContext\)[\s\S]*?await prepareGeneratedSourceTransition\(\{[\s\S]*?commitGeneratedSourceTransition\(\{[\s\S]*?html: content,[\s\S]*?sourceSha256: sourceHash/u,
   );
 });
 
@@ -833,7 +833,7 @@ test("header keeps persistence state concise without a redundant history suffix"
   assert.match(workbench, /\{viewMode === "history"/);
   assert.match(
     workbench,
-    /browserPreviewOnly[\s\S]*?"操作不会保存"[\s\S]*?persistState === "idle"[\s\S]*?"已安全保存"[\s\S]*?: persistLabel/,
+    /const isSafelySaved = Boolean\([\s\S]*?visibleCanvasAck\?\.generation === canvasGeneration[\s\S]*?visibleCanvasAck\.sha256 === sourceSha256[\s\S]*?const safeSaveLabel = isSafelySaved[\s\S]*?"已安全保存"[\s\S]*?"正在确认当前画布…"/,
   );
 });
 
@@ -993,13 +993,13 @@ test("AI completion adopts the generated semantic file before editing resumes", 
   );
   assert.match(
     workbench,
-    /const adoptGeneratedSourcePath = useCallback[\s\S]*?await api\.activateGeneratedVersion\(\{[\s\S]*?previousSourcePath,[\s\S]*?nextSourcePath,[\s\S]*?expectedSha256/,
+    /const prepareGeneratedSourceTransition = useCallback[\s\S]*?await api\.activateGeneratedVersion\(\{[\s\S]*?previousSourcePath,[\s\S]*?nextSourcePath,[\s\S]*?expectedSha256/,
   );
   assert.match(
     workbench,
-    /projectSessionRef\.current\.transitionSource\(\{[\s\S]*?sourcePath: nextSourcePath,[\s\S]*?projectId: nextProjectId,[\s\S]*?documentId: nextDocumentId,[\s\S]*?documentSessionRef\.current\.update\(\{[\s\S]*?sourceSha256: expectedSha256,[\s\S]*?pendingWrite: null/,
+    /const commitGeneratedSourceTransition = useCallback[\s\S]*?projectSessionRef\.current\.transitionSource\(\{[\s\S]*?sourcePath: prepared\.nextSourcePath,[\s\S]*?projectId: prepared\.projectId,[\s\S]*?documentId: prepared\.documentId[\s\S]*?documentSessionRef\.current\.publishAuthority\(\{[\s\S]*?html: nextHtml,[\s\S]*?sourceSha256: nextSourceSha256,[\s\S]*?publishVersion\(\)/,
   );
-  const adoptionStart = workbench.indexOf("const adoptGeneratedSourcePath = useCallback");
+  const adoptionStart = workbench.indexOf("const prepareGeneratedSourceTransition = useCallback");
   const adoptionEnd = workbench.indexOf("const recoverAutosaveLog", adoptionStart);
   assert.ok(adoptionStart >= 0 && adoptionEnd > adoptionStart);
   assert.doesNotMatch(
@@ -1016,7 +1016,7 @@ test("AI completion adopts the generated semantic file before editing resumes", 
   );
   assert.match(
     workbench,
-    /await adoptGeneratedSourcePath\(\{[\s\S]*?previousSourcePath: run\.sourcePath,[\s\S]*?nextSourcePath: committedSourcePath/,
+    /await prepareGeneratedSourceTransition\(\{[\s\S]*?previousSourcePath: run\.sourcePath,[\s\S]*?nextSourcePath: committedSourcePath/,
   );
   assert.match(
     workbench,

@@ -9,6 +9,7 @@ export type DocumentPersistState =
 export type DocumentSessionSnapshot = {
   html: string;
   sourceSha256: string | null;
+  canvasGeneration: number;
   editRevision: number;
   lastPersistedRevision: number;
   persistState: DocumentPersistState;
@@ -38,6 +39,16 @@ export class DocumentSession<TWrite = unknown> {
     editRevision?: number;
     lastPersistedRevision?: number;
   }): DocumentSessionSnapshot;
+  publishAuthority(value: {
+    html: string;
+    sourceSha256: string | null;
+    editRevision?: number;
+    lastPersistedRevision?: number;
+    persistState?: DocumentPersistState;
+    persistError?: string;
+    pendingWrite?: TWrite | null;
+  }): DocumentSessionSnapshot;
+  reloadCanvas(): DocumentSessionSnapshot;
   beginEdit(html: string): number;
   setHtml(html: string): void;
   setSourceSha256(sourceSha256: string | null): void;
@@ -57,6 +68,7 @@ export class DocumentSession<TWrite = unknown> {
   clearFlushPromise(promise: Promise<boolean>): boolean;
   readonly html: string;
   readonly sourceSha256: string | null;
+  readonly canvasGeneration: number;
   readonly editRevision: number;
   readonly lastPersistedRevision: number;
   readonly persistState: DocumentPersistState;

@@ -139,9 +139,28 @@ test("opening a committed version strictly freezes the current Canvas before ado
       "if (!frozen.ok)",
       "isCurrentProjectContext(transitionContext)",
       "persistRecoveryLog(null, transitionContext)",
-      "const adoptedContext = await adoptGeneratedSourcePath",
+      "const preparedTransition = await prepareGeneratedSourceTransition",
+      "const adoptedContext = commitGeneratedSourceTransition",
+      "await verifyCanvasRendered",
     ],
-    "the current project must cross a fail-closed Canvas Fence before source adoption",
+    "the current project must prepare complete bytes before one synchronous authority publication",
+  );
+
+  const publication = section(
+    workbench,
+    "const commitGeneratedSourceTransition = useCallback",
+    "const recoverAutosaveLog = useCallback",
+  );
+  assert.doesNotMatch(publication, /\bawait\b/u);
+  assertOrdered(
+    publication,
+    [
+      "projectSessionRef.current.transitionSource",
+      "documentSessionRef.current.publishAuthority",
+      "publishVersion()",
+      "invalidateCanvasRenderAcks()",
+    ],
+    "project, complete document, version and Canvas generation must publish without an async gap",
   );
 });
 
@@ -161,16 +180,23 @@ test("workspace source adoption requires an explicit hydration token or a live s
     refresh,
     [
       "if (projectHydratingRef.current && !hydrationSourceTransitionAuthorized)",
-      "if (canonicalSourcePath !== activeSource)",
+      "if (!sameLocalSourcePath(canonicalSourcePath, activeSource))",
       "if (!mustAdoptAuthoritativeSource)",
       "fenceAndFreezeCurrentCanvas(",
-      "const adoptedContext = await adoptGeneratedSourcePath",
+      "preparedTransition = await prepareGeneratedSourceTransition",
       "mustAdoptAuthoritativeSource = true",
-      "if (mustAdoptAuthoritativeSource)",
+      "const currentHtmlSha256 = await browserSha256",
       "const sourcePayload = await bridgeClient.source",
+      "const publishVersionAuthority",
+      "commitGeneratedSourceTransition",
       "await verifyCanvasRendered",
     ],
-    "metadata refresh must not silently become a source transition",
+    "workspace refresh must stage complete source authority before publishing project, document and version",
+  );
+  assert.doesNotMatch(
+    refresh,
+    /documentSessionRef\.current\.setSourceSha256\(workspaceHash\)/u,
+    "workspace metadata must never publish a Hash without the matching HTML tuple",
   );
   assert.match(
     workbench,
@@ -180,4 +206,60 @@ test("workspace source adoption requires an explicit hydration token or a live s
     workbench,
     /refreshWorkspace\(project\.sourcePath, epoch, false, epoch\)/u,
   );
+});
+
+test("canvas verification fences stale generations and performs one bounded rebuild", () => {
+  const verification = section(
+    workbench,
+    "const verifyCanvasRendered = useCallback",
+    "const clearAutosaveTimer",
+  );
+
+  assert.match(verification, /expectedGeneration/u);
+  assert.match(verification, /documentSessionRef\.current\.canvasGeneration/u);
+  assert.match(verification, /documentSessionRef\.current\.reloadCanvas\(\)/u);
+  assert.match(verification, /acknowledgeCanvasRender\("edit"/u);
+  assert.equal(
+    (verification.match(/reloadCanvas\(\)/gu) || []).length,
+    1,
+    "automatic recovery must stay bounded to one Canvas rebuild",
+  );
+});
+
+test("safe-save projection requires the visible Canvas to acknowledge current source authority", () => {
+  assert.match(
+    workbench,
+    /const isSafelySaved = Boolean\([\s\S]*?persistState === "idle"[\s\S]*?editRevision === lastPersistedRevision[\s\S]*?visibleCanvasAck\?\.generation === canvasGeneration[\s\S]*?visibleCanvasAck\.sha256 === sourceSha256/u,
+  );
+  assert.match(workbench, /isSafelySaved\s*\? "已安全保存"/u);
+});
+
+test("a disk acknowledgement cannot impersonate a Canvas render acknowledgement", () => {
+  const flush = section(
+    workbench,
+    "const flushAutosave = useCallback",
+    "const enqueueAutosave = useCallback",
+  );
+  assert.doesNotMatch(flush, /acknowledgeCanvasRender/u);
+  assert.match(
+    flush,
+    /writeCompletesCurrentDocument[\s\S]*?html: acknowledgedHtml,[\s\S]*?sourceSha256: nextHash,[\s\S]*?lastPersistedRevision: persistedDocumentRevision/u,
+  );
+  assert.match(
+    workbench,
+    /editorRef\.current\?\.getRenderedSourceHtml\(\) === nextHtml[\s\S]*?acknowledgeCanvasRender\("edit", renderGeneration, renderedSha256\)/u,
+  );
+});
+
+test("source undo keeps its in-place Canvas lease while publishing a complete tuple", () => {
+  const historyAction = section(
+    workbench,
+    "const requestSourceHistoryAction = useCallback",
+    "  useEffect(() => {\n    deferredEditorReplayRef.current.requestSourceHistoryAction = (",
+  );
+  assert.match(
+    historyAction,
+    /adoptHistorySource\([\s\S]*?documentSessionRef\.current\.update\(\{[\s\S]*?html: canonicalHtml,[\s\S]*?sourceSha256: nextSourceSha256/u,
+  );
+  assert.doesNotMatch(historyAction, /publishAuthority/u);
 });

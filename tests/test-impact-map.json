@@ -335,7 +335,7 @@
     {
       "id": "v2-island-controller",
       "patterns": [
-        "^app/components/(?:HtmlCanvasEditor(?:\\.types)?|html-canvas-(?:dom|interaction|internal-types|page-view|preview-sync|selection|style-inspector)|IslandEditingController|native-edit-types|native-edit-runtime-preflight|html-preview-sandbox)\\.(?:tsx|ts|js|d\\.ts)$"
+        "^app/components/(?:HtmlCanvasEditor(?:\\.types)?|HtmlInteractionPreview|html-canvas-(?:dom|interaction|internal-types|page-view|preview-sync|selection|style-inspector)|IslandEditingController|native-edit-types|native-edit-runtime-preflight|html-preview-sandbox)\\.(?:tsx|ts|js|d\\.ts)$"
       ],
       "suites": ["typecheck", "browser-smoke", "electron-smoke"],
       "nodeTests": [

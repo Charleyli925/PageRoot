@@ -58,7 +58,8 @@ The renderer's main workspace facts are partitioned as follows:
 
 - `ProjectSession`: open/registered identity, generation and query fencing;
 - `DocumentSession`: current HTML bytes, Hash, edit/persist revisions,
-  persistence projection, pending write and flush single flight;
+  persistence projection, pending write, flush single flight and Canvas
+  authority generation;
 - `CommentSession`: disposable comment working copy, composer, tombstones and
   saved-comment edit session;
 - `DraftSession`: acknowledged Draft revision, pending mutation and
@@ -84,6 +85,22 @@ projectId + documentId + sourcePath + session generation + query sequence
 
 Revisions are monotonic. A query result with an older revision may never
 replace an acknowledged state, even if the project identity is unchanged.
+
+A transition that changes the current source or Version has two phases. The
+asynchronous phase prepares and validates one complete candidate: project and
+document identity, canonical path, Version authority, HTML bytes and Hash. The
+publication phase contains no `await`: it synchronously advances
+`ProjectSession`, publishes the complete `DocumentSession` tuple, updates
+`VersionSession` and invalidates prior Canvas acknowledgements. Publishing only
+the path, only the Hash or any other partial combination is forbidden.
+
+Edit and preview surfaces acknowledge the exact Canvas authority generation and
+rendered source Hash. Acknowledgements are disposable and generation-fenced;
+they never become source authority. The safe-save projection requires both the
+persisted Document revision/Hash and the currently visible surface
+acknowledgement. A missing acknowledgement triggers at most one Canvas rebuild;
+a clean source mismatch triggers at most one authoritative reread before that
+rebuild. Neither recovery path delegates internal reconciliation to the user.
 
 The preview-to-edit context is a non-durable projection owned by the Workbench
 for one current document key and preview generation. A capture result may apply

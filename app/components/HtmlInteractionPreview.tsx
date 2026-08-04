@@ -35,6 +35,7 @@ type HtmlInteractionPreviewProps = {
   height?: string;
   transport?: "independent-url" | "srcdoc";
   onInteraction?: () => void;
+  onReady?: (sourceSha256: string | null) => void;
 };
 
 type DesktopPreviewSession = {
@@ -436,6 +437,7 @@ const HtmlInteractionPreview = forwardRef<
   height = "100%",
   transport = "srcdoc",
   onInteraction,
+  onReady,
 }, forwardedRef) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const sessionGenerationRef = useRef(0);
@@ -455,6 +457,11 @@ const HtmlInteractionPreview = forwardRef<
   );
 
   useEffect(() => {
+    onReady?.(null);
+    return () => onReady?.(null);
+  }, [onReady, prepared.sourceSha256]);
+
+  useEffect(() => {
     if (!independentTransport) {
       setDesktopSession(null);
       setFrameReady(false);
@@ -471,6 +478,7 @@ const HtmlInteractionPreview = forwardRef<
     sessionGenerationRef.current += 1;
     if (!previewApi) {
       setLoadFailed(true);
+      onReady?.(null);
       return undefined;
     }
     void previewApi.createSession({
@@ -485,7 +493,10 @@ const HtmlInteractionPreview = forwardRef<
       }
       setDesktopSession(session);
     }).catch(() => {
-      if (!cancelled) setLoadFailed(true);
+      if (!cancelled) {
+        setLoadFailed(true);
+        onReady?.(null);
+      }
     });
     return () => {
       cancelled = true;
@@ -499,6 +510,7 @@ const HtmlInteractionPreview = forwardRef<
     prepared.html,
     reloadRevision,
     sourcePath,
+    onReady,
   ]);
 
   useImperativeHandle(forwardedRef, () => ({
@@ -572,7 +584,11 @@ const HtmlInteractionPreview = forwardRef<
         <span>{statusLabel}</span>
         <button
           type="button"
-          onClick={() => setReloadRevision((revision) => revision + 1)}
+          onClick={() => {
+            setFrameReady(false);
+            onReady?.(null);
+            setReloadRevision((revision) => revision + 1);
+          }}
         >
           重新载入
         </button>
@@ -594,8 +610,13 @@ const HtmlInteractionPreview = forwardRef<
           if (independentTransport && !desktopSession) return;
           setFrameReady(true);
           setLoadFailed(false);
+          onReady?.(prepared.sourceSha256);
         }}
-        onError={() => setLoadFailed(true)}
+        onError={() => {
+          setFrameReady(false);
+          setLoadFailed(true);
+          onReady?.(null);
+        }}
       />
     </div>
   );
