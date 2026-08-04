@@ -36,6 +36,35 @@ worktree path; run all edits and task checks from that isolated checkout.
 `integration/` is reserved for an explicitly reviewed combination of multiple
 pending task branches. `test/` is only for test infrastructure.
 
+### Latest-installer source composition
+
+The phrases "latest installer" and "latest developer test installer" select a
+source set, not merely the branch that happens to be checked out. Unless the
+developer gives an inclusion or exclusion override, first make a live PR
+inventory, then compose the package source as follows:
+
+1. Fetch current `origin/main`; it supplies the canonical base and every change
+   that has already merged.
+2. Include the latest head OID of every applicable PageRoot PR in the current
+   development scope that is not explicitly excluded. Open, draft and closed
+   without merge are all eligible; PR state is evidence to report, not an
+   implicit exclusion.
+3. Create a clean temporary `integration/` branch and worktree from
+   `origin/main`, and integrate unmerged heads in dependency order. Stacked PRs
+   are composed once and duplicate commits are de-duplicated.
+4. Record every selected PR and exact head OID before packaging. Also record
+   every excluded or superseded PR with its reason so omission is visible.
+5. If a selected head is unavailable or cannot be integrated without an
+   unresolved conflict, stop and report the blocker; never build a package and
+   describe it as containing all PRs.
+
+This integration branch is disposable package input. Creating it does not
+merge any source PR or authorize a merge to `main`. If even one selected PR is
+not merged, the output must use the Developer Preview identity and remain
+non-release-eligible. A formal candidate is still built only from reviewed
+`main`; outstanding selected PRs must be merged first or explicitly excluded
+by the developer.
+
 Inspect and save coherent checkpoints from the task worktree:
 
 ```bash

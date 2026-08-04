@@ -82,16 +82,20 @@
       "prerequisites": ["build-desktop"]
     },
     "developer-package-build": {
-      "description": "Build one ad-hoc macOS developer preview DMG from the exact clean tree.",
+      "description": "Build one distinctly named and versioned ad-hoc macOS developer preview DMG from the exact clean tree.",
       "prerequisites": ["build-desktop"]
     },
     "developer-packaged-verify": {
-      "description": "Verify developer preview app.asar, Bridge resources, schemas, ad-hoc signature and DMG integrity.",
+      "description": "Verify developer preview identity, app.asar, Bridge resources, schemas, ad-hoc signature and DMG integrity.",
       "prerequisites": ["developer-package-build"]
     },
     "developer-packaged-startup": {
-      "description": "Launch the developer preview with isolated data and prove version, first window, readiness and clean exit.",
+      "description": "Launch the developer preview with isolated data and prove app name, version, first window, readiness and clean exit.",
       "prerequisites": ["developer-packaged-verify"]
+    },
+    "developer-package-report": {
+      "description": "Bind the developer installer to its exact source range and current GitHub Pull Request inventory for delivery.",
+      "prerequisites": ["developer-packaged-startup"]
     },
     "candidate-app-build": {
       "description": "Assemble the formal candidate app without Developer ID signing or Apple notarization.",
@@ -112,6 +116,10 @@
     "packaged-verify": {
       "description": "Verify app.asar, Bridge resources, schemas, signature, DMG integrity and read-only mount contents.",
       "prerequisites": ["package-build"]
+    },
+    "package-delivery-report": {
+      "description": "Bind the formal installer to its exact source range and current GitHub Pull Request inventory for delivery.",
+      "prerequisites": ["packaged-runtime", "packaged-verify"]
     }
   },
   "lanes": {
@@ -168,7 +176,7 @@
     "developer-package": {
       "description": "Optional on-demand developer preview from one clean committed source state.",
       "fullSuites": [
-        "developer-packaged-startup"
+        "developer-package-report"
       ]
     },
     "candidate-app": {
@@ -190,7 +198,8 @@
         "real-html",
         "package-build",
         "packaged-runtime",
-        "packaged-verify"
+        "packaged-verify",
+        "package-delivery-report"
       ]
     },
     "artifact-only": {
@@ -198,7 +207,8 @@
       "fullSuites": [
         "package-build",
         "packaged-runtime",
-        "packaged-verify"
+        "packaged-verify",
+        "package-delivery-report"
       ]
     }
   },
@@ -476,12 +486,13 @@
     {
       "id": "packaging",
       "patterns": [
-        "^(?:\\.github/workflows/release-candidate\\.yml|package(?:-lock)?\\.json|PageRoot 用户声明与免责声明\\.txt|desktop/after-pack\\.mjs|desktop/resources/.*|scripts/(?:build-package|create-release-assets|developer-preview|release-app-(?:checkpoint|stage)|release-candidate-provenance|release-provenance|source-gate-provenance|verify-packaged-artifact)\\.mjs)$"
+        "^(?:\\.github/workflows/(?:developer-preview|release-candidate|release)\\.yml|package(?:-lock)?\\.json|PageRoot 用户声明与免责声明\\.txt|desktop/after-pack\\.mjs|desktop/resources/.*|scripts/(?:build-package|create-release-assets|developer-preview|package-delivery-report|release-app-(?:checkpoint|stage)|release-candidate-provenance|release-provenance|source-gate-provenance|verify-packaged-artifact)\\.mjs)$"
       ],
       "suites": [],
       "nodeTests": [
         "tests/desktop-package.test.mjs",
         "tests/developer-preview-package.test.mjs",
+        "tests/package-delivery-report.test.mjs",
         "tests/packaged-artifact-gate.test.mjs",
         "tests/release-app-stage.test.mjs",
         "tests/release-provenance.test.mjs",

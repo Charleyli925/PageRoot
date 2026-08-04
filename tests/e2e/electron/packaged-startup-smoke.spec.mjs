@@ -14,15 +14,18 @@ const productRoot = path.resolve(import.meta.dirname, "../../..");
 const packageVersion = JSON.parse(
   readFileSync(path.join(productRoot, "package.json"), "utf8"),
 ).version;
+const expectedAppVersion = process.env.PAGEROOT_EXPECTED_APP_VERSION || packageVersion;
+const expectedProductName = process.env.PAGEROOT_EXPECTED_PRODUCT_NAME || "PageRoot";
 
 function packagedExecutable() {
   const appPath = process.env.PAGEROOT_PACKAGED_APP_PATH;
   if (!appPath || !path.isAbsolute(appPath) || path.extname(appPath) !== ".app") {
-    throw new Error("PAGEROOT_PACKAGED_APP_PATH must name the absolute packaged PageRoot.app path.");
+    throw new Error("PAGEROOT_PACKAGED_APP_PATH must name an absolute packaged .app path.");
   }
-  const executable = path.join(appPath, "Contents", "MacOS", "PageRoot");
+  const productName = path.basename(appPath, ".app");
+  const executable = path.join(appPath, "Contents", "MacOS", productName);
   if (!existsSync(executable)) {
-    throw new Error(`Packaged PageRoot executable is missing: ${executable}`);
+    throw new Error(`Packaged application executable is missing: ${executable}`);
   }
   return executable;
 }
@@ -85,7 +88,15 @@ test("developer preview opens the latest runtime and closes cleanly", async () =
       requestAnimationFrame(() => requestAnimationFrame(resolve));
     }));
     const runtime = await page.evaluate(() => window.htmlAIRuntime);
-    expect(runtime?.appVersion).toBe(packageVersion);
+    expect(runtime?.appVersion).toBe(expectedAppVersion);
+    const appIdentity = await electronApp.evaluate(({ app }) => ({
+      name: app.getName(),
+      version: app.getVersion(),
+    }));
+    expect(appIdentity).toEqual({
+      name: expectedProductName,
+      version: expectedAppVersion,
+    });
     expect(runtime?.bridgePort).toMatch(/^[1-9]\d{0,4}$/u);
     expect(Number(runtime?.bridgePort)).toBeGreaterThan(0);
     expect(Number(runtime?.bridgePort)).toBeLessThanOrEqual(65_535);

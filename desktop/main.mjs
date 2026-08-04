@@ -114,7 +114,12 @@ const e2eUserDataPath = (() => {
 })();
 const productUserDataPath = e2eUserDataPath || path.join(app.getPath("appData"), "PageRoot");
 app.setPath("userData", productUserDataPath);
-app.setName("源页");
+const packagedApplicationName = app.getName();
+app.setName(
+  app.isPackaged && packagedApplicationName === "PageRoot Developer Preview"
+    ? packagedApplicationName
+    : "源页",
+);
 if (e2eUserDataPath) {
   // Hosted macOS runners can report an Electron window as visible while the
   // WindowServer still classifies it as background or occluded. Keep the

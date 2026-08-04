@@ -12,7 +12,9 @@ import {
 } from "./test-gate-core.mjs";
 import {
   DEVELOPER_PREVIEW_ARTIFACT_PATTERN,
+  developerPreviewPackageJson,
   developerPreviewReleaseDirectory,
+  resolveDeveloperPreviewIdentity,
   writeDeveloperPreviewAttestation,
 } from "./developer-preview.mjs";
 import { candidateAppReleaseDirectory } from "./release-app-stage.mjs";
@@ -186,6 +188,26 @@ function commandForSuite(suiteId, context) {
   if (suiteId === "developer-packaged-startup") {
     return packageCommand("test:packaged-startup:prepared");
   }
+  if (suiteId === "developer-package-report") {
+    return {
+      command: process.execPath,
+      args: [
+        path.join(productRoot, "scripts/package-delivery-report.mjs"),
+        "--kind",
+        "developer-preview",
+        "--artifact",
+        context.artifact.dmgPath,
+        "--version",
+        context.artifact.version,
+        "--architecture",
+        context.options.arch,
+        "--base-tag",
+        context.developerPreviewIdentity.stableTag,
+        "--output",
+        path.join(productRoot, "output/developer-preview"),
+      ],
+    };
+  }
   if (suiteId === "candidate-app-runtime") {
     return packageCommand("test:packaged-runtime:prepared");
   }
@@ -216,6 +238,24 @@ function commandForSuite(suiteId, context) {
         context.options.arch,
         "--profile",
         "candidate-app",
+      ],
+    };
+  }
+  if (suiteId === "package-delivery-report") {
+    return {
+      command: process.execPath,
+      args: [
+        path.join(productRoot, "scripts/package-delivery-report.mjs"),
+        "--kind",
+        "formal",
+        "--artifact",
+        context.artifact.dmgPath,
+        "--version",
+        context.artifact.version,
+        "--architecture",
+        context.options.arch,
+        "--output",
+        path.join(productRoot, "output/package-delivery"),
       ],
     };
   }
@@ -277,6 +317,12 @@ async function main() {
   const plan = assertFullyAutomatedPlan(selectGatePlan({ map, lane: options.lane, changedFiles: files }));
   const repository = await repositoryEvidence(files);
   const packageJson = JSON.parse(await readFile(path.join(productRoot, "package.json"), "utf8"));
+  const developerPreviewIdentity = options.lane === "developer-package"
+    ? resolveDeveloperPreviewIdentity({ productRoot, packageJson })
+    : null;
+  const packagedPackageJson = developerPreviewIdentity
+    ? developerPreviewPackageJson(packageJson, developerPreviewIdentity)
+    : packageJson;
   if (options.lane === "artifact-only" || options.lane === "candidate-app") {
     if (process.env.PAGEROOT_SOURCE_GATE_TRUSTED !== "true") {
       throw new Error(`${options.lane} requires a trusted source-gate decision from CI.`);
@@ -292,7 +338,7 @@ async function main() {
   }
   const artifact = expectedArtifactLayout({
     productRoot,
-    packageJson,
+    packageJson: packagedPackageJson,
     arch: options.arch,
     releaseDirectory: options.lane === "developer-package"
       ? developerPreviewReleaseDirectory(productRoot)
@@ -307,7 +353,12 @@ async function main() {
   const runId = `${startedAt.toISOString().replace(/[:.]/gu, "-")}-${options.lane}`;
   const reportDirectory = path.join(productRoot, "output/test-runs", runId);
   await mkdir(reportDirectory, { recursive: true });
-  const context = { options, plan, artifact };
+  const context = {
+    options,
+    plan,
+    artifact,
+    developerPreviewIdentity,
+  };
   const selectedSuites = plan.suites.map((suite) => {
     const command = commandForSuite(suite.id, context);
     return { ...suite, command: shellDisplay(command.command, command.args) };
@@ -353,6 +404,8 @@ async function main() {
           || suite.id === "candidate-app-runtime")
           ? {
             PAGEROOT_PACKAGED_APP_PATH: artifact.appPath,
+            PAGEROOT_EXPECTED_APP_VERSION: artifact.version,
+            PAGEROOT_EXPECTED_PRODUCT_NAME: artifact.productName,
             PAGEROOT_TEST_ARCH: options.arch,
           }
           : {}),
@@ -394,8 +447,8 @@ async function main() {
     const record = await writeDeveloperPreviewAttestation({
       productRoot,
       artifact,
+      identity: developerPreviewIdentity,
       repository,
-      version: packageJson.version,
       architecture: options.arch,
       results,
     });
@@ -416,6 +469,15 @@ async function main() {
     passedCount: results.filter((result) => result.status === "passed").length,
     failedSuite: failed?.id || null,
     developerPreviewAttestation,
+    packageDeliveryReport: !options.dryRun
+      && !failed
+      && options.lane === "developer-package"
+      ? "output/developer-preview/package-delivery-report.md"
+      : !options.dryRun
+        && !failed
+        && ["artifact", "artifact-only"].includes(options.lane)
+        ? "output/package-delivery/package-delivery-report.md"
+        : null,
     results,
   };
   await writeJson(path.join(reportDirectory, "results.json"), summary);

@@ -16,7 +16,9 @@ import {
   DEVELOPER_PREVIEW_ARTIFACT_PATTERN,
   developerPreviewBuilderArguments,
   developerPreviewEnvironment,
+  developerPreviewPackageJson,
   developerPreviewReleaseDirectory,
+  resolveDeveloperPreviewIdentity,
 } from "./developer-preview.mjs";
 import {
   candidateAppBuilderArguments,
@@ -257,6 +259,12 @@ async function main() {
   const packageJson = JSON.parse(
     await readFile(path.join(productRoot, "package.json"), "utf8"),
   );
+  const developerPreviewIdentity = isDeveloperPreview
+    ? resolveDeveloperPreviewIdentity({ productRoot, packageJson })
+    : null;
+  const packagedPackageJson = isDeveloperPreview
+    ? developerPreviewPackageJson(packageJson, developerPreviewIdentity)
+    : packageJson;
   const releaseDirectory = isDeveloperPreview
     ? developerPreviewReleaseDirectory(productRoot)
     : isCandidateApp
@@ -267,7 +275,7 @@ async function main() {
       );
   const layout = expectedArtifactLayout({
     productRoot,
-    packageJson,
+    packageJson: packagedPackageJson,
     arch: architecture,
     releaseDirectory,
     artifactName: isDeveloperPreview
@@ -293,7 +301,11 @@ async function main() {
     telemetryConfig = restored.telemetry;
     console.log(`Build provenance restored from signed app: ${prepackagedAppPath}`);
   } else {
-    const provenance = await writeBuildInfo({ productRoot, architecture });
+    const provenance = await writeBuildInfo({
+      productRoot,
+      architecture,
+      version: packagedPackageJson.version,
+    });
     buildInfo = provenance.buildInfo;
     telemetryConfig = await writeUsageTelemetryBuildConfig({
       productRoot,
@@ -303,6 +315,13 @@ async function main() {
   }
   console.log(`Git commit: ${buildInfo.commitSha}`);
   console.log(`Package profile: ${profile}`);
+  if (developerPreviewIdentity) {
+    console.log(
+      `Developer preview identity: ${developerPreviewIdentity.productName} `
+      + `${developerPreviewIdentity.version} `
+      + `(stable ${developerPreviewIdentity.stableTag}, sequence ${developerPreviewIdentity.buildSequence})`,
+    );
+  }
   console.log(
     telemetryConfig.enabled
       ? `Usage telemetry configured for ${telemetryConfig.host}`
@@ -321,6 +340,7 @@ async function main() {
   const builderArguments = isDeveloperPreview
     ? developerPreviewBuilderArguments({
       architecture,
+      identity: developerPreviewIdentity,
       releaseDirectory,
     })
     : isCandidateApp

@@ -54,14 +54,14 @@ boundary.
 | `npm run gate:task` | Static checks plus impacted Node/browser/Electron coverage |
 | `npm run gate:main:auto` | Internal post-merge Node/browser smoke after exact-tree PR provenance verification |
 | `npm run gate:release:auto` | Complete source gate on a clean commit |
-| `npm run package:developer` | Optional arm64 developer preview requested explicitly: ad-hoc DMG, packaged-content verification and one isolated startup; no notarization or publication |
-| `npm run package:developer:x64` | The same optional developer preview for Intel Macs |
+| `npm run package:developer` | Optional arm64 developer preview requested explicitly: distinct app/Bundle identity, stable-tag-derived test version, ad-hoc DMG, packaged-content verification, one isolated startup, and an exact live PR/content delivery report; no notarization or publication |
+| `npm run package:developer:x64` | The same optional developer preview and delivery report for Intel Macs |
 | `npm run gate:candidate-app:auto` | Guarded internal formal-candidate preflight: assemble one ad-hoc App, verify contents, then run the complete packaged-runtime oracle before signing |
 | `npm run gate:artifact-only:auto` | Guarded internal installer lane; it refuses to run without CI's fresh matching tree/version decision |
-| `npm run release:mac` | Complete source gate, signed arm64 DMG/ZIP package, packaged runtime test and artifact verification; release credentials are required for notarization proof |
+| `npm run release:mac` | Complete source gate, signed arm64 DMG/ZIP package, packaged runtime test, artifact verification and exact live PR/content delivery report; release credentials are required for notarization proof |
 | `npm run test:electron:ci-preflight:prepared` | Synthetic hosted-macOS window, timer and animation-frame preflight used before Electron product suites |
 
-The developer-preview, release and artifact lanes stop if the worktree is dirty or if HEAD/tree changes during the run. Reports are written to the ignored `output/test-runs/` directory. `package:developer` is never called by another lane: run it only after an explicit developer request. Its ad-hoc, unnotarized DMG is retained for short installation feedback and is never release-eligible. See `docs/DEVELOPER_PREVIEW_PLAYBOOK.md`.
+The developer-preview, release and artifact lanes stop if the worktree is dirty or if HEAD/tree changes during the run. Test reports are written to the ignored `output/test-runs/` directory; successful installer lanes additionally write `package-delivery-report.json` and `.md` below `output/`. The final report step requires live GitHub PR metadata and fails the installer handoff if it cannot enumerate the exact tag-to-commit range. Package commands always build the exact current clean Tree; they do not discover or merge other PRs. For an unqualified "latest" package request, prepare the required `origin/main` plus non-excluded-PR integration Tree first as documented in `docs/GIT_WORKFLOW.md`. `package:developer` is never called by another lane: run it only after an explicit developer request. Its ad-hoc, unnotarized DMG is retained for short installation feedback and is never release-eligible. See `docs/DEVELOPER_PREVIEW_PLAYBOOK.md`.
 
 Desktop development and Electron E2E disable live update checks. The pure
 application-update controller is covered by Node tests; the Release Candidate

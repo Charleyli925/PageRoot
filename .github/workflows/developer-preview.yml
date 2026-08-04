@@ -15,6 +15,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
   group: developer-preview-${{ github.ref }}
@@ -47,6 +48,8 @@ jobs:
         timeout-minutes: 10
       - name: Build and smoke-check the requested preview
         timeout-minutes: 25
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: >-
           node scripts/ci-evidence.mjs run
           --suite developer-preview
@@ -62,6 +65,7 @@ jobs:
             echo "- Built only because this workflow was dispatched explicitly."
             echo "- Uses an ad-hoc signature and is not notarized."
             echo "- Is not eligible for a tag, GitHub Release, or updater publication."
+            echo "- Uses the distinct PageRoot Developer Preview name and a stable-tag-derived test version."
             echo "- Automated scope: latest packaged contents, basic artifact integrity, and one clean startup."
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload developer preview
@@ -72,6 +76,8 @@ jobs:
           path: |
             output/developer-preview/release/*.dmg
             output/developer-preview/developer-preview.json
+            output/developer-preview/package-delivery-report.json
+            output/developer-preview/package-delivery-report.md
             output/test-runs
             output/ci-evidence
           if-no-files-found: error

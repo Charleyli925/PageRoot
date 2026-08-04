@@ -7,6 +7,28 @@ Official releases use two explicit GitHub Actions stages from reviewed `main`:
 
 Do not push a release tag manually. A tag is an output of successful candidate verification, not the input that starts packaging.
 
+## Default source set for a latest installer
+
+An unqualified request for the "latest installer" or "latest developer test
+installer" means current `origin/main` plus the latest code from every
+applicable PageRoot PR in the current development scope that the developer has
+not explicitly excluded. A PR being open, draft, or closed without merge does
+not exclude it. Merged changes arrive through `main`; unmerged heads are
+combined on a temporary `integration/` branch without changing the source PRs.
+
+Inventory the selected PR number and exact head OID before building. Record
+explicitly excluded and superseded PRs with reasons. Stacked PRs must be
+integrated in dependency order without applying the same commits twice. A
+missing head or unresolved conflict blocks the build rather than producing a
+silently incomplete package.
+
+Any selected unmerged Pull Request makes the resulting installer a Developer
+Preview with `releaseEligible: false`. Formal candidates and releases remain
+restricted to reviewed `main`; if selected PR work is still outstanding, merge
+it first or obtain an explicit developer exclusion. The package commands build
+the exact clean current Tree and do not discover or merge PRs themselves, so
+this source-composition step happens before the package gate.
+
 ## Optional developer preview
 
 When the developer explicitly asks for an installable test package, manually
@@ -21,6 +43,47 @@ release does not imply a developer preview, and the formal workflows never
 depend on its result or reuse its DMG. See
 `docs/DEVELOPER_PREVIEW_PLAYBOOK.md` for the exact trigger, installation and
 failure boundaries.
+
+Developer previews use a separate package identity: `PageRoot Developer
+Preview`, a `.developer-preview` Bundle ID suffix, and a DMG name that includes
+`Developer-Preview`. Their effective version is derived from the latest stable
+tag and committed first-parent order: after `v0.9.5`, the first two readable
+sequence prefixes are `0.9.69991` and `0.9.69992`. Each full preview version
+adds the exact commit as `-dev.g<40 位 Commit SHA>`, so divergent branches can
+never reuse an application or DMG version. The baseline must be an annotated,
+remote `vA.B.C` release tag that points directly to a commit and matches the
+release-tag contract; locally created semver-shaped tags are ignored. These
+overrides apply only while building the preview and never change the source
+package version or any formal candidate metadata.
+
+## Mandatory installer delivery report
+
+Every completed installer build, whether a formal candidate or a Developer
+Preview, ends with an automated `package-delivery-report` step. The report is
+generated only after artifact verification and startup checks and contains:
+
+- the exact DMG file, version, architecture, byte size and SHA-256;
+- the latest formal tag used as the content baseline, packaged Commit/Tree,
+  commit count, changed-file count and diff totals;
+- every Pull Request associated with commits in that range, its link, current
+  GitHub open/draft/merged/mergeability/check status, and a one-line summary;
+- every direct commit in the package range that GitHub cannot associate with a
+  Pull Request.
+
+The JSON and copy-ready Markdown are written below `output/` as
+`package-delivery-report.json` and `package-delivery-report.md`; GitHub
+workflows also append the Markdown to the run summary. PR state is live and can
+change without changing package bytes, so this report is delivery metadata,
+not an embedded application resource or immutable release attestation. Refresh
+it against the same DMG immediately before a delayed handoff.
+
+The agent's installer reply must reproduce the report's package identity,
+content range and complete PR/direct-commit inventory. Each PR needs its
+current state and one sentence describing its main change. It must also list
+every explicitly excluded or superseded PR and the reason from the pre-build
+source inventory. If GitHub metadata cannot be queried, a selected head is not
+in the packaged Tree, or any included commit is omitted, packaging may have
+succeeded technically but installer handoff is incomplete.
 
 ## Prepare the source
 
@@ -89,6 +152,8 @@ The workflow:
 - creates checksums for every public payload and metadata file, retains the
   legacy `update-manifest.json`, and copies `build-info.json`;
 - freezes those files with `release-candidate.json` in an artifact named for the exact Tree Hash, version, architecture and workflow run attempt.
+- generates the separate live package delivery report for the exact DMG and
+  appends its PR inventory to the workflow summary before handoff.
 
 It does not create a tag or GitHub Release. A failed build or verification therefore leaves the version namespace untouched.
 
@@ -133,6 +198,10 @@ If publication fails after the tag push but before the GitHub Release exists, re
 Packaging refuses committed-source drift or untracked source files. `build-info.json` records version, architecture, repository, commit SHA, Tree SHA and build time. `release-candidate.json` additionally binds the source-gate run, candidate run/attempt and SHA-256 plus size of every public asset.
 
 Publication resolves only the artifact whose name matches the successful run attempt, then revalidates all of that information after downloading it. This keeps a failed-job rerun distinct from bytes uploaded by an earlier attempt of the same workflow run. The Release includes both provenance files, so the published installer can be traced to the reviewed source tree and the exact successful candidate run and attempt.
+
+Before publication, the Release workflow regenerates the delivery report for
+the downloaded verified DMG so the eventual release reply uses current PR
+states without mutating the frozen candidate or its checksums.
 
 The public build is signed with a Developer ID Application certificate,
 notarized and stapled before it is frozen. If electron-builder lists the DMG in

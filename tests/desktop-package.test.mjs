@@ -171,7 +171,10 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.match(mainProcess, /utilityProcess\.fork/);
   assert.match(mainProcess, /requestSingleInstanceLock/);
   assert.match(mainProcess, /app\.setPath\("userData",\s*productUserDataPath\)/);
-  assert.match(mainProcess, /app\.setName\("源页"\)/);
+  assert.match(
+    mainProcess,
+    /app\.isPackaged\s*&&\s*packagedApplicationName\s*===\s*"PageRoot Developer Preview"[\s\S]*?\?\s*packagedApplicationName[\s\S]*?:\s*"源页"/,
+  );
   assert.match(
     mainProcess,
     /\["PageRootV2",\s*"YuanYe",\s*"HTML AI 工作台"\][\s\S]*?"html-projects\.json"/,

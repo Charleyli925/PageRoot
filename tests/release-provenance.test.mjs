@@ -63,4 +63,13 @@ test("repository identity and expected build info come from the active checkout"
   assert.equal(expected.commitSha, repository.commitSha);
   assert.equal(expected.treeSha, repository.treeSha);
   assert.equal(expected.version, packageJson.version);
+
+  const developerPreview = await expectedBuildInfo({
+    productRoot,
+    architecture: "arm64",
+    requireClean: false,
+    version: "0.9.69991",
+  });
+  assert.equal(developerPreview.version, "0.9.69991");
+  assert.equal(developerPreview.commitSha, repository.commitSha);
 });

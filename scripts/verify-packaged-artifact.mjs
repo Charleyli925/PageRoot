@@ -19,7 +19,9 @@ import { gunzipSync } from "node:zlib";
 import { extractFile, listPackage, statFile } from "@electron/asar";
 import {
   DEVELOPER_PREVIEW_ARTIFACT_PATTERN,
+  developerPreviewPackageJson,
   developerPreviewReleaseDirectory,
+  resolveDeveloperPreviewIdentity,
 } from "./developer-preview.mjs";
 import { candidateAppReleaseDirectory } from "./release-app-stage.mjs";
 import { assertBuildInfo, expectedBuildInfo } from "./release-provenance.mjs";
@@ -392,6 +394,7 @@ export async function verifyAppBundle({
   productRoot = DEFAULT_PRODUCT_ROOT,
   appPath,
   packageJson,
+  sourcePackageJson = packageJson,
   verifySignature = true,
   signaturePolicy,
   expectedProvenance,
@@ -410,7 +413,7 @@ export async function verifyAppBundle({
     access(appPath),
     access(infoPlistPath),
     access(asarPath),
-    assertSourceDependencyClosureIsClean(productRoot, packageJson),
+    assertSourceDependencyClosureIsClean(productRoot, sourcePackageJson),
   ]);
 
   const [shortVersion, bundleVersion, bundleIdentifier] = await Promise.all([
@@ -661,6 +664,7 @@ async function verifyDmg({
   productName,
   productRoot,
   packageJson,
+  sourcePackageJson = packageJson,
   expectedProvenance,
   signaturePolicy = "developer-id",
 }) {
@@ -697,6 +701,7 @@ async function verifyDmg({
       productRoot,
       appPath: mountedAppPath,
       packageJson,
+      sourcePackageJson,
       signaturePolicy,
       expectedProvenance,
     });
@@ -818,11 +823,17 @@ export async function verifyPackagedArtifact({
     /^(?:release|developer|candidate-app|candidate-app-signed)$/u,
     "profile must be release, developer, candidate-app or candidate-app-signed",
   );
-  const packageJson = JSON.parse(
+  const sourcePackageJson = JSON.parse(
     await readFile(path.join(productRoot, "package.json"), "utf8"),
   );
   const isDeveloperPreview = profile === "developer";
   const isCandidateApp = profile === "candidate-app" || profile === "candidate-app-signed";
+  const developerPreviewIdentity = isDeveloperPreview
+    ? resolveDeveloperPreviewIdentity({ productRoot, packageJson: sourcePackageJson })
+    : null;
+  const packageJson = isDeveloperPreview
+    ? developerPreviewPackageJson(sourcePackageJson, developerPreviewIdentity)
+    : sourcePackageJson;
   const expectedLayout = expectedArtifactLayout({
     productRoot,
     packageJson,
@@ -849,6 +860,7 @@ export async function verifyPackagedArtifact({
     productRoot,
     architecture: arch,
     requireClean: true,
+    version: packageJson.version,
   });
   if (isDeveloperPreview) {
     const [app, dmg] = await Promise.all([
@@ -856,6 +868,7 @@ export async function verifyPackagedArtifact({
         productRoot,
         appPath: layout.appPath,
         packageJson,
+        sourcePackageJson,
         signaturePolicy: "adhoc",
         expectedProvenance: provenance,
       }),
@@ -864,6 +877,7 @@ export async function verifyPackagedArtifact({
         productName: layout.productName,
         productRoot,
         packageJson,
+        sourcePackageJson,
         expectedProvenance: provenance,
         signaturePolicy: "adhoc",
       }),
