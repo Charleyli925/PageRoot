@@ -19,6 +19,9 @@ Notable user-visible changes are documented here. This project follows Semantic 
 - Update Next.js and its ESLint configuration to 16.3.0, and refresh compatible
   transitive build dependencies so the dependency audit has no active security
   exceptions.
+- Keep the desktop workspace Bridge startup pending while macOS is waiting for
+  Documents-folder authorization, then resume the same launch automatically
+  once the service reports ready instead of showing a false 12-second timeout.
 
 ## [0.9.5] - 2026-07-31
 

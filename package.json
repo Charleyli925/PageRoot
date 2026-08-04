@@ -165,6 +165,7 @@
       "desktop/export-copy.mjs",
       "desktop/open-in-default-browser.mjs",
       "desktop/project-ipc-security.mjs",
+      "desktop/bridge-startup.mjs",
       "desktop/bridge-shutdown.mjs",
       "desktop/close-recovery.mjs",
       "desktop/product-contract.mjs",

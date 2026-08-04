@@ -20,6 +20,7 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
     lifecycleCore,
     htmlSourceParser,
     scopeValidator,
+    bridgeStartup,
     bridgeShutdown,
     closeRecovery,
     qoderHandoff,
@@ -47,6 +48,7 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
     readFile(new URL("../scripts/lifecycle-core.mjs", import.meta.url), "utf8"),
     readFile(new URL("../scripts/html-source-parser.mjs", import.meta.url), "utf8"),
     readFile(new URL("../scripts/scope-validator.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../desktop/bridge-startup.mjs", import.meta.url), "utf8"),
     readFile(new URL("../desktop/bridge-shutdown.mjs", import.meta.url), "utf8"),
     readFile(new URL("../desktop/close-recovery.mjs", import.meta.url), "utf8"),
     readFile(new URL("../desktop/qoder-handoff.mjs", import.meta.url), "utf8"),
@@ -96,6 +98,7 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.ok(packageJson.build.files.includes("desktop/export-copy.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/open-in-default-browser.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/project-ipc-security.mjs"));
+  assert.ok(packageJson.build.files.includes("desktop/bridge-startup.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/bridge-shutdown.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/close-recovery.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/product-contract.mjs"));
@@ -169,6 +172,26 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.match(userNotice, /Apache License 2\.0/);
 
   assert.match(mainProcess, /utilityProcess\.fork/);
+  assert.match(mainProcess, /waitForBridgeReady/);
+  assert.doesNotMatch(mainProcess, /STARTUP_TIMEOUT_MS/);
+  assert.match(bridgeStartup, /export function waitForBridgeReady/);
+  assert.match(bridgeStartup, /onStillStarting/);
+  const bridgeLauncher = mainProcess.slice(
+    mainProcess.indexOf("async function launchBridge()"),
+    mainProcess.indexOf("async function createWindow()"),
+  );
+  const waitForReadyIndex = bridgeLauncher.indexOf("await waitForBridgeReady");
+  const publishPortIndex = bridgeLauncher.indexOf("bridgePort = port");
+  assert.notEqual(waitForReadyIndex, -1);
+  assert.notEqual(publishPortIndex, -1);
+  assert.ok(
+    waitForReadyIndex < publishPortIndex,
+    "the renderer port must remain unpublished until the Bridge reports ready",
+  );
+  assert.match(
+    bridgeLauncher,
+    /if \(bridgeStartupPromise\) return bridgeStartupPromise/,
+  );
   assert.match(mainProcess, /requestSingleInstanceLock/);
   assert.match(mainProcess, /app\.setPath\("userData",\s*productUserDataPath\)/);
   assert.match(

@@ -48,6 +48,10 @@ import {
   createWorkspaceRecoveryMailbox,
   stopBridgeProcessGracefully,
 } from "./bridge-shutdown.mjs";
+import {
+  BridgeExitedBeforeReadyError,
+  waitForBridgeReady,
+} from "./bridge-startup.mjs";
 import { createOpenInDefaultBrowserOperation } from "./open-in-default-browser.mjs";
 import { assertTrustedRendererEvent } from "./project-ipc-security.mjs";
 import {
@@ -130,7 +134,7 @@ if (e2eUserDataPath) {
   app.commandLine.appendSwitch("disable-backgrounding-occluded-windows");
 }
 
-const STARTUP_TIMEOUT_MS = 12_000;
+const BRIDGE_STARTUP_SLOW_MS = 12_000;
 const RENDERER_CLOSE_TIMEOUT_MS = 30_000;
 const BRIDGE_SHUTDOWN_TIMEOUT_MS = 5_000;
 const MAX_HTML_BYTES = PRODUCT_MAX_HTML_BYTES;
@@ -190,6 +194,7 @@ const EDIT_CHANNELS = Object.freeze({
 
 let bridgeProcess = null;
 let bridgePort = null;
+let bridgeStartupPromise = null;
 const bridgeAuthToken = randomBytes(32).toString("base64url");
 let mainWindow = null;
 let rendererHasLoaded = false;
@@ -1934,9 +1939,7 @@ async function workspacePath() {
   return existingWorkspace ?? pageRootWorkspace;
 }
 
-async function startBridge() {
-  if (bridgeProcess && bridgePort) return bridgePort;
-
+async function launchBridge() {
   const [port, workspace] = await Promise.all([
     findAvailablePort(),
     workspacePath(),
@@ -1955,70 +1958,84 @@ async function startBridge() {
   });
 
   bridgeProcess = child;
-  bridgePort = port;
+  let ready = false;
 
-  return await new Promise((resolve, reject) => {
-    let output = "";
-    let errorOutput = "";
-    let settled = false;
-
-    const finish = (error) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeout);
-      if (error) reject(error);
-      else resolve(port);
-    };
-
-    const timeout = setTimeout(() => {
-      finish(new Error(`本地工作区服务启动超时。${errorOutput ? `\n${errorOutput}` : ""}`));
-    }, STARTUP_TIMEOUT_MS);
-
-    child.stdout?.on("data", (chunk) => {
-      output += chunk.toString();
-      const lines = output.split("\n");
-      output = lines.pop() || "";
-      for (const line of lines) {
-        try {
-          const message = JSON.parse(line);
-          if (message.type === "ready") finish();
-        } catch {
-          // Ignore non-JSON diagnostics from the service.
-        }
-      }
-    });
-
-    child.stderr?.on("data", (chunk) => {
-      errorOutput += chunk.toString();
-    });
-
-    child.once("exit", (code) => {
+  child.once("exit", (code) => {
+    const ownedProcess = bridgeProcess === child;
+    if (ownedProcess) {
       bridgeProcess = null;
       bridgePort = null;
-      if (!settled) {
-        captureUsage("runtime_fault", {
-          process: "bridge",
-          kind: "bridge_start",
-          reason_code: "BRIDGE_EXITED_BEFORE_READY",
-          exit_code: Number.isInteger(code) ? code : -1,
-        });
-        finish(new Error(`本地工作区服务意外退出（${code}）。${errorOutput ? `\n${errorOutput}` : ""}`));
-      }
-      else if (!isQuitting) {
-        void showWorkspaceUnavailableRecovery();
-      }
+    }
+    if (!ownedProcess || !ready) return;
+    captureUsage("runtime_fault", {
+      process: "bridge",
+      kind: "bridge_exit",
+      reason_code: "BRIDGE_EXITED_AFTER_READY",
+      exit_code: Number.isInteger(code) ? code : -1,
     });
-
-    child.once("error", (_type, _location, report) => {
-      captureUsage("runtime_fault", {
-        process: "bridge",
-        kind: "bridge_start",
-        reason_code: "BRIDGE_PROCESS_ERROR",
-        fingerprint: telemetryFingerprint(report || "bridge-process-error"),
-      });
-      finish(new Error(report || "无法启动本地工作区服务。"));
-    });
+    if (!isQuitting) void showWorkspaceUnavailableRecovery();
   });
+  child.once("error", (_type, _location, report) => {
+    const ownedProcess = bridgeProcess === child;
+    if (!ownedProcess || !ready) return;
+    bridgeProcess = null;
+    bridgePort = null;
+    captureUsage("runtime_fault", {
+      process: "bridge",
+      kind: "bridge_exit",
+      reason_code: "BRIDGE_PROCESS_ERROR",
+      fingerprint: telemetryFingerprint(report || "bridge-process-error"),
+    });
+    if (!isQuitting) void showWorkspaceUnavailableRecovery();
+  });
+
+  try {
+    await waitForBridgeReady(child, {
+      expectedPort: port,
+      slowAfterMs: BRIDGE_STARTUP_SLOW_MS,
+      onStillStarting: () => {
+        console.warn(
+          "[bridge-startup] 本地工作区服务仍在启动；继续等待系统权限处理。",
+        );
+      },
+    });
+    if (bridgeProcess !== child) {
+      throw new BridgeExitedBeforeReadyError(null);
+    }
+    bridgePort = port;
+    ready = true;
+    return port;
+  } catch (error) {
+    // If the child is still alive, keep its handle so the coordinated fatal
+    // shutdown can request a graceful stop instead of orphaning the process.
+    bridgePort = null;
+    captureUsage("runtime_fault", {
+      process: "bridge",
+      kind: "bridge_start",
+      reason_code: telemetryReasonCode(
+        error?.code || error?.name,
+        "BRIDGE_START_FAILED",
+      ),
+      fingerprint: telemetryFingerprint(error),
+      ...(Number.isInteger(error?.exitCode)
+        ? { exit_code: error.exitCode }
+        : {}),
+    });
+    throw error;
+  }
+}
+
+async function startBridge() {
+  if (bridgeProcess && bridgePort) return bridgePort;
+  if (bridgeStartupPromise) return bridgeStartupPromise;
+
+  const startup = launchBridge();
+  bridgeStartupPromise = startup;
+  try {
+    return await startup;
+  } finally {
+    if (bridgeStartupPromise === startup) bridgeStartupPromise = null;
+  }
 }
 
 async function createWindow() {
