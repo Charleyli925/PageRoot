@@ -3019,6 +3019,15 @@ test("mandatory finalizer controls completion, identity, no-change, and cancella
   );
 
   const beforeNoChange = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+  assert.equal(beforeNoChange.recentRunOutcome.status, "error");
+  assert.equal(
+    beforeNoChange.recentRunOutcome.error.code,
+    "COMPLETION_IDENTITY_MISMATCH",
+  );
+  assert.equal(
+    beforeNoChange.recentRunOutcome.requestId,
+    invalidIdentityRun.requestId,
+  );
   const noChangeRun = (
     await postJson(bridge.baseUrl, "/request", {
       sourcePath,
@@ -3042,6 +3051,9 @@ test("mandatory finalizer controls completion, identity, no-change, and cancella
   assert.equal(noChange.body.status, "no-change");
   const afterNoChange = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
   assert.equal(afterNoChange.versions.length, 2);
+  assert.equal(afterNoChange.recentRunOutcome.status, "no-change");
+  assert.equal(afterNoChange.recentRunOutcome.requestId, noChangeRun.requestId);
+  assert.equal(afterNoChange.recentRunOutcome.completionObserved, true);
 
   const cancelledRun = (
     await postJson(bridge.baseUrl, "/request", {
@@ -4633,4 +4645,9 @@ test("output PROJECT.md is rejected as a protocol violation", async (t) => {
   const workspace = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
   assert.equal(workspace.runtimeState.lifecycleState, "editing");
   assert.equal(workspace.runtimeState.activeRun, null);
+  assert.equal(workspace.recentRunOutcome.status, "error");
+  assert.equal(
+    workspace.recentRunOutcome.error.code,
+    "OUTPUT_PROTOCOL_VIOLATION",
+  );
 });

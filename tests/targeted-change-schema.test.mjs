@@ -49,6 +49,7 @@ const pairs = [
     "version-manifest.internal-ai.json",
   ],
   ["scope-report.v1.schema.json", "scope-report.pass.json"],
+  ["candidate-assessment.v1.schema.json", "candidate-assessment.ready.json"],
 ];
 
 test("the clean targeted-change workspace uses strict v3 main records", async () => {
@@ -69,6 +70,7 @@ test("the clean targeted-change workspace uses strict v3 main records", async ()
     assert.equal(
       fixture.schemaVersion,
       schemaName === "scope-report.v1.schema.json"
+        || schemaName === "candidate-assessment.v1.schema.json"
         || schemaName === "source-history.v1.schema.json"
         ? "1.0.0"
         : MAIN_SCHEMA_VERSION,

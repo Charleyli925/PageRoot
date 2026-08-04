@@ -1,6 +1,6 @@
 {
   "name": "pageroot",
-  "version": "0.9.5",
+  "version": "0.9.6",
   "description": "源页（PageRoot）— Editable islands with byte-exact source outside every edited region.",
   "author": "源页",
   "license": "Apache-2.0",
@@ -201,10 +201,14 @@
         "from": "scripts/record-user-supplement.mjs",
         "to": "bridge/record-user-supplement.mjs"
       },
-      {
-        "from": "scripts/html-source-parser.mjs",
-        "to": "bridge/html-source-parser.mjs"
-      },
+    {
+      "from": "scripts/html-source-parser.mjs",
+      "to": "bridge/html-source-parser.mjs"
+    },
+    {
+      "from": "scripts/candidate-assessment.mjs",
+      "to": "bridge/candidate-assessment.mjs"
+    },
       {
         "from": "scripts/scope-validator.mjs",
         "to": "bridge/scope-validator.mjs"
@@ -377,6 +381,7 @@
         "filter": [
           "annotation-records.v3.schema.json",
           "attempt-outcome.v1.schema.json",
+          "candidate-assessment.v1.schema.json",
           "change-request.v3.schema.json",
           "committed-marker.v1.schema.json",
           "completion.v1.schema.json",

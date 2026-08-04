@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   activeRunFromRecord,
+  candidateAssessmentFromRecord,
   canonicalLifecycleState,
   deriveRunProgressSteps,
   hasObservedCompletion,
@@ -92,7 +93,7 @@ test("run progress keeps completion, validation, and result facts separate", () 
   }, "copied");
   assert.deepEqual(
     preCompletionError.map(({ state }) => state),
-    ["done", "error", "pending", "pending"],
+    ["done", "error", "pending", "neutral"],
   );
 
   const validationError = deriveRunProgressSteps({
@@ -103,7 +104,7 @@ test("run progress keeps completion, validation, and result facts separate", () 
   }, "copied");
   assert.deepEqual(
     validationError.map(({ state }) => state),
-    ["done", "done", "error", "pending"],
+    ["done", "done", "error", "neutral"],
   );
   assert.equal(validationError[2].detail, "结果 Hash 不一致");
 
@@ -116,7 +117,23 @@ test("run progress keeps completion, validation, and result facts separate", () 
     ["done", "done", "done", "current"],
   );
   assert.equal(ready[3].label, "新版本已准备好");
-  assert.equal(ready[3].detail, "旧版未被覆盖，等待你确认打开最新版");
+  assert.equal(ready[3].detail, "旧版未被覆盖，等待你审阅或直接打开");
+
+  const continuityAttention = deriveRunProgressSteps({
+    requestId: "req_0001",
+    status: "ready-to-open",
+    candidateAssessment: {
+      status: "attention",
+    },
+  });
+  assert.deepEqual(
+    continuityAttention.map(({ state }) => state),
+    ["done", "done", "attention", "current"],
+  );
+  assert.equal(
+    continuityAttention[3].detail,
+    "页面变化较大，请先对比审阅再决定是否采用",
+  );
 
   const noChange = deriveRunProgressSteps({
     requestId: "req_0001",
@@ -151,6 +168,29 @@ test("legacy validation review choices are decoded at the domain boundary", () =
   assert.equal(validationReviewFromRecord({ status: "unknown" }), null);
 });
 
+test("candidate assessment exposes only the renderer fields needed for review", () => {
+  assert.deepEqual(candidateAssessmentFromRecord({
+    status: "attention",
+    issueCodes: ["PAGE_CONTINUITY_UNCERTAIN"],
+    health: {
+      completeDocument: true,
+      bodyHasContent: true,
+      executableSurfaceUnchanged: true,
+    },
+    continuity: { status: "uncertain", evidencePoints: 0 },
+  }), {
+    status: "attention",
+    issueCodes: ["PAGE_CONTINUITY_UNCERTAIN"],
+    health: {
+      completeDocument: true,
+      bodyHasContent: true,
+      executableSurfaceUnchanged: true,
+    },
+    continuity: { status: "uncertain" },
+  });
+  assert.equal(candidateAssessmentFromRecord({ status: "unknown" }), null);
+});
+
 test("active run records decode transport aliases into one canonical model", () => {
   assert.deepEqual(activeRunFromRecord({
     projectId: "project_1",
@@ -181,7 +221,7 @@ test("active run records decode transport aliases into one canonical model", () 
     candidateVersionId: "",
     candidateVersionLabel: "版本 3",
     submittedAt: "",
-    error: "later",
+    error: "本轮没有收到可用的完成结果，页面和评论仍然保留。",
     conflictId: "conflict_1",
     candidateOutputSha256: "sha256:candidate",
     validationReview: {
@@ -190,4 +230,37 @@ test("active run records decode transport aliases into one canonical model", () 
       softViolationCodes: [],
     },
   });
+});
+
+test("active run errors are localized without exposing internal messages or codes", () => {
+  const blocked = activeRunFromRecord({
+    requestId: "req_0002",
+    status: "error",
+    completionObserved: true,
+    error: {
+      code: "EXECUTABLE_CONTENT_CHANGED",
+      message: "The candidate HTML could not be safely adopted.",
+    },
+  });
+  assert.equal(
+    blocked.error,
+    "返回内容新增或修改了可执行脚本，未自动采用。",
+  );
+  assert.equal(blocked.errorCode, "EXECUTABLE_CONTENT_CHANGED");
+  assert.doesNotMatch(blocked.error, /EXECUTABLE|candidate/iu);
+
+  const legacyScopeFailure = activeRunFromRecord({
+    requestId: "req_0003",
+    status: "error",
+    completionObserved: true,
+    error: {
+      code: "HARD_VALIDATION_FAILED",
+      message: "AI output failed: TARGET_AMBIGUOUS, TARGET_OUTSIDE_STRUCTURE",
+    },
+  });
+  assert.equal(
+    legacyScopeFailure.error,
+    "返回的 HTML 无法安全采用，当前页面没有被覆盖。",
+  );
+  assert.doesNotMatch(legacyScopeFailure.error, /TARGET_|HARD_/u);
 });

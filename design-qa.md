@@ -1,5 +1,149 @@
 # Design QA
 
+## AI review workspace — final seven-state contract
+
+Date: 2026-08-03
+
+### Comparison target
+
+- Source visual truth: `/tmp/review-toolbar-unified-v3.png`
+- Rendered implementation: `output/design-qa/ai-review-final.png`
+- Additional rendered state: `output/design-qa/ai-review-map.png`
+- Full combined comparison: `output/design-qa/comparison-full.png`
+- Focused toolbar comparison: `output/design-qa/comparison-toolbar.png`
+
+The source board establishes the accepted visual language: one quiet white
+review surface, neutral gray segmented controls, one violet selected state,
+compact labels and a centered retractable handle. The later product decision
+supersedes two information-architecture details visible in that board:
+
+1. the two version cards are removed and replaced by one `整页 / 左页 / 右页`
+   page-preview group;
+2. the former mixed review group is separated into `页面预览` and
+   `变化审阅（全部变化 / 文案 / 结构 / 视觉）`, while both groups retain the
+   same segmented-control treatment.
+
+The implementation is judged against that later contract, not against the
+superseded card content.
+
+### Viewport, pixels and density normalization
+
+- Source board: `1720 × 402` physical pixels.
+- Electron implementation: `2880 × 1920` physical pixels from a
+  `1440 × 960` CSS-pixel window at Retina `2×` density.
+- Primary state: light theme, toolbar pinned, `整页` selected, context `22%`,
+  synchronized scrolling selected, zoom `100%`, content map closed.
+- Additional state: the same viewport and controls with the complete content
+  map pinned open.
+- Full comparison normalization: the implementation's top `2880 × 620`
+  physical-pixel crop is Lanczos-downsampled to `1720 × 370` and vertically
+  combined with the source board at its native `1720 × 402` size.
+- Focused comparison normalization: source toolbar crop `1592 × 120`
+  (`x=64, y=218`) is combined with implementation toolbar crop `2824 × 224`
+  (`x=28, y=190`) downsampled to `1592 × 126`.
+- The source says `7 处变化` and the deterministic Electron fixture says
+  `4 处变化`; these are dynamic document facts and are not treated as visual
+  drift.
+
+### Full-view and focused evidence
+
+- The full comparison confirms the formal PageRoot header, review surface,
+  centered retractable handle and dual-page canvas form one clear vertical
+  hierarchy. The pinned toolbar ends before the version headers begin, so it
+  no longer covers either page caption.
+- The focused comparison makes every persistent toolbar label readable. All
+  seven review states share the same height, radius, gray resting surface,
+  violet active color and white selected tile.
+- The explicit `整页` button is the selected entry state. `左页` and `右页`
+  sit in the same group, while the four change modes form a distinct but
+  visually identical group. This is the final requested hierarchy.
+- The map-state screenshot confirms that the drawer remains attached to the
+  right edge, preserves the full-height page canvas, shows unchanged as well
+  as changed regions and does not collide with the pinned review toolbar.
+
+### Required fidelity surfaces
+
+- Fonts and typography: the implementation uses the product's system stack
+  (`-apple-system`, `SF Pro Display`, `Segoe UI`) and follows the source's
+  compact optical hierarchy. Labels, active weights, metadata and percentages
+  remain single-line and legible without truncating a core mode name.
+- Spacing and layout rhythm: toolbar padding, 38 px segmented shells, 32 px
+  selected tiles, 10 px control labels, 15 px outer radius, quiet elevation
+  and the centered handle reproduce the source's density. Grid tracks were
+  rebalanced so the four-item change group receives enough width.
+- Colors and visual tokens: neutral `#f1f1f5` controls, white active tiles,
+  gray metadata and the single violet family (`#6258d6` / `#4f47b8`) preserve
+  the source's one-emphasis-color rule. Before/after identity uses only a quiet
+  neutral dot and a violet dot; red/green comparison surfaces are absent.
+- Image quality and asset fidelity: the target contains no photographic or
+  illustrative asset. All visible interface icons use the existing Phosphor
+  icon package and the product's HTML file icon treatment; no emoji,
+  handcrafted SVG, CSS drawing or placeholder image replaces a source asset.
+- Copy and content: persistent copy matches the frozen contract — `页面预览`,
+  `整页`, `左页`, `右页`, `变化审阅`, `全部变化`, `文案`, `结构`, `视觉`,
+  `上下文可见度`, `滚动方式` and `画布缩放`. The formal header actions are
+  `返回 AI 修改前` and `接受全部并打开`.
+- Icons and controls: icon weight and 12–20 px sizing are consistent with the
+  existing workbench. Selected, resting, disabled, focus-visible and pinned
+  states remain distinguishable.
+- Accessibility and resilience: both segmented groups support arrow keys plus
+  Home/End, every state exposes `aria-pressed`, the confirmation dialog traps
+  focus and restores it to its trigger, reduced motion removes toolbar/drawer
+  transitions, and the tested `1440 px` and constrained `1180/980 px` grids do
+  not hide persistent mode labels.
+
+### Findings and comparison history
+
+1. Initial comparison — `[P2]` the pinned toolbar overlaid both page-version
+   headers. Fix: the pinned state now reserves `118px` above the canvas grid,
+   uses border-box sizing and disables that transition under reduced motion.
+2. Initial comparison — `[P2]` the last item in the four-mode change group
+   could clip because the context slider owned too much grid width. Fix: grid
+   tracks were reordered and rebalanced at the base, `1180px` and `980px`
+   layouts, then the implementation was recaptured.
+3. Post-fix focused comparison — `整页`, all four change labels, sync controls
+   and `100%` are fully readable; no overlap, clipping or inconsistent selected
+   surface remains.
+4. Post-fix full comparison — the official header, toolbar, dual-page headers,
+   page canvas and optional content map retain clear boundaries at the same
+   Electron viewport.
+
+No actionable P0, P1 or P2 finding remains. The source's version cards and
+single mixed mode row are intentionally superseded by the user's later,
+explicit seven-state hierarchy.
+
+### Interaction and automated evidence
+
+- Default entry is a clean dual-page `整页` preview; `左页` and `右页` each
+  render one page, and the explicit `整页` action restores the dual-page view.
+- Any change mode restores the dual-page canvas and focuses the first matching
+  change. Empty modes expose a status message instead of leaving stale marks.
+- All-change overview uses sparse outer dashed regions. Text mode uses
+  sentence groups plus precise insert/remove markers, structure mode detects
+  pure movement, and visual mode uses violet-blue dashed presentation marks.
+- The complete map reveals an authored hidden Tab before focusing its region.
+- Linked horizontal scrolling mirrors pixel position; linked vertical
+  scrolling aligns by outline-region ID and relative progress rather than raw
+  page offset.
+- Both return and accept paths require confirmation; the accept path activates
+  the verified candidate only after explicit confirmation.
+- The real Electron closed-loop suite passes both AI review/acceptance and
+  broad-related-result scenarios with the source file unchanged until accept.
+
+### Implementation checklist
+
+- [x] Shared official workbench header.
+- [x] One mutually exclusive seven-state model rendered as two control groups.
+- [x] Explicit whole-page return from either single-page view.
+- [x] Sparse, mode-specific diff presentation.
+- [x] Complete map, hidden-panel reveal and semantic scroll synchronization.
+- [x] Keyboard, focus-dialog and reduced-motion behavior.
+- [x] Same-state full and focused visual comparison after P2 fixes.
+
+final result: passed
+
+---
+
 ## Comment, safe page-switching and update-header polish
 
 Date: 2026-07-31

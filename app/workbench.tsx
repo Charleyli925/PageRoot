@@ -108,7 +108,10 @@ import {
   ProjectRulesSession,
   type ProjectRulesSnapshot,
 } from "./application/project-rules-session.js";
-import { ProjectSession } from "./application/project-session.js";
+import {
+  ProjectSession,
+  type ProjectSessionSnapshot,
+} from "./application/project-session.js";
 import {
   RunSession,
   type RunSessionSnapshot,
@@ -139,10 +142,10 @@ import {
 } from "./domain/draft-aggregate.js";
 import {
   activeRunFromRecord,
+  candidateAssessmentFromRecord,
   canonicalLifecycleState,
   deriveRunProgressSteps,
   isLockedLifecycleState,
-  validationReviewFromRecord,
   type ActiveRun,
   type LifecycleState,
 } from "./domain/run-lifecycle.js";
@@ -185,6 +188,11 @@ import {
   HandoffFooter,
   HandoffPanel,
 } from "./workbench/handoff-view";
+import AiReviewWorkspace from "./workbench/AiReviewWorkspace";
+import {
+  WorkbenchHeaderActions,
+  WorkbenchHeaderShell,
+} from "./workbench/workbench-header-shell";
 import {
   activeRunOperationKey,
   fileExtension,
@@ -207,7 +215,6 @@ import {
   isRecord,
   ownsNativeTextHistory,
   recoveryIdentityFromRecord,
-  scopeDecisionSummary,
   sourceHistoryOperationsFromRecord,
 } from "./workbench/record-model";
 import {
@@ -306,6 +313,7 @@ const INITIAL_RUN_SNAPSHOT: RunSessionSnapshot = {
   activeRun: null,
   activeHandoff: null,
   activeHandoffMayBeRunning: false,
+  recentOutcome: null,
   backgroundResults: [],
 };
 const INITIAL_VERSION_SNAPSHOT: VersionSessionSnapshot<Version> = {
@@ -341,6 +349,15 @@ const INITIAL_COMMENT_SNAPSHOT: CommentSessionSnapshot<
   composerAttachments: [],
   composerTarget: null,
   editSession: null,
+};
+
+type ReadyReviewSession = {
+  operationKey: string;
+  beforeHtml: string;
+  afterHtml: string;
+  beforeLabel: string;
+  afterLabel: string;
+  comments: CommentItem[];
 };
 
 function waitFor(delayMs: number): Promise<void> {
@@ -693,6 +710,7 @@ export default function Workbench() {
   }, [acknowledgeCanvasRender, canvasGeneration]);
   const [, setBridgeConnected] = useState<boolean | null>(null);
   const activeRun = runSnapshot.activeRun;
+  const recentRunOutcome = runSnapshot.recentOutcome;
   const setActiveRun = useCallback((
     next: SetStateAction<ActiveRun | null>,
   ) => {
@@ -712,6 +730,9 @@ export default function Workbench() {
   const [cancelling, setCancelling] = useState(false);
   const [cancelRunConfirmationKey, setCancelRunConfirmationKey] =
     useState<string | null>(null);
+  const [reviewPreparing, setReviewPreparing] = useState(false);
+  const [readyReviewSession, setReadyReviewSession] =
+    useState<ReadyReviewSession | null>(null);
   const [openingReadyVersion, setOpeningReadyVersion] = useState(false);
   const [resolvingConflict, setResolvingConflict] = useState(false);
   const [pendingReconcileBusy, setPendingReconcileBusy] = useState(false);
@@ -3587,6 +3608,12 @@ export default function Workbench() {
           ? { ...recoveredRunRecord, ...(runtimeConflict ? { conflict: runtimeConflict } : {}) }
           : null,
       );
+      const recoveredOutcome = activeRunFromRecord(payload.recentRunOutcome);
+      if (recoveredOutcome) {
+        runSessionRef.current.rememberOutcome(recoveredOutcome);
+      } else if (!recoveredRun) {
+        runSessionRef.current.forgetOutcome(activeSource);
+      }
       if (recoveredRun && isLockedLifecycle(recoveredRun.status)) {
         runSessionRef.current.trackRun(recoveredRun, { recovered: true });
         setProjectLocked(true);
@@ -3599,7 +3626,17 @@ export default function Workbench() {
       } else {
         const trackedRun = runSessionRef.current.runForSource(activeSource);
         if (trackedRun) runSessionRef.current.removeRun(trackedRun);
-        else runSessionRef.current.clearActiveRun();
+        else {
+          const visibleTerminal = runSessionRef.current.activeRun;
+          const keepVisibleTerminal = Boolean(
+            recoveredOutcome
+            && visibleTerminal
+            && ["error", "no-change"].includes(visibleTerminal.status)
+            && visibleTerminal.requestId === recoveredOutcome.requestId
+            && visibleTerminal.attemptId === recoveredOutcome.attemptId,
+          );
+          if (!keepVisibleTerminal) runSessionRef.current.clearActiveRun();
+        }
         setProjectLocked(false);
         projectLockedRef.current = false;
         if (!sourceBoundaryFrozen && !projectHydratingRef.current) {
@@ -3787,6 +3824,10 @@ export default function Workbench() {
           ? { ...recoveredRunRecord, ...(runtimeConflict ? { conflict: runtimeConflict } : {}) }
           : null,
       );
+      const recoveredOutcome = activeRunFromRecord(payload.recentRunOutcome);
+      if (recoveredOutcome) {
+        runSessionRef.current.rememberOutcome(recoveredOutcome);
+      }
       if (recoveredRun && isLockedLifecycle(recoveredRun.status)) {
         runSessionRef.current.trackRun(recoveredRun, {
           activate: "never",
@@ -4728,9 +4769,15 @@ export default function Workbench() {
 
       const prepare = async (): Promise<CloseReadiness> => {
         let imposedEditorFreeze = false;
+        let frozenHtml: string | null = null;
         let frozenSourceSha256: string | null = null;
         let ready = false;
         const closeLifecycle = closeLifecycleRef.current;
+        const inAppBlock = (reason: string): CloseReadiness => ({
+          ready: false,
+          reason,
+          presentation: "in-app",
+        });
         closeLifecycle.preparingRequestId = detail.requestId;
 
         try {
@@ -4751,7 +4798,7 @@ export default function Workbench() {
               ready = true;
               return { ready: true };
             }
-            return { ready: false, reason: "项目状态尚未读取完成，已取消关闭以避免覆盖未知编辑状态。" };
+            return inAppBlock("项目状态尚未读取完成，已取消关闭以避免覆盖未知编辑状态。");
           }
           if (projectLoadErrorRef.current) {
             if (
@@ -4759,7 +4806,7 @@ export default function Workbench() {
               || documentSessionRef.current.flushPromise
               || historyActionPromiseRef.current
             ) {
-              return { ready: false, reason: "项目读取失败且仍有待恢复的 HTML 修改，请先重试读取或导出副本。" };
+              return inAppBlock("项目读取失败且仍有待恢复的 HTML 修改，请先重试读取或导出副本。");
             }
             ready = true;
             return { ready: true };
@@ -4768,24 +4815,21 @@ export default function Workbench() {
             historyActionPromiseRef.current
             && !await historyActionPromiseRef.current
           ) {
-            return {
-              ready: false,
-              reason: "当前撤销或重做没有安全完成，已取消关闭。",
-            };
+            return inAppBlock("当前撤销或重做没有安全完成，已取消关闭。");
           }
 
           if (viewMode !== "history" && !projectLockedRef.current) {
             const frozen = editorRef.current?.freezeNow();
             if (!frozen) {
-              return { ready: false, reason: "编辑画布尚未就绪，已取消关闭以避免丢失文字草稿。" };
+              return inAppBlock("编辑画布尚未就绪，已取消关闭以避免丢失文字草稿。");
             }
             if (!frozen.ok) {
-              return {
-                ready: false,
-                reason: frozen.reason || "当前文字草稿无法安全提交，已取消关闭。",
-              };
+              return inAppBlock(
+                frozen.reason || "当前文字草稿无法安全提交，已取消关闭。",
+              );
             }
             imposedEditorFreeze = true;
+            frozenHtml = frozen.html;
             frozenSourceSha256 = frozen.sourceSha256;
             closeLifecycle.frozenRequestId = detail.requestId;
             if (
@@ -4801,22 +4845,78 @@ export default function Workbench() {
             deadlineAt: detail.deadlineAt - 250,
           });
           if (!drained.ok) {
-            return { ready: false, reason: drained.reason };
+            return inAppBlock(drained.reason);
           }
           if (
             imposedEditorFreeze
             && projectSessionRef.current.sourcePath
-            && (
-              documentSessionRef.current.lastPersistedRevision !== cutoffRevision
-              || !frozenSourceSha256
-              || documentSessionRef.current.sourceSha256 !== frozenSourceSha256
-            )
+            && frozenHtml !== null
           ) {
-            return { ready: false, reason: "关闭前冻结的 HTML 与已写回源文件不一致。" };
+            const boundaryIdentity: ProjectSessionSnapshot =
+              projectSessionRef.current.snapshot;
+            const identityIsCurrent = () => {
+              const current = projectSessionRef.current.snapshot;
+              return current.epoch === boundaryIdentity.epoch
+                && sameLocalSourcePath(
+                  current.sourcePath,
+                  boundaryIdentity.sourcePath,
+                )
+                && current.projectId === boundaryIdentity.projectId
+                && current.documentId === boundaryIdentity.documentId
+                && current.registered === boundaryIdentity.registered;
+            };
+            const sourceResult = await documentSessionRef.current
+              .reconcilePersistedBoundary({
+                frozenHtml,
+                reportedSourceSha256: frozenSourceSha256,
+                cutoffRevision,
+                hashHtml: browserSha256,
+                readSource: () => bridgeClient.source(
+                  boundaryIdentity.sourcePath || "",
+                  { timeoutMs: 2_500 },
+                ),
+                isCurrent: identityIsCurrent,
+                acceptsSource: (source) => Boolean(
+                  sameLocalSourcePath(
+                    String(source.sourcePath || ""),
+                    boundaryIdentity.sourcePath,
+                  )
+                  && source.registered === boundaryIdentity.registered
+                  && (
+                    !boundaryIdentity.registered
+                      ? !String(source.projectId || "")
+                        && !String(source.documentId || "")
+                      : (
+                        String(source.projectId || "") === boundaryIdentity.projectId
+                        && String(source.documentId || "") === boundaryIdentity.documentId
+                      )
+                  )
+                ),
+              });
+            if (!sourceResult.ready) {
+              if (sourceResult.code === "source-integrity-failed") {
+                setWorkspaceIssue({
+                  title: "源文件需要重新核对",
+                  message: sourceResult.reason,
+                });
+              } else if (!sourceResult.confirmed) {
+                setToast({
+                  title: "当前页面仍保持开启",
+                  message: sourceResult.reason,
+                  tone: "info",
+                  disposition: "background-result",
+                  dedupeKey: "close-source-reconciliation",
+                });
+              }
+              return inAppBlock(sourceResult.reason);
+            }
+            if (sourceResult.lastModifiedAt) {
+              setLastModifiedAt(sourceResult.lastModifiedAt);
+            }
           }
 
           if (closeLifecycle.abortedRequestIds.has(detail.requestId)) {
-            return { ready: false, reason: "桌面外壳已取消本次关闭。" };
+            return inAppBlock("桌面外壳已取消本次关闭。");
           }
           ready = true;
           return { ready: true };
@@ -4824,6 +4924,7 @@ export default function Workbench() {
           return {
             ready: false,
             reason: cause instanceof Error ? cause.message : "关闭前安全写入检查失败。",
+            presentation: "native",
           };
         } finally {
           if (closeLifecycle.preparingRequestId === detail.requestId) {
@@ -7483,7 +7584,7 @@ export default function Workbench() {
     }
   }, [activeRun?.requestPath]);
 
-  const revealVersionInFinder = useCallback(async (version: Version) => {
+  const revealVersionInFinder = useCallback(async (version: Pick<Version, "id">) => {
     const activeSourcePath = projectSessionRef.current.sourcePath;
     const revealVersionFile = window.htmlAIProjects?.revealVersionFile;
     if (!activeSourcePath || !revealVersionFile) return;
@@ -7697,6 +7798,7 @@ export default function Workbench() {
       commentCount: activeComments.length,
       changeEventCount: submissionContext.changeEvents.length,
     };
+    runSessionRef.current.forgetOutcome(submissionContext.sourcePath);
     setActiveRun(pendingRun);
     setHandoffPreviewOpen(false);
     setCanvasMode("edit");
@@ -8020,11 +8122,18 @@ export default function Workbench() {
       if (!transitionContext) {
         throw new Error("新版本已生成，但当前画布缺少可核对的项目身份。");
       }
-      const frozen = fenceAndFreezeCurrentCanvas(
-        "新版本已生成，但当前编辑画布尚未就绪。",
+      const alreadyFencedForReview = Boolean(
+        readyReviewSession
+        && readyReviewSession.operationKey === activeRunOperationKey(run)
+        && readyReviewSession.beforeHtml === documentSessionRef.current.html,
       );
-      if (!frozen.ok) {
-        throw new Error(frozen.reason || "新版本已生成，但当前编辑会话尚未安全收口。");
+      if (!alreadyFencedForReview) {
+        const frozen = fenceAndFreezeCurrentCanvas(
+          "新版本已生成，但当前编辑画布尚未就绪。",
+        );
+        if (!frozen.ok) {
+          throw new Error(frozen.reason || "新版本已生成，但当前编辑会话尚未安全收口。");
+        }
       }
       if (!isCurrentProjectContext(transitionContext)) {
         throw new DeferredEditorCommandDiscardedError("stale-session");
@@ -8101,7 +8210,6 @@ export default function Workbench() {
       status: protocolViolation ? "error" : "complete",
       completionObserved: true,
     };
-    setActiveRun(completedRun);
     setHandoffPreviewOpen(false);
     setCanvasMode("edit");
     setDrawer(null);
@@ -8111,6 +8219,8 @@ export default function Workbench() {
     if (projectLoadErrorRef.current) {
       throw new Error(`新版本已精确打开，但项目状态复核失败：${projectLoadErrorRef.current}`);
     }
+    setActiveRun(completedRun);
+    setDrawer(null);
     setProjectLocked(false);
     projectLockedRef.current = false;
     viewTransitioningRef.current = false;
@@ -8160,6 +8270,7 @@ export default function Workbench() {
     persistRecoveryLog,
     prepareGeneratedSourceTransition,
     refreshWorkspace,
+    readyReviewSession,
     setActiveRun,
     verifyCanvasRendered,
   ]);
@@ -8174,12 +8285,18 @@ export default function Workbench() {
     };
   }, [openCommittedVersion]);
 
-  const activateReadyResult = useCallback(async () => {
+  const activateReadyResult = useCallback(async (
+    { reviewed = false }: { reviewed?: boolean } = {},
+  ) => {
     const run = activeRun;
     if (
       !run
       || run.status !== "ready-to-open"
       || !run.readyPayload
+      || (
+        run.candidateAssessment?.status === "attention"
+        && !reviewed
+      )
     ) return;
     const operationKey = activeRunOperationKey(run);
     if (!runSessionRef.current.beginOperation("activate", operationKey)) return;
@@ -8203,7 +8320,17 @@ export default function Workbench() {
         version: activatedPayload.version || run.readyPayload.version,
       };
       await openCommittedVersion(run, mergedPayload);
+      if (readyReviewSession?.operationKey === operationKey) {
+        setDrawer(null);
+        await new Promise<void>((resolve) => {
+          window.requestAnimationFrame(() => {
+            window.requestAnimationFrame(() => resolve());
+          });
+        });
+        setReadyReviewSession(null);
+      }
       runSessionRef.current.removeRun(run, { clearActive: false });
+      runSessionRef.current.clearActiveHandoff();
     } catch (cause) {
       if (isDeferredEditorCommandDiscardedError(cause)) return;
       const error = productErrorMessage(cause, "最新版暂时无法打开。");
@@ -8234,7 +8361,156 @@ export default function Workbench() {
         setOpeningReadyVersion(false);
       }
     }
-  }, [activeRun, openCommittedVersion, setActiveRun]);
+  }, [activeRun, openCommittedVersion, readyReviewSession, setActiveRun]);
+
+  const reviewReadyResult = useCallback(async () => {
+    const run = runSessionRef.current.activeRun;
+    if (
+      !run
+      || run.status !== "ready-to-open"
+      || !run.readyPayload
+      || reviewPreparing
+    ) return;
+    const operationKey = activeRunOperationKey(run);
+    setReviewPreparing(true);
+    try {
+      const payload = await bridgeClient.versionFile(
+        run.sourcePath,
+        run.candidateVersionId,
+      );
+      const currentRun = runSessionRef.current.activeRun;
+      if (
+        !currentRun
+        || currentRun.status !== "ready-to-open"
+        || activeRunOperationKey(currentRun) !== operationKey
+      ) return;
+      const declaredIdentities: Array<[string, string, unknown]> = [
+        ["projectId", run.projectId, payload.projectId],
+        ["documentId", run.documentId, payload.documentId],
+        ["versionId", run.candidateVersionId, payload.versionId],
+      ];
+      for (const [field, expected, actual] of declaredIdentities) {
+        if (String(actual || "") !== expected) {
+          throw new Error(`审阅版本的 ${field} 与当前冻结任务不一致。`);
+        }
+      }
+      const candidateHtml = String(payload.content || "");
+      const candidateHash = String(payload.sha256 || payload.contentSha256 || "");
+      const expectedCandidateHash = String(
+        run.readyPayload.contentSha256
+        || (isRecord(run.readyPayload.version)
+          ? run.readyPayload.version.contentSha256
+          : "")
+        || candidateHash,
+      );
+      if (
+        !candidateHtml
+        || !candidateHash
+        || candidateHash !== expectedCandidateHash
+        || await browserSha256(candidateHtml) !== candidateHash
+      ) {
+        throw new Error("审阅候选与已校验版本的内容 Hash 不一致。");
+      }
+      const reviewContext = captureProjectContext();
+      if (!reviewContext) {
+        throw new Error("当前画布缺少可核对的项目身份，无法开始安全审阅。");
+      }
+      const frozen = fenceAndFreezeCurrentCanvas(
+        "当前编辑画布尚未就绪，无法开始安全审阅。",
+      );
+      if (!frozen.ok) {
+        throw new Error(frozen.reason || "当前编辑会话尚未安全收口。");
+      }
+      if (!isCurrentProjectContext(reviewContext)) {
+        throw new DeferredEditorCommandDiscardedError("stale-session");
+      }
+      const frozenHtml = frozen.html;
+      if (
+        !run.baseSnapshotSha256
+        || await browserSha256(frozenHtml) !== run.baseSnapshotSha256
+      ) {
+        throw new Error("当前冻结 HTML 已发生变化，无法开始安全对比。");
+      }
+      setReadyReviewSession({
+        operationKey,
+        beforeHtml: frozenHtml,
+        afterHtml: candidateHtml,
+        comments: commentSessionRef.current.comments
+          .filter(commentHasContent)
+          .map((comment) => ({
+            ...comment,
+            target: {
+              ...comment.target,
+              ...(comment.target.sourceAnchor
+                ? { sourceAnchor: { ...comment.target.sourceAnchor } }
+                : {}),
+              ...(comment.target.fingerprint
+                ? {
+                    fingerprint: {
+                      ...comment.target.fingerprint,
+                      stableAttributes: {
+                        ...comment.target.fingerprint.stableAttributes,
+                      },
+                      ancestorFingerprint: [
+                        ...comment.target.fingerprint.ancestorFingerprint,
+                      ],
+                    },
+                  }
+                : {}),
+              ...(comment.target.boundingBox
+                ? { boundingBox: { ...comment.target.boundingBox } }
+                : {}),
+            },
+            ...(comment.attachments?.length
+              ? { attachments: comment.attachments.map((item) => ({ ...item })) }
+              : {}),
+          })),
+        beforeLabel: run.basedOnVersionId
+          ? safeVersionLabel(run.basedOnVersionId)
+          : "当前版本",
+        afterLabel: String(
+          run.readyPayload.candidateDisplayVersionLabel
+          || safeVersionLabel(run.candidateVersionId),
+        ),
+      });
+      setDrawer(null);
+    } catch (cause) {
+      setToast({
+        title: "暂时无法开始审阅",
+        message: productErrorMessage(
+          cause,
+          "候选版本仍已安全保留，可以稍后重试。",
+        ),
+        tone: "error",
+        sticky: true,
+        dedupeKey: "ready-version-review",
+      });
+    } finally {
+      setReviewPreparing(false);
+    }
+  }, [
+    captureProjectContext,
+    fenceAndFreezeCurrentCanvas,
+    isCurrentProjectContext,
+    reviewPreparing,
+  ]);
+
+  useEffect(() => {
+    if (!readyReviewSession) return;
+    const currentRun = runSessionRef.current.activeRun;
+    if (
+      !currentRun
+      || currentRun.status !== "ready-to-open"
+      || activeRunOperationKey(currentRun) !== readyReviewSession.operationKey
+    ) {
+      if (openingReadyVersion) return;
+      const frame = window.requestAnimationFrame(() => {
+        setReadyReviewSession(null);
+      });
+      return () => window.cancelAnimationFrame(frame);
+    }
+    return undefined;
+  }, [activeRun, openingReadyVersion, readyReviewSession]);
 
   const processRunStatus = useCallback(async (
     run: ActiveRun,
@@ -8264,15 +8540,15 @@ export default function Workbench() {
     const previousBackgroundState =
       runSessionRef.current.runForSource(run.sourcePath)?.status;
     if (state === "ready-to-open") {
-      const validationReview = validationReviewFromRecord(payload.validationReview);
+      const candidateAssessment = candidateAssessmentFromRecord(
+        payload.candidateAssessment,
+      );
       const nextRun: ActiveRun = {
         ...run,
         status: "ready-to-open",
         readyPayload: payload,
-        ...(validationReview ? { validationReview } : {}),
-        ...(isRecord(payload.scopeReport)
-          ? { scopeReport: payload.scopeReport }
-          : {}),
+        ...(candidateAssessment ? { candidateAssessment } : {}),
+        completionObserved: true,
       };
       runSessionRef.current.trackRun(nextRun, {
         activate: isCurrentProject ? "always" : "never",
@@ -8306,12 +8582,17 @@ export default function Workbench() {
     }
     if (state === "no-change") {
       deleteTrackedRun();
+      const noChangeRun = activeRunFromRecord({
+        ...run,
+        ...payload,
+        status: "no-change",
+      }) || { ...run, status: "no-change" as const, completionObserved: true };
+      runSessionRef.current.rememberOutcome(noChangeRun);
       if (isCurrentProject) {
         clearBackgroundProjectResult(run.sourcePath);
         projectLockedRef.current = false;
         setProjectLocked(false);
         editorRef.current?.unlockNow?.();
-        const noChangeRun = { ...run, status: "no-change" as const };
         setActiveRun(noChangeRun);
         setDrawer("handoff");
       } else {
@@ -8337,19 +8618,21 @@ export default function Workbench() {
     }
     if (state === "error") {
       deleteTrackedRun();
+      const errorRun = activeRunFromRecord({
+        ...run,
+        ...payload,
+        status: "error",
+      }) || {
+        ...run,
+        status: "error" as const,
+        error: "返回的 HTML 无法安全采用，当前页面没有被覆盖。",
+        completionObserved: payload.completionObserved === true,
+      };
+      runSessionRef.current.rememberOutcome(errorRun);
       if (isCurrentProject) {
         projectLockedRef.current = false;
         setProjectLocked(false);
         editorRef.current?.unlockNow?.();
-        const error = isRecord(payload.error)
-          ? String(payload.error.message || "完成校验失败")
-          : String(payload.error || "完成校验失败");
-        const errorRun = {
-          ...run,
-          status: "error" as const,
-          error,
-          completionObserved: payload.completionObserved === true,
-        };
         setActiveRun(errorRun);
         setDrawer("handoff");
       } else {
@@ -8471,6 +8754,16 @@ export default function Workbench() {
         setDrawer("handoff");
         return;
       }
+      const recoveredOutcome = activeRunFromRecord(payload.recentRunOutcome);
+      if (recoveredOutcome) {
+        runSessionRef.current.rememberOutcome(recoveredOutcome);
+        runSessionRef.current.setActiveRun(recoveredOutcome);
+        projectLockedRef.current = false;
+        setProjectLocked(false);
+        editorRef.current?.unlockNow?.();
+        setDrawer("handoff");
+        return;
+      }
       projectLockedRef.current = false;
       setProjectLocked(false);
       editorRef.current?.unlockNow?.();
@@ -8507,13 +8800,15 @@ export default function Workbench() {
 
   const cancelActiveRun = useCallback(async ({
     agentMayBeRunning = false,
+    reason,
   }: {
     agentMayBeRunning?: boolean;
+    reason?: string;
   } = {}) => {
-    if (!activeRun || !activeRun.requestId || activeRun.requestId === "pending") return;
+    if (!activeRun || !activeRun.requestId || activeRun.requestId === "pending") return false;
     const run = { ...activeRun };
     const operationKey = activeRunOperationKey(run);
-    if (!runSessionRef.current.beginOperation("cancel", operationKey)) return;
+    if (!runSessionRef.current.beginOperation("cancel", operationKey)) return false;
     const showAgentReminder = (title: string) => {
       if (!agentMayBeRunning) return;
       setToast({
@@ -8535,7 +8830,7 @@ export default function Workbench() {
       setDrawer(null);
       showAgentReminder("本轮已结束，已恢复编辑");
       runSessionRef.current.endOperation("cancel", operationKey);
-      return;
+      return true;
     }
     const context = (
       (
@@ -8555,9 +8850,9 @@ export default function Workbench() {
         sourcePath: run.sourcePath,
         requestId: run.requestId,
         attemptId: run.attemptId,
-        reason: agentMayBeRunning
+        reason: reason || (agentMayBeRunning
           ? "cancelled-by-user-after-agent-handoff"
-          : "cancelled-by-user",
+          : "cancelled-by-user"),
       });
       if (runSessionRef.current.hasRun(run)) {
         runSessionRef.current.removeRun(run);
@@ -8583,8 +8878,9 @@ export default function Workbench() {
           });
         }
       }
+      return true;
     } catch (cause) {
-      if (context && !isCurrentProjectContext(context)) return;
+      if (context && !isCurrentProjectContext(context)) return false;
       if (context) {
         const nextRun = {
           ...run,
@@ -8595,6 +8891,7 @@ export default function Workbench() {
         };
         runSessionRef.current.trackRun(nextRun, { activate: "always" });
       }
+      return false;
     } finally {
       runSessionRef.current.endOperation("cancel", operationKey);
       if (context && isCurrentProjectContext(context)) {
@@ -9001,22 +9298,25 @@ export default function Workbench() {
     activeRun
     && ["validating", "committing", "recovering-transaction"].includes(activeRun.status),
   );
-  const activeScopeDecision = activeRun?.validationReview?.softViolationCodes.length
-    ? scopeDecisionSummary(activeRun.scopeReport)
-    : null;
+  const candidateNeedsReview =
+    activeRun?.candidateAssessment?.status === "attention";
   const processPanelTitle = pendingRunOutcome
     ? "正在确认这次发送是否成功"
     : activeRun?.status === "ready-to-open"
-      ? "修改结果已通过检查"
+      ? candidateNeedsReview
+        ? "页面变化较大，请先审阅"
+        : "修改结果已完成检查"
       : activeRun?.status === "no-change"
         ? "这次没有产生有效变化"
         : activeRun?.status === "error"
-          ? "本轮需要处理后再试"
+          ? "返回的 HTML 无法使用"
           : "等待 QoderWork 返回修改结果";
   const processSummaryTitle = pendingRunOutcome
     ? "为避免重复任务，画布暂时保持只读"
     : activeRun?.status === "ready-to-open"
-      ? "新版本已保留，等待你确认打开"
+      ? candidateNeedsReview
+        ? "候选版本已保留，等待你对比确认"
+        : "新版本已保留，等待你确认打开"
       : activeRun?.status === "no-change"
         ? "页面与评论可以继续编辑"
         : activeRun?.status === "error"
@@ -9027,12 +9327,14 @@ export default function Workbench() {
     : activeRun?.status === "no-change"
       ? "原评论和附件都已保留，调整要求后可以重新发送"
       : activeRun?.status === "error"
-        ? "错误详情保留在本轮记录中，返回编辑后可调整并重试"
+        ? "当前 HTML 没有被覆盖；返回编辑后仍可查看上轮处理"
+        : candidateNeedsReview
+          ? "HTML 可以打开，但与上一版的共同特征较少，不会直接替换当前页面"
         : "原始评论和本地内容均已冻结，返回结果不会覆盖它们";
   const processStatusLabel = pendingRunOutcome
     ? "正在等待修改结果"
     : activeRun?.status === "ready-to-open"
-      ? "等待确认打开"
+      ? candidateNeedsReview ? "请先审阅" : "等待确认打开"
       : activeRun?.status === "no-change"
         ? "没有新版本"
         : activeRun?.status === "error"
@@ -9384,9 +9686,10 @@ export default function Workbench() {
     commentRailOffsetRef.current = commentRailMinimumOffset;
     setCommentRailOffset(commentRailMinimumOffset);
   }, [commentRailFollowsFocus, commentRailMinimumOffset]);
-  const returnToEditingFromTerminalRun = (adjustRequirements: boolean) => {
+  const returnToEditingFromTerminalRun = () => {
     const completedRun = runSessionRef.current.activeRun;
     if (completedRun?.sourcePath) {
+      runSessionRef.current.rememberOutcome(completedRun);
       runSessionRef.current.clearHandoff(completedRun.sourcePath);
     }
     runSessionRef.current.clearActiveRun();
@@ -9397,17 +9700,14 @@ export default function Workbench() {
     setProjectLocked(false);
     projectLockedRef.current = false;
     editorRef.current?.unlockNow?.();
-    if (!adjustRequirements) return;
-    const firstComment = commentSessionRef.current.comments.find(commentHasContent);
-    window.requestAnimationFrame(() => {
-      if (!firstComment) {
-        openGlobalCommentComposer();
-      } else if (!canLocateTarget(firstComment.target)) {
-        beginTargetRelink(firstComment.commentId);
-      } else {
-        beginCommentEdit(firstComment);
-      }
-    });
+  };
+  const reopenRecentRunOutcome = () => {
+    const outcome = runSessionRef.current.outcomeForSource(sourcePath);
+    if (!outcome) return;
+    runSessionRef.current.setActiveRun(outcome);
+    setHandoffPreviewOpen(false);
+    setCanvasMode("edit");
+    setDrawer("handoff");
   };
   const handleToastAction = () => {
     const action = toast?.action;
@@ -9467,25 +9767,72 @@ export default function Workbench() {
     }
   };
 
+  const readyReviewOverlay = readyReviewSession ? (
+    <AiReviewWorkspace
+      fileName={currentSourceFileName}
+      beforeLabel={readyReviewSession.beforeLabel}
+      afterLabel={readyReviewSession.afterLabel}
+      beforeHtml={readyReviewSession.beforeHtml}
+      afterHtml={readyReviewSession.afterHtml}
+      comments={readyReviewSession.comments}
+      sourcePath={sourcePath || undefined}
+      accepting={openingReadyVersion}
+      error={activeRun?.status === "ready-to-open" ? activeRun.error : undefined}
+      notice={activeRun?.candidateAssessment?.status === "attention"
+        ? "这个候选可以打开，但与上一版的共同特征较少。请重点核对整页内容，再决定是否接受。"
+        : undefined}
+      onExit={() => {
+        setReadyReviewSession(null);
+        setDrawer("handoff");
+      }}
+      onReturnBefore={() => {
+        void (async () => {
+          const restored = await cancelActiveRun({
+            reason: "declined-ai-candidate-after-review",
+          });
+          if (!restored) return;
+          setToast({
+            title: `已返回 AI 修改前的${readyReviewSession.beforeLabel}`,
+            message: `${readyReviewSession.afterLabel} 与本轮记录仍已保留；当前页面可直接继续编辑。`,
+            tone: "success",
+            dedupeKey: "ready-version-returned-before",
+          });
+        })();
+      }}
+      onAccept={() => {
+        void activateReadyResult({
+          reviewed: true,
+        });
+      }}
+      onRevealCandidateHtml={() => {
+        const candidateVersionId = activeRun?.candidateVersionId;
+        if (candidateVersionId) {
+          void revealVersionInFinder({ id: candidateVersionId });
+        }
+      }}
+    />
+  ) : null;
+
   return (
-    <main
-      className="workbench"
-      data-round-state={runInProgress ? "processing" : viewMode}
-      data-canvas-mode={canvasMode}
-      data-handoff-preview={runInProgress && handoffPreviewOpen ? "true" : undefined}
-      data-project-state={
-        projectLoadError
-          ? "failed"
-          : projectHydrating
-            ? "hydrating"
-            : sourcePath
-              ? "ready"
-              : "unbound"
-      }
-      aria-label="HTML AI 可视化编辑工作台"
-    >
-      <header
-        className="workbench-header"
+    <>
+      <main
+        className="workbench"
+        data-round-state={runInProgress ? "processing" : viewMode}
+        data-canvas-mode={canvasMode}
+        data-handoff-preview={runInProgress && handoffPreviewOpen ? "true" : undefined}
+        data-project-state={
+          projectLoadError
+            ? "failed"
+            : projectHydrating
+              ? "hydrating"
+              : sourcePath
+                ? "ready"
+                : "unbound"
+        }
+        aria-label="HTML AI 可视化编辑工作台"
+        inert={readyReviewSession ? true : undefined}
+      >
+      <WorkbenchHeaderShell
         data-file-renaming={fileRenameEditing ? "true" : undefined}
       >
         <div className="window-file">
@@ -9682,7 +10029,7 @@ export default function Workbench() {
           </div>
         </div>
 
-        <nav className="header-actions" aria-label="画布模式、项目和版本操作">
+        <WorkbenchHeaderActions aria-label="画布模式、项目和版本操作">
           <div className="canvas-mode-switch" role="group" aria-label="画布模式">
             <button
               type="button"
@@ -9793,6 +10140,21 @@ export default function Workbench() {
             <ChatCircleTextIcon aria-hidden="true" size={18} weight="duotone" />
             全局评论
           </button>
+          {recentRunOutcome && !runInProgress && !terminalRun ? (
+            <button
+              className="recent-run-button"
+              type="button"
+              aria-expanded={drawer === "handoff"}
+              onClick={reopenRecentRunOutcome}
+            >
+              <ClockCounterClockwiseIcon
+                aria-hidden="true"
+                size={18}
+                weight="duotone"
+              />
+              上轮处理
+            </button>
+          ) : null}
           <button
             className="header-send-button"
             type="button"
@@ -9841,7 +10203,7 @@ export default function Workbench() {
               ? <small>{pendingSendItemCount}</small>
               : null}
           </button>
-        </nav>
+        </WorkbenchHeaderActions>
         <input
           ref={fileInputRef}
           className="sr-only"
@@ -9861,7 +10223,7 @@ export default function Workbench() {
             if (target) void uploadAttachments(files, target, "file-picker");
           }}
         />
-      </header>
+      </WorkbenchHeaderShell>
 
       {startupIssue ? (
         <section className="startup-issue" role="alert">
@@ -10045,6 +10407,7 @@ export default function Workbench() {
             ref={commentsPanelRef}
             className="comments-panel comment-rail"
             aria-label={viewMode === "history" ? "历史版本评论" : "本轮评论"}
+            data-html-canvas-preserve-selection="true"
             aria-busy={!commentLayoutReady}
             data-layout-ready={commentLayoutReady ? "true" : "false"}
             data-layout-generation={commentLayoutAuthority.viewContextGeneration}
@@ -11251,7 +11614,6 @@ export default function Workbench() {
               activeCommentItems={activeCommentItems}
               runBasisLabel={runBasisLabel}
               runSubmittedLabel={runSubmittedLabel}
-              activeScopeDecision={activeScopeDecision}
               pendingRunOutcome={pendingRunOutcome}
               canRevealRequestFolder={Boolean(
                 typeof window !== "undefined"
@@ -11264,6 +11626,7 @@ export default function Workbench() {
         {drawer === "handoff" && activeRun ? (
           <HandoffFooter
             activeRun={activeRun}
+            reviewPreparing={reviewPreparing}
             openingReadyVersion={openingReadyVersion}
             pendingRunOutcome={pendingRunOutcome}
             pendingReconcileBusy={pendingReconcileBusy}
@@ -11277,8 +11640,8 @@ export default function Workbench() {
               typeof window !== "undefined"
               && window.htmlAIProjects?.revealRequestFolder,
             )}
+            onReviewReadyResult={() => void reviewReadyResult()}
             onActivateReadyResult={() => void activateReadyResult()}
-            onClose={() => setDrawer(null)}
             onSend={() => void sendToQoderWork(
               activeRun.handoffMessage,
               activeRun,
@@ -11363,6 +11726,8 @@ export default function Workbench() {
           }}
         />
       ) : null}
-    </main>
+      </main>
+      {readyReviewOverlay}
+    </>
   );
 }

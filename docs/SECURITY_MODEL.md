@@ -35,7 +35,16 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   exposed. The document response blocks `file:` resource loading and authored
   base URLs. The application renderer's CSP remains strict and the preview
   scheme does not receive `bypassCSP`.
-- Strict schemas, frozen inputs and identity/Hash checks before accepting AI output; scope evidence is always recorded, with protocol/script/target-integrity findings hard-blocked and ordinary breadth findings observed without a user-waiver loop
+- Strict schemas, frozen inputs and identity/Hash/path checks before accepting AI output; complete-document, non-empty-body and unchanged executable-surface checks remain hard boundaries, while weak page continuity forces isolated review instead of silently opening or falsely rejecting the candidate
+- Review-before-open reads only the frozen current HTML and immutable candidate
+  Version after rechecking their identities and Hashes. Both copies render in
+  unique-origin sandboxed frames; authored scripts, refresh directives and
+  inline handlers are removed, nested frames are re-sandboxed, and links/forms
+  cannot navigate or submit. On desktop, each sanitized copy uses a bounded
+  `pageroot-preview:` session so the exact review bootstrap loads as an external
+  script without weakening the application renderer CSP; the root sandbox still
+  grants only scripts. Only that review scroll/focus bridge may execute, and its
+  messages are bound to the exact frame and review session.
 - Main-process-only usage telemetry with exact event/property allowlists,
   random installation/session UUIDs and HMAC project pseudonyms; no hardware
   identifier, content, path, filename, raw exception or stack is accepted
@@ -81,6 +90,23 @@ one-sided runtime classes, text/HTML, inline style, form state and runtime
 children. The normal script-disabled editing iframe and SourcePatch checks
 remain unchanged.
 
+The AI review workspace is an isolated interactive review preview with no
+activation or persistence authority. It preserves the already-validated authored
+scripts and inline events in a disposable review copy so source-backed Tabs,
+disclosures and local controls can be inspected. The review iframe uses only
+`allow-scripts`: it has no same-origin authority, form submission, navigation,
+popup, download, modal or host IPC capability. Parent-side capture also blocks
+anchor navigation and form submission, nested iframes receive an empty sandbox,
+and refresh/CSP meta directives are removed only from the disposable review copy
+so they cannot navigate the frame or suppress the trusted review bootstrap.
+
+Entering review does not change `project.json.sourcePath`, the current Canvas,
+the immutable Version or the activation transaction, and runtime interaction
+state is never serialized. The renderer accepts review messages only when the
+session ID, side, declared message source and `MessageEvent.source` all match the
+registered frame. A user must still invoke the existing fail-closed ready-version
+activation path through “直接打开” or the review confirmation “打开 AI 修改后”.
+
 Edit-mode reveal actions use the same trust boundary. They accept only strict
 Tabs whose selected panel is proved by `aria-selected` plus `hidden`, native
 details with one direct summary, and local button/region disclosures whose
@@ -110,6 +136,14 @@ authorized main-frame sender and a known ordinary `.html` or `.htm` project
 path, then derives the `file:` URL itself. Executable negative tests prove
 malformed, non-HTML, unknown, unsafe and unauthorized requests cannot reach
 the shell launch adapter.
+
+Close reconciliation never writes from a preview or from stale metadata. It
+hashes the frozen authoritative renderer bytes, fences the current project
+identity, and uses a bounded read-only `/source` query only when acknowledged
+local state is insufficient. The response must match the captured registered
+identity and its declared Hash must match independently hashed content before
+it can repair the renderer projection. Any real byte divergence remains
+fail-closed and preserves both the in-memory editor copy and the disk copy.
 
 The telemetry preload method is fire-and-forget and does not expose a generic
 network API. The main process verifies the sender frame and independently

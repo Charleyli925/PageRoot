@@ -56,7 +56,9 @@ import { createOpenInDefaultBrowserOperation } from "./open-in-default-browser.m
 import { assertTrustedRendererEvent } from "./project-ipc-security.mjs";
 import {
   closeAbortPayload,
+  normalizeCloseResult,
   runGuardedFinalExit,
+  shouldPresentNativeCloseBlock,
   stopBridgeOrNotifyCloseAborted,
 } from "./close-recovery.mjs";
 import {
@@ -1585,38 +1587,8 @@ function isTrustedRendererUrl(value) {
   }
 }
 
-function normalizedCloseResult(payload) {
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    throw new TypeError("关闭确认结果无效。");
-  }
-  const allowedKeys = new Set(["requestId", "ready", "reason"]);
-  if (Object.keys(payload).some((key) => !allowedKeys.has(key))) {
-    throw new TypeError("关闭确认结果包含未支持的字段。");
-  }
-  if (
-    typeof payload.requestId !== "string"
-    || payload.requestId.length < 8
-    || payload.requestId.length > 100
-  ) {
-    throw new TypeError("关闭确认 requestId 无效。");
-  }
-  if (typeof payload.ready !== "boolean") {
-    throw new TypeError("关闭确认 ready 必须是布尔值。");
-  }
-  const reason = payload.ready
-    ? null
-    : typeof payload.reason === "string" && payload.reason.trim()
-      ? payload.reason.trim().slice(0, 500)
-      : "编辑器尚未确认所有本地更改都已安全写入。";
-  return {
-    requestId: payload.requestId,
-    ready: payload.ready,
-    reason,
-  };
-}
-
 async function reportCloseResult(payload) {
-  const result = normalizedCloseResult(payload);
+  const result = normalizeCloseResult(payload);
   if (!closeRequest || closeRequest.requestId !== result.requestId) {
     return { accepted: false, reason: "request-expired" };
   }
@@ -1630,12 +1602,22 @@ async function reportCloseResult(payload) {
 
 function requestRendererClose(reason) {
   if (!mainWindow || mainWindow.isDestroyed()) {
-    return Promise.resolve({ requestId: null, ready: true, reason: null });
+    return Promise.resolve({
+      requestId: null,
+      ready: true,
+      reason: null,
+      presentation: null,
+    });
   }
   // Before the first renderer load there is no editable document or queued
   // renderer write to drain, so startup failures can exit without a timeout.
   if (!rendererHasLoaded) {
-    return Promise.resolve({ requestId: null, ready: true, reason: null });
+    return Promise.resolve({
+      requestId: null,
+      ready: true,
+      reason: null,
+      presentation: null,
+    });
   }
   if (closeRequest) return closeRequest.promise;
 
@@ -1652,6 +1634,7 @@ function requestRendererClose(reason) {
       requestId,
       ready: false,
       reason: "等待编辑器写入完成超时。请保持应用开启，确认自动保存状态后再关闭。",
+      presentation: "native",
     });
   }, RENDERER_CLOSE_TIMEOUT_MS);
   closeRequest = {
@@ -1715,16 +1698,19 @@ const EXIT_INTENTS = Object.freeze({
   quit: Object.freeze({
     abortDetail: "源页已取消关闭并返回当前页面，请处理后再试。",
     abortButton: "继续编辑",
+    blockedMessage: "关闭前的安全确认没有完成。",
     errorTitle: "无法安全关闭源页",
   }),
   relaunch: Object.freeze({
     abortDetail: "源页已取消重新打开并返回当前页面，请处理后再试。",
     abortButton: "返回源页",
+    blockedMessage: "重新打开前的安全确认没有完成。",
     errorTitle: "暂时无法重新打开源页",
   }),
   update: Object.freeze({
     abortDetail: "源页已取消安装更新并返回当前页面，请处理后再试。",
     abortButton: "返回源页",
+    blockedMessage: "安装更新前的安全确认没有完成。",
     errorTitle: "暂时无法安装更新",
   }),
 });
@@ -1736,17 +1722,33 @@ async function coordinateApplicationExit(reason, intent = "quit") {
   coordinatedExit = (async () => {
     const result = await requestRendererClose(reason);
     if (!result.ready) {
+      const nativeBlock = shouldPresentNativeCloseBlock(result);
+      const interruptionSurface = nativeBlock ? "native" : "global";
       captureUsage("interruption_changed", {
         interruption_code: "close_safety",
         phase: "started",
         result: "unknown",
-        surface: "native",
+        surface: interruptionSurface,
       });
       notifyRendererCloseAborted(result.requestId, result.reason);
+      if (!nativeBlock) {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.show();
+          mainWindow.focus();
+        }
+        captureUsage("interruption_changed", {
+          interruption_code: "close_safety",
+          phase: "resolved",
+          result: "continued",
+          surface: interruptionSurface,
+        });
+        coordinatedExit = null;
+        return false;
+      }
       const messageBoxOptions = {
         type: "warning",
-        title: "还有内容没有保存",
-        message: result.reason || "当前页面还有内容没有保存完成。",
+        title: exitIntent.errorTitle,
+        message: result.reason || exitIntent.blockedMessage,
         detail: exitIntent.abortDetail,
         buttons: [exitIntent.abortButton],
         defaultId: 0,
@@ -1761,7 +1763,7 @@ async function coordinateApplicationExit(reason, intent = "quit") {
         interruption_code: "close_safety",
         phase: "resolved",
         result: "continued",
-        surface: "native",
+        surface: interruptionSurface,
       });
       coordinatedExit = null;
       return false;

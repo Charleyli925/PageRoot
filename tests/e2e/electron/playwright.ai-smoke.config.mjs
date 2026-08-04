@@ -9,7 +9,7 @@ const productRoot = path.resolve(currentDirectory, "../../..");
 
 export default defineConfig({
   ...aiConfig,
-  grep: /a verified AI result stays pending until the user opens the new HTML|a soft out-of-scope AI return is audited without blocking the ready version/u,
+  grep: /a verified AI result stays pending through desktop review until the user accepts it|a broad but related AI return is accepted without a target-scope error/u,
   outputDir: path.join(productRoot, "output/playwright/ai-closed-loop-smoke/results"),
   reporter: [
     ["list"],

@@ -32,6 +32,63 @@ Notable user-visible changes are documented here. This project follows Semantic 
   canvases now acknowledge the same generation, safe-save status cannot reuse
   stale content, and the “+” project picker automatically repairs one clean
   projection mismatch instead of silently doing nothing.
+- Reconciled safe close against the exact frozen HTML bytes so stale Canvas
+  Hash or revision projections no longer contradict a “Safely saved” status.
+  Matching authoritative bytes now repair the projection silently; confirmed
+  external divergence or invalid source integrity stays fail-closed with an
+  in-app recovery path. Renderer-owned blockers return to that path without a
+  duplicate macOS alert, while missing, timed-out or faulty close coordination
+  still uses the native fallback.
+- Replaced subtree-exact AI acceptance with a simpler candidate check: complete
+  visible HTML and an unchanged executable surface remain hard requirements,
+  while coarse page continuity now routes uncertain results into mandatory
+  side-by-side review instead of falsely failing broad but valid edits.
+- Localized terminal AI errors, fixed long error text overlapping the process
+  timeline, reduced duplicate terminal actions to one “Return to editing”
+  action, and added a restart-safe “Previous run” entry for reopening the last
+  error or no-change outcome.
+- Made AI results review-first: ready results now offer a highlighted
+  side-by-side review and a secondary direct-open action, with full-page
+  change filters, synchronized navigation, and a reversible return-before-AI
+  confirmation before the same audited activation path is used.
+- Rebuilt the formal AI review workspace around independent page, change
+  filter, context visibility, navigation, page-runtime, scrolling and zoom
+  state. Page and filter buttons now remain selected independently, map
+  navigation no longer changes review display, and single- and dual-page views
+  fill the available Canvas with only minimal framing gaps.
+- Unified Canvas comments and formal review on one Tab-discovery contract,
+  including explicit and strict indexed page controls. Review now coordinates
+  both pages through one presentation epoch, removes stale frames immediately,
+  keeps dimming continuous while different-height Tabs settle, and converges
+  linked vertical scrolling instead of jumping. Every final frame carries a
+  short label; consecutive edited lines use one stepped union frame and mask
+  hole rather than a whitespace-crossing rectangle. Frozen user comments also
+  appear only on the before page as a persistent read-only “评” marker with a
+  hover-only bubble.
+- Unified review frames and dimming on one typed change footprint. Copy uses
+  leaf-level exact ranges and high-confidence pairing instead of tag/position
+  guesses. Connected frames merge without crossing columns, contained ancestor
+  frames are removed, and the context mask now punches transparent holes from
+  those exact final rectangles so frame interiors remain clear. Added copy uses
+  green frames, removed copy red, structure blue and visual changes purple;
+  repeated short copy and inserted structures no longer create unrelated text
+  or visual frames. Before/after controls now use paired stable identities and
+  mirror Tabs, disclosures, buttons and form state in both directions even
+  while scrolling is independent; unsupported matches degrade silently.
+- Made review open directly on the first change in synchronized dual-page All
+  mode with 18% context. Added copy keeps the page's authored styling and uses
+  one merged dashed frame; removed copy keeps its deletion treatment, while the
+  final frame rectangle—not incidental DOM ancestry—defines the fully clear
+  region for each Copy/Structure/Visual projection.
+  The content map opens to the right of its handle, distinguishes changed rows,
+  and dismisses on outside interaction. Linked review now mirrors authored
+  page actions and form state, not only Tabs. Return confirmation locates the
+  exact candidate HTML, while acceptance keeps review covering the live editor
+  until the candidate is rendered, eliminating the waiting-page flash.
+- End Canvas selection and native text editing when the user clicks elsewhere
+  in the page or App, committing the current checkpoint and removing the edit
+  toolbar and selection together. Selection-bound toolbar and comment actions
+  remain stable long enough to complete their intended operation.
 
 ## [0.9.5] - 2026-07-31
 

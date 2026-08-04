@@ -1,7 +1,7 @@
 # PageRoot MVP 产品需求
 
-- 状态：v3 单引擎目标合同
-- 适用范围：本地 HTML 源码局部编辑、内部 AI 交接、强制范围校验与版本历史
+- 状态：v3 单引擎与候选评估合同
+- 适用范围：本地 HTML 源码局部编辑、内部 AI 交接、候选健康/连续性检查与版本历史
 - 上位文档：[架构说明](ARCHITECTURE.md)
 - 安全边界：[安全模型](SECURITY_MODEL.md)
 - 验证策略：[测试策略](../tests/TEST_STRATEGY.md)
@@ -19,7 +19,7 @@ PageRoot 让用户在真实本地 HTML 上完成两类工作：
 
 核心合同只有一句：
 
-> 用户选中谁，直接编辑就只 Patch 谁；只有内部 AI 对一次冻结提交返回经过最终化、目标范围校验、确实不同并完成事务提交的完整 HTML，系统才创建下一版和新的当前工作文件，绝不覆盖提交前的 HTML。
+> 用户选中谁，直接编辑就只 Patch 谁；内部 AI 对一次冻结提交返回完整且可显示、身份与 Hash 一致、没有改变可执行表面并完成事务提交的 HTML，系统才创建下一版，且在用户确认前绝不替换提交前的 HTML；与上一版连续性不足时必须先审阅。
 
 ## 2. 目标与非目标
 
@@ -136,7 +136,7 @@ PageRoot 让用户在真实本地 HTML 上完成两类工作：
 每次本地修改：
 
 1. 文字双击时由 `IslandEditingController` 为当前源码宿主建立唯一可编辑岛；浏览器只负责光标、Selection 和 IME，Controller 接管输入、删除、换行、粘贴与格式变更。
-2. 约 700ms、格式、Cmd+S、目标切换、关闭或发送边界生成带目标身份、源 Hash、精确岛内 before/after 和操作类型的 `replace-editable-island` 命令；短暂失焦不结束会话。
+2. 约 700ms、格式、Cmd+S、目标切换、关闭或发送边界生成带目标身份、源 Hash、精确岛内 before/after 和操作类型的 `replace-editable-island` 命令；编辑工具栏及与当前选区绑定的评论操作不结束会话，点击除此之外的页面或 App 区域则提交 checkpoint，并同时清除编辑态、选区与工具栏。
 3. SourceIndex/TargetResolver 唯一定位真实源码范围；无法唯一定位时保留草稿并阻止操作。
 4. SourcePatchEngine 只替换目标元素的精确 `contentRange`，并验证岛外源码逐字节不变。岛内可进行最小 parse5 规范化；成功事务把实际 forward Patch 和对应 exact inverse Patch 作为同一操作写入有界源码历史，不保存整页 DOM 快照。
 5. 用 Patch 结果更新内存 HTML 并原子重建 projection；失败时保留原会话和草稿。
@@ -285,7 +285,8 @@ editing
   → processing
   → validating
   → committing
-  → ready
+  → ready-to-open
+  ↔ review view（隔离可交互、不可持久化；runtime 仍为 ready-to-open）
   → editing
 ```
 
@@ -294,7 +295,9 @@ editing
 - `awaiting-conflict-resolution`
 - `recovering-transaction`
 
-`submitting`、`processing`、`validating`、`committing`、冲突和事务恢复均锁定当前项目。`ready` 表示新版已经完整打开，可短暂展示成功提示后回到 `editing`。
+`submitting`、`processing`、`validating`、`committing`、冲突和事务恢复均锁定当前项目。`ready-to-open` 表示新版已经安全生成但尚未成为当前源；界面默认突出“审阅对比”，同时保留“直接打开”。正式审阅页在无保存与激活权限的隔离沙箱中展示冻结当前版与 AI 候选。进入审阅默认显示“双页 + 全部变化 + 上下文可见度 18% + 同步滚动 + 100%”，并把第一处变化作为定位目标。页面模式、变化类型、可见度、定位、页内运行态、滚动与缩放彼此独立，任何控件不得顺带重置其他状态；单双页都最大化利用 Canvas，只保留必要的小间隙。
+
+变化分析产出一份供框选和虚化共同读取的精确 footprint：文案是叶子级增删范围，结构和视觉是最小受影响节点。当前筛选 footprint 之外的整页内容按可见度虚化；导航焦点只负责滚动和活动说明。全部变化把同一位置的文案/结构/视觉框融合并去除祖先重复框，不跨越列或大片无变化区域。内容地图只定位并揭示 Tab，不改变审阅显示逻辑。两页安全动作使用成对稳定 key 双向同步，且不受同步/独立滚动选择影响；无法安全对应时静默降级。所有运行态都不改变候选。通过左上角项目标识退出审阅会回到同一待处理页面；确认“返回 AI 修改前”则结束 active run 并直接恢复修改前 HTML 的编辑状态，但不删除评论、编辑记录、候选 Version、working HTML 或本轮记录，确认提示中的链接直接在 Finder 定位该候选 HTML。“打开 AI 修改后”需要确认；审阅层保持覆盖到候选编辑画布完全就绪后再一次性移除，不得闪现等待 AI 页面，完成三侧 Hash 校验后回到 `editing`。
 
 状态与 active run 的唯一事实源是该项目自己的 `runtime-state.json`。`project.json` 不保存第二份 active run。
 
@@ -342,9 +345,10 @@ editing
 - 冻结输入 Hash 相同。
 - 实际 output Hash 与 completion 相同。
 - HTML 完整可加载。
+- body 存在可显示内容。
+- 脚本、inline handler、`javascript:` URL 和 meta refresh 与冻结输入一致。
 - 规范化比较可重复。
-- ScopeValidator 能在 base 与 output 两侧唯一解析所有允许目标。
-- 每个实质差异都能分类为目标内、目标外、finalizer metadata 或语义等价规范化。
+- 候选与上一版的粗粒度连续性评估可重复。
 
 规范化比较只允许移除以下工作台自有 meta：
 
@@ -364,7 +368,10 @@ editing
 - 保留 Request、Attempt、评论和诊断记录。
 - 解锁当前项目，允许用户修改要求后再次提交。
 
-若比较 Hash 不同，必须生成符合 `scope-report.v1.schema.json` 的强制报告。目标外正文、属性、结构、共享 CSS、JavaScript 或无法唯一定位的目标均使 Attempt 失败；保留 output、completion、scope report 和 outcome，不创建 Version、不消耗候选号。正式产品没有关闭 ScopeValidator 的功能开关。
+若比较 Hash 不同，必须生成符合 `candidate-assessment.v1.schema.json` 的记录。完整性、
+可显示 body 或可执行表面失败时保留 output、completion、assessment 和 outcome，不创建
+Version。连续性证据不足时仍创建不可变 Version，但状态为 `attention`，处理页只允许进入
+对比审阅；普通正文、属性、结构和样式变化不按评论 TargetRef 判失败。
 
 ### 5.10 两阶段 Version 提交
 
@@ -374,7 +381,7 @@ editing
 
 1. 再次确认 active run。
 2. 建立持久事务日志。
-3. 准备不可变 HTML、v3 `version.json`、scope report 引用和评论归档。
+3. 准备不可变 HTML、v3 `version.json` 和评论归档；Attempt assessment 由 `requestId + attemptId` 关联。
 4. 核对候选 Hash。
 5. 核对当前源 Hash 等于 `baseSnapshotSha256`。
 6. 保存并校验源 HTML 短期恢复文件。
@@ -526,7 +533,8 @@ Prompt、AI 返回、附件、剪贴板、文件名/路径、账号、电脑序�
 - `project-state.v3.schema.json`
 - `runtime-state.v3.schema.json`
 - `source-history.v1.schema.json`
-- `scope-report.v1.schema.json`
+- `candidate-assessment.v1.schema.json`
+- `scope-report.v1.schema.json`（直接 Patch/旧 Attempt 证据，不由新 AI Attempt 写入）
 - `completion.v1.schema.json`
 - `input-manifest.v1.schema.json`
 - `attempt-outcome.v1.schema.json`
@@ -617,12 +625,13 @@ Prompt、AI 返回、附件、剪贴板、文件名/路径、账号、电脑序�
 - 连续两次 AI 成功后，原始 HTML 与第一份工作文件逐字节不变，项目当前路径指向第二份工作文件。
 - 历史页不提供恢复或覆盖当前 HTML；需要以旧快照开始时，将其作为普通文件登记为新的 Document 与 V1。
 
-### 10.5 事务、范围与干净切换
+### 10.5 事务、候选检查与干净切换
 
 - 每个事务故障点均能恢复到完整旧态或完整新态。
 - 无 commit marker 的候选不出现在历史。
-- ScopeValidator 继续完整记录目标外正文、属性、结构、CSS 和 JavaScript 变化。
-- 身份、脚本、协议、路径、Hash、目标歧义和完整性属于硬校验，失败时不创建 Version、不消耗候选号。
-- 目标外正文、属性、普通结构与样式联动属于软观察：写入 `validation-review.json`，在结果面板说明，但不阻断候选 Version。
+- 身份、协议、路径、Hash、完整文档、可显示 body 和可执行表面属于硬校验，失败时不创建 Version、不消耗候选号。
+- 与上一版连续性证据不足写入 `candidate-assessment.json` 的 `attention`，不阻断候选 Version，但必须先审阅且不能直接打开。
+- 评论 TargetRef 只指导生成、审阅和历史解释；目标外正文、属性、普通结构与样式联动不再单独生成失败或 waiver。
+- 失败与 no-change 返回编辑后仍可从“上轮处理”恢复，重启后行为一致；界面不显示内部英文异常或校验代码串。
 - v3 运行时、前端历史和发布包不包含旧 Schema Reader、migration report 或 legacy marker 分支。
 - 0.6.1 与切换前数据已有独立只读归档，可用于整体回退。

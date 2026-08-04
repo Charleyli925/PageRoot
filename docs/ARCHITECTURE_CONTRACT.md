@@ -58,8 +58,8 @@ The renderer's main workspace facts are partitioned as follows:
 
 - `ProjectSession`: open/registered identity, generation and query fencing;
 - `DocumentSession`: current HTML bytes, Hash, edit/persist revisions,
-  persistence projection, pending write, flush single flight and Canvas
-  authority generation;
+  persistence projection, pending write, flush single flight, Canvas authority
+  generation and exact-byte reconciliation at persistence boundaries;
 - `CommentSession`: disposable comment working copy, composer, tombstones and
   saved-comment edit session;
 - `DraftSession`: acknowledged Draft revision, pending mutation and
@@ -246,6 +246,14 @@ result includes an action that changes the condition. Entry points must not
 copy their own boolean lists. An obligation may request a final verification
 without reporting permanent pending state; an already acknowledged aggregate
 must drain as a no-op without advancing its revision.
+
+After the aggregate drains, source close readiness is reconciled by
+`DocumentSession` against the independently hashed frozen HTML. An acknowledged
+revision may be ahead of the cutoff. A stale Canvas Hash or renderer projection
+is not itself a blocker; only an unresolved exact-byte check may trigger the
+bounded authoritative source read. Matching bytes repair the projection, while
+confirmed divergence or invalid source integrity remains fail-closed in its
+owning renderer recovery surface.
 
 A lazily opened page with no durable material closes as a no-op and remains
 unregistered. If it contains a comment, composer recovery, tombstone or edit

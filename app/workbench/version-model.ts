@@ -1,4 +1,7 @@
-import { validationReviewFromRecord } from "../domain/run-lifecycle.js";
+import {
+  candidateAssessmentFromRecord,
+  validationReviewFromRecord,
+} from "../domain/run-lifecycle.js";
 import { versionAuditCollections } from "../lib/version-audit-records";
 import { commentsFromRecords, selectionFromRecord } from "./comment-model";
 import { displayVersionLabel } from "./project-model";
@@ -134,6 +137,9 @@ export function versionsFromWorkspace(
       directEdits: changesFromRecords(auditCollections.editEvents),
       supplements: supplementsFromRecords(raw.supplements),
       validationReview: validationReviewFromRecord(raw.validationReview),
+      candidateAssessment: candidateAssessmentFromRecord(
+        raw.candidateAssessment,
+      ),
     }];
   }).sort((a, b) => b.ordinal - a.ordinal);
 }

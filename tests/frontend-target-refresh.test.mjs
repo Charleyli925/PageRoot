@@ -591,6 +591,35 @@ test("spacing menu is controlled and closes for outside toolbar and canvas inter
   assert.match(canvas, /setSpacingMenuOpen\(\(open\) => !open\)/u);
 });
 
+test("outside app or canvas clicks commit editing and clear the active selection", async () => {
+  const canvas = await readCanvasArchitecture();
+  assert.match(
+    canvas,
+    /documentNode\.addEventListener\("pointerdown", clearOnOutsidePointer, true\)/u,
+  );
+  assert.match(
+    canvas,
+    /toolbarRef\.current\?\.contains\(target\)[\s\S]*?clearSelection\(\)/u,
+  );
+  assert.match(
+    canvas,
+    /targetElement\?\.closest\('\[data-html-canvas-preserve-selection="true"\]'\)[\s\S]*?clearSelection\(\)/u,
+  );
+  const workbench = await readWorkbenchArchitecture();
+  assert.match(
+    workbench,
+    /className="comments-panel comment-rail"[\s\S]*?data-html-canvas-preserve-selection="true"/u,
+  );
+  const handleClick = canvas.slice(
+    canvas.indexOf("const handleClick = (event: MouseEvent) =>"),
+    canvas.indexOf("const handleDoubleClick", canvas.indexOf("const handleClick = (event: MouseEvent) =>")),
+  );
+  assert.match(
+    handleClick,
+    /selectedElement\.contains\(event\.target\)[\s\S]*?clearSelection\(\)[\s\S]*?return;/u,
+  );
+});
+
 test("canvas root whitespace clears selection instead of selecting the document body", async () => {
   const canvas = await readCanvasArchitecture();
   const selectableHelper = canvas.slice(

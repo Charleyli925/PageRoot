@@ -16,6 +16,15 @@ function persistState(value) {
   return PERSIST_STATES.has(value) ? value : "idle";
 }
 
+function boundaryBlock(code, reason, confirmed = false) {
+  return Object.freeze({
+    ready: false,
+    code,
+    reason,
+    confirmed,
+  });
+}
+
 function initialSnapshot({
   html = "",
   sourceSha256 = null,
@@ -229,6 +238,150 @@ export class DocumentSession {
     if (this.#flushPromise !== promise) return false;
     this.#flushPromise = null;
     return true;
+  }
+
+  async reconcilePersistedBoundary({
+    frozenHtml,
+    reportedSourceSha256 = null,
+    cutoffRevision,
+    hashHtml,
+    readSource,
+    isCurrent,
+    acceptsSource,
+  }) {
+    if (
+      typeof hashHtml !== "function"
+      || typeof readSource !== "function"
+      || typeof isCurrent !== "function"
+      || typeof acceptsSource !== "function"
+    ) {
+      throw new TypeError("Document boundary reconciliation is not configured.");
+    }
+
+    const html = String(frozenHtml);
+    const cutoff = revision(cutoffRevision);
+    const stillCurrent = () => Boolean(
+      isCurrent()
+      && this.#snapshot.editRevision === cutoff
+      && this.#snapshot.html === html
+      && !this.#pendingWrite
+      && !this.#flushPromise
+    );
+
+    let frozenSha256;
+    try {
+      frozenSha256 = String(await hashHtml(html));
+    } catch {
+      return boundaryBlock(
+        "frozen-integrity-unavailable",
+        "当前页面暂时无法完成内容校验，源页已保持开启；再次关闭时会自动继续。",
+      );
+    }
+    if (!/^sha256:[a-f0-9]{64}$/u.test(frozenSha256)) {
+      return boundaryBlock(
+        "frozen-integrity-unavailable",
+        "当前页面暂时无法完成内容校验，源页已保持开启；再次关闭时会自动继续。",
+      );
+    }
+    if (!stillCurrent()) {
+      return boundaryBlock(
+        "session-changed",
+        "关闭核对期间当前页面发生了变化，源页已保持开启；再次关闭时会自动继续。",
+      );
+    }
+
+    const metadataRepaired = Boolean(
+      reportedSourceSha256
+      && String(reportedSourceSha256) !== frozenSha256
+    );
+    if (
+      this.#snapshot.persistState === "idle"
+      && this.#snapshot.sourceSha256 === frozenSha256
+      && this.#snapshot.lastPersistedRevision >= cutoff
+    ) {
+      return Object.freeze({
+        ready: true,
+        repaired: metadataRepaired,
+        sourceSha256: frozenSha256,
+        lastModifiedAt: "",
+      });
+    }
+
+    let source;
+    try {
+      source = await readSource();
+    } catch {
+      return boundaryBlock(
+        "source-unavailable",
+        "源文件暂时无法完成最终核对，当前页面仍保留；再次关闭时会自动继续。",
+      );
+    }
+    let sourceAccepted = false;
+    try {
+      sourceAccepted = Boolean(
+        source
+        && typeof source === "object"
+        && !Array.isArray(source)
+        && acceptsSource(source)
+      );
+    } catch {
+      sourceAccepted = false;
+    }
+    if (!stillCurrent() || !sourceAccepted) {
+      return boundaryBlock(
+        "source-identity-changed",
+        "核对期间当前文件身份发生了变化，源页已保持开启；再次关闭时会自动继续。",
+      );
+    }
+
+    const content = typeof source?.content === "string" ? source.content : null;
+    const declaredSha256 = String(source?.sha256 || "");
+    let actualSha256 = "";
+    if (content !== null) {
+      try {
+        actualSha256 = String(await hashHtml(content));
+      } catch {
+        actualSha256 = "";
+      }
+    }
+    if (
+      content === null
+      || !/^sha256:[a-f0-9]{64}$/u.test(declaredSha256)
+      || actualSha256 !== declaredSha256
+    ) {
+      return boundaryBlock(
+        "source-integrity-failed",
+        "源文件的内容校验没有通过。当前页面没有覆盖文件；请先导出当前编辑，再重新读取源文件。",
+        true,
+      );
+    }
+    if (!stillCurrent()) {
+      return boundaryBlock(
+        "session-changed",
+        "核对期间当前页面发生了变化，源页已保持开启；再次关闭时会自动继续。",
+      );
+    }
+    if (content !== html || declaredSha256 !== frozenSha256) {
+      const reason = "磁盘中的 HTML 已被其他操作修改。当前页面没有覆盖任何一份；请先导出当前编辑，或重新载入磁盘文件。";
+      this.setPersistence({ state: "conflict", error: reason });
+      return boundaryBlock("source-diverged", reason, true);
+    }
+
+    this.update({
+      sourceSha256: frozenSha256,
+      lastPersistedRevision: Math.max(
+        this.#snapshot.lastPersistedRevision,
+        cutoff,
+      ),
+      persistState: "idle",
+      persistError: "",
+    });
+    return Object.freeze({
+      ready: true,
+      repaired: true,
+      sourceSha256: frozenSha256,
+      lastModifiedAt: String(source?.lastModifiedAt || ""),
+    });
   }
 
   get html() {

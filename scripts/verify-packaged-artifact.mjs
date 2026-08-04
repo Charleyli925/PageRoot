@@ -35,6 +35,7 @@ const REQUIRED_BRIDGE_FILES = [
   "user-supplement-core.mjs",
   "record-user-supplement.mjs",
   "html-source-parser.mjs",
+  "candidate-assessment.mjs",
   "scope-validator.mjs",
   "target-identity.mjs",
   "product-contract.mjs",
@@ -539,6 +540,9 @@ export async function verifyAppBundle({
     const scopeValidatorUrl = pathToFileURL(
       path.join(resourcesPath, "bridge", "scope-validator.mjs"),
     ).href;
+    const candidateAssessmentUrl = pathToFileURL(
+      path.join(resourcesPath, "bridge", "candidate-assessment.mjs"),
+    ).href;
     const draftServiceUrl = pathToFileURL(
       path.join(resourcesPath, "bridge", "draft-service.mjs"),
     ).href;
@@ -547,7 +551,7 @@ export async function verifyAppBundle({
       [
         "--input-type=module",
         "--eval",
-        `await import(${JSON.stringify(lifecycleCoreUrl)}); await import(${JSON.stringify(scopeValidatorUrl)}); await import(${JSON.stringify(draftServiceUrl)})`,
+        `await import(${JSON.stringify(lifecycleCoreUrl)}); await import(${JSON.stringify(candidateAssessmentUrl)}); await import(${JSON.stringify(scopeValidatorUrl)}); await import(${JSON.stringify(draftServiceUrl)})`,
       ],
       "packaged Bridge dependency smoke",
       {

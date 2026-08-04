@@ -53,9 +53,9 @@ The release and artifact gates require a clean committed tree. Any source change
 
 - Current HTML bytes are authoritative. Preview DOM is disposable and must never be serialized back as the persistence source.
 - Visual edits use minimal source patches and preserve unrelated bytes, native selection, IME composition and source identity.
-- Ambiguous targets, stale hashes, external writes, invalid scope, identity failures and unsafe paths fail closed.
+- Direct source edits still fail closed on ambiguous targets, stale hashes, external writes, invalid patch scope, identity failures and unsafe paths.
 - Privileged filesystem behavior stays behind the Electron/Bridge boundary with narrow validated IPC.
-- AI output remains untrusted until protocol, identity, hash, path, scope and complete-HTML checks pass.
+- AI output remains untrusted until protocol, identity, hash, path, complete-HTML and executable-surface checks pass. Frozen comment targets guide generation and review; they are not a pixel- or subtree-exact Version acceptance boundary. Weak page continuity forces review instead of failing an otherwise usable candidate.
 - QoderWork handoff remains clipboard-only unless the user explicitly authorizes a different product boundary.
 - Tests and fixtures use synthetic data only. Never commit real user HTML, attachments, project records, credentials, personal paths, logs or generated binaries.
 
@@ -71,7 +71,7 @@ Read only the documents needed for the task:
 | Architecture, state, source patches, persistence, IPC | `docs/ARCHITECTURE.md`, `docs/ARCHITECTURE_CONTRACT.md`, `docs/STATE_OWNERSHIP.md`, `docs/ENGINEERING_STANDARDS.md`, `docs/SECURITY_MODEL.md` |
 | User flows, state or UI behavior | `docs/INTERACTION_FLOW.md`, plus the relevant focused policy document |
 | Change Request, schemas, AI completion or versions | `docs/CHANGE_REQUEST_PROTOCOL.md`, relevant files in `schemas/` and `fixtures/` |
-| Internal AI supplements or validation waivers | `docs/AI_SUPPLEMENT_AND_VALIDATION.md` |
+| Internal AI supplements or candidate validation | `docs/AI_SUPPLEMENT_AND_VALIDATION.md` |
 | Dependencies or advisories | `docs/DEPENDENCY_SECURITY.md` |
 | Public-source privacy and contribution boundary | `docs/OPEN_SOURCE_BOUNDARY.md`, `CONTRIBUTING.md`, `SECURITY.md` |
 | Versioning, packaging, signing or GitHub Release | `docs/RELEASING.md` |

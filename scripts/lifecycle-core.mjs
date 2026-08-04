@@ -53,6 +53,7 @@ const SUPPLEMENT_EVIDENCE_STATES = new Set([
 ]);
 const ATTEMPT_ENTRY_NAMES = new Set([
   "output",
+  "candidate-assessment.json",
   "completion.json",
   "scope-report.json",
   "result.json",

@@ -16,7 +16,8 @@ records.
 
 ## Current auxiliary records
 
-- `scope-report.v1.schema.json`
+- `candidate-assessment.v1.schema.json`
+- `scope-report.v1.schema.json` (direct-patch and legacy Attempt evidence; new AI Attempts use candidate assessment)
 - `completion.v1.schema.json`
 - `input-manifest.v1.schema.json`
 - `attempt-outcome.v1.schema.json`

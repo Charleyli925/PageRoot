@@ -12,7 +12,10 @@ export function isBridgeRequestError(value: unknown): value is BridgeRequestErro
 
 export type BridgeClient = {
   workspace(sourcePath: string): Promise<BridgeJson>;
-  source(sourcePath: string): Promise<BridgeJson>;
+  source(
+    sourcePath: string,
+    options?: { timeoutMs?: number },
+  ): Promise<BridgeJson>;
   conflictCandidate(sourcePath: string): Promise<BridgeJson>;
   status(
     sourcePath: string,

@@ -38,7 +38,8 @@
 
 | Fixture | Schema | 重点 |
 |---|---|---|
-| `scope-report.pass.json` | `scope-report.v1` | 目标范围强制校验通过证据 |
+| `candidate-assessment.ready.json` | `candidate-assessment.v1` | HTML 健康、可执行面不变且与上一版连续 |
+| `scope-report.pass.json` | `scope-report.v1` | 直接 Patch 与旧 Attempt 的目标范围证据 |
 | `completion.valid.json` | `completion.v1` | 有效变化的强完成信号 |
 | `completion.no-change.json` | `completion.v1` | 比较 Hash 相同，不得建版 |
 | `input-manifest.frozen.json` | `input-manifest.v1` | AI 可读文件的完整有序 Hash allowlist |

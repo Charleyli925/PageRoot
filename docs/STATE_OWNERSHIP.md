@@ -5,7 +5,7 @@
 | Open source locator before first durable action, registered identity, renderer generation and late-query fence | Renderer `ProjectSession` | active-file record before registration; project registry and `project.json` afterwards | Workbench composition root and all durable sessions |
 | Registered mutation context resolution and atomic-replacement source observation | Bridge project-context service | project/document registry graph plus the owning runtime `pendingWrite` target Hash | Bridge mutation routes and `/project/ensure` |
 | Explicit source filename transition, pending operation and active/recent path rebase | Desktop source-rename transaction | active-file `pendingRename` / `lastRename`, then filesystem path | project session, Bridge relink, views |
-| Current source bytes, Hash, edit revision, persistence projection, pending write, single-flight source flush and Canvas authority generation | Renderer `DocumentSession` | source HTML, runtime autosave record and recovery log; the generation itself is disposable | Canvas, preview readiness, source-history session and drain coordinator |
+| Current source bytes, Hash, edit revision, persistence projection, pending write, single-flight source flush, Canvas authority generation and exact-byte boundary reconciliation | Renderer `DocumentSession` | source HTML, runtime autosave record and recovery log; the generation itself is disposable | Canvas, preview readiness, source-history session and drain coordinator |
 | Canvas source-history context, pending Patch operations, cursor and applied action IDs | Renderer `SourceHistorySession` for pending intent; Bridge source-history service for acknowledged authority | `history/source-operations.json`, committed with the source through the runtime `pendingWrite` outbox | Canvas, Document session, desktop Edit intent router |
 | Focused comment/rules/filename text input undo history and active composition | The native text control and Electron/Chromium editing engine; project-rules session owns autosave eligibility and explicit restore fencing | in-memory control-local history only | desktop Edit intent router, project-rules drain |
 | Active renderer draft revision, pending command and unknown-outcome reconciliation | Draft session | acknowledged aggregate fingerprint plus crash-only recovery outbox | comment rail, drain coordinator |
@@ -16,13 +16,17 @@
 | AI Request/Attempt lifecycle transition | Bridge run lifecycle | runtime state and immutable Request/Attempt records | Run session and finalizer |
 | Immutable Version list, based-on/exact/restored identities and history-view transition | Renderer `VersionSession` | immutable Version records and current runtime pointers | Workbench history and Canvas projection |
 | `PROJECT.md` content, editor generation, composition fence, autosave eligibility and save status | Renderer `ProjectRulesSession` | managed `PROJECT.md` | project panel, drain coordinator and Request freeze |
-| Close/switch/submit/history readiness and desktop close lifecycle | Drain coordinator plus one renderer close lifecycle | composed owner snapshots and request identity; no copied dirty booleans | Electron close handshake, browser fallback and navigation |
+| Close/switch/submit/history readiness and desktop close lifecycle | Drain coordinator plus one renderer close lifecycle | composed owner snapshots, request identity and bounded presentation class; no copied dirty booleans | Electron close handshake, browser fallback and navigation |
 | Bridge transport, timeouts, error details and unknown outcomes | Typed Bridge client | no durable state | application sessions |
 | Bridge startup operation, live utility process and ready-only port | Main-process Bridge startup lifecycle | no durable state; one in-memory single-flight operation per app process | window bootstrap, graceful shutdown and workspace-unavailable recovery |
 | Undelivered Bridge-unavailable recovery issue and renderer-listener readiness | Main-process recovery mailbox | in-memory for the current app process | preload handshake, native fallback and Workbench banner |
 | Renderer edit, project-picker, attachment-persistence, close-coordination and interactive-preview capabilities | Runtime capability resolver | immutable preload manifest; fail-closed browser default | Workbench composition root |
 | Volatile interactive-preview document, bootstrap and allowed source-relative asset root | Main-process preview protocol controller | none; bounded in-memory session only | isolated preview iframe |
 | Current preview/edit display context, bounded read-only visuals, safe reveal transition and per-surface render acknowledgement | Workbench page-view context state | none; source-bound in-memory projection tagged by `DocumentSession` Canvas generation and rendered source Hash | `HtmlCanvasEditor`, `HtmlInteractionPreview`, save-status projection and toolbar |
+| AI review page view, change filter, context visibility, navigation target, canonical page-presentation path, scroll mode and zoom mode | `AiReviewWorkspace` review reducer | none; disposable state bound to the frozen before/after pair | review toolbar, content map and isolated review frames |
+| AI review node pairing, typed change facts and fused frame/mask geometry | `review-document` analyzer and isolated-frame projection runtime | none; deterministically rebuilt from the frozen before/after HTML pair | review outline, semantic frames and context mask |
+| AI review Tab/disclosure/control presentation state and transition epoch | Parent `AiReviewWorkspace` presentation coordinator; either frame may propose an intent | none; disposable parent state plus frame projection only | both review frames, content map and overlay/mask projection |
+| Frozen review comment set and read-only before-page marker projection | Ready-review session owns comment text; `review-document` resolves opaque before-page target keys; isolated runtime owns anonymous viewport geometry; trusted `AiReviewWorkspace` joins and renders them | none beyond the immutable Request/Draft evidence already frozen for the run | trusted review host above the before frame only; authored frames never receive comment text |
 | Current source-backed comment resolution, visibility, coordinates, marker eligibility and natural document height | `HtmlCanvasEditor` presentation measurement | none; disposable snapshot tagged by rendered source Hash, applied page-view generation and exact target-ID set | Workbench comment rail and Canvas height |
 | Stable application update schedule, coalesced manual check, download progress and restart-install readiness | Main-process application-update controller | signed GitHub Release metadata plus updater cache; no editor authority | preload status snapshot, About PageRoot, Workbench update notice, drain coordinator |
 | Random installation identity, project pseudonym secret, aggregate counters and unsent usage events | Main-process usage-telemetry controller | bounded `usage-telemetry.json` under PageRoot Application Support | PostHog batch ingestion only |
@@ -72,6 +76,17 @@ Rules:
   presentation-only and never enter the source patch or persistence paths.
   Toolbar and Option-click actions may propose a new context for the current
   document key, but do not own or persist it.
+- AI review state fields are orthogonal. Page, filter, visibility, navigation,
+  page presentation, scroll and zoom actions may update only their own reducer field. Review
+  navigation can reveal a hidden panel in both frames but cannot become a
+  second filter or mask owner. The parent owns the full nested panel path and
+  one transition epoch; frames report readiness but cannot independently
+  commit a new overlay state. The paired action-key projection mirrors safe
+  runtime presentation in either direction and never writes source bytes,
+  Version records or project state. Frozen review comments remain read-only
+  evidence. Their text stays in the trusted host, while the before frame reports
+  only opaque-key geometry; neither review frame receives the text and the after
+  page never receives a marker.
 - `CommentSession` is a renderer working copy, not durable Draft authority.
   Runtime state is likewise not a second copy of draft contents: it carries
   lifecycle state and a revisioned pointer to the draft repository.

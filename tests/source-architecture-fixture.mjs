@@ -8,6 +8,7 @@ async function readSources(relativePaths) {
 
 export async function readCanvasArchitecture() {
   const sources = await readSources([
+    "../app/lib/page-presentation-dom.ts",
     "../app/components/HtmlCanvasEditor.types.ts",
     "../app/components/html-canvas-dom.ts",
     "../app/components/html-canvas-interaction.ts",

@@ -1,0 +1,161 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://html-change.local/schemas/candidate-assessment.v1.schema.json",
+  "title": "PageRoot AI candidate assessment v1",
+  "description": "A coarse candidate health and document-continuity assessment. Comment targets remain review guidance and are not an acceptance boundary.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "status",
+    "projectId",
+    "documentId",
+    "requestId",
+    "attemptId",
+    "candidateVersionId",
+    "baseSha256",
+    "outputSha256",
+    "baseComparisonSha256",
+    "outputComparisonSha256",
+    "issueCodes",
+    "health",
+    "continuity",
+    "executable",
+    "assessedAt"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0.0"
+    },
+    "status": {
+      "enum": ["ready", "attention", "blocked"]
+    },
+    "projectId": {
+      "type": "string",
+      "pattern": "^project_[A-Za-z0-9_-]+$"
+    },
+    "documentId": {
+      "type": "string",
+      "pattern": "^doc_[A-Za-z0-9_-]+$"
+    },
+    "requestId": {
+      "type": "string",
+      "pattern": "^req_[A-Za-z0-9_-]+$"
+    },
+    "attemptId": {
+      "type": "string",
+      "pattern": "^attempt_[0-9]{3}$"
+    },
+    "candidateVersionId": {
+      "type": "string",
+      "pattern": "^ver_[0-9]{4,}$"
+    },
+    "baseSha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "outputSha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "baseComparisonSha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "outputComparisonSha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "issueCodes": {
+      "type": "array",
+      "uniqueItems": true,
+      "maxItems": 10,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 120
+      }
+    },
+    "health": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "completeDocument",
+        "bodyHasContent",
+        "executableSurfaceUnchanged"
+      ],
+      "properties": {
+        "completeDocument": { "type": "boolean" },
+        "bodyHasContent": { "type": "boolean" },
+        "executableSurfaceUnchanged": { "type": "boolean" }
+      }
+    },
+    "continuity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "evidencePoints",
+        "sameTitle",
+        "text",
+        "anchors",
+        "classes",
+        "assets",
+        "baseVisibleTextLength",
+        "outputVisibleTextLength",
+        "baseBodyElementCount",
+        "outputBodyElementCount",
+        "baseParseErrorCount",
+        "outputParseErrorCount"
+      ],
+      "properties": {
+        "status": { "enum": ["related", "uncertain"] },
+        "evidencePoints": { "type": "integer", "minimum": 0 },
+        "sameTitle": { "type": "boolean" },
+        "text": { "$ref": "#/$defs/overlap" },
+        "anchors": { "$ref": "#/$defs/overlap" },
+        "classes": { "$ref": "#/$defs/overlap" },
+        "assets": { "$ref": "#/$defs/overlap" },
+        "baseVisibleTextLength": { "type": "integer", "minimum": 0 },
+        "outputVisibleTextLength": { "type": "integer", "minimum": 0 },
+        "baseBodyElementCount": { "type": "integer", "minimum": 0 },
+        "outputBodyElementCount": { "type": "integer", "minimum": 0 },
+        "baseParseErrorCount": { "type": "integer", "minimum": 0 },
+        "outputParseErrorCount": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "executable": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["unchanged", "baseCount", "outputCount", "changedCount"],
+      "properties": {
+        "unchanged": { "type": "boolean" },
+        "baseCount": { "type": "integer", "minimum": 0 },
+        "outputCount": { "type": "integer", "minimum": 0 },
+        "changedCount": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "assessedAt": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "overlap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["score", "shared", "base", "output"],
+      "properties": {
+        "score": {
+          "oneOf": [
+            { "type": "number", "minimum": 0, "maximum": 1 },
+            { "type": "null" }
+          ]
+        },
+        "shared": { "type": "integer", "minimum": 0 },
+        "base": { "type": "integer", "minimum": 0 },
+        "output": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

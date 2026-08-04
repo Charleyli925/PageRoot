@@ -11,10 +11,10 @@ import { FileHtmlIcon } from "@phosphor-icons/react/dist/csr/FileHtml";
 import { FlagCheckeredIcon } from "@phosphor-icons/react/dist/csr/FlagCheckered";
 import { FloppyDiskIcon } from "@phosphor-icons/react/dist/csr/FloppyDisk";
 import { FolderOpenIcon } from "@phosphor-icons/react/dist/csr/FolderOpen";
+import { GitDiffIcon } from "@phosphor-icons/react/dist/csr/GitDiff";
 import { LockKeyIcon } from "@phosphor-icons/react/dist/csr/LockKey";
 import { MinusCircleIcon } from "@phosphor-icons/react/dist/csr/MinusCircle";
 import { PaperclipIcon } from "@phosphor-icons/react/dist/csr/Paperclip";
-import { PencilSimpleIcon } from "@phosphor-icons/react/dist/csr/PencilSimple";
 import { SealCheckIcon } from "@phosphor-icons/react/dist/csr/SealCheck";
 import { ShieldCheckIcon } from "@phosphor-icons/react/dist/csr/ShieldCheck";
 import { TriangleIcon } from "@phosphor-icons/react/dist/csr/Triangle";
@@ -116,7 +116,6 @@ export function HandoffPanel({
   activeCommentItems,
   runBasisLabel,
   runSubmittedLabel,
-  activeScopeDecision,
   pendingRunOutcome,
   canRevealRequestFolder,
   onRevealRequestFolder,
@@ -131,21 +130,30 @@ export function HandoffPanel({
   activeCommentItems: CommentItem[];
   runBasisLabel: string;
   runSubmittedLabel: string;
-  activeScopeDecision: {
-    message: string;
-    examples: string[];
-  } | null;
   pendingRunOutcome: boolean;
   canRevealRequestFolder: boolean;
   onRevealRequestFolder: () => void;
 }) {
+  const continuityNeedsReview =
+    activeRun?.candidateAssessment?.status === "attention";
+  const summaryTone = activeRun?.status === "error"
+    ? "error"
+    : continuityNeedsReview
+      ? "attention"
+      : activeRun?.status === "no-change"
+        ? "neutral"
+        : activeRun?.status === "ready-to-open"
+          ? "ready"
+        : terminalRun
+          ? "neutral"
+          : "processing";
   return (
     <div className="handoff-panel">
       {activeRun ? (
         <>
-          <div className="processing-summary-bar">
+          <div className="processing-summary-bar" data-tone={summaryTone}>
             <div>
-              {terminalRun ? (
+              {activeRun.status === "error" || continuityNeedsReview ? (
                 <TriangleIcon aria-hidden="true" size={19} weight="duotone" />
               ) : (
                 <LockKeyIcon aria-hidden="true" size={19} weight="duotone" />
@@ -155,7 +163,7 @@ export function HandoffPanel({
                 <small>{processSummaryDetail}</small>
               </span>
             </div>
-            <span className="status-chip">
+            <span className="status-chip" data-tone={summaryTone}>
               <span aria-hidden="true" />
               {processStatusLabel}
             </span>
@@ -266,21 +274,14 @@ export function HandoffPanel({
           </div>
 
           <div className="processing-decisions">
-            {activeRun.validationReview?.softViolationCodes.length
+            {continuityNeedsReview
               && activeRun.status === "ready-to-open" ? (
-              <section className="validation-decision" role="status">
-                <strong>已记录评论范围外的额外变化</strong>
+              <section className="validation-decision" data-tone="attention" role="status">
+                <strong>页面变化较大，建议先审阅</strong>
                 <p>
-                  {activeScopeDecision?.message
-                    || "这些变化没有触及不可忽略的文件、身份或脚本边界，因此没有中断版本生成。"}
+                  HTML 可以正常打开，但系统找到的上一版共同特征较少。
+                  候选版本已经保留，请先对比审阅再决定是否采用。
                 </p>
-                {activeScopeDecision?.examples.length ? (
-                  <ul className="scope-change-preview">
-                    {activeScopeDecision.examples.map((example) => (
-                      <li key={example}>{example}</li>
-                    ))}
-                  </ul>
-                ) : null}
               </section>
             ) : null}
             {activeRun.status === "awaiting-conflict-resolution" ? (
@@ -311,13 +312,13 @@ export function HandoffPanel({
               </section>
             ) : null}
             {!pendingRunOutcome && activeRun.status === "no-change" ? (
-              <section className="validation-decision" role="status">
+              <section className="validation-decision" data-tone="neutral" role="status">
                 <strong>这次没有可采用的变化</strong>
                 <p>没有创建新版本。原评论、附件和当前 HTML 都已保留。</p>
               </section>
             ) : null}
             {!pendingRunOutcome && activeRun.status === "error" ? (
-              <section className="validation-decision" role="alert">
+              <section className="validation-decision" data-tone="error" role="alert">
                 <strong>本轮没有改动当前 HTML</strong>
                 <p>{activeRun.error || "结果没有通过安全检查。"}</p>
               </section>
@@ -335,6 +336,7 @@ export function HandoffPanel({
 
 export function HandoffFooter({
   activeRun,
+  reviewPreparing,
   openingReadyVersion,
   pendingRunOutcome,
   pendingReconcileBusy,
@@ -345,8 +347,8 @@ export function HandoffFooter({
   checkingRun,
   terminalRun,
   canRevealRequestFolder,
+  onReviewReadyResult,
   onActivateReadyResult,
-  onClose,
   onSend,
   onCancel,
   onResolveConflict,
@@ -356,6 +358,7 @@ export function HandoffFooter({
   onPreviewSentHtml,
 }: {
   activeRun: ActiveRun;
+  reviewPreparing: boolean;
   openingReadyVersion: boolean;
   pendingRunOutcome: boolean;
   pendingReconcileBusy: boolean;
@@ -366,13 +369,13 @@ export function HandoffFooter({
   checkingRun: boolean;
   terminalRun: boolean;
   canRevealRequestFolder: boolean;
+  onReviewReadyResult: () => void;
   onActivateReadyResult: () => void;
-  onClose: () => void;
   onSend: () => void;
   onCancel: () => void;
   onResolveConflict: (choice: "adopt-ai" | "keep-external") => void;
   onRevealRequestFolder: () => void;
-  onReturnToEditing: (restoreDraft: boolean) => void;
+  onReturnToEditing: () => void;
   onRequestEnd: () => void;
   onPreviewSentHtml: () => void;
 }) {
@@ -383,24 +386,23 @@ export function HandoffFooter({
           <button
             className="primary-action"
             type="button"
-            disabled={openingReadyVersion || !activeRun.readyPayload}
-            onClick={onActivateReadyResult}
+            disabled={reviewPreparing || openingReadyVersion || !activeRun.readyPayload}
+            onClick={onReviewReadyResult}
           >
-            <FileHtmlIcon aria-hidden="true" size={18} weight="duotone" />
-            {openingReadyVersion ? "正在打开并核对…" : "打开最新版"}
+            <GitDiffIcon aria-hidden="true" size={18} weight="bold" />
+            {reviewPreparing ? "正在准备对比…" : "审阅对比"}
           </button>
-          <button
-            className="secondary-action"
-            type="button"
-            onClick={onClose}
-          >
-            <ClockCounterClockwiseIcon
-              aria-hidden="true"
-              size={17}
-              weight="duotone"
-            />
-            稍后处理
-          </button>
+          {activeRun.candidateAssessment?.status !== "attention" ? (
+            <button
+              className="secondary-action"
+              type="button"
+              disabled={reviewPreparing || openingReadyVersion || !activeRun.readyPayload}
+              onClick={onActivateReadyResult}
+            >
+              <FileHtmlIcon aria-hidden="true" size={18} weight="duotone" />
+              {openingReadyVersion ? "正在打开并核对…" : "直接打开"}
+            </button>
+          ) : null}
         </>
       ) : pendingRunOutcome ? (
         <span className="processing-auto-status" role="status">
@@ -468,28 +470,18 @@ export function HandoffFooter({
           查看本轮文件
         </button>
       ) : terminalRun ? (
-        <>
-          <button
-            className="primary-action"
-            type="button"
-            onClick={() => onReturnToEditing(true)}
-          >
-            <PencilSimpleIcon aria-hidden="true" size={17} weight="bold" />
-            修改要求
-          </button>
-          <button
-            className="secondary-action"
-            type="button"
-            onClick={() => onReturnToEditing(false)}
-          >
-            <ArrowCounterClockwiseIcon
-              aria-hidden="true"
-              size={17}
-              weight="bold"
-            />
-            返回编辑
-          </button>
-        </>
+        <button
+          className="primary-action"
+          type="button"
+          onClick={onReturnToEditing}
+        >
+          <ArrowCounterClockwiseIcon
+            aria-hidden="true"
+            size={17}
+            weight="bold"
+          />
+          返回编辑
+        </button>
       ) : (
         <>
           <button

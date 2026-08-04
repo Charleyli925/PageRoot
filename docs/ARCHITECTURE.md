@@ -14,7 +14,7 @@ User HTML bytes
 Comments + frozen input
   -> Change Request / Attempt
   -> clipboard-only AI handoff
-  -> completion + scope validation
+  -> completion + candidate health/continuity assessment
   -> immutable Version
   -> explicit user-controlled activation
 ```
@@ -26,7 +26,7 @@ Comments + frozen input
   sole owner of each mutable fact.
 - `app/` owns the visual workbench, source mapping and direct-edit transaction model.
 - `desktop/` owns privileged filesystem access, windows, lifecycle, update checks, usage telemetry and safe IPC exposure.
-- `scripts/` owns the local Bridge, protocol finalization, scope validation and automated gates.
+- `scripts/` owns the local Bridge, protocol finalization, AI candidate assessment, direct-edit/legacy scope evidence and automated gates.
 - `schemas/` defines persisted and exchanged records. `fixtures/` proves strict current and legacy behavior.
 - Preview DOM is disposable. It is never a persistence source.
 - Current-source and generated-Version changes use prepare-then-publish: all
@@ -79,6 +79,34 @@ Comments + frozen input
   constant-index legacy Tabs, native details and local disclosures; one Canvas
   executor applies the accepted context. It never invokes authored handlers,
   serializes the preview DOM or creates a second interaction mode.
+- Formal AI review owns one disposable reducer with independent page, change
+  filter, context visibility, navigation, canonical presentation path, scroll
+  and zoom fields. The document
+  analyzer first establishes high-confidence before/after node pairs, derives
+  copy, structure and visual facts from those pairs, and only then emits one
+  typed canonical change footprint. It never promotes tag/position proximity
+  alone into a change fact. Connected line fragments retain their exact union
+  boundary, so one stepped frame avoids overlapping per-line boxes without
+  becoming a whitespace-crossing bounding rectangle. Global context masking
+  punches holes from those same union paths, so mask and frame cannot diverge. The disposable
+  projection uses reserved attributes plus an explicit presentation reset and
+  important geometry, preventing authored `svg`/`div` rules from restyling its
+  mask or frames. Stable
+  outline regions remain navigation-only. `page-presentation-dom` is the
+  shared explicit-ID and strict indexed-Tab discovery contract consumed by
+  Canvas comment presentation and formal review. Before/after panel and action keys
+  are assigned as pairs before either isolated document is prepared, so safe
+  runtime actions mirror bidirectionally even when copy or order differs. A
+  parent-owned presentation epoch removes stale projections immediately and
+  commits both frames only after their new layout is stable. Frozen comments
+  resolve against the immutable before source, but their text never enters the
+  authored iframe. The before frame receives only an opaque target key and
+  reports anonymous viewport geometry; the trusted React host joins that
+  geometry to the frozen text and renders read-only hover markers above the
+  before page. Linked vertical scroll follows semantic region
+  progress through frame-to-frame convergence instead of a single jump;
+  Scroll mode controls only scroll following. No review state or authored
+  runtime mutation has source, Version or project authority.
 - `IslandEditingController` is the only production text-edit engine in PageRoot 0.9.0. `contenteditable="true"` supplies focus, caret, Selection and IME composition, while the controller owns insertion, deletion, line breaks, paste and formatting. Chromium DOM serialization never has commit authority.
 - `editable-island` owns the V2 capability and normalization contract. An accepted edit replaces only the selected element's parsed `contentRange`; bytes outside that range remain exact. Inside the range, parse5 may perform the smallest safe normalization needed to preserve inline semantics, comments and immutable authored atoms.
 - `native-edit-policy` owns shared session attributes and checkpoint timing. `native-edit-runtime-preflight` still proves that enabling the island does not change geometry or text style; `HtmlCanvasEditor` only coordinates selection, the island session and SourcePatch.
@@ -123,6 +151,9 @@ they do not import application services.
 | Workbench pure record/comment/project/version/browser helpers | `app/workbench/*-model.ts`, `app/workbench/browser-io.ts` |
 | History, attachment and preview presentation | `app/workbench/presentation.tsx` |
 | AI handoff drawer presentation | `app/workbench/handoff-view.tsx` |
+| Formal AI review state transitions | `app/workbench/review-state.ts` |
+| Formal AI review analysis, paired runtime mapping, global mask and overlay projection | `app/workbench/review-document.ts` |
+| Formal AI review composition and isolated-frame coordination | `app/workbench/AiReviewWorkspace.tsx` |
 
 The V2 source-fidelity path remains a protected core: `SourceIndex`,
 `TargetResolver`, `editable-island`, `IslandEditingController`,
@@ -143,6 +174,15 @@ the only production text and source-mutation route.
 ## Persistence
 
 Direct edits form ordered revisions and are written through a single queue. Every write checks the expected source Hash, uses a same-directory temporary file and atomic replacement, then rereads the result. External modification causes a fail-closed conflict.
+
+At close, `DocumentSession` independently hashes the frozen renderer HTML and
+accepts any acknowledged persisted revision at or beyond the close cutoff. A
+stale Canvas Hash or renderer projection is repaired silently. Only when local
+authority cannot prove the exact bytes does the renderer perform a bounded
+authoritative source read; identical content repairs the projection, confirmed
+divergence enters the source-conflict owner, and an invalid content/Hash pair
+enters the persistent workspace recovery surface without overwriting either
+copy.
 
 A durable command for an already registered project carries one captured
 `projectId + documentId + sourcePath` context. The Bridge resolves the registry
@@ -234,6 +274,12 @@ The runtime capability manifest selects exactly one close coordinator:
 Electron's acknowledged handshake for the desktop app, or `beforeunload` for a
 browser runtime. They never compete over the same close.
 
+The renderer close result also classifies who owns presentation. Known
+recoverable blockers remain in their Canvas/banner/panel and cause Electron to
+return focus without a duplicate native dialog. Missing handlers, renderer
+timeouts and unexpected close-coordination faults default to the native
+fail-closed surface.
+
 The main-process application-update controller is the sole owner of stable
 channel checks, the startup-plus-four-hour schedule, coalesced manual checks,
 download progress and downloaded-install readiness. It exposes only immutable
@@ -260,7 +306,7 @@ never participates in editor authority or close/navigation drains.
 
 ## Trust model
 
-The renderer is sandboxed with context isolation and no Node integration. The preload exposes narrow validated IPC methods. The Bridge uses a per-process authentication token and only operates on managed project paths. AI output is untrusted until protocol, identity, Hash, path and HTML checks succeed. Scope validation remains strict evidence: managed metadata, scripts and unresolved targets hard-stop; ordinary out-of-target content/style findings are persisted as `observed` audit records and do not create a separate user-waiver state. Telemetry schemas have no fields for HTML, user text, attachments, clipboard data, filenames, paths, raw exceptions, account identity or hardware identity.
+The renderer is sandboxed with context isolation and no Node integration. The preload exposes narrow validated IPC methods. The Bridge uses a per-process authentication token and only operates on managed project paths. AI output is untrusted until protocol, identity, Hash, path, complete-document and unchanged-executable-surface checks succeed. A coarse continuity fingerprint compares visible text, stable anchors, classes, assets and title with the frozen base. Strong continuity enters the normal ready flow; weak continuity preserves the immutable candidate but removes direct-open and requires side-by-side review. Frozen comment targets remain generation and review context, not a subtree-exact acceptance gate. Telemetry schemas have no fields for HTML, user text, attachments, clipboard data, filenames, paths, raw exceptions, account identity or hardware identity.
 
 Every renderer request to the Bridge is bounded: ordinary state/file operations use 15 seconds, attachments use 30 seconds, and Request creation uses 60 seconds. Busy refs are released in `finally`, so an unresponsive local service cannot leave a permanent UI lock. An unknown Request POST outcome remains fail-closed and is reconciled against the durable workspace state before editing resumes.
 

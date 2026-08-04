@@ -3,7 +3,7 @@ import { readFile, stat } from "node:fs/promises";
 import test from "node:test";
 import semver from "semver";
 
-test("desktop package carries the v3 single patch engine, scope gate and active schemas", async () => {
+test("desktop package carries the v3 patch engine, candidate assessment and active schemas", async () => {
   const [
     packageText,
     mainProcess,
@@ -19,6 +19,7 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
     finalizer,
     lifecycleCore,
     htmlSourceParser,
+    candidateAssessment,
     scopeValidator,
     bridgeStartup,
     bridgeShutdown,
@@ -47,6 +48,7 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
     readFile(new URL("../scripts/finalize-attempt.mjs", import.meta.url), "utf8"),
     readFile(new URL("../scripts/lifecycle-core.mjs", import.meta.url), "utf8"),
     readFile(new URL("../scripts/html-source-parser.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../scripts/candidate-assessment.mjs", import.meta.url), "utf8"),
     readFile(new URL("../scripts/scope-validator.mjs", import.meta.url), "utf8"),
     readFile(new URL("../desktop/bridge-startup.mjs", import.meta.url), "utf8"),
     readFile(new URL("../desktop/bridge-shutdown.mjs", import.meta.url), "utf8"),
@@ -128,6 +130,7 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
     "bridge/user-supplement-core.mjs",
     "bridge/record-user-supplement.mjs",
     "bridge/html-source-parser.mjs",
+    "bridge/candidate-assessment.mjs",
     "bridge/scope-validator.mjs",
     "bridge/target-identity.mjs",
     "bridge/product-contract.mjs",
@@ -315,6 +318,12 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.match(mainProcess, /requestRendererClose/);
   assert.match(mainProcess, /if \(!rendererHasLoaded\)/);
   assert.match(mainProcess, /coordinateApplicationExit/);
+  assert.match(mainProcess, /shouldPresentNativeCloseBlock/);
+  assert.match(
+    mainProcess,
+    /if \(!nativeBlock\)[\s\S]*?mainWindow\.show\(\);[\s\S]*?mainWindow\.focus\(\);[\s\S]*?return false;/,
+  );
+  assert.doesNotMatch(mainProcess, /还有内容没有保存/);
   assert.match(mainProcess, /event\.preventDefault\(\)/);
   assert.match(mainProcess, /stopBridge:\s*stopBridgeGracefully/);
   assert.match(mainProcess, /stopBridgeProcessGracefully/);
@@ -401,6 +410,7 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.match(preload, /onPrepareClose/);
   assert.match(preload, /reportReady/);
   assert.match(preload, /reportBlocked/);
+  assert.match(preload, /presentation = "native"/);
   assert.match(preload, /onCloseAborted/);
   assert.match(preload, /onWorkspaceUnavailable/);
   assert.match(
@@ -425,6 +435,7 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.match(rendererMain, /waitUntil/);
   assert.match(rendererMain, /readinessChecks\.length === 0/);
   assert.match(rendererMain, /reportBlocked/);
+  assert.match(rendererMain, /blocked\.presentation/);
   assert.match(rendererMain, /reportReady/);
   assert.match(rendererHtml, /Content-Security-Policy/);
   assert.match(rendererHtml, /default-src 'none'/);
@@ -443,7 +454,7 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
 
   assert.doesNotMatch(bridge, /\/Users\/lizexuan/);
   assert.match(bridge, /completion\.json/);
-  assert.match(bridge, /scope-report\.json/);
+  assert.match(bridge, /candidate-assessment\.json/);
   assert.match(bridge, /committed\.json/);
   assert.match(bridge, /ELECTRON_RUN_AS_NODE=1/);
   assert.match(finalizer, /finalizeAttempt/);
@@ -452,6 +463,8 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
   assert.match(lifecycleCore, /canonicalizationVersion|CANONICALIZATION_VERSION/);
   assert.match(htmlSourceParser, /from "parse5"/);
   assert.match(htmlSourceParser, /sourceCodeLocationInfo:\s*true/);
+  assert.match(candidateAssessment, /assessHtmlCandidate/);
+  assert.match(candidateAssessment, /PAGE_CONTINUITY_UNCERTAIN/);
   assert.match(scopeValidator, /SCOPE_ENFORCEMENT_MODE/);
   assert.match(scopeValidator, /validateScope/);
   assert.match(bridgeShutdown, /BridgeShutdownTimeoutError/);

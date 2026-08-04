@@ -156,12 +156,16 @@ async function closePageRootGracefully(electronApp) {
   await closed;
 }
 
-function createSourceFixture(fileName = "generated-ai-loop.html") {
+function createSourceFixture(
+  fileName = "generated-ai-loop.html",
+  transform = (source) => source,
+) {
   const sourceDirectory = mkdtempSync(
     path.join(tmpdir(), "pageroot-ai-loop-source-"),
   );
   const sourcePath = path.join(sourceDirectory, fileName);
-  writeFileSync(sourcePath, fixtureBuffer("complex-layout.html"));
+  const source = fixtureBuffer("complex-layout.html").toString("utf8");
+  writeFileSync(sourcePath, transform(source), "utf8");
   return { sourceDirectory, sourcePath, original: readFileSync(sourcePath) };
 }
 
@@ -442,9 +446,83 @@ function workingHtmlFiles(workspace, projectId) {
     .map((fileName) => path.join(directory, fileName));
 }
 
-test("a verified AI result stays pending until the user opens the new HTML", async () => {
+test("a verified AI result stays pending through desktop review until the user accepts it", async () => {
   test.setTimeout(180_000);
-  const fixture = createSourceFixture();
+  const fixture = createSourceFixture("generated-ai-loop.html", (source) => source.replace(
+    "  </main>",
+    `    <section data-review-regression>
+      <h2>核心结论</h2>
+      <div data-review-regression-summary>在守住 EBITA 率底线的基础上，锁单确收实现 +8.52% 增长；21 天日均增量 +4.12 万，累计增量 +86.6 万。</div>
+      <div data-review-metrics>
+        <article data-review-metric="lock"><strong>+8.52%</strong><span>锁单确收增幅（显著 p&lt;0.01）</span><small>日均 52.5 万 vs 48.4 万</small></article>
+        <article data-review-metric="ipv"><strong>+4.49%</strong><span>IPV 增幅（显著 p&lt;0.01）</span><small>日均 63.4 万 vs 60.7 万</small></article>
+        <article data-review-metric="cvr"><strong>+6.85%</strong><span>CVR 增幅（显著 p&lt;0.01）</span><small>0.217% vs 0.203%</small></article>
+      </div>
+      <div data-review-mixed-copy>
+        <p data-review-reference>参考：示例日均确收约207万，增量4.12万/天约占2.0%。</p>
+        <p data-review-warning>⚠️ 近6天(7/23-<span><strong>7/28)增幅收窄至负值区间，需</strong></span>持续关注。</p>
+      </div>
+      <div data-review-break-layout><span>日均63<br><br>.4万<br>60.7万</span></div>
+      <div data-review-deleted-copy><strong>品均拆解：</strong>总确收增长来自覆盖扩大。<br>待删除第一行<br>待删除第二行<br>待删除第三行<br>AI托管的核心价值保持不变。</div>
+    </section>
+    <section data-review-ebita-section>
+      <h2>3EBITA分析</h2>
+      <div data-review-ebita-copy><strong>结论：</strong>EBITA差异均在波动范围<br>内（0.06~0.13pt），AI托管未恶化盈利能力。</div>
+    </section>
+    <div class="tabs" role="tablist" aria-label="Review interaction fixture">
+      <button type="button" data-review-tab-button data-p="review-p1">审阅标签一</button>
+      <button type="button" data-review-tab-button data-p="review-p2">审阅标签二</button>
+    </div>
+    <div data-review-priority><strong>优先顺序：</strong>先处理稳定性，再补齐体验细节。</div>
+    <button type="button" id="review-counter" data-review-counter>交互计数 <span>0</span></button>
+    <input id="review-sync-input" aria-label="审阅同步输入" value="">
+    <div class="panel" id="review-p1" data-review-tab-panel="one">
+      <article><h2>标签一概览</h2><p>第一块完整内容</p></article>
+      <article><h2>标签一详情</h2><p>第二块完整内容</p></article>
+    </div>
+    <div class="panel" id="review-p2" data-review-tab-panel="two" hidden>
+      <article><h2>标签二概览</h2><p>第三块完整内容</p></article>
+      <article><h2>标签二详情</h2><p>第四块完整内容</p></article>
+    </div>
+    <div class="indexed-review-tabs">
+      <button type="button" class="indexed-review-tab active" onclick="switchIndexedReviewTab(0)">分行业表现</button>
+      <button type="button" class="indexed-review-tab" onclick="switchIndexedReviewTab(1)">抖音搜盘表现</button>
+    </div>
+    <div class="indexed-review-panels">
+      <section id="indexed-review-panel-one" class="indexed-review-panel active" style="display: block; min-height: 240px">
+        <h2>分行业表现</h2><p>索引式页签第一页</p>
+      </section>
+      <section id="indexed-review-panel-two" class="indexed-review-panel" style="display: none; min-height: 960px">
+        <h2>抖音搜盘表现</h2><p>索引式页签第二页</p>
+      </section>
+    </div>
+    <script>
+      document.querySelectorAll("[data-review-tab-button]").forEach((button) => {
+        button.addEventListener("click", () => {
+          document.querySelectorAll("[data-review-tab-panel]").forEach((panel) => {
+            panel.hidden = panel.id !== button.dataset.p;
+          });
+        });
+      });
+      document.querySelector("[data-review-counter]").addEventListener("click", (event) => {
+        const button = event.currentTarget;
+        const nextCount = Number(button.dataset.count || 0) + 1;
+        button.dataset.count = String(nextCount);
+        button.querySelector("span").textContent = String(nextCount);
+      });
+      function switchIndexedReviewTab(activeIndex) {
+        document.querySelectorAll(".indexed-review-tab").forEach((tab, index) => {
+          tab.classList.toggle("active", index === activeIndex);
+        });
+        document.querySelectorAll(".indexed-review-panel").forEach((panel, index) => {
+          panel.classList.toggle("active", index === activeIndex);
+          panel.style.display = index === activeIndex ? "block" : "none";
+        });
+      }
+      document.documentElement.dataset.reviewFixtureReady = "true";
+    </script>
+  </main>`,
+  ));
   const pickerSourcePath = path.join(fixture.sourceDirectory, "picker-target.html");
   writeFileSync(
     pickerSourcePath,
@@ -486,12 +564,55 @@ test("a verified AI result stays pending until the user opens the new HTML", asy
     ).toHaveAttribute("data-state", "current");
     writeAiOutput(request.requestRoot, (base) => {
       expect(base.match(new RegExp(ORIGINAL_TEXT, "gu"))).toHaveLength(1);
-      return base.replace(ORIGINAL_TEXT, UPDATED_TEXT);
+      return base
+        .replace(ORIGINAL_TEXT, UPDATED_TEXT)
+        .replace(
+          "      <div data-review-regression-summary>",
+          `      <div data-review-added-chart>
+        <strong>实验效果概览</strong>
+        <div><span>锁单确收</span><progress max="100" value="82"></progress></div>
+        <div><span>CVR</span><progress max="100" value="69"></progress></div>
+        <p>读图：规模增长由转化效率提升与动销覆盖扩大共同驱动。</p>
+      </div>
+      <div data-review-regression-summary>`,
+        )
+        .replace(
+          '    <div data-review-priority><strong>优先顺序：</strong>先处理稳定性，再补齐体验细节。</div>\n',
+          "",
+        )
+        .replace(
+          '<p data-review-reference>参考：示例日均确收约207万，增量4.12万/天约占2.0%。</p>',
+          '<p data-review-reference>参考：示例日均确收约207万，本实验增量4.12万/天约占2.0%。</p>',
+        )
+        .replace(
+          '<p data-review-warning>⚠️ 近6天(7/23-<span><strong>7/28)增幅收窄至负值区间，需</strong></span>持续关注。</p>',
+          '<p data-review-warning>⚠️ 近6天（7/23—<strong>7/28）增幅收窄至负值区间，需</strong>持续关注定价调整和转化波动。</p>',
+        )
+        .replace(
+          '<div data-review-break-layout><span>日均63<br><br>.4万<br>60.7万</span></div>',
+          '<div data-review-break-layout>日均63.4万 vs 60.7万</div>',
+        )
+        .replace(
+          '<div data-review-deleted-copy><strong>品均拆解：</strong>总确收增长来自覆盖扩大。<br>待删除第一行<br>待删除第二行<br>待删除第三行<br>AI托管的核心价值保持不变。</div>',
+          '<div data-review-deleted-copy><strong>品均拆解：</strong>总确收增长来自覆盖扩大。<br>AI托管的核心价值保持不变，并应继续关注留存质量。</div>',
+        )
+        .replace(
+          '<div data-review-ebita-copy><strong>结论：</strong>EBITA差异均在波动范围<br>内（0.06~0.13pt），AI托管未恶化盈利能力。</div>',
+          '<div data-review-ebita-copy><strong>结论：</strong>EBITA差异均在波动范围内（0.06~0.13pt），AI托管未恶化盈利能力，建议继续保留实验策略。</div>',
+        )
+        .replace(
+          "<article><h2>标签一概览</h2><p>第一块完整内容</p></article>\n      <article><h2>标签一详情</h2><p>第二块完整内容</p></article>",
+          "<article><h2>标签一详情</h2><p>第二块完整内容</p></article>\n      <article><h2>标签一概览</h2><p>第一块完整内容</p></article>",
+        )
+        .replace(
+          "<article><h2>标签二详情</h2><p>第四块完整内容</p></article>",
+          "<article style=\"padding: 24px; border-radius: 16px\"><h2>标签二详情</h2><p>第四块完整内容</p></article>",
+        );
     });
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
 
     await expect(launched.page.getByText(
-      "修改结果已通过检查",
+      "修改结果已完成检查",
       { exact: true },
     ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
     await expect(
@@ -507,14 +628,823 @@ test("a verified AI result stays pending until the user opens the new HTML", asy
       { timeout: 20_000 },
     ).toBe(1);
 
+    await launched.page.getByRole("button", { name: "审阅对比" }).click();
+    await expect(launched.page.getByTestId("ai-review-workspace"))
+      .toBeVisible({ timeout: 30_000 });
     await launched.page.getByRole("button", {
-      name: "打开最新版",
+      name: "显示并固定审阅工具",
     }).click();
-    await expect.poll(async () => (
-      launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject())
-    ), { timeout: 30_000 }).toMatchObject({
-      sourcePath: expect.stringMatching(/\/working\/generated-ai-loop-V1\.1\.html$/u),
+    const pinnedToolbarHandle = launched.page.getByRole("button", {
+      name: "收起审阅工具",
     });
+    await expect(pinnedToolbarHandle).toBeVisible();
+    await expect.poll(async () => {
+      const toolbarHandleBox = await pinnedToolbarHandle.boundingBox();
+      const beforePaneHeaderBox = await launched.page
+        .locator('section[data-side="before"] > header')
+        .boundingBox();
+      if (!toolbarHandleBox || !beforePaneHeaderBox) return -100;
+      return beforePaneHeaderBox.y - (toolbarHandleBox.y + toolbarHandleBox.height);
+    }).toBeGreaterThanOrEqual(-1);
+    const beforeReviewFrame = launched.page.frameLocator(
+      'iframe[title^="修改前"]',
+    );
+    const afterReviewFrame = launched.page.frameLocator(
+      'iframe[title^="修改后"]',
+    );
+    await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
+      "data-pageroot-review-filter",
+    ), { timeout: 30_000 }).toBe("all");
+    await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
+      "data-pageroot-review-focus",
+    )).not.toBe("all");
+    await expect(launched.page.getByRole("slider", {
+      name: "非修改区域上下文可见度",
+    })).toHaveValue("18");
+    await expect(launched.page.locator('[data-view="split"]')).toBeVisible();
+    await expect(launched.page.getByRole("button", {
+      name: "双页对比（修改前与 AI 修改后）",
+    })).toHaveAttribute("aria-pressed", "true");
+    await expect(launched.page.getByRole("button", { name: "查看全部变化" }))
+      .toHaveAttribute("aria-pressed", "true");
+    await expect(beforeReviewFrame.locator("html"))
+      .toHaveAttribute("data-author-script-ran", "true");
+    await expect(beforeReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-fixture-ready", "true");
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-fixture-ready", "true");
+    await expect(beforeReviewFrame.locator('meta[http-equiv="refresh"]'))
+      .toHaveCount(0);
+    const reviewCommentMarker = launched.page.locator(
+      'section[data-side="before"] [data-testid="review-comment-marker"]',
+    );
+    await expect(reviewCommentMarker).toHaveCount(1);
+    await expect(reviewCommentMarker).toHaveAttribute("role", "note");
+    await expect(reviewCommentMarker).not.toHaveAttribute("tabindex", /.+/u);
+    await expect(launched.page.locator(
+      'section[data-side="after"] [data-testid="review-comment-marker"]',
+    )).toHaveCount(0);
+    const frozenReviewComment = `只把这个列表项改为“${UPDATED_TEXT}”，其他地方保持不变。`;
+    await expect.poll(() => beforeReviewFrame.locator("html").evaluate(
+      (element, text) => element.innerHTML.includes(text),
+      frozenReviewComment,
+    )).toBe(false);
+    await expect.poll(() => afterReviewFrame.locator("html").evaluate(
+      (element, text) => element.innerHTML.includes(text),
+      frozenReviewComment,
+    )).toBe(false);
+    await reviewCommentMarker.hover();
+    const reviewCommentBubble = reviewCommentMarker.getByTestId("review-comment-bubble");
+    await expect(reviewCommentBubble).toContainText(frozenReviewComment);
+    await expect(reviewCommentBubble).toBeVisible();
+    const beforeReviewViewport = launched.page.locator(
+      'section[data-side="before"] [aria-label="修改前画布滚动区"]',
+    );
+    await expect.poll(async () => {
+      const [bubbleBox, viewportBox] = await Promise.all([
+        reviewCommentBubble.boundingBox(),
+        beforeReviewViewport.boundingBox(),
+      ]);
+      if (!bubbleBox || !viewportBox) return false;
+      return bubbleBox.x >= viewportBox.x + 4
+        && bubbleBox.x + bubbleBox.width <= viewportBox.x + viewportBox.width - 4;
+    }).toBe(true);
+    if (process.env.PAGEROOT_CAPTURE_REVIEW) {
+      const captureDirectory = path.join(productRoot, "output", "design-qa");
+      mkdirSync(captureDirectory, { recursive: true });
+      await launched.page.screenshot({
+        path: path.join(captureDirectory, "ai-review-comment.png"),
+        animations: "disabled",
+      });
+    }
+    await launched.page.locator('section[data-side="before"] > header').hover();
+    await expect(reviewCommentBubble).toBeHidden();
+    await expect(beforeReviewFrame.locator('[data-review-tab-panel="two"]'))
+      .toBeHidden();
+    await beforeReviewFrame.getByRole("button", { name: "审阅标签二" })
+      .evaluate((button) => button.click());
+    await expect.poll(async () => beforeReviewFrame.locator("html").evaluate(() => {
+      const transitioning = document.documentElement.hasAttribute(
+        "data-pageroot-review-transitioning",
+      );
+      return !transitioning || (
+        document.querySelectorAll("[data-pageroot-review-transition-mask]").length === 1
+        && document.querySelectorAll("[data-pageroot-review-projection-layer]").length === 0
+      );
+    })).toBe(true);
+    await expect(beforeReviewFrame.locator('[data-review-tab-panel="two"]'))
+      .toBeVisible();
+    await expect(afterReviewFrame.locator('[data-review-tab-panel="two"]'))
+      .toBeVisible();
+    await expect.poll(async () => Promise.all(
+      [beforeReviewFrame, afterReviewFrame].map((frame) => frame.locator("html").evaluate(() => (
+        !document.documentElement.hasAttribute("data-pageroot-review-transitioning")
+      ))),
+    ).then((states) => states.every(Boolean))).toBe(true);
+    await expect.poll(async () => Promise.all(
+      [beforeReviewFrame, afterReviewFrame].map((frame) => frame.locator("html").evaluate(() => {
+        const filter = document.documentElement.dataset.pagerootReviewFilter || "all";
+        return [...document.querySelectorAll("[data-pageroot-review-overlay-box]")]
+          .every((box) => {
+            const changeId = box.getAttribute("data-pageroot-review-overlay-box");
+            return [...document.querySelectorAll(
+              '[data-pageroot-review-marker="' + changeId + '"]',
+            )].some((marker) => {
+              const markerTypes = String(
+                marker.getAttribute("data-pageroot-review-marker-types") || "",
+              ).split(/\s+/u);
+              const matchesFilter = filter === "all" || markerTypes.includes(filter);
+              return matchesFilter && [...marker.getClientRects()]
+                .some((rect) => rect.width > 1 && rect.height > 1);
+            });
+          });
+      })),
+    ).then((states) => states.every(Boolean))).toBe(true);
+    await expect(beforeReviewFrame.locator("#indexed-review-panel-one")).toBeVisible();
+    await expect(afterReviewFrame.locator("#indexed-review-panel-one")).toBeVisible();
+    await afterReviewFrame.getByRole("button", { name: "抖音搜盘表现" })
+      .evaluate((button) => button.click());
+    await expect.poll(() => afterReviewFrame.locator("html").evaluate(() => {
+      const documentHeight = Math.max(
+        document.documentElement.scrollHeight,
+        document.body?.scrollHeight || 0,
+      );
+      const layer = document.documentElement.hasAttribute(
+        "data-pageroot-review-transitioning",
+      )
+        ? document.querySelector("[data-pageroot-review-transition-mask]")
+        : document.querySelector("[data-pageroot-review-projection-layer]");
+      return Boolean(layer && layer.getBoundingClientRect().height >= documentHeight - 1);
+    })).toBe(true);
+    await expect(afterReviewFrame.locator("#indexed-review-panel-two")).toBeVisible();
+    await expect(beforeReviewFrame.locator("#indexed-review-panel-two")).toBeVisible();
+    await expect(afterReviewFrame.locator("#indexed-review-panel-one")).toBeHidden();
+    await expect(beforeReviewFrame.locator("#indexed-review-panel-one")).toBeHidden();
+    const beforeCounter = beforeReviewFrame.locator("[data-review-counter]");
+    const afterCounter = afterReviewFrame.locator("[data-review-counter]");
+    await beforeCounter.evaluate((button) => button.click());
+    await expect(beforeCounter).toHaveAttribute("data-count", "1");
+    await expect(afterCounter).toHaveAttribute("data-count", "1");
+    await beforeReviewFrame.getByRole("textbox", { name: "审阅同步输入" })
+      .fill("双页动作同步");
+    await expect(afterReviewFrame.getByRole("textbox", { name: "审阅同步输入" }))
+      .toHaveValue("双页动作同步");
+    await launched.page.getByRole("button", { name: "独立滚动" }).click();
+    await afterCounter.evaluate((button) => button.click());
+    await expect(beforeCounter).toHaveAttribute("data-count", "2");
+    await expect(afterCounter).toHaveAttribute("data-count", "2");
+    await afterReviewFrame.getByRole("textbox", { name: "审阅同步输入" })
+      .fill("反向动作同步");
+    await expect(beforeReviewFrame.getByRole("textbox", { name: "审阅同步输入" }))
+      .toHaveValue("反向动作同步");
+    await launched.page.getByRole("button", { name: "同步滚动" }).click();
+    await expect.poll(() => beforeReviewFrame.locator(
+      "[data-pageroot-review-overlay-box]",
+    ).count()).toBeGreaterThan(0);
+    await expect.poll(() => afterReviewFrame.locator(
+      "[data-pageroot-review-overlay-box]",
+    ).count()).toBeGreaterThan(0);
+    await expect.poll(() => afterReviewFrame.locator(
+      '[data-pageroot-review-overlay-box][data-tone="text-added"], [data-pageroot-review-overlay-box][data-tone="structure"], [data-pageroot-review-overlay-box][data-tone="style"], [data-pageroot-review-overlay-box][data-tone="mixed"]',
+    ).count()).toBeGreaterThan(0);
+    await expect.poll(async () => Promise.all(
+      [beforeReviewFrame, afterReviewFrame].map((frame) => frame.locator(
+        "[data-pageroot-review-overlay-box]",
+      ).evaluateAll((boxes) => boxes.length > 0 && boxes.every((box) => {
+        const labels = box.querySelectorAll("[data-pageroot-review-overlay-label]");
+        const label = labels[0]?.textContent?.trim() || "";
+        return labels.length === 1 && label.length >= 2 && label.length <= 10;
+      }))),
+    ).then((states) => states.every(Boolean))).toBe(true);
+    const nestedOverlayPairs = await afterReviewFrame.locator(
+      "[data-pageroot-review-overlay-box]",
+    ).evaluateAll((boxes) => boxes.flatMap((outer, outerIndex) => {
+      const outerRect = outer.getBoundingClientRect();
+      return boxes.flatMap((inner, innerIndex) => {
+        if (outerIndex === innerIndex) return [];
+        const innerRect = inner.getBoundingClientRect();
+        const nested = outer.getAttribute("data-pageroot-review-overlay-box")
+          === inner.getAttribute("data-pageroot-review-overlay-box")
+          && innerRect.width * innerRect.height < outerRect.width * outerRect.height * .86
+          && innerRect.left >= outerRect.left - 2
+          && innerRect.top >= outerRect.top - 2
+          && innerRect.right <= outerRect.right + 2
+          && innerRect.bottom <= outerRect.bottom + 2;
+        return nested ? [{
+          changeId: outer.getAttribute("data-pageroot-review-overlay-box"),
+          outer: {
+            summary: outer.textContent,
+            tone: outer.getAttribute("data-tone"),
+            rect: [outerRect.x, outerRect.y, outerRect.width, outerRect.height],
+          },
+          inner: {
+            summary: inner.textContent,
+            tone: inner.getAttribute("data-tone"),
+            rect: [innerRect.x, innerRect.y, innerRect.width, innerRect.height],
+          },
+        }] : [];
+      });
+    }));
+    expect(nestedOverlayPairs).toEqual([]);
+    await expect.poll(async () => beforeReviewFrame.locator(
+      "[data-pageroot-review-id]",
+    ).first().evaluate((element) => getComputedStyle(element).outlineStyle)).toBe("none");
+    if (process.env.PAGEROOT_CAPTURE_REVIEW) {
+      const captureDirectory = path.join(productRoot, "output", "design-qa");
+      mkdirSync(captureDirectory, { recursive: true });
+      await launched.page.screenshot({
+        path: path.join(captureDirectory, "ai-review-all-changes.png"),
+        animations: "disabled",
+      });
+    }
+    await launched.page.getByRole("button", { name: "文案变化" }).click();
+    await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
+      "data-pageroot-review-filter",
+    )).toBe("text");
+    await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
+      "data-pageroot-review-focus",
+    )).not.toBe("all");
+    await expect(beforeReviewFrame.locator(
+      '[data-pageroot-review-text="removed"]',
+    ).filter({ hasText: ORIGINAL_TEXT })).toBeVisible();
+    await expect(afterReviewFrame.locator(
+      '[data-pageroot-review-text="added"]',
+    ).filter({ hasText: UPDATED_TEXT })).toBeVisible();
+    const deletedPriority = beforeReviewFrame.locator(
+      '[data-pageroot-review-text="removed"]',
+    ).filter({ hasText: /优先顺序/u });
+    await expect(deletedPriority).toHaveCount(1);
+    await expect.poll(() => deletedPriority.evaluate(
+      (element) => getComputedStyle(element).textDecorationLine,
+    )).toContain("line-through");
+    const addedText = afterReviewFrame.locator(
+      '[data-pageroot-review-text="added"]',
+    ).filter({ hasText: UPDATED_TEXT });
+    await expect.poll(() => addedText.evaluate(
+      (element) => getComputedStyle(element).textDecorationLine,
+    )).toBe("none");
+    expect(await addedText.evaluate((element) => getComputedStyle(element).color))
+      .toBe(await addedText.evaluate((element) => getComputedStyle(element.parentElement).color));
+    await expect.poll(() => afterReviewFrame.locator(
+      '[data-pageroot-review-overlay-box][data-tone="text-added"]',
+    ).count()).toBeGreaterThan(0);
+    await expect.poll(() => beforeReviewFrame.locator(
+      '[data-pageroot-review-overlay-box][data-tone="text-removed"]',
+    ).count()).toBeGreaterThan(0);
+    await expect.poll(() => afterReviewFrame.locator(
+      '[data-pageroot-review-overlay-box][data-tone="text-added"]',
+    ).first().evaluate((element) => {
+      const shape = element.querySelector("[data-pageroot-review-overlay-shape]");
+      return shape ? getComputedStyle(shape).stroke : getComputedStyle(element).borderTopColor;
+    }))
+      .toBe("rgb(35, 155, 86)");
+    await expect.poll(() => beforeReviewFrame.locator(
+      '[data-pageroot-review-overlay-box][data-tone="text-removed"]',
+    ).first().evaluate((element) => {
+      const shape = element.querySelector("[data-pageroot-review-overlay-shape]");
+      return shape ? getComputedStyle(shape).stroke : getComputedStyle(element).borderTopColor;
+    }))
+      .toBe("rgb(209, 75, 68)");
+    const steppedTextFrame = beforeReviewFrame.locator(
+      '[data-pageroot-review-overlay-box][data-tone="text-removed"][data-shaped="true"]',
+    ).first();
+    await expect(steppedTextFrame).toBeAttached();
+    expect(Number(await steppedTextFrame.getAttribute(
+      "data-pageroot-review-fragment-count",
+    )))
+      .toBeGreaterThan(1);
+    await expect(steppedTextFrame.locator(
+      "[data-pageroot-review-overlay-shape]",
+    )).toHaveAttribute("d", /M .+ L .+ Z/u);
+    await expect(afterReviewFrame.locator(
+      '[data-review-added-chart] [data-pageroot-review-text="added"]',
+    ).filter({ hasText: "实验效果概览" })).toHaveCount(1);
+    await expect(afterReviewFrame.locator(
+      '[data-review-added-chart] [data-pageroot-review-text="added"]',
+    ).filter({ hasText: "实验效果概览" }))
+      .toHaveAttribute("data-pageroot-review-summary", "新增内容");
+    await expect(beforeReviewFrame.locator(
+      '[data-review-reference] [data-pageroot-review-text-context="removed"]',
+    )).toHaveCount(1);
+    await expect(afterReviewFrame.locator(
+      '[data-review-reference] [data-pageroot-review-text="added"]',
+    ).filter({ hasText: "本实验" })).toHaveAttribute(
+      "data-pageroot-review-summary",
+      "文本调整",
+    );
+    const addedChartChangeId = await afterReviewFrame.locator(
+      "[data-review-added-chart] [data-pageroot-review-marker]",
+    ).first().getAttribute("data-pageroot-review-marker");
+    expect(addedChartChangeId).toBeTruthy();
+    await expect(afterReviewFrame.locator(
+      `[data-pageroot-review-overlay-box="${addedChartChangeId}"] [data-pageroot-review-overlay-label]`,
+    ).filter({ hasText: /^新增内容$/u }).first()).toBeVisible();
+    const warningRemovedText = await beforeReviewFrame.locator(
+      '[data-review-warning] [data-pageroot-review-text="removed"]',
+    ).allTextContents();
+    expect(warningRemovedText.join(""))
+      .not.toContain("7/28)增幅收窄至负值区间，需");
+    await expect(beforeReviewFrame.locator(
+      '[data-review-deleted-copy] [data-pageroot-review-text="removed"]',
+    ).filter({ hasText: /^待删除第/u })).toHaveCount(3);
+    await expect(beforeReviewFrame.locator(
+      '[data-review-break-layout] [data-pageroot-review-text-context="removed"]',
+    )).toHaveCount(3);
+    await expect(afterReviewFrame.locator(
+      '[data-review-break-layout] [data-pageroot-review-text="added"]',
+    ).filter({ hasText: "vs" })).toHaveCount(1);
+    await expect(beforeReviewFrame.locator(
+      '[data-review-ebita-copy] [data-pageroot-review-text-context="removed"]',
+    ).first()).toBeVisible();
+    await expect(afterReviewFrame.locator(
+      '[data-review-ebita-copy] [data-pageroot-review-text="added"]',
+    ).filter({ hasText: "建议继续保留实验策略" })).toBeVisible();
+    await expect(afterReviewFrame.locator(
+      '[data-review-regression-summary] [data-pageroot-review-text]',
+    )).toHaveCount(0);
+    await expect(beforeReviewFrame.locator(
+      '[data-review-metrics] [data-pageroot-review-text]',
+    )).toHaveCount(0);
+    await expect(afterReviewFrame.locator(
+      '[data-review-metrics] [data-pageroot-review-text]',
+    )).toHaveCount(0);
+    if (process.env.PAGEROOT_CAPTURE_REVIEW) {
+      const captureDirectory = path.join(productRoot, "output", "design-qa");
+      mkdirSync(captureDirectory, { recursive: true });
+      await launched.page.screenshot({
+        path: path.join(captureDirectory, "ai-review-text-changes.png"),
+        animations: "disabled",
+      });
+    }
+    await expect(beforeReviewFrame.locator(
+      '[data-pageroot-review-text]',
+    ).filter({ hasText: "第二块完整内容" })).toHaveCount(0);
+    await expect(afterReviewFrame.locator(
+      '[data-pageroot-review-text]',
+    ).filter({ hasText: "第二块完整内容" })).toHaveCount(0);
+    const textMask = afterReviewFrame.locator(
+      '[data-pageroot-review-mask-dim]',
+    );
+    await expect(textMask).toBeAttached();
+    await expect.poll(() => textMask.getAttribute("fill-opacity"))
+      .toBe("0.82");
+    await expect.poll(() => afterReviewFrame.locator(
+      '[data-pageroot-review-mask-layer]',
+    ).evaluate((element) => ({
+      background: getComputedStyle(element).backgroundColor,
+      borderWidth: getComputedStyle(element).borderTopWidth,
+    }))).toEqual({ background: "rgba(0, 0, 0, 0)", borderWidth: "0px" });
+    await expect.poll(async () => {
+      const boxes = await afterReviewFrame.locator(
+        '[data-pageroot-review-overlay-box]',
+      ).evaluateAll((elements) => elements.map((element) => ({
+        left: Number.parseFloat(element.style.left),
+        top: Number.parseFloat(element.style.top),
+        width: Number.parseFloat(element.style.width),
+        height: Number.parseFloat(element.style.height),
+      })));
+      const holes = await afterReviewFrame.locator(
+        '[data-pageroot-review-mask-hole]',
+      ).evaluateAll((elements) => elements.map((element) => ({
+        left: Number(element.getAttribute("data-left")),
+        top: Number(element.getAttribute("data-top")),
+        width: Number(element.getAttribute("data-width")),
+        height: Number(element.getAttribute("data-height")),
+        path: element.getAttribute("d"),
+      })));
+      return boxes.length === holes.length && boxes.every((box, index) => (
+        Math.abs(box.left - holes[index].left) < 0.02
+        && Math.abs(box.top - holes[index].top) < 0.02
+        && Math.abs(box.width - holes[index].width) < 0.02
+        && Math.abs(box.height - holes[index].height) < 0.02
+        && Boolean(holes[index].path)
+      ));
+    }).toBe(true);
+    await expect.poll(() => afterReviewFrame.locator("html").evaluate(() => {
+      const path = document.querySelector("[data-pageroot-review-mask-dim]");
+      const boxes = [...document.querySelectorAll("[data-pageroot-review-overlay-box]")];
+      const changedText = document.querySelector('[data-pageroot-review-marker-types~="text"]');
+      const changedRect = changedText?.getClientRects()[0];
+      if (!(path instanceof SVGGeometryElement) || !changedRect) return false;
+      const changedPointIsDimmed = path.isPointInFill(new DOMPoint(
+        changedRect.left + scrollX + changedRect.width / 2,
+        changedRect.top + scrollY + changedRect.height / 2,
+      ));
+      let outsidePointIsDimmed = false;
+      for (let y = 8; y < Math.min(400, document.documentElement.scrollHeight); y += 24) {
+        for (let x = 8; x < Math.min(600, document.documentElement.scrollWidth); x += 24) {
+          const inFrame = boxes.some((box) => {
+            const rect = box.getBoundingClientRect();
+            return x >= rect.left + scrollX && x <= rect.right + scrollX
+              && y >= rect.top + scrollY && y <= rect.bottom + scrollY;
+          });
+          if (!inFrame && path.isPointInFill(new DOMPoint(x, y))) {
+            outsidePointIsDimmed = true;
+            break;
+          }
+        }
+        if (outsidePointIsDimmed) break;
+      }
+      return !changedPointIsDimmed && outsidePointIsDimmed;
+    })).toBe(true);
+    await expect.poll(() => beforeReviewFrame.locator("html").evaluate(() => {
+      const dim = document.querySelector("[data-pageroot-review-mask-dim]");
+      const shapedBoxes = [...document.querySelectorAll(
+        '[data-pageroot-review-overlay-box][data-shaped="true"]',
+      )];
+      if (!(dim instanceof SVGGeometryElement)) return false;
+      return shapedBoxes.some((box) => {
+        const changeId = box.getAttribute("data-pageroot-review-overlay-box");
+        const hole = [...document.querySelectorAll("[data-pageroot-review-mask-hole]")]
+          .find((candidate) => (
+            candidate.getAttribute("data-pageroot-review-mask-hole") === changeId
+          ));
+        if (!(hole instanceof SVGGeometryElement)) return false;
+        const rect = box.getBoundingClientRect();
+        for (let row = 1; row < 8; row += 1) {
+          for (let column = 1; column < 8; column += 1) {
+            const point = new DOMPoint(
+              rect.left + scrollX + rect.width * column / 8,
+              rect.top + scrollY + rect.height * row / 8,
+            );
+            if (!hole.isPointInFill(point) && dim.isPointInFill(point)) return true;
+          }
+        }
+        return false;
+      });
+    })).toBe(true);
+    await launched.page.getByRole("slider", {
+      name: "非修改区域上下文可见度",
+    }).fill("0");
+    await expect.poll(async () => Number(await beforeReviewFrame.locator("html").evaluate(
+      (element) => element.style.getPropertyValue("--pageroot-review-context-opacity"),
+    ))).toBe(0);
+    await expect.poll(() => beforeReviewFrame.locator(
+      '[data-pageroot-review-mask-dim]',
+    ).getAttribute("fill-opacity")).toBe("1");
+    await launched.page.getByRole("slider", {
+      name: "非修改区域上下文可见度",
+    }).fill("50");
+    await expect.poll(async () => Number(await beforeReviewFrame.locator("html").evaluate(
+      (element) => element.style.getPropertyValue("--pageroot-review-context-opacity"),
+    ))).toBeCloseTo(0.5, 4);
+    await expect.poll(() => beforeReviewFrame.locator(
+      '[data-pageroot-review-mask-dim]',
+    ).getAttribute("fill-opacity")).toBe("0.5");
+    await launched.page.getByRole("slider", {
+      name: "非修改区域上下文可见度",
+    }).fill("100");
+    await expect.poll(async () => Number(await beforeReviewFrame.locator("html").evaluate(
+      (element) => element.style.getPropertyValue("--pageroot-review-context-opacity"),
+    ))).toBe(1);
+    await expect.poll(() => beforeReviewFrame.locator(
+      '[data-pageroot-review-mask-dim]',
+    ).getAttribute("fill-opacity")).toBe("0");
+    await launched.page.getByRole("slider", {
+      name: "非修改区域上下文可见度",
+    }).fill("18");
+    await launched.page.getByRole("button", {
+      name: "打开内容地图",
+    }).click();
+    const outlineItems = launched.page.getByTestId("review-outline-item");
+    await expect.poll(() => outlineItems.count()).toBeGreaterThan(5);
+    await expect(launched.page.getByText("审阅标签一", { exact: true })).toBeVisible();
+    await expect(launched.page.getByText("审阅标签二", { exact: true })).toBeVisible();
+    expect(await launched.page.locator(
+      '[data-testid="review-outline-item"][data-changed="false"]',
+    ).count()).toBeGreaterThan(0);
+    const viewportWidth = await launched.page.evaluate(() => window.innerWidth);
+    await expect.poll(async () => {
+      const drawer = launched.page.locator('aside[aria-label="页面内容地图"]');
+      const handleBox = await drawer.locator(":scope > div").first().boundingBox();
+      const panelBox = await drawer.locator(':scope > div[aria-hidden="false"]').boundingBox();
+      if (!handleBox || !panelBox) return false;
+      const handleGap = panelBox.x - (handleBox.x + handleBox.width);
+      const rightGap = panelBox.x + panelBox.width - viewportWidth;
+      return Math.abs(handleGap) <= 1 && Math.abs(rightGap) <= 1;
+    }).toBe(true);
+    const changedMapItem = launched.page.locator(
+      '[data-testid="review-outline-item"][data-changed="true"]',
+    ).first();
+    const unchangedMapItem = launched.page.locator(
+      '[data-testid="review-outline-item"][data-changed="false"]',
+    ).first();
+    expect(await changedMapItem.evaluate((element) => getComputedStyle(element).opacity))
+      .toBe("1");
+    expect(Number(await unchangedMapItem.evaluate((element) => getComputedStyle(element).opacity)))
+      .toBeLessThan(0.7);
+    const ebitaChangeId = await beforeReviewFrame.locator(
+      "[data-review-ebita-section]",
+    ).getAttribute("data-pageroot-review-id");
+    expect(ebitaChangeId).toBeTruthy();
+    await launched.page.getByRole("button", {
+      name: /3EBITA分析：文本调整/u,
+    }).click();
+    await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
+      "data-pageroot-review-focus",
+    )).toBe(ebitaChangeId);
+    await expect.poll(() => beforeReviewFrame.locator(
+      `[data-pageroot-review-overlay-box="${ebitaChangeId}"]`,
+    ).count()).toBeGreaterThan(0);
+    await beforeCounter.click();
+    await expect(afterCounter).toHaveAttribute("data-count", "3");
+    await expect(launched.page.getByRole("button", { name: "打开内容地图" }))
+      .toBeVisible();
+    await launched.page.getByRole("button", { name: "打开内容地图" }).click();
+    const movedOutlineItem = launched.page.getByRole("button", {
+      name: /标签一详情：位置调整/u,
+    });
+    await expect(movedOutlineItem).toBeVisible();
+    await movedOutlineItem.click();
+    await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
+      "data-pageroot-review-filter",
+    )).toBe("text");
+    await expect(launched.page.locator('[data-view="split"]')).toBeVisible();
+    await expect(launched.page.getByRole("slider", {
+      name: "非修改区域上下文可见度",
+    })).toHaveValue("18");
+    await launched.page.getByRole("button", { name: "查看全部变化" }).click();
+    await expect(launched.page.locator('[data-view="split"]')).toBeVisible();
+    await expect(beforeReviewFrame.locator('[data-review-tab-panel="one"]'))
+      .toBeVisible();
+    await expect(afterReviewFrame.locator('[data-review-tab-panel="one"]'))
+      .toBeVisible();
+    const nextChangeButton = launched.page.getByRole("button", { name: "下一处变化" });
+    const totalChanges = Number((await nextChangeButton.locator("xpath=..")
+      .locator("small").textContent())?.replace("/", "") || 0);
+    let navigatorReachedSecondPanel = false;
+    for (let index = 0; index < totalChanges; index += 1) {
+      await nextChangeButton.click();
+      if (await beforeReviewFrame.locator('[data-review-tab-panel="two"]').isVisible()) {
+        navigatorReachedSecondPanel = true;
+        break;
+      }
+    }
+    expect(navigatorReachedSecondPanel).toBe(true);
+    await expect(afterReviewFrame.locator('[data-review-tab-panel="two"]'))
+      .toBeVisible();
+    await launched.page.getByRole("button", { name: "结构变化" }).click();
+    await expect(launched.page.getByRole("button", { name: "打开内容地图" }))
+      .toBeVisible();
+    await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
+      "data-pageroot-review-filter",
+    )).toBe("structure");
+    await expect(beforeReviewFrame.locator("[data-pageroot-review-structure]").first())
+      .toBeVisible();
+    await expect(beforeReviewFrame.locator(
+      '[data-pageroot-review-overlay-box][data-tone="structure"]',
+    ).first()).toBeAttached();
+    await expect.poll(() => beforeReviewFrame.locator(
+      '[data-pageroot-review-overlay-box][data-tone="structure"]',
+    ).first().evaluate((element) => {
+      const shape = element.querySelector("[data-pageroot-review-overlay-shape]");
+      return shape ? getComputedStyle(shape).stroke : getComputedStyle(element).borderTopColor;
+    }))
+      .toBe("rgb(22, 119, 200)");
+    await expect(afterReviewFrame.locator(
+      '[data-review-added-chart][data-pageroot-review-structure]',
+    )).toHaveCount(1);
+    await expect(beforeReviewFrame.locator(
+      '[data-review-metrics] [data-pageroot-review-structure]',
+    )).toHaveCount(0);
+    await expect(afterReviewFrame.locator(
+      '[data-review-metrics] [data-pageroot-review-structure]',
+    )).toHaveCount(0);
+    await expect(beforeReviewFrame.locator(
+      '[data-review-mixed-copy] [data-pageroot-review-structure], [data-review-break-layout] [data-pageroot-review-structure], [data-review-ebita-copy] [data-pageroot-review-structure]',
+    )).toHaveCount(0);
+    await expect(afterReviewFrame.locator(
+      '[data-review-mixed-copy] [data-pageroot-review-structure], [data-review-break-layout] [data-pageroot-review-structure], [data-review-ebita-copy] [data-pageroot-review-structure]',
+    )).toHaveCount(0);
+    await launched.page.getByRole("button", { name: "视觉变化" }).click();
+    await expect.poll(async () => afterReviewFrame.locator("html").getAttribute(
+      "data-pageroot-review-filter",
+    )).toBe("style");
+    await expect(afterReviewFrame.locator("[data-pageroot-review-style]").first())
+      .toBeVisible();
+    await expect(afterReviewFrame.locator(
+      '[data-pageroot-review-overlay-box][data-tone="style"]',
+    ).first()).toBeAttached();
+    await expect.poll(() => afterReviewFrame.locator(
+      '[data-pageroot-review-overlay-box][data-tone="style"]',
+    ).first().evaluate((element) => {
+      const shape = element.querySelector("[data-pageroot-review-overlay-shape]");
+      return shape ? getComputedStyle(shape).stroke : getComputedStyle(element).borderTopColor;
+    }))
+      .toBe("rgb(109, 92, 231)");
+    await expect(beforeReviewFrame.locator(
+      '[data-review-regression] [data-pageroot-review-style]',
+    )).toHaveCount(0);
+    await expect(afterReviewFrame.locator(
+      '[data-review-regression] [data-pageroot-review-style]',
+    )).toHaveCount(0);
+    await expect(beforeReviewFrame.locator('[data-review-tab-panel="two"]'))
+      .toBeVisible();
+    await expect(afterReviewFrame.locator('[data-review-tab-panel="two"]'))
+      .toBeVisible();
+    await expect(afterReviewFrame.locator(
+      '[data-pageroot-review-overlay-box][data-tone="style"] [data-pageroot-review-overlay-label]',
+    ).first()).toHaveText("视觉调整");
+    await launched.page.getByRole("button", {
+      name: /单独查看修改前/,
+    }).click();
+    await expect(launched.page.locator('[data-view="before"]')).toBeVisible();
+    await expect(launched.page.locator('section[data-side="after"]')).toHaveAttribute("hidden", "");
+    await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
+      "data-pageroot-review-filter",
+    )).toBe("style");
+    await expect.poll(async () => {
+      const viewport = await launched.page.locator('[aria-label="修改前画布滚动区"]').boundingBox();
+      const frame = await launched.page.locator('iframe[title^="修改前"]').boundingBox();
+      if (!viewport || !frame) return 100;
+      return Math.abs((frame.x + frame.width) - (viewport.x + viewport.width));
+    }).toBeLessThanOrEqual(2);
+    await launched.page.getByRole("button", {
+      name: "双页对比（修改前与 AI 修改后）",
+    }).click();
+    await expect(launched.page.locator('[data-view="split"]')).toBeVisible();
+    await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
+      "data-pageroot-review-filter",
+    )).toBe("style");
+    const wholePageButton = launched.page.getByRole("button", {
+      name: "双页对比（修改前与 AI 修改后）",
+    });
+    await wholePageButton.focus();
+    await wholePageButton.press("ArrowRight");
+    await expect(launched.page.locator('[data-view="before"]')).toBeVisible();
+    const leftPageButton = launched.page.getByRole("button", {
+      name: /单独查看修改前/u,
+    });
+    await expect(leftPageButton).toBeFocused();
+    await leftPageButton.press("ArrowLeft");
+    await expect(launched.page.locator('[data-view="split"]')).toBeVisible();
+    await expect(wholePageButton).toBeFocused();
+    await launched.page.getByRole("button", {
+      name: /单独查看 AI 修改后/,
+    }).click();
+    await expect(launched.page.locator('[data-view="after"]')).toBeVisible();
+    await expect(launched.page.locator('section[data-side="before"]')).toHaveAttribute("hidden", "");
+    await launched.page.getByRole("button", { name: "查看全部变化" }).click();
+    await expect(launched.page.locator('[data-view="after"]')).toBeVisible();
+    await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
+      "data-pageroot-review-filter",
+    )).toBe("all");
+    await wholePageButton.click();
+    await expect(launched.page.locator('[data-view="split"]')).toBeVisible();
+    await expect.poll(async () => {
+      const grid = await launched.page.locator('[data-view="split"]').boundingBox();
+      const beforePane = await launched.page.locator('section[data-side="before"]').boundingBox();
+      const afterPane = await launched.page.locator('section[data-side="after"]').boundingBox();
+      if (!grid || !beforePane || !afterPane) return false;
+      return beforePane.x - grid.x <= 4
+        && grid.x + grid.width - (afterPane.x + afterPane.width) <= 4
+        && afterPane.x - (beforePane.x + beforePane.width) <= 4;
+    }).toBe(true);
+    const beforeViewport = launched.page.locator('[aria-label="修改前画布滚动区"]');
+    const afterViewport = launched.page.locator('[aria-label="修改后画布滚动区"]');
+    await launched.page.waitForTimeout(450);
+    const sourceLeft = await beforeViewport.evaluate((element) => {
+      element.scrollLeft = Math.max(1, Math.round(
+        (element.scrollWidth - element.clientWidth) * .35,
+      ));
+      element.dispatchEvent(new Event("scroll"));
+      return element.scrollLeft;
+    });
+    expect(sourceLeft).toBeGreaterThan(0);
+    await expect.poll(() => afterViewport.evaluate((element) => element.scrollLeft))
+      .toBe(sourceLeft);
+
+    await Promise.all([
+      beforeReviewFrame.locator("html").evaluate(() => window.scrollTo(0, 0)),
+      afterReviewFrame.locator("html").evaluate(() => window.scrollTo(0, 0)),
+    ]);
+    await launched.page.waitForTimeout(80);
+    await beforeReviewFrame.locator("html").evaluate(() => {
+      const outlines = [...document.querySelectorAll("[data-pageroot-outline-id]")]
+        .filter((element) => element.getBoundingClientRect().height > 0);
+      const target = outlines[Math.floor(outlines.length / 2)];
+      target?.scrollIntoView({ block: "start", behavior: "auto" });
+    });
+    const followerScrollSamples = [];
+    for (let index = 0; index < 8; index += 1) {
+      await launched.page.waitForTimeout(20);
+      followerScrollSamples.push(await afterReviewFrame.locator("html").evaluate(
+        () => window.scrollY,
+      ));
+    }
+    const reducedMotion = await afterReviewFrame.locator("html").evaluate(() => (
+      matchMedia("(prefers-reduced-motion: reduce)").matches
+    ));
+    if (!reducedMotion) {
+      const movingSamples = followerScrollSamples.filter((value) => value > 1);
+      expect(new Set(movingSamples.map((value) => Math.round(value))).size)
+        .toBeGreaterThan(1);
+      movingSamples.slice(1).forEach((value, index) => {
+        expect(value).toBeGreaterThanOrEqual(movingSamples[index] - 1);
+      });
+      expect(movingSamples[0]).toBeLessThan(movingSamples.at(-1));
+    }
+    const visibleOutlineAnchor = (frame) => frame.locator("html").evaluate(() => {
+      const outlines = [...document.querySelectorAll("[data-pageroot-outline-id]")]
+        .filter((element) => element.getBoundingClientRect().height > 0);
+      const anchor = outlines.find((element) => element.getBoundingClientRect().bottom > 1)
+        || outlines.at(-1);
+      if (!anchor) return { outlineId: "", ratio: 0 };
+      const rect = anchor.getBoundingClientRect();
+      return {
+        outlineId: anchor.getAttribute("data-pageroot-outline-id") || "",
+        ratio: Math.max(0, Math.min(1, (0 - rect.top) / Math.max(1, rect.height))),
+      };
+    });
+    const beforeOutlineAnchor = await visibleOutlineAnchor(beforeReviewFrame);
+    expect(beforeOutlineAnchor.outlineId).not.toBe("");
+    const afterOutlineProgress = () => afterReviewFrame.locator(
+      `[data-pageroot-outline-id="${beforeOutlineAnchor.outlineId}"]`,
+    ).evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      return Math.max(0, Math.min(1, (0 - rect.top) / Math.max(1, rect.height)));
+    });
+    await expect.poll(afterOutlineProgress).toBeCloseTo(beforeOutlineAnchor.ratio, 1);
+    await beforeReviewFrame.locator("html").evaluate(() => window.scrollTo(0, 0));
+    await expect.poll(() => afterReviewFrame.locator("html").evaluate(() => window.scrollY))
+      .toBe(0);
+    await beforeReviewFrame.locator("html").evaluate(() => {
+      window.scrollTo(0, 0);
+      dispatchEvent(new WheelEvent("wheel", { deltaY: -120 }));
+    });
+    await launched.page.waitForTimeout(120);
+    expect(await afterReviewFrame.locator("html").evaluate(() => window.scrollY)).toBe(0);
+    if (process.env.PAGEROOT_CAPTURE_REVIEW) {
+      const captureDirectory = path.join(productRoot, "output", "design-qa");
+      mkdirSync(captureDirectory, { recursive: true });
+      await launched.page.getByRole("slider", {
+        name: "非修改区域上下文可见度",
+      }).fill("18");
+      await wholePageButton.click();
+      await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
+        "data-pageroot-review-filter",
+      )).toBe("all");
+      await Promise.all([
+        beforeViewport.evaluate((element) => { element.scrollLeft = 0; }),
+        afterViewport.evaluate((element) => { element.scrollLeft = 0; }),
+        beforeReviewFrame.locator("html").evaluate(() => window.scrollTo(0, 0)),
+        afterReviewFrame.locator("html").evaluate(() => window.scrollTo(0, 0)),
+      ]);
+      const closeMapButton = launched.page.getByRole("button", {
+        name: "收起内容地图",
+      }).first();
+      if (await closeMapButton.isVisible()) await closeMapButton.click();
+      await launched.page.screenshot({
+        path: path.join(captureDirectory, "ai-review-final.png"),
+        animations: "disabled",
+      });
+      await launched.page.getByRole("button", {
+        name: "打开内容地图",
+      }).click();
+      await launched.page.screenshot({
+        path: path.join(captureDirectory, "ai-review-map.png"),
+        animations: "disabled",
+      });
+    }
+    await launched.page.getByRole("button", {
+      name: "打开 AI 修改后",
+    }).click();
+    await expect(launched.page.getByRole("dialog", {
+      name: /打开 AI 修改后（.+）？/u,
+    })).toBeVisible();
+    await expect(launched.page.getByRole("button", { name: "继续审阅" }))
+      .toBeFocused();
+    await launched.page.evaluate(() => {
+      window.__pagerootSawHandoffFlash = false;
+      window.__pagerootHandoffFlashEvents = [];
+      window.__pagerootHandoffObserver = new MutationObserver(() => {
+        const panel = document.querySelector(".handoff-panel");
+        const review = document.querySelector('[data-testid="ai-review-workspace"]');
+        const reviewCoversWindow = Boolean(
+          review
+          && review.getClientRects().length > 0
+          && getComputedStyle(review).position === "fixed",
+        );
+        if (panel && panel.getClientRects().length > 0 && !reviewCoversWindow) {
+          window.__pagerootSawHandoffFlash = true;
+          window.__pagerootHandoffFlashEvents.push({
+            panelText: panel.textContent?.slice(0, 120) || "",
+            reviewPresent: Boolean(review),
+            drawer: document.querySelector(".side-drawer")?.getAttribute("data-drawer") || "",
+            sourceTitle: document.querySelector(".window-file-title-row strong")?.textContent || "",
+          });
+        }
+      });
+      window.__pagerootHandoffObserver.observe(document.body, { childList: true, subtree: true });
+    });
+    await launched.page.getByRole("button", { name: "确认并打开" }).click();
+    await expect.poll(async () => launched.page.evaluate(async () => {
+      const project = await window.htmlAIProjects?.getActiveProject();
+      const reviewVisible = Boolean(document.querySelector('[data-testid="ai-review-workspace"]'));
+      const visibleAlert = [...document.querySelectorAll('[role="alert"]')]
+        .find((element) => element.getClientRects().length > 0)?.textContent || "";
+      return `${project?.sourcePath || ""}|review=${reviewVisible}|alert=${visibleAlert}`;
+    }), { timeout: 30_000 }).toMatch(/\/working\/generated-ai-loop-V1\.1\.html\|review=false/u);
     const opened = await launched.page.evaluate(
       () => window.htmlAIProjects?.getActiveProject(),
     );
@@ -522,6 +1452,12 @@ test("a verified AI result stays pending until the user opens the new HTML", asy
     expect(opened.sourcePath).toMatch(/\/working\/generated-ai-loop-V1\.1\.html$/u);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
     expect(readFileSync(opened.sourcePath, "utf8")).toContain(UPDATED_TEXT);
+    expect(await launched.page.evaluate(() => {
+      window.__pagerootHandoffObserver?.disconnect();
+      return window.__pagerootHandoffFlashEvents;
+    })).toEqual([]);
+    await expect(launched.page.locator(".handoff-panel").filter({ visible: true }))
+      .toHaveCount(0);
     const openedFrame = await loadedDiskFrame(launched.page, opened.sourcePath);
     await expect(openedFrame.locator(caseSelector("list-item")))
       .toHaveText(UPDATED_TEXT);
@@ -578,10 +1514,10 @@ test("two AI versions activate in order and survive relaunch without identity dr
     );
     runOfficialFinalizer(firstRequest.requestRoot, firstRequest.changeRequest);
     await expect(launched.page.getByText(
-      "修改结果已通过检查",
+      "修改结果已完成检查",
       { exact: true },
     ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
-    await launched.page.getByRole("button", { name: "打开最新版" }).click();
+    await launched.page.getByRole("button", { name: "直接打开" }).click();
     await expect.poll(async () => (
       launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject())
     ), { timeout: 30_000 }).toMatchObject({
@@ -607,10 +1543,10 @@ test("two AI versions activate in order and survive relaunch without identity dr
     );
     runOfficialFinalizer(secondRequest.requestRoot, secondRequest.changeRequest);
     await expect(launched.page.getByText(
-      "修改结果已通过检查",
+      "修改结果已完成检查",
       { exact: true },
     ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
-    await launched.page.getByRole("button", { name: "打开最新版" }).click();
+    await launched.page.getByRole("button", { name: "直接打开" }).click();
     await expect.poll(async () => (
       launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject())
     ), { timeout: 30_000 }).toMatchObject({
@@ -666,7 +1602,7 @@ test("two AI versions activate in order and survive relaunch without identity dr
   }
 });
 
-test("an internal AI supplement is sealed, scope-authorized, opened, and shown in history", async () => {
+test("an internal AI supplement is sealed, applied, opened, and shown in history", async () => {
   test.setTimeout(180_000);
   const fixture = createSourceFixture("supplement-ai-loop.html");
   const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
@@ -700,7 +1636,7 @@ test("an internal AI supplement is sealed, scope-authorized, opened, and shown i
       .replace("校验通过", "补充指令已回写"));
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
     await expect(launched.page.getByText(
-      "修改结果已通过检查",
+      "修改结果已完成检查",
       { exact: true },
     ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
     await expect(launched.page.getByText(
@@ -718,7 +1654,7 @@ test("an internal AI supplement is sealed, scope-authorized, opened, and shown i
     expect(archive.records).toHaveLength(1);
     expect(archive.records[0].refersTo).toContain(instructionId);
 
-    await launched.page.getByRole("button", { name: "打开最新版" }).click();
+    await launched.page.getByRole("button", { name: "直接打开" }).click();
     await expect.poll(async () => (
       launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject())
     ), { timeout: 30_000 }).toMatchObject({
@@ -749,7 +1685,7 @@ test("an internal AI supplement is sealed, scope-authorized, opened, and shown i
   }
 });
 
-test("a no-change result returns to editable requirements without a dead end", async () => {
+test("a no-change result returns to editing and remains reopenable", async () => {
   test.setTimeout(120_000);
   const fixture = createSourceFixture("no-change-recovery.html");
   const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
@@ -773,15 +1709,107 @@ test("a no-change result returns to editable requirements without a dead end", a
     await expect(launched.page.getByRole("button", { name: "返回编辑" }))
       .toBeVisible();
     await expect(launched.page.getByRole("button", { name: "修改要求" }))
-      .toBeVisible();
+      .toHaveCount(0);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
 
-    await launched.page.getByRole("button", { name: "修改要求" }).click();
-    const editor = launched.page.getByRole("textbox", { name: /编辑评论/u });
-    await expect(editor).toBeVisible();
-    await expect(editor).toHaveValue(new RegExp(UPDATED_TEXT, "u"));
+    await launched.page.getByRole("button", { name: "返回编辑" }).click();
+    await expect(launched.page.getByRole("button", { name: "上轮处理" }))
+      .toBeVisible();
     await expect(launched.page.getByRole("button", { name: /发送至 Qoder/u }))
       .toBeEnabled();
+    await launched.page.getByRole("button", { name: "上轮处理" }).click();
+    await expect(launched.page.getByText(
+      "这次没有产生有效变化",
+      { exact: true },
+    ).filter({ visible: true }).first()).toBeVisible();
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("returning from review restores the editable pre-AI version and preserves the candidate", async () => {
+  test.setTimeout(180_000);
+  const fixture = createSourceFixture("return-before-ai.html");
+  const commentText = `只把这个列表项改为“${UPDATED_TEXT}”，其他地方保持不变。`;
+  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  try {
+    const request = await addCommentAndSubmit(
+      launched.page,
+      launched.electronApp,
+      fixture.sourcePath,
+    );
+    writeAiOutput(
+      request.requestRoot,
+      (base) => base.replace(ORIGINAL_TEXT, UPDATED_TEXT),
+    );
+    runOfficialFinalizer(request.requestRoot, request.changeRequest);
+    await expect(launched.page.getByText(
+      "修改结果已完成检查",
+      { exact: true },
+    ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+    const candidateFiles = workingHtmlFiles(
+      launched.workspace,
+      request.changeRequest.projectId,
+    );
+    expect(candidateFiles).toHaveLength(1);
+    expect(readFileSync(candidateFiles[0], "utf8")).toContain(UPDATED_TEXT);
+
+    await launched.page.getByRole("button", { name: "审阅对比" }).click();
+    await expect(launched.page.getByTestId("ai-review-workspace"))
+      .toBeVisible({ timeout: 30_000 });
+    await launched.page.getByRole("button", { name: "返回 AI 修改前" }).click();
+    const dialog = launched.page.getByRole("dialog", {
+      name: /返回 AI 修改前（版本 \d+）？/u,
+    });
+    await expect(dialog).toBeVisible();
+    if (process.env.PAGEROOT_CAPTURE_REVIEW) {
+      const captureDirectory = path.join(productRoot, "output", "design-qa");
+      mkdirSync(captureDirectory, { recursive: true });
+      await launched.page.screenshot({
+        path: path.join(captureDirectory, "ai-review-return-confirmation.png"),
+        animations: "disabled",
+      });
+    }
+    await expect(dialog.getByText(/确认后不会采用这次 AI 返回的 版本 \d+。/u))
+      .toBeVisible();
+    await expect(dialog.getByText(/将继续使用 版本 \d+（AI 修改前）为基线重新修改。/u))
+      .toBeVisible();
+    await expect(dialog.getByRole("button", {
+      name: "AI 返回的 HTML 已自动保留，点击在 Finder 中显示。",
+    })).toBeVisible();
+    const [returnBackground, continueBackground] = await Promise.all([
+      dialog.getByRole("button", { name: "返回修改前版本" })
+        .evaluate((element) => getComputedStyle(element).backgroundColor),
+      dialog.getByRole("button", { name: "继续审阅" })
+        .evaluate((element) => getComputedStyle(element).backgroundColor),
+    ]);
+    expect(returnBackground).not.toBe(continueBackground);
+    await dialog.getByRole("button", { name: "返回修改前版本" }).click();
+
+    await expect(launched.page.getByTestId("ai-review-workspace")).toHaveCount(0);
+    await loadedDiskFrame(launched.page, fixture.sourcePath);
+    await expect(launched.page.locator(".comment-card").filter({ hasText: commentText }))
+      .toHaveCount(1);
+    const restored = await launched.page.evaluate(
+      () => window.htmlAIProjects?.getActiveProject(),
+    );
+    expect(restored.sourcePath).toBe(realpathSync(fixture.sourcePath));
+    const registry = JSON.parse(readFileSync(
+      path.join(launched.workspace, "project-registry.json"),
+      "utf8",
+    ));
+    const runtime = JSON.parse(readFileSync(path.join(
+      launched.workspace,
+      "projects",
+      registry.projects[request.changeRequest.projectId].storageDirectoryName,
+      "runtime-state.json",
+    ), "utf8"));
+    expect(runtime.lifecycleState).toBe("editing");
+    expect(runtime.activeRun).toBeNull();
+    expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
+    expect(existsSync(candidateFiles[0])).toBe(true);
+    expect(readFileSync(candidateFiles[0], "utf8")).toContain(UPDATED_TEXT);
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
@@ -1615,7 +2643,7 @@ test("a malformed AI HTML return is rejected before completion or opening", asyn
   }
 });
 
-test("a soft out-of-scope AI return is audited without blocking the ready version", async () => {
+test("a broad but related AI return is accepted without a target-scope error", async () => {
   const fixture = createSourceFixture();
   const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
   try {
@@ -1631,13 +2659,12 @@ test("a soft out-of-scope AI return is audited without blocking the ready versio
         "<title>unauthorized title mutation</title>",
       ));
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
-    await expect(launched.page.getByText("已记录评论范围外的额外变化", { exact: true })
-      .filter({ visible: true }).first())
-      .toBeVisible({ timeout: 30_000 });
     await expect(launched.page.getByText(
-      "修改结果已通过检查",
+      "修改结果已完成检查",
       { exact: true },
     ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+    await expect(launched.page.getByText("已记录评论范围外的额外变化", { exact: true }))
+      .toHaveCount(0);
     await expect(launched.page.getByRole("button", { name: "采用这些额外变化" }))
       .toHaveCount(0);
     const active = await launched.page.evaluate(
@@ -1670,11 +2697,11 @@ test("a committed version that the desktop cannot activate stays visibly blocked
     writeAiOutput(request.requestRoot, (base) => base.replace(ORIGINAL_TEXT, UPDATED_TEXT));
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
     await expect(launched.page.getByText(
-      "修改结果已通过检查",
+      "修改结果已完成检查",
       { exact: true },
     ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
     await launched.page.getByRole("button", {
-      name: "打开最新版",
+      name: "直接打开",
     }).click();
     await expect(launched.page.getByText(/新版本文件暂时无法打开|最新版暂时无法打开/u)
       .filter({ visible: true }).first())

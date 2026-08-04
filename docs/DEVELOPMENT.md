@@ -100,7 +100,10 @@ The weekly/manual read-only `CI Health` workflow computes a rolling 30-day repor
 - Route edits through SourcePatchEngine and preserve unrelated bytes.
 - Derive Canvas history only from accepted SourcePatch forward/exact-inverse
   results; never add a preview-DOM or component-local snapshot stack.
-- Fail closed on ambiguous mapping, scope or identity.
+- Fail closed on ambiguous mapping or patch scope for direct source edits. For AI
+  candidates, keep protocol/identity/Hash/path/complete-HTML/executable checks
+  hard, but treat comment targets as review guidance and low page continuity as
+  a mandatory-review signal rather than a failed Attempt.
 - Keep local filesystem operations behind the Electron/Bridge boundary.
 - Add schema fixtures and compatibility tests for protocol changes.
 - Never include real user documents in tests.

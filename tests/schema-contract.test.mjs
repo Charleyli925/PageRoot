@@ -34,6 +34,7 @@ const pairs = [
   ["attempt-outcome.v1.schema.json", "attempt-outcome.failed.json"],
   ["attempt-outcome.v1.schema.json", "attempt-outcome.no-change.json"],
   ["attempt-outcome.v1.schema.json", "attempt-outcome.version-created.json"],
+  ["candidate-assessment.v1.schema.json", "candidate-assessment.ready.json"],
   ["change-request.v3.schema.json", "change-request.frozen.json"],
   ["committed-marker.v1.schema.json", "committed-marker.initial.json"],
   ["committed-marker.v1.schema.json", "committed-marker.valid.json"],
