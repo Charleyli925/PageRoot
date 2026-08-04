@@ -234,6 +234,31 @@ test("safe-save projection requires the visible Canvas to acknowledge current so
   assert.match(workbench, /isSafelySaved\s*\? "已安全保存"/u);
 });
 
+test("project registration treats supplied empty HTML as authoritative repair content", () => {
+  const registration = section(
+    workbench,
+    "const ensureProjectRegistered = useCallback",
+    "const prepareProjectRecords = useCallback",
+  );
+
+  assert.match(
+    registration,
+    /const hasCanonicalSource = typeof payload\.content === "string";/u,
+  );
+  assert.match(
+    registration,
+    /hasCanonicalSource\s*&& await browserSha256\(canonicalSource\) !== nextSourceSha256/u,
+  );
+  assert.match(
+    registration,
+    /mustRepairCleanProjection && !hasCanonicalSource/u,
+  );
+  assert.match(
+    registration,
+    /const shouldAdoptCanonicalSource = Boolean\(\s*hasCanonicalSource\s*&& currentDocumentClean/u,
+  );
+});
+
 test("a disk acknowledgement cannot impersonate a Canvas render acknowledgement", () => {
   const flush = section(
     workbench,

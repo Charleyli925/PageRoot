@@ -667,6 +667,11 @@ export default function Workbench() {
   const invalidateCanvasRenderAcks = useCallback(() => {
     setCanvasRenderAcks({ edit: null, preview: null });
   }, []);
+  const invalidateEditCanvasRenderAck = useCallback(() => {
+    setCanvasRenderAcks((current) => (
+      current.edit ? { ...current, edit: null } : current
+    ));
+  }, []);
   const acknowledgeCanvasRender = useCallback((
     surface: CanvasMode,
     generation: number,
@@ -1764,12 +1769,13 @@ export default function Workbench() {
       );
       const canonicalSource =
         typeof payload.content === "string" ? payload.content : "";
+      const hasCanonicalSource = typeof payload.content === "string";
       if (
         !nextProjectId
         || !nextDocumentId
         || !/^sha256:[a-f0-9]{64}$/.test(nextSourceSha256)
         || (
-          canonicalSource
+          hasCanonicalSource
           && await browserSha256(canonicalSource) !== nextSourceSha256
         )
       ) {
@@ -1789,11 +1795,11 @@ export default function Workbench() {
       const mustRepairCleanProjection = Boolean(
         currentDocumentClean && currentHtmlSha256 !== nextSourceSha256
       );
-      if (mustRepairCleanProjection && !canonicalSource) {
+      if (mustRepairCleanProjection && !hasCanonicalSource) {
         throw new Error("项目记录与当前画布不一致，且缺少可自动恢复的完整源 HTML。");
       }
       const shouldAdoptCanonicalSource = Boolean(
-        canonicalSource
+        hasCanonicalSource
         && currentDocumentClean
         && (adoptCanonicalSource || mustRepairCleanProjection)
       );
@@ -1967,6 +1973,7 @@ export default function Workbench() {
   ]);
 
   useEffect(() => {
+    if (canvasMode !== "edit") return undefined;
     let cancelled = false;
     const expectedHtml = html;
     const expectedGeneration = canvasGeneration;
@@ -1990,7 +1997,7 @@ export default function Workbench() {
     return () => {
       cancelled = true;
     };
-  }, [acknowledgeCanvasRender, canvasGeneration, html]);
+  }, [acknowledgeCanvasRender, canvasGeneration, canvasMode, html]);
 
   const clearAutosaveTimer = useCallback(() => {
     if (autosaveTimerRef.current !== null) {
@@ -9705,6 +9712,7 @@ export default function Workbench() {
                     ) ? capturedContext : null;
                     setPageViewContext(nextContext);
                     editorRef.current?.applyPageViewContext(nextContext);
+                    invalidateEditCanvasRenderAck();
                     setCanvasMode("edit");
                   })
                   .finally(() => {

@@ -280,7 +280,11 @@ test("editing and interactive preview are separate canvas modes", () => {
   assert.match(workbench, /<HtmlInteractionPreview[\s\S]*?height="100%"/);
   assert.match(
     workbench,
-    /capturePageViewContext\(\)[\s\S]*?applyPageViewContext\(nextContext\)[\s\S]*?setCanvasMode\("edit"\)/,
+    /capturePageViewContext\(\)[\s\S]*?applyPageViewContext\(nextContext\)[\s\S]*?invalidateEditCanvasRenderAck\(\)[\s\S]*?setCanvasMode\("edit"\)/,
+  );
+  assert.match(
+    workbench,
+    /useEffect\(\(\) => \{\s*if \(canvasMode !== "edit"\) return undefined;[\s\S]*?const verifyInitialRender = async \(\) => \{[\s\S]*?acknowledgeCanvasRender\("edit"[\s\S]*?\}, \[acknowledgeCanvasRender, canvasGeneration, canvasMode, html\]\);/,
   );
   assert.match(workbench, /transport=\{interactivePreviewTransport\}/);
   assert.doesNotMatch(interactionPreview, /隔离交互预览|运行时 DOM、表单和存储不会写回源码/);
