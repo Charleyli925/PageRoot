@@ -176,6 +176,11 @@ function appendSrcSetReferences(value, extensions, append) {
   }
 }
 
+function textContentFor(node) {
+  if (typeof node?.value === "string") return node.value;
+  return (node?.childNodes || []).map((child) => textContentFor(child)).join("");
+}
+
 function collectHtmlAssetReferences(html) {
   const references = [];
   const append = (value, extensions) => {
@@ -184,8 +189,28 @@ function collectHtmlAssetReferences(html) {
   const visit = (node) => {
     const tagName = String(node.tagName || "").toLowerCase();
     const attributes = attributesFor(node);
+    const inlineStyle = cssReferences(attributes.get("style") || "");
+    for (const value of inlineStyle.urls) {
+      append(value, CSS_URL_EXTENSIONS);
+    }
     if (tagName === "script") {
       append(attributes.get("src"), SCRIPT_EXTENSIONS);
+      if (
+        !attributes.get("src")
+        && (attributes.get("type") || "").trim().toLowerCase() === "module"
+      ) {
+        for (const value of javaScriptImports(textContentFor(node))) {
+          append(value, SCRIPT_EXTENSIONS);
+        }
+      }
+    } else if (tagName === "style") {
+      const inlineStylesheet = cssReferences(textContentFor(node));
+      for (const value of inlineStylesheet.imports) {
+        append(value, STYLE_EXTENSIONS);
+      }
+      for (const value of inlineStylesheet.urls) {
+        append(value, CSS_URL_EXTENSIONS);
+      }
     } else if (tagName === "link") {
       const rel = (attributes.get("rel") || "")
         .toLowerCase()

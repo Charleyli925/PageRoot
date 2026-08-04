@@ -8270,6 +8270,19 @@ export default function Workbench() {
     isCurrentProjectContext,
   ]);
 
+  const requestActiveRunEnd = useCallback(() => {
+    if (!activeRun) return;
+    if (handoffCancellationNeedsConfirmation) {
+      setCancelRunConfirmationKey(activeRunOperationKey(activeRun));
+      return;
+    }
+    void cancelActiveRun();
+  }, [
+    activeRun,
+    cancelActiveRun,
+    handoffCancellationNeedsConfirmation,
+  ]);
+
   const resolveAiConflict = useCallback(async (action: "adopt-ai" | "keep-external") => {
     if (!activeRun || activeRun.status !== "awaiting-conflict-resolution") return;
     const run = { ...activeRun };
@@ -10891,17 +10904,11 @@ export default function Workbench() {
               activeRun.handoffMessage,
               activeRun,
             )}
-            onCancel={() => void cancelActiveRun()}
+            onCancel={requestActiveRunEnd}
             onResolveConflict={(choice) => void resolveAiConflict(choice)}
             onRevealRequestFolder={() => void revealActiveRunInFinder()}
             onReturnToEditing={returnToEditingFromTerminalRun}
-            onRequestEnd={() => {
-              if (handoffCancellationNeedsConfirmation) {
-                setCancelRunConfirmationKey(activeRunOperationKey(activeRun));
-              } else {
-                void cancelActiveRun();
-              }
-            }}
+            onRequestEnd={requestActiveRunEnd}
             onPreviewSentHtml={() => {
               setHandoffPreviewOpen(true);
               setCanvasMode("preview");

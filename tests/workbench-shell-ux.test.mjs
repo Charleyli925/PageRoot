@@ -751,6 +751,17 @@ test("ending a copied AI run warns clearly and restores editing with a stop remi
   );
   assert.match(
     workbench,
+    /const requestActiveRunEnd = useCallback\(\(\) => \{[\s\S]*?handoffCancellationNeedsConfirmation[\s\S]*?setCancelRunConfirmationKey\(activeRunOperationKey\(activeRun\)\)[\s\S]*?void cancelActiveRun\(\)/,
+  );
+  const handoffFooterPropsStart = workbench.lastIndexOf("<HandoffFooter");
+  const handoffFooterProps = workbench.slice(
+    handoffFooterPropsStart,
+    workbench.indexOf("/>", handoffFooterPropsStart),
+  );
+  assert.match(handoffFooterProps, /onCancel=\{requestActiveRunEnd\}/);
+  assert.match(handoffFooterProps, /onRequestEnd=\{requestActiveRunEnd\}/);
+  assert.match(
+    workbench,
     /activeRun\?\.status === "processing"[\s\S]*?runSnapshot\.activeHandoffMayBeRunning/,
   );
   assert.match(
