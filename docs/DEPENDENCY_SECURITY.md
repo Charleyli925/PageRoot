@@ -8,15 +8,21 @@ Dependabot checks monthly. Coupled React packages are updated together, and mino
 
 ## Temporary reviewed exceptions
 
-Each exception has its own mandatory review date. An exception is removed in
-the same Pull Request that introduces a verified compatible fix.
-
-| Advisory | Review by | Dependency path | Current assessment |
-| --- | --- | --- | --- |
-| [GHSA-mh99-v99m-4gvg](https://github.com/advisories/GHSA-mh99-v99m-4gvg) | 2026-08-15 | ESLint/electron-builder -> minimatch -> brace-expansion | Reviewed 2026-07-26. The available fixed brace-expansion is a new major while several build-only parents require older majors; forcing one global override would replace their parser contract without upstream compatibility evidence. PageRoot passes only repository-owned glob patterns to these lint and packaging tools, and none of this dependency tree is shipped in the Electron package. Upgrade or remove the parent chains as soon as compatible releases exist. |
-| [GHSA-f88m-g3jw-g9cj](https://github.com/advisories/GHSA-f88m-g3jw-g9cj) | 2026-08-31 | Next.js -> Sharp/libvips | Reviewed 2026-07-23. The current latest compatible parent still selects Sharp 0.34.x. Sharp and Next.js are not included in the Electron package allowlist. |
+There are no active exceptions. Each future exception needs its own mandatory
+review date and must be removed in the same Pull Request that introduces a
+verified compatible fix.
 
 ## Reviewed fixes
+
+The 2026-08-04 security convergence upgrades `next` and
+`eslint-config-next` to 16.3.0, which refreshes the optional Sharp/libvips
+closure to Sharp 0.35.3. It also resolves compatible `fast-uri`, PostCSS and
+all affected `brace-expansion` lockfile entries. The separate `undici` fixes
+stay within the parent-supported major: Miniflare receives 7.29.0 while
+node-gyp receives 6.28.0. These constrained overrides keep the Cloudflare and
+node-gyp toolchains compatible while removing their advisories. The audit now
+returns zero vulnerabilities, so the prior Brace Expansion and Sharp
+exceptions are removed from the executable allowlist.
 
 The 2026-07-26 dependency convergence incorporates the complete contents of
 open dependency PRs #9, #12 and #30, then verifies them with the current
@@ -26,10 +32,12 @@ hoisted `entities` version prevents the packaged Bridge from losing a nested
 dependency that Electron Builder does not copy from inside another managed
 module. The dependency audit rejects nested or incomplete packaged-runtime
 closures before the artifact stage. The grouped development dependencies use
-their reviewed patch or minor versions. A same-major override selects PostCSS
-8.5.23 for Next.js and tar 7.5.22 for the build chain; the former PostCSS and tar
-exceptions were removed after `npm audit` no longer reported them.
+their reviewed patch or minor versions. The current same-major overrides select
+PostCSS 8.5.25 and tar 7.5.22 for the build chain; related exceptions are
+removed after `npm audit` no longer reports them.
 
 The macOS package includes the compiled desktop renderer, selected desktop modules, `parse5`, `entities`, the reviewed `electron-updater` closure, schemas and build provenance; it explicitly excludes the general `node_modules` tree. `semver` is pinned at the package root so the updater closure has no hidden nested runtime copy. The dependency audit rejects missing, nested or undeclared modules in this exact packaged allowlist. These exceptions do not authorize adding the affected packages to the packaged runtime.
 
-Do not use `npm audit fix --force`: npm currently proposes an incompatible Next.js downgrade. Remove each exception as soon as a compatible upstream release resolves it, and rerun all source and artifact gates after any dependency change.
+Do not use `npm audit fix --force`: review every dependency update deliberately,
+prefer compatible upstream fixes or narrow overrides, and rerun all source and
+artifact gates after any dependency change.
