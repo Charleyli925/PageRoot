@@ -56,10 +56,54 @@ test("independent preview protocol serves one volatile document and bounded loca
   const siteRoot = path.join(temporaryRoot, "site");
   await mkdir(siteRoot);
   const sourcePath = path.join(siteRoot, "report.html");
+  const sourceHtml = [
+    "<!doctype html>",
+    '<link rel="stylesheet" href="styles/site.css">',
+    '<script type="module" src="chart.js"></script>',
+    "<style>@import \"styles/inline.css\"; .inline-sheet { background-image: url(\"assets/inline-sheet.png\"); }</style>",
+    '<div style="background-image: url(\'assets/inline-attribute.png\')"></div>',
+    '<script type="module">import "./inline-module.js";</script>',
+    '<script src="escape.js"></script>',
+    '<img src="assets/hero.png">',
+    '<img src=".env">',
+  ].join("\n");
   const assetPath = path.join(siteRoot, "chart.js");
   const outsidePath = path.join(temporaryRoot, "outside.js");
-  await writeFile(sourcePath, "<!doctype html><script src=chart.js></script>");
-  await writeFile(assetPath, "window.chartLoaded = true;");
+  await mkdir(path.join(siteRoot, "styles"));
+  await mkdir(path.join(siteRoot, "assets"));
+  await mkdir(path.join(siteRoot, "modules"));
+  await mkdir(path.join(siteRoot, ".git"));
+  await writeFile(sourcePath, sourceHtml);
+  await writeFile(assetPath, 'import "./modules/helper.mjs";');
+  await writeFile(path.join(siteRoot, "modules", "helper.mjs"), "window.chartLoaded = true;");
+  await writeFile(
+    path.join(siteRoot, "styles", "site.css"),
+    '@import "theme.css"; .hero { background-image: url("../assets/hero.png"); }',
+  );
+  await writeFile(
+    path.join(siteRoot, "styles", "theme.css"),
+    '@font-face { font-family: Preview; src: url("../assets/preview.woff2"); }',
+  );
+  await writeFile(
+    path.join(siteRoot, "styles", "inline.css"),
+    '@font-face { font-family: Inline; src: url("../assets/inline.woff2"); }',
+  );
+  await writeFile(
+    path.join(siteRoot, "inline-module.js"),
+    'import "./modules/inline-helper.mjs";',
+  );
+  await writeFile(
+    path.join(siteRoot, "modules", "inline-helper.mjs"),
+    "window.inlineModuleLoaded = true;",
+  );
+  await writeFile(path.join(siteRoot, "assets", "hero.png"), "synthetic image");
+  await writeFile(path.join(siteRoot, "assets", "preview.woff2"), "synthetic font");
+  await writeFile(path.join(siteRoot, "assets", "inline-sheet.png"), "synthetic image");
+  await writeFile(path.join(siteRoot, "assets", "inline-attribute.png"), "synthetic image");
+  await writeFile(path.join(siteRoot, "assets", "inline.woff2"), "synthetic font");
+  await writeFile(path.join(siteRoot, ".env"), "PRIVATE_TOKEN=preview-test\n");
+  await writeFile(path.join(siteRoot, ".git", "config"), "[core]\nrepositoryformatversion = 0\n");
+  await writeFile(path.join(siteRoot, "not-declared.js"), "window.private = true;");
   await writeFile(outsidePath, "window.escaped = true;");
   await symlink(outsidePath, path.join(siteRoot, "escape.js"));
 
@@ -99,7 +143,7 @@ test("independent preview protocol serves one volatile document and bounded loca
   controller.install();
   assert.equal(typeof handler, "function");
   const session = await controller.createSession({
-    html: "<!doctype html><h1>独立预览</h1>",
+    html: sourceHtml,
     bootstrapJavaScript: "window.previewBootstrap = true;",
     sourcePath,
   });
@@ -111,10 +155,14 @@ test("independent preview protocol serves one volatile document and bounded loca
 
   const documentResponse = await handler(new Request(session.url));
   assert.equal(documentResponse.status, 200);
-  assert.match(await documentResponse.text(), /独立预览/);
+  assert.match(await documentResponse.text(), /chart\.js/);
   assert.equal(
     documentResponse.headers.get("cache-control"),
     "no-store",
+  );
+  assert.match(
+    documentResponse.headers.get("content-security-policy") || "",
+    /base-uri 'none'/,
   );
 
   const bootstrapResponse = await handler(new Request(
@@ -131,11 +179,62 @@ test("independent preview protocol serves one volatile document and bounded loca
   assert.equal(fetched.length, 1);
   assert.match(fetched[0].url, /chart\.js$/u);
 
+  const previewUrl = (relativePath) => (
+    PREVIEW_PROTOCOL_SCHEME + "://" + session.sessionId + "/" + relativePath
+  );
+  const importedModule = await handler(new Request(
+    previewUrl("modules/helper.mjs"),
+  ));
+  assert.equal(importedModule.status, 200);
+
+  const stylesheet = await handler(new Request(
+    previewUrl("styles/theme.css"),
+  ));
+  assert.equal(stylesheet.status, 200);
+
+  const cssAsset = await handler(new Request(
+    previewUrl("assets/preview.woff2"),
+  ));
+  assert.equal(cssAsset.status, 200);
+
+  const inlineStylesheet = await handler(new Request(
+    previewUrl("styles/inline.css"),
+  ));
+  assert.equal(inlineStylesheet.status, 200);
+  const inlineSheetAsset = await handler(new Request(
+    previewUrl("assets/inline-sheet.png"),
+  ));
+  assert.equal(inlineSheetAsset.status, 200);
+  const inlineAttributeAsset = await handler(new Request(
+    previewUrl("assets/inline-attribute.png"),
+  ));
+  assert.equal(inlineAttributeAsset.status, 200);
+  const inlineCssAsset = await handler(new Request(
+    previewUrl("assets/inline.woff2"),
+  ));
+  assert.equal(inlineCssAsset.status, 200);
+  const inlineModule = await handler(new Request(
+    previewUrl("inline-module.js"),
+  ));
+  assert.equal(inlineModule.status, 200);
+  const inlineModuleDependency = await handler(new Request(
+    previewUrl("modules/inline-helper.mjs"),
+  ));
+  assert.equal(inlineModuleDependency.status, 200);
+  assert.equal(fetched.length, 10);
+
+  const secretAsset = await handler(new Request(previewUrl(".env")));
+  assert.equal(secretAsset.status, 400);
+  const gitConfig = await handler(new Request(previewUrl(".git/config")));
+  assert.equal(gitConfig.status, 400);
+  const unlistedAsset = await handler(new Request(previewUrl("not-declared.js")));
+  assert.equal(unlistedAsset.status, 404);
+
   const escapedAsset = await handler(new Request(
     `pageroot-preview://${session.sessionId}/escape.js`,
   ));
-  assert.equal(escapedAsset.status, 400);
-  assert.equal(fetched.length, 1);
+  assert.equal(escapedAsset.status, 404);
+  assert.equal(fetched.length, 10);
 
   assert.deepEqual(controller.revokeSession(session.sessionId), {
     revoked: true,

@@ -28,9 +28,13 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   file URL; the renderer cannot supply an arbitrary URL or protocol
 - Desktop interactive preview runs under a dedicated `pageroot-preview:`
   origin. Its main-process session is size/count/time bounded, exposes no
-  PageRoot preload bridge, and serves relative local assets only after source
-  path authority, realpath and containment checks. The application renderer's
-  CSP remains strict and the preview scheme does not receive `bypassCSP`.
+  PageRoot preload bridge, and serves only a session-specific allowlist of
+  declared relative script, style, image, font and media assets after source
+  path authority, realpath and containment checks. Dotfiles, undeclared
+  siblings and files reachable only through an escaping symlink are never
+  exposed. The document response blocks `file:` resource loading and authored
+  base URLs. The application renderer's CSP remains strict and the preview
+  scheme does not receive `bypassCSP`.
 - Strict schemas, frozen inputs and identity/Hash checks before accepting AI output; scope evidence is always recorded, with protocol/script/target-integrity findings hard-blocked and ordinary breadth findings observed without a user-waiver loop
 - Main-process-only usage telemetry with exact event/property allowlists,
   random installation/session UUIDs and HMAC project pseudonyms; no hardware

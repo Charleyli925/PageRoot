@@ -66,6 +66,65 @@ test("run session rejects a late handoff result from an older run", () => {
   assert.equal(session.activeHandoff.status, "copying");
 });
 
+test("run session preserves handoff risk after a retry fails", () => {
+  const session = new RunSession({ sourcePath: "/tmp/page.html" });
+  const current = run();
+  session.trackRun(current);
+  session.publishHandoff({
+    sourcePath: current.sourcePath,
+    requestId: current.requestId,
+    attemptId: current.attemptId,
+    status: "copied",
+  });
+  session.publishHandoff({
+    sourcePath: current.sourcePath,
+    requestId: current.requestId,
+    attemptId: current.attemptId,
+    status: "failed",
+  });
+
+  assert.equal(session.activeHandoff.status, "failed");
+  assert.equal(session.activeHandoffMayBeRunning, true);
+});
+
+test("run session preserves copied handoff risk when refreshing the same run", () => {
+  const session = new RunSession({ sourcePath: "/tmp/page.html" });
+  const current = run();
+  session.trackRun(current);
+  session.publishHandoff({
+    sourcePath: current.sourcePath,
+    requestId: current.requestId,
+    attemptId: current.attemptId,
+    status: "copied",
+  });
+
+  session.setActiveRun({ ...current, status: "processing" });
+
+  assert.equal(session.activeHandoffMayBeRunning, true);
+});
+
+test("run session treats a recovered processing run as potentially handed off", () => {
+  const original = new RunSession({ sourcePath: "/tmp/page.html" });
+  const current = run();
+  original.trackRun(current);
+  original.publishHandoff({
+    sourcePath: current.sourcePath,
+    requestId: current.requestId,
+    attemptId: current.attemptId,
+    status: "copied",
+  });
+  assert.equal(original.activeHandoffMayBeRunning, true);
+
+  const recovered = new RunSession({ sourcePath: "/tmp/page.html" });
+  recovered.trackRun(current, { recovered: true });
+  assert.equal(recovered.activeHandoff, null);
+  assert.equal(recovered.activeHandoffMayBeRunning, true);
+
+  const fresh = new RunSession({ sourcePath: "/tmp/page.html" });
+  fresh.trackRun(current);
+  assert.equal(fresh.activeHandoffMayBeRunning, false);
+});
+
 test("run session rebases run, handoff and result through a source rename", () => {
   const session = new RunSession({ sourcePath: "/tmp/page.html" });
   const current = run();

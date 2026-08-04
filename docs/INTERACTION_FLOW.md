@@ -526,7 +526,7 @@ commit pending native edit checkpoint
 - 安全按钮：“继续等待”，默认获得键盘焦点。
 - 结束按钮：“结束本轮并继续编辑”。
 
-`Escape`、点击遮罩或“继续等待”只关闭弹窗，不改变 Request。若剪贴板交接失败，没有证据表明 AI Agent 已经收到任务，“取消本轮”仍可直接结束。
+`Escape`、点击遮罩或“继续等待”只关闭弹窗，不改变 Request。若剪贴板交接失败，没有证据表明 AI Agent 已经收到任务，“取消本轮”仍可直接结束。应用重启后恢复到 `processing` 的 Request 无法重新证明剪贴板状态，因此同样先显示确认；这不会声称 AI Agent 已收到任务，只避免在不确定时跳过提醒。
 
 用户确认结束后，工作台写入受控 `cancelled.json`、释放候选并立即恢复当前源 HTML 的编辑，不删除 Attempt 或它的 output 路径。界面只显示：“本轮已结束，已恢复编辑”“AI Agent 不会被自动停止；如仍在运行，请手动停止。”产品不声称也不尝试停止外部 AI Agent。
 
@@ -853,7 +853,7 @@ A 项目 processing 时切换 B 项目：
 15. 历史抽屉无横向滚动，且“在 Finder 中显示”只定位对应不可变 HTML。
 16. 处理中查看 Request/Attempt/output 并产生普通 `.DS_Store`，仍保持 processing 且 finalizer 可正常完成；同名软链接和其他额外文件继续失败关闭。
 17. completion 出现前的失败不点亮“AI 已返回”；completion 出现后的校验失败保留已返回事实。
-18. 剪贴板已交接时点击“结束本轮并继续编辑”，先显示精简的 AI Agent 风险确认；“继续等待”不改变 Request。
+18. 剪贴板已交接，或重启后恢复且无法重新证明交接状态时，点击“结束本轮并继续编辑”先显示精简的 AI Agent 风险确认；“继续等待”不改变 Request。
 19. 确认结束后立即恢复编辑并显示手动停止 AI Agent 的提醒；迟到 finalizer 可重复返回同一不可重试取消终态，且不写 completion、不建版、不改变源 HTML。
 20. 文字、样式、插入换行和同级下移落盘后，系统 Edit 菜单可逐项按原始字节撤销，并在重启后继续；重做恢复完全相同的 forward 字节。
 21. 评论正文和 `PROJECT.md` 获得焦点时，Edit > Undo 只恢复该输入框文字；评论/附件卡片状态与源 HTML 均不变化。

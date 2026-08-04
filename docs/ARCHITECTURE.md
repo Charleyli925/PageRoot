@@ -33,8 +33,9 @@ Comments + frozen input
 - Desktop interactive preview uses a short-lived `pageroot-preview:` document
   instead of `srcdoc`, so the authored page does not inherit the renderer's
   `script-src 'self'` policy. The main process owns the volatile session and
-  serves only its prepared HTML, its fixed bootstrap and realpath-contained
-  files beside the known source HTML.
+  serves only its prepared HTML, its fixed bootstrap and a session-specific
+  manifest of declared relative assets beside the known source HTML. It never
+  turns the source directory into a general-purpose local-file origin.
 - Preview-to-edit carries only a bounded `PageViewContext`: source-backed
   active/inactive class transitions and `hidden`, `open`, `aria-selected` or
   `aria-expanded` state, plus a strictly bounded read-only visual projection

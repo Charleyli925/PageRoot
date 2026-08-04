@@ -1,10 +1,12 @@
 import { randomBytes } from "node:crypto";
 import {
+  readFile,
   realpath,
   stat,
 } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { parse } from "parse5";
 
 export const PREVIEW_PROTOCOL_SCHEME = "pageroot-preview";
 export const PREVIEW_BOOTSTRAP_PATH = "/.pageroot/preview-bootstrap.js";
@@ -13,7 +15,51 @@ const DEFAULT_MAX_HTML_BYTES = 20 * 1024 * 1024;
 const DEFAULT_MAX_BOOTSTRAP_BYTES = 2 * 1024 * 1024;
 const DEFAULT_MAX_SESSIONS = 8;
 const DEFAULT_SESSION_TTL_MS = 30 * 60 * 1000;
+const DEFAULT_MAX_DECLARED_ASSETS = 256;
+const DEFAULT_MAX_DEPENDENCY_SCAN_BYTES = 2 * 1024 * 1024;
 const SESSION_ID_PATTERN = /^[a-f0-9]{32}$/u;
+const ASSET_REFERENCE_ORIGIN = "https://pageroot-preview.invalid";
+const SCRIPT_EXTENSIONS = new Set([".js", ".mjs"]);
+const STYLE_EXTENSIONS = new Set([".css"]);
+const IMAGE_EXTENSIONS = new Set([
+  ".avif",
+  ".gif",
+  ".ico",
+  ".jpeg",
+  ".jpg",
+  ".png",
+  ".svg",
+  ".webp",
+]);
+const FONT_EXTENSIONS = new Set([".otf", ".ttf", ".woff", ".woff2"]);
+const MEDIA_EXTENSIONS = new Set([
+  ".m4a",
+  ".mp3",
+  ".mp4",
+  ".oga",
+  ".ogg",
+  ".ogv",
+  ".wav",
+  ".webm",
+]);
+const CSS_URL_EXTENSIONS = new Set([
+  ...IMAGE_EXTENSIONS,
+  ...FONT_EXTENSIONS,
+  ...MEDIA_EXTENSIONS,
+]);
+const PREVIEW_DOCUMENT_CSP = [
+  "default-src 'self' http: https: data: blob:",
+  "script-src 'self' http: https: data: blob: 'unsafe-inline'",
+  "style-src 'self' http: https: data: blob: 'unsafe-inline'",
+  "img-src 'self' http: https: data: blob:",
+  "font-src 'self' http: https: data: blob:",
+  "media-src 'self' http: https: data: blob:",
+  "connect-src 'self' http: https:",
+  "worker-src 'self' blob:",
+  "frame-src 'self' http: https:",
+  "base-uri 'none'",
+  "object-src 'none'",
+].join("; ");
 
 let schemePrivilegesRegistered = false;
 
@@ -21,13 +67,14 @@ function utf8ByteLength(value) {
   return Buffer.byteLength(String(value), "utf8");
 }
 
-function response(body, status, contentType) {
+function response(body, status, contentType, extraHeaders = {}) {
   return new Response(body, {
     status,
     headers: {
       "cache-control": "no-store",
       "content-type": contentType,
       "x-content-type-options": "nosniff",
+      ...extraHeaders,
     },
   });
 }
@@ -63,6 +110,261 @@ async function resolveSourceRoot(sourcePath) {
     throw new TypeError("Preview sourcePath must resolve to a regular file.");
   }
   return realpath(path.dirname(sourceRealPath));
+}
+
+function normalizeRelativeAssetPath(value, basePath = "") {
+  if (typeof value !== "string") return null;
+  const reference = value.trim();
+  if (!reference || reference.length > 4096 || reference.startsWith("#")) {
+    return null;
+  }
+
+  let parsed;
+  try {
+    const baseUrl = new URL(
+      `${ASSET_REFERENCE_ORIGIN}/${basePath.replace(/^\/+|\/+$/gu, "")}`,
+    );
+    if (!baseUrl.pathname.endsWith("/")) baseUrl.pathname += "/";
+    parsed = new URL(reference, baseUrl);
+  } catch {
+    return null;
+  }
+  if (parsed.origin !== ASSET_REFERENCE_ORIGIN) return null;
+
+  let decodedPath;
+  try {
+    decodedPath = decodeURIComponent(parsed.pathname);
+  } catch {
+    return null;
+  }
+  if (!decodedPath || decodedPath.includes("\0") || decodedPath.includes("\\")) {
+    return null;
+  }
+  const normalizedPath = path.posix.normalize(decodedPath).replace(/^\/+/, "");
+  if (
+    !normalizedPath
+    || normalizedPath === "."
+    || normalizedPath === ".."
+    || normalizedPath.startsWith("../")
+  ) return null;
+  if (normalizedPath.split("/").some((segment) => segment.startsWith("."))) {
+    return null;
+  }
+  return normalizedPath;
+}
+
+function extensionForAsset(relativePath) {
+  return path.posix.extname(relativePath).toLowerCase();
+}
+
+function isAllowedAssetType(relativePath, extensions) {
+  return extensions.has(extensionForAsset(relativePath));
+}
+
+function attributesFor(node) {
+  return new Map((node.attrs || []).map((attribute) => [
+    String(attribute.name || "").toLowerCase(),
+    String(attribute.value || ""),
+  ]));
+}
+
+function appendSrcSetReferences(value, extensions, append) {
+  if (typeof value !== "string") return;
+  for (const candidate of value.split(",")) {
+    const reference = candidate.trim().split(/\s+/u)[0];
+    if (reference) append(reference, extensions);
+  }
+}
+
+function textContentFor(node) {
+  if (typeof node?.value === "string") return node.value;
+  return (node?.childNodes || []).map((child) => textContentFor(child)).join("");
+}
+
+function collectHtmlAssetReferences(html) {
+  const references = [];
+  const append = (value, extensions) => {
+    references.push({ value, extensions, basePath: "" });
+  };
+  const visit = (node) => {
+    const tagName = String(node.tagName || "").toLowerCase();
+    const attributes = attributesFor(node);
+    const inlineStyle = cssReferences(attributes.get("style") || "");
+    for (const value of inlineStyle.urls) {
+      append(value, CSS_URL_EXTENSIONS);
+    }
+    if (tagName === "script") {
+      append(attributes.get("src"), SCRIPT_EXTENSIONS);
+      if (
+        !attributes.get("src")
+        && (attributes.get("type") || "").trim().toLowerCase() === "module"
+      ) {
+        for (const value of javaScriptImports(textContentFor(node))) {
+          append(value, SCRIPT_EXTENSIONS);
+        }
+      }
+    } else if (tagName === "style") {
+      const inlineStylesheet = cssReferences(textContentFor(node));
+      for (const value of inlineStylesheet.imports) {
+        append(value, STYLE_EXTENSIONS);
+      }
+      for (const value of inlineStylesheet.urls) {
+        append(value, CSS_URL_EXTENSIONS);
+      }
+    } else if (tagName === "link") {
+      const rel = (attributes.get("rel") || "")
+        .toLowerCase()
+        .split(/\s+/u);
+      if (rel.includes("stylesheet")) {
+        append(attributes.get("href"), STYLE_EXTENSIONS);
+      } else if (rel.includes("icon") || rel.includes("apple-touch-icon")) {
+        append(attributes.get("href"), IMAGE_EXTENSIONS);
+      } else if (rel.includes("preload")) {
+        const as = (attributes.get("as") || "").toLowerCase();
+        const extensions = as === "style"
+          ? STYLE_EXTENSIONS
+          : as === "script"
+            ? SCRIPT_EXTENSIONS
+            : as === "font"
+              ? FONT_EXTENSIONS
+              : as === "image"
+                ? IMAGE_EXTENSIONS
+                : MEDIA_EXTENSIONS;
+        append(attributes.get("href"), extensions);
+      }
+    } else if (tagName === "img") {
+      append(attributes.get("src"), IMAGE_EXTENSIONS);
+      appendSrcSetReferences(attributes.get("srcset"), IMAGE_EXTENSIONS, append);
+    } else if (tagName === "source") {
+      const type = (attributes.get("type") || "").toLowerCase();
+      const extensions = type.startsWith("image/")
+        ? IMAGE_EXTENSIONS
+        : MEDIA_EXTENSIONS;
+      append(attributes.get("src"), extensions);
+      appendSrcSetReferences(attributes.get("srcset"), extensions, append);
+    } else if (tagName === "video" || tagName === "audio" || tagName === "track") {
+      append(attributes.get("src"), MEDIA_EXTENSIONS);
+      if (tagName === "video") append(attributes.get("poster"), IMAGE_EXTENSIONS);
+    } else if (tagName === "image" || tagName === "use") {
+      append(attributes.get("href") || attributes.get("xlink:href"), IMAGE_EXTENSIONS);
+    } else if (tagName === "input") {
+      if ((attributes.get("type") || "").toLowerCase() === "image") {
+        append(attributes.get("src"), IMAGE_EXTENSIONS);
+      }
+    }
+    for (const child of node.childNodes || []) visit(child);
+    if (node.content) visit(node.content);
+  };
+  try {
+    visit(parse(html));
+  } catch {
+    return [];
+  }
+  return references;
+}
+
+function cssReferences(css) {
+  const imports = [];
+  const urls = [];
+  const importPattern = /@import\s+(?:url\(\s*)?(["']?)([^"'\s)]+)\1\s*\)?/giu;
+  const urlPattern = /url\(\s*(["']?)(.*?)\1\s*\)/giu;
+  for (const match of css.matchAll(importPattern)) imports.push(match[2]);
+  for (const match of css.matchAll(urlPattern)) urls.push(match[2]);
+  return { imports, urls };
+}
+
+function javaScriptImports(source) {
+  const references = [];
+  const pattern = /(?:\bimport\s*(?:[\w*${},\s]*?\s+from\s*)?|\bexport\s+(?:[\w*${},\s]*?\s+from\s*)?|\bimport\s*\(\s*)(["'])([^"']+)\1/giu;
+  for (const match of source.matchAll(pattern)) references.push(match[2]);
+  return references;
+}
+
+async function resolveDeclaredAsset(sourceRoot, relativePath) {
+  const candidatePath = path.resolve(
+    sourceRoot,
+    ...relativePath.split("/"),
+  );
+  if (!isContainedPath(sourceRoot, candidatePath)) return null;
+  try {
+    const resolvedPath = await realpath(candidatePath);
+    if (!isContainedPath(sourceRoot, resolvedPath)) return null;
+    const fileInfo = await stat(resolvedPath);
+    return fileInfo.isFile() ? resolvedPath : null;
+  } catch {
+    return null;
+  }
+}
+
+async function collectDeclaredAssets({
+  html,
+  sourceRoot,
+  maxAssets = DEFAULT_MAX_DECLARED_ASSETS,
+  maxDependencyScanBytes = DEFAULT_MAX_DEPENDENCY_SCAN_BYTES,
+}) {
+  const assets = new Map();
+  const cssQueue = [];
+  const scriptQueue = [];
+  const pendingReferences = collectHtmlAssetReferences(html);
+
+  const add = async ({ value, extensions, basePath = "" }) => {
+    const relativePath = normalizeRelativeAssetPath(value, basePath);
+    if (
+      !relativePath
+      || !isAllowedAssetType(relativePath, extensions)
+      || assets.has(relativePath)
+      || assets.size >= maxAssets
+    ) return;
+    const resolvedPath = await resolveDeclaredAsset(sourceRoot, relativePath);
+    if (!resolvedPath) return;
+    const asset = Object.freeze({ relativePath, resolvedPath });
+    assets.set(relativePath, asset);
+    const extension = extensionForAsset(relativePath);
+    if (STYLE_EXTENSIONS.has(extension)) cssQueue.push(asset);
+    if (SCRIPT_EXTENSIONS.has(extension)) scriptQueue.push(asset);
+  };
+
+  while (pendingReferences.length > 0) {
+    await add(pendingReferences.shift());
+  }
+
+  for (let index = 0; index < cssQueue.length; index += 1) {
+    const stylesheet = cssQueue[index];
+    try {
+      const info = await stat(stylesheet.resolvedPath);
+      if (info.size > maxDependencyScanBytes) continue;
+      const source = await readFile(stylesheet.resolvedPath, "utf8");
+      const basePath = path.posix.dirname(stylesheet.relativePath);
+      const references = cssReferences(source);
+      for (const value of references.imports) {
+        await add({ value, extensions: STYLE_EXTENSIONS, basePath });
+      }
+      for (const value of references.urls) {
+        await add({ value, extensions: CSS_URL_EXTENSIONS, basePath });
+      }
+    } catch {
+      // A missing or unreadable declared stylesheet simply cannot extend the
+      // preview session's capability set.
+    }
+  }
+
+  for (let index = 0; index < scriptQueue.length; index += 1) {
+    const script = scriptQueue[index];
+    try {
+      const info = await stat(script.resolvedPath);
+      if (info.size > maxDependencyScanBytes) continue;
+      const source = await readFile(script.resolvedPath, "utf8");
+      const basePath = path.posix.dirname(script.relativePath);
+      for (const value of javaScriptImports(source)) {
+        await add({ value, extensions: SCRIPT_EXTENSIONS, basePath });
+      }
+    } catch {
+      // A missing or unreadable declared script cannot authorize additional
+      // local files for the preview.
+    }
+  }
+
+  return assets;
 }
 
 function normalizeSessionId(value) {
@@ -155,6 +457,9 @@ export function createPreviewProtocolController({
       throw new TypeError("Interactive preview payload is invalid or too large.");
     }
     const sourceRoot = await resolveSourceRoot(payload?.sourcePath);
+    const declaredAssets = sourceRoot
+      ? await collectDeclaredAssets({ html, sourceRoot })
+      : new Map();
     removeExpiredSessions();
     while (sessions.size >= maxSessions) {
       const oldestSessionId = sessions.keys().next().value;
@@ -176,6 +481,7 @@ export function createPreviewProtocolController({
       html,
       bootstrapJavaScript,
       sourceRoot,
+      declaredAssets,
       createdAt,
       lastAccessedAt: createdAt,
     });
@@ -216,6 +522,7 @@ export function createPreviewProtocolController({
         request.method === "HEAD" ? null : session.html,
         200,
         "text/html; charset=utf-8",
+        { "content-security-policy": PREVIEW_DOCUMENT_CSP },
       );
     }
     if (requestUrl.pathname === PREVIEW_BOOTSTRAP_PATH) {
@@ -227,19 +534,17 @@ export function createPreviewProtocolController({
     }
     if (!session.sourceRoot) return notFound();
 
-    let decodedPath;
-    try {
-      decodedPath = decodeURIComponent(requestUrl.pathname).replace(/^\/+/u, "");
-    } catch {
-      return invalidRequest();
-    }
-    if (!decodedPath || decodedPath.includes("\0")) return invalidRequest();
-    const candidatePath = path.resolve(session.sourceRoot, decodedPath);
-    if (!isContainedPath(session.sourceRoot, candidatePath)) return invalidRequest();
+    const relativePath = normalizeRelativeAssetPath(requestUrl.pathname);
+    if (!relativePath) return invalidRequest();
+    const asset = session.declaredAssets.get(relativePath);
+    if (!asset) return notFound();
 
     try {
-      const resolvedPath = await realpath(candidatePath);
-      if (!isContainedPath(session.sourceRoot, resolvedPath)) return invalidRequest();
+      const resolvedPath = await realpath(asset.resolvedPath);
+      if (
+        resolvedPath !== asset.resolvedPath
+        || !isContainedPath(session.sourceRoot, resolvedPath)
+      ) return notFound();
       const fileInfo = await stat(resolvedPath);
       if (!fileInfo.isFile()) return notFound();
       return netFetch(pathToFileURL(resolvedPath).href, {

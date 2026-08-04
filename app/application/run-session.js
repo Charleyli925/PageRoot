@@ -64,6 +64,10 @@ export class RunSession {
 
   #handoffs = new Map();
 
+  #copiedHandoffs = new Map();
+
+  #recoveredRuns = new Map();
+
   #busy = new Map(
     OPERATION_KINDS.map((kind) => [kind, new Set()]),
   );
@@ -113,6 +117,16 @@ export class RunSession {
     return changed;
   }
 
+  #matchesTrackedRun(map, run) {
+    return sameRun(this.#findBySource(map, run?.sourcePath), run);
+  }
+
+  #clearRunScopedState(sourcePath) {
+    const copied = this.#deleteBySource(this.#copiedHandoffs, sourcePath);
+    const recovered = this.#deleteBySource(this.#recoveredRuns, sourcePath);
+    return copied || recovered;
+  }
+
   activate(sourcePath) {
     this.#activeSourcePath = normalizedPath(sourcePath);
     this.#activeRun = this.runForSource(this.#activeSourcePath);
@@ -122,13 +136,27 @@ export class RunSession {
   }
 
   setActiveRun(run) {
+    if (
+      run?.sourcePath
+      && !sameRun(this.#activeRun, run)
+      && !this.#matchesTrackedRun(this.#runs, run)
+    ) {
+      this.#clearRunScopedState(run.sourcePath);
+    }
     this.#activeRun = run || null;
     this.#emit();
     return this.#activeRun;
   }
 
-  trackRun(run, { activate = "if-current" } = {}) {
+  trackRun(run, { activate = "if-current", recovered = false } = {}) {
     if (!run?.sourcePath) return null;
+    const previous = this.runForSource(run.sourcePath);
+    const sameTrackedRun = sameRun(previous, run);
+    if (!sameTrackedRun) this.#clearRunScopedState(run.sourcePath);
+    if (recovered && !sameTrackedRun) {
+      this.#deleteBySource(this.#recoveredRuns, run.sourcePath);
+      this.#recoveredRuns.set(run.sourcePath, run);
+    }
     this.#deleteBySource(this.#runs, run.sourcePath);
     this.#runs.set(run.sourcePath, run);
     if (
@@ -159,6 +187,7 @@ export class RunSession {
     for (const [trackedPath, tracked] of this.#runs) {
       if (sameAttempt(tracked, run)) {
         this.#runs.delete(trackedPath);
+        this.#clearRunScopedState(trackedPath);
         changed = true;
       }
     }
@@ -188,6 +217,17 @@ export class RunSession {
         || previous.attemptId !== state.attemptId
       )
     ) return false;
+    const copyAlreadyConfirmed = this.#matchesTrackedRun(
+      this.#copiedHandoffs,
+      state,
+    );
+    if (state.status === "copying" && !copyAlreadyConfirmed) {
+      this.#deleteBySource(this.#copiedHandoffs, state.sourcePath);
+    }
+    if (state.status === "copied") {
+      this.#deleteBySource(this.#copiedHandoffs, state.sourcePath);
+      this.#copiedHandoffs.set(state.sourcePath, state);
+    }
     this.#deleteBySource(this.#handoffs, state.sourcePath);
     this.#handoffs.set(state.sourcePath, state);
     if (
@@ -206,6 +246,7 @@ export class RunSession {
 
   clearHandoff(sourcePath) {
     const changed = this.#deleteBySource(this.#handoffs, sourcePath);
+    this.#deleteBySource(this.#copiedHandoffs, sourcePath);
     if (samePath(this.#activeHandoff?.sourcePath, sourcePath)) {
       this.#activeHandoff = null;
     }
@@ -215,6 +256,10 @@ export class RunSession {
 
   clearActiveHandoff() {
     if (!this.#activeHandoff) return false;
+    this.#deleteBySource(
+      this.#copiedHandoffs,
+      this.#activeHandoff.sourcePath,
+    );
     this.#activeHandoff = null;
     this.#emit();
     return true;
@@ -276,6 +321,30 @@ export class RunSession {
       : null;
     if (nextHandoff) this.#handoffs.set(nextSourcePath, nextHandoff);
 
+    const copiedHandoff = this.#findBySource(
+      this.#copiedHandoffs,
+      previousSourcePath,
+    );
+    this.#deleteBySource(this.#copiedHandoffs, previousSourcePath);
+    if (copiedHandoff) {
+      this.#copiedHandoffs.set(nextSourcePath, {
+        ...copiedHandoff,
+        sourcePath: nextSourcePath,
+      });
+    }
+
+    const recoveredRun = this.#findBySource(
+      this.#recoveredRuns,
+      previousSourcePath,
+    );
+    this.#deleteBySource(this.#recoveredRuns, previousSourcePath);
+    if (recoveredRun) {
+      this.#recoveredRuns.set(nextSourcePath, {
+        ...recoveredRun,
+        sourcePath: nextSourcePath,
+      });
+    }
+
     const trackedResult = this.resultForSource(previousSourcePath);
     this.#deleteBySource(this.#results, previousSourcePath);
     if (trackedResult) this.#results.set(nextSourcePath, trackedResult);
@@ -319,6 +388,15 @@ export class RunSession {
     return this.#activeHandoff;
   }
 
+  get activeHandoffMayBeRunning() {
+    if (!this.#activeRun) return false;
+    return this.#matchesTrackedRun(this.#copiedHandoffs, this.#activeRun)
+      || (
+        this.#activeRun.status === "processing"
+        && this.#matchesTrackedRun(this.#recoveredRuns, this.#activeRun)
+      );
+  }
+
   get runs() {
     return Object.freeze([...this.#runs.values()]);
   }
@@ -328,6 +406,7 @@ export class RunSession {
       activeSourcePath: this.#activeSourcePath,
       activeRun: this.#activeRun,
       activeHandoff: this.#activeHandoff,
+      activeHandoffMayBeRunning: this.activeHandoffMayBeRunning,
       backgroundResults: frozenEntries(this.#results),
     });
   }

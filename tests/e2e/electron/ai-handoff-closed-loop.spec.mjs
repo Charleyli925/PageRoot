@@ -921,16 +921,25 @@ test("a rapid double click creates exactly one durable Request", async () => {
   }
 });
 
-test("ending a copied run warns first and late AI finalization stops cleanly", async () => {
+test("ending a copied run still warns after restart and blocks late finalization", async () => {
   test.setTimeout(120_000);
   const fixture = createSourceFixture("cancel-copied-run.html");
-  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  let launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
   try {
     const request = await addCommentAndSubmit(
       launched.page,
       launched.electronApp,
       fixture.sourcePath,
     );
+    await closePageRootGracefully(launched.electronApp);
+    launched = await launchPageRoot({
+      activeSourcePath: fixture.sourcePath,
+      isolatedUserData: launched.isolatedUserData,
+    });
+    await expect(launched.page.getByText(
+      "等待 QoderWork 返回修改结果",
+      { exact: true },
+    )).toBeVisible();
     const endRound = launched.page.getByRole("button", {
       name: "结束本轮并继续编辑",
     }).filter({ visible: true }).first();
