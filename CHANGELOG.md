@@ -4,6 +4,10 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+- Update Next.js and its ESLint configuration to 16.3.0, and refresh compatible
+  transitive build dependencies so the dependency audit has no active security
+  exceptions.
+
 ## [0.9.5] - 2026-07-31
 
 - Run desktop interactive previews in a short-lived isolated document so

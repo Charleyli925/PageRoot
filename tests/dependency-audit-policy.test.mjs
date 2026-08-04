@@ -53,20 +53,8 @@ test("dependency audit policy rejects new and expired advisories", () => {
   assert.deepEqual(result.expired.map((item) => item.source), ["1"]);
 });
 
-test("reviewed production exceptions are explicit and time-bounded", () => {
-  assert.deepEqual(Object.keys(acceptedAdvisories).sort(), [
-    "1124066",
-    "1124334",
-  ]);
-  assert.deepEqual(acceptedAdvisories["1124334"], {
-    package: "brace-expansion",
-    url: "https://github.com/advisories/GHSA-mh99-v99m-4gvg",
-    expiresOn: "2026-08-15",
-  });
-  assert.ok(
-    Object.values(acceptedAdvisories).every((advisory) => advisory.expiresOn),
-    "every dependency exception must have a mandatory review date",
-  );
+test("resolved production advisories leave no active exception", () => {
+  assert.deepEqual(acceptedAdvisories, {});
 });
 
 test("Dependabot keeps coupled React updates together and defers automatic majors", () => {
