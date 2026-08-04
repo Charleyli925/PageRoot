@@ -29,6 +29,18 @@ Comments + frozen input
 - `scripts/` owns the local Bridge, protocol finalization, scope validation and automated gates.
 - `schemas/` defines persisted and exchanged records. `fixtures/` proves strict current and legacy behavior.
 - Preview DOM is disposable. It is never a persistence source.
+- Current-source and generated-Version changes use prepare-then-publish: all
+  project/document identities, canonical path, Version state, HTML bytes and
+  Hash are validated before one synchronous renderer publication. No async
+  query may expose a new path or Hash beside old Document bytes.
+- `DocumentSession` advances one Canvas authority generation whenever the
+  authoritative bytes/view are replaced. Edit and preview readiness are
+  disposable acknowledgements tagged by that generation and the rendered
+  source Hash; stale acknowledgements are ignored. “Safely saved” additionally
+  requires the visible surface acknowledgement to match the persisted source.
+- A clean projection mismatch is repaired automatically by one authoritative
+  source reread and one bounded Canvas rebuild. Failure stays fail-closed and
+  never asks the user to reconcile internal Hash state manually.
 - Pure-browser preview is a supported read-only route. It may run authored page interactions inside the sandbox, but it exposes no PageRoot edit, comment, attachment, project-write, or AI-submit authority.
 - Desktop interactive preview uses a short-lived `pageroot-preview:` document
   instead of `srcdoc`, so the authored page does not inherit the renderer's
@@ -84,7 +96,7 @@ they do not import application services.
 | --- | --- |
 | Bridge routes, timeouts and structured outcomes | `app/application/bridge-client.js` |
 | Open/registered project identity, session generation and late-query fencing | `app/application/project-session.js` |
-| Current source bytes, Hash, revisions, persistence projection and source-write single flight | `app/application/document-session.js` |
+| Current source bytes, Hash, revisions, persistence projection, source-write single flight and Canvas authority generation | `app/application/document-session.js` |
 | Renderer draft revision, pending operations and reconciliation | `app/application/draft-session.js` |
 | Renderer comment working copy, composer and saved-comment edit projection | `app/application/comment-session.js` |
 | Active/background runs, Qoder status, background outcomes and operation locks | `app/application/run-session.js` |

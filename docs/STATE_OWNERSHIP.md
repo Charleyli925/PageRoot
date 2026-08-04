@@ -5,7 +5,7 @@
 | Open source locator before first durable action, registered identity, renderer generation and late-query fence | Renderer `ProjectSession` | active-file record before registration; project registry and `project.json` afterwards | Workbench composition root and all durable sessions |
 | Registered mutation context resolution and atomic-replacement source observation | Bridge project-context service | project/document registry graph plus the owning runtime `pendingWrite` target Hash | Bridge mutation routes and `/project/ensure` |
 | Explicit source filename transition, pending operation and active/recent path rebase | Desktop source-rename transaction | active-file `pendingRename` / `lastRename`, then filesystem path | project session, Bridge relink, views |
-| Current source bytes, Hash, edit revision, persistence projection, pending write and single-flight source flush | Renderer `DocumentSession` | source HTML, runtime autosave record and recovery log | Canvas, source-history session and drain coordinator |
+| Current source bytes, Hash, edit revision, persistence projection, pending write, single-flight source flush and Canvas authority generation | Renderer `DocumentSession` | source HTML, runtime autosave record and recovery log; the generation itself is disposable | Canvas, preview readiness, source-history session and drain coordinator |
 | Canvas source-history context, pending Patch operations, cursor and applied action IDs | Renderer `SourceHistorySession` for pending intent; Bridge source-history service for acknowledged authority | `history/source-operations.json`, committed with the source through the runtime `pendingWrite` outbox | Canvas, Document session, desktop Edit intent router |
 | Focused comment/rules/filename text input undo history and active composition | The native text control and Electron/Chromium editing engine; project-rules session owns autosave eligibility and explicit restore fencing | in-memory control-local history only | desktop Edit intent router, project-rules drain |
 | Active renderer draft revision, pending command and unknown-outcome reconciliation | Draft session | acknowledged aggregate fingerprint plus crash-only recovery outbox | comment rail, drain coordinator |
@@ -22,7 +22,7 @@
 | Undelivered Bridge-unavailable recovery issue and renderer-listener readiness | Main-process recovery mailbox | in-memory for the current app process | preload handshake, native fallback and Workbench banner |
 | Renderer edit, project-picker, attachment-persistence, close-coordination and interactive-preview capabilities | Runtime capability resolver | immutable preload manifest; fail-closed browser default | Workbench composition root |
 | Volatile interactive-preview document, bootstrap and allowed source-relative asset root | Main-process preview protocol controller | none; bounded in-memory session only | isolated preview iframe |
-| Current preview/edit display context, bounded read-only visuals, safe reveal transition and capture generation | Workbench page-view context state | none; source-bound in-memory projection only | `HtmlCanvasEditor` presentation layer and toolbar |
+| Current preview/edit display context, bounded read-only visuals, safe reveal transition and per-surface render acknowledgement | Workbench page-view context state | none; source-bound in-memory projection tagged by `DocumentSession` Canvas generation and rendered source Hash | `HtmlCanvasEditor`, `HtmlInteractionPreview`, save-status projection and toolbar |
 | Current source-backed comment resolution, visibility, coordinates, marker eligibility and natural document height | `HtmlCanvasEditor` presentation measurement | none; disposable snapshot tagged by rendered source Hash, applied page-view generation and exact target-ID set | Workbench comment rail and Canvas height |
 | Stable application update schedule, coalesced manual check, download progress and restart-install readiness | Main-process application-update controller | signed GitHub Release metadata plus updater cache; no editor authority | preload status snapshot, About PageRoot, Workbench update notice, drain coordinator |
 | Random installation identity, project pseudonym secret, aggregate counters and unsent usage events | Main-process usage-telemetry controller | bounded `usage-telemetry.json` under PageRoot Application Support | PostHog batch ingestion only |
@@ -52,6 +52,14 @@ Rules:
   an unrelated external replacement.
 - Cross-owner operations are coordinated explicitly; they do not synchronize
   through incidental React effects.
+- A current-source transition first stages one complete candidate containing
+  project identity, source path, Version authority, HTML bytes and verified
+  Hash. Only after every field is valid may the coordinator synchronously
+  publish Project, Document and Version state and advance the Canvas authority
+  generation. A Hash-only or path-only publication is invalid.
+- Edit and preview acknowledge rendering with the exact Document Canvas
+  generation and source Hash. A late acknowledgement from an older generation
+  is discarded and cannot make persistence appear safe.
 - A filename transition never owns HTML bytes or Document identity. It may
   advance the source locator only after the expected source Hash is verified;
   the project session then adopts the Bridge-confirmed path for the same

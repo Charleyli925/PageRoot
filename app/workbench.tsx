@@ -268,6 +268,22 @@ function isDeferredEditorCommandDiscardedError(
   return value instanceof DeferredEditorCommandDiscardedError;
 }
 
+type CanvasRenderAck = Readonly<{
+  generation: number;
+  sha256: string;
+}>;
+
+type CanvasRenderAcks = Readonly<Record<CanvasMode, CanvasRenderAck | null>>;
+
+type PreparedGeneratedSourceTransition = Readonly<{
+  previousSourcePath: string;
+  nextSourcePath: string;
+  projectId: string;
+  documentId: string;
+  updatesCurrentProject: boolean;
+  activatedProject: HtmlProject | null;
+}>;
+
 const AUTOSAVE_DELAY_MS = 700;
 const bridgeClient = createRuntimeBridgeClient();
 const recoveryStore = createBrowserRecoveryStore();
@@ -304,6 +320,7 @@ const INITIAL_VERSION_SNAPSHOT: VersionSessionSnapshot<Version> = {
 const INITIAL_DOCUMENT_SNAPSHOT: DocumentSessionSnapshot = {
   html: DEFAULT_PROJECT_HTML,
   sourceSha256: null,
+  canvasGeneration: 0,
   editRevision: 0,
   lastPersistedRevision: 0,
   persistState: "idle",
@@ -551,6 +568,7 @@ export default function Workbench() {
     useState<DocumentSessionSnapshot>(INITIAL_DOCUMENT_SNAPSHOT);
   const html = documentSnapshot.html;
   const sourceSha256 = documentSnapshot.sourceSha256;
+  const canvasGeneration = documentSnapshot.canvasGeneration;
   const editRevision = documentSnapshot.editRevision;
   const lastPersistedRevision = documentSnapshot.lastPersistedRevision;
   const persistState = documentSnapshot.persistState;
@@ -642,7 +660,37 @@ export default function Workbench() {
       BROWSER_RUNTIME_CAPABILITIES.interactivePreview,
     );
   const viewingVersionId = versionSnapshot.viewingVersionId;
-  const [renderedContentSha256, setRenderedContentSha256] = useState<string | null>(null);
+  const [canvasRenderAcks, setCanvasRenderAcks] = useState<CanvasRenderAcks>({
+    edit: null,
+    preview: null,
+  });
+  const invalidateCanvasRenderAcks = useCallback(() => {
+    setCanvasRenderAcks({ edit: null, preview: null });
+  }, []);
+  const invalidateEditCanvasRenderAck = useCallback(() => {
+    setCanvasRenderAcks((current) => (
+      current.edit ? { ...current, edit: null } : current
+    ));
+  }, []);
+  const acknowledgeCanvasRender = useCallback((
+    surface: CanvasMode,
+    generation: number,
+    sha256: string | null,
+  ): boolean => {
+    if (generation !== documentSessionRef.current.canvasGeneration) return false;
+    setCanvasRenderAcks((current) => ({
+      ...current,
+      [surface]: sha256 ? { generation, sha256 } : null,
+    }));
+    return true;
+  }, []);
+  const renderedContentSha256 =
+    canvasRenderAcks.edit?.generation === canvasGeneration
+      ? canvasRenderAcks.edit.sha256
+      : null;
+  const handlePreviewReady = useCallback((sha256: string | null) => {
+    acknowledgeCanvasRender("preview", canvasGeneration, sha256);
+  }, [acknowledgeCanvasRender, canvasGeneration]);
   const [, setBridgeConnected] = useState<boolean | null>(null);
   const activeRun = runSnapshot.activeRun;
   const setActiveRun = useCallback((
@@ -1144,8 +1192,7 @@ export default function Workbench() {
   const activePageViewContext = (
     pageViewContext?.documentKey === pageViewDocumentKey
   ) ? pageViewContext : null;
-  const expectedCommentLayoutSourceSha256 =
-    renderedContentSha256 || sourceSha256;
+  const expectedCommentLayoutSourceSha256 = renderedContentSha256 || "";
   const otherTabCommentsContextKey = [
     canvasMode,
     pageViewDocumentKey,
@@ -1722,17 +1769,43 @@ export default function Workbench() {
       );
       const canonicalSource =
         typeof payload.content === "string" ? payload.content : "";
+      const hasCanonicalSource = typeof payload.content === "string";
       if (
         !nextProjectId
         || !nextDocumentId
         || !/^sha256:[a-f0-9]{64}$/.test(nextSourceSha256)
         || (
-          canonicalSource
+          hasCanonicalSource
           && await browserSha256(canonicalSource) !== nextSourceSha256
         )
       ) {
         throw new Error("项目记录已建立，但返回的身份或源文件校验不完整。");
       }
+      const currentDocument = documentSessionRef.current.snapshot;
+      const currentHtmlSha256 = await browserSha256(currentDocument.html);
+      if (
+        epoch !== projectSessionRef.current.epoch
+        || !sameLocalSourcePath(projectSessionRef.current.sourcePath, activeSource)
+      ) return null;
+      const currentDocumentClean = Boolean(
+        currentDocument.editRevision === currentDocument.lastPersistedRevision
+        && !documentSessionRef.current.pendingWrite
+        && !documentSessionRef.current.flushPromise
+      );
+      const mustRepairCleanProjection = Boolean(
+        currentDocumentClean && currentHtmlSha256 !== nextSourceSha256
+      );
+      if (mustRepairCleanProjection && !hasCanonicalSource) {
+        throw new Error("项目记录与当前画布不一致，且缺少可自动恢复的完整源 HTML。");
+      }
+      const shouldAdoptCanonicalSource = Boolean(
+        hasCanonicalSource
+        && currentDocumentClean
+        && (adoptCanonicalSource || mustRepairCleanProjection)
+      );
+      const nextDocumentHtml = shouldAdoptCanonicalSource
+        ? canonicalSource
+        : currentDocument.html;
       const projectRecord = isRecord(payload.project) ? payload.project : {};
       const paths = isRecord(payload.paths) ? payload.paths : {};
       const registeredContext = projectSessionRef.current.register({
@@ -1744,7 +1817,18 @@ export default function Workbench() {
       if (!registeredContext) return null;
       recoveryIdentityRef.current =
         recoveryIdentityFromRecord(payload.recoveryIdentity);
-      documentSessionRef.current.setSourceSha256(nextSourceSha256);
+      if (shouldAdoptCanonicalSource) {
+        documentSessionRef.current.publishAuthority({
+          html: nextDocumentHtml,
+          sourceSha256: nextSourceSha256,
+        });
+        invalidateCanvasRenderAcks();
+      } else {
+        documentSessionRef.current.update({
+          html: nextDocumentHtml,
+          sourceSha256: nextSourceSha256,
+        });
+      }
       setProjectRecordsPath(
         String(paths.projectRecords || payload.projectRoot || "") || null,
       );
@@ -1757,12 +1841,7 @@ export default function Workbench() {
         currentBasedOnVersionId: payload.currentBasedOnVersionId,
         currentExactVersionId: payload.currentExactVersionId,
       });
-      if (
-        adoptCanonicalSource
-        && canonicalSource
-        && documentSessionRef.current.editRevision === documentSessionRef.current.lastPersistedRevision
-        && !documentSessionRef.current.pendingWrite
-      ) {
+      if (shouldAdoptCanonicalSource) {
         const reboundTargets = rebindTargetsPreservingGlobal(
           canonicalSource,
           [
@@ -1784,8 +1863,6 @@ export default function Workbench() {
             || commentSessionRef.current.composerTarget;
           commentSessionRef.current.setComposerTarget(reboundDraftTarget);
         }
-        documentSessionRef.current.setHtml(canonicalSource);
-        setRenderedContentSha256(null);
       }
       const authoritativeDraft = draftAuthorityFromWorkspace(payload);
       draftSessionRef.current.replaceAuthority(
@@ -1812,7 +1889,7 @@ export default function Workbench() {
         projectRegistrationPromiseRef.current = null;
       }
     }
-  }, []);
+  }, [invalidateCanvasRenderAcks]);
 
   const prepareProjectRecords = useCallback(async () => {
     const activeSource = projectSessionRef.current.sourcePath;
@@ -1857,36 +1934,61 @@ export default function Workbench() {
     expectedSha256: string,
     context?: ProjectContext,
   ): Promise<void> => {
-    for (let attempt = 0; attempt < 80; attempt += 1) {
-      await new Promise<void>((resolve) => window.setTimeout(resolve, 25));
-      if (context && !isCurrentProjectContext(context)) {
-        throw new Error("项目已切换，停止核对旧项目画布。");
+    let expectedGeneration = documentSessionRef.current.canvasGeneration;
+    const waitForCurrentGeneration = async (): Promise<boolean> => {
+      for (let attempt = 0; attempt < 40; attempt += 1) {
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 25));
+        if (context && !isCurrentProjectContext(context)) {
+          throw new Error("项目已切换，停止核对旧项目画布。");
+        }
+        if (
+          documentSessionRef.current.canvasGeneration !== expectedGeneration
+          || documentSessionRef.current.html !== expectedHtml
+        ) {
+          throw new Error("画布核对期间当前文档已经切换。");
+        }
+        const renderedSource = editorRef.current?.getRenderedSourceHtml();
+        if (renderedSource !== expectedHtml) continue;
+        const renderedSha256 = await browserSha256(renderedSource);
+        if (renderedSha256 !== expectedSha256) {
+          throw new Error("画布已载入内容的 Hash 与源 HTML 不一致。");
+        }
+        acknowledgeCanvasRender("edit", expectedGeneration, renderedSha256);
+        return true;
       }
-      const renderedSource = editorRef.current?.getRenderedSourceHtml();
-      if (renderedSource !== expectedHtml) continue;
-      const renderedSha256 = await browserSha256(renderedSource);
-      if (renderedSha256 !== expectedSha256) {
-        throw new Error("画布已载入内容的 Hash 与源 HTML 不一致。");
-      }
-      if (!context || isCurrentProjectContext(context)) {
-        setRenderedContentSha256(renderedSha256);
-      }
-      return;
-    }
+      return false;
+    };
+    if (await waitForCurrentGeneration()) return;
+
+    // A missing acknowledgement is a disposable-Canvas failure, not a user
+    // conflict. Rebuild exactly once from the authoritative Document snapshot.
+    expectedGeneration = documentSessionRef.current.reloadCanvas().canvasGeneration;
+    invalidateCanvasRenderAcks();
+    if (await waitForCurrentGeneration()) return;
     throw new Error("画布没有在时限内确认载入目标 HTML。");
-  }, [isCurrentProjectContext]);
+  }, [
+    acknowledgeCanvasRender,
+    invalidateCanvasRenderAcks,
+    isCurrentProjectContext,
+  ]);
 
   useEffect(() => {
+    if (canvasMode !== "edit") return undefined;
     let cancelled = false;
     const expectedHtml = html;
+    const expectedGeneration = canvasGeneration;
     const verifyInitialRender = async () => {
       for (let attempt = 0; attempt < 40; attempt += 1) {
         await new Promise<void>((resolve) => window.setTimeout(resolve, 25));
         if (cancelled) return;
         if (editorRef.current?.getRenderedSourceHtml() !== expectedHtml) continue;
         const renderedSha256 = await browserSha256(expectedHtml);
-        if (!cancelled && documentSessionRef.current.html === expectedHtml) {
-          setRenderedContentSha256(renderedSha256);
+        if (
+          !cancelled
+          && documentSessionRef.current.html === expectedHtml
+          && documentSessionRef.current.canvasGeneration === expectedGeneration
+        ) {
+          acknowledgeCanvasRender("edit", expectedGeneration, renderedSha256);
         }
         return;
       }
@@ -1895,7 +1997,7 @@ export default function Workbench() {
     return () => {
       cancelled = true;
     };
-  }, [html]);
+  }, [acknowledgeCanvasRender, canvasGeneration, canvasMode, html]);
 
   const clearAutosaveTimer = useCallback(() => {
     if (autosaveTimerRef.current !== null) {
@@ -2228,18 +2330,26 @@ export default function Workbench() {
             recoveryIdentityRef.current =
               recoveryIdentityFromRecord(payload.recoveryIdentity)
               || recoveryIdentityRef.current;
-            documentSessionRef.current.update({
-              sourceSha256: nextHash,
-              lastPersistedRevision: Math.max(
-                documentSessionRef.current.lastPersistedRevision,
-                persistedRevision,
-              ),
-            });
-            setLastModifiedAt(persistedAt);
-            if (
+            const writeCompletesCurrentDocument = Boolean(
               documentSessionRef.current.editRevision === write.revision
               && !documentSessionRef.current.pendingWrite
-            ) {
+            );
+            const persistedDocumentRevision = Math.max(
+              documentSessionRef.current.lastPersistedRevision,
+              persistedRevision,
+            );
+            documentSessionRef.current.update(writeCompletesCurrentDocument
+              ? {
+                  html: acknowledgedHtml,
+                  sourceSha256: nextHash,
+                  lastPersistedRevision: persistedDocumentRevision,
+                }
+              : {
+                  sourceSha256: nextHash,
+                  lastPersistedRevision: persistedDocumentRevision,
+                });
+            setLastModifiedAt(persistedAt);
+            if (writeCompletesCurrentDocument) {
               const reboundTargets = rebindTargetsPreservingGlobal(
                 acknowledgedHtml,
                 [
@@ -2269,8 +2379,6 @@ export default function Workbench() {
                   || commentSessionRef.current.composerTarget;
                 commentSessionRef.current.setComposerTarget(reboundDraftTarget);
               }
-              documentSessionRef.current.setHtml(acknowledgedHtml);
-              setRenderedContentSha256(nextHash);
               versionSessionRef.current.updateAuthority({
                 currentExactVersionId: payload.currentExactVersionId,
               });
@@ -2414,7 +2522,7 @@ export default function Workbench() {
     }
     documentSessionRef.current.beginEdit(nextHtml);
     versionSessionRef.current.markSourceEdited();
-    setRenderedContentSha256(null);
+    invalidateCanvasRenderAcks();
 
     if (mutation) {
       const nextEvents = appendDirectEditEvent({
@@ -2477,6 +2585,7 @@ export default function Workbench() {
     clearAutosaveTimer,
     currentBasedOnVersionId,
     flushAutosave,
+    invalidateCanvasRenderAcks,
     persistCurrentDraftRecovery,
     persistRecoveryLog,
   ]);
@@ -2596,7 +2705,7 @@ export default function Workbench() {
         ? "preview"
         : "edit",
     );
-    setRenderedContentSha256(null);
+    invalidateCanvasRenderAcks();
     setProjectLocked(opensLockedProject);
     setProjectHydrating(Boolean(project.sourcePath));
     setProjectLoadError(null);
@@ -2645,6 +2754,7 @@ export default function Workbench() {
   }, [
     clearAutosaveTimer,
     clearBackgroundProjectResult,
+    invalidateCanvasRenderAcks,
     markBackgroundProjectResult,
   ]);
 
@@ -2679,7 +2789,7 @@ export default function Workbench() {
     }
   }, []);
 
-  const adoptGeneratedSourcePath = useCallback(async ({
+  const prepareGeneratedSourceTransition = useCallback(async ({
     previousSourcePath,
     nextSourcePath,
     expectedSha256,
@@ -2693,21 +2803,7 @@ export default function Workbench() {
     nextProjectId: string;
     nextDocumentId: string;
     versionId: string;
-  }): Promise<ProjectContext | null> => {
-    if (!nextSourcePath || nextSourcePath === previousSourcePath) {
-      if (!sameLocalSourcePath(
-        projectSessionRef.current.sourcePath,
-        nextSourcePath,
-      )) return null;
-      return projectSessionRef.current.context
-        || projectSessionRef.current.register({
-          epoch: projectSessionRef.current.epoch,
-          projectId: nextProjectId,
-          documentId: nextDocumentId,
-          sourcePath: nextSourcePath,
-        });
-    }
-
+  }): Promise<PreparedGeneratedSourceTransition> => {
     const updatesCurrentProject =
       (
         Boolean(nextProjectId)
@@ -2716,45 +2812,105 @@ export default function Workbench() {
       )
       || sameLocalSourcePath(projectSessionRef.current.sourcePath, previousSourcePath)
       || sameLocalSourcePath(projectSessionRef.current.sourcePath, nextSourcePath);
-    const api = window.htmlAIProjects;
-    if (api?.activateGeneratedVersion) {
-      await api.activateGeneratedVersion({
+    if (!nextSourcePath || sameLocalSourcePath(nextSourcePath, previousSourcePath)) {
+      return Object.freeze({
         previousSourcePath,
         nextSourcePath,
-        expectedSha256,
-        projectId: nextProjectId,
-        versionId,
-      });
-      await refreshRecents();
-    }
-    if (!updatesCurrentProject) return null;
-
-    if (projectSessionRef.current.sourcePath !== nextSourcePath) {
-      runSessionRef.current.rebaseSource({
-        previousSourcePath,
-        sourcePath: nextSourcePath,
-        projectId: nextProjectId,
-      });
-      const transitionedContext = projectSessionRef.current.transitionSource({
-        previousSourcePath,
-        sourcePath: nextSourcePath,
         projectId: nextProjectId,
         documentId: nextDocumentId,
+        updatesCurrentProject,
+        activatedProject: null,
       });
-      if (!transitionedContext || !("projectId" in transitionedContext)) {
-        return null;
-      }
-      documentSessionRef.current.update({
-        sourceSha256: expectedSha256,
-        pendingWrite: null,
+    }
+
+    const api = window.htmlAIProjects;
+    if (!api?.activateGeneratedVersion) {
+      throw new Error("当前运行环境不能安全切换到生成的新版本文件。");
+    }
+    const activatedProject = await api.activateGeneratedVersion({
+      previousSourcePath,
+      nextSourcePath,
+      expectedSha256,
+      projectId: nextProjectId,
+      versionId,
+    });
+    if (
+      !sameLocalSourcePath(activatedProject.sourcePath, nextSourcePath)
+      || activatedProject.sha256 !== expectedSha256
+      || await browserSha256(activatedProject.html) !== expectedSha256
+    ) {
+      throw new Error("生成版本的路径、HTML 与 Hash 没有形成完整一致的候选。");
+    }
+    void refreshRecents();
+    return Object.freeze({
+      previousSourcePath,
+      nextSourcePath,
+      projectId: nextProjectId,
+      documentId: nextDocumentId,
+      updatesCurrentProject,
+      activatedProject,
+    });
+  }, [refreshRecents]);
+
+  const commitGeneratedSourceTransition = useCallback(({
+    prepared,
+    html: nextHtml,
+    sourceSha256: nextSourceSha256,
+    publishVersion,
+  }: {
+    prepared: PreparedGeneratedSourceTransition;
+    html: string;
+    sourceSha256: string;
+    publishVersion: () => void;
+  }): ProjectContext | null => {
+    if (!prepared.updatesCurrentProject) return null;
+    const changesSourcePath = !sameLocalSourcePath(
+      projectSessionRef.current.sourcePath,
+      prepared.nextSourcePath,
+    );
+    if (changesSourcePath) {
+      runSessionRef.current.rebaseSource({
+        previousSourcePath: prepared.previousSourcePath,
+        sourcePath: prepared.nextSourcePath,
+        projectId: prepared.projectId,
       });
+    }
+    const transition = changesSourcePath
+      ? projectSessionRef.current.transitionSource({
+          previousSourcePath: prepared.previousSourcePath,
+          sourcePath: prepared.nextSourcePath,
+          projectId: prepared.projectId,
+          documentId: prepared.documentId,
+        })
+      : projectSessionRef.current.context
+        || projectSessionRef.current.register({
+          epoch: projectSessionRef.current.epoch,
+          projectId: prepared.projectId,
+          documentId: prepared.documentId,
+          sourcePath: prepared.nextSourcePath,
+        });
+    if (!transition) return null;
+    const context = projectSessionRef.current.context;
+    if (!context) return null;
+
+    // No asynchronous boundary is permitted here. React observes the new
+    // project, complete Document tuple, Version authority and Canvas generation
+    // in one renderer commit instead of rendering any partial combination.
+    documentSessionRef.current.publishAuthority({
+      html: nextHtml,
+      sourceSha256: nextSourceSha256,
+      pendingWrite: null,
+    });
+    publishVersion();
+    invalidateCanvasRenderAcks();
+    if (changesSourcePath) {
       recoveryIdentityRef.current = null;
       draftSessionRef.current.deactivate();
       sourceHistorySessionRef.current.deactivate();
       draftRecoveryOperationIdRef.current = null;
     }
-    return projectSessionRef.current.context;
-  }, [refreshRecents]);
+    return context;
+  }, [invalidateCanvasRenderAcks]);
 
   const recoverAutosaveLog = useCallback(async (
     context: ProjectContext,
@@ -2849,13 +3005,14 @@ export default function Workbench() {
     );
     auditPendingRef.current = recoveredEvents;
     commentSessionRef.current.setChangeEvents(mergedEvents);
-    documentSessionRef.current.update({
+    documentSessionRef.current.publishAuthority({
       html: recoveredHtml,
+      sourceSha256: currentSourceSha256,
       editRevision: revision,
       pendingWrite: job,
     });
     versionSessionRef.current.markSourceEdited();
-    setRenderedContentSha256(null);
+    invalidateCanvasRenderAcks();
     persistRecoveryLog(job);
 
     if (canRebaseSafely) {
@@ -2897,6 +3054,7 @@ export default function Workbench() {
     clearAutosaveTimer,
     fenceAndFreezeCurrentCanvas,
     flushAutosave,
+    invalidateCanvasRenderAcks,
     isCurrentProjectContext,
     persistRecoveryLog,
     verifyCanvasRendered,
@@ -3111,7 +3269,12 @@ export default function Workbench() {
         || (isRecord(payload.current) ? payload.current.path : "")
         || activeSource,
       );
-      if (canonicalSourcePath !== activeSource) {
+      const workspaceHash = String(payload.currentHtmlSha256 || "");
+      if (workspaceHash && !/^sha256:[a-f0-9]{64}$/.test(workspaceHash)) {
+        throw new Error("项目状态返回的源 HTML Hash 无效。");
+      }
+      let preparedTransition: PreparedGeneratedSourceTransition | null = null;
+      if (!sameLocalSourcePath(canonicalSourcePath, activeSource)) {
         if (!mustAdoptAuthoritativeSource) {
           const frozen = fenceAndFreezeCurrentCanvas(
             "项目状态包含新的源文件，但当前编辑画布尚未就绪。",
@@ -3135,7 +3298,7 @@ export default function Workbench() {
         ) {
           throw new Error("项目已经生成新文件，但缺少切换当前文件所需的完整身份。");
         }
-        const adoptedContext = await adoptGeneratedSourcePath({
+        preparedTransition = await prepareGeneratedSourceTransition({
           previousSourcePath: activeSource,
           nextSourcePath: canonicalSourcePath,
           expectedSha256,
@@ -3143,35 +3306,140 @@ export default function Workbench() {
           nextDocumentId,
           versionId,
         });
-        if (!adoptedContext) return;
-        activeSource = adoptedContext.sourcePath;
-        epoch = adoptedContext.epoch;
+        if (!preparedTransition.updatesCurrentProject) return;
+        if (!workspaceQueryIsCurrent()) return;
         mustAdoptAuthoritativeSource = true;
       }
-      if (
-        epoch !== projectSessionRef.current.epoch
-        || !sameLocalSourcePath(projectSessionRef.current.sourcePath, activeSource)
-      ) return;
+
+      const projectRecord = isRecord(payload.project) ? payload.project : {};
+      const workspacePaths = isRecord(payload.paths) ? payload.paths : {};
+      const currentDocument = documentSessionRef.current.snapshot;
+      const currentHtmlSha256 = await browserSha256(currentDocument.html);
+      if (!workspaceQueryIsCurrent()) return;
+      const currentDocumentClean = Boolean(
+        currentDocument.persistState === "idle"
+        && currentDocument.editRevision === currentDocument.lastPersistedRevision
+        && !documentSessionRef.current.pendingWrite
+        && !documentSessionRef.current.flushPromise
+      );
+      const cleanProjectionMismatch = Boolean(
+        currentDocumentClean
+        && workspaceHash
+        && currentHtmlSha256 !== workspaceHash
+      );
+      let authoritativeHtml = currentDocument.html;
+      let authoritativeSourceHash = currentDocument.sourceSha256 || workspaceHash;
+      let authoritativeLastModifiedAt = String(payload.lastModifiedAt || "");
+      let sourceAuthorityPayload: Record<string, unknown> | null = null;
+
+      if (preparedTransition?.activatedProject) {
+        authoritativeHtml = preparedTransition.activatedProject.html;
+        authoritativeSourceHash = preparedTransition.activatedProject.sha256;
+        authoritativeLastModifiedAt = String(
+          preparedTransition.activatedProject.lastModifiedAt
+          || payload.lastModifiedAt
+          || "",
+        );
+      } else if (
+        mustAdoptAuthoritativeSource
+        || cleanProjectionMismatch
+      ) {
+        mustAdoptAuthoritativeSource = true;
+        markProjectHydrationStage("source-request");
+        const sourcePayload = await bridgeClient.source(canonicalSourcePath);
+        markProjectHydrationStage("source-response");
+        markProjectHydrationStage("source-parsed");
+        if (!workspaceQueryIsCurrent()) return;
+        if (
+          String(sourcePayload.projectId || "") !== nextProjectId
+          || String(sourcePayload.documentId || "") !== nextDocumentId
+        ) {
+          throw new Error("读取期间源文件身份发生变化，已保持只读；请重新打开该文件。");
+        }
+        authoritativeHtml = String(sourcePayload.content || "");
+        authoritativeSourceHash = String(sourcePayload.sha256 || "");
+        markProjectHydrationStage("source-hash");
+        if (
+          !authoritativeSourceHash
+          || await browserSha256(authoritativeHtml) !== authoritativeSourceHash
+          || (workspaceHash && authoritativeSourceHash !== workspaceHash)
+        ) {
+          throw new Error("源 HTML 内容与服务端 Hash 不一致，已拒绝开放编辑。");
+        }
+        if (!workspaceQueryIsCurrent()) return;
+        sourceAuthorityPayload = sourcePayload;
+        authoritativeLastModifiedAt = String(
+          sourcePayload.lastModifiedAt || payload.lastModifiedAt || "",
+        );
+      } else if (currentDocumentClean && workspaceHash) {
+        // Publish the complete tuple even when only metadata needed repair.
+        authoritativeSourceHash = workspaceHash;
+      } else if (
+        workspaceHash
+        && currentDocument.sourceSha256
+        && workspaceHash !== currentDocument.sourceSha256
+      ) {
+        throw new Error("本地编辑期间源文件身份发生变化，已停止刷新以保留当前内容。");
+      }
+      if (!authoritativeSourceHash) {
+        throw new Error("项目状态缺少当前源 HTML Hash。");
+      }
+
+      if (!workspaceQueryIsCurrent()) return;
+      const publishVersionAuthority = () => {
+        versionSessionRef.current.hydrate({
+          versions: versionsFromWorkspace(payload),
+          latestVersionId: payload.latestVersionId,
+          currentBasedOnVersionId:
+            sourceAuthorityPayload?.currentBasedOnVersionId
+            || payload.currentBasedOnVersionId,
+          currentExactVersionId:
+            sourceAuthorityPayload?.currentExactVersionId
+            || payload.currentExactVersionId,
+          restoredFromVersionId:
+            sourceAuthorityPayload?.restoredFromVersionId
+            || payload.restoredFromVersionId
+            || projectRecord.restoredFromVersionId,
+        });
+      };
+      let registeredContext: ProjectContext | null = null;
+      if (preparedTransition) {
+        registeredContext = commitGeneratedSourceTransition({
+          prepared: preparedTransition,
+          html: authoritativeHtml,
+          sourceSha256: authoritativeSourceHash,
+          publishVersion: publishVersionAuthority,
+        });
+      } else {
+        registeredContext = projectSessionRef.current.register({
+          epoch,
+          projectId: nextProjectId,
+          documentId: nextDocumentId,
+          sourcePath: activeSource,
+        });
+        if (!registeredContext) return;
+        if (
+          mustAdoptAuthoritativeSource
+          || authoritativeHtml !== currentDocument.html
+        ) {
+          documentSessionRef.current.publishAuthority({
+            html: authoritativeHtml,
+            sourceSha256: authoritativeSourceHash,
+          });
+          invalidateCanvasRenderAcks();
+        } else {
+          documentSessionRef.current.update({
+            html: authoritativeHtml,
+            sourceSha256: authoritativeSourceHash,
+          });
+        }
+        publishVersionAuthority();
+      }
+      if (!registeredContext) return;
+      activeSource = registeredContext.sourcePath;
+      epoch = registeredContext.epoch;
       recoveryIdentityRef.current =
         recoveryIdentityFromRecord(payload.recoveryIdentity);
-      const registeredContext = projectSessionRef.current.register({
-        epoch,
-        projectId: nextProjectId,
-        documentId: nextDocumentId,
-        sourcePath: activeSource,
-      });
-      if (!registeredContext) return;
-      const projectRecord = isRecord(payload.project) ? payload.project : {};
-      versionSessionRef.current.hydrate({
-        versions: versionsFromWorkspace(payload),
-        latestVersionId: payload.latestVersionId,
-        currentBasedOnVersionId: payload.currentBasedOnVersionId,
-        currentExactVersionId: payload.currentExactVersionId,
-        restoredFromVersionId:
-          payload.restoredFromVersionId
-          || projectRecord.restoredFromVersionId,
-      });
-      const workspacePaths = isRecord(payload.paths) ? payload.paths : {};
       if (projectRecord.displayName) {
         setProjectName(String(projectRecord.displayName));
       }
@@ -3182,56 +3450,8 @@ export default function Workbench() {
           || "",
         ) || null,
       );
-      const workspaceHash = String(payload.currentHtmlSha256 || "");
-      let authoritativeSourceHash = workspaceHash;
-      if (mustAdoptAuthoritativeSource) {
-        markProjectHydrationStage("source-request");
-        const sourcePayload = await bridgeClient.source(activeSource);
-        markProjectHydrationStage("source-response");
-        markProjectHydrationStage("source-parsed");
-        if (!workspaceQueryIsCurrent()) return;
-        if (
-          String(sourcePayload.projectId || "") !== nextProjectId
-          || String(sourcePayload.documentId || "") !== nextDocumentId
-        ) {
-          throw new Error("读取期间源文件身份发生变化，已保持只读；请重新打开该文件。");
-        }
-        const authoritativeHtml = String(sourcePayload.content || "");
-        authoritativeSourceHash = String(sourcePayload.sha256 || "");
-        markProjectHydrationStage("source-hash");
-        if (
-          !authoritativeSourceHash
-          || await browserSha256(authoritativeHtml) !== authoritativeSourceHash
-        ) {
-          throw new Error("源 HTML 内容与服务端 Hash 不一致，已拒绝开放编辑。");
-        }
-        if (!workspaceQueryIsCurrent()) return;
-        documentSessionRef.current.update({
-          html: authoritativeHtml,
-          sourceSha256: authoritativeSourceHash,
-        });
-        setRenderedContentSha256(null);
-        setLastModifiedAt(String(sourcePayload.lastModifiedAt || payload.lastModifiedAt || ""));
-        versionSessionRef.current.updateAuthority({
-          currentBasedOnVersionId:
-            sourcePayload.currentBasedOnVersionId
-            || payload.currentBasedOnVersionId
-            || null,
-          currentExactVersionId:
-            sourcePayload.currentExactVersionId || null,
-          restoredFromVersionId:
-            sourcePayload.restoredFromVersionId
-            || payload.restoredFromVersionId
-            || null,
-        });
-      } else if (workspaceHash) {
-        documentSessionRef.current.setSourceSha256(workspaceHash);
-      }
-      if (!mustAdoptAuthoritativeSource && payload.lastModifiedAt) {
-        setLastModifiedAt(String(payload.lastModifiedAt));
-      }
+      setLastModifiedAt(authoritativeLastModifiedAt);
 
-      if (!workspaceQueryIsCurrent()) return;
       const runtime = isRecord(payload.runtimeState) ? payload.runtimeState : {};
       const runtimeConflict = isRecord(runtime.conflict) ? runtime.conflict : null;
       const edit = isRecord(runtime.edit) ? runtime.edit : {};
@@ -3409,7 +3629,7 @@ export default function Workbench() {
             .conflictCandidate(activeSource)
             .catch((): Record<string, unknown> => ({}));
           if (
-            workspaceQueryIsCurrent()
+            isCurrentProjectContext(registeredContext)
             && typeof conflictPayload.content === "string"
           ) {
             const candidateHtml = conflictPayload.content;
@@ -3437,13 +3657,14 @@ export default function Workbench() {
               historyOperations: [],
               recoveryIdentity: recoveryIdentityRef.current,
             };
-            documentSessionRef.current.update({
+            documentSessionRef.current.publishAuthority({
               html: candidateHtml,
+              sourceSha256: authoritativeSourceHash,
               editRevision: revision,
               pendingWrite: conflictWrite,
             });
             versionSessionRef.current.markSourceEdited();
-            setRenderedContentSha256(null);
+            invalidateCanvasRenderAcks();
             persistRecoveryLog(conflictWrite, context);
           }
           recoveredAutosaveConflict = true;
@@ -3496,7 +3717,7 @@ export default function Workbench() {
         projectLoadErrorRef.current = message;
         setProjectHydrating(false);
         setProjectLoadError(message);
-        setRenderedContentSha256(null);
+        invalidateCanvasRenderAcks();
         setBridgeConnected(false);
         markProjectHydrationStage("failed");
       }
@@ -3516,11 +3737,13 @@ export default function Workbench() {
       }
     }
   }, [
-    adoptGeneratedSourcePath,
+    commitGeneratedSourceTransition,
     deferEditorCommand,
     fenceAndFreezeCurrentCanvas,
+    invalidateCanvasRenderAcks,
     isCurrentProjectContext,
     persistRecoveryLog,
+    prepareGeneratedSourceTransition,
     recoverAutosaveLog,
     recoverDraftLog,
     verifyCanvasRendered,
@@ -4688,6 +4911,71 @@ export default function Workbench() {
     return () => window.removeEventListener("beforeunload", beforeUnload);
   }, []);
 
+  const ensureCurrentDocumentCanvas = useCallback(async (): Promise<void> => {
+    const context = captureProjectContext();
+    let expectedHtml = documentSessionRef.current.html;
+    let expectedSha256 = await browserSha256(expectedHtml);
+    const persistedProjectionIsClean = Boolean(
+      context
+      && documentSessionRef.current.persistState === "idle"
+      && documentSessionRef.current.editRevision
+        === documentSessionRef.current.lastPersistedRevision
+      && !documentSessionRef.current.pendingWrite
+      && !documentSessionRef.current.flushPromise
+    );
+    if (
+      context
+      && persistedProjectionIsClean
+      && documentSessionRef.current.sourceSha256
+      && documentSessionRef.current.sourceSha256 !== expectedSha256
+    ) {
+      const sourcePayload = await bridgeClient.source(context.sourcePath);
+      if (!isCurrentProjectContext(context)) {
+        throw new DeferredEditorCommandDiscardedError("stale-session");
+      }
+      if (
+        String(sourcePayload.projectId || "") !== context.projectId
+        || String(sourcePayload.documentId || "") !== context.documentId
+      ) {
+        throw new Error("自动恢复时源文件身份发生变化。");
+      }
+      const repairedHtml = String(sourcePayload.content || "");
+      const repairedSha256 = String(sourcePayload.sha256 || "");
+      if (
+        !/^sha256:[a-f0-9]{64}$/.test(repairedSha256)
+        || await browserSha256(repairedHtml) !== repairedSha256
+      ) {
+        throw new Error("自动恢复读取到的源 HTML 与 Hash 不一致。");
+      }
+      if (!isCurrentProjectContext(context)) {
+        throw new DeferredEditorCommandDiscardedError("stale-session");
+      }
+      documentSessionRef.current.publishAuthority({
+        html: repairedHtml,
+        sourceSha256: repairedSha256,
+        pendingWrite: null,
+        persistState: "idle",
+        persistError: "",
+      });
+      versionSessionRef.current.updateAuthority({
+        currentBasedOnVersionId:
+          sourcePayload.currentBasedOnVersionId || undefined,
+        currentExactVersionId: sourcePayload.currentExactVersionId || null,
+        restoredFromVersionId: sourcePayload.restoredFromVersionId || null,
+      });
+      setLastModifiedAt(String(sourcePayload.lastModifiedAt || ""));
+      invalidateCanvasRenderAcks();
+      expectedHtml = repairedHtml;
+      expectedSha256 = repairedSha256;
+    }
+    await verifyCanvasRendered(expectedHtml, expectedSha256, context || undefined);
+  }, [
+    captureProjectContext,
+    invalidateCanvasRenderAcks,
+    isCurrentProjectContext,
+    verifyCanvasRendered,
+  ]);
+
   const prepareProjectSwitch = useCallback(async (
     fromDeferred = false,
     retrySourcePath?: string,
@@ -4744,7 +5032,7 @@ export default function Workbench() {
       return false;
     }
     const shouldCommitCurrentCanvas = viewMode !== "history";
-    const committed = shouldCommitCurrentCanvas
+    let committed = shouldCommitCurrentCanvas
       ? editorRef.current?.fencePendingEdit({
           resumeEditing: false,
           trigger: "project-switch",
@@ -4773,6 +5061,28 @@ export default function Workbench() {
       rememberProjectOpen();
       return false;
     }
+    if (shouldCommitCurrentCanvas) {
+      try {
+        await ensureCurrentDocumentCanvas();
+      } catch (cause) {
+        setToast({
+          title: "当前画布尚未完成自动恢复",
+          message: productErrorMessage(
+            cause,
+            "工作台已保留当前文件，没有切换项目；画布会继续保持锁定以避免内容错配。",
+          ),
+          tone: "error",
+          disposition: "background-result",
+          dedupeKey: "canvas-authority-recovery",
+        });
+        return false;
+      }
+      committed = editorRef.current?.fencePendingEdit({
+        resumeEditing: false,
+        trigger: "project-switch",
+      });
+      if (!committed || !committed.ok) return false;
+    }
     if (
       projectSessionRef.current.sourcePath
       && committed
@@ -4787,6 +5097,7 @@ export default function Workbench() {
     return true;
   }, [
     deferEditorCommand,
+    ensureCurrentDocumentCanvas,
     viewMode,
   ]);
   useEffect(() => {
@@ -5148,7 +5459,8 @@ export default function Workbench() {
       if (!transitionedProject) {
         throw new Error("文件已重命名，但当前项目身份已经变化。");
       }
-      documentSessionRef.current.update({
+      documentSessionRef.current.publishAuthority({
+        html: documentSessionRef.current.html,
         sourceSha256: result.sha256,
         pendingWrite: null,
       });
@@ -5360,12 +5672,19 @@ export default function Workbench() {
           : {}),
       });
     }
+    const renderGeneration = documentSessionRef.current.canvasGeneration;
     void browserSha256(nextHtml).then((renderedSha256) => {
-      if (documentSessionRef.current.html === nextHtml) setRenderedContentSha256(renderedSha256);
+      if (
+        documentSessionRef.current.html === nextHtml
+        && documentSessionRef.current.canvasGeneration === renderGeneration
+        && editorRef.current?.getRenderedSourceHtml() === nextHtml
+      ) {
+        acknowledgeCanvasRender("edit", renderGeneration, renderedSha256);
+      }
     });
     setActiveRun((run) => run?.status === "complete" ? null : run);
     return true;
-  }, [enqueueAutosave, setActiveRun, viewMode]);
+  }, [acknowledgeCanvasRender, enqueueAutosave, setActiveRun, viewMode]);
 
   const exportCurrentHtml = useCallback(async (fromDeferred = false) => {
     if (viewTransitioningRef.current) return;
@@ -5509,7 +5828,9 @@ export default function Workbench() {
     ) return;
     const operationId = beginNavigationOperation();
     if (operationId === null) return;
-    const previousHtml = documentSessionRef.current.html;
+    const previousDocument = documentSessionRef.current.snapshot;
+    const previousHtml = previousDocument.html;
+    const previousPendingWrite = documentSessionRef.current.pendingWrite;
     const previousVersionView = versionSessionRef.current.captureView();
     let externalAccepted = false;
     try {
@@ -5549,8 +5870,17 @@ export default function Workbench() {
       if (!hash || await browserSha256(content) !== hash) {
         throw new Error("重新读取的源 HTML 与声明 Hash 不一致。");
       }
-      documentSessionRef.current.setHtml(content);
-      setRenderedContentSha256(null);
+      documentSessionRef.current.publishAuthority({
+        html: content,
+        sourceSha256: hash,
+      });
+      versionSessionRef.current.returnCurrent({
+        currentExactVersionId: payload.currentExactVersionId || null,
+        currentBasedOnVersionId:
+          payload.currentBasedOnVersionId || currentBasedOnVersionId,
+        restoredFromVersionId: payload.restoredFromVersionId || null,
+      });
+      invalidateCanvasRenderAcks();
       await verifyCanvasRendered(content, hash, context);
       if (
         navigationOperationRef.current !== operationId
@@ -5560,18 +5890,11 @@ export default function Workbench() {
       commentSessionRef.current.setChangeEvents([]);
       persistRecoveryLog(null, context);
       documentSessionRef.current.update({
-        sourceSha256: hash,
         pendingWrite: null,
         persistState: "idle",
         persistError: "",
       });
       setLastModifiedAt(String(payload.lastModifiedAt || ""));
-      versionSessionRef.current.returnCurrent({
-        currentExactVersionId: payload.currentExactVersionId || null,
-        currentBasedOnVersionId:
-          payload.currentBasedOnVersionId || currentBasedOnVersionId,
-        restoredFromVersionId: payload.restoredFromVersionId || null,
-      });
       await refreshWorkspace(context.sourcePath, context.epoch);
       if (
         navigationOperationRef.current !== operationId
@@ -5587,9 +5910,15 @@ export default function Workbench() {
       if (!isCurrentProjectContext(context)) return;
       if (navigationOperationRef.current === operationId) {
         if (!externalAccepted) {
-          documentSessionRef.current.setHtml(previousHtml);
+          documentSessionRef.current.publishAuthority({
+            html: previousHtml,
+            sourceSha256: previousDocument.sourceSha256,
+            pendingWrite: previousPendingWrite,
+            persistState: previousDocument.persistState,
+            persistError: previousDocument.persistError,
+          });
           versionSessionRef.current.restoreView(previousVersionView);
-          setRenderedContentSha256(null);
+          invalidateCanvasRenderAcks();
           try {
             await verifyCanvasRendered(
               previousHtml,
@@ -5624,6 +5953,7 @@ export default function Workbench() {
     currentBasedOnVersionId,
     deferEditorCommand,
     finishNavigationOperation,
+    invalidateCanvasRenderAcks,
     isCurrentProjectContext,
     persistRecoveryLog,
     persistState,
@@ -5908,6 +6238,9 @@ export default function Workbench() {
       recoveryIdentityRef.current =
         recoveryIdentityFromRecord(payload.recoveryIdentity)
         || recoveryIdentityRef.current;
+      // Source history already performs an in-place canonical Canvas reload so
+      // it can restore the active target and caret. Publish the complete
+      // Document tuple without advancing the project/version Canvas generation.
       documentSessionRef.current.update({
         html: canonicalHtml,
         sourceSha256: nextSourceSha256,
@@ -5925,7 +6258,7 @@ export default function Workbench() {
       versionSessionRef.current.updateAuthority({
         currentExactVersionId: payload.currentExactVersionId,
       });
-      setRenderedContentSha256(null);
+      invalidateCanvasRenderAcks();
       persistRecoveryLog(null, context);
       documentSessionRef.current.setPersistence({
         state: "idle",
@@ -5968,6 +6301,7 @@ export default function Workbench() {
     captureProjectContext,
     deferEditorCommand,
     flushAutosave,
+    invalidateCanvasRenderAcks,
     isCurrentProjectContext,
     persistRecoveryLog,
     viewMode,
@@ -7698,7 +8032,7 @@ export default function Workbench() {
       // Recovery is cleared only after the live Canvas has crossed the Fence.
       persistRecoveryLog(null, transitionContext);
     }
-    const adoptedContext = await adoptGeneratedSourcePath({
+    const preparedTransition = await prepareGeneratedSourceTransition({
       previousSourcePath: run.sourcePath,
       nextSourcePath: committedSourcePath,
       expectedSha256: sourceHash,
@@ -7706,7 +8040,7 @@ export default function Workbench() {
       nextDocumentId: run.documentId,
       versionId,
     });
-    if (!adoptedContext) {
+    if (!preparedTransition.updatesCurrentProject) {
       setToast({
         title: protocolViolation
           ? `${candidateLabel} 已生成，但需要检查`
@@ -7726,21 +8060,23 @@ export default function Workbench() {
       });
       return;
     }
-    documentSessionRef.current.update({
+    const adoptedContext = commitGeneratedSourceTransition({
+      prepared: preparedTransition,
       html: content,
       sourceSha256: sourceHash,
-      pendingWrite: null,
+      publishVersion: () => versionSessionRef.current.adoptCommitted(versionId),
     });
+    if (!adoptedContext) {
+      throw new DeferredEditorCommandDiscardedError("stale-session");
+    }
     auditPendingRef.current = [];
-    setRenderedContentSha256(null);
-    await verifyCanvasRendered(content, versionHash, adoptedContext);
-    if (!isCurrentProjectContext(adoptedContext)) return;
-    versionSessionRef.current.adoptCommitted(versionId);
-    setLastModifiedAt(sourceLastModifiedAt);
     documentSessionRef.current.setPersistence({
       state: "idle",
       error: "",
     });
+    await verifyCanvasRendered(content, versionHash, adoptedContext);
+    if (!isCurrentProjectContext(adoptedContext)) return;
+    setLastModifiedAt(sourceLastModifiedAt);
     persistDraftRecovery(null, adoptedContext);
     commentSessionRef.current.reset();
     draftSessionRef.current.replaceAuthority(adoptedContext, 0, {
@@ -7815,13 +8151,14 @@ export default function Workbench() {
       }
     }
   }, [
-    adoptGeneratedSourcePath,
     captureProjectContext,
+    commitGeneratedSourceTransition,
     deferEditorCommand,
     fenceAndFreezeCurrentCanvas,
     isCurrentProjectContext,
     persistDraftRecovery,
     persistRecoveryLog,
+    prepareGeneratedSourceTransition,
     refreshWorkspace,
     setActiveRun,
     verifyCanvasRendered,
@@ -8390,7 +8727,8 @@ export default function Workbench() {
     if (!context) return;
     const operationId = beginNavigationOperation();
     if (operationId === null) return;
-    const previousHtml = documentSessionRef.current.html;
+    const previousDocument = documentSessionRef.current.snapshot;
+    const previousHtml = previousDocument.html;
     const previousVersionView = versionSessionRef.current.captureView();
     try {
       if (viewMode === "current") {
@@ -8415,22 +8753,28 @@ export default function Workbench() {
       if (!hash || await browserSha256(content) !== hash) {
         throw new Error("历史文件内容与声明 Hash 不一致，已拒绝打开。");
       }
-      documentSessionRef.current.setHtml(content);
-      setRenderedContentSha256(null);
+      documentSessionRef.current.publishAuthority({
+        html: content,
+        sourceSha256: previousDocument.sourceSha256,
+      });
+      versionSessionRef.current.enterHistory(version.id);
+      invalidateCanvasRenderAcks();
       await verifyCanvasRendered(content, hash, context);
       if (
         navigationOperationRef.current !== operationId
         || !isCurrentProjectContext(context)
       ) return;
-      versionSessionRef.current.enterHistory(version.id);
       setDrawer(null);
       editorRef.current?.clearSelection();
     } catch (cause) {
       if (!isCurrentProjectContext(context)) return;
       if (navigationOperationRef.current === operationId) {
-        documentSessionRef.current.setHtml(previousHtml);
+        documentSessionRef.current.publishAuthority({
+          html: previousHtml,
+          sourceSha256: previousDocument.sourceSha256,
+        });
         versionSessionRef.current.restoreView(previousVersionView);
-        setRenderedContentSha256(null);
+        invalidateCanvasRenderAcks();
         try {
           await verifyCanvasRendered(
             previousHtml,
@@ -8459,6 +8803,7 @@ export default function Workbench() {
     captureProjectContext,
     deferEditorCommand,
     finishNavigationOperation,
+    invalidateCanvasRenderAcks,
     isCurrentProjectContext,
     runInProgress,
     verifyCanvasRendered,
@@ -8483,7 +8828,8 @@ export default function Workbench() {
     if (!context) return;
     const operationId = beginNavigationOperation();
     if (operationId === null) return;
-    const previousHtml = documentSessionRef.current.html;
+    const previousDocument = documentSessionRef.current.snapshot;
+    const previousHtml = previousDocument.html;
     const previousVersionView = versionSessionRef.current.captureView();
     try {
       const payload = await bridgeClient.source(context.sourcePath);
@@ -8502,15 +8848,10 @@ export default function Workbench() {
       if (!hash || await browserSha256(content) !== hash) {
         throw new Error("当前源 HTML 与声明 Hash 不一致。");
       }
-      documentSessionRef.current.setHtml(content);
-      setRenderedContentSha256(null);
-      await verifyCanvasRendered(content, hash, context);
-      if (
-        navigationOperationRef.current !== operationId
-        || !isCurrentProjectContext(context)
-      ) return;
-      documentSessionRef.current.setSourceSha256(hash);
-      setLastModifiedAt(String(payload.lastModifiedAt || ""));
+      documentSessionRef.current.publishAuthority({
+        html: content,
+        sourceSha256: hash,
+      });
       versionSessionRef.current.returnCurrent({
         currentBasedOnVersionId:
           payload.currentBasedOnVersionId || currentBasedOnVersionId,
@@ -8518,12 +8859,22 @@ export default function Workbench() {
         restoredFromVersionId:
           payload.restoredFromVersionId || restoredFromVersionId,
       });
+      invalidateCanvasRenderAcks();
+      await verifyCanvasRendered(content, hash, context);
+      if (
+        navigationOperationRef.current !== operationId
+        || !isCurrentProjectContext(context)
+      ) return;
+      setLastModifiedAt(String(payload.lastModifiedAt || ""));
     } catch (cause) {
       if (!isCurrentProjectContext(context)) return;
       if (navigationOperationRef.current === operationId) {
-        documentSessionRef.current.setHtml(previousHtml);
+        documentSessionRef.current.publishAuthority({
+          html: previousHtml,
+          sourceSha256: previousDocument.sourceSha256,
+        });
         versionSessionRef.current.restoreView(previousVersionView);
-        setRenderedContentSha256(null);
+        invalidateCanvasRenderAcks();
         try {
           await verifyCanvasRendered(
             previousHtml,
@@ -8553,6 +8904,7 @@ export default function Workbench() {
     currentBasedOnVersionId,
     deferEditorCommand,
     finishNavigationOperation,
+    invalidateCanvasRenderAcks,
     isCurrentProjectContext,
     restoredFromVersionId,
     verifyCanvasRendered,
@@ -8578,6 +8930,35 @@ export default function Workbench() {
             : browserPreviewOnly
               ? "浏览器预览 · 只读"
               : "内置介绍页 · 打开本地 HTML 后开始编辑";
+  const visibleCanvasAck = canvasMode === "preview"
+    ? canvasRenderAcks.preview
+    : canvasRenderAcks.edit;
+  const isSafelySaved = Boolean(
+    sourcePath
+    && sourceSha256
+    && viewMode === "current"
+    && persistState === "idle"
+    && editRevision === lastPersistedRevision
+    && !projectHydrating
+    && !projectLoadError
+    && !viewTransitioning
+    && visibleCanvasAck?.generation === canvasGeneration
+    && visibleCanvasAck.sha256 === sourceSha256
+  );
+  const safeSaveLabel = isSafelySaved
+    ? "已安全保存"
+    : "正在确认当前画布…";
+  const saveStatusLabel = browserPreviewOnly
+    ? "操作不会保存"
+    : fileRenameBusy
+      ? "正在重命名…"
+      : persistState !== "idle"
+        ? persistLabel
+        : viewMode === "history"
+          ? "历史版本 · 只读"
+          : sourcePath
+            ? safeSaveLabel
+            : persistLabel;
   const canShowCurrentFileInFolder = Boolean(
     sourcePath
     && typeof window !== "undefined"
@@ -9288,18 +9669,14 @@ export default function Workbench() {
                 data-file-renaming={fileRenameBusy ? "true" : undefined}
                 data-edit-revision={editRevision}
                 data-persisted-revision={lastPersistedRevision}
-                data-rendered-sha256={renderedContentSha256 || undefined}
+                data-canvas-generation={canvasGeneration}
+                data-render-generation={visibleCanvasAck?.generation}
+                data-rendered-sha256={visibleCanvasAck?.sha256 || undefined}
                 role="status"
                 aria-live="polite"
               >
                 <span aria-hidden="true" />
-                {browserPreviewOnly
-                  ? "操作不会保存"
-                  : fileRenameBusy
-                    ? "正在重命名…"
-                  : persistState === "idle"
-                    ? "已安全保存"
-                    : persistLabel}
+                {saveStatusLabel}
               </span>
             </span>
           </div>
@@ -9335,6 +9712,7 @@ export default function Workbench() {
                     ) ? capturedContext : null;
                     setPageViewContext(nextContext);
                     editorRef.current?.applyPageViewContext(nextContext);
+                    invalidateEditCanvasRenderAck();
                     setCanvasMode("edit");
                   })
                   .finally(() => {
@@ -9592,6 +9970,7 @@ export default function Workbench() {
                 <div className="canvas-loading" role="status">正在载入源码画布…</div>
               )}>
                 <HtmlCanvasEditor
+                  key={`editor-authority-${canvasGeneration}`}
                   ref={editorRef}
                   html={html}
                   sourcePath={sourcePath || undefined}
@@ -9648,6 +10027,7 @@ export default function Workbench() {
           </div>
           {canvasMode === "preview" ? (
             <HtmlInteractionPreview
+              key={`preview-authority-${canvasGeneration}`}
               ref={interactionPreviewRef}
               html={interactionPreviewHtml}
               documentKey={pageViewDocumentKey}
@@ -9655,6 +10035,7 @@ export default function Workbench() {
               height="100%"
               transport={interactivePreviewTransport}
               onInteraction={() => setProjectMenuOpen(false)}
+              onReady={handlePreviewReady}
             />
           ) : null}
         </section>
@@ -10679,9 +11060,7 @@ export default function Workbench() {
                       <span aria-hidden="true" />
                       {browserPreviewOnly
                         ? "只读预览 · 操作不会保存"
-                        : persistState === "idle"
-                          ? "已安全保存"
-                          : persistLabel}
+                        : saveStatusLabel}
                     </em>
                   </span>
                   <div className="current-project-actions">

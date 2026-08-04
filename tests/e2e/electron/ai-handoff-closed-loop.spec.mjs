@@ -29,6 +29,7 @@ const electronExecutable = require("electron");
 const ORIGINAL_TEXT = "列表项中的文字保持项目符号和缩进。";
 const UPDATED_TEXT = "自动闭环验收通过";
 const SECOND_UPDATED_TEXT = "自动闭环第二版通过";
+const PICKER_TEXT = "项目切换原子发布验收通过";
 
 function seedActiveDiskProject(
   isolatedUserData,
@@ -444,6 +445,14 @@ function workingHtmlFiles(workspace, projectId) {
 test("a verified AI result stays pending until the user opens the new HTML", async () => {
   test.setTimeout(180_000);
   const fixture = createSourceFixture();
+  const pickerSourcePath = path.join(fixture.sourceDirectory, "picker-target.html");
+  writeFileSync(
+    pickerSourcePath,
+    fixtureBuffer("complex-layout.html")
+      .toString("utf8")
+      .replace(ORIGINAL_TEXT, PICKER_TEXT),
+    "utf8",
+  );
   const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
   try {
     const request = await addCommentAndSubmit(
@@ -516,6 +525,35 @@ test("a verified AI result stays pending until the user opens the new HTML", asy
     const openedFrame = await loadedDiskFrame(launched.page, opened.sourcePath);
     await expect(openedFrame.locator(caseSelector("list-item")))
       .toHaveText(UPDATED_TEXT);
+
+    await expect(launched.page.locator(".save-status"))
+      .toHaveText("已安全保存", { timeout: 30_000 });
+    await launched.page.getByRole("button", { name: "预览", exact: true }).click();
+    const previewFrame = launched.page.frameLocator(
+      'iframe[title="HTML 交互预览"]',
+    );
+    await expect(previewFrame.locator(caseSelector("list-item")))
+      .toHaveText(UPDATED_TEXT, { timeout: 30_000 });
+    await expect(launched.page.locator(".save-status"))
+      .toHaveText("已安全保存", { timeout: 30_000 });
+    await launched.page.getByRole("button", { name: "编辑", exact: true }).click();
+
+    await launched.electronApp.evaluate(({ dialog }, sourcePath) => {
+      dialog.showOpenDialog = async () => ({
+        canceled: false,
+        filePaths: [sourcePath],
+      });
+    }, pickerSourcePath);
+    await launched.page.getByRole("button", {
+      name: "打开新的本地 HTML",
+      exact: true,
+    }).click();
+    const pickerFrame = await loadedDiskFrame(
+      launched.page,
+      pickerSourcePath,
+    );
+    await expect(pickerFrame.locator(caseSelector("list-item")))
+      .toHaveText(PICKER_TEXT);
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);

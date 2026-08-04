@@ -23,6 +23,7 @@ function initialSnapshot({
   return Object.freeze({
     html: String(html),
     sourceSha256: sourceSha256 ? String(sourceSha256) : null,
+    canvasGeneration: 0,
     editRevision: 0,
     lastPersistedRevision: 0,
     persistState: "idle",
@@ -99,10 +100,53 @@ export class DocumentSession {
     this.#emit({
       html: String(html || ""),
       sourceSha256: sourceSha256 ? String(sourceSha256) : null,
+      canvasGeneration: this.#snapshot.canvasGeneration + 1,
       editRevision: revision(editRevision),
       lastPersistedRevision: revision(lastPersistedRevision),
       persistState: "idle",
       persistError: "",
+    });
+    return this.#snapshot;
+  }
+
+  publishAuthority({
+    html,
+    sourceSha256,
+    editRevision,
+    lastPersistedRevision,
+    persistState: nextPersistState,
+    persistError,
+    pendingWrite,
+  }) {
+    const next = {
+      ...this.#snapshot,
+      html: String(html),
+      sourceSha256: sourceSha256 ? String(sourceSha256) : null,
+      canvasGeneration: this.#snapshot.canvasGeneration + 1,
+    };
+    if (editRevision !== undefined) {
+      next.editRevision = revision(editRevision);
+    }
+    if (lastPersistedRevision !== undefined) {
+      next.lastPersistedRevision = revision(lastPersistedRevision);
+    }
+    if (nextPersistState !== undefined) {
+      next.persistState = persistState(nextPersistState);
+    }
+    if (persistError !== undefined) {
+      next.persistError = String(persistError || "");
+    }
+    if (pendingWrite !== undefined) {
+      this.#pendingWrite = pendingWrite || null;
+    }
+    this.#emit(next);
+    return this.#snapshot;
+  }
+
+  reloadCanvas() {
+    this.#emit({
+      ...this.#snapshot,
+      canvasGeneration: this.#snapshot.canvasGeneration + 1,
     });
     return this.#snapshot;
   }
@@ -193,6 +237,10 @@ export class DocumentSession {
 
   get sourceSha256() {
     return this.#snapshot.sourceSha256;
+  }
+
+  get canvasGeneration() {
+    return this.#snapshot.canvasGeneration;
   }
 
   get editRevision() {
