@@ -50,21 +50,6 @@ export type PageViewContextEntry = Readonly<{
   ariaExpanded?: "true" | "false" | null;
 }>;
 
-export type PageViewContextVisual = Readonly<
-  | {
-      targetRef: PageViewTargetRef;
-      kind: "canvas-bitmap";
-      width: number;
-      height: number;
-      dataUrl: string;
-    }
-  | {
-      targetRef: PageViewTargetRef;
-      kind: "table-body";
-      html: string;
-    }
->;
-
 export type PageViewContext = Readonly<{
   protocol: "pageroot-page-view-context";
   version: 2;
@@ -72,7 +57,6 @@ export type PageViewContext = Readonly<{
   generation: number;
   sourceSha256: string;
   entries: readonly PageViewContextEntry[];
-  visuals: readonly PageViewContextVisual[];
 }>;
 
 export type PagePresentationAction = Readonly<{
@@ -97,20 +81,6 @@ export type RawPageViewSnapshot = {
     display: string;
     visibility: string;
   }>;
-  visuals?: Array<
-    | {
-        sourceNodeId: string;
-        kind: "canvas-bitmap";
-        width: number;
-        height: number;
-        dataUrl: string;
-      }
-    | {
-        sourceNodeId: string;
-        kind: "table-body";
-        html: string;
-      }
-  >;
 };
 
 export const PAGE_VIEW_CONTEXT_PROTOCOL: "pageroot-page-view-context";
@@ -139,11 +109,6 @@ export function resolvePageViewContext(
       ariaSelected: string | null;
       ariaExpanded: string | null;
     };
-  }>;
-  visuals: Array<{
-    visual: PageViewContextVisual;
-    sourceNodeId: string;
-    resolution: "exact" | "rebound";
   }>;
 };
 

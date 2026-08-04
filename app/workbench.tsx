@@ -103,6 +103,10 @@ import {
   type DocumentSessionSnapshot,
 } from "./application/document-session.js";
 import { DrainCoordinator } from "./application/drain-coordinator.js";
+import {
+  RuntimeVisualProjectionSession,
+  type RuntimeVisualProjectionSnapshot,
+} from "./application/runtime-visual-projection-session.js";
 import type { PageViewContext } from "./lib/page-view-context.js";
 import {
   ProjectRulesSession,
@@ -308,6 +312,14 @@ const INITIAL_DOCUMENT_SNAPSHOT: DocumentSessionSnapshot = {
   persistState: "idle",
   persistError: "",
 };
+const INITIAL_RUNTIME_VISUAL_PROJECTION_SNAPSHOT:
+RuntimeVisualProjectionSnapshot = Object.freeze({
+  status: "idle",
+  documentKey: null,
+  sourceSha256: null,
+  requestKey: null,
+  projection: null,
+});
 const INITIAL_COMMENT_SNAPSHOT: CommentSessionSnapshot<
   CommentItem,
   DirectEditEvent,
@@ -468,11 +480,24 @@ export default function Workbench() {
     itemKey: string;
   } | null>(null);
   const pagePresentationScrollRequestRef = useRef(0);
+  const runtimeVisualViewportRef = useRef<{
+    width: number;
+    height: number;
+  } | null>(null);
   const projectOpenRequestRef = useRef(0);
   const projectSessionRef = useRef(new ProjectSession());
   const drainCoordinatorRef = useRef(new DrainCoordinator());
   const runtimeCapabilitiesRef =
     useRef<RuntimeCapabilities>(BROWSER_RUNTIME_CAPABILITIES);
+  const runtimeVisualProjectionSessionRef = useRef(
+    new RuntimeVisualProjectionSession({
+      capture: async (payload) => {
+        const api = globalThis.window?.htmlAIEditVisuals;
+        if (!api) throw new Error("Edit visual capture is unavailable.");
+        return api.captureProjection(payload);
+      },
+    }),
+  );
   const draftSessionRef = useRef(new DraftSession<CommentItem, DirectEditEvent>({
     bridgeClient,
     encodeComment: persistedComment,
@@ -636,6 +661,10 @@ export default function Workbench() {
   const [canvasMode, setCanvasMode] = useState<CanvasMode>("edit");
   const [pageViewContext, setPageViewContext] =
     useState<PageViewContext | null>(null);
+  const [runtimeVisualProjectionSnapshot, setRuntimeVisualProjectionSnapshot] =
+    useState<RuntimeVisualProjectionSnapshot>(
+      INITIAL_RUNTIME_VISUAL_PROJECTION_SNAPSHOT,
+    );
   const [interactivePreviewTransport, setInteractivePreviewTransport] =
     useState<RuntimeCapabilities["interactivePreview"]>(
       BROWSER_RUNTIME_CAPABILITIES.interactivePreview,
@@ -700,6 +729,11 @@ export default function Workbench() {
       setDocumentId(snapshot.documentId);
     });
     return () => session.setObserver(null);
+  }, []);
+  useEffect(() => {
+    const session = runtimeVisualProjectionSessionRef.current;
+    session.setObserver(setRuntimeVisualProjectionSnapshot);
+    return () => session.dispose();
   }, []);
   useEffect(() => {
     const session = projectRulesSessionRef.current;
@@ -1139,6 +1173,77 @@ export default function Workbench() {
   const activePageViewContext = (
     pageViewContext?.documentKey === pageViewDocumentKey
   ) ? pageViewContext : null;
+  const activeRuntimeVisualProjection = (
+    runtimeVisualProjectionSnapshot.status === "ready"
+    && runtimeVisualProjectionSnapshot.projection?.documentKey
+      === pageViewDocumentKey
+  ) ? runtimeVisualProjectionSnapshot.projection : null;
+  const handleRuntimeVisualViewport = useCallback((viewport: {
+    width: number;
+    height: number;
+  }) => {
+    if (
+      Number.isFinite(viewport.width)
+      && Number.isFinite(viewport.height)
+      && viewport.width > 0
+      && viewport.height > 0
+    ) {
+      runtimeVisualViewportRef.current = viewport;
+    }
+    const currentViewport = runtimeVisualViewportRef.current;
+    if (
+      canvasMode === "edit"
+      && (
+        commentLayoutAuthority.textEditing
+        || editorRef.current?.hasPendingNativeEdit()
+      )
+    ) {
+      return;
+    }
+    const eligible = (
+      runtimeCapabilitiesReady
+      && runtimeCapabilitiesRef.current.editVisualProjection
+        === "offscreen-capture"
+      && !browserPreviewOnly
+      && canvasMode === "edit"
+      && viewMode === "current"
+      && !interactionLocked
+      && Boolean(sourcePath)
+      && !projectHydrating
+      && !projectLoadError
+      && !workspaceIssue
+    );
+    if (!eligible || !currentViewport || !sourcePath) {
+      runtimeVisualProjectionSessionRef.current.reset();
+      return;
+    }
+    runtimeVisualProjectionSessionRef.current.request({
+      html,
+      sourcePath,
+      documentKey: pageViewDocumentKey,
+      viewportWidth: currentViewport.width,
+      pageViewContext: activePageViewContext,
+    });
+  }, [
+    activePageViewContext,
+    browserPreviewOnly,
+    canvasMode,
+    commentLayoutAuthority.textEditing,
+    html,
+    interactionLocked,
+    pageViewDocumentKey,
+    projectHydrating,
+    projectLoadError,
+    runtimeCapabilitiesReady,
+    sourcePath,
+    viewMode,
+    workspaceIssue,
+  ]);
+  useEffect(() => {
+    handleRuntimeVisualViewport(
+      runtimeVisualViewportRef.current ?? { width: 0, height: 0 },
+    );
+  }, [handleRuntimeVisualViewport]);
   const expectedCommentLayoutSourceSha256 =
     renderedContentSha256 || sourceSha256;
   const otherTabCommentsContextKey = [
@@ -2546,6 +2651,8 @@ export default function Workbench() {
     setLastModifiedAt(project.lastModifiedAt || null);
     setSelection(null);
     setPageViewContext(null);
+    runtimeVisualProjectionSessionRef.current.reset();
+    runtimeVisualViewportRef.current = null;
     editorRef.current?.applyPageViewContext(null);
     setComposerOpen(false);
     commentSessionRef.current.reset();
@@ -9560,6 +9667,10 @@ export default function Workbench() {
             className="canvas-edit-surface"
             hidden={canvasMode !== "edit"}
             aria-hidden={canvasMode !== "edit"}
+            data-runtime-visual-status={runtimeVisualProjectionSnapshot.status}
+            data-runtime-visual-count={
+              activeRuntimeVisualProjection?.visuals.length ?? 0
+            }
           >
             {!runtimeCapabilitiesReady ? (
               <div className="canvas-loading" role="status">正在识别运行环境…</div>
@@ -9602,6 +9713,8 @@ export default function Workbench() {
                   commentedTargets={commentedTargets}
                   trackedTargets={trackedAuditTargets}
                   pageViewContext={activePageViewContext}
+                  runtimeVisualProjection={activeRuntimeVisualProjection}
+                  onRuntimeVisualViewport={handleRuntimeVisualViewport}
                   pageViewDocumentKey={pageViewDocumentKey}
                   onPageViewContextChange={acceptPageViewContext}
                   locked={

@@ -4,6 +4,11 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+- Show script-generated Canvas, SVG/HTML charts and dynamic table bodies
+  automatically in desktop Edit as one source-Hash-bound read-only bitmap
+  projection. The bitmap remains pointer-transparent so comments target the
+  original HTML host, while source save, review diff, versions and AI input
+  continue to use the complete original HTML without PageRoot projection data.
 - Made AI review evidence semantic and render-backed: repeated copy is paired
   within its real row or component context, zero-evidence map entries are
   disabled and skipped, and difference frames remeasure after fonts, images or

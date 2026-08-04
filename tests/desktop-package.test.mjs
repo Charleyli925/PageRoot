@@ -370,6 +370,10 @@ test("desktop package carries the v3 single patch engine, scope gate and active 
     preload,
     /exposeInMainWorld\(["']htmlAIPreview["'],\s*previewApi\)/,
   );
+  assert.match(
+    preload,
+    /exposeInMainWorld\(["']htmlAIEditVisuals["'],\s*editVisualApi\)/,
+  );
   assert.match(preload, /exposeInMainWorld\(["']htmlAIRuntime["'],\s*runtimeConfig\)/);
   assert.match(preload, /exposeInMainWorld\(["']htmlAIAppLifecycle["'],\s*appLifecycleApi\)/);
   assert.match(preload, /onPrepareClose/);

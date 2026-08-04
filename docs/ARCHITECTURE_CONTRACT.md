@@ -42,8 +42,8 @@ Bridge route adapters
   weaken the gate to land a feature.
 - Runtime capability decoding has one ingress:
   `app/application/runtime-capabilities.js`. Source editing, project opening,
-  attachment persistence, close coordination and interactive preview transport
-  are independent declarations;
+  attachment persistence, close coordination, interactive preview transport
+  and edit visual projection are independent declarations;
   consumers may not infer the whole runtime from the presence of one preload
   API. Electron owns desktop close safety through its acknowledged handshake;
   `beforeunload` is only the browser fallback.
@@ -85,12 +85,25 @@ projectId + documentId + sourcePath + session generation + query sequence
 Revisions are monotonic. A query result with an older revision may never
 replace an acknowledged state, even if the project identity is unchanged.
 
-The preview-to-edit context is a non-durable projection owned by the Workbench
-for one current document key and preview generation. A capture result may apply
-only while that complete identity is still current. Project/source changes,
+The preview-to-edit `PageViewContext` is a non-durable projection owned by the
+Workbench for one current document key and preview generation. It contains
+only allowlisted source-backed presentation state. Project/source changes,
 history navigation, a newer preview generation or a failed capture discard it.
 It never registers a drain obligation and never changes source, Draft or
-Version authority. Comment layout is measured only after this projection is
+Version authority.
+
+Edit runtime visuals have a separate owner:
+`RuntimeVisualProjectionSession`. Its request identity includes document key,
+source path, exact source Hash, normalized edit viewport and resolved
+`PageViewContext` entries. Only its newest generation may publish a result.
+The main-process capture controller owns at most one hidden authored-page
+window and its preview session; replacement or disposal destroys both. The
+accepted result is a bounded PNG projection for source-empty hosts, not a copy
+of runtime DOM. It has no drain, persistence, review-diff, source-history or AI
+authority. The Canvas may mount and remove it only as presentation beneath the
+original source host; comments and edits continue to resolve that host.
+
+Comment layout is measured only after current disposable presentation is
 applied. The Workbench accepts no card coordinates until the Canvas reports a
 complete target set for the current rendered source Hash and applied generation;
 missing coordinates remain an explicit recovery state and are never synthesized

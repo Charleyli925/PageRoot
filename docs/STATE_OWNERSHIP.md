@@ -19,9 +19,10 @@
 | Close/switch/submit/history readiness and desktop close lifecycle | Drain coordinator plus one renderer close lifecycle | composed owner snapshots and request identity; no copied dirty booleans | Electron close handshake, browser fallback and navigation |
 | Bridge transport, timeouts, error details and unknown outcomes | Typed Bridge client | no durable state | application sessions |
 | Undelivered Bridge-unavailable recovery issue and renderer-listener readiness | Main-process recovery mailbox | in-memory for the current app process | preload handshake, native fallback and Workbench banner |
-| Renderer edit, project-picker, attachment-persistence, close-coordination and interactive-preview capabilities | Runtime capability resolver | immutable preload manifest; fail-closed browser default | Workbench composition root |
+| Renderer edit, project-picker, attachment-persistence, close-coordination, interactive-preview and edit-visual capabilities | Runtime capability resolver | immutable preload manifest; fail-closed browser default | Workbench composition root |
 | Volatile interactive-preview document, bootstrap and allowed source-relative asset root | Main-process preview protocol controller | none; bounded in-memory session only | isolated preview iframe and the script-disabled edit iframe's resource base |
-| Current preview/edit display context, bounded read-only visuals, safe reveal transition and capture generation | Workbench page-view context state | none; source-bound in-memory projection only | `HtmlCanvasEditor` presentation layer and toolbar |
+| Current preview/edit display context, safe reveal transition and capture generation | Workbench page-view context state | none; source-bound in-memory projection only | `HtmlCanvasEditor` presentation layer and toolbar |
+| Current edit runtime-visual request identity, generation and accepted bitmap projection | Renderer `RuntimeVisualProjectionSession`; main-process capture controller solely owns its active hidden window/session | none; source-Hash-bound in-memory PNGs only | `HtmlCanvasEditor` presentation layer; original source host remains comment target |
 | Current source-backed comment resolution, visibility, coordinates, marker eligibility and natural document height | `HtmlCanvasEditor` presentation measurement | none; disposable snapshot tagged by rendered source Hash, applied page-view generation and exact target-ID set | Workbench comment rail and Canvas height |
 | Stable application update schedule, coalesced manual check, download progress and restart-install readiness | Main-process application-update controller | signed GitHub Release metadata plus updater cache; no editor authority | preload status snapshot, About PageRoot, Workbench update notice, drain coordinator |
 | Random installation identity, project pseudonym secret, aggregate counters and unsent usage events | Main-process usage-telemetry controller | bounded `usage-telemetry.json` under PageRoot Application Support | PostHog batch ingestion only |
@@ -57,12 +58,14 @@ Rules:
   `projectId` and `documentId`.
 - Runtime features are declared independently. The presence of a project-picker
   API never implies source-edit or attachment-persistence authority.
-- Interactive-preview sessions and page-view context are disposable. They do
-  not participate in save, switch, submit or close drains, and cannot become a
-  second copy of the source HTML. Bounded Canvas/table visual projections are
-  presentation-only and never enter the source patch or persistence paths.
-  Toolbar and Option-click actions may propose a new context for the current
-  document key, but do not own or persist it.
+- Interactive-preview sessions, page-view context and edit runtime-visual
+  projections are disposable. They do not participate in save, switch, submit
+  or close drains, and cannot become a second copy of the source HTML. Bitmap
+  projections are presentation-only and never enter source patch, review,
+  version, persistence or AI-input paths. Toolbar and Option-click actions may
+  propose a new context for the current document key, but do not own or persist
+  it. A projection refresh consumes that context; it does not merge runtime DOM
+  into it.
 - `CommentSession` is a renderer working copy, not durable Draft authority.
   Runtime state is likewise not a second copy of draft contents: it carries
   lifecycle state and a revisioned pointer to the draft repository.

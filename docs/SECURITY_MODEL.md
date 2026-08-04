@@ -35,6 +35,13 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   media, but not for renderer or authored scripts: `pageroot-preview:` is absent
   from `script-src`, the edit document remains sandboxed without script
   capability, and every source transition revokes the previous session.
+- Desktop edit visual capture is a separate narrow IPC capability. The main
+  process revalidates the known source path and a bounded payload, owns one
+  hidden sandboxed BrowserWindow with Node disabled, denies navigation,
+  popups and webviews, and destroys the window plus preview session after each
+  capture or superseding request. It returns only bounded PNG data URLs and
+  geometry tied to the renderer-provided exact source Hash; it never returns
+  runtime HTML, SVG, script state or filesystem data.
 - Strict schemas, frozen inputs and identity/Hash checks before accepting AI output; scope evidence is always recorded, with protocol/script/target-integrity findings hard-blocked and ordinary breadth findings observed without a user-waiver loop
 - Main-process-only usage telemetry with exact event/property allowlists,
   random installation/session UUIDs and HMAC project pseudonyms; no hardware
@@ -78,8 +85,15 @@ only to the trusted application main frame. When the user returns to editing,
 PageRoot accepts only an allowlisted source-backed presentation diff. It rejects
 unknown or duplicated source nodes, stale Hashes, truncated captures, arbitrary
 one-sided runtime classes, text/HTML, inline style, form state and runtime
-children. The normal script-disabled editing iframe and SourcePatch checks
-remain unchanged.
+children. Independently, Edit may display a PNG capture only inside a unique
+source-empty host with the exact current source Hash. The bitmap has pointer
+events disabled, so selection and comments resolve the original source host.
+Projection nodes are removed/rebuilt as disposable presentation and cannot be
+serialized by the source engine. Save, review comparison and Request creation
+continue from authoritative source bytes (the Bridge copies those exact bytes
+to `input/base/index.html`); PageRoot-generated projection attributes and PNGs
+are never appended to AI input. The normal script-disabled editing iframe and
+SourcePatch checks remain unchanged.
 
 Edit-mode reveal actions use the same trust boundary. They accept only strict
 Tabs whose selected panel is proved by `aria-selected` plus `hidden`, native

@@ -41,11 +41,17 @@ Comments + frozen input
   old session before a new resource root can be adopted.
 - Preview-to-edit carries only a bounded `PageViewContext`: source-backed
   active/inactive class transitions and `hidden`, `open`, `aria-selected` or
-  `aria-expanded` state, plus a strictly bounded read-only visual projection
-  for a source-empty chart container or `tbody`. The edit frame is still
-  rebuilt from source bytes. Canvas snapshots and sanitized table rows are
-  disposable and non-editable; arbitrary runtime nodes, rewritten text, form
-  values and scroll positions are never copied into it or serialized.
+  `aria-expanded` state. It never carries runtime DOM, pixels or table markup.
+- Desktop Edit has one separate, disposable runtime-visual projection. A
+  renderer session indexes source-empty hosts, asks one hidden sandboxed
+  `pageroot-preview:` window to run the authored page, and accepts bounded PNG
+  captures only when the original source Hash, host identity and viewport
+  request are still current. `HtmlCanvasEditor` mounts each PNG as a
+  pointer-transparent child of its original source host (or one bitmap row for
+  an empty `tbody`). The host therefore remains the selectable/commentable
+  TargetRef. The runtime DOM is never merged or synchronized, and neither the
+  bitmap nor its temporary attributes enter SourcePatch, save, version, review
+  diff or AI Request input.
 - Comment selection remains source-node exact inside foreign content. Authored
   SVG children retain their own instrumented SourceIndex identity; runtime-only
   children fail closed and are never promoted to an ancestor `svg`.
@@ -102,7 +108,7 @@ they do not import application services.
 | Close, switch, submit and history obligations | `app/application/drain-coordinator.js` |
 | Late query rejection and monotonic draft reads | `app/application/project-query-fence.js` |
 | Crash-only browser recovery | `app/application/recovery-store.js` |
-| Renderer, project-picker, attachment and interactive-preview capabilities | `app/application/runtime-capabilities.js` |
+| Renderer, project-picker, attachment, interactive-preview and edit-visual capabilities | `app/application/runtime-capabilities.js` |
 | Same-directory source rename, operation journal and active/recent path rebase | `desktop/source-rename.mjs` |
 | Known-source Finder reveal | narrow project IPC in `desktop/main.mjs` |
 | Validated default-browser HTML launch | `desktop/open-in-default-browser.mjs`, behind `desktop/project-ipc-security.mjs` sender authority |
@@ -110,7 +116,10 @@ they do not import application services.
 | Preview sanitization and verified frame injection | `app/components/html-preview-sandbox.js` |
 | Renderer declaration of the shared volatile preview-session capability | `app/components/desktop-preview-api.ts` |
 | Volatile desktop preview sessions and contained local-asset serving | `desktop/preview-protocol.mjs` |
-| Source-backed preview/edit display-state filtering, bounded visual filtering and rebinding, and safe action resolution | `app/lib/page-view-context.js`, `app/lib/read-only-visual.js` |
+| Source-backed preview/edit display-state filtering, rebinding and safe action resolution | `app/lib/page-view-context.js` |
+| Source-bound edit visual request/late-result ownership and payload validation | `app/application/runtime-visual-projection-session.js`, `app/domain/runtime-visual-projection.js` |
+| Sandboxed offscreen page execution and bounded bitmap capture | `desktop/edit-visual-capture.mjs` |
+| Read-only bitmap mounting inside original source hosts | `app/components/html-canvas-runtime-visual.ts` |
 | Run lifecycle decoding and transition policy | `app/domain/run-lifecycle.js` |
 | Workbench pure record/comment/project/version/browser helpers | `app/workbench/*-model.ts`, `app/workbench/browser-io.ts` |
 | History, attachment and preview presentation | `app/workbench/presentation.tsx` |

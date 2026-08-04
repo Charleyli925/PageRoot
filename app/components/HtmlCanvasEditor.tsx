@@ -18,6 +18,7 @@ import {
   type PagePresentationAction,
   type PageViewContext,
 } from "../lib/page-view-context.js";
+import type { RuntimeVisualProjection } from "../domain/runtime-visual-projection.js";
 import {
   SOURCE_NODE_ATTRIBUTE,
   applyPatchPlan,
@@ -96,6 +97,7 @@ import {
   tabAssociationForElement,
   tabAssociations,
 } from "./html-canvas-page-view";
+import { applyRuntimeVisualProjectionToDocument } from "./html-canvas-runtime-visual";
 import {
   canonicalNativeHostPreview,
   nativeEditHostForElement,
@@ -368,6 +370,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     commentedTargets = EMPTY_COMMENTED_TARGETS,
     trackedTargets = EMPTY_TRACKED_TARGETS,
     pageViewContext = null,
+    runtimeVisualProjection = null,
+    onRuntimeVisualViewport,
     pageViewDocumentKey = "",
     onPageViewContextChange,
   },
@@ -481,6 +485,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const pageViewContextRef = useRef<PageViewContext | null>(pageViewContext);
   const lastPageViewContextPropRef = useRef<PageViewContext | null>(pageViewContext);
   const appliedPageViewContextRef = useRef<PageViewContext | null>(null);
+  const runtimeVisualProjectionRef = useRef<RuntimeVisualProjection | null>(
+    runtimeVisualProjection,
+  );
+  const onRuntimeVisualViewportRef = useRef(onRuntimeVisualViewport);
   const pageViewDocumentKeyRef = useRef(pageViewDocumentKey);
   const onPageViewContextChangeRef = useRef(onPageViewContextChange);
   const controlledMode = locked ? "processing" : interactionMode;
@@ -512,6 +520,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     lastPageViewContextPropRef.current = pageViewContext;
     pageViewContextRef.current = pageViewContext;
   }
+  runtimeVisualProjectionRef.current = runtimeVisualProjection;
+  onRuntimeVisualViewportRef.current = onRuntimeVisualViewport;
   pageViewDocumentKeyRef.current = pageViewDocumentKey;
   onPageViewContextChangeRef.current = onPageViewContextChange;
 
@@ -816,6 +826,14 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     const frameOffsetTop = iframeRect.top - containerRect.top;
     const frameHeight = iframe.clientHeight;
     const frameWidth = iframe.clientWidth;
+    try {
+      onRuntimeVisualViewportRef.current?.({
+        width: Math.max(1, Math.round(frameWidth)),
+        height: Math.max(1, Math.round(frameHeight)),
+      });
+    } catch {
+      // Runtime visual capture is optional and cannot interrupt edit layout.
+    }
     const scrollingElement = documentNode.scrollingElement || documentNode.documentElement;
     const frameView = documentNode.defaultView;
     const scrollTop = Math.max(
@@ -3321,6 +3339,21 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     });
   }, []);
 
+  const applyRuntimeVisualProjectionNow = useCallback((
+    projection: RuntimeVisualProjection | null,
+  ): boolean => {
+    runtimeVisualProjectionRef.current = projection;
+    const documentNode = iframeRef.current?.contentDocument;
+    if (!documentNode?.documentElement) return false;
+    applyRuntimeVisualProjectionToDocument(
+      documentNode,
+      frameSourceHtmlRef.current,
+      projection,
+    );
+    requestAnimationFrame(updateOverlayPosition);
+    return true;
+  }, [updateOverlayPosition]);
+
   const applyPageViewContextNow = useCallback((
     nextContext: PageViewContext | null,
   ): boolean => {
@@ -3334,6 +3367,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       appliedPageViewContextRef.current,
     );
     appliedPageViewContextRef.current = nextContext;
+    applyRuntimeVisualProjectionToDocument(
+      documentNode,
+      frameSourceHtmlRef.current,
+      runtimeVisualProjectionRef.current,
+    );
     requestAnimationFrame(updateOverlayPosition);
     return true;
   }, [updateOverlayPosition]);
@@ -3468,6 +3506,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   useEffect(() => {
     applyPageViewContextNow(pageViewContext);
   }, [applyPageViewContextNow, pageViewContext]);
+
+  useEffect(() => {
+    applyRuntimeVisualProjectionNow(runtimeVisualProjection);
+  }, [applyRuntimeVisualProjectionNow, runtimeVisualProjection]);
 
   useEffect(() => {
     onReady?.(api);
@@ -3621,6 +3663,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       null,
     );
     appliedPageViewContextRef.current = pageViewContextRef.current;
+    applyRuntimeVisualProjectionToDocument(
+      documentNode,
+      frameSourceHtmlRef.current,
+      runtimeVisualProjectionRef.current,
+    );
 
     const handleClick = (event: MouseEvent) => {
       if (isCanvasRootElement(event.target)) {

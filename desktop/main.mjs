@@ -87,6 +87,10 @@ import {
   createPreviewSessionOperation,
   registerPreviewProtocolScheme,
 } from "./preview-protocol.mjs";
+import {
+  createEditVisualCaptureController,
+  createEditVisualCaptureOperation,
+} from "./edit-visual-capture.mjs";
 
 // electron-updater is CommonJS; the default import is the supported ESM bridge.
 const { autoUpdater } = electronUpdater;
@@ -178,6 +182,9 @@ const PREVIEW_CHANNELS = Object.freeze({
   createSession: "html-preview:create-session",
   revokeSession: "html-preview:revoke-session",
 });
+const EDIT_VISUAL_CHANNELS = Object.freeze({
+  captureProjection: "html-edit-visuals:capture-projection",
+});
 const EDIT_CHANNELS = Object.freeze({
   historyRequested: "html-edit:history-requested",
   nativeHistory: "html-edit:native-history",
@@ -201,6 +208,7 @@ let usageTelemetry = null;
 let workspaceFailurePrompt = null;
 let managedWelcomeRegistration = null;
 let previewProtocolController = null;
+let editVisualCaptureController = null;
 const workspaceRecoveryMailbox = createWorkspaceRecoveryMailbox();
 
 function ensurePreviewProtocolController() {
@@ -213,6 +221,23 @@ function ensurePreviewProtocolController() {
     previewProtocolController.install();
   }
   return previewProtocolController;
+}
+
+function ensureEditVisualCaptureController() {
+  if (!editVisualCaptureController) {
+    editVisualCaptureController = createEditVisualCaptureController({
+      BrowserWindowClass: BrowserWindow,
+      createSession: (payload) => (
+        ensurePreviewProtocolController().createSession(payload)
+      ),
+      revokeSession: (sessionId) => (
+        Promise.resolve(
+          ensurePreviewProtocolController().revokeSession(sessionId),
+        )
+      ),
+    });
+  }
+  return editVisualCaptureController;
 }
 
 function telemetryFingerprint(value) {
@@ -783,6 +808,15 @@ const createPreviewSession = createPreviewSessionOperation({
   createSession: (payload) => (
     ensurePreviewProtocolController().createSession(payload)
   ),
+  authorizeSourcePath: async (sourcePathInput) => {
+    const sourcePath = assertReadPayload(sourcePathInput);
+    await assertKnownProjectPath(sourcePath);
+    return inspectHtmlFile(sourcePath);
+  },
+});
+
+const captureEditVisualProjection = createEditVisualCaptureOperation({
+  capture: (payload) => ensureEditVisualCaptureController().capture(payload),
   authorizeSourcePath: async (sourcePathInput) => {
     const sourcePath = assertReadPayload(sourcePathInput);
     await assertKnownProjectPath(sourcePath);
@@ -1499,6 +1533,13 @@ function registerProjectIpc() {
       "preview_revoke_session",
     ),
   );
+  ipcMain.handle(
+    EDIT_VISUAL_CHANNELS.captureProjection,
+    trustedProject(
+      captureEditVisualProjection,
+      "edit_visual_capture_projection",
+    ),
+  );
   ipcMain.handle(APP_CHANNELS.closeResult, trusted(reportCloseResult));
   ipcMain.handle(
     APP_CHANNELS.workspaceRecoveryReady,
@@ -1690,6 +1731,7 @@ function unregisterIpc() {
     ...Object.values(PROJECT_CHANNELS),
     ...Object.values(INTEGRATION_CHANNELS),
     ...Object.values(UPDATE_CHANNELS),
+    ...Object.values(EDIT_VISUAL_CHANNELS),
     APP_CHANNELS.closeResult,
     APP_CHANNELS.workspaceRecoveryReady,
     APP_CHANNELS.relaunch,
@@ -2114,6 +2156,8 @@ async function createWindow() {
   });
   mainWindow.on("closed", () => {
     applicationUpdate?.stopAutomaticChecks();
+    editVisualCaptureController?.dispose();
+    editVisualCaptureController = null;
     previewProtocolController?.dispose();
     rendererHasLoaded = false;
     workspaceRecoveryMailbox.beginRendererLoad();
