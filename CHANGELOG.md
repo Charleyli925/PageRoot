@@ -4,6 +4,11 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+- Show script-generated Canvas, SVG/HTML charts and dynamic table bodies
+  automatically in desktop Edit as one source-Hash-bound read-only bitmap
+  projection. The bitmap remains pointer-transparent so comments target the
+  original HTML host, while source save, review diff, versions and AI input
+  continue to use the complete original HTML without PageRoot projection data.
 - Give developer test packages a distinct `PageRoot Developer Preview` app
   identity and deterministic versions derived from the latest formal tag; for
   example, the first two committed previews after `0.9.5` are `0.9.69991` and
@@ -89,7 +94,6 @@ Notable user-visible changes are documented here. This project follows Semantic 
   in the page or App, committing the current checkpoint and removing the edit
   toolbar and selection together. Selection-bound toolbar and comment actions
   remain stable long enough to complete their intended operation.
-
 ## [0.9.5] - 2026-07-31
 
 - Run desktop interactive previews in a short-lived isolated document so

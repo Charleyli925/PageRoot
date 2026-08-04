@@ -10,8 +10,6 @@ import {
 import type { HtmlCanvasCommentedTarget, HtmlCanvasSelection } from "./HtmlCanvasEditor.types";
 
 const PAGE_VIEW_CONTEXT_ATTRIBUTE = "data-pageroot-view-context";
-const READ_ONLY_VISUAL_ATTRIBUTE = "data-pageroot-readonly-visual";
-const READ_ONLY_VISUAL_HOST_ATTRIBUTE = "data-pageroot-readonly-visual-host";
 
 export function escapedSourceNodeId(nodeId: string): string {
   return nodeId.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
@@ -98,12 +96,6 @@ export function restorePageViewContext(
   sourceHtml: string,
   context: PageViewContext | null,
 ) {
-  documentNode.querySelectorAll<HTMLElement>(
-    `[${READ_ONLY_VISUAL_ATTRIBUTE}]`,
-  ).forEach((element) => element.remove());
-  documentNode.querySelectorAll<HTMLElement>(
-    `[${READ_ONLY_VISUAL_HOST_ATTRIBUTE}]`,
-  ).forEach((element) => element.removeAttribute(READ_ONLY_VISUAL_HOST_ATTRIBUTE));
   if (!context) return;
   const resolved = resolvePageViewContext(sourceHtml, context);
   for (const item of resolved.entries) {
@@ -171,45 +163,6 @@ export function applyPageViewContextToDocument(
     }
     element.setAttribute(PAGE_VIEW_CONTEXT_ATTRIBUTE, "true");
     applied += 1;
-  }
-  for (const item of resolved.visuals) {
-    const element = pageViewContextElement(documentNode, item.sourceNodeId);
-    const hasAuthoredVisualContent = element
-      ? Array.from(element.childNodes).some((node) => (
-          node.nodeType === Node.ELEMENT_NODE
-          || (node.nodeType === Node.TEXT_NODE && (node.textContent ?? "").trim().length > 0)
-        ))
-      : true;
-    if (!element || hasAuthoredVisualContent) continue;
-    element.setAttribute(READ_ONLY_VISUAL_HOST_ATTRIBUTE, "true");
-    if (item.visual.kind === "canvas-bitmap") {
-      const image = documentNode.createElement("img");
-      image.setAttribute(READ_ONLY_VISUAL_ATTRIBUTE, "canvas-bitmap");
-      image.setAttribute("contenteditable", "false");
-      image.setAttribute("aria-hidden", "true");
-      image.setAttribute("alt", "");
-      image.setAttribute("draggable", "false");
-      image.width = item.visual.width;
-      image.height = item.visual.height;
-      image.src = item.visual.dataUrl;
-      element.append(image);
-      applied += 1;
-      continue;
-    }
-    const parser = new (documentNode.defaultView?.DOMParser ?? DOMParser)();
-    const parsedVisual = parser.parseFromString(
-      `<table><tbody>${item.visual.html}</tbody></table>`,
-      "text/html",
-    );
-    const projectedRows = Array.from(
-      parsedVisual.querySelector("tbody")?.children ?? [],
-    ).map((row) => documentNode.importNode(row, true));
-    for (const row of projectedRows) {
-      row.setAttribute(READ_ONLY_VISUAL_ATTRIBUTE, "table-body");
-      row.setAttribute("contenteditable", "false");
-    }
-    element.append(...projectedRows);
-    if (projectedRows.length > 0) applied += 1;
   }
   return applied;
 }

@@ -281,13 +281,13 @@
     {
       "id": "state-architecture",
       "patterns": [
-        "^app/application/(?:bridge-client|comment-session|document-session|draft-session|drain-coordinator|project-query-fence|project-rules-session|project-session|recovery-store|run-session|runtime-capabilities|source-history-session|version-session)\\.(?:js|d\\.ts)$",
-        "^app/domain/(?:draft-aggregate|run-lifecycle|source-history)\\.(?:js|d\\.ts)$",
+        "^app/application/(?:bridge-client|comment-session|document-session|draft-session|drain-coordinator|project-query-fence|project-rules-session|project-session|recovery-store|run-session|runtime-capabilities|runtime-visual-projection-session|source-history-session|version-session)\\.(?:js|d\\.ts)$",
+        "^app/domain/(?:draft-aggregate|run-lifecycle|runtime-visual-projection|source-history)\\.(?:js|d\\.ts)$",
         "^shared/(?:draft-aggregate|source-history)\\.mjs$",
         "^scripts/(?:check-architecture|draft-aggregate|draft-service|project-context-service|source-history-service)\\.mjs$",
         "^tests/(?:architecture-boundaries|bridge-client|comment-session|document-session|draft-aggregate|draft-service|draft-session|drain-coordinator|project-query-fence|project-rules-session|project-session|recovery-store|run-lifecycle|run-session|runtime-capabilities|source-history|source-history-session|version-session)\\.test\\.mjs$",
         "^(?:CONTRIBUTING|docs/(?:ARCHITECTURE|ARCHITECTURE_CONTRACT|STATE_OWNERSHIP|ENGINEERING_STANDARDS))\\.md$",
-        "^docs/decisions/(?:0003-session-ownership-and-mutation-outcomes|0004-v2-editable-islands|0007-independent-interactive-preview|0008-safe-presentation-actions-in-edit-mode|0009-persistent-source-patch-history|0011-workbench-session-decomposition|0012-id-first-project-context)\\.md$"
+        "^docs/decisions/(?:0003-session-ownership-and-mutation-outcomes|0004-v2-editable-islands|0007-independent-interactive-preview|0008-safe-presentation-actions-in-edit-mode|0009-persistent-source-patch-history|0011-workbench-session-decomposition|0012-id-first-project-context|0013-edit-runtime-visual-projection)\\.md$"
       ],
       "suites": ["typecheck"],
       "nodeTests": [
@@ -307,6 +307,7 @@
         "tests/run-lifecycle.test.mjs",
         "tests/run-session.test.mjs",
         "tests/runtime-capabilities.test.mjs",
+        "tests/runtime-visual-projection.test.mjs",
         "tests/source-history.test.mjs",
         "tests/source-history-session.test.mjs",
         "tests/version-session.test.mjs"
@@ -335,7 +336,7 @@
     {
       "id": "v2-island-controller",
       "patterns": [
-        "^app/components/(?:HtmlCanvasEditor(?:\\.types)?|HtmlInteractionPreview|html-canvas-(?:dom|interaction|internal-types|page-view|preview-sync|selection|style-inspector)|IslandEditingController|native-edit-types|native-edit-runtime-preflight|html-preview-sandbox)\\.(?:tsx|ts|js|d\\.ts)$"
+        "^app/components/(?:HtmlCanvasEditor(?:\\.types)?|HtmlInteractionPreview|desktop-(?:edit-visual|preview)-api|html-canvas-(?:dom|interaction|internal-types|page-view|preview-sync|runtime-visual|selection|style-inspector)|IslandEditingController|native-edit-types|native-edit-runtime-preflight|html-preview-sandbox)\\.(?:tsx|ts|js|d\\.ts)$"
       ],
       "suites": ["typecheck", "browser-smoke", "electron-smoke"],
       "nodeTests": [
@@ -423,10 +424,29 @@
       ]
     },
     {
+      "id": "edit-runtime-visual-projection",
+      "patterns": [
+        "^app/application/runtime-visual-projection-session\\.(?:js|d\\.ts)$",
+        "^app/domain/runtime-visual-projection\\.(?:js|d\\.ts)$",
+        "^app/components/(?:desktop-edit-visual-api|html-canvas-runtime-visual)\\.(?:ts|d\\.ts)$",
+        "^app/lib/png-data-url\\.js$",
+        "^desktop/edit-visual-capture\\.mjs$",
+        "^tests/(?:edit-visual-capture|runtime-visual-projection)\\.test\\.mjs$",
+        "^docs/decisions/0013-edit-runtime-visual-projection\\.md$"
+      ],
+      "suites": ["typecheck", "electron-smoke"],
+      "nodeTests": [
+        "tests/edit-visual-capture.test.mjs",
+        "tests/runtime-visual-projection.test.mjs",
+        "tests/desktop-preload-ipc.test.mjs",
+        "tests/workbench-source-fence-contract.test.mjs"
+      ]
+    },
+    {
       "id": "desktop-runtime",
       "patterns": [
         "^desktop/.*\\.(?:mjs|tsx|ts|html)$",
-        "^tests/(?:bridge-startup|open-in-default-browser|preview-protocol)\\.test\\.mjs$"
+        "^tests/(?:bridge-startup|edit-visual-capture|open-in-default-browser|preview-protocol)\\.test\\.mjs$"
       ],
       "suites": ["electron-smoke"],
       "nodeTests": [
@@ -438,6 +458,7 @@
         "tests/bridge-startup.test.mjs",
         "tests/bridge-shutdown.test.mjs",
         "tests/export-copy.test.mjs",
+        "tests/edit-visual-capture.test.mjs",
         "tests/open-in-default-browser.test.mjs",
         "tests/preview-protocol.test.mjs",
         "tests/desktop-package.test.mjs",

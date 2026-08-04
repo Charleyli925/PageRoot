@@ -4,6 +4,7 @@ export type RuntimeCapabilities = Readonly<{
   attachmentPersistence: "bridge" | "memory" | "none";
   closeCoordination: "electron-handshake" | "browser-beforeunload";
   interactivePreview: "independent-url" | "srcdoc";
+  editVisualProjection: "offscreen-capture" | "none";
 }>;
 
 export const BROWSER_RUNTIME_CAPABILITIES: RuntimeCapabilities;

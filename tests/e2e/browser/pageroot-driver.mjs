@@ -123,6 +123,7 @@ export async function ensureSourceEditingTestRuntime(page) {
           attachmentPersistence: "memory",
           closeCoordination: "browser-beforeunload",
           interactivePreview: "srcdoc",
+          editVisualProjection: "none",
         },
       },
     });

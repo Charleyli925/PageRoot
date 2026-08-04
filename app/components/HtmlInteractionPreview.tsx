@@ -65,9 +65,6 @@ const CAPTURE_REQUEST_TYPE = "pageroot-page-view-context-request";
 const CAPTURE_RESPONSE_TYPE = "pageroot-page-view-context-response";
 const CAPTURE_TIMEOUT_MS = 1_200;
 const MAX_CAPTURED_ELEMENTS = 512;
-const MAX_CAPTURED_VISUALS = 24;
-const MAX_CAPTURED_VISUAL_BYTES = 2_000_000;
-const MAX_CAPTURED_TABLE_BYTES = 512_000;
 const INDEPENDENT_PREVIEW_SANDBOX =
   "allow-scripts allow-same-origin allow-forms allow-modals allow-popups allow-downloads";
 const SRCDOC_PREVIEW_SANDBOX =
@@ -114,14 +111,9 @@ const PREVIEW_STORAGE_BOOTSTRAP = String.raw`
 function previewBootstrapJavaScript({
   channelToken,
   sourceSha256,
-  visualCandidates,
 }: {
   channelToken: string;
   sourceSha256: string;
-  visualCandidates: Array<{
-    sourceNodeId: string;
-    tagName: "div" | "tbody";
-  }>;
 }): string {
   const config = JSON.stringify({
     channelToken,
@@ -132,10 +124,6 @@ function previewBootstrapJavaScript({
     requestType: CAPTURE_REQUEST_TYPE,
     responseType: CAPTURE_RESPONSE_TYPE,
     maxElements: MAX_CAPTURED_ELEMENTS,
-    maxVisuals: MAX_CAPTURED_VISUALS,
-    maxVisualBytes: MAX_CAPTURED_VISUAL_BYTES,
-    maxTableBytes: MAX_CAPTURED_TABLE_BYTES,
-    visualCandidates,
   }).replace(/</gu, "\\u003c");
   return String.raw`
 (() => {
@@ -145,7 +133,6 @@ function previewBootstrapJavaScript({
 
   const capture = () => {
     const entries = [];
-    const visuals = [];
     const seen = new Set();
     const elements = document.querySelectorAll(
       "[" + config.sourceNodeAttribute + "]",
@@ -205,71 +192,12 @@ function previewBootstrapJavaScript({
         break;
       }
     }
-    if (!truncated) {
-      for (const candidate of config.visualCandidates) {
-        const selector = "[" + config.sourceNodeAttribute + '="' +
-          CSS.escape(candidate.sourceNodeId) + '"]';
-        const matches = document.querySelectorAll(selector);
-        if (matches.length !== 1) continue;
-        const element = matches[0];
-        if (
-          !element.isConnected
-          || element.closest("[hidden]")
-          || element.getClientRects().length === 0
-        ) continue;
-        if (candidate.tagName === "div") {
-          const canvases = Array.from(element.querySelectorAll("canvas"))
-            .filter((canvas) => (
-              canvas.width > 0
-              && canvas.height > 0
-              && canvas.getClientRects().length > 0
-            ))
-            .sort((left, right) => (
-              right.width * right.height - left.width * left.height
-            ));
-          const canvas = canvases[0];
-          if (!canvas) continue;
-          try {
-            const dataUrl = canvas.toDataURL("image/png");
-            if (
-              dataUrl.length <= config.maxVisualBytes
-              && /^data:image\/png;base64,/u.test(dataUrl)
-            ) {
-              visuals.push({
-                sourceNodeId: candidate.sourceNodeId,
-                kind: "canvas-bitmap",
-                width: canvas.width,
-                height: canvas.height,
-                dataUrl,
-              });
-            }
-          } catch {
-            // Cross-origin pixels stay preview-only instead of weakening capture.
-          }
-        } else if (
-          candidate.tagName === "tbody"
-          && element.children.length > 0
-          && element.innerHTML.length <= config.maxTableBytes
-        ) {
-          visuals.push({
-            sourceNodeId: candidate.sourceNodeId,
-            kind: "table-body",
-            html: element.innerHTML,
-          });
-        }
-        if (visuals.length > config.maxVisuals) {
-          truncated = true;
-          break;
-        }
-      }
-    }
     return {
       protocol: config.protocol,
       version: config.version,
       sourceSha256: config.sourceSha256,
       truncated,
       entries: truncated ? [] : entries,
-      visuals: truncated ? [] : visuals,
     };
   };
 
@@ -356,33 +284,10 @@ function preparePreviewDocument(
   bootstrapJavaScript: string;
 } {
   const sourceIndex = buildSourceIndex(source);
-  const visualCandidates = (sourceIndex.elements as Array<{
-    nodeId: string;
-    tagName: string;
-    contentRange?: {
-      startOffset: number;
-      endOffset: number;
-    };
-  }>)
-    .filter((element) => {
-      if (element.tagName !== "div" && element.tagName !== "tbody") return false;
-      if (!element.contentRange) return false;
-      const innerHtml = sourceIndex.source.slice(
-        element.contentRange.startOffset,
-        element.contentRange.endOffset,
-      );
-      return innerHtml.replace(/<!--[\s\S]*?-->/gu, "").trim().length === 0;
-    })
-    .slice(0, 256)
-    .map((element) => ({
-      sourceNodeId: element.nodeId,
-      tagName: element.tagName as "div" | "tbody",
-    }));
   const channelToken = randomToken();
   const bootstrapJavaScript = previewBootstrapJavaScript({
     channelToken,
     sourceSha256: sourceIndex.sourceSha256,
-    visualCandidates,
   });
   if (typeof DOMParser === "undefined") {
     return {

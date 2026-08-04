@@ -46,6 +46,34 @@ test("source-boundary freeze is fail closed and verifies the exact source snapsh
   );
 });
 
+test("edit visual projection never becomes review, persistence, or AI input", () => {
+  const submission = section(
+    workbench,
+    "const generateRequest = useCallback",
+    "const openCommittedVersion = useCallback",
+  );
+  assertOrdered(
+    submission,
+    [
+      "const frozen = editorRef.current?.freezeNow()",
+      "const capturedHtml = frozen.html",
+      "const persistedSourceSha256 = documentSessionRef.current.sourceSha256",
+      "persistedSourceSha256 !== frozen.sourceSha256",
+      "bridgeClient.createRequest({",
+      "expectedSourceSha256: persistedSourceSha256",
+    ],
+    "AI Request must remain bound to the exact frozen and persisted source",
+  );
+  assert.doesNotMatch(
+    submission,
+    /runtimeVisualProjection|data-pageroot-readonly-visual|data-pageroot-readonly-visual-host/u,
+  );
+  assert.doesNotMatch(
+    submission.slice(submission.indexOf("bridgeClient.createRequest({")),
+    /\b(?:html|baseHtml|projection)\s*:/u,
+  );
+});
+
 test("autosave accepts only a byte-identical acknowledgement and fences protocol failures", () => {
   const autosave = section(
     workbench,
