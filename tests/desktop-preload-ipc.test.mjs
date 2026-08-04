@@ -53,6 +53,7 @@ async function loadPreloadApis(invoke) {
     lifecycle: exposed.get("htmlAIAppLifecycle"),
     usage: exposed.get("htmlAIUsage"),
     preview: exposed.get("htmlAIPreview"),
+    editVisuals: exposed.get("htmlAIEditVisuals"),
     edit: exposed.get("htmlAIEdit"),
     sent,
     emit(channel, payload) {
@@ -81,7 +82,32 @@ test("preload declares one immutable desktop runtime capability manifest", async
   assert.equal(runtime.capabilities.attachmentPersistence, "bridge");
   assert.equal(runtime.capabilities.closeCoordination, "electron-handshake");
   assert.equal(runtime.capabilities.interactivePreview, "independent-url");
+  assert.equal(runtime.capabilities.editVisualProjection, "offscreen-capture");
   assert.equal(Object.isFrozen(runtime.capabilities), true);
+});
+
+test("preload exposes one narrow edit visual capture method", async () => {
+  const calls = [];
+  const { editVisuals } = await loadPreloadApis(async (...args) => {
+    calls.push(args);
+    return success({
+      protocol: "pageroot-runtime-visual-projection",
+      version: 1,
+      sourceSha256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      visuals: [],
+    });
+  });
+  const payload = {
+    html: "<!doctype html><div></div>",
+    sourcePath: "/Users/demo/report.html",
+  };
+
+  await editVisuals.captureProjection(payload);
+  assert.deepEqual(calls, [[
+    "html-edit-visuals:capture-projection",
+    payload,
+  ]]);
+  assert.deepEqual(Object.keys(editVisuals), ["captureProjection"]);
 });
 
 test("preload exposes only preview session creation and revocation", async () => {

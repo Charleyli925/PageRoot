@@ -405,6 +405,10 @@ test("desktop package carries the v3 patch engine, candidate assessment and acti
     preload,
     /exposeInMainWorld\(["']htmlAIPreview["'],\s*previewApi\)/,
   );
+  assert.match(
+    preload,
+    /exposeInMainWorld\(["']htmlAIEditVisuals["'],\s*editVisualApi\)/,
+  );
   assert.match(preload, /exposeInMainWorld\(["']htmlAIRuntime["'],\s*runtimeConfig\)/);
   assert.match(preload, /exposeInMainWorld\(["']htmlAIAppLifecycle["'],\s*appLifecycleApi\)/);
   assert.match(preload, /onPrepareClose/);

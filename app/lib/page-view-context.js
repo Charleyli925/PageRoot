@@ -3,19 +3,12 @@ import {
   createTargetRef,
   resolveTargetRef,
 } from "./target-resolver.js";
-import {
-  isSafePngDataUrl,
-  sanitizeReadOnlyTableBodyHtml,
-} from "./read-only-visual.js";
 
 export const PAGE_VIEW_CONTEXT_PROTOCOL = "pageroot-page-view-context";
 export const PAGE_VIEW_CONTEXT_VERSION = 2;
 
 const MAX_SNAPSHOT_ENTRIES = 512;
 const MAX_CONTEXT_ENTRIES = 64;
-const MAX_SNAPSHOT_VISUALS = 24;
-const MAX_CONTEXT_VISUALS = 16;
-const MAX_VISUAL_PIXEL_DIMENSION = 4_096;
 const MAX_PRESENTATION_TAB_COUNT = 24;
 const MAX_CLASS_TOKENS = 128;
 const MAX_QUALIFIED_CLASS_TOKENS = 8;
@@ -140,81 +133,6 @@ function frozenTargetRef(targetRef) {
   });
 }
 
-function frozenContextVisual(visual) {
-  const targetRef = frozenTargetRef(visual.targetRef);
-  if (visual.kind === "canvas-bitmap") {
-    return Object.freeze({
-      targetRef,
-      kind: "canvas-bitmap",
-      width: visual.width,
-      height: visual.height,
-      dataUrl: visual.dataUrl,
-    });
-  }
-  return Object.freeze({
-    targetRef,
-    kind: "table-body",
-    html: visual.html,
-  });
-}
-
-function sourceVisualPlaceholder(sourceIndex, element) {
-  if (
-    !element?.contentRange
-    || !Number.isInteger(element.contentRange.startOffset)
-    || !Number.isInteger(element.contentRange.endOffset)
-  ) return false;
-  const innerHtml = sourceIndex.source.slice(
-    element.contentRange.startOffset,
-    element.contentRange.endOffset,
-  );
-  return innerHtml.replace(/<!--[\s\S]*?-->/gu, "").trim().length === 0;
-}
-
-function normalizedReadOnlyVisual(sourceIndex, rawVisual, sourceNodeCounts) {
-  const sourceNodeId = String(rawVisual?.sourceNodeId ?? "");
-  if (!sourceNodeId || sourceNodeCounts.get(sourceNodeId) !== 1) return null;
-  const element = sourceIndex.byNodeId.get(sourceNodeId);
-  if (
-    !element
-    || element.type !== "element"
-    || !sourceVisualPlaceholder(sourceIndex, element)
-  ) return null;
-
-  const targetRef = frozenTargetRef(createTargetRef(sourceIndex, element, {
-    level: "subregion",
-  }));
-  if (
-    rawVisual?.kind === "canvas-bitmap"
-    && element.tagName === "div"
-    && Number.isInteger(rawVisual.width)
-    && Number.isInteger(rawVisual.height)
-    && rawVisual.width >= 1
-    && rawVisual.height >= 1
-    && rawVisual.width <= MAX_VISUAL_PIXEL_DIMENSION
-    && rawVisual.height <= MAX_VISUAL_PIXEL_DIMENSION
-    && isSafePngDataUrl(rawVisual.dataUrl)
-  ) {
-    return Object.freeze({
-      targetRef,
-      kind: "canvas-bitmap",
-      width: rawVisual.width,
-      height: rawVisual.height,
-      dataUrl: String(rawVisual.dataUrl),
-    });
-  }
-  if (rawVisual?.kind === "table-body" && element.tagName === "tbody") {
-    const html = sanitizeReadOnlyTableBodyHtml(rawVisual.html);
-    if (!html) return null;
-    return Object.freeze({
-      targetRef,
-      kind: "table-body",
-      html,
-    });
-  }
-  return null;
-}
-
 function contextStateDiff(sourceState, currentState) {
   const hidden = sourceState.hidden === currentState.hidden
     ? undefined
@@ -300,11 +218,6 @@ export function createPageViewContext({
     || snapshot?.truncated === true
     || !Array.isArray(snapshot?.entries)
     || snapshot.entries.length > MAX_SNAPSHOT_ENTRIES
-    || (
-      snapshot?.visuals !== undefined
-      && !Array.isArray(snapshot.visuals)
-    )
-    || (snapshot?.visuals?.length ?? 0) > MAX_SNAPSHOT_VISUALS
   ) return null;
 
   const sourceIndex = buildSourceIndex(html);
@@ -379,27 +292,7 @@ export function createPageViewContext({
     if (entries.length >= MAX_CONTEXT_ENTRIES) break;
   }
 
-  const visualSourceNodeCounts = new Map();
-  for (const rawVisual of snapshot.visuals ?? []) {
-    const sourceNodeId = String(rawVisual?.sourceNodeId ?? "");
-    visualSourceNodeCounts.set(
-      sourceNodeId,
-      (visualSourceNodeCounts.get(sourceNodeId) ?? 0) + 1,
-    );
-  }
-  const visuals = [];
-  for (const rawVisual of snapshot.visuals ?? []) {
-    const visual = normalizedReadOnlyVisual(
-      sourceIndex,
-      rawVisual,
-      visualSourceNodeCounts,
-    );
-    if (!visual) continue;
-    visuals.push(visual);
-    if (visuals.length >= MAX_CONTEXT_VISUALS) break;
-  }
-
-  if (entries.length === 0 && visuals.length === 0) return null;
+  if (entries.length === 0) return null;
   return Object.freeze({
     protocol: PAGE_VIEW_CONTEXT_PROTOCOL,
     version: PAGE_VIEW_CONTEXT_VERSION,
@@ -407,7 +300,6 @@ export function createPageViewContext({
     generation,
     sourceSha256: sourceIndex.sourceSha256,
     entries: Object.freeze(entries),
-    visuals: Object.freeze(visuals),
   });
 }
 
@@ -422,10 +314,8 @@ function resolvePageViewContextFromIndex(sourceIndex, context) {
     || context?.version !== PAGE_VIEW_CONTEXT_VERSION
     || !Array.isArray(context?.entries)
     || context.entries.length > MAX_CONTEXT_ENTRIES
-    || !Array.isArray(context?.visuals)
-    || context.visuals.length > MAX_CONTEXT_VISUALS
   ) {
-    return { sourceIndex, entries: [], visuals: [] };
+    return { sourceIndex, entries: [] };
   }
   const entries = [];
   for (const entry of context.entries) {
@@ -448,48 +338,7 @@ function resolvePageViewContextFromIndex(sourceIndex, context) {
       sourceState,
     });
   }
-  const visuals = [];
-  for (const visual of context.visuals) {
-    let resolution;
-    try {
-      resolution = resolveTargetRef(sourceIndex, visual.targetRef);
-    } catch {
-      continue;
-    }
-    if (
-      !["exact", "rebound"].includes(resolution.resolution)
-      || resolution.target?.type !== "element"
-      || !sourceVisualPlaceholder(sourceIndex, resolution.target)
-    ) continue;
-    if (
-      visual.kind === "canvas-bitmap"
-      && resolution.target.tagName === "div"
-      && Number.isInteger(visual.width)
-      && Number.isInteger(visual.height)
-      && visual.width >= 1
-      && visual.height >= 1
-      && visual.width <= MAX_VISUAL_PIXEL_DIMENSION
-      && visual.height <= MAX_VISUAL_PIXEL_DIMENSION
-      && isSafePngDataUrl(visual.dataUrl)
-    ) {
-      visuals.push({
-        visual,
-        sourceNodeId: resolution.target.nodeId,
-        resolution: resolution.resolution,
-      });
-    } else if (
-      visual.kind === "table-body"
-      && resolution.target.tagName === "tbody"
-      && sanitizeReadOnlyTableBodyHtml(visual.html) === visual.html
-    ) {
-      visuals.push({
-        visual,
-        sourceNodeId: resolution.target.nodeId,
-        resolution: resolution.resolution,
-      });
-    }
-  }
-  return { sourceIndex, entries, visuals };
+  return { sourceIndex, entries };
 }
 
 function sourceAttribute(element, name) {
@@ -607,18 +456,13 @@ function presentationStateMap(sourceIndex, context, documentKey) {
       || context.generation < 0
       || !Array.isArray(context.entries)
       || context.entries.length > MAX_CONTEXT_ENTRIES
-      || !Array.isArray(context.visuals)
-      || context.visuals.length > MAX_CONTEXT_VISUALS
     )
   ) return null;
   const states = new Map();
   const resolved = resolvePageViewContextFromIndex(sourceIndex, context);
   if (
     context
-    && (
-      resolved.entries.length !== context.entries.length
-      || resolved.visuals.length !== context.visuals.length
-    )
+    && resolved.entries.length !== context.entries.length
   ) return null;
   for (const item of resolved.entries) {
     if (states.has(item.sourceNodeId)) return null;
@@ -627,17 +471,7 @@ function presentationStateMap(sourceIndex, context, documentKey) {
       effectivePresentationState(item.sourceState, item.entry),
     );
   }
-  const visualNodeIds = new Set();
-  const visuals = [];
-  for (const item of resolved.visuals) {
-    if (visualNodeIds.has(item.sourceNodeId)) return null;
-    visualNodeIds.add(item.sourceNodeId);
-    visuals.push(frozenContextVisual(item.visual));
-  }
-  return Object.freeze({
-    states,
-    visuals: Object.freeze(visuals),
-  });
+  return Object.freeze({ states });
 }
 
 function effectiveStateFor(sourceIndex, states, element) {
@@ -681,7 +515,6 @@ function frozenContextEntry(sourceIndex, element, state) {
 function contextFromPresentationStates({
   sourceIndex,
   states,
-  visuals,
   documentKey,
   generation,
 }) {
@@ -693,7 +526,7 @@ function contextFromPresentationStates({
     if (entry) entries.push(entry);
     if (entries.length > MAX_CONTEXT_ENTRIES) return undefined;
   }
-  if (entries.length === 0 && visuals.length === 0) return null;
+  if (entries.length === 0) return null;
   return Object.freeze({
     protocol: PAGE_VIEW_CONTEXT_PROTOCOL,
     version: PAGE_VIEW_CONTEXT_VERSION,
@@ -701,7 +534,6 @@ function contextFromPresentationStates({
     generation,
     sourceSha256: sourceIndex.sourceSha256,
     entries: Object.freeze(entries),
-    visuals: Object.freeze([...visuals]),
   });
 }
 
@@ -733,7 +565,6 @@ function closestTabList(sourceIndex, element) {
 function resolveTabAction({
   sourceIndex,
   states,
-  visuals,
   target,
   documentKey,
   generation,
@@ -826,7 +657,6 @@ function resolveTabAction({
   const nextContext = contextFromPresentationStates({
     sourceIndex,
     states,
-    visuals,
     documentKey,
     generation,
   });
@@ -870,7 +700,6 @@ function classTokensWithoutLegacyTabState(state) {
 function resolveDataLinkedTabAction({
   sourceIndex,
   states,
-  visuals,
   target,
   documentKey,
   generation,
@@ -1007,7 +836,6 @@ function resolveDataLinkedTabAction({
   const nextContext = contextFromPresentationStates({
     sourceIndex,
     states,
-    visuals,
     documentKey,
     generation,
   });
@@ -1076,7 +904,6 @@ function relatedIndexedTabGroupParents(
 function resolveIndexedHandlerTabAction({
   sourceIndex,
   states,
-  visuals,
   target,
   documentKey,
   generation,
@@ -1217,7 +1044,6 @@ function resolveIndexedHandlerTabAction({
   const nextContext = contextFromPresentationStates({
     sourceIndex,
     states,
-    visuals,
     documentKey,
     generation,
   });
@@ -1233,7 +1059,6 @@ function resolveIndexedHandlerTabAction({
 function resolveDetailsAction({
   sourceIndex,
   states,
-  visuals,
   target,
   documentKey,
   generation,
@@ -1263,7 +1088,6 @@ function resolveDetailsAction({
   const nextContext = contextFromPresentationStates({
     sourceIndex,
     states,
-    visuals,
     documentKey,
     generation,
   });
@@ -1293,7 +1117,6 @@ function disclosureAnchor(sourceIndex, control) {
 function resolveDisclosureAction({
   sourceIndex,
   states,
-  visuals,
   target,
   documentKey,
   generation,
@@ -1361,7 +1184,6 @@ function resolveDisclosureAction({
   const nextContext = contextFromPresentationStates({
     sourceIndex,
     states,
-    visuals,
     documentKey,
     generation,
   });
@@ -1423,7 +1245,6 @@ export function createPagePresentationAction({
   const options = {
     sourceIndex,
     states: presentation.states,
-    visuals: presentation.visuals,
     target: resolution.target,
     documentKey,
     generation: currentContext?.generation ?? generation,

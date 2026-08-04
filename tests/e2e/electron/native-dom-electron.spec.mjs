@@ -607,12 +607,15 @@ test("Electron interactive preview runs authored scripts and edits the selected 
     <button id="tab-one" class="tab active" aria-selected="true">第一页</button>
     <button id="tab-two" class="tab" aria-selected="false">第二页</button>
   </nav>
-  <section id="panel-one" class="panel active"><p>第一页正文</p></section>
+  <section id="panel-one" class="panel active">
+    <p>第一页正文</p>
+    <div id="runtime-canvas" data-native-case="runtime-visual-host" style="width: 32px; height: 16px"></div>
+    <div id="runtime-svg" style="width: 40px; height: 20px"></div>
+    <table><tbody id="runtime-table"></tbody></table>
+  </section>
   <section id="panel-two" class="panel">
     <p data-native-case="preview-tab-copy" data-native-mode="native-editable">第二页可编辑正文</p>
     <svg id="static-chart" viewBox="0 0 10 10"><circle cx="5" cy="5" r="3"></circle></svg>
-    <div id="runtime-canvas" style="width: 32px; height: 16px"></div>
-    <table><tbody id="runtime-table"></tbody></table>
   </section>
   <script src="./runtime.js"></script>
 </body>
@@ -646,7 +649,10 @@ test("Electron interactive preview runs authored scripts and edits the selected 
     '<tr data-runtime-row><td>动态行一</td></tr><tr data-runtime-row><td>动态行二</td></tr>';
   const runtimeSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   runtimeSvg.setAttribute("data-runtime-chart", "true");
-  document.getElementById("panel-two").append(runtimeSvg);
+  runtimeSvg.setAttribute("width", "40");
+  runtimeSvg.setAttribute("height", "20");
+  runtimeSvg.innerHTML = '<rect width="40" height="20" fill="#2563eb"></rect>';
+  document.getElementById("runtime-svg").append(runtimeSvg);
   document.body.dataset.runtimeReady = "true";
 })();`,
     "utf8",
@@ -662,6 +668,28 @@ test("Electron interactive preview runs authored scripts and edits the selected 
       launched.page,
       sourcePath,
       "preview-tab-copy",
+    );
+
+    await expect(editFrame.locator(
+      '#runtime-canvas img[data-pageroot-readonly-visual="runtime-bitmap"]',
+    )).toBeVisible({ timeout: 20_000 });
+    await expect(editFrame.locator(
+      '#runtime-svg img[data-pageroot-readonly-visual="runtime-bitmap"]',
+    )).toBeVisible();
+    await expect(editFrame.locator(
+      '#runtime-table > tr[data-pageroot-readonly-visual="runtime-bitmap-row"] img[data-pageroot-readonly-visual="runtime-bitmap"]',
+    )).toBeVisible();
+    await expect(editFrame.locator("#runtime-canvas canvas")).toHaveCount(0);
+    await expect(editFrame.locator("#runtime-svg svg")).toHaveCount(0);
+    await expect(editFrame.locator("[data-runtime-row]")).toHaveCount(0);
+    await addCanvasComment(
+      launched.page,
+      editFrame,
+      "runtime-visual-host",
+      "请调整这张运行时图表",
+    );
+    expect(readFileSync(sourcePath, "utf8")).not.toMatch(
+      /data-pageroot-readonly-visual|data-runtime-row|data-runtime-chart|data-drawn/u,
     );
 
     await launched.page.getByRole("button", {
@@ -713,27 +741,34 @@ test("Electron interactive preview runs authored scripts and edits the selected 
       name: "编辑",
       exact: true,
     })).toHaveAttribute("aria-pressed", "true");
+    await expect(launched.page.locator(".canvas-edit-surface"))
+      .toHaveAttribute("data-runtime-visual-status", "ready", {
+        timeout: 20_000,
+      });
 
-    await expect(editFrame.locator("#panel-two")).toBeVisible();
-    await expect(editFrame.locator("#panel-two")).toHaveClass(/active/u);
-    await expect(editFrame.locator("#panel-one")).toBeHidden();
-    await expect(editFrame.locator("#static-chart")).toBeVisible();
-    await expect(editFrame.locator(
-      '#runtime-canvas img[data-pageroot-readonly-visual="canvas-bitmap"]',
-    )).toBeVisible();
-    await expect(editFrame.locator("#runtime-canvas canvas")).toHaveCount(0);
-    await expect(editFrame.locator(
-      '#runtime-table > tr[data-pageroot-readonly-visual="table-body"]',
-    )).toHaveCount(2);
-    await expect(editFrame.locator("#runtime-table")).toContainText("动态行一");
-    await expect(editFrame.locator("#runtime-table")).toContainText("动态行二");
-    await expect(editFrame.locator("[data-runtime-chart]")).toHaveCount(0);
+    const resumedEditFrame = await currentEditorFrame(launched.page);
+    await expect(resumedEditFrame.locator("#panel-two")).toBeVisible();
+    await expect(resumedEditFrame.locator("#panel-two")).toHaveClass(/active/u);
+    await expect(resumedEditFrame.locator("#panel-one")).toBeHidden();
+    await expect(resumedEditFrame.locator("#static-chart")).toBeVisible();
+    await expect(resumedEditFrame.locator(
+      '#runtime-canvas img[data-pageroot-readonly-visual="runtime-bitmap"]',
+    )).toHaveCount(1, { timeout: 20_000 });
+    await expect(resumedEditFrame.locator("#runtime-canvas canvas")).toHaveCount(0);
+    await expect(resumedEditFrame.locator(
+      '#runtime-table > tr[data-pageroot-readonly-visual="runtime-bitmap-row"]',
+    )).toHaveCount(1);
+    await expect(resumedEditFrame.locator("#runtime-table")).not.toContainText("动态行一");
+    await expect(resumedEditFrame.locator(
+      '#runtime-svg img[data-pageroot-readonly-visual="runtime-bitmap"]',
+    )).toHaveCount(1);
+    await expect(resumedEditFrame.locator("[data-runtime-chart]")).toHaveCount(0);
     expect(readFileSync(sourcePath, "utf8")).not.toMatch(
       /data-pageroot-readonly-visual|data-runtime-row|data-runtime-chart|data-drawn/u,
     );
 
-    await activateNativeEdit(editFrame, "preview-tab-copy");
-    await expect(editFrame.locator(caseSelector("preview-tab-copy")))
+    await activateNativeEdit(resumedEditFrame, "preview-tab-copy");
+    await expect(resumedEditFrame.locator(caseSelector("preview-tab-copy")))
       .toHaveAttribute("contenteditable", "true");
   } finally {
     if (electronApp && isolatedUserData) {
@@ -743,6 +778,35 @@ test("Electron interactive preview runs authored scripts and edits the selected 
       sourceDirectory,
       "pageroot-preview-source-e2e-",
     );
+  }
+});
+
+test("Electron edit mode projects runtime visuals in an opt-in real HTML file", async () => {
+  const sourcePath = process.env.PAGEROOT_REAL_HTML_PATH;
+  test.skip(
+    !sourcePath || !existsSync(sourcePath),
+    "Set PAGEROOT_REAL_HTML_PATH to an existing local HTML file.",
+  );
+  const originalBytes = readFileSync(sourcePath);
+  const launched = await launchPageRoot({ activeSourcePath: sourcePath });
+  try {
+    const editFrame = await currentEditorFrame(launched.page);
+    await editFrame.waitForFunction(() => Boolean(document.querySelector("#np1a")));
+    await expect(editFrame.locator(
+      '#np1a img[data-pageroot-readonly-visual="runtime-bitmap"]',
+    )).toBeVisible({ timeout: 30_000 });
+    await expect(editFrame.locator(
+      '#np1b img[data-pageroot-readonly-visual="runtime-bitmap"]',
+    )).toBeVisible();
+    await expect(editFrame.locator(
+      '#cat-tbody img[data-pageroot-readonly-visual="runtime-bitmap"]',
+    )).toHaveCount(1);
+    await expect(editFrame.locator("#np1a svg, #np1a canvas")).toHaveCount(0);
+    await expect(editFrame.locator("#cat-tbody > tr:not([data-pageroot-readonly-visual])"))
+      .toHaveCount(0);
+    expect(readFileSync(sourcePath)).toEqual(originalBytes);
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
   }
 });
 

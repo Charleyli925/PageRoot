@@ -262,81 +262,6 @@ test("page view context rebinds to edited source without copying runtime DOM", (
   );
 });
 
-test("page view context carries bounded read-only visuals only for empty source placeholders", () => {
-  const html = `<!doctype html>
-<main>
-  <div id="chart" style="height: 120px"></div>
-  <table><tbody id="rows"></tbody></table>
-  <div id="authored">静态内容</div>
-</main>`;
-  const index = buildSourceIndex(html);
-  const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAEElEQVR42mNk+M/wHwAEAQH/2p9Z5QAAAABJRU5ErkJggg==";
-  const context = createPageViewContext({
-    html,
-    documentKey: "memory:visuals",
-    generation: 3,
-    snapshot: {
-      protocol: PAGE_VIEW_CONTEXT_PROTOCOL,
-      version: PAGE_VIEW_CONTEXT_VERSION,
-      sourceSha256: index.sourceSha256,
-      truncated: false,
-      entries: [],
-      visuals: [
-        {
-          sourceNodeId: sourceNodeId(index, "chart"),
-          kind: "canvas-bitmap",
-          width: 320,
-          height: 120,
-          dataUrl: png,
-        },
-        {
-          sourceNodeId: sourceNodeId(index, "rows"),
-          kind: "table-body",
-          html: [
-            '<tr onclick="bad()"><td style="color:#dc2626;font-weight:700;background:#faf5fc;position:fixed">',
-            "动态行",
-            '<script>alert(1)</script><img src="bad.png"></td></tr>',
-          ].join(""),
-        },
-        {
-          sourceNodeId: sourceNodeId(index, "authored"),
-          kind: "canvas-bitmap",
-          width: 1,
-          height: 1,
-          dataUrl: png,
-        },
-        {
-          sourceNodeId: "runtime-only",
-          kind: "table-body",
-          html: "<tr><td>运行时节点</td></tr>",
-        },
-      ],
-    },
-  });
-
-  assert.ok(context);
-  assert.equal(context.entries.length, 0);
-  assert.equal(context.visuals.length, 2);
-  assert.deepEqual(
-    context.visuals.map((visual) => visual.kind),
-    ["canvas-bitmap", "table-body"],
-  );
-  const tableVisual = context.visuals.find((visual) => visual.kind === "table-body");
-  assert.equal(
-    tableVisual.html,
-    '<tr><td style="color:#dc2626;font-weight:700;background:#faf5fc">动态行</td></tr>',
-  );
-  assert.equal(Object.isFrozen(context.visuals), true);
-  assert.equal(Object.isFrozen(context.visuals[0]), true);
-
-  const resolved = resolvePageViewContext(
-    html.replace("静态内容", "仍是静态内容"),
-    context,
-  );
-  assert.equal(resolved.entries.length, 0);
-  assert.equal(resolved.visuals.length, 2);
-});
-
 test("arbitrary runtime classes, stale source, and truncated snapshots fail closed", () => {
   const html = `<!doctype html><main><section id="card" class="card">正文</section></main>`;
   const index = buildSourceIndex(html);
@@ -401,7 +326,6 @@ test("semantic Tab actions switch only disposable presentation context", () => {
   assert.ok(action.nextContext);
   assert.equal(action.nextContext.documentKey, "editing:/tmp/report.html");
   assert.equal(action.nextContext.generation, 5);
-  assert.deepEqual(action.nextContext.visuals, []);
   assert.equal(index.source, html);
 
   const resolved = resolvePageViewContext(html, action.nextContext);
@@ -594,46 +518,6 @@ test("ambiguous constant-index handler tabs fail closed", () => {
       targetRef: targetRef(index, "indexed-tab-two"),
     }), null);
   }
-});
-
-test("presentation actions preserve bounded read-only visuals", () => {
-  const html = PRESENTATION_HTML.replace(
-    "</body>",
-    '<div id="chart" style="height: 120px"></div></body>',
-  );
-  const index = buildSourceIndex(html);
-  const context = createPageViewContext({
-    html,
-    documentKey: "editing:visuals",
-    generation: 7,
-    snapshot: {
-      protocol: PAGE_VIEW_CONTEXT_PROTOCOL,
-      version: PAGE_VIEW_CONTEXT_VERSION,
-      sourceSha256: index.sourceSha256,
-      truncated: false,
-      entries: [],
-      visuals: [{
-        sourceNodeId: sourceNodeId(index, "chart"),
-        kind: "canvas-bitmap",
-        width: 320,
-        height: 120,
-        dataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAEElEQVR42mNk+M/wHwAEAQH/2p9Z5QAAAABJRU5ErkJggg==",
-      }],
-    },
-  });
-  assert.ok(context);
-
-  const action = createPagePresentationAction({
-    html,
-    sourceIndex: index,
-    documentKey: "editing:visuals",
-    currentContext: context,
-    targetRef: targetRef(index, "tab-two"),
-  });
-  assert.ok(action?.nextContext);
-  assert.deepEqual(action.nextContext.visuals, context.visuals);
-  assert.equal(Object.isFrozen(action.nextContext.visuals), true);
-  assert.equal(Object.isFrozen(action.nextContext.visuals[0]), true);
 });
 
 test("details and strict local disclosure actions preserve existing context", () => {

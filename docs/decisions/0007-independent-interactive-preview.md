@@ -1,6 +1,6 @@
 # ADR 0007: Interactive preview uses an independent document and source-backed edit context
 
-- Status: Accepted
+- Status: Accepted; preview-to-edit visual handoff superseded by ADR 0013
 - Date: 2026-07-29
 
 ## Context
@@ -21,6 +21,10 @@ bodies empty for a bounded script to fill. Hiding those visuals in Edit makes
 the surrounding source-authored analysis hard to review.
 
 ## Decision
+
+The independent preview/session decision below remains active. The two-case
+Canvas/table visual handoff is retained here as historical context and is
+superseded by `0013-edit-runtime-visual-projection.md`.
 
 - Electron registers one standard, secure `pageroot-preview:` scheme before the
   app is ready. The scheme does not bypass CSP.

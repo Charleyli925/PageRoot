@@ -31,10 +31,16 @@ Tree，不在测试执行期间自动合并分支。组合 Tree 含任何未合�
 - 源码字符串合同：只在其拥有的组件或控制器变化时运行；不把实现文本匹配当作主要正确性证据。
 - Browser 冒烟：固定覆盖脚本隔离、源码字节、可编辑岛、源码权威围栏和能力降级五类关键风险；完整 Browser 包含全部活动 V2 回归。V1 的 per-keystroke tracker、FormatSkeleton 和 IME tail 状态机实现及测试已从仓库删除；V2 岛内字节 oracle、输入矩阵和 composition 快照用例是唯一产品合同。
 - Electron 冒烟：固定覆盖真实 authored DOM 输入和一次带磁盘持久化的 composition；完整 Electron 保留保存、关闭重开和逐字节 forward 结果等全部路径。
-- 交互预览：Node 分别证明短期自定义协议的资源边界和
-  PageViewContext 的 source-backed allowlist；Electron 用一份合成报告
-  证明宿主 CSP 下的相对脚本、SVG/Canvas/动态表格、Tab 切换，以及返回
-  编辑后只保留当前 Tab 且仍能进入原有文字编辑岛。Browser 的确定性
+- 交互预览与编辑视觉投影：Node 分别证明短期自定义协议的资源边界、
+  PageViewContext 的 source-backed allowlist、投影精确源 Hash/空宿主校验、主进程
+  截图边界和迟到结果丢弃；Electron 用一份合成报告证明用户未进入预览时，
+  运行时 SVG/HTML、Canvas 和动态 `tbody` 已以只读 PNG 显示且可对原宿主留评论，
+  源文件字节不变；同一用例再证明宿主 CSP 下的相对脚本和真实运行时 DOM、
+  Tab 切换，以及返回编辑后只保留当前 Tab 且仍能进入原有文字编辑岛。
+  可选真实 HTML 用例直接覆盖 `np1a`/`np1b` 等脚本生成图和动态表格，不将真实
+  文件复制进测试仓库。桌面编辑画布还必须
+  证明同目录图片通过同一条受控资源根加载成功，而 `script-src` 没有因此
+  获得自定义协议权限。Browser 的确定性
   Tab 评论用例同时证明 `评N` 标记悬浮于标签控制右上角、顶部栏不重复
   显示当前标签、其他标签评论以中性评论卡片在顶部栏内部展开，并可从
   具体卡片切换标签并定位对应评论。未保存评论在当前标签页保留持久入口，
