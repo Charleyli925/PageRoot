@@ -7,6 +7,28 @@ Official releases use two explicit GitHub Actions stages from reviewed `main`:
 
 Do not push a release tag manually. A tag is an output of successful candidate verification, not the input that starts packaging.
 
+## Default source set for a latest installer
+
+An unqualified request for the "latest installer" or "latest developer test
+installer" means current `origin/main` plus the latest code from every
+applicable PageRoot PR in the current development scope that the developer has
+not explicitly excluded. A PR being open, draft, or closed without merge does
+not exclude it. Merged changes arrive through `main`; unmerged heads are
+combined on a temporary `integration/` branch without changing the source PRs.
+
+Inventory the selected PR number and exact head OID before building. Record
+explicitly excluded and superseded PRs with reasons. Stacked PRs must be
+integrated in dependency order without applying the same commits twice. A
+missing head or unresolved conflict blocks the build rather than producing a
+silently incomplete package.
+
+Any selected unmerged Pull Request makes the resulting installer a Developer
+Preview with `releaseEligible: false`. Formal candidates and releases remain
+restricted to reviewed `main`; if selected PR work is still outstanding, merge
+it first or obtain an explicit developer exclusion. The package commands build
+the exact clean current Tree and do not discover or merge PRs themselves, so
+this source-composition step happens before the package gate.
+
 ## Optional developer preview
 
 When the developer explicitly asks for an installable test package, manually
@@ -53,8 +75,10 @@ it against the same DMG immediately before a delayed handoff.
 
 The agent's installer reply must reproduce the report's package identity,
 content range and complete PR/direct-commit inventory. Each PR needs its
-current state and one sentence describing its main change. If GitHub metadata
-cannot be queried or any included commit is omitted, packaging may have
+current state and one sentence describing its main change. It must also list
+every explicitly excluded or superseded PR and the reason from the pre-build
+source inventory. If GitHub metadata cannot be queried, a selected head is not
+in the packaged Tree, or any included commit is omitted, packaging may have
 succeeded technically but installer handoff is incomplete.
 
 ## Prepare the source

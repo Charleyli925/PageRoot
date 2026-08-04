@@ -12,6 +12,9 @@ Notable user-visible changes are documented here. This project follows Semantic 
   package-content report with artifact Hash, source range, all associated Pull
   Requests, their live status and one-line purpose, plus direct commits without
   a Pull Request.
+- Treat an unqualified latest-package request as current `origin/main` plus all
+  applicable, non-excluded PR heads; compose unmerged work on a temporary
+  integration branch and keep any such installer Developer Preview-only.
 
 ## [0.9.5] - 2026-07-31
 

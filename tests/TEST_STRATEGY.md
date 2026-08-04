@@ -17,6 +17,10 @@
 
 本地 `release` 和完整 `artifact` 不根据改动缩减范围。`Developer Preview` 是独立的可选入口，正式 `release`、`artifact` 和 `artifact-only` 都不会自动调用它；自动部分不等待人工安装结果，开发者的短验证仅是反馈，不签发正式凭证。`artifact-only` 不是开发者手工跳过源码测试的捷径：执行器会拒绝缺少 CI 信任决定、Tree Hash 或版本不一致的调用，只允许 `Release Candidate` 在七天内成功 PR 凭证与当前 Tree Hash、版本完全一致时进入。发布工作流只接受同一 Tree/版本、已验证且 72 小时内的候选包。`edit` 和 `task` 的选择由 `tests/test-impact-map.json` 决定，模型或开发者只选择门禁层级，不临时拼接测试命令。
 
+“最新安装包”的多 PR 源码组合是打包前的 Git 流程：门禁只验证当前干净
+Tree，不在测试执行期间自动合并分支。组合 Tree 含任何未合并 PR 时，
+只能进入 Developer Preview 门禁，不能进入正式候选或发布门禁。
+
 工作区有未提交修改时，`edit/task` 自动读取 staged、unstaged 和 untracked 文件。任务已经提交后应运行 `npm run gate:task -- --base <基准分支或提交>`；干净工作区又没有 `--base` 时门禁会明确失败，不会把“零测试”伪装成通过。
 
 `npm run task:finish` 是 `gate:task -- --base origin/main` 的安全任务包装，不引入新的门禁层。`tests/task-workflow.test.mjs` 在独立临时 Git 仓库中验证分支名、干净 primary `main`、远端同步、隔离 worktree 创建、现有分支 attach、脏工作区拒绝、GitHub PR/本地独有提交分类、retire 默认 dry-run、显式放弃围栏和最终差异报告，不会操作开发者的真实分支。

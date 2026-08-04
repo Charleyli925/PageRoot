@@ -144,13 +144,26 @@ test("delivery Markdown reports exact package bytes, every PR and direct commits
 });
 
 test("installer workflows generate a live delivery report after package verification", async () => {
-  const [preview, candidate, release, agentGuide, releasing, playbook] = await Promise.all([
+  const [
+    preview,
+    candidate,
+    release,
+    agentGuide,
+    releasing,
+    playbook,
+    gitWorkflow,
+    codexWorkflow,
+    development,
+  ] = await Promise.all([
     readFile(path.join(productRoot, ".github/workflows/developer-preview.yml"), "utf8"),
     readFile(path.join(productRoot, ".github/workflows/release-candidate.yml"), "utf8"),
     readFile(path.join(productRoot, ".github/workflows/release.yml"), "utf8"),
     readFile(path.join(productRoot, "AGENTS.md"), "utf8"),
     readFile(path.join(productRoot, "docs/RELEASING.md"), "utf8"),
     readFile(path.join(productRoot, "docs/DEVELOPER_PREVIEW_PLAYBOOK.md"), "utf8"),
+    readFile(path.join(productRoot, "docs/GIT_WORKFLOW.md"), "utf8"),
+    readFile(path.join(productRoot, "docs/CODEX_WORKFLOW.md"), "utf8"),
+    readFile(path.join(productRoot, "docs/DEVELOPMENT.md"), "utf8"),
   ]);
   assert.match(preview, /GH_TOKEN:\s*\$\{\{ github\.token \}\}/u);
   assert.match(preview, /package-delivery-report\.md/u);
@@ -158,6 +171,13 @@ test("installer workflows generate a live delivery report after package verifica
   assert.match(candidate, /output\/package-delivery/u);
   assert.match(release, /package-delivery-report\.mjs/u);
   assert.match(agentGuide, /every associated Pull Request/u);
+  assert.match(agentGuide, /latest head of every[\s\S]*applicable PageRoot Pull Request/u);
   assert.match(releasing, /Mandatory installer delivery report/u);
+  assert.match(releasing, /Default source set for a latest installer/u);
+  assert.match(releasing, /Any selected unmerged Pull Request[\s\S]*Developer Preview/u);
   assert.match(playbook, /安装包内容报告/u);
+  assert.match(playbook, /默认源码范围/u);
+  assert.match(gitWorkflow, /Latest-installer source composition/u);
+  assert.match(codexWorkflow, /最新 `origin\/main` \+ 当前开发范围/u);
+  assert.match(development, /Package commands always build the exact current clean Tree/u);
 });

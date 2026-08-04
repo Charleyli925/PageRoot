@@ -136,6 +136,29 @@ same files without rebuilding. See
 `docs/RELEASE_PIPELINE_GOVERNANCE.md` for failure classification, rerun policy
 and metrics.
 
+## Latest installer source rule
+
+开发者说“生成最新的安装包”、“生成最新的开发者测试安装包”或等价表述时，
+默认范围不是“当前分支”，而是“最新 `origin/main` + 当前开发范围
+内所有未被开发者明确排除的相关 PR 最新代码”。合并、开放、Draft 或关
+闭未合并只是要报告的当前状态，不自动构成排除理由。
+
+执行顺序固定为：
+
+1. 同步 `origin/main` 并查询 GitHub 上的实时 PR 清单。
+2. 记录本次应包含、明确排除和已被其他 PR 替代的项；每个排除项必须有
+   可交付的理由。
+3. 若存在未合并 PR，从最新 `origin/main` 建立临时 `integration/` 分支，按依赖
+   顺序组合每个 PR 的最新 head OID，并去掉堆叠 PR 带来的重复提交。
+4. 在这个干净、已提交的组合 Tree 上运行打包门禁。`package:developer`
+   本身只打当前 Tree，不会在内部悄悄合并其他 PR。
+5. 若最新 head 无法取得或存在未解决冲突，停止并报告，不得静默漏包。
+
+只要组合 Tree 含未合并 PR，它就只能产生 `PageRoot Developer Preview`；
+“生成正式安装包”不会把未合并代码冒充为正式源码，而是要求相关 PR 先通
+过审查并合并，或由开发者明确排除。“只打 `main`”、“排除 #N”、“只包含
+#N/#M”等说法才改变默认范围。
+
 “给我开发者测试包”或等价的明确请求只触发可选
 `Developer Preview`：干净提交、ad-hoc DMG、包内容校验和一次最小启动，不
 执行完整源码矩阵、签名、公证、tag 或发布。“正式打包/发布”本身不隐含这
@@ -148,7 +171,8 @@ package-delivery report 步骤。它把 DMG Hash 与精确 Commit/Tree、最近�
 tag 以来的提交和文件变化绑定，并从 GitHub 实时解析每个关联 PR 的开放、
 草稿、合并和检查状态；未关联 PR 的直接提交不能隐藏。代理交付安装包时必须
 把 `package-delivery-report.md` 的信息写进当次回复，逐个 PR 给出链接、当前
-状态和一句话修改摘要。若回复前经过较长时间，应对同一 DMG 重新运行报告命
+状态和一句话修改摘要，并补充打包前清单中所有排除/替代项及理由。若回复
+前经过较长时间，应对同一 DMG 重新运行报告命
 令以刷新可变的 PR 状态；无法取得实时 GitHub 元数据时，不得把安装包交付称
 为完成。
 
@@ -191,6 +215,7 @@ If the task generated or published an installer, append this mandatory block:
 Package: file, version, architecture, size and SHA-256
 Contents: stable-tag-to-commit range, commit count and changed-file count
 Pull Requests: every PR link, current state/readiness/check status, and one-sentence summary
+Excluded/superseded PRs: every omitted PR and its explicit reason, or “none”
 Direct commits: every included commit not associated with a PR, or explicitly “none”
 Trust: signing/notarization/release eligibility
 ```
