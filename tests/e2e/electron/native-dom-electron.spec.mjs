@@ -746,28 +746,29 @@ test("Electron interactive preview runs authored scripts and edits the selected 
         timeout: 20_000,
       });
 
-    await expect(editFrame.locator("#panel-two")).toBeVisible();
-    await expect(editFrame.locator("#panel-two")).toHaveClass(/active/u);
-    await expect(editFrame.locator("#panel-one")).toBeHidden();
-    await expect(editFrame.locator("#static-chart")).toBeVisible();
-    await expect(editFrame.locator(
+    const resumedEditFrame = await currentEditorFrame(launched.page);
+    await expect(resumedEditFrame.locator("#panel-two")).toBeVisible();
+    await expect(resumedEditFrame.locator("#panel-two")).toHaveClass(/active/u);
+    await expect(resumedEditFrame.locator("#panel-one")).toBeHidden();
+    await expect(resumedEditFrame.locator("#static-chart")).toBeVisible();
+    await expect(resumedEditFrame.locator(
       '#runtime-canvas img[data-pageroot-readonly-visual="runtime-bitmap"]',
     )).toHaveCount(1, { timeout: 20_000 });
-    await expect(editFrame.locator("#runtime-canvas canvas")).toHaveCount(0);
-    await expect(editFrame.locator(
+    await expect(resumedEditFrame.locator("#runtime-canvas canvas")).toHaveCount(0);
+    await expect(resumedEditFrame.locator(
       '#runtime-table > tr[data-pageroot-readonly-visual="runtime-bitmap-row"]',
     )).toHaveCount(1);
-    await expect(editFrame.locator("#runtime-table")).not.toContainText("动态行一");
-    await expect(editFrame.locator(
+    await expect(resumedEditFrame.locator("#runtime-table")).not.toContainText("动态行一");
+    await expect(resumedEditFrame.locator(
       '#runtime-svg img[data-pageroot-readonly-visual="runtime-bitmap"]',
     )).toHaveCount(1);
-    await expect(editFrame.locator("[data-runtime-chart]")).toHaveCount(0);
+    await expect(resumedEditFrame.locator("[data-runtime-chart]")).toHaveCount(0);
     expect(readFileSync(sourcePath, "utf8")).not.toMatch(
       /data-pageroot-readonly-visual|data-runtime-row|data-runtime-chart|data-drawn/u,
     );
 
-    await activateNativeEdit(editFrame, "preview-tab-copy");
-    await expect(editFrame.locator(caseSelector("preview-tab-copy")))
+    await activateNativeEdit(resumedEditFrame, "preview-tab-copy");
+    await expect(resumedEditFrame.locator(caseSelector("preview-tab-copy")))
       .toHaveAttribute("contenteditable", "true");
   } finally {
     if (electronApp && isolatedUserData) {
