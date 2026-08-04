@@ -357,6 +357,7 @@ type ReadyReviewSession = {
   afterHtml: string;
   beforeLabel: string;
   afterLabel: string;
+  comments: CommentItem[];
 };
 
 function waitFor(delayMs: number): Promise<void> {
@@ -8434,6 +8435,36 @@ export default function Workbench() {
         operationKey,
         beforeHtml: frozenHtml,
         afterHtml: candidateHtml,
+        comments: commentSessionRef.current.comments
+          .filter(commentHasContent)
+          .map((comment) => ({
+            ...comment,
+            target: {
+              ...comment.target,
+              ...(comment.target.sourceAnchor
+                ? { sourceAnchor: { ...comment.target.sourceAnchor } }
+                : {}),
+              ...(comment.target.fingerprint
+                ? {
+                    fingerprint: {
+                      ...comment.target.fingerprint,
+                      stableAttributes: {
+                        ...comment.target.fingerprint.stableAttributes,
+                      },
+                      ancestorFingerprint: [
+                        ...comment.target.fingerprint.ancestorFingerprint,
+                      ],
+                    },
+                  }
+                : {}),
+              ...(comment.target.boundingBox
+                ? { boundingBox: { ...comment.target.boundingBox } }
+                : {}),
+            },
+            ...(comment.attachments?.length
+              ? { attachments: comment.attachments.map((item) => ({ ...item })) }
+              : {}),
+          })),
         beforeLabel: run.basedOnVersionId
           ? safeVersionLabel(run.basedOnVersionId)
           : "当前版本",
@@ -9743,6 +9774,7 @@ export default function Workbench() {
       afterLabel={readyReviewSession.afterLabel}
       beforeHtml={readyReviewSession.beforeHtml}
       afterHtml={readyReviewSession.afterHtml}
+      comments={readyReviewSession.comments}
       sourcePath={sourcePath || undefined}
       accepting={openingReadyVersion}
       error={activeRun?.status === "ready-to-open" ? activeRun.error : undefined}

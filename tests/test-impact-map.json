@@ -315,7 +315,7 @@
     {
       "id": "source-editing-core",
       "patterns": [
-        "^app/lib/(?:canvas-target-rebind|editable-island|native-dom-logical-index|page-view-context|source-(?:index|patch-core|patch-engine|text-map)|target-resolver|runtime-dom-source-map|native-(?:edit-capability|edit-policy))\\.(?:js|ts|d\\.ts)$",
+        "^app/lib/(?:canvas-target-rebind|editable-island|native-dom-logical-index|page-(?:presentation-dom|view-context)|source-(?:index|patch-core|patch-engine|text-map)|target-resolver|runtime-dom-source-map|native-(?:edit-capability|edit-policy))\\.(?:js|ts|d\\.ts)$",
         "^scripts/(?:source-index|source-patch-engine|target-resolver)\\.mjs$"
       ],
       "suites": ["typecheck", "browser-smoke", "electron-smoke"],
@@ -364,6 +364,7 @@
     {
       "id": "ai-review-workspace",
       "patterns": [
+        "^app/lib/page-presentation-dom\\.ts$",
         "^app/workbench/(?:AiReviewWorkspace|review-document|review-state)\\.(?:ts|tsx)$",
         "^app/workbench/ai-review-workspace\\.module\\.css$",
         "^tests/ai-review-workspace\\.test\\.mjs$",

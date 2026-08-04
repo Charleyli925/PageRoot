@@ -521,11 +521,137 @@
 
 .documentScale iframe {
   position: absolute;
+  z-index: 0;
   top: 0;
   left: 0;
   display: block;
   border: 0;
   background: #fff;
+}
+
+.reviewCommentLayer {
+  position: absolute;
+  z-index: 3;
+  inset: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.reviewCommentMarker {
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgb(91 80 198 / 35%);
+  border-radius: 8px;
+  background: rgb(255 255 255 / 96%);
+  box-shadow: 0 4px 13px rgb(47 41 111 / 18%);
+  color: #5b50c6;
+  cursor: default;
+  font-size: 11px;
+  font-weight: 760;
+  line-height: 1;
+  pointer-events: auto;
+  transform: translate(-50%, -50%);
+  transition: border-color 140ms ease, background 140ms ease, box-shadow 140ms ease, color 140ms ease;
+  user-select: none;
+}
+
+.reviewCommentMarker:hover {
+  border-color: #6258d6;
+  background: #6258d6;
+  box-shadow: 0 6px 17px rgb(47 41 111 / 25%);
+  color: #fff;
+}
+
+.reviewCommentBubble {
+  position: absolute;
+  top: 50%;
+  width: min(286px, calc(100vw - 88px));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 13px;
+  border: 1px solid rgb(97 88 214 / 18%);
+  border-radius: 11px;
+  background: rgb(255 255 255 / 98%);
+  box-shadow: 0 12px 34px rgb(35 31 80 / 20%);
+  color: #34323f;
+  opacity: 0;
+  pointer-events: none;
+  text-align: left;
+  transform: translateY(-50%) scale(.98);
+  transform-origin: center;
+  transition: opacity 130ms ease, transform 150ms cubic-bezier(.2, .8, .2, 1), visibility 0s linear 150ms;
+  user-select: text;
+  visibility: hidden;
+  white-space: normal;
+}
+
+.reviewCommentMarker[data-bubble-placement="right"] .reviewCommentBubble {
+  left: calc(100% + 10px);
+}
+
+.reviewCommentMarker[data-bubble-placement="left"] .reviewCommentBubble {
+  right: calc(100% + 10px);
+}
+
+.reviewCommentMarker[data-bubble-vertical="below"] .reviewCommentBubble {
+  top: 50%;
+  transform: translateY(10px) scale(.98);
+  transform-origin: top;
+}
+
+.reviewCommentMarker[data-bubble-vertical="above"] .reviewCommentBubble {
+  top: auto;
+  bottom: 50%;
+  transform: translateY(-10px) scale(.98);
+  transform-origin: bottom;
+}
+
+.reviewCommentMarker:hover .reviewCommentBubble {
+  opacity: 1;
+  transform: translateY(-50%) scale(1);
+  transition-delay: 0s;
+  visibility: visible;
+}
+
+.reviewCommentMarker[data-bubble-vertical="below"]:hover .reviewCommentBubble {
+  transform: translateY(10px) scale(1);
+}
+
+.reviewCommentMarker[data-bubble-vertical="above"]:hover .reviewCommentBubble {
+  transform: translateY(-10px) scale(1);
+}
+
+.reviewCommentBubble > strong {
+  color: #5650b8;
+  font-size: 11px;
+  font-weight: 760;
+  letter-spacing: .02em;
+}
+
+.reviewCommentItem {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: #45434f;
+  font-size: 12px;
+  font-weight: 520;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.reviewCommentItem + .reviewCommentItem {
+  padding-top: 8px;
+  border-top: 1px solid #ecebf3;
+}
+
+.reviewCommentItem small {
+  color: #8a8797;
+  font-size: 10px;
+  font-weight: 560;
 }
 
 .mapDrawer {
@@ -730,6 +856,11 @@
 .mapList button[data-changed="true"] {
   background: #f8f7ff;
   box-shadow: inset 2px 0 #6258d6;
+}
+
+.mapList button[data-panel-active="true"]:not([data-changed="true"]) {
+  background: #faf9ff;
+  box-shadow: inset 2px 0 #aaa5df;
 }
 
 .mapList button[data-changed="true"]:hover,
@@ -1015,7 +1146,9 @@
   .canvasToolbarDock,
   .canvasGrid,
   .mapHandle,
-  .mapPanel {
+  .mapPanel,
+  .reviewCommentMarker,
+  .reviewCommentBubble {
     transition: none;
   }
 }

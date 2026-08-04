@@ -1396,7 +1396,12 @@ test("comment layout uses one current snapshot and isolates recovery per item", 
   assert.match(canvas, /contentHeight: number/);
   assert.match(canvas, /textEditing: boolean/);
   assert.match(canvas, /function naturalDocumentContentHeight/);
-  assert.match(canvas, /visibleCount === 1/);
+  assert.match(canvas, /export function pageTabAssociations/);
+  assert.match(canvas, /group\.members\.filter\(isVisible\)\.length === 1/);
+  assert.match(
+    canvas,
+    /group\.members\.filter\(hasIndexedTabActiveState\)\.length === 1/,
+  );
   assert.match(
     canvas,
     /findIndex\(hasIndexedTabActiveState\) === visiblePanelIndex/,

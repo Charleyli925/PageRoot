@@ -34,6 +34,7 @@ import { WarningCircleIcon } from "@phosphor-icons/react/dist/csr/WarningCircle"
 
 import {
   buildReviewDocuments,
+  type ReviewCommentGroup,
   type ReviewDocuments,
   type ReviewSide,
 } from "./review-document";
@@ -48,6 +49,7 @@ import {
   WorkbenchHeaderActions,
   WorkbenchHeaderShell,
 } from "./workbench-header-shell";
+import type { CommentItem } from "./types";
 import styles from "./ai-review-workspace.module.css";
 
 type ConfirmationAction = "return" | "accept";
@@ -57,6 +59,11 @@ type ReviewDesktopSessionResult = {
   documents: ReviewDocuments;
   sessions: ReviewDesktopSessions | null;
   failed: boolean;
+};
+type ReviewCommentLayout = {
+  key: string;
+  left: number;
+  top: number;
 };
 
 const FILTER_LABELS: Record<ReviewChangeFilter, string> = {
@@ -86,12 +93,41 @@ type ReviewMessage = {
   pageRatio?: number;
   outlineId?: string;
   panelKey?: string;
+  panelPath?: string[];
+  presentationEpoch?: number;
   actionKey?: string;
   actionType?: "click" | "control-state";
+  panelControl?: boolean;
   value?: string;
   checked?: boolean;
   boundary?: "top" | "middle" | "bottom";
+  commentLayouts?: unknown;
 };
+
+function safeReviewCommentLayouts(
+  value: unknown,
+  allowedKeys: ReadonlySet<string>,
+): ReviewCommentLayout[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  return value.flatMap((candidate) => {
+    if (!candidate || typeof candidate !== "object") return [];
+    const { key, left, top } = candidate as Record<string, unknown>;
+    if (
+      typeof key !== "string"
+      || !allowedKeys.has(key)
+      || seen.has(key)
+      || typeof left !== "number"
+      || typeof top !== "number"
+      || !Number.isFinite(left)
+      || !Number.isFinite(top)
+      || Math.abs(left) > 100_000
+      || Math.abs(top) > 100_000
+    ) return [];
+    seen.add(key);
+    return [{ key, left, top }];
+  });
+}
 
 function postToFrame(
   frame: HTMLIFrameElement | null,
@@ -118,6 +154,8 @@ function ReviewDocumentPane({
   frameUrl,
   loadFailed,
   visible,
+  commentGroups,
+  commentLayouts,
 }: {
   side: ReviewSide;
   html: string;
@@ -131,10 +169,13 @@ function ReviewDocumentPane({
   frameUrl?: string;
   loadFailed: boolean;
   visible: boolean;
+  commentGroups: readonly ReviewCommentGroup[];
+  commentLayouts: readonly ReviewCommentLayout[];
 }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const [viewportSize, setViewportSize] = useState({ width: 590, height: 620 });
+  const [viewportScrollLeft, setViewportScrollLeft] = useState(0);
 
   const assignViewport = useCallback((element: HTMLDivElement | null) => {
     viewportRef.current = element;
@@ -163,6 +204,7 @@ function ReviewDocumentPane({
     : 1;
   const renderedWidth = documentViewportWidth * scale;
   const iframeHeight = Math.max(620, viewportSize.height / scale);
+  const commentLayoutsByKey = new Map(commentLayouts.map((layout) => [layout.key, layout]));
 
   useEffect(() => {
     onScale(side, scale);
@@ -194,7 +236,10 @@ function ReviewDocumentPane({
         tabIndex={0}
         aria-label={`${side === "before" ? "修改前" : "修改后"}画布滚动区`}
         aria-busy={independentTransport && !frameUrl && !loadFailed}
-        onScroll={() => onHorizontalScroll(side)}
+        onScroll={(event) => {
+          setViewportScrollLeft(event.currentTarget.scrollLeft);
+          onHorizontalScroll(side);
+        }}
       >
         {loadFailed ? (
           <div className={styles.frameError} role="alert">
@@ -229,6 +274,54 @@ function ReviewDocumentPane({
               if (viewportRef.current) viewportRef.current.scrollLeft = 0;
             }}
           />
+          {commentGroups.length ? (
+            <div className={styles.reviewCommentLayer}>
+              {commentGroups.map((group) => {
+                const layout = commentLayoutsByKey.get(group.key);
+                if (!layout) return null;
+                const left = Math.max(12, Math.min(documentViewportWidth - 12, layout.left)) * scale;
+                const top = Math.max(12, Math.min(iframeHeight - 12, layout.top)) * scale;
+                const visibleLeft = left - viewportScrollLeft;
+                const placement = visibleLeft < viewportSize.width * .55 ? "right" : "left";
+                const verticalPlacement = top < 96
+                  ? "below"
+                  : top > viewportSize.height - 96
+                    ? "above"
+                    : "center";
+                const commentText = group.items.map((item) => item.text).join("；");
+                return (
+                  <span
+                    key={group.key}
+                    className={styles.reviewCommentMarker}
+                    data-testid="review-comment-marker"
+                    data-comment-key={group.key}
+                    data-bubble-placement={placement}
+                    data-bubble-vertical={verticalPlacement}
+                    role="note"
+                    aria-label={`用户评论：${commentText}`}
+                    style={{ left, top }}
+                  >
+                    <span aria-hidden="true">评</span>
+                    <span
+                      className={styles.reviewCommentBubble}
+                      data-testid="review-comment-bubble"
+                      aria-hidden="true"
+                    >
+                      <strong>用户评论</strong>
+                      {group.items.map((item, index) => (
+                        <span className={styles.reviewCommentItem} key={`${group.key}-${index}`}>
+                          <span>{item.text}</span>
+                          {item.attachmentCount > 0 && !item.text.startsWith("已添加 ") ? (
+                            <small>{item.attachmentCount} 个参考附件</small>
+                          ) : null}
+                        </span>
+                      ))}
+                    </span>
+                  </span>
+                );
+              })}
+            </div>
+          ) : null}
         </div>
       </div>
     </section>
@@ -241,6 +334,7 @@ export default function AiReviewWorkspace({
   afterLabel,
   beforeHtml,
   afterHtml,
+  comments,
   sourcePath,
   accepting,
   error,
@@ -255,6 +349,7 @@ export default function AiReviewWorkspace({
   afterLabel: string;
   beforeHtml: string;
   afterHtml: string;
+  comments: readonly CommentItem[];
   sourcePath?: string;
   accepting: boolean;
   error?: string;
@@ -274,6 +369,7 @@ export default function AiReviewWorkspace({
           sessionId,
           sourcePath,
           externalBootstrap: independentTransport,
+          comments,
         })
       : {
           before: EMPTY_REVIEW_DOCUMENT,
@@ -281,8 +377,9 @@ export default function AiReviewWorkspace({
           bootstrapJavaScript: { before: "", after: "" },
           changes: [],
           outline: [],
+          commentGroups: [],
         }
-  ), [afterHtml, beforeHtml, hydrated, independentTransport, sessionId, sourcePath]);
+  ), [afterHtml, beforeHtml, comments, hydrated, independentTransport, sessionId, sourcePath]);
   const [reviewState, dispatchReviewState] = useReducer(
     reduceReviewState,
     DEFAULT_REVIEW_STATE,
@@ -292,6 +389,7 @@ export default function AiReviewWorkspace({
     changeFilter: filter,
     contextVisibility: transparency,
     navigationTarget: focus,
+    pagePresentationPath,
     scrollMode,
     zoomMode: zoom,
   } = reviewState;
@@ -301,6 +399,10 @@ export default function AiReviewWorkspace({
   const [confirmationAction, setConfirmationAction] = useState<ConfirmationAction | null>(null);
   const [desktopSessionResult, setDesktopSessionResult] =
     useState<ReviewDesktopSessionResult | null>(null);
+  const [commentLayoutState, setCommentLayoutState] = useState<{
+    documents: ReviewDocuments;
+    layouts: ReviewCommentLayout[];
+  }>({ documents, layouts: [] });
   const continueReviewButtonRef = useRef<HTMLButtonElement>(null);
   const confirmationTriggerRef = useRef<HTMLButtonElement | null>(null);
   const confirmDialogRef = useRef<HTMLElement>(null);
@@ -317,13 +419,24 @@ export default function AiReviewWorkspace({
   const scalesRef = useRef<Record<ReviewSide, number>>({ before: 1, after: 1 });
   const horizontalFollowerRef = useRef<ReviewSide | null>(null);
   const scrollSyncSequenceRef = useRef(0);
-  const reviewStateRef = useRef({ filter, focus, transparency });
+  const presentationEpochRef = useRef(0);
+  const presentationReadyRef = useRef<{
+    epoch: number;
+    expected: Set<ReviewSide>;
+    ready: Set<ReviewSide>;
+    afterCommit: Array<() => void>;
+    timer: number | null;
+  } | null>(null);
+  const reviewStateRef = useRef({ filter, focus, transparency, pagePresentationPath });
   const desktopSessions = desktopSessionResult?.documents === documents
     ? desktopSessionResult.sessions
     : null;
   const reviewLoadFailed = desktopSessionResult?.documents === documents
     ? desktopSessionResult.failed
     : false;
+  const reviewCommentLayouts = commentLayoutState.documents === documents
+    ? commentLayoutState.layouts
+    : [];
   const navigableChanges = useMemo(() => (
     filter === "all"
       ? documents.changes
@@ -368,8 +481,8 @@ export default function AiReviewWorkspace({
   }, [mapOpen]);
 
   useEffect(() => {
-    reviewStateRef.current = { filter, focus, transparency };
-  }, [filter, focus, transparency]);
+    reviewStateRef.current = { filter, focus, transparency, pagePresentationPath };
+  }, [filter, focus, pagePresentationPath, transparency]);
 
   const sendState = useCallback((side?: ReviewSide) => {
     const state = reviewStateRef.current;
@@ -396,9 +509,74 @@ export default function AiReviewWorkspace({
       type: "focus-change",
       changeId: currentFocus,
       panelKey: selectedChange.panelKey,
+      panelPath: selectedChange.panelPath,
       behavior: "auto",
     });
   }, [documents.changes, sessionId]);
+
+  const finishPagePresentation = useCallback((epoch: number) => {
+    const pending = presentationReadyRef.current;
+    if (!pending || pending.epoch !== epoch) return;
+    if (pending.timer !== null) window.clearTimeout(pending.timer);
+    (["before", "after"] as ReviewSide[]).forEach((side) => {
+      postToFrame(framesRef.current[side], sessionId, {
+        type: "commit-presentation",
+        presentationEpoch: epoch,
+      });
+    });
+    presentationReadyRef.current = null;
+    pending.afterCommit.forEach((callback) => callback());
+  }, [sessionId]);
+
+  const coordinatePagePresentation = useCallback((
+    rawPath: readonly string[],
+    afterCommit?: () => void,
+  ) => {
+    const panelPath = [...new Set(rawPath.filter((key) => /^panel-\d+$/u.test(key)))];
+    if (!panelPath.length) {
+      afterCommit?.();
+      return;
+    }
+    const previous = presentationReadyRef.current;
+    if (previous?.timer !== null && previous?.timer !== undefined) {
+      window.clearTimeout(previous.timer);
+    }
+    presentationEpochRef.current += 1;
+    const epoch = presentationEpochRef.current;
+    const expected = new Set<ReviewSide>(
+      (["before", "after"] as ReviewSide[]).filter((side) => Boolean(framesRef.current[side])),
+    );
+    const pending = {
+      epoch,
+      expected,
+      ready: new Set<ReviewSide>(),
+      afterCommit: afterCommit ? [afterCommit] : [],
+      timer: null as number | null,
+    };
+    presentationReadyRef.current = pending;
+    dispatchReviewState({ type: "set-page-presentation", value: panelPath });
+    expected.forEach((side) => {
+      postToFrame(framesRef.current[side], sessionId, {
+        type: "begin-presentation",
+        presentationEpoch: epoch,
+      });
+    });
+    expected.forEach((side) => {
+      postToFrame(framesRef.current[side], sessionId, {
+        type: "activate-panel",
+        panelKey: panelPath.at(-1),
+        panelPath,
+        presentationEpoch: epoch,
+      });
+    });
+    pending.timer = window.setTimeout(() => finishPagePresentation(epoch), 1_600);
+    if (!expected.size) finishPagePresentation(epoch);
+  }, [finishPagePresentation, sessionId]);
+
+  useEffect(() => () => {
+    const pending = presentationReadyRef.current;
+    if (pending?.timer != null) window.clearTimeout(pending.timer);
+  }, []);
 
   useEffect(() => {
     if (!independentTransport) return undefined;
@@ -467,6 +645,24 @@ export default function AiReviewWorkspace({
         focusCurrentSelection(message.side);
         return;
       }
+      if (message.type === "presentation-ready") {
+        const pending = presentationReadyRef.current;
+        if (!pending || pending.epoch !== Number(message.presentationEpoch)) return;
+        pending.ready.add(message.side);
+        if ([...pending.expected].every((side) => pending.ready.has(side))) {
+          finishPagePresentation(pending.epoch);
+        }
+        return;
+      }
+      if (message.type === "comment-layout") {
+        if (message.side !== "before") return;
+        const allowedKeys = new Set(documents.commentGroups.map((group) => group.key));
+        setCommentLayoutState({
+          documents,
+          layouts: safeReviewCommentLayouts(message.commentLayouts, allowedKeys),
+        });
+        return;
+      }
       if (
         message.type === "interaction"
         || message.type === "action"
@@ -479,11 +675,13 @@ export default function AiReviewWorkspace({
         (message.type === "action" || message.type === "control-state")
         && message.actionKey
       ) {
+        if (message.panelControl) return;
         const follower: ReviewSide = message.side === "before" ? "after" : "before";
         postToFrame(framesRef.current[follower], sessionId, {
           type: "mirror-action",
           actionKey: message.actionKey,
           panelKey: message.panelKey,
+          panelPath: message.panelPath,
           actionType: message.type === "control-state" ? "control-state" : "click",
           value: message.value,
           checked: message.checked,
@@ -491,11 +689,21 @@ export default function AiReviewWorkspace({
         return;
       }
       if (message.type === "panel-change") {
-        const follower: ReviewSide = message.side === "before" ? "after" : "before";
-        postToFrame(framesRef.current[follower], sessionId, {
-          type: "activate-panel",
-          panelKey: message.panelKey,
-        });
+        const panelPath = message.panelPath?.length
+          ? message.panelPath
+          : message.panelKey
+            ? [message.panelKey]
+            : [];
+        const visibleItem = documents.outline.find((item) => (
+          item.panelPath?.at(-1) === panelPath.at(-1)
+        ));
+        if (visibleItem) {
+          dispatchReviewState({
+            type: "set-navigation-target",
+            value: visibleItem.changeId || visibleItem.id,
+          });
+        }
+        coordinatePagePresentation(panelPath);
         return;
       }
       if (message.type !== "scroll" || scrollMode !== "linked") return;
@@ -513,7 +721,16 @@ export default function AiReviewWorkspace({
     };
     window.addEventListener("message", handleMessage);
     return () => window.removeEventListener("message", handleMessage);
-  }, [focusCurrentSelection, scrollMode, sendState, sessionId]);
+  }, [
+    coordinatePagePresentation,
+    documents,
+    documents.outline,
+    finishPagePresentation,
+    focusCurrentSelection,
+    scrollMode,
+    sendState,
+    sessionId,
+  ]);
 
   const registerFrame = useCallback((side: ReviewSide, frame: HTMLIFrameElement | null) => {
     framesRef.current[side] = frame;
@@ -563,15 +780,23 @@ export default function AiReviewWorkspace({
   const selectChange = useCallback((changeId: string) => {
     const selectedChange = documents.changes.find((change) => change.id === changeId);
     dispatchReviewState({ type: "set-navigation-target", value: changeId });
-    (["before", "after"] as ReviewSide[]).forEach((side) => {
-      postToFrame(framesRef.current[side], sessionId, {
-        type: "focus-change",
-        changeId,
-        panelKey: selectedChange?.panelKey,
-        behavior: "smooth",
+    const focusChange = () => {
+      (["before", "after"] as ReviewSide[]).forEach((side) => {
+        postToFrame(framesRef.current[side], sessionId, {
+          type: "focus-change",
+          changeId,
+          panelKey: selectedChange?.panelKey,
+          panelPath: selectedChange?.panelPath,
+          behavior: "smooth",
+        });
       });
-    });
-  }, [documents.changes, sessionId]);
+    };
+    if (selectedChange?.panelPath?.length) {
+      coordinatePagePresentation(selectedChange.panelPath, focusChange);
+    } else {
+      focusChange();
+    }
+  }, [coordinatePagePresentation, documents.changes, sessionId]);
 
   const selectReviewMode = useCallback((mode: ReviewChangeFilter) => {
     dispatchReviewState({ type: "set-change-filter", value: mode });
@@ -587,15 +812,20 @@ export default function AiReviewWorkspace({
       return;
     }
     dispatchReviewState({ type: "set-navigation-target", value: item.id });
-    (["before", "after"] as ReviewSide[]).forEach((side) => {
-      postToFrame(framesRef.current[side], sessionId, {
-        type: "focus-outline",
-        outlineId: item.id,
-        panelKey: item.panelKey,
-        behavior: "smooth",
+    const focusOutline = () => {
+      (["before", "after"] as ReviewSide[]).forEach((side) => {
+        postToFrame(framesRef.current[side], sessionId, {
+          type: "focus-outline",
+          outlineId: item.id,
+          panelKey: item.panelKey,
+          panelPath: item.panelPath,
+          behavior: "smooth",
+        });
       });
-    });
-  }, [selectChange, sessionId]);
+    };
+    if (item.panelPath?.length) coordinatePagePresentation(item.panelPath, focusOutline);
+    else focusOutline();
+  }, [coordinatePagePresentation, selectChange, sessionId]);
 
   const selectPageOverview = useCallback(() => {
     dispatchReviewState({ type: "set-navigation-target", value: "all" });
@@ -918,6 +1148,8 @@ export default function AiReviewWorkspace({
                 frameUrl={desktopSessions?.before.url}
                 loadFailed={reviewLoadFailed}
                 visible={canvasView === "split" || canvasView === "before"}
+                commentGroups={documents.commentGroups}
+                commentLayouts={reviewCommentLayouts}
               />
               <ReviewDocumentPane
                 side="after"
@@ -932,6 +1164,8 @@ export default function AiReviewWorkspace({
                 frameUrl={desktopSessions?.after.url}
                 loadFailed={reviewLoadFailed}
                 visible={canvasView === "split" || canvasView === "after"}
+                commentGroups={[]}
+                commentLayouts={[]}
               />
             </div>
 
@@ -994,6 +1228,12 @@ export default function AiReviewWorkspace({
                           const selected = focus === (item.changeId || item.id);
                           const matchesFilter = Boolean(item.changeId)
                             && (filter === "all" || item.types.includes(filter));
+                          const panelActive = Boolean(
+                            item.panelPath?.length
+                            && item.panelPath.every((key, index) => (
+                              pagePresentationPath[index] === key
+                            )),
+                          );
                           return (
                             <li key={item.id}>
                               <button
@@ -1001,6 +1241,7 @@ export default function AiReviewWorkspace({
                                 data-testid="review-outline-item"
                                 data-changed={item.changeId ? "true" : "false"}
                                 data-matches-filter={matchesFilter ? "true" : "false"}
+                                data-panel-active={panelActive ? "true" : undefined}
                                 aria-pressed={selected}
                                 aria-label={`${item.label}：${item.helper}`}
                                 onClick={() => selectOutlineItem(item)}

@@ -56,6 +56,15 @@ Notable user-visible changes are documented here. This project follows Semantic 
   state. Page and filter buttons now remain selected independently, map
   navigation no longer changes review display, and single- and dual-page views
   fill the available Canvas with only minimal framing gaps.
+- Unified Canvas comments and formal review on one Tab-discovery contract,
+  including explicit and strict indexed page controls. Review now coordinates
+  both pages through one presentation epoch, removes stale frames immediately,
+  keeps dimming continuous while different-height Tabs settle, and converges
+  linked vertical scrolling instead of jumping. Every final frame carries a
+  short label; consecutive edited lines use one stepped union frame and mask
+  hole rather than a whitespace-crossing rectangle. Frozen user comments also
+  appear only on the before page as a persistent read-only “评” marker with a
+  hover-only bubble.
 - Unified review frames and dimming on one typed change footprint. Copy uses
   leaf-level exact ranges and high-confidence pairing instead of tag/position
   guesses. Connected frames merge without crossing columns, contained ancestor

@@ -1,5 +1,12 @@
 import { SOURCE_NODE_ATTRIBUTE } from "../lib/source-patch-core.js";
 import { resolvePageViewContext, type PageViewContext } from "../lib/page-view-context.js";
+import {
+  activatePageTabContaining,
+  isRenderedPageElement,
+  pageTabAssociationForElement,
+  pageTabAssociations,
+  type PageTabAssociation,
+} from "../lib/page-presentation-dom";
 import type { HtmlCanvasCommentedTarget, HtmlCanvasSelection } from "./HtmlCanvasEditor.types";
 
 const PAGE_VIEW_CONTEXT_ATTRIBUTE = "data-pageroot-view-context";
@@ -20,29 +27,8 @@ function pageViewContextElement(
   return matches.length === 1 ? matches[0] : null;
 }
 
-type TabAssociation = {
-  panel: HTMLElement;
-  control: HTMLElement;
-  key: string;
-  label: string;
-};
-
-const TAB_STATE_CLASS_NAMES = new Set([
-  "active",
-  "is-active",
-  "selected",
-  "current",
-]);
-
 export function isRenderedCommentTarget(element: HTMLElement): boolean {
-  if (!element.isConnected || element.closest("[hidden]")) return false;
-  const style = element.ownerDocument.defaultView?.getComputedStyle(element);
-  if (
-    style?.display === "none"
-    || style?.visibility === "hidden"
-    || style?.visibility === "collapse"
-  ) return false;
-  return element.getClientRects().length > 0;
+  return isRenderedPageElement(element);
 }
 
 export function commentLayoutTargets(
@@ -83,244 +69,19 @@ export function naturalDocumentContentHeight(
   );
 }
 
-function controlledPanelIds(control: HTMLElement): string[] {
-  const values = [
-    control.getAttribute("aria-controls"),
-    control.getAttribute("data-p"),
-    control.getAttribute("data-tab"),
-    control.getAttribute("href"),
-  ];
-  const ids = new Set<string>();
-  for (const value of values) {
-    for (const token of String(value ?? "").split(/\s+/u)) {
-      const normalized = token.trim().replace(/^#/u, "");
-      if (normalized && !/[\s"'<>]/u.test(normalized)) ids.add(normalized);
-    }
-  }
-  return [...ids];
-}
-
-type SiblingClassGroup = {
-  parent: HTMLElement;
-  members: HTMLElement[];
-};
-
-function stableSiblingClassKeys(element: HTMLElement): string[] {
-  return [...element.classList]
-    .filter((token) => !TAB_STATE_CLASS_NAMES.has(token))
-    .sort()
-    .map((token) => `${element.tagName.toLowerCase()}:${token}`);
-}
-
-function siblingClassGroups(documentNode: Document): SiblingClassGroup[] {
-  const parents = new Set<HTMLElement>();
-  documentNode.querySelectorAll<HTMLElement>("[class]").forEach((element) => {
-    if (element.parentElement) parents.add(element.parentElement);
-  });
-  const groups: SiblingClassGroup[] = [];
-  for (const parent of parents) {
-    const byClass = new Map<string, HTMLElement[]>();
-    const children = Array.from(parent.children) as HTMLElement[];
-    for (const child of children) {
-      for (const key of stableSiblingClassKeys(child)) {
-        const members = byClass.get(key);
-        if (members) members.push(child);
-        else byClass.set(key, [child]);
-      }
-    }
-    const seenMemberSets = new Set<string>();
-    for (const members of byClass.values()) {
-      if (members.length < 2 || members.length > 16) continue;
-      const memberSetKey = members
-        .map((member) => children.indexOf(member))
-        .join(",");
-      if (seenMemberSets.has(memberSetKey)) continue;
-      seenMemberSets.add(memberSetKey);
-      groups.push({ parent, members });
-    }
-  }
-  return groups;
-}
-
-function isIndexedTabControl(element: HTMLElement): boolean {
-  return element.getAttribute("role") === "tab"
-    || element.hasAttribute("onclick")
-    || element.hasAttribute("data-p")
-    || element.hasAttribute("data-tab")
-    || ["BUTTON", "A"].includes(element.tagName);
-}
-
-function hasIndexedTabActiveState(element: HTMLElement): boolean {
-  return element.getAttribute("aria-selected") === "true"
-    || [...TAB_STATE_CLASS_NAMES].some((className) => (
-      element.classList.contains(className)
-    ));
-}
-
-function relatedTabGroupParents(
-  controlParent: HTMLElement,
-  panelParent: HTMLElement,
-): boolean {
-  return controlParent === panelParent
-    || controlParent.parentElement === panelParent
-    || (
-      controlParent.parentElement !== null
-      && controlParent.parentElement === panelParent.parentElement
-    );
-}
-
-function inferredIndexedTabAssociations(
-  documentNode: Document,
-  existing: readonly TabAssociation[],
-): TabAssociation[] {
-  const groups = siblingClassGroups(documentNode);
-  const documentOrder = new Map<HTMLElement, number>(
-    [...documentNode.querySelectorAll<HTMLElement>("body *")]
-      .map((element, index) => [element, index]),
-  );
-  const controlGroups = groups.filter((group) => (
-    group.members.every((element) => (
-      isIndexedTabControl(element) && isRenderedCommentTarget(element)
-    ))
-  ));
-  const panelGroups = groups.filter((group) => {
-    if (
-      group.members.some((element) => existing.some((entry) => entry.panel === element))
-      || !group.members.every((element) => (
-        element.hasAttribute(SOURCE_NODE_ATTRIBUTE)
-        && !isIndexedTabControl(element)
-      ))
-    ) return false;
-    const visibleCount = group.members.filter(isRenderedCommentTarget).length;
-    return visibleCount === 1;
-  });
-
-  const associations: TabAssociation[] = [];
-  for (const panels of panelGroups) {
-    const firstPanelIndex = documentOrder.get(panels.members[0]) ?? Number.MAX_SAFE_INTEGER;
-    const visiblePanelIndex = panels.members.findIndex(isRenderedCommentTarget);
-    const controls = controlGroups
-      .filter((candidate) => (
-        candidate.members.length === panels.members.length
-        && relatedTabGroupParents(candidate.parent, panels.parent)
-        && (documentOrder.get(candidate.members.at(-1)!) ?? -1) < firstPanelIndex
-        && candidate.members.filter(hasIndexedTabActiveState).length === 1
-        && candidate.members.findIndex(hasIndexedTabActiveState) === visiblePanelIndex
-      ))
-      .sort((left, right) => {
-        const leftDistance = firstPanelIndex
-          - (documentOrder.get(left.members.at(-1)!) ?? 0);
-        const rightDistance = firstPanelIndex
-          - (documentOrder.get(right.members.at(-1)!) ?? 0);
-        return leftDistance - rightDistance;
-      })[0];
-    if (!controls) continue;
-    panels.members.forEach((panel, index) => {
-      const control = controls.members[index];
-      const label = (control.textContent ?? "").replace(/\s+/gu, " ").trim();
-      associations.push({
-        panel,
-        control,
-        key: panel.getAttribute(SOURCE_NODE_ATTRIBUTE) || panel.id,
-        label: label || panel.getAttribute("aria-label") || "其他标签页",
-      });
-    });
-  }
-  return associations;
-}
-
-export function tabAssociations(documentNode: Document): TabAssociation[] {
-  const associations: TabAssociation[] = [];
-  const controls = documentNode.querySelectorAll<HTMLElement>(
-    [
-      '[role="tab"][aria-controls]',
-      '[role="tab"][href^="#"]',
-      "[data-p]",
-      "[data-tab]",
-    ].join(", "),
-  );
-  for (const control of controls) {
-    for (const panelId of controlledPanelIds(control)) {
-      const panel = documentNode.getElementById(panelId);
-      if (!panel) continue;
-      const label = (control.textContent ?? "").replace(/\s+/gu, " ").trim();
-      associations.push({
-        panel,
-        control,
-        key: panel.getAttribute(SOURCE_NODE_ATTRIBUTE) || panel.id || panelId,
-        label: label || panel.getAttribute("aria-label") || "其他标签页",
-      });
-    }
-  }
-  for (const panel of documentNode.querySelectorAll<HTMLElement>(
-    '[role="tabpanel"][aria-labelledby]',
-  )) {
-    const labelledBy = panel.getAttribute("aria-labelledby");
-    if (!labelledBy || associations.some((entry) => entry.panel === panel)) continue;
-    const control = documentNode.getElementById(labelledBy);
-    if (!control) continue;
-    associations.push({
-      panel,
-      control,
-      key: panel.getAttribute(SOURCE_NODE_ATTRIBUTE) || panel.id || labelledBy,
-      label: (control.textContent ?? "").replace(/\s+/gu, " ").trim()
-        || panel.getAttribute("aria-label")
-      || "其他标签页",
-    });
-  }
-  associations.push(...inferredIndexedTabAssociations(documentNode, associations));
-  return associations;
+export function tabAssociations(documentNode: Document): PageTabAssociation[] {
+  return pageTabAssociations(documentNode);
 }
 
 export function tabAssociationForElement(
   element: HTMLElement,
-  associations: readonly TabAssociation[],
-): TabAssociation | null {
-  let candidate: HTMLElement | null = element;
-  while (candidate) {
-    const association = associations.find((entry) => entry.panel === candidate);
-    if (association) return association;
-    candidate = candidate.parentElement;
-  }
-  return null;
+  associations: readonly PageTabAssociation[],
+): PageTabAssociation | null {
+  return pageTabAssociationForElement(element, associations);
 }
 
 export function activateContainingTab(element: HTMLElement): boolean {
-  const associations = tabAssociations(element.ownerDocument);
-  const target = tabAssociationForElement(element, associations);
-  if (!target) return false;
-  const controlParent = target.control.parentElement;
-  const group = associations.filter((entry) => (
-    entry.control.parentElement === controlParent
-  ));
-  if (group.length < 2) return false;
-  const stateClasses = [...TAB_STATE_CLASS_NAMES].filter(
-    (className) => group.some((entry) => (
-      entry.control.classList.contains(className)
-      || entry.panel.classList.contains(className)
-    )),
-  );
-  for (const entry of group) {
-    const active = entry === target;
-    for (const className of stateClasses) {
-      entry.control.classList.toggle(className, active);
-      entry.panel.classList.toggle(className, active);
-    }
-    if (
-      entry.control.hasAttribute("aria-selected")
-      || entry.control.getAttribute("role") === "tab"
-    ) {
-      entry.control.setAttribute("aria-selected", String(active));
-    }
-    if (
-      entry.control.hasAttribute("tabindex")
-      || entry.control.getAttribute("role") === "tab"
-    ) {
-      entry.control.tabIndex = active ? 0 : -1;
-    }
-    entry.panel.toggleAttribute("hidden", !active);
-  }
-  return isRenderedCommentTarget(element);
+  return activatePageTabContaining(element);
 }
 
 function writeAriaState(

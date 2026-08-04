@@ -2,7 +2,17 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const [workbench, handoff, review, reviewDocument, reviewState, styles, headerShell] = await Promise.all([
+const [
+  workbench,
+  handoff,
+  review,
+  reviewDocument,
+  reviewState,
+  styles,
+  headerShell,
+  pagePresentation,
+  canvasPageView,
+] = await Promise.all([
   readFile(new URL("../app/workbench.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/workbench/handoff-view.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/workbench/AiReviewWorkspace.tsx", import.meta.url), "utf8"),
@@ -10,6 +20,8 @@ const [workbench, handoff, review, reviewDocument, reviewState, styles, headerSh
   readFile(new URL("../app/workbench/review-state.ts", import.meta.url), "utf8"),
   readFile(new URL("../app/workbench/ai-review-workspace.module.css", import.meta.url), "utf8"),
   readFile(new URL("../app/workbench/workbench-header-shell.tsx", import.meta.url), "utf8"),
+  readFile(new URL("../app/lib/page-presentation-dom.ts", import.meta.url), "utf8"),
+  readFile(new URL("../app/components/html-canvas-page-view.ts", import.meta.url), "utf8"),
 ]);
 
 test("a ready AI result is review-first with exactly one direct-open alternative", () => {
@@ -157,7 +169,7 @@ test("change discovery builds a complete outline and precise change markers", ()
   assert.match(reviewDocument, /data-pageroot-review-structure/);
   assert.match(reviewDocument, /data-pageroot-review-style/);
   assert.match(reviewDocument, /markMovedPairs/);
-  assert.match(reviewDocument, /if \(pair\?\.moved[\s\S]*?return "结构变化"/);
+  assert.match(reviewDocument, /if \(pair\?\.moved[\s\S]*?return "位置调整"/);
   assert.match(reviewDocument, /VISUAL_ATTRIBUTE_NAMES/);
   assert.match(reviewDocument, /pairVisualElements/);
   assert.match(reviewDocument, /elementPairScore/);
@@ -206,6 +218,23 @@ test("review controls keep page, filter, visibility, and navigation orthogonal",
   assert.match(reviewState, /case "set-change-filter"/);
   assert.match(reviewState, /case "set-context-visibility"/);
   assert.match(reviewState, /case "set-navigation-target"/);
+  assert.match(reviewState, /case "set-page-presentation"/);
+  assert.match(review, /coordinatePagePresentation/);
+  assert.match(reviewDocument, /data-pageroot-review-panel-path/);
+});
+
+test("comments and formal review share one explicit and indexed Tab registry", () => {
+  assert.match(reviewDocument, /from "\.\.\/lib\/page-presentation-dom"/);
+  assert.match(canvasPageView, /from "\.\.\/lib\/page-presentation-dom"/);
+  assert.match(pagePresentation, /export function pageTabAssociations/);
+  assert.match(pagePresentation, /\[role="tab"\]\[aria-controls\]/);
+  assert.match(pagePresentation, /"\[data-p\]"/);
+  assert.match(pagePresentation, /"\[data-tab\]"/);
+  assert.match(pagePresentation, /inferredIndexedTabAssociations/);
+  assert.match(pagePresentation, /requireSourceBackedPanels \?\? !options\.detached/);
+  assert.match(pagePresentation, /group\.members\.filter\(hasIndexedTabActiveState\)\.length === 1/);
+  assert.match(reviewDocument, /const panelPath = panelPathForElement/);
+  assert.match(review, /dispatchReviewState\(\{ type: "set-page-presentation"/);
 });
 
 test("all-change review keeps text treatment precise and mirrors authored actions", () => {
@@ -215,14 +244,19 @@ test("all-change review keeps text treatment precise and mirrors authored action
   assert.match(reviewDocument, /color: inherit !important;[\s\S]*?text-decoration: none !important/);
   assert.match(reviewDocument, /querySelectorAll\('\[data-pageroot-review-marker-types~="text"\]'\)/);
   assert.match(reviewDocument, /textTone[\s\S]*?"text-removed"[\s\S]*?"text-added"/);
-  assert.match(reviewDocument, /"新增文案"/);
-  assert.match(reviewDocument, /"删除文案"/);
-  assert.match(reviewDocument, /"文案修改前"/);
-  assert.match(reviewDocument, /"文案修改后"/);
+  assert.match(reviewDocument, /"新增内容"/);
+  assert.match(reviewDocument, /"删除内容"/);
+  assert.match(reviewDocument, /"文本调整"/);
   assert.match(reviewDocument, /mergeConnectedRecords/);
   assert.match(reviewDocument, /minimalRecords/);
   assert.match(reviewDocument, /tone: record\.tones\.length > 1 \? "mixed" : record\.tones\[0\]/);
   assert.match(reviewDocument, /allModeSummary/);
+  assert.match(reviewDocument, /fuseConnectedFragments/);
+  assert.match(reviewDocument, /unionPath/);
+  assert.match(reviewDocument, /data-pageroot-review-overlay-shape/);
+  assert.match(reviewDocument, /data-pageroot-review-overlay-shape-svg/);
+  assert.match(reviewDocument, /data-pageroot-review-fragment-count/);
+  assert.match(reviewDocument, /data-pageroot-review-overlay-label/);
   assert.match(reviewDocument, /data-pageroot-review-mask-layer/);
   assert.match(reviewDocument, /data-pageroot-review-mask-hole/);
   assert.match(reviewDocument, /data-pageroot-review-mask-dim/);
@@ -240,7 +274,7 @@ test("all-change review keeps text treatment precise and mirrors authored action
   assert.match(reviewDocument, /matchingPanelControl/);
   assert.match(reviewDocument, /revealTarget/);
   assert.match(reviewDocument, /activatePanelKey/);
-  assert.match(reviewDocument, /post\("action", \{ actionKey, panelKey \}\)/);
+  assert.match(reviewDocument, /post\("action", \{/);
   assert.match(review, /type: "activate-panel"/);
   assert.match(review, /type: "mirror-action"/);
   assert.match(reviewDocument, /message\.type === "mirror-action"/);
@@ -255,9 +289,34 @@ test("all-change review keeps text treatment precise and mirrors authored action
   assert.match(reviewDocument, /MutationObserver/);
   assert.match(reviewDocument, /ResizeObserver/);
   assert.match(reviewDocument, /post\("action-applied"/);
+  assert.match(reviewDocument, /beginProjectionTransition/);
+  assert.match(reviewDocument, /post\("presentation-ready"/);
+  assert.match(reviewDocument, /commitProjectionTransition/);
+  assert.match(reviewDocument, /if \(projectionTransitioning\) \{[\s\S]*?renderTransitionMask\(\);[\s\S]*?schedulePresentationReady/);
+  assert.match(reviewDocument, /animateFollowerScroll/);
+  assert.match(reviewDocument, /topDelta \* \.28/);
   assert.doesNotMatch(reviewDocument, /annotateUnchangedSubtrees/);
   const actionMirrorStart = review.indexOf('(message.type === "action" || message.type === "control-state")');
   const actionMirrorEnd = review.indexOf('if (message.type === "panel-change")', actionMirrorStart);
   assert.doesNotMatch(review.slice(actionMirrorStart, actionMirrorEnd), /scrollMode === "linked"/);
   assert.match(review, /document\.addEventListener\("pointerdown", closeOnOutsidePointer, true\)/);
+});
+
+test("formal review projects frozen user comments on the before page only", () => {
+  assert.match(workbench, /comments=\{readyReviewSession\.comments\}/);
+  assert.match(review, /comments: readonly CommentItem\[\]/);
+  assert.match(reviewDocument, /annotateReviewComments\(\s*beforeDocument/);
+  assert.match(reviewDocument, /post\("comment-layout", \{ commentLayouts \}\)/);
+  assert.match(reviewDocument, /data-pageroot-review-comment-key/);
+  assert.match(review, /message\.side !== "before"/);
+  assert.match(review, /safeReviewCommentLayouts\(message\.commentLayouts, allowedKeys\)/);
+  assert.match(review, /commentGroups=\{documents\.commentGroups\}/);
+  assert.match(review, /data-testid="review-comment-marker"/);
+  assert.match(review, /data-testid="review-comment-bubble"/);
+  assert.match(review, />评<\/span>/);
+  assert.match(styles, /\.reviewCommentMarker:hover \.reviewCommentBubble\s*\{/);
+  assert.doesNotMatch(reviewDocument, /data-pageroot-review-comment-(?:data|layer|marker|bubble)/);
+  assert.doesNotMatch(reviewDocument, /用户评论/);
+  assert.doesNotMatch(review, /data-testid="review-comment-marker"[\s\S]{0,400}(?:onClick|tabIndex)/);
+  assert.doesNotMatch(styles, /\.reviewCommentMarker:focus/);
 });

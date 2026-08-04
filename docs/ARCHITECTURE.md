@@ -80,18 +80,31 @@ Comments + frozen input
   executor applies the accepted context. It never invokes authored handlers,
   serializes the preview DOM or creates a second interaction mode.
 - Formal AI review owns one disposable reducer with independent page, change
-  filter, context visibility, navigation, scroll and zoom fields. The document
+  filter, context visibility, navigation, canonical presentation path, scroll
+  and zoom fields. The document
   analyzer first establishes high-confidence before/after node pairs, derives
   copy, structure and visual facts from those pairs, and only then emits one
   typed canonical change footprint. It never promotes tag/position proximity
-  alone into a change fact. Global context masking punches holes from the exact
-  final overlay rectangles, so mask and frame cannot diverge. The disposable
+  alone into a change fact. Connected line fragments retain their exact union
+  boundary, so one stepped frame avoids overlapping per-line boxes without
+  becoming a whitespace-crossing bounding rectangle. Global context masking
+  punches holes from those same union paths, so mask and frame cannot diverge. The disposable
   projection uses reserved attributes plus an explicit presentation reset and
   important geometry, preventing authored `svg`/`div` rules from restyling its
   mask or frames. Stable
-  outline regions remain navigation-only. Before/after panel and action keys
+  outline regions remain navigation-only. `page-presentation-dom` is the
+  shared explicit-ID and strict indexed-Tab discovery contract consumed by
+  Canvas comment presentation and formal review. Before/after panel and action keys
   are assigned as pairs before either isolated document is prepared, so safe
-  runtime actions mirror bidirectionally even when copy or order differs.
+  runtime actions mirror bidirectionally even when copy or order differs. A
+  parent-owned presentation epoch removes stale projections immediately and
+  commits both frames only after their new layout is stable. Frozen comments
+  resolve against the immutable before source, but their text never enters the
+  authored iframe. The before frame receives only an opaque target key and
+  reports anonymous viewport geometry; the trusted React host joins that
+  geometry to the frozen text and renders read-only hover markers above the
+  before page. Linked vertical scroll follows semantic region
+  progress through frame-to-frame convergence instead of a single jump;
   Scroll mode controls only scroll following. No review state or authored
   runtime mutation has source, Version or project authority.
 - `IslandEditingController` is the only production text-edit engine in PageRoot 0.9.0. `contenteditable="true"` supplies focus, caret, Selection and IME composition, while the controller owns insertion, deletion, line breaks, paste and formatting. Chromium DOM serialization never has commit authority.

@@ -10,6 +10,7 @@ export type ReviewState = {
   changeFilter: ReviewChangeFilter;
   contextVisibility: number;
   navigationTarget: string;
+  pagePresentationPath: string[];
   scrollMode: ReviewScrollMode;
   zoomMode: ReviewZoomMode;
 };
@@ -19,6 +20,7 @@ export type ReviewStateAction =
   | { type: "set-change-filter"; value: ReviewChangeFilter }
   | { type: "set-context-visibility"; value: number }
   | { type: "set-navigation-target"; value: string }
+  | { type: "set-page-presentation"; value: string[] }
   | { type: "set-scroll-mode"; value: ReviewScrollMode }
   | { type: "set-zoom-mode"; value: ReviewZoomMode };
 
@@ -27,6 +29,7 @@ export const DEFAULT_REVIEW_STATE: ReviewState = {
   changeFilter: "all",
   contextVisibility: 18,
   navigationTarget: "all",
+  pagePresentationPath: [],
   scrollMode: "linked",
   zoomMode: "actual",
 };
@@ -52,6 +55,12 @@ export function reduceReviewState(
       return state.navigationTarget === action.value
         ? state
         : { ...state, navigationTarget: action.value };
+    case "set-page-presentation": {
+      const value = [...new Set(action.value.filter(Boolean))];
+      const unchanged = value.length === state.pagePresentationPath.length
+        && value.every((item, index) => item === state.pagePresentationPath[index]);
+      return unchanged ? state : { ...state, pagePresentationPath: value };
+    }
     case "set-scroll-mode":
       return state.scrollMode === action.value ? state : { ...state, scrollMode: action.value };
     case "set-zoom-mode":

@@ -1,3 +1,19 @@
+import type { HtmlCanvasSelection } from "../components/HtmlCanvasEditor.types";
+import {
+  PAGE_TAB_STATE_CLASS_NAMES,
+  pageTabAssociations,
+} from "../lib/page-presentation-dom";
+import {
+  buildSourceIndex,
+  createTargetRef,
+  resolveTargetRef,
+} from "../lib/source-patch-core.js";
+import {
+  sourceTargetRefForSelection,
+  targetLevelForSelection,
+} from "../lib/canvas-target-rebind.js";
+import type { CommentItem } from "./types";
+
 export type ReviewFilter = "all" | "text" | "structure" | "style";
 export type ReviewChangeType = Exclude<ReviewFilter, "all">;
 export type ReviewSide = "before" | "after";
@@ -10,6 +26,7 @@ export type ReviewChange = {
   beforePresent: boolean;
   afterPresent: boolean;
   panelKey?: string;
+  panelPath?: string[];
   movement?: { from: number; to: number };
 };
 
@@ -20,6 +37,7 @@ export type ReviewOutlineItem = {
   helper: string;
   changeId?: string;
   panelKey?: string;
+  panelPath?: string[];
   types: ReviewChangeType[];
   movement?: { from: number; to: number };
 };
@@ -30,6 +48,15 @@ export type ReviewDocuments = {
   bootstrapJavaScript: Record<ReviewSide, string>;
   changes: ReviewChange[];
   outline: ReviewOutlineItem[];
+  commentGroups: ReviewCommentGroup[];
+};
+
+export type ReviewCommentGroup = {
+  key: string;
+  items: Array<{
+    text: string;
+    attachmentCount: number;
+  }>;
 };
 
 const REVIEW_STYLE_ID = "pageroot-ai-review-style";
@@ -189,10 +216,63 @@ const REVIEW_DOCUMENT_STYLE = String.raw`
     border-color: #6d5ce7 !important;
   }
 
-  [data-pageroot-review-overlay-box][data-active="true"]::after {
+  [data-pageroot-review-overlay-box][data-shaped="true"] {
+    border: 0 !important;
+  }
+
+  [data-pageroot-review-overlay-shape-svg] {
+    position: absolute !important;
+    inset: 0 !important;
+    display: block !important;
+    width: 100% !important;
+    height: 100% !important;
+    overflow: visible !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    max-width: none !important;
+    max-height: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    opacity: 1 !important;
+    filter: none !important;
+    transform: none !important;
+    pointer-events: none !important;
+  }
+
+  [data-pageroot-review-overlay-shape] {
+    display: block !important;
+    fill: none !important;
+    stroke: #1677c8 !important;
+    stroke-width: calc(2px * var(--pageroot-review-ui-scale)) !important;
+    stroke-dasharray: calc(6px * var(--pageroot-review-ui-scale)) calc(4px * var(--pageroot-review-ui-scale)) !important;
+    stroke-linejoin: round !important;
+    stroke-linecap: round !important;
+    vector-effect: non-scaling-stroke !important;
+  }
+
+  [data-pageroot-review-overlay-box][data-tone="text-removed"] [data-pageroot-review-overlay-shape] {
+    stroke: #d14b44 !important;
+  }
+
+  [data-pageroot-review-overlay-box][data-tone="text-added"] [data-pageroot-review-overlay-shape] {
+    stroke: #239b56 !important;
+  }
+
+  [data-pageroot-review-overlay-box][data-tone="style"] [data-pageroot-review-overlay-shape],
+  [data-pageroot-review-overlay-box][data-tone="mixed"] [data-pageroot-review-overlay-shape] {
+    stroke: #6d5ce7 !important;
+  }
+
+  [data-pageroot-review-overlay-label] {
     position: absolute !important;
     right: 0 !important;
     bottom: calc(100% + 4px) !important;
+    z-index: 2 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    min-height: calc(19px * var(--pageroot-review-ui-scale)) !important;
     max-width: min(320px, calc(100vw - 24px)) !important;
     padding: calc(3px * var(--pageroot-review-ui-scale)) calc(7px * var(--pageroot-review-ui-scale)) !important;
     overflow: hidden !important;
@@ -201,13 +281,26 @@ const REVIEW_DOCUMENT_STYLE = String.raw`
     background: rgb(255 255 255 / 94%) !important;
     color: #514ba9 !important;
     box-shadow: 0 4px 12px rgb(30 25 70 / 12%) !important;
-    content: attr(data-summary) !important;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
     font-size: calc(10px * var(--pageroot-review-ui-scale)) !important;
     font-weight: 700 !important;
     line-height: 1.2 !important;
     white-space: nowrap !important;
     text-overflow: ellipsis !important;
+  }
+
+  [data-pageroot-review-transition-mask] {
+    position: absolute !important;
+    z-index: 2147482490 !important;
+    top: 0 !important;
+    left: 0 !important;
+    display: block !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    background: #ffffff !important;
+    pointer-events: none !important;
   }
 
   html:not([data-pageroot-review-overlays="true"])[data-pageroot-review-filter]
@@ -443,16 +536,18 @@ function isPanelContainer(element: Element): boolean {
 function closestPanelContainer(element: Element): Element | null {
   let candidate: Element | null = element;
   while (candidate && candidate !== element.ownerDocument.body) {
-    if (isPanelContainer(candidate)) return candidate;
+    if (
+      candidate.getAttribute("data-pageroot-review-panel-container") === "true"
+      || isPanelContainer(candidate)
+    ) return candidate;
     candidate = candidate.parentElement;
   }
   return null;
 }
 
 function safePanelControls(document: Document): Element[] {
-  const explicit = [...document.querySelectorAll(
-    '[role="tab"], button[aria-controls], button[data-p], button[data-tab]',
-  )];
+  const explicit = pageTabAssociations(document, { detached: true })
+    .map((association) => association.control);
   const likely = [...document.querySelectorAll(
     'button, a[href^="#"], [role="button"], input[type="radio"]',
   )].filter((element) => (
@@ -466,6 +561,7 @@ function panelControlTarget(control: Element): string {
   return control.getAttribute("aria-controls")
     || control.getAttribute("data-p")
     || control.getAttribute("data-tab")
+    || control.getAttribute("href")?.replace(/^#/u, "")
     || "";
 }
 
@@ -495,18 +591,35 @@ type PanelDescriptor = {
   control: Element | null;
   explicitIdentity: string;
   label: string;
+  groupKey: string;
+  activeClasses: string[];
   index: number;
 };
 
 function panelDescriptors(document: Document): PanelDescriptor[] {
-  const panels = [...document.querySelectorAll("body *")].filter(isPanelContainer);
+  const associations = pageTabAssociations(document, { detached: true });
+  const associatedPanels = new Set(associations.map((association) => association.panel));
+  const panels = [
+    ...associations.map((association) => association.panel),
+    ...[...document.querySelectorAll("body *")]
+      .filter(isPanelContainer)
+      .filter((panel) => !associatedPanels.has(panel as HTMLElement)),
+  ];
   const controls = safePanelControls(document);
   return panels.map((panel, index) => {
-    const control = controls.find((candidate) => controlMatchesPanel(candidate, panel))
+    const association = associations.find((candidate) => candidate.panel === panel);
+    const control = association?.control
+      || controls.find((candidate) => controlMatchesPanel(candidate, panel))
       || (controls.length === panels.length ? controls[index] : null);
+    const activeClasses = PAGE_TAB_STATE_CLASS_NAMES.filter((className) => (
+      Boolean(control?.classList.contains(className))
+      || panel.classList.contains(className)
+    ));
     return {
       panel,
       control,
+      groupKey: association?.groupKey || `loose-panel-${index + 1}`,
+      activeClasses,
       explicitIdentity: normalizedPanelLabel(
         panel.id
         || panel.getAttribute("data-page")
@@ -525,7 +638,44 @@ function panelDescriptors(document: Document): PanelDescriptor[] {
 
 function setPanelDescriptorKey(descriptor: PanelDescriptor, key: string) {
   descriptor.panel.setAttribute("data-pageroot-review-panel-key", key);
-  descriptor.control?.setAttribute("data-pageroot-review-panel-key", key);
+  descriptor.panel.setAttribute("data-pageroot-review-panel-container", "true");
+  descriptor.panel.setAttribute("data-pageroot-review-panel-group", descriptor.groupKey);
+  if (descriptor.activeClasses.length) {
+    descriptor.panel.setAttribute(
+      "data-pageroot-review-panel-active-classes",
+      descriptor.activeClasses.join(" "),
+    );
+  }
+  if (descriptor.control) {
+    descriptor.control.setAttribute("data-pageroot-review-panel-key", key);
+    descriptor.control.setAttribute("data-pageroot-review-panel-control", "true");
+    descriptor.control.setAttribute("data-pageroot-review-panel-group", descriptor.groupKey);
+    if (descriptor.activeClasses.length) {
+      descriptor.control.setAttribute(
+        "data-pageroot-review-panel-active-classes",
+        descriptor.activeClasses.join(" "),
+      );
+    }
+  }
+}
+
+function annotatePanelPaths(document: Document) {
+  document.querySelectorAll<HTMLElement>("[data-pageroot-review-panel-key]")
+    .forEach((element) => {
+      const keys: string[] = [];
+      let candidate: Element | null = element;
+      while (candidate && candidate !== document.body) {
+        if (
+          candidate.getAttribute("data-pageroot-review-panel-container") === "true"
+          || candidate === element
+        ) {
+          const key = candidate.getAttribute("data-pageroot-review-panel-key");
+          if (key && !keys.includes(key)) keys.unshift(key);
+        }
+        candidate = candidate.parentElement;
+      }
+      element.setAttribute("data-pageroot-review-panel-path", keys.join(" "));
+    });
 }
 
 function annotatePanelPairs(before: Document, after: Document) {
@@ -559,6 +709,8 @@ function annotatePanelPairs(before: Document, after: Document) {
     pairIndex += 1;
     setPanelDescriptorKey(descriptor, `panel-${pairIndex}`);
   });
+  annotatePanelPaths(before);
+  annotatePanelPaths(after);
 }
 
 type ActionDescriptor = {
@@ -645,10 +797,18 @@ function annotateActionPairs(before: Document, after: Document) {
   });
 }
 
-function panelKeyForElement(element: Element | null): string | undefined {
-  if (!element) return undefined;
-  return closestPanelContainer(element)
-    ?.getAttribute("data-pageroot-review-panel-key") || undefined;
+function panelPathForElement(element: Element | null): string[] {
+  if (!element) return [];
+  const path: string[] = [];
+  let candidate: Element | null = element;
+  while (candidate && candidate !== element.ownerDocument.body) {
+    if (candidate.getAttribute("data-pageroot-review-panel-container") === "true") {
+      const key = candidate.getAttribute("data-pageroot-review-panel-key");
+      if (key && !path.includes(key)) path.unshift(key);
+    }
+    candidate = candidate.parentElement;
+  }
+  return path;
 }
 
 function isGenericContentContainer(element: Element): boolean {
@@ -908,14 +1068,17 @@ function helperText(
 ): string {
   if (!beforePresent) return "新增内容";
   if (!afterPresent) return "删除内容";
-  if (pair?.moved && types.length === 1 && types[0] === "structure") return "结构变化";
+  if (pair?.moved && types.length === 1 && types[0] === "structure") return "位置调整";
   const labels = types.map((type) => (
-    type === "text" ? "文案" : type === "structure" ? "结构" : "视觉"
+    type === "text" ? "文本" : type === "structure" ? "结构" : "视觉"
   ));
-  return `${[...new Set(labels)].join("、")}变化`;
+  return `${[...new Set(labels)].join("、")}调整`;
 }
 
 function panelControlLabel(document: Document, panel: Element): string {
+  const association = pageTabAssociations(document, { detached: true })
+    .find((candidate) => candidate.panel === panel);
+  if (association?.label) return association.label;
   const controls = safePanelControls(document);
   const panelId = panel.id
     || panel.getAttribute("data-page")
@@ -1899,6 +2062,17 @@ function attachChangeMarkerMetadata(
   changeId: string,
   helper: string,
 ) {
+  const pairTextKinds = new Set(
+    [pair.before, pair.after].flatMap((root) => (
+      root
+        ? [root, ...root.querySelectorAll("[data-pageroot-review-text-change]")]
+          .map((element) => element.getAttribute("data-pageroot-review-text-change"))
+          .filter(Boolean)
+        : []
+    )),
+  );
+  const pairedTextReplacement = pairTextKinds.has("added")
+    && pairTextKinds.has("removed");
   [pair.before, pair.after].forEach((root) => {
     if (!root) return;
     const markerElements = [root, ...root.querySelectorAll("*")].filter((element) => (
@@ -1915,14 +2089,18 @@ function attachChangeMarkerMetadata(
       if (element.hasAttribute("data-pageroot-review-structure")) markerTypes.push("structure");
       if (element.hasAttribute("data-pageroot-review-style")) markerTypes.push("style");
       const textChange = element.getAttribute("data-pageroot-review-text-change");
+      const structuralAddition = Boolean(
+        element.closest('[data-pageroot-review-structure="added"]'),
+      );
+      const structuralRemoval = Boolean(
+        element.closest('[data-pageroot-review-structure="removed"]'),
+      );
       const summary = textMarker
-        ? textChange === "added"
-          ? "新增文案"
-          : textChange === "removed"
-            ? "删除文案"
-            : textChange === "before"
-              ? "文案修改前"
-              : "文案修改后"
+        ? textChange === "added" && (!pairedTextReplacement || structuralAddition)
+          ? "新增内容"
+          : textChange === "removed" && (!pairedTextReplacement || structuralRemoval)
+            ? "删除内容"
+            : "文本调整"
         : helper;
       element.setAttribute("data-pageroot-review-marker", changeId);
       element.setAttribute("data-pageroot-review-marker-types", markerTypes.join(" "));
@@ -1930,6 +2108,91 @@ function attachChangeMarkerMetadata(
       element.setAttribute("data-pageroot-review-active", "false");
       if (index === 0) element.setAttribute("data-pageroot-review-primary", "true");
     });
+  });
+}
+
+function resolvedCommentElement(
+  document: Document,
+  sourceIndex: ReturnType<typeof buildSourceIndex>,
+  target: HtmlCanvasSelection,
+): Element | null {
+  if (target.selector.trim().toLowerCase() === "body" && target.level === "module") {
+    return document.body;
+  }
+  try {
+    const resolved = resolveTargetRef(
+      sourceIndex,
+      sourceTargetRefForSelection(target),
+    );
+    if (
+      !resolved.target
+      || resolved.resolution === "ambiguous"
+      || resolved.resolution === "orphaned"
+    ) return null;
+    const sourceElement = resolved.target.type === "element"
+      ? resolved.target
+      : resolved.target.parentId
+        ? sourceIndex.byNodeId.get(resolved.target.parentId)
+        : null;
+    if (!sourceElement || sourceElement.type !== "element") return null;
+    const refreshed = createTargetRef(sourceIndex, sourceElement, {
+      targetId: target.id,
+      label: target.label,
+      level: targetLevelForSelection(target.level),
+    });
+    if (refreshed.selector) {
+      const matches = document.querySelectorAll(refreshed.selector);
+      if (matches.length === 1) return matches[0];
+    }
+  } catch {
+    // The frozen target remains authoritative; a selector fallback is allowed
+    // only when it resolves uniquely in that same immutable source document.
+  }
+  try {
+    const matches = target.selector ? document.querySelectorAll(target.selector) : [];
+    return matches.length === 1 ? matches[0] : null;
+  } catch {
+    return null;
+  }
+}
+
+function annotateReviewComments(
+  document: Document,
+  sourceHtml: string,
+  comments: readonly CommentItem[],
+): ReviewCommentGroup[] {
+  if (!comments.length || !document.body) return [];
+  let sourceIndex: ReturnType<typeof buildSourceIndex>;
+  try {
+    sourceIndex = buildSourceIndex(sourceHtml);
+  } catch {
+    return [];
+  }
+  const groups = new Map<Element, CommentItem[]>();
+  comments.forEach((comment) => {
+    if (!comment.text.trim() && !comment.attachments?.length) return;
+    const element = resolvedCommentElement(document, sourceIndex, comment.target);
+    if (!element) return;
+    const existing = groups.get(element);
+    if (existing) existing.push(comment);
+    else groups.set(element, [comment]);
+  });
+  if (!groups.size) return [];
+
+  return [...groups.entries()].map(([element, items], index) => {
+    const key = `review-comment-${index + 1}`;
+    element.setAttribute("data-pageroot-review-comment-key", key);
+    if (element === document.body) {
+      element.setAttribute("data-pageroot-review-comment-global", "true");
+    }
+    return {
+      key,
+      items: items.map((comment) => ({
+        text: comment.text.trim()
+          || `已添加 ${comment.attachments?.length || 0} 个参考附件`,
+        attachmentCount: comment.attachments?.length || 0,
+      })),
+    };
   });
 }
 
@@ -1988,9 +2251,15 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
   const sessionId = ${JSON.stringify(sessionId)};
   const side = ${JSON.stringify(side)};
   let scrollFrame = 0;
+  let followerScrollFrame = 0;
   let overlayFrame = 0;
+  let commentLayoutFrame = 0;
+  let presentationReadyTimer = 0;
   let programmaticScrollToken = "";
   let programmaticScrollTop = 0;
+  let followerScrollTarget = null;
+  let projectionEpoch = 0;
+  let projectionTransitioning = false;
   let mirroringPanel = false;
   let mirroringAction = false;
   let currentState = { filter: "all", focus: "all", transparency: 18, scale: 1 };
@@ -2007,17 +2276,21 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
     document.body?.scrollHeight || 0,
   );
   const safeKey = (value) => String(value || "").replace(/[^a-z0-9-]/gi, "");
+  const safePanelPath = (value) => [...new Set(
+    (Array.isArray(value) ? value : String(value || "").split(/\s+/))
+      .map(safeKey)
+      .filter(Boolean),
+  )];
   const isSafePanelControl = (element) => element instanceof Element && element.matches(
-    '[role="tab"], button[aria-controls], button[data-p], button[data-tab]',
+    '[data-pageroot-review-panel-control="true"]',
   );
   const panelControlForKey = (panelKey) => [...document.querySelectorAll(
-    '[role="tab"][data-pageroot-review-panel-key], button[aria-controls][data-pageroot-review-panel-key], button[data-p][data-pageroot-review-panel-key], button[data-tab][data-pageroot-review-panel-key]',
+    '[data-pageroot-review-panel-control="true"][data-pageroot-review-panel-key]',
   )].find((candidate) => candidate.getAttribute("data-pageroot-review-panel-key") === panelKey) || null;
   const panelForKey = (panelKey) => [...document.querySelectorAll(
-    '[data-pageroot-review-panel-key]',
+    '[data-pageroot-review-panel-container="true"][data-pageroot-review-panel-key]',
   )].find((candidate) => (
     candidate.getAttribute("data-pageroot-review-panel-key") === panelKey
-    && !isSafePanelControl(candidate)
   )) || null;
   const actionForKey = (actionKey) => [...document.querySelectorAll(
     '[data-pageroot-review-action-key]',
@@ -2025,31 +2298,138 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
     candidate.getAttribute("data-pageroot-review-action-key") === actionKey
   )) || null;
   const scheduleOverlayRender = () => {
+    if (projectionTransitioning) return;
     cancelAnimationFrame(overlayFrame);
     overlayFrame = requestAnimationFrame(renderReviewOverlays);
+  };
+  const reportReviewCommentLayouts = () => {
+    commentLayoutFrame = 0;
+    if (projectionTransitioning) return;
+    const commentLayouts = [...document.querySelectorAll('[data-pageroot-review-comment-key]')]
+      .flatMap((target) => {
+        const key = safeKey(target.getAttribute("data-pageroot-review-comment-key"));
+        if (!key) return [];
+        const rects = [...target.getClientRects()]
+          .filter((rect) => rect.width > 0 && rect.height > 0);
+        if (!rects.length) return [];
+        const global = target.getAttribute("data-pageroot-review-comment-global") === "true";
+        const firstRect = rects.reduce((current, rect) => (
+          rect.top < current.top ? rect : current
+        ));
+        return [{
+          key,
+          left: global ? 22 : Math.max(...rects.map((rect) => rect.right)) + 10,
+          top: global ? 22 : firstRect.top + firstRect.height / 2,
+        }];
+      });
+    post("comment-layout", { commentLayouts });
+  };
+  const scheduleCommentLayoutReport = () => {
+    if (projectionTransitioning) return;
+    cancelAnimationFrame(commentLayoutFrame);
+    commentLayoutFrame = requestAnimationFrame(reportReviewCommentLayouts);
+  };
+  const renderTransitionMask = () => {
+    document.querySelector('[data-pageroot-review-transition-mask]')?.remove();
+    const mask = document.createElement("div");
+    mask.setAttribute("data-pageroot-review-transition-mask", "true");
+    mask.style.setProperty("width", Math.max(
+      innerWidth,
+      document.documentElement.scrollWidth,
+      document.body?.scrollWidth || 0,
+    ) + "px", "important");
+    mask.style.setProperty("height", Math.max(innerHeight, documentHeight()) + "px", "important");
+    const contextVisibility = clamp(Number(currentState.transparency ?? 18), 0, 100) / 100;
+    mask.style.setProperty("opacity", String(Math.round((1 - contextVisibility) * 1000) / 1000), "important");
+    document.body.append(mask);
+  };
+  const beginProjectionTransition = (rawEpoch) => {
+    const requestedEpoch = Number(rawEpoch || 0);
+    if (
+      Number.isFinite(requestedEpoch)
+      && requestedEpoch > 0
+      && requestedEpoch < projectionEpoch
+    ) return projectionEpoch;
+    projectionEpoch = Number.isFinite(requestedEpoch) && requestedEpoch > 0
+      ? requestedEpoch
+      : projectionEpoch + 1;
+    projectionTransitioning = true;
+    clearTimeout(presentationReadyTimer);
+    cancelAnimationFrame(overlayFrame);
+    cancelAnimationFrame(commentLayoutFrame);
+    document.querySelector('[data-pageroot-review-projection-layer]')?.remove();
+    document.documentElement.dataset.pagerootReviewTransitioning = "true";
+    renderTransitionMask();
+    post("comment-layout", { commentLayouts: [] });
+    return projectionEpoch;
+  };
+  const schedulePresentationReady = (rawEpoch) => {
+    const epoch = Number(rawEpoch || projectionEpoch);
+    if (!projectionTransitioning || epoch !== projectionEpoch) return;
+    clearTimeout(presentationReadyTimer);
+    presentationReadyTimer = window.setTimeout(() => {
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        if (!projectionTransitioning || epoch !== projectionEpoch) return;
+        post("presentation-ready", { presentationEpoch: epoch });
+      }));
+    }, 80);
+  };
+  const commitProjectionTransition = (rawEpoch) => {
+    const epoch = Number(rawEpoch || 0);
+    if (epoch && epoch !== projectionEpoch) return;
+    clearTimeout(presentationReadyTimer);
+    projectionTransitioning = false;
+    document.documentElement.removeAttribute("data-pageroot-review-transitioning");
+    document.querySelector('[data-pageroot-review-transition-mask]')?.remove();
+    renderReviewOverlays();
+  };
+  const applyPanelGroupState = (panelKey) => {
+    const panel = panelForKey(panelKey);
+    const groupKey = panel?.getAttribute("data-pageroot-review-panel-group") || "";
+    if (!groupKey) return;
+    const members = [...document.querySelectorAll(
+      '[data-pageroot-review-panel-group="' + groupKey + '"]',
+    )];
+    const stateClasses = [...new Set(members.flatMap((member) => String(
+      member.getAttribute("data-pageroot-review-panel-active-classes") || "",
+    ).split(/\s+/).filter(Boolean)))];
+    members.forEach((candidate) => {
+      const active = candidate.getAttribute("data-pageroot-review-panel-key") === panelKey;
+      stateClasses.forEach((className) => candidate.classList.toggle(className, active));
+      if (isSafePanelControl(candidate)) {
+        candidate.setAttribute("aria-selected", active ? "true" : "false");
+        candidate.setAttribute("aria-expanded", active ? "true" : "false");
+        if (candidate.hasAttribute("tabindex") || candidate.getAttribute("role") === "tab") {
+          candidate.tabIndex = active ? 0 : -1;
+        }
+      } else if (candidate.getAttribute("data-pageroot-review-panel-container") === "true") {
+        candidate.toggleAttribute("hidden", !active);
+        candidate.setAttribute("aria-hidden", active ? "false" : "true");
+      }
+    });
   };
   const activatePanelKey = (rawPanelKey) => {
     const panelKey = safeKey(rawPanelKey);
     if (!panelKey) return;
     const control = panelControlForKey(panelKey);
     const panel = panelForKey(panelKey);
-    if (control instanceof HTMLElement) {
+    const alreadyPresented = panel instanceof HTMLElement
+      && !panel.hidden
+      && panel.getAttribute("aria-hidden") !== "true"
+      && getComputedStyle(panel).display !== "none"
+      && getComputedStyle(panel).visibility !== "hidden"
+      && panel.getClientRects().length > 0;
+    if (control instanceof HTMLElement && !alreadyPresented) {
       mirroringPanel = true;
       control.click();
       queueMicrotask(() => { mirroringPanel = false; });
     }
-    if (panel instanceof HTMLElement) {
-      panel.hidden = false;
-      panel.removeAttribute("hidden");
-      panel.setAttribute("aria-hidden", "false");
-    }
-    document.querySelectorAll('[data-pageroot-review-panel-key]').forEach((candidate) => {
-      if (!isSafePanelControl(candidate)) return;
-      const active = candidate.getAttribute("data-pageroot-review-panel-key") === panelKey;
-      candidate.setAttribute("aria-selected", active ? "true" : "false");
-      candidate.setAttribute("aria-expanded", active ? "true" : "false");
-    });
-    requestAnimationFrame(scheduleOverlayRender);
+    applyPanelGroupState(panelKey);
+  };
+  const activatePanelPath = (rawPath) => {
+    const panelPath = safePanelPath(rawPath);
+    panelPath.forEach(activatePanelKey);
+    return panelPath;
   };
   const mirrorAction = (message) => {
     const actionKey = safeKey(message.actionKey);
@@ -2058,7 +2438,8 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
     const actionActivatesRequestedPanel = action
       && isSafePanelControl(action)
       && action.getAttribute("data-pageroot-review-panel-key") === safeKey(message.panelKey);
-    if (message.panelKey && !actionActivatesRequestedPanel) activatePanelKey(message.panelKey);
+    if (message.panelPath?.length) activatePanelPath(message.panelPath);
+    else if (message.panelKey && !actionActivatesRequestedPanel) activatePanelKey(message.panelKey);
     action = actionForKey(actionKey);
     if (!(action instanceof HTMLElement) || action.matches(":disabled")) {
       post("action-applied", { actionKey, applied: false });
@@ -2117,7 +2498,7 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
       || panel.getAttribute("data-tab-panel")
       || "";
     if (!panelId) return null;
-    return [...document.querySelectorAll('[role="tab"], button[aria-controls], button[data-p], button[data-tab]')]
+    return [...document.querySelectorAll('[data-pageroot-review-panel-control="true"]')]
       .find((candidate) => (
         candidate.getAttribute("aria-controls") === panelId
         || candidate.getAttribute("data-p") === panelId
@@ -2125,8 +2506,9 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
         || (panelId.startsWith("p") && candidate.getAttribute("data-p") === panelId.slice(1))
       )) || null;
   };
-  const revealTarget = (target, requestedPanelKey) => {
-    if (requestedPanelKey) activatePanelKey(requestedPanelKey);
+  const revealTarget = (target, requestedPanelPath) => {
+    if (requestedPanelPath?.length) activatePanelPath(requestedPanelPath);
+    else if (typeof requestedPanelPath === "string") activatePanelKey(requestedPanelPath);
     if (!target) return;
     const details = target.closest("details");
     if (details) details.open = true;
@@ -2164,8 +2546,8 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
       if (programmaticScrollToken === token) programmaticScrollToken = "";
     })));
   };
-  const focusTarget = (target, panelKey) => {
-    revealTarget(target, panelKey);
+  const focusTarget = (target, panelPath) => {
+    revealTarget(target, panelPath);
     if (!target) return;
     requestAnimationFrame(() => {
       const token = "focus-" + Date.now() + "-" + Math.random();
@@ -2175,6 +2557,26 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
       releaseProgrammaticScroll(token);
       scheduleOverlayRender();
     });
+  };
+  const prefersReducedMotion = () => matchMedia?.("(prefers-reduced-motion: reduce)")?.matches === true;
+  const animateFollowerScroll = () => {
+    followerScrollFrame = 0;
+    const target = followerScrollTarget;
+    if (!target) return;
+    const topDelta = target.top - scrollY;
+    const leftDelta = target.left - scrollX;
+    const finished = Math.abs(topDelta) < .75 && Math.abs(leftDelta) < .75;
+    const nextTop = finished ? target.top : scrollY + topDelta * .28;
+    const nextLeft = finished ? target.left : scrollX + leftDelta * .28;
+    programmaticScrollTop = nextTop;
+    scrollTo({ top: nextTop, left: nextLeft, behavior: "auto" });
+    if (finished) {
+      followerScrollTarget = null;
+      releaseProgrammaticScroll(target.token);
+      scheduleOverlayRender();
+      return;
+    }
+    followerScrollFrame = requestAnimationFrame(animateFollowerScroll);
   };
   const syncScroll = (message) => {
     const token = safeKey(message.syncToken) || ("sync-" + Date.now());
@@ -2189,15 +2591,23 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
     let top = pageRatio * maximumScroll;
     if (message.boundary === "top") {
       top = 0;
-    } else if (message.boundary === "bottom") {
-      top = maximumScroll;
     } else if (target) {
       const rect = target.getBoundingClientRect();
       top = scrollY + rect.top + ratio * Math.max(1, rect.height);
+    } else if (message.boundary === "bottom") {
+      top = pageRatio * maximumScroll;
     }
     programmaticScrollTop = clamp(top, 0, maximumScroll);
-    scrollTo({ top: programmaticScrollTop, left: Number(message.left || 0), behavior: "auto" });
-    releaseProgrammaticScroll(token);
+    const left = Number(message.left || 0);
+    if (prefersReducedMotion()) {
+      cancelAnimationFrame(followerScrollFrame);
+      followerScrollTarget = null;
+      scrollTo({ top: programmaticScrollTop, left, behavior: "auto" });
+      releaseProgrammaticScroll(token);
+      return;
+    }
+    followerScrollTarget = { top: programmaticScrollTop, left, token };
+    if (!followerScrollFrame) followerScrollFrame = requestAnimationFrame(animateFollowerScroll);
   };
   const markerTypes = (element) => String(
     element.getAttribute("data-pageroot-review-marker-types") || "",
@@ -2207,22 +2617,72 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
     const verticalOverlap = Math.max(0, Math.min(left.bottom, right.bottom) - Math.max(left.top, right.top));
     const minimumWidth = Math.max(1, Math.min(left.right - left.left, right.right - right.left));
     const minimumHeight = Math.max(1, Math.min(left.bottom - left.top, right.bottom - right.top));
+    const continuousLineGap = Math.max(gap, Math.min(18, minimumHeight * .8));
     const horizontalGap = Math.max(0, Math.max(left.left, right.left) - Math.min(left.right, right.right));
     const verticalGap = Math.max(0, Math.max(left.top, right.top) - Math.min(left.bottom, right.bottom));
     return (horizontalOverlap > 0 && verticalOverlap > 0)
-      || (verticalGap <= gap && horizontalOverlap / minimumWidth >= .35)
+      || (verticalGap <= continuousLineGap && horizontalOverlap / minimumWidth >= .35)
       || (horizontalGap <= gap && verticalOverlap / minimumHeight >= .35);
   };
-  const mergeRecordGroup = (records) => ({
-    ...records[0],
-    left: Math.min(...records.map((record) => record.left)),
-    top: Math.min(...records.map((record) => record.top)),
-    right: Math.max(...records.map((record) => record.right)),
-    bottom: Math.max(...records.map((record) => record.bottom)),
-    types: [...new Set(records.flatMap((record) => record.types))],
-    tones: [...new Set(records.flatMap((record) => record.tones))],
-    textKinds: [...new Set(records.flatMap((record) => record.textKinds || []))],
-  });
+  const fuseConnectedFragments = (rawFragments) => {
+    const fragments = rawFragments.map((fragment) => ({ ...fragment }));
+    for (let pass = 0; pass < 2; pass += 1) {
+      fragments.forEach((left, leftIndex) => fragments.forEach((right, rightIndex) => {
+        if (leftIndex >= rightIndex) return;
+        const horizontalOverlap = Math.max(0, Math.min(left.right, right.right) - Math.max(left.left, right.left));
+        const verticalOverlap = Math.max(0, Math.min(left.bottom, right.bottom) - Math.max(left.top, right.top));
+        const verticalGap = Math.max(0, Math.max(left.top, right.top) - Math.min(left.bottom, right.bottom));
+        const horizontalGap = Math.max(0, Math.max(left.left, right.left) - Math.min(left.right, right.right));
+        const minimumWidth = Math.max(1, Math.min(left.right - left.left, right.right - right.left));
+        const minimumHeight = Math.max(1, Math.min(left.bottom - left.top, right.bottom - right.top));
+        const continuousLineGap = Math.max(10, Math.min(18, minimumHeight * .8));
+        if (
+          verticalGap > 0
+          && verticalGap <= continuousLineGap
+          && horizontalOverlap / minimumWidth >= .35
+        ) {
+          const midpoint = (Math.min(left.bottom, right.bottom) + Math.max(left.top, right.top)) / 2;
+          if (left.top <= right.top) {
+            left.bottom = midpoint;
+            right.top = midpoint;
+          } else {
+            right.bottom = midpoint;
+            left.top = midpoint;
+          }
+        } else if (horizontalGap > 0 && horizontalGap <= 10 && verticalOverlap / minimumHeight >= .35) {
+          const midpoint = (Math.min(left.right, right.right) + Math.max(left.left, right.left)) / 2;
+          if (left.left <= right.left) {
+            left.right = midpoint;
+            right.left = midpoint;
+          } else {
+            right.right = midpoint;
+            left.left = midpoint;
+          }
+        }
+      }));
+    }
+    return fragments;
+  };
+  const mergeRecordGroup = (records) => {
+    const fragments = fuseConnectedFragments(records.flatMap((record) => (
+      record.fragments || [{
+        left: record.left,
+        top: record.top,
+        right: record.right,
+        bottom: record.bottom,
+      }]
+    )));
+    return {
+      ...records[0],
+      fragments,
+      left: Math.min(...fragments.map((record) => record.left)),
+      top: Math.min(...fragments.map((record) => record.top)),
+      right: Math.max(...fragments.map((record) => record.right)),
+      bottom: Math.max(...fragments.map((record) => record.bottom)),
+      types: [...new Set(records.flatMap((record) => record.types))],
+      tones: [...new Set(records.flatMap((record) => record.tones))],
+    };
+  };
   const mergeConnectedRecords = (records, canMerge) => {
     const remaining = [...records];
     const merged = [];
@@ -2241,26 +2701,71 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
     }
     return merged;
   };
-  const allModeSummary = (types, textKinds) => {
-    const labels = [];
-    if (types.includes("text")) {
-      labels.push(textKinds.length === 1
-        ? textKinds[0] === "added"
-          ? "新增文案"
-          : textKinds[0] === "removed"
-            ? "删除文案"
-            : textKinds[0] === "before"
-              ? "文案修改前"
-              : "文案修改后"
-        : "文案");
+  const allModeSummary = (types, summary) => {
+    if (summary === "新增内容" || summary === "删除内容") return summary;
+    if (types.length > 2) return "综合调整";
+    if (types.includes("text") && types.includes("style")) return "文本、视觉调整";
+    if (types.includes("text") && types.includes("structure")) return "文本、结构调整";
+    if (types.includes("structure") && types.includes("style")) return "结构、视觉调整";
+    if (types.includes("text")) return "文本调整";
+    if (types.includes("structure")) return "结构调整";
+    if (types.includes("style")) return "视觉调整";
+    return "内容调整";
+  };
+  const roundedCoordinate = (value) => Math.round(value * 4) / 4;
+  const unionPath = (rawRects, offsetLeft = 0, offsetTop = 0) => {
+    const rects = rawRects.map((rect) => ({
+      left: roundedCoordinate(rect.left - offsetLeft),
+      top: roundedCoordinate(rect.top - offsetTop),
+      right: roundedCoordinate(rect.right - offsetLeft),
+      bottom: roundedCoordinate(rect.bottom - offsetTop),
+    }));
+    const xs = [...new Set(rects.flatMap((rect) => [rect.left, rect.right]))].sort((a, b) => a - b);
+    const ys = [...new Set(rects.flatMap((rect) => [rect.top, rect.bottom]))].sort((a, b) => a - b);
+    const filled = ys.slice(0, -1).map((top, row) => xs.slice(0, -1).map((left, column) => {
+      const centerX = (left + xs[column + 1]) / 2;
+      const centerY = (top + ys[row + 1]) / 2;
+      return rects.some((rect) => centerX >= rect.left && centerX <= rect.right && centerY >= rect.top && centerY <= rect.bottom);
+    }));
+    const edges = [];
+    const hasCell = (row, column) => Boolean(filled[row]?.[column]);
+    filled.forEach((row, rowIndex) => row.forEach((inside, columnIndex) => {
+      if (!inside) return;
+      const left = xs[columnIndex];
+      const right = xs[columnIndex + 1];
+      const top = ys[rowIndex];
+      const bottom = ys[rowIndex + 1];
+      if (!hasCell(rowIndex - 1, columnIndex)) edges.push([[left, top], [right, top]]);
+      if (!hasCell(rowIndex, columnIndex + 1)) edges.push([[right, top], [right, bottom]]);
+      if (!hasCell(rowIndex + 1, columnIndex)) edges.push([[right, bottom], [left, bottom]]);
+      if (!hasCell(rowIndex, columnIndex - 1)) edges.push([[left, bottom], [left, top]]);
+    }));
+    const pointKey = (point) => point[0] + "," + point[1];
+    const paths = [];
+    while (edges.length) {
+      const edge = edges.shift();
+      const points = [edge[0], edge[1]];
+      const startKey = pointKey(edge[0]);
+      let currentKey = pointKey(edge[1]);
+      while (currentKey !== startKey) {
+        const nextIndex = edges.findIndex((candidate) => pointKey(candidate[0]) === currentKey);
+        if (nextIndex < 0) break;
+        const next = edges.splice(nextIndex, 1)[0];
+        points.push(next[1]);
+        currentKey = pointKey(next[1]);
+      }
+      const simplified = points.filter((point, index) => {
+        if (index === 0 || index === points.length - 1) return true;
+        const previous = points[index - 1];
+        const next = points[index + 1];
+        return !((previous[0] === point[0] && point[0] === next[0])
+          || (previous[1] === point[1] && point[1] === next[1]));
+      });
+      if (simplified.length > 2) {
+        paths.push("M " + simplified.map((point) => point[0] + " " + point[1]).join(" L ") + " Z");
+      }
     }
-    if (types.includes("structure")) labels.push("结构");
-    if (types.includes("style")) labels.push("视觉");
-    return labels.length
-      ? labels.map((label) => label.endsWith("文案") || label.endsWith("前") || label.endsWith("后")
-        ? label
-        : label + "变化").join("、")
-      : "变化";
+    return paths.join(" ");
   };
   const recordsOverlapStrongly = (left, right) => {
     const width = Math.max(0, Math.min(left.right, right.right) - Math.max(left.left, right.left));
@@ -2271,6 +2776,7 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
     return intersection / Math.min(leftArea, rightArea) >= .62;
   };
   function renderReviewOverlays() {
+    if (projectionTransitioning) return;
     document.querySelector('[data-pageroot-review-projection-layer]')?.remove();
     const filter = currentState.filter || "all";
     const records = [];
@@ -2279,7 +2785,6 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
         const textToneValue = element.getAttribute("data-pageroot-review-text")
           || element.getAttribute("data-pageroot-review-text-context");
         const textTone = textToneValue === "removed" ? "text-removed" : "text-added";
-        const textKind = element.getAttribute("data-pageroot-review-text-change") || "";
         [...element.getClientRects()]
           .filter((rect) => rect.width > 1 && rect.height > 1)
           .forEach((rect) => records.push({
@@ -2288,7 +2793,6 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
             tone: textTone,
             tones: [textTone],
             types: ["text"],
-            textKinds: textKind ? [textKind] : [],
             left: rect.left + scrollX,
             top: rect.top + scrollY,
             right: rect.right + scrollX,
@@ -2311,7 +2815,6 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
           tone: type,
           tones: [type],
           types: [type],
-          textKinds: [],
           left: rect.left + scrollX,
           top: rect.top + scrollY,
           right: rect.right + scrollX,
@@ -2342,7 +2845,7 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
       )).map((record) => ({
         ...record,
         tone: record.tones.length > 1 ? "mixed" : record.tones[0],
-        summary: allModeSummary(record.types, record.textKinds),
+        summary: allModeSummary(record.types, record.summary),
       }));
     }
     const inset = 3;
@@ -2366,24 +2869,33 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
     svg.style.setProperty("height", height + "px", "important");
     const holePaths = [];
     merged.forEach((record) => {
-      const hole = document.createElementNS(namespace, "rect");
+      const fragments = (record.fragments || [{
+        left: record.left,
+        top: record.top,
+        right: record.right,
+        bottom: record.bottom,
+      }]).map((fragment) => ({
+        left: fragment.left - inset,
+        top: fragment.top - inset,
+        right: fragment.right + inset,
+        bottom: fragment.bottom + inset,
+      }));
+      const pathData = unionPath(fragments);
+      record.renderFragments = fragments;
+      record.pathData = pathData;
+      const hole = document.createElementNS(namespace, "path");
       hole.setAttribute("data-pageroot-review-mask-hole", record.changeId);
       const left = record.left - inset;
       const top = record.top - inset;
       const width = record.right - record.left + inset * 2;
       const holeHeight = record.bottom - record.top + inset * 2;
-      hole.setAttribute("x", String(left));
-      hole.setAttribute("y", String(top));
-      hole.setAttribute("width", String(width));
-      hole.setAttribute("height", String(holeHeight));
-      hole.setAttribute("rx", String(5));
+      hole.setAttribute("d", pathData);
+      hole.setAttribute("data-left", String(left));
+      hole.setAttribute("data-top", String(top));
+      hole.setAttribute("data-width", String(width));
+      hole.setAttribute("data-height", String(holeHeight));
       hole.setAttribute("fill", "none");
-      holePaths.push(
-        "M " + left + " " + top
-        + " H " + (left + width)
-        + " V " + (top + holeHeight)
-        + " H " + left + " Z",
-      );
+      holePaths.push(pathData);
       svg.append(hole);
     });
     const dim = document.createElementNS(namespace, "path");
@@ -2399,7 +2911,6 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
     dim.setAttribute("fill-opacity", String(Math.round((1 - contextVisibility) * 1_000) / 1_000));
     svg.prepend(dim);
     layer.append(svg);
-    const firstByChange = new Set();
     merged.forEach((record) => {
       const box = document.createElement("div");
       box.setAttribute("data-pageroot-review-overlay-box", record.changeId);
@@ -2407,17 +2918,41 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
       box.dataset.tones = record.tones.join(" ");
       box.dataset.types = record.types.join(" ");
       box.dataset.summary = record.summary;
-      const active = currentState.focus !== "all" && currentState.focus === record.changeId && !firstByChange.has(record.changeId);
+      box.setAttribute(
+        "data-pageroot-review-fragment-count",
+        String((record.renderFragments || []).length || 1),
+      );
+      const active = currentState.focus !== "all" && currentState.focus === record.changeId;
       box.dataset.active = active ? "true" : "false";
-      firstByChange.add(record.changeId);
-      box.style.setProperty("left", (record.left - inset) + "px", "important");
-      box.style.setProperty("top", (record.top - inset) + "px", "important");
-      box.style.setProperty("width", (record.right - record.left + inset * 2) + "px", "important");
-      box.style.setProperty("height", (record.bottom - record.top + inset * 2) + "px", "important");
+      const left = record.left - inset;
+      const top = record.top - inset;
+      const width = record.right - record.left + inset * 2;
+      const boxHeight = record.bottom - record.top + inset * 2;
+      box.style.setProperty("left", left + "px", "important");
+      box.style.setProperty("top", top + "px", "important");
+      box.style.setProperty("width", width + "px", "important");
+      box.style.setProperty("height", boxHeight + "px", "important");
+      if ((record.renderFragments || []).length > 1) {
+        box.dataset.shaped = "true";
+        const shapeSvg = document.createElementNS(namespace, "svg");
+        shapeSvg.setAttribute("data-pageroot-review-overlay-shape-svg", "true");
+        shapeSvg.setAttribute("viewBox", "0 0 " + width + " " + boxHeight);
+        shapeSvg.setAttribute("preserveAspectRatio", "none");
+        const shape = document.createElementNS(namespace, "path");
+        shape.setAttribute("data-pageroot-review-overlay-shape", "true");
+        shape.setAttribute("d", unionPath(record.renderFragments, left, top));
+        shapeSvg.append(shape);
+        box.append(shapeSvg);
+      }
+      const label = document.createElement("span");
+      label.setAttribute("data-pageroot-review-overlay-label", "true");
+      label.textContent = record.summary || "内容调整";
+      box.append(label);
       layer.append(box);
     });
     document.body.append(layer);
     document.documentElement.dataset.pagerootReviewOverlays = merged.length ? "true" : "false";
+    scheduleCommentLayoutReport();
   }
   const applyState = (state) => {
     currentState = { ...currentState, ...state };
@@ -2442,24 +2977,31 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
         ? "true"
         : "false";
     });
-    scheduleOverlayRender();
+    if (projectionTransitioning) renderTransitionMask();
+    else scheduleOverlayRender();
   };
   addEventListener("message", (event) => {
     const message = event.data;
     if (!message || message.source !== "pageroot-ai-review-parent" || message.sessionId !== sessionId) return;
     if (message.type === "state") applyState(message.state || {});
     if (message.type === "sync-scroll") syncScroll(message);
-    if (message.type === "activate-panel") activatePanelKey(message.panelKey);
+    if (message.type === "begin-presentation") beginProjectionTransition(message.presentationEpoch);
+    if (message.type === "activate-panel") {
+      if (!projectionTransitioning) beginProjectionTransition(message.presentationEpoch);
+      activatePanelPath(message.panelPath?.length ? message.panelPath : [message.panelKey]);
+      schedulePresentationReady(message.presentationEpoch);
+    }
+    if (message.type === "commit-presentation") commitProjectionTransition(message.presentationEpoch);
     if (message.type === "mirror-action") mirrorAction(message);
     if (message.type === "focus-change") {
       const changeId = String(message.changeId || "").replace(/[^a-z0-9-]/gi, "");
       const target = document.querySelector('[data-pageroot-review-id="' + changeId + '"]');
-      focusTarget(target, message.panelKey);
+      focusTarget(target, message.panelPath?.length ? message.panelPath : message.panelKey);
     }
     if (message.type === "focus-outline") {
       const outlineId = String(message.outlineId || "").replace(/[^a-z0-9-]/gi, "");
       const target = document.querySelector('[data-pageroot-outline-id="' + outlineId + '"]');
-      focusTarget(target, message.panelKey);
+      focusTarget(target, message.panelPath?.length ? message.panelPath : message.panelKey);
     }
   });
   addEventListener("click", (event) => {
@@ -2471,20 +3013,33 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
       const actionKey = action.getAttribute("data-pageroot-review-action-key") || "";
       const panelKey = action.closest("[data-pageroot-review-panel-key]")
         ?.getAttribute("data-pageroot-review-panel-key") || "";
+      const panelPath = safePanelPath(
+        action.getAttribute("data-pageroot-review-panel-path")
+        || action.closest("[data-pageroot-review-panel-path]")
+          ?.getAttribute("data-pageroot-review-panel-path"),
+      );
       scheduleOverlayRender();
       requestAnimationFrame(() => {
-        post("action", { actionKey, panelKey });
+        post("action", {
+          actionKey,
+          panelKey,
+          panelPath,
+          panelControl: isSafePanelControl(action),
+        });
         requestAnimationFrame(scheduleOverlayRender);
       });
     }
     const control = event.target instanceof Element
-      ? event.target.closest('[role="tab"][data-pageroot-review-panel-key], button[aria-controls][data-pageroot-review-panel-key], button[data-p][data-pageroot-review-panel-key], button[data-tab][data-pageroot-review-panel-key]')
+      ? event.target.closest('[data-pageroot-review-panel-control="true"][data-pageroot-review-panel-key]')
       : null;
     if (control && !mirroringPanel && !mirroringAction) {
       const panelKey = control.getAttribute("data-pageroot-review-panel-key") || "";
+      const panelPath = safePanelPath(
+        control.getAttribute("data-pageroot-review-panel-path") || panelKey,
+      );
+      const localEpoch = beginProjectionTransition(projectionEpoch + 1);
       requestAnimationFrame(() => {
-        scheduleOverlayRender();
-        post("panel-change", { panelKey });
+        post("panel-change", { panelKey, panelPath, presentationEpoch: localEpoch });
       });
     }
     if (event.target instanceof Element && event.target.closest("a[href], area[href]")) {
@@ -2501,6 +3056,11 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
       actionKey: action.getAttribute("data-pageroot-review-action-key") || "",
       panelKey: action.closest("[data-pageroot-review-panel-key]")
         ?.getAttribute("data-pageroot-review-panel-key") || "",
+      panelPath: safePanelPath(
+        action.getAttribute("data-pageroot-review-panel-path")
+        || action.closest("[data-pageroot-review-panel-path]")
+          ?.getAttribute("data-pageroot-review-panel-path"),
+      ),
       value: action.value,
       checked: action instanceof HTMLInputElement ? action.checked : undefined,
     });
@@ -2509,6 +3069,7 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
   addEventListener("change", postControlState, true);
   addEventListener("submit", (event) => event.preventDefault(), true);
   addEventListener("scroll", () => {
+    scheduleCommentLayoutReport();
     if (programmaticScrollToken) {
       if (Math.abs(scrollY - programmaticScrollTop) <= 1) scheduleOverlayRender();
       return;
@@ -2518,17 +3079,23 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
       post("scroll", { ...reviewAnchor(), left: scrollX });
     });
   }, { passive: true });
-  addEventListener("resize", scheduleOverlayRender, { passive: true });
+  const handleLayoutChange = () => {
+    if (projectionTransitioning) {
+      renderTransitionMask();
+      schedulePresentationReady(projectionEpoch);
+    } else scheduleOverlayRender();
+  };
+  addEventListener("resize", handleLayoutChange, { passive: true });
   const mutationObserver = new MutationObserver((mutations) => {
     const onlyOverlayChanges = mutations.every((mutation) => {
       const changedNodes = [...mutation.addedNodes, ...mutation.removedNodes];
       return changedNodes.length > 0 && changedNodes.every((node) => (
         node instanceof Element
-        && (node.matches("[data-pageroot-review-projection-layer]")
-          || Boolean(node.closest("[data-pageroot-review-projection-layer]")))
+        && (node.matches("[data-pageroot-review-projection-layer], [data-pageroot-review-transition-mask]")
+          || Boolean(node.closest("[data-pageroot-review-projection-layer], [data-pageroot-review-transition-mask]")))
       ));
     });
-    if (!onlyOverlayChanges) scheduleOverlayRender();
+    if (!onlyOverlayChanges) handleLayoutChange();
   });
   if (document.body) mutationObserver.observe(document.body, {
     subtree: true,
@@ -2538,7 +3105,7 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
     attributeFilter: ["aria-expanded", "aria-hidden", "aria-selected", "class", "hidden", "open", "style"],
   });
   const resizeObserver = typeof ResizeObserver === "function"
-    ? new ResizeObserver(scheduleOverlayRender)
+    ? new ResizeObserver(handleLayoutChange)
     : null;
   if (resizeObserver && document.body) resizeObserver.observe(document.body);
   const announceReady = () => post("ready", {
@@ -2616,6 +3183,7 @@ export function buildReviewDocuments(
     sessionId: string;
     sourcePath?: string;
     externalBootstrap?: boolean;
+    comments?: readonly CommentItem[];
   },
 ): ReviewDocuments {
   if (typeof DOMParser === "undefined") {
@@ -2628,6 +3196,7 @@ export function buildReviewDocuments(
       },
       changes: [],
       outline: [],
+      commentGroups: [],
     };
   }
   const parser = new DOMParser();
@@ -2656,7 +3225,10 @@ export function buildReviewDocuments(
     const movement = pair.moved
       ? { from: pair.beforeIndex + 1, to: pair.afterIndex + 1 }
       : undefined;
-    const panelKey = panelKeyForElement(pair.after) || panelKeyForElement(pair.before);
+    const panelPath = panelPathForElement(pair.after).length
+      ? panelPathForElement(pair.after)
+      : panelPathForElement(pair.before);
+    const panelKey = panelPath.at(-1);
     [pair.before, pair.after].forEach((element) => {
       if (!element) return;
       element.setAttribute("data-pageroot-outline-id", outlineId);
@@ -2676,6 +3248,7 @@ export function buildReviewDocuments(
         beforePresent: Boolean(pair.before),
         afterPresent: Boolean(pair.after),
         ...(panelKey ? { panelKey } : {}),
+        ...(panelPath.length ? { panelPath } : {}),
         ...(movement ? { movement } : {}),
       });
     }
@@ -2689,9 +3262,16 @@ export function buildReviewDocuments(
       types,
       ...(changeId ? { changeId } : {}),
       ...(panelKey ? { panelKey } : {}),
+      ...(panelPath.length ? { panelPath } : {}),
       ...(movement ? { movement } : {}),
     });
   });
+
+  const commentGroups = annotateReviewComments(
+    beforeDocument,
+    beforeHtml,
+    options.comments || [],
+  );
 
   const preparedBefore = prepareDocument(
     beforeDocument,
@@ -2716,5 +3296,6 @@ export function buildReviewDocuments(
     },
     changes,
     outline,
+    commentGroups,
   };
 }

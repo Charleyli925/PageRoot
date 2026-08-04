@@ -23,9 +23,10 @@
 | Renderer edit, project-picker, attachment-persistence, close-coordination and interactive-preview capabilities | Runtime capability resolver | immutable preload manifest; fail-closed browser default | Workbench composition root |
 | Volatile interactive-preview document, bootstrap and allowed source-relative asset root | Main-process preview protocol controller | none; bounded in-memory session only | isolated preview iframe |
 | Current preview/edit display context, bounded read-only visuals, safe reveal transition and per-surface render acknowledgement | Workbench page-view context state | none; source-bound in-memory projection tagged by `DocumentSession` Canvas generation and rendered source Hash | `HtmlCanvasEditor`, `HtmlInteractionPreview`, save-status projection and toolbar |
-| AI review page view, change filter, context visibility, navigation target, scroll mode and zoom mode | `AiReviewWorkspace` review reducer | none; disposable state bound to the frozen before/after pair | review toolbar, content map and isolated review frames |
+| AI review page view, change filter, context visibility, navigation target, canonical page-presentation path, scroll mode and zoom mode | `AiReviewWorkspace` review reducer | none; disposable state bound to the frozen before/after pair | review toolbar, content map and isolated review frames |
 | AI review node pairing, typed change facts and fused frame/mask geometry | `review-document` analyzer and isolated-frame projection runtime | none; deterministically rebuilt from the frozen before/after HTML pair | review outline, semantic frames and context mask |
-| AI review Tab/disclosure/control presentation state | The user-operated review frame for an intent; parent review coordinator mirrors through paired action keys | none; disposable frame runtime only | the opposite review frame and overlay projection |
+| AI review Tab/disclosure/control presentation state and transition epoch | Parent `AiReviewWorkspace` presentation coordinator; either frame may propose an intent | none; disposable parent state plus frame projection only | both review frames, content map and overlay/mask projection |
+| Frozen review comment set and read-only before-page marker projection | Ready-review session owns comment text; `review-document` resolves opaque before-page target keys; isolated runtime owns anonymous viewport geometry; trusted `AiReviewWorkspace` joins and renders them | none beyond the immutable Request/Draft evidence already frozen for the run | trusted review host above the before frame only; authored frames never receive comment text |
 | Current source-backed comment resolution, visibility, coordinates, marker eligibility and natural document height | `HtmlCanvasEditor` presentation measurement | none; disposable snapshot tagged by rendered source Hash, applied page-view generation and exact target-ID set | Workbench comment rail and Canvas height |
 | Stable application update schedule, coalesced manual check, download progress and restart-install readiness | Main-process application-update controller | signed GitHub Release metadata plus updater cache; no editor authority | preload status snapshot, About PageRoot, Workbench update notice, drain coordinator |
 | Random installation identity, project pseudonym secret, aggregate counters and unsent usage events | Main-process usage-telemetry controller | bounded `usage-telemetry.json` under PageRoot Application Support | PostHog batch ingestion only |
@@ -76,11 +77,16 @@ Rules:
   Toolbar and Option-click actions may propose a new context for the current
   document key, but do not own or persist it.
 - AI review state fields are orthogonal. Page, filter, visibility, navigation,
-  scroll and zoom actions may update only their own reducer field. Review
+  page presentation, scroll and zoom actions may update only their own reducer field. Review
   navigation can reveal a hidden panel in both frames but cannot become a
-  second filter or mask owner. The paired action-key projection mirrors safe
+  second filter or mask owner. The parent owns the full nested panel path and
+  one transition epoch; frames report readiness but cannot independently
+  commit a new overlay state. The paired action-key projection mirrors safe
   runtime presentation in either direction and never writes source bytes,
-  Version records or project state.
+  Version records or project state. Frozen review comments remain read-only
+  evidence. Their text stays in the trusted host, while the before frame reports
+  only opaque-key geometry; neither review frame receives the text and the after
+  page never receives a marker.
 - `CommentSession` is a renderer working copy, not durable Draft authority.
   Runtime state is likewise not a second copy of draft contents: it carries
   lifecycle state and a revisioned pointer to the draft repository.
