@@ -62,6 +62,7 @@ jobs:
             echo "- Built only because this workflow was dispatched explicitly."
             echo "- Uses an ad-hoc signature and is not notarized."
             echo "- Is not eligible for a tag, GitHub Release, or updater publication."
+            echo "- Uses the distinct PageRoot Developer Preview name and a stable-tag-derived test version."
             echo "- Automated scope: latest packaged contents, basic artifact integrity, and one clean startup."
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload developer preview

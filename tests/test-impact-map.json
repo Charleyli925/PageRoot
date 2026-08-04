@@ -82,15 +82,15 @@
       "prerequisites": ["build-desktop"]
     },
     "developer-package-build": {
-      "description": "Build one ad-hoc macOS developer preview DMG from the exact clean tree.",
+      "description": "Build one distinctly named and versioned ad-hoc macOS developer preview DMG from the exact clean tree.",
       "prerequisites": ["build-desktop"]
     },
     "developer-packaged-verify": {
-      "description": "Verify developer preview app.asar, Bridge resources, schemas, ad-hoc signature and DMG integrity.",
+      "description": "Verify developer preview identity, app.asar, Bridge resources, schemas, ad-hoc signature and DMG integrity.",
       "prerequisites": ["developer-package-build"]
     },
     "developer-packaged-startup": {
-      "description": "Launch the developer preview with isolated data and prove version, first window, readiness and clean exit.",
+      "description": "Launch the developer preview with isolated data and prove app name, version, first window, readiness and clean exit.",
       "prerequisites": ["developer-packaged-verify"]
     },
     "candidate-app-build": {

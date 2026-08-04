@@ -4,6 +4,11 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+- Give developer test packages a distinct `PageRoot Developer Preview` app
+  identity and deterministic versions derived from the latest formal tag; for
+  example, the first two committed previews after `0.9.5` are `0.9.69991` and
+  `0.9.69992`, with the same identity carried by the DMG and attestation.
+
 ## [0.9.5] - 2026-07-31
 
 - Run desktop interactive previews in a short-lived isolated document so

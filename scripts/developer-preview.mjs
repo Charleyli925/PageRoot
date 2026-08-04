@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   mkdir,
@@ -8,8 +9,13 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 
+export const DEVELOPER_PREVIEW_PRODUCT_NAME = "PageRoot Developer Preview";
+export const DEVELOPER_PREVIEW_APP_ID_SUFFIX = ".developer-preview";
 export const DEVELOPER_PREVIEW_ARTIFACT_PATTERN =
-  "PageRoot-${version}-developer-preview-${arch}.${ext}";
+  "PageRoot-Developer-Preview-${version}-${arch}.${ext}";
+
+const STABLE_VERSION_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u;
+const DEVELOPER_VERSION_MARKER = "999";
 
 const SENSITIVE_BUILD_ENVIRONMENT = new Set([
   "APPLE_API_ISSUER",
@@ -34,6 +40,130 @@ function assertArchitecture(architecture) {
   assert.match(architecture ?? "", /^(?:arm64|x64)$/u, "architecture must be arm64 or x64");
 }
 
+function parseStableVersion(version, label = "stable version") {
+  const match = STABLE_VERSION_PATTERN.exec(version ?? "");
+  assert.ok(match, `${label} must contain exactly three numeric components`);
+  return {
+    major: Number(match[1]),
+    minor: Number(match[2]),
+    patch: Number(match[3]),
+  };
+}
+
+function compareStableVersions(left, right) {
+  return left.major - right.major
+    || left.minor - right.minor
+    || left.patch - right.patch;
+}
+
+function gitOutput(productRoot, arguments_) {
+  const result = spawnSync("git", arguments_, {
+    cwd: productRoot,
+    encoding: "utf8",
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(
+      `git ${arguments_.join(" ")} failed: ${(result.stderr || result.stdout).trim()}`,
+    );
+  }
+  return result.stdout.trim();
+}
+
+export function developerPreviewVersion({ stableVersion, buildSequence }) {
+  const parsed = parseStableVersion(stableVersion);
+  assert.equal(
+    Number.isSafeInteger(buildSequence) && buildSequence > 0,
+    true,
+    "developer preview build sequence must be a positive safe integer",
+  );
+  const nextPatch = parsed.patch + 1;
+  assert.equal(
+    Number.isSafeInteger(nextPatch),
+    true,
+    "developer preview next patch must be a safe integer",
+  );
+  return `${parsed.major}.${parsed.minor}.${nextPatch}${DEVELOPER_VERSION_MARKER}${buildSequence}`;
+}
+
+export function createDeveloperPreviewIdentity({
+  packageJson,
+  stableVersion,
+  stableTag = `v${stableVersion}`,
+  buildSequence,
+}) {
+  assert.equal(typeof packageJson?.version, "string", "source package version must be configured");
+  assert.equal(
+    typeof packageJson?.build?.appId,
+    "string",
+    "source build.appId must be configured",
+  );
+  parseStableVersion(stableVersion);
+  assert.equal(stableTag, `v${stableVersion}`, "stable tag must match the stable version");
+  const version = developerPreviewVersion({ stableVersion, buildSequence });
+  return Object.freeze({
+    kind: "developer-preview",
+    sourceVersion: packageJson.version,
+    stableVersion,
+    stableTag,
+    buildSequence,
+    version,
+    productName: DEVELOPER_PREVIEW_PRODUCT_NAME,
+    appId: `${packageJson.build.appId}${DEVELOPER_PREVIEW_APP_ID_SUFFIX}`,
+    artifactPattern: DEVELOPER_PREVIEW_ARTIFACT_PATTERN,
+  });
+}
+
+export function resolveDeveloperPreviewIdentity({ productRoot, packageJson }) {
+  assert.equal(path.isAbsolute(productRoot), true, "product root must be absolute");
+  const stableTags = gitOutput(productRoot, ["tag", "--merged", "HEAD", "--list", "v*"])
+    .split("\n")
+    .filter(Boolean)
+    .flatMap((tag) => {
+      const match = /^v(.+)$/u.exec(tag);
+      if (!match || !STABLE_VERSION_PATTERN.test(match[1])) return [];
+      return [{ tag, version: match[1], parsed: parseStableVersion(match[1]) }];
+    })
+    .sort((left, right) => compareStableVersions(left.parsed, right.parsed));
+  const stable = stableTags.at(-1);
+  assert.ok(
+    stable,
+    "developer preview packaging requires an official v<major>.<minor>.<patch> tag in HEAD history",
+  );
+  const buildSequence = Number(gitOutput(productRoot, [
+    "rev-list",
+    "--count",
+    "--first-parent",
+    `${stable.tag}..HEAD`,
+  ]));
+  assert.equal(
+    Number.isSafeInteger(buildSequence) && buildSequence > 0,
+    true,
+    "developer preview packaging requires at least one committed change after the latest official tag",
+  );
+  return createDeveloperPreviewIdentity({
+    packageJson,
+    stableVersion: stable.version,
+    stableTag: stable.tag,
+    buildSequence,
+  });
+}
+
+export function developerPreviewPackageJson(packageJson, identity) {
+  assert.equal(identity?.kind, "developer-preview", "developer preview identity is required");
+  return {
+    ...packageJson,
+    version: identity.version,
+    productName: identity.productName,
+    build: {
+      ...packageJson.build,
+      appId: identity.appId,
+      productName: identity.productName,
+      artifactName: identity.artifactPattern,
+    },
+  };
+}
+
 export function developerPreviewRoot(productRoot) {
   return path.resolve(productRoot, "output", "developer-preview");
 }
@@ -53,9 +183,11 @@ export function developerPreviewArtifactName({ version, architecture }) {
 
 export function developerPreviewBuilderArguments({
   architecture,
+  identity,
   releaseDirectory,
 }) {
   assertArchitecture(architecture);
+  assert.equal(identity?.kind, "developer-preview", "developer preview identity is required");
   assert.equal(
     path.isAbsolute(releaseDirectory),
     true,
@@ -71,8 +203,15 @@ export function developerPreviewBuilderArguments({
     "--config.mac.identity=-",
     "--config.mac.notarize=false",
     "--config.mac.hardenedRuntime=false",
+    `--config.appId=${identity.appId}`,
+    `--config.productName=${identity.productName}`,
+    `--config.extraMetadata.productName=${identity.productName}`,
+    `--config.extraMetadata.version=${identity.version}`,
+    `--config.buildVersion=${identity.version}`,
+    `--config.mac.bundleVersion=${identity.version}`,
+    `--config.mac.bundleShortVersion=${identity.version}`,
     `--config.directories.output=${releaseDirectory}`,
-    `--config.artifactName=${DEVELOPER_PREVIEW_ARTIFACT_PATTERN}`,
+    `--config.artifactName=${identity.artifactPattern}`,
   ];
 }
 
@@ -90,13 +229,14 @@ export function developerPreviewEnvironment(environment = process.env) {
 export async function writeDeveloperPreviewAttestation({
   productRoot,
   artifact,
+  identity,
   repository,
-  version,
   architecture,
   results,
   createdAt = new Date(),
 }) {
   assertArchitecture(architecture);
+  assert.equal(identity?.kind, "developer-preview", "developer preview identity is required");
   assert.match(repository?.head ?? "", /^[a-f0-9]{40}$/u, "developer preview commit is invalid");
   assert.match(repository?.tree ?? "", /^[a-f0-9]{40}$/u, "developer preview tree is invalid");
   assert.equal(repository?.dirty, false, "developer preview source must be clean");
@@ -118,13 +258,27 @@ export async function writeDeveloperPreviewAttestation({
     stat(resolvedDmgPath),
   ]);
   assert.ok(dmgInfo.isFile(), "developer preview DMG must be a file");
+  assert.equal(
+    path.basename(resolvedDmgPath),
+    developerPreviewArtifactName({
+      version: identity.version,
+      architecture,
+    }),
+    "developer preview DMG name does not match its identity",
+  );
 
   const attestation = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     kind: "developer-preview",
     releaseEligible: false,
     notarized: false,
-    version,
+    sourceVersion: identity.sourceVersion,
+    stableVersion: identity.stableVersion,
+    stableTag: identity.stableTag,
+    buildSequence: identity.buildSequence,
+    version: identity.version,
+    productName: identity.productName,
+    bundleIdentifier: identity.appId,
     architecture,
     commitSha: repository.head,
     treeSha: repository.tree,

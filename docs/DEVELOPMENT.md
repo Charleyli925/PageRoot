@@ -54,7 +54,7 @@ boundary.
 | `npm run gate:task` | Static checks plus impacted Node/browser/Electron coverage |
 | `npm run gate:main:auto` | Internal post-merge Node/browser smoke after exact-tree PR provenance verification |
 | `npm run gate:release:auto` | Complete source gate on a clean commit |
-| `npm run package:developer` | Optional arm64 developer preview requested explicitly: ad-hoc DMG, packaged-content verification and one isolated startup; no notarization or publication |
+| `npm run package:developer` | Optional arm64 developer preview requested explicitly: distinct app/Bundle identity, stable-tag-derived test version, ad-hoc DMG, packaged-content verification and one isolated startup; no notarization or publication |
 | `npm run package:developer:x64` | The same optional developer preview for Intel Macs |
 | `npm run gate:candidate-app:auto` | Guarded internal formal-candidate preflight: assemble one ad-hoc App, verify contents, then run the complete packaged-runtime oracle before signing |
 | `npm run gate:artifact-only:auto` | Guarded internal installer lane; it refuses to run without CI's fresh matching tree/version decision |

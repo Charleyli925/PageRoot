@@ -34,6 +34,22 @@ npm run package:developer:x64
 
 产物位于 `output/developer-preview/`。GitHub artifact 保留 7 天。
 
+## 名称与版本规范
+
+开发者测试包同时通过应用名、安装包名和版本号表明身份：
+
+- 安装后的应用名固定为 `PageRoot Developer Preview`，Bundle ID 固定在正式版 ID 的 `.developer-preview` 子标识下，因此可以和正式版 `PageRoot` 并存。
+- DMG 固定命名为 `PageRoot-Developer-Preview-<测试版本>-<架构>.dmg`。
+- `developer-preview.json` 同时记录源码版本、最近正式 tag、测试序号、测试版本、应用名和 Bundle ID。
+
+测试版本由最近一个正式 `vA.B.C` tag 和该 tag 之后的 first-parent 提交序号 `N` 自动生成：补丁位使用“下一正式补丁号 + `999` + 序号”。例如正式版本为 `0.9.5` 时：
+
+- 第 1 个提交：`0.9.69991`
+- 第 2 个提交：`0.9.69992`
+- 产物示例：`PageRoot-Developer-Preview-0.9.69991-arm64.dmg`
+
+同一个提交重复构建始终得到同一个测试版本；新提交才会顺延。新的正式 tag 会重置基线。工作流会拒绝没有正式 tag、直接位于正式 tag 上或含未提交修改的测试构建，避免版本身份不确定。`package.json` 和正式发布产物仍保留正式版本与 `PageRoot` 名称，不会被测试包配置改写。
+
 ## 自动校验范围
 
 默认轻量流程只做以下工作：
@@ -41,7 +57,7 @@ npm run package:developer:x64
 1. 拒绝未提交的源代码，并把 commit SHA 与 Tree SHA 写入证明。
 2. 构建最新 Electron renderer。
 3. 只生成一个对应架构的 DMG，不生成 updater ZIP、blockmap 或发布元数据。
-4. 校验 `app.asar` 文件闭包、源文件、Bridge、Schema、法律资源、版本、架构、DMG 完整性和只读挂载内容。
+4. 校验 `app.asar` 文件闭包、源文件、Bridge、Schema、法律资源、测试应用名、测试版本、独立 Bundle ID、架构、DMG 完整性和只读挂载内容。
 5. 要求 ad-hoc 签名，不读取 Developer ID、Apple 公证或发布凭据。
 6. 使用隔离 userData 启动真实 `.app`，确认首个窗口、版本、Bridge、Workbench 就绪状态和正常退出。
 7. 写入 `developer-preview.json`，包括 DMG SHA-256，并固定：
@@ -55,7 +71,7 @@ npm run package:developer:x64
 
 下载后，开发者只需做一次短验证：
 
-1. 对照 `developer-preview.json` 确认版本、架构、commit 与 DMG SHA-256。
+1. 对照 `developer-preview.json` 确认测试版本、正式基线、测试序号、架构、commit 与 DMG SHA-256。
 2. 安装并打开应用。因为包使用 ad-hoc 签名且未公证，macOS 可能要求在 Finder 中按住 Control 点击应用并选择“打开”。
 3. 使用真实文档的副本打开应用，确认本次最关键的一到两个能力能正常运行。
 4. 记录通过或明确的失败现象。

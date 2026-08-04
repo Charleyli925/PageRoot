@@ -33,11 +33,16 @@ export async function expectedBuildInfo({
   productRoot = defaultProductRoot,
   architecture,
   requireClean = true,
+  version,
 } = {}) {
   if (!/^(?:arm64|x64)$/u.test(architecture || "")) {
     throw new Error("architecture must be arm64 or x64");
   }
   const packageJson = JSON.parse(await readFile(path.join(productRoot, "package.json"), "utf8"));
+  const effectiveVersion = version ?? packageJson.version;
+  if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/u.test(effectiveVersion || "")) {
+    throw new Error("build version must be a semantic version");
+  }
   const repository = readRepositoryIdentity(productRoot);
   if (requireClean && repository.dirty) {
     throw new Error(
@@ -48,7 +53,7 @@ export async function expectedBuildInfo({
   return Object.freeze({
     schemaVersion: 1,
     name: packageJson.name,
-    version: packageJson.version,
+    version: effectiveVersion,
     architecture,
     sourceRepository: "https://github.com/Charleyli925/PageRoot",
     commitSha: repository.commitSha,
@@ -59,8 +64,14 @@ export async function expectedBuildInfo({
 export async function writeBuildInfo({
   productRoot = defaultProductRoot,
   architecture,
+  version,
 } = {}) {
-  const expected = await expectedBuildInfo({ productRoot, architecture, requireClean: true });
+  const expected = await expectedBuildInfo({
+    productRoot,
+    architecture,
+    requireClean: true,
+    version,
+  });
   const buildInfo = Object.freeze({
     ...expected,
     builtAt: new Date().toISOString(),

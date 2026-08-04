@@ -22,6 +22,14 @@ depend on its result or reuse its DMG. See
 `docs/DEVELOPER_PREVIEW_PLAYBOOK.md` for the exact trigger, installation and
 failure boundaries.
 
+Developer previews use a separate package identity: `PageRoot Developer
+Preview`, a `.developer-preview` Bundle ID suffix, and a DMG name that includes
+`Developer-Preview`. Their effective version is derived from the latest stable
+tag and committed first-parent order; after `v0.9.5`, the first two preview
+versions are `0.9.69991` and `0.9.69992`. These overrides apply only while
+building the preview and never change the source package version or any formal
+candidate metadata.
+
 ## Prepare the source
 
 1. Update `package.json` and the package-lock root to the same semantic version.
