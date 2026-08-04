@@ -325,12 +325,14 @@ test("workbench transitions fail closed when a native DOM edit cannot commit or 
   );
   assert.match(
     closeFlow,
-    /const frozen = editorRef\.current\?\.freezeNow\(\);[\s\S]*?if \(!frozen\)[\s\S]*?return \{ ready: false[\s\S]*?if \(!frozen\.ok\)[\s\S]*?return \{[\s\S]*?enqueueAutosave\(frozen\.html/u,
+    /const frozen = editorRef\.current\?\.freezeNow\(\);[\s\S]*?if \(!frozen\)[\s\S]*?inAppBlock\([\s\S]*?if \(!frozen\.ok\)[\s\S]*?inAppBlock\([\s\S]*?enqueueAutosave\(frozen\.html/u,
   );
   assert.match(
     closeFlow,
-    /documentSessionRef\.current\.lastPersistedRevision !== cutoffRevision[\s\S]*?documentSessionRef\.current\.sourceSha256 !== frozenSourceSha256/u,
+    /reconcilePersistedBoundary\(\{[\s\S]*?hashHtml: browserSha256,[\s\S]*?readSource: \(\) => bridgeClient\.source/u,
   );
+  assert.doesNotMatch(closeFlow, /lastPersistedRevision !== cutoffRevision/u);
+  assert.doesNotMatch(closeFlow, /关闭前冻结的 HTML 与已写回源文件不一致/u);
 
   const projectSwitch = workbench.slice(
     workbench.indexOf("const prepareProjectSwitch"),

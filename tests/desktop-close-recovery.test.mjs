@@ -3,7 +3,9 @@ import test from "node:test";
 import {
   canCloseDuringHydration,
   closeAbortPayload,
+  normalizeCloseResult,
   runGuardedFinalExit,
+  shouldPresentNativeCloseBlock,
   shouldRecoverEditorAfterCloseAbort,
   stopBridgeOrNotifyCloseAborted,
 } from "../desktop/close-recovery.mjs";
@@ -168,4 +170,40 @@ test("close-abort payloads reject missing or malformed request identities", () =
     requestId: "close-request-0002",
     reason: "已取消关闭",
   });
+});
+
+test("renderer-owned close blockers stay in the application instead of opening a native alert", () => {
+  const inAppResult = normalizeCloseResult({
+    requestId: "close-request-0003",
+    ready: false,
+    reason: "源文件正在自动复核。",
+    presentation: "in-app",
+  });
+  assert.deepEqual(inAppResult, {
+    requestId: "close-request-0003",
+    ready: false,
+    reason: "源文件正在自动复核。",
+    presentation: "in-app",
+  });
+  assert.equal(shouldPresentNativeCloseBlock(inAppResult), false);
+
+  const legacyOrTimeoutResult = normalizeCloseResult({
+    requestId: "close-request-0004",
+    ready: false,
+    reason: "Renderer 没有完成关闭确认。",
+  });
+  assert.equal(legacyOrTimeoutResult.presentation, "native");
+  assert.equal(shouldPresentNativeCloseBlock(legacyOrTimeoutResult), true);
+});
+
+test("close result normalization rejects unsupported presentation values", () => {
+  assert.throws(
+    () => normalizeCloseResult({
+      requestId: "close-request-0005",
+      ready: false,
+      reason: "blocked",
+      presentation: "toast",
+    }),
+    /关闭阻断出口无效/u,
+  );
 });

@@ -16,6 +16,26 @@ export type DocumentSessionSnapshot = {
   persistError: string;
 };
 
+export type PersistedBoundaryResult =
+  | {
+      ready: true;
+      repaired: boolean;
+      sourceSha256: string;
+      lastModifiedAt: string;
+    }
+  | {
+      ready: false;
+      code:
+        | "frozen-integrity-unavailable"
+        | "session-changed"
+        | "source-unavailable"
+        | "source-identity-changed"
+        | "source-integrity-failed"
+        | "source-diverged";
+      reason: string;
+      confirmed: boolean;
+    };
+
 export class DocumentSession<TWrite = unknown> {
   constructor(options?: {
     html?: string;
@@ -66,6 +86,15 @@ export class DocumentSession<TWrite = unknown> {
     promise: Promise<boolean> | null,
   ): Promise<boolean> | null;
   clearFlushPromise(promise: Promise<boolean>): boolean;
+  reconcilePersistedBoundary(value: {
+    frozenHtml: string;
+    reportedSourceSha256?: string | null;
+    cutoffRevision: number;
+    hashHtml: (html: string) => Promise<string>;
+    readSource: () => Promise<Record<string, unknown>>;
+    isCurrent: () => boolean;
+    acceptsSource: (source: Record<string, unknown>) => boolean;
+  }): Promise<PersistedBoundaryResult>;
   readonly html: string;
   readonly sourceSha256: string | null;
   readonly canvasGeneration: number;

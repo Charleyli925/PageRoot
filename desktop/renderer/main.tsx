@@ -20,7 +20,11 @@ type CloseAbortedRequest = {
 
 type CloseReadiness =
   | { ready: true }
-  | { ready: false; reason: string };
+  | {
+      ready: false;
+      reason: string;
+      presentation: "in-app" | "native";
+    };
 
 type PrepareCloseDetail = PrepareCloseRequest & {
   waitUntil: (readiness: Promise<CloseReadiness>) => void;
@@ -40,6 +44,7 @@ declare global {
       reportBlocked: (
         requestId: string,
         reason: string,
+        presentation?: "in-app" | "native",
       ) => Promise<{ accepted: boolean }>;
       onCloseAborted: (
         listener: (request: CloseAbortedRequest) => void,
@@ -111,6 +116,7 @@ window.htmlAIAppLifecycle?.onPrepareClose(async (request) => {
       await window.htmlAIAppLifecycle?.reportBlocked(
         request.requestId,
         blocked.reason || "仍有更改尚未安全写入。",
+        blocked.presentation,
       );
       return;
     }

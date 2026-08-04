@@ -108,7 +108,10 @@ import {
   ProjectRulesSession,
   type ProjectRulesSnapshot,
 } from "./application/project-rules-session.js";
-import { ProjectSession } from "./application/project-session.js";
+import {
+  ProjectSession,
+  type ProjectSessionSnapshot,
+} from "./application/project-session.js";
 import {
   RunSession,
   type RunSessionSnapshot,
@@ -4765,9 +4768,15 @@ export default function Workbench() {
 
       const prepare = async (): Promise<CloseReadiness> => {
         let imposedEditorFreeze = false;
+        let frozenHtml: string | null = null;
         let frozenSourceSha256: string | null = null;
         let ready = false;
         const closeLifecycle = closeLifecycleRef.current;
+        const inAppBlock = (reason: string): CloseReadiness => ({
+          ready: false,
+          reason,
+          presentation: "in-app",
+        });
         closeLifecycle.preparingRequestId = detail.requestId;
 
         try {
@@ -4788,7 +4797,7 @@ export default function Workbench() {
               ready = true;
               return { ready: true };
             }
-            return { ready: false, reason: "项目状态尚未读取完成，已取消关闭以避免覆盖未知编辑状态。" };
+            return inAppBlock("项目状态尚未读取完成，已取消关闭以避免覆盖未知编辑状态。");
           }
           if (projectLoadErrorRef.current) {
             if (
@@ -4796,7 +4805,7 @@ export default function Workbench() {
               || documentSessionRef.current.flushPromise
               || historyActionPromiseRef.current
             ) {
-              return { ready: false, reason: "项目读取失败且仍有待恢复的 HTML 修改，请先重试读取或导出副本。" };
+              return inAppBlock("项目读取失败且仍有待恢复的 HTML 修改，请先重试读取或导出副本。");
             }
             ready = true;
             return { ready: true };
@@ -4805,24 +4814,21 @@ export default function Workbench() {
             historyActionPromiseRef.current
             && !await historyActionPromiseRef.current
           ) {
-            return {
-              ready: false,
-              reason: "当前撤销或重做没有安全完成，已取消关闭。",
-            };
+            return inAppBlock("当前撤销或重做没有安全完成，已取消关闭。");
           }
 
           if (viewMode !== "history" && !projectLockedRef.current) {
             const frozen = editorRef.current?.freezeNow();
             if (!frozen) {
-              return { ready: false, reason: "编辑画布尚未就绪，已取消关闭以避免丢失文字草稿。" };
+              return inAppBlock("编辑画布尚未就绪，已取消关闭以避免丢失文字草稿。");
             }
             if (!frozen.ok) {
-              return {
-                ready: false,
-                reason: frozen.reason || "当前文字草稿无法安全提交，已取消关闭。",
-              };
+              return inAppBlock(
+                frozen.reason || "当前文字草稿无法安全提交，已取消关闭。",
+              );
             }
             imposedEditorFreeze = true;
+            frozenHtml = frozen.html;
             frozenSourceSha256 = frozen.sourceSha256;
             closeLifecycle.frozenRequestId = detail.requestId;
             if (
@@ -4838,22 +4844,78 @@ export default function Workbench() {
             deadlineAt: detail.deadlineAt - 250,
           });
           if (!drained.ok) {
-            return { ready: false, reason: drained.reason };
+            return inAppBlock(drained.reason);
           }
           if (
             imposedEditorFreeze
             && projectSessionRef.current.sourcePath
-            && (
-              documentSessionRef.current.lastPersistedRevision !== cutoffRevision
-              || !frozenSourceSha256
-              || documentSessionRef.current.sourceSha256 !== frozenSourceSha256
-            )
+            && frozenHtml !== null
           ) {
-            return { ready: false, reason: "关闭前冻结的 HTML 与已写回源文件不一致。" };
+            const boundaryIdentity: ProjectSessionSnapshot =
+              projectSessionRef.current.snapshot;
+            const identityIsCurrent = () => {
+              const current = projectSessionRef.current.snapshot;
+              return current.epoch === boundaryIdentity.epoch
+                && sameLocalSourcePath(
+                  current.sourcePath,
+                  boundaryIdentity.sourcePath,
+                )
+                && current.projectId === boundaryIdentity.projectId
+                && current.documentId === boundaryIdentity.documentId
+                && current.registered === boundaryIdentity.registered;
+            };
+            const sourceResult = await documentSessionRef.current
+              .reconcilePersistedBoundary({
+                frozenHtml,
+                reportedSourceSha256: frozenSourceSha256,
+                cutoffRevision,
+                hashHtml: browserSha256,
+                readSource: () => bridgeClient.source(
+                  boundaryIdentity.sourcePath || "",
+                  { timeoutMs: 2_500 },
+                ),
+                isCurrent: identityIsCurrent,
+                acceptsSource: (source) => Boolean(
+                  sameLocalSourcePath(
+                    String(source.sourcePath || ""),
+                    boundaryIdentity.sourcePath,
+                  )
+                  && source.registered === boundaryIdentity.registered
+                  && (
+                    !boundaryIdentity.registered
+                      ? !String(source.projectId || "")
+                        && !String(source.documentId || "")
+                      : (
+                        String(source.projectId || "") === boundaryIdentity.projectId
+                        && String(source.documentId || "") === boundaryIdentity.documentId
+                      )
+                  )
+                ),
+              });
+            if (!sourceResult.ready) {
+              if (sourceResult.code === "source-integrity-failed") {
+                setWorkspaceIssue({
+                  title: "源文件需要重新核对",
+                  message: sourceResult.reason,
+                });
+              } else if (!sourceResult.confirmed) {
+                setToast({
+                  title: "当前页面仍保持开启",
+                  message: sourceResult.reason,
+                  tone: "info",
+                  disposition: "background-result",
+                  dedupeKey: "close-source-reconciliation",
+                });
+              }
+              return inAppBlock(sourceResult.reason);
+            }
+            if (sourceResult.lastModifiedAt) {
+              setLastModifiedAt(sourceResult.lastModifiedAt);
+            }
           }
 
           if (closeLifecycle.abortedRequestIds.has(detail.requestId)) {
-            return { ready: false, reason: "桌面外壳已取消本次关闭。" };
+            return inAppBlock("桌面外壳已取消本次关闭。");
           }
           ready = true;
           return { ready: true };
@@ -4861,6 +4923,7 @@ export default function Workbench() {
           return {
             ready: false,
             reason: cause instanceof Error ? cause.message : "关闭前安全写入检查失败。",
+            presentation: "native",
           };
         } finally {
           if (closeLifecycle.preparingRequestId === detail.requestId) {

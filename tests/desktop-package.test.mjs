@@ -318,6 +318,12 @@ test("desktop package carries the v3 patch engine, candidate assessment and acti
   assert.match(mainProcess, /requestRendererClose/);
   assert.match(mainProcess, /if \(!rendererHasLoaded\)/);
   assert.match(mainProcess, /coordinateApplicationExit/);
+  assert.match(mainProcess, /shouldPresentNativeCloseBlock/);
+  assert.match(
+    mainProcess,
+    /if \(!nativeBlock\)[\s\S]*?mainWindow\.show\(\);[\s\S]*?mainWindow\.focus\(\);[\s\S]*?return false;/,
+  );
+  assert.doesNotMatch(mainProcess, /还有内容没有保存/);
   assert.match(mainProcess, /event\.preventDefault\(\)/);
   assert.match(mainProcess, /stopBridge:\s*stopBridgeGracefully/);
   assert.match(mainProcess, /stopBridgeProcessGracefully/);
@@ -404,6 +410,7 @@ test("desktop package carries the v3 patch engine, candidate assessment and acti
   assert.match(preload, /onPrepareClose/);
   assert.match(preload, /reportReady/);
   assert.match(preload, /reportBlocked/);
+  assert.match(preload, /presentation = "native"/);
   assert.match(preload, /onCloseAborted/);
   assert.match(preload, /onWorkspaceUnavailable/);
   assert.match(
@@ -428,6 +435,7 @@ test("desktop package carries the v3 patch engine, candidate assessment and acti
   assert.match(rendererMain, /waitUntil/);
   assert.match(rendererMain, /readinessChecks\.length === 0/);
   assert.match(rendererMain, /reportBlocked/);
+  assert.match(rendererMain, /blocked\.presentation/);
   assert.match(rendererMain, /reportReady/);
   assert.match(rendererHtml, /Content-Security-Policy/);
   assert.match(rendererHtml, /default-src 'none'/);

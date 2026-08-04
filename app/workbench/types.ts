@@ -362,7 +362,11 @@ export type BackgroundProjectResult = {
 };
 export type CloseReadiness =
   | { ready: true }
-  | { ready: false; reason: string };
+  | {
+      ready: false;
+      reason: string;
+      presentation: "in-app" | "native";
+    };
 export type PrepareCloseDetail = {
   requestId: string;
   reason: string;

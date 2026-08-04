@@ -249,10 +249,11 @@ const appLifecycleApi = Object.freeze({
     requestId,
     ready: true,
   }),
-  reportBlocked: (requestId, reason) => ipcRenderer.invoke(appChannels.closeResult, {
+  reportBlocked: (requestId, reason, presentation = "native") => ipcRenderer.invoke(appChannels.closeResult, {
     requestId,
     ready: false,
     reason,
+    presentation,
   }),
   onWorkspaceUnavailable: (listener) => {
     if (typeof listener !== "function") {

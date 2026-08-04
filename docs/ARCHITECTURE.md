@@ -162,6 +162,15 @@ the only production text and source-mutation route.
 
 Direct edits form ordered revisions and are written through a single queue. Every write checks the expected source Hash, uses a same-directory temporary file and atomic replacement, then rereads the result. External modification causes a fail-closed conflict.
 
+At close, `DocumentSession` independently hashes the frozen renderer HTML and
+accepts any acknowledged persisted revision at or beyond the close cutoff. A
+stale Canvas Hash or renderer projection is repaired silently. Only when local
+authority cannot prove the exact bytes does the renderer perform a bounded
+authoritative source read; identical content repairs the projection, confirmed
+divergence enters the source-conflict owner, and an invalid content/Hash pair
+enters the persistent workspace recovery surface without overwriting either
+copy.
+
 A durable command for an already registered project carries one captured
 `projectId + documentId + sourcePath` context. The Bridge resolves the registry
 graph by both opaque IDs first and treats the path only as a scope assertion;
@@ -251,6 +260,12 @@ verification is a no-op: it neither POSTs the draft nor advances its revision.
 The runtime capability manifest selects exactly one close coordinator:
 Electron's acknowledged handshake for the desktop app, or `beforeunload` for a
 browser runtime. They never compete over the same close.
+
+The renderer close result also classifies who owns presentation. Known
+recoverable blockers remain in their Canvas/banner/panel and cause Electron to
+return focus without a duplicate native dialog. Missing handlers, renderer
+timeouts and unexpected close-coordination faults default to the native
+fail-closed surface.
 
 The main-process application-update controller is the sole owner of stable
 channel checks, the startup-plus-four-hour schedule, coalesced manual checks,

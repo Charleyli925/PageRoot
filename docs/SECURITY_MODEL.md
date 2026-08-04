@@ -137,6 +137,14 @@ path, then derives the `file:` URL itself. Executable negative tests prove
 malformed, non-HTML, unknown, unsafe and unauthorized requests cannot reach
 the shell launch adapter.
 
+Close reconciliation never writes from a preview or from stale metadata. It
+hashes the frozen authoritative renderer bytes, fences the current project
+identity, and uses a bounded read-only `/source` query only when acknowledged
+local state is insufficient. The response must match the captured registered
+identity and its declared Hash must match independently hashed content before
+it can repair the renderer projection. Any real byte divergence remains
+fail-closed and preserves both the in-memory editor copy and the disk copy.
+
 The telemetry preload method is fire-and-forget and does not expose a generic
 network API. The main process verifies the sender frame and independently
 sanitizes the event through a closed schema. Persistent telemetry state is

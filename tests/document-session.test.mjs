@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 
 import { DocumentSession } from "../app/application/document-session.js";
+
+function sha256(value) {
+  return `sha256:${createHash("sha256").update(value).digest("hex")}`;
+}
 
 test("document session owns source bytes, revisions and pending write", () => {
   const session = new DocumentSession({
@@ -83,4 +88,148 @@ test("document session clears only the matching flush promise", async () => {
   assert.equal(session.flushPromise, first);
   assert.equal(session.clearFlushPromise(first), true);
   assert.equal(session.flushPromise, null);
+});
+
+test("a stale canvas hash does not block a boundary whose exact bytes were safely persisted", async () => {
+  const html = "<main>saved</main>";
+  const sourceSha256 = sha256(html);
+  const session = new DocumentSession({ html, sourceSha256 });
+  session.update({
+    editRevision: 4,
+    lastPersistedRevision: 6,
+  });
+  let sourceReads = 0;
+
+  const result = await session.reconcilePersistedBoundary({
+    frozenHtml: html,
+    reportedSourceSha256: sha256("<main>stale canvas metadata</main>"),
+    cutoffRevision: 4,
+    hashHtml: async (value) => sha256(value),
+    readSource: async () => {
+      sourceReads += 1;
+      throw new Error("the local acknowledgement is already sufficient");
+    },
+    isCurrent: () => true,
+    acceptsSource: () => true,
+  });
+
+  assert.deepEqual(result, {
+    ready: true,
+    repaired: true,
+    sourceSha256,
+    lastModifiedAt: "",
+  });
+  assert.equal(sourceReads, 0);
+});
+
+test("a stale persisted projection is silently repaired from authoritative source bytes", async () => {
+  const html = "<main>saved</main>";
+  const sourceSha256 = sha256(html);
+  const session = new DocumentSession({
+    html,
+    sourceSha256: sha256("<main>old</main>"),
+  });
+  session.update({ editRevision: 3, lastPersistedRevision: 2 });
+
+  const result = await session.reconcilePersistedBoundary({
+    frozenHtml: html,
+    cutoffRevision: 3,
+    hashHtml: async (value) => sha256(value),
+    readSource: async () => ({
+      content: html,
+      sha256: sourceSha256,
+      lastModifiedAt: "2026-08-04T10:00:00.000Z",
+    }),
+    isCurrent: () => true,
+    acceptsSource: () => true,
+  });
+
+  assert.deepEqual(result, {
+    ready: true,
+    repaired: true,
+    sourceSha256,
+    lastModifiedAt: "2026-08-04T10:00:00.000Z",
+  });
+  assert.equal(session.sourceSha256, sourceSha256);
+  assert.equal(session.lastPersistedRevision, 3);
+  assert.equal(session.persistState, "idle");
+});
+
+test("only confirmed authoritative divergence becomes a source conflict", async () => {
+  const html = "<main>local</main>";
+  const externalHtml = "<main>external</main>";
+  const session = new DocumentSession({
+    html,
+    sourceSha256: sha256("<main>old</main>"),
+  });
+  session.update({ editRevision: 2, lastPersistedRevision: 1 });
+
+  const result = await session.reconcilePersistedBoundary({
+    frozenHtml: html,
+    cutoffRevision: 2,
+    hashHtml: async (value) => sha256(value),
+    readSource: async () => ({
+      content: externalHtml,
+      sha256: sha256(externalHtml),
+    }),
+    isCurrent: () => true,
+    acceptsSource: () => true,
+  });
+
+  assert.equal(result.ready, false);
+  assert.equal(result.code, "source-diverged");
+  assert.equal(result.confirmed, true);
+  assert.equal(session.persistState, "conflict");
+  assert.match(session.persistError, /其他操作修改/u);
+});
+
+test("a transient authoritative read failure stays recoverable and does not invent corruption", async () => {
+  const html = "<main>local</main>";
+  const session = new DocumentSession({
+    html,
+    sourceSha256: sha256("<main>old</main>"),
+  });
+  session.update({ editRevision: 2, lastPersistedRevision: 1 });
+
+  const result = await session.reconcilePersistedBoundary({
+    frozenHtml: html,
+    cutoffRevision: 2,
+    hashHtml: async (value) => sha256(value),
+    readSource: async () => {
+      throw new Error("temporarily unavailable");
+    },
+    isCurrent: () => true,
+    acceptsSource: () => true,
+  });
+
+  assert.equal(result.ready, false);
+  assert.equal(result.code, "source-unavailable");
+  assert.equal(result.confirmed, false);
+  assert.equal(session.persistState, "idle");
+});
+
+test("invalid authoritative content integrity is confirmed before recovery is escalated", async () => {
+  const html = "<main>local</main>";
+  const session = new DocumentSession({
+    html,
+    sourceSha256: sha256("<main>old</main>"),
+  });
+  session.update({ editRevision: 2, lastPersistedRevision: 1 });
+
+  const result = await session.reconcilePersistedBoundary({
+    frozenHtml: html,
+    cutoffRevision: 2,
+    hashHtml: async (value) => sha256(value),
+    readSource: async () => ({
+      content: "<main>damaged response</main>",
+      sha256: sha256("<main>different bytes</main>"),
+    }),
+    isCurrent: () => true,
+    acceptsSource: () => true,
+  });
+
+  assert.equal(result.ready, false);
+  assert.equal(result.code, "source-integrity-failed");
+  assert.equal(result.confirmed, true);
+  assert.equal(session.persistState, "idle");
 });

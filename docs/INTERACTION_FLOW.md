@@ -818,6 +818,8 @@ A 项目 processing 时切换 B 项目：
 - 草稿会执行一次最终校验；若内容、删除记录和 edit event 的权威指纹未变化，该校验是 no-op，不发起 POST，也不增加 revision。
 - 草稿 revision 冲突或 POST 结果未知时自动读取权威草稿、重放未确认 operation 并在有新前提后有限重试。只有无法确定性合并的真实语义冲突才阻止离开。
 - 若 `editRevision > lastPersistedRevision` 却意外缺少 queued write，关闭或切换边界必须从当前内存 HTML、revision 与待审计事件重建恢复写入，不能永久停在“未保存”。
+- 标题栏显示“已安全保存”后，关闭复核以冻结 HTML 的真实字节 Hash 和 `lastPersistedRevision >= cutoffRevision` 为准，不要求 Canvas 临时 Hash 或 revision 投影逐字相等。内部投影落后时静默修正；只有本地证据不足时才限时回读源文件，字节一致就继续关闭。权威回读确认外部内容不同或完整性失败时，返回应用内持久恢复入口；一次瞬时回读失败只保持页面并在下次关闭继续核对。
+- Renderer 已知的关闭阻断由对应 Canvas、横幅或流程面板解释，Electron 取消本次关闭并返回原页面，不再重复弹 macOS 警告框。只有 Renderer 未注册处理器、确认超时或关闭协调异常时，桌面外壳才使用原生提示。
 - 旧项目的登记或 autosave 失败回调只能写入旧项目恢复记录，不能占用当前项目的 pending write。
 - 源 HTML 写入失败与评论记录失败共用一个顶部持久恢复横幅：源文件问题优先，否则由评论问题提供“重试记录评论”。右侧评论栏和 Toast 不再重复同一错误。
 - active run、冲突和事务状态已经持久化。

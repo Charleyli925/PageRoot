@@ -32,6 +32,13 @@ Notable user-visible changes are documented here. This project follows Semantic 
   canvases now acknowledge the same generation, safe-save status cannot reuse
   stale content, and the “+” project picker automatically repairs one clean
   projection mismatch instead of silently doing nothing.
+- Reconciled safe close against the exact frozen HTML bytes so stale Canvas
+  Hash or revision projections no longer contradict a “Safely saved” status.
+  Matching authoritative bytes now repair the projection silently; confirmed
+  external divergence or invalid source integrity stays fail-closed with an
+  in-app recovery path. Renderer-owned blockers return to that path without a
+  duplicate macOS alert, while missing, timed-out or faulty close coordination
+  still uses the native fallback.
 - Replaced subtree-exact AI acceptance with a simpler candidate check: complete
   visible HTML and an unchanged executable surface remain hard requirements,
   while coarse page continuity now routes uncertain results into mandatory

@@ -183,10 +183,11 @@ export function createBridgeClient({
       { sourcePath },
       "本地项目记录不可用。",
     ),
-    source: (sourcePath) => query(
+    source: (sourcePath, { timeoutMs = DEFAULT_READ_TIMEOUT_MS } = {}) => query(
       "/source",
       { sourcePath },
       "无法读取当前源 HTML。",
+      timeoutMs,
     ),
     conflictCandidate: (sourcePath) => query(
       "/conflict-candidate",
