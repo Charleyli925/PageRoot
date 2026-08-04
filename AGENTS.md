@@ -30,6 +30,13 @@ For command behavior, authorization levels, worktrees and reporting format, read
 - Complete clean source candidate: `npm run gate:release:auto`
 - Verified arm64 installer candidate: `npm run release:mac`
 
+Every successful installer handoff, formal or developer preview, must include
+an exact package-content report in the user reply: artifact identity and hash,
+the source range, every associated Pull Request with its current GitHub status
+and a one-sentence change summary, plus any direct commits with no PR. Generate
+or refresh `package-delivery-report.md` after the package checks; if live PR
+metadata cannot be obtained, the installer handoff is incomplete.
+
 The release and artifact gates require a clean committed tree. Any source change invalidates earlier release evidence. Draft Pull Requests run impact-selected feedback; marking the final tree ready runs the complete source gate once. `main` verifies its exact-tree attestation and runs only a fast smoke. The manual `Release Candidate` workflow may use the internal `gate:artifact-only:auto` lane only when CI has authenticated a fresh successful PR gate for the identical Git tree and version. The separate `Release` workflow then verifies and publishes those exact candidate bytes and creates the immutable tag; it never rebuilds during publication. Release only from reviewed `main` using `docs/RELEASING.md`.
 
 ## Product invariants

@@ -8,6 +8,10 @@ Notable user-visible changes are documented here. This project follows Semantic 
   identity and deterministic versions derived from the latest formal tag; for
   example, the first two committed previews after `0.9.5` are `0.9.69991` and
   `0.9.69992`, with the same identity carried by the DMG and attestation.
+- Require every formal or developer installer handoff to include an exact
+  package-content report with artifact Hash, source range, all associated Pull
+  Requests, their live status and one-line purpose, plus direct commits without
+  a Pull Request.
 
 ## [0.9.5] - 2026-07-31
 

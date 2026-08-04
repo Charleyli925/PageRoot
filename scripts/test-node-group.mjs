@@ -23,6 +23,7 @@ const CONTRACT_TESTS = new Set([
 const PACKAGE_TESTS = new Set([
   "desktop-package.test.mjs",
   "developer-preview-package.test.mjs",
+  "package-delivery-report.test.mjs",
   "packaged-artifact-gate.test.mjs",
   "release-candidate-provenance.test.mjs",
   "release-app-stage.test.mjs",

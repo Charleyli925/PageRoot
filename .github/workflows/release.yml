@@ -12,6 +12,7 @@ on:
 permissions:
   actions: read
   contents: write
+  pull-requests: read
 
 concurrency:
   group: release-publish-${{ inputs.version }}
@@ -81,12 +82,26 @@ jobs:
           --directory output/downloaded-release-candidate
           --run-id "$CANDIDATE_RUN_ID"
           --run-attempt "$CANDIDATE_RUN_ATTEMPT"
+      - name: Refresh exact package contents and current Pull Request states
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: >-
+          node scripts/package-delivery-report.mjs
+          --kind formal
+          --artifact "output/downloaded-release-candidate/PageRoot-${VERSION}-arm64.dmg"
+          --version "$VERSION"
+          --architecture arm64
+          --repository "$GITHUB_REPOSITORY"
+          --output output/package-delivery
       - name: Upload pre-publication evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: PageRoot-release-publication-evidence-${{ github.run_id }}-${{ github.run_attempt }}
-          path: output/ci-evidence
+          path: |
+            output/ci-evidence
+            output/package-delivery
           if-no-files-found: warn
           retention-days: 30
       - name: Create or safely resume the immutable annotated tag

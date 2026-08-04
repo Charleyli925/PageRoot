@@ -382,11 +382,13 @@ test("release commands use one automated artifact lane with full tests and packa
     "package-build",
     "packaged-runtime",
     "packaged-verify",
+    "package-delivery-report",
   ]);
   assert.deepEqual(impactMap.lanes["artifact-only"].fullSuites, [
     "package-build",
     "packaged-runtime",
     "packaged-verify",
+    "package-delivery-report",
   ]);
   assert.match(gateRunner, /output\/test-runs/);
   assert.match(gateRunner, /changeSetSha256/);

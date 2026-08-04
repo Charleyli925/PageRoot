@@ -143,6 +143,15 @@ and metrics.
 明“不真实打包”，只能修改或检查流程定义。完整操作边界见
 `docs/DEVELOPER_PREVIEW_PLAYBOOK.md`。
 
+正式安装包或开发者测试包的门禁通过后，还必须运行最后一个
+package-delivery report 步骤。它把 DMG Hash 与精确 Commit/Tree、最近正式
+tag 以来的提交和文件变化绑定，并从 GitHub 实时解析每个关联 PR 的开放、
+草稿、合并和检查状态；未关联 PR 的直接提交不能隐藏。代理交付安装包时必须
+把 `package-delivery-report.md` 的信息写进当次回复，逐个 PR 给出链接、当前
+状态和一句话修改摘要。若回复前经过较长时间，应对同一 DMG 重新运行报告命
+令以刷新可变的 PR 状态；无法取得实时 GitHub 元数据时，不得把安装包交付称
+为完成。
+
 ## Documentation impact
 
 Behavior and its documentation form one change. Use this routing table:
@@ -174,6 +183,16 @@ Documentation:
 Pull Request:
 Release:
 Worktree:
+```
+
+If the task generated or published an installer, append this mandatory block:
+
+```text
+Package: file, version, architecture, size and SHA-256
+Contents: stable-tag-to-commit range, commit count and changed-file count
+Pull Requests: every PR link, current state/readiness/check status, and one-sentence summary
+Direct commits: every included commit not associated with a PR, or explicitly “none”
+Trust: signing/notarization/release eligibility
 ```
 
 Never say "done" while required checks are pending, the worktree contains unexplained changes, or an authorized publish/merge step remains incomplete.

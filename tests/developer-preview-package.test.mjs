@@ -240,6 +240,7 @@ test("developer preview attestation is explicitly non-release and binds exact by
         { id: "developer-package-build", status: "passed" },
         { id: "developer-packaged-verify", status: "passed" },
         { id: "developer-packaged-startup", status: "passed" },
+        { id: "developer-package-report", status: "passed" },
       ],
       createdAt: new Date("2026-07-29T00:00:00.000Z"),
     });
@@ -269,6 +270,7 @@ test("developer preview attestation is explicitly non-release and binds exact by
       "developer-package-build",
       "developer-packaged-verify",
       "developer-packaged-startup",
+      "developer-package-report",
     ]);
     assert.deepEqual(
       JSON.parse(await readFile(record.destination, "utf8")),
@@ -299,6 +301,7 @@ test("developer preview stays optional, manual-only and independent from release
       "developer-package-build",
       "developer-packaged-verify",
       "developer-packaged-startup",
+      "developer-package-report",
     ],
   );
   for (const lane of ["release", "artifact", "artifact-only"]) {

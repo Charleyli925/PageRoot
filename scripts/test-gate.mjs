@@ -188,6 +188,26 @@ function commandForSuite(suiteId, context) {
   if (suiteId === "developer-packaged-startup") {
     return packageCommand("test:packaged-startup:prepared");
   }
+  if (suiteId === "developer-package-report") {
+    return {
+      command: process.execPath,
+      args: [
+        path.join(productRoot, "scripts/package-delivery-report.mjs"),
+        "--kind",
+        "developer-preview",
+        "--artifact",
+        context.artifact.dmgPath,
+        "--version",
+        context.artifact.version,
+        "--architecture",
+        context.options.arch,
+        "--base-tag",
+        context.developerPreviewIdentity.stableTag,
+        "--output",
+        path.join(productRoot, "output/developer-preview"),
+      ],
+    };
+  }
   if (suiteId === "candidate-app-runtime") {
     return packageCommand("test:packaged-runtime:prepared");
   }
@@ -218,6 +238,24 @@ function commandForSuite(suiteId, context) {
         context.options.arch,
         "--profile",
         "candidate-app",
+      ],
+    };
+  }
+  if (suiteId === "package-delivery-report") {
+    return {
+      command: process.execPath,
+      args: [
+        path.join(productRoot, "scripts/package-delivery-report.mjs"),
+        "--kind",
+        "formal",
+        "--artifact",
+        context.artifact.dmgPath,
+        "--version",
+        context.artifact.version,
+        "--architecture",
+        context.options.arch,
+        "--output",
+        path.join(productRoot, "output/package-delivery"),
       ],
     };
   }
@@ -315,7 +353,12 @@ async function main() {
   const runId = `${startedAt.toISOString().replace(/[:.]/gu, "-")}-${options.lane}`;
   const reportDirectory = path.join(productRoot, "output/test-runs", runId);
   await mkdir(reportDirectory, { recursive: true });
-  const context = { options, plan, artifact };
+  const context = {
+    options,
+    plan,
+    artifact,
+    developerPreviewIdentity,
+  };
   const selectedSuites = plan.suites.map((suite) => {
     const command = commandForSuite(suite.id, context);
     return { ...suite, command: shellDisplay(command.command, command.args) };
@@ -426,6 +469,15 @@ async function main() {
     passedCount: results.filter((result) => result.status === "passed").length,
     failedSuite: failed?.id || null,
     developerPreviewAttestation,
+    packageDeliveryReport: !options.dryRun
+      && !failed
+      && options.lane === "developer-package"
+      ? "output/developer-preview/package-delivery-report.md"
+      : !options.dryRun
+        && !failed
+        && ["artifact", "artifact-only"].includes(options.lane)
+        ? "output/package-delivery/package-delivery-report.md"
+        : null,
     results,
   };
   await writeJson(path.join(reportDirectory, "results.json"), summary);

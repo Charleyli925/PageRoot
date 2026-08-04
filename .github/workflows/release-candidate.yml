@@ -321,6 +321,19 @@ jobs:
           --stage artifact-final
           --
           npm run release:assets -- --arch arm64
+      - name: Report exact package contents and current Pull Request states
+        timeout-minutes: 10
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PACKAGE_VERSION: ${{ needs.signed-app.outputs.source_gate_version }}
+        run: >-
+          node scripts/package-delivery-report.mjs
+          --kind formal
+          --artifact "release/PageRoot-${PACKAGE_VERSION}-arm64.dmg"
+          --version "$PACKAGE_VERSION"
+          --architecture arm64
+          --repository "$GITHUB_REPOSITORY"
+          --output output/package-delivery
       - name: Freeze candidate bytes and provenance
         id: candidate
         timeout-minutes: 5
@@ -365,6 +378,8 @@ jobs:
         timeout-minutes: 10
         with:
           name: PageRoot-release-candidate-evidence-${{ github.run_id }}-${{ github.run_attempt }}
-          path: output/ci-evidence
+          path: |
+            output/ci-evidence
+            output/package-delivery
           if-no-files-found: warn
           retention-days: 30

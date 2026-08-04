@@ -15,6 +15,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
   group: developer-preview-${{ github.ref }}
@@ -47,6 +48,8 @@ jobs:
         timeout-minutes: 10
       - name: Build and smoke-check the requested preview
         timeout-minutes: 25
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: >-
           node scripts/ci-evidence.mjs run
           --suite developer-preview
@@ -73,6 +76,8 @@ jobs:
           path: |
             output/developer-preview/release/*.dmg
             output/developer-preview/developer-preview.json
+            output/developer-preview/package-delivery-report.json
+            output/developer-preview/package-delivery-report.md
             output/test-runs
             output/ci-evidence
           if-no-files-found: error

@@ -135,10 +135,11 @@ test("release and artifact lanes use complete automated coverage and never smoke
   assert.equal(suiteIds(release).some((id) => id.endsWith("-smoke")), false);
 
   const artifact = assertFullyAutomatedPlan(selectGatePlan({ map, lane: "artifact" }));
-  assert.deepEqual(suiteIds(artifact).slice(-3), [
+  assert.deepEqual(suiteIds(artifact).slice(-4), [
     "package-build",
     "packaged-runtime",
     "packaged-verify",
+    "package-delivery-report",
   ]);
   assert.equal(
     artifact.suites.some((suite) => /manual|human|人工|真人|手工|checklist/iu.test(
@@ -160,6 +161,7 @@ test("release and artifact lanes use complete automated coverage and never smoke
     "package-build",
     "packaged-runtime",
     "packaged-verify",
+    "package-delivery-report",
   ]);
 });
 
@@ -172,6 +174,7 @@ test("developer package is opt-in, lightweight and verifies contents before star
     "developer-package-build",
     "developer-packaged-verify",
     "developer-packaged-startup",
+    "developer-package-report",
   ]);
   for (const formalLane of ["release", "artifact", "artifact-only"]) {
     const formal = selectGatePlan({ map, lane: formalLane });

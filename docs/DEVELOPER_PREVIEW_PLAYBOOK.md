@@ -24,6 +24,10 @@
 4. 手动点击运行。
 5. 下载名为 `PageRoot-developer-preview-…` 的 Actions artifact。
 
+工作流摘要会同时给出“安装包内容报告”，artifact 内也包含
+`package-delivery-report.json` 和可直接用于交付回复的
+`package-delivery-report.md`。
+
 本机明确需要生成时，也可以在干净且已提交的目标 Tree 上执行：
 
 ```bash
@@ -64,6 +68,9 @@ npm run package:developer:x64
    - `kind: developer-preview`
    - `releaseEligible: false`
    - `notarized: false`
+8. 在所有校验通过后查询 GitHub，生成安装包内容报告：绑定 DMG Hash、
+   `v0.9.5..HEAD` 一类的源码范围、提交/文件统计，逐个列出关联 PR 的当前
+   状态和一句话摘要，并显式列出没有 PR 的直接提交。
 
 它不会运行完整 Node、Browser、Electron 或 AI 发布矩阵，不会访问真实用户文档，不会创建 tag、GitHub Release 或更新器资产，也不会上传到正式发布通道。
 
@@ -72,9 +79,19 @@ npm run package:developer:x64
 下载后，开发者只需做一次短验证：
 
 1. 对照 `developer-preview.json` 确认测试版本、正式基线、测试序号、架构、commit 与 DMG SHA-256。
-2. 安装并打开应用。因为包使用 ad-hoc 签名且未公证，macOS 可能要求在 Finder 中按住 Control 点击应用并选择“打开”。
-3. 使用真实文档的副本打开应用，确认本次最关键的一到两个能力能正常运行。
-4. 记录通过或明确的失败现象。
+2. 对照 `package-delivery-report.md` 确认内容范围、所有关联 PR、PR 当前
+   状态/检查结果、每个 PR 的一句话修改摘要，以及未关联 PR 的直接提交。
+3. 安装并打开应用。因为包使用 ad-hoc 签名且未公证，macOS 可能要求在 Finder 中按住 Control 点击应用并选择“打开”。
+4. 使用真实文档的副本打开应用，确认本次最关键的一到两个能力能正常运行。
+5. 记录通过或明确的失败现象。
+
+## 安装包交付回复
+
+每次真正生成开发者测试包后，给开发者的回复必须包含 DMG 链接、版本、
+架构、大小、SHA-256、源码范围和变更规模，并逐个列出报告中的 PR 链接、
+当前状态与一句话修改摘要；没有 PR 的提交也要列出，若没有则明确写“无”。
+因为 PR 状态会变化，延迟交付时要针对同一个 DMG 刷新报告。只有 DMG 而没有
+完整内容报告，不能算完成交付。
 
 不要清除系统 quarantine，不要把这个 DMG 当作正式版本分发。人工安装结果只用于尽早发现打包范围或基本运行问题，不会改变正式发布门禁。
 
