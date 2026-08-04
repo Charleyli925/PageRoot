@@ -47,10 +47,14 @@ failure boundaries.
 Developer previews use a separate package identity: `PageRoot Developer
 Preview`, a `.developer-preview` Bundle ID suffix, and a DMG name that includes
 `Developer-Preview`. Their effective version is derived from the latest stable
-tag and committed first-parent order; after `v0.9.5`, the first two preview
-versions are `0.9.69991` and `0.9.69992`. These overrides apply only while
-building the preview and never change the source package version or any formal
-candidate metadata.
+tag and committed first-parent order: after `v0.9.5`, the first two readable
+sequence prefixes are `0.9.69991` and `0.9.69992`. Each full preview version
+adds the exact commit as `-dev.g<40 位 Commit SHA>`, so divergent branches can
+never reuse an application or DMG version. The baseline must be an annotated,
+remote `vA.B.C` release tag that points directly to a commit and matches the
+release-tag contract; locally created semver-shaped tags are ignored. These
+overrides apply only while building the preview and never change the source
+package version or any formal candidate metadata.
 
 ## Mandatory installer delivery report
 

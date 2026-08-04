@@ -15,6 +15,7 @@ export const DEVELOPER_PREVIEW_ARTIFACT_PATTERN =
   "PageRoot-Developer-Preview-${version}-${arch}.${ext}";
 
 const STABLE_VERSION_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u;
+const GIT_SHA_PATTERN = /^[a-f0-9]{40}$/u;
 const DEVELOPER_VERSION_MARKER = "999";
 
 const SENSITIVE_BUILD_ENVIRONMENT = new Set([
@@ -70,7 +71,7 @@ function gitOutput(productRoot, arguments_) {
   return result.stdout.trim();
 }
 
-export function developerPreviewVersion({ stableVersion, buildSequence }) {
+export function developerPreviewSequenceVersion({ stableVersion, buildSequence }) {
   const parsed = parseStableVersion(stableVersion);
   assert.equal(
     Number.isSafeInteger(buildSequence) && buildSequence > 0,
@@ -86,11 +87,22 @@ export function developerPreviewVersion({ stableVersion, buildSequence }) {
   return `${parsed.major}.${parsed.minor}.${nextPatch}${DEVELOPER_VERSION_MARKER}${buildSequence}`;
 }
 
+export function developerPreviewVersion({ stableVersion, buildSequence, commitSha }) {
+  const sequenceVersion = developerPreviewSequenceVersion({ stableVersion, buildSequence });
+  assert.match(
+    commitSha ?? "",
+    GIT_SHA_PATTERN,
+    "developer preview commit must be a full Git SHA",
+  );
+  return `${sequenceVersion}-dev.g${commitSha}`;
+}
+
 export function createDeveloperPreviewIdentity({
   packageJson,
   stableVersion,
   stableTag = `v${stableVersion}`,
   buildSequence,
+  commitSha,
 }) {
   assert.equal(typeof packageJson?.version, "string", "source package version must be configured");
   assert.equal(
@@ -100,13 +112,16 @@ export function createDeveloperPreviewIdentity({
   );
   parseStableVersion(stableVersion);
   assert.equal(stableTag, `v${stableVersion}`, "stable tag must match the stable version");
-  const version = developerPreviewVersion({ stableVersion, buildSequence });
+  const sequenceVersion = developerPreviewSequenceVersion({ stableVersion, buildSequence });
+  const version = developerPreviewVersion({ stableVersion, buildSequence, commitSha });
   return Object.freeze({
     kind: "developer-preview",
     sourceVersion: packageJson.version,
     stableVersion,
     stableTag,
     buildSequence,
+    sequenceVersion,
+    commitSha,
     version,
     productName: DEVELOPER_PREVIEW_PRODUCT_NAME,
     appId: `${packageJson.build.appId}${DEVELOPER_PREVIEW_APP_ID_SUFFIX}`,
@@ -114,22 +129,73 @@ export function createDeveloperPreviewIdentity({
   });
 }
 
-export function resolveDeveloperPreviewIdentity({ productRoot, packageJson }) {
+function remoteStableTagObjects(productRoot) {
+  const output = gitOutput(productRoot, [
+    "ls-remote",
+    "--tags",
+    "--refs",
+    "origin",
+    "refs/tags/v*",
+  ]);
+  return new Map(output.split("\n").flatMap((line) => {
+    if (!line) return [];
+    const [objectSha, reference] = line.split("\t");
+    const tag = reference?.replace(/^refs\/tags\//u, "");
+    if (!tag || !GIT_SHA_PATTERN.test(objectSha) || !/^v.+$/u.test(tag)) return [];
+    return [[tag, objectSha]];
+  }));
+}
+
+function officialStableTag(productRoot, tag, remoteTagObjects) {
+  const version = /^v(.+)$/u.exec(tag)?.[1];
+  if (!version || !STABLE_VERSION_PATTERN.test(version)) return null;
+  const reference = `refs/tags/${tag}`;
+  const tagObject = gitOutput(productRoot, ["rev-parse", reference]);
+  if (remoteTagObjects.get(tag) !== tagObject) return null;
+  if (gitOutput(productRoot, ["cat-file", "-t", reference]) !== "tag") return null;
+
+  const annotation = gitOutput(productRoot, ["cat-file", "-p", reference]);
+  const divider = annotation.indexOf("\n\n");
+  if (divider < 0) return null;
+  const headers = annotation.slice(0, divider).split("\n");
+  const target = headers.find((header) => header.startsWith("object "))?.slice("object ".length);
+  const targetType = headers.find((header) => header.startsWith("type "))?.slice("type ".length);
+  const declaredTag = headers.find((header) => header.startsWith("tag "))?.slice("tag ".length);
+  const message = annotation.slice(divider + 2).trim();
+  if (
+    !GIT_SHA_PATTERN.test(target ?? "")
+    || targetType !== "commit"
+    || declaredTag !== tag
+    || message !== `PageRoot ${version}`
+  ) {
+    return null;
+  }
+  if (gitOutput(productRoot, ["rev-parse", `${tag}^{commit}`]) !== target) return null;
+  return { tag, version, parsed: parseStableVersion(version) };
+}
+
+export function officialStableTags({ productRoot }) {
   assert.equal(path.isAbsolute(productRoot), true, "product root must be absolute");
-  const stableTags = gitOutput(productRoot, ["tag", "--merged", "HEAD", "--list", "v*"])
+  const remoteTagObjects = remoteStableTagObjects(productRoot);
+  return gitOutput(productRoot, ["tag", "--merged", "HEAD", "--list", "v*"])
     .split("\n")
     .filter(Boolean)
     .flatMap((tag) => {
-      const match = /^v(.+)$/u.exec(tag);
-      if (!match || !STABLE_VERSION_PATTERN.test(match[1])) return [];
-      return [{ tag, version: match[1], parsed: parseStableVersion(match[1]) }];
+      const stable = officialStableTag(productRoot, tag, remoteTagObjects);
+      return stable ? [stable] : [];
     })
     .sort((left, right) => compareStableVersions(left.parsed, right.parsed));
-  const stable = stableTags.at(-1);
+}
+
+export function resolveDeveloperPreviewIdentity({ productRoot, packageJson }) {
+  assert.equal(path.isAbsolute(productRoot), true, "product root must be absolute");
+  const stable = officialStableTags({ productRoot }).at(-1);
   assert.ok(
     stable,
-    "developer preview packaging requires an official v<major>.<minor>.<patch> tag in HEAD history",
+    "developer preview packaging requires an official remote annotated v<major>.<minor>.<patch> tag in HEAD history",
   );
+  const commitSha = gitOutput(productRoot, ["rev-parse", "HEAD"]);
+  assert.match(commitSha, GIT_SHA_PATTERN, "developer preview commit is invalid");
   const buildSequence = Number(gitOutput(productRoot, [
     "rev-list",
     "--count",
@@ -146,6 +212,7 @@ export function resolveDeveloperPreviewIdentity({ productRoot, packageJson }) {
     stableVersion: stable.version,
     stableTag: stable.tag,
     buildSequence,
+    commitSha,
   });
 }
 
@@ -238,6 +305,7 @@ export async function writeDeveloperPreviewAttestation({
   assertArchitecture(architecture);
   assert.equal(identity?.kind, "developer-preview", "developer preview identity is required");
   assert.match(repository?.head ?? "", /^[a-f0-9]{40}$/u, "developer preview commit is invalid");
+  assert.equal(identity.commitSha, repository.head, "developer preview identity must bind its source commit");
   assert.match(repository?.tree ?? "", /^[a-f0-9]{40}$/u, "developer preview tree is invalid");
   assert.equal(repository?.dirty, false, "developer preview source must be clean");
   assert.equal(Array.isArray(results), true, "developer preview results must be an array");
@@ -276,6 +344,7 @@ export async function writeDeveloperPreviewAttestation({
     stableVersion: identity.stableVersion,
     stableTag: identity.stableTag,
     buildSequence: identity.buildSequence,
+    sequenceVersion: identity.sequenceVersion,
     version: identity.version,
     productName: identity.productName,
     bundleIdentifier: identity.appId,

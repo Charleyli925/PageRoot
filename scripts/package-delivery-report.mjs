@@ -13,6 +13,8 @@ import {
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { officialStableTags } from "./developer-preview.mjs";
+
 const scriptPath = fileURLToPath(import.meta.url);
 const productRoot = path.resolve(path.dirname(scriptPath), "..");
 const SHA_PATTERN = /^[0-9a-f]{40}$/u;
@@ -87,14 +89,13 @@ function resolveRepository(root, explicitRepository) {
 }
 
 function stableTags(root) {
-  return gitOutput(root, [
-    "tag",
-    "--merged",
-    "HEAD",
-    "--list",
-    "v*",
-    "--sort=-version:refname",
-  ]).split("\n").filter((tag) => STABLE_TAG_PATTERN.test(tag));
+  return officialStableTags({ productRoot: root })
+    .sort((left, right) => (
+      right.parsed.major - left.parsed.major
+      || right.parsed.minor - left.parsed.minor
+      || right.parsed.patch - left.parsed.patch
+    ))
+    .map(({ tag }) => tag);
 }
 
 export function selectPackageBaseline({

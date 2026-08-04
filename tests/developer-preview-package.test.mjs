@@ -25,6 +25,7 @@ import {
   developerPreviewEnvironment,
   developerPreviewPackageJson,
   developerPreviewReleaseDirectory,
+  developerPreviewSequenceVersion,
   developerPreviewVersion,
   resolveDeveloperPreviewIdentity,
   writeDeveloperPreviewAttestation,
@@ -59,62 +60,138 @@ function runGit(repository, arguments_) {
   return result.stdout.trim();
 }
 
+async function createPreviewRepository() {
+  const root = await mkdtemp(path.join(os.tmpdir(), "pageroot-preview-identity-"));
+  const repository = path.join(root, "repository");
+  const origin = path.join(root, "origin.git");
+  await mkdir(repository);
+  runGit(repository, ["init"]);
+  runGit(repository, ["config", "user.name", "PageRoot Test"]);
+  runGit(repository, ["config", "user.email", "pageroot-test@example.invalid"]);
+  runGit(repository, ["init", "--bare", origin]);
+  runGit(repository, ["remote", "add", "origin", origin]);
+  return { root, repository };
+}
+
+function createOfficialStableTag(repository, version) {
+  const tag = `v${version}`;
+  runGit(repository, ["tag", "-a", tag, "-m", `PageRoot ${version}`]);
+  runGit(repository, ["push", "origin", `refs/tags/${tag}`]);
+}
+
 test("developer preview versions are recognizable and advance from the latest stable patch", () => {
   assert.equal(
-    developerPreviewVersion({ stableVersion: "0.9.5", buildSequence: 1 }),
+    developerPreviewSequenceVersion({ stableVersion: "0.9.5", buildSequence: 1 }),
     "0.9.69991",
   );
   assert.equal(
-    developerPreviewVersion({ stableVersion: "0.9.5", buildSequence: 2 }),
+    developerPreviewSequenceVersion({ stableVersion: "0.9.5", buildSequence: 2 }),
     "0.9.69992",
   );
   assert.equal(
-    developerPreviewVersion({ stableVersion: "0.9.9", buildSequence: 12 }),
+    developerPreviewSequenceVersion({ stableVersion: "0.9.9", buildSequence: 12 }),
     "0.9.1099912",
   );
+  assert.equal(
+    developerPreviewVersion({
+      stableVersion: "0.9.5",
+      buildSequence: 1,
+      commitSha: "a".repeat(40),
+    }),
+    `0.9.69991-dev.g${"a".repeat(40)}`,
+  );
+  assert.notEqual(
+    developerPreviewVersion({
+      stableVersion: "0.9.5",
+      buildSequence: 1,
+      commitSha: "a".repeat(40),
+    }),
+    developerPreviewVersion({
+      stableVersion: "0.9.5",
+      buildSequence: 1,
+      commitSha: "b".repeat(40),
+    }),
+    "different commits must never reuse a developer preview version",
+  );
   assert.throws(
-    () => developerPreviewVersion({ stableVersion: "0.9.5-beta.1", buildSequence: 1 }),
+    () => developerPreviewSequenceVersion({ stableVersion: "0.9.5-beta.1", buildSequence: 1 }),
     /exactly three numeric components/u,
   );
   assert.throws(
-    () => developerPreviewVersion({ stableVersion: "0.9.5", buildSequence: 0 }),
+    () => developerPreviewSequenceVersion({ stableVersion: "0.9.5", buildSequence: 0 }),
     /positive safe integer/u,
+  );
+  assert.throws(
+    () => developerPreviewVersion({
+      stableVersion: "0.9.5",
+      buildSequence: 1,
+      commitSha: "not-a-commit",
+    }),
+    /full Git SHA/u,
   );
 });
 
 test("developer preview identity uses committed first-parent order after the latest official tag", async () => {
-  const repository = await mkdtemp(path.join(os.tmpdir(), "pageroot-preview-identity-"));
+  const { root, repository } = await createPreviewRepository();
   try {
-    runGit(repository, ["init"]);
-    runGit(repository, ["config", "user.name", "PageRoot Test"]);
-    runGit(repository, ["config", "user.email", "pageroot-test@example.invalid"]);
     await writeFile(path.join(repository, "identity.txt"), "stable\n");
     runGit(repository, ["add", "identity.txt"]);
     runGit(repository, ["-c", "commit.gpgsign=false", "commit", "-m", "stable"]);
-    runGit(repository, ["tag", "v0.9.5"]);
+    createOfficialStableTag(repository, "0.9.5");
 
     await writeFile(path.join(repository, "identity.txt"), "preview one\n");
     runGit(repository, ["add", "identity.txt"]);
     runGit(repository, ["-c", "commit.gpgsign=false", "commit", "-m", "preview one"]);
+    const firstCommit = runGit(repository, ["rev-parse", "HEAD"]);
     const first = resolveDeveloperPreviewIdentity({
       productRoot: repository,
       packageJson: sourcePackageJson,
     });
     assert.equal(first.stableTag, "v0.9.5");
     assert.equal(first.buildSequence, 1);
-    assert.equal(first.version, "0.9.69991");
+    assert.equal(first.sequenceVersion, "0.9.69991");
+    assert.equal(first.commitSha, firstCommit);
+    assert.equal(first.version, `0.9.69991-dev.g${firstCommit}`);
 
     await writeFile(path.join(repository, "identity.txt"), "preview two\n");
     runGit(repository, ["add", "identity.txt"]);
     runGit(repository, ["-c", "commit.gpgsign=false", "commit", "-m", "preview two"]);
+    const secondCommit = runGit(repository, ["rev-parse", "HEAD"]);
     const second = resolveDeveloperPreviewIdentity({
       productRoot: repository,
       packageJson: sourcePackageJson,
     });
     assert.equal(second.buildSequence, 2);
-    assert.equal(second.version, "0.9.69992");
+    assert.equal(second.sequenceVersion, "0.9.69992");
+    assert.equal(second.version, `0.9.69992-dev.g${secondCommit}`);
   } finally {
-    await rm(repository, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("developer preview ignores non-official semver-shaped tags", async () => {
+  const { root, repository } = await createPreviewRepository();
+  try {
+    await writeFile(path.join(repository, "identity.txt"), "stable\n");
+    runGit(repository, ["add", "identity.txt"]);
+    runGit(repository, ["-c", "commit.gpgsign=false", "commit", "-m", "stable"]);
+    createOfficialStableTag(repository, "0.9.5");
+
+    await writeFile(path.join(repository, "identity.txt"), "preview\n");
+    runGit(repository, ["add", "identity.txt"]);
+    runGit(repository, ["-c", "commit.gpgsign=false", "commit", "-m", "preview"]);
+    runGit(repository, ["tag", "v99.0.0"]);
+    runGit(repository, ["push", "origin", "refs/tags/v99.0.0"]);
+    runGit(repository, ["tag", "-a", "v98.0.0", "-m", "PageRoot 98.0.0"]);
+
+    const identity = resolveDeveloperPreviewIdentity({
+      productRoot: repository,
+      packageJson: sourcePackageJson,
+    });
+    assert.equal(identity.stableTag, "v0.9.5");
+    assert.equal(identity.sequenceVersion, "0.9.69991");
+  } finally {
+    await rm(root, { recursive: true, force: true });
   }
 });
 
@@ -137,10 +214,11 @@ test("developer preview is an explicit ad-hoc DMG profile while release packagin
     packageJson: sourcePackageJson,
     stableVersion: "0.9.5",
     buildSequence: 1,
+    commitSha: "a".repeat(40),
   });
   assert.deepEqual(developerPreviewPackageJson(sourcePackageJson, identity), {
     ...sourcePackageJson,
-    version: "0.9.69991",
+    version: `0.9.69991-dev.g${"a".repeat(40)}`,
     productName: "PageRoot Developer Preview",
     build: {
       ...sourcePackageJson.build,
@@ -168,17 +246,20 @@ test("developer preview is an explicit ad-hoc DMG profile while release packagin
       "--config.appId=com.htmlai.workbench.developer-preview",
       "--config.productName=PageRoot Developer Preview",
       "--config.extraMetadata.productName=PageRoot Developer Preview",
-      "--config.extraMetadata.version=0.9.69991",
-      "--config.buildVersion=0.9.69991",
-      "--config.mac.bundleVersion=0.9.69991",
-      "--config.mac.bundleShortVersion=0.9.69991",
+      `--config.extraMetadata.version=0.9.69991-dev.g${"a".repeat(40)}`,
+      `--config.buildVersion=0.9.69991-dev.g${"a".repeat(40)}`,
+      `--config.mac.bundleVersion=0.9.69991-dev.g${"a".repeat(40)}`,
+      `--config.mac.bundleShortVersion=0.9.69991-dev.g${"a".repeat(40)}`,
       `--config.directories.output=${releaseDirectory}`,
       `--config.artifactName=${DEVELOPER_PREVIEW_ARTIFACT_PATTERN}`,
     ],
   );
   assert.equal(
-    developerPreviewArtifactName({ version: "0.9.69991", architecture: "arm64" }),
-    "PageRoot-Developer-Preview-0.9.69991-arm64.dmg",
+    developerPreviewArtifactName({
+      version: `0.9.69991-dev.g${"a".repeat(40)}`,
+      architecture: "arm64",
+    }),
+    `PageRoot-Developer-Preview-0.9.69991-dev.g${"a".repeat(40)}-arm64.dmg`,
   );
 });
 
@@ -217,6 +298,7 @@ test("developer preview attestation is explicitly non-release and binds exact by
       packageJson: sourcePackageJson,
       stableVersion: "0.9.5",
       buildSequence: 2,
+      commitSha: "a".repeat(40),
     });
     const releaseDirectory = developerPreviewReleaseDirectory(temporaryRoot);
     await mkdir(releaseDirectory, { recursive: true });
@@ -252,7 +334,8 @@ test("developer preview attestation is explicitly non-release and binds exact by
     assert.equal(record.attestation.stableVersion, "0.9.5");
     assert.equal(record.attestation.stableTag, "v0.9.5");
     assert.equal(record.attestation.buildSequence, 2);
-    assert.equal(record.attestation.version, "0.9.69992");
+    assert.equal(record.attestation.sequenceVersion, "0.9.69992");
+    assert.equal(record.attestation.version, `0.9.69992-dev.g${"a".repeat(40)}`);
     assert.equal(record.attestation.productName, "PageRoot Developer Preview");
     assert.equal(
       record.attestation.bundleIdentifier,
@@ -260,7 +343,7 @@ test("developer preview attestation is explicitly non-release and binds exact by
     );
     assert.equal(
       record.attestation.artifact.file,
-      "PageRoot-Developer-Preview-0.9.69992-arm64.dmg",
+      `PageRoot-Developer-Preview-0.9.69992-dev.g${"a".repeat(40)}-arm64.dmg`,
     );
     assert.equal(
       record.attestation.artifact.sha256,
