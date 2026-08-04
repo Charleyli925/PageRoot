@@ -8,18 +8,7 @@ import { fileURLToPath } from "node:url";
 const scriptPath = fileURLToPath(import.meta.url);
 const productRoot = path.resolve(path.dirname(scriptPath), "..");
 
-export const acceptedAdvisories = Object.freeze({
-  1124334: Object.freeze({
-    package: "brace-expansion",
-    url: "https://github.com/advisories/GHSA-mh99-v99m-4gvg",
-    expiresOn: "2026-08-15",
-  }),
-  1124066: Object.freeze({
-    package: "sharp",
-    url: "https://github.com/advisories/GHSA-f88m-g3jw-g9cj",
-    expiresOn: "2026-08-31",
-  }),
-});
+export const acceptedAdvisories = Object.freeze({});
 
 export function evaluateAuditReport(report, {
   allowlist = acceptedAdvisories,

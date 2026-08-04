@@ -15,6 +15,9 @@ Notable user-visible changes are documented here. This project follows Semantic 
 - Treat an unqualified latest-package request as current `origin/main` plus all
   applicable, non-excluded PR heads; compose unmerged work on a temporary
   integration branch and keep any such installer Developer Preview-only.
+- Update Next.js and its ESLint configuration to 16.3.0, and refresh compatible
+  transitive build dependencies so the dependency audit has no active security
+  exceptions.
 
 ## [0.9.5] - 2026-07-31
 
