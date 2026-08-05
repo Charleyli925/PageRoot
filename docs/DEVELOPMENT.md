@@ -52,7 +52,7 @@ boundary.
 | --- | --- |
 | `npm run gate:edit` | Fast, impact-selected feedback for uncommitted work |
 | `npm run gate:task` | Static checks plus impacted Node/browser/Electron coverage |
-| `npm run gate:main:auto` | Internal post-merge Node/browser smoke after exact-tree PR provenance verification |
+| `npm run gate:main:auto` | Optional local/diagnostic Node/browser smoke; it is not part of the automatic post-merge path |
 | `npm run gate:release:auto` | Complete source gate on a clean commit |
 | `npm run package:developer` | Optional arm64 developer preview requested explicitly: distinct app/Bundle identity, stable-tag-derived test version, ad-hoc DMG, packaged-content verification, one isolated startup, and an exact live PR/content delivery report; no notarization or publication |
 | `npm run package:developer:x64` | The same optional developer preview and delivery report for Intel Macs |
@@ -85,14 +85,16 @@ runs never send product events. A distribution package embeds only the public
 PostHog project ingestion token generated from `PAGEROOT_POSTHOG_TOKEN`; never
 use a personal or project secret API key.
 
-Draft Pull Requests run only impact-selected feedback. Marking a final PR tree ready runs parallel Node, three-shard Chromium, real HTML, native Electron and deterministic AI groups. Linux builds and shares only the Web renderer used by Node and Browser. Each macOS job builds the Electron renderer locally, runs the hosted-window preflight, then owns either the native Electron suite or the AI suite; those jobs can be rerun independently. Dependency, Playwright and Electron downloads are cached by lockfile identity.
+Every ordinary Pull Request update runs the separate impact-selected `PR Feedback` workflow, whether the PR is draft or ready. Only an explicit transition from draft to ready promotes the current head and runs parallel Node, three-shard Chromium, real HTML, native Electron and deterministic AI groups. Any later commit cancels an in-flight stale complete run and receives feedback only; the new SHA remains unmergeable until it is returned to draft and promoted again. Promote only one PR at a time so a merge cannot force several parallel candidates through the complete matrix again. Linux builds and shares only the Web renderer used by Node and Browser. Each macOS job builds the Electron renderer locally, runs the hosted-window preflight, then owns either the native Electron suite or the AI suite; those jobs can be rerun independently. Dependency, Playwright and Electron downloads are cached by lockfile identity.
+
+After merge, `main-integrity` verifies the merged PR, exact Tree Hash and package/lockfile version against the fresh source-gate attestation. It does not rerun Node or Browser smoke; a mismatch fails closed instead of trying to manufacture new evidence on `main`.
 
 Critical workflow commands write machine-readable evidence and normalized failure signatures under `output/ci-evidence/`. The full taxonomy, same-SHA rerun rule, two-strike policy and operating metrics are in `docs/RELEASE_PIPELINE_GOVERNANCE.md`.
 The CI-evidence contract test enumerates every stage used by the active source,
 developer-preview, candidate and publication workflows, so an unsupported stage
 name fails during source review rather than after formal packaging begins.
 
-The weekly/manual read-only `CI Health` workflow computes a rolling 30-day report from GitHub Actions history. It measures complete-gate attempts, wall-time percentiles, repeated-green runner time, environment-preflight failures and candidate/publication conclusions; reports are written under `output/ci-health/`.
+The weekly/manual read-only `CI Health` workflow computes a rolling 30-day report from both PR-feedback and source-candidate Actions history. In addition to exact-tree attempts, latency, repeated-green jobs and environment failures, it measures complete gates per Pull Request and runner minutes spent on later candidate SHAs of the same PR. This exposes lifecycle churn that same-SHA rerun metrics cannot see. Reports are written under `output/ci-health/`.
 
 ## Design constraints
 
@@ -101,9 +103,10 @@ The weekly/manual read-only `CI Health` workflow computes a rolling 30-day repor
 - Derive Canvas history only from accepted SourcePatch forward/exact-inverse
   results; never add a preview-DOM or component-local snapshot stack.
 - Fail closed on ambiguous mapping or patch scope for direct source edits. For AI
-  candidates, keep protocol/identity/Hash/path/complete-HTML/executable checks
-  hard, but treat comment targets as review guidance and low page continuity as
-  a mandatory-review signal rather than a failed Attempt.
+  candidates, keep protocol/identity/Hash/path/complete-HTML checks hard, but do
+  not inspect or signal authored script changes; treat comment targets as review
+  guidance and low page continuity as a mandatory-review signal rather than a
+  failed Attempt.
 - Keep local filesystem operations behind the Electron/Bridge boundary.
 - Add schema fixtures and compatibility tests for protocol changes.
 - Never include real user documents in tests.

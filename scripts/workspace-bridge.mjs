@@ -18,7 +18,7 @@ import {
 import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
-import { promisify } from "node:util";
+import { isDeepStrictEqual, promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import {
   assertSchemaVersion,
@@ -57,7 +57,10 @@ import {
 import {
   rawStartTagAttributes,
 } from "./scope-validator.mjs";
-import { assessHtmlCandidate } from "./candidate-assessment.mjs";
+import {
+  assessHtmlCandidate,
+  normalizeCandidateAssessmentPolicy,
+} from "./candidate-assessment.mjs";
 import {
   PRODUCT_MAX_BRIDGE_BODY_BYTES,
   PRODUCT_MAX_HTML_BYTES,
@@ -3704,6 +3707,7 @@ async function listVersions(context) {
             attemptId: manifest.attemptId,
             candidateVersionId: versionId,
           },
+          { verifyHistoricalEvidence: true },
         );
       }
     }
@@ -3793,6 +3797,7 @@ async function latestTerminalRunOutcome(context) {
           candidateVersionId: outcome.candidateVersionId,
           baseSha256: outcome.baseSnapshotSha256,
         },
+        { verifyHistoricalEvidence: true },
       )
     : null;
   return {
@@ -5999,7 +6004,7 @@ function assertCandidateAssessmentRecord(
   expected = {},
   label = "candidate-assessment.json",
 ) {
-  assertAuxiliarySchemaVersion(assessment, label);
+  assertCandidateAssessmentIdentity(assessment, expected, label);
   if (!["ready", "attention", "blocked"].includes(assessment.status)) {
     throw new HttpError(
       409,
@@ -6007,14 +6012,32 @@ function assertCandidateAssessmentRecord(
       `${label} has an unsupported status.`,
     );
   }
+  const hasRetiredExecutable = assessment.executable !== undefined;
+  const hasRetiredExecutableHealth =
+    assessment.health?.executableSurfaceUnchanged !== undefined;
   if (
     !Array.isArray(assessment.issueCodes)
     || !assessment.issueCodes.every((value) => typeof value === "string")
     || !assessment.health
     || typeof assessment.health.completeDocument !== "boolean"
     || typeof assessment.health.bodyHasContent !== "boolean"
-    || typeof assessment.health.executableSurfaceUnchanged !== "boolean"
     || !["related", "uncertain"].includes(assessment.continuity?.status)
+    || hasRetiredExecutable !== hasRetiredExecutableHealth
+    || (
+      hasRetiredExecutable
+      && (
+        typeof assessment.health.executableSurfaceUnchanged !== "boolean"
+        || typeof assessment.executable?.unchanged !== "boolean"
+        || !Number.isSafeInteger(assessment.executable?.baseCount)
+        || assessment.executable.baseCount < 0
+        || !Number.isSafeInteger(assessment.executable?.outputCount)
+        || assessment.executable.outputCount < 0
+        || !Number.isSafeInteger(assessment.executable?.changedCount)
+        || assessment.executable.changedCount < 0
+        || assessment.health.executableSurfaceUnchanged
+          !== assessment.executable.unchanged
+      )
+    )
   ) {
     throw new HttpError(
       409,
@@ -6022,6 +6045,15 @@ function assertCandidateAssessmentRecord(
       `${label} is structurally invalid.`,
     );
   }
+  return normalizeCandidateAssessmentPolicy(assessment);
+}
+
+function assertCandidateAssessmentIdentity(
+  assessment,
+  expected = {},
+  label = "candidate-assessment.json",
+) {
+  assertAuxiliarySchemaVersion(assessment, label);
   for (const field of [
     "baseSha256",
     "outputSha256",
@@ -6047,14 +6079,111 @@ function assertCandidateAssessmentRecord(
   return assessment;
 }
 
-async function readCandidateAssessment(assessmentPath, expected = {}) {
-  return assertCandidateAssessmentRecord(
-    await readAuxiliaryJson(
-      assessmentPath,
-      "candidate-assessment.json",
-    ),
+async function readHistoricalCandidateAssessment(
+  assessmentPath,
+  assessment,
+  expected,
+) {
+  const label = "candidate-assessment.json";
+  const normalized = assertCandidateAssessmentRecord(
+    assessment,
     expected,
+    label,
   );
+  const attemptRoot = path.dirname(assessmentPath);
+  const requestRoot = path.dirname(path.dirname(attemptRoot));
+  const projectRoot = path.dirname(path.dirname(requestRoot));
+  const committedCandidatePath = path.join(
+    projectRoot,
+    "versions",
+    normalized.candidateVersionId,
+    "files",
+    "index.html",
+  );
+  const candidateEvidencePath = await exists(committedCandidatePath)
+    ? committedCandidatePath
+    : path.join(attemptRoot, "output", "index.html");
+  const sources = [
+    [path.join(requestRoot, "input", "base", "index.html"), "frozen base"],
+    [candidateEvidencePath, "immutable candidate"],
+  ];
+  const buffers = [];
+  for (const [sourcePath, sourceLabel] of sources) {
+    const information = await lstat(sourcePath).catch((error) => {
+      if (error?.code === "ENOENT") {
+        throw new HttpError(
+          409,
+          "CANDIDATE_ASSESSMENT_LEGACY_EVIDENCE_MISSING",
+          `${label} ${sourceLabel} evidence is missing.`,
+        );
+      }
+      throw error;
+    });
+    if (information.isSymbolicLink() || !information.isFile()) {
+      throw new HttpError(
+        409,
+        "CANDIDATE_ASSESSMENT_LEGACY_EVIDENCE_INVALID",
+        `${label} ${sourceLabel} evidence must be a regular file.`,
+      );
+    }
+    buffers.push(await readFile(sourcePath));
+  }
+  const [baseBuffer, outputBuffer] = buffers;
+  const baseHtml = baseBuffer.toString("utf8");
+  const outputHtml = outputBuffer.toString("utf8");
+  if (
+    sha256(baseBuffer) !== assessment.baseSha256
+    || sha256(outputBuffer) !== assessment.outputSha256
+    || comparisonSha256(baseHtml) !== assessment.baseComparisonSha256
+    || comparisonSha256(outputHtml) !== assessment.outputComparisonSha256
+  ) {
+    throw new HttpError(
+      409,
+      "CANDIDATE_ASSESSMENT_LEGACY_EVIDENCE_MISMATCH",
+      `${label} no longer matches its sealed HTML evidence.`,
+    );
+  }
+  const current = {
+    schemaVersion: normalized.schemaVersion,
+    projectId: normalized.projectId,
+    documentId: normalized.documentId,
+    requestId: normalized.requestId,
+    attemptId: normalized.attemptId,
+    candidateVersionId: normalized.candidateVersionId,
+    baseSha256: normalized.baseSha256,
+    outputSha256: normalized.outputSha256,
+    baseComparisonSha256: normalized.baseComparisonSha256,
+    outputComparisonSha256: normalized.outputComparisonSha256,
+    ...assessHtmlCandidate({ baseHtml, outputHtml }),
+    assessedAt: normalized.assessedAt,
+  };
+  if (!isDeepStrictEqual(normalized, current)) {
+    throw new HttpError(
+      409,
+      "CANDIDATE_ASSESSMENT_INVALID",
+      `${label} does not match its sealed HTML evidence.`,
+    );
+  }
+  return normalized;
+}
+
+async function readCandidateAssessment(
+  assessmentPath,
+  expected = {},
+  { verifyHistoricalEvidence = false } = {},
+) {
+  const assessment = await readAuxiliaryJson(
+    assessmentPath,
+    "candidate-assessment.json",
+  );
+  if (verifyHistoricalEvidence) {
+    return readHistoricalCandidateAssessment(
+      assessmentPath,
+      assessment,
+      expected,
+    );
+  }
+  return assertCandidateAssessmentRecord(assessment, expected);
 }
 
 async function writeCandidateAssessmentRaw(context, runtime, validated) {

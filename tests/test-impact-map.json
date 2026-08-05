@@ -154,7 +154,7 @@
       "alwaysForCode": ["typecheck", "lint"]
     },
     "main": {
-      "description": "Fast post-merge smoke after the PR source-gate provenance has matched the exact main tree.",
+      "description": "Optional diagnostic smoke for an exact main tree; automatic post-merge CI uses provenance verification only.",
       "fullSuites": [
         "node-smoke",
         "browser-smoke"
@@ -228,7 +228,7 @@
       "patterns": [
         "^scripts/source-gate-provenance\\.mjs$",
         "^tests/source-gate-provenance\\.test\\.mjs$",
-        "^\\.github/workflows/(?:ci|developer-preview|release|release-candidate)\\.yml$"
+        "^\\.github/workflows/(?:ci|pr-feedback|developer-preview|release|release-candidate)\\.yml$"
       ],
       "suites": [],
       "nodeTests": ["tests/source-gate-provenance.test.mjs"]
@@ -238,7 +238,7 @@
       "patterns": [
         "^scripts/ci-evidence\\.mjs$",
         "^tests/ci-evidence\\.test\\.mjs$",
-        "^\\.github/workflows/(?:ci|developer-preview|release|release-candidate)\\.yml$"
+        "^\\.github/workflows/(?:ci|pr-feedback|developer-preview|release|release-candidate)\\.yml$"
       ],
       "suites": [],
       "nodeTests": ["tests/ci-evidence.test.mjs"]
@@ -248,7 +248,7 @@
       "patterns": [
         "^scripts/ci-health-report\\.mjs$",
         "^tests/ci-health-report\\.test\\.mjs$",
-        "^\\.github/workflows/ci-health\\.yml$"
+        "^\\.github/workflows/(?:ci|ci-health|pr-feedback)\\.yml$"
       ],
       "suites": [],
       "nodeTests": ["tests/ci-health-report.test.mjs"]
@@ -365,15 +365,23 @@
     {
       "id": "ai-review-workspace",
       "patterns": [
+        "^app/lib/review-text-diff\\.(?:d\\.ts|js)$",
+        "^app/lib/review-comment-source-map\\.js$",
         "^app/lib/page-presentation-dom\\.ts$",
+        "^app/lib/review-scroll-sync\\.(?:js|d\\.ts)$",
         "^app/workbench/(?:AiReviewWorkspace|review-document|review-state)\\.(?:ts|tsx)$",
         "^app/workbench/ai-review-workspace\\.module\\.css$",
-        "^tests/ai-review-workspace\\.test\\.mjs$",
+        "^tests/(?:ai-review-workspace|review-comment-source-map|review-scroll-sync|review-text-diff)\\.test\\.mjs$",
         "^tests/e2e/electron/ai-handoff-closed-loop\\.spec\\.mjs$",
         "^docs/(?:AI_SUPPLEMENT_AND_VALIDATION|CHANGE_REQUEST_PROTOCOL|INTERACTION_FLOW|MVP_PRD)\\.md$"
       ],
       "suites": ["typecheck", "ai-smoke"],
-      "nodeTests": ["tests/ai-review-workspace.test.mjs"]
+      "nodeTests": [
+        "tests/ai-review-workspace.test.mjs",
+        "tests/review-comment-source-map.test.mjs",
+        "tests/review-scroll-sync.test.mjs",
+        "tests/review-text-diff.test.mjs"
+      ]
     },
     {
       "id": "workbench-lifecycle",
@@ -496,7 +504,8 @@
       "id": "schemas",
       "patterns": [
         "^schemas/.*\\.json$",
-        "^fixtures/v3/source-history\\.current\\.json$"
+        "^fixtures/v3/source-history\\.current\\.json$",
+        "^fixtures/candidate-assessment-compat/.*$"
       ],
       "suites": [],
       "nodeTests": [
@@ -550,6 +559,12 @@
         "^tests/e2e/browser/(?!real-complex-html\\.gate|playwright\\.real-html\\.config).*\\.mjs$"
       ],
       "suites": ["browser-smoke"],
+      "nodeTests": []
+    },
+    {
+      "id": "shared-browser-electron-e2e-driver",
+      "patterns": ["^tests/e2e/browser/pageroot-driver\\.mjs$"],
+      "suites": ["browser-smoke", "electron-smoke"],
       "nodeTests": []
     },
     {

@@ -232,6 +232,17 @@ test("structured project identity errors use one safe product message", () => {
   );
 });
 
+test("candidate assessment failures use accurate localized project copy", () => {
+  const error = new Error(
+    "candidate-assessment.json is structurally invalid.",
+  );
+  error.code = "CANDIDATE_ASSESSMENT_INVALID";
+  assert.equal(
+    productErrorMessage(error, "项目状态暂时无法读取。"),
+    "某次 AI 结果的校验记录无法核对。当前 HTML 没有被改动，请重试读取。",
+  );
+});
+
 test("unknown internal fields and local paths never reach product copy", () => {
   assert.equal(
     productErrorMessage(

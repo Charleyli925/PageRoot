@@ -109,17 +109,19 @@ stash.
 
 1. Use a short-lived branch with an approved prefix.
 2. Keep one coherent outcome per PR.
-3. Open a draft PR while implementation is changing. Draft updates run only impact-selected feedback.
+3. Open every PR as draft. All ordinary PR updates run only impact-selected feedback, regardless of the current draft flag.
 4. The PR body must state outcome, boundary, verification, documentation impact and release impact.
-5. When the final intended GitHub diff is reviewable, mark the PR ready. This triggers the one complete `release-gate` for that tree.
+5. Update the final head onto current `main`, confirm no other PR is being promoted, then mark the PR ready. The `ready_for_review` transition triggers the one complete `release-gate` for that tree.
 6. Wait for the required `release-gate` and review the final GitHub diff, not only the local working diff.
 7. Squash-merge only after authorization. GitHub deletes the remote task branch; then audit and explicitly retire the local task before fast-forwarding primary `main`.
 
 Do not use an installed app, DMG, backup folder or another checkout as a source for new edits. If the local checkout contains unrelated work, create an isolated Git worktree rather than stashing or mixing changes.
 
-The required PR `release-gate` is the one complete source gate for the final ready PR tree. Draft updates run `draft-feedback` and do not spend the complete Browser/Electron matrix. Local development should normally stop at impact-selected `gate:edit` and `task:finish`; rerun the complete source gate locally only for CI diagnosis or high-risk editing-engine work where the additional evidence is useful.
+The required PR `release-gate` is the one complete source gate for an explicitly promoted final tree. `PR Feedback` owns `opened`, `synchronize`, `reopened` and `converted_to_draft`; it runs `gate:edit` and never reports the `release-gate` status. The complete workflow listens only to `ready_for_review`. A later commit shares the same concurrency key, cancels an in-flight stale complete run, and leaves the new SHA without the required check. Convert the PR back to draft and mark it ready again only after that head is final. Opening a PR directly as ready does not bypass this boundary. Local development should normally stop at impact-selected `gate:edit` and `task:finish`; rerun the complete source gate locally only for CI diagnosis or high-risk editing-engine work where the additional evidence is useful.
 
-After merge, CI authenticates the successful PR result against the exact `main` Tree Hash and package/lockfile version, then runs a small Node and browser smoke on Linux. It does not repeat the complete browser and Electron suites. The source-gate attestation is valid for seven days and only for the exact tree.
+Promote only one PR at a time. Other parallel work remains draft and continues receiving cheap feedback; after the current candidate merges, update the next branch onto the new `main` and promote it. This prevents strict up-to-date protection from turning every merge into a cascade of complete runs on the remaining PRs.
+
+After merge, CI authenticates the successful PR result against the exact `main` Tree Hash, package/lockfile version and merged PR. Equality failure blocks immediately; equality success does not repeat Node, Browser or Electron source tests. The source-gate attestation is valid for seven days and only for the exact tree.
 
 Before a tag exists, the manual `Release Candidate` workflow uses that source
 attestation to assemble one pre-sign App on macOS. It checks package contents

@@ -4,6 +4,24 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+- Stop treating AI-authored script changes as an adoption failure. Candidate
+  assessment now checks document usability and coarse continuity only; retired
+  executable-surface fields in historical records are verified, normalized out
+  of current status, and never rewritten or exposed as a present-day warning.
+  Genuine assessment read errors also show an accurate failure instead of
+  being mislabeled as a timeout.
+- Keep AI review text frames aligned to semantic punctuation and word ranges.
+  Replacing “品均基本持平” with “单品效率整体稳定，增幅仅+0.10%” now
+  marks the complete old and new phrases instead of treating their accidental
+  shared “品” character as unchanged or splitting the green frame. Short Chinese
+  replacements remain pairable, while distant edits in long punctuation-free
+  copy no longer pull the unchanged text between them into one oversized frame.
+- Make visual-review frames follow the element that owns the changed paint or
+  layout. Whole-card background, border, radius, shadow, size and layout
+  changes now keep one complete component frame and matching mask hole, while
+  logical block sizing follows the same rule. Inherited copy styling now uses
+  the rendered text ranges instead of its container box, and neighboring cards
+  cannot merge merely because they are close together.
 - Show script-generated Canvas, SVG/HTML charts and dynamic table bodies
   automatically in desktop Edit as one source-Hash-bound read-only bitmap
   projection. The bitmap remains pointer-transparent so comments target the
@@ -45,9 +63,9 @@ Notable user-visible changes are documented here. This project follows Semantic 
   duplicate macOS alert, while missing, timed-out or faulty close coordination
   still uses the native fallback.
 - Replaced subtree-exact AI acceptance with a simpler candidate check: complete
-  visible HTML and an unchanged executable surface remain hard requirements,
-  while coarse page continuity now routes uncertain results into mandatory
-  side-by-side review instead of falsely failing broad but valid edits.
+  visible HTML is the content requirement, while coarse page continuity routes
+  uncertain results into mandatory side-by-side review instead of falsely
+  failing broad but valid edits.
 - Localized terminal AI errors, fixed long error text overlapping the process
   timeline, reduced duplicate terminal actions to one “Return to editing”
   action, and added a restart-safe “Previous run” entry for reopening the last
@@ -70,6 +88,14 @@ Notable user-visible changes are documented here. This project follows Semantic 
   hole rather than a whitespace-crossing rectangle. Frozen user comments also
   appear only on the before page as a persistent read-only “评” marker with a
   hover-only bubble.
+- Reworked linked review scrolling around a single input owner and a cached,
+  monotonic semantic map. The active page now keeps native scrolling and
+  momentum while the follower applies only the newest target per frame;
+  rapid reversals and side switches invalidate stale work, unequal page
+  boundaries no longer pull the longer page to its end, and scroll events no
+  longer rebuild overlays or remeasure comment targets. Page-overview jumps
+  now invalidate the active gesture before returning both panes to the top,
+  and bounded comment coordinates remain available in very long documents.
 - Unified review frames and dimming on one typed change footprint. Copy uses
   leaf-level exact ranges and high-confidence pairing instead of tag/position
   guesses. Connected frames merge without crossing columns, contained ancestor
@@ -91,9 +117,10 @@ Notable user-visible changes are documented here. This project follows Semantic 
   exact candidate HTML, while acceptance keeps review covering the live editor
   until the candidate is rendered, eliminating the waiting-page flash.
 - End Canvas selection and native text editing when the user clicks elsewhere
-  in the page or App, committing the current checkpoint and removing the edit
-  toolbar and selection together. Selection-bound toolbar and comment actions
-  remain stable long enough to complete their intended operation.
+  in the page or App—including blank space in the top bar or comment rail—by
+  committing the current checkpoint and removing the edit toolbar and selection
+  together. Selection-bound toolbar, comment-card and composer actions remain
+  stable long enough to complete their intended operation.
 ## [0.9.5] - 2026-07-31
 
 - Run desktop interactive previews in a short-lived isolated document so

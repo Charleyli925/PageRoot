@@ -19,7 +19,7 @@ PageRoot 让用户在真实本地 HTML 上完成两类工作：
 
 核心合同只有一句：
 
-> 用户选中谁，直接编辑就只 Patch 谁；内部 AI 对一次冻结提交返回完整且可显示、身份与 Hash 一致、没有改变可执行表面并完成事务提交的 HTML，系统才创建下一版，且在用户确认前绝不替换提交前的 HTML；与上一版连续性不足时必须先审阅。
+> 用户选中谁，直接编辑就只 Patch 谁；内部 AI 对一次冻结提交返回完整且可显示、身份与 Hash 一致并完成事务提交的 HTML，系统才创建下一版，且在用户确认前绝不替换提交前的 HTML；作者脚本变化不检测、不提示，与上一版连续性不足时必须先审阅。
 
 ## 2. 目标与非目标
 
@@ -297,7 +297,7 @@ editing
 
 `submitting`、`processing`、`validating`、`committing`、冲突和事务恢复均锁定当前项目。`ready-to-open` 表示新版已经安全生成但尚未成为当前源；界面默认突出“审阅对比”，同时保留“直接打开”。正式审阅页在无保存与激活权限的隔离沙箱中展示冻结当前版与 AI 候选。进入审阅默认显示“双页 + 全部变化 + 上下文可见度 18% + 同步滚动 + 100%”，并把第一处变化作为定位目标。页面模式、变化类型、可见度、定位、页内运行态、滚动与缩放彼此独立，任何控件不得顺带重置其他状态；单双页都最大化利用 Canvas，只保留必要的小间隙。
 
-变化分析产出一份供框选和虚化共同读取的精确 footprint：文案是叶子级增删范围，结构和视觉是最小受影响节点。当前筛选 footprint 之外的整页内容按可见度虚化；导航焦点只负责滚动和活动说明。全部变化把同一位置的文案/结构/视觉框融合并去除祖先重复框，不跨越列或大片无变化区域。内容地图只定位并揭示 Tab，不改变审阅显示逻辑。两页安全动作使用成对稳定 key 双向同步，且不受同步/独立滚动选择影响；无法安全对应时静默降级。所有运行态都不改变候选。通过左上角项目标识退出审阅会回到同一待处理页面；确认“返回 AI 修改前”则结束 active run 并直接恢复修改前 HTML 的编辑状态，但不删除评论、编辑记录、候选 Version、working HTML 或本轮记录，确认提示中的链接直接在 Finder 定位该候选 HTML。“打开 AI 修改后”需要确认；审阅层保持覆盖到候选编辑画布完全就绪后再一次性移除，不得闪现等待 AI 页面，完成三侧 Hash 校验后回到 `editing`。
+变化分析产出一份供框选和虚化共同读取的精确 footprint：文案是叶子级增删范围，结构是最小受影响节点；视觉变化额外记录属性的影响 owner，内容属性使用细粒度内容框，背景、边框、圆角、阴影、尺寸和布局等盒子级属性使用完整组件 border box，并支配同一 owner 内的视觉子框。当前筛选 footprint 之外的整页内容按可见度虚化；导航焦点只负责滚动和活动说明。全部变化把同一位置的文案/结构/视觉框融合，只删除自身未变化且可由后代解释的祖先重复框；不同 `ownerKey` 的邻近组件不跨列或空白融合。内容地图只定位并揭示 Tab，不改变审阅显示逻辑。两页安全动作使用成对稳定 key 双向同步，且不受同步/独立滚动选择影响；无法安全对应时静默降级。所有运行态都不改变候选。通过左上角项目标识退出审阅会回到同一待处理页面；确认“返回 AI 修改前”则结束 active run 并直接恢复修改前 HTML 的编辑状态，但不删除评论、编辑记录、候选 Version、working HTML 或本轮记录，确认提示中的链接直接在 Finder 定位该候选 HTML。“打开 AI 修改后”需要确认；审阅层保持覆盖到候选编辑画布完全就绪后再一次性移除，不得闪现等待 AI 页面，完成三侧 Hash 校验后回到 `editing`。
 
 状态与 active run 的唯一事实源是该项目自己的 `runtime-state.json`。`project.json` 不保存第二份 active run。
 
@@ -346,7 +346,7 @@ editing
 - 实际 output Hash 与 completion 相同。
 - HTML 完整可加载。
 - body 存在可显示内容。
-- 脚本、inline handler、`javascript:` URL 和 meta refresh 与冻结输入一致。
+- 脚本、inline handler、`javascript:` URL 和 meta refresh 作为普通候选内容，不参与检测、分级或提示。
 - 规范化比较可重复。
 - 候选与上一版的粗粒度连续性评估可重复。
 
@@ -368,10 +368,17 @@ editing
 - 保留 Request、Attempt、评论和诊断记录。
 - 解锁当前项目，允许用户修改要求后再次提交。
 
-若比较 Hash 不同，必须生成符合 `candidate-assessment.v1.schema.json` 的记录。完整性、
-可显示 body 或可执行表面失败时保留 output、completion、assessment 和 outcome，不创建
-Version。连续性证据不足时仍创建不可变 Version，但状态为 `attention`，处理页只允许进入
+若比较 Hash 不同，必须生成符合 `candidate-assessment.v1.schema.json` 的记录。完整性或
+可显示 body 失败时保留 output、completion、assessment 和 outcome，不创建 Version。
+脚本、inline handler、可执行 URL 和 refresh 指令变化不检测、不提示。连续性证据不足时仍创建不可变 Version，但状态为 `attention`，处理页只允许进入
 对比审阅；普通正文、属性、结构和样式变化不按评论 TargetRef 判失败。
+
+2026 年 8 月的短期 Developer Preview 产生过两种 `1.0.0` 历史 assessment：省略或
+包含 `executable` 与 `health.executableSurfaceUnchanged`。历史 Version 或已归档终态
+通过单一兼容入口读取两种形态：系统必须从普通文件形式保留的冻结 base 与不可变候选证据
+重算四个 Hash 和当前文档健康/连续性 assessment。结果只在内存中移除退役字段与旧脚本
+结论，不改写 Attempt；归档失败结果仍保持终态，也不以辅助展示记录阻止当前权威 HTML
+继续编辑。
 
 ### 5.10 两阶段 Version 提交
 
@@ -629,8 +636,9 @@ Prompt、AI 返回、附件、剪贴板、文件名/路径、账号、电脑序�
 
 - 每个事务故障点均能恢复到完整旧态或完整新态。
 - 无 commit marker 的候选不出现在历史。
-- 身份、协议、路径、Hash、完整文档、可显示 body 和可执行表面属于硬校验，失败时不创建 Version、不消耗候选号。
+- 身份、协议、路径、Hash、完整文档和可显示 body 属于硬校验，失败时不创建 Version、不消耗候选号；候选脚本内容不参与校验或提示。
 - 与上一版连续性证据不足写入 `candidate-assessment.json` 的 `attention`，不阻断候选 Version，但必须先审阅且不能直接打开。
+- 历史 Version 或已归档终态的已知 Developer Preview assessment 使用任一旧形态时，只有冻结 base、不可变候选证据和四个 Hash 均可重现才可在内存中按当前规则读取；退役字段及脚本结论必须移除，不得修改旧 Attempt 或复活终态。
 - 评论 TargetRef 只指导生成、审阅和历史解释；目标外正文、属性、普通结构与样式联动不再单独生成失败或 waiver。
 - 失败与 no-change 返回编辑后仍可从“上轮处理”恢复，重启后行为一致；界面不显示内部英文异常或校验代码串。
 - v3 运行时、前端历史和发布包不包含旧 Schema Reader、migration report 或 legacy marker 分支。

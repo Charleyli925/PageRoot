@@ -30,6 +30,50 @@ const ORIGINAL_TEXT = "列表项中的文字保持项目符号和缩进。";
 const UPDATED_TEXT = "自动闭环验收通过";
 const SECOND_UPDATED_TEXT = "自动闭环第二版通过";
 const PICKER_TEXT = "项目切换原子发布验收通过";
+const REVIEW_METRIC_BEFORE_CSS = `
+      [data-review-metrics] {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 18px;
+      }
+      [data-review-metric] {
+        display: grid;
+        gap: 10px;
+        padding: 18px;
+        border: 2px solid #d9dcec;
+        border-top: 4px solid #6d5ce7;
+        border-radius: 16px;
+        background: #ffffff;
+        color: #2d2d39;
+      }
+      [data-review-metric] strong { color: #6d5ce7; font-size: 28px; }
+      [data-review-metric] span { color: #555767; }
+      [data-review-metric] small { color: #239b56; }
+      [data-review-inherited-copy] { color: #555767; font-family: sans-serif; }
+      [data-review-logical-card] { block-size: 54px; inline-size: 240px; overflow: hidden; }
+`;
+const REVIEW_METRIC_AFTER_CSS = `
+      [data-review-metrics] {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 18px;
+      }
+      [data-review-metric] {
+        display: grid;
+        gap: 10px;
+        padding: 18px;
+        border: 2px solid #241d58;
+        border-top: 4px solid #6d5ce7;
+        border-radius: 16px;
+        background: #241d58;
+        color: #ffffff;
+      }
+      [data-review-metric] strong { color: #ffffff; font-size: 28px; }
+      [data-review-metric] span { color: #dedcf2; }
+      [data-review-metric] small { color: #9fe6bf; }
+      [data-review-inherited-copy] { color: #ffffff; font-family: sans-serif; }
+      [data-review-logical-card] { block-size: 84px; inline-size: 240px; overflow: hidden; }
+`;
 
 function seedActiveDiskProject(
   isolatedUserData,
@@ -450,14 +494,18 @@ test("a verified AI result stays pending through desktop review until the user a
   test.setTimeout(180_000);
   const fixture = createSourceFixture("generated-ai-loop.html", (source) => source.replace(
     "  </main>",
-    `    <section data-review-regression>
+    `    <style data-review-metric-theme>${REVIEW_METRIC_BEFORE_CSS}    </style>
+    <section data-review-regression>
       <h2>核心结论</h2>
       <div data-review-regression-summary>在守住 EBITA 率底线的基础上，锁单确收实现 +8.52% 增长；21 天日均增量 +4.12 万，累计增量 +86.6 万。</div>
+      <div data-review-semantic-copy>而非「让每个商品卖得更好」（品均基本持平）。这说明增长主要来自有效成交覆盖扩大。</div>
       <div data-review-metrics>
         <article data-review-metric="lock"><strong>+8.52%</strong><span>锁单确收增幅（显著 p&lt;0.01）</span><small>日均 52.5 万 vs 48.4 万</small></article>
         <article data-review-metric="ipv"><strong>+4.49%</strong><span>IPV 增幅（显著 p&lt;0.01）</span><small>日均 63.4 万 vs 60.7 万</small></article>
         <article data-review-metric="cvr"><strong>+6.85%</strong><span>CVR 增幅（显著 p&lt;0.01）</span><small>0.217% vs 0.203%</small></article>
       </div>
+      <div data-review-inherited-copy style="width: 420px; padding: 24px; border: 2px solid #b8b8c7">内容级视觉调整</div>
+      <div data-review-logical-card style="padding: 12px; border: 2px solid #b8b8c7">逻辑尺寸视觉调整</div>
       <div data-review-mixed-copy>
         <p data-review-reference>参考：示例日均确收约207万，增量4.12万/天约占2.0%。</p>
         <p data-review-warning>⚠️ 近6天(7/23-<span><strong>7/28)增幅收窄至负值区间，需</strong></span>持续关注。</p>
@@ -566,6 +614,7 @@ test("a verified AI result stays pending through desktop review until the user a
       expect(base.match(new RegExp(ORIGINAL_TEXT, "gu"))).toHaveLength(1);
       return base
         .replace(ORIGINAL_TEXT, UPDATED_TEXT)
+        .replace(REVIEW_METRIC_BEFORE_CSS, REVIEW_METRIC_AFTER_CSS)
         .replace(
           "      <div data-review-regression-summary>",
           `      <div data-review-added-chart>
@@ -583,6 +632,10 @@ test("a verified AI result stays pending through desktop review until the user a
         .replace(
           '<p data-review-reference>参考：示例日均确收约207万，增量4.12万/天约占2.0%。</p>',
           '<p data-review-reference>参考：示例日均确收约207万，本实验增量4.12万/天约占2.0%。</p>',
+        )
+        .replace(
+          '<div data-review-semantic-copy>而非「让每个商品卖得更好」（品均基本持平）。这说明增长主要来自有效成交覆盖扩大。</div>',
+          '<div data-review-semantic-copy>而非「让每个商品卖得更好」（单品效率整体稳定，增幅仅+0.10%）。这说明增长主要来自有效成交覆盖扩大。</div>',
         )
         .replace(
           '<p data-review-warning>⚠️ 近6天(7/23-<span><strong>7/28)增幅收窄至负值区间，需</strong></span>持续关注。</p>',
@@ -945,6 +998,12 @@ test("a verified AI result stays pending through desktop review until the user a
     expect(warningRemovedText.join(""))
       .not.toContain("7/28)增幅收窄至负值区间，需");
     await expect(beforeReviewFrame.locator(
+      '[data-review-semantic-copy] [data-pageroot-review-text="removed"]',
+    )).toHaveText("品均基本持平");
+    await expect(afterReviewFrame.locator(
+      '[data-review-semantic-copy] [data-pageroot-review-text="added"]',
+    )).toHaveText("单品效率整体稳定，增幅仅+0.10%");
+    await expect(beforeReviewFrame.locator(
       '[data-review-deleted-copy] [data-pageroot-review-text="removed"]',
     ).filter({ hasText: /^待删除第/u })).toHaveCount(3);
     await expect(beforeReviewFrame.locator(
@@ -1233,10 +1292,10 @@ test("a verified AI result stays pending through desktop review until the user a
     }))
       .toBe("rgb(109, 92, 231)");
     await expect(beforeReviewFrame.locator(
-      '[data-review-regression] [data-pageroot-review-style]',
+      '[data-review-regression-summary][data-pageroot-review-style], [data-review-regression-summary] [data-pageroot-review-style]',
     )).toHaveCount(0);
     await expect(afterReviewFrame.locator(
-      '[data-review-regression] [data-pageroot-review-style]',
+      '[data-review-regression-summary][data-pageroot-review-style], [data-review-regression-summary] [data-pageroot-review-style]',
     )).toHaveCount(0);
     await expect(beforeReviewFrame.locator('[data-review-tab-panel="two"]'))
       .toBeVisible();
@@ -1245,6 +1304,87 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect(afterReviewFrame.locator(
       '[data-pageroot-review-overlay-box][data-tone="style"] [data-pageroot-review-overlay-label]',
     ).first()).toHaveText("视觉调整");
+    await expect.poll(async () => Promise.all(
+      [beforeReviewFrame, afterReviewFrame].map((frame) => frame.locator("html").evaluate(() => {
+        const copy = document.querySelector("[data-review-inherited-copy]");
+        if (!copy || copy.getAttribute("data-pageroot-review-style-scope") !== "content") {
+          return false;
+        }
+        const owner = copy.getAttribute("data-pageroot-review-style-owner");
+        const overlay = [...document.querySelectorAll("[data-pageroot-review-overlay-owner]")]
+          .find((candidate) => candidate.getAttribute("data-pageroot-review-overlay-owner") === owner);
+        if (!owner || !overlay || overlay.getAttribute("data-scope") !== "content") return false;
+        const copyRect = copy.getBoundingClientRect();
+        const overlayRect = overlay.getBoundingClientRect();
+        return overlayRect.left >= copyRect.left - 4
+          && overlayRect.top >= copyRect.top - 4
+          && overlayRect.right <= copyRect.right + 4
+          && overlayRect.bottom <= copyRect.bottom + 4
+          && overlayRect.width < copyRect.width * .75
+          && overlayRect.height < copyRect.height * .75;
+      })),
+    ).then((states) => states.every(Boolean))).toBe(true);
+    await expect.poll(async () => Promise.all(
+      [beforeReviewFrame, afterReviewFrame].map((frame) => frame.locator("html").evaluate(() => {
+        const card = document.querySelector("[data-review-logical-card]");
+        if (!card || card.getAttribute("data-pageroot-review-style-scope") !== "box") return false;
+        const owner = card.getAttribute("data-pageroot-review-style-owner");
+        const overlay = [...document.querySelectorAll("[data-pageroot-review-overlay-owner]")]
+          .find((candidate) => candidate.getAttribute("data-pageroot-review-overlay-owner") === owner);
+        if (!owner || !overlay || overlay.getAttribute("data-scope") !== "box") return false;
+        const cardRect = card.getBoundingClientRect();
+        const overlayRect = overlay.getBoundingClientRect();
+        return Math.abs(overlayRect.left - (cardRect.left - 3)) < .75
+          && Math.abs(overlayRect.top - (cardRect.top - 3)) < .75
+          && Math.abs(overlayRect.width - (cardRect.width + 6)) < .75
+          && Math.abs(overlayRect.height - (cardRect.height + 6)) < .75;
+      })),
+    ).then((states) => states.every(Boolean))).toBe(true);
+    await expect.poll(async () => Promise.all(
+      [beforeReviewFrame, afterReviewFrame].map((frame) => frame.locator("html").evaluate(() => {
+        const cards = [...document.querySelectorAll("[data-review-metric]")];
+        if (cards.length !== 3) return false;
+        const owners = cards.map((card) => (
+          card.getAttribute("data-pageroot-review-style-owner") || ""
+        ));
+        if (owners.some((owner) => !owner) || new Set(owners).size !== cards.length) return false;
+        return cards.every((card, index) => {
+          const owner = owners[index];
+          const overlays = [...document.querySelectorAll(
+            '[data-pageroot-review-overlay-owner]',
+          )].filter((candidate) => (
+            candidate.getAttribute("data-pageroot-review-overlay-owner") === owner
+          ));
+          const holes = [...document.querySelectorAll(
+            '[data-pageroot-review-mask-owner]',
+          )].filter((candidate) => (
+            candidate.getAttribute("data-pageroot-review-mask-owner") === owner
+          ));
+          if (overlays.length !== 1 || holes.length !== 1) return false;
+          const overlay = overlays[0];
+          const hole = holes[0];
+          const cardRect = card.getBoundingClientRect();
+          const overlayRect = overlay.getBoundingClientRect();
+          const expectedDocumentLeft = cardRect.left + scrollX - 3;
+          const expectedDocumentTop = cardRect.top + scrollY - 3;
+          const expectedWidth = cardRect.width + 6;
+          const expectedHeight = cardRect.height + 6;
+          return card.getAttribute("data-pageroot-review-style-scope") === "box"
+            && overlay.getAttribute("data-scope") === "box"
+            && overlay.getAttribute("data-shaped") !== "true"
+            && overlay.getAttribute("data-pageroot-review-fragment-count") === "1"
+            && Math.abs(overlayRect.left - (cardRect.left - 3)) < .75
+            && Math.abs(overlayRect.top - (cardRect.top - 3)) < .75
+            && Math.abs(overlayRect.width - expectedWidth) < .75
+            && Math.abs(overlayRect.height - expectedHeight) < .75
+            && Math.abs(Number(hole.getAttribute("data-left")) - expectedDocumentLeft) < .75
+            && Math.abs(Number(hole.getAttribute("data-top")) - expectedDocumentTop) < .75
+            && Math.abs(Number(hole.getAttribute("data-width")) - expectedWidth) < .75
+            && Math.abs(Number(hole.getAttribute("data-height")) - expectedHeight) < .75
+            && Boolean(hole.getAttribute("d"));
+        });
+      })),
+    ).then((states) => states.every(Boolean))).toBe(true);
     await launched.page.getByRole("button", {
       name: /单独查看修改前/,
     }).click();
@@ -1314,17 +1454,73 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect.poll(() => afterViewport.evaluate((element) => element.scrollLeft))
       .toBe(sourceLeft);
 
-    await Promise.all([
-      beforeReviewFrame.locator("html").evaluate(() => window.scrollTo(0, 0)),
-      afterReviewFrame.locator("html").evaluate(() => window.scrollTo(0, 0)),
-    ]);
-    await launched.page.waitForTimeout(80);
+    const originalAfterMaximum = await afterReviewFrame.locator("html").evaluate(() => (
+      Math.max(0, document.documentElement.scrollHeight - innerHeight)
+    ));
+    await afterReviewFrame.locator("html").evaluate(() => {
+      const spacer = document.createElement("div");
+      spacer.setAttribute("data-review-sync-height-probe", "true");
+      spacer.style.height = "1600px";
+      spacer.style.pointerEvents = "none";
+      document.body.append(spacer);
+    });
+    await expect.poll(() => afterReviewFrame.locator("html").evaluate(() => (
+      Math.max(0, document.documentElement.scrollHeight - innerHeight)
+    ))).toBeGreaterThan(originalAfterMaximum + 1_400);
+    await launched.page.waitForTimeout(180);
     await beforeReviewFrame.locator("html").evaluate(() => {
+      const maximum = Math.max(0, document.documentElement.scrollHeight - innerHeight);
+      dispatchEvent(new WheelEvent("wheel", { deltaY: 1_600 }));
+      window.scrollTo(0, maximum);
+    });
+    await expect.poll(() => afterReviewFrame.locator("html").evaluate(() => window.scrollY))
+      .toBeGreaterThan(1);
+    const unequalHeightFollower = await afterReviewFrame.locator("html").evaluate(() => ({
+      top: scrollY,
+      maximum: Math.max(0, document.documentElement.scrollHeight - innerHeight),
+    }));
+    expect(unequalHeightFollower.maximum - unequalHeightFollower.top).toBeGreaterThan(1_000);
+    await beforeReviewFrame.locator("html").evaluate(() => {
+      dispatchEvent(new WheelEvent("wheel", { deltaY: 1_200 }));
+    });
+    await launched.page.waitForTimeout(160);
+    expect(await afterReviewFrame.locator("html").evaluate(() => window.scrollY))
+      .toBeCloseTo(unequalHeightFollower.top, 0);
+    await afterReviewFrame.locator('[data-review-sync-height-probe="true"]')
+      .evaluate((spacer) => spacer.remove());
+    await expect.poll(() => afterReviewFrame.locator("html").evaluate(() => (
+      Math.max(0, document.documentElement.scrollHeight - innerHeight)
+    ))).toBe(originalAfterMaximum);
+
+    await beforeReviewFrame.locator("html").evaluate(() => {
+      dispatchEvent(new WheelEvent("wheel", { deltaY: -120 }));
+      window.scrollTo(0, 0);
+    });
+    await expect.poll(() => afterReviewFrame.locator("html").evaluate(() => window.scrollY))
+      .toBe(0);
+    await launched.page.waitForTimeout(180);
+    const sourceScrollResult = await beforeReviewFrame.locator("html").evaluate(() => {
       const outlines = [...document.querySelectorAll("[data-pageroot-outline-id]")]
         .filter((element) => element.getBoundingClientRect().height > 0);
       const target = outlines[Math.floor(outlines.length / 2)];
-      target?.scrollIntoView({ block: "start", behavior: "auto" });
+      if (!target) return { maximum: 0, target: 0, actual: scrollY, count: 0 };
+      const rect = target.getBoundingClientRect();
+      const nextTop = scrollY + rect.top + rect.height / 2 - innerHeight / 3;
+      dispatchEvent(new WheelEvent("wheel", { deltaY: 900 }));
+      window.scrollTo(0, nextTop);
+      return {
+        maximum: Math.max(0, document.documentElement.scrollHeight - innerHeight),
+        target: nextTop,
+        actual: scrollY,
+        count: outlines.length,
+      };
     });
+    const followerScrollMetrics = await afterReviewFrame.locator("html").evaluate(() => ({
+      maximum: Math.max(0, document.documentElement.scrollHeight - innerHeight),
+      actual: scrollY,
+    }));
+    expect(sourceScrollResult.actual).toBeGreaterThan(1);
+    expect(followerScrollMetrics.maximum).toBeGreaterThan(1);
     const followerScrollSamples = [];
     for (let index = 0; index < 8; index += 1) {
       await launched.page.waitForTimeout(20);
@@ -1332,40 +1528,67 @@ test("a verified AI result stays pending through desktop review until the user a
         () => window.scrollY,
       ));
     }
-    const reducedMotion = await afterReviewFrame.locator("html").evaluate(() => (
-      matchMedia("(prefers-reduced-motion: reduce)").matches
-    ));
-    if (!reducedMotion) {
-      const movingSamples = followerScrollSamples.filter((value) => value > 1);
-      expect(new Set(movingSamples.map((value) => Math.round(value))).size)
-        .toBeGreaterThan(1);
-      movingSamples.slice(1).forEach((value, index) => {
-        expect(value).toBeGreaterThanOrEqual(movingSamples[index] - 1);
-      });
-      expect(movingSamples[0]).toBeLessThan(movingSamples.at(-1));
-    }
-    const visibleOutlineAnchor = (frame) => frame.locator("html").evaluate(() => {
+    expect(followerScrollSamples.at(-1)).toBeGreaterThan(1);
+    const settledFollowerSamples = followerScrollSamples.slice(-5);
+    expect(Math.max(...settledFollowerSamples) - Math.min(...settledFollowerSamples))
+      .toBeLessThanOrEqual(1);
+    const referenceOutlineAnchor = (frame) => frame.locator("html").evaluate(() => {
+      const referenceLine = innerHeight / 3;
       const outlines = [...document.querySelectorAll("[data-pageroot-outline-id]")]
         .filter((element) => element.getBoundingClientRect().height > 0);
-      const anchor = outlines.find((element) => element.getBoundingClientRect().bottom > 1)
+      const anchor = outlines.find((element) => element.getBoundingClientRect().bottom > referenceLine)
         || outlines.at(-1);
       if (!anchor) return { outlineId: "", ratio: 0 };
       const rect = anchor.getBoundingClientRect();
       return {
         outlineId: anchor.getAttribute("data-pageroot-outline-id") || "",
-        ratio: Math.max(0, Math.min(1, (0 - rect.top) / Math.max(1, rect.height))),
+        ratio: Math.max(0, Math.min(1, (referenceLine - rect.top) / Math.max(1, rect.height))),
       };
     });
-    const beforeOutlineAnchor = await visibleOutlineAnchor(beforeReviewFrame);
+    const beforeOutlineAnchor = await referenceOutlineAnchor(beforeReviewFrame);
     expect(beforeOutlineAnchor.outlineId).not.toBe("");
     const afterOutlineProgress = () => afterReviewFrame.locator(
       `[data-pageroot-outline-id="${beforeOutlineAnchor.outlineId}"]`,
     ).evaluate((element) => {
+      const referenceLine = innerHeight / 3;
       const rect = element.getBoundingClientRect();
-      return Math.max(0, Math.min(1, (0 - rect.top) / Math.max(1, rect.height)));
+      return Math.max(0, Math.min(1, (referenceLine - rect.top) / Math.max(1, rect.height)));
     });
     await expect.poll(afterOutlineProgress).toBeCloseTo(beforeOutlineAnchor.ratio, 1);
-    await beforeReviewFrame.locator("html").evaluate(() => window.scrollTo(0, 0));
+
+    await beforeReviewFrame.locator("html").evaluate(() => {
+      const maximum = Math.max(0, document.documentElement.scrollHeight - innerHeight);
+      dispatchEvent(new WheelEvent("wheel", { deltaY: 1_600 }));
+      window.scrollTo(0, maximum * .82);
+      window.scrollTo(0, maximum * .26);
+    });
+    const reversalSamples = [];
+    for (let index = 0; index < 7; index += 1) {
+      await launched.page.waitForTimeout(20);
+      reversalSamples.push(await afterReviewFrame.locator("html").evaluate(() => window.scrollY));
+    }
+    const settledReversalSamples = reversalSamples.slice(-4);
+    expect(Math.max(...settledReversalSamples) - Math.min(...settledReversalSamples))
+      .toBeLessThanOrEqual(1);
+
+    await afterReviewFrame.locator("html").evaluate(() => {
+      const maximum = Math.max(0, document.documentElement.scrollHeight - innerHeight);
+      dispatchEvent(new WheelEvent("wheel", { deltaY: -900 }));
+      window.scrollTo(0, maximum * .18);
+    });
+    const sideSwitchSamples = [];
+    for (let index = 0; index < 7; index += 1) {
+      await launched.page.waitForTimeout(20);
+      sideSwitchSamples.push(await beforeReviewFrame.locator("html").evaluate(() => window.scrollY));
+    }
+    const settledSideSwitchSamples = sideSwitchSamples.slice(-4);
+    expect(Math.max(...settledSideSwitchSamples) - Math.min(...settledSideSwitchSamples))
+      .toBeLessThanOrEqual(1);
+
+    await beforeReviewFrame.locator("html").evaluate(() => {
+      dispatchEvent(new WheelEvent("wheel", { deltaY: -1_200 }));
+      window.scrollTo(0, 0);
+    });
     await expect.poll(() => afterReviewFrame.locator("html").evaluate(() => window.scrollY))
       .toBe(0);
     await beforeReviewFrame.locator("html").evaluate(() => {

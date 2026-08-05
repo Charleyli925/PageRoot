@@ -111,17 +111,18 @@ test("failed runs, expired artifacts and non-PR commits are never trusted", () =
   })).reason, "no_merged_pull_request");
 });
 
-test("GitHub workflows keep one ready-PR source boundary, a light main boundary and a pre-tag artifact boundary", async () => {
-  const [ci, candidate, release] = await Promise.all([
+test("GitHub workflows keep one ready-PR source boundary, an exact-tree main boundary and a pre-tag artifact boundary", async () => {
+  const [ci, feedback, candidate, release] = await Promise.all([
     readFile(path.join(productRoot, ".github/workflows/ci.yml"), "utf8"),
+    readFile(path.join(productRoot, ".github/workflows/pr-feedback.yml"), "utf8"),
     readFile(path.join(productRoot, ".github/workflows/release-candidate.yml"), "utf8"),
     readFile(path.join(productRoot, ".github/workflows/release.yml"), "utf8"),
   ]);
 
-  assert.match(ci, /ready_for_review/u);
-  assert.match(ci, /converted_to_draft/u);
-  assert.match(ci, /name: draft-feedback/u);
-  assert.match(ci, /github\.event\.pull_request\.draft == false/u);
+  assert.match(ci, /types: \[ready_for_review\]/u);
+  assert.doesNotMatch(ci, /workflow_dispatch/u);
+  assert.doesNotMatch(ci, /types: \[[^\]]*synchronize/u);
+  assert.doesNotMatch(ci, /name: (?:draft|pr)-feedback/u);
   assert.match(ci, /name: release-gate/u);
   assert.match(ci, /source-gate-provenance\.mjs create/u);
   assert.match(ci, /steps\.provenance\.outputs\.artifact_name/u);
@@ -139,9 +140,17 @@ test("GitHub workflows keep one ready-PR source boundary, a light main boundary 
   assert.doesNotMatch(ci, /dist-desktop/u);
   assert.doesNotMatch(ci, /Download shared source build/u);
   assert.match(ci, /scripts\/ci-evidence\.mjs run/u);
-  assert.match(ci, /gate:main:auto/u);
   assert.match(ci, /Verify PR result, exact tree, version and freshness/u);
+  assert.doesNotMatch(ci, /name: main-smoke|gate:main:auto/u);
   assert.doesNotMatch(ci, /push:[\s\S]{0,300}gate:release:auto/u);
+
+  assert.match(feedback, /types: \[opened, synchronize, reopened, converted_to_draft\]/u);
+  assert.match(feedback, /name: pr-feedback/u);
+  assert.match(feedback, /--stage pr-feedback/u);
+  assert.match(feedback, /npm run gate:edit -- --base "\$PR_BASE_SHA"/u);
+  assert.match(feedback, /group: pageroot-pr-/u);
+  assert.match(ci, /group: pageroot-pr-/u);
+  assert.doesNotMatch(feedback, /name: release-gate|test:browser:full|test:electron:full/u);
 
   assert.match(candidate, /source-gate-provenance\.mjs verify/u);
   assert.match(candidate, /gate:candidate-app:auto/u);

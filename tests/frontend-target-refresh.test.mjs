@@ -591,7 +591,7 @@ test("spacing menu is controlled and closes for outside toolbar and canvas inter
   assert.match(canvas, /setSpacingMenuOpen\(\(open\) => !open\)/u);
 });
 
-test("outside app or canvas clicks commit editing and clear the active selection", async () => {
+test("outside blank surfaces clear selection while selection-bound actions remain stable", async () => {
   const canvas = await readCanvasArchitecture();
   assert.match(
     canvas,
@@ -606,9 +606,22 @@ test("outside app or canvas clicks commit editing and clear the active selection
     /targetElement\?\.closest\('\[data-html-canvas-preserve-selection="true"\]'\)[\s\S]*?clearSelection\(\)/u,
   );
   const workbench = await readWorkbenchArchitecture();
+  const commentRail = workbench.slice(
+    workbench.indexOf('className="comments-panel comment-rail"'),
+    workbench.indexOf('className="comment-rail-content"'),
+  );
+  assert.doesNotMatch(commentRail, /data-html-canvas-preserve-selection/u);
   assert.match(
     workbench,
-    /className="comments-panel comment-rail"[\s\S]*?data-html-canvas-preserve-selection="true"/u,
+    /className="comment-composer rail-comment-composer"[\s\S]*?data-html-canvas-preserve-selection="true"/u,
+  );
+  assert.match(
+    workbench,
+    /className="comment-card"[\s\S]*?data-html-canvas-preserve-selection="true"/u,
+  );
+  assert.match(
+    workbench,
+    /className="comment-header-action[^"]*"[\s\S]*?data-html-canvas-preserve-selection="true"/u,
   );
   const handleClick = canvas.slice(
     canvas.indexOf("const handleClick = (event: MouseEvent) =>"),

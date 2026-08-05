@@ -5,13 +5,17 @@ import {
 } from "../lib/page-presentation-dom";
 import {
   buildSourceIndex,
-  createTargetRef,
-  resolveTargetRef,
 } from "../lib/source-patch-core.js";
 import {
-  sourceTargetRefForSelection,
-  targetLevelForSelection,
-} from "../lib/canvas-target-rebind.js";
+  mergeReviewTextRanges,
+  reviewTextSimilarity,
+  sentenceAwareTextDifferences,
+} from "../lib/review-text-diff.js";
+import {
+  REVIEW_SOURCE_NODE_ATTRIBUTE,
+  prepareReviewCommentSourceProjection,
+  resolveReviewCommentSourceElement,
+} from "../lib/review-comment-source-map.js";
 import type { CommentItem } from "./types";
 
 export type ReviewFilter = "all" | "text" | "structure" | "style";
@@ -63,7 +67,6 @@ const REVIEW_STYLE_ID = "pageroot-ai-review-style";
 const REVIEW_BOOTSTRAP_ATTRIBUTE = "data-pageroot-ai-review-bootstrap";
 const REVIEW_BASE_ATTRIBUTE = "data-pageroot-ai-review-base";
 const REVIEW_BOOTSTRAP_PATH = "/.pageroot/preview-bootstrap.js";
-
 const REVIEW_DOCUMENT_STYLE = String.raw`
   html {
     --pageroot-review-context-opacity: .18;
@@ -1119,306 +1122,7 @@ function regionGroupLabel(element: Element | null, document: Document): string {
   return "页面内容";
 }
 
-type TextToken = { value: string; start: number; end: number };
 type TextRange = { start: number; end: number };
-
-function tokenizeReviewText(value: string): TextToken[] {
-  const tokens: TextToken[] = [];
-  const matcher = /[\p{Script=Han}]|[\p{Script=Latin}\p{N}_]+|[\p{L}]|[^\s]/gu;
-  for (const match of value.matchAll(matcher)) {
-    const start = match.index ?? 0;
-    tokens.push({ value: match[0], start, end: start + match[0].length });
-  }
-  return tokens;
-}
-
-function reviewTextSimilarity(left: string, right: string): number {
-  if (!left || !right) return 0;
-  if (left === right) return 1;
-  const leftTokens = tokenizeReviewText(left);
-  const rightTokens = tokenizeReviewText(right);
-  if (!leftTokens.length || !rightTokens.length) return 0;
-  const unmatched = unmatchedTokenIndexes(leftTokens, rightTokens);
-  const matched = Math.min(
-    leftTokens.length - unmatched.before.size,
-    rightTokens.length - unmatched.after.size,
-  );
-  return matched / Math.max(leftTokens.length, rightTokens.length);
-}
-
-function unmatchedTokenIndexes(
-  before: TextToken[],
-  after: TextToken[],
-): { before: Set<number>; after: Set<number> } {
-  const beforeUnmatched = new Set(before.map((_, index) => index));
-  const afterUnmatched = new Set(after.map((_, index) => index));
-  if (!before.length || !after.length) return { before: beforeUnmatched, after: afterUnmatched };
-
-  if (before.length * after.length > 60_000) {
-    let prefix = 0;
-    while (
-      prefix < before.length
-      && prefix < after.length
-      && before[prefix].value === after[prefix].value
-    ) {
-      beforeUnmatched.delete(prefix);
-      afterUnmatched.delete(prefix);
-      prefix += 1;
-    }
-    let beforeSuffix = before.length - 1;
-    let afterSuffix = after.length - 1;
-    while (
-      beforeSuffix >= prefix
-      && afterSuffix >= prefix
-      && before[beforeSuffix].value === after[afterSuffix].value
-    ) {
-      beforeUnmatched.delete(beforeSuffix);
-      afterUnmatched.delete(afterSuffix);
-      beforeSuffix -= 1;
-      afterSuffix -= 1;
-    }
-    return { before: beforeUnmatched, after: afterUnmatched };
-  }
-
-  const matrix = Array.from(
-    { length: before.length + 1 },
-    () => new Uint16Array(after.length + 1),
-  );
-  for (let beforeIndex = 1; beforeIndex <= before.length; beforeIndex += 1) {
-    for (let afterIndex = 1; afterIndex <= after.length; afterIndex += 1) {
-      matrix[beforeIndex][afterIndex] = before[beforeIndex - 1].value === after[afterIndex - 1].value
-        ? matrix[beforeIndex - 1][afterIndex - 1] + 1
-        : Math.max(matrix[beforeIndex - 1][afterIndex], matrix[beforeIndex][afterIndex - 1]);
-    }
-  }
-  let beforeIndex = before.length;
-  let afterIndex = after.length;
-  while (beforeIndex > 0 && afterIndex > 0) {
-    if (before[beforeIndex - 1].value === after[afterIndex - 1].value) {
-      beforeUnmatched.delete(beforeIndex - 1);
-      afterUnmatched.delete(afterIndex - 1);
-      beforeIndex -= 1;
-      afterIndex -= 1;
-    } else if (matrix[beforeIndex - 1][afterIndex] >= matrix[beforeIndex][afterIndex - 1]) {
-      beforeIndex -= 1;
-    } else {
-      afterIndex -= 1;
-    }
-  }
-  return { before: beforeUnmatched, after: afterUnmatched };
-}
-
-function rangesForTokens(
-  source: string,
-  tokens: TextToken[],
-  indexes: Set<number>,
-): TextRange[] {
-  const ranges: TextRange[] = [];
-  [...indexes].sort((left, right) => left - right).forEach((index) => {
-    const token = tokens[index];
-    const previous = ranges.at(-1);
-    if (
-      previous
-      && /^[\s，。；：、,.!?！？:;()[\]{}'"“”‘’\-—]*$/u.test(source.slice(previous.end, token.start))
-    ) {
-      previous.end = token.end;
-    } else {
-      ranges.push({ start: token.start, end: token.end });
-    }
-  });
-  return ranges;
-}
-
-function reviewSentenceRanges(value: string): TextRange[] {
-  if (!value) return [];
-  const ranges: TextRange[] = [];
-  const boundary = /[。！？!?；;]+|\n+/gu;
-  let start = 0;
-  const pushRange = (rangeStart: number, rangeEnd: number) => {
-    let cursor = rangeStart;
-    while (rangeEnd - cursor > 96) {
-      const preferredBreak = value.slice(cursor, cursor + 96).search(/\s+(?=\S+$)/u);
-      const end = preferredBreak >= 36 ? cursor + preferredBreak + 1 : cursor + 96;
-      if (value.slice(cursor, end).trim()) ranges.push({ start: cursor, end });
-      cursor = end;
-    }
-    if (value.slice(cursor, rangeEnd).trim()) ranges.push({ start: cursor, end: rangeEnd });
-  };
-  for (const match of value.matchAll(boundary)) {
-    const end = (match.index ?? 0) + match[0].length;
-    pushRange(start, end);
-    start = end;
-  }
-  pushRange(start, value.length);
-  return ranges.length ? ranges : [{ start: 0, end: value.length }];
-}
-
-function unmatchedSentenceIndexes(
-  beforeText: string,
-  beforeRanges: TextRange[],
-  afterText: string,
-  afterRanges: TextRange[],
-): { before: Set<number>; after: Set<number> } {
-  const beforeValues = beforeRanges.map((range) => (
-    beforeText.slice(range.start, range.end).replace(/\s+/g, " ").trim()
-  ));
-  const afterValues = afterRanges.map((range) => (
-    afterText.slice(range.start, range.end).replace(/\s+/g, " ").trim()
-  ));
-  const beforeUnmatched = new Set(beforeValues.map((_, index) => index));
-  const afterUnmatched = new Set(afterValues.map((_, index) => index));
-  if (beforeValues.length * afterValues.length > 40_000) {
-    let prefix = 0;
-    while (
-      prefix < beforeValues.length
-      && prefix < afterValues.length
-      && beforeValues[prefix] === afterValues[prefix]
-    ) {
-      beforeUnmatched.delete(prefix);
-      afterUnmatched.delete(prefix);
-      prefix += 1;
-    }
-    let beforeSuffix = beforeValues.length - 1;
-    let afterSuffix = afterValues.length - 1;
-    while (
-      beforeSuffix >= prefix
-      && afterSuffix >= prefix
-      && beforeValues[beforeSuffix] === afterValues[afterSuffix]
-    ) {
-      beforeUnmatched.delete(beforeSuffix);
-      afterUnmatched.delete(afterSuffix);
-      beforeSuffix -= 1;
-      afterSuffix -= 1;
-    }
-    return { before: beforeUnmatched, after: afterUnmatched };
-  }
-  const matrix = Array.from(
-    { length: beforeValues.length + 1 },
-    () => new Uint16Array(afterValues.length + 1),
-  );
-  for (let beforeIndex = 1; beforeIndex <= beforeValues.length; beforeIndex += 1) {
-    for (let afterIndex = 1; afterIndex <= afterValues.length; afterIndex += 1) {
-      matrix[beforeIndex][afterIndex] = beforeValues[beforeIndex - 1] === afterValues[afterIndex - 1]
-        ? matrix[beforeIndex - 1][afterIndex - 1] + 1
-        : Math.max(matrix[beforeIndex - 1][afterIndex], matrix[beforeIndex][afterIndex - 1]);
-    }
-  }
-  let beforeIndex = beforeValues.length;
-  let afterIndex = afterValues.length;
-  while (beforeIndex > 0 && afterIndex > 0) {
-    if (beforeValues[beforeIndex - 1] === afterValues[afterIndex - 1]) {
-      beforeUnmatched.delete(beforeIndex - 1);
-      afterUnmatched.delete(afterIndex - 1);
-      beforeIndex -= 1;
-      afterIndex -= 1;
-    } else if (matrix[beforeIndex - 1][afterIndex] >= matrix[beforeIndex][afterIndex - 1]) {
-      beforeIndex -= 1;
-    } else {
-      afterIndex -= 1;
-    }
-  }
-  return { before: beforeUnmatched, after: afterUnmatched };
-}
-
-function mergeTextRanges(ranges: TextRange[]): TextRange[] {
-  return [...ranges]
-    .sort((left, right) => left.start - right.start || left.end - right.end)
-    .reduce<TextRange[]>((merged, range) => {
-      const previous = merged.at(-1);
-      if (previous && range.start <= previous.end) {
-        previous.end = Math.max(previous.end, range.end);
-      } else {
-        merged.push({ ...range });
-      }
-      return merged;
-    }, []);
-}
-
-function sentenceAwareTextDifferences(
-  beforeText: string,
-  afterText: string,
-): { before: TextRange[]; after: TextRange[] } {
-  const beforeSentences = reviewSentenceRanges(beforeText);
-  const afterSentences = reviewSentenceRanges(afterText);
-  const unmatchedSentences = unmatchedSentenceIndexes(
-    beforeText,
-    beforeSentences,
-    afterText,
-    afterSentences,
-  );
-  const beforeIndexes = [...unmatchedSentences.before].sort((left, right) => left - right);
-  const afterIndexes = [...unmatchedSentences.after].sort((left, right) => left - right);
-  const beforeDifferences: TextRange[] = [];
-  const afterDifferences: TextRange[] = [];
-  const sentencePairs = beforeIndexes.flatMap((beforeIndex) => afterIndexes.map((afterIndex) => {
-    const beforeRange = beforeSentences[beforeIndex];
-    const afterRange = afterSentences[afterIndex];
-    const similarity = reviewTextSimilarity(
-      beforeText.slice(beforeRange.start, beforeRange.end),
-      afterText.slice(afterRange.start, afterRange.end),
-    );
-    const orderDistance = Math.abs(
-      beforeIndexes.indexOf(beforeIndex) - afterIndexes.indexOf(afterIndex),
-    );
-    return { beforeIndex, afterIndex, similarity, orderDistance };
-  })).filter((pair) => pair.similarity >= .28)
-    .sort((left, right) => (
-      right.similarity - left.similarity || left.orderDistance - right.orderDistance
-    ));
-  const pairedBefore = new Set<number>();
-  const pairedAfter = new Set<number>();
-  sentencePairs.forEach((pair) => {
-    if (pairedBefore.has(pair.beforeIndex) || pairedAfter.has(pair.afterIndex)) return;
-    pairedBefore.add(pair.beforeIndex);
-    pairedAfter.add(pair.afterIndex);
-    const beforeRange = beforeSentences[pair.beforeIndex];
-    const afterRange = afterSentences[pair.afterIndex];
-    const beforeSentence = beforeText.slice(beforeRange.start, beforeRange.end);
-    const afterSentence = afterText.slice(afterRange.start, afterRange.end);
-    const beforeTokens = tokenizeReviewText(beforeSentence);
-    const afterTokens = tokenizeReviewText(afterSentence);
-    const unmatchedTokens = unmatchedTokenIndexes(beforeTokens, afterTokens);
-    const matchedCount = Math.min(
-      beforeTokens.length - unmatchedTokens.before.size,
-      afterTokens.length - unmatchedTokens.after.size,
-    );
-    const similarity = matchedCount / Math.max(1, beforeTokens.length, afterTokens.length);
-    if (similarity < .2) {
-      beforeDifferences.push(beforeRange);
-      afterDifferences.push(afterRange);
-      return;
-    }
-    const beforeTokenRanges = rangesForTokens(
-      beforeSentence,
-      beforeTokens,
-      unmatchedTokens.before,
-    ).map((range) => ({
-      start: beforeRange.start + range.start,
-      end: beforeRange.start + range.end,
-    }));
-    const afterTokenRanges = rangesForTokens(
-      afterSentence,
-      afterTokens,
-      unmatchedTokens.after,
-    ).map((range) => ({
-      start: afterRange.start + range.start,
-      end: afterRange.start + range.end,
-    }));
-    beforeDifferences.push(...beforeTokenRanges);
-    afterDifferences.push(...afterTokenRanges);
-  });
-  beforeIndexes.forEach((index) => {
-    if (!pairedBefore.has(index)) beforeDifferences.push(beforeSentences[index]);
-  });
-  afterIndexes.forEach((index) => {
-    if (!pairedAfter.has(index)) afterDifferences.push(afterSentences[index]);
-  });
-
-  return {
-    before: mergeTextRanges(beforeDifferences),
-    after: mergeTextRanges(afterDifferences),
-  };
-}
 
 function wrapTextRanges(
   inventory: ReviewTextInventory,
@@ -1427,7 +1131,7 @@ function wrapTextRanges(
   changeKind: "added" | "removed" | "before" | "after" = tone,
 ) {
   if (!ranges.length) return;
-  const mergedRanges = mergeTextRanges(ranges);
+  const mergedRanges = mergeReviewTextRanges(ranges);
   inventory.nodes.forEach(({ node, start, end }) => {
     const intersections = mergedRanges
       .map((range) => ({ start: Math.max(start, range.start), end: Math.min(end, range.end) }))
@@ -2002,6 +1706,105 @@ function changedStylesheetSelectors(before: Document, after: Document) {
     }));
 }
 
+type ReviewStyleScope = "box" | "content";
+
+const BOX_OWNED_STYLE_PROPERTIES = new Set([
+  "aspect-ratio",
+  "backdrop-filter",
+  "block-size",
+  "box-shadow",
+  "clear",
+  "clip",
+  "clip-path",
+  "content",
+  "display",
+  "filter",
+  "float",
+  "height",
+  "inset",
+  "isolation",
+  "left",
+  "mask",
+  "mask-image",
+  "max-height",
+  "max-width",
+  "min-height",
+  "min-width",
+  "object-fit",
+  "object-position",
+  "opacity",
+  "order",
+  "overflow",
+  "overflow-x",
+  "overflow-y",
+  "perspective",
+  "position",
+  "right",
+  "top",
+  "transform",
+  "transform-origin",
+  "visibility",
+  "width",
+  "z-index",
+]);
+
+const BOX_OWNED_STYLE_PREFIXES = [
+  "align-",
+  "background",
+  "border",
+  "bottom",
+  "column-",
+  "contain",
+  "flex",
+  "gap",
+  "grid",
+  "inline-size",
+  "justify-",
+  "margin",
+  "mask-",
+  "max-inline-size",
+  "max-block-size",
+  "min-inline-size",
+  "min-block-size",
+  "outline",
+  "padding",
+  "place-",
+  "rotate",
+  "scale",
+  "translate",
+];
+
+function stylePropertyOwnsElementBox(property: string): boolean {
+  const normalized = property.trim().toLowerCase();
+  if (!normalized) return false;
+  if (normalized.startsWith("--") || normalized.startsWith("@")) return true;
+  return BOX_OWNED_STYLE_PROPERTIES.has(normalized)
+    || BOX_OWNED_STYLE_PREFIXES.some((prefix) => normalized.startsWith(prefix));
+}
+
+function styleScopeForProperties(properties: string[]): ReviewStyleScope {
+  return properties.some(stylePropertyOwnsElementBox) ? "box" : "content";
+}
+
+function changedVisualProperties(before: Element, after: Element): string[] {
+  const properties = new Set<string>();
+  VISUAL_ATTRIBUTE_NAMES.forEach((attributeName) => {
+    const beforeValue = before.getAttribute(attributeName);
+    const afterValue = after.getAttribute(attributeName);
+    if (beforeValue === afterValue) return;
+    if (attributeName === "style") {
+      const beforeStyle = styleDeclarationMap(beforeValue || "");
+      const afterStyle = styleDeclarationMap(afterValue || "");
+      [...new Set([...beforeStyle.keys(), ...afterStyle.keys()])].forEach((property) => {
+        if (beforeStyle.get(property) !== afterStyle.get(property)) properties.add(property);
+      });
+      return;
+    }
+    properties.add(`@${attributeName}`);
+  });
+  return [...properties];
+}
+
 function elementsMatchingSelector(root: Element, rawSelector: string): Element[] {
   const selector = rawSelector
     .replace(/::[\w-]+/gu, "")
@@ -2022,22 +1825,47 @@ function elementsMatchingSelector(root: Element, rawSelector: string): Element[]
 function markStyleDifferences(before: Element | null, after: Element | null): boolean {
   if (!before || !after) return false;
   let marked = 0;
+  let ownerSequence = before.ownerDocument.querySelectorAll(
+    "[data-pageroot-review-style-owner]",
+  ).length;
+  const markPair = (
+    beforeElement: Element,
+    afterElement: Element,
+    scope: ReviewStyleScope,
+  ) => {
+    const owner = beforeElement.getAttribute("data-pageroot-review-style-owner")
+      || afterElement.getAttribute("data-pageroot-review-style-owner")
+      || `style-owner-${++ownerSequence}`;
+    const existingScope = beforeElement.getAttribute("data-pageroot-review-style-scope")
+      || afterElement.getAttribute("data-pageroot-review-style-scope");
+    const resolvedScope: ReviewStyleScope = existingScope === "box" || scope === "box"
+      ? "box"
+      : "content";
+    beforeElement.setAttribute("data-pageroot-review-style", "before");
+    afterElement.setAttribute("data-pageroot-review-style", "after");
+    beforeElement.setAttribute("data-pageroot-review-style-owner", owner);
+    afterElement.setAttribute("data-pageroot-review-style-owner", owner);
+    beforeElement.setAttribute("data-pageroot-review-style-scope", resolvedScope);
+    afterElement.setAttribute("data-pageroot-review-style-scope", resolvedScope);
+    marked += 1;
+  };
   for (const pair of pairVisualElements(before, after)) {
     if (selfPresentationSignature(pair.before) === selfPresentationSignature(pair.after)) continue;
-    pair.before.setAttribute("data-pageroot-review-style", "before");
-    pair.after.setAttribute("data-pageroot-review-style", "after");
-    marked += 1;
+    markPair(
+      pair.before,
+      pair.after,
+      styleScopeForProperties(changedVisualProperties(pair.before, pair.after)),
+    );
     if (marked >= 40) break;
   }
   const changedRules = changedStylesheetSelectors(before.ownerDocument, after.ownerDocument);
-  changedRules.forEach(({ selector }) => {
+  changedRules.forEach(({ selector, labels }) => {
+    const scope = styleScopeForProperties(labels);
     selector.split(",").forEach((part) => {
       const beforeMatches = elementsMatchingSelector(before, part).slice(0, 40);
       const afterMatches = elementsMatchingSelector(after, part).slice(0, 40);
       pairSiblingElements(beforeMatches, afterMatches).forEach((afterElement, beforeElement) => {
-        beforeElement.setAttribute("data-pageroot-review-style", "before");
-        afterElement.setAttribute("data-pageroot-review-style", "after");
-        marked += 1;
+        markPair(beforeElement, afterElement, scope);
       });
     });
   });
@@ -2114,40 +1942,27 @@ function attachChangeMarkerMetadata(
 function resolvedCommentElement(
   document: Document,
   sourceIndex: ReturnType<typeof buildSourceIndex>,
+  sourceElementsByNodeId: ReadonlyMap<string, Element>,
   target: HtmlCanvasSelection,
 ): Element | null {
   if (target.selector.trim().toLowerCase() === "body" && target.level === "module") {
     return document.body;
   }
-  try {
-    const resolved = resolveTargetRef(
-      sourceIndex,
-      sourceTargetRefForSelection(target),
-    );
-    if (
-      !resolved.target
-      || resolved.resolution === "ambiguous"
-      || resolved.resolution === "orphaned"
-    ) return null;
-    const sourceElement = resolved.target.type === "element"
-      ? resolved.target
-      : resolved.target.parentId
-        ? sourceIndex.byNodeId.get(resolved.target.parentId)
-        : null;
-    if (!sourceElement || sourceElement.type !== "element") return null;
-    const refreshed = createTargetRef(sourceIndex, sourceElement, {
-      targetId: target.id,
-      label: target.label,
-      level: targetLevelForSelection(target.level),
-    });
-    if (refreshed.selector) {
-      const matches = document.querySelectorAll(refreshed.selector);
-      if (matches.length === 1) return matches[0];
+  const sourceElement = resolveReviewCommentSourceElement(sourceIndex, target);
+  if (sourceElement) {
+    const sourceMappedElement = sourceElementsByNodeId.get(sourceElement.nodeId);
+    if (sourceMappedElement) return sourceMappedElement;
+    if (sourceElement.selector) {
+      try {
+        const matches = document.querySelectorAll(sourceElement.selector);
+        if (matches.length === 1) return matches[0];
+      } catch {
+        // Fall through to the frozen selector below.
+      }
     }
-  } catch {
-    // The frozen target remains authoritative; a selector fallback is allowed
-    // only when it resolves uniquely in that same immutable source document.
   }
+  // The frozen target remains authoritative; a selector fallback is allowed
+  // only when it resolves uniquely in that same immutable source document.
   try {
     const matches = target.selector ? document.querySelectorAll(target.selector) : [];
     return matches.length === 1 ? matches[0] : null;
@@ -2160,18 +1975,31 @@ function annotateReviewComments(
   document: Document,
   sourceHtml: string,
   comments: readonly CommentItem[],
+  indexedSource?: ReturnType<typeof buildSourceIndex> | null,
 ): ReviewCommentGroup[] {
   if (!comments.length || !document.body) return [];
-  let sourceIndex: ReturnType<typeof buildSourceIndex>;
+  let sourceIndex = indexedSource ?? null;
   try {
-    sourceIndex = buildSourceIndex(sourceHtml);
+    sourceIndex ??= buildSourceIndex(sourceHtml);
   } catch {
     return [];
   }
+  const sourceElementsByNodeId = new Map<string, Element>();
+  document.querySelectorAll(`[${REVIEW_SOURCE_NODE_ATTRIBUTE}]`).forEach((element) => {
+    const nodeId = element.getAttribute(REVIEW_SOURCE_NODE_ATTRIBUTE);
+    if (nodeId && !sourceElementsByNodeId.has(nodeId)) {
+      sourceElementsByNodeId.set(nodeId, element);
+    }
+  });
   const groups = new Map<Element, CommentItem[]>();
   comments.forEach((comment) => {
     if (!comment.text.trim() && !comment.attachments?.length) return;
-    const element = resolvedCommentElement(document, sourceIndex, comment.target);
+    const element = resolvedCommentElement(
+      document,
+      sourceIndex,
+      sourceElementsByNodeId,
+      comment.target,
+    );
     if (!element) return;
     const existing = groups.get(element);
     if (existing) existing.push(comment);
@@ -2196,14 +2024,20 @@ function annotateReviewComments(
   });
 }
 
-function clearReservedReviewMarkup(document: Document) {
+function clearReservedReviewMarkup(
+  document: Document,
+  preserveSourceNodeIdentity = false,
+) {
   document.getElementById(REVIEW_STYLE_ID)?.remove();
   document.querySelectorAll(`[${REVIEW_BOOTSTRAP_ATTRIBUTE}]`).forEach((element) => element.remove());
   document.querySelectorAll(`base[${REVIEW_BASE_ATTRIBUTE}]`).forEach((element) => element.remove());
   document.querySelectorAll("*").forEach((element) => {
     [...element.attributes].forEach((attribute) => {
       if (
-        attribute.name.startsWith("data-pageroot-review-")
+        (
+          attribute.name.startsWith("data-pageroot-review-")
+          && (!preserveSourceNodeIdentity || attribute.name !== REVIEW_SOURCE_NODE_ATTRIBUTE)
+        )
         || attribute.name === "data-pageroot-outline-id"
       ) {
         element.removeAttribute(attribute.name);
@@ -2250,14 +2084,14 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
 (() => {
   const sessionId = ${JSON.stringify(sessionId)};
   const side = ${JSON.stringify(side)};
-  let scrollFrame = 0;
-  let followerScrollFrame = 0;
   let overlayFrame = 0;
-  let commentLayoutFrame = 0;
+  let layoutReportFrame = 0;
+  let layoutReportTimer = 0;
   let presentationReadyTimer = 0;
-  let programmaticScrollToken = "";
-  let programmaticScrollTop = 0;
-  let followerScrollTarget = null;
+  let geometryRevision = 0;
+  let activeScrollCommand = null;
+  let followerGestureId = 0;
+  let acceptsFollowerScroll = false;
   let projectionEpoch = 0;
   let projectionTransitioning = false;
   let mirroringPanel = false;
@@ -2303,7 +2137,6 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
     overlayFrame = requestAnimationFrame(renderReviewOverlays);
   };
   const reportReviewCommentLayouts = () => {
-    commentLayoutFrame = 0;
     if (projectionTransitioning) return;
     const commentLayouts = [...document.querySelectorAll('[data-pageroot-review-comment-key]')]
       .flatMap((target) => {
@@ -2318,16 +2151,49 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
         ));
         return [{
           key,
-          left: global ? 22 : Math.max(...rects.map((rect) => rect.right)) + 10,
-          top: global ? 22 : firstRect.top + firstRect.height / 2,
+          left: global ? 22 : Math.max(...rects.map((rect) => rect.right)) + scrollX + 10,
+          top: global ? 22 : firstRect.top + scrollY + firstRect.height / 2,
+          viewportLeft: global ? 22 : Math.max(...rects.map((rect) => rect.right)) + 10,
+          viewportTop: global ? 22 : firstRect.top + firstRect.height / 2,
+          global,
         }];
       });
     post("comment-layout", { commentLayouts });
   };
-  const scheduleCommentLayoutReport = () => {
+  const reportScrollGeometry = () => {
     if (projectionTransitioning) return;
-    cancelAnimationFrame(commentLayoutFrame);
-    commentLayoutFrame = requestAnimationFrame(reportReviewCommentLayouts);
+    geometryRevision += 1;
+    const anchors = [...document.querySelectorAll("[data-pageroot-outline-id]")]
+      .flatMap((element) => {
+        const rect = element.getBoundingClientRect();
+        const id = safeKey(element.getAttribute("data-pageroot-outline-id"));
+        if (!id || rect.width <= 0 || rect.height <= 0) return [];
+        return [{ id, top: Math.max(0, scrollY + rect.top), height: rect.height }];
+      });
+    post("scroll-geometry", {
+      scrollGeometry: {
+        viewportHeight: innerHeight,
+        maximumScroll: Math.max(0, documentHeight() - innerHeight),
+        revision: geometryRevision,
+        anchors,
+      },
+    });
+  };
+  const reportLayoutMetrics = () => {
+    layoutReportFrame = 0;
+    if (projectionTransitioning) return;
+    reportScrollGeometry();
+    reportReviewCommentLayouts();
+  };
+  const scheduleLayoutReport = (immediate = false) => {
+    if (projectionTransitioning) return;
+    clearTimeout(layoutReportTimer);
+    const queueReport = () => {
+      cancelAnimationFrame(layoutReportFrame);
+      layoutReportFrame = requestAnimationFrame(reportLayoutMetrics);
+    };
+    if (immediate) queueReport();
+    else layoutReportTimer = window.setTimeout(queueReport, 80);
   };
   const renderTransitionMask = () => {
     document.querySelector('[data-pageroot-review-transition-mask]')?.remove();
@@ -2355,8 +2221,9 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
       : projectionEpoch + 1;
     projectionTransitioning = true;
     clearTimeout(presentationReadyTimer);
+    clearTimeout(layoutReportTimer);
     cancelAnimationFrame(overlayFrame);
-    cancelAnimationFrame(commentLayoutFrame);
+    cancelAnimationFrame(layoutReportFrame);
     document.querySelector('[data-pageroot-review-projection-layer]')?.remove();
     document.documentElement.dataset.pagerootReviewTransitioning = "true";
     renderTransitionMask();
@@ -2382,6 +2249,7 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
     document.documentElement.removeAttribute("data-pageroot-review-transitioning");
     document.querySelector('[data-pageroot-review-transition-mask]')?.remove();
     renderReviewOverlays();
+    scheduleLayoutReport(true);
   };
   const applyPanelGroupState = (panelKey) => {
     const panel = panelForKey(panelKey);
@@ -2467,29 +2335,6 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
       });
     }
   };
-  const reviewAnchor = () => {
-    const elements = [...document.querySelectorAll("[data-pageroot-outline-id]")]
-      .filter((element) => element.getBoundingClientRect().height > 0);
-    const anchor = elements.find((element) => element.getBoundingClientRect().bottom > 1)
-      || elements.at(-1)
-      || null;
-    const maximumScroll = Math.max(1, documentHeight() - innerHeight);
-    const boundary = scrollY <= 1
-      ? "top"
-      : maximumScroll - scrollY <= 1
-        ? "bottom"
-        : "middle";
-    if (!anchor) {
-      return { outlineId: "", ratio: 0, pageRatio: clamp(scrollY / maximumScroll, 0, 1), boundary };
-    }
-    const rect = anchor.getBoundingClientRect();
-    return {
-      outlineId: anchor.getAttribute("data-pageroot-outline-id") || "",
-      ratio: clamp((0 - rect.top) / Math.max(1, rect.height), 0, 1),
-      pageRatio: clamp(scrollY / maximumScroll, 0, 1),
-      boundary,
-    };
-  };
   const matchingPanelControl = (panel) => {
     const panelKey = panel.getAttribute("data-pageroot-review-panel-key") || "";
     if (panelKey) return panelControlForKey(panelKey);
@@ -2541,80 +2386,44 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
       }
     });
   };
-  const releaseProgrammaticScroll = (token) => {
-    requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => {
-      if (programmaticScrollToken === token) programmaticScrollToken = "";
-    })));
-  };
   const focusTarget = (target, panelPath) => {
     revealTarget(target, panelPath);
     if (!target) return;
     requestAnimationFrame(() => {
       const token = "focus-" + Date.now() + "-" + Math.random();
-      programmaticScrollToken = token;
       target.scrollIntoView({ block: "start", behavior: "auto" });
-      programmaticScrollTop = scrollY;
-      releaseProgrammaticScroll(token);
-      scheduleOverlayRender();
+      activeScrollCommand = { commandId: token, top: scrollY, left: scrollX };
     });
   };
-  const prefersReducedMotion = () => matchMedia?.("(prefers-reduced-motion: reduce)")?.matches === true;
-  const animateFollowerScroll = () => {
-    followerScrollFrame = 0;
-    const target = followerScrollTarget;
-    if (!target) return;
-    const topDelta = target.top - scrollY;
-    const leftDelta = target.left - scrollX;
-    // Chromium may quantize scroll positions to whole CSS pixels. Treat that
-    // final pixel as complete and snap to the exact target; otherwise a 1px
-    // delta eased by .28 can keep rounding back to the same position forever.
-    const finished = Math.abs(topDelta) <= 1 && Math.abs(leftDelta) <= 1;
-    const nextTop = finished ? target.top : scrollY + topDelta * .28;
-    const nextLeft = finished ? target.left : scrollX + leftDelta * .28;
-    programmaticScrollTop = nextTop;
-    scrollTo({ top: nextTop, left: nextLeft, behavior: "auto" });
-    if (finished) {
-      followerScrollTarget = null;
-      releaseProgrammaticScroll(target.token);
-      scheduleOverlayRender();
-      return;
-    }
-    followerScrollFrame = requestAnimationFrame(animateFollowerScroll);
+  const applyScrollOwner = (message) => {
+    const gestureId = Math.max(0, Math.trunc(Number(message.gestureId || 0)));
+    const leader = message.leader === "before" || message.leader === "after"
+      ? message.leader
+      : "";
+    acceptsFollowerScroll = message.linked === true && Boolean(leader) && leader !== side;
+    followerGestureId = acceptsFollowerScroll ? gestureId : 0;
+    if (!acceptsFollowerScroll) activeScrollCommand = null;
   };
-  const syncScroll = (message) => {
-    const token = safeKey(message.syncToken) || ("sync-" + Date.now());
-    programmaticScrollToken = token;
-    const outlineId = String(message.outlineId || "").replace(/[^a-z0-9-]/gi, "");
-    const ratio = clamp(Number(message.ratio || 0), 0, 1);
-    const pageRatio = clamp(Number(message.pageRatio || 0), 0, 1);
-    const target = outlineId
-      ? document.querySelector('[data-pageroot-outline-id="' + outlineId + '"]')
-      : null;
+  const applyScrollPosition = (message) => {
+    const gestureId = Math.max(0, Math.trunc(Number(message.gestureId || 0)));
+    const force = message.force === true;
+    if (!force && (!acceptsFollowerScroll || gestureId !== followerGestureId)) return;
     const maximumScroll = Math.max(0, documentHeight() - innerHeight);
-    let top = pageRatio * maximumScroll;
-    if (message.boundary === "top") {
-      top = 0;
-    } else if (target) {
-      const rect = target.getBoundingClientRect();
-      top = scrollY + rect.top + ratio * Math.max(1, rect.height);
-    } else if (message.boundary === "bottom") {
-      top = pageRatio * maximumScroll;
-    }
-    programmaticScrollTop = clamp(top, 0, maximumScroll);
-    const left = Number(message.left || 0);
-    if (prefersReducedMotion()) {
-      cancelAnimationFrame(followerScrollFrame);
-      followerScrollTarget = null;
-      scrollTo({ top: programmaticScrollTop, left, behavior: "auto" });
-      releaseProgrammaticScroll(token);
-      return;
-    }
-    followerScrollTarget = { top: programmaticScrollTop, left, token };
-    if (!followerScrollFrame) followerScrollFrame = requestAnimationFrame(animateFollowerScroll);
+    const top = clamp(Number(message.top || 0), 0, maximumScroll);
+    const left = Math.max(0, Number(message.left || 0));
+    const commandId = safeKey(message.commandId) || ("review-scroll-" + gestureId);
+    activeScrollCommand = { commandId, top, left };
+    scrollTo({ top, left, behavior: "auto" });
   };
   const markerTypes = (element) => String(
     element.getAttribute("data-pageroot-review-marker-types") || "",
   ).split(/\s+/).filter(Boolean);
+  const recordContains = (outer, inner, tolerance = 2) => (
+    inner.left >= outer.left - tolerance
+    && inner.top >= outer.top - tolerance
+    && inner.right <= outer.right + tolerance
+    && inner.bottom <= outer.bottom + tolerance
+  );
   const recordsAreClose = (left, right, gap = 10) => {
     const horizontalOverlap = Math.max(0, Math.min(left.right, right.right) - Math.max(left.left, right.left));
     const verticalOverlap = Math.max(0, Math.min(left.bottom, right.bottom) - Math.max(left.top, right.top));
@@ -2675,8 +2484,13 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
         bottom: record.bottom,
       }]
     )));
+    const boxOwner = records.find((record) => (
+      record.tone === "style" && record.scope === "box" && record.ownerKey
+    ));
     return {
       ...records[0],
+      ownerKey: boxOwner?.ownerKey || records[0].ownerKey || "",
+      scope: boxOwner ? "box" : records[0].scope,
       fragments,
       left: Math.min(...fragments.map((record) => record.left)),
       top: Math.min(...fragments.map((record) => record.top)),
@@ -2778,6 +2592,28 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
     const rightArea = Math.max(1, (right.right - right.left) * (right.bottom - right.top));
     return intersection / Math.min(leftArea, rightArea) >= .62;
   };
+  const contentStyleRects = (element) => {
+    const rects = [];
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    let node = walker.nextNode();
+    while (node) {
+      const parent = node.parentElement;
+      if (
+        (node.textContent || "").trim()
+        && parent
+        && !parent.closest("script, style, noscript, template")
+      ) {
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        [...range.getClientRects()]
+          .filter((rect) => rect.width > 1 && rect.height > 1)
+          .forEach((rect) => rects.push(rect));
+        range.detach();
+      }
+      node = walker.nextNode();
+    }
+    return rects.length ? rects : [element.getBoundingClientRect()];
+  };
   function renderReviewOverlays() {
     if (projectionTransitioning) return;
     document.querySelector('[data-pageroot-review-projection-layer]')?.remove();
@@ -2791,7 +2627,10 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
         [...element.getClientRects()]
           .filter((rect) => rect.width > 1 && rect.height > 1)
           .forEach((rect) => records.push({
+            element,
             changeId: element.getAttribute("data-pageroot-review-marker") || "",
+            ownerKey: "",
+            scope: "text",
             summary: element.getAttribute("data-pageroot-review-summary") || "",
             tone: textTone,
             tones: [textTone],
@@ -2810,36 +2649,63 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
         : '[data-pageroot-review-marker-types~="' + filter + '"]';
     if (selector) [...document.querySelectorAll(selector)]
       .forEach((element) => {
-        const rect = element.getBoundingClientRect();
         const types = markerTypes(element).filter((type) => filter === "all" || type === filter);
-        types.forEach((type) => records.push({
-          changeId: element.getAttribute("data-pageroot-review-marker") || "",
-          summary: element.getAttribute("data-pageroot-review-summary") || "",
-          tone: type,
-          tones: [type],
-          types: [type],
-          left: rect.left + scrollX,
-          top: rect.top + scrollY,
-          right: rect.right + scrollX,
-          bottom: rect.bottom + scrollY,
-        }));
+        types.forEach((type) => {
+          const scope = type === "style"
+            ? element.getAttribute("data-pageroot-review-style-scope") || "content"
+            : "element";
+          const rects = type === "style" && scope === "content"
+            ? contentStyleRects(element)
+            : [element.getBoundingClientRect()];
+          rects.forEach((rect) => records.push({
+            element,
+            changeId: element.getAttribute("data-pageroot-review-marker") || "",
+            ownerKey: type === "style"
+              ? element.getAttribute("data-pageroot-review-style-owner") || ""
+              : "",
+            scope,
+            summary: type === "style"
+              ? "视觉调整"
+              : element.getAttribute("data-pageroot-review-summary") || "",
+            tone: type,
+            tones: [type],
+            types: [type],
+            left: rect.left + scrollX,
+            top: rect.top + scrollY,
+            right: rect.right + scrollX,
+            bottom: rect.bottom + scrollY,
+          }));
+        });
       });
     const visibleRecords = records
       .filter((rect) => rect.right - rect.left > 1 && rect.bottom - rect.top > 1)
       .sort((left, right) => left.changeId.localeCompare(right.changeId) || left.top - right.top || left.left - right.left);
-    const minimalRecords = visibleRecords.filter((record, index) => !visibleRecords.some((candidate, candidateIndex) => {
-      if (index === candidateIndex || record.changeId !== candidate.changeId || record.tone !== candidate.tone) return false;
-      const recordArea = (record.right - record.left) * (record.bottom - record.top);
-      const candidateArea = (candidate.right - candidate.left) * (candidate.bottom - candidate.top);
-      return candidateArea < recordArea * .86
-        && candidate.left >= record.left - 2
-        && candidate.top >= record.top - 2
-        && candidate.right <= record.right + 2
-        && candidate.bottom <= record.bottom + 2;
-    }));
+    const dominantStyleBoxes = visibleRecords.filter((record) => (
+      record.tone === "style" && record.scope === "box"
+    ));
+    const minimalRecords = visibleRecords.filter((record, index) => {
+      if (record.tone === "style") {
+        const dominatedByBoxOwner = dominantStyleBoxes.some((candidate) => (
+          candidate !== record
+          && candidate.changeId === record.changeId
+          && candidate.ownerKey !== record.ownerKey
+          && candidate.element.contains(record.element)
+          && recordContains(candidate, record)
+        ));
+        if (dominatedByBoxOwner) return false;
+        if (record.scope === "box") return true;
+      }
+      return !visibleRecords.some((candidate, candidateIndex) => {
+        if (index === candidateIndex || record.changeId !== candidate.changeId || record.tone !== candidate.tone) return false;
+        const recordArea = (record.right - record.left) * (record.bottom - record.top);
+        const candidateArea = (candidate.right - candidate.left) * (candidate.bottom - candidate.top);
+        return candidateArea < recordArea * .86 && recordContains(record, candidate);
+      });
+    });
     let merged = mergeConnectedRecords(minimalRecords, (left, right) => (
       left.changeId === right.changeId
       && left.tone === right.tone
+      && (left.tone !== "style" || left.ownerKey === right.ownerKey)
       && recordsAreClose(left, right)
     ));
     if (filter === "all") {
@@ -2888,6 +2754,9 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
       record.pathData = pathData;
       const hole = document.createElementNS(namespace, "path");
       hole.setAttribute("data-pageroot-review-mask-hole", record.changeId);
+      if (record.ownerKey) {
+        hole.setAttribute("data-pageroot-review-mask-owner", record.ownerKey);
+      }
       const left = record.left - inset;
       const top = record.top - inset;
       const width = record.right - record.left + inset * 2;
@@ -2917,9 +2786,13 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
     merged.forEach((record) => {
       const box = document.createElement("div");
       box.setAttribute("data-pageroot-review-overlay-box", record.changeId);
+      if (record.ownerKey) {
+        box.setAttribute("data-pageroot-review-overlay-owner", record.ownerKey);
+      }
       box.dataset.tone = record.tone;
       box.dataset.tones = record.tones.join(" ");
       box.dataset.types = record.types.join(" ");
+      box.dataset.scope = record.scope || "element";
       box.dataset.summary = record.summary;
       box.setAttribute(
         "data-pageroot-review-fragment-count",
@@ -2955,7 +2828,7 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
     });
     document.body.append(layer);
     document.documentElement.dataset.pagerootReviewOverlays = merged.length ? "true" : "false";
-    scheduleCommentLayoutReport();
+    scheduleLayoutReport();
   }
   const applyState = (state) => {
     currentState = { ...currentState, ...state };
@@ -2987,7 +2860,8 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
     const message = event.data;
     if (!message || message.source !== "pageroot-ai-review-parent" || message.sessionId !== sessionId) return;
     if (message.type === "state") applyState(message.state || {});
-    if (message.type === "sync-scroll") syncScroll(message);
+    if (message.type === "scroll-owner") applyScrollOwner(message);
+    if (message.type === "set-scroll-position") applyScrollPosition(message);
     if (message.type === "begin-presentation") beginProjectionTransition(message.presentationEpoch);
     if (message.type === "activate-panel") {
       if (!projectionTransitioning) beginProjectionTransition(message.presentationEpoch);
@@ -3071,31 +2945,54 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
   addEventListener("input", postControlState, true);
   addEventListener("change", postControlState, true);
   addEventListener("submit", (event) => event.preventDefault(), true);
+  const announceScrollIntent = () => {
+    activeScrollCommand = null;
+    acceptsFollowerScroll = false;
+    followerGestureId = 0;
+    post("scroll-intent");
+  };
+  addEventListener("wheel", announceScrollIntent, { capture: true, passive: true });
+  addEventListener("touchstart", announceScrollIntent, { capture: true, passive: true });
+  addEventListener("pointerdown", announceScrollIntent, { capture: true, passive: true });
+  addEventListener("keydown", (event) => {
+    const scrollKeys = new Set([
+      "ArrowUp",
+      "ArrowDown",
+      "PageUp",
+      "PageDown",
+      "Home",
+      "End",
+      " ",
+      "Spacebar",
+    ]);
+    if (!scrollKeys.has(event.key)) return;
+    if (
+      event.target instanceof Element
+      && event.target.closest('input, textarea, select, [contenteditable="true"]')
+    ) return;
+    announceScrollIntent();
+  }, true);
   addEventListener("scroll", () => {
-    scheduleCommentLayoutReport();
-    if (programmaticScrollToken) {
-      if (Math.abs(scrollY - programmaticScrollTop) <= 1) {
-        scheduleOverlayRender();
-        return;
-      }
-      // A new scroll that diverges from the animation target is fresh input,
-      // not an echo. Stop the stale follower animation so it cannot suppress
-      // or overwrite a user-return-to-top (or any later source scroll).
-      cancelAnimationFrame(followerScrollFrame);
-      followerScrollFrame = 0;
-      followerScrollTarget = null;
-      programmaticScrollToken = "";
-    }
-    cancelAnimationFrame(scrollFrame);
-    scrollFrame = requestAnimationFrame(() => {
-      post("scroll", { ...reviewAnchor(), left: scrollX });
+    const command = activeScrollCommand;
+    const commandMatches = command
+      && Math.abs(scrollY - command.top) <= 1
+      && Math.abs(scrollX - command.left) <= 1;
+    if (command && !commandMatches) activeScrollCommand = null;
+    post("scroll-position", {
+      top: scrollY,
+      left: scrollX,
+      commandId: commandMatches ? command.commandId : "",
     });
+    if (commandMatches && activeScrollCommand === command) activeScrollCommand = null;
   }, { passive: true });
   const handleLayoutChange = () => {
     if (projectionTransitioning) {
       renderTransitionMask();
       schedulePresentationReady(projectionEpoch);
-    } else scheduleOverlayRender();
+    } else {
+      scheduleOverlayRender();
+      scheduleLayoutReport();
+    }
   };
   addEventListener("resize", handleLayoutChange, { passive: true });
   const mutationObserver = new MutationObserver((mutations) => {
@@ -3126,7 +3023,11 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
   const ready = () => {
     announceReady();
     scheduleOverlayRender();
-    document.fonts?.ready?.then(scheduleOverlayRender).catch(() => {});
+    scheduleLayoutReport(true);
+    document.fonts?.ready?.then(() => {
+      scheduleOverlayRender();
+      scheduleLayoutReport();
+    }).catch(() => {});
   };
   if (document.readyState === "loading") addEventListener("DOMContentLoaded", ready, { once: true });
   else ready();
@@ -3212,10 +3113,24 @@ export function buildReviewDocuments(
     };
   }
   const parser = new DOMParser();
-  const beforeDocument = parser.parseFromString(beforeHtml, "text/html");
+  const comments = options.comments || [];
+  const sourceProjection = prepareReviewCommentSourceProjection(
+    beforeHtml,
+    comments.length > 0,
+  );
+  const beforeDocument = parser.parseFromString(sourceProjection.html, "text/html");
   const afterDocument = parser.parseFromString(afterHtml, "text/html");
-  clearReservedReviewMarkup(beforeDocument);
+  clearReservedReviewMarkup(beforeDocument, sourceProjection.projected);
   clearReservedReviewMarkup(afterDocument);
+  const commentGroups = annotateReviewComments(
+    beforeDocument,
+    beforeHtml,
+    comments,
+    sourceProjection.sourceIndex,
+  );
+  beforeDocument.querySelectorAll(`[${REVIEW_SOURCE_NODE_ATTRIBUTE}]`).forEach((element) => {
+    element.removeAttribute(REVIEW_SOURCE_NODE_ATTRIBUTE);
+  });
   annotatePanelPairs(beforeDocument, afterDocument);
   annotateActionPairs(beforeDocument, afterDocument);
   const pairs = pairSections(
@@ -3278,12 +3193,6 @@ export function buildReviewDocuments(
       ...(movement ? { movement } : {}),
     });
   });
-
-  const commentGroups = annotateReviewComments(
-    beforeDocument,
-    beforeHtml,
-    options.comments || [],
-  );
 
   const preparedBefore = prepareDocument(
     beforeDocument,

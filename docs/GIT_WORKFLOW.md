@@ -7,9 +7,9 @@
 ```text
 GitHub main
   -> short-lived branch
-  -> draft Pull Request + impact-selected feedback
-  -> ready Pull Request + complete source gate + Tree Hash attestation
-  -> main commit + exact-tree verification + fast smoke
+  -> Pull Request updates + impact-selected feedback
+  -> one explicit draft-to-ready promotion + complete source gate + Tree Hash attestation
+  -> main commit + exact-tree/version/PR attestation verification
   -> pre-tag installer candidate + packaged-runtime verification
   -> exact candidate verification + immutable version tag + GitHub Release
 ```
@@ -78,6 +78,24 @@ git push -u origin feature/short-name
 ```
 
 Open a Pull Request, wait for required CI, review the final diff, then squash-merge. Delete the merged branch. Never use a DMG, `.app`, copied folder or local backup as the basis for a new edit.
+
+Every Pull Request starts as draft. `opened`, `synchronize`, `reopened` and
+`converted_to_draft` events run only the impact-selected `PR Feedback`
+workflow. When the intended head is frozen, first update it onto current
+`origin/main` and confirm no other PR is occupying the source-candidate lane;
+then mark it ready. That single `ready_for_review` transition runs the complete
+source matrix and is the only event that can create the required
+`release-gate` and exact-tree attestation.
+
+Do not promote several parallel PRs at once. Keep other reviewed work draft
+until the preceding candidate merges, then update the next branch and promote
+it. A commit pushed after promotion cancels any in-flight stale candidate and
+receives only PR feedback. The new head cannot merge because it has no
+`release-gate`; convert it to draft and mark it ready again only after the new
+head is final. A PR opened non-draft likewise receives feedback only and must
+be re-armed through draft before promotion. `main` accepts the resulting tree
+only when provenance verification finds the fresh matching attestation; it
+does not repeat Node or Browser smoke after that equality proof.
 
 GitHub deletes the remote task branch after squash merge. Local worktrees are a
 separate lifecycle: run `npm run task:audit` from the primary checkout, preview

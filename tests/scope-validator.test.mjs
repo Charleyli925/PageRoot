@@ -25,7 +25,10 @@ import {
   createInsertionPointTargetRef,
   createTargetRef,
 } from "../app/lib/target-resolver.js";
-import { assessHtmlCandidate } from "../scripts/candidate-assessment.mjs";
+import {
+  assessHtmlCandidate,
+  normalizeCandidateAssessmentPolicy,
+} from "../scripts/candidate-assessment.mjs";
 import { injectManagedMeta, sha256 } from "../scripts/lifecycle-core.mjs";
 import { validateScope } from "../scripts/scope-validator.mjs";
 
@@ -112,7 +115,7 @@ async function scopeSchemaValidator() {
   return ajv.compile(schema);
 }
 
-test("candidate assessment distinguishes usable edits, uncertain continuity, and unusable HTML", () => {
+test("candidate assessment ignores script changes while checking document health and continuity", () => {
   const baseHtml = documentHtml();
   const related = assessHtmlCandidate({
     baseHtml,
@@ -137,17 +140,57 @@ test("candidate assessment distinguishes usable edits, uncertain continuity, and
   assert.equal(empty.status, "blocked");
   assert.deepEqual(empty.issueCodes, ["HTML_BODY_EMPTY"]);
 
-  const executableChange = assessHtmlCandidate({
+  const scriptChange = assessHtmlCandidate({
     baseHtml,
     outputHtml: baseHtml.replace(
       "window.scopeFixture = 1",
       "window.scopeFixture = 2",
     ),
   });
-  assert.equal(executableChange.status, "blocked");
+  assert.equal(scriptChange.status, "ready");
+  assert.deepEqual(scriptChange.issueCodes, []);
+  assert.equal("executable" in scriptChange, false);
+  assert.equal("executableSurfaceUnchanged" in scriptChange.health, false);
+});
+
+test("historical script-change conclusions are normalized out of current policy", () => {
+  const current = assessHtmlCandidate({
+    baseHtml: documentHtml(),
+    outputHtml: documentHtml().replace(
+      "window.scopeFixture = 1",
+      "window.scopeFixture = 2",
+    ),
+  });
+  const legacy = {
+    ...current,
+    status: "blocked",
+    issueCodes: ["EXECUTABLE_CONTENT_CHANGED"],
+    health: {
+      ...current.health,
+      executableSurfaceUnchanged: false,
+    },
+    executable: {
+      unchanged: false,
+      baseCount: 1,
+      outputCount: 1,
+      changedCount: 1,
+    },
+  };
+
+  const normalized = normalizeCandidateAssessmentPolicy(legacy);
+  assert.equal(normalized.status, "ready");
+  assert.deepEqual(normalized.issueCodes, []);
+  assert.equal("executable" in normalized, false);
+  assert.equal("executableSurfaceUnchanged" in normalized.health, false);
+
+  const currentRecordWithUnexpectedConclusion = {
+    ...current,
+    status: "blocked",
+    issueCodes: ["UNEXPECTED_CONCLUSION"],
+  };
   assert.deepEqual(
-    executableChange.issueCodes,
-    ["EXECUTABLE_CONTENT_CHANGED"],
+    normalizeCandidateAssessmentPolicy(currentRecordWithUnexpectedConclusion),
+    currentRecordWithUnexpectedConclusion,
   );
 });
 
@@ -985,7 +1028,7 @@ async function runFinalizer(workspace, run) {
   ]);
 }
 
-test("workspace lifecycle treats comment targets as guidance and blocks executable changes", async (t) => {
+test("workspace lifecycle treats comment targets as guidance for every HTML change", async (t) => {
   const root = await realpath(
     await mkdtemp(join(tmpdir(), "html-ai-text-scope-")),
   );
@@ -1017,7 +1060,7 @@ test("workspace lifecycle treats comment targets as guidance and blocks executab
   assert.equal(opened.registered, true);
   const frozenSource = await readFile(sourcePath, "utf8");
   const target = textTarget(frozenSource);
-  const rejectedCases = [
+  const candidateCases = [
     [
       "script",
       (html) => html.replace(
@@ -1038,10 +1081,9 @@ test("workspace lifecycle treats comment targets as guidance and blocks executab
     ],
   ];
 
-  let blockedCaseCount = 0;
   let readyCaseCount = 0;
   let nextVersionOrdinal = 2;
-  for (const [expectedKind, mutate] of rejectedCases) {
+  for (const [expectedKind, mutate] of candidateCases) {
     const run = (
       await postJson(bridge.baseUrl, "/request", {
         sourcePath,
@@ -1049,7 +1091,7 @@ test("workspace lifecycle treats comment targets as guidance and blocks executab
         documentId: opened.documentId,
         expectedSourceSha256: opened.currentHtmlSha256,
         freezeCutoffRevision: 0,
-        summary: `拒绝 text scope ${expectedKind} widening`,
+        summary: `允许 text scope ${expectedKind} widening`,
         targets: [target],
         instructions: [
           {
@@ -1074,34 +1116,27 @@ test("workspace lifecycle treats comment targets as guidance and blocks executab
     const candidateAssessment = status.body.candidateAssessment || JSON.parse(
       await readFile(join(run.attemptPath, "candidate-assessment.json"), "utf8"),
     );
-    if (status.body.status === "error") {
-      blockedCaseCount += 1;
-      assert.equal(expectedKind, "script");
-      assert.equal(status.body.error.code, "EXECUTABLE_CONTENT_CHANGED");
-      assert.equal(candidateAssessment.status, "blocked");
-    } else {
-      readyCaseCount += 1;
-      assert.equal(status.body.status, "ready-to-open");
-      assert.equal(candidateAssessment.status, "ready");
-      const cancelled = await postJson(
-        bridge.baseUrl,
-        "/active-run/cancel",
-        {
-          sourcePath,
-          requestId: run.requestId,
-          attemptId: run.attemptId,
-        },
-      );
-      assert.equal(cancelled.response.status, 200);
-      assert.equal(cancelled.body.status, "cancelled");
-      nextVersionOrdinal += 1;
-    }
+    readyCaseCount += 1;
+    assert.equal(status.body.status, "ready-to-open");
+    assert.equal(candidateAssessment.status, "ready");
+    assert.equal("executable" in candidateAssessment, false);
+    const cancelled = await postJson(
+      bridge.baseUrl,
+      "/active-run/cancel",
+      {
+        sourcePath,
+        requestId: run.requestId,
+        attemptId: run.attemptId,
+      },
+    );
+    assert.equal(cancelled.response.status, 200);
+    assert.equal(cancelled.body.status, "cancelled");
+    nextVersionOrdinal += 1;
     await assert.rejects(access(join(run.attemptPath, "scope-report.json")));
     await assert.rejects(access(join(run.attemptPath, "validation-review.json")));
     assert.equal(await readFile(sourcePath, "utf8"), frozenSource);
   }
-  assert.equal(blockedCaseCount, 1);
-  assert.equal(readyCaseCount, 2);
+  assert.equal(readyCaseCount, 3);
 
   const acceptedRun = (
     await postJson(bridge.baseUrl, "/request", {
@@ -1245,7 +1280,7 @@ test("an unrelated but usable HTML candidate is preserved with mandatory-review 
   );
 });
 
-test("workspace lifecycle accepts broad page edits but still blocks changed executable content", async (t) => {
+test("workspace lifecycle accepts broad page and script edits without content-based blocking", async (t) => {
   const root = await realpath(
     await mkdtemp(join(tmpdir(), "html-ai-scope-lifecycle-")),
   );
@@ -1276,11 +1311,10 @@ test("workspace lifecycle accepts broad page edits but still blocks changed exec
   ).body;
   assert.equal(opened.registered, true);
   const target = regularTarget();
-  const violations = [
-    ["text", false, (html) => html.replace("目标外正文", "越界正文")],
+  const candidateCases = [
+    ["text", (html) => html.replace("目标外正文", "越界正文")],
     [
       "attribute",
-      false,
       (html) =>
         html.replace(
           '<aside id="outside">',
@@ -1289,17 +1323,15 @@ test("workspace lifecycle accepts broad page edits but still blocks changed exec
     ],
     [
       "structure",
-      false,
       (html) =>
         html.replace(
           '<aside id="outside">',
           '<section id="rogue">越界结构</section><aside id="outside">',
         ),
     ],
-    ["shared-css", false, (html) => html.replace("color: red", "color: blue")],
+    ["shared-css", (html) => html.replace("color: red", "color: blue")],
     [
       "script",
-      true,
       (html) =>
         html.replace("window.scopeFixture = 1", "window.scopeFixture = 2"),
     ],
@@ -1308,7 +1340,7 @@ test("workspace lifecycle accepts broad page edits but still blocks changed exec
   let expectedSourceSha256 = opened.currentHtmlSha256;
   let nextVersionOrdinal = 2;
   const expectedVersionIds = ["ver_0001"];
-  for (const [expectedKind, hardFailure, mutate] of violations) {
+  for (const [expectedKind, mutate] of candidateCases) {
     const run = (
       await postJson(bridge.baseUrl, "/request", {
         sourcePath,
@@ -1316,7 +1348,7 @@ test("workspace lifecycle accepts broad page edits but still blocks changed exec
         documentId: opened.documentId,
         expectedSourceSha256,
         freezeCutoffRevision: 0,
-        summary: `拒绝目标外 ${expectedKind}`,
+        summary: `允许目标外 ${expectedKind}`,
         targets: [target],
         instructions: [
           {
@@ -1338,17 +1370,8 @@ test("workspace lifecycle accepts broad page edits but still blocks changed exec
       `/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
     );
     assert.equal(status.response.status, 200, expectedKind);
-    assert.equal(
-      status.body.status,
-      hardFailure ? "error" : "ready-to-open",
-      expectedKind,
-    );
-    if (hardFailure) {
-      assert.equal(status.body.error.code, "EXECUTABLE_CONTENT_CHANGED");
-      assert.equal(status.body.candidateAssessment.status, "blocked");
-    } else {
-      assert.equal(status.body.candidateAssessment.status, "ready", expectedKind);
-    }
+    assert.equal(status.body.status, "ready-to-open", expectedKind);
+    assert.equal(status.body.candidateAssessment.status, "ready", expectedKind);
     const assessmentPath = join(run.attemptPath, "candidate-assessment.json");
     const outcomePath = join(run.attemptPath, "outcome.json");
     await Promise.all([
@@ -1360,43 +1383,27 @@ test("workspace lifecycle accepts broad page edits but still blocks changed exec
     const persistedAssessment = JSON.parse(
       await readFile(assessmentPath, "utf8"),
     );
-    assert.equal(
-      persistedAssessment.status,
-      hardFailure ? "blocked" : "ready",
-      expectedKind,
-    );
+    assert.equal(persistedAssessment.status, "ready", expectedKind);
+    assert.equal("executable" in persistedAssessment, false, expectedKind);
     await assert.rejects(access(join(run.attemptPath, "scope-report.json")));
     await assert.rejects(access(join(run.attemptPath, "validation-review.json")));
-    if (!hardFailure) {
-      const cancelled = await postJson(
-        bridge.baseUrl,
-        "/active-run/cancel",
-        {
-          sourcePath,
-          requestId: run.requestId,
-          attemptId: run.attemptId,
-        },
-      );
-      assert.equal(cancelled.response.status, 200, expectedKind);
-      assert.equal(cancelled.body.status, "cancelled", expectedKind);
-      expectedVersionIds.push(run.candidateVersionId);
-      nextVersionOrdinal += 1;
-    }
+    const cancelled = await postJson(
+      bridge.baseUrl,
+      "/active-run/cancel",
+      {
+        sourcePath,
+        requestId: run.requestId,
+        attemptId: run.attemptId,
+      },
+    );
+    assert.equal(cancelled.response.status, 200, expectedKind);
+    assert.equal(cancelled.body.status, "cancelled", expectedKind);
+    expectedVersionIds.push(run.candidateVersionId);
+    nextVersionOrdinal += 1;
     const persistedOutcome = JSON.parse(
       await readFile(outcomePath, "utf8"),
     );
-    assert.equal(
-      persistedOutcome.status,
-      hardFailure ? "failed" : "cancelled",
-      expectedKind,
-    );
-    if (hardFailure) {
-      assert.equal(
-        persistedOutcome.error.code,
-        "EXECUTABLE_CONTENT_CHANGED",
-        expectedKind,
-      );
-    }
+    assert.equal(persistedOutcome.status, "cancelled", expectedKind);
     const projectRoot = opened.projectRoot;
     const versionIds = (await readdir(join(projectRoot, "versions")))
       .filter((name) => /^ver_\d+$/.test(name));

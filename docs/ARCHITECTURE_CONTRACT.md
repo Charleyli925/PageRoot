@@ -276,18 +276,29 @@ binding, then drains the aggregate.
 
 ## Compatibility
 
-Compatibility belongs at one versioned decoder or route adapter. Each fallback
-must state the old producer, removal condition and focused coverage. Domain and
-view code use only current canonical states. Inline aliases and permanent
-“just in case” branches are not allowed.
+Compatibility belongs at one versioned decoder or route adapter per retired
+producer. Each fallback must state the old producer, removal condition and
+focused coverage. Domain and view code use only current canonical states.
+Inline aliases and permanent “just in case” branches are not allowed.
 
-The one compatibility decoder accepts only complete PageRoot 0.9.0 v3 project
-records whose registry, `project.json`, initial Version and existing
-`projects/<projectId>` directory prove one identity. It adds `displayName`,
-`createdAt` and `storageDirectoryName=projectId` in place without renaming or
-scanning directories. Remove this adapter only when 0.9.0 project records leave
-the supported upgrade window. v1/v2 and incomplete records remain unsupported
-and are rejected without migration, renaming or deletion.
+The supported compatibility adapters are:
+
+- Complete PageRoot 0.9.0 v3 project records whose registry, `project.json`,
+  initial Version and existing `projects/<projectId>` directory prove one
+  identity may gain `displayName`, `createdAt` and
+  `storageDirectoryName=projectId` in place without renaming or scanning
+  directories. Remove this adapter only when 0.9.0 project records leave the
+  supported upgrade window. v1/v2 and incomplete records remain unsupported.
+- Historical Versions and archived failed/no-change outcomes produced by the
+  short-lived August 2026 Developer Previews may use either `1.0.0`
+  `candidate-assessment.json` shape: without executable-surface fields or with
+  the now-retired pair. The historical query adapter validates either shape,
+  verifies frozen base and immutable candidate evidence as ordinary files against all
+  exact/comparison Hashes, deterministically re-runs current document-health
+  and continuity assessment, and exposes a canonical result without retired
+  fields. It never rewrites the Attempt; old script conclusions never affect
+  current status, and archived outcomes remain terminal. Remove the adapter
+  when those Developer Preview records leave the supported upgrade window.
 
 ## Change requirements
 

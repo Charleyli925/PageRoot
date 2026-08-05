@@ -365,7 +365,7 @@ Prompt 不让 AI 手写 `completion.json`，也不让 AI猜候选版本号。
 
 `USER_SUPPLEMENT.json` 只能由受控 helper 追加，内部 AI 不得直接编辑。helper 可把内部 AI 当前对话新增的文件或图片复制到 `supplement-attachments/` 并记录字节数与 SHA-256；无法取得原件时只能写 `description-only`，历史中明确显示“原件未归档”。旧记录不可覆盖，只能通过 `add / amend / retract` 形成审计链。`add.refersTo` 可以指向它所补充的原始 `instructionId`；`amend / retract` 必须引用原始 instruction 或更早的 supplement record。所有写入、封存、建版与历史读取都使用同一组冻结 instruction 身份校验。
 
-`amend` 会替代它引用的旧 supplement record，`retract` 会撤销它引用的 record；Prompt 和历史只消费最终仍有效的记录。有效补充与原始 TargetRef 一起解释用户想改什么，但不充当候选 Version 的逐节点授权表。脚本/handler/可执行 URL、身份、Hash、路径与协议仍按硬边界拒绝；普通正文、属性、结构和样式由审阅流程确认。
+`amend` 会替代它引用的旧 supplement record，`retract` 会撤销它引用的 record；Prompt 和历史只消费最终仍有效的记录。有效补充与原始 TargetRef 一起解释用户想改什么，但不充当候选 Version 的逐节点授权表。身份、Hash、路径与协议仍按硬边界拒绝；脚本、handler、可执行 URL、普通正文、属性、结构和样式都是候选内容，由审阅流程确认。
 
 finalizer 可写：
 
@@ -529,14 +529,23 @@ Completion 必须在 output 完全关闭后最后写入。完成后 output 封�
 `candidate-assessment.json` 记录：
 
 - base/output 精确 Hash 与比较 Hash，以及 Request、Attempt、候选 Version 身份；
-- 完整文档、非空可显示 body、可执行表面不变三项健康结果；
+- 完整文档、非空可显示 body 两项健康结果；
 - 可见文字 shingles、稳定 id/data 锚点、class、资源引用和 title 的粗粒度重合证据；
 - `ready | attention | blocked` 与稳定 issue code。
 
-`blocked` 只用于候选无法作为正常 HTML 使用，或可执行表面发生变化。协议、身份、Hash、
-路径、受管 metadata 和 completion 封存仍在 assessment 之前硬阻断。`attention` 表示 HTML
+`blocked` 只用于候选无法作为正常 HTML 使用。协议、身份、Hash、路径、受管 metadata
+和 completion 封存仍在 assessment 之前硬阻断。脚本、inline handler、可执行 URL 和
+refresh 指令属于普通候选内容，不检测、不分级、不产生用户提示。`attention` 表示 HTML
 可以打开，但系统无法充分证明它继承了上一版；Bridge 仍创建不可变候选 Version，界面必须
 移除“直接打开”并要求先进入隔离对比审阅。`ready` 允许审阅或直接打开。
+
+当前 writer 只写完整文档、非空 body 与连续性字段，不写 `executable` 或
+`health.executableSurfaceUnchanged`。这两个退役字段在 v1 Schema 中保持可选，只为读取
+短期 Developer Preview 的不可变历史。历史 Version 或已归档终态查询要求冻结 base 与
+不可变候选证据均为普通文件、四个精确/比较 Hash 全部匹配，并按当前文档健康与连续性算法
+重算 assessment。Reader 在内存中移除退役字段，也会移除旧的脚本阻断结论；不改写
+Attempt，不把归档 outcome 变成可打开候选。相关 Developer Preview 数据退出支持窗口后
+删除该 adapter。
 
 v3 TargetRef、评论和 supplement 继续作为生成指令与历史证据，但不再逐节点限制候选
 Version。旧 Attempt 的 `scope-report.json` 与 `validation-review.json` 仍可只读展示；新
@@ -558,7 +567,6 @@ Attempt 不生成它们。`scope-validator.mjs` 继续服务直接 source patch�
 | canonicalizationVersion | `canonicalization-mismatch` |
 | output 完整性 | `invalid-html` |
 | output body 无可显示内容 | `HTML_BODY_EMPTY`，阻断 |
-| 脚本、inline handler、`javascript:` URL 或 meta refresh 变化 | `EXECUTABLE_CONTENT_CHANGED`，阻断 |
 | 与上一版共同特征不足 | `PAGE_CONTINUITY_UNCERTAIN`，保留候选并强制先审阅 |
 | completion 后 output 改变 | `sealed-output-modified` |
 | active run 已取消/替代 | `stale-completion` |
@@ -566,6 +574,10 @@ Attempt 不生成它们。`scope-validator.mjs` 继续服务直接 source patch�
 硬校验失败不得创建 Version 或推进 latest Version。前端只把内部 error code 映射为稳定的
 中文原因，不显示原始英文异常或代码串。失败与 no-change outcome 由 workspace API 作为
 `recentRunOutcome` 恢复；用户返回编辑后仍可通过“上轮处理”再次打开，重启也不丢失。
+
+`candidate-assessment.v1` 为历史记录保留可选的 `executable` 与
+`health.executableSurfaceUnchanged` 只读字段；当前 producer 和 Renderer 都不生成、读取或
+展示这些字段。
 
 ## 14. 两阶段 Version 事务
 
@@ -607,7 +619,7 @@ Attempt 不生成它们。`scope-validator.mjs` 继续服务直接 source patch�
 
 导航区域与可见变化 marker 必须分离。分析器必须先以显式身份、完全相同内容、语义标题、有效类身份或足够文字相似度建立高置信度节点配对；同标签、同位置不能单独授权配对。文案事实来自叶子级精确增删，结构事实来自未配对/移动/非视觉结构属性，视觉事实只来自已配对既有节点的呈现属性或实际命中样式规则；新增结构不得自动派生视觉变化。细粒度事实经祖先抑制和连通区域融合后形成唯一 canonical footprint，框和整页遮罩共同消费最终矩形，遮罩直接以每个框为透明孔，因此框内完整清晰、框外按可见度虚化。文案新增为绿色虚线框，文案删除为红色虚线框并保留红色删除线，结构在两页统一为蓝色，视觉在两页统一为紫色。`全部变化`只融合强重叠的多类型 footprint，同处只显示一个紫色融合框和类型并集说明；单类型框继续保留语义色。导航焦点不得改变变化集合或遮罩。
 
-正式审阅页还必须提供包含已修改与未修改区域、并按原页面 Tab 分组的完整内容地图；变化项以克制的紫色边线和底色显示，未变化项降低对比度。地图面板从把手右侧展开，右边缘贴住画布，并在用户点击地图以外的页内画布、顶部栏或 App 区域时自动收起。修改前/后文档的 panel 与 action key 必须成对建立稳定映射；AI 改动控件文案或顺序时，优先依据显式目标、同 panel 控件类型与语义位置匹配。任一侧的安全页内动作始终镜像到另一侧，包括 Tab、折叠、业务按钮以及 input/select/textarea 的值与选中态；该合同不受同步/独立滚动控制，匹配失败时静默保持当前侧，不显示额外提示。导航、提交、弹窗、下载和宿主 IPC 仍由沙箱阻止。同步滚动联动横向位置并按内容区域 ID 与区内进度对齐纵向位置；独立滚动只关闭滚动跟随。页内动作和布局变化后必须自动刷新框选与虚化，内容地图选择不是刷新前置条件。运行态不得写回 HTML、Version 或项目状态。
+正式审阅页还必须提供包含已修改与未修改区域、并按原页面 Tab 分组的完整内容地图；变化项以克制的紫色边线和底色显示，未变化项降低对比度。地图面板从把手右侧展开，右边缘贴住画布，并在用户点击地图以外的页内画布、顶部栏或 App 区域时自动收起。修改前/后文档的 panel 与 action key 必须成对建立稳定映射；AI 改动控件文案或顺序时，优先依据显式目标、同 panel 控件类型与语义位置匹配。任一侧的安全页内动作始终镜像到另一侧，包括 Tab、折叠、业务按钮以及 input/select/textarea 的值与选中态；该合同不受同步/独立滚动控制，匹配失败时静默保持当前侧，不显示额外提示。导航、提交、弹窗、下载和宿主 IPC 仍由沙箱阻止。同步滚动联动横向位置；纵向以当前直接输入侧为唯一主控，按布局稳定点缓存的共同内容区域及区内进度建立连续单调映射，跟随侧每帧只应用最新目标。换侧必须让旧代次失效；短页边界只钳制短页，不得强拉长页到顶/底。滚动事件内不得扫描锚点、重建框选或重测评论，布局映射在手势空闲后更新。独立滚动只关闭滚动跟随。页内动作和布局变化后必须自动刷新框选与虚化，内容地图选择不是刷新前置条件。运行态不得写回 HTML、Version 或项目状态。
 
 审阅页点击“返回 AI 修改前”必须先逐行展示确认提醒：不会采用本次 AI 返回；继续以修改前版本为基线重新修改；AI HTML 已自动保留，且整句链接直接调用不可变 Version 的精确文件定位，在 Finder 中选中候选 HTML，而不是只打开本轮目录。确认后把该 active run 以 `declined-ai-candidate-after-review` 结束并令 runtime 回到 `editing`，直接恢复原 HTML 编辑状态；评论、编辑记录、候选 Version、working HTML 与本轮审计记录均不删除。“继续审阅”为紫色建议操作，“返回修改前版本”为灰色操作。通过左上角项目标识退出审阅仍只返回本轮处理页，不结束待打开状态。
 

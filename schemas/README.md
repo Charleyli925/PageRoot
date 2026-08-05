@@ -29,6 +29,14 @@ The v1 suffix here is local to each auxiliary artifact and remains its current
 strict contract. These files are not compatibility readers for old main
 records.
 
+`candidate-assessment.v1.schema.json` requires document-health and continuity
+evidence. The retired `health.executableSurfaceUnchanged` and `executable`
+members remain optional only so immutable Developer Preview history can be
+read. The history route verifies the record against sealed HTML and all four
+Hashes, normalizes those fields out in memory, and never lets them affect
+current status, review routing or adoption. Current writers do not emit them;
+archived outcomes remain terminal and history is never rewritten.
+
 `source-history.v1.schema.json` is the bounded, document-owned journal of
 byte-exact canvas source operations. Its cursor is independent from immutable
 Versions; comments, attachments, and project-rule edits are not entries.

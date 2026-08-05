@@ -22,13 +22,6 @@ const NON_RENDERING_BODY_ELEMENTS = new Set([
   "template",
   "title",
 ]);
-const EXECUTABLE_URL_ATTRIBUTES = new Set([
-  "action",
-  "formaction",
-  "href",
-  "src",
-  "xlink:href",
-]);
 const ASSET_ATTRIBUTES = new Set([
   "href",
   "poster",
@@ -58,16 +51,6 @@ function textContent(node, ignored = false) {
     result += textContent(child, nextIgnored);
   }
   if (node?.content) result += textContent(node.content, nextIgnored);
-  return result;
-}
-
-function rawTextContent(node) {
-  if (node?.nodeName === "#text") return String(node.value || "");
-  let result = "";
-  for (const child of node?.childNodes ?? []) {
-    result += rawTextContent(child);
-  }
-  if (node?.content) result += rawTextContent(node.content);
   return result;
 }
 
@@ -172,78 +155,6 @@ function roundedScore(value) {
   return value === null ? null : Math.round(value * 10_000) / 10_000;
 }
 
-function multiset(values) {
-  const result = new Map();
-  for (const value of values) {
-    result.set(value, (result.get(value) ?? 0) + 1);
-  }
-  return result;
-}
-
-function sameMultiset(left, right) {
-  if (left.size !== right.size) return false;
-  for (const [key, count] of left) {
-    if (right.get(key) !== count) return false;
-  }
-  return true;
-}
-
-function executableSurface(html) {
-  const parsed = parseHtmlSource(html);
-  const entries = [];
-  visitElements(
-    parsed.document,
-    (node) => {
-      const attributes = attributesFor(node);
-      if (node.tagName === "script") {
-        const serializedAttributes = [...attributes.entries()]
-          .sort(([left], [right]) => left.localeCompare(right))
-          .map(([name, value]) => `${name}=${value}`)
-          .join("\u0000");
-        entries.push(
-          `script\u0000${serializedAttributes}\u0000${rawTextContent(node)}`,
-        );
-      }
-      for (const [name, rawValue] of attributes) {
-        const value = String(rawValue || "");
-        if (/^on[a-z]+$/iu.test(name)) {
-          entries.push(`handler\u0000${node.tagName}\u0000${name}\u0000${value}`);
-        } else if (
-          EXECUTABLE_URL_ATTRIBUTES.has(name)
-          && /^\s*javascript:/iu.test(value)
-        ) {
-          entries.push(`javascript-url\u0000${node.tagName}\u0000${name}\u0000${value}`);
-        }
-      }
-      if (
-        node.tagName === "meta"
-        && attributes.get("http-equiv")?.trim().toLocaleLowerCase("und") === "refresh"
-      ) {
-        entries.push(`meta-refresh\u0000${attributes.get("content") ?? ""}`);
-      }
-    },
-    { includeTemplateContent: true },
-  );
-  return multiset(entries);
-}
-
-function executableDelta(baseHtml, outputHtml) {
-  const base = executableSurface(baseHtml);
-  const output = executableSurface(outputHtml);
-  let sharedCount = 0;
-  for (const [key, baseCount] of base) {
-    sharedCount += Math.min(baseCount, output.get(key) ?? 0);
-  }
-  const baseCount = [...base.values()].reduce((sum, count) => sum + count, 0);
-  const outputCount = [...output.values()].reduce((sum, count) => sum + count, 0);
-  return {
-    unchanged: sameMultiset(base, output),
-    baseCount,
-    outputCount,
-    changedCount: Math.max(baseCount, outputCount) - sharedCount,
-  };
-}
-
 function continuityAssessment(baseHtml, outputHtml) {
   const base = continuityFingerprint(baseHtml);
   const output = continuityFingerprint(outputHtml);
@@ -314,41 +225,86 @@ function continuityAssessment(baseHtml, outputHtml) {
   };
 }
 
+function assessmentDecision({
+  completeDocument,
+  bodyHasContent,
+  continuityStatus,
+}) {
+  if (!completeDocument) {
+    return {
+      status: "blocked",
+      issueCodes: ["HTML_DOCUMENT_INCOMPLETE"],
+    };
+  }
+  if (!bodyHasContent) {
+    return {
+      status: "blocked",
+      issueCodes: ["HTML_BODY_EMPTY"],
+    };
+  }
+  if (continuityStatus === "uncertain") {
+    return {
+      status: "attention",
+      issueCodes: ["PAGE_CONTINUITY_UNCERTAIN"],
+    };
+  }
+  return { status: "ready", issueCodes: [] };
+}
+
+/**
+ * Historical v1 records may carry executable-surface fields from a retired
+ * policy. They remain readable evidence, but never influence current
+ * acceptance, review routing, or user-facing status.
+ */
+export function normalizeCandidateAssessmentPolicy(assessment) {
+  const hasRetiredPolicyEvidence = Object.hasOwn(
+    assessment,
+    "executable",
+  ) || Object.hasOwn(
+    assessment.health ?? {},
+    "executableSurfaceUnchanged",
+  );
+  const current = { ...assessment };
+  delete current.executable;
+  const health = { ...(assessment.health ?? {}) };
+  delete health.executableSurfaceUnchanged;
+  const decision = hasRetiredPolicyEvidence
+    ? assessmentDecision({
+      completeDocument: health.completeDocument,
+      bodyHasContent: health.bodyHasContent,
+      continuityStatus: assessment.continuity?.status,
+    })
+    : {
+      status: assessment.status,
+      issueCodes: assessment.issueCodes,
+    };
+  return {
+    ...current,
+    ...decision,
+    health,
+  };
+}
+
 export function assessHtmlCandidate({ baseHtml, outputHtml }) {
   const completeDocument = hasCompleteDocumentStructure(outputHtml);
   const continuity = continuityAssessment(baseHtml, outputHtml);
-  const executable = executableDelta(baseHtml, outputHtml);
   const bodyHasContent = Boolean(
     continuity.outputVisibleTextLength > 0
     || continuity.outputBodyElementCount > 0
   );
-  const issueCodes = [];
-  let status = "ready";
-
-  if (!completeDocument) {
-    status = "blocked";
-    issueCodes.push("HTML_DOCUMENT_INCOMPLETE");
-  } else if (!bodyHasContent) {
-    status = "blocked";
-    issueCodes.push("HTML_BODY_EMPTY");
-  } else if (!executable.unchanged) {
-    status = "blocked";
-    issueCodes.push("EXECUTABLE_CONTENT_CHANGED");
-  } else if (continuity.status === "uncertain") {
-    status = "attention";
-    issueCodes.push("PAGE_CONTINUITY_UNCERTAIN");
-  }
+  const decision = assessmentDecision({
+    completeDocument,
+    bodyHasContent,
+    continuityStatus: continuity.status,
+  });
 
   return {
     schemaVersion: CANDIDATE_ASSESSMENT_SCHEMA_VERSION,
-    status,
-    issueCodes,
+    ...decision,
     health: {
       completeDocument,
       bodyHasContent,
-      executableSurfaceUnchanged: executable.unchanged,
     },
     continuity,
-    executable,
   };
 }

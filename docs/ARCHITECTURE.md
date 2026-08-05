@@ -254,6 +254,16 @@ directory. The clean-cutover decision is recorded in
 
 Initial and accepted AI results are immutable versions. Routine local edits do not create versions. A validated AI result is not activated until the user explicitly chooses it.
 
+Candidate assessment is Attempt evidence, not current-source authority. The
+historical Version and archived terminal-outcome queries have one bounded
+adapter for the two `1.0.0` Developer Preview shapes: records may omit or carry
+the now-retired executable-surface fields. It verifies immutable base/candidate
+bytes and all four Hashes, re-runs the current document-health and continuity
+assessment, normalizes retired fields out in memory, and leaves the old file
+unchanged. Script conclusions from an old record never affect current status or
+review routing. Archived outcomes remain terminal and cannot become openable
+candidates through this adapter.
+
 `PROJECT.md` uses debounced autosave and is flushed before project switch or close. One recoverable unsaved comment composer is allowed at a time. Attachment uploads, rule saves and ordinary source writes are finished or surfaced in their owning panel before navigation proceeds.
 
 Persistent source and Draft failures share the single workspace status-banner
@@ -315,7 +325,7 @@ never participates in editor authority or close/navigation drains.
 
 ## Trust model
 
-The renderer is sandboxed with context isolation and no Node integration. The preload exposes narrow validated IPC methods. The Bridge uses a per-process authentication token and only operates on managed project paths. AI output is untrusted until protocol, identity, Hash, path, complete-document and unchanged-executable-surface checks succeed. A coarse continuity fingerprint compares visible text, stable anchors, classes, assets and title with the frozen base. Strong continuity enters the normal ready flow; weak continuity preserves the immutable candidate but removes direct-open and requires side-by-side review. Frozen comment targets remain generation and review context, not a subtree-exact acceptance gate. Telemetry schemas have no fields for HTML, user text, attachments, clipboard data, filenames, paths, raw exceptions, account identity or hardware identity.
+The renderer is sandboxed with context isolation and no Node integration. The preload exposes narrow validated IPC methods. The Bridge uses a per-process authentication token and only operates on managed project paths. AI output is untrusted until protocol, identity, Hash, path and complete/displayable-document checks succeed. Authored scripts, handlers, executable URLs and refresh directives are accepted as candidate content without detection or UI signaling; their execution remains contained by the existing preview, edit and review sandboxes. A coarse continuity fingerprint compares visible text, stable anchors, classes, assets and title with the frozen base. Strong continuity enters the normal ready flow; weak continuity preserves the immutable candidate but removes direct-open and requires side-by-side review. Frozen comment targets remain generation and review context, not a subtree-exact acceptance gate. Telemetry schemas have no fields for HTML, user text, attachments, clipboard data, filenames, paths, raw exceptions, account identity or hardware identity.
 
 Every renderer request to the Bridge is bounded: ordinary state/file operations use 15 seconds, attachments use 30 seconds, and Request creation uses 60 seconds. Busy refs are released in `finally`, so an unresponsive local service cannot leave a permanent UI lock. An unknown Request POST outcome remains fail-closed and is reconciled against the durable workspace state before editing resumes.
 

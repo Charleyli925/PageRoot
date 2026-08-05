@@ -77,20 +77,36 @@ test("clicking a module's blank padding clears selection instead of opening its 
   await expect(frame.locator("[data-html-canvas-selected]")).toHaveCount(0);
 });
 
-test("clicking outside the canvas commits editing and clears its toolbar and selection", async ({
+test("clicking blank header and comment-rail surfaces commits editing and clears selection", async ({
   page,
 }) => {
   const { editor, frame } = await loadFixture(page, "complex-layout.html");
   const target = frame.locator(caseSelector("paragraph-entities"));
+  const toolbar = editor.getByRole("toolbar");
 
   await activateNativeEdit(frame, "paragraph-entities");
   await expect(target).toHaveAttribute("contenteditable", "true");
-  await expect(editor.getByRole("toolbar")).toBeVisible();
+  await expect(toolbar).toBeVisible();
   await expect(frame.locator("[data-html-canvas-selected]")).toHaveCount(1);
 
-  await page.locator(".window-file-title-row").click();
+  await page.locator(".comments-panel.comment-rail").click({
+    position: { x: 4, y: 4 },
+  });
 
-  await expect(editor.getByRole("toolbar")).toHaveCount(0);
+  await expect(toolbar).toHaveCount(0);
+  await expect(frame.locator("[data-html-canvas-selected]")).toHaveCount(0);
+  await expect(target).not.toHaveAttribute("contenteditable", "true");
+
+  await activateNativeEdit(frame, "paragraph-entities");
+  await expect(target).toHaveAttribute("contenteditable", "true");
+  await expect(toolbar).toBeVisible();
+  await expect(frame.locator("[data-html-canvas-selected]")).toHaveCount(1);
+
+  await page.locator(".workbench-header").click({
+    position: { x: 4, y: 4 },
+  });
+
+  await expect(toolbar).toHaveCount(0);
   await expect(frame.locator("[data-html-canvas-selected]")).toHaveCount(0);
   await expect(target).not.toHaveAttribute("contenteditable", "true");
 });

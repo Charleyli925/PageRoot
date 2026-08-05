@@ -8,9 +8,9 @@
 |---|---|---|---|
 | `npm run gate:edit` | 一次局部修改后 | 只运行影响映射命中的 Node 文件；必要时 typecheck | 快速发现局部逻辑错误，不启动浏览器或 Electron |
 | `npm run gate:task` | 一个开发任务完成时 | 静态检查、受影响 Node 文件，以及相关 Browser/Electron/AI 冒烟 | 在较短时间内证明生产链路已经接通 |
-| Draft PR `draft-feedback` | PR 仍在迭代 | 按影响映射选择 Node/编译检查 | 不因每次推送重复消费完整矩阵 |
-| Ready PR `release-gate` | 最终 PR Tree | 全量 Node、三分片完整 Browser、独立 Native Electron、独立确定性 AI 闭环、真实 HTML 发现式门禁 | 完整源码回归只跑一次并签发 Tree Hash 凭证 |
-| `npm run gate:main:auto` | 合并到 `main` | 校验 PR 结果/Tree Hash/版本后，固定 Node 与 Browser 冒烟 | 快速证明合并结果没有漂移，不重复全量源码测试 |
+| PR `pr-feedback` | `opened/synchronize/reopened/converted_to_draft` | 按影响映射选择 Node/编译检查 | 普通推送无论 Draft/Ready 都不重复消费完整矩阵；新提交取消仍在运行的旧 SHA 完整门禁 |
+| 一次性晋升 `release-gate` | 最终 PR Tree 从 Draft 显式转为 Ready | 全量 Node、三分片完整 Browser、独立 Native Electron、独立确定性 AI 闭环、真实 HTML 发现式门禁 | 每个最终候选只跑一次并签发 Tree Hash 凭证；后续新 SHA 必须重新 Draft→Ready 才能再晋升 |
+| `main-integrity` | 合并到 `main` | 校验合并 PR、Tree Hash、package/lockfile 版本和凭证时效 | 相等即复用完整源码证据，不重复 Node、Browser 或 Electron 测试；不相等直接失败 |
 | 按需 `Developer Preview` | 仅在开发者明确要求时 | 干净 Tree、最新 renderer、ad-hoc DMG、包内容完整性、一次隔离启动和精确 PR/内容交付报告 | 在消耗签名/公证时间前发现“漏打包或根本跑不起来”；不成为正式门禁 |
 | `Release Candidate` | 打标签之前，凭证新鲜且 Tree/版本完全一致 | 预签名 App 内容/完整运行校验 → Developer ID 签名后启动 → App 公证 checkpoint → 从同一 App 生成并公证 DMG → 最终字节校验 | 内容错误不消耗 Apple 队列；后段失败只重跑后段 |
 | `Release` | 候选包通过且不超过 72 小时 | 重新校验候选凭证和每个文件 Hash，创建 tag 并发布原字节 | 发布阶段不重新构建、不悄悄替换文件 |
@@ -24,6 +24,13 @@ Tree，不在测试执行期间自动合并分支。组合 Tree 含任何未合�
 工作区有未提交修改时，`edit/task` 自动读取 staged、unstaged 和 untracked 文件。任务已经提交后应运行 `npm run gate:task -- --base <基准分支或提交>`；干净工作区又没有 `--base` 时门禁会明确失败，不会把“零测试”伪装成通过。
 
 `npm run task:finish` 是 `gate:task -- --base origin/main` 的安全任务包装，不引入新的门禁层。`tests/task-workflow.test.mjs` 在独立临时 Git 仓库中验证分支名、干净 primary `main`、远端同步、隔离 worktree 创建、现有分支 attach、脏工作区拒绝、GitHub PR/本地独有提交分类、retire 默认 dry-run、显式放弃围栏和最终差异报告，不会操作开发者的真实分支。
+
+PR 必须从 Draft 开始。普通推送由独立的 `PR Feedback` workflow 处理，
+不会创建名为 `release-gate` 的跳过 job；因此分支保护不会把轻量反馈误当
+完整通过。只有 `ready_for_review` 事件存在完整 workflow。若晋升后又有提交，
+新 SHA 只获得反馈且缺少必需检查，必须重新转 Draft、冻结后再转 Ready。
+同一时间只晋升一个 PR；其他并行修改继续留在 Draft，等前一个合并并更新
+到新 `main` 后再晋升，避免严格最新基线制造三角形重测。
 
 ## 测试类型与去重
 
@@ -55,7 +62,36 @@ Tree，不在测试执行期间自动合并分支。组合 Tree 含任何未合�
   单击选择、双击编辑、工具条和 `Option + 单击` 不冲突，切换前后共享滚动
   位置不变、作者处理器未运行且导出字节不变；Electron
   独立重读真实源文件，证明作者事件未运行且磁盘字节不变。
-- AI 闭环：Node 集成必须分别证明普通/跨标签相关改动可建版、不相关但可用 HTML 进入 `attention` 并强制审阅、可执行表面变化被阻断，以及失败/no-change 可从 workspace 恢复。任务级跑正常闭环和一个硬失败代表场景；发布级覆盖复制失败、缺失 finalizer、非法 HTML、版本激活失败与终态返回/重开。正式 Electron 审阅用例还必须证明默认“双页 + 全部变化 + 18%”、页面/筛选/可见度/导航彼此独立、左右单页和双页均铺满可用 Canvas、完全相同文字不被标记、叶子级精确文字差异、重复短文案和中间插入结构不会错配、未修改指标卡不产生文案/结构/视觉假阳性、文本新增绿框/删除红框/结构蓝框/视觉紫框、每个框都有简短标注且整块新增统一为“新增内容”、连续跨行修改只生成一个不穿越空白的阶梯形框、每个框与遮罩 union-path 透明孔几何一致且阶梯空角继续虚化、页面自身的 `svg`/`div` 规则不能改写投影几何或遮罩外观、导航区域不画框、连通 marker 融合且祖先嵌套框删除、全部变化同处多类型只显示一个融合框、具体结构/视觉说明、内容地图、上下导航与左右页点击共用显式/索引式 Tab 识别并双向揭示隐藏 Tab、切换期间旧框不残留且虚化无空档、安全按钮和表单在同步或独立滚动下均能左右双向同步、0/50/100 上下文可见度、横向联动、不同高度下按区域进度平滑收敛及顶端无反向回跳、修改前页“评”字悬停气泡只读且修改后页不重复、分段控件键盘移动、工具栏不遮挡页面标题、确认弹窗文案/焦点/按钮层级、返回修改前直接恢复编辑且保留评论与候选文件，以及确认打开全程不显示等待 AI 页面。Browser 另外证明点击页面 padding 与 App 空白会一起结束编辑、选区和工具栏。测试自动生成受控 AI 输出并执行正式 finalizer，不等待外部模型或真人接力。
+- AI 闭环：Node 集成必须分别证明普通/跨标签相关改动可建版、不相关但可用
+  HTML 进入 `attention` 并强制审阅、脚本/inline handler 等作者内容变化
+  照常建版且不生成检测字段或提示，以及身份/Hash/路径/协议失败与
+  no-change 可从 workspace 恢复。任务级跑正常闭环和一个硬失败代表场景；
+  发布级覆盖复制失败、缺失 finalizer、非法 HTML、版本激活失败与终态
+  返回/重开。正式 Electron 审阅用例还必须证明默认“双页 + 全部变化 +
+  18%”、页面/筛选/可见度/导航彼此独立、左右单页和双页均铺满可用
+  Canvas、完全相同文字不被标记、叶子级精确文字差异、重复短文案和中间
+  插入结构不会错配、未修改指标卡不产生文案/结构/视觉假阳性、文本新增
+  绿框/删除红框/结构蓝框/视觉紫框、每个框都有简短标注且整块新增统一为
+  “新增内容”、连续跨行修改只生成一个不穿越空白的阶梯形框、整卡背景/
+  边框/前景色同时变化时每张卡只生成一个贴合完整 border box 的普通矩形
+  且相邻卡片不融合、`block-size` 仍归属完整盒子、仅继承文字颜色变化时
+  直接测量文字 Range 而不框容器、每个框与遮罩 union-path 透明孔几何一致且阶梯空角
+  继续虚化、页面自身的 `svg` / `div` 规则不能改写投影几何或遮罩外观、
+  导航区域不画框、内容型连通 marker 融合且自身未变化的祖先嵌套框删除、
+  盒子级视觉 owner 支配内部视觉子框、全部变化同处多类型只显示一个融合框、具体结构/
+  视觉说明、内容地图、上下导航与左右页点击共用显式/索引式 Tab 识别并
+  双向揭示隐藏 Tab、切换期间旧框不残留且虚化无空档、安全按钮和表单在
+  同步或独立滚动下均能左右双向同步、0/50/100 上下文可见度、横向联动、
+  不同高度下按区域进度对齐、单帧只消费最新位置、快速上下反向后不追赶
+  旧目标、左右换侧后旧代次失效、短页顶/底边界不强拉长页且顶端无反向
+  回跳、修改前页“评”字悬停气泡只读且修改后页不重复、分段控件键盘移动、
+  工具栏不遮挡页面标题、确认弹窗文案/焦点/按钮层级、返回修改前直接恢复
+  编辑且保留评论与候选文件，以及确认打开全程不显示等待 AI 页面。
+  Browser 另外证明点击页面 padding 与 App 空白会一起结束编辑、选区和
+  工具栏。测试自动生成受控 AI 输出并执行正式 finalizer，不等待外部模型
+  或真人接力。
+- 审阅滚动回归必须直接证明页面概览会递增手势代次、取消待执行跟随帧并保留语义映射；评论布局契约还必须接受超出 100,000px 的有限长文档坐标，同时继续拒绝非有限值和超过安全上限的坐标。
+- 文案 footprint 算法由 Node 直接用字符范围 oracle 验证：覆盖有意义标点前后的独立替换、纯插入、稳定句首词、短中文块的字符级辅助配对、超长无标点文本中的多处远距离精确修改，以及“品均基本持平”替换为“单品效率整体稳定，增幅仅+0.10%”时不能用偶然相同的“品”抵消增删。Electron 在既有正式审阅闭环中只复测这个真实故障的 DOM marker 接线，不重复纯算法排列。
 - 应用更新：Node 用伪 updater 证明 stable-only、点击后单次下载、差分开启、普通退出不安装、仅 downloaded 状态可安装和错误降级；Preload/Workbench 合同证明状态快照、下载/安装意图、无 Canvas 完成横幅与重启确认保持窄边界。
 - 默认浏览器打开：Node 直接执行主进程操作与 sender 权限门，证明 malformed、非 HTML、未知项目、非普通文件和非可信 frame 均不会调用 shell；Workbench 合同只补充证明精确 edit revision 的围栏、写回和 IPC 顺序。
 - 使用数据：Node 使用伪网络端点证明安装 ID 持久、会话 ID 轮换、
@@ -80,12 +116,18 @@ Browser 验证真实 DOM 中保存卡片、草稿卡片和输入框在当前/其
 切换、聚焦和展开后的相对顺序、无重叠结果，以及输入框自动聚焦、
 `Enter` 保存、`Shift + Enter` 换行。
 
-顶层 Node 测试在一次执行中只出现一次。精确影响映射优先；只有找不到任何精确用例时才启用 `node-core` 兜底。PR CI 在 Linux 构建一次 Web renderer，供 Node 和 Browser 共享；每个 macOS Electron job 在目标系统本地构建 renderer，并先用独立 preflight 证明窗口可见、计时器和 animation frame 正常推进。Native Electron 与 AI 闭环分成两个 job，Browser 保持每个分片单 worker、零重试，但跨三个独立分片并发。
+顶层 Node 测试在一次执行中只出现一次。精确影响映射优先；只有找不到任何精确用例时才启用 `node-core` 兜底。PR CI 在 Linux 构建一次 Web renderer，供 Node 和 Browser 共享；每个 macOS Electron job 在目标系统本地构建 renderer，并先用独立 preflight 证明窗口可见、计时器和 animation frame 正常推进。Native Electron 与 AI 闭环分成两个 job，Browser 保持每个分片单 worker、零重试，但跨三个独立分片并发。测试直接提交隐藏文件 input 时不会经过真实“打开”动作的 pre-picker switch fence；共享 fixture driver 只允许在旧画布仍为 render-verified、input 仍 attached 时有限重提，不能重跑整条用例或掩盖加载后的产品断言失败。
 
 关键 CI 命令通过 `scripts/ci-evidence.mjs` 记录 commit、Tree、job、耗时、退出状态、标准化失败摘要与稳定签名。环境 preflight 失败可直接归类为 `ci_environment`；源码测试失败先标 `needs_triage`，再依据独立 oracle 归为 `product`、`test_script` 或 `ci_environment`。同一 SHA 的环境嫌疑只重跑失败 job；正式流程第二 job 失败时保留并复用第一 job 的签名 App checkpoint，不重新做已通过的构建、运行、签名和 App 公证。相同签名连续两次失败且本地不复现时冻结候选并登记 CI incident。完整规则见 `docs/RELEASE_PIPELINE_GOVERNANCE.md`。
 `tests/ci-evidence.test.mjs` 会枚举源码、开发预览、候选与发布工作流实际使用的
 每个 evidence stage；任何未同步到允许列表的名称必须在源码门禁中失败，不能等到
 正式候选打包才暴露。
+
+CI Health 同时读取 `pr-feedback.yml` 与 `ci.yml`。除了同一 run 的绿色 job
+重跑，它还按 PR number（旧数据缺失时按 head branch）聚合不同 SHA 的完整
+门禁：`runsPerPullRequestAverage` 目标不超过 `1.25`，后续候选 SHA 消耗的
+runner minutes 占全部 PR CI 时间应低于 `20%`。这部分不能再被“每个 Tree
+只跑一次”的旧指标隐藏。
 
 ## 判断标准优先级
 

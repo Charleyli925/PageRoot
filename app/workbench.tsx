@@ -3855,7 +3855,7 @@ export default function Workbench() {
       if (epoch === projectSessionRef.current.epoch) {
         const message = productErrorMessage(
           cause,
-          "项目状态读取超时，请重试；源文件没有被改动。",
+          "项目状态暂时无法读取，请重试；源文件没有被改动。",
         );
         projectHydratingRef.current = false;
         projectLoadErrorRef.current = message;
@@ -10520,7 +10520,6 @@ export default function Workbench() {
             ref={commentsPanelRef}
             className="comments-panel comment-rail"
             aria-label={viewMode === "history" ? "历史版本评论" : "本轮评论"}
-            data-html-canvas-preserve-selection="true"
             aria-busy={!commentLayoutReady}
             data-layout-ready={commentLayoutReady ? "true" : "false"}
             data-layout-generation={commentLayoutAuthority.viewContextGeneration}
@@ -10578,6 +10577,7 @@ export default function Workbench() {
                     <button
                       className="comment-header-action unsaved-comment-shortcut"
                       type="button"
+                      data-html-canvas-preserve-selection="true"
                       aria-label="有一条未保存评论"
                       onClick={resumeCurrentComposer}
                     >
@@ -10591,6 +10591,7 @@ export default function Workbench() {
                     <button
                       className="comment-header-action unsaved-comment-edit-shortcut"
                       type="button"
+                      data-html-canvas-preserve-selection="true"
                       aria-label="有一条未保存修改"
                       onClick={() => resumeCommentEdit(
                         unfinishedEditedComment.commentId,
@@ -10604,6 +10605,7 @@ export default function Workbench() {
                     <button
                       className="comment-header-action other-tab-comments-toggle"
                       type="button"
+                      data-html-canvas-preserve-selection="true"
                       aria-expanded={otherTabCommentsOpen}
                       aria-controls="other-tab-comment-groups"
                       onClick={() => setExpandedOtherTabCommentsKey((current) => (
@@ -10646,6 +10648,7 @@ export default function Workbench() {
                               <button
                                 className="comment-card other-tab-comment-card draft-comment-card"
                                 type="button"
+                                data-html-canvas-preserve-selection="true"
                                 aria-label={`${group.label}：未保存评论：${insertionLabel(entry.target)}：${entry.previewText}`}
                                 key={entry.key}
                                 onClick={() => {
@@ -10669,6 +10672,7 @@ export default function Workbench() {
                             <button
                               className="comment-card other-tab-comment-card"
                               type="button"
+                              data-html-canvas-preserve-selection="true"
                               aria-label={`${group.label}：${insertionLabel(entry.target)}：${entry.previewText}`}
                               key={entry.key}
                               onClick={() => {
@@ -10743,6 +10747,7 @@ export default function Workbench() {
               <section
                 className="comment-composer rail-comment-composer"
                 aria-label="添加评论"
+                data-html-canvas-preserve-selection="true"
                 data-comment-measure="__composer"
                 data-comment-measure-key={composerMeasurementKey}
                 data-focused="true"
@@ -10912,6 +10917,7 @@ export default function Workbench() {
               <button
                 className="comment-card draft-comment-card"
                 type="button"
+                data-html-canvas-preserve-selection="true"
                 aria-label={`未保存评论：${insertionLabel(draftTarget)}：${draft.trim() || `已添加 ${draftAttachments.length} 个附件`}`}
                 data-comment-measure="__draft_recovery"
                 data-comment-measure-key={draftRecoveryMeasurementKey}
@@ -10972,6 +10978,7 @@ export default function Workbench() {
               return (
                 <article
                   className="comment-card"
+                  data-html-canvas-preserve-selection="true"
                   data-comment-measure={comment.commentId}
                   data-comment-measure-key={commentMeasurementKeys[comment.commentId]}
                   data-selected={selection?.selector === comment.target.selector ? "true" : "false"}

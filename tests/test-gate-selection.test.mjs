@@ -78,6 +78,22 @@ test("real-HTML gate changes run the discovery oracle instead of an unrelated sm
   assert.deepEqual(suiteIds(plan), ["typecheck", "lint", "build-web", "real-html"]);
 });
 
+test("the shared fixture driver schedules both browser and Electron smoke", () => {
+  const plan = selectGatePlan({
+    map,
+    lane: "task",
+    changedFiles: ["tests/e2e/browser/pageroot-driver.mjs"],
+  });
+  assert.deepEqual(suiteIds(plan), [
+    "typecheck",
+    "lint",
+    "build-web",
+    "browser-smoke",
+    "build-desktop",
+    "electron-smoke",
+  ]);
+});
+
 test("packaged-runtime test changes wait for the artifact boundary instead of running unrelated Electron smoke", () => {
   const plan = selectGatePlan({
     map,

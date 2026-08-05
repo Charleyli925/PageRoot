@@ -38,6 +38,7 @@ import {
   type ReviewDocuments,
   type ReviewSide,
 } from "./review-document";
+import { ReviewScrollCoordinator } from "../lib/review-scroll-sync.js";
 import {
   DEFAULT_REVIEW_STATE,
   reduceReviewState,
@@ -64,6 +65,9 @@ type ReviewCommentLayout = {
   key: string;
   left: number;
   top: number;
+  viewportLeft: number;
+  viewportTop: number;
+  global: boolean;
 };
 
 const FILTER_LABELS: Record<ReviewChangeFilter, string> = {
@@ -89,9 +93,9 @@ type ReviewMessage = {
   type?: string;
   top?: number;
   left?: number;
-  ratio?: number;
-  pageRatio?: number;
-  outlineId?: string;
+  commandId?: string;
+  gestureId?: number;
+  scrollGeometry?: unknown;
   panelKey?: string;
   panelPath?: string[];
   presentationEpoch?: number;
@@ -100,9 +104,10 @@ type ReviewMessage = {
   panelControl?: boolean;
   value?: string;
   checked?: boolean;
-  boundary?: "top" | "middle" | "bottom";
   commentLayouts?: unknown;
 };
+
+const MAX_REVIEW_COMMENT_COORDINATE = 10_000_000;
 
 function safeReviewCommentLayouts(
   value: unknown,
@@ -112,20 +117,40 @@ function safeReviewCommentLayouts(
   const seen = new Set<string>();
   return value.flatMap((candidate) => {
     if (!candidate || typeof candidate !== "object") return [];
-    const { key, left, top } = candidate as Record<string, unknown>;
+    const {
+      key,
+      left,
+      top,
+      viewportLeft,
+      viewportTop,
+      global,
+    } = candidate as Record<string, unknown>;
     if (
       typeof key !== "string"
       || !allowedKeys.has(key)
       || seen.has(key)
       || typeof left !== "number"
       || typeof top !== "number"
+      || typeof viewportLeft !== "number"
+      || typeof viewportTop !== "number"
       || !Number.isFinite(left)
       || !Number.isFinite(top)
-      || Math.abs(left) > 100_000
-      || Math.abs(top) > 100_000
+      || !Number.isFinite(viewportLeft)
+      || !Number.isFinite(viewportTop)
+      || Math.abs(left) > MAX_REVIEW_COMMENT_COORDINATE
+      || Math.abs(top) > MAX_REVIEW_COMMENT_COORDINATE
+      || Math.abs(viewportLeft) > MAX_REVIEW_COMMENT_COORDINATE
+      || Math.abs(viewportTop) > MAX_REVIEW_COMMENT_COORDINATE
     ) return [];
     seen.add(key);
-    return [{ key, left, top }];
+    return [{
+      key,
+      left,
+      top,
+      viewportLeft,
+      viewportTop,
+      global: global === true,
+    }];
   });
 }
 
@@ -215,6 +240,68 @@ function ReviewDocumentPane({
     onViewport(side, null);
   }, [onFrame, onViewport, side]);
 
+  const renderCommentMarker = (group: ReviewCommentGroup) => {
+    const layout = commentLayoutsByKey.get(group.key);
+    if (!layout) return null;
+    const left = Math.max(12, Math.min(documentViewportWidth - 12, layout.left)) * scale;
+    const top = Math.max(12, layout.top) * scale;
+    const visibleLeft = layout.viewportLeft * scale - viewportScrollLeft;
+    const visibleTop = layout.viewportTop * scale;
+    const placement = visibleLeft < viewportSize.width * .55 ? "right" : "left";
+    const verticalPlacement = visibleTop < 96
+      ? "below"
+      : visibleTop > viewportSize.height - 96
+        ? "above"
+        : "center";
+    const commentText = group.items.map((item) => item.text).join("；");
+    return (
+      <span
+        key={group.key}
+        className={styles.reviewCommentMarker}
+        data-testid="review-comment-marker"
+        data-comment-key={group.key}
+        data-bubble-placement={placement}
+        data-bubble-vertical={verticalPlacement}
+        role="note"
+        aria-label={`用户评论：${commentText}`}
+        style={{ left, top }}
+        onPointerEnter={(event) => {
+          const viewport = viewportRef.current;
+          if (!viewport) return;
+          const markerBounds = event.currentTarget.getBoundingClientRect();
+          const viewportBounds = viewport.getBoundingClientRect();
+          const centerX = markerBounds.left + markerBounds.width / 2 - viewportBounds.left;
+          const centerY = markerBounds.top + markerBounds.height / 2 - viewportBounds.top;
+          event.currentTarget.dataset.bubblePlacement = centerX < viewportBounds.width * .55
+            ? "right"
+            : "left";
+          event.currentTarget.dataset.bubbleVertical = centerY < 96
+            ? "below"
+            : centerY > viewportBounds.height - 96
+              ? "above"
+              : "center";
+        }}
+      >
+        <span aria-hidden="true">评</span>
+        <span
+          className={styles.reviewCommentBubble}
+          data-testid="review-comment-bubble"
+          aria-hidden="true"
+        >
+          <strong>用户评论</strong>
+          {group.items.map((item, index) => (
+            <span className={styles.reviewCommentItem} key={`${group.key}-${index}`}>
+              <span>{item.text}</span>
+              {item.attachmentCount > 0 && !item.text.startsWith("已添加 ") ? (
+                <small>{item.attachmentCount} 个参考附件</small>
+              ) : null}
+            </span>
+          ))}
+        </span>
+      </span>
+    );
+  };
+
   return (
     <section
       className={styles.documentPane}
@@ -276,50 +363,14 @@ function ReviewDocumentPane({
           />
           {commentGroups.length ? (
             <div className={styles.reviewCommentLayer}>
-              {commentGroups.map((group) => {
-                const layout = commentLayoutsByKey.get(group.key);
-                if (!layout) return null;
-                const left = Math.max(12, Math.min(documentViewportWidth - 12, layout.left)) * scale;
-                const top = Math.max(12, Math.min(iframeHeight - 12, layout.top)) * scale;
-                const visibleLeft = left - viewportScrollLeft;
-                const placement = visibleLeft < viewportSize.width * .55 ? "right" : "left";
-                const verticalPlacement = top < 96
-                  ? "below"
-                  : top > viewportSize.height - 96
-                    ? "above"
-                    : "center";
-                const commentText = group.items.map((item) => item.text).join("；");
-                return (
-                  <span
-                    key={group.key}
-                    className={styles.reviewCommentMarker}
-                    data-testid="review-comment-marker"
-                    data-comment-key={group.key}
-                    data-bubble-placement={placement}
-                    data-bubble-vertical={verticalPlacement}
-                    role="note"
-                    aria-label={`用户评论：${commentText}`}
-                    style={{ left, top }}
-                  >
-                    <span aria-hidden="true">评</span>
-                    <span
-                      className={styles.reviewCommentBubble}
-                      data-testid="review-comment-bubble"
-                      aria-hidden="true"
-                    >
-                      <strong>用户评论</strong>
-                      {group.items.map((item, index) => (
-                        <span className={styles.reviewCommentItem} key={`${group.key}-${index}`}>
-                          <span>{item.text}</span>
-                          {item.attachmentCount > 0 && !item.text.startsWith("已添加 ") ? (
-                            <small>{item.attachmentCount} 个参考附件</small>
-                          ) : null}
-                        </span>
-                      ))}
-                    </span>
-                  </span>
-                );
-              })}
+              <div className={styles.reviewCommentContentLayer}>
+                {commentGroups.filter((group) => (
+                  commentLayoutsByKey.get(group.key)?.global !== true
+                )).map(renderCommentMarker)}
+              </div>
+              {commentGroups.filter((group) => (
+                commentLayoutsByKey.get(group.key)?.global === true
+              )).map(renderCommentMarker)}
             </div>
           ) : null}
         </div>
@@ -418,7 +469,11 @@ export default function AiReviewWorkspace({
   });
   const scalesRef = useRef<Record<ReviewSide, number>>({ before: 1, after: 1 });
   const horizontalFollowerRef = useRef<ReviewSide | null>(null);
-  const scrollSyncSequenceRef = useRef(0);
+  const scrollCoordinatorRef = useRef<ReviewScrollCoordinator | null>(null);
+  const frameScrollPositionsRef = useRef<Record<ReviewSide, { top: number; left: number }>>({
+    before: { top: 0, left: 0 },
+    after: { top: 0, left: 0 },
+  });
   const presentationEpochRef = useRef(0);
   const presentationReadyRef = useRef<{
     epoch: number;
@@ -428,6 +483,7 @@ export default function AiReviewWorkspace({
     timer: number | null;
   } | null>(null);
   const reviewStateRef = useRef({ filter, focus, transparency, pagePresentationPath });
+  const scrollModeRef = useRef(scrollMode);
   const desktopSessions = desktopSessionResult?.documents === documents
     ? desktopSessionResult.sessions
     : null;
@@ -458,6 +514,62 @@ export default function AiReviewWorkspace({
     return [...grouped.entries()].map(([label, items]) => ({ label, items }));
   }, [documents.outline]);
   const mapOpen = mapPinned || mapPeeked;
+
+  const updateCommentScrollTransform = useCallback((
+    side: ReviewSide,
+    top: number,
+    left: number,
+  ) => {
+    const safeTop = Number.isFinite(top) ? Math.max(0, top) : 0;
+    const safeLeft = Number.isFinite(left) ? Math.max(0, left) : 0;
+    frameScrollPositionsRef.current[side] = { top: safeTop, left: safeLeft };
+    const viewport = viewportsRef.current[side];
+    if (!viewport) return;
+    const scale = scalesRef.current[side];
+    viewport.style.setProperty("--review-comment-scroll-x", `${safeLeft * scale}px`);
+    viewport.style.setProperty("--review-comment-scroll-y", `${safeTop * scale}px`);
+  }, []);
+
+  useEffect(() => {
+    const coordinator = new ReviewScrollCoordinator({
+      requestFrame: (callback) => window.requestAnimationFrame(callback),
+      cancelFrame: (handle) => window.cancelAnimationFrame(handle),
+      setTimer: (callback, delay) => window.setTimeout(callback, delay),
+      clearTimer: (handle) => window.clearTimeout(handle),
+      now: () => performance.now(),
+      applyFollower: (side, command) => {
+        updateCommentScrollTransform(side, command.top, command.left);
+        postToFrame(framesRef.current[side], sessionId, {
+          type: "set-scroll-position",
+          ...command,
+        });
+      },
+      onOwnerChange: (owner) => {
+        (['before', 'after'] as ReviewSide[]).forEach((side) => {
+          postToFrame(framesRef.current[side], sessionId, {
+            type: "scroll-owner",
+            ...owner,
+          });
+        });
+      },
+    });
+    scrollCoordinatorRef.current = coordinator;
+    coordinator.setLinked(scrollModeRef.current === "linked");
+    return () => {
+      coordinator.setLinked(false);
+      coordinator.reset();
+      if (scrollCoordinatorRef.current === coordinator) scrollCoordinatorRef.current = null;
+    };
+  }, [sessionId, updateCommentScrollTransform]);
+
+  useEffect(() => {
+    scrollModeRef.current = scrollMode;
+    scrollCoordinatorRef.current?.setLinked(scrollMode === "linked");
+  }, [scrollMode]);
+
+  useEffect(() => {
+    scrollCoordinatorRef.current?.reset();
+  }, [documents]);
 
   useEffect(() => {
     if (!hydrated || reviewInitializedRef.current) return;
@@ -654,6 +766,25 @@ export default function AiReviewWorkspace({
         }
         return;
       }
+      if (message.type === "scroll-geometry") {
+        scrollCoordinatorRef.current?.updateGeometry(message.side, message.scrollGeometry);
+        return;
+      }
+      if (message.type === "scroll-intent") {
+        scrollCoordinatorRef.current?.handleIntent(message.side);
+        return;
+      }
+      if (message.type === "scroll-position") {
+        const top = Number(message.top || 0);
+        const left = Number(message.left || 0);
+        updateCommentScrollTransform(message.side, top, left);
+        scrollCoordinatorRef.current?.handlePosition(message.side, {
+          top,
+          left,
+          commandId: message.commandId,
+        });
+        return;
+      }
       if (message.type === "comment-layout") {
         if (message.side !== "before") return;
         const allowedKeys = new Set(documents.commentGroups.map((group) => group.key));
@@ -706,18 +837,6 @@ export default function AiReviewWorkspace({
         coordinatePagePresentation(panelPath);
         return;
       }
-      if (message.type !== "scroll" || scrollMode !== "linked") return;
-      const follower: ReviewSide = message.side === "before" ? "after" : "before";
-      scrollSyncSequenceRef.current += 1;
-      postToFrame(framesRef.current[follower], sessionId, {
-        type: "sync-scroll",
-        syncToken: `scroll-${scrollSyncSequenceRef.current}`,
-        outlineId: message.outlineId,
-        ratio: Number(message.ratio || 0),
-        pageRatio: Number(message.pageRatio || 0),
-        left: Number(message.left || 0),
-        boundary: message.boundary,
-      });
     };
     window.addEventListener("message", handleMessage);
     return () => window.removeEventListener("message", handleMessage);
@@ -727,9 +846,9 @@ export default function AiReviewWorkspace({
     documents.outline,
     finishPagePresentation,
     focusCurrentSelection,
-    scrollMode,
     sendState,
     sessionId,
+    updateCommentScrollTransform,
   ]);
 
   const registerFrame = useCallback((side: ReviewSide, frame: HTMLIFrameElement | null) => {
@@ -737,15 +856,28 @@ export default function AiReviewWorkspace({
     if (frame) window.requestAnimationFrame(() => {
       sendState(side);
       focusCurrentSelection(side);
+      const owner = scrollCoordinatorRef.current?.snapshot();
+      if (owner) {
+        postToFrame(frame, sessionId, {
+          type: "scroll-owner",
+          linked: owner.linked,
+          leader: owner.leader,
+          gestureId: owner.gestureId,
+        });
+      }
     });
-  }, [focusCurrentSelection, sendState]);
+  }, [focusCurrentSelection, sendState, sessionId]);
 
   const registerViewport = useCallback((side: ReviewSide, viewport: HTMLDivElement | null) => {
     viewportsRef.current[side] = viewport;
-  }, []);
+    const position = frameScrollPositionsRef.current[side];
+    if (viewport) updateCommentScrollTransform(side, position.top, position.left);
+  }, [updateCommentScrollTransform]);
 
   const updateScale = useCallback((side: ReviewSide, scale: number) => {
     scalesRef.current[side] = scale;
+    const position = frameScrollPositionsRef.current[side];
+    updateCommentScrollTransform(side, position.top, position.left);
     const state = reviewStateRef.current;
     postToFrame(framesRef.current[side], sessionId, {
       type: "state",
@@ -756,7 +888,7 @@ export default function AiReviewWorkspace({
         scale,
       },
     });
-  }, [sessionId]);
+  }, [sessionId, updateCommentScrollTransform]);
 
   const handleHorizontalScroll = useCallback((side: ReviewSide) => {
     if (scrollMode !== "linked" || horizontalFollowerRef.current === side) return;
@@ -829,17 +961,23 @@ export default function AiReviewWorkspace({
 
   const selectPageOverview = useCallback(() => {
     dispatchReviewState({ type: "set-navigation-target", value: "all" });
+    const coordinator = scrollCoordinatorRef.current;
+    const gestureId = coordinator?.invalidateGesture() || 0;
+    const commandBatchId = Date.now();
     (["before", "after"] as ReviewSide[]).forEach((side) => {
+      const commandId = `overview-${commandBatchId}-${side}`;
+      coordinator?.handlePosition(side, { top: 0, left: 0, commandId });
+      updateCommentScrollTransform(side, 0, 0);
       postToFrame(framesRef.current[side], sessionId, {
-        type: "sync-scroll",
-        syncToken: `overview-${Date.now()}`,
-        boundary: "top",
-        pageRatio: 0,
-        ratio: 0,
+        type: "set-scroll-position",
+        commandId,
+        gestureId,
+        force: true,
+        top: 0,
         left: 0,
       });
     });
-  }, [sessionId]);
+  }, [sessionId, updateCommentScrollTransform]);
 
   const navigate = useCallback((direction: -1 | 1) => {
     if (!navigableChanges.length) return;
