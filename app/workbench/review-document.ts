@@ -5,12 +5,11 @@ import {
 } from "../lib/page-presentation-dom";
 import {
   buildSourceIndex,
-  createTargetRef,
+  instrumentPreviewHtml,
   resolveTargetRef,
 } from "../lib/source-patch-core.js";
 import {
   sourceTargetRefForSelection,
-  targetLevelForSelection,
 } from "../lib/canvas-target-rebind.js";
 import type { CommentItem } from "./types";
 
@@ -63,6 +62,7 @@ const REVIEW_STYLE_ID = "pageroot-ai-review-style";
 const REVIEW_BOOTSTRAP_ATTRIBUTE = "data-pageroot-ai-review-bootstrap";
 const REVIEW_BASE_ATTRIBUTE = "data-pageroot-ai-review-base";
 const REVIEW_BOOTSTRAP_PATH = "/.pageroot/preview-bootstrap.js";
+const REVIEW_SOURCE_NODE_ATTRIBUTE = "data-pageroot-review-source-node-id";
 
 const REVIEW_DOCUMENT_STYLE = String.raw`
   html {
@@ -2114,6 +2114,7 @@ function attachChangeMarkerMetadata(
 function resolvedCommentElement(
   document: Document,
   sourceIndex: ReturnType<typeof buildSourceIndex>,
+  sourceElementsByNodeId: ReadonlyMap<string, Element>,
   target: HtmlCanvasSelection,
 ): Element | null {
   if (target.selector.trim().toLowerCase() === "body" && target.level === "module") {
@@ -2135,13 +2136,10 @@ function resolvedCommentElement(
         ? sourceIndex.byNodeId.get(resolved.target.parentId)
         : null;
     if (!sourceElement || sourceElement.type !== "element") return null;
-    const refreshed = createTargetRef(sourceIndex, sourceElement, {
-      targetId: target.id,
-      label: target.label,
-      level: targetLevelForSelection(target.level),
-    });
-    if (refreshed.selector) {
-      const matches = document.querySelectorAll(refreshed.selector);
+    const sourceMappedElement = sourceElementsByNodeId.get(sourceElement.nodeId);
+    if (sourceMappedElement) return sourceMappedElement;
+    if (sourceElement.selector) {
+      const matches = document.querySelectorAll(sourceElement.selector);
       if (matches.length === 1) return matches[0];
     }
   } catch {
@@ -2160,18 +2158,31 @@ function annotateReviewComments(
   document: Document,
   sourceHtml: string,
   comments: readonly CommentItem[],
+  indexedSource?: ReturnType<typeof buildSourceIndex> | null,
 ): ReviewCommentGroup[] {
   if (!comments.length || !document.body) return [];
-  let sourceIndex: ReturnType<typeof buildSourceIndex>;
+  let sourceIndex = indexedSource ?? null;
   try {
-    sourceIndex = buildSourceIndex(sourceHtml);
+    sourceIndex ??= buildSourceIndex(sourceHtml);
   } catch {
     return [];
   }
+  const sourceElementsByNodeId = new Map<string, Element>();
+  document.querySelectorAll(`[${REVIEW_SOURCE_NODE_ATTRIBUTE}]`).forEach((element) => {
+    const nodeId = element.getAttribute(REVIEW_SOURCE_NODE_ATTRIBUTE);
+    if (nodeId && !sourceElementsByNodeId.has(nodeId)) {
+      sourceElementsByNodeId.set(nodeId, element);
+    }
+  });
   const groups = new Map<Element, CommentItem[]>();
   comments.forEach((comment) => {
     if (!comment.text.trim() && !comment.attachments?.length) return;
-    const element = resolvedCommentElement(document, sourceIndex, comment.target);
+    const element = resolvedCommentElement(
+      document,
+      sourceIndex,
+      sourceElementsByNodeId,
+      comment.target,
+    );
     if (!element) return;
     const existing = groups.get(element);
     if (existing) existing.push(comment);
@@ -2196,14 +2207,20 @@ function annotateReviewComments(
   });
 }
 
-function clearReservedReviewMarkup(document: Document) {
+function clearReservedReviewMarkup(
+  document: Document,
+  preserveSourceNodeIdentity = false,
+) {
   document.getElementById(REVIEW_STYLE_ID)?.remove();
   document.querySelectorAll(`[${REVIEW_BOOTSTRAP_ATTRIBUTE}]`).forEach((element) => element.remove());
   document.querySelectorAll(`base[${REVIEW_BASE_ATTRIBUTE}]`).forEach((element) => element.remove());
   document.querySelectorAll("*").forEach((element) => {
     [...element.attributes].forEach((attribute) => {
       if (
-        attribute.name.startsWith("data-pageroot-review-")
+        (
+          attribute.name.startsWith("data-pageroot-review-")
+          && (!preserveSourceNodeIdentity || attribute.name !== REVIEW_SOURCE_NODE_ATTRIBUTE)
+        )
         || attribute.name === "data-pageroot-outline-id"
       ) {
         element.removeAttribute(attribute.name);
@@ -2313,13 +2330,20 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
           .filter((rect) => rect.width > 0 && rect.height > 0);
         if (!rects.length) return [];
         const global = target.getAttribute("data-pageroot-review-comment-global") === "true";
-        const firstRect = rects.reduce((current, rect) => (
+        if (global) return [{ key, left: 22, top: 22 }];
+        const visibleRects = rects.filter((rect) => (
+          rect.bottom >= 0 && rect.top <= innerHeight
+        ));
+        if (!visibleRects.length) return [];
+        const firstRect = visibleRects.reduce((current, rect) => (
           rect.top < current.top ? rect : current
         ));
+        const visibleTop = Math.max(0, firstRect.top);
+        const visibleBottom = Math.min(innerHeight, firstRect.bottom);
         return [{
           key,
-          left: global ? 22 : Math.max(...rects.map((rect) => rect.right)) + 10,
-          top: global ? 22 : firstRect.top + firstRect.height / 2,
+          left: Math.max(...visibleRects.map((rect) => rect.right)) + 10,
+          top: visibleTop + (visibleBottom - visibleTop) / 2,
         }];
       });
     post("comment-layout", { commentLayouts });
@@ -3212,10 +3236,35 @@ export function buildReviewDocuments(
     };
   }
   const parser = new DOMParser();
-  const beforeDocument = parser.parseFromString(beforeHtml, "text/html");
+  const comments = options.comments || [];
+  let indexedBeforeSource: ReturnType<typeof buildSourceIndex> | null = null;
+  let projectedBeforeHtml = beforeHtml;
+  let projectedSourceNodeIdentity = false;
+  if (comments.length) {
+    try {
+      indexedBeforeSource = buildSourceIndex(beforeHtml);
+      projectedBeforeHtml = instrumentPreviewHtml(indexedBeforeSource, {
+        attributeName: REVIEW_SOURCE_NODE_ATTRIBUTE,
+      }).html;
+      projectedSourceNodeIdentity = true;
+    } catch {
+      // Keep the unique-selector fallback available for sources that already
+      // contain the reserved review identity attribute.
+    }
+  }
+  const beforeDocument = parser.parseFromString(projectedBeforeHtml, "text/html");
   const afterDocument = parser.parseFromString(afterHtml, "text/html");
-  clearReservedReviewMarkup(beforeDocument);
+  clearReservedReviewMarkup(beforeDocument, projectedSourceNodeIdentity);
   clearReservedReviewMarkup(afterDocument);
+  const commentGroups = annotateReviewComments(
+    beforeDocument,
+    beforeHtml,
+    comments,
+    indexedBeforeSource,
+  );
+  beforeDocument.querySelectorAll(`[${REVIEW_SOURCE_NODE_ATTRIBUTE}]`).forEach((element) => {
+    element.removeAttribute(REVIEW_SOURCE_NODE_ATTRIBUTE);
+  });
   annotatePanelPairs(beforeDocument, afterDocument);
   annotateActionPairs(beforeDocument, afterDocument);
   const pairs = pairSections(
@@ -3278,12 +3327,6 @@ export function buildReviewDocuments(
       ...(movement ? { movement } : {}),
     });
   });
-
-  const commentGroups = annotateReviewComments(
-    beforeDocument,
-    beforeHtml,
-    options.comments || [],
-  );
 
   const preparedBefore = prepareDocument(
     beforeDocument,
