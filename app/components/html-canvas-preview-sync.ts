@@ -1,8 +1,18 @@
-import { SOURCE_NODE_ATTRIBUTE, instrumentPreviewHtml } from "../lib/source-patch-core.js";
+import {
+  SOURCE_NODE_ATTRIBUTE,
+  instrumentPreviewHtml,
+  resolveTargetRef,
+} from "../lib/source-patch-core.js";
+import { isEditableIslandTarget } from "../lib/editable-island.js";
 import { isTransparentSourceTextElement } from "../lib/source-text-map.js";
 import { disableExecutableMarkup } from "./html-preview-sandbox.js";
 import { escapedSourceNodeId } from "./html-canvas-page-view";
-import type { SourceElementValue, SourceIndexValue, TextRangeSegment } from "./html-canvas-internal-types";
+import type {
+  SourceElementValue,
+  SourceIndexValue,
+  SourceTargetRef,
+  TextRangeSegment,
+} from "./html-canvas-internal-types";
 import type { IslandEditingController } from "./IslandEditingController";
 
 export function sourceTextNodeForDomText(
@@ -266,5 +276,79 @@ export function refreshMountedPreviewSourceNodeIds(
     }) === true;
   }
   plan.apply();
+  return true;
+}
+
+export function adoptCanonicalHistoryIslandInPlace(options: {
+  rootElement: HTMLElement;
+  previousIndex: SourceIndexValue;
+  nextIndex: SourceIndexValue;
+  previousTargetRef: SourceTargetRef;
+  nextTargetRef: SourceTargetRef;
+}): boolean {
+  const {
+    rootElement,
+    previousIndex,
+    nextIndex,
+    previousTargetRef,
+    nextTargetRef,
+  } = options;
+  const documentNode = rootElement.ownerDocument;
+  const previousResolution = resolveTargetRef(previousIndex, previousTargetRef);
+  const nextResolution = resolveTargetRef(nextIndex, nextTargetRef);
+  if (
+    previousResolution.resolution !== "exact"
+    || nextResolution.resolution !== "exact"
+    || previousResolution.target?.type !== "element"
+    || nextResolution.target?.type !== "element"
+    || rootElement.getAttribute(SOURCE_NODE_ATTRIBUTE)
+      !== previousResolution.target.nodeId
+  ) return false;
+
+  const previousCapability = isEditableIslandTarget(
+    previousIndex,
+    previousTargetRef,
+  );
+  const nextCapability = isEditableIslandTarget(nextIndex, nextTargetRef);
+  if (!previousCapability.editable || !nextCapability.editable) return false;
+  const previousIsland = previousCapability.island;
+  const nextIsland = nextCapability.island;
+  if (
+    previousIsland.element.nodeId !== previousResolution.target.nodeId
+    || nextIsland.element.nodeId !== nextResolution.target.nodeId
+    || previousIsland.element.tagName !== nextIsland.element.tagName
+    || previousIndex.source.slice(0, previousIsland.contentRange.startOffset)
+      !== nextIndex.source.slice(0, nextIsland.contentRange.startOffset)
+    || previousIndex.source.slice(previousIsland.contentRange.endOffset)
+      !== nextIndex.source.slice(nextIsland.contentRange.endOffset)
+  ) return false;
+
+  const canonicalTarget = canonicalNativeHostPreview(
+    rootElement,
+    nextIsland.element.nodeId,
+    nextIndex,
+  );
+  if (!canonicalTarget) return false;
+  const canonicalChildren = Array.from(canonicalTarget.childNodes).map(
+    (node) => documentNode.importNode(node, true),
+  );
+  if (!refreshMountedPreviewSourceNodeIds(
+    documentNode,
+    previousIndex,
+    nextIndex,
+    { excludeRoot: rootElement },
+  )) return false;
+
+  rootElement.replaceChildren(...canonicalChildren);
+  rootElement.setAttribute(SOURCE_NODE_ATTRIBUTE, nextIsland.element.nodeId);
+  const nextElements = nextIndex.elements as SourceElementValue[];
+  const mountedElements = sourceBackedPreviewElements(documentNode);
+  if (
+    mountedElements.length !== nextElements.length
+    || mountedElements.some((element, index) => (
+      element.getAttribute(SOURCE_NODE_ATTRIBUTE) !== nextElements[index].nodeId
+      || element.tagName.toLowerCase() !== nextElements[index].tagName
+    ))
+  ) throw new Error("历史文字结果无法保持当前画布的源码节点映射。");
   return true;
 }

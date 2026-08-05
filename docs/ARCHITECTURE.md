@@ -227,6 +227,15 @@ forward operation truncates redo. If current source bytes cannot be chained to
 the journal—external modification or a new working file—the Bridge establishes
 a fresh boundary at those bytes rather than crossing unknown content.
 
+After that acknowledgement, the Canvas may keep the current iframe only when
+both history targets resolve exactly to the same editable-island identity, the
+source prefix and suffix prove that every byte outside that island is unchanged,
+and the complete mounted source-node sequence validates against the next
+`SourceIndex`. It then replaces only the island's children from an instrumented
+canonical parse, refreshes ephemeral node IDs and restores the logical Selection
+and viewport. Any failed proof uses the existing fresh verified-frame path. The
+mounted DOM remains a disposable projection and is never serialized into source.
+
 The desktop `Edit` menu is a router, not another history owner. Focused native
 text inputs use Electron/Chromium's local text undo. Canvas focus routes
 Undo/Redo intent to the renderer source-history session. Comment/card,

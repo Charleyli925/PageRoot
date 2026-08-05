@@ -99,6 +99,7 @@ import {
 } from "./html-canvas-page-view";
 import { applyRuntimeVisualProjectionToDocument } from "./html-canvas-runtime-visual";
 import {
+  adoptCanonicalHistoryIslandInPlace,
   canonicalNativeHostPreview,
   nativeEditHostForElement,
   refreshMountedPreviewSourceNodeIds,
@@ -3185,6 +3186,107 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     fencePendingEdit({ resumeEditing: false })
   ), [fencePendingEdit]);
 
+  const adoptEditableIslandHistoryInPlace = useCallback((
+    source: string,
+    bookmark: NativeEditFenceBookmark | null,
+    target: HtmlCanvasSelection | null,
+    logicalSelection?: NativeEditSelection,
+  ): boolean => {
+    const iframe = iframeRef.current;
+    const documentNode = iframe?.contentDocument;
+    const frameView = iframe?.contentWindow;
+    const rootElement = selectedElementRef.current;
+    const previousIndex = sourceIndexRef.current;
+    const previousSource = frameSourceHtmlRef.current;
+    if (
+      !bookmark
+      || !target
+      || activeNativeEditRef.current
+      || !iframe
+      || !documentNode?.documentElement
+      || !frameView
+      || !rootElement?.isConnected
+      || rootElement.ownerDocument !== documentNode
+      || !previousIndex
+      || previousIndex.source !== previousSource
+      || renderedSourceHtmlRef.current !== previousSource
+      || containerRef.current?.getAttribute("data-render-verified") !== "true"
+    ) return false;
+
+    const viewport = {
+      left: frameView.scrollX,
+      top: frameView.scrollY,
+    };
+    try {
+      const previousTargetRef = sourceTargetRefForSelection(bookmark.target);
+      const nextTargetRef = sourceTargetRefForSelection(target);
+      const nextIndex = buildSourceIndex(source);
+      if (!adoptCanonicalHistoryIslandInPlace({
+        rootElement,
+        previousIndex,
+        nextIndex,
+        previousTargetRef,
+        nextTargetRef,
+      })) return false;
+
+      // The Bridge-validated bytes remain authoritative. This only advances
+      // the disposable mounted projection after proving that every byte
+      // outside the active editable island is unchanged.
+      sourceIndexRef.current = nextIndex;
+      frameSourceHtmlRef.current = source;
+      renderedSourceHtmlRef.current = source;
+      pendingFrameRestoreEpochRef.current += 1;
+      pendingNativeEditResumeRef.current = null;
+      pendingSelectionRef.current = null;
+      pendingToolbarVisibleRef.current = false;
+      nativeDomGenerationRef.current += 1;
+      nativeEditNeedsReloadRef.current = false;
+      fencedDocumentCleanupRef.current();
+      applyPageViewContextToDocument(
+        documentNode,
+        source,
+        pageViewContextRef.current,
+        appliedPageViewContextRef.current,
+      );
+      appliedPageViewContextRef.current = pageViewContextRef.current;
+      applyRuntimeVisualProjectionToDocument(
+        documentNode,
+        source,
+        runtimeVisualProjectionRef.current,
+      );
+      const restoredTarget = selectTarget(target, {
+        reveal: false,
+        showToolbar: bookmark.toolbarVisible,
+      });
+      if (
+        !restoredTarget
+        || restoredTarget.resolution === "ambiguous"
+        || restoredTarget.resolution === "orphaned"
+        || selectedElementRef.current !== rootElement
+        || !startEditing(undefined, logicalSelection ?? bookmark.selection)
+      ) throw new Error("历史文字结果无法在当前画布恢复编辑目标。");
+
+      frameView.scrollTo({
+        left: viewport.left,
+        top: viewport.top,
+        behavior: "auto",
+      });
+      containerRef.current?.setAttribute(
+        "data-history-adopt-path",
+        "editable-island-in-place",
+      );
+      containerRef.current?.setAttribute("data-render-verified", "true");
+      requestAnimationFrame(updateOverlayPosition);
+      return true;
+    } catch {
+      containerRef.current?.setAttribute(
+        "data-history-adopt-path",
+        "frame-reload-fallback",
+      );
+      return false;
+    }
+  }, [selectTarget, startEditing, updateOverlayPosition]);
+
   const adoptHistorySource = useCallback((
     source: string,
     target: HtmlCanvasSelection | null,
@@ -3200,6 +3302,16 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     const resumeTarget = bookmark
       ? target ?? bookmark.target
       : target;
+    if (adoptEditableIslandHistoryInPlace(
+      source,
+      bookmark,
+      resumeTarget,
+      selection ?? bookmark?.selection,
+    )) return true;
+    containerRef.current?.setAttribute(
+      "data-history-adopt-path",
+      "frame-reload-fallback",
+    );
     queueNativeFenceReload(
       source,
       bookmark,
@@ -3207,7 +3319,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       selection ?? bookmark?.selection,
     );
     return true;
-  }, [detachNativeEditForFence, queueNativeFenceReload]);
+  }, [
+    adoptEditableIslandHistoryInPlace,
+    detachNativeEditForFence,
+    queueNativeFenceReload,
+  ]);
 
   const cancelHistoryAction = useCallback((
     options: { restore?: boolean } = {},

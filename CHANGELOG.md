@@ -4,6 +4,10 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+- Stop Canvas text undo/redo from blanking and jumping the page. Bridge-verified
+  changes confined to the active editable island now adopt canonical children,
+  source-node identities, caret and viewport in the existing iframe; any failed
+  proof still falls back to a fresh verified frame.
 - Make frozen user comments easier to discover in AI review with a larger,
   always-purple “评” marker and white label. The marker remains anchored to
   the original comment target, and hovering still opens the existing read-only

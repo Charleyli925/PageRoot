@@ -6446,9 +6446,10 @@ export default function Workbench() {
       recoveryIdentityRef.current =
         recoveryIdentityFromRecord(payload.recoveryIdentity)
         || recoveryIdentityRef.current;
-      // Source history already performs an in-place canonical Canvas reload so
-      // it can restore the active target and caret. Publish the complete
-      // Document tuple without advancing the project/version Canvas generation.
+      // Source history already performs canonical Canvas adoption (mounted
+      // island when proven safe, otherwise a fresh frame) and restores the
+      // active target/caret. Publish the complete Document tuple without
+      // advancing the project/version Canvas generation.
       documentSessionRef.current.update({
         html: canonicalHtml,
         sourceSha256: nextSourceSha256,

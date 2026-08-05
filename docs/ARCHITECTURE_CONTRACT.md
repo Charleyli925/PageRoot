@@ -196,6 +196,15 @@ reconciled by querying workspace authority; the same action ID may be replayed
 once only when authority proves it was already applied or its original
 preconditions still hold.
 
+A Bridge-acknowledged history result may advance the mounted editable-island
+projection without replacing its iframe only after exact old/new target
+resolution through the recorded TargetRef transition, byte-equal source
+prefix/suffix outside the island and a complete next-`SourceIndex` DOM mapping
+all succeed. This is a projection optimization, not another history application
+path: canonical bytes still come only from the Bridge. Failure at any proof
+point retires the frame and loads the canonical source through the normal
+verified fallback.
+
 The history journal is bounded and may be reset only at a proven current source
 Hash. A forward edit after undo truncates redo. Source mismatch never attempts
 best-effort patching and never serializes preview DOM; it creates a new history

@@ -366,7 +366,7 @@ test("style writes use source-safe values, canonical target identity, and only a
   );
 });
 
-test("ordinary patches keep the mounted iframe while source-authority fences use a fresh frame", async () => {
+test("ordinary patches and proven history keep the iframe while other authority fences replace it", async () => {
   const canvas = await readCanvasArchitecture();
   const stablePreview = canvas.slice(
     canvas.indexOf("const synchronizeStablePreview = useCallback"),
@@ -375,6 +375,18 @@ test("ordinary patches keep the mounted iframe while source-authority fences use
   const applyCommand = canvas.slice(
     canvas.indexOf("const applySourceCommand = useCallback"),
     canvas.indexOf("const resetSelection = useCallback", canvas.indexOf("const applySourceCommand = useCallback")),
+  );
+  const historyInPlace = canvas.slice(
+    canvas.indexOf("const adoptEditableIslandHistoryInPlace = useCallback"),
+    canvas.indexOf("const adoptHistorySource = useCallback"),
+  );
+  const historyProjection = canvas.slice(
+    canvas.indexOf("export function adoptCanonicalHistoryIslandInPlace"),
+    canvas.indexOf("export type MoveAvailability"),
+  );
+  const historyAdoption = canvas.slice(
+    canvas.indexOf("const adoptHistorySource = useCallback"),
+    canvas.indexOf("const cancelHistoryAction = useCallback"),
   );
 
   assert.match(
@@ -455,6 +467,31 @@ test("ordinary patches keep the mounted iframe while source-authority fences use
   assert.match(applyCommand, /\.session\.applyExternalIslandBaseline\(\{/u);
   assert.match(applyCommand, /data-render-verified", "true"/u);
   assert.doesNotMatch(applyCommand, /data-render-verified", "false"/u);
+
+  assert.match(historyInPlace, /adoptCanonicalHistoryIslandInPlace\(\{/u);
+  assert.match(historyProjection, /isEditableIslandTarget\(/u);
+  assert.match(
+    historyProjection,
+    /previousIndex\.source\.slice\(0, previousIsland\.contentRange\.startOffset\)[\s\S]*?nextIndex\.source\.slice\(0, nextIsland\.contentRange\.startOffset\)/u,
+    "history may stay mounted only after proving the source prefix outside the editable island",
+  );
+  assert.match(
+    historyProjection,
+    /previousIndex\.source\.slice\(previousIsland\.contentRange\.endOffset\)[\s\S]*?nextIndex\.source\.slice\(nextIsland\.contentRange\.endOffset\)/u,
+    "history may stay mounted only after proving the source suffix outside the editable island",
+  );
+  assert.match(historyProjection, /refreshMountedPreviewSourceNodeIds\(/u);
+  assert.match(historyProjection, /rootElement\.replaceChildren\(\.\.\.canonicalChildren\)/u);
+  assert.match(historyProjection, /mountedElements\.length !== nextElements\.length/u);
+  assert.match(historyInPlace, /frameView\.scrollTo\(/u);
+  assert.match(historyInPlace, /"editable-island-in-place"/u);
+  assert.doesNotMatch(historyInPlace, /loadFrameSource|queueNativeFenceReload/u);
+  assert.doesNotMatch(historyProjection, /loadFrameSource|queueNativeFenceReload/u);
+  assert.match(
+    historyAdoption,
+    /if \(adoptEditableIslandHistoryInPlace\([\s\S]*?\)\) return true;[\s\S]*?queueNativeFenceReload\(/u,
+    "history must use a verified mounted-island path before the fresh-frame fallback",
+  );
 
   const finishStart = canvas.indexOf("const frameReloadRequired");
   const finishNativeEdit = canvas.slice(

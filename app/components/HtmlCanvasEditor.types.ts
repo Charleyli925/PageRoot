@@ -181,7 +181,7 @@ export type HtmlCanvasEditorHandle = {
   ) => HtmlCanvasSelection | null;
   startEditing: () => boolean;
   moveSelected: (direction: "up" | "down") => boolean;
-  /** Adopts one Bridge-validated history result without serializing preview DOM. */
+  /** Adopts one Bridge-validated history result in place when proven safe, otherwise with a fresh frame. */
   adoptHistorySource: (
     source: string,
     target: HtmlCanvasSelection | null,
