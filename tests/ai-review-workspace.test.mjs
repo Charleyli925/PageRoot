@@ -375,6 +375,23 @@ test("runtime chart review supplements only the initial bounded static footprint
   assert.match(review, /event\.ports\.length === 1/);
   assert.match(review, /message\.challenge !== expectedChallenge/);
   assert.match(review, /coordinator\.start\(\)/);
+  assert.match(review, /useLayoutEffect\(\(\) => \{/);
+  assert.match(review, /runtimeVisualOwnerDocumentsRef/);
+  assert.match(review, /runtimeVisualFrameDocumentsRef/);
+  const runtimeOwnerStart = review.indexOf("useLayoutEffect(() => {");
+  const runtimeOwnerEnd = review.indexOf(
+    "const finishPagePresentation",
+    runtimeOwnerStart,
+  );
+  assert.match(
+    review.slice(runtimeOwnerStart, runtimeOwnerEnd),
+    /drainRegisteredFrames\(\);[\s\S]*runtimeVisualCoordinatorRef\.current = coordinator;[\s\S]*drainRegisteredFrames\(\);/,
+  );
+  assert.match(review, /prepareRuntimeVisualFrame\(side, frame\)/);
+  assert.match(
+    review,
+    /useLayoutEffect\(\(\) => \{\s+const handleMessage =/,
+  );
   const runtimeReadyStart = review.indexOf('if (message.type === "ready")');
   const runtimeReadyEnd = review.indexOf(
     'if (message.type === "presentation-ready")',

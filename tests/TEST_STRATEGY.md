@@ -96,7 +96,9 @@ PR 必须从 Draft 开始。普通推送由独立的 `PR Feedback` workflow 处�
   已有静态框的宿主不得
   再进入运行态候选或增加第二个变化项；原页脚本伪造普通 `ready`、空快照
   或假 `MessageChannel` 也不得抢先完成任一侧；慢资源导致 iframe
-  `load` 迟于快照时，缓存批次仍必须在注册后提交。Node 由纯协调器 oracle
+  `load` 迟于快照时，缓存批次仍必须在注册后提交；极快
+  `srcDoc` 先注册、后建立协调器时，owner 必须主动排空已注册 frame。
+  Node 由纯协调器 oracle
   验证消息上限、完整双侧提交、静态 `changeId` 复用、500ms 全量回退
   和迟到拒绝。
   Browser 另外证明点击页面 padding 与 App 空白会一起结束编辑、选区和

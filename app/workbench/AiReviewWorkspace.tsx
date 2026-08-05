@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useReducer,
   useRef,
@@ -508,6 +509,11 @@ export default function AiReviewWorkspace({
     timer: number | null;
   } | null>(null);
   const runtimeVisualCoordinatorRef = useRef<ReviewRuntimeVisualCoordinator | null>(null);
+  const runtimeVisualOwnerDocumentsRef = useRef<ReviewDocuments | null>(null);
+  const runtimeVisualFrameDocumentsRef = useRef<Record<ReviewSide, ReviewDocuments | null>>({
+    before: null,
+    after: null,
+  });
   const runtimeVisualReadySidesRef = useRef<Set<ReviewSide>>(new Set());
   const runtimeVisualResolutionRef = useRef<ReviewRuntimeVisualResult | null>(null);
   const runtimeVisualPortsRef = useRef<Record<ReviewSide, MessagePort | null>>({
@@ -721,12 +727,52 @@ export default function AiReviewWorkspace({
     });
   }, [commitRuntimeVisualFrame, documents]);
 
-  useEffect(() => {
+  const prepareRuntimeVisualFrame = useCallback((
+    side: ReviewSide,
+    frame: HTMLIFrameElement,
+  ) => {
+    if (
+      framesRef.current[side] !== frame
+      || runtimeVisualOwnerDocumentsRef.current !== documents
+      || runtimeVisualFrameDocumentsRef.current[side] !== documents
+    ) return;
+    const resolved = runtimeVisualResolutionRef.current;
+    const coordinator = runtimeVisualCoordinatorRef.current;
+    if (
+      coordinator
+      && resolved?.documents !== documents
+      && !runtimeVisualPortsRef.current[side]
+    ) {
+      coordinator.start();
+      if (!runtimeVisualChannelChallengesRef.current[side]) {
+        const challenge = createReviewRuntimeVisualChallenge();
+        if (challenge) {
+          runtimeVisualChannelChallengesRef.current[side] = challenge;
+          postToFrame(frame, sessionId, {
+            type: "request-runtime-visual-channel",
+            challenge,
+          });
+        }
+      }
+    }
+    if (resolved?.documents === documents) {
+      commitRuntimeVisualFrame(side, resolved);
+    }
+  }, [commitRuntimeVisualFrame, documents, sessionId]);
+
+  useLayoutEffect(() => {
     runtimeVisualCoordinatorRef.current?.dispose();
     runtimeVisualCoordinatorRef.current = null;
+    runtimeVisualOwnerDocumentsRef.current = documents;
     closeRuntimeVisualChannels();
     runtimeVisualReadySidesRef.current = new Set();
     runtimeVisualResolutionRef.current = null;
+    const drainRegisteredFrames = () => {
+      (["before", "after"] as ReviewSide[]).forEach((side) => {
+        const frame = framesRef.current[side];
+        if (frame) prepareRuntimeVisualFrame(side, frame);
+      });
+    };
     if (!documents.runtimeVisualCandidates.length) {
       runtimeVisualResolutionRef.current = {
         documents,
@@ -734,7 +780,12 @@ export default function AiReviewWorkspace({
         outline: documents.outline,
         markers: [],
       };
-      return undefined;
+      drainRegisteredFrames();
+      return () => {
+        if (runtimeVisualOwnerDocumentsRef.current === documents) {
+          runtimeVisualOwnerDocumentsRef.current = null;
+        }
+      };
     }
     const coordinator = new ReviewRuntimeVisualCoordinator({
       candidates: documents.runtimeVisualCandidates,
@@ -744,14 +795,23 @@ export default function AiReviewWorkspace({
       clearTimer: (handle) => window.clearTimeout(handle as number),
     });
     runtimeVisualCoordinatorRef.current = coordinator;
+    drainRegisteredFrames();
     return () => {
       coordinator.dispose();
       closeRuntimeVisualChannels();
       if (runtimeVisualCoordinatorRef.current === coordinator) {
         runtimeVisualCoordinatorRef.current = null;
       }
+      if (runtimeVisualOwnerDocumentsRef.current === documents) {
+        runtimeVisualOwnerDocumentsRef.current = null;
+      }
     };
-  }, [closeRuntimeVisualChannels, documents, resolveRuntimeVisuals]);
+  }, [
+    closeRuntimeVisualChannels,
+    documents,
+    prepareRuntimeVisualFrame,
+    resolveRuntimeVisuals,
+  ]);
 
   const finishPagePresentation = useCallback((epoch: number) => {
     const pending = presentationReadyRef.current;
@@ -869,7 +929,7 @@ export default function AiReviewWorkspace({
     return () => window.cancelAnimationFrame(focusFrame);
   }, [confirmationAction]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const handleMessage = (event: MessageEvent<ReviewMessage>) => {
       const message = event.data;
       if (
@@ -1022,29 +1082,13 @@ export default function AiReviewWorkspace({
 
   const registerFrame = useCallback((side: ReviewSide, frame: HTMLIFrameElement | null) => {
     framesRef.current[side] = frame;
+    runtimeVisualFrameDocumentsRef.current[side] = frame ? documents : null;
     if (frame) window.requestAnimationFrame(() => {
-      const resolved = runtimeVisualResolutionRef.current;
-      const coordinator = runtimeVisualCoordinatorRef.current;
+      prepareRuntimeVisualFrame(side, frame);
       if (
-        coordinator
-        && resolved?.documents !== documents
-        && !runtimeVisualPortsRef.current[side]
-      ) {
-        coordinator.start();
-        if (!runtimeVisualChannelChallengesRef.current[side]) {
-          const challenge = createReviewRuntimeVisualChallenge();
-          if (challenge) {
-            runtimeVisualChannelChallengesRef.current[side] = challenge;
-            postToFrame(frame, sessionId, {
-              type: "request-runtime-visual-channel",
-              challenge,
-            });
-          }
-        }
-      }
-      if (resolved?.documents === documents) {
-        commitRuntimeVisualFrame(side, resolved);
-      }
+        framesRef.current[side] !== frame
+        || runtimeVisualFrameDocumentsRef.current[side] !== documents
+      ) return;
       const owner = scrollCoordinatorRef.current?.snapshot();
       if (owner) {
         postToFrame(frame, sessionId, {
@@ -1055,7 +1099,7 @@ export default function AiReviewWorkspace({
         });
       }
     });
-  }, [commitRuntimeVisualFrame, documents, sessionId]);
+  }, [documents, prepareRuntimeVisualFrame, sessionId]);
 
   const registerViewport = useCallback((side: ReviewSide, viewport: HTMLDivElement | null) => {
     viewportsRef.current[side] = viewport;

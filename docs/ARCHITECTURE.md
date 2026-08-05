@@ -104,6 +104,9 @@ Comments + frozen input
   port, compares the completed before/after batches, reuses the owning static
   `changeId` when present and otherwise adds one visual change for that outline.
   A pre-load batch remains cached until the registered frame claims its port.
+  Coordinator and message-listener installation run before paint and drain any
+  frame already registered for the same frozen document pair, so load/effect
+  ordering cannot strand the initial projection.
   A single bounded initial deadline commits both frames atomically; timeout,
   partial and late batches silently retain the static footprint. Exact leaf text
   ranges remain immutable evidence; a separate readable-footprint planner

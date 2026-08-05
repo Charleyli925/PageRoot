@@ -130,6 +130,9 @@ same-side-stable, host-relative HTML/SVG/Canvas fingerprints, including the
 host's own painted box and directly mutated size while excluding an unpainted
 empty box or indirect layout size. A batch
 completed before frame registration remains cached for the challenged claim.
+Coordinator installation must drain every already-registered frame bound to the
+same document pair; neither load-before-owner nor owner-before-load may strand
+the initial projection.
 Evidence travels
 only over a challenged `MessageChannel` capability created by the trusted first
 bootstrap script and transferred only for a browser-trusted parent event;
