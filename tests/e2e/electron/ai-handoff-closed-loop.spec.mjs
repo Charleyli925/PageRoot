@@ -978,6 +978,20 @@ test("a verified AI result stays pending through desktop review until the user a
     expect(await afterReviewFrame.locator(
       "#review-runtime-static-covered",
     ).getAttribute("data-pageroot-review-marker")).not.toBe(runtimeChangedIds[0]);
+    await afterReviewFrame.locator("html").evaluate(() => {
+      document.documentElement.dataset.reviewPostLoadNavigationAttempted = "true";
+      location.replace(
+        "data:text/html,<html data-review-post-load-replacement=true></html>",
+      );
+    });
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-post-load-navigation-attempted", "true");
+    await expect(afterReviewFrame.locator("html"))
+      .not.toHaveAttribute("data-review-post-load-replacement", "true");
+    await expect(afterReviewFrame.locator("html"))
+      .not.toHaveAttribute("data-pageroot-preview-navigation-fallback", "true");
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-pageroot-review-filter", "all");
     await expect(beforeReviewFrame.locator('meta[http-equiv="refresh"]'))
       .toHaveCount(0);
     const reviewCommentMarker = launched.page.locator(
@@ -2060,6 +2074,103 @@ test("a verified AI result stays pending through desktop review until the user a
     );
     await expect(pickerFrame.locator(caseSelector("list-item")))
       .toHaveText(PICKER_TEXT);
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("a pre-load review navigation falls back without trusting the replacement page", async () => {
+  test.setTimeout(120_000);
+  const fixture = createSourceFixture("review-navigation-fallback.html", (source) => source.replace(
+    "  </main>",
+    `    <section data-review-navigation-fallback>
+      <h2>运行态导航安全回归</h2>
+      <div id="review-navigation-chart"></div>
+      <script>
+        const reviewNavigationVariant = "before";
+        const reviewNavigationHost = document.querySelector("#review-navigation-chart");
+        reviewNavigationHost.innerHTML = '<strong>'
+          + reviewNavigationVariant
+          + '</strong>';
+        const reviewNavigationSide = JSON.stringify(
+          document.documentElement.dataset.pagerootReviewSide,
+        );
+        const reviewReplacementScript = [
+          'addEventListener("message",function(event){',
+          'const message=event.data;',
+          'if(message?.source!=="pageroot-ai-review-parent"',
+          '||message?.type!=="request-runtime-visual-channel")return;',
+          'const channel=new MessageChannel();',
+          'parent.postMessage({source:"pageroot-ai-review",sessionId:message.sessionId,side:',
+          reviewNavigationSide,
+          ',type:"runtime-visual-channel",challenge:message.challenge},"*",[channel.port2]);',
+          'channel.port1.postMessage({source:"pageroot-ai-review-runtime-visual",',
+          'sessionId:message.sessionId,side:',
+          reviewNavigationSide,
+          ',type:"runtime-visual-snapshots",runtimeVisualSnapshots:[]});',
+          '});',
+        ].join('');
+        const reviewReplacementHtml = '<!doctype html>'
+          + '<html data-review-runtime-navigation-replacement="true"><body><script>'
+          + reviewReplacementScript
+          + '<\\/script></body></html>';
+        location.replace(
+          "data:text/html;charset=utf-8," + encodeURIComponent(reviewReplacementHtml),
+        );
+      </script>
+    </section>
+  </main>`,
+  ));
+  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  try {
+    const request = await addCommentAndSubmit(
+      launched.page,
+      launched.electronApp,
+      fixture.sourcePath,
+    );
+    writeAiOutput(request.requestRoot, (base) => base
+      .replace(ORIGINAL_TEXT, UPDATED_TEXT)
+      .replace(
+        'const reviewNavigationVariant = "before";',
+        'const reviewNavigationVariant = "after";',
+      ));
+    runOfficialFinalizer(request.requestRoot, request.changeRequest);
+    await expect(launched.page.getByText(
+      "修改结果已完成检查",
+      { exact: true },
+    ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+
+    await launched.page.getByRole("button", { name: "审阅对比" }).click();
+    await expect(launched.page.getByTestId("ai-review-workspace"))
+      .toBeVisible({ timeout: 30_000 });
+    const beforeReviewFrame = launched.page.frameLocator('iframe[title^="修改前"]');
+    const afterReviewFrame = launched.page.frameLocator('iframe[title^="修改后"]');
+    for (const frame of [beforeReviewFrame, afterReviewFrame]) {
+      await expect(frame.locator("html")).toHaveAttribute(
+        "data-pageroot-preview-navigation-fallback",
+        "true",
+        { timeout: 30_000 },
+      );
+      await expect(frame.locator("html"))
+        .not.toHaveAttribute("data-review-runtime-navigation-replacement", "true");
+      await expect(frame.locator("html"))
+        .toHaveAttribute("data-pageroot-review-filter", "all");
+      await expect(frame.locator("#review-navigation-chart"))
+        .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
+    }
+    await expect(afterReviewFrame.locator(
+      '[data-pageroot-review-marker-types~="text"]',
+    ).filter({ hasText: UPDATED_TEXT }).first()).toBeVisible();
+    await expect(launched.page.getByText(
+      "审阅画布未能安全载入，请返回本轮处理页面后重试。",
+      { exact: true },
+    )).toHaveCount(0);
+    await launched.page.getByRole("button", {
+      name: "显示并固定审阅工具",
+    }).click();
+    await expect(launched.page.getByRole("button", { name: "收起审阅工具" }))
+      .toBeVisible();
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);

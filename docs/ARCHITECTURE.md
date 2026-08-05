@@ -47,7 +47,11 @@ Comments + frozen input
   `script-src 'self'` policy. The main process owns the volatile session and
   serves only its prepared HTML, its fixed bootstrap and a session-specific
   manifest of declared relative assets beside the known source HTML. It never
-  turns the source directory into a general-purpose local-file origin.
+  turns the source directory into a general-purpose local-file origin. A
+  direct-frame authored navigation is canceled. If it occurs before the first
+  load completes, that session becomes a one-way, stricter-CSP scriptless
+  fallback retaining only the owned bootstrap, then reloads the same frame;
+  attempts after load leave the current document intact.
 - Preview-to-edit carries only a bounded `PageViewContext`: source-backed
   active/inactive class transitions and `hidden`, `open`, `aria-selected` or
   `aria-expanded` state. It never carries runtime DOM, pixels or table markup.
@@ -92,7 +96,12 @@ Comments + frozen input
   copy, structure and visual facts from those pairs, and only then emits one
   typed canonical change footprint. It never promotes tag/position proximity
   alone into a change fact. Static source analysis remains the primary fact
-  channel. A bounded supplement is available only for a high-confidence pair
+  channel. The runtime supplement is available only through the managed desktop
+  preview transport. Its main-process frame-navigation fence blocks authored
+  replacement; a pre-load attempt atomically changes that volatile session to a
+  scriptless document retaining only the owned bootstrap and reloads it, so the
+  review silently keeps static evidence. Inline/browser review remains
+  static-only. A bounded supplement is then available only for a high-confidence pair
   of source-empty chart hosts when the changed authored script directly
   references a distinctive identity of that host and the existing static
   footprint does not already cover it. Script co-location inside the same

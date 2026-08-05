@@ -123,6 +123,13 @@ original source host; comments and edits continue to resolve that host.
 
 Formal review has a separate, narrower runtime-visual supplement owned by the
 parent `AiReviewWorkspace` and its `ReviewRuntimeVisualCoordinator`. The frozen
+source analyzer enables it only for the managed desktop preview transport. The
+main process must reject authored navigation away from that direct
+`pageroot-preview` subframe. On an attempt before the first load completes, the preview protocol owner
+must atomically switch only that volatile session to a stricter-CSP document
+with authored scripts removed and the owned external bootstrap retained, then
+reload the same frame. That pair completes with static evidence instead of
+trusting a replacement document; inline/browser review remains static-only. The frozen
 source analyzer must first prove a unique source-empty host pair, a relevant
 changed authored script that directly references the host's distinctive
 identity, and absence of an existing static footprint over that host. Merely

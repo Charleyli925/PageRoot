@@ -109,7 +109,11 @@ Pure-browser preview is a different, strictly weaker capability: authored script
 
 Desktop preview is likewise untrusted authored content. The iframe has no
 top-navigation authority, new windows are denied, and preview IPC is available
-only to the trusted application main frame. When the user returns to editing,
+only to the trusted application main frame. A direct preview frame that tries
+to self-navigate is fenced by the main process; before its first load completes,
+its volatile session becomes a one-way scriptless fallback retaining only the
+owned external bootstrap, while later attempts leave the loaded page intact.
+When the user returns to editing,
 PageRoot accepts only an allowlisted source-backed presentation diff. It rejects
 unknown or duplicated source nodes, stale Hashes, truncated captures, arbitrary
 one-sided runtime classes, text/HTML, inline style, form state and runtime
@@ -127,11 +131,19 @@ The AI review workspace is an isolated interactive review preview with no
 activation or persistence authority. It preserves the identity/Hash-validated authored
 scripts and inline events in a disposable review copy so source-backed Tabs,
 disclosures and local controls can be inspected. The review iframe uses only
-`allow-scripts`: it has no same-origin authority, form submission, navigation,
+`allow-scripts`: it has no same-origin authority, form submission, top navigation,
 popup, download, modal or host IPC capability. Parent-side capture also blocks
 anchor navigation and form submission, nested iframes receive an empty sandbox,
 and refresh/CSP meta directives are removed only from the disposable review copy
 so they cannot navigate the frame or suppress the trusted review bootstrap.
+Runtime-chart evidence is enabled only for the managed desktop preview transport.
+The main process rejects authored navigation away from a direct
+`pageroot-preview` subframe. A rejected pre-load attempt atomically marks that
+volatile protocol session for a one-time reload: every authored script is
+removed, inline handlers are disabled by the stricter CSP, and only the owned
+external bootstrap remains executable. The replacement document therefore
+cannot receive or answer the challenge, while the review completes silently
+from static evidence. Inline/browser review uses static evidence only.
 
 Entering review does not change `project.json.sourcePath`, the current Canvas,
 the immutable Version or the activation transaction, and runtime interaction

@@ -4349,11 +4349,13 @@ export function buildReviewDocuments(
     });
   });
 
-  const runtimeVisualCandidates = annotateRuntimeVisualCandidates(
-    beforeDocument,
-    afterDocument,
-    runtimeSections,
-  );
+  const runtimeVisualCandidates = options.externalBootstrap
+    ? annotateRuntimeVisualCandidates(
+        beforeDocument,
+        afterDocument,
+        runtimeSections,
+      )
+    : [];
 
   const preparedBefore = prepareDocument(
     beforeDocument,

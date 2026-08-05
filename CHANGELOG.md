@@ -30,7 +30,12 @@ Notable user-visible changes are documented here. This project follows Semantic 
   geometry, page-flow shifts,
   identical final output, animation, incomplete or late analysis. Accepted
   chart facts commit with the initial review projection rather than appearing
-  after interaction.
+  after interaction. Runtime evidence is enabled only on the managed desktop
+  preview transport. If authored code tries to replace that subframe before its
+  first load completes, the main process blocks it and reloads the same volatile session once as a scriptless
+  copy that retains only the owned bootstrap; review then keeps the
+  authoritative static result without adding a notice. Inline/browser review
+  is static-only.
 - Stop treating AI-authored script changes as an adoption failure. Candidate
   assessment now checks document usability and coarse continuity only; retired
   executable-surface fields in historical records are verified, normalized out

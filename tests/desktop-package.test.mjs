@@ -347,6 +347,16 @@ test("desktop package carries the v3 patch engine, candidate assessment and acti
   assert.match(mainProcess, /PREVIEW_CHANNELS\.createSession/);
   assert.match(mainProcess, /PREVIEW_CHANNELS\.revokeSession/);
   assert.match(mainProcess, /will-frame-navigate/);
+  assert.match(
+    mainProcess,
+    /will-frame-navigate", \(details\) => \{[\s\S]*?details\.frame\?\.url, details\.initiator\?\.url[\s\S]*?details\.preventDefault\(\)[\s\S]*?loadedManagedPreviewFrameIds\.has\(frame\.frameTreeNodeId\)[\s\S]*?activateNavigationFallback\(protectedPreviewUrl\)[\s\S]*?setImmediate[\s\S]*?frame\.reload\(\)/,
+    "preview subframes must not replace the bootstrap-owned document",
+  );
+  assert.match(
+    mainProcess,
+    /did-frame-finish-load[\s\S]*?webFrameMain\.fromId\(frameProcessId, frameRoutingId\)[\s\S]*?loadedManagedPreviewFrameIds\.add\(frame\.frameTreeNodeId\)/,
+    "only a preview that has not completed its first load needs the scriptless reload",
+  );
   assert.match(previewProtocol, /PREVIEW_PROTOCOL_SCHEME = "pageroot-preview"/);
   assert.match(previewProtocol, /protocolApi\.handle\(PREVIEW_PROTOCOL_SCHEME/);
   assert.match(previewProtocol, /isContainedPath\(session\.sourceRoot, resolvedPath\)/);

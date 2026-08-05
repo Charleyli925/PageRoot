@@ -338,6 +338,10 @@ test("all-change review keeps text treatment precise and mirrors authored action
 
 test("runtime chart review supplements only the initial bounded static footprint", () => {
   assert.match(reviewDocument, /annotateRuntimeVisualCandidates/);
+  assert.match(
+    reviewDocument,
+    /const runtimeVisualCandidates = options\.externalBootstrap\s+\? annotateRuntimeVisualCandidates/,
+  );
   assert.match(reviewDocument, /staticReviewMarkerCoversRuntimeHost/);
   assert.match(reviewDocument, /collectRuntimeVisualSnapshots/);
   assert.match(reviewDocument, /runtimeVisualBatchNodeLimit/);
