@@ -163,6 +163,9 @@ test("change discovery builds a complete outline and precise change markers", ()
   assert.match(reviewDocument, /outline\.push/);
   assert.match(reviewDocument, /markTextDifferences/);
   assert.match(reviewDocument, /sentenceAwareTextDifferences/);
+  assert.match(reviewDocument, /readableReviewTextFootprintPlan/);
+  assert.match(reviewDocument, /data-pageroot-review-text-block-groups/);
+  assert.match(reviewDocument, /data-pageroot-review-text-group/);
   assert.match(reviewDocument, /data-pageroot-review-text-context/);
   assert.match(reviewDocument, /data-pageroot-review-text-change/);
   assert.match(reviewDocument, /data-pageroot-review-text/);
@@ -255,6 +258,11 @@ test("all-change review keeps text treatment precise and mirrors authored action
   assert.match(reviewDocument, /"新增内容"/);
   assert.match(reviewDocument, /"删除内容"/);
   assert.match(reviewDocument, /"文本调整"/);
+  assert.match(reviewDocument, /"段落改写"/);
+  assert.match(reviewDocument, /readableTextRecords/);
+  assert.match(reviewDocument, /mergeTextLineIntervals/);
+  assert.match(reviewDocument, /scope: "text-block"/);
+  assert.match(reviewDocument, /mergeConnectedRecords\(nonTextRecords/);
   assert.match(reviewDocument, /mergeConnectedRecords/);
   assert.match(reviewDocument, /minimalRecords/);
   assert.match(reviewDocument, /dominantStyleBoxes/);
