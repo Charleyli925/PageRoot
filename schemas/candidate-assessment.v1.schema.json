@@ -22,6 +22,35 @@
     "continuity",
     "assessedAt"
   ],
+  "allOf": [
+    {
+      "if": {
+        "type": "object",
+        "required": ["executable"]
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "health": {
+            "type": "object",
+            "required": ["executableSurfaceUnchanged"]
+          }
+        }
+      },
+      "else": {
+        "type": "object",
+        "properties": {
+          "health": {
+            "type": "object",
+            "not": {
+              "type": "object",
+              "required": ["executableSurfaceUnchanged"]
+            }
+          }
+        }
+      }
+    }
+  ],
   "properties": {
     "schemaVersion": {
       "const": "1.0.0"

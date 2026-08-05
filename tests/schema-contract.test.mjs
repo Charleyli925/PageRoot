@@ -611,7 +611,7 @@ test("every lifecycle fixture satisfies a meta-valid strict JSON Schema", async 
   }
 });
 
-test("the candidate assessment Schema accepts current and retired executable-field shapes", async () => {
+test("the candidate assessment Schema accepts only current and paired retired executable-field shapes", async () => {
   const { ajv, validate } = await validator(
     "candidate-assessment.v1.schema.json",
   );
@@ -632,6 +632,14 @@ test("the candidate assessment Schema accepts current and retired executable-fie
     changedCount: 1,
   };
   assertValid(ajv, validate, legacy, "legacy candidate assessment");
+
+  const healthOnly = structuredClone(current);
+  healthOnly.health.executableSurfaceUnchanged = false;
+  assert.equal(validate(healthOnly), false);
+
+  const executableOnly = structuredClone(current);
+  executableOnly.executable = legacy.executable;
+  assert.equal(validate(executableOnly), false);
 });
 
 test("the success bundle preserves one identity, lineage, content and archive across every artifact", async () => {
