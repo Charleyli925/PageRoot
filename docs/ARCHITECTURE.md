@@ -93,8 +93,10 @@ Comments + frozen input
   typed canonical change footprint. It never promotes tag/position proximity
   alone into a change fact. Static source analysis remains the primary fact
   channel. A bounded supplement is available only for a high-confidence pair
-  of source-empty chart hosts when a changed authored script is causally tied
-  to that host and the existing static footprint does not already cover it.
+  of source-empty chart hosts when the changed authored script directly
+  references a distinctive identity of that host and the existing static
+  footprint does not already cover it. Script co-location inside the same
+  section is not causal evidence.
   Each isolated frame samples visible HTML/SVG/Canvas paint twice, including
   the host's own painted box and directly mutated size but not an unpainted
   empty box or indirect layout size, using

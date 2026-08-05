@@ -21,7 +21,9 @@ Notable user-visible changes are documented here. This project follows Semantic 
   dashed frame without an underline or background treatment.
 - Detect stable script-generated HTML, SVG and Canvas chart changes inside
   uniquely paired source-empty hosts during AI review. Existing static frames
-  remain authoritative and are never duplicated. The bounded capture includes
+  remain authoritative and are never duplicated. A changed script must directly
+  reference the host's distinctive identity; sharing a section is insufficient.
+  The bounded capture includes
   the host's own painted box and directly mutated size as well as generated
   descendants, caches evidence across slow frame loads, and ignores unpainted
   geometry, page-flow shifts,

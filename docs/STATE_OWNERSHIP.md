@@ -92,7 +92,9 @@ Rules:
   only opaque-key geometry; neither review frame receives the text and the after
   page never receives a marker.
 - The runtime-chart supplement never re-analyzes a statically covered host. It
-  accepts only a complete declared before/after pair before its initial deadline,
+  declares a host only when the changed authored script directly references
+  that host's distinctive source identity; section co-location is not enough.
+  It accepts only a complete declared before/after pair before its initial deadline,
   includes the host's own painted box and directly mutated size but not
   unpainted geometry or indirect layout size, ignores
   absolute document position and unstable or late samples, merges with an

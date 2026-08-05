@@ -95,7 +95,8 @@ PR 必须从 Draft 开始。普通推送由独立的 `PR Feedback` workflow 处�
   产生 marker；宿主自身的背景、边框及脚本直接改写的尺寸变化必须命中。
   已有静态框的宿主不得
   再进入运行态候选或增加第二个变化项；原页脚本伪造普通 `ready`、空快照
-  或假 `MessageChannel` 也不得抢先完成任一侧；慢资源导致 iframe
+  或假 `MessageChannel` 也不得抢先完成任一侧；同一 section 内由未修改
+  脚本独立生成随机值或时间戳的空宿主不得仅因旁边脚本变化进入候选；慢资源导致 iframe
   `load` 迟于快照时，缓存批次仍必须在注册后提交；极快
   `srcDoc` 先注册、后建立协调器时，owner 必须主动排空已注册 frame。
   Node 由纯协调器 oracle

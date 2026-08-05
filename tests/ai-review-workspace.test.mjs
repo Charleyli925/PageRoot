@@ -355,6 +355,14 @@ test("runtime chart review supplements only the initial bounded static footprint
   assert.match(reviewDocument, /type: "runtime-visual-snapshots"/);
   assert.match(reviewDocument, /runtimeVisualSnapshotBatch = runtimeVisualSnapshots/);
   assert.match(reviewDocument, /runtimeVisualSourceBoxAttribute/);
+  assert.match(
+    reviewDocument,
+    /changedScripts\.some\(\(\{ content \}\) => referencesHost\(content\)\)/,
+  );
+  assert.doesNotMatch(reviewDocument, /sectionPair\.(?:before|after)\?\.contains/);
+  assert.doesNotMatch(reviewDocument, /hostReferenceScripts/);
+  assert.match(reviewDocument, /remainingSignatures/);
+  assert.match(reviewDocument, /if \(explicitValues\.length\) return explicitValues/);
   assert.match(reviewDocument, /hostBoxMutated/);
   const runtimeChannelTransferStart = reviewDocument.indexOf(
     "const transferRuntimeVisualChannel",

@@ -124,8 +124,10 @@ original source host; comments and edits continue to resolve that host.
 Formal review has a separate, narrower runtime-visual supplement owned by the
 parent `AiReviewWorkspace` and its `ReviewRuntimeVisualCoordinator`. The frozen
 source analyzer must first prove a unique source-empty host pair, a relevant
-changed authored script and absence of an existing static footprint over that
-host. Both already-isolated review frames may then report one bounded pair of
+changed authored script that directly references the host's distinctive
+identity, and absence of an existing static footprint over that host. Merely
+placing another changed script in the same section is never causal evidence.
+Both already-isolated review frames may then report one bounded pair of
 same-side-stable, host-relative HTML/SVG/Canvas fingerprints, including the
 host's own painted box and directly mutated size while excluding an unpainted
 empty box or indirect layout size. A batch

@@ -532,6 +532,8 @@ test("a verified AI result stays pending through desktop review until the user a
       <div id="review-runtime-root-geometry-chart" class="review-runtime-chart-host"></div>
       <div id="review-runtime-flow-chart" class="review-runtime-chart-host"></div>
       <div id="review-runtime-unstable-chart" class="review-runtime-chart-host"></div>
+      <div id="review-runtime-unrelated-random-chart" class="review-runtime-chart-host"></div>
+      <script>document.documentElement.dataset.reviewRuntimeSectionVariant = "before";</script>
     </section>
     <section data-review-runtime-static-covered-section>
       <h2>静态已覆盖图表</h2>
@@ -564,6 +566,11 @@ test("a verified AI result stays pending through desktop review until the user a
         <h2>抖音搜盘表现</h2><p>索引式页签第二页</p>
       </section>
     </div>
+    <script>
+      const runtimeUnrelatedRandomChart = document.querySelector("#review-runtime-unrelated-random-chart");
+      runtimeUnrelatedRandomChart.innerHTML = '<div style="padding:10px;border:1px solid #c9c9d8">未修改脚本独立渲染：'
+        + Date.now() + '-' + Math.random() + '</div>';
+    </script>
     <script>
       document.querySelectorAll("[data-review-tab-button]").forEach((button) => {
         button.addEventListener("click", () => {
@@ -756,6 +763,10 @@ test("a verified AI result stays pending through desktop review until the user a
           'const runtimeReviewChartVariant = "after";',
         )
         .replace(
+          'document.documentElement.dataset.reviewRuntimeSectionVariant = "before";',
+          'document.documentElement.dataset.reviewRuntimeSectionVariant = "after";',
+        )
+        .replace(
           'id="review-runtime-static-covered" class="review-runtime-chart-host" style="border: 2px solid #d9dcec; padding: 12px"',
           'id="review-runtime-static-covered" class="review-runtime-chart-host" style="border: 2px solid #241d58; padding: 12px"',
         )
@@ -935,6 +946,12 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect(afterReviewFrame.locator("#review-runtime-root-geometry-chart"))
       .toHaveAttribute("data-pageroot-review-runtime-host", /runtime-host-\d+/u);
     await expect(afterReviewFrame.locator("#review-runtime-root-geometry-chart"))
+      .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
+    await expect(beforeReviewFrame.locator("#review-runtime-unrelated-random-chart"))
+      .not.toHaveAttribute("data-pageroot-review-runtime-host", /.+/u);
+    await expect(afterReviewFrame.locator("#review-runtime-unrelated-random-chart"))
+      .not.toHaveAttribute("data-pageroot-review-runtime-host", /.+/u);
+    await expect(afterReviewFrame.locator("#review-runtime-unrelated-random-chart"))
       .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
     const runtimeFlowTop = await Promise.all([
       beforeReviewFrame.locator("#review-runtime-flow-chart")

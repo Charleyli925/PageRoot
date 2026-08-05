@@ -1125,15 +1125,11 @@ type ReviewRuntimeHostPair = {
 };
 
 type ReviewScriptDescriptor = {
-  element: HTMLScriptElement;
   content: string;
   signature: string;
-  identityTokens: string[];
 };
 
 type ChangedReviewScript = {
-  before: ReviewScriptDescriptor | null;
-  after: ReviewScriptDescriptor | null;
   content: string;
 };
 
@@ -1271,18 +1267,9 @@ function reviewScriptDescriptors(document: Document): ReviewScriptDescriptor[] {
       element.getAttribute("type") || "",
       element.textContent || "",
     ].join("\n");
-    const identityTokens = [
-      element.id,
-      element.getAttribute("name") || "",
-      ...[...element.attributes]
-        .filter((attribute) => attribute.name.startsWith("data-"))
-        .flatMap((attribute) => [attribute.name, attribute.value]),
-    ].map((value) => value.trim()).filter((value) => value.length >= 3);
     return {
-      element,
       content,
       signature: `${element.getAttribute("src") || ""}\u0000${element.getAttribute("type") || ""}\u0000${element.textContent || ""}`,
-      identityTokens,
     };
   });
 }
@@ -1291,62 +1278,61 @@ function changedReviewScripts(
   beforeScripts: ReviewScriptDescriptor[],
   afterScripts: ReviewScriptDescriptor[],
 ): ChangedReviewScript[] {
-  const length = Math.max(beforeScripts.length, afterScripts.length);
-  return Array.from({ length }, (_, index) => {
-    const before = beforeScripts[index] || null;
-    const after = afterScripts[index] || null;
-    return {
-      before,
-      after,
-      content: `${before?.content || ""}\n${after?.content || ""}`,
-    };
-  }).filter(({ before, after }) => before?.signature !== after?.signature);
+  const unmatched = (
+    scripts: ReviewScriptDescriptor[],
+    counterparts: ReviewScriptDescriptor[],
+  ) => {
+    const remainingSignatures = new Map<string, number>();
+    counterparts.forEach(({ signature }) => {
+      remainingSignatures.set(signature, (remainingSignatures.get(signature) || 0) + 1);
+    });
+    return scripts.filter(({ signature }) => {
+      const remaining = remainingSignatures.get(signature) || 0;
+      if (!remaining) return true;
+      remainingSignatures.set(signature, remaining - 1);
+      return false;
+    });
+  };
+  return [
+    ...unmatched(beforeScripts, afterScripts),
+    ...unmatched(afterScripts, beforeScripts),
+  ].map(({ content }) => ({ content }));
 }
 
 function runtimeVisualScriptTokens(before: Element, after: Element): string[] {
-  return [...new Set([
-    ...runtimeVisualIdentityParts(before),
-    ...runtimeVisualIdentityParts(after),
-    before.id,
-    after.id,
-    ...[...before.attributes, ...after.attributes]
-      .filter((attribute) => (
-        attribute.name.startsWith("data-")
-        && !attribute.name.startsWith("data-pageroot-")
+  const elementTokens = (element: Element) => {
+    const explicitValues = [
+      element.id,
+      ...[...element.attributes]
+        .filter((attribute) => (
+          attribute.name.startsWith("data-")
+          && !attribute.name.startsWith("data-pageroot-")
+          && /(?:canvas|chart|graph|plot|table|visual|viz)/iu.test(attribute.name)
+        ))
+        .flatMap((attribute) => [attribute.name, attribute.value]),
+    ].map((value) => value.trim()).filter((value) => value.length >= 3);
+    if (explicitValues.length) return explicitValues;
+    const semanticValues = ["aria-label", "name", "title"]
+      .map((attributeName) => element.getAttribute(attributeName) || "")
+      .map((value) => value.trim())
+      .filter((value) => value.length >= 3);
+    if (semanticValues.length) return semanticValues;
+    return classTokens(element)
+      .filter((token) => (
+        !GENERIC_RUNTIME_VISUAL_CLASSES.has(token.toLowerCase())
       ))
-      .flatMap((attribute) => [attribute.name, attribute.value]),
-    ...classTokens(before),
-    ...classTokens(after),
-  ].flatMap((value) => String(value || "").split(/[:|]/u))
-    .map((value) => value.trim())
-    .filter((value) => value.length >= 3))];
+      .filter((value) => value.length >= 3);
+  };
+  return [...new Set([...elementTokens(before), ...elementTokens(after)])];
 }
 
 function hasRuntimeVisualCause(
   hostPair: ReviewRuntimeHostPair,
-  sectionPair: SectionPair,
   changedScripts: ChangedReviewScript[],
-  allScripts: ReviewScriptDescriptor[],
 ): boolean {
   const tokens = runtimeVisualScriptTokens(hostPair.before, hostPair.after);
   const referencesHost = (content: string) => tokens.some((token) => content.includes(token));
-  if (changedScripts.some(({ before, after, content }) => (
-    (before && sectionPair.before?.contains(before.element))
-    || (after && sectionPair.after?.contains(after.element))
-    || referencesHost(content)
-  ))) return true;
-
-  const hostReferenceScripts = allScripts.filter((script) => referencesHost(script.content));
-  if (!hostReferenceScripts.length) return false;
-  return changedScripts.some(({ before, after }) => {
-    const changedIdentityTokens = [
-      ...(before?.identityTokens || []),
-      ...(after?.identityTokens || []),
-    ];
-    return changedIdentityTokens.some((token) => (
-      hostReferenceScripts.some((script) => script.content.includes(token))
-    ));
-  });
+  return tokens.length > 0 && changedScripts.some(({ content }) => referencesHost(content));
 }
 
 function staticReviewMarkerCoversRuntimeHost(
@@ -1383,7 +1369,6 @@ function annotateRuntimeVisualCandidates(
   const afterScripts = reviewScriptDescriptors(afterDocument);
   const changedScripts = changedReviewScripts(beforeScripts, afterScripts);
   if (!changedScripts.length) return [];
-  const allScripts = [...beforeScripts, ...afterScripts];
   const proposed: Array<{
     before: Element;
     after: Element;
@@ -1399,7 +1384,7 @@ function annotateRuntimeVisualCandidates(
         || usedAfter.has(hostPair.after)
         || staticReviewMarkerCoversRuntimeHost(hostPair.before, section.pair.before as Element)
         || staticReviewMarkerCoversRuntimeHost(hostPair.after, section.pair.after as Element)
-        || !hasRuntimeVisualCause(hostPair, section.pair, changedScripts, allScripts)
+        || !hasRuntimeVisualCause(hostPair, changedScripts)
       ) return;
       usedBefore.add(hostPair.before);
       usedAfter.add(hostPair.after);
