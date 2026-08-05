@@ -82,6 +82,12 @@ Notable user-visible changes are documented here. This project follows Semantic 
   hole rather than a whitespace-crossing rectangle. Frozen user comments also
   appear only on the before page as a persistent read-only “评” marker with a
   hover-only bubble.
+- Reworked linked review scrolling around a single input owner and a cached,
+  monotonic semantic map. The active page now keeps native scrolling and
+  momentum while the follower applies only the newest target per frame;
+  rapid reversals and side switches invalidate stale work, unequal page
+  boundaries no longer pull the longer page to its end, and scroll events no
+  longer rebuild overlays or remeasure comment targets.
 - Unified review frames and dimming on one typed change footprint. Copy uses
   leaf-level exact ranges and high-confidence pairing instead of tag/position
   guesses. Connected frames merge without crossing columns, contained ancestor

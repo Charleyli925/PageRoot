@@ -12,6 +12,7 @@ const [
   headerShell,
   pagePresentation,
   canvasPageView,
+  reviewScrollSync,
 ] = await Promise.all([
   readFile(new URL("../app/workbench.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/workbench/handoff-view.tsx", import.meta.url), "utf8"),
@@ -22,6 +23,7 @@ const [
   readFile(new URL("../app/workbench/workbench-header-shell.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/lib/page-presentation-dom.ts", import.meta.url), "utf8"),
   readFile(new URL("../app/components/html-canvas-page-view.ts", import.meta.url), "utf8"),
+  readFile(new URL("../app/lib/review-scroll-sync.js", import.meta.url), "utf8"),
 ]);
 
 test("a ready AI result is review-first with exactly one direct-open alternative", () => {
@@ -279,11 +281,18 @@ test("all-change review keeps text treatment precise and mirrors authored action
   assert.match(review, /type: "mirror-action"/);
   assert.match(reviewDocument, /message\.type === "mirror-action"/);
   assert.match(reviewDocument, /post\("control-state"/);
-  assert.match(reviewDocument, /reviewAnchor/);
-  assert.match(reviewDocument, /message\.type === "sync-scroll"/);
-  assert.match(review, /type: "sync-scroll"/);
-  assert.match(reviewDocument, /message\.boundary === "top"/);
-  assert.match(reviewDocument, /programmaticScrollToken/);
+  assert.match(reviewDocument, /post\("scroll-intent"\)/);
+  assert.match(reviewDocument, /post\("scroll-position"/);
+  assert.match(reviewDocument, /post\("scroll-geometry"/);
+  assert.match(reviewDocument, /message\.type === "scroll-owner"/);
+  assert.match(reviewDocument, /message\.type === "set-scroll-position"/);
+  assert.match(review, /new ReviewScrollCoordinator/);
+  assert.match(review, /type: "scroll-owner"/);
+  assert.match(review, /type: "set-scroll-position"/);
+  assert.match(reviewScrollSync, /stableAnchorPairs/);
+  assert.match(reviewScrollSync, /viewportHeight \/ 3/);
+  assert.match(reviewScrollSync, /this\.cancelPendingFrame\(\)/);
+  assert.match(reviewScrollSync, /this\.frameHandle = this\.requestFrame/);
   assert.match(reviewDocument, /renderReviewOverlays/);
   assert.match(reviewDocument, /recordsAreClose/);
   assert.match(reviewDocument, /MutationObserver/);
@@ -293,9 +302,15 @@ test("all-change review keeps text treatment precise and mirrors authored action
   assert.match(reviewDocument, /post\("presentation-ready"/);
   assert.match(reviewDocument, /commitProjectionTransition/);
   assert.match(reviewDocument, /if \(projectionTransitioning\) \{[\s\S]*?renderTransitionMask\(\);[\s\S]*?schedulePresentationReady/);
-  assert.match(reviewDocument, /animateFollowerScroll/);
-  assert.match(reviewDocument, /topDelta \* \.28/);
-  assert.match(reviewDocument, /Math\.abs\(topDelta\) <= 1/);
+  assert.doesNotMatch(reviewDocument, /animateFollowerScroll|topDelta \* \.28/);
+  const scrollHandlerStart = reviewDocument.indexOf('addEventListener("scroll", () =>');
+  const scrollHandlerEnd = reviewDocument.indexOf('const handleLayoutChange', scrollHandlerStart);
+  const scrollHandler = reviewDocument.slice(scrollHandlerStart, scrollHandlerEnd);
+  assert.doesNotMatch(
+    scrollHandler,
+    /getBoundingClientRect|scheduleOverlayRender|scheduleLayoutReport|requestAnimationFrame/,
+  );
+  assert.match(scrollHandler, /post\("scroll-position"/);
   assert.doesNotMatch(reviewDocument, /annotateUnchangedSubtrees/);
   const actionMirrorStart = review.indexOf('(message.type === "action" || message.type === "control-state")');
   const actionMirrorEnd = review.indexOf('if (message.type === "panel-change")', actionMirrorStart);
@@ -308,6 +323,9 @@ test("formal review projects frozen user comments on the before page only", () =
   assert.match(review, /comments: readonly CommentItem\[\]/);
   assert.match(reviewDocument, /annotateReviewComments\(\s*beforeDocument/);
   assert.match(reviewDocument, /post\("comment-layout", \{ commentLayouts \}\)/);
+  assert.match(reviewDocument, /firstRect\.top \+ scrollY/);
+  assert.match(review, /reviewCommentContentLayer/);
+  assert.match(styles, /--review-comment-scroll-y/);
   assert.match(reviewDocument, /data-pageroot-review-comment-key/);
   assert.match(review, /message\.side !== "before"/);
   assert.match(review, /safeReviewCommentLayouts\(message\.commentLayouts, allowedKeys\)/);
