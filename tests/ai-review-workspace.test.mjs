@@ -347,11 +347,11 @@ test("formal review projects frozen user comments on the before page only", () =
   assert.match(review, /data-testid="review-comment-marker"/);
   assert.match(review, /data-testid="review-comment-bubble"/);
   assert.match(review, />评<\/span>/);
-  assert.match(styles, /\.reviewCommentMarker\s*\{[\s\S]*?width:\s*38px;[\s\S]*?height:\s*38px;/);
-  assert.match(styles, /\.reviewCommentMarker\s*\{[\s\S]*?border-radius:\s*14px;/);
-  assert.match(styles, /\.reviewCommentMarker\s*\{[\s\S]*?background:\s*#6258d6;/);
-  assert.match(styles, /\.reviewCommentMarker\s*\{[\s\S]*?color:\s*#fff;/);
-  assert.match(styles, /\.reviewCommentMarker\s*\{[\s\S]*?font-size:\s*22px;/);
+  assert.match(styles, /\.reviewCommentMarker\s*\{[^}]*?width:\s*30px;[^}]*?height:\s*30px;/);
+  assert.match(styles, /\.reviewCommentMarker\s*\{[^}]*?border-radius:\s*14px;/);
+  assert.match(styles, /\.reviewCommentMarker\s*\{[^}]*?background:\s*#6258d6;/);
+  assert.match(styles, /\.reviewCommentMarker\s*\{[^}]*?color:\s*#fff;/);
+  assert.match(styles, /\.reviewCommentMarker\s*\{[^}]*?font-size:\s*20px;/);
   assert.match(styles, /\.reviewCommentMarker:hover \.reviewCommentBubble\s*\{/);
   assert.doesNotMatch(reviewDocument, /data-pageroot-review-comment-(?:data|layer|marker|bubble)/);
   assert.doesNotMatch(reviewDocument, /用户评论/);
