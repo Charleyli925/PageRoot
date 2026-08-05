@@ -137,8 +137,13 @@ Entering review does not change `project.json.sourcePath`, the current Canvas,
 the immutable Version or the activation transaction, and runtime interaction
 state is never serialized. The renderer accepts review messages only when the
 session ID, side, declared message source and `MessageEvent.source` all match the
-registered frame. A user must still invoke the existing fail-closed ready-version
-activation path through “直接打开” or the review confirmation “打开 AI 修改后”.
+registered frame. Runtime-chart snapshot messages are additionally limited to
+host keys declared by the frozen source analyzer, bounded atom/signature counts
+and one accepted batch per side. They contain no executable DOM and can only add
+a disposable visual marker after a complete stable pair; invalid, partial,
+timed-out or late input is ignored. A user must still invoke the existing
+fail-closed ready-version activation path through “直接打开” or the review
+confirmation “打开 AI 修改后”.
 
 Edit-mode reveal actions use the same trust boundary. They accept only strict
 Tabs whose selected panel is proved by `aria-selected` plus `hidden`, native

@@ -121,6 +121,17 @@ of runtime DOM. It has no drain, persistence, review-diff, source-history or AI
 authority. The Canvas may mount and remove it only as presentation beneath the
 original source host; comments and edits continue to resolve that host.
 
+Formal review has a separate, narrower runtime-visual supplement owned by the
+parent `AiReviewWorkspace` and its `ReviewRuntimeVisualCoordinator`. The frozen
+source analyzer must first prove a unique source-empty host pair, a relevant
+changed authored script and absence of an existing static footprint over that
+host. Both already-isolated review frames may then report one bounded pair of
+same-side-stable, host-relative HTML/SVG/Canvas fingerprints. Only a complete
+before/after batch received before the initial deadline may add a visual marker;
+absolute page position, one-sided, unstable, invalid, timed-out and late facts
+fail closed to the unchanged static result. The supplement owns no source,
+Version, persistence, Bridge, drain or activation state.
+
 Comment layout is measured only after current disposable presentation is
 applied. The Workbench accepts no card coordinates until the Canvas reports a
 complete target set for the current rendered source Hash and applied generation;

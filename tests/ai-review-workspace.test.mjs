@@ -110,7 +110,7 @@ test("formal review reuses the workbench header and exposes independent review c
   assert.match(styles, /\.previewButtonLabel small[\s\S]*?font-style: italic/);
   assert.match(styles, /\.transparencyField > \.toolbarFieldLabel/);
   assert.match(styles, /justify-content: flex-start;[\s\S]*?gap: 1ch/);
-  assert.match(review, /<small>\{documents\.changes\.length\} 处变化<\/small>/);
+  assert.match(review, /<small>\{reviewChanges\.length\} 处变化<\/small>/);
   assert.match(styles, /\.canvasGrid[\s\S]*?gap: 3px;[\s\S]*?padding: 3px/);
 });
 
@@ -334,6 +334,24 @@ test("all-change review keeps text treatment precise and mirrors authored action
   const actionMirrorEnd = review.indexOf('if (message.type === "panel-change")', actionMirrorStart);
   assert.doesNotMatch(review.slice(actionMirrorStart, actionMirrorEnd), /scrollMode === "linked"/);
   assert.match(review, /document\.addEventListener\("pointerdown", closeOnOutsidePointer, true\)/);
+});
+
+test("runtime chart review supplements only the initial bounded static footprint", () => {
+  assert.match(reviewDocument, /annotateRuntimeVisualCandidates/);
+  assert.match(reviewDocument, /staticReviewMarkerCoversRuntimeHost/);
+  assert.match(reviewDocument, /collectRuntimeVisualSnapshots/);
+  assert.match(reviewDocument, /runtimeVisualBatchNodeLimit/);
+  assert.match(reviewDocument, /runtimeVisualBatchAtomLimit/);
+  assert.match(reviewDocument, /runtimeVisualBatchValueLimit/);
+  assert.match(
+    reviewDocument,
+    /JSON\.stringify\(firstSnapshot\) === JSON\.stringify\(secondSnapshot\)/,
+  );
+  assert.match(reviewDocument, /type === "apply-runtime-visual-changes"/);
+  assert.match(review, /new ReviewRuntimeVisualCoordinator/);
+  assert.match(review, /REVIEW_RUNTIME_VISUAL_DEADLINE_MS/);
+  assert.match(review, /confirmationAction \|\| runtimeVisualPending/);
+  assert.doesNotMatch(review, /运行态不稳定|分析未完成|概括标记/);
 });
 
 test("formal review projects frozen user comments on the before page only", () => {

@@ -520,6 +520,19 @@ test("a verified AI result stays pending through desktop review until the user a
       <h2>3EBITA分析</h2>
       <div data-review-ebita-copy><strong>结论：</strong>EBITA差异均在波动范围<br>内（0.06~0.13pt），AI托管未恶化盈利能力。</div>
     </section>
+    <section data-review-runtime-visuals>
+      <h2>运行态图表回归</h2>
+      <style>@keyframes review-runtime-unstable-motion { from { transform: translateX(0); } to { transform: translateX(80px); } }</style>
+      <div id="review-runtime-html-chart" class="review-runtime-chart-host"></div>
+      <svg id="review-runtime-svg-chart" class="review-runtime-chart-host" viewBox="0 0 320 96" width="320" height="96"></svg>
+      <canvas id="review-runtime-canvas-chart" class="review-runtime-chart-host" width="320" height="96"></canvas>
+      <div id="review-runtime-flow-chart" class="review-runtime-chart-host"></div>
+      <div id="review-runtime-unstable-chart" class="review-runtime-chart-host"></div>
+    </section>
+    <section data-review-runtime-static-covered-section>
+      <h2>静态已覆盖图表</h2>
+      <div id="review-runtime-static-covered" class="review-runtime-chart-host" style="border: 2px solid #d9dcec; padding: 12px"></div>
+    </section>
     <div class="tabs" role="tablist" aria-label="Review interaction fixture">
       <button type="button" data-review-tab-button data-p="review-p1">审阅标签一</button>
       <button type="button" data-review-tab-button data-p="review-p2">审阅标签二</button>
@@ -570,6 +583,39 @@ test("a verified AI result stays pending through desktop review until the user a
           panel.style.display = index === activeIndex ? "block" : "none";
         });
       }
+      const runtimeReviewChartVariant = "before";
+      const runtimeHtmlChart = document.querySelector("#review-runtime-html-chart");
+      const runtimeHtmlValue = runtimeReviewChartVariant === "before" ? "81.6 亿次" : "96.2 亿次";
+      const runtimeHtmlWidth = runtimeReviewChartVariant === "before" ? "62%" : "82%";
+      runtimeHtmlChart.innerHTML = '<div style="display:grid;gap:8px;padding:14px;border:2px solid '
+        + (runtimeReviewChartVariant === "before" ? '#d9dcec' : '#6d5ce7')
+        + ';border-radius:14px;background:#fff"><strong>各平台日均整体搜索次数</strong><span>'
+        + runtimeHtmlValue
+        + '</span><i style="display:block;height:18px;width:'
+        + runtimeHtmlWidth
+        + ';background:#9b8cf0"></i></div>';
+      const runtimeSvgChart = document.querySelector("#review-runtime-svg-chart");
+      const runtimeSvgHeight = runtimeReviewChartVariant === "before" ? 44 : 72;
+      runtimeSvgChart.innerHTML = '<rect x="12" y="12" width="296" height="72" rx="10" fill="#f5f3ff"></rect>'
+        + '<rect x="36" y="' + (84 - runtimeSvgHeight) + '" width="72" height="' + runtimeSvgHeight
+        + '" fill="' + (runtimeReviewChartVariant === "before" ? '#9aaec2' : '#6d5ce7') + '"></rect>'
+        + '<text x="132" y="54" fill="#25233a">SVG 搜索趋势</text>';
+      const runtimeCanvasChart = document.querySelector("#review-runtime-canvas-chart");
+      const runtimeCanvasContext = runtimeCanvasChart.getContext("2d");
+      runtimeCanvasContext.fillStyle = "#f5f3ff";
+      runtimeCanvasContext.fillRect(0, 0, 320, 96);
+      runtimeCanvasContext.fillStyle = runtimeReviewChartVariant === "before" ? "#9aaec2" : "#6d5ce7";
+      runtimeCanvasContext.fillRect(24, 20, runtimeReviewChartVariant === "before" ? 150 : 238, 56);
+      const runtimeFlowChart = document.querySelector("#review-runtime-flow-chart");
+      runtimeFlowChart.innerHTML = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:12px;border:1px solid #c9c9d8"><span>稳定基准</span><strong>48.4%</strong></div>';
+      const runtimeUnstableChart = document.querySelector("#review-runtime-unstable-chart");
+      runtimeUnstableChart.innerHTML = '<div style="width:120px;padding:10px;border:1px solid #6d5ce7;animation:review-runtime-unstable-motion .4s linear infinite alternate"><span>动画数据</span><strong>'
+        + (runtimeReviewChartVariant === "before" ? "旧值" : "新值")
+        + '</strong></div>';
+      const runtimeStaticCovered = document.querySelector("#review-runtime-static-covered");
+      runtimeStaticCovered.innerHTML = '<div><strong>静态已覆盖</strong><span>'
+        + (runtimeReviewChartVariant === "before" ? '旧值' : '新值')
+        + '</span></div>';
       document.documentElement.dataset.reviewFixtureReady = "true";
     </script>
   </main>`,
@@ -618,6 +664,19 @@ test("a verified AI result stays pending through desktop review until the user a
       return base
         .replace(ORIGINAL_TEXT, UPDATED_TEXT)
         .replace(REVIEW_METRIC_BEFORE_CSS, REVIEW_METRIC_AFTER_CSS)
+        .replace(
+          'const runtimeReviewChartVariant = "before";',
+          'const runtimeReviewChartVariant = "after";',
+        )
+        .replace(
+          'id="review-runtime-static-covered" class="review-runtime-chart-host" style="border: 2px solid #d9dcec; padding: 12px"',
+          'id="review-runtime-static-covered" class="review-runtime-chart-host" style="border: 2px solid #241d58; padding: 12px"',
+        )
+        .replace(
+          "    <section data-review-runtime-visuals>",
+          `    <div data-review-runtime-flow-shift style="height: 72px">新增内容只造成后续区域正常下移</div>
+    <section data-review-runtime-visuals>`,
+        )
         .replace(
           "      <div data-review-regression-summary>",
           `      <div data-review-added-chart>
@@ -733,6 +792,64 @@ test("a verified AI result stays pending through desktop review until the user a
       .toHaveAttribute("data-review-fixture-ready", "true");
     await expect(afterReviewFrame.locator("html"))
       .toHaveAttribute("data-review-fixture-ready", "true");
+    const runtimeChangedHosts = [
+      "#review-runtime-html-chart",
+      "#review-runtime-svg-chart",
+      "#review-runtime-canvas-chart",
+    ];
+    for (const selector of runtimeChangedHosts) {
+      await expect(beforeReviewFrame.locator(selector)).toHaveAttribute(
+        "data-pageroot-review-runtime-marker",
+        "true",
+      );
+      await expect(afterReviewFrame.locator(selector)).toHaveAttribute(
+        "data-pageroot-review-runtime-marker",
+        "true",
+      );
+      await expect(afterReviewFrame.locator(selector)).toHaveAttribute(
+        "data-pageroot-review-marker-types",
+        "style",
+      );
+    }
+    const runtimeChangedIds = await Promise.all(runtimeChangedHosts.map((selector) => (
+      afterReviewFrame.locator(selector).getAttribute("data-pageroot-review-marker")
+    )));
+    expect(new Set(runtimeChangedIds).size).toBe(1);
+    expect(runtimeChangedIds[0]).toMatch(/^runtime-change-outline-\d+$/u);
+    await expect(launched.page.getByTestId("review-outline-item").filter({
+      has: launched.page.getByText("运行态图表回归", { exact: true }),
+    })).toHaveAttribute("aria-label", "运行态图表回归：视觉调整");
+    const runtimeHtmlOwner = await afterReviewFrame.locator(
+      "#review-runtime-html-chart",
+    ).getAttribute("data-pageroot-review-style-owner");
+    expect(runtimeHtmlOwner).toMatch(/^runtime-runtime-host-\d+$/u);
+    await expect(afterReviewFrame.locator(
+      `[data-pageroot-review-overlay-owner="${runtimeHtmlOwner}"]`,
+    )).toBeVisible();
+    await expect(beforeReviewFrame.locator("#review-runtime-flow-chart"))
+      .toHaveAttribute("data-pageroot-review-runtime-host", /runtime-host-\d+/u);
+    await expect(afterReviewFrame.locator("#review-runtime-flow-chart"))
+      .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
+    await expect(afterReviewFrame.locator("#review-runtime-unstable-chart"))
+      .toHaveAttribute("data-pageroot-review-runtime-host", /runtime-host-\d+/u);
+    await expect(afterReviewFrame.locator("#review-runtime-unstable-chart"))
+      .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
+    const runtimeFlowTop = await Promise.all([
+      beforeReviewFrame.locator("#review-runtime-flow-chart")
+        .evaluate((element) => element.getBoundingClientRect().top),
+      afterReviewFrame.locator("#review-runtime-flow-chart")
+        .evaluate((element) => element.getBoundingClientRect().top),
+    ]);
+    expect(Math.abs(runtimeFlowTop[0] - runtimeFlowTop[1])).toBeGreaterThan(30);
+    await expect(afterReviewFrame.locator("#review-runtime-static-covered"))
+      .not.toHaveAttribute("data-pageroot-review-runtime-host", /.+/u);
+    await expect(afterReviewFrame.locator("#review-runtime-static-covered"))
+      .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
+    await expect(afterReviewFrame.locator("#review-runtime-static-covered"))
+      .toHaveAttribute("data-pageroot-review-marker-types", /style/u);
+    expect(await afterReviewFrame.locator(
+      "#review-runtime-static-covered",
+    ).getAttribute("data-pageroot-review-marker")).not.toBe(runtimeChangedIds[0]);
     await expect(beforeReviewFrame.locator('meta[http-equiv="refresh"]'))
       .toHaveCount(0);
     const reviewCommentMarker = launched.page.locator(

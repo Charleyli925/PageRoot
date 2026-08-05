@@ -38,6 +38,11 @@ import {
   type ReviewDocuments,
   type ReviewSide,
 } from "./review-document";
+import {
+  REVIEW_RUNTIME_VISUAL_DEADLINE_MS,
+  ReviewRuntimeVisualCoordinator,
+  mergeReviewRuntimeVisualChanges,
+} from "../lib/review-runtime-visual.js";
 import { ReviewScrollCoordinator } from "../lib/review-scroll-sync.js";
 import {
   DEFAULT_REVIEW_STATE,
@@ -60,6 +65,12 @@ type ReviewDesktopSessionResult = {
   documents: ReviewDocuments;
   sessions: ReviewDesktopSessions | null;
   failed: boolean;
+};
+type ReviewRuntimeVisualResult = {
+  documents: ReviewDocuments;
+  changes: ReviewDocuments["changes"];
+  outline: ReviewDocuments["outline"];
+  markers: Array<{ key: string; changeId: string }>;
 };
 type ReviewCommentLayout = {
   key: string;
@@ -105,6 +116,7 @@ type ReviewMessage = {
   value?: string;
   checked?: boolean;
   commentLayouts?: unknown;
+  runtimeVisualSnapshots?: unknown;
 };
 
 const MAX_REVIEW_COMMENT_COORDINATE = 10_000_000;
@@ -428,6 +440,7 @@ export default function AiReviewWorkspace({
           bootstrapJavaScript: { before: "", after: "" },
           changes: [],
           outline: [],
+          runtimeVisualCandidates: [],
           commentGroups: [],
         }
   ), [afterHtml, beforeHtml, comments, hydrated, independentTransport, sessionId, sourcePath]);
@@ -450,6 +463,8 @@ export default function AiReviewWorkspace({
   const [confirmationAction, setConfirmationAction] = useState<ConfirmationAction | null>(null);
   const [desktopSessionResult, setDesktopSessionResult] =
     useState<ReviewDesktopSessionResult | null>(null);
+  const [runtimeVisualResult, setRuntimeVisualResult] =
+    useState<ReviewRuntimeVisualResult | null>(null);
   const [commentLayoutState, setCommentLayoutState] = useState<{
     documents: ReviewDocuments;
     layouts: ReviewCommentLayout[];
@@ -482,6 +497,9 @@ export default function AiReviewWorkspace({
     afterCommit: Array<() => void>;
     timer: number | null;
   } | null>(null);
+  const runtimeVisualCoordinatorRef = useRef<ReviewRuntimeVisualCoordinator | null>(null);
+  const runtimeVisualReadySidesRef = useRef<Set<ReviewSide>>(new Set());
+  const runtimeVisualResolutionRef = useRef<ReviewRuntimeVisualResult | null>(null);
   const reviewStateRef = useRef({ filter, focus, transparency, pagePresentationPath });
   const scrollModeRef = useRef(scrollMode);
   const desktopSessions = desktopSessionResult?.documents === documents
@@ -493,26 +511,33 @@ export default function AiReviewWorkspace({
   const reviewCommentLayouts = commentLayoutState.documents === documents
     ? commentLayoutState.layouts
     : [];
+  const activeRuntimeVisualResult = runtimeVisualResult?.documents === documents
+    ? runtimeVisualResult
+    : null;
+  const runtimeVisualPending = documents.runtimeVisualCandidates.length > 0
+    && !activeRuntimeVisualResult;
+  const reviewChanges = activeRuntimeVisualResult?.changes || documents.changes;
+  const reviewOutline = activeRuntimeVisualResult?.outline || documents.outline;
   const navigableChanges = useMemo(() => (
     filter === "all"
-      ? documents.changes
-      : documents.changes.filter((change) => change.types.includes(filter))
-  ), [documents.changes, filter]);
+      ? reviewChanges
+      : reviewChanges.filter((change) => change.types.includes(filter))
+  ), [filter, reviewChanges]);
   const activeChange = focus === "all"
     ? null
-    : documents.changes.find((change) => change.id === focus) || null;
+    : reviewChanges.find((change) => change.id === focus) || null;
   const activeIndex = activeChange
     ? navigableChanges.findIndex((change) => change.id === activeChange.id)
     : -1;
   const outlineGroups = useMemo(() => {
     const grouped = new Map<string, ReviewDocuments["outline"]>();
-    documents.outline.forEach((item) => {
+    reviewOutline.forEach((item) => {
       const items = grouped.get(item.group) || [];
       items.push(item);
       grouped.set(item.group, items);
     });
     return [...grouped.entries()].map(([label, items]) => ({ label, items }));
-  }, [documents.outline]);
+  }, [reviewOutline]);
   const mapOpen = mapPinned || mapPeeked;
 
   const updateCommentScrollTransform = useCallback((
@@ -581,6 +606,19 @@ export default function AiReviewWorkspace({
   }, [documents.changes, hydrated]);
 
   useEffect(() => {
+    if (
+      !activeRuntimeVisualResult
+      || documents.changes.length > 0
+      || reviewStateRef.current.focus !== "all"
+      || !reviewChanges[0]
+    ) return;
+    dispatchReviewState({
+      type: "set-navigation-target",
+      value: reviewChanges[0].id,
+    });
+  }, [activeRuntimeVisualResult, documents.changes.length, reviewChanges]);
+
+  useEffect(() => {
     if (!mapOpen) return undefined;
     const closeOnOutsidePointer = (event: PointerEvent) => {
       const target = event.target;
@@ -597,6 +635,10 @@ export default function AiReviewWorkspace({
   }, [filter, focus, pagePresentationPath, transparency]);
 
   const sendState = useCallback((side?: ReviewSide) => {
+    if (
+      documents.runtimeVisualCandidates.length > 0
+      && runtimeVisualResolutionRef.current?.documents !== documents
+    ) return;
     const state = reviewStateRef.current;
     const sides: ReviewSide[] = side ? [side] : ["before", "after"];
     sides.forEach((targetSide) => {
@@ -610,12 +652,20 @@ export default function AiReviewWorkspace({
         },
       });
     });
-  }, [sessionId]);
+  }, [documents, sessionId]);
 
-  const focusCurrentSelection = useCallback((side: ReviewSide) => {
+  const commitRuntimeVisualFrame = useCallback((
+    side: ReviewSide,
+    result: ReviewRuntimeVisualResult,
+  ) => {
+    postToFrame(framesRef.current[side], sessionId, {
+      type: "apply-runtime-visual-changes",
+      markers: result.markers,
+    });
+    sendState(side);
     const currentFocus = reviewStateRef.current.focus;
     if (currentFocus === "all") return;
-    const selectedChange = documents.changes.find((change) => change.id === currentFocus);
+    const selectedChange = result.changes.find((change) => change.id === currentFocus);
     if (!selectedChange) return;
     postToFrame(framesRef.current[side], sessionId, {
       type: "focus-change",
@@ -624,7 +674,52 @@ export default function AiReviewWorkspace({
       panelPath: selectedChange.panelPath,
       behavior: "auto",
     });
-  }, [documents.changes, sessionId]);
+  }, [sendState, sessionId]);
+
+  const resolveRuntimeVisuals = useCallback((changedCandidateKeys: readonly string[]) => {
+    const merged = mergeReviewRuntimeVisualChanges(documents, changedCandidateKeys);
+    const result: ReviewRuntimeVisualResult = {
+      documents,
+      changes: [...merged.changes],
+      outline: [...merged.outline],
+      markers: [...merged.markers],
+    };
+    runtimeVisualResolutionRef.current = result;
+    setRuntimeVisualResult(result);
+    runtimeVisualReadySidesRef.current.forEach((side) => {
+      commitRuntimeVisualFrame(side, result);
+    });
+  }, [commitRuntimeVisualFrame, documents]);
+
+  useEffect(() => {
+    runtimeVisualCoordinatorRef.current?.dispose();
+    runtimeVisualCoordinatorRef.current = null;
+    runtimeVisualReadySidesRef.current = new Set();
+    runtimeVisualResolutionRef.current = null;
+    if (!documents.runtimeVisualCandidates.length) {
+      runtimeVisualResolutionRef.current = {
+        documents,
+        changes: documents.changes,
+        outline: documents.outline,
+        markers: [],
+      };
+      return undefined;
+    }
+    const coordinator = new ReviewRuntimeVisualCoordinator({
+      candidates: documents.runtimeVisualCandidates,
+      deadlineMs: REVIEW_RUNTIME_VISUAL_DEADLINE_MS,
+      onResolve: resolveRuntimeVisuals,
+      setTimer: (callback, delay) => window.setTimeout(callback, delay),
+      clearTimer: (handle) => window.clearTimeout(handle as number),
+    });
+    runtimeVisualCoordinatorRef.current = coordinator;
+    return () => {
+      coordinator.dispose();
+      if (runtimeVisualCoordinatorRef.current === coordinator) {
+        runtimeVisualCoordinatorRef.current = null;
+      }
+    };
+  }, [documents, resolveRuntimeVisuals]);
 
   const finishPagePresentation = useCallback((epoch: number) => {
     const pending = presentationReadyRef.current;
@@ -753,8 +848,18 @@ export default function AiReviewWorkspace({
         || event.source !== framesRef.current[message.side]?.contentWindow
       ) return;
       if (message.type === "ready") {
-        sendState(message.side);
-        focusCurrentSelection(message.side);
+        runtimeVisualReadySidesRef.current.add(message.side);
+        const resolved = runtimeVisualResolutionRef.current;
+        if (resolved?.documents === documents) {
+          commitRuntimeVisualFrame(message.side, resolved);
+          return;
+        }
+        const coordinator = runtimeVisualCoordinatorRef.current;
+        if (coordinator) {
+          coordinator.accept(message.side, message.runtimeVisualSnapshots);
+        } else {
+          resolveRuntimeVisuals([]);
+        }
         return;
       }
       if (message.type === "presentation-ready") {
@@ -825,7 +930,7 @@ export default function AiReviewWorkspace({
           : message.panelKey
             ? [message.panelKey]
             : [];
-        const visibleItem = documents.outline.find((item) => (
+        const visibleItem = reviewOutline.find((item) => (
           item.panelPath?.at(-1) === panelPath.at(-1)
         ));
         if (visibleItem) {
@@ -841,11 +946,12 @@ export default function AiReviewWorkspace({
     window.addEventListener("message", handleMessage);
     return () => window.removeEventListener("message", handleMessage);
   }, [
+    commitRuntimeVisualFrame,
     coordinatePagePresentation,
     documents,
-    documents.outline,
     finishPagePresentation,
-    focusCurrentSelection,
+    resolveRuntimeVisuals,
+    reviewOutline,
     sendState,
     sessionId,
     updateCommentScrollTransform,
@@ -854,8 +960,10 @@ export default function AiReviewWorkspace({
   const registerFrame = useCallback((side: ReviewSide, frame: HTMLIFrameElement | null) => {
     framesRef.current[side] = frame;
     if (frame) window.requestAnimationFrame(() => {
-      sendState(side);
-      focusCurrentSelection(side);
+      const resolved = runtimeVisualResolutionRef.current;
+      if (resolved?.documents === documents) {
+        commitRuntimeVisualFrame(side, resolved);
+      }
       const owner = scrollCoordinatorRef.current?.snapshot();
       if (owner) {
         postToFrame(frame, sessionId, {
@@ -866,7 +974,7 @@ export default function AiReviewWorkspace({
         });
       }
     });
-  }, [focusCurrentSelection, sendState, sessionId]);
+  }, [commitRuntimeVisualFrame, documents, sessionId]);
 
   const registerViewport = useCallback((side: ReviewSide, viewport: HTMLDivElement | null) => {
     viewportsRef.current[side] = viewport;
@@ -910,7 +1018,7 @@ export default function AiReviewWorkspace({
   }, [scrollMode]);
 
   const selectChange = useCallback((changeId: string) => {
-    const selectedChange = documents.changes.find((change) => change.id === changeId);
+    const selectedChange = reviewChanges.find((change) => change.id === changeId);
     dispatchReviewState({ type: "set-navigation-target", value: changeId });
     const focusChange = () => {
       (["before", "after"] as ReviewSide[]).forEach((side) => {
@@ -928,7 +1036,7 @@ export default function AiReviewWorkspace({
     } else {
       focusChange();
     }
-  }, [coordinatePagePresentation, documents.changes, sessionId]);
+  }, [coordinatePagePresentation, reviewChanges, sessionId]);
 
   const selectReviewMode = useCallback((mode: ReviewChangeFilter) => {
     dispatchReviewState({ type: "set-change-filter", value: mode });
@@ -1121,7 +1229,10 @@ export default function AiReviewWorkspace({
         </div>
       ) : null}
 
-      <main className={styles.reviewMain} inert={confirmationAction ? true : undefined}>
+      <main
+        className={styles.reviewMain}
+        inert={confirmationAction || runtimeVisualPending ? true : undefined}
+      >
         <section
           className={styles.canvasReview}
           data-toolbar-open={toolbarPinned ? "true" : undefined}
@@ -1132,7 +1243,7 @@ export default function AiReviewWorkspace({
                 <span className={styles.canvasReviewIcon}><EyeIcon aria-hidden="true" size={20} weight="duotone" /></span>
                 <span>
                   <strong>审阅模式</strong>
-                  <small>{documents.changes.length} 处变化</small>
+                  <small>{reviewChanges.length} 处变化</small>
                 </span>
               </div>
 
@@ -1337,7 +1448,7 @@ export default function AiReviewWorkspace({
               </div>
               <div className={styles.mapPanel} aria-hidden={!mapOpen} inert={!mapOpen ? true : undefined}>
                 <header>
-                  <div><span>页面内容地图 · {documents.outline.length} 个区域</span><strong>{activeChange ? `正在看：${activeChange.label}` : focus === "all" ? "整页总览" : "正在看未修改区域"}</strong></div>
+                  <div><span>页面内容地图 · {reviewOutline.length} 个区域</span><strong>{activeChange ? `正在看：${activeChange.label}` : focus === "all" ? "整页总览" : "正在看未修改区域"}</strong></div>
                   <button type="button" aria-label={mapPinned ? "收起内容地图" : "保持内容地图展开"} aria-pressed={mapPinned} onClick={() => setMapPinned((current) => !current)}>
                     <PushPinIcon aria-hidden="true" size={15} weight={mapPinned ? "fill" : "duotone"} />
                   </button>
@@ -1362,7 +1473,7 @@ export default function AiReviewWorkspace({
                       <h3><span>{group.label}</span><small>{matchingCount}/{group.items.length} 处匹配</small></h3>
                       <ol className={styles.mapList}>
                         {group.items.map((item) => {
-                          const itemIndex = documents.outline.findIndex((candidate) => candidate.id === item.id);
+                          const itemIndex = reviewOutline.findIndex((candidate) => candidate.id === item.id);
                           const selected = focus === (item.changeId || item.id);
                           const matchesFilter = Boolean(item.changeId)
                             && (filter === "all" || item.types.includes(filter));

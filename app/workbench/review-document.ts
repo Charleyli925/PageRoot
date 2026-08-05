@@ -12,6 +12,9 @@ import {
   reviewTextSimilarity,
   sentenceAwareTextDifferences,
 } from "../lib/review-text-diff.js";
+import type {
+  ReviewRuntimeVisualCandidate,
+} from "../lib/review-runtime-visual.js";
 import {
   REVIEW_SOURCE_NODE_ATTRIBUTE,
   prepareReviewCommentSourceProjection,
@@ -53,6 +56,7 @@ export type ReviewDocuments = {
   bootstrapJavaScript: Record<ReviewSide, string>;
   changes: ReviewChange[];
   outline: ReviewOutlineItem[];
+  runtimeVisualCandidates: ReviewRuntimeVisualCandidate[];
   commentGroups: ReviewCommentGroup[];
 };
 
@@ -348,6 +352,40 @@ const NON_CONTENT_TAGS = new Set([
   "SCRIPT",
   "STYLE",
   "TEMPLATE",
+]);
+
+const REVIEW_RUNTIME_VISUAL_HOST_ATTRIBUTE = "data-pageroot-review-runtime-host";
+const MAX_REVIEW_RUNTIME_VISUAL_CANDIDATES = 128;
+const RUNTIME_VISUAL_HOST_SELECTOR = [
+  "article",
+  "aside",
+  "canvas",
+  "div",
+  "figure",
+  "figcaption",
+  "li",
+  "main",
+  "section",
+  "span",
+  "svg",
+  "td",
+  "th",
+  "tbody",
+].join(",");
+const GENERIC_RUNTIME_VISUAL_CLASSES = new Set([
+  "active",
+  "card",
+  "chart",
+  "container",
+  "content",
+  "grid",
+  "item",
+  "main",
+  "panel",
+  "row",
+  "section",
+  "wrap",
+  "wrapper",
 ]);
 
 type ReviewTextInventory = {
@@ -1062,6 +1100,313 @@ function pairSections(before: Element[], after: Element[]): SectionPair[] {
     }
   });
   return markMovedPairs(pairs);
+}
+
+type ReviewRuntimeSectionContext = {
+  pair: SectionPair;
+  outlineId: string;
+  changeId?: string;
+  label: string;
+  panelKey?: string;
+  panelPath: string[];
+};
+
+type ReviewRuntimeHostPair = {
+  before: Element;
+  after: Element;
+};
+
+type ReviewScriptDescriptor = {
+  element: HTMLScriptElement;
+  content: string;
+  signature: string;
+  identityTokens: string[];
+};
+
+type ChangedReviewScript = {
+  before: ReviewScriptDescriptor | null;
+  after: ReviewScriptDescriptor | null;
+  content: string;
+};
+
+function isRuntimeVisualPlaceholder(element: Element): boolean {
+  if (!element.matches(RUNTIME_VISUAL_HOST_SELECTOR)) return false;
+  return [...element.childNodes].every((node) => (
+    node.nodeType === Node.COMMENT_NODE
+    || (node.nodeType === Node.TEXT_NODE && !(node.textContent || "").trim())
+  ));
+}
+
+function runtimeVisualIdentityParts(element: Element): string[] {
+  const parts: string[] = [];
+  if (element.id) parts.push(`id:${element.id}`);
+  for (const attributeName of ["aria-label", "name", "title"]) {
+    const value = element.getAttribute(attributeName)?.trim();
+    if (value) parts.push(`${attributeName}:${value}`);
+  }
+  [...element.attributes].forEach((attribute) => {
+    if (
+      !attribute.name.startsWith("data-")
+      || attribute.name.startsWith("data-pageroot-")
+      || !/(?:canvas|chart|graph|plot|table|visual|viz)/iu.test(attribute.name)
+    ) return;
+    parts.push(`${attribute.name}:${attribute.value.trim()}`);
+  });
+  const distinctiveClasses = classTokens(element).filter((token) => (
+    token.length >= 4 && !GENERIC_RUNTIME_VISUAL_CLASSES.has(token.toLowerCase())
+  ));
+  if (distinctiveClasses.length) {
+    parts.push(`class:${distinctiveClasses.sort().join(".")}`);
+  }
+  return parts;
+}
+
+function runtimeVisualPairIdentity(element: Element): string | null {
+  const explicitKey = pairKey(element);
+  if (explicitKey) return `${element.tagName}:${explicitKey}`;
+  const parts = runtimeVisualIdentityParts(element);
+  return parts.length ? `${element.tagName}:${parts.join("|")}` : null;
+}
+
+function runtimeVisualSourceSignature(element: Element): string {
+  const attributes = [...element.attributes]
+    .filter((attribute) => !attribute.name.startsWith("data-pageroot-"))
+    .map((attribute) => `${attribute.name}=${attribute.value}`)
+    .sort();
+  return `${element.tagName}|${attributes.join("|")}`;
+}
+
+function relativeElementPath(root: Element, element: Element): string | null {
+  const indexes: number[] = [];
+  let current: Element | null = element;
+  while (current && current !== root) {
+    const parent: Element | null = current.parentElement;
+    if (!parent) return null;
+    indexes.unshift([...parent.children].indexOf(current));
+    current = parent;
+  }
+  return current === root ? indexes.join(".") : null;
+}
+
+function runtimeVisualHosts(root: Element): Element[] {
+  return [root, ...root.querySelectorAll(RUNTIME_VISUAL_HOST_SELECTOR)]
+    .filter(isRuntimeVisualPlaceholder);
+}
+
+function pairRuntimeVisualHosts(
+  beforeRoot: Element,
+  afterRoot: Element,
+): ReviewRuntimeHostPair[] {
+  const beforeHosts = runtimeVisualHosts(beforeRoot);
+  const afterHosts = runtimeVisualHosts(afterRoot);
+  const beforeIdentityCounts = new Map<string, number>();
+  const afterByIdentity = new Map<string, Element[]>();
+  beforeHosts.forEach((element) => {
+    const identity = runtimeVisualPairIdentity(element);
+    if (identity) beforeIdentityCounts.set(identity, (beforeIdentityCounts.get(identity) || 0) + 1);
+  });
+  afterHosts.forEach((element) => {
+    const identity = runtimeVisualPairIdentity(element);
+    if (!identity) return;
+    const matches = afterByIdentity.get(identity) || [];
+    matches.push(element);
+    afterByIdentity.set(identity, matches);
+  });
+
+  const usedAfter = new Set<Element>();
+  const assignments = new Map<Element, Element>();
+  beforeHosts.forEach((beforeHost) => {
+    const identity = runtimeVisualPairIdentity(beforeHost);
+    const matches = identity ? afterByIdentity.get(identity) || [] : [];
+    if (
+      !identity
+      || beforeIdentityCounts.get(identity) !== 1
+      || matches.length !== 1
+      || usedAfter.has(matches[0])
+    ) return;
+    assignments.set(beforeHost, matches[0]);
+    usedAfter.add(matches[0]);
+  });
+
+  const afterByPath = new Map(afterHosts.flatMap((afterHost) => {
+    const path = relativeElementPath(afterRoot, afterHost);
+    return path === null ? [] : [[path, afterHost] as const];
+  }));
+  beforeHosts.forEach((beforeHost) => {
+    if (assignments.has(beforeHost)) return;
+    const identityParts = runtimeVisualIdentityParts(beforeHost);
+    const path = relativeElementPath(beforeRoot, beforeHost);
+    const afterHost = path === null ? null : afterByPath.get(path) || null;
+    if (
+      !identityParts.length
+      || !afterHost
+      || usedAfter.has(afterHost)
+      || beforeHost.tagName !== afterHost.tagName
+      || runtimeVisualSourceSignature(beforeHost) !== runtimeVisualSourceSignature(afterHost)
+    ) return;
+    assignments.set(beforeHost, afterHost);
+    usedAfter.add(afterHost);
+  });
+  return [...assignments].map(([before, after]) => ({ before, after }));
+}
+
+function reviewScriptDescriptors(document: Document): ReviewScriptDescriptor[] {
+  return [...document.scripts].map((element) => {
+    const content = [
+      element.getAttribute("src") || "",
+      element.getAttribute("type") || "",
+      element.textContent || "",
+    ].join("\n");
+    const identityTokens = [
+      element.id,
+      element.getAttribute("name") || "",
+      ...[...element.attributes]
+        .filter((attribute) => attribute.name.startsWith("data-"))
+        .flatMap((attribute) => [attribute.name, attribute.value]),
+    ].map((value) => value.trim()).filter((value) => value.length >= 3);
+    return {
+      element,
+      content,
+      signature: `${element.getAttribute("src") || ""}\u0000${element.getAttribute("type") || ""}\u0000${element.textContent || ""}`,
+      identityTokens,
+    };
+  });
+}
+
+function changedReviewScripts(
+  beforeScripts: ReviewScriptDescriptor[],
+  afterScripts: ReviewScriptDescriptor[],
+): ChangedReviewScript[] {
+  const length = Math.max(beforeScripts.length, afterScripts.length);
+  return Array.from({ length }, (_, index) => {
+    const before = beforeScripts[index] || null;
+    const after = afterScripts[index] || null;
+    return {
+      before,
+      after,
+      content: `${before?.content || ""}\n${after?.content || ""}`,
+    };
+  }).filter(({ before, after }) => before?.signature !== after?.signature);
+}
+
+function runtimeVisualScriptTokens(before: Element, after: Element): string[] {
+  return [...new Set([
+    ...runtimeVisualIdentityParts(before),
+    ...runtimeVisualIdentityParts(after),
+    before.id,
+    after.id,
+    ...[...before.attributes, ...after.attributes]
+      .filter((attribute) => (
+        attribute.name.startsWith("data-")
+        && !attribute.name.startsWith("data-pageroot-")
+      ))
+      .flatMap((attribute) => [attribute.name, attribute.value]),
+    ...classTokens(before),
+    ...classTokens(after),
+  ].flatMap((value) => String(value || "").split(/[:|]/u))
+    .map((value) => value.trim())
+    .filter((value) => value.length >= 3))];
+}
+
+function hasRuntimeVisualCause(
+  hostPair: ReviewRuntimeHostPair,
+  sectionPair: SectionPair,
+  changedScripts: ChangedReviewScript[],
+  allScripts: ReviewScriptDescriptor[],
+): boolean {
+  const tokens = runtimeVisualScriptTokens(hostPair.before, hostPair.after);
+  const referencesHost = (content: string) => tokens.some((token) => content.includes(token));
+  if (changedScripts.some(({ before, after, content }) => (
+    (before && sectionPair.before?.contains(before.element))
+    || (after && sectionPair.after?.contains(after.element))
+    || referencesHost(content)
+  ))) return true;
+
+  const hostReferenceScripts = allScripts.filter((script) => referencesHost(script.content));
+  if (!hostReferenceScripts.length) return false;
+  return changedScripts.some(({ before, after }) => {
+    const changedIdentityTokens = [
+      ...(before?.identityTokens || []),
+      ...(after?.identityTokens || []),
+    ];
+    return changedIdentityTokens.some((token) => (
+      hostReferenceScripts.some((script) => script.content.includes(token))
+    ));
+  });
+}
+
+function staticReviewMarkerCoversRuntimeHost(
+  host: Element,
+  sectionRoot: Element,
+): boolean {
+  let candidate: Element | null = host;
+  while (candidate) {
+    if (candidate.hasAttribute("data-pageroot-review-marker")) {
+      const markerTypes = String(
+        candidate.getAttribute("data-pageroot-review-marker-types") || "",
+      ).split(/\s+/u);
+      if (
+        candidate === host
+        || markerTypes.includes("structure")
+        || (
+          markerTypes.includes("style")
+          && candidate.getAttribute("data-pageroot-review-style-scope") === "box"
+        )
+      ) return true;
+    }
+    if (candidate === sectionRoot) break;
+    candidate = candidate.parentElement;
+  }
+  return false;
+}
+
+function annotateRuntimeVisualCandidates(
+  beforeDocument: Document,
+  afterDocument: Document,
+  sections: ReviewRuntimeSectionContext[],
+): ReviewRuntimeVisualCandidate[] {
+  const beforeScripts = reviewScriptDescriptors(beforeDocument);
+  const afterScripts = reviewScriptDescriptors(afterDocument);
+  const changedScripts = changedReviewScripts(beforeScripts, afterScripts);
+  if (!changedScripts.length) return [];
+  const allScripts = [...beforeScripts, ...afterScripts];
+  const proposed: Array<{
+    before: Element;
+    after: Element;
+    section: ReviewRuntimeSectionContext;
+  }> = [];
+  const usedBefore = new Set<Element>();
+  const usedAfter = new Set<Element>();
+  sections.forEach((section) => {
+    if (!section.pair.before || !section.pair.after) return;
+    pairRuntimeVisualHosts(section.pair.before, section.pair.after).forEach((hostPair) => {
+      if (
+        usedBefore.has(hostPair.before)
+        || usedAfter.has(hostPair.after)
+        || staticReviewMarkerCoversRuntimeHost(hostPair.before, section.pair.before as Element)
+        || staticReviewMarkerCoversRuntimeHost(hostPair.after, section.pair.after as Element)
+        || !hasRuntimeVisualCause(hostPair, section.pair, changedScripts, allScripts)
+      ) return;
+      usedBefore.add(hostPair.before);
+      usedAfter.add(hostPair.after);
+      proposed.push({ ...hostPair, section });
+    });
+  });
+  if (proposed.length > MAX_REVIEW_RUNTIME_VISUAL_CANDIDATES) return [];
+  return proposed.map(({ before, after, section }, index) => {
+    const key = `runtime-host-${index + 1}`;
+    const changeId = section.changeId || `runtime-change-${section.outlineId}`;
+    before.setAttribute(REVIEW_RUNTIME_VISUAL_HOST_ATTRIBUTE, key);
+    after.setAttribute(REVIEW_RUNTIME_VISUAL_HOST_ATTRIBUTE, key);
+    return {
+      key,
+      outlineId: section.outlineId,
+      changeId,
+      label: section.label,
+      ...(section.panelKey ? { panelKey: section.panelKey } : {}),
+      ...(section.panelPath.length ? { panelPath: [...section.panelPath] } : {}),
+    };
+  });
 }
 
 function helperText(
@@ -2200,6 +2545,7 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
   let acceptsFollowerScroll = false;
   let projectionEpoch = 0;
   let projectionTransitioning = false;
+  let initialProjectionCommitted = false;
   let mirroringPanel = false;
   let mirroringAction = false;
   let currentState = { filter: "all", focus: "all", transparency: 18, scale: 1 };
@@ -2221,6 +2567,415 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
       .map(safeKey)
       .filter(Boolean),
   )];
+  const runtimeVisualHostAttribute = ${JSON.stringify(REVIEW_RUNTIME_VISUAL_HOST_ATTRIBUTE)};
+  const runtimeVisualCandidateLimit = ${MAX_REVIEW_RUNTIME_VISUAL_CANDIDATES};
+  const runtimeVisualAtomLimit = 4096;
+  const runtimeVisualBatchAtomLimit = 8192;
+  const runtimeVisualBatchNodeLimit = 8192;
+  const runtimeVisualCanvasPixelLimit = 4194304;
+  const runtimeVisualValueLimit = 200000;
+  const runtimeVisualBatchValueLimit = 400000;
+  const runtimeVisualDelay = (milliseconds) => new Promise((resolve) => {
+    window.setTimeout(resolve, milliseconds);
+  });
+  const runtimeVisualFrames = () => new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  });
+  const runtimeVisualHex = (value) => (value >>> 0).toString(16).padStart(8, "0");
+  const runtimeVisualDigest = (value) => {
+    const textValue = String(value || "");
+    let first = 2166136261;
+    let second = 2246822507;
+    let third = 3266489909;
+    let fourth = 668265263;
+    for (let index = 0; index < textValue.length; index += 1) {
+      const code = textValue.charCodeAt(index);
+      first = Math.imul(first ^ code, 16777619);
+      second = Math.imul(second ^ code, 3266489917);
+      third = Math.imul(third ^ code, 668265263);
+      fourth = Math.imul(fourth ^ code, 374761393);
+    }
+    return runtimeVisualHex(first)
+      + runtimeVisualHex(second)
+      + runtimeVisualHex(third)
+      + runtimeVisualHex(fourth)
+      + ":" + Math.max(1, textValue.length);
+  };
+  const runtimeVisualByteDigest = (bytes) => {
+    let first = 2166136261;
+    let second = 2246822507;
+    let third = 3266489909;
+    let fourth = 668265263;
+    for (let index = 0; index < bytes.length; index += 1) {
+      const value = bytes[index];
+      first = Math.imul(first ^ value, 16777619);
+      second = Math.imul(second ^ value, 3266489917);
+      third = Math.imul(third ^ value, 668265263);
+      fourth = Math.imul(fourth ^ value, 374761393);
+    }
+    return runtimeVisualHex(first)
+      + runtimeVisualHex(second)
+      + runtimeVisualHex(third)
+      + runtimeVisualHex(fourth)
+      + ":" + Math.max(1, bytes.length);
+  };
+  const runtimeVisualRounded = (value) => Math.round(Number(value || 0) * 2) / 2;
+  const runtimeVisualRect = (rect, hostRect) => [
+    runtimeVisualRounded(rect.left - hostRect.left),
+    runtimeVisualRounded(rect.top - hostRect.top),
+    runtimeVisualRounded(rect.width),
+    runtimeVisualRounded(rect.height),
+  ].join(",");
+  const runtimeVisualVisible = (element) => {
+    if (!(element instanceof Element)) return false;
+    const style = getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    return style.display !== "none"
+      && style.visibility !== "hidden"
+      && style.visibility !== "collapse"
+      && Number(style.opacity || 1) > 0
+      && rect.width > 0
+      && rect.height > 0;
+  };
+  const runtimeVisualTransparent = (value) => (
+    !value
+    || value === "transparent"
+    || value === "rgba(0, 0, 0, 0)"
+    || value === "rgba(0,0,0,0)"
+  );
+  const runtimeVisualTextPaint = (style) => [
+    style.color,
+    style.fontFamily,
+    style.fontSize,
+    style.fontStyle,
+    style.fontWeight,
+    style.lineHeight,
+    style.letterSpacing,
+    style.textDecorationColor,
+    style.textDecorationLine,
+    style.textDecorationStyle,
+    style.textShadow,
+  ].join("|");
+  const runtimeVisualBoxPaint = (style) => {
+    const borderVisible = ["Top", "Right", "Bottom", "Left"].some((sideName) => (
+      parseFloat(style["border" + sideName + "Width"] || "0") > 0
+      && style["border" + sideName + "Style"] !== "none"
+      && !runtimeVisualTransparent(style["border" + sideName + "Color"])
+    ));
+    const painted = !runtimeVisualTransparent(style.backgroundColor)
+      || Boolean(style.backgroundImage && style.backgroundImage !== "none")
+      || borderVisible
+      || Boolean(style.boxShadow && style.boxShadow !== "none")
+      || Boolean(style.filter && style.filter !== "none")
+      || Number(style.opacity || 1) < 1;
+    if (!painted) return "";
+    return [
+      style.backgroundColor,
+      style.backgroundImage,
+      style.borderTopColor,
+      style.borderTopStyle,
+      style.borderTopWidth,
+      style.borderRightColor,
+      style.borderRightStyle,
+      style.borderRightWidth,
+      style.borderBottomColor,
+      style.borderBottomStyle,
+      style.borderBottomWidth,
+      style.borderLeftColor,
+      style.borderLeftStyle,
+      style.borderLeftWidth,
+      style.borderRadius,
+      style.boxShadow,
+      style.filter,
+      style.opacity,
+    ].join("|");
+  };
+  const runtimeVisualPush = (capture, channel, value) => {
+    const normalized = String(value || "");
+    capture.valueLength += normalized.length;
+    capture.budget.atoms += 1;
+    capture.budget.valueLength += normalized.length;
+    if (
+      capture[channel].length >= runtimeVisualAtomLimit
+      || capture.valueLength > runtimeVisualValueLimit
+      || capture.budget.atoms > runtimeVisualBatchAtomLimit
+      || capture.budget.valueLength > runtimeVisualBatchValueLimit
+    ) throw new Error("runtime-visual-budget");
+    capture[channel].push(normalized);
+  };
+  const runtimeVisualCanvas = (canvas, capture) => {
+    const width = Math.max(0, Math.round(Number(canvas.width || 0)));
+    const height = Math.max(0, Math.round(Number(canvas.height || 0)));
+    const pixels = width * height;
+    if (!pixels || pixels > runtimeVisualCanvasPixelLimit) {
+      throw new Error("runtime-visual-canvas-size");
+    }
+    if (capture.budget.canvasPixels + pixels > runtimeVisualCanvasPixelLimit) {
+      throw new Error("runtime-visual-canvas-batch");
+    }
+    capture.budget.canvasPixels += pixels;
+    let value = "";
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (context) {
+      value = runtimeVisualByteDigest(context.getImageData(0, 0, width, height).data);
+    } else {
+      const dataUrl = canvas.toDataURL("image/png");
+      if (!dataUrl || dataUrl.length > 24000000) throw new Error("runtime-visual-canvas-data");
+      value = runtimeVisualDigest(dataUrl);
+    }
+    capture.canvasPixels += pixels;
+    if (capture.canvasPixels > runtimeVisualCanvasPixelLimit) {
+      throw new Error("runtime-visual-canvas-total");
+    }
+    runtimeVisualPush(capture, "canvas", width + "x" + height + "|" + value);
+  };
+  const runtimeVisualVectorAttributes = [
+    "d", "points", "x", "y", "x1", "y1", "x2", "y2", "cx", "cy",
+    "r", "rx", "ry", "width", "height", "viewBox", "transform",
+  ];
+  const captureRuntimeVisualHost = (host, budget) => {
+    try {
+      if (!(host instanceof Element)) return null;
+      const hostRect = host.getBoundingClientRect();
+      const capture = {
+        content: [],
+        paint: [],
+        geometry: [],
+        vector: [],
+        canvas: [],
+        canvasPixels: 0,
+        valueLength: 0,
+        budget,
+      };
+      const descendants = [];
+      if (host.matches("canvas")) {
+        budget.nodes += 1;
+        descendants.push(host);
+      } else {
+        const elementWalker = document.createTreeWalker(host, NodeFilter.SHOW_ELEMENT);
+        let descendant = elementWalker.nextNode();
+        while (descendant) {
+          budget.nodes += 1;
+          if (budget.nodes > runtimeVisualBatchNodeLimit) return null;
+          if (!descendant.closest(
+            "[data-pageroot-review-projection-layer], [data-pageroot-review-transition-mask]",
+          )) descendants.push(descendant);
+          if (descendants.length > runtimeVisualAtomLimit) return null;
+          descendant = elementWalker.nextNode();
+        }
+      }
+      if (budget.nodes > runtimeVisualBatchNodeLimit) return null;
+      descendants.forEach((element) => {
+        if (element instanceof HTMLCanvasElement) {
+          if (runtimeVisualVisible(element)) runtimeVisualCanvas(element, capture);
+          return;
+        }
+        const style = getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        const isVector = element instanceof SVGElement
+          && !["svg", "defs", "desc", "metadata", "title"].includes(
+            element.tagName.toLowerCase(),
+          );
+        if (isVector) {
+          if (
+            style.display === "none"
+            || style.visibility === "hidden"
+            || Number(style.opacity || 1) <= 0
+            || (rect.width <= 0 && rect.height <= 0)
+          ) return;
+          const attributes = runtimeVisualVectorAttributes.map((name) => (
+            name + "=" + (element.getAttribute(name) || "")
+          )).join("|");
+          runtimeVisualPush(capture, "vector", [
+            element.tagName.toLowerCase(),
+            attributes,
+            style.fill,
+            style.fillOpacity,
+            style.stroke,
+            style.strokeOpacity,
+            style.strokeWidth,
+            style.opacity,
+          ].join("|"));
+          runtimeVisualPush(capture, "geometry", "vector|" + runtimeVisualRect(rect, hostRect));
+          return;
+        }
+        if (!runtimeVisualVisible(element)) return;
+        if (["IMG", "PICTURE", "PROGRESS", "METER", "VIDEO"].includes(element.tagName)) {
+          runtimeVisualPush(capture, "content", [
+            element.tagName,
+            element.getAttribute("src") || "",
+            element.getAttribute("srcset") || "",
+            element.getAttribute("value") || "",
+            element.getAttribute("max") || "",
+          ].join("|"));
+          runtimeVisualPush(capture, "geometry", "media|" + runtimeVisualRect(rect, hostRect));
+        }
+        const boxPaint = runtimeVisualBoxPaint(style);
+        if (boxPaint) {
+          runtimeVisualPush(capture, "paint", "box|" + boxPaint);
+          runtimeVisualPush(capture, "geometry", "box|" + runtimeVisualRect(rect, hostRect));
+        }
+      });
+
+      const walker = document.createTreeWalker(host, NodeFilter.SHOW_TEXT);
+      let textNode = walker.nextNode();
+      let textNodes = 0;
+      while (textNode) {
+        textNodes += 1;
+        budget.nodes += 1;
+        if (
+          textNodes > runtimeVisualAtomLimit
+          || budget.nodes > runtimeVisualBatchNodeLimit
+        ) return null;
+        const parentElement = textNode.parentElement;
+        const text = String(textNode.textContent || "").replace(/\s+/g, " ").trim();
+        if (
+          text
+          && parentElement
+          && !parentElement.closest("script, style, noscript, template")
+          && runtimeVisualVisible(parentElement)
+        ) {
+          const range = document.createRange();
+          range.selectNodeContents(textNode);
+          const rects = [...range.getClientRects()].filter((rect) => (
+            rect.width > 0 && rect.height > 0
+          ));
+          range.detach();
+          if (rects.length) {
+            runtimeVisualPush(capture, "content", "text|" + text);
+            runtimeVisualPush(
+              capture,
+              "paint",
+              "text|" + runtimeVisualTextPaint(getComputedStyle(parentElement)),
+            );
+            rects.forEach((rect) => runtimeVisualPush(
+              capture,
+              "geometry",
+              "text|" + runtimeVisualRect(rect, hostRect),
+            ));
+          }
+        }
+        textNode = walker.nextNode();
+      }
+
+      const specialRuntimeContent = host.matches("canvas, svg, tbody")
+        || Boolean(host.querySelector("canvas, svg, table, tbody, progress, meter"));
+      const chartLike = capture.canvasPixels > 0
+        || capture.vector.length > 0
+        || (specialRuntimeContent && (
+          capture.content.length + capture.paint.length + capture.geometry.length > 0
+        ))
+        || capture.paint.length >= 2
+        || capture.content.length >= 2
+        || (capture.paint.length >= 1 && capture.content.length >= 1);
+      if (!chartLike) {
+        return {
+          key: host.getAttribute(runtimeVisualHostAttribute) || "",
+          state: "empty",
+          contentSignature: "",
+          paintSignature: "",
+          geometrySignature: "",
+          vectorSignature: "",
+          canvasSignature: "",
+          contentAtoms: 0,
+          paintAtoms: 0,
+          geometryAtoms: 0,
+          vectorAtoms: 0,
+          canvasPixels: 0,
+        };
+      }
+      const channelSignature = (values) => values.length
+        ? runtimeVisualDigest(values.join("\u001f"))
+        : "";
+      return {
+        key: host.getAttribute(runtimeVisualHostAttribute) || "",
+        state: "stable",
+        contentSignature: channelSignature(capture.content),
+        paintSignature: channelSignature(capture.paint),
+        geometrySignature: channelSignature(capture.geometry),
+        vectorSignature: channelSignature(capture.vector),
+        canvasSignature: channelSignature(capture.canvas),
+        contentAtoms: capture.content.length,
+        paintAtoms: capture.paint.length,
+        geometryAtoms: capture.geometry.length,
+        vectorAtoms: capture.vector.length,
+        canvasPixels: capture.canvasPixels,
+      };
+    } catch {
+      return null;
+    }
+  };
+  const collectRuntimeVisualSnapshots = async () => {
+    const hosts = [...document.querySelectorAll("[" + runtimeVisualHostAttribute + "]")];
+    if (!hosts.length || hosts.length > runtimeVisualCandidateLimit) return [];
+    await Promise.race([
+      document.fonts?.ready || Promise.resolve(),
+      runtimeVisualDelay(120),
+    ]).catch(() => {});
+    await runtimeVisualDelay(24);
+    await runtimeVisualFrames();
+    const firstBudget = { atoms: 0, nodes: 0, valueLength: 0, canvasPixels: 0 };
+    const first = new Map(hosts.flatMap((host) => {
+      const snapshot = captureRuntimeVisualHost(host, firstBudget);
+      return snapshot?.key ? [[snapshot.key, snapshot]] : [];
+    }));
+    await runtimeVisualDelay(64);
+    await runtimeVisualFrames();
+    const secondBudget = { atoms: 0, nodes: 0, valueLength: 0, canvasPixels: 0 };
+    return hosts.flatMap((host) => {
+      const key = host.getAttribute(runtimeVisualHostAttribute) || "";
+      const firstSnapshot = first.get(key);
+      const secondSnapshot = captureRuntimeVisualHost(host, secondBudget);
+      return firstSnapshot
+        && secondSnapshot
+        && JSON.stringify(firstSnapshot) === JSON.stringify(secondSnapshot)
+        ? [secondSnapshot]
+        : [];
+    });
+  };
+  const applyRuntimeVisualChanges = (rawMarkers) => {
+    document.querySelectorAll('[data-pageroot-review-runtime-marker="true"]').forEach((element) => {
+      element.removeAttribute("data-pageroot-review-runtime-marker");
+      element.removeAttribute("data-pageroot-review-marker");
+      element.removeAttribute("data-pageroot-review-marker-types");
+      element.removeAttribute("data-pageroot-review-summary");
+      element.removeAttribute("data-pageroot-review-style-scope");
+      element.removeAttribute("data-pageroot-review-style-owner");
+    });
+    const hosts = [...document.querySelectorAll("[" + runtimeVisualHostAttribute + "]")];
+    const hostsByKey = new Map(hosts.map((host) => [
+      host.getAttribute(runtimeVisualHostAttribute) || "",
+      host,
+    ]));
+    const markers = Array.isArray(rawMarkers) && rawMarkers.length <= hosts.length
+      ? rawMarkers
+      : [];
+    const normalized = [];
+    const seen = new Set();
+    for (const marker of markers) {
+      const key = safeKey(marker?.key);
+      const changeId = safeKey(marker?.changeId);
+      if (!key || !changeId || seen.has(key) || !hostsByKey.has(key)) {
+        normalized.length = 0;
+        break;
+      }
+      seen.add(key);
+      normalized.push({ key, changeId });
+    }
+    normalized.forEach(({ key, changeId }) => {
+      const host = hostsByKey.get(key);
+      host.setAttribute("data-pageroot-review-runtime-marker", "true");
+      host.setAttribute("data-pageroot-review-marker", changeId);
+      host.setAttribute("data-pageroot-review-marker-types", "style");
+      host.setAttribute("data-pageroot-review-summary", "视觉调整");
+      host.setAttribute("data-pageroot-review-style-scope", "box");
+      host.setAttribute("data-pageroot-review-style-owner", "runtime-" + key);
+      host.setAttribute("data-pageroot-review-active", "false");
+    });
+    initialProjectionCommitted = true;
+    scheduleOverlayRender();
+    scheduleLayoutReport(true);
+  };
   const isSafePanelControl = (element) => element instanceof Element && element.matches(
     '[data-pageroot-review-panel-control="true"]',
   );
@@ -2238,7 +2993,7 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
     candidate.getAttribute("data-pageroot-review-action-key") === actionKey
   )) || null;
   const scheduleOverlayRender = () => {
-    if (projectionTransitioning) return;
+    if (projectionTransitioning || !initialProjectionCommitted) return;
     cancelAnimationFrame(overlayFrame);
     overlayFrame = requestAnimationFrame(renderReviewOverlays);
   };
@@ -3140,6 +3895,9 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
     const message = event.data;
     if (!message || message.source !== "pageroot-ai-review-parent" || message.sessionId !== sessionId) return;
     if (message.type === "state") applyState(message.state || {});
+    if (message.type === "apply-runtime-visual-changes") {
+      applyRuntimeVisualChanges(message.markers);
+    }
     if (message.type === "scroll-owner") applyScrollOwner(message);
     if (message.type === "set-scroll-position") applyScrollPosition(message);
     if (message.type === "begin-presentation") beginProjectionTransition(message.presentationEpoch);
@@ -3297,20 +4055,27 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
     ? new ResizeObserver(handleLayoutChange)
     : null;
   if (resizeObserver && document.body) resizeObserver.observe(document.body);
-  const announceReady = () => post("ready", {
+  const announceReady = (runtimeVisualSnapshots) => post("ready", {
     height: Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight || 0),
+    runtimeVisualSnapshots,
   });
-  const ready = () => {
-    announceReady();
-    scheduleOverlayRender();
+  const ready = async () => {
+    const runtimeVisualSnapshots = await Promise.race([
+      collectRuntimeVisualSnapshots(),
+      runtimeVisualDelay(420).then(() => []),
+    ]).catch(() => []);
+    announceReady(runtimeVisualSnapshots);
     scheduleLayoutReport(true);
     document.fonts?.ready?.then(() => {
       scheduleOverlayRender();
       scheduleLayoutReport();
     }).catch(() => {});
   };
-  if (document.readyState === "loading") addEventListener("DOMContentLoaded", ready, { once: true });
-  else ready();
+  if (document.readyState === "loading") {
+    addEventListener("DOMContentLoaded", () => { void ready(); }, { once: true });
+  } else {
+    void ready();
+  }
 })();
 `;
 }
@@ -3389,6 +4154,7 @@ export function buildReviewDocuments(
       },
       changes: [],
       outline: [],
+      runtimeVisualCandidates: [],
       commentGroups: [],
     };
   }
@@ -3419,6 +4185,7 @@ export function buildReviewDocuments(
   );
   const changes: ReviewChange[] = [];
   const outline: ReviewOutlineItem[] = [];
+  const runtimeSections: ReviewRuntimeSectionContext[] = [];
 
   pairs.forEach((pair, pairIndex) => {
     const outlineId = `outline-${outline.length + 1}`;
@@ -3436,6 +4203,14 @@ export function buildReviewDocuments(
       ? panelPathForElement(pair.after)
       : panelPathForElement(pair.before);
     const panelKey = panelPath.at(-1);
+    runtimeSections.push({
+      pair,
+      outlineId,
+      ...(changeId ? { changeId } : {}),
+      label,
+      ...(panelKey ? { panelKey } : {}),
+      panelPath,
+    });
     [pair.before, pair.after].forEach((element) => {
       if (!element) return;
       element.setAttribute("data-pageroot-outline-id", outlineId);
@@ -3474,6 +4249,12 @@ export function buildReviewDocuments(
     });
   });
 
+  const runtimeVisualCandidates = annotateRuntimeVisualCandidates(
+    beforeDocument,
+    afterDocument,
+    runtimeSections,
+  );
+
   const preparedBefore = prepareDocument(
     beforeDocument,
     "before",
@@ -3497,6 +4278,7 @@ export function buildReviewDocuments(
     },
     changes,
     outline,
+    runtimeVisualCandidates,
     commentGroups,
   };
 }

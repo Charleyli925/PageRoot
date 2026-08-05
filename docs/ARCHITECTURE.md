@@ -91,13 +91,24 @@ Comments + frozen input
   analyzer first establishes high-confidence before/after node pairs, derives
   copy, structure and visual facts from those pairs, and only then emits one
   typed canonical change footprint. It never promotes tag/position proximity
-  alone into a change fact. Exact leaf text ranges remain immutable evidence;
-  a separate readable-footprint planner groups nearby ranges, keeps stable
-  sentence gaps separate, gives tiny phrases a bounded line-local width and
-  promotes dense multi-line rewrites to their smallest semantic text owner.
-  Local wrapped copy renders as separate rectangular line frames with one
-  group label instead of a stepped union polygon. Global context masking
-  punches holes from those same final rectangles, so mask and frame cannot diverge. The disposable
+  alone into a change fact. Static source analysis remains the primary fact
+  channel. A bounded supplement is available only for a high-confidence pair
+  of source-empty chart hosts when a changed authored script is causally tied
+  to that host and the existing static footprint does not already cover it.
+  Each isolated frame samples visible HTML/SVG/Canvas paint twice, using
+  host-relative geometry and omitting unstable or unsupported results. The
+  parent `ReviewRuntimeVisualCoordinator` accepts only declared host keys,
+  compares the completed before/after batches, reuses the owning static
+  `changeId` when present and otherwise adds one visual change for that outline.
+  A single bounded initial deadline commits both frames atomically; timeout,
+  partial and late batches silently retain the static footprint. Exact leaf text
+  ranges remain immutable evidence; a separate readable-footprint planner
+  groups nearby ranges, keeps stable sentence gaps separate, gives tiny phrases
+  a bounded line-local width and promotes dense multi-line rewrites to their
+  smallest semantic text owner. Local wrapped copy renders as separate
+  rectangular line frames with one group label instead of a stepped union
+  polygon. Global context masking punches holes from those same final
+  rectangles, so mask and frame cannot diverge. The disposable
   projection uses reserved attributes plus an explicit presentation reset and
   important geometry, preventing authored `svg`/`div` rules from restyling its
   mask or frames. Stable
@@ -164,6 +175,7 @@ they do not import application services.
 | History, attachment and preview presentation | `app/workbench/presentation.tsx` |
 | AI handoff drawer presentation | `app/workbench/handoff-view.tsx` |
 | Formal AI review state transitions | `app/workbench/review-state.ts` |
+| Bounded review-runtime snapshot validation, comparison, deduplication and initial deadline | `app/lib/review-runtime-visual.js` |
 | Formal AI review analysis, paired runtime mapping, global mask and overlay projection | `app/workbench/review-document.ts` |
 | Formal AI review composition and isolated-frame coordination | `app/workbench/AiReviewWorkspace.tsx` |
 

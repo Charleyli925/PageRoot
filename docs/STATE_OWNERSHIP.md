@@ -26,6 +26,7 @@
 | Current edit runtime-visual request identity, generation and accepted bitmap projection | Renderer `RuntimeVisualProjectionSession`; main-process capture controller solely owns its active hidden window/session | none; source-Hash-bound in-memory PNGs only | `HtmlCanvasEditor` presentation layer; original source host remains comment target |
 | AI review page view, change filter, context visibility, navigation target, canonical page-presentation path, scroll mode and zoom mode | `AiReviewWorkspace` review reducer | none; disposable state bound to the frozen before/after pair | review toolbar, content map and isolated review frames |
 | AI review node pairing, typed change facts and fused frame/mask geometry | `review-document` analyzer and isolated-frame projection runtime | none; deterministically rebuilt from the frozen before/after HTML pair | review outline, semantic frames and context mask |
+| Initial AI review runtime-chart snapshot batch, deadline and accepted supplemental host markers | Parent `AiReviewWorkspace` through `ReviewRuntimeVisualCoordinator` | none; one bounded in-memory decision bound to the frozen document pair and declared host keys | effective review changes/outline and both isolated frame projections |
 | AI review Tab/disclosure/control presentation state and transition epoch | Parent `AiReviewWorkspace` presentation coordinator; either frame may propose an intent | none; disposable parent state plus frame projection only | both review frames, content map and overlay/mask projection |
 | Frozen review comment set and read-only before-page marker projection | Ready-review session owns comment text; `review-document` resolves opaque before-page target keys; isolated runtime owns anonymous viewport geometry; trusted `AiReviewWorkspace` joins and renders them | none beyond the immutable Request/Draft evidence already frozen for the run | trusted review host above the before frame only; authored frames never receive comment text |
 | Current source-backed comment resolution, visibility, coordinates, marker eligibility and natural document height | `HtmlCanvasEditor` presentation measurement | none; disposable snapshot tagged by rendered source Hash, applied page-view generation and exact target-ID set | Workbench comment rail and Canvas height |
@@ -90,6 +91,12 @@ Rules:
   evidence. Their text stays in the trusted host, while the before frame reports
   only opaque-key geometry; neither review frame receives the text and the after
   page never receives a marker.
+- The runtime-chart supplement never re-analyzes a statically covered host. It
+  accepts only a complete declared before/after pair before its initial deadline,
+  ignores absolute document position and unstable or late samples, merges with
+  an existing owning change instead of duplicating it, and freezes after the
+  initial projection commit. Failure has no visible recovery owner because the
+  authoritative static review remains valid.
 - `CommentSession` is a renderer working copy, not durable Draft authority.
   Runtime state is likewise not a second copy of draft contents: it carries
   lifecycle state and a revisioned pointer to the draft repository.

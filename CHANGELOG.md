@@ -19,6 +19,12 @@ Notable user-visible changes are documented here. This project follows Semantic 
   jagged union outline. Each semantic group carries one label. Removed copy
   keeps its red dashed strike and red dashed frame; added copy keeps its green
   dashed frame without an underline or background treatment.
+- Detect stable script-generated HTML, SVG and Canvas chart changes inside
+  uniquely paired source-empty hosts during AI review. Existing static frames
+  remain authoritative and are never duplicated; page-flow shifts, identical
+  final output, animation, incomplete or late analysis silently keep the
+  static result, and accepted chart facts commit with the initial review
+  projection rather than appearing after interaction.
 - Stop treating AI-authored script changes as an adoption failure. Candidate
   assessment now checks document usability and coarse continuity only; retired
   executable-surface fields in historical records are verified, normalized out
