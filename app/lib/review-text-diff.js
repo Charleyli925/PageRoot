@@ -6,6 +6,9 @@ const FALLBACK_TOKEN_PATTERN = /[\p{Script=Han}]|[\p{Script=Latin}\p{N}_]+|[\p{L
 const NON_WHITESPACE_PATTERN = /[^\s]/gu;
 const HAN_CHARACTER_PATTERN = /^\p{Script=Han}$/u;
 const SEMANTIC_BOUNDARY_PATTERN = /^[\s\p{P}\p{S}]$/u;
+const SHORT_HAN_TEXT_PATTERN = /^\p{Script=Han}{3,12}$/u;
+const MAX_TOKEN_MATRIX_CELLS = 60_000;
+const TOKEN_CHUNK_ANCHOR_LENGTHS = [4, 3, 2, 1];
 
 function tokenizeFallback(value) {
   const tokens = [];
@@ -48,44 +51,7 @@ function tokenizeReviewText(value) {
   return tokens;
 }
 
-function unmatchedTokenIndexes(before, after) {
-  const beforeUnmatched = new Set(before.map((_, index) => index));
-  const afterUnmatched = new Set(after.map((_, index) => index));
-  const matches = [];
-  if (!before.length || !after.length) {
-    return { before: beforeUnmatched, after: afterUnmatched, matches };
-  }
-
-  if (before.length * after.length > 60_000) {
-    let prefix = 0;
-    while (
-      prefix < before.length
-      && prefix < after.length
-      && before[prefix].value === after[prefix].value
-    ) {
-      beforeUnmatched.delete(prefix);
-      afterUnmatched.delete(prefix);
-      matches.push({ before: prefix, after: prefix });
-      prefix += 1;
-    }
-    let beforeSuffix = before.length - 1;
-    let afterSuffix = after.length - 1;
-    const suffixMatches = [];
-    while (
-      beforeSuffix >= prefix
-      && afterSuffix >= prefix
-      && before[beforeSuffix].value === after[afterSuffix].value
-    ) {
-      beforeUnmatched.delete(beforeSuffix);
-      afterUnmatched.delete(afterSuffix);
-      suffixMatches.push({ before: beforeSuffix, after: afterSuffix });
-      beforeSuffix -= 1;
-      afterSuffix -= 1;
-    }
-    matches.push(...suffixMatches.reverse());
-    return { before: beforeUnmatched, after: afterUnmatched, matches };
-  }
-
+function exactTokenMatches(before, after, beforeOffset = 0, afterOffset = 0) {
   const matrix = Array.from(
     { length: before.length + 1 },
     () => new Uint16Array(after.length + 1),
@@ -99,11 +65,13 @@ function unmatchedTokenIndexes(before, after) {
   }
   let beforeIndex = before.length;
   let afterIndex = after.length;
+  const matches = [];
   while (beforeIndex > 0 && afterIndex > 0) {
     if (before[beforeIndex - 1].value === after[afterIndex - 1].value) {
-      beforeUnmatched.delete(beforeIndex - 1);
-      afterUnmatched.delete(afterIndex - 1);
-      matches.push({ before: beforeIndex - 1, after: afterIndex - 1 });
+      matches.push({
+        before: beforeOffset + beforeIndex - 1,
+        after: afterOffset + afterIndex - 1,
+      });
       beforeIndex -= 1;
       afterIndex -= 1;
     } else if (matrix[beforeIndex - 1][afterIndex] >= matrix[beforeIndex][afterIndex - 1]) {
@@ -113,6 +81,129 @@ function unmatchedTokenIndexes(before, after) {
     }
   }
   matches.reverse();
+  return matches;
+}
+
+function tokenSequenceKey(tokens, start, length) {
+  return tokens.slice(start, start + length)
+    .map(({ value }) => `${value.length}:${value}`)
+    .join("|");
+}
+
+function uniqueTokenSequences(tokens, length) {
+  const sequences = new Map();
+  for (let index = 0; index <= tokens.length - length; index += 1) {
+    const key = tokenSequenceKey(tokens, index, length);
+    sequences.set(key, sequences.has(key) ? -1 : index);
+  }
+  return sequences;
+}
+
+function stableTokenChunkAnchor(before, after) {
+  for (const length of TOKEN_CHUNK_ANCHOR_LENGTHS) {
+    if (before.length < length || after.length < length) continue;
+    const beforeSequences = uniqueTokenSequences(before, length);
+    const afterSequences = uniqueTokenSequences(after, length);
+    let best = null;
+    beforeSequences.forEach((beforeIndex, key) => {
+      const afterIndex = afterSequences.get(key);
+      if (beforeIndex < 0 || afterIndex === undefined || afterIndex < 0) return;
+      const beforePosition = (beforeIndex + length / 2) / before.length;
+      const afterPosition = (afterIndex + length / 2) / after.length;
+      const orderDistance = Math.abs(beforePosition - afterPosition);
+      const centerDistance = Math.abs((beforePosition + afterPosition) / 2 - 0.5);
+      const score = orderDistance * 4 + centerDistance;
+      if (!best || score < best.score) {
+        best = { before: beforeIndex, after: afterIndex, length, score };
+      }
+    });
+    if (best) return best;
+  }
+  return null;
+}
+
+function tokenMatches(before, after, beforeOffset = 0, afterOffset = 0) {
+  if (!before.length || !after.length) return [];
+  let prefix = 0;
+  const prefixMatches = [];
+  while (
+    prefix < before.length
+    && prefix < after.length
+    && before[prefix].value === after[prefix].value
+  ) {
+    prefixMatches.push({
+      before: beforeOffset + prefix,
+      after: afterOffset + prefix,
+    });
+    prefix += 1;
+  }
+
+  let beforeEnd = before.length;
+  let afterEnd = after.length;
+  const suffixMatches = [];
+  while (
+    beforeEnd > prefix
+    && afterEnd > prefix
+    && before[beforeEnd - 1].value === after[afterEnd - 1].value
+  ) {
+    beforeEnd -= 1;
+    afterEnd -= 1;
+    suffixMatches.unshift({
+      before: beforeOffset + beforeEnd,
+      after: afterOffset + afterEnd,
+    });
+  }
+
+  const beforeMiddle = before.slice(prefix, beforeEnd);
+  const afterMiddle = after.slice(prefix, afterEnd);
+  let middleMatches = [];
+  if (beforeMiddle.length && afterMiddle.length) {
+    const middleBeforeOffset = beforeOffset + prefix;
+    const middleAfterOffset = afterOffset + prefix;
+    if (beforeMiddle.length * afterMiddle.length <= MAX_TOKEN_MATRIX_CELLS) {
+      middleMatches = exactTokenMatches(
+        beforeMiddle,
+        afterMiddle,
+        middleBeforeOffset,
+        middleAfterOffset,
+      );
+    } else {
+      // Long punctuation-free copy must stay bounded without falling back to
+      // one giant prefix/suffix replacement. A unique shared token sequence is
+      // a stable semantic chunk boundary; recurse on both sides of that anchor.
+      const anchor = stableTokenChunkAnchor(beforeMiddle, afterMiddle);
+      if (anchor) {
+        const leftMatches = tokenMatches(
+          beforeMiddle.slice(0, anchor.before),
+          afterMiddle.slice(0, anchor.after),
+          middleBeforeOffset,
+          middleAfterOffset,
+        );
+        const anchorMatches = Array.from({ length: anchor.length }, (_, index) => ({
+          before: middleBeforeOffset + anchor.before + index,
+          after: middleAfterOffset + anchor.after + index,
+        }));
+        const rightMatches = tokenMatches(
+          beforeMiddle.slice(anchor.before + anchor.length),
+          afterMiddle.slice(anchor.after + anchor.length),
+          middleBeforeOffset + anchor.before + anchor.length,
+          middleAfterOffset + anchor.after + anchor.length,
+        );
+        middleMatches = [...leftMatches, ...anchorMatches, ...rightMatches];
+      }
+    }
+  }
+  return [...prefixMatches, ...middleMatches, ...suffixMatches];
+}
+
+function unmatchedTokenIndexes(before, after) {
+  const beforeUnmatched = new Set(before.map((_, index) => index));
+  const afterUnmatched = new Set(after.map((_, index) => index));
+  const matches = tokenMatches(before, after);
+  matches.forEach((match) => {
+    beforeUnmatched.delete(match.before);
+    afterUnmatched.delete(match.after);
+  });
   return { before: beforeUnmatched, after: afterUnmatched, matches };
 }
 
@@ -190,7 +281,22 @@ export function reviewTextSimilarity(left, right) {
     leftTokens.length - unmatched.before.size,
     rightTokens.length - unmatched.after.size,
   );
-  return matched / Math.max(leftTokens.length, rightTokens.length);
+  const wordSimilarity = matched / Math.max(leftTokens.length, rightTokens.length);
+  const leftCharacters = [...left.replace(/\s+/gu, "")];
+  const rightCharacters = [...right.replace(/\s+/gu, "")];
+  if (
+    !SHORT_HAN_TEXT_PATTERN.test(leftCharacters.join(""))
+    || !SHORT_HAN_TEXT_PATTERN.test(rightCharacters.join(""))
+  ) return wordSimilarity;
+  const characterMatches = tokenMatches(
+    leftCharacters.map((value) => ({ value })),
+    rightCharacters.map((value) => ({ value })),
+  ).length;
+  if (characterMatches < 2) return wordSimilarity;
+  return Math.max(
+    wordSimilarity,
+    characterMatches / Math.max(leftCharacters.length, rightCharacters.length),
+  );
 }
 
 function rangesForTokens(source, tokens, indexes) {

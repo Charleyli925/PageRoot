@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { sentenceAwareTextDifferences } from "../app/lib/review-text-diff.js";
+import {
+  reviewTextSimilarity,
+  sentenceAwareTextDifferences,
+} from "../app/lib/review-text-diff.js";
 
 function changedText(source, ranges) {
   return ranges.map(({ start, end }) => source.slice(start, end));
@@ -43,5 +46,25 @@ test("a shared standalone Han word at the same clause edge stays unchanged", () 
   assert.deepEqual(compare("在增长。", "在下降。"), {
     before: ["增长"],
     after: ["下降"],
+  });
+});
+
+test("short Han copy keeps enough character similarity for block pairing", () => {
+  assert.equal(reviewTextSimilarity("招商银行", "工商银行"), 0.75);
+});
+
+test("one accidental shared Han character does not make short blocks pairable", () => {
+  assert.equal(reviewTextSimilarity("商品好", "单品稳"), 0);
+});
+
+test("long punctuation-free copy keeps distant edits in separate precise ranges", () => {
+  const beforeWords = Array.from({ length: 520 }, (_, index) => `stable${index}`);
+  const afterWords = [...beforeWords];
+  afterWords[80] = "changedFirst";
+  afterWords[440] = "changedSecond";
+
+  assert.deepEqual(compare(beforeWords.join(" "), afterWords.join(" ")), {
+    before: ["stable80", "stable440"],
+    after: ["changedFirst", "changedSecond"],
   });
 });
