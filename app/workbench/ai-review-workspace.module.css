@@ -537,6 +537,19 @@
   pointer-events: none;
 }
 
+.reviewCommentContentLayer {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+  pointer-events: none;
+  transform: translate3d(
+    calc(-1 * var(--review-comment-scroll-x, 0px)),
+    calc(-1 * var(--review-comment-scroll-y, 0px)),
+    0
+  );
+  will-change: transform;
+}
+
 .reviewCommentMarker {
   position: absolute;
   width: 24px;

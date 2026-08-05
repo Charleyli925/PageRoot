@@ -1960,14 +1960,14 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
 (() => {
   const sessionId = ${JSON.stringify(sessionId)};
   const side = ${JSON.stringify(side)};
-  let scrollFrame = 0;
-  let followerScrollFrame = 0;
   let overlayFrame = 0;
-  let commentLayoutFrame = 0;
+  let layoutReportFrame = 0;
+  let layoutReportTimer = 0;
   let presentationReadyTimer = 0;
-  let programmaticScrollToken = "";
-  let programmaticScrollTop = 0;
-  let followerScrollTarget = null;
+  let geometryRevision = 0;
+  let activeScrollCommand = null;
+  let followerGestureId = 0;
+  let acceptsFollowerScroll = false;
   let projectionEpoch = 0;
   let projectionTransitioning = false;
   let mirroringPanel = false;
@@ -2013,7 +2013,6 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
     overlayFrame = requestAnimationFrame(renderReviewOverlays);
   };
   const reportReviewCommentLayouts = () => {
-    commentLayoutFrame = 0;
     if (projectionTransitioning) return;
     const commentLayouts = [...document.querySelectorAll('[data-pageroot-review-comment-key]')]
       .flatMap((target) => {
@@ -2023,28 +2022,54 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
           .filter((rect) => rect.width > 0 && rect.height > 0);
         if (!rects.length) return [];
         const global = target.getAttribute("data-pageroot-review-comment-global") === "true";
-        if (global) return [{ key, left: 22, top: 22 }];
-        const visibleRects = rects.filter((rect) => (
-          rect.bottom >= 0 && rect.top <= innerHeight
-        ));
-        if (!visibleRects.length) return [];
-        const firstRect = visibleRects.reduce((current, rect) => (
+        const firstRect = rects.reduce((current, rect) => (
           rect.top < current.top ? rect : current
         ));
-        const visibleTop = Math.max(0, firstRect.top);
-        const visibleBottom = Math.min(innerHeight, firstRect.bottom);
         return [{
           key,
-          left: Math.max(...visibleRects.map((rect) => rect.right)) + 10,
-          top: visibleTop + (visibleBottom - visibleTop) / 2,
+          left: global ? 22 : Math.max(...rects.map((rect) => rect.right)) + scrollX + 10,
+          top: global ? 22 : firstRect.top + scrollY + firstRect.height / 2,
+          viewportLeft: global ? 22 : Math.max(...rects.map((rect) => rect.right)) + 10,
+          viewportTop: global ? 22 : firstRect.top + firstRect.height / 2,
+          global,
         }];
       });
     post("comment-layout", { commentLayouts });
   };
-  const scheduleCommentLayoutReport = () => {
+  const reportScrollGeometry = () => {
     if (projectionTransitioning) return;
-    cancelAnimationFrame(commentLayoutFrame);
-    commentLayoutFrame = requestAnimationFrame(reportReviewCommentLayouts);
+    geometryRevision += 1;
+    const anchors = [...document.querySelectorAll("[data-pageroot-outline-id]")]
+      .flatMap((element) => {
+        const rect = element.getBoundingClientRect();
+        const id = safeKey(element.getAttribute("data-pageroot-outline-id"));
+        if (!id || rect.width <= 0 || rect.height <= 0) return [];
+        return [{ id, top: Math.max(0, scrollY + rect.top), height: rect.height }];
+      });
+    post("scroll-geometry", {
+      scrollGeometry: {
+        viewportHeight: innerHeight,
+        maximumScroll: Math.max(0, documentHeight() - innerHeight),
+        revision: geometryRevision,
+        anchors,
+      },
+    });
+  };
+  const reportLayoutMetrics = () => {
+    layoutReportFrame = 0;
+    if (projectionTransitioning) return;
+    reportScrollGeometry();
+    reportReviewCommentLayouts();
+  };
+  const scheduleLayoutReport = (immediate = false) => {
+    if (projectionTransitioning) return;
+    clearTimeout(layoutReportTimer);
+    const queueReport = () => {
+      cancelAnimationFrame(layoutReportFrame);
+      layoutReportFrame = requestAnimationFrame(reportLayoutMetrics);
+    };
+    if (immediate) queueReport();
+    else layoutReportTimer = window.setTimeout(queueReport, 80);
   };
   const renderTransitionMask = () => {
     document.querySelector('[data-pageroot-review-transition-mask]')?.remove();
@@ -2072,8 +2097,9 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
       : projectionEpoch + 1;
     projectionTransitioning = true;
     clearTimeout(presentationReadyTimer);
+    clearTimeout(layoutReportTimer);
     cancelAnimationFrame(overlayFrame);
-    cancelAnimationFrame(commentLayoutFrame);
+    cancelAnimationFrame(layoutReportFrame);
     document.querySelector('[data-pageroot-review-projection-layer]')?.remove();
     document.documentElement.dataset.pagerootReviewTransitioning = "true";
     renderTransitionMask();
@@ -2099,6 +2125,7 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
     document.documentElement.removeAttribute("data-pageroot-review-transitioning");
     document.querySelector('[data-pageroot-review-transition-mask]')?.remove();
     renderReviewOverlays();
+    scheduleLayoutReport(true);
   };
   const applyPanelGroupState = (panelKey) => {
     const panel = panelForKey(panelKey);
@@ -2184,29 +2211,6 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
       });
     }
   };
-  const reviewAnchor = () => {
-    const elements = [...document.querySelectorAll("[data-pageroot-outline-id]")]
-      .filter((element) => element.getBoundingClientRect().height > 0);
-    const anchor = elements.find((element) => element.getBoundingClientRect().bottom > 1)
-      || elements.at(-1)
-      || null;
-    const maximumScroll = Math.max(1, documentHeight() - innerHeight);
-    const boundary = scrollY <= 1
-      ? "top"
-      : maximumScroll - scrollY <= 1
-        ? "bottom"
-        : "middle";
-    if (!anchor) {
-      return { outlineId: "", ratio: 0, pageRatio: clamp(scrollY / maximumScroll, 0, 1), boundary };
-    }
-    const rect = anchor.getBoundingClientRect();
-    return {
-      outlineId: anchor.getAttribute("data-pageroot-outline-id") || "",
-      ratio: clamp((0 - rect.top) / Math.max(1, rect.height), 0, 1),
-      pageRatio: clamp(scrollY / maximumScroll, 0, 1),
-      boundary,
-    };
-  };
   const matchingPanelControl = (panel) => {
     const panelKey = panel.getAttribute("data-pageroot-review-panel-key") || "";
     if (panelKey) return panelControlForKey(panelKey);
@@ -2258,76 +2262,34 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
       }
     });
   };
-  const releaseProgrammaticScroll = (token) => {
-    requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => {
-      if (programmaticScrollToken === token) programmaticScrollToken = "";
-    })));
-  };
   const focusTarget = (target, panelPath) => {
     revealTarget(target, panelPath);
     if (!target) return;
     requestAnimationFrame(() => {
       const token = "focus-" + Date.now() + "-" + Math.random();
-      programmaticScrollToken = token;
       target.scrollIntoView({ block: "start", behavior: "auto" });
-      programmaticScrollTop = scrollY;
-      releaseProgrammaticScroll(token);
-      scheduleOverlayRender();
+      activeScrollCommand = { commandId: token, top: scrollY, left: scrollX };
     });
   };
-  const prefersReducedMotion = () => matchMedia?.("(prefers-reduced-motion: reduce)")?.matches === true;
-  const animateFollowerScroll = () => {
-    followerScrollFrame = 0;
-    const target = followerScrollTarget;
-    if (!target) return;
-    const topDelta = target.top - scrollY;
-    const leftDelta = target.left - scrollX;
-    // Chromium may quantize scroll positions to whole CSS pixels. Treat that
-    // final pixel as complete and snap to the exact target; otherwise a 1px
-    // delta eased by .28 can keep rounding back to the same position forever.
-    const finished = Math.abs(topDelta) <= 1 && Math.abs(leftDelta) <= 1;
-    const nextTop = finished ? target.top : scrollY + topDelta * .28;
-    const nextLeft = finished ? target.left : scrollX + leftDelta * .28;
-    programmaticScrollTop = nextTop;
-    scrollTo({ top: nextTop, left: nextLeft, behavior: "auto" });
-    if (finished) {
-      followerScrollTarget = null;
-      releaseProgrammaticScroll(target.token);
-      scheduleOverlayRender();
-      return;
-    }
-    followerScrollFrame = requestAnimationFrame(animateFollowerScroll);
+  const applyScrollOwner = (message) => {
+    const gestureId = Math.max(0, Math.trunc(Number(message.gestureId || 0)));
+    const leader = message.leader === "before" || message.leader === "after"
+      ? message.leader
+      : "";
+    acceptsFollowerScroll = message.linked === true && Boolean(leader) && leader !== side;
+    followerGestureId = acceptsFollowerScroll ? gestureId : 0;
+    if (!acceptsFollowerScroll) activeScrollCommand = null;
   };
-  const syncScroll = (message) => {
-    const token = safeKey(message.syncToken) || ("sync-" + Date.now());
-    programmaticScrollToken = token;
-    const outlineId = String(message.outlineId || "").replace(/[^a-z0-9-]/gi, "");
-    const ratio = clamp(Number(message.ratio || 0), 0, 1);
-    const pageRatio = clamp(Number(message.pageRatio || 0), 0, 1);
-    const target = outlineId
-      ? document.querySelector('[data-pageroot-outline-id="' + outlineId + '"]')
-      : null;
+  const applyScrollPosition = (message) => {
+    const gestureId = Math.max(0, Math.trunc(Number(message.gestureId || 0)));
+    const force = message.force === true;
+    if (!force && (!acceptsFollowerScroll || gestureId !== followerGestureId)) return;
     const maximumScroll = Math.max(0, documentHeight() - innerHeight);
-    let top = pageRatio * maximumScroll;
-    if (message.boundary === "top") {
-      top = 0;
-    } else if (target) {
-      const rect = target.getBoundingClientRect();
-      top = scrollY + rect.top + ratio * Math.max(1, rect.height);
-    } else if (message.boundary === "bottom") {
-      top = pageRatio * maximumScroll;
-    }
-    programmaticScrollTop = clamp(top, 0, maximumScroll);
-    const left = Number(message.left || 0);
-    if (prefersReducedMotion()) {
-      cancelAnimationFrame(followerScrollFrame);
-      followerScrollTarget = null;
-      scrollTo({ top: programmaticScrollTop, left, behavior: "auto" });
-      releaseProgrammaticScroll(token);
-      return;
-    }
-    followerScrollTarget = { top: programmaticScrollTop, left, token };
-    if (!followerScrollFrame) followerScrollFrame = requestAnimationFrame(animateFollowerScroll);
+    const top = clamp(Number(message.top || 0), 0, maximumScroll);
+    const left = Math.max(0, Number(message.left || 0));
+    const commandId = safeKey(message.commandId) || ("review-scroll-" + gestureId);
+    activeScrollCommand = { commandId, top, left };
+    scrollTo({ top, left, behavior: "auto" });
   };
   const markerTypes = (element) => String(
     element.getAttribute("data-pageroot-review-marker-types") || "",
@@ -2672,7 +2634,7 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
     });
     document.body.append(layer);
     document.documentElement.dataset.pagerootReviewOverlays = merged.length ? "true" : "false";
-    scheduleCommentLayoutReport();
+    scheduleLayoutReport();
   }
   const applyState = (state) => {
     currentState = { ...currentState, ...state };
@@ -2704,7 +2666,8 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
     const message = event.data;
     if (!message || message.source !== "pageroot-ai-review-parent" || message.sessionId !== sessionId) return;
     if (message.type === "state") applyState(message.state || {});
-    if (message.type === "sync-scroll") syncScroll(message);
+    if (message.type === "scroll-owner") applyScrollOwner(message);
+    if (message.type === "set-scroll-position") applyScrollPosition(message);
     if (message.type === "begin-presentation") beginProjectionTransition(message.presentationEpoch);
     if (message.type === "activate-panel") {
       if (!projectionTransitioning) beginProjectionTransition(message.presentationEpoch);
@@ -2788,31 +2751,54 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
   addEventListener("input", postControlState, true);
   addEventListener("change", postControlState, true);
   addEventListener("submit", (event) => event.preventDefault(), true);
+  const announceScrollIntent = () => {
+    activeScrollCommand = null;
+    acceptsFollowerScroll = false;
+    followerGestureId = 0;
+    post("scroll-intent");
+  };
+  addEventListener("wheel", announceScrollIntent, { capture: true, passive: true });
+  addEventListener("touchstart", announceScrollIntent, { capture: true, passive: true });
+  addEventListener("pointerdown", announceScrollIntent, { capture: true, passive: true });
+  addEventListener("keydown", (event) => {
+    const scrollKeys = new Set([
+      "ArrowUp",
+      "ArrowDown",
+      "PageUp",
+      "PageDown",
+      "Home",
+      "End",
+      " ",
+      "Spacebar",
+    ]);
+    if (!scrollKeys.has(event.key)) return;
+    if (
+      event.target instanceof Element
+      && event.target.closest('input, textarea, select, [contenteditable="true"]')
+    ) return;
+    announceScrollIntent();
+  }, true);
   addEventListener("scroll", () => {
-    scheduleCommentLayoutReport();
-    if (programmaticScrollToken) {
-      if (Math.abs(scrollY - programmaticScrollTop) <= 1) {
-        scheduleOverlayRender();
-        return;
-      }
-      // A new scroll that diverges from the animation target is fresh input,
-      // not an echo. Stop the stale follower animation so it cannot suppress
-      // or overwrite a user-return-to-top (or any later source scroll).
-      cancelAnimationFrame(followerScrollFrame);
-      followerScrollFrame = 0;
-      followerScrollTarget = null;
-      programmaticScrollToken = "";
-    }
-    cancelAnimationFrame(scrollFrame);
-    scrollFrame = requestAnimationFrame(() => {
-      post("scroll", { ...reviewAnchor(), left: scrollX });
+    const command = activeScrollCommand;
+    const commandMatches = command
+      && Math.abs(scrollY - command.top) <= 1
+      && Math.abs(scrollX - command.left) <= 1;
+    if (command && !commandMatches) activeScrollCommand = null;
+    post("scroll-position", {
+      top: scrollY,
+      left: scrollX,
+      commandId: commandMatches ? command.commandId : "",
     });
+    if (commandMatches && activeScrollCommand === command) activeScrollCommand = null;
   }, { passive: true });
   const handleLayoutChange = () => {
     if (projectionTransitioning) {
       renderTransitionMask();
       schedulePresentationReady(projectionEpoch);
-    } else scheduleOverlayRender();
+    } else {
+      scheduleOverlayRender();
+      scheduleLayoutReport();
+    }
   };
   addEventListener("resize", handleLayoutChange, { passive: true });
   const mutationObserver = new MutationObserver((mutations) => {
@@ -2843,7 +2829,11 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
   const ready = () => {
     announceReady();
     scheduleOverlayRender();
-    document.fonts?.ready?.then(scheduleOverlayRender).catch(() => {});
+    scheduleLayoutReport(true);
+    document.fonts?.ready?.then(() => {
+      scheduleOverlayRender();
+      scheduleLayoutReport();
+    }).catch(() => {});
   };
   if (document.readyState === "loading") addEventListener("DOMContentLoaded", ready, { once: true });
   else ready();
