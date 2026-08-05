@@ -252,6 +252,20 @@ export class ReviewScrollCoordinator {
     this.onOwnerChange({ linked: this.linked, leader: null, gestureId: this.gestureId });
   }
 
+  invalidateGesture() {
+    this.cancelPendingFrame();
+    if (this.idleTimer !== null) this.clearTimer(this.idleTimer);
+    this.idleTimer = null;
+    this.lastIntentAt = Number.NEGATIVE_INFINITY;
+    this.activeUntil = Number.NEGATIVE_INFINITY;
+    this.leader = null;
+    this.takeoverOffset = 0;
+    this.gestureId += 1;
+    this.commitPendingGeometry();
+    this.onOwnerChange({ linked: this.linked, leader: null, gestureId: this.gestureId });
+    return this.gestureId;
+  }
+
   /**
    * @param {import("./review-scroll-sync.js").ReviewScrollSide} side
    * @param {unknown} rawGeometry

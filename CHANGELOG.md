@@ -87,7 +87,9 @@ Notable user-visible changes are documented here. This project follows Semantic 
   momentum while the follower applies only the newest target per frame;
   rapid reversals and side switches invalidate stale work, unequal page
   boundaries no longer pull the longer page to its end, and scroll events no
-  longer rebuild overlays or remeasure comment targets.
+  longer rebuild overlays or remeasure comment targets. Page-overview jumps
+  now invalidate the active gesture before returning both panes to the top,
+  and bounded comment coordinates remain available in very long documents.
 - Unified review frames and dimming on one typed change footprint. Copy uses
   leaf-level exact ranges and high-confidence pairing instead of tag/position
   guesses. Connected frames merge without crossing columns, contained ancestor

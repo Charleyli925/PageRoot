@@ -287,6 +287,7 @@ test("all-change review keeps text treatment precise and mirrors authored action
   assert.match(reviewDocument, /message\.type === "scroll-owner"/);
   assert.match(reviewDocument, /message\.type === "set-scroll-position"/);
   assert.match(review, /new ReviewScrollCoordinator/);
+  assert.match(review, /const gestureId = coordinator\?\.invalidateGesture\(\) \|\| 0/);
   assert.match(review, /type: "scroll-owner"/);
   assert.match(review, /type: "set-scroll-position"/);
   assert.match(reviewScrollSync, /stableAnchorPairs/);
@@ -324,6 +325,10 @@ test("formal review projects frozen user comments on the before page only", () =
   assert.match(reviewDocument, /annotateReviewComments\(\s*beforeDocument/);
   assert.match(reviewDocument, /post\("comment-layout", \{ commentLayouts \}\)/);
   assert.match(reviewDocument, /firstRect\.top \+ scrollY/);
+  assert.match(review, /MAX_REVIEW_COMMENT_COORDINATE = 10_000_000/);
+  assert.match(review, /Math\.abs\(top\) > MAX_REVIEW_COMMENT_COORDINATE/);
+  assert.match(review, /Math\.abs\(viewportTop\) > MAX_REVIEW_COMMENT_COORDINATE/);
+  assert.doesNotMatch(review, /Math\.abs\((?:left|top)\) > 100_000/);
   assert.match(review, /reviewCommentContentLayer/);
   assert.match(styles, /--review-comment-scroll-y/);
   assert.match(reviewDocument, /data-pageroot-review-comment-key/);

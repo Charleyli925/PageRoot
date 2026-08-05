@@ -107,6 +107,8 @@ type ReviewMessage = {
   commentLayouts?: unknown;
 };
 
+const MAX_REVIEW_COMMENT_COORDINATE = 10_000_000;
+
 function safeReviewCommentLayouts(
   value: unknown,
   allowedKeys: ReadonlySet<string>,
@@ -135,8 +137,10 @@ function safeReviewCommentLayouts(
       || !Number.isFinite(top)
       || !Number.isFinite(viewportLeft)
       || !Number.isFinite(viewportTop)
-      || Math.abs(left) > 100_000
-      || Math.abs(top) > 100_000
+      || Math.abs(left) > MAX_REVIEW_COMMENT_COORDINATE
+      || Math.abs(top) > MAX_REVIEW_COMMENT_COORDINATE
+      || Math.abs(viewportLeft) > MAX_REVIEW_COMMENT_COORDINATE
+      || Math.abs(viewportTop) > MAX_REVIEW_COMMENT_COORDINATE
     ) return [];
     seen.add(key);
     return [{
@@ -957,18 +961,23 @@ export default function AiReviewWorkspace({
 
   const selectPageOverview = useCallback(() => {
     dispatchReviewState({ type: "set-navigation-target", value: "all" });
-    const gestureId = scrollCoordinatorRef.current?.snapshot().gestureId || 0;
+    const coordinator = scrollCoordinatorRef.current;
+    const gestureId = coordinator?.invalidateGesture() || 0;
+    const commandBatchId = Date.now();
     (["before", "after"] as ReviewSide[]).forEach((side) => {
+      const commandId = `overview-${commandBatchId}-${side}`;
+      coordinator?.handlePosition(side, { top: 0, left: 0, commandId });
+      updateCommentScrollTransform(side, 0, 0);
       postToFrame(framesRef.current[side], sessionId, {
         type: "set-scroll-position",
-        commandId: `overview-${Date.now()}-${side}`,
+        commandId,
         gestureId,
         force: true,
         top: 0,
         left: 0,
       });
     });
-  }, [sessionId]);
+  }, [sessionId, updateCommentScrollTransform]);
 
   const navigate = useCallback((direction: -1 | 1) => {
     if (!navigableChanges.length) return;

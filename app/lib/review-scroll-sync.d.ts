@@ -71,6 +71,7 @@ export class ReviewScrollCoordinator {
   constructor(options: ReviewScrollCoordinatorOptions);
   setLinked(linked: boolean): void;
   reset(): void;
+  invalidateGesture(): number;
   updateGeometry(side: ReviewScrollSide, rawGeometry: unknown): boolean;
   handleIntent(side: ReviewScrollSide): number;
   handlePosition(side: ReviewScrollSide, position: ReviewScrollPosition): void;

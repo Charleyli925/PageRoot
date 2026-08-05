@@ -179,6 +179,41 @@ test("rapid reversal replaces the target directly without a stale chase animatio
   assert.equal(harness.pendingFrameCount(), 0);
 });
 
+test("programmatic overview invalidates a queued gesture without discarding its map", () => {
+  const harness = createHarness();
+  harness.coordinator.setLinked(true);
+  harness.coordinator.updateGeometry("before", beforeGeometry);
+  harness.coordinator.updateGeometry("after", afterGeometry);
+  harness.coordinator.handleIntent("before");
+  harness.coordinator.handlePosition("before", { top: 1_600, left: 0 });
+  const before = harness.coordinator.snapshot();
+  assert.equal(harness.pendingFrameCount(), 1);
+
+  const gestureId = harness.coordinator.invalidateGesture();
+  harness.coordinator.handlePosition("before", {
+    top: 0,
+    left: 0,
+    commandId: "overview-before",
+  });
+  harness.coordinator.handlePosition("after", {
+    top: 0,
+    left: 0,
+    commandId: "overview-after",
+  });
+  harness.flushFrame();
+
+  const after = harness.coordinator.snapshot();
+  assert.equal(gestureId, before.gestureId + 1);
+  assert.equal(after.leader, null);
+  assert.equal(after.mapRevision, before.mapRevision);
+  assert.deepEqual(after.positions, {
+    before: { top: 0, left: 0 },
+    after: { top: 0, left: 0 },
+  });
+  assert.equal(harness.commands.length, 0, "the queued follower command must stay cancelled");
+  assert.equal(harness.owners.at(-1).gestureId, gestureId);
+});
+
 test("a new gesture on the same side does not discard its first scroll delta", () => {
   const harness = createHarness();
   const map = buildReviewScrollMap(beforeGeometry, afterGeometry);
