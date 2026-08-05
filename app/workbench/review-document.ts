@@ -5,12 +5,12 @@ import {
 } from "../lib/page-presentation-dom";
 import {
   buildSourceIndex,
-  instrumentPreviewHtml,
-  resolveTargetRef,
 } from "../lib/source-patch-core.js";
 import {
-  sourceTargetRefForSelection,
-} from "../lib/canvas-target-rebind.js";
+  REVIEW_SOURCE_NODE_ATTRIBUTE,
+  prepareReviewCommentSourceProjection,
+  resolveReviewCommentSourceElement,
+} from "../lib/review-comment-source-map.js";
 import type { CommentItem } from "./types";
 
 export type ReviewFilter = "all" | "text" | "structure" | "style";
@@ -62,8 +62,6 @@ const REVIEW_STYLE_ID = "pageroot-ai-review-style";
 const REVIEW_BOOTSTRAP_ATTRIBUTE = "data-pageroot-ai-review-bootstrap";
 const REVIEW_BASE_ATTRIBUTE = "data-pageroot-ai-review-base";
 const REVIEW_BOOTSTRAP_PATH = "/.pageroot/preview-bootstrap.js";
-const REVIEW_SOURCE_NODE_ATTRIBUTE = "data-pageroot-review-source-node-id";
-
 const REVIEW_DOCUMENT_STYLE = String.raw`
   html {
     --pageroot-review-context-opacity: .18;
@@ -2120,32 +2118,21 @@ function resolvedCommentElement(
   if (target.selector.trim().toLowerCase() === "body" && target.level === "module") {
     return document.body;
   }
-  try {
-    const resolved = resolveTargetRef(
-      sourceIndex,
-      sourceTargetRefForSelection(target),
-    );
-    if (
-      !resolved.target
-      || resolved.resolution === "ambiguous"
-      || resolved.resolution === "orphaned"
-    ) return null;
-    const sourceElement = resolved.target.type === "element"
-      ? resolved.target
-      : resolved.target.parentId
-        ? sourceIndex.byNodeId.get(resolved.target.parentId)
-        : null;
-    if (!sourceElement || sourceElement.type !== "element") return null;
+  const sourceElement = resolveReviewCommentSourceElement(sourceIndex, target);
+  if (sourceElement) {
     const sourceMappedElement = sourceElementsByNodeId.get(sourceElement.nodeId);
     if (sourceMappedElement) return sourceMappedElement;
     if (sourceElement.selector) {
-      const matches = document.querySelectorAll(sourceElement.selector);
-      if (matches.length === 1) return matches[0];
+      try {
+        const matches = document.querySelectorAll(sourceElement.selector);
+        if (matches.length === 1) return matches[0];
+      } catch {
+        // Fall through to the frozen selector below.
+      }
     }
-  } catch {
-    // The frozen target remains authoritative; a selector fallback is allowed
-    // only when it resolves uniquely in that same immutable source document.
   }
+  // The frozen target remains authoritative; a selector fallback is allowed
+  // only when it resolves uniquely in that same immutable source document.
   try {
     const matches = target.selector ? document.querySelectorAll(target.selector) : [];
     return matches.length === 1 ? matches[0] : null;
@@ -3237,30 +3224,19 @@ export function buildReviewDocuments(
   }
   const parser = new DOMParser();
   const comments = options.comments || [];
-  let indexedBeforeSource: ReturnType<typeof buildSourceIndex> | null = null;
-  let projectedBeforeHtml = beforeHtml;
-  let projectedSourceNodeIdentity = false;
-  if (comments.length) {
-    try {
-      indexedBeforeSource = buildSourceIndex(beforeHtml);
-      projectedBeforeHtml = instrumentPreviewHtml(indexedBeforeSource, {
-        attributeName: REVIEW_SOURCE_NODE_ATTRIBUTE,
-      }).html;
-      projectedSourceNodeIdentity = true;
-    } catch {
-      // Keep the unique-selector fallback available for sources that already
-      // contain the reserved review identity attribute.
-    }
-  }
-  const beforeDocument = parser.parseFromString(projectedBeforeHtml, "text/html");
+  const sourceProjection = prepareReviewCommentSourceProjection(
+    beforeHtml,
+    comments.length > 0,
+  );
+  const beforeDocument = parser.parseFromString(sourceProjection.html, "text/html");
   const afterDocument = parser.parseFromString(afterHtml, "text/html");
-  clearReservedReviewMarkup(beforeDocument, projectedSourceNodeIdentity);
+  clearReservedReviewMarkup(beforeDocument, sourceProjection.projected);
   clearReservedReviewMarkup(afterDocument);
   const commentGroups = annotateReviewComments(
     beforeDocument,
     beforeHtml,
     comments,
-    indexedBeforeSource,
+    sourceProjection.sourceIndex,
   );
   beforeDocument.querySelectorAll(`[${REVIEW_SOURCE_NODE_ATTRIBUTE}]`).forEach((element) => {
     element.removeAttribute(REVIEW_SOURCE_NODE_ATTRIBUTE);
