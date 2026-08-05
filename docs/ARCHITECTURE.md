@@ -109,7 +109,9 @@ Comments + frozen input
   Coordinator and message-listener installation run before paint and drain any
   frame already registered for the same frozen document pair, so load/effect
   ordering cannot strand the initial projection.
-  A single bounded initial deadline commits both frames atomically; timeout,
+  The coordinator starts its single bounded initial deadline only after both
+  frames for that exact document pair have loaded; an earlier side never spends
+  the other side's comparison budget. It then commits both frames atomically; timeout,
   partial and late batches silently retain the static footprint. Exact leaf text
   ranges remain immutable evidence; a separate readable-footprint planner
   groups nearby ranges, keeps stable sentence gaps separate, gives tiny phrases

@@ -738,9 +738,14 @@ export default function AiReviewWorkspace({
     ) return;
     const resolved = runtimeVisualResolutionRef.current;
     const coordinator = runtimeVisualCoordinatorRef.current;
+    const allFramesReady = (["before", "after"] as ReviewSide[]).every((targetSide) => (
+      Boolean(framesRef.current[targetSide])
+      && runtimeVisualFrameDocumentsRef.current[targetSide] === documents
+    ));
     if (
       coordinator
       && resolved?.documents !== documents
+      && allFramesReady
       && !runtimeVisualPortsRef.current[side]
     ) {
       coordinator.start();
@@ -1084,7 +1089,10 @@ export default function AiReviewWorkspace({
     framesRef.current[side] = frame;
     runtimeVisualFrameDocumentsRef.current[side] = frame ? documents : null;
     if (frame) window.requestAnimationFrame(() => {
-      prepareRuntimeVisualFrame(side, frame);
+      (["before", "after"] as ReviewSide[]).forEach((targetSide) => {
+        const registeredFrame = framesRef.current[targetSide];
+        if (registeredFrame) prepareRuntimeVisualFrame(targetSide, registeredFrame);
+      });
       if (
         framesRef.current[side] !== frame
         || runtimeVisualFrameDocumentsRef.current[side] !== documents

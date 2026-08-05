@@ -523,7 +523,7 @@ test("a verified AI result stays pending through desktop review until the user a
     <section data-review-runtime-visuals>
       <h2>运行态图表回归</h2>
       <style>@keyframes review-runtime-unstable-motion { from { transform: translateX(0); } to { transform: translateX(80px); } }</style>
-      <img src="/review-runtime-slow.png" alt="" hidden data-review-runtime-slow-load>
+      <img alt="" hidden data-review-runtime-slow-load>
       <div id="review-runtime-html-chart" class="review-runtime-chart-host"></div>
       <svg id="review-runtime-svg-chart" class="review-runtime-chart-host" viewBox="0 0 320 96" width="320" height="96"></svg>
       <canvas id="review-runtime-canvas-chart" class="review-runtime-chart-host" width="320" height="96"></canvas>
@@ -595,6 +595,11 @@ test("a verified AI result stays pending through desktop review until the user a
         });
       }
       const runtimeReviewChartVariant = "before";
+      const runtimeSlowImage = document.querySelector("[data-review-runtime-slow-load]");
+      addEventListener("DOMContentLoaded", () => {
+        const reviewSide = document.documentElement.dataset.pagerootReviewSide;
+        if (reviewSide) runtimeSlowImage.src = "/review-runtime-slow.png?side=" + reviewSide;
+      }, { once: true });
       const runtimeHtmlChart = document.querySelector("#review-runtime-html-chart");
       const runtimeHtmlValue = runtimeReviewChartVariant === "before" ? "81.6 亿次" : "96.2 亿次";
       const runtimeHtmlWidth = runtimeReviewChartVariant === "before" ? "62%" : "82%";
@@ -711,9 +716,13 @@ test("a verified AI result stays pending through desktop review until the user a
   );
   const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
   let delayedReviewResourceRequests = 0;
-  await launched.page.route("**/review-runtime-slow.png", async (route) => {
+  await launched.page.route("**/review-runtime-slow.png*", async (route) => {
     delayedReviewResourceRequests += 1;
-    await new Promise((resolve) => setTimeout(resolve, 650));
+    const reviewSide = new URL(route.request().url()).searchParams.get("side");
+    await new Promise((resolve) => setTimeout(
+      resolve,
+      reviewSide === "after" ? 750 : 50,
+    ));
     await route.fulfill({
       status: 200,
       contentType: "image/png",

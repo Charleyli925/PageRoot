@@ -4161,10 +4161,7 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
     height: Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight || 0),
   });
   const ready = async () => {
-    const runtimeVisualSnapshots = await Promise.race([
-      collectRuntimeVisualSnapshots(),
-      runtimeVisualDelay(420).then(() => []),
-    ]).catch(() => []);
+    const runtimeVisualSnapshots = await collectRuntimeVisualSnapshots().catch(() => []);
     runtimeVisualSnapshotBatch = runtimeVisualSnapshots;
     publishRuntimeVisualSnapshots();
     announceReady();

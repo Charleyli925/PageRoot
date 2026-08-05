@@ -25,7 +25,8 @@ Notable user-visible changes are documented here. This project follows Semantic 
   reference the host's distinctive identity; sharing a section is insufficient.
   The bounded capture includes
   the host's own painted box and directly mutated size as well as generated
-  descendants, caches evidence across slow frame loads, and ignores unpainted
+  descendants, caches evidence across asymmetric slow frame loads, starts its
+  unchanged 500ms decision budget only after both review frames load, and ignores unpainted
   geometry, page-flow shifts,
   identical final output, animation, incomplete or late analysis. Accepted
   chart facts commit with the initial review projection rather than appearing

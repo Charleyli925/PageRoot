@@ -141,7 +141,7 @@ registered frame. Runtime-chart snapshot messages are additionally limited to
 host keys declared by the frozen source analyzer, bounded atom/signature counts
 and one accepted batch per side. Ordinary frame `ready` messages never carry
 runtime evidence. The trusted bootstrap creates a `MessageChannel` before any
-authored script runs; after frame load, the parent sends a fresh random challenge
+authored script runs; after both exact frame documents load, the parent sends a fresh random challenge
 that the bootstrap consumes only from a browser-trusted parent event in its first
 capture listener without exposing it to later authored listeners, then transfers
 the pre-created capability port. Only the matching port may submit snapshots.

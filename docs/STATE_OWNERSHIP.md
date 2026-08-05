@@ -101,7 +101,8 @@ Rules:
   existing owning change instead of duplicating it, and freezes after the
   initial projection commit. Pre-load evidence remains bootstrap-owned until
   frame registration, and owner installation drains frames already registered
-  for that exact document pair. Runtime evidence is accepted only through the
+  for that exact document pair. The parent arms the deadline only when both
+  exact frame documents are loaded. Runtime evidence is accepted only through the
   challenged capability port created by the trusted bootstrap before authored
   scripts run; ordinary frame messages cannot complete a side. Failure has no
   visible recovery owner because the authoritative static review remains valid.
