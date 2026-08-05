@@ -97,9 +97,10 @@ Notable user-visible changes are documented here. This project follows Semantic 
   exact candidate HTML, while acceptance keeps review covering the live editor
   until the candidate is rendered, eliminating the waiting-page flash.
 - End Canvas selection and native text editing when the user clicks elsewhere
-  in the page or App, committing the current checkpoint and removing the edit
-  toolbar and selection together. Selection-bound toolbar and comment actions
-  remain stable long enough to complete their intended operation.
+  in the page or App—including blank space in the top bar or comment rail—by
+  committing the current checkpoint and removing the edit toolbar and selection
+  together. Selection-bound toolbar, comment-card and composer actions remain
+  stable long enough to complete their intended operation.
 ## [0.9.5] - 2026-07-31
 
 - Run desktop interactive previews in a short-lived isolated document so

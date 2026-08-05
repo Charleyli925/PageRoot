@@ -892,8 +892,23 @@ test("Electron uses the authored DOM caret, Selection and controlled beforeinput
     expect(events.some(({ type, inputType }) => type === "beforeinput" && inputType === "insertText")).toBe(true);
     expect(events.some(({ type }) => type === "input")).toBe(false);
 
-    await page.locator(".window-file-title-row").click();
-    await expect(editor.getByRole("toolbar")).toHaveCount(0);
+    const toolbar = editor.getByRole("toolbar");
+    await page.locator(".comments-panel.comment-rail").click({
+      position: { x: 4, y: 4 },
+    });
+    await expect(toolbar).toHaveCount(0);
+    await expect(frame.locator("[data-html-canvas-selected]")).toHaveCount(0);
+    await expect(frame.locator(caseSelector("heading-inline")))
+      .not.toHaveAttribute("contenteditable", "true");
+
+    await activateNativeEdit(frame, "heading-inline");
+    await expect(toolbar).toBeVisible();
+    await expect(frame.locator("[data-html-canvas-selected]")).toHaveCount(1);
+
+    await page.locator(".workbench-header").click({
+      position: { x: 720, y: 4 },
+    });
+    await expect(toolbar).toHaveCount(0);
     await expect(frame.locator("[data-html-canvas-selected]")).toHaveCount(0);
     await expect(frame.locator(caseSelector("heading-inline")))
       .not.toHaveAttribute("contenteditable", "true");
