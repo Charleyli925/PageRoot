@@ -4,6 +4,10 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+- Make frozen user comments easier to discover in AI review with a larger,
+  always-purple “评” marker and white label. The marker remains anchored to
+  the original comment target, and hovering still opens the existing read-only
+  comment-detail bubble.
 - Stop treating AI-authored script changes as an adoption failure. Candidate
   assessment now checks document usability and coarse continuity only; retired
   executable-surface fields in historical records are verified, normalized out

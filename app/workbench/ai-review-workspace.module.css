@@ -552,18 +552,18 @@
 
 .reviewCommentMarker {
   position: absolute;
-  width: 24px;
-  height: 24px;
+  width: 48px;
+  height: 48px;
   display: grid;
   place-items: center;
-  border: 1px solid rgb(91 80 198 / 35%);
-  border-radius: 8px;
-  background: rgb(255 255 255 / 96%);
-  box-shadow: 0 4px 13px rgb(47 41 111 / 18%);
-  color: #5b50c6;
+  border: 2px solid rgb(255 255 255 / 92%);
+  border-radius: 14px;
+  background: #6258d6;
+  box-shadow: 0 7px 20px rgb(47 41 111 / 28%);
+  color: #fff;
   cursor: default;
-  font-size: 11px;
-  font-weight: 760;
+  font-size: 22px;
+  font-weight: 700;
   line-height: 1;
   pointer-events: auto;
   transform: translate(-50%, -50%);
@@ -572,9 +572,9 @@
 }
 
 .reviewCommentMarker:hover {
-  border-color: #6258d6;
-  background: #6258d6;
-  box-shadow: 0 6px 17px rgb(47 41 111 / 25%);
+  border-color: #fff;
+  background: #5147dc;
+  box-shadow: 0 9px 24px rgb(47 41 111 / 34%);
   color: #fff;
 }
 
