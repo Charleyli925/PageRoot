@@ -453,6 +453,7 @@ test("a verified AI result stays pending through desktop review until the user a
     `    <section data-review-regression>
       <h2>核心结论</h2>
       <div data-review-regression-summary>在守住 EBITA 率底线的基础上，锁单确收实现 +8.52% 增长；21 天日均增量 +4.12 万，累计增量 +86.6 万。</div>
+      <div data-review-semantic-copy>而非「让每个商品卖得更好」（品均基本持平）。这说明增长主要来自有效成交覆盖扩大。</div>
       <div data-review-metrics>
         <article data-review-metric="lock"><strong>+8.52%</strong><span>锁单确收增幅（显著 p&lt;0.01）</span><small>日均 52.5 万 vs 48.4 万</small></article>
         <article data-review-metric="ipv"><strong>+4.49%</strong><span>IPV 增幅（显著 p&lt;0.01）</span><small>日均 63.4 万 vs 60.7 万</small></article>
@@ -583,6 +584,10 @@ test("a verified AI result stays pending through desktop review until the user a
         .replace(
           '<p data-review-reference>参考：示例日均确收约207万，增量4.12万/天约占2.0%。</p>',
           '<p data-review-reference>参考：示例日均确收约207万，本实验增量4.12万/天约占2.0%。</p>',
+        )
+        .replace(
+          '<div data-review-semantic-copy>而非「让每个商品卖得更好」（品均基本持平）。这说明增长主要来自有效成交覆盖扩大。</div>',
+          '<div data-review-semantic-copy>而非「让每个商品卖得更好」（单品效率整体稳定，增幅仅+0.10%）。这说明增长主要来自有效成交覆盖扩大。</div>',
         )
         .replace(
           '<p data-review-warning>⚠️ 近6天(7/23-<span><strong>7/28)增幅收窄至负值区间，需</strong></span>持续关注。</p>',
@@ -944,6 +949,12 @@ test("a verified AI result stays pending through desktop review until the user a
     ).allTextContents();
     expect(warningRemovedText.join(""))
       .not.toContain("7/28)增幅收窄至负值区间，需");
+    await expect(beforeReviewFrame.locator(
+      '[data-review-semantic-copy] [data-pageroot-review-text="removed"]',
+    )).toHaveText("品均基本持平");
+    await expect(afterReviewFrame.locator(
+      '[data-review-semantic-copy] [data-pageroot-review-text="added"]',
+    )).toHaveText("单品效率整体稳定，增幅仅+0.10%");
     await expect(beforeReviewFrame.locator(
       '[data-review-deleted-copy] [data-pageroot-review-text="removed"]',
     ).filter({ hasText: /^待删除第/u })).toHaveCount(3);

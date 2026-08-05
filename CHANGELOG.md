@@ -10,6 +10,12 @@ Notable user-visible changes are documented here. This project follows Semantic 
   of current status, and never rewritten or exposed as a present-day warning.
   Genuine assessment read errors also show an accurate failure instead of
   being mislabeled as a timeout.
+- Keep AI review text frames aligned to semantic punctuation and word ranges.
+  Replacing “品均基本持平” with “单品效率整体稳定，增幅仅+0.10%” now
+  marks the complete old and new phrases instead of treating their accidental
+  shared “品” character as unchanged or splitting the green frame. Short Chinese
+  replacements remain pairable, while distant edits in long punctuation-free
+  copy no longer pull the unchanged text between them into one oversized frame.
 - Show script-generated Canvas, SVG/HTML charts and dynamic table bodies
   automatically in desktop Edit as one source-Hash-bound read-only bitmap
   projection. The bitmap remains pointer-transparent so comments target the
