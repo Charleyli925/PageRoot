@@ -368,19 +368,19 @@
         "^app/lib/review-text-diff\\.(?:d\\.ts|js)$",
         "^app/lib/review-comment-source-map\\.js$",
         "^app/lib/page-presentation-dom\\.ts$",
+        "^app/lib/review-scroll-sync\\.(?:js|d\\.ts)$",
         "^app/workbench/(?:AiReviewWorkspace|review-document|review-state)\\.(?:ts|tsx)$",
         "^app/workbench/ai-review-workspace\\.module\\.css$",
-        "^tests/ai-review-workspace\\.test\\.mjs$",
-        "^tests/review-text-diff\\.test\\.mjs$",
-        "^tests/review-comment-source-map\\.test\\.mjs$",
+        "^tests/(?:ai-review-workspace|review-comment-source-map|review-scroll-sync|review-text-diff)\\.test\\.mjs$",
         "^tests/e2e/electron/ai-handoff-closed-loop\\.spec\\.mjs$",
         "^docs/(?:AI_SUPPLEMENT_AND_VALIDATION|CHANGE_REQUEST_PROTOCOL|INTERACTION_FLOW|MVP_PRD)\\.md$"
       ],
       "suites": ["typecheck", "ai-smoke"],
       "nodeTests": [
         "tests/ai-review-workspace.test.mjs",
-        "tests/review-text-diff.test.mjs",
-        "tests/review-comment-source-map.test.mjs"
+        "tests/review-comment-source-map.test.mjs",
+        "tests/review-scroll-sync.test.mjs",
+        "tests/review-text-diff.test.mjs"
       ]
     },
     {

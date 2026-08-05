@@ -1325,17 +1325,73 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect.poll(() => afterViewport.evaluate((element) => element.scrollLeft))
       .toBe(sourceLeft);
 
-    await Promise.all([
-      beforeReviewFrame.locator("html").evaluate(() => window.scrollTo(0, 0)),
-      afterReviewFrame.locator("html").evaluate(() => window.scrollTo(0, 0)),
-    ]);
-    await launched.page.waitForTimeout(80);
+    const originalAfterMaximum = await afterReviewFrame.locator("html").evaluate(() => (
+      Math.max(0, document.documentElement.scrollHeight - innerHeight)
+    ));
+    await afterReviewFrame.locator("html").evaluate(() => {
+      const spacer = document.createElement("div");
+      spacer.setAttribute("data-review-sync-height-probe", "true");
+      spacer.style.height = "1600px";
+      spacer.style.pointerEvents = "none";
+      document.body.append(spacer);
+    });
+    await expect.poll(() => afterReviewFrame.locator("html").evaluate(() => (
+      Math.max(0, document.documentElement.scrollHeight - innerHeight)
+    ))).toBeGreaterThan(originalAfterMaximum + 1_400);
+    await launched.page.waitForTimeout(180);
     await beforeReviewFrame.locator("html").evaluate(() => {
+      const maximum = Math.max(0, document.documentElement.scrollHeight - innerHeight);
+      dispatchEvent(new WheelEvent("wheel", { deltaY: 1_600 }));
+      window.scrollTo(0, maximum);
+    });
+    await expect.poll(() => afterReviewFrame.locator("html").evaluate(() => window.scrollY))
+      .toBeGreaterThan(1);
+    const unequalHeightFollower = await afterReviewFrame.locator("html").evaluate(() => ({
+      top: scrollY,
+      maximum: Math.max(0, document.documentElement.scrollHeight - innerHeight),
+    }));
+    expect(unequalHeightFollower.maximum - unequalHeightFollower.top).toBeGreaterThan(1_000);
+    await beforeReviewFrame.locator("html").evaluate(() => {
+      dispatchEvent(new WheelEvent("wheel", { deltaY: 1_200 }));
+    });
+    await launched.page.waitForTimeout(160);
+    expect(await afterReviewFrame.locator("html").evaluate(() => window.scrollY))
+      .toBeCloseTo(unequalHeightFollower.top, 0);
+    await afterReviewFrame.locator('[data-review-sync-height-probe="true"]')
+      .evaluate((spacer) => spacer.remove());
+    await expect.poll(() => afterReviewFrame.locator("html").evaluate(() => (
+      Math.max(0, document.documentElement.scrollHeight - innerHeight)
+    ))).toBe(originalAfterMaximum);
+
+    await beforeReviewFrame.locator("html").evaluate(() => {
+      dispatchEvent(new WheelEvent("wheel", { deltaY: -120 }));
+      window.scrollTo(0, 0);
+    });
+    await expect.poll(() => afterReviewFrame.locator("html").evaluate(() => window.scrollY))
+      .toBe(0);
+    await launched.page.waitForTimeout(180);
+    const sourceScrollResult = await beforeReviewFrame.locator("html").evaluate(() => {
       const outlines = [...document.querySelectorAll("[data-pageroot-outline-id]")]
         .filter((element) => element.getBoundingClientRect().height > 0);
       const target = outlines[Math.floor(outlines.length / 2)];
-      target?.scrollIntoView({ block: "start", behavior: "auto" });
+      if (!target) return { maximum: 0, target: 0, actual: scrollY, count: 0 };
+      const rect = target.getBoundingClientRect();
+      const nextTop = scrollY + rect.top + rect.height / 2 - innerHeight / 3;
+      dispatchEvent(new WheelEvent("wheel", { deltaY: 900 }));
+      window.scrollTo(0, nextTop);
+      return {
+        maximum: Math.max(0, document.documentElement.scrollHeight - innerHeight),
+        target: nextTop,
+        actual: scrollY,
+        count: outlines.length,
+      };
     });
+    const followerScrollMetrics = await afterReviewFrame.locator("html").evaluate(() => ({
+      maximum: Math.max(0, document.documentElement.scrollHeight - innerHeight),
+      actual: scrollY,
+    }));
+    expect(sourceScrollResult.actual).toBeGreaterThan(1);
+    expect(followerScrollMetrics.maximum).toBeGreaterThan(1);
     const followerScrollSamples = [];
     for (let index = 0; index < 8; index += 1) {
       await launched.page.waitForTimeout(20);
@@ -1343,40 +1399,67 @@ test("a verified AI result stays pending through desktop review until the user a
         () => window.scrollY,
       ));
     }
-    const reducedMotion = await afterReviewFrame.locator("html").evaluate(() => (
-      matchMedia("(prefers-reduced-motion: reduce)").matches
-    ));
-    if (!reducedMotion) {
-      const movingSamples = followerScrollSamples.filter((value) => value > 1);
-      expect(new Set(movingSamples.map((value) => Math.round(value))).size)
-        .toBeGreaterThan(1);
-      movingSamples.slice(1).forEach((value, index) => {
-        expect(value).toBeGreaterThanOrEqual(movingSamples[index] - 1);
-      });
-      expect(movingSamples[0]).toBeLessThan(movingSamples.at(-1));
-    }
-    const visibleOutlineAnchor = (frame) => frame.locator("html").evaluate(() => {
+    expect(followerScrollSamples.at(-1)).toBeGreaterThan(1);
+    const settledFollowerSamples = followerScrollSamples.slice(-5);
+    expect(Math.max(...settledFollowerSamples) - Math.min(...settledFollowerSamples))
+      .toBeLessThanOrEqual(1);
+    const referenceOutlineAnchor = (frame) => frame.locator("html").evaluate(() => {
+      const referenceLine = innerHeight / 3;
       const outlines = [...document.querySelectorAll("[data-pageroot-outline-id]")]
         .filter((element) => element.getBoundingClientRect().height > 0);
-      const anchor = outlines.find((element) => element.getBoundingClientRect().bottom > 1)
+      const anchor = outlines.find((element) => element.getBoundingClientRect().bottom > referenceLine)
         || outlines.at(-1);
       if (!anchor) return { outlineId: "", ratio: 0 };
       const rect = anchor.getBoundingClientRect();
       return {
         outlineId: anchor.getAttribute("data-pageroot-outline-id") || "",
-        ratio: Math.max(0, Math.min(1, (0 - rect.top) / Math.max(1, rect.height))),
+        ratio: Math.max(0, Math.min(1, (referenceLine - rect.top) / Math.max(1, rect.height))),
       };
     });
-    const beforeOutlineAnchor = await visibleOutlineAnchor(beforeReviewFrame);
+    const beforeOutlineAnchor = await referenceOutlineAnchor(beforeReviewFrame);
     expect(beforeOutlineAnchor.outlineId).not.toBe("");
     const afterOutlineProgress = () => afterReviewFrame.locator(
       `[data-pageroot-outline-id="${beforeOutlineAnchor.outlineId}"]`,
     ).evaluate((element) => {
+      const referenceLine = innerHeight / 3;
       const rect = element.getBoundingClientRect();
-      return Math.max(0, Math.min(1, (0 - rect.top) / Math.max(1, rect.height)));
+      return Math.max(0, Math.min(1, (referenceLine - rect.top) / Math.max(1, rect.height)));
     });
     await expect.poll(afterOutlineProgress).toBeCloseTo(beforeOutlineAnchor.ratio, 1);
-    await beforeReviewFrame.locator("html").evaluate(() => window.scrollTo(0, 0));
+
+    await beforeReviewFrame.locator("html").evaluate(() => {
+      const maximum = Math.max(0, document.documentElement.scrollHeight - innerHeight);
+      dispatchEvent(new WheelEvent("wheel", { deltaY: 1_600 }));
+      window.scrollTo(0, maximum * .82);
+      window.scrollTo(0, maximum * .26);
+    });
+    const reversalSamples = [];
+    for (let index = 0; index < 7; index += 1) {
+      await launched.page.waitForTimeout(20);
+      reversalSamples.push(await afterReviewFrame.locator("html").evaluate(() => window.scrollY));
+    }
+    const settledReversalSamples = reversalSamples.slice(-4);
+    expect(Math.max(...settledReversalSamples) - Math.min(...settledReversalSamples))
+      .toBeLessThanOrEqual(1);
+
+    await afterReviewFrame.locator("html").evaluate(() => {
+      const maximum = Math.max(0, document.documentElement.scrollHeight - innerHeight);
+      dispatchEvent(new WheelEvent("wheel", { deltaY: -900 }));
+      window.scrollTo(0, maximum * .18);
+    });
+    const sideSwitchSamples = [];
+    for (let index = 0; index < 7; index += 1) {
+      await launched.page.waitForTimeout(20);
+      sideSwitchSamples.push(await beforeReviewFrame.locator("html").evaluate(() => window.scrollY));
+    }
+    const settledSideSwitchSamples = sideSwitchSamples.slice(-4);
+    expect(Math.max(...settledSideSwitchSamples) - Math.min(...settledSideSwitchSamples))
+      .toBeLessThanOrEqual(1);
+
+    await beforeReviewFrame.locator("html").evaluate(() => {
+      dispatchEvent(new WheelEvent("wheel", { deltaY: -1_200 }));
+      window.scrollTo(0, 0);
+    });
     await expect.poll(() => afterReviewFrame.locator("html").evaluate(() => window.scrollY))
       .toBe(0);
     await beforeReviewFrame.locator("html").evaluate(() => {
