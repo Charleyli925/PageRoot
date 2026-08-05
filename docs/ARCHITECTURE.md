@@ -98,7 +98,8 @@ Comments + frozen input
   Each isolated frame samples visible HTML/SVG/Canvas paint twice, using
   host-relative geometry and omitting unstable or unsupported results. The
   parent `ReviewRuntimeVisualCoordinator` accepts only declared host keys,
-  compares the completed before/after batches, reuses the owning static
+  accepts snapshot facts only through a challenged bootstrap-owned capability
+  port, compares the completed before/after batches, reuses the owning static
   `changeId` when present and otherwise adds one visual change for that outline.
   A single bounded initial deadline commits both frames atomically; timeout,
   partial and late batches silently retain the static footprint. Exact leaf text

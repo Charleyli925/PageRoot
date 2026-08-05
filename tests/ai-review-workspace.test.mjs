@@ -348,9 +348,26 @@ test("runtime chart review supplements only the initial bounded static footprint
     /JSON\.stringify\(firstSnapshot\) === JSON\.stringify\(secondSnapshot\)/,
   );
   assert.match(reviewDocument, /type === "apply-runtime-visual-changes"/);
+  assert.match(reviewDocument, /new MessageChannel\(\)/);
+  assert.match(reviewDocument, /!event\.isTrusted/);
+  assert.match(reviewDocument, /stopImmediateMessagePropagation\(event\)/);
+  assert.match(reviewDocument, /type: "runtime-visual-channel"/);
+  assert.match(reviewDocument, /type: "runtime-visual-snapshots"/);
   assert.match(review, /new ReviewRuntimeVisualCoordinator/);
   assert.match(review, /REVIEW_RUNTIME_VISUAL_DEADLINE_MS/);
-  assert.match(review, /runtimeVisualCoordinatorRef\.current\?\.start\(\)/);
+  assert.match(review, /createReviewRuntimeVisualChallenge/);
+  assert.match(review, /event\.ports\.length === 1/);
+  assert.match(review, /message\.challenge !== expectedChallenge/);
+  assert.match(review, /coordinator\.start\(\)/);
+  const runtimeReadyStart = review.indexOf('if (message.type === "ready")');
+  const runtimeReadyEnd = review.indexOf(
+    'if (message.type === "presentation-ready")',
+    runtimeReadyStart,
+  );
+  assert.doesNotMatch(
+    review.slice(runtimeReadyStart, runtimeReadyEnd),
+    /runtimeVisualSnapshots|coordinator\.accept/,
+  );
   assert.match(review, /confirmationAction \|\| runtimeVisualPending/);
   assert.doesNotMatch(review, /运行态不稳定|分析未完成|概括标记/);
 });

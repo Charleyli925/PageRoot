@@ -92,8 +92,10 @@ PR 必须从 Draft 开始。普通推送由独立的 `PR Feedback` workflow 处�
   同一正式 Electron 用例还要覆盖脚本填充的 HTML、SVG、Canvas 空宿主：
   真实视觉差异补入同一 canonical footprint；仅由上方新增内容造成的整体
   下移、相同最终输出和动画宿主不得产生 marker；已有静态框的宿主不得
-  再进入运行态候选或增加第二个变化项。Node 由纯协调器 oracle 验证消息
-  上限、完整双侧提交、静态 `changeId` 复用、500ms 全量回退和迟到拒绝。
+  再进入运行态候选或增加第二个变化项；原页脚本伪造普通 `ready`、空快照
+  或假 `MessageChannel` 也不得抢先完成任一侧。Node 由纯协调器 oracle
+  验证消息上限、完整双侧提交、静态 `changeId` 复用、500ms 全量回退
+  和迟到拒绝。
   Browser 另外证明点击页面 padding 与 App 空白会一起结束编辑、选区和
   工具栏。测试自动生成受控 AI 输出并执行正式 finalizer，不等待外部模型
   或真人接力。

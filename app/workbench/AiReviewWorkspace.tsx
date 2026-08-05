@@ -116,10 +116,20 @@ type ReviewMessage = {
   value?: string;
   checked?: boolean;
   commentLayouts?: unknown;
-  runtimeVisualSnapshots?: unknown;
+  challenge?: unknown;
 };
 
 const MAX_REVIEW_COMMENT_COORDINATE = 10_000_000;
+
+function createReviewRuntimeVisualChallenge(): string | null {
+  try {
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    return [...bytes].map((value) => value.toString(16).padStart(2, "0")).join("");
+  } catch {
+    return null;
+  }
+}
 
 function safeReviewCommentLayouts(
   value: unknown,
@@ -500,6 +510,14 @@ export default function AiReviewWorkspace({
   const runtimeVisualCoordinatorRef = useRef<ReviewRuntimeVisualCoordinator | null>(null);
   const runtimeVisualReadySidesRef = useRef<Set<ReviewSide>>(new Set());
   const runtimeVisualResolutionRef = useRef<ReviewRuntimeVisualResult | null>(null);
+  const runtimeVisualPortsRef = useRef<Record<ReviewSide, MessagePort | null>>({
+    before: null,
+    after: null,
+  });
+  const runtimeVisualChannelChallengesRef = useRef<Record<ReviewSide, string | null>>({
+    before: null,
+    after: null,
+  });
   const reviewStateRef = useRef({ filter, focus, transparency, pagePresentationPath });
   const scrollModeRef = useRef(scrollMode);
   const desktopSessions = desktopSessionResult?.documents === documents
@@ -539,6 +557,18 @@ export default function AiReviewWorkspace({
     return [...grouped.entries()].map(([label, items]) => ({ label, items }));
   }, [reviewOutline]);
   const mapOpen = mapPinned || mapPeeked;
+
+  const closeRuntimeVisualChannels = useCallback(() => {
+    (["before", "after"] as ReviewSide[]).forEach((side) => {
+      const port = runtimeVisualPortsRef.current[side];
+      if (port) {
+        port.onmessage = null;
+        port.close();
+      }
+      runtimeVisualPortsRef.current[side] = null;
+      runtimeVisualChannelChallengesRef.current[side] = null;
+    });
+  }, []);
 
   const updateCommentScrollTransform = useCallback((
     side: ReviewSide,
@@ -694,6 +724,7 @@ export default function AiReviewWorkspace({
   useEffect(() => {
     runtimeVisualCoordinatorRef.current?.dispose();
     runtimeVisualCoordinatorRef.current = null;
+    closeRuntimeVisualChannels();
     runtimeVisualReadySidesRef.current = new Set();
     runtimeVisualResolutionRef.current = null;
     if (!documents.runtimeVisualCandidates.length) {
@@ -715,11 +746,12 @@ export default function AiReviewWorkspace({
     runtimeVisualCoordinatorRef.current = coordinator;
     return () => {
       coordinator.dispose();
+      closeRuntimeVisualChannels();
       if (runtimeVisualCoordinatorRef.current === coordinator) {
         runtimeVisualCoordinatorRef.current = null;
       }
     };
-  }, [documents, resolveRuntimeVisuals]);
+  }, [closeRuntimeVisualChannels, documents, resolveRuntimeVisuals]);
 
   const finishPagePresentation = useCallback((epoch: number) => {
     const pending = presentationReadyRef.current;
@@ -847,18 +879,51 @@ export default function AiReviewWorkspace({
         || (message.side !== "before" && message.side !== "after")
         || event.source !== framesRef.current[message.side]?.contentWindow
       ) return;
+      if (message.type === "runtime-visual-channel") {
+        const runtimeVisualSide = message.side;
+        const port = event.ports.length === 1 ? event.ports[0] : null;
+        const expectedChallenge = runtimeVisualChannelChallengesRef.current[runtimeVisualSide];
+        if (
+          !port
+          || typeof message.challenge !== "string"
+          || message.challenge !== expectedChallenge
+          || runtimeVisualPortsRef.current[message.side]
+        ) {
+          port?.close();
+          return;
+        }
+        runtimeVisualChannelChallengesRef.current[runtimeVisualSide] = null;
+        runtimeVisualPortsRef.current[runtimeVisualSide] = port;
+        port.onmessage = (portEvent: MessageEvent<unknown>) => {
+          if (runtimeVisualPortsRef.current[runtimeVisualSide] !== port) return;
+          const portMessage = portEvent.data as {
+            source?: unknown;
+            sessionId?: unknown;
+            side?: unknown;
+            type?: unknown;
+            runtimeVisualSnapshots?: unknown;
+          } | null;
+          if (
+            !portMessage
+            || portMessage.source !== "pageroot-ai-review-runtime-visual"
+            || portMessage.sessionId !== sessionId
+            || portMessage.side !== runtimeVisualSide
+            || portMessage.type !== "runtime-visual-snapshots"
+          ) return;
+          runtimeVisualCoordinatorRef.current?.accept(
+            runtimeVisualSide,
+            portMessage.runtimeVisualSnapshots,
+          );
+        };
+        port.start();
+        return;
+      }
       if (message.type === "ready") {
         runtimeVisualReadySidesRef.current.add(message.side);
         const resolved = runtimeVisualResolutionRef.current;
         if (resolved?.documents === documents) {
           commitRuntimeVisualFrame(message.side, resolved);
           return;
-        }
-        const coordinator = runtimeVisualCoordinatorRef.current;
-        if (coordinator) {
-          coordinator.accept(message.side, message.runtimeVisualSnapshots);
-        } else {
-          resolveRuntimeVisuals([]);
         }
         return;
       }
@@ -950,9 +1015,7 @@ export default function AiReviewWorkspace({
     coordinatePagePresentation,
     documents,
     finishPagePresentation,
-    resolveRuntimeVisuals,
     reviewOutline,
-    sendState,
     sessionId,
     updateCommentScrollTransform,
   ]);
@@ -960,8 +1023,25 @@ export default function AiReviewWorkspace({
   const registerFrame = useCallback((side: ReviewSide, frame: HTMLIFrameElement | null) => {
     framesRef.current[side] = frame;
     if (frame) window.requestAnimationFrame(() => {
-      runtimeVisualCoordinatorRef.current?.start();
       const resolved = runtimeVisualResolutionRef.current;
+      const coordinator = runtimeVisualCoordinatorRef.current;
+      if (
+        coordinator
+        && resolved?.documents !== documents
+        && !runtimeVisualPortsRef.current[side]
+      ) {
+        coordinator.start();
+        if (!runtimeVisualChannelChallengesRef.current[side]) {
+          const challenge = createReviewRuntimeVisualChallenge();
+          if (challenge) {
+            runtimeVisualChannelChallengesRef.current[side] = challenge;
+            postToFrame(frame, sessionId, {
+              type: "request-runtime-visual-channel",
+              challenge,
+            });
+          }
+        }
+      }
       if (resolved?.documents === documents) {
         commitRuntimeVisualFrame(side, resolved);
       }

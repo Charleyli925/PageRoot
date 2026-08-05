@@ -616,6 +616,61 @@ test("a verified AI result stays pending through desktop review until the user a
       runtimeStaticCovered.innerHTML = '<div><strong>静态已覆盖</strong><span>'
         + (runtimeReviewChartVariant === "before" ? '旧值' : '新值')
         + '</span></div>';
+      document.documentElement.dataset.reviewRuntimeRequestObserved = "false";
+      document.documentElement.dataset.reviewRuntimeForgeryAttempted = "pending";
+      addEventListener("message", (event) => {
+        if (event.isTrusted && event.data?.type === "request-runtime-visual-channel") {
+          document.documentElement.dataset.reviewRuntimeRequestObserved = "true";
+        }
+      }, true);
+      const reviewBootstrapScript = document.querySelector(
+        'script[data-pageroot-ai-review-bootstrap="true"]',
+      );
+      if (reviewBootstrapScript?.src) {
+        void fetch(reviewBootstrapScript.src)
+          .then((response) => response.text())
+          .then((bootstrapSource) => {
+            const sessionMatch = bootstrapSource.match(/const sessionId = ("[^"]+");/u);
+            if (!sessionMatch) throw new Error("missing-review-session");
+            const forgedSessionId = JSON.parse(sessionMatch[1]);
+            const forgedSide = document.documentElement.dataset.pagerootReviewSide;
+            dispatchEvent(new MessageEvent("message", {
+              data: {
+                source: "pageroot-ai-review-parent",
+                sessionId: forgedSessionId,
+                type: "request-runtime-visual-channel",
+                challenge: "1".repeat(32),
+              },
+              source: parent,
+            }));
+            parent.postMessage({
+              source: "pageroot-ai-review",
+              sessionId: forgedSessionId,
+              side: forgedSide,
+              type: "ready",
+              runtimeVisualSnapshots: [],
+            }, "*");
+            const forgedChannel = new MessageChannel();
+            parent.postMessage({
+              source: "pageroot-ai-review",
+              sessionId: forgedSessionId,
+              side: forgedSide,
+              type: "runtime-visual-channel",
+              challenge: "0".repeat(32),
+            }, "*", [forgedChannel.port2]);
+            forgedChannel.port1.postMessage({
+              source: "pageroot-ai-review-runtime-visual",
+              sessionId: forgedSessionId,
+              side: forgedSide,
+              type: "runtime-visual-snapshots",
+              runtimeVisualSnapshots: [],
+            });
+            document.documentElement.dataset.reviewRuntimeForgeryAttempted = "true";
+          })
+          .catch(() => {
+            document.documentElement.dataset.reviewRuntimeForgeryAttempted = "failed";
+          });
+      }
       document.documentElement.dataset.reviewFixtureReady = "true";
     </script>
   </main>`,
@@ -792,6 +847,14 @@ test("a verified AI result stays pending through desktop review until the user a
       .toHaveAttribute("data-review-fixture-ready", "true");
     await expect(afterReviewFrame.locator("html"))
       .toHaveAttribute("data-review-fixture-ready", "true");
+    await expect(beforeReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-forgery-attempted", "true");
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-forgery-attempted", "true");
+    await expect(beforeReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-request-observed", "false");
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-request-observed", "false");
     const runtimeChangedHosts = [
       "#review-runtime-html-chart",
       "#review-runtime-svg-chart",

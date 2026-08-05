@@ -139,11 +139,17 @@ state is never serialized. The renderer accepts review messages only when the
 session ID, side, declared message source and `MessageEvent.source` all match the
 registered frame. Runtime-chart snapshot messages are additionally limited to
 host keys declared by the frozen source analyzer, bounded atom/signature counts
-and one accepted batch per side. They contain no executable DOM and can only add
-a disposable visual marker after a complete stable pair; invalid, partial,
-timed-out or late input is ignored. A user must still invoke the existing
-fail-closed ready-version activation path through “直接打开” or the review
-confirmation “打开 AI 修改后”.
+and one accepted batch per side. Ordinary frame `ready` messages never carry
+runtime evidence. The trusted bootstrap creates a `MessageChannel` before any
+authored script runs; after frame load, the parent sends a fresh random challenge
+that the bootstrap consumes only from a browser-trusted parent event in its first
+capture listener without exposing it to later authored listeners, then transfers
+the pre-created capability port. Only the matching port may submit snapshots.
+They contain no executable DOM and can
+only add a disposable visual marker after a complete stable pair; forged window
+messages, invalid, partial, timed-out or late input are ignored. A user must
+still invoke the existing fail-closed ready-version activation path through
+“直接打开” or the review confirmation “打开 AI 修改后”.
 
 Edit-mode reveal actions use the same trust boundary. They accept only strict
 Tabs whose selected panel is proved by `aria-selected` plus `hidden`, native

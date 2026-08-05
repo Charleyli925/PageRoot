@@ -2549,13 +2549,53 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
   let mirroringPanel = false;
   let mirroringAction = false;
   let currentState = { filter: "all", focus: "all", transparency: 18, scale: 1 };
-  const post = (type, extra = {}) => parent.postMessage({
+  const postToParent = parent.postMessage.bind(parent);
+  const runtimeVisualChannel = typeof MessageChannel === "function"
+    ? new MessageChannel()
+    : null;
+  const postRuntimeVisualPort = runtimeVisualChannel
+    ? runtimeVisualChannel.port1.postMessage.bind(runtimeVisualChannel.port1)
+    : null;
+  const stopImmediateMessagePropagation = Function.prototype.call.bind(
+    Event.prototype.stopImmediatePropagation,
+  );
+  let runtimeVisualChannelTransferred = false;
+  let runtimeVisualSnapshotBatch = null;
+  const post = (type, extra = {}) => postToParent({
     source: "pageroot-ai-review",
     sessionId,
     side,
     type,
     ...extra,
   }, "*");
+  const publishRuntimeVisualSnapshots = () => {
+    if (
+      !runtimeVisualChannelTransferred
+      || !postRuntimeVisualPort
+      || runtimeVisualSnapshotBatch === null
+    ) return;
+    postRuntimeVisualPort({
+      source: "pageroot-ai-review-runtime-visual",
+      sessionId,
+      side,
+      type: "runtime-visual-snapshots",
+      runtimeVisualSnapshots: runtimeVisualSnapshotBatch,
+    });
+  };
+  const transferRuntimeVisualChannel = (rawChallenge) => {
+    const challenge = String(rawChallenge || "");
+    if (!/^[a-f0-9]{32}$/u.test(challenge)) return;
+    if (!runtimeVisualChannel || runtimeVisualChannelTransferred) return;
+    runtimeVisualChannelTransferred = true;
+    postToParent({
+      source: "pageroot-ai-review",
+      sessionId,
+      side,
+      type: "runtime-visual-channel",
+      challenge,
+    }, "*", [runtimeVisualChannel.port2]);
+    publishRuntimeVisualSnapshots();
+  };
   const clamp = (value, minimum, maximum) => Math.max(minimum, Math.min(maximum, value));
   const documentHeight = () => Math.max(
     document.documentElement.scrollHeight,
@@ -3893,7 +3933,18 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
   };
   addEventListener("message", (event) => {
     const message = event.data;
-    if (!message || message.source !== "pageroot-ai-review-parent" || message.sessionId !== sessionId) return;
+    if (
+      !event.isTrusted
+      || event.source !== parent
+      || !message
+      || message.source !== "pageroot-ai-review-parent"
+      || message.sessionId !== sessionId
+    ) return;
+    if (message.type === "request-runtime-visual-channel") {
+      stopImmediateMessagePropagation(event);
+      transferRuntimeVisualChannel(message.challenge);
+      return;
+    }
     if (message.type === "state") applyState(message.state || {});
     if (message.type === "apply-runtime-visual-changes") {
       applyRuntimeVisualChanges(message.markers);
@@ -3918,7 +3969,7 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
       const target = document.querySelector('[data-pageroot-outline-id="' + outlineId + '"]');
       focusTarget(target, message.panelPath?.length ? message.panelPath : message.panelKey);
     }
-  });
+  }, true);
   addEventListener("click", (event) => {
     post("interaction");
     const action = event.target instanceof Element
@@ -4055,16 +4106,17 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
     ? new ResizeObserver(handleLayoutChange)
     : null;
   if (resizeObserver && document.body) resizeObserver.observe(document.body);
-  const announceReady = (runtimeVisualSnapshots) => post("ready", {
+  const announceReady = () => post("ready", {
     height: Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight || 0),
-    runtimeVisualSnapshots,
   });
   const ready = async () => {
     const runtimeVisualSnapshots = await Promise.race([
       collectRuntimeVisualSnapshots(),
       runtimeVisualDelay(420).then(() => []),
     ]).catch(() => []);
-    announceReady(runtimeVisualSnapshots);
+    runtimeVisualSnapshotBatch = runtimeVisualSnapshots;
+    publishRuntimeVisualSnapshots();
+    announceReady();
     scheduleLayoutReport(true);
     document.fonts?.ready?.then(() => {
       scheduleOverlayRender();

@@ -95,8 +95,10 @@ Rules:
   accepts only a complete declared before/after pair before its initial deadline,
   ignores absolute document position and unstable or late samples, merges with
   an existing owning change instead of duplicating it, and freezes after the
-  initial projection commit. Failure has no visible recovery owner because the
-  authoritative static review remains valid.
+  initial projection commit. Runtime evidence is accepted only through the
+  challenged capability port created by the trusted bootstrap before authored
+  scripts run; ordinary frame messages cannot complete a side. Failure has no
+  visible recovery owner because the authoritative static review remains valid.
 - `CommentSession` is a renderer working copy, not durable Draft authority.
   Runtime state is likewise not a second copy of draft contents: it carries
   lifecycle state and a revisioned pointer to the draft repository.
