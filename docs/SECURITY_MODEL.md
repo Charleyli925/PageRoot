@@ -52,8 +52,10 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   accepts only the exact retired field set after regular-file and four-Hash
   verification, re-runs the current executable-surface check from the sealed
   base/output, and never participates in active candidate opening or source
-  writes. A formerly `ready` history record may therefore display as `blocked`
-  under the current rule without locking the already-authoritative current HTML.
+  writes. It may project either committed Version history or an already
+  terminal archived outcome; the latter cannot become active again. A formerly
+  `ready` history record may therefore display as `blocked` under the current
+  rule without locking the already-authoritative current HTML.
 - Review-before-open reads only the frozen current HTML and immutable candidate
   Version after rechecking their identities and Hashes. Both copies render in
   unique-origin sandboxed frames; authored scripts, refresh directives and

@@ -3797,6 +3797,7 @@ async function latestTerminalRunOutcome(context) {
           candidateVersionId: outcome.candidateVersionId,
           baseSha256: outcome.baseSnapshotSha256,
         },
+        { compatibility: "historical-developer-preview" },
       )
     : null;
   return {

@@ -4613,6 +4613,73 @@ test("workspace re-derives a historical pre-executable Developer Preview assessm
   );
 });
 
+test("workspace re-derives a legacy assessment for an archived failed terminal outcome", async (t) => {
+  const environment = await createEnvironment(t);
+  const sourcePath = join(
+    environment.sources,
+    "legacy-terminal-candidate-assessment.html",
+  );
+  await writeFile(sourcePath, htmlPage("旧版失败终态评估"), "utf8");
+  const bridge = await environment.start();
+  const opened = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+  const originalSource = await readFile(sourcePath, "utf8");
+  const run = (
+    await postJson(bridge.baseUrl, "/request", {
+      sourcePath,
+      projectId: opened.projectId,
+      documentId: opened.documentId,
+      expectedSourceSha256: opened.currentHtmlSha256,
+      freezeCutoffRevision: 0,
+      summary: "验证旧开发测试版失败终态评估的历史读取兼容。",
+    })
+  ).body;
+  await writeFile(
+    run.outputPath,
+    "<!doctype html><html><head><title>空页面</title></head><body></body></html>",
+    "utf8",
+  );
+  await runFinalizer(environment.workspace, run);
+  const rejected = await requestJson(
+    bridge.baseUrl,
+    `/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
+  );
+  assert.equal(rejected.response.status, 200, JSON.stringify(rejected.body));
+  assert.equal(rejected.body.status, "error");
+  assert.equal(rejected.body.error.code, "HTML_BODY_EMPTY");
+
+  const assessmentPath = join(
+    run.attemptPath,
+    "candidate-assessment.json",
+  );
+  const legacyAssessment = JSON.parse(
+    await readFile(assessmentPath, "utf8"),
+  );
+  delete legacyAssessment.executable;
+  delete legacyAssessment.health.executableSurfaceUnchanged;
+  const persistedLegacyText = `${JSON.stringify(legacyAssessment, null, 2)}\n`;
+  await writeFile(assessmentPath, persistedLegacyText, "utf8");
+
+  const restored = await openWorkspace(bridge.baseUrl, sourcePath);
+  assert.equal(restored.response.status, 200, JSON.stringify(restored.body));
+  assert.equal(restored.body.runtimeState.lifecycleState, "editing");
+  assert.equal(restored.body.recentRunOutcome.status, "error");
+  assert.equal(
+    restored.body.recentRunOutcome.error.code,
+    "HTML_BODY_EMPTY",
+  );
+  assert.equal(
+    restored.body.recentRunOutcome.candidateAssessment.status,
+    "blocked",
+  );
+  assert.equal(
+    restored.body.recentRunOutcome.candidateAssessment
+      .health.executableSurfaceUnchanged,
+    true,
+  );
+  assert.equal(await readFile(assessmentPath, "utf8"), persistedLegacyText);
+  assert.equal(await readFile(sourcePath, "utf8"), originalSource);
+});
+
 test("history endpoints reject marker, manifest, and entry tampering", async (t) => {
   const environment = await createEnvironment(t);
   const sourcePath = join(environment.sources, "integrity.html");

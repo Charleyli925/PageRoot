@@ -541,11 +541,12 @@ Completion 必须在 output 完全关闭后最后写入。完成后 output 封�
 当前 writer 必须始终写出 Schema 中完整的 `health` 与 `executable`。2026-08-04 的短期
 Developer Preview 曾在仍声明 `schemaVersion=1.0.0` 时省略
 `health.executableSurfaceUnchanged` 和整个 `executable`。兼容只存在于 committed
-Version 的历史查询入口：Reader 要求字段集合精确匹配该旧生产者，冻结 base 与 sealed
-output 均为普通文件且四个精确/比较 Hash 全部匹配，再按当前算法重算完整 assessment，
-并验证旧字段仍能由旧算法重现。规范化结果只在内存中返回，不改写 Attempt；当前复核可把
-旧 `ready` 如实降为 `blocked`。active run、尚未打开候选、建版与激活均不得使用这一历史
-兼容入口。相关 Developer Preview 数据退出支持窗口后删除该 adapter。
+Version 的历史查询或已归档终态查询入口：Reader 要求字段集合精确匹配该旧生产者，冻结
+base 与 sealed output 均为普通文件且四个精确/比较 Hash 全部匹配，再按当前算法重算完整
+assessment，并验证旧字段仍能由旧算法重现。规范化结果只在内存中返回，不改写 Attempt；
+当前复核可把旧 `ready` 如实降为 `blocked`，已归档 outcome 始终保持终态。active run、
+尚未打开候选、建版与激活均不得使用这一历史兼容入口。相关 Developer Preview 数据退出
+支持窗口后删除该 adapter。
 
 v3 TargetRef、评论和 supplement 继续作为生成指令与历史证据，但不再逐节点限制候选
 Version。旧 Attempt 的 `scope-report.json` 与 `validation-review.json` 仍可只读展示；新

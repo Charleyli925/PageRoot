@@ -5,7 +5,7 @@ Notable user-visible changes are documented here. This project follows Semantic 
 ## [Unreleased]
 
 - Restore projects created by the short-lived August 4 Developer Preview when
-  a committed historical candidate assessment predates executable-surface
+  a historical Version or archived terminal outcome assessment predates executable-surface
   fields. PageRoot now verifies the frozen/sealed HTML and Hashes, re-runs the
   current assessment without rewriting history, and keeps the current HTML
   editable; genuine assessment errors also show an accurate read failure

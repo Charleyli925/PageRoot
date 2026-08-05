@@ -34,9 +34,10 @@ records.
 every current write. One history-only route adapter recognizes the exact
 short-lived August 4, 2026 Developer Preview shape that declared `1.0.0`
 before those fields were emitted; it validates and re-derives the canonical
-record from sealed HTML in memory. The legacy fixture intentionally does not
-validate against this current Schema, and active/unopened candidates never use
-that adapter.
+record from sealed HTML in memory for committed Version history or an already
+archived terminal outcome. The legacy fixture intentionally does not validate
+against this current Schema, archived outcomes remain terminal, and
+active/unopened candidates never use that adapter.
 
 `source-history.v1.schema.json` is the bounded, document-owned journal of
 byte-exact canvas source operations. Its cursor is independent from immutable
