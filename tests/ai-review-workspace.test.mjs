@@ -179,6 +179,12 @@ test("change discovery builds a complete outline and precise change markers", ()
   assert.match(reviewDocument, /similarity >= \.46/);
   assert.match(reviewDocument, /markStructureDifferences/);
   assert.match(reviewDocument, /changedStylesheetSelectors/);
+  assert.match(reviewDocument, /styleScopeForProperties/);
+  assert.match(reviewDocument, /"block-size"/);
+  assert.match(reviewDocument, /data-pageroot-review-style-owner/);
+  assert.match(reviewDocument, /data-pageroot-review-style-scope/);
+  assert.match(reviewDocument, /contentStyleRects/);
+  assert.match(reviewDocument, /range\.getClientRects\(\)/);
   assert.match(reviewDocument, /reviewTextInventoryForNodes/);
   assert.match(reviewDocument, /semanticTextInventories/);
   assert.match(reviewDocument, /STRUCTURE_TRANSPARENT_TAGS/);
@@ -251,6 +257,9 @@ test("all-change review keeps text treatment precise and mirrors authored action
   assert.match(reviewDocument, /"文本调整"/);
   assert.match(reviewDocument, /mergeConnectedRecords/);
   assert.match(reviewDocument, /minimalRecords/);
+  assert.match(reviewDocument, /dominantStyleBoxes/);
+  assert.match(reviewDocument, /candidate\.element\.contains\(record\.element\)/);
+  assert.match(reviewDocument, /left\.tone !== "style" \|\| left\.ownerKey === right\.ownerKey/);
   assert.match(reviewDocument, /tone: record\.tones\.length > 1 \? "mixed" : record\.tones\[0\]/);
   assert.match(reviewDocument, /allModeSummary/);
   assert.match(reviewDocument, /fuseConnectedFragments/);

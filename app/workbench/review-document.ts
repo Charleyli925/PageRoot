@@ -1706,6 +1706,105 @@ function changedStylesheetSelectors(before: Document, after: Document) {
     }));
 }
 
+type ReviewStyleScope = "box" | "content";
+
+const BOX_OWNED_STYLE_PROPERTIES = new Set([
+  "aspect-ratio",
+  "backdrop-filter",
+  "block-size",
+  "box-shadow",
+  "clear",
+  "clip",
+  "clip-path",
+  "content",
+  "display",
+  "filter",
+  "float",
+  "height",
+  "inset",
+  "isolation",
+  "left",
+  "mask",
+  "mask-image",
+  "max-height",
+  "max-width",
+  "min-height",
+  "min-width",
+  "object-fit",
+  "object-position",
+  "opacity",
+  "order",
+  "overflow",
+  "overflow-x",
+  "overflow-y",
+  "perspective",
+  "position",
+  "right",
+  "top",
+  "transform",
+  "transform-origin",
+  "visibility",
+  "width",
+  "z-index",
+]);
+
+const BOX_OWNED_STYLE_PREFIXES = [
+  "align-",
+  "background",
+  "border",
+  "bottom",
+  "column-",
+  "contain",
+  "flex",
+  "gap",
+  "grid",
+  "inline-size",
+  "justify-",
+  "margin",
+  "mask-",
+  "max-inline-size",
+  "max-block-size",
+  "min-inline-size",
+  "min-block-size",
+  "outline",
+  "padding",
+  "place-",
+  "rotate",
+  "scale",
+  "translate",
+];
+
+function stylePropertyOwnsElementBox(property: string): boolean {
+  const normalized = property.trim().toLowerCase();
+  if (!normalized) return false;
+  if (normalized.startsWith("--") || normalized.startsWith("@")) return true;
+  return BOX_OWNED_STYLE_PROPERTIES.has(normalized)
+    || BOX_OWNED_STYLE_PREFIXES.some((prefix) => normalized.startsWith(prefix));
+}
+
+function styleScopeForProperties(properties: string[]): ReviewStyleScope {
+  return properties.some(stylePropertyOwnsElementBox) ? "box" : "content";
+}
+
+function changedVisualProperties(before: Element, after: Element): string[] {
+  const properties = new Set<string>();
+  VISUAL_ATTRIBUTE_NAMES.forEach((attributeName) => {
+    const beforeValue = before.getAttribute(attributeName);
+    const afterValue = after.getAttribute(attributeName);
+    if (beforeValue === afterValue) return;
+    if (attributeName === "style") {
+      const beforeStyle = styleDeclarationMap(beforeValue || "");
+      const afterStyle = styleDeclarationMap(afterValue || "");
+      [...new Set([...beforeStyle.keys(), ...afterStyle.keys()])].forEach((property) => {
+        if (beforeStyle.get(property) !== afterStyle.get(property)) properties.add(property);
+      });
+      return;
+    }
+    properties.add(`@${attributeName}`);
+  });
+  return [...properties];
+}
+
 function elementsMatchingSelector(root: Element, rawSelector: string): Element[] {
   const selector = rawSelector
     .replace(/::[\w-]+/gu, "")
@@ -1726,22 +1825,47 @@ function elementsMatchingSelector(root: Element, rawSelector: string): Element[]
 function markStyleDifferences(before: Element | null, after: Element | null): boolean {
   if (!before || !after) return false;
   let marked = 0;
+  let ownerSequence = before.ownerDocument.querySelectorAll(
+    "[data-pageroot-review-style-owner]",
+  ).length;
+  const markPair = (
+    beforeElement: Element,
+    afterElement: Element,
+    scope: ReviewStyleScope,
+  ) => {
+    const owner = beforeElement.getAttribute("data-pageroot-review-style-owner")
+      || afterElement.getAttribute("data-pageroot-review-style-owner")
+      || `style-owner-${++ownerSequence}`;
+    const existingScope = beforeElement.getAttribute("data-pageroot-review-style-scope")
+      || afterElement.getAttribute("data-pageroot-review-style-scope");
+    const resolvedScope: ReviewStyleScope = existingScope === "box" || scope === "box"
+      ? "box"
+      : "content";
+    beforeElement.setAttribute("data-pageroot-review-style", "before");
+    afterElement.setAttribute("data-pageroot-review-style", "after");
+    beforeElement.setAttribute("data-pageroot-review-style-owner", owner);
+    afterElement.setAttribute("data-pageroot-review-style-owner", owner);
+    beforeElement.setAttribute("data-pageroot-review-style-scope", resolvedScope);
+    afterElement.setAttribute("data-pageroot-review-style-scope", resolvedScope);
+    marked += 1;
+  };
   for (const pair of pairVisualElements(before, after)) {
     if (selfPresentationSignature(pair.before) === selfPresentationSignature(pair.after)) continue;
-    pair.before.setAttribute("data-pageroot-review-style", "before");
-    pair.after.setAttribute("data-pageroot-review-style", "after");
-    marked += 1;
+    markPair(
+      pair.before,
+      pair.after,
+      styleScopeForProperties(changedVisualProperties(pair.before, pair.after)),
+    );
     if (marked >= 40) break;
   }
   const changedRules = changedStylesheetSelectors(before.ownerDocument, after.ownerDocument);
-  changedRules.forEach(({ selector }) => {
+  changedRules.forEach(({ selector, labels }) => {
+    const scope = styleScopeForProperties(labels);
     selector.split(",").forEach((part) => {
       const beforeMatches = elementsMatchingSelector(before, part).slice(0, 40);
       const afterMatches = elementsMatchingSelector(after, part).slice(0, 40);
       pairSiblingElements(beforeMatches, afterMatches).forEach((afterElement, beforeElement) => {
-        beforeElement.setAttribute("data-pageroot-review-style", "before");
-        afterElement.setAttribute("data-pageroot-review-style", "after");
-        marked += 1;
+        markPair(beforeElement, afterElement, scope);
       });
     });
   });
@@ -2294,6 +2418,12 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
   const markerTypes = (element) => String(
     element.getAttribute("data-pageroot-review-marker-types") || "",
   ).split(/\s+/).filter(Boolean);
+  const recordContains = (outer, inner, tolerance = 2) => (
+    inner.left >= outer.left - tolerance
+    && inner.top >= outer.top - tolerance
+    && inner.right <= outer.right + tolerance
+    && inner.bottom <= outer.bottom + tolerance
+  );
   const recordsAreClose = (left, right, gap = 10) => {
     const horizontalOverlap = Math.max(0, Math.min(left.right, right.right) - Math.max(left.left, right.left));
     const verticalOverlap = Math.max(0, Math.min(left.bottom, right.bottom) - Math.max(left.top, right.top));
@@ -2354,8 +2484,13 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
         bottom: record.bottom,
       }]
     )));
+    const boxOwner = records.find((record) => (
+      record.tone === "style" && record.scope === "box" && record.ownerKey
+    ));
     return {
       ...records[0],
+      ownerKey: boxOwner?.ownerKey || records[0].ownerKey || "",
+      scope: boxOwner ? "box" : records[0].scope,
       fragments,
       left: Math.min(...fragments.map((record) => record.left)),
       top: Math.min(...fragments.map((record) => record.top)),
@@ -2457,6 +2592,28 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
     const rightArea = Math.max(1, (right.right - right.left) * (right.bottom - right.top));
     return intersection / Math.min(leftArea, rightArea) >= .62;
   };
+  const contentStyleRects = (element) => {
+    const rects = [];
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    let node = walker.nextNode();
+    while (node) {
+      const parent = node.parentElement;
+      if (
+        (node.textContent || "").trim()
+        && parent
+        && !parent.closest("script, style, noscript, template")
+      ) {
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        [...range.getClientRects()]
+          .filter((rect) => rect.width > 1 && rect.height > 1)
+          .forEach((rect) => rects.push(rect));
+        range.detach();
+      }
+      node = walker.nextNode();
+    }
+    return rects.length ? rects : [element.getBoundingClientRect()];
+  };
   function renderReviewOverlays() {
     if (projectionTransitioning) return;
     document.querySelector('[data-pageroot-review-projection-layer]')?.remove();
@@ -2470,7 +2627,10 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
         [...element.getClientRects()]
           .filter((rect) => rect.width > 1 && rect.height > 1)
           .forEach((rect) => records.push({
+            element,
             changeId: element.getAttribute("data-pageroot-review-marker") || "",
+            ownerKey: "",
+            scope: "text",
             summary: element.getAttribute("data-pageroot-review-summary") || "",
             tone: textTone,
             tones: [textTone],
@@ -2489,36 +2649,63 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
         : '[data-pageroot-review-marker-types~="' + filter + '"]';
     if (selector) [...document.querySelectorAll(selector)]
       .forEach((element) => {
-        const rect = element.getBoundingClientRect();
         const types = markerTypes(element).filter((type) => filter === "all" || type === filter);
-        types.forEach((type) => records.push({
-          changeId: element.getAttribute("data-pageroot-review-marker") || "",
-          summary: element.getAttribute("data-pageroot-review-summary") || "",
-          tone: type,
-          tones: [type],
-          types: [type],
-          left: rect.left + scrollX,
-          top: rect.top + scrollY,
-          right: rect.right + scrollX,
-          bottom: rect.bottom + scrollY,
-        }));
+        types.forEach((type) => {
+          const scope = type === "style"
+            ? element.getAttribute("data-pageroot-review-style-scope") || "content"
+            : "element";
+          const rects = type === "style" && scope === "content"
+            ? contentStyleRects(element)
+            : [element.getBoundingClientRect()];
+          rects.forEach((rect) => records.push({
+            element,
+            changeId: element.getAttribute("data-pageroot-review-marker") || "",
+            ownerKey: type === "style"
+              ? element.getAttribute("data-pageroot-review-style-owner") || ""
+              : "",
+            scope,
+            summary: type === "style"
+              ? "视觉调整"
+              : element.getAttribute("data-pageroot-review-summary") || "",
+            tone: type,
+            tones: [type],
+            types: [type],
+            left: rect.left + scrollX,
+            top: rect.top + scrollY,
+            right: rect.right + scrollX,
+            bottom: rect.bottom + scrollY,
+          }));
+        });
       });
     const visibleRecords = records
       .filter((rect) => rect.right - rect.left > 1 && rect.bottom - rect.top > 1)
       .sort((left, right) => left.changeId.localeCompare(right.changeId) || left.top - right.top || left.left - right.left);
-    const minimalRecords = visibleRecords.filter((record, index) => !visibleRecords.some((candidate, candidateIndex) => {
-      if (index === candidateIndex || record.changeId !== candidate.changeId || record.tone !== candidate.tone) return false;
-      const recordArea = (record.right - record.left) * (record.bottom - record.top);
-      const candidateArea = (candidate.right - candidate.left) * (candidate.bottom - candidate.top);
-      return candidateArea < recordArea * .86
-        && candidate.left >= record.left - 2
-        && candidate.top >= record.top - 2
-        && candidate.right <= record.right + 2
-        && candidate.bottom <= record.bottom + 2;
-    }));
+    const dominantStyleBoxes = visibleRecords.filter((record) => (
+      record.tone === "style" && record.scope === "box"
+    ));
+    const minimalRecords = visibleRecords.filter((record, index) => {
+      if (record.tone === "style") {
+        const dominatedByBoxOwner = dominantStyleBoxes.some((candidate) => (
+          candidate !== record
+          && candidate.changeId === record.changeId
+          && candidate.ownerKey !== record.ownerKey
+          && candidate.element.contains(record.element)
+          && recordContains(candidate, record)
+        ));
+        if (dominatedByBoxOwner) return false;
+        if (record.scope === "box") return true;
+      }
+      return !visibleRecords.some((candidate, candidateIndex) => {
+        if (index === candidateIndex || record.changeId !== candidate.changeId || record.tone !== candidate.tone) return false;
+        const recordArea = (record.right - record.left) * (record.bottom - record.top);
+        const candidateArea = (candidate.right - candidate.left) * (candidate.bottom - candidate.top);
+        return candidateArea < recordArea * .86 && recordContains(record, candidate);
+      });
+    });
     let merged = mergeConnectedRecords(minimalRecords, (left, right) => (
       left.changeId === right.changeId
       && left.tone === right.tone
+      && (left.tone !== "style" || left.ownerKey === right.ownerKey)
       && recordsAreClose(left, right)
     ));
     if (filter === "all") {
@@ -2567,6 +2754,9 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
       record.pathData = pathData;
       const hole = document.createElementNS(namespace, "path");
       hole.setAttribute("data-pageroot-review-mask-hole", record.changeId);
+      if (record.ownerKey) {
+        hole.setAttribute("data-pageroot-review-mask-owner", record.ownerKey);
+      }
       const left = record.left - inset;
       const top = record.top - inset;
       const width = record.right - record.left + inset * 2;
@@ -2596,9 +2786,13 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
     merged.forEach((record) => {
       const box = document.createElement("div");
       box.setAttribute("data-pageroot-review-overlay-box", record.changeId);
+      if (record.ownerKey) {
+        box.setAttribute("data-pageroot-review-overlay-owner", record.ownerKey);
+      }
       box.dataset.tone = record.tone;
       box.dataset.tones = record.tones.join(" ");
       box.dataset.types = record.types.join(" ");
+      box.dataset.scope = record.scope || "element";
       box.dataset.summary = record.summary;
       box.setAttribute(
         "data-pageroot-review-fragment-count",

@@ -16,6 +16,12 @@ Notable user-visible changes are documented here. This project follows Semantic 
   shared “品” character as unchanged or splitting the green frame. Short Chinese
   replacements remain pairable, while distant edits in long punctuation-free
   copy no longer pull the unchanged text between them into one oversized frame.
+- Make visual-review frames follow the element that owns the changed paint or
+  layout. Whole-card background, border, radius, shadow, size and layout
+  changes now keep one complete component frame and matching mask hole, while
+  logical block sizing follows the same rule. Inherited copy styling now uses
+  the rendered text ranges instead of its container box, and neighboring cards
+  cannot merge merely because they are close together.
 - Show script-generated Canvas, SVG/HTML charts and dynamic table bodies
   automatically in desktop Edit as one source-Hash-bound read-only bitmap
   projection. The bitmap remains pointer-transparent so comments target the
