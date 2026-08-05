@@ -532,6 +532,8 @@ test("a verified AI result stays pending through desktop review until the user a
       <div id="review-runtime-hidden-churn-chart" class="review-runtime-chart-host"></div>
       <div id="review-runtime-descendant-opacity-chart" class="review-runtime-chart-host"></div>
       <div id="review-runtime-hidden-descendant-churn-chart" class="review-runtime-chart-host"></div>
+      <svg id="review-runtime-svg-descendant-opacity-chart" class="review-runtime-chart-host" viewBox="0 0 220 52" width="220" height="52"></svg>
+      <svg id="review-runtime-svg-hidden-descendant-churn-chart" class="review-runtime-chart-host" viewBox="0 0 220 52" width="220" height="52"></svg>
       <svg id="review-runtime-svg-root-chart" class="review-runtime-chart-host"></svg>
       <div id="review-runtime-root-geometry-chart" class="review-runtime-chart-host"></div>
       <div id="review-runtime-flow-chart" class="review-runtime-chart-host"></div>
@@ -654,6 +656,18 @@ test("a verified AI result stays pending through desktop review until the user a
       runtimeHiddenDescendantChurnChart.innerHTML = '<div style="opacity:0"><strong>'
         + (runtimeReviewChartVariant === "before" ? '内部隐藏旧值' : '内部隐藏新值')
         + '</strong></div>';
+      const runtimeSvgDescendantOpacityChart = document.querySelector(
+        "#review-runtime-svg-descendant-opacity-chart",
+      );
+      runtimeSvgDescendantOpacityChart.innerHTML = '<g opacity="'
+        + (runtimeReviewChartVariant === "before" ? '1' : '0')
+        + '"><rect x="8" y="8" width="204" height="36" rx="8" fill="#6d5ce7"></rect></g>';
+      const runtimeSvgHiddenDescendantChurnChart = document.querySelector(
+        "#review-runtime-svg-hidden-descendant-churn-chart",
+      );
+      runtimeSvgHiddenDescendantChurnChart.innerHTML = '<g opacity="0"><rect x="8" y="8" width="'
+        + (runtimeReviewChartVariant === "before" ? '96' : '204')
+        + '" height="36" rx="8" fill="#6d5ce7"></rect></g>';
       const runtimeSvgRootChart = document.querySelector("#review-runtime-svg-root-chart");
       runtimeSvgRootChart.style.cssText = 'display:block;height:52px;width:'
         + (runtimeReviewChartVariant === "before" ? '190px' : '248px')
@@ -729,6 +743,29 @@ test("a verified AI result stays pending through desktop review until the user a
             document.documentElement.dataset.reviewRuntimeForgeryAttempted = "failed";
           });
       }
+      const nativeRuntimeQuerySelectorAll = document.querySelectorAll.bind(document);
+      document.querySelectorAll = (selector) => (
+        String(selector).includes("data-pageroot-review-runtime-host")
+          ? []
+          : nativeRuntimeQuerySelectorAll(selector)
+      );
+      const nativeRuntimeGetComputedStyle = window.getComputedStyle.bind(window);
+      window.getComputedStyle = (element, pseudoElement) => {
+        if (
+          element instanceof Element
+          && element.hasAttribute("data-pageroot-review-runtime-host")
+        ) throw new Error("authored-runtime-style-forgery");
+        return nativeRuntimeGetComputedStyle(element, pseudoElement);
+      };
+      const forgedRuntimeHost = document.createElement("div");
+      forgedRuntimeHost.id = "review-runtime-forged-host";
+      forgedRuntimeHost.setAttribute(
+        "data-pageroot-review-runtime-host",
+        "runtime-host-forged",
+      );
+      forgedRuntimeHost.textContent = "伪造运行态宿主";
+      document.body.append(forgedRuntimeHost);
+      document.documentElement.dataset.reviewRuntimeDomApiAttack = "true";
       document.documentElement.dataset.reviewFixtureReady = "true";
     </script>
   </main>`,
@@ -934,6 +971,10 @@ test("a verified AI result stays pending through desktop review until the user a
       .toHaveAttribute("data-review-runtime-request-observed", "false");
     await expect(afterReviewFrame.locator("html"))
       .toHaveAttribute("data-review-runtime-request-observed", "false");
+    await expect(beforeReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-dom-api-attack", "true");
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-dom-api-attack", "true");
     expect(delayedReviewResourceRequests).toBeGreaterThanOrEqual(2);
     const runtimeChangedHosts = [
       "#review-runtime-html-chart",
@@ -942,6 +983,7 @@ test("a verified AI result stays pending through desktop review until the user a
       "#review-runtime-host-paint-chart",
       "#review-runtime-opacity-chart",
       "#review-runtime-descendant-opacity-chart",
+      "#review-runtime-svg-descendant-opacity-chart",
       "#review-runtime-svg-root-chart",
     ];
     for (const selector of runtimeChangedHosts) {
@@ -995,11 +1037,21 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect(afterReviewFrame.locator(
       "#review-runtime-hidden-descendant-churn-chart",
     )).not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
+    await expect(afterReviewFrame.locator(
+      "#review-runtime-svg-hidden-descendant-churn-chart",
+    )).toHaveAttribute("data-pageroot-review-runtime-host", /runtime-host-\d+/u);
+    await expect(afterReviewFrame.locator(
+      "#review-runtime-svg-hidden-descendant-churn-chart",
+    )).not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
     await expect(beforeReviewFrame.locator("#review-runtime-unrelated-random-chart"))
       .not.toHaveAttribute("data-pageroot-review-runtime-host", /.+/u);
     await expect(afterReviewFrame.locator("#review-runtime-unrelated-random-chart"))
       .not.toHaveAttribute("data-pageroot-review-runtime-host", /.+/u);
     await expect(afterReviewFrame.locator("#review-runtime-unrelated-random-chart"))
+      .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
+    await expect(beforeReviewFrame.locator("#review-runtime-forged-host"))
+      .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
+    await expect(afterReviewFrame.locator("#review-runtime-forged-host"))
       .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
     const runtimeFlowTop = await Promise.all([
       beforeReviewFrame.locator("#review-runtime-flow-chart")
@@ -2210,6 +2262,105 @@ test("a pre-load review navigation falls back without trusting the replacement p
     }).click();
     await expect(launched.page.getByRole("button", { name: "收起审阅工具" }))
       .toBeVisible();
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("a stolen runtime host claim falls back to the static review", async () => {
+  test.setTimeout(120_000);
+  const fixture = createSourceFixture("review-runtime-duplicate-claim.html", (source) => (
+    source.replace(
+      "  </main>",
+      `    <section data-review-runtime-duplicate-claim>
+      <h2>运行态宿主身份回归</h2>
+      <div id="review-runtime-duplicate-claim-chart"></div>
+      <script>
+        const reviewDuplicateClaimVariant = "before";
+        const reviewDuplicateClaimChart = document.querySelector(
+          "#review-runtime-duplicate-claim-chart",
+        );
+        reviewDuplicateClaimChart.innerHTML = '<strong>'
+          + reviewDuplicateClaimVariant
+          + '</strong><span>运行态图表</span>';
+        const reviewDuplicateClaimKey = reviewDuplicateClaimChart.getAttribute(
+          "data-pageroot-review-runtime-host",
+        );
+        if (reviewDuplicateClaimKey) {
+          reviewDuplicateClaimChart.removeAttribute(
+            "data-pageroot-review-runtime-host",
+          );
+          const reviewDuplicateClaimForgery = document.createElement("div");
+          reviewDuplicateClaimForgery.id = "review-runtime-duplicate-claim-forgery";
+          reviewDuplicateClaimForgery.setAttribute(
+            "data-pageroot-review-runtime-host",
+            reviewDuplicateClaimKey,
+          );
+          reviewDuplicateClaimForgery.textContent = "伪造的同 key 宿主";
+          document.body.append(reviewDuplicateClaimForgery);
+          document.documentElement.dataset.reviewRuntimeDuplicateClaim = "true";
+        }
+      </script>
+    </section>
+  </main>`,
+    )
+  ));
+  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  try {
+    const request = await addCommentAndSubmit(
+      launched.page,
+      launched.electronApp,
+      fixture.sourcePath,
+    );
+    writeAiOutput(request.requestRoot, (base) => base
+      .replace(ORIGINAL_TEXT, UPDATED_TEXT)
+      .replace(
+        'const reviewDuplicateClaimVariant = "before";',
+        'const reviewDuplicateClaimVariant = "after";',
+      ));
+    runOfficialFinalizer(request.requestRoot, request.changeRequest);
+    await expect(launched.page.getByText(
+      "修改结果已完成检查",
+      { exact: true },
+    ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+
+    await launched.page.getByRole("button", { name: "审阅对比" }).click();
+    await expect(launched.page.getByTestId("ai-review-workspace"))
+      .toBeVisible({ timeout: 30_000 });
+    await launched.page.getByRole("button", {
+      name: "显示并固定审阅工具",
+    }).click({ timeout: 10_000 });
+    await expect(launched.page.getByRole("button", { name: "收起审阅工具" }))
+      .toBeVisible();
+
+    const beforeReviewFrame = launched.page.frameLocator('iframe[title^="修改前"]');
+    const afterReviewFrame = launched.page.frameLocator('iframe[title^="修改后"]');
+    await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
+      "data-pageroot-review-focus",
+    ), { timeout: 5_000 }).not.toBe("all");
+    await expect.poll(async () => afterReviewFrame.locator("html").getAttribute(
+      "data-pageroot-review-focus",
+    ), { timeout: 5_000 }).not.toBe("all");
+    for (const frame of [beforeReviewFrame, afterReviewFrame]) {
+      await expect(frame.locator("html")).toHaveAttribute(
+        "data-review-runtime-duplicate-claim",
+        "true",
+      );
+      await expect(frame.locator("#review-runtime-duplicate-claim-chart"))
+        .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
+      await expect(frame.locator("#review-runtime-duplicate-claim-chart"))
+        .not.toHaveAttribute("data-pageroot-review-runtime-host", /.+/u);
+      await expect(frame.locator("#review-runtime-duplicate-claim-forgery"))
+        .toHaveAttribute("data-pageroot-review-runtime-host", /runtime-host-\d+/u);
+      await expect(frame.locator("#review-runtime-duplicate-claim-forgery"))
+        .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
+    }
+    await expect(afterReviewFrame.locator(
+      '[data-pageroot-review-marker-types~="text"]',
+    ).filter({ hasText: UPDATED_TEXT }).first()).toBeVisible();
+    await expect(launched.page.getByText("运行态不稳定", { exact: true })).toHaveCount(0);
+    await expect(launched.page.getByText("分析未完成", { exact: true })).toHaveCount(0);
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);

@@ -106,11 +106,18 @@ Comments + frozen input
   references a distinctive identity of that host and the existing static
   footprint does not already cover it. Script co-location inside the same
   section is not causal evidence.
+  The owned bootstrap binds the DOM traversal, attribute, layout,
+  computed-style and Canvas primitives before authored scripts execute and is
+  given the analyzer's exact candidate-key list. Its early mutation observer
+  binds each key to the parser-created source host before authored code can
+  transfer it. It ignores undeclared claims; missing, duplicate, transferred or
+  replaced declared claims and capture faults fail the whole supplemental
+  batch back to static evidence.
   Each isolated frame samples visible HTML/SVG/Canvas paint twice, including
   the host's own painted box, a fully transparent host as a stable disappearance
   state, and directly mutated size but not an unpainted empty box or indirect
   layout size. Every sample checks its ancestor chain back to the host and
-  prunes a zero-opacity subtree, so invisible child churn has no evidence
+  prunes a zero-opacity subtree, including an SVG vector wrapper, so invisible child churn has no evidence
   authority while a visible subtree becoming transparent still changes the
   stable host result. Sampling uses
   host-relative geometry and omits unstable or unsupported results. The

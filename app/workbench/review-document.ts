@@ -2537,11 +2537,152 @@ function baseHrefFromSourcePath(sourcePath?: string): string | undefined {
   return `file://${directoryPath.split("/").map(encodeURIComponent).join("/")}`;
 }
 
-function reviewBootstrap(sessionId: string, side: ReviewSide): string {
+function reviewBootstrap(
+  sessionId: string,
+  side: ReviewSide,
+  runtimeVisualCandidateKeys: readonly string[] = [],
+): string {
   return String.raw`
 (() => {
   const sessionId = ${JSON.stringify(sessionId)};
   const side = ${JSON.stringify(side)};
+  // This first managed script binds evidence readers before authored scripts execute.
+  const runtimeVisualExpectedKeys = Object.freeze(
+    ${JSON.stringify([...runtimeVisualCandidateKeys])},
+  );
+  const runtimeVisualBindCall = (method) => Function.prototype.call.bind(method);
+  const runtimeVisualFunctionHasInstance = runtimeVisualBindCall(
+    Function.prototype[Symbol.hasInstance],
+  );
+  const RuntimeVisualElement = Element;
+  const RuntimeVisualCanvasElement = HTMLCanvasElement;
+  const RuntimeVisualSvgElement = SVGElement;
+  const RuntimeVisualMap = Map;
+  const RuntimeVisualSet = Set;
+  const RuntimeVisualWeakMap = WeakMap;
+  const runtimeVisualArrayPush = runtimeVisualBindCall(Array.prototype.push);
+  const runtimeVisualArrayForEach = runtimeVisualBindCall(Array.prototype.forEach);
+  const runtimeVisualArrayJoin = runtimeVisualBindCall(Array.prototype.join);
+  const runtimeVisualArrayIncludes = runtimeVisualBindCall(Array.prototype.includes);
+  const runtimeVisualArrayMap = runtimeVisualBindCall(Array.prototype.map);
+  const runtimeVisualArraySome = runtimeVisualBindCall(Array.prototype.some);
+  const runtimeVisualArrayIsArray = Array.isArray.bind(Array);
+  const runtimeVisualDocumentQuerySelectorAll = runtimeVisualBindCall(
+    Document.prototype.querySelectorAll,
+  );
+  const runtimeVisualDocumentCreateTreeWalker = runtimeVisualBindCall(
+    Document.prototype.createTreeWalker,
+  );
+  const runtimeVisualDocumentCreateRange = runtimeVisualBindCall(
+    Document.prototype.createRange,
+  );
+  const runtimeVisualElementGetAttribute = runtimeVisualBindCall(
+    Element.prototype.getAttribute,
+  );
+  const runtimeVisualElementSetAttribute = runtimeVisualBindCall(
+    Element.prototype.setAttribute,
+  );
+  const runtimeVisualElementRemoveAttribute = runtimeVisualBindCall(
+    Element.prototype.removeAttribute,
+  );
+  const runtimeVisualElementMatches = runtimeVisualBindCall(Element.prototype.matches);
+  const runtimeVisualElementClosest = runtimeVisualBindCall(Element.prototype.closest);
+  const runtimeVisualElementQuerySelector = runtimeVisualBindCall(
+    Element.prototype.querySelector,
+  );
+  const runtimeVisualElementGetBoundingClientRect = runtimeVisualBindCall(
+    Element.prototype.getBoundingClientRect,
+  );
+  const runtimeVisualNodeParentElement = runtimeVisualBindCall(
+    Object.getOwnPropertyDescriptor(Node.prototype, "parentElement").get,
+  );
+  const runtimeVisualNodeTextContent = runtimeVisualBindCall(
+    Object.getOwnPropertyDescriptor(Node.prototype, "textContent").get,
+  );
+  const runtimeVisualElementTagName = runtimeVisualBindCall(
+    Object.getOwnPropertyDescriptor(Element.prototype, "tagName").get,
+  );
+  const runtimeVisualNodeListLength = runtimeVisualBindCall(
+    Object.getOwnPropertyDescriptor(NodeList.prototype, "length").get,
+  );
+  const runtimeVisualNodeListItem = runtimeVisualBindCall(NodeList.prototype.item);
+  const runtimeVisualTreeWalkerNextNode = runtimeVisualBindCall(TreeWalker.prototype.nextNode);
+  const RuntimeVisualMutationObserver = MutationObserver;
+  const runtimeVisualMutationObserverObserve = runtimeVisualBindCall(
+    MutationObserver.prototype.observe,
+  );
+  const runtimeVisualMutationObserverTakeRecords = runtimeVisualBindCall(
+    MutationObserver.prototype.takeRecords,
+  );
+  const runtimeVisualMutationRecordType = runtimeVisualBindCall(
+    Object.getOwnPropertyDescriptor(MutationRecord.prototype, "type").get,
+  );
+  const runtimeVisualMutationRecordTarget = runtimeVisualBindCall(
+    Object.getOwnPropertyDescriptor(MutationRecord.prototype, "target").get,
+  );
+  const runtimeVisualMutationRecordAddedNodes = runtimeVisualBindCall(
+    Object.getOwnPropertyDescriptor(MutationRecord.prototype, "addedNodes").get,
+  );
+  const runtimeVisualMutationRecordOldValue = runtimeVisualBindCall(
+    Object.getOwnPropertyDescriptor(MutationRecord.prototype, "oldValue").get,
+  );
+  const runtimeVisualRangeSelectNodeContents = runtimeVisualBindCall(
+    Range.prototype.selectNodeContents,
+  );
+  const runtimeVisualRangeGetClientRects = runtimeVisualBindCall(Range.prototype.getClientRects);
+  const runtimeVisualRangeDetach = runtimeVisualBindCall(Range.prototype.detach);
+  const runtimeVisualDomRectListLength = runtimeVisualBindCall(
+    Object.getOwnPropertyDescriptor(DOMRectList.prototype, "length").get,
+  );
+  const runtimeVisualDomRectListItem = runtimeVisualBindCall(DOMRectList.prototype.item);
+  const runtimeVisualCanvasGetContext = runtimeVisualBindCall(
+    HTMLCanvasElement.prototype.getContext,
+  );
+  const runtimeVisualCanvasToDataUrl = runtimeVisualBindCall(
+    HTMLCanvasElement.prototype.toDataURL,
+  );
+  const runtimeVisualCanvasWidth = runtimeVisualBindCall(
+    Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, "width").get,
+  );
+  const runtimeVisualCanvasHeight = runtimeVisualBindCall(
+    Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, "height").get,
+  );
+  const runtimeVisualContextGetImageData = runtimeVisualBindCall(
+    CanvasRenderingContext2D.prototype.getImageData,
+  );
+  const runtimeVisualImageData = runtimeVisualBindCall(
+    Object.getOwnPropertyDescriptor(ImageData.prototype, "data").get,
+  );
+  const runtimeVisualStyleGetPropertyValue = runtimeVisualBindCall(
+    CSSStyleDeclaration.prototype.getPropertyValue,
+  );
+  const runtimeVisualGetComputedStyle = getComputedStyle.bind(window);
+  const runtimeVisualMapGet = runtimeVisualBindCall(Map.prototype.get);
+  const runtimeVisualMapHas = runtimeVisualBindCall(Map.prototype.has);
+  const runtimeVisualMapSet = runtimeVisualBindCall(Map.prototype.set);
+  const runtimeVisualSetHas = runtimeVisualBindCall(Set.prototype.has);
+  const runtimeVisualSetAdd = runtimeVisualBindCall(Set.prototype.add);
+  const runtimeVisualWeakMapGet = runtimeVisualBindCall(WeakMap.prototype.get);
+  const runtimeVisualWeakMapHas = runtimeVisualBindCall(WeakMap.prototype.has);
+  const runtimeVisualWeakMapSet = runtimeVisualBindCall(WeakMap.prototype.set);
+  const runtimeVisualStringify = JSON.stringify.bind(JSON);
+  const runtimeVisualExpectedKeySet = new RuntimeVisualSet(runtimeVisualExpectedKeys);
+  const runtimeVisualIsInstance = (constructor, value) => (
+    runtimeVisualFunctionHasInstance(constructor, value)
+  );
+  const runtimeVisualStyleValue = (style, property) => (
+    runtimeVisualStyleGetPropertyValue(style, property)
+  );
+  const runtimeVisualQueryElements = (selector) => {
+    const list = runtimeVisualDocumentQuerySelectorAll(document, selector);
+    const values = [];
+    const length = runtimeVisualNodeListLength(list);
+    for (let index = 0; index < length; index += 1) {
+      const value = runtimeVisualNodeListItem(list, index);
+      if (value) runtimeVisualArrayPush(values, value);
+    }
+    return values;
+  };
   let overlayFrame = 0;
   let layoutReportFrame = 0;
   let layoutReportTimer = 0;
@@ -2627,6 +2768,71 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
   const runtimeVisualCanvasPixelLimit = 4194304;
   const runtimeVisualValueLimit = 200000;
   const runtimeVisualBatchValueLimit = 400000;
+  const runtimeVisualClaimedHosts = new RuntimeVisualMap();
+  let runtimeVisualHostClaimsValid = true;
+  const runtimeVisualClaimHost = (host, key) => {
+    if (
+      !runtimeVisualIsInstance(RuntimeVisualElement, host)
+      || !runtimeVisualSetHas(runtimeVisualExpectedKeySet, key)
+    ) return;
+    const claimed = runtimeVisualMapGet(runtimeVisualClaimedHosts, key);
+    if (claimed && claimed !== host) {
+      runtimeVisualHostClaimsValid = false;
+      return;
+    }
+    runtimeVisualMapSet(runtimeVisualClaimedHosts, key, host);
+  };
+  const runtimeVisualProcessHostClaimRecords = (records) => {
+    for (let recordIndex = 0; recordIndex < records.length; recordIndex += 1) {
+      const record = records[recordIndex];
+      const recordType = runtimeVisualMutationRecordType(record);
+      if (recordType === "childList") {
+        const addedNodes = runtimeVisualMutationRecordAddedNodes(record);
+        const addedNodeCount = runtimeVisualNodeListLength(addedNodes);
+        for (let nodeIndex = 0; nodeIndex < addedNodeCount; nodeIndex += 1) {
+          const node = runtimeVisualNodeListItem(addedNodes, nodeIndex);
+          if (!runtimeVisualIsInstance(RuntimeVisualElement, node)) continue;
+          runtimeVisualClaimHost(
+            node,
+            runtimeVisualElementGetAttribute(node, runtimeVisualHostAttribute) || "",
+          );
+        }
+        continue;
+      }
+      if (recordType !== "attributes") continue;
+      const target = runtimeVisualMutationRecordTarget(record);
+      runtimeVisualClaimHost(
+        target,
+        runtimeVisualMutationRecordOldValue(record) || "",
+      );
+      runtimeVisualClaimHost(
+        target,
+        runtimeVisualElementGetAttribute(target, runtimeVisualHostAttribute) || "",
+      );
+    }
+  };
+  const runtimeVisualHostClaimObserver = runtimeVisualExpectedKeys.length
+    ? new RuntimeVisualMutationObserver(runtimeVisualProcessHostClaimRecords)
+    : null;
+  if (runtimeVisualHostClaimObserver) {
+    runtimeVisualMutationObserverObserve(
+      runtimeVisualHostClaimObserver,
+      document.documentElement,
+      {
+        subtree: true,
+        childList: true,
+        attributes: true,
+        attributeFilter: [runtimeVisualHostAttribute],
+        attributeOldValue: true,
+      },
+    );
+  }
+  const runtimeVisualDrainHostClaims = () => {
+    if (!runtimeVisualHostClaimObserver) return;
+    runtimeVisualProcessHostClaimRecords(
+      runtimeVisualMutationObserverTakeRecords(runtimeVisualHostClaimObserver),
+    );
+  };
   const runtimeVisualDelay = (milliseconds) => new Promise((resolve) => {
     window.setTimeout(resolve, milliseconds);
   });
@@ -2677,33 +2883,38 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
     runtimeVisualRounded(rect.top - hostRect.top),
     runtimeVisualRounded(rect.width),
     runtimeVisualRounded(rect.height),
-  ].join(",");
+  ];
+  const runtimeVisualRectSignature = (rect, hostRect) => (
+    runtimeVisualArrayJoin(runtimeVisualRect(rect, hostRect), ",")
+  );
   const runtimeVisualVisible = (element, host, visibilityCache) => {
-    if (!(element instanceof Element)) return false;
+    if (!runtimeVisualIsInstance(RuntimeVisualElement, element)) return false;
     let current = element;
     let visible = true;
     const uncached = [];
-    while (current instanceof Element) {
-      if (visibilityCache.has(current)) {
-        visible = visibilityCache.get(current);
+    while (runtimeVisualIsInstance(RuntimeVisualElement, current)) {
+      if (runtimeVisualWeakMapHas(visibilityCache, current)) {
+        visible = runtimeVisualWeakMapGet(visibilityCache, current);
         break;
       }
-      uncached.push(current);
-      const style = getComputedStyle(current);
+      runtimeVisualArrayPush(uncached, current);
+      const style = runtimeVisualGetComputedStyle(current);
       if (
-        style.display === "none"
-        || style.visibility === "hidden"
-        || style.visibility === "collapse"
-        || Number(style.opacity || 1) <= 0
+        runtimeVisualStyleValue(style, "display") === "none"
+        || runtimeVisualStyleValue(style, "visibility") === "hidden"
+        || runtimeVisualStyleValue(style, "visibility") === "collapse"
+        || Number(runtimeVisualStyleValue(style, "opacity") || 1) <= 0
       ) {
         visible = false;
         break;
       }
       if (current === host) break;
-      current = current.parentElement;
+      current = runtimeVisualNodeParentElement(current);
     }
-    uncached.forEach((item) => visibilityCache.set(item, visible));
-    const rect = element.getBoundingClientRect();
+    runtimeVisualArrayForEach(uncached, (item) => {
+      runtimeVisualWeakMapSet(visibilityCache, item, visible);
+    });
+    const rect = runtimeVisualElementGetBoundingClientRect(element);
     return visible
       && rect.width > 0
       && rect.height > 0;
@@ -2715,51 +2926,70 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
     || value === "rgba(0,0,0,0)"
   );
   const runtimeVisualTextPaint = (style) => [
-    style.color,
-    style.fontFamily,
-    style.fontSize,
-    style.fontStyle,
-    style.fontWeight,
-    style.lineHeight,
-    style.letterSpacing,
-    style.textDecorationColor,
-    style.textDecorationLine,
-    style.textDecorationStyle,
-    style.textShadow,
-  ].join("|");
+    runtimeVisualStyleValue(style, "color"),
+    runtimeVisualStyleValue(style, "font-family"),
+    runtimeVisualStyleValue(style, "font-size"),
+    runtimeVisualStyleValue(style, "font-style"),
+    runtimeVisualStyleValue(style, "font-weight"),
+    runtimeVisualStyleValue(style, "line-height"),
+    runtimeVisualStyleValue(style, "letter-spacing"),
+    runtimeVisualStyleValue(style, "text-decoration-color"),
+    runtimeVisualStyleValue(style, "text-decoration-line"),
+    runtimeVisualStyleValue(style, "text-decoration-style"),
+    runtimeVisualStyleValue(style, "text-shadow"),
+  ];
+  const runtimeVisualTextPaintSignature = (style) => (
+    runtimeVisualArrayJoin(runtimeVisualTextPaint(style), "|")
+  );
   const runtimeVisualBoxPaint = (style) => {
-    const borderVisible = ["Top", "Right", "Bottom", "Left"].some((sideName) => (
-      parseFloat(style["border" + sideName + "Width"] || "0") > 0
-      && style["border" + sideName + "Style"] !== "none"
-      && !runtimeVisualTransparent(style["border" + sideName + "Color"])
-    ));
-    const painted = !runtimeVisualTransparent(style.backgroundColor)
-      || Boolean(style.backgroundImage && style.backgroundImage !== "none")
+    const borderVisible = runtimeVisualArraySome(
+      ["top", "right", "bottom", "left"],
+      (sideName) => (
+        parseFloat(
+          runtimeVisualStyleValue(style, "border-" + sideName + "-width") || "0",
+        ) > 0
+        && runtimeVisualStyleValue(style, "border-" + sideName + "-style") !== "none"
+        && !runtimeVisualTransparent(
+          runtimeVisualStyleValue(style, "border-" + sideName + "-color"),
+        )
+      ),
+    );
+    const backgroundImage = runtimeVisualStyleValue(style, "background-image");
+    const painted = !runtimeVisualTransparent(
+      runtimeVisualStyleValue(style, "background-color"),
+    )
+      || Boolean(backgroundImage && backgroundImage !== "none")
       || borderVisible
-      || Boolean(style.boxShadow && style.boxShadow !== "none")
-      || Boolean(style.filter && style.filter !== "none")
-      || Number(style.opacity || 1) < 1;
+      || Boolean(
+        runtimeVisualStyleValue(style, "box-shadow")
+        && runtimeVisualStyleValue(style, "box-shadow") !== "none"
+      )
+      || Boolean(
+        runtimeVisualStyleValue(style, "filter")
+        && runtimeVisualStyleValue(style, "filter") !== "none"
+      )
+      || Number(runtimeVisualStyleValue(style, "opacity") || 1) < 1;
     if (!painted) return "";
-    return [
-      style.backgroundColor,
-      style.backgroundImage,
-      style.borderTopColor,
-      style.borderTopStyle,
-      style.borderTopWidth,
-      style.borderRightColor,
-      style.borderRightStyle,
-      style.borderRightWidth,
-      style.borderBottomColor,
-      style.borderBottomStyle,
-      style.borderBottomWidth,
-      style.borderLeftColor,
-      style.borderLeftStyle,
-      style.borderLeftWidth,
-      style.borderRadius,
-      style.boxShadow,
-      style.filter,
-      style.opacity,
-    ].join("|");
+    return runtimeVisualArrayJoin([
+      runtimeVisualStyleValue(style, "background-color"),
+      backgroundImage,
+      runtimeVisualStyleValue(style, "border-top-color"),
+      runtimeVisualStyleValue(style, "border-top-style"),
+      runtimeVisualStyleValue(style, "border-top-width"),
+      runtimeVisualStyleValue(style, "border-right-color"),
+      runtimeVisualStyleValue(style, "border-right-style"),
+      runtimeVisualStyleValue(style, "border-right-width"),
+      runtimeVisualStyleValue(style, "border-bottom-color"),
+      runtimeVisualStyleValue(style, "border-bottom-style"),
+      runtimeVisualStyleValue(style, "border-bottom-width"),
+      runtimeVisualStyleValue(style, "border-left-color"),
+      runtimeVisualStyleValue(style, "border-left-style"),
+      runtimeVisualStyleValue(style, "border-left-width"),
+      runtimeVisualStyleValue(style, "border-radius"),
+      runtimeVisualStyleValue(style, "box-shadow"),
+      runtimeVisualStyleValue(style, "filter"),
+      runtimeVisualStyleValue(style, "opacity"),
+    ], "|");
   };
   const runtimeVisualPush = (capture, channel, value) => {
     const normalized = String(value || "");
@@ -2772,11 +3002,11 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
       || capture.budget.atoms > runtimeVisualBatchAtomLimit
       || capture.budget.valueLength > runtimeVisualBatchValueLimit
     ) throw new Error("runtime-visual-budget");
-    capture[channel].push(normalized);
+    runtimeVisualArrayPush(capture[channel], normalized);
   };
   const runtimeVisualCanvas = (canvas, capture, displayRect, includeDisplaySize) => {
-    const width = Math.max(0, Math.round(Number(canvas.width || 0)));
-    const height = Math.max(0, Math.round(Number(canvas.height || 0)));
+    const width = Math.max(0, Math.round(Number(runtimeVisualCanvasWidth(canvas) || 0)));
+    const height = Math.max(0, Math.round(Number(runtimeVisualCanvasHeight(canvas) || 0)));
     const pixels = width * height;
     if (!pixels || pixels > runtimeVisualCanvasPixelLimit) {
       throw new Error("runtime-visual-canvas-size");
@@ -2786,11 +3016,19 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
     }
     capture.budget.canvasPixels += pixels;
     let value = "";
-    const context = canvas.getContext("2d", { willReadFrequently: true });
+    const context = runtimeVisualCanvasGetContext(
+      canvas,
+      "2d",
+      { willReadFrequently: true },
+    );
     if (context) {
-      value = runtimeVisualByteDigest(context.getImageData(0, 0, width, height).data);
+      value = runtimeVisualByteDigest(
+        runtimeVisualImageData(
+          runtimeVisualContextGetImageData(context, 0, 0, width, height),
+        ),
+      );
     } else {
-      const dataUrl = canvas.toDataURL("image/png");
+      const dataUrl = runtimeVisualCanvasToDataUrl(canvas, "image/png");
       if (!dataUrl || dataUrl.length > 24000000) throw new Error("runtime-visual-canvas-data");
       value = runtimeVisualDigest(dataUrl);
     }
@@ -2811,19 +3049,23 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
   ];
   const captureRuntimeVisualHost = (host, budget) => {
     try {
-      if (!(host instanceof Element)) return null;
-      const hostRect = host.getBoundingClientRect();
-      const sourceBoxSignature = host.getAttribute(runtimeVisualSourceBoxAttribute);
-      const currentBoxSignature = JSON.stringify(runtimeVisualSourceBoxAttributes.map((attribute) => (
-        [attribute, host.getAttribute(attribute)]
-      )));
+      if (!runtimeVisualIsInstance(RuntimeVisualElement, host)) return null;
+      const hostRect = runtimeVisualElementGetBoundingClientRect(host);
+      const sourceBoxSignature = runtimeVisualElementGetAttribute(
+        host,
+        runtimeVisualSourceBoxAttribute,
+      );
+      const currentBoxSignature = runtimeVisualStringify(runtimeVisualArrayMap(
+        runtimeVisualSourceBoxAttributes,
+        (attribute) => [attribute, runtimeVisualElementGetAttribute(host, attribute)],
+      ));
       const hostBoxMutated = sourceBoxSignature !== null
         && sourceBoxSignature !== currentBoxSignature;
-      const hostStyle = getComputedStyle(host);
-      const hostFullyTransparent = hostStyle.display !== "none"
-        && hostStyle.visibility !== "hidden"
-        && hostStyle.visibility !== "collapse"
-        && Number(hostStyle.opacity || 1) <= 0
+      const hostStyle = runtimeVisualGetComputedStyle(host);
+      const hostFullyTransparent = runtimeVisualStyleValue(hostStyle, "display") !== "none"
+        && runtimeVisualStyleValue(hostStyle, "visibility") !== "hidden"
+        && runtimeVisualStyleValue(hostStyle, "visibility") !== "collapse"
+        && Number(runtimeVisualStyleValue(hostStyle, "opacity") || 1) <= 0
         && hostRect.width > 0
         && hostRect.height > 0;
       const capture = {
@@ -2836,38 +3078,42 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
         valueLength: 0,
         budget,
       };
-      const runtimeVisualVisibilityCache = new WeakMap();
+      const runtimeVisualVisibilityCache = new RuntimeVisualWeakMap();
       const descendants = [host];
       let hostOwnPaint = false;
       budget.nodes += 1;
-      if (!hostFullyTransparent && !host.matches("canvas")) {
-        const elementWalker = document.createTreeWalker(host, NodeFilter.SHOW_ELEMENT);
-        let descendant = elementWalker.nextNode();
+      if (!hostFullyTransparent && !runtimeVisualElementMatches(host, "canvas")) {
+        const elementWalker = runtimeVisualDocumentCreateTreeWalker(
+          document,
+          host,
+          NodeFilter.SHOW_ELEMENT,
+        );
+        let descendant = runtimeVisualTreeWalkerNextNode(elementWalker);
         while (descendant) {
           budget.nodes += 1;
           if (budget.nodes > runtimeVisualBatchNodeLimit) return null;
-          if (!descendant.closest(
+          if (!runtimeVisualElementClosest(descendant,
             "[data-pageroot-review-projection-layer], [data-pageroot-review-transition-mask]",
-          )) descendants.push(descendant);
+          )) runtimeVisualArrayPush(descendants, descendant);
           if (descendants.length > runtimeVisualAtomLimit) return null;
-          descendant = elementWalker.nextNode();
+          descendant = runtimeVisualTreeWalkerNextNode(elementWalker);
         }
       }
       if (budget.nodes > runtimeVisualBatchNodeLimit) return null;
-      descendants.forEach((element) => {
+      runtimeVisualArrayForEach(descendants, (element) => {
         if (element === host && hostFullyTransparent) {
           hostOwnPaint = true;
           runtimeVisualPush(capture, "paint", "host-box|opacity=0");
           return;
         }
-        if (element instanceof HTMLCanvasElement) {
+        if (runtimeVisualIsInstance(RuntimeVisualCanvasElement, element)) {
           if (!runtimeVisualVisible(
             element,
             host,
             runtimeVisualVisibilityCache,
           )) return;
-          const canvasStyle = getComputedStyle(element);
-          const canvasRect = element.getBoundingClientRect();
+          const canvasStyle = runtimeVisualGetComputedStyle(element);
+          const canvasRect = runtimeVisualElementGetBoundingClientRect(element);
           runtimeVisualCanvas(element, capture, canvasRect, hostBoxMutated);
           const canvasPaint = runtimeVisualBoxPaint(canvasStyle);
           if (canvasPaint) {
@@ -2881,39 +3127,45 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
               runtimeVisualPush(
                 capture,
                 "geometry",
-                "box|" + runtimeVisualRect(canvasRect, hostRect),
+                "box|" + runtimeVisualRectSignature(canvasRect, hostRect),
               );
             }
           }
           return;
         }
-        const style = getComputedStyle(element);
-        const rect = element.getBoundingClientRect();
-        const isVector = element instanceof SVGElement
-          && !["svg", "defs", "desc", "metadata", "title"].includes(
-            element.tagName.toLowerCase(),
+        const style = runtimeVisualGetComputedStyle(element);
+        const rect = runtimeVisualElementGetBoundingClientRect(element);
+        const elementTagName = runtimeVisualElementTagName(element);
+        const isVector = runtimeVisualIsInstance(RuntimeVisualSvgElement, element)
+          && !runtimeVisualArrayIncludes(
+            ["svg", "defs", "desc", "metadata", "title"],
+            elementTagName.toLowerCase(),
           );
         if (isVector) {
-          if (
-            style.display === "none"
-            || style.visibility === "hidden"
-            || Number(style.opacity || 1) <= 0
-            || (rect.width <= 0 && rect.height <= 0)
-          ) return;
-          const attributes = runtimeVisualVectorAttributes.map((name) => (
-            name + "=" + (element.getAttribute(name) || "")
-          )).join("|");
-          runtimeVisualPush(capture, "vector", [
-            element.tagName.toLowerCase(),
+          if (!runtimeVisualVisible(
+            element,
+            host,
+            runtimeVisualVisibilityCache,
+          )) return;
+          const attributes = runtimeVisualArrayJoin(runtimeVisualArrayMap(
+            runtimeVisualVectorAttributes,
+            (name) => name + "=" + (runtimeVisualElementGetAttribute(element, name) || ""),
+          ), "|");
+          runtimeVisualPush(capture, "vector", runtimeVisualArrayJoin([
+            elementTagName.toLowerCase(),
             attributes,
-            style.fill,
-            style.fillOpacity,
-            style.stroke,
-            style.strokeOpacity,
-            style.strokeWidth,
-            style.opacity,
-          ].join("|"));
-          runtimeVisualPush(capture, "geometry", "vector|" + runtimeVisualRect(rect, hostRect));
+            runtimeVisualStyleValue(style, "fill"),
+            runtimeVisualStyleValue(style, "fill-opacity"),
+            runtimeVisualStyleValue(style, "stroke"),
+            runtimeVisualStyleValue(style, "stroke-opacity"),
+            runtimeVisualStyleValue(style, "stroke-width"),
+            runtimeVisualStyleValue(style, "opacity"),
+          ], "|"));
+          runtimeVisualPush(
+            capture,
+            "geometry",
+            "vector|" + runtimeVisualRectSignature(rect, hostRect),
+          );
           return;
         }
         if (!runtimeVisualVisible(
@@ -2921,15 +3173,22 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
           host,
           runtimeVisualVisibilityCache,
         )) return;
-        if (["IMG", "PICTURE", "PROGRESS", "METER", "VIDEO"].includes(element.tagName)) {
-          runtimeVisualPush(capture, "content", [
-            element.tagName,
-            element.getAttribute("src") || "",
-            element.getAttribute("srcset") || "",
-            element.getAttribute("value") || "",
-            element.getAttribute("max") || "",
-          ].join("|"));
-          runtimeVisualPush(capture, "geometry", "media|" + runtimeVisualRect(rect, hostRect));
+        if (runtimeVisualArrayIncludes(
+          ["IMG", "PICTURE", "PROGRESS", "METER", "VIDEO"],
+          elementTagName,
+        )) {
+          runtimeVisualPush(capture, "content", runtimeVisualArrayJoin([
+            elementTagName,
+            runtimeVisualElementGetAttribute(element, "src") || "",
+            runtimeVisualElementGetAttribute(element, "srcset") || "",
+            runtimeVisualElementGetAttribute(element, "value") || "",
+            runtimeVisualElementGetAttribute(element, "max") || "",
+          ], "|"));
+          runtimeVisualPush(
+            capture,
+            "geometry",
+            "media|" + runtimeVisualRectSignature(rect, hostRect),
+          );
         }
         const boxPaint = runtimeVisualBoxPaint(style);
         if (boxPaint) {
@@ -2942,13 +3201,21 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
                 + "x" + runtimeVisualRounded(rect.height)
               : ""));
           if (!ownsPaint || hostBoxMutated) {
-            runtimeVisualPush(capture, "geometry", "box|" + runtimeVisualRect(rect, hostRect));
+            runtimeVisualPush(
+              capture,
+              "geometry",
+              "box|" + runtimeVisualRectSignature(rect, hostRect),
+            );
           }
         }
       });
 
-      const walker = document.createTreeWalker(host, NodeFilter.SHOW_TEXT);
-      let textNode = walker.nextNode();
+      const walker = runtimeVisualDocumentCreateTreeWalker(
+        document,
+        host,
+        NodeFilter.SHOW_TEXT,
+      );
+      let textNode = runtimeVisualTreeWalkerNextNode(walker);
       let textNodes = 0;
       while (textNode && !hostFullyTransparent) {
         textNodes += 1;
@@ -2957,43 +3224,59 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
           textNodes > runtimeVisualAtomLimit
           || budget.nodes > runtimeVisualBatchNodeLimit
         ) return null;
-        const parentElement = textNode.parentElement;
-        const text = String(textNode.textContent || "").replace(/\s+/g, " ").trim();
+        const parentElement = runtimeVisualNodeParentElement(textNode);
+        const text = String(runtimeVisualNodeTextContent(textNode) || "")
+          .replace(/\s+/g, " ")
+          .trim();
         if (
           text
           && parentElement
-          && !parentElement.closest("script, style, noscript, template")
+          && !runtimeVisualElementClosest(
+            parentElement,
+            "script, style, noscript, template",
+          )
           && runtimeVisualVisible(
             parentElement,
             host,
             runtimeVisualVisibilityCache,
           )
         ) {
-          const range = document.createRange();
-          range.selectNodeContents(textNode);
-          const rects = [...range.getClientRects()].filter((rect) => (
-            rect.width > 0 && rect.height > 0
-          ));
-          range.detach();
+          const range = runtimeVisualDocumentCreateRange(document);
+          runtimeVisualRangeSelectNodeContents(range, textNode);
+          const rawRects = runtimeVisualRangeGetClientRects(range);
+          const rects = [];
+          const rectCount = runtimeVisualDomRectListLength(rawRects);
+          for (let rectIndex = 0; rectIndex < rectCount; rectIndex += 1) {
+            const textRect = runtimeVisualDomRectListItem(rawRects, rectIndex);
+            if (textRect && textRect.width > 0 && textRect.height > 0) {
+              runtimeVisualArrayPush(rects, textRect);
+            }
+          }
+          runtimeVisualRangeDetach(range);
           if (rects.length) {
             runtimeVisualPush(capture, "content", "text|" + text);
             runtimeVisualPush(
               capture,
               "paint",
-              "text|" + runtimeVisualTextPaint(getComputedStyle(parentElement)),
+              "text|" + runtimeVisualTextPaintSignature(
+                runtimeVisualGetComputedStyle(parentElement),
+              ),
             );
-            rects.forEach((rect) => runtimeVisualPush(
+            runtimeVisualArrayForEach(rects, (rect) => runtimeVisualPush(
               capture,
               "geometry",
-              "text|" + runtimeVisualRect(rect, hostRect),
+              "text|" + runtimeVisualRectSignature(rect, hostRect),
             ));
           }
         }
-        textNode = walker.nextNode();
+        textNode = runtimeVisualTreeWalkerNextNode(walker);
       }
 
-      const specialRuntimeContent = host.matches("canvas, svg, tbody")
-        || Boolean(host.querySelector("canvas, svg, table, tbody, progress, meter"));
+      const specialRuntimeContent = runtimeVisualElementMatches(host, "canvas, svg, tbody")
+        || Boolean(runtimeVisualElementQuerySelector(
+          host,
+          "canvas, svg, table, tbody, progress, meter",
+        ));
       const chartLike = capture.canvasPixels > 0
         || capture.vector.length > 0
         || hostOwnPaint
@@ -3005,7 +3288,7 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
         || (capture.paint.length >= 1 && capture.content.length >= 1);
       if (!chartLike) {
         return {
-          key: host.getAttribute(runtimeVisualHostAttribute) || "",
+          key: runtimeVisualElementGetAttribute(host, runtimeVisualHostAttribute) || "",
           state: "empty",
           contentSignature: "",
           paintSignature: "",
@@ -3020,10 +3303,10 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
         };
       }
       const channelSignature = (values) => values.length
-        ? runtimeVisualDigest(values.join("\u001f"))
+        ? runtimeVisualDigest(runtimeVisualArrayJoin(values, "\u001f"))
         : "";
       return {
-        key: host.getAttribute(runtimeVisualHostAttribute) || "",
+        key: runtimeVisualElementGetAttribute(host, runtimeVisualHostAttribute) || "",
         state: "stable",
         contentSignature: channelSignature(capture.content),
         paintSignature: channelSignature(capture.paint),
@@ -3040,72 +3323,137 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
       return null;
     }
   };
+  const runtimeVisualExpectedHosts = () => {
+    if (runtimeVisualExpectedKeys.length > runtimeVisualCandidateLimit) return null;
+    if (!runtimeVisualExpectedKeys.length) return [];
+    runtimeVisualDrainHostClaims();
+    if (!runtimeVisualHostClaimsValid) return null;
+    const discovered = runtimeVisualQueryElements(
+      "[" + runtimeVisualHostAttribute + "]",
+    );
+    const hostsByKey = new RuntimeVisualMap();
+    let matchedHosts = 0;
+    runtimeVisualArrayForEach(discovered, (host) => {
+      const key = runtimeVisualElementGetAttribute(host, runtimeVisualHostAttribute) || "";
+      if (!runtimeVisualSetHas(runtimeVisualExpectedKeySet, key)) return;
+      if (runtimeVisualMapHas(hostsByKey, key)) {
+        matchedHosts = runtimeVisualExpectedKeys.length + 1;
+        return;
+      }
+      runtimeVisualMapSet(hostsByKey, key, host);
+      matchedHosts += 1;
+    });
+    if (matchedHosts !== runtimeVisualExpectedKeys.length) return null;
+    const orderedHosts = [];
+    runtimeVisualArrayForEach(runtimeVisualExpectedKeys, (key) => {
+      const host = runtimeVisualMapGet(hostsByKey, key);
+      const claimedHost = runtimeVisualMapGet(runtimeVisualClaimedHosts, key);
+      if (host && claimedHost === host) runtimeVisualArrayPush(orderedHosts, host);
+    });
+    return orderedHosts.length === runtimeVisualExpectedKeys.length
+      ? orderedHosts
+      : null;
+  };
+  const runtimeVisualHostsMatch = (expected, current) => {
+    if (current === null || expected.length !== current.length) return false;
+    for (let index = 0; index < expected.length; index += 1) {
+      if (expected[index] !== current[index]) return false;
+    }
+    return true;
+  };
   const collectRuntimeVisualSnapshots = async () => {
-    const hosts = [...document.querySelectorAll("[" + runtimeVisualHostAttribute + "]")];
-    if (!hosts.length || hosts.length > runtimeVisualCandidateLimit) return [];
+    const hosts = runtimeVisualExpectedHosts();
+    if (hosts === null) return null;
+    if (!hosts.length) return [];
     await Promise.race([
       document.fonts?.ready || Promise.resolve(),
       runtimeVisualDelay(120),
     ]).catch(() => {});
     await runtimeVisualDelay(24);
     await runtimeVisualFrames();
+    if (!runtimeVisualHostsMatch(hosts, runtimeVisualExpectedHosts())) return null;
     const firstBudget = { atoms: 0, nodes: 0, valueLength: 0, canvasPixels: 0 };
-    const first = new Map(hosts.flatMap((host) => {
+    const first = new RuntimeVisualMap();
+    for (let hostIndex = 0; hostIndex < hosts.length; hostIndex += 1) {
+      const host = hosts[hostIndex];
+      const expectedKey = runtimeVisualElementGetAttribute(
+        host,
+        runtimeVisualHostAttribute,
+      ) || "";
       const snapshot = captureRuntimeVisualHost(host, firstBudget);
-      return snapshot?.key ? [[snapshot.key, snapshot]] : [];
-    }));
+      if (!snapshot || snapshot.key !== expectedKey) return null;
+      runtimeVisualMapSet(first, expectedKey, snapshot);
+    }
     await runtimeVisualDelay(64);
     await runtimeVisualFrames();
+    if (!runtimeVisualHostsMatch(hosts, runtimeVisualExpectedHosts())) return null;
     const secondBudget = { atoms: 0, nodes: 0, valueLength: 0, canvasPixels: 0 };
-    return hosts.flatMap((host) => {
-      const key = host.getAttribute(runtimeVisualHostAttribute) || "";
-      const firstSnapshot = first.get(key);
+    const snapshots = [];
+    for (let hostIndex = 0; hostIndex < hosts.length; hostIndex += 1) {
+      const host = hosts[hostIndex];
+      const key = runtimeVisualElementGetAttribute(host, runtimeVisualHostAttribute) || "";
+      if (!runtimeVisualSetHas(runtimeVisualExpectedKeySet, key)) return null;
+      const firstSnapshot = runtimeVisualMapGet(first, key);
       const secondSnapshot = captureRuntimeVisualHost(host, secondBudget);
-      return firstSnapshot
-        && secondSnapshot
-        && JSON.stringify(firstSnapshot) === JSON.stringify(secondSnapshot)
-        ? [secondSnapshot]
-        : [];
-    });
+      if (!firstSnapshot || !secondSnapshot || secondSnapshot.key !== key) return null;
+      if (runtimeVisualStringify(firstSnapshot) === runtimeVisualStringify(secondSnapshot)) {
+        runtimeVisualArrayPush(snapshots, secondSnapshot);
+      }
+    }
+    return snapshots;
   };
   const applyRuntimeVisualChanges = (rawMarkers) => {
-    document.querySelectorAll('[data-pageroot-review-runtime-marker="true"]').forEach((element) => {
-      element.removeAttribute("data-pageroot-review-runtime-marker");
-      element.removeAttribute("data-pageroot-review-marker");
-      element.removeAttribute("data-pageroot-review-marker-types");
-      element.removeAttribute("data-pageroot-review-summary");
-      element.removeAttribute("data-pageroot-review-style-scope");
-      element.removeAttribute("data-pageroot-review-style-owner");
+    runtimeVisualArrayForEach(runtimeVisualQueryElements(
+      '[data-pageroot-review-runtime-marker="true"]',
+    ), (element) => {
+      runtimeVisualElementRemoveAttribute(element, "data-pageroot-review-runtime-marker");
+      runtimeVisualElementRemoveAttribute(element, "data-pageroot-review-marker");
+      runtimeVisualElementRemoveAttribute(element, "data-pageroot-review-marker-types");
+      runtimeVisualElementRemoveAttribute(element, "data-pageroot-review-summary");
+      runtimeVisualElementRemoveAttribute(element, "data-pageroot-review-style-scope");
+      runtimeVisualElementRemoveAttribute(element, "data-pageroot-review-style-owner");
     });
-    const hosts = [...document.querySelectorAll("[" + runtimeVisualHostAttribute + "]")];
-    const hostsByKey = new Map(hosts.map((host) => [
-      host.getAttribute(runtimeVisualHostAttribute) || "",
-      host,
-    ]));
-    const markers = Array.isArray(rawMarkers) && rawMarkers.length <= hosts.length
+    const hosts = runtimeVisualExpectedHosts();
+    const hostsByKey = new RuntimeVisualMap();
+    runtimeVisualArrayForEach(hosts || [], (host) => {
+      runtimeVisualMapSet(
+        hostsByKey,
+        runtimeVisualElementGetAttribute(host, runtimeVisualHostAttribute) || "",
+        host,
+      );
+    });
+    const markers = hosts
+      && runtimeVisualArrayIsArray(rawMarkers)
+      && rawMarkers.length <= hosts.length
       ? rawMarkers
       : [];
     const normalized = [];
-    const seen = new Set();
-    for (const marker of markers) {
+    const seen = new RuntimeVisualSet();
+    for (let markerIndex = 0; markerIndex < markers.length; markerIndex += 1) {
+      const marker = markers[markerIndex];
       const key = safeKey(marker?.key);
       const changeId = safeKey(marker?.changeId);
-      if (!key || !changeId || seen.has(key) || !hostsByKey.has(key)) {
+      if (
+        !key
+        || !changeId
+        || runtimeVisualSetHas(seen, key)
+        || !runtimeVisualMapHas(hostsByKey, key)
+      ) {
         normalized.length = 0;
         break;
       }
-      seen.add(key);
-      normalized.push({ key, changeId });
+      runtimeVisualSetAdd(seen, key);
+      runtimeVisualArrayPush(normalized, { key, changeId });
     }
-    normalized.forEach(({ key, changeId }) => {
-      const host = hostsByKey.get(key);
-      host.setAttribute("data-pageroot-review-runtime-marker", "true");
-      host.setAttribute("data-pageroot-review-marker", changeId);
-      host.setAttribute("data-pageroot-review-marker-types", "style");
-      host.setAttribute("data-pageroot-review-summary", "视觉调整");
-      host.setAttribute("data-pageroot-review-style-scope", "box");
-      host.setAttribute("data-pageroot-review-style-owner", "runtime-" + key);
-      host.setAttribute("data-pageroot-review-active", "false");
+    runtimeVisualArrayForEach(normalized, ({ key, changeId }) => {
+      const host = runtimeVisualMapGet(hostsByKey, key);
+      runtimeVisualElementSetAttribute(host, "data-pageroot-review-runtime-marker", "true");
+      runtimeVisualElementSetAttribute(host, "data-pageroot-review-marker", changeId);
+      runtimeVisualElementSetAttribute(host, "data-pageroot-review-marker-types", "style");
+      runtimeVisualElementSetAttribute(host, "data-pageroot-review-summary", "视觉调整");
+      runtimeVisualElementSetAttribute(host, "data-pageroot-review-style-scope", "box");
+      runtimeVisualElementSetAttribute(host, "data-pageroot-review-style-owner", "runtime-" + key);
+      runtimeVisualElementSetAttribute(host, "data-pageroot-review-active", "false");
     });
     initialProjectionCommitted = true;
     scheduleOverlayRender();
@@ -4205,9 +4553,11 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
     height: Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight || 0),
   });
   const ready = async () => {
-    const runtimeVisualSnapshots = await collectRuntimeVisualSnapshots().catch(() => []);
-    runtimeVisualSnapshotBatch = runtimeVisualSnapshots;
-    publishRuntimeVisualSnapshots();
+    const runtimeVisualSnapshots = await collectRuntimeVisualSnapshots().catch(() => null);
+    if (runtimeVisualSnapshots !== null) {
+      runtimeVisualSnapshotBatch = runtimeVisualSnapshots;
+      publishRuntimeVisualSnapshots();
+    }
     announceReady();
     scheduleLayoutReport(true);
     document.fonts?.ready?.then(() => {
@@ -4230,6 +4580,7 @@ function prepareDocument(
   sessionId: string,
   sourcePath?: string,
   externalBootstrap = false,
+  runtimeVisualCandidateKeys: readonly string[] = [],
 ): { html: string; bootstrapJavaScript: string } {
   document.querySelectorAll("meta[http-equiv]").forEach((element) => {
     const directive = (element.getAttribute("http-equiv") || "").trim().toLowerCase();
@@ -4256,7 +4607,11 @@ function prepareDocument(
 
   const bootstrap = document.createElement("script");
   bootstrap.setAttribute(REVIEW_BOOTSTRAP_ATTRIBUTE, "true");
-  const bootstrapJavaScript = reviewBootstrap(sessionId, side);
+  const bootstrapJavaScript = reviewBootstrap(
+    sessionId,
+    side,
+    runtimeVisualCandidateKeys,
+  );
   if (externalBootstrap) {
     bootstrap.src = REVIEW_BOOTSTRAP_PATH;
   } else {
@@ -4400,6 +4755,7 @@ export function buildReviewDocuments(
         runtimeSections,
       )
     : [];
+  const runtimeVisualCandidateKeys = runtimeVisualCandidates.map(({ key }) => key);
 
   const preparedBefore = prepareDocument(
     beforeDocument,
@@ -4407,6 +4763,7 @@ export function buildReviewDocuments(
     options.sessionId,
     options.sourcePath,
     options.externalBootstrap,
+    runtimeVisualCandidateKeys,
   );
   const preparedAfter = prepareDocument(
     afterDocument,
@@ -4414,6 +4771,7 @@ export function buildReviewDocuments(
     options.sessionId,
     options.sourcePath,
     options.externalBootstrap,
+    runtimeVisualCandidateKeys,
   );
   return {
     before: preparedBefore.html,

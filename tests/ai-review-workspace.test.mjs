@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import vm from "node:vm";
+
+import ts from "typescript";
 
 const [
   workbench,
@@ -25,6 +28,44 @@ const [
   readFile(new URL("../app/components/html-canvas-page-view.ts", import.meta.url), "utf8"),
   readFile(new URL("../app/lib/review-scroll-sync.js", import.meta.url), "utf8"),
 ]);
+
+function generatedReviewBootstrap(candidateKeys = []) {
+  const sourceFile = ts.createSourceFile(
+    "review-document.ts",
+    reviewDocument,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const declaration = sourceFile.statements.find((node) => (
+    ts.isFunctionDeclaration(node)
+    && node.name?.text === "reviewBootstrap"
+  ));
+  assert.ok(declaration, "reviewBootstrap declaration must exist");
+  const transpiled = ts.transpileModule(
+    reviewDocument.slice(declaration.getStart(sourceFile), declaration.end),
+    {
+      compilerOptions: {
+        module: ts.ModuleKind.None,
+        target: ts.ScriptTarget.ES2022,
+      },
+    },
+  ).outputText;
+  const context = vm.createContext({
+    MAX_REVIEW_RUNTIME_VISUAL_CANDIDATES: 128,
+    REVIEW_RUNTIME_VISUAL_HOST_ATTRIBUTE: "data-pageroot-review-runtime-host",
+    REVIEW_RUNTIME_VISUAL_SOURCE_BOX_ATTRIBUTE: "data-pageroot-review-runtime-source-box",
+    REVIEW_RUNTIME_VISUAL_SOURCE_BOX_ATTRIBUTES: [
+      "class",
+      "height",
+      "hidden",
+      "style",
+      "width",
+    ],
+  });
+  new vm.Script(transpiled).runInContext(context);
+  return context.reviewBootstrap("review-session", "before", candidateKeys);
+}
 
 test("a ready AI result is review-first with exactly one direct-open alternative", () => {
   const readyStart = handoff.indexOf('activeRun.status === "ready-to-open"');
@@ -349,8 +390,17 @@ test("runtime chart review supplements only the initial bounded static footprint
   assert.match(reviewDocument, /runtimeVisualBatchValueLimit/);
   assert.match(
     reviewDocument,
-    /JSON\.stringify\(firstSnapshot\) === JSON\.stringify\(secondSnapshot\)/,
+    /runtimeVisualStringify\(firstSnapshot\) === runtimeVisualStringify\(secondSnapshot\)/,
   );
+  assert.match(reviewDocument, /runtimeVisualExpectedKeys = Object\.freeze/);
+  assert.match(reviewDocument, /runtimeVisualDocumentQuerySelectorAll/);
+  assert.match(reviewDocument, /runtimeVisualGetComputedStyle = getComputedStyle\.bind\(window\)/);
+  assert.match(reviewDocument, /const hosts = runtimeVisualExpectedHosts\(\)/);
+  assert.match(reviewDocument, /if \(hosts === null\) return null/);
+  assert.match(reviewDocument, /if \(runtimeVisualSnapshots !== null\)/);
+  assert.match(reviewDocument, /runtimeVisualHostClaimObserver/);
+  assert.match(reviewDocument, /runtimeVisualMutationRecordOldValue/);
+  assert.match(reviewDocument, /claimedHost === host/);
   assert.match(reviewDocument, /type === "apply-runtime-visual-changes"/);
   assert.match(reviewDocument, /new MessageChannel\(\)/);
   assert.match(reviewDocument, /!event\.isTrusted/);
@@ -370,10 +420,14 @@ test("runtime chart review supplements only the initial bounded static footprint
   assert.match(reviewDocument, /hostBoxMutated/);
   assert.match(reviewDocument, /hostFullyTransparent/);
   assert.match(reviewDocument, /"host-box\|opacity=0"/);
-  assert.match(reviewDocument, /runtimeVisualVisibilityCache = new WeakMap/);
+  assert.match(reviewDocument, /runtimeVisualVisibilityCache = new RuntimeVisualWeakMap/);
   assert.match(
     reviewDocument,
-    /while \(current instanceof Element\)[\s\S]*?Number\(style\.opacity \|\| 1\) <= 0[\s\S]*?current === host/,
+    /while \(runtimeVisualIsInstance\(RuntimeVisualElement, current\)\)[\s\S]*?runtimeVisualStyleValue\(style, "opacity"\)[\s\S]*?current === host/,
+  );
+  assert.match(
+    reviewDocument,
+    /if \(isVector\) \{[\s\S]*?runtimeVisualVisible\([\s\S]*?runtimeVisualVisibilityCache/,
   );
   const runtimeChannelTransferStart = reviewDocument.indexOf(
     "const transferRuntimeVisualChannel",
@@ -430,6 +484,15 @@ test("runtime chart review supplements only the initial bounded static footprint
     /if \(reviewLoadFailed\)[\s\S]*?settleWithoutRuntime[\s\S]*?REVIEW_RUNTIME_VISUAL_FRAME_REGISTRATION_MS/,
   );
   assert.doesNotMatch(review, /运行态不稳定|分析未完成|概括标记/);
+});
+
+test("the generated runtime review bootstrap stays syntactically valid", () => {
+  const bootstrap = generatedReviewBootstrap(["runtime-host-1", "runtime-host-2"]);
+  assert.doesNotThrow(() => new vm.Script(bootstrap));
+  assert.match(
+    bootstrap,
+    /const runtimeVisualExpectedKeys = Object\.freeze\([\s\S]*?\["runtime-host-1","runtime-host-2"\]/,
+  );
 });
 
 test("formal review projects frozen user comments on the before page only", () => {

@@ -95,7 +95,13 @@ PR 必须从 Draft 开始。普通推送由独立的 `PR Feedback` workflow 处�
   产生 marker；宿主自身的背景、边框、宿主或内部区域由可见变为 `opacity: 0` 及脚本直接改写的尺寸变化必须命中，且宿主或内部透明层之下的不可见节点变化不得单独命中。
   已有静态框的宿主不得
   再进入运行态候选或增加第二个变化项；原页脚本伪造普通 `ready`、空快照
-  或假 `MessageChannel` 也不得抢先完成任一侧；同一 section 内由未修改
+  或假 `MessageChannel` 也不得抢先完成任一侧；受管 bootstrap 必须先于作者
+  脚本保存 DOM/CSSOM/Canvas 原生能力，作者覆盖 `querySelectorAll` 或
+  `getComputedStyle` 后仍能识别真实 HTML/SVG/Canvas 输出；候选 key 只接受
+  注入时声明且由解析器创建的原宿主，未知、重复、转移或替换宿主均静默
+  回退到既有静态审阅，不能制造运行态 marker；SVG 子树还必须沿祖先链
+  排除隐藏 `g` 下的向量变化。Node 必须先对生成后的 bootstrap 做语法编译，
+  Electron 再覆盖 API shadow、未知 key 与宿主 claim 被窃取场景。同一 section 内由未修改
   脚本独立生成随机值或时间戳的空宿主不得仅因旁边脚本变化进入候选；两侧慢资源分别延迟 50ms/750ms 时，快照缓存必须在各自注册后提交，500ms 决策预算必须等到两侧 iframe 均
   `load` 后才启动；任一 frame 资源持续不完成时，1.5 秒注册上限必须让工具栏恢复可用并保留静态 marker，之后资源完成和迟到运行态证据都不得追加框；候选脚本在首次 `load` 前尝试导航到能伪造 challenge 回复的替换页时，主进程必须拦截导航，同一会话必须一次性重载为只保留受管 bootstrap 的无作者脚本副本，保留静态 marker、不接受替换页快照，且不卡住审阅；内联/浏览器运输不得启用运行态候选。极快
   `srcDoc` 先注册、后建立协调器时，owner 必须主动排空已注册 frame。

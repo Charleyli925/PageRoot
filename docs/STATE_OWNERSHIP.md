@@ -94,10 +94,15 @@ Rules:
 - The runtime-chart supplement never re-analyzes a statically covered host. It
   declares a host only when the changed authored script directly references
   that host's distinctive source identity; section co-location is not enough.
+  The bootstrap binds its evidence-reading DOM/style/Canvas primitives before
+  authored scripts run, owns the frozen analyzer-declared host-key set and
+  records the parser-created element that first claims every key. Undeclared
+  claims are ignored; missing, duplicate, transferred, replaced or drifting
+  declared hosts and capture faults invalidate the whole supplemental batch.
   It accepts only a complete declared before/after pair before its initial deadline,
   includes the host's own painted box, fully transparent disappearance state
   and directly mutated size but prunes every descendant subtree whose ancestor
-  chain reaches zero opacity; hidden descendants, unpainted geometry and
+  chain reaches zero opacity, including SVG wrapper groups; hidden descendants, unpainted geometry and
   indirect layout size are not facts. It ignores
   absolute document position and unstable or late samples, merges with an
   existing owning change instead of duplicating it, and freezes after the

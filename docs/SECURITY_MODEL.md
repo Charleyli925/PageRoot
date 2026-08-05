@@ -152,8 +152,15 @@ session ID, side, declared message source and `MessageEvent.source` all match th
 registered frame. Runtime-chart snapshot messages are additionally limited to
 host keys declared by the frozen source analyzer, bounded atom/signature counts
 and one accepted batch per side. Ordinary frame `ready` messages never carry
-runtime evidence. The trusted bootstrap creates a `MessageChannel` before any
-authored script runs; after both exact frame documents load, the parent sends a fresh random challenge
+runtime evidence. The trusted bootstrap creates a `MessageChannel` and binds
+the DOM traversal, attribute, layout, computed-style and Canvas primitives used
+for evidence before any authored script runs. An early observer records the
+parser-created element that first claims every frozen candidate key. Snapshot
+discovery accepts only that exact key/element set: undeclared attributes are
+ignored, while a missing, duplicate, transferred or replaced declared host,
+key/element drift or capture exception invalidates the whole runtime batch and
+leaves static review authoritative. After both exact
+frame documents load, the parent sends a fresh random challenge
 that the bootstrap consumes only from a browser-trusted parent event in its first
 capture listener without exposing it to later authored listeners, then transfers
 the pre-created capability port. Only the matching port may submit snapshots.

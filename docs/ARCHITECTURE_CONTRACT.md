@@ -134,12 +134,19 @@ source analyzer must first prove a unique source-empty host pair, a relevant
 changed authored script that directly references the host's distinctive
 identity, and absence of an existing static footprint over that host. Merely
 placing another changed script in the same section is never causal evidence.
+The trusted first bootstrap must bind the DOM/style/Canvas collection entry
+points before authored scripts run, receive the exact declared candidate-key
+list from frozen analysis and record the parser-created element that first
+claims each key. Undeclared host attributes have no authority. A missing,
+duplicate, transferred or replaced declared key, key/element drift during
+either sample, or any capture failure invalidates the complete runtime batch
+and retains the static result.
 Both already-isolated review frames may then report one bounded pair of
 same-side-stable, host-relative HTML/SVG/Canvas fingerprints, including the
 host's own painted box, a fully transparent host as a stable disappearance
 state, and directly mutated size while excluding an unpainted empty box,
 indirect layout size and any subtree hidden beneath a zero-opacity host or
-descendant wrapper. A visible subtree becoming transparent remains a real
+descendant wrapper, including SVG vector groups. A visible subtree becoming transparent remains a real
 stable-result change. A batch
 completed before frame registration remains cached for the challenged claim.
 Coordinator installation must drain every already-registered frame bound to the
