@@ -1,0 +1,54 @@
+{
+  "schemaVersion": "1.0.0",
+  "projectId": "project_candidate_compat",
+  "documentId": "doc_candidate_compat",
+  "requestId": "req_0002",
+  "attemptId": "attempt_001",
+  "candidateVersionId": "ver_0002",
+  "baseSha256": "sha256:520db312fef5805370c412daa6a41e9932136814df6b90cc5c2aee6cf409cb4f",
+  "outputSha256": "sha256:bd518ec1b2fd4bffe36c3c56b4b9420a95ba23baff1bae2da1966027cc73a34e",
+  "baseComparisonSha256": "sha256:022a961fd0073d97ee524a4af9c4187c5b32de5071b44163532a0b127f5e4f57",
+  "outputComparisonSha256": "sha256:9aa67dde371df00bbf4fe17c2eea6f6191122422d615cc9f80815e984bbdca3f",
+  "status": "ready",
+  "issueCodes": [],
+  "health": {
+    "completeDocument": true,
+    "bodyHasContent": true
+  },
+  "continuity": {
+    "status": "related",
+    "evidencePoints": 4,
+    "sameTitle": true,
+    "text": {
+      "score": 1,
+      "shared": 12,
+      "base": 12,
+      "output": 20
+    },
+    "anchors": {
+      "score": 1,
+      "shared": 1,
+      "base": 1,
+      "output": 1
+    },
+    "classes": {
+      "score": 1,
+      "shared": 2,
+      "base": 2,
+      "output": 2
+    },
+    "assets": {
+      "score": null,
+      "shared": 0,
+      "base": 0,
+      "output": 0
+    },
+    "baseVisibleTextLength": 15,
+    "outputVisibleTextLength": 23,
+    "baseBodyElementCount": 3,
+    "outputBodyElementCount": 3,
+    "baseParseErrorCount": 0,
+    "outputParseErrorCount": 0
+  },
+  "assessedAt": "2026-08-04T07:45:14.371Z"
+}

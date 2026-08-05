@@ -496,7 +496,8 @@
       "id": "schemas",
       "patterns": [
         "^schemas/.*\\.json$",
-        "^fixtures/v3/source-history\\.current\\.json$"
+        "^fixtures/v3/source-history\\.current\\.json$",
+        "^fixtures/candidate-assessment-compat/.*$"
       ],
       "suites": [],
       "nodeTests": [

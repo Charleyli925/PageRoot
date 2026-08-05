@@ -47,6 +47,15 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   geometry tied to the renderer-provided exact source Hash; it never returns
   runtime HTML, SVG, script state or filesystem data.
 - Strict schemas, frozen inputs and identity/Hash/path checks before accepting AI output; complete-document, non-empty-body and unchanged executable-surface checks remain hard boundaries, while weak page continuity forces isolated review instead of silently opening or falsely rejecting the candidate
+- The history-only decoder for the August 4, 2026 Developer Preview
+  candidate-assessment shape does not trust its omitted executable result. It
+  accepts only the exact retired field set after regular-file and four-Hash
+  verification, re-runs the current executable-surface check from the sealed
+  base/output, and never participates in active candidate opening or source
+  writes. It may project either committed Version history or an already
+  terminal archived outcome; the latter cannot become active again. A formerly
+  `ready` history record may therefore display as `blocked` under the current
+  rule without locking the already-authoritative current HTML.
 - Review-before-open reads only the frozen current HTML and immutable candidate
   Version after rechecking their identities and Hashes. Both copies render in
   unique-origin sandboxed frames; authored scripts, refresh directives and

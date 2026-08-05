@@ -611,6 +611,29 @@ test("every lifecycle fixture satisfies a meta-valid strict JSON Schema", async 
   }
 });
 
+test("the current candidate assessment Schema rejects the pre-executable Developer Preview shape", async () => {
+  const { validate } = await validator(
+    "candidate-assessment.v1.schema.json",
+  );
+  const legacy = await json(
+    new URL(
+      "../fixtures/candidate-assessment-compat/candidate-assessment.pre-executable-dev.json",
+      import.meta.url,
+    ),
+  );
+  assert.equal(validate(legacy), false);
+  assert.ok(
+    validate.errors?.some(
+      (error) =>
+        error.keyword === "required"
+        && [
+          "executable",
+          "executableSurfaceUnchanged",
+        ].includes(String(error.params?.missingProperty || "")),
+    ),
+  );
+});
+
 test("the success bundle preserves one identity, lineage, content and archive across every artifact", async () => {
   const [
     request,

@@ -254,6 +254,17 @@ directory. The clean-cutover decision is recorded in
 
 Initial and accepted AI results are immutable versions. Routine local edits do not create versions. A validated AI result is not activated until the user explicitly chooses it.
 
+Candidate assessment is Attempt evidence, not current-source authority. The
+historical Version and archived terminal-outcome queries have one bounded adapter for the August 4, 2026
+Developer Preview record that omitted executable-surface fields while still
+declaring auxiliary Schema `1.0.0`: it verifies the immutable base/output
+bytes and all four Hashes, re-runs the current assessor, and publishes only the
+canonical in-memory result. The old file remains unchanged. Active or unopened
+candidates never use this history-only adapter, so direct-open safety is not
+widened and this known historical display shape no longer strands an otherwise
+valid current HTML in project hydration. Archived outcomes are terminal and
+cannot become openable candidates through this adapter.
+
 `PROJECT.md` uses debounced autosave and is flushed before project switch or close. One recoverable unsaved comment composer is allowed at a time. Attachment uploads, rule saves and ordinary source writes are finished or surfaced in their owning panel before navigation proceeds.
 
 Persistent source and Draft failures share the single workspace status-banner

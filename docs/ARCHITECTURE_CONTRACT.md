@@ -276,18 +276,30 @@ binding, then drains the aggregate.
 
 ## Compatibility
 
-Compatibility belongs at one versioned decoder or route adapter. Each fallback
-must state the old producer, removal condition and focused coverage. Domain and
-view code use only current canonical states. Inline aliases and permanent
-“just in case” branches are not allowed.
+Compatibility belongs at one versioned decoder or route adapter per retired
+producer. Each fallback must state the old producer, removal condition and
+focused coverage. Domain and view code use only current canonical states.
+Inline aliases and permanent “just in case” branches are not allowed.
 
-The one compatibility decoder accepts only complete PageRoot 0.9.0 v3 project
-records whose registry, `project.json`, initial Version and existing
-`projects/<projectId>` directory prove one identity. It adds `displayName`,
-`createdAt` and `storageDirectoryName=projectId` in place without renaming or
-scanning directories. Remove this adapter only when 0.9.0 project records leave
-the supported upgrade window. v1/v2 and incomplete records remain unsupported
-and are rejected without migration, renaming or deletion.
+The supported compatibility adapters are:
+
+- Complete PageRoot 0.9.0 v3 project records whose registry, `project.json`,
+  initial Version and existing `projects/<projectId>` directory prove one
+  identity may gain `displayName`, `createdAt` and
+  `storageDirectoryName=projectId` in place without renaming or scanning
+  directories. Remove this adapter only when 0.9.0 project records leave the
+  supported upgrade window. v1/v2 and incomplete records remain unsupported.
+- A historical Version or archived failed/no-change outcome produced by the
+  short-lived August 4, 2026 Developer Preview may have a
+  `candidate-assessment.json` whose declared
+  `1.0.0` shape predates executable-surface fields. The historical query
+  adapter accepts only that exact field set, verifies the frozen base and
+  sealed output as ordinary files against all exact/comparison Hashes, then
+  deterministically re-runs the current assessment and exposes only the
+  canonical result in memory. It never rewrites the Attempt and never applies
+  to an active/unopened candidate; an archived outcome remains terminal.
+  Remove it when those Developer Preview records leave the supported upgrade
+  window.
 
 ## Change requirements
 

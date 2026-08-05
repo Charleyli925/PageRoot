@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from "node:util";
+
 import {
   attributesFor,
   hasCompleteDocumentStructure,
@@ -36,6 +38,39 @@ const ASSET_ATTRIBUTES = new Set([
 ]);
 const MAX_CONTINUITY_TEXT_CODEPOINTS = 100_000;
 const TEXT_SHINGLE_SIZE = 4;
+const PRE_EXECUTABLE_DEVELOPER_PREVIEW_FIELDS = Object.freeze([
+  "schemaVersion",
+  "projectId",
+  "documentId",
+  "requestId",
+  "attemptId",
+  "candidateVersionId",
+  "baseSha256",
+  "outputSha256",
+  "baseComparisonSha256",
+  "outputComparisonSha256",
+  "status",
+  "issueCodes",
+  "health",
+  "continuity",
+  "assessedAt",
+]);
+const PRE_EXECUTABLE_DEVELOPER_PREVIEW_HEALTH_FIELDS = Object.freeze([
+  "completeDocument",
+  "bodyHasContent",
+]);
+
+function isRecord(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function hasExactlyFields(value, fields) {
+  if (!isRecord(value)) return false;
+  const actual = Object.keys(value).sort();
+  const expected = [...fields].sort();
+  return actual.length === expected.length
+    && actual.every((field, index) => field === expected[index]);
+}
 
 function normalizedVisibleText(value) {
   return String(value || "")
@@ -350,5 +385,77 @@ export function assessHtmlCandidate({ baseHtml, outputHtml }) {
     },
     continuity,
     executable,
+  };
+}
+
+function preExecutableDeveloperPreviewProjection(currentAssessment) {
+  const { completeDocument, bodyHasContent } = currentAssessment.health;
+  let status = "ready";
+  const issueCodes = [];
+  if (!completeDocument) {
+    status = "blocked";
+    issueCodes.push("HTML_DOCUMENT_INCOMPLETE");
+  } else if (!bodyHasContent) {
+    status = "blocked";
+    issueCodes.push("HTML_BODY_EMPTY");
+  } else if (currentAssessment.continuity.status === "uncertain") {
+    status = "attention";
+    issueCodes.push("PAGE_CONTINUITY_UNCERTAIN");
+  }
+  return {
+    schemaVersion: CANDIDATE_ASSESSMENT_SCHEMA_VERSION,
+    status,
+    issueCodes,
+    health: {
+      completeDocument,
+      bodyHasContent,
+    },
+    continuity: currentAssessment.continuity,
+  };
+}
+
+/**
+ * Decode the short-lived August 4, 2026 Developer Preview producer that wrote
+ * schemaVersion 1.0.0 before executable-surface evidence joined that contract.
+ * The caller must independently verify the sealed base/output hashes first.
+ * Remove this adapter after those Developer Preview records leave the supported
+ * upgrade window; current writers must continue emitting the strict full v1.
+ */
+export function decodePreExecutableDeveloperPreviewAssessment({
+  assessment,
+  baseHtml,
+  outputHtml,
+}) {
+  if (
+    !hasExactlyFields(
+      assessment,
+      PRE_EXECUTABLE_DEVELOPER_PREVIEW_FIELDS,
+    )
+    || !hasExactlyFields(
+      assessment.health,
+      PRE_EXECUTABLE_DEVELOPER_PREVIEW_HEALTH_FIELDS,
+    )
+  ) return null;
+
+  const currentAssessment = assessHtmlCandidate({ baseHtml, outputHtml });
+  const legacyProjection = preExecutableDeveloperPreviewProjection(
+    currentAssessment,
+  );
+  const recordedProjection = {
+    schemaVersion: assessment.schemaVersion,
+    status: assessment.status,
+    issueCodes: assessment.issueCodes,
+    health: assessment.health,
+    continuity: assessment.continuity,
+  };
+  if (!isDeepStrictEqual(recordedProjection, legacyProjection)) return null;
+
+  return {
+    ...assessment,
+    status: currentAssessment.status,
+    issueCodes: currentAssessment.issueCodes,
+    health: currentAssessment.health,
+    continuity: currentAssessment.continuity,
+    executable: currentAssessment.executable,
   };
 }

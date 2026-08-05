@@ -3855,7 +3855,7 @@ export default function Workbench() {
       if (epoch === projectSessionRef.current.epoch) {
         const message = productErrorMessage(
           cause,
-          "项目状态读取超时，请重试；源文件没有被改动。",
+          "项目状态暂时无法读取，请重试；源文件没有被改动。",
         );
         projectHydratingRef.current = false;
         projectLoadErrorRef.current = message;

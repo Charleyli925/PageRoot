@@ -298,7 +298,9 @@ export function HistoryVersionItem({
               <li>{version.summary || "完整 HTML 内容与页面结构"}</li>
               <li>评论、图片与附件的完整保留</li>
               <li>
-                {version.candidateAssessment?.status === "attention"
+                {version.candidateAssessment?.status === "blocked"
+                  ? "旧版候选按当前安全规则复核后需要注意"
+                  : version.candidateAssessment?.status === "attention"
                   ? "HTML 可以打开，版本连续性已标记为需审阅"
                   : version.candidateAssessment
                     ? "HTML 可用性与版本连续性已检查"
@@ -434,7 +436,9 @@ export function HistoryVersionItem({
                   <span>已归档</span>
                 </header>
                 <p>
-                  {version.candidateAssessment?.status === "attention"
+                  {version.candidateAssessment?.status === "blocked"
+                    ? "这份历史候选由早期开发测试版生成；当前复核发现它没有通过现行安全检查。版本文件仍会保留，当前 HTML 的编辑不受影响。"
+                    : version.candidateAssessment?.status === "attention"
                     ? "候选 HTML 可以打开，但系统找到的上一版共同特征较少；审阅提醒已随版本归档。"
                     : version.candidateAssessment
                       ? "HTML 可用性、可执行内容和上一版连续性已经检查并保存。"
