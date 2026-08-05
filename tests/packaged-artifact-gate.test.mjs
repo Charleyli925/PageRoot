@@ -135,6 +135,7 @@ async function createPackagedFixture(t) {
     "desktop/application-update.mjs",
     "desktop/usage-telemetry.mjs",
     "desktop/preview-protocol.mjs",
+    "desktop/edit-visual-capture.mjs",
     "public/brand-logo.png",
     "dist-desktop/renderer/index.html",
   ]) {
@@ -233,6 +234,7 @@ async function createPackagedFixture(t) {
     "desktop/application-update.mjs",
     "desktop/usage-telemetry.mjs",
     "desktop/preview-protocol.mjs",
+    "desktop/edit-visual-capture.mjs",
     "public/brand-logo.png",
     "package.json",
   ]) {
@@ -590,7 +592,7 @@ test("the app-bundle gate compares app.asar, Bridge scripts, schemas and plist v
     verifySignature: false,
   });
   assert.equal(result.version, "0.7.0");
-  assert.equal(result.asarFileCount, 21);
+  assert.equal(result.asarFileCount, 22);
   assert.equal(result.schemaFileCount, 5);
   assert.equal(result.legalResourceCount, 5);
   assert.equal(result.telemetry.enabled, true);
