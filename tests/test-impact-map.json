@@ -559,6 +559,12 @@
       "nodeTests": []
     },
     {
+      "id": "shared-browser-electron-e2e-driver",
+      "patterns": ["^tests/e2e/browser/pageroot-driver\\.mjs$"],
+      "suites": ["browser-smoke", "electron-smoke"],
+      "nodeTests": []
+    },
+    {
       "id": "browser-fixtures",
       "patterns": ["^tests/fixtures/native-dom/.*"],
       "suites": ["browser-smoke", "real-html"],

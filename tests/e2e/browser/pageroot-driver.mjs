@@ -131,6 +131,58 @@ export async function ensureSourceEditingTestRuntime(page) {
   await page.reload();
 }
 
+const FIXTURE_OPEN_ATTEMPTS = 3;
+const FIXTURE_OPEN_ATTEMPT_TIMEOUT = 18_000;
+
+async function openFixtureThroughHiddenInput({
+  page,
+  editor,
+  fileInput,
+  name,
+  buffer,
+}) {
+  const visibleFileStem = name.replace(/\.html?$/iu, "");
+  const fixtureTitle = page.locator(".window-file-title-row")
+    .getByText(visibleFileStem, { exact: true })
+    .first();
+  let lastError;
+
+  for (let attempt = 1; attempt <= FIXTURE_OPEN_ATTEMPTS; attempt += 1) {
+    await fileInput.setInputFiles({
+      name,
+      mimeType: "text/html",
+      buffer,
+    });
+    try {
+      await fixtureTitle.waitFor({
+        state: "visible",
+        timeout: FIXTURE_OPEN_ATTEMPT_TIMEOUT,
+      });
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt === FIXTURE_OPEN_ATTEMPTS) break;
+
+      // Directly assigning the hidden input skips the pre-picker
+      // prepareProjectSwitch() call used by the real Open action. The input
+      // handler still runs its own switch fence, and may reject one submission
+      // while a just-launched canvas finishes draining. Re-prove the old canvas
+      // is healthy and clear the input before one bounded re-submission.
+      await expect(editor).toHaveAttribute("data-render-verified", "true");
+      await fileInput.waitFor({ state: "attached" });
+      await fileInput.setInputFiles([]);
+    }
+  }
+
+  const currentTitle = await page.locator(".window-file-title-row")
+    .textContent()
+    .catch(() => "");
+  throw new Error(
+    `PageRoot did not open fixture ${JSON.stringify(name)} after ${FIXTURE_OPEN_ATTEMPTS} bounded submissions; current title: ${JSON.stringify(currentTitle?.trim() || "")}.`,
+    { cause: lastError },
+  );
+}
+
 export async function loadFixture(page, name, { buffer = fixtureBuffer(name) } = {}) {
   // Pure browser use is a formal read-only preview. These source-editing tests
   // exercise the desktop renderer, so expose only the narrow capability marker
@@ -150,16 +202,13 @@ export async function loadFixture(page, name, { buffer = fixtureBuffer(name) } =
 
   const fileInput = page.locator('input[type="file"][accept*=".html"]').first();
   await fileInput.waitFor({ state: "attached" });
-  await fileInput.setInputFiles({
+  await openFixtureThroughHiddenInput({
+    page,
+    editor,
+    fileInput,
     name,
-    mimeType: "text/html",
     buffer,
   });
-  const visibleFileStem = name.replace(/\.html?$/iu, "");
-  await page.locator(".window-file-title-row")
-    .getByText(visibleFileStem, { exact: true })
-    .first()
-    .waitFor({ state: "visible" });
 
   await expect(editor).toHaveAttribute("data-render-verified", "true");
 
