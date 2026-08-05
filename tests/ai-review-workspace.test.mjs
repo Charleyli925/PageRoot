@@ -347,7 +347,7 @@ test("formal review projects frozen user comments on the before page only", () =
   assert.match(review, /data-testid="review-comment-marker"/);
   assert.match(review, /data-testid="review-comment-bubble"/);
   assert.match(review, />评<\/span>/);
-  assert.match(styles, /\.reviewCommentMarker\s*\{[\s\S]*?width:\s*48px;[\s\S]*?height:\s*48px;/);
+  assert.match(styles, /\.reviewCommentMarker\s*\{[\s\S]*?width:\s*38px;[\s\S]*?height:\s*38px;/);
   assert.match(styles, /\.reviewCommentMarker\s*\{[\s\S]*?border-radius:\s*14px;/);
   assert.match(styles, /\.reviewCommentMarker\s*\{[\s\S]*?background:\s*#6258d6;/);
   assert.match(styles, /\.reviewCommentMarker\s*\{[\s\S]*?color:\s*#fff;/);

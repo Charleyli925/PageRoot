@@ -552,8 +552,8 @@
 
 .reviewCommentMarker {
   position: absolute;
-  width: 48px;
-  height: 48px;
+  width: 38px;
+  height: 38px;
   display: grid;
   place-items: center;
   border: 2px solid rgb(255 255 255 / 92%);
