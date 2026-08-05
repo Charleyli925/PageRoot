@@ -4,6 +4,12 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+- Keep AI review text frames aligned to semantic punctuation and word ranges.
+  Replacing “品均基本持平” with “单品效率整体稳定，增幅仅+0.10%” now
+  marks the complete old and new phrases instead of treating their accidental
+  shared “品” character as unchanged or splitting the green frame. Short Chinese
+  replacements remain pairable, while distant edits in long punctuation-free
+  copy no longer pull the unchanged text between them into one oversized frame.
 - Restore projects created by the short-lived August 4 Developer Preview when
   a historical Version or archived terminal outcome assessment predates executable-surface
   fields. PageRoot now verifies the frozen/sealed HTML and Hashes, re-runs the

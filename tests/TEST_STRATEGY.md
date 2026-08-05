@@ -56,6 +56,7 @@ Tree，不在测试执行期间自动合并分支。组合 Tree 含任何未合�
   位置不变、作者处理器未运行且导出字节不变；Electron
   独立重读真实源文件，证明作者事件未运行且磁盘字节不变。
 - AI 闭环：Node 集成必须分别证明普通/跨标签相关改动可建版、不相关但可用 HTML 进入 `attention` 并强制审阅、可执行表面变化被阻断，以及失败/no-change 可从 workspace 恢复。任务级跑正常闭环和一个硬失败代表场景；发布级覆盖复制失败、缺失 finalizer、非法 HTML、版本激活失败与终态返回/重开。正式 Electron 审阅用例还必须证明默认“双页 + 全部变化 + 18%”、页面/筛选/可见度/导航彼此独立、左右单页和双页均铺满可用 Canvas、完全相同文字不被标记、叶子级精确文字差异、重复短文案和中间插入结构不会错配、未修改指标卡不产生文案/结构/视觉假阳性、文本新增绿框/删除红框/结构蓝框/视觉紫框、每个框都有简短标注且整块新增统一为“新增内容”、连续跨行修改只生成一个不穿越空白的阶梯形框、每个框与遮罩 union-path 透明孔几何一致且阶梯空角继续虚化、页面自身的 `svg`/`div` 规则不能改写投影几何或遮罩外观、导航区域不画框、连通 marker 融合且祖先嵌套框删除、全部变化同处多类型只显示一个融合框、具体结构/视觉说明、内容地图、上下导航与左右页点击共用显式/索引式 Tab 识别并双向揭示隐藏 Tab、切换期间旧框不残留且虚化无空档、安全按钮和表单在同步或独立滚动下均能左右双向同步、0/50/100 上下文可见度、横向联动、不同高度下按区域进度平滑收敛及顶端无反向回跳、修改前页“评”字悬停气泡只读且修改后页不重复、分段控件键盘移动、工具栏不遮挡页面标题、确认弹窗文案/焦点/按钮层级、返回修改前直接恢复编辑且保留评论与候选文件，以及确认打开全程不显示等待 AI 页面。Browser 另外证明点击页面 padding 与 App 空白会一起结束编辑、选区和工具栏。测试自动生成受控 AI 输出并执行正式 finalizer，不等待外部模型或真人接力。
+- 文案 footprint 算法由 Node 直接用字符范围 oracle 验证：覆盖有意义标点前后的独立替换、纯插入、稳定句首词、短中文块的字符级辅助配对、超长无标点文本中的多处远距离精确修改，以及“品均基本持平”替换为“单品效率整体稳定，增幅仅+0.10%”时不能用偶然相同的“品”抵消增删。Electron 在既有正式审阅闭环中只复测这个真实故障的 DOM marker 接线，不重复纯算法排列。
 - 应用更新：Node 用伪 updater 证明 stable-only、点击后单次下载、差分开启、普通退出不安装、仅 downloaded 状态可安装和错误降级；Preload/Workbench 合同证明状态快照、下载/安装意图、无 Canvas 完成横幅与重启确认保持窄边界。
 - 默认浏览器打开：Node 直接执行主进程操作与 sender 权限门，证明 malformed、非 HTML、未知项目、非普通文件和非可信 frame 均不会调用 shell；Workbench 合同只补充证明精确 edit revision 的围栏、写回和 IPC 顺序。
 - 使用数据：Node 使用伪网络端点证明安装 ID 持久、会话 ID 轮换、
@@ -80,7 +81,7 @@ Browser 验证真实 DOM 中保存卡片、草稿卡片和输入框在当前/其
 切换、聚焦和展开后的相对顺序、无重叠结果，以及输入框自动聚焦、
 `Enter` 保存、`Shift + Enter` 换行。
 
-顶层 Node 测试在一次执行中只出现一次。精确影响映射优先；只有找不到任何精确用例时才启用 `node-core` 兜底。PR CI 在 Linux 构建一次 Web renderer，供 Node 和 Browser 共享；每个 macOS Electron job 在目标系统本地构建 renderer，并先用独立 preflight 证明窗口可见、计时器和 animation frame 正常推进。Native Electron 与 AI 闭环分成两个 job，Browser 保持每个分片单 worker、零重试，但跨三个独立分片并发。
+顶层 Node 测试在一次执行中只出现一次。精确影响映射优先；只有找不到任何精确用例时才启用 `node-core` 兜底。PR CI 在 Linux 构建一次 Web renderer，供 Node 和 Browser 共享；每个 macOS Electron job 在目标系统本地构建 renderer，并先用独立 preflight 证明窗口可见、计时器和 animation frame 正常推进。Native Electron 与 AI 闭环分成两个 job，Browser 保持每个分片单 worker、零重试，但跨三个独立分片并发。测试直接提交隐藏文件 input 时不会经过真实“打开”动作的 pre-picker switch fence；共享 fixture driver 只允许在旧画布仍为 render-verified、input 仍 attached 时有限重提，不能重跑整条用例或掩盖加载后的产品断言失败。
 
 关键 CI 命令通过 `scripts/ci-evidence.mjs` 记录 commit、Tree、job、耗时、退出状态、标准化失败摘要与稳定签名。环境 preflight 失败可直接归类为 `ci_environment`；源码测试失败先标 `needs_triage`，再依据独立 oracle 归为 `product`、`test_script` 或 `ci_environment`。同一 SHA 的环境嫌疑只重跑失败 job；正式流程第二 job 失败时保留并复用第一 job 的签名 App checkpoint，不重新做已通过的构建、运行、签名和 App 公证。相同签名连续两次失败且本地不复现时冻结候选并登记 CI incident。完整规则见 `docs/RELEASE_PIPELINE_GOVERNANCE.md`。
 `tests/ci-evidence.test.mjs` 会枚举源码、开发预览、候选与发布工作流实际使用的
