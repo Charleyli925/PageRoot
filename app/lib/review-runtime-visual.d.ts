@@ -62,6 +62,7 @@ export class ReviewRuntimeVisualCoordinator {
     clearTimer?: (handle: unknown) => void;
   });
   readonly resolved: boolean;
+  start(): boolean;
   accept(side: "before" | "after", rawSnapshots: unknown): boolean;
   dispose(): void;
 }

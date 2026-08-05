@@ -960,6 +960,7 @@ export default function AiReviewWorkspace({
   const registerFrame = useCallback((side: ReviewSide, frame: HTMLIFrameElement | null) => {
     framesRef.current[side] = frame;
     if (frame) window.requestAnimationFrame(() => {
+      runtimeVisualCoordinatorRef.current?.start();
       const resolved = runtimeVisualResolutionRef.current;
       if (resolved?.documents === documents) {
         commitRuntimeVisualFrame(side, resolved);

@@ -187,6 +187,9 @@ test("runtime visual coordination commits once, falls back atomically, and ignor
     },
     clearTimer: () => {},
   });
+  assert.deepEqual(timerDelays, []);
+  assert.equal(coordinator.start(), true);
+  assert.equal(coordinator.start(), false);
   assert.deepEqual(timerDelays, [500]);
   assert.equal(coordinator.accept("before", [snapshot("runtime-host-1")]), true);
   assert.deepEqual(resolutions, []);

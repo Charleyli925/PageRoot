@@ -350,6 +350,7 @@ test("runtime chart review supplements only the initial bounded static footprint
   assert.match(reviewDocument, /type === "apply-runtime-visual-changes"/);
   assert.match(review, /new ReviewRuntimeVisualCoordinator/);
   assert.match(review, /REVIEW_RUNTIME_VISUAL_DEADLINE_MS/);
+  assert.match(review, /runtimeVisualCoordinatorRef\.current\?\.start\(\)/);
   assert.match(review, /confirmationAction \|\| runtimeVisualPending/);
   assert.doesNotMatch(review, /运行态不稳定|分析未完成|概括标记/);
 });

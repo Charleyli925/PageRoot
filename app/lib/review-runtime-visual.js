@@ -298,12 +298,20 @@ export class ReviewRuntimeVisualCoordinator {
     this.resolved = false;
     this.disposed = false;
     this.timer = null;
-    if (this.candidates.length) {
-      this.timer = this.setTimer(
-        () => this.#resolve(Object.freeze([])),
-        this.deadlineMs,
-      );
-    }
+  }
+
+  start() {
+    if (
+      this.resolved
+      || this.disposed
+      || !this.candidates.length
+      || this.timer !== null
+    ) return false;
+    this.timer = this.setTimer(
+      () => this.#resolve(Object.freeze([])),
+      this.deadlineMs,
+    );
+    return true;
   }
 
   accept(side, rawSnapshots) {
@@ -313,6 +321,7 @@ export class ReviewRuntimeVisualCoordinator {
       || (side !== "before" && side !== "after")
       || this.snapshots[side] !== null
     ) return false;
+    this.start();
     this.snapshots[side] = acceptReviewRuntimeVisualSnapshots(
       rawSnapshots,
       this.allowedCandidateKeys,
