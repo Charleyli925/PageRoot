@@ -580,19 +580,18 @@ finalizer 最后原子写入 `completion.json`。工作台发现它后进入 `va
 5. 冻结基础 Hash。
 6. 实际 output Hash。
 7. HTML 是带 doctype、`html/head/body` 闭合结构的完整文档，body 存在可显示内容。
-8. output 与冻结基础的脚本、inline handler、`javascript:` URL 和 meta refresh 表面逐项一致。
-9. 以可见文字、稳定锚点、class、资源引用和 title 粗粒度判断是否继承上一版。
-10. 规范化比较 Hash。
-11. completion 写出后 output 未变化。
+8. 以可见文字、稳定锚点、class、资源引用和 title 粗粒度判断是否继承上一版。
+9. 规范化比较 Hash。
+10. completion 写出后 output 未变化。
 
 任何失败均不建版。界面显示明确错误与可恢复动作。
 
 评论 TargetRef 继续随 Request 冻结，供 AI 理解要求、对比审阅和历史追溯，但不再作为
 候选 Version 的 subtree 精确验收边界。正文、属性、标签或普通样式超出评论位置，不单独
 导致失败。候选与上一版共同特征不足时写入 `candidate-assessment.json` 的 `attention` 状态，
-仍保留不可变 Version，但必须先审阅，不能“直接打开”。文档不完整、body 无内容、可执行
-表面变化或身份/Hash/路径/协议不一致时才阻断，并保留 Request、Attempt、output、assessment
-与失败 outcome。
+仍保留不可变 Version，但必须先审阅，不能“直接打开”。脚本、inline handler、可执行 URL
+和 refresh 指令变化不检测、不提示，按普通候选内容建版。文档不完整、body 无内容或
+身份/Hash/路径/协议不一致时才阻断，并保留 Request、Attempt、output、assessment 与失败 outcome。
 
 处理面板不逐条暴露上述内部检查，而是固定合并成四个用户阶段：
 “准备并复制”“等待 AI 完成”“校验并保存”“结果”。每轮只允许一个当前阶段；
@@ -767,11 +766,10 @@ V1.8 · 生成于 16:41
 活动历史只读取严格 v3 的 `initial` 与 `internal-ai` Version。旧 `local-editor`、`restore` 或 v1/v2 manifest 只存在于切换前只读归档，新程序不读取、展示或混入当前历史；其中的 HTML 快照只能作为普通文件重新登记为新 Document 和 V1。
 
 历史里的 candidate assessment 是辅助校验展示，不拥有当前 HTML 的编辑权限。对
-2026-08-04 短期 Developer Preview 漏写可执行表面字段的精确旧形态，历史 Version 查询与
-已归档终态查询先核对冻结 base、sealed output 和四个 Hash，再按当前规则重新评估并只返回
-内存结果，不改写历史 Attempt。若复核发现可执行表面变化，卡片明确说明这是早期测试版
-结果、当前规则未通过；归档失败结果仍保持终态，同时不把当前权威 HTML 锁在“正在确认
-画布”。活动或尚未打开的候选仍按现行严格记录处理，不能使用这一历史兼容入口。
+2026 年 8 月 Developer Preview 的两种 `1.0.0` 形态（缺少或带有现已退役的可执行表面
+字段），历史 Version 查询与已归档终态查询先核对冻结 base、不可变候选证据和四个 Hash，
+再按当前文档健康与连续性规则重新评估，只返回移除退役字段的内存结果，不改写历史
+Attempt。旧记录中的脚本结论不再改变状态或产生提示；归档失败结果仍保持终态。
 
 内部 `V1/V2/V3` 与界面 `V1.0/V1.1/V1.2` 按同一 ordinal 一一对应。历史卡片必须在抽屉可用宽度内自动换行，不能要求用户左右滑动才能读完标题、摘要、评论或修改前后内容。
 

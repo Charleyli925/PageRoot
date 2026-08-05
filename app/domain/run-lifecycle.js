@@ -228,8 +228,6 @@ export function candidateAssessmentFromRecord(value) {
     health: {
       completeDocument: health.completeDocument === true,
       bodyHasContent: health.bodyHasContent === true,
-      executableSurfaceUnchanged:
-        health.executableSurfaceUnchanged === true,
     },
     continuity: {
       status: continuity.status === "related" ? "related" : "uncertain",
@@ -256,7 +254,6 @@ const ERROR_COPY_BY_CODE = new Map([
   ["INCOMPLETE_HTML", "返回的 HTML 不完整，无法打开。"],
   ["HTML_DOCUMENT_INCOMPLETE", "返回的 HTML 不完整，无法打开。"],
   ["HTML_BODY_EMPTY", "返回的 HTML 没有可显示的页面内容。"],
-  ["EXECUTABLE_CONTENT_CHANGED", "返回内容新增或修改了可执行脚本，未自动采用。"],
   ["OUTPUT_HASH_MISMATCH", "返回文件在完成后发生了变化，当前 HTML 没有被覆盖。"],
   ["BASE_SNAPSHOT_HASH_MISMATCH", "本轮基准 HTML 与提交时不一致，当前 HTML 没有被覆盖。"],
   ["COMPARISON_HASH_MISMATCH", "返回结果与完成记录不一致，当前 HTML 没有被覆盖。"],

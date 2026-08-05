@@ -55,7 +55,7 @@ The release and artifact gates require a clean committed tree. Any source change
 - Visual edits use minimal source patches and preserve unrelated bytes, native selection, IME composition and source identity.
 - Direct source edits still fail closed on ambiguous targets, stale hashes, external writes, invalid patch scope, identity failures and unsafe paths.
 - Privileged filesystem behavior stays behind the Electron/Bridge boundary with narrow validated IPC.
-- AI output remains untrusted until protocol, identity, hash, path, complete-HTML and executable-surface checks pass. Frozen comment targets guide generation and review; they are not a pixel- or subtree-exact Version acceptance boundary. Weak page continuity forces review instead of failing an otherwise usable candidate.
+- AI output remains untrusted until protocol, identity, hash, path and complete-HTML checks pass. Authored scripts are part of the user's requested HTML and must never be classified, compared or blocked merely because they changed. Frozen comment targets guide generation and review; they are not a pixel- or subtree-exact Version acceptance boundary. Weak page continuity forces review instead of failing an otherwise usable candidate.
 - QoderWork handoff remains clipboard-only unless the user explicitly authorizes a different product boundary.
 - Tests and fixtures use synthetic data only. Never commit real user HTML, attachments, project records, credentials, personal paths, logs or generated binaries.
 

@@ -469,6 +469,8 @@ test("desktop package carries the v3 patch engine, candidate assessment and acti
   assert.match(htmlSourceParser, /sourceCodeLocationInfo:\s*true/);
   assert.match(candidateAssessment, /assessHtmlCandidate/);
   assert.match(candidateAssessment, /PAGE_CONTINUITY_UNCERTAIN/);
+  assert.doesNotMatch(candidateAssessment, /EXECUTABLE_CONTENT_CHANGED/);
+  assert.doesNotMatch(candidateAssessment, /function executableSurface/);
   assert.match(scopeValidator, /SCOPE_ENFORCEMENT_MODE/);
   assert.match(scopeValidator, /validateScope/);
   assert.match(bridgeShutdown, /BridgeShutdownTimeoutError/);

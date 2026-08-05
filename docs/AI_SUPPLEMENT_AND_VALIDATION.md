@@ -25,19 +25,20 @@
 - 冻结输入、输出、completion、manifest、commit marker 的 Hash；
 - 完整 HTML、受管路径、普通文件与无路径逃逸；
 - supplement 封存、引用、附件与 Hash；
-- 管理元信息和可执行表面变化；
+- 管理元信息；
 - 事务、工作副本与版本完整性。
 
 完成记录和规范化比较通过后，Bridge 生成 `candidate-assessment.json`。它只回答两个
-产品问题：返回的是不是完整、可显示且没有改变可执行表面的 HTML；它是否大体继承了
-上一版。连续性证据来自可见文字、稳定 id/data 属性、class、资源引用和 title，属于
+产品问题：返回的是不是完整、可显示的 HTML；它是否大体继承了上一版。脚本、inline
+handler、可执行 URL 和 refresh 指令都属于候选内容，不参与检测、分级或用户提示。
+连续性证据来自可见文字、稳定 id/data 属性、class、资源引用和 title，属于
 粗粒度启发式，不宣称逐节点证明。
 
 评论 TargetRef 和有效 supplement 继续指导 AI、审阅与历史解释，但不再授权或禁止某个
 DOM 子树之外的普通正文、属性、结构或样式变化。这样可以避免 AI 把 `<p>` 改为 `<div>`、
 重组卡片或同步调整相关样式时被误判为失败。连续性证据充分为 `ready`；证据不足但 HTML
-可用为 `attention`，保留同一不可变候选并要求先审阅；不完整、空 body 或可执行表面变化
-为 `blocked`，不创建 Version。
+可用为 `attention`，保留同一不可变候选并要求先审阅；不完整或空 body 为 `blocked`，
+不创建 Version。
 
 ## 3. 结果审阅与打开方式
 
@@ -67,11 +68,10 @@ AI 结果通过校验后先创建不可变 Version 和独立 working HTML，运�
 
 Version manifest 仍保持不可变；历史通过其 `requestId + attemptId` 定位同一 Attempt 下的 supplement 和 candidate assessment。旧 `validation-review.json` 只读兼容，不再由新 Attempt 写入。
 
-2026-08-04 的短期 Developer Preview assessment 曾缺少可执行表面字段。仅历史 Version
-查询或已归档终态查询可在冻结 base、sealed output、四个 Hash 与旧字段全部可重现时重新
-运行当前 assessor，并把完整结果作为内存投影展示；旧 Attempt 不改写。若旧 producer
-当时记为 `ready`、当前规则却发现脚本或其他可执行表面变化，历史如实显示未通过，但当前
-已经权威打开的 HTML 仍可继续编辑。活动或尚未采用的候选不走该兼容路径。
+2026 年 8 月的短期 Developer Preview assessment 曾省略或写入现已退役的可执行表面
+字段。历史 Version 查询或已归档终态查询会先核对冻结 base、不可变候选证据和四个 Hash，
+再按当前文档健康与连续性规则重算，并把移除退役字段和脚本结论的结果作为内存投影；旧
+Attempt 不改写，归档 outcome 不复活。
 
 失败或 no-change 后，本轮处理页只有“返回编辑”。退出不会自动打开某条评论，也不会清除
 outcome；workspace 返回最近终态，标题栏“上轮处理”可在退出后或重启后重新打开。开始

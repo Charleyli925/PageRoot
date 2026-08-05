@@ -365,7 +365,7 @@ Prompt 不让 AI 手写 `completion.json`，也不让 AI猜候选版本号。
 
 `USER_SUPPLEMENT.json` 只能由受控 helper 追加，内部 AI 不得直接编辑。helper 可把内部 AI 当前对话新增的文件或图片复制到 `supplement-attachments/` 并记录字节数与 SHA-256；无法取得原件时只能写 `description-only`，历史中明确显示“原件未归档”。旧记录不可覆盖，只能通过 `add / amend / retract` 形成审计链。`add.refersTo` 可以指向它所补充的原始 `instructionId`；`amend / retract` 必须引用原始 instruction 或更早的 supplement record。所有写入、封存、建版与历史读取都使用同一组冻结 instruction 身份校验。
 
-`amend` 会替代它引用的旧 supplement record，`retract` 会撤销它引用的 record；Prompt 和历史只消费最终仍有效的记录。有效补充与原始 TargetRef 一起解释用户想改什么，但不充当候选 Version 的逐节点授权表。脚本/handler/可执行 URL、身份、Hash、路径与协议仍按硬边界拒绝；普通正文、属性、结构和样式由审阅流程确认。
+`amend` 会替代它引用的旧 supplement record，`retract` 会撤销它引用的 record；Prompt 和历史只消费最终仍有效的记录。有效补充与原始 TargetRef 一起解释用户想改什么，但不充当候选 Version 的逐节点授权表。身份、Hash、路径与协议仍按硬边界拒绝；脚本、handler、可执行 URL、普通正文、属性、结构和样式都是候选内容，由审阅流程确认。
 
 finalizer 可写：
 
@@ -529,24 +529,23 @@ Completion 必须在 output 完全关闭后最后写入。完成后 output 封�
 `candidate-assessment.json` 记录：
 
 - base/output 精确 Hash 与比较 Hash，以及 Request、Attempt、候选 Version 身份；
-- 完整文档、非空可显示 body、可执行表面不变三项健康结果；
+- 完整文档、非空可显示 body 两项健康结果；
 - 可见文字 shingles、稳定 id/data 锚点、class、资源引用和 title 的粗粒度重合证据；
 - `ready | attention | blocked` 与稳定 issue code。
 
-`blocked` 只用于候选无法作为正常 HTML 使用，或可执行表面发生变化。协议、身份、Hash、
-路径、受管 metadata 和 completion 封存仍在 assessment 之前硬阻断。`attention` 表示 HTML
+`blocked` 只用于候选无法作为正常 HTML 使用。协议、身份、Hash、路径、受管 metadata
+和 completion 封存仍在 assessment 之前硬阻断。脚本、inline handler、可执行 URL 和
+refresh 指令属于普通候选内容，不检测、不分级、不产生用户提示。`attention` 表示 HTML
 可以打开，但系统无法充分证明它继承了上一版；Bridge 仍创建不可变候选 Version，界面必须
 移除“直接打开”并要求先进入隔离对比审阅。`ready` 允许审阅或直接打开。
 
-当前 writer 必须始终写出 Schema 中完整的 `health` 与 `executable`。2026-08-04 的短期
-Developer Preview 曾在仍声明 `schemaVersion=1.0.0` 时省略
-`health.executableSurfaceUnchanged` 和整个 `executable`。兼容只存在于 committed
-Version 的历史查询或已归档终态查询入口：Reader 要求字段集合精确匹配该旧生产者，冻结
-base 与 sealed output 均为普通文件且四个精确/比较 Hash 全部匹配，再按当前算法重算完整
-assessment，并验证旧字段仍能由旧算法重现。规范化结果只在内存中返回，不改写 Attempt；
-当前复核可把旧 `ready` 如实降为 `blocked`，已归档 outcome 始终保持终态。active run、
-尚未打开候选、建版与激活均不得使用这一历史兼容入口。相关 Developer Preview 数据退出
-支持窗口后删除该 adapter。
+当前 writer 只写完整文档、非空 body 与连续性字段，不写 `executable` 或
+`health.executableSurfaceUnchanged`。这两个退役字段在 v1 Schema 中保持可选，只为读取
+短期 Developer Preview 的不可变历史。历史 Version 或已归档终态查询要求冻结 base 与
+不可变候选证据均为普通文件、四个精确/比较 Hash 全部匹配，并按当前文档健康与连续性算法
+重算 assessment。Reader 在内存中移除退役字段，也会移除旧的脚本阻断结论；不改写
+Attempt，不把归档 outcome 变成可打开候选。相关 Developer Preview 数据退出支持窗口后
+删除该 adapter。
 
 v3 TargetRef、评论和 supplement 继续作为生成指令与历史证据，但不再逐节点限制候选
 Version。旧 Attempt 的 `scope-report.json` 与 `validation-review.json` 仍可只读展示；新
@@ -568,7 +567,6 @@ Attempt 不生成它们。`scope-validator.mjs` 继续服务直接 source patch�
 | canonicalizationVersion | `canonicalization-mismatch` |
 | output 完整性 | `invalid-html` |
 | output body 无可显示内容 | `HTML_BODY_EMPTY`，阻断 |
-| 脚本、inline handler、`javascript:` URL 或 meta refresh 变化 | `EXECUTABLE_CONTENT_CHANGED`，阻断 |
 | 与上一版共同特征不足 | `PAGE_CONTINUITY_UNCERTAIN`，保留候选并强制先审阅 |
 | completion 后 output 改变 | `sealed-output-modified` |
 | active run 已取消/替代 | `stale-completion` |
@@ -576,6 +574,10 @@ Attempt 不生成它们。`scope-validator.mjs` 继续服务直接 source patch�
 硬校验失败不得创建 Version 或推进 latest Version。前端只把内部 error code 映射为稳定的
 中文原因，不显示原始英文异常或代码串。失败与 no-change outcome 由 workspace API 作为
 `recentRunOutcome` 恢复；用户返回编辑后仍可通过“上轮处理”再次打开，重启也不丢失。
+
+`candidate-assessment.v1` 为历史记录保留可选的 `executable` 与
+`health.executableSurfaceUnchanged` 只读字段；当前 producer 和 Renderer 都不生成、读取或
+展示这些字段。
 
 ## 14. 两阶段 Version 事务
 
