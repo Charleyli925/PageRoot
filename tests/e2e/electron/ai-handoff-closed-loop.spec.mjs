@@ -528,6 +528,8 @@ test("a verified AI result stays pending through desktop review until the user a
       <svg id="review-runtime-svg-chart" class="review-runtime-chart-host" viewBox="0 0 320 96" width="320" height="96"></svg>
       <canvas id="review-runtime-canvas-chart" class="review-runtime-chart-host" width="320" height="96"></canvas>
       <div id="review-runtime-host-paint-chart" class="review-runtime-chart-host"></div>
+      <div id="review-runtime-opacity-chart" class="review-runtime-chart-host"></div>
+      <div id="review-runtime-hidden-churn-chart" class="review-runtime-chart-host"></div>
       <svg id="review-runtime-svg-root-chart" class="review-runtime-chart-host"></svg>
       <div id="review-runtime-root-geometry-chart" class="review-runtime-chart-host"></div>
       <div id="review-runtime-flow-chart" class="review-runtime-chart-host"></div>
@@ -627,6 +629,17 @@ test("a verified AI result stays pending through desktop review until the user a
         + (runtimeReviewChartVariant === "before" ? '180px' : '236px')
         + ';background:' + (runtimeReviewChartVariant === "before" ? '#9aaec2' : '#6d5ce7')
         + ';border:2px solid #241d58;border-radius:10px';
+      const runtimeOpacityChart = document.querySelector("#review-runtime-opacity-chart");
+      runtimeOpacityChart.style.cssText = 'display:block;width:220px;height:48px;'
+        + 'background:#6d5ce7;opacity:'
+        + (runtimeReviewChartVariant === "before" ? '1' : '0');
+      runtimeOpacityChart.innerHTML = '<strong>透明度变化</strong>';
+      const runtimeHiddenChurnChart = document.querySelector("#review-runtime-hidden-churn-chart");
+      runtimeHiddenChurnChart.style.cssText = 'display:block;width:220px;height:48px;'
+        + 'background:#6d5ce7;opacity:0';
+      runtimeHiddenChurnChart.innerHTML = '<strong>'
+        + (runtimeReviewChartVariant === "before" ? '隐藏旧值' : '隐藏新值')
+        + '</strong>';
       const runtimeSvgRootChart = document.querySelector("#review-runtime-svg-root-chart");
       runtimeSvgRootChart.style.cssText = 'display:block;height:52px;width:'
         + (runtimeReviewChartVariant === "before" ? '190px' : '248px')
@@ -913,6 +926,7 @@ test("a verified AI result stays pending through desktop review until the user a
       "#review-runtime-svg-chart",
       "#review-runtime-canvas-chart",
       "#review-runtime-host-paint-chart",
+      "#review-runtime-opacity-chart",
       "#review-runtime-svg-root-chart",
     ];
     for (const selector of runtimeChangedHosts) {
@@ -955,6 +969,10 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect(afterReviewFrame.locator("#review-runtime-root-geometry-chart"))
       .toHaveAttribute("data-pageroot-review-runtime-host", /runtime-host-\d+/u);
     await expect(afterReviewFrame.locator("#review-runtime-root-geometry-chart"))
+      .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
+    await expect(afterReviewFrame.locator("#review-runtime-hidden-churn-chart"))
+      .toHaveAttribute("data-pageroot-review-runtime-host", /runtime-host-\d+/u);
+    await expect(afterReviewFrame.locator("#review-runtime-hidden-churn-chart"))
       .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
     await expect(beforeReviewFrame.locator("#review-runtime-unrelated-random-chart"))
       .not.toHaveAttribute("data-pageroot-review-runtime-host", /.+/u);
@@ -2172,6 +2190,106 @@ test("a pre-load review navigation falls back without trusting the replacement p
     await expect(launched.page.getByRole("button", { name: "收起审阅工具" }))
       .toBeVisible();
   } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("runtime review settles to static while a frame resource never finishes loading", async () => {
+  test.setTimeout(120_000);
+  const fixture = createSourceFixture("review-runtime-registration-timeout.html", (source) => (
+    source.replace(
+      "  </main>",
+      `    <section data-review-runtime-registration-timeout>
+      <h2>运行态加载收口回归</h2>
+      <img alt="" data-review-runtime-registration-resource>
+      <div id="review-runtime-registration-chart"></div>
+      <script>
+        const reviewRegistrationVariant = "before";
+        const reviewRegistrationResource = document.querySelector(
+          "[data-review-runtime-registration-resource]",
+        );
+        addEventListener("DOMContentLoaded", () => {
+          reviewRegistrationResource.src = "/review-runtime-registration-hang.png?side="
+            + document.documentElement.dataset.pagerootReviewSide;
+        }, { once: true });
+        const reviewRegistrationChart = document.querySelector(
+          "#review-runtime-registration-chart",
+        );
+        reviewRegistrationChart.innerHTML = '<strong>'
+          + reviewRegistrationVariant
+          + '</strong><span>运行态图表</span>';
+      </script>
+    </section>
+  </main>`,
+    )
+  ));
+  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  let releaseResources = () => {};
+  const resourceGate = new Promise((resolve) => {
+    releaseResources = resolve;
+  });
+  let pendingResourceRequests = 0;
+  let completedResourceRequests = 0;
+  await launched.page.route("**/review-runtime-registration-hang.png*", async (route) => {
+    pendingResourceRequests += 1;
+    await resourceGate;
+    completedResourceRequests += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: "image/png",
+      body: Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+        "base64",
+      ),
+    });
+  });
+  try {
+    const request = await addCommentAndSubmit(
+      launched.page,
+      launched.electronApp,
+      fixture.sourcePath,
+    );
+    writeAiOutput(request.requestRoot, (base) => base
+      .replace(ORIGINAL_TEXT, UPDATED_TEXT)
+      .replace(
+        'const reviewRegistrationVariant = "before";',
+        'const reviewRegistrationVariant = "after";',
+      ));
+    runOfficialFinalizer(request.requestRoot, request.changeRequest);
+    await expect(launched.page.getByText(
+      "修改结果已完成检查",
+      { exact: true },
+    ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+
+    await launched.page.getByRole("button", { name: "审阅对比" }).click();
+    await expect(launched.page.getByTestId("ai-review-workspace"))
+      .toBeVisible({ timeout: 30_000 });
+    await expect.poll(() => pendingResourceRequests, { timeout: 30_000 })
+      .toBeGreaterThanOrEqual(2);
+    await launched.page.getByRole("button", {
+      name: "显示并固定审阅工具",
+    }).click({ timeout: 10_000 });
+    expect(completedResourceRequests).toBe(0);
+    await expect(launched.page.getByRole("button", { name: "收起审阅工具" }))
+      .toBeVisible();
+
+    const afterReviewFrame = launched.page.frameLocator('iframe[title^="修改后"]');
+    await expect(afterReviewFrame.locator(
+      '[data-pageroot-review-marker-types~="text"]',
+    ).filter({ hasText: UPDATED_TEXT }).first()).toBeVisible();
+    await expect(afterReviewFrame.locator("#review-runtime-registration-chart"))
+      .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
+
+    releaseResources();
+    await expect.poll(() => completedResourceRequests, { timeout: 10_000 })
+      .toBeGreaterThanOrEqual(2);
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-pageroot-review-filter", "all");
+    await expect(afterReviewFrame.locator("#review-runtime-registration-chart"))
+      .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
+  } finally {
+    releaseResources();
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
   }

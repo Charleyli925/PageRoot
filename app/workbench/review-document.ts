@@ -2800,6 +2800,13 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
       )));
       const hostBoxMutated = sourceBoxSignature !== null
         && sourceBoxSignature !== currentBoxSignature;
+      const hostStyle = getComputedStyle(host);
+      const hostFullyTransparent = hostStyle.display !== "none"
+        && hostStyle.visibility !== "hidden"
+        && hostStyle.visibility !== "collapse"
+        && Number(hostStyle.opacity || 1) <= 0
+        && hostRect.width > 0
+        && hostRect.height > 0;
       const capture = {
         content: [],
         paint: [],
@@ -2813,7 +2820,7 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
       const descendants = [host];
       let hostOwnPaint = false;
       budget.nodes += 1;
-      if (!host.matches("canvas")) {
+      if (!hostFullyTransparent && !host.matches("canvas")) {
         const elementWalker = document.createTreeWalker(host, NodeFilter.SHOW_ELEMENT);
         let descendant = elementWalker.nextNode();
         while (descendant) {
@@ -2828,6 +2835,11 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
       }
       if (budget.nodes > runtimeVisualBatchNodeLimit) return null;
       descendants.forEach((element) => {
+        if (element === host && hostFullyTransparent) {
+          hostOwnPaint = true;
+          runtimeVisualPush(capture, "paint", "host-box|opacity=0");
+          return;
+        }
         if (element instanceof HTMLCanvasElement) {
           if (!runtimeVisualVisible(element)) return;
           const canvasStyle = getComputedStyle(element);
@@ -2910,7 +2922,7 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
       const walker = document.createTreeWalker(host, NodeFilter.SHOW_TEXT);
       let textNode = walker.nextNode();
       let textNodes = 0;
-      while (textNode) {
+      while (textNode && !hostFullyTransparent) {
         textNodes += 1;
         budget.nodes += 1;
         if (

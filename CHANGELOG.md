@@ -23,19 +23,23 @@ Notable user-visible changes are documented here. This project follows Semantic 
   uniquely paired source-empty hosts during AI review. Existing static frames
   remain authoritative and are never duplicated. A changed script must directly
   reference the host's distinctive identity; sharing a section is insufficient.
-  The bounded capture includes
-  the host's own painted box and directly mutated size as well as generated
-  descendants, caches evidence across asymmetric slow frame loads, starts its
-  unchanged 500ms decision budget only after both review frames load, and ignores unpainted
-  geometry, page-flow shifts,
+  The bounded capture includes the host's own painted box, fully transparent
+  host state and directly mutated size as well as generated descendants. It
+  does not inspect descendants hidden by a fully transparent host, so hidden
+  child churn cannot become a false positive. It caches evidence across
+  asymmetric slow frame loads, gives managed frames 1.5s to register, starts
+  its unchanged 500ms comparison budget only after both review frames load, and
+  ignores unpainted geometry, page-flow shifts,
   identical final output, animation, incomplete or late analysis. Accepted
   chart facts commit with the initial review projection rather than appearing
   after interaction. Runtime evidence is enabled only on the managed desktop
   preview transport. If authored code tries to replace that subframe before its
   first load completes, the main process blocks it and reloads the same volatile session once as a scriptless
   copy that retains only the owned bootstrap; review then keeps the
-  authoritative static result without adding a notice. Inline/browser review
-  is static-only.
+  authoritative static result without adding a notice. A managed-session
+  failure or frame that never finishes loading takes the same bounded static
+  path; late runtime evidence cannot reopen the decision. Inline/browser
+  review is static-only.
 - Stop treating AI-authored script changes as an adoption failure. Candidate
   assessment now checks document usability and coarse continuity only; retired
   executable-surface fields in historical records are verified, normalized out

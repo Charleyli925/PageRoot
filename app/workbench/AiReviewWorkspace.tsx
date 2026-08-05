@@ -121,6 +121,7 @@ type ReviewMessage = {
 };
 
 const MAX_REVIEW_COMMENT_COORDINATE = 10_000_000;
+const REVIEW_RUNTIME_VISUAL_FRAME_REGISTRATION_MS = 1_500;
 
 function createReviewRuntimeVisualChallenge(): string | null {
   try {
@@ -713,6 +714,8 @@ export default function AiReviewWorkspace({
   }, [sendState, sessionId]);
 
   const resolveRuntimeVisuals = useCallback((changedCandidateKeys: readonly string[]) => {
+    if (runtimeVisualResolutionRef.current?.documents === documents) return;
+    runtimeVisualCoordinatorRef.current?.dispose();
     const merged = mergeReviewRuntimeVisualChanges(documents, changedCandidateKeys);
     const result: ReviewRuntimeVisualResult = {
       documents,
@@ -816,6 +819,39 @@ export default function AiReviewWorkspace({
     documents,
     prepareRuntimeVisualFrame,
     resolveRuntimeVisuals,
+  ]);
+
+  useEffect(() => {
+    if (
+      !documents.runtimeVisualCandidates.length
+      || activeRuntimeVisualResult
+    ) return undefined;
+    const settleWithoutRuntime = () => {
+      if (
+        runtimeVisualOwnerDocumentsRef.current !== documents
+        || runtimeVisualResolutionRef.current?.documents === documents
+      ) return;
+      resolveRuntimeVisuals([]);
+    };
+    if (reviewLoadFailed) {
+      const failureTimer = window.setTimeout(settleWithoutRuntime, 0);
+      return () => window.clearTimeout(failureTimer);
+    }
+    if (!desktopSessions) return undefined;
+    const registrationTimer = window.setTimeout(() => {
+      const allFramesReady = (["before", "after"] as ReviewSide[]).every((side) => (
+        Boolean(framesRef.current[side])
+        && runtimeVisualFrameDocumentsRef.current[side] === documents
+      ));
+      if (!allFramesReady) settleWithoutRuntime();
+    }, REVIEW_RUNTIME_VISUAL_FRAME_REGISTRATION_MS);
+    return () => window.clearTimeout(registrationTimer);
+  }, [
+    activeRuntimeVisualResult,
+    desktopSessions,
+    documents,
+    resolveRuntimeVisuals,
+    reviewLoadFailed,
   ]);
 
   const finishPagePresentation = useCallback((epoch: number) => {

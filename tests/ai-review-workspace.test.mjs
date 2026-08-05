@@ -368,6 +368,8 @@ test("runtime chart review supplements only the initial bounded static footprint
   assert.match(reviewDocument, /remainingSignatures/);
   assert.match(reviewDocument, /if \(explicitValues\.length\) return explicitValues/);
   assert.match(reviewDocument, /hostBoxMutated/);
+  assert.match(reviewDocument, /hostFullyTransparent/);
+  assert.match(reviewDocument, /"host-box\|opacity=0"/);
   const runtimeChannelTransferStart = reviewDocument.indexOf(
     "const transferRuntimeVisualChannel",
   );
@@ -383,6 +385,10 @@ test("runtime chart review supplements only the initial bounded static footprint
   assert.match(reviewDocument, /\|\| hostOwnPaint/);
   assert.match(review, /new ReviewRuntimeVisualCoordinator/);
   assert.match(review, /REVIEW_RUNTIME_VISUAL_DEADLINE_MS/);
+  assert.match(
+    review,
+    /REVIEW_RUNTIME_VISUAL_FRAME_REGISTRATION_MS = 1_500/,
+  );
   assert.match(review, /createReviewRuntimeVisualChallenge/);
   assert.match(review, /event\.ports\.length === 1/);
   assert.match(review, /message\.challenge !== expectedChallenge/);
@@ -414,6 +420,10 @@ test("runtime chart review supplements only the initial bounded static footprint
     /runtimeVisualSnapshots|coordinator\.accept/,
   );
   assert.match(review, /confirmationAction \|\| runtimeVisualPending/);
+  assert.match(
+    review,
+    /if \(reviewLoadFailed\)[\s\S]*?settleWithoutRuntime[\s\S]*?REVIEW_RUNTIME_VISUAL_FRAME_REGISTRATION_MS/,
+  );
   assert.doesNotMatch(review, /运行态不稳定|分析未完成|概括标记/);
 });
 

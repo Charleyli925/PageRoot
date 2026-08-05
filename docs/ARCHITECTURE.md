@@ -107,9 +107,11 @@ Comments + frozen input
   footprint does not already cover it. Script co-location inside the same
   section is not causal evidence.
   Each isolated frame samples visible HTML/SVG/Canvas paint twice, including
-  the host's own painted box and directly mutated size but not an unpainted
-  empty box or indirect layout size, using
-  host-relative geometry and omitting unstable or unsupported results. The
+  the host's own painted box, a fully transparent host as a stable disappearance
+  state, and directly mutated size but not an unpainted empty box or indirect
+  layout size. Descendants under a fully transparent host are not traversed, so
+  invisible child churn has no evidence authority. Sampling uses
+  host-relative geometry and omits unstable or unsupported results. The
   parent `ReviewRuntimeVisualCoordinator` accepts only declared host keys,
   accepts snapshot facts only through a challenged bootstrap-owned capability
   port, compares the completed before/after batches, reuses the owning static
@@ -118,10 +120,13 @@ Comments + frozen input
   Coordinator and message-listener installation run before paint and drain any
   frame already registered for the same frozen document pair, so load/effect
   ordering cannot strand the initial projection.
-  The coordinator starts its single bounded initial deadline only after both
-  frames for that exact document pair have loaded; an earlier side never spends
-  the other side's comparison budget. It then commits both frames atomically; timeout,
-  partial and late batches silently retain the static footprint. Exact leaf text
+  Once the managed session pair exists, the parent gives both exact frame
+  documents 1.5s to register. A session failure or incomplete registration
+  resolves the initial projection from static evidence and ignores any later
+  runtime arrival. The coordinator starts its separate 500ms comparison
+  deadline only after both frames have loaded; an earlier side never spends the
+  other side's comparison budget. It then commits both frames atomically;
+  timeout, partial and late batches silently retain the static footprint. Exact leaf text
   ranges remain immutable evidence; a separate readable-footprint planner
   groups nearby ranges, keeps stable sentence gaps separate, gives tiny phrases
   a bounded line-local width and promotes dense multi-line rewrites to their
@@ -195,7 +200,7 @@ they do not import application services.
 | History, attachment and preview presentation | `app/workbench/presentation.tsx` |
 | AI handoff drawer presentation | `app/workbench/handoff-view.tsx` |
 | Formal AI review state transitions | `app/workbench/review-state.ts` |
-| Bounded review-runtime snapshot validation, comparison, deduplication and initial deadline | `app/lib/review-runtime-visual.js` |
+| Bounded review-runtime snapshot validation, comparison, deduplication and comparison deadline | `app/lib/review-runtime-visual.js` |
 | Formal AI review analysis, paired runtime mapping, global mask and overlay projection | `app/workbench/review-document.ts` |
 | Formal AI review composition and isolated-frame coordination | `app/workbench/AiReviewWorkspace.tsx` |
 

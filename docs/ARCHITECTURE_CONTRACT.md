@@ -136,13 +136,18 @@ identity, and absence of an existing static footprint over that host. Merely
 placing another changed script in the same section is never causal evidence.
 Both already-isolated review frames may then report one bounded pair of
 same-side-stable, host-relative HTML/SVG/Canvas fingerprints, including the
-host's own painted box and directly mutated size while excluding an unpainted
-empty box or indirect layout size. A batch
+host's own painted box, a fully transparent host as a stable disappearance
+state, and directly mutated size while excluding an unpainted empty box,
+indirect layout size and descendants hidden beneath that fully transparent
+host. A batch
 completed before frame registration remains cached for the challenged claim.
 Coordinator installation must drain every already-registered frame bound to the
 same document pair; neither load-before-owner nor owner-before-load may strand
-the initial projection. The comparison deadline may start only after both exact
-frame documents have loaded; asymmetric resource loading is not analysis time.
+the initial projection. Once the managed session pair exists, the parent must
+resolve to static evidence if both exact frame documents have not registered
+within 1.5s; a session failure takes the same path and late registration cannot
+reopen it. The separate 500ms comparison deadline may start only after both
+exact frame documents have loaded; asymmetric resource loading is not analysis time.
 Evidence travels
 only over a challenged `MessageChannel` capability created by the trusted first
 bootstrap script and transferred only for a browser-trusted parent event;
