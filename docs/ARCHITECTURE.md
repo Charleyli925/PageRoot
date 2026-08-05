@@ -91,10 +91,13 @@ Comments + frozen input
   analyzer first establishes high-confidence before/after node pairs, derives
   copy, structure and visual facts from those pairs, and only then emits one
   typed canonical change footprint. It never promotes tag/position proximity
-  alone into a change fact. Connected line fragments retain their exact union
-  boundary, so one stepped frame avoids overlapping per-line boxes without
-  becoming a whitespace-crossing bounding rectangle. Global context masking
-  punches holes from those same union paths, so mask and frame cannot diverge. The disposable
+  alone into a change fact. Exact leaf text ranges remain immutable evidence;
+  a separate readable-footprint planner groups nearby ranges, keeps stable
+  sentence gaps separate, gives tiny phrases a bounded line-local width and
+  promotes dense multi-line rewrites to their smallest semantic text owner.
+  Local wrapped copy renders as separate rectangular line frames with one
+  group label instead of a stepped union polygon. Global context masking
+  punches holes from those same final rectangles, so mask and frame cannot diverge. The disposable
   projection uses reserved attributes plus an explicit presentation reset and
   important geometry, preventing authored `svg`/`div` rules from restyling its
   mask or frames. Stable

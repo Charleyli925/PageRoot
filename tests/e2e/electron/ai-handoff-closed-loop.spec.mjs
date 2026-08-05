@@ -30,6 +30,8 @@ const ORIGINAL_TEXT = "列表项中的文字保持项目符号和缩进。";
 const UPDATED_TEXT = "自动闭环验收通过";
 const SECOND_UPDATED_TEXT = "自动闭环第二版通过";
 const PICKER_TEXT = "项目切换原子发布验收通过";
+const READABLE_REWRITE_BEFORE = "综搜整体仍处于放缓背景，关键不在于单纯增加曝光，而在于识别商品需求，并用更匹配的供给承接；核心仍是让模型识别电商意图，再优化结果组织，把模糊兴趣转化为可验证需求。";
+const READABLE_REWRITE_AFTER = "综搜放缓，但电商搜索仍有较高大盘。关键是识别内容浏览中的潜在商品需求，并用匹配供给承接。供给可归纳为电商意图识别、优化结果组织，将模糊兴趣转为可验证需求。";
 const REVIEW_METRIC_BEFORE_CSS = `
       [data-review-metrics] {
         display: grid;
@@ -499,6 +501,7 @@ test("a verified AI result stays pending through desktop review until the user a
       <h2>核心结论</h2>
       <div data-review-regression-summary>在守住 EBITA 率底线的基础上，锁单确收实现 +8.52% 增长；21 天日均增量 +4.12 万，累计增量 +86.6 万。</div>
       <div data-review-semantic-copy>而非「让每个商品卖得更好」（品均基本持平）。这说明增长主要来自有效成交覆盖扩大。</div>
+      <div data-review-readable-rewrite style="width: 360px; line-height: 1.7">${READABLE_REWRITE_BEFORE}</div>
       <div data-review-metrics>
         <article data-review-metric="lock"><strong>+8.52%</strong><span>锁单确收增幅（显著 p&lt;0.01）</span><small>日均 52.5 万 vs 48.4 万</small></article>
         <article data-review-metric="ipv"><strong>+4.49%</strong><span>IPV 增幅（显著 p&lt;0.01）</span><small>日均 63.4 万 vs 60.7 万</small></article>
@@ -636,6 +639,10 @@ test("a verified AI result stays pending through desktop review until the user a
         .replace(
           '<div data-review-semantic-copy>而非「让每个商品卖得更好」（品均基本持平）。这说明增长主要来自有效成交覆盖扩大。</div>',
           '<div data-review-semantic-copy>而非「让每个商品卖得更好」（单品效率整体稳定，增幅仅+0.10%）。这说明增长主要来自有效成交覆盖扩大。</div>',
+        )
+        .replace(
+          `<div data-review-readable-rewrite style="width: 360px; line-height: 1.7">${READABLE_REWRITE_BEFORE}</div>`,
+          `<div data-review-readable-rewrite style="width: 360px; line-height: 1.7">${READABLE_REWRITE_AFTER}</div>`,
         )
         .replace(
           '<p data-review-warning>⚠️ 近6天(7/23-<span><strong>7/28)增幅收窄至负值区间，需</strong></span>持续关注。</p>',
@@ -868,11 +875,41 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect.poll(async () => Promise.all(
       [beforeReviewFrame, afterReviewFrame].map((frame) => frame.locator(
         "[data-pageroot-review-overlay-box]",
-      ).evaluateAll((boxes) => boxes.length > 0 && boxes.every((box) => {
-        const labels = box.querySelectorAll("[data-pageroot-review-overlay-label]");
-        const label = labels[0]?.textContent?.trim() || "";
-        return labels.length === 1 && label.length >= 2 && label.length <= 10;
-      }))),
+      ).evaluateAll((boxes) => {
+        if (!boxes.length) return false;
+        const textGroups = new Map();
+        const standaloneBoxes = [];
+        boxes.forEach((box) => {
+          const textGroup = box.getAttribute("data-text-group");
+          const key = textGroup
+            ? [
+              box.getAttribute("data-pageroot-review-overlay-box"),
+              box.getAttribute("data-tone"),
+              textGroup,
+            ].join("|")
+            : "";
+          if (!key) {
+            standaloneBoxes.push(box);
+            return;
+          }
+          const grouped = textGroups.get(key) || [];
+          grouped.push(box);
+          textGroups.set(key, grouped);
+        });
+        const validLabel = (label) => {
+          const text = label?.textContent?.trim() || "";
+          return text.length >= 2 && text.length <= 10;
+        };
+        return standaloneBoxes.every((box) => {
+          const labels = box.querySelectorAll("[data-pageroot-review-overlay-label]");
+          return labels.length === 1 && validLabel(labels[0]);
+        }) && [...textGroups.values()].every((group) => {
+          const labels = group.flatMap((box) => (
+            [...box.querySelectorAll("[data-pageroot-review-overlay-label]")]
+          ));
+          return labels.length === 1 && validLabel(labels[0]);
+        });
+      })),
     ).then((states) => states.every(Boolean))).toBe(true);
     const nestedOverlayPairs = await afterReviewFrame.locator(
       "[data-pageroot-review-overlay-box]",
@@ -935,6 +972,9 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect.poll(() => deletedPriority.evaluate(
       (element) => getComputedStyle(element).textDecorationLine,
     )).toContain("line-through");
+    await expect.poll(() => deletedPriority.evaluate(
+      (element) => getComputedStyle(element).textDecorationStyle,
+    )).toBe("dashed");
     const addedText = afterReviewFrame.locator(
       '[data-pageroot-review-text="added"]',
     ).filter({ hasText: UPDATED_TEXT });
@@ -963,17 +1003,73 @@ test("a verified AI result stays pending through desktop review until the user a
       return shape ? getComputedStyle(shape).stroke : getComputedStyle(element).borderTopColor;
     }))
       .toBe("rgb(209, 75, 68)");
-    const steppedTextFrame = beforeReviewFrame.locator(
+    await expect(beforeReviewFrame.locator(
       '[data-pageroot-review-overlay-box][data-tone="text-removed"][data-shaped="true"]',
+    )).toHaveCount(0);
+    await expect(afterReviewFrame.locator(
+      '[data-pageroot-review-overlay-box][data-tone="text-added"][data-shaped="true"]',
+    )).toHaveCount(0);
+    await expect.poll(async () => Promise.all(
+      [beforeReviewFrame, afterReviewFrame].map((frame) => frame.locator(
+        '[data-pageroot-review-overlay-box][data-scope="text-phrase"]',
+      ).evaluateAll((boxes) => boxes.every((box) => (
+        box.getBoundingClientRect().width >= 24
+      )))),
+    ).then((states) => states.every(Boolean))).toBe(true);
+    const beforeRewriteMarker = beforeReviewFrame.locator(
+      '[data-review-readable-rewrite] [data-pageroot-review-text="removed"]',
     ).first();
-    await expect(steppedTextFrame).toBeAttached();
-    expect(Number(await steppedTextFrame.getAttribute(
+    const afterRewriteMarker = afterReviewFrame.locator(
+      '[data-review-readable-rewrite] [data-pageroot-review-text="added"]',
+    ).first();
+    await expect(beforeRewriteMarker).toHaveAttribute(
+      "data-pageroot-review-summary",
+      "段落改写",
+    );
+    await expect(afterRewriteMarker).toHaveAttribute(
+      "data-pageroot-review-summary",
+      "段落改写",
+    );
+    const beforeRewriteGroup = await beforeRewriteMarker.getAttribute(
+      "data-pageroot-review-text-group",
+    );
+    const afterRewriteGroup = await afterRewriteMarker.getAttribute(
+      "data-pageroot-review-text-group",
+    );
+    expect(beforeRewriteGroup).toBeTruthy();
+    expect(afterRewriteGroup).toBeTruthy();
+    const beforeRewriteFrame = beforeReviewFrame.locator(
+      `[data-pageroot-review-overlay-box][data-tone="text-removed"][data-text-group="${beforeRewriteGroup}"]`,
+    );
+    const afterRewriteFrame = afterReviewFrame.locator(
+      `[data-pageroot-review-overlay-box][data-tone="text-added"][data-text-group="${afterRewriteGroup}"]`,
+    );
+    await expect(beforeRewriteFrame).toHaveCount(1);
+    await expect(afterRewriteFrame).toHaveCount(1);
+    await expect(beforeRewriteFrame).toHaveAttribute("data-scope", "text-block");
+    await expect(afterRewriteFrame).toHaveAttribute("data-scope", "text-block");
+    await expect(beforeRewriteFrame).toHaveAttribute(
       "data-pageroot-review-fragment-count",
-    )))
-      .toBeGreaterThan(1);
-    await expect(steppedTextFrame.locator(
-      "[data-pageroot-review-overlay-shape]",
-    )).toHaveAttribute("d", /M .+ L .+ Z/u);
+      "1",
+    );
+    await expect(afterRewriteFrame).toHaveAttribute(
+      "data-pageroot-review-fragment-count",
+      "1",
+    );
+    await expect(beforeRewriteFrame.locator(
+      "[data-pageroot-review-overlay-label]",
+    )).toHaveText("段落改写");
+    await expect(afterRewriteFrame.locator(
+      "[data-pageroot-review-overlay-label]",
+    )).toHaveText("段落改写");
+    await expect.poll(() => beforeRewriteFrame.evaluate((element) => ({
+      color: getComputedStyle(element).borderTopColor,
+      style: getComputedStyle(element).borderTopStyle,
+    }))).toEqual({ color: "rgb(209, 75, 68)", style: "dashed" });
+    await expect.poll(() => afterRewriteFrame.evaluate((element) => ({
+      color: getComputedStyle(element).borderTopColor,
+      style: getComputedStyle(element).borderTopStyle,
+    }))).toEqual({ color: "rgb(35, 155, 86)", style: "dashed" });
     await expect(afterReviewFrame.locator(
       '[data-review-added-chart] [data-pageroot-review-text="added"]',
     ).filter({ hasText: "实验效果概览" })).toHaveCount(1);
@@ -1117,7 +1213,8 @@ test("a verified AI result stays pending through desktop review until the user a
         '[data-pageroot-review-overlay-box][data-shaped="true"]',
       )];
       if (!(dim instanceof SVGGeometryElement)) return false;
-      return shapedBoxes.some((box) => {
+      if (!shapedBoxes.length) return true;
+      return shapedBoxes.every((box) => {
         const changeId = box.getAttribute("data-pageroot-review-overlay-box");
         const hole = [...document.querySelectorAll("[data-pageroot-review-mask-hole]")]
           .find((candidate) => (

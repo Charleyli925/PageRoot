@@ -8,6 +8,13 @@ Notable user-visible changes are documented here. This project follows Semantic 
   always-purple “评” marker and white label. The marker remains anchored to
   the original comment target, and hovering still opens the existing read-only
   comment-detail bubble.
+- Separate exact AI-review copy evidence from the frame users read. Nearby
+  fragments now form bounded phrase or line rectangles, tiny edits gain a
+  line-local readable width, stable sentences stay separate, and dense
+  multi-line rewrites become one smallest-owner “段落改写” frame instead of a
+  jagged union outline. Each semantic group carries one label. Removed copy
+  keeps its red dashed strike and red dashed frame; added copy keeps its green
+  dashed frame without an underline or background treatment.
 - Stop treating AI-authored script changes as an adoption failure. Candidate
   assessment now checks document usability and coarse continuity only; retired
   executable-surface fields in historical records are verified, normalized out
@@ -87,9 +94,9 @@ Notable user-visible changes are documented here. This project follows Semantic 
   including explicit and strict indexed page controls. Review now coordinates
   both pages through one presentation epoch, removes stale frames immediately,
   keeps dimming continuous while different-height Tabs settle, and converges
-  linked vertical scrolling instead of jumping. Every final frame carries a
-  short label; consecutive edited lines use one stepped union frame and mask
-  hole rather than a whitespace-crossing rectangle. Frozen user comments also
+  linked vertical scrolling instead of jumping. Every semantic change group
+  carries one short label, and its final readable rectangles provide the mask
+  holes without a separate dimming geometry. Frozen user comments also
   appear only on the before page as a persistent read-only “评” marker with a
   hover-only bubble.
 - Reworked linked review scrolling around a single input owner and a cached,
