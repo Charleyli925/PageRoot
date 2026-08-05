@@ -6,9 +6,9 @@ PageRoot keeps the release standard high while avoiding repeated proof of the sa
 
 | Boundary | Trigger | Evidence | What it must not do |
 | --- | --- | --- | --- |
-| Draft feedback | Draft Pull Request open or update | Impact-selected Node/compiler feedback | Run the complete browser and Electron matrix |
-| Source candidate | Pull Request becomes ready or its ready head changes | Full Node, three Browser shards, real HTML, native Electron and deterministic AI; exact-tree attestation | Package or publish an installer |
-| Main integrity | Source candidate is merged | Match merge commit, Tree Hash, version and fresh PR attestation; fixed Node/Browser smoke | Repeat the complete source gate |
+| PR feedback | Pull Request opens, updates, reopens or returns to Draft | Impact-selected Node/compiler feedback for the current head | Report `release-gate` or run the complete Browser/Electron matrix |
+| Source candidate | One frozen Pull Request explicitly transitions from Draft to Ready | Full Node, three Browser shards, real HTML, native Electron and deterministic AI; exact-tree attestation | Automatically rerun on later commits, package or publish an installer |
+| Main integrity | Source candidate is merged | Match merged PR, Tree Hash, version and fresh PR attestation | Repeat any Node, Browser or Electron source test |
 | Developer preview | Explicit manual request only | Clean Tree, ad-hoc DMG, packaged-content audit, isolated startup and non-release attestation | Sign/notarize, create updater assets, become a prerequisite, tag or publish |
 | Release candidate | Manual `Release Candidate` dispatch on current `main` | Pre-sign content/runtime proof, signed-App checkpoint, final DMG/ZIP/update checks, release asset hashes and candidate attestation | Rebuild the verified App after checkpoint, create a tag or GitHub Release |
 | Publication | Manual `Release` dispatch for the exact version on current `main` | Fresh matching candidate, downloaded byte hashes and provenance | Rebuild, replace or silently mutate candidate bytes |
@@ -20,6 +20,14 @@ startup feedback ahead of an optionally requested installation check. No
 push, Pull Request, schedule, formal candidate or publication event triggers
 it. Its seven-day artifact cannot be promoted; formal release evidence starts
 independently from reviewed `main`.
+
+`PR Feedback` and the source-candidate workflow share a per-PR concurrency key.
+A commit or Draft conversion therefore cancels an in-flight complete run for
+the stale head, but does not create a `release-gate` job for the new SHA. The
+required check stays absent until the PR is explicitly promoted again. A PR
+opened non-draft also receives feedback only. Promote one PR at a time; keep
+other parallel work Draft until the current candidate merges, then update and
+promote the next branch against the new `main`.
 
 ## CI ownership and isolation
 
@@ -72,8 +80,8 @@ Do not raise global timeouts, enable blanket retries or rerun an entire green ma
 
 ## Release procedure
 
-1. Merge the version/change PR after its final ready-state `release-gate` passes.
-2. Confirm `main-integrity` and `main-smoke` are green for the merge commit.
+1. Update the version/change PR onto current `main`, promote that frozen head from Draft to Ready, and merge only after its exact `release-gate` passes.
+2. Confirm `main-integrity` is green for the merge commit. It reuses the exact source evidence and does not rerun source smoke.
 3. Confirm the signing `.p12` and fresh notarization credentials are present in GitHub encrypted secrets, then dispatch `Release Candidate` from `main`. It requires a source-gate attestation no older than 168 hours and fails before assembly when a required credential is missing.
 4. Confirm the pre-sign content/runtime gate passed before App notarization and that the final job consumed the matching signed-App checkpoint. Candidate/checkpoint artifacts are retained for 14 days; the completed candidate is reusable for publication for 72 hours. A failed-job rerun creates a distinct final candidate identity and publication resolves only the successful attempt.
 5. Dispatch `Release` from `main` with the exact package version. It verifies and publishes the candidate, then creates the annotated immutable tag and GitHub Release.
@@ -88,16 +96,18 @@ Review these metrics per release and as a rolling 30-day view:
 | Metric | Target |
 | --- | --- |
 | Complete source-gate attempts per released Tree Hash | P50 `1`, average at most `1.5` |
+| Complete source-gate runs per Pull Request | Average at most `1.25` |
 | Ready-PR full gate wall time | P50 under `6 min`, P95 under `10 min` |
 | CI-environment false-failure rate | Under `2%` of critical jobs |
 | Repeated green runner share | Under `20%` of runner minutes |
+| Later candidate-SHA churn | Under `20%` of all PR runner minutes |
 | Candidate App rebuilds after signed checkpoint | `0` |
 | Time to assign a failure category | Under `10 min` |
 | Publication rebuilds after candidate approval | `0` |
 
 Runner minutes and wall time are different signals. Splitting Electron lanes may use similar total macOS minutes while reducing critical-path time and allowing only the failed lane to rerun. The goal is less repeated evidence, not simply fewer tests.
 
-The read-only `CI Health` workflow runs weekly and can also be dispatched manually. `scripts/ci-health-report.mjs` reads Actions run/job history, writes the metric table to the workflow summary and retains `output/ci-health/ci-health.json` for 90 days. Empty periods remain `null`/`n/a`; they are never reported as a false zero failure rate.
+The read-only `CI Health` workflow runs weekly and can also be dispatched manually. `scripts/ci-health-report.mjs` reads both PR-feedback and source-candidate Actions history. It groups complete runs by Pull Request number, falling back to head branch for legacy records, and charges all later complete candidate SHAs to candidate churn. This complements same-Tree and same-run retry metrics instead of allowing many unique SHAs from one PR to look healthy. The metric table is written to the workflow summary and `output/ci-health/ci-health.json` is retained for 90 days. Empty periods remain `null`/`n/a`; they are never reported as a false zero failure rate.
 
 ## Change control
 

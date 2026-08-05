@@ -4,8 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
-  workflow_dispatch:
+    # A ready transition is an explicit, one-shot promotion of the current
+    # Pull Request head. Ordinary updates are handled by pr-feedback.yml and
+    # deliberately do not recreate the required release-gate check.
+    types: [ready_for_review]
 
 permissions:
   actions: read
@@ -13,13 +15,15 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # Shared with pr-feedback.yml so a new commit cancels an in-flight complete
+  # gate for the stale Pull Request head.
+  group: pageroot-pr-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   branch-policy:
     name: branch-policy
-    if: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' }}
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -32,46 +36,9 @@ jobs:
           BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
         run: npm run task:policy -- "$BRANCH_NAME"
 
-  draft-feedback:
-    name: draft-feedback
-    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 22.13.0
-          cache: npm
-      - name: Restore Electron download cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/electron
-          key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
-      - run: npm ci
-      - name: Run impact-selected draft feedback
-        run: >-
-          node scripts/ci-evidence.mjs run
-          --suite draft-feedback
-          --stage draft-feedback
-          --
-          npm run gate:edit -- --base origin/main
-      - name: Upload draft evidence
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: PageRoot-draft-evidence-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            output/ci-evidence
-            output/test-runs
-          if-no-files-found: warn
-          retention-days: 14
-
   source-build:
     name: source-build
-    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.draft == false) }}
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -115,7 +82,7 @@ jobs:
 
   source-node:
     name: source-node
-    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.draft == false) }}
+    if: github.event_name == 'pull_request'
     needs: source-build
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -156,7 +123,7 @@ jobs:
 
   source-browser:
     name: browser-${{ matrix.label }}
-    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.draft == false) }}
+    if: github.event_name == 'pull_request'
     needs: source-build
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -228,7 +195,7 @@ jobs:
 
   source-electron-native:
     name: electron-native
-    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.draft == false) }}
+    if: github.event_name == 'pull_request'
     runs-on: macos-14
     timeout-minutes: 45
     steps:
@@ -287,7 +254,7 @@ jobs:
 
   source-electron-ai:
     name: electron-ai
-    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.draft == false) }}
+    if: github.event_name == 'pull_request'
     runs-on: macos-14
     timeout-minutes: 45
     steps:
@@ -346,7 +313,7 @@ jobs:
 
   release-gate:
     name: release-gate
-    if: ${{ always() && (github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.draft == false)) }}
+    if: ${{ always() && github.event_name == 'pull_request' }}
     needs:
       - branch-policy
       - source-build
@@ -421,60 +388,3 @@ jobs:
             --workflow ci.yml \
             --max-age-hours 168 \
             --mode required
-
-  main-smoke:
-    name: main-smoke
-    if: github.event_name == 'push'
-    needs: main-integrity
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 22.13.0
-          cache: npm
-      - name: Restore Electron download cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/electron
-          key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
-      - run: npm ci
-      - name: Restore Playwright Chromium
-        id: playwright-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}
-      - name: Install Playwright system dependencies
-        run: npx playwright install-deps chromium
-      - name: Install Playwright Chromium
-        if: steps.playwright-cache.outputs.cache-hit != 'true'
-        run: npx playwright install chromium
-      - name: Run exact-tree main smoke
-        run: >-
-          node scripts/ci-evidence.mjs run
-          --suite main-smoke
-          --stage post-merge
-          --
-          npm run gate:main:auto
-      - name: Upload main smoke diagnostics
-        if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: PageRoot-main-smoke-diagnostics-${{ github.run_attempt }}
-          path: |
-            output/test-runs
-            output/playwright
-          if-no-files-found: warn
-          retention-days: 7
-      - name: Upload main smoke evidence
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: PageRoot-main-smoke-evidence-${{ github.run_id }}-${{ github.run_attempt }}
-          path: output/ci-evidence
-          if-no-files-found: warn
-          retention-days: 30

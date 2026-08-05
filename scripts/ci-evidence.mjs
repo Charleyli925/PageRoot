@@ -27,6 +27,7 @@ const PACKAGED_ARTIFACT_STAGES = new Set([
 ]);
 const ALLOWED_STAGES = new Set([
   "draft-feedback",
+  "pr-feedback",
   "source-build",
   "source-test",
   "environment-preflight",

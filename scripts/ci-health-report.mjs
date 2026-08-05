@@ -53,6 +53,46 @@ function isExecutedJob(job) {
   return job?.conclusion !== "skipped" && Boolean(job?.started_at && job?.completed_at);
 }
 
+function runnerMinutesForRuns(runs, jobsByRunId) {
+  return (runs || []).reduce((total, run) => (
+    total + jobsForRun(jobsByRunId, run.id)
+      .filter(isExecutedJob)
+      .reduce((runTotal, job) => (
+        runTotal + finiteDurationMinutes(job.started_at, job.completed_at)
+      ), 0)
+  ), 0);
+}
+
+function pullRequestKey(run) {
+  const pullRequestNumber = (run?.pull_requests || [])
+    .map((pullRequest) => Number(pullRequest?.number))
+    .find((number) => Number.isInteger(number) && number > 0);
+  if (pullRequestNumber) return `pr:${pullRequestNumber}`;
+  if (run?.head_branch) return `branch:${run.head_branch}`;
+  return `run:${run?.id || run?.head_sha || "unknown"}`;
+}
+
+function candidateRunCounts(fullRuns) {
+  const counts = new Map();
+  for (const run of fullRuns) {
+    const key = pullRequestKey(run);
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  return [...counts.values()];
+}
+
+function repeatedCandidateRuns(fullRuns) {
+  const seen = new Set();
+  return [...fullRuns]
+    .sort((left, right) => Date.parse(left.created_at || "") - Date.parse(right.created_at || ""))
+    .filter((run) => {
+      const key = pullRequestKey(run);
+      if (seen.has(key)) return true;
+      seen.add(key);
+      return false;
+    });
+}
+
 function repeatedGreenMinutes(jobs) {
   const ordered = [...jobs].sort((left, right) => (
     Number(left.run_attempt || 1) - Number(right.run_attempt || 1)
@@ -84,13 +124,19 @@ export function summarizeCiHealth({
   periodDays,
   generatedAt,
   ciRuns,
+  feedbackRuns = [],
   jobsByRunId,
   candidateRuns,
   releaseRuns,
 }) {
-  const pullRequestRuns = (ciRuns || []).filter((run) => run?.event === "pull_request");
-  const fullRuns = pullRequestRuns.filter((run) => jobsForRun(jobsByRunId, run.id).some((job) => (
+  const sourcePullRequestRuns = (ciRuns || []).filter((run) => run?.event === "pull_request");
+  const feedbackPullRequestRuns = (feedbackRuns || []).filter((run) => run?.event === "pull_request");
+  const pullRequestRuns = [...sourcePullRequestRuns, ...feedbackPullRequestRuns];
+  const fullRuns = sourcePullRequestRuns.filter((run) => jobsForRun(jobsByRunId, run.id).some((job) => (
     job?.name === "release-gate" && job?.conclusion !== "skipped"
+  )));
+  const selectedFeedbackRuns = pullRequestRuns.filter((run) => jobsForRun(jobsByRunId, run.id).some((job) => (
+    ["draft-feedback", "pr-feedback"].includes(job?.name) && job?.conclusion !== "skipped"
   )));
   const fullDurations = fullRuns.map((run) => (
     finiteDurationMinutes(run.created_at, run.updated_at)
@@ -116,38 +162,58 @@ export function summarizeCiHealth({
     gateAttemptsBySha[run.head_sha] = (gateAttemptsBySha[run.head_sha] || 0) + attempts;
   }
   const gateAttemptCounts = Object.values(gateAttemptsBySha);
+  const gateRunCounts = candidateRunCounts(fullRuns);
+  const repeatedCandidates = repeatedCandidateRuns(fullRuns);
   const averageAttempts = gateAttemptCounts.length > 0
     ? gateAttemptCounts.reduce((total, count) => total + count, 0) / gateAttemptCounts.length
     : null;
+  const averageRunsPerPullRequest = gateRunCounts.length > 0
+    ? gateRunCounts.reduce((total, count) => total + count, 0) / gateRunCounts.length
+    : null;
+  const fullGateMinutes = runnerMinutesForRuns(fullRuns, jobsByRunId);
+  const feedbackMinutes = runnerMinutesForRuns(selectedFeedbackRuns, jobsByRunId);
+  const candidateChurnMinutes = runnerMinutesForRuns(repeatedCandidates, jobsByRunId);
   const repeatedShare = runnerMinutes > 0 ? repeatedMinutes / runnerMinutes : null;
+  const candidateChurnShare = runnerMinutes > 0 ? candidateChurnMinutes / runnerMinutes : null;
   const preflightFailureRate = preflights.length > 0
     ? failedPreflights.length / preflights.length
     : null;
   const p50 = percentile(fullDurations, 50);
   const p95 = percentile(fullDurations, 95);
   return Object.freeze({
-    schemaVersion: 1,
+    schemaVersion: 2,
     generatedAt,
     periodDays,
     sourceGate: {
       pullRequestRuns: pullRequestRuns.length,
+      feedbackRuns: selectedFeedbackRuns.length,
       completeRuns: fullRuns.length,
       uniqueTrees: gateAttemptCounts.length,
+      candidatePullRequests: gateRunCounts.length,
       attemptsPerTreeAverage: round(averageAttempts),
       attemptsPerTreeP50: percentile(gateAttemptCounts, 50),
+      runsPerPullRequestAverage: round(averageRunsPerPullRequest),
+      runsPerPullRequestP50: percentile(gateRunCounts, 50),
+      repeatedCandidateRuns: repeatedCandidates.length,
       wallMinutesP50: p50,
       wallMinutesP95: p95,
       target: {
         attemptsPerTreeAverageAtMost: 1.5,
+        runsPerPullRequestAverageAtMost: 1.25,
         wallMinutesP50Under: 6,
         wallMinutesP95Under: 10,
       },
     },
     runnerUse: {
       totalMinutes: round(runnerMinutes),
+      feedbackMinutes: round(feedbackMinutes),
+      fullGateMinutes: round(fullGateMinutes),
       repeatedGreenMinutes: round(repeatedMinutes),
       repeatedGreenShare: round(repeatedShare),
-      targetShareUnder: 0.2,
+      candidateChurnMinutes: round(candidateChurnMinutes),
+      candidateChurnShare: round(candidateChurnShare),
+      repeatedGreenTargetShareUnder: 0.2,
+      candidateChurnTargetShareUnder: 0.2,
     },
     environmentPreflight: {
       completed: preflights.length,
@@ -260,9 +326,11 @@ function markdown(report) {
     "| Metric | Actual | Target |",
     "| --- | ---: | ---: |",
     `| Complete gate attempts per Tree | ${report.sourceGate.attemptsPerTreeAverage ?? "n/a"} | <= 1.5 |`,
+    `| Complete gates per Pull Request | ${report.sourceGate.runsPerPullRequestAverage ?? "n/a"} | <= 1.25 |`,
     `| Full PR wall P50 | ${report.sourceGate.wallMinutesP50 ?? "n/a"} min | < 6 min |`,
     `| Full PR wall P95 | ${report.sourceGate.wallMinutesP95 ?? "n/a"} min | < 10 min |`,
     `| Repeated-green runner share | ${percent(report.runnerUse.repeatedGreenShare)} | < 20% |`,
+    `| Cross-SHA candidate churn share | ${percent(report.runnerUse.candidateChurnShare)} | < 20% |`,
     `| Environment preflight failure rate | ${percent(report.environmentPreflight.failureRate)} | < 2% |`,
     `| Publication rebuilds | ${report.publication.rebuildsAfterCandidateApproval} | 0 |`,
     "",
@@ -282,17 +350,20 @@ async function main() {
     generatedAt.getTime() - options.days * 24 * 60 * 60 * 1000,
   ).toISOString();
   const repositoryPath = options.repository.split("/").map(encodeURIComponent).join("/");
-  const [ciRuns, candidateRuns, releaseRuns] = await Promise.all([
+  const [ciRuns, feedbackRuns, candidateRuns, releaseRuns] = await Promise.all([
     workflowRuns({ repositoryPath, workflow: "ci.yml", token, since }),
+    workflowRuns({ repositoryPath, workflow: "pr-feedback.yml", token, since }),
     workflowRuns({ repositoryPath, workflow: "release-candidate.yml", token, since }),
     workflowRuns({ repositoryPath, workflow: "release.yml", token, since }),
   ]);
-  const pullRequestRuns = ciRuns.filter((run) => run.event === "pull_request");
+  const pullRequestRuns = [...ciRuns, ...feedbackRuns]
+    .filter((run) => run.event === "pull_request");
   const jobsByRunId = await collectJobs(repositoryPath, pullRequestRuns, token);
   const report = summarizeCiHealth({
     periodDays: options.days,
     generatedAt: generatedAt.toISOString(),
     ciRuns,
+    feedbackRuns,
     jobsByRunId,
     candidateRuns,
     releaseRuns,

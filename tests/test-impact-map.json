@@ -154,7 +154,7 @@
       "alwaysForCode": ["typecheck", "lint"]
     },
     "main": {
-      "description": "Fast post-merge smoke after the PR source-gate provenance has matched the exact main tree.",
+      "description": "Optional diagnostic smoke for an exact main tree; automatic post-merge CI uses provenance verification only.",
       "fullSuites": [
         "node-smoke",
         "browser-smoke"
@@ -228,7 +228,7 @@
       "patterns": [
         "^scripts/source-gate-provenance\\.mjs$",
         "^tests/source-gate-provenance\\.test\\.mjs$",
-        "^\\.github/workflows/(?:ci|developer-preview|release|release-candidate)\\.yml$"
+        "^\\.github/workflows/(?:ci|pr-feedback|developer-preview|release|release-candidate)\\.yml$"
       ],
       "suites": [],
       "nodeTests": ["tests/source-gate-provenance.test.mjs"]
@@ -238,7 +238,7 @@
       "patterns": [
         "^scripts/ci-evidence\\.mjs$",
         "^tests/ci-evidence\\.test\\.mjs$",
-        "^\\.github/workflows/(?:ci|developer-preview|release|release-candidate)\\.yml$"
+        "^\\.github/workflows/(?:ci|pr-feedback|developer-preview|release|release-candidate)\\.yml$"
       ],
       "suites": [],
       "nodeTests": ["tests/ci-evidence.test.mjs"]
@@ -248,7 +248,7 @@
       "patterns": [
         "^scripts/ci-health-report\\.mjs$",
         "^tests/ci-health-report\\.test\\.mjs$",
-        "^\\.github/workflows/ci-health\\.yml$"
+        "^\\.github/workflows/(?:ci|ci-health|pr-feedback)\\.yml$"
       ],
       "suites": [],
       "nodeTests": ["tests/ci-health-report.test.mjs"]
