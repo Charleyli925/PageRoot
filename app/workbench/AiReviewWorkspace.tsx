@@ -279,6 +279,7 @@ function ReviewDocumentPane({
               {commentGroups.map((group) => {
                 const layout = commentLayoutsByKey.get(group.key);
                 if (!layout) return null;
+                if (layout.top < 0 || layout.top > iframeHeight) return null;
                 const left = Math.max(12, Math.min(documentViewportWidth - 12, layout.left)) * scale;
                 const top = Math.max(12, Math.min(iframeHeight - 12, layout.top)) * scale;
                 const visibleLeft = left - viewportScrollLeft;
