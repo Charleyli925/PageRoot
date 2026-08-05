@@ -46,16 +46,18 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   capture or superseding request. It returns only bounded PNG data URLs and
   geometry tied to the renderer-provided exact source Hash; it never returns
   runtime HTML, SVG, script state or filesystem data.
-- Strict schemas, frozen inputs and identity/Hash/path checks before accepting AI output; complete-document, non-empty-body and unchanged executable-surface checks remain hard boundaries, while weak page continuity forces isolated review instead of silently opening or falsely rejecting the candidate
-- The history-only decoder for the August 4, 2026 Developer Preview
-  candidate-assessment shape does not trust its omitted executable result. It
-  accepts only the exact retired field set after regular-file and four-Hash
-  verification, re-runs the current executable-surface check from the sealed
-  base/output, and never participates in active candidate opening or source
-  writes. It may project either committed Version history or an already
-  terminal archived outcome; the latter cannot become active again. A formerly
-  `ready` history record may therefore display as `blocked` under the current
-  rule without locking the already-authoritative current HTML.
+- Strict schemas, frozen inputs and identity/Hash/path checks before accepting
+  AI output; complete-document and non-empty-body checks remain protocol
+  boundaries. Authored scripts, handlers, executable URLs and refresh directives
+  are candidate content and are not inspected, classified or surfaced during
+  acceptance; existing sandboxes contain execution separately. Weak page
+  continuity forces isolated review instead of silently opening or falsely
+  rejecting the candidate.
+- The history-only decoder accepts both August 2026 Developer Preview
+  candidate-assessment shapes after regular-file and four-Hash verification,
+  re-runs only current document-health and continuity checks, and strips any
+  retired executable fields or conclusions in memory. It never rewrites
+  history or participates in source writes; archived outcomes stay terminal.
 - Review-before-open reads only the frozen current HTML and immutable candidate
   Version after rechecking their identities and Hashes. Both copies render in
   unique-origin sandboxed frames; authored scripts, refresh directives and
@@ -118,7 +120,7 @@ are never appended to AI input. The normal script-disabled editing iframe and
 SourcePatch checks remain unchanged.
 
 The AI review workspace is an isolated interactive review preview with no
-activation or persistence authority. It preserves the already-validated authored
+activation or persistence authority. It preserves the identity/Hash-validated authored
 scripts and inline events in a disposable review copy so source-backed Tabs,
 disclosures and local controls can be inspected. The review iframe uses only
 `allow-scripts`: it has no same-origin authority, form submission, navigation,

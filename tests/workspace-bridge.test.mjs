@@ -4521,7 +4521,7 @@ test("version list returns hash-validated comments, local edits, and AI dialogue
   );
 });
 
-test("workspace re-derives a historical pre-executable Developer Preview assessment without rewriting it", async (t) => {
+test("workspace verifies and normalizes retired executable fields without rewriting history", async (t) => {
   const environment = await createEnvironment(t);
   const sourcePath = join(
     environment.sources,
@@ -4537,7 +4537,7 @@ test("workspace re-derives a historical pre-executable Developer Preview assessm
       documentId: opened.documentId,
       expectedSourceSha256: opened.currentHtmlSha256,
       freezeCutoffRevision: 0,
-      summary: "验证旧开发测试版候选评估的历史读取兼容。",
+      summary: "验证旧版可执行内容字段的历史读取兼容。",
     })
   ).body;
   const frozenHtml = await readFile(run.inputPath, "utf8");
@@ -4545,7 +4545,7 @@ test("workspace re-derives a historical pre-executable Developer Preview assessm
     run.outputPath,
     frozenHtml.replace(
       "用于验证 HTML AI 版本生命周期。",
-      "用于验证旧开发测试版候选评估兼容。",
+      "用于验证旧版可执行内容字段兼容。",
     ),
     "utf8",
   );
@@ -4568,8 +4568,13 @@ test("workspace re-derives a historical pre-executable Developer Preview assessm
   );
   const legacyStatus = legacyAssessment.status;
   assert.ok(["ready", "attention"].includes(legacyStatus));
-  delete legacyAssessment.executable;
-  delete legacyAssessment.health.executableSurfaceUnchanged;
+  legacyAssessment.health.executableSurfaceUnchanged = true;
+  legacyAssessment.executable = {
+    unchanged: true,
+    baseCount: 0,
+    outputCount: 0,
+    changedCount: 0,
+  };
   const persistedLegacyText = `${JSON.stringify(legacyAssessment, null, 2)}\n`;
   await writeFile(assessmentPath, persistedLegacyText, "utf8");
 
@@ -4583,16 +4588,12 @@ test("workspace re-derives a historical pre-executable Developer Preview assessm
   );
   assert.ok(restoredVersion);
   assert.equal(restoredVersion.candidateAssessment.status, legacyStatus);
+  assert.equal("executable" in restoredVersion.candidateAssessment, false);
   assert.equal(
-    restoredVersion.candidateAssessment.health.executableSurfaceUnchanged,
-    true,
+    "executableSurfaceUnchanged"
+      in restoredVersion.candidateAssessment.health,
+    false,
   );
-  assert.deepEqual(restoredVersion.candidateAssessment.executable, {
-    unchanged: true,
-    baseCount: 0,
-    outputCount: 0,
-    changedCount: 0,
-  });
   assert.equal(await readFile(assessmentPath, "utf8"), persistedLegacyText);
 
   legacyAssessment.continuity.evidencePoints += 1;
@@ -4613,7 +4614,7 @@ test("workspace re-derives a historical pre-executable Developer Preview assessm
   );
 });
 
-test("workspace re-derives a legacy assessment for an archived failed terminal outcome", async (t) => {
+test("workspace normalizes retired fields for an archived failed terminal outcome", async (t) => {
   const environment = await createEnvironment(t);
   const sourcePath = join(
     environment.sources,
@@ -4630,7 +4631,7 @@ test("workspace re-derives a legacy assessment for an archived failed terminal o
       documentId: opened.documentId,
       expectedSourceSha256: opened.currentHtmlSha256,
       freezeCutoffRevision: 0,
-      summary: "验证旧开发测试版失败终态评估的历史读取兼容。",
+      summary: "验证旧版字段在失败终态中的历史读取兼容。",
     })
   ).body;
   await writeFile(
@@ -4654,8 +4655,13 @@ test("workspace re-derives a legacy assessment for an archived failed terminal o
   const legacyAssessment = JSON.parse(
     await readFile(assessmentPath, "utf8"),
   );
-  delete legacyAssessment.executable;
-  delete legacyAssessment.health.executableSurfaceUnchanged;
+  legacyAssessment.health.executableSurfaceUnchanged = true;
+  legacyAssessment.executable = {
+    unchanged: true,
+    baseCount: 0,
+    outputCount: 0,
+    changedCount: 0,
+  };
   const persistedLegacyText = `${JSON.stringify(legacyAssessment, null, 2)}\n`;
   await writeFile(assessmentPath, persistedLegacyText, "utf8");
 
@@ -4672,9 +4678,13 @@ test("workspace re-derives a legacy assessment for an archived failed terminal o
     "blocked",
   );
   assert.equal(
-    restored.body.recentRunOutcome.candidateAssessment
-      .health.executableSurfaceUnchanged,
-    true,
+    "executable" in restored.body.recentRunOutcome.candidateAssessment,
+    false,
+  );
+  assert.equal(
+    "executableSurfaceUnchanged"
+      in restored.body.recentRunOutcome.candidateAssessment.health,
+    false,
   );
   assert.equal(await readFile(assessmentPath, "utf8"), persistedLegacyText);
   assert.equal(await readFile(sourcePath, "utf8"), originalSource);

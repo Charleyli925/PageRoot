@@ -65,7 +65,6 @@ export type CandidateAssessment = {
   health: {
     completeDocument: boolean;
     bodyHasContent: boolean;
-    executableSurfaceUnchanged: boolean;
   };
   continuity: {
     status: "related" | "uncertain";

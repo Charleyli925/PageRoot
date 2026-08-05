@@ -18,7 +18,7 @@ import {
 import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
-import { promisify } from "node:util";
+import { isDeepStrictEqual, promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import {
   assertSchemaVersion,
@@ -59,7 +59,7 @@ import {
 } from "./scope-validator.mjs";
 import {
   assessHtmlCandidate,
-  decodePreExecutableDeveloperPreviewAssessment,
+  normalizeCandidateAssessmentPolicy,
 } from "./candidate-assessment.mjs";
 import {
   PRODUCT_MAX_BRIDGE_BODY_BYTES,
@@ -3707,7 +3707,7 @@ async function listVersions(context) {
             attemptId: manifest.attemptId,
             candidateVersionId: versionId,
           },
-          { compatibility: "historical-developer-preview" },
+          { verifyHistoricalEvidence: true },
         );
       }
     }
@@ -3797,7 +3797,7 @@ async function latestTerminalRunOutcome(context) {
           candidateVersionId: outcome.candidateVersionId,
           baseSha256: outcome.baseSnapshotSha256,
         },
-        { compatibility: "historical-developer-preview" },
+        { verifyHistoricalEvidence: true },
       )
     : null;
   return {
@@ -6012,23 +6012,32 @@ function assertCandidateAssessmentRecord(
       `${label} has an unsupported status.`,
     );
   }
+  const hasRetiredExecutable = assessment.executable !== undefined;
+  const hasRetiredExecutableHealth =
+    assessment.health?.executableSurfaceUnchanged !== undefined;
   if (
     !Array.isArray(assessment.issueCodes)
     || !assessment.issueCodes.every((value) => typeof value === "string")
     || !assessment.health
     || typeof assessment.health.completeDocument !== "boolean"
     || typeof assessment.health.bodyHasContent !== "boolean"
-    || typeof assessment.health.executableSurfaceUnchanged !== "boolean"
-    || typeof assessment.executable?.unchanged !== "boolean"
-    || !Number.isSafeInteger(assessment.executable?.baseCount)
-    || assessment.executable.baseCount < 0
-    || !Number.isSafeInteger(assessment.executable?.outputCount)
-    || assessment.executable.outputCount < 0
-    || !Number.isSafeInteger(assessment.executable?.changedCount)
-    || assessment.executable.changedCount < 0
-    || assessment.health.executableSurfaceUnchanged
-      !== assessment.executable.unchanged
     || !["related", "uncertain"].includes(assessment.continuity?.status)
+    || hasRetiredExecutable !== hasRetiredExecutableHealth
+    || (
+      hasRetiredExecutable
+      && (
+        typeof assessment.health.executableSurfaceUnchanged !== "boolean"
+        || typeof assessment.executable?.unchanged !== "boolean"
+        || !Number.isSafeInteger(assessment.executable?.baseCount)
+        || assessment.executable.baseCount < 0
+        || !Number.isSafeInteger(assessment.executable?.outputCount)
+        || assessment.executable.outputCount < 0
+        || !Number.isSafeInteger(assessment.executable?.changedCount)
+        || assessment.executable.changedCount < 0
+        || assessment.health.executableSurfaceUnchanged
+          !== assessment.executable.unchanged
+      )
+    )
   ) {
     throw new HttpError(
       409,
@@ -6036,7 +6045,7 @@ function assertCandidateAssessmentRecord(
       `${label} is structurally invalid.`,
     );
   }
-  return assessment;
+  return normalizeCandidateAssessmentPolicy(assessment);
 }
 
 function assertCandidateAssessmentIdentity(
@@ -6070,18 +6079,33 @@ function assertCandidateAssessmentIdentity(
   return assessment;
 }
 
-async function readHistoricalDeveloperPreviewAssessment(
+async function readHistoricalCandidateAssessment(
   assessmentPath,
   assessment,
   expected,
 ) {
   const label = "candidate-assessment.json";
-  assertCandidateAssessmentIdentity(assessment, expected, label);
+  const normalized = assertCandidateAssessmentRecord(
+    assessment,
+    expected,
+    label,
+  );
   const attemptRoot = path.dirname(assessmentPath);
   const requestRoot = path.dirname(path.dirname(attemptRoot));
+  const projectRoot = path.dirname(path.dirname(requestRoot));
+  const committedCandidatePath = path.join(
+    projectRoot,
+    "versions",
+    normalized.candidateVersionId,
+    "files",
+    "index.html",
+  );
+  const candidateEvidencePath = await exists(committedCandidatePath)
+    ? committedCandidatePath
+    : path.join(attemptRoot, "output", "index.html");
   const sources = [
     [path.join(requestRoot, "input", "base", "index.html"), "frozen base"],
-    [path.join(attemptRoot, "output", "index.html"), "sealed output"],
+    [candidateEvidencePath, "immutable candidate"],
   ];
   const buffers = [];
   for (const [sourcePath, sourceLabel] of sources) {
@@ -6119,36 +6143,41 @@ async function readHistoricalDeveloperPreviewAssessment(
       `${label} no longer matches its sealed HTML evidence.`,
     );
   }
-  const decoded = decodePreExecutableDeveloperPreviewAssessment({
-    assessment,
-    baseHtml,
-    outputHtml,
-  });
-  if (!decoded) {
+  const current = {
+    schemaVersion: normalized.schemaVersion,
+    projectId: normalized.projectId,
+    documentId: normalized.documentId,
+    requestId: normalized.requestId,
+    attemptId: normalized.attemptId,
+    candidateVersionId: normalized.candidateVersionId,
+    baseSha256: normalized.baseSha256,
+    outputSha256: normalized.outputSha256,
+    baseComparisonSha256: normalized.baseComparisonSha256,
+    outputComparisonSha256: normalized.outputComparisonSha256,
+    ...assessHtmlCandidate({ baseHtml, outputHtml }),
+    assessedAt: normalized.assessedAt,
+  };
+  if (!isDeepStrictEqual(normalized, current)) {
     throw new HttpError(
       409,
       "CANDIDATE_ASSESSMENT_INVALID",
-      `${label} does not match the supported Developer Preview producer.`,
+      `${label} does not match its sealed HTML evidence.`,
     );
   }
-  return assertCandidateAssessmentRecord(decoded, expected, label);
+  return normalized;
 }
 
 async function readCandidateAssessment(
   assessmentPath,
   expected = {},
-  { compatibility = "strict" } = {},
+  { verifyHistoricalEvidence = false } = {},
 ) {
   const assessment = await readAuxiliaryJson(
     assessmentPath,
     "candidate-assessment.json",
   );
-  if (
-    compatibility === "historical-developer-preview"
-    && assessment?.executable === undefined
-    && assessment?.health?.executableSurfaceUnchanged === undefined
-  ) {
-    return readHistoricalDeveloperPreviewAssessment(
+  if (verifyHistoricalEvidence) {
+    return readHistoricalCandidateAssessment(
       assessmentPath,
       assessment,
       expected,

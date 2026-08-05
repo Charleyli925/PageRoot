@@ -4,12 +4,12 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
-- Restore projects created by the short-lived August 4 Developer Preview when
-  a historical Version or archived terminal outcome assessment predates executable-surface
-  fields. PageRoot now verifies the frozen/sealed HTML and Hashes, re-runs the
-  current assessment without rewriting history, and keeps the current HTML
-  editable; genuine assessment errors also show an accurate read failure
-  instead of being mislabeled as a timeout.
+- Stop treating AI-authored script changes as an adoption failure. Candidate
+  assessment now checks document usability and coarse continuity only; retired
+  executable-surface fields in historical records are verified, normalized out
+  of current status, and never rewritten or exposed as a present-day warning.
+  Genuine assessment read errors also show an accurate failure instead of
+  being mislabeled as a timeout.
 - Show script-generated Canvas, SVG/HTML charts and dynamic table bodies
   automatically in desktop Edit as one source-Hash-bound read-only bitmap
   projection. The bitmap remains pointer-transparent so comments target the
@@ -51,9 +51,9 @@ Notable user-visible changes are documented here. This project follows Semantic 
   duplicate macOS alert, while missing, timed-out or faulty close coordination
   still uses the native fallback.
 - Replaced subtree-exact AI acceptance with a simpler candidate check: complete
-  visible HTML and an unchanged executable surface remain hard requirements,
-  while coarse page continuity now routes uncertain results into mandatory
-  side-by-side review instead of falsely failing broad but valid edits.
+  visible HTML is the content requirement, while coarse page continuity routes
+  uncertain results into mandatory side-by-side review instead of falsely
+  failing broad but valid edits.
 - Localized terminal AI errors, fixed long error text overlapping the process
   timeline, reduced duplicate terminal actions to one “Return to editing”
   action, and added a restart-safe “Previous run” entry for reopening the last

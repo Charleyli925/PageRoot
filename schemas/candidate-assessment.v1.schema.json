@@ -20,7 +20,6 @@
     "issueCodes",
     "health",
     "continuity",
-    "executable",
     "assessedAt"
   ],
   "properties": {
@@ -75,15 +74,15 @@
     "health": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "completeDocument",
-        "bodyHasContent",
-        "executableSurfaceUnchanged"
-      ],
+      "required": ["completeDocument", "bodyHasContent"],
       "properties": {
         "completeDocument": { "type": "boolean" },
         "bodyHasContent": { "type": "boolean" },
-        "executableSurfaceUnchanged": { "type": "boolean" }
+        "executableSurfaceUnchanged": {
+          "type": "boolean",
+          "deprecated": true,
+          "description": "Retired compatibility evidence. Readers must not use this field to accept, block, or warn about a candidate."
+        }
       }
     },
     "continuity": {
@@ -121,6 +120,8 @@
       }
     },
     "executable": {
+      "deprecated": true,
+      "description": "Retired compatibility evidence. Readers must not use this field to accept, block, or warn about a candidate.",
       "type": "object",
       "additionalProperties": false,
       "required": ["unchanged", "baseCount", "outputCount", "changedCount"],

@@ -175,6 +175,8 @@ test("candidate assessment exposes only the renderer fields needed for review", 
     health: {
       completeDocument: true,
       bodyHasContent: true,
+      // Legacy records can still carry this retired field; the renderer
+      // decoder intentionally ignores it.
       executableSurfaceUnchanged: true,
     },
     continuity: { status: "uncertain", evidencePoints: 0 },
@@ -184,7 +186,6 @@ test("candidate assessment exposes only the renderer fields needed for review", 
     health: {
       completeDocument: true,
       bodyHasContent: true,
-      executableSurfaceUnchanged: true,
     },
     continuity: { status: "uncertain" },
   });
@@ -233,7 +234,7 @@ test("active run records decode transport aliases into one canonical model", () 
 });
 
 test("active run errors are localized without exposing internal messages or codes", () => {
-  const blocked = activeRunFromRecord({
+  const legacyExecutableFailure = activeRunFromRecord({
     requestId: "req_0002",
     status: "error",
     completionObserved: true,
@@ -243,11 +244,17 @@ test("active run errors are localized without exposing internal messages or code
     },
   });
   assert.equal(
-    blocked.error,
-    "返回内容新增或修改了可执行脚本，未自动采用。",
+    legacyExecutableFailure.error,
+    "返回的 HTML 无法安全采用，当前页面没有被覆盖。",
   );
-  assert.equal(blocked.errorCode, "EXECUTABLE_CONTENT_CHANGED");
-  assert.doesNotMatch(blocked.error, /EXECUTABLE|candidate/iu);
+  assert.equal(
+    legacyExecutableFailure.errorCode,
+    "EXECUTABLE_CONTENT_CHANGED",
+  );
+  assert.doesNotMatch(
+    legacyExecutableFailure.error,
+    /EXECUTABLE|candidate|脚本/iu,
+  );
 
   const legacyScopeFailure = activeRunFromRecord({
     requestId: "req_0003",

@@ -19,7 +19,7 @@ PageRoot 让用户在真实本地 HTML 上完成两类工作：
 
 核心合同只有一句：
 
-> 用户选中谁，直接编辑就只 Patch 谁；内部 AI 对一次冻结提交返回完整且可显示、身份与 Hash 一致、没有改变可执行表面并完成事务提交的 HTML，系统才创建下一版，且在用户确认前绝不替换提交前的 HTML；与上一版连续性不足时必须先审阅。
+> 用户选中谁，直接编辑就只 Patch 谁；内部 AI 对一次冻结提交返回完整且可显示、身份与 Hash 一致并完成事务提交的 HTML，系统才创建下一版，且在用户确认前绝不替换提交前的 HTML；作者脚本变化不检测、不提示，与上一版连续性不足时必须先审阅。
 
 ## 2. 目标与非目标
 
@@ -346,7 +346,7 @@ editing
 - 实际 output Hash 与 completion 相同。
 - HTML 完整可加载。
 - body 存在可显示内容。
-- 脚本、inline handler、`javascript:` URL 和 meta refresh 与冻结输入一致。
+- 脚本、inline handler、`javascript:` URL 和 meta refresh 作为普通候选内容，不参与检测、分级或提示。
 - 规范化比较可重复。
 - 候选与上一版的粗粒度连续性评估可重复。
 
@@ -368,18 +368,17 @@ editing
 - 保留 Request、Attempt、评论和诊断记录。
 - 解锁当前项目，允许用户修改要求后再次提交。
 
-若比较 Hash 不同，必须生成符合 `candidate-assessment.v1.schema.json` 的记录。完整性、
-可显示 body 或可执行表面失败时保留 output、completion、assessment 和 outcome，不创建
-Version。连续性证据不足时仍创建不可变 Version，但状态为 `attention`，处理页只允许进入
+若比较 Hash 不同，必须生成符合 `candidate-assessment.v1.schema.json` 的记录。完整性或
+可显示 body 失败时保留 output、completion、assessment 和 outcome，不创建 Version。
+脚本、inline handler、可执行 URL 和 refresh 指令变化不检测、不提示。连续性证据不足时仍创建不可变 Version，但状态为 `attention`，处理页只允许进入
 对比审阅；普通正文、属性、结构和样式变化不按评论 TargetRef 判失败。
 
-2026-08-04 的短期 Developer Preview 曾在同为 `1.0.0` 的历史 assessment 中漏写
-`executable` 与 `health.executableSurfaceUnchanged`。只有历史 Version 或已归档终态可以
-通过单一兼容入口读取这种精确旧形态：系统必须从普通文件形式保留的冻结 base 与 sealed
-output 重算四个 Hash 和当前完整 assessment，旧记录其余字段也必须与旧生产者算法完全
-一致。结果只在内存中规范化，不改写 Attempt；若当前规则发现可执行表面变化，历史中如实
-显示为 `blocked`，归档失败结果仍保持终态，也不以这条辅助展示记录阻止当前权威 HTML
-继续编辑。活动或尚未打开的候选不使用该兼容入口。
+2026 年 8 月的短期 Developer Preview 产生过两种 `1.0.0` 历史 assessment：省略或
+包含 `executable` 与 `health.executableSurfaceUnchanged`。历史 Version 或已归档终态
+通过单一兼容入口读取两种形态：系统必须从普通文件形式保留的冻结 base 与不可变候选证据
+重算四个 Hash 和当前文档健康/连续性 assessment。结果只在内存中移除退役字段与旧脚本
+结论，不改写 Attempt；归档失败结果仍保持终态，也不以辅助展示记录阻止当前权威 HTML
+继续编辑。
 
 ### 5.10 两阶段 Version 提交
 
@@ -637,9 +636,9 @@ Prompt、AI 返回、附件、剪贴板、文件名/路径、账号、电脑序�
 
 - 每个事务故障点均能恢复到完整旧态或完整新态。
 - 无 commit marker 的候选不出现在历史。
-- 身份、协议、路径、Hash、完整文档、可显示 body 和可执行表面属于硬校验，失败时不创建 Version、不消耗候选号。
+- 身份、协议、路径、Hash、完整文档和可显示 body 属于硬校验，失败时不创建 Version、不消耗候选号；候选脚本内容不参与校验或提示。
 - 与上一版连续性证据不足写入 `candidate-assessment.json` 的 `attention`，不阻断候选 Version，但必须先审阅且不能直接打开。
-- 历史 Version 或已归档终态的已知 Developer Preview assessment 缺字段时，只有冻结/封存 HTML、四个 Hash 与旧算法字段全部可重现才可在内存中按当前规则读取；不得补写 `true`、修改旧 Attempt、复活终态或放宽活动候选的可执行表面门禁。
+- 历史 Version 或已归档终态的已知 Developer Preview assessment 使用任一旧形态时，只有冻结 base、不可变候选证据和四个 Hash 均可重现才可在内存中按当前规则读取；退役字段及脚本结论必须移除，不得修改旧 Attempt 或复活终态。
 - 评论 TargetRef 只指导生成、审阅和历史解释；目标外正文、属性、普通结构与样式联动不再单独生成失败或 waiver。
 - 失败与 no-change 返回编辑后仍可从“上轮处理”恢复，重启后行为一致；界面不显示内部英文异常或校验代码串。
 - v3 运行时、前端历史和发布包不包含旧 Schema Reader、migration report 或 legacy marker 分支。

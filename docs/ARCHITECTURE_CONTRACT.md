@@ -289,17 +289,16 @@ The supported compatibility adapters are:
   `storageDirectoryName=projectId` in place without renaming or scanning
   directories. Remove this adapter only when 0.9.0 project records leave the
   supported upgrade window. v1/v2 and incomplete records remain unsupported.
-- A historical Version or archived failed/no-change outcome produced by the
-  short-lived August 4, 2026 Developer Preview may have a
-  `candidate-assessment.json` whose declared
-  `1.0.0` shape predates executable-surface fields. The historical query
-  adapter accepts only that exact field set, verifies the frozen base and
-  sealed output as ordinary files against all exact/comparison Hashes, then
-  deterministically re-runs the current assessment and exposes only the
-  canonical result in memory. It never rewrites the Attempt and never applies
-  to an active/unopened candidate; an archived outcome remains terminal.
-  Remove it when those Developer Preview records leave the supported upgrade
-  window.
+- Historical Versions and archived failed/no-change outcomes produced by the
+  short-lived August 2026 Developer Previews may use either `1.0.0`
+  `candidate-assessment.json` shape: without executable-surface fields or with
+  the now-retired pair. The historical query adapter validates either shape,
+  verifies frozen base and immutable candidate evidence as ordinary files against all
+  exact/comparison Hashes, deterministically re-runs current document-health
+  and continuity assessment, and exposes a canonical result without retired
+  fields. It never rewrites the Attempt; old script conclusions never affect
+  current status, and archived outcomes remain terminal. Remove the adapter
+  when those Developer Preview records leave the supported upgrade window.
 
 ## Change requirements
 
