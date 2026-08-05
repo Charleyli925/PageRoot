@@ -8,7 +8,9 @@ List the files or subsystems intentionally changed and anything explicitly left 
 
 ## Verification
 
-- [ ] The PR stays draft while iterating; marking it ready should spend the one complete source gate on the final intended tree
+- [ ] The PR opened as Draft and ordinary pushes used only PR Feedback
+- [ ] The final head is updated onto current `main`; no other PR is being promoted
+- [ ] Marking Ready will spend the one complete source gate; any later commit returns this PR to Draft before re-promotion
 - [ ] `npm run gate:task`
 - [ ] Relevant manual observation is documented, if automation cannot cover it
 - [ ] No secrets, personal paths, user files, build output or release binaries are included

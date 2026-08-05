@@ -89,9 +89,10 @@ succeeded technically but installer handoff is incomplete.
 
 1. Update `package.json` and the package-lock root to the same semantic version.
 2. Move relevant `CHANGELOG.md` entries from Unreleased into that version.
-3. Open a draft Pull Request while iterating. Draft updates run impact-selected feedback.
-4. Mark the final intended tree ready and wait for the required complete `release-gate`.
-5. Merge only with authorization, then confirm `main-integrity` and `main-smoke` pass for the exact merge commit.
+3. Open a draft Pull Request while iterating. Every ordinary update runs impact-selected `PR Feedback` only.
+4. Update the frozen final head onto current `main`, ensure no other PR is being promoted, then mark it Ready once and wait for the required complete `release-gate`.
+5. If any commit or base update follows that promotion, return the PR to Draft and repeat step 4; the new SHA intentionally has no `release-gate` until re-promoted.
+6. Merge only with authorization, then confirm `main-integrity` accepts the exact merge Tree/version/PR attestation without rerunning source tests.
 
 Local `npm run release:mac` remains available when a complete local source-and-installer proof is useful. It is not publication and does not replace the reviewed GitHub flow.
 

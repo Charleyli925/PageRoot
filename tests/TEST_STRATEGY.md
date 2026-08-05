@@ -8,9 +8,9 @@
 |---|---|---|---|
 | `npm run gate:edit` | 一次局部修改后 | 只运行影响映射命中的 Node 文件；必要时 typecheck | 快速发现局部逻辑错误，不启动浏览器或 Electron |
 | `npm run gate:task` | 一个开发任务完成时 | 静态检查、受影响 Node 文件，以及相关 Browser/Electron/AI 冒烟 | 在较短时间内证明生产链路已经接通 |
-| Draft PR `draft-feedback` | PR 仍在迭代 | 按影响映射选择 Node/编译检查 | 不因每次推送重复消费完整矩阵 |
-| Ready PR `release-gate` | 最终 PR Tree | 全量 Node、三分片完整 Browser、独立 Native Electron、独立确定性 AI 闭环、真实 HTML 发现式门禁 | 完整源码回归只跑一次并签发 Tree Hash 凭证 |
-| `npm run gate:main:auto` | 合并到 `main` | 校验 PR 结果/Tree Hash/版本后，固定 Node 与 Browser 冒烟 | 快速证明合并结果没有漂移，不重复全量源码测试 |
+| PR `pr-feedback` | `opened/synchronize/reopened/converted_to_draft` | 按影响映射选择 Node/编译检查 | 普通推送无论 Draft/Ready 都不重复消费完整矩阵；新提交取消仍在运行的旧 SHA 完整门禁 |
+| 一次性晋升 `release-gate` | 最终 PR Tree 从 Draft 显式转为 Ready | 全量 Node、三分片完整 Browser、独立 Native Electron、独立确定性 AI 闭环、真实 HTML 发现式门禁 | 每个最终候选只跑一次并签发 Tree Hash 凭证；后续新 SHA 必须重新 Draft→Ready 才能再晋升 |
+| `main-integrity` | 合并到 `main` | 校验合并 PR、Tree Hash、package/lockfile 版本和凭证时效 | 相等即复用完整源码证据，不重复 Node、Browser 或 Electron 测试；不相等直接失败 |
 | 按需 `Developer Preview` | 仅在开发者明确要求时 | 干净 Tree、最新 renderer、ad-hoc DMG、包内容完整性、一次隔离启动和精确 PR/内容交付报告 | 在消耗签名/公证时间前发现“漏打包或根本跑不起来”；不成为正式门禁 |
 | `Release Candidate` | 打标签之前，凭证新鲜且 Tree/版本完全一致 | 预签名 App 内容/完整运行校验 → Developer ID 签名后启动 → App 公证 checkpoint → 从同一 App 生成并公证 DMG → 最终字节校验 | 内容错误不消耗 Apple 队列；后段失败只重跑后段 |
 | `Release` | 候选包通过且不超过 72 小时 | 重新校验候选凭证和每个文件 Hash，创建 tag 并发布原字节 | 发布阶段不重新构建、不悄悄替换文件 |
@@ -24,6 +24,13 @@ Tree，不在测试执行期间自动合并分支。组合 Tree 含任何未合�
 工作区有未提交修改时，`edit/task` 自动读取 staged、unstaged 和 untracked 文件。任务已经提交后应运行 `npm run gate:task -- --base <基准分支或提交>`；干净工作区又没有 `--base` 时门禁会明确失败，不会把“零测试”伪装成通过。
 
 `npm run task:finish` 是 `gate:task -- --base origin/main` 的安全任务包装，不引入新的门禁层。`tests/task-workflow.test.mjs` 在独立临时 Git 仓库中验证分支名、干净 primary `main`、远端同步、隔离 worktree 创建、现有分支 attach、脏工作区拒绝、GitHub PR/本地独有提交分类、retire 默认 dry-run、显式放弃围栏和最终差异报告，不会操作开发者的真实分支。
+
+PR 必须从 Draft 开始。普通推送由独立的 `PR Feedback` workflow 处理，
+不会创建名为 `release-gate` 的跳过 job；因此分支保护不会把轻量反馈误当
+完整通过。只有 `ready_for_review` 事件存在完整 workflow。若晋升后又有提交，
+新 SHA 只获得反馈且缺少必需检查，必须重新转 Draft、冻结后再转 Ready。
+同一时间只晋升一个 PR；其他并行修改继续留在 Draft，等前一个合并并更新
+到新 `main` 后再晋升，避免严格最新基线制造三角形重测。
 
 ## 测试类型与去重
 
@@ -115,6 +122,12 @@ Browser 验证真实 DOM 中保存卡片、草稿卡片和输入框在当前/其
 `tests/ci-evidence.test.mjs` 会枚举源码、开发预览、候选与发布工作流实际使用的
 每个 evidence stage；任何未同步到允许列表的名称必须在源码门禁中失败，不能等到
 正式候选打包才暴露。
+
+CI Health 同时读取 `pr-feedback.yml` 与 `ci.yml`。除了同一 run 的绿色 job
+重跑，它还按 PR number（旧数据缺失时按 head branch）聚合不同 SHA 的完整
+门禁：`runsPerPullRequestAverage` 目标不超过 `1.25`，后续候选 SHA 消耗的
+runner minutes 占全部 PR CI 时间应低于 `20%`。这部分不能再被“每个 Tree
+只跑一次”的旧指标隐藏。
 
 ## 判断标准优先级
 

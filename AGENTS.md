@@ -18,7 +18,7 @@ This repository is the complete public source boundary for PageRoot. Keep this f
 3. Keep the diff focused. Add tests and documentation in the same change when behavior, contracts, commands or public expectations change.
 4. While editing, use `npm run gate:edit`. Before publishing a branch, run `npm run task:finish`.
 5. Review `git diff`, stage only intentional paths, review `git diff --cached`, then commit and push the task branch.
-6. Open a draft PR while work is incomplete. When the final intended diff is reviewable, mark it ready to run the required complete gate once. Squash-merge only with explicit authorization.
+6. Open every PR as a draft. Ordinary pushes receive impact-selected feedback only. After updating the frozen final head onto current `main`, and only when no other PR is being promoted, mark it ready once to run the complete gate. Any later commit or base update invalidates that promotion: return the PR to draft, finish the work, then mark it ready again. Squash-merge only with explicit authorization.
 7. End every task with: branch, commit, changed-file summary, tests run and results, documentation impact, PR/Release links, and whether the worktree is clean. After merge, run the read-only `npm run task:audit` from the primary worktree and retire only the exact merged task with an explicit `task:retire --apply`.
 
 For command behavior, authorization levels, worktrees and reporting format, read `docs/CODEX_WORKFLOW.md`.
@@ -47,7 +47,7 @@ source PRs as a side effect. Do not silently omit a conflicting or unavailable
 head. Any package containing unmerged PR code is a Developer Preview and is
 not release-eligible; a formal candidate still requires reviewed `main` only.
 
-The release and artifact gates require a clean committed tree. Any source change invalidates earlier release evidence. Draft Pull Requests run impact-selected feedback; marking the final tree ready runs the complete source gate once. `main` verifies its exact-tree attestation and runs only a fast smoke. The manual `Release Candidate` workflow may use the internal `gate:artifact-only:auto` lane only when CI has authenticated a fresh successful PR gate for the identical Git tree and version. The separate `Release` workflow then verifies and publishes those exact candidate bytes and creates the immutable tag; it never rebuilds during publication. Release only from reviewed `main` using `docs/RELEASING.md`.
+The release and artifact gates require a clean committed tree. Any source change invalidates earlier release evidence. Every ordinary Pull Request update runs impact-selected feedback, whether the PR is draft or ready; only an explicit `ready_for_review` transition runs the complete source gate and creates the required exact-tree attestation. A new commit cancels an in-flight stale gate and leaves the new head without `release-gate` until it is promoted again. `main` verifies that exact Tree/version/PR attestation and does not rerun source tests. The manual `Release Candidate` workflow may use the internal `gate:artifact-only:auto` lane only when CI has authenticated a fresh successful PR gate for the identical Git tree and version. The separate `Release` workflow then verifies and publishes those exact candidate bytes and creates the immutable tag; it never rebuilds during publication. Release only from reviewed `main` using `docs/RELEASING.md`.
 
 ## Product invariants
 
