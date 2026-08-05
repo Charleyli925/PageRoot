@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  readableReviewTextFootprintPlan,
   reviewTextSimilarity,
   sentenceAwareTextDifferences,
 } from "../app/lib/review-text-diff.js";
@@ -67,4 +68,55 @@ test("long punctuation-free copy keeps distant edits in separate precise ranges"
     before: ["stable80", "stable440"],
     after: ["changedFirst", "changedSecond"],
   });
+});
+
+test("dense multi-line copy rewrites promote to one readable block footprint", () => {
+  const before = "综搜整体仍处于放缓背景，关键不在于单纯增加曝光，而在于识别商品需求，并用更匹配的供给承接；核心仍是让模型识别电商意图，再优化结果组织，把模糊兴趣转化为可验证需求。";
+  const after = "综搜放缓，但电商搜索仍有较高大盘。关键是识别内容浏览中的潜在商品需求，并用匹配供给承接。供给可归纳为电商意图识别、优化结果组织，将模糊兴趣转为可验证需求。";
+  const differences = sentenceAwareTextDifferences(before, after);
+  const plan = readableReviewTextFootprintPlan(before, after, differences);
+
+  assert.equal(plan.scope, "block");
+  assert.equal(plan.before.groups.length, 1);
+  assert.equal(plan.after.groups.length, 1);
+  assert.ok(plan.density >= 0.45);
+});
+
+test("a meaningful stable gap keeps precise phrase footprints separate", () => {
+  const before = "规模扩大但效率稳定";
+  const after = "规模收缩但效率提升";
+  const differences = sentenceAwareTextDifferences(before, after);
+  const plan = readableReviewTextFootprintPlan(before, after, differences);
+
+  assert.deepEqual(compare(before, after), {
+    before: ["扩大", "稳定"],
+    after: ["收缩", "提升"],
+  });
+  assert.equal(plan.scope, "inline");
+  assert.equal(plan.before.groups.length, 2);
+  assert.equal(plan.after.groups.length, 2);
+});
+
+test("tiny unchanged gaps are absorbed but sentence boundaries split footprints", () => {
+  const compact = readableReviewTextFootprintPlan(
+    "甲乙中丙丁",
+    "戊己中庚辛",
+    {
+      before: [{ start: 0, end: 2 }, { start: 3, end: 5 }],
+      after: [{ start: 0, end: 2 }, { start: 3, end: 5 }],
+    },
+  );
+  const separated = readableReviewTextFootprintPlan(
+    "甲乙。稳定句。丙丁",
+    "戊己。稳定句。庚辛",
+    {
+      before: [{ start: 0, end: 2 }, { start: 7, end: 9 }],
+      after: [{ start: 0, end: 2 }, { start: 7, end: 9 }],
+    },
+  );
+
+  assert.equal(compact.scope, "inline");
+  assert.equal(compact.before.groups.length, 1);
+  assert.equal(separated.scope, "inline");
+  assert.equal(separated.before.groups.length, 2);
 });

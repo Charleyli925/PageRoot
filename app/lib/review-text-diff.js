@@ -359,6 +359,102 @@ export function mergeReviewTextRanges(ranges) {
     }, []);
 }
 
+const HARD_FOOTPRINT_BOUNDARY_PATTERN = /[\n\u3002\uff01\uff1f!?\uff1b;]/u;
+
+function visibleCharacterCount(value) {
+  return [...value.replace(/\s/gu, "")].length;
+}
+
+function visibleRangeLength(source, ranges) {
+  return ranges.reduce((total, range) => (
+    total + visibleCharacterCount(source.slice(range.start, range.end))
+  ), 0);
+}
+
+function rangeSpanCoverage(source, ranges) {
+  if (!ranges.length) return 0;
+  const total = visibleCharacterCount(source);
+  if (!total) return 0;
+  const first = ranges[0];
+  const last = ranges[ranges.length - 1];
+  return visibleCharacterCount(source.slice(first.start, last.end)) / total;
+}
+
+function readableRangeGroups(source, ranges) {
+  const sorted = mergeReviewTextRanges(ranges);
+  return sorted.reduce((groups, range) => {
+    const previousGroup = groups.at(-1);
+    const previousRange = previousGroup?.at(-1);
+    if (!previousGroup || !previousRange) {
+      groups.push([{ ...range }]);
+      return groups;
+    }
+    const gap = source.slice(previousRange.end, range.start);
+    const gapLength = visibleCharacterCount(gap);
+    const joinedRanges = [...previousGroup, range];
+    const joinedStart = joinedRanges[0].start;
+    const joinedEnd = range.end;
+    const joinedLength = Math.max(
+      1,
+      visibleCharacterCount(source.slice(joinedStart, joinedEnd)),
+    );
+    const joinedDensity = visibleRangeLength(source, joinedRanges) / joinedLength;
+    const crossesHardBoundary = HARD_FOOTPRINT_BOUNDARY_PATTERN.test(gap);
+    const belongsToSameReadablePhrase = !crossesHardBoundary && (
+      gapLength <= 2
+      || (gapLength <= 6 && joinedDensity >= 0.58)
+    );
+    if (belongsToSameReadablePhrase) previousGroup.push({ ...range });
+    else groups.push([{ ...range }]);
+    return groups;
+  }, []);
+}
+
+export function readableReviewTextFootprintPlan(
+  beforeText,
+  afterText,
+  differences,
+) {
+  const beforeRanges = mergeReviewTextRanges(differences.before || []);
+  const afterRanges = mergeReviewTextRanges(differences.after || []);
+  const beforeLength = visibleCharacterCount(beforeText);
+  const afterLength = visibleCharacterCount(afterText);
+  const changedLength = visibleRangeLength(beforeText, beforeRanges)
+    + visibleRangeLength(afterText, afterRanges);
+  const totalLength = beforeLength + afterLength;
+  const density = totalLength ? changedLength / totalLength : 0;
+  const fragmentCount = beforeRanges.length + afterRanges.length;
+  const pairedReplacement = beforeRanges.length > 0 && afterRanges.length > 0;
+  const spanCoverage = Math.max(
+    rangeSpanCoverage(beforeText, beforeRanges),
+    rangeSpanCoverage(afterText, afterRanges),
+  );
+  const longEnoughForBlock = Math.max(beforeLength, afterLength) >= 20;
+  const denseRewrite = pairedReplacement && longEnoughForBlock && (
+    density >= 0.45
+    || (
+      fragmentCount >= 5
+      && density >= 0.28
+      && spanCoverage >= 0.65
+    )
+  );
+  const scope = denseRewrite ? "block" : "inline";
+  return {
+    scope,
+    density,
+    before: {
+      groups: denseRewrite && beforeRanges.length
+        ? [beforeRanges]
+        : readableRangeGroups(beforeText, beforeRanges),
+    },
+    after: {
+      groups: denseRewrite && afterRanges.length
+        ? [afterRanges]
+        : readableRangeGroups(afterText, afterRanges),
+    },
+  };
+}
+
 export function sentenceAwareTextDifferences(beforeText, afterText) {
   const beforeSentences = reviewSentenceRanges(beforeText);
   const afterSentences = reviewSentenceRanges(afterText);
