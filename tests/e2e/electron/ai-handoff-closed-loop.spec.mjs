@@ -736,7 +736,7 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect(reviewCommentMarker).not.toHaveAttribute("tabindex", /.+/u);
     await expect(reviewCommentMarker).toHaveCSS("width", "30px");
     await expect(reviewCommentMarker).toHaveCSS("height", "30px");
-    await expect(reviewCommentMarker).toHaveCSS("font-size", "20px");
+    await expect(reviewCommentMarker).toHaveCSS("font-size", "15px");
     await expect(reviewCommentMarker).toHaveCSS("background-color", "rgb(98, 88, 214)");
     await expect(reviewCommentMarker).toHaveCSS("color", "rgb(255, 255, 255)");
     await expect(launched.page.locator(
