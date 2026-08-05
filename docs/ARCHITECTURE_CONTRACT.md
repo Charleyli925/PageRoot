@@ -138,8 +138,9 @@ Both already-isolated review frames may then report one bounded pair of
 same-side-stable, host-relative HTML/SVG/Canvas fingerprints, including the
 host's own painted box, a fully transparent host as a stable disappearance
 state, and directly mutated size while excluding an unpainted empty box,
-indirect layout size and descendants hidden beneath that fully transparent
-host. A batch
+indirect layout size and any subtree hidden beneath a zero-opacity host or
+descendant wrapper. A visible subtree becoming transparent remains a real
+stable-result change. A batch
 completed before frame registration remains cached for the challenged claim.
 Coordinator installation must drain every already-registered frame bound to the
 same document pair; neither load-before-owner nor owner-before-load may strand

@@ -530,6 +530,8 @@ test("a verified AI result stays pending through desktop review until the user a
       <div id="review-runtime-host-paint-chart" class="review-runtime-chart-host"></div>
       <div id="review-runtime-opacity-chart" class="review-runtime-chart-host"></div>
       <div id="review-runtime-hidden-churn-chart" class="review-runtime-chart-host"></div>
+      <div id="review-runtime-descendant-opacity-chart" class="review-runtime-chart-host"></div>
+      <div id="review-runtime-hidden-descendant-churn-chart" class="review-runtime-chart-host"></div>
       <svg id="review-runtime-svg-root-chart" class="review-runtime-chart-host"></svg>
       <div id="review-runtime-root-geometry-chart" class="review-runtime-chart-host"></div>
       <div id="review-runtime-flow-chart" class="review-runtime-chart-host"></div>
@@ -640,6 +642,18 @@ test("a verified AI result stays pending through desktop review until the user a
       runtimeHiddenChurnChart.innerHTML = '<strong>'
         + (runtimeReviewChartVariant === "before" ? '隐藏旧值' : '隐藏新值')
         + '</strong>';
+      const runtimeDescendantOpacityChart = document.querySelector(
+        "#review-runtime-descendant-opacity-chart",
+      );
+      runtimeDescendantOpacityChart.innerHTML = '<div style="opacity:'
+        + (runtimeReviewChartVariant === "before" ? '1' : '0')
+        + '"><strong>内部区域透明度变化</strong></div>';
+      const runtimeHiddenDescendantChurnChart = document.querySelector(
+        "#review-runtime-hidden-descendant-churn-chart",
+      );
+      runtimeHiddenDescendantChurnChart.innerHTML = '<div style="opacity:0"><strong>'
+        + (runtimeReviewChartVariant === "before" ? '内部隐藏旧值' : '内部隐藏新值')
+        + '</strong></div>';
       const runtimeSvgRootChart = document.querySelector("#review-runtime-svg-root-chart");
       runtimeSvgRootChart.style.cssText = 'display:block;height:52px;width:'
         + (runtimeReviewChartVariant === "before" ? '190px' : '248px')
@@ -927,6 +941,7 @@ test("a verified AI result stays pending through desktop review until the user a
       "#review-runtime-canvas-chart",
       "#review-runtime-host-paint-chart",
       "#review-runtime-opacity-chart",
+      "#review-runtime-descendant-opacity-chart",
       "#review-runtime-svg-root-chart",
     ];
     for (const selector of runtimeChangedHosts) {
@@ -974,6 +989,12 @@ test("a verified AI result stays pending through desktop review until the user a
       .toHaveAttribute("data-pageroot-review-runtime-host", /runtime-host-\d+/u);
     await expect(afterReviewFrame.locator("#review-runtime-hidden-churn-chart"))
       .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
+    await expect(afterReviewFrame.locator(
+      "#review-runtime-hidden-descendant-churn-chart",
+    )).toHaveAttribute("data-pageroot-review-runtime-host", /runtime-host-\d+/u);
+    await expect(afterReviewFrame.locator(
+      "#review-runtime-hidden-descendant-churn-chart",
+    )).not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
     await expect(beforeReviewFrame.locator("#review-runtime-unrelated-random-chart"))
       .not.toHaveAttribute("data-pageroot-review-runtime-host", /.+/u);
     await expect(afterReviewFrame.locator("#review-runtime-unrelated-random-chart"))

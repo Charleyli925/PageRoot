@@ -370,6 +370,11 @@ test("runtime chart review supplements only the initial bounded static footprint
   assert.match(reviewDocument, /hostBoxMutated/);
   assert.match(reviewDocument, /hostFullyTransparent/);
   assert.match(reviewDocument, /"host-box\|opacity=0"/);
+  assert.match(reviewDocument, /runtimeVisualVisibilityCache = new WeakMap/);
+  assert.match(
+    reviewDocument,
+    /while \(current instanceof Element\)[\s\S]*?Number\(style\.opacity \|\| 1\) <= 0[\s\S]*?current === host/,
+  );
   const runtimeChannelTransferStart = reviewDocument.indexOf(
     "const transferRuntimeVisualChannel",
   );

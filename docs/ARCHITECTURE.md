@@ -109,8 +109,10 @@ Comments + frozen input
   Each isolated frame samples visible HTML/SVG/Canvas paint twice, including
   the host's own painted box, a fully transparent host as a stable disappearance
   state, and directly mutated size but not an unpainted empty box or indirect
-  layout size. Descendants under a fully transparent host are not traversed, so
-  invisible child churn has no evidence authority. Sampling uses
+  layout size. Every sample checks its ancestor chain back to the host and
+  prunes a zero-opacity subtree, so invisible child churn has no evidence
+  authority while a visible subtree becoming transparent still changes the
+  stable host result. Sampling uses
   host-relative geometry and omits unstable or unsupported results. The
   parent `ReviewRuntimeVisualCoordinator` accepts only declared host keys,
   accepts snapshot facts only through a challenged bootstrap-owned capability

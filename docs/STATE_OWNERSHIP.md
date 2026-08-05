@@ -96,8 +96,9 @@ Rules:
   that host's distinctive source identity; section co-location is not enough.
   It accepts only a complete declared before/after pair before its initial deadline,
   includes the host's own painted box, fully transparent disappearance state
-  and directly mutated size but not hidden descendants, unpainted geometry or
-  indirect layout size, ignores
+  and directly mutated size but prunes every descendant subtree whose ancestor
+  chain reaches zero opacity; hidden descendants, unpainted geometry and
+  indirect layout size are not facts. It ignores
   absolute document position and unstable or late samples, merges with an
   existing owning change instead of duplicating it, and freezes after the
   initial projection commit. Pre-load evidence remains bootstrap-owned until

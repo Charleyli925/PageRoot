@@ -2678,14 +2678,33 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
     runtimeVisualRounded(rect.width),
     runtimeVisualRounded(rect.height),
   ].join(",");
-  const runtimeVisualVisible = (element) => {
+  const runtimeVisualVisible = (element, host, visibilityCache) => {
     if (!(element instanceof Element)) return false;
-    const style = getComputedStyle(element);
+    let current = element;
+    let visible = true;
+    const uncached = [];
+    while (current instanceof Element) {
+      if (visibilityCache.has(current)) {
+        visible = visibilityCache.get(current);
+        break;
+      }
+      uncached.push(current);
+      const style = getComputedStyle(current);
+      if (
+        style.display === "none"
+        || style.visibility === "hidden"
+        || style.visibility === "collapse"
+        || Number(style.opacity || 1) <= 0
+      ) {
+        visible = false;
+        break;
+      }
+      if (current === host) break;
+      current = current.parentElement;
+    }
+    uncached.forEach((item) => visibilityCache.set(item, visible));
     const rect = element.getBoundingClientRect();
-    return style.display !== "none"
-      && style.visibility !== "hidden"
-      && style.visibility !== "collapse"
-      && Number(style.opacity || 1) > 0
+    return visible
       && rect.width > 0
       && rect.height > 0;
   };
@@ -2817,6 +2836,7 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
         valueLength: 0,
         budget,
       };
+      const runtimeVisualVisibilityCache = new WeakMap();
       const descendants = [host];
       let hostOwnPaint = false;
       budget.nodes += 1;
@@ -2841,7 +2861,11 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
           return;
         }
         if (element instanceof HTMLCanvasElement) {
-          if (!runtimeVisualVisible(element)) return;
+          if (!runtimeVisualVisible(
+            element,
+            host,
+            runtimeVisualVisibilityCache,
+          )) return;
           const canvasStyle = getComputedStyle(element);
           const canvasRect = element.getBoundingClientRect();
           runtimeVisualCanvas(element, capture, canvasRect, hostBoxMutated);
@@ -2892,7 +2916,11 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
           runtimeVisualPush(capture, "geometry", "vector|" + runtimeVisualRect(rect, hostRect));
           return;
         }
-        if (!runtimeVisualVisible(element)) return;
+        if (!runtimeVisualVisible(
+          element,
+          host,
+          runtimeVisualVisibilityCache,
+        )) return;
         if (["IMG", "PICTURE", "PROGRESS", "METER", "VIDEO"].includes(element.tagName)) {
           runtimeVisualPush(capture, "content", [
             element.tagName,
@@ -2935,7 +2963,11 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
           text
           && parentElement
           && !parentElement.closest("script, style, noscript, template")
-          && runtimeVisualVisible(parentElement)
+          && runtimeVisualVisible(
+            parentElement,
+            host,
+            runtimeVisualVisibilityCache,
+          )
         ) {
           const range = document.createRange();
           range.selectNodeContents(textNode);

@@ -25,8 +25,9 @@ Notable user-visible changes are documented here. This project follows Semantic 
   reference the host's distinctive identity; sharing a section is insufficient.
   The bounded capture includes the host's own painted box, fully transparent
   host state and directly mutated size as well as generated descendants. It
-  does not inspect descendants hidden by a fully transparent host, so hidden
-  child churn cannot become a false positive. It caches evidence across
+  prunes every zero-opacity host or descendant subtree, so hidden child churn
+  cannot become a false positive while a visible subtree becoming transparent
+  remains a real change. It caches evidence across
   asymmetric slow frame loads, gives managed frames 1.5s to register, starts
   its unchanged 500ms comparison budget only after both review frames load, and
   ignores unpainted geometry, page-flow shifts,
