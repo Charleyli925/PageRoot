@@ -4,6 +4,10 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+- Make frozen user comments easier to discover in AI review with a larger,
+  always-purple “评” marker and white label. The marker remains anchored to
+  the original comment target, and hovering still opens the existing read-only
+  comment-detail bubble.
 - Separate exact AI-review copy evidence from the frame users read. Nearby
   fragments now form bounded phrase or line rectangles, tiny edits gain a
   line-local readable width, stable sentences stay separate, and dense

@@ -355,6 +355,11 @@ test("formal review projects frozen user comments on the before page only", () =
   assert.match(review, /data-testid="review-comment-marker"/);
   assert.match(review, /data-testid="review-comment-bubble"/);
   assert.match(review, />评<\/span>/);
+  assert.match(styles, /\.reviewCommentMarker\s*\{[^}]*?width:\s*30px;[^}]*?height:\s*30px;/);
+  assert.match(styles, /\.reviewCommentMarker\s*\{[^}]*?border-radius:\s*14px;/);
+  assert.match(styles, /\.reviewCommentMarker\s*\{[^}]*?background:\s*#6258d6;/);
+  assert.match(styles, /\.reviewCommentMarker\s*\{[^}]*?color:\s*#fff;/);
+  assert.match(styles, /\.reviewCommentMarker\s*\{[^}]*?font-size:\s*15px;/);
   assert.match(styles, /\.reviewCommentMarker:hover \.reviewCommentBubble\s*\{/);
   assert.doesNotMatch(reviewDocument, /data-pageroot-review-comment-(?:data|layer|marker|bubble)/);
   assert.doesNotMatch(reviewDocument, /用户评论/);
