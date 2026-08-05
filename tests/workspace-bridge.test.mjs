@@ -4521,6 +4521,98 @@ test("version list returns hash-validated comments, local edits, and AI dialogue
   );
 });
 
+test("workspace re-derives a historical pre-executable Developer Preview assessment without rewriting it", async (t) => {
+  const environment = await createEnvironment(t);
+  const sourcePath = join(
+    environment.sources,
+    "legacy-candidate-assessment.html",
+  );
+  await writeFile(sourcePath, htmlPage("旧版候选评估"), "utf8");
+  const bridge = await environment.start();
+  const opened = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+  const run = (
+    await postJson(bridge.baseUrl, "/request", {
+      sourcePath,
+      projectId: opened.projectId,
+      documentId: opened.documentId,
+      expectedSourceSha256: opened.currentHtmlSha256,
+      freezeCutoffRevision: 0,
+      summary: "验证旧开发测试版候选评估的历史读取兼容。",
+    })
+  ).body;
+  const frozenHtml = await readFile(run.inputPath, "utf8");
+  await writeFile(
+    run.outputPath,
+    frozenHtml.replace(
+      "用于验证 HTML AI 版本生命周期。",
+      "用于验证旧开发测试版候选评估兼容。",
+    ),
+    "utf8",
+  );
+  await runFinalizer(environment.workspace, run);
+  const ready = await requestJson(
+    bridge.baseUrl,
+    `/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
+  );
+  assert.equal(ready.response.status, 200, JSON.stringify(ready.body));
+  assert.equal(ready.body.status, "ready-to-open");
+  const activated = await activateReadyVersion(bridge.baseUrl, ready.body);
+  const activatedHtml = await readFile(activated.currentPath, "utf8");
+
+  const assessmentPath = join(
+    run.attemptPath,
+    "candidate-assessment.json",
+  );
+  const legacyAssessment = JSON.parse(
+    await readFile(assessmentPath, "utf8"),
+  );
+  const legacyStatus = legacyAssessment.status;
+  assert.ok(["ready", "attention"].includes(legacyStatus));
+  delete legacyAssessment.executable;
+  delete legacyAssessment.health.executableSurfaceUnchanged;
+  const persistedLegacyText = `${JSON.stringify(legacyAssessment, null, 2)}\n`;
+  await writeFile(assessmentPath, persistedLegacyText, "utf8");
+
+  const restored = await previewWorkspace(
+    bridge.baseUrl,
+    activated.currentPath,
+  );
+  assert.equal(restored.response.status, 200, JSON.stringify(restored.body));
+  const restoredVersion = restored.body.versions.find(
+    (version) => version.versionId === run.candidateVersionId,
+  );
+  assert.ok(restoredVersion);
+  assert.equal(restoredVersion.candidateAssessment.status, legacyStatus);
+  assert.equal(
+    restoredVersion.candidateAssessment.health.executableSurfaceUnchanged,
+    true,
+  );
+  assert.deepEqual(restoredVersion.candidateAssessment.executable, {
+    unchanged: true,
+    baseCount: 0,
+    outputCount: 0,
+    changedCount: 0,
+  });
+  assert.equal(await readFile(assessmentPath, "utf8"), persistedLegacyText);
+
+  legacyAssessment.continuity.evidencePoints += 1;
+  await writeFile(
+    assessmentPath,
+    `${JSON.stringify(legacyAssessment, null, 2)}\n`,
+    "utf8",
+  );
+  const rejected = await previewWorkspace(
+    bridge.baseUrl,
+    activated.currentPath,
+  );
+  assert.equal(rejected.response.status, 409);
+  assert.equal(rejected.body.error.code, "CANDIDATE_ASSESSMENT_INVALID");
+  assert.equal(
+    await readFile(activated.currentPath, "utf8"),
+    activatedHtml,
+  );
+});
+
 test("history endpoints reject marker, manifest, and entry tampering", async (t) => {
   const environment = await createEnvironment(t);
   const sourcePath = join(environment.sources, "integrity.html");

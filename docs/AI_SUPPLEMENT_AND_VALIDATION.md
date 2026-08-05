@@ -67,6 +67,12 @@ AI 结果通过校验后先创建不可变 Version 和独立 working HTML，运�
 
 Version manifest 仍保持不可变；历史通过其 `requestId + attemptId` 定位同一 Attempt 下的 supplement 和 candidate assessment。旧 `validation-review.json` 只读兼容，不再由新 Attempt 写入。
 
+2026-08-04 的短期 Developer Preview assessment 曾缺少可执行表面字段。仅历史查询可在
+冻结 base、sealed output、四个 Hash 与旧字段全部可重现时重新运行当前 assessor，并把
+完整结果作为内存投影展示；旧 Attempt 不改写。若旧 producer 当时记为 `ready`、当前规则
+却发现脚本或其他可执行表面变化，历史如实显示未通过，但当前已经权威打开的 HTML 仍可
+继续编辑。活动或尚未采用的候选不走该兼容路径。
+
 失败或 no-change 后，本轮处理页只有“返回编辑”。退出不会自动打开某条评论，也不会清除
 outcome；workspace 返回最近终态，标题栏“上轮处理”可在退出后或重启后重新打开。开始
 冻结下一轮 Request 时，才把这个入口更新为新一轮。

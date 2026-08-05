@@ -373,6 +373,14 @@ editing
 Version。连续性证据不足时仍创建不可变 Version，但状态为 `attention`，处理页只允许进入
 对比审阅；普通正文、属性、结构和样式变化不按评论 TargetRef 判失败。
 
+2026-08-04 的短期 Developer Preview 曾在同为 `1.0.0` 的历史 assessment 中漏写
+`executable` 与 `health.executableSurfaceUnchanged`。只有已经提交、仅供历史展示的
+Version 可以通过单一兼容入口读取这种精确旧形态：系统必须从普通文件形式保留的冻结
+base 与 sealed output 重算四个 Hash 和当前完整 assessment，旧记录其余字段也必须与旧
+生产者算法完全一致。结果只在内存中规范化，不改写 Attempt；若当前规则发现可执行表面
+变化，历史中如实显示为 `blocked`，但不以这条辅助展示记录阻止当前权威 HTML 继续编辑。
+活动或尚未打开的候选不使用该兼容入口。
+
 ### 5.10 两阶段 Version 提交
 
 校验通过后进入 `committing`：
@@ -631,6 +639,7 @@ Prompt、AI 返回、附件、剪贴板、文件名/路径、账号、电脑序�
 - 无 commit marker 的候选不出现在历史。
 - 身份、协议、路径、Hash、完整文档、可显示 body 和可执行表面属于硬校验，失败时不创建 Version、不消耗候选号。
 - 与上一版连续性证据不足写入 `candidate-assessment.json` 的 `attention`，不阻断候选 Version，但必须先审阅且不能直接打开。
+- 已提交历史 Version 的已知 Developer Preview assessment 缺字段时，只有冻结/封存 HTML、四个 Hash 与旧算法字段全部可重现才可在内存中按当前规则读取；不得补写 `true`、修改旧 Attempt 或放宽活动候选的可执行表面门禁。
 - 评论 TargetRef 只指导生成、审阅和历史解释；目标外正文、属性、普通结构与样式联动不再单独生成失败或 waiver。
 - 失败与 no-change 返回编辑后仍可从“上轮处理”恢复，重启后行为一致；界面不显示内部英文异常或校验代码串。
 - v3 运行时、前端历史和发布包不包含旧 Schema Reader、migration report 或 legacy marker 分支。

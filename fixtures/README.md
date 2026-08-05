@@ -4,6 +4,10 @@
 
 `targeted-change/` 保存 SourceIndex、TargetResolver、SourcePatchEngine 和 ScopeValidator 的源码边界样本，覆盖 Unicode、CRLF/LF、属性引号、注释、template/table/script、样式来源与模块排序。
 
+`candidate-assessment-compat/` 保存一组纯合成的旧 Developer Preview
+assessment、冻结 base 与 sealed output。旧 JSON 故意不满足当前严格 Schema，只用于证明
+历史查询必须从匹配 Hash 的 HTML 重算当前结果，不能猜测缺失的可执行面结论。
+
 `v2/` 不是兼容合同。该目录只保留五份最小拒绝输入，用于证明 v3 主 Schema 会拒绝旧记录，而不是静默补字段或迁移：
 
 - `annotation-records.frozen.json`

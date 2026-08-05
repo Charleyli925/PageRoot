@@ -25,7 +25,10 @@ import {
   createInsertionPointTargetRef,
   createTargetRef,
 } from "../app/lib/target-resolver.js";
-import { assessHtmlCandidate } from "../scripts/candidate-assessment.mjs";
+import {
+  assessHtmlCandidate,
+  decodePreExecutableDeveloperPreviewAssessment,
+} from "../scripts/candidate-assessment.mjs";
 import { injectManagedMeta, sha256 } from "../scripts/lifecycle-core.mjs";
 import { validateScope } from "../scripts/scope-validator.mjs";
 
@@ -148,6 +151,62 @@ test("candidate assessment distinguishes usable edits, uncertain continuity, and
   assert.deepEqual(
     executableChange.issueCodes,
     ["EXECUTABLE_CONTENT_CHANGED"],
+  );
+});
+
+test("historical Developer Preview assessments are re-derived without inventing executable safety", async () => {
+  const fixtureRoot = join(
+    productRoot,
+    "fixtures",
+    "candidate-assessment-compat",
+  );
+  const [assessment, baseHtml, outputHtml] = await Promise.all([
+    readFile(
+      join(
+        fixtureRoot,
+        "candidate-assessment.pre-executable-dev.json",
+      ),
+      "utf8",
+    ).then(JSON.parse),
+    readFile(join(fixtureRoot, "base.html"), "utf8"),
+    readFile(join(fixtureRoot, "output.html"), "utf8"),
+  ]);
+
+  const decoded = decodePreExecutableDeveloperPreviewAssessment({
+    assessment,
+    baseHtml,
+    outputHtml,
+  });
+  assert.ok(decoded);
+  assert.equal(assessment.status, "ready");
+  assert.equal(assessment.executable, undefined);
+  assert.equal(decoded.status, "blocked");
+  assert.deepEqual(decoded.issueCodes, ["EXECUTABLE_CONTENT_CHANGED"]);
+  assert.deepEqual(decoded.executable, {
+    unchanged: false,
+    baseCount: 1,
+    outputCount: 1,
+    changedCount: 1,
+  });
+  assert.equal(decoded.health.executableSurfaceUnchanged, false);
+
+  const mismatched = structuredClone(assessment);
+  mismatched.continuity.evidencePoints += 1;
+  assert.equal(
+    decodePreExecutableDeveloperPreviewAssessment({
+      assessment: mismatched,
+      baseHtml,
+      outputHtml,
+    }),
+    null,
+  );
+  assert.equal(
+    decodePreExecutableDeveloperPreviewAssessment({
+      assessment: { ...assessment, unexpected: true },
+      baseHtml,
+      outputHtml,
+    }),
+    null,
   );
 });
 

@@ -47,6 +47,16 @@ const PRODUCT_ERROR_MESSAGES = Object.freeze({
     "保存结果无法核对。当前编辑仍保留，PageRoot 不会采用不一致的内容。",
   INVALID_SOURCE_HISTORY_ACK:
     "撤销结果无法核对。本次结果未采用，请重新打开源页后再试。",
+  CANDIDATE_ASSESSMENT_INVALID:
+    "某次 AI 结果的校验记录无法核对。当前 HTML 没有被改动，请重试读取。",
+  CANDIDATE_ASSESSMENT_IDENTITY_MISMATCH:
+    "某次 AI 结果与它的校验记录不一致。当前 HTML 没有被改动，请重试读取。",
+  CANDIDATE_ASSESSMENT_LEGACY_EVIDENCE_MISSING:
+    "旧版 AI 结果缺少复核所需的记录。当前 HTML 没有被改动，请重试读取。",
+  CANDIDATE_ASSESSMENT_LEGACY_EVIDENCE_INVALID:
+    "旧版 AI 结果的复核记录无法安全读取。当前 HTML 没有被改动。",
+  CANDIDATE_ASSESSMENT_LEGACY_EVIDENCE_MISMATCH:
+    "旧版 AI 结果与保留的复核记录不一致。当前 HTML 没有被改动。",
 });
 
 const NOTICE_DISPOSITIONS = new Set([
