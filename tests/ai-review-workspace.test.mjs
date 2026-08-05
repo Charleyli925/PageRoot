@@ -353,6 +353,22 @@ test("runtime chart review supplements only the initial bounded static footprint
   assert.match(reviewDocument, /stopImmediateMessagePropagation\(event\)/);
   assert.match(reviewDocument, /type: "runtime-visual-channel"/);
   assert.match(reviewDocument, /type: "runtime-visual-snapshots"/);
+  assert.match(reviewDocument, /runtimeVisualSnapshotBatch = runtimeVisualSnapshots/);
+  assert.match(reviewDocument, /runtimeVisualSourceBoxAttribute/);
+  assert.match(reviewDocument, /hostBoxMutated/);
+  const runtimeChannelTransferStart = reviewDocument.indexOf(
+    "const transferRuntimeVisualChannel",
+  );
+  const runtimeChannelTransferEnd = reviewDocument.indexOf(
+    "const clamp",
+    runtimeChannelTransferStart,
+  );
+  assert.match(
+    reviewDocument.slice(runtimeChannelTransferStart, runtimeChannelTransferEnd),
+    /publishRuntimeVisualSnapshots\(\);[\s\S]*post\("ready"/,
+  );
+  assert.match(reviewDocument, /\|size=" \+ runtimeVisualRounded\(rect\.width\)/);
+  assert.match(reviewDocument, /\|\| hostOwnPaint/);
   assert.match(review, /new ReviewRuntimeVisualCoordinator/);
   assert.match(review, /REVIEW_RUNTIME_VISUAL_DEADLINE_MS/);
   assert.match(review, /createReviewRuntimeVisualChallenge/);

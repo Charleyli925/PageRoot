@@ -126,7 +126,11 @@ parent `AiReviewWorkspace` and its `ReviewRuntimeVisualCoordinator`. The frozen
 source analyzer must first prove a unique source-empty host pair, a relevant
 changed authored script and absence of an existing static footprint over that
 host. Both already-isolated review frames may then report one bounded pair of
-same-side-stable, host-relative HTML/SVG/Canvas fingerprints. Evidence travels
+same-side-stable, host-relative HTML/SVG/Canvas fingerprints, including the
+host's own painted box and directly mutated size while excluding an unpainted
+empty box or indirect layout size. A batch
+completed before frame registration remains cached for the challenged claim.
+Evidence travels
 only over a challenged `MessageChannel` capability created by the trusted first
 bootstrap script and transferred only for a browser-trusted parent event;
 authored-window `ready`, synthetic requests or lookalike channel messages have

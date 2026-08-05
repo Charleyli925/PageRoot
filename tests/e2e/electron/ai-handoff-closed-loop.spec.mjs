@@ -523,9 +523,13 @@ test("a verified AI result stays pending through desktop review until the user a
     <section data-review-runtime-visuals>
       <h2>运行态图表回归</h2>
       <style>@keyframes review-runtime-unstable-motion { from { transform: translateX(0); } to { transform: translateX(80px); } }</style>
+      <img src="/review-runtime-slow.png" alt="" hidden data-review-runtime-slow-load>
       <div id="review-runtime-html-chart" class="review-runtime-chart-host"></div>
       <svg id="review-runtime-svg-chart" class="review-runtime-chart-host" viewBox="0 0 320 96" width="320" height="96"></svg>
       <canvas id="review-runtime-canvas-chart" class="review-runtime-chart-host" width="320" height="96"></canvas>
+      <div id="review-runtime-host-paint-chart" class="review-runtime-chart-host"></div>
+      <svg id="review-runtime-svg-root-chart" class="review-runtime-chart-host"></svg>
+      <div id="review-runtime-root-geometry-chart" class="review-runtime-chart-host"></div>
       <div id="review-runtime-flow-chart" class="review-runtime-chart-host"></div>
       <div id="review-runtime-unstable-chart" class="review-runtime-chart-host"></div>
     </section>
@@ -606,7 +610,22 @@ test("a verified AI result stays pending through desktop review until the user a
       runtimeCanvasContext.fillRect(0, 0, 320, 96);
       runtimeCanvasContext.fillStyle = runtimeReviewChartVariant === "before" ? "#9aaec2" : "#6d5ce7";
       runtimeCanvasContext.fillRect(24, 20, runtimeReviewChartVariant === "before" ? 150 : 238, 56);
+      const runtimeHostPaintChart = document.querySelector("#review-runtime-host-paint-chart");
+      runtimeHostPaintChart.style.cssText = 'display:block;height:48px;width:'
+        + (runtimeReviewChartVariant === "before" ? '180px' : '236px')
+        + ';background:' + (runtimeReviewChartVariant === "before" ? '#9aaec2' : '#6d5ce7')
+        + ';border:2px solid #241d58;border-radius:10px';
+      const runtimeSvgRootChart = document.querySelector("#review-runtime-svg-root-chart");
+      runtimeSvgRootChart.style.cssText = 'display:block;height:52px;width:'
+        + (runtimeReviewChartVariant === "before" ? '190px' : '248px')
+        + ';background:' + (runtimeReviewChartVariant === "before" ? '#e8edf2' : '#eeeaff')
+        + ';border:2px solid ' + (runtimeReviewChartVariant === "before" ? '#9aaec2' : '#6d5ce7');
+      const runtimeRootGeometryChart = document.querySelector("#review-runtime-root-geometry-chart");
+      runtimeRootGeometryChart.style.cssText = 'display:block;width:220px;height:'
+        + (runtimeReviewChartVariant === "before" ? '36px' : '78px');
       const runtimeFlowChart = document.querySelector("#review-runtime-flow-chart");
+      runtimeFlowChart.style.cssText = 'display:block;width:320px;padding:8px;'
+        + 'background:#f7f8fb;border:1px solid #c9c9d8;border-radius:8px';
       runtimeFlowChart.innerHTML = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:12px;border:1px solid #c9c9d8"><span>稳定基准</span><strong>48.4%</strong></div>';
       const runtimeUnstableChart = document.querySelector("#review-runtime-unstable-chart");
       runtimeUnstableChart.innerHTML = '<div style="width:120px;padding:10px;border:1px solid #6d5ce7;animation:review-runtime-unstable-motion .4s linear infinite alternate"><span>动画数据</span><strong>'
@@ -684,6 +703,19 @@ test("a verified AI result stays pending through desktop review until the user a
     "utf8",
   );
   const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  let delayedReviewResourceRequests = 0;
+  await launched.page.route("**/review-runtime-slow.png", async (route) => {
+    delayedReviewResourceRequests += 1;
+    await new Promise((resolve) => setTimeout(resolve, 650));
+    await route.fulfill({
+      status: 200,
+      contentType: "image/png",
+      body: Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+        "base64",
+      ),
+    });
+  });
   try {
     const request = await addCommentAndSubmit(
       launched.page,
@@ -855,10 +887,13 @@ test("a verified AI result stays pending through desktop review until the user a
       .toHaveAttribute("data-review-runtime-request-observed", "false");
     await expect(afterReviewFrame.locator("html"))
       .toHaveAttribute("data-review-runtime-request-observed", "false");
+    expect(delayedReviewResourceRequests).toBeGreaterThanOrEqual(2);
     const runtimeChangedHosts = [
       "#review-runtime-html-chart",
       "#review-runtime-svg-chart",
       "#review-runtime-canvas-chart",
+      "#review-runtime-host-paint-chart",
+      "#review-runtime-svg-root-chart",
     ];
     for (const selector of runtimeChangedHosts) {
       await expect(beforeReviewFrame.locator(selector)).toHaveAttribute(
@@ -896,6 +931,10 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect(afterReviewFrame.locator("#review-runtime-unstable-chart"))
       .toHaveAttribute("data-pageroot-review-runtime-host", /runtime-host-\d+/u);
     await expect(afterReviewFrame.locator("#review-runtime-unstable-chart"))
+      .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
+    await expect(afterReviewFrame.locator("#review-runtime-root-geometry-chart"))
+      .toHaveAttribute("data-pageroot-review-runtime-host", /runtime-host-\d+/u);
+    await expect(afterReviewFrame.locator("#review-runtime-root-geometry-chart"))
       .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
     const runtimeFlowTop = await Promise.all([
       beforeReviewFrame.locator("#review-runtime-flow-chart")

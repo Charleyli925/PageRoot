@@ -93,9 +93,12 @@ Rules:
   page never receives a marker.
 - The runtime-chart supplement never re-analyzes a statically covered host. It
   accepts only a complete declared before/after pair before its initial deadline,
-  ignores absolute document position and unstable or late samples, merges with
-  an existing owning change instead of duplicating it, and freezes after the
-  initial projection commit. Runtime evidence is accepted only through the
+  includes the host's own painted box and directly mutated size but not
+  unpainted geometry or indirect layout size, ignores
+  absolute document position and unstable or late samples, merges with an
+  existing owning change instead of duplicating it, and freezes after the
+  initial projection commit. Pre-load evidence remains bootstrap-owned until
+  frame registration. Runtime evidence is accepted only through the
   challenged capability port created by the trusted bootstrap before authored
   scripts run; ordinary frame messages cannot complete a side. Failure has no
   visible recovery owner because the authoritative static review remains valid.

@@ -95,12 +95,15 @@ Comments + frozen input
   channel. A bounded supplement is available only for a high-confidence pair
   of source-empty chart hosts when a changed authored script is causally tied
   to that host and the existing static footprint does not already cover it.
-  Each isolated frame samples visible HTML/SVG/Canvas paint twice, using
+  Each isolated frame samples visible HTML/SVG/Canvas paint twice, including
+  the host's own painted box and directly mutated size but not an unpainted
+  empty box or indirect layout size, using
   host-relative geometry and omitting unstable or unsupported results. The
   parent `ReviewRuntimeVisualCoordinator` accepts only declared host keys,
   accepts snapshot facts only through a challenged bootstrap-owned capability
   port, compares the completed before/after batches, reuses the owning static
   `changeId` when present and otherwise adds one visual change for that outline.
+  A pre-load batch remains cached until the registered frame claims its port.
   A single bounded initial deadline commits both frames atomically; timeout,
   partial and late batches silently retain the static footprint. Exact leaf text
   ranges remain immutable evidence; a separate readable-footprint planner

@@ -355,6 +355,14 @@ const NON_CONTENT_TAGS = new Set([
 ]);
 
 const REVIEW_RUNTIME_VISUAL_HOST_ATTRIBUTE = "data-pageroot-review-runtime-host";
+const REVIEW_RUNTIME_VISUAL_SOURCE_BOX_ATTRIBUTE = "data-pageroot-review-runtime-source-box";
+const REVIEW_RUNTIME_VISUAL_SOURCE_BOX_ATTRIBUTES = [
+  "class",
+  "height",
+  "hidden",
+  "style",
+  "width",
+];
 const MAX_REVIEW_RUNTIME_VISUAL_CANDIDATES = 128;
 const RUNTIME_VISUAL_HOST_SELECTOR = [
   "article",
@@ -1176,6 +1184,12 @@ function runtimeVisualSourceSignature(element: Element): string {
   return `${element.tagName}|${attributes.join("|")}`;
 }
 
+function runtimeVisualSourceBoxSignature(element: Element): string {
+  return JSON.stringify(REVIEW_RUNTIME_VISUAL_SOURCE_BOX_ATTRIBUTES.map((attribute) => (
+    [attribute, element.getAttribute(attribute)]
+  )));
+}
+
 function relativeElementPath(root: Element, element: Element): string | null {
   const indexes: number[] = [];
   let current: Element | null = element;
@@ -1398,6 +1412,14 @@ function annotateRuntimeVisualCandidates(
     const changeId = section.changeId || `runtime-change-${section.outlineId}`;
     before.setAttribute(REVIEW_RUNTIME_VISUAL_HOST_ATTRIBUTE, key);
     after.setAttribute(REVIEW_RUNTIME_VISUAL_HOST_ATTRIBUTE, key);
+    before.setAttribute(
+      REVIEW_RUNTIME_VISUAL_SOURCE_BOX_ATTRIBUTE,
+      runtimeVisualSourceBoxSignature(before),
+    );
+    after.setAttribute(
+      REVIEW_RUNTIME_VISUAL_SOURCE_BOX_ATTRIBUTE,
+      runtimeVisualSourceBoxSignature(after),
+    );
     return {
       key,
       outlineId: section.outlineId,
@@ -2595,6 +2617,9 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
       challenge,
     }, "*", [runtimeVisualChannel.port2]);
     publishRuntimeVisualSnapshots();
+    post("ready", {
+      height: Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight || 0),
+    });
   };
   const clamp = (value, minimum, maximum) => Math.max(minimum, Math.min(maximum, value));
   const documentHeight = () => Math.max(
@@ -2608,6 +2633,8 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
       .filter(Boolean),
   )];
   const runtimeVisualHostAttribute = ${JSON.stringify(REVIEW_RUNTIME_VISUAL_HOST_ATTRIBUTE)};
+  const runtimeVisualSourceBoxAttribute = ${JSON.stringify(REVIEW_RUNTIME_VISUAL_SOURCE_BOX_ATTRIBUTE)};
+  const runtimeVisualSourceBoxAttributes = ${JSON.stringify(REVIEW_RUNTIME_VISUAL_SOURCE_BOX_ATTRIBUTES)};
   const runtimeVisualCandidateLimit = ${MAX_REVIEW_RUNTIME_VISUAL_CANDIDATES};
   const runtimeVisualAtomLimit = 4096;
   const runtimeVisualBatchAtomLimit = 8192;
@@ -2743,7 +2770,7 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
     ) throw new Error("runtime-visual-budget");
     capture[channel].push(normalized);
   };
-  const runtimeVisualCanvas = (canvas, capture) => {
+  const runtimeVisualCanvas = (canvas, capture, displayRect, includeDisplaySize) => {
     const width = Math.max(0, Math.round(Number(canvas.width || 0)));
     const height = Math.max(0, Math.round(Number(canvas.height || 0)));
     const pixels = width * height;
@@ -2767,7 +2794,12 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
     if (capture.canvasPixels > runtimeVisualCanvasPixelLimit) {
       throw new Error("runtime-visual-canvas-total");
     }
-    runtimeVisualPush(capture, "canvas", width + "x" + height + "|" + value);
+    runtimeVisualPush(capture, "canvas", width + "x" + height
+      + (includeDisplaySize
+        ? "|display=" + runtimeVisualRounded(displayRect.width)
+          + "x" + runtimeVisualRounded(displayRect.height)
+        : "")
+      + "|" + value);
   };
   const runtimeVisualVectorAttributes = [
     "d", "points", "x", "y", "x1", "y1", "x2", "y2", "cx", "cy",
@@ -2777,6 +2809,12 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
     try {
       if (!(host instanceof Element)) return null;
       const hostRect = host.getBoundingClientRect();
+      const sourceBoxSignature = host.getAttribute(runtimeVisualSourceBoxAttribute);
+      const currentBoxSignature = JSON.stringify(runtimeVisualSourceBoxAttributes.map((attribute) => (
+        [attribute, host.getAttribute(attribute)]
+      )));
+      const hostBoxMutated = sourceBoxSignature !== null
+        && sourceBoxSignature !== currentBoxSignature;
       const capture = {
         content: [],
         paint: [],
@@ -2787,11 +2825,10 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
         valueLength: 0,
         budget,
       };
-      const descendants = [];
-      if (host.matches("canvas")) {
-        budget.nodes += 1;
-        descendants.push(host);
-      } else {
+      const descendants = [host];
+      let hostOwnPaint = false;
+      budget.nodes += 1;
+      if (!host.matches("canvas")) {
         const elementWalker = document.createTreeWalker(host, NodeFilter.SHOW_ELEMENT);
         let descendant = elementWalker.nextNode();
         while (descendant) {
@@ -2807,7 +2844,26 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
       if (budget.nodes > runtimeVisualBatchNodeLimit) return null;
       descendants.forEach((element) => {
         if (element instanceof HTMLCanvasElement) {
-          if (runtimeVisualVisible(element)) runtimeVisualCanvas(element, capture);
+          if (!runtimeVisualVisible(element)) return;
+          const canvasStyle = getComputedStyle(element);
+          const canvasRect = element.getBoundingClientRect();
+          runtimeVisualCanvas(element, capture, canvasRect, hostBoxMutated);
+          const canvasPaint = runtimeVisualBoxPaint(canvasStyle);
+          if (canvasPaint) {
+            if (element === host) hostOwnPaint = true;
+            runtimeVisualPush(capture, "paint", "host-box|" + canvasPaint
+              + (hostBoxMutated
+                ? "|size=" + runtimeVisualRounded(canvasRect.width)
+                  + "x" + runtimeVisualRounded(canvasRect.height)
+                : ""));
+            if (hostBoxMutated) {
+              runtimeVisualPush(
+                capture,
+                "geometry",
+                "box|" + runtimeVisualRect(canvasRect, hostRect),
+              );
+            }
+          }
           return;
         }
         const style = getComputedStyle(element);
@@ -2852,8 +2908,17 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
         }
         const boxPaint = runtimeVisualBoxPaint(style);
         if (boxPaint) {
-          runtimeVisualPush(capture, "paint", "box|" + boxPaint);
-          runtimeVisualPush(capture, "geometry", "box|" + runtimeVisualRect(rect, hostRect));
+          const ownsPaint = element === host;
+          if (ownsPaint) hostOwnPaint = true;
+          runtimeVisualPush(capture, "paint", (ownsPaint ? "host-box|" : "box|")
+            + boxPaint
+            + (ownsPaint && hostBoxMutated
+              ? "|size=" + runtimeVisualRounded(rect.width)
+                + "x" + runtimeVisualRounded(rect.height)
+              : ""));
+          if (!ownsPaint || hostBoxMutated) {
+            runtimeVisualPush(capture, "geometry", "box|" + runtimeVisualRect(rect, hostRect));
+          }
         }
       });
 
@@ -2902,6 +2967,7 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
         || Boolean(host.querySelector("canvas, svg, table, tbody, progress, meter"));
       const chartLike = capture.canvasPixels > 0
         || capture.vector.length > 0
+        || hostOwnPaint
         || (specialRuntimeContent && (
           capture.content.length + capture.paint.length + capture.geometry.length > 0
         ))
