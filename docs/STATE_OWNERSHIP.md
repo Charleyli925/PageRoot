@@ -102,7 +102,10 @@ Rules:
   operation is built only from the accepted SourcePatch result; after
   acknowledgement, the Bridge journal cursor is authoritative. Optional
   logical Selection and the operation's TargetRef transition may restore
-  presentation identity after canonical adoption but cannot change bytes.
+  presentation identity after canonical adoption but cannot change bytes. A
+  proven island-only result may update the disposable mounted projection in the
+  same iframe; failed proof replaces that projection and never changes history
+  authority.
 - The desktop Edit menu owns no history. It routes focused native text controls
   to platform undo and all eligible Canvas intent to `SourceHistorySession`.
   Comment cards, attachments and project actions are outside both histories.

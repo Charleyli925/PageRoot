@@ -100,6 +100,10 @@ route:
   identity, source Hash, history revision and cursor. Source HTML and the
   bounded journal share one crash-recoverable pending-write boundary; an
   external write or broken chain establishes a fresh boundary or fails closed.
+  Reusing the mounted iframe is allowed only when exact target identity,
+  byte-equal island-external source and the complete ephemeral source-node map
+  all validate against those Bridge-returned bytes; otherwise the Canvas loads
+  a fresh verified frame.
 
 Pure-browser preview is a different, strictly weaker capability: authored scripts and interactions may run inside the sandbox, but PageRoot editing, comments, attachments, local persistence and AI submission are unavailable. Its transient page state is never treated as unsaved PageRoot content.
 

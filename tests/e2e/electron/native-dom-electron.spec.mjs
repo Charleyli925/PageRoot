@@ -1449,7 +1449,13 @@ test("Electron restores the active text selection and keeps comment anchors stab
   const sourcePath = path.join(sourceDirectory, "history-selection-comments.html");
   const originalToken = "SOURCE_FIDELITY_TOKEN_001";
   const replacement = "无感撤回";
-  const original = withBomAndCrLf(fixtureBuffer("source-fidelity.html"));
+  const tallFixture = fixtureBuffer("source-fidelity.html")
+    .toString("utf8")
+    .replace(
+      "</body>",
+      "  <div aria-hidden='true' style='height: 1200px'></div>\n</body>",
+    );
+  const original = withBomAndCrLf(Buffer.from(tallFixture, "utf8"));
   writeFileSync(sourcePath, original);
 
   const isolatedUserData = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-"));
@@ -1460,7 +1466,7 @@ test("Electron restores the active text selection and keeps comment anchors stab
       activeSourcePath: sourcePath,
     });
     electronApp = launched.electronApp;
-    let { frame } = await loadedDiskFrame(
+    let { editor, frame } = await loadedDiskFrame(
       launched.page,
       sourcePath,
       "source-fidelity",
@@ -1486,17 +1492,37 @@ test("Electron restores the active text selection and keeps comment anchors stab
         selectionInside: true,
       });
 
+    const reviewStage = launched.page.locator(".review-scroll-stage");
+    await expect.poll(() => reviewStage.evaluate((element) => (
+      element.scrollHeight - element.clientHeight
+    ))).toBeGreaterThan(240);
+    await reviewStage.evaluate((element) => {
+      element.scrollTop = 240;
+    });
+    await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop))
+      .toBe(240);
+
     await commentCard.evaluate((element) => {
       element.setAttribute("data-history-qa-card", "true");
       window.__PAGEROOT_HISTORY_VISUAL_SAMPLES__ = [];
       window.__PAGEROOT_HISTORY_VISUAL_SAMPLING__ = true;
+      const initialEditor = document.querySelector('[data-testid="html-canvas-editor"]');
+      window.__PAGEROOT_HISTORY_FRAME__ = initialEditor?.querySelector("iframe") || null;
       const sample = () => {
         const card = document.querySelector('[data-history-qa-card="true"]');
-        window.__PAGEROOT_HISTORY_VISUAL_SAMPLES__.push(card
+        const editor = document.querySelector('[data-testid="html-canvas-editor"]');
+        const frame = editor?.querySelector("iframe") || null;
+        const stage = document.querySelector(".review-scroll-stage");
+        window.__PAGEROOT_HISTORY_VISUAL_SAMPLES__.push(card && editor && frame && stage
           ? {
               top: card.getBoundingClientRect().top,
               resolution: card.getAttribute("data-resolution"),
               recovery: card.textContent.includes("原位置已变化"),
+              sameFrame: frame === window.__PAGEROOT_HISTORY_FRAME__,
+              generation: frame.getAttribute("data-frame-generation"),
+              verified: editor.getAttribute("data-render-verified"),
+              visibility: getComputedStyle(frame).visibility,
+              scrollTop: stage.scrollTop,
             }
           : null);
         if (window.__PAGEROOT_HISTORY_VISUAL_SAMPLING__) {
@@ -1525,6 +1551,10 @@ test("Electron restores the active text selection and keeps comment anchors stab
       });
     await expect(commentCard).toHaveAttribute("data-resolution", /^(?:exact|rebound)$/u);
     await expect(commentCard.getByText("原位置已变化")).toHaveCount(0);
+    await expect(editor).toHaveAttribute(
+      "data-history-adopt-path",
+      "editable-island-in-place",
+    );
 
     const visualSamples = await launched.page.evaluate(() => {
       window.__PAGEROOT_HISTORY_VISUAL_SAMPLING__ = false;
@@ -1535,9 +1565,19 @@ test("Electron restores the active text selection and keeps comment anchors stab
       sample.recovery
       || !["exact", "rebound"].includes(sample.resolution)
     ))).toBe(false);
+    expect(visualSamples.every((sample) => (
+      sample.sameFrame
+      && sample.verified === "true"
+      && sample.visibility === "visible"
+    ))).toBe(true);
+    expect(new Set(visualSamples.map((sample) => sample.generation)).size).toBe(1);
     const sampledTops = visualSamples.map((sample) => sample.top);
     expect(Math.max(...sampledTops) - Math.min(...sampledTops))
       .toBeLessThanOrEqual(2);
+    const sampledScrollTops = visualSamples.map((sample) => sample.scrollTop);
+    expect(Math.max(...sampledScrollTops) - Math.min(...sampledScrollTops))
+      .toBeLessThanOrEqual(1);
+    expect(sampledScrollTops.every((scrollTop) => scrollTop === 240)).toBe(true);
   } finally {
     if (electronApp) {
       await stopPageRoot(electronApp, isolatedUserData, { cleanup: false });
