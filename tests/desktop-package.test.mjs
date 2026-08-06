@@ -73,6 +73,12 @@ test("desktop package carries the v3 patch engine, candidate assessment and acti
   assert.equal(packageJson.build.productName, "PageRoot");
   assert.equal(packageJson.build.artifactName, "PageRoot-${version}-${arch}.${ext}");
   assert.equal(packageJson.build.forceCodeSigning, true);
+  assert.deepEqual(packageJson.build.fileAssociations, [{
+    ext: ["html", "htm"],
+    name: "HTML Document",
+    role: "Editor",
+    rank: "Alternate",
+  }]);
   assert.equal(packageJson.build.mac.identity, undefined);
   assert.equal(packageJson.build.mac.hardenedRuntime, true);
   assert.equal(packageJson.build.mac.notarize, true);
@@ -93,6 +99,7 @@ test("desktop package carries the v3 patch engine, candidate assessment and acti
   assert.equal(packageJson.build.afterPack, "desktop/after-pack.mjs");
   assert.ok(packageJson.build.files.includes("!node_modules/**/*"));
   assert.ok(packageJson.build.files.includes("desktop/preload.mjs"));
+  assert.ok(packageJson.build.files.includes("desktop/external-file-open.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/project-files.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/source-rename.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/project-path-policy.mjs"));
@@ -196,6 +203,14 @@ test("desktop package carries the v3 patch engine, candidate assessment and acti
     /if \(bridgeStartupPromise\) return bridgeStartupPromise/,
   );
   assert.match(mainProcess, /requestSingleInstanceLock/);
+  assert.match(
+    mainProcess,
+    /app\.on\("open-file",[\s\S]*?event\.preventDefault\(\)[\s\S]*?publishExternalFileOpen\(filePath\)/,
+  );
+  assert.match(
+    mainProcess,
+    /app\.on\("second-instance",[\s\S]*?externalHtmlPathsFromArgv\(commandLine\)[\s\S]*?publishExternalFileOpen\(sourcePath\)/,
+  );
   assert.match(mainProcess, /app\.setPath\("userData",\s*productUserDataPath\)/);
   assert.match(
     mainProcess,
@@ -232,6 +247,13 @@ test("desktop package carries the v3 patch engine, candidate assessment and acti
   assert.match(mainProcess, /PROJECT_CHANNELS\.renameHtml/);
   assert.match(mainProcess, /PROJECT_CHANNELS\.revealRequestFolder/);
   assert.match(mainProcess, /PROJECT_CHANNELS\.forgetRecent/);
+  assert.match(mainProcess, /PROJECT_CHANNELS\.acceptExternalOpen/);
+  assert.match(
+    mainProcess,
+    /async function acceptExternalFileOpen[\s\S]*?externalFileOpenMailbox\.consume\(payload\.requestId\)[\s\S]*?openExternalFileRequest\(request\)/,
+  );
+  assert.match(mainProcess, /APP_CHANNELS\.externalOpenReady/);
+  assert.match(mainProcess, /APP_CHANNELS\.externalOpenRequested/);
   assert.match(mainProcess, /INTEGRATION_CHANNELS\.qoderHandoff/);
   assert.match(mainProcess, /UPDATE_CHANNELS\.getStatus/);
   assert.match(mainProcess, /UPDATE_CHANNELS\.checkNow/);

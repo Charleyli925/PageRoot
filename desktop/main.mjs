@@ -54,6 +54,10 @@ import {
   waitForBridgeReady,
 } from "./bridge-startup.mjs";
 import { createOpenInDefaultBrowserOperation } from "./open-in-default-browser.mjs";
+import {
+  createExternalFileOpenMailbox,
+  externalHtmlPathsFromArgv,
+} from "./external-file-open.mjs";
 import { assertTrustedRendererEvent } from "./project-ipc-security.mjs";
 import {
   closeAbortPayload,
@@ -162,6 +166,7 @@ const PROJECT_CHANNELS = Object.freeze({
   listRecentProjects: "html-projects:list-recent",
   openRecent: "html-projects:open-recent",
   forgetRecent: "html-projects:forget-recent",
+  acceptExternalOpen: "html-projects:accept-external-open",
 });
 const APP_CHANNELS = Object.freeze({
   prepareClose: "html-app:prepare-close",
@@ -170,6 +175,8 @@ const APP_CHANNELS = Object.freeze({
   aboutRequested: "html-app:about-requested",
   workspaceUnavailable: "html-app:workspace-unavailable",
   workspaceRecoveryReady: "html-app:workspace-recovery-ready",
+  externalOpenRequested: "html-app:external-open-requested",
+  externalOpenReady: "html-app:external-open-ready",
   relaunch: "html-app:relaunch",
   openUserNotice: "html-app:open-user-notice",
 });
@@ -221,6 +228,11 @@ let managedWelcomeRegistration = null;
 let previewProtocolController = null;
 let editVisualCaptureController = null;
 const workspaceRecoveryMailbox = createWorkspaceRecoveryMailbox();
+const externalFileOpenMailbox = createExternalFileOpenMailbox();
+
+for (const sourcePath of externalHtmlPathsFromArgv(process.argv.slice(1))) {
+  externalFileOpenMailbox.publish(sourcePath);
+}
 
 function ensurePreviewProtocolController() {
   if (!previewProtocolController) {
@@ -660,6 +672,76 @@ async function readHtmlProject(filePath) {
     sourcePath: canonicalPath,
     maxHtmlBytes: MAX_HTML_BYTES,
   });
+}
+
+function showExternalOpenError(error) {
+  dialog.showErrorBox(
+    "无法打开这个 HTML",
+    error instanceof Error ? error.message : String(error),
+  );
+}
+
+function focusMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+function publishExternalFileOpen(filePath) {
+  try {
+    const request = externalFileOpenMailbox.publish(filePath);
+    focusMainWindow();
+    if (rendererHasLoaded && mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(APP_CHANNELS.externalOpenRequested, request);
+    }
+    return request;
+  } catch (error) {
+    if (app.isReady()) showExternalOpenError(error);
+    return null;
+  }
+}
+
+async function openExternalFileRequest(request) {
+  const project = await readHtmlProject(request.sourcePath);
+  await activateProject(project.sourcePath);
+  return project;
+}
+
+async function adoptPendingExternalFileAtStartup() {
+  const pending = externalFileOpenMailbox.peek();
+  if (!pending) return null;
+  const request = externalFileOpenMailbox.consume(pending.requestId);
+  if (!request) return null;
+  try {
+    return await openExternalFileRequest(request);
+  } catch (error) {
+    showExternalOpenError(error);
+    return null;
+  }
+}
+
+async function acceptExternalFileOpen(payload) {
+  if (
+    !payload
+    || typeof payload !== "object"
+    || Array.isArray(payload)
+    || Object.keys(payload).some((key) => key !== "requestId")
+    || typeof payload.requestId !== "string"
+  ) {
+    throw new ProjectFileError(
+      "INVALID_EXTERNAL_OPEN_REQUEST",
+      "外部 HTML 打开请求无效。",
+    );
+  }
+  const request = externalFileOpenMailbox.consume(payload.requestId);
+  if (!request) {
+    throw new ProjectFileError(
+      "EXTERNAL_OPEN_REQUEST_EXPIRED",
+      "这次外部打开请求已经失效，请从 QoderWork 再点一次 PageRoot。",
+    );
+  }
+  return openExternalFileRequest(request);
 }
 
 async function currentActivePath() {
@@ -1471,6 +1553,10 @@ function registerProjectIpc() {
   ipcMain.handle(PROJECT_CHANNELS.openRecent, trustedProject(openRecent));
   ipcMain.handle(PROJECT_CHANNELS.forgetRecent, trustedProject(forgetRecentProject));
   ipcMain.handle(
+    PROJECT_CHANNELS.acceptExternalOpen,
+    trustedProject(acceptExternalFileOpen, "external_open"),
+  );
+  ipcMain.handle(
     INTEGRATION_CHANNELS.qoderHandoff,
     trustedProject((payload) => {
       if (
@@ -1557,6 +1643,10 @@ function registerProjectIpc() {
     trusted(() => ({
       issue: workspaceRecoveryMailbox.acknowledgeRendererReady(),
     })),
+  );
+  ipcMain.handle(
+    APP_CHANNELS.externalOpenReady,
+    trusted(() => externalFileOpenMailbox.peek()),
   );
   ipcMain.handle(
     APP_CHANNELS.relaunch,
@@ -1726,6 +1816,7 @@ function unregisterIpc() {
     ...Object.values(EDIT_VISUAL_CHANNELS),
     APP_CHANNELS.closeResult,
     APP_CHANNELS.workspaceRecoveryReady,
+    APP_CHANNELS.externalOpenReady,
     APP_CHANNELS.relaunch,
     EDIT_CHANNELS.nativeHistory,
   ]) {
@@ -2084,6 +2175,7 @@ async function startBridge() {
 async function createWindow() {
   const port = await startBridge();
   ensurePreviewProtocolController();
+  await adoptPendingExternalFileAtStartup();
 
   rendererHasLoaded = false;
   workspaceRecoveryMailbox.beginRendererLoad();
@@ -2185,6 +2277,13 @@ async function createWindow() {
   mainWindow.webContents.on("did-finish-load", () => {
     rendererHasLoaded = true;
     ensureApplicationUpdateController().startAutomaticChecks();
+    const pendingExternalOpen = externalFileOpenMailbox.peek();
+    if (pendingExternalOpen) {
+      mainWindow?.webContents.send(
+        APP_CHANNELS.externalOpenRequested,
+        pendingExternalOpen,
+      );
+    }
   });
   mainWindow.webContents.on("render-process-gone", (_event, details) => {
     captureUsage("runtime_fault", {
@@ -2237,15 +2336,20 @@ async function createWindow() {
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
+app.on("open-file", (event, filePath) => {
+  event.preventDefault();
+  publishExternalFileOpen(filePath);
+});
+
 if (!hasSingleInstanceLock) {
   app.quit();
 } else {
-  app.on("second-instance", () => {
+  app.on("second-instance", (_event, commandLine) => {
     captureUsage("app_launched", { launch_reason: "second_instance" });
-    if (!mainWindow) return;
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.show();
-    mainWindow.focus();
+    for (const sourcePath of externalHtmlPathsFromArgv(commandLine)) {
+      publishExternalFileOpen(sourcePath);
+    }
+    focusMainWindow();
   });
 
   app.whenReady().then(async () => {

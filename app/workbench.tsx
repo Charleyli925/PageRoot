@@ -295,6 +295,11 @@ type PreparedGeneratedSourceTransition = Readonly<{
   activatedProject: HtmlProject | null;
 }>;
 
+type ExternalOpenRequest = {
+  requestId: string;
+  sourcePath: string;
+};
+
 const AUTOSAVE_DELAY_MS = 700;
 const bridgeClient = createRuntimeBridgeClient();
 const recoveryStore = createBrowserRecoveryStore();
@@ -593,8 +598,10 @@ export default function Workbench() {
   const resumeSubmissionAfterRelinkRef = useRef(false);
   const pendingProjectOpenRef = useRef<{
     recentPath?: string;
+    externalRequest?: ExternalOpenRequest;
     requestedAt: number;
   } | null>(null);
+  const handledExternalOpenRequestsRef = useRef<Set<string>>(new Set());
   const closeLifecycleRef = useRef<CloseLifecycle>({
     preparingRequestId: null,
     frozenRequestId: null,
@@ -5364,6 +5371,77 @@ export default function Workbench() {
     }
   }, [applyProject, prepareProjectSwitch, refreshRecents, refreshWorkspace]);
 
+  const openExternalProject = useCallback(async (request: ExternalOpenRequest) => {
+    const handled = handledExternalOpenRequestsRef.current;
+    if (!request.requestId || handled.has(request.requestId)) return;
+    handled.add(request.requestId);
+
+    if (!await prepareProjectSwitch(false)) {
+      handled.delete(request.requestId);
+      pendingProjectOpenRef.current = {
+        externalRequest: request,
+        requestedAt: Date.now(),
+      };
+      return;
+    }
+
+    pendingProjectOpenRef.current = null;
+    setProjectMenuOpen(false);
+    const openRequest = projectOpenRequestRef.current + 1;
+    projectOpenRequestRef.current = openRequest;
+    const acceptExternalOpen = window.htmlAIProjects?.acceptExternalOpen;
+    if (!acceptExternalOpen) {
+      handled.delete(request.requestId);
+      setToast({
+        title: "无法接收外部 HTML",
+        message: "当前 PageRoot 版本缺少外部文件打开通道，请重新安装最新版本。",
+        tone: "error",
+        sticky: true,
+        disposition: "background-result",
+        dedupeKey: "external-project-open-unavailable",
+      });
+      return;
+    }
+
+    try {
+      const project = await acceptExternalOpen(request.requestId);
+      if (openRequest !== projectOpenRequestRef.current) return;
+      setStartupIssue(null);
+      applyProject(project);
+      const epoch = projectSessionRef.current.epoch;
+      await Promise.all([
+        refreshRecents(),
+        refreshWorkspace(project.sourcePath, epoch, false, epoch),
+      ]);
+    } catch (cause) {
+      if (openRequest !== projectOpenRequestRef.current) return;
+      setToast({
+        title: "无法打开 QoderWork 中的 HTML",
+        message: productErrorMessage(
+          cause,
+          "文件可能已移动、暂时不可读，或不是完整的 HTML 页面；当前项目仍保持打开。",
+        ),
+        tone: "error",
+        sticky: true,
+        disposition: "background-result",
+        dedupeKey: "external-project-open-error",
+      });
+    } finally {
+      if (handled.size > 32) {
+        const oldest = handled.values().next().value;
+        if (oldest) handled.delete(oldest);
+      }
+    }
+  }, [applyProject, prepareProjectSwitch, refreshRecents, refreshWorkspace]);
+
+  useEffect(() => {
+    const lifecycle = window.htmlAIAppLifecycle;
+    if (!lifecycle?.onExternalOpenRequested) return undefined;
+    return lifecycle.onExternalOpenRequested((request) => {
+      void openExternalProject(request);
+    });
+  }, [openExternalProject]);
+
   useEffect(() => {
     const pending = pendingProjectOpenRef.current;
     if (!pending) return;
@@ -5387,13 +5465,18 @@ export default function Workbench() {
       || editRevision > lastPersistedRevision
     ) return;
     pendingProjectOpenRef.current = null;
-    void openProject(pending.recentPath);
+    if (pending.externalRequest) {
+      void openExternalProject(pending.externalRequest);
+    } else {
+      void openProject(pending.recentPath);
+    }
   }, [
     draftPersistError,
     attachmentUploadCount,
     editRevision,
     generating,
     lastPersistedRevision,
+    openExternalProject,
     openProject,
     persistState,
     projectRulesSnapshot,

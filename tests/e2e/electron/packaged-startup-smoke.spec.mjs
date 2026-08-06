@@ -2,7 +2,9 @@ import {
   existsSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -56,16 +58,31 @@ async function stopPackagedAppForCleanup(electronApp) {
   }
 }
 
-test("developer preview opens the latest runtime and closes cleanly", async () => {
+test("developer preview opens external HTML at startup and while already running", async () => {
   test.setTimeout(60_000);
   const isolatedUserData = mkdtempSync(
     path.join(tmpdir(), "pageroot-native-e2e-developer-preview-"),
   );
+  const startupAlias = path.join(isolatedUserData, "qoder-startup.html");
+  const liveAlias = path.join(isolatedUserData, "qoder-live.htm");
+  writeFileSync(
+    startupAlias,
+    "<!doctype html><html><head><title>Startup</title></head><body><main>Qoder startup HTML</main></body></html>",
+    "utf8",
+  );
+  writeFileSync(
+    liveAlias,
+    "<!doctype html><html><head><title>Live</title></head><body><main>Qoder live HTML</main></body></html>",
+    "utf8",
+  );
+  const startupSourcePath = realpathSync(startupAlias);
+  const liveSourcePath = realpathSync(liveAlias);
   let electronApp = null;
   try {
     electronApp = await electron.launch({
       executablePath: packagedExecutable(),
       cwd: productRoot,
+      args: [startupSourcePath],
       env: {
         ...process.env,
         PAGEROOT_E2E: "1",
@@ -100,6 +117,26 @@ test("developer preview opens the latest runtime and closes cleanly", async () =
     expect(runtime?.bridgePort).toMatch(/^[1-9]\d{0,4}$/u);
     expect(Number(runtime?.bridgePort)).toBeGreaterThan(0);
     expect(Number(runtime?.bridgePort)).toBeLessThanOrEqual(65_535);
+    await expect.poll(
+      async () => (await page.evaluate(
+        () => window.htmlAIProjects?.getActiveProject(),
+      ))?.sourcePath,
+      { timeout: 30_000 },
+    ).toBe(startupSourcePath);
+
+    await electronApp.evaluate(({ app }, sourcePath) => {
+      app.emit("open-file", { preventDefault() {} }, sourcePath);
+    }, liveSourcePath);
+    await expect.poll(
+      async () => (await page.evaluate(
+        () => window.htmlAIProjects?.getActiveProject(),
+      ))?.sourcePath,
+      { timeout: 30_000 },
+    ).toBe(liveSourcePath);
+    await expect.poll(
+      () => page.locator("main.workbench").getAttribute("data-project-state"),
+      { timeout: 30_000 },
+    ).toBe("ready");
 
     const closed = electronApp.waitForEvent("close", { timeout: 30_000 });
     await electronApp.evaluate(({ BrowserWindow }) => {

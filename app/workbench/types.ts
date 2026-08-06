@@ -72,6 +72,7 @@ export type DesktopProjectsApi = {
   listRecentProjects: () => Promise<RecentProject[]>;
   openRecent: (sourcePath: string) => Promise<HtmlProject>;
   forgetRecent?: (sourcePath: string) => Promise<{ sourcePath: string }>;
+  acceptExternalOpen?: (requestId: string) => Promise<HtmlProject>;
 };
 
 export type QoderHandoffResult = {

@@ -468,6 +468,7 @@
         "tests/bridge-shutdown.test.mjs",
         "tests/export-copy.test.mjs",
         "tests/edit-visual-capture.test.mjs",
+        "tests/external-file-open.test.mjs",
         "tests/open-in-default-browser.test.mjs",
         "tests/preview-protocol.test.mjs",
         "tests/desktop-package.test.mjs",
