@@ -156,8 +156,9 @@ per side. Ordinary frame `ready` messages never carry
 runtime evidence. An omitted or invalid snapshot invalidates the complete
 runtime batch and leaves static review authoritative. The trusted bootstrap creates a `MessageChannel` and binds
 the DOM traversal, attribute, layout, computed-style, Canvas, string
-normalization/digest, and scheduling primitives used for evidence before any
-authored script runs. An early observer records the
+normalization/digest, and Promise/timer/animation scheduling primitives used for evidence before any
+authored script runs. Its bounded font wait composes only captured Promise capabilities, so it never re-reads
+page-mutable static methods. An early observer records the
 parser-created element that first claims every frozen candidate key. Snapshot
 discovery accepts only that exact key/element set: undeclared attributes are
 ignored, while a missing, duplicate, transferred or replaced declared host,

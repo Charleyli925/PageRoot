@@ -788,15 +788,26 @@ test("a verified AI result stays pending through desktop review until the user a
           ? 97
           : nativeRuntimeStringCharCodeAt.call(this, index);
       };
+      const nativeRuntimeMathImul = Math.imul;
+      const nativeRuntimePromiseRace = Promise.race;
+      const nativeRuntimePromiseResolve = Promise.resolve;
+      Math.imul = () => 0;
+      Promise.race = () => new Promise(() => {});
+      Promise.resolve = () => new Promise(() => {});
       const nativeRuntimeSetTimeout = window.setTimeout.bind(window);
       const nativeRuntimeRequestAnimationFrame = window.requestAnimationFrame.bind(window);
       window.setTimeout = () => 0;
       window.requestAnimationFrame = () => 0;
       nativeRuntimeSetTimeout(() => {
+        Math.imul = nativeRuntimeMathImul;
+        Promise.race = nativeRuntimePromiseRace;
+        Promise.resolve = nativeRuntimePromiseResolve;
         window.setTimeout = nativeRuntimeSetTimeout;
         window.requestAnimationFrame = nativeRuntimeRequestAnimationFrame;
+        document.documentElement.dataset.reviewRuntimePromiseDigestApiRestored = "true";
         document.documentElement.dataset.reviewRuntimeSchedulingApiRestored = "true";
       }, 300);
+      document.documentElement.dataset.reviewRuntimePromiseDigestApiAttack = "true";
       document.documentElement.dataset.reviewRuntimeSchedulingApiAttack = "true";
       document.documentElement.dataset.reviewRuntimeStringApiAttack = "true";
       document.documentElement.dataset.reviewRuntimeDomApiAttack = "true";
@@ -1022,9 +1033,17 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect(afterReviewFrame.locator("html"))
       .toHaveAttribute("data-review-runtime-scheduling-api-attack", "true");
     await expect(beforeReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-promise-digest-api-attack", "true");
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-promise-digest-api-attack", "true");
+    await expect(beforeReviewFrame.locator("html"))
       .toHaveAttribute("data-review-runtime-scheduling-api-restored", "true");
     await expect(afterReviewFrame.locator("html"))
       .toHaveAttribute("data-review-runtime-scheduling-api-restored", "true");
+    await expect(beforeReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-promise-digest-api-restored", "true");
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-promise-digest-api-restored", "true");
     expect(delayedReviewResourceRequests).toBeGreaterThanOrEqual(2);
     const runtimeChangedHosts = [
       "#review-runtime-html-chart",

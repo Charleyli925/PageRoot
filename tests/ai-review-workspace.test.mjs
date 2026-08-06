@@ -394,10 +394,20 @@ test("runtime chart review supplements only the initial bounded static footprint
   );
   assert.match(reviewDocument, /runtimeVisualExpectedKeys = Object\.freeze/);
   assert.match(reviewDocument, /const RuntimeVisualString = String;/);
+  assert.match(reviewDocument, /const RuntimeVisualPromise = Promise;/);
+  assert.match(reviewDocument, /runtimeVisualMathImul = Math\.imul\.bind\(Math\)/);
   assert.match(reviewDocument, /runtimeVisualSetTimeout = window\.setTimeout\.bind\(window\)/);
   assert.match(
     reviewDocument,
     /runtimeVisualRequestAnimationFrame = window\.requestAnimationFrame\.bind\(window\)/,
+  );
+  assert.match(
+    reviewDocument,
+    /runtimeVisualPromiseRace = \(values\) => new RuntimeVisualPromise\(\(resolve, reject\) => \{/,
+  );
+  assert.match(
+    reviewDocument,
+    /runtimeVisualPromiseResolve = RuntimeVisualPromise\.resolve\.bind\(RuntimeVisualPromise\)/,
   );
   assert.match(reviewDocument, /runtimeVisualStringCharCodeAt/);
   assert.match(reviewDocument, /runtimeVisualStringPadStart/);

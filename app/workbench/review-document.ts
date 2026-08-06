@@ -2561,8 +2561,17 @@ function reviewBootstrap(
   const RuntimeVisualSet = Set;
   const RuntimeVisualWeakMap = WeakMap;
   const RuntimeVisualString = String;
+  const RuntimeVisualPromise = Promise;
+  const runtimeVisualMathImul = Math.imul.bind(Math);
   const runtimeVisualSetTimeout = window.setTimeout.bind(window);
   const runtimeVisualRequestAnimationFrame = window.requestAnimationFrame.bind(window);
+  const runtimeVisualPromiseResolve = RuntimeVisualPromise.resolve.bind(RuntimeVisualPromise);
+  const runtimeVisualPromiseThen = runtimeVisualBindCall(RuntimeVisualPromise.prototype.then);
+  const runtimeVisualPromiseRace = (values) => new RuntimeVisualPromise((resolve, reject) => {
+    for (let index = 0; index < values.length; index += 1) {
+      runtimeVisualPromiseThen(runtimeVisualPromiseResolve(values[index]), resolve, reject);
+    }
+  });
   const runtimeVisualArrayPush = runtimeVisualBindCall(Array.prototype.push);
   const runtimeVisualArrayForEach = runtimeVisualBindCall(Array.prototype.forEach);
   const runtimeVisualArrayJoin = runtimeVisualBindCall(Array.prototype.join);
@@ -2872,10 +2881,10 @@ function reviewBootstrap(
       runtimeVisualMutationObserverTakeRecords(runtimeVisualHostClaimObserver),
     );
   };
-  const runtimeVisualDelay = (milliseconds) => new Promise((resolve) => {
+  const runtimeVisualDelay = (milliseconds) => new RuntimeVisualPromise((resolve) => {
     runtimeVisualSetTimeout(resolve, milliseconds);
   });
-  const runtimeVisualFrames = () => new Promise((resolve) => {
+  const runtimeVisualFrames = () => new RuntimeVisualPromise((resolve) => {
     runtimeVisualRequestAnimationFrame(() => runtimeVisualRequestAnimationFrame(resolve));
   });
   const runtimeVisualHex = (value) => runtimeVisualStringPadStart(
@@ -2891,10 +2900,10 @@ function reviewBootstrap(
     let fourth = 668265263;
     for (let index = 0; index < textValue.length; index += 1) {
       const code = runtimeVisualStringCharCodeAt(textValue, index);
-      first = Math.imul(first ^ code, 16777619);
-      second = Math.imul(second ^ code, 3266489917);
-      third = Math.imul(third ^ code, 668265263);
-      fourth = Math.imul(fourth ^ code, 374761393);
+      first = runtimeVisualMathImul(first ^ code, 16777619);
+      second = runtimeVisualMathImul(second ^ code, 3266489917);
+      third = runtimeVisualMathImul(third ^ code, 668265263);
+      fourth = runtimeVisualMathImul(fourth ^ code, 374761393);
     }
     return runtimeVisualHex(first)
       + runtimeVisualHex(second)
@@ -2909,10 +2918,10 @@ function reviewBootstrap(
     let fourth = 668265263;
     for (let index = 0; index < bytes.length; index += 1) {
       const value = bytes[index];
-      first = Math.imul(first ^ value, 16777619);
-      second = Math.imul(second ^ value, 3266489917);
-      third = Math.imul(third ^ value, 668265263);
-      fourth = Math.imul(fourth ^ value, 374761393);
+      first = runtimeVisualMathImul(first ^ value, 16777619);
+      second = runtimeVisualMathImul(second ^ value, 3266489917);
+      third = runtimeVisualMathImul(third ^ value, 668265263);
+      fourth = runtimeVisualMathImul(fourth ^ value, 374761393);
     }
     return runtimeVisualHex(first)
       + runtimeVisualHex(second)
@@ -3408,10 +3417,10 @@ function reviewBootstrap(
     const hosts = runtimeVisualExpectedHosts();
     if (hosts === null) return null;
     if (!hosts.length) return [];
-    await Promise.race([
-      document.fonts?.ready || Promise.resolve(),
+    await runtimeVisualPromiseThen(runtimeVisualPromiseRace([
+      document.fonts?.ready || runtimeVisualPromiseResolve(),
       runtimeVisualDelay(120),
-    ]).catch(() => {});
+    ]), () => undefined, () => undefined);
     await runtimeVisualDelay(24);
     await runtimeVisualFrames();
     if (!runtimeVisualHostsMatch(hosts, runtimeVisualExpectedHosts())) return null;
@@ -4597,7 +4606,11 @@ function reviewBootstrap(
     height: Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight || 0),
   });
   const ready = async () => {
-    const runtimeVisualSnapshots = await collectRuntimeVisualSnapshots().catch(() => null);
+    const runtimeVisualSnapshots = await runtimeVisualPromiseThen(
+      collectRuntimeVisualSnapshots(),
+      (snapshots) => snapshots,
+      () => null,
+    );
     if (runtimeVisualSnapshots !== null) {
       runtimeVisualSnapshotBatch = runtimeVisualSnapshots;
       publishRuntimeVisualSnapshots();

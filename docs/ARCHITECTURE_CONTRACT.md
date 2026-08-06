@@ -135,8 +135,10 @@ changed authored script that directly references the host's distinctive
 identity, and absence of an existing static footprint over that host. Merely
 placing another changed script in the same section is never causal evidence.
 The trusted first bootstrap must bind the DOM/style/Canvas collection,
-string-normalization/digest, and scheduling entry points before authored scripts
-run, receive the exact declared candidate-key list from frozen analysis and
+string-normalization/digest and Promise/timer/animation scheduling entry points
+before authored scripts run. Its bounded font wait must use only captured Promise
+capabilities, rather than a native `Promise.race` that re-reads mutable static
+methods. It receives the exact declared candidate-key list from frozen analysis and
 record the parser-created element that first
 claims each key. Undeclared host attributes have no authority. A missing,
 duplicate, transferred or replaced declared key, key/element drift during
