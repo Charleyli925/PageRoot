@@ -4,6 +4,8 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+## [0.9.6] - 2026-08-06
+
 - Stop Canvas text undo/redo from blanking and jumping the page. Bridge-verified
   changes confined to the active editable island now adopt canonical children,
   source-node identities, caret and viewport in the existing iframe; any failed
@@ -397,7 +399,8 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 - Published the first public macOS release in this repository under the earlier YuanYe artifact name.
 
-[Unreleased]: https://github.com/Charleyli925/PageRoot/compare/v0.9.5...HEAD
+[Unreleased]: https://github.com/Charleyli925/PageRoot/compare/v0.9.6...HEAD
+[0.9.6]: https://github.com/Charleyli925/PageRoot/compare/v0.9.5...v0.9.6
 [0.9.5]: https://github.com/Charleyli925/PageRoot/compare/v0.9.4...v0.9.5
 [0.9.4]: https://github.com/Charleyli925/PageRoot/compare/v0.9.3...v0.9.4
 [0.9.3]: https://github.com/Charleyli925/PageRoot/compare/v0.9.2...v0.9.3
