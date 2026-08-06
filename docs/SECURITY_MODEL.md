@@ -150,12 +150,14 @@ the immutable Version or the activation transaction, and runtime interaction
 state is never serialized. The renderer accepts review messages only when the
 session ID, side, declared message source and `MessageEvent.source` all match the
 registered frame. Runtime-chart snapshot messages are additionally limited to
-host keys declared by the frozen source analyzer, bounded atom/signature counts
-and one accepted batch per side. Ordinary frame `ready` messages never carry
-runtime evidence. The trusted bootstrap creates a `MessageChannel` and binds
-the DOM traversal, attribute, layout, computed-style, Canvas, and string
-normalization/digest primitives used for evidence before any authored script
-runs. An early observer records the
+host keys declared by the frozen source analyzer, bounded atom/signature counts,
+exactly one well-formed snapshot for every declared key, and one accepted batch
+per side. Ordinary frame `ready` messages never carry
+runtime evidence. An omitted or invalid snapshot invalidates the complete
+runtime batch and leaves static review authoritative. The trusted bootstrap creates a `MessageChannel` and binds
+the DOM traversal, attribute, layout, computed-style, Canvas, string
+normalization/digest, and scheduling primitives used for evidence before any
+authored script runs. An early observer records the
 parser-created element that first claims every frozen candidate key. Snapshot
 discovery accepts only that exact key/element set: undeclared attributes are
 ignored, while a missing, duplicate, transferred or replaced declared host,

@@ -41,7 +41,7 @@ export function acceptReviewRuntimeVisualSnapshots(value, allowedCandidateKeys) 
     !Array.isArray(value)
     || !(allowedCandidateKeys instanceof Set)
     || allowedCandidateKeys.size > MAX_RUNTIME_VISUAL_CANDIDATES
-    || value.length > allowedCandidateKeys.size
+    || value.length !== allowedCandidateKeys.size
     || value.length > MAX_RUNTIME_VISUAL_CANDIDATES
   ) return null;
 

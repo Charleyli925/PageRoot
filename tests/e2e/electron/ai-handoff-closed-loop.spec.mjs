@@ -685,10 +685,6 @@ test("a verified AI result stays pending through desktop review until the user a
       runtimeFlowChart.style.cssText = 'display:block;width:320px;padding:8px;'
         + 'background:#f7f8fb;border:1px solid #c9c9d8;border-radius:8px';
       runtimeFlowChart.innerHTML = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:12px;border:1px solid #c9c9d8"><span>稳定基准</span><strong>48.4%</strong></div>';
-      const runtimeUnstableChart = document.querySelector("#review-runtime-unstable-chart");
-      runtimeUnstableChart.innerHTML = '<div style="width:120px;padding:10px;border:1px solid #6d5ce7;animation:review-runtime-unstable-motion .4s linear infinite alternate"><span>动画数据</span><strong>'
-        + (runtimeReviewChartVariant === "before" ? "旧值" : "新值")
-        + '</strong></div>';
       const runtimeStaticCovered = document.querySelector("#review-runtime-static-covered");
       runtimeStaticCovered.innerHTML = '<div><strong>静态已覆盖</strong><span>'
         + (runtimeReviewChartVariant === "before" ? '旧值' : '新值')
@@ -792,9 +788,23 @@ test("a verified AI result stays pending through desktop review until the user a
           ? 97
           : nativeRuntimeStringCharCodeAt.call(this, index);
       };
+      const nativeRuntimeSetTimeout = window.setTimeout.bind(window);
+      const nativeRuntimeRequestAnimationFrame = window.requestAnimationFrame.bind(window);
+      window.setTimeout = () => 0;
+      window.requestAnimationFrame = () => 0;
+      nativeRuntimeSetTimeout(() => {
+        window.setTimeout = nativeRuntimeSetTimeout;
+        window.requestAnimationFrame = nativeRuntimeRequestAnimationFrame;
+        document.documentElement.dataset.reviewRuntimeSchedulingApiRestored = "true";
+      }, 300);
+      document.documentElement.dataset.reviewRuntimeSchedulingApiAttack = "true";
       document.documentElement.dataset.reviewRuntimeStringApiAttack = "true";
       document.documentElement.dataset.reviewRuntimeDomApiAttack = "true";
       document.documentElement.dataset.reviewFixtureReady = "true";
+    </script>
+    <script>
+      const runtimeUnstableChart = document.querySelector("#review-runtime-unstable-chart");
+      runtimeUnstableChart.innerHTML = '<div style="width:120px;padding:10px;border:1px solid #6d5ce7;animation:review-runtime-unstable-motion .4s linear infinite alternate"><span>动画数据</span><strong>固定值</strong></div>';
     </script>
   </main>`,
   ));
@@ -1007,6 +1017,14 @@ test("a verified AI result stays pending through desktop review until the user a
       .toHaveAttribute("data-review-runtime-string-api-attack", "true");
     await expect(afterReviewFrame.locator("html"))
       .toHaveAttribute("data-review-runtime-string-api-attack", "true");
+    await expect(beforeReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-scheduling-api-attack", "true");
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-scheduling-api-attack", "true");
+    await expect(beforeReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-scheduling-api-restored", "true");
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-scheduling-api-restored", "true");
     expect(delayedReviewResourceRequests).toBeGreaterThanOrEqual(2);
     const runtimeChangedHosts = [
       "#review-runtime-html-chart",
@@ -1053,7 +1071,7 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect(afterReviewFrame.locator("#review-runtime-flow-chart"))
       .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
     await expect(afterReviewFrame.locator("#review-runtime-unstable-chart"))
-      .toHaveAttribute("data-pageroot-review-runtime-host", /runtime-host-\d+/u);
+      .not.toHaveAttribute("data-pageroot-review-runtime-host", /.+/u);
     await expect(afterReviewFrame.locator("#review-runtime-unstable-chart"))
       .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
     await expect(afterReviewFrame.locator("#review-runtime-root-geometry-chart"))
@@ -2389,6 +2407,66 @@ test("a stolen runtime host claim falls back to the static review", async () => 
       await expect(frame.locator("#review-runtime-duplicate-claim-forgery"))
         .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
     }
+    await expect(afterReviewFrame.locator(
+      '[data-pageroot-review-marker-types~="text"]',
+    ).filter({ hasText: UPDATED_TEXT }).first()).toBeVisible();
+    await expect(launched.page.getByText("运行态不稳定", { exact: true })).toHaveCount(0);
+    await expect(launched.page.getByText("分析未完成", { exact: true })).toHaveCount(0);
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("an unstable runtime candidate falls back atomically to static review", async () => {
+  test.setTimeout(120_000);
+  const fixture = createSourceFixture("review-runtime-unstable.html", (source) => (
+    source.replace(
+      "  </main>",
+      `    <section data-review-runtime-unstable>
+      <h2>运行态动画回归</h2>
+      <style>@keyframes review-runtime-unstable-motion { from { transform: translateX(0); } to { transform: translateX(80px); } }</style>
+      <div id="review-runtime-unstable-chart"></div>
+      <script>
+        const reviewUnstableVariant = "before";
+        const reviewUnstableChart = document.querySelector("#review-runtime-unstable-chart");
+        reviewUnstableChart.innerHTML = '<div style="width:120px;padding:10px;border:1px solid #6d5ce7;animation:review-runtime-unstable-motion .4s linear infinite alternate"><span>动画数据</span><strong>'
+          + reviewUnstableVariant
+          + '</strong></div>';
+      </script>
+    </section>
+  </main>`,
+    )
+  ));
+  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  try {
+    const request = await addCommentAndSubmit(
+      launched.page,
+      launched.electronApp,
+      fixture.sourcePath,
+    );
+    writeAiOutput(request.requestRoot, (base) => base
+      .replace(ORIGINAL_TEXT, UPDATED_TEXT)
+      .replace(
+        'const reviewUnstableVariant = "before";',
+        'const reviewUnstableVariant = "after";',
+      ));
+    runOfficialFinalizer(request.requestRoot, request.changeRequest);
+    await expect(launched.page.getByText(
+      "修改结果已完成检查",
+      { exact: true },
+    ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+
+    await launched.page.getByRole("button", { name: "审阅对比" }).click();
+    await expect(launched.page.getByTestId("ai-review-workspace"))
+      .toBeVisible({ timeout: 30_000 });
+    const afterReviewFrame = launched.page.frameLocator('iframe[title^="修改后"]');
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-pageroot-review-overlays", "true", { timeout: 30_000 });
+    await expect(afterReviewFrame.locator("#review-runtime-unstable-chart"))
+      .toHaveAttribute("data-pageroot-review-runtime-host", /runtime-host-\d+/u);
+    await expect(afterReviewFrame.locator("#review-runtime-unstable-chart"))
+      .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
     await expect(afterReviewFrame.locator(
       '[data-pageroot-review-marker-types~="text"]',
     ).filter({ hasText: UPDATED_TEXT }).first()).toBeVisible();

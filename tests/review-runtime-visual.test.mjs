@@ -45,6 +45,14 @@ test("runtime visual snapshots accept only bounded declared host facts", () => {
     snapshot("runtime-host-1"),
     snapshot("runtime-host-1"),
   ], allowed), null);
+  const twoCandidates = new Set(["runtime-host-1", "runtime-host-2"]);
+  assert.equal(acceptReviewRuntimeVisualSnapshots([
+    snapshot("runtime-host-1"),
+  ], twoCandidates), null);
+  assert.equal(acceptReviewRuntimeVisualSnapshots([
+    snapshot("runtime-host-1"),
+    snapshot("runtime-host-2"),
+  ], twoCandidates)?.length, 2);
   assert.equal(acceptReviewRuntimeVisualSnapshots([
     snapshot("runtime-host-1", { contentSignature: "not-a-signature" }),
   ], allowed), null);
@@ -216,4 +224,21 @@ test("runtime visual coordination commits once, falls back atomically, and ignor
   timeoutTimers[0]();
   assert.deepEqual(timeoutResolutions, [[]]);
   assert.equal(timeoutCoordinator.accept("after", [snapshot("runtime-host-1")]), false);
+
+  const incompleteResolutions = [];
+  const incompleteCoordinator = new ReviewRuntimeVisualCoordinator({
+    candidates: [
+      { key: "runtime-host-1" },
+      { key: "runtime-host-2" },
+    ],
+    onResolve: (keys) => incompleteResolutions.push([...keys]),
+  });
+  assert.equal(incompleteCoordinator.accept("before", [
+    snapshot("runtime-host-1"),
+  ]), true);
+  assert.equal(incompleteCoordinator.accept("after", [
+    snapshot("runtime-host-1"),
+    snapshot("runtime-host-2"),
+  ]), true);
+  assert.deepEqual(incompleteResolutions, [[]]);
 });

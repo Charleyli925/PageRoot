@@ -2561,6 +2561,8 @@ function reviewBootstrap(
   const RuntimeVisualSet = Set;
   const RuntimeVisualWeakMap = WeakMap;
   const RuntimeVisualString = String;
+  const runtimeVisualSetTimeout = window.setTimeout.bind(window);
+  const runtimeVisualRequestAnimationFrame = window.requestAnimationFrame.bind(window);
   const runtimeVisualArrayPush = runtimeVisualBindCall(Array.prototype.push);
   const runtimeVisualArrayForEach = runtimeVisualBindCall(Array.prototype.forEach);
   const runtimeVisualArrayJoin = runtimeVisualBindCall(Array.prototype.join);
@@ -2871,10 +2873,10 @@ function reviewBootstrap(
     );
   };
   const runtimeVisualDelay = (milliseconds) => new Promise((resolve) => {
-    window.setTimeout(resolve, milliseconds);
+    runtimeVisualSetTimeout(resolve, milliseconds);
   });
   const runtimeVisualFrames = () => new Promise((resolve) => {
-    requestAnimationFrame(() => requestAnimationFrame(resolve));
+    runtimeVisualRequestAnimationFrame(() => runtimeVisualRequestAnimationFrame(resolve));
   });
   const runtimeVisualHex = (value) => runtimeVisualStringPadStart(
     runtimeVisualNumberToString(value >>> 0, 16),
@@ -3437,9 +3439,10 @@ function reviewBootstrap(
       const firstSnapshot = runtimeVisualMapGet(first, key);
       const secondSnapshot = captureRuntimeVisualHost(host, secondBudget);
       if (!firstSnapshot || !secondSnapshot || secondSnapshot.key !== key) return null;
-      if (runtimeVisualStringify(firstSnapshot) === runtimeVisualStringify(secondSnapshot)) {
-        runtimeVisualArrayPush(snapshots, secondSnapshot);
+      if (runtimeVisualStringify(firstSnapshot) !== runtimeVisualStringify(secondSnapshot)) {
+        return null;
       }
+      runtimeVisualArrayPush(snapshots, secondSnapshot);
     }
     return snapshots;
   };

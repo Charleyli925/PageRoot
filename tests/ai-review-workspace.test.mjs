@@ -390,10 +390,15 @@ test("runtime chart review supplements only the initial bounded static footprint
   assert.match(reviewDocument, /runtimeVisualBatchValueLimit/);
   assert.match(
     reviewDocument,
-    /runtimeVisualStringify\(firstSnapshot\) === runtimeVisualStringify\(secondSnapshot\)/,
+    /if \(runtimeVisualStringify\(firstSnapshot\) !== runtimeVisualStringify\(secondSnapshot\)\) \{\s*return null;\s*\}/,
   );
   assert.match(reviewDocument, /runtimeVisualExpectedKeys = Object\.freeze/);
   assert.match(reviewDocument, /const RuntimeVisualString = String;/);
+  assert.match(reviewDocument, /runtimeVisualSetTimeout = window\.setTimeout\.bind\(window\)/);
+  assert.match(
+    reviewDocument,
+    /runtimeVisualRequestAnimationFrame = window\.requestAnimationFrame\.bind\(window\)/,
+  );
   assert.match(reviewDocument, /runtimeVisualStringCharCodeAt/);
   assert.match(reviewDocument, /runtimeVisualStringPadStart/);
   assert.match(reviewDocument, /const runtimeVisualNormalizeText = \(value\) =>/);

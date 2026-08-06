@@ -23,8 +23,9 @@ Notable user-visible changes are documented here. This project follows Semantic 
   uniquely paired source-empty hosts during AI review. Existing static frames
   remain authoritative and are never duplicated. A changed script must directly
   reference the host's distinctive identity; sharing a section is insufficient.
-  The owned first script binds its DOM, computed-style and Canvas readers before
-  authored code runs, then resolves only the exact host keys declared by frozen
+  The owned first script binds its DOM, computed-style, Canvas, scheduling, and
+  text-normalization/digest readers before authored code runs, then resolves only
+  a complete exact host-key set declared by frozen
   source analysis and records which parser-created element first claimed each
   key. Unknown claims are ignored; a missing, duplicated, transferred or
   replaced declared host, or any capture fault, silently keeps the existing
