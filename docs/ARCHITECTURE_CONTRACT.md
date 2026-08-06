@@ -121,6 +121,56 @@ of runtime DOM. It has no drain, persistence, review-diff, source-history or AI
 authority. The Canvas may mount and remove it only as presentation beneath the
 original source host; comments and edits continue to resolve that host.
 
+Formal review has a separate, narrower runtime-visual supplement owned by the
+parent `AiReviewWorkspace` and its `ReviewRuntimeVisualCoordinator`. The frozen
+source analyzer enables it only for the managed desktop preview transport. The
+main process must reject authored navigation away from that direct
+`pageroot-preview` subframe. On an attempt before the first load completes, the preview protocol owner
+must atomically switch only that volatile session to a stricter-CSP document
+with authored scripts removed and the owned external bootstrap retained, then
+reload the same frame. That pair completes with static evidence instead of
+trusting a replacement document; inline/browser review remains static-only. The frozen
+source analyzer must first prove a unique source-empty host pair, a relevant
+changed authored script that directly references the host's distinctive
+identity, and absence of an existing static footprint over that host. Merely
+placing another changed script in the same section is never causal evidence.
+The trusted first bootstrap must bind the DOM/style/Canvas collection,
+string-normalization/digest and Promise/timer/animation scheduling entry points
+before authored scripts run. Its bounded font wait must use only captured Promise
+capabilities, rather than a native `Promise.race` that re-reads mutable static
+methods. It receives the exact declared candidate-key list from frozen analysis and
+record the parser-created element that first
+claims each key. Undeclared host attributes have no authority. A missing,
+duplicate, transferred or replaced declared key, key/element drift during
+either sample, or any capture failure invalidates the complete runtime batch
+and retains the static result.
+Both already-isolated review frames may then report one bounded pair of
+same-side-stable, host-relative HTML/SVG/Canvas fingerprints for every declared
+candidate, including the
+host's own painted box, a fully transparent host as a stable disappearance
+state, and directly mutated size while excluding an unpainted empty box,
+indirect layout size and any subtree hidden beneath a zero-opacity host or
+descendant wrapper, including SVG vector groups. A visible subtree becoming transparent remains a real
+stable-result change. An omitted or invalid candidate fingerprint invalidates
+the whole runtime batch. A batch
+completed before frame registration remains cached for the challenged claim.
+Coordinator installation must drain every already-registered frame bound to the
+same document pair; neither load-before-owner nor owner-before-load may strand
+the initial projection. Once the managed session pair exists, the parent must
+resolve to static evidence if both exact frame documents have not registered
+within 1.5s; a session failure takes the same path and late registration cannot
+reopen it. The separate 500ms comparison deadline may start only after both
+exact frame documents have loaded; asymmetric resource loading is not analysis time.
+Evidence travels
+only over a challenged `MessageChannel` capability created by the trusted first
+bootstrap script and transferred only for a browser-trusted parent event;
+authored-window `ready`, synthetic requests or lookalike channel messages have
+no fact authority. Only a complete
+before/after batch received before the initial deadline may add a visual marker;
+absolute page position, one-sided, unstable, invalid, timed-out and late facts
+fail closed to the unchanged static result. The supplement owns no source,
+Version, persistence, Bridge, drain or activation state.
+
 Comment layout is measured only after current disposable presentation is
 applied. The Workbench accepts no card coordinates until the Canvas reports a
 complete target set for the current rendered source Hash and applied generation;

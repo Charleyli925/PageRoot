@@ -280,3 +280,54 @@ test("preview protocol rejects malformed methods, payloads, and unknown sessions
     /absolute local path/u,
   );
 });
+
+test("a preview navigation attempt activates one scriptless bootstrap fallback", async () => {
+  const controller = createPreviewProtocolController({
+    protocolApi: { handle() {} },
+    netFetch: async () => new Response("unreachable"),
+    randomSessionId: () => "1234567890abcdef1234567890abcdef",
+  });
+  const session = await controller.createSession({
+    html: [
+      "<!doctype html>",
+      '<html><head><script data-pageroot-ai-review-bootstrap="true"',
+      ` src="${PREVIEW_BOOTSTRAP_PATH}"></script>`,
+      '<script src="author-chart.js"></script></head>',
+      '<body onload="location.replace(\'data:text/html,forged\')">',
+      '<script>window.authorNavigationRan = true;</script>',
+      "<p>静态审阅内容</p></body></html>",
+    ].join(""),
+    bootstrapJavaScript: "window.ownedBootstrapRan = true;",
+  });
+
+  const originalResponse = await controller.handleRequest(new Request(session.url));
+  const originalHtml = await originalResponse.text();
+  assert.match(originalHtml, /authorNavigationRan/u);
+  assert.match(originalHtml, /author-chart\.js/u);
+  assert.equal(controller.activateNavigationFallback("data:text/html,forged"), false);
+  assert.equal(controller.activateNavigationFallback(session.url), true);
+  assert.equal(controller.activateNavigationFallback(session.url), false);
+
+  const fallbackResponse = await controller.handleRequest(new Request(session.url));
+  const fallbackHtml = await fallbackResponse.text();
+  assert.match(
+    fallbackHtml,
+    /data-pageroot-preview-navigation-fallback="true"/u,
+  );
+  assert.match(fallbackHtml, /data-pageroot-ai-review-bootstrap="true"/u);
+  assert.doesNotMatch(fallbackHtml, /authorNavigationRan|author-chart\.js/u);
+  assert.equal((fallbackHtml.match(/<script\b/gu) || []).length, 1);
+  const fallbackCsp = fallbackResponse.headers.get("content-security-policy") || "";
+  assert.equal(
+    fallbackCsp.split(";").map((directive) => directive.trim())
+      .find((directive) => directive.startsWith("script-src")),
+    "script-src 'self'",
+  );
+  assert.match(fallbackCsp, /form-action 'none'/u);
+  assert.match(fallbackCsp, /frame-src 'none'/u);
+
+  const bootstrapResponse = await controller.handleRequest(new Request(
+    `pageroot-preview://${session.sessionId}${PREVIEW_BOOTSTRAP_PATH}`,
+  ));
+  assert.match(await bootstrapResponse.text(), /ownedBootstrapRan/u);
+});

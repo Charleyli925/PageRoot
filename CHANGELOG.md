@@ -19,6 +19,36 @@ Notable user-visible changes are documented here. This project follows Semantic 
   jagged union outline. Each semantic group carries one label. Removed copy
   keeps its red dashed strike and red dashed frame; added copy keeps its green
   dashed frame without an underline or background treatment.
+- Detect stable script-generated HTML, SVG and Canvas chart changes inside
+  uniquely paired source-empty hosts during AI review. Existing static frames
+  remain authoritative and are never duplicated. A changed script must directly
+  reference the host's distinctive identity; sharing a section is insufficient.
+  The owned first script binds its DOM, computed-style, Canvas, scheduling, and
+  text-normalization/digest readers before authored code runs, then resolves only
+  a complete exact host-key set declared by frozen
+  source analysis and records which parser-created element first claimed each
+  key. Unknown claims are ignored; a missing, duplicated, transferred or
+  replaced declared host, or any capture fault, silently keeps the existing
+  static review.
+  The bounded capture includes the host's own painted box, fully transparent
+  host state and directly mutated size as well as generated descendants. It
+  prunes every zero-opacity host or descendant subtree, including SVG wrapper
+  groups, so hidden child churn
+  cannot become a false positive while a visible subtree becoming transparent
+  remains a real change. It caches evidence across
+  asymmetric slow frame loads, gives managed frames 1.5s to register, starts
+  its unchanged 500ms comparison budget only after both review frames load, and
+  ignores unpainted geometry, page-flow shifts,
+  identical final output, animation, incomplete or late analysis. Accepted
+  chart facts commit with the initial review projection rather than appearing
+  after interaction. Runtime evidence is enabled only on the managed desktop
+  preview transport. If authored code tries to replace that subframe before its
+  first load completes, the main process blocks it and reloads the same volatile session once as a scriptless
+  copy that retains only the owned bootstrap; review then keeps the
+  authoritative static result without adding a notice. A managed-session
+  failure or frame that never finishes loading takes the same bounded static
+  path; late runtime evidence cannot reopen the decision. Inline/browser
+  review is static-only.
 - Stop treating AI-authored script changes as an adoption failure. Candidate
   assessment now checks document usability and coarse continuity only; retired
   executable-surface fields in historical records are verified, normalized out

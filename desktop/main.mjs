@@ -9,6 +9,7 @@ import {
   protocol,
   shell,
   utilityProcess,
+  webFrameMain,
 } from "electron";
 import electronUpdater from "electron-updater";
 import {
@@ -2120,26 +2121,65 @@ async function createWindow() {
   registerProjectIpc();
 
   mainWindow.removeMenu();
+  const loadedManagedPreviewFrameIds = new Set();
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   mainWindow.webContents.on("will-navigate", (event, url) => {
     if (!isTrustedRendererUrl(url)) event.preventDefault();
   });
-  mainWindow.webContents.on("will-frame-navigate", (event, details) => {
+  mainWindow.webContents.on("will-frame-navigate", (details) => {
     if (details.isMainFrame) return;
     const parentFrame = details.frame?.parent;
     if (parentFrame !== mainWindow?.webContents.mainFrame) return;
     try {
-      if (new URL(details.frame?.url || "").protocol === `${PREVIEW_PROTOCOL_SCHEME}:`) {
-        event.preventDefault();
-      }
+      const previewProtocol = `${PREVIEW_PROTOCOL_SCHEME}:`;
+      const protectedPreviewUrl = [details.frame?.url, details.initiator?.url]
+        .find((url) => new URL(url || "about:blank").protocol === previewProtocol);
+      if (!protectedPreviewUrl) return;
+      details.preventDefault();
+      const frame = details.frame;
+      if (!frame || loadedManagedPreviewFrameIds.has(frame.frameTreeNodeId)) return;
+      const activated = ensurePreviewProtocolController()
+        .activateNavigationFallback(protectedPreviewUrl);
+      if (!activated) return;
+      const protectedSessionId = new URL(protectedPreviewUrl).hostname;
+      setImmediate(() => {
+        if (frame.isDestroyed()) return;
+        try {
+          const currentFrameUrl = new URL(frame.url);
+          if (
+            currentFrameUrl.protocol !== previewProtocol
+            || currentFrameUrl.hostname !== protectedSessionId
+            || !["/", "/index.html"].includes(currentFrameUrl.pathname)
+          ) return;
+          frame.reload();
+        } catch {
+          // A detached frame has already been replaced by its owning React tree.
+        }
+      });
     } catch {
-      event.preventDefault();
+      details.preventDefault();
     }
   });
+  mainWindow.webContents.on(
+    "did-frame-finish-load",
+    (_event, isMainFrame, frameProcessId, frameRoutingId) => {
+      if (isMainFrame) return;
+      const frame = webFrameMain.fromId(frameProcessId, frameRoutingId);
+      if (!frame || frame.parent !== mainWindow?.webContents.mainFrame) return;
+      try {
+        if (new URL(frame.url).protocol === `${PREVIEW_PROTOCOL_SCHEME}:`) {
+          loadedManagedPreviewFrameIds.add(frame.frameTreeNodeId);
+        }
+      } catch {
+        // A detached frame has no stable completion identity to retain.
+      }
+    },
+  );
   mainWindow.webContents.on(
     "did-start-navigation",
     (_event, _url, isInPlace, isMainFrame) => {
       if (isInPlace || !isMainFrame) return;
+      loadedManagedPreviewFrameIds.clear();
       rendererHasLoaded = false;
       workspaceRecoveryMailbox.beginRendererLoad();
     },

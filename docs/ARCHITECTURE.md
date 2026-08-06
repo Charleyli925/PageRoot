@@ -47,7 +47,11 @@ Comments + frozen input
   `script-src 'self'` policy. The main process owns the volatile session and
   serves only its prepared HTML, its fixed bootstrap and a session-specific
   manifest of declared relative assets beside the known source HTML. It never
-  turns the source directory into a general-purpose local-file origin.
+  turns the source directory into a general-purpose local-file origin. A
+  direct-frame authored navigation is canceled. If it occurs before the first
+  load completes, that session becomes a one-way, stricter-CSP scriptless
+  fallback retaining only the owned bootstrap, then reloads the same frame;
+  attempts after load leave the current document intact.
 - Preview-to-edit carries only a bounded `PageViewContext`: source-backed
   active/inactive class transitions and `hidden`, `open`, `aria-selected` or
   `aria-expanded` state. It never carries runtime DOM, pixels or table markup.
@@ -91,13 +95,54 @@ Comments + frozen input
   analyzer first establishes high-confidence before/after node pairs, derives
   copy, structure and visual facts from those pairs, and only then emits one
   typed canonical change footprint. It never promotes tag/position proximity
-  alone into a change fact. Exact leaf text ranges remain immutable evidence;
-  a separate readable-footprint planner groups nearby ranges, keeps stable
-  sentence gaps separate, gives tiny phrases a bounded line-local width and
-  promotes dense multi-line rewrites to their smallest semantic text owner.
-  Local wrapped copy renders as separate rectangular line frames with one
-  group label instead of a stepped union polygon. Global context masking
-  punches holes from those same final rectangles, so mask and frame cannot diverge. The disposable
+  alone into a change fact. Static source analysis remains the primary fact
+  channel. The runtime supplement is available only through the managed desktop
+  preview transport. Its main-process frame-navigation fence blocks authored
+  replacement; a pre-load attempt atomically changes that volatile session to a
+  scriptless document retaining only the owned bootstrap and reloads it, so the
+  review silently keeps static evidence. Inline/browser review remains
+  static-only. A bounded supplement is then available only for a high-confidence pair
+  of source-empty chart hosts when the changed authored script directly
+  references a distinctive identity of that host and the existing static
+  footprint does not already cover it. Script co-location inside the same
+  section is not causal evidence.
+  The owned bootstrap binds the DOM traversal, attribute, layout,
+  computed-style and Canvas primitives before authored scripts execute and is
+  given the analyzer's exact candidate-key list. Its early mutation observer
+  binds each key to the parser-created source host before authored code can
+  transfer it. It ignores undeclared claims; missing, duplicate, transferred or
+  replaced declared claims and capture faults fail the whole supplemental
+  batch back to static evidence.
+  Each isolated frame samples visible HTML/SVG/Canvas paint twice, including
+  the host's own painted box, a fully transparent host as a stable disappearance
+  state, and directly mutated size but not an unpainted empty box or indirect
+  layout size. Every sample checks its ancestor chain back to the host and
+  prunes a zero-opacity subtree, including an SVG vector wrapper, so invisible child churn has no evidence
+  authority while a visible subtree becoming transparent still changes the
+  stable host result. Sampling uses
+  host-relative geometry and omits unstable or unsupported results. The
+  parent `ReviewRuntimeVisualCoordinator` accepts only declared host keys,
+  accepts snapshot facts only through a challenged bootstrap-owned capability
+  port, compares the completed before/after batches, reuses the owning static
+  `changeId` when present and otherwise adds one visual change for that outline.
+  A pre-load batch remains cached until the registered frame claims its port.
+  Coordinator and message-listener installation run before paint and drain any
+  frame already registered for the same frozen document pair, so load/effect
+  ordering cannot strand the initial projection.
+  Once the managed session pair exists, the parent gives both exact frame
+  documents 1.5s to register. A session failure or incomplete registration
+  resolves the initial projection from static evidence and ignores any later
+  runtime arrival. The coordinator starts its separate 500ms comparison
+  deadline only after both frames have loaded; an earlier side never spends the
+  other side's comparison budget. It then commits both frames atomically;
+  timeout, partial and late batches silently retain the static footprint. Exact leaf text
+  ranges remain immutable evidence; a separate readable-footprint planner
+  groups nearby ranges, keeps stable sentence gaps separate, gives tiny phrases
+  a bounded line-local width and promotes dense multi-line rewrites to their
+  smallest semantic text owner. Local wrapped copy renders as separate
+  rectangular line frames with one group label instead of a stepped union
+  polygon. Global context masking punches holes from those same final
+  rectangles, so mask and frame cannot diverge. The disposable
   projection uses reserved attributes plus an explicit presentation reset and
   important geometry, preventing authored `svg`/`div` rules from restyling its
   mask or frames. Stable
@@ -164,6 +209,7 @@ they do not import application services.
 | History, attachment and preview presentation | `app/workbench/presentation.tsx` |
 | AI handoff drawer presentation | `app/workbench/handoff-view.tsx` |
 | Formal AI review state transitions | `app/workbench/review-state.ts` |
+| Bounded review-runtime snapshot validation, comparison, deduplication and comparison deadline | `app/lib/review-runtime-visual.js` |
 | Formal AI review analysis, paired runtime mapping, global mask and overlay projection | `app/workbench/review-document.ts` |
 | Formal AI review composition and isolated-frame coordination | `app/workbench/AiReviewWorkspace.tsx` |
 

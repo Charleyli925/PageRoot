@@ -520,6 +520,32 @@ test("a verified AI result stays pending through desktop review until the user a
       <h2>3EBITA分析</h2>
       <div data-review-ebita-copy><strong>结论：</strong>EBITA差异均在波动范围<br>内（0.06~0.13pt），AI托管未恶化盈利能力。</div>
     </section>
+    <section data-review-runtime-visuals>
+      <h2>运行态图表回归</h2>
+      <style>@keyframes review-runtime-unstable-motion { from { transform: translateX(0); } to { transform: translateX(80px); } }</style>
+      <img alt="" hidden data-review-runtime-slow-load>
+      <div id="review-runtime-html-chart" class="review-runtime-chart-host"></div>
+      <div id="review-runtime-text-chart" class="review-runtime-chart-host"></div>
+      <svg id="review-runtime-svg-chart" class="review-runtime-chart-host" viewBox="0 0 320 96" width="320" height="96"></svg>
+      <canvas id="review-runtime-canvas-chart" class="review-runtime-chart-host" width="320" height="96"></canvas>
+      <div id="review-runtime-host-paint-chart" class="review-runtime-chart-host"></div>
+      <div id="review-runtime-opacity-chart" class="review-runtime-chart-host"></div>
+      <div id="review-runtime-hidden-churn-chart" class="review-runtime-chart-host"></div>
+      <div id="review-runtime-descendant-opacity-chart" class="review-runtime-chart-host"></div>
+      <div id="review-runtime-hidden-descendant-churn-chart" class="review-runtime-chart-host"></div>
+      <svg id="review-runtime-svg-descendant-opacity-chart" class="review-runtime-chart-host" viewBox="0 0 220 52" width="220" height="52"></svg>
+      <svg id="review-runtime-svg-hidden-descendant-churn-chart" class="review-runtime-chart-host" viewBox="0 0 220 52" width="220" height="52"></svg>
+      <svg id="review-runtime-svg-root-chart" class="review-runtime-chart-host"></svg>
+      <div id="review-runtime-root-geometry-chart" class="review-runtime-chart-host"></div>
+      <div id="review-runtime-flow-chart" class="review-runtime-chart-host"></div>
+      <div id="review-runtime-unstable-chart" class="review-runtime-chart-host"></div>
+      <div id="review-runtime-unrelated-random-chart" class="review-runtime-chart-host"></div>
+      <script>document.documentElement.dataset.reviewRuntimeSectionVariant = "before";</script>
+    </section>
+    <section data-review-runtime-static-covered-section>
+      <h2>静态已覆盖图表</h2>
+      <div id="review-runtime-static-covered" class="review-runtime-chart-host" style="border: 2px solid #d9dcec; padding: 12px"></div>
+    </section>
     <div class="tabs" role="tablist" aria-label="Review interaction fixture">
       <button type="button" data-review-tab-button data-p="review-p1">审阅标签一</button>
       <button type="button" data-review-tab-button data-p="review-p2">审阅标签二</button>
@@ -548,6 +574,11 @@ test("a verified AI result stays pending through desktop review until the user a
       </section>
     </div>
     <script>
+      const runtimeUnrelatedRandomChart = document.querySelector("#review-runtime-unrelated-random-chart");
+      runtimeUnrelatedRandomChart.innerHTML = '<div style="padding:10px;border:1px solid #c9c9d8">未修改脚本独立渲染：'
+        + Date.now() + '-' + Math.random() + '</div>';
+    </script>
+    <script>
       document.querySelectorAll("[data-review-tab-button]").forEach((button) => {
         button.addEventListener("click", () => {
           document.querySelectorAll("[data-review-tab-panel]").forEach((panel) => {
@@ -570,7 +601,221 @@ test("a verified AI result stays pending through desktop review until the user a
           panel.style.display = index === activeIndex ? "block" : "none";
         });
       }
+      const runtimeReviewChartVariant = "before";
+      const runtimeSlowImage = document.querySelector("[data-review-runtime-slow-load]");
+      addEventListener("DOMContentLoaded", () => {
+        const reviewSide = document.documentElement.dataset.pagerootReviewSide;
+        if (reviewSide) runtimeSlowImage.src = "/review-runtime-slow.png?side=" + reviewSide;
+      }, { once: true });
+      const runtimeHtmlChart = document.querySelector("#review-runtime-html-chart");
+      const runtimeHtmlValue = runtimeReviewChartVariant === "before" ? "81.6 亿次" : "96.2 亿次";
+      const runtimeHtmlWidth = runtimeReviewChartVariant === "before" ? "62%" : "82%";
+      runtimeHtmlChart.innerHTML = '<div style="display:grid;gap:8px;padding:14px;border:2px solid '
+        + (runtimeReviewChartVariant === "before" ? '#d9dcec' : '#6d5ce7')
+        + ';border-radius:14px;background:#fff"><strong>各平台日均整体搜索次数</strong><span>'
+        + runtimeHtmlValue
+        + '</span><i style="display:block;height:18px;width:'
+        + runtimeHtmlWidth
+        + ';background:#9b8cf0"></i></div>';
+      const runtimeTextChart = document.querySelector("#review-runtime-text-chart");
+      runtimeTextChart.innerHTML = '<span>运行态文本 '
+        + (runtimeReviewChartVariant === "before" ? "旧值" : "新值")
+        + '</span>';
+      const runtimeSvgChart = document.querySelector("#review-runtime-svg-chart");
+      const runtimeSvgHeight = runtimeReviewChartVariant === "before" ? 44 : 72;
+      runtimeSvgChart.innerHTML = '<rect x="12" y="12" width="296" height="72" rx="10" fill="#f5f3ff"></rect>'
+        + '<rect x="36" y="' + (84 - runtimeSvgHeight) + '" width="72" height="' + runtimeSvgHeight
+        + '" fill="' + (runtimeReviewChartVariant === "before" ? '#9aaec2' : '#6d5ce7') + '"></rect>'
+        + '<text x="132" y="54" fill="#25233a">SVG 搜索趋势</text>';
+      const runtimeCanvasChart = document.querySelector("#review-runtime-canvas-chart");
+      const runtimeCanvasContext = runtimeCanvasChart.getContext("2d");
+      runtimeCanvasContext.fillStyle = "#f5f3ff";
+      runtimeCanvasContext.fillRect(0, 0, 320, 96);
+      runtimeCanvasContext.fillStyle = runtimeReviewChartVariant === "before" ? "#9aaec2" : "#6d5ce7";
+      runtimeCanvasContext.fillRect(24, 20, runtimeReviewChartVariant === "before" ? 150 : 238, 56);
+      const runtimeHostPaintChart = document.querySelector("#review-runtime-host-paint-chart");
+      runtimeHostPaintChart.style.cssText = 'display:block;height:48px;width:'
+        + (runtimeReviewChartVariant === "before" ? '180px' : '236px')
+        + ';background:' + (runtimeReviewChartVariant === "before" ? '#9aaec2' : '#6d5ce7')
+        + ';border:2px solid #241d58;border-radius:10px';
+      const runtimeOpacityChart = document.querySelector("#review-runtime-opacity-chart");
+      runtimeOpacityChart.style.cssText = 'display:block;width:220px;height:48px;'
+        + 'background:#6d5ce7;opacity:'
+        + (runtimeReviewChartVariant === "before" ? '1' : '0');
+      runtimeOpacityChart.innerHTML = '<strong>透明度变化</strong>';
+      const runtimeHiddenChurnChart = document.querySelector("#review-runtime-hidden-churn-chart");
+      runtimeHiddenChurnChart.style.cssText = 'display:block;width:220px;height:48px;'
+        + 'background:#6d5ce7;opacity:0';
+      runtimeHiddenChurnChart.innerHTML = '<strong>'
+        + (runtimeReviewChartVariant === "before" ? '隐藏旧值' : '隐藏新值')
+        + '</strong>';
+      const runtimeDescendantOpacityChart = document.querySelector(
+        "#review-runtime-descendant-opacity-chart",
+      );
+      runtimeDescendantOpacityChart.innerHTML = '<div style="opacity:'
+        + (runtimeReviewChartVariant === "before" ? '1' : '0')
+        + '"><strong>内部区域透明度变化</strong></div>';
+      const runtimeHiddenDescendantChurnChart = document.querySelector(
+        "#review-runtime-hidden-descendant-churn-chart",
+      );
+      runtimeHiddenDescendantChurnChart.innerHTML = '<div style="opacity:0"><strong>'
+        + (runtimeReviewChartVariant === "before" ? '内部隐藏旧值' : '内部隐藏新值')
+        + '</strong></div>';
+      const runtimeSvgDescendantOpacityChart = document.querySelector(
+        "#review-runtime-svg-descendant-opacity-chart",
+      );
+      runtimeSvgDescendantOpacityChart.innerHTML = '<g opacity="'
+        + (runtimeReviewChartVariant === "before" ? '1' : '0')
+        + '"><rect x="8" y="8" width="204" height="36" rx="8" fill="#6d5ce7"></rect></g>';
+      const runtimeSvgHiddenDescendantChurnChart = document.querySelector(
+        "#review-runtime-svg-hidden-descendant-churn-chart",
+      );
+      runtimeSvgHiddenDescendantChurnChart.innerHTML = '<g opacity="0"><rect x="8" y="8" width="'
+        + (runtimeReviewChartVariant === "before" ? '96' : '204')
+        + '" height="36" rx="8" fill="#6d5ce7"></rect></g>';
+      const runtimeSvgRootChart = document.querySelector("#review-runtime-svg-root-chart");
+      runtimeSvgRootChart.style.cssText = 'display:block;height:52px;width:'
+        + (runtimeReviewChartVariant === "before" ? '190px' : '248px')
+        + ';background:' + (runtimeReviewChartVariant === "before" ? '#e8edf2' : '#eeeaff')
+        + ';border:2px solid ' + (runtimeReviewChartVariant === "before" ? '#9aaec2' : '#6d5ce7');
+      const runtimeRootGeometryChart = document.querySelector("#review-runtime-root-geometry-chart");
+      runtimeRootGeometryChart.style.cssText = 'display:block;width:220px;height:'
+        + (runtimeReviewChartVariant === "before" ? '36px' : '78px');
+      const runtimeFlowChart = document.querySelector("#review-runtime-flow-chart");
+      runtimeFlowChart.style.cssText = 'display:block;width:320px;padding:8px;'
+        + 'background:#f7f8fb;border:1px solid #c9c9d8;border-radius:8px';
+      runtimeFlowChart.innerHTML = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:12px;border:1px solid #c9c9d8"><span>稳定基准</span><strong>48.4%</strong></div>';
+      const runtimeStaticCovered = document.querySelector("#review-runtime-static-covered");
+      runtimeStaticCovered.innerHTML = '<div><strong>静态已覆盖</strong><span>'
+        + (runtimeReviewChartVariant === "before" ? '旧值' : '新值')
+        + '</span></div>';
+      document.documentElement.dataset.reviewRuntimeRequestObserved = "false";
+      document.documentElement.dataset.reviewRuntimeForgeryAttempted = "pending";
+      addEventListener("message", (event) => {
+        if (event.isTrusted && event.data?.type === "request-runtime-visual-channel") {
+          document.documentElement.dataset.reviewRuntimeRequestObserved = "true";
+        }
+      }, true);
+      const reviewBootstrapScript = document.querySelector(
+        'script[data-pageroot-ai-review-bootstrap="true"]',
+      );
+      if (reviewBootstrapScript?.src) {
+        void fetch(reviewBootstrapScript.src)
+          .then((response) => response.text())
+          .then((bootstrapSource) => {
+            const sessionMatch = bootstrapSource.match(/const sessionId = ("[^"]+");/u);
+            if (!sessionMatch) throw new Error("missing-review-session");
+            const forgedSessionId = JSON.parse(sessionMatch[1]);
+            const forgedSide = document.documentElement.dataset.pagerootReviewSide;
+            dispatchEvent(new MessageEvent("message", {
+              data: {
+                source: "pageroot-ai-review-parent",
+                sessionId: forgedSessionId,
+                type: "request-runtime-visual-channel",
+                challenge: "1".repeat(32),
+              },
+              source: parent,
+            }));
+            parent.postMessage({
+              source: "pageroot-ai-review",
+              sessionId: forgedSessionId,
+              side: forgedSide,
+              type: "ready",
+              runtimeVisualSnapshots: [],
+            }, "*");
+            const forgedChannel = new MessageChannel();
+            parent.postMessage({
+              source: "pageroot-ai-review",
+              sessionId: forgedSessionId,
+              side: forgedSide,
+              type: "runtime-visual-channel",
+              challenge: "0".repeat(32),
+            }, "*", [forgedChannel.port2]);
+            forgedChannel.port1.postMessage({
+              source: "pageroot-ai-review-runtime-visual",
+              sessionId: forgedSessionId,
+              side: forgedSide,
+              type: "runtime-visual-snapshots",
+              runtimeVisualSnapshots: [],
+            });
+            document.documentElement.dataset.reviewRuntimeForgeryAttempted = "true";
+          })
+          .catch(() => {
+            document.documentElement.dataset.reviewRuntimeForgeryAttempted = "failed";
+          });
+      }
+      const nativeRuntimeQuerySelectorAll = document.querySelectorAll.bind(document);
+      document.querySelectorAll = (selector) => (
+        String(selector).includes("data-pageroot-review-runtime-host")
+          ? []
+          : nativeRuntimeQuerySelectorAll(selector)
+      );
+      const nativeRuntimeGetComputedStyle = window.getComputedStyle.bind(window);
+      window.getComputedStyle = (element, pseudoElement) => {
+        if (
+          element instanceof Element
+          && element.hasAttribute("data-pageroot-review-runtime-host")
+        ) throw new Error("authored-runtime-style-forgery");
+        return nativeRuntimeGetComputedStyle(element, pseudoElement);
+      };
+      const forgedRuntimeHost = document.createElement("div");
+      forgedRuntimeHost.id = "review-runtime-forged-host";
+      forgedRuntimeHost.setAttribute(
+        "data-pageroot-review-runtime-host",
+        "runtime-host-forged",
+      );
+      forgedRuntimeHost.textContent = "伪造运行态宿主";
+      document.body.append(forgedRuntimeHost);
+      const nativeRuntimeStringReplace = String.prototype.replace;
+      const nativeRuntimeStringTrim = String.prototype.trim;
+      const nativeRuntimeStringCharCodeAt = String.prototype.charCodeAt;
+      const nativeRuntimeStringIncludes = String.prototype.includes;
+      const reviewRuntimeTextForgeryTarget = (value) => (
+        nativeRuntimeStringIncludes.call(value, "运行态文本")
+      );
+      String.prototype.replace = function(searchValue, replacement) {
+        const value = nativeRuntimeStringTrim.call(this);
+        return reviewRuntimeTextForgeryTarget(value)
+          ? "运行态文本已伪造"
+          : nativeRuntimeStringReplace.call(this, searchValue, replacement);
+      };
+      String.prototype.trim = function() {
+        const value = nativeRuntimeStringTrim.call(this);
+        return reviewRuntimeTextForgeryTarget(value) ? "运行态文本已伪造" : value;
+      };
+      String.prototype.charCodeAt = function(index) {
+        return reviewRuntimeTextForgeryTarget(this)
+          ? 97
+          : nativeRuntimeStringCharCodeAt.call(this, index);
+      };
+      const nativeRuntimeMathImul = Math.imul;
+      const nativeRuntimePromiseRace = Promise.race;
+      const nativeRuntimePromiseResolve = Promise.resolve;
+      Math.imul = () => 0;
+      Promise.race = () => new Promise(() => {});
+      Promise.resolve = () => new Promise(() => {});
+      const nativeRuntimeSetTimeout = window.setTimeout.bind(window);
+      const nativeRuntimeRequestAnimationFrame = window.requestAnimationFrame.bind(window);
+      window.setTimeout = () => 0;
+      window.requestAnimationFrame = () => 0;
+      nativeRuntimeSetTimeout(() => {
+        Math.imul = nativeRuntimeMathImul;
+        Promise.race = nativeRuntimePromiseRace;
+        Promise.resolve = nativeRuntimePromiseResolve;
+        window.setTimeout = nativeRuntimeSetTimeout;
+        window.requestAnimationFrame = nativeRuntimeRequestAnimationFrame;
+        document.documentElement.dataset.reviewRuntimePromiseDigestApiRestored = "true";
+        document.documentElement.dataset.reviewRuntimeSchedulingApiRestored = "true";
+      }, 300);
+      document.documentElement.dataset.reviewRuntimePromiseDigestApiAttack = "true";
+      document.documentElement.dataset.reviewRuntimeSchedulingApiAttack = "true";
+      document.documentElement.dataset.reviewRuntimeStringApiAttack = "true";
+      document.documentElement.dataset.reviewRuntimeDomApiAttack = "true";
       document.documentElement.dataset.reviewFixtureReady = "true";
+    </script>
+    <script>
+      const runtimeUnstableChart = document.querySelector("#review-runtime-unstable-chart");
+      runtimeUnstableChart.innerHTML = '<div style="width:120px;padding:10px;border:1px solid #6d5ce7;animation:review-runtime-unstable-motion .4s linear infinite alternate"><span>动画数据</span><strong>固定值</strong></div>';
     </script>
   </main>`,
   ));
@@ -583,6 +828,23 @@ test("a verified AI result stays pending through desktop review until the user a
     "utf8",
   );
   const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  let delayedReviewResourceRequests = 0;
+  await launched.page.route("**/review-runtime-slow.png*", async (route) => {
+    delayedReviewResourceRequests += 1;
+    const reviewSide = new URL(route.request().url()).searchParams.get("side");
+    await new Promise((resolve) => setTimeout(
+      resolve,
+      reviewSide === "after" ? 750 : 50,
+    ));
+    await route.fulfill({
+      status: 200,
+      contentType: "image/png",
+      body: Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+        "base64",
+      ),
+    });
+  });
   try {
     const request = await addCommentAndSubmit(
       launched.page,
@@ -618,6 +880,23 @@ test("a verified AI result stays pending through desktop review until the user a
       return base
         .replace(ORIGINAL_TEXT, UPDATED_TEXT)
         .replace(REVIEW_METRIC_BEFORE_CSS, REVIEW_METRIC_AFTER_CSS)
+        .replace(
+          'const runtimeReviewChartVariant = "before";',
+          'const runtimeReviewChartVariant = "after";',
+        )
+        .replace(
+          'document.documentElement.dataset.reviewRuntimeSectionVariant = "before";',
+          'document.documentElement.dataset.reviewRuntimeSectionVariant = "after";',
+        )
+        .replace(
+          'id="review-runtime-static-covered" class="review-runtime-chart-host" style="border: 2px solid #d9dcec; padding: 12px"',
+          'id="review-runtime-static-covered" class="review-runtime-chart-host" style="border: 2px solid #241d58; padding: 12px"',
+        )
+        .replace(
+          "    <section data-review-runtime-visuals>",
+          `    <div data-review-runtime-flow-shift style="height: 72px">新增内容只造成后续区域正常下移</div>
+    <section data-review-runtime-visuals>`,
+        )
         .replace(
           "      <div data-review-regression-summary>",
           `      <div data-review-added-chart>
@@ -733,6 +1012,147 @@ test("a verified AI result stays pending through desktop review until the user a
       .toHaveAttribute("data-review-fixture-ready", "true");
     await expect(afterReviewFrame.locator("html"))
       .toHaveAttribute("data-review-fixture-ready", "true");
+    await expect(beforeReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-forgery-attempted", "true");
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-forgery-attempted", "true");
+    await expect(beforeReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-request-observed", "false");
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-request-observed", "false");
+    await expect(beforeReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-dom-api-attack", "true");
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-dom-api-attack", "true");
+    await expect(beforeReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-string-api-attack", "true");
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-string-api-attack", "true");
+    await expect(beforeReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-scheduling-api-attack", "true");
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-scheduling-api-attack", "true");
+    await expect(beforeReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-promise-digest-api-attack", "true");
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-promise-digest-api-attack", "true");
+    await expect(beforeReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-scheduling-api-restored", "true");
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-scheduling-api-restored", "true");
+    await expect(beforeReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-promise-digest-api-restored", "true");
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-promise-digest-api-restored", "true");
+    expect(delayedReviewResourceRequests).toBeGreaterThanOrEqual(2);
+    const runtimeChangedHosts = [
+      "#review-runtime-html-chart",
+      "#review-runtime-text-chart",
+      "#review-runtime-svg-chart",
+      "#review-runtime-canvas-chart",
+      "#review-runtime-host-paint-chart",
+      "#review-runtime-opacity-chart",
+      "#review-runtime-descendant-opacity-chart",
+      "#review-runtime-svg-descendant-opacity-chart",
+      "#review-runtime-svg-root-chart",
+    ];
+    for (const selector of runtimeChangedHosts) {
+      await expect(beforeReviewFrame.locator(selector)).toHaveAttribute(
+        "data-pageroot-review-runtime-marker",
+        "true",
+      );
+      await expect(afterReviewFrame.locator(selector)).toHaveAttribute(
+        "data-pageroot-review-runtime-marker",
+        "true",
+      );
+      await expect(afterReviewFrame.locator(selector)).toHaveAttribute(
+        "data-pageroot-review-marker-types",
+        "style",
+      );
+    }
+    const runtimeChangedIds = await Promise.all(runtimeChangedHosts.map((selector) => (
+      afterReviewFrame.locator(selector).getAttribute("data-pageroot-review-marker")
+    )));
+    expect(new Set(runtimeChangedIds).size).toBe(1);
+    expect(runtimeChangedIds[0]).toMatch(/^runtime-change-outline-\d+$/u);
+    await expect(launched.page.getByTestId("review-outline-item").filter({
+      has: launched.page.getByText("运行态图表回归", { exact: true }),
+    })).toHaveAttribute("aria-label", "运行态图表回归：视觉调整");
+    const runtimeHtmlOwner = await afterReviewFrame.locator(
+      "#review-runtime-html-chart",
+    ).getAttribute("data-pageroot-review-style-owner");
+    expect(runtimeHtmlOwner).toMatch(/^runtime-runtime-host-\d+$/u);
+    await expect(afterReviewFrame.locator(
+      `[data-pageroot-review-overlay-owner="${runtimeHtmlOwner}"]`,
+    )).toBeVisible();
+    await expect(beforeReviewFrame.locator("#review-runtime-flow-chart"))
+      .toHaveAttribute("data-pageroot-review-runtime-host", /runtime-host-\d+/u);
+    await expect(afterReviewFrame.locator("#review-runtime-flow-chart"))
+      .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
+    await expect(afterReviewFrame.locator("#review-runtime-unstable-chart"))
+      .not.toHaveAttribute("data-pageroot-review-runtime-host", /.+/u);
+    await expect(afterReviewFrame.locator("#review-runtime-unstable-chart"))
+      .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
+    await expect(afterReviewFrame.locator("#review-runtime-root-geometry-chart"))
+      .toHaveAttribute("data-pageroot-review-runtime-host", /runtime-host-\d+/u);
+    await expect(afterReviewFrame.locator("#review-runtime-root-geometry-chart"))
+      .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
+    await expect(afterReviewFrame.locator("#review-runtime-hidden-churn-chart"))
+      .toHaveAttribute("data-pageroot-review-runtime-host", /runtime-host-\d+/u);
+    await expect(afterReviewFrame.locator("#review-runtime-hidden-churn-chart"))
+      .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
+    await expect(afterReviewFrame.locator(
+      "#review-runtime-hidden-descendant-churn-chart",
+    )).toHaveAttribute("data-pageroot-review-runtime-host", /runtime-host-\d+/u);
+    await expect(afterReviewFrame.locator(
+      "#review-runtime-hidden-descendant-churn-chart",
+    )).not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
+    await expect(afterReviewFrame.locator(
+      "#review-runtime-svg-hidden-descendant-churn-chart",
+    )).toHaveAttribute("data-pageroot-review-runtime-host", /runtime-host-\d+/u);
+    await expect(afterReviewFrame.locator(
+      "#review-runtime-svg-hidden-descendant-churn-chart",
+    )).not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
+    await expect(beforeReviewFrame.locator("#review-runtime-unrelated-random-chart"))
+      .not.toHaveAttribute("data-pageroot-review-runtime-host", /.+/u);
+    await expect(afterReviewFrame.locator("#review-runtime-unrelated-random-chart"))
+      .not.toHaveAttribute("data-pageroot-review-runtime-host", /.+/u);
+    await expect(afterReviewFrame.locator("#review-runtime-unrelated-random-chart"))
+      .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
+    await expect(beforeReviewFrame.locator("#review-runtime-forged-host"))
+      .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
+    await expect(afterReviewFrame.locator("#review-runtime-forged-host"))
+      .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
+    const runtimeFlowTop = await Promise.all([
+      beforeReviewFrame.locator("#review-runtime-flow-chart")
+        .evaluate((element) => element.getBoundingClientRect().top),
+      afterReviewFrame.locator("#review-runtime-flow-chart")
+        .evaluate((element) => element.getBoundingClientRect().top),
+    ]);
+    expect(Math.abs(runtimeFlowTop[0] - runtimeFlowTop[1])).toBeGreaterThan(30);
+    await expect(afterReviewFrame.locator("#review-runtime-static-covered"))
+      .not.toHaveAttribute("data-pageroot-review-runtime-host", /.+/u);
+    await expect(afterReviewFrame.locator("#review-runtime-static-covered"))
+      .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
+    await expect(afterReviewFrame.locator("#review-runtime-static-covered"))
+      .toHaveAttribute("data-pageroot-review-marker-types", /style/u);
+    expect(await afterReviewFrame.locator(
+      "#review-runtime-static-covered",
+    ).getAttribute("data-pageroot-review-marker")).not.toBe(runtimeChangedIds[0]);
+    await afterReviewFrame.locator("html").evaluate(() => {
+      document.documentElement.dataset.reviewPostLoadNavigationAttempted = "true";
+      location.replace(
+        "data:text/html,<html data-review-post-load-replacement=true></html>",
+      );
+    });
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-post-load-navigation-attempted", "true");
+    await expect(afterReviewFrame.locator("html"))
+      .not.toHaveAttribute("data-review-post-load-replacement", "true");
+    await expect(afterReviewFrame.locator("html"))
+      .not.toHaveAttribute("data-pageroot-preview-navigation-fallback", "true");
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-pageroot-review-filter", "all");
     await expect(beforeReviewFrame.locator('meta[http-equiv="refresh"]'))
       .toHaveCount(0);
     const reviewCommentMarker = launched.page.locator(
@@ -1816,6 +2236,362 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect(pickerFrame.locator(caseSelector("list-item")))
       .toHaveText(PICKER_TEXT);
   } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("a pre-load review navigation falls back without trusting the replacement page", async () => {
+  test.setTimeout(120_000);
+  const fixture = createSourceFixture("review-navigation-fallback.html", (source) => source.replace(
+    "  </main>",
+    `    <section data-review-navigation-fallback>
+      <h2>运行态导航安全回归</h2>
+      <div id="review-navigation-chart"></div>
+      <script>
+        const reviewNavigationVariant = "before";
+        const reviewNavigationHost = document.querySelector("#review-navigation-chart");
+        reviewNavigationHost.innerHTML = '<strong>'
+          + reviewNavigationVariant
+          + '</strong>';
+        const reviewNavigationSide = JSON.stringify(
+          document.documentElement.dataset.pagerootReviewSide,
+        );
+        const reviewReplacementScript = [
+          'addEventListener("message",function(event){',
+          'const message=event.data;',
+          'if(message?.source!=="pageroot-ai-review-parent"',
+          '||message?.type!=="request-runtime-visual-channel")return;',
+          'const channel=new MessageChannel();',
+          'parent.postMessage({source:"pageroot-ai-review",sessionId:message.sessionId,side:',
+          reviewNavigationSide,
+          ',type:"runtime-visual-channel",challenge:message.challenge},"*",[channel.port2]);',
+          'channel.port1.postMessage({source:"pageroot-ai-review-runtime-visual",',
+          'sessionId:message.sessionId,side:',
+          reviewNavigationSide,
+          ',type:"runtime-visual-snapshots",runtimeVisualSnapshots:[]});',
+          '});',
+        ].join('');
+        const reviewReplacementHtml = '<!doctype html>'
+          + '<html data-review-runtime-navigation-replacement="true"><body><script>'
+          + reviewReplacementScript
+          + '<\\/script></body></html>';
+        location.replace(
+          "data:text/html;charset=utf-8," + encodeURIComponent(reviewReplacementHtml),
+        );
+      </script>
+    </section>
+  </main>`,
+  ));
+  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  try {
+    const request = await addCommentAndSubmit(
+      launched.page,
+      launched.electronApp,
+      fixture.sourcePath,
+    );
+    writeAiOutput(request.requestRoot, (base) => base
+      .replace(ORIGINAL_TEXT, UPDATED_TEXT)
+      .replace(
+        'const reviewNavigationVariant = "before";',
+        'const reviewNavigationVariant = "after";',
+      ));
+    runOfficialFinalizer(request.requestRoot, request.changeRequest);
+    await expect(launched.page.getByText(
+      "修改结果已完成检查",
+      { exact: true },
+    ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+
+    await launched.page.getByRole("button", { name: "审阅对比" }).click();
+    await expect(launched.page.getByTestId("ai-review-workspace"))
+      .toBeVisible({ timeout: 30_000 });
+    const beforeReviewFrame = launched.page.frameLocator('iframe[title^="修改前"]');
+    const afterReviewFrame = launched.page.frameLocator('iframe[title^="修改后"]');
+    for (const frame of [beforeReviewFrame, afterReviewFrame]) {
+      await expect(frame.locator("html")).toHaveAttribute(
+        "data-pageroot-preview-navigation-fallback",
+        "true",
+        { timeout: 30_000 },
+      );
+      await expect(frame.locator("html"))
+        .not.toHaveAttribute("data-review-runtime-navigation-replacement", "true");
+      await expect(frame.locator("html"))
+        .toHaveAttribute("data-pageroot-review-filter", "all");
+      await expect(frame.locator("#review-navigation-chart"))
+        .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
+    }
+    await expect(afterReviewFrame.locator(
+      '[data-pageroot-review-marker-types~="text"]',
+    ).filter({ hasText: UPDATED_TEXT }).first()).toBeVisible();
+    await expect(launched.page.getByText(
+      "审阅画布未能安全载入，请返回本轮处理页面后重试。",
+      { exact: true },
+    )).toHaveCount(0);
+    await launched.page.getByRole("button", {
+      name: "显示并固定审阅工具",
+    }).click();
+    await expect(launched.page.getByRole("button", { name: "收起审阅工具" }))
+      .toBeVisible();
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("a stolen runtime host claim falls back to the static review", async () => {
+  test.setTimeout(120_000);
+  const fixture = createSourceFixture("review-runtime-duplicate-claim.html", (source) => (
+    source.replace(
+      "  </main>",
+      `    <section data-review-runtime-duplicate-claim>
+      <h2>运行态宿主身份回归</h2>
+      <div id="review-runtime-duplicate-claim-chart"></div>
+      <script>
+        const reviewDuplicateClaimVariant = "before";
+        const reviewDuplicateClaimChart = document.querySelector(
+          "#review-runtime-duplicate-claim-chart",
+        );
+        reviewDuplicateClaimChart.innerHTML = '<strong>'
+          + reviewDuplicateClaimVariant
+          + '</strong><span>运行态图表</span>';
+        const reviewDuplicateClaimKey = reviewDuplicateClaimChart.getAttribute(
+          "data-pageroot-review-runtime-host",
+        );
+        if (reviewDuplicateClaimKey) {
+          reviewDuplicateClaimChart.removeAttribute(
+            "data-pageroot-review-runtime-host",
+          );
+          const reviewDuplicateClaimForgery = document.createElement("div");
+          reviewDuplicateClaimForgery.id = "review-runtime-duplicate-claim-forgery";
+          reviewDuplicateClaimForgery.setAttribute(
+            "data-pageroot-review-runtime-host",
+            reviewDuplicateClaimKey,
+          );
+          reviewDuplicateClaimForgery.textContent = "伪造的同 key 宿主";
+          document.body.append(reviewDuplicateClaimForgery);
+          document.documentElement.dataset.reviewRuntimeDuplicateClaim = "true";
+        }
+      </script>
+    </section>
+  </main>`,
+    )
+  ));
+  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  try {
+    const request = await addCommentAndSubmit(
+      launched.page,
+      launched.electronApp,
+      fixture.sourcePath,
+    );
+    writeAiOutput(request.requestRoot, (base) => base
+      .replace(ORIGINAL_TEXT, UPDATED_TEXT)
+      .replace(
+        'const reviewDuplicateClaimVariant = "before";',
+        'const reviewDuplicateClaimVariant = "after";',
+      ));
+    runOfficialFinalizer(request.requestRoot, request.changeRequest);
+    await expect(launched.page.getByText(
+      "修改结果已完成检查",
+      { exact: true },
+    ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+
+    await launched.page.getByRole("button", { name: "审阅对比" }).click();
+    await expect(launched.page.getByTestId("ai-review-workspace"))
+      .toBeVisible({ timeout: 30_000 });
+    await launched.page.getByRole("button", {
+      name: "显示并固定审阅工具",
+    }).click({ timeout: 10_000 });
+    await expect(launched.page.getByRole("button", { name: "收起审阅工具" }))
+      .toBeVisible();
+
+    const beforeReviewFrame = launched.page.frameLocator('iframe[title^="修改前"]');
+    const afterReviewFrame = launched.page.frameLocator('iframe[title^="修改后"]');
+    await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
+      "data-pageroot-review-focus",
+    ), { timeout: 5_000 }).not.toBe("all");
+    await expect.poll(async () => afterReviewFrame.locator("html").getAttribute(
+      "data-pageroot-review-focus",
+    ), { timeout: 5_000 }).not.toBe("all");
+    for (const frame of [beforeReviewFrame, afterReviewFrame]) {
+      await expect(frame.locator("html")).toHaveAttribute(
+        "data-review-runtime-duplicate-claim",
+        "true",
+      );
+      await expect(frame.locator("#review-runtime-duplicate-claim-chart"))
+        .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
+      await expect(frame.locator("#review-runtime-duplicate-claim-chart"))
+        .not.toHaveAttribute("data-pageroot-review-runtime-host", /.+/u);
+      await expect(frame.locator("#review-runtime-duplicate-claim-forgery"))
+        .toHaveAttribute("data-pageroot-review-runtime-host", /runtime-host-\d+/u);
+      await expect(frame.locator("#review-runtime-duplicate-claim-forgery"))
+        .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
+    }
+    await expect(afterReviewFrame.locator(
+      '[data-pageroot-review-marker-types~="text"]',
+    ).filter({ hasText: UPDATED_TEXT }).first()).toBeVisible();
+    await expect(launched.page.getByText("运行态不稳定", { exact: true })).toHaveCount(0);
+    await expect(launched.page.getByText("分析未完成", { exact: true })).toHaveCount(0);
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("an unstable runtime candidate falls back atomically to static review", async () => {
+  test.setTimeout(120_000);
+  const fixture = createSourceFixture("review-runtime-unstable.html", (source) => (
+    source.replace(
+      "  </main>",
+      `    <section data-review-runtime-unstable>
+      <h2>运行态动画回归</h2>
+      <style>@keyframes review-runtime-unstable-motion { from { transform: translateX(0); } to { transform: translateX(80px); } }</style>
+      <div id="review-runtime-unstable-chart"></div>
+      <script>
+        const reviewUnstableVariant = "before";
+        const reviewUnstableChart = document.querySelector("#review-runtime-unstable-chart");
+        reviewUnstableChart.innerHTML = '<div style="width:120px;padding:10px;border:1px solid #6d5ce7;animation:review-runtime-unstable-motion .4s linear infinite alternate"><span>动画数据</span><strong>'
+          + reviewUnstableVariant
+          + '</strong></div>';
+      </script>
+    </section>
+  </main>`,
+    )
+  ));
+  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  try {
+    const request = await addCommentAndSubmit(
+      launched.page,
+      launched.electronApp,
+      fixture.sourcePath,
+    );
+    writeAiOutput(request.requestRoot, (base) => base
+      .replace(ORIGINAL_TEXT, UPDATED_TEXT)
+      .replace(
+        'const reviewUnstableVariant = "before";',
+        'const reviewUnstableVariant = "after";',
+      ));
+    runOfficialFinalizer(request.requestRoot, request.changeRequest);
+    await expect(launched.page.getByText(
+      "修改结果已完成检查",
+      { exact: true },
+    ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+
+    await launched.page.getByRole("button", { name: "审阅对比" }).click();
+    await expect(launched.page.getByTestId("ai-review-workspace"))
+      .toBeVisible({ timeout: 30_000 });
+    const afterReviewFrame = launched.page.frameLocator('iframe[title^="修改后"]');
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-pageroot-review-overlays", "true", { timeout: 30_000 });
+    await expect(afterReviewFrame.locator("#review-runtime-unstable-chart"))
+      .toHaveAttribute("data-pageroot-review-runtime-host", /runtime-host-\d+/u);
+    await expect(afterReviewFrame.locator("#review-runtime-unstable-chart"))
+      .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
+    await expect(afterReviewFrame.locator(
+      '[data-pageroot-review-marker-types~="text"]',
+    ).filter({ hasText: UPDATED_TEXT }).first()).toBeVisible();
+    await expect(launched.page.getByText("运行态不稳定", { exact: true })).toHaveCount(0);
+    await expect(launched.page.getByText("分析未完成", { exact: true })).toHaveCount(0);
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("runtime review settles to static while a frame resource never finishes loading", async () => {
+  test.setTimeout(120_000);
+  const fixture = createSourceFixture("review-runtime-registration-timeout.html", (source) => (
+    source.replace(
+      "  </main>",
+      `    <section data-review-runtime-registration-timeout>
+      <h2>运行态加载收口回归</h2>
+      <img alt="" data-review-runtime-registration-resource>
+      <div id="review-runtime-registration-chart"></div>
+      <script>
+        const reviewRegistrationVariant = "before";
+        const reviewRegistrationResource = document.querySelector(
+          "[data-review-runtime-registration-resource]",
+        );
+        addEventListener("DOMContentLoaded", () => {
+          reviewRegistrationResource.src = "/review-runtime-registration-hang.png?side="
+            + document.documentElement.dataset.pagerootReviewSide;
+        }, { once: true });
+        const reviewRegistrationChart = document.querySelector(
+          "#review-runtime-registration-chart",
+        );
+        reviewRegistrationChart.innerHTML = '<strong>'
+          + reviewRegistrationVariant
+          + '</strong><span>运行态图表</span>';
+      </script>
+    </section>
+  </main>`,
+    )
+  ));
+  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  let releaseResources = () => {};
+  const resourceGate = new Promise((resolve) => {
+    releaseResources = resolve;
+  });
+  let pendingResourceRequests = 0;
+  let completedResourceRequests = 0;
+  await launched.page.route("**/review-runtime-registration-hang.png*", async (route) => {
+    pendingResourceRequests += 1;
+    await resourceGate;
+    completedResourceRequests += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: "image/png",
+      body: Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+        "base64",
+      ),
+    });
+  });
+  try {
+    const request = await addCommentAndSubmit(
+      launched.page,
+      launched.electronApp,
+      fixture.sourcePath,
+    );
+    writeAiOutput(request.requestRoot, (base) => base
+      .replace(ORIGINAL_TEXT, UPDATED_TEXT)
+      .replace(
+        'const reviewRegistrationVariant = "before";',
+        'const reviewRegistrationVariant = "after";',
+      ));
+    runOfficialFinalizer(request.requestRoot, request.changeRequest);
+    await expect(launched.page.getByText(
+      "修改结果已完成检查",
+      { exact: true },
+    ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+
+    await launched.page.getByRole("button", { name: "审阅对比" }).click();
+    await expect(launched.page.getByTestId("ai-review-workspace"))
+      .toBeVisible({ timeout: 30_000 });
+    await expect.poll(() => pendingResourceRequests, { timeout: 30_000 })
+      .toBeGreaterThanOrEqual(2);
+    await launched.page.getByRole("button", {
+      name: "显示并固定审阅工具",
+    }).click({ timeout: 10_000 });
+    expect(completedResourceRequests).toBe(0);
+    await expect(launched.page.getByRole("button", { name: "收起审阅工具" }))
+      .toBeVisible();
+
+    const afterReviewFrame = launched.page.frameLocator('iframe[title^="修改后"]');
+    await expect(afterReviewFrame.locator(
+      '[data-pageroot-review-marker-types~="text"]',
+    ).filter({ hasText: UPDATED_TEXT }).first()).toBeVisible();
+    await expect(afterReviewFrame.locator("#review-runtime-registration-chart"))
+      .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
+
+    releaseResources();
+    await expect.poll(() => completedResourceRequests, { timeout: 10_000 })
+      .toBeGreaterThanOrEqual(2);
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-pageroot-review-filter", "all");
+    await expect(afterReviewFrame.locator("#review-runtime-registration-chart"))
+      .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
+  } finally {
+    releaseResources();
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
   }

@@ -6,7 +6,7 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { parse } from "parse5";
+import { parse, serialize } from "parse5";
 
 export const PREVIEW_PROTOCOL_SCHEME = "pageroot-preview";
 export const PREVIEW_BOOTSTRAP_PATH = "/.pageroot/preview-bootstrap.js";
@@ -60,6 +60,26 @@ const PREVIEW_DOCUMENT_CSP = [
   "base-uri 'none'",
   "object-src 'none'",
 ].join("; ");
+const PREVIEW_NAVIGATION_FALLBACK_CSP = [
+  "default-src 'self' http: https: data: blob:",
+  "script-src 'self'",
+  "style-src 'self' http: https: data: blob: 'unsafe-inline'",
+  "img-src 'self' http: https: data: blob:",
+  "font-src 'self' http: https: data: blob:",
+  "media-src 'self' http: https: data: blob:",
+  "connect-src 'self' http: https:",
+  "worker-src 'none'",
+  "frame-src 'none'",
+  "form-action 'none'",
+  "base-uri 'none'",
+  "object-src 'none'",
+].join("; ");
+const PREVIEW_BOOTSTRAP_ATTRIBUTES = new Set([
+  "data-pageroot-ai-review-bootstrap",
+  "data-pageroot-preview-bootstrap",
+]);
+const PREVIEW_NAVIGATION_FALLBACK_ATTRIBUTE =
+  "data-pageroot-preview-navigation-fallback";
 
 let schemePrivilegesRegistered = false;
 
@@ -166,6 +186,49 @@ function attributesFor(node) {
     String(attribute.name || "").toLowerCase(),
     String(attribute.value || ""),
   ]));
+}
+
+function isOwnedPreviewBootstrap(node) {
+  if (String(node?.tagName || "").toLowerCase() !== "script") return false;
+  const attributes = attributesFor(node);
+  return attributes.get("src") === PREVIEW_BOOTSTRAP_PATH
+    && [...PREVIEW_BOOTSTRAP_ATTRIBUTES].some(
+      (attribute) => attributes.get(attribute) === "true",
+    );
+}
+
+function scriptlessNavigationFallback(html) {
+  const document = parse(html);
+  let keptBootstrap = false;
+  let documentElement = null;
+  const visit = (node) => {
+    if (String(node?.tagName || "").toLowerCase() === "html") {
+      documentElement = node;
+    }
+    if (Array.isArray(node?.childNodes)) {
+      node.childNodes = node.childNodes.filter((child) => {
+        if (String(child?.tagName || "").toLowerCase() !== "script") return true;
+        if (!keptBootstrap && isOwnedPreviewBootstrap(child)) {
+          keptBootstrap = true;
+          return true;
+        }
+        return false;
+      });
+      node.childNodes.forEach(visit);
+    }
+    if (node?.content) visit(node.content);
+  };
+  visit(document);
+  if (documentElement) {
+    documentElement.attrs = (documentElement.attrs || []).filter(
+      (attribute) => attribute.name !== PREVIEW_NAVIGATION_FALLBACK_ATTRIBUTE,
+    );
+    documentElement.attrs.push({
+      name: PREVIEW_NAVIGATION_FALLBACK_ATTRIBUTE,
+      value: "true",
+    });
+  }
+  return serialize(document);
 }
 
 function appendSrcSetReferences(value, extensions, append) {
@@ -479,6 +542,7 @@ export function createPreviewProtocolController({
     const createdAt = now();
     sessions.set(sessionId, {
       html,
+      navigationFallbackActive: false,
       bootstrapJavaScript,
       sourceRoot,
       declaredAssets,
@@ -496,6 +560,30 @@ export function createPreviewProtocolController({
     return Object.freeze({
       revoked: sessionId ? sessions.delete(sessionId) : false,
     });
+  };
+
+  const activateNavigationFallback = (sessionUrlInput) => {
+    let sessionUrl;
+    try {
+      sessionUrl = new URL(String(sessionUrlInput || ""));
+    } catch {
+      return false;
+    }
+    if (
+      sessionUrl.protocol !== `${PREVIEW_PROTOCOL_SCHEME}:`
+      || (sessionUrl.pathname !== "/index.html" && sessionUrl.pathname !== "/")
+    ) return false;
+    const sessionId = normalizeSessionId(sessionUrl.hostname);
+    const session = sessionId ? sessions.get(sessionId) : null;
+    if (!session || session.navigationFallbackActive) return false;
+    if (session.lastAccessedAt < now() - sessionTtlMs) {
+      sessions.delete(sessionId);
+      return false;
+    }
+    session.html = scriptlessNavigationFallback(session.html);
+    session.navigationFallbackActive = true;
+    session.lastAccessedAt = now();
+    return true;
   };
 
   const handleRequest = async (request) => {
@@ -522,7 +610,11 @@ export function createPreviewProtocolController({
         request.method === "HEAD" ? null : session.html,
         200,
         "text/html; charset=utf-8",
-        { "content-security-policy": PREVIEW_DOCUMENT_CSP },
+        {
+          "content-security-policy": session.navigationFallbackActive
+            ? PREVIEW_NAVIGATION_FALLBACK_CSP
+            : PREVIEW_DOCUMENT_CSP,
+        },
       );
     }
     if (requestUrl.pathname === PREVIEW_BOOTSTRAP_PATH) {
@@ -570,6 +662,7 @@ export function createPreviewProtocolController({
     install,
     createSession,
     revokeSession,
+    activateNavigationFallback,
     dispose,
     sessionCount: () => sessions.size,
     handleRequest,

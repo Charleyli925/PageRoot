@@ -109,7 +109,11 @@ Pure-browser preview is a different, strictly weaker capability: authored script
 
 Desktop preview is likewise untrusted authored content. The iframe has no
 top-navigation authority, new windows are denied, and preview IPC is available
-only to the trusted application main frame. When the user returns to editing,
+only to the trusted application main frame. A direct preview frame that tries
+to self-navigate is fenced by the main process; before its first load completes,
+its volatile session becomes a one-way scriptless fallback retaining only the
+owned external bootstrap, while later attempts leave the loaded page intact.
+When the user returns to editing,
 PageRoot accepts only an allowlisted source-backed presentation diff. It rejects
 unknown or duplicated source nodes, stale Hashes, truncated captures, arbitrary
 one-sided runtime classes, text/HTML, inline style, form state and runtime
@@ -127,18 +131,48 @@ The AI review workspace is an isolated interactive review preview with no
 activation or persistence authority. It preserves the identity/Hash-validated authored
 scripts and inline events in a disposable review copy so source-backed Tabs,
 disclosures and local controls can be inspected. The review iframe uses only
-`allow-scripts`: it has no same-origin authority, form submission, navigation,
+`allow-scripts`: it has no same-origin authority, form submission, top navigation,
 popup, download, modal or host IPC capability. Parent-side capture also blocks
 anchor navigation and form submission, nested iframes receive an empty sandbox,
 and refresh/CSP meta directives are removed only from the disposable review copy
 so they cannot navigate the frame or suppress the trusted review bootstrap.
+Runtime-chart evidence is enabled only for the managed desktop preview transport.
+The main process rejects authored navigation away from a direct
+`pageroot-preview` subframe. A rejected pre-load attempt atomically marks that
+volatile protocol session for a one-time reload: every authored script is
+removed, inline handlers are disabled by the stricter CSP, and only the owned
+external bootstrap remains executable. The replacement document therefore
+cannot receive or answer the challenge, while the review completes silently
+from static evidence. Inline/browser review uses static evidence only.
 
 Entering review does not change `project.json.sourcePath`, the current Canvas,
 the immutable Version or the activation transaction, and runtime interaction
 state is never serialized. The renderer accepts review messages only when the
 session ID, side, declared message source and `MessageEvent.source` all match the
-registered frame. A user must still invoke the existing fail-closed ready-version
-activation path through “直接打开” or the review confirmation “打开 AI 修改后”.
+registered frame. Runtime-chart snapshot messages are additionally limited to
+host keys declared by the frozen source analyzer, bounded atom/signature counts,
+exactly one well-formed snapshot for every declared key, and one accepted batch
+per side. Ordinary frame `ready` messages never carry
+runtime evidence. An omitted or invalid snapshot invalidates the complete
+runtime batch and leaves static review authoritative. The trusted bootstrap creates a `MessageChannel` and binds
+the DOM traversal, attribute, layout, computed-style, Canvas, string
+normalization/digest, and Promise/timer/animation scheduling primitives used for evidence before any
+authored script runs. Its bounded font wait composes only captured Promise capabilities, so it never re-reads
+page-mutable static methods. An early observer records the
+parser-created element that first claims every frozen candidate key. Snapshot
+discovery accepts only that exact key/element set: undeclared attributes are
+ignored, while a missing, duplicate, transferred or replaced declared host,
+key/element drift or capture exception invalidates the whole runtime batch and
+leaves static review authoritative. After both exact
+frame documents load, the parent sends a fresh random challenge
+that the bootstrap consumes only from a browser-trusted parent event in its first
+capture listener without exposing it to later authored listeners, then transfers
+the pre-created capability port. Only the matching port may submit snapshots.
+They contain no executable DOM and can
+only add a disposable visual marker after a complete stable pair; forged window
+messages, invalid, partial, timed-out or late input are ignored. A user must
+still invoke the existing fail-closed ready-version activation path through
+“直接打开” or the review confirmation “打开 AI 修改后”.
 
 Edit-mode reveal actions use the same trust boundary. They accept only strict
 Tabs whose selected panel is proved by `aria-selected` plus `hidden`, native

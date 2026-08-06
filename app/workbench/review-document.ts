@@ -12,6 +12,9 @@ import {
   reviewTextSimilarity,
   sentenceAwareTextDifferences,
 } from "../lib/review-text-diff.js";
+import type {
+  ReviewRuntimeVisualCandidate,
+} from "../lib/review-runtime-visual.js";
 import {
   REVIEW_SOURCE_NODE_ATTRIBUTE,
   prepareReviewCommentSourceProjection,
@@ -53,6 +56,7 @@ export type ReviewDocuments = {
   bootstrapJavaScript: Record<ReviewSide, string>;
   changes: ReviewChange[];
   outline: ReviewOutlineItem[];
+  runtimeVisualCandidates: ReviewRuntimeVisualCandidate[];
   commentGroups: ReviewCommentGroup[];
 };
 
@@ -348,6 +352,48 @@ const NON_CONTENT_TAGS = new Set([
   "SCRIPT",
   "STYLE",
   "TEMPLATE",
+]);
+
+const REVIEW_RUNTIME_VISUAL_HOST_ATTRIBUTE = "data-pageroot-review-runtime-host";
+const REVIEW_RUNTIME_VISUAL_SOURCE_BOX_ATTRIBUTE = "data-pageroot-review-runtime-source-box";
+const REVIEW_RUNTIME_VISUAL_SOURCE_BOX_ATTRIBUTES = [
+  "class",
+  "height",
+  "hidden",
+  "style",
+  "width",
+];
+const MAX_REVIEW_RUNTIME_VISUAL_CANDIDATES = 128;
+const RUNTIME_VISUAL_HOST_SELECTOR = [
+  "article",
+  "aside",
+  "canvas",
+  "div",
+  "figure",
+  "figcaption",
+  "li",
+  "main",
+  "section",
+  "span",
+  "svg",
+  "td",
+  "th",
+  "tbody",
+].join(",");
+const GENERIC_RUNTIME_VISUAL_CLASSES = new Set([
+  "active",
+  "card",
+  "chart",
+  "container",
+  "content",
+  "grid",
+  "item",
+  "main",
+  "panel",
+  "row",
+  "section",
+  "wrap",
+  "wrapper",
 ]);
 
 type ReviewTextInventory = {
@@ -1062,6 +1108,312 @@ function pairSections(before: Element[], after: Element[]): SectionPair[] {
     }
   });
   return markMovedPairs(pairs);
+}
+
+type ReviewRuntimeSectionContext = {
+  pair: SectionPair;
+  outlineId: string;
+  changeId?: string;
+  label: string;
+  panelKey?: string;
+  panelPath: string[];
+};
+
+type ReviewRuntimeHostPair = {
+  before: Element;
+  after: Element;
+};
+
+type ReviewScriptDescriptor = {
+  content: string;
+  signature: string;
+};
+
+type ChangedReviewScript = {
+  content: string;
+};
+
+function isRuntimeVisualPlaceholder(element: Element): boolean {
+  if (!element.matches(RUNTIME_VISUAL_HOST_SELECTOR)) return false;
+  return [...element.childNodes].every((node) => (
+    node.nodeType === Node.COMMENT_NODE
+    || (node.nodeType === Node.TEXT_NODE && !(node.textContent || "").trim())
+  ));
+}
+
+function runtimeVisualIdentityParts(element: Element): string[] {
+  const parts: string[] = [];
+  if (element.id) parts.push(`id:${element.id}`);
+  for (const attributeName of ["aria-label", "name", "title"]) {
+    const value = element.getAttribute(attributeName)?.trim();
+    if (value) parts.push(`${attributeName}:${value}`);
+  }
+  [...element.attributes].forEach((attribute) => {
+    if (
+      !attribute.name.startsWith("data-")
+      || attribute.name.startsWith("data-pageroot-")
+      || !/(?:canvas|chart|graph|plot|table|visual|viz)/iu.test(attribute.name)
+    ) return;
+    parts.push(`${attribute.name}:${attribute.value.trim()}`);
+  });
+  const distinctiveClasses = classTokens(element).filter((token) => (
+    token.length >= 4 && !GENERIC_RUNTIME_VISUAL_CLASSES.has(token.toLowerCase())
+  ));
+  if (distinctiveClasses.length) {
+    parts.push(`class:${distinctiveClasses.sort().join(".")}`);
+  }
+  return parts;
+}
+
+function runtimeVisualPairIdentity(element: Element): string | null {
+  const explicitKey = pairKey(element);
+  if (explicitKey) return `${element.tagName}:${explicitKey}`;
+  const parts = runtimeVisualIdentityParts(element);
+  return parts.length ? `${element.tagName}:${parts.join("|")}` : null;
+}
+
+function runtimeVisualSourceSignature(element: Element): string {
+  const attributes = [...element.attributes]
+    .filter((attribute) => !attribute.name.startsWith("data-pageroot-"))
+    .map((attribute) => `${attribute.name}=${attribute.value}`)
+    .sort();
+  return `${element.tagName}|${attributes.join("|")}`;
+}
+
+function runtimeVisualSourceBoxSignature(element: Element): string {
+  return JSON.stringify(REVIEW_RUNTIME_VISUAL_SOURCE_BOX_ATTRIBUTES.map((attribute) => (
+    [attribute, element.getAttribute(attribute)]
+  )));
+}
+
+function relativeElementPath(root: Element, element: Element): string | null {
+  const indexes: number[] = [];
+  let current: Element | null = element;
+  while (current && current !== root) {
+    const parent: Element | null = current.parentElement;
+    if (!parent) return null;
+    indexes.unshift([...parent.children].indexOf(current));
+    current = parent;
+  }
+  return current === root ? indexes.join(".") : null;
+}
+
+function runtimeVisualHosts(root: Element): Element[] {
+  return [root, ...root.querySelectorAll(RUNTIME_VISUAL_HOST_SELECTOR)]
+    .filter(isRuntimeVisualPlaceholder);
+}
+
+function pairRuntimeVisualHosts(
+  beforeRoot: Element,
+  afterRoot: Element,
+): ReviewRuntimeHostPair[] {
+  const beforeHosts = runtimeVisualHosts(beforeRoot);
+  const afterHosts = runtimeVisualHosts(afterRoot);
+  const beforeIdentityCounts = new Map<string, number>();
+  const afterByIdentity = new Map<string, Element[]>();
+  beforeHosts.forEach((element) => {
+    const identity = runtimeVisualPairIdentity(element);
+    if (identity) beforeIdentityCounts.set(identity, (beforeIdentityCounts.get(identity) || 0) + 1);
+  });
+  afterHosts.forEach((element) => {
+    const identity = runtimeVisualPairIdentity(element);
+    if (!identity) return;
+    const matches = afterByIdentity.get(identity) || [];
+    matches.push(element);
+    afterByIdentity.set(identity, matches);
+  });
+
+  const usedAfter = new Set<Element>();
+  const assignments = new Map<Element, Element>();
+  beforeHosts.forEach((beforeHost) => {
+    const identity = runtimeVisualPairIdentity(beforeHost);
+    const matches = identity ? afterByIdentity.get(identity) || [] : [];
+    if (
+      !identity
+      || beforeIdentityCounts.get(identity) !== 1
+      || matches.length !== 1
+      || usedAfter.has(matches[0])
+    ) return;
+    assignments.set(beforeHost, matches[0]);
+    usedAfter.add(matches[0]);
+  });
+
+  const afterByPath = new Map(afterHosts.flatMap((afterHost) => {
+    const path = relativeElementPath(afterRoot, afterHost);
+    return path === null ? [] : [[path, afterHost] as const];
+  }));
+  beforeHosts.forEach((beforeHost) => {
+    if (assignments.has(beforeHost)) return;
+    const identityParts = runtimeVisualIdentityParts(beforeHost);
+    const path = relativeElementPath(beforeRoot, beforeHost);
+    const afterHost = path === null ? null : afterByPath.get(path) || null;
+    if (
+      !identityParts.length
+      || !afterHost
+      || usedAfter.has(afterHost)
+      || beforeHost.tagName !== afterHost.tagName
+      || runtimeVisualSourceSignature(beforeHost) !== runtimeVisualSourceSignature(afterHost)
+    ) return;
+    assignments.set(beforeHost, afterHost);
+    usedAfter.add(afterHost);
+  });
+  return [...assignments].map(([before, after]) => ({ before, after }));
+}
+
+function reviewScriptDescriptors(document: Document): ReviewScriptDescriptor[] {
+  return [...document.scripts].map((element) => {
+    const content = [
+      element.getAttribute("src") || "",
+      element.getAttribute("type") || "",
+      element.textContent || "",
+    ].join("\n");
+    return {
+      content,
+      signature: `${element.getAttribute("src") || ""}\u0000${element.getAttribute("type") || ""}\u0000${element.textContent || ""}`,
+    };
+  });
+}
+
+function changedReviewScripts(
+  beforeScripts: ReviewScriptDescriptor[],
+  afterScripts: ReviewScriptDescriptor[],
+): ChangedReviewScript[] {
+  const unmatched = (
+    scripts: ReviewScriptDescriptor[],
+    counterparts: ReviewScriptDescriptor[],
+  ) => {
+    const remainingSignatures = new Map<string, number>();
+    counterparts.forEach(({ signature }) => {
+      remainingSignatures.set(signature, (remainingSignatures.get(signature) || 0) + 1);
+    });
+    return scripts.filter(({ signature }) => {
+      const remaining = remainingSignatures.get(signature) || 0;
+      if (!remaining) return true;
+      remainingSignatures.set(signature, remaining - 1);
+      return false;
+    });
+  };
+  return [
+    ...unmatched(beforeScripts, afterScripts),
+    ...unmatched(afterScripts, beforeScripts),
+  ].map(({ content }) => ({ content }));
+}
+
+function runtimeVisualScriptTokens(before: Element, after: Element): string[] {
+  const elementTokens = (element: Element) => {
+    const explicitValues = [
+      element.id,
+      ...[...element.attributes]
+        .filter((attribute) => (
+          attribute.name.startsWith("data-")
+          && !attribute.name.startsWith("data-pageroot-")
+          && /(?:canvas|chart|graph|plot|table|visual|viz)/iu.test(attribute.name)
+        ))
+        .flatMap((attribute) => [attribute.name, attribute.value]),
+    ].map((value) => value.trim()).filter((value) => value.length >= 3);
+    if (explicitValues.length) return explicitValues;
+    const semanticValues = ["aria-label", "name", "title"]
+      .map((attributeName) => element.getAttribute(attributeName) || "")
+      .map((value) => value.trim())
+      .filter((value) => value.length >= 3);
+    if (semanticValues.length) return semanticValues;
+    return classTokens(element)
+      .filter((token) => (
+        !GENERIC_RUNTIME_VISUAL_CLASSES.has(token.toLowerCase())
+      ))
+      .filter((value) => value.length >= 3);
+  };
+  return [...new Set([...elementTokens(before), ...elementTokens(after)])];
+}
+
+function hasRuntimeVisualCause(
+  hostPair: ReviewRuntimeHostPair,
+  changedScripts: ChangedReviewScript[],
+): boolean {
+  const tokens = runtimeVisualScriptTokens(hostPair.before, hostPair.after);
+  const referencesHost = (content: string) => tokens.some((token) => content.includes(token));
+  return tokens.length > 0 && changedScripts.some(({ content }) => referencesHost(content));
+}
+
+function staticReviewMarkerCoversRuntimeHost(
+  host: Element,
+  sectionRoot: Element,
+): boolean {
+  let candidate: Element | null = host;
+  while (candidate) {
+    if (candidate.hasAttribute("data-pageroot-review-marker")) {
+      const markerTypes = String(
+        candidate.getAttribute("data-pageroot-review-marker-types") || "",
+      ).split(/\s+/u);
+      if (
+        candidate === host
+        || markerTypes.includes("structure")
+        || (
+          markerTypes.includes("style")
+          && candidate.getAttribute("data-pageroot-review-style-scope") === "box"
+        )
+      ) return true;
+    }
+    if (candidate === sectionRoot) break;
+    candidate = candidate.parentElement;
+  }
+  return false;
+}
+
+function annotateRuntimeVisualCandidates(
+  beforeDocument: Document,
+  afterDocument: Document,
+  sections: ReviewRuntimeSectionContext[],
+): ReviewRuntimeVisualCandidate[] {
+  const beforeScripts = reviewScriptDescriptors(beforeDocument);
+  const afterScripts = reviewScriptDescriptors(afterDocument);
+  const changedScripts = changedReviewScripts(beforeScripts, afterScripts);
+  if (!changedScripts.length) return [];
+  const proposed: Array<{
+    before: Element;
+    after: Element;
+    section: ReviewRuntimeSectionContext;
+  }> = [];
+  const usedBefore = new Set<Element>();
+  const usedAfter = new Set<Element>();
+  sections.forEach((section) => {
+    if (!section.pair.before || !section.pair.after) return;
+    pairRuntimeVisualHosts(section.pair.before, section.pair.after).forEach((hostPair) => {
+      if (
+        usedBefore.has(hostPair.before)
+        || usedAfter.has(hostPair.after)
+        || staticReviewMarkerCoversRuntimeHost(hostPair.before, section.pair.before as Element)
+        || staticReviewMarkerCoversRuntimeHost(hostPair.after, section.pair.after as Element)
+        || !hasRuntimeVisualCause(hostPair, changedScripts)
+      ) return;
+      usedBefore.add(hostPair.before);
+      usedAfter.add(hostPair.after);
+      proposed.push({ ...hostPair, section });
+    });
+  });
+  if (proposed.length > MAX_REVIEW_RUNTIME_VISUAL_CANDIDATES) return [];
+  return proposed.map(({ before, after, section }, index) => {
+    const key = `runtime-host-${index + 1}`;
+    const changeId = section.changeId || `runtime-change-${section.outlineId}`;
+    before.setAttribute(REVIEW_RUNTIME_VISUAL_HOST_ATTRIBUTE, key);
+    after.setAttribute(REVIEW_RUNTIME_VISUAL_HOST_ATTRIBUTE, key);
+    before.setAttribute(
+      REVIEW_RUNTIME_VISUAL_SOURCE_BOX_ATTRIBUTE,
+      runtimeVisualSourceBoxSignature(before),
+    );
+    after.setAttribute(
+      REVIEW_RUNTIME_VISUAL_SOURCE_BOX_ATTRIBUTE,
+      runtimeVisualSourceBoxSignature(after),
+    );
+    return {
+      key,
+      outlineId: section.outlineId,
+      changeId,
+      label: section.label,
+      ...(section.panelKey ? { panelKey: section.panelKey } : {}),
+      ...(section.panelPath.length ? { panelPath: [...section.panelPath] } : {}),
+    };
+  });
 }
 
 function helperText(
@@ -2185,11 +2537,200 @@ function baseHrefFromSourcePath(sourcePath?: string): string | undefined {
   return `file://${directoryPath.split("/").map(encodeURIComponent).join("/")}`;
 }
 
-function reviewBootstrap(sessionId: string, side: ReviewSide): string {
+function reviewBootstrap(
+  sessionId: string,
+  side: ReviewSide,
+  runtimeVisualCandidateKeys: readonly string[] = [],
+): string {
   return String.raw`
 (() => {
   const sessionId = ${JSON.stringify(sessionId)};
   const side = ${JSON.stringify(side)};
+  // This first managed script binds evidence readers before authored scripts execute.
+  const runtimeVisualExpectedKeys = Object.freeze(
+    ${JSON.stringify([...runtimeVisualCandidateKeys])},
+  );
+  const runtimeVisualBindCall = (method) => Function.prototype.call.bind(method);
+  const runtimeVisualFunctionHasInstance = runtimeVisualBindCall(
+    Function.prototype[Symbol.hasInstance],
+  );
+  const RuntimeVisualElement = Element;
+  const RuntimeVisualCanvasElement = HTMLCanvasElement;
+  const RuntimeVisualSvgElement = SVGElement;
+  const RuntimeVisualMap = Map;
+  const RuntimeVisualSet = Set;
+  const RuntimeVisualWeakMap = WeakMap;
+  const RuntimeVisualString = String;
+  const RuntimeVisualPromise = Promise;
+  const runtimeVisualMathImul = Math.imul.bind(Math);
+  const runtimeVisualSetTimeout = window.setTimeout.bind(window);
+  const runtimeVisualRequestAnimationFrame = window.requestAnimationFrame.bind(window);
+  const runtimeVisualPromiseResolve = RuntimeVisualPromise.resolve.bind(RuntimeVisualPromise);
+  const runtimeVisualPromiseThen = runtimeVisualBindCall(RuntimeVisualPromise.prototype.then);
+  const runtimeVisualPromiseRace = (values) => new RuntimeVisualPromise((resolve, reject) => {
+    for (let index = 0; index < values.length; index += 1) {
+      runtimeVisualPromiseThen(runtimeVisualPromiseResolve(values[index]), resolve, reject);
+    }
+  });
+  const runtimeVisualArrayPush = runtimeVisualBindCall(Array.prototype.push);
+  const runtimeVisualArrayForEach = runtimeVisualBindCall(Array.prototype.forEach);
+  const runtimeVisualArrayJoin = runtimeVisualBindCall(Array.prototype.join);
+  const runtimeVisualArrayIncludes = runtimeVisualBindCall(Array.prototype.includes);
+  const runtimeVisualArrayMap = runtimeVisualBindCall(Array.prototype.map);
+  const runtimeVisualArraySome = runtimeVisualBindCall(Array.prototype.some);
+  const runtimeVisualArrayIsArray = Array.isArray.bind(Array);
+  const runtimeVisualStringCharCodeAt = runtimeVisualBindCall(
+    String.prototype.charCodeAt,
+  );
+  const runtimeVisualStringFromCharCode = String.fromCharCode.bind(String);
+  const runtimeVisualNumberToString = runtimeVisualBindCall(Number.prototype.toString);
+  const runtimeVisualStringPadStart = runtimeVisualBindCall(String.prototype.padStart);
+  const runtimeVisualDocumentQuerySelectorAll = runtimeVisualBindCall(
+    Document.prototype.querySelectorAll,
+  );
+  const runtimeVisualDocumentCreateTreeWalker = runtimeVisualBindCall(
+    Document.prototype.createTreeWalker,
+  );
+  const runtimeVisualDocumentCreateRange = runtimeVisualBindCall(
+    Document.prototype.createRange,
+  );
+  const runtimeVisualElementGetAttribute = runtimeVisualBindCall(
+    Element.prototype.getAttribute,
+  );
+  const runtimeVisualElementSetAttribute = runtimeVisualBindCall(
+    Element.prototype.setAttribute,
+  );
+  const runtimeVisualElementRemoveAttribute = runtimeVisualBindCall(
+    Element.prototype.removeAttribute,
+  );
+  const runtimeVisualElementMatches = runtimeVisualBindCall(Element.prototype.matches);
+  const runtimeVisualElementClosest = runtimeVisualBindCall(Element.prototype.closest);
+  const runtimeVisualElementQuerySelector = runtimeVisualBindCall(
+    Element.prototype.querySelector,
+  );
+  const runtimeVisualElementGetBoundingClientRect = runtimeVisualBindCall(
+    Element.prototype.getBoundingClientRect,
+  );
+  const runtimeVisualNodeParentElement = runtimeVisualBindCall(
+    Object.getOwnPropertyDescriptor(Node.prototype, "parentElement").get,
+  );
+  const runtimeVisualNodeTextContent = runtimeVisualBindCall(
+    Object.getOwnPropertyDescriptor(Node.prototype, "textContent").get,
+  );
+  const runtimeVisualElementTagName = runtimeVisualBindCall(
+    Object.getOwnPropertyDescriptor(Element.prototype, "tagName").get,
+  );
+  const runtimeVisualNodeListLength = runtimeVisualBindCall(
+    Object.getOwnPropertyDescriptor(NodeList.prototype, "length").get,
+  );
+  const runtimeVisualNodeListItem = runtimeVisualBindCall(NodeList.prototype.item);
+  const runtimeVisualTreeWalkerNextNode = runtimeVisualBindCall(TreeWalker.prototype.nextNode);
+  const RuntimeVisualMutationObserver = MutationObserver;
+  const runtimeVisualMutationObserverObserve = runtimeVisualBindCall(
+    MutationObserver.prototype.observe,
+  );
+  const runtimeVisualMutationObserverTakeRecords = runtimeVisualBindCall(
+    MutationObserver.prototype.takeRecords,
+  );
+  const runtimeVisualMutationRecordType = runtimeVisualBindCall(
+    Object.getOwnPropertyDescriptor(MutationRecord.prototype, "type").get,
+  );
+  const runtimeVisualMutationRecordTarget = runtimeVisualBindCall(
+    Object.getOwnPropertyDescriptor(MutationRecord.prototype, "target").get,
+  );
+  const runtimeVisualMutationRecordAddedNodes = runtimeVisualBindCall(
+    Object.getOwnPropertyDescriptor(MutationRecord.prototype, "addedNodes").get,
+  );
+  const runtimeVisualMutationRecordOldValue = runtimeVisualBindCall(
+    Object.getOwnPropertyDescriptor(MutationRecord.prototype, "oldValue").get,
+  );
+  const runtimeVisualRangeSelectNodeContents = runtimeVisualBindCall(
+    Range.prototype.selectNodeContents,
+  );
+  const runtimeVisualRangeGetClientRects = runtimeVisualBindCall(Range.prototype.getClientRects);
+  const runtimeVisualRangeDetach = runtimeVisualBindCall(Range.prototype.detach);
+  const runtimeVisualDomRectListLength = runtimeVisualBindCall(
+    Object.getOwnPropertyDescriptor(DOMRectList.prototype, "length").get,
+  );
+  const runtimeVisualDomRectListItem = runtimeVisualBindCall(DOMRectList.prototype.item);
+  const runtimeVisualCanvasGetContext = runtimeVisualBindCall(
+    HTMLCanvasElement.prototype.getContext,
+  );
+  const runtimeVisualCanvasToDataUrl = runtimeVisualBindCall(
+    HTMLCanvasElement.prototype.toDataURL,
+  );
+  const runtimeVisualCanvasWidth = runtimeVisualBindCall(
+    Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, "width").get,
+  );
+  const runtimeVisualCanvasHeight = runtimeVisualBindCall(
+    Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, "height").get,
+  );
+  const runtimeVisualContextGetImageData = runtimeVisualBindCall(
+    CanvasRenderingContext2D.prototype.getImageData,
+  );
+  const runtimeVisualImageData = runtimeVisualBindCall(
+    Object.getOwnPropertyDescriptor(ImageData.prototype, "data").get,
+  );
+  const runtimeVisualStyleGetPropertyValue = runtimeVisualBindCall(
+    CSSStyleDeclaration.prototype.getPropertyValue,
+  );
+  const runtimeVisualGetComputedStyle = getComputedStyle.bind(window);
+  const runtimeVisualMapGet = runtimeVisualBindCall(Map.prototype.get);
+  const runtimeVisualMapHas = runtimeVisualBindCall(Map.prototype.has);
+  const runtimeVisualMapSet = runtimeVisualBindCall(Map.prototype.set);
+  const runtimeVisualSetHas = runtimeVisualBindCall(Set.prototype.has);
+  const runtimeVisualSetAdd = runtimeVisualBindCall(Set.prototype.add);
+  const runtimeVisualWeakMapGet = runtimeVisualBindCall(WeakMap.prototype.get);
+  const runtimeVisualWeakMapHas = runtimeVisualBindCall(WeakMap.prototype.has);
+  const runtimeVisualWeakMapSet = runtimeVisualBindCall(WeakMap.prototype.set);
+  const runtimeVisualStringify = JSON.stringify.bind(JSON);
+  const runtimeVisualExpectedKeySet = new RuntimeVisualSet(runtimeVisualExpectedKeys);
+  const runtimeVisualIsInstance = (constructor, value) => (
+    runtimeVisualFunctionHasInstance(constructor, value)
+  );
+  const runtimeVisualStyleValue = (style, property) => (
+    runtimeVisualStyleGetPropertyValue(style, property)
+  );
+  const runtimeVisualWhitespaceCode = (code) => (
+    code === 0x0009
+    || (code >= 0x000a && code <= 0x000d)
+    || code === 0x0020
+    || code === 0x00a0
+    || code === 0x1680
+    || (code >= 0x2000 && code <= 0x200a)
+    || code === 0x2028
+    || code === 0x2029
+    || code === 0x202f
+    || code === 0x205f
+    || code === 0x3000
+    || code === 0xfeff
+  );
+  const runtimeVisualNormalizeText = (value) => {
+    const source = RuntimeVisualString(value || "");
+    const values = [];
+    let pendingWhitespace = false;
+    for (let index = 0; index < source.length; index += 1) {
+      const code = runtimeVisualStringCharCodeAt(source, index);
+      if (runtimeVisualWhitespaceCode(code)) {
+        if (values.length) pendingWhitespace = true;
+        continue;
+      }
+      if (pendingWhitespace) runtimeVisualArrayPush(values, " ");
+      runtimeVisualArrayPush(values, runtimeVisualStringFromCharCode(code));
+      pendingWhitespace = false;
+    }
+    return runtimeVisualArrayJoin(values, "");
+  };
+  const runtimeVisualQueryElements = (selector) => {
+    const list = runtimeVisualDocumentQuerySelectorAll(document, selector);
+    const values = [];
+    const length = runtimeVisualNodeListLength(list);
+    for (let index = 0; index < length; index += 1) {
+      const value = runtimeVisualNodeListItem(list, index);
+      if (value) runtimeVisualArrayPush(values, value);
+    }
+    return values;
+  };
   let overlayFrame = 0;
   let layoutReportFrame = 0;
   let layoutReportTimer = 0;
@@ -2200,16 +2741,60 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
   let acceptsFollowerScroll = false;
   let projectionEpoch = 0;
   let projectionTransitioning = false;
+  let initialProjectionCommitted = false;
   let mirroringPanel = false;
   let mirroringAction = false;
   let currentState = { filter: "all", focus: "all", transparency: 18, scale: 1 };
-  const post = (type, extra = {}) => parent.postMessage({
+  const postToParent = parent.postMessage.bind(parent);
+  const runtimeVisualChannel = typeof MessageChannel === "function"
+    ? new MessageChannel()
+    : null;
+  const postRuntimeVisualPort = runtimeVisualChannel
+    ? runtimeVisualChannel.port1.postMessage.bind(runtimeVisualChannel.port1)
+    : null;
+  const stopImmediateMessagePropagation = Function.prototype.call.bind(
+    Event.prototype.stopImmediatePropagation,
+  );
+  let runtimeVisualChannelTransferred = false;
+  let runtimeVisualSnapshotBatch = null;
+  const post = (type, extra = {}) => postToParent({
     source: "pageroot-ai-review",
     sessionId,
     side,
     type,
     ...extra,
   }, "*");
+  const publishRuntimeVisualSnapshots = () => {
+    if (
+      !runtimeVisualChannelTransferred
+      || !postRuntimeVisualPort
+      || runtimeVisualSnapshotBatch === null
+    ) return;
+    postRuntimeVisualPort({
+      source: "pageroot-ai-review-runtime-visual",
+      sessionId,
+      side,
+      type: "runtime-visual-snapshots",
+      runtimeVisualSnapshots: runtimeVisualSnapshotBatch,
+    });
+  };
+  const transferRuntimeVisualChannel = (rawChallenge) => {
+    const challenge = String(rawChallenge || "");
+    if (!/^[a-f0-9]{32}$/u.test(challenge)) return;
+    if (!runtimeVisualChannel || runtimeVisualChannelTransferred) return;
+    runtimeVisualChannelTransferred = true;
+    postToParent({
+      source: "pageroot-ai-review",
+      sessionId,
+      side,
+      type: "runtime-visual-channel",
+      challenge,
+    }, "*", [runtimeVisualChannel.port2]);
+    publishRuntimeVisualSnapshots();
+    post("ready", {
+      height: Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight || 0),
+    });
+  };
   const clamp = (value, minimum, maximum) => Math.max(minimum, Math.min(maximum, value));
   const documentHeight = () => Math.max(
     document.documentElement.scrollHeight,
@@ -2221,6 +2806,712 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
       .map(safeKey)
       .filter(Boolean),
   )];
+  const runtimeVisualHostAttribute = ${JSON.stringify(REVIEW_RUNTIME_VISUAL_HOST_ATTRIBUTE)};
+  const runtimeVisualSourceBoxAttribute = ${JSON.stringify(REVIEW_RUNTIME_VISUAL_SOURCE_BOX_ATTRIBUTE)};
+  const runtimeVisualSourceBoxAttributes = ${JSON.stringify(REVIEW_RUNTIME_VISUAL_SOURCE_BOX_ATTRIBUTES)};
+  const runtimeVisualCandidateLimit = ${MAX_REVIEW_RUNTIME_VISUAL_CANDIDATES};
+  const runtimeVisualAtomLimit = 4096;
+  const runtimeVisualBatchAtomLimit = 8192;
+  const runtimeVisualBatchNodeLimit = 8192;
+  const runtimeVisualCanvasPixelLimit = 4194304;
+  const runtimeVisualValueLimit = 200000;
+  const runtimeVisualBatchValueLimit = 400000;
+  const runtimeVisualClaimedHosts = new RuntimeVisualMap();
+  let runtimeVisualHostClaimsValid = true;
+  const runtimeVisualClaimHost = (host, key) => {
+    if (
+      !runtimeVisualIsInstance(RuntimeVisualElement, host)
+      || !runtimeVisualSetHas(runtimeVisualExpectedKeySet, key)
+    ) return;
+    const claimed = runtimeVisualMapGet(runtimeVisualClaimedHosts, key);
+    if (claimed && claimed !== host) {
+      runtimeVisualHostClaimsValid = false;
+      return;
+    }
+    runtimeVisualMapSet(runtimeVisualClaimedHosts, key, host);
+  };
+  const runtimeVisualProcessHostClaimRecords = (records) => {
+    for (let recordIndex = 0; recordIndex < records.length; recordIndex += 1) {
+      const record = records[recordIndex];
+      const recordType = runtimeVisualMutationRecordType(record);
+      if (recordType === "childList") {
+        const addedNodes = runtimeVisualMutationRecordAddedNodes(record);
+        const addedNodeCount = runtimeVisualNodeListLength(addedNodes);
+        for (let nodeIndex = 0; nodeIndex < addedNodeCount; nodeIndex += 1) {
+          const node = runtimeVisualNodeListItem(addedNodes, nodeIndex);
+          if (!runtimeVisualIsInstance(RuntimeVisualElement, node)) continue;
+          runtimeVisualClaimHost(
+            node,
+            runtimeVisualElementGetAttribute(node, runtimeVisualHostAttribute) || "",
+          );
+        }
+        continue;
+      }
+      if (recordType !== "attributes") continue;
+      const target = runtimeVisualMutationRecordTarget(record);
+      runtimeVisualClaimHost(
+        target,
+        runtimeVisualMutationRecordOldValue(record) || "",
+      );
+      runtimeVisualClaimHost(
+        target,
+        runtimeVisualElementGetAttribute(target, runtimeVisualHostAttribute) || "",
+      );
+    }
+  };
+  const runtimeVisualHostClaimObserver = runtimeVisualExpectedKeys.length
+    ? new RuntimeVisualMutationObserver(runtimeVisualProcessHostClaimRecords)
+    : null;
+  if (runtimeVisualHostClaimObserver) {
+    runtimeVisualMutationObserverObserve(
+      runtimeVisualHostClaimObserver,
+      document.documentElement,
+      {
+        subtree: true,
+        childList: true,
+        attributes: true,
+        attributeFilter: [runtimeVisualHostAttribute],
+        attributeOldValue: true,
+      },
+    );
+  }
+  const runtimeVisualDrainHostClaims = () => {
+    if (!runtimeVisualHostClaimObserver) return;
+    runtimeVisualProcessHostClaimRecords(
+      runtimeVisualMutationObserverTakeRecords(runtimeVisualHostClaimObserver),
+    );
+  };
+  const runtimeVisualDelay = (milliseconds) => new RuntimeVisualPromise((resolve) => {
+    runtimeVisualSetTimeout(resolve, milliseconds);
+  });
+  const runtimeVisualFrames = () => new RuntimeVisualPromise((resolve) => {
+    runtimeVisualRequestAnimationFrame(() => runtimeVisualRequestAnimationFrame(resolve));
+  });
+  const runtimeVisualHex = (value) => runtimeVisualStringPadStart(
+    runtimeVisualNumberToString(value >>> 0, 16),
+    8,
+    "0",
+  );
+  const runtimeVisualDigest = (value) => {
+    const textValue = RuntimeVisualString(value || "");
+    let first = 2166136261;
+    let second = 2246822507;
+    let third = 3266489909;
+    let fourth = 668265263;
+    for (let index = 0; index < textValue.length; index += 1) {
+      const code = runtimeVisualStringCharCodeAt(textValue, index);
+      first = runtimeVisualMathImul(first ^ code, 16777619);
+      second = runtimeVisualMathImul(second ^ code, 3266489917);
+      third = runtimeVisualMathImul(third ^ code, 668265263);
+      fourth = runtimeVisualMathImul(fourth ^ code, 374761393);
+    }
+    return runtimeVisualHex(first)
+      + runtimeVisualHex(second)
+      + runtimeVisualHex(third)
+      + runtimeVisualHex(fourth)
+      + ":" + Math.max(1, textValue.length);
+  };
+  const runtimeVisualByteDigest = (bytes) => {
+    let first = 2166136261;
+    let second = 2246822507;
+    let third = 3266489909;
+    let fourth = 668265263;
+    for (let index = 0; index < bytes.length; index += 1) {
+      const value = bytes[index];
+      first = runtimeVisualMathImul(first ^ value, 16777619);
+      second = runtimeVisualMathImul(second ^ value, 3266489917);
+      third = runtimeVisualMathImul(third ^ value, 668265263);
+      fourth = runtimeVisualMathImul(fourth ^ value, 374761393);
+    }
+    return runtimeVisualHex(first)
+      + runtimeVisualHex(second)
+      + runtimeVisualHex(third)
+      + runtimeVisualHex(fourth)
+      + ":" + Math.max(1, bytes.length);
+  };
+  const runtimeVisualRounded = (value) => Math.round(Number(value || 0) * 2) / 2;
+  const runtimeVisualRect = (rect, hostRect) => [
+    runtimeVisualRounded(rect.left - hostRect.left),
+    runtimeVisualRounded(rect.top - hostRect.top),
+    runtimeVisualRounded(rect.width),
+    runtimeVisualRounded(rect.height),
+  ];
+  const runtimeVisualRectSignature = (rect, hostRect) => (
+    runtimeVisualArrayJoin(runtimeVisualRect(rect, hostRect), ",")
+  );
+  const runtimeVisualVisible = (element, host, visibilityCache) => {
+    if (!runtimeVisualIsInstance(RuntimeVisualElement, element)) return false;
+    let current = element;
+    let visible = true;
+    const uncached = [];
+    while (runtimeVisualIsInstance(RuntimeVisualElement, current)) {
+      if (runtimeVisualWeakMapHas(visibilityCache, current)) {
+        visible = runtimeVisualWeakMapGet(visibilityCache, current);
+        break;
+      }
+      runtimeVisualArrayPush(uncached, current);
+      const style = runtimeVisualGetComputedStyle(current);
+      if (
+        runtimeVisualStyleValue(style, "display") === "none"
+        || runtimeVisualStyleValue(style, "visibility") === "hidden"
+        || runtimeVisualStyleValue(style, "visibility") === "collapse"
+        || Number(runtimeVisualStyleValue(style, "opacity") || 1) <= 0
+      ) {
+        visible = false;
+        break;
+      }
+      if (current === host) break;
+      current = runtimeVisualNodeParentElement(current);
+    }
+    runtimeVisualArrayForEach(uncached, (item) => {
+      runtimeVisualWeakMapSet(visibilityCache, item, visible);
+    });
+    const rect = runtimeVisualElementGetBoundingClientRect(element);
+    return visible
+      && rect.width > 0
+      && rect.height > 0;
+  };
+  const runtimeVisualTransparent = (value) => (
+    !value
+    || value === "transparent"
+    || value === "rgba(0, 0, 0, 0)"
+    || value === "rgba(0,0,0,0)"
+  );
+  const runtimeVisualTextPaint = (style) => [
+    runtimeVisualStyleValue(style, "color"),
+    runtimeVisualStyleValue(style, "font-family"),
+    runtimeVisualStyleValue(style, "font-size"),
+    runtimeVisualStyleValue(style, "font-style"),
+    runtimeVisualStyleValue(style, "font-weight"),
+    runtimeVisualStyleValue(style, "line-height"),
+    runtimeVisualStyleValue(style, "letter-spacing"),
+    runtimeVisualStyleValue(style, "text-decoration-color"),
+    runtimeVisualStyleValue(style, "text-decoration-line"),
+    runtimeVisualStyleValue(style, "text-decoration-style"),
+    runtimeVisualStyleValue(style, "text-shadow"),
+  ];
+  const runtimeVisualTextPaintSignature = (style) => (
+    runtimeVisualArrayJoin(runtimeVisualTextPaint(style), "|")
+  );
+  const runtimeVisualBoxPaint = (style) => {
+    const borderVisible = runtimeVisualArraySome(
+      ["top", "right", "bottom", "left"],
+      (sideName) => (
+        parseFloat(
+          runtimeVisualStyleValue(style, "border-" + sideName + "-width") || "0",
+        ) > 0
+        && runtimeVisualStyleValue(style, "border-" + sideName + "-style") !== "none"
+        && !runtimeVisualTransparent(
+          runtimeVisualStyleValue(style, "border-" + sideName + "-color"),
+        )
+      ),
+    );
+    const backgroundImage = runtimeVisualStyleValue(style, "background-image");
+    const painted = !runtimeVisualTransparent(
+      runtimeVisualStyleValue(style, "background-color"),
+    )
+      || Boolean(backgroundImage && backgroundImage !== "none")
+      || borderVisible
+      || Boolean(
+        runtimeVisualStyleValue(style, "box-shadow")
+        && runtimeVisualStyleValue(style, "box-shadow") !== "none"
+      )
+      || Boolean(
+        runtimeVisualStyleValue(style, "filter")
+        && runtimeVisualStyleValue(style, "filter") !== "none"
+      )
+      || Number(runtimeVisualStyleValue(style, "opacity") || 1) < 1;
+    if (!painted) return "";
+    return runtimeVisualArrayJoin([
+      runtimeVisualStyleValue(style, "background-color"),
+      backgroundImage,
+      runtimeVisualStyleValue(style, "border-top-color"),
+      runtimeVisualStyleValue(style, "border-top-style"),
+      runtimeVisualStyleValue(style, "border-top-width"),
+      runtimeVisualStyleValue(style, "border-right-color"),
+      runtimeVisualStyleValue(style, "border-right-style"),
+      runtimeVisualStyleValue(style, "border-right-width"),
+      runtimeVisualStyleValue(style, "border-bottom-color"),
+      runtimeVisualStyleValue(style, "border-bottom-style"),
+      runtimeVisualStyleValue(style, "border-bottom-width"),
+      runtimeVisualStyleValue(style, "border-left-color"),
+      runtimeVisualStyleValue(style, "border-left-style"),
+      runtimeVisualStyleValue(style, "border-left-width"),
+      runtimeVisualStyleValue(style, "border-radius"),
+      runtimeVisualStyleValue(style, "box-shadow"),
+      runtimeVisualStyleValue(style, "filter"),
+      runtimeVisualStyleValue(style, "opacity"),
+    ], "|");
+  };
+  const runtimeVisualPush = (capture, channel, value) => {
+    const normalized = RuntimeVisualString(value || "");
+    capture.valueLength += normalized.length;
+    capture.budget.atoms += 1;
+    capture.budget.valueLength += normalized.length;
+    if (
+      capture[channel].length >= runtimeVisualAtomLimit
+      || capture.valueLength > runtimeVisualValueLimit
+      || capture.budget.atoms > runtimeVisualBatchAtomLimit
+      || capture.budget.valueLength > runtimeVisualBatchValueLimit
+    ) throw new Error("runtime-visual-budget");
+    runtimeVisualArrayPush(capture[channel], normalized);
+  };
+  const runtimeVisualCanvas = (canvas, capture, displayRect, includeDisplaySize) => {
+    const width = Math.max(0, Math.round(Number(runtimeVisualCanvasWidth(canvas) || 0)));
+    const height = Math.max(0, Math.round(Number(runtimeVisualCanvasHeight(canvas) || 0)));
+    const pixels = width * height;
+    if (!pixels || pixels > runtimeVisualCanvasPixelLimit) {
+      throw new Error("runtime-visual-canvas-size");
+    }
+    if (capture.budget.canvasPixels + pixels > runtimeVisualCanvasPixelLimit) {
+      throw new Error("runtime-visual-canvas-batch");
+    }
+    capture.budget.canvasPixels += pixels;
+    let value = "";
+    const context = runtimeVisualCanvasGetContext(
+      canvas,
+      "2d",
+      { willReadFrequently: true },
+    );
+    if (context) {
+      value = runtimeVisualByteDigest(
+        runtimeVisualImageData(
+          runtimeVisualContextGetImageData(context, 0, 0, width, height),
+        ),
+      );
+    } else {
+      const dataUrl = runtimeVisualCanvasToDataUrl(canvas, "image/png");
+      if (!dataUrl || dataUrl.length > 24000000) throw new Error("runtime-visual-canvas-data");
+      value = runtimeVisualDigest(dataUrl);
+    }
+    capture.canvasPixels += pixels;
+    if (capture.canvasPixels > runtimeVisualCanvasPixelLimit) {
+      throw new Error("runtime-visual-canvas-total");
+    }
+    runtimeVisualPush(capture, "canvas", width + "x" + height
+      + (includeDisplaySize
+        ? "|display=" + runtimeVisualRounded(displayRect.width)
+          + "x" + runtimeVisualRounded(displayRect.height)
+        : "")
+      + "|" + value);
+  };
+  const runtimeVisualVectorAttributes = [
+    "d", "points", "x", "y", "x1", "y1", "x2", "y2", "cx", "cy",
+    "r", "rx", "ry", "width", "height", "viewBox", "transform",
+  ];
+  const captureRuntimeVisualHost = (host, budget) => {
+    try {
+      if (!runtimeVisualIsInstance(RuntimeVisualElement, host)) return null;
+      const hostRect = runtimeVisualElementGetBoundingClientRect(host);
+      const sourceBoxSignature = runtimeVisualElementGetAttribute(
+        host,
+        runtimeVisualSourceBoxAttribute,
+      );
+      const currentBoxSignature = runtimeVisualStringify(runtimeVisualArrayMap(
+        runtimeVisualSourceBoxAttributes,
+        (attribute) => [attribute, runtimeVisualElementGetAttribute(host, attribute)],
+      ));
+      const hostBoxMutated = sourceBoxSignature !== null
+        && sourceBoxSignature !== currentBoxSignature;
+      const hostStyle = runtimeVisualGetComputedStyle(host);
+      const hostFullyTransparent = runtimeVisualStyleValue(hostStyle, "display") !== "none"
+        && runtimeVisualStyleValue(hostStyle, "visibility") !== "hidden"
+        && runtimeVisualStyleValue(hostStyle, "visibility") !== "collapse"
+        && Number(runtimeVisualStyleValue(hostStyle, "opacity") || 1) <= 0
+        && hostRect.width > 0
+        && hostRect.height > 0;
+      const capture = {
+        content: [],
+        paint: [],
+        geometry: [],
+        vector: [],
+        canvas: [],
+        canvasPixels: 0,
+        valueLength: 0,
+        budget,
+      };
+      const runtimeVisualVisibilityCache = new RuntimeVisualWeakMap();
+      const descendants = [host];
+      let hostOwnPaint = false;
+      budget.nodes += 1;
+      if (!hostFullyTransparent && !runtimeVisualElementMatches(host, "canvas")) {
+        const elementWalker = runtimeVisualDocumentCreateTreeWalker(
+          document,
+          host,
+          NodeFilter.SHOW_ELEMENT,
+        );
+        let descendant = runtimeVisualTreeWalkerNextNode(elementWalker);
+        while (descendant) {
+          budget.nodes += 1;
+          if (budget.nodes > runtimeVisualBatchNodeLimit) return null;
+          if (!runtimeVisualElementClosest(descendant,
+            "[data-pageroot-review-projection-layer], [data-pageroot-review-transition-mask]",
+          )) runtimeVisualArrayPush(descendants, descendant);
+          if (descendants.length > runtimeVisualAtomLimit) return null;
+          descendant = runtimeVisualTreeWalkerNextNode(elementWalker);
+        }
+      }
+      if (budget.nodes > runtimeVisualBatchNodeLimit) return null;
+      runtimeVisualArrayForEach(descendants, (element) => {
+        if (element === host && hostFullyTransparent) {
+          hostOwnPaint = true;
+          runtimeVisualPush(capture, "paint", "host-box|opacity=0");
+          return;
+        }
+        if (runtimeVisualIsInstance(RuntimeVisualCanvasElement, element)) {
+          if (!runtimeVisualVisible(
+            element,
+            host,
+            runtimeVisualVisibilityCache,
+          )) return;
+          const canvasStyle = runtimeVisualGetComputedStyle(element);
+          const canvasRect = runtimeVisualElementGetBoundingClientRect(element);
+          runtimeVisualCanvas(element, capture, canvasRect, hostBoxMutated);
+          const canvasPaint = runtimeVisualBoxPaint(canvasStyle);
+          if (canvasPaint) {
+            if (element === host) hostOwnPaint = true;
+            runtimeVisualPush(capture, "paint", "host-box|" + canvasPaint
+              + (hostBoxMutated
+                ? "|size=" + runtimeVisualRounded(canvasRect.width)
+                  + "x" + runtimeVisualRounded(canvasRect.height)
+                : ""));
+            if (hostBoxMutated) {
+              runtimeVisualPush(
+                capture,
+                "geometry",
+                "box|" + runtimeVisualRectSignature(canvasRect, hostRect),
+              );
+            }
+          }
+          return;
+        }
+        const style = runtimeVisualGetComputedStyle(element);
+        const rect = runtimeVisualElementGetBoundingClientRect(element);
+        const elementTagName = runtimeVisualElementTagName(element);
+        const isVector = runtimeVisualIsInstance(RuntimeVisualSvgElement, element)
+          && !runtimeVisualArrayIncludes(
+            ["svg", "defs", "desc", "metadata", "title"],
+            elementTagName.toLowerCase(),
+          );
+        if (isVector) {
+          if (!runtimeVisualVisible(
+            element,
+            host,
+            runtimeVisualVisibilityCache,
+          )) return;
+          const attributes = runtimeVisualArrayJoin(runtimeVisualArrayMap(
+            runtimeVisualVectorAttributes,
+            (name) => name + "=" + (runtimeVisualElementGetAttribute(element, name) || ""),
+          ), "|");
+          runtimeVisualPush(capture, "vector", runtimeVisualArrayJoin([
+            elementTagName.toLowerCase(),
+            attributes,
+            runtimeVisualStyleValue(style, "fill"),
+            runtimeVisualStyleValue(style, "fill-opacity"),
+            runtimeVisualStyleValue(style, "stroke"),
+            runtimeVisualStyleValue(style, "stroke-opacity"),
+            runtimeVisualStyleValue(style, "stroke-width"),
+            runtimeVisualStyleValue(style, "opacity"),
+          ], "|"));
+          runtimeVisualPush(
+            capture,
+            "geometry",
+            "vector|" + runtimeVisualRectSignature(rect, hostRect),
+          );
+          return;
+        }
+        if (!runtimeVisualVisible(
+          element,
+          host,
+          runtimeVisualVisibilityCache,
+        )) return;
+        if (runtimeVisualArrayIncludes(
+          ["IMG", "PICTURE", "PROGRESS", "METER", "VIDEO"],
+          elementTagName,
+        )) {
+          runtimeVisualPush(capture, "content", runtimeVisualArrayJoin([
+            elementTagName,
+            runtimeVisualElementGetAttribute(element, "src") || "",
+            runtimeVisualElementGetAttribute(element, "srcset") || "",
+            runtimeVisualElementGetAttribute(element, "value") || "",
+            runtimeVisualElementGetAttribute(element, "max") || "",
+          ], "|"));
+          runtimeVisualPush(
+            capture,
+            "geometry",
+            "media|" + runtimeVisualRectSignature(rect, hostRect),
+          );
+        }
+        const boxPaint = runtimeVisualBoxPaint(style);
+        if (boxPaint) {
+          const ownsPaint = element === host;
+          if (ownsPaint) hostOwnPaint = true;
+          runtimeVisualPush(capture, "paint", (ownsPaint ? "host-box|" : "box|")
+            + boxPaint
+            + (ownsPaint && hostBoxMutated
+              ? "|size=" + runtimeVisualRounded(rect.width)
+                + "x" + runtimeVisualRounded(rect.height)
+              : ""));
+          if (!ownsPaint || hostBoxMutated) {
+            runtimeVisualPush(
+              capture,
+              "geometry",
+              "box|" + runtimeVisualRectSignature(rect, hostRect),
+            );
+          }
+        }
+      });
+
+      const walker = runtimeVisualDocumentCreateTreeWalker(
+        document,
+        host,
+        NodeFilter.SHOW_TEXT,
+      );
+      let textNode = runtimeVisualTreeWalkerNextNode(walker);
+      let textNodes = 0;
+      while (textNode && !hostFullyTransparent) {
+        textNodes += 1;
+        budget.nodes += 1;
+        if (
+          textNodes > runtimeVisualAtomLimit
+          || budget.nodes > runtimeVisualBatchNodeLimit
+        ) return null;
+        const parentElement = runtimeVisualNodeParentElement(textNode);
+        const text = runtimeVisualNormalizeText(
+          runtimeVisualNodeTextContent(textNode) || "",
+        );
+        if (
+          text
+          && parentElement
+          && !runtimeVisualElementClosest(
+            parentElement,
+            "script, style, noscript, template",
+          )
+          && runtimeVisualVisible(
+            parentElement,
+            host,
+            runtimeVisualVisibilityCache,
+          )
+        ) {
+          const range = runtimeVisualDocumentCreateRange(document);
+          runtimeVisualRangeSelectNodeContents(range, textNode);
+          const rawRects = runtimeVisualRangeGetClientRects(range);
+          const rects = [];
+          const rectCount = runtimeVisualDomRectListLength(rawRects);
+          for (let rectIndex = 0; rectIndex < rectCount; rectIndex += 1) {
+            const textRect = runtimeVisualDomRectListItem(rawRects, rectIndex);
+            if (textRect && textRect.width > 0 && textRect.height > 0) {
+              runtimeVisualArrayPush(rects, textRect);
+            }
+          }
+          runtimeVisualRangeDetach(range);
+          if (rects.length) {
+            runtimeVisualPush(capture, "content", "text|" + text);
+            runtimeVisualPush(
+              capture,
+              "paint",
+              "text|" + runtimeVisualTextPaintSignature(
+                runtimeVisualGetComputedStyle(parentElement),
+              ),
+            );
+            runtimeVisualArrayForEach(rects, (rect) => runtimeVisualPush(
+              capture,
+              "geometry",
+              "text|" + runtimeVisualRectSignature(rect, hostRect),
+            ));
+          }
+        }
+        textNode = runtimeVisualTreeWalkerNextNode(walker);
+      }
+
+      const specialRuntimeContent = runtimeVisualElementMatches(host, "canvas, svg, tbody")
+        || Boolean(runtimeVisualElementQuerySelector(
+          host,
+          "canvas, svg, table, tbody, progress, meter",
+        ));
+      const chartLike = capture.canvasPixels > 0
+        || capture.vector.length > 0
+        || hostOwnPaint
+        || (specialRuntimeContent && (
+          capture.content.length + capture.paint.length + capture.geometry.length > 0
+        ))
+        || capture.paint.length >= 2
+        || capture.content.length >= 2
+        || (capture.paint.length >= 1 && capture.content.length >= 1);
+      if (!chartLike) {
+        return {
+          key: runtimeVisualElementGetAttribute(host, runtimeVisualHostAttribute) || "",
+          state: "empty",
+          contentSignature: "",
+          paintSignature: "",
+          geometrySignature: "",
+          vectorSignature: "",
+          canvasSignature: "",
+          contentAtoms: 0,
+          paintAtoms: 0,
+          geometryAtoms: 0,
+          vectorAtoms: 0,
+          canvasPixels: 0,
+        };
+      }
+      const channelSignature = (values) => values.length
+        ? runtimeVisualDigest(runtimeVisualArrayJoin(values, "\u001f"))
+        : "";
+      return {
+        key: runtimeVisualElementGetAttribute(host, runtimeVisualHostAttribute) || "",
+        state: "stable",
+        contentSignature: channelSignature(capture.content),
+        paintSignature: channelSignature(capture.paint),
+        geometrySignature: channelSignature(capture.geometry),
+        vectorSignature: channelSignature(capture.vector),
+        canvasSignature: channelSignature(capture.canvas),
+        contentAtoms: capture.content.length,
+        paintAtoms: capture.paint.length,
+        geometryAtoms: capture.geometry.length,
+        vectorAtoms: capture.vector.length,
+        canvasPixels: capture.canvasPixels,
+      };
+    } catch {
+      return null;
+    }
+  };
+  const runtimeVisualExpectedHosts = () => {
+    if (runtimeVisualExpectedKeys.length > runtimeVisualCandidateLimit) return null;
+    if (!runtimeVisualExpectedKeys.length) return [];
+    runtimeVisualDrainHostClaims();
+    if (!runtimeVisualHostClaimsValid) return null;
+    const discovered = runtimeVisualQueryElements(
+      "[" + runtimeVisualHostAttribute + "]",
+    );
+    const hostsByKey = new RuntimeVisualMap();
+    let matchedHosts = 0;
+    runtimeVisualArrayForEach(discovered, (host) => {
+      const key = runtimeVisualElementGetAttribute(host, runtimeVisualHostAttribute) || "";
+      if (!runtimeVisualSetHas(runtimeVisualExpectedKeySet, key)) return;
+      if (runtimeVisualMapHas(hostsByKey, key)) {
+        matchedHosts = runtimeVisualExpectedKeys.length + 1;
+        return;
+      }
+      runtimeVisualMapSet(hostsByKey, key, host);
+      matchedHosts += 1;
+    });
+    if (matchedHosts !== runtimeVisualExpectedKeys.length) return null;
+    const orderedHosts = [];
+    runtimeVisualArrayForEach(runtimeVisualExpectedKeys, (key) => {
+      const host = runtimeVisualMapGet(hostsByKey, key);
+      const claimedHost = runtimeVisualMapGet(runtimeVisualClaimedHosts, key);
+      if (host && claimedHost === host) runtimeVisualArrayPush(orderedHosts, host);
+    });
+    return orderedHosts.length === runtimeVisualExpectedKeys.length
+      ? orderedHosts
+      : null;
+  };
+  const runtimeVisualHostsMatch = (expected, current) => {
+    if (current === null || expected.length !== current.length) return false;
+    for (let index = 0; index < expected.length; index += 1) {
+      if (expected[index] !== current[index]) return false;
+    }
+    return true;
+  };
+  const collectRuntimeVisualSnapshots = async () => {
+    const hosts = runtimeVisualExpectedHosts();
+    if (hosts === null) return null;
+    if (!hosts.length) return [];
+    await runtimeVisualPromiseThen(runtimeVisualPromiseRace([
+      document.fonts?.ready || runtimeVisualPromiseResolve(),
+      runtimeVisualDelay(120),
+    ]), () => undefined, () => undefined);
+    await runtimeVisualDelay(24);
+    await runtimeVisualFrames();
+    if (!runtimeVisualHostsMatch(hosts, runtimeVisualExpectedHosts())) return null;
+    const firstBudget = { atoms: 0, nodes: 0, valueLength: 0, canvasPixels: 0 };
+    const first = new RuntimeVisualMap();
+    for (let hostIndex = 0; hostIndex < hosts.length; hostIndex += 1) {
+      const host = hosts[hostIndex];
+      const expectedKey = runtimeVisualElementGetAttribute(
+        host,
+        runtimeVisualHostAttribute,
+      ) || "";
+      const snapshot = captureRuntimeVisualHost(host, firstBudget);
+      if (!snapshot || snapshot.key !== expectedKey) return null;
+      runtimeVisualMapSet(first, expectedKey, snapshot);
+    }
+    await runtimeVisualDelay(64);
+    await runtimeVisualFrames();
+    if (!runtimeVisualHostsMatch(hosts, runtimeVisualExpectedHosts())) return null;
+    const secondBudget = { atoms: 0, nodes: 0, valueLength: 0, canvasPixels: 0 };
+    const snapshots = [];
+    for (let hostIndex = 0; hostIndex < hosts.length; hostIndex += 1) {
+      const host = hosts[hostIndex];
+      const key = runtimeVisualElementGetAttribute(host, runtimeVisualHostAttribute) || "";
+      if (!runtimeVisualSetHas(runtimeVisualExpectedKeySet, key)) return null;
+      const firstSnapshot = runtimeVisualMapGet(first, key);
+      const secondSnapshot = captureRuntimeVisualHost(host, secondBudget);
+      if (!firstSnapshot || !secondSnapshot || secondSnapshot.key !== key) return null;
+      if (runtimeVisualStringify(firstSnapshot) !== runtimeVisualStringify(secondSnapshot)) {
+        return null;
+      }
+      runtimeVisualArrayPush(snapshots, secondSnapshot);
+    }
+    return snapshots;
+  };
+  const applyRuntimeVisualChanges = (rawMarkers) => {
+    runtimeVisualArrayForEach(runtimeVisualQueryElements(
+      '[data-pageroot-review-runtime-marker="true"]',
+    ), (element) => {
+      runtimeVisualElementRemoveAttribute(element, "data-pageroot-review-runtime-marker");
+      runtimeVisualElementRemoveAttribute(element, "data-pageroot-review-marker");
+      runtimeVisualElementRemoveAttribute(element, "data-pageroot-review-marker-types");
+      runtimeVisualElementRemoveAttribute(element, "data-pageroot-review-summary");
+      runtimeVisualElementRemoveAttribute(element, "data-pageroot-review-style-scope");
+      runtimeVisualElementRemoveAttribute(element, "data-pageroot-review-style-owner");
+    });
+    const hosts = runtimeVisualExpectedHosts();
+    const hostsByKey = new RuntimeVisualMap();
+    runtimeVisualArrayForEach(hosts || [], (host) => {
+      runtimeVisualMapSet(
+        hostsByKey,
+        runtimeVisualElementGetAttribute(host, runtimeVisualHostAttribute) || "",
+        host,
+      );
+    });
+    const markers = hosts
+      && runtimeVisualArrayIsArray(rawMarkers)
+      && rawMarkers.length <= hosts.length
+      ? rawMarkers
+      : [];
+    const normalized = [];
+    const seen = new RuntimeVisualSet();
+    for (let markerIndex = 0; markerIndex < markers.length; markerIndex += 1) {
+      const marker = markers[markerIndex];
+      const key = safeKey(marker?.key);
+      const changeId = safeKey(marker?.changeId);
+      if (
+        !key
+        || !changeId
+        || runtimeVisualSetHas(seen, key)
+        || !runtimeVisualMapHas(hostsByKey, key)
+      ) {
+        normalized.length = 0;
+        break;
+      }
+      runtimeVisualSetAdd(seen, key);
+      runtimeVisualArrayPush(normalized, { key, changeId });
+    }
+    runtimeVisualArrayForEach(normalized, ({ key, changeId }) => {
+      const host = runtimeVisualMapGet(hostsByKey, key);
+      runtimeVisualElementSetAttribute(host, "data-pageroot-review-runtime-marker", "true");
+      runtimeVisualElementSetAttribute(host, "data-pageroot-review-marker", changeId);
+      runtimeVisualElementSetAttribute(host, "data-pageroot-review-marker-types", "style");
+      runtimeVisualElementSetAttribute(host, "data-pageroot-review-summary", "视觉调整");
+      runtimeVisualElementSetAttribute(host, "data-pageroot-review-style-scope", "box");
+      runtimeVisualElementSetAttribute(host, "data-pageroot-review-style-owner", "runtime-" + key);
+      runtimeVisualElementSetAttribute(host, "data-pageroot-review-active", "false");
+    });
+    initialProjectionCommitted = true;
+    scheduleOverlayRender();
+    scheduleLayoutReport(true);
+  };
   const isSafePanelControl = (element) => element instanceof Element && element.matches(
     '[data-pageroot-review-panel-control="true"]',
   );
@@ -2238,7 +3529,7 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
     candidate.getAttribute("data-pageroot-review-action-key") === actionKey
   )) || null;
   const scheduleOverlayRender = () => {
-    if (projectionTransitioning) return;
+    if (projectionTransitioning || !initialProjectionCommitted) return;
     cancelAnimationFrame(overlayFrame);
     overlayFrame = requestAnimationFrame(renderReviewOverlays);
   };
@@ -3138,8 +4429,22 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
   };
   addEventListener("message", (event) => {
     const message = event.data;
-    if (!message || message.source !== "pageroot-ai-review-parent" || message.sessionId !== sessionId) return;
+    if (
+      !event.isTrusted
+      || event.source !== parent
+      || !message
+      || message.source !== "pageroot-ai-review-parent"
+      || message.sessionId !== sessionId
+    ) return;
+    if (message.type === "request-runtime-visual-channel") {
+      stopImmediateMessagePropagation(event);
+      transferRuntimeVisualChannel(message.challenge);
+      return;
+    }
     if (message.type === "state") applyState(message.state || {});
+    if (message.type === "apply-runtime-visual-changes") {
+      applyRuntimeVisualChanges(message.markers);
+    }
     if (message.type === "scroll-owner") applyScrollOwner(message);
     if (message.type === "set-scroll-position") applyScrollPosition(message);
     if (message.type === "begin-presentation") beginProjectionTransition(message.presentationEpoch);
@@ -3160,7 +4465,7 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
       const target = document.querySelector('[data-pageroot-outline-id="' + outlineId + '"]');
       focusTarget(target, message.panelPath?.length ? message.panelPath : message.panelKey);
     }
-  });
+  }, true);
   addEventListener("click", (event) => {
     post("interaction");
     const action = event.target instanceof Element
@@ -3300,17 +4605,28 @@ function reviewBootstrap(sessionId: string, side: ReviewSide): string {
   const announceReady = () => post("ready", {
     height: Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight || 0),
   });
-  const ready = () => {
+  const ready = async () => {
+    const runtimeVisualSnapshots = await runtimeVisualPromiseThen(
+      collectRuntimeVisualSnapshots(),
+      (snapshots) => snapshots,
+      () => null,
+    );
+    if (runtimeVisualSnapshots !== null) {
+      runtimeVisualSnapshotBatch = runtimeVisualSnapshots;
+      publishRuntimeVisualSnapshots();
+    }
     announceReady();
-    scheduleOverlayRender();
     scheduleLayoutReport(true);
     document.fonts?.ready?.then(() => {
       scheduleOverlayRender();
       scheduleLayoutReport();
     }).catch(() => {});
   };
-  if (document.readyState === "loading") addEventListener("DOMContentLoaded", ready, { once: true });
-  else ready();
+  if (document.readyState === "loading") {
+    addEventListener("DOMContentLoaded", () => { void ready(); }, { once: true });
+  } else {
+    void ready();
+  }
 })();
 `;
 }
@@ -3321,6 +4637,7 @@ function prepareDocument(
   sessionId: string,
   sourcePath?: string,
   externalBootstrap = false,
+  runtimeVisualCandidateKeys: readonly string[] = [],
 ): { html: string; bootstrapJavaScript: string } {
   document.querySelectorAll("meta[http-equiv]").forEach((element) => {
     const directive = (element.getAttribute("http-equiv") || "").trim().toLowerCase();
@@ -3347,7 +4664,11 @@ function prepareDocument(
 
   const bootstrap = document.createElement("script");
   bootstrap.setAttribute(REVIEW_BOOTSTRAP_ATTRIBUTE, "true");
-  const bootstrapJavaScript = reviewBootstrap(sessionId, side);
+  const bootstrapJavaScript = reviewBootstrap(
+    sessionId,
+    side,
+    runtimeVisualCandidateKeys,
+  );
   if (externalBootstrap) {
     bootstrap.src = REVIEW_BOOTSTRAP_PATH;
   } else {
@@ -3389,6 +4710,7 @@ export function buildReviewDocuments(
       },
       changes: [],
       outline: [],
+      runtimeVisualCandidates: [],
       commentGroups: [],
     };
   }
@@ -3419,6 +4741,7 @@ export function buildReviewDocuments(
   );
   const changes: ReviewChange[] = [];
   const outline: ReviewOutlineItem[] = [];
+  const runtimeSections: ReviewRuntimeSectionContext[] = [];
 
   pairs.forEach((pair, pairIndex) => {
     const outlineId = `outline-${outline.length + 1}`;
@@ -3436,6 +4759,14 @@ export function buildReviewDocuments(
       ? panelPathForElement(pair.after)
       : panelPathForElement(pair.before);
     const panelKey = panelPath.at(-1);
+    runtimeSections.push({
+      pair,
+      outlineId,
+      ...(changeId ? { changeId } : {}),
+      label,
+      ...(panelKey ? { panelKey } : {}),
+      panelPath,
+    });
     [pair.before, pair.after].forEach((element) => {
       if (!element) return;
       element.setAttribute("data-pageroot-outline-id", outlineId);
@@ -3474,12 +4805,22 @@ export function buildReviewDocuments(
     });
   });
 
+  const runtimeVisualCandidates = options.externalBootstrap
+    ? annotateRuntimeVisualCandidates(
+        beforeDocument,
+        afterDocument,
+        runtimeSections,
+      )
+    : [];
+  const runtimeVisualCandidateKeys = runtimeVisualCandidates.map(({ key }) => key);
+
   const preparedBefore = prepareDocument(
     beforeDocument,
     "before",
     options.sessionId,
     options.sourcePath,
     options.externalBootstrap,
+    runtimeVisualCandidateKeys,
   );
   const preparedAfter = prepareDocument(
     afterDocument,
@@ -3487,6 +4828,7 @@ export function buildReviewDocuments(
     options.sessionId,
     options.sourcePath,
     options.externalBootstrap,
+    runtimeVisualCandidateKeys,
   );
   return {
     before: preparedBefore.html,
@@ -3497,6 +4839,7 @@ export function buildReviewDocuments(
     },
     changes,
     outline,
+    runtimeVisualCandidates,
     commentGroups,
   };
 }
