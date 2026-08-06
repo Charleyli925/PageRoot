@@ -4,6 +4,12 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+- Bring the review-first AI workflow into the public README, built-in welcome
+  project, About dialog and first-open guide. The new user-facing story shows
+  before and after side by side, explains copy, structure and visual change
+  labels in plain language, and makes clear that users choose which version to
+  open after reviewing; no AI result silently replaces the current HTML.
+
 ## [0.9.6] - 2026-08-06
 
 - Stop Canvas text undo/redo from blanking and jumping the page. Bridge-verified

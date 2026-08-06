@@ -255,7 +255,9 @@ export default function AboutPageRootDialog({
             <p id="about-pageroot-description">
               源码级本地 HTML 编辑器。
               <br />
-              所见即可改，AI Agent 无缝接力，源码始终是真相。
+              所见即可改，AI Agent 无缝接力。
+              <br />
+              修改前后对照审阅，再由你决定打开。
             </p>
           </div>
         </header>

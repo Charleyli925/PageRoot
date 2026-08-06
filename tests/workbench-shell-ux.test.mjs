@@ -71,11 +71,27 @@ test("startup welcome HTML is provisioned as a normal registered project", () =>
   assert.match(sampleHtml, /顺畅的文本编辑/);
   assert.match(sampleHtml, /指哪改哪的局部修改/);
   assert.match(sampleHtml, /AI Agent 拿到完整上下文/);
-  assert.match(sampleHtml, /AI Agent 结果安全接回/);
-  assert.match(sampleHtml, /Claude Code · Codex · WorkBuddy · Qoder/);
-  assert.match(sampleHtml, /无需复制整页 HTML 或重新描述位置/);
+  assert.match(sampleHtml, /看清变化，再决定采用/);
+  assert.match(sampleHtml, /REVIEW BEFORE ADOPT/);
+  assert.match(sampleHtml, /AI 改完，不用凭感觉验收/);
+  assert.match(sampleHtml, /不同变化分类标出，不用逐行找代码/);
+  assert.match(sampleHtml, /双页同步查看，原评论仍留在原位置/);
   assert.match(sampleHtml, /交给你正在使用的 AI Agent/);
-  assert.match(sampleHtml, /校验后生成独立新版本/);
+  assert.match(sampleHtml, /逐处审阅，再决定打开哪一版/);
+  assert.match(sampleHtml, /class="review-showcase"/);
+  assert.match(sampleHtml, /修改前与 AI 修改后的双页审阅示意/);
+  assert.match(sampleHtml, /文案、结构、视觉变化分开查看/);
+  assert.match(sampleHtml, /class="review-frame removed"/);
+  assert.match(sampleHtml, /class="review-frame added"/);
+  assert.match(sampleHtml, /class="review-comment">评/);
+  assert.match(sampleHtml, /--review-red: #d14b44/);
+  assert.match(sampleHtml, /--review-green: #239b56/);
+  assert.match(sampleHtml, /--review-blue: #1677c8/);
+  assert.match(sampleHtml, /--review-violet: #6d5ce7/);
+  assert.match(
+    sampleHtml,
+    /@media \(max-width: 520px\)[\s\S]*?\.review-pages \{ grid-template-columns: 1fr; \}/,
+  );
   assert.match(
     sampleHtml,
     /WELCOME_LOGO_RELATIVE_PATH = "brand-logo\.png"/,
@@ -84,8 +100,8 @@ test("startup welcome HTML is provisioned as a normal registered project", () =>
     sampleHtml,
     /src="\.\/\$\{WELCOME_LOGO_RELATIVE_PATH\}"/,
   );
-  assert.match(sampleHtml, /这张欢迎页本身，就是一次完整的 AI Agent 协作入口/);
-  assert.match(sampleHtml, /双击即可直接编辑，也可以选中内容添加评论/);
+  assert.match(sampleHtml, /这张欢迎页本身，就是一次完整的 AI Agent 协作与审阅入口/);
+  assert.match(sampleHtml, /点击“审阅对比”即可从这张页面体验修改前后对照/);
   assert.match(sampleHtml, /从顶部「项目」打开其他 HTML/);
   assert.doesNotMatch(sampleHtml, /尚未绑定本地文件/);
   assert.doesNotMatch(sampleHtml, /利率拐点前的仓位选择|美国 10 年期|市场策略周报/);
