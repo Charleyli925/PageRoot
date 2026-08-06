@@ -134,9 +134,9 @@ source analyzer must first prove a unique source-empty host pair, a relevant
 changed authored script that directly references the host's distinctive
 identity, and absence of an existing static footprint over that host. Merely
 placing another changed script in the same section is never causal evidence.
-The trusted first bootstrap must bind the DOM/style/Canvas collection entry
-points before authored scripts run, receive the exact declared candidate-key
-list from frozen analysis and record the parser-created element that first
+The trusted first bootstrap must bind the DOM/style/Canvas collection and
+string-normalization/digest entry points before authored scripts run, receive
+the exact declared candidate-key list from frozen analysis and record the parser-created element that first
 claims each key. Undeclared host attributes have no authority. A missing,
 duplicate, transferred or replaced declared key, key/element drift during
 either sample, or any capture failure invalidates the complete runtime batch

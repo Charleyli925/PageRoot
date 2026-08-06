@@ -153,8 +153,9 @@ registered frame. Runtime-chart snapshot messages are additionally limited to
 host keys declared by the frozen source analyzer, bounded atom/signature counts
 and one accepted batch per side. Ordinary frame `ready` messages never carry
 runtime evidence. The trusted bootstrap creates a `MessageChannel` and binds
-the DOM traversal, attribute, layout, computed-style and Canvas primitives used
-for evidence before any authored script runs. An early observer records the
+the DOM traversal, attribute, layout, computed-style, Canvas, and string
+normalization/digest primitives used for evidence before any authored script
+runs. An early observer records the
 parser-created element that first claims every frozen candidate key. Snapshot
 discovery accepts only that exact key/element set: undeclared attributes are
 ignored, while a missing, duplicate, transferred or replaced declared host,

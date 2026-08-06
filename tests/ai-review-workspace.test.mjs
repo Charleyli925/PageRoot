@@ -393,6 +393,14 @@ test("runtime chart review supplements only the initial bounded static footprint
     /runtimeVisualStringify\(firstSnapshot\) === runtimeVisualStringify\(secondSnapshot\)/,
   );
   assert.match(reviewDocument, /runtimeVisualExpectedKeys = Object\.freeze/);
+  assert.match(reviewDocument, /const RuntimeVisualString = String;/);
+  assert.match(reviewDocument, /runtimeVisualStringCharCodeAt/);
+  assert.match(reviewDocument, /runtimeVisualStringPadStart/);
+  assert.match(reviewDocument, /const runtimeVisualNormalizeText = \(value\) =>/);
+  assert.match(
+    reviewDocument,
+    /const text = runtimeVisualNormalizeText\(\s*runtimeVisualNodeTextContent\(textNode\) \|\| "",\s*\);/,
+  );
   assert.match(reviewDocument, /runtimeVisualDocumentQuerySelectorAll/);
   assert.match(reviewDocument, /runtimeVisualGetComputedStyle = getComputedStyle\.bind\(window\)/);
   assert.match(reviewDocument, /const hosts = runtimeVisualExpectedHosts\(\)/);

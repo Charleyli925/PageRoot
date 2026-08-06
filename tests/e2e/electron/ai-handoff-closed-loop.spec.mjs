@@ -525,6 +525,7 @@ test("a verified AI result stays pending through desktop review until the user a
       <style>@keyframes review-runtime-unstable-motion { from { transform: translateX(0); } to { transform: translateX(80px); } }</style>
       <img alt="" hidden data-review-runtime-slow-load>
       <div id="review-runtime-html-chart" class="review-runtime-chart-host"></div>
+      <div id="review-runtime-text-chart" class="review-runtime-chart-host"></div>
       <svg id="review-runtime-svg-chart" class="review-runtime-chart-host" viewBox="0 0 320 96" width="320" height="96"></svg>
       <canvas id="review-runtime-canvas-chart" class="review-runtime-chart-host" width="320" height="96"></canvas>
       <div id="review-runtime-host-paint-chart" class="review-runtime-chart-host"></div>
@@ -616,6 +617,10 @@ test("a verified AI result stays pending through desktop review until the user a
         + '</span><i style="display:block;height:18px;width:'
         + runtimeHtmlWidth
         + ';background:#9b8cf0"></i></div>';
+      const runtimeTextChart = document.querySelector("#review-runtime-text-chart");
+      runtimeTextChart.innerHTML = '<span>运行态文本 '
+        + (runtimeReviewChartVariant === "before" ? "旧值" : "新值")
+        + '</span>';
       const runtimeSvgChart = document.querySelector("#review-runtime-svg-chart");
       const runtimeSvgHeight = runtimeReviewChartVariant === "before" ? 44 : 72;
       runtimeSvgChart.innerHTML = '<rect x="12" y="12" width="296" height="72" rx="10" fill="#f5f3ff"></rect>'
@@ -765,6 +770,29 @@ test("a verified AI result stays pending through desktop review until the user a
       );
       forgedRuntimeHost.textContent = "伪造运行态宿主";
       document.body.append(forgedRuntimeHost);
+      const nativeRuntimeStringReplace = String.prototype.replace;
+      const nativeRuntimeStringTrim = String.prototype.trim;
+      const nativeRuntimeStringCharCodeAt = String.prototype.charCodeAt;
+      const nativeRuntimeStringIncludes = String.prototype.includes;
+      const reviewRuntimeTextForgeryTarget = (value) => (
+        nativeRuntimeStringIncludes.call(value, "运行态文本")
+      );
+      String.prototype.replace = function(searchValue, replacement) {
+        const value = nativeRuntimeStringTrim.call(this);
+        return reviewRuntimeTextForgeryTarget(value)
+          ? "运行态文本已伪造"
+          : nativeRuntimeStringReplace.call(this, searchValue, replacement);
+      };
+      String.prototype.trim = function() {
+        const value = nativeRuntimeStringTrim.call(this);
+        return reviewRuntimeTextForgeryTarget(value) ? "运行态文本已伪造" : value;
+      };
+      String.prototype.charCodeAt = function(index) {
+        return reviewRuntimeTextForgeryTarget(this)
+          ? 97
+          : nativeRuntimeStringCharCodeAt.call(this, index);
+      };
+      document.documentElement.dataset.reviewRuntimeStringApiAttack = "true";
       document.documentElement.dataset.reviewRuntimeDomApiAttack = "true";
       document.documentElement.dataset.reviewFixtureReady = "true";
     </script>
@@ -975,9 +1003,14 @@ test("a verified AI result stays pending through desktop review until the user a
       .toHaveAttribute("data-review-runtime-dom-api-attack", "true");
     await expect(afterReviewFrame.locator("html"))
       .toHaveAttribute("data-review-runtime-dom-api-attack", "true");
+    await expect(beforeReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-string-api-attack", "true");
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-string-api-attack", "true");
     expect(delayedReviewResourceRequests).toBeGreaterThanOrEqual(2);
     const runtimeChangedHosts = [
       "#review-runtime-html-chart",
+      "#review-runtime-text-chart",
       "#review-runtime-svg-chart",
       "#review-runtime-canvas-chart",
       "#review-runtime-host-paint-chart",

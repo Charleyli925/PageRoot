@@ -2560,6 +2560,7 @@ function reviewBootstrap(
   const RuntimeVisualMap = Map;
   const RuntimeVisualSet = Set;
   const RuntimeVisualWeakMap = WeakMap;
+  const RuntimeVisualString = String;
   const runtimeVisualArrayPush = runtimeVisualBindCall(Array.prototype.push);
   const runtimeVisualArrayForEach = runtimeVisualBindCall(Array.prototype.forEach);
   const runtimeVisualArrayJoin = runtimeVisualBindCall(Array.prototype.join);
@@ -2567,6 +2568,12 @@ function reviewBootstrap(
   const runtimeVisualArrayMap = runtimeVisualBindCall(Array.prototype.map);
   const runtimeVisualArraySome = runtimeVisualBindCall(Array.prototype.some);
   const runtimeVisualArrayIsArray = Array.isArray.bind(Array);
+  const runtimeVisualStringCharCodeAt = runtimeVisualBindCall(
+    String.prototype.charCodeAt,
+  );
+  const runtimeVisualStringFromCharCode = String.fromCharCode.bind(String);
+  const runtimeVisualNumberToString = runtimeVisualBindCall(Number.prototype.toString);
+  const runtimeVisualStringPadStart = runtimeVisualBindCall(String.prototype.padStart);
   const runtimeVisualDocumentQuerySelectorAll = runtimeVisualBindCall(
     Document.prototype.querySelectorAll,
   );
@@ -2673,6 +2680,36 @@ function reviewBootstrap(
   const runtimeVisualStyleValue = (style, property) => (
     runtimeVisualStyleGetPropertyValue(style, property)
   );
+  const runtimeVisualWhitespaceCode = (code) => (
+    code === 0x0009
+    || (code >= 0x000a && code <= 0x000d)
+    || code === 0x0020
+    || code === 0x00a0
+    || code === 0x1680
+    || (code >= 0x2000 && code <= 0x200a)
+    || code === 0x2028
+    || code === 0x2029
+    || code === 0x202f
+    || code === 0x205f
+    || code === 0x3000
+    || code === 0xfeff
+  );
+  const runtimeVisualNormalizeText = (value) => {
+    const source = RuntimeVisualString(value || "");
+    const values = [];
+    let pendingWhitespace = false;
+    for (let index = 0; index < source.length; index += 1) {
+      const code = runtimeVisualStringCharCodeAt(source, index);
+      if (runtimeVisualWhitespaceCode(code)) {
+        if (values.length) pendingWhitespace = true;
+        continue;
+      }
+      if (pendingWhitespace) runtimeVisualArrayPush(values, " ");
+      runtimeVisualArrayPush(values, runtimeVisualStringFromCharCode(code));
+      pendingWhitespace = false;
+    }
+    return runtimeVisualArrayJoin(values, "");
+  };
   const runtimeVisualQueryElements = (selector) => {
     const list = runtimeVisualDocumentQuerySelectorAll(document, selector);
     const values = [];
@@ -2839,15 +2876,19 @@ function reviewBootstrap(
   const runtimeVisualFrames = () => new Promise((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(resolve));
   });
-  const runtimeVisualHex = (value) => (value >>> 0).toString(16).padStart(8, "0");
+  const runtimeVisualHex = (value) => runtimeVisualStringPadStart(
+    runtimeVisualNumberToString(value >>> 0, 16),
+    8,
+    "0",
+  );
   const runtimeVisualDigest = (value) => {
-    const textValue = String(value || "");
+    const textValue = RuntimeVisualString(value || "");
     let first = 2166136261;
     let second = 2246822507;
     let third = 3266489909;
     let fourth = 668265263;
     for (let index = 0; index < textValue.length; index += 1) {
-      const code = textValue.charCodeAt(index);
+      const code = runtimeVisualStringCharCodeAt(textValue, index);
       first = Math.imul(first ^ code, 16777619);
       second = Math.imul(second ^ code, 3266489917);
       third = Math.imul(third ^ code, 668265263);
@@ -2992,7 +3033,7 @@ function reviewBootstrap(
     ], "|");
   };
   const runtimeVisualPush = (capture, channel, value) => {
-    const normalized = String(value || "");
+    const normalized = RuntimeVisualString(value || "");
     capture.valueLength += normalized.length;
     capture.budget.atoms += 1;
     capture.budget.valueLength += normalized.length;
@@ -3225,9 +3266,9 @@ function reviewBootstrap(
           || budget.nodes > runtimeVisualBatchNodeLimit
         ) return null;
         const parentElement = runtimeVisualNodeParentElement(textNode);
-        const text = String(runtimeVisualNodeTextContent(textNode) || "")
-          .replace(/\s+/g, " ")
-          .trim();
+        const text = runtimeVisualNormalizeText(
+          runtimeVisualNodeTextContent(textNode) || "",
+        );
         if (
           text
           && parentElement

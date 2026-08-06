@@ -96,8 +96,9 @@ PR 必须从 Draft 开始。普通推送由独立的 `PR Feedback` workflow 处�
   已有静态框的宿主不得
   再进入运行态候选或增加第二个变化项；原页脚本伪造普通 `ready`、空快照
   或假 `MessageChannel` 也不得抢先完成任一侧；受管 bootstrap 必须先于作者
-  脚本保存 DOM/CSSOM/Canvas 原生能力，作者覆盖 `querySelectorAll` 或
-  `getComputedStyle` 后仍能识别真实 HTML/SVG/Canvas 输出；候选 key 只接受
+  脚本保存 DOM/CSSOM/Canvas 与字符串归一化/摘要编码原生能力，作者覆盖
+  `querySelectorAll`、`getComputedStyle` 或 `String.prototype.replace`、
+  `trim`、`charCodeAt` 后仍能识别真实 HTML/SVG/Canvas 和仅文本的运行态输出；候选 key 只接受
   注入时声明且由解析器创建的原宿主，未知、重复、转移或替换宿主均静默
   回退到既有静态审阅，不能制造运行态 marker；SVG 子树还必须沿祖先链
   排除隐藏 `g` 下的向量变化。Node 必须先对生成后的 bootstrap 做语法编译，
