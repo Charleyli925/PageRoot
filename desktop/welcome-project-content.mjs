@@ -17,6 +17,10 @@ export const DEFAULT_PROJECT_HTML = `<!doctype html>
       --violet: #6550e8;
       --violet-soft: #eeeaff;
       --green: #39745a;
+      --review-red: #d14b44;
+      --review-green: #239b56;
+      --review-blue: #1677c8;
+      --review-violet: #6d5ce7;
     }
     * { box-sizing: border-box; }
     body {
@@ -168,6 +172,107 @@ export const DEFAULT_PROJECT_HTML = `<!doctype html>
     .promise-index { color: var(--violet); font: 700 10px/1 system-ui; letter-spacing: .12em; }
     .promise h3 { margin: 27px 0 10px; font-size: 18px; }
     .promise p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.8; }
+    .review-showcase {
+      display: grid;
+      grid-template-columns: .8fr 1.55fr;
+      gap: 38px;
+      margin-top: 58px;
+      padding: 38px;
+      border: 1px solid #dedaf5;
+      border-radius: 24px;
+      background: linear-gradient(135deg, #faf9ff 0%, #f2f0ff 100%);
+    }
+    .review-copy { align-self: center; }
+    .review-copy > small { color: var(--violet); font-size: 10px; font-weight: 750; letter-spacing: .14em; }
+    .review-copy h2 { margin: 13px 0 15px; font: 600 29px/1.35 "Songti SC", "STSong", serif; }
+    .review-copy > p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.8; }
+    .review-points { display: grid; gap: 10px; margin-top: 24px; }
+    .review-points span { display: grid; grid-template-columns: 24px 1fr; gap: 7px; color: #565561; font-size: 10px; line-height: 1.5; }
+    .review-points b { color: var(--violet); font-size: 9px; letter-spacing: .08em; }
+    .review-demo {
+      min-width: 0;
+      padding: 8px;
+      border: 1px solid #dcdae5;
+      border-radius: 15px;
+      background: #ececf1;
+      box-shadow: 0 18px 34px rgba(42, 36, 86, .1);
+    }
+    .review-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 7px;
+      padding: 6px;
+      border: 1px solid #e4e3ea;
+      border-radius: 9px;
+      background: rgba(255, 255, 255, .96);
+    }
+    .review-toolbar > div { display: flex; gap: 2px; padding: 2px; border-radius: 7px; background: #f1f1f5; }
+    .review-toolbar span { padding: 5px 7px; border-radius: 5px; color: #81808a; font-size: 7px; font-weight: 650; white-space: nowrap; }
+    .review-toolbar .mode-active { background: #fff; color: #4f47b8; box-shadow: 0 1px 4px rgba(20, 20, 36, .1); }
+    .review-pages { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 3px; }
+    .review-page { min-width: 0; overflow: hidden; border: 1px solid #d9dade; border-radius: 7px; background: #fff; }
+    .review-page > header { height: 28px; display: flex; align-items: center; gap: 6px; padding: 0 9px; border-bottom: 1px solid #ececf0; background: #fafafd; }
+    .review-page > header i { width: 6px; height: 6px; border-radius: 50%; background: #9698a2; box-shadow: 0 0 0 3px rgba(150, 152, 162, .09); }
+    .review-page.review-after > header i { background: #6258d6; box-shadow: 0 0 0 3px rgba(98, 88, 214, .1); }
+    .review-page > header strong { color: #3c3c45; font-size: 8px; }
+    .review-page > header small { color: #9999a2; font-size: 7px; }
+    .review-sheet { position: relative; min-height: 225px; padding: 24px 18px 20px; overflow: hidden; }
+    .review-kicker { color: #9b9aa4; font-size: 7px; font-weight: 750; letter-spacing: .12em; }
+    .review-sheet h3 { margin: 8px 0 15px; color: #7a7981; font: 600 15px/1.35 "Songti SC", "STSong", serif; }
+    .review-frame {
+      position: relative;
+      margin: 0 0 14px;
+      padding: 9px 10px;
+      border: 2px dashed currentColor;
+      border-radius: 6px;
+      background: #fff;
+      font-size: 9px;
+      line-height: 1.65;
+    }
+    .review-frame em {
+      position: absolute;
+      right: 0;
+      bottom: calc(100% + 4px);
+      padding: 3px 6px;
+      border: 1px solid rgba(98, 88, 214, .2);
+      border-radius: 5px;
+      background: rgba(255, 255, 255, .96);
+      color: #514ba9;
+      box-shadow: 0 3px 9px rgba(30, 25, 70, .1);
+      font-size: 7px;
+      font-style: normal;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .review-frame.removed { color: var(--review-red); text-decoration: line-through dashed; text-decoration-thickness: 1px; }
+    .review-frame.added { color: #3d3c43; border-color: var(--review-green); }
+    .review-card { padding: 12px; border: 2px dashed var(--review-violet); border-radius: 8px; color: #65646d; background: #fbfaff; font-size: 8px; line-height: 1.55; }
+    .review-before .review-card { border-color: #d8d7df; opacity: .46; }
+    .review-comment {
+      position: absolute;
+      right: 13px;
+      bottom: 13px;
+      width: 25px;
+      height: 25px;
+      display: grid;
+      place-items: center;
+      border: 2px solid rgba(255, 255, 255, .94);
+      border-radius: 12px;
+      background: #6258d6;
+      box-shadow: 0 6px 16px rgba(47, 41, 111, .28);
+      color: #fff;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .review-legend { display: flex; flex-wrap: wrap; gap: 9px 12px; padding: 8px 5px 0; color: #767580; font-size: 7px; }
+    .review-legend span { display: inline-flex; align-items: center; gap: 4px; }
+    .review-legend i { width: 9px; height: 7px; border: 1px dashed currentColor; border-radius: 2px; }
+    .review-legend .copy-before { color: var(--review-red); }
+    .review-legend .copy-after { color: var(--review-green); }
+    .review-legend .structure { color: var(--review-blue); }
+    .review-legend .visual { color: var(--review-violet); }
     .workflow {
       display: grid;
       grid-template-columns: .78fr 1.6fr;
@@ -222,6 +327,8 @@ export const DEFAULT_PROJECT_HTML = `<!doctype html>
       .hero { grid-template-columns: 1fr; gap: 40px; padding: 30px 24px 40px; }
       .demo-badge { top: 30px; right: 24px; }
       .brand-row { margin-bottom: 48px; }
+      h1 { font-size: clamp(38px, 10.6vw, 46px); }
+      h1 span + span { max-width: calc(100% - 18px); margin-left: 18px; }
       .content { padding: 42px 24px 36px; }
       .section-heading { display: block; }
       .section-heading p { margin-top: 14px; }
@@ -231,9 +338,15 @@ export const DEFAULT_PROJECT_HTML = `<!doctype html>
       .promise:nth-child(even) { min-height: 0; padding: 24px 0; border-left: 0; border-bottom: 1px solid var(--line); }
       .promise:last-child { border-bottom: 0; }
       .promise h3 { margin-top: 20px; }
+      .review-showcase { grid-template-columns: 1fr; gap: 30px; padding: 30px 24px; }
       .workflow { grid-template-columns: 1fr; gap: 30px; padding: 30px 24px; }
       .notice { align-items: flex-start; flex-direction: column; }
       footer { padding: 20px 24px; }
+    }
+    @media (max-width: 520px) {
+      .review-toolbar { align-items: flex-start; flex-direction: column; }
+      .review-pages { grid-template-columns: 1fr; }
+      .review-sheet { min-height: 205px; }
     }
   </style>
 </head>
@@ -250,17 +363,17 @@ export const DEFAULT_PROJECT_HTML = `<!doctype html>
         </div>
         <p class="eyebrow">Visual HTML × AI Agents</p>
         <h1><span>所见，即可落笔。</span><span>所改，止于所选。</span></h1>
-        <p class="intro">在真实 HTML 上直接修改，也可以在页面上指出位置、写下评论并附上参考文件。源页把完整上下文整理成 AI Agent 可直接执行的本地任务，让复杂修改自然接力。</p>
-        <div class="hero-foot"><span>可视化直接编辑</span><span>AI Agent 无缝交接</span><span>源码级安全接回</span></div>
+        <p class="intro">在真实 HTML 上直接修改，也可以指出位置、写下评论并交给 AI Agent。结果回来后，源页把修改前后并排呈现、逐处标出变化；看清之后，再由你决定打开哪一版。</p>
+        <div class="hero-foot"><span>可视化直接编辑</span><span>AI Agent 无缝交接</span><span>修改前后对照审阅</span></div>
       </div>
       <aside class="source-card">
-        <small>AGENT-READY BY DESIGN</small>
-        <h2>你指出哪里，AI Agent 就从哪里开始。</h2>
-        <p>真实 HTML、精确目标、评论、附件和项目规则会被冻结为本地任务包。AI Agent 写回后，源页自动检测、校验并生成独立版本。</p>
+        <small>REVIEW BEFORE ADOPT</small>
+        <h2>AI 改完，不用凭感觉验收。</h2>
+        <p>源页会把修改前与 AI 修改后并排放在真实页面中，让文案、结构与视觉变化一眼可见。</p>
         <div class="source-path">
-          <span><i></i>Claude Code · Codex · WorkBuddy · Qoder</span>
-          <span><i></i>无需复制整页 HTML 或重新描述位置</span>
-          <span><i></i>AI Agent 新版独立保留，不覆盖原文件</span>
+          <span><i></i>不同变化分类标出，不用逐行找代码</span>
+          <span><i></i>双页同步查看，原评论仍留在原位置</span>
+          <span><i></i>审阅之后，再由你决定打开哪一版</span>
         </div>
       </aside>
     </header>
@@ -269,33 +382,74 @@ export const DEFAULT_PROJECT_HTML = `<!doctype html>
       <section>
         <div class="section-heading">
           <div><small>CORE EXPERIENCE</small><h2>让人与 AI Agent 自然接力。</h2></div>
-          <p>不用在源码里找标签，也不必反复解释整张页面。你指出意图，AI Agent 执行，源页负责守住源码与版本边界。</p>
+          <p>不用在源码里找标签，也不必盲猜 AI 改了什么。你指出意图、审阅结果，源页负责守住源码与版本边界。</p>
         </div>
         <div class="promise-grid">
           <article class="promise"><span class="promise-index">01 / TYPE</span><h3>顺畅的文本编辑</h3><p>安全可编辑的文字，双击就能把光标放到点击位置。输入、删除、选择、粘贴和中文输入法都沿用熟悉的原生体验。</p></article>
           <article class="promise"><span class="promise-index">02 / TARGET</span><h3>指哪改哪的局部修改</h3><p>选中标题就只改标题，选中正文就只改正文。修改以最小源码 Patch 写回，其余 HTML 结构和格式保持不动。</p></article>
           <article class="promise"><span class="promise-index">03 / HANDOFF</span><h3>AI Agent 拿到完整上下文</h3><p>页面目标、评论、图片、文件、项目规则和冻结 HTML 会组成一项本地任务，不用再复制代码或重复说明位置。</p></article>
-          <article class="promise"><span class="promise-index">04 / VERIFY</span><h3>AI Agent 结果安全接回</h3><p>返回结果会核对身份、源码 Hash、文件完整性和修改范围；通过后独立建版，提交前文件始终保留。</p></article>
+          <article class="promise"><span class="promise-index">04 / REVIEW</span><h3>看清变化，再决定采用</h3><p>修改前与 AI 修改后并排审阅，文案、结构和视觉变化分别标出；看完可打开新版，也可回到修改前继续编辑。</p></article>
+        </div>
+      </section>
+
+      <section class="review-showcase">
+        <div class="review-copy">
+          <small>AI RESULT REVIEW</small>
+          <h2>AI 改了什么，先看清，再决定。</h2>
+          <p>结果不会自动替换当前页面。审阅从第一处变化开始，把真正需要你判断的地方从整张页面里提出来。</p>
+          <div class="review-points">
+            <span><b>01</b>文案、结构、视觉变化分开查看</span>
+            <span><b>02</b>双页同步滚动，原评论原位可见</span>
+            <span><b>03</b>打开 AI 修改后，或回到修改前继续</span>
+          </div>
+        </div>
+        <div class="review-demo" aria-label="修改前与 AI 修改后的双页审阅示意">
+          <div class="review-toolbar">
+            <div><span class="mode-active">双页</span><span>左页</span><span>右页</span></div>
+            <div><span class="mode-active">全部变化</span><span>文案</span><span>结构</span><span>视觉</span></div>
+          </div>
+          <div class="review-pages">
+            <article class="review-page review-before">
+              <header><i></i><strong>修改前</strong><small>原始 HTML</small></header>
+              <div class="review-sheet">
+                <span class="review-kicker">产品介绍</span>
+                <h3>让 AI 帮你改完页面。</h3>
+                <p class="review-frame removed"><em>文案改写</em>结果生成后，直接打开最新版本。</p>
+                <div class="review-card">关键模块保持原来的视觉层级。</div>
+                <span class="review-comment">评</span>
+              </div>
+            </article>
+            <article class="review-page review-after">
+              <header><i></i><strong>AI 修改后</strong><small>候选 HTML</small></header>
+              <div class="review-sheet">
+                <span class="review-kicker">产品介绍</span>
+                <h3>让 AI 修改，也让你看清。</h3>
+                <p class="review-frame added"><em>新增文案</em>结果生成后，先对照审阅，再决定是否打开。</p>
+                <div class="review-card">关键模块调整了层级、间距与视觉重点。</div>
+              </div>
+            </article>
+          </div>
+          <div class="review-legend"><span class="copy-before"><i></i>修改前文案</span><span class="copy-after"><i></i>AI 新文案</span><span class="structure"><i></i>结构变化</span><span class="visual"><i></i>视觉变化</span></div>
         </div>
       </section>
 
       <section class="workflow">
-        <div class="workflow-copy"><small>AI AGENT WORKFLOW</small><h2>你指出。<br />AI Agent 执行。<br />源页校验接回。</h2><p>Claude Code、Codex、WorkBuddy、Qoder，以及其他能读取本地文件并执行命令的 AI Agent 都可以使用。</p></div>
+        <div class="workflow-copy"><small>AI AGENT WORKFLOW</small><h2>你指出。<br />AI Agent 执行。<br />你审阅后决定。</h2><p>Claude Code、Codex、WorkBuddy、Qoder，以及其他能读取本地文件并执行命令的 AI Agent 都可以使用。</p></div>
         <div class="steps">
           <div class="step"><b>01</b><div><strong>在页面上选择和说明</strong><span>直接修改简单内容；复杂要求则锚定到页面、模块或文字，并附上图片和文件。</span></div></div>
           <div class="step"><b>02</b><div><strong>源页冻结可执行任务</strong><span>准确 HTML、目标、评论、附件和项目规则被整理到受管本地文件，交接信息自动复制。</span></div></div>
           <div class="step"><b>03</b><div><strong>交给你正在使用的 AI Agent</strong><span>AI Agent 按任务内的路径和规则读取、修改并最终化，不需要专用云端 API。</span></div></div>
-          <div class="step"><b>04</b><div><strong>校验后生成独立新版本</strong><span>源页检测返回结果并完成校验；通过后由你打开最新版，原文件和历史版本继续保留。</span></div></div>
+          <div class="step"><b>04</b><div><strong>逐处审阅，再决定打开哪一版</strong><span>源页先校验并独立保留结果；你对照修改前后，可打开 AI 新版，也可回到修改前继续。</span></div></div>
         </div>
       </section>
 
       <aside class="notice">
-        <div><strong>这张欢迎页本身，就是一次完整的 AI Agent 协作入口。</strong><span>双击即可直接编辑，也可以选中内容添加评论；发送后，把交接信息粘贴给 Claude Code、Codex、WorkBuddy、Qoder 等 AI Agent 即可。</span></div>
+        <div><strong>这张欢迎页本身，就是一次完整的 AI Agent 协作与审阅入口。</strong><span>双击即可直接编辑，也可以选中内容添加评论；AI 返回后，点击“审阅对比”即可从这张页面体验修改前后对照。</span></div>
         <em>从顶部「项目」打开其他 HTML</em>
       </aside>
     </div>
 
-    <footer><span>源页 · PageRoot</span><span>Visual intent in context. AI Agents in flow.</span></footer>
+    <footer><span>源页 · PageRoot</span><span>Visual intent in context. AI changes under review.</span></footer>
   </article>
 </body>
 </html>`;
