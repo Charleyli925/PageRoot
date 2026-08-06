@@ -199,7 +199,7 @@ test("desktop package carries the v3 patch engine, candidate assessment and acti
   assert.match(mainProcess, /app\.setPath\("userData",\s*productUserDataPath\)/);
   assert.match(
     mainProcess,
-    /app\.isPackaged\s*&&\s*packagedApplicationName\s*===\s*"PageRoot Developer Preview"[\s\S]*?\?\s*packagedApplicationName[\s\S]*?:\s*"源页"/,
+    /const applicationName\s*=\s*app\.isPackaged\s*\?\s*path\.basename\(process\.execPath,\s*path\.extname\(process\.execPath\)\)\s*:\s*"源页";[\s\S]*?app\.setName\(applicationName\)/,
   );
   assert.match(
     mainProcess,
