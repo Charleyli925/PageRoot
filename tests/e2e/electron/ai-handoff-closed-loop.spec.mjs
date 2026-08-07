@@ -1012,6 +1012,7 @@ test("a verified AI result stays pending through desktop review until the user a
     await route.fulfill({
       status: 200,
       contentType: "image/png",
+      headers: { "cache-control": "no-store" },
       body: Buffer.from(
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
         "base64",
