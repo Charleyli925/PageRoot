@@ -630,9 +630,45 @@ test("a verified AI result stays pending through desktop review until the user a
         reviewCommentScopeExposed,
       );
       document.documentElement.dataset.reviewRuntimeCommentScopeProbeVariant = "before";
-      runtimeCommentMarkerProbe.innerHTML = '<div style="height:48px;background:'
-        + (reviewCommentScopeExposed ? "#d34f6a" : "#7f91a4")
-        + '">评论范围探针</div>';
+      document.documentElement.dataset.reviewRuntimeCommentLocatorExposed = "pending";
+      const renderRuntimeCommentMarkerProbe = (bootstrapLocatorExposed = false) => {
+        const color = reviewCommentScopeExposed
+          ? "#d34f6a"
+          : (bootstrapLocatorExposed ? "#d34f6a" : "#7f91a4");
+        runtimeCommentMarkerProbe.innerHTML = '<div style="height:48px;background:'
+          + color
+          + '">评论范围探针</div>';
+      };
+      const inspectRuntimeCommentBootstrap = (bootstrapSource) => {
+        const bootstrapLocatorExposed = String(bootstrapSource || "").includes(
+          '[data-native-case="runtime-comment-caption"]',
+        );
+        document.documentElement.dataset.reviewRuntimeCommentLocatorExposed = String(
+          bootstrapLocatorExposed,
+        );
+        renderRuntimeCommentMarkerProbe(bootstrapLocatorExposed);
+      };
+      renderRuntimeCommentMarkerProbe();
+      const reviewCommentScopeBootstrapScript = document.querySelector(
+        'script[data-pageroot-ai-review-bootstrap="true"]',
+      );
+      if (reviewCommentScopeBootstrapScript?.src) {
+        try {
+          const request = new XMLHttpRequest();
+          request.open("GET", reviewCommentScopeBootstrapScript.src, false);
+          request.send();
+          inspectRuntimeCommentBootstrap(request.responseText);
+        } catch {
+          void fetch(reviewCommentScopeBootstrapScript.src)
+            .then((response) => response.text())
+            .then(inspectRuntimeCommentBootstrap)
+            .catch(() => {
+              document.documentElement.dataset.reviewRuntimeCommentLocatorExposed = "unavailable";
+            });
+        }
+      } else {
+        document.documentElement.dataset.reviewRuntimeCommentLocatorExposed = "missing";
+      }
     </script>
     <script>
       const runtimeCommentChart = document.querySelector("#review-runtime-comment-chart");
@@ -755,10 +791,14 @@ test("a verified AI result stays pending through desktop review until the user a
         + (runtimeReviewChartVariant === "before" ? '旧值' : '新值')
         + '</span></div>';
       document.documentElement.dataset.reviewRuntimeRequestObserved = "false";
+      document.documentElement.dataset.reviewRuntimeCommentRequestObserved = "false";
       document.documentElement.dataset.reviewRuntimeForgeryAttempted = "pending";
       addEventListener("message", (event) => {
         if (event.isTrusted && event.data?.type === "request-runtime-visual-channel") {
           document.documentElement.dataset.reviewRuntimeRequestObserved = "true";
+        }
+        if (event.isTrusted && event.data?.type === "request-review-comment-channel") {
+          document.documentElement.dataset.reviewRuntimeCommentRequestObserved = "true";
         }
       }, true);
       const reviewBootstrapScript = document.querySelector(
@@ -968,8 +1008,8 @@ test("a verified AI result stays pending through desktop review until the user a
           'document.documentElement.dataset.reviewRuntimeCommentScopeProbeVariant = "after";',
         )
         .replace(
-          'reviewCommentScopeExposed ? "#d34f6a" : "#7f91a4"',
-          'reviewCommentScopeExposed ? "#6d5ce7" : "#7f91a4"',
+          'bootstrapLocatorExposed ? "#d34f6a" : "#7f91a4"',
+          'bootstrapLocatorExposed ? "#6d5ce7" : "#7f91a4"',
         )
         .replace(
           'id="review-runtime-static-covered" class="review-runtime-chart-host" style="border: 2px solid #d9dcec; padding: 12px"',
@@ -1100,6 +1140,10 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect(afterReviewFrame.locator("html"))
       .toHaveAttribute("data-review-runtime-comment-scope-exposed", "false");
     await expect(beforeReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-comment-locator-exposed", "false");
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-comment-locator-exposed", "false");
+    await expect(beforeReviewFrame.locator("html"))
       .toHaveAttribute("data-review-runtime-comment-scope-probe-variant", "before");
     await expect(afterReviewFrame.locator("html"))
       .toHaveAttribute("data-review-runtime-comment-scope-probe-variant", "after");
@@ -1121,6 +1165,10 @@ test("a verified AI result stays pending through desktop review until the user a
       .toHaveAttribute("data-review-runtime-request-observed", "false");
     await expect(afterReviewFrame.locator("html"))
       .toHaveAttribute("data-review-runtime-request-observed", "false");
+    await expect(beforeReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-comment-request-observed", "false");
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-comment-request-observed", "false");
     await expect(beforeReviewFrame.locator("html"))
       .toHaveAttribute("data-review-runtime-dom-api-attack", "true");
     await expect(afterReviewFrame.locator("html"))

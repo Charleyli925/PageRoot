@@ -12,11 +12,13 @@ Notable user-visible changes are documented here. This project follows Semantic 
   ordinary runtime candidates. Global comments, charts outside that group, and
   other un-commented regions retain the strict host-reference gate and bounded
   budget. Comment scope remains analyzer-only: scope attributes are removed
-  before either review document is serialized. Both managed bootstraps receive
-  the same content-free locator list, but only unique source `id`, `data-*`,
-  `name`, or `aria-label` locators are admitted—never mutable sibling ordinals.
-  If a durable locator cannot be proven, the marker is omitted rather than
-  guessing a neighboring element.
+  before either review document is serialized, and durable locator data stays
+  in the trusted review host until it is delivered only to the before frame via
+  a challenged private port. It is absent from both authored documents and
+  fetchable bootstrap source. Only unique source `id`, `data-*`, `name`, or
+  `aria-label` locators are admitted—never mutable sibling ordinals. If a
+  durable locator cannot be proven, the marker is omitted rather than guessing
+  a neighboring element.
 
 ## [0.9.7] - 2026-08-07
 

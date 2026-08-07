@@ -31,7 +31,7 @@
 | AI review node pairing, typed change facts, prepared immutable review documents and fused frame/mask geometry | Cancellable `ReviewAnalysisSession` plus `review-document` analyzer, ready-review session and isolated-frame projection runtime | none; byte-bounded multi-entry cache keyed only by exact operation/source/comment identity | review outline, semantic frames and context mask |
 | Initial AI review runtime-chart snapshot batch, frame-registration/comparison deadlines and accepted supplemental host markers | Parent `AiReviewWorkspace` through `ReviewRuntimeVisualCoordinator`, behind the main-process managed-preview navigation fence | none; one bounded in-memory decision bound to the frozen document pair and declared host keys; session/load failure, navigation fallback and inline/browser review are static-only | effective review changes/outline and both isolated frame projections |
 | AI review Tab/disclosure/control presentation state and transition epoch | Parent `AiReviewWorkspace` presentation coordinator; either frame may propose an intent | none; disposable parent state plus frame projection only | both review frames, content map and overlay/mask projection |
-| Frozen review comment set and read-only before-page marker projection | Ready-review session owns comment text; `review-document` resolves opaque targets during analysis, strips the scope attribute before serialization, and gives both bootstraps the same content-free durable locator list; the before runtime reports anonymous viewport geometry, which trusted `AiReviewWorkspace` joins and renders | none beyond the immutable Request/Draft evidence already frozen for the run | trusted review host above the before frame only; authored frames never receive comment text or a comment scope marker |
+| Frozen review comment set and read-only before-page marker projection | Ready-review session owns comment text; `review-document` resolves opaque targets during analysis and strips scope attributes before serialization; trusted `AiReviewWorkspace` owns the durable locator list and delivers it only to the before runtime through a challenged private port, then joins its anonymous viewport geometry and renders it | none beyond the immutable Request/Draft evidence already frozen for the run | trusted review host above the before frame only; authored frames never receive comment text, a comment scope marker, or a fetchable locator list |
 | Current source-backed comment resolution, visibility, coordinates, marker eligibility and natural document height | `HtmlCanvasEditor` presentation measurement | none; disposable snapshot tagged by rendered source Hash, applied page-view generation and exact target-ID set | Workbench comment rail and Canvas height |
 | Stable application update schedule, coalesced manual check, download progress and restart-install readiness | Main-process application-update controller | signed GitHub Release metadata plus updater cache; no editor authority | preload status snapshot, About PageRoot, Workbench update notice, drain coordinator |
 | Random installation identity, project pseudonym secret, aggregate counters and unsent usage events | Main-process usage-telemetry controller | bounded `usage-telemetry.json` under PageRoot Application Support | PostHog batch ingestion only |
@@ -137,12 +137,14 @@ Rules:
   runtime presentation in either direction and never writes source bytes,
   Version records or project state. Frozen review comments remain read-only
   evidence. Their text stays in the trusted host. Scope attributes are removed
-  before either document is serialized; both bootstrap sources receive the same
-  content-free locator list, limited to unique source `id`, `data-*`, `name`, or
-  `aria-label` rather than positional sibling paths. Only the before bootstrap
-  resolves it to report geometry, and an unsafe locator produces no marker.
-  Neither review frame receives comment text or a comment scope marker in
-  authored-page markup.
+  before either document is serialized; the trusted parent keeps the
+  content-free locator list and releases it only to the before bootstrap through
+  a challenged private port, never in the document bytes or fetchable bootstrap
+  source. It is limited to unique source `id`, `data-*`, `name`, or `aria-label`
+  rather than positional sibling paths. Only the before bootstrap resolves it to
+  report geometry, and an unsafe locator or unavailable capability produces no
+  marker. Neither review frame receives comment text or a comment scope marker
+  in authored-page markup.
 - The runtime-chart supplement never re-analyzes a statically covered host. It
   declares an ordinary host only when the changed authored script directly
   references that host's distinctive source identity. A source-empty host

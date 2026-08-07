@@ -180,14 +180,18 @@ lower-priority scope to its sibling charts. The group cannot cross its section
 or derive from visual distance; comment text never enters either frame, and a
 global comment never authorizes page-wide capture. Opaque scope attributes exist
 only while frozen analysis prioritizes candidates and are stripped before either
-document is serialized. Both bootstraps receive the same content-free locator
-list; each locator must be a unique source `id`, `data-*`, `name`, or
-`aria-label`, never a mutable sibling ordinal. If the target is not safely
-locatable after authored runtime changes, its marker is omitted rather than
-guessed. Authored CSS or scripts therefore cannot observe a comment scope marker
-or manufacture a change. Every later identity, stability, budget and transport
-check remains unchanged.
-The trusted bootstrap creates a `MessageChannel` and binds
+document is serialized. The trusted parent retains the content-free locator
+list; only after the before frame loads does a separately challenged
+bootstrap-owned `MessageChannel` receive it. The list is absent from both
+authored documents and the fetchable bootstrap source. Each locator must be a
+unique source `id`, `data-*`, `name`, or `aria-label`, never a mutable sibling
+ordinal. If the target is not safely locatable after authored runtime changes,
+or that private capability exchange is unavailable, its marker is omitted rather
+than guessed. Authored CSS or scripts therefore cannot observe a comment scope
+marker or manufacture a change. Every later identity, stability, budget and
+transport check remains unchanged.
+The trusted bootstrap pre-creates separate `MessageChannel` capabilities for
+runtime evidence and, on the before side only, private locator delivery, and binds
 the DOM traversal, attribute, layout, computed-style, Canvas, string
 normalization/digest, and Promise/timer/animation scheduling primitives used for evidence before any
 authored script runs. Its bounded font wait composes only captured Promise capabilities, so it never re-reads
@@ -197,7 +201,7 @@ discovery accepts only that exact key/element set: undeclared attributes are
 ignored, while a missing, duplicate, transferred or replaced declared host or
 key/element drift invalidates the whole runtime batch and leaves static review
 authoritative. A local capture exception, instability or budget exhaustion is
-contained to that declared host as unavailable. After both exact
+contained to that declared host as unavailable. For runtime evidence, after both exact
 frame documents load, the parent sends a fresh random challenge
 that the bootstrap consumes only from a browser-trusted parent event in its first
 capture listener without exposing it to later authored listeners, then transfers

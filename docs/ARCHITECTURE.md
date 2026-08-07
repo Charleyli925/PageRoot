@@ -152,12 +152,15 @@ Comments + frozen input
   global comment does not authorize the page, and ordinary group-external script
   co-location inside the same section is not causal evidence. Comment scope
   attributes exist only while the frozen analyzer makes this decision, then are
-  stripped from both serialized documents. Both bootstrap sources instead carry
-  the same content-free locator list. A locator must be a unique source `id`,
-  `data-*`, `name`, or `aria-label`, never a positional sibling path; if it is
-  not durable, the before-side marker is omitted rather than rebound by guess.
-  Only the before bootstrap reports geometry, so authored code cannot react to a
-  comment marker.
+  stripped from both serialized documents. The trusted parent retains the
+  content-free locator list and, after the before frame loads, delivers it only
+  over a separately challenged bootstrap-owned `MessageChannel`; it is absent
+  from both document bytes and fetchable bootstrap source. A locator must be a
+  unique source `id`, `data-*`, `name`, or `aria-label`, never a positional
+  sibling path; if it is not durable or the private channel is unavailable, the
+  before-side marker is omitted rather than rebound by guess. Only the before
+  bootstrap reports geometry, so authored code cannot react to a comment
+  marker.
   The owned bootstrap binds the DOM traversal, attribute, layout,
   computed-style and Canvas primitives before authored scripts execute and is
   given the analyzer's exact candidate-key list. Its early mutation observer

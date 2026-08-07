@@ -62,6 +62,7 @@ export type ReviewDocuments = {
   outline: ReviewOutlineItem[];
   runtimeVisualCandidates: ReviewRuntimeVisualCandidate[];
   commentGroups: ReviewCommentGroup[];
+  commentTargets: ReviewCommentTarget[];
 };
 
 export type ReviewCommentGroup = {
@@ -72,7 +73,7 @@ export type ReviewCommentGroup = {
   }>;
 };
 
-type ReviewCommentTarget = {
+export type ReviewCommentTarget = {
   key: string;
   selector: string;
   global: boolean;
@@ -2990,18 +2991,11 @@ function reviewBootstrap(
   sessionId: string,
   side: ReviewSide,
   runtimeVisualCandidateKeys: readonly string[] = [],
-  reviewCommentTargets: readonly ReviewCommentTarget[] = [],
 ): string {
   return String.raw`
 (() => {
   const sessionId = ${JSON.stringify(sessionId)};
   const side = ${JSON.stringify(side)};
-  // This side-neutral locator list contains no comment content and is never
-  // materialized as authored-page markup. Its entries are source-index
-  // identities, never positional sibling paths.
-  const reviewCommentTargets = Object.freeze(
-    ${JSON.stringify(reviewCommentTargets)},
-  );
   // This first managed script binds evidence readers before authored scripts execute.
   const runtimeVisualExpectedKeys = Object.freeze(
     ${JSON.stringify([...runtimeVisualCandidateKeys])},
@@ -3208,6 +3202,12 @@ function reviewBootstrap(
   const runtimeVisualChannel = typeof MessageChannel === "function"
     ? new MessageChannel()
     : null;
+  // The comment locator capability is deliberately separate from runtime
+  // evidence. It exists only on the before side and never appears in this
+  // bootstrap source or in authored-page markup.
+  const reviewCommentChannel = side === "before" && typeof MessageChannel === "function"
+    ? new MessageChannel()
+    : null;
   const postRuntimeVisualPort = runtimeVisualChannel
     ? runtimeVisualChannel.port1.postMessage.bind(runtimeVisualChannel.port1)
     : null;
@@ -3215,7 +3215,9 @@ function reviewBootstrap(
     Event.prototype.stopImmediatePropagation,
   );
   let runtimeVisualChannelTransferred = false;
+  let reviewCommentChannelTransferred = false;
   let runtimeVisualSnapshotBatch = null;
+  let reviewCommentTargets = [];
   const post = (type, extra = {}) => postToParent({
     source: "pageroot-ai-review",
     sessionId,
@@ -3253,6 +3255,19 @@ function reviewBootstrap(
     post("ready", {
       height: Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight || 0),
     });
+  };
+  const transferReviewCommentChannel = (rawChallenge) => {
+    const challenge = String(rawChallenge || "");
+    if (!/^[a-f0-9]{32}$/u.test(challenge)) return;
+    if (!reviewCommentChannel || reviewCommentChannelTransferred) return;
+    reviewCommentChannelTransferred = true;
+    postToParent({
+      source: "pageroot-ai-review",
+      sessionId,
+      side,
+      type: "review-comment-channel",
+      challenge,
+    }, "*", [reviewCommentChannel.port2]);
   };
   const clamp = (value, minimum, maximum) => Math.max(minimum, Math.min(maximum, value));
   const documentHeight = () => Math.max(
@@ -4125,6 +4140,41 @@ function reviewBootstrap(
     if (immediate) queueReport();
     else layoutReportTimer = window.setTimeout(queueReport, 80);
   };
+  const acceptReviewCommentTargets = (rawTargets) => {
+    if (side !== "before" || !runtimeVisualArrayIsArray(rawTargets)) return;
+    const targets = [];
+    const seenKeys = new RuntimeVisualSet();
+    runtimeVisualArrayForEach(rawTargets, (candidate) => {
+      if (!candidate || typeof candidate !== "object") return;
+      const key = safeKey(candidate.key);
+      const global = candidate.global === true;
+      const selector = global
+        ? "body"
+        : typeof candidate.selector === "string"
+          ? candidate.selector
+          : "";
+      if (!key || runtimeVisualSetHas(seenKeys, key)) return;
+      if (!global && !selector) return;
+      runtimeVisualSetAdd(seenKeys, key);
+      runtimeVisualArrayPush(targets, { key, selector, global });
+    });
+    reviewCommentTargets = targets;
+    scheduleLayoutReport(true);
+  };
+  if (reviewCommentChannel) {
+    reviewCommentChannel.port1.onmessage = (event) => {
+      const message = event.data;
+      if (
+        !message
+        || message.source !== "pageroot-ai-review-comment-targets"
+        || message.sessionId !== sessionId
+        || message.side !== side
+        || message.type !== "comment-targets"
+      ) return;
+      acceptReviewCommentTargets(message.reviewCommentTargets);
+    };
+    reviewCommentChannel.port1.start();
+  }
   const renderTransitionMask = () => {
     document.querySelector('[data-pageroot-review-transition-mask]')?.remove();
     const mask = document.createElement("div");
@@ -4974,6 +5024,11 @@ function reviewBootstrap(
       transferRuntimeVisualChannel(message.challenge);
       return;
     }
+    if (message.type === "request-review-comment-channel") {
+      stopImmediateMessagePropagation(event);
+      transferReviewCommentChannel(message.challenge);
+      return;
+    }
     if (message.type === "state") applyState(message.state || {});
     if (message.type === "apply-runtime-visual-changes") {
       applyRuntimeVisualChanges(message.markers);
@@ -5171,7 +5226,6 @@ function prepareDocument(
   sourcePath?: string,
   externalBootstrap = false,
   runtimeVisualCandidateKeys: readonly string[] = [],
-  reviewCommentTargets: readonly ReviewCommentTarget[] = [],
 ): { html: string; bootstrapJavaScript: string } {
   document.querySelectorAll("meta[http-equiv]").forEach((element) => {
     const directive = (element.getAttribute("http-equiv") || "").trim().toLowerCase();
@@ -5202,7 +5256,6 @@ function prepareDocument(
     sessionId,
     side,
     runtimeVisualCandidateKeys,
-    reviewCommentTargets,
   );
   if (externalBootstrap) {
     bootstrap.src = REVIEW_BOOTSTRAP_PATH;
@@ -5249,6 +5302,7 @@ function* buildReviewDocumentSteps(
       outline: [],
       runtimeVisualCandidates: [],
       commentGroups: [],
+      commentTargets: [],
     };
   }
   const parser = new DOMParser();
@@ -5371,8 +5425,8 @@ function* buildReviewDocumentSteps(
     : [];
   const runtimeVisualCandidateKeys = runtimeVisualCandidates.map(({ key }) => key);
   // Comment attributes are analyzer-only scope hints. Strip them before either
-  // document is serialized; both managed bootstraps receive the same opaque,
-  // non-positional locator list instead.
+  // document is serialized; trusted parent state holds durable locators and
+  // later sends them only through the before frame's private capability port.
   clearReviewCommentScopeAttributes(beforeDocument);
   yield "runtime-candidates";
 
@@ -5383,7 +5437,6 @@ function* buildReviewDocumentSteps(
     options.sourcePath,
     options.externalBootstrap,
     runtimeVisualCandidateKeys,
-    reviewCommentTargets,
   );
   yield "prepare-before";
   const preparedAfter = prepareDocument(
@@ -5393,7 +5446,6 @@ function* buildReviewDocumentSteps(
     options.sourcePath,
     options.externalBootstrap,
     runtimeVisualCandidateKeys,
-    reviewCommentTargets,
   );
   yield "prepare-after";
   return {
@@ -5407,6 +5459,7 @@ function* buildReviewDocumentSteps(
     outline,
     runtimeVisualCandidates,
     commentGroups,
+    commentTargets: reviewCommentTargets,
   };
 }
 

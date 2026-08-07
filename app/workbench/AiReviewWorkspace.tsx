@@ -119,7 +119,7 @@ type ReviewMessage = {
 const MAX_REVIEW_COMMENT_COORDINATE = 10_000_000;
 const REVIEW_RUNTIME_VISUAL_FRAME_REGISTRATION_MS = 1_500;
 
-function createReviewRuntimeVisualChallenge(): string | null {
+function createReviewCapabilityChallenge(): string | null {
   try {
     const bytes = new Uint8Array(16);
     crypto.getRandomValues(bytes);
@@ -500,6 +500,8 @@ export default function AiReviewWorkspace({
     before: null,
     after: null,
   });
+  const reviewCommentPortRef = useRef<MessagePort | null>(null);
+  const reviewCommentChannelChallengeRef = useRef<string | null>(null);
   const reviewStateRef = useRef({ filter, focus, transparency, pagePresentationPath });
   const scrollModeRef = useRef(scrollMode);
   const desktopSessions = desktopSessionResult?.documents === documents
@@ -550,6 +552,16 @@ export default function AiReviewWorkspace({
       runtimeVisualPortsRef.current[side] = null;
       runtimeVisualChannelChallengesRef.current[side] = null;
     });
+  }, []);
+
+  const closeReviewCommentChannel = useCallback(() => {
+    const port = reviewCommentPortRef.current;
+    if (port) {
+      port.onmessage = null;
+      port.close();
+    }
+    reviewCommentPortRef.current = null;
+    reviewCommentChannelChallengeRef.current = null;
   }, []);
 
   const updateCommentScrollTransform = useCallback((
@@ -705,6 +717,25 @@ export default function AiReviewWorkspace({
     });
   }, [commitRuntimeVisualFrame, documents]);
 
+  const prepareReviewCommentFrame = useCallback((
+    side: ReviewSide,
+    frame: HTMLIFrameElement,
+  ) => {
+    if (
+      side !== "before"
+      || !documents.commentTargets.length
+      || reviewCommentPortRef.current
+      || reviewCommentChannelChallengeRef.current
+    ) return;
+    const challenge = createReviewCapabilityChallenge();
+    if (!challenge) return;
+    reviewCommentChannelChallengeRef.current = challenge;
+    postToFrame(frame, sessionId, {
+      type: "request-review-comment-channel",
+      challenge,
+    });
+  }, [documents.commentTargets, sessionId]);
+
   const prepareRuntimeVisualFrame = useCallback((
     side: ReviewSide,
     frame: HTMLIFrameElement,
@@ -728,7 +759,7 @@ export default function AiReviewWorkspace({
     ) {
       coordinator.start();
       if (!runtimeVisualChannelChallengesRef.current[side]) {
-        const challenge = createReviewRuntimeVisualChallenge();
+        const challenge = createReviewCapabilityChallenge();
         if (challenge) {
           runtimeVisualChannelChallengesRef.current[side] = challenge;
           postToFrame(frame, sessionId, {
@@ -748,12 +779,15 @@ export default function AiReviewWorkspace({
     runtimeVisualCoordinatorRef.current = null;
     runtimeVisualOwnerDocumentsRef.current = documents;
     closeRuntimeVisualChannels();
+    closeReviewCommentChannel();
     runtimeVisualReadySidesRef.current = new Set();
     runtimeVisualResolutionRef.current = null;
     const drainRegisteredFrames = () => {
       (["before", "after"] as ReviewSide[]).forEach((side) => {
         const frame = framesRef.current[side];
-        if (frame) prepareRuntimeVisualFrame(side, frame);
+        if (!frame) return;
+        prepareReviewCommentFrame(side, frame);
+        prepareRuntimeVisualFrame(side, frame);
       });
     };
     if (!documents.runtimeVisualCandidates.length) {
@@ -765,6 +799,7 @@ export default function AiReviewWorkspace({
       };
       drainRegisteredFrames();
       return () => {
+        closeReviewCommentChannel();
         if (runtimeVisualOwnerDocumentsRef.current === documents) {
           runtimeVisualOwnerDocumentsRef.current = null;
         }
@@ -782,6 +817,7 @@ export default function AiReviewWorkspace({
     return () => {
       coordinator.dispose();
       closeRuntimeVisualChannels();
+      closeReviewCommentChannel();
       if (runtimeVisualCoordinatorRef.current === coordinator) {
         runtimeVisualCoordinatorRef.current = null;
       }
@@ -790,8 +826,10 @@ export default function AiReviewWorkspace({
       }
     };
   }, [
+    closeReviewCommentChannel,
     closeRuntimeVisualChannels,
     documents,
+    prepareReviewCommentFrame,
     prepareRuntimeVisualFrame,
     resolveRuntimeVisuals,
   ]);
@@ -955,6 +993,30 @@ export default function AiReviewWorkspace({
         || (message.side !== "before" && message.side !== "after")
         || event.source !== framesRef.current[message.side]?.contentWindow
       ) return;
+      if (message.type === "review-comment-channel") {
+        const port = event.ports.length === 1 ? event.ports[0] : null;
+        const expectedChallenge = reviewCommentChannelChallengeRef.current;
+        if (
+          message.side !== "before"
+          || !port
+          || typeof message.challenge !== "string"
+          || message.challenge !== expectedChallenge
+          || reviewCommentPortRef.current
+        ) {
+          port?.close();
+          return;
+        }
+        reviewCommentChannelChallengeRef.current = null;
+        reviewCommentPortRef.current = port;
+        port.postMessage({
+          source: "pageroot-ai-review-comment-targets",
+          sessionId,
+          side: "before",
+          type: "comment-targets",
+          reviewCommentTargets: documents.commentTargets,
+        });
+        return;
+      }
       if (message.type === "runtime-visual-channel") {
         const runtimeVisualSide = message.side;
         const port = event.ports.length === 1 ? event.ports[0] : null;
@@ -1100,6 +1162,7 @@ export default function AiReviewWorkspace({
     framesRef.current[side] = frame;
     runtimeVisualFrameDocumentsRef.current[side] = frame ? documents : null;
     if (frame) window.requestAnimationFrame(() => {
+      prepareReviewCommentFrame(side, frame);
       (["before", "after"] as ReviewSide[]).forEach((targetSide) => {
         const registeredFrame = framesRef.current[targetSide];
         if (registeredFrame) prepareRuntimeVisualFrame(targetSide, registeredFrame);
@@ -1118,7 +1181,7 @@ export default function AiReviewWorkspace({
         });
       }
     });
-  }, [documents, prepareRuntimeVisualFrame, sessionId]);
+  }, [documents, prepareReviewCommentFrame, prepareRuntimeVisualFrame, sessionId]);
 
   const registerViewport = useCallback((side: ReviewSide, viewport: HTMLDivElement | null) => {
     viewportsRef.current[side] = viewport;

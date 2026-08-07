@@ -29,7 +29,7 @@ const [
   readFile(new URL("../app/lib/review-scroll-sync.js", import.meta.url), "utf8"),
 ]);
 
-function generatedReviewBootstrap(candidateKeys = [], commentTargets = []) {
+function generatedReviewBootstrap(candidateKeys = []) {
   const sourceFile = ts.createSourceFile(
     "review-document.ts",
     reviewDocument,
@@ -68,7 +68,6 @@ function generatedReviewBootstrap(candidateKeys = [], commentTargets = []) {
     "review-session",
     "before",
     candidateKeys,
-    commentTargets,
   );
 }
 
@@ -487,7 +486,7 @@ test("runtime chart review supplements only the initial bounded static footprint
     review,
     /REVIEW_RUNTIME_VISUAL_FRAME_REGISTRATION_MS = 1_500/,
   );
-  assert.match(review, /createReviewRuntimeVisualChallenge/);
+  assert.match(review, /createReviewCapabilityChallenge/);
   assert.match(review, /event\.ports\.length === 1/);
   assert.match(review, /message\.challenge !== expectedChallenge/);
   assert.match(review, /coordinator\.start\(\)/);
@@ -526,23 +525,16 @@ test("runtime chart review supplements only the initial bounded static footprint
 });
 
 test("the generated runtime review bootstrap stays syntactically valid", () => {
-  const bootstrap = generatedReviewBootstrap(
-    ["runtime-host-1", "runtime-host-2"],
-    [{
-      key: "review-comment-1",
-      selector: '[data-native-case="runtime-comment-caption"]',
-      global: false,
-    }],
-  );
+  const bootstrap = generatedReviewBootstrap(["runtime-host-1", "runtime-host-2"]);
   assert.doesNotThrow(() => new vm.Script(bootstrap));
   assert.match(
     bootstrap,
     /const runtimeVisualExpectedKeys = Object\.freeze\([\s\S]*?\["runtime-host-1","runtime-host-2"\]/,
   );
-  assert.match(
-    bootstrap,
-    /const reviewCommentTargets = Object\.freeze\([\s\S]*?"review-comment-1"[\s\S]*?"global":false/,
-  );
+  assert.match(bootstrap, /const reviewCommentChannel = side === "before"/);
+  assert.match(bootstrap, /type: "review-comment-channel"/);
+  assert.match(bootstrap, /message\.type !== "comment-targets"/);
+  assert.doesNotMatch(bootstrap, /review-comment-1|runtime-comment-caption/);
 });
 
 test("formal review projects frozen user comments with invisible durable locators", () => {
@@ -562,7 +554,11 @@ test("formal review projects frozen user comments with invisible durable locator
   assert.match(reviewDocument, /:nth-\(\?:child\|of-type\)\\\(/);
   assert.match(reviewDocument, /selector\.startsWith\("#"\)/);
   assert.match(reviewDocument, /clearReviewCommentScopeAttributes\(beforeDocument\)/);
-  assert.match(reviewDocument, /const reviewCommentTargets = Object\.freeze/);
+  assert.match(reviewDocument, /commentTargets: reviewCommentTargets/);
+  assert.match(reviewDocument, /let reviewCommentTargets = \[\]/);
+  assert.match(reviewDocument, /type: "review-comment-channel"/);
+  assert.match(reviewDocument, /type === "request-review-comment-channel"/);
+  assert.doesNotMatch(reviewDocument, /\$\{JSON\.stringify\(reviewCommentTargets\)\}/);
   assert.match(reviewDocument, /side === "before"/);
   const commentLayoutStart = reviewDocument.indexOf("const reportReviewCommentLayouts");
   const commentLayoutEnd = reviewDocument.indexOf("const reportScrollGeometry", commentLayoutStart);
@@ -572,6 +568,8 @@ test("formal review projects frozen user comments with invisible durable locator
   );
   assert.match(review, /message\.side !== "before"/);
   assert.match(review, /safeReviewCommentLayouts\(message\.commentLayouts, allowedKeys\)/);
+  assert.match(review, /type: "request-review-comment-channel"/);
+  assert.match(review, /reviewCommentTargets: documents\.commentTargets/);
   assert.match(review, /commentGroups=\{documents\.commentGroups\}/);
   assert.match(review, /data-testid="review-comment-marker"/);
   assert.match(review, /data-testid="review-comment-bubble"/);
