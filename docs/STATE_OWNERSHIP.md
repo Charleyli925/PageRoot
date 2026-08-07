@@ -77,8 +77,8 @@ Rules:
   external delivery during an uncommitted close cancels that exact handshake
   before normal mailbox delivery. After close commits, the mailbox does not
   accept the request in the exiting process; its owner atomically records only
-  the latest validated path in a one-shot handoff that the next process claims
-  and deletes before normal delivery.
+  the latest validated path in a one-shot handoff that only the next
+  single-instance owner claims and deletes before normal delivery.
 - `workbench.tsx` is a composition root, not an additional state owner. It
   subscribes to session snapshots, derives read-only presentation values and
   dispatches user intent back to the owning session.

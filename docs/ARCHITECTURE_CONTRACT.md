@@ -118,10 +118,11 @@ An external delivery that arrives while the Electron close handshake is still
 awaiting the renderer cancels that exact close attempt before the request is
 published. Once close is committed, the exiting process never publishes or
 accepts another external request: it atomically writes only the latest
-validated native HTML path to a private one-shot handoff. The next launch
-claims and deletes that handoff before routing it through the same mailbox, so
-no late delivery can mutate active/recent-project authority without a matching
-renderer publication.
+validated native HTML path to a private one-shot handoff. Only the next launch
+that acquires Electron's single-instance lock claims and deletes that handoff
+before routing it through the same mailbox, so a losing secondary process
+cannot consume the request and no late delivery can mutate active/recent-project
+authority without a matching renderer publication.
 
 `ProjectApplicationSession` owns every successful local or external project
 result after main-process acceptance and before renderer publication. It keeps

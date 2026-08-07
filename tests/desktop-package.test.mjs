@@ -280,6 +280,11 @@ test("desktop package carries the v3 patch engine, candidate assessment and acti
   );
   assert.match(
     mainProcess,
+    /if \(!hasSingleInstanceLock\) \{[\s\S]*?app\.quit\(\);\s*\} else \{[\s\S]*?externalFileOpenExitHandoff\.take\(\),[\s\S]*?externalHtmlPathsFromArgv\(process\.argv\.slice\(1\)\)/,
+    "only the single-instance owner can consume a committed-exit handoff",
+  );
+  assert.match(
+    mainProcess,
     /function publishExternalFileOpen\(filePath\) \{[\s\S]*?if \(isQuitting \|\| finalExitStarted\) \{[\s\S]*?deferExternalFileOpenUntilNextLaunch\(filePath\)[\s\S]*?interruptCloseForExternalOpen\(\)[\s\S]*?externalFileOpenMailbox\.publish\(filePath\)/,
     "an external delivery cannot enter an already committed shutdown",
   );

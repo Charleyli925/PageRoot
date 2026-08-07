@@ -238,13 +238,6 @@ const externalFileOpenExitHandoff = createExternalFileOpenExitHandoff({
 });
 const projectOpenQueue = createProjectOpenQueue();
 
-for (const sourcePath of [
-  externalFileOpenExitHandoff.take(),
-  ...externalHtmlPathsFromArgv(process.argv.slice(1)),
-].filter(Boolean)) {
-  externalFileOpenMailbox.publish(sourcePath);
-}
-
 function ensurePreviewProtocolController() {
   if (!previewProtocolController) {
     previewProtocolController = createPreviewProtocolController({
@@ -2439,6 +2432,18 @@ app.on("open-file", (event, filePath) => {
 if (!hasSingleInstanceLock) {
   app.quit();
 } else {
+  // Only the process that owns Electron's single-instance lock may consume
+  // the durable one-shot record. A losing secondary process forwards its
+  // command line to the owner and must leave this record for the authoritative
+  // next launch. Keep ordinary argv opens in the same sequence so a newer
+  // launch argument still supersedes an older committed-exit handoff.
+  for (const sourcePath of [
+    externalFileOpenExitHandoff.take(),
+    ...externalHtmlPathsFromArgv(process.argv.slice(1)),
+  ].filter(Boolean)) {
+    externalFileOpenMailbox.publish(sourcePath);
+  }
+
   app.on("second-instance", (_event, commandLine) => {
     captureUsage("app_launched", { launch_reason: "second_instance" });
     for (const sourcePath of externalHtmlPathsFromArgv(commandLine)) {
