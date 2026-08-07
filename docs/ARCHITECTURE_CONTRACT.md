@@ -72,7 +72,7 @@ The renderer's main workspace facts are partitioned as follows:
 - `SourceHistorySession`: pending exact Patch operations and history action.
 - `ExternalFileOpenSession`: opaque external-open delivery IDs, one active
   switch, newest queued request, deferred safe-switch retry and stale-result
-  fencing.
+  fencing for work that has not yet been accepted.
 
 `CommentSession` does not replace the Draft aggregate or Bridge CAS authority,
 and `VersionSession` does not make mutable copies of immutable Version files.
@@ -97,18 +97,21 @@ active-project transition its FIFO position at entry, shared by local picker,
 recent-project, external, startup, generated-version, rename and forget
 routes. The renderer's `ExternalFileOpenSession` owns delivery de-duplication,
 one active request, one newest queued request and a deferred retry when the
-normal project-switch boundary cannot yet close safely. It must fence an older
-result before publication when a newer request is queued, and it freezes the
-Canvas from the final safe switch fence through the awaited external acceptance;
-a newer external request inherits that freeze. If the final fence captures a
-post-cutoff native edit, it does not begin the IPC, releases that edit to normal
-persistence, and retries only after the source is safe. A successfully accepted
-external project is published even when a newer request is queued; the newer
-request replaces it only after its own successful acceptance, so a failed
-successor cannot split visible and durable authority. Ordinary Workbench
-project-picker retry state may not carry the external protocol. Thus a slow
-older request cannot leave renderer state, active-file state or recent-project
-state pointing at different sources, nor discard a post-cutoff native edit.
+normal project-switch boundary cannot yet close safely. It fences only an
+older request that has not yet been accepted when a newer request is queued,
+and it freezes the Canvas from the final safe switch fence through the awaited
+external acceptance; a newer external request inherits that freeze. Its
+snapshot is observed by Workbench, so each newly deferred request re-enters the
+normal safe-switch retry evaluation even when no other persistence state
+changes. If the final fence captures a post-cutoff native edit, it does not
+begin the IPC, releases that edit to normal persistence, and retries only after
+the source is safe. A successfully accepted external project is published even
+when a newer request is queued; the newer request replaces it only after its
+own successful acceptance, so a failed successor cannot split visible and
+durable authority. Ordinary Workbench project-picker retry state may not carry
+the external protocol. Thus a slow older request cannot leave renderer state,
+active-file state or recent-project state pointing at different sources, nor
+discard a post-cutoff native edit.
 
 A transition that changes the current source or Version has two phases. The
 asynchronous phase prepares and validates one complete candidate: project and

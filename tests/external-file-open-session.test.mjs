@@ -95,6 +95,22 @@ test("external file session deduplicates opaque deliveries and retains one defer
   assert.equal(session.snapshot.status, "idle");
 });
 
+test("external file session notifies the renderer when a request becomes deferred", async () => {
+  const session = new ExternalFileOpenSession();
+  const snapshots = [];
+  session.setObserver((snapshot) => snapshots.push(snapshot));
+
+  assert.equal(session.enqueue(request("retry"), async () => "deferred"), true);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(snapshots.at(-1), {
+    status: "deferred",
+    activeRequestId: null,
+    queuedRequestId: null,
+    deferredRequestId: "external_retry",
+  });
+});
+
 test("a newer external request supersedes a deferred request before it resumes", async () => {
   const session = new ExternalFileOpenSession();
   const calls = [];

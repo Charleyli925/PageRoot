@@ -106,6 +106,7 @@ import { DrainCoordinator } from "./application/drain-coordinator.js";
 import {
   ExternalFileOpenSession,
   type ExternalFileOpenRequest,
+  type ExternalFileOpenSnapshot,
 } from "./application/external-file-open-session.js";
 import {
   RuntimeVisualProjectionSession,
@@ -328,6 +329,12 @@ const INITIAL_RUN_SNAPSHOT: RunSessionSnapshot = {
   activeHandoffMayBeRunning: false,
   recentOutcome: null,
   backgroundResults: [],
+};
+const INITIAL_EXTERNAL_FILE_OPEN_SNAPSHOT: ExternalFileOpenSnapshot = {
+  status: "idle",
+  activeRequestId: null,
+  queuedRequestId: null,
+  deferredRequestId: null,
 };
 const INITIAL_VERSION_SNAPSHOT: VersionSessionSnapshot<Version> = {
   versions: [],
@@ -621,6 +628,12 @@ export default function Workbench() {
 
   const [documentSnapshot, setDocumentSnapshot] =
     useState<DocumentSessionSnapshot>(INITIAL_DOCUMENT_SNAPSHOT);
+  const [externalFileOpenSnapshot, setExternalFileOpenSnapshot] =
+    useState<ExternalFileOpenSnapshot>(INITIAL_EXTERNAL_FILE_OPEN_SNAPSHOT);
+  const externalDeferredRequestId =
+    externalFileOpenSnapshot.status === "deferred"
+      ? externalFileOpenSnapshot.deferredRequestId
+      : null;
   const html = documentSnapshot.html;
   const sourceSha256 = documentSnapshot.sourceSha256;
   const canvasGeneration = documentSnapshot.canvasGeneration;
@@ -818,7 +831,15 @@ export default function Workbench() {
     session.setObserver(setRuntimeVisualProjectionSnapshot);
     return () => session.dispose();
   }, []);
-  useEffect(() => () => externalFileOpenSessionRef.current.dispose(), []);
+  useEffect(() => {
+    const session = externalFileOpenSessionRef.current;
+    // Deferred external opens are owned by the session. Publishing its
+    // snapshot makes the normal safe-switch retry effect react to a newly
+    // deferred request even when no ordinary persistence state has changed.
+    session.setObserver(setExternalFileOpenSnapshot);
+    setExternalFileOpenSnapshot(session.snapshot);
+    return () => session.dispose();
+  }, []);
   useEffect(() => {
     const session = projectRulesSessionRef.current;
     session.setObserver((snapshot) => {
@@ -5517,7 +5538,7 @@ export default function Workbench() {
   useEffect(() => {
     const pending = pendingProjectOpenRef.current;
     const externalOpenSession = externalFileOpenSessionRef.current;
-    if (!pending && externalOpenSession.snapshot.status !== "deferred") return;
+    if (!pending && !externalDeferredRequestId) return;
     const projectRulesUnsaved = projectRulesSessionRef.current
       .inspect({ locked: projectLockedRef.current }).state !== "resolved";
     const draftState = draftSessionRef.current.inspect();
@@ -5547,6 +5568,7 @@ export default function Workbench() {
     draftPersistError,
     attachmentUploadCount,
     editRevision,
+    externalDeferredRequestId,
     generating,
     lastPersistedRevision,
     openExternalProject,

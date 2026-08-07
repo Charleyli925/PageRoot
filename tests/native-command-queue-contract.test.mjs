@@ -410,6 +410,50 @@ test("external HTML activation holds the canvas fence through main-process accep
   );
 });
 
+test("deferred external opens publish their session snapshot for retry", () => {
+  const observer = section(
+    workbench,
+    "const session = externalFileOpenSessionRef.current;",
+    "const session = projectRulesSessionRef.current;",
+  );
+  const retry = section(
+    workbench,
+    "const pending = pendingProjectOpenRef.current;",
+    "const showProjectInFolder = useCallback",
+  );
+
+  assert.match(
+    workbench,
+    /const \[externalFileOpenSnapshot, setExternalFileOpenSnapshot\] =[\s\S]*?useState<ExternalFileOpenSnapshot>/u,
+    "Workbench must project ExternalFileOpenSession state into React",
+  );
+  assert.match(
+    observer,
+    /session\.setObserver\(setExternalFileOpenSnapshot\);[\s\S]*?setExternalFileOpenSnapshot\(session\.snapshot\);/u,
+    "the external session observer must seed and update the React snapshot",
+  );
+  assert.match(
+    workbench,
+    /const externalDeferredRequestId =[\s\S]*?externalFileOpenSnapshot\.status === "deferred"[\s\S]*?externalFileOpenSnapshot\.deferredRequestId/u,
+    "only a deferred owner snapshot may schedule retry",
+  );
+  assert.match(
+    retry,
+    /if \(!pending && !externalDeferredRequestId\) return;/u,
+    "a new deferred request must re-enter the normal retry effect",
+  );
+  assert.match(
+    retry,
+    /\}, \[[\s\S]*?externalDeferredRequestId/u,
+    "the retry effect must subscribe to deferred request identity",
+  );
+  assert.doesNotMatch(
+    retry,
+    /externalOpenSession\.snapshot\.status/u,
+    "retry cannot poll mutable session state without its observer snapshot",
+  );
+});
+
 test("desktop project opens publish successful FIFO predecessors", () => {
   const localOpen = section(
     workbench,

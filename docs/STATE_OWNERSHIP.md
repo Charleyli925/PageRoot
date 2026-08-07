@@ -4,7 +4,7 @@
 | --- | --- | --- | --- |
 | Open source locator before first durable action, registered identity, renderer generation and late-query fence | Renderer `ProjectSession` | active-file record before registration; project registry and `project.json` afterwards | Workbench composition root and all durable sessions |
 | Latest unaccepted OS/QoderWork HTML-open request plus FIFO active/recent-project transitions | Main-process external-file-open mailbox and `ProjectOpenQueue` | in-memory for the current app process; no renderer-supplied path authority | preload lifecycle delivery, startup adoption and trusted project IPC |
-| External HTML request IDs, active/queued/deferred renderer delivery and stale-result fence | Renderer `ExternalFileOpenSession` | none; bounded in-memory state only | Workbench composition root and the project-switch boundary |
+| External HTML request IDs, active/queued/deferred renderer delivery, snapshot notification and unaccepted-result fence | Renderer `ExternalFileOpenSession` | none; bounded in-memory state only | Workbench composition root and the project-switch boundary |
 | Registered mutation context resolution and atomic-replacement source observation | Bridge project-context service | project/document registry graph plus the owning runtime `pendingWrite` target Hash | Bridge mutation routes and `/project/ensure` |
 | Explicit source filename transition, pending operation and active/recent path rebase | Desktop source-rename transaction | active-file `pendingRename` / `lastRename`, then filesystem path | project session, Bridge relink, views |
 | Current source bytes, Hash, edit revision, persistence projection, pending write, single-flight source flush, Canvas authority generation and exact-byte boundary reconciliation | Renderer `DocumentSession` | source HTML, runtime autosave record and recovery log; the generation itself is disposable | Canvas, preview readiness, source-history session and drain coordinator |
@@ -50,14 +50,16 @@ Rules:
   state boundary. The renderer `ExternalFileOpenSession` deduplicates delivery
   IDs and owns active, queued and deferred switching; Workbench's ordinary
   project-picker retry ref never stores an external request. A newer queued
-  external request fences the older renderer result and inherits its Canvas
-  freeze. If the final pre-IPC fence itself captures a post-cutoff native edit,
-  no external activation starts; that edit returns to normal persistence before
-  the session retries. An accepted project publishes before a later queued
-  request runs, and that later request replaces it only on success. The final
-  visible project and the main-process active/recent source therefore stay
-  aligned without discarding input or losing a prior successful open to a
-  failed successor.
+  external request fences only older work that has not yet been accepted and
+  inherits its Canvas freeze. The session emits a snapshot when a request
+  enters `deferred`, so Workbench re-evaluates the safe-switch retry even when
+  no unrelated state changes. If the final pre-IPC fence itself captures a
+  post-cutoff native edit, no external activation starts; that edit returns to
+  normal persistence before the session retries. An accepted project publishes
+  before a later queued request runs, and that later request replaces it only
+  on success. The final visible project and the main-process active/recent
+  source therefore stay aligned without discarding input or losing a prior
+  successful open to a failed successor.
 - `workbench.tsx` is a composition root, not an additional state owner. It
   subscribes to session snapshots, derives read-only presentation values and
   dispatches user intent back to the owning session.
