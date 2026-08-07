@@ -73,22 +73,24 @@ test("runtime visual snapshots accept only bounded declared host facts", () => {
   ), null);
 });
 
-test("comment-scoped runtime candidates take the bounded comparison slots first", () => {
+test("comment target and nearest-group runtime candidates take bounded slots first", () => {
   const ordinary = Array.from({ length: 129 }, (_, index) => ({
     key: `ordinary-${index + 1}`,
     commentPriority: 0,
   }));
-  const ancestorComment = { key: "ancestor-comment", commentPriority: 1 };
-  const directComment = { key: "direct-comment", commentPriority: 2 };
-  const input = [...ordinary, ancestorComment, directComment];
+  const adjacentChart = { key: "adjacent-chart", commentPriority: 1 };
+  const ancestorComment = { key: "ancestor-comment", commentPriority: 2 };
+  const directComment = { key: "direct-comment", commentPriority: 3 };
+  const input = [...ordinary, adjacentChart, ancestorComment, directComment];
   const selected = selectPrioritizedReviewRuntimeVisualCandidates(input);
 
   assert.equal(selected.length, 128);
   assert.equal(selected[0], directComment);
   assert.equal(selected[1], ancestorComment);
+  assert.equal(selected[2], adjacentChart);
   assert.deepEqual(
-    selected.slice(2).map(({ key }) => key),
-    ordinary.slice(0, 126).map(({ key }) => key),
+    selected.slice(3).map(({ key }) => key),
+    ordinary.slice(0, 125).map(({ key }) => key),
   );
   assert.equal(input[0], ordinary[0], "selection must not reorder the source list");
 });

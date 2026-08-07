@@ -140,10 +140,13 @@ Rules:
   declares an ordinary host only when the changed authored script directly
   references that host's distinctive source identity. A source-empty host
   directly targeted by, or nested beneath, a frozen non-global review comment
-  may instead use the opaque comment target as explicit local scope and is
-  selected before ordinary hosts under the same 128-candidate limit. Global
-  comments do not widen runtime scope, and ordinary section co-location is not
-  enough.
+  may instead use the opaque comment target as explicit local scope. The first
+  ancestor of that target containing at least two pairable hosts inside the
+  current review section owns a lower-priority nearest-group scope for its
+  sibling charts. Direct, contained and nearest-group hosts are selected in that
+  order before ordinary hosts under the same 128-candidate limit. Global
+  comments do not widen runtime scope, the group cannot cross its section, and
+  ordinary group-external section co-location is not enough.
   The bootstrap binds its evidence-reading DOM/style/Canvas primitives before
   authored scripts run, owns the frozen analyzer-declared host-key set and
   records the parser-created element that first claims every key. Undeclared

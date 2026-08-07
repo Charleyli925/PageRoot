@@ -558,7 +558,10 @@ test("a verified AI result stays pending through desktop review until the user a
       <div id="review-runtime-flow-chart" class="review-runtime-chart-host"></div>
       <div id="review-runtime-unstable-chart" class="review-runtime-chart-host"></div>
       <div id="review-runtime-unrelated-random-chart" class="review-runtime-chart-host"></div>
-      <div id="review-runtime-comment-chart" class="review-runtime-chart-host" data-native-case="runtime-comment-chart" style="display:block;min-height:78px"></div>
+      <div data-review-runtime-comment-group style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div id="review-runtime-comment-chart" class="review-runtime-chart-host" data-native-case="runtime-comment-chart" style="display:block;min-height:78px"></div>
+        <div id="review-runtime-comment-adjacent-chart" class="review-runtime-chart-host" style="display:block;min-height:78px"></div>
+      </div>
       <script>document.documentElement.dataset.reviewRuntimeSectionVariant = "before";</script>
     </section>
     <section data-review-runtime-static-covered-section>
@@ -602,10 +605,12 @@ test("a verified AI result stays pending through desktop review until the user a
     </script>
     <script>
       const runtimeCommentChart = document.querySelector("#review-runtime-comment-chart");
+      const runtimeCommentAdjacentChart = document.querySelector("#review-runtime-comment-adjacent-chart");
       const runtimeCommentPalette = window.reviewRuntimeCommentPalette;
-      runtimeCommentChart.innerHTML = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:14px;border:1px solid #d9dcec;border-radius:12px">'
-        + '<span style="height:48px;background:' + runtimeCommentPalette[0] + '">综搜电商意图</span>'
-        + '<span style="height:48px;background:' + runtimeCommentPalette[1] + '">商城搜</span></div>';
+      runtimeCommentChart.innerHTML = '<div style="padding:14px;border:1px solid #d9dcec;border-radius:12px">'
+        + '<div style="height:48px;background:' + runtimeCommentPalette[0] + '">综搜电商意图</div></div>';
+      runtimeCommentAdjacentChart.innerHTML = '<div style="padding:14px;border:1px solid #d9dcec;border-radius:12px">'
+        + '<div style="height:48px;background:' + runtimeCommentPalette[1] + '">商城搜</div></div>';
     </script>
     <script>
       document.querySelectorAll("[data-review-tab-button]").forEach((button) => {
@@ -1095,6 +1100,7 @@ test("a verified AI result stays pending through desktop review until the user a
       "#review-runtime-svg-descendant-opacity-chart",
       "#review-runtime-svg-root-chart",
       "#review-runtime-comment-chart",
+      "#review-runtime-comment-adjacent-chart",
     ];
     for (const selector of runtimeChangedHosts) {
       await expect(beforeReviewFrame.locator(selector)).toHaveAttribute(

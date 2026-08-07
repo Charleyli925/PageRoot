@@ -369,6 +369,8 @@ const REVIEW_RUNTIME_VISUAL_SOURCE_BOX_ATTRIBUTES = [
 ];
 const REVIEW_COMMENT_KEY_ATTRIBUTE = "data-pageroot-review-comment-key";
 const REVIEW_COMMENT_GLOBAL_ATTRIBUTE = "data-pageroot-review-comment-global";
+const REVIEW_COMMENT_MARKUP_ATTRIBUTE_PATTERN =
+  /\sdata-pageroot-review-comment-(?:key|global)="[^"]*"/gu;
 const RUNTIME_VISUAL_HOST_SELECTOR = [
   "article",
   "aside",
@@ -463,6 +465,7 @@ function normalizedMarkup(element: Element): string {
   const cached = normalizedMarkupCache.get(element);
   if (cached !== undefined) return cached;
   const value = element.outerHTML
+    .replace(REVIEW_COMMENT_MARKUP_ATTRIBUTE_PATTERN, "")
     .replace(/\s+/g, " ")
     .replace(/>\s+</g, "><")
     .trim();
@@ -483,6 +486,10 @@ function ancestorMarkupSignature(element: Element): string {
     ancestors.push([
       current.tagName,
       [...current.attributes]
+        .filter((attribute) => (
+          attribute.name !== REVIEW_COMMENT_KEY_ATTRIBUTE
+          && attribute.name !== REVIEW_COMMENT_GLOBAL_ATTRIBUTE
+        ))
         .map((attribute) => `${attribute.name}=${attribute.value}`)
         .sort()
         .join("\u001f"),
@@ -1488,14 +1495,50 @@ function isLocalReviewCommentTarget(element: Element): boolean {
     && element.getAttribute(REVIEW_COMMENT_GLOBAL_ATTRIBUTE) !== "true";
 }
 
-function runtimeVisualCommentPriority(host: Element): number {
-  if (isLocalReviewCommentTarget(host)) return 2;
+function runtimeVisualCommentMatch(host: Element): {
+  priority: number;
+  target: Element;
+} | null {
+  if (isLocalReviewCommentTarget(host)) return { priority: 3, target: host };
   let candidate = host.parentElement;
   while (candidate) {
-    if (isLocalReviewCommentTarget(candidate)) return 1;
+    if (isLocalReviewCommentTarget(candidate)) {
+      return { priority: 2, target: candidate };
+    }
     candidate = candidate.parentElement;
   }
-  return 0;
+  return null;
+}
+
+function runtimeVisualHostAncestorCounts(
+  sectionRoot: Element,
+  hostPairs: readonly ReviewRuntimeHostPair[],
+): Map<Element, number> {
+  const counts = new Map<Element, number>();
+  hostPairs.forEach((hostPair) => {
+    let candidate: Element | null = hostPair.before;
+    while (candidate) {
+      counts.set(candidate, (counts.get(candidate) || 0) + 1);
+      if (candidate === sectionRoot) break;
+      candidate = candidate.parentElement;
+    }
+  });
+  return counts;
+}
+
+function nearestRuntimeVisualCommentGroup(
+  target: Element,
+  sectionRoot: Element,
+  hostAncestorCounts: ReadonlyMap<Element, number>,
+): Element | null {
+  if (target !== sectionRoot && !sectionRoot.contains(target)) return null;
+  let candidate: Element | null = target;
+  while (candidate) {
+    if ((hostAncestorCounts.get(candidate) || 0) >= 2) return candidate;
+    if (candidate === sectionRoot) return null;
+    candidate = candidate.parentElement;
+  }
+  return null;
 }
 
 function staticReviewMarkerCoversRuntimeHost(
@@ -1542,8 +1585,39 @@ function annotateRuntimeVisualCandidates(
   const usedAfter = new Set<Element>();
   sections.forEach((section) => {
     if (!section.pair.before || !section.pair.after) return;
-    pairRuntimeVisualHosts(section.pair.before, section.pair.after).forEach((hostPair) => {
-      const commentPriority = runtimeVisualCommentPriority(hostPair.before);
+    const hostPairs = pairRuntimeVisualHosts(section.pair.before, section.pair.after);
+    const hostAncestorCounts = runtimeVisualHostAncestorCounts(
+      section.pair.before,
+      hostPairs,
+    );
+    const commentMatches = new Map<Element, ReturnType<typeof runtimeVisualCommentMatch>>();
+    const commentGroups = new Set<Element>();
+    const commentGroupByTarget = new Map<Element, Element | null>();
+    hostPairs.forEach((hostPair) => {
+      const match = runtimeVisualCommentMatch(hostPair.before);
+      commentMatches.set(hostPair.before, match);
+      if (!match) return;
+      let group = commentGroupByTarget.get(match.target);
+      if (!commentGroupByTarget.has(match.target)) {
+        group = nearestRuntimeVisualCommentGroup(
+          match.target,
+          section.pair.before as Element,
+          hostAncestorCounts,
+        );
+        commentGroupByTarget.set(match.target, group);
+      }
+      if (group) commentGroups.add(group);
+    });
+    hostPairs.forEach((hostPair) => {
+      let commentPriority = commentMatches.get(hostPair.before)?.priority || 0;
+      if (!commentPriority) {
+        for (const group of commentGroups) {
+          if (group === hostPair.before || group.contains(hostPair.before)) {
+            commentPriority = 1;
+            break;
+          }
+        }
+      }
       if (
         usedBefore.has(hostPair.before)
         || usedAfter.has(hostPair.after)

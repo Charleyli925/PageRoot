@@ -172,10 +172,14 @@ runtime batch and leaves static review authoritative; a validated unavailable
 host has no comparison authority and does not grant authority to or suppress a
 different host. Candidate declaration requires either a changed-script reference
 to the unique source-empty host or a frozen non-global opaque comment target on
-that host or an ancestor. The latter is only local scope evidence and takes
-bounded candidate slots first; comment text never enters either frame, a global
-comment never authorizes page-wide capture, and every later identity, stability,
-budget and transport check remains unchanged. The trusted bootstrap creates a `MessageChannel` and binds
+that host or an ancestor. The first ancestor of such a target containing at
+least two pairable hosts inside the same high-confidence review section may also
+grant lower-priority scope to its sibling hosts. The group cannot cross its
+section or derive from visual distance; comment text never enters either frame,
+a global comment never authorizes page-wide capture, and the opaque comment
+attributes are excluded from static pairing evidence so they cannot manufacture
+a change. Every later identity, stability, budget and transport check remains
+unchanged. The trusted bootstrap creates a `MessageChannel` and binds
 the DOM traversal, attribute, layout, computed-style, Canvas, string
 normalization/digest, and Promise/timer/animation scheduling primitives used for evidence before any
 authored script runs. Its bounded font wait composes only captured Promise capabilities, so it never re-reads

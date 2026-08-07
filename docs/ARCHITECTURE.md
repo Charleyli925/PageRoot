@@ -133,9 +133,14 @@ Comments + frozen input
   reference its distinctive identity. A host directly targeted by, or contained
   beneath, a frozen non-global review comment is instead admitted as explicit
   local user scope, even when a changed palette/data/config script and the stable
-  host-binding script are separate. Comment-scoped hosts take the bounded 128
-  candidate slots first. A global comment does not authorize the page, and
-  ordinary script co-location inside the same section is not causal evidence.
+  host-binding script are separate. Within the same high-confidence review
+  section, the analyzer also admits pairable sibling hosts in the first ancestor
+  of that comment target containing at least two hosts. It does not cross a
+  section, infer visual distance or inspect comment text. Group discovery uses
+  one source-DOM ancestor-count pass per section and performs no layout read.
+  Direct, contained and nearest-group hosts take the bounded 128 candidate slots in that order. A
+  global comment does not authorize the page, and ordinary group-external script
+  co-location inside the same section is not causal evidence.
   The owned bootstrap binds the DOM traversal, attribute, layout,
   computed-style and Canvas primitives before authored scripts execute and is
   given the analyzer's exact candidate-key list. Its early mutation observer

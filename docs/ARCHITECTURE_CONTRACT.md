@@ -211,10 +211,15 @@ requires a relevant changed authored script that directly references its
 distinctive identity. A host directly targeted by, or nested below, a frozen
 non-global review comment may instead use that opaque local target as scope
 evidence, so split palette/data/config and host-binding scripts remain
-detectable. These comment-scoped hosts are selected before ordinary hosts under
-the same 128-candidate cap. A global comment never authorizes page-wide runtime
-capture, and merely placing another changed script in the same section remains
-insufficient causal evidence.
+detectable. Within that high-confidence review section, the first ancestor of
+the target containing at least two pairable source-empty hosts defines one
+nearest chart group; its sibling hosts may use lower-priority local scope
+evidence without parsing comment text or inferring visual distance. Direct,
+contained and nearest-group hosts are selected in that order before ordinary
+hosts under the same 128-candidate cap. A global comment never authorizes
+page-wide runtime capture, the group cannot cross its section, and merely
+placing another changed script elsewhere in the section remains insufficient
+causal evidence.
 The trusted first bootstrap must bind the DOM/style/Canvas collection,
 string-normalization/digest and Promise/timer/animation scheduling entry points
 before authored scripts run. Its bounded font wait must use only captured Promise

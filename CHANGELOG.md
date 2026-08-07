@@ -6,9 +6,10 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 - Fixed formal AI review missing chart palette, data, or configuration changes
   when the changed script did not directly name the rendered chart host. A
-  source-empty chart inside a saved local comment target is now compared before
-  ordinary runtime candidates, while global comments and un-commented regions
-  retain the existing strict host-reference gate and bounded evidence budget.
+  source-empty chart inside a saved local comment target, plus pairable sibling
+  charts in its nearest multi-chart group, is now compared before ordinary
+  runtime candidates. Global comments, charts outside that group, and other
+  un-commented regions retain the strict host-reference gate and bounded budget.
 
 ## [0.9.7] - 2026-08-07
 
