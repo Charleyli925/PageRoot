@@ -5398,32 +5398,62 @@ export default function Workbench() {
     }
     if (isSuperseded()) return "complete";
 
+    // prepareProjectSwitch() closes the current edit and persistence drain, but
+    // the external main-process read can still take time. Take an imperative
+    // fence immediately before that awaited boundary so post-cutoff native
+    // input cannot be reset when the accepted project is applied below.
+    let canvasFrozen = false;
+    if (
+      projectSessionRef.current.sourcePath
+      && !projectLoadErrorRef.current
+      && viewMode !== "history"
+    ) {
+      const freezeCutoffRevision = documentSessionRef.current.editRevision;
+      const frozen = fenceAndFreezeCurrentCanvas(
+        "当前编辑画布尚未完成安全收口，暂不能切换 QoderWork 中的 HTML。",
+      );
+      if (!frozen.ok) return "deferred";
+      canvasFrozen = true;
+      if (
+        documentSessionRef.current.editRevision !== freezeCutoffRevision
+        || documentSessionRef.current.pendingWrite
+        || documentSessionRef.current.flushPromise
+      ) {
+        // freezeNow() captured a native input delivered after the prior switch
+        // drain. Do not start external activation; return this exact edit to
+        // normal persistence and retry the switch only after it is safe.
+        editorRef.current?.unlockNow?.();
+        return "deferred";
+      }
+    }
+
     pendingProjectOpenRef.current = null;
     setProjectMenuOpen(false);
     const openRequest = projectOpenRequestRef.current + 1;
     projectOpenRequestRef.current = openRequest;
     const acceptExternalOpen = window.htmlAIProjects?.acceptExternalOpen;
-    if (!acceptExternalOpen) {
-      if (!isSuperseded()) {
-        setToast({
-          title: "无法接收外部 HTML",
-          message: "当前 PageRoot 版本缺少外部文件打开通道，请重新安装最新版本。",
-          tone: "error",
-          sticky: true,
-          disposition: "background-result",
-          dedupeKey: "external-project-open-unavailable",
-        });
-      }
-      return "complete";
-    }
-
+    let appliedProject = false;
     try {
+      if (!acceptExternalOpen) {
+        if (!isSuperseded()) {
+          setToast({
+            title: "无法接收外部 HTML",
+            message: "当前 PageRoot 版本缺少外部文件打开通道，请重新安装最新版本。",
+            tone: "error",
+            sticky: true,
+            disposition: "background-result",
+            dedupeKey: "external-project-open-unavailable",
+          });
+        }
+        return "complete";
+      }
       const project = await acceptExternalOpen(request.requestId);
       if (isSuperseded() || openRequest !== projectOpenRequestRef.current) {
         return "complete";
       }
       setStartupIssue(null);
       applyProject(project);
+      appliedProject = true;
       const epoch = projectSessionRef.current.epoch;
       await Promise.all([
         refreshRecents(),
@@ -5444,9 +5474,23 @@ export default function Workbench() {
         disposition: "background-result",
         dedupeKey: "external-project-open-error",
       });
+    } finally {
+      // A newer external request inherits this fence. Any final failure leaves
+      // the current source untouched, so release it only once the external
+      // session has no newer request waiting to take authority.
+      if (canvasFrozen && !appliedProject && !isSuperseded()) {
+        editorRef.current?.unlockNow?.();
+      }
     }
     return "complete";
-  }, [applyProject, prepareProjectSwitch, refreshRecents, refreshWorkspace]);
+  }, [
+    applyProject,
+    fenceAndFreezeCurrentCanvas,
+    prepareProjectSwitch,
+    refreshRecents,
+    refreshWorkspace,
+    viewMode,
+  ]);
 
   useEffect(() => {
     const lifecycle = window.htmlAIAppLifecycle;

@@ -89,17 +89,23 @@ projectId + documentId + sourcePath + session generation + query sequence
 Revisions are monotonic. A query result with an older revision may never
 replace an acknowledged state, even if the project identity is unchanged.
 
-External HTML delivery is separately serialized. The main-process mailbox
-accepts only a validated, opaque `.html`/`.htm` request ID, replaces an older
-unaccepted OS request with the newer one, and runs the complete
-read-plus-active-project mutation in FIFO order. The renderer's
-`ExternalFileOpenSession` owns delivery de-duplication, one active request,
-one newest queued request and a deferred retry when the normal project-switch
-boundary cannot yet close safely. It must fence an older result before
-publication when a newer request is queued; ordinary Workbench project-picker
-retry state may not carry that protocol. Thus a slow older request cannot
-leave renderer state, active-file state or recent-project state pointing at
-different sources.
+External HTML delivery is separately authorized but not separately ordered.
+The main-process mailbox accepts only a validated, opaque `.html`/`.htm`
+request ID and replaces an older unaccepted OS request with the newer one.
+`ProjectOpenQueue` then assigns the whole picker/read/Bridge-check and
+active-project transition its FIFO position at entry, shared by local picker,
+recent-project, external, startup, generated-version, rename and forget
+routes. The renderer's `ExternalFileOpenSession` owns delivery de-duplication,
+one active request, one newest queued request and a deferred retry when the
+normal project-switch boundary cannot yet close safely. It must fence an older
+result before publication when a newer request is queued, and it freezes the
+Canvas from the final safe switch fence through the awaited external acceptance;
+a newer external request inherits that freeze. If the final fence captures a
+post-cutoff native edit, it does not begin the IPC, releases that edit to normal
+persistence, and retries only after the source is safe. Ordinary Workbench
+project-picker retry state may not carry the external protocol. Thus a slow
+older request cannot leave renderer state, active-file state or recent-project
+state pointing at different sources, nor discard a post-cutoff native edit.
 
 A transition that changes the current source or Version has two phases. The
 asynchronous phase prepares and validates one complete candidate: project and

@@ -10,8 +10,10 @@ Notable user-visible changes are documented here. This project follows Semantic 
   HTML editor. Selecting it now opens the exact current `.html` or `.htm`
   source in PageRoot whether the app is closed or already running, while
   preserving the user's current edits before switching projects. Rapid external
-  open requests now finish in order and cannot leave PageRoot displaying an
-  older file after a newer request has become active.
+  open requests and ordinary local project opens now share one durable order,
+  cannot leave PageRoot displaying an older file after a newer request has
+  become active, and keep the Canvas frozen while external activation is still
+  in flight.
 - Update the shared `js-yaml` dependency closure to 4.3.1, removing the
   high-severity parsing advisory without changing the packaged runtime shape.
 - Bring the review-first AI workflow into the public README, built-in welcome

@@ -100,6 +100,7 @@ test("desktop package carries the v3 patch engine, candidate assessment and acti
   assert.ok(packageJson.build.files.includes("!node_modules/**/*"));
   assert.ok(packageJson.build.files.includes("desktop/preload.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/external-file-open.mjs"));
+  assert.ok(packageJson.build.files.includes("desktop/project-open-queue.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/project-files.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/source-rename.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/project-path-policy.mjs"));
@@ -248,6 +249,23 @@ test("desktop package carries the v3 patch engine, candidate assessment and acti
   assert.match(mainProcess, /PROJECT_CHANNELS\.revealRequestFolder/);
   assert.match(mainProcess, /PROJECT_CHANNELS\.forgetRecent/);
   assert.match(mainProcess, /PROJECT_CHANNELS\.acceptExternalOpen/);
+  assert.match(mainProcess, /const projectOpenQueue = createProjectOpenQueue\(\)/);
+  assert.match(
+    mainProcess,
+    /async function openExternalFileRequest[\s\S]*?projectOpenQueue\.run\([\s\S]*?readHtmlProject\(request\.sourcePath\)[\s\S]*?activateProject\(project\.sourcePath\)/,
+  );
+  assert.match(
+    mainProcess,
+    /async function openHtml[\s\S]*?projectOpenQueue\.run\([\s\S]*?dialog\.showOpenDialog[\s\S]*?readHtmlProject\(result\.filePaths\[0\]\)[\s\S]*?activateProject\(project\.sourcePath\)/,
+  );
+  assert.match(
+    mainProcess,
+    /async function openRecent[\s\S]*?projectOpenQueue\.run\([\s\S]*?readHtmlProject\(normalizedPath\)[\s\S]*?activateProject\(project\.sourcePath\)/,
+  );
+  assert.match(
+    mainProcess,
+    /async function activateGeneratedVersion\(payload\)[\s\S]*?projectOpenQueue\.run\(\(\) => activateGeneratedVersionOperation\(payload\)\)/,
+  );
   assert.match(
     mainProcess,
     /async function acceptExternalFileOpen[\s\S]*?externalFileOpenMailbox\.accept\(\s*payload\.requestId,\s*openExternalFileRequest,\s*\)[\s\S]*?return operation/,

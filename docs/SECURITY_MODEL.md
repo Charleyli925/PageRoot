@@ -29,8 +29,9 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
 - External OS/QoderWork opening accepts only a validated absolute `.html` or
   `.htm` path behind a main-process-created opaque request ID. The renderer may
   consume that ID once but cannot substitute a path; stale IDs are rejected,
-  and the main process serializes validation, reading and active-project
-  mutation so an older request cannot overwrite the newer active source.
+  and the main-process project-open queue serializes its validation, reading
+  and active-project mutation with every other active/recent-project transition
+  so an older request cannot overwrite the newer active source.
 - Desktop interactive preview runs under a dedicated `pageroot-preview:`
   origin. Its main-process session is size/count/time bounded, exposes no
   PageRoot preload bridge, and serves only a session-specific allowlist of

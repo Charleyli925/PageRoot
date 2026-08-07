@@ -58,6 +58,7 @@ import {
   createExternalFileOpenMailbox,
   externalHtmlPathsFromArgv,
 } from "./external-file-open.mjs";
+import { createProjectOpenQueue } from "./project-open-queue.mjs";
 import { assertTrustedRendererEvent } from "./project-ipc-security.mjs";
 import {
   closeAbortPayload,
@@ -229,6 +230,7 @@ let previewProtocolController = null;
 let editVisualCaptureController = null;
 const workspaceRecoveryMailbox = createWorkspaceRecoveryMailbox();
 const externalFileOpenMailbox = createExternalFileOpenMailbox();
+const projectOpenQueue = createProjectOpenQueue();
 
 for (const sourcePath of externalHtmlPathsFromArgv(process.argv.slice(1))) {
   externalFileOpenMailbox.publish(sourcePath);
@@ -703,9 +705,11 @@ function publishExternalFileOpen(filePath) {
 }
 
 async function openExternalFileRequest(request) {
-  const project = await readHtmlProject(request.sourcePath);
-  await activateProject(project.sourcePath);
-  return project;
+  return projectOpenQueue.run(async () => {
+    const project = await readHtmlProject(request.sourcePath);
+    await activateProject(project.sourcePath);
+    return project;
+  });
 }
 
 async function adoptPendingExternalFileAtStartup() {
@@ -804,6 +808,10 @@ async function ensureBridgeProjectRegistered(project) {
 }
 
 async function getActiveProject() {
+  return projectOpenQueue.run(getActiveProjectOperation);
+}
+
+async function getActiveProjectOperation() {
   const workspaceRoot = await workspacePath();
   const welcomeSourcePath = managedWelcomeSourcePath(workspaceRoot);
   let activePath = await currentActivePath();
@@ -848,19 +856,21 @@ async function getActiveProject() {
 }
 
 async function openHtml() {
-  const result = await dialog.showOpenDialog(mainWindow, {
-    title: "打开 HTML 项目",
-    buttonLabel: "打开",
-    properties: ["openFile"],
-    filters: [
-      { name: "HTML 文件", extensions: ["html", "htm"] },
-    ],
-  });
-  if (result.canceled || result.filePaths.length !== 1) return null;
+  return projectOpenQueue.run(async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: "打开 HTML 项目",
+      buttonLabel: "打开",
+      properties: ["openFile"],
+      filters: [
+        { name: "HTML 文件", extensions: ["html", "htm"] },
+      ],
+    });
+    if (result.canceled || result.filePaths.length !== 1) return null;
 
-  const project = await readHtmlProject(result.filePaths[0]);
-  await activateProject(project.sourcePath);
-  return project;
+    const project = await readHtmlProject(result.filePaths[0]);
+    await activateProject(project.sourcePath);
+    return project;
+  });
 }
 
 async function assertKnownProjectPath(sourcePath) {
@@ -969,6 +979,10 @@ async function rebindRenamedWorkspace(sourcePath, expectedSha256) {
 }
 
 async function renameHtml(payload) {
+  return projectOpenQueue.run(() => renameHtmlOperation(payload));
+}
+
+async function renameHtmlOperation(payload) {
   const state = await loadProjectState();
   return renameHtmlSource({
     payload,
@@ -981,6 +995,10 @@ async function renameHtml(payload) {
 }
 
 async function activateGeneratedVersion(payload) {
+  return projectOpenQueue.run(() => activateGeneratedVersionOperation(payload));
+}
+
+async function activateGeneratedVersionOperation(payload) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     throw new TypeError("新版本文件参数无效。");
   }
@@ -1397,33 +1415,37 @@ async function listRecentProjects() {
 }
 
 async function openRecent(filePath) {
-  const normalizedPath = assertHtmlPath(filePath);
-  const state = await loadProjectState();
-  const requestedIdentity = await existingPathIdentity(normalizedPath);
-  const recentIdentities = await Promise.all(
-    state.recent.map((entry) => existingPathIdentity(entry.path)),
-  );
-  if (!recentIdentities.includes(requestedIdentity)) {
-    throw new ProjectFileError(
-      "NOT_RECENT_PROJECT",
-      "该文件已从最近项目中移除，请用“打开本地 HTML”重新选择。",
+  return projectOpenQueue.run(async () => {
+    const normalizedPath = assertHtmlPath(filePath);
+    const state = await loadProjectState();
+    const requestedIdentity = await existingPathIdentity(normalizedPath);
+    const recentIdentities = await Promise.all(
+      state.recent.map((entry) => existingPathIdentity(entry.path)),
     );
-  }
+    if (!recentIdentities.includes(requestedIdentity)) {
+      throw new ProjectFileError(
+        "NOT_RECENT_PROJECT",
+        "该文件已从最近项目中移除，请用“打开本地 HTML”重新选择。",
+      );
+    }
 
-  try {
-    const project = await readHtmlProject(normalizedPath);
-    await activateProject(project.sourcePath);
-    return project;
-  } catch (error) {
-    if (error?.code === "ENOENT") await forgetProject(normalizedPath);
-    throw error;
-  }
+    try {
+      const project = await readHtmlProject(normalizedPath);
+      await activateProject(project.sourcePath);
+      return project;
+    } catch (error) {
+      if (error?.code === "ENOENT") await forgetProject(normalizedPath);
+      throw error;
+    }
+  });
 }
 
 async function forgetRecentProject(filePath) {
-  const normalizedPath = assertHtmlPath(filePath);
-  await forgetProject(normalizedPath);
-  return { sourcePath: normalizedPath };
+  return projectOpenQueue.run(async () => {
+    const normalizedPath = assertHtmlPath(filePath);
+    await forgetProject(normalizedPath);
+    return { sourcePath: normalizedPath };
+  });
 }
 
 function publishApplicationUpdateStatus(result) {

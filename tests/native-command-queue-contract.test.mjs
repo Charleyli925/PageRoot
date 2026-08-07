@@ -365,3 +365,32 @@ test("refresh and project-switch awaiters always settle when replayed or discard
     "project-switch failure and discard must both resolve false",
   );
 });
+
+test("external HTML activation holds the canvas fence through main-process acceptance", () => {
+  const externalOpen = section(
+    workbench,
+    "const openExternalProject = useCallback",
+    "useEffect(() => {",
+  );
+
+  assertOrdered(
+    externalOpen,
+    [
+      "await prepareProjectSwitch(false, { onDeferred: () => {} })",
+      "const freezeCutoffRevision = documentSessionRef.current.editRevision",
+      "const frozen = fenceAndFreezeCurrentCanvas",
+      "const project = await acceptExternalOpen(request.requestId)",
+    ],
+    "external activation must freeze native editing immediately before IPC",
+  );
+  assert.match(
+    externalOpen,
+    /documentSessionRef\.current\.editRevision !== freezeCutoffRevision[\s\S]*?documentSessionRef\.current\.pendingWrite[\s\S]*?editorRef\.current\?\.unlockNow\?\.\(\)[\s\S]*?return "deferred"/u,
+    "a post-cutoff native edit must return to persistence before the retry",
+  );
+  assert.match(
+    externalOpen,
+    /finally \{[\s\S]*?canvasFrozen && !appliedProject && !isSuperseded\(\)[\s\S]*?editorRef\.current\?\.unlockNow\?\.\(\)/u,
+    "only a final failed external open may release its canvas fence",
+  );
+});

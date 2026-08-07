@@ -3,7 +3,7 @@
 | Mutable fact | Sole owner | Durable authority | Consumers |
 | --- | --- | --- | --- |
 | Open source locator before first durable action, registered identity, renderer generation and late-query fence | Renderer `ProjectSession` | active-file record before registration; project registry and `project.json` afterwards | Workbench composition root and all durable sessions |
-| Latest unaccepted OS/QoderWork HTML-open request and FIFO read-plus-active-project activation | Main-process external-file-open mailbox | in-memory for the current app process; no renderer-supplied path authority | preload lifecycle delivery, startup adoption and trusted project IPC |
+| Latest unaccepted OS/QoderWork HTML-open request plus FIFO active/recent-project transitions | Main-process external-file-open mailbox and `ProjectOpenQueue` | in-memory for the current app process; no renderer-supplied path authority | preload lifecycle delivery, startup adoption and trusted project IPC |
 | External HTML request IDs, active/queued/deferred renderer delivery and stale-result fence | Renderer `ExternalFileOpenSession` | none; bounded in-memory state only | Workbench composition root and the project-switch boundary |
 | Registered mutation context resolution and atomic-replacement source observation | Bridge project-context service | project/document registry graph plus the owning runtime `pendingWrite` target Hash | Bridge mutation routes and `/project/ensure` |
 | Explicit source filename transition, pending operation and active/recent path rebase | Desktop source-rename transaction | active-file `pendingRename` / `lastRename`, then filesystem path | project session, Bridge relink, views |
@@ -42,14 +42,19 @@
 Rules:
 
 - A consumer never writes another owner's fields directly.
-- External HTML delivery has two explicit owners. The main mailbox accepts only
-  its latest unconsumed opaque request and serializes the complete
-  read-and-active-project mutation. The renderer `ExternalFileOpenSession`
-  deduplicates delivery IDs and owns active, queued and deferred switching;
-  Workbench's ordinary project-picker retry ref never stores an external
-  request. A newer queued external request fences the older renderer result,
-  so the final visible project and the main-process active/recent source stay
-  aligned.
+- External HTML delivery has three explicit owners. The main mailbox accepts
+  only its latest unconsumed opaque request. `ProjectOpenQueue` assigns every
+  active/recent-project transition its order before a picker, source read or
+  Bridge check can finish; local picker, recent-project, external, startup,
+  generated-version, rename and forget transitions therefore share one durable
+  state boundary. The renderer `ExternalFileOpenSession` deduplicates delivery
+  IDs and owns active, queued and deferred switching; Workbench's ordinary
+  project-picker retry ref never stores an external request. A newer queued
+  external request fences the older renderer result and inherits its Canvas
+  freeze. If the final pre-IPC fence itself captures a post-cutoff native edit,
+  no external activation starts; that edit returns to normal persistence before
+  the session retries. The final visible project and the main-process
+  active/recent source therefore stay aligned without discarding input.
 - `workbench.tsx` is a composition root, not an additional state owner. It
   subscribes to session snapshots, derives read-only presentation values and
   dispatches user intent back to the owning session.
