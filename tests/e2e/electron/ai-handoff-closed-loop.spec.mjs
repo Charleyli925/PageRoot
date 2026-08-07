@@ -565,6 +565,20 @@ test("a verified AI result stays pending through desktop review until the user a
         <div id="review-runtime-comment-marker-probe" class="review-runtime-chart-host" style="display:block;min-height:78px"></div>
       </div>
       <script>document.documentElement.dataset.reviewRuntimeSectionVariant = "before";</script>
+      <script>
+        const runtimeCommentCaption = document.querySelector(
+          "[data-native-case='runtime-comment-caption']",
+        );
+        const runtimeCommentInsertedSibling = document.createElement("p");
+        runtimeCommentInsertedSibling.textContent = "运行态插入的同标签说明";
+        runtimeCommentCaption.before(runtimeCommentInsertedSibling);
+        runtimeCommentCaption.parentElement.append(runtimeCommentCaption);
+        document.documentElement.dataset.reviewRuntimeCommentScopeTarget = (
+          runtimeCommentCaption.hasAttribute("data-pageroot-review-comment-key")
+            ? "caption"
+            : "missing"
+        );
+      </script>
     </section>
     <section data-review-runtime-static-covered-section>
       <h2>静态已覆盖图表</h2>
@@ -1073,15 +1087,19 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect(afterReviewFrame.locator("html"))
       .toHaveAttribute("data-review-fixture-ready", "true");
     await expect(beforeReviewFrame.locator("html"))
-      .toHaveAttribute("data-review-runtime-comment-scope-exposed", "false");
+      .toHaveAttribute("data-review-runtime-comment-scope-exposed", "true");
     await expect(afterReviewFrame.locator("html"))
-      .toHaveAttribute("data-review-runtime-comment-scope-exposed", "false");
+      .toHaveAttribute("data-review-runtime-comment-scope-exposed", "true");
+    await expect(beforeReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-comment-scope-target", "caption");
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-comment-scope-target", "caption");
     await expect(beforeReviewFrame.locator(
       "[data-pageroot-review-comment-key]",
-    )).toHaveCount(0);
+    )).toHaveCount(2);
     await expect(afterReviewFrame.locator(
       "[data-pageroot-review-comment-key]",
-    )).toHaveCount(0);
+    )).toHaveCount(2);
     await expect(beforeReviewFrame.locator("html"))
       .toHaveAttribute("data-review-runtime-forgery-attempted", "true");
     await expect(afterReviewFrame.locator("html"))

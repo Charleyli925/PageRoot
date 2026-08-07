@@ -11,10 +11,11 @@ Notable user-visible changes are documented here. This project follows Semantic 
   target is a caption or heading beside the charts), is now compared before
   ordinary runtime candidates. Global comments, charts outside that group, and
   other un-commented regions retain the strict host-reference gate and bounded
-  budget. Comment scope is now analyzer-only: neither review document serializes
-  comment-marker attributes, and both managed bootstraps receive the same
-  content-free locator configuration so authored CSS or scripts cannot create a
-  before-only visual difference.
+  budget. Comment scope is now side-neutral: a content-free key remains on the
+  same frozen target in both review documents, so it survives authored sibling
+  reordering without giving CSS or scripts a before-only visual difference. The
+  candidate-side target is uniquely rebound from the frozen identity; if that
+  cannot be proven, the key is removed from both serialized documents.
 
 ## [0.9.7] - 2026-08-07
 
