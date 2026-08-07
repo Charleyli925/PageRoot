@@ -250,7 +250,7 @@ test("desktop package carries the v3 patch engine, candidate assessment and acti
   assert.match(mainProcess, /PROJECT_CHANNELS\.acceptExternalOpen/);
   assert.match(
     mainProcess,
-    /async function acceptExternalFileOpen[\s\S]*?externalFileOpenMailbox\.consume\(payload\.requestId\)[\s\S]*?openExternalFileRequest\(request\)/,
+    /async function acceptExternalFileOpen[\s\S]*?externalFileOpenMailbox\.accept\(\s*payload\.requestId,\s*openExternalFileRequest,\s*\)[\s\S]*?return operation/,
   );
   assert.match(mainProcess, /APP_CHANNELS\.externalOpenReady/);
   assert.match(mainProcess, /APP_CHANNELS\.externalOpenRequested/);

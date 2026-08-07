@@ -59,3 +59,54 @@ test("external open mailbox authorizes only its latest opaque request", () => {
   assert.equal(mailbox.peek(), null);
   assert.equal(mailbox.consume(second.requestId), null);
 });
+
+test("external open mailbox serializes accepted active-project mutations", async () => {
+  let nextId = 0;
+  const mailbox = createExternalFileOpenMailbox({
+    createRequestId: () => `external_${++nextId}`,
+    platform: "darwin",
+  });
+  const first = mailbox.publish("/Users/demo/first.html");
+  let releaseFirst;
+  const firstStarted = new Promise((resolve) => {
+    releaseFirst = resolve;
+  });
+  let markFirstStarted;
+  const firstHasStarted = new Promise((resolve) => {
+    markFirstStarted = resolve;
+  });
+  let activeOperations = 0;
+  const order = [];
+  const activate = async (request) => {
+    activeOperations += 1;
+    assert.equal(activeOperations, 1, "active-project mutations must not overlap");
+    order.push(`start:${request.requestId}`);
+    if (request.requestId === first.requestId) {
+      markFirstStarted();
+      await firstStarted;
+    }
+    order.push(`finish:${request.requestId}`);
+    activeOperations -= 1;
+    return request.sourcePath;
+  };
+
+  const firstOperation = mailbox.accept(first.requestId, activate);
+  assert.ok(firstOperation);
+  await firstHasStarted;
+  const second = mailbox.publish("/Users/demo/second.htm");
+  const secondOperation = mailbox.accept(second.requestId, activate);
+  assert.ok(secondOperation);
+  assert.deepEqual(order, [`start:${first.requestId}`]);
+
+  releaseFirst();
+  assert.deepEqual(
+    await Promise.all([firstOperation, secondOperation]),
+    [first.sourcePath, second.sourcePath],
+  );
+  assert.deepEqual(order, [
+    `start:${first.requestId}`,
+    `finish:${first.requestId}`,
+    `start:${second.requestId}`,
+    `finish:${second.requestId}`,
+  ]);
+});

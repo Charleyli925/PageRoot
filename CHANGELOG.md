@@ -9,7 +9,11 @@ Notable user-visible changes are documented here. This project follows Semantic 
 - Let macOS applications such as Qoder Work offer PageRoot as an alternate
   HTML editor. Selecting it now opens the exact current `.html` or `.htm`
   source in PageRoot whether the app is closed or already running, while
-  preserving the user's current edits before switching projects.
+  preserving the user's current edits before switching projects. Rapid external
+  open requests now finish in order and cannot leave PageRoot displaying an
+  older file after a newer request has become active.
+- Update the shared `js-yaml` dependency closure to 4.3.1, removing the
+  high-severity parsing advisory without changing the packaged runtime shape.
 - Bring the review-first AI workflow into the public README, built-in welcome
   project, About dialog and first-open guide. The new user-facing story shows
   before and after side by side, explains copy, structure and visual change

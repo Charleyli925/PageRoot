@@ -711,10 +711,13 @@ async function openExternalFileRequest(request) {
 async function adoptPendingExternalFileAtStartup() {
   const pending = externalFileOpenMailbox.peek();
   if (!pending) return null;
-  const request = externalFileOpenMailbox.consume(pending.requestId);
-  if (!request) return null;
+  const operation = externalFileOpenMailbox.accept(
+    pending.requestId,
+    openExternalFileRequest,
+  );
+  if (!operation) return null;
   try {
-    return await openExternalFileRequest(request);
+    return await operation;
   } catch (error) {
     showExternalOpenError(error);
     return null;
@@ -734,14 +737,17 @@ async function acceptExternalFileOpen(payload) {
       "外部 HTML 打开请求无效。",
     );
   }
-  const request = externalFileOpenMailbox.consume(payload.requestId);
-  if (!request) {
+  const operation = externalFileOpenMailbox.accept(
+    payload.requestId,
+    openExternalFileRequest,
+  );
+  if (!operation) {
     throw new ProjectFileError(
       "EXTERNAL_OPEN_REQUEST_EXPIRED",
       "这次外部打开请求已经失效，请从 QoderWork 再点一次 PageRoot。",
     );
   }
-  return openExternalFileRequest(request);
+  return operation;
 }
 
 async function currentActivePath() {

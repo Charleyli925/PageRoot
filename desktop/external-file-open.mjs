@@ -61,6 +61,18 @@ export function createExternalFileOpenMailbox({
   platform = process.platform,
 } = {}) {
   let pending = null;
+  let activationTail = Promise.resolve();
+
+  const consume = (requestId) => {
+    if (
+      !pending
+      || typeof requestId !== "string"
+      || requestId !== pending.requestId
+    ) return null;
+    const request = pending;
+    pending = null;
+    return request;
+  };
 
   return Object.freeze({
     publish(value) {
@@ -76,15 +88,19 @@ export function createExternalFileOpenMailbox({
     peek() {
       return pending;
     },
-    consume(requestId) {
-      if (
-        !pending
-        || typeof requestId !== "string"
-        || requestId !== pending.requestId
-      ) return null;
-      const request = pending;
-      pending = null;
-      return request;
+    consume,
+    accept(requestId, activate) {
+      const request = consume(requestId);
+      if (!request) return null;
+      if (typeof activate !== "function") {
+        throw new TypeError("外部 HTML 打开处理器无效。");
+      }
+      // `activate` owns the read + active-project mutation. Keep that entire
+      // operation in one FIFO so a slow earlier request cannot overwrite the
+      // newer active/recent source after the renderer has moved on.
+      const operation = activationTail.then(() => activate(request));
+      activationTail = operation.catch(() => undefined);
+      return operation;
     },
   });
 }

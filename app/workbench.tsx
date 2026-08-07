@@ -104,6 +104,10 @@ import {
 } from "./application/document-session.js";
 import { DrainCoordinator } from "./application/drain-coordinator.js";
 import {
+  ExternalFileOpenSession,
+  type ExternalFileOpenRequest,
+} from "./application/external-file-open-session.js";
+import {
   RuntimeVisualProjectionSession,
   type RuntimeVisualProjectionSnapshot,
 } from "./application/runtime-visual-projection-session.js";
@@ -295,10 +299,10 @@ type PreparedGeneratedSourceTransition = Readonly<{
   activatedProject: HtmlProject | null;
 }>;
 
-type ExternalOpenRequest = {
-  requestId: string;
-  sourcePath: string;
-};
+type ProjectSwitchOptions = Readonly<{
+  retrySourcePath?: string;
+  onDeferred?: () => void;
+}>;
 
 const AUTOSAVE_DELAY_MS = 700;
 const bridgeClient = createRuntimeBridgeClient();
@@ -440,7 +444,10 @@ export default function Workbench() {
       sourceTransitionToken: number | undefined,
       resolve: () => void,
     ) => void;
-    prepareProjectSwitch?: (resolve: (value: boolean) => void) => void;
+    prepareProjectSwitch?: (
+      resolve: (value: boolean) => void,
+      options?: ProjectSwitchOptions,
+    ) => void;
     exportCurrentHtml?: () => void;
     reloadCurrentSource?: () => void;
     requestUserFlush?: () => void;
@@ -527,6 +534,7 @@ export default function Workbench() {
   const projectOpenRequestRef = useRef(0);
   const projectSessionRef = useRef(new ProjectSession());
   const drainCoordinatorRef = useRef(new DrainCoordinator());
+  const externalFileOpenSessionRef = useRef(new ExternalFileOpenSession());
   const runtimeCapabilitiesRef =
     useRef<RuntimeCapabilities>(BROWSER_RUNTIME_CAPABILITIES);
   const runtimeVisualProjectionSessionRef = useRef(
@@ -598,10 +606,8 @@ export default function Workbench() {
   const resumeSubmissionAfterRelinkRef = useRef(false);
   const pendingProjectOpenRef = useRef<{
     recentPath?: string;
-    externalRequest?: ExternalOpenRequest;
     requestedAt: number;
   } | null>(null);
-  const handledExternalOpenRequestsRef = useRef<Set<string>>(new Set());
   const closeLifecycleRef = useRef<CloseLifecycle>({
     preparingRequestId: null,
     frozenRequestId: null,
@@ -812,6 +818,7 @@ export default function Workbench() {
     session.setObserver(setRuntimeVisualProjectionSnapshot);
     return () => session.dispose();
   }, []);
+  useEffect(() => () => externalFileOpenSessionRef.current.dispose(), []);
   useEffect(() => {
     const session = projectRulesSessionRef.current;
     session.setObserver((snapshot) => {
@@ -5193,9 +5200,16 @@ export default function Workbench() {
 
   const prepareProjectSwitch = useCallback(async (
     fromDeferred = false,
-    retrySourcePath?: string,
+    {
+      retrySourcePath,
+      onDeferred,
+    }: ProjectSwitchOptions = {},
   ): Promise<boolean> => {
     const rememberProjectOpen = () => {
+      if (onDeferred) {
+        onDeferred();
+        return;
+      }
       pendingProjectOpenRef.current = {
         ...(retrySourcePath ? { recentPath: retrySourcePath } : {}),
         requestedAt: Date.now(),
@@ -5214,7 +5228,10 @@ export default function Workbench() {
             resolveDeferred?.(false);
             return;
           }
-          replay((value) => resolveDeferred?.(value));
+          replay((value) => resolveDeferred?.(value), {
+            retrySourcePath,
+            onDeferred,
+          });
         },
         undefined,
         { onDiscard: () => resolveDeferred?.(false) },
@@ -5316,13 +5333,13 @@ export default function Workbench() {
     viewMode,
   ]);
   useEffect(() => {
-    deferredEditorReplayRef.current.prepareProjectSwitch = (resolve) => {
-      void prepareProjectSwitch(true).then(resolve, () => resolve(false));
+    deferredEditorReplayRef.current.prepareProjectSwitch = (resolve, options) => {
+      void prepareProjectSwitch(true, options).then(resolve, () => resolve(false));
     };
   }, [prepareProjectSwitch]);
 
   const openProject = useCallback(async (recentPath?: string) => {
-    if (!await prepareProjectSwitch(false, recentPath)) return;
+    if (!await prepareProjectSwitch(false, { retrySourcePath: recentPath })) return;
     pendingProjectOpenRef.current = null;
     setProjectMenuOpen(false);
     const openRequest = projectOpenRequestRef.current + 1;
@@ -5371,19 +5388,15 @@ export default function Workbench() {
     }
   }, [applyProject, prepareProjectSwitch, refreshRecents, refreshWorkspace]);
 
-  const openExternalProject = useCallback(async (request: ExternalOpenRequest) => {
-    const handled = handledExternalOpenRequestsRef.current;
-    if (!request.requestId || handled.has(request.requestId)) return;
-    handled.add(request.requestId);
-
-    if (!await prepareProjectSwitch(false)) {
-      handled.delete(request.requestId);
-      pendingProjectOpenRef.current = {
-        externalRequest: request,
-        requestedAt: Date.now(),
-      };
-      return;
+  const openExternalProject = useCallback(async (
+    request: ExternalFileOpenRequest,
+    { isSuperseded }: { isSuperseded: () => boolean },
+  ): Promise<"complete" | "deferred"> => {
+    if (isSuperseded()) return "complete";
+    if (!await prepareProjectSwitch(false, { onDeferred: () => {} })) {
+      return "deferred";
     }
+    if (isSuperseded()) return "complete";
 
     pendingProjectOpenRef.current = null;
     setProjectMenuOpen(false);
@@ -5391,21 +5404,24 @@ export default function Workbench() {
     projectOpenRequestRef.current = openRequest;
     const acceptExternalOpen = window.htmlAIProjects?.acceptExternalOpen;
     if (!acceptExternalOpen) {
-      handled.delete(request.requestId);
-      setToast({
-        title: "无法接收外部 HTML",
-        message: "当前 PageRoot 版本缺少外部文件打开通道，请重新安装最新版本。",
-        tone: "error",
-        sticky: true,
-        disposition: "background-result",
-        dedupeKey: "external-project-open-unavailable",
-      });
-      return;
+      if (!isSuperseded()) {
+        setToast({
+          title: "无法接收外部 HTML",
+          message: "当前 PageRoot 版本缺少外部文件打开通道，请重新安装最新版本。",
+          tone: "error",
+          sticky: true,
+          disposition: "background-result",
+          dedupeKey: "external-project-open-unavailable",
+        });
+      }
+      return "complete";
     }
 
     try {
       const project = await acceptExternalOpen(request.requestId);
-      if (openRequest !== projectOpenRequestRef.current) return;
+      if (isSuperseded() || openRequest !== projectOpenRequestRef.current) {
+        return "complete";
+      }
       setStartupIssue(null);
       applyProject(project);
       const epoch = projectSessionRef.current.epoch;
@@ -5414,7 +5430,9 @@ export default function Workbench() {
         refreshWorkspace(project.sourcePath, epoch, false, epoch),
       ]);
     } catch (cause) {
-      if (openRequest !== projectOpenRequestRef.current) return;
+      if (isSuperseded() || openRequest !== projectOpenRequestRef.current) {
+        return "complete";
+      }
       setToast({
         title: "无法打开 QoderWork 中的 HTML",
         message: productErrorMessage(
@@ -5426,25 +5444,26 @@ export default function Workbench() {
         disposition: "background-result",
         dedupeKey: "external-project-open-error",
       });
-    } finally {
-      if (handled.size > 32) {
-        const oldest = handled.values().next().value;
-        if (oldest) handled.delete(oldest);
-      }
     }
+    return "complete";
   }, [applyProject, prepareProjectSwitch, refreshRecents, refreshWorkspace]);
 
   useEffect(() => {
     const lifecycle = window.htmlAIAppLifecycle;
     if (!lifecycle?.onExternalOpenRequested) return undefined;
     return lifecycle.onExternalOpenRequested((request) => {
-      void openExternalProject(request);
+      const accepted = externalFileOpenSessionRef.current.enqueue(
+        request,
+        openExternalProject,
+      );
+      if (accepted) pendingProjectOpenRef.current = null;
     });
   }, [openExternalProject]);
 
   useEffect(() => {
     const pending = pendingProjectOpenRef.current;
-    if (!pending) return;
+    const externalOpenSession = externalFileOpenSessionRef.current;
+    if (!pending && externalOpenSession.snapshot.status !== "deferred") return;
     const projectRulesUnsaved = projectRulesSessionRef.current
       .inspect({ locked: projectLockedRef.current }).state !== "resolved";
     const draftState = draftSessionRef.current.inspect();
@@ -5464,12 +5483,12 @@ export default function Workbench() {
       || draftState.error
       || editRevision > lastPersistedRevision
     ) return;
-    pendingProjectOpenRef.current = null;
-    if (pending.externalRequest) {
-      void openExternalProject(pending.externalRequest);
-    } else {
+    if (pending) {
+      pendingProjectOpenRef.current = null;
       void openProject(pending.recentPath);
+      return;
     }
+    externalOpenSession.resume(openExternalProject);
   }, [
     draftPersistError,
     attachmentUploadCount,

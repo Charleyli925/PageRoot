@@ -70,6 +70,9 @@ The renderer's main workspace facts are partitioned as follows:
   outcomes and operation locks;
 - `VersionSession`: immutable Version projection and history-view transition;
 - `SourceHistorySession`: pending exact Patch operations and history action.
+- `ExternalFileOpenSession`: opaque external-open delivery IDs, one active
+  switch, newest queued request, deferred safe-switch retry and stale-result
+  fencing.
 
 `CommentSession` does not replace the Draft aggregate or Bridge CAS authority,
 and `VersionSession` does not make mutable copies of immutable Version files.
@@ -85,6 +88,18 @@ projectId + documentId + sourcePath + session generation + query sequence
 
 Revisions are monotonic. A query result with an older revision may never
 replace an acknowledged state, even if the project identity is unchanged.
+
+External HTML delivery is separately serialized. The main-process mailbox
+accepts only a validated, opaque `.html`/`.htm` request ID, replaces an older
+unaccepted OS request with the newer one, and runs the complete
+read-plus-active-project mutation in FIFO order. The renderer's
+`ExternalFileOpenSession` owns delivery de-duplication, one active request,
+one newest queued request and a deferred retry when the normal project-switch
+boundary cannot yet close safely. It must fence an older result before
+publication when a newer request is queued; ordinary Workbench project-picker
+retry state may not carry that protocol. Thus a slow older request cannot
+leave renderer state, active-file state or recent-project state pointing at
+different sources.
 
 A transition that changes the current source or Version has two phases. The
 asynchronous phase prepares and validates one complete candidate: project and
