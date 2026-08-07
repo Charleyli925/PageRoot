@@ -270,6 +270,29 @@ test("desktop package carries the v3 patch engine, candidate assessment and acti
     mainProcess,
     /async function acceptExternalFileOpen[\s\S]*?externalFileOpenMailbox\.accept\(\s*payload\.requestId,\s*openExternalFileRequest,\s*\)[\s\S]*?return operation/,
   );
+  assert.match(
+    mainProcess,
+    /const externalFileOpenExitHandoff = createExternalFileOpenExitHandoff\([\s\S]*?handoffPath: path\.join\(app\.getPath\("userData"\), "external-open-handoff\.json"\)/,
+  );
+  assert.match(
+    mainProcess,
+    /externalFileOpenExitHandoff\.take\(\),[\s\S]*?externalHtmlPathsFromArgv\(process\.argv\.slice\(1\)\)/,
+  );
+  assert.match(
+    mainProcess,
+    /function publishExternalFileOpen\(filePath\) \{[\s\S]*?if \(isQuitting \|\| finalExitStarted\) \{[\s\S]*?deferExternalFileOpenUntilNextLaunch\(filePath\)[\s\S]*?interruptCloseForExternalOpen\(\)[\s\S]*?externalFileOpenMailbox\.publish\(filePath\)/,
+    "an external delivery cannot enter an already committed shutdown",
+  );
+  assert.match(
+    mainProcess,
+    /function interruptCloseForExternalOpen\(\) \{[\s\S]*?if \(!coordinatedExit \|\| isQuitting \|\| finalExitStarted\) return false;[\s\S]*?closeAttemptGeneration \+= 1;[\s\S]*?pending\.resolve\([\s\S]*?presentation: "in-app"/,
+    "a new external delivery interrupts an uncommitted renderer-close handshake",
+  );
+  assert.match(
+    mainProcess,
+    /const closeAttempt = closeAttemptGeneration;[\s\S]*?await requestRendererClose\(reason\)[\s\S]*?if \(closeAttempt !== closeAttemptGeneration\) \{[\s\S]*?notifyRendererCloseAborted/,
+    "an external delivery that races a ready close result cancels before shutdown commits",
+  );
   assert.match(mainProcess, /APP_CHANNELS\.externalOpenReady/);
   assert.match(mainProcess, /APP_CHANNELS\.externalOpenRequested/);
   assert.match(mainProcess, /INTEGRATION_CHANNELS\.qoderHandoff/);

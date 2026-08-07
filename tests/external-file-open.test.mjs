@@ -2,12 +2,43 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  createExternalFileOpenExitHandoff,
   createExternalFileOpenMailbox,
   externalOpenFailurePresentation,
   externalHtmlPathsFromArgv,
   normalizeExternalHtmlPath,
 } from "../desktop/external-file-open.mjs";
 import { ProjectFileError } from "../desktop/project-files.mjs";
+
+function createMemoryFilesystem() {
+  const files = new Map();
+  const missing = (filePath) => Object.assign(
+    new Error(`ENOENT: ${filePath}`),
+    { code: "ENOENT" },
+  );
+  return {
+    files,
+    mkdirSync() {},
+    readFileSync(filePath) {
+      if (!files.has(filePath)) throw missing(filePath);
+      return files.get(filePath);
+    },
+    renameSync(fromPath, toPath) {
+      if (!files.has(fromPath)) throw missing(fromPath);
+      files.set(toPath, files.get(fromPath));
+      files.delete(fromPath);
+    },
+    unlinkSync(filePath) {
+      if (!files.delete(filePath)) throw missing(filePath);
+    },
+    writeFileSync(filePath, contents, { flag } = {}) {
+      if (flag === "wx" && files.has(filePath)) {
+        throw Object.assign(new Error(`EEXIST: ${filePath}`), { code: "EEXIST" });
+      }
+      files.set(filePath, String(contents));
+    },
+  };
+}
 
 test("external HTML paths accept absolute html/htm paths and file URLs only", () => {
   assert.equal(
@@ -70,6 +101,55 @@ test("native external-open failures use stable product errors instead of raw pat
       message: "源 HTML 已不存在。",
     },
   );
+});
+
+test("an external open received after committed shutdown is handed to the next launch once", () => {
+  const filesystem = createMemoryFilesystem();
+  const handoffPath = "/Users/demo/Library/Application Support/PageRoot/external-open-handoff.json";
+  const createHandoff = () => createExternalFileOpenExitHandoff({
+    handoffPath,
+    platform: "darwin",
+    filesystem,
+    createTemporaryPath: () => `${handoffPath}.tmp`,
+  });
+
+  const exiting = createHandoff();
+  assert.equal(
+    exiting.defer("/Users/demo/Qoder 输出/first.html"),
+    "/Users/demo/Qoder 输出/first.html",
+  );
+  assert.equal(
+    exiting.defer("/Users/demo/Qoder 输出/latest.htm"),
+    "/Users/demo/Qoder 输出/latest.htm",
+    "the newest request replaces an earlier unconsumed handoff",
+  );
+
+  const restarted = createHandoff();
+  assert.equal(
+    restarted.take(),
+    "/Users/demo/Qoder 输出/latest.htm",
+    "the next process receives the validated latest external path",
+  );
+  assert.equal(restarted.take(), null, "a consumed handoff cannot replay twice");
+  assert.equal(filesystem.files.size, 0, "the one-shot record is removed after claim");
+});
+
+test("an invalid shutdown handoff is discarded before it gains file authority", () => {
+  const filesystem = createMemoryFilesystem();
+  const handoffPath = "/Users/demo/Library/Application Support/PageRoot/external-open-handoff.json";
+  filesystem.files.set(handoffPath, JSON.stringify({
+    version: 1,
+    sourcePath: "/Users/demo/not-html.txt",
+  }));
+  const handoff = createExternalFileOpenExitHandoff({
+    handoffPath,
+    platform: "darwin",
+    filesystem,
+    createTemporaryPath: () => `${handoffPath}.tmp`,
+  });
+
+  assert.equal(handoff.take(), null);
+  assert.equal(filesystem.files.has(handoffPath), false);
 });
 
 test("external open mailbox authorizes only its latest opaque request", () => {

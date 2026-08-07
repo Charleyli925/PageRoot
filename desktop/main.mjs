@@ -55,6 +55,7 @@ import {
 } from "./bridge-startup.mjs";
 import { createOpenInDefaultBrowserOperation } from "./open-in-default-browser.mjs";
 import {
+  createExternalFileOpenExitHandoff,
   createExternalFileOpenMailbox,
   externalOpenFailurePresentation,
   externalHtmlPathsFromArgv,
@@ -219,6 +220,7 @@ let isQuitting = false;
 let finalExitStarted = false;
 let closeRequest = null;
 let coordinatedExit = null;
+let closeAttemptGeneration = 0;
 let projectIpcRegistered = false;
 let projectState = null;
 let stateWriteQueue = Promise.resolve();
@@ -231,9 +233,15 @@ let previewProtocolController = null;
 let editVisualCaptureController = null;
 const workspaceRecoveryMailbox = createWorkspaceRecoveryMailbox();
 const externalFileOpenMailbox = createExternalFileOpenMailbox();
+const externalFileOpenExitHandoff = createExternalFileOpenExitHandoff({
+  handoffPath: path.join(app.getPath("userData"), "external-open-handoff.json"),
+});
 const projectOpenQueue = createProjectOpenQueue();
 
-for (const sourcePath of externalHtmlPathsFromArgv(process.argv.slice(1))) {
+for (const sourcePath of [
+  externalFileOpenExitHandoff.take(),
+  ...externalHtmlPathsFromArgv(process.argv.slice(1)),
+].filter(Boolean)) {
   externalFileOpenMailbox.publish(sourcePath);
 }
 
@@ -698,7 +706,43 @@ function focusMainWindow() {
   mainWindow.focus();
 }
 
+function interruptCloseForExternalOpen() {
+  if (!coordinatedExit || isQuitting || finalExitStarted) return false;
+  closeAttemptGeneration += 1;
+  if (!closeRequest) return true;
+  const pending = closeRequest;
+  closeRequest = null;
+  clearTimeout(pending.timeout);
+  pending.resolve({
+    requestId: pending.requestId,
+    ready: false,
+    reason: "收到新的外部 HTML 打开请求，已取消关闭。",
+    presentation: "in-app",
+  });
+  return true;
+}
+
+function deferExternalFileOpenUntilNextLaunch(filePath) {
+  try {
+    return externalFileOpenExitHandoff.defer(filePath);
+  } catch {
+    // The exiting process must never accept a new path after close has
+    // committed. A failed private handoff leaves the request unaccepted.
+    return null;
+  }
+}
+
+function resumeDeferredExternalFileOpenAfterExitAbort() {
+  if (isQuitting || finalExitStarted) return;
+  const sourcePath = externalFileOpenExitHandoff.take();
+  if (sourcePath) publishExternalFileOpen(sourcePath);
+}
+
 function publishExternalFileOpen(filePath) {
+  if (isQuitting || finalExitStarted) {
+    return deferExternalFileOpenUntilNextLaunch(filePath);
+  }
+  interruptCloseForExternalOpen();
   try {
     const request = externalFileOpenMailbox.publish(filePath);
     focusMainWindow();
@@ -1888,7 +1932,20 @@ async function coordinateApplicationExit(reason, intent = "quit") {
   const exitIntent = EXIT_INTENTS[intent];
   if (!exitIntent) throw new TypeError(`Unsupported exit intent: ${intent}`);
   coordinatedExit = (async () => {
+    const closeAttempt = closeAttemptGeneration;
     const result = await requestRendererClose(reason);
+    if (closeAttempt !== closeAttemptGeneration) {
+      notifyRendererCloseAborted(
+        result.requestId,
+        "收到新的外部 HTML 打开请求，已取消关闭。",
+      );
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.show();
+        mainWindow.focus();
+      }
+      coordinatedExit = null;
+      return false;
+    }
     if (!result.ready) {
       const nativeBlock = shouldPresentNativeCloseBlock(result);
       const interruptionSurface = nativeBlock ? "native" : "global";
@@ -1983,6 +2040,7 @@ async function coordinateApplicationExit(reason, intent = "quit") {
         } finally {
           registerProjectIpc();
           notifyRendererCloseAborted(result.requestId, error);
+          resumeDeferredExternalFileOpenAfterExitAbort();
         }
         if (restartError) throw restartError;
       },
@@ -1991,6 +2049,7 @@ async function coordinateApplicationExit(reason, intent = "quit") {
   })().catch((error) => {
     coordinatedExit = null;
     isQuitting = false;
+    resumeDeferredExternalFileOpenAfterExitAbort();
     dialog.showErrorBox(
       exitIntent.errorTitle,
       error instanceof Error ? error.message : String(error),
@@ -2385,7 +2444,7 @@ if (!hasSingleInstanceLock) {
     for (const sourcePath of externalHtmlPathsFromArgv(commandLine)) {
       publishExternalFileOpen(sourcePath);
     }
-    focusMainWindow();
+    if (!isQuitting && !finalExitStarted) focusMainWindow();
   });
 
   app.whenReady().then(async () => {

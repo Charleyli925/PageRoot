@@ -31,7 +31,11 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   consume that ID once but cannot substitute a path; stale IDs are rejected,
   and the main-process project-open queue serializes its validation, reading
   and active-project mutation with every other active/recent-project transition
-  so an older request cannot overwrite the newer active source.
+  so an older request cannot overwrite the newer active source. An external
+  delivery interrupts an uncommitted close; after close commits it is stored
+  only as the latest validated path in a private one-shot handoff, then passes
+  the same mailbox validation again on the next launch. It never grants a
+  renderer path or a late active-project mutation.
 - Desktop interactive preview runs under a dedicated `pageroot-preview:`
   origin. Its main-process session is size/count/time bounded, exposes no
   PageRoot preload bridge, and serves only a session-specific allowlist of

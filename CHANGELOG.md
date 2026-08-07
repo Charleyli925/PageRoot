@@ -25,7 +25,9 @@ Notable user-visible changes are documented here. This project follows Semantic 
   product error code and message instead of exposing the local path or raw
   filesystem exception. Closing, restarting, or installing an update now waits
   for an external HTML switch to finish safely instead of interrupting it,
-  including when the current project is still loading or has a read error.
+  including when the current project is still loading or has a read error. A
+  new external open that arrives mid-close now cancels the uncommitted close or
+  is safely handed to the next launch after shutdown commits.
 - Update the shared `js-yaml` dependency closure to 4.3.1, removing the
   high-severity parsing advisory without changing the packaged runtime shape.
 - Bring the review-first AI workflow into the public README, built-in welcome

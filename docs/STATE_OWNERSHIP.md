@@ -3,7 +3,7 @@
 | Mutable fact | Sole owner | Durable authority | Consumers |
 | --- | --- | --- | --- |
 | Open source locator before first durable action, registered identity, renderer generation and late-query fence | Renderer `ProjectSession` | active-file record before registration; project registry and `project.json` afterwards | Workbench composition root and all durable sessions |
-| Latest unaccepted OS/QoderWork HTML-open request plus FIFO active/recent-project transitions | Main-process external-file-open mailbox and `ProjectOpenQueue` | in-memory for the current app process; no renderer-supplied path authority | preload lifecycle delivery, startup adoption and trusted project IPC |
+| Latest unaccepted OS/QoderWork HTML-open request, committed-exit one-shot handoff, plus FIFO active/recent-project transitions | Main-process external-file-open mailbox and `ProjectOpenQueue` | in-memory for the current process plus one private, validated `userData` handoff record after close commits; no renderer-supplied path authority | preload lifecycle delivery, startup adoption and trusted project IPC |
 | External HTML request IDs, active/queued/deferred renderer delivery, snapshot notification and unaccepted-result fence | Renderer `ExternalFileOpenSession` | none; bounded in-memory state only | Workbench composition root and the project-switch boundary |
 | Accepted local/external project results, their FIFO renderer publication and deferred final-fence retry | Renderer `ProjectApplicationSession` | none; bounded in-memory state only | Workbench composition root and the final project-application boundary |
 | Registered mutation context resolution and atomic-replacement source observation | Bridge project-context service | project/document registry graph plus the owning runtime `pendingWrite` target Hash | Bridge mutation routes and `/project/ensure` |
@@ -73,7 +73,12 @@ Rules:
   successful open to a failed successor. Close treats both a main-process
   external acceptance and an accepted renderer application as drain
   obligations before either the hydration or load-error close fast path; it
-  cannot approve shutdown while either owner is active or deferred.
+  cannot approve shutdown while either owner is active or deferred. A new
+  external delivery during an uncommitted close cancels that exact handshake
+  before normal mailbox delivery. After close commits, the mailbox does not
+  accept the request in the exiting process; its owner atomically records only
+  the latest validated path in a one-shot handoff that the next process claims
+  and deletes before normal delivery.
 - `workbench.tsx` is a composition root, not an additional state owner. It
   subscribes to session snapshots, derives read-only presentation values and
   dispatches user intent back to the owning session.

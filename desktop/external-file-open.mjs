@@ -1,4 +1,11 @@
 import { randomUUID } from "node:crypto";
+import {
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -8,6 +15,15 @@ const HTML_EXTENSIONS = new Set([".html", ".htm"]);
 const EXTERNAL_OPEN_FAILURE = Object.freeze({
   code: "EXTERNAL_OPEN_FAILED",
   message: "无法读取这个 HTML 文件。请确认文件仍存在且具有访问权限。",
+});
+const EXIT_HANDOFF_VERSION = 1;
+const EXIT_HANDOFF_MAX_BYTES = 8 * 1024;
+const EXIT_HANDOFF_FILESYSTEM = Object.freeze({
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
 });
 
 function pathImplementation(platform) {
@@ -76,6 +92,124 @@ export function externalOpenFailurePresentation(error) {
     });
   }
   return EXTERNAL_OPEN_FAILURE;
+}
+
+/**
+ * Carries one native external-open intent across a shutdown that has already
+ * been committed. The main process must not accept a new request into an
+ * exiting renderer: it atomically records the validated path, and the next
+ * process consumes the record before it asks the renderer to accept it.
+ */
+export function createExternalFileOpenExitHandoff({
+  handoffPath,
+  platform = process.platform,
+  filesystem = EXIT_HANDOFF_FILESYSTEM,
+  createTemporaryPath = () => `${handoffPath}.${process.pid}.${randomUUID()}.tmp`,
+  maxBytes = EXIT_HANDOFF_MAX_BYTES,
+} = {}) {
+  if (typeof handoffPath !== "string" || !handoffPath.trim()) {
+    throw new TypeError("外部打开交接路径无效。");
+  }
+  if (
+    !filesystem
+    || ["mkdirSync", "readFileSync", "renameSync", "unlinkSync", "writeFileSync"]
+      .some((name) => typeof filesystem[name] !== "function")
+  ) {
+    throw new TypeError("外部打开交接存储无效。");
+  }
+  if (typeof createTemporaryPath !== "function") {
+    throw new TypeError("外部打开交接临时路径生成器无效。");
+  }
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 128) {
+    throw new TypeError("外部打开交接大小上限无效。");
+  }
+
+  const resolvedHandoffPath = path.resolve(handoffPath);
+  const discard = () => {
+    try {
+      filesystem.unlinkSync(resolvedHandoffPath);
+    } catch {
+      // A missing or unremovable handoff remains fail-closed: it is not opened.
+    }
+  };
+  const decode = (value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    if (
+      Object.keys(value).length !== 2
+      || value.version !== EXIT_HANDOFF_VERSION
+      || !("sourcePath" in value)
+    ) return null;
+    try {
+      return normalizeExternalHtmlPath(value.sourcePath, { platform });
+    } catch {
+      return null;
+    }
+  };
+
+  return Object.freeze({
+    defer(value) {
+      const sourcePath = normalizeExternalHtmlPath(value, { platform });
+      const contents = `${JSON.stringify({
+        version: EXIT_HANDOFF_VERSION,
+        sourcePath,
+      })}\n`;
+      if (Buffer.byteLength(contents, "utf8") > maxBytes) {
+        throw new RangeError("外部打开交接内容超过上限。");
+      }
+      const temporaryPath = createTemporaryPath();
+      if (typeof temporaryPath !== "string" || !temporaryPath.trim()) {
+        throw new TypeError("外部打开交接临时路径无效。");
+      }
+      try {
+        filesystem.mkdirSync(path.dirname(resolvedHandoffPath), {
+          recursive: true,
+          mode: 0o700,
+        });
+        filesystem.writeFileSync(temporaryPath, contents, {
+          encoding: "utf8",
+          flag: "wx",
+          mode: 0o600,
+        });
+        filesystem.renameSync(temporaryPath, resolvedHandoffPath);
+      } finally {
+        try {
+          filesystem.unlinkSync(temporaryPath);
+        } catch {
+          // `renameSync` consumes the temporary record on success.
+        }
+      }
+      return sourcePath;
+    },
+    take() {
+      let raw;
+      try {
+        raw = filesystem.readFileSync(resolvedHandoffPath, "utf8");
+      } catch {
+        return null;
+      }
+      const contents = String(raw);
+      if (Buffer.byteLength(contents, "utf8") > maxBytes) {
+        discard();
+        return null;
+      }
+      let sourcePath = null;
+      try {
+        sourcePath = decode(JSON.parse(contents));
+      } catch {
+        // Malformed crash handoffs never gain filesystem authority.
+      }
+      if (!sourcePath) {
+        discard();
+        return null;
+      }
+      try {
+        filesystem.unlinkSync(resolvedHandoffPath);
+      } catch {
+        return null;
+      }
+      return sourcePath;
+    },
+  });
 }
 
 export function createExternalFileOpenMailbox({
