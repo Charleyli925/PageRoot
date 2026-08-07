@@ -123,7 +123,9 @@ Rules:
   source-dependent and schedules a replacement. Pending or replacement work never owns
   permission to blank the committed bitmap; identical mounts retain their DOM
   identity, and Preview/Edit suspension preserves only bounded disposable
-  byte-bounded cache state. Accepted PNG bytes and unchanged mounts retain their
+  byte-bounded cache state. A valid non-deferred empty projection clears the prior
+  mount, while direct Canvas/SVG sizing overrides remain reversible presentation
+  state. Accepted PNG bytes and unchanged mounts retain their
   identity across TargetRef rebinding; Blob URLs are presentation resources and
   are revoked on replacement or frame disposal.
 - AI review state fields are orthogonal. Page, filter, visibility, navigation,

@@ -71,7 +71,9 @@ const RUNTIME_DEPENDENCY_TAGS = new Set([
 ]);
 const INLINE_EVENT_HANDLER_ATTRIBUTE = /^on[a-z][a-z0-9]*$/u;
 const BROAD_RUNTIME_HOST_MUTATION = /(?:appendChild|insertAdjacentHTML|replaceChildren|\.innerHTML\s*=|document\.createElement|echarts\.init|Highcharts\.chart|Plotly\.newPlot|vegaEmbed|d3\.select|new\s+Chart\s*\()/u;
-const INDIRECT_RUNTIME_DOM_READ = /(?:\bdocument\.(?:body|documentElement|forms|images|links)\b|\.(?:children|childNodes|first(?:Child|ElementChild)|last(?:Child|ElementChild)|parent(?:Node|Element)|previous(?:Sibling|ElementSibling)|next(?:Sibling|ElementSibling)|closest)\b|\b(?:document|[A-Za-z_$][\w$]*)\.(?:querySelector|querySelectorAll)\s*\(\s*(?!["'`])|\b(?:document|[A-Za-z_$][\w$]*)\.(?:querySelectorAll|getElementsBy(?:ClassName|TagName|Name))\s*\()/u;
+const INDIRECT_RUNTIME_DOM_READ = /(?:\bdocument\.(?:body|documentElement|forms|images|links)\b|\.(?:children|childNodes|first(?:Child|ElementChild)|last(?:Child|ElementChild)|parent(?:Node|Element)|previous(?:Sibling|ElementSibling)|next(?:Sibling|ElementSibling)|closest)\b|\bgetElementsBy(?:ClassName|TagName|Name)\s*\()/u;
+const RUNTIME_DOM_QUERY_CALL = /\bquerySelector(?:All)?\s*\(\s*([^)]*)\)/gu;
+const STABLE_RUNTIME_SELECTOR_LITERAL = /^("|'|`)(?:#[A-Za-z_][\w-]*|\.[A-Za-z_][\w-]*|\[\s*(?:id|name|class|data-[\w-]+)(?:\s*(?:[~|^$*]?=)\s*(?:[A-Za-z0-9_-]+|"[^"]*"|'[^']*'|`[^`]*`))?\s*\])\1$/u;
 const acceptedProjectionAuthority = new WeakSet();
 
 function reusableSourceIndex(html, candidate) {
@@ -183,6 +185,13 @@ function runtimeExecutableSources(sourceIndex) {
   };
 }
 
+function usesIndirectRuntimeDomRead(source) {
+  if (INDIRECT_RUNTIME_DOM_READ.test(source)) return true;
+  return [...source.matchAll(RUNTIME_DOM_QUERY_CALL)].some((match) => (
+    !STABLE_RUNTIME_SELECTOR_LITERAL.test(match[1].trim())
+  ));
+}
+
 function candidateBelongsToHandlerOwner(
   sourceIndex,
   element,
@@ -275,7 +284,7 @@ function runtimeDependencySha256(sourceIndex, candidates) {
     candidates: candidates.map((candidate) => candidate.captureKey),
     executableSources,
     referencedDataSources,
-    ...(INDIRECT_RUNTIME_DOM_READ.test(scriptSource)
+    ...(usesIndirectRuntimeDomRead(scriptSource)
       ? { indirectDomSourceSha256: sourceIndex.sourceSha256 }
       : {}),
   }));

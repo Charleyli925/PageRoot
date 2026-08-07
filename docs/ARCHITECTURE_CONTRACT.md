@@ -185,7 +185,10 @@ ordinary hosts by their content box and `tbody` by its border box,
 keeps positive axis-aligned scale/translate and zoom in one viewport-coordinate
 painted box, must reject partial viewport/overflow coverage, and may mark a hidden or
 temporarily uncapturable host deferred. A deferred host may reuse only its own
-previously accepted stable-key bitmap. Canvas reconciliation must retain an
+previously accepted stable-key bitmap; a valid non-deferred empty response
+clears a previous mount. Direct Canvas/SVG background projection temporarily
+applies captured content-box dimensions and restores the original inline sizing
+when it is removed. Canvas reconciliation must retain an
 identical image node and stage/decode a replacement Blob before removing the
 current one. Its responsive content layer must follow host flow/resize and use
 aspect-preserving `contain`; a source-zero host must use validated captured

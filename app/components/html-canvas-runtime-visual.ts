@@ -21,6 +21,8 @@ const observedRootByHost = new WeakMap<HTMLElement, HTMLElement>();
 const objectUrlByImage = new WeakMap<HTMLImageElement, string>();
 const backgroundProjectionByHost = new WeakMap<HTMLElement, {
   runtimeContentSha256: string;
+  layoutWidth: number;
+  layoutHeight: number;
   objectUrl: string;
   original: ReadonlyArray<Readonly<{
     property: string;
@@ -35,6 +37,9 @@ const BACKGROUND_PROPERTIES = [
   "background-position",
   "background-repeat",
   "background-size",
+  "display",
+  "width",
+  "height",
 ] as const;
 
 function escapedAttributeValue(value: string): string {
@@ -194,6 +199,54 @@ function preservedPaintedScale(host: HTMLElement): { x: number; y: number } {
     x: Math.max(0.000001, scaleX),
     y: Math.max(0.000001, scaleY),
   };
+}
+
+function styleLength(style: CSSStyleDeclaration, property: string): number {
+  const value = Number.parseFloat(style.getPropertyValue(property));
+  return Number.isFinite(value) ? value : 0;
+}
+
+function backgroundProjectionDimension(
+  host: HTMLElement,
+  visual: RuntimeVisualProjection["visuals"][number],
+  dimension: "width" | "height",
+): number {
+  const style = host.ownerDocument.defaultView?.getComputedStyle(host);
+  const scale = preservedPaintedScale(host);
+  const contentLength = dimension === "width"
+    ? visual.layoutWidth / scale.x
+    : visual.layoutHeight / scale.y;
+  if (!style || style.boxSizing !== "border-box") {
+    return Math.max(1, contentLength);
+  }
+  const suffix = dimension === "width" ? "left" : "top";
+  const oppositeSuffix = dimension === "width" ? "right" : "bottom";
+  const boxExtras = [
+    `padding-${suffix}`,
+    `padding-${oppositeSuffix}`,
+    `border-${suffix}-width`,
+    `border-${oppositeSuffix}-width`,
+  ].reduce((total, property) => total + styleLength(style, property), 0);
+  return Math.max(1, contentLength + boxExtras);
+}
+
+function configureBackgroundProjectionGeometry(
+  host: HTMLElement,
+  visual: RuntimeVisualProjection["visuals"][number],
+) {
+  if (host.ownerDocument.defaultView?.getComputedStyle(host).display === "inline") {
+    setImportantStyle(host, "display", "inline-block");
+  }
+  setImportantStyle(
+    host,
+    "width",
+    `${backgroundProjectionDimension(host, visual, "width")}px`,
+  );
+  setImportantStyle(
+    host,
+    "height",
+    `${backgroundProjectionDimension(host, visual, "height")}px`,
+  );
 }
 
 function configureProjectionLayer(
@@ -381,6 +434,7 @@ function commitBackgroundProjection(
   setImportantStyle(host, "background-position", "left top");
   setImportantStyle(host, "background-repeat", "no-repeat");
   setImportantStyle(host, "background-size", "contain");
+  configureBackgroundProjectionGeometry(host, visual);
   host.setAttribute(
     RUNTIME_VISUAL_HOST_ATTRIBUTE,
     "runtime-bitmap-background",
@@ -392,6 +446,8 @@ function commitBackgroundProjection(
   );
   backgroundProjectionByHost.set(host, {
     runtimeContentSha256: visual.runtimeContentSha256,
+    layoutWidth: visual.layoutWidth,
+    layoutHeight: visual.layoutHeight,
     objectUrl,
     original,
   });
@@ -497,6 +553,8 @@ function artifactMatches(
         === visual.runtimeContentSha256
       && backgroundProjectionByHost.get(root)?.runtimeContentSha256
         === visual.runtimeContentSha256
+      && backgroundProjectionByHost.get(root)?.layoutWidth === visual.layoutWidth
+      && backgroundProjectionByHost.get(root)?.layoutHeight === visual.layoutHeight
     );
   }
   const image = projectionImage(root);
@@ -652,7 +710,10 @@ export function applyRuntimeVisualProjectionToDocument(
     const matching = hostRoots.find((root) => artifactMatches(root, visual)) ?? null;
     if (visual.tagName === "canvas" || visual.tagName === "svg") {
       acceptedRoots.add(element);
-      if (matching) cancelPendingProjection(element);
+      if (matching) {
+        cancelPendingProjection(element);
+        configureBackgroundProjectionGeometry(element, visual);
+      }
       else stageBackgroundProjection(element, visual);
       applied += 1;
       continue;

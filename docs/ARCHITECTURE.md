@@ -70,7 +70,8 @@ Comments + frozen input
   source-authored `canvas` and `svg` roots are candidates as well as ordinary
   containers. `HtmlCanvasEditor` mounts each PNG through a responsive content
   layer (or one bitmap row for an empty `tbody`); direct Canvas/SVG roots use a
-  reversible content-box background adapter. The host therefore remains the selectable/commentable
+  reversible content-box background adapter that temporarily applies the captured
+  content-box dimensions. The host therefore remains the selectable/commentable
   TargetRef. The runtime DOM is never merged or synchronized, and neither the
   bitmap nor its temporary attributes enter SourcePatch, save, version, review
   diff or AI Request input.
@@ -83,7 +84,8 @@ Comments + frozen input
   box for `tbody`, and rejects a
   viewport/overflow-clipped rectangle rather than stretching a partial bitmap.
   Hidden or temporarily uncapturable hosts are deferred so their previous
-  committed bitmap can remain. The Canvas reconciles by stable host key, keeps
+  committed bitmap can remain; a valid non-deferred empty result is an
+  authoritative clear. The Canvas reconciles by stable host key, keeps
   identical image nodes, and decodes a changed Blob URL off-DOM before replacing
   the old node. Content layers follow host resize/flow changes with `contain`
   sizing and an owned `ResizeObserver`, so a cache hit cannot reuse stale fixed

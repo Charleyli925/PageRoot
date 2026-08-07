@@ -677,9 +677,14 @@ test("Electron interactive preview runs authored scripts and edits the selected 
   runtimeSvg.innerHTML = '<rect width="40" height="20" fill="#2563eb"></rect>';
   document.getElementById("runtime-svg").append(runtimeSvg);
   const directCanvas = document.getElementById("direct-runtime-canvas");
-  directCanvas.getContext("2d").fillRect(0, 0, 18, 9);
-  document.getElementById("direct-runtime-svg").innerHTML =
-    '<rect width="44" height="22" fill="#7c3aed"></rect>';
+  directCanvas.width = 800;
+  directCanvas.height = 400;
+  directCanvas.getContext("2d").fillRect(0, 0, 400, 200);
+  const directSvg = document.getElementById("direct-runtime-svg");
+  directSvg.setAttribute("width", "700");
+  directSvg.setAttribute("height", "350");
+  directSvg.innerHTML =
+    '<rect width="700" height="350" fill="#7c3aed"></rect>';
   const scaledHost = document.getElementById("runtime-scaled");
   const scaledPanel = document.createElement("div");
   scaledPanel.dataset.runtimeScaled = "true";
@@ -790,6 +795,25 @@ test("Electron interactive preview runs authored scripts and edits the selected 
         'url("blob:',
       ),
     )).toBe(true);
+    const directRuntimeGeometry = await editFrame.evaluate(() => {
+      const canvas = document.querySelector("#direct-runtime-canvas");
+      const svg = document.querySelector("#direct-runtime-svg");
+      if (!canvas || !svg) {
+        throw new Error("Direct runtime visual hosts are missing.");
+      }
+      const canvasRect = canvas.getBoundingClientRect();
+      const svgRect = svg.getBoundingClientRect();
+      return {
+        canvasWidth: canvasRect.width,
+        canvasHeight: canvasRect.height,
+        svgWidth: svgRect.width,
+        svgHeight: svgRect.height,
+      };
+    });
+    expect(directRuntimeGeometry.canvasWidth).toBeCloseTo(800, 0);
+    expect(directRuntimeGeometry.canvasHeight).toBeCloseTo(400, 0);
+    expect(directRuntimeGeometry.svgWidth).toBeCloseTo(700, 0);
+    expect(directRuntimeGeometry.svgHeight).toBeCloseTo(350, 0);
     await expect(editFrame.locator(
       '#runtime-table > tr[data-pageroot-readonly-visual="runtime-bitmap-row"] img[data-pageroot-readonly-visual="runtime-bitmap"]',
     )).toBeVisible();
