@@ -12,13 +12,20 @@ Notable user-visible changes are documented here. This project follows Semantic 
   ordinary runtime candidates. Global comments, charts outside that group, and
   other un-commented regions retain the strict host-reference gate and bounded
   budget. Comment scope remains analyzer-only: scope attributes are removed
-  before either review document is serialized, and durable locator data stays
-  in the trusted review host until it is delivered only to the before frame via
-  a challenged private port. It is absent from both authored documents and
-  fetchable bootstrap source. Only unique source `id`, `data-*`, `name`, or
-  `aria-label` locators are admitted—never mutable sibling ordinals. If a
-  durable locator cannot be proven, the marker is omitted rather than guessing
-  a neighboring element. When comment scope, rather than a direct changed-script
+  before either review document is serialized. Every source-resolved local
+  target also receives a short-lived, content-free source-node identity so the
+  first owned before bootstrap can bind the exact parser-created element and
+  remove that identity before authored code runs. The trusted review host keeps
+  the key-to-identity map until it delivers it only to the before frame via a
+  challenged private port. Comment bodies, comment keys and locator maps never
+  enter document bytes or fetchable bootstrap source. A unique source `id`,
+  `data-*`, `name`, or `aria-label` locator is only a safe fallback when that
+  source identity is unavailable—never a mutable sibling ordinal. Missing,
+  duplicate, replaced or disconnected targets, and unavailable private
+  transport, omit the marker rather than guessing a neighboring element. The
+  bootstrap consumes both private-channel challenges in its first capture
+  listener, before authored capture listeners can observe or forge either port.
+  When comment scope, rather than a direct changed-script
   reference, admits a host and its first before/after comparison differs,
   PageRoot now reloads the same isolated pair once and requires each side's
   fingerprint to match its own fresh run. One-shot `Math.random()`/`Date.now()`

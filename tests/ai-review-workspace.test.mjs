@@ -540,11 +540,17 @@ test("the generated runtime review bootstrap stays syntactically valid", () => {
   );
   assert.match(bootstrap, /const reviewCommentChannel = side === "before"/);
   assert.match(bootstrap, /type: "review-comment-channel"/);
+  assert.match(bootstrap, /const capturePrivateChannelRequest = \(event\) =>/);
+  assert.match(
+    bootstrap,
+    /runtimeVisualAddEventListener\("message", capturePrivateChannelRequest, \{ capture: true \}\)/,
+  );
+  assert.match(bootstrap, /const reviewCommentIdentityElements = new RuntimeVisualMap\(\)/);
   assert.match(bootstrap, /message\.type !== "comment-targets"/);
   assert.doesNotMatch(bootstrap, /review-comment-1|runtime-comment-caption/);
 });
 
-test("formal review projects frozen user comments with invisible durable locators", () => {
+test("formal review projects frozen user comments with private source identities", () => {
   assert.match(workbench, /comments: reviewComments/);
   assert.match(workbench, /documents=\{readyReviewSession\.documents\}/);
   assert.match(reviewDocument, /annotateReviewComments\(\s*beforeDocument/);
@@ -560,11 +566,17 @@ test("formal review projects frozen user comments with invisible durable locator
   assert.match(reviewDocument, /durableReviewCommentTargetSelector/);
   assert.match(reviewDocument, /:nth-\(\?:child\|of-type\)\\\(/);
   assert.match(reviewDocument, /selector\.startsWith\("#"\)/);
-  assert.match(reviewDocument, /clearReviewCommentScopeAttributes\(beforeDocument\)/);
+  assert.match(reviewDocument, /sourceNodeId\?: string/);
+  assert.match(reviewDocument, /reviewCommentIdentityAttributeName/);
+  assert.match(
+    reviewDocument,
+    /clearReviewCommentScopeAttributes\(\s*beforeDocument,\s*reviewCommentTargets,\s*reviewCommentIdentityAttribute,\s*\)/,
+  );
   assert.match(reviewDocument, /commentTargets: reviewCommentTargets/);
   assert.match(reviewDocument, /let reviewCommentTargets = \[\]/);
   assert.match(reviewDocument, /type: "review-comment-channel"/);
-  assert.match(reviewDocument, /type === "request-review-comment-channel"/);
+  assert.match(reviewDocument, /capturePrivateChannelRequest/);
+  assert.match(reviewDocument, /\{ capture: true \}/);
   assert.doesNotMatch(reviewDocument, /\$\{JSON\.stringify\(reviewCommentTargets\)\}/);
   assert.match(reviewDocument, /side === "before"/);
   const commentLayoutStart = reviewDocument.indexOf("const reportReviewCommentLayouts");

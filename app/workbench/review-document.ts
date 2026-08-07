@@ -75,8 +75,9 @@ export type ReviewCommentGroup = {
 
 export type ReviewCommentTarget = {
   key: string;
-  selector: string;
   global: boolean;
+  selector?: string;
+  sourceNodeId?: string;
 };
 
 type ReviewCommentAnnotations = {
@@ -381,6 +382,10 @@ const REVIEW_RUNTIME_VISUAL_SOURCE_BOX_ATTRIBUTES = [
 ];
 const REVIEW_COMMENT_KEY_ATTRIBUTE = "data-pageroot-review-comment-key";
 const REVIEW_COMMENT_GLOBAL_ATTRIBUTE = "data-pageroot-review-comment-global";
+const REVIEW_COMMENT_BOOTSTRAP_IDENTITY_ATTRIBUTE =
+  "data-pageroot-review-comment-identity-attribute";
+const REVIEW_COMMENT_IDENTITY_ATTRIBUTE_PREFIX =
+  "data-pageroot-review-comment-source-";
 const REVIEW_COMMENT_MARKUP_ATTRIBUTE_PATTERN =
   /\sdata-pageroot-review-comment-(?:key|global)="[^"]*"/gu;
 const RUNTIME_VISUAL_HOST_SELECTOR = [
@@ -2842,10 +2847,29 @@ function resolvedCommentElement(
   }
 }
 
-function clearReviewCommentScopeAttributes(document: Document): void {
+function reviewCommentIdentityAttributeName(sessionId: string): string {
+  const token = sessionId.toLowerCase().replace(/[^a-z0-9-]/gu, "").slice(0, 80);
+  return `${REVIEW_COMMENT_IDENTITY_ATTRIBUTE_PREFIX}${token || "session"}`;
+}
+
+function clearReviewCommentScopeAttributes(
+  document: Document,
+  reviewCommentTargets: readonly ReviewCommentTarget[] = [],
+  identityAttribute?: string,
+): void {
+  const sourceNodeIdsByKey = new Map(
+    reviewCommentTargets.flatMap((target) => (
+      target.sourceNodeId ? [[target.key, target.sourceNodeId] as const] : []
+    )),
+  );
   document.querySelectorAll(
     `[${REVIEW_COMMENT_KEY_ATTRIBUTE}], [${REVIEW_COMMENT_GLOBAL_ATTRIBUTE}]`,
   ).forEach((element) => {
+    const key = element.getAttribute(REVIEW_COMMENT_KEY_ATTRIBUTE) || "";
+    const sourceNodeId = sourceNodeIdsByKey.get(key);
+    if (identityAttribute && sourceNodeId) {
+      element.setAttribute(identityAttribute, sourceNodeId);
+    }
     element.removeAttribute(REVIEW_COMMENT_KEY_ATTRIBUTE);
     element.removeAttribute(REVIEW_COMMENT_GLOBAL_ATTRIBUTE);
   });
@@ -2892,10 +2916,12 @@ function annotateReviewComments(
     return { groups: [], targets: [] };
   }
   const sourceElementsByNodeId = new Map<string, Element>();
+  const sourceNodeIdsByElement = new Map<Element, string>();
   document.querySelectorAll(`[${REVIEW_SOURCE_NODE_ATTRIBUTE}]`).forEach((element) => {
     const nodeId = element.getAttribute(REVIEW_SOURCE_NODE_ATTRIBUTE);
     if (nodeId && !sourceElementsByNodeId.has(nodeId)) {
       sourceElementsByNodeId.set(nodeId, element);
+      sourceNodeIdsByElement.set(element, nodeId);
     }
   });
   const groups = new Map<Element, CommentItem[]>();
@@ -2933,8 +2959,14 @@ function annotateReviewComments(
         ),
         null,
       );
-    if (selector) {
-      targets.push({ key, selector, global });
+    const sourceNodeId = global ? undefined : sourceNodeIdsByElement.get(element);
+    if (selector || sourceNodeId) {
+      targets.push({
+        key,
+        global,
+        ...(selector ? { selector } : {}),
+        ...(sourceNodeId ? { sourceNodeId } : {}),
+      });
     }
     return {
       key,
@@ -3051,6 +3083,7 @@ function reviewBootstrap(
   const runtimeVisualStringFromCharCode = String.fromCharCode.bind(String);
   const runtimeVisualNumberToString = runtimeVisualBindCall(Number.prototype.toString);
   const runtimeVisualStringPadStart = runtimeVisualBindCall(String.prototype.padStart);
+  const runtimeVisualRegExpTest = runtimeVisualBindCall(RegExp.prototype.test);
   const runtimeVisualDocumentQuerySelectorAll = runtimeVisualBindCall(
     Document.prototype.querySelectorAll,
   );
@@ -3074,6 +3107,9 @@ function reviewBootstrap(
   const runtimeVisualElementQuerySelector = runtimeVisualBindCall(
     Element.prototype.querySelector,
   );
+  const runtimeVisualElementQuerySelectorAll = runtimeVisualBindCall(
+    Element.prototype.querySelectorAll,
+  );
   const runtimeVisualElementGetBoundingClientRect = runtimeVisualBindCall(
     Element.prototype.getBoundingClientRect,
   );
@@ -3082,6 +3118,9 @@ function reviewBootstrap(
   );
   const runtimeVisualNodeParentElement = runtimeVisualBindCall(
     Object.getOwnPropertyDescriptor(Node.prototype, "parentElement").get,
+  );
+  const runtimeVisualNodeIsConnected = runtimeVisualBindCall(
+    Object.getOwnPropertyDescriptor(Node.prototype, "isConnected").get,
   );
   const runtimeVisualNodeTextContent = runtimeVisualBindCall(
     Object.getOwnPropertyDescriptor(Node.prototype, "textContent").get,
@@ -3100,6 +3139,9 @@ function reviewBootstrap(
   );
   const runtimeVisualMutationObserverTakeRecords = runtimeVisualBindCall(
     MutationObserver.prototype.takeRecords,
+  );
+  const runtimeVisualMutationObserverDisconnect = runtimeVisualBindCall(
+    MutationObserver.prototype.disconnect,
   );
   const runtimeVisualMutationRecordType = runtimeVisualBindCall(
     Object.getOwnPropertyDescriptor(MutationRecord.prototype, "type").get,
@@ -3214,7 +3256,9 @@ function reviewBootstrap(
   let mirroringPanel = false;
   let mirroringAction = false;
   let currentState = { filter: "all", focus: "all", transparency: 18, scale: 1 };
-  const postToParent = parent.postMessage.bind(parent);
+  const reviewParent = parent;
+  const postToParent = reviewParent.postMessage.bind(reviewParent);
+  const runtimeVisualAddEventListener = addEventListener.bind(window);
   const runtimeVisualChannel = typeof MessageChannel === "function"
     ? new MessageChannel()
     : null;
@@ -3230,10 +3274,54 @@ function reviewBootstrap(
   const stopImmediateMessagePropagation = Function.prototype.call.bind(
     Event.prototype.stopImmediatePropagation,
   );
+  const reviewBootstrapElement = document.currentScript;
+  const reviewCommentBootstrapIdentityAttribute = "data-pageroot-review-comment-identity-attribute";
+  const reviewCommentIdentityAttribute = (() => {
+    if (!runtimeVisualIsInstance(RuntimeVisualElement, reviewBootstrapElement)) return "";
+    const rawAttribute = runtimeVisualElementGetAttribute(
+      reviewBootstrapElement,
+      reviewCommentBootstrapIdentityAttribute,
+    ) || "";
+    runtimeVisualElementRemoveAttribute(
+      reviewBootstrapElement,
+      reviewCommentBootstrapIdentityAttribute,
+    );
+    return /^data-pageroot-review-comment-source-[a-z0-9-]{4,96}$/iu.test(rawAttribute)
+      ? rawAttribute
+      : "";
+  })();
   let runtimeVisualChannelTransferred = false;
   let reviewCommentChannelTransferred = false;
   let runtimeVisualSnapshotBatch = null;
   let reviewCommentTargets = [];
+  let pendingRuntimeVisualChannelChallenge = null;
+  let pendingReviewCommentChannelChallenge = null;
+  let privateChannelRequestsReady = false;
+  const capturePrivateChannelRequest = (event) => {
+    const message = event.data;
+    if (
+      !event.isTrusted
+      || event.source !== reviewParent
+      || !message
+      || message.source !== "pageroot-ai-review-parent"
+      || message.sessionId !== sessionId
+      || (
+        message.type !== "request-runtime-visual-channel"
+        && message.type !== "request-review-comment-channel"
+      )
+    ) return;
+    // This listener is installed by the first owned script with capture=true.
+    // It consumes the capability challenge before authored capture listeners can
+    // observe it or race a forged port back to the parent.
+    stopImmediateMessagePropagation(event);
+    if (message.type === "request-runtime-visual-channel") {
+      pendingRuntimeVisualChannelChallenge = message.challenge;
+    } else {
+      pendingReviewCommentChannelChallenge = message.challenge;
+    }
+    if (privateChannelRequestsReady) drainPrivateChannelRequests();
+  };
+  runtimeVisualAddEventListener("message", capturePrivateChannelRequest, { capture: true });
   const post = (type, extra = {}) => postToParent({
     source: "pageroot-ai-review",
     sessionId,
@@ -3285,6 +3373,16 @@ function reviewBootstrap(
       challenge,
     }, "*", [reviewCommentChannel.port2]);
   };
+  const drainPrivateChannelRequests = () => {
+    const runtimeChallenge = pendingRuntimeVisualChannelChallenge;
+    const commentChallenge = pendingReviewCommentChannelChallenge;
+    pendingRuntimeVisualChannelChallenge = null;
+    pendingReviewCommentChannelChallenge = null;
+    if (runtimeChallenge !== null) transferRuntimeVisualChannel(runtimeChallenge);
+    if (commentChallenge !== null) transferReviewCommentChannel(commentChallenge);
+  };
+  privateChannelRequestsReady = true;
+  drainPrivateChannelRequests();
   const clamp = (value, minimum, maximum) => Math.max(minimum, Math.min(maximum, value));
   const documentHeight = () => Math.max(
     document.documentElement.scrollHeight,
@@ -3376,6 +3474,103 @@ function reviewBootstrap(
     runtimeVisualProcessHostClaimRecords(
       runtimeVisualMutationObserverTakeRecords(runtimeVisualHostClaimObserver),
     );
+  };
+  const reviewCommentSourceNodeIdPattern = /^element:\d+:\d+:[a-z][a-z0-9:-]{0,127}$/iu;
+  const reviewCommentIdentityElements = new RuntimeVisualMap();
+  const reviewCommentInvalidSourceNodeIds = new RuntimeVisualSet();
+  const safeReviewCommentSourceNodeId = (value) => {
+    const sourceNodeId = RuntimeVisualString(value || "");
+    return sourceNodeId.length <= 256
+      && runtimeVisualRegExpTest(reviewCommentSourceNodeIdPattern, sourceNodeId)
+      ? sourceNodeId
+      : "";
+  };
+  const captureReviewCommentIdentityElement = (element, rawSourceNodeId) => {
+    if (
+      !reviewCommentIdentityAttribute
+      || !runtimeVisualIsInstance(RuntimeVisualElement, element)
+    ) return;
+    const sourceNodeId = safeReviewCommentSourceNodeId(
+      rawSourceNodeId === undefined
+        ? runtimeVisualElementGetAttribute(element, reviewCommentIdentityAttribute)
+        : rawSourceNodeId,
+    );
+    if (sourceNodeId) {
+      const existing = runtimeVisualMapGet(reviewCommentIdentityElements, sourceNodeId);
+      if (existing && existing !== element) {
+        runtimeVisualSetAdd(reviewCommentInvalidSourceNodeIds, sourceNodeId);
+      } else if (!runtimeVisualSetHas(reviewCommentInvalidSourceNodeIds, sourceNodeId)) {
+        runtimeVisualMapSet(reviewCommentIdentityElements, sourceNodeId, element);
+      }
+    }
+    if (runtimeVisualElementGetAttribute(element, reviewCommentIdentityAttribute) !== null) {
+      runtimeVisualElementRemoveAttribute(element, reviewCommentIdentityAttribute);
+    }
+  };
+  const captureReviewCommentIdentitySubtree = (element) => {
+    if (!runtimeVisualIsInstance(RuntimeVisualElement, element)) return;
+    captureReviewCommentIdentityElement(element);
+    if (!reviewCommentIdentityAttribute) return;
+    const nested = runtimeVisualElementQuerySelectorAll(
+      element,
+      "[" + reviewCommentIdentityAttribute + "]",
+    );
+    const length = runtimeVisualNodeListLength(nested);
+    for (let index = 0; index < length; index += 1) {
+      captureReviewCommentIdentityElement(runtimeVisualNodeListItem(nested, index));
+    }
+  };
+  const processReviewCommentIdentityRecords = (records) => {
+    for (let recordIndex = 0; recordIndex < records.length; recordIndex += 1) {
+      const record = records[recordIndex];
+      if (runtimeVisualMutationRecordType(record) === "childList") {
+        const addedNodes = runtimeVisualMutationRecordAddedNodes(record);
+        const addedNodeCount = runtimeVisualNodeListLength(addedNodes);
+        for (let nodeIndex = 0; nodeIndex < addedNodeCount; nodeIndex += 1) {
+          captureReviewCommentIdentitySubtree(
+            runtimeVisualNodeListItem(addedNodes, nodeIndex),
+          );
+        }
+        continue;
+      }
+      if (runtimeVisualMutationRecordType(record) !== "attributes") continue;
+      const target = runtimeVisualMutationRecordTarget(record);
+      captureReviewCommentIdentityElement(
+        target,
+        runtimeVisualMutationRecordOldValue(record),
+      );
+      captureReviewCommentIdentityElement(target);
+    }
+  };
+  const reviewCommentIdentityObserver = reviewCommentIdentityAttribute
+    ? new RuntimeVisualMutationObserver(processReviewCommentIdentityRecords)
+    : null;
+  if (reviewCommentIdentityObserver) {
+    runtimeVisualQueryElements("[" + reviewCommentIdentityAttribute + "]").forEach(
+      captureReviewCommentIdentityElement,
+    );
+    runtimeVisualMutationObserverObserve(
+      reviewCommentIdentityObserver,
+      document.documentElement,
+      {
+        subtree: true,
+        childList: true,
+        attributes: true,
+        attributeFilter: [reviewCommentIdentityAttribute],
+        attributeOldValue: true,
+      },
+    );
+  }
+  const drainReviewCommentIdentityClaims = () => {
+    if (!reviewCommentIdentityObserver) return;
+    processReviewCommentIdentityRecords(
+      runtimeVisualMutationObserverTakeRecords(reviewCommentIdentityObserver),
+    );
+  };
+  const closeReviewCommentIdentityClaims = () => {
+    if (!reviewCommentIdentityObserver) return;
+    drainReviewCommentIdentityClaims();
+    runtimeVisualMutationObserverDisconnect(reviewCommentIdentityObserver);
   };
   const runtimeVisualDelay = (milliseconds) => new RuntimeVisualPromise((resolve) => {
     runtimeVisualSetTimeout(resolve, milliseconds);
@@ -4086,17 +4281,21 @@ function reviewBootstrap(
           });
           continue;
         }
-        let matches;
-        try {
-          matches = runtimeVisualDocumentQuerySelectorAll(
-            document,
-            RuntimeVisualString(commentTarget?.selector || ""),
-          );
-        } catch {
-          continue;
+        let target = commentTarget?.element || null;
+        if (target && !runtimeVisualNodeIsConnected(target)) continue;
+        if (!target) {
+          let matches;
+          try {
+            matches = runtimeVisualDocumentQuerySelectorAll(
+              document,
+              RuntimeVisualString(commentTarget?.selector || ""),
+            );
+          } catch {
+            continue;
+          }
+          if (runtimeVisualNodeListLength(matches) !== 1) continue;
+          target = runtimeVisualNodeListItem(matches, 0);
         }
-        if (runtimeVisualNodeListLength(matches) !== 1) continue;
-        const target = runtimeVisualNodeListItem(matches, 0);
         if (!target) continue;
         const clientRects = runtimeVisualElementGetClientRects(target);
         const rects = [];
@@ -4169,10 +4368,31 @@ function reviewBootstrap(
         : typeof candidate.selector === "string"
           ? candidate.selector
           : "";
+      const rawSourceNodeId = typeof candidate.sourceNodeId === "string"
+        ? candidate.sourceNodeId
+        : "";
+      const sourceNodeId = safeReviewCommentSourceNodeId(rawSourceNodeId);
+      if (rawSourceNodeId && !sourceNodeId) return;
+      const identityElement = sourceNodeId
+        ? runtimeVisualMapGet(reviewCommentIdentityElements, sourceNodeId)
+        : null;
       if (!key || runtimeVisualSetHas(seenKeys, key)) return;
-      if (!global && !selector) return;
+      if (
+        sourceNodeId
+        && (
+          !identityElement
+          || runtimeVisualSetHas(reviewCommentInvalidSourceNodeIds, sourceNodeId)
+          || !runtimeVisualIsInstance(RuntimeVisualElement, identityElement)
+        )
+      ) return;
+      if (!global && !sourceNodeId && !selector) return;
       runtimeVisualSetAdd(seenKeys, key);
-      runtimeVisualArrayPush(targets, { key, selector, global });
+      runtimeVisualArrayPush(targets, {
+        key,
+        selector,
+        global,
+        ...(identityElement ? { element: identityElement } : {}),
+      });
     });
     reviewCommentTargets = targets;
     scheduleLayoutReport(true);
@@ -5026,25 +5246,15 @@ function reviewBootstrap(
     if (projectionTransitioning) renderTransitionMask();
     else scheduleOverlayRender();
   };
-  addEventListener("message", (event) => {
+  runtimeVisualAddEventListener("message", (event) => {
     const message = event.data;
     if (
       !event.isTrusted
-      || event.source !== parent
+      || event.source !== reviewParent
       || !message
       || message.source !== "pageroot-ai-review-parent"
       || message.sessionId !== sessionId
     ) return;
-    if (message.type === "request-runtime-visual-channel") {
-      stopImmediateMessagePropagation(event);
-      transferRuntimeVisualChannel(message.challenge);
-      return;
-    }
-    if (message.type === "request-review-comment-channel") {
-      stopImmediateMessagePropagation(event);
-      transferReviewCommentChannel(message.challenge);
-      return;
-    }
     if (message.type === "state") applyState(message.state || {});
     if (message.type === "apply-runtime-visual-changes") {
       applyRuntimeVisualChanges(message.markers);
@@ -5210,6 +5420,7 @@ function reviewBootstrap(
     height: Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight || 0),
   });
   const ready = async () => {
+    closeReviewCommentIdentityClaims();
     const runtimeVisualSnapshots = await runtimeVisualPromiseThen(
       collectRuntimeVisualSnapshots(),
       (snapshots) => snapshots,
@@ -5242,6 +5453,7 @@ function prepareDocument(
   sourcePath?: string,
   externalBootstrap = false,
   runtimeVisualCandidateKeys: readonly string[] = [],
+  reviewCommentIdentityAttribute?: string,
 ): { html: string; bootstrapJavaScript: string } {
   document.querySelectorAll("meta[http-equiv]").forEach((element) => {
     const directive = (element.getAttribute("http-equiv") || "").trim().toLowerCase();
@@ -5268,6 +5480,12 @@ function prepareDocument(
 
   const bootstrap = document.createElement("script");
   bootstrap.setAttribute(REVIEW_BOOTSTRAP_ATTRIBUTE, "true");
+  if (side === "before" && reviewCommentIdentityAttribute) {
+    bootstrap.setAttribute(
+      REVIEW_COMMENT_BOOTSTRAP_IDENTITY_ATTRIBUTE,
+      reviewCommentIdentityAttribute,
+    );
+  }
   const bootstrapJavaScript = reviewBootstrap(
     sessionId,
     side,
@@ -5440,10 +5658,21 @@ function* buildReviewDocumentSteps(
       )
     : [];
   const runtimeVisualCandidateKeys = runtimeVisualCandidates.map(({ key }) => key);
+  const reviewCommentIdentityAttribute = reviewCommentTargets.some(
+    (target) => Boolean(target.sourceNodeId),
+  )
+    ? reviewCommentIdentityAttributeName(options.sessionId)
+    : undefined;
   // Comment attributes are analyzer-only scope hints. Strip them before either
-  // document is serialized; trusted parent state holds durable locators and
-  // later sends them only through the before frame's private capability port.
-  clearReviewCommentScopeAttributes(beforeDocument);
+  // document is serialized. A resolved before target may retain only a
+  // short-lived source identity for the first owned bootstrap to bind and
+  // remove before authored scripts run; trusted parent state still sends the
+  // key-to-identity mapping only through the before frame's private port.
+  clearReviewCommentScopeAttributes(
+    beforeDocument,
+    reviewCommentTargets,
+    reviewCommentIdentityAttribute,
+  );
   yield "runtime-candidates";
 
   const preparedBefore = prepareDocument(
@@ -5453,6 +5682,7 @@ function* buildReviewDocumentSteps(
     options.sourcePath,
     options.externalBootstrap,
     runtimeVisualCandidateKeys,
+    reviewCommentIdentityAttribute,
   );
   yield "prepare-before";
   const preparedAfter = prepareDocument(

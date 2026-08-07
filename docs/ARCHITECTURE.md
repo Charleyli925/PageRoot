@@ -152,15 +152,22 @@ Comments + frozen input
   global comment does not authorize the page, and ordinary group-external script
   co-location inside the same section is not causal evidence. Comment scope
   attributes exist only while the frozen analyzer makes this decision, then are
-  stripped from both serialized documents. The trusted parent retains the
-  content-free locator list and, after the before frame loads, delivers it only
-  over a separately challenged bootstrap-owned `MessageChannel`; it is absent
-  from both document bytes and fetchable bootstrap source. A locator must be a
-  unique source `id`, `data-*`, `name`, or `aria-label`, never a positional
-  sibling path; if it is not durable or the private channel is unavailable, the
-  before-side marker is omitted rather than rebound by guess. Only the before
-  bootstrap reports geometry, so authored code cannot react to a comment
-  marker. When comment scope admits a host without a direct changed-script
+  stripped from both serialized documents. For every source-resolved local
+  before target, the prepared document carries only a short-lived,
+  content-free source-node identity on that exact projected element. The first
+  owned bootstrap reads its per-session identity-attribute name from a temporary
+  attribute on itself, records the exact parser-created element, and removes
+  both temporary attributes before authored code runs. The trusted parent keeps
+  the key-to-identity map and, after the before frame loads, delivers it only
+  over a separately challenged bootstrap-owned `MessageChannel`. Comment body,
+  comment key and locator-map data are absent from document bytes and fetchable
+  bootstrap source. A unique source `id`, `data-*`, `name`, or `aria-label`
+  locator is an optional safe fallback only when source identity is unavailable,
+  never a positional sibling path; a missing, duplicate, replaced or
+  disconnected identity, or unavailable private channel, omits the before-side
+  marker rather than rebinding by guess. Only the before bootstrap reports
+  geometry, so authored code cannot react to a comment marker. When comment
+  scope admits a host without a direct changed-script
   reference, a first-pair visual difference must be reproduced by a fresh run
   of the same frozen before/after documents before the parent may project it.
   A clock/random one-shot result, mismatched replay, or unavailable replay
@@ -177,6 +184,10 @@ Comments + frozen input
   difference. A host that is unsupported, unstable or over budget emits an explicit
   unavailable fact with no comparison authority, while valid sibling hosts
   remain usable.
+  Its first capture listener consumes the trusted parent's runtime and comment
+  channel challenges, validates parent/session/type, and stops propagation
+  before later authored capture listeners can observe a challenge or race a
+  forged port; the ordinary message listener never transfers either capability.
   Each isolated frame samples visible HTML/SVG/Canvas paint twice, including
   the host's own painted box, a fully transparent host as a stable disappearance
   state, and directly mutated size but not an unpainted empty box or indirect

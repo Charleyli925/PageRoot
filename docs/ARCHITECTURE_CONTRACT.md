@@ -232,14 +232,18 @@ authority until a first observed before/after difference repeats in one fresh
 run of the same frozen document pair on both sides; a direct changed-script
 reference does not need the replay. A replay mismatch, failure or timeout
 removes only that scope-relaxed evidence and retains the static result. Comment
-scope attributes are analysis-only and are removed
-before either review document is serialized. The trusted parent keeps the
-content-free locator configuration and sends it only to the before bootstrap
-over a separately challenged private `MessageChannel`, never in either document
-or fetchable bootstrap source. Its locator must be a unique source `id`,
-`data-*`, `name`, or `aria-label`, never a positional sibling path; if that
-identity or private transport is unavailable at runtime, the marker is omitted
-rather than guessed. Only the before bootstrap returns comment geometry, so
+scope attributes are analysis-only and are removed before either review document
+is serialized. Each source-resolved local before target retains only a
+content-free, session-scoped source-node identity until the first owned bootstrap
+records its exact parser-created element and removes the identity before authored
+scripts run. The trusted parent keeps the key-to-identity configuration and sends
+it only to the before bootstrap over a separately challenged private
+`MessageChannel`; comment body, comment key and locator-map data never enter
+document bytes or fetchable bootstrap source. A unique source `id`, `data-*`,
+`name`, or `aria-label` is an optional fallback only when source identity is
+unavailable, never a positional sibling path. Missing, duplicate, replaced or
+disconnected identities, and unavailable private transport, omit the marker
+rather than guessing. Only the before bootstrap returns comment geometry, so
 authored CSS or scripts cannot observe a comment scope marker and create runtime
 evidence themselves.
 The trusted first bootstrap must bind the DOM/style/Canvas collection,
@@ -283,11 +287,14 @@ exact frame documents have loaded; asymmetric resource loading is not analysis t
 The one permitted comment-scope confirmation reload receives the same 1.5s
 registration boundary and a fresh 500ms comparison deadline only after both
 replacement frames load. Its failure cannot erase a direct-causality marker
-from the first pair, but its scope-relaxed candidates fail closed. Evidence travels
-only over a challenged `MessageChannel` capability created by the trusted first
-bootstrap script and transferred only for a browser-trusted parent event;
-authored-window `ready`, synthetic requests or lookalike channel messages have
-no fact authority. Only a complete
+from the first pair, but its scope-relaxed candidates fail closed. Evidence
+travels only over a challenged `MessageChannel` capability created by the
+trusted first bootstrap script and transferred only for a browser-trusted parent
+event. Its first owned capture listener validates the trusted parent/session/type
+and stops propagation before later authored capture listeners can inspect either
+runtime or comment challenge; the ordinary bridge listener cannot transfer a
+port. Authored-window `ready`, synthetic requests or lookalike channel messages
+have no fact authority. Only a complete
 before/after batch received before the applicable initial or confirmation deadline may add a visual marker;
 absolute page position, one-sided, unstable, invalid, timed-out and late facts
 fail closed to the unchanged static result. The supplement owns no source,

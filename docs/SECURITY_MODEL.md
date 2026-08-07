@@ -180,15 +180,18 @@ lower-priority scope to its sibling charts. The group cannot cross its section
 or derive from visual distance; comment text never enters either frame, and a
 global comment never authorizes page-wide capture. Opaque scope attributes exist
 only while frozen analysis prioritizes candidates and are stripped before either
-document is serialized. The trusted parent retains the content-free locator
-list; only after the before frame loads does a separately challenged
-bootstrap-owned `MessageChannel` receive it. The list is absent from both
-authored documents and the fetchable bootstrap source. Each locator must be a
-unique source `id`, `data-*`, `name`, or `aria-label`, never a mutable sibling
-ordinal. If the target is not safely locatable after authored runtime changes,
-or that private capability exchange is unavailable, its marker is omitted rather
-than guessed. Authored CSS or scripts therefore cannot observe a comment scope
-marker or manufacture a change. If a host was admitted only through that scope,
+document is serialized. Each source-resolved local target carries only a
+short-lived, content-free source-node identity until the first owned bootstrap
+records the exact parser-created element and removes it before authored scripts
+run. The trusted parent retains the key-to-identity map; only after the before
+frame loads does a separately challenged bootstrap-owned `MessageChannel`
+receive it. Comment body, key and locator-map data are absent from document
+bytes and fetchable bootstrap source. A unique source `id`, `data-*`, `name`,
+or `aria-label` is a safe fallback only when source identity is unavailable,
+never a mutable sibling ordinal. Missing, duplicate, replaced or disconnected
+identities, or an unavailable private capability exchange, omit the marker
+rather than guessing. Authored CSS or scripts therefore cannot observe a
+comment scope marker or manufacture a change. If a host was admitted only through that scope,
 not a direct changed-script reference, a first-pair difference must match the
 same side in one newly loaded frozen frame pair; clock/random one-shots, a
 replacement-frame failure, or a mismatch have no marker authority. Every later
@@ -208,7 +211,11 @@ contained to that declared host as unavailable. For runtime evidence, after both
 frame documents load, the parent sends a fresh random challenge
 that the bootstrap consumes only from a browser-trusted parent event in its first
 capture listener without exposing it to later authored listeners, then transfers
-the pre-created capability port. Only the matching port may submit snapshots.
+the pre-created capability port. The same first capture listener protects the
+before-side comment-channel challenge; it validates the trusted parent,
+session and type, stops propagation before any authored capture listener runs,
+and leaves the ordinary bridge listener unable to transfer either port. Only
+the matching port may submit snapshots.
 They contain no executable DOM and can
 only add a disposable visual marker after a complete stable pair, plus the
 required same-side fresh-pair confirmation for scope-only admission; forged window

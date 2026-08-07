@@ -127,6 +127,7 @@ PR 必须从 Draft 开始。普通推送由独立的 `PR Feedback` workflow 处�
   Browser 另外证明点击页面 padding 与 App 空白会一起结束编辑、选区和
   工具栏。测试自动生成受控 AI 输出并执行正式 finalizer，不等待外部模型
   或真人接力。
+- 评论标记必须覆盖无 `id`、`data-*`、`name`、`aria-label` 的 class-only 普通目标：即使作者插入或重排同标签兄弟，before bootstrap 也必须仅凭冻结源 `sourceNodeId` 绑定解析器创建的原元素并保留 marker。测试还必须证明该临时身份和 bootstrap 配置在作者代码可运行前已移除，作者页面看不到评论正文、评论 key 或定位映射；恶意的作者 capture listener 即使尝试读取 challenge、以同一 challenge 伪造评论端口，也既看不到评论 channel 请求，也收不到 `comment-targets`。
 - 评论范围放宽而没有直接变化脚本因果证据的运行态候选，Node 必须证明首轮
   before/after 差异会请求且只请求一次新 frame run：两侧各自与首轮完全一致时
   才保留 marker，任一侧指纹不同、确认 run 无法注册或确认 deadline 超时都只

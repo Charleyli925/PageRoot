@@ -315,6 +315,7 @@ async function addCommentAndSubmit(
       sourcePath,
       comment.text,
       comment.targetCase,
+      comment.targetSelector,
     );
   }
   await page.getByRole("button", { name: /发送至 Qoder/u }).click();
@@ -343,9 +344,9 @@ async function addCommentAndSubmit(
 
 async function addComment(page, sourcePath, text = (
   `只把这个列表项改为“${UPDATED_TEXT}”，其他地方保持不变。`
-), targetCase = "list-item") {
+), targetCase = "list-item", targetSelector = "") {
   const frame = await loadedDiskFrame(page, sourcePath);
-  const target = frame.locator(caseSelector(targetCase));
+  const target = frame.locator(targetSelector || caseSelector(targetCase));
   await page.keyboard.press("Escape");
   await frame.locator("body").click({ position: { x: 2, y: 2 } });
   await target.scrollIntoViewIfNeeded();
@@ -520,6 +521,7 @@ test("a verified AI result stays pending through desktop review until the user a
       <div data-review-regression-summary>在守住 EBITA 率底线的基础上，锁单确收实现 +8.52% 增长；21 天日均增量 +4.12 万，累计增量 +86.6 万。</div>
       <div data-review-semantic-copy>而非「让每个商品卖得更好」（品均基本持平）。这说明增长主要来自有效成交覆盖扩大。</div>
       <div data-review-readable-rewrite style="width: 360px; line-height: 1.7">${READABLE_REWRITE_BEFORE}</div>
+      <p class="review-comment-ordinary-target">普通段落评论定位保持独立。</p>
       <div data-review-metrics>
         <article data-review-metric="lock"><strong>+8.52%</strong><span>锁单确收增幅（显著 p&lt;0.01）</span><small>日均 52.5 万 vs 48.4 万</small></article>
         <article data-review-metric="ipv"><strong>+4.49%</strong><span>IPV 增幅（显著 p&lt;0.01）</span><small>日均 63.4 万 vs 60.7 万</small></article>
@@ -629,6 +631,19 @@ test("a verified AI result stays pending through desktop review until the user a
       );
       document.documentElement.dataset.reviewRuntimeCommentScopeExposed = String(
         reviewCommentScopeExposed,
+      );
+      const reviewCommentSourceIdentityExposed = [...document.querySelectorAll("*")].some(
+        (element) => [...element.attributes].some((attribute) => (
+          attribute.name.startsWith("data-pageroot-review-comment-source-")
+        )),
+      );
+      document.documentElement.dataset.reviewRuntimeCommentSourceIdentityExposed = String(
+        reviewCommentSourceIdentityExposed,
+      );
+      document.documentElement.dataset.reviewRuntimeCommentBootstrapIdentityExposed = String(
+        Boolean(document.querySelector(
+          "[data-pageroot-review-comment-identity-attribute]",
+        )),
       );
       document.documentElement.dataset.reviewRuntimeCommentScopeProbeVariant = "before";
       document.documentElement.dataset.reviewRuntimeCommentLocatorExposed = "pending";
@@ -800,6 +815,8 @@ test("a verified AI result stays pending through desktop review until the user a
         + '</span></div>';
       document.documentElement.dataset.reviewRuntimeRequestObserved = "false";
       document.documentElement.dataset.reviewRuntimeCommentRequestObserved = "false";
+      document.documentElement.dataset.reviewRuntimeCommentForgeryAttempted = "false";
+      document.documentElement.dataset.reviewRuntimeCommentLocatorLeaked = "false";
       document.documentElement.dataset.reviewRuntimeForgeryAttempted = "pending";
       addEventListener("message", (event) => {
         if (event.isTrusted && event.data?.type === "request-runtime-visual-channel") {
@@ -807,6 +824,25 @@ test("a verified AI result stays pending through desktop review until the user a
         }
         if (event.isTrusted && event.data?.type === "request-review-comment-channel") {
           document.documentElement.dataset.reviewRuntimeCommentRequestObserved = "true";
+          document.documentElement.dataset.reviewRuntimeCommentForgeryAttempted = "true";
+          const forgedCommentChannel = new MessageChannel();
+          forgedCommentChannel.port1.onmessage = (portEvent) => {
+            const message = portEvent.data;
+            if (
+              message?.source === "pageroot-ai-review-comment-targets"
+              && message?.type === "comment-targets"
+            ) {
+              document.documentElement.dataset.reviewRuntimeCommentLocatorLeaked = "true";
+            }
+          };
+          forgedCommentChannel.port1.start();
+          parent.postMessage({
+            source: "pageroot-ai-review",
+            sessionId: event.data.sessionId,
+            side: document.documentElement.dataset.pagerootReviewSide,
+            type: "review-comment-channel",
+            challenge: event.data.challenge,
+          }, "*", [forgedCommentChannel.port2]);
         }
       }, true);
       const reviewBootstrapScript = document.querySelector(
@@ -943,6 +979,7 @@ test("a verified AI result stays pending through desktop review until the user a
   const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
   let delayedReviewResourceRequests = 0;
   const runtimeVisualCommentText = "这两个图的配色改一下，包括旁边这个柱状图的颜色。";
+  const ordinaryReviewCommentText = "这个普通段落也请保留。";
   await launched.page.route("**/review-runtime-slow.png*", async (route) => {
     delayedReviewResourceRequests += 1;
     const reviewSide = new URL(route.request().url()).searchParams.get("side");
@@ -968,6 +1005,9 @@ test("a verified AI result stays pending through desktop review until the user a
       [{
         text: runtimeVisualCommentText,
         targetCase: "runtime-comment-caption",
+      }, {
+        text: ordinaryReviewCommentText,
+        targetSelector: ".review-comment-ordinary-target",
       }],
     );
     const attemptRoot = path.join(
@@ -1148,6 +1188,14 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect(afterReviewFrame.locator("html"))
       .toHaveAttribute("data-review-runtime-comment-scope-exposed", "false");
     await expect(beforeReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-comment-source-identity-exposed", "false");
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-comment-source-identity-exposed", "false");
+    await expect(beforeReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-comment-bootstrap-identity-exposed", "false");
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-comment-bootstrap-identity-exposed", "false");
+    await expect(beforeReviewFrame.locator("html"))
       .toHaveAttribute("data-review-runtime-comment-locator-exposed", "false");
     await expect(afterReviewFrame.locator("html"))
       .toHaveAttribute("data-review-runtime-comment-locator-exposed", "false");
@@ -1177,6 +1225,14 @@ test("a verified AI result stays pending through desktop review until the user a
       .toHaveAttribute("data-review-runtime-comment-request-observed", "false");
     await expect(afterReviewFrame.locator("html"))
       .toHaveAttribute("data-review-runtime-comment-request-observed", "false");
+    await expect(beforeReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-comment-forgery-attempted", "false");
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-comment-forgery-attempted", "false");
+    await expect(beforeReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-comment-locator-leaked", "false");
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-comment-locator-leaked", "false");
     await expect(beforeReviewFrame.locator("html"))
       .toHaveAttribute("data-review-runtime-dom-api-attack", "true");
     await expect(afterReviewFrame.locator("html"))
@@ -1333,7 +1389,7 @@ test("a verified AI result stays pending through desktop review until the user a
     const reviewCommentMarkers = launched.page.locator(
       'section[data-side="before"] [data-testid="review-comment-marker"]',
     );
-    await expect(reviewCommentMarkers).toHaveCount(2);
+    await expect(reviewCommentMarkers).toHaveCount(3);
     const frozenReviewComment = `只把这个列表项改为“${UPDATED_TEXT}”，其他地方保持不变。`;
     const reviewCommentMarker = reviewCommentMarkers.filter({
       hasText: frozenReviewComment,
@@ -1341,6 +1397,9 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect(reviewCommentMarker).toHaveCount(1);
     await expect(reviewCommentMarkers.filter({
       hasText: runtimeVisualCommentText,
+    })).toHaveCount(1);
+    await expect(reviewCommentMarkers.filter({
+      hasText: ordinaryReviewCommentText,
     })).toHaveCount(1);
     await expect(reviewCommentMarker).toHaveAttribute("role", "note");
     await expect(reviewCommentMarker).not.toHaveAttribute("tabindex", /.+/u);
