@@ -2051,6 +2051,18 @@ test("a verified AI result stays pending through desktop review until the user a
     });
     await expect.poll(() => afterReviewFrame.locator("html").evaluate(() => window.scrollY))
       .toBeGreaterThan(1);
+    const unequalHeightFollowerSamples = [];
+    for (let index = 0; index < 8; index += 1) {
+      await launched.page.waitForTimeout(20);
+      unequalHeightFollowerSamples.push(await afterReviewFrame.locator("html").evaluate(
+        () => window.scrollY,
+      ));
+    }
+    const settledUnequalHeightFollowerSamples = unequalHeightFollowerSamples.slice(-5);
+    expect(
+      Math.max(...settledUnequalHeightFollowerSamples)
+        - Math.min(...settledUnequalHeightFollowerSamples),
+    ).toBeLessThanOrEqual(1);
     const unequalHeightFollower = await afterReviewFrame.locator("html").evaluate(() => ({
       top: scrollY,
       maximum: Math.max(0, document.documentElement.scrollHeight - innerHeight),
