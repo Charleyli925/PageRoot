@@ -150,7 +150,11 @@ Comments + frozen input
   local target without a layout read. Direct, contained and nearest-group hosts
   take the bounded 128 candidate slots in that order. A
   global comment does not authorize the page, and ordinary group-external script
-  co-location inside the same section is not causal evidence.
+  co-location inside the same section is not causal evidence. Comment scope
+  attributes exist only while the frozen analyzer makes this decision, then are
+  stripped from both serialized documents. Both bootstrap sources instead carry
+  the same content-free opaque locator list; only the before bootstrap uses it
+  to report geometry, so authored code cannot react to a before-only marker.
   The owned bootstrap binds the DOM traversal, attribute, layout,
   computed-style and Canvas primitives before authored scripts execute and is
   given the analyzer's exact candidate-key list. Its early mutation observer

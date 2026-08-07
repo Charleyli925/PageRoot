@@ -177,10 +177,13 @@ that host or an ancestor. Independently, every frozen non-global opaque comment
 target inside the same high-confidence review section seeds the first ancestor
 with at least two pairable hosts, so an anchored caption or heading may grant
 lower-priority scope to its sibling charts. The group cannot cross its section
-or derive from visual distance; comment text never enters either frame, a global
-comment never authorizes page-wide capture, and the opaque comment attributes
-are excluded from static pairing evidence so they cannot manufacture a change.
-Every later identity, stability, budget and transport check remains unchanged.
+or derive from visual distance; comment text never enters either frame, and a
+global comment never authorizes page-wide capture. Opaque comment attributes
+exist only during frozen analysis and are removed before either document is
+serialized; both bootstraps receive the same content-free locator list, so
+authored CSS or scripts cannot observe a before-only comment marker or
+manufacture a change. Every later identity, stability, budget and transport
+check remains unchanged.
 The trusted bootstrap creates a `MessageChannel` and binds
 the DOM traversal, attribute, layout, computed-style, Canvas, string
 normalization/digest, and Promise/timer/animation scheduling primitives used for evidence before any

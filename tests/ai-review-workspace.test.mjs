@@ -29,7 +29,7 @@ const [
   readFile(new URL("../app/lib/review-scroll-sync.js", import.meta.url), "utf8"),
 ]);
 
-function generatedReviewBootstrap(candidateKeys = []) {
+function generatedReviewBootstrap(candidateKeys = [], commentTargets = []) {
   const sourceFile = ts.createSourceFile(
     "review-document.ts",
     reviewDocument,
@@ -64,7 +64,12 @@ function generatedReviewBootstrap(candidateKeys = []) {
     ],
   });
   new vm.Script(transpiled).runInContext(context);
-  return context.reviewBootstrap("review-session", "before", candidateKeys);
+  return context.reviewBootstrap(
+    "review-session",
+    "before",
+    candidateKeys,
+    commentTargets,
+  );
 }
 
 test("a ready AI result is review-first with exactly one direct-open alternative", () => {
@@ -521,15 +526,26 @@ test("runtime chart review supplements only the initial bounded static footprint
 });
 
 test("the generated runtime review bootstrap stays syntactically valid", () => {
-  const bootstrap = generatedReviewBootstrap(["runtime-host-1", "runtime-host-2"]);
+  const bootstrap = generatedReviewBootstrap(
+    ["runtime-host-1", "runtime-host-2"],
+    [{
+      key: "review-comment-1",
+      selector: "html > body:nth-of-type(1) > main:nth-of-type(1)",
+      global: false,
+    }],
+  );
   assert.doesNotThrow(() => new vm.Script(bootstrap));
   assert.match(
     bootstrap,
     /const runtimeVisualExpectedKeys = Object\.freeze\([\s\S]*?\["runtime-host-1","runtime-host-2"\]/,
   );
+  assert.match(
+    bootstrap,
+    /const reviewCommentTargets = Object\.freeze\([\s\S]*?"review-comment-1"[\s\S]*?"global":false/,
+  );
 });
 
-test("formal review projects frozen user comments on the before page only", () => {
+test("formal review projects frozen user comments without author-observable scope markup", () => {
   assert.match(workbench, /comments: reviewComments/);
   assert.match(workbench, /documents=\{readyReviewSession\.documents\}/);
   assert.match(reviewDocument, /annotateReviewComments\(\s*beforeDocument/);
@@ -541,7 +557,15 @@ test("formal review projects frozen user comments on the before page only", () =
   assert.doesNotMatch(review, /Math\.abs\((?:left|top)\) > 100_000/);
   assert.match(review, /reviewCommentContentLayer/);
   assert.match(styles, /--review-comment-scroll-y/);
-  assert.match(reviewDocument, /data-pageroot-review-comment-key/);
+  assert.match(reviewDocument, /clearReviewCommentScopeAttributes\(beforeDocument\)/);
+  assert.match(reviewDocument, /const reviewCommentTargets = Object\.freeze/);
+  assert.match(reviewDocument, /side === "before"/);
+  const commentLayoutStart = reviewDocument.indexOf("const reportReviewCommentLayouts");
+  const commentLayoutEnd = reviewDocument.indexOf("const reportScrollGeometry", commentLayoutStart);
+  assert.doesNotMatch(
+    reviewDocument.slice(commentLayoutStart, commentLayoutEnd),
+    /data-pageroot-review-comment-key/,
+  );
   assert.match(review, /message\.side !== "before"/);
   assert.match(review, /safeReviewCommentLayouts\(message\.commentLayouts, allowedKeys\)/);
   assert.match(review, /commentGroups=\{documents\.commentGroups\}/);

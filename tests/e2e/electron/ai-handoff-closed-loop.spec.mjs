@@ -562,6 +562,7 @@ test("a verified AI result stays pending through desktop review until the user a
         <p data-native-case="runtime-comment-caption" style="grid-column:1 / -1;margin:0">相邻图表统一配色</p>
         <div id="review-runtime-comment-chart" class="review-runtime-chart-host" data-native-case="runtime-comment-chart" style="display:block;min-height:78px"></div>
         <div id="review-runtime-comment-adjacent-chart" class="review-runtime-chart-host" style="display:block;min-height:78px"></div>
+        <div id="review-runtime-comment-marker-probe" class="review-runtime-chart-host" style="display:block;min-height:78px"></div>
       </div>
       <script>document.documentElement.dataset.reviewRuntimeSectionVariant = "before";</script>
     </section>
@@ -603,6 +604,20 @@ test("a verified AI result stays pending through desktop review until the user a
     </script>
     <script>
       window.reviewRuntimeCommentPalette = ["#a9c7e0", "#decdb0"];
+    </script>
+    <script>
+      const runtimeCommentMarkerProbe = document.querySelector(
+        "#review-runtime-comment-marker-probe",
+      );
+      const reviewCommentScopeExposed = Boolean(
+        document.querySelector("[data-pageroot-review-comment-key]"),
+      );
+      document.documentElement.dataset.reviewRuntimeCommentScopeExposed = String(
+        reviewCommentScopeExposed,
+      );
+      runtimeCommentMarkerProbe.innerHTML = '<div style="height:48px;background:'
+        + (reviewCommentScopeExposed ? "#d34f6a" : "#7f91a4")
+        + '">评论范围探针</div>';
     </script>
     <script>
       const runtimeCommentChart = document.querySelector("#review-runtime-comment-chart");
@@ -1058,6 +1073,16 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect(afterReviewFrame.locator("html"))
       .toHaveAttribute("data-review-fixture-ready", "true");
     await expect(beforeReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-comment-scope-exposed", "false");
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-comment-scope-exposed", "false");
+    await expect(beforeReviewFrame.locator(
+      "[data-pageroot-review-comment-key]",
+    )).toHaveCount(0);
+    await expect(afterReviewFrame.locator(
+      "[data-pageroot-review-comment-key]",
+    )).toHaveCount(0);
+    await expect(beforeReviewFrame.locator("html"))
       .toHaveAttribute("data-review-runtime-forgery-attempted", "true");
     await expect(afterReviewFrame.locator("html"))
       .toHaveAttribute("data-review-runtime-forgery-attempted", "true");
@@ -1165,6 +1190,14 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect(afterReviewFrame.locator("#review-runtime-unrelated-random-chart"))
       .not.toHaveAttribute("data-pageroot-review-runtime-host", /.+/u);
     await expect(afterReviewFrame.locator("#review-runtime-unrelated-random-chart"))
+      .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
+    await expect(beforeReviewFrame.locator("#review-runtime-comment-marker-probe"))
+      .toHaveAttribute("data-pageroot-review-runtime-host", /runtime-host-\d+/u);
+    await expect(afterReviewFrame.locator("#review-runtime-comment-marker-probe"))
+      .toHaveAttribute("data-pageroot-review-runtime-host", /runtime-host-\d+/u);
+    await expect(beforeReviewFrame.locator("#review-runtime-comment-marker-probe"))
+      .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
+    await expect(afterReviewFrame.locator("#review-runtime-comment-marker-probe"))
       .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
     await expect(beforeReviewFrame.locator("#review-runtime-forged-host"))
       .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");

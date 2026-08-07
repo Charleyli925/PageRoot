@@ -11,7 +11,10 @@ Notable user-visible changes are documented here. This project follows Semantic 
   target is a caption or heading beside the charts), is now compared before
   ordinary runtime candidates. Global comments, charts outside that group, and
   other un-commented regions retain the strict host-reference gate and bounded
-  budget.
+  budget. Comment scope is now analyzer-only: neither review document serializes
+  comment-marker attributes, and both managed bootstraps receive the same
+  content-free locator configuration so authored CSS or scripts cannot create a
+  before-only visual difference.
 
 ## [0.9.7] - 2026-08-07
 

@@ -227,7 +227,11 @@ and nearest-group hosts are selected in that order before ordinary hosts under
 the same 128-candidate cap. A global comment never authorizes
 page-wide runtime capture, the group cannot cross its section, and merely
 placing another changed script elsewhere in the section remains insufficient
-causal evidence.
+causal evidence. Comment scope attributes are analysis-only and are removed
+before either review document is serialized. Both managed bootstrap sources
+receive the same content-free opaque locator configuration, but only the before
+bootstrap returns comment geometry, so authored CSS or scripts cannot observe a
+before-only scope marker and create runtime evidence themselves.
 The trusted first bootstrap must bind the DOM/style/Canvas collection,
 string-normalization/digest and Promise/timer/animation scheduling entry points
 before authored scripts run. Its bounded font wait must use only captured Promise

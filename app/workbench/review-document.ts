@@ -72,6 +72,17 @@ export type ReviewCommentGroup = {
   }>;
 };
 
+type ReviewCommentTarget = {
+  key: string;
+  selector: string;
+  global: boolean;
+};
+
+type ReviewCommentAnnotations = {
+  groups: ReviewCommentGroup[];
+  targets: ReviewCommentTarget[];
+};
+
 const REVIEW_STYLE_ID = "pageroot-ai-review-style";
 const REVIEW_BOOTSTRAP_ATTRIBUTE = "data-pageroot-ai-review-bootstrap";
 const REVIEW_BASE_ATTRIBUTE = "data-pageroot-ai-review-base";
@@ -2814,18 +2825,47 @@ function resolvedCommentElement(
   }
 }
 
+function reviewCommentTargetSelector(element: Element): string {
+  const root = element.ownerDocument.documentElement;
+  if (element === root) return "html";
+  const segments: string[] = [];
+  let current: Element | null = element;
+  while (current && current !== root) {
+    const tagName = current.tagName;
+    const parent: Element | null = current.parentElement;
+    if (!parent) return "html";
+    const siblings = [...parent.children].filter((sibling) => (
+      sibling.tagName === tagName
+    ));
+    const typeIndex = siblings.indexOf(current) + 1;
+    if (typeIndex < 1) return "html";
+    segments.unshift(`${tagName.toLowerCase()}:nth-of-type(${typeIndex})`);
+    current = parent;
+  }
+  return ["html", ...segments].join(" > ");
+}
+
+function clearReviewCommentScopeAttributes(document: Document): void {
+  document.querySelectorAll(
+    `[${REVIEW_COMMENT_KEY_ATTRIBUTE}], [${REVIEW_COMMENT_GLOBAL_ATTRIBUTE}]`,
+  ).forEach((element) => {
+    element.removeAttribute(REVIEW_COMMENT_KEY_ATTRIBUTE);
+    element.removeAttribute(REVIEW_COMMENT_GLOBAL_ATTRIBUTE);
+  });
+}
+
 function annotateReviewComments(
   document: Document,
   sourceHtml: string,
   comments: readonly CommentItem[],
   indexedSource?: ReturnType<typeof buildSourceIndex> | null,
-): ReviewCommentGroup[] {
-  if (!comments.length || !document.body) return [];
+): ReviewCommentAnnotations {
+  if (!comments.length || !document.body) return { groups: [], targets: [] };
   let sourceIndex = indexedSource ?? null;
   try {
     sourceIndex ??= buildSourceIndex(sourceHtml);
   } catch {
-    return [];
+    return { groups: [], targets: [] };
   }
   const sourceElementsByNodeId = new Map<string, Element>();
   document.querySelectorAll(`[${REVIEW_SOURCE_NODE_ATTRIBUTE}]`).forEach((element) => {
@@ -2848,14 +2888,21 @@ function annotateReviewComments(
     if (existing) existing.push(comment);
     else groups.set(element, [comment]);
   });
-  if (!groups.size) return [];
+  if (!groups.size) return { groups: [], targets: [] };
 
-  return [...groups.entries()].map(([element, items], index) => {
+  const targets: ReviewCommentTarget[] = [];
+  const reviewGroups = [...groups.entries()].map(([element, items], index) => {
     const key = `review-comment-${index + 1}`;
+    const global = element === document.body;
     element.setAttribute(REVIEW_COMMENT_KEY_ATTRIBUTE, key);
-    if (element === document.body) {
+    if (global) {
       element.setAttribute(REVIEW_COMMENT_GLOBAL_ATTRIBUTE, "true");
     }
+    targets.push({
+      key,
+      selector: reviewCommentTargetSelector(element),
+      global,
+    });
     return {
       key,
       items: items.map((comment) => ({
@@ -2865,6 +2912,7 @@ function annotateReviewComments(
       })),
     };
   });
+  return { groups: reviewGroups, targets };
 }
 
 function clearReservedReviewMarkup(
@@ -2926,11 +2974,18 @@ function reviewBootstrap(
   sessionId: string,
   side: ReviewSide,
   runtimeVisualCandidateKeys: readonly string[] = [],
+  reviewCommentTargets: readonly ReviewCommentTarget[] = [],
 ): string {
   return String.raw`
 (() => {
   const sessionId = ${JSON.stringify(sessionId)};
   const side = ${JSON.stringify(side)};
+  // This side-neutral locator list contains no comment content and is never
+  // materialized as authored-page markup. It lets only the trusted before
+  // bootstrap recover comment geometry after the page has settled.
+  const reviewCommentTargets = Object.freeze(
+    ${JSON.stringify(reviewCommentTargets)},
+  );
   // This first managed script binds evidence readers before authored scripts execute.
   const runtimeVisualExpectedKeys = Object.freeze(
     ${JSON.stringify([...runtimeVisualCandidateKeys])},
@@ -2995,6 +3050,9 @@ function reviewBootstrap(
   );
   const runtimeVisualElementGetBoundingClientRect = runtimeVisualBindCall(
     Element.prototype.getBoundingClientRect,
+  );
+  const runtimeVisualElementGetClientRects = runtimeVisualBindCall(
+    Element.prototype.getClientRects,
   );
   const runtimeVisualNodeParentElement = runtimeVisualBindCall(
     Object.getOwnPropertyDescriptor(Node.prototype, "parentElement").get,
@@ -3965,26 +4023,55 @@ function reviewBootstrap(
   };
   const reportReviewCommentLayouts = () => {
     if (projectionTransitioning) return;
-    const commentLayouts = [...document.querySelectorAll('[data-pageroot-review-comment-key]')]
-      .flatMap((target) => {
-        const key = safeKey(target.getAttribute("data-pageroot-review-comment-key"));
-        if (!key) return [];
-        const rects = [...target.getClientRects()]
-          .filter((rect) => rect.width > 0 && rect.height > 0);
-        if (!rects.length) return [];
-        const global = target.getAttribute("data-pageroot-review-comment-global") === "true";
+    const commentLayouts = [];
+    if (side === "before") {
+      for (const commentTarget of reviewCommentTargets) {
+        const key = safeKey(commentTarget?.key);
+        if (!key) continue;
+        if (commentTarget?.global === true) {
+          runtimeVisualArrayPush(commentLayouts, {
+            key,
+            left: 22,
+            top: 22,
+            viewportLeft: 22,
+            viewportTop: 22,
+            global: true,
+          });
+          continue;
+        }
+        let matches;
+        try {
+          matches = runtimeVisualDocumentQuerySelectorAll(
+            document,
+            RuntimeVisualString(commentTarget?.selector || ""),
+          );
+        } catch {
+          continue;
+        }
+        if (runtimeVisualNodeListLength(matches) !== 1) continue;
+        const target = runtimeVisualNodeListItem(matches, 0);
+        if (!target) continue;
+        const clientRects = runtimeVisualElementGetClientRects(target);
+        const rects = [];
+        for (let index = 0; index < runtimeVisualDomRectListLength(clientRects); index += 1) {
+          const rect = runtimeVisualDomRectListItem(clientRects, index);
+          if (rect && rect.width > 0 && rect.height > 0) runtimeVisualArrayPush(rects, rect);
+        }
+        if (!rects.length) continue;
         const firstRect = rects.reduce((current, rect) => (
           rect.top < current.top ? rect : current
         ));
-        return [{
+        const right = Math.max(...rects.map((rect) => rect.right));
+        runtimeVisualArrayPush(commentLayouts, {
           key,
-          left: global ? 22 : Math.max(...rects.map((rect) => rect.right)) + scrollX + 10,
-          top: global ? 22 : firstRect.top + scrollY + firstRect.height / 2,
-          viewportLeft: global ? 22 : Math.max(...rects.map((rect) => rect.right)) + 10,
-          viewportTop: global ? 22 : firstRect.top + firstRect.height / 2,
-          global,
-        }];
-      });
+          left: right + scrollX + 10,
+          top: firstRect.top + scrollY + firstRect.height / 2,
+          viewportLeft: right + 10,
+          viewportTop: firstRect.top + firstRect.height / 2,
+          global: false,
+        });
+      }
+    }
     post("comment-layout", { commentLayouts });
   };
   const reportScrollGeometry = () => {
@@ -5068,6 +5155,7 @@ function prepareDocument(
   sourcePath?: string,
   externalBootstrap = false,
   runtimeVisualCandidateKeys: readonly string[] = [],
+  reviewCommentTargets: readonly ReviewCommentTarget[] = [],
 ): { html: string; bootstrapJavaScript: string } {
   document.querySelectorAll("meta[http-equiv]").forEach((element) => {
     const directive = (element.getAttribute("http-equiv") || "").trim().toLowerCase();
@@ -5098,6 +5186,7 @@ function prepareDocument(
     sessionId,
     side,
     runtimeVisualCandidateKeys,
+    reviewCommentTargets,
   );
   if (externalBootstrap) {
     bootstrap.src = REVIEW_BOOTSTRAP_PATH;
@@ -5157,12 +5246,14 @@ function* buildReviewDocumentSteps(
   clearReservedReviewMarkup(beforeDocument, sourceProjection.projected);
   clearReservedReviewMarkup(afterDocument);
   yield "parse";
-  const commentGroups = annotateReviewComments(
+  const commentAnnotations = annotateReviewComments(
     beforeDocument,
     beforeHtml,
     comments,
     sourceProjection.sourceIndex,
   );
+  const commentGroups = commentAnnotations.groups;
+  const reviewCommentTargets = commentAnnotations.targets;
   beforeDocument.querySelectorAll(`[${REVIEW_SOURCE_NODE_ATTRIBUTE}]`).forEach((element) => {
     element.removeAttribute(REVIEW_SOURCE_NODE_ATTRIBUTE);
   });
@@ -5263,6 +5354,11 @@ function* buildReviewDocumentSteps(
       )
     : [];
   const runtimeVisualCandidateKeys = runtimeVisualCandidates.map(({ key }) => key);
+  // Comment attributes are trusted analyzer-only scope hints. Removing them
+  // before serialization keeps authored CSS and scripts from observing a
+  // before-only marker; both bootstrap payloads receive the same opaque
+  // locator list instead.
+  clearReviewCommentScopeAttributes(beforeDocument);
   yield "runtime-candidates";
 
   const preparedBefore = prepareDocument(
@@ -5272,6 +5368,7 @@ function* buildReviewDocumentSteps(
     options.sourcePath,
     options.externalBootstrap,
     runtimeVisualCandidateKeys,
+    reviewCommentTargets,
   );
   yield "prepare-before";
   const preparedAfter = prepareDocument(
@@ -5281,6 +5378,7 @@ function* buildReviewDocumentSteps(
     options.sourcePath,
     options.externalBootstrap,
     runtimeVisualCandidateKeys,
+    reviewCommentTargets,
   );
   yield "prepare-after";
   return {

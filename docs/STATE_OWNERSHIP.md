@@ -31,7 +31,7 @@
 | AI review node pairing, typed change facts, prepared immutable review documents and fused frame/mask geometry | Cancellable `ReviewAnalysisSession` plus `review-document` analyzer, ready-review session and isolated-frame projection runtime | none; byte-bounded multi-entry cache keyed only by exact operation/source/comment identity | review outline, semantic frames and context mask |
 | Initial AI review runtime-chart snapshot batch, frame-registration/comparison deadlines and accepted supplemental host markers | Parent `AiReviewWorkspace` through `ReviewRuntimeVisualCoordinator`, behind the main-process managed-preview navigation fence | none; one bounded in-memory decision bound to the frozen document pair and declared host keys; session/load failure, navigation fallback and inline/browser review are static-only | effective review changes/outline and both isolated frame projections |
 | AI review Tab/disclosure/control presentation state and transition epoch | Parent `AiReviewWorkspace` presentation coordinator; either frame may propose an intent | none; disposable parent state plus frame projection only | both review frames, content map and overlay/mask projection |
-| Frozen review comment set and read-only before-page marker projection | Ready-review session owns comment text; `review-document` resolves opaque before-page target keys; isolated runtime owns anonymous viewport geometry; trusted `AiReviewWorkspace` joins and renders them | none beyond the immutable Request/Draft evidence already frozen for the run | trusted review host above the before frame only; authored frames never receive comment text |
+| Frozen review comment set and read-only before-page marker projection | Ready-review session owns comment text; `review-document` resolves analyzer-only opaque targets, serializes no comment scope attributes, and gives both bootstraps the same content-free locator list; only the before runtime reports anonymous viewport geometry, which trusted `AiReviewWorkspace` joins and renders | none beyond the immutable Request/Draft evidence already frozen for the run | trusted review host above the before frame only; authored frames never receive comment text or a side-specific comment marker |
 | Current source-backed comment resolution, visibility, coordinates, marker eligibility and natural document height | `HtmlCanvasEditor` presentation measurement | none; disposable snapshot tagged by rendered source Hash, applied page-view generation and exact target-ID set | Workbench comment rail and Canvas height |
 | Stable application update schedule, coalesced manual check, download progress and restart-install readiness | Main-process application-update controller | signed GitHub Release metadata plus updater cache; no editor authority | preload status snapshot, About PageRoot, Workbench update notice, drain coordinator |
 | Random installation identity, project pseudonym secret, aggregate counters and unsent usage events | Main-process usage-telemetry controller | bounded `usage-telemetry.json` under PageRoot Application Support | PostHog batch ingestion only |
@@ -136,9 +136,11 @@ Rules:
   commit a new overlay state. The paired action-key projection mirrors safe
   runtime presentation in either direction and never writes source bytes,
   Version records or project state. Frozen review comments remain read-only
-  evidence. Their text stays in the trusted host, while the before frame reports
-  only opaque-key geometry; neither review frame receives the text and the after
-  page never receives a marker.
+  evidence. Their text stays in the trusted host. Analyzer-only comment scope
+  attributes are removed before either document is serialized, while both
+  bootstrap sources receive the same content-free opaque locator list; only the
+  before bootstrap resolves it to report geometry. Neither review frame receives
+  comment text or a side-specific comment marker in authored-page markup.
 - The runtime-chart supplement never re-analyzes a statically covered host. It
   declares an ordinary host only when the changed authored script directly
   references that host's distinctive source identity. A source-empty host
