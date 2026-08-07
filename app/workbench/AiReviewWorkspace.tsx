@@ -61,6 +61,7 @@ type ReviewDesktopSession = { sessionId: string; url: string };
 type ReviewDesktopSessions = Record<ReviewSide, ReviewDesktopSession>;
 type ReviewDesktopSessionResult = {
   documents: ReviewDocuments;
+  frameRun: number;
   sessions: ReviewDesktopSessions | null;
   failed: boolean;
 };
@@ -375,10 +376,10 @@ function ReviewDocumentPane({
               transform: `scale(${scale})`,
               transformOrigin: "top left",
             }}
-            onLoad={() => {
+            onLoad={(event) => {
               if (loadFailed || (independentTransport && !frameUrl)) return;
-              const frame = iframeRef.current;
-              if (!frame) return;
+              const frame = event.currentTarget;
+              if (iframeRef.current !== frame) return;
               onFrame(side, frame);
               if (viewportRef.current) viewportRef.current.scrollLeft = 0;
             }}
@@ -508,9 +509,11 @@ export default function AiReviewWorkspace({
   const reviewStateRef = useRef({ filter, focus, transparency, pagePresentationPath });
   const scrollModeRef = useRef(scrollMode);
   const desktopSessions = desktopSessionResult?.documents === documents
+    && desktopSessionResult.frameRun === runtimeVisualFrameRun
     ? desktopSessionResult.sessions
     : null;
   const reviewLoadFailed = desktopSessionResult?.documents === documents
+    && desktopSessionResult.frameRun === runtimeVisualFrameRun
     ? desktopSessionResult.failed
     : false;
   const reviewCommentLayouts = commentLayoutState.documents === documents
@@ -961,6 +964,7 @@ export default function AiReviewWorkspace({
     if (!independentTransport) return undefined;
     const previewApi = window.htmlAIPreview;
     if (!previewApi) return undefined;
+    const frameRun = runtimeVisualFrameRun;
     let cancelled = false;
     const createdSessions: ReviewDesktopSession[] = [];
     void (async () => {
@@ -968,24 +972,27 @@ export default function AiReviewWorkspace({
         const beforeSession = await previewApi.createSession({
           html: documents.before,
           bootstrapJavaScript: documents.bootstrapJavaScript.before,
+          bootstrapFallbackJavaScript: documents.bootstrapFallbackJavaScript.before,
           ...(sourcePath ? { sourcePath } : {}),
         });
         createdSessions.push(beforeSession);
         const afterSession = await previewApi.createSession({
           html: documents.after,
           bootstrapJavaScript: documents.bootstrapJavaScript.after,
+          bootstrapFallbackJavaScript: documents.bootstrapFallbackJavaScript.after,
           ...(sourcePath ? { sourcePath } : {}),
         });
         createdSessions.push(afterSession);
         if (cancelled) return;
         setDesktopSessionResult({
           documents,
+          frameRun,
           sessions: { before: beforeSession, after: afterSession },
           failed: false,
         });
       } catch {
         if (!cancelled) {
-          setDesktopSessionResult({ documents, sessions: null, failed: true });
+          setDesktopSessionResult({ documents, frameRun, sessions: null, failed: true });
         }
       }
     })();
@@ -995,7 +1002,7 @@ export default function AiReviewWorkspace({
         void previewApi.revokeSession(createdSession.sessionId);
       });
     };
-  }, [documents, independentTransport, sourcePath]);
+  }, [documents, independentTransport, runtimeVisualFrameRun, sourcePath]);
 
   useEffect(() => {
     sendState();
@@ -1084,6 +1091,11 @@ export default function AiReviewWorkspace({
       }
       if (message.type === "ready") {
         runtimeVisualReadySidesRef.current.add(message.side);
+        const frame = framesRef.current[message.side];
+        if (frame) {
+          prepareReviewCommentFrame(message.side, frame);
+          prepareRuntimeVisualFrame(message.side, frame);
+        }
         const resolved = runtimeVisualResolutionRef.current;
         if (resolved?.documents === documents) {
           commitRuntimeVisualFrame(message.side, resolved);
@@ -1179,6 +1191,8 @@ export default function AiReviewWorkspace({
     coordinatePagePresentation,
     documents,
     finishPagePresentation,
+    prepareReviewCommentFrame,
+    prepareRuntimeVisualFrame,
     reviewOutline,
     sessionId,
     updateCommentScrollTransform,

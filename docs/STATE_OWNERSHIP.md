@@ -29,9 +29,9 @@
 | Current edit runtime-visual dependency identity, generation, accepted bitmap projection and byte-bounded recent-result cache | Renderer `RuntimeVisualProjectionSession`; main-process capture controller solely owns its active hidden window/session | none; exact-source-validated in-memory binary PNGs only | `HtmlCanvasEditor` responsive keyed presentation reconciler; original source host remains comment target |
 | AI review page view, change filter, context visibility, navigation target, canonical page-presentation path, scroll mode and zoom mode | `AiReviewWorkspace` review reducer | none; disposable state bound to the frozen before/after pair | review toolbar, content map and isolated review frames |
 | AI review node pairing, typed change facts, prepared immutable review documents and fused frame/mask geometry | Cancellable `ReviewAnalysisSession` plus `review-document` analyzer, ready-review session and isolated-frame projection runtime | none; byte-bounded multi-entry cache keyed only by exact operation/source/comment identity | review outline, semantic frames and context mask |
-| Initial AI review runtime-chart snapshot batch, session-private candidate element/key/source-box bindings, one conditional same-document confirmation batch for scope-only candidates, frame-registration/comparison deadlines and accepted supplemental host markers | Parent `AiReviewWorkspace` through `ReviewRuntimeVisualCoordinator`, behind the main-process managed-preview navigation fence; first owned bootstrap owns the transient identity-to-element map | none; one bounded in-memory decision bound to the frozen document pair and declared host keys; the identity is removed before author code runs, and only a first-pair difference without direct script causality reloads once; session/load failure, identity drift, navigation fallback and inline/browser review are static-only | effective review changes/outline and both isolated frame projections |
+| Initial AI review runtime-chart snapshot batch, one-shot private candidate element/key/source-box bindings, one conditional same-document confirmation batch for scope-only candidates, frame-registration/comparison deadlines and accepted supplemental host markers | Parent `AiReviewWorkspace` through `ReviewRuntimeVisualCoordinator`, behind the main-process managed-preview navigation fence; the first parser bootstrap response owns the transient binding map | none; one bounded in-memory decision bound to the frozen document pair and declared host keys; bindings never enter HTML, a later bootstrap read is unbound, and only a first-pair difference without direct script causality reloads once; fresh sessions serve confirmation bindings; session/load failure, binding drift, navigation fallback and inline/browser review are static-only | effective review changes/outline and both isolated frame projections |
 | AI review Tab/disclosure/control presentation state and transition epoch | Parent `AiReviewWorkspace` presentation coordinator; either frame may propose an intent | none; disposable parent state plus frame projection only | both review frames, content map and overlay/mask projection |
-| Frozen review comment set and read-only before-page marker projection | Ready-review session owns comment text; `review-document` resolves opaque targets during analysis, strips scope attributes, and leaves only a short-lived content-free source-node identity for the first owned before bootstrap to bind and remove; trusted `AiReviewWorkspace` owns the key-to-identity map and delivers it only through a challenged private port, then joins anonymous viewport geometry and renders it | none beyond the immutable Request/Draft evidence already frozen for the run | trusted review host above the before frame only; authored frames never receive comment text, comment keys, a comment scope marker, or a post-bootstrap identity/locator map |
+| Frozen review comment set and read-only before-page marker projection | Ready-review session owns comment text; `review-document` resolves opaque targets during analysis, strips scope attributes, and carries source-node bindings only in the parser-blocking first private bootstrap response; trusted `AiReviewWorkspace` delivers targets only through a challenged private port, then joins anonymous viewport geometry and renders it | none beyond the immutable Request/Draft evidence already frozen for the run | trusted review host above the before frame only; authored frames never receive comment text, comment keys, a comment scope marker, or a source-node/locator map in HTML or later bootstrap source |
 | Current source-backed comment resolution, visibility, coordinates, marker eligibility and natural document height | `HtmlCanvasEditor` presentation measurement | none; disposable snapshot tagged by rendered source Hash, applied page-view generation and exact target-ID set | Workbench comment rail and Canvas height |
 | Stable application update schedule, coalesced manual check, download progress and restart-install readiness | Main-process application-update controller | signed GitHub Release metadata plus updater cache; no editor authority | preload status snapshot, About PageRoot, Workbench update notice, drain coordinator |
 | Random installation identity, project pseudonym secret, aggregate counters and unsent usage events | Main-process usage-telemetry controller | bounded `usage-telemetry.json` under PageRoot Application Support | PostHog batch ingestion only |
@@ -138,14 +138,16 @@ Rules:
   Version records or project state. Frozen review comments remain read-only
   evidence. Their text stays in the trusted host. Scope attributes are removed
   before either document is serialized. A source-resolved local before target
-  retains only a short-lived content-free source-node identity until the first
-  owned bootstrap binds its exact parser-created element and removes it before
-  authored scripts run. The trusted parent keeps the key-to-identity map and
-  releases it only to the before bootstrap through a challenged private port;
-  comment text, keys and locator maps never enter document bytes or fetchable
-  bootstrap source. A unique source `id`, `data-*`, `name`, or `aria-label` is
-  only a safe fallback when source identity is unavailable, never a positional
-  sibling path. An unsafe, duplicate, replaced or disconnected target, or an
+  is represented only by an opaque private initial-bootstrap binding: an
+  element path plus a narrow static fingerprint, never a source-node identity
+  in authored-page markup. The managed preview serves it only to the
+  parser-blocking first bootstrap request, then returns an unbound fallback to
+  later reads. The trusted parent releases targets only to the before bootstrap
+  through a challenged private port; comment text, keys, source-node IDs and
+  locator maps never enter document bytes or later fetchable bootstrap source.
+  A unique source `id`, `data-*`, `name`, or `aria-label` is only a safe
+  fallback when private binding is unavailable, never a positional sibling
+  path. An unsafe, ambiguous, replaced or disconnected target, or an
   unavailable capability, produces no marker. Neither review frame receives
   comment text or a comment scope marker in authored-page markup.
 - The runtime-chart supplement never re-analyzes a statically covered host. It
@@ -162,10 +164,12 @@ Rules:
   comments do not widen runtime scope, the group cannot cross its section, and
   ordinary group-external section co-location is not enough.
   Candidate keys and original source-box baselines are held only in the first
-  bootstrap's session-private element map. The temporary identity is removed
-  before authored code runs; fixed runtime-host/source-box attributes are not
-  serialized. A missing, re-added, duplicate, replaced or disconnected identity
-  invalidates the full supplemental batch.
+  parser bootstrap response's session-private element map. No temporary
+  identity, fixed runtime-host/source-box attribute, key or path is serialized.
+  A stale path may resolve only to one matching private fingerprint; a missing,
+  ambiguous, replaced or disconnected binding invalidates the full supplemental
+  batch. Confirmation creates fresh sessions so its frame pair receives new
+  one-shot bindings.
   The bootstrap binds its evidence-reading DOM/style/Canvas primitives before
   authored scripts run, owns the frozen analyzer-declared host-key set and
   records the parser-created element that first claims every key. Undeclared

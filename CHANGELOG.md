@@ -13,15 +13,17 @@ Notable user-visible changes are documented here. This project follows Semantic 
   other un-commented regions retain the strict host-reference gate and bounded
   budget. Comment scope remains analyzer-only: scope attributes are removed
   before either review document is serialized. Every source-resolved local
-  target also receives a short-lived, content-free source-node identity so the
-  first owned before bootstrap can bind the exact parser-created element and
-  remove that identity before authored code runs. The trusted review host keeps
-  the key-to-identity map until it delivers it only to the before frame via a
-  challenged private port. Comment bodies, comment keys and locator maps never
-  enter document bytes or fetchable bootstrap source. A unique source `id`,
-  `data-*`, `name`, or `aria-label` locator is only a safe fallback when that
-  source identity is unavailable—never a mutable sibling ordinal. Missing,
-  duplicate, replaced or disconnected targets, and unavailable private
+  target is instead represented only in a private initial-bootstrap binding:
+  an element path plus a narrow static fingerprint, never a temporary DOM
+  attribute. The desktop preview session serves that binding only to the
+  parser-blocking first bootstrap request, then replaces it with an unbound
+  fallback for later author-initiated reads. The trusted review host delivers
+  comment targets only to the before frame via a challenged private port.
+  Comment bodies, comment keys, source-node IDs and locator maps never enter
+  document bytes or a later fetchable bootstrap response. A unique source `id`,
+  `data-*`, `name`, or `aria-label` locator is only a safe fallback when the
+  private binding is unavailable—never a mutable sibling ordinal. Missing,
+  ambiguous, replaced or disconnected targets, and unavailable private
   transport, omit the marker rather than guessing a neighboring element. The
   bootstrap consumes both private-channel challenges in its first capture
   listener, before authored capture listeners can observe or forge either port.
@@ -32,14 +34,17 @@ Notable user-visible changes are documented here. This project follows Semantic 
   initialization, a failed replay, or a replay mismatch keeps the existing
   static result; directly causal hosts and comment-scoped hosts with no initial
   difference do not pay for the extra run.
-- Hardened runtime-chart candidate binding so host keys and original source-box
-  baselines are no longer serialized as fixed authored-page attributes. The
-  first owned bootstrap consumes a session-private temporary identity before
-  author code runs, removes it immediately, and retains the exact element/key/
-  baseline mapping only in its closed runtime state. A missing, re-added,
-  duplicate, replaced or disconnected identity invalidates the complete
-  supplemental batch, so authored CSS or scripts cannot use candidate metadata
-  to manufacture a visual difference.
+- Hardened runtime-chart candidate binding so host keys, source-box baselines
+  and element locators are never serialized as authored-page attributes. The
+  parser-blocking first bootstrap response alone receives opaque private
+  bindings; the managed preview immediately consumes it and serves only an
+  unbound fallback source to later reads. It retains the exact element/key/
+  baseline mapping only in closed runtime state. A stale path may resolve only
+  to one matching private fingerprint; an ambiguity, replacement or
+  disconnection invalidates the complete supplemental batch, so authored CSS
+  or scripts cannot use candidate metadata to manufacture a visual difference.
+  A confirmation pair receives fresh preview sessions so its own first
+  bootstrap response can safely carry its one-shot bindings.
 
 ## [0.9.7] - 2026-08-07
 

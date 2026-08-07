@@ -29,7 +29,7 @@ const [
   readFile(new URL("../app/lib/review-scroll-sync.js", import.meta.url), "utf8"),
 ]);
 
-function generatedReviewBootstrap(candidateKeys = []) {
+function generatedReviewBootstrap(candidateKeys = [], reviewCommentBindings = []) {
   const sourceFile = ts.createSourceFile(
     "review-document.ts",
     reviewDocument,
@@ -62,10 +62,17 @@ function generatedReviewBootstrap(candidateKeys = []) {
     ],
   });
   new vm.Script(transpiled).runInContext(context);
+  const runtimeVisualBindings = candidateKeys.map((key, index) => ({
+    key,
+    path: [1, index],
+    tagName: "DIV",
+    sourceBoxSignature: "[]",
+  }));
   return context.reviewBootstrap(
     "review-session",
     "before",
-    candidateKeys,
+    runtimeVisualBindings,
+    reviewCommentBindings,
   );
 }
 
@@ -383,11 +390,31 @@ test("runtime chart review supplements only the initial bounded static footprint
   assert.match(reviewDocument, /annotateRuntimeVisualCandidates/);
   assert.match(
     reviewDocument,
-    /const runtimeVisualIdentityAttribute = options\.externalBootstrap\s+\? reviewRuntimeVisualIdentityAttributeName\(options\.sessionId\)/,
+    /const runtimeVisualAnnotations: ReviewRuntimeVisualAnnotations = options\.externalBootstrap\s+\? annotateRuntimeVisualCandidates/,
   );
   assert.match(
     reviewDocument,
-    /const runtimeVisualCandidates = runtimeVisualIdentityAttribute\s+\? annotateRuntimeVisualCandidates/,
+    /const runtimeVisualCandidates = runtimeVisualAnnotations\.candidates/,
+  );
+  assert.match(reviewDocument, /reviewBootstrapElementBinding/);
+  assert.match(reviewDocument, /runtimeVisualInitialBindings = Object\.freeze/);
+  assert.match(reviewDocument, /initialBindingObserver/);
+  assert.match(reviewDocument, /bootstrapFallbackJavaScript/);
+  assert.match(review, /bootstrapFallbackJavaScript: documents\.bootstrapFallbackJavaScript\.before/);
+  assert.match(review, /bootstrapFallbackJavaScript: documents\.bootstrapFallbackJavaScript\.after/);
+  assert.match(review, /\[documents, independentTransport, runtimeVisualFrameRun, sourcePath\]/);
+  assert.match(review, /frameRun: number;/);
+  assert.match(
+    review,
+    /desktopSessionResult\.frameRun === runtimeVisualFrameRun/,
+  );
+  assert.match(
+    review,
+    /const frame = event\.currentTarget;\s+if \(iframeRef\.current !== frame\) return;/,
+  );
+  assert.match(
+    review,
+    /if \(message\.type === "ready"\) \{\s+runtimeVisualReadySidesRef\.current\.add\(message\.side\);\s+const frame = framesRef\.current\[message\.side\];\s+if \(frame\) \{\s+prepareReviewCommentFrame\(message\.side, frame\);\s+prepareRuntimeVisualFrame\(message\.side, frame\);/,
   );
   assert.match(reviewDocument, /staticReviewMarkerCoversRuntimeHost/);
   assert.match(reviewDocument, /collectRuntimeVisualSnapshots/);
@@ -438,9 +465,9 @@ test("runtime chart review supplements only the initial bounded static footprint
   assert.match(reviewDocument, /const hosts = runtimeVisualExpectedHosts\(\)/);
   assert.match(reviewDocument, /if \(hosts === null\) return null/);
   assert.match(reviewDocument, /if \(runtimeVisualSnapshots !== null\)/);
-  assert.match(reviewDocument, /runtimeVisualIdentityObserver/);
-  assert.match(reviewDocument, /runtimeVisualMutationRecordOldValue/);
-  assert.match(reviewDocument, /if \(previousIdentityValue\) \{/);
+  assert.match(reviewDocument, /runtimeVisualInitialBindingElement/);
+  assert.match(reviewDocument, /runtimeVisualInitialBindingMatches/);
+  assert.match(reviewDocument, /drainInitialBindings\(\);/);
   assert.match(reviewDocument, /runtimeVisualKeyForHost\(host\) !== key/);
   assert.match(reviewDocument, /type === "apply-runtime-visual-changes"/);
   assert.match(reviewDocument, /new MessageChannel\(\)/);
@@ -450,7 +477,8 @@ test("runtime chart review supplements only the initial bounded static footprint
   assert.match(reviewDocument, /type: "runtime-visual-snapshots"/);
   assert.match(reviewDocument, /runtimeVisualSnapshotBatch = runtimeVisualSnapshots/);
   assert.match(reviewDocument, /runtimeVisualSourceBoxSignatures/);
-  assert.match(reviewDocument, /reviewRuntimeVisualIdentityAttributeName/);
+  assert.doesNotMatch(reviewDocument, /data-pageroot-review-runtime-identity-attribute/);
+  assert.doesNotMatch(reviewDocument, /data-pageroot-review-runtime-source-/);
   assert.doesNotMatch(reviewDocument, /data-pageroot-review-runtime-host/);
   assert.doesNotMatch(reviewDocument, /data-pageroot-review-runtime-source-box/);
   assert.match(
@@ -551,10 +579,14 @@ test("the generated runtime review bootstrap stays syntactically valid", () => {
     bootstrap,
     /runtimeVisualAddEventListener\("message", capturePrivateChannelRequest, \{ capture: true \}\)/,
   );
-  assert.match(bootstrap, /data-pageroot-review-runtime-identity-attribute/);
+  assert.match(bootstrap, /const runtimeVisualInitialBindings = Object\.freeze/);
+  assert.match(bootstrap, /const reviewCommentInitialBindings = Object\.freeze/);
+  assert.match(bootstrap, /const initialBindingObserver/);
   assert.match(bootstrap, /const runtimeVisualIdentityElements = new RuntimeVisualMap\(\)/);
   assert.match(bootstrap, /const reviewCommentIdentityElements = new RuntimeVisualMap\(\)/);
   assert.match(bootstrap, /message\.type !== "comment-targets"/);
+  assert.doesNotMatch(bootstrap, /data-pageroot-review-runtime-source-/);
+  assert.doesNotMatch(bootstrap, /data-pageroot-review-comment-source-/);
   assert.doesNotMatch(bootstrap, /review-comment-1|runtime-comment-caption/);
 });
 
@@ -575,11 +607,13 @@ test("formal review projects frozen user comments with private source identities
   assert.match(reviewDocument, /:nth-\(\?:child\|of-type\)\\\(/);
   assert.match(reviewDocument, /selector\.startsWith\("#"\)/);
   assert.match(reviewDocument, /sourceNodeId\?: string/);
-  assert.match(reviewDocument, /reviewCommentIdentityAttributeName/);
+  assert.match(reviewDocument, /reviewCommentBootstrapBindings/);
   assert.match(
     reviewDocument,
-    /clearReviewCommentScopeAttributes\(\s*beforeDocument,\s*reviewCommentTargets,\s*reviewCommentIdentityAttribute,\s*\)/,
+    /clearReviewCommentScopeAttributes\(beforeDocument\);/,
   );
+  assert.match(reviewDocument, /reviewCommentInitialBindings = Object\.freeze/);
+  assert.doesNotMatch(reviewDocument, /data-pageroot-review-comment-source-/);
   assert.match(reviewDocument, /commentTargets: reviewCommentTargets/);
   assert.match(reviewDocument, /let reviewCommentTargets = \[\]/);
   assert.match(reviewDocument, /type: "review-comment-channel"/);

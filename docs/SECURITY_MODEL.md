@@ -180,30 +180,36 @@ lower-priority scope to its sibling charts. The group cannot cross its section
 or derive from visual distance; comment text never enters either frame, and a
 global comment never authorizes page-wide capture. Opaque scope attributes exist
 only while frozen analysis prioritizes candidates and are stripped before either
-document is serialized. Each source-resolved local target carries only a
-short-lived, content-free source-node identity until the first owned bootstrap
-records the exact parser-created element and removes it before authored scripts
-run. The trusted parent retains the key-to-identity map; only after the before
-frame loads does a separately challenged bootstrap-owned `MessageChannel`
-receive it. Comment body, key and locator-map data are absent from document
-bytes and fetchable bootstrap source. A unique source `id`, `data-*`, `name`,
-or `aria-label` is a safe fallback only when source identity is unavailable,
-never a mutable sibling ordinal. Missing, duplicate, replaced or disconnected
-identities, or an unavailable private capability exchange, omit the marker
-rather than guessing. Authored CSS or scripts therefore cannot observe a
-comment scope marker or manufacture a change. If a host was admitted only through that scope,
+document is serialized. Each source-resolved local target is represented only
+by an opaque private initial-bootstrap binding: an element path plus a narrow
+static fingerprint, never a source-node identity in the document. The managed
+preview serves that binding only to the parser-blocking first bootstrap request,
+then replaces it with an unbound fallback for later author-initiated reads. The
+trusted parent retains the source-node map; only after the before frame loads
+does a separately challenged bootstrap-owned `MessageChannel` receive targets.
+Comment body, key, source-node and locator-map data are absent from document
+bytes and any later fetchable bootstrap response. A unique source `id`,
+`data-*`, `name`, or `aria-label` is a safe fallback only when private binding
+is unavailable, never a mutable sibling ordinal. Missing, ambiguous, replaced
+or disconnected bindings, or an unavailable private capability exchange, omit
+the marker rather than guessing. Authored CSS or scripts therefore cannot
+observe a comment scope marker or manufacture a change. If a host was admitted only through that scope,
 not a direct changed-script reference, a first-pair difference must match the
 same side in one newly loaded frozen frame pair; clock/random one-shots, a
 replacement-frame failure, or a mismatch have no marker authority. Every later
 identity, stability, budget and transport check remains unchanged.
 Runtime candidate keys and original source-box baselines are not persistent
-authored-page metadata. Each selected host receives only a session-private
-temporary identity; the first owned bootstrap records its exact parser-created
-element and baseline, removes the identity before authored code runs, and uses
-only its closure-held map thereafter. Fixed runtime-host/source-box attributes
-are never serialized. Missing, re-added, duplicate, replaced or disconnected
-candidate identities invalidate the whole runtime batch, so authored CSS or
-scripts cannot turn those internals into manufactured runtime evidence.
+authored-page metadata. Each selected host is represented only by a one-shot
+private initial-bootstrap binding containing an opaque path, narrow static
+fingerprint and frozen baseline. The first parser request receives it; the
+managed preview then serves unbound fallback source, and the bootstrap uses
+only its closure-held element/key/baseline map thereafter. Fixed
+runtime-host/source-box attributes, candidate keys and locator paths are never
+serialized. A stale path can resolve only to one matching private fingerprint;
+missing, ambiguous, replaced or disconnected bindings invalidate the whole
+runtime batch, so authored CSS or scripts cannot turn those internals into
+manufactured runtime evidence. A confirmation pair uses fresh sessions and its
+own one-shot bindings.
 The trusted bootstrap pre-creates separate `MessageChannel` capabilities for
 runtime evidence and, on the before side only, private locator delivery, and binds
 the DOM traversal, attribute, layout, computed-style, Canvas, string

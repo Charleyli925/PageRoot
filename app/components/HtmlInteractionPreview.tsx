@@ -47,6 +47,7 @@ type DesktopPreviewApi = {
   createSession: (payload: {
     html: string;
     bootstrapJavaScript: string;
+    bootstrapFallbackJavaScript?: string;
     sourcePath?: string;
   }) => Promise<DesktopPreviewSession>;
   revokeSession: (sessionId: string) => Promise<{ revoked: boolean }>;

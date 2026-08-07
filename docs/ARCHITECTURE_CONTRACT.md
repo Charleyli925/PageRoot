@@ -233,26 +233,31 @@ run of the same frozen document pair on both sides; a direct changed-script
 reference does not need the replay. A replay mismatch, failure or timeout
 removes only that scope-relaxed evidence and retains the static result. Comment
 scope attributes are analysis-only and are removed before either review document
-is serialized. Each source-resolved local before target retains only a
-content-free, session-scoped source-node identity until the first owned bootstrap
-records its exact parser-created element and removes the identity before authored
-scripts run. The trusted parent keeps the key-to-identity configuration and sends
-it only to the before bootstrap over a separately challenged private
-`MessageChannel`; comment body, comment key and locator-map data never enter
-document bytes or fetchable bootstrap source. A unique source `id`, `data-*`,
-`name`, or `aria-label` is an optional fallback only when source identity is
-unavailable, never a positional sibling path. Missing, duplicate, replaced or
-disconnected identities, and unavailable private transport, omit the marker
-rather than guessing. Only the before bootstrap returns comment geometry, so
-authored CSS or scripts cannot observe a comment scope marker and create runtime
-evidence themselves.
-Runtime candidate keys and original source-box baselines are also carried only
-by a session-private temporary identity attribute. The first owned bootstrap
-records the exact parser-created element and removes that attribute before
-authored scripts run; later sampling resolves only its closure-held
-element/key/baseline map. No fixed runtime-host or source-box attribute is
-serialized. A missing, re-added, duplicate, replaced or disconnected identity
-invalidates the complete runtime batch and retains static evidence.
+is serialized. Each source-resolved local before target is represented only by
+an opaque private initial-bootstrap binding: an element path plus a narrow
+static fingerprint, never a source-node identity attribute. The managed preview
+serves that binding only to the parser-blocking first bootstrap request and then
+serves an unbound fallback to later author-initiated requests. The trusted
+parent keeps the source-node configuration and sends targets only to the before
+bootstrap over a separately challenged private `MessageChannel`; comment body,
+comment key, source-node and locator-map data never enter document bytes or a
+later fetchable bootstrap response. A unique source `id`, `data-*`, `name`, or
+`aria-label` is an optional fallback only when private binding is unavailable,
+never a positional sibling path. Missing, ambiguous, replaced or disconnected
+bindings, and unavailable private transport, omit the marker rather than
+guessing. Only the before bootstrap returns comment geometry, so authored CSS
+or scripts cannot observe a comment scope marker and create runtime evidence
+themselves.
+Runtime candidate keys and original source-box baselines are carried by the
+same one-shot private bootstrap binding, not by attributes in review HTML. The
+first parser request consumes an opaque path/fingerprint/baseline record; later
+sampling resolves only its closure-held element/key/baseline map and later
+bootstrap reads receive unbound source. No fixed runtime-host or source-box
+attribute, candidate key or locator path is serialized. A stale path may match
+only one private fingerprint; a missing, ambiguous, replaced or disconnected
+binding invalidates the complete runtime batch and retains static evidence.
+Confirmation creates fresh preview sessions, so its new frame pair gets new
+one-shot bindings.
 The trusted first bootstrap must bind the DOM/style/Canvas collection,
 string-normalization/digest and Promise/timer/animation scheduling entry points
 before authored scripts run. Its bounded font wait must use only captured Promise

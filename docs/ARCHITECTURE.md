@@ -153,20 +153,21 @@ Comments + frozen input
   co-location inside the same section is not causal evidence. Comment scope
   attributes exist only while the frozen analyzer makes this decision, then are
   stripped from both serialized documents. For every source-resolved local
-  before target, the prepared document carries only a short-lived,
-  content-free source-node identity on that exact projected element. The first
-  owned bootstrap reads its per-session identity-attribute name from a temporary
-  attribute on itself, records the exact parser-created element, and removes
-  both temporary attributes before authored code runs. The trusted parent keeps
-  the key-to-identity map and, after the before frame loads, delivers it only
-  over a separately challenged bootstrap-owned `MessageChannel`. Comment body,
-  comment key and locator-map data are absent from document bytes and fetchable
-  bootstrap source. A unique source `id`, `data-*`, `name`, or `aria-label`
-  locator is an optional safe fallback only when source identity is unavailable,
-  never a positional sibling path; a missing, duplicate, replaced or
-  disconnected identity, or unavailable private channel, omits the before-side
-  marker rather than rebinding by guess. Only the before bootstrap reports
-  geometry, so authored code cannot react to a comment marker. When comment
+  before target, the analyzer retains an opaque private initial-bootstrap
+  binding: a parser path plus a narrowly scoped static fingerprint, never a
+  source-node attribute in the prepared document. The desktop managed-preview
+  session serves that binding only to the parser-blocking first request for the
+  external bootstrap, then replaces it with an unbound fallback response. The
+  trusted parent keeps the source-node mapping and, after the before frame
+  loads, delivers targets only over a separately challenged bootstrap-owned
+  `MessageChannel`. Comment body, comment key, source-node and locator-map data
+  are absent from document bytes and from any later author-initiated bootstrap
+  read. A unique source `id`, `data-*`, `name`, or `aria-label` locator is an
+  optional safe fallback only when the private binding is unavailable, never a
+  positional sibling path; a missing, ambiguous, replaced or disconnected
+  binding, or unavailable private channel, omits the before-side marker rather
+  than rebinding by guess. Only the before bootstrap reports geometry, so
+  authored code cannot react to a comment marker. When comment
   scope admits a host without a direct changed-script
   reference, a first-pair visual difference must be reproduced by a fresh run
   of the same frozen before/after documents before the parent may project it.
@@ -185,13 +186,17 @@ Comments + frozen input
   unavailable fact with no comparison authority, while valid sibling hosts
   remain usable.
   Candidate host keys and original source-box baselines follow the same private
-  binding discipline as comment identities: a session-private temporary
-  attribute is consumed and removed by the first owned bootstrap before
-  authored code runs, and the exact element/key/baseline mapping thereafter
-  exists only in bootstrap closure state. A missing, re-added, duplicate,
-  replaced or disconnected identity invalidates the complete runtime batch;
-  fixed runtime-host/source-box attributes are never serialized into the
-  authored-page DOM.
+  binding discipline as comments: the parser-blocking first bootstrap response
+  alone carries an opaque path/fingerprint/baseline record, while serialized
+  HTML carries no candidate identity. The managed preview consumes that private
+  response once and replaces it with an unbound fallback for subsequent reads;
+  the exact element/key/baseline mapping thereafter exists only in bootstrap
+  closure state. A stale path may resolve only to one matching private
+  fingerprint. A missing, ambiguous, replaced or disconnected binding
+  invalidates the complete runtime batch; fixed runtime-host/source-box
+  attributes, candidate keys and locator paths are never serialized into the
+  authored-page DOM or a later fetchable bootstrap response. Confirmation uses
+  fresh preview sessions so the new pair has its own one-shot binding response.
   Its first capture listener consumes the trusted parent's runtime and comment
   channel challenges, validates parent/session/type, and stops propagation
   before later authored capture listeners can observe a challenge or race a

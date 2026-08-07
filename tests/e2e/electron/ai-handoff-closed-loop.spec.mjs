@@ -632,9 +632,11 @@ test("a verified AI result stays pending through desktop review until the user a
       document.documentElement.dataset.reviewRuntimeCommentScopeExposed = String(
         reviewCommentScopeExposed,
       );
+      const reviewCommentSourceIdentityAttributePrefix =
+        "data-pageroot-review-comment-" + "source-";
       const reviewCommentSourceIdentityExposed = [...document.querySelectorAll("*")].some(
         (element) => [...element.attributes].some((attribute) => (
-          attribute.name.startsWith("data-pageroot-review-comment-source-")
+          attribute.name.startsWith(reviewCommentSourceIdentityAttributePrefix)
         )),
       );
       document.documentElement.dataset.reviewRuntimeCommentSourceIdentityExposed = String(
@@ -688,12 +690,18 @@ test("a verified AI result stays pending through desktop review until the user a
     </script>
     <script>
       const runtimeCandidateAttributeProbeColor = "#7f91a4";
+      const runtimeCandidateLegacySourceBoxAttribute =
+        "data-pageroot-review-runtime-source" + "-box";
       const runtimeCandidateAttributeProbeHosts = document.querySelectorAll(
-        "[data-pageroot-review-runtime-host], [data-pageroot-review-runtime-source-box]",
+        "[data-pageroot-review-runtime-host], ["
+          + runtimeCandidateLegacySourceBoxAttribute
+          + "]",
       );
+      const runtimeCandidateLiveIdentityAttributePrefix =
+        "data-pageroot-review-runtime-" + "source-";
       const runtimeCandidateIdentityExposed = [...document.querySelectorAll("*")].some(
         (element) => [...element.attributes].some((attribute) => (
-          attribute.name.startsWith("data-pageroot-review-runtime-source-")
+          attribute.name.startsWith(runtimeCandidateLiveIdentityAttributePrefix)
         )),
       );
       const runtimeCandidateBootstrapIdentityExposed = document.querySelector(
@@ -707,6 +715,60 @@ test("a verified AI result stays pending through desktop review until the user a
       runtimeCandidateAttributeProbeHosts.forEach((host) => {
         host.style.outline = "4px solid " + runtimeCandidateAttributeProbeColor;
       });
+      const runtimeCandidateMarkupProbe = document.querySelector(
+        "#review-runtime-comment-marker-probe",
+      );
+      document.documentElement.dataset.reviewRuntimeCandidateMarkupExposed = "pending";
+      document.documentElement.dataset.reviewRuntimeCommentMarkupIdentityExposed = "pending";
+      const runtimeSourceIdentityPrefix = "data-pageroot-review-runtime-" + "source-";
+      const commentSourceIdentityPrefix = "data-pageroot-review-comment-" + "source-";
+      const inspectRuntimeCandidateBytes = (documentSource, bootstrapSource) => {
+        const documentText = String(documentSource || "");
+        const bootstrapText = String(bootstrapSource || "");
+        const runtimeIdentityExposed = documentText.includes(runtimeSourceIdentityPrefix)
+          || bootstrapText.includes(runtimeSourceIdentityPrefix)
+          || bootstrapText.includes('"runtime-host-');
+        const commentIdentityExposed = documentText.includes(commentSourceIdentityPrefix)
+          || bootstrapText.includes(commentSourceIdentityPrefix);
+        document.documentElement.dataset.reviewRuntimeCandidateMarkupExposed = String(
+          runtimeIdentityExposed,
+        );
+        document.documentElement.dataset.reviewRuntimeCommentMarkupIdentityExposed = String(
+          commentIdentityExposed,
+        );
+        if (runtimeIdentityExposed && runtimeCandidateMarkupProbe) {
+          runtimeCandidateMarkupProbe.innerHTML = '<div style="height:48px;background:'
+            + runtimeCandidateAttributeProbeColor
+            + '">源码身份泄漏探针</div>';
+        }
+      };
+      const runtimeCandidateBootstrap = document.querySelector(
+        'script[data-pageroot-ai-review-bootstrap="true"]',
+      );
+      if (runtimeCandidateBootstrap?.src) {
+        try {
+          const documentRequest = new XMLHttpRequest();
+          const bootstrapRequest = new XMLHttpRequest();
+          documentRequest.open("GET", location.href, false);
+          documentRequest.send();
+          bootstrapRequest.open("GET", runtimeCandidateBootstrap.src, false);
+          bootstrapRequest.send();
+          inspectRuntimeCandidateBytes(
+            documentRequest.responseText,
+            bootstrapRequest.responseText,
+          );
+        } catch {
+          void Promise.all([
+            fetch(location.href).then((response) => response.text()),
+            fetch(runtimeCandidateBootstrap.src).then((response) => response.text()),
+          ]).then(([documentSource, bootstrapSource]) => {
+            inspectRuntimeCandidateBytes(documentSource, bootstrapSource);
+          }).catch(() => {
+            document.documentElement.dataset.reviewRuntimeCandidateMarkupExposed = "unavailable";
+            document.documentElement.dataset.reviewRuntimeCommentMarkupIdentityExposed = "unavailable";
+          });
+        }
+      }
     </script>
     <script>
       const runtimeCommentChart = document.querySelector("#review-runtime-comment-chart");
@@ -1226,6 +1288,14 @@ test("a verified AI result stays pending through desktop review until the user a
       .toHaveAttribute("data-review-runtime-candidate-attribute-exposed", "false");
     await expect(afterReviewFrame.locator("html"))
       .toHaveAttribute("data-review-runtime-candidate-attribute-exposed", "false");
+    await expect(beforeReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-candidate-markup-exposed", "false");
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-candidate-markup-exposed", "false");
+    await expect(beforeReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-comment-markup-identity-exposed", "false");
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-comment-markup-identity-exposed", "false");
     await expect(beforeReviewFrame.locator("html"))
       .toHaveAttribute("data-review-runtime-comment-locator-exposed", "false");
     await expect(afterReviewFrame.locator("html"))
@@ -2615,7 +2685,7 @@ test("a pre-load review navigation falls back without trusting the replacement p
   }
 });
 
-test("a stolen runtime host claim falls back to the static review", async () => {
+test("fetched review bytes cannot expose a runtime host binding", async () => {
   test.setTimeout(120_000);
   const fixture = createSourceFixture("review-runtime-duplicate-claim.html", (source) => (
     source.replace(
@@ -2634,41 +2704,38 @@ test("a stolen runtime host claim falls back to the static review", async () => 
         const reviewDuplicateClaimBootstrap = document.querySelector(
           'script[data-pageroot-ai-review-bootstrap="true"]',
         );
-        let reviewDuplicateClaimIdentityAttribute = "";
-        let reviewDuplicateClaimKey = "";
+        let reviewDuplicateClaimBindingExposed = false;
         if (reviewDuplicateClaimBootstrap?.src) {
           try {
-            const request = new XMLHttpRequest();
-            request.open("GET", reviewDuplicateClaimBootstrap.src, false);
-            request.send();
-            const bootstrapSource = request.responseText || "";
-            const sessionMatch = bootstrapSource.match(/const sessionId = ("[^"]+");/u);
-            const keyMatch = bootstrapSource.match(
-              /const runtimeVisualExpectedKeys = Object\\.freeze\\(\\s*\\[\\s*"([^"]+)"/u,
-            );
-            if (!sessionMatch || !keyMatch) throw new Error("missing-runtime-identity");
-            const token = JSON.parse(sessionMatch[1])
-              .toLowerCase()
-              .replace(/[^a-z0-9-]/gu, "")
-              .slice(0, 80) || "session";
-            reviewDuplicateClaimIdentityAttribute =
-              "data-pageroot-review-runtime-source-" + token;
-            reviewDuplicateClaimKey = keyMatch[1];
+            const documentRequest = new XMLHttpRequest();
+            const bootstrapRequest = new XMLHttpRequest();
+            documentRequest.open("GET", location.href, false);
+            documentRequest.send();
+            bootstrapRequest.open("GET", reviewDuplicateClaimBootstrap.src, false);
+            bootstrapRequest.send();
+            const documentSource = documentRequest.responseText || "";
+            const bootstrapSource = bootstrapRequest.responseText || "";
+            const identityPrefix = "data-pageroot-review-runtime-" + "source-";
+            reviewDuplicateClaimBindingExposed = documentSource.includes(identityPrefix)
+              || bootstrapSource.includes(identityPrefix)
+              || bootstrapSource.includes('"runtime-host-');
           } catch {
-            reviewDuplicateClaimIdentityAttribute = "";
+            reviewDuplicateClaimBindingExposed = false;
           }
         }
-        if (reviewDuplicateClaimIdentityAttribute && reviewDuplicateClaimKey) {
-          const reviewDuplicateClaimForgery = document.createElement("div");
-          reviewDuplicateClaimForgery.id = "review-runtime-duplicate-claim-forgery";
+        const reviewDuplicateClaimForgery = document.createElement("div");
+        reviewDuplicateClaimForgery.id = "review-runtime-duplicate-claim-forgery";
+        if (reviewDuplicateClaimBindingExposed) {
           reviewDuplicateClaimForgery.setAttribute(
-            reviewDuplicateClaimIdentityAttribute,
-            reviewDuplicateClaimKey,
+            "data-pageroot-review-runtime-" + "source-forged",
+            "runtime-host-forged",
           );
-          reviewDuplicateClaimForgery.textContent = "伪造的同 key 宿主";
-          document.body.append(reviewDuplicateClaimForgery);
-          document.documentElement.dataset.reviewRuntimeDuplicateClaim = "true";
         }
+        reviewDuplicateClaimForgery.textContent = "伪造的同 key 宿主";
+        document.body.append(reviewDuplicateClaimForgery);
+        document.documentElement.dataset.reviewRuntimeDuplicateClaim = String(
+          reviewDuplicateClaimBindingExposed,
+        );
       </script>
     </section>
   </main>`,
@@ -2713,10 +2780,10 @@ test("a stolen runtime host claim falls back to the static review", async () => 
     for (const frame of [beforeReviewFrame, afterReviewFrame]) {
       await expect(frame.locator("html")).toHaveAttribute(
         "data-review-runtime-duplicate-claim",
-        "true",
+        "false",
       );
       await expect(frame.locator("#review-runtime-duplicate-claim-chart"))
-        .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
+        .toHaveAttribute("data-pageroot-review-runtime-marker", "true");
       await expect(frame.locator("#review-runtime-duplicate-claim-forgery"))
         .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
       await expect(frame.locator(
