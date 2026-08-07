@@ -3,9 +3,11 @@ import test from "node:test";
 
 import {
   createExternalFileOpenMailbox,
+  externalOpenFailurePresentation,
   externalHtmlPathsFromArgv,
   normalizeExternalHtmlPath,
 } from "../desktop/external-file-open.mjs";
+import { ProjectFileError } from "../desktop/project-files.mjs";
 
 test("external HTML paths accept absolute html/htm paths and file URLs only", () => {
   assert.equal(
@@ -40,6 +42,33 @@ test("external argv parsing ignores Chromium arguments and deduplicates HTML pat
       "/Users/demo/archive.htm",
     ], { platform: "darwin" }),
     ["/Users/demo/report.html", "/Users/demo/archive.htm"],
+  );
+});
+
+test("native external-open failures use stable product errors instead of raw paths", () => {
+  const rawFilesystemFailure = Object.assign(
+    new Error("ENOENT: no such file or directory, lstat '/Users/demo/客户页面.html'"),
+    { code: "ENOENT" },
+  );
+
+  assert.deepEqual(externalOpenFailurePresentation(rawFilesystemFailure), {
+    code: "EXTERNAL_OPEN_FAILED",
+    message: "无法读取这个 HTML 文件。请确认文件仍存在且具有访问权限。",
+  });
+  assert.doesNotMatch(
+    externalOpenFailurePresentation(rawFilesystemFailure).message,
+    /ENOENT|客户页面|\/Users/u,
+  );
+  assert.deepEqual(
+    externalOpenFailurePresentation(new ProjectFileError(
+      "SOURCE_NOT_FOUND",
+      "源 HTML 已不存在。",
+      { sourcePath: "/Users/demo/客户页面.html" },
+    )),
+    {
+      code: "SOURCE_NOT_FOUND",
+      message: "源 HTML 已不存在。",
+    },
   );
 });
 

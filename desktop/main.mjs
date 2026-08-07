@@ -56,6 +56,7 @@ import {
 import { createOpenInDefaultBrowserOperation } from "./open-in-default-browser.mjs";
 import {
   createExternalFileOpenMailbox,
+  externalOpenFailurePresentation,
   externalHtmlPathsFromArgv,
 } from "./external-file-open.mjs";
 import { createProjectOpenQueue } from "./project-open-queue.mjs";
@@ -659,10 +660,16 @@ async function inspectHtmlFile(filePath) {
   const normalizedPath = assertHtmlPath(filePath);
   const fileStats = await lstat(normalizedPath);
   if (!fileStats.isFile() || fileStats.isSymbolicLink()) {
-    throw new TypeError("只能打开普通 HTML 文件。");
+    throw new ProjectFileError(
+      "UNSAFE_EXTERNAL_HTML",
+      "只能打开普通 HTML 文件。",
+    );
   }
   if (fileStats.size > MAX_HTML_BYTES) {
-    throw new RangeError("HTML 文件不能超过 25 MB。");
+    throw new ProjectFileError(
+      "HTML_TOO_LARGE",
+      "HTML 文件不能超过 25 MB。",
+    );
   }
   return normalizedPath;
 }
@@ -677,9 +684,10 @@ async function readHtmlProject(filePath) {
 }
 
 function showExternalOpenError(error) {
+  const presentation = externalOpenFailurePresentation(error);
   dialog.showErrorBox(
     "无法打开这个 HTML",
-    error instanceof Error ? error.message : String(error),
+    `${presentation.message}\n\n错误代码：${presentation.code}`,
   );
 }
 

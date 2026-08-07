@@ -2,7 +2,13 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { ProjectFileError } from "./project-files.mjs";
+
 const HTML_EXTENSIONS = new Set([".html", ".htm"]);
+const EXTERNAL_OPEN_FAILURE = Object.freeze({
+  code: "EXTERNAL_OPEN_FAILED",
+  message: "无法读取这个 HTML 文件。请确认文件仍存在且具有访问权限。",
+});
 
 function pathImplementation(platform) {
   return platform === "win32" ? path.win32 : path.posix;
@@ -54,6 +60,22 @@ export function externalHtmlPathsFromArgv(
     }
   }
   return results;
+}
+
+/**
+ * Native startup happens before a renderer can safely present an IPC error.
+ * Keep the native dialog product-facing: filesystem exceptions commonly
+ * include a full local path, syscall and platform-specific implementation
+ * detail. Product file errors already carry a stable code and message.
+ */
+export function externalOpenFailurePresentation(error) {
+  if (error instanceof ProjectFileError) {
+    return Object.freeze({
+      code: error.code,
+      message: error.message,
+    });
+  }
+  return EXTERNAL_OPEN_FAILURE;
 }
 
 export function createExternalFileOpenMailbox({

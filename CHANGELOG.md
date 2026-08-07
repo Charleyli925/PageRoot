@@ -20,7 +20,10 @@ Notable user-visible changes are documented here. This project follows Semantic 
   or external result now enters a renderer FIFO and re-fences immediately
   before it is published, so an older result cannot unlock the Canvas and let a
   later queued open discard a newer user edit. A delayed startup catch-up can
-  no longer replace a newer live external-open request in the renderer.
+  no longer replace a newer live external-open request in the renderer. If a
+  cold-start file has moved or cannot be read, PageRoot now shows a stable
+  product error code and message instead of exposing the local path or raw
+  filesystem exception.
 - Update the shared `js-yaml` dependency closure to 4.3.1, removing the
   high-severity parsing advisory without changing the packaged runtime shape.
 - Bring the review-first AI workflow into the public README, built-in welcome
