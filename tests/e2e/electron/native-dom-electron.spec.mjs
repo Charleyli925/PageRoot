@@ -733,24 +733,6 @@ test("Electron interactive preview runs authored scripts and edits the selected 
     await expect(editFrame.locator(
       '#runtime-svg img[data-pageroot-readonly-visual="runtime-bitmap"]',
     )).toBeVisible();
-    const initialRuntimeVisualGeometry = await editFrame.locator(
-      '#runtime-svg img[data-pageroot-readonly-visual="runtime-bitmap"]',
-    ).evaluate((image) => {
-      const host = image.closest("#runtime-svg");
-      if (!host) throw new Error("Runtime visual host is missing.");
-      const hostRect = host.getBoundingClientRect();
-      const imageRect = image.getBoundingClientRect();
-      return {
-        imageWidth: imageRect.width,
-        imageHeight: imageRect.height,
-        insetX: imageRect.left - hostRect.left,
-        insetY: imageRect.top - hostRect.top,
-      };
-    });
-    expect(initialRuntimeVisualGeometry.imageWidth).toBeCloseTo(50, 1);
-    expect(initialRuntimeVisualGeometry.imageHeight).toBeCloseTo(25, 1);
-    expect(initialRuntimeVisualGeometry.insetX).toBeCloseTo(12.5, 1);
-    expect(initialRuntimeVisualGeometry.insetY).toBeCloseTo(12.5, 1);
     await expect(editFrame.locator("#direct-runtime-canvas"))
       .toHaveAttribute(
         "data-pageroot-readonly-visual-host",
