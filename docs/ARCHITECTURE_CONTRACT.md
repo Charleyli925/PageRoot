@@ -246,6 +246,13 @@ disconnected identities, and unavailable private transport, omit the marker
 rather than guessing. Only the before bootstrap returns comment geometry, so
 authored CSS or scripts cannot observe a comment scope marker and create runtime
 evidence themselves.
+Runtime candidate keys and original source-box baselines are also carried only
+by a session-private temporary identity attribute. The first owned bootstrap
+records the exact parser-created element and removes that attribute before
+authored scripts run; later sampling resolves only its closure-held
+element/key/baseline map. No fixed runtime-host or source-box attribute is
+serialized. A missing, re-added, duplicate, replaced or disconnected identity
+invalidates the complete runtime batch and retains static evidence.
 The trusted first bootstrap must bind the DOM/style/Canvas collection,
 string-normalization/digest and Promise/timer/animation scheduling entry points
 before authored scripts run. Its bounded font wait must use only captured Promise

@@ -196,6 +196,14 @@ not a direct changed-script reference, a first-pair difference must match the
 same side in one newly loaded frozen frame pair; clock/random one-shots, a
 replacement-frame failure, or a mismatch have no marker authority. Every later
 identity, stability, budget and transport check remains unchanged.
+Runtime candidate keys and original source-box baselines are not persistent
+authored-page metadata. Each selected host receives only a session-private
+temporary identity; the first owned bootstrap records its exact parser-created
+element and baseline, removes the identity before authored code runs, and uses
+only its closure-held map thereafter. Fixed runtime-host/source-box attributes
+are never serialized. Missing, re-added, duplicate, replaced or disconnected
+candidate identities invalidate the whole runtime batch, so authored CSS or
+scripts cannot turn those internals into manufactured runtime evidence.
 The trusted bootstrap pre-creates separate `MessageChannel` capabilities for
 runtime evidence and, on the before side only, private locator delivery, and binds
 the DOM traversal, attribute, layout, computed-style, Canvas, string

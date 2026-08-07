@@ -184,6 +184,14 @@ Comments + frozen input
   difference. A host that is unsupported, unstable or over budget emits an explicit
   unavailable fact with no comparison authority, while valid sibling hosts
   remain usable.
+  Candidate host keys and original source-box baselines follow the same private
+  binding discipline as comment identities: a session-private temporary
+  attribute is consumed and removed by the first owned bootstrap before
+  authored code runs, and the exact element/key/baseline mapping thereafter
+  exists only in bootstrap closure state. A missing, re-added, duplicate,
+  replaced or disconnected identity invalidates the complete runtime batch;
+  fixed runtime-host/source-box attributes are never serialized into the
+  authored-page DOM.
   Its first capture listener consumes the trusted parent's runtime and comment
   channel challenges, validates parent/session/type, and stops propagation
   before later authored capture listeners can observe a challenge or race a

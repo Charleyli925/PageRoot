@@ -32,6 +32,14 @@ Notable user-visible changes are documented here. This project follows Semantic 
   initialization, a failed replay, or a replay mismatch keeps the existing
   static result; directly causal hosts and comment-scoped hosts with no initial
   difference do not pay for the extra run.
+- Hardened runtime-chart candidate binding so host keys and original source-box
+  baselines are no longer serialized as fixed authored-page attributes. The
+  first owned bootstrap consumes a session-private temporary identity before
+  author code runs, removes it immediately, and retains the exact element/key/
+  baseline mapping only in its closed runtime state. A missing, re-added,
+  duplicate, replaced or disconnected identity invalidates the complete
+  supplemental batch, so authored CSS or scripts cannot use candidate metadata
+  to manufacture a visual difference.
 
 ## [0.9.7] - 2026-08-07
 

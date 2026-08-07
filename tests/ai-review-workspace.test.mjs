@@ -53,8 +53,6 @@ function generatedReviewBootstrap(candidateKeys = []) {
   ).outputText;
   const context = vm.createContext({
     REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT: 128,
-    REVIEW_RUNTIME_VISUAL_HOST_ATTRIBUTE: "data-pageroot-review-runtime-host",
-    REVIEW_RUNTIME_VISUAL_SOURCE_BOX_ATTRIBUTE: "data-pageroot-review-runtime-source-box",
     REVIEW_RUNTIME_VISUAL_SOURCE_BOX_ATTRIBUTES: [
       "class",
       "height",
@@ -385,7 +383,11 @@ test("runtime chart review supplements only the initial bounded static footprint
   assert.match(reviewDocument, /annotateRuntimeVisualCandidates/);
   assert.match(
     reviewDocument,
-    /const runtimeVisualCandidates = options\.externalBootstrap\s+\? annotateRuntimeVisualCandidates/,
+    /const runtimeVisualIdentityAttribute = options\.externalBootstrap\s+\? reviewRuntimeVisualIdentityAttributeName\(options\.sessionId\)/,
+  );
+  assert.match(
+    reviewDocument,
+    /const runtimeVisualCandidates = runtimeVisualIdentityAttribute\s+\? annotateRuntimeVisualCandidates/,
   );
   assert.match(reviewDocument, /staticReviewMarkerCoversRuntimeHost/);
   assert.match(reviewDocument, /collectRuntimeVisualSnapshots/);
@@ -399,7 +401,7 @@ test("runtime chart review supplements only the initial bounded static footprint
   );
   assert.match(
     reviewDocument,
-    /captureRuntimeVisualHost\(\s+host,\s+runtimeVisualSnapshotBudget,\s+\)/,
+    /captureRuntimeVisualHost\(\s+host,\s+expectedKey,\s+sourceBoxSignature,\s+runtimeVisualSnapshotBudget,\s+\)/,
   );
   assert.doesNotMatch(
     reviewDocument,
@@ -436,9 +438,10 @@ test("runtime chart review supplements only the initial bounded static footprint
   assert.match(reviewDocument, /const hosts = runtimeVisualExpectedHosts\(\)/);
   assert.match(reviewDocument, /if \(hosts === null\) return null/);
   assert.match(reviewDocument, /if \(runtimeVisualSnapshots !== null\)/);
-  assert.match(reviewDocument, /runtimeVisualHostClaimObserver/);
+  assert.match(reviewDocument, /runtimeVisualIdentityObserver/);
   assert.match(reviewDocument, /runtimeVisualMutationRecordOldValue/);
-  assert.match(reviewDocument, /claimedHost === host/);
+  assert.match(reviewDocument, /if \(previousIdentityValue\) \{/);
+  assert.match(reviewDocument, /runtimeVisualKeyForHost\(host\) !== key/);
   assert.match(reviewDocument, /type === "apply-runtime-visual-changes"/);
   assert.match(reviewDocument, /new MessageChannel\(\)/);
   assert.match(reviewDocument, /!event\.isTrusted/);
@@ -446,7 +449,10 @@ test("runtime chart review supplements only the initial bounded static footprint
   assert.match(reviewDocument, /type: "runtime-visual-channel"/);
   assert.match(reviewDocument, /type: "runtime-visual-snapshots"/);
   assert.match(reviewDocument, /runtimeVisualSnapshotBatch = runtimeVisualSnapshots/);
-  assert.match(reviewDocument, /runtimeVisualSourceBoxAttribute/);
+  assert.match(reviewDocument, /runtimeVisualSourceBoxSignatures/);
+  assert.match(reviewDocument, /reviewRuntimeVisualIdentityAttributeName/);
+  assert.doesNotMatch(reviewDocument, /data-pageroot-review-runtime-host/);
+  assert.doesNotMatch(reviewDocument, /data-pageroot-review-runtime-source-box/);
   assert.match(
     reviewDocument,
     /changedScripts\.some\(\(\{ content \}\) => referencesHost\(content\)\)/,
@@ -545,6 +551,8 @@ test("the generated runtime review bootstrap stays syntactically valid", () => {
     bootstrap,
     /runtimeVisualAddEventListener\("message", capturePrivateChannelRequest, \{ capture: true \}\)/,
   );
+  assert.match(bootstrap, /data-pageroot-review-runtime-identity-attribute/);
+  assert.match(bootstrap, /const runtimeVisualIdentityElements = new RuntimeVisualMap\(\)/);
   assert.match(bootstrap, /const reviewCommentIdentityElements = new RuntimeVisualMap\(\)/);
   assert.match(bootstrap, /message\.type !== "comment-targets"/);
   assert.doesNotMatch(bootstrap, /review-comment-1|runtime-comment-caption/);

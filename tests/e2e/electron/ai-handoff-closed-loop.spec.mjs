@@ -687,6 +687,28 @@ test("a verified AI result stays pending through desktop review until the user a
       }
     </script>
     <script>
+      const runtimeCandidateAttributeProbeColor = "#7f91a4";
+      const runtimeCandidateAttributeProbeHosts = document.querySelectorAll(
+        "[data-pageroot-review-runtime-host], [data-pageroot-review-runtime-source-box]",
+      );
+      const runtimeCandidateIdentityExposed = [...document.querySelectorAll("*")].some(
+        (element) => [...element.attributes].some((attribute) => (
+          attribute.name.startsWith("data-pageroot-review-runtime-source-")
+        )),
+      );
+      const runtimeCandidateBootstrapIdentityExposed = document.querySelector(
+        'script[data-pageroot-ai-review-bootstrap="true"]',
+      )?.hasAttribute("data-pageroot-review-runtime-identity-attribute");
+      document.documentElement.dataset.reviewRuntimeCandidateAttributeExposed = String(
+        runtimeCandidateAttributeProbeHosts.length > 0
+          || runtimeCandidateIdentityExposed
+          || runtimeCandidateBootstrapIdentityExposed,
+      );
+      runtimeCandidateAttributeProbeHosts.forEach((host) => {
+        host.style.outline = "4px solid " + runtimeCandidateAttributeProbeColor;
+      });
+    </script>
+    <script>
       const runtimeCommentChart = document.querySelector("#review-runtime-comment-chart");
       const runtimeCommentAdjacentChart = document.querySelector("#review-runtime-comment-adjacent-chart");
       const runtimeCommentPalette = window.reviewRuntimeCommentPalette;
@@ -1052,6 +1074,10 @@ test("a verified AI result stays pending through desktop review until the user a
           'window.reviewRuntimeCommentPalette = ["#7fa2c4", "#f4ba7d"];',
         )
         .replace(
+          'const runtimeCandidateAttributeProbeColor = "#7f91a4";',
+          'const runtimeCandidateAttributeProbeColor = "#d34f6a";',
+        )
+        .replace(
           'document.documentElement.dataset.reviewRuntimeCommentScopeProbeVariant = "before";',
           'document.documentElement.dataset.reviewRuntimeCommentScopeProbeVariant = "after";',
         )
@@ -1196,6 +1222,10 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect(afterReviewFrame.locator("html"))
       .toHaveAttribute("data-review-runtime-comment-bootstrap-identity-exposed", "false");
     await expect(beforeReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-candidate-attribute-exposed", "false");
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-candidate-attribute-exposed", "false");
+    await expect(beforeReviewFrame.locator("html"))
       .toHaveAttribute("data-review-runtime-comment-locator-exposed", "false");
     await expect(afterReviewFrame.locator("html"))
       .toHaveAttribute("data-review-runtime-comment-locator-exposed", "false");
@@ -1285,6 +1315,27 @@ test("a verified AI result stays pending through desktop review until the user a
         "style",
       );
     }
+    const runtimeCandidateMetadataHosts = [
+      ...runtimeChangedHosts,
+      "#review-runtime-flow-chart",
+      "#review-runtime-unstable-chart",
+      "#review-runtime-root-geometry-chart",
+      "#review-runtime-hidden-churn-chart",
+      "#review-runtime-hidden-descendant-churn-chart",
+      "#review-runtime-svg-hidden-descendant-churn-chart",
+      "#review-runtime-unrelated-random-chart",
+      "#review-runtime-comment-random-chart",
+      "#review-runtime-comment-marker-probe",
+      "#review-runtime-static-covered",
+    ];
+    for (const frame of [beforeReviewFrame, afterReviewFrame]) {
+      for (const selector of runtimeCandidateMetadataHosts) {
+        await expect(frame.locator(selector))
+          .not.toHaveAttribute("data-pageroot-review-runtime-host");
+        await expect(frame.locator(selector))
+          .not.toHaveAttribute("data-pageroot-review-runtime-source-box");
+      }
+    }
     const runtimeChangedIds = await Promise.all(runtimeChangedHosts.map((selector) => (
       afterReviewFrame.locator(selector).getAttribute("data-pageroot-review-marker")
     )));
@@ -1300,52 +1351,26 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect(afterReviewFrame.locator(
       `[data-pageroot-review-overlay-owner="${runtimeHtmlOwner}"]`,
     )).toBeVisible();
-    await expect(beforeReviewFrame.locator("#review-runtime-flow-chart"))
-      .toHaveAttribute("data-pageroot-review-runtime-host", /runtime-host-\d+/u);
     await expect(afterReviewFrame.locator("#review-runtime-flow-chart"))
       .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
     await expect(afterReviewFrame.locator("#review-runtime-unstable-chart"))
-      .not.toHaveAttribute("data-pageroot-review-runtime-host", /.+/u);
-    await expect(afterReviewFrame.locator("#review-runtime-unstable-chart"))
       .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
-    await expect(afterReviewFrame.locator("#review-runtime-root-geometry-chart"))
-      .toHaveAttribute("data-pageroot-review-runtime-host", /runtime-host-\d+/u);
     await expect(afterReviewFrame.locator("#review-runtime-root-geometry-chart"))
       .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
     await expect(afterReviewFrame.locator("#review-runtime-hidden-churn-chart"))
-      .toHaveAttribute("data-pageroot-review-runtime-host", /runtime-host-\d+/u);
-    await expect(afterReviewFrame.locator("#review-runtime-hidden-churn-chart"))
       .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
-    await expect(afterReviewFrame.locator(
-      "#review-runtime-hidden-descendant-churn-chart",
-    )).toHaveAttribute("data-pageroot-review-runtime-host", /runtime-host-\d+/u);
     await expect(afterReviewFrame.locator(
       "#review-runtime-hidden-descendant-churn-chart",
     )).not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
     await expect(afterReviewFrame.locator(
       "#review-runtime-svg-hidden-descendant-churn-chart",
-    )).toHaveAttribute("data-pageroot-review-runtime-host", /runtime-host-\d+/u);
-    await expect(afterReviewFrame.locator(
-      "#review-runtime-svg-hidden-descendant-churn-chart",
     )).not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
-    await expect(beforeReviewFrame.locator("#review-runtime-unrelated-random-chart"))
-      .not.toHaveAttribute("data-pageroot-review-runtime-host", /.+/u);
-    await expect(afterReviewFrame.locator("#review-runtime-unrelated-random-chart"))
-      .not.toHaveAttribute("data-pageroot-review-runtime-host", /.+/u);
     await expect(afterReviewFrame.locator("#review-runtime-unrelated-random-chart"))
       .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
-    await expect(beforeReviewFrame.locator("#review-runtime-comment-random-chart"))
-      .toHaveAttribute("data-pageroot-review-runtime-host", /runtime-host-\d+/u);
-    await expect(afterReviewFrame.locator("#review-runtime-comment-random-chart"))
-      .toHaveAttribute("data-pageroot-review-runtime-host", /runtime-host-\d+/u);
     await expect(beforeReviewFrame.locator("#review-runtime-comment-random-chart"))
       .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
     await expect(afterReviewFrame.locator("#review-runtime-comment-random-chart"))
       .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
-    await expect(beforeReviewFrame.locator("#review-runtime-comment-marker-probe"))
-      .toHaveAttribute("data-pageroot-review-runtime-host", /runtime-host-\d+/u);
-    await expect(afterReviewFrame.locator("#review-runtime-comment-marker-probe"))
-      .toHaveAttribute("data-pageroot-review-runtime-host", /runtime-host-\d+/u);
     await expect(beforeReviewFrame.locator("#review-runtime-comment-marker-probe"))
       .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
     await expect(afterReviewFrame.locator("#review-runtime-comment-marker-probe"))
@@ -1361,8 +1386,6 @@ test("a verified AI result stays pending through desktop review until the user a
         .evaluate((element) => element.getBoundingClientRect().top),
     ]);
     expect(Math.abs(runtimeFlowTop[0] - runtimeFlowTop[1])).toBeGreaterThan(30);
-    await expect(afterReviewFrame.locator("#review-runtime-static-covered"))
-      .not.toHaveAttribute("data-pageroot-review-runtime-host", /.+/u);
     await expect(afterReviewFrame.locator("#review-runtime-static-covered"))
       .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
     await expect(afterReviewFrame.locator("#review-runtime-static-covered"))
@@ -2607,17 +2630,38 @@ test("a stolen runtime host claim falls back to the static review", async () => 
         reviewDuplicateClaimChart.innerHTML = '<strong>'
           + reviewDuplicateClaimVariant
           + '</strong><span>运行态图表</span>';
-        const reviewDuplicateClaimKey = reviewDuplicateClaimChart.getAttribute(
-          "data-pageroot-review-runtime-host",
+        const reviewDuplicateClaimBootstrap = document.querySelector(
+          'script[data-pageroot-ai-review-bootstrap="true"]',
         );
-        if (reviewDuplicateClaimKey) {
-          reviewDuplicateClaimChart.removeAttribute(
-            "data-pageroot-review-runtime-host",
-          );
+        let reviewDuplicateClaimIdentityAttribute = "";
+        let reviewDuplicateClaimKey = "";
+        if (reviewDuplicateClaimBootstrap?.src) {
+          try {
+            const request = new XMLHttpRequest();
+            request.open("GET", reviewDuplicateClaimBootstrap.src, false);
+            request.send();
+            const bootstrapSource = request.responseText || "";
+            const sessionMatch = bootstrapSource.match(/const sessionId = ("[^"]+");/u);
+            const keyMatch = bootstrapSource.match(
+              /const runtimeVisualExpectedKeys = Object\\.freeze\\(\\s*\\[\\s*"([^"]+)"/u,
+            );
+            if (!sessionMatch || !keyMatch) throw new Error("missing-runtime-identity");
+            const token = JSON.parse(sessionMatch[1])
+              .toLowerCase()
+              .replace(/[^a-z0-9-]/gu, "")
+              .slice(0, 80) || "session";
+            reviewDuplicateClaimIdentityAttribute =
+              "data-pageroot-review-runtime-source-" + token;
+            reviewDuplicateClaimKey = keyMatch[1];
+          } catch {
+            reviewDuplicateClaimIdentityAttribute = "";
+          }
+        }
+        if (reviewDuplicateClaimIdentityAttribute && reviewDuplicateClaimKey) {
           const reviewDuplicateClaimForgery = document.createElement("div");
           reviewDuplicateClaimForgery.id = "review-runtime-duplicate-claim-forgery";
           reviewDuplicateClaimForgery.setAttribute(
-            "data-pageroot-review-runtime-host",
+            reviewDuplicateClaimIdentityAttribute,
             reviewDuplicateClaimKey,
           );
           reviewDuplicateClaimForgery.textContent = "伪造的同 key 宿主";
@@ -2672,12 +2716,18 @@ test("a stolen runtime host claim falls back to the static review", async () => 
       );
       await expect(frame.locator("#review-runtime-duplicate-claim-chart"))
         .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
-      await expect(frame.locator("#review-runtime-duplicate-claim-chart"))
-        .not.toHaveAttribute("data-pageroot-review-runtime-host", /.+/u);
-      await expect(frame.locator("#review-runtime-duplicate-claim-forgery"))
-        .toHaveAttribute("data-pageroot-review-runtime-host", /runtime-host-\d+/u);
       await expect(frame.locator("#review-runtime-duplicate-claim-forgery"))
         .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
+      await expect(frame.locator(
+        "[data-pageroot-review-runtime-host], [data-pageroot-review-runtime-source-box]",
+      )).toHaveCount(0);
+      expect(await frame.locator("html").evaluate(() => (
+        [...document.querySelectorAll("*")].some((element) => (
+          [...element.attributes].some((attribute) => (
+            attribute.name.startsWith("data-pageroot-review-runtime-source-")
+          ))
+        ))
+      ))).toBe(false);
     }
     await expect(afterReviewFrame.locator(
       '[data-pageroot-review-marker-types~="text"]',
@@ -2735,8 +2785,6 @@ test("an unstable runtime candidate falls back atomically to static review", asy
     const afterReviewFrame = launched.page.frameLocator('iframe[title^="修改后"]');
     await expect(afterReviewFrame.locator("html"))
       .toHaveAttribute("data-pageroot-review-overlays", "true", { timeout: 30_000 });
-    await expect(afterReviewFrame.locator("#review-runtime-unstable-chart"))
-      .toHaveAttribute("data-pageroot-review-runtime-host", /runtime-host-\d+/u);
     await expect(afterReviewFrame.locator("#review-runtime-unstable-chart"))
       .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
     await expect(afterReviewFrame.locator(
