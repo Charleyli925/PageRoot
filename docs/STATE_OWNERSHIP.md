@@ -137,8 +137,13 @@ Rules:
   only opaque-key geometry; neither review frame receives the text and the after
   page never receives a marker.
 - The runtime-chart supplement never re-analyzes a statically covered host. It
-  declares a host only when the changed authored script directly references
-  that host's distinctive source identity; section co-location is not enough.
+  declares an ordinary host only when the changed authored script directly
+  references that host's distinctive source identity. A source-empty host
+  directly targeted by, or nested beneath, a frozen non-global review comment
+  may instead use the opaque comment target as explicit local scope and is
+  selected before ordinary hosts under the same 128-candidate limit. Global
+  comments do not widen runtime scope, and ordinary section co-location is not
+  enough.
   The bootstrap binds its evidence-reading DOM/style/Canvas primitives before
   authored scripts run, owns the frozen analyzer-declared host-key set and
   records the parser-created element that first claims every key. Undeclared

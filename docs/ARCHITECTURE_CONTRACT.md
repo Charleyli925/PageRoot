@@ -205,10 +205,16 @@ must atomically switch only that volatile session to a stricter-CSP document
 with authored scripts removed and the owned external bootstrap retained, then
 reload the same frame. That pair completes with static evidence instead of
 trusting a replacement document; inline/browser review remains static-only. The frozen
-source analyzer must first prove a unique source-empty host pair, a relevant
-changed authored script that directly references the host's distinctive
-identity, and absence of an existing static footprint over that host. Merely
-placing another changed script in the same section is never causal evidence.
+source analyzer must first prove a unique source-empty host pair and absence of
+an existing static footprint over that host. An ordinary host additionally
+requires a relevant changed authored script that directly references its
+distinctive identity. A host directly targeted by, or nested below, a frozen
+non-global review comment may instead use that opaque local target as scope
+evidence, so split palette/data/config and host-binding scripts remain
+detectable. These comment-scoped hosts are selected before ordinary hosts under
+the same 128-candidate cap. A global comment never authorizes page-wide runtime
+capture, and merely placing another changed script in the same section remains
+insufficient causal evidence.
 The trusted first bootstrap must bind the DOM/style/Canvas collection,
 string-normalization/digest and Promise/timer/animation scheduling entry points
 before authored scripts run. Its bounded font wait must use only captured Promise

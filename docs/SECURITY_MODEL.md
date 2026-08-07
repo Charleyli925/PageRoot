@@ -170,7 +170,12 @@ per side. Ordinary frame `ready` messages never carry
 runtime evidence. An omitted or malformed snapshot invalidates the complete
 runtime batch and leaves static review authoritative; a validated unavailable
 host has no comparison authority and does not grant authority to or suppress a
-different host. The trusted bootstrap creates a `MessageChannel` and binds
+different host. Candidate declaration requires either a changed-script reference
+to the unique source-empty host or a frozen non-global opaque comment target on
+that host or an ancestor. The latter is only local scope evidence and takes
+bounded candidate slots first; comment text never enters either frame, a global
+comment never authorizes page-wide capture, and every later identity, stability,
+budget and transport check remains unchanged. The trusted bootstrap creates a `MessageChannel` and binds
 the DOM traversal, attribute, layout, computed-style, Canvas, string
 normalization/digest, and Promise/timer/animation scheduling primitives used for evidence before any
 authored script runs. Its bounded font wait composes only captured Promise capabilities, so it never re-reads

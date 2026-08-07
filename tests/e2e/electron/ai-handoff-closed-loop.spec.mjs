@@ -301,6 +301,7 @@ async function addCommentAndSubmit(
   electronApp,
   sourcePath,
   updatedText = UPDATED_TEXT,
+  additionalComments = [],
 ) {
   await electronApp.evaluate(({ clipboard }) => clipboard.clear());
   await addComment(
@@ -308,6 +309,14 @@ async function addCommentAndSubmit(
     sourcePath,
     `只把这个列表项改为“${updatedText}”，其他地方保持不变。`,
   );
+  for (const comment of additionalComments) {
+    await addComment(
+      page,
+      sourcePath,
+      comment.text,
+      comment.targetCase,
+    );
+  }
   await page.getByRole("button", { name: /发送至 Qoder/u }).click();
   await expect(page.getByText("等待 QoderWork 返回修改结果", { exact: true }))
     .toBeVisible();
@@ -322,8 +331,12 @@ async function addCommentAndSubmit(
   const changeRequest = JSON.parse(
     readFileSync(path.join(requestRoot, "change-request.json"), "utf8"),
   );
-  expect(changeRequest.requirements.instructions).toHaveLength(1);
-  expect(changeRequest.requirements.instructions[0].text).toContain(updatedText);
+  expect(changeRequest.requirements.instructions).toHaveLength(
+    1 + additionalComments.length,
+  );
+  expect(changeRequest.requirements.instructions.some(
+    (instruction) => instruction.text.includes(updatedText),
+  )).toBe(true);
   expect(changeRequest.requirements.preserveOutsideTargets).toBe(true);
   return { promptPath, requestRoot, changeRequest };
 }
@@ -545,6 +558,7 @@ test("a verified AI result stays pending through desktop review until the user a
       <div id="review-runtime-flow-chart" class="review-runtime-chart-host"></div>
       <div id="review-runtime-unstable-chart" class="review-runtime-chart-host"></div>
       <div id="review-runtime-unrelated-random-chart" class="review-runtime-chart-host"></div>
+      <div id="review-runtime-comment-chart" class="review-runtime-chart-host" data-native-case="runtime-comment-chart" style="display:block;min-height:78px"></div>
       <script>document.documentElement.dataset.reviewRuntimeSectionVariant = "before";</script>
     </section>
     <section data-review-runtime-static-covered-section>
@@ -582,6 +596,16 @@ test("a verified AI result stays pending through desktop review until the user a
       const runtimeUnrelatedRandomChart = document.querySelector("#review-runtime-unrelated-random-chart");
       runtimeUnrelatedRandomChart.innerHTML = '<div style="padding:10px;border:1px solid #c9c9d8">未修改脚本独立渲染：'
         + Date.now() + '-' + Math.random() + '</div>';
+    </script>
+    <script>
+      window.reviewRuntimeCommentPalette = ["#a9c7e0", "#decdb0"];
+    </script>
+    <script>
+      const runtimeCommentChart = document.querySelector("#review-runtime-comment-chart");
+      const runtimeCommentPalette = window.reviewRuntimeCommentPalette;
+      runtimeCommentChart.innerHTML = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:14px;border:1px solid #d9dcec;border-radius:12px">'
+        + '<span style="height:48px;background:' + runtimeCommentPalette[0] + '">综搜电商意图</span>'
+        + '<span style="height:48px;background:' + runtimeCommentPalette[1] + '">商城搜</span></div>';
     </script>
     <script>
       document.querySelectorAll("[data-review-tab-button]").forEach((button) => {
@@ -834,6 +858,7 @@ test("a verified AI result stays pending through desktop review until the user a
   );
   const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
   let delayedReviewResourceRequests = 0;
+  const runtimeVisualCommentText = "这两个图的配色改一下，包括旁边这个柱状图的颜色。";
   await launched.page.route("**/review-runtime-slow.png*", async (route) => {
     delayedReviewResourceRequests += 1;
     const reviewSide = new URL(route.request().url()).searchParams.get("side");
@@ -855,6 +880,11 @@ test("a verified AI result stays pending through desktop review until the user a
       launched.page,
       launched.electronApp,
       fixture.sourcePath,
+      UPDATED_TEXT,
+      [{
+        text: runtimeVisualCommentText,
+        targetCase: "runtime-comment-chart",
+      }],
     );
     const attemptRoot = path.join(
       request.requestRoot,
@@ -892,6 +922,10 @@ test("a verified AI result stays pending through desktop review until the user a
         .replace(
           'document.documentElement.dataset.reviewRuntimeSectionVariant = "before";',
           'document.documentElement.dataset.reviewRuntimeSectionVariant = "after";',
+        )
+        .replace(
+          'window.reviewRuntimeCommentPalette = ["#a9c7e0", "#decdb0"];',
+          'window.reviewRuntimeCommentPalette = ["#7fa2c4", "#f4ba7d"];',
         )
         .replace(
           'id="review-runtime-static-covered" class="review-runtime-chart-host" style="border: 2px solid #d9dcec; padding: 12px"',
@@ -1060,6 +1094,7 @@ test("a verified AI result stays pending through desktop review until the user a
       "#review-runtime-descendant-opacity-chart",
       "#review-runtime-svg-descendant-opacity-chart",
       "#review-runtime-svg-root-chart",
+      "#review-runtime-comment-chart",
     ];
     for (const selector of runtimeChangedHosts) {
       await expect(beforeReviewFrame.locator(selector)).toHaveAttribute(
@@ -1160,10 +1195,18 @@ test("a verified AI result stays pending through desktop review until the user a
       .toHaveAttribute("data-pageroot-review-filter", "all");
     await expect(beforeReviewFrame.locator('meta[http-equiv="refresh"]'))
       .toHaveCount(0);
-    const reviewCommentMarker = launched.page.locator(
+    const reviewCommentMarkers = launched.page.locator(
       'section[data-side="before"] [data-testid="review-comment-marker"]',
     );
+    await expect(reviewCommentMarkers).toHaveCount(2);
+    const frozenReviewComment = `只把这个列表项改为“${UPDATED_TEXT}”，其他地方保持不变。`;
+    const reviewCommentMarker = reviewCommentMarkers.filter({
+      hasText: frozenReviewComment,
+    });
     await expect(reviewCommentMarker).toHaveCount(1);
+    await expect(reviewCommentMarkers.filter({
+      hasText: runtimeVisualCommentText,
+    })).toHaveCount(1);
     await expect(reviewCommentMarker).toHaveAttribute("role", "note");
     await expect(reviewCommentMarker).not.toHaveAttribute("tabindex", /.+/u);
     await expect(reviewCommentMarker).toHaveCSS("width", "30px");
@@ -1174,7 +1217,6 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect(launched.page.locator(
       'section[data-side="after"] [data-testid="review-comment-marker"]',
     )).toHaveCount(0);
-    const frozenReviewComment = `只把这个列表项改为“${UPDATED_TEXT}”，其他地方保持不变。`;
     await expect.poll(() => beforeReviewFrame.locator("html").evaluate(
       (element, text) => element.innerHTML.includes(text),
       frozenReviewComment,

@@ -1,6 +1,6 @@
 export type ReviewRuntimeVisualSnapshot = Readonly<{
   key: string;
-  state: "empty" | "stable";
+  state: "empty" | "stable" | "unavailable";
   contentSignature: string;
   paintSignature: string;
   geometrySignature: string;
@@ -23,6 +23,14 @@ export type ReviewRuntimeVisualCandidate = Readonly<{
 }>;
 
 export const REVIEW_RUNTIME_VISUAL_DEADLINE_MS: 500;
+export const REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT: 128;
+
+export function selectPrioritizedReviewRuntimeVisualCandidates<
+  TCandidate extends { commentPriority?: number },
+>(
+  candidates: readonly TCandidate[],
+  maximum?: number,
+): readonly TCandidate[];
 
 export function acceptReviewRuntimeVisualSnapshots(
   value: unknown,

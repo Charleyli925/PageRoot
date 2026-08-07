@@ -6,6 +6,7 @@ import {
   acceptReviewRuntimeVisualSnapshots,
   changedReviewRuntimeVisualCandidateKeys,
   mergeReviewRuntimeVisualChanges,
+  selectPrioritizedReviewRuntimeVisualCandidates,
 } from "../app/lib/review-runtime-visual.js";
 
 const signature = (seed) => `${seed.repeat(32).slice(0, 32)}:12`;
@@ -70,6 +71,26 @@ test("runtime visual snapshots accept only bounded declared host facts", () => {
     [],
     new Set(Array.from({ length: 129 }, (_, index) => `runtime-host-${index + 1}`)),
   ), null);
+});
+
+test("comment-scoped runtime candidates take the bounded comparison slots first", () => {
+  const ordinary = Array.from({ length: 129 }, (_, index) => ({
+    key: `ordinary-${index + 1}`,
+    commentPriority: 0,
+  }));
+  const ancestorComment = { key: "ancestor-comment", commentPriority: 1 };
+  const directComment = { key: "direct-comment", commentPriority: 2 };
+  const input = [...ordinary, ancestorComment, directComment];
+  const selected = selectPrioritizedReviewRuntimeVisualCandidates(input);
+
+  assert.equal(selected.length, 128);
+  assert.equal(selected[0], directComment);
+  assert.equal(selected[1], ancestorComment);
+  assert.deepEqual(
+    selected.slice(2).map(({ key }) => key),
+    ordinary.slice(0, 126).map(({ key }) => key),
+  );
+  assert.equal(input[0], ordinary[0], "selection must not reorder the source list");
 });
 
 test("runtime comparison recognizes stable intrinsic visuals but ignores a lone geometry shift", () => {

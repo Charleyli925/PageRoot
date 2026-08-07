@@ -12,6 +12,10 @@ import {
   reviewTextSimilarity,
   sentenceAwareTextDifferences,
 } from "../lib/review-text-diff.js";
+import {
+  REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT,
+  selectPrioritizedReviewRuntimeVisualCandidates,
+} from "../lib/review-runtime-visual.js";
 import type {
   ReviewRuntimeVisualCandidate,
 } from "../lib/review-runtime-visual.js";
@@ -363,7 +367,8 @@ const REVIEW_RUNTIME_VISUAL_SOURCE_BOX_ATTRIBUTES = [
   "style",
   "width",
 ];
-const MAX_REVIEW_RUNTIME_VISUAL_CANDIDATES = 128;
+const REVIEW_COMMENT_KEY_ATTRIBUTE = "data-pageroot-review-comment-key";
+const REVIEW_COMMENT_GLOBAL_ATTRIBUTE = "data-pageroot-review-comment-global";
 const RUNTIME_VISUAL_HOST_SELECTOR = [
   "article",
   "aside",
@@ -1478,6 +1483,21 @@ function hasRuntimeVisualCause(
   return tokens.length > 0 && changedScripts.some(({ content }) => referencesHost(content));
 }
 
+function isLocalReviewCommentTarget(element: Element): boolean {
+  return element.hasAttribute(REVIEW_COMMENT_KEY_ATTRIBUTE)
+    && element.getAttribute(REVIEW_COMMENT_GLOBAL_ATTRIBUTE) !== "true";
+}
+
+function runtimeVisualCommentPriority(host: Element): number {
+  if (isLocalReviewCommentTarget(host)) return 2;
+  let candidate = host.parentElement;
+  while (candidate) {
+    if (isLocalReviewCommentTarget(candidate)) return 1;
+    candidate = candidate.parentElement;
+  }
+  return 0;
+}
+
 function staticReviewMarkerCoversRuntimeHost(
   host: Element,
   sectionRoot: Element,
@@ -1516,26 +1536,34 @@ function annotateRuntimeVisualCandidates(
     before: Element;
     after: Element;
     section: ReviewRuntimeSectionContext;
+    commentPriority: number;
   }> = [];
   const usedBefore = new Set<Element>();
   const usedAfter = new Set<Element>();
   sections.forEach((section) => {
     if (!section.pair.before || !section.pair.after) return;
     pairRuntimeVisualHosts(section.pair.before, section.pair.after).forEach((hostPair) => {
+      const commentPriority = runtimeVisualCommentPriority(hostPair.before);
       if (
         usedBefore.has(hostPair.before)
         || usedAfter.has(hostPair.after)
         || staticReviewMarkerCoversRuntimeHost(hostPair.before, section.pair.before as Element)
         || staticReviewMarkerCoversRuntimeHost(hostPair.after, section.pair.after as Element)
-        || !hasRuntimeVisualCause(hostPair, changedScripts)
+        || (
+          commentPriority === 0
+          && !hasRuntimeVisualCause(hostPair, changedScripts)
+        )
       ) return;
       usedBefore.add(hostPair.before);
       usedAfter.add(hostPair.after);
-      proposed.push({ ...hostPair, section });
+      proposed.push({ ...hostPair, section, commentPriority });
     });
   });
-  if (proposed.length > MAX_REVIEW_RUNTIME_VISUAL_CANDIDATES) return [];
-  return proposed.map(({ before, after, section }, index) => {
+  const selected = selectPrioritizedReviewRuntimeVisualCandidates(
+    proposed,
+    REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT,
+  );
+  return selected.map(({ before, after, section }, index) => {
     const key = `runtime-host-${index + 1}`;
     const changeId = section.changeId || `runtime-change-${section.outlineId}`;
     before.setAttribute(REVIEW_RUNTIME_VISUAL_HOST_ATTRIBUTE, key);
@@ -2745,9 +2773,9 @@ function annotateReviewComments(
 
   return [...groups.entries()].map(([element, items], index) => {
     const key = `review-comment-${index + 1}`;
-    element.setAttribute("data-pageroot-review-comment-key", key);
+    element.setAttribute(REVIEW_COMMENT_KEY_ATTRIBUTE, key);
     if (element === document.body) {
-      element.setAttribute("data-pageroot-review-comment-global", "true");
+      element.setAttribute(REVIEW_COMMENT_GLOBAL_ATTRIBUTE, "true");
     }
     return {
       key,
@@ -3087,7 +3115,7 @@ function reviewBootstrap(
   const runtimeVisualHostAttribute = ${JSON.stringify(REVIEW_RUNTIME_VISUAL_HOST_ATTRIBUTE)};
   const runtimeVisualSourceBoxAttribute = ${JSON.stringify(REVIEW_RUNTIME_VISUAL_SOURCE_BOX_ATTRIBUTE)};
   const runtimeVisualSourceBoxAttributes = ${JSON.stringify(REVIEW_RUNTIME_VISUAL_SOURCE_BOX_ATTRIBUTES)};
-  const runtimeVisualCandidateLimit = ${MAX_REVIEW_RUNTIME_VISUAL_CANDIDATES};
+  const runtimeVisualCandidateLimit = ${REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT};
   const runtimeVisualAtomLimit = 4096;
   const runtimeVisualBatchAtomLimit = 8192;
   const runtimeVisualBatchNodeLimit = 8192;

@@ -52,7 +52,7 @@ function generatedReviewBootstrap(candidateKeys = []) {
     },
   ).outputText;
   const context = vm.createContext({
-    MAX_REVIEW_RUNTIME_VISUAL_CANDIDATES: 128,
+    REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT: 128,
     REVIEW_RUNTIME_VISUAL_HOST_ATTRIBUTE: "data-pageroot-review-runtime-host",
     REVIEW_RUNTIME_VISUAL_SOURCE_BOX_ATTRIBUTE: "data-pageroot-review-runtime-source-box",
     REVIEW_RUNTIME_VISUAL_SOURCE_BOX_ATTRIBUTES: [

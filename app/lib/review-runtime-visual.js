@@ -1,6 +1,6 @@
 export const REVIEW_RUNTIME_VISUAL_DEADLINE_MS = 500;
+export const REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT = 128;
 
-const MAX_RUNTIME_VISUAL_CANDIDATES = 128;
 const MAX_RUNTIME_VISUAL_ATOMS = 4_096;
 const MAX_RUNTIME_CANVAS_PIXELS = 4_194_304;
 const SIGNATURE_PATTERN = /^[a-f0-9]{32}:[1-9]\d{0,7}$/u;
@@ -40,9 +40,9 @@ export function acceptReviewRuntimeVisualSnapshots(value, allowedCandidateKeys) 
   if (
     !Array.isArray(value)
     || !(allowedCandidateKeys instanceof Set)
-    || allowedCandidateKeys.size > MAX_RUNTIME_VISUAL_CANDIDATES
+    || allowedCandidateKeys.size > REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT
     || value.length !== allowedCandidateKeys.size
-    || value.length > MAX_RUNTIME_VISUAL_CANDIDATES
+    || value.length > REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT
   ) return null;
 
   const seen = new Set();
@@ -137,6 +137,27 @@ export function acceptReviewRuntimeVisualSnapshots(value, allowedCandidateKeys) 
     }));
   }
   return Object.freeze(accepted);
+}
+
+export function selectPrioritizedReviewRuntimeVisualCandidates(
+  candidates,
+  maximum = REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT,
+) {
+  if (!Array.isArray(candidates)) return Object.freeze([]);
+  const limit = Number.isSafeInteger(maximum)
+    ? Math.max(0, Math.min(REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT, maximum))
+    : REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT;
+  return Object.freeze(candidates
+    .map((candidate, index) => ({
+      candidate,
+      index,
+      priority: Number.isFinite(candidate?.commentPriority)
+        ? Math.max(0, Math.trunc(candidate.commentPriority))
+        : 0,
+    }))
+    .sort((left, right) => right.priority - left.priority || left.index - right.index)
+    .slice(0, limit)
+    .map(({ candidate }) => candidate));
 }
 
 function runtimeSnapshotChanged(before, after) {

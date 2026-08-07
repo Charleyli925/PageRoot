@@ -127,11 +127,15 @@ Comments + frozen input
   replacement; a pre-load attempt atomically changes that volatile session to a
   scriptless document retaining only the owned bootstrap and reloads it, so the
   review silently keeps static evidence. Inline/browser review remains
-  static-only. A bounded supplement is then available only for a high-confidence pair
-  of source-empty chart hosts when the changed authored script directly
-  references a distinctive identity of that host and the existing static
-  footprint does not already cover it. Script co-location inside the same
-  section is not causal evidence.
+  static-only. A bounded supplement is then available only for a high-confidence
+  pair of source-empty chart hosts that the existing static footprint does not
+  already cover. An ordinary host requires a changed authored script to
+  reference its distinctive identity. A host directly targeted by, or contained
+  beneath, a frozen non-global review comment is instead admitted as explicit
+  local user scope, even when a changed palette/data/config script and the stable
+  host-binding script are separate. Comment-scoped hosts take the bounded 128
+  candidate slots first. A global comment does not authorize the page, and
+  ordinary script co-location inside the same section is not causal evidence.
   The owned bootstrap binds the DOM traversal, attribute, layout,
   computed-style and Canvas primitives before authored scripts execute and is
   given the analyzer's exact candidate-key list. Its early mutation observer
