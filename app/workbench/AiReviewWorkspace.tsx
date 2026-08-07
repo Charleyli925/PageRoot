@@ -197,6 +197,7 @@ function ReviewDocumentPane({
   onHorizontalScroll,
   independentTransport,
   frameUrl,
+  runtimeVisualFrameRun,
   loadFailed,
   visible,
   commentGroups,
@@ -212,6 +213,7 @@ function ReviewDocumentPane({
   onHorizontalScroll: (side: ReviewSide) => void;
   independentTransport: boolean;
   frameUrl?: string;
+  runtimeVisualFrameRun: number;
   loadFailed: boolean;
   visible: boolean;
   commentGroups: readonly ReviewCommentGroup[];
@@ -359,7 +361,7 @@ function ReviewDocumentPane({
         >
           <iframe
             ref={iframeRef}
-            key={independentTransport ? frameUrl || `${side}-pending` : side}
+            key={`${independentTransport ? frameUrl || `${side}-pending` : side}-runtime-${runtimeVisualFrameRun}`}
             {...(independentTransport
               ? { src: frameUrl || "about:blank" }
               : { srcDoc: html })}
@@ -452,6 +454,7 @@ export default function AiReviewWorkspace({
     useState<ReviewDesktopSessionResult | null>(null);
   const [runtimeVisualResult, setRuntimeVisualResult] =
     useState<ReviewRuntimeVisualResult | null>(null);
+  const [runtimeVisualFrameRun, setRuntimeVisualFrameRun] = useState(0);
   const [commentLayoutState, setCommentLayoutState] = useState<{
     documents: ReviewDocuments;
     layouts: ReviewCommentLayout[];
@@ -774,6 +777,25 @@ export default function AiReviewWorkspace({
     }
   }, [commitRuntimeVisualFrame, documents, sessionId]);
 
+  const requestRuntimeVisualConfirmation = useCallback(() => {
+    if (
+      runtimeVisualOwnerDocumentsRef.current !== documents
+      || runtimeVisualResolutionRef.current?.documents === documents
+    ) return false;
+    // The first pair can establish a comment-scoped visual difference, but a
+    // fresh document run is required before that relaxed admission may create
+    // a marker. Drop every old capability before React replaces the frames.
+    closeRuntimeVisualChannels();
+    closeReviewCommentChannel();
+    (['before', 'after'] as ReviewSide[]).forEach((side) => {
+      framesRef.current[side] = null;
+      runtimeVisualFrameDocumentsRef.current[side] = null;
+    });
+    runtimeVisualReadySidesRef.current = new Set();
+    setRuntimeVisualFrameRun((current) => current + 1);
+    return true;
+  }, [closeReviewCommentChannel, closeRuntimeVisualChannels, documents]);
+
   useLayoutEffect(() => {
     runtimeVisualCoordinatorRef.current?.dispose();
     runtimeVisualCoordinatorRef.current = null;
@@ -809,6 +831,7 @@ export default function AiReviewWorkspace({
       candidates: documents.runtimeVisualCandidates,
       deadlineMs: REVIEW_RUNTIME_VISUAL_DEADLINE_MS,
       onResolve: resolveRuntimeVisuals,
+      onRequestConfirmation: requestRuntimeVisualConfirmation,
       setTimer: (callback, delay) => window.setTimeout(callback, delay),
       clearTimer: (handle) => window.clearTimeout(handle as number),
     });
@@ -831,6 +854,7 @@ export default function AiReviewWorkspace({
     documents,
     prepareReviewCommentFrame,
     prepareRuntimeVisualFrame,
+    requestRuntimeVisualConfirmation,
     resolveRuntimeVisuals,
   ]);
 
@@ -844,6 +868,7 @@ export default function AiReviewWorkspace({
         runtimeVisualOwnerDocumentsRef.current !== documents
         || runtimeVisualResolutionRef.current?.documents === documents
       ) return;
+      if (runtimeVisualCoordinatorRef.current?.failConfirmation()) return;
       resolveRuntimeVisuals([]);
     };
     if (reviewLoadFailed) {
@@ -865,6 +890,7 @@ export default function AiReviewWorkspace({
     documents,
     resolveRuntimeVisuals,
     reviewLoadFailed,
+    runtimeVisualFrameRun,
   ]);
 
   const finishPagePresentation = useCallback((epoch: number) => {
@@ -1602,6 +1628,7 @@ export default function AiReviewWorkspace({
                 onHorizontalScroll={handleHorizontalScroll}
                 independentTransport={independentTransport}
                 frameUrl={desktopSessions?.before.url}
+                runtimeVisualFrameRun={runtimeVisualFrameRun}
                 loadFailed={reviewLoadFailed}
                 visible={canvasView === "split" || canvasView === "before"}
                 commentGroups={documents.commentGroups}
@@ -1618,6 +1645,7 @@ export default function AiReviewWorkspace({
                 onHorizontalScroll={handleHorizontalScroll}
                 independentTransport={independentTransport}
                 frameUrl={desktopSessions?.after.url}
+                runtimeVisualFrameRun={runtimeVisualFrameRun}
                 loadFailed={reviewLoadFailed}
                 visible={canvasView === "split" || canvasView === "after"}
                 commentGroups={[]}

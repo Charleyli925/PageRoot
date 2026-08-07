@@ -160,16 +160,21 @@ Comments + frozen input
   sibling path; if it is not durable or the private channel is unavailable, the
   before-side marker is omitted rather than rebound by guess. Only the before
   bootstrap reports geometry, so authored code cannot react to a comment
-  marker.
+  marker. When comment scope admits a host without a direct changed-script
+  reference, a first-pair visual difference must be reproduced by a fresh run
+  of the same frozen before/after documents before the parent may project it.
+  A clock/random one-shot result, mismatched replay, or unavailable replay
+  keeps the static footprint; directly causal hosts do not reload.
   The owned bootstrap binds the DOM traversal, attribute, layout,
   computed-style and Canvas primitives before authored scripts execute and is
   given the analyzer's exact candidate-key list. Its early mutation observer
   binds each key to the parser-created source host before authored code can
   transfer it. It ignores undeclared claims; missing, duplicate, transferred or
   replaced declared identities fail the supplemental batch back to static
-  evidence. Per-host limits and one aggregate traversal/Canvas budget span the
-  complete two-sample batch, so a page with many declared hosts cannot multiply
-  the work. A host that is unsupported, unstable or over budget emits an explicit
+  evidence. Per-host limits and one aggregate traversal/Canvas budget span each
+  two-sample run, so a page with many declared hosts cannot multiply the work;
+  the one conditional confirmation run begins only after a scope-only first-pair
+  difference. A host that is unsupported, unstable or over budget emits an explicit
   unavailable fact with no comparison authority, while valid sibling hosts
   remain usable.
   Each isolated frame samples visible HTML/SVG/Canvas paint twice, including
@@ -185,6 +190,8 @@ Comments + frozen input
   port, compares the completed before/after batches, reuses the owning static
   `changeId` when present and otherwise adds one visual change for that outline.
   A pre-load batch remains cached until the registered frame claims its port.
+  Only a changed scope-relaxed candidate causes one frame-pair reload and must
+  match each side's first fingerprint; all other evidence stays single-run.
   Coordinator and message-listener installation run before paint and drain any
   frame already registered for the same frozen document pair, so load/effect
   ordering cannot strand the initial projection.
@@ -193,7 +200,9 @@ Comments + frozen input
   resolves the initial projection from static evidence and ignores any later
   runtime arrival. The coordinator starts its separate 500ms comparison
   deadline only after both frames have loaded; an earlier side never spends the
-  other side's comparison budget. It then commits both frames atomically;
+  other side's comparison budget. A required confirmation reload receives the
+  same bounded registration and comparison budgets, then can fail closed only
+  its scope-relaxed candidates. It then commits both frames atomically;
   timeout, partial and late batches silently retain the static footprint. Exact leaf text
   ranges remain immutable evidence; a separate readable-footprint planner
   groups nearby ranges, keeps stable sentence gaps separate, gives tiny phrases

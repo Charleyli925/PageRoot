@@ -227,7 +227,12 @@ and nearest-group hosts are selected in that order before ordinary hosts under
 the same 128-candidate cap. A global comment never authorizes
 page-wide runtime capture, the group cannot cross its section, and merely
 placing another changed script elsewhere in the section remains insufficient
-causal evidence. Comment scope attributes are analysis-only and are removed
+causal evidence. A host admitted only by that comment scope has no marker
+authority until a first observed before/after difference repeats in one fresh
+run of the same frozen document pair on both sides; a direct changed-script
+reference does not need the replay. A replay mismatch, failure or timeout
+removes only that scope-relaxed evidence and retains the static result. Comment
+scope attributes are analysis-only and are removed
 before either review document is serialized. The trusted parent keeps the
 content-free locator configuration and sends it only to the before bootstrap
 over a separately challenged private `MessageChannel`, never in either document
@@ -247,13 +252,19 @@ claims each key. Undeclared host attributes have no authority. A missing,
 duplicate, transferred or replaced declared key, or key/element drift during
 either sample invalidates the complete runtime batch and retains the static
 result. Per-host traversal, node, value and Canvas limits remain isolated, while
-one aggregate budget spans every declared host and both stability samples. An
+one aggregate budget spans every declared host and both stability samples within
+each frame run. The conditional confirmation is at most one additional run and
+starts only after a scope-only candidate actually differs. An
 unsupported, unstable, over-budget or locally failed host must produce one
 validated `unavailable` fact; that fact has no comparison
 authority and cannot suppress valid sibling-host facts.
 Both already-isolated review frames may then report one bounded pair of
 same-side-stable, host-relative HTML/SVG/Canvas fingerprints for every declared
-candidate, including the
+candidate. Only a first-pair change from a comment-scope-only candidate asks
+the parent to clear its old ports and reload the same two isolated frames once;
+the candidate must match its own side's fresh fingerprint before that first
+pair may be compared. Every other candidate uses the first pair only, including
+comment-scope candidates with no first-pair difference. Fingerprints include the
 host's own painted box, a fully transparent host as a stable disappearance
 state, and directly mutated size while excluding an unpainted empty box,
 indirect layout size and any subtree hidden beneath a zero-opacity host or
@@ -269,12 +280,15 @@ resolve to static evidence if both exact frame documents have not registered
 within 1.5s; a session failure takes the same path and late registration cannot
 reopen it. The separate 500ms comparison deadline may start only after both
 exact frame documents have loaded; asymmetric resource loading is not analysis time.
-Evidence travels
+The one permitted comment-scope confirmation reload receives the same 1.5s
+registration boundary and a fresh 500ms comparison deadline only after both
+replacement frames load. Its failure cannot erase a direct-causality marker
+from the first pair, but its scope-relaxed candidates fail closed. Evidence travels
 only over a challenged `MessageChannel` capability created by the trusted first
 bootstrap script and transferred only for a browser-trusted parent event;
 authored-window `ready`, synthetic requests or lookalike channel messages have
 no fact authority. Only a complete
-before/after batch received before the initial deadline may add a visual marker;
+before/after batch received before the applicable initial or confirmation deadline may add a visual marker;
 absolute page position, one-sided, unstable, invalid, timed-out and late facts
 fail closed to the unchanged static result. The supplement owns no source,
 Version, persistence, Bridge, drain or activation state.

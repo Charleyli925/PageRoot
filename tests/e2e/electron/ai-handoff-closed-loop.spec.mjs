@@ -562,6 +562,7 @@ test("a verified AI result stays pending through desktop review until the user a
         <p data-native-case="runtime-comment-caption" style="grid-column:1 / -1;margin:0">相邻图表统一配色</p>
         <div id="review-runtime-comment-chart" class="review-runtime-chart-host" data-native-case="runtime-comment-chart" style="display:block;min-height:78px"></div>
         <div id="review-runtime-comment-adjacent-chart" class="review-runtime-chart-host" style="display:block;min-height:78px"></div>
+        <div id="review-runtime-comment-random-chart" class="review-runtime-chart-host" style="display:block;min-height:78px"></div>
         <div id="review-runtime-comment-marker-probe" class="review-runtime-chart-host" style="display:block;min-height:78px"></div>
       </div>
       <script>document.documentElement.dataset.reviewRuntimeSectionVariant = "before";</script>
@@ -678,6 +679,13 @@ test("a verified AI result stays pending through desktop review until the user a
         + '<div style="height:48px;background:' + runtimeCommentPalette[0] + '">综搜电商意图</div></div>';
       runtimeCommentAdjacentChart.innerHTML = '<div style="padding:14px;border:1px solid #d9dcec;border-radius:12px">'
         + '<div style="height:48px;background:' + runtimeCommentPalette[1] + '">商城搜</div></div>';
+    </script>
+    <script>
+      const runtimeCommentRandomChart = document.querySelector(
+        "#review-runtime-comment-random-chart",
+      );
+      runtimeCommentRandomChart.innerHTML = '<div style="height:48px;background:#7f91a4">一次性随机：'
+        + Date.now() + '-' + Math.random() + '</div>';
     </script>
     <script>
       document.querySelectorAll("[data-review-tab-button]").forEach((button) => {
@@ -1193,7 +1201,7 @@ test("a verified AI result stays pending through desktop review until the user a
       .toHaveAttribute("data-review-runtime-promise-digest-api-restored", "true");
     await expect(afterReviewFrame.locator("html"))
       .toHaveAttribute("data-review-runtime-promise-digest-api-restored", "true");
-    expect(delayedReviewResourceRequests).toBeGreaterThanOrEqual(2);
+    expect(delayedReviewResourceRequests).toBeGreaterThanOrEqual(4);
     const runtimeChangedHosts = [
       "#review-runtime-html-chart",
       "#review-runtime-text-chart",
@@ -1269,6 +1277,14 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect(afterReviewFrame.locator("#review-runtime-unrelated-random-chart"))
       .not.toHaveAttribute("data-pageroot-review-runtime-host", /.+/u);
     await expect(afterReviewFrame.locator("#review-runtime-unrelated-random-chart"))
+      .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
+    await expect(beforeReviewFrame.locator("#review-runtime-comment-random-chart"))
+      .toHaveAttribute("data-pageroot-review-runtime-host", /runtime-host-\d+/u);
+    await expect(afterReviewFrame.locator("#review-runtime-comment-random-chart"))
+      .toHaveAttribute("data-pageroot-review-runtime-host", /runtime-host-\d+/u);
+    await expect(beforeReviewFrame.locator("#review-runtime-comment-random-chart"))
+      .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
+    await expect(afterReviewFrame.locator("#review-runtime-comment-random-chart"))
       .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
     await expect(beforeReviewFrame.locator("#review-runtime-comment-marker-probe"))
       .toHaveAttribute("data-pageroot-review-runtime-host", /runtime-host-\d+/u);

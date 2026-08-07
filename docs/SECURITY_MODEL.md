@@ -164,7 +164,7 @@ state is never serialized. The renderer accepts review messages only when the
 session ID, side, declared message source and `MessageEvent.source` all match the
 registered frame. Runtime-chart snapshot messages are additionally limited to
 host keys declared by the frozen source analyzer, per-host bounded atom/signature
-counts plus one aggregate traversal/value/Canvas budget across the complete
+counts plus one aggregate traversal/value/Canvas budget across each per-run
 two-sample batch, exactly one well-formed available or unavailable snapshot for every
 declared key, and one accepted batch
 per side. Ordinary frame `ready` messages never carry
@@ -188,8 +188,11 @@ unique source `id`, `data-*`, `name`, or `aria-label`, never a mutable sibling
 ordinal. If the target is not safely locatable after authored runtime changes,
 or that private capability exchange is unavailable, its marker is omitted rather
 than guessed. Authored CSS or scripts therefore cannot observe a comment scope
-marker or manufacture a change. Every later identity, stability, budget and
-transport check remains unchanged.
+marker or manufacture a change. If a host was admitted only through that scope,
+not a direct changed-script reference, a first-pair difference must match the
+same side in one newly loaded frozen frame pair; clock/random one-shots, a
+replacement-frame failure, or a mismatch have no marker authority. Every later
+identity, stability, budget and transport check remains unchanged.
 The trusted bootstrap pre-creates separate `MessageChannel` capabilities for
 runtime evidence and, on the before side only, private locator delivery, and binds
 the DOM traversal, attribute, layout, computed-style, Canvas, string
@@ -207,7 +210,8 @@ that the bootstrap consumes only from a browser-trusted parent event in its firs
 capture listener without exposing it to later authored listeners, then transfers
 the pre-created capability port. Only the matching port may submit snapshots.
 They contain no executable DOM and can
-only add a disposable visual marker after a complete stable pair; forged window
+only add a disposable visual marker after a complete stable pair, plus the
+required same-side fresh-pair confirmation for scope-only admission; forged window
 messages, invalid, partial, timed-out or late input are ignored. A user must
 still invoke the existing fail-closed ready-version activation path through
 “直接打开” or the review confirmation “打开 AI 修改后”.

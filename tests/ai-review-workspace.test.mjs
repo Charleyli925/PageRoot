@@ -451,6 +451,10 @@ test("runtime chart review supplements only the initial bounded static footprint
     reviewDocument,
     /changedScripts\.some\(\(\{ content \}\) => referencesHost\(content\)\)/,
   );
+  assert.match(
+    reviewDocument,
+    /requiresDeterministicConfirmation: commentPriority > 0 && !runtimeVisualCause/,
+  );
   assert.doesNotMatch(reviewDocument, /sectionPair\.(?:before|after)\?\.contains/);
   assert.doesNotMatch(reviewDocument, /hostReferenceScripts/);
   assert.match(reviewDocument, /remainingSignatures/);
@@ -482,6 +486,9 @@ test("runtime chart review supplements only the initial bounded static footprint
   assert.match(reviewDocument, /\|\| hostOwnPaint/);
   assert.match(review, /new ReviewRuntimeVisualCoordinator/);
   assert.match(review, /REVIEW_RUNTIME_VISUAL_DEADLINE_MS/);
+  assert.match(review, /onRequestConfirmation: requestRuntimeVisualConfirmation/);
+  assert.match(review, /setRuntimeVisualFrameRun\(\(current\) => current \+ 1\)/);
+  assert.match(review, /runtimeVisualCoordinatorRef\.current\?\.failConfirmation\(\)/);
   assert.match(
     review,
     /REVIEW_RUNTIME_VISUAL_FRAME_REGISTRATION_MS = 1_500/,

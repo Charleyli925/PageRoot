@@ -18,7 +18,13 @@ Notable user-visible changes are documented here. This project follows Semantic 
   fetchable bootstrap source. Only unique source `id`, `data-*`, `name`, or
   `aria-label` locators are admitted—never mutable sibling ordinals. If a
   durable locator cannot be proven, the marker is omitted rather than guessing
-  a neighboring element.
+  a neighboring element. When comment scope, rather than a direct changed-script
+  reference, admits a host and its first before/after comparison differs,
+  PageRoot now reloads the same isolated pair once and requires each side's
+  fingerprint to match its own fresh run. One-shot `Math.random()`/`Date.now()`
+  initialization, a failed replay, or a replay mismatch keeps the existing
+  static result; directly causal hosts and comment-scoped hosts with no initial
+  difference do not pay for the extra run.
 
 ## [0.9.7] - 2026-08-07
 

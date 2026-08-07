@@ -1601,6 +1601,7 @@ function annotateRuntimeVisualCandidates(
     after: Element;
     section: ReviewRuntimeSectionContext;
     commentPriority: number;
+    requiresDeterministicConfirmation: boolean;
   }> = [];
   const usedBefore = new Set<Element>();
   const usedAfter = new Set<Element>();
@@ -1635,6 +1636,7 @@ function annotateRuntimeVisualCandidates(
           }
         }
       }
+      const runtimeVisualCause = hasRuntimeVisualCause(hostPair, changedScripts);
       if (
         usedBefore.has(hostPair.before)
         || usedAfter.has(hostPair.after)
@@ -1642,19 +1644,32 @@ function annotateRuntimeVisualCandidates(
         || staticReviewMarkerCoversRuntimeHost(hostPair.after, section.pair.after as Element)
         || (
           commentPriority === 0
-          && !hasRuntimeVisualCause(hostPair, changedScripts)
+          && !runtimeVisualCause
         )
       ) return;
       usedBefore.add(hostPair.before);
       usedAfter.add(hostPair.after);
-      proposed.push({ ...hostPair, section, commentPriority });
+      proposed.push({
+        ...hostPair,
+        section,
+        commentPriority,
+        // A comment can admit a host whose binding script is unchanged. That
+        // scoped exception needs an independent document run before it can
+        // create a runtime marker; ordinary direct script causality does not.
+        requiresDeterministicConfirmation: commentPriority > 0 && !runtimeVisualCause,
+      });
     });
   });
   const selected = selectPrioritizedReviewRuntimeVisualCandidates(
     proposed,
     REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT,
   );
-  return selected.map(({ before, after, section }, index) => {
+  return selected.map(({
+    before,
+    after,
+    section,
+    requiresDeterministicConfirmation,
+  }, index) => {
     const key = `runtime-host-${index + 1}`;
     const changeId = section.changeId || `runtime-change-${section.outlineId}`;
     before.setAttribute(REVIEW_RUNTIME_VISUAL_HOST_ATTRIBUTE, key);
@@ -1674,6 +1689,7 @@ function annotateRuntimeVisualCandidates(
       label: section.label,
       ...(section.panelKey ? { panelKey: section.panelKey } : {}),
       ...(section.panelPath.length ? { panelPath: [...section.panelPath] } : {}),
+      ...(requiresDeterministicConfirmation ? { requiresDeterministicConfirmation } : {}),
     };
   });
 }
