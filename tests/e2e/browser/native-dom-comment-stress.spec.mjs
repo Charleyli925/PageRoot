@@ -18,6 +18,7 @@ test("comments virtualize immediately above the threshold and remain navigable",
   const target = frame.locator(caseSelector("list-item"));
   const toolbar = page.getByRole("toolbar", { name: /编辑/u });
   const commentRail = page.locator('aside[aria-label="本轮评论"]');
+  const commentCount = commentRail.locator(".comments-header h1");
   const initialCount = COMMENT_VIRTUALIZATION_THRESHOLD + 1;
 
   for (let index = 1; index <= initialCount; index += 1) {
@@ -26,9 +27,13 @@ test("comments virtualize immediately above the threshold and remain navigable",
     await page.getByRole("textbox", { name: "评论内容" })
       .fill(`压力评论 ${String(index).padStart(3, "0")}`);
     await page.getByRole("button", { name: "评论", exact: true }).click();
+    // The first save may be waiting for the lazy project registration. Wait
+    // for its committed state before starting the next user action so this
+    // stress test exercises virtualization, not a submission race.
+    await expect(commentCount).toContainText(String(index));
   }
 
-  await expect(commentRail.locator(".comments-header h1"))
+  await expect(commentCount)
     .toContainText(String(initialCount));
   await expect(commentRail.locator(".comments-header small"))
     .toContainText(/当前加载 \d+ 条/u);
@@ -46,7 +51,7 @@ test("comments virtualize immediately above the threshold and remain navigable",
   await page.getByRole("textbox", { name: "评论内容" })
     .fill(`压力评论 ${String(nextCount).padStart(3, "0")}`);
   await page.getByRole("button", { name: "评论", exact: true }).click();
-  await expect(commentRail.locator(".comments-header h1"))
+  await expect(commentCount)
     .toContainText(String(nextCount));
   await expect(commentRail.locator(".comment-card")
     .filter({ hasText: `压力评论 ${String(nextCount).padStart(3, "0")}` }))
