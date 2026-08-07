@@ -119,7 +119,8 @@ Rules:
   propose a new context for the current document key, but do not own or persist
   it. A projection refresh consumes that context; it does not merge runtime DOM
   into it. Runtime dependency-stable text/history changes may rebind the exact
-  committed projection without capture. Pending or replacement work never owns
+  committed projection without capture; indirect DOM traversal is conservatively
+  source-dependent and schedules a replacement. Pending or replacement work never owns
   permission to blank the committed bitmap; identical mounts retain their DOM
   identity, and Preview/Edit suspension preserves only bounded disposable
   byte-bounded cache state. Accepted PNG bytes and unchanged mounts retain their

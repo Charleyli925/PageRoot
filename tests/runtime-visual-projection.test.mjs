@@ -193,6 +193,34 @@ test("script-referenced data containers participate in the runtime dependency", 
   assert.equal(first?.dependencySha256, unrelated?.dependencySha256);
 });
 
+test("indirect DOM reads conservatively invalidate the runtime dependency", () => {
+  const source = `<!doctype html><body>
+    <span>1,2,3</span><div id="chart"></div>
+    <script>
+      const series = document.body.children[0].textContent;
+      document.getElementById("chart").textContent = series;
+    </script>
+  </body>`;
+  const first = describeRuntimeVisualCapture({
+    html: source,
+    sourcePath: "/tmp/indirect-data.html",
+    viewportWidth: 900,
+  });
+  const changedData = describeRuntimeVisualCapture({
+    html: source.replace("1,2,3", "3,2,1"),
+    sourcePath: "/tmp/indirect-data.html",
+    viewportWidth: 900,
+  });
+  const unrelated = describeRuntimeVisualCapture({
+    html: source.replace("<span>", "<p>ordinary copy</p><span>"),
+    sourcePath: "/tmp/indirect-data.html",
+    viewportWidth: 900,
+  });
+  assert.ok(first?.candidates.length);
+  assert.notEqual(first?.dependencySha256, changedData?.dependencySha256);
+  assert.notEqual(first?.dependencySha256, unrelated?.dependencySha256);
+});
+
 test("accepted projections stay bound to the exact original source hash and empty host", () => {
   const prepared = prepareRuntimeVisualCapture({
     html: SOURCE,

@@ -71,6 +71,7 @@ const RUNTIME_DEPENDENCY_TAGS = new Set([
 ]);
 const INLINE_EVENT_HANDLER_ATTRIBUTE = /^on[a-z][a-z0-9]*$/u;
 const BROAD_RUNTIME_HOST_MUTATION = /(?:appendChild|insertAdjacentHTML|replaceChildren|\.innerHTML\s*=|document\.createElement|echarts\.init|Highcharts\.chart|Plotly\.newPlot|vegaEmbed|d3\.select|new\s+Chart\s*\()/u;
+const INDIRECT_RUNTIME_DOM_READ = /(?:\bdocument\.(?:body|documentElement|forms|images|links)\b|\.(?:children|childNodes|first(?:Child|ElementChild)|last(?:Child|ElementChild)|parent(?:Node|Element)|previous(?:Sibling|ElementSibling)|next(?:Sibling|ElementSibling)|closest)\b|\b(?:document|[A-Za-z_$][\w$]*)\.(?:querySelector|querySelectorAll)\s*\(\s*(?!["'`])|\b(?:document|[A-Za-z_$][\w$]*)\.(?:querySelectorAll|getElementsBy(?:ClassName|TagName|Name))\s*\()/u;
 const acceptedProjectionAuthority = new WeakSet();
 
 function reusableSourceIndex(html, candidate) {
@@ -274,6 +275,9 @@ function runtimeDependencySha256(sourceIndex, candidates) {
     candidates: candidates.map((candidate) => candidate.captureKey),
     executableSources,
     referencedDataSources,
+    ...(INDIRECT_RUNTIME_DOM_READ.test(scriptSource)
+      ? { indirectDomSourceSha256: sourceIndex.sourceSha256 }
+      : {}),
   }));
 }
 

@@ -59,7 +59,8 @@ Comments + frozen input
   renderer session reuses the Canvas `SourceIndex`, limits source-empty hosts
   to authored executable causality (scripts or inline handlers), and keys capture
   work by executable source, script/handler-referenced data containers, stable host TargetRef, a 64px
-  viewport bucket and presentation context. Ordinary text/history edits
+  viewport bucket and presentation context. Structural or indirect DOM reads conservatively fold the
+  complete source Hash into that identity. Ordinary dependency-stable text/history edits
   therefore resolve that TargetRef against the current SourceIndex and rebind the committed projection to the
   exact new source Hash instead of running the page again. A bounded LRU keeps
   recent viewport/context results under both entry and byte budgets, and Preview/Edit suspension retains the last

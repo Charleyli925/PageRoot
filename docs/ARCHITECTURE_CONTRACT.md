@@ -164,7 +164,9 @@ Edit runtime visuals have a separate owner:
 source path, a runtime dependency Hash over stable source-empty TargetRefs,
 executable/style sources and script/handler-referenced data containers, a bucketed edit viewport and resolved
 `PageViewContext` dependency. The exact source Hash remains mandatory at every
-acceptance boundary. A dependency-stable source edit may only rebind a previously
+acceptance boundary. An indirect DOM traversal conservatively includes the complete
+source Hash in that dependency, so any source edit schedules a replacement rather
+than reusing a stale bitmap. A dependency-stable source edit may only rebind a previously
 accepted bitmap through the current `SourceIndex`; it cannot relax the empty-host,
 unique-host, tag, protocol or PNG checks. Only the newest generation may publish
 a changed result. The session may retain the committed projection while a

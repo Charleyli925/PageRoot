@@ -42,7 +42,7 @@ PR 必须从 Draft 开始。普通推送由独立的 `PR Feedback` workflow 处�
 - 交互预览与编辑视觉投影：Node 分别证明短期自定义协议的资源边界、
   PageViewContext 的 source-backed allowlist、投影精确源 Hash/空宿主校验、主进程
   PNG 二进制签名/IHDR/内容摘要/字节/DPR/crop 边界、稳定 TargetRef 重绑定、
-  64px viewport bucket、脚本/自动内联处理器引用数据依赖、字节 LRU 和迟到结果丢弃；Electron
+  64px viewport bucket、脚本/自动内联处理器引用数据依赖（间接 DOM 遍历保守纳入完整源 Hash）、字节 LRU 和迟到结果丢弃；Electron
   用一份合成报告证明用户未进入预览时，直接或嵌套的运行时 SVG/HTML、Canvas
   和动态 `tbody` 已以只读 PNG 显示且可对原宿主留评论，
   源文件字节不变；同一用例再证明宿主 CSP 下的相对脚本和真实运行时 DOM、
