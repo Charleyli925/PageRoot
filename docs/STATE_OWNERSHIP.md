@@ -72,8 +72,8 @@ Rules:
   active/recent source stay aligned without discarding input or losing a prior
   successful open to a failed successor. Close treats both a main-process
   external acceptance and an accepted renderer application as drain
-  obligations; it cannot approve shutdown while either owner is active or
-  deferred.
+  obligations before either the hydration or load-error close fast path; it
+  cannot approve shutdown while either owner is active or deferred.
 - `workbench.tsx` is a composition root, not an additional state owner. It
   subscribes to session snapshots, derives read-only presentation values and
   dispatches user intent back to the owning session.

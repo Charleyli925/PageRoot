@@ -5012,21 +5012,26 @@ export default function Workbench() {
           externalFileOpenSessionRef.current.snapshot.status !== "idle"
           || projectApplicationSessionRef.current.snapshot.status !== "idle"
         );
+        const drainProjectOpenSessions = async (): Promise<CloseReadiness | null> => {
+          while (projectOpenInFlight()) {
+            const projectOpenDrain = await drainCoordinatorRef.current.drain(
+              "close",
+              { deadlineAt: detail.deadlineAt - 250 },
+            );
+            if (!projectOpenDrain.ok) return inAppBlock(projectOpenDrain.reason);
+          }
+          return null;
+        };
         closeLifecycle.preparingRequestId = detail.requestId;
 
         try {
+          // An external request may mutate durable active-project authority
+          // before a hydration or load-error fast path would normally decide
+          // that this close is clean. Drain those owners before either fast
+          // path, then fail closed if a new request races that observation.
+          const projectOpenBlock = await drainProjectOpenSessions();
+          if (projectOpenBlock) return projectOpenBlock;
           if (projectHydratingRef.current) {
-            // Startup hydration can close cleanly, but an external read or an
-            // accepted result may have already begun changing durable project
-            // authority. Drain those registered owners before taking the
-            // hydration fast path so shutdown cannot interrupt their switch.
-            if (projectOpenInFlight()) {
-              const projectOpenDrain = await drainCoordinatorRef.current.drain(
-                "close",
-                { deadlineAt: detail.deadlineAt - 250 },
-              );
-              if (!projectOpenDrain.ok) return inAppBlock(projectOpenDrain.reason);
-            }
             if (projectOpenInFlight()) {
               return inAppBlock("外部 HTML 切换仍未安全完成，已取消关闭。");
             }
@@ -5049,6 +5054,9 @@ export default function Workbench() {
             return inAppBlock("项目状态尚未读取完成，已取消关闭以避免覆盖未知编辑状态。");
           }
           if (projectLoadErrorRef.current) {
+            if (projectOpenInFlight()) {
+              return inAppBlock("外部 HTML 切换仍未安全完成，已取消关闭。");
+            }
             if (
               documentSessionRef.current.pendingWrite
               || documentSessionRef.current.flushPromise

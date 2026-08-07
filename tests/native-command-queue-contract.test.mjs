@@ -419,8 +419,8 @@ test("close waits for external acceptance and accepted-project application owner
   );
   assert.match(
     closeFlow,
-    /const projectOpenInFlight = \(\) =>[\s\S]*?if \(projectHydratingRef\.current\) \{[\s\S]*?if \(projectOpenInFlight\(\)\) \{[\s\S]*?drain\([\s\S]*?"close",[\s\S]*?if \(!projectOpenDrain\.ok\)[\s\S]*?if \(projectOpenInFlight\(\)\)[\s\S]*?canCloseDuringHydration\(\{/u,
-    "hydration may use its close fast path only after active project-open owners drain",
+    /const drainProjectOpenSessions = async \(\): Promise<CloseReadiness \| null> => \{[\s\S]*?while \(projectOpenInFlight\(\)\)[\s\S]*?drain\([\s\S]*?"close",[\s\S]*?const projectOpenBlock = await drainProjectOpenSessions\(\);[\s\S]*?if \(projectOpenBlock\) return projectOpenBlock;[\s\S]*?if \(projectHydratingRef\.current\) \{[\s\S]*?if \(projectOpenInFlight\(\)\)[\s\S]*?canCloseDuringHydration\(\{[\s\S]*?if \(projectLoadErrorRef\.current\) \{[\s\S]*?if \(projectOpenInFlight\(\)\)[\s\S]*?ready = true;/u,
+    "every close fast path must drain active project-open owners and fail closed on a race",
   );
 });
 
