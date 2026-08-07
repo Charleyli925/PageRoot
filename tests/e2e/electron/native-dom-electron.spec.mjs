@@ -601,6 +601,19 @@ test("Electron interactive preview runs authored scripts and edits the selected 
   <style>
     .panel { display: none; }
     .panel.active { display: block; }
+    .runtime-scaled-frame {
+      position: relative;
+      width: 420px;
+      height: 220px;
+      overflow: hidden;
+    }
+    #runtime-scaled {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      transform: scale(1.25);
+      transform-origin: top left;
+    }
   </style>
 </head>
 <body>
@@ -618,6 +631,9 @@ test("Electron interactive preview runs authored scripts and edits the selected 
     <canvas id="direct-runtime-canvas" width="36" height="18"></canvas>
     <svg id="direct-runtime-svg" width="44" height="22"></svg>
     <table><tbody id="runtime-table"></tbody></table>
+    <div class="runtime-scaled-frame" id="runtime-scaled-frame">
+      <div id="runtime-scaled"></div>
+    </div>
   </section>
   <section id="panel-two" class="panel">
     <p data-native-case="preview-tab-copy" data-native-mode="native-editable">第二页可编辑正文</p>
@@ -663,6 +679,22 @@ test("Electron interactive preview runs authored scripts and edits the selected 
   directCanvas.getContext("2d").fillRect(0, 0, 18, 9);
   document.getElementById("direct-runtime-svg").innerHTML =
     '<rect width="44" height="22" fill="#7c3aed"></rect>';
+  const scaledHost = document.getElementById("runtime-scaled");
+  const scaledPanel = document.createElement("div");
+  scaledPanel.dataset.runtimeScaled = "true";
+  scaledPanel.style.cssText =
+    "width:800px;height:360px;background:linear-gradient(90deg,#2563eb,#7c3aed)";
+  scaledHost.append(scaledPanel);
+  const fitScaledPanel = () => {
+    const frame = document.getElementById("runtime-scaled-frame");
+    const scale = Math.min(
+      (frame.clientWidth - 16) / 800,
+      (frame.clientHeight - 16) / 360,
+    );
+    scaledHost.style.transform = "scale(" + scale + ")";
+  };
+  window.addEventListener("resize", fitScaledPanel);
+  fitScaledPanel();
   document.body.dataset.runtimeReady = "true";
 })();`,
     "utf8",
@@ -686,6 +718,27 @@ test("Electron interactive preview runs authored scripts and edits the selected 
     await expect(editFrame.locator(
       '#runtime-svg img[data-pageroot-readonly-visual="runtime-bitmap"]',
     )).toBeVisible();
+    const scaledRuntimeVisual = editFrame.locator(
+      '#runtime-scaled img[data-pageroot-readonly-visual="runtime-bitmap"]',
+    );
+    await expect(scaledRuntimeVisual).toBeVisible();
+    const scaledRuntimeVisualGeometry = await scaledRuntimeVisual.evaluate((image) => {
+      const frame = image.closest("#runtime-scaled-frame");
+      if (!frame) throw new Error("Scaled runtime visual frame is missing.");
+      const frameRect = frame.getBoundingClientRect();
+      const imageRect = image.getBoundingClientRect();
+      return {
+        imageWidth: imageRect.width,
+        imageHeight: imageRect.height,
+        insideFrame: imageRect.left >= frameRect.left
+          && imageRect.top >= frameRect.top
+          && imageRect.right <= frameRect.right + 1
+          && imageRect.bottom <= frameRect.bottom + 1,
+      };
+    });
+    expect(scaledRuntimeVisualGeometry.imageWidth).toBeCloseTo(404, 1);
+    expect(scaledRuntimeVisualGeometry.imageHeight).toBeCloseTo(182, 0);
+    expect(scaledRuntimeVisualGeometry.insideFrame).toBe(true);
     const initialRuntimeVisualGeometry = await editFrame.locator(
       '#runtime-svg img[data-pageroot-readonly-visual="runtime-bitmap"]',
     ).evaluate((image) => {
@@ -776,6 +829,8 @@ test("Electron interactive preview runs authored scripts and edits the selected 
       .toHaveAttribute("data-drawn", "true");
     await expect(previewFrame.locator("[data-runtime-row]")).toHaveCount(2);
     await expect(previewFrame.locator("[data-runtime-chart]")).toHaveCount(1);
+    await expect(previewFrame.locator("[data-runtime-scaled]"))
+      .toBeVisible();
 
     await previewFrame.locator("#tab-two").click();
     await expect(previewFrame.locator("#panel-two")).toBeVisible();
@@ -809,6 +864,9 @@ test("Electron interactive preview runs authored scripts and edits the selected 
     await expect(resumedEditFrame.locator("#runtime-table")).not.toContainText("动态行一");
     await expect(resumedEditFrame.locator(
       '#runtime-svg img[data-pageroot-readonly-visual="runtime-bitmap"]',
+    )).toHaveCount(1);
+    await expect(resumedEditFrame.locator(
+      '#runtime-scaled img[data-pageroot-readonly-visual="runtime-bitmap"]',
     )).toHaveCount(1);
     await expect(resumedEditFrame.locator("[data-runtime-chart]")).toHaveCount(0);
     expect(readFileSync(sourcePath, "utf8")).not.toMatch(
@@ -866,9 +924,15 @@ test("Electron edit mode projects runtime visuals in an opt-in real HTML file", 
     await expect(editFrame.locator(
       '#np1b img[data-pageroot-readonly-visual="runtime-bitmap"]',
     )).toBeVisible();
+    await editFrame.locator('.tab[data-p="p3"]').click();
+    await launched.page.getByRole("button", {
+      name: "切换到此页签",
+      exact: true,
+    }).click();
+    await expect(editFrame.locator("#p3")).toBeVisible();
     await expect(editFrame.locator(
       '#cat-tbody img[data-pageroot-readonly-visual="runtime-bitmap"]',
-    )).toHaveCount(1);
+    )).toBeVisible({ timeout: 30_000 });
     await expect(editFrame.locator("#np1a svg, #np1a canvas")).toHaveCount(0);
     await expect(editFrame.locator("#cat-tbody > tr:not([data-pageroot-readonly-visual])"))
       .toHaveCount(0);

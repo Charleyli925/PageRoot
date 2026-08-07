@@ -180,12 +180,14 @@ authority. The Canvas may mount and remove it only as presentation beneath the
 original source host; comments and edits continue to resolve that host. Protocol
 V2 validates PNG/IHDR/content Hash/byte length/DPR/crop/sizing fields, measures
 ordinary hosts by their content box and `tbody` by its border box,
-must reject partial viewport/overflow coverage, and may mark a hidden or
+keeps positive axis-aligned scale/translate and zoom in one viewport-coordinate
+painted box, must reject partial viewport/overflow coverage, and may mark a hidden or
 temporarily uncapturable host deferred. A deferred host may reuse only its own
 previously accepted stable-key bitmap. Canvas reconciliation must retain an
 identical image node and stage/decode a replacement Blob before removing the
 current one. Its responsive content layer must follow host flow/resize and use
-aspect-preserving `contain`; stale or invalid projections do not authorize
+aspect-preserving `contain`; a source-zero host must use validated captured
+intrinsic dimensions rather than a percentage of its zero box. Stale or invalid projections do not authorize
 clearing a valid mount.
 
 Prepared formal-review documents are owned by a cancellable

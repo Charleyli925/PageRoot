@@ -194,11 +194,13 @@ test("capture controller destroys its hidden window and revokes its preview sess
     && source.includes("lastMutationAt")
   )), true);
   assert.equal(executedScripts.some((source) => (
-    source.includes('computed.transform !== "none"')
+    source.includes("preservesPaintedGeometry")
+    && source.includes("window.dispatchEvent(new Event(\"resize\"))")
     && source.includes('computed.display === "none"')
   )), true);
   assert.equal(executedScripts.some((source) => (
-    source.includes("element.clientWidth - paddingLeft - paddingRight")
+    source.includes("viewportScale")
+    && source.includes("ancestor.clientWidth * ancestorScale.x")
     && source.includes("deviceScaleFactor")
     && source.includes("complete: true")
   )), true);

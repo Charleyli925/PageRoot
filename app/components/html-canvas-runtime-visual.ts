@@ -150,12 +150,50 @@ function initialLayoutMode(host: HTMLElement): "host" | "intrinsic" {
     const parsed = Number.parseFloat(value);
     return Number.isFinite(parsed) ? parsed : 0;
   };
-  const occupiedHeight = host.getBoundingClientRect().height
-    - numeric(style.borderTopWidth)
-    - numeric(style.borderBottomWidth)
+  const occupiedWidth = host.clientWidth
+    - numeric(style.paddingLeft)
+    - numeric(style.paddingRight);
+  const occupiedHeight = host.clientHeight
     - numeric(style.paddingTop)
     - numeric(style.paddingBottom);
-  return occupiedHeight >= 1 ? "host" : "intrinsic";
+  return occupiedWidth >= 1 && occupiedHeight >= 1
+    ? "host"
+    : "intrinsic";
+}
+
+function preservedPaintedScale(host: HTMLElement): { x: number; y: number } {
+  let scaleX = 1;
+  let scaleY = 1;
+  for (let node: HTMLElement | null = host; node; node = node.parentElement) {
+    const style = node.ownerDocument.defaultView?.getComputedStyle(node);
+    if (!style) continue;
+    const match = /^matrix\(([^)]+)\)$/u.exec(style.transform);
+    if (match) {
+      const values = match[1]
+        .split(",")
+        .map((value) => Number.parseFloat(value));
+      if (
+        values.length === 6
+        && values.every(Number.isFinite)
+        && values[0] > 0
+        && values[3] > 0
+        && Math.abs(values[1]) < 0.000001
+        && Math.abs(values[2]) < 0.000001
+      ) {
+        scaleX *= values[0];
+        scaleY *= values[3];
+      }
+    }
+    const zoom = Number.parseFloat(style.zoom);
+    if (Number.isFinite(zoom) && zoom > 0) {
+      scaleX *= zoom;
+      scaleY *= zoom;
+    }
+  }
+  return {
+    x: Math.max(0.000001, scaleX),
+    y: Math.max(0.000001, scaleY),
+  };
 }
 
 function configureProjectionLayer(
@@ -174,19 +212,20 @@ function configureProjectionLayer(
     hostDisplay === "inline" ? "inline-block" : "block",
   );
   setImportantStyle(root, "box-sizing", "border-box");
-  setImportantStyle(root, "width", "100%");
-  setImportantStyle(root, "max-width", "100%");
   setImportantStyle(root, "min-width", "0");
   if (mode === "host") {
+    setImportantStyle(root, "width", "100%");
+    setImportantStyle(root, "max-width", "100%");
     setImportantStyle(root, "height", "100%");
+    setImportantStyle(root, "max-height", "100%");
     root.style.removeProperty("aspect-ratio");
   } else {
-    root.style.removeProperty("height");
-    setImportantStyle(
-      root,
-      "aspect-ratio",
-      `${visual.layoutWidth} / ${visual.layoutHeight}`,
-    );
+    const scale = preservedPaintedScale(host);
+    setImportantStyle(root, "width", `${visual.layoutWidth / scale.x}px`);
+    setImportantStyle(root, "height", `${visual.layoutHeight / scale.y}px`);
+    setImportantStyle(root, "max-width", "none");
+    setImportantStyle(root, "max-height", "none");
+    root.style.removeProperty("aspect-ratio");
   }
   setImportantStyle(root, "overflow", "hidden");
   setImportantStyle(root, "line-height", "0");

@@ -290,6 +290,45 @@ test("hidden populated hosts retain the last committed artifact", () => {
   }), null);
 });
 
+test("projection session never caches an all-deferred capture as ready", async () => {
+  let captures = 0;
+  const session = new RuntimeVisualProjectionSession({
+    captureDebounceMs: 0,
+    capture: async (capturePayload) => {
+      captures += 1;
+      return {
+        protocol: RUNTIME_VISUAL_PROJECTION_PROTOCOL,
+        version: RUNTIME_VISUAL_PROJECTION_VERSION,
+        sourceSha256: capturePayload.sourceSha256,
+        visuals: [],
+        deferredSourceNodeIds: capturePayload.candidates.map(
+          (candidate) => candidate.sourceNodeId,
+        ),
+      };
+    },
+  });
+  const request = () => session.request({
+    html: SOURCE,
+    sourcePath: "/tmp/report.html",
+    documentKey: "current:/tmp/report.html",
+    viewportWidth: 900,
+  });
+
+  request();
+  await nextTask();
+  await nextTask();
+  assert.equal(captures, 1);
+  assert.equal(session.snapshot.status, "unavailable");
+  assert.equal(session.snapshot.projection, null);
+
+  request();
+  await nextTask();
+  await nextTask();
+  assert.equal(captures, 2);
+  assert.equal(session.snapshot.status, "unavailable");
+  session.dispose();
+});
+
 test("projection session rebinds non-visual source edits without recapturing", async () => {
   const pending = [];
   const session = new RuntimeVisualProjectionSession({

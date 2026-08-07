@@ -75,16 +75,20 @@ Comments + frozen input
   diff or AI Request input.
   Capture protocol V2 transfers bounded PNG bytes rather than Base64, validates
   PNG signature/IHDR dimensions, content SHA, byte length, DPR, sizing mode and
-  crop geometry, waits for a short mutation-quiet point, neutralizes only
-  disposable transform/effect presentation during measurement, captures the
-  content box for ordinary hosts and the border box for `tbody`, and rejects a
+  crop geometry, waits for a short mutation-quiet point, keeps positive
+  axis-aligned scale/translate and zoom in the final painted geometry, and
+  neutralizes other disposable transform/effect presentation during
+  measurement. It captures the content box for ordinary hosts and the border
+  box for `tbody`, and rejects a
   viewport/overflow-clipped rectangle rather than stretching a partial bitmap.
   Hidden or temporarily uncapturable hosts are deferred so their previous
   committed bitmap can remain. The Canvas reconciles by stable host key, keeps
   identical image nodes, and decodes a changed Blob URL off-DOM before replacing
   the old node. Content layers follow host resize/flow changes with `contain`
   sizing and an owned `ResizeObserver`, so a cache hit cannot reuse stale fixed
-  pixel geometry; a projection refresh never starts by blanking the document.
+  pixel geometry. A source-zero host receives the validated captured intrinsic
+  size instead of resolving a percentage against its own zero box; a projection
+  refresh never starts by blanking the document.
 - Comment selection remains source-node exact inside foreign content. Authored
   SVG children retain their own instrumented SourceIndex identity; runtime-only
   children fail closed and are never promoted to an ancestor `svg`.
