@@ -96,6 +96,7 @@ export function createPageViewContext(options?: {
 export function resolvePageViewContext(
   html: string,
   context: PageViewContext | null | undefined,
+  sourceIndex?: unknown,
 ): {
   sourceIndex: unknown;
   entries: Array<{

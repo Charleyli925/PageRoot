@@ -1,5 +1,7 @@
+import { createHash } from "node:crypto";
+
 const PROJECTION_PROTOCOL = "pageroot-runtime-visual-projection";
-const PROJECTION_VERSION = 1;
+const PROJECTION_VERSION = 2;
 const SOURCE_NODE_ATTRIBUTE = "data-html-ai-source-node-id";
 const SOURCE_SHA256_PATTERN = /^sha256:[a-f0-9]{64}$/u;
 const CLASS_TOKEN_PATTERN = /^[^\t\n\f\r \u0000-\u001f\u007f]{1,96}$/u;
@@ -9,7 +11,7 @@ const MAX_CANDIDATES = 256;
 const MAX_VISUALS = 32;
 const MAX_PRESENTATION_ENTRIES = 64;
 const MAX_CLASS_TOKENS = 128;
-const MAX_VISUAL_DATA_URL_BYTES = 2_000_000;
+const MAX_VISUAL_PNG_BYTES = 2_000_000;
 const MAX_TOTAL_VISUAL_BYTES = 16_000_000;
 const MAX_VISUAL_DIMENSION = 4_096;
 const MIN_VIEWPORT_WIDTH = 320;
@@ -17,12 +19,16 @@ const MAX_VIEWPORT_WIDTH = 4_096;
 const MIN_VIEWPORT_HEIGHT = 320;
 const MAX_VIEWPORT_HEIGHT = 2_400;
 const LOAD_TIMEOUT_MS = 20_000;
-const SCRIPT_SETTLE_MS = 900;
-const REVEAL_SETTLE_MS = 80;
+const INITIAL_QUIET_MS = 120;
+const INITIAL_SETTLE_TIMEOUT_MS = 900;
+const PRESENTATION_QUIET_MS = 80;
+const PRESENTATION_SETTLE_TIMEOUT_MS = 300;
+const CAPTURE_BOXES = new Set(["border", "content"]);
 
 const VISUAL_HOST_TAGS = new Set([
   "article",
   "aside",
+  "canvas",
   "div",
   "figure",
   "figcaption",
@@ -30,6 +36,7 @@ const VISUAL_HOST_TAGS = new Set([
   "main",
   "section",
   "span",
+  "svg",
   "td",
   "th",
   "tbody",
@@ -56,6 +63,19 @@ const PRESENTATION_ENTRY_KEYS = new Set([
 
 function isRecord(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function measureCapturePhase(phase, startedAt) {
+  try {
+    const name = `pageroot:edit-visual-capture:${phase}`;
+    performance.clearMeasures(name);
+    performance.measure(name, {
+      start: startedAt,
+      end: performance.now(),
+    });
+  } catch {
+    // Diagnostics cannot own capture availability.
+  }
 }
 
 function boundedInteger(value, minimum, maximum) {
@@ -209,10 +229,6 @@ export function validateEditVisualCapturePayload(payload) {
   });
 }
 
-function delay(milliseconds) {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
-}
-
 async function withTimeout(promise, milliseconds, onTimeout) {
   let timeoutId;
   const timeout = new Promise((_, reject) => {
@@ -271,10 +287,98 @@ function presentationScript(entries, sourceNodeAttribute) {
   })()`;
 }
 
-function populatedCandidateScript(candidates, sourceNodeAttribute) {
+function settleRuntimeScript(
+  quietMilliseconds,
+  maximumMilliseconds,
+  {
+    candidates = [],
+    sourceNodeAttribute = null,
+    initiallyPopulatedSourceNodeIds = [],
+  } = {},
+) {
+  return `new Promise((resolve) => {
+    const quietMilliseconds = ${Math.max(0, quietMilliseconds)};
+    const maximumMilliseconds = ${Math.max(quietMilliseconds, maximumMilliseconds)};
+    const candidates = ${safeScriptValue(candidates)};
+    const sourceNodeAttribute = ${safeScriptValue(sourceNodeAttribute)};
+    const initialSourceNodeIds = new Set(${safeScriptValue(
+      initiallyPopulatedSourceNodeIds,
+    )});
+    const candidateSourceNodeIds = new Set(candidates
+      .map((candidate) => candidate?.sourceNodeId)
+      .filter((sourceNodeId) => typeof sourceNodeId === "string"));
+    const tracksCandidateReadiness = candidateSourceNodeIds.size > 0
+      && typeof sourceNodeAttribute === "string"
+      && sourceNodeAttribute.length > 0;
+    const pendingCandidateSourceNodeIds = new Set([...candidateSourceNodeIds]
+      .filter((sourceNodeId) => !initialSourceNodeIds.has(sourceNodeId)));
+    const startedAt = performance.now();
+    let lastMutationAt = startedAt;
+    const candidateSourceNodeId = (node) => {
+      let current = node?.nodeType === 1 ? node : node?.parentElement;
+      while (current?.nodeType === 1) {
+        const sourceNodeId = current.getAttribute(sourceNodeAttribute);
+        if (candidateSourceNodeIds.has(sourceNodeId)) return sourceNodeId;
+        current = current.parentElement;
+      }
+      return null;
+    };
+    const observer = new MutationObserver((records) => {
+      if (!tracksCandidateReadiness) {
+        lastMutationAt = performance.now();
+        return;
+      }
+      let changedPendingCandidate = false;
+      for (const record of records) {
+        const sourceNodeId = candidateSourceNodeId(record.target);
+        if (sourceNodeId && pendingCandidateSourceNodeIds.delete(sourceNodeId)) {
+          changedPendingCandidate = true;
+        }
+      }
+      if (changedPendingCandidate) lastMutationAt = performance.now();
+    });
+    observer.observe(document, {
+      attributes: true,
+      childList: true,
+      characterData: true,
+      subtree: true,
+    });
+    const finish = () => {
+      observer.disconnect();
+      resolve(true);
+    };
+    const inspect = () => {
+      const now = performance.now();
+      if (
+        (
+          (!tracksCandidateReadiness
+            || pendingCandidateSourceNodeIds.size === 0)
+          && now - lastMutationAt >= quietMilliseconds
+        )
+        || now - startedAt >= maximumMilliseconds
+      ) {
+        finish();
+        return;
+      }
+      requestAnimationFrame(inspect);
+    };
+    requestAnimationFrame(() => requestAnimationFrame(inspect));
+  })`;
+}
+
+function populatedCandidateScript(
+  candidates,
+  sourceNodeAttribute,
+  maximumCandidates = MAX_VISUALS,
+) {
+  const boundedMaximumCandidates = Math.max(
+    1,
+    Math.min(MAX_CANDIDATES, Math.floor(Number(maximumCandidates) || 0)),
+  );
   return `(() => {
     const candidates = ${safeScriptValue(candidates)};
     const sourceNodeAttribute = ${safeScriptValue(sourceNodeAttribute)};
+    const maximumCandidates = ${boundedMaximumCandidates};
     const elements = Array.from(document.querySelectorAll("[" + sourceNodeAttribute + "]"));
     const populated = [];
     for (const candidate of candidates) {
@@ -283,12 +387,30 @@ function populatedCandidateScript(candidates, sourceNodeAttribute) {
       ));
       if (matches.length !== 1) continue;
       const element = matches[0];
-      const hasRuntimeContent = Array.from(element.childNodes).some((node) => (
+      const hasChildContent = Array.from(element.childNodes).some((node) => (
         node.nodeType === Node.ELEMENT_NODE
         || (node.nodeType === Node.TEXT_NODE && (node.textContent || "").trim())
       ));
+      let hasCanvasPixels = false;
+      if (candidate.tagName === "canvas") {
+        try {
+          const probe = document.createElement("canvas");
+          probe.width = 32;
+          probe.height = 32;
+          const context = probe.getContext("2d", { willReadFrequently: true });
+          context.drawImage(element, 0, 0, probe.width, probe.height);
+          const pixels = context.getImageData(0, 0, probe.width, probe.height).data;
+          for (let offset = 3; offset < pixels.length; offset += 4) {
+            if (pixels[offset] !== 0) { hasCanvasPixels = true; break; }
+          }
+        } catch {
+          // A tainted canvas can only be inspected by capturing its pixels.
+          hasCanvasPixels = true;
+        }
+      }
+      const hasRuntimeContent = hasChildContent || hasCanvasPixels;
       if (hasRuntimeContent) populated.push(candidate);
-      if (populated.length >= ${MAX_VISUALS}) break;
+      if (populated.length >= maximumCandidates) break;
     }
     return populated;
   })()`;
@@ -305,6 +427,8 @@ function prepareCandidateScript(candidate, sourceNodeAttribute, restoreKey) {
     if (matches.length !== 1) return false;
     const element = matches[0];
     if (!element.isConnected) return false;
+    element.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
+    window.dispatchEvent(new Event("resize"));
     const changes = [];
     const rememberStyle = (node, property, value) => {
       changes.push({
@@ -316,26 +440,47 @@ function prepareCandidateScript(candidate, sourceNodeAttribute, restoreKey) {
       });
       node.style.setProperty(property, value, "important");
     };
-    for (let node = element; node && node !== document.documentElement; node = node.parentElement) {
-      if (node.hasAttribute("hidden")) {
-        changes.push({ kind: "hidden", node });
-        node.removeAttribute("hidden");
+    const preservesPaintedGeometry = (transform) => {
+      if (transform === "none") return true;
+      const match = /^matrix\\(([^)]+)\\)$/u.exec(transform);
+      if (!match) return false;
+      const values = match[1].split(",").map((value) => Number.parseFloat(value));
+      if (values.length !== 6 || values.some((value) => !Number.isFinite(value))) {
+        return false;
       }
+      const [scaleX, skewY, skewX, scaleY] = values;
+      return scaleX > 0
+        && scaleY > 0
+        && Math.abs(skewX) < 0.000001
+        && Math.abs(skewY) < 0.000001;
+    };
+    const affectedNodes = [];
+    for (let node = element; node; node = node.parentElement) {
       const computed = window.getComputedStyle(node);
-      if (computed.display === "none") {
-        const fallback = node.tagName === "TBODY"
-          ? "table-row-group"
-          : node.tagName === "TR"
-            ? "table-row"
-            : ["TD", "TH"].includes(node.tagName)
-              ? "table-cell"
-              : "block";
-        rememberStyle(node, "display", fallback);
+      if (
+        node.hasAttribute("hidden")
+        || computed.display === "none"
+        || computed.visibility === "hidden"
+        || computed.visibility === "collapse"
+        || Number(computed.opacity) <= 0
+      ) return false;
+      affectedNodes.push({ node, computed });
+      if (node === document.documentElement) break;
+    }
+    for (const { node, computed } of affectedNodes) {
+      if (!preservesPaintedGeometry(computed.transform)) {
+        rememberStyle(node, "transform", "none");
       }
-      if (computed.visibility === "hidden" || computed.visibility === "collapse") {
-        rememberStyle(node, "visibility", "visible");
+      if (computed.opacity !== "1") rememberStyle(node, "opacity", "1");
+      if (computed.filter !== "none") rememberStyle(node, "filter", "none");
+      if (computed.backdropFilter && computed.backdropFilter !== "none") {
+        rememberStyle(node, "backdrop-filter", "none");
       }
-      if (computed.opacity === "0") rememberStyle(node, "opacity", "1");
+      if (computed.clipPath !== "none") rememberStyle(node, "clip-path", "none");
+      if (computed.mixBlendMode !== "normal") {
+        rememberStyle(node, "mix-blend-mode", "normal");
+      }
+      if (computed.perspective !== "none") rememberStyle(node, "perspective", "none");
     }
     window[restoreKey] = () => {
       for (const change of changes.reverse()) {
@@ -349,8 +494,6 @@ function prepareCandidateScript(candidate, sourceNodeAttribute, restoreKey) {
       delete window[restoreKey];
       window.dispatchEvent(new Event("resize"));
     };
-    element.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
-    window.dispatchEvent(new Event("resize"));
     return true;
   })()`;
 }
@@ -366,25 +509,115 @@ function measureCandidateScript(candidate, sourceNodeAttribute) {
       const element = matches[0];
       const rect = element.getBoundingClientRect();
       const style = window.getComputedStyle(element);
-      const left = Math.max(0, rect.left);
-      const top = Math.max(0, rect.top);
-      const right = Math.min(window.innerWidth, rect.right);
-      const bottom = Math.min(window.innerHeight, rect.bottom);
+      const numeric = (value) => {
+        const parsed = Number.parseFloat(value);
+        return Number.isFinite(parsed) ? parsed : 0;
+      };
+      const borderLeft = numeric(style.borderLeftWidth);
+      const borderRight = numeric(style.borderRightWidth);
+      const borderTop = numeric(style.borderTopWidth);
+      const borderBottom = numeric(style.borderBottomWidth);
+      const paddingLeft = numeric(style.paddingLeft);
+      const paddingRight = numeric(style.paddingRight);
+      const paddingTop = numeric(style.paddingTop);
+      const paddingBottom = numeric(style.paddingBottom);
+      const viewportScale = (node, nodeRect) => {
+        const offsetWidth = Number(node.offsetWidth);
+        const offsetHeight = Number(node.offsetHeight);
+        return {
+          x: Number.isFinite(offsetWidth) && offsetWidth >= 1
+            ? nodeRect.width / offsetWidth
+            : 1,
+          y: Number.isFinite(offsetHeight) && offsetHeight >= 1
+            ? nodeRect.height / offsetHeight
+            : 1,
+        };
+      };
+      const captureBox = element.tagName === "TBODY" ? "border" : "content";
+      let left = rect.left;
+      let top = rect.top;
+      let layoutWidth = rect.width;
+      let layoutHeight = rect.height;
+      if (captureBox === "content") {
+        const scale = viewportScale(element, rect);
+        left += (borderLeft + paddingLeft) * scale.x;
+        top += (borderTop + paddingTop) * scale.y;
+        layoutWidth = (
+          element.clientWidth - paddingLeft - paddingRight
+        ) * scale.x;
+        layoutHeight = (
+          element.clientHeight - paddingTop - paddingBottom
+        ) * scale.y;
+        if (layoutWidth < 1) {
+          layoutWidth = rect.width
+            - (borderLeft + borderRight + paddingLeft + paddingRight) * scale.x;
+        }
+        if (layoutHeight < 1) {
+          layoutHeight = rect.height
+            - (borderTop + borderBottom + paddingTop + paddingBottom) * scale.y;
+        }
+      }
+      const right = left + layoutWidth;
+      const bottom = top + layoutHeight;
       if (
         !element.isConnected
         || style.display === "none"
         || style.visibility === "hidden"
         || style.visibility === "collapse"
-        || right - left < 1
-        || bottom - top < 1
+        || layoutWidth < 1
+        || layoutHeight < 1
+      ) { resolve(null); return; }
+      let visibleLeft = Math.max(0, left);
+      let visibleTop = Math.max(0, top);
+      let visibleRight = Math.min(window.innerWidth, right);
+      let visibleBottom = Math.min(window.innerHeight, bottom);
+      for (let ancestor = element.parentElement; ancestor; ancestor = ancestor.parentElement) {
+        const ancestorStyle = window.getComputedStyle(ancestor);
+        const clipsX = ancestorStyle.overflowX !== "visible";
+        const clipsY = ancestorStyle.overflowY !== "visible";
+        if (clipsX || clipsY) {
+          const ancestorRect = ancestor.getBoundingClientRect();
+          const ancestorScale = viewportScale(ancestor, ancestorRect);
+          const ancestorBorderLeft = numeric(ancestorStyle.borderLeftWidth);
+          const ancestorBorderTop = numeric(ancestorStyle.borderTopWidth);
+          if (clipsX) {
+            const clipLeft = ancestorRect.left
+              + ancestorBorderLeft * ancestorScale.x;
+            visibleLeft = Math.max(visibleLeft, clipLeft);
+            visibleRight = Math.min(
+              visibleRight,
+              clipLeft + ancestor.clientWidth * ancestorScale.x,
+            );
+          }
+          if (clipsY) {
+            const clipTop = ancestorRect.top
+              + ancestorBorderTop * ancestorScale.y;
+            visibleTop = Math.max(visibleTop, clipTop);
+            visibleBottom = Math.min(
+              visibleBottom,
+              clipTop + ancestor.clientHeight * ancestorScale.y,
+            );
+          }
+        }
+        if (ancestor === document.documentElement) break;
+      }
+      const epsilon = 0.75;
+      if (
+        visibleLeft > left + epsilon
+        || visibleTop > top + epsilon
+        || visibleRight < right - epsilon
+        || visibleBottom < bottom - epsilon
       ) { resolve(null); return; }
       resolve({
         x: Math.floor(left),
         y: Math.floor(top),
         width: Math.max(1, Math.ceil(right) - Math.floor(left)),
         height: Math.max(1, Math.ceil(bottom) - Math.floor(top)),
-        layoutWidth: Math.max(1, Math.round(rect.width)),
-        layoutHeight: Math.max(1, Math.round(rect.height)),
+        layoutWidth: Math.max(1, Math.round(layoutWidth)),
+        layoutHeight: Math.max(1, Math.round(layoutHeight)),
+        deviceScaleFactor: Math.max(0.5, Math.min(8, window.devicePixelRatio || 1)),
+        captureBox,
+        complete: true,
       });
     }));
   })`;
@@ -398,7 +631,11 @@ function restoreCandidateScript(restoreKey) {
 }
 
 function boundedCaptureRect(measurement, viewport) {
-  if (!isRecord(measurement)) return null;
+  if (
+    !isRecord(measurement)
+    || measurement.complete !== true
+    || !CAPTURE_BOXES.has(measurement.captureBox)
+  ) return null;
   const x = boundedInteger(measurement.x, 0, viewport.width - 1);
   const y = boundedInteger(measurement.y, 0, viewport.height - 1);
   const width = boundedInteger(measurement.width, 1, viewport.width);
@@ -423,36 +660,67 @@ function boundedCaptureRect(measurement, viewport) {
     || x + width > viewport.width
     || y + height > viewport.height
   ) return null;
-  return { x, y, width, height, layoutWidth, layoutHeight };
+  return {
+    x,
+    y,
+    width,
+    height,
+    layoutWidth,
+    layoutHeight,
+    captureBox: measurement.captureBox,
+  };
 }
 
 function boundedPng(image) {
   if (!image || image.isEmpty()) return null;
   let candidate = image;
-  let dataUrl = candidate.toDataURL();
-  for (let attempt = 0; dataUrl.length > MAX_VISUAL_DATA_URL_BYTES && attempt < 4; attempt += 1) {
+  let pngBytes = candidate.toPNG();
+  for (let attempt = 0; pngBytes.length > MAX_VISUAL_PNG_BYTES && attempt < 4; attempt += 1) {
     const size = candidate.getSize();
     const scale = Math.max(
       0.25,
-      Math.sqrt(MAX_VISUAL_DATA_URL_BYTES / dataUrl.length) * 0.9,
+      Math.sqrt(MAX_VISUAL_PNG_BYTES / pngBytes.length) * 0.9,
     );
     candidate = candidate.resize({
       width: Math.max(1, Math.floor(size.width * scale)),
       height: Math.max(1, Math.floor(size.height * scale)),
       quality: "good",
     });
-    dataUrl = candidate.toDataURL();
+    pngBytes = candidate.toPNG();
   }
-  const size = candidate.getSize();
+  const pngView = pngBytes instanceof Uint8Array && pngBytes.byteLength >= 24
+    ? new DataView(
+      pngBytes.buffer,
+      pngBytes.byteOffset,
+      pngBytes.byteLength,
+    )
+    : null;
+  const pngWidth = pngView?.getUint32(16, false) ?? 0;
+  const pngHeight = pngView?.getUint32(20, false) ?? 0;
   if (
-    dataUrl.length > MAX_VISUAL_DATA_URL_BYTES
-    || !/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/u.test(dataUrl)
-    || size.width < 1
-    || size.height < 1
-    || size.width > MAX_VISUAL_DIMENSION
-    || size.height > MAX_VISUAL_DIMENSION
+    !(pngBytes instanceof Uint8Array)
+    || pngBytes.length < 20
+    || pngBytes.length > MAX_VISUAL_PNG_BYTES
+    || ![137, 80, 78, 71, 13, 10, 26, 10].every(
+      (value, index) => pngBytes[index] === value,
+    )
+    || ![73, 72, 68, 82].every(
+      (value, index) => pngBytes[12 + index] === value,
+    )
+    || pngWidth < 1
+    || pngHeight < 1
+    || pngWidth > MAX_VISUAL_DIMENSION
+    || pngHeight > MAX_VISUAL_DIMENSION
   ) return null;
-  return { dataUrl, width: size.width, height: size.height };
+  return {
+    pngBytes: new Uint8Array(pngBytes),
+    width: pngWidth,
+    height: pngHeight,
+    byteLength: pngBytes.length,
+    runtimeContentSha256: `sha256:${createHash("sha256")
+      .update(pngBytes)
+      .digest("hex")}`,
+  };
 }
 
 export function createEditVisualCaptureOperation({
@@ -477,7 +745,6 @@ export function createEditVisualCaptureController({
   BrowserWindowClass,
   createSession,
   revokeSession,
-  wait = delay,
 } = {}) {
   if (typeof BrowserWindowClass !== "function") {
     throw new TypeError("Edit visual capture requires BrowserWindow.");
@@ -489,6 +756,7 @@ export function createEditVisualCaptureController({
   let activeCapture = null;
 
   const capture = async (rawPayload) => {
+    const captureStartedAt = performance.now();
     const payload = validateEditVisualCapturePayload(rawPayload);
     activeCapture?.cancel();
     let cancelled = false;
@@ -544,7 +812,41 @@ export function createEditVisualCaptureController({
         "document.fonts?.ready?.catch?.(() => undefined) ?? Promise.resolve()",
         true,
       ).catch(() => undefined);
-      await wait(SCRIPT_SETTLE_MS);
+      const initiallyPopulatedCandidates = await captureWindow.webContents
+        .executeJavaScript(
+          populatedCandidateScript(
+            payload.candidates,
+            payload.sourceNodeAttribute,
+            payload.candidates.length,
+          ),
+          true,
+        )
+        .catch(() => []);
+      const candidateSourceNodeIds = new Set(
+        payload.candidates.map((candidate) => candidate.sourceNodeId),
+      );
+      const initiallyPopulatedSourceNodeIds = Array.isArray(
+        initiallyPopulatedCandidates,
+      )
+        ? [...new Set(initiallyPopulatedCandidates
+          .map((candidate) => candidate?.sourceNodeId)
+          .filter((sourceNodeId) => (
+            typeof sourceNodeId === "string"
+            && candidateSourceNodeIds.has(sourceNodeId)
+          )))]
+        : [];
+      await captureWindow.webContents.executeJavaScript(
+        settleRuntimeScript(
+          INITIAL_QUIET_MS,
+          INITIAL_SETTLE_TIMEOUT_MS,
+          {
+            candidates: payload.candidates,
+            sourceNodeAttribute: payload.sourceNodeAttribute,
+            initiallyPopulatedSourceNodeIds,
+          },
+        ),
+        true,
+      );
       await captureWindow.webContents.executeJavaScript(
         presentationScript(
           payload.presentationEntries,
@@ -552,16 +854,30 @@ export function createEditVisualCaptureController({
         ),
         true,
       );
-      await wait(REVEAL_SETTLE_MS);
+      await captureWindow.webContents.executeJavaScript(
+        settleRuntimeScript(
+          PRESENTATION_QUIET_MS,
+          PRESENTATION_SETTLE_TIMEOUT_MS,
+        ),
+        true,
+      );
       const populatedCandidates = await captureWindow.webContents.executeJavaScript(
         populatedCandidateScript(payload.candidates, payload.sourceNodeAttribute),
         true,
       );
-      const visuals = [];
-      let totalBytes = 0;
-      for (const candidate of Array.isArray(populatedCandidates)
+      const capturableCandidates = Array.isArray(populatedCandidates)
         ? populatedCandidates.slice(0, MAX_VISUALS)
-        : []) {
+        : [];
+      const visuals = [];
+      const deferredSourceNodeIds = [];
+      let totalBytes = 0;
+      for (
+        let candidateIndex = 0;
+        candidateIndex < capturableCandidates.length;
+        candidateIndex += 1
+      ) {
+        const candidate = capturableCandidates[candidateIndex];
+        const candidateStartedAt = performance.now();
         if (cancelled || captureWindow.isDestroyed()) break;
         const restoreKey = `__pagerootEditVisualRestore_${visuals.length}`;
         try {
@@ -573,14 +889,19 @@ export function createEditVisualCaptureController({
             ),
             true,
           );
-          if (!prepared) continue;
-          await wait(REVEAL_SETTLE_MS);
+          if (!prepared) {
+            deferredSourceNodeIds.push(candidate.sourceNodeId);
+            continue;
+          }
           const measurement = await captureWindow.webContents.executeJavaScript(
             measureCandidateScript(candidate, payload.sourceNodeAttribute),
             true,
           );
           const rect = boundedCaptureRect(measurement, payload.viewport);
-          if (!rect) continue;
+          if (!rect) {
+            deferredSourceNodeIds.push(candidate.sourceNodeId);
+            continue;
+          }
           const image = await captureWindow.capturePage(
             {
               x: rect.x,
@@ -591,19 +912,44 @@ export function createEditVisualCaptureController({
             { stayHidden: true },
           );
           const png = boundedPng(image);
-          if (!png) continue;
-          totalBytes += png.dataUrl.length;
-          if (totalBytes > MAX_TOTAL_VISUAL_BYTES) break;
+          if (!png) {
+            deferredSourceNodeIds.push(candidate.sourceNodeId);
+            continue;
+          }
+          totalBytes += png.byteLength;
+          if (totalBytes > MAX_TOTAL_VISUAL_BYTES) {
+            deferredSourceNodeIds.push(
+              ...capturableCandidates
+                .slice(candidateIndex)
+                .map((item) => item.sourceNodeId),
+            );
+            break;
+          }
           visuals.push(Object.freeze({
             sourceNodeId: candidate.sourceNodeId,
             width: png.width,
             height: png.height,
             layoutWidth: rect.layoutWidth,
             layoutHeight: rect.layoutHeight,
-            dataUrl: png.dataUrl,
+            deviceScaleFactor: Math.max(
+              0.5,
+              Math.min(8, Number(measurement.deviceScaleFactor) || 1),
+            ),
+            captureBox: rect.captureBox,
+            crop: Object.freeze({
+              x: rect.x,
+              y: rect.y,
+              width: rect.width,
+              height: rect.height,
+            }),
+            sizingMode: "contain",
+            runtimeContentSha256: png.runtimeContentSha256,
+            byteLength: png.byteLength,
+            pngBytes: png.pngBytes,
           }));
         } catch {
           // A single unrenderable host must not hide the other runtime visuals.
+          deferredSourceNodeIds.push(candidate.sourceNodeId);
           continue;
         } finally {
           if (!captureWindow.isDestroyed()) {
@@ -612,6 +958,7 @@ export function createEditVisualCaptureController({
               true,
             ).catch(() => undefined);
           }
+          measureCapturePhase("host", candidateStartedAt);
         }
       }
       if (cancelled) throw new Error("Edit visual capture was superseded.");
@@ -620,11 +967,13 @@ export function createEditVisualCaptureController({
         version: PROJECTION_VERSION,
         sourceSha256: payload.sourceSha256,
         visuals: Object.freeze(visuals),
+        deferredSourceNodeIds: Object.freeze(deferredSourceNodeIds),
       });
     } finally {
       if (captureWindow && !captureWindow.isDestroyed()) captureWindow.destroy();
       if (session?.sessionId) await revokeSession(session.sessionId).catch(() => undefined);
       if (activeCapture === operation) activeCapture = null;
+      measureCapturePhase("total", captureStartedAt);
     }
   };
 

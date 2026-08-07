@@ -161,14 +161,47 @@ Version authority.
 
 Edit runtime visuals have a separate owner:
 `RuntimeVisualProjectionSession`. Its request identity includes document key,
-source path, exact source Hash, normalized edit viewport and resolved
-`PageViewContext` entries. Only its newest generation may publish a result.
+source path, a runtime dependency Hash over stable source-empty TargetRefs,
+executable/style sources and script/handler-referenced data containers, a bucketed edit viewport and resolved
+`PageViewContext` dependency. The exact source Hash remains mandatory at every
+acceptance boundary. An indirect DOM traversal conservatively includes the complete
+source Hash in that dependency, so any source edit schedules a replacement rather
+than reusing a stale bitmap. A dependency-stable source edit may only rebind a previously
+accepted bitmap through the current `SourceIndex`; it cannot relax the empty-host,
+unique-host, tag, protocol or PNG checks. Only the newest generation may publish
+a changed result. The session may retain the committed projection while a
+replacement is scheduled/captured, suspend it across Preview/Edit transitions,
+and keep a recent-result LRU bounded by both bytes and entry count. Resetting
+document authority clears both committed state and cache.
 The main-process capture controller owns at most one hidden authored-page
 window and its preview session; replacement or disposal destroys both. The
-accepted result is a bounded PNG projection for source-empty hosts, not a copy
+accepted result is a bounded binary PNG projection for source-empty hosts,
+including direct Canvas/SVG roots, not a copy
 of runtime DOM. It has no drain, persistence, review-diff, source-history or AI
 authority. The Canvas may mount and remove it only as presentation beneath the
-original source host; comments and edits continue to resolve that host.
+original source host; comments and edits continue to resolve that host. Protocol
+V2 validates PNG/IHDR/content Hash/byte length/DPR/crop/sizing fields, measures
+ordinary hosts by their content box and `tbody` by its border box,
+keeps positive axis-aligned scale/translate and zoom in one viewport-coordinate
+painted box, must reject partial viewport/overflow coverage, and may mark a hidden or
+temporarily uncapturable host deferred. A deferred host may reuse only its own
+previously accepted stable-key bitmap; a valid non-deferred empty response
+clears a previous mount. Direct Canvas/SVG background projection temporarily
+applies captured content-box dimensions and restores the original inline sizing
+when it is removed. Canvas reconciliation must retain an
+identical image node and stage/decode a replacement Blob before removing the
+current one. Its responsive content layer must follow host flow/resize and use
+aspect-preserving `contain`; a source-zero host must use validated captured
+intrinsic dimensions rather than a percentage of its zero box. Stale or invalid projections do not authorize
+clearing a valid mount.
+
+Prepared formal-review documents are owned by a cancellable
+`ReviewAnalysisSession` keyed to exact operation/source/comment identity. Its
+multi-entry cache is byte bounded. Parsing and annotation yield between phases,
+and stale work stops before publication. Fuzzy node pairing may compare only
+compatible tag/context/stable-key buckets after exact and unique identity
+matches; it cannot restore a page-wide Cartesian candidate set or change the
+existing evidence thresholds.
 
 Formal review has a separate, narrower runtime-visual supplement owned by the
 parent `AiReviewWorkspace` and its `ReviewRuntimeVisualCoordinator`. The frozen
@@ -190,9 +223,13 @@ capabilities, rather than a native `Promise.race` that re-reads mutable static
 methods. It receives the exact declared candidate-key list from frozen analysis and
 record the parser-created element that first
 claims each key. Undeclared host attributes have no authority. A missing,
-duplicate, transferred or replaced declared key, key/element drift during
-either sample, or any capture failure invalidates the complete runtime batch
-and retains the static result.
+duplicate, transferred or replaced declared key, or key/element drift during
+either sample invalidates the complete runtime batch and retains the static
+result. Per-host traversal, node, value and Canvas limits remain isolated, while
+one aggregate budget spans every declared host and both stability samples. An
+unsupported, unstable, over-budget or locally failed host must produce one
+validated `unavailable` fact; that fact has no comparison
+authority and cannot suppress valid sibling-host facts.
 Both already-isolated review frames may then report one bounded pair of
 same-side-stable, host-relative HTML/SVG/Canvas fingerprints for every declared
 candidate, including the
@@ -200,8 +237,9 @@ host's own painted box, a fully transparent host as a stable disappearance
 state, and directly mutated size while excluding an unpainted empty box,
 indirect layout size and any subtree hidden beneath a zero-opacity host or
 descendant wrapper, including SVG vector groups. A visible subtree becoming transparent remains a real
-stable-result change. An omitted or invalid candidate fingerprint invalidates
-the whole runtime batch. A batch
+stable-result change. An omitted candidate entry, malformed available
+fingerprint or invalid identity still invalidates the whole runtime batch; a
+well-formed unavailable entry is ignored during comparison. A batch
 completed before frame registration remains cached for the challenged claim.
 Coordinator installation must drain every already-registered frame bound to the
 same document pair; neither load-before-owner nor owner-before-load may strand

@@ -778,6 +778,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       onRuntimeVisualViewportRef.current?.({
         width: Math.max(1, Math.round(frameWidth)),
         height: Math.max(1, Math.round(frameHeight)),
+        ...(sourceIndexRef.current
+          ? { sourceIndex: sourceIndexRef.current }
+          : {}),
       });
     } catch {
       // Runtime visual capture is optional and cannot interrupt edit layout.

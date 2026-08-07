@@ -123,6 +123,30 @@ test("instrumented preview injects ephemeral node IDs without changing the sourc
   );
 });
 
+test("instrumented preview preserves byte output for large element sets", () => {
+  const html = `<!doctype html><main>${Array.from(
+    { length: 4_000 },
+    (_, index) => `<section data-row="${index}"><span>row ${index}</span></section>`,
+  ).join("")}</main>`;
+  const index = buildSourceIndex(html);
+  let legacyOutput = html;
+  const insertions = index.elements
+    .map((element) => ({
+      offset: element.closingDelimiterOffset,
+      value: ` ${SOURCE_NODE_ATTRIBUTE}="${element.nodeId}"`,
+    }))
+    .sort((left, right) => right.offset - left.offset);
+  for (const insertion of insertions) {
+    legacyOutput = legacyOutput.slice(0, insertion.offset)
+      + insertion.value
+      + legacyOutput.slice(insertion.offset);
+  }
+
+  const preview = instrumentPreviewHtml(index);
+  assert.equal(preview.html, legacyOutput);
+  assert.equal(preview.nodeIds.length, 8_001);
+});
+
 test("fallback selectors use CSS nth-of-type ordinals across mixed-tag siblings and identify the preview node", () => {
   const html = `<!doctype html><html><head><title>Selector</title></head><body><main><h1>A</h1><p>B</p><aside>C</aside><p>D</p></main></body></html>`;
   const index = buildSourceIndex(html);

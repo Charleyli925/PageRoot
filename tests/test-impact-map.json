@@ -281,12 +281,12 @@
     {
       "id": "state-architecture",
       "patterns": [
-        "^app/application/(?:bridge-client|comment-session|document-session|draft-session|drain-coordinator|external-file-open-session|project-application-session|project-query-fence|project-rules-session|project-session|recovery-store|run-session|runtime-capabilities|runtime-visual-projection-session|source-history-session|version-session)\\.(?:js|d\\.ts)$",
+        "^app/application/(?:bridge-client|comment-session|document-session|draft-session|drain-coordinator|external-file-open-session|project-application-session|project-query-fence|project-rules-session|project-session|recovery-store|review-analysis-session|run-session|runtime-capabilities|runtime-visual-projection-session|source-history-session|version-session)\\.(?:js|d\\.ts)$",
         "^desktop/project-open-queue\\.mjs$",
         "^app/domain/(?:draft-aggregate|run-lifecycle|runtime-visual-projection|source-history)\\.(?:js|d\\.ts)$",
         "^shared/(?:draft-aggregate|source-history)\\.mjs$",
         "^scripts/(?:check-architecture|draft-aggregate|draft-service|project-context-service|source-history-service)\\.mjs$",
-        "^tests/(?:architecture-boundaries|bridge-client|comment-session|document-session|draft-aggregate|draft-service|draft-session|drain-coordinator|external-file-open-session|project-application-session|project-open-queue|project-query-fence|project-rules-session|project-session|recovery-store|run-lifecycle|run-session|runtime-capabilities|source-history|source-history-session|version-session)\\.test\\.mjs$",
+        "^tests/(?:architecture-boundaries|bridge-client|comment-session|document-session|draft-aggregate|draft-service|draft-session|drain-coordinator|external-file-open-session|project-application-session|project-open-queue|project-query-fence|project-rules-session|project-session|recovery-store|review-analysis-session|run-lifecycle|run-session|runtime-capabilities|source-history|source-history-session|version-session)\\.test\\.mjs$",
         "^(?:CONTRIBUTING|docs/(?:ARCHITECTURE|ARCHITECTURE_CONTRACT|STATE_OWNERSHIP|ENGINEERING_STANDARDS))\\.md$",
         "^docs/decisions/(?:0003-session-ownership-and-mutation-outcomes|0004-v2-editable-islands|0007-independent-interactive-preview|0008-safe-presentation-actions-in-edit-mode|0009-persistent-source-patch-history|0011-workbench-session-decomposition|0012-id-first-project-context|0013-edit-runtime-visual-projection)\\.md$"
       ],
@@ -308,6 +308,7 @@
         "tests/project-rules-session.test.mjs",
         "tests/project-session.test.mjs",
         "tests/recovery-store.test.mjs",
+        "tests/review-analysis-session.test.mjs",
         "tests/run-lifecycle.test.mjs",
         "tests/run-session.test.mjs",
         "tests/runtime-capabilities.test.mjs",
@@ -369,19 +370,22 @@
     {
       "id": "ai-review-workspace",
       "patterns": [
+        "^app/application/review-analysis-session\\.(?:js|d\\.ts)$",
         "^app/lib/review-(?:runtime-visual|text-diff)\\.(?:d\\.ts|js)$",
         "^app/lib/review-comment-source-map\\.js$",
         "^app/lib/page-presentation-dom\\.ts$",
         "^app/lib/review-scroll-sync\\.(?:js|d\\.ts)$",
         "^app/workbench/(?:AiReviewWorkspace|review-document|review-state)\\.(?:ts|tsx)$",
         "^app/workbench/ai-review-workspace\\.module\\.css$",
-        "^tests/(?:ai-review-workspace|review-comment-source-map|review-runtime-visual|review-scroll-sync|review-text-diff)\\.test\\.mjs$",
+        "^scripts/benchmark-review-analysis\\.mjs$",
+        "^tests/(?:ai-review-workspace|review-analysis-session|review-comment-source-map|review-runtime-visual|review-scroll-sync|review-text-diff)\\.test\\.mjs$",
         "^tests/e2e/electron/ai-handoff-closed-loop\\.spec\\.mjs$",
         "^docs/(?:AI_SUPPLEMENT_AND_VALIDATION|CHANGE_REQUEST_PROTOCOL|INTERACTION_FLOW|MVP_PRD)\\.md$"
       ],
       "suites": ["typecheck", "ai-smoke"],
       "nodeTests": [
         "tests/ai-review-workspace.test.mjs",
+        "tests/review-analysis-session.test.mjs",
         "tests/review-comment-source-map.test.mjs",
         "tests/review-runtime-visual.test.mjs",
         "tests/review-scroll-sync.test.mjs",

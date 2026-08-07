@@ -54,8 +54,10 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   process revalidates the known source path and a bounded payload, owns one
   hidden sandboxed BrowserWindow with Node disabled, denies navigation,
   popups and webviews, and destroys the window plus preview session after each
-  capture or superseding request. It returns only bounded PNG data URLs and
-  geometry tied to the renderer-provided exact source Hash; it never returns
+  capture or superseding request. It returns only bounded PNG bytes plus
+  validated PNG dimensions/content SHA/byte length/DPR/sizing/crop metadata,
+  explicit content/border-box geometry and deferred source-node identities tied
+  to the renderer-provided exact source Hash; it never returns
   runtime HTML, SVG, script state or filesystem data.
 - Strict schemas, frozen inputs and identity/Hash/path checks before accepting
   AI output; complete-document and non-empty-body checks remain protocol
@@ -131,7 +133,7 @@ one-sided runtime classes, text/HTML, inline style, form state and runtime
 children. Independently, Edit may display a PNG capture only inside a unique
 source-empty host with the exact current source Hash. The bitmap has pointer
 events disabled, so selection and comments resolve the original source host.
-Projection nodes are removed/rebuilt as disposable presentation and cannot be
+Projection nodes are keyed/reconciled as disposable presentation and cannot be
 serialized by the source engine. Save, review comparison and Request creation
 continue from authoritative source bytes (the Bridge copies those exact bytes
 to `input/base/index.html`); PageRoot-generated projection attributes and PNGs
@@ -161,20 +163,25 @@ the immutable Version or the activation transaction, and runtime interaction
 state is never serialized. The renderer accepts review messages only when the
 session ID, side, declared message source and `MessageEvent.source` all match the
 registered frame. Runtime-chart snapshot messages are additionally limited to
-host keys declared by the frozen source analyzer, bounded atom/signature counts,
-exactly one well-formed snapshot for every declared key, and one accepted batch
+host keys declared by the frozen source analyzer, per-host bounded atom/signature
+counts plus one aggregate traversal/value/Canvas budget across the complete
+two-sample batch, exactly one well-formed available or unavailable snapshot for every
+declared key, and one accepted batch
 per side. Ordinary frame `ready` messages never carry
-runtime evidence. An omitted or invalid snapshot invalidates the complete
-runtime batch and leaves static review authoritative. The trusted bootstrap creates a `MessageChannel` and binds
+runtime evidence. An omitted or malformed snapshot invalidates the complete
+runtime batch and leaves static review authoritative; a validated unavailable
+host has no comparison authority and does not grant authority to or suppress a
+different host. The trusted bootstrap creates a `MessageChannel` and binds
 the DOM traversal, attribute, layout, computed-style, Canvas, string
 normalization/digest, and Promise/timer/animation scheduling primitives used for evidence before any
 authored script runs. Its bounded font wait composes only captured Promise capabilities, so it never re-reads
 page-mutable static methods. An early observer records the
 parser-created element that first claims every frozen candidate key. Snapshot
 discovery accepts only that exact key/element set: undeclared attributes are
-ignored, while a missing, duplicate, transferred or replaced declared host,
-key/element drift or capture exception invalidates the whole runtime batch and
-leaves static review authoritative. After both exact
+ignored, while a missing, duplicate, transferred or replaced declared host or
+key/element drift invalidates the whole runtime batch and leaves static review
+authoritative. A local capture exception, instability or budget exhaustion is
+contained to that declared host as unavailable. After both exact
 frame documents load, the parent sends a fresh random challenge
 that the bootstrap consumes only from a browser-trusted parent event in its first
 capture listener without exposing it to later authored listeners, then transfers

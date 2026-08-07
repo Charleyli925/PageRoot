@@ -78,7 +78,7 @@ export function acceptReviewRuntimeVisualSnapshots(value, allowedCandidateKeys) 
       !key
       || !allowedCandidateKeys.has(key)
       || seen.has(key)
-      || (state !== "empty" && state !== "stable")
+      || (state !== "empty" && state !== "stable" && state !== "unavailable")
       || contentAtoms === null
       || paintAtoms === null
       || geometryAtoms === null
@@ -113,7 +113,10 @@ export function acceptReviewRuntimeVisualSnapshots(value, allowedCandidateKeys) 
       || geometrySignature === null
       || vectorSignature === null
       || canvasSignature === null
-      || (state === "empty" && (atomCount !== 0 || canvasPixels !== 0))
+      || (
+        (state === "empty" || state === "unavailable")
+        && (atomCount !== 0 || canvasPixels !== 0)
+      )
       || (state === "stable" && atomCount === 0 && canvasPixels === 0)
     ) return null;
 
@@ -137,6 +140,7 @@ export function acceptReviewRuntimeVisualSnapshots(value, allowedCandidateKeys) 
 }
 
 function runtimeSnapshotChanged(before, after) {
+  if (before.state === "unavailable" || after.state === "unavailable") return false;
   if (before.state !== after.state) {
     return before.state === "stable" || after.state === "stable";
   }

@@ -26,30 +26,51 @@ version comparison or AI input.
 - `PageViewContext` carries presentation state only. It no longer carries
   Canvas pixels or table HTML.
 - A renderer `RuntimeVisualProjectionSession` indexes source-empty hosts in the
-  exact current HTML. Its request identity includes document key, source path,
-  source Hash, normalized edit viewport and applied presentation entries.
-  Debouncing and a monotonic generation discard late results.
+  exact current HTML, reusing the Canvas `SourceIndex`. Its capture identity
+  includes document key, source path, stable host TargetRefs, executable/style
+  and script-referenced data dependencies, a 64px edit-viewport bucket and
+  applied presentation entries.
+  The exact source Hash remains mandatory when accepting or rebinding a result.
+  Debouncing and a monotonic generation discard late results; an entry- and
+  byte-bounded LRU
+  allows dependency-stable text/history edits and Preview/Edit transitions to
+  reuse an already accepted projection.
 - A narrow preload method sends the bounded request to one main-process capture
   controller. The controller reuses the contained `pageroot-preview:` resource
   session, runs the authored page in a hidden sandboxed BrowserWindow, denies
   navigation/popups/webviews and captures the final host rectangle. It is
-  renderer-library agnostic: Canvas, SVG, HTML and `tbody` use the same bitmap
-  route.
-- The response contains bounded PNG data URLs and geometry only. It is accepted
-  only for the exact source Hash, a unique known source node and a host that is
-  still empty in source.
+  renderer-library agnostic: direct or nested Canvas/SVG, HTML and `tbody` use the same bitmap
+  route. Protocol V2 waits for a short mutation-quiet point, captures ordinary
+  hosts by content box and `tbody` by border box. Positive axis-aligned
+  scale/translate and zoom remain part of the final painted geometry; other
+  disposable transforms/effects are neutralized. Clipped partial rectangles
+  are rejected.
+- The response contains bounded PNG bytes plus validated IHDR dimensions,
+  content SHA, byte length, DPR, sizing mode and crop geometry only. It is
+  accepted only for the exact source Hash, a unique known source node and a
+  host that is still empty in source.
 - `HtmlCanvasEditor` mounts the PNG as pointer-transparent, read-only
-  presentation beneath the original instrumented host. An empty `tbody` gets
-  one bitmap row. Clicking, selecting and commenting therefore resolve the
+  presentation in a responsive content layer beneath the original instrumented
+  host. A source-sized host owns the layer size, while a source-zero host gets
+  the validated captured intrinsic size. An empty `tbody` gets one bitmap row;
+  direct Canvas/SVG roots use a
+  reversible content-box background. Clicking, selecting and commenting therefore resolve the
   original host TargetRef, never the image.
+  Stable host keys reconcile mounts in place. An unchanged bitmap retains its
+  image node; a replacement Blob URL is decoded off-DOM before the old node is
+  removed, and every retired Blob URL is revoked. `contain` sizing plus an owned
+  ResizeObserver follows host flow/size changes without recapture. Hidden
+  or temporarily uncapturable hosts may defer to their own last accepted image.
 - Projection nodes and `data-pageroot-*` attributes are disposable. They do not
   enter SourcePatch, browser/source history, save, export, Draft, Version,
   review diff or Request creation. The Bridge still copies the complete exact
   source HTML to `input/base/index.html`; PageRoot merely omits its own temporary
   projection data.
 - The projection owns no drain obligation and no runtime-DOM synchronization.
-  Project/source/history/mode changes clear it; the next eligible edit viewport
-  may request a new one.
+  A document-authority reset clears it. Mode suspension cancels pending capture
+  but retains the bounded committed/cache state; source changes that affect a
+  runtime dependency schedule a replacement without blanking the committed
+  projection.
 
 ## Consequences
 

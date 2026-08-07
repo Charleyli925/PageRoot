@@ -303,8 +303,12 @@ export function createPageViewContext({
   });
 }
 
-export function resolvePageViewContext(html, context) {
-  const sourceIndex = buildSourceIndex(html);
+export function resolvePageViewContext(html, context, suppliedSourceIndex = null) {
+  const sourceIndex = suppliedSourceIndex?.source === html
+    && Array.isArray(suppliedSourceIndex.elements)
+    && suppliedSourceIndex.byNodeId instanceof Map
+    ? suppliedSourceIndex
+    : buildSourceIndex(html);
   return resolvePageViewContextFromIndex(sourceIndex, context);
 }
 

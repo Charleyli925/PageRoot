@@ -606,18 +606,22 @@ export function instrumentPreviewHtml(indexOrHtml, options = {}) {
     );
   }
 
-  let html = index.source;
   const insertions = index.elements
     .map((element) => ({
       offset: element.closingDelimiterOffset,
       value: ` ${attributeName}="${element.nodeId}"`,
     }))
-    .sort((left, right) => right.offset - left.offset);
+    .sort((left, right) => left.offset - right.offset);
+  const parts = [];
+  let sourceCursor = 0;
   for (const insertion of insertions) {
-    html = html.slice(0, insertion.offset) + insertion.value + html.slice(insertion.offset);
+    parts.push(index.source.slice(sourceCursor, insertion.offset));
+    parts.push(insertion.value);
+    sourceCursor = insertion.offset;
   }
+  parts.push(index.source.slice(sourceCursor));
   return {
-    html,
+    html: parts.join(""),
     attributeName,
     nodeIds: index.elements.map((element) => element.nodeId),
     sourceSha256: index.sourceSha256,
