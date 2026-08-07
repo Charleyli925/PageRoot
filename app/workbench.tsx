@@ -194,6 +194,10 @@ import {
 } from "./workbench/handoff-view";
 import AiReviewWorkspace from "./workbench/AiReviewWorkspace";
 import {
+  buildReviewDocuments,
+  type ReviewDocuments,
+} from "./workbench/review-document";
+import {
   WorkbenchHeaderActions,
   WorkbenchHeaderShell,
 } from "./workbench/workbench-header-shell";
@@ -365,11 +369,27 @@ const INITIAL_COMMENT_SNAPSHOT: CommentSessionSnapshot<
 
 type ReadyReviewSession = {
   operationKey: string;
+  sessionId: string;
+  documents: ReviewDocuments;
   beforeHtml: string;
-  afterHtml: string;
   beforeLabel: string;
   afterLabel: string;
-  comments: CommentItem[];
+};
+
+type PreparedReviewDocuments = {
+  operationKey: string;
+  beforeHtml: string;
+  afterHtml: string;
+  sourcePath: string;
+  commentsKey: string;
+  sessionId: string;
+  documents: ReviewDocuments;
+};
+
+type RuntimeVisualViewport = {
+  width: number;
+  height: number;
+  sourceIndex?: { source?: unknown };
 };
 
 function waitFor(delayMs: number): Promise<void> {
@@ -515,11 +535,10 @@ export default function Workbench() {
     itemKey: string;
   } | null>(null);
   const pagePresentationScrollRequestRef = useRef(0);
-  const runtimeVisualViewportRef = useRef<{
-    width: number;
-    height: number;
-  } | null>(null);
+  const runtimeVisualViewportRef = useRef<RuntimeVisualViewport | null>(null);
   const projectOpenRequestRef = useRef(0);
+  const preparedReviewDocumentsRef = useRef<PreparedReviewDocuments | null>(null);
+  const reviewSessionSequenceRef = useRef(0);
   const projectSessionRef = useRef(new ProjectSession());
   const drainCoordinatorRef = useRef(new DrainCoordinator());
   const runtimeCapabilitiesRef =
@@ -1248,14 +1267,10 @@ export default function Workbench() {
     pageViewContext?.documentKey === pageViewDocumentKey
   ) ? pageViewContext : null;
   const activeRuntimeVisualProjection = (
-    runtimeVisualProjectionSnapshot.status === "ready"
-    && runtimeVisualProjectionSnapshot.projection?.documentKey
+    runtimeVisualProjectionSnapshot.projection?.documentKey
       === pageViewDocumentKey
   ) ? runtimeVisualProjectionSnapshot.projection : null;
-  const handleRuntimeVisualViewport = useCallback((viewport: {
-    width: number;
-    height: number;
-  }) => {
+  const handleRuntimeVisualViewport = useCallback((viewport: RuntimeVisualViewport) => {
     if (
       Number.isFinite(viewport.width)
       && Number.isFinite(viewport.height)
@@ -1274,21 +1289,29 @@ export default function Workbench() {
     ) {
       return;
     }
-    const eligible = (
+    const available = (
       runtimeCapabilitiesReady
       && runtimeCapabilitiesRef.current.editVisualProjection
         === "offscreen-capture"
       && !browserPreviewOnly
-      && canvasMode === "edit"
       && viewMode === "current"
-      && !interactionLocked
       && Boolean(sourcePath)
       && !projectHydrating
       && !projectLoadError
       && !workspaceIssue
     );
-    if (!eligible || !currentViewport || !sourcePath) {
+    if (!available || !currentViewport || !sourcePath) {
       runtimeVisualProjectionSessionRef.current.reset();
+      return;
+    }
+    if (canvasMode !== "edit" || interactionLocked) {
+      runtimeVisualProjectionSessionRef.current.suspend();
+      return;
+    }
+    if (currentViewport.sourceIndex?.source !== html) {
+      // The Canvas publishes its already-built exact SourceIndex after a source
+      // transition. Waiting for that callback avoids reparsing a large document
+      // from this parent effect and cannot authorize a stale projection.
       return;
     }
     runtimeVisualProjectionSessionRef.current.request({
@@ -1297,6 +1320,7 @@ export default function Workbench() {
       documentKey: pageViewDocumentKey,
       viewportWidth: currentViewport.width,
       pageViewContext: activePageViewContext,
+      sourceIndex: currentViewport.sourceIndex,
     });
   }, [
     activePageViewContext,
@@ -2786,6 +2810,7 @@ export default function Workbench() {
     setLastModifiedAt(project.lastModifiedAt || null);
     setSelection(null);
     setPageViewContext(null);
+    preparedReviewDocumentsRef.current = null;
     runtimeVisualProjectionSessionRef.current.reset();
     runtimeVisualViewportRef.current = null;
     editorRef.current?.applyPageViewContext(null);
@@ -8539,13 +8564,9 @@ export default function Workbench() {
       ) {
         throw new Error("当前冻结 HTML 已发生变化，无法开始安全对比。");
       }
-      setReadyReviewSession({
-        operationKey,
-        beforeHtml: frozenHtml,
-        afterHtml: candidateHtml,
-        comments: commentSessionRef.current.comments
-          .filter(commentHasContent)
-          .map((comment) => ({
+      const reviewComments = commentSessionRef.current.comments
+        .filter(commentHasContent)
+        .map((comment) => ({
             ...comment,
             target: {
               ...comment.target,
@@ -8572,7 +8593,40 @@ export default function Workbench() {
             ...(comment.attachments?.length
               ? { attachments: comment.attachments.map((item) => ({ ...item })) }
               : {}),
-          })),
+          }));
+      const commentsKey = JSON.stringify(reviewComments);
+      const cachedReview = preparedReviewDocumentsRef.current;
+      const preparedReview = (
+        cachedReview?.operationKey === operationKey
+        && cachedReview.beforeHtml === frozenHtml
+        && cachedReview.afterHtml === candidateHtml
+        && cachedReview.sourcePath === run.sourcePath
+        && cachedReview.commentsKey === commentsKey
+      ) ? cachedReview : (() => {
+          const sessionId = `review-${Date.now().toString(36)}-${++reviewSessionSequenceRef.current}`;
+          const documents = buildReviewDocuments(frozenHtml, candidateHtml, {
+            sessionId,
+            sourcePath: run.sourcePath,
+            externalBootstrap: Boolean(window.htmlAIPreview),
+            comments: reviewComments,
+          });
+          const result: PreparedReviewDocuments = {
+            operationKey,
+            beforeHtml: frozenHtml,
+            afterHtml: candidateHtml,
+            sourcePath: run.sourcePath,
+            commentsKey,
+            sessionId,
+            documents,
+          };
+          preparedReviewDocumentsRef.current = result;
+          return result;
+        })();
+      setReadyReviewSession({
+        operationKey,
+        sessionId: preparedReview.sessionId,
+        documents: preparedReview.documents,
+        beforeHtml: frozenHtml,
         beforeLabel: run.basedOnVersionId
           ? safeVersionLabel(run.basedOnVersionId)
           : "当前版本",
@@ -9880,9 +9934,8 @@ export default function Workbench() {
       fileName={currentSourceFileName}
       beforeLabel={readyReviewSession.beforeLabel}
       afterLabel={readyReviewSession.afterLabel}
-      beforeHtml={readyReviewSession.beforeHtml}
-      afterHtml={readyReviewSession.afterHtml}
-      comments={readyReviewSession.comments}
+      sessionId={readyReviewSession.sessionId}
+      documents={readyReviewSession.documents}
       sourcePath={sourcePath || undefined}
       accepting={openingReadyVersion}
       error={activeRun?.status === "ready-to-open" ? activeRun.error : undefined}

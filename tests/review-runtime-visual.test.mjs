@@ -56,6 +56,16 @@ test("runtime visual snapshots accept only bounded declared host facts", () => {
   assert.equal(acceptReviewRuntimeVisualSnapshots([
     snapshot("runtime-host-1", { contentSignature: "not-a-signature" }),
   ], allowed), null);
+  assert.equal(acceptReviewRuntimeVisualSnapshots([{
+    ...snapshot("runtime-host-1"),
+    state: "unavailable",
+    contentSignature: "",
+    paintSignature: "",
+    geometrySignature: "",
+    contentAtoms: 0,
+    paintAtoms: 0,
+    geometryAtoms: 0,
+  }], allowed)?.[0].state, "unavailable");
   assert.equal(acceptReviewRuntimeVisualSnapshots(
     [],
     new Set(Array.from({ length: 129 }, (_, index) => `runtime-host-${index + 1}`)),
@@ -108,6 +118,20 @@ test("runtime comparison recognizes stable intrinsic visuals but ignores a lone 
     }],
     after: [snapshot("runtime-host-1")],
   }), ["runtime-host-1"]);
+  assert.deepEqual(changedReviewRuntimeVisualCandidateKeys({
+    candidates,
+    before,
+    after: [{
+      ...snapshot("runtime-host-1"),
+      state: "unavailable",
+      contentSignature: "",
+      paintSignature: "",
+      geometrySignature: "",
+      contentAtoms: 0,
+      paintAtoms: 0,
+      geometryAtoms: 0,
+    }],
+  }), []);
 });
 
 test("runtime visual merge reuses a static change and creates at most one change per untouched outline", () => {

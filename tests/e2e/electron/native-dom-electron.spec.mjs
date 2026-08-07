@@ -610,7 +610,10 @@ test("Electron interactive preview runs authored scripts and edits the selected 
   <section id="panel-one" class="panel active">
     <p>第一页正文</p>
     <div id="runtime-canvas" data-native-case="runtime-visual-host" style="width: 32px; height: 16px"></div>
-    <div id="runtime-svg" style="width: 40px; height: 20px"></div>
+    <div
+      id="runtime-svg"
+      style="width: 40px; height: 20px; padding: 7px; border: 3px solid #0f172a; transform: translate(13px, 7px) scale(1.25); transform-origin: top left"
+    ></div>
     <table><tbody id="runtime-table"></tbody></table>
   </section>
   <section id="panel-two" class="panel">
@@ -676,6 +679,24 @@ test("Electron interactive preview runs authored scripts and edits the selected 
     await expect(editFrame.locator(
       '#runtime-svg img[data-pageroot-readonly-visual="runtime-bitmap"]',
     )).toBeVisible();
+    const initialRuntimeVisualGeometry = await editFrame.locator(
+      '#runtime-svg img[data-pageroot-readonly-visual="runtime-bitmap"]',
+    ).evaluate((image) => {
+      const host = image.parentElement;
+      if (!host) throw new Error("Runtime visual host is missing.");
+      const hostRect = host.getBoundingClientRect();
+      const imageRect = image.getBoundingClientRect();
+      return {
+        imageWidth: imageRect.width,
+        imageHeight: imageRect.height,
+        insetX: imageRect.left - hostRect.left,
+        insetY: imageRect.top - hostRect.top,
+      };
+    });
+    expect(initialRuntimeVisualGeometry.imageWidth).toBeCloseTo(50, 1);
+    expect(initialRuntimeVisualGeometry.imageHeight).toBeCloseTo(25, 1);
+    expect(initialRuntimeVisualGeometry.insetX).toBeCloseTo(12.5, 1);
+    expect(initialRuntimeVisualGeometry.insetY).toBeCloseTo(12.5, 1);
     await expect(editFrame.locator(
       '#runtime-table > tr[data-pageroot-readonly-visual="runtime-bitmap-row"] img[data-pageroot-readonly-visual="runtime-bitmap"]',
     )).toBeVisible();
@@ -770,6 +791,22 @@ test("Electron interactive preview runs authored scripts and edits the selected 
     await activateNativeEdit(resumedEditFrame, "preview-tab-copy");
     await expect(resumedEditFrame.locator(caseSelector("preview-tab-copy")))
       .toHaveAttribute("contenteditable", "true");
+    await resumedEditFrame.locator(
+      '#runtime-svg img[data-pageroot-readonly-visual="runtime-bitmap"]',
+    ).evaluate((image) => {
+      window.__PAGEROOT_E2E_RUNTIME_VISUAL__ = image;
+    });
+    await setTextSelection(resumedEditFrame, "preview-tab-copy", 0);
+    await launched.page.keyboard.insertText("原位");
+    await expect.poll(() => resumedEditFrame.locator(
+      caseSelector("preview-tab-copy"),
+    ).textContent()).toContain("原位");
+    await expect.poll(() => resumedEditFrame.evaluate(() => (
+      window.__PAGEROOT_E2E_RUNTIME_VISUAL__
+        === document.querySelector(
+          '#runtime-svg img[data-pageroot-readonly-visual="runtime-bitmap"]',
+        )
+    ))).toBe(true);
   } finally {
     if (electronApp && isolatedUserData) {
       await stopPageRoot(electronApp, isolatedUserData);

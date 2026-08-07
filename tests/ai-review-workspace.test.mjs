@@ -388,10 +388,8 @@ test("runtime chart review supplements only the initial bounded static footprint
   assert.match(reviewDocument, /runtimeVisualBatchNodeLimit/);
   assert.match(reviewDocument, /runtimeVisualBatchAtomLimit/);
   assert.match(reviewDocument, /runtimeVisualBatchValueLimit/);
-  assert.match(
-    reviewDocument,
-    /if \(runtimeVisualStringify\(firstSnapshot\) !== runtimeVisualStringify\(secondSnapshot\)\) \{\s*return null;\s*\}/,
-  );
+  assert.match(reviewDocument, /runtimeVisualUnavailableSnapshot/);
+  assert.match(reviewDocument, /hostIndex % 4 === 0/);
   assert.match(reviewDocument, /runtimeVisualExpectedKeys = Object\.freeze/);
   assert.match(reviewDocument, /const RuntimeVisualString = String;/);
   assert.match(reviewDocument, /const RuntimeVisualPromise = Promise;/);
@@ -519,8 +517,8 @@ test("the generated runtime review bootstrap stays syntactically valid", () => {
 });
 
 test("formal review projects frozen user comments on the before page only", () => {
-  assert.match(workbench, /comments=\{readyReviewSession\.comments\}/);
-  assert.match(review, /comments: readonly CommentItem\[\]/);
+  assert.match(workbench, /comments: reviewComments/);
+  assert.match(workbench, /documents=\{readyReviewSession\.documents\}/);
   assert.match(reviewDocument, /annotateReviewComments\(\s*beforeDocument/);
   assert.match(reviewDocument, /post\("comment-layout", \{ commentLayouts \}\)/);
   assert.match(reviewDocument, /firstRect\.top \+ scrollY/);

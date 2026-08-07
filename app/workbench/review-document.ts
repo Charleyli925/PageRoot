@@ -439,15 +439,30 @@ function reviewTextInventory(element: Element | null): ReviewTextInventory {
     : { text: "", nodes: [], breakOffsets: [] };
 }
 
+const normalizedTextCache = new WeakMap<Element, string>();
+const normalizedMarkupCache = new WeakMap<Element, string>();
+const visualSignatureCache = new WeakMap<Element, string>();
+const classTokenCache = new WeakMap<Element, string[]>();
+const conciseTextCache = new WeakMap<Element, string>();
+
 function normalizedText(element: Element | null): string {
-  return reviewTextInventory(element).text.replace(/\s+/g, " ").trim();
+  if (!element) return "";
+  const cached = normalizedTextCache.get(element);
+  if (cached !== undefined) return cached;
+  const value = reviewTextInventory(element).text.replace(/\s+/g, " ").trim();
+  normalizedTextCache.set(element, value);
+  return value;
 }
 
 function normalizedMarkup(element: Element): string {
-  return element.outerHTML
+  const cached = normalizedMarkupCache.get(element);
+  if (cached !== undefined) return cached;
+  const value = element.outerHTML
     .replace(/\s+/g, " ")
     .replace(/>\s+</g, "><")
     .trim();
+  normalizedMarkupCache.set(element, value);
+  return value;
 }
 
 const VISUAL_ATTRIBUTE_NAMES = new Set([
@@ -482,15 +497,23 @@ function normalizedCss(value: string): string {
 }
 
 function elementVisualSignature(element: Element): string {
-  return [...element.attributes]
+  const cached = visualSignatureCache.get(element);
+  if (cached !== undefined) return cached;
+  const value = [...element.attributes]
     .filter((attribute) => VISUAL_ATTRIBUTE_NAMES.has(attribute.name.toLowerCase()))
     .sort((left, right) => left.name.localeCompare(right.name))
     .map((attribute) => `${attribute.name.toLowerCase()}=${attribute.value}`)
     .join("\u001f");
+  visualSignatureCache.set(element, value);
+  return value;
 }
 
 function classTokens(element: Element): string[] {
-  return [...element.classList].map((token) => token.toLowerCase());
+  const cached = classTokenCache.get(element);
+  if (cached) return cached;
+  const value = [...element.classList].map((token) => token.toLowerCase());
+  classTokenCache.set(element, value);
+  return value;
 }
 
 function hasClassRole(element: Element, roles: string[]): boolean {
@@ -518,11 +541,15 @@ function directHeading(element: Element): Element | null {
 
 function conciseElementText(element: Element | null): string {
   if (!element) return "";
+  const cached = conciseTextCache.get(element);
+  if (cached !== undefined) return cached;
   const clone = element.cloneNode(true) as Element;
   clone.querySelectorAll(
     "script, style, noscript, template, small, .sub, .subtitle, [class*='subtitle'], [class*='meta']",
   ).forEach((candidate) => candidate.remove());
-  return (clone.textContent || "").replace(/\s+/g, " ").trim();
+  const value = (clone.textContent || "").replace(/\s+/g, " ").trim();
+  conciseTextCache.set(element, value);
+  return value;
 }
 
 function changeLabel(
@@ -2117,7 +2144,16 @@ function markStructureDifferences(pair: SectionPair): boolean {
   return Object.values(stats).some((entries) => entries.length > 0);
 }
 
+const styleDeclarationCache = new Map<string, Map<string, string>>();
+const stylesheetRuleCache = new WeakMap<Document, Map<string, string>>();
+const changedStylesheetSelectorCache = new WeakMap<
+  Document,
+  WeakMap<Document, Array<{ selector: string; labels: string[] }>>
+>();
+
 function styleDeclarationMap(value: string): Map<string, string> {
+  const cached = styleDeclarationCache.get(value);
+  if (cached) return cached;
   const declarations = new Map<string, string>();
   value.split(";").forEach((declaration) => {
     const separator = declaration.indexOf(":");
@@ -2127,10 +2163,16 @@ function styleDeclarationMap(value: string): Map<string, string> {
       normalizedCss(declaration.slice(separator + 1)),
     );
   });
+  styleDeclarationCache.set(value, declarations);
+  if (styleDeclarationCache.size > 256) {
+    styleDeclarationCache.delete(styleDeclarationCache.keys().next().value as string);
+  }
   return declarations;
 }
 
 function stylesheetRules(document: Document): Map<string, string> {
+  const cached = stylesheetRuleCache.get(document);
+  if (cached) return cached;
   const rules = new Map<string, string>();
   document.querySelectorAll("style").forEach((styleElement) => {
     const css = styleElement.textContent || "";
@@ -2140,24 +2182,35 @@ function stylesheetRules(document: Document): Map<string, string> {
       rules.set(selector, normalizedCss(match[2]));
     }
   });
+  stylesheetRuleCache.set(document, rules);
   return rules;
 }
 
 function changedStylesheetSelectors(before: Document, after: Document) {
+  const cached = changedStylesheetSelectorCache.get(before)?.get(after);
+  if (cached) return cached;
   const beforeRules = stylesheetRules(before);
   const afterRules = stylesheetRules(after);
-  return [...new Set([...beforeRules.keys(), ...afterRules.keys()])]
+  const changes = [...new Set([...beforeRules.keys(), ...afterRules.keys()])]
     .filter((selector) => beforeRules.get(selector) !== afterRules.get(selector))
-    .map((selector) => ({
-      selector,
-      labels: [...new Set([
-        ...styleDeclarationMap(beforeRules.get(selector) || "").keys(),
-        ...styleDeclarationMap(afterRules.get(selector) || "").keys(),
-      ])].filter((property) => (
-        styleDeclarationMap(beforeRules.get(selector) || "").get(property)
-        !== styleDeclarationMap(afterRules.get(selector) || "").get(property)
-      )),
-    }));
+    .map((selector) => {
+      const beforeDeclarations = styleDeclarationMap(beforeRules.get(selector) || "");
+      const afterDeclarations = styleDeclarationMap(afterRules.get(selector) || "");
+      return {
+        selector,
+        labels: [...new Set([
+          ...beforeDeclarations.keys(),
+          ...afterDeclarations.keys(),
+        ])].filter((property) => (
+          beforeDeclarations.get(property) !== afterDeclarations.get(property)
+        )),
+      };
+    });
+  const afterCache = changedStylesheetSelectorCache.get(before)
+    ?? new WeakMap<Document, Array<{ selector: string; labels: string[] }>>();
+  afterCache.set(after, changes);
+  changedStylesheetSelectorCache.set(before, afterCache);
+  return changes;
 }
 
 type ReviewStyleScope = "box" | "content";
@@ -3413,6 +3466,20 @@ function reviewBootstrap(
     }
     return true;
   };
+  const runtimeVisualUnavailableSnapshot = (key) => ({
+    key,
+    state: "unavailable",
+    contentSignature: "",
+    paintSignature: "",
+    geometrySignature: "",
+    vectorSignature: "",
+    canvasSignature: "",
+    contentAtoms: 0,
+    paintAtoms: 0,
+    geometryAtoms: 0,
+    vectorAtoms: 0,
+    canvasPixels: 0,
+  });
   const collectRuntimeVisualSnapshots = async () => {
     const hosts = runtimeVisualExpectedHosts();
     if (hosts === null) return null;
@@ -3424,34 +3491,54 @@ function reviewBootstrap(
     await runtimeVisualDelay(24);
     await runtimeVisualFrames();
     if (!runtimeVisualHostsMatch(hosts, runtimeVisualExpectedHosts())) return null;
-    const firstBudget = { atoms: 0, nodes: 0, valueLength: 0, canvasPixels: 0 };
     const first = new RuntimeVisualMap();
     for (let hostIndex = 0; hostIndex < hosts.length; hostIndex += 1) {
+      if (hostIndex > 0 && hostIndex % 4 === 0) await runtimeVisualDelay(0);
       const host = hosts[hostIndex];
       const expectedKey = runtimeVisualElementGetAttribute(
         host,
         runtimeVisualHostAttribute,
       ) || "";
-      const snapshot = captureRuntimeVisualHost(host, firstBudget);
-      if (!snapshot || snapshot.key !== expectedKey) return null;
-      runtimeVisualMapSet(first, expectedKey, snapshot);
+      const snapshot = captureRuntimeVisualHost(host, {
+        atoms: 0,
+        nodes: 0,
+        valueLength: 0,
+        canvasPixels: 0,
+      });
+      runtimeVisualMapSet(
+        first,
+        expectedKey,
+        snapshot?.key === expectedKey
+          ? snapshot
+          : runtimeVisualUnavailableSnapshot(expectedKey),
+      );
     }
     await runtimeVisualDelay(64);
     await runtimeVisualFrames();
     if (!runtimeVisualHostsMatch(hosts, runtimeVisualExpectedHosts())) return null;
-    const secondBudget = { atoms: 0, nodes: 0, valueLength: 0, canvasPixels: 0 };
     const snapshots = [];
     for (let hostIndex = 0; hostIndex < hosts.length; hostIndex += 1) {
+      if (hostIndex > 0 && hostIndex % 4 === 0) await runtimeVisualDelay(0);
       const host = hosts[hostIndex];
       const key = runtimeVisualElementGetAttribute(host, runtimeVisualHostAttribute) || "";
       if (!runtimeVisualSetHas(runtimeVisualExpectedKeySet, key)) return null;
       const firstSnapshot = runtimeVisualMapGet(first, key);
-      const secondSnapshot = captureRuntimeVisualHost(host, secondBudget);
-      if (!firstSnapshot || !secondSnapshot || secondSnapshot.key !== key) return null;
-      if (runtimeVisualStringify(firstSnapshot) !== runtimeVisualStringify(secondSnapshot)) {
-        return null;
-      }
-      runtimeVisualArrayPush(snapshots, secondSnapshot);
+      const capturedSecond = captureRuntimeVisualHost(host, {
+        atoms: 0,
+        nodes: 0,
+        valueLength: 0,
+        canvasPixels: 0,
+      });
+      const secondSnapshot = capturedSecond?.key === key
+        ? capturedSecond
+        : runtimeVisualUnavailableSnapshot(key);
+      runtimeVisualArrayPush(
+        snapshots,
+        firstSnapshot
+          && runtimeVisualStringify(firstSnapshot) === runtimeVisualStringify(secondSnapshot)
+          ? secondSnapshot
+          : runtimeVisualUnavailableSnapshot(key),
+      );
     }
     return snapshots;
   };

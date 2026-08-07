@@ -56,15 +56,29 @@ Comments + frozen input
   active/inactive class transitions and `hidden`, `open`, `aria-selected` or
   `aria-expanded` state. It never carries runtime DOM, pixels or table markup.
 - Desktop Edit has one separate, disposable runtime-visual projection. A
-  renderer session indexes source-empty hosts, asks one hidden sandboxed
-  `pageroot-preview:` window to run the authored page, and accepts bounded PNG
-  captures only when the original source Hash, host identity and viewport
-  request are still current. `HtmlCanvasEditor` mounts each PNG as a
+  renderer session reuses the Canvas `SourceIndex`, limits source-empty hosts
+  to those with authored-script causality, and keys capture work by executable
+  source, stable host identity, normalized viewport and presentation context.
+  Ordinary text/history edits therefore rebind the committed projection to the
+  exact new source Hash instead of running the page again. A bounded LRU keeps
+  recent viewport/context results, and Preview/Edit suspension retains the last
+  committed result while canceling pending work. A real dependency change asks
+  one hidden sandboxed `pageroot-preview:` window to run the authored page and
+  accepts bounded PNG captures only after exact source/host validation.
+  `HtmlCanvasEditor` mounts each PNG as a
   pointer-transparent child of its original source host (or one bitmap row for
   an empty `tbody`). The host therefore remains the selectable/commentable
   TargetRef. The runtime DOM is never merged or synchronized, and neither the
   bitmap nor its temporary attributes enter SourcePatch, save, version, review
   diff or AI Request input.
+  Capture protocol V2 waits for a short mutation-quiet point, neutralizes only
+  disposable transform/effect presentation during measurement, captures the
+  content box for ordinary hosts and the border box for `tbody`, and rejects a
+  viewport/overflow-clipped rectangle rather than stretching a partial bitmap.
+  Hidden or temporarily uncapturable hosts are deferred so their previous
+  committed bitmap can remain. The Canvas reconciles by stable host key, keeps
+  identical image nodes, and decodes a changed bitmap before replacing the old
+  node; a projection refresh never starts by blanking the document.
 - Comment selection remains source-node exact inside foreign content. Authored
   SVG children retain their own instrumented SourceIndex identity; runtime-only
   children fail closed and are never promoted to an ancestor `svg`.
@@ -95,7 +109,9 @@ Comments + frozen input
   analyzer first establishes high-confidence before/after node pairs, derives
   copy, structure and visual facts from those pairs, and only then emits one
   typed canonical change footprint. It never promotes tag/position proximity
-  alone into a change fact. Static source analysis remains the primary fact
+  alone into a change fact. The ready-review session prepares that immutable
+  document pair once for the exact operation/source/comment identity before the
+  React review surface mounts; rerenders reuse it. Static source analysis remains the primary fact
   channel. The runtime supplement is available only through the managed desktop
   preview transport. Its main-process frame-navigation fence blocks authored
   replacement; a pre-load attempt atomically changes that volatile session to a
@@ -111,8 +127,11 @@ Comments + frozen input
   given the analyzer's exact candidate-key list. Its early mutation observer
   binds each key to the parser-created source host before authored code can
   transfer it. It ignores undeclared claims; missing, duplicate, transferred or
-  replaced declared claims and capture faults fail the whole supplemental
-  batch back to static evidence.
+  replaced declared identities fail the supplemental batch back to static
+  evidence. Each declared host receives an independent traversal/Canvas budget.
+  A host that is unsupported, unstable or over budget emits an explicit
+  unavailable fact with no comparison authority, while valid sibling hosts
+  remain usable.
   Each isolated frame samples visible HTML/SVG/Canvas paint twice, including
   the host's own painted box, a fully transparent host as a stable disappearance
   state, and directly mutated size but not an unpainted empty box or indirect

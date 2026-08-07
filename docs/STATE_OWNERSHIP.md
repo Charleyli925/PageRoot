@@ -23,9 +23,9 @@
 | Renderer edit, project-picker, attachment-persistence, close-coordination, interactive-preview and edit-visual capabilities | Runtime capability resolver | immutable preload manifest; fail-closed browser default | Workbench composition root |
 | Volatile interactive-preview document, bootstrap, allowed source-relative asset root, completed-frame identity set and one-way pre-load scriptless navigation-fallback flag | Main-process preview protocol controller plus the owning window's navigation fence | none; bounded in-memory session/window state only; the fallback cannot be reversed inside a session | isolated preview iframe and the script-disabled edit iframe's resource base |
 | Current preview/edit display context, bounded read-only visuals, safe reveal transition and per-surface render acknowledgement | Workbench page-view context state | none; source-bound in-memory projection tagged by `DocumentSession` Canvas generation and rendered source Hash | `HtmlCanvasEditor`, `HtmlInteractionPreview`, save-status projection and toolbar |
-| Current edit runtime-visual request identity, generation and accepted bitmap projection | Renderer `RuntimeVisualProjectionSession`; main-process capture controller solely owns its active hidden window/session | none; source-Hash-bound in-memory PNGs only | `HtmlCanvasEditor` presentation layer; original source host remains comment target |
+| Current edit runtime-visual dependency identity, generation, accepted bitmap projection and bounded recent-result cache | Renderer `RuntimeVisualProjectionSession`; main-process capture controller solely owns its active hidden window/session | none; exact-source-validated in-memory PNGs only | `HtmlCanvasEditor` keyed presentation reconciler; original source host remains comment target |
 | AI review page view, change filter, context visibility, navigation target, canonical page-presentation path, scroll mode and zoom mode | `AiReviewWorkspace` review reducer | none; disposable state bound to the frozen before/after pair | review toolbar, content map and isolated review frames |
-| AI review node pairing, typed change facts and fused frame/mask geometry | `review-document` analyzer and isolated-frame projection runtime | none; deterministically rebuilt from the frozen before/after HTML pair | review outline, semantic frames and context mask |
+| AI review node pairing, typed change facts, prepared immutable review documents and fused frame/mask geometry | Ready-review session plus `review-document` analyzer and isolated-frame projection runtime | none; prepared once and cached only for the exact operation/source/comment identity | review outline, semantic frames and context mask |
 | Initial AI review runtime-chart snapshot batch, frame-registration/comparison deadlines and accepted supplemental host markers | Parent `AiReviewWorkspace` through `ReviewRuntimeVisualCoordinator`, behind the main-process managed-preview navigation fence | none; one bounded in-memory decision bound to the frozen document pair and declared host keys; session/load failure, navigation fallback and inline/browser review are static-only | effective review changes/outline and both isolated frame projections |
 | AI review Tab/disclosure/control presentation state and transition epoch | Parent `AiReviewWorkspace` presentation coordinator; either frame may propose an intent | none; disposable parent state plus frame projection only | both review frames, content map and overlay/mask projection |
 | Frozen review comment set and read-only before-page marker projection | Ready-review session owns comment text; `review-document` resolves opaque before-page target keys; isolated runtime owns anonymous viewport geometry; trusted `AiReviewWorkspace` joins and renders them | none beyond the immutable Request/Draft evidence already frozen for the run | trusted review host above the before frame only; authored frames never receive comment text |
@@ -79,7 +79,11 @@ Rules:
   version, persistence or AI-input paths. Toolbar and Option-click actions may
   propose a new context for the current document key, but do not own or persist
   it. A projection refresh consumes that context; it does not merge runtime DOM
-  into it.
+  into it. Runtime dependency-stable text/history changes may rebind the exact
+  committed projection without capture. Pending or replacement work never owns
+  permission to blank the committed bitmap; identical mounts retain their DOM
+  identity, and Preview/Edit suspension preserves only bounded disposable
+  cache state.
 - AI review state fields are orthogonal. Page, filter, visibility, navigation,
   page presentation, scroll and zoom actions may update only their own reducer field. Review
   navigation can reveal a hidden panel in both frames but cannot become a
@@ -98,7 +102,9 @@ Rules:
   authored scripts run, owns the frozen analyzer-declared host-key set and
   records the parser-created element that first claims every key. Undeclared
   claims are ignored; missing, duplicate, transferred, replaced or drifting
-  declared hosts and capture faults invalidate the whole supplemental batch.
+  declared identities invalidate the whole supplemental batch. Each host owns
+  an independent capture budget; a local fault, instability or exhaustion is a
+  validated unavailable fact with no authority over valid sibling hosts.
   It accepts only a complete declared before/after pair before its initial deadline,
   includes the host's own painted box, fully transparent disappearance state
   and directly mutated size but prunes every descendant subtree whose ancestor

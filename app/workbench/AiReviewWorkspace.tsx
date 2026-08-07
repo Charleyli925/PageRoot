@@ -3,7 +3,6 @@
 import {
   useCallback,
   useEffect,
-  useId,
   useLayoutEffect,
   useMemo,
   useReducer,
@@ -34,7 +33,6 @@ import { TreeStructureIcon } from "@phosphor-icons/react/dist/csr/TreeStructure"
 import { WarningCircleIcon } from "@phosphor-icons/react/dist/csr/WarningCircle";
 
 import {
-  buildReviewDocuments,
   type ReviewCommentGroup,
   type ReviewDocuments,
   type ReviewSide,
@@ -56,7 +54,6 @@ import {
   WorkbenchHeaderActions,
   WorkbenchHeaderShell,
 } from "./workbench-header-shell";
-import type { CommentItem } from "./types";
 import styles from "./ai-review-workspace.module.css";
 
 type ConfirmationAction = "return" | "accept";
@@ -95,7 +92,6 @@ const PAGE_VIEW_LABELS: Record<ReviewPageView, string> = {
   after: "右页 · AI 修改后",
 };
 
-const EMPTY_REVIEW_DOCUMENT = "<!doctype html><html><head><meta charset=\"utf-8\"></head><body></body></html>";
 const subscribeHydration = () => () => {};
 
 type ReviewMessage = {
@@ -407,9 +403,8 @@ export default function AiReviewWorkspace({
   fileName,
   beforeLabel,
   afterLabel,
-  beforeHtml,
-  afterHtml,
-  comments,
+  sessionId,
+  documents,
   sourcePath,
   accepting,
   error,
@@ -422,9 +417,8 @@ export default function AiReviewWorkspace({
   fileName: string;
   beforeLabel: string;
   afterLabel: string;
-  beforeHtml: string;
-  afterHtml: string;
-  comments: readonly CommentItem[];
+  sessionId: string;
+  documents: ReviewDocuments;
   sourcePath?: string;
   accepting: boolean;
   error?: string;
@@ -434,28 +428,9 @@ export default function AiReviewWorkspace({
   onAccept: () => void;
   onRevealCandidateHtml: () => void;
 }) {
-  const sessionId = `review-${useId().replace(/:/g, "-")}`;
   const fileTitle = fileName.replace(/\.(?:html?|xhtml)$/iu, "") || fileName;
   const hydrated = useSyncExternalStore(subscribeHydration, () => true, () => false);
   const independentTransport = hydrated && Boolean(window.htmlAIPreview);
-  const documents = useMemo<ReviewDocuments>(() => (
-    hydrated
-      ? buildReviewDocuments(beforeHtml, afterHtml, {
-          sessionId,
-          sourcePath,
-          externalBootstrap: independentTransport,
-          comments,
-        })
-      : {
-          before: EMPTY_REVIEW_DOCUMENT,
-          after: EMPTY_REVIEW_DOCUMENT,
-          bootstrapJavaScript: { before: "", after: "" },
-          changes: [],
-          outline: [],
-          runtimeVisualCandidates: [],
-          commentGroups: [],
-        }
-  ), [afterHtml, beforeHtml, comments, hydrated, independentTransport, sessionId, sourcePath]);
   const [reviewState, dispatchReviewState] = useReducer(
     reduceReviewState,
     DEFAULT_REVIEW_STATE,

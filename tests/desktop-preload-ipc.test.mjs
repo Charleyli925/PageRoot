@@ -92,7 +92,7 @@ test("preload exposes one narrow edit visual capture method", async () => {
     calls.push(args);
     return success({
       protocol: "pageroot-runtime-visual-projection",
-      version: 1,
+      version: 2,
       sourceSha256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       visuals: [],
     });

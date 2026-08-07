@@ -1,5 +1,5 @@
 const PROJECTION_PROTOCOL = "pageroot-runtime-visual-projection";
-const PROJECTION_VERSION = 1;
+const PROJECTION_VERSION = 2;
 const SOURCE_NODE_ATTRIBUTE = "data-html-ai-source-node-id";
 const SOURCE_SHA256_PATTERN = /^sha256:[a-f0-9]{64}$/u;
 const CLASS_TOKEN_PATTERN = /^[^\t\n\f\r \u0000-\u001f\u007f]{1,96}$/u;
@@ -17,8 +17,11 @@ const MAX_VIEWPORT_WIDTH = 4_096;
 const MIN_VIEWPORT_HEIGHT = 320;
 const MAX_VIEWPORT_HEIGHT = 2_400;
 const LOAD_TIMEOUT_MS = 20_000;
-const SCRIPT_SETTLE_MS = 900;
-const REVEAL_SETTLE_MS = 80;
+const INITIAL_QUIET_MS = 120;
+const INITIAL_SETTLE_TIMEOUT_MS = 900;
+const PRESENTATION_QUIET_MS = 80;
+const PRESENTATION_SETTLE_TIMEOUT_MS = 300;
+const CAPTURE_BOXES = new Set(["border", "content"]);
 
 const VISUAL_HOST_TAGS = new Set([
   "article",
@@ -209,10 +212,6 @@ export function validateEditVisualCapturePayload(payload) {
   });
 }
 
-function delay(milliseconds) {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
-}
-
 async function withTimeout(promise, milliseconds, onTimeout) {
   let timeoutId;
   const timeout = new Promise((_, reject) => {
@@ -271,6 +270,40 @@ function presentationScript(entries, sourceNodeAttribute) {
   })()`;
 }
 
+function settleRuntimeScript(quietMilliseconds, maximumMilliseconds) {
+  return `new Promise((resolve) => {
+    const quietMilliseconds = ${Math.max(0, quietMilliseconds)};
+    const maximumMilliseconds = ${Math.max(quietMilliseconds, maximumMilliseconds)};
+    const startedAt = performance.now();
+    let lastMutationAt = startedAt;
+    const observer = new MutationObserver(() => {
+      lastMutationAt = performance.now();
+    });
+    observer.observe(document, {
+      attributes: true,
+      childList: true,
+      characterData: true,
+      subtree: true,
+    });
+    const finish = () => {
+      observer.disconnect();
+      resolve(true);
+    };
+    const inspect = () => {
+      const now = performance.now();
+      if (
+        now - lastMutationAt >= quietMilliseconds
+        || now - startedAt >= maximumMilliseconds
+      ) {
+        finish();
+        return;
+      }
+      requestAnimationFrame(inspect);
+    };
+    requestAnimationFrame(() => requestAnimationFrame(inspect));
+  })`;
+}
+
 function populatedCandidateScript(candidates, sourceNodeAttribute) {
   return `(() => {
     const candidates = ${safeScriptValue(candidates)};
@@ -316,26 +349,34 @@ function prepareCandidateScript(candidate, sourceNodeAttribute, restoreKey) {
       });
       node.style.setProperty(property, value, "important");
     };
-    for (let node = element; node && node !== document.documentElement; node = node.parentElement) {
-      if (node.hasAttribute("hidden")) {
-        changes.push({ kind: "hidden", node });
-        node.removeAttribute("hidden");
-      }
+    const affectedNodes = [];
+    for (let node = element; node; node = node.parentElement) {
       const computed = window.getComputedStyle(node);
-      if (computed.display === "none") {
-        const fallback = node.tagName === "TBODY"
-          ? "table-row-group"
-          : node.tagName === "TR"
-            ? "table-row"
-            : ["TD", "TH"].includes(node.tagName)
-              ? "table-cell"
-              : "block";
-        rememberStyle(node, "display", fallback);
+      if (
+        node.hasAttribute("hidden")
+        || computed.display === "none"
+        || computed.visibility === "hidden"
+        || computed.visibility === "collapse"
+        || Number(computed.opacity) <= 0
+      ) return false;
+      affectedNodes.push({ node, computed });
+      if (node === document.documentElement) break;
+    }
+    for (const { node, computed } of affectedNodes) {
+      if (computed.transform !== "none") rememberStyle(node, "transform", "none");
+      if (computed.opacity !== "1") rememberStyle(node, "opacity", "1");
+      if (computed.filter !== "none") rememberStyle(node, "filter", "none");
+      if (computed.backdropFilter && computed.backdropFilter !== "none") {
+        rememberStyle(node, "backdrop-filter", "none");
       }
-      if (computed.visibility === "hidden" || computed.visibility === "collapse") {
-        rememberStyle(node, "visibility", "visible");
+      if (computed.clipPath !== "none") rememberStyle(node, "clip-path", "none");
+      if (computed.mixBlendMode !== "normal") {
+        rememberStyle(node, "mix-blend-mode", "normal");
       }
-      if (computed.opacity === "0") rememberStyle(node, "opacity", "1");
+      if (computed.perspective !== "none") rememberStyle(node, "perspective", "none");
+      if (computed.zoom && computed.zoom !== "1" && computed.zoom !== "normal") {
+        rememberStyle(node, "zoom", "1");
+      }
     }
     window[restoreKey] = () => {
       for (const change of changes.reverse()) {
@@ -366,25 +407,92 @@ function measureCandidateScript(candidate, sourceNodeAttribute) {
       const element = matches[0];
       const rect = element.getBoundingClientRect();
       const style = window.getComputedStyle(element);
-      const left = Math.max(0, rect.left);
-      const top = Math.max(0, rect.top);
-      const right = Math.min(window.innerWidth, rect.right);
-      const bottom = Math.min(window.innerHeight, rect.bottom);
+      const numeric = (value) => {
+        const parsed = Number.parseFloat(value);
+        return Number.isFinite(parsed) ? parsed : 0;
+      };
+      const borderLeft = numeric(style.borderLeftWidth);
+      const borderRight = numeric(style.borderRightWidth);
+      const borderTop = numeric(style.borderTopWidth);
+      const borderBottom = numeric(style.borderBottomWidth);
+      const paddingLeft = numeric(style.paddingLeft);
+      const paddingRight = numeric(style.paddingRight);
+      const paddingTop = numeric(style.paddingTop);
+      const paddingBottom = numeric(style.paddingBottom);
+      const captureBox = element.tagName === "TBODY" ? "border" : "content";
+      let left = rect.left;
+      let top = rect.top;
+      let layoutWidth = rect.width;
+      let layoutHeight = rect.height;
+      if (captureBox === "content") {
+        left += borderLeft + paddingLeft;
+        top += borderTop + paddingTop;
+        layoutWidth = element.clientWidth - paddingLeft - paddingRight;
+        layoutHeight = element.clientHeight - paddingTop - paddingBottom;
+        if (layoutWidth < 1) {
+          layoutWidth = rect.width
+            - borderLeft - borderRight - paddingLeft - paddingRight;
+        }
+        if (layoutHeight < 1) {
+          layoutHeight = rect.height
+            - borderTop - borderBottom - paddingTop - paddingBottom;
+        }
+      }
+      const right = left + layoutWidth;
+      const bottom = top + layoutHeight;
       if (
         !element.isConnected
         || style.display === "none"
         || style.visibility === "hidden"
         || style.visibility === "collapse"
-        || right - left < 1
-        || bottom - top < 1
+        || layoutWidth < 1
+        || layoutHeight < 1
+      ) { resolve(null); return; }
+      let visibleLeft = Math.max(0, left);
+      let visibleTop = Math.max(0, top);
+      let visibleRight = Math.min(window.innerWidth, right);
+      let visibleBottom = Math.min(window.innerHeight, bottom);
+      for (let ancestor = element.parentElement; ancestor; ancestor = ancestor.parentElement) {
+        const ancestorStyle = window.getComputedStyle(ancestor);
+        const clipsX = ancestorStyle.overflowX !== "visible";
+        const clipsY = ancestorStyle.overflowY !== "visible";
+        if (clipsX || clipsY) {
+          const ancestorRect = ancestor.getBoundingClientRect();
+          const ancestorBorderLeft = numeric(ancestorStyle.borderLeftWidth);
+          const ancestorBorderTop = numeric(ancestorStyle.borderTopWidth);
+          if (clipsX) {
+            visibleLeft = Math.max(visibleLeft, ancestorRect.left + ancestorBorderLeft);
+            visibleRight = Math.min(
+              visibleRight,
+              ancestorRect.left + ancestorBorderLeft + ancestor.clientWidth,
+            );
+          }
+          if (clipsY) {
+            visibleTop = Math.max(visibleTop, ancestorRect.top + ancestorBorderTop);
+            visibleBottom = Math.min(
+              visibleBottom,
+              ancestorRect.top + ancestorBorderTop + ancestor.clientHeight,
+            );
+          }
+        }
+        if (ancestor === document.documentElement) break;
+      }
+      const epsilon = 0.75;
+      if (
+        visibleLeft > left + epsilon
+        || visibleTop > top + epsilon
+        || visibleRight < right - epsilon
+        || visibleBottom < bottom - epsilon
       ) { resolve(null); return; }
       resolve({
         x: Math.floor(left),
         y: Math.floor(top),
         width: Math.max(1, Math.ceil(right) - Math.floor(left)),
         height: Math.max(1, Math.ceil(bottom) - Math.floor(top)),
-        layoutWidth: Math.max(1, Math.round(rect.width)),
-        layoutHeight: Math.max(1, Math.round(rect.height)),
+        layoutWidth: Math.max(1, Math.round(layoutWidth)),
+        layoutHeight: Math.max(1, Math.round(layoutHeight)),
+        captureBox,
+        complete: true,
       });
     }));
   })`;
@@ -398,7 +506,11 @@ function restoreCandidateScript(restoreKey) {
 }
 
 function boundedCaptureRect(measurement, viewport) {
-  if (!isRecord(measurement)) return null;
+  if (
+    !isRecord(measurement)
+    || measurement.complete !== true
+    || !CAPTURE_BOXES.has(measurement.captureBox)
+  ) return null;
   const x = boundedInteger(measurement.x, 0, viewport.width - 1);
   const y = boundedInteger(measurement.y, 0, viewport.height - 1);
   const width = boundedInteger(measurement.width, 1, viewport.width);
@@ -423,7 +535,15 @@ function boundedCaptureRect(measurement, viewport) {
     || x + width > viewport.width
     || y + height > viewport.height
   ) return null;
-  return { x, y, width, height, layoutWidth, layoutHeight };
+  return {
+    x,
+    y,
+    width,
+    height,
+    layoutWidth,
+    layoutHeight,
+    captureBox: measurement.captureBox,
+  };
 }
 
 function boundedPng(image) {
@@ -477,7 +597,6 @@ export function createEditVisualCaptureController({
   BrowserWindowClass,
   createSession,
   revokeSession,
-  wait = delay,
 } = {}) {
   if (typeof BrowserWindowClass !== "function") {
     throw new TypeError("Edit visual capture requires BrowserWindow.");
@@ -544,7 +663,10 @@ export function createEditVisualCaptureController({
         "document.fonts?.ready?.catch?.(() => undefined) ?? Promise.resolve()",
         true,
       ).catch(() => undefined);
-      await wait(SCRIPT_SETTLE_MS);
+      await captureWindow.webContents.executeJavaScript(
+        settleRuntimeScript(INITIAL_QUIET_MS, INITIAL_SETTLE_TIMEOUT_MS),
+        true,
+      );
       await captureWindow.webContents.executeJavaScript(
         presentationScript(
           payload.presentationEntries,
@@ -552,16 +674,29 @@ export function createEditVisualCaptureController({
         ),
         true,
       );
-      await wait(REVEAL_SETTLE_MS);
+      await captureWindow.webContents.executeJavaScript(
+        settleRuntimeScript(
+          PRESENTATION_QUIET_MS,
+          PRESENTATION_SETTLE_TIMEOUT_MS,
+        ),
+        true,
+      );
       const populatedCandidates = await captureWindow.webContents.executeJavaScript(
         populatedCandidateScript(payload.candidates, payload.sourceNodeAttribute),
         true,
       );
-      const visuals = [];
-      let totalBytes = 0;
-      for (const candidate of Array.isArray(populatedCandidates)
+      const capturableCandidates = Array.isArray(populatedCandidates)
         ? populatedCandidates.slice(0, MAX_VISUALS)
-        : []) {
+        : [];
+      const visuals = [];
+      const deferredSourceNodeIds = [];
+      let totalBytes = 0;
+      for (
+        let candidateIndex = 0;
+        candidateIndex < capturableCandidates.length;
+        candidateIndex += 1
+      ) {
+        const candidate = capturableCandidates[candidateIndex];
         if (cancelled || captureWindow.isDestroyed()) break;
         const restoreKey = `__pagerootEditVisualRestore_${visuals.length}`;
         try {
@@ -573,14 +708,19 @@ export function createEditVisualCaptureController({
             ),
             true,
           );
-          if (!prepared) continue;
-          await wait(REVEAL_SETTLE_MS);
+          if (!prepared) {
+            deferredSourceNodeIds.push(candidate.sourceNodeId);
+            continue;
+          }
           const measurement = await captureWindow.webContents.executeJavaScript(
             measureCandidateScript(candidate, payload.sourceNodeAttribute),
             true,
           );
           const rect = boundedCaptureRect(measurement, payload.viewport);
-          if (!rect) continue;
+          if (!rect) {
+            deferredSourceNodeIds.push(candidate.sourceNodeId);
+            continue;
+          }
           const image = await captureWindow.capturePage(
             {
               x: rect.x,
@@ -591,19 +731,31 @@ export function createEditVisualCaptureController({
             { stayHidden: true },
           );
           const png = boundedPng(image);
-          if (!png) continue;
+          if (!png) {
+            deferredSourceNodeIds.push(candidate.sourceNodeId);
+            continue;
+          }
           totalBytes += png.dataUrl.length;
-          if (totalBytes > MAX_TOTAL_VISUAL_BYTES) break;
+          if (totalBytes > MAX_TOTAL_VISUAL_BYTES) {
+            deferredSourceNodeIds.push(
+              ...capturableCandidates
+                .slice(candidateIndex)
+                .map((item) => item.sourceNodeId),
+            );
+            break;
+          }
           visuals.push(Object.freeze({
             sourceNodeId: candidate.sourceNodeId,
             width: png.width,
             height: png.height,
             layoutWidth: rect.layoutWidth,
             layoutHeight: rect.layoutHeight,
+            captureBox: rect.captureBox,
             dataUrl: png.dataUrl,
           }));
         } catch {
           // A single unrenderable host must not hide the other runtime visuals.
+          deferredSourceNodeIds.push(candidate.sourceNodeId);
           continue;
         } finally {
           if (!captureWindow.isDestroyed()) {
@@ -620,6 +772,7 @@ export function createEditVisualCaptureController({
         version: PROJECTION_VERSION,
         sourceSha256: payload.sourceSha256,
         visuals: Object.freeze(visuals),
+        deferredSourceNodeIds: Object.freeze(deferredSourceNodeIds),
       });
     } finally {
       if (captureWindow && !captureWindow.isDestroyed()) captureWindow.destroy();

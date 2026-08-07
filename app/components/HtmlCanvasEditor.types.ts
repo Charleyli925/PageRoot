@@ -5,6 +5,7 @@ import type {
   NativeEditSelection,
 } from "./native-edit-types";
 import type { NoticeUsageCapture } from "./NoticeBar";
+import type { SourceIndexValue } from "./html-canvas-internal-types";
 
 export type HtmlCanvasSelectionLevel = "module" | "part" | "insertion";
 export type HtmlCanvasTargetResolution =
@@ -261,6 +262,7 @@ export type HtmlCanvasEditorProps = {
   onRuntimeVisualViewport?: (viewport: {
     width: number;
     height: number;
+    sourceIndex?: SourceIndexValue;
   }) => void;
   /** Stable host-owned identity for disposable presentation state. */
   pageViewDocumentKey?: string;

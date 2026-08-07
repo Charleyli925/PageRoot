@@ -29,7 +29,9 @@ export class RuntimeVisualProjectionSession {
     documentKey?: string;
     viewportWidth?: number;
     pageViewContext?: PageViewContext | null;
+    sourceIndex?: unknown;
   }): boolean;
+  suspend(): void;
   reset(): void;
   dispose(): void;
   readonly snapshot: RuntimeVisualProjectionSnapshot;
