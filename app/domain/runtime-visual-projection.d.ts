@@ -1,5 +1,25 @@
 import type { PageViewContext } from "../lib/page-view-context.js";
 
+export type RuntimeVisualHostTargetRef = Readonly<{
+  targetId: string;
+  label: string;
+  level: "subregion";
+  selector?: string;
+  sourceAnchor: Readonly<{
+    startOffset: number;
+    endOffset: number;
+    sourceSha256: string;
+  }>;
+  fingerprint: Readonly<{
+    tagName?: string;
+    stableAttributes?: Readonly<Record<string, string>>;
+    ancestorFingerprint?: readonly string[];
+    textPrefix?: string;
+    textSuffix?: string;
+  }>;
+  resolution: "exact";
+}>;
+
 export type RuntimeVisualCapturePayload = Readonly<{
   html: string;
   sourcePath: string;
@@ -31,8 +51,13 @@ export type RawRuntimeVisualProjection = Readonly<{
     height: number;
     layoutWidth: number;
     layoutHeight: number;
+    deviceScaleFactor: number;
     captureBox: "border" | "content";
-    dataUrl: string;
+    crop: Readonly<{ x: number; y: number; width: number; height: number }>;
+    sizingMode: "contain";
+    runtimeContentSha256: string;
+    byteLength: number;
+    pngBytes: Uint8Array;
   }>>;
   deferredSourceNodeIds: readonly string[];
 }>;
@@ -47,14 +72,25 @@ export type RuntimeVisualProjection = Readonly<{
     sourceNodeId: string;
     tagName: string;
     captureKey: string;
+    hostTargetRef: RuntimeVisualHostTargetRef;
     width: number;
     height: number;
     layoutWidth: number;
     layoutHeight: number;
+    deviceScaleFactor: number;
     captureBox: "border" | "content";
-    dataUrl: string;
+    crop: Readonly<{ x: number; y: number; width: number; height: number }>;
+    sizingMode: "contain";
+    runtimeContentSha256: string;
+    byteLength: number;
+    pngBytes: Uint8Array;
   }>>;
   deferredCaptureKeys: readonly string[];
+  deferredTargets: ReadonlyArray<Readonly<{
+    captureKey: string;
+    tagName: string;
+    hostTargetRef: RuntimeVisualHostTargetRef;
+  }>>;
 }>;
 
 export const RUNTIME_VISUAL_PROJECTION_PROTOCOL:
@@ -68,10 +104,12 @@ export type RuntimeVisualCaptureDescriptor = Readonly<{
     sourceNodeId: string;
     tagName: string;
     captureKey: string;
+    hostTargetRef: RuntimeVisualHostTargetRef;
   }>>;
   presentationEntries: RuntimeVisualCapturePayload["presentationEntries"];
   presentationDependencySha256: string;
   viewportWidth: number;
+  viewportBucket: number;
 }>;
 
 export function describeRuntimeVisualCapture(options?: {
@@ -91,10 +129,12 @@ export function prepareRuntimeVisualCapture(options?: {
 }): Readonly<{
   sourceSha256: string;
   dependencySha256: string;
+  viewportBucket: number;
   candidates: ReadonlyArray<Readonly<{
     sourceNodeId: string;
     tagName: string;
     captureKey: string;
+    hostTargetRef: RuntimeVisualHostTargetRef;
   }>>;
   payload: RuntimeVisualCapturePayload | null;
 }> | null;

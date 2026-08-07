@@ -9,6 +9,7 @@ import {
 import { prepareRuntimeVisualCapture } from "../app/domain/runtime-visual-projection.js";
 
 const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAEElEQVR42mNk+M/wHwAEAQH/2p9Z5QAAAABJRU5ErkJggg==";
+const PNG_BYTES = Buffer.from(PNG.slice(PNG.indexOf(",") + 1), "base64");
 const SOURCE = `<!doctype html><main><div id=chart></div><script>
   document.getElementById("chart").appendChild(document.createElement("svg"));
 </script></main>`;
@@ -130,7 +131,7 @@ test("capture controller destroys its hidden window and revokes its preview sess
       captures.push({ rect, options });
       return {
         isEmpty: () => false,
-        toDataURL: () => PNG,
+        toPNG: () => PNG_BYTES,
         getSize: () => ({ width: 1, height: 1 }),
         resize() {
           return this;
@@ -165,6 +166,19 @@ test("capture controller destroys its hidden window and revokes its preview sess
   assert.equal(result.version, 2);
   assert.equal(result.visuals.length, 1);
   assert.equal(result.visuals[0].captureBox, "content");
+  assert.equal(result.visuals[0].sizingMode, "contain");
+  assert.equal(result.visuals[0].deviceScaleFactor, 1);
+  assert.match(result.visuals[0].runtimeContentSha256, /^sha256:[a-f0-9]{64}$/u);
+  assert.deepEqual(
+    Buffer.from(result.visuals[0].pngBytes),
+    PNG_BYTES,
+  );
+  assert.deepEqual(result.visuals[0].crop, {
+    x: 4,
+    y: 8,
+    width: 320,
+    height: 120,
+  });
   assert.deepEqual(result.deferredSourceNodeIds, []);
   assert.deepEqual(captures, [{
     rect: { x: 4, y: 8, width: 320, height: 120 },
@@ -185,7 +199,12 @@ test("capture controller destroys its hidden window and revokes its preview sess
   )), true);
   assert.equal(executedScripts.some((source) => (
     source.includes("element.clientWidth - paddingLeft - paddingRight")
+    && source.includes("deviceScaleFactor")
     && source.includes("complete: true")
+  )), true);
+  assert.equal(executedScripts.some((source) => (
+    source.includes('candidate.tagName === "canvas"')
+    && source.includes("getImageData")
   )), true);
 });
 

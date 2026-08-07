@@ -465,6 +465,28 @@ function normalizedMarkup(element: Element): string {
   return value;
 }
 
+function reviewStylesheetSignature(document: Document): string {
+  return [...document.querySelectorAll("style, link[rel~='stylesheet' i]")]
+    .map((element) => normalizedMarkup(element))
+    .join("\u001e");
+}
+
+function ancestorMarkupSignature(element: Element): string {
+  const ancestors: string[] = [];
+  let current = element.parentElement;
+  while (current) {
+    ancestors.push([
+      current.tagName,
+      [...current.attributes]
+        .map((attribute) => `${attribute.name}=${attribute.value}`)
+        .sort()
+        .join("\u001f"),
+    ].join("\u0000"));
+    current = current.parentElement;
+  }
+  return ancestors.join("\u001e");
+}
+
 const VISUAL_ATTRIBUTE_NAMES = new Set([
   "align",
   "aria-hidden",
@@ -839,14 +861,21 @@ function actionDescriptors(document: Document): ActionDescriptor[] {
 function annotateActionPairs(before: Document, after: Document) {
   const beforeActions = actionDescriptors(before);
   const afterActions = actionDescriptors(after);
+  const afterBuckets = new Map<string, ActionDescriptor[]>();
+  afterActions.forEach((action) => {
+    const key = `${action.panelKey}\u0000${action.kind}`;
+    const bucket = afterBuckets.get(key) ?? [];
+    bucket.push(action);
+    afterBuckets.set(key, bucket);
+  });
   const usedAfter = new Set<ActionDescriptor>();
   let pairIndex = 0;
   beforeActions.forEach((beforeAction) => {
-    const ranked = afterActions
+    const ranked = (afterBuckets.get(
+      `${beforeAction.panelKey}\u0000${beforeAction.kind}`,
+    ) ?? [])
       .filter((candidate) => !usedAfter.has(candidate))
       .map((candidate) => {
-        if (beforeAction.kind !== candidate.kind) return { candidate, score: -1 };
-        if (beforeAction.panelKey !== candidate.panelKey) return { candidate, score: -1 };
         return {
           candidate,
           score: 45
@@ -1074,6 +1103,19 @@ type SectionPair = {
   moved?: boolean;
 };
 
+function uniqueSignatureMap<T>(
+  items: T[],
+  signature: (item: T) => string | null,
+): Map<string, T | null> {
+  const result = new Map<string, T | null>();
+  items.forEach((item) => {
+    const key = signature(item);
+    if (!key) return;
+    result.set(key, result.has(key) ? null : item);
+  });
+  return result;
+}
+
 function markMovedPairs(pairs: SectionPair[]): SectionPair[] {
   const matched = pairs.filter((pair) => pair.before && pair.after);
   const beforeOrder = [...matched].sort((left, right) => left.beforeIndex - right.beforeIndex);
@@ -1088,10 +1130,14 @@ function markMovedPairs(pairs: SectionPair[]): SectionPair[] {
 function pairSections(before: Element[], after: Element[]): SectionPair[] {
   const assignments = new Map<Element, Element>();
   const usedAfter = new Set<Element>();
-  const afterByKey = new Map<string, Element>();
+  const afterByKey = new Map<string, Element | null>();
+  const afterIndexByElement = new Map(
+    after.map((element, index) => [element, index]),
+  );
   after.forEach((element) => {
     const key = pairKey(element);
-    if (key && !afterByKey.has(key)) afterByKey.set(key, element);
+    if (!key) return;
+    afterByKey.set(key, afterByKey.has(key) ? null : element);
   });
 
   before.forEach((beforeElement) => {
@@ -1102,15 +1148,83 @@ function pairSections(before: Element[], after: Element[]): SectionPair[] {
     usedAfter.add(afterElement);
   });
 
+  const exactSectionSignature = (element: Element) => (
+    pairKey(element)
+      ? null
+      : `${element.tagName}\u0000${regionContextKey(element)}\u0000${normalizedMarkup(element)}`
+  );
+  const uniqueBeforeMarkup = uniqueSignatureMap(before, exactSectionSignature);
+  const uniqueAfterMarkup = uniqueSignatureMap(after, exactSectionSignature);
+  uniqueBeforeMarkup.forEach((beforeElement, signature) => {
+    const afterElement = uniqueAfterMarkup.get(signature);
+    if (
+      !beforeElement
+      || !afterElement
+      || assignments.has(beforeElement)
+      || usedAfter.has(afterElement)
+    ) return;
+    assignments.set(beforeElement, afterElement);
+    usedAfter.add(afterElement);
+  });
+
+  const stableSectionSignature = (element: Element) => {
+    if (pairKey(element)) return null;
+    const accessibleIdentity = ["aria-label", "data-title", "name", "title"]
+      .map((attribute) => element.getAttribute(attribute)?.trim() || "")
+      .filter(Boolean);
+    const heading = conciseElementText(directHeading(element));
+    const distinctiveClasses = classTokens(element).filter((token) => ![
+      "active", "card", "col", "column", "container", "content", "grid", "item",
+      "main", "panel", "row", "section", "selected", "wrap", "wrapper",
+    ].includes(token));
+    if (!accessibleIdentity.length && !heading && !distinctiveClasses.length) {
+      return null;
+    }
+    return [
+      element.tagName,
+      regionContextKey(element),
+      accessibleIdentity.join("\u001f"),
+      heading,
+      distinctiveClasses.sort().join("\u001f"),
+    ].join("\u0000");
+  };
+  const uniqueBeforeIdentity = uniqueSignatureMap(
+    before.filter((element) => !assignments.has(element)),
+    stableSectionSignature,
+  );
+  const uniqueAfterIdentity = uniqueSignatureMap(
+    after.filter((element) => !usedAfter.has(element)),
+    stableSectionSignature,
+  );
+  uniqueBeforeIdentity.forEach((beforeElement, signature) => {
+    const afterElement = uniqueAfterIdentity.get(signature);
+    if (!beforeElement || !afterElement) return;
+    assignments.set(beforeElement, afterElement);
+    usedAfter.add(afterElement);
+  });
+
+  const afterBuckets = new Map<string, Element[]>();
+  after.forEach((afterElement) => {
+    if (pairKey(afterElement) || usedAfter.has(afterElement)) return;
+    const bucketKey = `${afterElement.tagName}\u0000${regionContextKey(afterElement)}`;
+    const bucket = afterBuckets.get(bucketKey) ?? [];
+    bucket.push(afterElement);
+    afterBuckets.set(bucketKey, bucket);
+  });
   const edges = before.flatMap((beforeElement, beforeIndex) => (
     assignments.has(beforeElement) || pairKey(beforeElement)
       ? []
-      : after.map((afterElement, afterIndex) => ({
+      : (afterBuckets.get(
+          `${beforeElement.tagName}\u0000${regionContextKey(beforeElement)}`,
+        ) ?? []).map((afterElement) => ({
         beforeElement,
         afterElement,
-        score: pairKey(afterElement)
-          ? Number.NEGATIVE_INFINITY
-          : sectionPairScore(beforeElement, afterElement, beforeIndex, afterIndex),
+        score: sectionPairScore(
+          beforeElement,
+          afterElement,
+          beforeIndex,
+          afterIndexByElement.get(afterElement) ?? -1,
+        ),
       }))
   )).filter((edge) => Number.isFinite(edge.score))
     .sort((left, right) => right.score - left.score);
@@ -1126,7 +1240,9 @@ function pairSections(before: Element[], after: Element[]): SectionPair[] {
       before: beforeElement,
       after: afterElement,
       beforeIndex: index,
-      afterIndex: afterElement ? after.indexOf(afterElement) : -1,
+      afterIndex: afterElement
+        ? afterIndexByElement.get(afterElement) ?? -1
+        : -1,
     };
   });
   after.forEach((afterElement, index) => {
@@ -1771,11 +1887,47 @@ function pairTextBlocks(
 ): Array<{ before: ReviewTextBlock | null; after: ReviewTextBlock | null }> {
   const assignments = new Map<ReviewTextBlock, ReviewTextBlock>();
   const usedAfter = new Set<ReviewTextBlock>();
-  const edges = before.flatMap((beforeBlock, beforeIndex) => after.map((afterBlock, afterIndex) => ({
-    beforeBlock,
-    afterBlock,
-    score: textBlockPairScore(beforeBlock, afterBlock, beforeIndex, afterIndex),
-  }))).filter((edge) => Number.isFinite(edge.score))
+  const afterIndexByBlock = new Map(
+    after.map((block, index) => [block, index]),
+  );
+  const afterBuckets = new Map<string, ReviewTextBlock[]>();
+  const textBlockSignature = (block: ReviewTextBlock) => {
+    const identity = pairKey(block.anchor);
+    const bucketKey = `${block.anchor.tagName}\u0000${identity ? `key:${identity}` : "unkeyed"}`;
+    const text = block.inventory.text.replace(/\s+/g, " ").trim();
+    return text ? `${bucketKey}\u0000${text}` : null;
+  };
+  const uniqueBeforeText = uniqueSignatureMap(before, textBlockSignature);
+  const uniqueAfterText = uniqueSignatureMap(after, textBlockSignature);
+  uniqueBeforeText.forEach((beforeBlock, signature) => {
+    const afterBlock = uniqueAfterText.get(signature);
+    if (!beforeBlock || !afterBlock) return;
+    assignments.set(beforeBlock, afterBlock);
+    usedAfter.add(afterBlock);
+  });
+  after.forEach((block) => {
+    if (usedAfter.has(block)) return;
+    const identity = pairKey(block.anchor);
+    const bucketKey = `${block.anchor.tagName}\u0000${identity ? `key:${identity}` : "unkeyed"}`;
+    const bucket = afterBuckets.get(bucketKey) ?? [];
+    bucket.push(block);
+    afterBuckets.set(bucketKey, bucket);
+  });
+  const edges = before.flatMap((beforeBlock, beforeIndex) => {
+    if (assignments.has(beforeBlock)) return [];
+    const identity = pairKey(beforeBlock.anchor);
+    const bucketKey = `${beforeBlock.anchor.tagName}\u0000${identity ? `key:${identity}` : "unkeyed"}`;
+    return (afterBuckets.get(bucketKey) ?? []).map((afterBlock) => ({
+      beforeBlock,
+      afterBlock,
+      score: textBlockPairScore(
+        beforeBlock,
+        afterBlock,
+        beforeIndex,
+        afterIndexByBlock.get(afterBlock) ?? -1,
+      ),
+    }));
+  }).filter((edge) => Number.isFinite(edge.score))
     .sort((left, right) => right.score - left.score);
   edges.forEach(({ beforeBlock, afterBlock }) => {
     if (assignments.has(beforeBlock) || usedAfter.has(afterBlock)) return;
@@ -1957,6 +2109,9 @@ function pairVisualElements(
 ): Array<{ before: Element; after: Element }> {
   const beforeElements = [beforeRoot, ...beforeRoot.querySelectorAll("*")].slice(0, 501);
   const afterElements = [afterRoot, ...afterRoot.querySelectorAll("*")].slice(0, 501);
+  const afterIndexByElement = new Map(
+    afterElements.map((element, index) => [element, index]),
+  );
   const afterBuckets = new Map<string, Element[]>();
   afterElements.forEach((element) => {
     const key = visualPairKey(element);
@@ -1976,15 +2131,49 @@ function pairVisualElements(
     assignments.set(beforeElement, keyed);
     usedAfter.add(keyed);
   });
+
+  const compatibleIdentity = (element: Element) => {
+    const identity = pairKey(element);
+    return `${element.tagName}\u0000${identity ? `key:${identity}` : "unkeyed"}`;
+  };
+  const exactMarkupSignature = (element: Element) => (
+    `${compatibleIdentity(element)}\u0000${normalizedMarkup(element)}`
+  );
+  const uniqueBeforeMarkup = uniqueSignatureMap(
+    beforeElements.filter((element) => !assignments.has(element)),
+    exactMarkupSignature,
+  );
+  const uniqueAfterMarkup = uniqueSignatureMap(
+    afterElements.filter((element) => !usedAfter.has(element)),
+    exactMarkupSignature,
+  );
+  uniqueBeforeMarkup.forEach((beforeElement, signature) => {
+    const afterElement = uniqueAfterMarkup.get(signature);
+    if (!beforeElement || !afterElement) return;
+    assignments.set(beforeElement, afterElement);
+    usedAfter.add(afterElement);
+  });
+  const compatibleAfterBuckets = new Map<string, Element[]>();
+  afterElements.forEach((afterElement) => {
+    if (usedAfter.has(afterElement)) return;
+    const key = compatibleIdentity(afterElement);
+    const bucket = compatibleAfterBuckets.get(key) ?? [];
+    bucket.push(afterElement);
+    compatibleAfterBuckets.set(key, bucket);
+  });
   const edges = beforeElements.flatMap((beforeElement, beforeIndex) => (
     assignments.has(beforeElement)
       ? []
-      : afterElements.map((afterElement, afterIndex) => ({
+      : (compatibleAfterBuckets.get(compatibleIdentity(beforeElement)) ?? [])
+        .map((afterElement) => ({
         beforeElement,
         afterElement,
-        score: usedAfter.has(afterElement)
-          ? Number.NEGATIVE_INFINITY
-          : elementPairScore(beforeElement, afterElement, beforeIndex, afterIndex),
+        score: elementPairScore(
+          beforeElement,
+          afterElement,
+          beforeIndex,
+          afterIndexByElement.get(afterElement) ?? -1,
+        ),
       }))
   )).filter((edge) => Number.isFinite(edge.score))
     .sort((left, right) => right.score - left.score);
@@ -2071,11 +2260,47 @@ function markStructureElement(element: Element, tone: string) {
 function pairSiblingElements(before: Element[], after: Element[]): Map<Element, Element> {
   const assignments = new Map<Element, Element>();
   const usedAfter = new Set<Element>();
-  const edges = before.flatMap((beforeElement, beforeIndex) => after.map((afterElement, afterIndex) => ({
-    beforeElement,
-    afterElement,
-    score: elementPairScore(beforeElement, afterElement, beforeIndex, afterIndex),
-  }))).filter((edge) => Number.isFinite(edge.score))
+  const compatibleIdentity = (element: Element) => {
+    const identity = pairKey(element);
+    return `${element.tagName}\u0000${identity ? `key:${identity}` : "unkeyed"}`;
+  };
+  const exactMarkupSignature = (element: Element) => (
+    `${compatibleIdentity(element)}\u0000${normalizedMarkup(element)}`
+  );
+  const uniqueBeforeMarkup = uniqueSignatureMap(before, exactMarkupSignature);
+  const uniqueAfterMarkup = uniqueSignatureMap(after, exactMarkupSignature);
+  uniqueBeforeMarkup.forEach((beforeElement, signature) => {
+    const afterElement = uniqueAfterMarkup.get(signature);
+    if (!beforeElement || !afterElement) return;
+    assignments.set(beforeElement, afterElement);
+    usedAfter.add(afterElement);
+  });
+  const afterIndexByElement = new Map(
+    after.map((element, index) => [element, index]),
+  );
+  const afterBuckets = new Map<string, Element[]>();
+  after.forEach((afterElement) => {
+    if (usedAfter.has(afterElement)) return;
+    const key = compatibleIdentity(afterElement);
+    const bucket = afterBuckets.get(key) ?? [];
+    bucket.push(afterElement);
+    afterBuckets.set(key, bucket);
+  });
+  const edges = before.flatMap((beforeElement, beforeIndex) => (
+    assignments.has(beforeElement)
+      ? []
+      : (afterBuckets.get(compatibleIdentity(beforeElement)) ?? [])
+        .map((afterElement) => ({
+          beforeElement,
+          afterElement,
+          score: elementPairScore(
+            beforeElement,
+            afterElement,
+            beforeIndex,
+            afterIndexByElement.get(afterElement) ?? -1,
+          ),
+        }))
+  )).filter((edge) => Number.isFinite(edge.score))
     .sort((left, right) => right.score - left.score);
   edges.forEach(({ beforeElement, afterElement }) => {
     if (assignments.has(beforeElement) || usedAfter.has(afterElement)) return;
@@ -4777,16 +5002,18 @@ function prepareDocument(
   };
 }
 
-export function buildReviewDocuments(
+type ReviewDocumentBuildOptions = {
+  sessionId: string;
+  sourcePath?: string;
+  externalBootstrap?: boolean;
+  comments?: readonly CommentItem[];
+};
+
+function* buildReviewDocumentSteps(
   beforeHtml: string,
   afterHtml: string,
-  options: {
-    sessionId: string;
-    sourcePath?: string;
-    externalBootstrap?: boolean;
-    comments?: readonly CommentItem[];
-  },
-): ReviewDocuments {
+  options: ReviewDocumentBuildOptions,
+): Generator<string, ReviewDocuments, void> {
   if (typeof DOMParser === "undefined") {
     return {
       before: beforeHtml,
@@ -4811,6 +5038,7 @@ export function buildReviewDocuments(
   const afterDocument = parser.parseFromString(afterHtml, "text/html");
   clearReservedReviewMarkup(beforeDocument, sourceProjection.projected);
   clearReservedReviewMarkup(afterDocument);
+  yield "parse";
   const commentGroups = annotateReviewComments(
     beforeDocument,
     beforeHtml,
@@ -4820,20 +5048,36 @@ export function buildReviewDocuments(
   beforeDocument.querySelectorAll(`[${REVIEW_SOURCE_NODE_ATTRIBUTE}]`).forEach((element) => {
     element.removeAttribute(REVIEW_SOURCE_NODE_ATTRIBUTE);
   });
+  yield "comments";
   annotatePanelPairs(beforeDocument, afterDocument);
+  yield "panels";
   annotateActionPairs(beforeDocument, afterDocument);
-  const pairs = pairSections(
-    candidateSections(beforeDocument),
-    candidateSections(afterDocument),
-  );
+  yield "actions";
+  const beforeSections = candidateSections(beforeDocument);
+  yield "candidate-sections-before";
+  const afterSections = candidateSections(afterDocument);
+  yield "candidate-sections-after";
+  const pairs = pairSections(beforeSections, afterSections);
   const changes: ReviewChange[] = [];
   const outline: ReviewOutlineItem[] = [];
   const runtimeSections: ReviewRuntimeSectionContext[] = [];
+  const stylesheetsMatch = reviewStylesheetSignature(beforeDocument)
+    === reviewStylesheetSignature(afterDocument);
+  yield "section-pairing";
 
-  pairs.forEach((pair, pairIndex) => {
+  for (const [pairIndex, pair] of pairs.entries()) {
     const outlineId = `outline-${outline.length + 1}`;
     const label = changeLabel(pair.before, pair.after, pairIndex);
-    const types = annotateChangePair(pair);
+    const exactStablePair = Boolean(
+      !pair.moved
+      && stylesheetsMatch
+      && pair.before
+      && pair.after
+      && normalizedMarkup(pair.before) === normalizedMarkup(pair.after)
+      && ancestorMarkupSignature(pair.before)
+        === ancestorMarkupSignature(pair.after),
+    );
+    const types = exactStablePair ? [] : annotateChangePair(pair);
     const changeId = types.length ? `change-${changes.length + 1}` : undefined;
     const helper = types.length
       ? helperText(types, Boolean(pair.before), Boolean(pair.after), pair)
@@ -4890,7 +5134,8 @@ export function buildReviewDocuments(
       ...(panelPath.length ? { panelPath } : {}),
       ...(movement ? { movement } : {}),
     });
-  });
+    if ((pairIndex + 1) % 24 === 0) yield "change-annotation";
+  }
 
   const runtimeVisualCandidates = options.externalBootstrap
     ? annotateRuntimeVisualCandidates(
@@ -4900,6 +5145,7 @@ export function buildReviewDocuments(
       )
     : [];
   const runtimeVisualCandidateKeys = runtimeVisualCandidates.map(({ key }) => key);
+  yield "runtime-candidates";
 
   const preparedBefore = prepareDocument(
     beforeDocument,
@@ -4909,6 +5155,7 @@ export function buildReviewDocuments(
     options.externalBootstrap,
     runtimeVisualCandidateKeys,
   );
+  yield "prepare-before";
   const preparedAfter = prepareDocument(
     afterDocument,
     "after",
@@ -4917,6 +5164,7 @@ export function buildReviewDocuments(
     options.externalBootstrap,
     runtimeVisualCandidateKeys,
   );
+  yield "prepare-after";
   return {
     before: preparedBefore.html,
     after: preparedAfter.html,
@@ -4929,4 +5177,93 @@ export function buildReviewDocuments(
     runtimeVisualCandidates,
     commentGroups,
   };
+}
+
+export function buildReviewDocuments(
+  beforeHtml: string,
+  afterHtml: string,
+  options: ReviewDocumentBuildOptions,
+): ReviewDocuments {
+  const steps = buildReviewDocumentSteps(beforeHtml, afterHtml, options);
+  let step = steps.next();
+  while (!step.done) step = steps.next();
+  return step.value;
+}
+
+function yieldReviewAnalysisTask(): Promise<void> {
+  return new Promise((resolve) => globalThis.setTimeout(resolve, 0));
+}
+
+function measureReviewAnalysisPhase(
+  phase: string,
+  startedAt: number,
+  endedAt: number,
+) {
+  try {
+    globalThis.performance?.measure?.(
+      `pageroot:review-analysis:${phase}`,
+      { start: startedAt, end: endedAt },
+    );
+  } catch {
+    // Performance diagnostics cannot own review availability.
+  }
+}
+
+export async function buildReviewDocumentsAsync(
+  beforeHtml: string,
+  afterHtml: string,
+  options: ReviewDocumentBuildOptions,
+  control: { isCancelled?: () => boolean } = {},
+): Promise<ReviewDocuments> {
+  [
+    "parse",
+    "comments",
+    "panels",
+    "actions",
+    "candidate-sections-before",
+    "candidate-sections-after",
+    "section-pairing",
+    "change-annotation",
+    "runtime-candidates",
+    "prepare-before",
+    "prepare-after",
+    "complete",
+  ].forEach((phase) => {
+    try {
+      globalThis.performance?.clearMeasures?.(
+        `pageroot:review-analysis:${phase}`,
+      );
+    } catch {
+      // Diagnostics cannot own review analysis.
+    }
+  });
+  const steps = buildReviewDocumentSteps(beforeHtml, afterHtml, options);
+  const assertCurrent = () => {
+    if (control.isCancelled?.()) {
+      throw new Error("Review document analysis was superseded.");
+    }
+  };
+  assertCurrent();
+  let segmentStartedAt = globalThis.performance?.now?.() ?? Date.now();
+  let step = steps.next();
+  let segmentEndedAt = globalThis.performance?.now?.() ?? Date.now();
+  measureReviewAnalysisPhase(
+    step.done ? "complete" : step.value,
+    segmentStartedAt,
+    segmentEndedAt,
+  );
+  while (!step.done) {
+    await yieldReviewAnalysisTask();
+    assertCurrent();
+    segmentStartedAt = globalThis.performance?.now?.() ?? Date.now();
+    step = steps.next();
+    segmentEndedAt = globalThis.performance?.now?.() ?? Date.now();
+    measureReviewAnalysisPhase(
+      step.done ? "complete" : step.value,
+      segmentStartedAt,
+      segmentEndedAt,
+    );
+  }
+  assertCurrent();
+  return step.value;
 }

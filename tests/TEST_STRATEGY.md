@@ -40,10 +40,14 @@ PR 必须从 Draft 开始。普通推送由独立的 `PR Feedback` workflow 处�
 - Electron 冒烟：固定覆盖真实 authored DOM 输入和一次带磁盘持久化的 composition；完整 Electron 保留保存、关闭重开和逐字节 forward 结果等全部路径。
 - 交互预览与编辑视觉投影：Node 分别证明短期自定义协议的资源边界、
   PageViewContext 的 source-backed allowlist、投影精确源 Hash/空宿主校验、主进程
-  截图边界和迟到结果丢弃；Electron 用一份合成报告证明用户未进入预览时，
-  运行时 SVG/HTML、Canvas 和动态 `tbody` 已以只读 PNG 显示且可对原宿主留评论，
+  PNG 二进制签名/IHDR/内容摘要/字节/DPR/crop 边界、稳定 TargetRef 重绑定、
+  64px viewport bucket、脚本引用数据依赖、字节 LRU 和迟到结果丢弃；Electron
+  用一份合成报告证明用户未进入预览时，直接或嵌套的运行时 SVG/HTML、Canvas
+  和动态 `tbody` 已以只读 PNG 显示且可对原宿主留评论，
   源文件字节不变；同一用例再证明宿主 CSP 下的相对脚本和真实运行时 DOM、
-  Tab 切换，以及返回编辑后只保留当前 Tab 且仍能进入原有文字编辑岛。
+  border/padding/transform 下的 content-box 几何、响应式 `contain` 层、Tab 切换，
+  以及返回编辑和普通文字输入后只保留当前 Tab、位图 DOM 身份不变且仍能进入
+  原有文字编辑岛。Blob URL/临时背景不得进入源码字节。
   可选真实 HTML 用例直接覆盖 `np1a`/`np1b` 等脚本生成图和动态表格，不将真实
   文件复制进测试仓库。桌面编辑画布还必须
   证明同目录图片通过同一条受控资源根加载成功，而 `script-src` 没有因此
@@ -65,7 +69,14 @@ PR 必须从 Draft 开始。普通推送由独立的 `PR Feedback` workflow 处�
 - AI 闭环：Node 集成必须分别证明普通/跨标签相关改动可建版、不相关但可用
   HTML 进入 `attention` 并强制审阅、脚本/inline handler 等作者内容变化
   照常建版且不生成检测字段或提示，以及身份/Hash/路径/协议失败与
-  no-change 可从 workspace 恢复。任务级跑正常闭环和一个硬失败代表场景；
+  no-change 可从 workspace 恢复。
+  `ReviewAnalysisSession` 的 Node oracle 另证明确切 key 合并、异步让步、运行中
+  取消和按字节 LRU。修改审阅配对/分段实现时，还要在真实 Chromium DOM 中用
+  大型多 section/深层卡片 HTML 记录总耗时及各 `pageroot:review-analysis:*`
+  phase，确认 fuzzy pairing 只在兼容 bucket 内运行，并以正式 Electron 闭环
+  证明变化数量和类型没有因性能优化改变；可复现实测入口是
+  `npm run benchmark:review-analysis`，该诊断不增加产品内提示。
+  任务级跑正常闭环和一个硬失败代表场景；
   发布级覆盖复制失败、缺失 finalizer、非法 HTML、版本激活失败与终态
   返回/重开。正式 Electron 审阅用例还必须证明默认“双页 + 全部变化 +
   18%”、页面/筛选/可见度/导航彼此独立、左右单页和双页均铺满可用

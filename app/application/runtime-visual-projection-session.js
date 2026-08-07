@@ -9,7 +9,24 @@ import {
 } from "../domain/runtime-visual-projection.js";
 
 const DEFAULT_CAPTURE_DEBOUNCE_MS = 180;
-const MAX_PROJECTION_CACHE_ENTRIES = 8;
+const MAX_PROJECTION_CACHE_ENTRIES = 32;
+const MAX_PROJECTION_CACHE_BYTES = 32 * 1024 * 1024;
+
+function projectionByteSize(projection) {
+  return projection?.visuals?.reduce((total, visual) => (
+    total + Math.max(0, Number(visual.byteLength) || 0) + 512
+  ), 1_024) ?? 0;
+}
+
+function markProjectionEvent(event) {
+  try {
+    const name = `pageroot:runtime-visual:${event}`;
+    globalThis.performance?.clearMarks?.(name);
+    globalThis.performance?.mark?.(name);
+  } catch {
+    // Diagnostics cannot own projection state.
+  }
+}
 
 function initialSnapshot() {
   return Object.freeze({
@@ -35,6 +52,8 @@ export class RuntimeVisualProjectionSession {
   #captureDebounceMs;
 
   #cache = new Map();
+
+  #cacheBytes = 0;
 
   #committedRequestKey = null;
 
@@ -62,11 +81,30 @@ export class RuntimeVisualProjectionSession {
   }
 
   #cacheProjection(requestKey, projection) {
+    const previous = this.#cache.get(requestKey);
+    if (previous) this.#cacheBytes -= previous.bytes;
     this.#cache.delete(requestKey);
-    this.#cache.set(requestKey, projection);
-    while (this.#cache.size > MAX_PROJECTION_CACHE_ENTRIES) {
-      this.#cache.delete(this.#cache.keys().next().value);
+    const bytes = projectionByteSize(projection);
+    if (bytes > MAX_PROJECTION_CACHE_BYTES) return;
+    this.#cache.set(requestKey, { projection, bytes });
+    this.#cacheBytes += bytes;
+    while (
+      this.#cache.size > MAX_PROJECTION_CACHE_ENTRIES
+      || this.#cacheBytes > MAX_PROJECTION_CACHE_BYTES
+    ) {
+      const oldestKey = this.#cache.keys().next().value;
+      const oldest = this.#cache.get(oldestKey);
+      this.#cache.delete(oldestKey);
+      this.#cacheBytes -= oldest?.bytes ?? 0;
     }
+  }
+
+  #cachedProjection(requestKey) {
+    const entry = this.#cache.get(requestKey);
+    if (!entry) return null;
+    this.#cache.delete(requestKey);
+    this.#cache.set(requestKey, entry);
+    return entry.projection;
   }
 
   #commit({ requestKey, projection }) {
@@ -126,7 +164,7 @@ export class RuntimeVisualProjectionSession {
       documentKey,
       sourcePath,
       descriptor.dependencySha256,
-      descriptor.viewportWidth,
+      descriptor.viewportBucket,
       descriptor.presentationDependencySha256,
     ].join("\u0000");
     const latest = {
@@ -163,9 +201,12 @@ export class RuntimeVisualProjectionSession {
       && this.#committedRequestKey === requestKey
       && this.#snapshot.projection?.documentKey === documentKey
       && this.#snapshot.projection.sourceSha256 === descriptor.sourceSha256
-    ) return true;
+    ) {
+      markProjectionEvent("dependency-hit");
+      return true;
+    }
 
-    const cached = this.#cache.get(requestKey)
+    const cached = this.#cachedProjection(requestKey)
       ?? (this.#committedRequestKey === requestKey
         ? this.#snapshot.projection
         : null);
@@ -176,6 +217,7 @@ export class RuntimeVisualProjectionSession {
         if (this.#timer !== null) clearTimeout(this.#timer);
         this.#timer = null;
         this.#commit({ requestKey, projection: rebound });
+        markProjectionEvent("cache-hit");
         return true;
       }
     }
@@ -211,6 +253,7 @@ export class RuntimeVisualProjectionSession {
       ? this.#snapshot.projection
       : null;
     this.#pending = { requestKey, sequence, latest, capture: null };
+    markProjectionEvent("scheduled");
     this.#emit({
       status: "scheduled",
       documentKey,
@@ -253,7 +296,10 @@ export class RuntimeVisualProjectionSession {
           if (
             sequence !== this.#sequence
             || currentPending?.sequence !== sequence
-          ) return;
+          ) {
+            markProjectionEvent("late-discard");
+            return;
+          }
           let projection = acceptRuntimeVisualProjection({
             html: captureContext.html,
             documentKey,
@@ -286,6 +332,7 @@ export class RuntimeVisualProjectionSession {
           }
           if (projection) {
             this.#commit({ requestKey, projection });
+            markProjectionEvent("capture-ready");
             return;
           }
           this.#pending = null;
@@ -337,6 +384,7 @@ export class RuntimeVisualProjectionSession {
     this.#timer = null;
     this.#pending = null;
     this.#cache.clear();
+    this.#cacheBytes = 0;
     this.#committedRequestKey = null;
     if (this.#snapshot.status !== "idle") this.#emit(initialSnapshot());
   }

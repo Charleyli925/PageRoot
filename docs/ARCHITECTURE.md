@@ -58,27 +58,33 @@ Comments + frozen input
 - Desktop Edit has one separate, disposable runtime-visual projection. A
   renderer session reuses the Canvas `SourceIndex`, limits source-empty hosts
   to those with authored-script causality, and keys capture work by executable
-  source, stable host identity, normalized viewport and presentation context.
-  Ordinary text/history edits therefore rebind the committed projection to the
+  source, script-referenced data containers, stable host TargetRef, a 64px
+  viewport bucket and presentation context. Ordinary text/history edits
+  therefore resolve that TargetRef against the current SourceIndex and rebind the committed projection to the
   exact new source Hash instead of running the page again. A bounded LRU keeps
-  recent viewport/context results, and Preview/Edit suspension retains the last
+  recent viewport/context results under both entry and byte budgets, and Preview/Edit suspension retains the last
   committed result while canceling pending work. A real dependency change asks
   one hidden sandboxed `pageroot-preview:` window to run the authored page and
-  accepts bounded PNG captures only after exact source/host validation.
-  `HtmlCanvasEditor` mounts each PNG as a
-  pointer-transparent child of its original source host (or one bitmap row for
-  an empty `tbody`). The host therefore remains the selectable/commentable
+  accepts bounded PNG captures only after exact source/host validation. Empty
+  source-authored `canvas` and `svg` roots are candidates as well as ordinary
+  containers. `HtmlCanvasEditor` mounts each PNG through a responsive content
+  layer (or one bitmap row for an empty `tbody`); direct Canvas/SVG roots use a
+  reversible content-box background adapter. The host therefore remains the selectable/commentable
   TargetRef. The runtime DOM is never merged or synchronized, and neither the
   bitmap nor its temporary attributes enter SourcePatch, save, version, review
   diff or AI Request input.
-  Capture protocol V2 waits for a short mutation-quiet point, neutralizes only
+  Capture protocol V2 transfers bounded PNG bytes rather than Base64, validates
+  PNG signature/IHDR dimensions, content SHA, byte length, DPR, sizing mode and
+  crop geometry, waits for a short mutation-quiet point, neutralizes only
   disposable transform/effect presentation during measurement, captures the
   content box for ordinary hosts and the border box for `tbody`, and rejects a
   viewport/overflow-clipped rectangle rather than stretching a partial bitmap.
   Hidden or temporarily uncapturable hosts are deferred so their previous
   committed bitmap can remain. The Canvas reconciles by stable host key, keeps
-  identical image nodes, and decodes a changed bitmap before replacing the old
-  node; a projection refresh never starts by blanking the document.
+  identical image nodes, and decodes a changed Blob URL off-DOM before replacing
+  the old node. Content layers follow host resize/flow changes with `contain`
+  sizing and an owned `ResizeObserver`, so a cache hit cannot reuse stale fixed
+  pixel geometry; a projection refresh never starts by blanking the document.
 - Comment selection remains source-node exact inside foreign content. Authored
   SVG children retain their own instrumented SourceIndex identity; runtime-only
   children fail closed and are never promoted to an ancestor `svg`.
@@ -105,13 +111,17 @@ Comments + frozen input
   serializes the preview DOM or creates a second interaction mode.
 - Formal AI review owns one disposable reducer with independent page, change
   filter, context visibility, navigation, canonical presentation path, scroll
-  and zoom fields. The document
-  analyzer first establishes high-confidence before/after node pairs, derives
+  and zoom fields. A cancellable, byte-bounded `ReviewAnalysisSession` yields
+  between parse/control/pair/annotation/serialization phases and caches multiple
+  exact identities. Its document analyzer first establishes high-confidence before/after node pairs, derives
   copy, structure and visual facts from those pairs, and only then emits one
   typed canonical change footprint. It never promotes tag/position proximity
-  alone into a change fact. The ready-review session prepares that immutable
-  document pair once for the exact operation/source/comment identity before the
-  React review surface mounts; rerenders reuse it. Static source analysis remains the primary fact
+  alone into a change fact. Pairing consumes unique stable keys, unchanged
+  markup and distinctive identities first, then limits fuzzy edges to compatible
+  tag/context buckets rather than a page-wide Cartesian product. The
+  ready-review session prepares that immutable document pair for the exact
+  operation/source/comment identity before the React review surface mounts;
+  rerenders and bounded cache hits reuse it. Static source analysis remains the primary fact
   channel. The runtime supplement is available only through the managed desktop
   preview transport. Its main-process frame-navigation fence blocks authored
   replacement; a pre-load attempt atomically changes that volatile session to a

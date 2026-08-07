@@ -1,10 +1,15 @@
-import { isSafePngDataUrl } from "../lib/png-data-url.js";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { bytesToHex } from "@noble/hashes/utils.js";
 import {
   SOURCE_NODE_ATTRIBUTE,
   buildSourceIndex,
   instrumentPreviewHtml,
   sourceSha256,
 } from "../lib/source-index.js";
+import {
+  createTargetRef,
+  resolveTargetRef,
+} from "../lib/target-resolver.js";
 import { resolvePageViewContext } from "../lib/page-view-context.js";
 
 export const RUNTIME_VISUAL_PROJECTION_PROTOCOL =
@@ -17,10 +22,12 @@ const MAX_TOTAL_VISUAL_BYTES = 16_000_000;
 const MAX_VISUAL_PIXEL_DIMENSION = 4_096;
 const MIN_VIEWPORT_WIDTH = 320;
 const MAX_VIEWPORT_WIDTH = 4_096;
+const VIEWPORT_BUCKET_WIDTH = 64;
 const CAPTURE_VIEWPORT_HEIGHT = 1_200;
 const VISUAL_HOST_TAGS = new Set([
   "article",
   "aside",
+  "canvas",
   "div",
   "figure",
   "figcaption",
@@ -28,11 +35,34 @@ const VISUAL_HOST_TAGS = new Set([
   "main",
   "section",
   "span",
+  "svg",
   "td",
   "th",
   "tbody",
 ]);
 const CAPTURE_BOXES = new Set(["border", "content"]);
+const RUNTIME_CONTENT_SHA256_PATTERN = /^sha256:[a-f0-9]{64}$/u;
+const RAW_PROJECTION_KEYS = new Set([
+  "protocol",
+  "version",
+  "sourceSha256",
+  "visuals",
+  "deferredSourceNodeIds",
+]);
+const RAW_VISUAL_KEYS = new Set([
+  "sourceNodeId",
+  "width",
+  "height",
+  "layoutWidth",
+  "layoutHeight",
+  "deviceScaleFactor",
+  "captureBox",
+  "crop",
+  "sizingMode",
+  "runtimeContentSha256",
+  "byteLength",
+  "pngBytes",
+]);
 const RUNTIME_DEPENDENCY_TAGS = new Set([
   "base",
   "link",
@@ -40,6 +70,7 @@ const RUNTIME_DEPENDENCY_TAGS = new Set([
   "style",
 ]);
 const BROAD_RUNTIME_HOST_MUTATION = /(?:appendChild|insertAdjacentHTML|replaceChildren|\.innerHTML\s*=|document\.createElement|echarts\.init|Highcharts\.chart|Plotly\.newPlot|vegaEmbed|d3\.select|new\s+Chart\s*\()/u;
+const acceptedProjectionAuthority = new WeakSet();
 
 function reusableSourceIndex(html, candidate) {
   return candidate?.source === html
@@ -48,6 +79,10 @@ function reusableSourceIndex(html, candidate) {
     && candidate.byNodeId instanceof Map
     ? candidate
     : buildSourceIndex(html);
+}
+
+function isRecord(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function captureBoxIdentity(sourceIndex, element) {
@@ -64,6 +99,27 @@ function captureBoxIdentity(sourceIndex, element) {
     selector: element.selector,
     sourceBoxes,
   }));
+}
+
+function immutableTargetRef(targetRef) {
+  const fingerprint = targetRef.fingerprint
+    ? Object.freeze({
+      ...targetRef.fingerprint,
+      stableAttributes: Object.freeze({
+        ...(targetRef.fingerprint.stableAttributes ?? {}),
+      }),
+      ancestorFingerprint: Object.freeze([
+        ...(targetRef.fingerprint.ancestorFingerprint ?? []),
+      ]),
+    })
+    : undefined;
+  return Object.freeze({
+    ...targetRef,
+    ...(targetRef.sourceAnchor
+      ? { sourceAnchor: Object.freeze({ ...targetRef.sourceAnchor }) }
+      : {}),
+    ...(fingerprint ? { fingerprint } : {}),
+  });
 }
 
 function sourceVisualPlaceholder(sourceIndex, element) {
@@ -109,13 +165,13 @@ function runtimeReferencedCandidates(sourceIndex, candidates) {
     return element?.type === "element" && candidateReferenceTokens(element)
       .some((token) => scriptSource.includes(token));
   });
-  if (referenced.length > 0) return referenced;
   const hasExternalScript = scripts.some(
     (element) => (element.attributesByName.get("src")?.length ?? 0) === 1,
   );
-  return hasExternalScript || BROAD_RUNTIME_HOST_MUTATION.test(scriptSource)
-    ? candidates
-    : [];
+  if (hasExternalScript || BROAD_RUNTIME_HOST_MUTATION.test(scriptSource)) {
+    return candidates;
+  }
+  return referenced;
 }
 
 function captureCandidates(sourceIndex) {
@@ -125,22 +181,45 @@ function captureCandidates(sourceIndex) {
       && sourceVisualPlaceholder(sourceIndex, element)
     ))
     .slice(0, MAX_CAPTURE_CANDIDATES)
-    .map((element) => Object.freeze({
-      sourceNodeId: element.nodeId,
-      tagName: element.tagName,
-      captureKey: captureBoxIdentity(sourceIndex, element),
-    }));
+    .map((element) => {
+      const hostTargetRef = immutableTargetRef(createTargetRef(
+        sourceIndex,
+        element,
+        { level: "subregion" },
+      ));
+      return Object.freeze({
+        sourceNodeId: element.nodeId,
+        tagName: element.tagName,
+        captureKey: captureBoxIdentity(sourceIndex, element),
+        hostTargetRef,
+      });
+    });
   return runtimeReferencedCandidates(sourceIndex, placeholders);
 }
 
 function runtimeDependencySha256(sourceIndex, candidates) {
+  const scripts = sourceIndex.elements.filter(
+    (element) => element.tagName === "script",
+  );
+  const scriptSource = scripts.map((element) => element.raw).join("\n");
   const executableSources = sourceIndex.elements
     .filter((element) => RUNTIME_DEPENDENCY_TAGS.has(element.tagName))
     .map((element) => [element.tagName, element.selector, element.raw]);
+  const referencedDataSources = scriptSource
+    ? sourceIndex.elements
+      .filter((element) => (
+        !RUNTIME_DEPENDENCY_TAGS.has(element.tagName)
+        && candidateReferenceTokens(element).some(
+          (token) => scriptSource.includes(token),
+        )
+      ))
+      .map((element) => [element.tagName, element.selector, element.raw])
+    : [];
   return sourceSha256(JSON.stringify({
     version: RUNTIME_VISUAL_PROJECTION_VERSION,
     candidates: candidates.map((candidate) => candidate.captureKey),
     executableSources,
+    referencedDataSources,
   }));
 }
 
@@ -188,6 +267,10 @@ function normalizedViewportWidth(value) {
   return Math.max(MIN_VIEWPORT_WIDTH, Math.min(MAX_VIEWPORT_WIDTH, width));
 }
 
+function viewportBucket(width) {
+  return Math.floor(width / VIEWPORT_BUCKET_WIDTH);
+}
+
 export function prepareRuntimeVisualCapture({
   html,
   sourcePath,
@@ -207,6 +290,7 @@ export function prepareRuntimeVisualCapture({
     return Object.freeze({
       sourceSha256: sourceIndex.sourceSha256,
       dependencySha256,
+      viewportBucket: viewportBucket(width),
       candidates: Object.freeze([]),
       payload: null,
     });
@@ -222,6 +306,7 @@ export function prepareRuntimeVisualCapture({
   return Object.freeze({
     sourceSha256: sourceIndex.sourceSha256,
     dependencySha256,
+    viewportBucket: viewportBucket(width),
     candidates: Object.freeze(candidates),
     payload: Object.freeze({
       html: instrumentedHtml,
@@ -268,11 +353,52 @@ export function describeRuntimeVisualCapture({
       entries,
     ),
     viewportWidth: width,
+    viewportBucket: viewportBucket(width),
   });
 }
 
-function dataUrlByteLength(dataUrl) {
-  return Math.ceil(String(dataUrl ?? "").length * 0.75);
+function normalizedPngBytes(value) {
+  let bytes;
+  if (value instanceof ArrayBuffer) {
+    bytes = new Uint8Array(value);
+  } else if (ArrayBuffer.isView(value) && value.BYTES_PER_ELEMENT === 1) {
+    bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  } else {
+    return null;
+  }
+  if (
+    bytes.byteLength < 33
+    || bytes.byteLength > 2_000_000
+    || ![137, 80, 78, 71, 13, 10, 26, 10].every(
+      (expected, index) => bytes[index] === expected,
+    )
+    || ![73, 72, 68, 82].every(
+      (expected, index) => bytes[12 + index] === expected,
+    )
+    || ![73, 69, 78, 68, 174, 66, 96, 130].every(
+      (expected, index) => bytes[bytes.byteLength - 8 + index] === expected,
+    )
+  ) return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const width = view.getUint32(16, false);
+  const height = view.getUint32(20, false);
+  if (
+    width < 1
+    || height < 1
+    || width > MAX_VISUAL_PIXEL_DIMENSION
+    || height > MAX_VISUAL_PIXEL_DIMENSION
+  ) return null;
+  return { bytes: new Uint8Array(bytes), width, height };
+}
+
+function pngSha256(bytes) {
+  return `sha256:${bytesToHex(sha256(bytes))}`;
+}
+
+function finalizeAcceptedProjection(value) {
+  const projection = Object.freeze(value);
+  acceptedProjectionAuthority.add(projection);
+  return projection;
 }
 
 export function acceptRuntimeVisualProjection({
@@ -298,10 +424,17 @@ export function acceptRuntimeVisualProjection({
     || rawProjection.visuals.length > MAX_CAPTURE_VISUALS
     || !Array.isArray(rawProjection?.deferredSourceNodeIds)
     || rawProjection.deferredSourceNodeIds.length > MAX_CAPTURE_VISUALS
+    || rawProjection.visuals.length
+      + rawProjection.deferredSourceNodeIds.length > MAX_CAPTURE_VISUALS
+    || Object.keys(rawProjection).some((key) => !RAW_PROJECTION_KEYS.has(key))
   ) return null;
 
   const sourceNodeCounts = new Map();
   for (const rawVisual of rawProjection.visuals) {
+    if (
+      !isRecord(rawVisual)
+      || Object.keys(rawVisual).some((key) => !RAW_VISUAL_KEYS.has(key))
+    ) continue;
     const sourceNodeId = String(rawVisual?.sourceNodeId ?? "");
     sourceNodeCounts.set(
       sourceNodeId,
@@ -328,53 +461,110 @@ export function acceptRuntimeVisualProjection({
       || !VISUAL_HOST_TAGS.has(element.tagName)
       || !sourceVisualPlaceholder(sourceIndex, element)
       || !candidate
-      || !isSafePngDataUrl(rawVisual?.dataUrl)
     ) continue;
+    const png = normalizedPngBytes(rawVisual?.pngBytes);
+    if (!png) continue;
+    const pngBytes = png.bytes;
     const width = Number(rawVisual.width);
     const height = Number(rawVisual.height);
     const layoutWidth = Number(rawVisual.layoutWidth);
     const layoutHeight = Number(rawVisual.layoutHeight);
+    const deviceScaleFactor = Number(rawVisual.deviceScaleFactor);
     const captureBox = String(rawVisual.captureBox ?? "");
+    const sizingMode = String(rawVisual.sizingMode ?? "");
+    const runtimeContentSha256 = String(
+      rawVisual.runtimeContentSha256 ?? "",
+    );
+    const byteLength = Number(rawVisual.byteLength);
+    const crop = rawVisual.crop;
     if (
       ![width, height, layoutWidth, layoutHeight].every(Number.isFinite)
       || ![width, height, layoutWidth, layoutHeight].every((value) => value >= 1)
       || [width, height, layoutWidth, layoutHeight].some(
         (value) => value > MAX_VISUAL_PIXEL_DIMENSION,
       )
+      || Math.round(width) !== png.width
+      || Math.round(height) !== png.height
       || !CAPTURE_BOXES.has(captureBox)
       || (element.tagName === "tbody" && captureBox !== "border")
       || (element.tagName !== "tbody" && captureBox !== "content")
+      || !Number.isFinite(deviceScaleFactor)
+      || deviceScaleFactor < 0.5
+      || deviceScaleFactor > 8
+      || sizingMode !== "contain"
+      || !RUNTIME_CONTENT_SHA256_PATTERN.test(runtimeContentSha256)
+      || runtimeContentSha256 !== pngSha256(pngBytes)
+      || !Number.isSafeInteger(byteLength)
+      || byteLength !== pngBytes.byteLength
+      || !isRecord(crop)
+      || Object.keys(crop).some(
+        (key) => !["x", "y", "width", "height"].includes(key),
+      )
+      || ![crop.x, crop.y, crop.width, crop.height].every(Number.isFinite)
+      || crop.x < 0
+      || crop.y < 0
+      || crop.width < 1
+      || crop.height < 1
+      || crop.x > MAX_VIEWPORT_WIDTH
+      || crop.y > CAPTURE_VIEWPORT_HEIGHT
+      || crop.width > MAX_VISUAL_PIXEL_DIMENSION
+      || crop.height > MAX_VISUAL_PIXEL_DIMENSION
+      || crop.x + crop.width > MAX_VIEWPORT_WIDTH
+      || crop.y + crop.height > CAPTURE_VIEWPORT_HEIGHT
+      || Math.abs(crop.width - layoutWidth) > 2
+      || Math.abs(crop.height - layoutHeight) > 2
     ) continue;
-    totalBytes += dataUrlByteLength(rawVisual.dataUrl);
+    totalBytes += byteLength;
     if (totalBytes > MAX_TOTAL_VISUAL_BYTES) return null;
     visuals.push(Object.freeze({
       sourceNodeId,
       tagName: element.tagName,
       captureKey: candidate.captureKey,
+      hostTargetRef: candidate.hostTargetRef,
       width: Math.round(width),
       height: Math.round(height),
       layoutWidth: Math.round(layoutWidth),
       layoutHeight: Math.round(layoutHeight),
+      deviceScaleFactor,
       captureBox,
-      dataUrl: String(rawVisual.dataUrl),
+      crop: Object.freeze({
+        x: Math.round(crop.x),
+        y: Math.round(crop.y),
+        width: Math.round(crop.width),
+        height: Math.round(crop.height),
+      }),
+      sizingMode,
+      runtimeContentSha256,
+      byteLength,
+      pngBytes,
     }));
   }
 
   const deferredCaptureKeys = [];
+  const deferredTargets = [];
   const deferredSourceNodeIds = new Set();
+  const visualSourceNodeIds = new Set(
+    visuals.map((visual) => visual.sourceNodeId),
+  );
   for (const rawSourceNodeId of rawProjection.deferredSourceNodeIds) {
     const sourceNodeId = String(rawSourceNodeId ?? "");
     const candidate = candidatesByNodeId.get(sourceNodeId);
     if (
       !sourceNodeId
       || deferredSourceNodeIds.has(sourceNodeId)
+      || visualSourceNodeIds.has(sourceNodeId)
       || !candidate
     ) return null;
     deferredSourceNodeIds.add(sourceNodeId);
     deferredCaptureKeys.push(candidate.captureKey);
+    deferredTargets.push(Object.freeze({
+      captureKey: candidate.captureKey,
+      tagName: candidate.tagName,
+      hostTargetRef: candidate.hostTargetRef,
+    }));
   }
 
-  return Object.freeze({
+  return finalizeAcceptedProjection({
     protocol: RUNTIME_VISUAL_PROJECTION_PROTOCOL,
     version: RUNTIME_VISUAL_PROJECTION_VERSION,
     documentKey,
@@ -382,6 +572,7 @@ export function acceptRuntimeVisualProjection({
     sourceSha256: sourceIndex.sourceSha256,
     visuals: Object.freeze(visuals),
     deferredCaptureKeys: Object.freeze(deferredCaptureKeys),
+    deferredTargets: Object.freeze(deferredTargets),
   });
 }
 
@@ -395,43 +586,71 @@ export function rebindRuntimeVisualProjection({
   if (
     projection?.protocol !== RUNTIME_VISUAL_PROJECTION_PROTOCOL
     || projection?.version !== RUNTIME_VISUAL_PROJECTION_VERSION
+    || !acceptedProjectionAuthority.has(projection)
+    || typeof documentKey !== "string"
+    || !documentKey
+    || projection.documentKey !== documentKey
+    || !Number.isSafeInteger(generation)
+    || generation < 0
   ) return null;
   const sourceIndex = reusableSourceIndex(html, suppliedSourceIndex);
-  const candidatesByCaptureKey = new Map();
-  for (const candidate of captureCandidates(sourceIndex)) {
-    if (candidatesByCaptureKey.has(candidate.captureKey)) {
-      candidatesByCaptureKey.set(candidate.captureKey, null);
-    } else {
-      candidatesByCaptureKey.set(candidate.captureKey, candidate);
+  const candidatesByNodeId = new Map(
+    captureCandidates(sourceIndex).map((candidate) => [
+      candidate.sourceNodeId,
+      candidate,
+    ]),
+  );
+  const resolveCandidate = (visual) => {
+    if (!visual?.hostTargetRef) return null;
+    let resolution;
+    try {
+      resolution = resolveTargetRef(sourceIndex, visual.hostTargetRef);
+    } catch {
+      return null;
     }
+    if (!resolution?.target || !["exact", "rebound"].includes(resolution.resolution)) {
+      return null;
+    }
+    const candidate = candidatesByNodeId.get(resolution.target.nodeId);
+    return candidate?.tagName === visual.tagName ? candidate : null;
+  };
+  const visuals = [];
+  const usedVisualNodeIds = new Set();
+  for (const visual of projection.visuals) {
+    const candidate = resolveCandidate(visual);
+    if (!candidate || usedVisualNodeIds.has(candidate.sourceNodeId)) continue;
+    usedVisualNodeIds.add(candidate.sourceNodeId);
+    visuals.push(Object.freeze({
+      ...visual,
+      sourceNodeId: candidate.sourceNodeId,
+      tagName: candidate.tagName,
+      captureKey: candidate.captureKey,
+      hostTargetRef: candidate.hostTargetRef,
+    }));
   }
-  return acceptRuntimeVisualProjection({
-    html,
+  const deferredTargets = [];
+  const usedDeferredNodeIds = new Set();
+  for (const deferredTarget of projection.deferredTargets ?? []) {
+    const candidate = resolveCandidate(deferredTarget);
+    if (!candidate || usedDeferredNodeIds.has(candidate.sourceNodeId)) continue;
+    usedDeferredNodeIds.add(candidate.sourceNodeId);
+    deferredTargets.push(Object.freeze({
+      captureKey: candidate.captureKey,
+      tagName: candidate.tagName,
+      hostTargetRef: candidate.hostTargetRef,
+    }));
+  }
+  return finalizeAcceptedProjection({
+    protocol: RUNTIME_VISUAL_PROJECTION_PROTOCOL,
+    version: RUNTIME_VISUAL_PROJECTION_VERSION,
     documentKey,
     generation,
-    sourceIndex,
-    rawProjection: {
-      protocol: RUNTIME_VISUAL_PROJECTION_PROTOCOL,
-      version: RUNTIME_VISUAL_PROJECTION_VERSION,
-      sourceSha256: sourceIndex.sourceSha256,
-      visuals: projection.visuals.flatMap((visual) => {
-        const candidate = candidatesByCaptureKey.get(visual.captureKey);
-        if (!candidate || candidate.tagName !== visual.tagName) return [];
-        return [{
-          sourceNodeId: candidate.sourceNodeId,
-          width: visual.width,
-          height: visual.height,
-          layoutWidth: visual.layoutWidth,
-          layoutHeight: visual.layoutHeight,
-          captureBox: visual.captureBox,
-          dataUrl: visual.dataUrl,
-        }];
-      }),
-      deferredSourceNodeIds: projection.deferredCaptureKeys.flatMap((captureKey) => {
-        const candidate = candidatesByCaptureKey.get(captureKey);
-        return candidate ? [candidate.sourceNodeId] : [];
-      }),
-    },
+    sourceSha256: sourceIndex.sourceSha256,
+    visuals: Object.freeze(visuals),
+    deferredCaptureKeys: Object.freeze(
+      deferredTargets.map((target) => target.captureKey),
+    ),
+    deferredTargets: Object.freeze(deferredTargets),
   });
 }
 
@@ -443,24 +662,30 @@ export function mergeDeferredRuntimeVisualProjection({
   fallbackProjection,
   sourceIndex: suppliedSourceIndex = null,
 } = {}) {
-  if (!projection || projection.deferredCaptureKeys.length === 0) {
-    return projection ?? null;
-  }
+  if (
+    typeof html !== "string"
+    || !projection
+    || !acceptedProjectionAuthority.has(projection)
+    || !Array.isArray(projection.deferredCaptureKeys)
+  ) return null;
+  const sourceIndex = reusableSourceIndex(html, suppliedSourceIndex);
+  if (
+    typeof documentKey !== "string"
+    || !documentKey
+    || projection.documentKey !== documentKey
+    || projection.sourceSha256 !== sourceIndex.sourceSha256
+    || !Number.isSafeInteger(generation)
+    || generation < 0
+  ) return null;
+  if (projection.deferredCaptureKeys.length === 0) return projection;
   const fallback = rebindRuntimeVisualProjection({
     html,
     documentKey,
     generation,
     projection: fallbackProjection,
-    sourceIndex: suppliedSourceIndex,
+    sourceIndex,
   });
   if (!fallback) return projection;
-  const sourceIndex = reusableSourceIndex(html, suppliedSourceIndex);
-  const candidatesByCaptureKey = new Map(
-    captureCandidates(sourceIndex).map((candidate) => [
-      candidate.captureKey,
-      candidate,
-    ]),
-  );
   const fallbackByCaptureKey = new Map(
     fallback.visuals.map((visual) => [visual.captureKey, visual]),
   );
@@ -471,34 +696,16 @@ export function mergeDeferredRuntimeVisualProjection({
     const fallbackVisual = fallbackByCaptureKey.get(captureKey);
     if (fallbackVisual) mergedByCaptureKey.set(captureKey, fallbackVisual);
   }
-  return acceptRuntimeVisualProjection({
-    html,
+  return finalizeAcceptedProjection({
+    protocol: RUNTIME_VISUAL_PROJECTION_PROTOCOL,
+    version: RUNTIME_VISUAL_PROJECTION_VERSION,
     documentKey,
     generation,
-    sourceIndex,
-    rawProjection: {
-      protocol: RUNTIME_VISUAL_PROJECTION_PROTOCOL,
-      version: RUNTIME_VISUAL_PROJECTION_VERSION,
-      sourceSha256: sourceIndex.sourceSha256,
-      visuals: [...mergedByCaptureKey.values()]
-        .slice(0, MAX_CAPTURE_VISUALS)
-        .flatMap((visual) => {
-        const candidate = candidatesByCaptureKey.get(visual.captureKey);
-        if (!candidate) return [];
-        return [{
-          sourceNodeId: candidate.sourceNodeId,
-          width: visual.width,
-          height: visual.height,
-          layoutWidth: visual.layoutWidth,
-          layoutHeight: visual.layoutHeight,
-          captureBox: visual.captureBox,
-          dataUrl: visual.dataUrl,
-        }];
-      }),
-      deferredSourceNodeIds: projection.deferredCaptureKeys.flatMap((captureKey) => {
-        const candidate = candidatesByCaptureKey.get(captureKey);
-        return candidate ? [candidate.sourceNodeId] : [];
-      }),
-    },
+    sourceSha256: projection.sourceSha256,
+    visuals: Object.freeze(
+      [...mergedByCaptureKey.values()].slice(0, MAX_CAPTURE_VISUALS),
+    ),
+    deferredCaptureKeys: projection.deferredCaptureKeys,
+    deferredTargets: projection.deferredTargets,
   });
 }

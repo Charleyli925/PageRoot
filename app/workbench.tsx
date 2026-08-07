@@ -107,6 +107,10 @@ import {
   RuntimeVisualProjectionSession,
   type RuntimeVisualProjectionSnapshot,
 } from "./application/runtime-visual-projection-session.js";
+import {
+  ReviewAnalysisCancelledError,
+  ReviewAnalysisSession,
+} from "./application/review-analysis-session.js";
 import type { PageViewContext } from "./lib/page-view-context.js";
 import {
   ProjectRulesSession,
@@ -194,7 +198,7 @@ import {
 } from "./workbench/handoff-view";
 import AiReviewWorkspace from "./workbench/AiReviewWorkspace";
 import {
-  buildReviewDocuments,
+  buildReviewDocumentsAsync,
   type ReviewDocuments,
 } from "./workbench/review-document";
 import {
@@ -386,6 +390,18 @@ type PreparedReviewDocuments = {
   documents: ReviewDocuments;
 };
 
+function preparedReviewByteSize(prepared: PreparedReviewDocuments): number {
+  return 2 * (
+    prepared.beforeHtml.length
+    + prepared.afterHtml.length
+    + prepared.commentsKey.length
+    + prepared.documents.before.length
+    + prepared.documents.after.length
+    + prepared.documents.bootstrapJavaScript.before.length
+    + prepared.documents.bootstrapJavaScript.after.length
+  );
+}
+
 type RuntimeVisualViewport = {
   width: number;
   height: number;
@@ -537,7 +553,11 @@ export default function Workbench() {
   const pagePresentationScrollRequestRef = useRef(0);
   const runtimeVisualViewportRef = useRef<RuntimeVisualViewport | null>(null);
   const projectOpenRequestRef = useRef(0);
-  const preparedReviewDocumentsRef = useRef<PreparedReviewDocuments | null>(null);
+  const reviewAnalysisSessionRef = useRef(
+    new ReviewAnalysisSession<PreparedReviewDocuments>({
+      estimateSize: preparedReviewByteSize,
+    }),
+  );
   const reviewSessionSequenceRef = useRef(0);
   const projectSessionRef = useRef(new ProjectSession());
   const drainCoordinatorRef = useRef(new DrainCoordinator());
@@ -824,6 +844,7 @@ export default function Workbench() {
     session.setObserver(setRuntimeVisualProjectionSnapshot);
     return () => session.dispose();
   }, []);
+  useEffect(() => () => reviewAnalysisSessionRef.current.dispose(), []);
   useEffect(() => {
     const session = projectRulesSessionRef.current;
     session.setObserver((snapshot) => {
@@ -2810,7 +2831,7 @@ export default function Workbench() {
     setLastModifiedAt(project.lastModifiedAt || null);
     setSelection(null);
     setPageViewContext(null);
-    preparedReviewDocumentsRef.current = null;
+    reviewAnalysisSessionRef.current.clear();
     runtimeVisualProjectionSessionRef.current.reset();
     runtimeVisualViewportRef.current = null;
     editorRef.current?.applyPageViewContext(null);
@@ -8595,22 +8616,26 @@ export default function Workbench() {
               : {}),
           }));
       const commentsKey = JSON.stringify(reviewComments);
-      const cachedReview = preparedReviewDocumentsRef.current;
-      const preparedReview = (
-        cachedReview?.operationKey === operationKey
-        && cachedReview.beforeHtml === frozenHtml
-        && cachedReview.afterHtml === candidateHtml
-        && cachedReview.sourcePath === run.sourcePath
-        && cachedReview.commentsKey === commentsKey
-      ) ? cachedReview : (() => {
+      const externalBootstrap = Boolean(window.htmlAIPreview);
+      const reviewCacheKey = [
+        operationKey,
+        run.baseSnapshotSha256,
+        candidateHash,
+        run.sourcePath,
+        externalBootstrap ? "external" : "inline",
+        await browserSha256(commentsKey),
+      ].join("\u0000");
+      const preparedReview = await reviewAnalysisSessionRef.current.analyze({
+        key: reviewCacheKey,
+        compute: async ({ isCancelled }) => {
           const sessionId = `review-${Date.now().toString(36)}-${++reviewSessionSequenceRef.current}`;
-          const documents = buildReviewDocuments(frozenHtml, candidateHtml, {
+          const documents = await buildReviewDocumentsAsync(frozenHtml, candidateHtml, {
             sessionId,
             sourcePath: run.sourcePath,
-            externalBootstrap: Boolean(window.htmlAIPreview),
+            externalBootstrap,
             comments: reviewComments,
-          });
-          const result: PreparedReviewDocuments = {
+          }, { isCancelled });
+          return {
             operationKey,
             beforeHtml: frozenHtml,
             afterHtml: candidateHtml,
@@ -8619,9 +8644,15 @@ export default function Workbench() {
             sessionId,
             documents,
           };
-          preparedReviewDocumentsRef.current = result;
-          return result;
-        })();
+        },
+      });
+      const analyzedRun = runSessionRef.current.activeRun;
+      if (
+        !analyzedRun
+        || analyzedRun.status !== "ready-to-open"
+        || activeRunOperationKey(analyzedRun) !== operationKey
+        || !isCurrentProjectContext(reviewContext)
+      ) return;
       setReadyReviewSession({
         operationKey,
         sessionId: preparedReview.sessionId,
@@ -8637,6 +8668,7 @@ export default function Workbench() {
       });
       setDrawer(null);
     } catch (cause) {
+      if (cause instanceof ReviewAnalysisCancelledError) return;
       setToast({
         title: "暂时无法开始审阅",
         message: productErrorMessage(

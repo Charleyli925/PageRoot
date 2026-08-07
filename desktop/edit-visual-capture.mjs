@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 const PROJECTION_PROTOCOL = "pageroot-runtime-visual-projection";
 const PROJECTION_VERSION = 2;
 const SOURCE_NODE_ATTRIBUTE = "data-html-ai-source-node-id";
@@ -9,7 +11,7 @@ const MAX_CANDIDATES = 256;
 const MAX_VISUALS = 32;
 const MAX_PRESENTATION_ENTRIES = 64;
 const MAX_CLASS_TOKENS = 128;
-const MAX_VISUAL_DATA_URL_BYTES = 2_000_000;
+const MAX_VISUAL_PNG_BYTES = 2_000_000;
 const MAX_TOTAL_VISUAL_BYTES = 16_000_000;
 const MAX_VISUAL_DIMENSION = 4_096;
 const MIN_VIEWPORT_WIDTH = 320;
@@ -26,6 +28,7 @@ const CAPTURE_BOXES = new Set(["border", "content"]);
 const VISUAL_HOST_TAGS = new Set([
   "article",
   "aside",
+  "canvas",
   "div",
   "figure",
   "figcaption",
@@ -33,6 +36,7 @@ const VISUAL_HOST_TAGS = new Set([
   "main",
   "section",
   "span",
+  "svg",
   "td",
   "th",
   "tbody",
@@ -59,6 +63,19 @@ const PRESENTATION_ENTRY_KEYS = new Set([
 
 function isRecord(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function measureCapturePhase(phase, startedAt) {
+  try {
+    const name = `pageroot:edit-visual-capture:${phase}`;
+    performance.clearMeasures(name);
+    performance.measure(name, {
+      start: startedAt,
+      end: performance.now(),
+    });
+  } catch {
+    // Diagnostics cannot own capture availability.
+  }
 }
 
 function boundedInteger(value, minimum, maximum) {
@@ -316,10 +333,28 @@ function populatedCandidateScript(candidates, sourceNodeAttribute) {
       ));
       if (matches.length !== 1) continue;
       const element = matches[0];
-      const hasRuntimeContent = Array.from(element.childNodes).some((node) => (
+      const hasChildContent = Array.from(element.childNodes).some((node) => (
         node.nodeType === Node.ELEMENT_NODE
         || (node.nodeType === Node.TEXT_NODE && (node.textContent || "").trim())
       ));
+      let hasCanvasPixels = false;
+      if (candidate.tagName === "canvas") {
+        try {
+          const probe = document.createElement("canvas");
+          probe.width = 32;
+          probe.height = 32;
+          const context = probe.getContext("2d", { willReadFrequently: true });
+          context.drawImage(element, 0, 0, probe.width, probe.height);
+          const pixels = context.getImageData(0, 0, probe.width, probe.height).data;
+          for (let offset = 3; offset < pixels.length; offset += 4) {
+            if (pixels[offset] !== 0) { hasCanvasPixels = true; break; }
+          }
+        } catch {
+          // A tainted canvas can only be inspected by capturing its pixels.
+          hasCanvasPixels = true;
+        }
+      }
+      const hasRuntimeContent = hasChildContent || hasCanvasPixels;
       if (hasRuntimeContent) populated.push(candidate);
       if (populated.length >= ${MAX_VISUALS}) break;
     }
@@ -491,6 +526,7 @@ function measureCandidateScript(candidate, sourceNodeAttribute) {
         height: Math.max(1, Math.ceil(bottom) - Math.floor(top)),
         layoutWidth: Math.max(1, Math.round(layoutWidth)),
         layoutHeight: Math.max(1, Math.round(layoutHeight)),
+        deviceScaleFactor: Math.max(0.5, Math.min(8, window.devicePixelRatio || 1)),
         captureBox,
         complete: true,
       });
@@ -549,30 +585,53 @@ function boundedCaptureRect(measurement, viewport) {
 function boundedPng(image) {
   if (!image || image.isEmpty()) return null;
   let candidate = image;
-  let dataUrl = candidate.toDataURL();
-  for (let attempt = 0; dataUrl.length > MAX_VISUAL_DATA_URL_BYTES && attempt < 4; attempt += 1) {
+  let pngBytes = candidate.toPNG();
+  for (let attempt = 0; pngBytes.length > MAX_VISUAL_PNG_BYTES && attempt < 4; attempt += 1) {
     const size = candidate.getSize();
     const scale = Math.max(
       0.25,
-      Math.sqrt(MAX_VISUAL_DATA_URL_BYTES / dataUrl.length) * 0.9,
+      Math.sqrt(MAX_VISUAL_PNG_BYTES / pngBytes.length) * 0.9,
     );
     candidate = candidate.resize({
       width: Math.max(1, Math.floor(size.width * scale)),
       height: Math.max(1, Math.floor(size.height * scale)),
       quality: "good",
     });
-    dataUrl = candidate.toDataURL();
+    pngBytes = candidate.toPNG();
   }
-  const size = candidate.getSize();
+  const pngView = pngBytes instanceof Uint8Array && pngBytes.byteLength >= 24
+    ? new DataView(
+      pngBytes.buffer,
+      pngBytes.byteOffset,
+      pngBytes.byteLength,
+    )
+    : null;
+  const pngWidth = pngView?.getUint32(16, false) ?? 0;
+  const pngHeight = pngView?.getUint32(20, false) ?? 0;
   if (
-    dataUrl.length > MAX_VISUAL_DATA_URL_BYTES
-    || !/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/u.test(dataUrl)
-    || size.width < 1
-    || size.height < 1
-    || size.width > MAX_VISUAL_DIMENSION
-    || size.height > MAX_VISUAL_DIMENSION
+    !(pngBytes instanceof Uint8Array)
+    || pngBytes.length < 20
+    || pngBytes.length > MAX_VISUAL_PNG_BYTES
+    || ![137, 80, 78, 71, 13, 10, 26, 10].every(
+      (value, index) => pngBytes[index] === value,
+    )
+    || ![73, 72, 68, 82].every(
+      (value, index) => pngBytes[12 + index] === value,
+    )
+    || pngWidth < 1
+    || pngHeight < 1
+    || pngWidth > MAX_VISUAL_DIMENSION
+    || pngHeight > MAX_VISUAL_DIMENSION
   ) return null;
-  return { dataUrl, width: size.width, height: size.height };
+  return {
+    pngBytes: new Uint8Array(pngBytes),
+    width: pngWidth,
+    height: pngHeight,
+    byteLength: pngBytes.length,
+    runtimeContentSha256: `sha256:${createHash("sha256")
+      .update(pngBytes)
+      .digest("hex")}`,
+  };
 }
 
 export function createEditVisualCaptureOperation({
@@ -608,6 +667,7 @@ export function createEditVisualCaptureController({
   let activeCapture = null;
 
   const capture = async (rawPayload) => {
+    const captureStartedAt = performance.now();
     const payload = validateEditVisualCapturePayload(rawPayload);
     activeCapture?.cancel();
     let cancelled = false;
@@ -697,6 +757,7 @@ export function createEditVisualCaptureController({
         candidateIndex += 1
       ) {
         const candidate = capturableCandidates[candidateIndex];
+        const candidateStartedAt = performance.now();
         if (cancelled || captureWindow.isDestroyed()) break;
         const restoreKey = `__pagerootEditVisualRestore_${visuals.length}`;
         try {
@@ -735,7 +796,7 @@ export function createEditVisualCaptureController({
             deferredSourceNodeIds.push(candidate.sourceNodeId);
             continue;
           }
-          totalBytes += png.dataUrl.length;
+          totalBytes += png.byteLength;
           if (totalBytes > MAX_TOTAL_VISUAL_BYTES) {
             deferredSourceNodeIds.push(
               ...capturableCandidates
@@ -750,8 +811,21 @@ export function createEditVisualCaptureController({
             height: png.height,
             layoutWidth: rect.layoutWidth,
             layoutHeight: rect.layoutHeight,
+            deviceScaleFactor: Math.max(
+              0.5,
+              Math.min(8, Number(measurement.deviceScaleFactor) || 1),
+            ),
             captureBox: rect.captureBox,
-            dataUrl: png.dataUrl,
+            crop: Object.freeze({
+              x: rect.x,
+              y: rect.y,
+              width: rect.width,
+              height: rect.height,
+            }),
+            sizingMode: "contain",
+            runtimeContentSha256: png.runtimeContentSha256,
+            byteLength: png.byteLength,
+            pngBytes: png.pngBytes,
           }));
         } catch {
           // A single unrenderable host must not hide the other runtime visuals.
@@ -764,6 +838,7 @@ export function createEditVisualCaptureController({
               true,
             ).catch(() => undefined);
           }
+          measureCapturePhase("host", candidateStartedAt);
         }
       }
       if (cancelled) throw new Error("Edit visual capture was superseded.");
@@ -778,6 +853,7 @@ export function createEditVisualCaptureController({
       if (captureWindow && !captureWindow.isDestroyed()) captureWindow.destroy();
       if (session?.sessionId) await revokeSession(session.sessionId).catch(() => undefined);
       if (activeCapture === operation) activeCapture = null;
+      measureCapturePhase("total", captureStartedAt);
     }
   };
 

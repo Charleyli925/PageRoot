@@ -614,6 +614,8 @@ test("Electron interactive preview runs authored scripts and edits the selected 
       id="runtime-svg"
       style="width: 40px; height: 20px; padding: 7px; border: 3px solid #0f172a; transform: translate(13px, 7px) scale(1.25); transform-origin: top left"
     ></div>
+    <canvas id="direct-runtime-canvas" width="36" height="18"></canvas>
+    <svg id="direct-runtime-svg" width="44" height="22"></svg>
     <table><tbody id="runtime-table"></tbody></table>
   </section>
   <section id="panel-two" class="panel">
@@ -656,6 +658,10 @@ test("Electron interactive preview runs authored scripts and edits the selected 
   runtimeSvg.setAttribute("height", "20");
   runtimeSvg.innerHTML = '<rect width="40" height="20" fill="#2563eb"></rect>';
   document.getElementById("runtime-svg").append(runtimeSvg);
+  const directCanvas = document.getElementById("direct-runtime-canvas");
+  directCanvas.getContext("2d").fillRect(0, 0, 18, 9);
+  document.getElementById("direct-runtime-svg").innerHTML =
+    '<rect width="44" height="22" fill="#7c3aed"></rect>';
   document.body.dataset.runtimeReady = "true";
 })();`,
     "utf8",
@@ -682,7 +688,7 @@ test("Electron interactive preview runs authored scripts and edits the selected 
     const initialRuntimeVisualGeometry = await editFrame.locator(
       '#runtime-svg img[data-pageroot-readonly-visual="runtime-bitmap"]',
     ).evaluate((image) => {
-      const host = image.parentElement;
+      const host = image.closest("#runtime-svg");
       if (!host) throw new Error("Runtime visual host is missing.");
       const hostRect = host.getBoundingClientRect();
       const imageRect = image.getBoundingClientRect();
@@ -697,6 +703,26 @@ test("Electron interactive preview runs authored scripts and edits the selected 
     expect(initialRuntimeVisualGeometry.imageHeight).toBeCloseTo(25, 1);
     expect(initialRuntimeVisualGeometry.insetX).toBeCloseTo(12.5, 1);
     expect(initialRuntimeVisualGeometry.insetY).toBeCloseTo(12.5, 1);
+    await expect(editFrame.locator("#direct-runtime-canvas"))
+      .toHaveAttribute(
+        "data-pageroot-readonly-visual-host",
+        "runtime-bitmap-background",
+      );
+    await expect(editFrame.locator("#direct-runtime-svg"))
+      .toHaveAttribute(
+        "data-pageroot-readonly-visual-host",
+        "runtime-bitmap-background",
+      );
+    expect(await editFrame.locator("#direct-runtime-canvas").evaluate(
+      (element) => getComputedStyle(element).backgroundImage.startsWith(
+        'url("blob:',
+      ),
+    )).toBe(true);
+    expect(await editFrame.locator("#direct-runtime-svg").evaluate(
+      (element) => getComputedStyle(element).backgroundImage.startsWith(
+        'url("blob:',
+      ),
+    )).toBe(true);
     await expect(editFrame.locator(
       '#runtime-table > tr[data-pageroot-readonly-visual="runtime-bitmap-row"] img[data-pageroot-readonly-visual="runtime-bitmap"]',
     )).toBeVisible();
@@ -710,7 +736,7 @@ test("Electron interactive preview runs authored scripts and edits the selected 
       "请调整这张运行时图表",
     );
     expect(readFileSync(sourcePath, "utf8")).not.toMatch(
-      /data-pageroot-readonly-visual|data-runtime-row|data-runtime-chart|data-drawn/u,
+      /data-pageroot-readonly-visual|data-runtime-row|data-runtime-chart|data-drawn|(?:data:image\/png|blob:)|background-size:\s*contain/u,
     );
 
     await launched.page.getByRole("button", {
@@ -785,7 +811,7 @@ test("Electron interactive preview runs authored scripts and edits the selected 
     )).toHaveCount(1);
     await expect(resumedEditFrame.locator("[data-runtime-chart]")).toHaveCount(0);
     expect(readFileSync(sourcePath, "utf8")).not.toMatch(
-      /data-pageroot-readonly-visual|data-runtime-row|data-runtime-chart|data-drawn/u,
+      /data-pageroot-readonly-visual|data-runtime-row|data-runtime-chart|data-drawn|(?:data:image\/png|blob:)|background-size:\s*contain/u,
     );
 
     await activateNativeEdit(resumedEditFrame, "preview-tab-copy");
@@ -805,8 +831,12 @@ test("Electron interactive preview runs authored scripts and edits the selected 
       window.__PAGEROOT_E2E_RUNTIME_VISUAL__
         === document.querySelector(
           '#runtime-svg img[data-pageroot-readonly-visual="runtime-bitmap"]',
-        )
+      )
     ))).toBe(true);
+    await expect.poll(() => readFileSync(sourcePath, "utf8")).toContain("原位");
+    expect(readFileSync(sourcePath, "utf8")).not.toMatch(
+      /data-pageroot-readonly-visual|data-runtime-row|data-runtime-chart|data-drawn|(?:data:image\/png|blob:)|background-size:\s*contain/u,
+    );
   } finally {
     if (electronApp && isolatedUserData) {
       await stopPageRoot(electronApp, isolatedUserData);

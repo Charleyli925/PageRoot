@@ -62,6 +62,7 @@
     "test:packaged-runtime:prepared": "playwright test --config tests/e2e/electron/playwright.packaged.config.mjs",
     "test:packaged-startup:prepared": "playwright test --config tests/e2e/electron/playwright.packaged-startup.config.mjs",
     "test:bridge": "node --test tests/workspace-bridge.test.mjs",
+    "benchmark:review-analysis": "node scripts/benchmark-review-analysis.mjs",
     "test:package": "node scripts/test-node-group.mjs package",
     "verify:packaged": "node scripts/verify-packaged-artifact.mjs --arch arm64",
     "verify:packaged:x64": "node scripts/verify-packaged-artifact.mjs --arch x64",

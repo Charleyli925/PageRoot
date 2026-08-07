@@ -43,7 +43,8 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   process revalidates the known source path and a bounded payload, owns one
   hidden sandboxed BrowserWindow with Node disabled, denies navigation,
   popups and webviews, and destroys the window plus preview session after each
-  capture or superseding request. It returns only bounded PNG data URLs,
+  capture or superseding request. It returns only bounded PNG bytes plus
+  validated PNG dimensions/content SHA/byte length/DPR/sizing/crop metadata,
   explicit content/border-box geometry and deferred source-node identities tied
   to the renderer-provided exact source Hash; it never returns
   runtime HTML, SVG, script state or filesystem data.
