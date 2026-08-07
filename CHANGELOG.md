@@ -4,6 +4,32 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+## [0.9.7] - 2026-08-07
+
+- Let macOS applications such as Qoder Work offer PageRoot as an alternate
+  HTML editor. Selecting it now opens the exact current `.html` or `.htm`
+  source in PageRoot whether the app is closed or already running, while
+  preserving the user's current edits before switching projects. Rapid external
+  open requests and ordinary local project opens now share one durable order,
+  cannot leave PageRoot displaying an older file after a newer request has
+  become active, and keep the Canvas frozen while external activation is still
+  in flight. A failed later external request now keeps the last successfully
+  opened file visible and durable. A deferred external open now waits for an
+  observed switch blocker to clear, or for an explicit retry, so Canvas
+  recovery cannot create an automatic retry loop. Every already accepted local
+  or external result now enters a renderer FIFO and re-fences immediately
+  before it is published, so an older result cannot unlock the Canvas and let a
+  later queued open discard a newer user edit. A delayed startup catch-up can
+  no longer replace a newer live external-open request in the renderer. If a
+  cold-start file has moved or cannot be read, PageRoot now shows a stable
+  product error code and message instead of exposing the local path or raw
+  filesystem exception. Closing, restarting, or installing an update now waits
+  for an external HTML switch to finish safely instead of interrupting it,
+  including when the current project is still loading or has a read error. A
+  new external open that arrives mid-close now cancels the uncommitted close or
+  is safely handed to the next launch after shutdown commits.
+- Update the shared `js-yaml` dependency closure to 4.3.1, removing the
+  high-severity parsing advisory without changing the packaged runtime shape.
 - Bring the review-first AI workflow into the public README, built-in welcome
   project, About dialog and first-open guide. The new user-facing story shows
   before and after side by side, explains copy, structure and visual change

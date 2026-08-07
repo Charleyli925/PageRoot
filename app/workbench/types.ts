@@ -72,6 +72,7 @@ export type DesktopProjectsApi = {
   listRecentProjects: () => Promise<RecentProject[]>;
   openRecent: (sourcePath: string) => Promise<HtmlProject>;
   forgetRecent?: (sourcePath: string) => Promise<{ sourcePath: string }>;
+  acceptExternalOpen?: (requestId: string) => Promise<HtmlProject>;
 };
 
 export type QoderHandoffResult = {
@@ -273,6 +274,8 @@ export type ToastAction =
   | { id: "open-handoff"; label: string }
   | { id: "open-project"; label: string; sourcePath: string }
   | { id: "retry-project-open"; label: string; sourcePath?: string }
+  | { id: "retry-external-project-open"; label: string }
+  | { id: "retry-project-application"; label: string }
   | {
       id: "open-attachment-picker";
       label: string;

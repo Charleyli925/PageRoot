@@ -35,6 +35,11 @@ type WorkspaceUnavailable = {
   message: string;
 };
 
+type ExternalOpenRequest = {
+  requestId: string;
+  sourcePath: string;
+};
+
 declare global {
   interface Window {
     htmlAIAppLifecycle?: {
@@ -51,6 +56,9 @@ declare global {
       ) => () => void;
       onWorkspaceUnavailable: (
         listener: (issue: WorkspaceUnavailable) => void,
+      ) => () => void;
+      onExternalOpenRequested: (
+        listener: (request: ExternalOpenRequest) => void,
       ) => () => void;
       relaunch: () => Promise<{ relaunched: boolean }>;
       openUserNotice: () => Promise<{ opened: boolean }>;

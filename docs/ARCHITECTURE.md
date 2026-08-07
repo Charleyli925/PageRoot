@@ -207,6 +207,7 @@ they do not import application services.
 | --- | --- |
 | Bridge routes, timeouts and structured outcomes | `app/application/bridge-client.js` |
 | Open/registered project identity, session generation and late-query fencing | `app/application/project-session.js` |
+| External OS/QoderWork HTML-open delivery, opaque request deduplication, committed-exit one-shot handoff, cold-start native failure presentation from stable product codes, whole project-open transition ordering, monotonic deferred-transition notification, blocker-gated/manual safe-switch retry, accepted-result FIFO and final renderer fence | `desktop/external-file-open.mjs`, `desktop/project-open-queue.mjs`, `app/application/external-file-open-session.js`, `app/application/project-application-session.js` |
 | Current source bytes, Hash, revisions, persistence projection, source-write single flight and Canvas authority generation | `app/application/document-session.js` |
 | Renderer draft revision, pending operations and reconciliation | `app/application/draft-session.js` |
 | Renderer comment working copy, composer and saved-comment edit projection | `app/application/comment-session.js` |

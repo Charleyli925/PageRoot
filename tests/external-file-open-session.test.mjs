@@ -1,0 +1,194 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { ExternalFileOpenSession } from "../app/application/external-file-open-session.js";
+
+function request(id) {
+  return {
+    requestId: `external_${id}`,
+    sourcePath: `/Users/demo/${id}.html`,
+  };
+}
+
+test("external file session serializes delivery and lets the newest queued request win", async () => {
+  const session = new ExternalFileOpenSession();
+  let releaseFirst;
+  const firstReleased = new Promise((resolve) => {
+    releaseFirst = resolve;
+  });
+  let markFirstStarted;
+  const firstStarted = new Promise((resolve) => {
+    markFirstStarted = resolve;
+  });
+  let markLatestFinished;
+  const latestFinished = new Promise((resolve) => {
+    markLatestFinished = resolve;
+  });
+  const order = [];
+  const execute = async (value, { isSuperseded }) => {
+    order.push(`start:${value.requestId}`);
+    if (value.requestId === "external_first") {
+      markFirstStarted();
+      await firstReleased;
+      assert.equal(isSuperseded(), true);
+    }
+    order.push(`finish:${value.requestId}`);
+    if (value.requestId === "external_latest") markLatestFinished();
+    return "complete";
+  };
+
+  assert.equal(session.enqueue(request("first"), execute), true);
+  await firstStarted;
+  assert.equal(session.enqueue(request("second"), execute), true);
+  assert.equal(session.enqueue(request("latest"), execute), true);
+  assert.deepEqual(session.snapshot, {
+    status: "opening",
+    activeRequestId: "external_first",
+    queuedRequestId: "external_latest",
+    deferredRequestId: null,
+    deferredSequence: 0,
+  });
+
+  releaseFirst();
+  await latestFinished;
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(order, [
+    "start:external_first",
+    "finish:external_first",
+    "start:external_latest",
+    "finish:external_latest",
+  ]);
+  assert.deepEqual(session.snapshot, {
+    status: "idle",
+    activeRequestId: null,
+    queuedRequestId: null,
+    deferredRequestId: null,
+    deferredSequence: 0,
+  });
+});
+
+test("external file session deduplicates opaque deliveries and retains one deferred request", async () => {
+  const session = new ExternalFileOpenSession();
+  const calls = [];
+  let completeRetry;
+  const retryFinished = new Promise((resolve) => {
+    completeRetry = resolve;
+  });
+  const execute = async (value) => {
+    calls.push(value.requestId);
+    if (calls.length === 1) return "deferred";
+    completeRetry();
+    return "complete";
+  };
+
+  assert.equal(session.enqueue(request("deferred"), execute), true);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(session.snapshot, {
+    status: "deferred",
+    activeRequestId: null,
+    queuedRequestId: null,
+    deferredRequestId: "external_deferred",
+    deferredSequence: 1,
+  });
+  assert.equal(session.enqueue(request("deferred"), execute), false);
+  assert.equal(session.resume(execute), true);
+  await retryFinished;
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(calls, ["external_deferred", "external_deferred"]);
+  assert.equal(session.snapshot.status, "idle");
+});
+
+test("external file session notifies the renderer when a request becomes deferred", async () => {
+  const session = new ExternalFileOpenSession();
+  const snapshots = [];
+  session.setObserver((snapshot) => snapshots.push(snapshot));
+
+  assert.equal(session.enqueue(request("retry"), async () => "deferred"), true);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(snapshots.at(-1), {
+    status: "deferred",
+    activeRequestId: null,
+    queuedRequestId: null,
+    deferredRequestId: "external_retry",
+    deferredSequence: 1,
+  });
+});
+
+test("external file session gives every deferred transition a new sequence", async () => {
+  const session = new ExternalFileOpenSession();
+  const calls = [];
+  const execute = async (value) => {
+    calls.push(value.requestId);
+    return "deferred";
+  };
+
+  assert.equal(session.enqueue(request("retry-sequence"), execute), true);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(session.snapshot.deferredSequence, 1);
+
+  assert.equal(session.resume(execute), true);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(session.snapshot.deferredSequence, 2);
+  assert.deepEqual(calls, ["external_retry-sequence", "external_retry-sequence"]);
+});
+
+test("a newer external request supersedes a deferred request before it resumes", async () => {
+  const session = new ExternalFileOpenSession();
+  const calls = [];
+  let finishSecond;
+  const secondFinished = new Promise((resolve) => {
+    finishSecond = resolve;
+  });
+  const execute = async (value) => {
+    calls.push(value.requestId);
+    if (value.requestId === "external_first") return "deferred";
+    finishSecond();
+    return "complete";
+  };
+
+  assert.equal(session.enqueue(request("first"), execute), true);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(session.snapshot.status, "deferred");
+  assert.equal(session.enqueue(request("second"), execute), true);
+  await secondFinished;
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(calls, ["external_first", "external_second"]);
+  assert.equal(session.snapshot.status, "idle");
+});
+
+test("a successful active request remains publishable when its queued successor fails", async () => {
+  const session = new ExternalFileOpenSession();
+  const visibleProjects = [];
+  let releaseFirst;
+  const firstReleased = new Promise((resolve) => {
+    releaseFirst = resolve;
+  });
+  let markFirstStarted;
+  const firstStarted = new Promise((resolve) => {
+    markFirstStarted = resolve;
+  });
+  const execute = async (value, { isSuperseded }) => {
+    if (value.requestId === "external_first") {
+      markFirstStarted();
+      await firstReleased;
+      assert.equal(isSuperseded(), true);
+      // The Workbench may publish this already-accepted project even though a
+      // newer request is queued. That successor can fail without making the
+      // renderer diverge from the main-process active/recent source.
+      visibleProjects.push(value.sourcePath);
+      return "complete";
+    }
+    throw new Error("second source is unreadable");
+  };
+
+  assert.equal(session.enqueue(request("first"), execute), true);
+  await firstStarted;
+  assert.equal(session.enqueue(request("second"), execute), true);
+  releaseFirst();
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(visibleProjects, ["/Users/demo/first.html"]);
+  assert.equal(session.snapshot.status, "idle");
+});

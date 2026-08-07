@@ -63,11 +63,13 @@ opened by the production application.
 Electron tests pass a dedicated `PAGEROOT_E2E_USER_DATA_DIR` that is accepted
 only when `PAGEROOT_E2E=1` and the path is an isolated
 `pageroot-native-e2e-*` directory under the system temporary directory. They
-also place the bridge workspace inside that directory, remove only validated
-test directories, and never change `HOME` or open the user's real HTML
-project. The real-file case checkpoints and autosaves a temporary disk HTML,
-proves that only the authorized bytes changed, and then closes and reopens the
-app against the same forward result.
+run the native window hidden by default, keep its renderer unthrottled, place
+the bridge workspace inside that directory, remove only validated test
+directories, and never change `HOME` or open the user's real HTML project. Set
+`PAGEROOT_E2E_FOREGROUND=1` only for deliberate visual debugging. The
+real-file case checkpoints and autosaves a temporary disk HTML, proves that
+only the authorized bytes changed, and then closes and reopens the app against
+the same forward result.
 
 ## Coverage and release interpretation
 

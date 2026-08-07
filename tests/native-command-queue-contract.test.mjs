@@ -356,12 +356,265 @@ test("refresh and project-switch awaiters always settle when replayed or discard
   );
   assert.match(
     prepare,
-    /const replay = deferredEditorReplayRef\.current\.prepareProjectSwitch;[\s\S]*?if \(!replay\) \{[\s\S]*?resolveDeferred\?\.\(false\);[\s\S]*?return;[\s\S]*?replay\(\(value\) => resolveDeferred\?\.\(value\)\)/u,
+    /const replay = deferredEditorReplayRef\.current\.prepareProjectSwitch;[\s\S]*?if \(!replay\) \{[\s\S]*?resolveDeferred\?\.\(false\);[\s\S]*?return;[\s\S]*?replay\(\(value\) => resolveDeferred\?\.\(value\),[\s\S]*?retrySourcePath,[\s\S]*?onDeferred/u,
     "an unavailable project-switch replay endpoint must fail closed",
   );
   assert.match(
     prepare,
-    /prepareProjectSwitch\(true\)\.then\(resolve, \(\) => resolve\(false\)\)/u,
+    /prepareProjectSwitch\(true, options\)\.then\(resolve, \(\) => resolve\(false\)\)/u,
     "project-switch failure and discard must both resolve false",
+  );
+});
+
+test("external HTML activation fences before main-process acceptance and queues its result", () => {
+  const externalOpen = section(
+    workbench,
+    "const openExternalProject = useCallback",
+    "useEffect(() => {",
+  );
+
+  assertOrdered(
+    externalOpen,
+    [
+      "await prepareProjectSwitch(false, { onDeferred: () => {} })",
+      "const freezeCutoffRevision = documentSessionRef.current.editRevision",
+      "const frozen = fenceAndFreezeCurrentCanvas",
+      "const project = await acceptExternalOpen(request.requestId)",
+    ],
+    "external activation must freeze native editing immediately before IPC",
+  );
+  assert.match(
+    externalOpen,
+    /documentSessionRef\.current\.editRevision !== freezeCutoffRevision[\s\S]*?documentSessionRef\.current\.pendingWrite[\s\S]*?editorRef\.current\?\.unlockNow\?\.\(\)[\s\S]*?return "deferred"/u,
+    "a post-cutoff native edit must return to persistence before the retry",
+  );
+  assert.match(
+    externalOpen,
+    /finally \{[\s\S]*?canvasFrozen && !isSuperseded\(\)[\s\S]*?editorRef\.current\?\.unlockNow\?\.\(\)/u,
+    "the pre-read fence must release only when no newer external request inherits it",
+  );
+  assert.match(
+    externalOpen,
+    /const project = await acceptExternalOpen\(request\.requestId\);[\s\S]*?enqueueAcceptedProject\(project,/u,
+    "an accepted external project must enter the renderer FIFO before a successor can publish",
+  );
+});
+
+test("close waits for external acceptance and accepted-project application owners", () => {
+  const closeFlow = section(
+    workbench,
+    "const handlePrepareClose = (event: Event) => {",
+    "const handleCloseAborted = (event: Event) => {",
+  );
+
+  assert.match(
+    workbench,
+    /coordinator\.replace\("external-file-open",[\s\S]*?boundary === "close"[\s\S]*?externalFileOpenSessionRef\.current\.snapshot\.status !== "idle"[\s\S]*?waitUntilResolved\([\s\S]*?externalFileOpenSessionRef\.current\.snapshot\.status === "idle"/u,
+    "an external main-process acceptance must be a close-drain obligation",
+  );
+  assert.match(
+    workbench,
+    /coordinator\.replace\("project-application",[\s\S]*?boundary === "close"[\s\S]*?projectApplicationSessionRef\.current\.snapshot\.status !== "idle"[\s\S]*?waitUntilResolved\([\s\S]*?projectApplicationSessionRef\.current\.snapshot\.status === "idle"/u,
+    "an accepted project awaiting renderer publication must be a close-drain obligation",
+  );
+  assert.match(
+    closeFlow,
+    /const drainProjectOpenSessions = async \(\): Promise<CloseReadiness \| null> => \{[\s\S]*?while \(projectOpenInFlight\(\)\)[\s\S]*?drain\([\s\S]*?"close",[\s\S]*?const projectOpenBlock = await drainProjectOpenSessions\(\);[\s\S]*?if \(projectOpenBlock\) return projectOpenBlock;[\s\S]*?if \(projectHydratingRef\.current\) \{[\s\S]*?if \(projectOpenInFlight\(\)\)[\s\S]*?canCloseDuringHydration\(\{[\s\S]*?if \(projectLoadErrorRef\.current\) \{[\s\S]*?if \(projectOpenInFlight\(\)\)[\s\S]*?ready = true;/u,
+    "every close fast path must drain active project-open owners and fail closed on a race",
+  );
+});
+
+test("accepted desktop results re-fence in renderer FIFO before publication", () => {
+  const application = section(
+    workbench,
+    "const applyAcceptedProject = useCallback",
+    "const enqueueAcceptedProject = useCallback",
+  );
+  const localOpen = section(
+    workbench,
+    "const openProject = useCallback",
+    "const openExternalProject = useCallback",
+  );
+  const externalOpen = section(
+    workbench,
+    "const openExternalProject = useCallback",
+    "const resumeDeferredProjectApplication = useCallback",
+  );
+
+  assert.match(
+    workbench,
+    /new ProjectApplicationSession<AcceptedProjectApplication>\(\)/u,
+    "one renderer owner must retain accepted project results",
+  );
+  assertOrdered(
+    application,
+    [
+      "await prepareProjectSwitch(false, { onDeferred: () => {} })",
+      "const freezeCutoffRevision = documentSessionRef.current.editRevision",
+      "const frozen = fenceAndFreezeCurrentCanvas",
+      "applyProject(project)",
+    ],
+    "each accepted result must drain and take a final fence before publication",
+  );
+  assert.match(
+    application,
+    /documentSessionRef\.current\.editRevision !== freezeCutoffRevision[\s\S]*?editorRef\.current\?\.unlockNow\?\.\(\)[\s\S]*?return "deferred"/u,
+    "post-drain native input must keep the accepted result queued for retry",
+  );
+  assert.match(
+    localOpen,
+    /await api\.open(?:Recent|Html)\([\s\S]*?enqueueAcceptedProject\(project, reportOpenFailure\)/u,
+    "ordinary desktop results must enter the same renderer FIFO",
+  );
+  assert.match(
+    externalOpen,
+    /await acceptExternalOpen\(request\.requestId\)[\s\S]*?enqueueAcceptedProject\(project,/u,
+    "external results must enter the same renderer FIFO",
+  );
+  assert.doesNotMatch(
+    localOpen,
+    /applyProject\(project\)/u,
+    "ordinary IPC completion may not publish directly without the final fence",
+  );
+});
+
+test("deferred external opens publish transition snapshots and wait for a safe retry trigger", () => {
+  const observer = section(
+    workbench,
+    "const session = externalFileOpenSessionRef.current;",
+    "const session = projectApplicationSessionRef.current;",
+  );
+  const retry = section(
+    workbench,
+    "const pending = pendingProjectOpenRef.current;",
+    "const showProjectInFolder = useCallback",
+  );
+
+  assert.match(
+    workbench,
+    /const \[externalFileOpenSnapshot, setExternalFileOpenSnapshot\] =[\s\S]*?useState<ExternalFileOpenSnapshot>/u,
+    "Workbench must project ExternalFileOpenSession state into React",
+  );
+  assert.match(
+    observer,
+    /session\.setObserver\(setExternalFileOpenSnapshot\);[\s\S]*?setExternalFileOpenSnapshot\(session\.snapshot\);/u,
+    "the external session observer must seed and update the React snapshot",
+  );
+  assert.match(
+    workbench,
+    /const externalDeferredRequestId =[\s\S]*?externalFileOpenSnapshot\.status === "deferred"[\s\S]*?externalFileOpenSnapshot\.deferredRequestId/u,
+    "only a deferred owner snapshot may schedule retry",
+  );
+  assert.match(
+    workbench,
+    /const externalDeferredSequence =[\s\S]*?externalFileOpenSnapshot\.status === "deferred"[\s\S]*?externalFileOpenSnapshot\.deferredSequence/u,
+    "each deferred transition needs an observer-visible sequence",
+  );
+  assert.match(
+    retry,
+    /!pending[\s\S]*?!projectApplicationDeferredId[\s\S]*?!externalDeferredRequestId/u,
+    "a new deferred request must re-enter the normal retry effect",
+  );
+  assert.match(
+    retry,
+    /const advanceDeferredRetry =[\s\S]*?retryState\.requestId !== requestId[\s\S]*?retryState\.deferredSequence !== deferredSequence[\s\S]*?return;/u,
+    "a new deferred transition must be observed before it can ever resume",
+  );
+  assertOrdered(
+    retry,
+    [
+      "const retryState = retryRef.current;",
+      "retryState.requestId !== requestId",
+      "retryState.deferredSequence !== deferredSequence",
+      "sawSwitchBlocker: switchBlocked",
+      "if (switchBlocked) {",
+      "retryState.sawSwitchBlocker = true;",
+      "if (!retryState.sawSwitchBlocker) return;",
+      "resume();",
+    ],
+    "automatic resume must wait for an observed blocker transition",
+  );
+  assert.match(
+    workbench,
+    /id: "retry-external-project-open", label: "重试打开"/u,
+    "a persistently deferred external open needs an explicit retry action",
+  );
+  assert.match(
+    workbench,
+    /action\.id === "retry-external-project-open"[\s\S]*?resumeDeferredExternalProject\(\)/u,
+    "the explicit retry action must delegate to the session owner",
+  );
+  assert.doesNotMatch(
+    retry,
+    /externalOpenSession\.snapshot\.status/u,
+    "retry cannot poll mutable session state without its observer snapshot",
+  );
+});
+
+test("deferred accepted results remain in renderer FIFO until a safe retry", () => {
+  const observer = section(
+    workbench,
+    "const session = projectApplicationSessionRef.current;",
+    "const session = projectRulesSessionRef.current;",
+  );
+  const retry = section(
+    workbench,
+    "const pending = pendingProjectOpenRef.current;",
+    "const showProjectInFolder = useCallback",
+  );
+
+  assert.match(
+    workbench,
+    /const \[projectApplicationSnapshot, setProjectApplicationSnapshot\] =[\s\S]*?useState<ProjectApplicationSnapshot>/u,
+    "Workbench must project accepted-project owner state into React",
+  );
+  assert.match(
+    observer,
+    /session\.setObserver\(setProjectApplicationSnapshot\);[\s\S]*?setProjectApplicationSnapshot\(session\.snapshot\);/u,
+    "the accepted-project observer must seed and update React state",
+  );
+  assert.match(
+    workbench,
+    /const projectApplicationDeferredId =[\s\S]*?projectApplicationSnapshot\.status === "deferred"[\s\S]*?projectApplicationSnapshot\.deferredApplicationId/u,
+    "only a deferred accepted-result snapshot may resume publication",
+  );
+  assert.match(
+    retry,
+    /projectApplicationDeferredRetryRef,[\s\S]*?projectApplicationDeferredId,[\s\S]*?projectApplicationDeferredSequence,[\s\S]*?resumeDeferredProjectApplication/u,
+    "accepted results must resume before later external or picker work",
+  );
+  assert.match(
+    workbench,
+    /id: "retry-project-application", label: "继续切换"/u,
+    "a persistently deferred accepted result needs an explicit continuation action",
+  );
+  assert.match(
+    workbench,
+    /action\.id === "retry-project-application"[\s\S]*?resumeDeferredProjectApplication\(\)/u,
+    "the continuation action must delegate to the renderer FIFO owner",
+  );
+});
+
+test("desktop project opens publish successful FIFO predecessors", () => {
+  const localOpen = section(
+    workbench,
+    "const openProject = useCallback",
+    "const openExternalProject = useCallback",
+  );
+
+  assert.match(
+    localOpen,
+    /const orderedByMainProcess = \([\s\S]*?projectOpening === "desktop-dialog"/u,
+    "desktop open results need an explicit main-process ordering boundary",
+  );
+  assert.match(
+    localOpen,
+    /!project[\s\S]*?!orderedByMainProcess && openRequest !== projectOpenRequestRef\.current/u,
+    "only browser file input results may use the renderer stale-request fence",
+  );
+  assert.match(
+    localOpen,
+    /enqueueAcceptedProject\(project, reportOpenFailure\)/u,
+    "successful desktop predecessors must retain FIFO publication authority",
   );
 });

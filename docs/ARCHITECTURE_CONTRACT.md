@@ -70,6 +70,11 @@ The renderer's main workspace facts are partitioned as follows:
   outcomes and operation locks;
 - `VersionSession`: immutable Version projection and history-view transition;
 - `SourceHistorySession`: pending exact Patch operations and history action.
+- `ExternalFileOpenSession`: opaque external-open delivery IDs, one active
+  switch, newest queued request, deferred safe-switch retry and stale-result
+  fencing for work that has not yet been accepted.
+- `ProjectApplicationSession`: FIFO accepted project results, final renderer
+  switch fence, deferred application retry and successor preservation.
 
 `CommentSession` does not replace the Draft aggregate or Bridge CAS authority,
 and `VersionSession` does not make mutable copies of immutable Version files.
@@ -85,6 +90,50 @@ projectId + documentId + sourcePath + session generation + query sequence
 
 Revisions are monotonic. A query result with an older revision may never
 replace an acknowledged state, even if the project identity is unchanged.
+
+External HTML delivery is separately authorized but not separately ordered.
+The main-process mailbox accepts only a validated, opaque `.html`/`.htm`
+request ID and replaces an older unaccepted OS request with the newer one.
+`ProjectOpenQueue` then assigns the whole picker/read/Bridge-check and
+active-project transition its FIFO position at entry, shared by local picker,
+recent-project, external, startup, generated-version, rename and forget
+routes. The renderer's `ExternalFileOpenSession` owns delivery de-duplication,
+one active request, one newest queued request and a deferred retry when the
+normal project-switch boundary cannot yet close safely. Preload subscribes
+before requesting its readiness catch-up, and drops that catch-up if a live
+delivery arrives first, so an older mailbox snapshot cannot replace a newer
+external intent. The session fences only an
+older request that has not yet been accepted when a newer request is queued,
+and it freezes the Canvas from the final safe switch fence through the awaited
+external acceptance; a newer external request inherits that freeze. Its
+snapshot includes a monotonically increasing deferred-transition sequence.
+Workbench observes a new sequence but never resumes from that snapshot alone:
+automatic retry requires a relevant safe-switch blocker to be observed and
+then clear. If no tracked blocker is present, Workbench keeps the current HTML
+and offers an explicit retry action instead. If the final fence captures a
+post-cutoff native edit, it does not begin the IPC, releases that edit to normal
+persistence, and resumes only after that source blocker clears.
+
+An external delivery that arrives while the Electron close handshake is still
+awaiting the renderer cancels that exact close attempt before the request is
+published. Once close is committed, the exiting process never publishes or
+accepts another external request: it atomically writes only the latest
+validated native HTML path to a private one-shot handoff. Only the next launch
+that acquires Electron's single-instance lock claims and deletes that handoff
+before routing it through the same mailbox, so a losing secondary process
+cannot consume the request and no late delivery can mutate active/recent-project
+authority without a matching renderer publication.
+
+`ProjectApplicationSession` owns every successful local or external project
+result after main-process acceptance and before renderer publication. It keeps
+those results FIFO, so a later accepted result cannot erase a deferred or
+successfully published predecessor. Before applying each result, Workbench
+re-enters the complete switch boundary and takes one synchronous final Canvas
+freeze. A post-drain native edit leaves that accepted result in the session
+until a relevant blocker transition or explicit continuation makes another
+attempt safe. Thus a slow later read cannot unlock the Canvas through an older
+result and then discard an intervening edit. Ordinary Workbench project-picker
+retry state may not carry either external delivery or accepted-result protocol.
 
 A transition that changes the current source or Version has two phases. The
 asynchronous phase prepares and validates one complete candidate: project and

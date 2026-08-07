@@ -104,6 +104,16 @@ import {
 } from "./application/document-session.js";
 import { DrainCoordinator } from "./application/drain-coordinator.js";
 import {
+  ExternalFileOpenSession,
+  type ExternalFileOpenRequest,
+  type ExternalFileOpenSnapshot,
+} from "./application/external-file-open-session.js";
+import {
+  ProjectApplicationSession,
+  type ProjectApplication,
+  type ProjectApplicationSnapshot,
+} from "./application/project-application-session.js";
+import {
   RuntimeVisualProjectionSession,
   type RuntimeVisualProjectionSnapshot,
 } from "./application/runtime-visual-projection-session.js";
@@ -303,6 +313,22 @@ type PreparedGeneratedSourceTransition = Readonly<{
   activatedProject: HtmlProject | null;
 }>;
 
+type ProjectSwitchOptions = Readonly<{
+  retrySourcePath?: string;
+  onDeferred?: () => void;
+}>;
+
+type AcceptedProjectApplication = Readonly<{
+  project: HtmlProject;
+  onFailure: (cause: unknown) => void;
+}>;
+
+type DeferredProjectApplicationRetry = {
+  requestId: string | null;
+  deferredSequence: number;
+  sawSwitchBlocker: boolean;
+};
+
 const AUTOSAVE_DELAY_MS = 700;
 const bridgeClient = createRuntimeBridgeClient();
 const recoveryStore = createBrowserRecoveryStore();
@@ -327,6 +353,20 @@ const INITIAL_RUN_SNAPSHOT: RunSessionSnapshot = {
   activeHandoffMayBeRunning: false,
   recentOutcome: null,
   backgroundResults: [],
+};
+const INITIAL_EXTERNAL_FILE_OPEN_SNAPSHOT: ExternalFileOpenSnapshot = {
+  status: "idle",
+  activeRequestId: null,
+  queuedRequestId: null,
+  deferredRequestId: null,
+  deferredSequence: 0,
+};
+const INITIAL_PROJECT_APPLICATION_SNAPSHOT: ProjectApplicationSnapshot = {
+  status: "idle",
+  activeApplicationId: null,
+  queuedApplicationId: null,
+  deferredApplicationId: null,
+  deferredSequence: 0,
 };
 const INITIAL_VERSION_SNAPSHOT: VersionSessionSnapshot<Version> = {
   versions: [],
@@ -471,7 +511,10 @@ export default function Workbench() {
       sourceTransitionToken: number | undefined,
       resolve: () => void,
     ) => void;
-    prepareProjectSwitch?: (resolve: (value: boolean) => void) => void;
+    prepareProjectSwitch?: (
+      resolve: (value: boolean) => void,
+      options?: ProjectSwitchOptions,
+    ) => void;
     exportCurrentHtml?: () => void;
     reloadCurrentSource?: () => void;
     requestUserFlush?: () => void;
@@ -561,6 +604,10 @@ export default function Workbench() {
   const reviewSessionSequenceRef = useRef(0);
   const projectSessionRef = useRef(new ProjectSession());
   const drainCoordinatorRef = useRef(new DrainCoordinator());
+  const externalFileOpenSessionRef = useRef(new ExternalFileOpenSession());
+  const projectApplicationSessionRef =
+    useRef(new ProjectApplicationSession<AcceptedProjectApplication>());
+  const projectApplicationCounterRef = useRef(0);
   const runtimeCapabilitiesRef =
     useRef<RuntimeCapabilities>(BROWSER_RUNTIME_CAPABILITIES);
   const runtimeVisualProjectionSessionRef = useRef(
@@ -634,6 +681,17 @@ export default function Workbench() {
     recentPath?: string;
     requestedAt: number;
   } | null>(null);
+  const externalDeferredRetryRef = useRef<DeferredProjectApplicationRetry>({
+    requestId: null,
+    deferredSequence: 0,
+    sawSwitchBlocker: false,
+  });
+  const projectApplicationDeferredRetryRef =
+    useRef<DeferredProjectApplicationRetry>({
+      requestId: null,
+      deferredSequence: 0,
+      sawSwitchBlocker: false,
+    });
   const closeLifecycleRef = useRef<CloseLifecycle>({
     preparingRequestId: null,
     frozenRequestId: null,
@@ -647,6 +705,26 @@ export default function Workbench() {
 
   const [documentSnapshot, setDocumentSnapshot] =
     useState<DocumentSessionSnapshot>(INITIAL_DOCUMENT_SNAPSHOT);
+  const [externalFileOpenSnapshot, setExternalFileOpenSnapshot] =
+    useState<ExternalFileOpenSnapshot>(INITIAL_EXTERNAL_FILE_OPEN_SNAPSHOT);
+  const [projectApplicationSnapshot, setProjectApplicationSnapshot] =
+    useState<ProjectApplicationSnapshot>(INITIAL_PROJECT_APPLICATION_SNAPSHOT);
+  const externalDeferredRequestId =
+    externalFileOpenSnapshot.status === "deferred"
+      ? externalFileOpenSnapshot.deferredRequestId
+      : null;
+  const externalDeferredSequence =
+    externalFileOpenSnapshot.status === "deferred"
+      ? externalFileOpenSnapshot.deferredSequence
+      : 0;
+  const projectApplicationDeferredId =
+    projectApplicationSnapshot.status === "deferred"
+      ? projectApplicationSnapshot.deferredApplicationId
+      : null;
+  const projectApplicationDeferredSequence =
+    projectApplicationSnapshot.status === "deferred"
+      ? projectApplicationSnapshot.deferredSequence
+      : 0;
   const html = documentSnapshot.html;
   const sourceSha256 = documentSnapshot.sourceSha256;
   const canvasGeneration = documentSnapshot.canvasGeneration;
@@ -845,6 +923,21 @@ export default function Workbench() {
     return () => session.dispose();
   }, []);
   useEffect(() => () => reviewAnalysisSessionRef.current.dispose(), []);
+  useEffect(() => {
+    const session = externalFileOpenSessionRef.current;
+    // Deferred external opens are owned by the session. Publishing its
+    // snapshot makes the normal safe-switch retry effect react to a newly
+    // deferred request even when no ordinary persistence state has changed.
+    session.setObserver(setExternalFileOpenSnapshot);
+    setExternalFileOpenSnapshot(session.snapshot);
+    return () => session.dispose();
+  }, []);
+  useEffect(() => {
+    const session = projectApplicationSessionRef.current;
+    session.setObserver(setProjectApplicationSnapshot);
+    setProjectApplicationSnapshot(session.snapshot);
+    return () => session.dispose();
+  }, []);
   useEffect(() => {
     const session = projectRulesSessionRef.current;
     session.setObserver((snapshot) => {
@@ -4156,6 +4249,36 @@ export default function Workbench() {
 
   useEffect(() => {
     const coordinator = drainCoordinatorRef.current;
+    coordinator.replace("external-file-open", {
+      label: "等待外部 HTML 打开完成",
+      inspect: (boundary) => (
+        boundary === "close"
+        && externalFileOpenSessionRef.current.snapshot.status !== "idle"
+      )
+        ? {
+            state: "pending",
+            reason: "外部 HTML 正在读取或等待安全切换。",
+          }
+        : { state: "resolved" },
+      drain: () => waitUntilResolved(
+        () => externalFileOpenSessionRef.current.snapshot.status === "idle",
+      ),
+    });
+    coordinator.replace("project-application", {
+      label: "等待已接收的 HTML 切换完成",
+      inspect: (boundary) => (
+        boundary === "close"
+        && projectApplicationSessionRef.current.snapshot.status !== "idle"
+      )
+        ? {
+            state: "pending",
+            reason: "已接收的 HTML 仍在完成安全切换。",
+          }
+        : { state: "resolved" },
+      drain: () => waitUntilResolved(
+        () => projectApplicationSessionRef.current.snapshot.status === "idle",
+      ),
+    });
     coordinator.replace("view-transition", {
       label: "等待页面切换完成",
       inspect: (boundary) => (
@@ -4931,10 +5054,33 @@ export default function Workbench() {
           reason,
           presentation: "in-app",
         });
+        const projectOpenInFlight = () => (
+          externalFileOpenSessionRef.current.snapshot.status !== "idle"
+          || projectApplicationSessionRef.current.snapshot.status !== "idle"
+        );
+        const drainProjectOpenSessions = async (): Promise<CloseReadiness | null> => {
+          while (projectOpenInFlight()) {
+            const projectOpenDrain = await drainCoordinatorRef.current.drain(
+              "close",
+              { deadlineAt: detail.deadlineAt - 250 },
+            );
+            if (!projectOpenDrain.ok) return inAppBlock(projectOpenDrain.reason);
+          }
+          return null;
+        };
         closeLifecycle.preparingRequestId = detail.requestId;
 
         try {
+          // An external request may mutate durable active-project authority
+          // before a hydration or load-error fast path would normally decide
+          // that this close is clean. Drain those owners before either fast
+          // path, then fail closed if a new request races that observation.
+          const projectOpenBlock = await drainProjectOpenSessions();
+          if (projectOpenBlock) return projectOpenBlock;
           if (projectHydratingRef.current) {
+            if (projectOpenInFlight()) {
+              return inAppBlock("外部 HTML 切换仍未安全完成，已取消关闭。");
+            }
             const draftState = draftSessionRef.current.inspect();
             if (canCloseDuringHydration({
               projectHydrating: true,
@@ -4954,6 +5100,9 @@ export default function Workbench() {
             return inAppBlock("项目状态尚未读取完成，已取消关闭以避免覆盖未知编辑状态。");
           }
           if (projectLoadErrorRef.current) {
+            if (projectOpenInFlight()) {
+              return inAppBlock("外部 HTML 切换仍未安全完成，已取消关闭。");
+            }
             if (
               documentSessionRef.current.pendingWrite
               || documentSessionRef.current.flushPromise
@@ -5232,9 +5381,16 @@ export default function Workbench() {
 
   const prepareProjectSwitch = useCallback(async (
     fromDeferred = false,
-    retrySourcePath?: string,
+    {
+      retrySourcePath,
+      onDeferred,
+    }: ProjectSwitchOptions = {},
   ): Promise<boolean> => {
     const rememberProjectOpen = () => {
+      if (onDeferred) {
+        onDeferred();
+        return;
+      }
       pendingProjectOpenRef.current = {
         ...(retrySourcePath ? { recentPath: retrySourcePath } : {}),
         requestedAt: Date.now(),
@@ -5253,7 +5409,10 @@ export default function Workbench() {
             resolveDeferred?.(false);
             return;
           }
-          replay((value) => resolveDeferred?.(value));
+          replay((value) => resolveDeferred?.(value), {
+            retrySourcePath,
+            onDeferred,
+          });
         },
         undefined,
         { onDiscard: () => resolveDeferred?.(false) },
@@ -5355,17 +5514,97 @@ export default function Workbench() {
     viewMode,
   ]);
   useEffect(() => {
-    deferredEditorReplayRef.current.prepareProjectSwitch = (resolve) => {
-      void prepareProjectSwitch(true).then(resolve, () => resolve(false));
+    deferredEditorReplayRef.current.prepareProjectSwitch = (resolve, options) => {
+      void prepareProjectSwitch(true, options).then(resolve, () => resolve(false));
     };
   }, [prepareProjectSwitch]);
 
+  const applyAcceptedProject = useCallback(async (
+    application: ProjectApplication<AcceptedProjectApplication>,
+  ): Promise<"complete" | "deferred"> => {
+    const { project, onFailure } = application.value;
+    // The main-process FIFO owns durable activation, but it cannot prevent an
+    // earlier result from reaching the renderer while a later result is still
+    // reading. Re-open the complete renderer switch boundary for every
+    // accepted result, then take one synchronous final fence before publish.
+    if (!await prepareProjectSwitch(false, { onDeferred: () => {} })) {
+      return "deferred";
+    }
+    let canvasFrozen = false;
+    let appliedProject = false;
+    if (
+      projectSessionRef.current.sourcePath
+      && !projectLoadErrorRef.current
+      && viewMode !== "history"
+    ) {
+      const freezeCutoffRevision = documentSessionRef.current.editRevision;
+      const frozen = fenceAndFreezeCurrentCanvas(
+        "当前编辑画布尚未完成安全收口，暂不能切换 HTML。",
+      );
+      if (!frozen.ok) {
+        editorRef.current?.showCommitBlocked(frozen.reason);
+        return "deferred";
+      }
+      canvasFrozen = true;
+      if (
+        documentSessionRef.current.editRevision !== freezeCutoffRevision
+        || documentSessionRef.current.pendingWrite
+        || documentSessionRef.current.flushPromise
+      ) {
+        // freezeNow() can receive native input after the final drain. Release
+        // it to normal persistence and keep this already-accepted result in
+        // the renderer FIFO for a later, safe application.
+        editorRef.current?.unlockNow?.();
+        return "deferred";
+      }
+    }
+    try {
+      setStartupIssue(null);
+      applyProject(project);
+      appliedProject = true;
+      const epoch = projectSessionRef.current.epoch;
+      await Promise.all([
+        refreshRecents(),
+        refreshWorkspace(project.sourcePath, epoch, false, epoch),
+      ]);
+    } catch (cause) {
+      try {
+        onFailure(cause);
+      } catch {
+        // Failure presentation cannot strand later accepted project results.
+      }
+    } finally {
+      if (canvasFrozen && !appliedProject) {
+        editorRef.current?.unlockNow?.();
+      }
+    }
+    return "complete";
+  }, [
+    applyProject,
+    fenceAndFreezeCurrentCanvas,
+    prepareProjectSwitch,
+    refreshRecents,
+    refreshWorkspace,
+    viewMode,
+  ]);
+
+  const enqueueAcceptedProject = useCallback((
+    project: HtmlProject,
+    onFailure: (cause: unknown) => void,
+  ) => projectApplicationSessionRef.current.enqueue({
+    applicationId: `project-application-${++projectApplicationCounterRef.current}`,
+    value: { project, onFailure },
+  }, applyAcceptedProject), [applyAcceptedProject]);
+
   const openProject = useCallback(async (recentPath?: string) => {
-    if (!await prepareProjectSwitch(false, recentPath)) return;
+    if (!await prepareProjectSwitch(false, { retrySourcePath: recentPath })) return;
     pendingProjectOpenRef.current = null;
     setProjectMenuOpen(false);
     const openRequest = projectOpenRequestRef.current + 1;
     projectOpenRequestRef.current = openRequest;
+    const orderedByMainProcess = (
+      runtimeCapabilitiesRef.current.projectOpening === "desktop-dialog"
+    );
     if (
       runtimeCapabilitiesRef.current.projectOpening === "browser-file"
       && !recentPath
@@ -5375,19 +5614,7 @@ export default function Workbench() {
     }
     const api = window.htmlAIProjects;
     if (!api) return;
-    try {
-      const project = recentPath
-        ? await api.openRecent(recentPath)
-        : await api.openHtml();
-      if (!project || openRequest !== projectOpenRequestRef.current) return;
-      setStartupIssue(null);
-      applyProject(project);
-      const epoch = projectSessionRef.current.epoch;
-      await Promise.all([
-        refreshRecents(),
-        refreshWorkspace(project.sourcePath, epoch, false, epoch),
-      ]);
-    } catch (cause) {
+    const reportOpenFailure = (cause: unknown) => {
       if (openRequest !== projectOpenRequestRef.current) return;
       if (recentPath) void refreshRecents();
       setToast({
@@ -5407,16 +5634,173 @@ export default function Workbench() {
           label: recentPath ? "重新选择位置" : "重新选择",
         },
       });
+    };
+    try {
+      const project = recentPath
+        ? await api.openRecent(recentPath)
+        : await api.openHtml();
+      if (
+        !project
+        || (!orderedByMainProcess && openRequest !== projectOpenRequestRef.current)
+      ) return;
+      // Desktop project opens are complete FIFO transitions in the main
+      // process. A successful earlier result remains canonical until a later
+      // request succeeds; the browser file input has no such main-process
+      // authority and still needs its renderer request fence.
+      if (!enqueueAcceptedProject(project, reportOpenFailure)) {
+        reportOpenFailure(new Error("无法安排当前 HTML 的安全切换。"));
+      }
+    } catch (cause) {
+      reportOpenFailure(cause);
     }
-  }, [applyProject, prepareProjectSwitch, refreshRecents, refreshWorkspace]);
+  }, [enqueueAcceptedProject, prepareProjectSwitch, refreshRecents]);
+
+  const openExternalProject = useCallback(async (
+    request: ExternalFileOpenRequest,
+    { isSuperseded }: { isSuperseded: () => boolean },
+  ): Promise<"complete" | "deferred"> => {
+    if (isSuperseded()) return "complete";
+    if (!await prepareProjectSwitch(false, { onDeferred: () => {} })) {
+      return "deferred";
+    }
+    if (isSuperseded()) return "complete";
+
+    // prepareProjectSwitch() closes the current edit and persistence drain, but
+    // the external main-process read can still take time. Take an imperative
+    // fence immediately before that awaited boundary so post-cutoff native
+    // input cannot be reset when the accepted project is applied below.
+    let canvasFrozen = false;
+    if (
+      projectSessionRef.current.sourcePath
+      && !projectLoadErrorRef.current
+      && viewMode !== "history"
+    ) {
+      const freezeCutoffRevision = documentSessionRef.current.editRevision;
+      const frozen = fenceAndFreezeCurrentCanvas(
+        "当前编辑画布尚未完成安全收口，暂不能切换 QoderWork 中的 HTML。",
+      );
+      if (!frozen.ok) return "deferred";
+      canvasFrozen = true;
+      if (
+        documentSessionRef.current.editRevision !== freezeCutoffRevision
+        || documentSessionRef.current.pendingWrite
+        || documentSessionRef.current.flushPromise
+      ) {
+        // freezeNow() captured a native input delivered after the prior switch
+        // drain. Do not start external activation; return this exact edit to
+        // normal persistence and retry the switch only after it is safe.
+        editorRef.current?.unlockNow?.();
+        return "deferred";
+      }
+    }
+
+    pendingProjectOpenRef.current = null;
+    setProjectMenuOpen(false);
+    const openRequest = projectOpenRequestRef.current + 1;
+    projectOpenRequestRef.current = openRequest;
+    const acceptExternalOpen = window.htmlAIProjects?.acceptExternalOpen;
+    try {
+      if (!acceptExternalOpen) {
+        if (!isSuperseded()) {
+          setToast({
+            title: "无法接收外部 HTML",
+            message: "当前 PageRoot 版本缺少外部文件打开通道，请重新安装最新版本。",
+            tone: "error",
+            sticky: true,
+            disposition: "background-result",
+            dedupeKey: "external-project-open-unavailable",
+          });
+        }
+        return "complete";
+      }
+      const project = await acceptExternalOpen(request.requestId);
+      // Main-process project opens are serialized as whole transitions. Keep
+      // every accepted result in renderer FIFO too: B may have to wait for a
+      // final Canvas fence after A has already published, and a failed later
+      // successor must never erase A's successful application.
+      if (!enqueueAcceptedProject(project, (cause) => {
+        if (isSuperseded() || openRequest !== projectOpenRequestRef.current) return;
+        setToast({
+          title: "无法打开 QoderWork 中的 HTML",
+          message: productErrorMessage(
+            cause,
+            "文件可能已移动、暂时不可读，或不是完整的 HTML 页面；当前项目仍保持打开。",
+          ),
+          tone: "error",
+          sticky: true,
+          disposition: "background-result",
+          dedupeKey: "external-project-open-error",
+        });
+      })) {
+        throw new Error("无法安排外部 HTML 的安全切换。");
+      }
+    } catch (cause) {
+      if (isSuperseded() || openRequest !== projectOpenRequestRef.current) {
+        return "complete";
+      }
+      setToast({
+        title: "无法打开 QoderWork 中的 HTML",
+        message: productErrorMessage(
+          cause,
+          "文件可能已移动、暂时不可读，或不是完整的 HTML 页面；当前项目仍保持打开。",
+        ),
+        tone: "error",
+        sticky: true,
+        disposition: "background-result",
+        dedupeKey: "external-project-open-error",
+      });
+    } finally {
+      // A newer external request inherits this fence. Any final failure leaves
+      // the current source untouched. Accepted results take their own final
+      // fence inside ProjectApplicationSession, so this pre-read fence can be
+      // released once no newer external request inherits it.
+      if (canvasFrozen && !isSuperseded()) {
+        editorRef.current?.unlockNow?.();
+      }
+    }
+    return "complete";
+  }, [
+    enqueueAcceptedProject,
+    fenceAndFreezeCurrentCanvas,
+    prepareProjectSwitch,
+    viewMode,
+  ]);
+
+  const resumeDeferredProjectApplication = useCallback(() => {
+    const session = projectApplicationSessionRef.current;
+    if (session.snapshot.status !== "deferred") return false;
+    return session.resume(applyAcceptedProject);
+  }, [applyAcceptedProject]);
+
+  const resumeDeferredExternalProject = useCallback(() => {
+    const session = externalFileOpenSessionRef.current;
+    if (session.snapshot.status !== "deferred") return false;
+    return session.resume(openExternalProject);
+  }, [openExternalProject]);
+
+  useEffect(() => {
+    const lifecycle = window.htmlAIAppLifecycle;
+    if (!lifecycle?.onExternalOpenRequested) return undefined;
+    return lifecycle.onExternalOpenRequested((request) => {
+      const accepted = externalFileOpenSessionRef.current.enqueue(
+        request,
+        openExternalProject,
+      );
+      if (accepted) pendingProjectOpenRef.current = null;
+    });
+  }, [openExternalProject]);
 
   useEffect(() => {
     const pending = pendingProjectOpenRef.current;
-    if (!pending) return;
+    if (
+      !pending
+      && !projectApplicationDeferredId
+      && !externalDeferredRequestId
+    ) return;
     const projectRulesUnsaved = projectRulesSessionRef.current
       .inspect({ locked: projectLockedRef.current }).state !== "resolved";
     const draftState = draftSessionRef.current.inspect();
-    if (
+    const switchBlocked = Boolean(
       generating
       || submissionIntentRef.current
       || submissionPendingRef.current
@@ -5431,21 +5815,114 @@ export default function Workbench() {
       || draftState.writing
       || draftState.error
       || editRevision > lastPersistedRevision
-    ) return;
+    );
+    const advanceDeferredRetry = (
+      retryRef: { current: DeferredProjectApplicationRetry },
+      requestId: string,
+      deferredSequence: number,
+      resume: () => boolean,
+      requestManualRetry: () => void,
+    ) => {
+      const retryState = retryRef.current;
+      if (
+        retryState.requestId !== requestId
+        || retryState.deferredSequence !== deferredSequence
+      ) {
+        // A deferred snapshot acknowledges one failed boundary attempt. It is
+        // not itself permission to repeat that attempt: doing so can loop
+        // while Canvas authority recovery remains unresolved but ordinary
+        // projections already look clean.
+        retryRef.current = {
+          requestId,
+          deferredSequence,
+          sawSwitchBlocker: switchBlocked,
+        };
+        if (!switchBlocked) requestManualRetry();
+        return;
+      }
+      if (switchBlocked) {
+        retryState.sawSwitchBlocker = true;
+        return;
+      }
+      if (!retryState.sawSwitchBlocker) return;
+      retryState.sawSwitchBlocker = false;
+      resume();
+    };
+    // Accepted results own the earlier renderer FIFO position, so they resume
+    // before a still-unaccepted external request or a picker retry.
+    if (projectApplicationDeferredId) {
+      advanceDeferredRetry(
+        projectApplicationDeferredRetryRef,
+        projectApplicationDeferredId,
+        projectApplicationDeferredSequence,
+        resumeDeferredProjectApplication,
+        () => setToast({
+          title: "当前 HTML 尚未完成安全切换",
+          message: "已保留已接受的 HTML；当前画布恢复后可手动继续切换。",
+          tone: "warning",
+          sticky: true,
+          disposition: "direct-action",
+          dedupeKey: "project-application-deferred",
+          action: { id: "retry-project-application", label: "继续切换" },
+        }),
+      );
+      return;
+    }
+    if (externalDeferredRequestId) {
+      advanceDeferredRetry(
+        externalDeferredRetryRef,
+        externalDeferredRequestId,
+        externalDeferredSequence,
+        resumeDeferredExternalProject,
+        () => setToast({
+          title: "暂不能切换到 QoderWork 中的 HTML",
+          message: "当前画布仍在安全恢复；已保留当前 HTML。恢复后可手动重试打开。",
+          tone: "warning",
+          sticky: true,
+          disposition: "direct-action",
+          dedupeKey: "external-project-open-deferred",
+          action: { id: "retry-external-project-open", label: "重试打开" },
+        }),
+      );
+      return;
+    }
+    if (!pending || switchBlocked) return;
     pendingProjectOpenRef.current = null;
     void openProject(pending.recentPath);
   }, [
     draftPersistError,
     attachmentUploadCount,
     editRevision,
+    externalDeferredRequestId,
+    externalDeferredSequence,
     generating,
     lastPersistedRevision,
     openProject,
     persistState,
+    projectApplicationDeferredId,
+    projectApplicationDeferredSequence,
     projectRulesSnapshot,
     projectHydrating,
+    resumeDeferredProjectApplication,
+    resumeDeferredExternalProject,
     viewTransitioning,
   ]);
+  useEffect(() => {
+    if (
+      externalFileOpenSnapshot.status !== "deferred"
+      && toastRef.current?.dedupeKey === "external-project-open-deferred"
+    ) {
+      setToast(null);
+    }
+  }, [externalFileOpenSnapshot.status]);
+  useEffect(() => {
+    if (
+      projectApplicationSnapshot.status !== "deferred"
+      && toastRef.current?.dedupeKey === "project-application-deferred"
+    ) {
+      setToast(null);
+    }
+  }, [projectApplicationSnapshot.status]);
 
   const showProjectInFolder = useCallback(async (requestedSourcePath?: string) => {
     const activeSourcePath = requestedSourcePath || projectSessionRef.current.sourcePath;
@@ -9915,6 +10392,10 @@ export default function Workbench() {
       void openProject(action.sourcePath);
     } else if (action.id === "retry-project-open") {
       void openProject(action.sourcePath);
+    } else if (action.id === "retry-external-project-open") {
+      void resumeDeferredExternalProject();
+    } else if (action.id === "retry-project-application") {
+      void resumeDeferredProjectApplication();
     } else if (action.id === "open-attachment-picker") {
       openAttachmentPicker(action.target, action.accept || "all");
     } else if (action.id === "review-comment-attachments") {

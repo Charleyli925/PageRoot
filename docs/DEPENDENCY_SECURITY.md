@@ -14,6 +14,11 @@ verified compatible fix.
 
 ## Reviewed fixes
 
+The 2026-08-07 release patch moves the single hoisted `js-yaml` runtime and
+tooling closure from 4.3.0 to the parent-compatible 4.3.1. This removes
+GHSA-5p4m-2wfm-xmqj without adding an exception, changing Electron, or
+introducing a nested packaged dependency.
+
 The 2026-08-04 security convergence upgrades `next` and
 `eslint-config-next` to 16.3.0, which refreshes the optional Sharp/libvips
 closure to Sharp 0.35.3. It also resolves compatible `fast-uri`, PostCSS and

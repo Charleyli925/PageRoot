@@ -18,6 +18,7 @@ const channels = Object.freeze({
   listRecentProjects: "html-projects:list-recent",
   openRecent: "html-projects:open-recent",
   forgetRecent: "html-projects:forget-recent",
+  acceptExternalOpen: "html-projects:accept-external-open",
 });
 const appChannels = Object.freeze({
   prepareClose: "html-app:prepare-close",
@@ -26,6 +27,8 @@ const appChannels = Object.freeze({
   aboutRequested: "html-app:about-requested",
   workspaceUnavailable: "html-app:workspace-unavailable",
   workspaceRecoveryReady: "html-app:workspace-recovery-ready",
+  externalOpenRequested: "html-app:external-open-requested",
+  externalOpenReady: "html-app:external-open-ready",
   relaunch: "html-app:relaunch",
   openUserNotice: "html-app:open-user-notice",
 });
@@ -123,6 +126,10 @@ const projectsApi = Object.freeze({
   listRecentProjects: () => invokeProject(channels.listRecentProjects),
   openRecent: (sourcePath) => invokeProject(channels.openRecent, sourcePath),
   forgetRecent: (sourcePath) => invokeProject(channels.forgetRecent, sourcePath),
+  acceptExternalOpen: (requestId) => invokeProject(
+    channels.acceptExternalOpen,
+    { requestId },
+  ),
 });
 const integrationsApi = Object.freeze({
   handoffToQoderWork: (payload) => invokeProject(
@@ -196,6 +203,7 @@ const closeListeners = new Map();
 const closeAbortListeners = new Map();
 const aboutRequestListeners = new Map();
 const workspaceUnavailableListeners = new Map();
+const externalOpenListeners = new Map();
 function normalizedWorkspaceIssue(payload) {
   return Object.freeze({
     title: typeof payload?.title === "string"
@@ -204,6 +212,19 @@ function normalizedWorkspaceIssue(payload) {
     message: typeof payload?.message === "string"
       ? payload.message
       : "当前页面内容仍保留，可以导出后重新打开源页。",
+  });
+}
+function normalizedExternalOpenRequest(payload) {
+  if (
+    !payload
+    || typeof payload.requestId !== "string"
+    || !payload.requestId
+    || typeof payload.sourcePath !== "string"
+    || !payload.sourcePath
+  ) return null;
+  return Object.freeze({
+    requestId: payload.requestId,
+    sourcePath: payload.sourcePath,
   });
 }
 const appLifecycleApi = Object.freeze({
@@ -290,6 +311,41 @@ const appLifecycleApi = Object.freeze({
       if (!registered) return;
       workspaceUnavailableListeners.delete(listener);
       ipcRenderer.removeListener(appChannels.workspaceUnavailable, registered);
+    };
+  },
+  onExternalOpenRequested: (listener) => {
+    if (typeof listener !== "function") {
+      throw new TypeError("onExternalOpenRequested listener must be a function.");
+    }
+    let liveDeliveryGeneration = 0;
+    const wrapped = (_event, payload) => {
+      const request = normalizedExternalOpenRequest(payload);
+      if (!request) return;
+      liveDeliveryGeneration += 1;
+      listener(request);
+    };
+    externalOpenListeners.set(listener, wrapped);
+    ipcRenderer.on(appChannels.externalOpenRequested, wrapped);
+    const catchUpGeneration = liveDeliveryGeneration;
+    void ipcRenderer.invoke(appChannels.externalOpenReady)
+      .then((payload) => {
+        if (
+          externalOpenListeners.get(listener) !== wrapped
+          || !payload
+          // A live IPC delivery is newer than the asynchronous readiness
+          // snapshot. Never let that stale catch-up response replace the
+          // currently pending mailbox request in the renderer session.
+          || liveDeliveryGeneration !== catchUpGeneration
+        ) return;
+        const request = normalizedExternalOpenRequest(payload);
+        if (request) listener(request);
+      })
+      .catch(() => {});
+    return () => {
+      const registered = externalOpenListeners.get(listener);
+      if (!registered) return;
+      externalOpenListeners.delete(listener);
+      ipcRenderer.removeListener(appChannels.externalOpenRequested, registered);
     };
   },
   relaunch: () => ipcRenderer.invoke(appChannels.relaunch),

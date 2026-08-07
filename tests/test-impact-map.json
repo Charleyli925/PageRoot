@@ -281,11 +281,12 @@
     {
       "id": "state-architecture",
       "patterns": [
-        "^app/application/(?:bridge-client|comment-session|document-session|draft-session|drain-coordinator|project-query-fence|project-rules-session|project-session|recovery-store|review-analysis-session|run-session|runtime-capabilities|runtime-visual-projection-session|source-history-session|version-session)\\.(?:js|d\\.ts)$",
+        "^app/application/(?:bridge-client|comment-session|document-session|draft-session|drain-coordinator|external-file-open-session|project-application-session|project-query-fence|project-rules-session|project-session|recovery-store|review-analysis-session|run-session|runtime-capabilities|runtime-visual-projection-session|source-history-session|version-session)\\.(?:js|d\\.ts)$",
+        "^desktop/project-open-queue\\.mjs$",
         "^app/domain/(?:draft-aggregate|run-lifecycle|runtime-visual-projection|source-history)\\.(?:js|d\\.ts)$",
         "^shared/(?:draft-aggregate|source-history)\\.mjs$",
         "^scripts/(?:check-architecture|draft-aggregate|draft-service|project-context-service|source-history-service)\\.mjs$",
-        "^tests/(?:architecture-boundaries|bridge-client|comment-session|document-session|draft-aggregate|draft-service|draft-session|drain-coordinator|project-query-fence|project-rules-session|project-session|recovery-store|review-analysis-session|run-lifecycle|run-session|runtime-capabilities|source-history|source-history-session|version-session)\\.test\\.mjs$",
+        "^tests/(?:architecture-boundaries|bridge-client|comment-session|document-session|draft-aggregate|draft-service|draft-session|drain-coordinator|external-file-open-session|project-application-session|project-open-queue|project-query-fence|project-rules-session|project-session|recovery-store|review-analysis-session|run-lifecycle|run-session|runtime-capabilities|source-history|source-history-session|version-session)\\.test\\.mjs$",
         "^(?:CONTRIBUTING|docs/(?:ARCHITECTURE|ARCHITECTURE_CONTRACT|STATE_OWNERSHIP|ENGINEERING_STANDARDS))\\.md$",
         "^docs/decisions/(?:0003-session-ownership-and-mutation-outcomes|0004-v2-editable-islands|0007-independent-interactive-preview|0008-safe-presentation-actions-in-edit-mode|0009-persistent-source-patch-history|0011-workbench-session-decomposition|0012-id-first-project-context|0013-edit-runtime-visual-projection)\\.md$"
       ],
@@ -299,6 +300,9 @@
         "tests/draft-service.test.mjs",
         "tests/draft-session.test.mjs",
         "tests/drain-coordinator.test.mjs",
+        "tests/external-file-open-session.test.mjs",
+        "tests/project-application-session.test.mjs",
+        "tests/project-open-queue.test.mjs",
         "tests/project-query-fence.test.mjs",
         "tests/project-context-service.test.mjs",
         "tests/project-rules-session.test.mjs",
@@ -393,12 +397,14 @@
       "patterns": [
         "^app/workbench(?:\\.tsx|/.*\\.(?:ts|tsx))$",
         "^app/lib/comment-rail-layout\\.js$",
-        "^tests/(?:comment-rail-layout\\.test|source-architecture-fixture)\\.mjs$"
+        "^tests/(?:comment-rail-layout\\.test|source-architecture-fixture)\\.mjs$",
+        "^tests/native-command-queue-contract\\.test\\.mjs$"
       ],
       "suites": ["typecheck", "browser-smoke", "electron-smoke", "ai-smoke"],
       "nodeTests": [
         "tests/direct-edit-events.test.mjs",
         "tests/comment-rail-layout.test.mjs",
+        "tests/native-command-queue-contract.test.mjs",
         "tests/frontend-target-refresh.test.mjs",
         "tests/notification-policy.test.mjs",
         "tests/notification-ui.test.mjs",
@@ -459,7 +465,7 @@
       "id": "desktop-runtime",
       "patterns": [
         "^desktop/.*\\.(?:mjs|tsx|ts|html)$",
-        "^tests/(?:bridge-startup|edit-visual-capture|open-in-default-browser|preview-protocol)\\.test\\.mjs$"
+        "^tests/(?:bridge-startup|edit-visual-capture|electron-window-policy|open-in-default-browser|preview-protocol)\\.test\\.mjs$"
       ],
       "suites": ["electron-smoke"],
       "nodeTests": [
@@ -472,6 +478,9 @@
         "tests/bridge-shutdown.test.mjs",
         "tests/export-copy.test.mjs",
         "tests/edit-visual-capture.test.mjs",
+        "tests/external-file-open.test.mjs",
+        "tests/project-open-queue.test.mjs",
+        "tests/electron-window-policy.test.mjs",
         "tests/open-in-default-browser.test.mjs",
         "tests/preview-protocol.test.mjs",
         "tests/desktop-package.test.mjs",
@@ -592,7 +601,7 @@
         "^tests/e2e/electron/(?!ai-handoff-closed-loop|packaged-(?:runtime|startup)-smoke\\.spec|playwright\\.packaged(?:-startup)?\\.config).*\\.mjs$"
       ],
       "suites": ["electron-smoke"],
-      "nodeTests": []
+      "nodeTests": ["tests/electron-window-policy.test.mjs"]
     },
     {
       "id": "ai-e2e",
@@ -602,7 +611,10 @@
         "^tests/ai-smoke-config\\.test\\.mjs$"
       ],
       "suites": ["ai-smoke"],
-      "nodeTests": ["tests/ai-smoke-config.test.mjs"]
+      "nodeTests": [
+        "tests/ai-smoke-config.test.mjs",
+        "tests/electron-window-policy.test.mjs"
+      ]
     }
   ],
   "fallback": {
