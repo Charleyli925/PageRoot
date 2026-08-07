@@ -54,6 +54,13 @@ import {
   waitForBridgeReady,
 } from "./bridge-startup.mjs";
 import { createOpenInDefaultBrowserOperation } from "./open-in-default-browser.mjs";
+import {
+  createExternalFileOpenExitHandoff,
+  createExternalFileOpenMailbox,
+  externalOpenFailurePresentation,
+  externalHtmlPathsFromArgv,
+} from "./external-file-open.mjs";
+import { createProjectOpenQueue } from "./project-open-queue.mjs";
 import { assertTrustedRendererEvent } from "./project-ipc-security.mjs";
 import {
   closeAbortPayload,
@@ -162,6 +169,7 @@ const PROJECT_CHANNELS = Object.freeze({
   listRecentProjects: "html-projects:list-recent",
   openRecent: "html-projects:open-recent",
   forgetRecent: "html-projects:forget-recent",
+  acceptExternalOpen: "html-projects:accept-external-open",
 });
 const APP_CHANNELS = Object.freeze({
   prepareClose: "html-app:prepare-close",
@@ -170,6 +178,8 @@ const APP_CHANNELS = Object.freeze({
   aboutRequested: "html-app:about-requested",
   workspaceUnavailable: "html-app:workspace-unavailable",
   workspaceRecoveryReady: "html-app:workspace-recovery-ready",
+  externalOpenRequested: "html-app:external-open-requested",
+  externalOpenReady: "html-app:external-open-ready",
   relaunch: "html-app:relaunch",
   openUserNotice: "html-app:open-user-notice",
 });
@@ -210,6 +220,7 @@ let isQuitting = false;
 let finalExitStarted = false;
 let closeRequest = null;
 let coordinatedExit = null;
+let closeAttemptGeneration = 0;
 let projectIpcRegistered = false;
 let projectState = null;
 let stateWriteQueue = Promise.resolve();
@@ -221,6 +232,11 @@ let managedWelcomeRegistration = null;
 let previewProtocolController = null;
 let editVisualCaptureController = null;
 const workspaceRecoveryMailbox = createWorkspaceRecoveryMailbox();
+const externalFileOpenMailbox = createExternalFileOpenMailbox();
+const externalFileOpenExitHandoff = createExternalFileOpenExitHandoff({
+  handoffPath: path.join(app.getPath("userData"), "external-open-handoff.json"),
+});
+const projectOpenQueue = createProjectOpenQueue();
 
 function ensurePreviewProtocolController() {
   if (!previewProtocolController) {
@@ -645,10 +661,16 @@ async function inspectHtmlFile(filePath) {
   const normalizedPath = assertHtmlPath(filePath);
   const fileStats = await lstat(normalizedPath);
   if (!fileStats.isFile() || fileStats.isSymbolicLink()) {
-    throw new TypeError("只能打开普通 HTML 文件。");
+    throw new ProjectFileError(
+      "UNSAFE_EXTERNAL_HTML",
+      "只能打开普通 HTML 文件。",
+    );
   }
   if (fileStats.size > MAX_HTML_BYTES) {
-    throw new RangeError("HTML 文件不能超过 25 MB。");
+    throw new ProjectFileError(
+      "HTML_TOO_LARGE",
+      "HTML 文件不能超过 25 MB。",
+    );
   }
   return normalizedPath;
 }
@@ -660,6 +682,121 @@ async function readHtmlProject(filePath) {
     sourcePath: canonicalPath,
     maxHtmlBytes: MAX_HTML_BYTES,
   });
+}
+
+function showExternalOpenError(error) {
+  const presentation = externalOpenFailurePresentation(error);
+  dialog.showErrorBox(
+    "无法打开这个 HTML",
+    `${presentation.message}\n\n错误代码：${presentation.code}`,
+  );
+}
+
+function focusMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+function interruptCloseForExternalOpen() {
+  if (!coordinatedExit || isQuitting || finalExitStarted) return false;
+  closeAttemptGeneration += 1;
+  if (!closeRequest) return true;
+  const pending = closeRequest;
+  closeRequest = null;
+  clearTimeout(pending.timeout);
+  pending.resolve({
+    requestId: pending.requestId,
+    ready: false,
+    reason: "收到新的外部 HTML 打开请求，已取消关闭。",
+    presentation: "in-app",
+  });
+  return true;
+}
+
+function deferExternalFileOpenUntilNextLaunch(filePath) {
+  try {
+    return externalFileOpenExitHandoff.defer(filePath);
+  } catch {
+    // The exiting process must never accept a new path after close has
+    // committed. A failed private handoff leaves the request unaccepted.
+    return null;
+  }
+}
+
+function resumeDeferredExternalFileOpenAfterExitAbort() {
+  if (isQuitting || finalExitStarted) return;
+  const sourcePath = externalFileOpenExitHandoff.take();
+  if (sourcePath) publishExternalFileOpen(sourcePath);
+}
+
+function publishExternalFileOpen(filePath) {
+  if (isQuitting || finalExitStarted) {
+    return deferExternalFileOpenUntilNextLaunch(filePath);
+  }
+  interruptCloseForExternalOpen();
+  try {
+    const request = externalFileOpenMailbox.publish(filePath);
+    focusMainWindow();
+    if (rendererHasLoaded && mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(APP_CHANNELS.externalOpenRequested, request);
+    }
+    return request;
+  } catch (error) {
+    if (app.isReady()) showExternalOpenError(error);
+    return null;
+  }
+}
+
+async function openExternalFileRequest(request) {
+  return projectOpenQueue.run(async () => {
+    const project = await readHtmlProject(request.sourcePath);
+    await activateProject(project.sourcePath);
+    return project;
+  });
+}
+
+async function adoptPendingExternalFileAtStartup() {
+  const pending = externalFileOpenMailbox.peek();
+  if (!pending) return null;
+  const operation = externalFileOpenMailbox.accept(
+    pending.requestId,
+    openExternalFileRequest,
+  );
+  if (!operation) return null;
+  try {
+    return await operation;
+  } catch (error) {
+    showExternalOpenError(error);
+    return null;
+  }
+}
+
+async function acceptExternalFileOpen(payload) {
+  if (
+    !payload
+    || typeof payload !== "object"
+    || Array.isArray(payload)
+    || Object.keys(payload).some((key) => key !== "requestId")
+    || typeof payload.requestId !== "string"
+  ) {
+    throw new ProjectFileError(
+      "INVALID_EXTERNAL_OPEN_REQUEST",
+      "外部 HTML 打开请求无效。",
+    );
+  }
+  const operation = externalFileOpenMailbox.accept(
+    payload.requestId,
+    openExternalFileRequest,
+  );
+  if (!operation) {
+    throw new ProjectFileError(
+      "EXTERNAL_OPEN_REQUEST_EXPIRED",
+      "这次外部打开请求已经失效，请从 QoderWork 再点一次 PageRoot。",
+    );
+  }
+  return operation;
 }
 
 async function currentActivePath() {
@@ -716,6 +853,10 @@ async function ensureBridgeProjectRegistered(project) {
 }
 
 async function getActiveProject() {
+  return projectOpenQueue.run(getActiveProjectOperation);
+}
+
+async function getActiveProjectOperation() {
   const workspaceRoot = await workspacePath();
   const welcomeSourcePath = managedWelcomeSourcePath(workspaceRoot);
   let activePath = await currentActivePath();
@@ -760,19 +901,21 @@ async function getActiveProject() {
 }
 
 async function openHtml() {
-  const result = await dialog.showOpenDialog(mainWindow, {
-    title: "打开 HTML 项目",
-    buttonLabel: "打开",
-    properties: ["openFile"],
-    filters: [
-      { name: "HTML 文件", extensions: ["html", "htm"] },
-    ],
-  });
-  if (result.canceled || result.filePaths.length !== 1) return null;
+  return projectOpenQueue.run(async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: "打开 HTML 项目",
+      buttonLabel: "打开",
+      properties: ["openFile"],
+      filters: [
+        { name: "HTML 文件", extensions: ["html", "htm"] },
+      ],
+    });
+    if (result.canceled || result.filePaths.length !== 1) return null;
 
-  const project = await readHtmlProject(result.filePaths[0]);
-  await activateProject(project.sourcePath);
-  return project;
+    const project = await readHtmlProject(result.filePaths[0]);
+    await activateProject(project.sourcePath);
+    return project;
+  });
 }
 
 async function assertKnownProjectPath(sourcePath) {
@@ -881,6 +1024,10 @@ async function rebindRenamedWorkspace(sourcePath, expectedSha256) {
 }
 
 async function renameHtml(payload) {
+  return projectOpenQueue.run(() => renameHtmlOperation(payload));
+}
+
+async function renameHtmlOperation(payload) {
   const state = await loadProjectState();
   return renameHtmlSource({
     payload,
@@ -893,6 +1040,10 @@ async function renameHtml(payload) {
 }
 
 async function activateGeneratedVersion(payload) {
+  return projectOpenQueue.run(() => activateGeneratedVersionOperation(payload));
+}
+
+async function activateGeneratedVersionOperation(payload) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     throw new TypeError("新版本文件参数无效。");
   }
@@ -1309,33 +1460,37 @@ async function listRecentProjects() {
 }
 
 async function openRecent(filePath) {
-  const normalizedPath = assertHtmlPath(filePath);
-  const state = await loadProjectState();
-  const requestedIdentity = await existingPathIdentity(normalizedPath);
-  const recentIdentities = await Promise.all(
-    state.recent.map((entry) => existingPathIdentity(entry.path)),
-  );
-  if (!recentIdentities.includes(requestedIdentity)) {
-    throw new ProjectFileError(
-      "NOT_RECENT_PROJECT",
-      "该文件已从最近项目中移除，请用“打开本地 HTML”重新选择。",
+  return projectOpenQueue.run(async () => {
+    const normalizedPath = assertHtmlPath(filePath);
+    const state = await loadProjectState();
+    const requestedIdentity = await existingPathIdentity(normalizedPath);
+    const recentIdentities = await Promise.all(
+      state.recent.map((entry) => existingPathIdentity(entry.path)),
     );
-  }
+    if (!recentIdentities.includes(requestedIdentity)) {
+      throw new ProjectFileError(
+        "NOT_RECENT_PROJECT",
+        "该文件已从最近项目中移除，请用“打开本地 HTML”重新选择。",
+      );
+    }
 
-  try {
-    const project = await readHtmlProject(normalizedPath);
-    await activateProject(project.sourcePath);
-    return project;
-  } catch (error) {
-    if (error?.code === "ENOENT") await forgetProject(normalizedPath);
-    throw error;
-  }
+    try {
+      const project = await readHtmlProject(normalizedPath);
+      await activateProject(project.sourcePath);
+      return project;
+    } catch (error) {
+      if (error?.code === "ENOENT") await forgetProject(normalizedPath);
+      throw error;
+    }
+  });
 }
 
 async function forgetRecentProject(filePath) {
-  const normalizedPath = assertHtmlPath(filePath);
-  await forgetProject(normalizedPath);
-  return { sourcePath: normalizedPath };
+  return projectOpenQueue.run(async () => {
+    const normalizedPath = assertHtmlPath(filePath);
+    await forgetProject(normalizedPath);
+    return { sourcePath: normalizedPath };
+  });
 }
 
 function publishApplicationUpdateStatus(result) {
@@ -1471,6 +1626,10 @@ function registerProjectIpc() {
   ipcMain.handle(PROJECT_CHANNELS.openRecent, trustedProject(openRecent));
   ipcMain.handle(PROJECT_CHANNELS.forgetRecent, trustedProject(forgetRecentProject));
   ipcMain.handle(
+    PROJECT_CHANNELS.acceptExternalOpen,
+    trustedProject(acceptExternalFileOpen, "external_open"),
+  );
+  ipcMain.handle(
     INTEGRATION_CHANNELS.qoderHandoff,
     trustedProject((payload) => {
       if (
@@ -1557,6 +1716,10 @@ function registerProjectIpc() {
     trusted(() => ({
       issue: workspaceRecoveryMailbox.acknowledgeRendererReady(),
     })),
+  );
+  ipcMain.handle(
+    APP_CHANNELS.externalOpenReady,
+    trusted(() => externalFileOpenMailbox.peek()),
   );
   ipcMain.handle(
     APP_CHANNELS.relaunch,
@@ -1726,6 +1889,7 @@ function unregisterIpc() {
     ...Object.values(EDIT_VISUAL_CHANNELS),
     APP_CHANNELS.closeResult,
     APP_CHANNELS.workspaceRecoveryReady,
+    APP_CHANNELS.externalOpenReady,
     APP_CHANNELS.relaunch,
     EDIT_CHANNELS.nativeHistory,
   ]) {
@@ -1761,7 +1925,20 @@ async function coordinateApplicationExit(reason, intent = "quit") {
   const exitIntent = EXIT_INTENTS[intent];
   if (!exitIntent) throw new TypeError(`Unsupported exit intent: ${intent}`);
   coordinatedExit = (async () => {
+    const closeAttempt = closeAttemptGeneration;
     const result = await requestRendererClose(reason);
+    if (closeAttempt !== closeAttemptGeneration) {
+      notifyRendererCloseAborted(
+        result.requestId,
+        "收到新的外部 HTML 打开请求，已取消关闭。",
+      );
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.show();
+        mainWindow.focus();
+      }
+      coordinatedExit = null;
+      return false;
+    }
     if (!result.ready) {
       const nativeBlock = shouldPresentNativeCloseBlock(result);
       const interruptionSurface = nativeBlock ? "native" : "global";
@@ -1856,6 +2033,7 @@ async function coordinateApplicationExit(reason, intent = "quit") {
         } finally {
           registerProjectIpc();
           notifyRendererCloseAborted(result.requestId, error);
+          resumeDeferredExternalFileOpenAfterExitAbort();
         }
         if (restartError) throw restartError;
       },
@@ -1864,6 +2042,7 @@ async function coordinateApplicationExit(reason, intent = "quit") {
   })().catch((error) => {
     coordinatedExit = null;
     isQuitting = false;
+    resumeDeferredExternalFileOpenAfterExitAbort();
     dialog.showErrorBox(
       exitIntent.errorTitle,
       error instanceof Error ? error.message : String(error),
@@ -2084,6 +2263,7 @@ async function startBridge() {
 async function createWindow() {
   const port = await startBridge();
   ensurePreviewProtocolController();
+  await adoptPendingExternalFileAtStartup();
 
   rendererHasLoaded = false;
   workspaceRecoveryMailbox.beginRendererLoad();
@@ -2185,6 +2365,13 @@ async function createWindow() {
   mainWindow.webContents.on("did-finish-load", () => {
     rendererHasLoaded = true;
     ensureApplicationUpdateController().startAutomaticChecks();
+    const pendingExternalOpen = externalFileOpenMailbox.peek();
+    if (pendingExternalOpen) {
+      mainWindow?.webContents.send(
+        APP_CHANNELS.externalOpenRequested,
+        pendingExternalOpen,
+      );
+    }
   });
   mainWindow.webContents.on("render-process-gone", (_event, details) => {
     captureUsage("runtime_fault", {
@@ -2237,15 +2424,32 @@ async function createWindow() {
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
+app.on("open-file", (event, filePath) => {
+  event.preventDefault();
+  publishExternalFileOpen(filePath);
+});
+
 if (!hasSingleInstanceLock) {
   app.quit();
 } else {
-  app.on("second-instance", () => {
+  // Only the process that owns Electron's single-instance lock may consume
+  // the durable one-shot record. A losing secondary process forwards its
+  // command line to the owner and must leave this record for the authoritative
+  // next launch. Keep ordinary argv opens in the same sequence so a newer
+  // launch argument still supersedes an older committed-exit handoff.
+  for (const sourcePath of [
+    externalFileOpenExitHandoff.take(),
+    ...externalHtmlPathsFromArgv(process.argv.slice(1)),
+  ].filter(Boolean)) {
+    externalFileOpenMailbox.publish(sourcePath);
+  }
+
+  app.on("second-instance", (_event, commandLine) => {
     captureUsage("app_launched", { launch_reason: "second_instance" });
-    if (!mainWindow) return;
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.show();
-    mainWindow.focus();
+    for (const sourcePath of externalHtmlPathsFromArgv(commandLine)) {
+      publishExternalFileOpen(sourcePath);
+    }
+    if (!isQuitting && !finalExitStarted) focusMainWindow();
   });
 
   app.whenReady().then(async () => {

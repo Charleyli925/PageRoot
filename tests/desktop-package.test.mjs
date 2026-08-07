@@ -73,6 +73,12 @@ test("desktop package carries the v3 patch engine, candidate assessment and acti
   assert.equal(packageJson.build.productName, "PageRoot");
   assert.equal(packageJson.build.artifactName, "PageRoot-${version}-${arch}.${ext}");
   assert.equal(packageJson.build.forceCodeSigning, true);
+  assert.deepEqual(packageJson.build.fileAssociations, [{
+    ext: ["html", "htm"],
+    name: "HTML Document",
+    role: "Editor",
+    rank: "Alternate",
+  }]);
   assert.equal(packageJson.build.mac.identity, undefined);
   assert.equal(packageJson.build.mac.hardenedRuntime, true);
   assert.equal(packageJson.build.mac.notarize, true);
@@ -93,6 +99,8 @@ test("desktop package carries the v3 patch engine, candidate assessment and acti
   assert.equal(packageJson.build.afterPack, "desktop/after-pack.mjs");
   assert.ok(packageJson.build.files.includes("!node_modules/**/*"));
   assert.ok(packageJson.build.files.includes("desktop/preload.mjs"));
+  assert.ok(packageJson.build.files.includes("desktop/external-file-open.mjs"));
+  assert.ok(packageJson.build.files.includes("desktop/project-open-queue.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/project-files.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/source-rename.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/project-path-policy.mjs"));
@@ -196,6 +204,14 @@ test("desktop package carries the v3 patch engine, candidate assessment and acti
     /if \(bridgeStartupPromise\) return bridgeStartupPromise/,
   );
   assert.match(mainProcess, /requestSingleInstanceLock/);
+  assert.match(
+    mainProcess,
+    /app\.on\("open-file",[\s\S]*?event\.preventDefault\(\)[\s\S]*?publishExternalFileOpen\(filePath\)/,
+  );
+  assert.match(
+    mainProcess,
+    /app\.on\("second-instance",[\s\S]*?externalHtmlPathsFromArgv\(commandLine\)[\s\S]*?publishExternalFileOpen\(sourcePath\)/,
+  );
   assert.match(mainProcess, /app\.setPath\("userData",\s*productUserDataPath\)/);
   assert.match(
     mainProcess,
@@ -232,6 +248,58 @@ test("desktop package carries the v3 patch engine, candidate assessment and acti
   assert.match(mainProcess, /PROJECT_CHANNELS\.renameHtml/);
   assert.match(mainProcess, /PROJECT_CHANNELS\.revealRequestFolder/);
   assert.match(mainProcess, /PROJECT_CHANNELS\.forgetRecent/);
+  assert.match(mainProcess, /PROJECT_CHANNELS\.acceptExternalOpen/);
+  assert.match(mainProcess, /const projectOpenQueue = createProjectOpenQueue\(\)/);
+  assert.match(
+    mainProcess,
+    /async function openExternalFileRequest[\s\S]*?projectOpenQueue\.run\([\s\S]*?readHtmlProject\(request\.sourcePath\)[\s\S]*?activateProject\(project\.sourcePath\)/,
+  );
+  assert.match(
+    mainProcess,
+    /async function openHtml[\s\S]*?projectOpenQueue\.run\([\s\S]*?dialog\.showOpenDialog[\s\S]*?readHtmlProject\(result\.filePaths\[0\]\)[\s\S]*?activateProject\(project\.sourcePath\)/,
+  );
+  assert.match(
+    mainProcess,
+    /async function openRecent[\s\S]*?projectOpenQueue\.run\([\s\S]*?readHtmlProject\(normalizedPath\)[\s\S]*?activateProject\(project\.sourcePath\)/,
+  );
+  assert.match(
+    mainProcess,
+    /async function activateGeneratedVersion\(payload\)[\s\S]*?projectOpenQueue\.run\(\(\) => activateGeneratedVersionOperation\(payload\)\)/,
+  );
+  assert.match(
+    mainProcess,
+    /async function acceptExternalFileOpen[\s\S]*?externalFileOpenMailbox\.accept\(\s*payload\.requestId,\s*openExternalFileRequest,\s*\)[\s\S]*?return operation/,
+  );
+  assert.match(
+    mainProcess,
+    /const externalFileOpenExitHandoff = createExternalFileOpenExitHandoff\([\s\S]*?handoffPath: path\.join\(app\.getPath\("userData"\), "external-open-handoff\.json"\)/,
+  );
+  assert.match(
+    mainProcess,
+    /externalFileOpenExitHandoff\.take\(\),[\s\S]*?externalHtmlPathsFromArgv\(process\.argv\.slice\(1\)\)/,
+  );
+  assert.match(
+    mainProcess,
+    /if \(!hasSingleInstanceLock\) \{[\s\S]*?app\.quit\(\);\s*\} else \{[\s\S]*?externalFileOpenExitHandoff\.take\(\),[\s\S]*?externalHtmlPathsFromArgv\(process\.argv\.slice\(1\)\)/,
+    "only the single-instance owner can consume a committed-exit handoff",
+  );
+  assert.match(
+    mainProcess,
+    /function publishExternalFileOpen\(filePath\) \{[\s\S]*?if \(isQuitting \|\| finalExitStarted\) \{[\s\S]*?deferExternalFileOpenUntilNextLaunch\(filePath\)[\s\S]*?interruptCloseForExternalOpen\(\)[\s\S]*?externalFileOpenMailbox\.publish\(filePath\)/,
+    "an external delivery cannot enter an already committed shutdown",
+  );
+  assert.match(
+    mainProcess,
+    /function interruptCloseForExternalOpen\(\) \{[\s\S]*?if \(!coordinatedExit \|\| isQuitting \|\| finalExitStarted\) return false;[\s\S]*?closeAttemptGeneration \+= 1;[\s\S]*?pending\.resolve\([\s\S]*?presentation: "in-app"/,
+    "a new external delivery interrupts an uncommitted renderer-close handshake",
+  );
+  assert.match(
+    mainProcess,
+    /const closeAttempt = closeAttemptGeneration;[\s\S]*?await requestRendererClose\(reason\)[\s\S]*?if \(closeAttempt !== closeAttemptGeneration\) \{[\s\S]*?notifyRendererCloseAborted/,
+    "an external delivery that races a ready close result cancels before shutdown commits",
+  );
+  assert.match(mainProcess, /APP_CHANNELS\.externalOpenReady/);
+  assert.match(mainProcess, /APP_CHANNELS\.externalOpenRequested/);
   assert.match(mainProcess, /INTEGRATION_CHANNELS\.qoderHandoff/);
   assert.match(mainProcess, /UPDATE_CHANNELS\.getStatus/);
   assert.match(mainProcess, /UPDATE_CHANNELS\.checkNow/);
