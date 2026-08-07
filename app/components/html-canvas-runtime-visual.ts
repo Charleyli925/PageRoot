@@ -21,6 +21,8 @@ const observedRootByHost = new WeakMap<HTMLElement, HTMLElement>();
 const objectUrlByImage = new WeakMap<HTMLImageElement, string>();
 const backgroundProjectionByHost = new WeakMap<HTMLElement, {
   runtimeContentSha256: string;
+  layoutWidth: number;
+  layoutHeight: number;
   objectUrl: string;
   original: ReadonlyArray<Readonly<{
     property: string;
@@ -35,6 +37,9 @@ const BACKGROUND_PROPERTIES = [
   "background-position",
   "background-repeat",
   "background-size",
+  "display",
+  "width",
+  "height",
 ] as const;
 
 function escapedAttributeValue(value: string): string {
@@ -150,12 +155,98 @@ function initialLayoutMode(host: HTMLElement): "host" | "intrinsic" {
     const parsed = Number.parseFloat(value);
     return Number.isFinite(parsed) ? parsed : 0;
   };
-  const occupiedHeight = host.getBoundingClientRect().height
-    - numeric(style.borderTopWidth)
-    - numeric(style.borderBottomWidth)
+  const occupiedWidth = host.clientWidth
+    - numeric(style.paddingLeft)
+    - numeric(style.paddingRight);
+  const occupiedHeight = host.clientHeight
     - numeric(style.paddingTop)
     - numeric(style.paddingBottom);
-  return occupiedHeight >= 1 ? "host" : "intrinsic";
+  return occupiedWidth >= 1 && occupiedHeight >= 1
+    ? "host"
+    : "intrinsic";
+}
+
+function preservedPaintedScale(host: HTMLElement): { x: number; y: number } {
+  let scaleX = 1;
+  let scaleY = 1;
+  for (let node: HTMLElement | null = host; node; node = node.parentElement) {
+    const style = node.ownerDocument.defaultView?.getComputedStyle(node);
+    if (!style) continue;
+    const match = /^matrix\(([^)]+)\)$/u.exec(style.transform);
+    if (match) {
+      const values = match[1]
+        .split(",")
+        .map((value) => Number.parseFloat(value));
+      if (
+        values.length === 6
+        && values.every(Number.isFinite)
+        && values[0] > 0
+        && values[3] > 0
+        && Math.abs(values[1]) < 0.000001
+        && Math.abs(values[2]) < 0.000001
+      ) {
+        scaleX *= values[0];
+        scaleY *= values[3];
+      }
+    }
+    const zoom = Number.parseFloat(style.zoom);
+    if (Number.isFinite(zoom) && zoom > 0) {
+      scaleX *= zoom;
+      scaleY *= zoom;
+    }
+  }
+  return {
+    x: Math.max(0.000001, scaleX),
+    y: Math.max(0.000001, scaleY),
+  };
+}
+
+function styleLength(style: CSSStyleDeclaration, property: string): number {
+  const value = Number.parseFloat(style.getPropertyValue(property));
+  return Number.isFinite(value) ? value : 0;
+}
+
+function backgroundProjectionDimension(
+  host: HTMLElement,
+  visual: RuntimeVisualProjection["visuals"][number],
+  dimension: "width" | "height",
+): number {
+  const style = host.ownerDocument.defaultView?.getComputedStyle(host);
+  const scale = preservedPaintedScale(host);
+  const contentLength = dimension === "width"
+    ? visual.layoutWidth / scale.x
+    : visual.layoutHeight / scale.y;
+  if (!style || style.boxSizing !== "border-box") {
+    return Math.max(1, contentLength);
+  }
+  const suffix = dimension === "width" ? "left" : "top";
+  const oppositeSuffix = dimension === "width" ? "right" : "bottom";
+  const boxExtras = [
+    `padding-${suffix}`,
+    `padding-${oppositeSuffix}`,
+    `border-${suffix}-width`,
+    `border-${oppositeSuffix}-width`,
+  ].reduce((total, property) => total + styleLength(style, property), 0);
+  return Math.max(1, contentLength + boxExtras);
+}
+
+function configureBackgroundProjectionGeometry(
+  host: HTMLElement,
+  visual: RuntimeVisualProjection["visuals"][number],
+) {
+  if (host.ownerDocument.defaultView?.getComputedStyle(host).display === "inline") {
+    setImportantStyle(host, "display", "inline-block");
+  }
+  setImportantStyle(
+    host,
+    "width",
+    `${backgroundProjectionDimension(host, visual, "width")}px`,
+  );
+  setImportantStyle(
+    host,
+    "height",
+    `${backgroundProjectionDimension(host, visual, "height")}px`,
+  );
 }
 
 function configureProjectionLayer(
@@ -174,19 +265,20 @@ function configureProjectionLayer(
     hostDisplay === "inline" ? "inline-block" : "block",
   );
   setImportantStyle(root, "box-sizing", "border-box");
-  setImportantStyle(root, "width", "100%");
-  setImportantStyle(root, "max-width", "100%");
   setImportantStyle(root, "min-width", "0");
   if (mode === "host") {
+    setImportantStyle(root, "width", "100%");
+    setImportantStyle(root, "max-width", "100%");
     setImportantStyle(root, "height", "100%");
+    setImportantStyle(root, "max-height", "100%");
     root.style.removeProperty("aspect-ratio");
   } else {
-    root.style.removeProperty("height");
-    setImportantStyle(
-      root,
-      "aspect-ratio",
-      `${visual.layoutWidth} / ${visual.layoutHeight}`,
-    );
+    const scale = preservedPaintedScale(host);
+    setImportantStyle(root, "width", `${visual.layoutWidth / scale.x}px`);
+    setImportantStyle(root, "height", `${visual.layoutHeight / scale.y}px`);
+    setImportantStyle(root, "max-width", "none");
+    setImportantStyle(root, "max-height", "none");
+    root.style.removeProperty("aspect-ratio");
   }
   setImportantStyle(root, "overflow", "hidden");
   setImportantStyle(root, "line-height", "0");
@@ -342,6 +434,7 @@ function commitBackgroundProjection(
   setImportantStyle(host, "background-position", "left top");
   setImportantStyle(host, "background-repeat", "no-repeat");
   setImportantStyle(host, "background-size", "contain");
+  configureBackgroundProjectionGeometry(host, visual);
   host.setAttribute(
     RUNTIME_VISUAL_HOST_ATTRIBUTE,
     "runtime-bitmap-background",
@@ -353,6 +446,8 @@ function commitBackgroundProjection(
   );
   backgroundProjectionByHost.set(host, {
     runtimeContentSha256: visual.runtimeContentSha256,
+    layoutWidth: visual.layoutWidth,
+    layoutHeight: visual.layoutHeight,
     objectUrl,
     original,
   });
@@ -458,6 +553,8 @@ function artifactMatches(
         === visual.runtimeContentSha256
       && backgroundProjectionByHost.get(root)?.runtimeContentSha256
         === visual.runtimeContentSha256
+      && backgroundProjectionByHost.get(root)?.layoutWidth === visual.layoutWidth
+      && backgroundProjectionByHost.get(root)?.layoutHeight === visual.layoutHeight
     );
   }
   const image = projectionImage(root);
@@ -613,7 +710,10 @@ export function applyRuntimeVisualProjectionToDocument(
     const matching = hostRoots.find((root) => artifactMatches(root, visual)) ?? null;
     if (visual.tagName === "canvas" || visual.tagName === "svg") {
       acceptedRoots.add(element);
-      if (matching) cancelPendingProjection(element);
+      if (matching) {
+        cancelPendingProjection(element);
+        configureBackgroundProjectionGeometry(element, visual);
+      }
       else stageBackgroundProjection(element, visual);
       applied += 1;
       continue;

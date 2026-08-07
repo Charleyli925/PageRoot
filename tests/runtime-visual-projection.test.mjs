@@ -104,6 +104,30 @@ test("decorative empty elements without script causality do not open runtime cap
   assert.equal(prepared.payload, null);
 });
 
+test("load-time inline handlers retain their source-empty runtime hosts", () => {
+  const source = `<!doctype html><body onload="document.querySelector('div').textContent = 'ready'">
+      <div id="handler-chart"></div>
+    </body>`;
+  const prepared = prepareRuntimeVisualCapture({
+    html: source,
+    sourcePath: "/tmp/handler-report.html",
+    viewportWidth: 900,
+  });
+  assert.deepEqual(
+    prepared?.candidates.map((candidate) => candidate.tagName),
+    ["div"],
+  );
+  assert.ok(prepared?.payload);
+  assert.notEqual(
+    prepared?.dependencySha256,
+    prepareRuntimeVisualCapture({
+      html: source.replace("ready", "updated"),
+      sourcePath: "/tmp/handler-report.html",
+      viewportWidth: 900,
+    })?.dependencySha256,
+  );
+});
+
 test("direct Canvas and SVG runtime hosts are capture candidates", () => {
   const source = `<!doctype html><main>
     <canvas id="direct-canvas"></canvas>
@@ -146,8 +170,8 @@ test("script-referenced data containers participate in the runtime dependency", 
   const source = `<!doctype html><main>
     <div id="chart"></div><div id="chart-data">1,2,3</div>
     <script>
-      document.getElementById("chart").textContent =
-        document.getElementById("chart-data").textContent;
+      document.querySelector("#chart").textContent =
+        document.querySelector("#chart-data").textContent;
     </script>
   </main>`;
   const first = describeRuntimeVisualCapture({
@@ -167,6 +191,56 @@ test("script-referenced data containers participate in the runtime dependency", 
   });
   assert.notEqual(first?.dependencySha256, changed?.dependencySha256);
   assert.equal(first?.dependencySha256, unrelated?.dependencySha256);
+});
+
+test("indirect DOM reads conservatively invalidate the runtime dependency", () => {
+  const source = `<!doctype html><body>
+    <span>1,2,3</span><div id="chart"></div>
+    <script>
+      const series = document.body.children[0].textContent;
+      document.getElementById("chart").textContent = series;
+    </script>
+  </body>`;
+  const first = describeRuntimeVisualCapture({
+    html: source,
+    sourcePath: "/tmp/indirect-data.html",
+    viewportWidth: 900,
+  });
+  const changedData = describeRuntimeVisualCapture({
+    html: source.replace("1,2,3", "3,2,1"),
+    sourcePath: "/tmp/indirect-data.html",
+    viewportWidth: 900,
+  });
+  const unrelated = describeRuntimeVisualCapture({
+    html: source.replace("<span>", "<p>ordinary copy</p><span>"),
+    sourcePath: "/tmp/indirect-data.html",
+    viewportWidth: 900,
+  });
+  assert.ok(first?.candidates.length);
+  assert.notEqual(first?.dependencySha256, changedData?.dependencySha256);
+  assert.notEqual(first?.dependencySha256, unrelated?.dependencySha256);
+});
+
+test("literal tag selectors conservatively invalidate the runtime dependency", () => {
+  const source = `<!doctype html><main>
+    <p>1,2,3</p><div id="chart"></div>
+    <script>
+      document.getElementById("chart").textContent =
+        document.querySelector("p").textContent;
+    </script>
+  </main>`;
+  const first = describeRuntimeVisualCapture({
+    html: source,
+    sourcePath: "/tmp/literal-selector-data.html",
+    viewportWidth: 900,
+  });
+  const changedData = describeRuntimeVisualCapture({
+    html: source.replace("1,2,3", "3,2,1"),
+    sourcePath: "/tmp/literal-selector-data.html",
+    viewportWidth: 900,
+  });
+  assert.ok(first?.candidates.length);
+  assert.notEqual(first?.dependencySha256, changedData?.dependencySha256);
 });
 
 test("accepted projections stay bound to the exact original source hash and empty host", () => {
@@ -288,6 +362,93 @@ test("hidden populated hosts retain the last committed artifact", () => {
     generation: 3,
     rawProjection: overlappingProjection,
   }), null);
+});
+
+test("projection session never caches an all-deferred capture as ready", async () => {
+  let captures = 0;
+  const session = new RuntimeVisualProjectionSession({
+    captureDebounceMs: 0,
+    capture: async (capturePayload) => {
+      captures += 1;
+      return {
+        protocol: RUNTIME_VISUAL_PROJECTION_PROTOCOL,
+        version: RUNTIME_VISUAL_PROJECTION_VERSION,
+        sourceSha256: capturePayload.sourceSha256,
+        visuals: [],
+        deferredSourceNodeIds: capturePayload.candidates.map(
+          (candidate) => candidate.sourceNodeId,
+        ),
+      };
+    },
+  });
+  const request = () => session.request({
+    html: SOURCE,
+    sourcePath: "/tmp/report.html",
+    documentKey: "current:/tmp/report.html",
+    viewportWidth: 900,
+  });
+
+  request();
+  await nextTask();
+  await nextTask();
+  assert.equal(captures, 1);
+  assert.equal(session.snapshot.status, "unavailable");
+  assert.equal(session.snapshot.projection, null);
+
+  request();
+  await nextTask();
+  await nextTask();
+  assert.equal(captures, 2);
+  assert.equal(session.snapshot.status, "unavailable");
+  session.dispose();
+});
+
+test("projection session commits a non-deferred empty capture as a clear", async () => {
+  const pending = [];
+  const session = new RuntimeVisualProjectionSession({
+    captureDebounceMs: 0,
+    capture: (payload) => new Promise((resolve) => {
+      pending.push({ payload, resolve });
+    }),
+  });
+  const request = (html) => session.request({
+    html,
+    sourcePath: "/tmp/report.html",
+    documentKey: "current:/tmp/report.html",
+    viewportWidth: 900,
+  });
+
+  request(SOURCE);
+  await nextTask();
+  pending[0].resolve(rawProjection(pending[0].payload));
+  await nextTask();
+  assert.equal(session.snapshot.projection?.visuals.length, 1);
+
+  const clearedSource = SOURCE.replace(
+    'document.createElement("svg")',
+    'document.createElement("canvas")',
+  );
+  request(clearedSource);
+  await nextTask();
+  assert.equal(pending.length, 2);
+  pending[1].resolve({
+    protocol: RUNTIME_VISUAL_PROJECTION_PROTOCOL,
+    version: RUNTIME_VISUAL_PROJECTION_VERSION,
+    sourceSha256: pending[1].payload.sourceSha256,
+    visuals: [],
+    deferredSourceNodeIds: [],
+  });
+  await nextTask();
+  assert.equal(session.snapshot.status, "ready");
+  assert.equal(session.snapshot.projection?.visuals.length, 0);
+  assert.equal(
+    session.snapshot.projection?.sourceSha256,
+    buildSourceIndex(clearedSource).sourceSha256,
+  );
+
+  request(clearedSource);
+  assert.equal(pending.length, 2);
+  session.dispose();
 });
 
 test("projection session rebinds non-visual source edits without recapturing", async () => {

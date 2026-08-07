@@ -388,6 +388,19 @@ test("runtime chart review supplements only the initial bounded static footprint
   assert.match(reviewDocument, /runtimeVisualBatchNodeLimit/);
   assert.match(reviewDocument, /runtimeVisualBatchAtomLimit/);
   assert.match(reviewDocument, /runtimeVisualBatchValueLimit/);
+  assert.match(reviewDocument, /runtimeVisualSnapshotBudgetExhausted/);
+  assert.match(
+    reviewDocument,
+    /const runtimeVisualSnapshotBudget = \{\s+atoms: 0,\s+nodes: 0,\s+valueLength: 0,\s+canvasPixels: 0,\s+\}/,
+  );
+  assert.match(
+    reviewDocument,
+    /captureRuntimeVisualHost\(\s+host,\s+runtimeVisualSnapshotBudget,\s+\)/,
+  );
+  assert.doesNotMatch(
+    reviewDocument,
+    /captureRuntimeVisualHost\(host, \{\s+atoms: 0,/,
+  );
   assert.match(reviewDocument, /runtimeVisualUnavailableSnapshot/);
   assert.match(reviewDocument, /hostIndex % 4 === 0/);
   assert.match(reviewDocument, /runtimeVisualExpectedKeys = Object\.freeze/);

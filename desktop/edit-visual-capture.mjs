@@ -287,14 +287,55 @@ function presentationScript(entries, sourceNodeAttribute) {
   })()`;
 }
 
-function settleRuntimeScript(quietMilliseconds, maximumMilliseconds) {
+function settleRuntimeScript(
+  quietMilliseconds,
+  maximumMilliseconds,
+  {
+    candidates = [],
+    sourceNodeAttribute = null,
+    initiallyPopulatedSourceNodeIds = [],
+  } = {},
+) {
   return `new Promise((resolve) => {
     const quietMilliseconds = ${Math.max(0, quietMilliseconds)};
     const maximumMilliseconds = ${Math.max(quietMilliseconds, maximumMilliseconds)};
+    const candidates = ${safeScriptValue(candidates)};
+    const sourceNodeAttribute = ${safeScriptValue(sourceNodeAttribute)};
+    const initialSourceNodeIds = new Set(${safeScriptValue(
+      initiallyPopulatedSourceNodeIds,
+    )});
+    const candidateSourceNodeIds = new Set(candidates
+      .map((candidate) => candidate?.sourceNodeId)
+      .filter((sourceNodeId) => typeof sourceNodeId === "string"));
+    const tracksCandidateReadiness = candidateSourceNodeIds.size > 0
+      && typeof sourceNodeAttribute === "string"
+      && sourceNodeAttribute.length > 0;
+    const pendingCandidateSourceNodeIds = new Set([...candidateSourceNodeIds]
+      .filter((sourceNodeId) => !initialSourceNodeIds.has(sourceNodeId)));
     const startedAt = performance.now();
     let lastMutationAt = startedAt;
-    const observer = new MutationObserver(() => {
-      lastMutationAt = performance.now();
+    const candidateSourceNodeId = (node) => {
+      let current = node?.nodeType === 1 ? node : node?.parentElement;
+      while (current?.nodeType === 1) {
+        const sourceNodeId = current.getAttribute(sourceNodeAttribute);
+        if (candidateSourceNodeIds.has(sourceNodeId)) return sourceNodeId;
+        current = current.parentElement;
+      }
+      return null;
+    };
+    const observer = new MutationObserver((records) => {
+      if (!tracksCandidateReadiness) {
+        lastMutationAt = performance.now();
+        return;
+      }
+      let changedPendingCandidate = false;
+      for (const record of records) {
+        const sourceNodeId = candidateSourceNodeId(record.target);
+        if (sourceNodeId && pendingCandidateSourceNodeIds.delete(sourceNodeId)) {
+          changedPendingCandidate = true;
+        }
+      }
+      if (changedPendingCandidate) lastMutationAt = performance.now();
     });
     observer.observe(document, {
       attributes: true,
@@ -309,7 +350,11 @@ function settleRuntimeScript(quietMilliseconds, maximumMilliseconds) {
     const inspect = () => {
       const now = performance.now();
       if (
-        now - lastMutationAt >= quietMilliseconds
+        (
+          (!tracksCandidateReadiness
+            || pendingCandidateSourceNodeIds.size === 0)
+          && now - lastMutationAt >= quietMilliseconds
+        )
         || now - startedAt >= maximumMilliseconds
       ) {
         finish();
@@ -321,10 +366,19 @@ function settleRuntimeScript(quietMilliseconds, maximumMilliseconds) {
   })`;
 }
 
-function populatedCandidateScript(candidates, sourceNodeAttribute) {
+function populatedCandidateScript(
+  candidates,
+  sourceNodeAttribute,
+  maximumCandidates = MAX_VISUALS,
+) {
+  const boundedMaximumCandidates = Math.max(
+    1,
+    Math.min(MAX_CANDIDATES, Math.floor(Number(maximumCandidates) || 0)),
+  );
   return `(() => {
     const candidates = ${safeScriptValue(candidates)};
     const sourceNodeAttribute = ${safeScriptValue(sourceNodeAttribute)};
+    const maximumCandidates = ${boundedMaximumCandidates};
     const elements = Array.from(document.querySelectorAll("[" + sourceNodeAttribute + "]"));
     const populated = [];
     for (const candidate of candidates) {
@@ -356,7 +410,7 @@ function populatedCandidateScript(candidates, sourceNodeAttribute) {
       }
       const hasRuntimeContent = hasChildContent || hasCanvasPixels;
       if (hasRuntimeContent) populated.push(candidate);
-      if (populated.length >= ${MAX_VISUALS}) break;
+      if (populated.length >= maximumCandidates) break;
     }
     return populated;
   })()`;
@@ -373,6 +427,8 @@ function prepareCandidateScript(candidate, sourceNodeAttribute, restoreKey) {
     if (matches.length !== 1) return false;
     const element = matches[0];
     if (!element.isConnected) return false;
+    element.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
+    window.dispatchEvent(new Event("resize"));
     const changes = [];
     const rememberStyle = (node, property, value) => {
       changes.push({
@@ -383,6 +439,20 @@ function prepareCandidateScript(candidate, sourceNodeAttribute, restoreKey) {
         priority: node.style.getPropertyPriority(property),
       });
       node.style.setProperty(property, value, "important");
+    };
+    const preservesPaintedGeometry = (transform) => {
+      if (transform === "none") return true;
+      const match = /^matrix\\(([^)]+)\\)$/u.exec(transform);
+      if (!match) return false;
+      const values = match[1].split(",").map((value) => Number.parseFloat(value));
+      if (values.length !== 6 || values.some((value) => !Number.isFinite(value))) {
+        return false;
+      }
+      const [scaleX, skewY, skewX, scaleY] = values;
+      return scaleX > 0
+        && scaleY > 0
+        && Math.abs(skewX) < 0.000001
+        && Math.abs(skewY) < 0.000001;
     };
     const affectedNodes = [];
     for (let node = element; node; node = node.parentElement) {
@@ -398,7 +468,9 @@ function prepareCandidateScript(candidate, sourceNodeAttribute, restoreKey) {
       if (node === document.documentElement) break;
     }
     for (const { node, computed } of affectedNodes) {
-      if (computed.transform !== "none") rememberStyle(node, "transform", "none");
+      if (!preservesPaintedGeometry(computed.transform)) {
+        rememberStyle(node, "transform", "none");
+      }
       if (computed.opacity !== "1") rememberStyle(node, "opacity", "1");
       if (computed.filter !== "none") rememberStyle(node, "filter", "none");
       if (computed.backdropFilter && computed.backdropFilter !== "none") {
@@ -409,9 +481,6 @@ function prepareCandidateScript(candidate, sourceNodeAttribute, restoreKey) {
         rememberStyle(node, "mix-blend-mode", "normal");
       }
       if (computed.perspective !== "none") rememberStyle(node, "perspective", "none");
-      if (computed.zoom && computed.zoom !== "1" && computed.zoom !== "normal") {
-        rememberStyle(node, "zoom", "1");
-      }
     }
     window[restoreKey] = () => {
       for (const change of changes.reverse()) {
@@ -425,8 +494,6 @@ function prepareCandidateScript(candidate, sourceNodeAttribute, restoreKey) {
       delete window[restoreKey];
       window.dispatchEvent(new Event("resize"));
     };
-    element.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
-    window.dispatchEvent(new Event("resize"));
     return true;
   })()`;
 }
@@ -454,23 +521,40 @@ function measureCandidateScript(candidate, sourceNodeAttribute) {
       const paddingRight = numeric(style.paddingRight);
       const paddingTop = numeric(style.paddingTop);
       const paddingBottom = numeric(style.paddingBottom);
+      const viewportScale = (node, nodeRect) => {
+        const offsetWidth = Number(node.offsetWidth);
+        const offsetHeight = Number(node.offsetHeight);
+        return {
+          x: Number.isFinite(offsetWidth) && offsetWidth >= 1
+            ? nodeRect.width / offsetWidth
+            : 1,
+          y: Number.isFinite(offsetHeight) && offsetHeight >= 1
+            ? nodeRect.height / offsetHeight
+            : 1,
+        };
+      };
       const captureBox = element.tagName === "TBODY" ? "border" : "content";
       let left = rect.left;
       let top = rect.top;
       let layoutWidth = rect.width;
       let layoutHeight = rect.height;
       if (captureBox === "content") {
-        left += borderLeft + paddingLeft;
-        top += borderTop + paddingTop;
-        layoutWidth = element.clientWidth - paddingLeft - paddingRight;
-        layoutHeight = element.clientHeight - paddingTop - paddingBottom;
+        const scale = viewportScale(element, rect);
+        left += (borderLeft + paddingLeft) * scale.x;
+        top += (borderTop + paddingTop) * scale.y;
+        layoutWidth = (
+          element.clientWidth - paddingLeft - paddingRight
+        ) * scale.x;
+        layoutHeight = (
+          element.clientHeight - paddingTop - paddingBottom
+        ) * scale.y;
         if (layoutWidth < 1) {
           layoutWidth = rect.width
-            - borderLeft - borderRight - paddingLeft - paddingRight;
+            - (borderLeft + borderRight + paddingLeft + paddingRight) * scale.x;
         }
         if (layoutHeight < 1) {
           layoutHeight = rect.height
-            - borderTop - borderBottom - paddingTop - paddingBottom;
+            - (borderTop + borderBottom + paddingTop + paddingBottom) * scale.y;
         }
       }
       const right = left + layoutWidth;
@@ -493,20 +577,25 @@ function measureCandidateScript(candidate, sourceNodeAttribute) {
         const clipsY = ancestorStyle.overflowY !== "visible";
         if (clipsX || clipsY) {
           const ancestorRect = ancestor.getBoundingClientRect();
+          const ancestorScale = viewportScale(ancestor, ancestorRect);
           const ancestorBorderLeft = numeric(ancestorStyle.borderLeftWidth);
           const ancestorBorderTop = numeric(ancestorStyle.borderTopWidth);
           if (clipsX) {
-            visibleLeft = Math.max(visibleLeft, ancestorRect.left + ancestorBorderLeft);
+            const clipLeft = ancestorRect.left
+              + ancestorBorderLeft * ancestorScale.x;
+            visibleLeft = Math.max(visibleLeft, clipLeft);
             visibleRight = Math.min(
               visibleRight,
-              ancestorRect.left + ancestorBorderLeft + ancestor.clientWidth,
+              clipLeft + ancestor.clientWidth * ancestorScale.x,
             );
           }
           if (clipsY) {
-            visibleTop = Math.max(visibleTop, ancestorRect.top + ancestorBorderTop);
+            const clipTop = ancestorRect.top
+              + ancestorBorderTop * ancestorScale.y;
+            visibleTop = Math.max(visibleTop, clipTop);
             visibleBottom = Math.min(
               visibleBottom,
-              ancestorRect.top + ancestorBorderTop + ancestor.clientHeight,
+              clipTop + ancestor.clientHeight * ancestorScale.y,
             );
           }
         }
@@ -723,8 +812,39 @@ export function createEditVisualCaptureController({
         "document.fonts?.ready?.catch?.(() => undefined) ?? Promise.resolve()",
         true,
       ).catch(() => undefined);
+      const initiallyPopulatedCandidates = await captureWindow.webContents
+        .executeJavaScript(
+          populatedCandidateScript(
+            payload.candidates,
+            payload.sourceNodeAttribute,
+            payload.candidates.length,
+          ),
+          true,
+        )
+        .catch(() => []);
+      const candidateSourceNodeIds = new Set(
+        payload.candidates.map((candidate) => candidate.sourceNodeId),
+      );
+      const initiallyPopulatedSourceNodeIds = Array.isArray(
+        initiallyPopulatedCandidates,
+      )
+        ? [...new Set(initiallyPopulatedCandidates
+          .map((candidate) => candidate?.sourceNodeId)
+          .filter((sourceNodeId) => (
+            typeof sourceNodeId === "string"
+            && candidateSourceNodeIds.has(sourceNodeId)
+          )))]
+        : [];
       await captureWindow.webContents.executeJavaScript(
-        settleRuntimeScript(INITIAL_QUIET_MS, INITIAL_SETTLE_TIMEOUT_MS),
+        settleRuntimeScript(
+          INITIAL_QUIET_MS,
+          INITIAL_SETTLE_TIMEOUT_MS,
+          {
+            candidates: payload.candidates,
+            sourceNodeAttribute: payload.sourceNodeAttribute,
+            initiallyPopulatedSourceNodeIds,
+          },
+        ),
         true,
       );
       await captureWindow.webContents.executeJavaScript(

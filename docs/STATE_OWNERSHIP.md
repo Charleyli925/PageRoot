@@ -119,10 +119,13 @@ Rules:
   propose a new context for the current document key, but do not own or persist
   it. A projection refresh consumes that context; it does not merge runtime DOM
   into it. Runtime dependency-stable text/history changes may rebind the exact
-  committed projection without capture. Pending or replacement work never owns
+  committed projection without capture; indirect DOM traversal is conservatively
+  source-dependent and schedules a replacement. Pending or replacement work never owns
   permission to blank the committed bitmap; identical mounts retain their DOM
   identity, and Preview/Edit suspension preserves only bounded disposable
-  byte-bounded cache state. Accepted PNG bytes and unchanged mounts retain their
+  byte-bounded cache state. A valid non-deferred empty projection clears the prior
+  mount, while direct Canvas/SVG sizing overrides remain reversible presentation
+  state. Accepted PNG bytes and unchanged mounts retain their
   identity across TargetRef rebinding; Blob URLs are presentation resources and
   are revoked on replacement or frame disposal.
 - AI review state fields are orthogonal. Page, filter, visibility, navigation,
@@ -151,8 +154,9 @@ Rules:
   authored scripts run, owns the frozen analyzer-declared host-key set and
   records the parser-created element that first claims every key. Undeclared
   claims are ignored; missing, duplicate, transferred, replaced or drifting
-  declared identities invalidate the whole supplemental batch. Each host owns
-  an independent capture budget; a local fault, instability or exhaustion is a
+  declared identities invalidate the whole supplemental batch. Each host retains
+  independent failure isolation while one aggregate capture budget spans the
+  complete two-sample batch; a local fault, instability or exhaustion is a
   validated unavailable fact with no authority over valid sibling hosts.
   It accepts only a complete declared before/after pair before its initial deadline,
   includes the host's own painted box, fully transparent disappearance state

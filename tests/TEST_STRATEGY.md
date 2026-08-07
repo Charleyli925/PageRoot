@@ -42,11 +42,13 @@ PR 必须从 Draft 开始。普通推送由独立的 `PR Feedback` workflow 处�
 - 交互预览与编辑视觉投影：Node 分别证明短期自定义协议的资源边界、
   PageViewContext 的 source-backed allowlist、投影精确源 Hash/空宿主校验、主进程
   PNG 二进制签名/IHDR/内容摘要/字节/DPR/crop 边界、稳定 TargetRef 重绑定、
-  64px viewport bucket、脚本引用数据依赖、字节 LRU 和迟到结果丢弃；Electron
+  64px viewport bucket、脚本/自动内联处理器引用数据依赖（间接 DOM 遍历与未解析字面量选择器保守纳入完整源 Hash）、有效空结果清除旧位图、字节 LRU 和迟到结果丢弃；Electron
   用一份合成报告证明用户未进入预览时，直接或嵌套的运行时 SVG/HTML、Canvas
   和动态 `tbody` 已以只读 PNG 显示且可对原宿主留评论，
   源文件字节不变；同一用例再证明宿主 CSP 下的相对脚本和真实运行时 DOM、
-  border/padding/transform 下的 content-box 几何、响应式 `contain` 层、Tab 切换，
+  border/padding/transform 下的 content-box 几何、直连 Canvas/SVG 的运行时尺寸、响应式 `contain` 层、Tab 切换，
+  以及源码 0×0 绝对定位宿主被运行时内容撑开并经 `resize` 缩放后仍能在
+  `overflow:hidden` 容器内产生非零完整位图，
   以及返回编辑和普通文字输入后只保留当前 Tab、位图 DOM 身份不变且仍能进入
   原有文字编辑岛。Blob URL/临时背景不得进入源码字节。
   可选真实 HTML 用例直接覆盖 `np1a`/`np1b` 等脚本生成图和动态表格，不将真实

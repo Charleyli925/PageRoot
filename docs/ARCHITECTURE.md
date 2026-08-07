@@ -57,9 +57,10 @@ Comments + frozen input
   `aria-expanded` state. It never carries runtime DOM, pixels or table markup.
 - Desktop Edit has one separate, disposable runtime-visual projection. A
   renderer session reuses the Canvas `SourceIndex`, limits source-empty hosts
-  to those with authored-script causality, and keys capture work by executable
-  source, script-referenced data containers, stable host TargetRef, a 64px
-  viewport bucket and presentation context. Ordinary text/history edits
+  to authored executable causality (scripts or inline handlers), and keys capture
+  work by executable source, script/handler-referenced data containers, stable host TargetRef, a 64px
+  viewport bucket and presentation context. Structural or indirect DOM reads conservatively fold the
+  complete source Hash into that identity. Ordinary dependency-stable text/history edits
   therefore resolve that TargetRef against the current SourceIndex and rebind the committed projection to the
   exact new source Hash instead of running the page again. A bounded LRU keeps
   recent viewport/context results under both entry and byte budgets, and Preview/Edit suspension retains the last
@@ -69,22 +70,28 @@ Comments + frozen input
   source-authored `canvas` and `svg` roots are candidates as well as ordinary
   containers. `HtmlCanvasEditor` mounts each PNG through a responsive content
   layer (or one bitmap row for an empty `tbody`); direct Canvas/SVG roots use a
-  reversible content-box background adapter. The host therefore remains the selectable/commentable
+  reversible content-box background adapter that temporarily applies the captured
+  content-box dimensions. The host therefore remains the selectable/commentable
   TargetRef. The runtime DOM is never merged or synchronized, and neither the
   bitmap nor its temporary attributes enter SourcePatch, save, version, review
   diff or AI Request input.
   Capture protocol V2 transfers bounded PNG bytes rather than Base64, validates
   PNG signature/IHDR dimensions, content SHA, byte length, DPR, sizing mode and
-  crop geometry, waits for a short mutation-quiet point, neutralizes only
-  disposable transform/effect presentation during measurement, captures the
-  content box for ordinary hosts and the border box for `tbody`, and rejects a
+  crop geometry, waits for a short mutation-quiet point, keeps positive
+  axis-aligned scale/translate and zoom in the final painted geometry, and
+  neutralizes other disposable transform/effect presentation during
+  measurement. It captures the content box for ordinary hosts and the border
+  box for `tbody`, and rejects a
   viewport/overflow-clipped rectangle rather than stretching a partial bitmap.
   Hidden or temporarily uncapturable hosts are deferred so their previous
-  committed bitmap can remain. The Canvas reconciles by stable host key, keeps
+  committed bitmap can remain; a valid non-deferred empty result is an
+  authoritative clear. The Canvas reconciles by stable host key, keeps
   identical image nodes, and decodes a changed Blob URL off-DOM before replacing
   the old node. Content layers follow host resize/flow changes with `contain`
   sizing and an owned `ResizeObserver`, so a cache hit cannot reuse stale fixed
-  pixel geometry; a projection refresh never starts by blanking the document.
+  pixel geometry. A source-zero host receives the validated captured intrinsic
+  size instead of resolving a percentage against its own zero box; a projection
+  refresh never starts by blanking the document.
 - Comment selection remains source-node exact inside foreign content. Authored
   SVG children retain their own instrumented SourceIndex identity; runtime-only
   children fail closed and are never promoted to an ancestor `svg`.
@@ -147,8 +154,9 @@ Comments + frozen input
   binds each key to the parser-created source host before authored code can
   transfer it. It ignores undeclared claims; missing, duplicate, transferred or
   replaced declared identities fail the supplemental batch back to static
-  evidence. Each declared host receives an independent traversal/Canvas budget.
-  A host that is unsupported, unstable or over budget emits an explicit
+  evidence. Per-host limits and one aggregate traversal/Canvas budget span the
+  complete two-sample batch, so a page with many declared hosts cannot multiply
+  the work. A host that is unsupported, unstable or over budget emits an explicit
   unavailable fact with no comparison authority, while valid sibling hosts
   remain usable.
   Each isolated frame samples visible HTML/SVG/Canvas paint twice, including

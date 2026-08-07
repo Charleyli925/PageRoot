@@ -330,7 +330,13 @@ export class RuntimeVisualProjectionSession {
               sourceIndex: current.sourceIndex,
             });
           }
-          if (projection) {
+          if (
+            projection
+            && (
+              projection.visuals.length > 0
+              || projection.deferredCaptureKeys.length === 0
+            )
+          ) {
             this.#commit({ requestKey, projection });
             markProjectionEvent("capture-ready");
             return;

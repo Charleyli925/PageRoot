@@ -69,7 +69,11 @@ const RUNTIME_DEPENDENCY_TAGS = new Set([
   "script",
   "style",
 ]);
+const INLINE_EVENT_HANDLER_ATTRIBUTE = /^on[a-z][a-z0-9]*$/u;
 const BROAD_RUNTIME_HOST_MUTATION = /(?:appendChild|insertAdjacentHTML|replaceChildren|\.innerHTML\s*=|document\.createElement|echarts\.init|Highcharts\.chart|Plotly\.newPlot|vegaEmbed|d3\.select|new\s+Chart\s*\()/u;
+const INDIRECT_RUNTIME_DOM_READ = /(?:\bdocument\.(?:body|documentElement|forms|images|links)\b|\.(?:children|childNodes|first(?:Child|ElementChild)|last(?:Child|ElementChild)|parent(?:Node|Element)|previous(?:Sibling|ElementSibling)|next(?:Sibling|ElementSibling)|closest)\b|\bgetElementsBy(?:ClassName|TagName|Name)\s*\()/u;
+const RUNTIME_DOM_QUERY_CALL = /\bquerySelector(?:All)?\s*\(\s*([^)]*)\)/gu;
+const STABLE_RUNTIME_SELECTOR_LITERAL = /^("|'|`)(?:#[A-Za-z_][\w-]*|\.[A-Za-z_][\w-]*|\[\s*(?:id|name|class|data-[\w-]+)(?:\s*(?:[~|^$*]?=)\s*(?:[A-Za-z0-9_-]+|"[^"]*"|'[^']*'|`[^`]*`))?\s*\])\1$/u;
 const acceptedProjectionAuthority = new WeakSet();
 
 function reusableSourceIndex(html, candidate) {
@@ -154,21 +158,76 @@ function candidateReferenceTokens(element) {
   return [...tokens].filter((token) => String(token).length >= 3);
 }
 
-function runtimeReferencedCandidates(sourceIndex, candidates) {
+function runtimeExecutableSources(sourceIndex) {
   const scripts = sourceIndex.elements.filter(
     (element) => element.tagName === "script",
   );
-  if (scripts.length === 0) return [];
-  const scriptSource = scripts.map((element) => element.raw).join("\n");
+  const handlers = [];
+  for (const element of sourceIndex.elements) {
+    for (const attribute of element.attributes ?? []) {
+      const value = attribute.value ?? attribute.rawValue;
+      if (
+        INLINE_EVENT_HANDLER_ATTRIBUTE.test(attribute.name)
+        && typeof value === "string"
+        && value.length > 0
+      ) {
+        handlers.push({ element, attribute, value });
+      }
+    }
+  }
+  return {
+    scripts,
+    handlers,
+    source: [
+      ...scripts.map((element) => element.raw),
+      ...handlers.map((handler) => handler.value),
+    ].join("\n"),
+  };
+}
+
+function usesIndirectRuntimeDomRead(source) {
+  if (INDIRECT_RUNTIME_DOM_READ.test(source)) return true;
+  return [...source.matchAll(RUNTIME_DOM_QUERY_CALL)].some((match) => (
+    !STABLE_RUNTIME_SELECTOR_LITERAL.test(match[1].trim())
+  ));
+}
+
+function candidateBelongsToHandlerOwner(
+  sourceIndex,
+  element,
+  handlerOwnerNodeIds,
+) {
+  let current = element;
+  while (current?.type === "element") {
+    if (handlerOwnerNodeIds.has(current.nodeId)) return true;
+    current = current.parentId
+      ? sourceIndex.byNodeId.get(current.parentId)
+      : null;
+  }
+  return false;
+}
+
+function runtimeReferencedCandidates(sourceIndex, candidates) {
+  const { scripts, handlers, source } = runtimeExecutableSources(sourceIndex);
+  if (scripts.length === 0 && handlers.length === 0) return [];
+  const handlerOwnerNodeIds = new Set(
+    handlers.map((handler) => handler.element.nodeId),
+  );
   const referenced = candidates.filter((candidate) => {
     const element = sourceIndex.byNodeId.get(candidate.sourceNodeId);
-    return element?.type === "element" && candidateReferenceTokens(element)
-      .some((token) => scriptSource.includes(token));
+    return element?.type === "element" && (
+      candidateBelongsToHandlerOwner(
+        sourceIndex,
+        element,
+        handlerOwnerNodeIds,
+      )
+      || candidateReferenceTokens(element).some((token) => source.includes(token))
+    );
   });
   const hasExternalScript = scripts.some(
     (element) => (element.attributesByName.get("src")?.length ?? 0) === 1,
   );
-  if (hasExternalScript || BROAD_RUNTIME_HOST_MUTATION.test(scriptSource)) {
+  if (hasExternalScript || BROAD_RUNTIME_HOST_MUTATION.test(source)) {
     return candidates;
   }
   return referenced;
@@ -198,13 +257,18 @@ function captureCandidates(sourceIndex) {
 }
 
 function runtimeDependencySha256(sourceIndex, candidates) {
-  const scripts = sourceIndex.elements.filter(
-    (element) => element.tagName === "script",
-  );
-  const scriptSource = scripts.map((element) => element.raw).join("\n");
+  const { handlers, source: scriptSource } = runtimeExecutableSources(sourceIndex);
   const executableSources = sourceIndex.elements
     .filter((element) => RUNTIME_DEPENDENCY_TAGS.has(element.tagName))
     .map((element) => [element.tagName, element.selector, element.raw]);
+  for (const handler of handlers) {
+    executableSources.push([
+      "event-handler",
+      handler.element.selector,
+      handler.attribute.name,
+      handler.value,
+    ]);
+  }
   const referencedDataSources = scriptSource
     ? sourceIndex.elements
       .filter((element) => (
@@ -220,6 +284,9 @@ function runtimeDependencySha256(sourceIndex, candidates) {
     candidates: candidates.map((candidate) => candidate.captureKey),
     executableSources,
     referencedDataSources,
+    ...(usesIndirectRuntimeDomRead(scriptSource)
+      ? { indirectDomSourceSha256: sourceIndex.sourceSha256 }
+      : {}),
   }));
 }
 

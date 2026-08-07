@@ -41,15 +41,19 @@ version comparison or AI input.
   navigation/popups/webviews and captures the final host rectangle. It is
   renderer-library agnostic: direct or nested Canvas/SVG, HTML and `tbody` use the same bitmap
   route. Protocol V2 waits for a short mutation-quiet point, captures ordinary
-  hosts by content box and `tbody` by border box, neutralizes capture-time
-  transforms/effects, and rejects clipped partial rectangles.
+  hosts by content box and `tbody` by border box. Positive axis-aligned
+  scale/translate and zoom remain part of the final painted geometry; other
+  disposable transforms/effects are neutralized. Clipped partial rectangles
+  are rejected.
 - The response contains bounded PNG bytes plus validated IHDR dimensions,
   content SHA, byte length, DPR, sizing mode and crop geometry only. It is
   accepted only for the exact source Hash, a unique known source node and a
   host that is still empty in source.
 - `HtmlCanvasEditor` mounts the PNG as pointer-transparent, read-only
   presentation in a responsive content layer beneath the original instrumented
-  host. An empty `tbody` gets one bitmap row; direct Canvas/SVG roots use a
+  host. A source-sized host owns the layer size, while a source-zero host gets
+  the validated captured intrinsic size. An empty `tbody` gets one bitmap row;
+  direct Canvas/SVG roots use a
   reversible content-box background. Clicking, selecting and commenting therefore resolve the
   original host TargetRef, never the image.
   Stable host keys reconcile mounts in place. An unchanged bitmap retains its
