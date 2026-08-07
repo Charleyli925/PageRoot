@@ -130,17 +130,22 @@ const e2eUserDataPath = (() => {
   }
   return resolved;
 })();
+const e2eWindowForeground = Boolean(e2eUserDataPath)
+  && process.env.PAGEROOT_E2E_FOREGROUND === "1";
+const e2eWindowRunsInBackground = Boolean(e2eUserDataPath)
+  && !e2eWindowForeground;
 const productUserDataPath = e2eUserDataPath || path.join(app.getPath("appData"), "PageRoot");
 app.setPath("userData", productUserDataPath);
 const applicationName = app.isPackaged
   ? path.basename(process.execPath, path.extname(process.execPath))
   : "源页";
 app.setName(applicationName);
+if (e2eWindowRunsInBackground && process.platform === "darwin") {
+  app.setActivationPolicy("accessory");
+}
 if (e2eUserDataPath) {
-  // Hosted macOS runners can report an Electron window as visible while the
-  // WindowServer still classifies it as background or occluded. Keep the
-  // renderer's startup timers and frame commits active for deterministic E2E
-  // hydration; production launch behavior remains unchanged.
+  // Background E2E still needs deterministic timers, visibility state and
+  // frame commits. Production launch behavior remains unchanged.
   app.commandLine.appendSwitch("disable-background-timer-throttling");
   app.commandLine.appendSwitch("disable-renderer-backgrounding");
   app.commandLine.appendSwitch("disable-backgrounding-occluded-windows");
@@ -337,6 +342,18 @@ process.on("uncaughtExceptionMonitor", (error) => {
   });
 });
 
+function presentMainWindow() {
+  if (
+    e2eWindowRunsInBackground
+    || !mainWindow
+    || mainWindow.isDestroyed()
+  ) return false;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+  return true;
+}
+
 function requestAboutPageRoot() {
   if (
     !rendererHasLoaded
@@ -345,9 +362,7 @@ function requestAboutPageRoot() {
   ) {
     return;
   }
-  if (mainWindow.isMinimized()) mainWindow.restore();
-  mainWindow.show();
-  mainWindow.focus();
+  presentMainWindow();
   mainWindow.webContents.send(APP_CHANNELS.aboutRequested);
 }
 
@@ -693,10 +708,7 @@ function showExternalOpenError(error) {
 }
 
 function focusMainWindow() {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  if (mainWindow.isMinimized()) mainWindow.restore();
-  mainWindow.show();
-  mainWindow.focus();
+  return presentMainWindow();
 }
 
 function interruptCloseForExternalOpen() {
@@ -1932,15 +1944,15 @@ async function coordinateApplicationExit(reason, intent = "quit") {
         result.requestId,
         "收到新的外部 HTML 打开请求，已取消关闭。",
       );
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.show();
-        mainWindow.focus();
-      }
+      presentMainWindow();
       coordinatedExit = null;
       return false;
     }
     if (!result.ready) {
-      const nativeBlock = shouldPresentNativeCloseBlock(result);
+      const nativeBlock = (
+        !e2eWindowRunsInBackground
+        && shouldPresentNativeCloseBlock(result)
+      );
       const interruptionSurface = nativeBlock ? "native" : "global";
       captureUsage("interruption_changed", {
         interruption_code: "close_safety",
@@ -1950,10 +1962,7 @@ async function coordinateApplicationExit(reason, intent = "quit") {
       });
       notifyRendererCloseAborted(result.requestId, result.reason);
       if (!nativeBlock) {
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.show();
-          mainWindow.focus();
-        }
+        presentMainWindow();
         captureUsage("interruption_changed", {
           interruption_code: "close_safety",
           phase: "resolved",
@@ -2274,7 +2283,7 @@ async function createWindow() {
     minHeight: 720,
     backgroundColor: "#f7f8fa",
     title: "源页",
-    show: process.env.PAGEROOT_E2E === "1",
+    show: e2eWindowForeground,
     ...(process.platform === "darwin"
       ? {
           titleBarStyle: "hiddenInset",
@@ -2397,7 +2406,7 @@ async function createWindow() {
       reason_code: "RESPONSIVE",
     });
   });
-  mainWindow.once("ready-to-show", () => mainWindow?.show());
+  mainWindow.once("ready-to-show", presentMainWindow);
   mainWindow.on("close", (event) => {
     if (finalExitStarted) return;
     event.preventDefault();
@@ -2449,11 +2458,16 @@ if (!hasSingleInstanceLock) {
     for (const sourcePath of externalHtmlPathsFromArgv(commandLine)) {
       publishExternalFileOpen(sourcePath);
     }
-    if (!isQuitting && !finalExitStarted) focusMainWindow();
+    if (!isQuitting && !finalExitStarted) presentMainWindow();
   });
 
   app.whenReady().then(async () => {
-    if (process.platform === "darwin" && app.dock && !app.isPackaged) {
+    if (
+      process.platform === "darwin"
+      && app.dock
+      && !app.isPackaged
+      && !e2eWindowRunsInBackground
+    ) {
       app.dock.setIcon(path.join(directory, "resources", "icon.png"));
     }
     installApplicationMenu();

@@ -38,6 +38,7 @@ PR 必须从 Draft 开始。普通推送由独立的 `PR Feedback` workflow 处�
 - 源码字符串合同：只在其拥有的组件或控制器变化时运行；不把实现文本匹配当作主要正确性证据。
 - Browser 冒烟：固定覆盖脚本隔离、源码字节、可编辑岛、源码权威围栏和能力降级五类关键风险；完整 Browser 包含全部活动 V2 回归。V1 的 per-keystroke tracker、FormatSkeleton 和 IME tail 状态机实现及测试已从仓库删除；V2 岛内字节 oracle、输入矩阵和 composition 快照用例是唯一产品合同。
 - Electron 冒烟：固定覆盖真实 authored DOM 输入和一次带磁盘持久化的 composition；完整 Electron 保留保存、关闭重开和逐字节 forward 结果等全部路径。
+- Electron 产品套件默认使用隐藏、禁止后台节流的 BrowserWindow，不激活应用、不抢键盘焦点；只有显式设置 `PAGEROOT_E2E_FOREGROUND=1` 才显示测试窗口。CI 环境预检保留可见但不聚焦的 accessory 窗口，用于证明 WindowServer 绘制能力。
 - 交互预览与编辑视觉投影：Node 分别证明短期自定义协议的资源边界、
   PageViewContext 的 source-backed allowlist、投影精确源 Hash/空宿主校验、主进程
   截图边界和迟到结果丢弃；Electron 用一份合成报告证明用户未进入预览时，
