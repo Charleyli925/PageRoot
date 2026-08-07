@@ -628,6 +628,7 @@ test("Electron interactive preview runs authored scripts and edits the selected 
       id="runtime-svg"
       style="width: 40px; height: 20px; padding: 7px; border: 3px solid #0f172a; transform: translate(13px, 7px) scale(1.25); transform-origin: top left"
     ></div>
+    <div id="runtime-delayed" style="width: 32px; height: 16px"></div>
     <canvas id="direct-runtime-canvas" width="36" height="18"></canvas>
     <svg id="direct-runtime-svg" width="44" height="22"></svg>
     <table><tbody id="runtime-table"></tbody></table>
@@ -695,6 +696,15 @@ test("Electron interactive preview runs authored scripts and edits the selected 
   };
   window.addEventListener("resize", fitScaledPanel);
   fitScaledPanel();
+  window.addEventListener("load", () => {
+    window.setTimeout(() => {
+      const delayedCanvas = document.createElement("canvas");
+      delayedCanvas.width = 32;
+      delayedCanvas.height = 16;
+      delayedCanvas.getContext("2d").fillRect(0, 0, 16, 8);
+      document.getElementById("runtime-delayed").append(delayedCanvas);
+    }, 350);
+  }, { once: true });
   document.body.dataset.runtimeReady = "true";
 })();`,
     "utf8",
@@ -717,6 +727,9 @@ test("Electron interactive preview runs authored scripts and edits the selected 
     )).toBeVisible({ timeout: 20_000 });
     await expect(editFrame.locator(
       '#runtime-svg img[data-pageroot-readonly-visual="runtime-bitmap"]',
+    )).toBeVisible();
+    await expect(editFrame.locator(
+      '#runtime-delayed img[data-pageroot-readonly-visual="runtime-bitmap"]',
     )).toBeVisible();
     const scaledRuntimeVisual = editFrame.locator(
       '#runtime-scaled img[data-pageroot-readonly-visual="runtime-bitmap"]',

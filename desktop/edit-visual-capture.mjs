@@ -287,14 +287,55 @@ function presentationScript(entries, sourceNodeAttribute) {
   })()`;
 }
 
-function settleRuntimeScript(quietMilliseconds, maximumMilliseconds) {
+function settleRuntimeScript(
+  quietMilliseconds,
+  maximumMilliseconds,
+  {
+    candidates = [],
+    sourceNodeAttribute = null,
+    initiallyPopulatedSourceNodeIds = [],
+  } = {},
+) {
   return `new Promise((resolve) => {
     const quietMilliseconds = ${Math.max(0, quietMilliseconds)};
     const maximumMilliseconds = ${Math.max(quietMilliseconds, maximumMilliseconds)};
+    const candidates = ${safeScriptValue(candidates)};
+    const sourceNodeAttribute = ${safeScriptValue(sourceNodeAttribute)};
+    const initialSourceNodeIds = new Set(${safeScriptValue(
+      initiallyPopulatedSourceNodeIds,
+    )});
+    const candidateSourceNodeIds = new Set(candidates
+      .map((candidate) => candidate?.sourceNodeId)
+      .filter((sourceNodeId) => typeof sourceNodeId === "string"));
+    const tracksCandidateReadiness = candidateSourceNodeIds.size > 0
+      && typeof sourceNodeAttribute === "string"
+      && sourceNodeAttribute.length > 0;
+    const pendingCandidateSourceNodeIds = new Set([...candidateSourceNodeIds]
+      .filter((sourceNodeId) => !initialSourceNodeIds.has(sourceNodeId)));
     const startedAt = performance.now();
     let lastMutationAt = startedAt;
-    const observer = new MutationObserver(() => {
-      lastMutationAt = performance.now();
+    const candidateSourceNodeId = (node) => {
+      let current = node?.nodeType === 1 ? node : node?.parentElement;
+      while (current?.nodeType === 1) {
+        const sourceNodeId = current.getAttribute(sourceNodeAttribute);
+        if (candidateSourceNodeIds.has(sourceNodeId)) return sourceNodeId;
+        current = current.parentElement;
+      }
+      return null;
+    };
+    const observer = new MutationObserver((records) => {
+      if (!tracksCandidateReadiness) {
+        lastMutationAt = performance.now();
+        return;
+      }
+      let changedPendingCandidate = false;
+      for (const record of records) {
+        const sourceNodeId = candidateSourceNodeId(record.target);
+        if (sourceNodeId && pendingCandidateSourceNodeIds.delete(sourceNodeId)) {
+          changedPendingCandidate = true;
+        }
+      }
+      if (changedPendingCandidate) lastMutationAt = performance.now();
     });
     observer.observe(document, {
       attributes: true,
@@ -309,7 +350,11 @@ function settleRuntimeScript(quietMilliseconds, maximumMilliseconds) {
     const inspect = () => {
       const now = performance.now();
       if (
-        now - lastMutationAt >= quietMilliseconds
+        (
+          (!tracksCandidateReadiness
+            || pendingCandidateSourceNodeIds.size === 0)
+          && now - lastMutationAt >= quietMilliseconds
+        )
         || now - startedAt >= maximumMilliseconds
       ) {
         finish();
@@ -321,10 +366,19 @@ function settleRuntimeScript(quietMilliseconds, maximumMilliseconds) {
   })`;
 }
 
-function populatedCandidateScript(candidates, sourceNodeAttribute) {
+function populatedCandidateScript(
+  candidates,
+  sourceNodeAttribute,
+  maximumCandidates = MAX_VISUALS,
+) {
+  const boundedMaximumCandidates = Math.max(
+    1,
+    Math.min(MAX_CANDIDATES, Math.floor(Number(maximumCandidates) || 0)),
+  );
   return `(() => {
     const candidates = ${safeScriptValue(candidates)};
     const sourceNodeAttribute = ${safeScriptValue(sourceNodeAttribute)};
+    const maximumCandidates = ${boundedMaximumCandidates};
     const elements = Array.from(document.querySelectorAll("[" + sourceNodeAttribute + "]"));
     const populated = [];
     for (const candidate of candidates) {
@@ -356,7 +410,7 @@ function populatedCandidateScript(candidates, sourceNodeAttribute) {
       }
       const hasRuntimeContent = hasChildContent || hasCanvasPixels;
       if (hasRuntimeContent) populated.push(candidate);
-      if (populated.length >= ${MAX_VISUALS}) break;
+      if (populated.length >= maximumCandidates) break;
     }
     return populated;
   })()`;
@@ -758,8 +812,39 @@ export function createEditVisualCaptureController({
         "document.fonts?.ready?.catch?.(() => undefined) ?? Promise.resolve()",
         true,
       ).catch(() => undefined);
+      const initiallyPopulatedCandidates = await captureWindow.webContents
+        .executeJavaScript(
+          populatedCandidateScript(
+            payload.candidates,
+            payload.sourceNodeAttribute,
+            payload.candidates.length,
+          ),
+          true,
+        )
+        .catch(() => []);
+      const candidateSourceNodeIds = new Set(
+        payload.candidates.map((candidate) => candidate.sourceNodeId),
+      );
+      const initiallyPopulatedSourceNodeIds = Array.isArray(
+        initiallyPopulatedCandidates,
+      )
+        ? [...new Set(initiallyPopulatedCandidates
+          .map((candidate) => candidate?.sourceNodeId)
+          .filter((sourceNodeId) => (
+            typeof sourceNodeId === "string"
+            && candidateSourceNodeIds.has(sourceNodeId)
+          )))]
+        : [];
       await captureWindow.webContents.executeJavaScript(
-        settleRuntimeScript(INITIAL_QUIET_MS, INITIAL_SETTLE_TIMEOUT_MS),
+        settleRuntimeScript(
+          INITIAL_QUIET_MS,
+          INITIAL_SETTLE_TIMEOUT_MS,
+          {
+            candidates: payload.candidates,
+            sourceNodeAttribute: payload.sourceNodeAttribute,
+            initiallyPopulatedSourceNodeIds,
+          },
+        ),
         true,
       );
       await captureWindow.webContents.executeJavaScript(
