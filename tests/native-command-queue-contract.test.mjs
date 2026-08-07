@@ -356,12 +356,12 @@ test("refresh and project-switch awaiters always settle when replayed or discard
   );
   assert.match(
     prepare,
-    /const replay = deferredEditorReplayRef\.current\.prepareProjectSwitch;[\s\S]*?if \(!replay\) \{[\s\S]*?resolveDeferred\?\.\(false\);[\s\S]*?return;[\s\S]*?replay\(\(value\) => resolveDeferred\?\.\(value\)\)/u,
+    /const replay = deferredEditorReplayRef\.current\.prepareProjectSwitch;[\s\S]*?if \(!replay\) \{[\s\S]*?resolveDeferred\?\.\(false\);[\s\S]*?return;[\s\S]*?replay\(\(value\) => resolveDeferred\?\.\(value\),[\s\S]*?retrySourcePath,[\s\S]*?onDeferred/u,
     "an unavailable project-switch replay endpoint must fail closed",
   );
   assert.match(
     prepare,
-    /prepareProjectSwitch\(true\)\.then\(resolve, \(\) => resolve\(false\)\)/u,
+    /prepareProjectSwitch\(true, options\)\.then\(resolve, \(\) => resolve\(false\)\)/u,
     "project-switch failure and discard must both resolve false",
   );
 });

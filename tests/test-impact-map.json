@@ -390,12 +390,14 @@
       "patterns": [
         "^app/workbench(?:\\.tsx|/.*\\.(?:ts|tsx))$",
         "^app/lib/comment-rail-layout\\.js$",
-        "^tests/(?:comment-rail-layout\\.test|source-architecture-fixture)\\.mjs$"
+        "^tests/(?:comment-rail-layout\\.test|source-architecture-fixture)\\.mjs$",
+        "^tests/native-command-queue-contract\\.test\\.mjs$"
       ],
       "suites": ["typecheck", "browser-smoke", "electron-smoke", "ai-smoke"],
       "nodeTests": [
         "tests/direct-edit-events.test.mjs",
         "tests/comment-rail-layout.test.mjs",
+        "tests/native-command-queue-contract.test.mjs",
         "tests/frontend-target-refresh.test.mjs",
         "tests/notification-policy.test.mjs",
         "tests/notification-ui.test.mjs",
