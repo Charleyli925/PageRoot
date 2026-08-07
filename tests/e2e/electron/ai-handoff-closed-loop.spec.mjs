@@ -123,14 +123,20 @@ async function launchPageRoot({
     },
   });
   const page = await electronApp.firstWindow();
-  await electronApp.evaluate(({ app, BrowserWindow }) => {
+  const nativeWindow = await electronApp.evaluate(({ BrowserWindow }) => {
     const window = BrowserWindow.getAllWindows()[0];
     window?.webContents.setBackgroundThrottling(false);
-    window?.show();
-    app.focus({ steal: true });
-    window?.focus();
+    return {
+      focused: window?.isFocused() || false,
+      visible: window?.isVisible() || false,
+    };
   });
-  await page.bringToFront();
+  const foreground = (
+    injectedEnv.PAGEROOT_E2E_FOREGROUND
+    ?? process.env.PAGEROOT_E2E_FOREGROUND
+  ) === "1";
+  expect(nativeWindow.visible).toBe(foreground);
+  if (!foreground) expect(nativeWindow.focused).toBe(false);
   await page.waitForLoadState("domcontentloaded");
   await page.waitForFunction(() => document.visibilityState === "visible");
   await page.evaluate(() => new Promise((resolve) => {
@@ -233,7 +239,6 @@ function removeSourceFixture(sourceDirectory) {
 
 async function waitForProjectReady(page, timeout = 60_000) {
   await expect.poll(async () => {
-    await page.bringToFront();
     const state = await page.locator("main.workbench").getAttribute("data-project-state");
     if (state === "ready") return state;
     const stage = await page.evaluate(() => window.__PAGEROOT_HYDRATION_STAGE__);

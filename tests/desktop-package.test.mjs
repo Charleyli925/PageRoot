@@ -389,7 +389,7 @@ test("desktop package carries the v3 patch engine, candidate assessment and acti
   assert.match(mainProcess, /shouldPresentNativeCloseBlock/);
   assert.match(
     mainProcess,
-    /if \(!nativeBlock\)[\s\S]*?mainWindow\.show\(\);[\s\S]*?mainWindow\.focus\(\);[\s\S]*?return false;/,
+    /const nativeBlock = \([\s\S]*?!e2eWindowRunsInBackground[\s\S]*?shouldPresentNativeCloseBlock\(result\)[\s\S]*?if \(!nativeBlock\)[\s\S]*?presentMainWindow\(\);[\s\S]*?return false;/,
   );
   assert.doesNotMatch(mainProcess, /还有内容没有保存/);
   assert.match(mainProcess, /event\.preventDefault\(\)/);
@@ -429,7 +429,24 @@ test("desktop package carries the v3 patch engine, candidate assessment and acti
   assert.match(previewProtocol, /protocolApi\.handle\(PREVIEW_PROTOCOL_SCHEME/);
   assert.match(previewProtocol, /isContainedPath\(session\.sourceRoot, resolvedPath\)/);
   assert.doesNotMatch(previewProtocol, /bypassCSP:\s*true/);
-  assert.match(mainProcess, /show:\s*process\.env\.PAGEROOT_E2E === "1"/u);
+  assert.match(
+    mainProcess,
+    /const e2eWindowForeground = Boolean\(e2eUserDataPath\)[\s\S]*?PAGEROOT_E2E_FOREGROUND === "1"/u,
+  );
+  assert.match(
+    mainProcess,
+    /const e2eWindowRunsInBackground = Boolean\(e2eUserDataPath\)[\s\S]*?!e2eWindowForeground/u,
+  );
+  assert.match(
+    mainProcess,
+    /e2eWindowRunsInBackground[\s\S]*?app\.setActivationPolicy\("accessory"\)/u,
+  );
+  assert.match(mainProcess, /show:\s*e2eWindowForeground/u);
+  assert.match(
+    mainProcess,
+    /function presentMainWindow\(\)[\s\S]*?e2eWindowRunsInBackground[\s\S]*?mainWindow\.show\(\)[\s\S]*?mainWindow\.focus\(\)/u,
+  );
+  assert.match(mainProcess, /mainWindow\.once\("ready-to-show", presentMainWindow\)/u);
   assert.match(
     mainProcess,
     /process\.env\.PAGEROOT_E2E === "1"[\s\S]*?backgroundThrottling:\s*false/u,

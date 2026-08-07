@@ -10,6 +10,7 @@ if (!isolatedUserData || !path.isAbsolute(isolatedUserData)) {
 }
 
 app.setPath("userData", isolatedUserData);
+if (process.platform === "darwin") app.setActivationPolicy("accessory");
 app.commandLine.appendSwitch("disable-background-timer-throttling");
 app.commandLine.appendSwitch("disable-renderer-backgrounding");
 app.commandLine.appendSwitch("disable-backgrounding-occluded-windows");
@@ -20,7 +21,7 @@ app.whenReady().then(async () => {
   mainWindow = new BrowserWindow({
     width: 480,
     height: 320,
-    show: true,
+    show: false,
     webPreferences: {
       backgroundThrottling: false,
       contextIsolation: true,
@@ -36,8 +37,7 @@ app.whenReady().then(async () => {
       + "</body></html>",
     ),
   );
-  mainWindow.show();
-  mainWindow.focus();
+  mainWindow.showInactive();
 });
 
 app.on("window-all-closed", () => app.quit());

@@ -85,6 +85,13 @@ runs never send product events. A distribution package embeds only the public
 PostHog project ingestion token generated from `PAGEROOT_POSTHOG_TOKEN`; never
 use a personal or project secret API key.
 
+Electron product suites run their BrowserWindow hidden by default and keep
+background timers and frame commits enabled, so local automation does not
+activate PageRoot or cover other applications. Set `PAGEROOT_E2E_FOREGROUND=1`
+only when explicitly debugging the native window. The hosted-macOS environment
+preflight uses a visible inactive accessory window because that suite must
+prove WindowServer painting without stealing keyboard focus.
+
 Every ordinary Pull Request update runs the separate impact-selected `PR Feedback` workflow, whether the PR is draft or ready. Only an explicit transition from draft to ready promotes the current head and runs parallel Node, three-shard Chromium, real HTML, native Electron and deterministic AI groups. Any later commit cancels an in-flight stale complete run and receives feedback only; the new SHA remains unmergeable until it is returned to draft and promoted again. Promote only one PR at a time so a merge cannot force several parallel candidates through the complete matrix again. Linux builds and shares only the Web renderer used by Node and Browser. Each macOS job builds the Electron renderer locally, runs the hosted-window preflight, then owns either the native Electron suite or the AI suite; those jobs can be rerun independently. Dependency, Playwright and Electron downloads are cached by lockfile identity.
 
 After merge, `main-integrity` verifies the merged PR, exact Tree Hash and package/lockfile version against the fresh source-gate attestation. It does not rerun Node or Browser smoke; a mismatch fails closed instead of trying to manufacture new evidence on `main`.

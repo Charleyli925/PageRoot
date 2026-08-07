@@ -461,7 +461,7 @@
       "id": "desktop-runtime",
       "patterns": [
         "^desktop/.*\\.(?:mjs|tsx|ts|html)$",
-        "^tests/(?:bridge-startup|edit-visual-capture|open-in-default-browser|preview-protocol)\\.test\\.mjs$"
+        "^tests/(?:bridge-startup|edit-visual-capture|electron-window-policy|open-in-default-browser|preview-protocol)\\.test\\.mjs$"
       ],
       "suites": ["electron-smoke"],
       "nodeTests": [
@@ -476,6 +476,7 @@
         "tests/edit-visual-capture.test.mjs",
         "tests/external-file-open.test.mjs",
         "tests/project-open-queue.test.mjs",
+        "tests/electron-window-policy.test.mjs",
         "tests/open-in-default-browser.test.mjs",
         "tests/preview-protocol.test.mjs",
         "tests/desktop-package.test.mjs",
@@ -596,7 +597,7 @@
         "^tests/e2e/electron/(?!ai-handoff-closed-loop|packaged-(?:runtime|startup)-smoke\\.spec|playwright\\.packaged(?:-startup)?\\.config).*\\.mjs$"
       ],
       "suites": ["electron-smoke"],
-      "nodeTests": []
+      "nodeTests": ["tests/electron-window-policy.test.mjs"]
     },
     {
       "id": "ai-e2e",
@@ -606,7 +607,10 @@
         "^tests/ai-smoke-config\\.test\\.mjs$"
       ],
       "suites": ["ai-smoke"],
-      "nodeTests": ["tests/ai-smoke-config.test.mjs"]
+      "nodeTests": [
+        "tests/ai-smoke-config.test.mjs",
+        "tests/electron-window-policy.test.mjs"
+      ]
     }
   ],
   "fallback": {

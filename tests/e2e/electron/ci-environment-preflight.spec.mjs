@@ -66,20 +66,18 @@ test("hosted macOS can show, schedule and paint a synthetic Electron renderer", 
       },
     });
     const page = await electronApp.firstWindow({ timeout: 15_000 });
-    const nativeWindow = await electronApp.evaluate(({ app, BrowserWindow }) => {
+    const nativeWindow = await electronApp.evaluate(({ BrowserWindow }) => {
       const window = BrowserWindow.getAllWindows()[0];
       window?.webContents.setBackgroundThrottling(false);
-      window?.show();
-      app.focus({ steal: true });
-      window?.focus();
+      window?.showInactive();
       return {
         count: BrowserWindow.getAllWindows().length,
+        focused: window?.isFocused() || false,
         visible: window?.isVisible() || false,
         minimized: window?.isMinimized() || false,
         destroyed: window?.isDestroyed() ?? true,
       };
     });
-    await page.bringToFront();
     await page.waitForLoadState("domcontentloaded", { timeout: 15_000 });
     await page.waitForFunction(() => document.visibilityState === "visible", null, {
       timeout: 10_000,
@@ -111,6 +109,7 @@ test("hosted macOS can show, schedule and paint a synthetic Electron renderer", 
 
     expect(nativeWindow).toEqual({
       count: 1,
+      focused: false,
       visible: true,
       minimized: false,
       destroyed: false,
