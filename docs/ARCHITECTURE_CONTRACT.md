@@ -212,10 +212,52 @@ must atomically switch only that volatile session to a stricter-CSP document
 with authored scripts removed and the owned external bootstrap retained, then
 reload the same frame. That pair completes with static evidence instead of
 trusting a replacement document; inline/browser review remains static-only. The frozen
-source analyzer must first prove a unique source-empty host pair, a relevant
-changed authored script that directly references the host's distinctive
-identity, and absence of an existing static footprint over that host. Merely
-placing another changed script in the same section is never causal evidence.
+source analyzer must first prove a unique source-empty host pair and absence of
+an existing static footprint over that host. An ordinary host additionally
+requires a relevant changed authored script that directly references its
+distinctive identity. A host directly targeted by, or nested below, a frozen
+non-global review comment may instead use that opaque local target as scope
+evidence, so split palette/data/config and host-binding scripts remain
+detectable. Every frozen non-global comment target inside that high-confidence
+review section also starts a nearest-chart-group search: its first ancestor with
+at least two pairable source-empty hosts defines the group, so a caption or
+heading target may grant lower-priority local scope to its sibling charts
+without parsing comment text or inferring visual distance. Direct, contained
+and nearest-group hosts are selected in that order before ordinary hosts under
+the same 128-candidate cap. A global comment never authorizes
+page-wide runtime capture, the group cannot cross its section, and merely
+placing another changed script elsewhere in the section remains insufficient
+causal evidence. A host admitted only by that comment scope has no marker
+authority until a first observed before/after difference repeats in one fresh
+run of the same frozen document pair on both sides; a direct changed-script
+reference does not need the replay. A replay mismatch, failure or timeout
+removes only that scope-relaxed evidence and retains the static result. Comment
+scope attributes are analysis-only and are removed before either review document
+is serialized. Each source-resolved local before target is represented only by
+an opaque private initial-bootstrap binding: an element path plus a narrow
+static fingerprint, never a source-node identity attribute. The managed preview
+serves that binding only to the parser-blocking first bootstrap request and then
+serves an unbound fallback to later author-initiated requests. The trusted
+parent keeps the source-node configuration and sends targets only to the before
+bootstrap over a separately challenged private `MessageChannel`; comment body,
+comment key, source-node and locator-map data never enter document bytes or a
+later fetchable bootstrap response. A unique source `id`, `data-*`, `name`, or
+`aria-label` is an optional fallback only when private binding is unavailable,
+never a positional sibling path. Missing, ambiguous, replaced or disconnected
+bindings, and unavailable private transport, omit the marker rather than
+guessing. Only the before bootstrap returns comment geometry, so authored CSS
+or scripts cannot observe a comment scope marker and create runtime evidence
+themselves.
+Runtime candidate keys and original source-box baselines are carried by the
+same one-shot private bootstrap binding, not by attributes in review HTML. The
+first parser request consumes an opaque path/fingerprint/baseline record; later
+sampling resolves only its closure-held element/key/baseline map and later
+bootstrap reads receive unbound source. No fixed runtime-host or source-box
+attribute, candidate key or locator path is serialized. A stale path may match
+only one private fingerprint; a missing, ambiguous, replaced or disconnected
+binding invalidates the complete runtime batch and retains static evidence.
+Confirmation creates fresh preview sessions, so its new frame pair gets new
+one-shot bindings.
 The trusted first bootstrap must bind the DOM/style/Canvas collection,
 string-normalization/digest and Promise/timer/animation scheduling entry points
 before authored scripts run. Its bounded font wait must use only captured Promise
@@ -226,13 +268,19 @@ claims each key. Undeclared host attributes have no authority. A missing,
 duplicate, transferred or replaced declared key, or key/element drift during
 either sample invalidates the complete runtime batch and retains the static
 result. Per-host traversal, node, value and Canvas limits remain isolated, while
-one aggregate budget spans every declared host and both stability samples. An
+one aggregate budget spans every declared host and both stability samples within
+each frame run. The conditional confirmation is at most one additional run and
+starts only after a scope-only candidate actually differs. An
 unsupported, unstable, over-budget or locally failed host must produce one
 validated `unavailable` fact; that fact has no comparison
 authority and cannot suppress valid sibling-host facts.
 Both already-isolated review frames may then report one bounded pair of
 same-side-stable, host-relative HTML/SVG/Canvas fingerprints for every declared
-candidate, including the
+candidate. Only a first-pair change from a comment-scope-only candidate asks
+the parent to clear its old ports and reload the same two isolated frames once;
+the candidate must match its own side's fresh fingerprint before that first
+pair may be compared. Every other candidate uses the first pair only, including
+comment-scope candidates with no first-pair difference. Fingerprints include the
 host's own painted box, a fully transparent host as a stable disappearance
 state, and directly mutated size while excluding an unpainted empty box,
 indirect layout size and any subtree hidden beneath a zero-opacity host or
@@ -248,12 +296,18 @@ resolve to static evidence if both exact frame documents have not registered
 within 1.5s; a session failure takes the same path and late registration cannot
 reopen it. The separate 500ms comparison deadline may start only after both
 exact frame documents have loaded; asymmetric resource loading is not analysis time.
-Evidence travels
-only over a challenged `MessageChannel` capability created by the trusted first
-bootstrap script and transferred only for a browser-trusted parent event;
-authored-window `ready`, synthetic requests or lookalike channel messages have
-no fact authority. Only a complete
-before/after batch received before the initial deadline may add a visual marker;
+The one permitted comment-scope confirmation reload receives the same 1.5s
+registration boundary and a fresh 500ms comparison deadline only after both
+replacement frames load. Its failure cannot erase a direct-causality marker
+from the first pair, but its scope-relaxed candidates fail closed. Evidence
+travels only over a challenged `MessageChannel` capability created by the
+trusted first bootstrap script and transferred only for a browser-trusted parent
+event. Its first owned capture listener validates the trusted parent/session/type
+and stops propagation before later authored capture listeners can inspect either
+runtime or comment challenge; the ordinary bridge listener cannot transfer a
+port. Authored-window `ready`, synthetic requests or lookalike channel messages
+have no fact authority. Only a complete
+before/after batch received before the applicable initial or confirmation deadline may add a visual marker;
 absolute page position, one-sided, unstable, invalid, timed-out and late facts
 fail closed to the unchanged static result. The supplement owns no source,
 Version, persistence, Bridge, drain or activation state.

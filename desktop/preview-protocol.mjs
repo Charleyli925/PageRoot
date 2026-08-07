@@ -474,6 +474,9 @@ export function createPreviewSessionOperation({
     return createSession({
       html: payload?.html,
       bootstrapJavaScript: payload?.bootstrapJavaScript,
+      ...(payload?.bootstrapFallbackJavaScript === undefined
+        ? {}
+        : { bootstrapFallbackJavaScript: payload.bootstrapFallbackJavaScript }),
       ...(sourcePath ? { sourcePath } : {}),
     });
   };
@@ -511,11 +514,19 @@ export function createPreviewProtocolController({
     const bootstrapJavaScript = typeof payload?.bootstrapJavaScript === "string"
       ? payload.bootstrapJavaScript
       : null;
+    const bootstrapFallbackJavaScript = payload?.bootstrapFallbackJavaScript === undefined
+      ? null
+      : typeof payload.bootstrapFallbackJavaScript === "string"
+        ? payload.bootstrapFallbackJavaScript
+        : null;
     if (
       html === null
       || bootstrapJavaScript === null
+      || (payload?.bootstrapFallbackJavaScript !== undefined
+        && bootstrapFallbackJavaScript === null)
       || utf8ByteLength(html) > maxHtmlBytes
-      || utf8ByteLength(bootstrapJavaScript) > maxBootstrapBytes
+      || utf8ByteLength(bootstrapJavaScript)
+        + utf8ByteLength(bootstrapFallbackJavaScript || "") > maxBootstrapBytes
     ) {
       throw new TypeError("Interactive preview payload is invalid or too large.");
     }
@@ -544,6 +555,8 @@ export function createPreviewProtocolController({
       html,
       navigationFallbackActive: false,
       bootstrapJavaScript,
+      bootstrapFallbackJavaScript,
+      bootstrapPrivateAvailable: bootstrapFallbackJavaScript !== null,
       sourceRoot,
       declaredAssets,
       createdAt,
@@ -618,8 +631,20 @@ export function createPreviewProtocolController({
       );
     }
     if (requestUrl.pathname === PREVIEW_BOOTSTRAP_PATH) {
+      const servePrivateBootstrap = request.method === "GET"
+        && session.bootstrapPrivateAvailable;
+      const bootstrapJavaScript = servePrivateBootstrap
+        ? session.bootstrapJavaScript
+        : session.bootstrapFallbackJavaScript ?? session.bootstrapJavaScript;
+      if (servePrivateBootstrap) {
+        // The first parser-blocking bootstrap can receive a private binding
+        // payload. It is never returned to later same-origin fetches from the
+        // authored document; retain only the public, unbound program.
+        session.bootstrapPrivateAvailable = false;
+        session.bootstrapJavaScript = session.bootstrapFallbackJavaScript;
+      }
       return response(
-        request.method === "HEAD" ? null : session.bootstrapJavaScript,
+        request.method === "HEAD" ? null : bootstrapJavaScript,
         200,
         "text/javascript; charset=utf-8",
       );

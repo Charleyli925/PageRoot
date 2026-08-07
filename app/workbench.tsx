@@ -439,6 +439,9 @@ function preparedReviewByteSize(prepared: PreparedReviewDocuments): number {
     + prepared.documents.after.length
     + prepared.documents.bootstrapJavaScript.before.length
     + prepared.documents.bootstrapJavaScript.after.length
+    + prepared.documents.bootstrapFallbackJavaScript.before.length
+    + prepared.documents.bootstrapFallbackJavaScript.after.length
+    + JSON.stringify(prepared.documents.commentTargets).length
   );
 }
 

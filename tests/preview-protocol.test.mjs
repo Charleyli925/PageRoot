@@ -33,6 +33,7 @@ test("preview session operation authorizes the source path before creation", asy
   const result = await operation({
     html: "<p>preview</p>",
     bootstrapJavaScript: "void 0;",
+    bootstrapFallbackJavaScript: "void 1;",
     sourcePath: "/known/report.html",
     ignored: "not forwarded",
   });
@@ -43,9 +44,45 @@ test("preview session operation authorizes the source path before creation", asy
     ["create", {
       html: "<p>preview</p>",
       bootstrapJavaScript: "void 0;",
+      bootstrapFallbackJavaScript: "void 1;",
       sourcePath: "/canonical/report.html",
     }],
   ]);
+});
+
+test("private preview bootstrap bytes are consumed before authored fetches", async () => {
+  const controller = createPreviewProtocolController({
+    protocolApi: { handle() {} },
+    netFetch: async () => new Response("unreachable"),
+    randomSessionId: () => "abcdefabcdefabcdefabcdefabcdefab",
+  });
+  const session = await controller.createSession({
+    html: [
+      "<!doctype html>",
+      '<script data-pageroot-ai-review-bootstrap="true"',
+      ` src="${PREVIEW_BOOTSTRAP_PATH}"></script>`,
+      "<main>public preview bytes</main>",
+    ].join(""),
+    bootstrapJavaScript: "const privateBinding = 'runtime-host-1';",
+    bootstrapFallbackJavaScript: "const publicBootstrap = true;",
+  });
+  const documentResponse = await controller.handleRequest(new Request(session.url));
+  const documentHtml = await documentResponse.text();
+  assert.doesNotMatch(documentHtml, /privateBinding|runtime-host-1/u);
+
+  const bootstrapUrl = `pageroot-preview://${session.sessionId}${PREVIEW_BOOTSTRAP_PATH}`;
+  const firstBootstrap = await controller.handleRequest(new Request(bootstrapUrl));
+  assert.match(await firstBootstrap.text(), /privateBinding/u);
+
+  const laterBootstrap = await controller.handleRequest(new Request(bootstrapUrl));
+  const laterBootstrapSource = await laterBootstrap.text();
+  assert.match(laterBootstrapSource, /publicBootstrap/u);
+  assert.doesNotMatch(laterBootstrapSource, /privateBinding|runtime-host-1/u);
+
+  const headBootstrap = await controller.handleRequest(new Request(bootstrapUrl, {
+    method: "HEAD",
+  }));
+  assert.equal(await headBootstrap.text(), "");
 });
 
 test("independent preview protocol serves one volatile document and bounded local assets", async (t) => {

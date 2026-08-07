@@ -301,6 +301,7 @@ async function addCommentAndSubmit(
   electronApp,
   sourcePath,
   updatedText = UPDATED_TEXT,
+  additionalComments = [],
 ) {
   await electronApp.evaluate(({ clipboard }) => clipboard.clear());
   await addComment(
@@ -308,6 +309,15 @@ async function addCommentAndSubmit(
     sourcePath,
     `只把这个列表项改为“${updatedText}”，其他地方保持不变。`,
   );
+  for (const comment of additionalComments) {
+    await addComment(
+      page,
+      sourcePath,
+      comment.text,
+      comment.targetCase,
+      comment.targetSelector,
+    );
+  }
   await page.getByRole("button", { name: /发送至 Qoder/u }).click();
   await expect(page.getByText("等待 QoderWork 返回修改结果", { exact: true }))
     .toBeVisible();
@@ -322,17 +332,21 @@ async function addCommentAndSubmit(
   const changeRequest = JSON.parse(
     readFileSync(path.join(requestRoot, "change-request.json"), "utf8"),
   );
-  expect(changeRequest.requirements.instructions).toHaveLength(1);
-  expect(changeRequest.requirements.instructions[0].text).toContain(updatedText);
+  expect(changeRequest.requirements.instructions).toHaveLength(
+    1 + additionalComments.length,
+  );
+  expect(changeRequest.requirements.instructions.some(
+    (instruction) => instruction.text.includes(updatedText),
+  )).toBe(true);
   expect(changeRequest.requirements.preserveOutsideTargets).toBe(true);
   return { promptPath, requestRoot, changeRequest };
 }
 
 async function addComment(page, sourcePath, text = (
   `只把这个列表项改为“${UPDATED_TEXT}”，其他地方保持不变。`
-), targetCase = "list-item") {
+), targetCase = "list-item", targetSelector = "") {
   const frame = await loadedDiskFrame(page, sourcePath);
-  const target = frame.locator(caseSelector(targetCase));
+  const target = frame.locator(targetSelector || caseSelector(targetCase));
   await page.keyboard.press("Escape");
   await frame.locator("body").click({ position: { x: 2, y: 2 } });
   await target.scrollIntoViewIfNeeded();
@@ -507,6 +521,7 @@ test("a verified AI result stays pending through desktop review until the user a
       <div data-review-regression-summary>在守住 EBITA 率底线的基础上，锁单确收实现 +8.52% 增长；21 天日均增量 +4.12 万，累计增量 +86.6 万。</div>
       <div data-review-semantic-copy>而非「让每个商品卖得更好」（品均基本持平）。这说明增长主要来自有效成交覆盖扩大。</div>
       <div data-review-readable-rewrite style="width: 360px; line-height: 1.7">${READABLE_REWRITE_BEFORE}</div>
+      <p class="review-comment-ordinary-target">普通段落评论定位保持独立。</p>
       <div data-review-metrics>
         <article data-review-metric="lock"><strong>+8.52%</strong><span>锁单确收增幅（显著 p&lt;0.01）</span><small>日均 52.5 万 vs 48.4 万</small></article>
         <article data-review-metric="ipv"><strong>+4.49%</strong><span>IPV 增幅（显著 p&lt;0.01）</span><small>日均 63.4 万 vs 60.7 万</small></article>
@@ -545,7 +560,28 @@ test("a verified AI result stays pending through desktop review until the user a
       <div id="review-runtime-flow-chart" class="review-runtime-chart-host"></div>
       <div id="review-runtime-unstable-chart" class="review-runtime-chart-host"></div>
       <div id="review-runtime-unrelated-random-chart" class="review-runtime-chart-host"></div>
+      <div data-review-runtime-comment-group style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <p data-native-case="runtime-comment-caption" style="grid-column:1 / -1;margin:0">相邻图表统一配色</p>
+        <div id="review-runtime-comment-chart" class="review-runtime-chart-host" data-native-case="runtime-comment-chart" style="display:block;min-height:78px"></div>
+        <div id="review-runtime-comment-adjacent-chart" class="review-runtime-chart-host" style="display:block;min-height:78px"></div>
+        <div id="review-runtime-comment-random-chart" class="review-runtime-chart-host" style="display:block;min-height:78px"></div>
+        <div id="review-runtime-comment-marker-probe" class="review-runtime-chart-host" style="display:block;min-height:78px"></div>
+      </div>
       <script>document.documentElement.dataset.reviewRuntimeSectionVariant = "before";</script>
+      <script>
+        const runtimeCommentCaption = document.querySelector(
+          "[data-native-case='runtime-comment-caption']",
+        );
+        const runtimeCommentInsertedSibling = document.createElement("p");
+        runtimeCommentInsertedSibling.textContent = "运行态插入的同标签说明";
+        runtimeCommentCaption.before(runtimeCommentInsertedSibling);
+        runtimeCommentCaption.parentElement.append(runtimeCommentCaption);
+        document.documentElement.dataset.reviewRuntimeCommentScopeTarget = (
+          runtimeCommentCaption.hasAttribute("data-pageroot-review-comment-key")
+            ? "caption"
+            : "missing"
+        );
+      </script>
     </section>
     <section data-review-runtime-static-covered-section>
       <h2>静态已覆盖图表</h2>
@@ -581,6 +617,173 @@ test("a verified AI result stays pending through desktop review until the user a
     <script>
       const runtimeUnrelatedRandomChart = document.querySelector("#review-runtime-unrelated-random-chart");
       runtimeUnrelatedRandomChart.innerHTML = '<div style="padding:10px;border:1px solid #c9c9d8">未修改脚本独立渲染：'
+        + Date.now() + '-' + Math.random() + '</div>';
+    </script>
+    <script>
+      window.reviewRuntimeCommentPalette = ["#a9c7e0", "#decdb0"];
+    </script>
+    <script>
+      const runtimeCommentMarkerProbe = document.querySelector(
+        "#review-runtime-comment-marker-probe",
+      );
+      const reviewCommentScopeExposed = Boolean(
+        document.querySelector("[data-pageroot-review-comment-key]"),
+      );
+      document.documentElement.dataset.reviewRuntimeCommentScopeExposed = String(
+        reviewCommentScopeExposed,
+      );
+      const reviewCommentSourceIdentityAttributePrefix =
+        "data-pageroot-review-comment-" + "source-";
+      const reviewCommentSourceIdentityExposed = [...document.querySelectorAll("*")].some(
+        (element) => [...element.attributes].some((attribute) => (
+          attribute.name.startsWith(reviewCommentSourceIdentityAttributePrefix)
+        )),
+      );
+      document.documentElement.dataset.reviewRuntimeCommentSourceIdentityExposed = String(
+        reviewCommentSourceIdentityExposed,
+      );
+      document.documentElement.dataset.reviewRuntimeCommentBootstrapIdentityExposed = String(
+        Boolean(document.querySelector(
+          "[data-pageroot-review-comment-identity-attribute]",
+        )),
+      );
+      document.documentElement.dataset.reviewRuntimeCommentScopeProbeVariant = "before";
+      document.documentElement.dataset.reviewRuntimeCommentLocatorExposed = "pending";
+      const renderRuntimeCommentMarkerProbe = (bootstrapLocatorExposed = false) => {
+        const color = reviewCommentScopeExposed
+          ? "#d34f6a"
+          : (bootstrapLocatorExposed ? "#d34f6a" : "#7f91a4");
+        runtimeCommentMarkerProbe.innerHTML = '<div style="height:48px;background:'
+          + color
+          + '">评论范围探针</div>';
+      };
+      const inspectRuntimeCommentBootstrap = (bootstrapSource) => {
+        const bootstrapLocatorExposed = String(bootstrapSource || "").includes(
+          '[data-native-case="runtime-comment-caption"]',
+        );
+        document.documentElement.dataset.reviewRuntimeCommentLocatorExposed = String(
+          bootstrapLocatorExposed,
+        );
+        renderRuntimeCommentMarkerProbe(bootstrapLocatorExposed);
+      };
+      renderRuntimeCommentMarkerProbe();
+      const reviewCommentScopeBootstrapScript = document.querySelector(
+        'script[data-pageroot-ai-review-bootstrap="true"]',
+      );
+      if (reviewCommentScopeBootstrapScript?.src) {
+        try {
+          const request = new XMLHttpRequest();
+          request.open("GET", reviewCommentScopeBootstrapScript.src, false);
+          request.send();
+          inspectRuntimeCommentBootstrap(request.responseText);
+        } catch {
+          void fetch(reviewCommentScopeBootstrapScript.src)
+            .then((response) => response.text())
+            .then(inspectRuntimeCommentBootstrap)
+            .catch(() => {
+              document.documentElement.dataset.reviewRuntimeCommentLocatorExposed = "unavailable";
+            });
+        }
+      } else {
+        document.documentElement.dataset.reviewRuntimeCommentLocatorExposed = "missing";
+      }
+    </script>
+    <script>
+      const runtimeCandidateAttributeProbeColor = "#7f91a4";
+      const runtimeCandidateLegacySourceBoxAttribute =
+        "data-pageroot-review-runtime-source" + "-box";
+      const runtimeCandidateAttributeProbeHosts = document.querySelectorAll(
+        "[data-pageroot-review-runtime-host], ["
+          + runtimeCandidateLegacySourceBoxAttribute
+          + "]",
+      );
+      const runtimeCandidateLiveIdentityAttributePrefix =
+        "data-pageroot-review-runtime-" + "source-";
+      const runtimeCandidateIdentityExposed = [...document.querySelectorAll("*")].some(
+        (element) => [...element.attributes].some((attribute) => (
+          attribute.name.startsWith(runtimeCandidateLiveIdentityAttributePrefix)
+        )),
+      );
+      const runtimeCandidateBootstrapIdentityExposed = document.querySelector(
+        'script[data-pageroot-ai-review-bootstrap="true"]',
+      )?.hasAttribute("data-pageroot-review-runtime-identity-attribute");
+      document.documentElement.dataset.reviewRuntimeCandidateAttributeExposed = String(
+        runtimeCandidateAttributeProbeHosts.length > 0
+          || runtimeCandidateIdentityExposed
+          || runtimeCandidateBootstrapIdentityExposed,
+      );
+      runtimeCandidateAttributeProbeHosts.forEach((host) => {
+        host.style.outline = "4px solid " + runtimeCandidateAttributeProbeColor;
+      });
+      const runtimeCandidateMarkupProbe = document.querySelector(
+        "#review-runtime-comment-marker-probe",
+      );
+      document.documentElement.dataset.reviewRuntimeCandidateMarkupExposed = "pending";
+      document.documentElement.dataset.reviewRuntimeCommentMarkupIdentityExposed = "pending";
+      const runtimeSourceIdentityPrefix = "data-pageroot-review-runtime-" + "source-";
+      const commentSourceIdentityPrefix = "data-pageroot-review-comment-" + "source-";
+      const inspectRuntimeCandidateBytes = (documentSource, bootstrapSource) => {
+        const documentText = String(documentSource || "");
+        const bootstrapText = String(bootstrapSource || "");
+        const runtimeIdentityExposed = documentText.includes(runtimeSourceIdentityPrefix)
+          || bootstrapText.includes(runtimeSourceIdentityPrefix)
+          || bootstrapText.includes('"runtime-host-');
+        const commentIdentityExposed = documentText.includes(commentSourceIdentityPrefix)
+          || bootstrapText.includes(commentSourceIdentityPrefix);
+        document.documentElement.dataset.reviewRuntimeCandidateMarkupExposed = String(
+          runtimeIdentityExposed,
+        );
+        document.documentElement.dataset.reviewRuntimeCommentMarkupIdentityExposed = String(
+          commentIdentityExposed,
+        );
+        if (runtimeIdentityExposed && runtimeCandidateMarkupProbe) {
+          runtimeCandidateMarkupProbe.innerHTML = '<div style="height:48px;background:'
+            + runtimeCandidateAttributeProbeColor
+            + '">源码身份泄漏探针</div>';
+        }
+      };
+      const runtimeCandidateBootstrap = document.querySelector(
+        'script[data-pageroot-ai-review-bootstrap="true"]',
+      );
+      if (runtimeCandidateBootstrap?.src) {
+        try {
+          const documentRequest = new XMLHttpRequest();
+          const bootstrapRequest = new XMLHttpRequest();
+          documentRequest.open("GET", location.href, false);
+          documentRequest.send();
+          bootstrapRequest.open("GET", runtimeCandidateBootstrap.src, false);
+          bootstrapRequest.send();
+          inspectRuntimeCandidateBytes(
+            documentRequest.responseText,
+            bootstrapRequest.responseText,
+          );
+        } catch {
+          void Promise.all([
+            fetch(location.href).then((response) => response.text()),
+            fetch(runtimeCandidateBootstrap.src).then((response) => response.text()),
+          ]).then(([documentSource, bootstrapSource]) => {
+            inspectRuntimeCandidateBytes(documentSource, bootstrapSource);
+          }).catch(() => {
+            document.documentElement.dataset.reviewRuntimeCandidateMarkupExposed = "unavailable";
+            document.documentElement.dataset.reviewRuntimeCommentMarkupIdentityExposed = "unavailable";
+          });
+        }
+      }
+    </script>
+    <script>
+      const runtimeCommentChart = document.querySelector("#review-runtime-comment-chart");
+      const runtimeCommentAdjacentChart = document.querySelector("#review-runtime-comment-adjacent-chart");
+      const runtimeCommentPalette = window.reviewRuntimeCommentPalette;
+      runtimeCommentChart.innerHTML = '<div style="padding:14px;border:1px solid #d9dcec;border-radius:12px">'
+        + '<div style="height:48px;background:' + runtimeCommentPalette[0] + '">综搜电商意图</div></div>';
+      runtimeCommentAdjacentChart.innerHTML = '<div style="padding:14px;border:1px solid #d9dcec;border-radius:12px">'
+        + '<div style="height:48px;background:' + runtimeCommentPalette[1] + '">商城搜</div></div>';
+    </script>
+    <script>
+      const runtimeCommentRandomChart = document.querySelector(
+        "#review-runtime-comment-random-chart",
+      );
+      runtimeCommentRandomChart.innerHTML = '<div style="height:48px;background:#7f91a4">一次性随机：'
         + Date.now() + '-' + Math.random() + '</div>';
     </script>
     <script>
@@ -695,10 +898,35 @@ test("a verified AI result stays pending through desktop review until the user a
         + (runtimeReviewChartVariant === "before" ? '旧值' : '新值')
         + '</span></div>';
       document.documentElement.dataset.reviewRuntimeRequestObserved = "false";
+      document.documentElement.dataset.reviewRuntimeCommentRequestObserved = "false";
+      document.documentElement.dataset.reviewRuntimeCommentForgeryAttempted = "false";
+      document.documentElement.dataset.reviewRuntimeCommentLocatorLeaked = "false";
       document.documentElement.dataset.reviewRuntimeForgeryAttempted = "pending";
       addEventListener("message", (event) => {
         if (event.isTrusted && event.data?.type === "request-runtime-visual-channel") {
           document.documentElement.dataset.reviewRuntimeRequestObserved = "true";
+        }
+        if (event.isTrusted && event.data?.type === "request-review-comment-channel") {
+          document.documentElement.dataset.reviewRuntimeCommentRequestObserved = "true";
+          document.documentElement.dataset.reviewRuntimeCommentForgeryAttempted = "true";
+          const forgedCommentChannel = new MessageChannel();
+          forgedCommentChannel.port1.onmessage = (portEvent) => {
+            const message = portEvent.data;
+            if (
+              message?.source === "pageroot-ai-review-comment-targets"
+              && message?.type === "comment-targets"
+            ) {
+              document.documentElement.dataset.reviewRuntimeCommentLocatorLeaked = "true";
+            }
+          };
+          forgedCommentChannel.port1.start();
+          parent.postMessage({
+            source: "pageroot-ai-review",
+            sessionId: event.data.sessionId,
+            side: document.documentElement.dataset.pagerootReviewSide,
+            type: "review-comment-channel",
+            challenge: event.data.challenge,
+          }, "*", [forgedCommentChannel.port2]);
         }
       }, true);
       const reviewBootstrapScript = document.querySelector(
@@ -834,6 +1062,8 @@ test("a verified AI result stays pending through desktop review until the user a
   );
   const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
   let delayedReviewResourceRequests = 0;
+  const runtimeVisualCommentText = "这两个图的配色改一下，包括旁边这个柱状图的颜色。";
+  const ordinaryReviewCommentText = "这个普通段落也请保留。";
   await launched.page.route("**/review-runtime-slow.png*", async (route) => {
     delayedReviewResourceRequests += 1;
     const reviewSide = new URL(route.request().url()).searchParams.get("side");
@@ -844,6 +1074,7 @@ test("a verified AI result stays pending through desktop review until the user a
     await route.fulfill({
       status: 200,
       contentType: "image/png",
+      headers: { "cache-control": "no-store" },
       body: Buffer.from(
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
         "base64",
@@ -855,6 +1086,14 @@ test("a verified AI result stays pending through desktop review until the user a
       launched.page,
       launched.electronApp,
       fixture.sourcePath,
+      UPDATED_TEXT,
+      [{
+        text: runtimeVisualCommentText,
+        targetCase: "runtime-comment-caption",
+      }, {
+        text: ordinaryReviewCommentText,
+        targetSelector: ".review-comment-ordinary-target",
+      }],
     );
     const attemptRoot = path.join(
       request.requestRoot,
@@ -892,6 +1131,22 @@ test("a verified AI result stays pending through desktop review until the user a
         .replace(
           'document.documentElement.dataset.reviewRuntimeSectionVariant = "before";',
           'document.documentElement.dataset.reviewRuntimeSectionVariant = "after";',
+        )
+        .replace(
+          'window.reviewRuntimeCommentPalette = ["#a9c7e0", "#decdb0"];',
+          'window.reviewRuntimeCommentPalette = ["#7fa2c4", "#f4ba7d"];',
+        )
+        .replace(
+          'const runtimeCandidateAttributeProbeColor = "#7f91a4";',
+          'const runtimeCandidateAttributeProbeColor = "#d34f6a";',
+        )
+        .replace(
+          'document.documentElement.dataset.reviewRuntimeCommentScopeProbeVariant = "before";',
+          'document.documentElement.dataset.reviewRuntimeCommentScopeProbeVariant = "after";',
+        )
+        .replace(
+          'bootstrapLocatorExposed ? "#d34f6a" : "#7f91a4"',
+          'bootstrapLocatorExposed ? "#6d5ce7" : "#7f91a4"',
         )
         .replace(
           'id="review-runtime-static-covered" class="review-runtime-chart-host" style="border: 2px solid #d9dcec; padding: 12px"',
@@ -1018,6 +1273,48 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect(afterReviewFrame.locator("html"))
       .toHaveAttribute("data-review-fixture-ready", "true");
     await expect(beforeReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-comment-scope-exposed", "false");
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-comment-scope-exposed", "false");
+    await expect(beforeReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-comment-source-identity-exposed", "false");
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-comment-source-identity-exposed", "false");
+    await expect(beforeReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-comment-bootstrap-identity-exposed", "false");
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-comment-bootstrap-identity-exposed", "false");
+    await expect(beforeReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-candidate-attribute-exposed", "false");
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-candidate-attribute-exposed", "false");
+    await expect(beforeReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-candidate-markup-exposed", "false");
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-candidate-markup-exposed", "false");
+    await expect(beforeReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-comment-markup-identity-exposed", "false");
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-comment-markup-identity-exposed", "false");
+    await expect(beforeReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-comment-locator-exposed", "false");
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-comment-locator-exposed", "false");
+    await expect(beforeReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-comment-scope-probe-variant", "before");
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-comment-scope-probe-variant", "after");
+    await expect(beforeReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-comment-scope-target", "missing");
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-comment-scope-target", "missing");
+    await expect(beforeReviewFrame.locator(
+      "[data-pageroot-review-comment-key]",
+    )).toHaveCount(0);
+    await expect(afterReviewFrame.locator(
+      "[data-pageroot-review-comment-key]",
+    )).toHaveCount(0);
+    await expect(beforeReviewFrame.locator("html"))
       .toHaveAttribute("data-review-runtime-forgery-attempted", "true");
     await expect(afterReviewFrame.locator("html"))
       .toHaveAttribute("data-review-runtime-forgery-attempted", "true");
@@ -1025,6 +1322,18 @@ test("a verified AI result stays pending through desktop review until the user a
       .toHaveAttribute("data-review-runtime-request-observed", "false");
     await expect(afterReviewFrame.locator("html"))
       .toHaveAttribute("data-review-runtime-request-observed", "false");
+    await expect(beforeReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-comment-request-observed", "false");
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-comment-request-observed", "false");
+    await expect(beforeReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-comment-forgery-attempted", "false");
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-comment-forgery-attempted", "false");
+    await expect(beforeReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-comment-locator-leaked", "false");
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-comment-locator-leaked", "false");
     await expect(beforeReviewFrame.locator("html"))
       .toHaveAttribute("data-review-runtime-dom-api-attack", "true");
     await expect(afterReviewFrame.locator("html"))
@@ -1049,7 +1358,7 @@ test("a verified AI result stays pending through desktop review until the user a
       .toHaveAttribute("data-review-runtime-promise-digest-api-restored", "true");
     await expect(afterReviewFrame.locator("html"))
       .toHaveAttribute("data-review-runtime-promise-digest-api-restored", "true");
-    expect(delayedReviewResourceRequests).toBeGreaterThanOrEqual(2);
+    expect(delayedReviewResourceRequests).toBeGreaterThanOrEqual(4);
     const runtimeChangedHosts = [
       "#review-runtime-html-chart",
       "#review-runtime-text-chart",
@@ -1060,6 +1369,8 @@ test("a verified AI result stays pending through desktop review until the user a
       "#review-runtime-descendant-opacity-chart",
       "#review-runtime-svg-descendant-opacity-chart",
       "#review-runtime-svg-root-chart",
+      "#review-runtime-comment-chart",
+      "#review-runtime-comment-adjacent-chart",
     ];
     for (const selector of runtimeChangedHosts) {
       await expect(beforeReviewFrame.locator(selector)).toHaveAttribute(
@@ -1074,6 +1385,27 @@ test("a verified AI result stays pending through desktop review until the user a
         "data-pageroot-review-marker-types",
         "style",
       );
+    }
+    const runtimeCandidateMetadataHosts = [
+      ...runtimeChangedHosts,
+      "#review-runtime-flow-chart",
+      "#review-runtime-unstable-chart",
+      "#review-runtime-root-geometry-chart",
+      "#review-runtime-hidden-churn-chart",
+      "#review-runtime-hidden-descendant-churn-chart",
+      "#review-runtime-svg-hidden-descendant-churn-chart",
+      "#review-runtime-unrelated-random-chart",
+      "#review-runtime-comment-random-chart",
+      "#review-runtime-comment-marker-probe",
+      "#review-runtime-static-covered",
+    ];
+    for (const frame of [beforeReviewFrame, afterReviewFrame]) {
+      for (const selector of runtimeCandidateMetadataHosts) {
+        await expect(frame.locator(selector))
+          .not.toHaveAttribute("data-pageroot-review-runtime-host");
+        await expect(frame.locator(selector))
+          .not.toHaveAttribute("data-pageroot-review-runtime-source-box");
+      }
     }
     const runtimeChangedIds = await Promise.all(runtimeChangedHosts.map((selector) => (
       afterReviewFrame.locator(selector).getAttribute("data-pageroot-review-marker")
@@ -1090,39 +1422,29 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect(afterReviewFrame.locator(
       `[data-pageroot-review-overlay-owner="${runtimeHtmlOwner}"]`,
     )).toBeVisible();
-    await expect(beforeReviewFrame.locator("#review-runtime-flow-chart"))
-      .toHaveAttribute("data-pageroot-review-runtime-host", /runtime-host-\d+/u);
     await expect(afterReviewFrame.locator("#review-runtime-flow-chart"))
       .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
     await expect(afterReviewFrame.locator("#review-runtime-unstable-chart"))
-      .not.toHaveAttribute("data-pageroot-review-runtime-host", /.+/u);
-    await expect(afterReviewFrame.locator("#review-runtime-unstable-chart"))
       .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
-    await expect(afterReviewFrame.locator("#review-runtime-root-geometry-chart"))
-      .toHaveAttribute("data-pageroot-review-runtime-host", /runtime-host-\d+/u);
     await expect(afterReviewFrame.locator("#review-runtime-root-geometry-chart"))
       .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
     await expect(afterReviewFrame.locator("#review-runtime-hidden-churn-chart"))
-      .toHaveAttribute("data-pageroot-review-runtime-host", /runtime-host-\d+/u);
-    await expect(afterReviewFrame.locator("#review-runtime-hidden-churn-chart"))
       .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
-    await expect(afterReviewFrame.locator(
-      "#review-runtime-hidden-descendant-churn-chart",
-    )).toHaveAttribute("data-pageroot-review-runtime-host", /runtime-host-\d+/u);
     await expect(afterReviewFrame.locator(
       "#review-runtime-hidden-descendant-churn-chart",
     )).not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
     await expect(afterReviewFrame.locator(
       "#review-runtime-svg-hidden-descendant-churn-chart",
-    )).toHaveAttribute("data-pageroot-review-runtime-host", /runtime-host-\d+/u);
-    await expect(afterReviewFrame.locator(
-      "#review-runtime-svg-hidden-descendant-churn-chart",
     )).not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
-    await expect(beforeReviewFrame.locator("#review-runtime-unrelated-random-chart"))
-      .not.toHaveAttribute("data-pageroot-review-runtime-host", /.+/u);
     await expect(afterReviewFrame.locator("#review-runtime-unrelated-random-chart"))
-      .not.toHaveAttribute("data-pageroot-review-runtime-host", /.+/u);
-    await expect(afterReviewFrame.locator("#review-runtime-unrelated-random-chart"))
+      .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
+    await expect(beforeReviewFrame.locator("#review-runtime-comment-random-chart"))
+      .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
+    await expect(afterReviewFrame.locator("#review-runtime-comment-random-chart"))
+      .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
+    await expect(beforeReviewFrame.locator("#review-runtime-comment-marker-probe"))
+      .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
+    await expect(afterReviewFrame.locator("#review-runtime-comment-marker-probe"))
       .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
     await expect(beforeReviewFrame.locator("#review-runtime-forged-host"))
       .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
@@ -1135,8 +1457,6 @@ test("a verified AI result stays pending through desktop review until the user a
         .evaluate((element) => element.getBoundingClientRect().top),
     ]);
     expect(Math.abs(runtimeFlowTop[0] - runtimeFlowTop[1])).toBeGreaterThan(30);
-    await expect(afterReviewFrame.locator("#review-runtime-static-covered"))
-      .not.toHaveAttribute("data-pageroot-review-runtime-host", /.+/u);
     await expect(afterReviewFrame.locator("#review-runtime-static-covered"))
       .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
     await expect(afterReviewFrame.locator("#review-runtime-static-covered"))
@@ -1160,10 +1480,21 @@ test("a verified AI result stays pending through desktop review until the user a
       .toHaveAttribute("data-pageroot-review-filter", "all");
     await expect(beforeReviewFrame.locator('meta[http-equiv="refresh"]'))
       .toHaveCount(0);
-    const reviewCommentMarker = launched.page.locator(
+    const reviewCommentMarkers = launched.page.locator(
       'section[data-side="before"] [data-testid="review-comment-marker"]',
     );
+    await expect(reviewCommentMarkers).toHaveCount(3);
+    const frozenReviewComment = `只把这个列表项改为“${UPDATED_TEXT}”，其他地方保持不变。`;
+    const reviewCommentMarker = reviewCommentMarkers.filter({
+      hasText: frozenReviewComment,
+    });
     await expect(reviewCommentMarker).toHaveCount(1);
+    await expect(reviewCommentMarkers.filter({
+      hasText: runtimeVisualCommentText,
+    })).toHaveCount(1);
+    await expect(reviewCommentMarkers.filter({
+      hasText: ordinaryReviewCommentText,
+    })).toHaveCount(1);
     await expect(reviewCommentMarker).toHaveAttribute("role", "note");
     await expect(reviewCommentMarker).not.toHaveAttribute("tabindex", /.+/u);
     await expect(reviewCommentMarker).toHaveCSS("width", "30px");
@@ -1174,7 +1505,6 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect(launched.page.locator(
       'section[data-side="after"] [data-testid="review-comment-marker"]',
     )).toHaveCount(0);
-    const frozenReviewComment = `只把这个列表项改为“${UPDATED_TEXT}”，其他地方保持不变。`;
     await expect.poll(() => beforeReviewFrame.locator("html").evaluate(
       (element, text) => element.innerHTML.includes(text),
       frozenReviewComment,
@@ -2002,6 +2332,18 @@ test("a verified AI result stays pending through desktop review until the user a
     });
     await expect.poll(() => afterReviewFrame.locator("html").evaluate(() => window.scrollY))
       .toBeGreaterThan(1);
+    const unequalHeightFollowerSamples = [];
+    for (let index = 0; index < 8; index += 1) {
+      await launched.page.waitForTimeout(20);
+      unequalHeightFollowerSamples.push(await afterReviewFrame.locator("html").evaluate(
+        () => window.scrollY,
+      ));
+    }
+    const settledUnequalHeightFollowerSamples = unequalHeightFollowerSamples.slice(-5);
+    expect(
+      Math.max(...settledUnequalHeightFollowerSamples)
+        - Math.min(...settledUnequalHeightFollowerSamples),
+    ).toBeLessThanOrEqual(1);
     const unequalHeightFollower = await afterReviewFrame.locator("html").evaluate(() => ({
       top: scrollY,
       maximum: Math.max(0, document.documentElement.scrollHeight - innerHeight),
@@ -2343,7 +2685,7 @@ test("a pre-load review navigation falls back without trusting the replacement p
   }
 });
 
-test("a stolen runtime host claim falls back to the static review", async () => {
+test("fetched review bytes cannot expose a runtime host binding", async () => {
   test.setTimeout(120_000);
   const fixture = createSourceFixture("review-runtime-duplicate-claim.html", (source) => (
     source.replace(
@@ -2359,23 +2701,41 @@ test("a stolen runtime host claim falls back to the static review", async () => 
         reviewDuplicateClaimChart.innerHTML = '<strong>'
           + reviewDuplicateClaimVariant
           + '</strong><span>运行态图表</span>';
-        const reviewDuplicateClaimKey = reviewDuplicateClaimChart.getAttribute(
-          "data-pageroot-review-runtime-host",
+        const reviewDuplicateClaimBootstrap = document.querySelector(
+          'script[data-pageroot-ai-review-bootstrap="true"]',
         );
-        if (reviewDuplicateClaimKey) {
-          reviewDuplicateClaimChart.removeAttribute(
-            "data-pageroot-review-runtime-host",
-          );
-          const reviewDuplicateClaimForgery = document.createElement("div");
-          reviewDuplicateClaimForgery.id = "review-runtime-duplicate-claim-forgery";
-          reviewDuplicateClaimForgery.setAttribute(
-            "data-pageroot-review-runtime-host",
-            reviewDuplicateClaimKey,
-          );
-          reviewDuplicateClaimForgery.textContent = "伪造的同 key 宿主";
-          document.body.append(reviewDuplicateClaimForgery);
-          document.documentElement.dataset.reviewRuntimeDuplicateClaim = "true";
+        let reviewDuplicateClaimBindingExposed = false;
+        if (reviewDuplicateClaimBootstrap?.src) {
+          try {
+            const documentRequest = new XMLHttpRequest();
+            const bootstrapRequest = new XMLHttpRequest();
+            documentRequest.open("GET", location.href, false);
+            documentRequest.send();
+            bootstrapRequest.open("GET", reviewDuplicateClaimBootstrap.src, false);
+            bootstrapRequest.send();
+            const documentSource = documentRequest.responseText || "";
+            const bootstrapSource = bootstrapRequest.responseText || "";
+            const identityPrefix = "data-pageroot-review-runtime-" + "source-";
+            reviewDuplicateClaimBindingExposed = documentSource.includes(identityPrefix)
+              || bootstrapSource.includes(identityPrefix)
+              || bootstrapSource.includes('"runtime-host-');
+          } catch {
+            reviewDuplicateClaimBindingExposed = false;
+          }
         }
+        const reviewDuplicateClaimForgery = document.createElement("div");
+        reviewDuplicateClaimForgery.id = "review-runtime-duplicate-claim-forgery";
+        if (reviewDuplicateClaimBindingExposed) {
+          reviewDuplicateClaimForgery.setAttribute(
+            "data-pageroot-review-runtime-" + "source-forged",
+            "runtime-host-forged",
+          );
+        }
+        reviewDuplicateClaimForgery.textContent = "伪造的同 key 宿主";
+        document.body.append(reviewDuplicateClaimForgery);
+        document.documentElement.dataset.reviewRuntimeDuplicateClaim = String(
+          reviewDuplicateClaimBindingExposed,
+        );
       </script>
     </section>
   </main>`,
@@ -2420,16 +2780,22 @@ test("a stolen runtime host claim falls back to the static review", async () => 
     for (const frame of [beforeReviewFrame, afterReviewFrame]) {
       await expect(frame.locator("html")).toHaveAttribute(
         "data-review-runtime-duplicate-claim",
-        "true",
+        "false",
       );
       await expect(frame.locator("#review-runtime-duplicate-claim-chart"))
-        .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
-      await expect(frame.locator("#review-runtime-duplicate-claim-chart"))
-        .not.toHaveAttribute("data-pageroot-review-runtime-host", /.+/u);
-      await expect(frame.locator("#review-runtime-duplicate-claim-forgery"))
-        .toHaveAttribute("data-pageroot-review-runtime-host", /runtime-host-\d+/u);
+        .toHaveAttribute("data-pageroot-review-runtime-marker", "true");
       await expect(frame.locator("#review-runtime-duplicate-claim-forgery"))
         .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
+      await expect(frame.locator(
+        "[data-pageroot-review-runtime-host], [data-pageroot-review-runtime-source-box]",
+      )).toHaveCount(0);
+      expect(await frame.locator("html").evaluate(() => (
+        [...document.querySelectorAll("*")].some((element) => (
+          [...element.attributes].some((attribute) => (
+            attribute.name.startsWith("data-pageroot-review-runtime-source-")
+          ))
+        ))
+      ))).toBe(false);
     }
     await expect(afterReviewFrame.locator(
       '[data-pageroot-review-marker-types~="text"]',
@@ -2487,8 +2853,6 @@ test("an unstable runtime candidate falls back atomically to static review", asy
     const afterReviewFrame = launched.page.frameLocator('iframe[title^="修改后"]');
     await expect(afterReviewFrame.locator("html"))
       .toHaveAttribute("data-pageroot-review-overlays", "true", { timeout: 30_000 });
-    await expect(afterReviewFrame.locator("#review-runtime-unstable-chart"))
-      .toHaveAttribute("data-pageroot-review-runtime-host", /runtime-host-\d+/u);
     await expect(afterReviewFrame.locator("#review-runtime-unstable-chart"))
       .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
     await expect(afterReviewFrame.locator(

@@ -733,6 +733,26 @@ test("Electron interactive preview runs authored scripts and edits the selected 
     await expect(editFrame.locator(
       '#runtime-svg img[data-pageroot-readonly-visual="runtime-bitmap"]',
     )).toBeVisible();
+    await expect(editFrame.locator("#direct-runtime-canvas"))
+      .toHaveAttribute(
+        "data-pageroot-readonly-visual-host",
+        "runtime-bitmap-background",
+      );
+    await expect(editFrame.locator("#direct-runtime-svg"))
+      .toHaveAttribute(
+        "data-pageroot-readonly-visual-host",
+        "runtime-bitmap-background",
+      );
+    expect(await editFrame.locator("#direct-runtime-canvas").evaluate(
+      (element) => getComputedStyle(element).backgroundImage.startsWith(
+        'url("blob:',
+      ),
+    )).toBe(true);
+    expect(await editFrame.locator("#direct-runtime-svg").evaluate(
+      (element) => getComputedStyle(element).backgroundImage.startsWith(
+        'url("blob:',
+      ),
+    )).toBe(true);
     await expect(editFrame.locator(
       '#runtime-delayed img[data-pageroot-readonly-visual="runtime-bitmap"]',
     )).toBeVisible();

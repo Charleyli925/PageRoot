@@ -164,14 +164,54 @@ state is never serialized. The renderer accepts review messages only when the
 session ID, side, declared message source and `MessageEvent.source` all match the
 registered frame. Runtime-chart snapshot messages are additionally limited to
 host keys declared by the frozen source analyzer, per-host bounded atom/signature
-counts plus one aggregate traversal/value/Canvas budget across the complete
+counts plus one aggregate traversal/value/Canvas budget across each per-run
 two-sample batch, exactly one well-formed available or unavailable snapshot for every
 declared key, and one accepted batch
 per side. Ordinary frame `ready` messages never carry
 runtime evidence. An omitted or malformed snapshot invalidates the complete
 runtime batch and leaves static review authoritative; a validated unavailable
 host has no comparison authority and does not grant authority to or suppress a
-different host. The trusted bootstrap creates a `MessageChannel` and binds
+different host. Candidate declaration requires either a changed-script reference
+to the unique source-empty host or a frozen non-global opaque comment target on
+that host or an ancestor. Independently, every frozen non-global opaque comment
+target inside the same high-confidence review section seeds the first ancestor
+with at least two pairable hosts, so an anchored caption or heading may grant
+lower-priority scope to its sibling charts. The group cannot cross its section
+or derive from visual distance; comment text never enters either frame, and a
+global comment never authorizes page-wide capture. Opaque scope attributes exist
+only while frozen analysis prioritizes candidates and are stripped before either
+document is serialized. Each source-resolved local target is represented only
+by an opaque private initial-bootstrap binding: an element path plus a narrow
+static fingerprint, never a source-node identity in the document. The managed
+preview serves that binding only to the parser-blocking first bootstrap request,
+then replaces it with an unbound fallback for later author-initiated reads. The
+trusted parent retains the source-node map; only after the before frame loads
+does a separately challenged bootstrap-owned `MessageChannel` receive targets.
+Comment body, key, source-node and locator-map data are absent from document
+bytes and any later fetchable bootstrap response. A unique source `id`,
+`data-*`, `name`, or `aria-label` is a safe fallback only when private binding
+is unavailable, never a mutable sibling ordinal. Missing, ambiguous, replaced
+or disconnected bindings, or an unavailable private capability exchange, omit
+the marker rather than guessing. Authored CSS or scripts therefore cannot
+observe a comment scope marker or manufacture a change. If a host was admitted only through that scope,
+not a direct changed-script reference, a first-pair difference must match the
+same side in one newly loaded frozen frame pair; clock/random one-shots, a
+replacement-frame failure, or a mismatch have no marker authority. Every later
+identity, stability, budget and transport check remains unchanged.
+Runtime candidate keys and original source-box baselines are not persistent
+authored-page metadata. Each selected host is represented only by a one-shot
+private initial-bootstrap binding containing an opaque path, narrow static
+fingerprint and frozen baseline. The first parser request receives it; the
+managed preview then serves unbound fallback source, and the bootstrap uses
+only its closure-held element/key/baseline map thereafter. Fixed
+runtime-host/source-box attributes, candidate keys and locator paths are never
+serialized. A stale path can resolve only to one matching private fingerprint;
+missing, ambiguous, replaced or disconnected bindings invalidate the whole
+runtime batch, so authored CSS or scripts cannot turn those internals into
+manufactured runtime evidence. A confirmation pair uses fresh sessions and its
+own one-shot bindings.
+The trusted bootstrap pre-creates separate `MessageChannel` capabilities for
+runtime evidence and, on the before side only, private locator delivery, and binds
 the DOM traversal, attribute, layout, computed-style, Canvas, string
 normalization/digest, and Promise/timer/animation scheduling primitives used for evidence before any
 authored script runs. Its bounded font wait composes only captured Promise capabilities, so it never re-reads
@@ -181,13 +221,18 @@ discovery accepts only that exact key/element set: undeclared attributes are
 ignored, while a missing, duplicate, transferred or replaced declared host or
 key/element drift invalidates the whole runtime batch and leaves static review
 authoritative. A local capture exception, instability or budget exhaustion is
-contained to that declared host as unavailable. After both exact
+contained to that declared host as unavailable. For runtime evidence, after both exact
 frame documents load, the parent sends a fresh random challenge
 that the bootstrap consumes only from a browser-trusted parent event in its first
 capture listener without exposing it to later authored listeners, then transfers
-the pre-created capability port. Only the matching port may submit snapshots.
+the pre-created capability port. The same first capture listener protects the
+before-side comment-channel challenge; it validates the trusted parent,
+session and type, stops propagation before any authored capture listener runs,
+and leaves the ordinary bridge listener unable to transfer either port. Only
+the matching port may submit snapshots.
 They contain no executable DOM and can
-only add a disposable visual marker after a complete stable pair; forged window
+only add a disposable visual marker after a complete stable pair, plus the
+required same-side fresh-pair confirmation for scope-only admission; forged window
 messages, invalid, partial, timed-out or late input are ignored. A user must
 still invoke the existing fail-closed ready-version activation path through
 “直接打开” or the review confirmation “打开 AI 修改后”.

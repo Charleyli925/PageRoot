@@ -6,6 +6,7 @@ import {
   acceptReviewRuntimeVisualSnapshots,
   changedReviewRuntimeVisualCandidateKeys,
   mergeReviewRuntimeVisualChanges,
+  selectPrioritizedReviewRuntimeVisualCandidates,
 } from "../app/lib/review-runtime-visual.js";
 
 const signature = (seed) => `${seed.repeat(32).slice(0, 32)}:12`;
@@ -70,6 +71,28 @@ test("runtime visual snapshots accept only bounded declared host facts", () => {
     [],
     new Set(Array.from({ length: 129 }, (_, index) => `runtime-host-${index + 1}`)),
   ), null);
+});
+
+test("comment target and nearest-group runtime candidates take bounded slots first", () => {
+  const ordinary = Array.from({ length: 129 }, (_, index) => ({
+    key: `ordinary-${index + 1}`,
+    commentPriority: 0,
+  }));
+  const adjacentChart = { key: "adjacent-chart", commentPriority: 1 };
+  const ancestorComment = { key: "ancestor-comment", commentPriority: 2 };
+  const directComment = { key: "direct-comment", commentPriority: 3 };
+  const input = [...ordinary, adjacentChart, ancestorComment, directComment];
+  const selected = selectPrioritizedReviewRuntimeVisualCandidates(input);
+
+  assert.equal(selected.length, 128);
+  assert.equal(selected[0], directComment);
+  assert.equal(selected[1], ancestorComment);
+  assert.equal(selected[2], adjacentChart);
+  assert.deepEqual(
+    selected.slice(3).map(({ key }) => key),
+    ordinary.slice(0, 125).map(({ key }) => key),
+  );
+  assert.equal(input[0], ordinary[0], "selection must not reorder the source list");
 });
 
 test("runtime comparison recognizes stable intrinsic visuals but ignores a lone geometry shift", () => {
@@ -265,4 +288,93 @@ test("runtime visual coordination commits once, falls back atomically, and ignor
     snapshot("runtime-host-2"),
   ]), true);
   assert.deepEqual(incompleteResolutions, [[]]);
+});
+
+test("comment-scoped runtime evidence must match a fresh document run", () => {
+  const candidates = [
+    {
+      key: "comment-scoped-host",
+      outlineId: "outline-1",
+      changeId: "runtime-change-outline-1",
+      label: "图表区",
+      requiresDeterministicConfirmation: true,
+    },
+    {
+      key: "causal-host",
+      outlineId: "outline-1",
+      changeId: "runtime-change-outline-1",
+      label: "图表区",
+    },
+  ];
+  const initialBefore = [
+    snapshot("comment-scoped-host"),
+    snapshot("causal-host"),
+  ];
+  const initialAfter = [
+    snapshot("comment-scoped-host", { paintSignature: signature("d") }),
+    snapshot("causal-host", { paintSignature: signature("e") }),
+  ];
+  const unstableResolutions = [];
+  let unstableRequests = 0;
+  const unstableCoordinator = new ReviewRuntimeVisualCoordinator({
+    candidates,
+    onResolve: (keys) => unstableResolutions.push([...keys]),
+    onRequestConfirmation: () => {
+      unstableRequests += 1;
+      return true;
+    },
+  });
+  unstableCoordinator.accept("before", initialBefore);
+  unstableCoordinator.accept("after", initialAfter);
+  assert.equal(unstableRequests, 1);
+  assert.deepEqual(unstableResolutions, []);
+  assert.equal(unstableCoordinator.start(), true);
+  unstableCoordinator.accept("before", [
+    snapshot("comment-scoped-host", { paintSignature: signature("f") }),
+    snapshot("causal-host"),
+  ]);
+  unstableCoordinator.accept("after", initialAfter);
+  assert.deepEqual(unstableResolutions, [["causal-host"]]);
+
+  const stableResolutions = [];
+  const stableCoordinator = new ReviewRuntimeVisualCoordinator({
+    candidates,
+    onResolve: (keys) => stableResolutions.push([...keys]),
+    onRequestConfirmation: () => true,
+  });
+  stableCoordinator.accept("before", initialBefore);
+  stableCoordinator.accept("after", initialAfter);
+  assert.equal(stableCoordinator.start(), true);
+  stableCoordinator.accept("before", initialBefore);
+  stableCoordinator.accept("after", initialAfter);
+  assert.deepEqual(stableResolutions, [["comment-scoped-host", "causal-host"]]);
+
+  const unavailableConfirmationResolutions = [];
+  const unavailableConfirmationCoordinator = new ReviewRuntimeVisualCoordinator({
+    candidates,
+    onResolve: (keys) => unavailableConfirmationResolutions.push([...keys]),
+    onRequestConfirmation: () => true,
+  });
+  unavailableConfirmationCoordinator.accept("before", initialBefore);
+  unavailableConfirmationCoordinator.accept("after", initialAfter);
+  assert.equal(unavailableConfirmationCoordinator.failConfirmation(), true);
+  assert.deepEqual(unavailableConfirmationResolutions, [["causal-host"]]);
+
+  const confirmationTimers = [];
+  const timeoutResolutions = [];
+  const timeoutCoordinator = new ReviewRuntimeVisualCoordinator({
+    candidates,
+    onResolve: (keys) => timeoutResolutions.push([...keys]),
+    onRequestConfirmation: () => true,
+    setTimer: (callback) => {
+      confirmationTimers.push(callback);
+      return callback;
+    },
+    clearTimer: () => {},
+  });
+  timeoutCoordinator.accept("before", initialBefore);
+  timeoutCoordinator.accept("after", initialAfter);
+  assert.equal(timeoutCoordinator.start(), true);
+  confirmationTimers.at(-1)();
+  assert.deepEqual(timeoutResolutions, [["causal-host"]]);
 });

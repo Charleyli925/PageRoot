@@ -134,22 +134,73 @@ Comments + frozen input
   replacement; a pre-load attempt atomically changes that volatile session to a
   scriptless document retaining only the owned bootstrap and reloads it, so the
   review silently keeps static evidence. Inline/browser review remains
-  static-only. A bounded supplement is then available only for a high-confidence pair
-  of source-empty chart hosts when the changed authored script directly
-  references a distinctive identity of that host and the existing static
-  footprint does not already cover it. Script co-location inside the same
-  section is not causal evidence.
+  static-only. A bounded supplement is then available only for a high-confidence
+  pair of source-empty chart hosts that the existing static footprint does not
+  already cover. An ordinary host requires a changed authored script to
+  reference its distinctive identity. A host directly targeted by, or contained
+  beneath, a frozen non-global review comment is instead admitted as explicit
+  local user scope, even when a changed palette/data/config script and the stable
+  host-binding script are separate. Within the same high-confidence review
+  section, every frozen non-global comment target also seeds a nearest-group
+  search. The first ancestor of that target containing at least two hosts admits
+  its pairable sibling hosts, including when the comment anchors a caption or
+  heading beside the charts. It does not cross a section, infer visual distance
+  or inspect comment text. Group discovery builds one source-DOM
+  ancestor-count map per section, then performs a bounded ancestor walk per
+  local target without a layout read. Direct, contained and nearest-group hosts
+  take the bounded 128 candidate slots in that order. A
+  global comment does not authorize the page, and ordinary group-external script
+  co-location inside the same section is not causal evidence. Comment scope
+  attributes exist only while the frozen analyzer makes this decision, then are
+  stripped from both serialized documents. For every source-resolved local
+  before target, the analyzer retains an opaque private initial-bootstrap
+  binding: a parser path plus a narrowly scoped static fingerprint, never a
+  source-node attribute in the prepared document. The desktop managed-preview
+  session serves that binding only to the parser-blocking first request for the
+  external bootstrap, then replaces it with an unbound fallback response. The
+  trusted parent keeps the source-node mapping and, after the before frame
+  loads, delivers targets only over a separately challenged bootstrap-owned
+  `MessageChannel`. Comment body, comment key, source-node and locator-map data
+  are absent from document bytes and from any later author-initiated bootstrap
+  read. A unique source `id`, `data-*`, `name`, or `aria-label` locator is an
+  optional safe fallback only when the private binding is unavailable, never a
+  positional sibling path; a missing, ambiguous, replaced or disconnected
+  binding, or unavailable private channel, omits the before-side marker rather
+  than rebinding by guess. Only the before bootstrap reports geometry, so
+  authored code cannot react to a comment marker. When comment
+  scope admits a host without a direct changed-script
+  reference, a first-pair visual difference must be reproduced by a fresh run
+  of the same frozen before/after documents before the parent may project it.
+  A clock/random one-shot result, mismatched replay, or unavailable replay
+  keeps the static footprint; directly causal hosts do not reload.
   The owned bootstrap binds the DOM traversal, attribute, layout,
   computed-style and Canvas primitives before authored scripts execute and is
   given the analyzer's exact candidate-key list. Its early mutation observer
   binds each key to the parser-created source host before authored code can
   transfer it. It ignores undeclared claims; missing, duplicate, transferred or
   replaced declared identities fail the supplemental batch back to static
-  evidence. Per-host limits and one aggregate traversal/Canvas budget span the
-  complete two-sample batch, so a page with many declared hosts cannot multiply
-  the work. A host that is unsupported, unstable or over budget emits an explicit
+  evidence. Per-host limits and one aggregate traversal/Canvas budget span each
+  two-sample run, so a page with many declared hosts cannot multiply the work;
+  the one conditional confirmation run begins only after a scope-only first-pair
+  difference. A host that is unsupported, unstable or over budget emits an explicit
   unavailable fact with no comparison authority, while valid sibling hosts
   remain usable.
+  Candidate host keys and original source-box baselines follow the same private
+  binding discipline as comments: the parser-blocking first bootstrap response
+  alone carries an opaque path/fingerprint/baseline record, while serialized
+  HTML carries no candidate identity. The managed preview consumes that private
+  response once and replaces it with an unbound fallback for subsequent reads;
+  the exact element/key/baseline mapping thereafter exists only in bootstrap
+  closure state. A stale path may resolve only to one matching private
+  fingerprint. A missing, ambiguous, replaced or disconnected binding
+  invalidates the complete runtime batch; fixed runtime-host/source-box
+  attributes, candidate keys and locator paths are never serialized into the
+  authored-page DOM or a later fetchable bootstrap response. Confirmation uses
+  fresh preview sessions so the new pair has its own one-shot binding response.
+  Its first capture listener consumes the trusted parent's runtime and comment
+  channel challenges, validates parent/session/type, and stops propagation
+  before later authored capture listeners can observe a challenge or race a
+  forged port; the ordinary message listener never transfers either capability.
   Each isolated frame samples visible HTML/SVG/Canvas paint twice, including
   the host's own painted box, a fully transparent host as a stable disappearance
   state, and directly mutated size but not an unpainted empty box or indirect
@@ -163,6 +214,8 @@ Comments + frozen input
   port, compares the completed before/after batches, reuses the owning static
   `changeId` when present and otherwise adds one visual change for that outline.
   A pre-load batch remains cached until the registered frame claims its port.
+  Only a changed scope-relaxed candidate causes one frame-pair reload and must
+  match each side's first fingerprint; all other evidence stays single-run.
   Coordinator and message-listener installation run before paint and drain any
   frame already registered for the same frozen document pair, so load/effect
   ordering cannot strand the initial projection.
@@ -171,7 +224,9 @@ Comments + frozen input
   resolves the initial projection from static evidence and ignores any later
   runtime arrival. The coordinator starts its separate 500ms comparison
   deadline only after both frames have loaded; an earlier side never spends the
-  other side's comparison budget. It then commits both frames atomically;
+  other side's comparison budget. A required confirmation reload receives the
+  same bounded registration and comparison budgets, then can fail closed only
+  its scope-relaxed candidates. It then commits both frames atomically;
   timeout, partial and late batches silently retain the static footprint. Exact leaf text
   ranges remain immutable evidence; a separate readable-footprint planner
   groups nearby ranges, keeps stable sentence gaps separate, gives tiny phrases

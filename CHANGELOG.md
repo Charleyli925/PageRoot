@@ -4,6 +4,48 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+- Fixed formal AI review missing chart palette, data, or configuration changes
+  when the changed script did not directly name the rendered chart host. A
+  source-empty chart directly covered by a saved local comment target, plus
+  pairable charts in the target's nearest multi-chart group (including when the
+  target is a caption or heading beside the charts), is now compared before
+  ordinary runtime candidates. Global comments, charts outside that group, and
+  other un-commented regions retain the strict host-reference gate and bounded
+  budget. Comment scope remains analyzer-only: scope attributes are removed
+  before either review document is serialized. Every source-resolved local
+  target is instead represented only in a private initial-bootstrap binding:
+  an element path plus a narrow static fingerprint, never a temporary DOM
+  attribute. The desktop preview session serves that binding only to the
+  parser-blocking first bootstrap request, then replaces it with an unbound
+  fallback for later author-initiated reads. The trusted review host delivers
+  comment targets only to the before frame via a challenged private port.
+  Comment bodies, comment keys, source-node IDs and locator maps never enter
+  document bytes or a later fetchable bootstrap response. A unique source `id`,
+  `data-*`, `name`, or `aria-label` locator is only a safe fallback when the
+  private binding is unavailable—never a mutable sibling ordinal. Missing,
+  ambiguous, replaced or disconnected targets, and unavailable private
+  transport, omit the marker rather than guessing a neighboring element. The
+  bootstrap consumes both private-channel challenges in its first capture
+  listener, before authored capture listeners can observe or forge either port.
+  When comment scope, rather than a direct changed-script
+  reference, admits a host and its first before/after comparison differs,
+  PageRoot now reloads the same isolated pair once and requires each side's
+  fingerprint to match its own fresh run. One-shot `Math.random()`/`Date.now()`
+  initialization, a failed replay, or a replay mismatch keeps the existing
+  static result; directly causal hosts and comment-scoped hosts with no initial
+  difference do not pay for the extra run.
+- Hardened runtime-chart candidate binding so host keys, source-box baselines
+  and element locators are never serialized as authored-page attributes. The
+  parser-blocking first bootstrap response alone receives opaque private
+  bindings; the managed preview immediately consumes it and serves only an
+  unbound fallback source to later reads. It retains the exact element/key/
+  baseline mapping only in closed runtime state. A stale path may resolve only
+  to one matching private fingerprint; an ambiguity, replacement or
+  disconnection invalidates the complete supplemental batch, so authored CSS
+  or scripts cannot use candidate metadata to manufacture a visual difference.
+  A confirmation pair receives fresh preview sessions so its own first
+  bootstrap response can safely carry its one-shot bindings.
+
 ## [0.9.7] - 2026-08-07
 
 - Let macOS applications such as Qoder Work offer PageRoot as an alternate

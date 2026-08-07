@@ -1,6 +1,6 @@
 export const REVIEW_RUNTIME_VISUAL_DEADLINE_MS = 500;
+export const REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT = 128;
 
-const MAX_RUNTIME_VISUAL_CANDIDATES = 128;
 const MAX_RUNTIME_VISUAL_ATOMS = 4_096;
 const MAX_RUNTIME_CANVAS_PIXELS = 4_194_304;
 const SIGNATURE_PATTERN = /^[a-f0-9]{32}:[1-9]\d{0,7}$/u;
@@ -40,9 +40,9 @@ export function acceptReviewRuntimeVisualSnapshots(value, allowedCandidateKeys) 
   if (
     !Array.isArray(value)
     || !(allowedCandidateKeys instanceof Set)
-    || allowedCandidateKeys.size > MAX_RUNTIME_VISUAL_CANDIDATES
+    || allowedCandidateKeys.size > REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT
     || value.length !== allowedCandidateKeys.size
-    || value.length > MAX_RUNTIME_VISUAL_CANDIDATES
+    || value.length > REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT
   ) return null;
 
   const seen = new Set();
@@ -139,6 +139,27 @@ export function acceptReviewRuntimeVisualSnapshots(value, allowedCandidateKeys) 
   return Object.freeze(accepted);
 }
 
+export function selectPrioritizedReviewRuntimeVisualCandidates(
+  candidates,
+  maximum = REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT,
+) {
+  if (!Array.isArray(candidates)) return Object.freeze([]);
+  const limit = Number.isSafeInteger(maximum)
+    ? Math.max(0, Math.min(REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT, maximum))
+    : REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT;
+  return Object.freeze(candidates
+    .map((candidate, index) => ({
+      candidate,
+      index,
+      priority: Number.isFinite(candidate?.commentPriority)
+        ? Math.max(0, Math.trunc(candidate.commentPriority))
+        : 0,
+    }))
+    .sort((left, right) => right.priority - left.priority || left.index - right.index)
+    .slice(0, limit)
+    .map(({ candidate }) => candidate));
+}
+
 function runtimeSnapshotChanged(before, after) {
   if (before.state === "unavailable" || after.state === "unavailable") return false;
   if (before.state !== after.state) {
@@ -163,6 +184,23 @@ function runtimeSnapshotChanged(before, after) {
     || contentChanged
     || paintChanged
     || geometryChanged;
+}
+
+function runtimeSnapshotsMatch(left, right) {
+  return Boolean(left)
+    && Boolean(right)
+    && left.key === right.key
+    && left.state === right.state
+    && left.contentSignature === right.contentSignature
+    && left.paintSignature === right.paintSignature
+    && left.geometrySignature === right.geometrySignature
+    && left.vectorSignature === right.vectorSignature
+    && left.canvasSignature === right.canvasSignature
+    && left.contentAtoms === right.contentAtoms
+    && left.paintAtoms === right.paintAtoms
+    && left.geometryAtoms === right.geometryAtoms
+    && left.vectorAtoms === right.vectorAtoms
+    && left.canvasPixels === right.canvasPixels;
 }
 
 export function changedReviewRuntimeVisualCandidateKeys({
@@ -286,19 +324,28 @@ export class ReviewRuntimeVisualCoordinator {
   constructor({
     candidates,
     onResolve,
+    onRequestConfirmation,
     deadlineMs = REVIEW_RUNTIME_VISUAL_DEADLINE_MS,
     setTimer = (callback, delay) => setTimeout(callback, delay),
     clearTimer = (handle) => clearTimeout(handle),
   } = {}) {
     this.candidates = Array.isArray(candidates) ? Object.freeze([...candidates]) : Object.freeze([]);
     this.allowedCandidateKeys = new Set(this.candidates.map((candidate) => candidate.key));
+    this.confirmationCandidateKeys = new Set(this.candidates
+      .filter((candidate) => candidate?.requiresDeterministicConfirmation === true)
+      .map((candidate) => candidate.key));
     this.onResolve = typeof onResolve === "function" ? onResolve : () => {};
+    this.onRequestConfirmation = typeof onRequestConfirmation === "function"
+      ? onRequestConfirmation
+      : () => false;
     this.deadlineMs = Number.isFinite(deadlineMs)
       ? Math.max(1, Math.min(5_000, Math.round(deadlineMs)))
       : REVIEW_RUNTIME_VISUAL_DEADLINE_MS;
     this.setTimer = setTimer;
     this.clearTimer = clearTimer;
     this.snapshots = { before: null, after: null };
+    this.confirmationSnapshots = { before: null, after: null };
+    this.phase = "initial";
     this.resolved = false;
     this.disposed = false;
     this.timer = null;
@@ -311,8 +358,16 @@ export class ReviewRuntimeVisualCoordinator {
       || !this.candidates.length
       || this.timer !== null
     ) return false;
+    if (this.phase === "awaiting-confirmation") this.phase = "confirmation";
+    if (this.phase !== "initial" && this.phase !== "confirmation") return false;
     this.timer = this.setTimer(
-      () => this.#resolve(Object.freeze([])),
+      () => {
+        if (this.phase === "confirmation") {
+          this.failConfirmation();
+          return;
+        }
+        this.#resolve(Object.freeze([]));
+      },
       this.deadlineMs,
     );
     return true;
@@ -323,21 +378,98 @@ export class ReviewRuntimeVisualCoordinator {
       this.resolved
       || this.disposed
       || (side !== "before" && side !== "after")
-      || this.snapshots[side] !== null
+      || (this.phase !== "initial" && this.phase !== "confirmation")
     ) return false;
+    const snapshots = this.phase === "confirmation"
+      ? this.confirmationSnapshots
+      : this.snapshots;
+    if (snapshots[side] !== null) return false;
     this.start();
-    this.snapshots[side] = acceptReviewRuntimeVisualSnapshots(
+    snapshots[side] = acceptReviewRuntimeVisualSnapshots(
       rawSnapshots,
       this.allowedCandidateKeys,
     ) || Object.freeze([]);
-    if (this.snapshots.before !== null && this.snapshots.after !== null) {
-      this.#resolve(changedReviewRuntimeVisualCandidateKeys({
-        candidates: this.candidates,
-        before: this.snapshots.before,
-        after: this.snapshots.after,
-      }));
+    if (snapshots.before !== null && snapshots.after !== null) {
+      if (this.phase === "initial") this.#resolveInitialSnapshots();
+      else this.#resolveConfirmedSnapshots();
     }
     return true;
+  }
+
+  failConfirmation() {
+    if (
+      this.resolved
+      || this.disposed
+      || (this.phase !== "awaiting-confirmation" && this.phase !== "confirmation")
+      || this.snapshots.before === null
+      || this.snapshots.after === null
+    ) return false;
+    this.#resolve(this.#initialChangedCandidateKeys().filter((key) => (
+      !this.confirmationCandidateKeys.has(key)
+    )));
+    return true;
+  }
+
+  #initialChangedCandidateKeys() {
+    if (this.snapshots.before === null || this.snapshots.after === null) {
+      return Object.freeze([]);
+    }
+    return changedReviewRuntimeVisualCandidateKeys({
+      candidates: this.candidates,
+      before: this.snapshots.before,
+      after: this.snapshots.after,
+    });
+  }
+
+  #resolveInitialSnapshots() {
+    const changedCandidateKeys = this.#initialChangedCandidateKeys();
+    const needsConfirmation = changedCandidateKeys.some((key) => (
+      this.confirmationCandidateKeys.has(key)
+    ));
+    if (!needsConfirmation) {
+      this.#resolve(changedCandidateKeys);
+      return;
+    }
+    if (this.timer !== null) this.clearTimer(this.timer);
+    this.timer = null;
+    this.phase = "awaiting-confirmation";
+    let confirmationRequested = false;
+    try {
+      confirmationRequested = this.onRequestConfirmation() === true;
+    } catch {
+      confirmationRequested = false;
+    }
+    if (!confirmationRequested) this.failConfirmation();
+  }
+
+  #resolveConfirmedSnapshots() {
+    if (
+      this.confirmationSnapshots.before === null
+      || this.confirmationSnapshots.after === null
+    ) return;
+    const initialBeforeByKey = new Map(this.snapshots.before.map((snapshot) => [
+      snapshot.key,
+      snapshot,
+    ]));
+    const initialAfterByKey = new Map(this.snapshots.after.map((snapshot) => [
+      snapshot.key,
+      snapshot,
+    ]));
+    const confirmedBeforeByKey = new Map(this.confirmationSnapshots.before.map((snapshot) => [
+      snapshot.key,
+      snapshot,
+    ]));
+    const confirmedAfterByKey = new Map(this.confirmationSnapshots.after.map((snapshot) => [
+      snapshot.key,
+      snapshot,
+    ]));
+    const stableConfirmationKeys = new Set([...this.confirmationCandidateKeys].filter((key) => (
+      runtimeSnapshotsMatch(initialBeforeByKey.get(key), confirmedBeforeByKey.get(key))
+      && runtimeSnapshotsMatch(initialAfterByKey.get(key), confirmedAfterByKey.get(key))
+    )));
+    this.#resolve(this.#initialChangedCandidateKeys().filter((key) => (
+      !this.confirmationCandidateKeys.has(key) || stableConfirmationKeys.has(key)
+    )));
   }
 
   #resolve(changedCandidateKeys) {

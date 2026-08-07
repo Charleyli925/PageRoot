@@ -1,6 +1,6 @@
 export type ReviewRuntimeVisualSnapshot = Readonly<{
   key: string;
-  state: "empty" | "stable";
+  state: "empty" | "stable" | "unavailable";
   contentSignature: string;
   paintSignature: string;
   geometrySignature: string;
@@ -18,11 +18,21 @@ export type ReviewRuntimeVisualCandidate = Readonly<{
   outlineId: string;
   changeId: string;
   label: string;
+  /** Requires a fresh same-document run when comment scope, not script causality, admitted it. */
+  requiresDeterministicConfirmation?: boolean;
   panelKey?: string;
   panelPath?: readonly string[];
 }>;
 
 export const REVIEW_RUNTIME_VISUAL_DEADLINE_MS: 500;
+export const REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT: 128;
+
+export function selectPrioritizedReviewRuntimeVisualCandidates<
+  TCandidate extends { commentPriority?: number },
+>(
+  candidates: readonly TCandidate[],
+  maximum?: number,
+): readonly TCandidate[];
 
 export function acceptReviewRuntimeVisualSnapshots(
   value: unknown,
@@ -57,6 +67,7 @@ export class ReviewRuntimeVisualCoordinator {
   constructor(options?: {
     candidates?: readonly ReviewRuntimeVisualCandidate[];
     onResolve?: (changedCandidateKeys: readonly string[]) => void;
+    onRequestConfirmation?: () => boolean;
     deadlineMs?: number;
     setTimer?: (callback: () => void, delay: number) => unknown;
     clearTimer?: (handle: unknown) => void;
@@ -64,5 +75,7 @@ export class ReviewRuntimeVisualCoordinator {
   readonly resolved: boolean;
   start(): boolean;
   accept(side: "before" | "after", rawSnapshots: unknown): boolean;
+  /** Fail closed only the candidates that need a fresh deterministic rerun. */
+  failConfirmation(): boolean;
   dispose(): void;
 }
