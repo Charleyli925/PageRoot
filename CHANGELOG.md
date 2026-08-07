@@ -14,7 +14,9 @@ Notable user-visible changes are documented here. This project follows Semantic 
   cannot leave PageRoot displaying an older file after a newer request has
   become active, and keep the Canvas frozen while external activation is still
   in flight. A failed later external request now keeps the last successfully
-  opened file visible and durable.
+  opened file visible and durable. A deferred external open now waits for an
+  observed switch blocker to clear, or for an explicit retry, so Canvas
+  recovery cannot create an automatic retry loop.
 - Update the shared `js-yaml` dependency closure to 4.3.1, removing the
   high-severity parsing advisory without changing the packaged runtime shape.
 - Bring the review-first AI workflow into the public README, built-in welcome

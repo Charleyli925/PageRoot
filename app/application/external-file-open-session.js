@@ -20,6 +20,7 @@ function initialSnapshot() {
     activeRequestId: null,
     queuedRequestId: null,
     deferredRequestId: null,
+    deferredSequence: 0,
   });
 }
 
@@ -39,6 +40,8 @@ export class ExternalFileOpenSession {
   #queued = null;
 
   #deferred = null;
+
+  #deferredSequence = 0;
 
   #execute = null;
 
@@ -65,6 +68,7 @@ export class ExternalFileOpenSession {
       activeRequestId: this.#active?.requestId || null,
       queuedRequestId: this.#queued?.requestId || null,
       deferredRequestId: this.#deferred?.requestId || null,
+      deferredSequence: this.#deferredSequence,
     });
     try {
       this.#observer?.(this.#snapshot);
@@ -111,6 +115,7 @@ export class ExternalFileOpenSession {
         this.#active = null;
         if (result === "deferred" && !this.#queued) {
           this.#deferred = request;
+          this.#deferredSequence += 1;
           this.#emit();
           break;
         }

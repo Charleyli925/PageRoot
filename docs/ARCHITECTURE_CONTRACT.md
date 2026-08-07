@@ -101,11 +101,13 @@ normal project-switch boundary cannot yet close safely. It fences only an
 older request that has not yet been accepted when a newer request is queued,
 and it freezes the Canvas from the final safe switch fence through the awaited
 external acceptance; a newer external request inherits that freeze. Its
-snapshot is observed by Workbench, so each newly deferred request re-enters the
-normal safe-switch retry evaluation even when no other persistence state
-changes. If the final fence captures a post-cutoff native edit, it does not
-begin the IPC, releases that edit to normal persistence, and retries only after
-the source is safe. A successfully accepted external project is published even
+snapshot includes a monotonically increasing deferred-transition sequence.
+Workbench observes a new sequence but never resumes from that snapshot alone:
+automatic retry requires a relevant safe-switch blocker to be observed and
+then clear. If no tracked blocker is present, Workbench keeps the current HTML
+and offers an explicit retry action instead. If the final fence captures a
+post-cutoff native edit, it does not begin the IPC, releases that edit to normal
+persistence, and resumes only after that source blocker clears. A successfully accepted external project is published even
 when a newer request is queued; the newer request replaces it only after its
 own successful acceptance, so a failed successor cannot split visible and
 durable authority. Ordinary Workbench project-picker retry state may not carry

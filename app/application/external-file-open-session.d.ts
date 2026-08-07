@@ -8,6 +8,7 @@ export type ExternalFileOpenSnapshot = Readonly<{
   activeRequestId: string | null;
   queuedRequestId: string | null;
   deferredRequestId: string | null;
+  deferredSequence: number;
 }>;
 
 export type ExternalFileOpenExecution = (

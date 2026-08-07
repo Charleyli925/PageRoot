@@ -46,6 +46,7 @@ test("external file session serializes delivery and lets the newest queued reque
     activeRequestId: "external_first",
     queuedRequestId: "external_latest",
     deferredRequestId: null,
+    deferredSequence: 0,
   });
 
   releaseFirst();
@@ -62,6 +63,7 @@ test("external file session serializes delivery and lets the newest queued reque
     activeRequestId: null,
     queuedRequestId: null,
     deferredRequestId: null,
+    deferredSequence: 0,
   });
 });
 
@@ -86,6 +88,7 @@ test("external file session deduplicates opaque deliveries and retains one defer
     activeRequestId: null,
     queuedRequestId: null,
     deferredRequestId: "external_deferred",
+    deferredSequence: 1,
   });
   assert.equal(session.enqueue(request("deferred"), execute), false);
   assert.equal(session.resume(execute), true);
@@ -108,7 +111,26 @@ test("external file session notifies the renderer when a request becomes deferre
     activeRequestId: null,
     queuedRequestId: null,
     deferredRequestId: "external_retry",
+    deferredSequence: 1,
   });
+});
+
+test("external file session gives every deferred transition a new sequence", async () => {
+  const session = new ExternalFileOpenSession();
+  const calls = [];
+  const execute = async (value) => {
+    calls.push(value.requestId);
+    return "deferred";
+  };
+
+  assert.equal(session.enqueue(request("retry-sequence"), execute), true);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(session.snapshot.deferredSequence, 1);
+
+  assert.equal(session.resume(execute), true);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(session.snapshot.deferredSequence, 2);
+  assert.deepEqual(calls, ["external_retry-sequence", "external_retry-sequence"]);
 });
 
 test("a newer external request supersedes a deferred request before it resumes", async () => {

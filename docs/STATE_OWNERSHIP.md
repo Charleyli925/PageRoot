@@ -51,11 +51,14 @@ Rules:
   IDs and owns active, queued and deferred switching; Workbench's ordinary
   project-picker retry ref never stores an external request. A newer queued
   external request fences only older work that has not yet been accepted and
-  inherits its Canvas freeze. The session emits a snapshot when a request
-  enters `deferred`, so Workbench re-evaluates the safe-switch retry even when
-  no unrelated state changes. If the final pre-IPC fence itself captures a
-  post-cutoff native edit, no external activation starts; that edit returns to
-  normal persistence before the session retries. An accepted project publishes
+  inherits its Canvas freeze. The session emits a monotonically increasing
+  deferred-transition sequence when a request enters `deferred`. Workbench
+  observes that sequence but does not retry from the same snapshot: automatic
+  retry needs a relevant safe-switch blocker to become clear; otherwise an
+  explicit retry action delegates back to the session. If the final pre-IPC
+  fence itself captures a post-cutoff native edit, no external activation
+  starts; that edit returns to normal persistence before the session retries.
+  An accepted project publishes
   before a later queued request runs, and that later request replaces it only
   on success. The final visible project and the main-process active/recent
   source therefore stay aligned without discarding input or losing a prior

@@ -335,6 +335,7 @@ const INITIAL_EXTERNAL_FILE_OPEN_SNAPSHOT: ExternalFileOpenSnapshot = {
   activeRequestId: null,
   queuedRequestId: null,
   deferredRequestId: null,
+  deferredSequence: 0,
 };
 const INITIAL_VERSION_SNAPSHOT: VersionSessionSnapshot<Version> = {
   versions: [],
@@ -615,6 +616,15 @@ export default function Workbench() {
     recentPath?: string;
     requestedAt: number;
   } | null>(null);
+  const externalDeferredRetryRef = useRef<{
+    requestId: string | null;
+    deferredSequence: number;
+    sawSwitchBlocker: boolean;
+  }>({
+    requestId: null,
+    deferredSequence: 0,
+    sawSwitchBlocker: false,
+  });
   const closeLifecycleRef = useRef<CloseLifecycle>({
     preparingRequestId: null,
     frozenRequestId: null,
@@ -634,6 +644,10 @@ export default function Workbench() {
     externalFileOpenSnapshot.status === "deferred"
       ? externalFileOpenSnapshot.deferredRequestId
       : null;
+  const externalDeferredSequence =
+    externalFileOpenSnapshot.status === "deferred"
+      ? externalFileOpenSnapshot.deferredSequence
+      : 0;
   const html = documentSnapshot.html;
   const sourceSha256 = documentSnapshot.sourceSha256;
   const canvasGeneration = documentSnapshot.canvasGeneration;
@@ -5523,6 +5537,12 @@ export default function Workbench() {
     viewMode,
   ]);
 
+  const resumeDeferredExternalProject = useCallback(() => {
+    const session = externalFileOpenSessionRef.current;
+    if (session.snapshot.status !== "deferred") return false;
+    return session.resume(openExternalProject);
+  }, [openExternalProject]);
+
   useEffect(() => {
     const lifecycle = window.htmlAIAppLifecycle;
     if (!lifecycle?.onExternalOpenRequested) return undefined;
@@ -5537,12 +5557,11 @@ export default function Workbench() {
 
   useEffect(() => {
     const pending = pendingProjectOpenRef.current;
-    const externalOpenSession = externalFileOpenSessionRef.current;
     if (!pending && !externalDeferredRequestId) return;
     const projectRulesUnsaved = projectRulesSessionRef.current
       .inspect({ locked: projectLockedRef.current }).state !== "resolved";
     const draftState = draftSessionRef.current.inspect();
-    if (
+    const switchBlocked = Boolean(
       generating
       || submissionIntentRef.current
       || submissionPendingRef.current
@@ -5557,27 +5576,71 @@ export default function Workbench() {
       || draftState.writing
       || draftState.error
       || editRevision > lastPersistedRevision
-    ) return;
+    );
     if (pending) {
+      if (switchBlocked) return;
       pendingProjectOpenRef.current = null;
       void openProject(pending.recentPath);
       return;
     }
-    externalOpenSession.resume(openExternalProject);
+    if (!externalDeferredRequestId) return;
+    const retryState = externalDeferredRetryRef.current;
+    if (
+      retryState.requestId !== externalDeferredRequestId
+      || retryState.deferredSequence !== externalDeferredSequence
+    ) {
+      // A deferred snapshot acknowledges one failed boundary attempt. It is
+      // not itself permission to repeat that attempt: doing so can loop while
+      // Canvas authority recovery remains unresolved but ordinary projections
+      // already look clean.
+      externalDeferredRetryRef.current = {
+        requestId: externalDeferredRequestId,
+        deferredSequence: externalDeferredSequence,
+        sawSwitchBlocker: switchBlocked,
+      };
+      if (!switchBlocked) {
+        setToast({
+          title: "暂不能切换到 QoderWork 中的 HTML",
+          message: "当前画布仍在安全恢复；已保留当前 HTML。恢复后可手动重试打开。",
+          tone: "warning",
+          sticky: true,
+          disposition: "direct-action",
+          dedupeKey: "external-project-open-deferred",
+          action: { id: "retry-external-project-open", label: "重试打开" },
+        });
+      }
+      return;
+    }
+    if (switchBlocked) {
+      retryState.sawSwitchBlocker = true;
+      return;
+    }
+    if (!retryState.sawSwitchBlocker) return;
+    retryState.sawSwitchBlocker = false;
+    resumeDeferredExternalProject();
   }, [
     draftPersistError,
     attachmentUploadCount,
     editRevision,
     externalDeferredRequestId,
+    externalDeferredSequence,
     generating,
     lastPersistedRevision,
-    openExternalProject,
     openProject,
     persistState,
     projectRulesSnapshot,
     projectHydrating,
+    resumeDeferredExternalProject,
     viewTransitioning,
   ]);
+  useEffect(() => {
+    if (
+      externalFileOpenSnapshot.status !== "deferred"
+      && toastRef.current?.dedupeKey === "external-project-open-deferred"
+    ) {
+      setToast(null);
+    }
+  }, [externalFileOpenSnapshot.status]);
 
   const showProjectInFolder = useCallback(async (requestedSourcePath?: string) => {
     const activeSourcePath = requestedSourcePath || projectSessionRef.current.sourcePath;
@@ -10007,6 +10070,8 @@ export default function Workbench() {
       void openProject(action.sourcePath);
     } else if (action.id === "retry-project-open") {
       void openProject(action.sourcePath);
+    } else if (action.id === "retry-external-project-open") {
+      void resumeDeferredExternalProject();
     } else if (action.id === "open-attachment-picker") {
       openAttachmentPicker(action.target, action.accept || "all");
     } else if (action.id === "review-comment-attachments") {

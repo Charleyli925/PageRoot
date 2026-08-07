@@ -410,7 +410,7 @@ test("external HTML activation holds the canvas fence through main-process accep
   );
 });
 
-test("deferred external opens publish their session snapshot for retry", () => {
+test("deferred external opens publish transition snapshots and wait for a safe retry trigger", () => {
   const observer = section(
     workbench,
     "const session = externalFileOpenSessionRef.current;",
@@ -438,14 +438,43 @@ test("deferred external opens publish their session snapshot for retry", () => {
     "only a deferred owner snapshot may schedule retry",
   );
   assert.match(
+    workbench,
+    /const externalDeferredSequence =[\s\S]*?externalFileOpenSnapshot\.status === "deferred"[\s\S]*?externalFileOpenSnapshot\.deferredSequence/u,
+    "each deferred transition needs an observer-visible sequence",
+  );
+  assert.match(
     retry,
     /if \(!pending && !externalDeferredRequestId\) return;/u,
     "a new deferred request must re-enter the normal retry effect",
   );
   assert.match(
     retry,
-    /\}, \[[\s\S]*?externalDeferredRequestId/u,
-    "the retry effect must subscribe to deferred request identity",
+    /retryState\.requestId !== externalDeferredRequestId[\s\S]*?retryState\.deferredSequence !== externalDeferredSequence[\s\S]*?return;/u,
+    "a new deferred transition must be observed before it can ever resume",
+  );
+  assertOrdered(
+    retry,
+    [
+      "const retryState = externalDeferredRetryRef.current;",
+      "retryState.requestId !== externalDeferredRequestId",
+      "retryState.deferredSequence !== externalDeferredSequence",
+      "sawSwitchBlocker: switchBlocked",
+      "if (switchBlocked) {",
+      "retryState.sawSwitchBlocker = true;",
+      "if (!retryState.sawSwitchBlocker) return;",
+      "resumeDeferredExternalProject();",
+    ],
+    "automatic resume must wait for an observed blocker transition",
+  );
+  assert.match(
+    workbench,
+    /id: "retry-external-project-open", label: "重试打开"/u,
+    "a persistently deferred external open needs an explicit retry action",
+  );
+  assert.match(
+    workbench,
+    /action\.id === "retry-external-project-open"[\s\S]*?resumeDeferredExternalProject\(\)/u,
+    "the explicit retry action must delegate to the session owner",
   );
   assert.doesNotMatch(
     retry,
