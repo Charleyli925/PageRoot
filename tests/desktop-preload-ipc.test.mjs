@@ -374,6 +374,41 @@ test("preload replays a pending external-open request and receives later request
   unsubscribe();
 });
 
+test("preload ignores a stale external-open catch-up after a newer live delivery", async () => {
+  let resolveReady;
+  const ready = new Promise((resolve) => {
+    resolveReady = resolve;
+  });
+  const calls = [];
+  const preload = await loadPreloadApis(async (...args) => {
+    calls.push(args);
+    if (args[0] === "html-app:external-open-ready") return ready;
+    return null;
+  });
+  const requests = [];
+  const unsubscribe = preload.lifecycle.onExternalOpenRequested((request) => {
+    requests.push(request);
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  preload.emit("html-app:external-open-requested", {
+    requestId: "external_live",
+    sourcePath: "/Users/demo/live.html",
+  });
+  resolveReady({
+    requestId: "external_startup",
+    sourcePath: "/Users/demo/startup.html",
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(JSON.parse(JSON.stringify(requests)), [{
+    requestId: "external_live",
+    sourcePath: "/Users/demo/live.html",
+  }]);
+  assert.deepEqual(calls, [["html-app:external-open-ready"]]);
+  unsubscribe();
+});
+
 test("preload exposes workspace failure recovery and a narrow relaunch action", async () => {
   const calls = [];
   const preload = await loadPreloadApis(async (...args) => {

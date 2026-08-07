@@ -49,7 +49,9 @@ Rules:
   Bridge check can finish; local picker, recent-project, external, startup,
   generated-version, rename and forget transitions therefore share one durable
   state boundary. The renderer `ExternalFileOpenSession` deduplicates delivery
-  IDs and owns active, queued and deferred switching; Workbench's ordinary
+  IDs and owns active, queued and deferred switching. Preload suppresses an
+  older readiness catch-up once it has observed a live request, so delivery
+  order cannot reverse at the renderer boundary; Workbench's ordinary
   project-picker retry ref never stores an external request. A newer queued
   external request fences only older work that has not yet been accepted and
   inherits its Canvas freeze. The session emits a monotonically increasing

@@ -99,7 +99,10 @@ active-project transition its FIFO position at entry, shared by local picker,
 recent-project, external, startup, generated-version, rename and forget
 routes. The renderer's `ExternalFileOpenSession` owns delivery de-duplication,
 one active request, one newest queued request and a deferred retry when the
-normal project-switch boundary cannot yet close safely. It fences only an
+normal project-switch boundary cannot yet close safely. Preload subscribes
+before requesting its readiness catch-up, and drops that catch-up if a live
+delivery arrives first, so an older mailbox snapshot cannot replace a newer
+external intent. The session fences only an
 older request that has not yet been accepted when a newer request is queued,
 and it freezes the Canvas from the final safe switch fence through the awaited
 external acceptance; a newer external request inherits that freeze. Its

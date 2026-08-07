@@ -317,17 +317,28 @@ const appLifecycleApi = Object.freeze({
     if (typeof listener !== "function") {
       throw new TypeError("onExternalOpenRequested listener must be a function.");
     }
+    let liveDeliveryGeneration = 0;
     const wrapped = (_event, payload) => {
       const request = normalizedExternalOpenRequest(payload);
-      if (request) listener(request);
+      if (!request) return;
+      liveDeliveryGeneration += 1;
+      listener(request);
     };
     externalOpenListeners.set(listener, wrapped);
     ipcRenderer.on(appChannels.externalOpenRequested, wrapped);
+    const catchUpGeneration = liveDeliveryGeneration;
     void ipcRenderer.invoke(appChannels.externalOpenReady)
       .then((payload) => {
-        if (externalOpenListeners.get(listener) === wrapped && payload) {
-          wrapped(null, payload);
-        }
+        if (
+          externalOpenListeners.get(listener) !== wrapped
+          || !payload
+          // A live IPC delivery is newer than the asynchronous readiness
+          // snapshot. Never let that stale catch-up response replace the
+          // currently pending mailbox request in the renderer session.
+          || liveDeliveryGeneration !== catchUpGeneration
+        ) return;
+        const request = normalizedExternalOpenRequest(payload);
+        if (request) listener(request);
       })
       .catch(() => {});
     return () => {
