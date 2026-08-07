@@ -143,8 +143,9 @@ Rules:
   authored scripts run, owns the frozen analyzer-declared host-key set and
   records the parser-created element that first claims every key. Undeclared
   claims are ignored; missing, duplicate, transferred, replaced or drifting
-  declared identities invalidate the whole supplemental batch. Each host owns
-  an independent capture budget; a local fault, instability or exhaustion is a
+  declared identities invalidate the whole supplemental batch. Each host retains
+  independent failure isolation while one aggregate capture budget spans the
+  complete two-sample batch; a local fault, instability or exhaustion is a
   validated unavailable fact with no authority over valid sibling hosts.
   It accepts only a complete declared before/after pair before its initial deadline,
   includes the host's own painted box, fully transparent disappearance state

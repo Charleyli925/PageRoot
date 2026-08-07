@@ -920,6 +920,46 @@ test("Electron interactive preview runs authored scripts and edits the selected 
   }
 });
 
+test("Electron edit mode projects a source-empty host populated by an inline load handler", async () => {
+  const sourceDirectory = mkdtempSync(
+    path.join(tmpdir(), "pageroot-inline-handler-source-e2e-"),
+  );
+  const sourcePath = path.join(sourceDirectory, "inline-handler-report.html");
+  const source = `<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Inline handler runtime visual</title></head>
+<body onload="document.querySelector('div').textContent = '运行时内容'">
+  <main><div data-native-case="inline-handler-runtime" style="width: 120px; height: 30px"></div></main>
+</body>
+</html>`;
+  writeFileSync(sourcePath, source, "utf8");
+
+  let electronApp = null;
+  let isolatedUserData = null;
+  try {
+    const launched = await launchPageRoot({ activeSourcePath: sourcePath });
+    electronApp = launched.electronApp;
+    isolatedUserData = launched.isolatedUserData;
+    const { frame: editFrame } = await loadedDiskFrame(
+      launched.page,
+      sourcePath,
+      "inline-handler-runtime",
+    );
+    await expect(editFrame.locator(
+      '[data-native-case="inline-handler-runtime"] img[data-pageroot-readonly-visual="runtime-bitmap"]',
+    )).toBeVisible({ timeout: 20_000 });
+    expect(readFileSync(sourcePath, "utf8")).toBe(source);
+  } finally {
+    if (electronApp && isolatedUserData) {
+      await stopPageRoot(electronApp, isolatedUserData);
+    }
+    removeValidatedTemporaryDirectory(
+      sourceDirectory,
+      "pageroot-inline-handler-source-e2e-",
+    );
+  }
+});
+
 test("Electron edit mode projects runtime visuals in an opt-in real HTML file", async () => {
   const sourcePath = process.env.PAGEROOT_REAL_HTML_PATH;
   test.skip(

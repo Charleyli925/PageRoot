@@ -57,8 +57,8 @@ Comments + frozen input
   `aria-expanded` state. It never carries runtime DOM, pixels or table markup.
 - Desktop Edit has one separate, disposable runtime-visual projection. A
   renderer session reuses the Canvas `SourceIndex`, limits source-empty hosts
-  to those with authored-script causality, and keys capture work by executable
-  source, script-referenced data containers, stable host TargetRef, a 64px
+  to authored executable causality (scripts or inline handlers), and keys capture
+  work by executable source, script/handler-referenced data containers, stable host TargetRef, a 64px
   viewport bucket and presentation context. Ordinary text/history edits
   therefore resolve that TargetRef against the current SourceIndex and rebind the committed projection to the
   exact new source Hash instead of running the page again. A bounded LRU keeps
@@ -142,8 +142,9 @@ Comments + frozen input
   binds each key to the parser-created source host before authored code can
   transfer it. It ignores undeclared claims; missing, duplicate, transferred or
   replaced declared identities fail the supplemental batch back to static
-  evidence. Each declared host receives an independent traversal/Canvas budget.
-  A host that is unsupported, unstable or over budget emits an explicit
+  evidence. Per-host limits and one aggregate traversal/Canvas budget span the
+  complete two-sample batch, so a page with many declared hosts cannot multiply
+  the work. A host that is unsupported, unstable or over budget emits an explicit
   unavailable fact with no comparison authority, while valid sibling hosts
   remain usable.
   Each isolated frame samples visible HTML/SVG/Canvas paint twice, including

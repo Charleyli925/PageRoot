@@ -162,7 +162,7 @@ Version authority.
 Edit runtime visuals have a separate owner:
 `RuntimeVisualProjectionSession`. Its request identity includes document key,
 source path, a runtime dependency Hash over stable source-empty TargetRefs,
-executable/style sources and script-referenced data containers, a bucketed edit viewport and resolved
+executable/style sources and script/handler-referenced data containers, a bucketed edit viewport and resolved
 `PageViewContext` dependency. The exact source Hash remains mandatory at every
 acceptance boundary. A dependency-stable source edit may only rebind a previously
 accepted bitmap through the current `SourceIndex`; it cannot relax the empty-host,
@@ -220,9 +220,10 @@ record the parser-created element that first
 claims each key. Undeclared host attributes have no authority. A missing,
 duplicate, transferred or replaced declared key, or key/element drift during
 either sample invalidates the complete runtime batch and retains the static
-result. Traversal, node, value and Canvas limits are independently reset for
-each declared host. An unsupported, unstable, over-budget or locally failed
-host must produce one validated `unavailable` fact; that fact has no comparison
+result. Per-host traversal, node, value and Canvas limits remain isolated, while
+one aggregate budget spans every declared host and both stability samples. An
+unsupported, unstable, over-budget or locally failed host must produce one
+validated `unavailable` fact; that fact has no comparison
 authority and cannot suppress valid sibling-host facts.
 Both already-isolated review frames may then report one bounded pair of
 same-side-stable, host-relative HTML/SVG/Canvas fingerprints for every declared

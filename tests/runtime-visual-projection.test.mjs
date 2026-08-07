@@ -104,6 +104,30 @@ test("decorative empty elements without script causality do not open runtime cap
   assert.equal(prepared.payload, null);
 });
 
+test("load-time inline handlers retain their source-empty runtime hosts", () => {
+  const source = `<!doctype html><body onload="document.querySelector('div').textContent = 'ready'">
+      <div id="handler-chart"></div>
+    </body>`;
+  const prepared = prepareRuntimeVisualCapture({
+    html: source,
+    sourcePath: "/tmp/handler-report.html",
+    viewportWidth: 900,
+  });
+  assert.deepEqual(
+    prepared?.candidates.map((candidate) => candidate.tagName),
+    ["div"],
+  );
+  assert.ok(prepared?.payload);
+  assert.notEqual(
+    prepared?.dependencySha256,
+    prepareRuntimeVisualCapture({
+      html: source.replace("ready", "updated"),
+      sourcePath: "/tmp/handler-report.html",
+      viewportWidth: 900,
+    })?.dependencySha256,
+  );
+});
+
 test("direct Canvas and SVG runtime hosts are capture candidates", () => {
   const source = `<!doctype html><main>
     <canvas id="direct-canvas"></canvas>

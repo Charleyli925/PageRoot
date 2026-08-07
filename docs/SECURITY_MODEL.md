@@ -164,7 +164,8 @@ state is never serialized. The renderer accepts review messages only when the
 session ID, side, declared message source and `MessageEvent.source` all match the
 registered frame. Runtime-chart snapshot messages are additionally limited to
 host keys declared by the frozen source analyzer, per-host bounded atom/signature
-counts, exactly one well-formed available or unavailable snapshot for every
+counts plus one aggregate traversal/value/Canvas budget across the complete
+two-sample batch, exactly one well-formed available or unavailable snapshot for every
 declared key, and one accepted batch
 per side. Ordinary frame `ready` messages never carry
 runtime evidence. An omitted or malformed snapshot invalidates the complete

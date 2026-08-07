@@ -3094,6 +3094,12 @@ function reviewBootstrap(
   const runtimeVisualCanvasPixelLimit = 4194304;
   const runtimeVisualValueLimit = 200000;
   const runtimeVisualBatchValueLimit = 400000;
+  const runtimeVisualSnapshotBudgetExhausted = (budget) => (
+    budget.atoms >= runtimeVisualBatchAtomLimit
+    || budget.nodes >= runtimeVisualBatchNodeLimit
+    || budget.valueLength >= runtimeVisualBatchValueLimit
+    || budget.canvasPixels >= runtimeVisualCanvasPixelLimit
+  );
   const runtimeVisualClaimedHosts = new RuntimeVisualMap();
   let runtimeVisualHostClaimsValid = true;
   const runtimeVisualClaimHost = (host, key) => {
@@ -3323,15 +3329,15 @@ function reviewBootstrap(
   };
   const runtimeVisualPush = (capture, channel, value) => {
     const normalized = RuntimeVisualString(value || "");
+    if (
+      capture[channel].length >= runtimeVisualAtomLimit
+      || capture.valueLength + normalized.length > runtimeVisualValueLimit
+      || capture.budget.atoms >= runtimeVisualBatchAtomLimit
+      || capture.budget.valueLength + normalized.length > runtimeVisualBatchValueLimit
+    ) throw new Error("runtime-visual-budget");
     capture.valueLength += normalized.length;
     capture.budget.atoms += 1;
     capture.budget.valueLength += normalized.length;
-    if (
-      capture[channel].length >= runtimeVisualAtomLimit
-      || capture.valueLength > runtimeVisualValueLimit
-      || capture.budget.atoms > runtimeVisualBatchAtomLimit
-      || capture.budget.valueLength > runtimeVisualBatchValueLimit
-    ) throw new Error("runtime-visual-budget");
     runtimeVisualArrayPush(capture[channel], normalized);
   };
   const runtimeVisualCanvas = (canvas, capture, displayRect, includeDisplaySize) => {
@@ -3379,7 +3385,10 @@ function reviewBootstrap(
   ];
   const captureRuntimeVisualHost = (host, budget) => {
     try {
-      if (!runtimeVisualIsInstance(RuntimeVisualElement, host)) return null;
+      if (
+        !runtimeVisualIsInstance(RuntimeVisualElement, host)
+        || runtimeVisualSnapshotBudgetExhausted(budget)
+      ) return null;
       const hostRect = runtimeVisualElementGetBoundingClientRect(host);
       const sourceBoxSignature = runtimeVisualElementGetAttribute(
         host,
@@ -3716,6 +3725,12 @@ function reviewBootstrap(
     await runtimeVisualDelay(24);
     await runtimeVisualFrames();
     if (!runtimeVisualHostsMatch(hosts, runtimeVisualExpectedHosts())) return null;
+    const runtimeVisualSnapshotBudget = {
+      atoms: 0,
+      nodes: 0,
+      valueLength: 0,
+      canvasPixels: 0,
+    };
     const first = new RuntimeVisualMap();
     for (let hostIndex = 0; hostIndex < hosts.length; hostIndex += 1) {
       if (hostIndex > 0 && hostIndex % 4 === 0) await runtimeVisualDelay(0);
@@ -3724,12 +3739,10 @@ function reviewBootstrap(
         host,
         runtimeVisualHostAttribute,
       ) || "";
-      const snapshot = captureRuntimeVisualHost(host, {
-        atoms: 0,
-        nodes: 0,
-        valueLength: 0,
-        canvasPixels: 0,
-      });
+      const snapshot = captureRuntimeVisualHost(
+        host,
+        runtimeVisualSnapshotBudget,
+      );
       runtimeVisualMapSet(
         first,
         expectedKey,
@@ -3748,12 +3761,10 @@ function reviewBootstrap(
       const key = runtimeVisualElementGetAttribute(host, runtimeVisualHostAttribute) || "";
       if (!runtimeVisualSetHas(runtimeVisualExpectedKeySet, key)) return null;
       const firstSnapshot = runtimeVisualMapGet(first, key);
-      const capturedSecond = captureRuntimeVisualHost(host, {
-        atoms: 0,
-        nodes: 0,
-        valueLength: 0,
-        canvasPixels: 0,
-      });
+      const capturedSecond = captureRuntimeVisualHost(
+        host,
+        runtimeVisualSnapshotBudget,
+      );
       const secondSnapshot = capturedSecond?.key === key
         ? capturedSecond
         : runtimeVisualUnavailableSnapshot(key);
