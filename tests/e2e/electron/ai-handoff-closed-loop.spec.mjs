@@ -559,6 +559,7 @@ test("a verified AI result stays pending through desktop review until the user a
       <div id="review-runtime-unstable-chart" class="review-runtime-chart-host"></div>
       <div id="review-runtime-unrelated-random-chart" class="review-runtime-chart-host"></div>
       <div data-review-runtime-comment-group style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <p data-native-case="runtime-comment-caption" style="grid-column:1 / -1;margin:0">相邻图表统一配色</p>
         <div id="review-runtime-comment-chart" class="review-runtime-chart-host" data-native-case="runtime-comment-chart" style="display:block;min-height:78px"></div>
         <div id="review-runtime-comment-adjacent-chart" class="review-runtime-chart-host" style="display:block;min-height:78px"></div>
       </div>
@@ -888,7 +889,7 @@ test("a verified AI result stays pending through desktop review until the user a
       UPDATED_TEXT,
       [{
         text: runtimeVisualCommentText,
-        targetCase: "runtime-comment-chart",
+        targetCase: "runtime-comment-caption",
       }],
     );
     const attemptRoot = path.join(

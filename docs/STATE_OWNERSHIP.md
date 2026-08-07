@@ -143,11 +143,13 @@ Rules:
   declares an ordinary host only when the changed authored script directly
   references that host's distinctive source identity. A source-empty host
   directly targeted by, or nested beneath, a frozen non-global review comment
-  may instead use the opaque comment target as explicit local scope. The first
-  ancestor of that target containing at least two pairable hosts inside the
-  current review section owns a lower-priority nearest-group scope for its
-  sibling charts. Direct, contained and nearest-group hosts are selected in that
-  order before ordinary hosts under the same 128-candidate limit. Global
+  may instead use the opaque comment target as explicit local scope. Every
+  frozen non-global target inside the current review section also starts a
+  nearest-group search: its first ancestor containing at least two pairable
+  hosts owns lower-priority scope for sibling charts, even if the target is a
+  caption or heading beside them. Direct, contained and nearest-group hosts are
+  selected in that order before ordinary hosts under the same 128-candidate
+  limit. Global
   comments do not widen runtime scope, the group cannot cross its section, and
   ordinary group-external section co-location is not enough.
   The bootstrap binds its evidence-reading DOM/style/Canvas primitives before

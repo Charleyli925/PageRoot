@@ -1510,6 +1510,15 @@ function runtimeVisualCommentMatch(host: Element): {
   return null;
 }
 
+function localRuntimeVisualCommentTargets(sectionRoot: Element): Element[] {
+  const targets = new Set<Element>();
+  if (isLocalReviewCommentTarget(sectionRoot)) targets.add(sectionRoot);
+  sectionRoot.querySelectorAll(`[${REVIEW_COMMENT_KEY_ATTRIBUTE}]`).forEach((target) => {
+    if (isLocalReviewCommentTarget(target)) targets.add(target);
+  });
+  return [...targets];
+}
+
 function runtimeVisualHostAncestorCounts(
   sectionRoot: Element,
   hostPairs: readonly ReviewRuntimeHostPair[],
@@ -1592,21 +1601,17 @@ function annotateRuntimeVisualCandidates(
     );
     const commentMatches = new Map<Element, ReturnType<typeof runtimeVisualCommentMatch>>();
     const commentGroups = new Set<Element>();
-    const commentGroupByTarget = new Map<Element, Element | null>();
+    localRuntimeVisualCommentTargets(section.pair.before).forEach((target) => {
+      const group = nearestRuntimeVisualCommentGroup(
+        target,
+        section.pair.before as Element,
+        hostAncestorCounts,
+      );
+      if (group) commentGroups.add(group);
+    });
     hostPairs.forEach((hostPair) => {
       const match = runtimeVisualCommentMatch(hostPair.before);
       commentMatches.set(hostPair.before, match);
-      if (!match) return;
-      let group = commentGroupByTarget.get(match.target);
-      if (!commentGroupByTarget.has(match.target)) {
-        group = nearestRuntimeVisualCommentGroup(
-          match.target,
-          section.pair.before as Element,
-          hostAncestorCounts,
-        );
-        commentGroupByTarget.set(match.target, group);
-      }
-      if (group) commentGroups.add(group);
     });
     hostPairs.forEach((hostPair) => {
       let commentPriority = commentMatches.get(hostPair.before)?.priority || 0;

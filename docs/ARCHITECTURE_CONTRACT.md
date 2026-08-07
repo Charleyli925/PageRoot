@@ -218,12 +218,13 @@ requires a relevant changed authored script that directly references its
 distinctive identity. A host directly targeted by, or nested below, a frozen
 non-global review comment may instead use that opaque local target as scope
 evidence, so split palette/data/config and host-binding scripts remain
-detectable. Within that high-confidence review section, the first ancestor of
-the target containing at least two pairable source-empty hosts defines one
-nearest chart group; its sibling hosts may use lower-priority local scope
-evidence without parsing comment text or inferring visual distance. Direct,
-contained and nearest-group hosts are selected in that order before ordinary
-hosts under the same 128-candidate cap. A global comment never authorizes
+detectable. Every frozen non-global comment target inside that high-confidence
+review section also starts a nearest-chart-group search: its first ancestor with
+at least two pairable source-empty hosts defines the group, so a caption or
+heading target may grant lower-priority local scope to its sibling charts
+without parsing comment text or inferring visual distance. Direct, contained
+and nearest-group hosts are selected in that order before ordinary hosts under
+the same 128-candidate cap. A global comment never authorizes
 page-wide runtime capture, the group cannot cross its section, and merely
 placing another changed script elsewhere in the section remains insufficient
 causal evidence.
