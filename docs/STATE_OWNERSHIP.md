@@ -5,6 +5,7 @@
 | Open source locator before first durable action, registered identity, renderer generation and late-query fence | Renderer `ProjectSession` | active-file record before registration; project registry and `project.json` afterwards | Workbench composition root and all durable sessions |
 | Latest unaccepted OS/QoderWork HTML-open request plus FIFO active/recent-project transitions | Main-process external-file-open mailbox and `ProjectOpenQueue` | in-memory for the current app process; no renderer-supplied path authority | preload lifecycle delivery, startup adoption and trusted project IPC |
 | External HTML request IDs, active/queued/deferred renderer delivery, snapshot notification and unaccepted-result fence | Renderer `ExternalFileOpenSession` | none; bounded in-memory state only | Workbench composition root and the project-switch boundary |
+| Accepted local/external project results, their FIFO renderer publication and deferred final-fence retry | Renderer `ProjectApplicationSession` | none; bounded in-memory state only | Workbench composition root and the final project-application boundary |
 | Registered mutation context resolution and atomic-replacement source observation | Bridge project-context service | project/document registry graph plus the owning runtime `pendingWrite` target Hash | Bridge mutation routes and `/project/ensure` |
 | Explicit source filename transition, pending operation and active/recent path rebase | Desktop source-rename transaction | active-file `pendingRename` / `lastRename`, then filesystem path | project session, Bridge relink, views |
 | Current source bytes, Hash, edit revision, persistence projection, pending write, single-flight source flush, Canvas authority generation and exact-byte boundary reconciliation | Renderer `DocumentSession` | source HTML, runtime autosave record and recovery log; the generation itself is disposable | Canvas, preview readiness, source-history session and drain coordinator |
@@ -42,7 +43,7 @@
 Rules:
 
 - A consumer never writes another owner's fields directly.
-- External HTML delivery has three explicit owners. The main mailbox accepts
+- External HTML delivery has four explicit owners. The main mailbox accepts
   only its latest unconsumed opaque request. `ProjectOpenQueue` assigns every
   active/recent-project transition its order before a picker, source read or
   Bridge check can finish; local picker, recent-project, external, startup,
@@ -58,10 +59,15 @@ Rules:
   explicit retry action delegates back to the session. If the final pre-IPC
   fence itself captures a post-cutoff native edit, no external activation
   starts; that edit returns to normal persistence before the session retries.
-  An accepted project publishes
-  before a later queued request runs, and that later request replaces it only
-  on success. The final visible project and the main-process active/recent
-  source therefore stay aligned without discarding input or losing a prior
+  Once main-process acceptance succeeds, `ProjectApplicationSession` becomes
+  the sole owner of renderer publication. It retains local and external
+  results FIFO, repeats the switch drain and takes a synchronous final Canvas
+  freeze immediately before every `applyProject`. A deferred final fence keeps
+  its already-accepted result until a relevant blocker clears or the user
+  explicitly continues. An accepted project therefore publishes before a later
+  queued result runs, and that later result replaces it only on its own safe
+  application. After the FIFO settles, the visible project and main-process
+  active/recent source stay aligned without discarding input or losing a prior
   successful open to a failed successor.
 - `workbench.tsx` is a composition root, not an additional state owner. It
   subscribes to session snapshots, derives read-only presentation values and

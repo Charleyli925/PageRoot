@@ -73,6 +73,8 @@ The renderer's main workspace facts are partitioned as follows:
 - `ExternalFileOpenSession`: opaque external-open delivery IDs, one active
   switch, newest queued request, deferred safe-switch retry and stale-result
   fencing for work that has not yet been accepted.
+- `ProjectApplicationSession`: FIFO accepted project results, final renderer
+  switch fence, deferred application retry and successor preservation.
 
 `CommentSession` does not replace the Draft aggregate or Bridge CAS authority,
 and `VersionSession` does not make mutable copies of immutable Version files.
@@ -107,13 +109,18 @@ automatic retry requires a relevant safe-switch blocker to be observed and
 then clear. If no tracked blocker is present, Workbench keeps the current HTML
 and offers an explicit retry action instead. If the final fence captures a
 post-cutoff native edit, it does not begin the IPC, releases that edit to normal
-persistence, and resumes only after that source blocker clears. A successfully accepted external project is published even
-when a newer request is queued; the newer request replaces it only after its
-own successful acceptance, so a failed successor cannot split visible and
-durable authority. Ordinary Workbench project-picker retry state may not carry
-the external protocol. Thus a slow older request cannot leave renderer state,
-active-file state or recent-project state pointing at different sources, nor
-discard a post-cutoff native edit.
+persistence, and resumes only after that source blocker clears.
+
+`ProjectApplicationSession` owns every successful local or external project
+result after main-process acceptance and before renderer publication. It keeps
+those results FIFO, so a later accepted result cannot erase a deferred or
+successfully published predecessor. Before applying each result, Workbench
+re-enters the complete switch boundary and takes one synchronous final Canvas
+freeze. A post-drain native edit leaves that accepted result in the session
+until a relevant blocker transition or explicit continuation makes another
+attempt safe. Thus a slow later read cannot unlock the Canvas through an older
+result and then discard an intervening edit. Ordinary Workbench project-picker
+retry state may not carry either external delivery or accepted-result protocol.
 
 A transition that changes the current source or Version has two phases. The
 asynchronous phase prepares and validates one complete candidate: project and

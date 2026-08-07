@@ -1,0 +1,150 @@
+function initialSnapshot() {
+  return Object.freeze({
+    status: "idle",
+    activeApplicationId: null,
+    queuedApplicationId: null,
+    deferredApplicationId: null,
+    deferredSequence: 0,
+  });
+}
+
+function copyApplication(value) {
+  if (
+    !value
+    || typeof value.applicationId !== "string"
+    || !value.applicationId
+  ) return null;
+  return Object.freeze({
+    applicationId: value.applicationId,
+    value: value.value,
+  });
+}
+
+/**
+ * Owns accepted main-process project results until the renderer can safely
+ * publish them. It is deliberately FIFO: a later accepted result must not
+ * erase an earlier successful result merely because that predecessor is still
+ * waiting for the final Canvas fence.
+ */
+export class ProjectApplicationSession {
+  #observer = null;
+
+  #snapshot = initialSnapshot();
+
+  #active = null;
+
+  #queued = [];
+
+  #deferred = null;
+
+  #deferredSequence = 0;
+
+  #execute = null;
+
+  #drainPromise = null;
+
+  #generation = 0;
+
+  setObserver(observer) {
+    this.#observer = typeof observer === "function" ? observer : null;
+  }
+
+  #emit() {
+    const status = this.#active
+      ? "applying"
+      : this.#deferred
+        ? "deferred"
+        : this.#queued.length > 0
+          ? "queued"
+          : "idle";
+    this.#snapshot = Object.freeze({
+      status,
+      activeApplicationId: this.#active?.applicationId || null,
+      queuedApplicationId: this.#queued[0]?.applicationId || null,
+      deferredApplicationId: this.#deferred?.applicationId || null,
+      deferredSequence: this.#deferredSequence,
+    });
+    try {
+      this.#observer?.(this.#snapshot);
+    } catch {
+      // A view observer cannot change project-application authority.
+    }
+  }
+
+  #drain() {
+    if (this.#drainPromise) return this.#drainPromise;
+    if (this.#deferred) return Promise.resolve();
+    const generation = this.#generation;
+    const drain = async () => {
+      while (generation === this.#generation) {
+        const application = this.#queued.shift();
+        if (!application) break;
+        this.#active = application;
+        this.#emit();
+
+        let result = "complete";
+        try {
+          result = await this.#execute?.(application);
+        } catch {
+          // The executor owns presentation of an actionable failure. A failed
+          // predecessor must not strand later accepted project results.
+        }
+
+        if (generation !== this.#generation) break;
+        this.#active = null;
+        if (result === "deferred") {
+          this.#deferred = application;
+          this.#deferredSequence += 1;
+          this.#emit();
+          break;
+        }
+        this.#emit();
+      }
+    };
+    const promise = drain().finally(() => {
+      if (this.#drainPromise !== promise) return;
+      this.#drainPromise = null;
+      if (this.#queued.length > 0 && !this.#deferred) {
+        void this.#drain();
+      } else {
+        this.#emit();
+      }
+    });
+    this.#drainPromise = promise;
+    return promise;
+  }
+
+  enqueue(value, execute) {
+    const application = copyApplication(value);
+    if (!application || typeof execute !== "function") return false;
+    this.#execute = execute;
+    this.#queued.push(application);
+    this.#emit();
+    void this.#drain();
+    return true;
+  }
+
+  resume(execute) {
+    if (!this.#deferred || typeof execute !== "function") return false;
+    this.#execute = execute;
+    this.#queued.unshift(this.#deferred);
+    this.#deferred = null;
+    this.#emit();
+    void this.#drain();
+    return true;
+  }
+
+  dispose() {
+    this.#generation += 1;
+    this.#observer = null;
+    this.#active = null;
+    this.#queued = [];
+    this.#deferred = null;
+    this.#execute = null;
+    this.#emit();
+  }
+
+  get snapshot() {
+    return this.#snapshot;
+  }
+}

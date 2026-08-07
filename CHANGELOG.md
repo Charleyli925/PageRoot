@@ -16,7 +16,10 @@ Notable user-visible changes are documented here. This project follows Semantic 
   in flight. A failed later external request now keeps the last successfully
   opened file visible and durable. A deferred external open now waits for an
   observed switch blocker to clear, or for an explicit retry, so Canvas
-  recovery cannot create an automatic retry loop.
+  recovery cannot create an automatic retry loop. Every already accepted local
+  or external result now enters a renderer FIFO and re-fences immediately
+  before it is published, so an older result cannot unlock the Canvas and let a
+  later queued open discard a newer user edit.
 - Update the shared `js-yaml` dependency closure to 4.3.1, removing the
   high-severity parsing advisory without changing the packaged runtime shape.
 - Bring the review-first AI workflow into the public README, built-in welcome

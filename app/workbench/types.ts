@@ -275,6 +275,7 @@ export type ToastAction =
   | { id: "open-project"; label: string; sourcePath: string }
   | { id: "retry-project-open"; label: string; sourcePath?: string }
   | { id: "retry-external-project-open"; label: string }
+  | { id: "retry-project-application"; label: string }
   | {
       id: "open-attachment-picker";
       label: string;
