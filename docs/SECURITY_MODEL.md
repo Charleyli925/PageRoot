@@ -178,13 +178,15 @@ target inside the same high-confidence review section seeds the first ancestor
 with at least two pairable hosts, so an anchored caption or heading may grant
 lower-priority scope to its sibling charts. The group cannot cross its section
 or derive from visual distance; comment text never enters either frame, and a
-global comment never authorizes page-wide capture. A content-free opaque key is
-serialized only when one candidate-side target uniquely rebinds from the frozen
-identity; that same key stays on both parser-created elements, including through
-authored same-tag sibling reordering. If no counterpart is proven, it is removed
-from both documents. Authored CSS or scripts therefore cannot observe a
-before-only comment marker or manufacture a change. Every later identity,
-stability, budget and transport check remains unchanged.
+global comment never authorizes page-wide capture. Opaque scope attributes exist
+only while frozen analysis prioritizes candidates and are stripped before either
+document is serialized. Both bootstraps receive the same content-free locator
+list; each locator must be a unique source `id`, `data-*`, `name`, or
+`aria-label`, never a mutable sibling ordinal. If the target is not safely
+locatable after authored runtime changes, its marker is omitted rather than
+guessed. Authored CSS or scripts therefore cannot observe a comment scope marker
+or manufacture a change. Every later identity, stability, budget and transport
+check remains unchanged.
 The trusted bootstrap creates a `MessageChannel` and binds
 the DOM traversal, attribute, layout, computed-style, Canvas, string
 normalization/digest, and Promise/timer/animation scheduling primitives used for evidence before any

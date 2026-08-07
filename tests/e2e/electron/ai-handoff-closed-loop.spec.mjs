@@ -629,6 +629,7 @@ test("a verified AI result stays pending through desktop review until the user a
       document.documentElement.dataset.reviewRuntimeCommentScopeExposed = String(
         reviewCommentScopeExposed,
       );
+      document.documentElement.dataset.reviewRuntimeCommentScopeProbeVariant = "before";
       runtimeCommentMarkerProbe.innerHTML = '<div style="height:48px;background:'
         + (reviewCommentScopeExposed ? "#d34f6a" : "#7f91a4")
         + '">评论范围探针</div>';
@@ -963,6 +964,14 @@ test("a verified AI result stays pending through desktop review until the user a
           'window.reviewRuntimeCommentPalette = ["#7fa2c4", "#f4ba7d"];',
         )
         .replace(
+          'document.documentElement.dataset.reviewRuntimeCommentScopeProbeVariant = "before";',
+          'document.documentElement.dataset.reviewRuntimeCommentScopeProbeVariant = "after";',
+        )
+        .replace(
+          'reviewCommentScopeExposed ? "#d34f6a" : "#7f91a4"',
+          'reviewCommentScopeExposed ? "#6d5ce7" : "#7f91a4"',
+        )
+        .replace(
           'id="review-runtime-static-covered" class="review-runtime-chart-host" style="border: 2px solid #d9dcec; padding: 12px"',
           'id="review-runtime-static-covered" class="review-runtime-chart-host" style="border: 2px solid #241d58; padding: 12px"',
         )
@@ -1087,19 +1096,23 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect(afterReviewFrame.locator("html"))
       .toHaveAttribute("data-review-fixture-ready", "true");
     await expect(beforeReviewFrame.locator("html"))
-      .toHaveAttribute("data-review-runtime-comment-scope-exposed", "true");
+      .toHaveAttribute("data-review-runtime-comment-scope-exposed", "false");
     await expect(afterReviewFrame.locator("html"))
-      .toHaveAttribute("data-review-runtime-comment-scope-exposed", "true");
+      .toHaveAttribute("data-review-runtime-comment-scope-exposed", "false");
     await expect(beforeReviewFrame.locator("html"))
-      .toHaveAttribute("data-review-runtime-comment-scope-target", "caption");
+      .toHaveAttribute("data-review-runtime-comment-scope-probe-variant", "before");
     await expect(afterReviewFrame.locator("html"))
-      .toHaveAttribute("data-review-runtime-comment-scope-target", "caption");
+      .toHaveAttribute("data-review-runtime-comment-scope-probe-variant", "after");
+    await expect(beforeReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-comment-scope-target", "missing");
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-review-runtime-comment-scope-target", "missing");
     await expect(beforeReviewFrame.locator(
       "[data-pageroot-review-comment-key]",
-    )).toHaveCount(2);
+    )).toHaveCount(0);
     await expect(afterReviewFrame.locator(
       "[data-pageroot-review-comment-key]",
-    )).toHaveCount(2);
+    )).toHaveCount(0);
     await expect(beforeReviewFrame.locator("html"))
       .toHaveAttribute("data-review-runtime-forgery-attempted", "true");
     await expect(afterReviewFrame.locator("html"))

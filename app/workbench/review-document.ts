@@ -72,9 +72,15 @@ export type ReviewCommentGroup = {
   }>;
 };
 
+type ReviewCommentTarget = {
+  key: string;
+  selector: string;
+  global: boolean;
+};
+
 type ReviewCommentAnnotations = {
   groups: ReviewCommentGroup[];
-  mirroredKeys: ReadonlySet<string>;
+  targets: ReviewCommentTarget[];
 };
 
 const REVIEW_STYLE_ID = "pageroot-ai-review-style";
@@ -2819,67 +2825,67 @@ function resolvedCommentElement(
   }
 }
 
-function clearReviewCommentScopeAttributes(
-  document: Document,
-  mirroredKeys: ReadonlySet<string> = new Set(),
-): void {
+function clearReviewCommentScopeAttributes(document: Document): void {
   document.querySelectorAll(
     `[${REVIEW_COMMENT_KEY_ATTRIBUTE}], [${REVIEW_COMMENT_GLOBAL_ATTRIBUTE}]`,
   ).forEach((element) => {
-    const key = element.getAttribute(REVIEW_COMMENT_KEY_ATTRIBUTE);
-    if (key && mirroredKeys.has(key)) return;
     element.removeAttribute(REVIEW_COMMENT_KEY_ATTRIBUTE);
     element.removeAttribute(REVIEW_COMMENT_GLOBAL_ATTRIBUTE);
   });
 }
 
-function reviewSourceElementsByNodeId(document: Document): Map<string, Element> {
-  const elementsByNodeId = new Map<string, Element>();
-  document.querySelectorAll(`[${REVIEW_SOURCE_NODE_ATTRIBUTE}]`).forEach((element) => {
-    const nodeId = element.getAttribute(REVIEW_SOURCE_NODE_ATTRIBUTE);
-    if (nodeId && !elementsByNodeId.has(nodeId)) {
-      elementsByNodeId.set(nodeId, element);
-    }
-  });
-  return elementsByNodeId;
-}
-
-function mirroredReviewCommentElement(
-  sourceIndex: ReturnType<typeof buildSourceIndex> | null | undefined,
-  elementsByNodeId: ReadonlyMap<string, Element>,
+function durableReviewCommentTargetSelector(
+  document: Document,
+  sourceIndex: ReturnType<typeof buildSourceIndex>,
+  element: Element,
   target: HtmlCanvasSelection,
-): Element | null {
-  if (!sourceIndex) return null;
+): string | null {
   const sourceElement = resolveReviewCommentSourceElement(sourceIndex, target);
-  return sourceElement
-    ? elementsByNodeId.get(sourceElement.nodeId) || null
-    : null;
+  const selector = sourceElement?.selector || "";
+  // A positional selector can drift when authored code inserts, removes or
+  // reorders same-tag siblings. A source-index selector is durable only when
+  // it is rooted in the target's unique id, data attribute, name or aria label.
+  if (
+    !selector
+    || /:nth-(?:child|of-type)\(/iu.test(selector)
+    || !(
+      selector.startsWith("#")
+      || /\[\s*(?:data-[\w-]+|name|aria-label)\s*=/iu.test(selector)
+    )
+  ) return null;
+  try {
+    const matches = document.querySelectorAll(selector);
+    return matches.length === 1 && matches[0] === element ? selector : null;
+  } catch {
+    return null;
+  }
 }
 
 function annotateReviewComments(
-  beforeDocument: Document,
-  afterDocument: Document,
+  document: Document,
   sourceHtml: string,
   comments: readonly CommentItem[],
   indexedSource?: ReturnType<typeof buildSourceIndex> | null,
-  indexedAfterSource?: ReturnType<typeof buildSourceIndex> | null,
 ): ReviewCommentAnnotations {
-  if (!comments.length || !beforeDocument.body) {
-    return { groups: [], mirroredKeys: new Set() };
-  }
+  if (!comments.length || !document.body) return { groups: [], targets: [] };
   let sourceIndex = indexedSource ?? null;
   try {
     sourceIndex ??= buildSourceIndex(sourceHtml);
   } catch {
-    return { groups: [], mirroredKeys: new Set() };
+    return { groups: [], targets: [] };
   }
-  const sourceElementsByNodeId = reviewSourceElementsByNodeId(beforeDocument);
-  const afterElementsByNodeId = reviewSourceElementsByNodeId(afterDocument);
+  const sourceElementsByNodeId = new Map<string, Element>();
+  document.querySelectorAll(`[${REVIEW_SOURCE_NODE_ATTRIBUTE}]`).forEach((element) => {
+    const nodeId = element.getAttribute(REVIEW_SOURCE_NODE_ATTRIBUTE);
+    if (nodeId && !sourceElementsByNodeId.has(nodeId)) {
+      sourceElementsByNodeId.set(nodeId, element);
+    }
+  });
   const groups = new Map<Element, CommentItem[]>();
   comments.forEach((comment) => {
     if (!comment.text.trim() && !comment.attachments?.length) return;
     const element = resolvedCommentElement(
-      beforeDocument,
+      document,
       sourceIndex,
       sourceElementsByNodeId,
       comment.target,
@@ -2889,34 +2895,29 @@ function annotateReviewComments(
     if (existing) existing.push(comment);
     else groups.set(element, [comment]);
   });
-  if (!groups.size) return { groups: [], mirroredKeys: new Set() };
+  if (!groups.size) return { groups: [], targets: [] };
 
-  const mirroredKeys = new Set<string>();
-  const usedAfterElements = new Set<Element>();
+  const targets: ReviewCommentTarget[] = [];
   const reviewGroups = [...groups.entries()].map(([element, items], index) => {
     const key = `review-comment-${index + 1}`;
-    const global = element === beforeDocument.body;
+    const global = element === document.body;
     element.setAttribute(REVIEW_COMMENT_KEY_ATTRIBUTE, key);
     if (global) {
       element.setAttribute(REVIEW_COMMENT_GLOBAL_ATTRIBUTE, "true");
     }
-    const mirroredElement = global
-      ? afterDocument.body
-      : items.reduce<Element | null>(
-        (matched, item) => matched || mirroredReviewCommentElement(
-          indexedAfterSource,
-          afterElementsByNodeId,
+    const selector = global
+      ? "body"
+      : items.reduce<string | null>(
+        (matched, item) => matched || durableReviewCommentTargetSelector(
+          document,
+          sourceIndex,
+          element,
           item.target,
         ),
         null,
       );
-    if (mirroredElement && !usedAfterElements.has(mirroredElement)) {
-      usedAfterElements.add(mirroredElement);
-      mirroredElement.setAttribute(REVIEW_COMMENT_KEY_ATTRIBUTE, key);
-      if (global) {
-        mirroredElement.setAttribute(REVIEW_COMMENT_GLOBAL_ATTRIBUTE, "true");
-      }
-      mirroredKeys.add(key);
+    if (selector) {
+      targets.push({ key, selector, global });
     }
     return {
       key,
@@ -2927,7 +2928,7 @@ function annotateReviewComments(
       })),
     };
   });
-  return { groups: reviewGroups, mirroredKeys };
+  return { groups: reviewGroups, targets };
 }
 
 function clearReservedReviewMarkup(
@@ -2989,11 +2990,18 @@ function reviewBootstrap(
   sessionId: string,
   side: ReviewSide,
   runtimeVisualCandidateKeys: readonly string[] = [],
+  reviewCommentTargets: readonly ReviewCommentTarget[] = [],
 ): string {
   return String.raw`
 (() => {
   const sessionId = ${JSON.stringify(sessionId)};
   const side = ${JSON.stringify(side)};
+  // This side-neutral locator list contains no comment content and is never
+  // materialized as authored-page markup. Its entries are source-index
+  // identities, never positional sibling paths.
+  const reviewCommentTargets = Object.freeze(
+    ${JSON.stringify(reviewCommentTargets)},
+  );
   // This first managed script binds evidence readers before authored scripts execute.
   const runtimeVisualExpectedKeys = Object.freeze(
     ${JSON.stringify([...runtimeVisualCandidateKeys])},
@@ -4033,28 +4041,10 @@ function reviewBootstrap(
     if (projectionTransitioning) return;
     const commentLayouts = [];
     if (side === "before") {
-      let commentTargets;
-      try {
-        commentTargets = runtimeVisualDocumentQuerySelectorAll(
-          document,
-          "[data-pageroot-review-comment-key]",
-        );
-      } catch {
-        commentTargets = null;
-      }
-      for (let index = 0; commentTargets && index < runtimeVisualNodeListLength(commentTargets); index += 1) {
-        const target = runtimeVisualNodeListItem(commentTargets, index);
-        if (!target) continue;
-        const key = safeKey(runtimeVisualElementGetAttribute(
-          target,
-          "data-pageroot-review-comment-key",
-        ));
+      for (const commentTarget of reviewCommentTargets) {
+        const key = safeKey(commentTarget?.key);
         if (!key) continue;
-        const global = runtimeVisualElementGetAttribute(
-          target,
-          "data-pageroot-review-comment-global",
-        ) === "true";
-        if (global) {
+        if (commentTarget?.global === true) {
           runtimeVisualArrayPush(commentLayouts, {
             key,
             left: 22,
@@ -4065,6 +4055,18 @@ function reviewBootstrap(
           });
           continue;
         }
+        let matches;
+        try {
+          matches = runtimeVisualDocumentQuerySelectorAll(
+            document,
+            RuntimeVisualString(commentTarget?.selector || ""),
+          );
+        } catch {
+          continue;
+        }
+        if (runtimeVisualNodeListLength(matches) !== 1) continue;
+        const target = runtimeVisualNodeListItem(matches, 0);
+        if (!target) continue;
         const clientRects = runtimeVisualElementGetClientRects(target);
         const rects = [];
         for (let index = 0; index < runtimeVisualDomRectListLength(clientRects); index += 1) {
@@ -5169,6 +5171,7 @@ function prepareDocument(
   sourcePath?: string,
   externalBootstrap = false,
   runtimeVisualCandidateKeys: readonly string[] = [],
+  reviewCommentTargets: readonly ReviewCommentTarget[] = [],
 ): { html: string; bootstrapJavaScript: string } {
   document.querySelectorAll("meta[http-equiv]").forEach((element) => {
     const directive = (element.getAttribute("http-equiv") || "").trim().toLowerCase();
@@ -5199,6 +5202,7 @@ function prepareDocument(
     sessionId,
     side,
     runtimeVisualCandidateKeys,
+    reviewCommentTargets,
   );
   if (externalBootstrap) {
     bootstrap.src = REVIEW_BOOTSTRAP_PATH;
@@ -5253,28 +5257,20 @@ function* buildReviewDocumentSteps(
     beforeHtml,
     comments.length > 0,
   );
-  const afterSourceProjection = prepareReviewCommentSourceProjection(
-    afterHtml,
-    comments.length > 0,
-  );
   const beforeDocument = parser.parseFromString(sourceProjection.html, "text/html");
-  const afterDocument = parser.parseFromString(afterSourceProjection.html, "text/html");
+  const afterDocument = parser.parseFromString(afterHtml, "text/html");
   clearReservedReviewMarkup(beforeDocument, sourceProjection.projected);
-  clearReservedReviewMarkup(afterDocument, afterSourceProjection.projected);
+  clearReservedReviewMarkup(afterDocument);
   yield "parse";
   const commentAnnotations = annotateReviewComments(
     beforeDocument,
-    afterDocument,
     beforeHtml,
     comments,
     sourceProjection.sourceIndex,
-    afterSourceProjection.sourceIndex,
   );
   const commentGroups = commentAnnotations.groups;
+  const reviewCommentTargets = commentAnnotations.targets;
   beforeDocument.querySelectorAll(`[${REVIEW_SOURCE_NODE_ATTRIBUTE}]`).forEach((element) => {
-    element.removeAttribute(REVIEW_SOURCE_NODE_ATTRIBUTE);
-  });
-  afterDocument.querySelectorAll(`[${REVIEW_SOURCE_NODE_ATTRIBUTE}]`).forEach((element) => {
     element.removeAttribute(REVIEW_SOURCE_NODE_ATTRIBUTE);
   });
   yield "comments";
@@ -5374,12 +5370,10 @@ function* buildReviewDocumentSteps(
       )
     : [];
   const runtimeVisualCandidateKeys = runtimeVisualCandidates.map(({ key }) => key);
-  // Keep scope markup only for targets proven to have a same-key counterpart
-  // in the candidate. A key then remains attached to the parser-created source
-  // element as authored scripts reorder it, while no before-only attribute can
-  // affect runtime evidence.
-  clearReviewCommentScopeAttributes(beforeDocument, commentAnnotations.mirroredKeys);
-  clearReviewCommentScopeAttributes(afterDocument, commentAnnotations.mirroredKeys);
+  // Comment attributes are analyzer-only scope hints. Strip them before either
+  // document is serialized; both managed bootstraps receive the same opaque,
+  // non-positional locator list instead.
+  clearReviewCommentScopeAttributes(beforeDocument);
   yield "runtime-candidates";
 
   const preparedBefore = prepareDocument(
@@ -5389,6 +5383,7 @@ function* buildReviewDocumentSteps(
     options.sourcePath,
     options.externalBootstrap,
     runtimeVisualCandidateKeys,
+    reviewCommentTargets,
   );
   yield "prepare-before";
   const preparedAfter = prepareDocument(
@@ -5398,6 +5393,7 @@ function* buildReviewDocumentSteps(
     options.sourcePath,
     options.externalBootstrap,
     runtimeVisualCandidateKeys,
+    reviewCommentTargets,
   );
   yield "prepare-after";
   return {

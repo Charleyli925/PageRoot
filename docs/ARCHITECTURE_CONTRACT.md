@@ -227,12 +227,13 @@ and nearest-group hosts are selected in that order before ordinary hosts under
 the same 128-candidate cap. A global comment never authorizes
 page-wide runtime capture, the group cannot cross its section, and merely
 placing another changed script elsewhere in the section remains insufficient
-causal evidence. A content-free comment scope key is retained only when a
-candidate-side target uniquely rebinds from the frozen identity and receives the
-same key. It remains bound to the parser-created element as authored code
-reorders siblings; when a counterpart cannot be proven, the key is removed from
-both documents. Only the before bootstrap returns comment geometry, so authored
-CSS or scripts cannot observe a before-only scope marker and create runtime
+causal evidence. Comment scope attributes are analysis-only and are removed
+before either review document is serialized. Both managed bootstrap sources
+receive the same content-free locator configuration. Its locator must be a
+unique source `id`, `data-*`, `name`, or `aria-label`, never a positional
+sibling path; if that identity is unavailable at runtime, the marker is omitted
+rather than guessed. Only the before bootstrap returns comment geometry, so
+authored CSS or scripts cannot observe a comment scope marker and create runtime
 evidence themselves.
 The trusted first bootstrap must bind the DOM/style/Canvas collection,
 string-normalization/digest and Promise/timer/animation scheduling entry points
