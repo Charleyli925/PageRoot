@@ -14,6 +14,7 @@ const smokeTitles = [
   "source reversal shortcuts are blocked and never change committed bytes",
   "one text edit changes only the authorized UTF-8 bytes, including BOM and CRLF",
   "visible empty inline boundary stays structurally intact while surrounding text remains editable",
+  "mixed block parents fall back to safe inline hosts and exact bare-text fragments",
   "IME confirmation replays at the frozen left-style caret",
   "out-of-band mutation restores the last safe draft and reports in the viewport",
   "one unsaved comment blocks a second target and Canvas selection keeps its scroll",

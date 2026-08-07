@@ -60,6 +60,10 @@ export type IslandEditingControllerOptions = {
   hostElement: HTMLElement;
   baseline: NativeEditBaseline;
   sourceInnerHtml: string;
+  normalizeInnerHtml?: (
+    value: string,
+    options: { baselineInnerHtml: string },
+  ) => string;
   lease: NativeEditLease;
   ariaLabel?: string;
   onStateChange?: (state: NativeEditSessionState) => void;
@@ -547,6 +551,11 @@ export class IslandEditingController {
 
   private readonly lease: NativeEditLease;
 
+  private readonly normalizeInnerHtml: (
+    value: string,
+    options: { baselineInnerHtml: string },
+  ) => string;
+
   private leaseStamp: NativeEditLeaseStamp;
 
   private readonly callbacks: Pick<
@@ -593,6 +602,8 @@ export class IslandEditingController {
     this.hostElement = options.hostElement;
     this.baseline = { ...options.baseline };
     this.baselineInnerHtml = String(options.sourceInnerHtml);
+    this.normalizeInnerHtml = options.normalizeInnerHtml
+      ?? normalizeEditableIslandHtml;
     this.lease = options.lease;
     this.leaseStamp = cloneLeaseStamp(options.lease.stamp);
     this.callbacks = {
@@ -602,7 +613,7 @@ export class IslandEditingController {
       onError: options.onError,
       onPendingCommandReady: options.onPendingCommandReady,
     };
-    this.baselineCanonicalInnerHtml = normalizeEditableIslandHtml(
+    this.baselineCanonicalInnerHtml = this.normalizeInnerHtml(
       this.baselineInnerHtml,
       { baselineInnerHtml: this.baselineInnerHtml },
     );
@@ -714,7 +725,7 @@ export class IslandEditingController {
   }
 
   private serializeLiveCanonical(): string {
-    return normalizeEditableIslandHtml(this.hostElement.innerHTML, {
+    return this.normalizeInnerHtml(this.hostElement.innerHTML, {
       baselineInnerHtml: this.baselineInnerHtml,
     });
   }
@@ -1295,7 +1306,7 @@ export class IslandEditingController {
     ) return false;
     let canonical: string;
     try {
-      canonical = normalizeEditableIslandHtml(baseline.innerHtml, {
+      canonical = this.normalizeInnerHtml(baseline.innerHtml, {
         baselineInnerHtml: baseline.innerHtml,
       });
       if (

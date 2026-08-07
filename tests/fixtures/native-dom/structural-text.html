@@ -14,6 +14,19 @@
       max-width: 680px;
       margin-bottom: 24px;
     }
+
+    [data-native-case="mixed-parent"] {
+      max-width: 680px;
+      margin-bottom: 24px;
+      padding: 16px;
+      border: 1px solid #ddd;
+    }
+
+    [data-native-case="mixed-parent"] > div {
+      height: 24px;
+      margin-bottom: 8px;
+      background: #eee;
+    }
   </style>
 </head>
 <body>
@@ -21,5 +34,7 @@
     <li data-native-case="nested-list-title">发现阶段<ul data-keep="yes"><li>访谈 12 位内容创作者</li><li>审计现有流程</li></ul></li>
   </ol>
   <p data-native-case="wbr-text">软换行机会：Hypertext<wbr>Markup<wbr>Language</p>
+  <div data-native-case="mixed-parent"><div data-keep="chart">图表结构保持</div><b data-native-case="mixed-inline">强调文字</b>，裸文本<span data-keep="tail">尾注</span></div>
+  <p data-native-case="ordinary-inline">普通<strong data-native-case="ordinary-inline-child">安全</strong>段落</p>
 </body>
 </html>

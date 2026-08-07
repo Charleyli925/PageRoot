@@ -32,11 +32,13 @@ import {
 import {
   editableIslandForTarget,
   isEditableIslandTarget,
+  normalizeEditableTextFragmentHtml,
 } from "../lib/editable-island.js";
 import {
   sourceTargetRefForSelection,
 } from "../lib/canvas-target-rebind.js";
 import {
+  buildSourceTextFragmentMap,
   buildSourceTextMap,
   sourceSegmentsToTextRange,
   textRangeToSourceSegments,
@@ -101,8 +103,11 @@ import { applyRuntimeVisualProjectionToDocument } from "./html-canvas-runtime-vi
 import {
   adoptCanonicalHistoryIslandInPlace,
   canonicalNativeHostPreview,
+  mountNativeTextFragmentHost,
   nativeEditHostForElement,
+  nativeTextFragmentForRange,
   refreshMountedPreviewSourceNodeIds,
+  sourceTextNodeForDomText,
   sourceBackedPreviewElements,
   sourceTextParentsForSegments,
 } from "./html-canvas-preview-sync";
@@ -163,6 +168,94 @@ import {
 import styles from "./HtmlCanvasEditor.module.css";
 
 const GLOBAL_SELECTION_ATTRIBUTE = "data-html-canvas-global-selected";
+
+const TEXT_FRAGMENT_STYLE_PROPERTIES = [
+  "color",
+  "direction",
+  "font",
+  "letterSpacing",
+  "lineHeight",
+  "overflowWrap",
+  "textShadow",
+  "textTransform",
+  "whiteSpace",
+  "wordBreak",
+  "wordSpacing",
+  "writingMode",
+] as const;
+
+function nativeTextFragmentStyleSignature(element: HTMLElement): string {
+  const style = element.ownerDocument.defaultView?.getComputedStyle(element);
+  if (!style) return "";
+  return TEXT_FRAGMENT_STYLE_PROPERTIES.map(
+    (property) => `${property}:${style[property]}`,
+  ).join(";");
+}
+
+function hasNativeTextFragmentPseudoContent(element: HTMLElement): boolean {
+  const view = element.ownerDocument.defaultView;
+  if (!view) return true;
+  return (["::before", "::after"] as const).some((pseudo) => {
+    const content = view.getComputedStyle(element, pseudo).content;
+    return Boolean(
+      content
+      && content !== "none"
+      && content !== "normal"
+      && content !== "\"\""
+    );
+  });
+}
+
+function sourceTextNodeForFragmentReplacement(
+  sourceIndex: SourceIndexValue,
+  startOffset: number,
+  rawValue: string,
+) {
+  if (!rawValue) return null;
+  return [...sourceIndex.byNodeId.values()].find((node) => (
+    node?.type === "text"
+    && node.range.startOffset === startOffset
+    && node.range.endOffset === startOffset + rawValue.length
+  )) ?? null;
+}
+
+function activeRangeForTextFragmentTarget(
+  parentElement: HTMLElement,
+  sourceIndex: SourceIndexValue,
+  target: HtmlCanvasSelection,
+  textTargetRef: SourceTargetRef,
+): ActiveTextRange | null {
+  try {
+    const resolution = resolveTargetRef(sourceIndex, textTargetRef);
+    const sourceText = resolution.target;
+    if (
+      (
+        resolution.resolution === "ambiguous"
+        || resolution.resolution === "orphaned"
+      )
+      || sourceText?.type !== "text"
+      || sourceText.parentId !== target.nodeId
+    ) return null;
+    const textNode = Array.from(parentElement.childNodes).find((node): node is Text => (
+      node.nodeType === 3
+      && sourceTextNodeForDomText(node as Text, sourceIndex)?.nodeId === sourceText.nodeId
+    )) ?? null;
+    if (!textNode || sourceText.value.length === 0) return null;
+    return {
+      target,
+      segments: [{
+        textNodeId: sourceText.nodeId,
+        startOffset: 0,
+        endOffset: sourceText.value.length,
+      }],
+      text: sourceText.value,
+      styleElements: [parentElement],
+      direction: "forward",
+    };
+  } catch {
+    return null;
+  }
+}
 
 const EDITOR_DOCUMENT_STYLES = `
   ::selection {
@@ -264,11 +357,15 @@ type CommentMarker = {
 };
 
 type ActiveNativeEdit = {
+  mode: "editable-island" | "text-fragment";
   rootElement: HTMLElement;
+  selectionElement: HTMLElement;
   target: HtmlCanvasSelection;
   projection: SourceTextMap;
   rootTargetRef: SourceTargetRef;
-  islandInnerHtml: string;
+  sourceInnerHtml: string;
+  fragmentTargetRef: SourceTargetRef | null;
+  releaseHost: (() => void) | null;
   session: IslandEditingController;
   selection: NativeEditSelection;
   lease: {
@@ -300,6 +397,7 @@ type NativeEditFenceBookmark = {
   selection: NativeEditSelection;
   focus: boolean;
   toolbarVisible: boolean;
+  fragmentTargetRef?: SourceTargetRef;
 };
 
 type PendingNativeEditResume = NativeEditFenceBookmark & {
@@ -1631,7 +1729,16 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       if (
         activeNativeEdit
         && options.islandTextCommit
-        && forwardPlan.type === "replace-editable-island"
+        && (
+          (
+            activeNativeEdit.mode === "editable-island"
+            && forwardPlan.type === "replace-editable-island"
+          )
+          || (
+            activeNativeEdit.mode === "text-fragment"
+            && forwardPlan.type === "update-direct-text-node"
+          )
+        )
         && activeNativeEdit.target.id === mutation.target.id
       ) {
         const refreshedRootRef = result.refreshedTargetRefs.find(
@@ -1642,15 +1749,46 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         if (!refreshedRootRef || refreshedRootRef.resolution !== "exact") {
           throw new Error("V2 可编辑岛提交后无法精确重绑源码目标。");
         }
-        const refreshedProjection = buildSourceTextMap(
-          result.sourceIndex,
-          refreshedRootRef,
-          { allowEmpty: true, ignoreComments: true },
-        );
-        const refreshedIsland = editableIslandForTarget(
-          result.sourceIndex,
-          refreshedRootRef,
-        );
+        const forwardMetadata = forwardPlan.metadata as {
+          nextFragmentHtml?: unknown;
+        };
+        const nextFragmentHtml = activeNativeEdit.mode === "text-fragment"
+          ? String(forwardMetadata.nextFragmentHtml ?? "")
+          : null;
+        const fragmentPatch = activeNativeEdit.mode === "text-fragment"
+          ? result.patches.find((patch) => patch.kind === "direct-text-node")
+          : null;
+        const refreshedFragmentNode = activeNativeEdit.mode === "text-fragment"
+          && fragmentPatch
+          ? sourceTextNodeForFragmentReplacement(
+              result.sourceIndex,
+              fragmentPatch.startOffset,
+              nextFragmentHtml ?? "",
+            )
+          : null;
+        const refreshedFragmentRef = refreshedFragmentNode
+          && activeNativeEdit.fragmentTargetRef
+          ? createTargetRef(result.sourceIndex, refreshedFragmentNode, {
+              level: "text",
+              targetId: activeNativeEdit.fragmentTargetRef.targetId,
+              label: activeNativeEdit.fragmentTargetRef.label,
+            }) as SourceTargetRef
+          : null;
+        const refreshedIsland = activeNativeEdit.mode === "editable-island"
+          ? editableIslandForTarget(result.sourceIndex, refreshedRootRef)
+          : null;
+        const refreshedProjection = refreshedIsland
+          ? buildSourceTextMap(
+              result.sourceIndex,
+              refreshedRootRef,
+              { allowEmpty: true, ignoreComments: true },
+            )
+          : refreshedFragmentRef
+            ? buildSourceTextFragmentMap(
+                result.sourceIndex,
+                refreshedFragmentRef,
+              )
+            : null;
         const nextLease = {
           ...activeNativeEdit.lease,
           sourceRevision: result.sourceSha256,
@@ -1664,19 +1802,42 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             excludeRoot: activeNativeEdit.rootElement,
           },
         );
-        activeNativeEdit.session.runExpectedMutation(() => {
-          activeNativeEdit.rootElement
-            .querySelectorAll(`[${SOURCE_NODE_ATTRIBUTE}]`)
-            .forEach((element) => element.removeAttribute(SOURCE_NODE_ATTRIBUTE));
-          activeNativeEdit.rootElement.setAttribute(
-            SOURCE_NODE_ATTRIBUTE,
-            refreshedIsland.element.nodeId,
+        if (refreshedIsland) {
+          activeNativeEdit.session.runExpectedMutation(() => {
+            activeNativeEdit.rootElement
+              .querySelectorAll(`[${SOURCE_NODE_ATTRIBUTE}]`)
+              .forEach((element) => element.removeAttribute(SOURCE_NODE_ATTRIBUTE));
+            activeNativeEdit.rootElement.setAttribute(
+              SOURCE_NODE_ATTRIBUTE,
+              refreshedIsland.element.nodeId,
+            );
+          });
+        }
+        sourceIndexRef.current = result.sourceIndex;
+        frameSourceHtmlRef.current = result.html;
+        activeNativeEdit.rootTargetRef = refreshedRootRef;
+        activeNativeEdit.fragmentTargetRef = refreshedFragmentRef;
+        activeNativeEdit.target = appliedMutation.target;
+        selectedSourceSelectionRef.current = appliedMutation.target;
+        setSelection(appliedMutation.target);
+        onSelectRef.current?.(appliedMutation.target);
+        if (!refreshedProjection) {
+          nativeEditNeedsReloadRef.current = true;
+          renderedSourceHtmlRef.current = null;
+          containerRef.current?.setAttribute(
+            "data-native-commit-path",
+            "v2-text-fragment-empty-fence",
           );
-        });
+          containerRef.current?.setAttribute("data-render-verified", "true");
+          return result;
+        }
+        const nextSourceInnerHtml = refreshedIsland?.innerHtml
+          ?? nextFragmentHtml
+          ?? "";
         const rebased = activeNativeEdit.session.applyExternalIslandBaseline({
           revision: result.sourceSha256,
           text: refreshedProjection.text,
-          innerHtml: refreshedIsland.innerHtml,
+          innerHtml: nextSourceInnerHtml,
           selection: options.islandTextCommit.selection,
         }, {
           preserveLiveSelection: true,
@@ -1685,16 +1846,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         if (!rebased) {
           throw new Error("V2 可编辑岛已写入源码，但实时编辑会话无法推进到新版本。");
         }
-        sourceIndexRef.current = result.sourceIndex;
-        frameSourceHtmlRef.current = result.html;
         activeNativeEdit.projection = refreshedProjection;
-        activeNativeEdit.rootTargetRef = refreshedRootRef;
-        activeNativeEdit.islandInnerHtml = refreshedIsland.innerHtml;
+        activeNativeEdit.sourceInnerHtml = nextSourceInnerHtml;
         activeNativeEdit.selection = options.islandTextCommit.selection;
-        activeNativeEdit.target = appliedMutation.target;
-        selectedSourceSelectionRef.current = appliedMutation.target;
-        setSelection(appliedMutation.target);
-        onSelectRef.current?.(appliedMutation.target);
         nativeEditNeedsReloadRef.current = !refreshedMountedSourceIds;
         renderedSourceHtmlRef.current = refreshedMountedSourceIds
           ? result.html
@@ -1702,17 +1856,23 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         containerRef.current?.setAttribute(
           "data-native-commit-path",
           !refreshedMountedSourceIds
-            ? "v2-island-fence-deferred"
+            ? activeNativeEdit.mode === "text-fragment"
+              ? "v2-text-fragment-fence-deferred"
+              : "v2-island-fence-deferred"
             : options.islandTextCommit.deferPreviewReconcile
-            ? "v2-island-fence-deferred"
-            : "v2-island-preserved",
+              ? activeNativeEdit.mode === "text-fragment"
+                ? "v2-text-fragment-fence-deferred"
+                : "v2-island-fence-deferred"
+              : activeNativeEdit.mode === "text-fragment"
+                ? "v2-text-fragment-preserved"
+                : "v2-island-preserved",
         );
         containerRef.current?.setAttribute("data-render-verified", "true");
         return result;
       }
       if (activeNativeEdit) {
         throw new Error(
-          "V2 可编辑岛会话只能提交 replace-editable-island 命令。",
+          "V2 文字会话只能提交当前受控文字命令。",
         );
       }
       const previewStayedMounted = synchronizeStablePreview(
@@ -1910,18 +2070,20 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     clearNativeEditCheckpointTimer();
     const target = active.target;
     const rootElement = active.rootElement;
+    const documentNode = rootElement.ownerDocument;
     currentNativeEditLeaseRef.current = null;
     activeNativeEditRef.current = null;
     discardPendingNativeCommands("session-ended");
     retainNativeEditFocusRef.current = null;
-    installFencedDocumentGuardRef.current(rootElement.ownerDocument);
+    installFencedDocumentGuardRef.current(documentNode);
+    rootElement.removeAttribute("data-html-canvas-editing");
     active.session.fenceDispose();
+    active.releaseHost?.();
     nativeEditNeedsReloadRef.current = false;
     activeTextRangeRef.current = null;
     setIsEditing(false);
     setHasTextRange(false);
-    rootElement.removeAttribute("data-html-canvas-editing");
-    rootElement.ownerDocument.getSelection()?.removeAllRanges();
+    documentNode.getSelection()?.removeAllRanges();
     queueNativeFenceReloadRef.current(
       source,
       {
@@ -1930,6 +2092,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         selection,
         focus: true,
         toolbarVisible: true,
+        ...(active.fragmentTargetRef
+          ? { fragmentTargetRef: active.fragmentTargetRef }
+          : {}),
       },
       target,
       selection,
@@ -2012,7 +2177,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       const mutation: HtmlCanvasMutation = {
         kind: "text",
         target: active.target,
-        property: "editableIslandHtml",
+        property: active.mode === "text-fragment"
+          ? "textFragmentHtml"
+          : "editableIslandHtml",
         before: {
           innerHtml: previousInnerHtml,
           text: previousText,
@@ -2025,15 +2192,28 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           inputType: captured.checkpoint.inputType,
         },
       };
-      let validatedProjection: SourceTextMap | null = null;
-      let validatedIslandInnerHtml: string | null = null;
-      const result = applySourceCommand({
-        type: "replace-editable-island",
-        targetRef: active.rootTargetRef,
-        beforeInnerHtml: previousInnerHtml,
-        nextInnerHtml,
-        expectedSourceSha256: active.projection.sourceSha256,
-      }, mutation, {
+      let validatedSourceInnerHtml: string | null = null;
+      let validationSucceeded = false;
+      if (active.mode === "text-fragment" && !active.fragmentTargetRef) {
+        throw new Error("V2 文字草稿无法安全写入当前可编辑岛。");
+      }
+      const command = active.mode === "text-fragment"
+        ? {
+            type: "update-direct-text-node" as const,
+            targetRef: active.rootTargetRef,
+            textTargetRef: active.fragmentTargetRef!,
+            beforeFragmentHtml: previousInnerHtml,
+            nextFragmentHtml: nextInnerHtml,
+            expectedSourceSha256: active.projection.sourceSha256,
+          }
+        : {
+            type: "replace-editable-island" as const,
+            targetRef: active.rootTargetRef,
+            beforeInnerHtml: previousInnerHtml,
+            nextInnerHtml,
+            expectedSourceSha256: active.projection.sourceSha256,
+          };
+      const result = applySourceCommand(command, mutation, {
         islandTextCommit: {
           selection: nextSelection,
           deferPreviewReconcile: options.deferPreviewReconcile,
@@ -2047,26 +2227,62 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           if (!operationTargetRef || operationTargetRef.resolution !== "exact") {
             throw new Error("V2 可编辑岛无法在 Patch 后精确重绑。");
           }
-          const projection = buildSourceTextMap(
-            candidate.sourceIndex,
-            operationTargetRef,
-            { allowEmpty: true, ignoreComments: true },
+          if (active.mode === "editable-island") {
+            const projection = buildSourceTextMap(
+              candidate.sourceIndex,
+              operationTargetRef,
+              { allowEmpty: true, ignoreComments: true },
+            );
+            const island = editableIslandForTarget(
+              candidate.sourceIndex,
+              operationTargetRef,
+            );
+            if (
+              island.innerHtml !== nextInnerHtml
+              || projection.text !== nextText
+            ) {
+              throw new Error("V2 可编辑岛源码结果与当前草稿不一致。");
+            }
+            validatedSourceInnerHtml = island.innerHtml;
+            validationSucceeded = true;
+            return;
+          }
+          const fragmentPatch = candidate.patches.find(
+            (patch) => patch.kind === "direct-text-node",
           );
-          const island = editableIslandForTarget(
-            candidate.sourceIndex,
-            operationTargetRef,
-          );
-          if (
-            island.innerHtml !== nextInnerHtml
-            || projection.text !== nextText
-          ) {
+          if (!fragmentPatch) {
             throw new Error("V2 可编辑岛源码结果与当前草稿不一致。");
           }
-          validatedProjection = projection;
-          validatedIslandInnerHtml = island.innerHtml;
+          const nextTextNode = sourceTextNodeForFragmentReplacement(
+            candidate.sourceIndex,
+            fragmentPatch.startOffset,
+            nextInnerHtml,
+          );
+          if (!nextTextNode) {
+            if (nextInnerHtml !== "" || nextText !== "") {
+              throw new Error("V2 可编辑岛源码结果与当前草稿不一致。");
+            }
+            validatedSourceInnerHtml = "";
+            validationSucceeded = true;
+            return;
+          }
+          const refreshedFragmentRef = createTargetRef(
+            candidate.sourceIndex,
+            nextTextNode,
+            { level: "text" },
+          ) as SourceTargetRef;
+          const projection = buildSourceTextFragmentMap(
+            candidate.sourceIndex,
+            refreshedFragmentRef,
+          );
+          if (projection.text !== nextText) {
+            throw new Error("V2 可编辑岛源码结果与当前草稿不一致。");
+          }
+          validatedSourceInnerHtml = nextInnerHtml;
+          validationSucceeded = true;
         },
       });
-      if (!result || !validatedProjection || validatedIslandInnerHtml === null) {
+      if (!result || !validationSucceeded || validatedSourceInnerHtml === null) {
         const reason = "V2 文字草稿无法安全写入当前可编辑岛。";
         restoreRejectedNativeCheckpoint(active, beforeSelection);
         return { ok: false, mutation: null, reason };
@@ -2077,11 +2293,13 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         !currentActive
         || currentActive.session !== active.session
         || currentActive.projection.sourceSha256 !== result.sourceSha256
-        || currentActive.islandInnerHtml !== validatedIslandInnerHtml
+        || currentActive.sourceInnerHtml !== validatedSourceInnerHtml
       ) {
         containerRef.current?.setAttribute(
           "data-native-commit-path",
-          "v2-island-checkpoint-reload",
+          active.mode === "text-fragment"
+            ? "v2-text-fragment-checkpoint-reload"
+            : "v2-island-checkpoint-reload",
         );
         if (activeNativeEditRef.current === active) {
           reloadCommittedNativeEditFromSource(active, result.html, nextSelection);
@@ -2091,8 +2309,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       containerRef.current?.setAttribute(
         "data-native-commit-path",
         options.deferPreviewReconcile
-          ? "v2-island-checkpoint-fence"
-          : "v2-island-checkpoint-preserved",
+          ? active.mode === "text-fragment"
+            ? "v2-text-fragment-checkpoint-fence"
+            : "v2-island-checkpoint-fence"
+          : active.mode === "text-fragment"
+            ? "v2-text-fragment-checkpoint-preserved"
+            : "v2-island-checkpoint-preserved",
       );
       refreshNativeEditRangeState(currentActive, nextSelection);
       return { ok: true, mutation };
@@ -2139,6 +2361,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       const source = frameSourceHtmlRef.current;
       const target = active.target;
       const rootElement = active.rootElement;
+      const selectionElement = active.selectionElement;
       const frameReloadRequired = (
         nativeEditNeedsReloadRef.current
         || !rootElement.isConnected
@@ -2148,12 +2371,13 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       activeNativeEditRef.current = null;
       discardPendingNativeCommands("session-ended");
       retainNativeEditFocusRef.current = null;
+      rootElement.removeAttribute("data-html-canvas-editing");
       active.session.dispose();
+      active.releaseHost?.();
       nativeEditNeedsReloadRef.current = false;
       activeTextRangeRef.current = null;
       setIsEditing(false);
       setHasTextRange(false);
-      rootElement.removeAttribute("data-html-canvas-editing");
       rootElement.ownerDocument.getSelection()?.removeAllRanges();
       if (frameReloadRequired) {
         selectedElementRef.current = null;
@@ -2167,9 +2391,13 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       pendingSelectionRef.current = null;
       pendingToolbarVisibleRef.current = false;
       pendingFrameRestoreEpochRef.current += 1;
-      selectedElementRef.current = rootElement;
+      if (active.mode === "editable-island") {
+        selectedElementRef.current = rootElement;
+      } else {
+        selectedElementRef.current = selectionElement;
+      }
       selectedSourceSelectionRef.current = target;
-      rootElement.setAttribute("data-html-canvas-selected", target.level);
+      selectionElement.setAttribute("data-html-canvas-selected", target.level);
       renderedSourceHtmlRef.current = source;
       containerRef.current?.setAttribute("data-render-verified", "true");
       setSelection(target);
@@ -2178,7 +2406,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       onSelectRef.current?.(target);
       updateSelectedStyle();
       updateMoveAvailability();
-      observeSelectedElement(rootElement);
+      observeSelectedElement(selectionElement);
       requestAnimationFrame(updateOverlayPosition);
       return { ...committed, frameReloading: false };
     } finally {
@@ -2385,58 +2613,122 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       );
       return false;
     }
-    const hostElement = nativeEditHostForElement(selectedElement, sourceIndex);
-    if (!hostElement) {
-      containerRef.current?.setAttribute("data-native-start-status", "no-host");
-      reportBlockedEdit(new Error(
+    const priorRange = activeTextRangeRef.current;
+    const islandHostElement = nativeEditHostForElement(selectedElement, sourceIndex);
+    const fragmentCandidate = islandHostElement
+      ? null
+      : nativeTextFragmentForRange(priorRange, sourceIndex);
+    if (!islandHostElement && !fragmentCandidate) {
+      let blockedCause: Error = new Error(
         "这段可见内容不是当前源码中的唯一静态文字，无法安全进入原位编辑。",
-      ));
+      );
+      const selectedNodeId = selectedElement.getAttribute(SOURCE_NODE_ATTRIBUTE);
+      const selectedSourceNode = selectedNodeId
+        ? sourceIndex.byNodeId.get(selectedNodeId)
+        : null;
+      if (selectedSourceNode?.type === "element") {
+        try {
+          const selectedTargetRef = createTargetRef(
+            sourceIndex,
+            selectedSourceNode,
+            { level: "subregion" },
+          ) as SourceTargetRef;
+          const islandCapability = isEditableIslandTarget(
+            sourceIndex,
+            selectedTargetRef,
+          );
+          if (!islandCapability.editable) {
+            containerRef.current?.setAttribute(
+              "data-native-start-status",
+              `island:${islandCapability.code}`,
+            );
+            containerRef.current?.setAttribute(
+              "data-native-capability-detail",
+              `${islandCapability.code}:${JSON.stringify(
+                islandCapability.details,
+              )}`.slice(0, 2400),
+            );
+            blockedCause = new Error(
+              islandCapability.message
+              || "这处内容包含不能由文字编辑器改写的网页结构。",
+            );
+          }
+        } catch {
+          // The existing no-host path below remains the fail-closed fallback.
+        }
+      }
+      containerRef.current?.setAttribute(
+        "data-native-start-status",
+        containerRef.current.getAttribute("data-native-start-status") || "no-host",
+      );
+      reportBlockedEdit(blockedCause);
       return false;
     }
-    const priorRange = activeTextRangeRef.current;
-    const target = selectElement(hostElement, "part", {
+    const mode: ActiveNativeEdit["mode"] = fragmentCandidate
+      ? "text-fragment"
+      : "editable-island";
+    const selectionElement = fragmentCandidate?.parentElement
+      ?? islandHostElement!;
+    const target = selectElement(selectionElement, "part", {
       preserveTextSelection: Boolean(priorRange),
       showToolbar: true,
     });
+    let mountedFragment: ReturnType<typeof mountNativeTextFragmentHost> = null;
+    let createdSession: IslandEditingController | null = null;
     try {
       const rootTargetRef = sourceTargetRefForSelection(target);
-      const projection = buildSourceTextMap(
-        sourceIndex,
-        rootTargetRef,
-        { allowEmpty: true, ignoreComments: true },
-      );
+      const fragmentTargetRef = fragmentCandidate?.textTargetRef ?? null;
+      const projection = fragmentTargetRef
+        ? buildSourceTextFragmentMap(sourceIndex, fragmentTargetRef)
+        : buildSourceTextMap(
+            sourceIndex,
+            rootTargetRef,
+            { allowEmpty: true, ignoreComments: true },
+          );
       const activationLogicalRange = priorRange
         ? sourceSegmentsToTextRange(projection, priorRange.segments)
         : null;
-      const islandCapability = isEditableIslandTarget(
-        sourceIndex,
-        rootTargetRef,
-      );
-      if (!islandCapability.editable) {
-        containerRef.current?.setAttribute(
-          "data-native-start-status",
-          `island:${islandCapability.code}`,
+      let sourceInnerHtml = fragmentCandidate?.sourceInnerHtml ?? "";
+      if (mode === "editable-island") {
+        const islandCapability = isEditableIslandTarget(
+          sourceIndex,
+          rootTargetRef,
         );
-        containerRef.current?.setAttribute(
-          "data-native-capability-detail",
-          `${islandCapability.code}:${JSON.stringify(
-            islandCapability.details,
-          )}`.slice(0, 2400),
-        );
-        reportBlockedEdit(new Error(
-          islandCapability.message
-          || "这处内容包含不能由文字编辑器改写的网页结构。",
-        ));
-        return false;
+        if (!islandCapability.editable) {
+          containerRef.current?.setAttribute(
+            "data-native-start-status",
+            `island:${islandCapability.code}`,
+          );
+          containerRef.current?.setAttribute(
+            "data-native-capability-detail",
+            `${islandCapability.code}:${JSON.stringify(
+              islandCapability.details,
+            )}`.slice(0, 2400),
+          );
+          reportBlockedEdit(new Error(
+            islandCapability.message
+            || "这处内容包含不能由文字编辑器改写的网页结构。",
+          ));
+          return false;
+        }
+        sourceInnerHtml = islandCapability.island.innerHtml;
       }
-      if (nativeLogicalText(hostElement) !== projection.text) {
+      const liveText = fragmentCandidate
+        ? fragmentCandidate.textNode.data
+        : nativeLogicalText(islandHostElement!);
+      if (liveText !== projection.text) {
         containerRef.current?.setAttribute("data-native-start-status", "text-mismatch");
         reportBlockedEdit(new Error(
           "画布文字与源码节点已经漂移，已阻止直接编辑。",
         ));
         return false;
       }
-      const layoutBeforeEditing = nativeLayoutFingerprint(hostElement);
+      const layoutElement = fragmentCandidate?.parentElement
+        ?? islandHostElement!;
+      const layoutBeforeEditing = nativeLayoutFingerprint(layoutElement);
+      const fragmentStyleBefore = fragmentCandidate
+        ? nativeTextFragmentStyleSignature(fragmentCandidate.parentElement)
+        : null;
       let initialSelection = boundedHistorySelection(
         restoredSelection,
         projection.text,
@@ -2457,6 +2749,15 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         text: projection.text,
         ...(initialSelection ? { selection: initialSelection } : {}),
       };
+      if (fragmentCandidate) {
+        mountedFragment = mountNativeTextFragmentHost(fragmentCandidate.textNode);
+        if (!mountedFragment) {
+          throw new Error(
+            "这段可见内容不是当前源码中的唯一静态文字，无法安全进入原位编辑。",
+          );
+        }
+      }
+      const hostElement = mountedFragment?.hostElement ?? islandHostElement!;
       nativeEditSessionSequenceRef.current += 1;
       // Entering contenteditable gives Chromium a document-local mutation
       // owner even when the user later blurs before typing. Keep that
@@ -2466,7 +2767,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         sessionId: `native_${nativeEditSessionSequenceRef.current.toString(36)}`,
         domGeneration: nativeDomGenerationRef.current,
         sourceRevision: projection.sourceSha256,
-        hostId: rootTargetRef.targetId,
+        hostId: fragmentTargetRef?.targetId ?? rootTargetRef.targetId,
       };
       currentNativeEditLeaseRef.current = lease;
       const handleSessionState = (state: NativeEditSessionState) => {
@@ -2492,7 +2793,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       const session = new IslandEditingController({
         hostElement,
         baseline,
-        sourceInnerHtml: islandCapability.island.innerHtml,
+        sourceInnerHtml,
+        ...(mode === "text-fragment"
+          ? { normalizeInnerHtml: normalizeEditableTextFragmentHtml }
+          : {}),
         lease: {
           stamp: lease,
           isCurrent: (stamp) => nativeEditLeasesMatch(
@@ -2525,12 +2829,19 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         onEscape: () => finishNativeEditing(true, "manual"),
         onError: reportBlockedEdit,
       });
-      const layoutAfterEditing = nativeLayoutFingerprint(hostElement);
+      createdSession = session;
+      const layoutAfterEditing = nativeLayoutFingerprint(layoutElement);
+      const fragmentStyleStable = !fragmentCandidate || (
+        nativeTextFragmentStyleSignature(hostElement) === fragmentStyleBefore
+        && !hasNativeTextFragmentPseudoContent(hostElement)
+      );
       if (
         !sameNativeLayout(layoutBeforeEditing, layoutAfterEditing)
         || !sameNativeTextStyle(layoutBeforeEditing, layoutAfterEditing)
+        || !fragmentStyleStable
       ) {
         session.dispose();
+        mountedFragment?.release();
         currentNativeEditLeaseRef.current = null;
         containerRef.current?.setAttribute(
           "data-native-start-status",
@@ -2542,11 +2853,15 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         return false;
       }
       const active: ActiveNativeEdit = {
+        mode,
         rootElement: hostElement,
+        selectionElement,
         target,
         projection,
         rootTargetRef,
-        islandInnerHtml: islandCapability.island.innerHtml,
+        sourceInnerHtml,
+        fragmentTargetRef,
+        releaseHost: mountedFragment?.release ?? null,
         session,
         lease,
         selection: initialSelection ?? {
@@ -2561,11 +2876,15 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       containerRef.current?.removeAttribute("data-native-capability-detail");
       containerRef.current?.setAttribute(
         "data-native-host-mode",
-        "v2-editable-island",
+        mode === "text-fragment"
+          ? "v2-text-fragment"
+          : "v2-editable-island",
       );
       containerRef.current?.setAttribute(
         "data-native-event-delivery-mode",
-        "native-editable-island",
+        mode === "text-fragment"
+          ? "native-text-fragment"
+          : "native-editable-island",
       );
       hostElement.setAttribute("data-html-canvas-editing", "true");
       activeTextRangeRef.current = priorRange
@@ -2592,14 +2911,13 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       containerRef.current?.setAttribute("data-native-start-status", "started");
       return true;
     } catch (cause) {
+      createdSession?.dispose();
+      mountedFragment?.release();
       containerRef.current?.setAttribute(
         "data-native-start-status",
         `error:${cause instanceof Error ? cause.message : String(cause)}`.slice(0, 500),
       );
-      const currentLease = currentNativeEditLeaseRef.current;
-      if (currentLease?.hostId === selectedSourceSelectionRef.current?.id) {
-        currentNativeEditLeaseRef.current = null;
-      }
+      currentNativeEditLeaseRef.current = null;
       reportBlockedEdit(cause);
       return false;
     }
@@ -2620,6 +2938,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     nextIndex,
   ) => {
     if (
+      active.mode !== "editable-island"
+      ||
       activeNativeEditRef.current !== active
       || !target.nodeId
       || !active.rootElement.isConnected
@@ -2657,6 +2977,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     // focused host. replaceChild can synchronously dispatch focusout/blur;
     // those events must not enqueue work against the new canonical island.
     active.session.fenceDispose();
+    active.releaseHost?.();
     active.rootElement.removeAttribute("data-html-canvas-editing");
     active.rootElement.ownerDocument.getSelection()?.removeAllRanges();
     nativeDomGenerationRef.current += 1;
@@ -3016,10 +3337,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     if (!active) return null;
     const documentNode = active.rootElement.ownerDocument;
     const activeElement = documentNode.activeElement;
-    const currentTarget = active.rootElement.isConnected
+    const currentTarget = active.selectionElement.isConnected
       && !nativeEditNeedsReloadRef.current
       ? selectionForElement(
-          active.rootElement,
+          active.selectionElement,
           sourceIndexRef.current,
           active.target,
           undefined,
@@ -3027,7 +3348,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         )
       : active.target;
     active.target = currentTarget;
-    const liveSourceNodeId = active.rootElement.getAttribute(SOURCE_NODE_ATTRIBUTE);
+    const liveSourceNodeId = active.selectionElement.getAttribute(SOURCE_NODE_ATTRIBUTE);
     containerRef.current?.setAttribute(
       "data-native-fence-target",
       `${liveSourceNodeId ?? "none"}:${
@@ -3046,6 +3367,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         || (activeElement && active.rootElement.contains(activeElement)),
       ),
       toolbarVisible: toolbarVisibleRef.current,
+      ...(active.fragmentTargetRef
+        ? { fragmentTargetRef: active.fragmentTargetRef }
+        : {}),
     };
     clearNativeEditCheckpointTimer();
     currentNativeEditLeaseRef.current = null;
@@ -3053,8 +3377,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     discardPendingNativeCommands("session-ended");
     retainNativeEditFocusRef.current = null;
     installFencedDocumentGuard(documentNode);
-    active.session.fenceDispose();
     active.rootElement.removeAttribute("data-html-canvas-editing");
+    active.session.fenceDispose();
+    active.releaseHost?.();
     documentNode.getSelection()?.removeAllRanges();
     activeTextRangeRef.current = null;
     setIsEditing(false);
@@ -3664,7 +3989,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     return () => {
       clearNativeEditCheckpointTimer();
       currentNativeEditLeaseRef.current = null;
-      activeNativeEditRef.current?.session.fenceDispose();
+      const activeNativeEdit = activeNativeEditRef.current;
+      activeNativeEdit?.rootElement.removeAttribute("data-html-canvas-editing");
+      activeNativeEdit?.session.fenceDispose();
+      activeNativeEdit?.releaseHost?.();
       activeNativeEditRef.current = null;
       discardPendingNativeCommands("unmounted");
       retainNativeEditFocusRef.current = null;
@@ -3791,6 +4119,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         return;
       }
       if (activeNativeEditRef.current?.rootElement.contains(event.target as Node)) return;
+      const activeEdit = activeNativeEditRef.current;
+      if (activeEdit?.mode === "text-fragment") {
+        const committed = finishNativeEditing(true, "manual");
+        if (!committed.ok || committed.frameReloading) return;
+      }
       if (captureTextRange()) {
         event.preventDefault();
         event.stopPropagation();
@@ -3817,6 +4150,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         return;
       }
       if (activeNativeEditRef.current?.rootElement.contains(event.target as Node)) return;
+      const activeEdit = activeNativeEditRef.current;
+      if (activeEdit?.mode === "text-fragment") {
+        const committed = finishNativeEditing(true, "manual");
+        if (!committed.ok || committed.frameReloading) return;
+      }
       const caretPoint = caretPointFromMouseEvent(event);
       const nativeSelection = documentNode.getSelection();
       let nativeRange = nativeSelection
@@ -4178,6 +4516,21 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           && pendingNativeEditResumeRef.current?.fenceId === pendingNativeResume.fenceId
         ) {
           pendingNativeEditResumeRef.current = null;
+          if (
+            pendingNativeResume.fragmentTargetRef
+            && restoredTarget
+            && selectedElementRef.current
+            && sourceIndexRef.current
+          ) {
+            const restoredFragmentRange = activeRangeForTextFragmentTarget(
+              selectedElementRef.current,
+              sourceIndexRef.current,
+              restoredTarget,
+              pendingNativeResume.fragmentTargetRef,
+            );
+            activeTextRangeRef.current = restoredFragmentRange;
+            setHasTextRange(Boolean(restoredFragmentRange));
+          }
           const resumed = startEditing(undefined, pendingNativeResume.selection);
           containerRef.current?.setAttribute(
             "data-native-fence-resume",
@@ -4285,7 +4638,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         if (
           !element
           || !element.isConnected
-          || element !== activeNativeEdit.rootElement
+          || element !== activeNativeEdit.selectionElement
         ) {
           reportBlockedEdit(new Error(
             "格式提交后的文字宿主没有精确重绑，已停止继续修改。",
@@ -4548,6 +4901,14 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const selectedNativeEditHost = selectedElementRef.current && sourceIndexRef.current
     ? nativeEditHostForElement(selectedElementRef.current, sourceIndexRef.current)
     : null;
+  const selectedNativeTextFragment = !selectedNativeEditHost && sourceIndexRef.current
+    ? nativeTextFragmentForRange(activeTextRangeRef.current, sourceIndexRef.current)
+    : null;
+  const selectedNativeEditAvailable = Boolean(
+    activeNativeEditRef.current
+    || selectedNativeEditHost
+    || selectedNativeTextFragment,
+  );
   const selectedPagePresentationAction = (
     !readOnly
     && !interactionLocked
@@ -4771,8 +5132,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
                 type="button"
                 className={styles.toolButton}
                 aria-pressed={isEditing}
-                disabled={!selectedNativeEditHost}
-                title={!selectedNativeEditHost
+                disabled={!selectedNativeEditAvailable}
+                title={!selectedNativeEditAvailable
                   ? "这段内容不是当前源码中的唯一静态文字"
                   : "像文档一样在原位置编辑文字"}
                 onClick={() => {

@@ -4,6 +4,7 @@ import test from "node:test";
 import { buildSourceIndex } from "../app/lib/source-index.js";
 import {
   SourceTextMapError,
+  buildSourceTextFragmentMap,
   buildSourceTextMap,
   sourceAnchorToTextOffset,
   sourceSegmentsToTextRange,
@@ -43,6 +44,24 @@ test("maps decoded UTF-16 text across authored inline elements without layout se
     startOffset: 1,
     endOffset: 5,
   });
+});
+
+test("isolates one exact direct text node from a structurally complex parent", () => {
+  const index = buildSourceIndex(
+    `<div id="mixed"><div>chart</div><b>强调</b>裸&amp;文本<span>尾注</span></div>`,
+  );
+  const textNode = index.textNodes.find((node) => node.value === "裸&文本");
+  const map = buildSourceTextFragmentMap(index, textNode.nodeId);
+
+  assert.equal(map.rootNodeId, elementById(index, "mixed").nodeId);
+  assert.equal(map.text, "裸&文本");
+  assert.equal(map.textRunCount, 1);
+  assert.equal(map.boundaryCount, 0);
+  assert.deepEqual(textRangeToSourceSegments(map, 0, map.textLength), [{
+    textNodeId: textNode.nodeId,
+    startOffset: 0,
+    endOffset: textNode.value.length,
+  }]);
 });
 
 test("round-trips text and child-boundary source anchors with explicit affinity", () => {
