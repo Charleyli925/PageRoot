@@ -4203,6 +4203,36 @@ export default function Workbench() {
 
   useEffect(() => {
     const coordinator = drainCoordinatorRef.current;
+    coordinator.replace("external-file-open", {
+      label: "等待外部 HTML 打开完成",
+      inspect: (boundary) => (
+        boundary === "close"
+        && externalFileOpenSessionRef.current.snapshot.status !== "idle"
+      )
+        ? {
+            state: "pending",
+            reason: "外部 HTML 正在读取或等待安全切换。",
+          }
+        : { state: "resolved" },
+      drain: () => waitUntilResolved(
+        () => externalFileOpenSessionRef.current.snapshot.status === "idle",
+      ),
+    });
+    coordinator.replace("project-application", {
+      label: "等待已接收的 HTML 切换完成",
+      inspect: (boundary) => (
+        boundary === "close"
+        && projectApplicationSessionRef.current.snapshot.status !== "idle"
+      )
+        ? {
+            state: "pending",
+            reason: "已接收的 HTML 仍在完成安全切换。",
+          }
+        : { state: "resolved" },
+      drain: () => waitUntilResolved(
+        () => projectApplicationSessionRef.current.snapshot.status === "idle",
+      ),
+    });
     coordinator.replace("view-transition", {
       label: "等待页面切换完成",
       inspect: (boundary) => (
@@ -4978,10 +5008,28 @@ export default function Workbench() {
           reason,
           presentation: "in-app",
         });
+        const projectOpenInFlight = () => (
+          externalFileOpenSessionRef.current.snapshot.status !== "idle"
+          || projectApplicationSessionRef.current.snapshot.status !== "idle"
+        );
         closeLifecycle.preparingRequestId = detail.requestId;
 
         try {
           if (projectHydratingRef.current) {
+            // Startup hydration can close cleanly, but an external read or an
+            // accepted result may have already begun changing durable project
+            // authority. Drain those registered owners before taking the
+            // hydration fast path so shutdown cannot interrupt their switch.
+            if (projectOpenInFlight()) {
+              const projectOpenDrain = await drainCoordinatorRef.current.drain(
+                "close",
+                { deadlineAt: detail.deadlineAt - 250 },
+              );
+              if (!projectOpenDrain.ok) return inAppBlock(projectOpenDrain.reason);
+            }
+            if (projectOpenInFlight()) {
+              return inAppBlock("外部 HTML 切换仍未安全完成，已取消关闭。");
+            }
             const draftState = draftSessionRef.current.inspect();
             if (canCloseDuringHydration({
               projectHydrating: true,

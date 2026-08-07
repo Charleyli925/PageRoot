@@ -400,6 +400,30 @@ test("external HTML activation fences before main-process acceptance and queues 
   );
 });
 
+test("close waits for external acceptance and accepted-project application owners", () => {
+  const closeFlow = section(
+    workbench,
+    "const handlePrepareClose = (event: Event) => {",
+    "const handleCloseAborted = (event: Event) => {",
+  );
+
+  assert.match(
+    workbench,
+    /coordinator\.replace\("external-file-open",[\s\S]*?boundary === "close"[\s\S]*?externalFileOpenSessionRef\.current\.snapshot\.status !== "idle"[\s\S]*?waitUntilResolved\([\s\S]*?externalFileOpenSessionRef\.current\.snapshot\.status === "idle"/u,
+    "an external main-process acceptance must be a close-drain obligation",
+  );
+  assert.match(
+    workbench,
+    /coordinator\.replace\("project-application",[\s\S]*?boundary === "close"[\s\S]*?projectApplicationSessionRef\.current\.snapshot\.status !== "idle"[\s\S]*?waitUntilResolved\([\s\S]*?projectApplicationSessionRef\.current\.snapshot\.status === "idle"/u,
+    "an accepted project awaiting renderer publication must be a close-drain obligation",
+  );
+  assert.match(
+    closeFlow,
+    /const projectOpenInFlight = \(\) =>[\s\S]*?if \(projectHydratingRef\.current\) \{[\s\S]*?if \(projectOpenInFlight\(\)\) \{[\s\S]*?drain\([\s\S]*?"close",[\s\S]*?if \(!projectOpenDrain\.ok\)[\s\S]*?if \(projectOpenInFlight\(\)\)[\s\S]*?canCloseDuringHydration\(\{/u,
+    "hydration may use its close fast path only after active project-open owners drain",
+  );
+});
+
 test("accepted desktop results re-fence in renderer FIFO before publication", () => {
   const application = section(
     workbench,
