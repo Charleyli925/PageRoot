@@ -393,4 +393,38 @@ test("external HTML activation holds the canvas fence through main-process accep
     /finally \{[\s\S]*?canvasFrozen && !appliedProject && !isSuperseded\(\)[\s\S]*?editorRef\.current\?\.unlockNow\?\.\(\)/u,
     "only a final failed external open may release its canvas fence",
   );
+  assert.match(
+    externalOpen,
+    /const project = await acceptExternalOpen\(request\.requestId\);[\s\S]*?setStartupIssue\(null\);[\s\S]*?applyProject\(project\)/u,
+    "an accepted external project must publish before a queued successor runs",
+  );
+  const acceptedSuccess = section(
+    externalOpen,
+    "const project = await acceptExternalOpen(request.requestId)",
+    "applyProject(project)",
+  );
+  assert.doesNotMatch(
+    acceptedSuccess,
+    /isSuperseded\(\)/u,
+    "a queued successor must not discard an already accepted project",
+  );
+});
+
+test("desktop project opens publish successful FIFO predecessors", () => {
+  const localOpen = section(
+    workbench,
+    "const openProject = useCallback",
+    "const openExternalProject = useCallback",
+  );
+
+  assert.match(
+    localOpen,
+    /const orderedByMainProcess = \([\s\S]*?projectOpening === "desktop-dialog"/u,
+    "desktop open results need an explicit main-process ordering boundary",
+  );
+  assert.match(
+    localOpen,
+    /!project[\s\S]*?!orderedByMainProcess && openRequest !== projectOpenRequestRef\.current/u,
+    "only browser file input results may use the renderer stale-request fence",
+  );
 });

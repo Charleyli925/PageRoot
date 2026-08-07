@@ -118,3 +118,39 @@ test("a newer external request supersedes a deferred request before it resumes",
   assert.deepEqual(calls, ["external_first", "external_second"]);
   assert.equal(session.snapshot.status, "idle");
 });
+
+test("a successful active request remains publishable when its queued successor fails", async () => {
+  const session = new ExternalFileOpenSession();
+  const visibleProjects = [];
+  let releaseFirst;
+  const firstReleased = new Promise((resolve) => {
+    releaseFirst = resolve;
+  });
+  let markFirstStarted;
+  const firstStarted = new Promise((resolve) => {
+    markFirstStarted = resolve;
+  });
+  const execute = async (value, { isSuperseded }) => {
+    if (value.requestId === "external_first") {
+      markFirstStarted();
+      await firstReleased;
+      assert.equal(isSuperseded(), true);
+      // The Workbench may publish this already-accepted project even though a
+      // newer request is queued. That successor can fail without making the
+      // renderer diverge from the main-process active/recent source.
+      visibleProjects.push(value.sourcePath);
+      return "complete";
+    }
+    throw new Error("second source is unreadable");
+  };
+
+  assert.equal(session.enqueue(request("first"), execute), true);
+  await firstStarted;
+  assert.equal(session.enqueue(request("second"), execute), true);
+  releaseFirst();
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(visibleProjects, ["/Users/demo/first.html"]);
+  assert.equal(session.snapshot.status, "idle");
+});

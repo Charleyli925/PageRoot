@@ -102,7 +102,10 @@ result before publication when a newer request is queued, and it freezes the
 Canvas from the final safe switch fence through the awaited external acceptance;
 a newer external request inherits that freeze. If the final fence captures a
 post-cutoff native edit, it does not begin the IPC, releases that edit to normal
-persistence, and retries only after the source is safe. Ordinary Workbench
+persistence, and retries only after the source is safe. A successfully accepted
+external project is published even when a newer request is queued; the newer
+request replaces it only after its own successful acceptance, so a failed
+successor cannot split visible and durable authority. Ordinary Workbench
 project-picker retry state may not carry the external protocol. Thus a slow
 older request cannot leave renderer state, active-file state or recent-project
 state pointing at different sources, nor discard a post-cutoff native edit.

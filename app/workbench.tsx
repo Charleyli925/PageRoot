@@ -5344,6 +5344,9 @@ export default function Workbench() {
     setProjectMenuOpen(false);
     const openRequest = projectOpenRequestRef.current + 1;
     projectOpenRequestRef.current = openRequest;
+    const orderedByMainProcess = (
+      runtimeCapabilitiesRef.current.projectOpening === "desktop-dialog"
+    );
     if (
       runtimeCapabilitiesRef.current.projectOpening === "browser-file"
       && !recentPath
@@ -5357,7 +5360,14 @@ export default function Workbench() {
       const project = recentPath
         ? await api.openRecent(recentPath)
         : await api.openHtml();
-      if (!project || openRequest !== projectOpenRequestRef.current) return;
+      if (
+        !project
+        || (!orderedByMainProcess && openRequest !== projectOpenRequestRef.current)
+      ) return;
+      // Desktop project opens are complete FIFO transitions in the main
+      // process. A successful earlier result remains canonical until a later
+      // request succeeds; the browser file input has no such main-process
+      // authority and still needs its renderer request fence.
       setStartupIssue(null);
       applyProject(project);
       const epoch = projectSessionRef.current.epoch;
@@ -5448,9 +5458,9 @@ export default function Workbench() {
         return "complete";
       }
       const project = await acceptExternalOpen(request.requestId);
-      if (isSuperseded() || openRequest !== projectOpenRequestRef.current) {
-        return "complete";
-      }
+      // Main-process project opens are serialized as whole transitions. Once A
+      // has been accepted, publish it even when B is queued: B may fail, and a
+      // failed successor must leave both the visible and durable source at A.
       setStartupIssue(null);
       applyProject(project);
       appliedProject = true;

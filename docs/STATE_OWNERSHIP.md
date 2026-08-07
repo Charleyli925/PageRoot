@@ -53,8 +53,11 @@ Rules:
   external request fences the older renderer result and inherits its Canvas
   freeze. If the final pre-IPC fence itself captures a post-cutoff native edit,
   no external activation starts; that edit returns to normal persistence before
-  the session retries. The final visible project and the main-process
-  active/recent source therefore stay aligned without discarding input.
+  the session retries. An accepted project publishes before a later queued
+  request runs, and that later request replaces it only on success. The final
+  visible project and the main-process active/recent source therefore stay
+  aligned without discarding input or losing a prior successful open to a
+  failed successor.
 - `workbench.tsx` is a composition root, not an additional state owner. It
   subscribes to session snapshots, derives read-only presentation values and
   dispatches user intent back to the owning session.
