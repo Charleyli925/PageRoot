@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import test from "node:test";
 
 import { RuntimeVisualProjectionSession } from "../app/application/runtime-visual-projection-session.js";
+import { RUNTIME_VISUAL_CONTRACT } from "../app/domain/runtime-visual-contract.js";
 import {
   RUNTIME_VISUAL_PROJECTION_PROTOCOL,
   RUNTIME_VISUAL_PROJECTION_VERSION,
@@ -166,6 +167,31 @@ test("external runtime scripts do not hide candidates referenced by another scri
     viewportWidth: 900,
   });
   assert.equal(prepared?.candidates.length, 2);
+});
+
+test("directly referenced runtime hosts keep priority before the shared candidate cap", () => {
+  const unrelatedHosts = Array.from(
+    { length: RUNTIME_VISUAL_CONTRACT.candidateLimit },
+    (_, index) => `<div class="unrelated-${index}"></div>`,
+  ).join("");
+  const source = `<!doctype html><main>${unrelatedHosts}
+    <div id="late-chart"></div>
+    <script>
+      document.getElementById("late-chart").appendChild(document.createElement("svg"));
+    </script>
+  </main>`;
+  const sourceIndex = buildSourceIndex(source);
+  const prepared = prepareRuntimeVisualCapture({
+    html: source,
+    sourcePath: "/tmp/late-runtime-host.html",
+    viewportWidth: 900,
+  });
+  assert.equal(prepared?.candidates.length, RUNTIME_VISUAL_CONTRACT.candidateLimit);
+  const firstCandidate = prepared?.candidates[0];
+  assert.equal(
+    firstCandidate && sourceIndex.byNodeId.get(firstCandidate.sourceNodeId)?.stableAttributes.id,
+    "late-chart",
+  );
 });
 
 test("script-referenced data containers participate in the runtime dependency", () => {

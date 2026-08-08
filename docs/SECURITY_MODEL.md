@@ -239,8 +239,9 @@ before-side comment-channel challenge; it validates the trusted parent,
   and leaves the ordinary bridge listener unable to transfer either port. Only
   the matching port may submit snapshots. Runtime requests, channel transfer and
   snapshot envelopes must also match the shared contract version and the exact
-  side-specific source Hash. The producer truncates deterministic identity
-  attributes at the same shared 24-attribute boundary enforced by the consumer.
+  side-specific source Hash. The producer uses the same shared 24-attribute
+  boundary enforced by the consumer; an over-limit host without an explicit
+  `id`/`name` anchor is omitted rather than represented by an unsafe prefix.
   Parser-added Elements may ignore mutable text only when at least one stable
   attribute proves the exact record; ambiguity, replacement or disconnection
   remains a static-only result.

@@ -236,7 +236,13 @@ function runtimeReferencedCandidates(sourceIndex, candidates) {
     || BROAD_RUNTIME_HOST_MUTATION.test(source)
     || usesIndirectRuntimeDomRead(source)
   ) {
-    return candidates;
+    const referencedIds = new Set(
+      referenced.map((candidate) => candidate.sourceNodeId),
+    );
+    return [
+      ...referenced,
+      ...candidates.filter((candidate) => !referencedIds.has(candidate.sourceNodeId)),
+    ];
   }
   return referenced;
 }
@@ -247,7 +253,6 @@ function captureCandidates(sourceIndex) {
       VISUAL_HOST_TAGS.has(element.tagName)
       && sourceVisualPlaceholder(sourceIndex, element)
     ))
-    .slice(0, MAX_CAPTURE_CANDIDATES)
     .map((element) => {
       const hostTargetRef = immutableTargetRef(createTargetRef(
         sourceIndex,
@@ -261,7 +266,8 @@ function captureCandidates(sourceIndex) {
         hostTargetRef,
       });
     });
-  return runtimeReferencedCandidates(sourceIndex, placeholders);
+  return runtimeReferencedCandidates(sourceIndex, placeholders)
+    .slice(0, MAX_CAPTURE_CANDIDATES);
 }
 
 function runtimeDependencySha256(sourceIndex, candidates) {

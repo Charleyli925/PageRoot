@@ -620,6 +620,7 @@ test("hostile review fixtures are enforced by the adapter and page contract", ()
   assert.match(parserMutation.html, /class="comment-target"/u);
   assert.match(parserMutation.html, /class="comment-host"/u);
   assert.match(attributeLimit.html, /data-key-24/u);
+  assert.doesNotMatch(attributeLimit.html, /id=["']chart["']/u);
 
   assert.match(reviewDocument, /ReviewRuntimeVisualCaptureAdapter/);
   assert.match(reviewDocument, /REVIEW_PAGE_RUNTIME_VISUAL_CAPTURE_ADAPTER/);
@@ -636,6 +637,10 @@ test("hostile review fixtures are enforced by the adapter and page contract", ()
   assert.match(reviewDocument, /(?:color\|lab\|lch\|oklab\|oklch\|hsl\|hwb)/u);
   assert.match(reviewDocument, /runtimeVisualNumberIsFinite/);
   assert.match(reviewDocument, /runtimeVisualMutationRecordAddedNodes/);
+  assert.match(
+    reviewDocument,
+    /nonReviewAttributes\.length > RUNTIME_VISUAL_CONTRACT\.identityAttributeLimit[\s\S]*?return null;/u,
+  );
   assert.match(
     reviewDocument,
     /\.slice\(0, RUNTIME_VISUAL_CONTRACT\.identityAttributeLimit\)/,

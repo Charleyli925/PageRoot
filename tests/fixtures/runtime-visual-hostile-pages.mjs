@@ -90,13 +90,13 @@ export const RUNTIME_VISUAL_HOSTILE_PAGES = Object.freeze([
     pr: 107,
     threadId: "PRRT_kwDOTdtgh86XW6Z_",
     surface: "review",
-    html: `<!doctype html><main><div id="chart" ${Array.from(
+    html: `<!doctype html><main><div ${Array.from(
       { length: 25 },
       (_, index) => `data-key-${index}="${index}"`,
     ).join(" ")}></div><script>
-      document.getElementById("chart").append(document.createElement("canvas"));</script></main>`,
-    contract: "Producer and consumer use the same 24-attribute identity limit.",
-    closureReason: "The producer deterministically prioritizes and truncates identity attributes before serialization.",
+      document.querySelector("div").append(document.createElement("canvas"));</script></main>`,
+    contract: "A host with more than 24 identity attributes and no explicit id/name anchor is not bindable.",
+    closureReason: "The producer drops an over-limit fingerprint instead of allowing the retained prefix to guess a parser sibling; the consumer enforces the same 24-attribute ceiling.",
   }),
 ]);
 
