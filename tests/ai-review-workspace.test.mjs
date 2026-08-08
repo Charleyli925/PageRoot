@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import vm from "node:vm";
 
+import { chromium } from "playwright";
 import ts from "typescript";
 import { runtimeVisualHostilePage } from "./fixtures/runtime-visual-hostile-pages.mjs";
 
@@ -88,6 +89,94 @@ function generatedReviewBootstrap(candidateKeys = [], reviewCommentBindings = []
     runtimeVisualBindings,
     reviewCommentBindings,
   );
+}
+
+async function parsedReviewCommentLayouts({
+  binding,
+  authoredScript,
+  targets = [{
+    key: "parsed-comment",
+    selector: ".comment-host",
+    sourceNodeId: binding.sourceNodeId,
+  }],
+}) {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage({ viewport: { width: 800, height: 600 } });
+    const bootstrap = generatedReviewBootstrap([], [binding]);
+    await page.setContent(`<!doctype html>
+<html>
+  <head>
+    <style>
+      html, body { margin: 0; }
+      main { display: block; }
+      .comment-host { display: block; width: 10px; height: 10px; }
+    </style>
+    <script>${bootstrap}</script>
+  </head>
+  <body>
+    <main></main>
+    <script>${authoredScript}</script>
+  </body>
+</html>`, { waitUntil: "load" });
+    return await page.evaluate(async ({ sessionId, side, commentTargets }) => {
+      const messages = [];
+      let commentPort = null;
+      const receive = (event) => {
+        const message = event.data;
+        if (
+          message?.source === "pageroot-ai-review"
+          && message.type === "review-comment-channel"
+        ) {
+          commentPort = event.ports?.[0] || null;
+          commentPort?.start?.();
+        }
+        if (
+          message?.source === "pageroot-ai-review"
+          && message.type === "comment-layout"
+        ) messages.push(message);
+      };
+      addEventListener("message", receive);
+      try {
+        const challenge = "a".repeat(32);
+        postMessage({
+          source: "pageroot-ai-review-parent",
+          sessionId,
+          type: "request-review-comment-channel",
+          challenge,
+        }, "*");
+        const deadline = Date.now() + 3_000;
+        while (!commentPort && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        if (!commentPort) return { channel: false, layouts: messages };
+        commentPort.postMessage({
+          source: "pageroot-ai-review-comment-targets",
+          sessionId,
+          side,
+          type: "comment-targets",
+          reviewCommentTargets: commentTargets,
+        });
+        while (
+          !messages.some((message) => (
+            message.commentLayouts?.some((layout) => layout.key === "parsed-comment")
+          ))
+          && Date.now() < deadline
+        ) {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        return { channel: true, layouts: messages };
+      } finally {
+        removeEventListener("message", receive);
+      }
+    }, {
+      sessionId: "review-session",
+      side: "before",
+      commentTargets: targets,
+    });
+  } finally {
+    await browser.close();
+  }
 }
 
 test("a ready AI result is review-first with exactly one direct-open alternative", () => {
@@ -656,6 +745,63 @@ test("the generated runtime review bootstrap stays syntactically valid", () => {
   assert.doesNotMatch(bootstrap, /data-pageroot-review-runtime-source-/);
   assert.doesNotMatch(bootstrap, /data-pageroot-review-comment-source-/);
   assert.doesNotMatch(bootstrap, /review-comment-1|runtime-comment-caption/);
+});
+
+test("path-only review comments bind against a real parsed DOM", async () => {
+  const binding = {
+    sourceNodeId: "element:1:1:div",
+    path: [1, 0, 0],
+    tagName: "DIV",
+    sourceBoxSignature: "[]",
+    identityAttributes: [],
+    identityText: "",
+  };
+  const result = await parsedReviewCommentLayouts({
+    binding,
+    authoredScript: `
+      const host = document.createElement("div");
+      host.className = "comment-host";
+      document.querySelector("main").append(host);
+    `,
+  });
+  assert.equal(result.channel, true);
+  assert.ok(
+    result.layouts.some((message) => (
+      message.commentLayouts?.some((layout) => layout.key === "parsed-comment")
+    )),
+    "the exact frozen path should resolve the parsed comment element",
+  );
+});
+
+test("path-only review comments fail closed when the parsed path and tag diverge", async () => {
+  const binding = {
+    sourceNodeId: "element:1:1:div",
+    path: [1, 0, 0],
+    tagName: "DIV",
+    sourceBoxSignature: "[]",
+    identityAttributes: [],
+    identityText: "",
+  };
+  const result = await parsedReviewCommentLayouts({
+    binding,
+    authoredScript: `
+      const wrongPath = document.createElement("section");
+      wrongPath.className = "comment-host";
+      const main = document.querySelector("main");
+      main.append(wrongPath);
+      const actualTarget = document.createElement("div");
+      actualTarget.className = "comment-host";
+      main.append(actualTarget);
+    `,
+  });
+  assert.equal(result.channel, true);
+  assert.equal(
+    result.layouts.some((message) => (
+      message.commentLayouts?.some((layout) => layout.key === "parsed-comment")
+    )),
+    false,
+    "a mismatched path must not guess the later same-class element",
+  );
 });
 
 test("hostile review fixtures are enforced by the adapter and page contract", () => {
