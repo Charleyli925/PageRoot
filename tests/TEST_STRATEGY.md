@@ -8,8 +8,10 @@
 |---|---|---|---|
 | `npm run gate:edit` | 一次局部修改后 | 只运行影响映射命中的 Node 文件；必要时 typecheck | 快速发现局部逻辑错误，不启动浏览器或 Electron |
 | `npm run gate:task` | 一个开发任务完成时 | 静态检查、受影响 Node 文件，以及相关 Browser/Electron/AI 冒烟 | 在较短时间内证明生产链路已经接通 |
-| PR `pr-feedback` | `opened/synchronize/reopened/converted_to_draft` | 按影响映射选择 Node/编译检查 | 普通推送无论 Draft/Ready 都不重复消费完整矩阵；新提交取消仍在运行的旧 SHA 完整门禁 |
-| 一次性晋升 `release-gate` | 最终 PR Tree 从 Draft 显式转为 Ready | 全量 Node、三分片完整 Browser、独立 Native Electron、独立确定性 AI 闭环、真实 HTML 发现式门禁 | 每个最终候选只跑一次并签发 Tree Hash 凭证；后续新 SHA 必须重新 Draft→Ready 才能再晋升 |
+| PR `pr-feedback` | `opened/synchronize/reopened` | 按影响映射选择 Node/编译检查 | 普通推送无论 Draft/Ready 都不重复消费完整矩阵；仅切回 Draft 不产生 Feedback |
+| `review-settled` | 已在 Draft 请求 exact head/base 审阅的最终 Tree 转为 Ready，由 Ready 唯一触发最终审阅 | 实时 head/base、Draft 请求/完成、post-Ready 非阻断正式 review、不可变 exact-commit clean comment 或 phase-correct reaction、当前提交 `CHANGES_REQUESTED`、180 秒 settle window、活动非 outdated P0-P2 线程 | 审阅未结束、阻断、空 review/`EYES`、旧 head/base、迟到意见或未解决意见时不启动完整矩阵 |
+| `baseline-policy` | review 与分支策略通过 | 全局依赖 advisory policy 与 packaged-runtime closure | 基线红时不启动 Linux build、Browser 或 macOS Electron runner |
+| 一次性晋升 `release-gate` | review 与 baseline 均通过的最终 PR Tree | 全量 Node、三分片完整 Browser、独立 Native Electron、独立确定性 AI 闭环、真实 HTML 发现式门禁 | 每个最终候选只跑一次并签发 Tree Hash 凭证；后续新 SHA 必须重新 Draft 审阅并晋升 |
 | `Release Dry Run` | PR 改动命中打包、release metadata、Electron、Bridge、Schema 或资源路径 | clean job 组装/静态校验显式未签名（`identity=null`）App → 非发布 checkpoint → 第二 clean job 恢复 metadata、重建 renderer oracle、再次校验并启动核对名称/版本/Bundle ID | 不读取签名或 Apple 凭证、不生成 DMG/updater、不成为 Candidate、不创建 tag、不发布 |
 | `main-integrity` | 合并到 `main` | 校验合并 PR、Tree Hash、package/lockfile 版本和凭证时效 | 相等即复用完整源码证据，不重复 Node、Browser 或 Electron 测试；不相等直接失败 |
 | 按需 `Developer Preview` | 仅在开发者明确要求时 | 干净 Tree、最新 renderer、ad-hoc DMG、包内容完整性、一次隔离启动和精确 PR/内容交付报告 | 在消耗签名/公证时间前发现“漏打包或根本跑不起来”；不成为正式门禁 |
@@ -28,8 +30,12 @@ Tree，不在测试执行期间自动合并分支。组合 Tree 含任何未合�
 
 PR 必须从 Draft 开始。普通推送由独立的 `PR Feedback` workflow 处理，
 不会创建名为 `release-gate` 的跳过 job；因此分支保护不会把轻量反馈误当
-完整通过。只有 `ready_for_review` 事件存在完整 workflow。若晋升后又有提交，
-新 SHA 只获得反馈且缺少必需检查，必须重新转 Draft、冻结后再转 Ready。
+完整通过。只切回 Draft 不触发 Feedback。冻结 head 并更新到当前 base 后必须先在 Draft 用完整
+head/base SHA marker 明确请求 Codex review；每个新提交或 base 更新都需要新请求。只有
+`ready_for_review` 事件存在完整 workflow，并且 Ready 本身是唯一的最终审阅触发器，期间不再发布第二条 review 命令。`review-settled` 只接受携带当前完整 `commit_id`、匹配 `Reviewed commit` marker 且状态为 `COMMENTED` 或 `APPROVED` 的非阻断 Codex review、以固定 clean 结论开头且不可编辑的 exact-commit Codex comment，或处于正确 Draft/Ready 时间区间且严格晚于对应触发的 clean `THUMBS_UP`；当前提交的 `CHANGES_REQUESTED` 即使没有 inline thread 也不属于完成证据，Draft 阶段立即阻断，Ready 阶段从该信号等待 180 秒后阻断。canonical request 与 clean comment 的编辑状态来自 GraphQL `lastEditedAt`，即使创建/更新时间落在同一秒也不能绕过。Ready 把 Draft PR reaction 替换为 `EYES` 后，持久 clean comment 仍保留 Draft 证据。同一 head 的严格 canonical 历史若出现不同 base，整对证据失败关闭并要求产生新 head，不猜测 commit-only completion 的 base。同秒时间戳无法证明先后时失败关闭，空 review、`EYES`、普通讨论文本和任意非协议 Markdown 都不参与判定。它在每轮轮询中同时重验 live head/base，随后从真实完成或阻断时刻等待 180 秒，再检查未解决且未 outdated 的 P0-P2
+线程。通过后 `baseline-policy` 才检查依赖与打包运行时闭包；完整 Linux/Browser/
+Electron job 依赖这些前置条件；`release-gate` 在 attestation 前刷新同一基线，覆盖延迟 failed-job retry 不重跑已绿 prerequisite 的情况。若晋升后又有提交，新 SHA 只获得反馈且缺少
+必需检查，必须重新转 Draft、冻结、审阅后再转 Ready；base 更新同样使已审组合失效。
 同一时间只晋升一个 PR；其他并行修改继续留在 Draft，等前一个合并并更新
 到新 `main` 后再晋升，避免严格最新基线制造三角形重测。
 
@@ -169,18 +175,25 @@ Browser 验证真实 DOM 中保存卡片、草稿卡片和输入框在当前/其
 切换、聚焦和展开后的相对顺序、无重叠结果，以及输入框自动聚焦、
 `Enter` 保存、`Shift + Enter` 换行。
 
-顶层 Node 测试在一次执行中只出现一次。精确影响映射优先；只有找不到任何精确用例时才启用 `node-core` 兜底。PR CI 在 Linux 构建一次 Web renderer，供 Node 和 Browser 共享；每个 macOS Electron job 在目标系统本地构建 renderer，并先用独立 preflight 证明窗口可见、计时器和 animation frame 正常推进。Native Electron 与 AI 闭环分成两个 job，Browser 保持每个分片单 worker、零重试，但跨三个独立分片并发。测试直接提交隐藏文件 input 时不会经过真实“打开”动作的 pre-picker switch fence；共享 fixture driver 只允许在旧画布仍为 render-verified、input 仍 attached 时有限重提，不能重跑整条用例或掩盖加载后的产品断言失败。
+顶层 Node 测试在一次执行中只出现一次。精确影响映射优先；只有找不到任何精确用例时才启用 `node-core` 兜底。PR CI 在 Linux 构建一次 Web renderer，供 Node 和 Browser 共享；共享产物名称绑定唯一 `run_id` 而不绑定 `run_attempt`，并保留 30 天，因此同一 workflow run 只重跑失败 job 时可以复用已通过的构建。若 `source-build` 本身重跑，则以相同名称覆盖同一 run 的旧产物。每个 macOS Electron job 在目标系统本地构建 renderer，并先用独立 preflight 证明窗口可见、计时器和 animation frame 正常推进。Native Electron 与 AI 闭环分成两个 job，Browser 保持每个分片单 worker、零重试，但跨三个独立分片并发。测试直接提交隐藏文件 input 时不会经过真实“打开”动作的 pre-picker switch fence；共享 fixture driver 只允许在旧画布仍为 render-verified、input 仍 attached 时有限重提，不能重跑整条用例或掩盖加载后的产品断言失败。
 
 关键 CI 命令通过 `scripts/ci-evidence.mjs` 记录 commit、Tree、job、耗时、退出状态、标准化失败摘要与稳定签名。环境 preflight 失败可直接归类为 `ci_environment`；源码测试失败先标 `needs_triage`，再依据独立 oracle 归为 `product`、`test_script` 或 `ci_environment`。同一 SHA 的环境嫌疑只重跑失败 job；正式流程第二 job 失败时保留并复用第一 job 的签名 App checkpoint，不重新做已通过的构建、运行、签名和 App 公证。相同签名连续两次失败且本地不复现时冻结候选并登记 CI incident。完整规则见 `docs/RELEASE_PIPELINE_GOVERNANCE.md`。
 `tests/ci-evidence.test.mjs` 会枚举源码、开发预览、候选与发布工作流实际使用的
 每个 evidence stage；任何未同步到允许列表的名称必须在源码门禁中失败，不能等到
 正式候选打包才暴露。
 
-CI Health 同时读取 `pr-feedback.yml` 与 `ci.yml`。除了同一 run 的绿色 job
+CI Health 每日先跑依赖健康基线，并同时读取 `ci.yml`、`pr-feedback.yml`、
+`release-dry-run.yml`、`release-candidate.yml` 与 `release.yml`。
+除了同一 run 的绿色 job
 重跑，它还按 PR number（旧数据缺失时按 head branch）聚合不同 SHA 的完整
 门禁：`runsPerPullRequestAverage` 目标不超过 `1.25`，后续候选 SHA 消耗的
 runner minutes 占全部 PR CI 时间应低于 `20%`。这部分不能再被“每个 Tree
-只跑一次”的旧指标隐藏。
+只跑一次”的旧指标隐藏。报告同时保留总量、完整门禁、Feedback、候选 churn
+runner minutes 及 PR/候选取消率。只有 `status=completed` 且存在 conclusion 的
+workflow run 可进入完整门禁次数、延迟、尝试、churn 和取消率分母；活动 run
+的数量与已结束 job 所消耗的 runner minutes 另行展示，不使用可变的
+`updated_at` 伪造已完成延迟。Actions Summary 对每个可机器计算的报告目标明确显示
+`MET`、`MISSED` 或 `NO DATA`，而 review/baseline 阻断和正在执行的候选不会被误计成完整门禁。
 
 ## 判断标准优先级
 

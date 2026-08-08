@@ -11,6 +11,15 @@ import {
 } from "../scripts/source-gate-provenance.mjs";
 
 const productRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+function workflowJob(workflow, jobId) {
+  const marker = `  ${jobId}:\n`;
+  const start = workflow.indexOf(marker);
+  assert.notEqual(start, -1, `${jobId} job must exist`);
+  const remainder = workflow.slice(start + marker.length);
+  const nextJob = remainder.search(/^  [a-z0-9-]+:\n/mu);
+  return nextJob === -1 ? remainder : remainder.slice(0, nextJob);
+}
 const commitSha = "a".repeat(40);
 const treeSha = "b".repeat(40);
 const headSha = "c".repeat(40);
@@ -111,19 +120,63 @@ test("failed runs, expired artifacts and non-PR commits are never trusted", () =
   })).reason, "no_merged_pull_request");
 });
 
-test("GitHub workflows keep one ready-PR source boundary, an exact-tree main boundary and a pre-tag artifact boundary", async () => {
-  const [ci, feedback, candidate, release] = await Promise.all([
+test("GitHub workflows keep one reviewed ready-PR source boundary, an exact-tree main boundary and a pre-tag artifact boundary", async () => {
+  const [ci, feedback, candidate, release, packageText] = await Promise.all([
     readFile(path.join(productRoot, ".github/workflows/ci.yml"), "utf8"),
     readFile(path.join(productRoot, ".github/workflows/pr-feedback.yml"), "utf8"),
     readFile(path.join(productRoot, ".github/workflows/release-candidate.yml"), "utf8"),
     readFile(path.join(productRoot, ".github/workflows/release.yml"), "utf8"),
+    readFile(path.join(productRoot, "package.json"), "utf8"),
   ]);
+  const packageJson = JSON.parse(packageText);
+  const reviewSettled = workflowJob(ci, "review-settled");
+  const baselinePolicy = workflowJob(ci, "baseline-policy");
+  const sourceBuild = workflowJob(ci, "source-build");
+  const sourceNode = workflowJob(ci, "source-node");
+  const sourceBrowser = workflowJob(ci, "source-browser");
+  const electronNative = workflowJob(ci, "source-electron-native");
+  const electronAi = workflowJob(ci, "source-electron-ai");
+  const releaseGate = workflowJob(ci, "release-gate");
 
   assert.match(ci, /types: \[ready_for_review\]/u);
   assert.doesNotMatch(ci, /workflow_dispatch/u);
   assert.doesNotMatch(ci, /types: \[[^\]]*synchronize/u);
+  assert.doesNotMatch(ci, /pull_request_target/u);
+  assert.doesNotMatch(ci, /contents: write|issues: write|pull-requests: write/u);
+  assert.doesNotMatch(ci, /gh pr merge|mergePullRequest/u);
   assert.doesNotMatch(ci, /name: (?:draft|pr)-feedback/u);
+  assert.match(ci, /issues: read/u);
+  assert.match(reviewSettled, /name: review-settled/u);
+  assert.match(reviewSettled, /check-pr-review-settled\.mjs/u);
+  assert.match(reviewSettled, /--expected-head "\$\{\{ github\.event\.pull_request\.head\.sha \}\}"/u);
+  assert.match(reviewSettled, /--expected-base "\$\{\{ github\.event\.pull_request\.base\.sha \}\}"/u);
+  assert.match(reviewSettled, /--settle-seconds 180/u);
+  assert.match(reviewSettled, /--timeout-seconds 1200/u);
+  assert.match(reviewSettled, /--poll-seconds 20/u);
+  assert.match(baselinePolicy, /name: baseline-policy/u);
+  assert.match(baselinePolicy, /needs:[\s\S]*- review-settled[\s\S]*- branch-policy/u);
+  assert.match(baselinePolicy, /npm run audit:dependencies/u);
+  assert.match(sourceBuild, /needs:[\s\S]*- review-settled[\s\S]*- baseline-policy/u);
+  assert.match(sourceBuild, /npm run ci:source-build:prepared/u);
+  assert.match(sourceBuild, /name: PageRoot-web-build-\$\{\{ github\.run_id \}\}/u);
+  assert.match(sourceBuild, /retention-days: 30/u);
+  assert.match(sourceBuild, /overwrite: true/u);
+  assert.doesNotMatch(sourceBuild, /PageRoot-web-build-[^\n]*run_attempt/u);
+  assert.match(sourceNode, /name: PageRoot-web-build-\$\{\{ github\.run_id \}\}/u);
+  assert.match(sourceBrowser, /name: PageRoot-web-build-\$\{\{ github\.run_id \}\}/u);
+  assert.doesNotMatch(sourceNode, /PageRoot-web-build-[^\n]*run_attempt/u);
+  assert.doesNotMatch(sourceBrowser, /PageRoot-web-build-[^\n]*run_attempt/u);
+  assert.match(electronNative, /needs:[\s\S]*- review-settled[\s\S]*- baseline-policy/u);
+  assert.match(electronAi, /needs:[\s\S]*- review-settled[\s\S]*- baseline-policy/u);
   assert.match(ci, /name: release-gate/u);
+  assert.match(releaseGate, /needs:[\s\S]*- review-settled[\s\S]*- baseline-policy/u);
+  assert.match(releaseGate, /REVIEW_RESULT: \$\{\{ needs\.review-settled\.result \}\}/u);
+  assert.match(releaseGate, /BASELINE_RESULT: \$\{\{ needs\.baseline-policy\.result \}\}/u);
+  assert.match(releaseGate, /Revalidate frozen head\/base review evidence/u);
+  assert.match(releaseGate, /--expected-head "\$\{\{ github\.event\.pull_request\.head\.sha \}\}"/u);
+  assert.match(releaseGate, /--expected-base "\$\{\{ github\.event\.pull_request\.base\.sha \}\}"/u);
+  assert.match(releaseGate, /Refresh dependency and packaged-runtime baseline before attestation/u);
+  assert.match(releaseGate, /npm run audit:dependencies/u);
   assert.match(ci, /source-gate-provenance\.mjs create/u);
   assert.match(ci, /steps\.provenance\.outputs\.artifact_name/u);
   assert.match(ci, /runs-on: ubuntu-24\.04/u);
@@ -144,13 +197,22 @@ test("GitHub workflows keep one ready-PR source boundary, an exact-tree main bou
   assert.doesNotMatch(ci, /name: main-smoke|gate:main:auto/u);
   assert.doesNotMatch(ci, /push:[\s\S]{0,300}gate:release:auto/u);
 
-  assert.match(feedback, /types: \[opened, synchronize, reopened, converted_to_draft\]/u);
+  assert.match(feedback, /types: \[opened, synchronize, reopened\]/u);
+  assert.doesNotMatch(feedback, /converted_to_draft/u);
   assert.match(feedback, /name: pr-feedback/u);
   assert.match(feedback, /--stage pr-feedback/u);
   assert.match(feedback, /npm run gate:edit -- --base "\$PR_BASE_SHA"/u);
   assert.match(feedback, /group: pageroot-pr-/u);
   assert.match(ci, /group: pageroot-pr-/u);
   assert.doesNotMatch(feedback, /name: release-gate|test:browser:full|test:electron:full/u);
+  assert.equal(
+    packageJson.scripts["ci:source-build"],
+    "npm run audit:dependencies && npm run ci:source-build:prepared",
+  );
+  assert.equal(
+    packageJson.scripts["ci:source-build:prepared"],
+    "npm run typecheck && npm run lint && npm run build",
+  );
 
   assert.match(candidate, /source-gate-provenance\.mjs verify/u);
   assert.match(candidate, /gate:candidate-app:auto/u);

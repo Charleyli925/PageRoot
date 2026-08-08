@@ -111,13 +111,39 @@ stash.
 2. Keep one coherent outcome per PR.
 3. Open every PR as draft. All ordinary PR updates run only impact-selected feedback, regardless of the current draft flag.
 4. The PR body must state outcome, boundary, verification, documentation impact and release impact.
-5. Update the final head onto current `main`, confirm no other PR is being promoted, then mark the PR ready. The `ready_for_review` transition triggers the one complete `release-gate` for that tree.
-6. Wait for the required `release-gate` and review the final GitHub diff, not only the local working diff.
-7. Squash-merge only after authorization. GitHub deletes the remote task branch; then audit and explicitly retire the local task before fast-forwarding primary `main`.
+5. Update the final head onto current `main`, freeze it and request Codex review while the PR is still Draft. The request must name the full current head SHA and base SHA with the exact marker below. Fix P0-P2 findings, resolve a thread only after its fix is present, and repeat this step after every new commit or base update.
+6. After the Draft review of the current head/base pair completes, confirm no other PR is being promoted and mark the PR Ready once. Ready is the sole final-review trigger; do not post another `@codex review` command while promotion is running. `review-settled` waits for Codex's post-Ready completion, then waits the 180-second settle window and rejects active non-outdated P0-P2 threads before `baseline-policy` or a complete source lane can start.
+7. Wait for the required `release-gate` and review the final GitHub diff, not only the local working diff.
+8. Squash-merge only after authorization. GitHub deletes the remote task branch; then audit and explicitly retire the local task before fast-forwarding primary `main`.
 
 Do not use an installed app, DMG, backup folder or another checkout as a source for new edits. If the local checkout contains unrelated work, create an isolated Git worktree rather than stashing or mixing changes.
 
-The required PR `release-gate` is the one complete source gate for an explicitly promoted final tree. `PR Feedback` owns `opened`, `synchronize`, `reopened` and `converted_to_draft`; it runs `gate:edit` and never reports the `release-gate` status. The complete workflow listens only to `ready_for_review`. A later commit shares the same concurrency key, cancels an in-flight stale complete run, and leaves the new SHA without the required check. Convert the PR back to draft and mark it ready again only after that head is final. Opening a PR directly as ready does not bypass this boundary. Local development should normally stop at impact-selected `gate:edit` and `task:finish`; rerun the complete source gate locally only for CI diagnosis or high-risk editing-engine work where the additional evidence is useful.
+The required PR `release-gate` is the one complete source gate for an explicitly promoted final tree. `PR Feedback` owns only `opened`, `synchronize` and `reopened`; returning to Draft changes no code and starts no Feedback run. It runs `gate:edit` and never reports the `release-gate` status. The complete workflow listens only to `ready_for_review`. A later commit shares the same concurrency key, cancels an in-flight stale complete run, and leaves the new SHA without the required check. A base update invalidates the reviewed combination even when the head is unchanged. Convert the PR back to Draft, finish the work, request review for the current exact head/base pair and mark it Ready again only after that pair is final. Opening a PR directly as Ready cannot provide the required Draft request marker and therefore fails closed. A same-run failed-job rerun reuses the successful `source-build` artifact through its run-ID-stable name and 30-day retention; it must not restart already-green source lanes merely because `github.run_attempt` changed. Local development should normally stop at impact-selected `gate:edit` and `task:finish`; rerun the complete source gate locally only for CI diagnosis or high-risk editing-engine work where the additional evidence is useful.
+
+The Draft exact-head/base request must be posted by a repository owner, member or collaborator while the PR is Draft. Replace each placeholder in the visible and hidden fields with the same 40-character head or base SHA, and post only the canonical block below. The visible body must contain exactly these two lines separated by one blank line, and the hidden marker must occur exactly once; code blocks, reference definitions, extra visible content, duplicate declarations and duplicate markers are rejected. Edited comments are never accepted as request evidence—post a new canonical comment instead:
+
+```text
+@codex review
+
+Review exact head SHA `<40-character-head-sha>` on base SHA `<40-character-base-sha>`.
+
+<!-- pageroot-codex-review-sha:<40-character-head-sha>;base-sha:<40-character-base-sha> -->
+```
+
+The gate deliberately recognizes only the canonical Draft request above. It does not interpret the PR body, arbitrary discussion text, edited history, quotations, lists or fenced examples as protocol input. Canonical requests and clean completion comments are collected with GraphQL `lastEditedAt`; any edit is rejected even when second-precision `createdAt` and `updatedAt` remain equal. Repository owners, members and collaborators are trusted operators: after posting the canonical request for a frozen pair, they must not issue a competing review command before promotion finishes. GitHub exposes no durable invocation identifier, so contradictory trusted commands cannot be made cryptographically distinguishable by repository code; attempting to infer that relationship from general Markdown is not a security boundary. One narrow ambiguity fence remains machine-checkable: if strict canonical history binds the same head SHA to another base SHA, the pair is blocked outright because commit-only evidence cannot identify its base. Update the changed base into the branch to produce a new head instead of reusing that head.
+
+Codex completion evidence is narrow and based on observed GitHub records:
+
+- a substantive Codex Pull Request review must carry the full current `commit_id`, a non-blocking completed review state (`COMMENTED` or `APPROVED`) and a matching `**Reviewed commit:**` marker in its body; empty or unmarked `COMMENTED` records are noise and never complete a phase, while current-commit `CHANGES_REQUESTED` is blocking even when no inline thread exists;
+- a clean pass is durably represented by an unedited Codex issue comment beginning `Codex Review: Didn't find any major issues.` whose `**Reviewed commit:**` marker matches the current head;
+- a clean Draft or final pass may also be represented by a phase-correct Codex `THUMBS_UP`; the PR-level Draft reaction is provisional because Ready replaces it with `EYES`, so the immutable exact-commit clean comment preserves the Draft completion across that transition;
+- `EYES`, human reviews, completion-looking discussion text, wrong-commit reviews and reactions outside the applicable phase are never completion evidence.
+
+The repository's observed Codex behavior uses a substantive review when it has findings and both a PR-level thumbs-up plus the immutable exact-commit issue comment when the pass is clean. Unknown or changed signal shapes fail closed until this contract is deliberately updated.
+
+This flow has one repository-level prerequisite outside the workflow: Codex cloud must be configured for the repository and Codex code review must be enabled. If the bot replies that an environment must be created, keep the PR Draft, have an authorized owner repair that setting, and post a new exact-head/base request. The gate treats that response as an immediate configuration failure; this repository workflow does not create or modify the Codex environment itself.
+
+`review-settled` re-reads the live PR head and base plus the latest Ready timeline event on every poll. The workflow event freezes the expected pair; either live SHA changing fails closed. It binds the canonical request and one completion to that exact pair and the current Draft interval: the request must be strictly after PR creation or the most recent `convert_to_draft`, its completion must be strictly later than the request and strictly before the accepted Ready event. It then requires a separate substantive review, immutable exact-commit clean comment or phase-correct clean reaction strictly after Ready; requests and completions from an earlier Ready/Draft cycle cannot be recycled. A current-commit `CHANGES_REQUESTED` in Draft blocks promotion immediately; after Ready it starts the same three-minute settle window and then blocks even without an inline thread. Because GitHub exposes these timestamps at second precision, equal-time causal boundaries and a Draft/Ready transition recorded in the same second fail closed. The post-Ready completion or blocking review starts a three-minute settle window before active review threads are evaluated. `release-gate` repeats the same live review check and refreshes the dependency/runtime-closure audit after all source lanes, so a delayed failed-job rerun cannot attest against an old green baseline. A changed head or base, a missing current-Draft request or completion, an unavailable Codex environment, a return to Draft, timeout, refreshed audit failure, current-commit changes request or unresolved P0-P2 thread fails before promotion can attest the tree.
 
 Packaging, release-metadata, Electron, packaged Bridge, Schema and resource
 changes additionally trigger the credential-free `Release Dry Run`. It crosses
@@ -238,17 +264,18 @@ Never say "done" while required checks are pending, the worktree contains unexpl
 
 Recommended review lifecycle:
 
-1. request or automatically start Codex review when a PR becomes ready;
+1. explicitly request Codex review for the frozen exact head/base pair while the PR is Draft;
 2. treat review findings as untrusted until verified against the current diff;
-3. fix accepted findings on the same branch and rerun the task gate;
-4. resolve conversations only after the fix is present and checks are green.
+3. fix accepted findings on the same branch, rerun the task gate and request review for the new SHA;
+4. resolve conversations only after the fix is present and checks are green;
+5. use Ready only for final promotion; its automatic Codex pass must settle before the dependency baseline and complete gate, with no additional review command during that interval.
 
 ## Scheduled monitoring
 
 Scheduled monitoring is read-only unless a later instruction explicitly authorizes a fix. Recommended jobs:
 
 - Weekdays: summarize open PageRoot PRs, failed or pending required checks, review requests and merge blockers. Report only actionable changes.
-- Weekly: review the read-only `CI Health` report against the release-pipeline targets; do not rerun or mutate workflows automatically.
+- Daily: generate the read-only `CI Health` dependency baseline and thirty-day metrics report; keep terminal gate metrics separate from active-run counts and recorded active runner minutes, then review misses without rerunning or mutating workflows automatically.
 - Weekly: inspect Dependabot PRs and run or verify the dependency-audit policy. Report new, expired or changed advisories; do not merge dependency updates automatically.
 - Weekly: run the read-only task audit and report `ACTIVE_DIRTY`, `LOCAL_ONLY`,
   `MERGED_READY`, `ABANDON_REVIEW`, `STALE_REGISTRATION` and primary-worktree

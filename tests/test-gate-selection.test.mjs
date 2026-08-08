@@ -9,6 +9,7 @@ import {
   selectGatePlan,
   validateImpactMap,
 } from "../scripts/test-gate-core.mjs";
+import { CI_HEALTH_WORKFLOW_INPUTS } from "../scripts/ci-health-report.mjs";
 import { nodeTestGroups } from "../scripts/test-node-group.mjs";
 
 const productRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -67,6 +68,20 @@ test("documentation-only changes produce an explicit no-test plan", () => {
   });
   assert.deepEqual(plan.suites, []);
   assert.deepEqual(plan.selectedNodeTests, []);
+});
+
+test("every CI Health workflow input selects its ownership coverage", () => {
+  for (const workflow of Object.values(CI_HEALTH_WORKFLOW_INPUTS)) {
+    const plan = selectGatePlan({
+      map,
+      lane: "edit",
+      changedFiles: [`.github/workflows/${workflow}`],
+    });
+    assert.ok(
+      plan.selectedNodeTests.includes("tests/ci-health-report.test.mjs"),
+      `${workflow} must select CI Health contract coverage`,
+    );
+  }
 });
 
 test("real-HTML gate changes run the discovery oracle instead of an unrelated smoke subset", () => {

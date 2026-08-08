@@ -234,6 +234,16 @@
       "nodeTests": ["tests/source-gate-provenance.test.mjs"]
     },
     {
+      "id": "pr-review-settled",
+      "patterns": [
+        "^scripts/check-pr-review-settled\\.mjs$",
+        "^tests/pr-review-settled\\.test\\.mjs$",
+        "^\\.github/workflows/(?:ci|pr-feedback)\\.yml$"
+      ],
+      "suites": [],
+      "nodeTests": ["tests/pr-review-settled.test.mjs"]
+    },
+    {
       "id": "ci-evidence",
       "patterns": [
         "^scripts/ci-evidence\\.mjs$",
@@ -248,10 +258,13 @@
       "patterns": [
         "^scripts/ci-health-report\\.mjs$",
         "^tests/ci-health-report\\.test\\.mjs$",
-        "^\\.github/workflows/(?:ci|ci-health|pr-feedback)\\.yml$"
+        "^\\.github/workflows/(?:ci|ci-health|pr-feedback|release|release-candidate|release-dry-run)\\.yml$"
       ],
       "suites": [],
-      "nodeTests": ["tests/ci-health-report.test.mjs"]
+      "nodeTests": [
+        "tests/ci-health-report.test.mjs",
+        "tests/test-gate-selection.test.mjs"
+      ]
     },
     {
       "id": "release-candidate-provenance",
