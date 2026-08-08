@@ -292,6 +292,25 @@ export function normalizeEditableIslandHtml(
   return serialize(nextFragment);
 }
 
+export function normalizeEditableTextFragmentHtml(
+  value,
+  { baselineInnerHtml = "" } = {},
+) {
+  const normalized = normalizeEditableIslandHtml(value, { baselineInnerHtml });
+  const fragment = parseFragment(normalized);
+  const unsupported = childNodesFor(fragment).find(
+    (node) => node.nodeName !== "#text",
+  );
+  if (unsupported) {
+    fail(
+      "EDITABLE_TEXT_FRAGMENT_STRUCTURE_UNSUPPORTED",
+      "A direct source text fragment can only contain plain text.",
+      { nodeName: unsupported.nodeName },
+    );
+  }
+  return serialize(fragment);
+}
+
 function sourceDescendants(index, element) {
   const descendants = [];
   const pending = [...element.childIds];

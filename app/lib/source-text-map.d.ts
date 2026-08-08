@@ -85,6 +85,11 @@ export declare function buildSourceTextMap(
   options?: { allowEmpty?: boolean; ignoreComments?: boolean },
 ): SourceTextMap;
 
+export declare function buildSourceTextFragmentMap(
+  index: Record<string, unknown>,
+  target: string | Record<string, unknown>,
+): SourceTextMap;
+
 export declare function textOffsetToSourceAnchor(
   map: SourceTextMap,
   offset: number,

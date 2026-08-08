@@ -124,6 +124,7 @@ PageRoot 让用户在真实本地 HTML 上完成两类工作：
 - Hyperlink、表单、任意作者脚本、仅靠 class 识别的控件、弹窗、Popover
   和抽屉在编辑模式中继续保持禁用；真实页面行为只在隔离预览中运行。
 - 双击 source-backed 静态文字后，光标直接出现在点击位置；普通文字和安全的混合行内文字都可输入、删除和选择。
+- 行内节点向上寻找宿主遇到不安全复杂父容器时，保留最近的安全节点；复杂父容器下能唯一映射的直属裸文字可以纯文本方式精确编辑。
 - 可编辑宿主的可视段首、段尾和非空样式交界均可输入：可视段首继承右侧首字符，其他交界继承左侧字符，工具栏显示与下一次输入一致的样式。
 - 文字 checkpoint 可以跨多个源码 text node，但不得拍平或序列化既有行内标签。
 - 字体、字号、字重、斜体和颜色。
@@ -135,10 +136,10 @@ PageRoot 让用户在真实本地 HTML 上完成两类工作：
 
 每次本地修改：
 
-1. 文字双击时由 `IslandEditingController` 为当前源码宿主建立唯一可编辑岛；浏览器只负责光标、Selection 和 IME，Controller 接管输入、删除、换行、粘贴与格式变更。
-2. 约 700ms、格式、Cmd+S、目标切换、关闭或发送边界生成带目标身份、源 Hash、精确岛内 before/after 和操作类型的 `replace-editable-island` 命令；编辑工具栏及与当前选区绑定的评论操作不结束会话，点击除此之外的页面或 App 区域则提交 checkpoint，并同时清除编辑态、选区与工具栏。
+1. 文字双击时由 `IslandEditingController` 为当前源码宿主建立唯一可编辑岛；向上提升遇到不安全父容器时回退到最近安全节点，或为唯一直属裸文字建立一个不写入源码的临时纯文本宿主。浏览器只负责光标、Selection 和 IME，Controller 接管实际变更。
+2. 约 700ms、格式、Cmd+S、目标切换、关闭或发送边界生成带目标身份、源 Hash 和精确 before/after 的 `replace-editable-island` 或 `update-direct-text-node` 命令；编辑工具栏及与当前选区绑定的评论操作不结束会话，点击除此之外的页面或 App 区域则提交 checkpoint，并同时清除编辑态、选区与工具栏。
 3. SourceIndex/TargetResolver 唯一定位真实源码范围；无法唯一定位时保留草稿并阻止操作。
-4. SourcePatchEngine 只替换目标元素的精确 `contentRange`，并验证岛外源码逐字节不变。岛内可进行最小 parse5 规范化；成功事务把实际 forward Patch 和对应 exact inverse Patch 作为同一操作写入有界源码历史，不保存整页 DOM 快照。
+4. SourcePatchEngine 只替换目标元素的精确 `contentRange`，或裸文字的精确 text-node range，并验证其他源码逐字节不变。文本节点删除时仍由存活父 TargetRef 授权，保证 exact inverse 可恢复；不保存整页 DOM 快照。
 5. 用 Patch 结果更新内存 HTML 并原子重建 projection；失败时保留原会话和草稿。
 6. 增加 `editRevision` 并追加稳定 ID 的 edit event。
 7. 触发有上限 debounce 的同一条串行写入队列。
@@ -154,8 +155,8 @@ Selection 重放 IME 最终文本。
 
 安全岛可保留行内语义、注释和不可变的图片、SVG、MathML、Canvas、
 表单控件及媒体原子。MutationObserver 发现非 Controller 所有的 DOM
-变化时立即恢复。脚本、样式、表单/嵌入根和包含不安全块结构的目标不
-进入文字编辑。最终只能提交完整岛内容，经受保护属性、原子、注释、
+变化时立即恢复。脚本、样式、表单/嵌入根和不安全块结构本身不
+进入文字编辑；其安全行内子节点或唯一直属裸文字可按精确边界编辑。最终只能提交完整岛或纯文本片段，经受保护属性、原子、注释、
 重解析、范围和源码 Hash 校验；预览 DOM 永远不能整页序列化回源码。
 
 编辑画布必须明确提示“本地文本编辑会直接修改源文件并保存”。这里的“源文件”指项目当前指向的 HTML：首次打开时是用户原文件；AI 成功后是新的 `working/V1.x.html`。
