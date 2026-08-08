@@ -30,6 +30,7 @@ export const RUNTIME_VISUAL_HOSTILE_PAGES = Object.freeze([
     html: `<!doctype html><main><div id="chart"></div><script>
       const label=document.createElement("span");label.style.color="transparent";label.textContent="hidden";
       const alphaLabel=document.createElement("span");alphaLabel.style.cssText="color:rgba(255, 0, 0, 0);text-shadow:0 0 2px rgba(0, 255, 0, 0)";alphaLabel.textContent="also hidden";
+      RegExp.prototype[Symbol.match]=()=>null;
       document.getElementById("chart").append(label,alphaLabel);</script></main>`,
     contract: "Text without visible color, shadow, decoration, or stroke paint is not visual evidence.",
     closureReason: "Keyword and zero-alpha paint are both excluded before content, paint, and geometry hashing.",
@@ -74,10 +75,10 @@ export const RUNTIME_VISUAL_HOSTILE_PAGES = Object.freeze([
     pr: 107,
     threadId: "PRRT_kwDOTdtgh86XW6Z8",
     surface: "review",
-    html: `<!doctype html><main><section id="target">original</section><script>
-      document.getElementById("target").textContent="mutated";</script></main>`,
-    contract: "Parser-added targets may bind by stable identity before mutable text is compared.",
-    closureReason: "Mutation records retain the exact inserted Element; text is ignored only when stable attributes prove it.",
+    html: `<!doctype html><main><section id="target">original</section><div class="chart"></div><script>
+      document.getElementById("target").textContent="mutated";</script><div class="chart"></div></main>`,
+    contract: "Parser-added targets may bind by stable identity before mutable text is compared, even across duplicate parser checkpoints.",
+    closureReason: "Mutation records retain only the path-matching Element; mismatched observations never fall back to a partial-document fingerprint scan.",
   }),
   Object.freeze({
     id: "pr107-attribute-limit",

@@ -3742,13 +3742,13 @@ function reviewBootstrap(
   const runtimeVisualStringCharCodeAt = runtimeVisualBindCall(
     String.prototype.charCodeAt,
   );
-  const runtimeVisualStringMatch = runtimeVisualBindCall(String.prototype.match);
   const runtimeVisualStringToLowerCase = runtimeVisualBindCall(String.prototype.toLowerCase);
   const runtimeVisualStringTrim = runtimeVisualBindCall(String.prototype.trim);
   const runtimeVisualStringFromCharCode = String.fromCharCode.bind(String);
   const runtimeVisualNumberToString = runtimeVisualBindCall(Number.prototype.toString);
   const runtimeVisualStringPadStart = runtimeVisualBindCall(String.prototype.padStart);
   const runtimeVisualRegExpTest = runtimeVisualBindCall(RegExp.prototype.test);
+  const runtimeVisualRegExpExec = runtimeVisualBindCall(RegExp.prototype.exec);
   const runtimeVisualDocumentQuerySelectorAll = runtimeVisualBindCall(
     Document.prototype.querySelectorAll,
   );
@@ -4225,9 +4225,11 @@ function reviewBootstrap(
   const captureRuntimeVisualInitialBinding = (binding, observedElement = null) => {
     const key = runtimeVisualIdentityKey(binding?.key);
     if (!key || runtimeVisualSetHas(runtimeVisualInvalidKeys, key)) return;
-    const element = runtimeVisualObservedBindingMatches(observedElement, binding)
-      ? observedElement
-      : runtimeVisualInitialBindingElement(binding);
+    if (
+      observedElement !== null
+      && !runtimeVisualObservedBindingMatches(observedElement, binding)
+    ) return;
+    const element = observedElement || runtimeVisualInitialBindingElement(binding);
     if (!element) return;
     const existing = runtimeVisualMapGet(runtimeVisualIdentityElements, key);
     const existingKey = runtimeVisualMapGet(runtimeVisualHostKeys, element);
@@ -4255,9 +4257,11 @@ function reviewBootstrap(
       !sourceNodeId
       || runtimeVisualSetHas(reviewCommentInvalidSourceNodeIds, sourceNodeId)
     ) return;
-    const element = runtimeVisualObservedBindingMatches(observedElement, binding)
-      ? observedElement
-      : runtimeVisualInitialBindingElement(binding);
+    if (
+      observedElement !== null
+      && !runtimeVisualObservedBindingMatches(observedElement, binding)
+    ) return;
+    const element = observedElement || runtimeVisualInitialBindingElement(binding);
     if (!element) return;
     const existing = runtimeVisualMapGet(reviewCommentIdentityElements, sourceNodeId);
     if (existing && existing !== element) {
@@ -4266,17 +4270,21 @@ function reviewBootstrap(
     }
     if (!existing) runtimeVisualMapSet(reviewCommentIdentityElements, sourceNodeId, element);
   };
+  let runtimeVisualInitialBindingsBootstrapped = false;
   let runtimeVisualInitialBindingsClosed = false;
   const captureInitialBindings = (records = []) => {
     if (runtimeVisualInitialBindingsClosed) return;
-    runtimeVisualArrayForEach(
-      runtimeVisualInitialBindings,
-      captureRuntimeVisualInitialBinding,
-    );
-    runtimeVisualArrayForEach(
-      reviewCommentInitialBindings,
-      captureReviewCommentInitialBinding,
-    );
+    if (!runtimeVisualInitialBindingsBootstrapped) {
+      runtimeVisualInitialBindingsBootstrapped = true;
+      runtimeVisualArrayForEach(
+        runtimeVisualInitialBindings,
+        captureRuntimeVisualInitialBinding,
+      );
+      runtimeVisualArrayForEach(
+        reviewCommentInitialBindings,
+        captureReviewCommentInitialBinding,
+      );
+    }
     runtimeVisualArrayForEach(records, (record) => {
       if (runtimeVisualMutationRecordType(record) !== "childList") return;
       const addedNodes = runtimeVisualMutationRecordAddedNodes(record);
@@ -4425,9 +4433,9 @@ function reviewBootstrap(
   const runtimeVisualTransparent = (value) => {
     const normalized = runtimeVisualNormalizedPaintValue(value);
     if (!normalized || normalized === "transparent") return true;
-    const alphaMatch = runtimeVisualStringMatch(
-      normalized,
+    const alphaMatch = runtimeVisualRegExpExec(
       /^rgba?\([^)]*[,/]\s*([0-9.]+%?)\s*\)$/iu,
+      normalized,
     );
     if (alphaMatch) {
       const alpha = runtimeVisualParseFloat(alphaMatch[1]);
@@ -4441,10 +4449,13 @@ function reviewBootstrap(
   const runtimeVisualShadowHasPaint = (value) => {
     const normalized = runtimeVisualNormalizedPaintValue(value);
     if (!normalized || normalized === "none") return false;
-    const colors = runtimeVisualStringMatch(
-      normalized,
-      /(?:rgba?\([^)]*\)|#[0-9a-f]{3,8}|transparent)/giu,
-    ) || [];
+    const colorPattern = /(?:rgba?\([^)]*\)|#[0-9a-f]{3,8}|transparent)/giu;
+    const colors = [];
+    let colorMatch = runtimeVisualRegExpExec(colorPattern, normalized);
+    while (colorMatch) {
+      runtimeVisualArrayPush(colors, colorMatch[0]);
+      colorMatch = runtimeVisualRegExpExec(colorPattern, normalized);
+    }
     return !colors.length
       || runtimeVisualArraySome(colors, (color) => !runtimeVisualTransparent(color));
   };
