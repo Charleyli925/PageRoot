@@ -179,7 +179,11 @@ function reviewInvocationStatus(body) {
       }
       continue;
     }
-    if (!fence && /^ {0,3}@codex[ \t]+review\b/iu.test(line)) return "invocation";
+    if (
+      !fence
+      && !/^(?: {4}|\t)/u.test(line)
+      && /@codex[ \t]+review\b/iu.test(line)
+    ) return "invocation";
   }
   return "none";
 }

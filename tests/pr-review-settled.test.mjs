@@ -358,9 +358,15 @@ test("noncanonical review invocations force exact-request completion reactions",
   assert.equal(evaluate({
     issueComments: [request(), finalRequest(), {
       ...request({ id: 90 }),
-      body: "```text\n@codex review\n```\n\n> @codex review",
+      body: "```text\n@codex review\n```",
     }],
   }).status, "settled");
+  assert.equal(evaluate({
+    issueComments: [request(), finalRequest(), {
+      ...request({ id: 95 }),
+      body: "- @codex review",
+    }],
+  }).reason, "draft_review_not_completed_before_promotion");
 });
 
 test("PR-body and malformed review invocations fail closed without misreading fenced examples", () => {
@@ -483,6 +489,12 @@ test("clean Codex comments and reactions bind to the correct exact-head/base req
       body: "> @codex review\n\nQuoted context only.",
     }],
     reviews: [draftReview()],
+    requestReactions: [{
+      id: 57,
+      user: { login: "chatgpt-codex-connector[bot]" },
+      content: "+1",
+      created_at: draftCompletedAt,
+    }],
     finalRequestReactions: [{
       id: 56,
       user: { login: "chatgpt-codex-connector[bot]" },

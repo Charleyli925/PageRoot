@@ -175,6 +175,8 @@ test("GitHub workflows keep one reviewed ready-PR source boundary, an exact-tree
   assert.match(releaseGate, /Revalidate frozen head\/base review evidence/u);
   assert.match(releaseGate, /--expected-head "\$\{\{ github\.event\.pull_request\.head\.sha \}\}"/u);
   assert.match(releaseGate, /--expected-base "\$\{\{ github\.event\.pull_request\.base\.sha \}\}"/u);
+  assert.match(releaseGate, /Refresh dependency and packaged-runtime baseline before attestation/u);
+  assert.match(releaseGate, /npm run audit:dependencies/u);
   assert.match(ci, /source-gate-provenance\.mjs create/u);
   assert.match(ci, /steps\.provenance\.outputs\.artifact_name/u);
   assert.match(ci, /runs-on: ubuntu-24\.04/u);

@@ -34,9 +34,9 @@ PR 必须从 Draft 开始。普通推送由独立的 `PR Feedback` workflow 处�
 head/base SHA marker 明确请求 Codex review；每个新提交或 base 更新都需要新请求。只有
 `ready_for_review` 事件存在完整 workflow，但 `review-settled` 仍要求 Ready
 之后发布不同 marker 的 final exact-head/base 请求，并等到该评论上的 Codex 👍 或携带
-当前 commit 身份的完成信号；它在每轮轮询中同时重验 live head/base，PR 级 reaction 不作为证据。只要可信 PR 正文曾被编辑或包含审阅命令，或 PR 对话/审阅线程中的可信评论曾被编辑、无法安全解析、或不能 canonical 绑定到同一 exact head/base（含缺失或不匹配 marker），commit-only 完成信号就因无法区分调用而被忽略，只接受新 request 自身的 Codex 👍；常规处理应把新 base 更新进分支并产生新 head。随后等待 180 秒，再检查未解决且未 outdated 的 P0-P2
+当前 commit 身份的完成信号；它在每轮轮询中同时重验 live head/base，PR 级 reaction 不作为证据。只要可信 PR 正文曾被编辑或包含可见审阅命令，或 PR 对话/审阅线程中的可信评论曾被编辑、无法安全解析、含列表/标题/引用/行内等可见 non-canonical 审阅命令、或不能 canonical 绑定到同一 exact head/base，commit-only 完成信号就因无法区分调用而被忽略，只接受新 request 自身的 Codex 👍；fenced/indented code 示例不算调用。常规处理应把新 base 更新进分支并产生新 head。随后等待 180 秒，再检查未解决且未 outdated 的 P0-P2
 线程。通过后 `baseline-policy` 才检查依赖与打包运行时闭包；完整 Linux/Browser/
-Electron job 依赖这些前置条件。若晋升后又有提交，新 SHA 只获得反馈且缺少
+Electron job 依赖这些前置条件；`release-gate` 在 attestation 前刷新同一基线，覆盖延迟 failed-job retry 不重跑已绿 prerequisite 的情况。若晋升后又有提交，新 SHA 只获得反馈且缺少
 必需检查，必须重新转 Draft、冻结、审阅后再转 Ready；base 更新同样使已审组合失效。
 同一时间只晋升一个 PR；其他并行修改继续留在 Draft，等前一个合并并更新
 到新 `main` 后再晋升，避免严格最新基线制造三角形重测。
