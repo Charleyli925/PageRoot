@@ -1525,7 +1525,6 @@ test("a verified AI result stays pending through desktop review until the user a
       "#review-runtime-canvas-chart",
       "#review-runtime-host-paint-chart",
       "#review-runtime-single-painted-child",
-      "#review-runtime-attribute-limit",
       "#review-runtime-opacity-chart",
       "#review-runtime-descendant-opacity-chart",
       "#review-runtime-svg-descendant-opacity-chart",
@@ -1549,6 +1548,7 @@ test("a verified AI result stays pending through desktop review until the user a
     }
     const runtimeCandidateMetadataHosts = [
       ...runtimeChangedHosts,
+      "#review-runtime-attribute-limit",
       "#review-runtime-flow-chart",
       "#review-runtime-unstable-chart",
       "#review-runtime-root-geometry-chart",
@@ -1585,6 +1585,8 @@ test("a verified AI result stays pending through desktop review until the user a
       `[data-pageroot-review-overlay-owner="${runtimeHtmlOwner}"]`,
     )).toBeVisible();
     await expect(afterReviewFrame.locator("#review-runtime-flow-chart"))
+      .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
+    await expect(afterReviewFrame.locator("#review-runtime-attribute-limit"))
       .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
     await expect(afterReviewFrame.locator("#review-runtime-unstable-chart"))
       .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
