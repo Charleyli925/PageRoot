@@ -109,14 +109,17 @@ function candidateRunCounts(fullRuns) {
 }
 
 function repeatedCandidateRuns(fullRuns) {
-  const seen = new Set();
+  const seenShasByCandidate = new Map();
   return [...fullRuns]
     .sort((left, right) => Date.parse(left.created_at || "") - Date.parse(right.created_at || ""))
     .filter((run) => {
       const key = pullRequestKey(run);
-      if (seen.has(key)) return true;
-      seen.add(key);
-      return false;
+      const sha = run?.head_sha || `unknown:${run?.id || "run"}`;
+      const seenShas = seenShasByCandidate.get(key) || new Set();
+      const isLaterDistinctSha = seenShas.size > 0 && !seenShas.has(sha);
+      seenShas.add(sha);
+      seenShasByCandidate.set(key, seenShas);
+      return isLaterDistinctSha;
     });
 }
 

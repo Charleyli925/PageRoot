@@ -230,6 +230,63 @@ test("CI health exposes complete-gate churn across different SHAs of one Pull Re
   assert.equal(report.targetAssessment.metrics.runsPerPullRequestAverage.status, "missed");
 });
 
+test("CI health excludes same-SHA full-gate reruns from cross-SHA candidate churn", () => {
+  const sameSha = "a".repeat(40);
+  const laterSha = "b".repeat(40);
+  const ciRuns = [{
+    id: 205,
+    event: "pull_request",
+    head_sha: sameSha,
+    pull_requests: [{ number: 82 }],
+    created_at: "2026-07-24T09:00:00.000Z",
+    updated_at: "2026-07-24T09:03:00.000Z",
+  }, {
+    id: 206,
+    event: "pull_request",
+    head_sha: sameSha,
+    pull_requests: [{ number: 82 }],
+    created_at: "2026-07-24T10:00:00.000Z",
+    updated_at: "2026-07-24T10:04:00.000Z",
+  }, {
+    id: 207,
+    event: "pull_request",
+    head_sha: laterSha,
+    pull_requests: [{ number: 82 }],
+    created_at: "2026-07-24T11:00:00.000Z",
+    updated_at: "2026-07-24T11:05:00.000Z",
+  }, {
+    id: 208,
+    event: "pull_request",
+    head_sha: laterSha,
+    pull_requests: [{ number: 82 }],
+    created_at: "2026-07-24T12:00:00.000Z",
+    updated_at: "2026-07-24T12:06:00.000Z",
+  }];
+  const jobsByRunId = Object.fromEntries(ciRuns.map((run) => ([run.id, [job({
+    name: "source-build",
+    attempt: 1,
+    conclusion: "success",
+    startedAt: run.created_at,
+    completedAt: run.updated_at,
+  })]])));
+
+  const report = summarizeCiHealth({
+    periodDays: 30,
+    generatedAt: "2026-07-24T12:30:00.000Z",
+    ciRuns,
+    jobsByRunId,
+    candidateRuns: [],
+    releaseRuns: [],
+    dependencyHealth: "success",
+  });
+
+  assert.equal(report.sourceGate.completeRuns, 4);
+  assert.equal(report.sourceGate.repeatedCandidateRuns, 1);
+  assert.equal(report.runnerUse.fullGateMinutes, 18);
+  assert.equal(report.runnerUse.candidateChurnMinutes, 5);
+  assert.equal(report.runnerUse.candidateChurnShare, 0.28);
+});
+
 test("CI health records cancellation rates without treating pre-review jobs as full gates", () => {
   const report = summarizeCiHealth({
     periodDays: 30,

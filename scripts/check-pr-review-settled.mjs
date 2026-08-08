@@ -89,8 +89,8 @@ function visibleRequestIdentity(body, phase) {
   const visibleMarkdown = markdownWithoutHtmlComments(body);
   if (visibleMarkdown === null) return null;
   const pattern = phase === "final"
-    ? /^\s*@codex review[ \t]*\r?\n[ \t]*\r?\nFinal review exact head SHA `([0-9a-f]{40})` on base SHA `([0-9a-f]{40})`\.[ \t]*(?:\r?\n[ \t]*)*$/iu
-    : /^\s*@codex review[ \t]*\r?\n[ \t]*\r?\nReview exact head SHA `([0-9a-f]{40})` on base SHA `([0-9a-f]{40})`\.[ \t]*(?:\r?\n[ \t]*)*$/iu;
+    ? /^ {0,3}@codex review[ \t]*\r?\n[ \t]*\r?\nFinal review exact head SHA `([0-9a-f]{40})` on base SHA `([0-9a-f]{40})`\.[ \t]*(?:\r?\n[ \t]*)*$/iu
+    : /^ {0,3}@codex review[ \t]*\r?\n[ \t]*\r?\nReview exact head SHA `([0-9a-f]{40})` on base SHA `([0-9a-f]{40})`\.[ \t]*(?:\r?\n[ \t]*)*$/iu;
   const match = visibleMarkdown.match(pattern);
   if (!match) return null;
   return Object.freeze({

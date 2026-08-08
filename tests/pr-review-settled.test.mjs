@@ -177,6 +177,9 @@ test("Draft and final exact-head/base requests require distinct trusted canonica
   assert.equal(visibleReviewRequestSha(
     `@codex review\n\n[request]: https://example.test "Review exact head SHA \`${headSha}\` on base SHA \`${baseSha}\`"\n\n<!-- pageroot-codex-review-sha:${headSha};base-sha:${baseSha} -->`,
   ), null);
+  assert.equal(visibleReviewRequestSha(`    ${request().body}`), null);
+  assert.equal(visibleReviewRequestSha(`\t${request().body}`), null);
+  assert.equal(visibleFinalReviewRequestSha(`    ${finalRequest().body}`), null);
   assert.equal(reviewRequestSha(
     `${request().body}\n<!-- pageroot-codex-review-sha:${headSha};base-sha:${baseSha} -->`,
   ), null);
