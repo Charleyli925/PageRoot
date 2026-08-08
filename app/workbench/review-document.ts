@@ -3784,6 +3784,9 @@ function reviewBootstrap(
   const runtimeVisualNodeParentElement = runtimeVisualBindCall(
     Object.getOwnPropertyDescriptor(Node.prototype, "parentElement").get,
   );
+  const runtimeVisualDocumentReadyState = runtimeVisualBindCall(
+    Object.getOwnPropertyDescriptor(Document.prototype, "readyState").get,
+  );
   const runtimeVisualNodeIsConnected = runtimeVisualBindCall(
     Object.getOwnPropertyDescriptor(Node.prototype, "isConnected").get,
   );
@@ -4198,7 +4201,10 @@ function reviewBootstrap(
   };
   const runtimeVisualObservedBindingMatches = (element, binding) => {
     const identityAttributes = runtimeVisualInitialBindingIdentityAttributes(binding);
-    return Boolean(identityAttributes?.length)
+    const identityText = typeof binding?.identityText === "string"
+      ? RuntimeVisualString(binding.identityText)
+      : "";
+    return Boolean((identityAttributes?.length || identityText.length > 0))
       && runtimeVisualInitialBindingPathMatches(element, binding)
       && runtimeVisualInitialBindingMatches(element, binding, true);
   };
@@ -4211,7 +4217,8 @@ function reviewBootstrap(
   };
   const runtimeVisualInitialBindingElement = (binding) => {
     const pathElement = runtimeVisualInitialBindingPathElement(binding?.path);
-    if (runtimeVisualInitialBindingMatches(pathElement, binding)) return pathElement;
+    if (runtimeVisualInitialBindingMatches(pathElement, binding, true)) return pathElement;
+    if (runtimeVisualDocumentReadyState(document) === "loading") return null;
     if (!runtimeVisualInitialBindingHasFingerprint(binding)) return null;
     const matching = [];
     runtimeVisualArrayForEach(runtimeVisualQueryElements("*"), (element) => {
@@ -4270,21 +4277,17 @@ function reviewBootstrap(
     }
     if (!existing) runtimeVisualMapSet(reviewCommentIdentityElements, sourceNodeId, element);
   };
-  let runtimeVisualInitialBindingsBootstrapped = false;
   let runtimeVisualInitialBindingsClosed = false;
   const captureInitialBindings = (records = []) => {
     if (runtimeVisualInitialBindingsClosed) return;
-    if (!runtimeVisualInitialBindingsBootstrapped) {
-      runtimeVisualInitialBindingsBootstrapped = true;
-      runtimeVisualArrayForEach(
-        runtimeVisualInitialBindings,
-        captureRuntimeVisualInitialBinding,
-      );
-      runtimeVisualArrayForEach(
-        reviewCommentInitialBindings,
-        captureReviewCommentInitialBinding,
-      );
-    }
+    runtimeVisualArrayForEach(
+      runtimeVisualInitialBindings,
+      captureRuntimeVisualInitialBinding,
+    );
+    runtimeVisualArrayForEach(
+      reviewCommentInitialBindings,
+      captureReviewCommentInitialBinding,
+    );
     runtimeVisualArrayForEach(records, (record) => {
       if (runtimeVisualMutationRecordType(record) !== "childList") return;
       const addedNodes = runtimeVisualMutationRecordAddedNodes(record);
