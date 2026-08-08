@@ -143,21 +143,48 @@ function commentUpdatedAt(comment) {
   return comment?.updated_at || comment?.updatedAt || commentCreatedAt(comment);
 }
 
+function canonicalRequestIdentity(comment, phase) {
+  const hiddenIdentity = hiddenRequestIdentity(comment?.body, phase);
+  const visibleIdentity = visibleRequestIdentity(comment?.body, phase);
+  if (
+    isCodexActor(commentAuthor(comment))
+    || !TRUSTED_REQUEST_ASSOCIATIONS.has(commentAssociation(comment))
+    || !hiddenIdentity
+    || !visibleIdentity
+    || hiddenIdentity.headSha !== visibleIdentity.headSha
+    || hiddenIdentity.baseSha !== visibleIdentity.baseSha
+    || !Number.isFinite(timestamp(commentCreatedAt(comment)))
+    || timestamp(commentUpdatedAt(comment)) !== timestamp(commentCreatedAt(comment))
+  ) return null;
+  return Object.freeze({
+    phase,
+    headSha: hiddenIdentity.headSha,
+    baseSha: hiddenIdentity.baseSha,
+    at: timestamp(commentCreatedAt(comment)),
+  });
+}
+
 function exactReviewRequests(issueComments, expectedHeadSha, expectedBaseSha, phase) {
   return (issueComments || []).filter((comment) => {
-    const hiddenIdentity = hiddenRequestIdentity(comment?.body, phase);
-    const visibleIdentity = visibleRequestIdentity(comment?.body, phase);
-    return (
-      !isCodexActor(commentAuthor(comment))
-      && TRUSTED_REQUEST_ASSOCIATIONS.has(commentAssociation(comment))
-      && hiddenIdentity?.headSha === expectedHeadSha
-      && hiddenIdentity?.baseSha === expectedBaseSha
-      && visibleIdentity?.headSha === expectedHeadSha
-      && visibleIdentity?.baseSha === expectedBaseSha
-      && Number.isFinite(timestamp(commentCreatedAt(comment)))
-      && timestamp(commentUpdatedAt(comment)) === timestamp(commentCreatedAt(comment))
-    );
+    const identity = canonicalRequestIdentity(comment, phase);
+    return identity?.headSha === expectedHeadSha && identity?.baseSha === expectedBaseSha;
   });
+}
+
+function hasPriorRequestForDifferentBase({
+  issueComments,
+  expectedHeadSha,
+  expectedBaseSha,
+  beforeAt,
+}) {
+  return (issueComments || []).some((comment) => (
+    ["draft", "final"].some((phase) => {
+      const identity = canonicalRequestIdentity(comment, phase);
+      return identity?.headSha === expectedHeadSha
+        && identity.baseSha !== expectedBaseSha
+        && identity.at < beforeAt;
+    })
+  ));
 }
 
 function latestReadyForReviewEvent(timelineEvents) {
@@ -209,6 +236,7 @@ function reviewCompletionSignals({
   reviews,
   issueComments,
   requestReactions,
+  acceptCommitBoundSignals = true,
 }) {
   const signals = [];
   for (const review of reviews || []) {
@@ -219,6 +247,7 @@ function reviewCompletionSignals({
     ).toLowerCase();
     if (
       isCodexActor(review?.user?.login || review?.author?.login || review?.author)
+      && acceptCommitBoundSignals
       && ["APPROVED", "CHANGES_REQUESTED", "COMMENTED"].includes(state)
       && commitSha === expectedHeadSha
       && Number.isFinite(completedAt)
@@ -237,6 +266,7 @@ function reviewCompletionSignals({
     const prefix = reviewedCommitPrefix(comment?.body);
     if (
       isCodexActor(commentAuthor(comment))
+      && acceptCommitBoundSignals
       && prefix
       && expectedHeadSha.startsWith(prefix)
       && Number.isFinite(completedAt)
@@ -485,6 +515,12 @@ export function evaluateReviewSettlement({
     reviews,
     issueComments,
     requestReactions,
+    acceptCommitBoundSignals: !hasPriorRequestForDifferentBase({
+      issueComments,
+      expectedHeadSha: expectedSha,
+      expectedBaseSha: expectedBase,
+      beforeAt: requestAt,
+    }),
   });
   const draftCompletion = draftCompletionSignals.find((signal) => (
     signal.at >= draftStartedAt && signal.at < readyAt
@@ -569,6 +605,12 @@ export function evaluateReviewSettlement({
     reviews,
     issueComments,
     requestReactions: finalRequestReactions,
+    acceptCommitBoundSignals: !hasPriorRequestForDifferentBase({
+      issueComments,
+      expectedHeadSha: expectedSha,
+      expectedBaseSha: expectedBase,
+      beforeAt: finalRequestAt,
+    }),
   });
   const completion = finalCompletionSignals[0] || null;
   const finalEnvironmentFailure = latestCodexEnvironmentFailure(

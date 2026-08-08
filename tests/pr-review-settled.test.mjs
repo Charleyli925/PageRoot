@@ -230,6 +230,38 @@ test("Draft and final Codex reviews bind to the current head/base pair and their
   }).reason, "final_exact_sha_review_not_requested");
 });
 
+test("base-only request changes accept only completion reactions on the exact new requests", () => {
+  const issueComments = [
+    request({
+      id: 80,
+      base: oldBaseSha,
+      createdAt: "2026-08-08T03:30:00.000Z",
+    }),
+    request(),
+    finalRequest(),
+  ];
+  assert.equal(evaluate({
+    issueComments,
+    reviews: [draftReview(), exactReview()],
+  }).reason, "draft_review_not_completed_before_promotion");
+  assert.equal(evaluate({
+    issueComments,
+    reviews: [],
+    requestReactions: [{
+      id: 81,
+      user: { login: "chatgpt-codex-connector[bot]" },
+      content: "+1",
+      created_at: draftCompletedAt,
+    }],
+    finalRequestReactions: [{
+      id: 82,
+      user: { login: "chatgpt-codex-connector[bot]" },
+      content: "+1",
+      created_at: completedAt,
+    }],
+  }).status, "settled");
+});
+
 test("clean Codex comments and reactions bind to the correct exact-head/base request", () => {
   const cleanComment = {
     id: 40,
