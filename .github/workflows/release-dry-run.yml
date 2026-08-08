@@ -18,6 +18,7 @@ on:
       - scripts/attachment-storage.mjs
       - scripts/build-package.mjs
       - scripts/candidate-assessment.mjs
+      - scripts/ci-evidence.mjs
       - scripts/create-release-assets.mjs
       - scripts/developer-preview.mjs
       - scripts/draft-aggregate.mjs

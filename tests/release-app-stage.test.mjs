@@ -683,6 +683,7 @@ test("release dry-run workflow crosses two clean jobs without credentials or rel
   ]);
   assert.match(workflow, /on:\s*\n\s+pull_request:[\s\S]+paths:/u);
   assert.match(workflow, /- desktop\/\*\*/u);
+  assert.match(workflow, /- scripts\/ci-evidence\.mjs/u);
   assert.match(workflow, /- scripts\/release-app-checkpoint\.mjs/u);
   assert.match(workflow, /- scripts\/workspace-bridge\.mjs/u);
   assert.doesNotMatch(workflow, /- app\/\*\*/u);
