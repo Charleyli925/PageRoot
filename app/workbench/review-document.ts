@@ -5443,16 +5443,13 @@ function reviewBootstrap(
     return [...groups.values()].flatMap((group) => {
       const base = group[0];
       const lines = textLineGroups(group);
-      const density = Math.max(...group.map((record) => Number(record.textDensity || 0)));
       const owner = textFootprintOwner(base.element, base.geometryOwnerId);
+      // The fact planner is the sole authority that may promote a replacement
+      // to a block.  A render-time density heuristic cannot recover that
+      // authority: it has lost the stable-sentence boundaries and would turn
+      // a wrapped middle sentence into a frame around its unchanged neighbors.
       const useBlock = base.textOperation === "replace"
-        && (
-          base.textScope === "block"
-          || (
-            lines.length > 3
-            && density >= .35
-          )
-        );
+        && base.textScope === "block";
       if (useBlock && owner) {
         const ownerBounds = readableBlockBounds(owner);
         if (ownerBounds) {

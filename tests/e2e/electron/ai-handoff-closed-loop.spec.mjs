@@ -523,6 +523,7 @@ test("a verified AI result stays pending through desktop review until the user a
       <div data-review-readable-rewrite style="width: 360px; line-height: 1.7">${READABLE_REWRITE_BEFORE}</div>
       <p data-review-layout-only style="width: 240px">同一段文字保持不变<br>只是换行位置调整。</p>
       <p data-review-cross-line style="width: 150px; line-height: 1.6">稳定前缀，稳定后缀。</p>
+      <p data-review-stable-sentence-rewrite style="width: 150px; line-height: 1.6">稳定前句。旧方案覆盖多个指标、多个渠道、多个阶段，并给出较长说明。稳定后句。</p>
       <style data-review-marker-style>[data-review-injection-stability] span { display:block !important; padding:9px !important; }</style>
       <style data-review-projection-style>div, svg { outline:7px solid rgb(255 0 153) !important; }</style>
       <p data-review-injection-stability><span data-review-stable-left>稳定左侧</span><strong>旧词</strong><em data-review-stable-right>稳定右侧</em></p>
@@ -1231,6 +1232,10 @@ test("a verified AI result stays pending through desktop review until the user a
         .replace(
           '<p data-review-cross-line style="width: 150px; line-height: 1.6">稳定前缀，稳定后缀。</p>',
           '<p data-review-cross-line style="width: 150px; line-height: 1.6">稳定前缀，新增说明需要跨越多个实际文字行并保持独立框选，稳定后缀。</p>',
+        )
+        .replace(
+          '<p data-review-stable-sentence-rewrite style="width: 150px; line-height: 1.6">稳定前句。旧方案覆盖多个指标、多个渠道、多个阶段，并给出较长说明。稳定后句。</p>',
+          '<p data-review-stable-sentence-rewrite style="width: 150px; line-height: 1.6">稳定前句。新方案改写全部口径、执行路径、验证方式，并补充另一组较长说明。稳定后句。</p>',
         )
         .replace(
           '<p data-review-injection-stability><span data-review-stable-left>稳定左侧</span><strong>旧词</strong><em data-review-stable-right>稳定右侧</em></p>',
@@ -2180,6 +2185,79 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect(crossLineFrames.locator(
       "[data-pageroot-review-overlay-label]",
     )).toHaveCount(1);
+    for (const [frame, tone] of [
+      [beforeReviewFrame, "removed"],
+      [afterReviewFrame, "added"],
+    ]) {
+      await expect.poll(() => frame.locator("html").evaluate((expectedTone) => {
+        const owner = document.querySelector("[data-review-stable-sentence-rewrite]");
+        const marker = owner?.querySelector(
+          '[data-pageroot-review-text="' + expectedTone + '"]',
+        );
+        if (!owner || !marker) return { matches: false, reason: "marker-missing" };
+        const groupId = marker.getAttribute("data-pageroot-review-text-group") || "";
+        const markerRange = document.createRange();
+        markerRange.selectNodeContents(marker);
+        const markerRectCount = [...markerRange.getClientRects()]
+          .filter((rect) => rect.width > 1 && rect.height > 1).length;
+        markerRange.detach();
+        const stableRects = [...owner.childNodes]
+          .filter((node) => (
+            node.nodeType === Node.TEXT_NODE
+            && /稳定(?:前|后)句/u.test(node.textContent || "")
+          ))
+          .flatMap((node) => {
+            const range = document.createRange();
+            range.selectNodeContents(node);
+            const rects = [...range.getClientRects()]
+              .filter((rect) => rect.width > 1 && rect.height > 1)
+              .map((rect) => ({
+                left: rect.left,
+                top: rect.top,
+                right: rect.right,
+                bottom: rect.bottom,
+              }));
+            range.detach();
+            return rects;
+          });
+        const frames = [...document.querySelectorAll(
+          '[data-pageroot-review-overlay-box][data-text-group="' + groupId + '"]',
+        )];
+        const holes = [...document.querySelectorAll(
+          '[data-pageroot-review-mask-hole][data-text-group="' + groupId + '"]',
+        )];
+        const intersectsStableText = frames.some((frame) => {
+          const rect = frame.getBoundingClientRect();
+          return stableRects.some((stableRect) => (
+            Math.min(rect.right, stableRect.right) - Math.max(rect.left, stableRect.left) > 1
+            && Math.min(rect.bottom, stableRect.bottom) - Math.max(rect.top, stableRect.top) > 1
+          ));
+        });
+        return {
+          matches: markerRectCount >= 3
+            && frames.length === markerRectCount
+            && holes.length === frames.length
+            && frames.every((frame) => (
+              frame.getAttribute("data-scope") !== "text-block"
+              && frame.getAttribute("data-shaped") !== "true"
+              && frame.getAttribute("data-pageroot-review-fragment-count") === "1"
+            ))
+            && frames.filter((frame) => (
+              frame.querySelector("[data-pageroot-review-overlay-label]")
+            )).length === 1
+            && stableRects.length === 2
+            && !intersectsStableText
+            && ![...owner.querySelectorAll("[data-pageroot-review-text]")].some((candidate) => (
+              /稳定(?:前|后)句/u.test(candidate.textContent || "")
+            )),
+          markerRectCount,
+          frameCount: frames.length,
+          holeCount: holes.length,
+          stableRectCount: stableRects.length,
+          intersectsStableText,
+        };
+      }, tone)).toMatchObject({ matches: true });
+    }
     const addedChartChangeId = await afterReviewFrame.locator(
       "[data-review-added-chart] [data-pageroot-review-marker]",
     ).first().getAttribute("data-pageroot-review-marker");
