@@ -306,3 +306,45 @@ test("bare-text fragments persist toolbar and shortcut formatting through guarde
   );
   await expect(mixedParent.locator(':scope > span[data-keep="tail"]')).toHaveText("尾注");
 });
+
+test("deleting a bare-text fragment ends its session without a blocked resume", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const source = fixtureBuffer("structural-text.html");
+  const { editor, frame } = await loadFixture(page, "structural-text.html", {
+    buffer: source,
+  });
+  const mixedParent = frame.locator(caseSelector("mixed-parent"));
+  const fragmentHost = mixedParent.locator(
+    ':scope > pageroot-text-fragment[data-pageroot-text-fragment-host="true"]',
+  );
+
+  await mixedParent.dblclick({
+    position: await directTextPoint(mixedParent, "裸文本"),
+    force: true,
+  });
+  await expect(fragmentHost).toHaveAttribute("contenteditable", "true");
+  await selectElementText(fragmentHost);
+  await page.keyboard.press("Backspace");
+
+  const expected = replaceExactOnce(
+    source,
+    '，裸文本<span data-keep="tail">',
+    '<span data-keep="tail">',
+  );
+  await expect.poll(async () => (
+    await exportCurrentHtml(page)
+  ).toString("utf8")).toBe(expected.toString("utf8"));
+  await expect(fragmentHost).toHaveCount(0);
+  await expect(mixedParent).not.toHaveAttribute("contenteditable", "true");
+  await expect.poll(() => editor.getAttribute("data-edit-block-detail")).toBeNull();
+  await expect(page.locator(".toast.show")).toHaveCount(0);
+  await expect(mixedParent.locator(':scope > div[data-keep="chart"]')).toHaveText(
+    "图表结构保持",
+  );
+  await expect(mixedParent.locator(':scope > b[data-native-case="mixed-inline"]')).toHaveText(
+    "强调文字",
+  );
+  await expect(mixedParent.locator(':scope > span[data-keep="tail"]')).toHaveText("尾注");
+});

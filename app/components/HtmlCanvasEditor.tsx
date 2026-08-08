@@ -497,6 +497,14 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   ) => void>(() => undefined);
   const nativeEditCheckpointTimerRef = useRef<number | null>(null);
   const nativeEditCheckpointRef = useRef<() => void>(() => undefined);
+  const finishNativeEditingRef = useRef<(
+    shouldApply: boolean,
+    trigger?: NativeEditCheckpointTrigger,
+  ) => NativeEditCommitResult>(() => ({
+    ok: false,
+    mutation: null,
+    reason: "文字编辑会话尚未准备完成。",
+  }));
   const nativeEditSessionSequenceRef = useRef(0);
   const nativeDomGenerationRef = useRef(0);
   const nativeSessionNeedsCanonicalFenceRef = useRef(false);
@@ -2288,6 +2296,30 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         return { ok: false, mutation: null, reason };
       }
       sourceCommitted = true;
+      if (
+        active.mode === "text-fragment"
+        && validatedSourceInnerHtml === ""
+      ) {
+        // The source patch deliberately removes the direct Text node. There
+        // is therefore no fragment projection to rebase or resume after the
+        // canonical frame reload. Retire the transient host without running a
+        // second checkpoint; its committed mutation is returned below.
+        const retired = finishNativeEditingRef.current(false, trigger);
+        if (!retired.ok) {
+          throw new Error(
+            retired.reason || "文字片段删除后无法安全结束编辑会话。",
+          );
+        }
+        containerRef.current?.setAttribute(
+          "data-native-commit-path",
+          "v2-text-fragment-empty-finished",
+        );
+        return {
+          ok: true,
+          mutation,
+          ...(retired.frameReloading ? { frameReloading: true } : {}),
+        };
+      }
       const currentActive = activeNativeEditRef.current;
       if (
         !currentActive
@@ -2380,6 +2412,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       setHasTextRange(false);
       rootElement.ownerDocument.getSelection()?.removeAllRanges();
       if (frameReloadRequired) {
+        // An explicit finish never resumes native editing after the new frame
+        // is connected. This is essential when a direct-text fragment was
+        // deleted: its source target no longer exists to restore.
+        pendingNativeEditResumeRef.current = null;
         selectedElementRef.current = null;
         pendingSelectionRef.current = target;
         pendingToolbarVisibleRef.current = true;
@@ -2422,6 +2458,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     updateOverlayPosition,
     updateSelectedStyle,
   ]);
+  finishNativeEditingRef.current = finishNativeEditing;
 
   const resetSelection = useCallback((
     commitPendingEdit: boolean,
