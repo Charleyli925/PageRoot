@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   CI_HEALTH_WORKFLOW_INPUTS,
+  pullRequestMetrics,
   renderCiHealthMarkdown,
   summarizeCiHealth,
   summarizeCandidateFlow,
@@ -159,6 +160,7 @@ test("CI health reports the final-candidate path, Ready churn, and review priori
   })];
   const pullRequests = [{
     number: 120,
+    head: { sha: "a".repeat(40) },
     merged_at: "2026-08-09T10:35:00.000Z",
     timelineEvents: [
       { event: "ready_for_review", created_at: "2026-08-09T10:00:00.000Z" },
@@ -166,8 +168,15 @@ test("CI health reports the final-candidate path, Ready churn, and review priori
     ],
     reviews: [{
       state: "COMMENTED",
+      user: { login: "chatgpt-codex-connector" },
+      commit_id: "a".repeat(40),
       submitted_at: "2026-08-09T10:10:00.000Z",
-      body: "![P1 Badge](x)",
+      body: "![P1 Badge](x)\n\n**Reviewed commit:** `aaaaaaaaaa`",
+    }, {
+      state: "CHANGES_REQUESTED",
+      user: { login: "maintainer" },
+      submitted_at: "2026-08-09T10:11:00.000Z",
+      body: "No priority attached to this deferred finding.",
     }],
     reviewComments: [
       { body: "![P0 Badge](x)" },
@@ -178,6 +187,12 @@ test("CI health reports the final-candidate path, Ready churn, and review priori
   }];
   const jobsByRunId = {
     700: [job({
+      name: "source-node",
+      attempt: 1,
+      conclusion: "success",
+      startedAt: "2026-08-09T10:06:00.000Z",
+      completedAt: "2026-08-09T10:17:00.000Z",
+    }), job({
       name: "release-gate",
       attempt: 1,
       conclusion: "success",
@@ -190,9 +205,9 @@ test("CI health reports the final-candidate path, Ready churn, and review priori
   assert.equal(flow.readyTransitionsPerPullRequestAverage, 2);
   assert.equal(flow.candidateToMergeMinutesP50, 30);
   assert.equal(flow.reviewMinutesP50, 5);
-  assert.equal(flow.testMinutesP50, 19);
+  assert.equal(flow.testMinutesP50, 12);
   assert.equal(flow.mergeWaitMinutesP50, 11);
-  assert.deepEqual(flow.priorityCounts, { P0: 1, P1: 1, P2: 1, P3: 1, unclassified: 1 });
+  assert.deepEqual(flow.priorityCounts, { P0: 1, P1: 1, P2: 1, P3: 1, unclassified: 2 });
 
   const report = summarizeCiHealth({
     periodDays: 30,
@@ -209,6 +224,125 @@ test("CI health reports the final-candidate path, Ready churn, and review priori
   assert.equal(report.targetAssessment.metrics.mergeWaitMinutesP50.status, "missed");
   assert.match(renderCiHealthMarkdown(report), /Candidate-to-merge P50/u);
   assert.match(renderCiHealthMarkdown(report), /Review findings P0\/P1\/P2\/P3/u);
+});
+
+test("CI health accepts only exact-final-head Codex review evidence", () => {
+  const headSha = "b".repeat(40);
+  const pullRequest = {
+    number: 121,
+    head: { sha: headSha },
+    timelineEvents: [{ event: "ready_for_review", created_at: "2026-08-09T10:00:00.000Z" }],
+    reviews: [{
+      state: "APPROVED",
+      user: { login: "maintainer" },
+      commit_id: headSha,
+      submitted_at: "2026-08-09T10:01:00.000Z",
+      body: "Approved by a maintainer, but not Codex.",
+    }, {
+      state: "COMMENTED",
+      user: { login: "chatgpt-codex-connector" },
+      commit_id: "a".repeat(40),
+      submitted_at: "2026-08-09T10:02:00.000Z",
+      body: "**Reviewed commit:** `aaaaaaaaaa`",
+    }],
+  };
+  assert.equal(
+    summarizeCandidateFlow({ pullRequests: [pullRequest] }).reviewMinutesP50,
+    null,
+  );
+
+  pullRequest.issueComments = [{
+    user: { login: "chatgpt-codex-connector" },
+    created_at: "2026-08-09T10:03:00.000Z",
+    updated_at: "2026-08-09T10:03:00.000Z",
+    body: "Codex Review: Didn't find any major issues.\n\n**Reviewed commit:** `bbbbbbbbbb`",
+  }];
+  assert.equal(
+    summarizeCandidateFlow({ pullRequests: [pullRequest] }).reviewMinutesP50,
+    3,
+  );
+});
+
+test("CI health binds gate and test completion to the final promoted SHA", () => {
+  const oldSha = "a".repeat(40);
+  const finalSha = "b".repeat(40);
+  const ciRuns = [completedRun({
+    id: 710,
+    event: "pull_request",
+    head_sha: oldSha,
+    pull_requests: [{ number: 122 }],
+    created_at: "2026-08-09T10:00:00.000Z",
+    updated_at: "2026-08-09T10:16:00.000Z",
+  }), completedRun({
+    id: 711,
+    event: "pull_request",
+    head_sha: finalSha,
+    pull_requests: [{ number: 122 }],
+    created_at: "2026-08-09T10:20:00.000Z",
+    updated_at: "2026-08-09T10:30:00.000Z",
+  })];
+  const flow = summarizeCandidateFlow({
+    ciRuns,
+    jobsByRunId: {
+      710: [job({
+        name: "source-node",
+        attempt: 1,
+        conclusion: "success",
+        startedAt: "2026-08-09T10:01:00.000Z",
+        completedAt: "2026-08-09T10:14:00.000Z",
+      }), job({
+        name: "release-gate",
+        attempt: 1,
+        conclusion: "success",
+        startedAt: "2026-08-09T10:15:00.000Z",
+        completedAt: "2026-08-09T10:16:00.000Z",
+      })],
+      711: [job({
+        name: "source-node",
+        attempt: 1,
+        conclusion: "success",
+        startedAt: "2026-08-09T10:21:00.000Z",
+        completedAt: "2026-08-09T10:27:00.000Z",
+      }), job({
+        name: "release-gate",
+        attempt: 1,
+        conclusion: "success",
+        startedAt: "2026-08-09T10:29:00.000Z",
+        completedAt: "2026-08-09T10:30:00.000Z",
+      })],
+    },
+    pullRequests: [{
+      number: 122,
+      head: { sha: finalSha },
+      merged_at: "2026-08-09T10:35:00.000Z",
+      timelineEvents: [
+        { event: "ready_for_review", created_at: "2026-08-09T10:00:00.000Z" },
+        { event: "ready_for_review", created_at: "2026-08-09T10:20:00.000Z" },
+      ],
+    }],
+  });
+  assert.equal(flow.testMinutesP50, 7);
+  assert.equal(flow.mergeWaitMinutesP50, 5);
+  assert.equal(flow.candidateToMergeMinutesP50, 15);
+});
+
+test("CI health excludes flow intervals outside its report window", () => {
+  const flow = summarizeCandidateFlow({
+    since: "2026-08-01T00:00:00.000Z",
+    pullRequests: [{
+      number: 123,
+      merged_at: "2026-07-02T00:00:00.000Z",
+      updated_at: "2026-08-09T00:00:00.000Z",
+      timelineEvents: [{ event: "ready_for_review", created_at: "2026-07-01T00:00:00.000Z" }],
+    }, {
+      number: 124,
+      merged_at: "2026-08-02T00:10:00.000Z",
+      timelineEvents: [{ event: "ready_for_review", created_at: "2026-08-02T00:00:00.000Z" }],
+    }],
+  });
+  assert.equal(flow.readyTransitions, 1);
+  assert.equal(flow.candidateToMergeMinutesP50, 10);
+  assert.deepEqual(flow.rows.map((row) => row.pullRequestNumber), [124]);
 });
 
 test("CI health separates active gate work from terminal gate metrics", () => {
@@ -348,7 +482,7 @@ test("CI health exposes complete-gate churn across different SHAs of one Pull Re
     dependencyHealth: "success",
   });
 
-  assert.equal(report.schemaVersion, 5);
+  assert.equal(report.schemaVersion, 6);
   assert.equal(report.sourceGate.pullRequestRuns, 4);
   assert.equal(report.sourceGate.feedbackRuns, 1);
   assert.equal(report.sourceGate.completeRuns, 3);
@@ -668,6 +802,36 @@ test("CI health paginates the complete requested workflow window", async () => {
   }
 });
 
+test("CI health fails closed when the Pull Request activity window exceeds its page cap", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const parsed = new URL(url);
+    const page = Number(parsed.searchParams.get("page"));
+    return {
+      ok: true,
+      status: 200,
+      async json() {
+        return Array.from({ length: 100 }, (_, index) => ({
+          number: page * 1000 + index,
+          updated_at: "2026-08-09T00:00:00.000Z",
+        }));
+      },
+    };
+  };
+  try {
+    await assert.rejects(
+      () => pullRequestMetrics({
+        repositoryPath: "owner/repository",
+        token: "test-token",
+        since: "2026-08-01T00:00:00.000Z",
+      }),
+      /exceeded 500 updated entries/u,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("CI health workflow stays read-only and retains a machine-readable report", async () => {
   const [workflow, reportScript] = await Promise.all([
     readFile(path.join(productRoot, ".github/workflows/ci-health.yml"), "utf8"),
@@ -677,6 +841,7 @@ test("CI health workflow stays read-only and retains a machine-readable report",
   assert.match(workflow, /cron: "17 1 \* \* \*"/u);
   assert.match(workflow, /actions: read/u);
   assert.match(workflow, /contents: read/u);
+  assert.match(workflow, /issues: read/u);
   assert.match(workflow, /pull-requests: read/u);
   assert.match(workflow, /ci-health-report\.mjs/u);
   assert.match(workflow, /name: dependency-health/u);
@@ -699,6 +864,7 @@ test("CI health workflow stays read-only and retains a machine-readable report",
   assert.match(reportScript, /workflow: CI_HEALTH_WORKFLOW_INPUTS\.releaseCandidate/u);
   assert.match(reportScript, /workflow: CI_HEALTH_WORKFLOW_INPUTS\.release/u);
   assert.match(reportScript, /pullRequestMetrics\(\{ repositoryPath, token, since \}\)/u);
+  assert.match(reportScript, /issues\/\$\{number\}\/comments/u);
   assert.match(reportScript, /Candidate-to-merge P50/u);
   assert.match(reportScript, /\| Metric \| Actual \| Target \| Status \|/u);
   assert.match(reportScript, /Cancelled completed promoted candidates/u);

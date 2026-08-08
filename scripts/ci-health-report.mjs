@@ -8,6 +8,11 @@ import {
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  classifyReviewPriority,
+  finalCodexCompletion,
+} from "./check-pr-review-policy.mjs";
+
 const scriptPath = fileURLToPath(import.meta.url);
 const productRoot = path.resolve(path.dirname(scriptPath), "..");
 const DEFAULT_DAYS = 30;
@@ -226,40 +231,57 @@ function minutesBetween(startedAt, completedAt) {
   return (completedMs - startedMs) / 60_000;
 }
 
-function reviewPriority(body) {
-  const match = String(body || "").match(/\bP([0-3])(?:\s+Badge|\b)/iu);
-  return match ? `P${match[1]}` : "unclassified";
-}
-
 function pullRequestNumber(run) {
   return (run?.pull_requests || [])
     .map((pullRequest) => Number(pullRequest?.number))
     .find((number) => Number.isInteger(number) && number > 0) || null;
 }
 
-function latestReadyTransition(pullRequest) {
+function readyEventsInWindow(pullRequest, sinceMs = null) {
   return (pullRequest?.timelineEvents || pullRequest?.timeline_events || [])
-    .filter((event) => event?.event === "ready_for_review" && Number.isFinite(timestampMilliseconds(event?.created_at || event?.createdAt)))
+    .filter((event) => {
+      if (event?.event !== "ready_for_review") return false;
+      const at = timestampMilliseconds(event?.created_at || event?.createdAt);
+      return Number.isFinite(at) && (!Number.isFinite(sinceMs) || at >= sinceMs);
+    });
+}
+
+function latestReadyTransition(events) {
+  return (events || [])
     .sort((left, right) => timestampMilliseconds(right?.created_at || right?.createdAt) - timestampMilliseconds(left?.created_at || left?.createdAt))[0] || null;
 }
 
 function reviewCompletionAfterReady(pullRequest, readyAt) {
-  const readyAtMs = timestampMilliseconds(readyAt);
-  if (!Number.isFinite(readyAtMs)) return null;
-  return (pullRequest?.reviews || [])
-    .filter((review) => {
-      const state = String(review?.state || "").toUpperCase();
-      const submittedAt = review?.submitted_at || review?.submittedAt;
-      return ["APPROVED", "COMMENTED", "CHANGES_REQUESTED"].includes(state)
-        && timestampMilliseconds(submittedAt) > readyAtMs;
-    })
-    .sort((left, right) => timestampMilliseconds(left?.submitted_at || left?.submittedAt) - timestampMilliseconds(right?.submitted_at || right?.submittedAt))[0] || null;
+  const headSha = String(
+    pullRequest?.head?.sha || pullRequest?.headSha || pullRequest?.headRefOid || "",
+  ).toLowerCase();
+  return finalCodexCompletion({
+    reviews: pullRequest?.reviews || [],
+    issueComments: pullRequest?.issueComments || pullRequest?.issue_comments || [],
+    expectedHeadSha: headSha,
+    readyAt,
+  });
 }
 
-function releaseGateCompletionForPullRequest({ pullRequestNumber: number, ciRuns, jobsByRunId, mergedAt }) {
+function releaseGateCompletionForPullRequest({
+  pullRequestNumber: number,
+  headSha,
+  readyAt,
+  ciRuns,
+  jobsByRunId,
+  mergedAt,
+}) {
   const mergedAtMs = timestampMilliseconds(mergedAt);
+  const readyAtMs = timestampMilliseconds(readyAt);
+  const expectedHead = String(headSha || "").toLowerCase();
+  if (!Number.isInteger(number) || number < 1 || !/^[0-9a-f]{40}$/u.test(expectedHead)) return null;
   return (ciRuns || []).flatMap((run) => {
-    if (pullRequestNumber(run) !== number) return [];
+    const runCreatedAt = timestampMilliseconds(run?.created_at || run?.createdAt);
+    if (
+      pullRequestNumber(run) !== number
+      || String(run?.head_sha || run?.headSha || "").toLowerCase() !== expectedHead
+      || (Number.isFinite(readyAtMs) && (!Number.isFinite(runCreatedAt) || runCreatedAt < readyAtMs))
+    ) return [];
     return jobsForRun(jobsByRunId, run.id)
       .filter((job) => job?.name === "release-gate" && job?.conclusion === "success")
       .map((job) => ({ run, job, completedAt: job.completed_at || job.completedAt }));
@@ -269,7 +291,30 @@ function releaseGateCompletionForPullRequest({ pullRequestNumber: number, ciRuns
   }).sort((left, right) => timestampMilliseconds(right.completedAt) - timestampMilliseconds(left.completedAt))[0] || null;
 }
 
-export function summarizeCandidateFlow({ pullRequests = [], ciRuns = [], jobsByRunId = {} } = {}) {
+function testCompletionForGate(gate, jobsByRunId) {
+  if (!gate) return null;
+  const completedAt = jobsForRun(jobsByRunId, gate.run?.id)
+    .filter((job) => (
+      job?.conclusion === "success"
+      && isExecutedJob(job)
+      && (isFullGateLane(job) || isReleaseDryRunLane(job))
+    ))
+    .map((job) => job.completed_at || job.completedAt)
+    .filter((value) => Number.isFinite(timestampMilliseconds(value)))
+    .sort((left, right) => timestampMilliseconds(right) - timestampMilliseconds(left))[0] || null;
+  return completedAt;
+}
+
+export function summarizeCandidateFlow({
+  pullRequests = [],
+  ciRuns = [],
+  jobsByRunId = {},
+  since = null,
+} = {}) {
+  const sinceMs = since === null ? null : timestampMilliseconds(since);
+  if (since !== null && !Number.isFinite(sinceMs)) {
+    throw new Error("CI Health flow window must use a valid timestamp.");
+  }
   const candidateToMergeMinutes = [];
   const reviewMinutes = [];
   const testMinutes = [];
@@ -280,34 +325,44 @@ export function summarizeCandidateFlow({ pullRequests = [], ciRuns = [], jobsByR
   const rows = [];
 
   for (const pullRequest of pullRequests || []) {
-    const events = pullRequest?.timelineEvents || pullRequest?.timeline_events || [];
-    const readyEvents = events.filter((event) => event?.event === "ready_for_review");
+    const readyEvents = readyEventsInWindow(pullRequest, sinceMs);
+    if (readyEvents.length === 0) continue;
     readyTransitions += readyEvents.length;
-    if (readyEvents.length > 0) perPullRequestReadyCounts.push(readyEvents.length);
+    perPullRequestReadyCounts.push(readyEvents.length);
     for (const review of pullRequest?.reviews || []) {
-      const priority = reviewPriority(review?.body);
-      if (priority !== "unclassified") priorityCounts[priority] += 1;
+      const priority = classifyReviewPriority(review?.body);
+      if (priority !== "unclassified" || String(review?.state || "").toUpperCase() === "CHANGES_REQUESTED") {
+        priorityCounts[priority] += 1;
+      }
     }
     for (const comment of pullRequest?.reviewComments || pullRequest?.review_comments || []) {
-      priorityCounts[reviewPriority(comment?.body)] += 1;
+      priorityCounts[classifyReviewPriority(comment?.body)] += 1;
     }
 
-    const readyEvent = latestReadyTransition(pullRequest);
+    const readyEvent = latestReadyTransition(readyEvents);
     const readyAt = readyEvent?.created_at || readyEvent?.createdAt || null;
     const review = reviewCompletionAfterReady(pullRequest, readyAt);
-    const reviewAt = review?.submitted_at || review?.submittedAt || null;
+    const reviewAt = Number.isFinite(review?.at) ? new Date(review.at).toISOString() : null;
     const mergedAt = pullRequest?.merged_at || pullRequest?.mergedAt || null;
+    const mergedAtMs = timestampMilliseconds(mergedAt);
+    const mergedWithinWindow = !Number.isFinite(sinceMs) || (
+      Number.isFinite(mergedAtMs) && mergedAtMs >= sinceMs
+    );
+    const headSha = pullRequest?.head?.sha || pullRequest?.headSha || pullRequest?.headRefOid || null;
     const gate = releaseGateCompletionForPullRequest({
       pullRequestNumber: Number(pullRequest?.number),
+      headSha,
+      readyAt,
       ciRuns,
       jobsByRunId,
       mergedAt,
     });
     const gateAt = gate?.completedAt || null;
-    const candidateToMerge = minutesBetween(readyAt, mergedAt);
+    const testCompletedAt = testCompletionForGate(gate, jobsByRunId);
+    const candidateToMerge = mergedWithinWindow ? minutesBetween(readyAt, mergedAt) : null;
     const reviewDuration = minutesBetween(readyAt, reviewAt);
-    const testDuration = gate ? minutesBetween(gate.run?.created_at, gateAt) : null;
-    const mergeWait = minutesBetween(gateAt, mergedAt);
+    const testDuration = gate ? minutesBetween(gate.run?.created_at || gate.run?.createdAt, testCompletedAt) : null;
+    const mergeWait = mergedWithinWindow ? minutesBetween(gateAt, mergedAt) : null;
     if (Number.isFinite(candidateToMerge)) candidateToMergeMinutes.push(candidateToMerge);
     if (Number.isFinite(reviewDuration)) reviewMinutes.push(reviewDuration);
     if (Number.isFinite(testDuration)) testMinutes.push(testDuration);
@@ -319,6 +374,8 @@ export function summarizeCandidateFlow({ pullRequests = [], ciRuns = [], jobsByR
       reviewMinutes: round(reviewDuration),
       testMinutes: round(testDuration),
       mergeWaitMinutes: round(mergeWait),
+      finalHeadSha: headSha || null,
+      testCompletedAt,
     }));
   }
 
@@ -382,6 +439,11 @@ export function summarizeCiHealth({
   pullRequests = [],
   dependencyHealth = "unknown",
 }) {
+  const generatedAtMs = timestampMilliseconds(generatedAt);
+  if (!Number.isFinite(generatedAtMs) || !Number.isInteger(periodDays) || periodDays < 1) {
+    throw new Error("CI Health requires a valid generatedAt timestamp and positive integer periodDays.");
+  }
+  const flowSince = new Date(generatedAtMs - periodDays * 24 * 60 * 60 * 1000).toISOString();
   const sourcePullRequestRuns = (ciRuns || []).filter((run) => run?.event === "pull_request");
   const feedbackPullRequestRuns = (feedbackRuns || []).filter((run) => run?.event === "pull_request");
   const dryRunPullRequestRuns = (dryRunRuns || []).filter((run) => (
@@ -481,6 +543,7 @@ export function summarizeCiHealth({
     pullRequests,
     ciRuns: sourcePullRequestRuns,
     jobsByRunId,
+    since: flowSince,
   });
   const targetMetrics = Object.freeze({
     attemptsPerTreeAverage: numericTarget(
@@ -532,7 +595,7 @@ export function summarizeCiHealth({
     dependencyHealth: dependencyTarget(dependencyHealth),
   });
   return Object.freeze({
-    schemaVersion: 5,
+    schemaVersion: 6,
     generatedAt,
     periodDays,
     sourceGate: {
@@ -726,6 +789,11 @@ export async function pullRequestMetrics({ repositoryPath, token, since }) {
       .filter(Number.isFinite)
       .sort((left, right) => left - right)[0];
     if (response.length < 100 || (Number.isFinite(oldestUpdatedAt) && oldestUpdatedAt < sinceMs)) break;
+    if (page === MAX_PULL_REQUEST_PAGES) {
+      throw new Error(
+        `Pull Request metrics exceeded ${MAX_PULL_REQUEST_PAGES * 100} updated entries in the requested window.`,
+      );
+    }
   }
   const enriched = [];
   const batchSize = 8;
@@ -733,12 +801,19 @@ export async function pullRequestMetrics({ repositoryPath, token, since }) {
     const batch = pullRequests.slice(index, index + batchSize);
     const entries = await Promise.all(batch.map(async (pullRequest) => {
       const number = Number(pullRequest.number);
-      const [timelineEvents, reviews, reviewComments] = await Promise.all([
+      const [timelineEvents, reviews, reviewComments, issueComments] = await Promise.all([
         restPages({ apiPath: `/repos/${repositoryPath}/issues/${number}/events`, token }),
         restPages({ apiPath: `/repos/${repositoryPath}/pulls/${number}/reviews`, token }),
         restPages({ apiPath: `/repos/${repositoryPath}/pulls/${number}/comments`, token }),
+        restPages({ apiPath: `/repos/${repositoryPath}/issues/${number}/comments`, token }),
       ]);
-      return { ...pullRequest, timelineEvents, reviews, reviewComments };
+      return {
+        ...pullRequest,
+        timelineEvents,
+        reviews,
+        reviewComments,
+        issueComments,
+      };
     }));
     enriched.push(...entries);
   }

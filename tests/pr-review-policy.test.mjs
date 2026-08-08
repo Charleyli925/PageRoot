@@ -141,6 +141,55 @@ test("an active same-head P0/P1 changes request from Draft still blocks after Re
   assert.equal(result.blockingFindings[0].priority, "P1");
 });
 
+test("a reviewer’s later same-head decision supersedes their earlier changes request", () => {
+  const result = evaluate({
+    now: new Date("2026-08-09T04:02:31.000Z"),
+    reviews: [
+      codexReview(),
+      codexReview({
+        id: 11,
+        actor: "maintainer",
+        state: "CHANGES_REQUESTED",
+        submittedAt: "2026-08-09T03:59:00.000Z",
+        body: "![P1 Badge](x) This concern needs a decision.",
+      }),
+      codexReview({
+        id: 12,
+        actor: "maintainer",
+        state: "APPROVED",
+        submittedAt: "2026-08-09T04:02:00.000Z",
+        body: "The earlier P1 concern is withdrawn.",
+      }),
+    ],
+  });
+  assert.equal(result.status, "passed");
+  assert.deepEqual(result.blockingFindings, []);
+});
+
+test("a plain follow-up comment cannot supersede a same-head P0/P1 changes request", () => {
+  const result = evaluate({
+    reviews: [
+      codexReview(),
+      codexReview({
+        id: 13,
+        actor: "maintainer",
+        state: "CHANGES_REQUESTED",
+        submittedAt: "2026-08-09T03:59:00.000Z",
+        body: "![P1 Badge](x) This concern remains active.",
+      }),
+      codexReview({
+        id: 14,
+        actor: "maintainer",
+        state: "COMMENTED",
+        submittedAt: "2026-08-09T04:02:00.000Z",
+        body: "A follow-up note without an explicit approval.",
+      }),
+    ],
+  });
+  assert.equal(result.status, "blocked");
+  assert.equal(result.blockingFindings[0].priority, "P1");
+});
+
 test("P2/P3/unclassified findings are recorded without blocking a final candidate", () => {
   const result = evaluate({
     reviewThreads: [thread({ priority: "P2" }), thread({ priority: "P3", id: 21 }), {
@@ -175,7 +224,7 @@ test("review-policy artifact carries machine-readable blocking and deferred find
     await assert.rejects(() => writeReviewPolicyArtifact(result, relative), /inside the repository/u);
     destination = await writeReviewPolicyArtifact(result, "output/review-policy/test-policy.json");
     const artifact = JSON.parse(await readFile(destination, "utf8"));
-    assert.equal(artifact.policyVersion, "2026-08-09");
+    assert.equal(artifact.policyVersion, "2026-08-09.1");
     assert.equal(artifact.status, "passed");
     assert.equal(artifact.nonBlockingFindings[0].priority, "P2");
   } finally {

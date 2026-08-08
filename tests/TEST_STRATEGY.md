@@ -13,7 +13,7 @@
 | `baseline-policy` | 分支策略通过，与 review-policy 并行 | 全局依赖 advisory policy 与 packaged-runtime closure | 基线红时不启动 Linux build、Browser 或 macOS Electron runner |
 | 一次性晋升 `release-gate` | review、baseline、完整测试和相关 dry run 都完成的最终 PR Tree | 全量 Node、三分片完整 Browser、独立 Native Electron、独立确定性 AI 闭环、真实 HTML 发现式门禁、即时 review revalidation 与 Tree Hash 凭证 | 每个最终候选只跑一次；后续新 SHA 必须重新 Draft 后 Ready |
 | `Release Dry Run` | `candidate-context` 判定 Ready 候选有打包、release metadata、Electron、Bridge、Schema 或资源风险 | clean job 组装/静态校验显式未签名（`identity=null`）App → 非发布 checkpoint → 第二 clean job 恢复 metadata、重建 renderer oracle、再次校验并启动核对名称/版本/Bundle ID | 不读取签名或 Apple 凭证、不生成 DMG/updater、不成为 Candidate、不创建 tag、不发布；PR 大小只作建议，不作为触发或阻断 |
-| `Review Debt` | 每周 trusted default-branch schedule/manual run | 汇总最近 PR 的行内线程和 review-level P2/P3/unclassified `CHANGES_REQUESTED` finding 到滚动 Issue | 不 checkout PR head、不改代码、不合并、不成为必需检查 |
+| `Review Debt` | 每周 trusted default-branch schedule/manual run | 汇总最近 PR 的行内线程和 review-level P2/P3/unclassified `CHANGES_REQUESTED` finding 到滚动 Issue；超出活动窗口但尚未重新验证的项以 machine-readable state carry forward | 不 checkout PR head、不改代码、不合并、不成为必需检查 |
 | `main-integrity` | 合并到 `main` | 校验合并 PR、Tree Hash、package/lockfile 版本和凭证时效 | 相等即复用完整源码证据，不重复 Node、Browser 或 Electron 测试；不相等直接失败 |
 | 按需 `Developer Preview` | 仅在开发者明确要求时 | 干净 Tree、最新 renderer、ad-hoc DMG、包内容完整性、一次隔离启动和精确 PR/内容交付报告 | 在消耗签名/公证时间前发现“漏打包或根本跑不起来”；不成为正式门禁 |
 | `Release Candidate` | 打标签之前，凭证新鲜且 Tree/版本完全一致 | 预签名 App 内容/完整运行校验 → Developer ID 签名后启动 → App 公证 checkpoint → 从同一 App 生成并公证 DMG → 最终字节校验 | 内容错误不消耗 Apple 队列；后段失败只重跑后段 |
@@ -194,13 +194,16 @@ Browser 验证真实 DOM 中保存卡片、草稿卡片和输入框在当前/其
 
 CI Health 每日先跑依赖健康基线，并同时读取 `ci.yml`、`pr-feedback.yml`、
 `release-dry-run.yml`、`release-candidate.yml` 与 `release.yml`，以及 Pull
-Request 的 Ready event、review 和 review comment。除了同一 run 的绿色 job
-重跑，它还按 PR number（旧数据缺失时按 head branch）聚合不同 SHA 的完整
-门禁，记录 Ready 次数、P0/P1/P2/P3/unclassified finding、Ready-to-review、
-Ready-to-gate、gate-to-merge 和 candidate-to-merge。目标是正常候选 P50 在
-40 分钟内完成，其中 review 小于 15 分钟、测试小于 20 分钟、gate-to-merge
-小于 10 分钟。PR 大小只以 advisory scope 观察，不加入目标或阻断。报告同时
-保留总量、完整门禁、Feedback、候选 churn runner minutes 及 PR/候选取消率。
+Request 的 Ready event、review、review comment 和 issue comment。除了同一 run
+的绿色 job 重跑，它还按 PR number（旧数据缺失时按 head branch）聚合不同 SHA 的
+完整门禁，记录 Ready 次数、P0/P1/P2/P3/unclassified finding、Ready-to-review、
+Ready-to-gate、gate-to-merge 和 candidate-to-merge。review 延迟只接受与
+`review-policy` 相同的最终 head、Ready 后 Codex completion；测试完成取该 final
+SHA 上最后一个成功 source/dry-run lane，而不是等待 review 的 `release-gate`。
+流量指标只采纳窗口内的 Ready/merge 区间，超过分页上限会显式失败。目标是正常候选
+P50 在 40 分钟内完成，其中 review 小于 15 分钟、测试小于 20 分钟、
+gate-to-merge 小于 10 分钟。PR 大小只以 advisory scope 观察，不加入目标或阻断。
+报告同时保留总量、完整门禁、Feedback、候选 churn runner minutes 及 PR/候选取消率。
 只有 `status=completed` 且存在 conclusion 的 workflow run 可进入完整门禁次数、
 延迟、尝试、churn 和取消率分母；活动 run 的数量与已结束 job 所消耗的 runner
 minutes 另行展示，不使用可变的 `updated_at` 伪造已完成延迟。Actions Summary

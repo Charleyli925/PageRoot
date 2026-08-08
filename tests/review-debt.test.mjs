@@ -5,6 +5,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
+  parseReviewDebtState,
   renderReviewDebtMarkdown,
   summarizeReviewDebt,
   writeReviewDebtArtifact,
@@ -20,11 +21,19 @@ function thread(priority, { resolved = false, outdated = false } = {}) {
   };
 }
 
-function review(priority, { id = 20, state = "CHANGES_REQUESTED", actor = "reviewer" } = {}) {
+function review(priority, {
+  id = 20,
+  state = "CHANGES_REQUESTED",
+  actor = null,
+  submittedAt = null,
+  commitSha = null,
+} = {}) {
   return {
     id,
     state,
-    user: { login: actor },
+    user: { login: actor || `reviewer-${id}` },
+    ...(submittedAt ? { submitted_at: submittedAt } : {}),
+    ...(commitSha ? { commit_id: commitSha } : {}),
     body: priority ? `![${priority} Badge](x)` : "No priority",
   };
 }
@@ -75,13 +84,70 @@ test("review debt preserves non-blocking review-level changes requests without r
   ]);
 });
 
+test("review debt drops a review-level finding after its reviewer supersedes it", () => {
+  const headSha = "a".repeat(40);
+  const report = summarizeReviewDebt({
+    generatedAt: "2026-08-09T00:00:00.000Z",
+    pullRequests: [{
+      number: 14,
+      head: { sha: headSha },
+      reviews: [
+        review("P2", {
+          id: 30,
+          actor: "reviewer",
+          commitSha: headSha,
+          submittedAt: "2026-08-09T00:01:00.000Z",
+        }),
+        review(null, {
+          id: 31,
+          actor: "reviewer",
+          state: "APPROVED",
+          commitSha: headSha,
+          submittedAt: "2026-08-09T00:02:00.000Z",
+        }),
+      ],
+    }],
+  });
+  assert.equal(report.totalDeferredFindings, 0);
+});
+
+test("review debt carries inactive-window findings forward and removes them only after a later rescan clears them", () => {
+  const first = summarizeReviewDebt({
+    generatedAt: "2026-08-09T00:00:00.000Z",
+    pullRequests: [{
+      number: 15,
+      html_url: "https://example.test/pr/15",
+      reviewThreads: [thread("P2")],
+    }],
+  });
+  const stored = parseReviewDebtState(renderReviewDebtMarkdown(first));
+  assert.ok(stored);
+  const carried = summarizeReviewDebt({
+    generatedAt: "2026-08-16T00:00:00.000Z",
+    pullRequests: [],
+    retainedFindings: stored.findings,
+  });
+  assert.equal(carried.totalDeferredFindings, 1);
+  assert.equal(carried.currentWindowFindings, 0);
+  assert.equal(carried.carriedForwardFindings, 1);
+  assert.equal(carried.findings[0].source, "carried_forward");
+  assert.match(renderReviewDebtMarkdown(carried), /carried forward/u);
+
+  const rescanned = summarizeReviewDebt({
+    generatedAt: "2026-08-23T00:00:00.000Z",
+    pullRequests: [{ number: 15, reviewThreads: [] }],
+    retainedFindings: carried.findings,
+  });
+  assert.equal(rescanned.totalDeferredFindings, 0);
+});
+
 test("a weekly rolling artifact is machine-readable and repository-scoped", async () => {
   const output = "output/review-debt/test-review-debt.json";
   try {
     const report = summarizeReviewDebt({ pullRequests: [] });
     const destination = await writeReviewDebtArtifact(report, output);
     const artifact = JSON.parse(await readFile(destination, "utf8"));
-    assert.equal(artifact.schemaVersion, 1);
+    assert.equal(artifact.schemaVersion, 2);
     assert.equal(artifact.totalDeferredFindings, 0);
     await assert.rejects(() => writeReviewDebtArtifact(report, "../../outside.json"), /inside the repository/u);
   } finally {
