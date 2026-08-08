@@ -91,6 +91,23 @@ function reaction({
   };
 }
 
+function cleanComment({
+  sha = headSha,
+  createdAt: completedAt = finalCompletedAt,
+  updatedAt = completedAt,
+  id = 50,
+  actor = "chatgpt-codex-connector[bot]",
+  body = null,
+} = {}) {
+  return {
+    id,
+    user: { login: actor },
+    created_at: completedAt,
+    updated_at: updatedAt,
+    body: body ?? `Codex Review: Didn't find any major issues. Breezy!\n\n**Reviewed commit:** \`${sha.slice(0, 10)}\``,
+  };
+}
+
 function codexThread({
   priority = "P2",
   resolved = false,
@@ -225,6 +242,31 @@ test("a PR-level clean reaction may prove the frozen Draft pair before Ready", (
   assert.equal(result.draftCompletion.scope, "pull_request");
 });
 
+test("an immutable exact-commit clean comment survives Ready replacing the Draft reaction", () => {
+  const firstSnapshot = evaluate({
+    reviews: [],
+    pullRequestReactions: [reaction({
+      id: 43,
+      createdAt: draftCompletedAt,
+    })],
+  });
+  assert.equal(firstSnapshot.reason, "final_review_in_progress");
+  assert.equal(firstSnapshot.draftCompletion.scope, "pull_request");
+
+  const laterSnapshot = evaluate({
+    issueComments: [
+      request(),
+      cleanComment({ id: 51, createdAt: draftCompletedAt }),
+      cleanComment({ id: 52, createdAt: finalCompletedAt }),
+    ],
+    reviews: [],
+    pullRequestReactions: [],
+  });
+  assert.equal(laterSnapshot.status, "settled");
+  assert.equal(laterSnapshot.draftCompletion.kind, "clean_review_comment");
+  assert.equal(laterSnapshot.completion.kind, "clean_review_comment");
+});
+
 test("empty, unmarked, stale, human and wrong-commit records are never completions", () => {
   const emptyDraft = draftReview({ body: "" });
   const emptyFinal = codexReview({ body: "" });
@@ -245,6 +287,26 @@ test("empty, unmarked, stale, human and wrong-commit records are never completio
     reviews: [draftReview()],
     pullRequestReactions: [eyes],
   }).reason, "final_review_in_progress");
+
+  const commentNoise = [
+    cleanComment({ sha: oldSha }),
+    cleanComment({ actor: "maintainer" }),
+    cleanComment({
+      updatedAt: "2026-08-08T04:02:01.000Z",
+    }),
+    cleanComment({
+      body: "Codex Review: Didn't find any major issues. Breezy!",
+    }),
+    cleanComment({
+      body: `Ordinary Codex discussion.\n\n**Reviewed commit:** \`${headSha.slice(0, 10)}\``,
+    }),
+  ];
+  for (const noise of commentNoise) {
+    assert.equal(evaluate({
+      issueComments: [request(), noise],
+      reviews: [draftReview()],
+    }).reason, "final_review_in_progress");
+  }
 });
 
 test("completion requires a matching body marker as well as GitHub commit identity", () => {
@@ -295,11 +357,19 @@ test("second-resolution causal boundaries fail closed", () => {
     requestReactions: [reaction({ createdAt: requestAt })],
   }).reason, "draft_review_not_completed_before_promotion");
   assert.equal(evaluate({
+    issueComments: [request(), cleanComment({ createdAt: requestAt })],
+    reviews: [codexReview()],
+  }).reason, "draft_review_not_completed_before_promotion");
+  assert.equal(evaluate({
     reviews: [draftReview(), codexReview({ submittedAt: readyAt })],
   }).reason, "final_review_in_progress");
   assert.equal(evaluate({
     reviews: [draftReview()],
     pullRequestReactions: [reaction({ createdAt: readyAt })],
+  }).reason, "final_review_in_progress");
+  assert.equal(evaluate({
+    issueComments: [request(), cleanComment({ createdAt: readyAt })],
+    reviews: [draftReview()],
   }).reason, "final_review_in_progress");
   assert.equal(evaluate({
     timelineEvents: [

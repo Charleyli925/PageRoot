@@ -17,6 +17,7 @@ const DEFAULT_TIMEOUT_SECONDS = 20 * 60;
 const DEFAULT_POLL_SECONDS = 20;
 const MAX_REST_PAGES = 20;
 const CODEX_ENVIRONMENT_UNAVAILABLE_PATTERN = /\bcreate an environment for this repo\b/iu;
+const CODEX_CLEAN_COMPLETION_PATTERN = /^Codex Review:\s*Didn't find any major issues\.[^\r\n]*\r?\n\r?\n/iu;
 
 function normalizedLogin(value) {
   return String(value || "").toLowerCase().replace(/\[bot\]$/u, "");
@@ -181,16 +182,46 @@ function cleanReactionSignal(reaction, scope, after, before) {
   };
 }
 
+function cleanCompletionCommentSignal(comment, expectedHeadSha, after, before) {
+  const completedAt = timestamp(commentCreatedAt(comment));
+  const updatedAt = timestamp(commentUpdatedAt(comment));
+  const prefix = reviewedCommitPrefix(comment?.body);
+  if (
+    !isCodexActor(commentAuthor(comment))
+    || updatedAt !== completedAt
+    || !CODEX_CLEAN_COMPLETION_PATTERN.test(String(comment?.body || ""))
+    || !prefix
+    || !expectedHeadSha.startsWith(prefix)
+    || !strictlyInInterval(completedAt, after, before)
+  ) return null;
+  return {
+    kind: "clean_review_comment",
+    scope: "issue_comment",
+    at: completedAt,
+    id: comment?.id || comment?.databaseId || null,
+  };
+}
+
 function reviewCompletionSignals({
   expectedHeadSha,
   after,
   before = Number.POSITIVE_INFINITY,
   reviews = [],
+  completionComments = [],
   reactionGroups = [],
 }) {
   const signals = [];
   for (const review of reviews) {
     const signal = substantiveReviewSignal(review, expectedHeadSha, after, before);
+    if (signal) signals.push(signal);
+  }
+  for (const comment of completionComments) {
+    const signal = cleanCompletionCommentSignal(
+      comment,
+      expectedHeadSha,
+      after,
+      before,
+    );
     if (signal) signals.push(signal);
   }
   for (const group of reactionGroups) {
@@ -366,6 +397,7 @@ export function evaluateReviewSettlement({
     after: requestAt,
     before: readyAt,
     reviews,
+    completionComments: issueComments,
     reactionGroups: [
       { scope: "request_comment", reactions: requestReactions },
       { scope: "pull_request", reactions: pullRequestReactions },
@@ -397,6 +429,7 @@ export function evaluateReviewSettlement({
     expectedHeadSha: expectedHead,
     after: readyAt,
     reviews,
+    completionComments: issueComments,
     reactionGroups: [{ scope: "pull_request", reactions: pullRequestReactions }],
   })[0] || null;
   const finalEnvironmentFailure = latestCodexEnvironmentFailure(
