@@ -9,6 +9,10 @@ export function mergeReviewTextRanges(
   ranges: readonly ReviewTextRange[],
 ): ReviewTextRange[];
 
+export function reviewSentenceRanges(
+  value: string,
+): ReviewTextRange[];
+
 export type ReviewTextChangeOperation =
   | "none"
   | "insert"

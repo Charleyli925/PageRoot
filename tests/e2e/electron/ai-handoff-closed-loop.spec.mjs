@@ -2189,37 +2189,88 @@ test("a verified AI result stays pending through desktop review until the user a
       [beforeReviewFrame, "removed"],
       [afterReviewFrame, "added"],
     ]) {
-      await expect.poll(() => frame.locator("html").evaluate((expectedTone) => {
+      await expect.poll(() => frame.locator("html").evaluate((_documentElement, expectedTone) => {
         const owner = document.querySelector("[data-review-stable-sentence-rewrite]");
         const marker = owner?.querySelector(
           '[data-pageroot-review-text="' + expectedTone + '"]',
         );
         if (!owner || !marker) return { matches: false, reason: "marker-missing" };
         const groupId = marker.getAttribute("data-pageroot-review-text-group") || "";
-        const markerRange = document.createRange();
-        markerRange.selectNodeContents(marker);
-        const markerRectCount = [...markerRange.getClientRects()]
-          .filter((rect) => rect.width > 1 && rect.height > 1).length;
-        markerRange.detach();
-        const stableRects = [...owner.childNodes]
-          .filter((node) => (
-            node.nodeType === Node.TEXT_NODE
-            && /稳定(?:前|后)句/u.test(node.textContent || "")
-          ))
-          .flatMap((node) => {
-            const range = document.createRange();
-            range.selectNodeContents(node);
-            const rects = [...range.getClientRects()]
-              .filter((rect) => rect.width > 1 && rect.height > 1)
-              .map((rect) => ({
-                left: rect.left,
-                top: rect.top,
-                right: rect.right,
-                bottom: rect.bottom,
-              }));
-            range.detach();
-            return rects;
-          });
+        const markers = [...owner.querySelectorAll(
+          '[data-pageroot-review-text="' + expectedTone + '"][data-pageroot-review-text-group="' + groupId + '"]',
+        )];
+        const markerRects = markers.flatMap((candidate) => {
+          const markerRange = document.createRange();
+          markerRange.selectNodeContents(candidate);
+          const rects = [...markerRange.getClientRects()]
+            .filter((rect) => rect.width > 1 && rect.height > 1)
+            .map((rect) => ({
+              left: rect.left,
+              top: rect.top,
+              right: rect.right,
+              bottom: rect.bottom,
+            }));
+          markerRange.detach();
+          return rects;
+        });
+        const markerRectCount = markerRects.length;
+        const markerLineCount = markerRects.reduce((lines, rect) => {
+          const matchingLine = lines.find((line) => line.some((candidate) => {
+            const overlap = Math.max(0, Math.min(candidate.bottom, rect.bottom)
+              - Math.max(candidate.top, rect.top));
+            const height = Math.max(1, Math.min(
+              candidate.bottom - candidate.top,
+              rect.bottom - rect.top,
+            ));
+            return overlap / height >= .5;
+          }));
+          if (matchingLine) matchingLine.push(rect);
+          else lines.push([rect]);
+          return lines;
+        }, []).length;
+        const stableRanges = String(
+          owner.getAttribute("data-pageroot-review-stable-text-ranges") || "",
+        ).split(/\s+/).map((value) => {
+          const match = /^(\d+):(\d+)$/u.exec(value);
+          return match ? { start: Number(match[1]), end: Number(match[2]) } : null;
+        }).filter((range) => range && range.end > range.start);
+        const textNodes = [];
+        const textWalker = document.createTreeWalker(owner, NodeFilter.SHOW_TEXT);
+        let textNode = textWalker.nextNode();
+        while (textNode) {
+          if (!textNode.parentElement?.closest("script, style, noscript, template")) {
+            textNodes.push(textNode);
+          }
+          textNode = textWalker.nextNode();
+        }
+        const boundaryAt = (offset) => {
+          let remaining = Math.max(0, Math.trunc(offset));
+          for (const node of textNodes) {
+            const length = node.textContent?.length || 0;
+            if (remaining <= length) return { node, offset: remaining };
+            remaining -= length;
+          }
+          const node = textNodes.at(-1);
+          return node ? { node, offset: node.textContent?.length || 0 } : null;
+        };
+        const stableRects = stableRanges.flatMap((sourceRange) => {
+          const start = boundaryAt(sourceRange.start);
+          const end = boundaryAt(sourceRange.end);
+          if (!start || !end) return [];
+          const range = document.createRange();
+          range.setStart(start.node, start.offset);
+          range.setEnd(end.node, end.offset);
+          const rects = [...range.getClientRects()]
+            .filter((rect) => rect.width > 1 && rect.height > 1)
+            .map((rect) => ({
+              left: rect.left,
+              top: rect.top,
+              right: rect.right,
+              bottom: rect.bottom,
+            }));
+          range.detach();
+          return rects;
+        });
         const frames = [...document.querySelectorAll(
           '[data-pageroot-review-overlay-box][data-text-group="' + groupId + '"]',
         )];
@@ -2233,10 +2284,20 @@ test("a verified AI result stays pending through desktop review until the user a
             && Math.min(rect.bottom, stableRect.bottom) - Math.max(rect.top, stableRect.top) > 1
           ));
         });
-        return {
-          matches: markerRectCount >= 3
-            && frames.length === markerRectCount
+        const overlaps = (left, right) => (
+          Math.min(left.right, right.right) - Math.max(left.left, right.left) > 1
+          && Math.min(left.bottom, right.bottom) - Math.max(left.top, right.top) > 1
+        );
+        const matches = markerRectCount >= 3
+            && markerLineCount >= 3
+            && frames.length >= markerLineCount
             && holes.length === frames.length
+            && markerRects.every((rect) => frames.some((frame) => (
+              overlaps(rect, frame.getBoundingClientRect())
+            )))
+            && frames.every((frame) => markerRects.some((rect) => (
+              overlaps(frame.getBoundingClientRect(), rect)
+            )))
             && frames.every((frame) => (
               frame.getAttribute("data-scope") !== "text-block"
               && frame.getAttribute("data-shaped") !== "true"
@@ -2245,14 +2306,20 @@ test("a verified AI result stays pending through desktop review until the user a
             && frames.filter((frame) => (
               frame.querySelector("[data-pageroot-review-overlay-label]")
             )).length === 1
-            && stableRects.length === 2
+            && stableRanges.length === 2
+            && stableRects.length >= 2
             && !intersectsStableText
             && ![...owner.querySelectorAll("[data-pageroot-review-text]")].some((candidate) => (
               /稳定(?:前|后)句/u.test(candidate.textContent || "")
-            )),
+            ));
+        return {
+          matches,
           markerRectCount,
+          markerLineCount,
+          markerCount: markers.length,
           frameCount: frames.length,
           holeCount: holes.length,
+          stableRangeCount: stableRanges.length,
           stableRectCount: stableRects.length,
           intersectsStableText,
         };

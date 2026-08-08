@@ -150,8 +150,9 @@ Rules:
   path. An unsafe, ambiguous, replaced or disconnected target, or an
   unavailable capability, produces no marker. Neither review frame receives
   comment text or a comment scope marker in authored-page markup.
-- Semantic pairing is analysis-local. Its parent-scoped pair graph and
-  `semanticOwnerId`/`geometryOwnerId` may annotate the disposable prepared
+- Semantic pairing is analysis-local. Its parent-scoped pair graph,
+  `semanticOwnerId`/`geometryOwnerId`, and exact stable-sentence geometry
+  offsets may annotate the disposable prepared
   documents so the projection can group one frozen review result, but they have
   no database, source, Version, comment locator, Bridge or IPC authority and
   are discarded with that review session or its bounded cache entry.

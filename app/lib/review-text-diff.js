@@ -313,7 +313,7 @@ function rangesForTokens(source, tokens, indexes) {
   return ranges;
 }
 
-function reviewSentenceRanges(value) {
+export function reviewSentenceRanges(value) {
   if (!value) return [];
   const ranges = [];
   const boundary = /[\u3002\uff01\uff1f!?\uff1b;]+|\n+/gu;

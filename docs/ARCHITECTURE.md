@@ -236,7 +236,8 @@ Comments + frozen input
   its scope-relaxed candidates. It then commits both frames atomically;
   timeout, partial and late batches silently retain the static footprint. Exact leaf text
   ranges remain immutable evidence; a separate readable-footprint planner
-  groups nearby ranges, keeps stable sentence gaps separate, gives tiny phrases
+  groups nearby ranges, keeps stable sentence gaps separate, records exact
+  stable-sentence offsets as disposable geometry boundaries, gives tiny phrases
   a bounded line-local width and promotes dense multi-line rewrites to their
   smallest semantic text owner. Local wrapped copy renders as separate
   rectangular line frames with one group label instead of a stepped union

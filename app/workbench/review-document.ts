@@ -9,6 +9,7 @@ import {
 import {
   mergeReviewTextRanges,
   readableReviewTextFootprintPlan,
+  reviewSentenceRanges,
   reviewTextSimilarity,
   sentenceAwareTextDifferences,
 } from "../lib/review-text-diff.js";
@@ -2423,6 +2424,23 @@ function markSemanticTextFootprintOwner(
   );
 }
 
+function markStableSentenceRanges(
+  unit: ReviewSemanticUnit,
+  inventory: ReviewTextInventory,
+  evidenceRanges: TextRange[],
+) {
+  const stableRanges = reviewSentenceRanges(inventory.text).filter((sentence) => (
+    !evidenceRanges.some((range) => (
+      range.end > sentence.start && range.start < sentence.end
+    ))
+  ));
+  if (!stableRanges.length) return;
+  unit.element.setAttribute(
+    "data-pageroot-review-stable-text-ranges",
+    stableRanges.map((range) => `${range.start}:${range.end}`).join(" "),
+  );
+}
+
 function markSemanticAllText(
   pair: ReviewSemanticPairNode,
   unit: ReviewSemanticUnit,
@@ -2491,6 +2509,10 @@ function markSemanticTextDifferences(graph: ReviewSemanticPairGraph): {
       afterInventory.text,
       differences,
     );
+    if (plan.operation === "replace") {
+      markStableSentenceRanges(pair.before, beforeInventory, plan.before.evidenceRanges);
+      markStableSentenceRanges(pair.after, afterInventory, plan.after.evidenceRanges);
+    }
     const maximumScope = pair.before.maximumScope === "inline"
       || pair.after.maximumScope === "inline"
       ? "inline"
@@ -5352,7 +5374,15 @@ function reviewBootstrap(
       else lines.push([record]);
       return lines;
     }, []);
-  const mergeTextLineIntervals = (records) => [...records]
+  const protectedTextBetween = (left, right, protectedRecords) => (
+    protectedRecords.some((candidate) => (
+      recordsShareTextLine(candidate, left)
+      && recordsShareTextLine(candidate, right)
+      && candidate.left < right.left - .25
+      && candidate.right > left.right + .25
+    ))
+  );
+  const mergeTextLineIntervals = (records, protectedRecords = []) => [...records]
     .sort((left, right) => left.left - right.left)
     .reduce((intervals, record) => {
       const previous = intervals.at(-1);
@@ -5365,7 +5395,10 @@ function reviewBootstrap(
         Math.min(previous.bottom - previous.top, record.bottom - record.top),
       );
       const gap = Math.max(0, record.left - previous.right);
-      if (gap <= Math.max(10, minimumHeight * .9)) {
+      if (
+        gap <= Math.max(10, minimumHeight * .9)
+        && !protectedTextBetween(previous, record, protectedRecords)
+      ) {
         previous.left = Math.min(previous.left, record.left);
         previous.top = Math.min(previous.top, record.top);
         previous.right = Math.max(previous.right, record.right);
@@ -5375,7 +5408,7 @@ function reviewBootstrap(
       }
       return intervals;
     }, []);
-  const expandTinyTextInterval = (record, ownerLines) => {
+  const expandTinyTextInterval = (record, ownerLines, protectedRecords = []) => {
     const height = Math.max(1, record.bottom - record.top);
     const minimumWidth = Math.max(24, height * 1.6);
     if (record.right - record.left >= minimumWidth) return record;
@@ -5388,24 +5421,37 @@ function reviewBootstrap(
       )) || null
       : null;
     if (!ownerBounds) return record;
-    if (ownerBounds && ownerBounds.right - ownerBounds.left <= minimumWidth) {
-      return { ...record, left: ownerBounds.left, right: ownerBounds.right };
+    const leftBoundary = protectedRecords.reduce((boundary, candidate) => (
+      recordsShareTextLine(candidate, record)
+      && candidate.right <= record.left + .25
+      ? Math.max(boundary, candidate.right)
+      : boundary
+    ), ownerBounds.left);
+    const rightBoundary = protectedRecords.reduce((boundary, candidate) => (
+      recordsShareTextLine(candidate, record)
+      && candidate.left >= record.right - .25
+      ? Math.min(boundary, candidate.left)
+      : boundary
+    ), ownerBounds.right);
+    if (rightBoundary <= leftBoundary) return record;
+    if (rightBoundary - leftBoundary <= minimumWidth) {
+      return { ...record, left: leftBoundary, right: rightBoundary };
     }
     const center = (record.left + record.right) / 2;
     let left = center - minimumWidth / 2;
     let right = center + minimumWidth / 2;
-    if (ownerBounds && left < ownerBounds.left) {
-      right += ownerBounds.left - left;
-      left = ownerBounds.left;
+    if (left < leftBoundary) {
+      right += leftBoundary - left;
+      left = leftBoundary;
     }
-    if (ownerBounds && right > ownerBounds.right) {
-      left -= right - ownerBounds.right;
-      right = ownerBounds.right;
+    if (right > rightBoundary) {
+      left -= right - rightBoundary;
+      right = rightBoundary;
     }
     return {
       ...record,
-      left: ownerBounds ? Math.max(ownerBounds.left, left) : left,
-      right: ownerBounds ? Math.min(ownerBounds.right, right) : right,
+      left: Math.max(leftBoundary, left),
+      right: Math.min(rightBoundary, right),
     };
   };
   const boundsForRects = (rects) => rects.length ? {
@@ -5422,6 +5468,46 @@ function reviewBootstrap(
       right: rect.right + scrollX,
       bottom: rect.bottom + scrollY,
     }));
+  const ownerStableTextRecords = (owner) => {
+    const ranges = String(
+      owner.getAttribute("data-pageroot-review-stable-text-ranges") || "",
+    ).split(/\s+/).map((value) => {
+      const match = /^(\d+):(\d+)$/u.exec(value);
+      return match ? { start: Number(match[1]), end: Number(match[2]) } : null;
+    }).filter((range) => range && range.end > range.start);
+    if (!ranges.length) return [];
+    const nodes = anchorTextNodes(owner);
+    if (!nodes.length) return [];
+    const boundaryAt = (offset) => {
+      let remaining = Math.max(0, Math.trunc(offset));
+      for (const node of nodes) {
+        const length = node.textContent?.length || 0;
+        if (remaining <= length) return { node, offset: remaining };
+        remaining -= length;
+      }
+      const node = nodes.at(-1);
+      return node ? { node, offset: node.textContent?.length || 0 } : null;
+    };
+    const records = [];
+    ranges.forEach((sourceRange) => {
+      const start = boundaryAt(sourceRange.start);
+      const end = boundaryAt(sourceRange.end);
+      if (!start || !end) return;
+      const range = document.createRange();
+      range.setStart(start.node, start.offset);
+      range.setEnd(end.node, end.offset);
+      [...range.getClientRects()]
+        .filter((rect) => rect.width > 1 && rect.height > 1)
+        .forEach((rect) => records.push({
+          left: rect.left + scrollX,
+          top: rect.top + scrollY,
+          right: rect.right + scrollX,
+          bottom: rect.bottom + scrollY,
+        }));
+      range.detach();
+    });
+    return records;
+  };
   const textOwnerAllowsBlock = (owner) => {
     if (!owner || !owner.matches(
       "p, h1, h2, h3, h4, h5, h6, li, td, th, caption, div",
@@ -5506,8 +5592,9 @@ function reviewBootstrap(
       }
       const multiLine = lines.length > 1;
       const ownerLines = owner ? textLineGroups(ownerContentRecords(owner)) : [];
-      return lines.flatMap((line) => mergeTextLineIntervals(line))
-        .map((record) => expandTinyTextInterval(record, ownerLines))
+      const protectedRecords = owner ? ownerStableTextRecords(owner) : [];
+      return lines.flatMap((line) => mergeTextLineIntervals(line, protectedRecords))
+        .map((record) => expandTinyTextInterval(record, ownerLines, protectedRecords))
         .sort((left, right) => left.top - right.top || left.left - right.left)
         .map((record, index) => ({
           ...record,
@@ -5720,15 +5807,18 @@ function reviewBootstrap(
     svg.style.setProperty("height", height + "px", "important");
     const holePaths = [];
     merged.forEach((record) => {
+      const horizontalInset = record.types.length === 1 && record.types[0] === "text"
+        ? 0
+        : inset;
       const fragments = (record.fragments || [{
         left: record.left,
         top: record.top,
         right: record.right,
         bottom: record.bottom,
       }]).map((fragment) => ({
-        left: fragment.left - inset,
+        left: fragment.left - horizontalInset,
         top: fragment.top - inset,
-        right: fragment.right + inset,
+        right: fragment.right + horizontalInset,
         bottom: fragment.bottom + inset,
       }));
       const pathData = unionPath(fragments);
@@ -5743,9 +5833,9 @@ function reviewBootstrap(
       if (record.ownerKey) {
         hole.setAttribute("data-pageroot-review-mask-owner", record.ownerKey);
       }
-      const left = record.left - inset;
+      const left = record.left - horizontalInset;
       const top = record.top - inset;
-      const width = record.right - record.left + inset * 2;
+      const width = record.right - record.left + horizontalInset * 2;
       const holeHeight = record.bottom - record.top + inset * 2;
       hole.setAttribute("d", pathData);
       hole.setAttribute("data-left", String(left));
@@ -5770,6 +5860,9 @@ function reviewBootstrap(
     svg.prepend(dim);
     layer.append(svg);
     merged.forEach((record) => {
+      const horizontalInset = record.types.length === 1 && record.types[0] === "text"
+        ? 0
+        : inset;
       const box = document.createElement("div");
       box.setAttribute("data-pageroot-review-overlay-box", record.changeId);
       box.setAttribute("data-pageroot-review-semantic-owner", record.semanticOwnerId || "");
@@ -5792,9 +5885,9 @@ function reviewBootstrap(
       );
       const active = currentState.focus !== "all" && currentState.focus === record.changeId;
       box.dataset.active = active ? "true" : "false";
-      const left = record.left - inset;
+      const left = record.left - horizontalInset;
       const top = record.top - inset;
-      const width = record.right - record.left + inset * 2;
+      const width = record.right - record.left + horizontalInset * 2;
       const boxHeight = record.bottom - record.top + inset * 2;
       box.style.setProperty("left", left + "px", "important");
       box.style.setProperty("top", top + "px", "important");

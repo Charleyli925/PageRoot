@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   readableReviewTextFootprintPlan,
+  reviewSentenceRanges,
   reviewTextSimilarity,
   sentenceAwareTextDifferences,
 } from "../app/lib/review-text-diff.js";
@@ -213,6 +214,16 @@ test("stable outer sentences prevent dense evidence from swallowing the block", 
   assert.ok(changedText(after, plan.after.evidenceRanges).every((value) => (
     !value.includes("稳定前句") && !value.includes("稳定后句")
   )));
+});
+
+test("stable sentence offsets stay exact when a changed sentence has unchanged suffix text", () => {
+  const source = "稳定前句。旧方案覆盖多个指标、多个渠道、多个阶段，并给出较长说明。稳定后句。";
+
+  assert.deepEqual(reviewSentenceRanges(source), [
+    { start: 0, end: 5 },
+    { start: 5, end: 33 },
+    { start: 33, end: 38 },
+  ]);
 });
 
 test("a meaningful stable gap keeps precise phrase footprints separate", () => {
