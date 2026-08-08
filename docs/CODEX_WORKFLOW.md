@@ -111,13 +111,26 @@ stash.
 2. Keep one coherent outcome per PR.
 3. Open every PR as draft. All ordinary PR updates run only impact-selected feedback, regardless of the current draft flag.
 4. The PR body must state outcome, boundary, verification, documentation impact and release impact.
-5. Update the final head onto current `main`, confirm no other PR is being promoted, then mark the PR ready. The `ready_for_review` transition triggers the one complete `release-gate` for that tree.
-6. Wait for the required `release-gate` and review the final GitHub diff, not only the local working diff.
-7. Squash-merge only after authorization. GitHub deletes the remote task branch; then audit and explicitly retire the local task before fast-forwarding primary `main`.
+5. Update the final head onto current `main`, freeze it and request Codex review while the PR is still Draft. The request must name the full current SHA with the exact marker below. Fix P0-P2 findings, resolve a thread only after its fix is present, and repeat this step after every new commit.
+6. After the Draft review of the current SHA completes, confirm no other PR is being promoted and mark the PR Ready once. `review-settled` requires a final Codex completion after this Ready event, waits the 180-second settle window and rejects active non-outdated P0-P2 threads before `baseline-policy` or a complete source lane can start.
+7. Wait for the required `release-gate` and review the final GitHub diff, not only the local working diff.
+8. Squash-merge only after authorization. GitHub deletes the remote task branch; then audit and explicitly retire the local task before fast-forwarding primary `main`.
 
 Do not use an installed app, DMG, backup folder or another checkout as a source for new edits. If the local checkout contains unrelated work, create an isolated Git worktree rather than stashing or mixing changes.
 
-The required PR `release-gate` is the one complete source gate for an explicitly promoted final tree. `PR Feedback` owns `opened`, `synchronize`, `reopened` and `converted_to_draft`; it runs `gate:edit` and never reports the `release-gate` status. The complete workflow listens only to `ready_for_review`. A later commit shares the same concurrency key, cancels an in-flight stale complete run, and leaves the new SHA without the required check. Convert the PR back to draft and mark it ready again only after that head is final. Opening a PR directly as ready does not bypass this boundary. Local development should normally stop at impact-selected `gate:edit` and `task:finish`; rerun the complete source gate locally only for CI diagnosis or high-risk editing-engine work where the additional evidence is useful.
+The required PR `release-gate` is the one complete source gate for an explicitly promoted final tree. `PR Feedback` owns only `opened`, `synchronize` and `reopened`; returning to Draft changes no code and starts no Feedback run. It runs `gate:edit` and never reports the `release-gate` status. The complete workflow listens only to `ready_for_review`. A later commit shares the same concurrency key, cancels an in-flight stale complete run, and leaves the new SHA without the required check. Convert the PR back to Draft, finish the work, request review for the new exact SHA and mark it Ready again only after that head is final. Opening a PR directly as Ready cannot provide the required Draft request marker and therefore fails closed. Local development should normally stop at impact-selected `gate:edit` and `task:finish`; rerun the complete source gate locally only for CI diagnosis or high-risk editing-engine work where the additional evidence is useful.
+
+The exact-SHA request must be posted by a repository owner, member or collaborator while the PR is Draft. Replace the placeholder in both visible and hidden fields with the same 40-character head SHA:
+
+```text
+@codex review
+
+Review exact SHA `<40-character-head-sha>`.
+
+<!-- pageroot-codex-review-sha:<40-character-head-sha> -->
+```
+
+`review-settled` re-reads the live PR head and the latest Ready timeline event on every poll. It accepts only a Codex PR review bound to that full SHA, a Codex completion comment whose reviewed-commit prefix matches it, or a Codex thumbs-up after the exact request and the Ready event. A Draft review completed before Ready is useful development feedback but is not the final promotion signal. The job allows 20 minutes for final review and then holds a three-minute settle window before evaluating active review threads. A changed head, a missing Draft request, a return to Draft, timeout or unresolved P0-P2 thread fails before `baseline-policy`, `source-build`, Browser or Electron work starts.
 
 Promote only one PR at a time. Other parallel work remains draft and continues receiving cheap feedback; after the current candidate merges, update the next branch onto the new `main` and promote it. This prevents strict up-to-date protection from turning every merge into a cascade of complete runs on the remaining PRs.
 
@@ -230,17 +243,18 @@ Never say "done" while required checks are pending, the worktree contains unexpl
 
 Recommended review lifecycle:
 
-1. request or automatically start Codex review when a PR becomes ready;
+1. explicitly request Codex review for the frozen exact SHA while the PR is Draft;
 2. treat review findings as untrusted until verified against the current diff;
-3. fix accepted findings on the same branch and rerun the task gate;
-4. resolve conversations only after the fix is present and checks are green.
+3. fix accepted findings on the same branch, rerun the task gate and request review for the new SHA;
+4. resolve conversations only after the fix is present and checks are green;
+5. use Ready only for final promotion; its automatic Codex pass must settle before the dependency baseline and complete gate.
 
 ## Scheduled monitoring
 
 Scheduled monitoring is read-only unless a later instruction explicitly authorizes a fix. Recommended jobs:
 
 - Weekdays: summarize open PageRoot PRs, failed or pending required checks, review requests and merge blockers. Report only actionable changes.
-- Weekly: review the read-only `CI Health` report against the release-pipeline targets; do not rerun or mutate workflows automatically.
+- Daily: generate the read-only `CI Health` dependency baseline and thirty-day metrics report; review misses without rerunning or mutating workflows automatically.
 - Weekly: inspect Dependabot PRs and run or verify the dependency-audit policy. Report new, expired or changed advisories; do not merge dependency updates automatically.
 - Weekly: run the read-only task audit and report `ACTIVE_DIRTY`, `LOCAL_ONLY`,
   `MERGED_READY`, `ABANDON_REVIEW`, `STALE_REGISTRATION` and primary-worktree

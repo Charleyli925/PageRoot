@@ -6,8 +6,10 @@ PageRoot keeps the release standard high while avoiding repeated proof of the sa
 
 | Boundary | Trigger | Evidence | What it must not do |
 | --- | --- | --- | --- |
-| PR feedback | Pull Request opens, updates, reopens or returns to Draft | Impact-selected Node/compiler feedback for the current head | Report `release-gate` or run the complete Browser/Electron matrix |
-| Source candidate | One frozen Pull Request explicitly transitions from Draft to Ready | Full Node, three Browser shards, real HTML, native Electron and deterministic AI; exact-tree attestation | Automatically rerun on later commits, package or publish an installer |
+| PR feedback | Pull Request opens, updates or reopens | Impact-selected Node/compiler feedback for the current head | Report `release-gate` or run the complete Browser/Electron matrix |
+| Review settlement | A frozen, exact-SHA-reviewed Pull Request explicitly transitions from Draft to Ready | Draft request marker, final Ready-triggered Codex completion, 180-second settle window and no active P0-P2 thread | Start dependency, build, Browser or Electron work while review is pending or stale |
+| Dependency baseline | Review settlement and branch policy pass | Unchanged advisory threshold plus exact packaged-runtime closure | Start a complete source lane or macOS runner while the global baseline is red |
+| Source candidate | Review settlement and dependency baseline pass for one promoted head | Full Node, three Browser shards, real HTML, native Electron and deterministic AI; exact-tree attestation | Automatically rerun on later commits, package or publish an installer |
 | Main integrity | Source candidate is merged | Match merged PR, Tree Hash, version and fresh PR attestation | Repeat any Node, Browser or Electron source test |
 | Developer preview | Explicit manual request only | Clean Tree, ad-hoc DMG, packaged-content audit, isolated startup and non-release attestation | Sign/notarize, create updater assets, become a prerequisite, tag or publish |
 | Release candidate | Manual `Release Candidate` dispatch on current `main` | Pre-sign content/runtime proof, signed-App checkpoint, final DMG/ZIP/update checks, release asset hashes and candidate attestation | Rebuild the verified App after checkpoint, create a tag or GitHub Release |
@@ -22,15 +24,21 @@ it. Its seven-day artifact cannot be promoted; formal release evidence starts
 independently from reviewed `main`.
 
 `PR Feedback` and the source-candidate workflow share a per-PR concurrency key.
-A commit or Draft conversion therefore cancels an in-flight complete run for
-the stale head, but does not create a `release-gate` job for the new SHA. The
-required check stays absent until the PR is explicitly promoted again. A PR
-opened non-draft also receives feedback only. Promote one PR at a time; keep
-other parallel work Draft until the current candidate merges, then update and
-promote the next branch against the new `main`.
+A new commit therefore cancels an in-flight complete run for the stale head but
+does not create a `release-gate` job for the new SHA. Returning to Draft alone
+starts no Feedback workflow; a still-running `review-settled` poll re-reads that
+state and fails closed. The required check stays absent until the new head gets
+an explicit exact-SHA Draft request and is promoted again. A PR opened
+non-draft receives Feedback only and cannot satisfy the Draft request boundary.
+Promote one PR at a time; keep other parallel work Draft until the current
+candidate merges, then update and promote the next branch against the new
+`main`.
 
 ## CI ownership and isolation
 
+- `review-settled` is the first promotion barrier. It revalidates the live head and latest Ready event, requires a trusted exact-SHA request made in Draft, waits for the final Codex completion after Ready, then holds three minutes before rejecting active non-outdated P0-P2 threads.
+- The promotion workflow remains a read-only `pull_request` workflow. It grants no write permission, never uses `pull_request_target` to execute checked-out PR code and never merges a Pull Request.
+- `baseline-policy` waits for both review settlement and branch policy. It runs `audit:dependencies`, whose single command owns both advisory policy and packaged-runtime closure. `source-build`, Native Electron and AI Electron depend on this job, so a red global baseline consumes no macOS runner.
 - Linux builds and shares only the Web renderer used by Node and Browser lanes.
 - Each macOS Electron lane builds the Electron renderer locally. The build is normally sub-second and removes Linux-to-macOS build output as a variable.
 - Native Electron and deterministic AI run as separate jobs. A failure can be rerun independently.
@@ -107,7 +115,7 @@ Review these metrics per release and as a rolling 30-day view:
 
 Runner minutes and wall time are different signals. Splitting Electron lanes may use similar total macOS minutes while reducing critical-path time and allowing only the failed lane to rerun. The goal is less repeated evidence, not simply fewer tests.
 
-The read-only `CI Health` workflow runs weekly and can also be dispatched manually. `scripts/ci-health-report.mjs` reads both PR-feedback and source-candidate Actions history. It groups complete runs by Pull Request number, falling back to head branch for legacy records, and charges all later complete candidate SHAs to candidate churn. This complements same-Tree and same-run retry metrics instead of allowing many unique SHAs from one PR to look healthy. The metric table is written to the workflow summary and `output/ci-health/ci-health.json` is retained for 90 days. Empty periods remain `null`/`n/a`; they are never reported as a false zero failure rate.
+The read-only `CI Health` workflow runs daily and can also be dispatched manually. Its first job runs the same dependency advisory and packaged-runtime closure baseline even when no PR is promoted; the report job still runs with `always()` so a red baseline is recorded rather than hiding the thirty-day metrics. `scripts/ci-health-report.mjs` reads both PR-feedback and source-candidate Actions history. It groups complete runs by Pull Request number, falling back to head branch for legacy records, charges all later complete candidate SHAs to candidate churn, records total/full/feedback/churn runner minutes, and reports cancellation rates for all PR workflows and promoted candidates. Review-only or baseline-only failed promotions are not miscounted as complete gates. The Actions Summary gives every machine-measured report target an explicit `MET`, `MISSED` or `NO DATA` result plus an overall status; `output/ci-health/ci-health.json` retains the same assessment for 90 days. Empty periods remain `null`/`n/a`; they are never reported as a false zero failure rate.
 
 ## Change control
 

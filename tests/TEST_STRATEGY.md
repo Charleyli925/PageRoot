@@ -8,8 +8,10 @@
 |---|---|---|---|
 | `npm run gate:edit` | 一次局部修改后 | 只运行影响映射命中的 Node 文件；必要时 typecheck | 快速发现局部逻辑错误，不启动浏览器或 Electron |
 | `npm run gate:task` | 一个开发任务完成时 | 静态检查、受影响 Node 文件，以及相关 Browser/Electron/AI 冒烟 | 在较短时间内证明生产链路已经接通 |
-| PR `pr-feedback` | `opened/synchronize/reopened/converted_to_draft` | 按影响映射选择 Node/编译检查 | 普通推送无论 Draft/Ready 都不重复消费完整矩阵；新提交取消仍在运行的旧 SHA 完整门禁 |
-| 一次性晋升 `release-gate` | 最终 PR Tree 从 Draft 显式转为 Ready | 全量 Node、三分片完整 Browser、独立 Native Electron、独立确定性 AI 闭环、真实 HTML 发现式门禁 | 每个最终候选只跑一次并签发 Tree Hash 凭证；后续新 SHA 必须重新 Draft→Ready 才能再晋升 |
+| PR `pr-feedback` | `opened/synchronize/reopened` | 按影响映射选择 Node/编译检查 | 普通推送无论 Draft/Ready 都不重复消费完整矩阵；仅切回 Draft 不产生 Feedback |
+| `review-settled` | 已在 Draft 请求 exact-SHA 审阅的最终 Tree 转为 Ready | 实时 head、Draft 请求标记、Ready 后最终 Codex 完成、180 秒 settle window、活动非 outdated P0-P2 线程 | 审阅未结束、旧 SHA、迟到意见或未解决意见时不启动完整矩阵 |
+| `baseline-policy` | review 与分支策略通过 | 全局依赖 advisory policy 与 packaged-runtime closure | 基线红时不启动 Linux build、Browser 或 macOS Electron runner |
+| 一次性晋升 `release-gate` | review 与 baseline 均通过的最终 PR Tree | 全量 Node、三分片完整 Browser、独立 Native Electron、独立确定性 AI 闭环、真实 HTML 发现式门禁 | 每个最终候选只跑一次并签发 Tree Hash 凭证；后续新 SHA 必须重新 Draft 审阅并晋升 |
 | `main-integrity` | 合并到 `main` | 校验合并 PR、Tree Hash、package/lockfile 版本和凭证时效 | 相等即复用完整源码证据，不重复 Node、Browser 或 Electron 测试；不相等直接失败 |
 | 按需 `Developer Preview` | 仅在开发者明确要求时 | 干净 Tree、最新 renderer、ad-hoc DMG、包内容完整性、一次隔离启动和精确 PR/内容交付报告 | 在消耗签名/公证时间前发现“漏打包或根本跑不起来”；不成为正式门禁 |
 | `Release Candidate` | 打标签之前，凭证新鲜且 Tree/版本完全一致 | 预签名 App 内容/完整运行校验 → Developer ID 签名后启动 → App 公证 checkpoint → 从同一 App 生成并公证 DMG → 最终字节校验 | 内容错误不消耗 Apple 队列；后段失败只重跑后段 |
@@ -27,8 +29,13 @@ Tree，不在测试执行期间自动合并分支。组合 Tree 含任何未合�
 
 PR 必须从 Draft 开始。普通推送由独立的 `PR Feedback` workflow 处理，
 不会创建名为 `release-gate` 的跳过 job；因此分支保护不会把轻量反馈误当
-完整通过。只有 `ready_for_review` 事件存在完整 workflow。若晋升后又有提交，
-新 SHA 只获得反馈且缺少必需检查，必须重新转 Draft、冻结后再转 Ready。
+完整通过。只切回 Draft 不触发 Feedback。冻结 head 后必须先在 Draft 用完整
+SHA marker 明确请求 Codex review；每个新提交都需要新请求。只有
+`ready_for_review` 事件存在完整 workflow，但 `review-settled` 仍要求 Ready
+之后的最终 Codex 完成信号并等待 180 秒，再检查未解决且未 outdated 的 P0-P2
+线程。通过后 `baseline-policy` 才检查依赖与打包运行时闭包；完整 Linux/Browser/
+Electron job 依赖这些前置条件。若晋升后又有提交，新 SHA 只获得反馈且缺少
+必需检查，必须重新转 Draft、冻结、审阅后再转 Ready。
 同一时间只晋升一个 PR；其他并行修改继续留在 Draft，等前一个合并并更新
 到新 `main` 后再晋升，避免严格最新基线制造三角形重测。
 
@@ -174,11 +181,14 @@ Browser 验证真实 DOM 中保存卡片、草稿卡片和输入框在当前/其
 每个 evidence stage；任何未同步到允许列表的名称必须在源码门禁中失败，不能等到
 正式候选打包才暴露。
 
-CI Health 同时读取 `pr-feedback.yml` 与 `ci.yml`。除了同一 run 的绿色 job
+CI Health 每日先跑依赖健康基线，并同时读取 `pr-feedback.yml` 与 `ci.yml`。
+除了同一 run 的绿色 job
 重跑，它还按 PR number（旧数据缺失时按 head branch）聚合不同 SHA 的完整
 门禁：`runsPerPullRequestAverage` 目标不超过 `1.25`，后续候选 SHA 消耗的
 runner minutes 占全部 PR CI 时间应低于 `20%`。这部分不能再被“每个 Tree
-只跑一次”的旧指标隐藏。
+只跑一次”的旧指标隐藏。报告同时保留总量、完整门禁、Feedback、候选 churn
+runner minutes 及 PR/候选取消率；Actions Summary 对每个可机器计算的报告目标明确显示
+`MET`、`MISSED` 或 `NO DATA`，而 review/baseline 阻断不会被误计成完整门禁。
 
 ## 判断标准优先级
 

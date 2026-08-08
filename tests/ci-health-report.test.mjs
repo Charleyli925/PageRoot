@@ -4,7 +4,10 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { summarizeCiHealth } from "../scripts/ci-health-report.mjs";
+import {
+  renderCiHealthMarkdown,
+  summarizeCiHealth,
+} from "../scripts/ci-health-report.mjs";
 
 const productRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -33,6 +36,7 @@ test("CI health distinguishes full-gate latency, repeated green work and preflig
     ciRuns: [{
       id: 100,
       event: "pull_request",
+      conclusion: "success",
       head_sha: "a".repeat(40),
       pull_requests: [{ number: 25 }],
       created_at: "2026-07-24T10:00:00.000Z",
@@ -95,6 +99,7 @@ test("CI health distinguishes full-gate latency, repeated green work and preflig
     },
     candidateRuns: [{ conclusion: "success" }, { conclusion: "failure" }],
     releaseRuns: [{ conclusion: "success" }],
+    dependencyHealth: "success",
   });
 
   assert.equal(report.sourceGate.completeRuns, 1);
@@ -111,6 +116,11 @@ test("CI health distinguishes full-gate latency, repeated green work and preflig
   assert.deepEqual(report.releaseCandidate.conclusions, { success: 1, failure: 1 });
   assert.deepEqual(report.publication.conclusions, { success: 1 });
   assert.equal(report.publication.rebuildsAfterCandidateApproval, 0);
+  assert.equal(report.workflowCancellation.pullRequestCancellationRate, 0);
+  assert.equal(report.targetAssessment.metrics.dependencyHealth.status, "met");
+  assert.equal(report.targetAssessment.overall, "missed");
+  assert.match(renderCiHealthMarkdown(report), /Overall target status: \*\*❌ MISSED\*\*/u);
+  assert.match(renderCiHealthMarkdown(report), /Total PR runner minutes/u);
 });
 
 test("CI health exposes complete-gate churn across different SHAs of one Pull Request", () => {
@@ -150,21 +160,21 @@ test("CI health exposes complete-gate churn across different SHAs of one Pull Re
   }];
   const jobsByRunId = {
     201: [job({
-      name: "release-gate",
+      name: "source-build",
       attempt: 1,
       conclusion: "success",
       startedAt: "2026-07-24T09:00:00.000Z",
       completedAt: "2026-07-24T09:10:00.000Z",
     })],
     202: [job({
-      name: "release-gate",
+      name: "source-build",
       attempt: 1,
       conclusion: "success",
       startedAt: "2026-07-24T10:00:00.000Z",
       completedAt: "2026-07-24T10:08:00.000Z",
     })],
     203: [job({
-      name: "release-gate",
+      name: "source-build",
       attempt: 1,
       conclusion: "success",
       startedAt: "2026-07-24T11:00:00.000Z",
@@ -187,9 +197,10 @@ test("CI health exposes complete-gate churn across different SHAs of one Pull Re
     jobsByRunId,
     candidateRuns: [],
     releaseRuns: [],
+    dependencyHealth: "success",
   });
 
-  assert.equal(report.schemaVersion, 2);
+  assert.equal(report.schemaVersion, 3);
   assert.equal(report.sourceGate.pullRequestRuns, 4);
   assert.equal(report.sourceGate.feedbackRuns, 1);
   assert.equal(report.sourceGate.completeRuns, 3);
@@ -202,6 +213,63 @@ test("CI health exposes complete-gate churn across different SHAs of one Pull Re
   assert.equal(report.runnerUse.fullGateMinutes, 25);
   assert.equal(report.runnerUse.candidateChurnMinutes, 8);
   assert.equal(report.runnerUse.candidateChurnShare, 0.3);
+  assert.equal(report.targetAssessment.metrics.runsPerPullRequestAverage.status, "missed");
+});
+
+test("CI health records cancellation rates without treating pre-review jobs as full gates", () => {
+  const report = summarizeCiHealth({
+    periodDays: 30,
+    generatedAt: "2026-08-08T12:00:00.000Z",
+    ciRuns: [{
+      id: 301,
+      event: "pull_request",
+      conclusion: "cancelled",
+      head_sha: "a".repeat(40),
+      pull_requests: [{ number: 90 }],
+    }, {
+      id: 302,
+      event: "pull_request",
+      conclusion: "failure",
+      head_sha: "b".repeat(40),
+      pull_requests: [{ number: 91 }],
+    }],
+    feedbackRuns: [{
+      id: 303,
+      event: "pull_request",
+      conclusion: "cancelled",
+      pull_requests: [{ number: 90 }],
+    }, {
+      id: 304,
+      event: "pull_request",
+      conclusion: "success",
+      pull_requests: [{ number: 91 }],
+    }],
+    jobsByRunId: {
+      302: [job({
+        name: "review-settled",
+        attempt: 1,
+        conclusion: "failure",
+        startedAt: "2026-08-08T10:00:00.000Z",
+        completedAt: "2026-08-08T10:01:00.000Z",
+      })],
+      304: [job({
+        name: "pr-feedback",
+        attempt: 1,
+        conclusion: "success",
+        startedAt: "2026-08-08T10:02:00.000Z",
+        completedAt: "2026-08-08T10:03:00.000Z",
+      })],
+    },
+    candidateRuns: [],
+    releaseRuns: [],
+    dependencyHealth: "success",
+  });
+
+  assert.equal(report.sourceGate.completeRuns, 0);
+  assert.equal(report.workflowCancellation.cancelledPullRequestRuns, 2);
+  assert.equal(report.workflowCancellation.pullRequestCancellationRate, 0.5);
+  assert.equal(report.workflowCancellation.cancelledPromotedCandidateRuns, 1);
+  assert.equal(report.workflowCancellation.promotedCandidateCancellationRate, 0.5);
 });
 
 test("CI health keeps empty periods explicit instead of reporting false zero rates", () => {
@@ -218,6 +286,8 @@ test("CI health keeps empty periods explicit instead of reporting false zero rat
   assert.equal(report.sourceGate.wallMinutesP50, null);
   assert.equal(report.runnerUse.repeatedGreenShare, null);
   assert.equal(report.environmentPreflight.failureRate, null);
+  assert.equal(report.workflowCancellation.pullRequestCancellationRate, null);
+  assert.equal(report.targetAssessment.overall, "insufficient_data");
 });
 
 test("CI health workflow stays read-only and retains a machine-readable report", async () => {
@@ -226,11 +296,19 @@ test("CI health workflow stays read-only and retains a machine-readable report",
     readFile(path.join(productRoot, "scripts/ci-health-report.mjs"), "utf8"),
   ]);
   assert.match(workflow, /schedule:/u);
+  assert.match(workflow, /cron: "17 1 \* \* \*"/u);
   assert.match(workflow, /actions: read/u);
   assert.match(workflow, /contents: read/u);
   assert.match(workflow, /ci-health-report\.mjs/u);
+  assert.match(workflow, /name: dependency-health/u);
+  assert.match(workflow, /npm run audit:dependencies/u);
+  assert.match(workflow, /needs: dependency-health/u);
+  assert.match(workflow, /if: \$\{\{ always\(\) \}\}/u);
+  assert.match(workflow, /DEPENDENCY_HEALTH_RESULT: \$\{\{ needs\.dependency-health\.result \}\}/u);
   assert.match(workflow, /retention-days: 90/u);
   assert.doesNotMatch(workflow, /contents: write|pull-requests: write|issues: write/u);
   assert.match(reportScript, /workflow: "ci\.yml"/u);
   assert.match(reportScript, /workflow: "pr-feedback\.yml"/u);
+  assert.match(reportScript, /\| Metric \| Actual \| Target \| Status \|/u);
+  assert.match(reportScript, /Cancelled promoted candidates/u);
 });

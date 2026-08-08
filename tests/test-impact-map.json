@@ -234,6 +234,16 @@
       "nodeTests": ["tests/source-gate-provenance.test.mjs"]
     },
     {
+      "id": "pr-review-settled",
+      "patterns": [
+        "^scripts/check-pr-review-settled\\.mjs$",
+        "^tests/pr-review-settled\\.test\\.mjs$",
+        "^\\.github/workflows/(?:ci|pr-feedback)\\.yml$"
+      ],
+      "suites": [],
+      "nodeTests": ["tests/pr-review-settled.test.mjs"]
+    },
+    {
       "id": "ci-evidence",
       "patterns": [
         "^scripts/ci-evidence\\.mjs$",

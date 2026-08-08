@@ -12,6 +12,7 @@ on:
 permissions:
   actions: read
   contents: read
+  issues: read
   pull-requests: read
 
 concurrency:
@@ -21,6 +22,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  review-settled:
+    name: review-settled
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.13.0
+      - name: Wait for the exact-SHA Codex review to settle
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          node scripts/check-pr-review-settled.mjs
+          --repository "$GITHUB_REPOSITORY"
+          --pull-request "${{ github.event.pull_request.number }}"
+          --expected-head "${{ github.event.pull_request.head.sha }}"
+          --settle-seconds 180
+          --timeout-seconds 1200
+          --poll-seconds 20
+
   branch-policy:
     name: branch-policy
     if: github.event_name == 'pull_request'
@@ -36,9 +59,28 @@ jobs:
           BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
         run: npm run task:policy -- "$BRANCH_NAME"
 
+  baseline-policy:
+    name: baseline-policy
+    if: github.event_name == 'pull_request'
+    needs:
+      - review-settled
+      - branch-policy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.13.0
+      - name: Audit dependencies and packaged runtime closure
+        run: npm run audit:dependencies
+
   source-build:
     name: source-build
     if: github.event_name == 'pull_request'
+    needs:
+      - review-settled
+      - baseline-policy
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -61,7 +103,7 @@ jobs:
           --suite source-build
           --stage source-build
           --
-          npm run ci:source-build
+          npm run ci:source-build:prepared
       - name: Upload shared web build
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -196,6 +238,9 @@ jobs:
   source-electron-native:
     name: electron-native
     if: github.event_name == 'pull_request'
+    needs:
+      - review-settled
+      - baseline-policy
     runs-on: macos-14
     timeout-minutes: 45
     steps:
@@ -255,6 +300,9 @@ jobs:
   source-electron-ai:
     name: electron-ai
     if: github.event_name == 'pull_request'
+    needs:
+      - review-settled
+      - baseline-policy
     runs-on: macos-14
     timeout-minutes: 45
     steps:
@@ -315,6 +363,8 @@ jobs:
     name: release-gate
     if: ${{ always() && github.event_name == 'pull_request' }}
     needs:
+      - review-settled
+      - baseline-policy
       - branch-policy
       - source-build
       - source-node
@@ -326,6 +376,8 @@ jobs:
     steps:
       - name: Require every source lane
         env:
+          REVIEW_RESULT: ${{ needs.review-settled.result }}
+          BASELINE_RESULT: ${{ needs.baseline-policy.result }}
           POLICY_RESULT: ${{ needs.branch-policy.result }}
           BUILD_RESULT: ${{ needs.source-build.result }}
           NODE_RESULT: ${{ needs.source-node.result }}
@@ -333,6 +385,8 @@ jobs:
           ELECTRON_NATIVE_RESULT: ${{ needs.source-electron-native.result }}
           ELECTRON_AI_RESULT: ${{ needs.source-electron-ai.result }}
         run: |
+          test "$REVIEW_RESULT" = "success"
+          test "$BASELINE_RESULT" = "success"
           test "$POLICY_RESULT" = "success"
           test "$BUILD_RESULT" = "success"
           test "$NODE_RESULT" = "success"

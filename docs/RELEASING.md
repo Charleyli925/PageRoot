@@ -90,9 +90,10 @@ succeeded technically but installer handoff is incomplete.
 1. Update `package.json` and the package-lock root to the same semantic version.
 2. Move relevant `CHANGELOG.md` entries from Unreleased into that version.
 3. Open a draft Pull Request while iterating. Every ordinary update runs impact-selected `PR Feedback` only.
-4. Update the frozen final head onto current `main`, ensure no other PR is being promoted, then mark it Ready once and wait for the required complete `release-gate`.
-5. If any commit or base update follows that promotion, return the PR to Draft and repeat step 4; the new SHA intentionally has no `release-gate` until re-promoted.
-6. Merge only with authorization, then confirm `main-integrity` accepts the exact merge Tree/version/PR attestation without rerunning source tests.
+4. Update the final head onto current `main`, freeze it and, while still Draft, post the exact-SHA Codex request defined in `docs/CODEX_WORKFLOW.md`. Address P0-P2 findings, resolve fixed threads and repeat for every new SHA.
+5. Ensure no other PR is being promoted, then mark this reviewed head Ready once. `review-settled` waits for the Ready-triggered final Codex completion plus a 180-second settle window; only then may `baseline-policy` run the unchanged advisory threshold and packaged-runtime closure check.
+6. Wait for the original complete source lanes and required `release-gate`. If review or baseline fails, the Linux build, Browser and macOS Electron lanes remain unstarted. If any commit or base update follows promotion, return the PR to Draft and repeat steps 4-5; an old `release-gate` and attestation cannot satisfy the new SHA.
+7. Merge only with authorization, then confirm `main-integrity` accepts the exact merge Tree/version/PR attestation without rerunning source tests.
 
 Local `npm run release:mac` remains available when a complete local source-and-installer proof is useful. It is not publication and does not replace the reviewed GitHub flow.
 
