@@ -17,6 +17,7 @@ import {
   refreshDmgUpdateMetadata,
 } from "../scripts/build-package.mjs";
 import {
+  appBundleSignaturePolicyForProfile,
   assertNoRetiredEditorArtifacts,
   expectedArtifactLayout,
   verifyAppBundle,
@@ -447,6 +448,15 @@ test("release commands use one automated artifact lane with full tests and packa
     `PageRoot-${packageJson.version}-arm64.zip.blockmap`,
   );
   assert.equal(path.basename(layout.updateInfoPath), "latest-mac.yml");
+});
+
+test("app-only profiles keep dry-run unsigned without weakening Candidate signature gates", () => {
+  assert.equal(appBundleSignaturePolicyForProfile("release-dry-run"), "none");
+  assert.equal(appBundleSignaturePolicyForProfile("candidate-app"), "adhoc");
+  assert.equal(
+    appBundleSignaturePolicyForProfile("candidate-app-signed"),
+    "developer-id",
+  );
 });
 
 test("release packaging notarizes, staples and validates the final DMG", async (t) => {

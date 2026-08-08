@@ -66,7 +66,7 @@ concurrency:
 
 jobs:
   assemble:
-    name: assemble-and-checkpoint-adhoc-app
+    name: assemble-and-checkpoint-unsigned-app
     runs-on: macos-14
     timeout-minutes: 35
     outputs:
@@ -95,7 +95,7 @@ jobs:
       - name: Build the first clean-job renderer oracle
         timeout-minutes: 5
         run: npm run desktop:renderer
-      - name: Generate synthetic telemetry and build metadata and assemble the ad-hoc App
+      - name: Generate synthetic telemetry and build metadata and assemble the unsigned App
         timeout-minutes: 15
         run: >-
           node scripts/ci-evidence.mjs run

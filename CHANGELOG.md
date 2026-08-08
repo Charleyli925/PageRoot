@@ -6,7 +6,7 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 - Add a credential-free Release Dry Run for Pull Requests that change packaging,
   release metadata, Electron or packaged Bridge paths. Two independent macOS
-  jobs now assemble and checkpoint a non-release ad-hoc App, then restore it in
+  jobs now assemble and checkpoint an explicitly unsigned non-release App, then restore it in
   a clean checkout, rebuild the renderer oracle, revalidate telemetry/build
   metadata and launch-check the product name, version and Bundle ID. The
   checkpoint is always `releaseEligible: false`, uses only a synthetic public

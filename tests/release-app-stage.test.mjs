@@ -209,7 +209,7 @@ test("formal candidate profiles assemble once and package only a verified prepac
   );
 });
 
-test("release dry-run profile reuses ad-hoc assembly without producing distributables", () => {
+test("release dry-run profile assembles an explicitly unsigned App without distributables", () => {
   const releaseDirectory = "/tmp/pageroot-release-dry-run/staged";
   assert.deepEqual(
     parseBuildOptions(["--arch", "arm64", "--profile", "release-dry-run"]),
@@ -224,18 +224,23 @@ test("release dry-run profile reuses ad-hoc assembly without producing distribut
       architecture: "arm64",
       releaseDirectory,
     }),
-    candidateAppBuilderArguments({
-      architecture: "arm64",
-      releaseDirectory,
-    }),
+    [
+      "--mac",
+      "dir",
+      "--arm64",
+      "--publish",
+      "never",
+      "--config.forceCodeSigning=false",
+      "--config.mac.identity=null",
+      "--config.mac.notarize=false",
+      "--config.mac.hardenedRuntime=false",
+      `--config.directories.output=${releaseDirectory}`,
+    ],
   );
-  assert.deepEqual(
-    releaseDryRunAppBuilderArguments({
-      architecture: "arm64",
-      releaseDirectory,
-    }).slice(0, 5),
-    ["--mac", "dir", "--arm64", "--publish", "never"],
-  );
+  assert.ok(candidateAppBuilderArguments({
+    architecture: "arm64",
+    releaseDirectory,
+  }).includes("--config.mac.identity=-"));
 });
 
 test("pre-sign assembly keeps public telemetry but cannot see signing or notarization credentials", () => {

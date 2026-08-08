@@ -817,6 +817,17 @@ async function verifyUpdateAssets({
   }
 }
 
+export function appBundleSignaturePolicyForProfile(profile) {
+  assert.match(
+    profile,
+    /^(?:candidate-app|candidate-app-signed|release-dry-run)$/u,
+    "app-only profile must be candidate-app, candidate-app-signed or release-dry-run",
+  );
+  if (profile === "candidate-app-signed") return "developer-id";
+  if (profile === "release-dry-run") return "none";
+  return "adhoc";
+}
+
 export async function verifyPackagedArtifact({
   productRoot = DEFAULT_PRODUCT_ROOT,
   arch = "arm64",
@@ -904,7 +915,7 @@ export async function verifyPackagedArtifact({
       productRoot,
       appPath: layout.appPath,
       packageJson,
-      signaturePolicy: profile === "candidate-app-signed" ? "developer-id" : "adhoc",
+      signaturePolicy: appBundleSignaturePolicyForProfile(profile),
       expectedProvenance: provenance,
     });
     return {

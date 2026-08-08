@@ -121,7 +121,7 @@ The required PR `release-gate` is the one complete source gate for an explicitly
 
 Packaging, release-metadata, Electron, packaged Bridge, Schema and resource
 changes additionally trigger the credential-free `Release Dry Run`. It crosses
-an ad-hoc App checkpoint between two clean macOS jobs, restores metadata,
+an unsigned App checkpoint between two clean macOS jobs, restores metadata,
 rebuilds the renderer oracle and launch-checks name/version/Bundle ID. The
 checkpoint is `releaseEligible: false`; the workflow has no secrets, signing,
 notarization, distributable, Candidate, tag or publication authority and cannot

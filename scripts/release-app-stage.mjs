@@ -186,7 +186,20 @@ export function releaseDryRunAppBuilderArguments({
   architecture,
   releaseDirectory,
 }) {
-  return adHocAppBuilderArguments({ architecture, releaseDirectory });
+  assertArchitecture(architecture);
+  assert.equal(path.isAbsolute(releaseDirectory), true, "app output must be absolute");
+  return [
+    "--mac",
+    "dir",
+    `--${architecture}`,
+    "--publish",
+    "never",
+    "--config.forceCodeSigning=false",
+    "--config.mac.identity=null",
+    "--config.mac.notarize=false",
+    "--config.mac.hardenedRuntime=false",
+    `--config.directories.output=${releaseDirectory}`,
+  ];
 }
 
 export function candidateArtifactBuilderArguments({

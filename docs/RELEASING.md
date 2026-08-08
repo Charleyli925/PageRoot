@@ -39,7 +39,7 @@ reference `secrets.*`.
 
 The first clean macOS job builds the Electron renderer, generates exact
 `build-info.json` plus an enabled telemetry configuration using a fixed
-synthetic public-format token, assembles an ad-hoc `.app`, and reuses the formal
+synthetic public-format token, assembles an explicitly unsigned `.app`, and reuses the formal
 packaged verifier for app.asar, Bridge, Schema, resource, metadata, version and
 Bundle ID checks. It freezes that App as a dedicated dry-run checkpoint whose
 attestation always contains `releaseEligible: false`.
