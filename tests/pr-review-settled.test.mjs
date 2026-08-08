@@ -193,6 +193,43 @@ test("clean Codex completion comments and reactions remain exact-request-bound",
     }],
   }).reason, "codex_review_in_progress");
   assert.equal(evaluate({
+    issueComments: [request(), {
+      id: 55,
+      user: { login: "maintainer" },
+      author_association: "OWNER",
+      created_at: "2026-08-08T04:01:30.000Z",
+      updated_at: "2026-08-08T04:01:30.000Z",
+      body: "@codex explain this workflow",
+    }],
+    reviews: [draftReview()],
+    issueReactions: [{
+      id: 56,
+      user: { login: "chatgpt-codex-connector[bot]" },
+      content: "+1",
+      created_at: completedAt,
+    }],
+  }).reason, "ready_reaction_not_exclusively_bound");
+  assert.equal(evaluate({
+    pullRequest: { ...pullRequest(), body: "@codex explain this PR" },
+    reviews: [draftReview()],
+    issueReactions: [{
+      id: 57,
+      user: { login: "chatgpt-codex-connector[bot]" },
+      content: "+1",
+      created_at: completedAt,
+    }],
+  }).reason, "ready_reaction_not_exclusively_bound");
+  assert.equal(evaluate({
+    reviews: [draftReview()],
+    issueReactions: [{
+      id: 58,
+      user: { login: "chatgpt-codex-connector[bot]" },
+      content: "+1",
+      created_at: "2026-08-08T04:21:01.000Z",
+    }],
+    now: new Date("2026-08-08T04:24:02.000Z"),
+  }).reason, "ready_reaction_not_exclusively_bound");
+  assert.equal(evaluate({
     reviews: [draftReview()],
     issueReactions: [{
       id: 51,

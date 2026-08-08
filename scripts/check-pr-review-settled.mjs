@@ -95,6 +95,14 @@ function commentUpdatedAt(comment) {
   return comment?.updated_at || comment?.updatedAt || commentCreatedAt(comment);
 }
 
+function commentId(comment) {
+  return comment?.id || comment?.databaseId || null;
+}
+
+function invokesCodex(body) {
+  return /(?:^|\s)@codex\b/iu.test(body || "");
+}
+
 function exactReviewRequests(issueComments, expectedHeadSha) {
   return (issueComments || []).filter((comment) => (
     !isCodexActor(commentAuthor(comment))
@@ -104,6 +112,22 @@ function exactReviewRequests(issueComments, expectedHeadSha) {
     && Number.isFinite(timestamp(commentCreatedAt(comment)))
     && timestamp(commentUpdatedAt(comment)) === timestamp(commentCreatedAt(comment))
   ));
+}
+
+function hasCompetingCodexInvocation({ issueComments, pullRequest, request, requestAt }) {
+  if (invokesCodex(pullRequest?.body)) return true;
+  const requestId = String(commentId(request) || "");
+  return (issueComments || []).some((comment) => {
+    const sameRequest = comment === request || (
+      requestId && String(commentId(comment) || "") === requestId
+    );
+    return (
+      !sameRequest
+      && !isCodexActor(commentAuthor(comment))
+      && invokesCodex(comment?.body)
+      && timestamp(commentUpdatedAt(comment)) >= requestAt
+    );
+  });
 }
 
 function latestReadyForReviewEvent(timelineEvents) {
@@ -399,6 +423,12 @@ export function evaluateReviewSettlement({
     requestReactions,
     issueReactions,
   });
+  const readyReactionBound = !hasCompetingCodexInvocation({
+    issueComments,
+    pullRequest,
+    request,
+    requestAt,
+  });
   const draftCompletion = completionSignals.find((signal) => (
     signal.at >= draftStartedAt && signal.at < readyAt
     && (signal.kind !== "clean_review_reaction" || signal.scope === "request_comment")
@@ -437,12 +467,26 @@ export function evaluateReviewSettlement({
   }
   const completion = completionSignals.find((signal) => (
     signal.at >= readyAt
-    && (signal.kind !== "clean_review_reaction" || signal.scope === "pull_request")
+    && (
+      signal.kind !== "clean_review_reaction"
+      || (
+        signal.scope === "pull_request"
+        && readyReactionBound
+        && signal.at <= readyAt + DEFAULT_TIMEOUT_SECONDS * 1000
+      )
+    )
   )) || null;
   if (!completion) {
+    const unboundReadyReaction = completionSignals.some((signal) => (
+      signal.kind === "clean_review_reaction"
+      && signal.scope === "pull_request"
+      && signal.at >= readyAt
+    ));
     return Object.freeze({
-      status: "waiting",
-      reason: "codex_review_in_progress",
+      status: unboundReadyReaction ? "blocked" : "waiting",
+      reason: unboundReadyReaction
+        ? "ready_reaction_not_exclusively_bound"
+        : "codex_review_in_progress",
       expectedHeadSha: expectedSha,
       currentHeadSha,
       request: requestSummary,
