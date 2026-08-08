@@ -4315,9 +4315,10 @@ function reviewBootstrap(
         observedElement,
         binding,
       );
+      const hasFingerprint = runtimeVisualInitialBindingHasFingerprint(binding);
       if (
         pathMatches
-        && !runtimeVisualInitialBindingHasFingerprint(binding)
+        && !hasFingerprint
         && runtimeVisualInitialBindingMatches(observedElement, binding, true)
       ) {
         const existing = runtimeVisualMapGet(reviewCommentIdentityElements, sourceNodeId);
@@ -4328,6 +4329,18 @@ function reviewBootstrap(
         if (!existing) {
           runtimeVisualMapSet(reviewCommentIdentityElements, sourceNodeId, observedElement);
         }
+        return;
+      }
+      // A path-only binding has no evidence with which to distinguish a
+      // same-tag parser decoy from the source target after the frozen path
+      // shifts. Keep the entire comment binding unavailable rather than
+      // allowing the first observed element to become a guessed TargetRef.
+      if (
+        !pathMatches
+        && !hasFingerprint
+        && runtimeVisualInitialBindingMatches(observedElement, binding, true)
+      ) {
+        runtimeVisualSetAdd(reviewCommentInvalidSourceNodeIds, sourceNodeId);
         return;
       }
       if (!runtimeVisualInitialBindingMatches(

@@ -197,9 +197,11 @@ does a separately challenged bootstrap-owned `MessageChannel` receive targets.
 Comment body, key, source-node and locator-map data are absent from document
 bytes and any later fetchable bootstrap response. A unique source `id`,
 `data-*`, `name`, or `aria-label` is a safe fallback only when private binding
-is unavailable, never a mutable sibling ordinal. Missing, ambiguous, replaced
-or disconnected bindings, or an unavailable private capability exchange, omit
-the marker rather than guessing. Authored CSS or scripts therefore cannot
+is unavailable, never a mutable sibling ordinal. A fingerprintless binding is
+accepted only at its exact frozen path; a same-tag observation at a shifted path
+is ambiguous and omits the marker. Missing, ambiguous, replaced or disconnected
+bindings, or an unavailable private capability exchange, omit the marker rather
+than guessing. Authored CSS or scripts therefore cannot
 observe a comment scope marker or manufacture a change. If a host was admitted only through that scope,
 not a direct changed-script reference, a first-pair difference must match the
 same side in one newly loaded frozen frame pair; clock/random one-shots, a

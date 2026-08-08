@@ -125,3 +125,30 @@ test("path-only review comments fail closed when the parsed path and tag diverge
     message.commentLayouts?.some((layout) => layout.key === "parsed-comment")
   ))).toBe(false);
 });
+
+test("path-only review comments fail closed when a same-tag parser decoy shifts the target", async ({ page }) => {
+  const binding = {
+    sourceNodeId: "element:1:1:div",
+    path: [1, 0, 0],
+    tagName: "DIV",
+    sourceBoxSignature: "[]",
+    identityAttributes: [],
+    identityText: "",
+  };
+  const result = await parsedReviewCommentLayouts(page, {
+    binding,
+    authoredScript: `
+      const main = document.querySelector("main");
+      const decoy = document.createElement("div");
+      decoy.className = "comment-host";
+      main.append(decoy);
+      const actualTarget = document.createElement("div");
+      actualTarget.className = "comment-host";
+      main.append(actualTarget);
+    `,
+  });
+  expect(result.channel).toBe(true);
+  expect(result.layouts.some((message) => (
+    message.commentLayouts?.some((layout) => layout.key === "parsed-comment")
+  ))).toBe(false);
+});

@@ -23,6 +23,7 @@ const smokeTitles = [
   "indexed script tabs keep hidden comments grouped, suppress ghost markers, and shrink the canvas",
   "path-only review comments bind against a real parsed DOM",
   "path-only review comments fail closed when the parsed path and tag diverge",
+  "path-only review comments fail closed when a same-tag parser decoy shifts the target",
 ];
 const escapedTitles = smokeTitles.map((title) => title.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"));
 

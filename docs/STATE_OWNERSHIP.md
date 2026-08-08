@@ -173,6 +173,8 @@ Rules:
   Candidate keys and original source-box baselines are held only in the first
   parser bootstrap response's session-private element map. No temporary
   identity, fixed runtime-host/source-box attribute, key or path is serialized.
+  A fingerprintless comment binding remains valid only at its exact frozen
+  path; a same-tag observation at a shifted path is ambiguous and is omitted.
   A stale path may resolve only to one matching private fingerprint; a missing,
   ambiguous, replaced or disconnected binding invalidates the full supplemental
   batch. Confirmation creates fresh sessions so its frame pair receives new

@@ -252,9 +252,11 @@ bootstrap over a separately challenged private `MessageChannel`; comment body,
 comment key, source-node and locator-map data never enter document bytes or a
 later fetchable bootstrap response. A unique source `id`, `data-*`, `name`, or
 `aria-label` is an optional fallback only when private binding is unavailable,
-never a positional sibling path. Missing, ambiguous, replaced or disconnected
-bindings, and unavailable private transport, omit the marker rather than
-guessing. Only the before bootstrap returns comment geometry, so authored CSS
+never a positional sibling path. A fingerprintless binding remains valid only
+while its observed element is the exact frozen path; a same-tag observation at
+a shifted path makes that target ambiguous and omits the marker. Missing,
+ambiguous, replaced or disconnected bindings, and unavailable private transport,
+omit the marker rather than guessing. Only the before bootstrap returns comment geometry, so authored CSS
 or scripts cannot observe a comment scope marker and create runtime evidence
 themselves.
 Runtime candidate keys and original source-box baselines are carried by the
