@@ -228,7 +228,7 @@
       "patterns": [
         "^scripts/source-gate-provenance\\.mjs$",
         "^tests/source-gate-provenance\\.test\\.mjs$",
-        "^\\.github/workflows/(?:ci|pr-feedback|developer-preview|release|release-candidate)\\.yml$"
+        "^\\.github/workflows/(?:ci|pr-feedback|developer-preview|release|release-candidate|release-dry-run)\\.yml$"
       ],
       "suites": [],
       "nodeTests": ["tests/source-gate-provenance.test.mjs"]
@@ -248,7 +248,7 @@
       "patterns": [
         "^scripts/ci-evidence\\.mjs$",
         "^tests/ci-evidence\\.test\\.mjs$",
-        "^\\.github/workflows/(?:ci|pr-feedback|developer-preview|release|release-candidate)\\.yml$"
+        "^\\.github/workflows/(?:ci|pr-feedback|developer-preview|release|release-candidate|release-dry-run)\\.yml$"
       ],
       "suites": [],
       "nodeTests": ["tests/ci-evidence.test.mjs"]
@@ -554,7 +554,7 @@
     {
       "id": "packaging",
       "patterns": [
-        "^(?:\\.github/workflows/(?:developer-preview|release-candidate|release)\\.yml|package(?:-lock)?\\.json|PageRoot 用户声明与免责声明\\.txt|desktop/after-pack\\.mjs|desktop/resources/.*|scripts/(?:build-package|create-release-assets|developer-preview|package-delivery-report|release-app-(?:checkpoint|stage)|release-candidate-provenance|release-provenance|source-gate-provenance|verify-packaged-artifact)\\.mjs)$"
+        "^(?:\\.github/workflows/(?:developer-preview|release-candidate|release-dry-run|release)\\.yml|package(?:-lock)?\\.json|PageRoot 用户声明与免责声明\\.txt|desktop/after-pack\\.mjs|desktop/resources/.*|scripts/(?:build-package|create-release-assets|developer-preview|package-delivery-report|packaged-app-identity|release-app-(?:checkpoint|stage)|release-candidate-provenance|release-provenance|source-gate-provenance|verify-packaged-artifact)\\.mjs)$"
       ],
       "suites": [],
       "nodeTests": [

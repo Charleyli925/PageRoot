@@ -26,6 +26,9 @@ import {
   candidateAppReleaseDirectory,
   candidateArtifactBuilderArguments,
   candidateArtifactBuilderEnvironment,
+  releaseDryRunAppBuilderArguments,
+  releaseDryRunAppEnvironment,
+  releaseDryRunAppReleaseDirectory,
   restoreReleaseMetadataFromApp,
 } from "./release-app-stage.mjs";
 import { writeBuildInfo } from "./release-provenance.mjs";
@@ -63,9 +66,9 @@ export function parseBuildOptions(argv) {
   if (!/^(?:arm64|x64)$/u.test(options.architecture ?? "")) {
     throw new Error("--arch must be arm64 or x64.");
   }
-  if (!/^(?:release|developer|candidate-app|candidate-artifacts)$/u.test(options.profile)) {
+  if (!/^(?:release|developer|candidate-app|candidate-artifacts|release-dry-run)$/u.test(options.profile)) {
     throw new Error(
-      "--profile must be release, developer, candidate-app or candidate-artifacts.",
+      "--profile must be release, developer, candidate-app, candidate-artifacts or release-dry-run.",
     );
   }
   if (options.profile === "candidate-artifacts") {
@@ -256,6 +259,7 @@ async function main() {
   const isDeveloperPreview = profile === "developer";
   const isCandidateApp = profile === "candidate-app";
   const isCandidateArtifacts = profile === "candidate-artifacts";
+  const isReleaseDryRun = profile === "release-dry-run";
   const packageJson = JSON.parse(
     await readFile(path.join(productRoot, "package.json"), "utf8"),
   );
@@ -269,10 +273,12 @@ async function main() {
     ? developerPreviewReleaseDirectory(productRoot)
     : isCandidateApp
       ? candidateAppReleaseDirectory(productRoot)
-      : path.resolve(
-        productRoot,
-        packageJson.build?.directories?.output ?? "release",
-      );
+      : isReleaseDryRun
+        ? releaseDryRunAppReleaseDirectory(productRoot)
+        : path.resolve(
+          productRoot,
+          packageJson.build?.directories?.output ?? "release",
+        );
   const layout = expectedArtifactLayout({
     productRoot,
     packageJson: packagedPackageJson,
@@ -286,9 +292,11 @@ async function main() {
     ? developerPreviewEnvironment(process.env)
     : isCandidateApp
       ? candidateAppEnvironment(process.env)
-      : isCandidateArtifacts
-        ? candidateArtifactBuilderEnvironment(process.env)
-        : process.env;
+      : isReleaseDryRun
+        ? releaseDryRunAppEnvironment(process.env)
+        : isCandidateArtifacts
+          ? candidateArtifactBuilderEnvironment(process.env)
+          : process.env;
   let buildInfo;
   let telemetryConfig;
   if (isCandidateArtifacts) {
@@ -348,13 +356,18 @@ async function main() {
         architecture,
         releaseDirectory,
       })
-      : isCandidateArtifacts
-        ? candidateArtifactBuilderArguments({
+      : isReleaseDryRun
+        ? releaseDryRunAppBuilderArguments({
           architecture,
-          prepackagedAppPath,
           releaseDirectory,
         })
-        : releasePackageBuilderArguments(architecture);
+        : isCandidateArtifacts
+          ? candidateArtifactBuilderArguments({
+            architecture,
+            prepackagedAppPath,
+            releaseDirectory,
+          })
+          : releasePackageBuilderArguments(architecture);
   const child = spawn(
     executable,
     builderArguments,
@@ -376,8 +389,12 @@ async function main() {
     return;
   }
 
-  if (isCandidateApp) {
-    console.log(`Pre-sign candidate app assembled in ${releaseDirectory}`);
+  if (isCandidateApp || isReleaseDryRun) {
+    console.log(
+      isReleaseDryRun
+        ? `Credential-free release dry-run app assembled in ${releaseDirectory}`
+        : `Pre-sign candidate app assembled in ${releaseDirectory}`,
+    );
     return;
   }
 

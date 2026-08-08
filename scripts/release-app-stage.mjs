@@ -42,6 +42,8 @@ const RELEASE_CREDENTIAL_ENVIRONMENT = new Set([
   "GITHUB_TOKEN",
   "NPM_TOKEN",
 ]);
+export const RELEASE_DRY_RUN_TELEMETRY_TOKEN = "phc_release_dry_run_oracle";
+export const RELEASE_DRY_RUN_TELEMETRY_HOST = "https://us.i.posthog.com";
 
 function assertArchitecture(architecture) {
   assert.match(architecture ?? "", /^(?:arm64|x64)$/u, "architecture must be arm64 or x64");
@@ -70,8 +72,14 @@ function requiredCredential(environment, name) {
   return value;
 }
 
-function assertManagedCandidateApp(productRoot, appPath) {
-  const candidateRoot = path.resolve(productRoot, "output", "release-candidate");
+function assertManagedReleaseApp(productRoot, appPath, profile) {
+  const outputChild = profile === "candidate"
+    ? "release-candidate"
+    : profile === "release-dry-run"
+      ? "release-dry-run"
+      : null;
+  assert.ok(outputChild, "release app profile must be candidate or release-dry-run");
+  const candidateRoot = path.resolve(productRoot, "output", outputChild);
   const resolved = path.resolve(appPath);
   const relative = path.relative(candidateRoot, resolved);
   assert.ok(
@@ -79,9 +87,13 @@ function assertManagedCandidateApp(productRoot, appPath) {
       && !relative.startsWith("..")
       && !path.isAbsolute(relative)
       && path.extname(resolved) === ".app",
-    "candidate app must stay under output/release-candidate",
+    `${profile} app must stay under output/${outputChild}`,
   );
   return resolved;
+}
+
+function assertManagedCandidateApp(productRoot, appPath) {
+  return assertManagedReleaseApp(productRoot, appPath, "candidate");
 }
 
 async function defaultCommandRunner(command, arguments_, { environment = process.env } = {}) {
@@ -105,6 +117,10 @@ export function candidateAppReleaseDirectory(productRoot) {
   return path.resolve(productRoot, "output", "release-candidate", "staged");
 }
 
+export function releaseDryRunAppReleaseDirectory(productRoot) {
+  return path.resolve(productRoot, "output", "release-dry-run", "staged");
+}
+
 export function candidateAppPath({
   productRoot,
   packageJson,
@@ -122,12 +138,29 @@ export function candidateAppPath({
   );
 }
 
-export function candidateAppBuilderArguments({
+export function releaseDryRunAppPath({
+  productRoot,
+  packageJson,
+  architecture,
+}) {
+  assert.equal(
+    typeof packageJson?.build?.productName,
+    "string",
+    "build.productName must be configured",
+  );
+  return path.join(
+    releaseDryRunAppReleaseDirectory(productRoot),
+    architectureDirectory(architecture),
+    `${packageJson.build.productName}.app`,
+  );
+}
+
+function adHocAppBuilderArguments({
   architecture,
   releaseDirectory,
 }) {
   assertArchitecture(architecture);
-  assert.equal(path.isAbsolute(releaseDirectory), true, "candidate app output must be absolute");
+  assert.equal(path.isAbsolute(releaseDirectory), true, "app output must be absolute");
   return [
     "--mac",
     "dir",
@@ -136,6 +169,33 @@ export function candidateAppBuilderArguments({
     "never",
     "--config.forceCodeSigning=false",
     "--config.mac.identity=-",
+    "--config.mac.notarize=false",
+    "--config.mac.hardenedRuntime=false",
+    `--config.directories.output=${releaseDirectory}`,
+  ];
+}
+
+export function candidateAppBuilderArguments({
+  architecture,
+  releaseDirectory,
+}) {
+  return adHocAppBuilderArguments({ architecture, releaseDirectory });
+}
+
+export function releaseDryRunAppBuilderArguments({
+  architecture,
+  releaseDirectory,
+}) {
+  assertArchitecture(architecture);
+  assert.equal(path.isAbsolute(releaseDirectory), true, "app output must be absolute");
+  return [
+    "--mac",
+    "dir",
+    `--${architecture}`,
+    "--publish",
+    "never",
+    "--config.forceCodeSigning=false",
+    "--config.mac.identity=null",
     "--config.mac.notarize=false",
     "--config.mac.hardenedRuntime=false",
     `--config.directories.output=${releaseDirectory}`,
@@ -169,6 +229,15 @@ export function candidateArtifactBuilderArguments({
 export function candidateAppEnvironment(environment = process.env) {
   return {
     ...withoutReleaseCredentials(environment),
+    PAGEROOT_REQUIRE_TELEMETRY_CONFIG: "1",
+  };
+}
+
+export function releaseDryRunAppEnvironment(environment = process.env) {
+  return {
+    ...withoutReleaseCredentials(environment),
+    PAGEROOT_POSTHOG_TOKEN: RELEASE_DRY_RUN_TELEMETRY_TOKEN,
+    PAGEROOT_POSTHOG_HOST: RELEASE_DRY_RUN_TELEMETRY_HOST,
     PAGEROOT_REQUIRE_TELEMETRY_CONFIG: "1",
   };
 }
@@ -298,9 +367,10 @@ export async function restoreReleaseMetadataFromApp({
   productRoot,
   appPath,
   architecture,
+  profile = "candidate",
   expectedBuildInfoResolver = expectedBuildInfo,
 }) {
-  const resolvedAppPath = assertManagedCandidateApp(productRoot, appPath);
+  const resolvedAppPath = assertManagedReleaseApp(productRoot, appPath, profile);
   const resourcesPath = path.join(resolvedAppPath, "Contents", "Resources");
   const buildInfoBytes = await readFile(path.join(resourcesPath, "build-info.json"));
   const telemetryBytes = await readFile(

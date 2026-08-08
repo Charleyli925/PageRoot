@@ -29,6 +29,37 @@ it first or obtain an explicit developer exclusion. The package commands build
 the exact clean current Tree and do not discover or merge PRs themselves, so
 this source-composition step happens before the package gate.
 
+## Credential-free PR release dry run
+
+Pull Requests automatically run `Release Dry Run` only when their changed paths
+can affect packaging, release/build metadata, Electron, packaged Bridge code,
+Schemas or bundled resources. Ordinary UI or documentation-only PRs do not run
+it. The workflow has no `workflow_dispatch` publication authority and does not
+reference `secrets.*`.
+
+The first clean macOS job builds the Electron renderer, generates exact
+`build-info.json` plus an enabled telemetry configuration using a fixed
+synthetic public-format token, assembles an explicitly unsigned `.app`, and reuses the formal
+packaged verifier for app.asar, Bridge, Schema, resource, metadata, version and
+Bundle ID checks. It freezes that App as a dedicated dry-run checkpoint whose
+attestation always contains `releaseEligible: false`.
+
+The second clean macOS job downloads and hash-verifies that checkpoint, restores
+the embedded build and telemetry metadata, rebuilds the renderer comparison
+oracle, revalidates the unchanged payload, then launches the App and compares
+`app.getName()`, `app.getVersion()` and `CFBundleIdentifier` with the source
+package contract. Missing renderer output or telemetry metadata therefore fails
+before merge.
+
+This workflow never creates a DMG, ZIP, blockmap, update manifest, formal
+Candidate, tag or GitHub Release. Its directory, archive, attestation filename
+and `release-dry-run-checkpoint` kind are distinct from the signed-App
+checkpoint; the formal Candidate verifier rejects a renamed dry-run
+attestation. A successful dry run is early regression evidence only. The
+formal Candidate still starts independently from reviewed `main`, requires the
+real telemetry project token plus signing/notarization credentials, and never
+downloads or reuses dry-run bytes.
+
 ## Optional developer preview
 
 When the developer explicitly asks for an installable test package, manually
@@ -139,8 +170,9 @@ The workflow:
   runtime oracle before it exposes signing or Apple credentials to a build
   process;
 - Developer ID signs that already-verified App, launches it once under
-  Hardened Runtime before any Apple submission, then notarizes, staples and
-  re-verifies it;
+  Hardened Runtime and reuses the same product-name/version/Bundle-ID startup
+  oracle before any Apple submission, then notarizes, staples and re-verifies
+  it;
 - archives the exact signed/notarized App plus source, payload and archive
   hashes as an attempt-qualified checkpoint retained for 14 days;
 - starts a separate job from that checkpoint, validates every checkpoint byte,

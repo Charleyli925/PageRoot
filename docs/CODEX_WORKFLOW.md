@@ -146,6 +146,14 @@ This flow has one repository-level prerequisite outside the workflow: Codex clou
 
 `review-settled` re-reads the live PR head and the latest Ready timeline event on every poll. It binds the Draft request and one Codex completion to the current Draft interval: after PR creation or the most recent `convert_to_draft`, and strictly before the accepted Ready event. It then requires a distinct final request strictly after Ready and a separate completion at or after that request; requests and completions from an earlier Ready/Draft cycle cannot be recycled. Each completion must be a Codex PR review bound to the full SHA, a Codex completion comment whose reviewed-commit prefix matches it, or a Codex thumbs-up on the phase's exact request comment. PR-level reactions and non-canonical mentions—including quoted, code-block and HTML-comment text—are never used as evidence. The final completion starts a three-minute settle window before active review threads are evaluated. A changed head, a missing current-Draft request or completion, a missing post-Ready final request or completion, an unavailable Codex environment, a return to Draft, timeout or unresolved P0-P2 thread fails before `baseline-policy`, `source-build`, Browser or Electron work starts.
 
+Packaging, release-metadata, Electron, packaged Bridge, Schema and resource
+changes additionally trigger the credential-free `Release Dry Run`. It crosses
+an unsigned App checkpoint between two clean macOS jobs, restores metadata,
+rebuilds the renderer oracle and launch-checks name/version/Bundle ID. The
+checkpoint is `releaseEligible: false`; the workflow has no secrets, signing,
+notarization, distributable, Candidate, tag or publication authority and cannot
+replace the formal post-merge flow.
+
 Promote only one PR at a time. Other parallel work remains draft and continues receiving cheap feedback; after the current candidate merges, update the next branch onto the new `main` and promote it. This prevents strict up-to-date protection from turning every merge into a cascade of complete runs on the remaining PRs.
 
 After merge, CI authenticates the successful PR result against the exact `main` Tree Hash, package/lockfile version and merged PR. Equality failure blocks immediately; equality success does not repeat Node, Browser or Electron source tests. The source-gate attestation is valid for seven days and only for the exact tree.
