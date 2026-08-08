@@ -285,6 +285,46 @@ test("stable data selectors retain exact short values", () => {
   assert.equal(prepared?.candidates.length, 1);
 });
 
+test("stable data selectors retain exact empty values", () => {
+  const source = `<!doctype html><main>
+    <div data-x=""></div>
+    <script>
+      document.querySelector('[data-x=""]').textContent = "ready";
+    </script>
+  </main>`;
+  const prepared = prepareRuntimeVisualCapture({
+    html: source,
+    sourcePath: "/tmp/empty-data-selector-runtime-host.html",
+    viewportWidth: 900,
+  });
+  assert.equal(prepared?.candidates.length, 1);
+});
+
+test("stable ID selectors implement every supported attribute operator", () => {
+  const cases = [
+    ["=", "chart", "chart"],
+    ["~=", "chart", "late chart"],
+    ["^=", "late", "late-chart"],
+    ["$=", "chart", "late-chart"],
+    ["*=", "te-cha", "late-chart"],
+    ["|=", "late", "late-chart"],
+  ];
+  for (const [operator, expected, actual] of cases) {
+    const source = `<!doctype html><main>
+      <div id="${actual}"></div>
+      <script>
+        document.querySelector('[id${operator}"${expected}"]').textContent = "ready";
+      </script>
+    </main>`;
+    const prepared = prepareRuntimeVisualCapture({
+      html: source,
+      sourcePath: `/tmp/id-${operator.replace("=", "")}-selector-runtime-host.html`,
+      viewportWidth: 900,
+    });
+    assert.equal(prepared?.candidates.length, 1, operator);
+  }
+});
+
 test("stable short ID lookups retain the exact host", () => {
   const source = `<!doctype html><main>
     <div class="go"></div>

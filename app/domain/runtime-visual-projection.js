@@ -174,8 +174,9 @@ function candidateReferenceTokens(element) {
   }
   return tokens.filter(({ value, kind }) => (
     kind === "identity-attribute"
+      || kind === "data-value"
       || (
-        ["id-value", "name-value", "class", "class-value", "data-value"].includes(kind)
+        ["id-value", "name-value", "class", "class-value"].includes(kind)
         && String(value).length > 0
       )
       || String(value).length >= 3
@@ -214,9 +215,23 @@ function runtimeIdentityValueMatches(source, value, kind) {
     ) return false;
     const expected = runtimeSelectorLiteralValue(attributeSelector.groups.value)
       ?? attributeSelector.groups.value;
-    return (attributeSelector.groups.operator === "="
-      || attributeSelector.groups.operator === "~=")
-      && expected === value;
+    const actual = String(value);
+    switch (attributeSelector.groups.operator) {
+      case "=":
+        return actual === expected;
+      case "~=":
+        return actual.split(/[\t\n\f\r ]+/u).includes(expected);
+      case "^=":
+        return actual.startsWith(expected);
+      case "$=":
+        return actual.endsWith(expected);
+      case "*=":
+        return actual.includes(expected);
+      case "|=":
+        return actual === expected || actual.startsWith(`${expected}-`);
+      default:
+        return false;
+    }
   })) return true;
   if (kind !== "id-value") return false;
   const escapedValue = value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
