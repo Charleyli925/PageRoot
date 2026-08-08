@@ -9,9 +9,26 @@ import {
 import {
   mergeReviewTextRanges,
   readableReviewTextFootprintPlan,
+  reviewSentenceRanges,
   reviewTextSimilarity,
   sentenceAwareTextDifferences,
 } from "../lib/review-text-diff.js";
+import type {
+  ReviewTextChangeOperation,
+  ReviewTextChangeScope,
+} from "../lib/review-text-diff.js";
+import {
+  appendReviewProjectionFact,
+  parseReviewProjectionFacts,
+  serializeReviewProjectionFacts,
+} from "../lib/review-projection-facts.js";
+import type {
+  ReviewProjectionFact,
+} from "../lib/review-projection-facts.js";
+import { alignReviewSemanticUnits } from "../lib/review-semantic-alignment.js";
+import type {
+  ReviewSemanticAlignmentMatch,
+} from "../lib/review-semantic-alignment.js";
 import {
   REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT,
   selectPrioritizedReviewRuntimeVisualCandidates,
@@ -90,6 +107,7 @@ const REVIEW_STYLE_ID = "pageroot-ai-review-style";
 const REVIEW_BOOTSTRAP_ATTRIBUTE = "data-pageroot-ai-review-bootstrap";
 const REVIEW_BASE_ATTRIBUTE = "data-pageroot-ai-review-base";
 const REVIEW_BOOTSTRAP_PATH = "/.pageroot/preview-bootstrap.js";
+const REVIEW_PROJECTION_FACTS_ATTRIBUTE = "data-pageroot-review-projection-facts";
 const REVIEW_DOCUMENT_STYLE = String.raw`
   html {
     --pageroot-review-context-opacity: .18;
@@ -107,6 +125,17 @@ const REVIEW_DOCUMENT_STYLE = String.raw`
 
   [data-pageroot-outline-id] {
     transition: opacity 160ms ease, filter 160ms ease, outline-color 120ms ease !important;
+  }
+
+  html body [data-pageroot-review-text][data-pageroot-review-marker] {
+    display: contents !important;
+    position: static !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    font: inherit !important;
+    letter-spacing: inherit !important;
+    word-spacing: inherit !important;
   }
 
   html[data-pageroot-review-filter="all"] [data-pageroot-review-marker-types~="structure"],
@@ -161,6 +190,7 @@ const REVIEW_DOCUMENT_STYLE = String.raw`
     margin: 0 !important;
     padding: 0 !important;
     border: 0 !important;
+    outline: none !important;
     background: transparent !important;
     opacity: 1 !important;
     filter: none !important;
@@ -183,6 +213,7 @@ const REVIEW_DOCUMENT_STYLE = String.raw`
     padding: 0 !important;
     border: 0 !important;
     border-radius: 0 !important;
+    outline: none !important;
     background: transparent !important;
     box-shadow: none !important;
     opacity: 1 !important;
@@ -217,6 +248,7 @@ const REVIEW_DOCUMENT_STYLE = String.raw`
     padding: 0 !important;
     border: calc(2px * var(--pageroot-review-ui-scale)) dashed #1677c8 !important;
     border-radius: calc(5px * var(--pageroot-review-ui-scale)) !important;
+    outline: none !important;
     background: transparent !important;
     box-shadow: none !important;
     opacity: 1 !important;
@@ -260,6 +292,7 @@ const REVIEW_DOCUMENT_STYLE = String.raw`
     margin: 0 !important;
     padding: 0 !important;
     border: 0 !important;
+    outline: none !important;
     background: transparent !important;
     opacity: 1 !important;
     filter: none !important;
@@ -325,6 +358,7 @@ const REVIEW_DOCUMENT_STYLE = String.raw`
     margin: 0 !important;
     padding: 0 !important;
     border: 0 !important;
+    outline: none !important;
     background: #ffffff !important;
     pointer-events: none !important;
   }
@@ -417,7 +451,7 @@ const GENERIC_RUNTIME_VISUAL_CLASSES = new Set([
 
 type ReviewTextInventory = {
   text: string;
-  nodes: Array<{ node: Text; start: number; end: number }>;
+  nodes: Array<{ node: Text; start: number; end: number; nodeOffset: number }>;
   breakOffsets: number[];
 };
 
@@ -436,7 +470,7 @@ function reviewTextInventoryForNodes(sourceNodes: Iterable<Node>): ReviewTextInv
       const value = node.textContent || "";
       const start = text.length;
       text += value;
-      nodes.push({ node: node as Text, start, end: text.length });
+      nodes.push({ node: node as Text, start, end: text.length, nodeOffset: 0 });
       return;
     }
     if (!(node instanceof Element)) return;
@@ -1823,21 +1857,58 @@ type TextRange = { start: number; end: number };
 type ReviewTextFootprintGroup = {
   id: string;
   ranges: TextRange[];
-  scope: "inline" | "block";
+  scope: ReviewTextChangeScope;
   density: number;
+  operation: ReviewTextChangeOperation;
+  semanticOwnerId: string;
+  geometryOwnerId: string;
   summary?: string;
 };
 
-function markTextFootprintOwner(
-  anchor: Element,
-  groups: ReviewTextFootprintGroup[],
-) {
-  const attribute = "data-pageroot-review-text-block-groups";
-  const groupIds = new Set(
+function markTextAnchor(anchor: Element, groupId: string, offset: number) {
+  const attribute = "data-pageroot-review-text-anchors";
+  const anchors = new Set(
     (anchor.getAttribute(attribute) || "").split(/\s+/).filter(Boolean),
   );
-  groups.forEach((group) => groupIds.add(group.id));
-  anchor.setAttribute(attribute, [...groupIds].join(" "));
+  anchors.add(`${groupId}@${Math.max(0, Math.trunc(offset))}`);
+  anchor.setAttribute(attribute, [...anchors].join(" "));
+}
+
+function reviewTextAnchorOffset(
+  anchor: Element,
+  inventory: ReviewTextInventory,
+): number {
+  const firstEntry = inventory.nodes[0];
+  if (!firstEntry) return 0;
+  const ownerId = anchor.getAttribute("data-pageroot-review-geometry-owner") || "";
+  let offset = 0;
+  const walker = anchor.ownerDocument.createTreeWalker(anchor, NodeFilter.SHOW_TEXT);
+  let node = walker.nextNode();
+  while (node) {
+    const parent = node.parentElement;
+    let nestedOwner = parent;
+    let crossesOwner = false;
+    while (nestedOwner && nestedOwner !== anchor) {
+      const nestedOwnerId = nestedOwner.getAttribute("data-pageroot-review-geometry-owner") || "";
+      if (nestedOwnerId && nestedOwnerId !== ownerId) {
+        crossesOwner = true;
+        break;
+      }
+      nestedOwner = nestedOwner.parentElement;
+    }
+    const visibleTextNode = Boolean(
+      parent
+      && !crossesOwner
+      && parent.namespaceURI === "http://www.w3.org/1999/xhtml"
+      && !parent.closest("script, style, noscript, template, [data-pageroot-review-projection-layer]"),
+    );
+    if (visibleTextNode) {
+      if (node === firstEntry.node) return offset + firstEntry.nodeOffset;
+      offset += node.textContent?.length || 0;
+    }
+    node = walker.nextNode();
+  }
+  return 0;
 }
 
 function applyTextFootprintMetadata(
@@ -1849,6 +1920,9 @@ function applyTextFootprintMetadata(
   marker.dataset.pagerootReviewTextDensity = String(
     Math.round(group.density * 10_000) / 10_000,
   );
+  marker.dataset.pagerootReviewTextOperation = group.operation;
+  marker.dataset.pagerootReviewSemanticOwner = group.semanticOwnerId;
+  marker.dataset.pagerootReviewGeometryOwner = group.geometryOwnerId;
   if (group.summary) marker.dataset.pagerootReviewTextSummary = group.summary;
 }
 
@@ -1856,13 +1930,12 @@ function wrapTextRanges(
   inventory: ReviewTextInventory,
   groups: ReviewTextFootprintGroup[],
   tone: "removed" | "added",
-  changeKind: "added" | "removed" | "before" | "after" = tone,
 ) {
   if (!groups.length) return;
   const annotatedRanges = groups.flatMap((group) => (
     mergeReviewTextRanges(group.ranges).map((range) => ({ ...range, group }))
   )).sort((left, right) => left.start - right.start || left.end - right.end);
-  inventory.nodes.forEach(({ node, start, end }) => {
+  inventory.nodes.forEach(({ node, start, end, nodeOffset }) => {
     const intersections = annotatedRanges
       .map((range) => ({
         start: Math.max(start, range.start),
@@ -1877,15 +1950,14 @@ function wrapTextRanges(
       if (!value) return;
       const marker = node.ownerDocument.createElement("span");
       marker.dataset.pagerootReviewText = tone;
-      marker.dataset.pagerootReviewTextChange = changeKind;
       applyTextFootprintMetadata(marker, group);
       marker.textContent = value;
       fragment.append(marker);
     };
     let cursor = 0;
     intersections.forEach((range) => {
-      const localStart = range.start - start;
-      const localEnd = range.end - start;
+      const localStart = nodeOffset + range.start - start;
+      const localEnd = nodeOffset + range.end - start;
       if (localStart > cursor) {
         fragment.append(source.slice(cursor, localStart));
       }
@@ -1896,24 +1968,6 @@ function wrapTextRanges(
       fragment.append(source.slice(cursor));
     }
     node.replaceWith(fragment);
-  });
-}
-
-function wrapTextContext(
-  inventory: ReviewTextInventory,
-  tone: "removed" | "added",
-  changeKind: "before" | "after",
-  group: ReviewTextFootprintGroup,
-) {
-  inventory.nodes.forEach(({ node }) => {
-    const value = node.textContent || "";
-    if (!value.trim()) return;
-    const marker = node.ownerDocument.createElement("span");
-    marker.dataset.pagerootReviewTextContext = tone;
-    marker.dataset.pagerootReviewTextChange = changeKind;
-    applyTextFootprintMetadata(marker, group);
-    marker.textContent = value;
-    node.replaceWith(marker);
   });
 }
 
@@ -1960,11 +2014,6 @@ const REVIEW_TEXT_BLOCK_TAGS = new Set([
   "UL",
 ]);
 
-type ReviewTextBlock = {
-  anchor: Element;
-  inventory: ReviewTextInventory;
-};
-
 function isReviewTextBlockElement(element: Element): boolean {
   return element.namespaceURI === "http://www.w3.org/1999/xhtml"
     && REVIEW_TEXT_BLOCK_TAGS.has(element.tagName);
@@ -1983,6 +2032,7 @@ function sliceReviewTextInventory(
         node: entry.node,
         start: Math.max(entry.start, start) - start,
         end: Math.min(entry.end, end) - start,
+        nodeOffset: entry.nodeOffset + Math.max(0, start - entry.start),
       })),
     breakOffsets: inventory.breakOffsets
       .filter((offset) => offset > start && offset < end)
@@ -1990,299 +2040,642 @@ function sliceReviewTextInventory(
   };
 }
 
-function semanticTextInventories(sourceNodes: Node[]): ReviewTextInventory[] {
-  const inventory = reviewTextInventoryForNodes(sourceNodes);
-  if (!inventory.text.trim()) return [];
-  const boundaries = [...new Set(inventory.breakOffsets)]
-    .filter((offset) => /[\u3002\uff01\uff1f!?\uff1b;]\s*$/u.test(inventory.text.slice(0, offset)))
-    .filter((offset) => offset > 0 && offset < inventory.text.length);
-  const ranges: TextRange[] = [];
-  let start = 0;
-  boundaries.forEach((end) => {
-    if (inventory.text.slice(start, end).trim()) ranges.push({ start, end });
-    start = end;
-  });
-  if (inventory.text.slice(start).trim()) ranges.push({ start, end: inventory.text.length });
-  return ranges.map((range) => sliceReviewTextInventory(inventory, range.start, range.end));
-}
+const NUMBERED_TEXT_LINE_PATTERN = /^\s*(?:[\u2460-\u2473]|[（(]?\d+[）).、:：]|[（(][一二三四五六七八九十]+[）)]|[一二三四五六七八九十]+[）、.]|[•·▪◦●]|[-–—])\s*/u;
 
-function flowEndsAtHardBoundary(nodes: Node[]): boolean {
-  const inventory = reviewTextInventoryForNodes(nodes);
-  if (/[\u3002\uff01\uff1f!?\uff1b;]\s*$/u.test(inventory.text)) return true;
-  const meaningfulElements = nodes.filter((node) => (
-    node instanceof Element && node.tagName !== "BR" && normalizedText(node).length > 0
-  ));
-  const directCopy = nodes.some((node) => (
-    node.nodeType === Node.TEXT_NODE && Boolean((node.textContent || "").trim())
-  ));
-  return meaningfulElements.length === 1 && !directCopy;
-}
-
-function reviewTextBlocks(region: Element): ReviewTextBlock[] {
-  const blocks: ReviewTextBlock[] = [];
-  const collect = (container: Element) => {
-    let flow: Node[] = [];
-    const flush = () => {
-      if (!flow.length) return;
-      semanticTextInventories(flow).forEach((inventory) => {
-        blocks.push({ anchor: container, inventory });
-      });
-      flow = [];
-    };
-    container.childNodes.forEach((node) => {
-      if (node instanceof Element && NON_CONTENT_TAGS.has(node.tagName)) return;
-      if (node instanceof Element && isReviewTextBlockElement(node)) {
-        flush();
-        collect(node);
-        return;
-      }
-      flow.push(node);
-      if (node instanceof Element && node.tagName === "BR" && flowEndsAtHardBoundary(flow)) {
-        flush();
-      }
-    });
-    flush();
-  };
-  collect(region);
-  if (!blocks.length) {
-    const inventory = reviewTextInventory(region);
-    if (inventory.text.trim()) blocks.push({ anchor: region, inventory });
-  }
-  return blocks;
-}
-
-function textBlockPairScore(
-  before: ReviewTextBlock,
-  after: ReviewTextBlock,
-  beforeIndex: number,
-  afterIndex: number,
-): number {
-  if (before.anchor.tagName !== after.anchor.tagName) return Number.NEGATIVE_INFINITY;
-  const beforeKey = pairKey(before.anchor);
-  const afterKey = pairKey(after.anchor);
-  if ((beforeKey || afterKey) && beforeKey !== afterKey) return Number.NEGATIVE_INFINITY;
-  const beforeText = before.inventory.text.replace(/\s+/g, " ").trim();
-  const afterText = after.inventory.text.replace(/\s+/g, " ").trim();
-  const exactText = beforeText === afterText;
-  const similarity = reviewTextSimilarity(beforeText, afterText);
-  const beforeClasses = new Set(classTokens(before.anchor));
-  const sharedClasses = classTokens(after.anchor).filter((token) => beforeClasses.has(token));
-  const distinctiveClasses = sharedClasses.filter((token) => ![
+const GENERIC_REVIEW_TEXT_CLASSES = new Set([
     "active", "card", "col", "column", "container", "content", "grid", "item",
     "main", "panel", "row", "section", "selected", "wrap", "wrapper",
-  ].includes(token));
-  if (!exactText && similarity < .48 && !(distinctiveClasses.length && similarity >= .24)) {
-    return Number.NEGATIVE_INFINITY;
-  }
-  return (beforeKey ? 600 : 0)
-    + (exactText ? 420 : 0)
-    + Math.round(similarity * 160)
-    + Math.min(80, distinctiveClasses.length * 24)
-    + Math.max(0, 24 - Math.abs(beforeIndex - afterIndex) * 2);
-}
-
-function pairTextBlocks(
-  before: ReviewTextBlock[],
-  after: ReviewTextBlock[],
-): Array<{ before: ReviewTextBlock | null; after: ReviewTextBlock | null }> {
-  const assignments = new Map<ReviewTextBlock, ReviewTextBlock>();
-  const usedAfter = new Set<ReviewTextBlock>();
-  const afterIndexByBlock = new Map(
-    after.map((block, index) => [block, index]),
-  );
-  const afterBuckets = new Map<string, ReviewTextBlock[]>();
-  const textBlockSignature = (block: ReviewTextBlock) => {
-    const identity = pairKey(block.anchor);
-    const bucketKey = `${block.anchor.tagName}\u0000${identity ? `key:${identity}` : "unkeyed"}`;
-    const text = block.inventory.text.replace(/\s+/g, " ").trim();
-    return text ? `${bucketKey}\u0000${text}` : null;
-  };
-  const uniqueBeforeText = uniqueSignatureMap(before, textBlockSignature);
-  const uniqueAfterText = uniqueSignatureMap(after, textBlockSignature);
-  uniqueBeforeText.forEach((beforeBlock, signature) => {
-    const afterBlock = uniqueAfterText.get(signature);
-    if (!beforeBlock || !afterBlock) return;
-    assignments.set(beforeBlock, afterBlock);
-    usedAfter.add(afterBlock);
-  });
-  after.forEach((block) => {
-    if (usedAfter.has(block)) return;
-    const identity = pairKey(block.anchor);
-    const bucketKey = `${block.anchor.tagName}\u0000${identity ? `key:${identity}` : "unkeyed"}`;
-    const bucket = afterBuckets.get(bucketKey) ?? [];
-    bucket.push(block);
-    afterBuckets.set(bucketKey, bucket);
-  });
-  const edges = before.flatMap((beforeBlock, beforeIndex) => {
-    if (assignments.has(beforeBlock)) return [];
-    const identity = pairKey(beforeBlock.anchor);
-    const bucketKey = `${beforeBlock.anchor.tagName}\u0000${identity ? `key:${identity}` : "unkeyed"}`;
-    return (afterBuckets.get(bucketKey) ?? []).map((afterBlock) => ({
-      beforeBlock,
-      afterBlock,
-      score: textBlockPairScore(
-        beforeBlock,
-        afterBlock,
-        beforeIndex,
-        afterIndexByBlock.get(afterBlock) ?? -1,
-      ),
-    }));
-  }).filter((edge) => Number.isFinite(edge.score))
-    .sort((left, right) => right.score - left.score);
-  edges.forEach(({ beforeBlock, afterBlock }) => {
-    if (assignments.has(beforeBlock) || usedAfter.has(afterBlock)) return;
-    assignments.set(beforeBlock, afterBlock);
-    usedAfter.add(afterBlock);
-  });
-
-  const pairs: Array<{ before: ReviewTextBlock | null; after: ReviewTextBlock | null }> = before.map((beforeBlock) => ({
-    before: beforeBlock,
-    after: assignments.get(beforeBlock) || null,
-  }));
-  after.forEach((afterBlock) => {
-    if (!usedAfter.has(afterBlock)) pairs.push({ before: null, after: afterBlock });
-  });
-  return pairs;
-}
-
-function markAllText(
-  block: ReviewTextBlock,
-  tone: "removed" | "added",
-  groupId: string,
-): boolean {
-  const { inventory } = block;
-  if (!inventory.text.trim()) return false;
-  const group: ReviewTextFootprintGroup = {
-    id: groupId,
-    ranges: [{ start: 0, end: inventory.text.length }],
-    scope: "block",
-    density: 1,
-  };
-  markTextFootprintOwner(block.anchor, [group]);
-  wrapTextRanges(inventory, [group], tone);
-  return true;
-}
+]);
 
 function sameBreakLayout(before: ReviewTextInventory, after: ReviewTextInventory): boolean {
   return before.breakOffsets.length === after.breakOffsets.length
     && before.breakOffsets.every((offset, index) => offset === after.breakOffsets[index]);
 }
 
-function markTextDifferences(before: Element | null, after: Element | null): boolean {
-  let changed = false;
-  if (!before && after) {
-    reviewTextBlocks(after).forEach((element, index) => {
-      changed = markAllText(element, "added", `text-${index + 1}-1`) || changed;
-    });
-    return changed;
+type ReviewSemanticUnitKind =
+  | "section"
+  | "container"
+  | "leaf-text-block"
+  | "direct-flow"
+  | "br-line"
+  | "atomic-content"
+  | "list"
+  | "list-item"
+  | "table"
+  | "row-group"
+  | "table-row"
+  | "table-cell";
+
+type ReviewSemanticUnit = {
+  kind: ReviewSemanticUnitKind;
+  element: Element;
+  inventory: ReviewTextInventory | null;
+  maximumScope: "inline" | "block";
+  children: ReviewSemanticUnit[];
+  columnStart?: number;
+  columnSpan?: number;
+};
+
+type ReviewSemanticPairNode = {
+  before: ReviewSemanticUnit | null;
+  after: ReviewSemanticUnit | null;
+  match: ReviewSemanticAlignmentMatch;
+  moved: boolean;
+  semanticOwnerId: string;
+  geometryOwnerId: string;
+  structureFallback: boolean;
+  children: ReviewSemanticPairNode[];
+};
+
+type ReviewSemanticPairGraph = {
+  root: ReviewSemanticPairNode;
+};
+
+const REVIEW_LEAF_TEXT_OWNER_TAGS = new Set([
+  "ADDRESS",
+  "BLOCKQUOTE",
+  "BUTTON",
+  "CAPTION",
+  "DD",
+  "DT",
+  "FIGCAPTION",
+  "H1",
+  "H2",
+  "H3",
+  "H4",
+  "H5",
+  "H6",
+  "P",
+  "PRE",
+  "SUMMARY",
+]);
+
+const REVIEW_DIRECT_TEXT_OWNER_TAGS = new Set([
+  "BUTTON",
+  "CAPTION",
+  "DD",
+  "DIV",
+  "DT",
+  "FIGCAPTION",
+  "LI",
+  "TD",
+  "TH",
+]);
+
+// These elements contribute visible content without contributing to the text
+// inventory. They must not be left inside a direct-flow unit: that unit is
+// intentionally discarded when it contains neither text nor authored <br>s.
+// Foreign-namespace content (notably SVG and MathML) follows the same rule.
+const REVIEW_ATOMIC_CONTENT_TAGS = new Set([
+  "AREA",
+  "AUDIO",
+  "CANVAS",
+  "EMBED",
+  "HR",
+  "IFRAME",
+  "IMG",
+  "INPUT",
+  "METER",
+  "OBJECT",
+  "PICTURE",
+  "PROGRESS",
+  "SELECT",
+  "TEXTAREA",
+  "VIDEO",
+]);
+
+function isReviewAtomicContentElement(element: Element): boolean {
+  return element.namespaceURI !== "http://www.w3.org/1999/xhtml"
+    || REVIEW_ATOMIC_CONTENT_TAGS.has(element.tagName);
+}
+
+function atomicContentSemanticSignature(element: Element): string | null {
+  const identityAttributes = [...element.attributes]
+    .filter((attribute) => (
+      !VISUAL_ATTRIBUTE_NAMES.has(attribute.name.toLowerCase())
+      && !attribute.name.startsWith("data-pageroot-review-")
+      && (
+        attribute.value.trim().length > 0
+        // A present authored data attribute is an intentional, stable
+        // identity even when written in HTML boolean form (`data-key`).
+        || attribute.name.startsWith("data-")
+      )
+    ))
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .map((attribute) => `${attribute.name.toLowerCase()}=${attribute.value}`);
+  // A bare tag is not a high-confidence identity. Let repeated or anonymous
+  // media remain unmatched rather than guessing that a replacement is a move.
+  if (!identityAttributes.length) return null;
+  return [
+    element.namespaceURI || "",
+    element.localName.toLowerCase(),
+    ...identityAttributes,
+  ].join("\u0000");
+}
+
+function atomicContentSemanticUnit(element: Element): ReviewSemanticUnit {
+  return {
+    kind: "atomic-content",
+    element,
+    inventory: null,
+    maximumScope: "inline",
+    children: [],
+  };
+}
+
+function semanticFlowUnit(
+  owner: Element,
+  sourceNodes: Node[],
+  maximumScope: "inline" | "block",
+): ReviewSemanticUnit | null {
+  const inventory = reviewTextInventoryForNodes(sourceNodes);
+  if (!inventory.text.trim() && !inventory.breakOffsets.length) return null;
+  const breakOffsets = [...new Set(inventory.breakOffsets)]
+    .filter((offset) => offset >= 0 && offset <= inventory.text.length)
+    .sort((left, right) => left - right);
+  const lineRanges: TextRange[] = [];
+  let start = 0;
+  [...breakOffsets, inventory.text.length].forEach((end) => {
+    lineRanges.push({ start, end });
+    start = end;
+  });
+  const nonEmptyLines = lineRanges.filter((range) => (
+    inventory.text.slice(range.start, range.end).trim()
+  ));
+  const numberedLines = nonEmptyLines.length >= 2 && nonEmptyLines.every((range) => (
+    NUMBERED_TEXT_LINE_PATTERN.test(inventory.text.slice(range.start, range.end))
+  ));
+  if (!numberedLines) {
+    return {
+      kind: "direct-flow",
+      element: owner,
+      inventory,
+      maximumScope,
+      children: [],
+    };
   }
-  if (before && !after) {
-    reviewTextBlocks(before).forEach((element, index) => {
-      changed = markAllText(element, "removed", `text-${index + 1}-1`) || changed;
-    });
-    return changed;
-  }
-  if (!before || !after) return false;
-  pairTextBlocks(reviewTextBlocks(before), reviewTextBlocks(after)).forEach((pair, pairIndex) => {
-    const groupBase = `text-${pairIndex + 1}`;
-    if (!pair.before && pair.after) {
-      changed = markAllText(pair.after, "added", `${groupBase}-1`) || changed;
-      return;
-    }
-    if (pair.before && !pair.after) {
-      changed = markAllText(pair.before, "removed", `${groupBase}-1`) || changed;
-      return;
-    }
-    if (!pair.before || !pair.after) return;
-    const beforeInventory = pair.before.inventory;
-    const afterInventory = pair.after.inventory;
-    const layoutChanged = !sameBreakLayout(beforeInventory, afterInventory);
-    if (beforeInventory.text === afterInventory.text) {
-      if (!layoutChanged) return;
-      const group: ReviewTextFootprintGroup = {
-        id: `${groupBase}-1`,
-        ranges: [{ start: 0, end: beforeInventory.text.length }],
-        scope: "block",
-        density: 1,
-      };
-      markTextFootprintOwner(pair.before.anchor, [group]);
-      markTextFootprintOwner(pair.after.anchor, [group]);
-      wrapTextContext(beforeInventory, "removed", "before", group);
-      wrapTextContext(afterInventory, "added", "after", group);
-      changed = true;
-      return;
-    }
-    const differences = sentenceAwareTextDifferences(
-      beforeInventory.text,
-      afterInventory.text,
+  return {
+    kind: "direct-flow",
+    element: owner,
+    inventory: null,
+    maximumScope: "inline",
+    children: lineRanges.map((range) => ({
+      kind: "br-line" as const,
+      element: owner,
+      inventory: sliceReviewTextInventory(inventory, range.start, range.end),
+      maximumScope: "inline" as const,
+      children: [],
+    })),
+  };
+}
+
+function semanticChildrenForContainer(container: Element): ReviewSemanticUnit[] {
+  const children: ReviewSemanticUnit[] = [];
+  let flow: Node[] = [];
+  const flush = () => {
+    if (!flow.length) return;
+    const unit = semanticFlowUnit(
+      container,
+      flow,
+      REVIEW_DIRECT_TEXT_OWNER_TAGS.has(container.tagName) ? "block" : "inline",
     );
-    if (!differences.before.length && !differences.after.length && !layoutChanged) return;
+    if (unit) children.push(unit);
+    flow = [];
+  };
+  container.childNodes.forEach((node) => {
+    if (node instanceof Element && NON_CONTENT_TAGS.has(node.tagName)) return;
+    if (node instanceof Element && isReviewAtomicContentElement(node)) {
+      flush();
+      children.push(atomicContentSemanticUnit(node));
+      return;
+    }
+    if (
+      node instanceof Element
+      && node.namespaceURI === "http://www.w3.org/1999/xhtml"
+      && isReviewTextBlockElement(node)
+    ) {
+      flush();
+      children.push(buildReviewSemanticUnit(node));
+      return;
+    }
+    flow.push(node);
+  });
+  flush();
+  return children;
+}
+
+function tableCellUnits(row: Element): ReviewSemanticUnit[] {
+  let logicalColumn = 0;
+  return [...row.children]
+    .filter((element) => element.matches("th, td"))
+    .map((element) => {
+      const rawSpan = Number.parseInt(element.getAttribute("colspan") || "1", 10);
+      const columnSpan = Number.isFinite(rawSpan) && rawSpan > 0 ? rawSpan : 1;
+      const unit = buildReviewSemanticUnit(element);
+      unit.columnStart = logicalColumn;
+      unit.columnSpan = columnSpan;
+      logicalColumn += columnSpan;
+      return unit;
+    });
+}
+
+function buildReviewSemanticUnit(element: Element): ReviewSemanticUnit {
+  if (isReviewAtomicContentElement(element)) return atomicContentSemanticUnit(element);
+  if (element.matches("ul, ol")) {
+    return {
+      kind: "list",
+      element,
+      inventory: null,
+      maximumScope: "inline",
+      children: [...element.children]
+        .filter((child) => child.tagName === "LI")
+        .map(buildReviewSemanticUnit),
+    };
+  }
+  if (element.tagName === "LI") {
+    return {
+      kind: "list-item",
+      element,
+      inventory: null,
+      maximumScope: "block",
+      children: semanticChildrenForContainer(element),
+    };
+  }
+  if (element.tagName === "TABLE") {
+    return {
+      kind: "table",
+      element,
+      inventory: null,
+      maximumScope: "inline",
+      children: [...element.children]
+        .filter((child) => child.matches("caption, thead, tbody, tfoot, tr"))
+        .map(buildReviewSemanticUnit),
+    };
+  }
+  if (element.matches("thead, tbody, tfoot")) {
+    return {
+      kind: "row-group",
+      element,
+      inventory: null,
+      maximumScope: "inline",
+      children: [...element.children]
+        .filter((child) => child.tagName === "TR")
+        .map(buildReviewSemanticUnit),
+    };
+  }
+  if (element.tagName === "TR") {
+    return {
+      kind: "table-row",
+      element,
+      inventory: null,
+      maximumScope: "block",
+      children: tableCellUnits(element),
+    };
+  }
+  if (element.matches("td, th")) {
+    return {
+      kind: "table-cell",
+      element,
+      inventory: null,
+      maximumScope: "block",
+      children: semanticChildrenForContainer(element),
+    };
+  }
+  const hasBlockChild = [...element.children].some((child) => (
+    isReviewTextBlockElement(child)
+  ));
+  if (REVIEW_LEAF_TEXT_OWNER_TAGS.has(element.tagName) && !hasBlockChild) {
+    return {
+      kind: "leaf-text-block",
+      element,
+      inventory: reviewTextInventory(element),
+      maximumScope: "block",
+      children: [],
+    };
+  }
+  return {
+    kind: element.matches("section, article, main, header, footer, nav")
+      ? "section"
+      : "container",
+    element,
+    inventory: null,
+    maximumScope: "inline",
+    children: semanticChildrenForContainer(element),
+  };
+}
+
+function semanticUnitText(unit: ReviewSemanticUnit): string {
+  if (unit.inventory) return unit.inventory.text;
+  if (unit.kind === "table-row") {
+    return [...unit.element.children]
+      .filter((element) => element.matches("th, td"))
+      .map((element) => normalizedText(element))
+      .join("\u001f");
+  }
+  return normalizedText(unit.element);
+}
+
+function semanticUnitDescriptor(unit: ReviewSemanticUnit, parentKey: string) {
+  const logicalCell = unit.kind === "table-cell"
+    ? `:${unit.element.tagName}:${unit.columnStart ?? -1}:${unit.columnSpan ?? 1}`
+    : `:${unit.element.tagName}`;
+  const text = semanticUnitText(unit);
+  const numberedPrefix = unit.kind === "br-line"
+    ? text.match(NUMBERED_TEXT_LINE_PATTERN)?.[0]?.trim() || ""
+    : "";
+  const ownsElementIdentity = unit.kind !== "direct-flow" && unit.kind !== "br-line";
+  const atomicSignature = unit.kind === "atomic-content"
+    ? atomicContentSemanticSignature(unit.element)
+    : null;
+  return {
+    kind: `${unit.kind}${logicalCell}`,
+    text,
+    stableId: ownsElementIdentity ? pairKey(unit.element) : null,
+    exactSignature: atomicSignature
+      ? `${unit.kind}\u0000${logicalCell}\u0000${atomicSignature}`
+      : text ? `${unit.kind}\u0000${logicalCell}\u0000${text}` : null,
+    affinities: [
+      ...classTokens(unit.element).filter((token) => !GENERIC_REVIEW_TEXT_CLASSES.has(token)),
+      ...(numberedPrefix ? [`number:${numberedPrefix}`] : []),
+    ],
+    parentKey,
+  };
+}
+
+function sameLogicalCellPattern(
+  before: ReviewSemanticUnit[],
+  after: ReviewSemanticUnit[],
+): boolean {
+  return before.length === after.length && before.every((unit, index) => {
+    const candidate = after[index];
+    return candidate
+      && unit.element.tagName === candidate.element.tagName
+      && unit.columnStart === candidate.columnStart
+      && unit.columnSpan === candidate.columnSpan;
+  });
+}
+
+function* buildReviewSemanticPairGraphSteps(
+  pair: SectionPair,
+): Generator<"semantic-row", ReviewSemanticPairGraph, void> {
+  let semanticOwnerSequence = 0;
+  let geometryOwnerSequence = 0;
+  let parentSequence = 0;
+  let semanticRowsSinceYield = 0;
+  const geometryOwners = new WeakMap<Element, string>();
+  const semanticOwner = () => `semantic-owner-${++semanticOwnerSequence}`;
+  const geometryOwner = (before: Element | null, after: Element | null) => {
+    const existing = (before && geometryOwners.get(before))
+      || (after && geometryOwners.get(after));
+    const ownerId = existing || `geometry-owner-${++geometryOwnerSequence}`;
+    [before, after].forEach((element) => {
+      if (!element) return;
+      geometryOwners.set(element, ownerId);
+      element.setAttribute("data-pageroot-review-geometry-owner", ownerId);
+    });
+    return ownerId;
+  };
+  const createPair = function* (
+    before: ReviewSemanticUnit | null,
+    after: ReviewSemanticUnit | null,
+    match: ReviewSemanticAlignmentMatch,
+    moved: boolean,
+    inheritedOwnerId?: string,
+  ): Generator<"semantic-row", ReviewSemanticPairNode, void> {
+    const ownerId = inheritedOwnerId || semanticOwner();
+    const node: ReviewSemanticPairNode = {
+      before,
+      after,
+      match,
+      moved,
+      semanticOwnerId: ownerId,
+      geometryOwnerId: geometryOwner(before?.element || null, after?.element || null),
+      structureFallback: false,
+      children: [],
+    };
+    if (!before || !after) {
+      const children = before?.children || after?.children || [];
+      for (const child of children) {
+        node.children.push(yield* createPair(
+          before ? child : null,
+          after ? child : null,
+          "unmatched",
+          false,
+          ownerId,
+        ));
+      }
+      if (node.before?.kind === "table-row" || node.before?.kind === "list-item"
+        || node.before?.kind === "br-line" || node.after?.kind === "table-row"
+        || node.after?.kind === "list-item" || node.after?.kind === "br-line") {
+        semanticRowsSinceYield += 1;
+        if (semanticRowsSinceYield >= 24) {
+          semanticRowsSinceYield = 0;
+          yield "semantic-row";
+        }
+      }
+      return node;
+    }
+    if (
+      before.kind === "table-row"
+      && after.kind === "table-row"
+      && !sameLogicalCellPattern(before.children, after.children)
+    ) {
+      node.structureFallback = true;
+      for (const child of before.children) {
+        node.children.push(yield* createPair(child, null, "unmatched", false, ownerId));
+      }
+      for (const child of after.children) {
+        node.children.push(yield* createPair(null, child, "unmatched", false, ownerId));
+      }
+      semanticRowsSinceYield += 1;
+      if (semanticRowsSinceYield >= 24) {
+        semanticRowsSinceYield = 0;
+        yield "semantic-row";
+      }
+      return node;
+    }
+    const parentKey = `semantic-parent-${++parentSequence}`;
+    const aligned = alignReviewSemanticUnits(
+      before.children.map((unit) => semanticUnitDescriptor(unit, parentKey)),
+      after.children.map((unit) => semanticUnitDescriptor(unit, parentKey)),
+    );
+    for (const childPair of aligned) {
+      node.children.push(yield* createPair(
+        childPair.beforeIndex === null ? null : before.children[childPair.beforeIndex],
+        childPair.afterIndex === null ? null : after.children[childPair.afterIndex],
+        childPair.match,
+        childPair.moved,
+      ));
+    }
+    if (node.before?.kind === "table-row" || node.before?.kind === "list-item"
+      || node.before?.kind === "br-line" || node.after?.kind === "table-row"
+      || node.after?.kind === "list-item" || node.after?.kind === "br-line") {
+      semanticRowsSinceYield += 1;
+      if (semanticRowsSinceYield >= 24) {
+        semanticRowsSinceYield = 0;
+        yield "semantic-row";
+      }
+    }
+    return node;
+  };
+  const beforeRoot = pair.before ? buildReviewSemanticUnit(pair.before) : null;
+  const afterRoot = pair.after ? buildReviewSemanticUnit(pair.after) : null;
+  return {
+    root: yield* createPair(
+      beforeRoot,
+      afterRoot,
+      beforeRoot && afterRoot ? "weighted" : "unmatched",
+      Boolean(pair.moved),
+    ),
+  };
+}
+
+function flattenReviewSemanticPairs(root: ReviewSemanticPairNode): ReviewSemanticPairNode[] {
+  return [root, ...root.children.flatMap(flattenReviewSemanticPairs)];
+}
+
+function markSemanticTextFootprintOwner(
+  unit: ReviewSemanticUnit,
+  groups: ReviewTextFootprintGroup[],
+) {
+  unit.element.setAttribute(
+    "data-pageroot-review-geometry-owner",
+    groups[0]?.geometryOwnerId || "",
+  );
+}
+
+function markStableSentenceRanges(
+  unit: ReviewSemanticUnit,
+  inventory: ReviewTextInventory,
+  evidenceRanges: TextRange[],
+) {
+  const stableRanges = reviewSentenceRanges(inventory.text).filter((sentence) => (
+    !evidenceRanges.some((range) => (
+      range.end > sentence.start && range.start < sentence.end
+    ))
+  ));
+  if (!stableRanges.length) return;
+  unit.element.setAttribute(
+    "data-pageroot-review-stable-text-ranges",
+    stableRanges.map((range) => `${range.start}:${range.end}`).join(" "),
+  );
+}
+
+function markSemanticAllText(
+  pair: ReviewSemanticPairNode,
+  unit: ReviewSemanticUnit,
+  tone: "removed" | "added",
+  groupId: string,
+): boolean {
+  const inventory = unit.inventory;
+  if (!inventory?.text.trim()) return false;
+  const differences = tone === "added"
+    ? { before: [], after: [{ start: 0, end: inventory.text.length }] }
+    : { before: [{ start: 0, end: inventory.text.length }], after: [] };
+  const plan = readableReviewTextFootprintPlan(
+    tone === "added" ? "" : inventory.text,
+    tone === "added" ? inventory.text : "",
+    differences,
+  );
+  const side = tone === "added" ? plan.after : plan.before;
+  const scope = unit.maximumScope === "inline" ? "inline" : plan.scope;
+  const group: ReviewTextFootprintGroup = {
+    id: groupId,
+    ranges: side.footprintGroups.flat(),
+    scope,
+    density: plan.density,
+    operation: plan.operation,
+    semanticOwnerId: pair.semanticOwnerId,
+    geometryOwnerId: pair.geometryOwnerId,
+  };
+  markSemanticTextFootprintOwner(unit, [group]);
+  wrapTextRanges(inventory, [group], tone);
+  return true;
+}
+
+function markSemanticTextDifferences(graph: ReviewSemanticPairGraph): {
+  changed: boolean;
+} {
+  let changed = false;
+  let groupSequence = 0;
+  flattenReviewSemanticPairs(graph.root).forEach((pair) => {
+    const beforeInventory = pair.before?.inventory || null;
+    const afterInventory = pair.after?.inventory || null;
+    if (!beforeInventory && !afterInventory) return;
+    const groupBase = `text-${++groupSequence}`;
+    if (!beforeInventory && pair.after) {
+      changed = markSemanticAllText(pair, pair.after, "added", `${groupBase}-1`) || changed;
+      return;
+    }
+    if (!afterInventory && pair.before) {
+      changed = markSemanticAllText(pair, pair.before, "removed", `${groupBase}-1`) || changed;
+      return;
+    }
+    if (!beforeInventory || !afterInventory || !pair.before || !pair.after) return;
+    const layoutChanged = !sameBreakLayout(beforeInventory, afterInventory);
+    const differences = beforeInventory.text === afterInventory.text
+      ? { before: [], after: [] }
+      : sentenceAwareTextDifferences(beforeInventory.text, afterInventory.text);
     const plan = readableReviewTextFootprintPlan(
       beforeInventory.text,
       afterInventory.text,
-      differences,
+      { ...differences, layout: layoutChanged },
     );
-    const preferredSummary = plan.scope === "block"
-      && differences.before.length
-      && differences.after.length
+    if (plan.operation === "none") return;
+    if (plan.operation === "layout") {
+      return;
+    }
+    if (plan.operation === "replace") {
+      markStableSentenceRanges(pair.before, beforeInventory, plan.before.evidenceRanges);
+      markStableSentenceRanges(pair.after, afterInventory, plan.after.evidenceRanges);
+    }
+    const maximumScope = pair.before.maximumScope === "inline"
+      || pair.after.maximumScope === "inline"
+      ? "inline"
+      : "block";
+    const footprintScope = maximumScope === "inline" ? "inline" : plan.scope;
+    const preferredSummary = footprintScope === "block" && plan.operation === "replace"
       ? "段落改写"
       : undefined;
-    const beforeGroups: ReviewTextFootprintGroup[] = plan.before.groups.map((ranges, index) => ({
+    const createGroups = (
+      ranges: TextRange[][],
+      geometryOwnerId: string,
+    ): ReviewTextFootprintGroup[] => ranges.map((groupRanges, index) => ({
       id: `${groupBase}-${index + 1}`,
-      ranges,
-      scope: plan.scope,
+      ranges: groupRanges,
+      scope: footprintScope,
       density: plan.density,
+      operation: plan.operation,
+      semanticOwnerId: pair.semanticOwnerId,
+      geometryOwnerId,
       summary: preferredSummary,
     }));
-    const afterGroups: ReviewTextFootprintGroup[] = plan.after.groups.map((ranges, index) => ({
-      id: `${groupBase}-${index + 1}`,
-      ranges,
-      scope: plan.scope,
-      density: plan.density,
-      summary: preferredSummary,
-    }));
-    if (differences.before.length) {
-      markTextFootprintOwner(pair.before.anchor, beforeGroups);
-      wrapTextRanges(
-        beforeInventory,
-        beforeGroups,
-        "removed",
-        differences.after.length ? "before" : "removed",
+    const beforeGroups = createGroups(plan.before.footprintGroups, pair.geometryOwnerId);
+    const afterGroups = createGroups(plan.after.footprintGroups, pair.geometryOwnerId);
+    if (beforeGroups.length) {
+      markSemanticTextFootprintOwner(pair.before, beforeGroups);
+      wrapTextRanges(beforeInventory, beforeGroups, "removed");
+      changed = true;
+    } else if (plan.before.anchorOffset !== null) {
+      markTextAnchor(
+        pair.before.element,
+        `${groupBase}-1`,
+        reviewTextAnchorOffset(pair.before.element, beforeInventory) + plan.before.anchorOffset,
       );
-      changed = true;
-    } else {
-      const contextGroup: ReviewTextFootprintGroup = {
-        id: `${groupBase}-1`,
-        ranges: [{ start: 0, end: beforeInventory.text.length }],
-        scope: plan.scope,
-        density: plan.density,
-      };
-      markTextFootprintOwner(pair.before.anchor, [contextGroup]);
-      wrapTextContext(beforeInventory, "removed", "before", contextGroup);
-      changed = true;
     }
-    if (differences.after.length) {
-      markTextFootprintOwner(pair.after.anchor, afterGroups);
-      wrapTextRanges(
-        afterInventory,
-        afterGroups,
-        "added",
-        differences.before.length ? "after" : "added",
+    if (afterGroups.length) {
+      markSemanticTextFootprintOwner(pair.after, afterGroups);
+      wrapTextRanges(afterInventory, afterGroups, "added");
+      changed = true;
+    } else if (plan.after.anchorOffset !== null) {
+      markTextAnchor(
+        pair.after.element,
+        `${groupBase}-1`,
+        reviewTextAnchorOffset(pair.after.element, afterInventory) + plan.after.anchorOffset,
       );
-      changed = true;
-    } else {
-      const contextGroup: ReviewTextFootprintGroup = {
-        id: `${groupBase}-1`,
-        ranges: [{ start: 0, end: afterInventory.text.length }],
-        scope: plan.scope,
-        density: plan.density,
-      };
-      markTextFootprintOwner(pair.after.anchor, [contextGroup]);
-      wrapTextContext(afterInventory, "added", "after", contextGroup);
-      changed = true;
     }
   });
-  return changed;
+  return { changed };
 }
 
 function selfPresentationSignature(element: Element): string {
@@ -2418,43 +2811,9 @@ function structuralSelfSignature(element: Element): string {
     .join("|");
 }
 
-const STRUCTURE_TRANSPARENT_TAGS = new Set([
-  "ABBR",
-  "B",
-  "BDI",
-  "BDO",
-  "BR",
-  "CITE",
-  "CODE",
-  "DATA",
-  "EM",
-  "I",
-  "KBD",
-  "MARK",
-  "Q",
-  "S",
-  "SAMP",
-  "SMALL",
-  "SPAN",
-  "STRONG",
-  "SUB",
-  "SUP",
-  "TIME",
-  "U",
-  "VAR",
-  "WBR",
-]);
-
-function structuralChildren(element: Element): Element[] {
-  return eligibleChildren(element).flatMap((child) => (
-    STRUCTURE_TRANSPARENT_TAGS.has(child.tagName)
-      ? structuralChildren(child)
-      : [child]
-  ));
-}
-
-function markStructureElement(element: Element, tone: string) {
+function markStructureElement(element: Element, tone: string, semanticOwnerId: string) {
   element.setAttribute("data-pageroot-review-structure", tone);
+  element.setAttribute("data-pageroot-review-semantic-owner", semanticOwnerId);
 }
 
 function pairSiblingElements(before: Element[], after: Element[]): Map<Element, Element> {
@@ -2510,62 +2869,49 @@ function pairSiblingElements(before: Element[], after: Element[]): Map<Element, 
   return assignments;
 }
 
-function markStructureDifferences(pair: SectionPair): boolean {
+function markStructureDifferences(graph: ReviewSemanticPairGraph): boolean {
   const stats: StructureDifferenceStats = { added: [], removed: [], moved: [], replaced: [] };
-  if (!pair.before && pair.after) {
-    markStructureElement(pair.after, "added");
-    stats.added.push(semanticElementName(pair.after));
-  } else if (pair.before && !pair.after) {
-    markStructureElement(pair.before, "removed");
-    stats.removed.push(semanticElementName(pair.before));
-  } else if (pair.before && pair.after) {
-    if (pair.moved) {
-      markStructureElement(pair.before, "from");
-      markStructureElement(pair.after, "to");
-      stats.moved.push(semanticElementName(pair.after));
+  let inspected = 0;
+  const compare = (pair: ReviewSemanticPairNode, depth: number) => {
+    if (depth > 12 || inspected >= 800) return;
+    inspected += 1;
+    const beforeElement = pair.before?.element || null;
+    const afterElement = pair.after?.element || null;
+    if (!beforeElement && afterElement) {
+      markStructureElement(afterElement, "added", pair.semanticOwnerId);
+      stats.added.push(semanticElementName(afterElement));
+      return;
     }
-    let inspected = 0;
-    const compareChildren = (beforeParent: Element, afterParent: Element, depth: number) => {
-      if (depth > 8 || inspected >= 500) return;
-      inspected += 1;
-      if (structuralSelfSignature(beforeParent) !== structuralSelfSignature(afterParent)) {
-        markStructureElement(beforeParent, "before");
-        markStructureElement(afterParent, "after");
-        stats.replaced.push(semanticElementName(afterParent));
-      }
-      const beforeChildren = structuralChildren(beforeParent);
-      const afterChildren = structuralChildren(afterParent);
-      const assignments = pairSiblingElements(beforeChildren, afterChildren);
-      const usedAfter = new Set(assignments.values());
-      const matchedBeforeOrder = beforeChildren.filter((element) => assignments.has(element));
-      const matchedAfterOrder = [...matchedBeforeOrder].sort((left, right) => (
-        afterChildren.indexOf(assignments.get(left) as Element)
-        - afterChildren.indexOf(assignments.get(right) as Element)
-      ));
-      const afterRank = new Map(matchedAfterOrder.map((element, index) => [element, index]));
-      beforeChildren.forEach((element) => {
-        const match = assignments.get(element);
-        if (!match) {
-          markStructureElement(element, "removed");
-          stats.removed.push(semanticElementName(element));
-          return;
-        }
-        const matchedIndex = matchedBeforeOrder.indexOf(element);
-        if (matchedIndex !== afterRank.get(element)) {
-          markStructureElement(element, "from");
-          markStructureElement(match, "to");
-          stats.moved.push(semanticElementName(match));
-        }
-        compareChildren(element, match, depth + 1);
-      });
-      afterChildren.forEach((element) => {
-        if (usedAfter.has(element)) return;
-        markStructureElement(element, "added");
-        stats.added.push(semanticElementName(element));
-      });
-    };
-    compareChildren(pair.before, pair.after, 0);
-  }
+    if (beforeElement && !afterElement) {
+      markStructureElement(beforeElement, "removed", pair.semanticOwnerId);
+      stats.removed.push(semanticElementName(beforeElement));
+      return;
+    }
+    if (!beforeElement || !afterElement || !pair.before || !pair.after) return;
+    if (pair.moved) {
+      markStructureElement(beforeElement, "from", pair.semanticOwnerId);
+      markStructureElement(afterElement, "to", pair.semanticOwnerId);
+      stats.moved.push(semanticElementName(afterElement));
+    }
+    if (pair.structureFallback) {
+      markStructureElement(beforeElement, "before", pair.semanticOwnerId);
+      markStructureElement(afterElement, "after", pair.semanticOwnerId);
+      stats.replaced.push(semanticElementName(afterElement));
+      return;
+    }
+    const ownsStructuralElement = pair.before.kind !== "direct-flow"
+      && pair.before.kind !== "br-line";
+    if (
+      ownsStructuralElement
+      && structuralSelfSignature(beforeElement) !== structuralSelfSignature(afterElement)
+    ) {
+      markStructureElement(beforeElement, "before", pair.semanticOwnerId);
+      markStructureElement(afterElement, "after", pair.semanticOwnerId);
+      stats.replaced.push(semanticElementName(afterElement));
+    }
+    pair.children.forEach((child) => compare(child, depth + 1));
+  };
+  compare(graph.root, 0);
   return Object.values(stats).some((entries) => entries.length > 0);
 }
 
@@ -2639,6 +2985,18 @@ function changedStylesheetSelectors(before: Document, after: Document) {
 }
 
 type ReviewStyleScope = "box" | "content";
+
+function reviewProjectionFactsForElement(element: Element): ReviewProjectionFact[] {
+  return parseReviewProjectionFacts(element.getAttribute(REVIEW_PROJECTION_FACTS_ATTRIBUTE));
+}
+
+function appendProjectionFactToElement(
+  element: Element,
+  fact: ReviewProjectionFact,
+) {
+  const facts = appendReviewProjectionFact(reviewProjectionFactsForElement(element), fact);
+  element.setAttribute(REVIEW_PROJECTION_FACTS_ATTRIBUTE, serializeReviewProjectionFacts(facts));
+}
 
 const BOX_OWNED_STYLE_PROPERTIES = new Set([
   "aspect-ratio",
@@ -2754,7 +3112,65 @@ function elementsMatchingSelector(root: Element, rawSelector: string): Element[]
   }
 }
 
-function markStyleDifferences(before: Element | null, after: Element | null): boolean {
+function semanticStylePairs(graph: ReviewSemanticPairGraph): Array<{
+  before: Element;
+  after: Element;
+  semanticOwnerId: string;
+  geometryOwnerId: string;
+}> {
+  const assignments = new Map<Element, {
+    after: Element;
+    semanticOwnerId: string;
+    geometryOwnerId: string;
+  }>();
+  flattenReviewSemanticPairs(graph.root).forEach((pair) => {
+    if (!pair.before || !pair.after) return;
+    const add = (before: Element, after: Element) => {
+      if (!assignments.has(before)) {
+        assignments.set(before, {
+          after,
+          semanticOwnerId: pair.semanticOwnerId,
+          geometryOwnerId: pair.geometryOwnerId,
+        });
+      }
+    };
+    add(pair.before.element, pair.after.element);
+    if (pair.before.inventory && pair.after.inventory) {
+      const inlineElements = (unit: ReviewSemanticUnit) => [...new Set(
+        unit.inventory?.nodes.flatMap(({ node }) => {
+          const elements: Element[] = [];
+          let candidate = node.parentElement;
+          while (candidate && candidate !== unit.element) {
+            elements.unshift(candidate);
+            candidate = candidate.parentElement;
+          }
+          return elements;
+        }) || [],
+      )];
+      pairSiblingElements(
+        inlineElements(pair.before),
+        inlineElements(pair.after),
+      ).forEach((afterElement, beforeElement) => add(beforeElement, afterElement));
+    } else if (pair.children.length === 0) {
+      pairVisualElements(pair.before.element, pair.after.element).forEach((visualPair) => {
+        add(visualPair.before, visualPair.after);
+      });
+    }
+  });
+  return [...assignments].map(([before, value]) => ({
+    before,
+    after: value.after,
+    semanticOwnerId: value.semanticOwnerId,
+    geometryOwnerId: value.geometryOwnerId,
+  }));
+}
+
+function markStyleDifferences(
+  graph: ReviewSemanticPairGraph,
+  layoutPairs: ReviewSemanticPairNode[],
+): boolean {
+  const before = graph.root.before?.element || null;
+  const after = graph.root.after?.element || null;
   if (!before || !after) return false;
   let marked = 0;
   let ownerSequence = before.ownerDocument.querySelectorAll(
@@ -2764,10 +3180,17 @@ function markStyleDifferences(before: Element | null, after: Element | null): bo
     beforeElement: Element,
     afterElement: Element,
     scope: ReviewStyleScope,
+    semanticOwnerId: string,
+    geometryOwnerId: string,
+    summary = "视觉调整",
+    factOwner?: string,
+    operation?: ReviewTextChangeOperation,
   ) => {
-    const owner = beforeElement.getAttribute("data-pageroot-review-style-owner")
+    const existingOwner = beforeElement.getAttribute("data-pageroot-review-style-owner")
       || afterElement.getAttribute("data-pageroot-review-style-owner")
+      || factOwner
       || `style-owner-${++ownerSequence}`;
+    const owner = factOwner || existingOwner;
     const existingScope = beforeElement.getAttribute("data-pageroot-review-style-scope")
       || afterElement.getAttribute("data-pageroot-review-style-scope");
     const resolvedScope: ReviewStyleScope = existingScope === "box" || scope === "box"
@@ -2775,18 +3198,48 @@ function markStyleDifferences(before: Element | null, after: Element | null): bo
       : "content";
     beforeElement.setAttribute("data-pageroot-review-style", "before");
     afterElement.setAttribute("data-pageroot-review-style", "after");
-    beforeElement.setAttribute("data-pageroot-review-style-owner", owner);
-    afterElement.setAttribute("data-pageroot-review-style-owner", owner);
+    // Legacy single-value attributes remain only as compatibility metadata for
+    // runtime candidate suppression. The serialized fact list below is the
+    // projection authority and can retain multiple independent facts.
+    beforeElement.setAttribute("data-pageroot-review-style-owner", existingOwner);
+    afterElement.setAttribute("data-pageroot-review-style-owner", existingOwner);
     beforeElement.setAttribute("data-pageroot-review-style-scope", resolvedScope);
     afterElement.setAttribute("data-pageroot-review-style-scope", resolvedScope);
+    beforeElement.setAttribute("data-pageroot-review-semantic-owner", semanticOwnerId);
+    afterElement.setAttribute("data-pageroot-review-semantic-owner", semanticOwnerId);
+    if (geometryOwnerId) {
+      beforeElement.setAttribute("data-pageroot-review-geometry-owner", geometryOwnerId);
+      afterElement.setAttribute("data-pageroot-review-geometry-owner", geometryOwnerId);
+    }
+    const existingSummary = beforeElement.getAttribute("data-pageroot-review-style-summary")
+      || afterElement.getAttribute("data-pageroot-review-style-summary");
+    if (!existingSummary || summary !== "换行调整") {
+      beforeElement.setAttribute("data-pageroot-review-style-summary", summary);
+      afterElement.setAttribute("data-pageroot-review-style-summary", summary);
+    }
+    [beforeElement, afterElement].forEach((element) => {
+      appendProjectionFactToElement(element, {
+        id: owner,
+        type: "style",
+        semanticOwnerId,
+        ...(geometryOwnerId ? { geometryOwnerId } : {}),
+        ownerKey: owner,
+        scope,
+        summary,
+        ...(operation ? { operation } : {}),
+      });
+    });
     marked += 1;
   };
-  for (const pair of pairVisualElements(before, after)) {
+  const boundedPairs = semanticStylePairs(graph);
+  for (const pair of boundedPairs) {
     if (selfPresentationSignature(pair.before) === selfPresentationSignature(pair.after)) continue;
     markPair(
       pair.before,
       pair.after,
       styleScopeForProperties(changedVisualProperties(pair.before, pair.after)),
+      pair.semanticOwnerId,
+      pair.geometryOwnerId,
     );
     if (marked >= 40) break;
   }
@@ -2794,27 +3247,77 @@ function markStyleDifferences(before: Element | null, after: Element | null): bo
   changedRules.forEach(({ selector, labels }) => {
     const scope = styleScopeForProperties(labels);
     selector.split(",").forEach((part) => {
-      const beforeMatches = elementsMatchingSelector(before, part).slice(0, 40);
-      const afterMatches = elementsMatchingSelector(after, part).slice(0, 40);
-      pairSiblingElements(beforeMatches, afterMatches).forEach((afterElement, beforeElement) => {
-        markPair(beforeElement, afterElement, scope);
-      });
+      const beforeMatches = new Set(elementsMatchingSelector(before, part));
+      const afterMatches = new Set(elementsMatchingSelector(after, part));
+      boundedPairs
+        .filter((pair) => beforeMatches.has(pair.before) && afterMatches.has(pair.after))
+        .slice(0, 40)
+        .forEach((pair) => {
+          markPair(pair.before, pair.after, scope, pair.semanticOwnerId, pair.geometryOwnerId);
+        });
     });
+  });
+  layoutPairs.forEach((pair) => {
+    if (!pair.before || !pair.after) return;
+    const layoutOwner = `layout-owner-${++ownerSequence}`;
+    pair.before.element.setAttribute("data-pageroot-review-layout", "before");
+    pair.after.element.setAttribute("data-pageroot-review-layout", "after");
+    pair.before.element.setAttribute("data-pageroot-review-operation", "layout");
+    pair.after.element.setAttribute("data-pageroot-review-operation", "layout");
+    markPair(
+      pair.before.element,
+      pair.after.element,
+      "content",
+      pair.semanticOwnerId,
+      pair.geometryOwnerId,
+      "换行调整",
+      layoutOwner,
+      "layout",
+    );
   });
   return marked > 0;
 }
 
-function annotateChangePair(
-  pair: SectionPair,
+function semanticLayoutPairs(graph: ReviewSemanticPairGraph): ReviewSemanticPairNode[] {
+  return flattenReviewSemanticPairs(graph.root).filter((pair) => {
+    const beforeInventory = pair.before?.inventory;
+    const afterInventory = pair.after?.inventory;
+    if (!beforeInventory || !afterInventory || beforeInventory.text !== afterInventory.text) return false;
+    const plan = readableReviewTextFootprintPlan(
+      beforeInventory.text,
+      afterInventory.text,
+      {
+        before: [],
+        after: [],
+        layout: !sameBreakLayout(beforeInventory, afterInventory),
+      },
+    );
+    return plan.operation === "layout";
+  });
+}
+
+function changeTypesForSemanticGraph(
+  graph: ReviewSemanticPairGraph,
 ): ReviewChangeType[] {
-  const structureChanged = markStructureDifferences(pair);
-  const styleChanged = markStyleDifferences(pair.before, pair.after);
-  const textChanged = markTextDifferences(pair.before, pair.after);
+  // Style inspection still runs against the unwrapped source DOM. The same
+  // layout planner identifies visual-only pairs first; text marking consumes
+  // it again below to avoid fabricating red/green evidence.
+  const layoutPairs = semanticLayoutPairs(graph);
+  const structureChanged = markStructureDifferences(graph);
+  const styleChanged = markStyleDifferences(graph, layoutPairs);
+  const textMarking = markSemanticTextDifferences(graph);
   return [
-    ...(textChanged ? ["text" as const] : []),
+    ...(textMarking.changed ? ["text" as const] : []),
     ...(structureChanged ? ["structure" as const] : []),
     ...(styleChanged ? ["style" as const] : []),
   ];
+}
+
+function* annotateChangePairSteps(
+  pair: SectionPair,
+): Generator<"semantic-row", ReviewChangeType[], void> {
+  const graph = yield* buildReviewSemanticPairGraphSteps(pair);
+  return changeTypesForSemanticGraph(graph);
 }
 
 function attachChangeMarkerMetadata(
@@ -2822,53 +3325,104 @@ function attachChangeMarkerMetadata(
   changeId: string,
   helper: string,
 ) {
-  const pairTextKinds = new Set(
-    [pair.before, pair.after].flatMap((root) => (
-      root
-        ? [root, ...root.querySelectorAll("[data-pageroot-review-text-change]")]
-          .map((element) => element.getAttribute("data-pageroot-review-text-change"))
-          .filter(Boolean)
-        : []
-    )),
-  );
-  const pairedTextReplacement = pairTextKinds.has("added")
-    && pairTextKinds.has("removed");
   [pair.before, pair.after].forEach((root) => {
     if (!root) return;
+    [root, ...root.querySelectorAll("[data-pageroot-review-text-anchors]")]
+      .filter((element) => element.hasAttribute("data-pageroot-review-text-anchors"))
+      .forEach((element) => {
+        element.setAttribute("data-pageroot-review-anchor-change", changeId);
+      });
     const markerElements = [root, ...root.querySelectorAll("*")].filter((element) => (
       element.hasAttribute("data-pageroot-review-text")
-      || element.hasAttribute("data-pageroot-review-text-context")
       || element.hasAttribute("data-pageroot-review-structure")
       || element.hasAttribute("data-pageroot-review-style")
+      || element.hasAttribute(REVIEW_PROJECTION_FACTS_ATTRIBUTE)
     ));
     markerElements.forEach((element, index) => {
-      const markerTypes: ReviewChangeType[] = [];
-      const textMarker = element.hasAttribute("data-pageroot-review-text")
-        || element.hasAttribute("data-pageroot-review-text-context");
-      if (textMarker) markerTypes.push("text");
-      if (element.hasAttribute("data-pageroot-review-structure")) markerTypes.push("structure");
-      if (element.hasAttribute("data-pageroot-review-style")) markerTypes.push("style");
-      const textChange = element.getAttribute("data-pageroot-review-text-change");
-      const structuralAddition = Boolean(
-        element.closest('[data-pageroot-review-structure="added"]'),
-      );
-      const structuralRemoval = Boolean(
-        element.closest('[data-pageroot-review-structure="removed"]'),
-      );
+      let facts = reviewProjectionFactsForElement(element);
+      const textMarker = element.hasAttribute("data-pageroot-review-text");
+      const textOperation = element.getAttribute("data-pageroot-review-text-operation");
+      const normalizedTextOperation = textOperation === "none"
+        || textOperation === "insert"
+        || textOperation === "delete"
+        || textOperation === "replace"
+        || textOperation === "layout"
+        ? textOperation
+        : null;
+      const rawTextScope = element.getAttribute("data-pageroot-review-text-scope");
+      const textScope: ReviewTextChangeScope = rawTextScope === "sentence"
+        ? "sentence"
+        : rawTextScope === "block"
+          ? "block"
+          : "inline";
       const readableTextSummary = element.getAttribute(
         "data-pageroot-review-text-summary",
       );
-      const summary = textMarker
+      const textSummary = textMarker
         ? readableTextSummary
-          || (textChange === "added" && (!pairedTextReplacement || structuralAddition)
+          || (textOperation === "insert"
             ? "新增内容"
-            : textChange === "removed" && (!pairedTextReplacement || structuralRemoval)
+            : textOperation === "delete"
               ? "删除内容"
               : "文本调整")
-        : helper;
+        : "";
+      if (textMarker) {
+        const semanticOwnerId = element.getAttribute("data-pageroot-review-semantic-owner")
+          || `fallback-owner-${changeId}-text-${index + 1}`;
+        const geometryOwnerId = element.getAttribute("data-pageroot-review-geometry-owner") || "";
+        const textGroup = element.getAttribute("data-pageroot-review-text-group")
+          || `text-marker-${index + 1}`;
+        facts = appendReviewProjectionFact(facts, {
+          id: textGroup,
+          type: "text",
+          semanticOwnerId,
+          ...(geometryOwnerId ? { geometryOwnerId } : {}),
+          scope: "text",
+          tone: element.getAttribute("data-pageroot-review-text") === "removed"
+            ? "removed"
+            : "added",
+          textGroup,
+          textScope,
+          textDensity: Number(element.getAttribute("data-pageroot-review-text-density") || 0),
+          ...(normalizedTextOperation ? { operation: normalizedTextOperation } : {}),
+          summary: textSummary,
+        });
+      }
+      if (element.hasAttribute("data-pageroot-review-structure")) {
+        const semanticOwnerId = element.getAttribute("data-pageroot-review-semantic-owner")
+          || `fallback-owner-${changeId}-structure-${index + 1}`;
+        const geometryOwnerId = element.getAttribute("data-pageroot-review-geometry-owner") || "";
+        const structureChange = element.getAttribute("data-pageroot-review-structure") || "changed";
+        facts = appendReviewProjectionFact(facts, {
+          id: `structure-${semanticOwnerId}-${structureChange}`,
+          type: "structure",
+          semanticOwnerId,
+          ...(geometryOwnerId ? { geometryOwnerId } : {}),
+          scope: "element",
+          structureChange,
+          summary: structureChange === "from" || structureChange === "to"
+            ? "位置调整"
+            : "结构调整",
+        });
+      }
+      const markerTypes = [...new Set(facts.map((fact) => fact.type))] as ReviewChangeType[];
+      const textFact = facts.find((fact) => fact.type === "text");
+      const visualFact = facts.find((fact) => (
+        fact.type === "style" && fact.operation !== "layout"
+      ));
+      const layoutFact = facts.find((fact) => (
+        fact.type === "style" && fact.operation === "layout"
+      ));
+      const structureFact = facts.find((fact) => fact.type === "structure");
+      const summary = textFact?.summary
+        || visualFact?.summary
+        || layoutFact?.summary
+        || structureFact?.summary
+        || helper;
       element.setAttribute("data-pageroot-review-marker", changeId);
       element.setAttribute("data-pageroot-review-marker-types", markerTypes.join(" "));
       element.setAttribute("data-pageroot-review-summary", summary);
+      element.setAttribute(REVIEW_PROJECTION_FACTS_ATTRIBUTE, serializeReviewProjectionFacts(facts));
       element.setAttribute("data-pageroot-review-active", "false");
       if (index === 0) element.setAttribute("data-pageroot-review-primary", "true");
     });
@@ -4293,6 +4847,7 @@ function reviewBootstrap(
       runtimeVisualElementRemoveAttribute(element, "data-pageroot-review-summary");
       runtimeVisualElementRemoveAttribute(element, "data-pageroot-review-style-scope");
       runtimeVisualElementRemoveAttribute(element, "data-pageroot-review-style-owner");
+      runtimeVisualElementRemoveAttribute(element, "data-pageroot-review-projection-facts");
     });
     const hosts = runtimeVisualExpectedHosts();
     const hostsByKey = new RuntimeVisualMap();
@@ -4700,13 +5255,143 @@ function reviewBootstrap(
       }
     });
   };
+  const recordFocusScrollCommand = (commandId, top = scrollY, left = scrollX) => {
+    const maximumScroll = Math.max(0, documentHeight() - innerHeight);
+    const resolvedTop = clamp(Number(top || 0), 0, maximumScroll);
+    const resolvedLeft = Math.max(0, Number(left || 0));
+    activeScrollCommand = { commandId, top: resolvedTop, left: resolvedLeft };
+    return activeScrollCommand;
+  };
+  const scrollToReviewRect = (rect) => {
+    if (!rect || rect.height <= 0 || !Number.isFinite(rect.top)) return false;
+    const token = "focus-" + Date.now() + "-" + Math.random();
+    const top = clamp(
+      scrollY + rect.top - Math.max(18, innerHeight * .12),
+      0,
+      Math.max(0, documentHeight() - innerHeight),
+    );
+    const command = recordFocusScrollCommand(token, top, scrollX);
+    scrollTo({ top: command.top, left: command.left, behavior: "auto" });
+    return true;
+  };
+  const scrollIntoReviewTarget = (target) => {
+    const token = "focus-" + Date.now() + "-" + Math.random();
+    target.scrollIntoView({ block: "start", behavior: "auto" });
+    recordFocusScrollCommand(token);
+  };
+  const anchorTextNodes = (anchor) => {
+    const ownerId = anchor.getAttribute("data-pageroot-review-geometry-owner") || "";
+    const nodes = [];
+    const walker = document.createTreeWalker(anchor, NodeFilter.SHOW_TEXT);
+    let node = walker.nextNode();
+    while (node) {
+      const parent = node.parentElement;
+      let nestedOwner = parent;
+      let crossesOwner = false;
+      while (nestedOwner && nestedOwner !== anchor) {
+        const candidateOwner = nestedOwner.getAttribute("data-pageroot-review-geometry-owner") || "";
+        if (
+          candidateOwner
+          && candidateOwner !== ownerId
+          && !nestedOwner.hasAttribute("data-pageroot-review-text")
+        ) {
+          crossesOwner = true;
+          break;
+        }
+        nestedOwner = nestedOwner.parentElement;
+      }
+      if (
+        parent
+        && !crossesOwner
+        && parent.namespaceURI === "http://www.w3.org/1999/xhtml"
+        && !parent.closest("script, style, noscript, template, [data-pageroot-review-projection-layer]")
+      ) nodes.push(node);
+      node = walker.nextNode();
+    }
+    return nodes;
+  };
+  const collapsedAnchorRect = (anchor, changeId) => {
+    if (anchor.getAttribute("data-pageroot-review-anchor-change") !== changeId) return null;
+    const encoded = String(
+      anchor.getAttribute("data-pageroot-review-text-anchors") || "",
+    ).split(/\s+/).find(Boolean) || "";
+    const offset = Math.max(0, Math.trunc(Number(encoded.slice(encoded.lastIndexOf("@") + 1)) || 0));
+    const nodes = anchorTextNodes(anchor);
+    if (!nodes.length) return null;
+    let remaining = offset;
+    let targetNode = nodes.at(-1);
+    let targetOffset = targetNode?.textContent?.length || 0;
+    for (const node of nodes) {
+      const length = node.textContent?.length || 0;
+      if (remaining <= length) {
+        targetNode = node;
+        targetOffset = remaining;
+        break;
+      }
+      remaining -= length;
+    }
+    if (!targetNode) return null;
+    const range = document.createRange();
+    const targetLength = targetNode.textContent?.length || 0;
+    targetOffset = Math.min(targetOffset, targetLength);
+    range.setStart(targetNode, targetOffset);
+    range.collapse(true);
+    let rect = range.getBoundingClientRect();
+    // A collapsed Range immediately after an authored <br> is often reported
+    // on the preceding visual line. Its offset remains the navigation anchor,
+    // while the next visible glyph supplies the measurable context rectangle.
+    let probeNode = targetNode;
+    let probeOffset = targetOffset;
+    let probeIndex = nodes.indexOf(targetNode);
+    while (probeNode && probeOffset >= (probeNode.textContent?.length || 0)) {
+      probeIndex += 1;
+      probeNode = nodes[probeIndex] || null;
+      probeOffset = 0;
+    }
+    if (probeNode && (probeNode.textContent?.length || 0) > probeOffset) {
+      const probe = document.createRange();
+      probe.setStart(probeNode, probeOffset);
+      probe.setEnd(probeNode, probeOffset + 1);
+      const probeRect = probe.getBoundingClientRect();
+      probe.detach();
+      if (probeRect.height > 0) rect = probeRect;
+    }
+    if (rect.height <= 0) {
+      const length = targetNode.textContent?.length || 0;
+      const start = Math.max(0, Math.min(targetOffset > 0 ? targetOffset - 1 : 0, length));
+      const end = Math.min(length, Math.max(start + 1, targetOffset));
+      if (end > start) {
+        range.setStart(targetNode, start);
+        range.setEnd(targetNode, end);
+        rect = range.getBoundingClientRect();
+      }
+    }
+    range.detach();
+    return rect.height > 0 ? rect : null;
+  };
   const focusTarget = (target, panelPath) => {
     revealTarget(target, panelPath);
     if (!target) return;
     requestAnimationFrame(() => {
-      const token = "focus-" + Date.now() + "-" + Math.random();
-      target.scrollIntoView({ block: "start", behavior: "auto" });
-      activeScrollCommand = { commandId: token, top: scrollY, left: scrollX };
+      if (!scrollToReviewRect(target.getBoundingClientRect())) {
+        scrollIntoReviewTarget(target);
+      }
+    });
+  };
+  const focusChangeTarget = (changeId, target, panelPath) => {
+    revealTarget(target, panelPath);
+    requestAnimationFrame(() => {
+      const visibleBox = document.querySelector(
+        '[data-pageroot-review-overlay-box="' + changeId + '"]',
+      );
+      if (visibleBox && scrollToReviewRect(visibleBox.getBoundingClientRect())) return;
+      const anchors = [...document.querySelectorAll(
+        '[data-pageroot-review-anchor-change="' + changeId + '"]',
+      )];
+      if (anchors.some((anchor) => scrollToReviewRect(collapsedAnchorRect(anchor, changeId)))) return;
+      if (target && !scrollToReviewRect(target.getBoundingClientRect())) {
+        scrollIntoReviewTarget(target);
+      }
     });
   };
   const applyScrollOwner = (message) => {
@@ -4732,6 +5417,132 @@ function reviewBootstrap(
   const markerTypes = (element) => String(
     element.getAttribute("data-pageroot-review-marker-types") || "",
   ).split(/\s+/).filter(Boolean);
+  const safeProjectionFactKey = (value) => {
+    const key = String(value || "").trim();
+    return /^[a-z0-9:_-]{1,160}$/iu.test(key) ? key : "";
+  };
+  const safeProjectionSummary = (value) => {
+    const summary = String(value || "").trim();
+    return summary && summary.length <= 80 ? summary : "";
+  };
+  const normalizeProjectionFact = (value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    const id = safeProjectionFactKey(value.id);
+    const type = value.type === "text" || value.type === "structure" || value.type === "style"
+      ? value.type
+      : "";
+    const semanticOwnerId = safeProjectionFactKey(value.semanticOwnerId);
+    if (!id || !type || !semanticOwnerId) return null;
+    const fact = { id, type, semanticOwnerId };
+    const geometryOwnerId = safeProjectionFactKey(value.geometryOwnerId);
+    const ownerKey = safeProjectionFactKey(value.ownerKey);
+    const textGroup = safeProjectionFactKey(value.textGroup);
+    const structureChange = safeProjectionFactKey(value.structureChange);
+    const scope = ["text", "text-phrase", "text-line", "text-block", "element", "box", "content"]
+      .includes(value.scope)
+      ? value.scope
+      : "";
+    const textScope = ["inline", "sentence", "block"]
+      .includes(value.textScope)
+      ? value.textScope
+      : "";
+    const operation = ["none", "insert", "delete", "replace", "layout"].includes(value.operation)
+      ? value.operation
+      : "";
+    const tone = value.tone === "added" || value.tone === "removed" ? value.tone : "";
+    const summary = safeProjectionSummary(value.summary);
+    const textDensity = Number(value.textDensity);
+    if (geometryOwnerId) fact.geometryOwnerId = geometryOwnerId;
+    if (ownerKey) fact.ownerKey = ownerKey;
+    if (textGroup) fact.textGroup = textGroup;
+    if (structureChange) fact.structureChange = structureChange;
+    if (scope) fact.scope = scope;
+    if (textScope) fact.textScope = textScope;
+    if (operation) fact.operation = operation;
+    if (tone) fact.tone = tone;
+    if (summary) fact.summary = summary;
+    if (Number.isFinite(textDensity) && textDensity >= 0 && textDensity <= 1) {
+      fact.textDensity = textDensity;
+    }
+    return fact;
+  };
+  const projectionFactIdentity = (fact) => [
+    fact.type,
+    fact.id,
+    fact.semanticOwnerId,
+    fact.geometryOwnerId || "",
+  ].join("\u001f");
+  const projectionFactsForElement = (element, fallbackSequence) => {
+    const serialized = element.getAttribute("data-pageroot-review-projection-facts");
+    if (serialized) {
+      try {
+        const parsed = JSON.parse(serialized);
+        if (!Array.isArray(parsed) || parsed.length > 24) return [];
+        const seen = new Set();
+        const facts = [];
+        for (const value of parsed) {
+          const fact = normalizeProjectionFact(value);
+          if (!fact) return [];
+          const key = projectionFactIdentity(fact);
+          if (seen.has(key)) continue;
+          seen.add(key);
+          facts.push(fact);
+        }
+        return facts;
+      } catch {
+        return [];
+      }
+    }
+    const changeId = element.getAttribute("data-pageroot-review-marker") || "";
+    const semanticOwnerId = element.getAttribute("data-pageroot-review-semantic-owner")
+      || ("fallback-owner-" + changeId + "-" + fallbackSequence);
+    const geometryOwnerId = element.getAttribute("data-pageroot-review-geometry-owner") || "";
+    const facts = [];
+    if (element.hasAttribute("data-pageroot-review-text")) {
+      const textGroup = element.getAttribute("data-pageroot-review-text-group")
+        || ("text-marker-" + fallbackSequence);
+      facts.push({
+        id: textGroup,
+        type: "text",
+        semanticOwnerId,
+        ...(geometryOwnerId ? { geometryOwnerId } : {}),
+        scope: "text",
+        tone: element.getAttribute("data-pageroot-review-text") === "removed" ? "removed" : "added",
+        textGroup,
+        textScope: element.getAttribute("data-pageroot-review-text-scope") || "inline",
+        textDensity: Number(element.getAttribute("data-pageroot-review-text-density") || 0),
+        operation: element.getAttribute("data-pageroot-review-text-operation") || "",
+        summary: element.getAttribute("data-pageroot-review-summary") || "",
+      });
+    }
+    if (markerTypes(element).includes("structure")) {
+      const structureChange = element.getAttribute("data-pageroot-review-structure") || "changed";
+      facts.push({
+        id: "structure-" + semanticOwnerId + "-" + structureChange,
+        type: "structure",
+        semanticOwnerId,
+        ...(geometryOwnerId ? { geometryOwnerId } : {}),
+        scope: "element",
+        structureChange,
+        summary: element.getAttribute("data-pageroot-review-summary") || "结构调整",
+      });
+    }
+    if (markerTypes(element).includes("style")) {
+      const ownerKey = element.getAttribute("data-pageroot-review-style-owner")
+        || ("style-owner-" + fallbackSequence);
+      facts.push({
+        id: ownerKey,
+        type: "style",
+        semanticOwnerId,
+        ...(geometryOwnerId ? { geometryOwnerId } : {}),
+        ownerKey,
+        scope: element.getAttribute("data-pageroot-review-style-scope") || "content",
+        operation: element.getAttribute("data-pageroot-review-operation") || "",
+        summary: element.getAttribute("data-pageroot-review-summary") || "视觉调整",
+      });
+    }
+    return facts.map(normalizeProjectionFact).filter(Boolean);
+  };
   const recordContains = (outer, inner, tolerance = 2) => (
     inner.left >= outer.left - tolerance
     && inner.top >= outer.top - tolerance
@@ -4835,6 +5646,7 @@ function reviewBootstrap(
   };
   const allModeSummary = (types, summary) => {
     if (summary === "新增内容" || summary === "删除内容") return summary;
+    if (types.length === 1 && summary) return summary;
     if (types.length > 2) return "综合调整";
     if (types.includes("text") && types.includes("style")) return "文本、视觉调整";
     if (types.includes("text") && types.includes("structure")) return "文本、结构调整";
@@ -4907,8 +5719,30 @@ function reviewBootstrap(
     const rightArea = Math.max(1, (right.right - right.left) * (right.bottom - right.top));
     return intersection / Math.min(leftArea, rightArea) >= .62;
   };
-  const contentStyleRects = (element) => {
+  const rangeClientRects = (element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    const rects = [...range.getClientRects()]
+      .filter((rect) => rect.width > 1 && rect.height > 1);
+    range.detach();
+    return rects;
+  };
+  const crossesGeometryOwner = (node, owner, ownerId) => {
+    let candidate = node.parentElement;
+    while (candidate && candidate !== owner) {
+      const candidateId = candidate.getAttribute("data-pageroot-review-geometry-owner") || "";
+      if (
+        candidateId
+        && candidateId !== ownerId
+        && !candidate.hasAttribute("data-pageroot-review-text")
+      ) return true;
+      candidate = candidate.parentElement;
+    }
+    return false;
+  };
+  const contentStyleRects = (element, respectGeometryOwners = false) => {
     const rects = [];
+    const ownerId = element.getAttribute("data-pageroot-review-geometry-owner") || "";
     const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
     let node = walker.nextNode();
     while (node) {
@@ -4916,6 +5750,7 @@ function reviewBootstrap(
       if (
         (node.textContent || "").trim()
         && parent
+        && (!respectGeometryOwners || !crossesGeometryOwner(node, element, ownerId))
         && !parent.closest("script, style, noscript, template")
       ) {
         const range = document.createRange();
@@ -4929,13 +5764,14 @@ function reviewBootstrap(
     }
     return rects.length ? rects : [element.getBoundingClientRect()];
   };
-  const textFootprintOwner = (element, groupId) => {
+  const textFootprintOwner = (element, geometryOwnerId) => {
     let candidate = element.parentElement;
     while (candidate) {
-      const groupIds = String(
-        candidate.getAttribute("data-pageroot-review-text-block-groups") || "",
-      ).split(/\s+/).filter(Boolean);
-      if (groupIds.includes(groupId)) return candidate;
+      if (
+        geometryOwnerId
+        && candidate.getAttribute("data-pageroot-review-geometry-owner") === geometryOwnerId
+        && !candidate.hasAttribute("data-pageroot-review-text")
+      ) return candidate;
       candidate = candidate.parentElement;
     }
     return null;
@@ -4958,7 +5794,15 @@ function reviewBootstrap(
       else lines.push([record]);
       return lines;
     }, []);
-  const mergeTextLineIntervals = (records) => [...records]
+  const protectedTextBetween = (left, right, protectedRecords) => (
+    protectedRecords.some((candidate) => (
+      recordsShareTextLine(candidate, left)
+      && recordsShareTextLine(candidate, right)
+      && candidate.left < right.left - .25
+      && candidate.right > left.right + .25
+    ))
+  );
+  const mergeTextLineIntervals = (records, protectedRecords = []) => [...records]
     .sort((left, right) => left.left - right.left)
     .reduce((intervals, record) => {
       const previous = intervals.at(-1);
@@ -4971,7 +5815,10 @@ function reviewBootstrap(
         Math.min(previous.bottom - previous.top, record.bottom - record.top),
       );
       const gap = Math.max(0, record.left - previous.right);
-      if (gap <= Math.max(10, minimumHeight * .9)) {
+      if (
+        gap <= Math.max(10, minimumHeight * .9)
+        && !protectedTextBetween(previous, record, protectedRecords)
+      ) {
         previous.left = Math.min(previous.left, record.left);
         previous.top = Math.min(previous.top, record.top);
         previous.right = Math.max(previous.right, record.right);
@@ -4981,32 +5828,50 @@ function reviewBootstrap(
       }
       return intervals;
     }, []);
-  const expandTinyTextInterval = (record, ownerLines) => {
+  const expandTinyTextInterval = (record, ownerLines, protectedRecords = []) => {
     const height = Math.max(1, record.bottom - record.top);
     const minimumWidth = Math.max(24, height * 1.6);
     if (record.right - record.left >= minimumWidth) return record;
     const ownerLine = ownerLines.find((line) => line.some((candidate) => (
       recordsShareTextLine(candidate, record)
     )));
-    const ownerBounds = ownerLine ? boundsForRects(ownerLine) : null;
-    if (ownerBounds && ownerBounds.right - ownerBounds.left <= minimumWidth) {
-      return { ...record, left: ownerBounds.left, right: ownerBounds.right };
+    const ownerBounds = ownerLine
+      ? mergeTextLineIntervals(ownerLine).find((interval) => (
+        Math.min(interval.right, record.right) - Math.max(interval.left, record.left) > 0
+      )) || null
+      : null;
+    if (!ownerBounds) return record;
+    const leftBoundary = protectedRecords.reduce((boundary, candidate) => (
+      recordsShareTextLine(candidate, record)
+      && candidate.right <= record.left + .25
+      ? Math.max(boundary, candidate.right)
+      : boundary
+    ), ownerBounds.left);
+    const rightBoundary = protectedRecords.reduce((boundary, candidate) => (
+      recordsShareTextLine(candidate, record)
+      && candidate.left >= record.right - .25
+      ? Math.min(boundary, candidate.left)
+      : boundary
+    ), ownerBounds.right);
+    if (rightBoundary <= leftBoundary) return record;
+    if (rightBoundary - leftBoundary <= minimumWidth) {
+      return { ...record, left: leftBoundary, right: rightBoundary };
     }
     const center = (record.left + record.right) / 2;
     let left = center - minimumWidth / 2;
     let right = center + minimumWidth / 2;
-    if (ownerBounds && left < ownerBounds.left) {
-      right += ownerBounds.left - left;
-      left = ownerBounds.left;
+    if (left < leftBoundary) {
+      right += leftBoundary - left;
+      left = leftBoundary;
     }
-    if (ownerBounds && right > ownerBounds.right) {
-      left -= right - ownerBounds.right;
-      right = ownerBounds.right;
+    if (right > rightBoundary) {
+      left -= right - rightBoundary;
+      right = rightBoundary;
     }
     return {
       ...record,
-      left: ownerBounds ? Math.max(ownerBounds.left, left) : left,
-      right: ownerBounds ? Math.min(ownerBounds.right, right) : right,
+      left: Math.max(leftBoundary, left),
+      right: Math.min(rightBoundary, right),
     };
   };
   const boundsForRects = (rects) => rects.length ? {
@@ -5015,10 +5880,107 @@ function reviewBootstrap(
     right: Math.max(...rects.map((rect) => rect.right)),
     bottom: Math.max(...rects.map((rect) => rect.bottom)),
   } : null;
+  const ownerContentRecords = (owner) => contentStyleRects(owner, true)
+    .filter((rect) => rect.width > 1 && rect.height > 1)
+    .map((rect) => ({
+      left: rect.left + scrollX,
+      top: rect.top + scrollY,
+      right: rect.right + scrollX,
+      bottom: rect.bottom + scrollY,
+    }));
+  const ownerStableTextRecords = (owner) => {
+    const ranges = String(
+      owner.getAttribute("data-pageroot-review-stable-text-ranges") || "",
+    ).split(/\s+/).map((value) => {
+      const match = /^(\d+):(\d+)$/u.exec(value);
+      return match ? { start: Number(match[1]), end: Number(match[2]) } : null;
+    }).filter((range) => range && range.end > range.start);
+    if (!ranges.length) return [];
+    const nodes = anchorTextNodes(owner);
+    if (!nodes.length) return [];
+    const boundaryAt = (offset) => {
+      let remaining = Math.max(0, Math.trunc(offset));
+      for (const node of nodes) {
+        const length = node.textContent?.length || 0;
+        if (remaining <= length) return { node, offset: remaining };
+        remaining -= length;
+      }
+      const node = nodes.at(-1);
+      return node ? { node, offset: node.textContent?.length || 0 } : null;
+    };
+    const records = [];
+    ranges.forEach((sourceRange) => {
+      const start = boundaryAt(sourceRange.start);
+      const end = boundaryAt(sourceRange.end);
+      if (!start || !end) return;
+      const range = document.createRange();
+      range.setStart(start.node, start.offset);
+      range.setEnd(end.node, end.offset);
+      [...range.getClientRects()]
+        .filter((rect) => rect.width > 1 && rect.height > 1)
+        .forEach((rect) => records.push({
+          left: rect.left + scrollX,
+          top: rect.top + scrollY,
+          right: rect.right + scrollX,
+          bottom: rect.bottom + scrollY,
+        }));
+      range.detach();
+    });
+    return records;
+  };
+  const textOwnerAllowsBlock = (owner) => {
+    if (!owner || !owner.matches(
+      "p, h1, h2, h3, h4, h5, h6, li, td, th, caption, div",
+    )) return false;
+    const style = getComputedStyle(owner);
+    if (
+      /^(?:inline-)?(?:grid|flex)$/u.test(style.display)
+      || (style.columnCount !== "auto" && Number(style.columnCount) > 1)
+    ) return false;
+    if (owner.matches("div") && owner.querySelector(
+      ":scope > address, :scope > article, :scope > aside, :scope > blockquote, :scope > div, :scope > dl, :scope > figure, :scope > form, :scope > h1, :scope > h2, :scope > h3, :scope > h4, :scope > h5, :scope > h6, :scope > ol, :scope > p, :scope > section, :scope > table, :scope > ul",
+    )) return false;
+    return true;
+  };
+  const readableBlockBounds = (owner) => {
+    if (!textOwnerAllowsBlock(owner)) return null;
+    const records = ownerContentRecords(owner);
+    const lines = textLineGroups(records)
+      .map((line) => mergeTextLineIntervals(line))
+      .filter((line) => line.length > 0);
+    if (!lines.length) return null;
+    const separatedColumns = lines.some((line) => line.some((interval, index) => {
+      const next = line[index + 1];
+      if (!next) return false;
+      const height = Math.max(1, Math.min(
+        interval.bottom - interval.top,
+        next.bottom - next.top,
+      ));
+      return next.left - interval.right > Math.max(24, height * 2);
+    }));
+    if (separatedColumns) return null;
+    const lineBounds = lines.map((line) => boundsForRects(line)).filter(Boolean);
+    const separatedRows = lineBounds.some((line, index) => {
+      const next = lineBounds[index + 1];
+      if (!next) return false;
+      const height = Math.max(1, Math.min(
+        line.bottom - line.top,
+        next.bottom - next.top,
+      ));
+      return next.top - line.bottom > Math.max(18, height * 1.5);
+    });
+    return separatedRows ? null : boundsForRects(lineBounds);
+  };
   const readableTextRecords = (records) => {
     const groups = new Map();
     records.forEach((record) => {
-      const key = record.changeId + "|" + record.tone + "|" + record.textGroup;
+      const key = [
+        record.changeId,
+        record.semanticOwnerId,
+        record.geometryOwnerId,
+        record.factIdentity,
+        record.textGroup,
+      ].join("|");
       const group = groups.get(key) || [];
       group.push(record);
       groups.set(key, group);
@@ -5026,25 +5988,22 @@ function reviewBootstrap(
     return [...groups.values()].flatMap((group) => {
       const base = group[0];
       const lines = textLineGroups(group);
-      const density = Math.max(...group.map((record) => Number(record.textDensity || 0)));
-      const owner = textFootprintOwner(base.element, base.textGroup);
-      const useBlock = base.textScope === "block"
-        || (lines.length > 3 && density >= .35);
+      const owner = textFootprintOwner(base.element, base.geometryOwnerId);
+      // The fact planner is the sole authority that may promote a replacement
+      // to a block.  A render-time density heuristic cannot recover that
+      // authority: it has lost the stable-sentence boundaries and would turn
+      // a wrapped middle sentence into a frame around its unchanged neighbors.
+      const useBlock = base.textOperation === "replace"
+        && base.textScope === "block";
       if (useBlock && owner) {
-        const ownerBounds = boundsForRects(contentStyleRects(owner)
-          .filter((rect) => rect.width > 1 && rect.height > 1)
-          .map((rect) => ({
-            left: rect.left + scrollX,
-            top: rect.top + scrollY,
-            right: rect.right + scrollX,
-            bottom: rect.bottom + scrollY,
-          })));
+        const ownerBounds = readableBlockBounds(owner);
         if (ownerBounds) {
           return [{
             ...base,
             ...ownerBounds,
             element: owner,
             scope: "text-block",
+            visualLine: "block",
             summary: base.summary === "文本调整" && base.textScope !== "block"
               ? "段落改写"
               : base.summary,
@@ -5053,20 +6012,15 @@ function reviewBootstrap(
         }
       }
       const multiLine = lines.length > 1;
-      const ownerLines = owner ? textLineGroups(contentStyleRects(owner)
-        .filter((rect) => rect.width > 1 && rect.height > 1)
-        .map((rect) => ({
-          left: rect.left + scrollX,
-          top: rect.top + scrollY,
-          right: rect.right + scrollX,
-          bottom: rect.bottom + scrollY,
-        }))) : [];
-      return lines.flatMap((line) => mergeTextLineIntervals(line))
-        .map((record) => expandTinyTextInterval(record, ownerLines))
+      const ownerLines = owner ? textLineGroups(ownerContentRecords(owner)) : [];
+      const protectedRecords = owner ? ownerStableTextRecords(owner) : [];
+      return lines.flatMap((line) => mergeTextLineIntervals(line, protectedRecords))
+        .map((record) => expandTinyTextInterval(record, ownerLines, protectedRecords))
         .sort((left, right) => left.top - right.top || left.left - right.left)
         .map((record, index) => ({
           ...record,
           scope: multiLine ? "text-line" : "text-phrase",
+          visualLine: String(index + 1),
           summary: multiLine && record.summary === "文本调整"
             ? "句子改写"
             : record.summary,
@@ -5079,72 +6033,75 @@ function reviewBootstrap(
     document.querySelector('[data-pageroot-review-projection-layer]')?.remove();
     const filter = currentState.filter || "all";
     const records = [];
-    if (filter === "all" || filter === "text") {
-      let textMarkerSequence = 0;
-      document.querySelectorAll('[data-pageroot-review-marker-types~="text"]').forEach((element) => {
-        textMarkerSequence += 1;
-        const textToneValue = element.getAttribute("data-pageroot-review-text")
-          || element.getAttribute("data-pageroot-review-text-context");
-        const textTone = textToneValue === "removed" ? "text-removed" : "text-added";
-        [...element.getClientRects()]
-          .filter((rect) => rect.width > 1 && rect.height > 1)
-          .forEach((rect) => records.push({
-            element,
-            changeId: element.getAttribute("data-pageroot-review-marker") || "",
-            ownerKey: "",
-            textGroup: element.getAttribute("data-pageroot-review-text-group")
-              || ("text-marker-" + textMarkerSequence),
-            textScope: element.getAttribute("data-pageroot-review-text-scope") || "inline",
-            textDensity: Number(
-              element.getAttribute("data-pageroot-review-text-density") || 0,
-            ),
-            scope: "text",
-            summary: element.getAttribute("data-pageroot-review-summary") || "",
-            tone: textTone,
-            tones: [textTone],
-            types: ["text"],
-            left: rect.left + scrollX,
-            top: rect.top + scrollY,
-            right: rect.right + scrollX,
-            bottom: rect.bottom + scrollY,
-          }));
-      });
-    }
-    const selector = filter === "all"
-      ? '[data-pageroot-review-marker-types~="structure"], [data-pageroot-review-marker-types~="style"]'
-      : filter === "text"
-        ? ""
-        : '[data-pageroot-review-marker-types~="' + filter + '"]';
-    if (selector) [...document.querySelectorAll(selector)]
-      .forEach((element) => {
-        const types = markerTypes(element).filter((type) => filter === "all" || type === filter);
-        types.forEach((type) => {
-          const scope = type === "style"
-            ? element.getAttribute("data-pageroot-review-style-scope") || "content"
-            : "element";
-          const rects = type === "style" && scope === "content"
+    let markerSequence = 0;
+    document.querySelectorAll('[data-pageroot-review-marker]').forEach((element) => {
+      markerSequence += 1;
+      const changeId = element.getAttribute("data-pageroot-review-marker") || "";
+      projectionFactsForElement(element, markerSequence)
+        .filter((fact) => filter === "all" || fact.type === filter)
+        .forEach((fact) => {
+          const semanticOwnerId = fact.semanticOwnerId;
+          const geometryOwnerId = fact.geometryOwnerId || "";
+          const factKey = fact.type + ":" + fact.id;
+          const factIdentity = projectionFactIdentity(fact);
+          if (fact.type === "text") {
+            const textTone = fact.tone === "removed" ? "text-removed" : "text-added";
+            const textGroup = fact.textGroup || fact.id;
+            rangeClientRects(element).forEach((rect) => records.push({
+              element,
+              changeId,
+              semanticOwnerId,
+              geometryOwnerId,
+              factKey,
+              factIdentity,
+              ownerKey: "",
+              textGroup,
+              textScope: fact.textScope || "inline",
+              textDensity: Number(fact.textDensity || 0),
+              textOperation: fact.operation || "",
+              scope: "text",
+              summary: fact.summary || element.getAttribute("data-pageroot-review-summary") || "文本调整",
+              tone: textTone,
+              tones: [textTone],
+              types: ["text"],
+              left: rect.left + scrollX,
+              top: rect.top + scrollY,
+              right: rect.right + scrollX,
+              bottom: rect.bottom + scrollY,
+            }));
+            return;
+          }
+          const scope = fact.scope || (fact.type === "style" ? "content" : "element");
+          const rects = fact.type === "style" && scope === "content"
             ? contentStyleRects(element)
             : [element.getBoundingClientRect()];
+          const structureChange = fact.type === "structure" ? fact.structureChange || "" : "";
+          const summary = fact.summary || (fact.type === "style"
+            ? (fact.operation === "layout" ? "换行调整" : "视觉调整")
+            : (structureChange === "from" || structureChange === "to"
+              ? "位置调整"
+              : "结构调整"));
           rects.forEach((rect) => records.push({
             element,
-            changeId: element.getAttribute("data-pageroot-review-marker") || "",
-            ownerKey: type === "style"
-              ? element.getAttribute("data-pageroot-review-style-owner") || ""
-              : "",
+            changeId,
+            semanticOwnerId,
+            geometryOwnerId,
+            factKey,
+            factIdentity,
+            ownerKey: fact.ownerKey || "",
+            structureChange,
             scope,
-            summary: type === "style"
-              ? "视觉调整"
-              : element.getAttribute("data-pageroot-review-summary") || "",
-            tone: type,
-            tones: [type],
-            types: [type],
+            summary,
+            tone: fact.type,
+            tones: [fact.type],
+            types: [fact.type],
             left: rect.left + scrollX,
             top: rect.top + scrollY,
             right: rect.right + scrollX,
             bottom: rect.bottom + scrollY,
           }));
         });
-      });
+    });
     const visibleRecords = records
       .filter((rect) => rect.right - rect.left > 1 && rect.bottom - rect.top > 1)
       .sort((left, right) => left.changeId.localeCompare(right.changeId) || left.top - right.top || left.left - right.left);
@@ -5156,23 +6113,44 @@ function reviewBootstrap(
         record.tone === "text-added" || record.tone === "text-removed"
       ))),
     ].sort((left, right) => left.changeId.localeCompare(right.changeId) || left.top - right.top || left.left - right.left);
-    const dominantStyleBoxes = readableRecords.filter((record) => (
+    const structureDominators = filter === "all"
+      ? readableRecords.filter((record) => (
+        record.tone === "structure"
+        && (record.structureChange === "added" || record.structureChange === "removed")
+      ))
+      : [];
+    const ownerFilteredRecords = readableRecords.filter((record) => !(
+      (record.tone === "text-added" || record.tone === "text-removed")
+      && structureDominators.some((candidate) => (
+        candidate.changeId === record.changeId
+        && candidate.semanticOwnerId === record.semanticOwnerId
+      ))
+    ));
+    const dominantStyleBoxes = ownerFilteredRecords.filter((record) => (
       record.tone === "style" && record.scope === "box"
     ));
-    const minimalRecords = readableRecords.filter((record, index) => {
+    const minimalRecords = ownerFilteredRecords.filter((record, index) => {
+      if (record.tone === "text-added" || record.tone === "text-removed") return true;
       if (record.tone === "style") {
         const dominatedByBoxOwner = dominantStyleBoxes.some((candidate) => (
           candidate !== record
           && candidate.changeId === record.changeId
-          && candidate.ownerKey !== record.ownerKey
+          && candidate.semanticOwnerId === record.semanticOwnerId
+          && candidate.ownerKey === record.ownerKey
           && candidate.element.contains(record.element)
           && recordContains(candidate, record)
         ));
         if (dominatedByBoxOwner) return false;
         if (record.scope === "box") return true;
       }
-      return !readableRecords.some((candidate, candidateIndex) => {
-        if (index === candidateIndex || record.changeId !== candidate.changeId || record.tone !== candidate.tone) return false;
+      return !ownerFilteredRecords.some((candidate, candidateIndex) => {
+        if (
+          index === candidateIndex
+          || record.changeId !== candidate.changeId
+          || record.semanticOwnerId !== candidate.semanticOwnerId
+          || record.factIdentity !== candidate.factIdentity
+          || record.tone !== candidate.tone
+        ) return false;
         const recordArea = (record.right - record.left) * (record.bottom - record.top);
         const candidateArea = (candidate.right - candidate.left) * (candidate.bottom - candidate.top);
         return candidateArea < recordArea * .86 && recordContains(record, candidate);
@@ -5188,14 +6166,21 @@ function reviewBootstrap(
       ...textRecords,
       ...mergeConnectedRecords(nonTextRecords, (left, right) => (
         left.changeId === right.changeId
+        && left.semanticOwnerId === right.semanticOwnerId
+        && left.factIdentity === right.factIdentity
         && left.tone === right.tone
-        && (left.tone !== "style" || left.ownerKey === right.ownerKey)
         && recordsAreClose(left, right)
       )),
     ].sort((left, right) => left.changeId.localeCompare(right.changeId) || left.top - right.top || left.left - right.left);
     if (filter === "all") {
       merged = mergeConnectedRecords(merged, (left, right) => (
-        left.changeId === right.changeId && recordsOverlapStrongly(left, right)
+        left.changeId === right.changeId
+        && left.semanticOwnerId === right.semanticOwnerId
+        // “全部变化” may suppress a structural child by its explicit owner
+        // rule, but it must never turn merely adjacent independent facts into
+        // one outline or one mask hole.
+        && left.factIdentity === right.factIdentity
+        && recordsOverlapStrongly(left, right)
       )).map((record) => ({
         ...record,
         tone: record.tones.length > 1 ? "mixed" : record.tones[0],
@@ -5223,15 +6208,18 @@ function reviewBootstrap(
     svg.style.setProperty("height", height + "px", "important");
     const holePaths = [];
     merged.forEach((record) => {
+      const horizontalInset = record.types.length === 1 && record.types[0] === "text"
+        ? 0
+        : inset;
       const fragments = (record.fragments || [{
         left: record.left,
         top: record.top,
         right: record.right,
         bottom: record.bottom,
       }]).map((fragment) => ({
-        left: fragment.left - inset,
+        left: fragment.left - horizontalInset,
         top: fragment.top - inset,
-        right: fragment.right + inset,
+        right: fragment.right + horizontalInset,
         bottom: fragment.bottom + inset,
       }));
       const pathData = unionPath(fragments);
@@ -5239,12 +6227,16 @@ function reviewBootstrap(
       record.pathData = pathData;
       const hole = document.createElementNS(namespace, "path");
       hole.setAttribute("data-pageroot-review-mask-hole", record.changeId);
+      hole.setAttribute("data-pageroot-review-semantic-owner", record.semanticOwnerId || "");
+      hole.setAttribute("data-pageroot-review-geometry-owner", record.geometryOwnerId || "");
+      hole.setAttribute("data-pageroot-review-fact", record.factKey || "");
+      if (record.textGroup) hole.setAttribute("data-text-group", record.textGroup);
       if (record.ownerKey) {
         hole.setAttribute("data-pageroot-review-mask-owner", record.ownerKey);
       }
-      const left = record.left - inset;
+      const left = record.left - horizontalInset;
       const top = record.top - inset;
-      const width = record.right - record.left + inset * 2;
+      const width = record.right - record.left + horizontalInset * 2;
       const holeHeight = record.bottom - record.top + inset * 2;
       hole.setAttribute("d", pathData);
       hole.setAttribute("data-left", String(left));
@@ -5269,8 +6261,14 @@ function reviewBootstrap(
     svg.prepend(dim);
     layer.append(svg);
     merged.forEach((record) => {
+      const horizontalInset = record.types.length === 1 && record.types[0] === "text"
+        ? 0
+        : inset;
       const box = document.createElement("div");
       box.setAttribute("data-pageroot-review-overlay-box", record.changeId);
+      box.setAttribute("data-pageroot-review-semantic-owner", record.semanticOwnerId || "");
+      box.setAttribute("data-pageroot-review-geometry-owner", record.geometryOwnerId || "");
+      box.setAttribute("data-pageroot-review-fact", record.factKey || "");
       if (record.ownerKey) {
         box.setAttribute("data-pageroot-review-overlay-owner", record.ownerKey);
       }
@@ -5280,21 +6278,29 @@ function reviewBootstrap(
       box.dataset.scope = record.scope || "element";
       box.dataset.summary = record.summary;
       if (record.textGroup) box.dataset.textGroup = record.textGroup;
+      if (record.textOperation) box.dataset.textOperation = record.textOperation;
+      if (record.visualLine) box.dataset.visualLine = record.visualLine;
       box.setAttribute(
         "data-pageroot-review-fragment-count",
         String((record.renderFragments || []).length || 1),
       );
       const active = currentState.focus !== "all" && currentState.focus === record.changeId;
       box.dataset.active = active ? "true" : "false";
-      const left = record.left - inset;
+      const left = record.left - horizontalInset;
       const top = record.top - inset;
-      const width = record.right - record.left + inset * 2;
+      const width = record.right - record.left + horizontalInset * 2;
       const boxHeight = record.bottom - record.top + inset * 2;
       box.style.setProperty("left", left + "px", "important");
       box.style.setProperty("top", top + "px", "important");
       box.style.setProperty("width", width + "px", "important");
       box.style.setProperty("height", boxHeight + "px", "important");
-      if ((record.renderFragments || []).length > 1) {
+      box.setAttribute("data-left", String(left));
+      box.setAttribute("data-top", String(top));
+      box.setAttribute("data-width", String(width));
+      box.setAttribute("data-height", String(boxHeight));
+      box.setAttribute("data-path", record.pathData || "");
+      const textOnly = record.types.length === 1 && record.types[0] === "text";
+      if (!textOnly && (record.renderFragments || []).length > 1) {
         box.dataset.shaped = "true";
         const shapeSvg = document.createElementNS(namespace, "svg");
         shapeSvg.setAttribute("data-pageroot-review-overlay-shape-svg", "true");
@@ -5370,7 +6376,7 @@ function reviewBootstrap(
     if (message.type === "focus-change") {
       const changeId = String(message.changeId || "").replace(/[^a-z0-9-]/gi, "");
       const target = document.querySelector('[data-pageroot-review-id="' + changeId + '"]');
-      focusTarget(target, message.panelPath?.length ? message.panelPath : message.panelKey);
+      focusChangeTarget(changeId, target, message.panelPath?.length ? message.panelPath : message.panelKey);
     }
     if (message.type === "focus-outline") {
       const outlineId = String(message.outlineId || "").replace(/[^a-z0-9-]/gi, "");
@@ -5693,7 +6699,16 @@ function* buildReviewDocumentSteps(
       && ancestorMarkupSignature(pair.before)
         === ancestorMarkupSignature(pair.after),
     );
-    const types = exactStablePair ? [] : annotateChangePair(pair);
+    let types: ReviewChangeType[] = [];
+    if (!exactStablePair) {
+      const annotationSteps = annotateChangePairSteps(pair);
+      let annotationStep = annotationSteps.next();
+      while (!annotationStep.done) {
+        yield annotationStep.value;
+        annotationStep = annotationSteps.next();
+      }
+      types = annotationStep.value;
+    }
     const changeId = types.length ? `change-${changes.length + 1}` : undefined;
     const helper = types.length
       ? helperText(types, Boolean(pair.before), Boolean(pair.after), pair)
@@ -5856,6 +6871,7 @@ export async function buildReviewDocumentsAsync(
     "candidate-sections-before",
     "candidate-sections-after",
     "section-pairing",
+    "semantic-row",
     "change-annotation",
     "runtime-candidates",
     "prepare-before",

@@ -211,13 +211,26 @@ test("change discovery builds a complete outline and precise change markers", ()
   assert.match(reviewDocument, /data-pageroot-outline-id/);
   assert.match(reviewDocument, /regionGroupLabel/);
   assert.match(reviewDocument, /outline\.push/);
-  assert.match(reviewDocument, /markTextDifferences/);
+  assert.match(reviewDocument, /markSemanticTextDifferences/);
   assert.match(reviewDocument, /sentenceAwareTextDifferences/);
   assert.match(reviewDocument, /readableReviewTextFootprintPlan/);
-  assert.match(reviewDocument, /data-pageroot-review-text-block-groups/);
+  assert.match(reviewDocument, /alignReviewSemanticUnits/);
+  assert.match(reviewDocument, /buildReviewSemanticPairGraph/);
+  assert.match(reviewDocument, /function\* buildReviewSemanticPairGraphSteps/);
+  assert.match(reviewDocument, /semanticRowsSinceYield >= 24/);
+  assert.match(reviewDocument, /yield "semantic-row"/);
+  assert.match(reviewDocument, /const annotationSteps = annotateChangePairSteps\(pair\)/);
+  assert.match(reviewDocument, /"list-item"/);
+  assert.match(reviewDocument, /"br-line"/);
+  assert.match(reviewDocument, /"table-row"/);
+  assert.doesNotMatch(reviewDocument, /data-pageroot-review-text-block-groups/);
   assert.match(reviewDocument, /data-pageroot-review-text-group/);
-  assert.match(reviewDocument, /data-pageroot-review-text-context/);
-  assert.match(reviewDocument, /data-pageroot-review-text-change/);
+  assert.match(reviewDocument, /data-pageroot-review-text-operation/);
+  assert.match(reviewDocument, /data-pageroot-review-semantic-owner/);
+  assert.match(reviewDocument, /data-pageroot-review-geometry-owner/);
+  assert.match(reviewDocument, /data-pageroot-review-text-anchors/);
+  assert.doesNotMatch(reviewDocument, /data-pageroot-review-text-context/);
+  assert.doesNotMatch(reviewDocument, /data-pageroot-review-text-change/);
   assert.match(reviewDocument, /data-pageroot-review-text/);
   assert.match(reviewDocument, /data-pageroot-review-marker/);
   assert.match(reviewDocument, /attachChangeMarkerMetadata/);
@@ -238,18 +251,40 @@ test("change discovery builds a complete outline and precise change markers", ()
   assert.match(reviewDocument, /data-pageroot-review-style-scope/);
   assert.match(reviewDocument, /contentStyleRects/);
   assert.match(reviewDocument, /range\.getClientRects\(\)/);
+  assert.match(reviewDocument, /sameLogicalCellPattern/);
   assert.match(reviewDocument, /reviewTextInventoryForNodes/);
-  assert.match(reviewDocument, /semanticTextInventories/);
-  assert.match(reviewDocument, /STRUCTURE_TRANSPARENT_TAGS/);
+  assert.match(reviewDocument, /semanticFlowUnit/);
+  assert.doesNotMatch(reviewDocument, /STRUCTURE_TRANSPARENT_TAGS/);
   assert.doesNotMatch(reviewDocument, /beforeTokenRanges\.length \?/);
   assert.doesNotMatch(reviewDocument, /afterTokenRanges\.length \?/);
-  assert.match(reviewDocument, /const structureChanged = markStructureDifferences\(pair\)/);
-  assert.match(reviewDocument, /const styleChanged = markStyleDifferences\(pair\.before, pair\.after\)/);
-  assert.match(reviewDocument, /const textChanged = markTextDifferences\(pair\.before, pair\.after\)/);
+  assert.match(reviewDocument, /const layoutPairs = semanticLayoutPairs\(graph\)/);
+  assert.match(reviewDocument, /const structureChanged = markStructureDifferences\(graph\)/);
+  assert.match(reviewDocument, /const styleChanged = markStyleDifferences\(graph, layoutPairs\)/);
+  assert.match(reviewDocument, /const textMarking = markSemanticTextDifferences\(graph\)/);
+  assert.match(reviewDocument, /REVIEW_PROJECTION_FACTS_ATTRIBUTE/);
+  assert.match(reviewDocument, /appendProjectionFactToElement/);
   assert.doesNotMatch(reviewDocument, /presentationSignature\(before\) !== presentationSignature\(after\)/);
   assert.doesNotMatch(reviewDocument, /const positional = afterElements\[index\]/);
   assert.match(reviewDocument, /annotatePanelPairs/);
   assert.match(reviewDocument, /annotateActionPairs/);
+});
+
+test("numbered direct text flows recognize the supported list prefixes", () => {
+  const patternMatch = reviewDocument.match(
+    /const NUMBERED_TEXT_LINE_PATTERN = \/(.+)\/u;/u,
+  );
+  assert.ok(patternMatch, "numbered line pattern must remain explicit");
+  const pattern = new RegExp(patternMatch[1], "u");
+  [
+    "① 圈号序列",
+    "1. 点号序列",
+    "1、顿号序列",
+    "1）右括号序列",
+    "（一）中文括号序列",
+    "一、中文顿号序列",
+    "• 项目符号序列",
+    "- 连字符序列",
+  ].forEach((line) => assert.equal(pattern.test(line), true, line));
 });
 
 test("review controls keep page, filter, visibility, and navigation orthogonal", () => {
@@ -303,13 +338,20 @@ test("all-change review keeps text treatment precise and mirrors authored action
   assert.doesNotMatch(reviewDocument, /data-pageroot-review-filter="all"\] \[data-pageroot-review-id\]/);
   assert.match(reviewDocument, /data-pageroot-review-filter="all"\] \[data-pageroot-review-text="removed"\]/);
   assert.match(reviewDocument, /color: inherit !important;[\s\S]*?text-decoration: none !important/);
-  assert.match(reviewDocument, /querySelectorAll\('\[data-pageroot-review-marker-types~="text"\]'\)/);
+  assert.match(reviewDocument, /projectionFactsForElement\(element, markerSequence\)/);
+  assert.match(reviewDocument, /data-pageroot-review-projection-facts/);
   assert.match(reviewDocument, /textTone[\s\S]*?"text-removed"[\s\S]*?"text-added"/);
   assert.match(reviewDocument, /"新增内容"/);
   assert.match(reviewDocument, /"删除内容"/);
   assert.match(reviewDocument, /"文本调整"/);
   assert.match(reviewDocument, /"段落改写"/);
   assert.match(reviewDocument, /readableTextRecords/);
+  assert.match(reviewDocument, /record\.semanticOwnerId/);
+  assert.match(reviewDocument, /record\.geometryOwnerId/);
+  assert.match(reviewDocument, /record\.textGroup/);
+  assert.match(reviewDocument, /visualLine: String\(index \+ 1\)/);
+  assert.match(reviewDocument, /textOwnerAllowsBlock/);
+  assert.match(reviewDocument, /readableBlockBounds/);
   assert.match(reviewDocument, /mergeTextLineIntervals/);
   assert.match(reviewDocument, /scope: "text-block"/);
   assert.match(reviewDocument, /mergeConnectedRecords\(nonTextRecords/);
@@ -317,7 +359,12 @@ test("all-change review keeps text treatment precise and mirrors authored action
   assert.match(reviewDocument, /minimalRecords/);
   assert.match(reviewDocument, /dominantStyleBoxes/);
   assert.match(reviewDocument, /candidate\.element\.contains\(record\.element\)/);
-  assert.match(reviewDocument, /left\.tone !== "style" \|\| left\.ownerKey === right\.ownerKey/);
+  assert.match(reviewDocument, /left\.semanticOwnerId === right\.semanticOwnerId/);
+  assert.match(reviewDocument, /const factIdentity = projectionFactIdentity\(fact\)/);
+  assert.match(reviewDocument, /left\.factIdentity === right\.factIdentity/);
+  assert.doesNotMatch(reviewDocument, /left\.allFactKey === right\.allFactKey/);
+  assert.match(reviewDocument, /structureDominators/);
+  assert.match(reviewDocument, /range\.selectNodeContents\(element\)/);
   assert.match(reviewDocument, /tone: record\.tones\.length > 1 \? "mixed" : record\.tones\[0\]/);
   assert.match(reviewDocument, /allModeSummary/);
   assert.match(reviewDocument, /fuseConnectedFragments/);
@@ -328,6 +375,7 @@ test("all-change review keeps text treatment precise and mirrors authored action
   assert.match(reviewDocument, /data-pageroot-review-overlay-label/);
   assert.match(reviewDocument, /data-pageroot-review-mask-layer/);
   assert.match(reviewDocument, /data-pageroot-review-mask-hole/);
+  assert.match(reviewDocument, /box\.getAttribute\("data-path"\) === hole\.getAttribute\("d"\)|box\.setAttribute\("data-path"/);
   assert.match(reviewDocument, /data-pageroot-review-mask-dim/);
   assert.match(reviewDocument, /fill-opacity/);
   assert.match(reviewDocument, /data-pageroot-review-mask-layer[\s\S]*?background: transparent !important/);
@@ -341,6 +389,11 @@ test("all-change review keeps text treatment precise and mirrors authored action
   assert.doesNotMatch(reviewDocument, /background: #fff0ef|background: #eaf8f1/);
   assert.doesNotMatch(reviewDocument, /data-pageroot-review-style\][\s\S]{0,180}solid #1980aa/);
   assert.match(reviewDocument, /matchingPanelControl/);
+  assert.match(reviewDocument, /collapsedAnchorRect/);
+  assert.match(reviewDocument, /focusChangeTarget/);
+  assert.match(reviewDocument, /data-pageroot-review-anchor-change/);
+  assert.match(reviewDocument, /data-pageroot-review-operation", "layout"/);
+  assert.match(reviewDocument, /"换行调整"/);
   assert.match(reviewDocument, /revealTarget/);
   assert.match(reviewDocument, /activatePanelKey/);
   assert.match(reviewDocument, /post\("action", \{/);

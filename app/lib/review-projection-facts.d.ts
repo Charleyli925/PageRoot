@@ -1,0 +1,40 @@
+export type ReviewProjectionFactType = "text" | "structure" | "style";
+
+export type ReviewProjectionFactScope =
+  | "text"
+  | "text-phrase"
+  | "text-line"
+  | "text-block"
+  | "element"
+  | "box"
+  | "content";
+
+export type ReviewProjectionFact = {
+  id: string;
+  type: ReviewProjectionFactType;
+  semanticOwnerId: string;
+  geometryOwnerId?: string;
+  scope?: ReviewProjectionFactScope;
+  ownerKey?: string;
+  operation?: "none" | "insert" | "delete" | "replace" | "layout";
+  tone?: "added" | "removed";
+  textGroup?: string;
+  textScope?: "inline" | "sentence" | "block";
+  textDensity?: number;
+  structureChange?: string;
+  summary?: string;
+};
+
+export function normalizeReviewProjectionFact(value: unknown): ReviewProjectionFact | null;
+export function reviewProjectionFactKey(value: unknown): string;
+export function reviewProjectionFactsCanMerge(left: unknown, right: unknown): boolean;
+export function appendReviewProjectionFact(
+  facts: readonly unknown[],
+  value: unknown,
+): ReviewProjectionFact[];
+export function serializeReviewProjectionFacts(facts: readonly unknown[]): string;
+export function parseReviewProjectionFacts(value: unknown): ReviewProjectionFact[];
+export function reviewProjectionFactsForFilter(
+  facts: readonly unknown[],
+  filter: "all" | ReviewProjectionFactType,
+): ReviewProjectionFact[];
