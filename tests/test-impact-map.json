@@ -258,7 +258,7 @@
       "patterns": [
         "^scripts/ci-health-report\\.mjs$",
         "^tests/ci-health-report\\.test\\.mjs$",
-        "^\\.github/workflows/(?:ci|ci-health|pr-feedback)\\.yml$"
+        "^\\.github/workflows/(?:ci|ci-health|pr-feedback|release-dry-run)\\.yml$"
       ],
       "suites": [],
       "nodeTests": ["tests/ci-health-report.test.mjs"]

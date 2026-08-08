@@ -69,6 +69,15 @@ test("documentation-only changes produce an explicit no-test plan", () => {
   assert.deepEqual(plan.selectedNodeTests, []);
 });
 
+test("Release Dry Run workflow changes select CI Health ownership coverage", () => {
+  const plan = selectGatePlan({
+    map,
+    lane: "edit",
+    changedFiles: [".github/workflows/release-dry-run.yml"],
+  });
+  assert.ok(plan.selectedNodeTests.includes("tests/ci-health-report.test.mjs"));
+});
+
 test("real-HTML gate changes run the discovery oracle instead of an unrelated smoke subset", () => {
   const plan = selectGatePlan({
     map,
