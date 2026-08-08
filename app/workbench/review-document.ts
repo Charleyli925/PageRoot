@@ -4301,6 +4301,25 @@ function reviewBootstrap(
       const identityText = typeof binding?.identityText === "string"
         ? RuntimeVisualString(binding.identityText)
         : "";
+      const pathMatches = runtimeVisualInitialBindingPathMatches(
+        observedElement,
+        binding,
+      );
+      if (
+        pathMatches
+        && !runtimeVisualInitialBindingHasFingerprint(binding)
+        && runtimeVisualInitialBindingMatches(observedElement, binding, true)
+      ) {
+        const existing = runtimeVisualMapGet(reviewCommentIdentityElements, sourceNodeId);
+        if (existing && existing !== observedElement) {
+          runtimeVisualSetAdd(reviewCommentInvalidSourceNodeIds, sourceNodeId);
+          return;
+        }
+        if (!existing) {
+          runtimeVisualMapSet(reviewCommentIdentityElements, sourceNodeId, observedElement);
+        }
+        return;
+      }
       if (!runtimeVisualInitialBindingMatches(
         observedElement,
         binding,

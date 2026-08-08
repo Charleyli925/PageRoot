@@ -80,10 +80,10 @@ export const RUNTIME_VISUAL_HOSTILE_PAGES = Object.freeze([
     pr: 107,
     threadId: "PRRT_kwDOTdtgh86XW6Z8",
     surface: "review",
-    html: `<!doctype html><main><section id="target">original</section><p class="comment-target">first comment</p><p class="comment-target">second comment</p><div class="chart"></div><script>
+    html: `<!doctype html><main><section id="target">original</section><p class="comment-target">first comment</p><p class="comment-target">second comment</p><div class="comment-host"></div><div class="chart"></div><script>
       document.getElementById("target").textContent="mutated";</script><div class="chart"></div></main>`,
-    contract: "Parser-added targets may bind by stable identity before mutable text is compared, while class-only comment fingerprints remain text-sensitive across duplicate parser checkpoints.",
-    closureReason: "Mutation records retain only the path-matching Element; final class-only matching keeps frozen text and never guesses among duplicate siblings.",
+    contract: "Parser-added targets may bind by stable identity before mutable text is compared, while class-only and fingerprintless comment targets remain path-safe across duplicate parser checkpoints.",
+    closureReason: "Mutation records bind a matching frozen path directly when no fingerprint exists; class-only fingerprints keep frozen text and never guess among duplicate siblings.",
   }),
   Object.freeze({
     id: "pr107-attribute-limit",
