@@ -541,6 +541,11 @@ test("a verified AI result stays pending through desktop review until the user a
       <h2>3EBITA分析</h2>
       <div data-review-ebita-copy><strong>结论：</strong>EBITA差异均在波动范围<br>内（0.06~0.13pt），AI托管未恶化盈利能力。</div>
     </section>
+    <section data-review-anchor-only-section>
+      <h2>删除锚点导航</h2>
+      <div style="height:280px" aria-hidden="true"></div>
+      <p data-review-anchor-only>稳定开头。只删除这句定位文字。稳定结尾。</p>
+    </section>
     <section data-review-runtime-visuals>
       <h2>运行态图表回归</h2>
       <style>@keyframes review-runtime-unstable-motion { from { transform: translateX(0); } to { transform: translateX(80px); } }</style>
@@ -1203,6 +1208,10 @@ test("a verified AI result stays pending through desktop review until the user a
         .replace(
           '<div data-review-ebita-copy><strong>结论：</strong>EBITA差异均在波动范围<br>内（0.06~0.13pt），AI托管未恶化盈利能力。</div>',
           '<div data-review-ebita-copy><strong>结论：</strong>EBITA差异均在波动范围内（0.06~0.13pt），AI托管未恶化盈利能力，建议继续保留实验策略。</div>',
+        )
+        .replace(
+          '<p data-review-anchor-only>稳定开头。只删除这句定位文字。稳定结尾。</p>',
+          '<p data-review-anchor-only>稳定开头。稳定结尾。</p>',
         )
         .replace(
           "<article><h2>标签一概览</h2><p>第一块完整内容</p></article>\n      <article><h2>标签一详情</h2><p>第二块完整内容</p></article>",
@@ -2072,6 +2081,43 @@ test("a verified AI result stays pending through desktop review until the user a
       .toBe("1");
     expect(Number(await unchangedMapItem.evaluate((element) => getComputedStyle(element).opacity)))
       .toBeLessThan(0.7);
+    await expect(beforeReviewFrame.locator(
+      '[data-review-anchor-only] [data-pageroot-review-text="removed"]',
+    )).toHaveText("只删除这句定位文字。");
+    await expect(afterReviewFrame.locator(
+      '[data-review-anchor-only] [data-pageroot-review-text], [data-review-anchor-only] [data-pageroot-review-text-context]',
+    )).toHaveCount(0);
+    const anchorOnlyChangeId = await afterReviewFrame.locator(
+      "[data-review-anchor-only-section]",
+    ).getAttribute("data-pageroot-review-id");
+    expect(anchorOnlyChangeId).toBeTruthy();
+    await expect(afterReviewFrame.locator(
+      "[data-review-anchor-only]",
+    )).toHaveAttribute("data-pageroot-review-anchor-change", anchorOnlyChangeId);
+    await expect(afterReviewFrame.locator(
+      `[data-pageroot-review-overlay-box="${anchorOnlyChangeId}"]`,
+    )).toHaveCount(0);
+    await expect(afterReviewFrame.locator(
+      `[data-pageroot-review-mask-hole="${anchorOnlyChangeId}"]`,
+    )).toHaveCount(0);
+    const anchorOnlyMapItem = launched.page.getByRole("button", {
+      name: /删除锚点导航/u,
+    });
+    await expect(anchorOnlyMapItem).toBeVisible();
+    await anchorOnlyMapItem.click();
+    await expect.poll(async () => afterReviewFrame.locator("html").getAttribute(
+      "data-pageroot-review-focus",
+    )).toBe(anchorOnlyChangeId);
+    await expect.poll(() => afterReviewFrame.locator("html").evaluate(() => {
+      const anchor = document.querySelector("[data-review-anchor-only]");
+      const section = document.querySelector("[data-review-anchor-only-section]");
+      if (!anchor || !section) return false;
+      const anchorRect = anchor.getBoundingClientRect();
+      const sectionRect = section.getBoundingClientRect();
+      return anchorRect.top >= 10
+        && anchorRect.top <= innerHeight * .26
+        && anchorRect.top - sectionRect.top > 220;
+    })).toBe(true);
     const ebitaChangeId = await beforeReviewFrame.locator(
       "[data-review-ebita-section]",
     ).getAttribute("data-pageroot-review-id");

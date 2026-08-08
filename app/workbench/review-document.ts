@@ -2829,6 +2829,11 @@ function attachChangeMarkerMetadata(
     && pairTextKinds.has("removed");
   [pair.before, pair.after].forEach((root) => {
     if (!root) return;
+    [root, ...root.querySelectorAll("[data-pageroot-review-text-anchors]")]
+      .filter((element) => element.hasAttribute("data-pageroot-review-text-anchors"))
+      .forEach((element) => {
+        element.setAttribute("data-pageroot-review-anchor-change", changeId);
+      });
     const markerElements = [root, ...root.querySelectorAll("*")].filter((element) => (
       element.hasAttribute("data-pageroot-review-text")
       || element.hasAttribute("data-pageroot-review-text-context")
@@ -4694,13 +4699,82 @@ function reviewBootstrap(
       }
     });
   };
+  const scrollToReviewRect = (rect) => {
+    if (!rect || rect.height <= 0 || !Number.isFinite(rect.top)) return false;
+    const token = "focus-" + Date.now() + "-" + Math.random();
+    const top = Math.max(0, scrollY + rect.top - Math.max(18, innerHeight * .12));
+    scrollTo({ top, left: scrollX, behavior: "auto" });
+    activeScrollCommand = { commandId: token, top, left: scrollX };
+    return true;
+  };
+  const collapsedAnchorRect = (anchor) => {
+    const encoded = String(
+      anchor.getAttribute("data-pageroot-review-text-anchors") || "",
+    ).split(/\s+/).find(Boolean) || "";
+    const offset = Math.max(0, Math.trunc(Number(encoded.slice(encoded.lastIndexOf("@") + 1)) || 0));
+    const nodes = [];
+    const walker = document.createTreeWalker(anchor, NodeFilter.SHOW_TEXT);
+    let node = walker.nextNode();
+    while (node) {
+      if (!node.parentElement?.closest(
+        "script, style, noscript, template, [data-pageroot-review-projection-layer]",
+      )) nodes.push(node);
+      node = walker.nextNode();
+    }
+    if (!nodes.length) return null;
+    let remaining = offset;
+    let targetNode = nodes.at(-1);
+    let targetOffset = targetNode?.textContent?.length || 0;
+    for (const candidate of nodes) {
+      const length = candidate.textContent?.length || 0;
+      if (remaining <= length) {
+        targetNode = candidate;
+        targetOffset = remaining;
+        break;
+      }
+      remaining -= length;
+    }
+    if (!targetNode) return null;
+    const range = document.createRange();
+    range.setStart(targetNode, Math.min(targetOffset, targetNode.textContent?.length || 0));
+    range.collapse(true);
+    let rect = range.getBoundingClientRect();
+    if (rect.height <= 0) {
+      const length = targetNode.textContent?.length || 0;
+      const start = Math.max(0, Math.min(targetOffset > 0 ? targetOffset - 1 : 0, length));
+      const end = Math.min(length, Math.max(start + 1, targetOffset));
+      if (end > start) {
+        range.setStart(targetNode, start);
+        range.setEnd(targetNode, end);
+        rect = range.getBoundingClientRect();
+      }
+    }
+    range.detach();
+    return rect.height > 0 ? rect : null;
+  };
   const focusTarget = (target, panelPath) => {
     revealTarget(target, panelPath);
     if (!target) return;
     requestAnimationFrame(() => {
-      const token = "focus-" + Date.now() + "-" + Math.random();
-      target.scrollIntoView({ block: "start", behavior: "auto" });
-      activeScrollCommand = { commandId: token, top: scrollY, left: scrollX };
+      if (!scrollToReviewRect(target.getBoundingClientRect())) {
+        target.scrollIntoView({ block: "start", behavior: "auto" });
+      }
+    });
+  };
+  const focusChangeTarget = (changeId, target, panelPath) => {
+    revealTarget(target, panelPath);
+    requestAnimationFrame(() => {
+      const visibleBox = document.querySelector(
+        '[data-pageroot-review-overlay-box="' + changeId + '"]',
+      );
+      if (visibleBox && scrollToReviewRect(visibleBox.getBoundingClientRect())) return;
+      const anchor = document.querySelector(
+        '[data-pageroot-review-anchor-change="' + changeId + '"]',
+      );
+      if (anchor && scrollToReviewRect(collapsedAnchorRect(anchor))) return;
+      if (target && !scrollToReviewRect(target.getBoundingClientRect())) {
+        target.scrollIntoView({ block: "start", behavior: "auto" });
+      }
     });
   };
   const applyScrollOwner = (message) => {
@@ -5364,7 +5438,7 @@ function reviewBootstrap(
     if (message.type === "focus-change") {
       const changeId = String(message.changeId || "").replace(/[^a-z0-9-]/gi, "");
       const target = document.querySelector('[data-pageroot-review-id="' + changeId + '"]');
-      focusTarget(target, message.panelPath?.length ? message.panelPath : message.panelKey);
+      focusChangeTarget(changeId, target, message.panelPath?.length ? message.panelPath : message.panelKey);
     }
     if (message.type === "focus-outline") {
       const outlineId = String(message.outlineId || "").replace(/[^a-z0-9-]/gi, "");
