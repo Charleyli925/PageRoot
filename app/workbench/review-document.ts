@@ -4626,10 +4626,10 @@ function reviewBootstrap(
       const alpha = runtimeVisualParseFloat(alphaMatch[1]);
       if (runtimeVisualNumberIsFinite(alpha) && alpha <= 0) return true;
     }
-    return Boolean(runtimeVisualRegExpExec(
+    return runtimeVisualRegExpExec(
       /^#(?:[0-9a-f]{3}0|[0-9a-f]{6}00)$/iu,
       normalized,
-    ));
+    ) !== null;
   };
   const runtimeVisualShadowHasPaint = (value) => {
     const normalized = runtimeVisualNormalizedPaintValue(value);

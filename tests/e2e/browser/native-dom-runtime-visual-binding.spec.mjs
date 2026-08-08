@@ -399,6 +399,32 @@ test("fingerprintless runtime hosts fail closed when a same-tag parser decoy shi
   expect(decoy.snapshots).toHaveLength(0);
 });
 
+test("runtime visual paint parsing survives an authored Boolean mutation", async ({ page }) => {
+  const binding = {
+    key: "runtime-host-boolean-mutation",
+    path: [1, 0, 0],
+    tagName: "DIV",
+    sourceBoxSignature: RUNTIME_SOURCE_BOX_SIGNATURE,
+    identityAttributes: [],
+  };
+  const result = await parsedRuntimeVisualSnapshots(page, {
+    binding,
+    authoredScript: `
+      Boolean = () => true;
+      const main = document.querySelector("main");
+      const actual = document.createElement("div");
+      actual.className = "runtime-host";
+      const painted = document.createElement("i");
+      painted.style.cssText = "display:block;background:red;width:8px;height:8px";
+      actual.append(painted);
+      main.append(actual);
+    `,
+  });
+  expect(result.channel).toBe(true);
+  expect(result.snapshots).toHaveLength(1);
+  expect(result.snapshots[0]).toHaveLength(1);
+});
+
 test("identical fingerprintless runtime siblings keep their separate frozen paths", async ({ page }) => {
   const bindings = [0, 1].map((index) => ({
     key: `runtime-host-${index + 1}`,
