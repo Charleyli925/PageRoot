@@ -158,6 +158,7 @@ test("GitHub workflows keep one reviewed ready-PR source boundary, an exact-tree
   assert.match(sourceBuild, /needs:[\s\S]*- review-settled[\s\S]*- baseline-policy/u);
   assert.match(sourceBuild, /npm run ci:source-build:prepared/u);
   assert.match(sourceBuild, /name: PageRoot-web-build-\$\{\{ github\.run_id \}\}/u);
+  assert.match(sourceBuild, /retention-days: 30/u);
   assert.match(sourceBuild, /overwrite: true/u);
   assert.doesNotMatch(sourceBuild, /PageRoot-web-build-[^\n]*run_attempt/u);
   assert.match(sourceNode, /name: PageRoot-web-build-\$\{\{ github\.run_id \}\}/u);

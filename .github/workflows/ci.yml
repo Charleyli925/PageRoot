@@ -112,7 +112,7 @@ jobs:
             dist
             package.json
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 30
           overwrite: true
       - name: Upload source-build evidence
         if: always()
