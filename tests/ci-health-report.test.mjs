@@ -8,6 +8,7 @@ import {
   CI_HEALTH_WORKFLOW_INPUTS,
   renderCiHealthMarkdown,
   summarizeCiHealth,
+  summarizeCandidateFlow,
   workflowRuns,
 } from "../scripts/ci-health-report.mjs";
 
@@ -147,6 +148,69 @@ test("CI health distinguishes full-gate latency, repeated green work and preflig
   assert.match(renderCiHealthMarkdown(report), /Total PR runner minutes/u);
 });
 
+test("CI health reports the final-candidate path, Ready churn, and review priority distribution", () => {
+  const ciRuns = [completedRun({
+    id: 700,
+    event: "pull_request",
+    head_sha: "a".repeat(40),
+    pull_requests: [{ number: 120 }],
+    created_at: "2026-08-09T10:05:00.000Z",
+    updated_at: "2026-08-09T10:24:00.000Z",
+  })];
+  const pullRequests = [{
+    number: 120,
+    merged_at: "2026-08-09T10:35:00.000Z",
+    timelineEvents: [
+      { event: "ready_for_review", created_at: "2026-08-09T10:00:00.000Z" },
+      { event: "ready_for_review", created_at: "2026-08-09T10:05:00.000Z" },
+    ],
+    reviews: [{
+      state: "COMMENTED",
+      submitted_at: "2026-08-09T10:10:00.000Z",
+      body: "![P1 Badge](x)",
+    }],
+    reviewComments: [
+      { body: "![P0 Badge](x)" },
+      { body: "![P2 Badge](x)" },
+      { body: "![P3 Badge](x)" },
+      { body: "No priority" },
+    ],
+  }];
+  const jobsByRunId = {
+    700: [job({
+      name: "release-gate",
+      attempt: 1,
+      conclusion: "success",
+      startedAt: "2026-08-09T10:23:00.000Z",
+      completedAt: "2026-08-09T10:24:00.000Z",
+    })],
+  };
+  const flow = summarizeCandidateFlow({ pullRequests, ciRuns, jobsByRunId });
+  assert.equal(flow.readyTransitions, 2);
+  assert.equal(flow.readyTransitionsPerPullRequestAverage, 2);
+  assert.equal(flow.candidateToMergeMinutesP50, 30);
+  assert.equal(flow.reviewMinutesP50, 5);
+  assert.equal(flow.testMinutesP50, 19);
+  assert.equal(flow.mergeWaitMinutesP50, 11);
+  assert.deepEqual(flow.priorityCounts, { P0: 1, P1: 1, P2: 1, P3: 1, unclassified: 1 });
+
+  const report = summarizeCiHealth({
+    periodDays: 30,
+    generatedAt: "2026-08-09T11:00:00.000Z",
+    ciRuns,
+    jobsByRunId,
+    candidateRuns: [],
+    releaseRuns: [],
+    pullRequests,
+    dependencyHealth: "success",
+  });
+  assert.equal(report.candidateFlow.candidateToMergeMinutesP50, 30);
+  assert.equal(report.targetAssessment.metrics.candidateToMergeMinutesP50.status, "met");
+  assert.equal(report.targetAssessment.metrics.mergeWaitMinutesP50.status, "missed");
+  assert.match(renderCiHealthMarkdown(report), /Candidate-to-merge P50/u);
+  assert.match(renderCiHealthMarkdown(report), /Review findings P0\/P1\/P2\/P3/u);
+});
+
 test("CI health separates active gate work from terminal gate metrics", () => {
   const report = summarizeCiHealth({
     periodDays: 30,
@@ -284,7 +348,7 @@ test("CI health exposes complete-gate churn across different SHAs of one Pull Re
     dependencyHealth: "success",
   });
 
-  assert.equal(report.schemaVersion, 4);
+  assert.equal(report.schemaVersion, 5);
   assert.equal(report.sourceGate.pullRequestRuns, 4);
   assert.equal(report.sourceGate.feedbackRuns, 1);
   assert.equal(report.sourceGate.completeRuns, 3);
@@ -424,7 +488,7 @@ test("CI health records cancellation rates without treating pre-review jobs as f
     })],
     jobsByRunId: {
       302: [job({
-        name: "review-settled",
+        name: "review-policy",
         attempt: 1,
         conclusion: "failure",
         startedAt: "2026-08-08T10:00:00.000Z",
@@ -613,6 +677,7 @@ test("CI health workflow stays read-only and retains a machine-readable report",
   assert.match(workflow, /cron: "17 1 \* \* \*"/u);
   assert.match(workflow, /actions: read/u);
   assert.match(workflow, /contents: read/u);
+  assert.match(workflow, /pull-requests: read/u);
   assert.match(workflow, /ci-health-report\.mjs/u);
   assert.match(workflow, /name: dependency-health/u);
   assert.match(workflow, /npm run audit:dependencies/u);
@@ -633,6 +698,8 @@ test("CI health workflow stays read-only and retains a machine-readable report",
   assert.match(reportScript, /workflow: CI_HEALTH_WORKFLOW_INPUTS\.releaseDryRun/u);
   assert.match(reportScript, /workflow: CI_HEALTH_WORKFLOW_INPUTS\.releaseCandidate/u);
   assert.match(reportScript, /workflow: CI_HEALTH_WORKFLOW_INPUTS\.release/u);
+  assert.match(reportScript, /pullRequestMetrics\(\{ repositoryPath, token, since \}\)/u);
+  assert.match(reportScript, /Candidate-to-merge P50/u);
   assert.match(reportScript, /\| Metric \| Actual \| Target \| Status \|/u);
   assert.match(reportScript, /Cancelled completed promoted candidates/u);
 });

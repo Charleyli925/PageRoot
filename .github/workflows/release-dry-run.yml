@@ -1,68 +1,36 @@
 name: Release Dry Run
-run-name: "Credential-free release dry run for PR #${{ github.event.pull_request.number }}"
+run-name: "Credential-free release dry run for candidate ${{ inputs.pull_request_number }}"
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened]
-    paths:
-      - .github/workflows/developer-preview.yml
-      - .github/workflows/release-candidate.yml
-      - .github/workflows/release-dry-run.yml
-      - .github/workflows/release.yml
-      - package.json
-      - package-lock.json
-      - desktop/**
-      - public/brand-logo.png
-      - schemas/**
-      - shared/**
-      - scripts/attachment-storage.mjs
-      - scripts/build-package.mjs
-      - scripts/candidate-assessment.mjs
-      - scripts/ci-evidence.mjs
-      - scripts/create-release-assets.mjs
-      - scripts/developer-preview.mjs
-      - scripts/draft-aggregate.mjs
-      - scripts/draft-service.mjs
-      - scripts/finalize-attempt.mjs
-      - scripts/html-source-parser.mjs
-      - scripts/lifecycle-core.mjs
-      - scripts/package-delivery-report.mjs
-      - scripts/packaged-app-identity.mjs
-      - scripts/product-contract.mjs
-      - scripts/project-context-service.mjs
-      - scripts/record-user-supplement.mjs
-      - scripts/release-app-checkpoint.mjs
-      - scripts/release-app-stage.mjs
-      - scripts/release-candidate-provenance.mjs
-      - scripts/release-provenance.mjs
-      - scripts/scope-validator.mjs
-      - scripts/source-gate-provenance.mjs
-      - scripts/source-history-service.mjs
-      - scripts/target-identity.mjs
-      - scripts/user-supplement-core.mjs
-      - scripts/verify-packaged-artifact.mjs
-      - scripts/workspace-bridge.mjs
-      - tests/desktop-package.test.mjs
-      - tests/developer-preview-package.test.mjs
-      - tests/e2e/electron/packaged-runtime-smoke.spec.mjs
-      - tests/e2e/electron/packaged-startup-smoke.spec.mjs
-      - tests/e2e/electron/playwright.packaged-startup.config.mjs
-      - tests/e2e/electron/playwright.packaged.config.mjs
-      - tests/packaged-artifact-gate.test.mjs
-      - tests/release-app-stage.test.mjs
-      - tests/test-impact-map.json
-      - LICENSE
-      - NOTICE
-      - PRIVACY.md
-      - THIRD_PARTY_NOTICES.md
-      - PageRoot 用户声明与免责声明.txt
+  workflow_call:
+    inputs:
+      pull_request_number:
+        description: "Candidate Pull Request number for evidence labels"
+        required: true
+        type: string
+      source_head:
+        description: "Exact final candidate head SHA"
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      pull_request_number:
+        description: "Candidate Pull Request number or manual label"
+        required: false
+        default: "manual"
+        type: string
+      source_head:
+        description: "Exact candidate SHA or ref to dry run"
+        required: true
+        default: "main"
+        type: string
 
 permissions:
   actions: read
   contents: read
 
 concurrency:
-  group: release-dry-run-pr-${{ github.event.pull_request.number }}
+  group: release-dry-run-${{ inputs.pull_request_number || inputs.source_head || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -76,6 +44,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         timeout-minutes: 5
         with:
+          ref: ${{ inputs.source_head }}
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -172,6 +141,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         timeout-minutes: 5
         with:
+          ref: ${{ inputs.source_head }}
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0

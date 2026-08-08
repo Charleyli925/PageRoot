@@ -1,0 +1,45 @@
+name: Review Debt
+
+on:
+  schedule:
+    - cron: "23 2 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: write
+
+concurrency:
+  group: review-debt
+  cancel-in-progress: true
+
+jobs:
+  rollup:
+    name: weekly-deferred-review-rollup
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      # Scheduled/manual runs execute only this trusted default-branch workflow.
+      # No Pull Request head is checked out, changed, or merged here.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.13.0
+      - name: Refresh weekly P2/P3 review debt issue
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          node scripts/review-debt.mjs sync
+          --repository "$GITHUB_REPOSITORY"
+          --days 7
+      - name: Upload review-debt snapshot
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: PageRoot-review-debt-${{ github.run_id }}
+          path: output/review-debt/review-debt.json
+          if-no-files-found: error
+          retention-days: 90

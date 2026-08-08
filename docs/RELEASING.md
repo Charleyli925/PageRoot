@@ -31,11 +31,13 @@ this source-composition step happens before the package gate.
 
 ## Credential-free PR release dry run
 
-Pull Requests automatically run `Release Dry Run` only when their changed paths
-can affect packaging, release/build metadata, Electron, packaged Bridge code,
-Schemas or bundled resources. Ordinary UI or documentation-only PRs do not run
-it. The workflow has no `workflow_dispatch` publication authority and does not
-reference `secrets.*`.
+Ready candidates invoke `Release Dry Run` only when `candidate-context`
+classifies their changed paths as able to affect packaging, release/build
+metadata, Electron, packaged Bridge code, Schemas or bundled resources. Ordinary
+UI or documentation-only candidates skip it successfully. Changed-file count is
+reported only as advisory scope; it is never a PR-size rejection. The reusable
+workflow can be manually dispatched for diagnosis but has no publication
+authority and does not reference `secrets.*`.
 
 The first clean macOS job builds the Electron renderer, generates exact
 `build-info.json` plus an enabled telemetry configuration using a fixed
@@ -120,10 +122,10 @@ succeeded technically but installer handoff is incomplete.
 
 1. Update `package.json` and the package-lock root to the same semantic version.
 2. Move relevant `CHANGELOG.md` entries from Unreleased into that version.
-3. Open a draft Pull Request while iterating. Every ordinary update runs impact-selected `PR Feedback` only.
-4. Update the final head onto current `main`, freeze it and, while still Draft, post the exact-head/base Codex request defined in `docs/CODEX_WORKFLOW.md`. Address P0-P2 findings, resolve fixed threads and repeat for every new head or base.
-5. Ensure the Draft review has a non-blocking completion signal, not a Codex environment/setup error or current-commit `CHANGES_REQUESTED`, and no other PR is being promoted; then mark this reviewed pair Ready once. Ready is the sole final-review trigger, so do not post another review command while it runs. `review-settled` continuously revalidates both SHAs, proves the pre-Ready Draft completion plus the Ready-triggered non-blocking substantive exact-commit review, immutable exact-commit clean comment or phase-correct clean reaction, preserves Draft evidence when Ready replaces its provisional thumbs-up, ignores empty reviews and `EYES`, then waits a 180-second settle window. A post-Ready current-commit `CHANGES_REQUESTED` starts that window and blocks afterward even without an inline thread. Only after a non-blocking result may `baseline-policy` run the unchanged advisory threshold and packaged-runtime closure check.
-6. Wait for the original complete source lanes and required `release-gate`. If review or baseline fails, the Linux build, Browser and macOS Electron lanes remain unstarted. The final gate refreshes the same dependency/runtime-closure audit before attestation, including on delayed failed-job retries whose original `baseline-policy` job remains green. If any commit or base update follows promotion, return the PR to Draft, update the branch onto the new base so it has a new head, and repeat steps 4-5; an old `release-gate` and attestation cannot satisfy the new head/base pair. A strict canonical request history that binds one unchanged head to multiple bases fails closed rather than guessing which invocation produced commit-only evidence.
+3. Open a draft Pull Request while iterating. Every ordinary update runs impact-selected `PR Feedback` only. Batch accepted P0/P1 corrections before promotion; P2/P3/unclassified findings remain debt unless deliberately escalated.
+4. Update the final head onto current `main`, freeze it and mark it Ready once. Ready starts the one final `review-policy` check; do not post a separate Draft marker or another review command while it runs.
+5. `review-policy` continuously revalidates both SHAs, requires a Ready-triggered substantive exact-commit Codex review or immutable exact-commit clean comment, then waits 30 seconds. It blocks active P0/P1 findings and P0/P1 `CHANGES_REQUESTED` reviews; P2/P3/unclassified findings are captured as debt regardless of reviewer. `branch-policy` and deterministic `baseline-policy` run independently, so source tests can execute while final review is still settling.
+6. Wait for the complete source lanes, any relevant candidate-only dry run and required `release-gate`. The final gate immediately revalidates review policy and refreshes the same dependency/runtime-closure audit before attestation, including on delayed failed-job retries whose original `baseline-policy` job remains green. If any commit or base update follows promotion, return the PR to Draft, update the branch onto the new base so it has a new head, batch required P0/P1 work and Ready the new final pair; an old `release-gate` and attestation cannot satisfy the new head/base pair.
 7. Merge only with authorization, then confirm `main-integrity` accepts the exact merge Tree/version/PR attestation without rerunning source tests.
 
 Local `npm run release:mac` remains available when a complete local source-and-installer proof is useful. It is not publication and does not replace the reviewed GitHub flow.

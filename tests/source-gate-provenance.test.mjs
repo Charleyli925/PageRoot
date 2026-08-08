@@ -120,16 +120,18 @@ test("failed runs, expired artifacts and non-PR commits are never trusted", () =
   })).reason, "no_merged_pull_request");
 });
 
-test("GitHub workflows keep one reviewed ready-PR source boundary, an exact-tree main boundary and a pre-tag artifact boundary", async () => {
-  const [ci, feedback, candidate, release, packageText] = await Promise.all([
+test("GitHub workflows run tests in parallel with one final-review policy and keep exact-tree release provenance", async () => {
+  const [ci, feedback, dryRun, candidate, release, packageText] = await Promise.all([
     readFile(path.join(productRoot, ".github/workflows/ci.yml"), "utf8"),
     readFile(path.join(productRoot, ".github/workflows/pr-feedback.yml"), "utf8"),
+    readFile(path.join(productRoot, ".github/workflows/release-dry-run.yml"), "utf8"),
     readFile(path.join(productRoot, ".github/workflows/release-candidate.yml"), "utf8"),
     readFile(path.join(productRoot, ".github/workflows/release.yml"), "utf8"),
     readFile(path.join(productRoot, "package.json"), "utf8"),
   ]);
   const packageJson = JSON.parse(packageText);
-  const reviewSettled = workflowJob(ci, "review-settled");
+  const reviewPolicy = workflowJob(ci, "review-policy");
+  const candidateContext = workflowJob(ci, "candidate-context");
   const baselinePolicy = workflowJob(ci, "baseline-policy");
   const sourceBuild = workflowJob(ci, "source-build");
   const sourceNode = workflowJob(ci, "source-node");
@@ -146,17 +148,25 @@ test("GitHub workflows keep one reviewed ready-PR source boundary, an exact-tree
   assert.doesNotMatch(ci, /gh pr merge|mergePullRequest/u);
   assert.doesNotMatch(ci, /name: (?:draft|pr)-feedback/u);
   assert.match(ci, /issues: read/u);
-  assert.match(reviewSettled, /name: review-settled/u);
-  assert.match(reviewSettled, /check-pr-review-settled\.mjs/u);
-  assert.match(reviewSettled, /--expected-head "\$\{\{ github\.event\.pull_request\.head\.sha \}\}"/u);
-  assert.match(reviewSettled, /--expected-base "\$\{\{ github\.event\.pull_request\.base\.sha \}\}"/u);
-  assert.match(reviewSettled, /--settle-seconds 180/u);
-  assert.match(reviewSettled, /--timeout-seconds 1200/u);
-  assert.match(reviewSettled, /--poll-seconds 20/u);
+  assert.match(reviewPolicy, /name: review-policy/u);
+  assert.match(reviewPolicy, /check-pr-review-policy\.mjs/u);
+  assert.match(reviewPolicy, /--expected-head "\$\{\{ github\.event\.pull_request\.head\.sha \}\}"/u);
+  assert.match(reviewPolicy, /--expected-base "\$\{\{ github\.event\.pull_request\.base\.sha \}\}"/u);
+  assert.match(reviewPolicy, /--settle-seconds 30/u);
+  assert.match(reviewPolicy, /--timeout-seconds 900/u);
+  assert.match(reviewPolicy, /--poll-seconds 15/u);
+  assert.match(reviewPolicy, /--mode wait/u);
+  assert.match(reviewPolicy, /PageRoot-review-policy-\$\{\{ github\.run_id \}\}/u);
+  assert.match(reviewPolicy, /output\/review-policy\/review-policy\.json/u);
+  assert.doesNotMatch(reviewPolicy, /Draft|exact_sha_review/u);
+  assert.match(candidateContext, /classify-pr-candidate\.mjs/u);
+  assert.match(candidateContext, /advisory_only|PR-size limit/u);
   assert.match(baselinePolicy, /name: baseline-policy/u);
-  assert.match(baselinePolicy, /needs:[\s\S]*- review-settled[\s\S]*- branch-policy/u);
+  assert.match(baselinePolicy, /needs:[\s\S]*- branch-policy/u);
+  assert.doesNotMatch(baselinePolicy, /review-policy/u);
   assert.match(baselinePolicy, /npm run audit:dependencies/u);
-  assert.match(sourceBuild, /needs:[\s\S]*- review-settled[\s\S]*- baseline-policy/u);
+  assert.match(sourceBuild, /needs:[\s\S]*- baseline-policy/u);
+  assert.doesNotMatch(sourceBuild, /review-policy/u);
   assert.match(sourceBuild, /npm run ci:source-build:prepared/u);
   assert.match(sourceBuild, /name: PageRoot-web-build-\$\{\{ github\.run_id \}\}/u);
   assert.match(sourceBuild, /retention-days: 30/u);
@@ -166,13 +176,17 @@ test("GitHub workflows keep one reviewed ready-PR source boundary, an exact-tree
   assert.match(sourceBrowser, /name: PageRoot-web-build-\$\{\{ github\.run_id \}\}/u);
   assert.doesNotMatch(sourceNode, /PageRoot-web-build-[^\n]*run_attempt/u);
   assert.doesNotMatch(sourceBrowser, /PageRoot-web-build-[^\n]*run_attempt/u);
-  assert.match(electronNative, /needs:[\s\S]*- review-settled[\s\S]*- baseline-policy/u);
-  assert.match(electronAi, /needs:[\s\S]*- review-settled[\s\S]*- baseline-policy/u);
+  assert.match(electronNative, /needs:[\s\S]*- baseline-policy/u);
+  assert.match(electronAi, /needs:[\s\S]*- baseline-policy/u);
+  assert.doesNotMatch(electronNative, /review-policy/u);
+  assert.doesNotMatch(electronAi, /review-policy/u);
   assert.match(ci, /name: release-gate/u);
-  assert.match(releaseGate, /needs:[\s\S]*- review-settled[\s\S]*- baseline-policy/u);
-  assert.match(releaseGate, /REVIEW_RESULT: \$\{\{ needs\.review-settled\.result \}\}/u);
+  assert.match(releaseGate, /needs:[\s\S]*- review-policy[\s\S]*- baseline-policy/u);
+  assert.match(releaseGate, /needs:[\s\S]*- candidate-context[\s\S]*- release-dry-run/u);
+  assert.match(releaseGate, /REVIEW_RESULT: \$\{\{ needs\.review-policy\.result \}\}/u);
   assert.match(releaseGate, /BASELINE_RESULT: \$\{\{ needs\.baseline-policy\.result \}\}/u);
-  assert.match(releaseGate, /Revalidate frozen head\/base review evidence/u);
+  assert.match(releaseGate, /Revalidate frozen head\/base final-review policy immediately/u);
+  assert.match(releaseGate, /--mode revalidate/u);
   assert.match(releaseGate, /--expected-head "\$\{\{ github\.event\.pull_request\.head\.sha \}\}"/u);
   assert.match(releaseGate, /--expected-base "\$\{\{ github\.event\.pull_request\.base\.sha \}\}"/u);
   assert.match(releaseGate, /Refresh dependency and packaged-runtime baseline before attestation/u);
@@ -213,6 +227,15 @@ test("GitHub workflows keep one reviewed ready-PR source boundary, an exact-tree
     packageJson.scripts["ci:source-build:prepared"],
     "npm run typecheck && npm run lint && npm run build",
   );
+
+  assert.match(ci, /uses: \.\/\.github\/workflows\/release-dry-run\.yml/u);
+  assert.match(ci, /packaging_required == 'true'/u);
+  assert.match(dryRun, /workflow_call:/u);
+  assert.match(dryRun, /workflow_dispatch:/u);
+  assert.doesNotMatch(dryRun, /^\s+pull_request:/mu);
+  assert.match(dryRun, /ref: \$\{\{ inputs\.source_head \}\}/u);
+  assert.match(dryRun, /persist-credentials: false/u);
+  assert.doesNotMatch(dryRun, /secrets:|gh release create|APPLE_/u);
 
   assert.match(candidate, /source-gate-provenance\.mjs verify/u);
   assert.match(candidate, /gate:candidate-app:auto/u);
