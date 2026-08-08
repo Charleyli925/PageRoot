@@ -244,6 +244,32 @@ test("stable ID lookup does not consume the cap with same-token name hosts", () 
   );
 });
 
+test("stable data selectors keep the exact value ahead of same-attribute cap", () => {
+  const unrelatedHosts = Array.from(
+    { length: RUNTIME_VISUAL_CONTRACT.candidateLimit },
+    (_, index) => `<div data-chart="early-${index}"></div>`,
+  ).join("");
+  const source = `<!doctype html><main>${unrelatedHosts}
+    <div data-chart="late"></div>
+    <script>
+      document.querySelector('[data-chart="late"]').appendChild(document.createElement("svg"));
+    </script>
+  </main>`;
+  const sourceIndex = buildSourceIndex(source);
+  const prepared = prepareRuntimeVisualCapture({
+    html: source,
+    sourcePath: "/tmp/data-selector-runtime-host.html",
+    viewportWidth: 900,
+  });
+  assert.equal(prepared?.candidates.length, RUNTIME_VISUAL_CONTRACT.candidateLimit);
+  const firstCandidate = prepared?.candidates[0];
+  assert.equal(
+    firstCandidate && sourceIndex.byNodeId.get(firstCandidate.sourceNodeId)
+      ?.stableAttributes["data-chart"],
+    "late",
+  );
+});
+
 test("named ID property references retain their exact host", () => {
   const source = `<!doctype html><main>
     <div id="chart"></div>

@@ -80,6 +80,7 @@ const STABLE_RUNTIME_SELECTOR_LITERAL = /^("|'|`)(?:#[A-Za-z_][\w-]*|\.[A-Za-z_]
 const STABLE_RUNTIME_ID_LITERAL = /^("|'|`)[A-Za-z_][\w:.-]*\1$/u;
 const RUNTIME_CLASS_ATTRIBUTE_SELECTOR = /^\[\s*class(?:\s*(?<operator>[~|^$*]?=)\s*(?<value>[A-Za-z0-9_-]+|"[^"]*"|'[^']*'|`[^`]*`))?\s*\]$/u;
 const RUNTIME_IDENTITY_ATTRIBUTE_SELECTOR = /^\[\s*(?<name>id|name)(?:\s*(?<operator>[~|^$*]?=)\s*(?<value>[A-Za-z0-9_-]+|"[^"]*"|'[^']*'|`[^`]*`))?\s*\]$/u;
+const RUNTIME_DATA_ATTRIBUTE_SELECTOR = /^\[\s*(?<name>data-[\w-]+)(?:\s*(?<operator>[~|^$*]?=)\s*(?<value>[A-Za-z0-9_-]+|"[^"]*"|'[^']*'|`[^`]*`))?\s*\]$/u;
 const acceptedProjectionAuthority = new WeakSet();
 
 function reusableSourceIndex(html, candidate) {
@@ -167,6 +168,7 @@ function candidateReferenceTokens(element) {
       tokens.push({
         value: attribute.value ?? attribute.rawValue ?? "",
         kind: "data-value",
+        attributeName: attribute.name,
       });
     }
   }
@@ -258,6 +260,37 @@ function runtimeAttributeSelectorMatches(source, value, kind) {
   });
 }
 
+function runtimeDataAttributeSelectorMatches(source, attributeName, value, kind) {
+  let sawAttributeSelector = false;
+  for (const match of source.matchAll(RUNTIME_DOM_QUERY_CALL)) {
+    const literal = match[1].trim();
+    if (!STABLE_RUNTIME_SELECTOR_LITERAL.test(literal)) continue;
+    const selector = runtimeSelectorLiteralValue(literal);
+    if (selector === null) continue;
+    const dataSelector = selector.match(RUNTIME_DATA_ATTRIBUTE_SELECTOR);
+    if (dataSelector?.groups?.name !== attributeName) continue;
+    sawAttributeSelector = true;
+    const operator = dataSelector.groups.operator;
+    if (kind === "data-attribute") {
+      if (!operator) return true;
+      continue;
+    }
+    if (kind !== "data-value" || !operator) continue;
+    const expected = runtimeSelectorLiteralValue(dataSelector.groups.value)
+      ?? dataSelector.groups.value;
+    const actual = String(value);
+    if (
+      (operator === "=" && actual === expected)
+      || (operator === "~=" && actual.split(/[\t\n\f\r ]+/u).includes(expected))
+      || (operator === "^=" && actual.startsWith(expected))
+      || (operator === "$=" && actual.endsWith(expected))
+      || (operator === "*=" && actual.includes(expected))
+      || (operator === "|=" && (actual === expected || actual.startsWith(`${expected}-`)))
+    ) return true;
+  }
+  return sawAttributeSelector ? false : null;
+}
+
 function sourceReferencesToken(source, tokenDescriptor) {
   const value = String(
     typeof tokenDescriptor === "object"
@@ -270,6 +303,16 @@ function sourceReferencesToken(source, tokenDescriptor) {
   if (value.length < 3 && kind !== "identity-attribute") return false;
   if (kind === "id-value" || kind === "name-value") {
     return runtimeIdentityValueMatches(source, value, kind);
+  }
+  if (kind === "data-attribute" || kind === "data-value") {
+    const dataSelectorReference = runtimeDataAttributeSelectorMatches(
+      source,
+      tokenDescriptor?.attributeName ?? value,
+      value,
+      kind,
+    );
+    if (dataSelectorReference !== null) return dataSelectorReference;
+    if (kind === "data-attribute") return false;
   }
   const attributeSelectorReference = (
     (kind === "class" || kind === "class-value" || kind === "identity-attribute")
