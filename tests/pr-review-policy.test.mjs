@@ -118,6 +118,24 @@ test("policy rejects stale heads, missing Ready evidence, unfinished final revie
   assert.equal(p0.blockingFindings[0].priority, "P0");
 });
 
+test("an active same-head P0/P1 changes request from Draft still blocks after Ready", () => {
+  const result = evaluate({
+    reviews: [
+      codexReview(),
+      codexReview({
+        id: 11,
+        actor: "maintainer",
+        state: "CHANGES_REQUESTED",
+        submittedAt: "2026-08-09T03:59:00.000Z",
+        body: "![P1 Badge](x) This is still unresolved.",
+      }),
+    ],
+  });
+  assert.equal(result.status, "blocked");
+  assert.equal(result.reason, "blocking_review_finding");
+  assert.equal(result.blockingFindings[0].priority, "P1");
+});
+
 test("P2/P3/unclassified findings are recorded without blocking a final candidate", () => {
   const result = evaluate({
     reviewThreads: [thread({ priority: "P2" }), thread({ priority: "P3", id: 21 }), {

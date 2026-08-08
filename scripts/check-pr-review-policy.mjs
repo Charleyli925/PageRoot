@@ -251,10 +251,7 @@ export function evaluateReviewPolicy({
   const readyAt = new Date(readyAtMs).toISOString();
 
   const reviewFindings = (reviews || [])
-    .filter((review) => (
-      reviewCommitSha(review) === expectedHead
-      && inOpenInterval(reviewSubmittedAt(review), readyAtMs)
-    ))
+    .filter((review) => reviewCommitSha(review) === expectedHead)
     .map(classifyReviewState);
   const threadFindings = (reviewThreads || []).map(classifyReviewThread);
   const blockingFindings = [
