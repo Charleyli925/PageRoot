@@ -24,7 +24,9 @@ the same frozen values and the accompanying TypeScript declarations.
 | Session identity | Validated `review-*` identity plus contract version and side-specific source SHA |
 
 Computed selectors, computed `getElementById` calls, generic selectors, external
-scripts, and broad DOM mutation are conservative dependencies. They may widen
+scripts, and broad DOM mutation are conservative dependencies. Stable host
+references use token-exact matching, so `chart` cannot match the distinct
+identifier `late-chart`; these dependencies may widen
 the set of exact source-empty candidates and fold the complete source Hash into
 the dependency, but they never authorize a guessed runtime node or a rebound
 TargetRef. A source Hash change starts a new cache partition, clears the mounted

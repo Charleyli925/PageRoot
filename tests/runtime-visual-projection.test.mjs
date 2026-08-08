@@ -172,7 +172,7 @@ test("external runtime scripts do not hide candidates referenced by another scri
 test("directly referenced runtime hosts keep priority before the shared candidate cap", () => {
   const unrelatedHosts = Array.from(
     { length: RUNTIME_VISUAL_CONTRACT.candidateLimit },
-    (_, index) => `<div class="unrelated-${index}"></div>`,
+    () => `<div class="chart"></div>`,
   ).join("");
   const source = `<!doctype html><main>${unrelatedHosts}
     <div id="late-chart"></div>

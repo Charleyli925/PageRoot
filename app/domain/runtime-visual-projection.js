@@ -160,6 +160,22 @@ function candidateReferenceTokens(element) {
   return [...tokens].filter((token) => String(token).length >= 3);
 }
 
+function sourceReferencesToken(source, token) {
+  const value = String(token ?? "");
+  if (value.length < 3) return false;
+  let offset = source.indexOf(value);
+  while (offset >= 0) {
+    const before = offset > 0 ? source[offset - 1] : "";
+    const after = source[offset + value.length] || "";
+    if (
+      !/[A-Za-z0-9_-]/u.test(before)
+      && !/[A-Za-z0-9_-]/u.test(after)
+    ) return true;
+    offset = source.indexOf(value, offset + 1);
+  }
+  return false;
+}
+
 function runtimeExecutableSources(sourceIndex) {
   const scripts = sourceIndex.elements.filter(
     (element) => element.tagName === "script",
@@ -225,7 +241,9 @@ function runtimeReferencedCandidates(sourceIndex, candidates) {
         element,
         handlerOwnerNodeIds,
       )
-      || candidateReferenceTokens(element).some((token) => source.includes(token))
+      || candidateReferenceTokens(element).some((token) => (
+        sourceReferencesToken(source, token)
+      ))
     );
   });
   const hasExternalScript = scripts.some(
@@ -287,9 +305,9 @@ function runtimeDependencySha256(sourceIndex, candidates) {
     ? sourceIndex.elements
       .filter((element) => (
         !RUNTIME_DEPENDENCY_TAGS.has(element.tagName)
-        && candidateReferenceTokens(element).some(
-          (token) => scriptSource.includes(token),
-        )
+        && candidateReferenceTokens(element).some((token) => (
+          sourceReferencesToken(scriptSource, token)
+        ))
       ))
       .map((element) => [element.tagName, element.selector, element.raw])
     : [];
