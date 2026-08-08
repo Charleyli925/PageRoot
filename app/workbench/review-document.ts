@@ -418,7 +418,7 @@ const GENERIC_RUNTIME_VISUAL_CLASSES = new Set([
 
 type ReviewTextInventory = {
   text: string;
-  nodes: Array<{ node: Text; start: number; end: number }>;
+  nodes: Array<{ node: Text; start: number; end: number; nodeOffset: number }>;
   breakOffsets: number[];
 };
 
@@ -437,7 +437,7 @@ function reviewTextInventoryForNodes(sourceNodes: Iterable<Node>): ReviewTextInv
       const value = node.textContent || "";
       const start = text.length;
       text += value;
-      nodes.push({ node: node as Text, start, end: text.length });
+      nodes.push({ node: node as Text, start, end: text.length, nodeOffset: 0 });
       return;
     }
     if (!(node instanceof Element)) return;
@@ -1872,7 +1872,7 @@ function wrapTextRanges(
   const annotatedRanges = groups.flatMap((group) => (
     mergeReviewTextRanges(group.ranges).map((range) => ({ ...range, group }))
   )).sort((left, right) => left.start - right.start || left.end - right.end);
-  inventory.nodes.forEach(({ node, start, end }) => {
+  inventory.nodes.forEach(({ node, start, end, nodeOffset }) => {
     const intersections = annotatedRanges
       .map((range) => ({
         start: Math.max(start, range.start),
@@ -1894,8 +1894,8 @@ function wrapTextRanges(
     };
     let cursor = 0;
     intersections.forEach((range) => {
-      const localStart = range.start - start;
-      const localEnd = range.end - start;
+      const localStart = nodeOffset + range.start - start;
+      const localEnd = nodeOffset + range.end - start;
       if (localStart > cursor) {
         fragment.append(source.slice(cursor, localStart));
       }
@@ -1906,24 +1906,6 @@ function wrapTextRanges(
       fragment.append(source.slice(cursor));
     }
     node.replaceWith(fragment);
-  });
-}
-
-function wrapTextContext(
-  inventory: ReviewTextInventory,
-  tone: "removed" | "added",
-  changeKind: "before" | "after",
-  group: ReviewTextFootprintGroup,
-) {
-  inventory.nodes.forEach(({ node }) => {
-    const value = node.textContent || "";
-    if (!value.trim()) return;
-    const marker = node.ownerDocument.createElement("span");
-    marker.dataset.pagerootReviewTextContext = tone;
-    marker.dataset.pagerootReviewTextChange = changeKind;
-    applyTextFootprintMetadata(marker, group);
-    marker.textContent = value;
-    node.replaceWith(marker);
   });
 }
 
@@ -1973,7 +1955,32 @@ const REVIEW_TEXT_BLOCK_TAGS = new Set([
 type ReviewTextBlock = {
   anchor: Element;
   inventory: ReviewTextInventory;
+  anchorOffset: number;
 };
+
+function reviewTextBlockAnchorOffset(
+  anchor: Element,
+  inventory: ReviewTextInventory,
+): number {
+  const firstEntry = inventory.nodes[0];
+  if (!firstEntry) return 0;
+  let offset = 0;
+  const walker = anchor.ownerDocument.createTreeWalker(anchor, NodeFilter.SHOW_TEXT);
+  let node = walker.nextNode();
+  while (node) {
+    const parent = node.parentElement;
+    if (
+      parent
+      && !parent.closest("script, style, noscript, template, [data-pageroot-review-projection-layer]")
+      && parent.namespaceURI === "http://www.w3.org/1999/xhtml"
+    ) {
+      if (node === firstEntry.node) return offset + firstEntry.nodeOffset;
+      offset += node.textContent?.length || 0;
+    }
+    node = walker.nextNode();
+  }
+  return 0;
+}
 
 function isReviewTextBlockElement(element: Element): boolean {
   return element.namespaceURI === "http://www.w3.org/1999/xhtml"
@@ -1993,6 +2000,7 @@ function sliceReviewTextInventory(
         node: entry.node,
         start: Math.max(entry.start, start) - start,
         end: Math.min(entry.end, end) - start,
+        nodeOffset: entry.nodeOffset + Math.max(0, start - entry.start),
       })),
     breakOffsets: inventory.breakOffsets
       .filter((offset) => offset > start && offset < end)
@@ -2030,13 +2038,18 @@ function flowEndsAtHardBoundary(nodes: Node[]): boolean {
 
 function reviewTextBlocks(region: Element): ReviewTextBlock[] {
   const blocks: ReviewTextBlock[] = [];
+  const appendBlock = (anchor: Element, inventory: ReviewTextInventory) => {
+    blocks.push({
+      anchor,
+      inventory,
+      anchorOffset: reviewTextBlockAnchorOffset(anchor, inventory),
+    });
+  };
   const collect = (container: Element) => {
     let flow: Node[] = [];
     const flush = () => {
       if (!flow.length) return;
-      semanticTextInventories(flow).forEach((inventory) => {
-        blocks.push({ anchor: container, inventory });
-      });
+      semanticTextInventories(flow).forEach((inventory) => appendBlock(container, inventory));
       flow = [];
     };
     container.childNodes.forEach((node) => {
@@ -2056,9 +2069,35 @@ function reviewTextBlocks(region: Element): ReviewTextBlock[] {
   collect(region);
   if (!blocks.length) {
     const inventory = reviewTextInventory(region);
-    if (inventory.text.trim()) blocks.push({ anchor: region, inventory });
+    if (inventory.text.trim()) appendBlock(region, inventory);
   }
   return blocks;
+}
+
+function textGeometryOwner(block: ReviewTextBlock): Element {
+  const textNodes = block.inventory.nodes.map((entry) => entry.node);
+  let candidate: Element | null = textNodes[0]?.parentElement || block.anchor;
+  while (candidate && block.anchor.contains(candidate)) {
+    const owner: Element = candidate;
+    if (textNodes.every((node) => owner.contains(node))) return owner;
+    if (owner === block.anchor) break;
+    candidate = owner.parentElement;
+  }
+  return block.anchor;
+}
+
+function markTextLayoutDifference(
+  before: ReviewTextBlock,
+  after: ReviewTextBlock,
+  groupId: string,
+) {
+  const mark = (block: ReviewTextBlock, side: "before" | "after") => {
+    const owner = textGeometryOwner(block);
+    owner.setAttribute("data-pageroot-review-layout", side);
+    owner.setAttribute("data-pageroot-review-layout-owner", `layout-${groupId}`);
+  };
+  mark(before, "before");
+  mark(after, "after");
 }
 
 function textBlockPairScore(
@@ -2178,60 +2217,58 @@ function sameBreakLayout(before: ReviewTextInventory, after: ReviewTextInventory
     && before.breakOffsets.every((offset, index) => offset === after.breakOffsets[index]);
 }
 
-function markTextDifferences(before: Element | null, after: Element | null): boolean {
-  let changed = false;
+type TextDifferenceMarking = {
+  textChanged: boolean;
+  layoutChanged: boolean;
+};
+
+function markTextDifferences(
+  before: Element | null,
+  after: Element | null,
+): TextDifferenceMarking {
+  let textChanged = false;
+  let layoutOnlyChanged = false;
   if (!before && after) {
     reviewTextBlocks(after).forEach((element, index) => {
-      changed = markAllText(element, "added", `text-${index + 1}-1`) || changed;
+      textChanged = markAllText(element, "added", `text-${index + 1}-1`) || textChanged;
     });
-    return changed;
+    return { textChanged, layoutChanged: layoutOnlyChanged };
   }
   if (before && !after) {
     reviewTextBlocks(before).forEach((element, index) => {
-      changed = markAllText(element, "removed", `text-${index + 1}-1`) || changed;
+      textChanged = markAllText(element, "removed", `text-${index + 1}-1`) || textChanged;
     });
-    return changed;
+    return { textChanged, layoutChanged: layoutOnlyChanged };
   }
-  if (!before || !after) return false;
+  if (!before || !after) return { textChanged, layoutChanged: layoutOnlyChanged };
   pairTextBlocks(reviewTextBlocks(before), reviewTextBlocks(after)).forEach((pair, pairIndex) => {
     const groupBase = `text-${pairIndex + 1}`;
     if (!pair.before && pair.after) {
-      changed = markAllText(pair.after, "added", `${groupBase}-1`) || changed;
+      textChanged = markAllText(pair.after, "added", `${groupBase}-1`) || textChanged;
       return;
     }
     if (pair.before && !pair.after) {
-      changed = markAllText(pair.before, "removed", `${groupBase}-1`) || changed;
+      textChanged = markAllText(pair.before, "removed", `${groupBase}-1`) || textChanged;
       return;
     }
     if (!pair.before || !pair.after) return;
     const beforeInventory = pair.before.inventory;
     const afterInventory = pair.after.inventory;
-    const layoutChanged = !sameBreakLayout(beforeInventory, afterInventory);
-    if (beforeInventory.text === afterInventory.text) {
-      if (!layoutChanged) return;
-      const group: ReviewTextFootprintGroup = {
-        id: `${groupBase}-1`,
-        ranges: [{ start: 0, end: beforeInventory.text.length }],
-        scope: "block",
-        density: 1,
-      };
-      markTextFootprintOwner(pair.before.anchor, [group]);
-      markTextFootprintOwner(pair.after.anchor, [group]);
-      wrapTextContext(beforeInventory, "removed", "before", group);
-      wrapTextContext(afterInventory, "added", "after", group);
-      changed = true;
-      return;
-    }
-    const differences = sentenceAwareTextDifferences(
-      beforeInventory.text,
-      afterInventory.text,
-    );
-    if (!differences.before.length && !differences.after.length && !layoutChanged) return;
+    const breakLayoutChanged = !sameBreakLayout(beforeInventory, afterInventory);
+    const differences = beforeInventory.text === afterInventory.text
+      ? { before: [], after: [] }
+      : sentenceAwareTextDifferences(beforeInventory.text, afterInventory.text);
     const plan = readableReviewTextFootprintPlan(
       beforeInventory.text,
       afterInventory.text,
-      differences,
+      { ...differences, layout: breakLayoutChanged },
     );
+    if (plan.operation === "none") return;
+    if (plan.operation === "layout") {
+      markTextLayoutDifference(pair.before, pair.after, `${groupBase}-1`);
+      layoutOnlyChanged = true;
+      return;
+    }
     const preferredSummary = plan.scope === "block"
       && differences.before.length
       && differences.after.length
@@ -2259,9 +2296,13 @@ function markTextDifferences(before: Element | null, after: Element | null): boo
         "removed",
         plan.operation === "replace" ? "before" : "removed",
       );
-      changed = true;
+      textChanged = true;
     } else if (plan.before.anchorOffset !== null) {
-      markTextAnchor(pair.before.anchor, `${groupBase}-1`, plan.before.anchorOffset);
+      markTextAnchor(
+        pair.before.anchor,
+        `${groupBase}-1`,
+        pair.before.anchorOffset + plan.before.anchorOffset,
+      );
     }
     if (plan.after.footprintGroups.length) {
       markTextFootprintOwner(pair.after.anchor, afterGroups);
@@ -2271,12 +2312,16 @@ function markTextDifferences(before: Element | null, after: Element | null): boo
         "added",
         plan.operation === "replace" ? "after" : "added",
       );
-      changed = true;
+      textChanged = true;
     } else if (plan.after.anchorOffset !== null) {
-      markTextAnchor(pair.after.anchor, `${groupBase}-1`, plan.after.anchorOffset);
+      markTextAnchor(
+        pair.after.anchor,
+        `${groupBase}-1`,
+        pair.after.anchorOffset + plan.after.anchorOffset,
+      );
     }
   });
-  return changed;
+  return { textChanged, layoutChanged: layoutOnlyChanged };
 }
 
 function selfPresentationSignature(element: Element): string {
@@ -2803,11 +2848,11 @@ function annotateChangePair(
 ): ReviewChangeType[] {
   const structureChanged = markStructureDifferences(pair);
   const styleChanged = markStyleDifferences(pair.before, pair.after);
-  const textChanged = markTextDifferences(pair.before, pair.after);
+  const textMarking = markTextDifferences(pair.before, pair.after);
   return [
-    ...(textChanged ? ["text" as const] : []),
+    ...(textMarking.textChanged ? ["text" as const] : []),
     ...(structureChanged ? ["structure" as const] : []),
-    ...(styleChanged ? ["style" as const] : []),
+    ...(styleChanged || textMarking.layoutChanged ? ["style" as const] : []),
   ];
 }
 
@@ -2839,14 +2884,18 @@ function attachChangeMarkerMetadata(
       || element.hasAttribute("data-pageroot-review-text-context")
       || element.hasAttribute("data-pageroot-review-structure")
       || element.hasAttribute("data-pageroot-review-style")
+      || element.hasAttribute("data-pageroot-review-layout")
     ));
     markerElements.forEach((element, index) => {
       const markerTypes: ReviewChangeType[] = [];
       const textMarker = element.hasAttribute("data-pageroot-review-text")
         || element.hasAttribute("data-pageroot-review-text-context");
+      const layoutMarker = element.hasAttribute("data-pageroot-review-layout");
       if (textMarker) markerTypes.push("text");
       if (element.hasAttribute("data-pageroot-review-structure")) markerTypes.push("structure");
-      if (element.hasAttribute("data-pageroot-review-style")) markerTypes.push("style");
+      if (element.hasAttribute("data-pageroot-review-style") || layoutMarker) {
+        markerTypes.push("style");
+      }
       const textChange = element.getAttribute("data-pageroot-review-text-change");
       const structuralAddition = Boolean(
         element.closest('[data-pageroot-review-structure="added"]'),
@@ -2864,7 +2913,7 @@ function attachChangeMarkerMetadata(
             : textChange === "removed" && (!pairedTextReplacement || structuralRemoval)
               ? "删除内容"
               : "文本调整")
-        : helper;
+        : layoutMarker ? "换行调整" : helper;
       element.setAttribute("data-pageroot-review-marker", changeId);
       element.setAttribute("data-pageroot-review-marker-types", markerTypes.join(" "));
       element.setAttribute("data-pageroot-review-summary", summary);
@@ -4699,13 +4748,29 @@ function reviewBootstrap(
       }
     });
   };
+  const recordFocusScrollCommand = (commandId, top = scrollY, left = scrollX) => {
+    const maximumScroll = Math.max(0, documentHeight() - innerHeight);
+    const resolvedTop = clamp(Number(top || 0), 0, maximumScroll);
+    const resolvedLeft = Math.max(0, Number(left || 0));
+    activeScrollCommand = { commandId, top: resolvedTop, left: resolvedLeft };
+    return activeScrollCommand;
+  };
   const scrollToReviewRect = (rect) => {
     if (!rect || rect.height <= 0 || !Number.isFinite(rect.top)) return false;
     const token = "focus-" + Date.now() + "-" + Math.random();
-    const top = Math.max(0, scrollY + rect.top - Math.max(18, innerHeight * .12));
-    scrollTo({ top, left: scrollX, behavior: "auto" });
-    activeScrollCommand = { commandId: token, top, left: scrollX };
+    const top = clamp(
+      scrollY + rect.top - Math.max(18, innerHeight * .12),
+      0,
+      Math.max(0, documentHeight() - innerHeight),
+    );
+    const command = recordFocusScrollCommand(token, top, scrollX);
+    scrollTo({ top: command.top, left: command.left, behavior: "auto" });
     return true;
+  };
+  const scrollIntoReviewTarget = (target) => {
+    const token = "focus-" + Date.now() + "-" + Math.random();
+    target.scrollIntoView({ block: "start", behavior: "auto" });
+    recordFocusScrollCommand(token);
   };
   const collapsedAnchorRect = (anchor) => {
     const encoded = String(
@@ -4716,9 +4781,12 @@ function reviewBootstrap(
     const walker = document.createTreeWalker(anchor, NodeFilter.SHOW_TEXT);
     let node = walker.nextNode();
     while (node) {
-      if (!node.parentElement?.closest(
-        "script, style, noscript, template, [data-pageroot-review-projection-layer]",
-      )) nodes.push(node);
+      if (
+        node.parentElement?.namespaceURI === "http://www.w3.org/1999/xhtml"
+        && !node.parentElement.closest(
+          "script, style, noscript, template, [data-pageroot-review-projection-layer]",
+        )
+      ) nodes.push(node);
       node = walker.nextNode();
     }
     if (!nodes.length) return null;
@@ -4736,13 +4804,34 @@ function reviewBootstrap(
     }
     if (!targetNode) return null;
     const range = document.createRange();
-    range.setStart(targetNode, Math.min(targetOffset, targetNode.textContent?.length || 0));
+    const targetLength = targetNode.textContent?.length || 0;
+    targetOffset = Math.min(targetOffset, targetLength);
+    range.setStart(targetNode, targetOffset);
     range.collapse(true);
     let rect = range.getBoundingClientRect();
+    // A collapsed Range immediately after <br> may be reported on the preceding
+    // visual line. Keep the collapsed offset as the navigation identity, but use
+    // the following glyph's real Range box when it exists so the viewport lands
+    // on the readable context after the anchor.
+    let probeNode = targetNode;
+    let probeOffset = targetOffset;
+    let probeIndex = nodes.indexOf(targetNode);
+    while (probeNode && probeOffset >= (probeNode.textContent?.length || 0)) {
+      probeIndex += 1;
+      probeNode = nodes[probeIndex] || null;
+      probeOffset = 0;
+    }
+    if (probeNode && (probeNode.textContent?.length || 0) > probeOffset) {
+      const probe = document.createRange();
+      probe.setStart(probeNode, probeOffset);
+      probe.setEnd(probeNode, probeOffset + 1);
+      const probeRect = probe.getBoundingClientRect();
+      probe.detach();
+      if (probeRect.height > 0) rect = probeRect;
+    }
     if (rect.height <= 0) {
-      const length = targetNode.textContent?.length || 0;
-      const start = Math.max(0, Math.min(targetOffset > 0 ? targetOffset - 1 : 0, length));
-      const end = Math.min(length, Math.max(start + 1, targetOffset));
+      const start = Math.max(0, Math.min(targetOffset > 0 ? targetOffset - 1 : 0, targetLength));
+      const end = Math.min(targetLength, Math.max(start + 1, targetOffset));
       if (end > start) {
         range.setStart(targetNode, start);
         range.setEnd(targetNode, end);
@@ -4757,7 +4846,7 @@ function reviewBootstrap(
     if (!target) return;
     requestAnimationFrame(() => {
       if (!scrollToReviewRect(target.getBoundingClientRect())) {
-        target.scrollIntoView({ block: "start", behavior: "auto" });
+        scrollIntoReviewTarget(target);
       }
     });
   };
@@ -4773,7 +4862,7 @@ function reviewBootstrap(
       );
       if (anchor && scrollToReviewRect(collapsedAnchorRect(anchor))) return;
       if (target && !scrollToReviewRect(target.getBoundingClientRect())) {
-        target.scrollIntoView({ block: "start", behavior: "auto" });
+        scrollIntoReviewTarget(target);
       }
     });
   };
@@ -4902,7 +4991,7 @@ function reviewBootstrap(
     return merged;
   };
   const allModeSummary = (types, summary) => {
-    if (summary === "新增内容" || summary === "删除内容") return summary;
+    if (summary === "新增内容" || summary === "删除内容" || summary === "换行调整") return summary;
     if (types.length > 2) return "综合调整";
     if (types.includes("text") && types.includes("style")) return "文本、视觉调整";
     if (types.includes("text") && types.includes("structure")) return "文本、结构调整";
@@ -5187,8 +5276,11 @@ function reviewBootstrap(
       .forEach((element) => {
         const types = markerTypes(element).filter((type) => filter === "all" || type === filter);
         types.forEach((type) => {
+          const layoutMarker = element.hasAttribute("data-pageroot-review-layout");
           const scope = type === "style"
-            ? element.getAttribute("data-pageroot-review-style-scope") || "content"
+            ? layoutMarker
+              ? "content"
+              : element.getAttribute("data-pageroot-review-style-scope") || "content"
             : "element";
           const rects = type === "style" && scope === "content"
             ? contentStyleRects(element)
@@ -5197,11 +5289,13 @@ function reviewBootstrap(
             element,
             changeId: element.getAttribute("data-pageroot-review-marker") || "",
             ownerKey: type === "style"
-              ? element.getAttribute("data-pageroot-review-style-owner") || ""
+              ? layoutMarker
+                ? element.getAttribute("data-pageroot-review-layout-owner") || ""
+                : element.getAttribute("data-pageroot-review-style-owner") || ""
               : "",
             scope,
             summary: type === "style"
-              ? "视觉调整"
+              ? layoutMarker ? "换行调整" : "视觉调整"
               : element.getAttribute("data-pageroot-review-summary") || "",
             tone: type,
             tones: [type],

@@ -217,6 +217,8 @@ test("change discovery builds a complete outline and precise change markers", ()
   assert.match(reviewDocument, /data-pageroot-review-text-block-groups/);
   assert.match(reviewDocument, /data-pageroot-review-text-group/);
   assert.match(reviewDocument, /data-pageroot-review-text-anchors/);
+  assert.match(reviewDocument, /reviewTextBlockAnchorOffset/);
+  assert.match(reviewDocument, /anchorOffset: reviewTextBlockAnchorOffset/);
   assert.match(reviewDocument, /data-pageroot-review-text-context/);
   assert.match(reviewDocument, /data-pageroot-review-text-change/);
   assert.match(reviewDocument, /data-pageroot-review-text/);
@@ -224,6 +226,9 @@ test("change discovery builds a complete outline and precise change markers", ()
   assert.match(reviewDocument, /attachChangeMarkerMetadata/);
   assert.match(reviewDocument, /data-pageroot-review-structure/);
   assert.match(reviewDocument, /data-pageroot-review-style/);
+  assert.match(reviewDocument, /data-pageroot-review-layout/);
+  assert.match(reviewDocument, /markTextLayoutDifference/);
+  assert.match(reviewDocument, /plan\.operation === "layout"/);
   assert.match(reviewDocument, /markMovedPairs/);
   assert.match(reviewDocument, /if \(pair\?\.moved[\s\S]*?return "位置调整"/);
   assert.match(reviewDocument, /VISUAL_ATTRIBUTE_NAMES/);
@@ -246,7 +251,8 @@ test("change discovery builds a complete outline and precise change markers", ()
   assert.doesNotMatch(reviewDocument, /afterTokenRanges\.length \?/);
   assert.match(reviewDocument, /const structureChanged = markStructureDifferences\(pair\)/);
   assert.match(reviewDocument, /const styleChanged = markStyleDifferences\(pair\.before, pair\.after\)/);
-  assert.match(reviewDocument, /const textChanged = markTextDifferences\(pair\.before, pair\.after\)/);
+  assert.match(reviewDocument, /const textMarking = markTextDifferences\(pair\.before, pair\.after\)/);
+  assert.match(reviewDocument, /textMarking\.layoutChanged/);
   assert.doesNotMatch(reviewDocument, /presentationSignature\(before\) !== presentationSignature\(after\)/);
   assert.doesNotMatch(reviewDocument, /const positional = afterElements\[index\]/);
   assert.match(reviewDocument, /annotatePanelPairs/);
@@ -352,6 +358,9 @@ test("all-change review keeps text treatment precise and mirrors authored action
   assert.match(reviewDocument, /post\("scroll-intent"\)/);
   assert.match(reviewDocument, /post\("scroll-position"/);
   assert.match(reviewDocument, /post\("scroll-geometry"/);
+  assert.match(reviewDocument, /recordFocusScrollCommand/);
+  assert.match(reviewDocument, /const top = clamp\([\s\S]*?documentHeight\(\) - innerHeight/);
+  assert.match(reviewDocument, /const scrollIntoReviewTarget = \(target\)/);
   assert.match(reviewDocument, /message\.type === "scroll-owner"/);
   assert.match(reviewDocument, /message\.type === "set-scroll-position"/);
   assert.match(review, /new ReviewScrollCoordinator/);

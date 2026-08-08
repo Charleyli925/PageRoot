@@ -143,7 +143,7 @@ PR 必须从 Draft 开始。普通推送由独立的 `PR Feedback` workflow 处�
   `Math.random()` 一次性渲染，另有无关脚本变化；它可进入候选但在两次 frame
   run 后绝不能得到 marker，而确定的 A+B 配色变化仍保留 marker。
 - 审阅滚动回归必须直接证明页面概览会递增手势代次、取消待执行跟随帧并保留语义映射；评论布局契约还必须接受超出 100,000px 的有限长文档坐标，同时继续拒绝非有限值和超过安全上限的坐标。
-- 文案 footprint 算法由 Node 直接用字符范围 oracle 验证：覆盖有意义标点前后的独立替换、纯插入、纯删除、稳定句首词、短中文块的字符级辅助配对、超长无标点文本中的多处远距离精确修改、短间隔归组、稳定句拆分和密集成对改写提升，以及“品均基本持平”替换为“单品效率整体稳定，增幅仅+0.10%”时不能用偶然相同的“品”抵消增删。纯插入/纯删除必须严格镜像，并分别断言 operation、两侧 evidence ranges、无证据侧的不可见 anchor 与空 footprint groups；整句单侧变化只能得到 sentence scope，存在稳定外句或缺少任一侧 evidence 时不得提升为 block。仅换行变化使用 layout operation，且两侧均无红绿文字 evidence。Electron 在既有正式审阅闭环证明纯新增只在修改后页出现绿色 footprint、纯删除只在修改前页出现红色 footprint、无证据侧不生成上下文框，同时证明红色虚线删除样式、绿色无下划线样式、普通短语/行矩形、最小可读宽度、单组单标签和段落块 geometry，不重复纯算法排列。
+- 文案 footprint 算法由 Node 直接用字符范围 oracle 验证：覆盖有意义标点前后的独立替换、纯插入、纯删除、稳定句首词、短中文块的字符级辅助配对、超长无标点文本中的多处远距离精确修改、短间隔归组、稳定句拆分和密集成对改写提升，以及“品均基本持平”替换为“单品效率整体稳定，增幅仅+0.10%”时不能用偶然相同的“品”抵消增删。纯插入/纯删除必须严格镜像，并分别断言 operation、两侧 evidence ranges、无证据侧的不可见 anchor 与空 footprint groups；整句单侧变化只能得到 sentence scope，存在稳定外句或缺少任一侧 evidence 时不得提升为 block。仅换行变化使用 layout operation，且两侧均无红绿文字 evidence。Electron 在既有正式审阅闭环证明纯新增只在修改后页出现绿色 footprint、纯删除只在修改前页出现红色 footprint、无证据侧不生成上下文框；删除对侧的导航必须优先落到不可见文字 Range（包括 authored `<br>` 后的后继文字行），而不是退回整段。仅换行变化只能在既有“视觉变化”筛选中显示“换行调整”标签。同时证明红色虚线删除样式、绿色无下划线样式、普通短语/行矩形、最小可读宽度、单组单标签和段落块 geometry，不重复纯算法排列。
 - 应用更新：Node 用伪 updater 证明 stable-only、点击后单次下载、差分开启、普通退出不安装、仅 downloaded 状态可安装和错误降级；Preload/Workbench 合同证明状态快照、下载/安装意图、无 Canvas 完成横幅与重启确认保持窄边界。
 - 默认浏览器打开：Node 直接执行主进程操作与 sender 权限门，证明 malformed、非 HTML、未知项目、非普通文件和非可信 frame 均不会调用 shell；Workbench 合同只补充证明精确 edit revision 的围栏、写回和 IPC 顺序。
 - 使用数据：Node 使用伪网络端点证明安装 ID 持久、会话 ID 轮换、
