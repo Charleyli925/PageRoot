@@ -4244,6 +4244,19 @@ function reviewBootstrap(
     RuntimeVisualString(binding?.sourceBoxSignature || "")
       === runtimeVisualSourceBoxSignature(element)
   );
+  const runtimeVisualInitialBindingForPath = (element, binding) => {
+    let matchingBinding = null;
+    runtimeVisualArrayForEach(runtimeVisualInitialBindings, (candidate) => {
+      if (
+        matchingBinding
+        || candidate === binding
+        || !runtimeVisualIdentityKey(candidate?.key)
+        || !runtimeVisualInitialBindingPathMatches(element, candidate)
+      ) return;
+      matchingBinding = candidate;
+    });
+    return matchingBinding;
+  };
   const runtimeVisualInitialBindingElement = (binding, useFrozenPath = true) => {
     const pathElement = runtimeVisualInitialBindingPathElement(binding?.path);
     const identityAttributes = runtimeVisualInitialBindingIdentityAttributes(binding);
@@ -4312,6 +4325,10 @@ function reviewBootstrap(
         && runtimeVisualInitialBindingMatches(observedElement, binding, true)
         && runtimeVisualInitialBindingSourceBoxMatches(observedElement, binding)
       ) {
+        // A legitimate sibling can have the same tag and source-box
+        // attributes. Its observation belongs to the other declared frozen
+        // path, not to this binding's decoy check.
+        if (runtimeVisualInitialBindingForPath(observedElement, binding)) return;
         runtimeVisualSetAdd(runtimeVisualInvalidKeys, key);
         return;
       }

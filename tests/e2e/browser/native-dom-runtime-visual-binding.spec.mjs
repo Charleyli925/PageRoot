@@ -18,11 +18,16 @@ const RUNTIME_SOURCE_BOX_SIGNATURE = JSON.stringify([
   ["width", null],
 ]);
 
-async function parsedRuntimeVisualSnapshots(page, { binding, authoredScript }) {
+async function parsedRuntimeVisualSnapshots(page, {
+  binding,
+  bindings = binding ? [binding] : [],
+  authoredScript,
+}) {
+  const runtimeBindings = bindings;
   const bootstrap = generatedReviewBootstrap(
-    ["runtime-host-1"],
+    runtimeBindings.map(({ key }) => key),
     [],
-    [binding],
+    runtimeBindings,
   );
   await page.setContent(`<!doctype html>
 <html>
@@ -305,4 +310,31 @@ test("fingerprintless runtime hosts fail closed when a same-tag parser decoy shi
   });
   expect(decoy.channel).toBe(true);
   expect(decoy.snapshots).toHaveLength(0);
+});
+
+test("identical fingerprintless runtime siblings keep their separate frozen paths", async ({ page }) => {
+  const bindings = [0, 1].map((index) => ({
+    key: `runtime-host-${index + 1}`,
+    path: [1, 0, index],
+    tagName: "DIV",
+    sourceBoxSignature: RUNTIME_SOURCE_BOX_SIGNATURE,
+    identityAttributes: [],
+  }));
+  const result = await parsedRuntimeVisualSnapshots(page, {
+    bindings,
+    authoredScript: `
+      const main = document.querySelector("main");
+      for (let index = 0; index < 2; index += 1) {
+        const actual = document.createElement("div");
+        actual.className = "runtime-host";
+        const painted = document.createElement("i");
+        painted.style.cssText = "display:block;background:red;width:8px;height:8px";
+        actual.append(painted);
+        main.append(actual);
+      }
+    `,
+  });
+  expect(result.channel).toBe(true);
+  expect(result.snapshots).toHaveLength(1);
+  expect(result.snapshots[0]).toHaveLength(2);
 });

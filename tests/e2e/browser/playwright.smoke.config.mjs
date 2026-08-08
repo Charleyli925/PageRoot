@@ -26,6 +26,7 @@ const smokeTitles = [
   "path-only review comments fail closed when a same-tag parser decoy shifts the target",
   "path-only review comments keep a bound target when a later same-tag node is unrelated",
   "fingerprintless runtime hosts fail closed when a same-tag parser decoy shifts the target",
+  "identical fingerprintless runtime siblings keep their separate frozen paths",
 ];
 const escapedTitles = smokeTitles.map((title) => title.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"));
 
