@@ -678,6 +678,7 @@ test("hostile review fixtures are enforced by the adapter and page contract", ()
   assert.match(reviewDocument, /runtimeVisualTextHasPaint/);
   assert.match(reviewDocument, /runtimeVisualObservedBindingMatches/);
   assert.match(reviewDocument, /runtimeVisualInitialBindingPathMatches/);
+  assert.match(reviewDocument, /runtimeVisualInitialBindingsBootstrapped/);
   assert.match(reviewDocument, /runtimeVisualDocumentReadyState/);
   assert.match(reviewDocument, /runtimeVisualRegExpExec/);
   assert.match(reviewDocument, /runtimeVisualNumberIsFinite/);

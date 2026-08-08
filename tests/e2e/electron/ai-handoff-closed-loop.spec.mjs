@@ -528,6 +528,13 @@ test("a verified AI result stays pending through desktop review until the user a
       <style data-review-projection-style>div, svg { outline:7px solid rgb(255 0 153) !important; }</style>
       <p data-review-injection-stability><span data-review-stable-left>稳定左侧</span><strong>旧词</strong><em data-review-stable-right>稳定右侧</em></p>
       <p class="review-comment-ordinary-target">普通段落评论定位保持独立。</p>
+      <script>
+        const ordinaryCommentTarget = document.querySelector(".review-comment-ordinary-target");
+        const ordinaryCommentSibling = document.createElement("p");
+        ordinaryCommentSibling.className = ordinaryCommentTarget.className;
+        ordinaryCommentSibling.textContent = "运行时插入的同类段落";
+        ordinaryCommentTarget.before(ordinaryCommentSibling);
+      </script>
       <div data-review-metrics>
         <article data-review-metric="lock"><strong>+8.52%</strong><span>锁单确收增幅（显著 p&lt;0.01）</span><small>日均 52.5 万 vs 48.4 万</small></article>
         <article data-review-metric="ipv"><strong>+4.49%</strong><span>IPV 增幅（显著 p&lt;0.01）</span><small>日均 63.4 万 vs 60.7 万</small></article>
