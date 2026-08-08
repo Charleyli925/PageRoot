@@ -3721,6 +3721,7 @@ function reviewBootstrap(
   const RuntimeVisualWeakMap = WeakMap;
   const RuntimeVisualString = String;
   const RuntimeVisualNumber = Number;
+  const runtimeVisualBoolean = Boolean;
   const RuntimeVisualPromise = Promise;
   const runtimeVisualMathImul = Math.imul.bind(Math);
   const runtimeVisualMathFloor = Math.floor.bind(Math);
@@ -4235,7 +4236,7 @@ function reviewBootstrap(
   };
   const runtimeVisualInitialBindingHasFingerprint = (binding) => {
     const attributes = runtimeVisualInitialBindingIdentityAttributes(binding);
-    return Boolean(
+    return runtimeVisualBoolean(
       attributes?.length
       || (typeof binding?.identityText === "string" && binding.identityText.length),
     );
@@ -4674,7 +4675,7 @@ function reviewBootstrap(
     return (
       !runtimeVisualTransparent(runtimeVisualTextEffectiveColor(style))
       || runtimeVisualShadowHasPaint(textShadow)
-      || Boolean(
+      || runtimeVisualBoolean(
         decorationLine
         && decorationLine !== "none"
         && !runtimeVisualTransparent(decorationColor)
@@ -4702,10 +4703,10 @@ function reviewBootstrap(
     const painted = !runtimeVisualTransparent(
       runtimeVisualStyleValue(style, "background-color"),
     )
-      || Boolean(backgroundImage && backgroundImage !== "none")
+      || runtimeVisualBoolean(backgroundImage && backgroundImage !== "none")
       || borderVisible
       || runtimeVisualShadowHasPaint(runtimeVisualStyleValue(style, "box-shadow"))
-      || Boolean(
+      || runtimeVisualBoolean(
         runtimeVisualStyleValue(style, "filter")
         && runtimeVisualStyleValue(style, "filter") !== "none"
       )
@@ -5023,7 +5024,7 @@ function reviewBootstrap(
       }
 
       const specialRuntimeContent = runtimeVisualElementMatches(host, "canvas, svg, tbody")
-        || Boolean(runtimeVisualElementQuerySelector(
+        || runtimeVisualBoolean(runtimeVisualElementQuerySelector(
           host,
           "canvas, svg, table, tbody, progress, meter",
         ));
@@ -5750,7 +5751,7 @@ function reviewBootstrap(
     const leader = message.leader === "before" || message.leader === "after"
       ? message.leader
       : "";
-    acceptsFollowerScroll = message.linked === true && Boolean(leader) && leader !== side;
+    acceptsFollowerScroll = message.linked === true && runtimeVisualBoolean(leader) && leader !== side;
     followerGestureId = acceptsFollowerScroll ? gestureId : 0;
     if (!acceptsFollowerScroll) activeScrollCommand = null;
   };
@@ -6023,7 +6024,7 @@ function reviewBootstrap(
       return rects.some((rect) => centerX >= rect.left && centerX <= rect.right && centerY >= rect.top && centerY <= rect.bottom);
     }));
     const edges = [];
-    const hasCell = (row, column) => Boolean(filled[row]?.[column]);
+    const hasCell = (row, column) => runtimeVisualBoolean(filled[row]?.[column]);
     filled.forEach((row, rowIndex) => row.forEach((inside, columnIndex) => {
       if (!inside) return;
       const left = xs[columnIndex];
@@ -6855,7 +6856,7 @@ function reviewBootstrap(
       return changedNodes.length > 0 && changedNodes.every((node) => (
         node instanceof Element
         && (node.matches("[data-pageroot-review-projection-layer], [data-pageroot-review-transition-mask]")
-          || Boolean(node.closest("[data-pageroot-review-projection-layer], [data-pageroot-review-transition-mask]")))
+          || runtimeVisualBoolean(node.closest("[data-pageroot-review-projection-layer], [data-pageroot-review-transition-mask]")))
       ));
     });
     if (!onlyOverlayChanges) handleLayoutChange();

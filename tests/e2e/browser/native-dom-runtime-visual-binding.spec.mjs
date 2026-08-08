@@ -425,6 +425,40 @@ test("runtime visual paint parsing survives an authored Boolean mutation", async
   expect(result.snapshots[0]).toHaveLength(1);
 });
 
+test("runtime visual text-decoration parsing survives an authored Boolean mutation", async ({ page }) => {
+  const binding = {
+    key: "runtime-host-decoration-mutation",
+    path: [1, 0, 0],
+    tagName: "DIV",
+    sourceBoxSignature: RUNTIME_SOURCE_BOX_SIGNATURE,
+    identityAttributes: [],
+  };
+  const result = await parsedRuntimeVisualSnapshots(page, {
+    binding,
+    authoredScript: `
+      Boolean = () => true;
+      const main = document.querySelector("main");
+      const actual = document.createElement("div");
+      actual.className = "runtime-host";
+      const hiddenText = document.createElement("span");
+      hiddenText.style.cssText = "display:block;color:transparent;text-decoration-line:none;width:8px;height:8px";
+      hiddenText.textContent = "hidden";
+      actual.append(hiddenText);
+      main.append(actual);
+    `,
+  });
+  expect(result.channel).toBe(true);
+  expect(result.snapshots).toHaveLength(1);
+  expect(result.snapshots[0]).toEqual([
+    expect.objectContaining({
+      state: "empty",
+      contentAtoms: 0,
+      paintAtoms: 0,
+      geometryAtoms: 0,
+    }),
+  ]);
+});
+
 test("identical fingerprintless runtime siblings keep their separate frozen paths", async ({ page }) => {
   const bindings = [0, 1].map((index) => ({
     key: `runtime-host-${index + 1}`,

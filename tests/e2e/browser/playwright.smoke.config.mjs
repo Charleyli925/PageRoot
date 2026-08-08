@@ -27,6 +27,7 @@ const smokeTitles = [
   "path-only review comments keep a bound target when a later same-tag node is unrelated",
   "fingerprintless runtime hosts fail closed when a same-tag parser decoy shifts the target",
   "runtime visual paint parsing survives an authored Boolean mutation",
+  "runtime visual text-decoration parsing survives an authored Boolean mutation",
   "identical fingerprintless runtime siblings keep their separate frozen paths",
   "identical path-only comment siblings keep their separate frozen paths",
   "mixed-shape path-only comment decoys fail closed",
