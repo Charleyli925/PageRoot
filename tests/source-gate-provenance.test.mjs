@@ -132,6 +132,8 @@ test("GitHub workflows keep one reviewed ready-PR source boundary, an exact-tree
   const reviewSettled = workflowJob(ci, "review-settled");
   const baselinePolicy = workflowJob(ci, "baseline-policy");
   const sourceBuild = workflowJob(ci, "source-build");
+  const sourceNode = workflowJob(ci, "source-node");
+  const sourceBrowser = workflowJob(ci, "source-browser");
   const electronNative = workflowJob(ci, "source-electron-native");
   const electronAi = workflowJob(ci, "source-electron-ai");
   const releaseGate = workflowJob(ci, "release-gate");
@@ -155,6 +157,13 @@ test("GitHub workflows keep one reviewed ready-PR source boundary, an exact-tree
   assert.match(baselinePolicy, /npm run audit:dependencies/u);
   assert.match(sourceBuild, /needs:[\s\S]*- review-settled[\s\S]*- baseline-policy/u);
   assert.match(sourceBuild, /npm run ci:source-build:prepared/u);
+  assert.match(sourceBuild, /name: PageRoot-web-build-\$\{\{ github\.run_id \}\}/u);
+  assert.match(sourceBuild, /overwrite: true/u);
+  assert.doesNotMatch(sourceBuild, /PageRoot-web-build-[^\n]*run_attempt/u);
+  assert.match(sourceNode, /name: PageRoot-web-build-\$\{\{ github\.run_id \}\}/u);
+  assert.match(sourceBrowser, /name: PageRoot-web-build-\$\{\{ github\.run_id \}\}/u);
+  assert.doesNotMatch(sourceNode, /PageRoot-web-build-[^\n]*run_attempt/u);
+  assert.doesNotMatch(sourceBrowser, /PageRoot-web-build-[^\n]*run_attempt/u);
   assert.match(electronNative, /needs:[\s\S]*- review-settled[\s\S]*- baseline-policy/u);
   assert.match(electronAi, /needs:[\s\S]*- review-settled[\s\S]*- baseline-policy/u);
   assert.match(ci, /name: release-gate/u);
