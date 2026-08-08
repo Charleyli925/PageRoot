@@ -66,6 +66,44 @@ async function selectElementText(element) {
   });
 }
 
+async function directTextPoint(element, textSnippet) {
+  return element.evaluate((node, snippet) => {
+    const text = Array.from(node.childNodes).find(
+      (child) => child.nodeType === Node.TEXT_NODE && child.textContent?.includes(snippet),
+    );
+    if (!text) throw new Error(`Fixture has no direct text matching ${snippet}.`);
+    const start = text.textContent.indexOf(snippet);
+    const range = document.createRange();
+    range.setStart(text, start);
+    range.setEnd(text, start + 1);
+    const glyph = range.getBoundingClientRect();
+    const parent = node.getBoundingClientRect();
+    return {
+      x: glyph.left - parent.left + Math.max(1, glyph.width / 2),
+      y: glyph.top - parent.top + Math.max(1, glyph.height / 2),
+    };
+  }, textSnippet);
+}
+
+async function selectTextRange(element, start, end) {
+  await element.evaluate((node, offsets) => {
+    const text = Array.from(node.childNodes).find(
+      (child) => child.nodeType === Node.TEXT_NODE,
+    );
+    if (!(text instanceof Text)) throw new Error("Fragment host has no direct text node.");
+    if (offsets.start < 0 || offsets.end < offsets.start || offsets.end > text.data.length) {
+      throw new RangeError(`Selection ${offsets.start}:${offsets.end} exceeds fragment text.`);
+    }
+    node.focus({ preventScroll: true });
+    const range = document.createRange();
+    range.setStart(text, offsets.start);
+    range.setEnd(text, offsets.end);
+    const selection = document.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  }, { start, end });
+}
+
 test("nested list headings and wbr text edit without changing their authored structure", async ({
   page,
 }) => {
@@ -146,22 +184,7 @@ test("mixed block parents fall back to safe inline hosts and exact bare-text fra
   );
   expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
 
-  const bareTextPoint = await mixedParent.evaluate((element) => {
-    const text = Array.from(element.childNodes).find(
-      (node) => node.nodeType === Node.TEXT_NODE && node.textContent?.includes("裸文本"),
-    );
-    if (!text) throw new Error("Mixed fixture has no direct bare text.");
-    const start = text.textContent.indexOf("裸文本");
-    const range = document.createRange();
-    range.setStart(text, start);
-    range.setEnd(text, start + 1);
-    const glyph = range.getBoundingClientRect();
-    const parent = element.getBoundingClientRect();
-    return {
-      x: glyph.left - parent.left + Math.max(1, glyph.width / 2),
-      y: glyph.top - parent.top + Math.max(1, glyph.height / 2),
-    };
-  });
+  const bareTextPoint = await directTextPoint(mixedParent, "裸文本");
   await mixedParent.dblclick({ position: bareTextPoint, force: true });
   const fragmentHost = mixedParent.locator(
     ':scope > pageroot-text-fragment[data-pageroot-text-fragment-host="true"]',
@@ -224,4 +247,62 @@ test("mixed block parents fall back to safe inline hosts and exact bare-text fra
     '<strong data-native-case="ordinary-inline-child">继续安全</strong>',
   );
   expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
+});
+
+test("bare-text fragments persist toolbar and shortcut formatting through guarded source patches", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const source = fixtureBuffer("structural-text.html");
+  const { frame } = await loadFixture(page, "structural-text.html", {
+    buffer: source,
+  });
+  const mixedParent = frame.locator(caseSelector("mixed-parent"));
+  const fragmentHost = mixedParent.locator(
+    ':scope > pageroot-text-fragment[data-pageroot-text-fragment-host="true"]',
+  );
+
+  await mixedParent.dblclick({
+    position: await directTextPoint(mixedParent, "裸文本"),
+    force: true,
+  });
+  await expect(fragmentHost).toHaveAttribute("contenteditable", "true");
+  await selectTextRange(fragmentHost, 1, 2);
+  const boldButton = page.getByRole("button", { name: "加粗", exact: true });
+  await expect(boldButton).toBeEnabled();
+  await boldButton.click();
+  await expect(fragmentHost).toHaveCount(0);
+
+  let expected = replaceExactOnce(
+    source,
+    '，裸文本<span data-keep="tail">',
+    '，<span style="all: unset; display: inline !important; font-weight: 700">裸</span>文本<span data-keep="tail">',
+  );
+  await expect.poll(async () => (
+    await exportCurrentHtml(page)
+  ).toString("utf8")).toBe(expected.toString("utf8"));
+  await expect(page.locator(".toast.show")).toHaveCount(0);
+
+  await mixedParent.dblclick({
+    position: await directTextPoint(mixedParent, "文本"),
+    force: true,
+  });
+  await expect(fragmentHost).toHaveAttribute("contenteditable", "true");
+  await selectTextRange(fragmentHost, 0, 2);
+  await page.keyboard.press("Meta+i");
+  await expect(fragmentHost).toHaveCount(0);
+
+  expected = replaceExactOnce(
+    expected,
+    '</span>文本<span data-keep="tail">',
+    '</span><span style="all: unset; display: inline !important; font-style: italic">文本</span><span data-keep="tail">',
+  );
+  await expect.poll(async () => (
+    await exportCurrentHtml(page)
+  ).toString("utf8")).toBe(expected.toString("utf8"));
+  await expect(page.locator(".toast.show")).toHaveCount(0);
+  await expect(mixedParent.locator(':scope > div[data-keep="chart"]')).toHaveText(
+    "图表结构保持",
+  );
+  await expect(mixedParent.locator(':scope > span[data-keep="tail"]')).toHaveText("尾注");
 });

@@ -4661,6 +4661,29 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         return;
       }
       if (
+        activeNativeEdit?.mode === "text-fragment"
+        && activeRange
+        && TEXT_RANGE_EDITABLE_PROPERTIES.has(property)
+      ) {
+        // A bare-text fragment deliberately accepts text only. Inline-style
+        // controller commands would add a <span> inside that fragment, which
+        // its normalizer correctly rejects. Finish the transient native host
+        // first, then let the guarded source-range patch below own the wrapper.
+        // Keep the captured range: finishNativeEditing clears the live range
+        // as part of retiring the fragment session.
+        const committed = finishNativeEditing(true, "style");
+        if (!committed.ok || committed.frameReloading) return;
+        activeNativeEdit = null;
+        element = selectedElementRef.current;
+        if (!element || !element.isConnected) {
+          reportBlockedEdit(new Error(
+            "文字片段提交后的宿主没有精确重绑，已停止继续修改。",
+          ));
+          return;
+        }
+        view = element.ownerDocument.defaultView;
+      }
+      if (
         activeNativeEdit
         && activeRange
         && TEXT_RANGE_EDITABLE_PROPERTIES.has(property)

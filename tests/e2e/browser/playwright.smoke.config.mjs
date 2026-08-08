@@ -15,6 +15,7 @@ const smokeTitles = [
   "one text edit changes only the authorized UTF-8 bytes, including BOM and CRLF",
   "visible empty inline boundary stays structurally intact while surrounding text remains editable",
   "mixed block parents fall back to safe inline hosts and exact bare-text fragments",
+  "bare-text fragments persist toolbar and shortcut formatting through guarded source patches",
   "IME confirmation replays at the frozen left-style caret",
   "out-of-band mutation restores the last safe draft and reports in the viewport",
   "one unsaved comment blocks a second target and Canvas selection keeps its scroll",
