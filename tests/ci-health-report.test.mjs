@@ -31,11 +31,19 @@ function job({
   };
 }
 
+function completedRun(run) {
+  return {
+    status: "completed",
+    conclusion: "success",
+    ...run,
+  };
+}
+
 test("CI health distinguishes full-gate latency, repeated green work and preflight failures", () => {
   const report = summarizeCiHealth({
     periodDays: 30,
     generatedAt: "2026-07-24T12:00:00.000Z",
-    ciRuns: [{
+    ciRuns: [completedRun({
       id: 100,
       event: "pull_request",
       conclusion: "success",
@@ -43,7 +51,7 @@ test("CI health distinguishes full-gate latency, repeated green work and preflig
       pull_requests: [{ number: 25 }],
       created_at: "2026-07-24T10:00:00.000Z",
       updated_at: "2026-07-24T10:08:00.000Z",
-    }],
+    })],
     feedbackRuns: [],
     jobsByRunId: {
       100: [
@@ -139,41 +147,101 @@ test("CI health distinguishes full-gate latency, repeated green work and preflig
   assert.match(renderCiHealthMarkdown(report), /Total PR runner minutes/u);
 });
 
+test("CI health separates active gate work from terminal gate metrics", () => {
+  const report = summarizeCiHealth({
+    periodDays: 30,
+    generatedAt: "2026-08-08T12:05:00.000Z",
+    ciRuns: [completedRun({
+      id: 101,
+      event: "pull_request",
+      head_sha: "a".repeat(40),
+      pull_requests: [{ number: 26 }],
+      created_at: "2026-08-08T10:00:00.000Z",
+      updated_at: "2026-08-08T10:08:00.000Z",
+    }), {
+      id: 102,
+      event: "pull_request",
+      status: "in_progress",
+      conclusion: null,
+      head_sha: "b".repeat(40),
+      pull_requests: [{ number: 27 }],
+      created_at: "2026-08-08T12:00:00.000Z",
+      updated_at: "2026-08-08T12:01:00.000Z",
+    }],
+    jobsByRunId: {
+      101: [job({
+        name: "source-build",
+        attempt: 1,
+        conclusion: "success",
+        startedAt: "2026-08-08T10:00:00.000Z",
+        completedAt: "2026-08-08T10:08:00.000Z",
+      })],
+      102: [job({
+        name: "source-build",
+        attempt: 1,
+        conclusion: "success",
+        startedAt: "2026-08-08T12:00:00.000Z",
+        completedAt: "2026-08-08T12:01:00.000Z",
+      })],
+    },
+    candidateRuns: [],
+    releaseRuns: [],
+    dependencyHealth: "success",
+  });
+
+  assert.equal(report.sourceGate.completeRuns, 1);
+  assert.equal(report.sourceGate.activeRuns, 1);
+  assert.equal(report.sourceGate.wallMinutesP50, 8);
+  assert.equal(report.sourceGate.wallMinutesP95, 8);
+  assert.equal(report.sourceGate.attemptsPerTreeAverage, 1);
+  assert.equal(report.runnerUse.totalMinutes, 9);
+  assert.equal(report.runnerUse.completedWorkflowMinutes, 8);
+  assert.equal(report.runnerUse.activeWorkflowMinutes, 1);
+  assert.equal(report.runnerUse.fullGateMinutes, 8);
+  assert.equal(report.runnerUse.activeGateMinutes, 1);
+  assert.equal(report.workflowCancellation.completedPullRequestRuns, 1);
+  assert.equal(report.workflowCancellation.activePullRequestRuns, 1);
+  assert.equal(report.workflowCancellation.pullRequestCancellationRate, 0);
+  const markdown = renderCiHealthMarkdown(report);
+  assert.match(markdown, /Active gates with completed source work \| 1/u);
+  assert.match(markdown, /Active-workflow recorded runner minutes \| 1/u);
+});
+
 test("CI health exposes complete-gate churn across different SHAs of one Pull Request", () => {
   const ciRuns = [
-    {
+    completedRun({
       id: 201,
       event: "pull_request",
       head_sha: "a".repeat(40),
       pull_requests: [{ number: 80 }],
       created_at: "2026-07-24T09:00:00.000Z",
       updated_at: "2026-07-24T09:10:00.000Z",
-    },
-    {
+    }),
+    completedRun({
       id: 202,
       event: "pull_request",
       head_sha: "b".repeat(40),
       pull_requests: [{ number: 80 }],
       created_at: "2026-07-24T10:00:00.000Z",
       updated_at: "2026-07-24T10:08:00.000Z",
-    },
-    {
+    }),
+    completedRun({
       id: 203,
       event: "pull_request",
       head_sha: "c".repeat(40),
       pull_requests: [{ number: 81 }],
       created_at: "2026-07-24T11:00:00.000Z",
       updated_at: "2026-07-24T11:07:00.000Z",
-    },
+    }),
   ];
-  const feedbackRuns = [{
+  const feedbackRuns = [completedRun({
     id: 204,
     event: "pull_request",
     head_sha: "d".repeat(40),
     pull_requests: [{ number: 80 }],
     created_at: "2026-07-24T12:00:00.000Z",
     updated_at: "2026-07-24T12:02:00.000Z",
-  }];
+  })];
   const jobsByRunId = {
     201: [job({
       name: "source-build",
@@ -216,7 +284,7 @@ test("CI health exposes complete-gate churn across different SHAs of one Pull Re
     dependencyHealth: "success",
   });
 
-  assert.equal(report.schemaVersion, 3);
+  assert.equal(report.schemaVersion, 4);
   assert.equal(report.sourceGate.pullRequestRuns, 4);
   assert.equal(report.sourceGate.feedbackRuns, 1);
   assert.equal(report.sourceGate.completeRuns, 3);
@@ -235,35 +303,35 @@ test("CI health exposes complete-gate churn across different SHAs of one Pull Re
 test("CI health excludes same-SHA full-gate reruns from cross-SHA candidate churn", () => {
   const sameSha = "a".repeat(40);
   const laterSha = "b".repeat(40);
-  const ciRuns = [{
+  const ciRuns = [completedRun({
     id: 205,
     event: "pull_request",
     head_sha: sameSha,
     pull_requests: [{ number: 82 }],
     created_at: "2026-07-24T09:00:00.000Z",
     updated_at: "2026-07-24T09:03:00.000Z",
-  }, {
+  }), completedRun({
     id: 206,
     event: "pull_request",
     head_sha: sameSha,
     pull_requests: [{ number: 82 }],
     created_at: "2026-07-24T10:00:00.000Z",
     updated_at: "2026-07-24T10:04:00.000Z",
-  }, {
+  }), completedRun({
     id: 207,
     event: "pull_request",
     head_sha: laterSha,
     pull_requests: [{ number: 82 }],
     created_at: "2026-07-24T11:00:00.000Z",
     updated_at: "2026-07-24T11:05:00.000Z",
-  }, {
+  }), completedRun({
     id: 208,
     event: "pull_request",
     head_sha: laterSha,
     pull_requests: [{ number: 82 }],
     created_at: "2026-07-24T12:00:00.000Z",
     updated_at: "2026-07-24T12:06:00.000Z",
-  }];
+  })];
   const jobsByRunId = Object.fromEntries(ciRuns.map((run) => ([run.id, [job({
     name: "source-build",
     attempt: 1,
@@ -293,7 +361,7 @@ test("CI health counts a return to an earlier SHA as new candidate churn", () =>
   const firstSha = "a".repeat(40);
   const secondSha = "b".repeat(40);
   const shas = [firstSha, firstSha, secondSha, secondSha, firstSha, firstSha];
-  const ciRuns = shas.map((headSha, index) => ({
+  const ciRuns = shas.map((headSha, index) => completedRun({
     id: 209 + index,
     event: "pull_request",
     head_sha: headSha,
@@ -330,30 +398,30 @@ test("CI health records cancellation rates without treating pre-review jobs as f
   const report = summarizeCiHealth({
     periodDays: 30,
     generatedAt: "2026-08-08T12:00:00.000Z",
-    ciRuns: [{
+    ciRuns: [completedRun({
       id: 301,
       event: "pull_request",
       conclusion: "cancelled",
       head_sha: "a".repeat(40),
       pull_requests: [{ number: 90 }],
-    }, {
+    }), completedRun({
       id: 302,
       event: "pull_request",
       conclusion: "failure",
       head_sha: "b".repeat(40),
       pull_requests: [{ number: 91 }],
-    }],
-    feedbackRuns: [{
+    })],
+    feedbackRuns: [completedRun({
       id: 303,
       event: "pull_request",
       conclusion: "cancelled",
       pull_requests: [{ number: 90 }],
-    }, {
+    }), completedRun({
       id: 304,
       event: "pull_request",
       conclusion: "success",
       pull_requests: [{ number: 91 }],
-    }],
+    })],
     jobsByRunId: {
       302: [job({
         name: "review-settled",
@@ -388,15 +456,15 @@ test("CI health includes automatic Release Dry Run minutes and cancellations in 
     generatedAt: "2026-08-08T12:00:00.000Z",
     ciRuns: [],
     feedbackRuns: [],
-    dryRunRuns: [{
+    dryRunRuns: [completedRun({
       id: 305,
       event: "pull_request",
       conclusion: "success",
-    }, {
+    }), completedRun({
       id: 306,
       event: "pull_request",
       conclusion: "cancelled",
-    }],
+    })],
     jobsByRunId: {
       305: [job({
         name: "assemble-and-checkpoint-unsigned-app",
@@ -566,5 +634,5 @@ test("CI health workflow stays read-only and retains a machine-readable report",
   assert.match(reportScript, /workflow: CI_HEALTH_WORKFLOW_INPUTS\.releaseCandidate/u);
   assert.match(reportScript, /workflow: CI_HEALTH_WORKFLOW_INPUTS\.release/u);
   assert.match(reportScript, /\| Metric \| Actual \| Target \| Status \|/u);
-  assert.match(reportScript, /Cancelled promoted candidates/u);
+  assert.match(reportScript, /Cancelled completed promoted candidates/u);
 });

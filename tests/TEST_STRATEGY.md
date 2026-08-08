@@ -189,8 +189,11 @@ CI Health 每日先跑依赖健康基线，并同时读取 `ci.yml`、`pr-feedba
 门禁：`runsPerPullRequestAverage` 目标不超过 `1.25`，后续候选 SHA 消耗的
 runner minutes 占全部 PR CI 时间应低于 `20%`。这部分不能再被“每个 Tree
 只跑一次”的旧指标隐藏。报告同时保留总量、完整门禁、Feedback、候选 churn
-runner minutes 及 PR/候选取消率；Actions Summary 对每个可机器计算的报告目标明确显示
-`MET`、`MISSED` 或 `NO DATA`，而 review/baseline 阻断不会被误计成完整门禁。
+runner minutes 及 PR/候选取消率。只有 `status=completed` 且存在 conclusion 的
+workflow run 可进入完整门禁次数、延迟、尝试、churn 和取消率分母；活动 run
+的数量与已结束 job 所消耗的 runner minutes 另行展示，不使用可变的
+`updated_at` 伪造已完成延迟。Actions Summary 对每个可机器计算的报告目标明确显示
+`MET`、`MISSED` 或 `NO DATA`，而 review/baseline 阻断和正在执行的候选不会被误计成完整门禁。
 
 ## 判断标准优先级
 

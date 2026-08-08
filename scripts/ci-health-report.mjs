@@ -64,6 +64,10 @@ function conclusionCounts(runs) {
   }, {});
 }
 
+function isCompletedWorkflowRun(run) {
+  return run?.status === "completed" && Boolean(run?.conclusion);
+}
+
 function jobsForRun(jobsByRunId, runId) {
   return jobsByRunId?.[String(runId)] || [];
 }
@@ -188,11 +192,14 @@ function publicationRebuildCount(releaseRuns, jobsByRunId) {
 
 function cancellationSummary(runs) {
   const total = (runs || []).length;
-  const cancelled = (runs || []).filter((run) => run?.conclusion === "cancelled").length;
+  const completedRuns = (runs || []).filter(isCompletedWorkflowRun);
+  const cancelled = completedRuns.filter((run) => run.conclusion === "cancelled").length;
   return Object.freeze({
     total,
+    completed: completedRuns.length,
+    active: total - completedRuns.length,
     cancelled,
-    rate: total > 0 ? round(cancelled / total) : null,
+    rate: completedRuns.length > 0 ? round(cancelled / completedRuns.length) : null,
   });
 }
 
@@ -244,12 +251,27 @@ export function summarizeCiHealth({
     ...feedbackPullRequestRuns,
     ...dryRunPullRequestRuns,
   ];
-  const fullRuns = sourcePullRequestRuns.filter((run) => (
+  const completedPullRequestRuns = pullRequestRuns.filter(isCompletedWorkflowRun);
+  const activePullRequestRuns = pullRequestRuns.filter((run) => (
+    !isCompletedWorkflowRun(run)
+  ));
+  const completedSourcePullRequestRuns = sourcePullRequestRuns.filter(
+    isCompletedWorkflowRun,
+  );
+  const fullRuns = completedSourcePullRequestRuns.filter((run) => (
     fullGateAttempts(jobsForRun(jobsByRunId, run.id)) > 0
+  ));
+  const activeFullRuns = sourcePullRequestRuns.filter((run) => (
+    !isCompletedWorkflowRun(run)
+    && fullGateAttempts(jobsForRun(jobsByRunId, run.id)) > 0
   ));
   const selectedFeedbackRuns = pullRequestRuns.filter((run) => jobsForRun(jobsByRunId, run.id).some((job) => (
     ["draft-feedback", "pr-feedback"].includes(job?.name) && job?.conclusion !== "skipped"
   )));
+  const completedFeedbackRuns = selectedFeedbackRuns.filter(isCompletedWorkflowRun);
+  const activeFeedbackRuns = selectedFeedbackRuns.filter((run) => (
+    !isCompletedWorkflowRun(run)
+  ));
   const fullDurations = fullRuns.map((run) => (
     finiteDurationMinutes(run.created_at, run.updated_at)
   )).filter((duration) => duration > 0);
@@ -259,10 +281,15 @@ export function summarizeCiHealth({
     .reduce((total, job) => (
       total + finiteDurationMinutes(job.started_at, job.completed_at)
     ), 0);
-  const repeatedMinutes = pullRequestRuns.reduce((total, run) => (
+  const completedRunnerMinutes = runnerMinutesForRuns(completedPullRequestRuns, jobsByRunId);
+  const activeRunnerMinutes = runnerMinutesForRuns(activePullRequestRuns, jobsByRunId);
+  const repeatedMinutes = completedPullRequestRuns.reduce((total, run) => (
     total + repeatedGreenMinutes(jobsForRun(jobsByRunId, run.id))
   ), 0);
-  const preflights = preflightSteps(allJobs).filter((step) => (
+  const completedJobs = completedPullRequestRuns.flatMap((run) => (
+    jobsForRun(jobsByRunId, run.id)
+  ));
+  const preflights = preflightSteps(completedJobs).filter((step) => (
     step.conclusion === "success" || step.conclusion === "failure"
   ));
   const failedPreflights = preflights.filter((step) => step.conclusion === "failure");
@@ -281,11 +308,22 @@ export function summarizeCiHealth({
     ? gateRunCounts.reduce((total, count) => total + count, 0) / gateRunCounts.length
     : null;
   const fullGateMinutes = runnerMinutesForRuns(fullRuns, jobsByRunId);
-  const feedbackMinutes = runnerMinutesForRuns(selectedFeedbackRuns, jobsByRunId);
-  const releaseDryRunMinutes = runnerMinutesForRuns(dryRunPullRequestRuns, jobsByRunId);
+  const activeGateMinutes = runnerMinutesForRuns(activeFullRuns, jobsByRunId);
+  const feedbackMinutes = runnerMinutesForRuns(completedFeedbackRuns, jobsByRunId);
+  const completedDryRunPullRequestRuns = dryRunPullRequestRuns.filter(
+    isCompletedWorkflowRun,
+  );
+  const releaseDryRunMinutes = runnerMinutesForRuns(
+    completedDryRunPullRequestRuns,
+    jobsByRunId,
+  );
   const candidateChurnMinutes = runnerMinutesForRuns(repeatedCandidates, jobsByRunId);
-  const repeatedShare = runnerMinutes > 0 ? repeatedMinutes / runnerMinutes : null;
-  const candidateChurnShare = runnerMinutes > 0 ? candidateChurnMinutes / runnerMinutes : null;
+  const repeatedShare = completedRunnerMinutes > 0
+    ? repeatedMinutes / completedRunnerMinutes
+    : null;
+  const candidateChurnShare = completedRunnerMinutes > 0
+    ? candidateChurnMinutes / completedRunnerMinutes
+    : null;
   const preflightFailureRate = preflights.length > 0
     ? failedPreflights.length / preflights.length
     : null;
@@ -329,13 +367,17 @@ export function summarizeCiHealth({
     dependencyHealth: dependencyTarget(dependencyHealth),
   });
   return Object.freeze({
-    schemaVersion: 3,
+    schemaVersion: 4,
     generatedAt,
     periodDays,
     sourceGate: {
       pullRequestRuns: pullRequestRuns.length,
-      feedbackRuns: selectedFeedbackRuns.length,
+      completedPullRequestRuns: completedPullRequestRuns.length,
+      activePullRequestRuns: activePullRequestRuns.length,
+      feedbackRuns: completedFeedbackRuns.length,
+      activeFeedbackRuns: activeFeedbackRuns.length,
       completeRuns: fullRuns.length,
+      activeRuns: activeFullRuns.length,
       uniqueTrees: gateAttemptCounts.length,
       candidatePullRequests: gateRunCounts.length,
       attemptsPerTreeAverage: roundedAverageAttempts,
@@ -354,9 +396,12 @@ export function summarizeCiHealth({
     },
     runnerUse: {
       totalMinutes: round(runnerMinutes),
+      completedWorkflowMinutes: round(completedRunnerMinutes),
+      activeWorkflowMinutes: round(activeRunnerMinutes),
       feedbackMinutes: round(feedbackMinutes),
       releaseDryRunMinutes: round(releaseDryRunMinutes),
       fullGateMinutes: round(fullGateMinutes),
+      activeGateMinutes: round(activeGateMinutes),
       repeatedGreenMinutes: round(repeatedMinutes),
       repeatedGreenShare: roundedRepeatedShare,
       candidateChurnMinutes: round(candidateChurnMinutes),
@@ -386,9 +431,13 @@ export function summarizeCiHealth({
     },
     workflowCancellation: {
       pullRequestRuns: pullRequestCancellation.total,
+      completedPullRequestRuns: pullRequestCancellation.completed,
+      activePullRequestRuns: pullRequestCancellation.active,
       cancelledPullRequestRuns: pullRequestCancellation.cancelled,
       pullRequestCancellationRate: pullRequestCancellation.rate,
       promotedCandidateRuns: candidateCancellation.total,
+      completedPromotedCandidateRuns: candidateCancellation.completed,
+      activePromotedCandidateRuns: candidateCancellation.active,
       cancelledPromotedCandidateRuns: candidateCancellation.cancelled,
       promotedCandidateCancellationRate: candidateCancellation.rate,
     },
@@ -531,14 +580,20 @@ export function renderCiHealthMarkdown(report) {
     "| Metric | Value |",
     "| --- | ---: |",
     `| Complete gates | ${report.sourceGate.completeRuns} |`,
+    `| Active gates with completed source work | ${report.sourceGate.activeRuns} |`,
     `| Repeated candidate gates | ${report.sourceGate.repeatedCandidateRuns} |`,
     `| Total PR runner minutes | ${report.runnerUse.totalMinutes} |`,
+    `| Completed-workflow runner minutes | ${report.runnerUse.completedWorkflowMinutes} |`,
+    `| Active-workflow recorded runner minutes | ${report.runnerUse.activeWorkflowMinutes} |`,
     `| Full-gate runner minutes | ${report.runnerUse.fullGateMinutes} |`,
+    `| Active-gate recorded runner minutes | ${report.runnerUse.activeGateMinutes} |`,
     `| Feedback runner minutes | ${report.runnerUse.feedbackMinutes} |`,
     `| Release-dry-run runner minutes | ${report.runnerUse.releaseDryRunMinutes} |`,
     `| Candidate-churn runner minutes | ${report.runnerUse.candidateChurnMinutes} |`,
-    `| Cancelled PR workflow runs | ${report.workflowCancellation.cancelledPullRequestRuns}/${report.workflowCancellation.pullRequestRuns} (${percent(report.workflowCancellation.pullRequestCancellationRate)}) |`,
-    `| Cancelled promoted candidates | ${report.workflowCancellation.cancelledPromotedCandidateRuns}/${report.workflowCancellation.promotedCandidateRuns} (${percent(report.workflowCancellation.promotedCandidateCancellationRate)}) |`,
+    `| Active PR workflow runs | ${report.workflowCancellation.activePullRequestRuns} |`,
+    `| Cancelled completed PR workflow runs | ${report.workflowCancellation.cancelledPullRequestRuns}/${report.workflowCancellation.completedPullRequestRuns} (${percent(report.workflowCancellation.pullRequestCancellationRate)}) |`,
+    `| Active promoted candidates | ${report.workflowCancellation.activePromotedCandidateRuns} |`,
+    `| Cancelled completed promoted candidates | ${report.workflowCancellation.cancelledPromotedCandidateRuns}/${report.workflowCancellation.completedPromotedCandidateRuns} (${percent(report.workflowCancellation.promotedCandidateCancellationRate)}) |`,
     "",
     `Candidate conclusions: \`${JSON.stringify(report.releaseCandidate.conclusions)}\``,
     "",

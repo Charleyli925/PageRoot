@@ -275,7 +275,7 @@ Recommended review lifecycle:
 Scheduled monitoring is read-only unless a later instruction explicitly authorizes a fix. Recommended jobs:
 
 - Weekdays: summarize open PageRoot PRs, failed or pending required checks, review requests and merge blockers. Report only actionable changes.
-- Daily: generate the read-only `CI Health` dependency baseline and thirty-day metrics report; review misses without rerunning or mutating workflows automatically.
+- Daily: generate the read-only `CI Health` dependency baseline and thirty-day metrics report; keep terminal gate metrics separate from active-run counts and recorded active runner minutes, then review misses without rerunning or mutating workflows automatically.
 - Weekly: inspect Dependabot PRs and run or verify the dependency-audit policy. Report new, expired or changed advisories; do not merge dependency updates automatically.
 - Weekly: run the read-only task audit and report `ACTIVE_DIRTY`, `LOCAL_ONLY`,
   `MERGED_READY`, `ABANDON_REVIEW`, `STALE_REGISTRATION` and primary-worktree
