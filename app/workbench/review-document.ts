@@ -4168,6 +4168,19 @@ function reviewBootstrap(
     }
     return attributes;
   };
+  const runtimeVisualInitialBindingIgnoresIdentityText = (
+    identityAttributes,
+    identityText,
+  ) => {
+    if (!identityText) return true;
+    if (!identityAttributes?.length) return false;
+    // A class-only fingerprint is intentionally text-sensitive. Class names
+    // are commonly shared by sibling comment targets, so dropping the frozen
+    // text would make the final uniqueness pass bind an arbitrary sibling.
+    return !identityAttributes.every(([name]) => (
+      runtimeVisualStringToLowerCase(RuntimeVisualString(name)) === "class"
+    ));
+  };
   const runtimeVisualInitialBindingMatches = (
     element,
     binding,
@@ -4210,7 +4223,11 @@ function reviewBootstrap(
     }
     return Boolean(identityAttributes?.length)
       && runtimeVisualInitialBindingPathMatches(element, binding)
-      && runtimeVisualInitialBindingMatches(element, binding, true);
+      && runtimeVisualInitialBindingMatches(
+        element,
+        binding,
+        runtimeVisualInitialBindingIgnoresIdentityText(identityAttributes, identityText),
+      );
   };
   const runtimeVisualInitialBindingHasFingerprint = (binding) => {
     const attributes = runtimeVisualInitialBindingIdentityAttributes(binding);
@@ -4228,7 +4245,7 @@ function reviewBootstrap(
     if (useFrozenPath && runtimeVisualInitialBindingMatches(
       pathElement,
       binding,
-      Boolean(identityAttributes?.length) || identityText.length === 0,
+      runtimeVisualInitialBindingIgnoresIdentityText(identityAttributes, identityText),
     )) return pathElement;
     if (runtimeVisualDocumentReadyState(document) === "loading") return null;
     if (!runtimeVisualInitialBindingHasFingerprint(binding)) return null;
@@ -4239,7 +4256,7 @@ function reviewBootstrap(
         && runtimeVisualInitialBindingMatches(
           element,
           binding,
-          Boolean(identityAttributes?.length) || identityText.length === 0,
+          runtimeVisualInitialBindingIgnoresIdentityText(identityAttributes, identityText),
         )
       ) runtimeVisualArrayPush(matching, element);
     });
@@ -4288,7 +4305,7 @@ function reviewBootstrap(
       if (!runtimeVisualInitialBindingMatches(
         observedElement,
         binding,
-        Boolean(identityAttributes?.length) || identityText.length === 0,
+        runtimeVisualInitialBindingIgnoresIdentityText(identityAttributes, identityText),
       )) return;
       runtimeVisualMapSet(reviewCommentDeferredBindings, binding, true);
       return;
@@ -4482,20 +4499,23 @@ function reviewBootstrap(
     ) || runtimeVisualRegExpExec(
       /^rgba?\([^/]*\/\s*([0-9.]+%?)\s*\)$/iu,
       normalized,
+    ) || runtimeVisualRegExpExec(
+      /^(?:color|lab|lch|oklab|oklch|hsl|hwb)\([^/]*\/\s*([0-9.]+%?)\s*\)$/iu,
+      normalized,
     );
     if (alphaMatch) {
       const alpha = runtimeVisualParseFloat(alphaMatch[1]);
       if (runtimeVisualNumberIsFinite(alpha) && alpha <= 0) return true;
     }
-    return runtimeVisualRegExpTest(
+    return Boolean(runtimeVisualRegExpExec(
       /^#(?:[0-9a-f]{3}0|[0-9a-f]{6}00)$/iu,
       normalized,
-    );
+    ));
   };
   const runtimeVisualShadowHasPaint = (value) => {
     const normalized = runtimeVisualNormalizedPaintValue(value);
     if (!normalized || normalized === "none") return false;
-    const colorPattern = /(?:rgba?\([^)]*\)|#[0-9a-f]{3,8}|transparent)/giu;
+    const colorPattern = /(?:(?:rgba?|color|lab|lch|oklab|oklch|hsl|hwb)\([^)]*\)|#[0-9a-f]{3,8}|transparent)/giu;
     const colors = [];
     let colorMatch = runtimeVisualRegExpExec(colorPattern, normalized);
     while (colorMatch) {

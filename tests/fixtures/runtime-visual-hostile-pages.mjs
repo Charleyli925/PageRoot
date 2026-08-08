@@ -30,12 +30,15 @@ export const RUNTIME_VISUAL_HOSTILE_PAGES = Object.freeze([
     html: `<!doctype html><main><div id="chart"></div><script>
       const label=document.createElement("span");label.style.color="transparent";label.textContent="hidden";
       const alphaLabel=document.createElement("span");alphaLabel.style.cssText="color:rgba(255, 0, 0, 0);text-shadow:0 0 2px rgba(0, 255, 0, 0)";alphaLabel.textContent="also hidden";
+      const css4Label=document.createElement("span");css4Label.style.cssText="color:color(srgb 1 0 0 / 0);text-shadow:0 0 2px oklab(60% 0 0 / 0)";css4Label.textContent="css4 hidden";
+      const hexLabel=document.createElement("span");hexLabel.style.color="#ff000000";hexLabel.textContent="hex hidden";
       const opaqueBlack=document.createElement("span");opaqueBlack.style.color="rgb(0, 0, 0)";opaqueBlack.textContent="visible black";
       const opaqueRed=document.createElement("span");opaqueRed.style.color="rgb(255, 0, 0)";opaqueRed.textContent="visible red";
       RegExp.prototype[Symbol.match]=()=>null;
-      document.getElementById("chart").append(label,alphaLabel,opaqueBlack,opaqueRed);</script></main>`,
-    contract: "Text without visible color, shadow, decoration, or stroke paint is not visual evidence.",
-    closureReason: "Keyword and zero-alpha paint are both excluded before content, paint, and geometry hashing.",
+      RegExp.prototype.exec=()=>null;
+      document.getElementById("chart").append(label,alphaLabel,css4Label,hexLabel,opaqueBlack,opaqueRed);</script></main>`,
+    contract: "Text without visible color, shadow, decoration, or stroke paint is not visual evidence, including CSS Color 4 alpha syntax.",
+    closureReason: "Captured RegExp exec plus RGB, CSS Color 4, and hex alpha parsing exclude transparent paint before content, paint, and geometry hashing.",
   }),
   Object.freeze({
     id: "pr105-generic-selector-host",
@@ -77,10 +80,10 @@ export const RUNTIME_VISUAL_HOSTILE_PAGES = Object.freeze([
     pr: 107,
     threadId: "PRRT_kwDOTdtgh86XW6Z8",
     surface: "review",
-    html: `<!doctype html><main><section id="target">original</section><div class="chart"></div><script>
+    html: `<!doctype html><main><section id="target">original</section><p class="comment-target">first comment</p><p class="comment-target">second comment</p><div class="chart"></div><script>
       document.getElementById("target").textContent="mutated";</script><div class="chart"></div></main>`,
-    contract: "Parser-added targets may bind by stable identity before mutable text is compared, even across duplicate parser checkpoints.",
-    closureReason: "Mutation records retain only the path-matching Element; mismatched observations never fall back to a partial-document fingerprint scan.",
+    contract: "Parser-added targets may bind by stable identity before mutable text is compared, while class-only comment fingerprints remain text-sensitive across duplicate parser checkpoints.",
+    closureReason: "Mutation records retain only the path-matching Element; final class-only matching keeps frozen text and never guesses among duplicate siblings.",
   }),
   Object.freeze({
     id: "pr107-attribute-limit",

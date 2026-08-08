@@ -668,9 +668,13 @@ test("hostile review fixtures are enforced by the adapter and page contract", ()
   assert.match(transparentText.html, /rgba\(255, 0, 0, 0\)/u);
   assert.match(transparentText.html, /rgb\(0, 0, 0\)/u);
   assert.match(transparentText.html, /rgb\(255, 0, 0\)/u);
+  assert.match(transparentText.html, /color\(srgb 1 0 0 \/ 0\)/u);
+  assert.match(transparentText.html, /oklab\(60% 0 0 \/ 0\)/u);
   assert.match(transparentText.html, /text-shadow/iu);
   assert.match(transparentText.html, /RegExp\.prototype\[Symbol\.match\]/u);
+  assert.match(transparentText.html, /RegExp\.prototype\.exec/u);
   assert.match(parserMutation.html, /textContent="mutated"/u);
+  assert.match(parserMutation.html, /class="comment-target"/u);
   assert.match(attributeLimit.html, /data-key-24/u);
 
   assert.match(reviewDocument, /ReviewRuntimeVisualCaptureAdapter/);
@@ -684,6 +688,8 @@ test("hostile review fixtures are enforced by the adapter and page contract", ()
   assert.match(reviewDocument, /reviewCommentDeferredBindings/);
   assert.match(reviewDocument, /runtimeVisualDocumentReadyState/);
   assert.match(reviewDocument, /runtimeVisualRegExpExec/);
+  assert.match(reviewDocument, /runtimeVisualInitialBindingIgnoresIdentityText/);
+  assert.match(reviewDocument, /(?:color\|lab\|lch\|oklab\|oklch\|hsl\|hwb)/u);
   assert.match(reviewDocument, /runtimeVisualNumberIsFinite/);
   assert.match(reviewDocument, /runtimeVisualMutationRecordAddedNodes/);
   assert.match(
