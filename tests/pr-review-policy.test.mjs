@@ -68,6 +68,11 @@ function evaluate(overrides = {}) {
 test("priority parsing defaults safely to deferred unclassified debt", () => {
   assert.equal(classifyReviewPriority("![P0 Badge](badge)"), "P0");
   assert.equal(classifyReviewPriority("![P3 Badge](x) then ![P1 Badge](x)"), "P1");
+  assert.equal(
+    classifyReviewPriority("![P2 Badge](x) This finding discusses P0/P1 behavior but remains P2."),
+    "P2",
+  );
+  assert.equal(classifyReviewPriority("P1: a structured blocking finding"), "P1");
   assert.equal(classifyReviewPriority("ordinary comment"), "unclassified");
   assert.equal(reviewedCommitPrefix("**Reviewed commit:** `aaaaaaaaaa`"), "aaaaaaaaaa");
 });

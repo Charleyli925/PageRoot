@@ -14,7 +14,8 @@ const DEFAULT_TIMEOUT_SECONDS = 15 * 60;
 const DEFAULT_POLL_SECONDS = 15;
 const MAX_REST_PAGES = 20;
 const POLICY_VERSION = "2026-08-09";
-const PRIORITY_PATTERN = /\bP([0-3])(?:\s+Badge|\b)/giu;
+const PRIORITY_BADGE_PATTERN = /\bP([0-3])\s+Badge\b/giu;
+const PRIORITY_LINE_PATTERN = /(?:^|\r?\n)\s*(?:[-*]\s*)?(?:\*\*)?\[?P([0-3])\]?(?:\*\*)?\s*[:：-]/gimu;
 const REVIEWED_COMMIT_PATTERN = /\*\*Reviewed commit:\*\*\s*`([0-9a-f]{10,40})`/iu;
 const CLEAN_COMPLETION_PATTERN = /^Codex Review:\s*Didn't find any major issues\.[^\r\n]*\r?\n\r?\n/iu;
 
@@ -76,8 +77,11 @@ function pullRequestBaseSha(pullRequest) {
 
 export function classifyReviewPriority(body) {
   let highestRank = Number.POSITIVE_INFINITY;
-  for (const match of String(body || "").matchAll(PRIORITY_PATTERN)) {
-    highestRank = Math.min(highestRank, Number(match[1]));
+  const text = String(body || "");
+  for (const pattern of [PRIORITY_BADGE_PATTERN, PRIORITY_LINE_PATTERN]) {
+    for (const match of text.matchAll(pattern)) {
+      highestRank = Math.min(highestRank, Number(match[1]));
+    }
   }
   return Number.isFinite(highestRank) ? `P${highestRank}` : "unclassified";
 }
