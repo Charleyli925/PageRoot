@@ -7,6 +7,7 @@ import {
   reviewedCommitPrefix,
   reviewPriority,
   reviewRequestSha,
+  visibleReviewRequestSha,
 } from "../scripts/check-pr-review-settled.mjs";
 
 const headSha = "a".repeat(40);
@@ -87,6 +88,7 @@ function evaluate(overrides = {}) {
 
 test("exact-SHA review requests require the trusted hidden marker", () => {
   assert.equal(reviewRequestSha(request().body), headSha);
+  assert.equal(visibleReviewRequestSha(request().body), headSha);
   assert.equal(reviewedCommitPrefix("**Reviewed commit:** `aaaaaaaaaa`"), "aaaaaaaaaa");
   assert.equal(reviewPriority("![P1 Badge](badge)"), "P1");
   assert.equal(latestExactReviewRequest([
@@ -94,6 +96,10 @@ test("exact-SHA review requests require the trusted hidden marker", () => {
     request({ id: 2, createdAt: "2026-08-08T03:30:00.000Z" }),
     request({ id: 3, association: "CONTRIBUTOR" }),
     { ...request({ id: 4 }), body: "@codex review" },
+    {
+      ...request({ id: 5 }),
+      body: request().body.replace(`Review exact SHA \`${headSha}\``, `Review exact SHA \`${oldSha}\``),
+    },
   ], headSha).id, 2);
 });
 

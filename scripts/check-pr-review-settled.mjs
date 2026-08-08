@@ -49,6 +49,13 @@ export function reviewRequestSha(body) {
   return match?.[1]?.toLowerCase() || null;
 }
 
+export function visibleReviewRequestSha(body) {
+  const match = String(body || "").match(
+    /\bReview exact SHA\s+`([0-9a-f]{40})`/iu,
+  );
+  return match?.[1]?.toLowerCase() || null;
+}
+
 export function reviewedCommitPrefix(body) {
   const match = String(body || "").match(
     /\*\*Reviewed commit:\*\*\s*`([0-9a-f]{10,40})`/iu,
@@ -83,6 +90,7 @@ function exactReviewRequests(issueComments, expectedHeadSha) {
     && TRUSTED_REQUEST_ASSOCIATIONS.has(commentAssociation(comment))
     && /(?:^|\s)@codex\s+review\b/iu.test(comment?.body || "")
     && reviewRequestSha(comment?.body) === expectedHeadSha
+    && visibleReviewRequestSha(comment?.body) === expectedHeadSha
     && Number.isFinite(latestTimestamp(commentCreatedAt(comment), commentUpdatedAt(comment)))
   ));
 }
