@@ -266,6 +266,24 @@ test("change discovery builds a complete outline and precise change markers", ()
   assert.match(reviewDocument, /annotateActionPairs/);
 });
 
+test("numbered direct text flows recognize the supported list prefixes", () => {
+  const patternMatch = reviewDocument.match(
+    /const NUMBERED_TEXT_LINE_PATTERN = \/(.+)\/u;/u,
+  );
+  assert.ok(patternMatch, "numbered line pattern must remain explicit");
+  const pattern = new RegExp(patternMatch[1], "u");
+  [
+    "① 圈号序列",
+    "1. 点号序列",
+    "1、顿号序列",
+    "1）右括号序列",
+    "（一）中文括号序列",
+    "一、中文顿号序列",
+    "• 项目符号序列",
+    "- 连字符序列",
+  ].forEach((line) => assert.equal(pattern.test(line), true, line));
+});
+
 test("review controls keep page, filter, visibility, and navigation orthogonal", () => {
   assert.match(review, /const selectReviewMode = useCallback/);
   assert.match(review, /type: "set-change-filter", value: mode/);
