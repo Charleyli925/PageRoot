@@ -12,6 +12,7 @@ import {
 
 const headSha = "a".repeat(40);
 const oldSha = "b".repeat(40);
+const createdAt = "2026-08-08T03:59:00.000Z";
 const requestAt = "2026-08-08T04:00:00.000Z";
 const draftCompletedAt = "2026-08-08T04:00:30.000Z";
 const readyAt = "2026-08-08T04:01:00.000Z";
@@ -35,7 +36,7 @@ function request({
 }
 
 function pullRequest({ sha = headSha, draft = false, state = "open" } = {}) {
-  return { head: { sha }, draft, state };
+  return { head: { sha }, draft, state, created_at: createdAt };
 }
 
 function exactReview({ sha = headSha, submittedAt = completedAt, id = 20 } = {}) {
@@ -187,6 +188,31 @@ test("Codex environment failures block promotion immediately until a later Draft
   }).status, "settled");
 });
 
+test("repeated promotion cannot recycle requests or completions from an earlier Draft interval", () => {
+  const repeatedTimeline = [
+    { id: 70, event: "ready_for_review", created_at: readyAt },
+    { id: 71, event: "convert_to_draft", created_at: "2026-08-08T04:03:00.000Z" },
+    { id: 72, event: "ready_for_review", created_at: "2026-08-08T04:04:00.000Z" },
+  ];
+  assert.equal(evaluate({
+    timelineEvents: repeatedTimeline,
+    reviews: [draftReview(), exactReview(), exactReview({
+      id: 73,
+      submittedAt: "2026-08-08T04:05:00.000Z",
+    })],
+    now: new Date("2026-08-08T04:08:01.000Z"),
+  }).reason, "exact_sha_request_not_in_latest_draft");
+  assert.equal(evaluate({
+    issueComments: [request({ createdAt: "2026-08-08T04:03:10.000Z" })],
+    timelineEvents: repeatedTimeline,
+    reviews: [exactReview(), exactReview({
+      id: 73,
+      submittedAt: "2026-08-08T04:05:00.000Z",
+    })],
+    now: new Date("2026-08-08T04:08:01.000Z"),
+  }).reason, "draft_review_not_completed_before_promotion");
+});
+
 test("the settle window prevents late review threads from racing the full gate", () => {
   const result = evaluate({ now: new Date("2026-08-08T04:04:59.999Z") });
   assert.equal(result.status, "waiting");
@@ -215,7 +241,10 @@ test("Ready promotion fails closed when the exact request is absent or the PR re
   assert.equal(evaluate({ timelineEvents: [] }).reason, "ready_transition_missing");
   assert.equal(evaluate({
     issueComments: [request({ createdAt: "2026-08-08T04:01:30.000Z" })],
-  }).reason, "exact_sha_request_not_in_draft");
+  }).reason, "exact_sha_request_not_in_latest_draft");
+  assert.equal(evaluate({
+    pullRequest: { head: { sha: headSha }, draft: false, state: "open" },
+  }).reason, "draft_interval_unavailable");
   assert.equal(evaluate({ pullRequest: pullRequest({ draft: true }) }).reason, "pull_request_is_draft");
   assert.equal(evaluate({ pullRequest: pullRequest({ state: "closed" }) }).reason, "pull_request_not_open");
 });

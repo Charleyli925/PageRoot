@@ -122,6 +122,19 @@ function latestReadyForReviewEvent(timelineEvents) {
     ))[0] || null;
 }
 
+function latestDraftEventBefore(timelineEvents, readyAt) {
+  return (timelineEvents || [])
+    .filter((event) => (
+      ["convert_to_draft", "converted_to_draft"].includes(event?.event)
+      && Number.isFinite(timestamp(event?.created_at || event?.createdAt))
+      && timestamp(event?.created_at || event?.createdAt) < readyAt
+    ))
+    .sort((left, right) => (
+      timestamp(right?.created_at || right?.createdAt)
+      - timestamp(left?.created_at || left?.createdAt)
+    ))[0] || null;
+}
+
 export function latestExactReviewRequest(issueComments, expectedHeadSha) {
   assertSha(expectedHeadSha, "expectedHeadSha");
   return exactReviewRequests(issueComments, expectedHeadSha)
@@ -341,14 +354,32 @@ export function evaluateReviewSettlement({
     });
   }
   const readyAt = timestamp(readyEvent?.created_at || readyEvent?.createdAt);
+  const draftEvent = latestDraftEventBefore(timelineEvents, readyAt);
+  const draftStartedAt = draftEvent
+    ? timestamp(draftEvent?.created_at || draftEvent?.createdAt)
+    : timestamp(pullRequest?.created_at || pullRequest?.createdAt);
+  if (!Number.isFinite(draftStartedAt)) {
+    return Object.freeze({
+      status: "blocked",
+      reason: "draft_interval_unavailable",
+      expectedHeadSha: expectedSha,
+      currentHeadSha,
+      request: requestSummary,
+      promotion: null,
+      completion: null,
+      settlesAt: null,
+      blockingThreads: [],
+    });
+  }
   const promotionSummary = Object.freeze({
     id: readyEvent?.id || readyEvent?.databaseId || null,
     at: new Date(readyAt).toISOString(),
+    draftStartedAt: new Date(draftStartedAt).toISOString(),
   });
-  if (requestAt > readyAt) {
+  if (requestAt < draftStartedAt || requestAt >= readyAt) {
     return Object.freeze({
       status: "blocked",
-      reason: "exact_sha_request_not_in_draft",
+      reason: "exact_sha_request_not_in_latest_draft",
       expectedHeadSha: expectedSha,
       currentHeadSha,
       request: requestSummary,
@@ -366,7 +397,9 @@ export function evaluateReviewSettlement({
     requestReactions,
     issueReactions,
   });
-  const draftCompletion = completionSignals.find((signal) => signal.at < readyAt) || null;
+  const draftCompletion = completionSignals.find((signal) => (
+    signal.at >= draftStartedAt && signal.at < readyAt
+  )) || null;
   const environmentFailure = latestCodexEnvironmentFailure(issueComments, requestAt);
   if (
     environmentFailure
