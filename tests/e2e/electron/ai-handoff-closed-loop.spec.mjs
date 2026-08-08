@@ -544,7 +544,7 @@ test("a verified AI result stays pending through desktop review until the user a
     <section data-review-anchor-only-section>
       <h2>删除锚点导航</h2>
       <div style="height:280px" aria-hidden="true"></div>
-      <p data-review-anchor-only>稳定开头。只删除这句定位文字。稳定结尾。</p>
+      <p data-review-anchor-only>稳定开头。删除词。稳定结尾。</p>
     </section>
     <section data-review-runtime-visuals>
       <h2>运行态图表回归</h2>
@@ -1210,7 +1210,7 @@ test("a verified AI result stays pending through desktop review until the user a
           '<div data-review-ebita-copy><strong>结论：</strong>EBITA差异均在波动范围内（0.06~0.13pt），AI托管未恶化盈利能力，建议继续保留实验策略。</div>',
         )
         .replace(
-          '<p data-review-anchor-only>稳定开头。只删除这句定位文字。稳定结尾。</p>',
+          '<p data-review-anchor-only>稳定开头。删除词。稳定结尾。</p>',
           '<p data-review-anchor-only>稳定开头。稳定结尾。</p>',
         )
         .replace(
@@ -1853,7 +1853,7 @@ test("a verified AI result stays pending through desktop review until the user a
       "[data-review-reference]",
     )).toHaveAttribute(
       "data-pageroot-review-text-anchors",
-      /text-\d+@\d+/u,
+      /text-\d+(?:-\d+)?@\d+/u,
     );
     await expect(afterReviewFrame.locator(
       '[data-review-reference] [data-pageroot-review-text="added"]',
@@ -1871,7 +1871,7 @@ test("a verified AI result stays pending through desktop review until the user a
       "[data-review-delete-only]",
     )).toHaveAttribute(
       "data-pageroot-review-text-anchors",
-      /text-\d+@\d+/u,
+      /text-\d+(?:-\d+)?@\d+/u,
     );
     const addedChartChangeId = await afterReviewFrame.locator(
       "[data-review-added-chart] [data-pageroot-review-marker]",
@@ -2083,7 +2083,7 @@ test("a verified AI result stays pending through desktop review until the user a
       .toBeLessThan(0.7);
     await expect(beforeReviewFrame.locator(
       '[data-review-anchor-only] [data-pageroot-review-text="removed"]',
-    )).toHaveText("只删除这句定位文字。");
+    )).toHaveText("删除词。");
     await expect(afterReviewFrame.locator(
       '[data-review-anchor-only] [data-pageroot-review-text], [data-review-anchor-only] [data-pageroot-review-text-context]',
     )).toHaveCount(0);
