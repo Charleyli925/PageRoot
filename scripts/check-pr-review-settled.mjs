@@ -37,18 +37,38 @@ function assertSha(value, label) {
   return normalized;
 }
 
+function hiddenRequestIdentity(body, phase) {
+  const markdown = String(body || "");
+  const marker = phase === "final"
+    ? "pageroot-codex-final-review-sha"
+    : "pageroot-codex-review-sha";
+  const declarations = [...markdown.matchAll(new RegExp(`${marker}:`, "giu"))];
+  if (declarations.length !== 1) return null;
+  const match = markdown.match(new RegExp(
+    `<!--\\s*${marker}:\\s*([0-9a-f]{40})\\s*;\\s*base-sha:\\s*([0-9a-f]{40})\\s*-->`,
+    "iu",
+  ));
+  if (!match) return null;
+  return Object.freeze({
+    headSha: match[1].toLowerCase(),
+    baseSha: match[2].toLowerCase(),
+  });
+}
+
 export function reviewRequestSha(body) {
-  const matches = [...String(body || "").matchAll(
-    /<!--\s*pageroot-codex-review-sha:\s*([0-9a-f]{40})\s*-->/giu,
-  )];
-  return matches.length === 1 ? matches[0][1].toLowerCase() : null;
+  return hiddenRequestIdentity(body, "draft")?.headSha || null;
+}
+
+export function reviewRequestBaseSha(body) {
+  return hiddenRequestIdentity(body, "draft")?.baseSha || null;
 }
 
 export function finalReviewRequestSha(body) {
-  const matches = [...String(body || "").matchAll(
-    /<!--\s*pageroot-codex-final-review-sha:\s*([0-9a-f]{40})\s*-->/giu,
-  )];
-  return matches.length === 1 ? matches[0][1].toLowerCase() : null;
+  return hiddenRequestIdentity(body, "final")?.headSha || null;
+}
+
+export function finalReviewRequestBaseSha(body) {
+  return hiddenRequestIdentity(body, "final")?.baseSha || null;
 }
 
 function markdownWithoutHtmlComments(body) {
@@ -65,22 +85,34 @@ function markdownWithoutHtmlComments(body) {
   }
 }
 
-export function visibleReviewRequestSha(body) {
+function visibleRequestIdentity(body, phase) {
   const visibleMarkdown = markdownWithoutHtmlComments(body);
   if (visibleMarkdown === null) return null;
-  const match = visibleMarkdown.match(
-    /^\s*@codex review[ \t]*\r?\n[ \t]*\r?\nReview exact SHA `([0-9a-f]{40})`\.[ \t]*(?:\r?\n[ \t]*)*$/iu,
-  );
-  return match?.[1]?.toLowerCase() || null;
+  const pattern = phase === "final"
+    ? /^\s*@codex review[ \t]*\r?\n[ \t]*\r?\nFinal review exact head SHA `([0-9a-f]{40})` on base SHA `([0-9a-f]{40})`\.[ \t]*(?:\r?\n[ \t]*)*$/iu
+    : /^\s*@codex review[ \t]*\r?\n[ \t]*\r?\nReview exact head SHA `([0-9a-f]{40})` on base SHA `([0-9a-f]{40})`\.[ \t]*(?:\r?\n[ \t]*)*$/iu;
+  const match = visibleMarkdown.match(pattern);
+  if (!match) return null;
+  return Object.freeze({
+    headSha: match[1].toLowerCase(),
+    baseSha: match[2].toLowerCase(),
+  });
+}
+
+export function visibleReviewRequestSha(body) {
+  return visibleRequestIdentity(body, "draft")?.headSha || null;
+}
+
+export function visibleReviewRequestBaseSha(body) {
+  return visibleRequestIdentity(body, "draft")?.baseSha || null;
 }
 
 export function visibleFinalReviewRequestSha(body) {
-  const visibleMarkdown = markdownWithoutHtmlComments(body);
-  if (visibleMarkdown === null) return null;
-  const match = visibleMarkdown.match(
-    /^\s*@codex review[ \t]*\r?\n[ \t]*\r?\nFinal review exact SHA `([0-9a-f]{40})`\.[ \t]*(?:\r?\n[ \t]*)*$/iu,
-  );
-  return match?.[1]?.toLowerCase() || null;
+  return visibleRequestIdentity(body, "final")?.headSha || null;
+}
+
+export function visibleFinalReviewRequestBaseSha(body) {
+  return visibleRequestIdentity(body, "final")?.baseSha || null;
 }
 
 export function reviewedCommitPrefix(body) {
@@ -111,19 +143,21 @@ function commentUpdatedAt(comment) {
   return comment?.updated_at || comment?.updatedAt || commentCreatedAt(comment);
 }
 
-function exactReviewRequests(issueComments, expectedHeadSha, phase) {
-  const hiddenSha = phase === "final" ? finalReviewRequestSha : reviewRequestSha;
-  const visibleSha = phase === "final"
-    ? visibleFinalReviewRequestSha
-    : visibleReviewRequestSha;
-  return (issueComments || []).filter((comment) => (
-    !isCodexActor(commentAuthor(comment))
-    && TRUSTED_REQUEST_ASSOCIATIONS.has(commentAssociation(comment))
-    && hiddenSha(comment?.body) === expectedHeadSha
-    && visibleSha(comment?.body) === expectedHeadSha
-    && Number.isFinite(timestamp(commentCreatedAt(comment)))
-    && timestamp(commentUpdatedAt(comment)) === timestamp(commentCreatedAt(comment))
-  ));
+function exactReviewRequests(issueComments, expectedHeadSha, expectedBaseSha, phase) {
+  return (issueComments || []).filter((comment) => {
+    const hiddenIdentity = hiddenRequestIdentity(comment?.body, phase);
+    const visibleIdentity = visibleRequestIdentity(comment?.body, phase);
+    return (
+      !isCodexActor(commentAuthor(comment))
+      && TRUSTED_REQUEST_ASSOCIATIONS.has(commentAssociation(comment))
+      && hiddenIdentity?.headSha === expectedHeadSha
+      && hiddenIdentity?.baseSha === expectedBaseSha
+      && visibleIdentity?.headSha === expectedHeadSha
+      && visibleIdentity?.baseSha === expectedBaseSha
+      && Number.isFinite(timestamp(commentCreatedAt(comment)))
+      && timestamp(commentUpdatedAt(comment)) === timestamp(commentCreatedAt(comment))
+    );
+  });
 }
 
 function latestReadyForReviewEvent(timelineEvents) {
@@ -151,17 +185,19 @@ function latestDraftEventBefore(timelineEvents, readyAt) {
     ))[0] || null;
 }
 
-export function latestExactReviewRequest(issueComments, expectedHeadSha) {
+export function latestExactReviewRequest(issueComments, expectedHeadSha, expectedBaseSha) {
   assertSha(expectedHeadSha, "expectedHeadSha");
-  return exactReviewRequests(issueComments, expectedHeadSha, "draft")
+  assertSha(expectedBaseSha, "expectedBaseSha");
+  return exactReviewRequests(issueComments, expectedHeadSha, expectedBaseSha, "draft")
     .sort((left, right) => (
       timestamp(commentCreatedAt(right)) - timestamp(commentCreatedAt(left))
     ))[0] || null;
 }
 
-export function latestFinalReviewRequest(issueComments, expectedHeadSha) {
+export function latestFinalReviewRequest(issueComments, expectedHeadSha, expectedBaseSha) {
   assertSha(expectedHeadSha, "expectedHeadSha");
-  return exactReviewRequests(issueComments, expectedHeadSha, "final")
+  assertSha(expectedBaseSha, "expectedBaseSha");
+  return exactReviewRequests(issueComments, expectedHeadSha, expectedBaseSha, "final")
     .sort((left, right) => (
       timestamp(commentCreatedAt(right)) - timestamp(commentCreatedAt(left))
     ))[0] || null;
@@ -291,8 +327,15 @@ function pullRequestHeadSha(pullRequest) {
   ).toLowerCase();
 }
 
+function pullRequestBaseSha(pullRequest) {
+  return String(
+    pullRequest?.base?.sha || pullRequest?.baseRefOid || pullRequest?.baseSha || "",
+  ).toLowerCase();
+}
+
 export function evaluateReviewSettlement({
   expectedHeadSha,
+  expectedBaseSha,
   pullRequest,
   issueComments = [],
   timelineEvents = [],
@@ -304,6 +347,7 @@ export function evaluateReviewSettlement({
   settleSeconds = DEFAULT_SETTLE_SECONDS,
 }) {
   const expectedSha = assertSha(expectedHeadSha, "expectedHeadSha");
+  const expectedBase = assertSha(expectedBaseSha, "expectedBaseSha");
   if (!Number.isFinite(settleSeconds) || settleSeconds < 0) {
     throw new Error("settleSeconds must be a non-negative number.");
   }
@@ -311,12 +355,31 @@ export function evaluateReviewSettlement({
   if (!Number.isFinite(nowMs)) throw new Error("now must be a valid date.");
 
   const currentHeadSha = pullRequestHeadSha(pullRequest);
+  const currentBaseSha = pullRequestBaseSha(pullRequest);
+  const resultIdentity = Object.freeze({
+    expectedHeadSha: expectedSha,
+    currentHeadSha: currentHeadSha || null,
+    expectedBaseSha: expectedBase,
+    currentBaseSha: currentBaseSha || null,
+  });
   if (currentHeadSha !== expectedSha) {
     return Object.freeze({
+      ...resultIdentity,
       status: "blocked",
       reason: "head_sha_changed",
       expectedHeadSha: expectedSha,
       currentHeadSha: currentHeadSha || null,
+      request: null,
+      completion: null,
+      settlesAt: null,
+      blockingThreads: [],
+    });
+  }
+  if (currentBaseSha !== expectedBase) {
+    return Object.freeze({
+      ...resultIdentity,
+      status: "blocked",
+      reason: "base_sha_changed",
       request: null,
       completion: null,
       settlesAt: null,
@@ -348,7 +411,7 @@ export function evaluateReviewSettlement({
     });
   }
 
-  const request = latestExactReviewRequest(issueComments, expectedSha);
+  const request = latestExactReviewRequest(issueComments, expectedSha, expectedBase);
   if (!request) {
     return Object.freeze({
       status: "blocked",
@@ -464,7 +527,7 @@ export function evaluateReviewSettlement({
       blockingThreads: [],
     });
   }
-  const finalRequest = latestFinalReviewRequest(issueComments, expectedSha);
+  const finalRequest = latestFinalReviewRequest(issueComments, expectedSha, expectedBase);
   if (!finalRequest) {
     return Object.freeze({
       status: "waiting",
@@ -602,6 +665,7 @@ function parseOptions(argv) {
     repository: process.env.GITHUB_REPOSITORY || "",
     pullRequest: Number(process.env.PR_NUMBER || 0),
     expectedHeadSha: process.env.PR_HEAD_SHA || "",
+    expectedBaseSha: process.env.PR_BASE_SHA || "",
     tokenEnv: "GITHUB_TOKEN",
     settleSeconds: DEFAULT_SETTLE_SECONDS,
     timeoutSeconds: DEFAULT_TIMEOUT_SECONDS,
@@ -614,6 +678,7 @@ function parseOptions(argv) {
     if (argument === "--repository") options.repository = value;
     else if (argument === "--pull-request") options.pullRequest = Number(value);
     else if (argument === "--expected-head") options.expectedHeadSha = value;
+    else if (argument === "--expected-base") options.expectedBaseSha = value;
     else if (argument === "--token-env") options.tokenEnv = value;
     else if (argument === "--settle-seconds") options.settleSeconds = Number(value);
     else if (argument === "--timeout-seconds") options.timeoutSeconds = Number(value);
@@ -627,6 +692,7 @@ function parseOptions(argv) {
     throw new Error("--pull-request must be a positive integer.");
   }
   options.expectedHeadSha = assertSha(options.expectedHeadSha, "--expected-head");
+  options.expectedBaseSha = assertSha(options.expectedBaseSha, "--expected-base");
   if (!Number.isInteger(options.settleSeconds) || options.settleSeconds < 0 || options.settleSeconds > 600) {
     throw new Error("--settle-seconds must be an integer from 0 to 600.");
   }
@@ -746,8 +812,16 @@ async function collectSnapshot(options, token) {
       token,
     }),
   ]);
-  const request = latestExactReviewRequest(issueComments, options.expectedHeadSha);
-  const finalRequest = latestFinalReviewRequest(issueComments, options.expectedHeadSha);
+  const request = latestExactReviewRequest(
+    issueComments,
+    options.expectedHeadSha,
+    options.expectedBaseSha,
+  );
+  const finalRequest = latestFinalReviewRequest(
+    issueComments,
+    options.expectedHeadSha,
+    options.expectedBaseSha,
+  );
   const requestId = request?.id || request?.databaseId;
   const finalRequestId = finalRequest?.id || finalRequest?.databaseId;
   const [requestReactions, finalRequestReactions] = await Promise.all([
@@ -781,6 +855,8 @@ function conciseResult(result) {
     reason: result.reason,
     expectedHeadSha: result.expectedHeadSha,
     currentHeadSha: result.currentHeadSha,
+    expectedBaseSha: result.expectedBaseSha,
+    currentBaseSha: result.currentBaseSha,
     request: result.request,
     promotion: result.promotion,
     draftCompletion: result.draftCompletion,
@@ -795,14 +871,15 @@ async function appendSummary(result) {
   if (!process.env.GITHUB_STEP_SUMMARY) return;
   const status = result.status === "settled" ? "PASS" : "BLOCKED";
   const lines = [
-    "### Exact-SHA Codex review",
+    "### Exact head/base Codex review",
     "",
     `- Result: **${status}** (${result.reason})`,
     `- Expected/current head: \`${result.expectedHeadSha}\` / \`${result.currentHeadSha || "unavailable"}\``,
-    `- Exact-SHA request: ${result.request ? `comment ${result.request.id} at ${result.request.at}` : "missing"}`,
+    `- Expected/current base: \`${result.expectedBaseSha}\` / \`${result.currentBaseSha || "unavailable"}\``,
+    `- Draft exact-head/base request: ${result.request ? `comment ${result.request.id} at ${result.request.at}` : "missing"}`,
     `- Ready promotion: ${result.promotion ? `event ${result.promotion.id} at ${result.promotion.at}` : "missing"}`,
     `- Draft completion: ${result.draftCompletion ? `${result.draftCompletion.kind} at ${result.draftCompletion.at}` : "not observed"}`,
-    `- Final exact-SHA request: ${result.finalRequest ? `comment ${result.finalRequest.id} at ${result.finalRequest.at}` : "missing"}`,
+    `- Final exact-head/base request: ${result.finalRequest ? `comment ${result.finalRequest.id} at ${result.finalRequest.at}` : "missing"}`,
     `- Final completion: ${result.completion ? `${result.completion.kind} at ${result.completion.at}` : "not observed"}`,
     `- Settle boundary: ${result.settlesAt || "not reached"}`,
     `- Blocking active threads: ${result.blockingThreads.length}`,
@@ -829,10 +906,16 @@ async function run(options) {
       await delay(Math.min(options.pollSeconds * 1000, Math.max(1, deadline - Date.now())));
       continue;
     }
-    const result = evaluateReviewSettlement({
+    const evaluated = evaluateReviewSettlement({
       expectedHeadSha: options.expectedHeadSha,
+      expectedBaseSha: options.expectedBaseSha,
       ...snapshot,
       settleSeconds: options.settleSeconds,
+    });
+    const result = Object.freeze({
+      expectedBaseSha: options.expectedBaseSha,
+      currentBaseSha: pullRequestBaseSha(snapshot.pullRequest) || null,
+      ...evaluated,
     });
     if (result.reason !== lastReason || result.status !== "waiting") {
       console.log(JSON.stringify(conciseResult(result), null, 2));

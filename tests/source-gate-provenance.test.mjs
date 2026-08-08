@@ -149,6 +149,7 @@ test("GitHub workflows keep one reviewed ready-PR source boundary, an exact-tree
   assert.match(reviewSettled, /name: review-settled/u);
   assert.match(reviewSettled, /check-pr-review-settled\.mjs/u);
   assert.match(reviewSettled, /--expected-head "\$\{\{ github\.event\.pull_request\.head\.sha \}\}"/u);
+  assert.match(reviewSettled, /--expected-base "\$\{\{ github\.event\.pull_request\.base\.sha \}\}"/u);
   assert.match(reviewSettled, /--settle-seconds 180/u);
   assert.match(reviewSettled, /--timeout-seconds 1200/u);
   assert.match(reviewSettled, /--poll-seconds 20/u);
@@ -171,6 +172,9 @@ test("GitHub workflows keep one reviewed ready-PR source boundary, an exact-tree
   assert.match(releaseGate, /needs:[\s\S]*- review-settled[\s\S]*- baseline-policy/u);
   assert.match(releaseGate, /REVIEW_RESULT: \$\{\{ needs\.review-settled\.result \}\}/u);
   assert.match(releaseGate, /BASELINE_RESULT: \$\{\{ needs\.baseline-policy\.result \}\}/u);
+  assert.match(releaseGate, /Revalidate frozen head\/base review evidence/u);
+  assert.match(releaseGate, /--expected-head "\$\{\{ github\.event\.pull_request\.head\.sha \}\}"/u);
+  assert.match(releaseGate, /--expected-base "\$\{\{ github\.event\.pull_request\.base\.sha \}\}"/u);
   assert.match(ci, /source-gate-provenance\.mjs create/u);
   assert.match(ci, /steps\.provenance\.outputs\.artifact_name/u);
   assert.match(ci, /runs-on: ubuntu-24\.04/u);

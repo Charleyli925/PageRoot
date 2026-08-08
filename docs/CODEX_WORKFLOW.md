@@ -111,40 +111,40 @@ stash.
 2. Keep one coherent outcome per PR.
 3. Open every PR as draft. All ordinary PR updates run only impact-selected feedback, regardless of the current draft flag.
 4. The PR body must state outcome, boundary, verification, documentation impact and release impact.
-5. Update the final head onto current `main`, freeze it and request Codex review while the PR is still Draft. The request must name the full current SHA with the exact marker below. Fix P0-P2 findings, resolve a thread only after its fix is present, and repeat this step after every new commit.
-6. After the Draft review of the current SHA completes, confirm no other PR is being promoted and mark the PR Ready once. Wait until GitHub shows the Ready transition, then post the canonical final exact-SHA request below. `review-settled` requires the final request and its Codex completion after this Ready event, waits the 180-second settle window and rejects active non-outdated P0-P2 threads before `baseline-policy` or a complete source lane can start.
+5. Update the final head onto current `main`, freeze it and request Codex review while the PR is still Draft. The request must name the full current head SHA and base SHA with the exact marker below. Fix P0-P2 findings, resolve a thread only after its fix is present, and repeat this step after every new commit or base update.
+6. After the Draft review of the current head/base pair completes, confirm no other PR is being promoted and mark the PR Ready once. Wait until GitHub shows the Ready transition, then post the canonical final exact-head/base request below. `review-settled` requires the final request and its Codex completion after this Ready event, waits the 180-second settle window and rejects active non-outdated P0-P2 threads before `baseline-policy` or a complete source lane can start.
 7. Wait for the required `release-gate` and review the final GitHub diff, not only the local working diff.
 8. Squash-merge only after authorization. GitHub deletes the remote task branch; then audit and explicitly retire the local task before fast-forwarding primary `main`.
 
 Do not use an installed app, DMG, backup folder or another checkout as a source for new edits. If the local checkout contains unrelated work, create an isolated Git worktree rather than stashing or mixing changes.
 
-The required PR `release-gate` is the one complete source gate for an explicitly promoted final tree. `PR Feedback` owns only `opened`, `synchronize` and `reopened`; returning to Draft changes no code and starts no Feedback run. It runs `gate:edit` and never reports the `release-gate` status. The complete workflow listens only to `ready_for_review`. A later commit shares the same concurrency key, cancels an in-flight stale complete run, and leaves the new SHA without the required check. Convert the PR back to Draft, finish the work, request review for the new exact SHA and mark it Ready again only after that head is final. Opening a PR directly as Ready cannot provide the required Draft request marker and therefore fails closed. A same-run failed-job rerun reuses the successful `source-build` artifact through its run-ID-stable name and 30-day retention; it must not restart already-green source lanes merely because `github.run_attempt` changed. Local development should normally stop at impact-selected `gate:edit` and `task:finish`; rerun the complete source gate locally only for CI diagnosis or high-risk editing-engine work where the additional evidence is useful.
+The required PR `release-gate` is the one complete source gate for an explicitly promoted final tree. `PR Feedback` owns only `opened`, `synchronize` and `reopened`; returning to Draft changes no code and starts no Feedback run. It runs `gate:edit` and never reports the `release-gate` status. The complete workflow listens only to `ready_for_review`. A later commit shares the same concurrency key, cancels an in-flight stale complete run, and leaves the new SHA without the required check. A base update invalidates the reviewed combination even when the head is unchanged. Convert the PR back to Draft, finish the work, request review for the current exact head/base pair and mark it Ready again only after that pair is final. Opening a PR directly as Ready cannot provide the required Draft request marker and therefore fails closed. A same-run failed-job rerun reuses the successful `source-build` artifact through its run-ID-stable name and 30-day retention; it must not restart already-green source lanes merely because `github.run_attempt` changed. Local development should normally stop at impact-selected `gate:edit` and `task:finish`; rerun the complete source gate locally only for CI diagnosis or high-risk editing-engine work where the additional evidence is useful.
 
-The Draft exact-SHA request must be posted by a repository owner, member or collaborator while the PR is Draft. Replace the placeholder in both visible and hidden fields with the same 40-character head SHA, and post only the canonical block below. The visible body must contain exactly these two lines separated by one blank line, and the hidden marker must occur exactly once; code blocks, reference definitions, extra visible content, duplicate declarations and duplicate markers are rejected. Edited comments are never accepted as request evidence—post a new canonical comment instead:
+The Draft exact-head/base request must be posted by a repository owner, member or collaborator while the PR is Draft. Replace each placeholder in the visible and hidden fields with the same 40-character head or base SHA, and post only the canonical block below. The visible body must contain exactly these two lines separated by one blank line, and the hidden marker must occur exactly once; code blocks, reference definitions, extra visible content, duplicate declarations and duplicate markers are rejected. Edited comments are never accepted as request evidence—post a new canonical comment instead:
 
 ```text
 @codex review
 
-Review exact SHA `<40-character-head-sha>`.
+Review exact head SHA `<40-character-head-sha>` on base SHA `<40-character-base-sha>`.
 
-<!-- pageroot-codex-review-sha:<40-character-head-sha> -->
+<!-- pageroot-codex-review-sha:<40-character-head-sha>;base-sha:<40-character-base-sha> -->
 ```
 
-After GitHub records the Ready transition, the same trusted roles must post a new, unedited final request. Wait at least one second after Ready so GitHub's second-resolution timestamps prove ordering, and replace both placeholders with the unchanged full head SHA:
+After GitHub records the Ready transition, the same trusted roles must post a new, unedited final request. Wait at least one second after Ready so GitHub's second-resolution timestamps prove ordering, and repeat the unchanged full head/base pair:
 
 ```text
 @codex review
 
-Final review exact SHA `<40-character-head-sha>`.
+Final review exact head SHA `<40-character-head-sha>` on base SHA `<40-character-base-sha>`.
 
-<!-- pageroot-codex-final-review-sha:<40-character-head-sha> -->
+<!-- pageroot-codex-final-review-sha:<40-character-head-sha>;base-sha:<40-character-base-sha> -->
 ```
 
 The final request is a promotion attestation, not a replacement for Draft iteration. The workflow intentionally ignores a thumbs-up attached to the PR itself: GitHub does not expose which Codex invocation produced that reaction. A clean final review therefore settles only when Codex reacts to this exact final request comment; a submitted Codex review or completion comment may also settle it because those records carry the reviewed commit identity.
 
-This flow has one repository-level prerequisite outside the workflow: Codex cloud must be configured for the repository and Codex code review must be enabled. If the bot replies that an environment must be created, keep the PR Draft, have an authorized owner repair that setting, and post a new exact-SHA request. The gate treats that response as an immediate configuration failure; this repository workflow does not create or modify the Codex environment itself.
+This flow has one repository-level prerequisite outside the workflow: Codex cloud must be configured for the repository and Codex code review must be enabled. If the bot replies that an environment must be created, keep the PR Draft, have an authorized owner repair that setting, and post a new exact-head/base request. The gate treats that response as an immediate configuration failure; this repository workflow does not create or modify the Codex environment itself.
 
-`review-settled` re-reads the live PR head and the latest Ready timeline event on every poll. It binds the Draft request and one Codex completion to the current Draft interval: after PR creation or the most recent `convert_to_draft`, and strictly before the accepted Ready event. It then requires a distinct final request strictly after Ready and a separate completion at or after that request; requests and completions from an earlier Ready/Draft cycle cannot be recycled. Each completion must be a Codex PR review bound to the full SHA, a Codex completion comment whose reviewed-commit prefix matches it, or a Codex thumbs-up on the phase's exact request comment. PR-level reactions and non-canonical mentions—including quoted, code-block and HTML-comment text—are never used as evidence. The final completion starts a three-minute settle window before active review threads are evaluated. A changed head, a missing current-Draft request or completion, a missing post-Ready final request or completion, an unavailable Codex environment, a return to Draft, timeout or unresolved P0-P2 thread fails before `baseline-policy`, `source-build`, Browser or Electron work starts.
+`review-settled` re-reads the live PR head and base plus the latest Ready timeline event on every poll. The workflow event freezes the expected pair; either live SHA changing fails closed. It binds the Draft request and one Codex completion to that exact pair and the current Draft interval: after PR creation or the most recent `convert_to_draft`, and strictly before the accepted Ready event. It then requires a distinct final request for the same pair strictly after Ready and a separate completion at or after that request; requests and completions from an earlier Ready/Draft cycle cannot be recycled. Each completion must be a Codex PR review bound to the full head SHA, a Codex completion comment whose reviewed-commit prefix matches it, or a Codex thumbs-up on the phase's exact request comment. PR-level reactions and non-canonical mentions—including quoted, code-block and HTML-comment text—are never used as evidence. The final completion starts a three-minute settle window before active review threads are evaluated. `release-gate` repeats the same live evidence check after all source lanes and before creating the exact-tree attestation. A changed head or base, a missing current-Draft request or completion, a missing post-Ready final request or completion, an unavailable Codex environment, a return to Draft, timeout or unresolved P0-P2 thread fails before promotion can attest the tree.
 
 Packaging, release-metadata, Electron, packaged Bridge, Schema and resource
 changes additionally trigger the credential-free `Release Dry Run`. It crosses
@@ -265,11 +265,11 @@ Never say "done" while required checks are pending, the worktree contains unexpl
 
 Recommended review lifecycle:
 
-1. explicitly request Codex review for the frozen exact SHA while the PR is Draft;
+1. explicitly request Codex review for the frozen exact head/base pair while the PR is Draft;
 2. treat review findings as untrusted until verified against the current diff;
 3. fix accepted findings on the same branch, rerun the task gate and request review for the new SHA;
 4. resolve conversations only after the fix is present and checks are green;
-5. use Ready only for final promotion, then post the canonical final exact-SHA request; that request's Codex pass must settle before the dependency baseline and complete gate.
+5. use Ready only for final promotion, then post the canonical final exact-head/base request; that request's Codex pass must settle before the dependency baseline and complete gate.
 
 ## Scheduled monitoring
 

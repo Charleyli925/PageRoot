@@ -9,7 +9,7 @@
 | `npm run gate:edit` | 一次局部修改后 | 只运行影响映射命中的 Node 文件；必要时 typecheck | 快速发现局部逻辑错误，不启动浏览器或 Electron |
 | `npm run gate:task` | 一个开发任务完成时 | 静态检查、受影响 Node 文件，以及相关 Browser/Electron/AI 冒烟 | 在较短时间内证明生产链路已经接通 |
 | PR `pr-feedback` | `opened/synchronize/reopened` | 按影响映射选择 Node/编译检查 | 普通推送无论 Draft/Ready 都不重复消费完整矩阵；仅切回 Draft 不产生 Feedback |
-| `review-settled` | 已在 Draft 请求 exact-SHA 审阅的最终 Tree 转为 Ready，并发布 post-Ready final exact-SHA 请求 | 实时 head、Draft 请求/完成、final 请求/评论或 commit 绑定完成、180 秒 settle window、活动非 outdated P0-P2 线程 | 审阅未结束、PR 级歧义 reaction、旧 SHA、迟到意见或未解决意见时不启动完整矩阵 |
+| `review-settled` | 已在 Draft 请求 exact head/base 审阅的最终 Tree 转为 Ready，并发布 post-Ready final exact-head/base 请求 | 实时 head/base、Draft 请求/完成、final 请求/评论或 commit 绑定完成、180 秒 settle window、活动非 outdated P0-P2 线程 | 审阅未结束、PR 级歧义 reaction、旧 head/base、迟到意见或未解决意见时不启动完整矩阵 |
 | `baseline-policy` | review 与分支策略通过 | 全局依赖 advisory policy 与 packaged-runtime closure | 基线红时不启动 Linux build、Browser 或 macOS Electron runner |
 | 一次性晋升 `release-gate` | review 与 baseline 均通过的最终 PR Tree | 全量 Node、三分片完整 Browser、独立 Native Electron、独立确定性 AI 闭环、真实 HTML 发现式门禁 | 每个最终候选只跑一次并签发 Tree Hash 凭证；后续新 SHA 必须重新 Draft 审阅并晋升 |
 | `Release Dry Run` | PR 改动命中打包、release metadata、Electron、Bridge、Schema 或资源路径 | clean job 组装/静态校验显式未签名（`identity=null`）App → 非发布 checkpoint → 第二 clean job 恢复 metadata、重建 renderer oracle、再次校验并启动核对名称/版本/Bundle ID | 不读取签名或 Apple 凭证、不生成 DMG/updater、不成为 Candidate、不创建 tag、不发布 |
@@ -30,14 +30,14 @@ Tree，不在测试执行期间自动合并分支。组合 Tree 含任何未合�
 
 PR 必须从 Draft 开始。普通推送由独立的 `PR Feedback` workflow 处理，
 不会创建名为 `release-gate` 的跳过 job；因此分支保护不会把轻量反馈误当
-完整通过。只切回 Draft 不触发 Feedback。冻结 head 后必须先在 Draft 用完整
-SHA marker 明确请求 Codex review；每个新提交都需要新请求。只有
+完整通过。只切回 Draft 不触发 Feedback。冻结 head 并更新到当前 base 后必须先在 Draft 用完整
+head/base SHA marker 明确请求 Codex review；每个新提交或 base 更新都需要新请求。只有
 `ready_for_review` 事件存在完整 workflow，但 `review-settled` 仍要求 Ready
-之后发布不同 marker 的 final exact-SHA 请求，并等到该评论上的 Codex 👍 或携带
-当前 commit 身份的完成信号；PR 级 reaction 不作为证据。随后等待 180 秒，再检查未解决且未 outdated 的 P0-P2
+之后发布不同 marker 的 final exact-head/base 请求，并等到该评论上的 Codex 👍 或携带
+当前 commit 身份的完成信号；它在每轮轮询中同时重验 live head/base，PR 级 reaction 不作为证据。随后等待 180 秒，再检查未解决且未 outdated 的 P0-P2
 线程。通过后 `baseline-policy` 才检查依赖与打包运行时闭包；完整 Linux/Browser/
 Electron job 依赖这些前置条件。若晋升后又有提交，新 SHA 只获得反馈且缺少
-必需检查，必须重新转 Draft、冻结、审阅后再转 Ready。
+必需检查，必须重新转 Draft、冻结、审阅后再转 Ready；base 更新同样使已审组合失效。
 同一时间只晋升一个 PR；其他并行修改继续留在 Draft，等前一个合并并更新
 到新 `main` 后再晋升，避免严格最新基线制造三角形重测。
 

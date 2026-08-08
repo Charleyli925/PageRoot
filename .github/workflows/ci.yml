@@ -40,6 +40,7 @@ jobs:
           --repository "$GITHUB_REPOSITORY"
           --pull-request "${{ github.event.pull_request.number }}"
           --expected-head "${{ github.event.pull_request.head.sha }}"
+          --expected-base "${{ github.event.pull_request.base.sha }}"
           --settle-seconds 180
           --timeout-seconds 1200
           --poll-seconds 20
@@ -397,6 +398,18 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      - name: Revalidate frozen head/base review evidence
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          node scripts/check-pr-review-settled.mjs
+          --repository "$GITHUB_REPOSITORY"
+          --pull-request "${{ github.event.pull_request.number }}"
+          --expected-head "${{ github.event.pull_request.head.sha }}"
+          --expected-base "${{ github.event.pull_request.base.sha }}"
+          --settle-seconds 180
+          --timeout-seconds 60
+          --poll-seconds 10
       - name: Create exact-tree source gate attestation
         id: provenance
         if: github.event_name == 'pull_request'

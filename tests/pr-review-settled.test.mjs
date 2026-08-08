@@ -7,14 +7,20 @@ import {
   latestFinalReviewRequest,
   reviewedCommitPrefix,
   reviewPriority,
+  finalReviewRequestBaseSha,
   finalReviewRequestSha,
+  reviewRequestBaseSha,
   reviewRequestSha,
+  visibleFinalReviewRequestBaseSha,
   visibleFinalReviewRequestSha,
+  visibleReviewRequestBaseSha,
   visibleReviewRequestSha,
 } from "../scripts/check-pr-review-settled.mjs";
 
 const headSha = "a".repeat(40);
 const oldSha = "b".repeat(40);
+const baseSha = "c".repeat(40);
+const oldBaseSha = "d".repeat(40);
 const createdAt = "2026-08-08T03:59:00.000Z";
 const requestAt = "2026-08-08T04:00:00.000Z";
 const draftCompletedAt = "2026-08-08T04:00:30.000Z";
@@ -24,6 +30,7 @@ const completedAt = "2026-08-08T04:02:00.000Z";
 
 function request({
   sha = headSha,
+  base = baseSha,
   createdAt = requestAt,
   updatedAt = createdAt,
   association = "OWNER",
@@ -31,7 +38,7 @@ function request({
 } = {}) {
   return {
     id,
-    body: `@codex review\n\nReview exact SHA \`${sha}\`.\n\n<!-- pageroot-codex-review-sha:${sha} -->`,
+    body: `@codex review\n\nReview exact head SHA \`${sha}\` on base SHA \`${base}\`.\n\n<!-- pageroot-codex-review-sha:${sha};base-sha:${base} -->`,
     user: { login: "maintainer" },
     author_association: association,
     created_at: createdAt,
@@ -41,6 +48,7 @@ function request({
 
 function finalRequest({
   sha = headSha,
+  base = baseSha,
   createdAt = finalRequestAt,
   updatedAt = createdAt,
   association = "OWNER",
@@ -48,7 +56,7 @@ function finalRequest({
 } = {}) {
   return {
     id,
-    body: `@codex review\n\nFinal review exact SHA \`${sha}\`.\n\n<!-- pageroot-codex-final-review-sha:${sha} -->`,
+    body: `@codex review\n\nFinal review exact head SHA \`${sha}\` on base SHA \`${base}\`.\n\n<!-- pageroot-codex-final-review-sha:${sha};base-sha:${base} -->`,
     user: { login: "maintainer" },
     author_association: association,
     created_at: createdAt,
@@ -56,8 +64,13 @@ function finalRequest({
   };
 }
 
-function pullRequest({ sha = headSha, draft = false, state = "open" } = {}) {
-  return { head: { sha }, draft, state, created_at: createdAt };
+function pullRequest({
+  sha = headSha,
+  base = baseSha,
+  draft = false,
+  state = "open",
+} = {}) {
+  return { head: { sha }, base: { sha: base }, draft, state, created_at: createdAt };
 }
 
 function exactReview({ sha = headSha, submittedAt = completedAt, id = 20 } = {}) {
@@ -97,6 +110,7 @@ function codexThread({
 function evaluate(overrides = {}) {
   return evaluateReviewSettlement({
     expectedHeadSha: headSha,
+    expectedBaseSha: baseSha,
     pullRequest: pullRequest(),
     issueComments: [request(), finalRequest()],
     timelineEvents: [{ id: 15, event: "ready_for_review", created_at: readyAt }],
@@ -108,11 +122,15 @@ function evaluate(overrides = {}) {
   });
 }
 
-test("Draft and final exact-SHA requests require distinct trusted canonical markers", () => {
+test("Draft and final exact-head/base requests require distinct trusted canonical markers", () => {
   assert.equal(reviewRequestSha(request().body), headSha);
+  assert.equal(reviewRequestBaseSha(request().body), baseSha);
   assert.equal(visibleReviewRequestSha(request().body), headSha);
+  assert.equal(visibleReviewRequestBaseSha(request().body), baseSha);
   assert.equal(finalReviewRequestSha(finalRequest().body), headSha);
+  assert.equal(finalReviewRequestBaseSha(finalRequest().body), baseSha);
   assert.equal(visibleFinalReviewRequestSha(finalRequest().body), headSha);
+  assert.equal(visibleFinalReviewRequestBaseSha(finalRequest().body), baseSha);
   assert.equal(reviewRequestSha(finalRequest().body), null);
   assert.equal(finalReviewRequestSha(request().body), null);
   assert.equal(reviewedCommitPrefix("**Reviewed commit:** `aaaaaaaaaa`"), "aaaaaaaaaa");
@@ -124,31 +142,35 @@ test("Draft and final exact-SHA requests require distinct trusted canonical mark
     { ...request({ id: 4 }), body: "@codex review" },
     {
       ...request({ id: 5 }),
-      body: request().body.replace(`Review exact SHA \`${headSha}\``, `Review exact SHA \`${oldSha}\``),
+      body: request().body.replace(`Review exact head SHA \`${headSha}\``, `Review exact head SHA \`${oldSha}\``),
     },
     request({
       id: 6,
       createdAt: "2026-08-08T03:45:00.000Z",
       updatedAt: "2026-08-08T03:59:00.000Z",
     }),
-  ], headSha).id, 2);
+    request({ id: 7, base: oldBaseSha, createdAt: "2026-08-08T03:50:00.000Z" }),
+  ], headSha, baseSha).id, 2);
   assert.equal(visibleReviewRequestSha(
     request().body.replace(
-      `Review exact SHA \`${headSha}\`.`,
-      `<!-- Review exact SHA \`${headSha}\`. -->\nReview exact SHA \`${oldSha}\`.`,
+      `Review exact head SHA \`${headSha}\` on base SHA \`${baseSha}\`.`,
+      `<!-- Review exact head SHA \`${headSha}\` on base SHA \`${baseSha}\`. -->\nReview exact head SHA \`${oldSha}\` on base SHA \`${baseSha}\`.`,
     ),
   ), null);
   assert.equal(visibleReviewRequestSha(
-    `${request().body}\nReview exact SHA \`${headSha}\`.`,
+    `${request().body}\nReview exact head SHA \`${headSha}\` on base SHA \`${baseSha}\`.`,
   ), null);
   assert.equal(visibleReviewRequestSha(
     `${request().body}\n<!-- unterminated`,
   ), null);
   assert.equal(visibleReviewRequestSha(
-    `@codex review\n\n[request]: https://example.test "Review exact SHA \`${headSha}\`"\n\n<!-- pageroot-codex-review-sha:${headSha} -->`,
+    `@codex review\n\n[request]: https://example.test "Review exact head SHA \`${headSha}\` on base SHA \`${baseSha}\`"\n\n<!-- pageroot-codex-review-sha:${headSha};base-sha:${baseSha} -->`,
   ), null);
   assert.equal(reviewRequestSha(
-    `${request().body}\n<!-- pageroot-codex-review-sha:${headSha} -->`,
+    `${request().body}\n<!-- pageroot-codex-review-sha:${headSha};base-sha:${baseSha} -->`,
+  ), null);
+  assert.equal(reviewRequestSha(
+    request().body.replace(`;base-sha:${baseSha}`, ""),
   ), null);
   assert.equal(latestFinalReviewRequest([
     finalRequest({ id: 7, createdAt: "2026-08-08T04:01:10.000Z" }),
@@ -156,18 +178,19 @@ test("Draft and final exact-SHA requests require distinct trusted canonical mark
     finalRequest({ id: 9, association: "CONTRIBUTOR" }),
     {
       ...finalRequest({ id: 10 }),
-      body: finalRequest().body.replace(`Final review exact SHA \`${headSha}\``, `Final review exact SHA \`${oldSha}\``),
+      body: finalRequest().body.replace(`Final review exact head SHA \`${headSha}\``, `Final review exact head SHA \`${oldSha}\``),
     },
-  ], headSha).id, 8);
+    finalRequest({ id: 11, base: oldBaseSha, createdAt: "2026-08-08T04:01:30.000Z" }),
+  ], headSha, baseSha).id, 8);
   assert.equal(visibleFinalReviewRequestSha(
-    finalRequest().body.replace("Final review exact SHA", "Review exact SHA"),
+    finalRequest().body.replace("Final review exact head SHA", "Review exact head SHA"),
   ), null);
   assert.equal(finalReviewRequestSha(
-    `${finalRequest().body}\n<!-- pageroot-codex-final-review-sha:${headSha} -->`,
+    `${finalRequest().body}\n<!-- pageroot-codex-final-review-sha:${headSha};base-sha:${baseSha} -->`,
   ), null);
 });
 
-test("Draft and final Codex reviews bind to the current full head SHA and their promotion phase", () => {
+test("Draft and final Codex reviews bind to the current head/base pair and their promotion phase", () => {
   assert.equal(evaluate().status, "settled");
   assert.equal(evaluate().draftCompletion.at, draftCompletedAt);
   assert.equal(evaluate().finalRequest.at, finalRequestAt);
@@ -195,9 +218,19 @@ test("Draft and final Codex reviews bind to the current full head SHA and their 
     })],
   }).reason, "final_exact_sha_request_not_after_ready");
   assert.equal(evaluate({ pullRequest: pullRequest({ sha: oldSha }) }).reason, "head_sha_changed");
+  assert.equal(evaluate({ pullRequest: pullRequest({ base: oldBaseSha }) }).reason, "base_sha_changed");
+  assert.equal(evaluate({
+    expectedBaseSha: oldBaseSha,
+  }).reason, "base_sha_changed");
+  assert.equal(evaluate({
+    issueComments: [request({ base: oldBaseSha }), finalRequest()],
+  }).reason, "exact_sha_review_not_requested");
+  assert.equal(evaluate({
+    issueComments: [request(), finalRequest({ base: oldBaseSha })],
+  }).reason, "final_exact_sha_review_not_requested");
 });
 
-test("clean Codex comments and reactions bind to the correct exact-SHA request", () => {
+test("clean Codex comments and reactions bind to the correct exact-head/base request", () => {
   const cleanComment = {
     id: 40,
     user: { login: "chatgpt-codex-connector[bot]" },
@@ -414,7 +447,12 @@ test("Ready promotion fails closed when the exact request is absent or the PR re
   }).reason, "exact_sha_request_not_in_latest_draft");
   assert.equal(evaluate({ issueComments: [request()] }).reason, "final_exact_sha_review_not_requested");
   assert.equal(evaluate({
-    pullRequest: { head: { sha: headSha }, draft: false, state: "open" },
+    pullRequest: {
+      head: { sha: headSha },
+      base: { sha: baseSha },
+      draft: false,
+      state: "open",
+    },
   }).reason, "draft_interval_unavailable");
   assert.equal(evaluate({ pullRequest: pullRequest({ draft: true }) }).reason, "pull_request_is_draft");
   assert.equal(evaluate({ pullRequest: pullRequest({ state: "closed" }) }).reason, "pull_request_not_open");
