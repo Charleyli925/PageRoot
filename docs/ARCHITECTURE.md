@@ -6,8 +6,9 @@ PageRoot is an Electron application with a React renderer and a local Bridge pro
 User HTML bytes
   -> SourceIndex / TargetResolver
   -> isolated authored-DOM preview
-  -> native Selection + V2 Editable Island controller
-  -> canonical island + exact content-range SourcePatch
+  -> native Selection + IslandEditingController
+  -> canonical editable island or exact direct-text-node fragment
+  -> exact content-range or text-node-range SourcePatch
   -> renderer SourceHistorySession + durable exact Patch journal
   -> serialized atomic file writer
 
@@ -255,6 +256,8 @@ Comments + frozen input
   runtime mutation has source, Version or project authority.
 - `IslandEditingController` is the only production text-edit engine in PageRoot 0.9.0. `contenteditable="true"` supplies focus, caret, Selection and IME composition, while the controller owns insertion, deletion, line breaks, paste and formatting. Chromium DOM serialization never has commit authority.
 - `editable-island` owns the V2 capability and normalization contract. An accepted edit replaces only the selected element's parsed `contentRange`; bytes outside that range remain exact. Inside the range, parse5 may perform the smallest safe normalization needed to preserve inline semantics, comments and immutable authored atoms.
+- Transparent inline host discovery records the nearest safe editable island while climbing. If the next parent is structurally unsafe, editing stays on that safe descendant instead of promoting to the unsafe parent.
+- A direct source text node under a structurally unsafe parent may use the same controller through a disposable, layout-checked inline host. Its `update-direct-text-node` transaction is authorized by the surviving parent TargetRef but patches only the exact text-node source range. The disposable host and its attributes never enter source.
 - `native-edit-policy` owns shared session attributes and checkpoint timing. `native-edit-runtime-preflight` still proves that enabling the island does not change geometry or text style; `HtmlCanvasEditor` only coordinates selection, the island session and SourcePatch.
 
 ## Module map
@@ -307,13 +310,14 @@ they do not import application services.
 | Formal AI review composition and isolated-frame coordination | `app/workbench/AiReviewWorkspace.tsx` |
 
 The V2 source-fidelity path remains a protected core: `SourceIndex`,
-`TargetResolver`, `editable-island`, `IslandEditingController`,
+`TargetResolver`, `editable-island`, direct-text-node normalization, `IslandEditingController`,
 `SourcePatchEngine` and the atomic source writer may be split only around a
 proven invariant, not to satisfy a line-count target. The retired V1
 `NativeEditingController`, its per-keystroke tracker, shadow block draft,
 FormatSkeleton and structural planner have been removed. The architecture gate
 rejects reintroducing those files or imports; production text editing has one
-V2 editable-island route.
+V2 controller route with element-island and exact direct-text-node transaction
+scopes.
 
 `HtmlCanvasEditor.tsx` remains the Canvas coordinator. Parsing, DOM
 instrumentation, interaction policy, preview synchronization, selection,

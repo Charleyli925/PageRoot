@@ -109,7 +109,7 @@ jobs:
           --
           node scripts/release-app-checkpoint.mjs sign
           --arch arm64
-      - name: Launch the signed app before sending bytes to Apple
+      - name: Launch and verify the signed app identity before sending bytes to Apple
         timeout-minutes: 5
         env:
           PAGEROOT_PACKAGED_APP_PATH: ${{ github.workspace }}/output/release-candidate/staged/mac-arm64/PageRoot.app

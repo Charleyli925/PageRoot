@@ -11,15 +11,22 @@ import path from "node:path";
 
 import { expect, test } from "@playwright/test";
 import { _electron as electron } from "playwright";
+import {
+  assertPackagedAppIdentity,
+  expectedPackagedAppIdentity,
+  readPackagedPlistIdentity,
+} from "../../../scripts/packaged-app-identity.mjs";
 
 const productRoot = path.resolve(import.meta.dirname, "../../..");
-const packageVersion = JSON.parse(
+const packageJson = JSON.parse(
   readFileSync(path.join(productRoot, "package.json"), "utf8"),
-).version;
-const expectedAppVersion = process.env.PAGEROOT_EXPECTED_APP_VERSION || packageVersion;
-const expectedProductName = process.env.PAGEROOT_EXPECTED_PRODUCT_NAME || "PageRoot";
+);
+const expectedIdentity = expectedPackagedAppIdentity({
+  packageJson,
+  environment: process.env,
+});
 
-function packagedExecutable() {
+function packagedApplication() {
   const appPath = process.env.PAGEROOT_PACKAGED_APP_PATH;
   if (!appPath || !path.isAbsolute(appPath) || path.extname(appPath) !== ".app") {
     throw new Error("PAGEROOT_PACKAGED_APP_PATH must name an absolute packaged .app path.");
@@ -29,16 +36,16 @@ function packagedExecutable() {
   if (!existsSync(executable)) {
     throw new Error(`Packaged application executable is missing: ${executable}`);
   }
-  return executable;
+  return { appPath, executable };
 }
 
 function removeIsolatedDirectory(directory) {
   const resolved = path.resolve(directory);
   if (
     path.dirname(resolved) !== path.resolve(tmpdir())
-    || !path.basename(resolved).startsWith("pageroot-native-e2e-developer-preview-")
+    || !path.basename(resolved).startsWith("pageroot-native-e2e-packaged-startup-")
   ) {
-    throw new Error(`Refusing to remove non-preview directory: ${directory}`);
+    throw new Error(`Refusing to remove non-packaged-startup directory: ${directory}`);
   }
   rmSync(resolved, {
     recursive: true,
@@ -58,10 +65,10 @@ async function stopPackagedAppForCleanup(electronApp) {
   }
 }
 
-test("developer preview opens external HTML at startup and while already running", async () => {
+test("packaged app preserves identity and opens external HTML across startup states", async () => {
   test.setTimeout(60_000);
   const isolatedUserData = mkdtempSync(
-    path.join(tmpdir(), "pageroot-native-e2e-developer-preview-"),
+    path.join(tmpdir(), "pageroot-native-e2e-packaged-startup-"),
   );
   const startupAlias = path.join(isolatedUserData, "qoder-startup.html");
   const liveAlias = path.join(isolatedUserData, "qoder-live.htm");
@@ -77,10 +84,11 @@ test("developer preview opens external HTML at startup and while already running
   );
   const startupSourcePath = realpathSync(startupAlias);
   const liveSourcePath = realpathSync(liveAlias);
+  const packagedApp = packagedApplication();
   let electronApp = null;
   try {
     electronApp = await electron.launch({
-      executablePath: packagedExecutable(),
+      executablePath: packagedApp.executable,
       cwd: productRoot,
       args: [startupSourcePath],
       env: {
@@ -105,14 +113,20 @@ test("developer preview opens external HTML at startup and while already running
       requestAnimationFrame(() => requestAnimationFrame(resolve));
     }));
     const runtime = await page.evaluate(() => window.htmlAIRuntime);
-    expect(runtime?.appVersion).toBe(expectedAppVersion);
-    const appIdentity = await electronApp.evaluate(({ app }) => ({
+    expect(runtime?.appVersion).toBe(expectedIdentity.version);
+    const runtimeIdentity = await electronApp.evaluate(({ app }) => ({
       name: app.getName(),
       version: app.getVersion(),
     }));
-    expect(appIdentity).toEqual({
-      name: expectedProductName,
-      version: expectedAppVersion,
+    const plistIdentity = await readPackagedPlistIdentity(packagedApp.appPath);
+    assertPackagedAppIdentity({
+      ...runtimeIdentity,
+      bundleId: plistIdentity.bundleId,
+    }, expectedIdentity);
+    expect(plistIdentity.bundleVersion).toBe(expectedIdentity.version);
+    expect(runtimeIdentity).toEqual({
+      name: expectedIdentity.name,
+      version: expectedIdentity.version,
     });
     expect(runtime?.bridgePort).toMatch(/^[1-9]\d{0,4}$/u);
     expect(Number(runtime?.bridgePort)).toBeGreaterThan(0);

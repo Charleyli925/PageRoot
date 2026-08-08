@@ -17,6 +17,7 @@ import {
   refreshDmgUpdateMetadata,
 } from "../scripts/build-package.mjs";
 import {
+  appBundleSignaturePolicyForProfile,
   assertNoRetiredEditorArtifacts,
   expectedArtifactLayout,
   verifyAppBundle,
@@ -119,6 +120,8 @@ async function createPackagedFixture(t) {
   for (const relativePath of [
     "desktop/main.mjs",
     "desktop/preload.mjs",
+    "desktop/external-file-open.mjs",
+    "desktop/project-open-queue.mjs",
     "desktop/project-files.mjs",
     "desktop/source-rename.mjs",
     "desktop/project-path-policy.mjs",
@@ -217,6 +220,8 @@ async function createPackagedFixture(t) {
   for (const relativePath of [
     "desktop/main.mjs",
     "desktop/preload.mjs",
+    "desktop/external-file-open.mjs",
+    "desktop/project-open-queue.mjs",
     "desktop/project-files.mjs",
     "desktop/source-rename.mjs",
     "desktop/project-path-policy.mjs",
@@ -445,6 +450,15 @@ test("release commands use one automated artifact lane with full tests and packa
   assert.equal(path.basename(layout.updateInfoPath), "latest-mac.yml");
 });
 
+test("app-only profiles keep dry-run unsigned without weakening Candidate signature gates", () => {
+  assert.equal(appBundleSignaturePolicyForProfile("release-dry-run"), "none");
+  assert.equal(appBundleSignaturePolicyForProfile("candidate-app"), "adhoc");
+  assert.equal(
+    appBundleSignaturePolicyForProfile("candidate-app-signed"),
+    "developer-id",
+  );
+});
+
 test("release packaging notarizes, staples and validates the final DMG", async (t) => {
   const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "pageroot-dmg-notarize-"));
   t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
@@ -592,7 +606,7 @@ test("the app-bundle gate compares app.asar, Bridge scripts, schemas and plist v
     verifySignature: false,
   });
   assert.equal(result.version, "0.7.0");
-  assert.equal(result.asarFileCount, 22);
+  assert.equal(result.asarFileCount, 24);
   assert.equal(result.schemaFileCount, 5);
   assert.equal(result.legalResourceCount, 5);
   assert.equal(result.telemetry.enabled, true);
@@ -631,5 +645,39 @@ test("the app-bundle gate compares app.asar, Bridge scripts, schemas and plist v
       verifySignature: false,
     }),
     /build provenance mismatch for version/,
+  );
+});
+
+test("restored app verification fails when the fresh renderer oracle is missing (#73)", async (t) => {
+  const fixture = await createPackagedFixture(t);
+  await rm(path.join(fixture.fixtureProductRoot, "dist-desktop"), {
+    recursive: true,
+    force: true,
+  });
+  await assert.rejects(
+    verifyAppBundle({
+      productRoot: fixture.fixtureProductRoot,
+      appPath: fixture.appPath,
+      packageJson: fixture.packageJson,
+      verifySignature: false,
+    }),
+    /dist-desktop/u,
+  );
+});
+
+test("restored app verification fails when telemetry metadata is missing (#74)", async (t) => {
+  const fixture = await createPackagedFixture(t);
+  await rm(path.join(
+    fixture.fixtureProductRoot,
+    "output/release-metadata/usage-telemetry-config.json",
+  ));
+  await assert.rejects(
+    verifyAppBundle({
+      productRoot: fixture.fixtureProductRoot,
+      appPath: fixture.appPath,
+      packageJson: fixture.packageJson,
+      verifySignature: false,
+    }),
+    /usage-telemetry-config\.json/u,
   );
 });

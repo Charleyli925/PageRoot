@@ -826,3 +826,104 @@ test("whole-root native text replacement changes only the text bytes and undoes 
   assert.equal(result.patches.length, 1);
   assert.equal(applyPatchPlan(result.inversePlan, result.html).html, html);
 });
+
+test("direct text fragments under complex parents replace only exact text-node bytes", () => {
+  const html = `<div id="mixed"><div class="chart">KEEP</div><b>强调</b>，裸&amp;文本<span>尾注</span></div>`;
+  const index = buildSourceIndex(html);
+  const parent = elementBy(
+    index,
+    (element) => element.stableAttributes.id === "mixed",
+  );
+  const textNode = index.textNodes.find((node) => node.value === "，裸&文本");
+  const result = applyPatchPlan(planSourcePatch({
+    type: "update-direct-text-node",
+    targetRef: createTargetRef(index, parent.nodeId, {
+      level: "subregion",
+      targetId: "mixed-parent",
+    }),
+    textTargetRef: createTargetRef(index, textNode.nodeId, { level: "text" }),
+    beforeFragmentHtml: "，裸&amp;文本",
+    nextFragmentHtml: "，新版&lt;文字&gt;",
+    expectedSourceSha256: index.sourceSha256,
+  }, index), html);
+
+  assert.equal(
+    result.html,
+    `<div id="mixed"><div class="chart">KEEP</div><b>强调</b>，新版&lt;文字&gt;<span>尾注</span></div>`,
+  );
+  assert.deepEqual(result.patches.map((patch) => patch.kind), ["direct-text-node"]);
+  assert.equal(result.refreshedTargetRefs[0].targetId, "mixed-parent");
+  assert.equal(result.refreshedTargetRefs[0].resolution, "exact");
+  assert.equal(applyPatchPlan(result.inversePlan, result.html).html, html);
+});
+
+test("direct text fragments can be deleted and undone through the surviving parent target", () => {
+  const html = `<div id="mixed"><section>KEEP</section>裸文本<span>尾注</span></div>`;
+  const index = buildSourceIndex(html);
+  const parent = elementBy(
+    index,
+    (element) => element.stableAttributes.id === "mixed",
+  );
+  const textNode = index.textNodes.find((node) => node.value === "裸文本");
+  const result = applyPatchPlan(planSourcePatch({
+    type: "update-direct-text-node",
+    targetRef: createTargetRef(index, parent.nodeId, { level: "subregion" }),
+    textTargetRef: createTargetRef(index, textNode.nodeId, { level: "text" }),
+    beforeFragmentHtml: "裸文本",
+    nextFragmentHtml: "",
+  }, index), html);
+
+  assert.equal(
+    result.html,
+    `<div id="mixed"><section>KEEP</section><span>尾注</span></div>`,
+  );
+  assert.equal(result.refreshedTargetRefs[0].resolution, "exact");
+  assert.equal(applyPatchPlan(result.inversePlan, result.html).html, html);
+});
+
+test("direct text fragment plans reject markup and non-direct text targets", () => {
+  const html = `<div id="mixed"><section>KEEP</section>裸文本<span>嵌套</span></div>`;
+  const index = buildSourceIndex(html);
+  const parent = elementBy(
+    index,
+    (element) => element.stableAttributes.id === "mixed",
+  );
+  const parentRef = createTargetRef(index, parent.nodeId, { level: "subregion" });
+  const directText = index.textNodes.find((node) => node.value === "裸文本");
+  const nestedText = index.textNodes.find((node) => node.value === "嵌套");
+
+  assert.throws(() => planSourcePatch({
+    type: "update-direct-text-node",
+    targetRef: parentRef,
+    textTargetRef: createTargetRef(index, directText.nodeId, { level: "text" }),
+    beforeFragmentHtml: "裸文本",
+    nextFragmentHtml: "<strong>不允许</strong>",
+  }, index), (error) => (
+    error?.code === "EDITABLE_TEXT_FRAGMENT_STRUCTURE_UNSUPPORTED"
+  ));
+  assertPatchError("TEXT_FRAGMENT_TARGET_MISMATCH", () => planSourcePatch({
+    type: "update-direct-text-node",
+    targetRef: parentRef,
+    textTargetRef: createTargetRef(index, nestedText.nodeId, { level: "text" }),
+    beforeFragmentHtml: "嵌套",
+    nextFragmentHtml: "新版",
+  }, index));
+});
+
+test("direct text fragments do not bypass safe islands or dedicated editor roots", () => {
+  for (const [html, expectedCode] of [
+    [`<p id="safe">普通文字</p>`, "TEXT_FRAGMENT_PARENT_UNSUPPORTED"],
+    [`<canvas id="dedicated">Canvas fallback</canvas>`, "TEXT_FRAGMENT_UNSAFE_CONTEXT"],
+  ]) {
+    const index = buildSourceIndex(html);
+    const parent = elementBy(index, (element) => Boolean(element.stableAttributes.id));
+    const textNode = index.textNodes[0];
+    assertPatchError(expectedCode, () => planSourcePatch({
+      type: "update-direct-text-node",
+      targetRef: createTargetRef(index, parent.nodeId, { level: "subregion" }),
+      textTargetRef: createTargetRef(index, textNode.nodeId, { level: "text" }),
+      beforeFragmentHtml: textNode.value,
+      nextFragmentHtml: "新版",
+    }, index));
+  }
+});

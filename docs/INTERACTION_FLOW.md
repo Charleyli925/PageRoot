@@ -304,13 +304,14 @@ SourcePatch、不写磁盘、不运行作者脚本，也不引入右键菜单、
 ```text
 单击选择文字宿主
 → 双击并把光标放到点击位置
-→ IslandEditingController 建立一个与精确源码 contentRange 对应的可编辑岛
+→ 向上选择最高的安全编辑宿主；不安全父容器下的直属裸文字则建立精确文本节点片段
+→ IslandEditingController 建立与源码 contentRange 或 text-node range 对应的受控编辑会话
 → 浏览器提供光标 / Selection / IME，Controller 接管所有实际文字变更
 → 用户输入、删除或选择文字
 → 约 700ms 或格式、Cmd+S、目标切换、关闭、发送边界
-→ 生成 replace-editable-island EditCommand
+→ 生成 replace-editable-island 或 update-direct-text-node EditCommand
 → SourceIndex + TargetResolver 锁定源码范围
-→ 岛内做最小安全规范化，SourcePatchEngine 生成精确 contentRange patch 与 inverse patch
+→ 岛内或纯文本片段做最小安全规范化，SourcePatchEngine 生成精确 range patch 与 inverse patch
 → 校验岛外字节完全不变，并重解析受影响区域
 → 用新源码原子重建 projection 并恢复逻辑选区
 → 内存 source HTML 立即更新
@@ -334,6 +335,8 @@ SourcePatch、不写磁盘、不运行作者脚本，也不引入右键菜单、
 - `contenteditable`、IME 快照、运行时 nodeId 和逻辑选区只存在于当前会话；不能保存为第二份 HTML 或长期 JSON。
 - flex/grid 文字只有在源码、运行时布局和 CSS selector 均安全时，才随首个真实 Patch 创建唯一 canonical 直接文字项；双击本身不修改源码。
 - 任何目标为 `ambiguous`、`orphaned`，或 patch 越出已解析源码范围时都必须 fail-closed，保留当前源码并要求用户重新定位。
+- 行内透明节点向上寻找宿主时，只有新候选仍是安全可编辑岛才继续提升；遇到复杂父容器时回退到最近的安全行内节点。
+- 复杂父容器下只有能唯一对应到一个直属源码 text node 的裸文字才能编辑。运行时临时宿主须通过布局和文字样式检查，且只接受纯文本；提交只替换该 text node 的源码字节，临时宿主不写入 HTML。
 
 PageRoot 0.9.0 只使用一种文字编辑路线：
 
@@ -342,8 +345,8 @@ PageRoot 0.9.0 只使用一种文字编辑路线：
 - 整个岛在一次会话内保持打开；工具栏内部及与当前选区绑定的评论操作不会结束编辑。用户点击除此之外的页面内容或 App 区域时，系统提交当前 checkpoint，并一次性清除 `contenteditable`、选区和浮动工具栏。Escape、保存、导出、项目切换、关闭和发送同样是明确 checkpoint 边界。
 - IME 开始时冻结岛内容与逻辑 Selection；结束时恢复快照，并把最终候选文字只插入冻结位置一次。没有完成的 composition 在失焦时取消，不猜测候选结果。
 - `MutationObserver` 只允许 Controller 自己发起的子节点和文字变更；脚本、浏览器命令或页面事件造成的越权 DOM 变化立即恢复到最近一次安全草稿，并在当前视口提示。
-- 岛可以包含安全行内语义、注释以及不可变的图片、SVG、MathML、Canvas、表单控件或媒体原子；这些原子及其属性不能被文字操作改写。脚本、样式、表单根、嵌入文档根及无法形成安全行内岛的块结构仍转为评论。
-- 保存时只替换所选元素的源码内容范围。未编辑区域逐字节保持；编辑岛允许 parse5 为结构安全做最小规范化，但不得增加受保护属性、改变不可变原子或注释。
+- 岛可以包含安全行内语义、注释以及不可变的图片、SVG、MathML、Canvas、表单控件或媒体原子；这些原子及其属性不能被文字操作改写。脚本、样式、表单根、嵌入文档根和复杂块结构本身仍转为评论；其中可独立证明安全的行内子节点或直属裸文字可按上述精确边界编辑。
+- 保存时只替换所选元素的源码内容范围，或唯一直属裸文字的精确 text-node range。未编辑区域逐字节保持；编辑岛允许 parse5 为结构安全做最小规范化，但不得增加受保护属性、改变不可变原子或注释。
 
 ### 5.2 撤销与重做
 

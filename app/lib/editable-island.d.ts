@@ -33,6 +33,11 @@ export function normalizeEditableIslandHtml(
   options?: { baselineInnerHtml?: string },
 ): string;
 
+export function normalizeEditableTextFragmentHtml(
+  value: string,
+  options?: { baselineInnerHtml?: string },
+): string;
+
 export function editableIslandForTarget(
   index: Record<string, unknown>,
   targetRef: EditableIslandTargetRef,
