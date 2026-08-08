@@ -4273,10 +4273,50 @@ function reviewBootstrap(
   const captureRuntimeVisualInitialBinding = (binding, observedElement = null) => {
     const key = runtimeVisualIdentityKey(binding?.key);
     if (!key || runtimeVisualSetHas(runtimeVisualInvalidKeys, key)) return;
-    if (
-      observedElement !== null
-      && !runtimeVisualObservedBindingMatches(observedElement, binding)
-    ) return;
+    if (observedElement !== null) {
+      const pathMatches = runtimeVisualInitialBindingPathMatches(
+        observedElement,
+        binding,
+      );
+      const hasFingerprint = runtimeVisualInitialBindingHasFingerprint(binding);
+      if (
+        pathMatches
+        && !hasFingerprint
+        && runtimeVisualInitialBindingMatches(observedElement, binding, true)
+      ) {
+        const existing = runtimeVisualMapGet(runtimeVisualIdentityElements, key);
+        const existingKey = runtimeVisualMapGet(runtimeVisualHostKeys, observedElement);
+        if ((existing && existing !== observedElement) || (existingKey && existingKey !== key)) {
+          runtimeVisualSetAdd(runtimeVisualInvalidKeys, key);
+          if (existingKey) runtimeVisualSetAdd(runtimeVisualInvalidKeys, existingKey);
+          return;
+        }
+        if (!existing && !existingKey) {
+          runtimeVisualMapSet(runtimeVisualIdentityElements, key, observedElement);
+          runtimeVisualMapSet(runtimeVisualHostKeys, observedElement, key);
+          runtimeVisualMapSet(
+            runtimeVisualSourceBoxSignatures,
+            observedElement,
+            RuntimeVisualString(binding.sourceBoxSignature),
+          );
+        }
+        return;
+      }
+      // A fingerprintless runtime host has no evidence with which to
+      // distinguish a same-tag parser decoy from the source target after the
+      // frozen path shifts. Keep the entire runtime binding unavailable rather
+      // than letting the first observed element fabricate a visual diff.
+      if (
+        !pathMatches
+        && !hasFingerprint
+        && runtimeVisualInitialBindingMatches(observedElement, binding, true)
+        && runtimeVisualInitialBindingSourceBoxMatches(observedElement, binding)
+      ) {
+        runtimeVisualSetAdd(runtimeVisualInvalidKeys, key);
+        return;
+      }
+      if (!runtimeVisualObservedBindingMatches(observedElement, binding)) return;
+    }
     const element = observedElement || runtimeVisualInitialBindingElement(binding);
     if (!element) return;
     const existing = runtimeVisualMapGet(runtimeVisualIdentityElements, key);

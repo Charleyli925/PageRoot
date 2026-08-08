@@ -288,6 +288,55 @@ test("class attribute-selector references retain class-only runtime hosts", () =
   );
 });
 
+test("class equality selectors match the complete class attribute value", () => {
+  const source = `<!doctype html><main>
+    <div class="chart wide"></div>
+    <div class="chart"></div>
+    <script>
+      document.querySelector('[class="chart wide"]').textContent = "ready";
+    </script>
+  </main>`;
+  const sourceIndex = buildSourceIndex(source);
+  const prepared = prepareRuntimeVisualCapture({
+    html: source,
+    sourcePath: "/tmp/class-equality-runtime-host.html",
+    viewportWidth: 900,
+  });
+  assert.deepEqual(
+    prepared?.candidates.map((candidate) => (
+      sourceIndex.byNodeId.get(candidate.sourceNodeId)?.attributesByName
+        .get("class")?.[0]?.value
+    )),
+    ["chart wide"],
+  );
+});
+
+test("identity presence selectors retain only the matching namespace hosts", () => {
+  for (const attributeName of ["id", "name"]) {
+    const source = `<!doctype html><main>
+      <div ${attributeName}="chart"></div>
+      <div class="unrelated"></div>
+      <script>
+        document.querySelector('[${attributeName}]').textContent = "ready";
+      </script>
+    </main>`;
+    const sourceIndex = buildSourceIndex(source);
+    const prepared = prepareRuntimeVisualCapture({
+      html: source,
+      sourcePath: `/tmp/${attributeName}-presence-runtime-host.html`,
+      viewportWidth: 900,
+    });
+    assert.deepEqual(
+      prepared?.candidates.map((candidate) => (
+        sourceIndex.byNodeId.get(candidate.sourceNodeId)?.attributesByName
+          .get(attributeName)?.[0]?.value
+      )),
+      ["chart"],
+      attributeName,
+    );
+  }
+});
+
 test("script-referenced data containers participate in the runtime dependency", () => {
   const source = `<!doctype html><main>
     <div id="chart"></div><div id="chart-data">1,2,3</div>

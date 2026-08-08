@@ -10,6 +10,83 @@ const COMMENT_SOURCE_BOX_SIGNATURE = JSON.stringify([
   ["width", null],
 ]);
 
+const RUNTIME_SOURCE_BOX_SIGNATURE = JSON.stringify([
+  ["class", "runtime-host"],
+  ["height", null],
+  ["hidden", null],
+  ["style", null],
+  ["width", null],
+]);
+
+async function parsedRuntimeVisualSnapshots(page, { binding, authoredScript }) {
+  const bootstrap = generatedReviewBootstrap(
+    ["runtime-host-1"],
+    [],
+    [binding],
+  );
+  await page.setContent(`<!doctype html>
+<html>
+  <head>
+    <style>
+      html, body { margin: 0; }
+      main { display: block; }
+      .runtime-host { display: block; width: 10px; height: 10px; }
+    </style>
+    <script>${bootstrap}</script>
+  </head>
+  <body>
+    <main></main>
+    <script>${authoredScript}</script>
+  </body>
+</html>`, { waitUntil: "load" });
+  return page.evaluate(async ({ sessionId, sourceSha256 }) => {
+    const snapshots = [];
+    let runtimePort = null;
+    const receive = (event) => {
+      const message = event.data;
+      if (
+        message?.source === "pageroot-ai-review"
+        && message.type === "runtime-visual-channel"
+      ) {
+        runtimePort = event.ports?.[0] || null;
+        runtimePort?.start?.();
+        runtimePort?.addEventListener("message", (portEvent) => {
+          const payload = portEvent.data;
+          if (
+            payload?.source === "pageroot-ai-review-runtime-visual"
+            && payload.type === "runtime-visual-snapshots"
+          ) snapshots.push(payload.runtimeVisualSnapshots);
+        });
+      }
+    };
+    addEventListener("message", receive);
+    try {
+      const challenge = "a".repeat(32);
+      postMessage({
+        source: "pageroot-ai-review-parent",
+        sessionId,
+        type: "request-runtime-visual-channel",
+        contractVersion: 1,
+        sourceSha256,
+        challenge,
+      }, "*");
+      const deadline = Date.now() + 4_000;
+      while (!runtimePort && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      while (!snapshots.length && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      return { channel: Boolean(runtimePort), snapshots };
+    } finally {
+      removeEventListener("message", receive);
+    }
+  }, {
+    sessionId: "review-session",
+    sourceSha256: `sha256:${"a".repeat(64)}`,
+  });
+}
+
 async function parsedReviewCommentLayouts(page, { binding, authoredScript }) {
   const bootstrap = generatedReviewBootstrap([], [binding]);
   await page.setContent(`<!doctype html>
@@ -184,4 +261,48 @@ test("path-only review comments keep a bound target when a later same-tag node i
   expect(result.layouts.some((message) => (
     message.commentLayouts?.some((layout) => layout.key === "parsed-comment")
   ))).toBe(true);
+});
+
+test("fingerprintless runtime hosts fail closed when a same-tag parser decoy shifts the target", async ({ page }) => {
+  const binding = {
+    key: "runtime-host-1",
+    path: [1, 0, 0],
+    tagName: "DIV",
+    sourceBoxSignature: RUNTIME_SOURCE_BOX_SIGNATURE,
+    identityAttributes: [],
+  };
+  const stable = await parsedRuntimeVisualSnapshots(page, {
+    binding,
+    authoredScript: `
+      const main = document.querySelector("main");
+      const actual = document.createElement("div");
+      actual.className = "runtime-host";
+      const painted = document.createElement("i");
+      painted.style.cssText = "display:block;background:red;width:8px;height:8px";
+      actual.append(painted);
+      main.append(actual);
+      main.append(document.createElement("div"));
+    `,
+  });
+  expect(stable.channel).toBe(true);
+  expect(stable.snapshots).toHaveLength(1);
+  expect(stable.snapshots[0]).toHaveLength(1);
+
+  const decoy = await parsedRuntimeVisualSnapshots(page, {
+    binding,
+    authoredScript: `
+      const main = document.querySelector("main");
+      const decoy = document.createElement("div");
+      decoy.className = "runtime-host";
+      main.append(decoy);
+      const actual = document.createElement("div");
+      actual.className = "runtime-host";
+      const painted = document.createElement("i");
+      painted.style.cssText = "display:block;background:red;width:8px;height:8px";
+      actual.append(painted);
+      main.append(actual);
+    `,
+  });
+  expect(decoy.channel).toBe(true);
+  expect(decoy.snapshots).toHaveLength(0);
 });

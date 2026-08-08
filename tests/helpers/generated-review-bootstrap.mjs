@@ -9,7 +9,11 @@ const reviewDocument = await readFile(
   "utf8",
 );
 
-export function generatedReviewBootstrap(candidateKeys = [], reviewCommentBindings = []) {
+export function generatedReviewBootstrap(
+  candidateKeys = [],
+  reviewCommentBindings = [],
+  runtimeVisualBindingsOverride = null,
+) {
   const sourceFile = ts.createSourceFile(
     "review-document.ts",
     reviewDocument,
@@ -54,12 +58,14 @@ export function generatedReviewBootstrap(candidateKeys = [], reviewCommentBindin
     ],
   });
   new vm.Script(transpiled).runInContext(context);
-  const runtimeVisualBindings = candidateKeys.map((key, index) => ({
-    key,
-    path: [1, index],
-    tagName: "DIV",
-    sourceBoxSignature: "[]",
-  }));
+  const runtimeVisualBindings = runtimeVisualBindingsOverride || candidateKeys.map(
+    (key, index) => ({
+      key,
+      path: [1, index],
+      tagName: "DIV",
+      sourceBoxSignature: "[]",
+    }),
+  );
   return context.reviewBootstrap(
     "review-session",
     "before",

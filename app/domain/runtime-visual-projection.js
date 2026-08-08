@@ -78,6 +78,7 @@ const RUNTIME_CLASS_LOOKUP_CALL = /(?:\bgetElementsByClassName|\bclassList\.(?:a
 const STABLE_RUNTIME_SELECTOR_LITERAL = /^("|'|`)(?:#[A-Za-z_][\w-]*|\.[A-Za-z_][\w-]*|\[\s*(?:id|name|class|data-[\w-]+)(?:\s*(?:[~|^$*]?=)\s*(?:[A-Za-z0-9_-]+|"[^"]*"|'[^']*'|`[^`]*`))?\s*\])\1$/u;
 const STABLE_RUNTIME_ID_LITERAL = /^("|'|`)[A-Za-z_][\w:.-]*\1$/u;
 const RUNTIME_CLASS_ATTRIBUTE_SELECTOR = /^\[\s*class(?:\s*(?<operator>[~|^$*]?=)\s*(?<value>[A-Za-z0-9_-]+|"[^"]*"|'[^']*'|`[^`]*`))?\s*\]$/u;
+const RUNTIME_IDENTITY_ATTRIBUTE_SELECTOR = /^\[\s*(?<name>id|name)(?:\s*(?<operator>[~|^$*]?=)\s*(?<value>[A-Za-z0-9_-]+|"[^"]*"|'[^']*'|`[^`]*`))?\s*\]$/u;
 const acceptedProjectionAuthority = new WeakSet();
 
 function reusableSourceIndex(html, candidate) {
@@ -147,13 +148,16 @@ function candidateReferenceTokens(element) {
   const tokens = [{ value: element.selector, kind: "selector" }];
   for (const attribute of element.attributes ?? []) {
     if (attribute.name === "id" || attribute.name === "name") {
+      tokens.push({ value: attribute.name, kind: "identity-attribute" });
       tokens.push({
         value: attribute.value ?? attribute.rawValue ?? "",
         kind: "identity",
       });
     }
     if (attribute.name === "class") {
-      String(attribute.value ?? attribute.rawValue ?? "")
+      const classValue = String(attribute.value ?? attribute.rawValue ?? "");
+      tokens.push({ value: classValue, kind: "class-value" });
+      classValue
         .split(/[\t\n\f\r ]+/u)
         .forEach((token) => tokens.push({ value: token, kind: "class" }));
     }
@@ -165,7 +169,59 @@ function candidateReferenceTokens(element) {
       });
     }
   }
-  return tokens.filter(({ value }) => String(value).length >= 3);
+  return tokens.filter(({ value, kind }) => (
+    kind === "identity-attribute" || String(value).length >= 3
+  ));
+}
+
+function runtimeSelectorLiteralValue(literal) {
+  const trimmed = String(literal || "").trim();
+  const quote = trimmed[0];
+  return quote && trimmed.at(-1) === quote
+    ? trimmed.slice(1, -1)
+    : null;
+}
+
+function runtimeAttributeSelectorMatches(source, value, kind) {
+  return [...source.matchAll(RUNTIME_DOM_QUERY_CALL)].some((match) => {
+    const literal = match[1].trim();
+    if (!STABLE_RUNTIME_SELECTOR_LITERAL.test(literal)) return false;
+    const selector = runtimeSelectorLiteralValue(literal);
+    if (selector === null) return false;
+    if (kind === "identity-attribute") {
+      const identitySelector = selector.match(RUNTIME_IDENTITY_ATTRIBUTE_SELECTOR);
+      return identitySelector?.groups?.name === value
+        && !identitySelector.groups.operator;
+    }
+    const classSelector = selector.match(RUNTIME_CLASS_ATTRIBUTE_SELECTOR);
+    if (!classSelector) return false;
+    if (!classSelector.groups?.value) return true;
+    const expected = runtimeSelectorLiteralValue(classSelector.groups.value)
+      ?? classSelector.groups.value;
+    const actual = String(value);
+    switch (classSelector.groups.operator) {
+      case "=":
+        return kind === "class-value" && expected === actual;
+      case "~=":
+        return kind === "class"
+          ? expected === actual
+          : actual.split(/[\t\n\f\r ]+/u).includes(expected);
+      case "^=":
+        return kind === "class-value"
+          && actual.startsWith(expected);
+      case "$=":
+        return kind === "class-value"
+          && actual.endsWith(expected);
+      case "*=":
+        return kind === "class-value"
+          && actual.includes(expected);
+      case "|=":
+        return kind === "class-value"
+          && (actual === expected || actual.startsWith(`${expected}-`));
+      default:
+        return false;
+    }
+  });
 }
 
 function sourceReferencesToken(source, tokenDescriptor) {
@@ -177,39 +233,18 @@ function sourceReferencesToken(source, tokenDescriptor) {
   const kind = typeof tokenDescriptor === "object"
     ? tokenDescriptor?.kind
     : "identity";
-  if (value.length < 3) return false;
-  if (
-    kind === "class"
-    && [...source.matchAll(RUNTIME_DOM_QUERY_CALL)].some((match) => {
-      const literal = match[1].trim();
-      if (!STABLE_RUNTIME_SELECTOR_LITERAL.test(literal)) return false;
-      const selector = literal.slice(1, -1);
-      const classSelector = selector.match(RUNTIME_CLASS_ATTRIBUTE_SELECTOR);
-      if (!classSelector) return false;
-      if (!classSelector.groups?.value) return true;
-      const expected = classSelector.groups.value.replace(
-        /^("|'|`)|("|'|`)$/gu,
-        "",
-      );
-      switch (classSelector.groups.operator) {
-        case "=":
-        case "~=":
-          return expected === value;
-        case "^=":
-          return value.startsWith(expected) || expected.startsWith(value);
-        case "$=":
-          return value.endsWith(expected) || expected.endsWith(value);
-        case "*=":
-          return value.includes(expected) || expected.includes(value);
-        case "|=":
-          return value === expected
-            || value.startsWith(`${expected}-`)
-            || expected.startsWith(`${value}-`);
-        default:
-          return false;
-      }
-    })
-  ) return true;
+  if (value.length < 3 && kind !== "identity-attribute") return false;
+  const attributeSelectorReference = (
+    (kind === "class" || kind === "class-value" || kind === "identity-attribute")
+    && runtimeAttributeSelectorMatches(source, value, kind)
+  );
+  if (kind === "identity-attribute") return attributeSelectorReference;
+  if (attributeSelectorReference) return true;
+  if (kind === "class-value") {
+    return [...source.matchAll(RUNTIME_CLASS_LOOKUP_CALL)].some((match) => (
+      String(match[2]) === value
+    ));
+  }
   let offset = source.indexOf(value);
   while (offset >= 0) {
     const before = offset > 0 ? source[offset - 1] : "";
