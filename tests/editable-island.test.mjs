@@ -12,6 +12,7 @@ import {
   EditableIslandError,
   editableIslandForTarget,
   normalizeEditableIslandHtml,
+  normalizeEditableTextFragmentHtml,
 } from "../app/lib/editable-island.js";
 
 function targetFor(html, tagName = "p") {
@@ -176,6 +177,27 @@ test("editable island rejects block structure, new protected semantics and atom 
       "before after",
       { baselineInnerHtml: "before <img src=\"kept.png\"> after" },
     ),
+  );
+});
+
+test("direct text fragments normalize entities but reject every authored element", () => {
+  assert.equal(
+    normalizeEditableTextFragmentHtml("新版&lt;文字&gt; &amp; emoji 😀", {
+      baselineInnerHtml: "旧版&amp;文字",
+    }),
+    "新版&lt;文字&gt; &amp; emoji 😀",
+  );
+  assertIslandError(
+    "EDITABLE_TEXT_FRAGMENT_STRUCTURE_UNSUPPORTED",
+    () => normalizeEditableTextFragmentHtml("<br>", {
+      baselineInnerHtml: "旧版文字",
+    }),
+  );
+  assertIslandError(
+    "EDITABLE_TEXT_FRAGMENT_STRUCTURE_UNSUPPORTED",
+    () => normalizeEditableTextFragmentHtml("<strong>新版</strong>", {
+      baselineInnerHtml: "旧版文字",
+    }),
   );
 });
 
