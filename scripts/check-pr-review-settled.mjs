@@ -14,6 +14,7 @@ const DEFAULT_SETTLE_SECONDS = 180;
 const DEFAULT_TIMEOUT_SECONDS = 20 * 60;
 const DEFAULT_POLL_SECONDS = 20;
 const MAX_REST_PAGES = 20;
+const CODEX_ENVIRONMENT_UNAVAILABLE_PATTERN = /\bcreate an environment for this repo\b/iu;
 
 function normalizedLogin(value) {
   return String(value || "").toLowerCase().replace(/\[bot\]$/u, "");
@@ -171,6 +172,34 @@ function reviewCompletionSignals({
   return signals.sort((left, right) => right.at - left.at);
 }
 
+function latestCodexEnvironmentFailure(issueComments, requestAt) {
+  return (issueComments || [])
+    .flatMap((comment) => {
+      const failedAt = timestamp(commentCreatedAt(comment));
+      if (
+        !isCodexActor(commentAuthor(comment))
+        || !CODEX_ENVIRONMENT_UNAVAILABLE_PATTERN.test(comment?.body || "")
+        || !Number.isFinite(failedAt)
+        || failedAt < requestAt
+      ) return [];
+      return [{
+        kind: "codex_environment_unavailable",
+        at: failedAt,
+        id: comment?.id || comment?.databaseId || null,
+      }];
+    })
+    .sort((left, right) => right.at - left.at)[0] || null;
+}
+
+function completionSummary(completion) {
+  if (!completion) return null;
+  return Object.freeze({
+    kind: completion.kind,
+    id: completion.id,
+    at: new Date(completion.at).toISOString(),
+  });
+}
+
 function threadComments(thread) {
   if (Array.isArray(thread?.comments)) return thread.comments;
   return thread?.comments?.nodes || [];
@@ -306,14 +335,48 @@ export function evaluateReviewSettlement({
       blockingThreads: [],
     });
   }
-  const completion = reviewCompletionSignals({
+  const completionSignals = reviewCompletionSignals({
     expectedHeadSha: expectedSha,
-    requestAt: Math.max(requestAt, readyAt),
+    requestAt,
     reviews,
     issueComments,
     requestReactions,
     issueReactions,
-  })[0];
+  });
+  const draftCompletion = completionSignals.find((signal) => signal.at < readyAt) || null;
+  const environmentFailure = latestCodexEnvironmentFailure(issueComments, requestAt);
+  if (
+    environmentFailure
+    && (!draftCompletion || environmentFailure.at > draftCompletion.at)
+  ) {
+    return Object.freeze({
+      status: "blocked",
+      reason: "codex_review_environment_unavailable",
+      expectedHeadSha: expectedSha,
+      currentHeadSha,
+      request: requestSummary,
+      promotion: promotionSummary,
+      draftCompletion: completionSummary(draftCompletion),
+      completion: null,
+      settlesAt: null,
+      blockingThreads: [],
+    });
+  }
+  if (!draftCompletion) {
+    return Object.freeze({
+      status: "blocked",
+      reason: "draft_review_not_completed_before_promotion",
+      expectedHeadSha: expectedSha,
+      currentHeadSha,
+      request: requestSummary,
+      promotion: promotionSummary,
+      draftCompletion: null,
+      completion: null,
+      settlesAt: null,
+      blockingThreads: [],
+    });
+  }
+  const completion = completionSignals.find((signal) => signal.at >= readyAt) || null;
   if (!completion) {
     return Object.freeze({
       status: "waiting",
@@ -322,6 +385,7 @@ export function evaluateReviewSettlement({
       currentHeadSha,
       request: requestSummary,
       promotion: promotionSummary,
+      draftCompletion: completionSummary(draftCompletion),
       completion: null,
       settlesAt: null,
       blockingThreads: [],
@@ -329,11 +393,8 @@ export function evaluateReviewSettlement({
   }
 
   const settlesAtMs = completion.at + settleSeconds * 1000;
-  const completionSummary = Object.freeze({
-    kind: completion.kind,
-    id: completion.id,
-    at: new Date(completion.at).toISOString(),
-  });
+  const finalCompletionSummary = completionSummary(completion);
+  const draftCompletionSummary = completionSummary(draftCompletion);
   if (nowMs < settlesAtMs) {
     return Object.freeze({
       status: "waiting",
@@ -342,7 +403,8 @@ export function evaluateReviewSettlement({
       currentHeadSha,
       request: requestSummary,
       promotion: promotionSummary,
-      completion: completionSummary,
+      draftCompletion: draftCompletionSummary,
+      completion: finalCompletionSummary,
       settlesAt: new Date(settlesAtMs).toISOString(),
       blockingThreads: [],
     });
@@ -357,7 +419,8 @@ export function evaluateReviewSettlement({
       currentHeadSha,
       request: requestSummary,
       promotion: promotionSummary,
-      completion: completionSummary,
+      draftCompletion: draftCompletionSummary,
+      completion: finalCompletionSummary,
       settlesAt: new Date(settlesAtMs).toISOString(),
       blockingThreads: unresolved,
     });
@@ -370,7 +433,8 @@ export function evaluateReviewSettlement({
     currentHeadSha,
     request: requestSummary,
     promotion: promotionSummary,
-    completion: completionSummary,
+    draftCompletion: draftCompletionSummary,
+    completion: finalCompletionSummary,
     settlesAt: new Date(settlesAtMs).toISOString(),
     blockingThreads: [],
   });
@@ -557,6 +621,7 @@ function conciseResult(result) {
     currentHeadSha: result.currentHeadSha,
     request: result.request,
     promotion: result.promotion,
+    draftCompletion: result.draftCompletion,
     completion: result.completion,
     settlesAt: result.settlesAt,
     blockingThreads: result.blockingThreads,
@@ -573,7 +638,8 @@ async function appendSummary(result) {
     `- Expected/current head: \`${result.expectedHeadSha}\` / \`${result.currentHeadSha || "unavailable"}\``,
     `- Exact-SHA request: ${result.request ? `comment ${result.request.id} at ${result.request.at}` : "missing"}`,
     `- Ready promotion: ${result.promotion ? `event ${result.promotion.id} at ${result.promotion.at}` : "missing"}`,
-    `- Completion: ${result.completion ? `${result.completion.kind} at ${result.completion.at}` : "not observed"}`,
+    `- Draft completion: ${result.draftCompletion ? `${result.draftCompletion.kind} at ${result.draftCompletion.at}` : "not observed"}`,
+    `- Final completion: ${result.completion ? `${result.completion.kind} at ${result.completion.at}` : "not observed"}`,
     `- Settle boundary: ${result.settlesAt || "not reached"}`,
     `- Blocking active threads: ${result.blockingThreads.length}`,
     "",

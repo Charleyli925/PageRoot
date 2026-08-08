@@ -91,6 +91,11 @@ Codex completion, 180-second settle window and clean active-thread check may
 unlock `baseline-policy` and the complete source matrix that can create the
 required `release-gate` and exact-tree attestation.
 
+Codex cloud and repository code review are operational prerequisites. A bot
+response asking for an environment is a hard stop: keep the PR Draft, let an
+authorized owner repair the external Codex setting, then issue a new exact-SHA
+request. Neither the workflow nor the PR changes that repository setting.
+
 Do not promote several parallel PRs at once. Keep other reviewed work draft
 until the preceding candidate merges, then update the next branch and promote
 it. A commit pushed after promotion cancels any in-flight stale candidate and
