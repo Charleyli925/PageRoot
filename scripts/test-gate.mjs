@@ -406,6 +406,7 @@ async function main() {
             PAGEROOT_PACKAGED_APP_PATH: artifact.appPath,
             PAGEROOT_EXPECTED_APP_VERSION: artifact.version,
             PAGEROOT_EXPECTED_PRODUCT_NAME: artifact.productName,
+            PAGEROOT_EXPECTED_BUNDLE_ID: packagedPackageJson.build.appId,
             PAGEROOT_TEST_ARCH: options.arch,
           }
           : {}),
