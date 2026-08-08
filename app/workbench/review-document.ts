@@ -1347,6 +1347,19 @@ type ChangedReviewScript = {
   content: string;
 };
 
+type RuntimeVisualScriptTokenKind =
+  | "id"
+  | "class"
+  | "data-attribute"
+  | "data-value"
+  | "semantic-value";
+
+type RuntimeVisualScriptToken = {
+  value: string;
+  kind: RuntimeVisualScriptTokenKind;
+  attributeName?: string;
+};
+
 type ReviewBootstrapElementBinding = {
   path: number[];
   tagName: string;
@@ -1591,31 +1604,124 @@ function changedReviewScripts(
   ].map(({ content }) => ({ content }));
 }
 
-function runtimeVisualScriptTokens(before: Element, after: Element): string[] {
-  const elementTokens = (element: Element) => {
-    const explicitValues = [
-      element.id,
-      ...[...element.attributes]
+function runtimeVisualScriptTokens(
+  before: Element,
+  after: Element,
+): RuntimeVisualScriptToken[] {
+  const elementTokens = (element: Element): RuntimeVisualScriptToken[] => {
+    const explicitTokens: RuntimeVisualScriptToken[] = [];
+    const id = element.id.trim();
+    if (id.length >= 3) explicitTokens.push({ value: id, kind: "id" });
+    [...element.attributes]
         .filter((attribute) => (
           attribute.name.startsWith("data-")
           && !attribute.name.startsWith("data-pageroot-")
           && /(?:canvas|chart|graph|plot|table|visual|viz)/iu.test(attribute.name)
         ))
-        .flatMap((attribute) => [attribute.name, attribute.value]),
-    ].map((value) => value.trim()).filter((value) => value.length >= 3);
-    if (explicitValues.length) return explicitValues;
-    const semanticValues = ["aria-label", "name", "title"]
-      .map((attributeName) => element.getAttribute(attributeName) || "")
-      .map((value) => value.trim())
-      .filter((value) => value.length >= 3);
-    if (semanticValues.length) return semanticValues;
+        .forEach((attribute) => {
+          const attributeName = attribute.name.trim();
+          const value = attribute.value.trim();
+          if (attributeName.length >= 3) {
+            explicitTokens.push({
+              value: attributeName,
+              kind: "data-attribute",
+              attributeName,
+            });
+          }
+          if (value.length >= 3) {
+            explicitTokens.push({
+              value,
+              kind: "data-value",
+              attributeName,
+            });
+          }
+        });
+    if (explicitTokens.length) return explicitTokens;
+    const semanticTokens: RuntimeVisualScriptToken[] = [];
+    ["aria-label", "name", "title"].forEach((attributeName) => {
+      const value = (element.getAttribute(attributeName) || "").trim();
+      if (value.length >= 3) {
+        semanticTokens.push({ value, kind: "semantic-value", attributeName });
+      }
+    });
+    if (semanticTokens.length) return semanticTokens;
     return classTokens(element)
       .filter((token) => (
         !GENERIC_RUNTIME_VISUAL_CLASSES.has(token.toLowerCase())
       ))
-      .filter((value) => value.length >= 3);
+      .filter((value) => value.length >= 3)
+      .map((value) => ({ value, kind: "class" }));
   };
-  return [...new Set([...elementTokens(before), ...elementTokens(after)])];
+  const unique = new Map<string, RuntimeVisualScriptToken>();
+  [...elementTokens(before), ...elementTokens(after)].forEach((token) => {
+    const key = `${token.kind}\u0000${token.attributeName || ""}\u0000${token.value}`;
+    if (!unique.has(key)) unique.set(key, token);
+  });
+  return [...unique.values()];
+}
+
+function runtimeVisualScriptRegexValue(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}
+
+function runtimeVisualScriptStringLiteral(value: string): string {
+  return `["'\\x60]${runtimeVisualScriptRegexValue(value)}["'\\x60]`;
+}
+
+function runtimeVisualScriptBoundaryMatches(source: string, value: string): boolean {
+  const escaped = runtimeVisualScriptRegexValue(value);
+  return new RegExp(
+    `(?:^|[^A-Za-z0-9_$-])${escaped}(?=$|[^A-Za-z0-9_$-])`,
+    "u",
+  ).test(source);
+}
+
+function runtimeVisualScriptReferencesToken(
+  source: string,
+  token: RuntimeVisualScriptToken,
+): boolean {
+  const value = token.value;
+  const escaped = runtimeVisualScriptRegexValue(value);
+  if (token.kind === "class") {
+    return new RegExp(
+      `(?:^|[^A-Za-z0-9_.:-])\\.${escaped}(?=$|[^A-Za-z0-9_.:-])`,
+      "u",
+    ).test(source) || new RegExp(
+      `(?:\\bgetElementsByClassName|\\bclassList\\.(?:add|contains|remove|replace|toggle))\\s*\\(\\s*${runtimeVisualScriptStringLiteral(value)}`,
+      "u",
+    ).test(source) || new RegExp(
+      `\\[\\s*class\\s*(?:[~|^$*]?=)\\s*${runtimeVisualScriptStringLiteral(value)}`,
+      "u",
+    ).test(source);
+  }
+  if (token.kind === "data-attribute") {
+    const attributeName = runtimeVisualScriptRegexValue(token.attributeName || value);
+    return new RegExp(`\\[\\s*${attributeName}\\s*\\]`, "u").test(source)
+      || new RegExp(
+        `\\bgetAttribute\\s*\\(\\s*${runtimeVisualScriptStringLiteral(token.attributeName || value)}\\s*\\)`,
+        "u",
+      ).test(source);
+  }
+  if (token.kind === "data-value") {
+    const attributeName = runtimeVisualScriptRegexValue(token.attributeName || "");
+    if (!attributeName) return false;
+    const literal = runtimeVisualScriptStringLiteral(value);
+    const unquoted = `${escaped}(?=\\s*\\])`;
+    return new RegExp(
+      `\\[\\s*${attributeName}\\s*(?:[~|^$*]?=)\\s*(?:${literal}|${unquoted})`,
+      "u",
+    ).test(source);
+  }
+  if (token.kind === "id") {
+    return new RegExp(
+      `\\bgetElementById\\s*\\(\\s*${runtimeVisualScriptStringLiteral(value)}\\s*\\)`,
+      "u",
+    ).test(source) || new RegExp(
+      `\\bquerySelector(?:All)?\\s*\\(\\s*${runtimeVisualScriptStringLiteral(`#${value}`)}\\s*\\)`,
+      "u",
+    ).test(source) || runtimeVisualScriptBoundaryMatches(source, value);
+  }
+  return runtimeVisualScriptBoundaryMatches(source, value);
 }
 
 function hasRuntimeVisualCause(
@@ -1623,7 +1729,9 @@ function hasRuntimeVisualCause(
   changedScripts: ChangedReviewScript[],
 ): boolean {
   const tokens = runtimeVisualScriptTokens(hostPair.before, hostPair.after);
-  const referencesHost = (content: string) => tokens.some((token) => content.includes(token));
+  const referencesHost = (content: string) => tokens.some((token) => (
+    runtimeVisualScriptReferencesToken(content, token)
+  ));
   return tokens.length > 0 && changedScripts.some(({ content }) => referencesHost(content));
 }
 

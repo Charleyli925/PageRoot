@@ -503,7 +503,7 @@ test("runtime chart review supplements only the initial bounded static footprint
   assert.doesNotMatch(reviewDocument, /sectionPair\.(?:before|after)\?\.contains/);
   assert.doesNotMatch(reviewDocument, /hostReferenceScripts/);
   assert.match(reviewDocument, /remainingSignatures/);
-  assert.match(reviewDocument, /if \(explicitValues\.length\) return explicitValues/);
+  assert.match(reviewDocument, /if \(explicitTokens\.length\) return explicitTokens/);
   assert.match(reviewDocument, /hostBoxMutated/);
   assert.match(reviewDocument, /hostFullyTransparent/);
   assert.match(reviewDocument, /"host-box\|opacity=0"/);
@@ -637,6 +637,8 @@ test("hostile review fixtures are enforced by the adapter and page contract", ()
   assert.match(reviewDocument, /runtimeVisualDocumentReadyState/);
   assert.match(reviewDocument, /runtimeVisualRegExpExec/);
   assert.match(reviewDocument, /runtimeVisualInitialBindingIgnoresIdentityText/);
+  assert.match(reviewDocument, /runtimeVisualScriptReferencesToken/);
+  assert.doesNotMatch(reviewDocument, /content\.includes\(token\)/u);
   assert.match(reviewDocument, /(?:color\|lab\|lch\|oklab\|oklch\|hsl\|hwb)/u);
   assert.match(reviewDocument, /runtimeVisualNumberIsFinite/);
   assert.match(reviewDocument, /runtimeVisualMutationRecordAddedNodes/);
