@@ -74,6 +74,7 @@ const BROAD_RUNTIME_HOST_MUTATION = /(?:appendChild|insertAdjacentHTML|replaceCh
 const INDIRECT_RUNTIME_DOM_READ = /(?:\bdocument\.(?:body|documentElement|forms|images|links)\b|\.(?:children|childNodes|first(?:Child|ElementChild)|last(?:Child|ElementChild)|parent(?:Node|Element)|previous(?:Sibling|ElementSibling)|next(?:Sibling|ElementSibling)|closest)\b|\bgetElementsBy(?:ClassName|TagName|Name)\s*\()/u;
 const RUNTIME_DOM_QUERY_CALL = /\bquerySelector(?:All)?\s*\(\s*([^)]*)\)/gu;
 const RUNTIME_GET_ELEMENT_BY_ID_CALL = /\bgetElementById\s*\(\s*([^)]*)\)/gu;
+const RUNTIME_GET_ELEMENTS_BY_NAME_CALL = /\bgetElementsByName\s*\(\s*([^)]*)\)/gu;
 const RUNTIME_CLASS_LOOKUP_CALL = /(?:\bgetElementsByClassName|\bclassList\.(?:add|contains|remove|replace|toggle))\s*\(\s*(["'`])([^"'`]+)\1/gu;
 const STABLE_RUNTIME_SELECTOR_LITERAL = /^("|'|`)(?:#[A-Za-z_][\w-]*|\.[A-Za-z_][\w-]*|\[\s*(?:id|name|class|data-[\w-]+)(?:\s*(?:[~|^$*]?=)\s*(?:[A-Za-z0-9_-]+|"[^"]*"|'[^']*'|`[^`]*`))?\s*\])\1$/u;
 const STABLE_RUNTIME_ID_LITERAL = /^("|'|`)[A-Za-z_][\w:.-]*\1$/u;
@@ -151,7 +152,7 @@ function candidateReferenceTokens(element) {
       tokens.push({ value: attribute.name, kind: "identity-attribute" });
       tokens.push({
         value: attribute.value ?? attribute.rawValue ?? "",
-        kind: "identity",
+        kind: `${attribute.name}-value`,
       });
     }
     if (attribute.name === "class") {
@@ -180,6 +181,36 @@ function runtimeSelectorLiteralValue(literal) {
   return quote && trimmed.at(-1) === quote
     ? trimmed.slice(1, -1)
     : null;
+}
+
+function runtimeIdentityValueMatches(source, value, kind) {
+  const attributeName = kind === "id-value" ? "id" : "name";
+  const lookupCall = kind === "id-value"
+    ? RUNTIME_GET_ELEMENT_BY_ID_CALL
+    : RUNTIME_GET_ELEMENTS_BY_NAME_CALL;
+  if ([...source.matchAll(lookupCall)].some((match) => {
+    const literal = match[1].trim();
+    return STABLE_RUNTIME_ID_LITERAL.test(literal)
+      && runtimeSelectorLiteralValue(literal) === value;
+  })) return true;
+  return [...source.matchAll(RUNTIME_DOM_QUERY_CALL)].some((match) => {
+    const literal = match[1].trim();
+    if (!STABLE_RUNTIME_SELECTOR_LITERAL.test(literal)) return false;
+    const selector = runtimeSelectorLiteralValue(literal);
+    if (selector === null) return false;
+    if (attributeName === "id" && selector === `#${value}`) return true;
+    const attributeSelector = selector.match(RUNTIME_IDENTITY_ATTRIBUTE_SELECTOR);
+    if (
+      !attributeSelector
+      || attributeSelector.groups?.name !== attributeName
+      || !attributeSelector.groups?.value
+    ) return false;
+    const expected = runtimeSelectorLiteralValue(attributeSelector.groups.value)
+      ?? attributeSelector.groups.value;
+    return (attributeSelector.groups.operator === "="
+      || attributeSelector.groups.operator === "~=")
+      && expected === value;
+  });
 }
 
 function runtimeAttributeSelectorMatches(source, value, kind) {
@@ -234,6 +265,9 @@ function sourceReferencesToken(source, tokenDescriptor) {
     ? tokenDescriptor?.kind
     : "identity";
   if (value.length < 3 && kind !== "identity-attribute") return false;
+  if (kind === "id-value" || kind === "name-value") {
+    return runtimeIdentityValueMatches(source, value, kind);
+  }
   const attributeSelectorReference = (
     (kind === "class" || kind === "class-value" || kind === "identity-attribute")
     && runtimeAttributeSelectorMatches(source, value, kind)

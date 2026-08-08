@@ -219,6 +219,31 @@ test("stable lookup namespaces keep an ID reference ahead of same-token classes"
   );
 });
 
+test("stable ID lookup does not consume the cap with same-token name hosts", () => {
+  const unrelatedHosts = Array.from(
+    { length: RUNTIME_VISUAL_CONTRACT.candidateLimit },
+    () => `<div name="chart"></div>`,
+  ).join("");
+  const source = `<!doctype html><main>${unrelatedHosts}
+    <div id="chart"></div>
+    <script>
+      document.getElementById("chart").appendChild(document.createElement("svg"));
+    </script>
+  </main>`;
+  const sourceIndex = buildSourceIndex(source);
+  const prepared = prepareRuntimeVisualCapture({
+    html: source,
+    sourcePath: "/tmp/id-name-runtime-host.html",
+    viewportWidth: 900,
+  });
+  assert.equal(prepared?.candidates.length, RUNTIME_VISUAL_CONTRACT.candidateLimit);
+  const firstCandidate = prepared?.candidates[0];
+  assert.equal(
+    firstCandidate && sourceIndex.byNodeId.get(firstCandidate.sourceNodeId)?.stableAttributes.id,
+    "chart",
+  );
+});
+
 test("direct references keep punctuation identifiers distinct from class tokens", () => {
   const unrelatedHosts = Array.from(
     { length: RUNTIME_VISUAL_CONTRACT.candidateLimit },

@@ -92,8 +92,20 @@ async function parsedRuntimeVisualSnapshots(page, {
   });
 }
 
-async function parsedReviewCommentLayouts(page, { binding, authoredScript }) {
-  const bootstrap = generatedReviewBootstrap([], [binding]);
+async function parsedReviewCommentLayouts(page, {
+  binding,
+  bindings = binding ? [binding] : [],
+  authoredScript,
+}) {
+  const commentBindings = bindings;
+  const commentTargets = commentBindings.map((commentBinding, index) => ({
+    key: commentBindings.length === 1
+      ? "parsed-comment"
+      : `parsed-comment-${index + 1}`,
+    selector: ".comment-host",
+    sourceNodeId: commentBinding.sourceNodeId,
+  }));
+  const bootstrap = generatedReviewBootstrap([], commentBindings);
   await page.setContent(`<!doctype html>
 <html>
   <head>
@@ -109,7 +121,7 @@ async function parsedReviewCommentLayouts(page, { binding, authoredScript }) {
     <script>${authoredScript}</script>
   </body>
 </html>`, { waitUntil: "load" });
-  return page.evaluate(async ({ sessionId, side }) => {
+  return page.evaluate(async ({ sessionId, side, commentTargets }) => {
     const messages = [];
     let commentPort = null;
     const receive = (event) => {
@@ -140,20 +152,17 @@ async function parsedReviewCommentLayouts(page, { binding, authoredScript }) {
         await new Promise((resolve) => setTimeout(resolve, 10));
       }
       if (!commentPort) return { channel: false, layouts: messages };
+      const expectedCommentKeys = new Set(commentTargets.map(({ key }) => key));
       commentPort.postMessage({
         source: "pageroot-ai-review-comment-targets",
         sessionId,
         side,
         type: "comment-targets",
-        reviewCommentTargets: [{
-          key: "parsed-comment",
-          selector: ".comment-host",
-          sourceNodeId: "element:1:1:div",
-        }],
+        reviewCommentTargets: commentTargets,
       });
       while (
         !messages.some((message) => (
-          message.commentLayouts?.some((layout) => layout.key === "parsed-comment")
+          message.commentLayouts?.some((layout) => expectedCommentKeys.has(layout.key))
         ))
         && Date.now() < deadline
       ) {
@@ -163,7 +172,7 @@ async function parsedReviewCommentLayouts(page, { binding, authoredScript }) {
     } finally {
       removeEventListener("message", receive);
     }
-  }, { sessionId: "review-session", side: "before" });
+  }, { sessionId: "review-session", side: "before", commentTargets });
 }
 
 test("path-only review comments bind against a real parsed DOM", async ({ page }) => {
@@ -265,6 +274,35 @@ test("path-only review comments keep a bound target when a later same-tag node i
   expect(result.channel).toBe(true);
   expect(result.layouts.some((message) => (
     message.commentLayouts?.some((layout) => layout.key === "parsed-comment")
+  ))).toBe(true);
+});
+
+test("identical path-only comment siblings keep their separate frozen paths", async ({ page }) => {
+  const bindings = [0, 1].map((index) => ({
+    sourceNodeId: `element:1:${index + 1}:div`,
+    path: [1, 0, index],
+    tagName: "DIV",
+    sourceBoxSignature: COMMENT_SOURCE_BOX_SIGNATURE,
+    identityAttributes: [],
+    identityText: "",
+  }));
+  const result = await parsedReviewCommentLayouts(page, {
+    bindings,
+    authoredScript: `
+      const main = document.querySelector("main");
+      for (let index = 0; index < 2; index += 1) {
+        const actual = document.createElement("div");
+        actual.className = "comment-host";
+        main.append(actual);
+      }
+    `,
+  });
+  expect(result.channel).toBe(true);
+  expect(result.layouts.some((message) => (
+    new Set(message.commentLayouts?.map((layout) => layout.key) || [])
+      .has("parsed-comment-1")
+    && new Set(message.commentLayouts?.map((layout) => layout.key) || [])
+      .has("parsed-comment-2")
   ))).toBe(true);
 });
 
