@@ -9,11 +9,31 @@ export function mergeReviewTextRanges(
   ranges: readonly ReviewTextRange[],
 ): ReviewTextRange[];
 
+export function reviewSentenceRanges(
+  value: string,
+): ReviewTextRange[];
+
+export type ReviewTextChangeOperation =
+  | "none"
+  | "insert"
+  | "delete"
+  | "replace"
+  | "layout";
+
+export type ReviewTextChangeScope = "inline" | "sentence" | "block";
+
+export type ReviewTextChangeSide = {
+  evidenceRanges: ReviewTextRange[];
+  footprintGroups: ReviewTextRange[][];
+  anchorOffset: number | null;
+};
+
 export type ReadableReviewTextFootprintPlan = {
-  scope: "inline" | "block";
+  operation: ReviewTextChangeOperation;
+  scope: ReviewTextChangeScope;
   density: number;
-  before: { groups: ReviewTextRange[][] };
-  after: { groups: ReviewTextRange[][] };
+  before: ReviewTextChangeSide;
+  after: ReviewTextChangeSide;
 };
 
 export function readableReviewTextFootprintPlan(
@@ -22,6 +42,7 @@ export function readableReviewTextFootprintPlan(
   differences: {
     before: readonly ReviewTextRange[];
     after: readonly ReviewTextRange[];
+    layout?: boolean;
   },
 ): ReadableReviewTextFootprintPlan;
 

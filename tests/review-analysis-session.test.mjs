@@ -98,3 +98,41 @@ test("review analysis translates cancellation during asynchronous compute", asyn
   release();
   await assert.rejects(pending, ReviewAnalysisCancelledError);
 });
+
+test("a cancelled prepared result is neither cached nor publishable to a later generation", async () => {
+  const session = new ReviewAnalysisSession({
+    estimateSize: (value) => value.bytes,
+  });
+  let release;
+  let markStarted;
+  let computes = 0;
+  const started = new Promise((resolve) => {
+    markStarted = resolve;
+  });
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const stale = session.analyze({
+    key: "prepared-review",
+    compute: async () => {
+      computes += 1;
+      markStarted();
+      await gate;
+      return { generation: "stale", bytes: 8 };
+    },
+  });
+  await started;
+  session.cancel();
+  release();
+  await assert.rejects(stale, ReviewAnalysisCancelledError);
+
+  const current = await session.analyze({
+    key: "prepared-review",
+    compute: () => {
+      computes += 1;
+      return { generation: "current", bytes: 8 };
+    },
+  });
+  assert.deepEqual(current, { generation: "current", bytes: 8 });
+  assert.equal(computes, 2);
+});
