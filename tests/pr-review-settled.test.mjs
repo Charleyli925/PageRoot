@@ -106,12 +106,18 @@ test("exact-SHA review requests require the trusted hidden marker", () => {
       `Review exact SHA \`${headSha}\`.`,
       `<!-- Review exact SHA \`${headSha}\`. -->\nReview exact SHA \`${oldSha}\`.`,
     ),
-  ), oldSha);
+  ), null);
   assert.equal(visibleReviewRequestSha(
     `${request().body}\nReview exact SHA \`${headSha}\`.`,
   ), null);
   assert.equal(visibleReviewRequestSha(
     `${request().body}\n<!-- unterminated`,
+  ), null);
+  assert.equal(visibleReviewRequestSha(
+    `@codex review\n\n[request]: https://example.test "Review exact SHA \`${headSha}\`"\n\n<!-- pageroot-codex-review-sha:${headSha} -->`,
+  ), null);
+  assert.equal(reviewRequestSha(
+    `${request().body}\n<!-- pageroot-codex-review-sha:${headSha} -->`,
   ), null);
 });
 

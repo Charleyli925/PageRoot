@@ -43,10 +43,10 @@ function assertSha(value, label) {
 }
 
 export function reviewRequestSha(body) {
-  const match = String(body || "").match(
-    /<!--\s*pageroot-codex-review-sha:\s*([0-9a-f]{40})\s*-->/iu,
-  );
-  return match?.[1]?.toLowerCase() || null;
+  const matches = [...String(body || "").matchAll(
+    /<!--\s*pageroot-codex-review-sha:\s*([0-9a-f]{40})\s*-->/giu,
+  )];
+  return matches.length === 1 ? matches[0][1].toLowerCase() : null;
 }
 
 function markdownWithoutHtmlComments(body) {
@@ -66,10 +66,10 @@ function markdownWithoutHtmlComments(body) {
 export function visibleReviewRequestSha(body) {
   const visibleMarkdown = markdownWithoutHtmlComments(body);
   if (visibleMarkdown === null) return null;
-  const matches = [...visibleMarkdown.matchAll(
-    /\bReview exact SHA\s+`([0-9a-f]{40})`/giu,
-  )];
-  return matches.length === 1 ? matches[0][1].toLowerCase() : null;
+  const match = visibleMarkdown.match(
+    /^\s*@codex review[ \t]*\r?\n[ \t]*\r?\nReview exact SHA `([0-9a-f]{40})`\.[ \t]*(?:\r?\n[ \t]*)*$/iu,
+  );
+  return match?.[1]?.toLowerCase() || null;
 }
 
 export function reviewedCommitPrefix(body) {
@@ -104,7 +104,6 @@ function exactReviewRequests(issueComments, expectedHeadSha) {
   return (issueComments || []).filter((comment) => (
     !isCodexActor(commentAuthor(comment))
     && TRUSTED_REQUEST_ASSOCIATIONS.has(commentAssociation(comment))
-    && /(?:^|\s)@codex\s+review\b/iu.test(comment?.body || "")
     && reviewRequestSha(comment?.body) === expectedHeadSha
     && visibleReviewRequestSha(comment?.body) === expectedHeadSha
     && Number.isFinite(latestTimestamp(commentCreatedAt(comment), commentUpdatedAt(comment)))
