@@ -104,6 +104,21 @@ test("an ordinary insertion without identity is never reported as movement", () 
   assert.ok(pairs.every((pair) => pair.moved === false));
 });
 
+test("stable text boundaries keep a long middle insertion paired", () => {
+  const pairs = alignReviewSemanticUnits(
+    [unit("稳定前缀，稳定后缀。", { kind: "leaf-text-block:P" })],
+    [unit("稳定前缀，新增说明需要跨越多个实际文字行并保持独立框选，稳定后缀。", {
+      kind: "leaf-text-block:P",
+    })],
+  );
+
+  assert.deepEqual(matchedPairs(pairs).map(({ beforeIndex, afterIndex, moved }) => ({
+    beforeIndex,
+    afterIndex,
+    moved,
+  })), [{ beforeIndex: 0, afterIndex: 0, moved: false }]);
+});
+
 test("swapping before and after mirrors every pair and insertion", () => {
   const before = [unit("甲"), unit("乙"), unit("丙")];
   const after = [before[0], unit("新增"), before[1], before[2]];

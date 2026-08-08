@@ -246,7 +246,7 @@ test("change discovery builds a complete outline and precise change markers", ()
   assert.match(reviewDocument, /range\.getClientRects\(\)/);
   assert.match(reviewDocument, /reviewTextInventoryForNodes/);
   assert.match(reviewDocument, /semanticFlowUnit/);
-  assert.match(reviewDocument, /STRUCTURE_TRANSPARENT_TAGS/);
+  assert.doesNotMatch(reviewDocument, /STRUCTURE_TRANSPARENT_TAGS/);
   assert.doesNotMatch(reviewDocument, /beforeTokenRanges\.length \?/);
   assert.doesNotMatch(reviewDocument, /afterTokenRanges\.length \?/);
   assert.match(reviewDocument, /const structureChanged = markStructureDifferences\(graph\)/);

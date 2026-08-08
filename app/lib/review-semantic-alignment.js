@@ -100,7 +100,33 @@ function sharedAffinityCount(before, after) {
   return (after.affinities || []).filter((value) => beforeAffinities.has(value)).length;
 }
 
-function weightedPairScore(before, after, beforeIndex, afterIndex) {
+function stableBoundaryAffinity(beforeText, afterText) {
+  const beforeCharacters = [...beforeText];
+  const afterCharacters = [...afterText];
+  const shorterLength = Math.min(beforeCharacters.length, afterCharacters.length);
+  if (!shorterLength) return 0;
+  let prefix = 0;
+  while (
+    prefix < shorterLength
+    && beforeCharacters[prefix] === afterCharacters[prefix]
+  ) prefix += 1;
+  let suffix = 0;
+  while (
+    prefix + suffix < shorterLength
+    && beforeCharacters[beforeCharacters.length - suffix - 1]
+      === afterCharacters[afterCharacters.length - suffix - 1]
+  ) suffix += 1;
+  const required = Math.min(shorterLength, Math.max(4, Math.ceil(shorterLength * 0.55)));
+  const stableSingleBoundary = Math.max(prefix, suffix) >= required;
+  const stablePairedBoundaries = prefix >= 2
+    && suffix >= 2
+    && prefix + suffix >= required;
+  return stableSingleBoundary || stablePairedBoundaries
+    ? (prefix + suffix) / shorterLength
+    : 0;
+}
+
+function weightedPairScore(before, after) {
   if (before.kind !== after.kind) return Number.NEGATIVE_INFINITY;
   if (normalizedParent(before) !== normalizedParent(after)) return Number.NEGATIVE_INFINITY;
   if (identityKey(before) || identityKey(after)) return Number.NEGATIVE_INFINITY;
@@ -109,12 +135,18 @@ function weightedPairScore(before, after, beforeIndex, afterIndex) {
   if (!beforeText || !afterText) return Number.NEGATIVE_INFINITY;
   const exact = beforeText === afterText;
   const similarity = reviewTextSimilarity(beforeText, afterText);
+  const boundaryAffinity = stableBoundaryAffinity(beforeText, afterText);
   const sharedAffinities = sharedAffinityCount(before, after);
-  if (!exact && similarity < 0.52 && !(sharedAffinities > 0 && similarity >= 0.28)) {
+  if (
+    !exact
+    && similarity < 0.52
+    && boundaryAffinity === 0
+    && !(sharedAffinities > 0 && similarity >= 0.28)
+  ) {
     return Number.NEGATIVE_INFINITY;
   }
   return (exact ? 420 : 0)
-    + Math.round(similarity * 180)
+    + Math.round(Math.max(similarity, boundaryAffinity) * 180)
     + Math.min(72, sharedAffinities * 24);
 }
 
@@ -124,7 +156,7 @@ function uniqueBestCandidates(before, after) {
   const afterBest = Array.from({ length: after.length }, () => ({ score: Number.NEGATIVE_INFINITY, count: 0 }));
   before.forEach((beforeUnit, beforeIndex) => {
     after.forEach((afterUnit, afterIndex) => {
-      const score = weightedPairScore(beforeUnit, afterUnit, beforeIndex, afterIndex);
+      const score = weightedPairScore(beforeUnit, afterUnit);
       scores[beforeIndex][afterIndex] = score;
       if (!Number.isFinite(score)) return;
       const beforeState = beforeBest[beforeIndex];
@@ -225,8 +257,6 @@ function windowBestMatch(before, after, beforeIndexes, afterIndexes, beforeCurso
       const score = weightedPairScore(
         before[beforeIndexes[beforeOffset]],
         after[afterIndexes[afterOffset]],
-        beforeOffset,
-        afterOffset,
       );
       if (!Number.isFinite(score)) continue;
       candidates.push({ beforeOffset, afterOffset, score });

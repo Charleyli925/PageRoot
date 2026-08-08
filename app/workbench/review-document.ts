@@ -2632,41 +2632,6 @@ function structuralSelfSignature(element: Element): string {
     .join("|");
 }
 
-const STRUCTURE_TRANSPARENT_TAGS = new Set([
-  "ABBR",
-  "B",
-  "BDI",
-  "BDO",
-  "BR",
-  "CITE",
-  "CODE",
-  "DATA",
-  "EM",
-  "I",
-  "KBD",
-  "MARK",
-  "Q",
-  "S",
-  "SAMP",
-  "SMALL",
-  "SPAN",
-  "STRONG",
-  "SUB",
-  "SUP",
-  "TIME",
-  "U",
-  "VAR",
-  "WBR",
-]);
-
-function structuralChildren(element: Element): Element[] {
-  return eligibleChildren(element).flatMap((child) => (
-    STRUCTURE_TRANSPARENT_TAGS.has(child.tagName)
-      ? structuralChildren(child)
-      : [child]
-  ));
-}
-
 function markStructureElement(element: Element, tone: string, semanticOwnerId: string) {
   element.setAttribute("data-pageroot-review-structure", tone);
   element.setAttribute("data-pageroot-review-semantic-owner", semanticOwnerId);
