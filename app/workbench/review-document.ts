@@ -4566,8 +4566,12 @@ function reviewBootstrap(
     return !colors.length
       || runtimeVisualArraySome(colors, (color) => !runtimeVisualTransparent(color));
   };
+  const runtimeVisualTextEffectiveColor = (style) => (
+    runtimeVisualStyleValue(style, "-webkit-text-fill-color")
+      || runtimeVisualStyleValue(style, "color")
+  );
   const runtimeVisualTextPaint = (style) => [
-    runtimeVisualStyleValue(style, "color"),
+    runtimeVisualTextEffectiveColor(style),
     runtimeVisualStyleValue(style, "font-family"),
     runtimeVisualStyleValue(style, "font-size"),
     runtimeVisualStyleValue(style, "font-style"),
@@ -4580,7 +4584,6 @@ function reviewBootstrap(
     runtimeVisualStyleValue(style, "text-shadow"),
     runtimeVisualStyleValue(style, "-webkit-text-stroke-color"),
     runtimeVisualStyleValue(style, "-webkit-text-stroke-width"),
-    runtimeVisualStyleValue(style, "-webkit-text-fill-color"),
   ];
   const runtimeVisualTextHasPaint = (style) => {
     const textShadow = runtimeVisualStyleValue(style, "text-shadow");
@@ -4590,13 +4593,8 @@ function reviewBootstrap(
       runtimeVisualStyleValue(style, "-webkit-text-stroke-width") || "0",
     );
     const strokeColor = runtimeVisualStyleValue(style, "-webkit-text-stroke-color");
-    const textFillColor = runtimeVisualStyleValue(
-      style,
-      "-webkit-text-fill-color",
-    );
     return (
-      !runtimeVisualTransparent(runtimeVisualStyleValue(style, "color"))
-      || !runtimeVisualTransparent(textFillColor)
+      !runtimeVisualTransparent(runtimeVisualTextEffectiveColor(style))
       || runtimeVisualShadowHasPaint(textShadow)
       || Boolean(
         decorationLine

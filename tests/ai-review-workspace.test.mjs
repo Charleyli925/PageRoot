@@ -612,6 +612,7 @@ test("hostile review fixtures are enforced by the adapter and page contract", ()
   assert.match(transparentText.html, /rgb\(0, 0, 0\)/u);
   assert.match(transparentText.html, /rgb\(255, 0, 0\)/u);
   assert.match(transparentText.html, /-webkit-text-fill-color:rgb\(0, 0, 255\)/u);
+  assert.match(transparentText.html, /-webkit-text-fill-color:transparent/u);
   assert.match(transparentText.html, /color\(srgb 1 0 0 \/ 0\)/u);
   assert.match(transparentText.html, /oklab\(60% 0 0 \/ 0\)/u);
   assert.match(transparentText.html, /text-shadow/iu);

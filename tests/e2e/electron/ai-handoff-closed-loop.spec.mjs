@@ -591,6 +591,7 @@ test("a verified AI result stays pending through desktop review until the user a
       <div id="review-runtime-host-paint-chart" class="review-runtime-chart-host"></div>
       <div id="review-runtime-single-painted-child" class="review-runtime-chart-host"></div>
       <div id="review-runtime-transparent-text" class="review-runtime-chart-host"></div>
+      <div id="review-runtime-transparent-fill-text" class="review-runtime-chart-host"></div>
       <div id="review-runtime-attribute-limit" class="review-runtime-chart-host"
         data-key-00="00" data-key-01="01" data-key-02="02" data-key-03="03"
         data-key-04="04" data-key-05="05" data-key-06="06" data-key-07="07"
@@ -913,6 +914,12 @@ test("a verified AI result stays pending through desktop review until the user a
         + '</span><span style="color:transparent;-webkit-text-fill-color:'
         + (runtimeReviewChartVariant === "before" ? '#9aaec2' : '#6d5ce7')
         + '">' + (runtimeReviewChartVariant === "before" ? '填充旧值' : '填充新值') + '</span>';
+      const runtimeTransparentFillText = document.querySelector(
+        "#review-runtime-transparent-fill-text",
+      );
+      runtimeTransparentFillText.innerHTML = '<span style="color:#d34f6a;-webkit-text-fill-color:transparent">'
+        + (runtimeReviewChartVariant === "before" ? '反向隐藏旧值' : '反向隐藏新值')
+        + '</span>';
       const runtimeAttributeLimit = document.querySelector(
         "#review-runtime-attribute-limit",
       );
@@ -1555,6 +1562,7 @@ test("a verified AI result stays pending through desktop review until the user a
       "#review-runtime-flow-chart",
       "#review-runtime-unstable-chart",
       "#review-runtime-root-geometry-chart",
+      "#review-runtime-transparent-fill-text",
       "#review-runtime-hidden-churn-chart",
       "#review-runtime-hidden-descendant-churn-chart",
       "#review-runtime-svg-hidden-descendant-churn-chart",
@@ -1593,6 +1601,10 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect(afterReviewFrame.locator("#review-runtime-unstable-chart"))
       .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
     await expect(afterReviewFrame.locator("#review-runtime-root-geometry-chart"))
+      .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
+    await expect(beforeReviewFrame.locator("#review-runtime-transparent-fill-text"))
+      .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
+    await expect(afterReviewFrame.locator("#review-runtime-transparent-fill-text"))
       .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
     await expect(afterReviewFrame.locator("#review-runtime-hidden-churn-chart"))
       .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");

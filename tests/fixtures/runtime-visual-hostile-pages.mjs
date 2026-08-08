@@ -39,9 +39,10 @@ export const RUNTIME_VISUAL_HOSTILE_PAGES = Object.freeze([
       const opaqueBlack=document.createElement("span");opaqueBlack.style.color="rgb(0, 0, 0)";opaqueBlack.textContent="visible black";
       const opaqueRed=document.createElement("span");opaqueRed.style.color="rgb(255, 0, 0)";opaqueRed.textContent="visible red";
       const filledLabel=document.createElement("span");filledLabel.style.cssText="color:transparent;-webkit-text-fill-color:rgb(0, 0, 255)";filledLabel.textContent="visible fill";
+      const transparentFillLabel=document.createElement("span");transparentFillLabel.style.cssText="color:rgb(255, 0, 0);-webkit-text-fill-color:transparent";transparentFillLabel.textContent="hidden fill";
       RegExp.prototype[Symbol.match]=()=>null;
       RegExp.prototype.exec=()=>null;
-      document.getElementById("chart").append(label,alphaLabel,css4Label,hexLabel,opaqueBlack,opaqueRed,filledLabel);</script></main>`,
+      document.getElementById("chart").append(label,alphaLabel,css4Label,hexLabel,opaqueBlack,opaqueRed,filledLabel,transparentFillLabel);</script></main>`,
     contract: "Text without visible color, text fill, shadow, decoration, or stroke paint is not visual evidence, including CSS Color 4 alpha syntax.",
     closureReason: "Captured RegExp exec plus RGB, CSS Color 4, hex alpha, and effective WebKit text-fill parsing exclude transparent paint while retaining opaque fill over transparent color.",
   }),

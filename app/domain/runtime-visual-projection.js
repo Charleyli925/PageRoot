@@ -74,6 +74,7 @@ const BROAD_RUNTIME_HOST_MUTATION = /(?:appendChild|insertAdjacentHTML|replaceCh
 const INDIRECT_RUNTIME_DOM_READ = /(?:\bdocument\.(?:body|documentElement|forms|images|links)\b|\.(?:children|childNodes|first(?:Child|ElementChild)|last(?:Child|ElementChild)|parent(?:Node|Element)|previous(?:Sibling|ElementSibling)|next(?:Sibling|ElementSibling)|closest)\b|\bgetElementsBy(?:ClassName|TagName|Name)\s*\()/u;
 const RUNTIME_DOM_QUERY_CALL = /\bquerySelector(?:All)?\s*\(\s*([^)]*)\)/gu;
 const RUNTIME_GET_ELEMENT_BY_ID_CALL = /\bgetElementById\s*\(\s*([^)]*)\)/gu;
+const RUNTIME_CLASS_LOOKUP_CALL = /(?:\bgetElementsByClassName|\bclassList\.(?:add|contains|remove|replace|toggle))\s*\(\s*(["'`])([^"'`]+)\1/gu;
 const STABLE_RUNTIME_SELECTOR_LITERAL = /^("|'|`)(?:#[A-Za-z_][\w-]*|\.[A-Za-z_][\w-]*|\[\s*(?:id|name|class|data-[\w-]+)(?:\s*(?:[~|^$*]?=)\s*(?:[A-Za-z0-9_-]+|"[^"]*"|'[^']*'|`[^`]*`))?\s*\])\1$/u;
 const STABLE_RUNTIME_ID_LITERAL = /^("|'|`)[A-Za-z_][\w:.-]*\1$/u;
 const acceptedProjectionAuthority = new WeakSet();
@@ -185,6 +186,18 @@ function sourceReferencesToken(source, tokenDescriptor) {
       && before === "."
       && !/[A-Za-z0-9_.:-]/u.test(source[offset - 2] || "")
     );
+    if (
+      kind === "class"
+      && !classSelectorPunctuation
+      && ![...source.matchAll(RUNTIME_CLASS_LOOKUP_CALL)].some((match) => (
+        String(match[2])
+          .split(/[\t\n\f\r ]+/u)
+          .includes(value)
+      ))
+    ) {
+      offset = source.indexOf(value, offset + 1);
+      continue;
+    }
     if (
       (classSelectorPunctuation || !/[A-Za-z0-9_.:-]/u.test(before))
       && !/[A-Za-z0-9_.:-]/u.test(after)
