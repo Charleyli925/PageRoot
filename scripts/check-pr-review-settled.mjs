@@ -85,6 +85,10 @@ function commentUpdatedAt(comment) {
   return comment?.updated_at || comment?.updatedAt || commentCreatedAt(comment);
 }
 
+function commentLastEditedAt(comment) {
+  return comment?.last_edited_at || comment?.lastEditedAt || null;
+}
+
 function isTrustedRequestComment(comment) {
   const createdAt = timestamp(commentCreatedAt(comment));
   const updatedAt = timestamp(commentUpdatedAt(comment));
@@ -92,6 +96,7 @@ function isTrustedRequestComment(comment) {
     !isCodexActor(commentAuthor(comment))
     && TRUSTED_REQUEST_ASSOCIATIONS.has(commentAssociation(comment))
     && Number.isFinite(createdAt)
+    && !commentLastEditedAt(comment)
     && updatedAt === createdAt
     && Boolean(requestIdentity(comment?.body))
   );
@@ -199,6 +204,7 @@ function cleanCompletionCommentSignal(comment, expectedHeadSha, after, before) {
   const prefix = reviewedCommitPrefix(comment?.body);
   if (
     !isCodexActor(commentAuthor(comment))
+    || Boolean(commentLastEditedAt(comment))
     || updatedAt !== completedAt
     || !CODEX_CLEAN_COMPLETION_PATTERN.test(String(comment?.body || ""))
     || !prefix
@@ -573,6 +579,49 @@ async function restPages(apiBase, apiPath, token) {
   throw new Error(`GitHub API pagination exceeded ${MAX_REST_PAGES} pages for ${apiPath}.`);
 }
 
+async function collectIssueComments({ graphqlUrl, owner, name, pullRequest, token }) {
+  const query = `
+    query($owner: String!, $name: String!, $number: Int!, $after: String) {
+      repository(owner: $owner, name: $name) {
+        pullRequest(number: $number) {
+          comments(first: 100, after: $after) {
+            nodes {
+              databaseId
+              body
+              createdAt
+              updatedAt
+              lastEditedAt
+              authorAssociation
+              author { login }
+            }
+            pageInfo { hasNextPage endCursor }
+          }
+        }
+      }
+    }
+  `;
+  const comments = [];
+  let after = null;
+  for (;;) {
+    const response = await githubJson(graphqlUrl, token, {
+      method: "POST",
+      body: JSON.stringify({
+        query,
+        variables: { owner, name, number: pullRequest, after },
+      }),
+    });
+    if (response.errors?.length) {
+      throw new Error(`GitHub GraphQL: ${response.errors.map((error) => error.message).join("; ")}`);
+    }
+    const connection = response?.data?.repository?.pullRequest?.comments;
+    if (!connection) throw new Error("Pull Request issue comments were unavailable.");
+    comments.push(...(connection.nodes || []));
+    if (!connection.pageInfo?.hasNextPage) return comments;
+    after = connection.pageInfo.endCursor;
+    if (!after) throw new Error("GitHub issue-comment pagination omitted endCursor.");
+  }
+}
+
 async function collectReviewThreads({ graphqlUrl, owner, name, pullRequest, token }) {
   const query = `
     query($owner: String!, $name: String!, $number: Int!, $after: String) {
@@ -636,7 +685,13 @@ async function collectSnapshot(options, token) {
     reviewThreads,
   ] = await Promise.all([
     githubJson(`${apiBase}${basePath}/pulls/${options.pullRequest}`, token),
-    restPages(apiBase, `${basePath}/issues/${options.pullRequest}/comments`, token),
+    collectIssueComments({
+      graphqlUrl,
+      owner,
+      name,
+      pullRequest: options.pullRequest,
+      token,
+    }),
     restPages(apiBase, `${basePath}/issues/${options.pullRequest}/events`, token),
     restPages(apiBase, `${basePath}/pulls/${options.pullRequest}/reviews`, token),
     restPages(apiBase, `${basePath}/issues/${options.pullRequest}/reactions`, token),

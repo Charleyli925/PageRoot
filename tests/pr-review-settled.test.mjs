@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
@@ -19,12 +20,17 @@ const requestAt = "2026-08-08T04:00:00.000Z";
 const draftCompletedAt = "2026-08-08T04:00:30.000Z";
 const readyAt = "2026-08-08T04:01:00.000Z";
 const finalCompletedAt = "2026-08-08T04:02:00.000Z";
+const reviewGateSource = await readFile(
+  new URL("../scripts/check-pr-review-settled.mjs", import.meta.url),
+  "utf8",
+);
 
 function request({
   sha = headSha,
   base = baseSha,
   createdAt: requestedAt = requestAt,
   updatedAt = requestedAt,
+  lastEditedAt = null,
   association = "OWNER",
   id = 10,
   body = null,
@@ -36,6 +42,7 @@ function request({
     author_association: association,
     created_at: requestedAt,
     updated_at: updatedAt,
+    lastEditedAt,
   };
 }
 
@@ -95,6 +102,7 @@ function cleanComment({
   sha = headSha,
   createdAt: completedAt = finalCompletedAt,
   updatedAt = completedAt,
+  lastEditedAt = null,
   id = 50,
   actor = "chatgpt-codex-connector[bot]",
   body = null,
@@ -104,6 +112,7 @@ function cleanComment({
     user: { login: actor },
     created_at: completedAt,
     updated_at: updatedAt,
+    lastEditedAt,
     body: body ?? `Codex Review: Didn't find any major issues. Breezy!\n\n**Reviewed commit:** \`${sha.slice(0, 10)}\``,
   };
 }
@@ -163,8 +172,25 @@ test("the Draft request is one immutable exact head/base protocol message", () =
       updatedAt: "2026-08-08T03:51:00.000Z",
     }),
     request({ id: 5, base: oldBaseSha }),
+    request({
+      id: 6,
+      createdAt: "2026-08-08T03:55:00.000Z",
+      updatedAt: "2026-08-08T03:55:00.000Z",
+      lastEditedAt: "2026-08-08T03:55:00.000Z",
+    }),
   ], headSha, baseSha);
   assert.equal(latest.id, 2);
+});
+
+test("GitHub issue-comment evidence includes edit-specific GraphQL metadata", () => {
+  assert.match(
+    reviewGateSource,
+    /comments\(first: 100, after: \$after\)[\s\S]+lastEditedAt[\s\S]+authorAssociation/u,
+  );
+  assert.doesNotMatch(
+    reviewGateSource,
+    /restPages\(apiBase, `\$\{basePath\}\/issues\/\$\{options\.pullRequest\}\/comments`/u,
+  );
 });
 
 test("non-protocol Markdown is ignored instead of being parsed as review evidence", () => {
@@ -295,6 +321,9 @@ test("empty, unmarked, stale, human and wrong-commit records are never completio
       updatedAt: "2026-08-08T04:02:01.000Z",
     }),
     cleanComment({
+      lastEditedAt: finalCompletedAt,
+    }),
+    cleanComment({
       body: "Codex Review: Didn't find any major issues. Breezy!",
     }),
     cleanComment({
@@ -374,6 +403,10 @@ test("one head cannot reuse completion evidence across canonical base requests",
       }),
     ],
   }).status, "settled");
+
+  assert.equal(evaluate({
+    issueComments: [request({ lastEditedAt: requestAt })],
+  }).reason, "exact_sha_review_not_requested");
 });
 
 test("second-resolution causal boundaries fail closed", () => {
