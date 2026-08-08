@@ -22,9 +22,9 @@ export const RUNTIME_VISUAL_HOSTILE_PAGES = Object.freeze([
     surface: "review",
     html: `<!doctype html><main><div class="chart-host"></div><script>
       const bar=document.createElement("i");bar.style.cssText="display:block;background:red;width:8px;height:8px";
-      document.querySelector(".chart-host").append(bar);</script></main>`,
-    contract: "A class-only runtime host remains path-bound even when its identity attributes are limited to the source-box class.",
-    closureReason: "The frozen path proves the unique host before the painted child is observed, so the runtime batch is not discarded for lack of non-class attributes.",
+      document.querySelector('[class~="chart-host"]').append(bar);</script></main>`,
+    contract: "A class-only runtime host remains path-bound through a stable class attribute selector even when its identity attributes are limited to the source-box class.",
+    closureReason: "The selector parser preserves class-namespace references for stable attribute selectors, so the frozen path proves the unique host before the painted child is observed without guessing a parser sibling.",
   }),
   Object.freeze({
     id: "pr100-transparent-text",

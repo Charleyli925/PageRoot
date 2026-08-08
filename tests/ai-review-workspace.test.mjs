@@ -606,7 +606,7 @@ test("hostile review fixtures are enforced by the adapter and page contract", ()
   const attributeLimit = runtimeVisualHostilePage("pr107-attribute-limit");
   assert.match(nativeCanvas.html, /Math\.round=\(\)=>0/u);
   assert.match(classOnlyHost.html, /class="chart-host"/u);
-  assert.match(classOnlyHost.html, /querySelector\("\.chart-host"\)/u);
+  assert.match(classOnlyHost.html, /querySelector\('\[class~="chart-host"\]'\)/u);
   assert.match(transparentText.html, /color="transparent"/u);
   assert.match(transparentText.html, /rgba\(255, 0, 0, 0\)/u);
   assert.match(transparentText.html, /rgb\(0, 0, 0\)/u);

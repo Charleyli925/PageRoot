@@ -77,6 +77,7 @@ const RUNTIME_GET_ELEMENT_BY_ID_CALL = /\bgetElementById\s*\(\s*([^)]*)\)/gu;
 const RUNTIME_CLASS_LOOKUP_CALL = /(?:\bgetElementsByClassName|\bclassList\.(?:add|contains|remove|replace|toggle))\s*\(\s*(["'`])([^"'`]+)\1/gu;
 const STABLE_RUNTIME_SELECTOR_LITERAL = /^("|'|`)(?:#[A-Za-z_][\w-]*|\.[A-Za-z_][\w-]*|\[\s*(?:id|name|class|data-[\w-]+)(?:\s*(?:[~|^$*]?=)\s*(?:[A-Za-z0-9_-]+|"[^"]*"|'[^']*'|`[^`]*`))?\s*\])\1$/u;
 const STABLE_RUNTIME_ID_LITERAL = /^("|'|`)[A-Za-z_][\w:.-]*\1$/u;
+const RUNTIME_CLASS_ATTRIBUTE_SELECTOR = /^\[\s*class(?:\s*(?<operator>[~|^$*]?=)\s*(?<value>[A-Za-z0-9_-]+|"[^"]*"|'[^']*'|`[^`]*`))?\s*\]$/u;
 const acceptedProjectionAuthority = new WeakSet();
 
 function reusableSourceIndex(html, candidate) {
@@ -177,6 +178,38 @@ function sourceReferencesToken(source, tokenDescriptor) {
     ? tokenDescriptor?.kind
     : "identity";
   if (value.length < 3) return false;
+  if (
+    kind === "class"
+    && [...source.matchAll(RUNTIME_DOM_QUERY_CALL)].some((match) => {
+      const literal = match[1].trim();
+      if (!STABLE_RUNTIME_SELECTOR_LITERAL.test(literal)) return false;
+      const selector = literal.slice(1, -1);
+      const classSelector = selector.match(RUNTIME_CLASS_ATTRIBUTE_SELECTOR);
+      if (!classSelector) return false;
+      if (!classSelector.groups?.value) return true;
+      const expected = classSelector.groups.value.replace(
+        /^("|'|`)|("|'|`)$/gu,
+        "",
+      );
+      switch (classSelector.groups.operator) {
+        case "=":
+        case "~=":
+          return expected === value;
+        case "^=":
+          return value.startsWith(expected) || expected.startsWith(value);
+        case "$=":
+          return value.endsWith(expected) || expected.endsWith(value);
+        case "*=":
+          return value.includes(expected) || expected.includes(value);
+        case "|=":
+          return value === expected
+            || value.startsWith(`${expected}-`)
+            || expected.startsWith(`${value}-`);
+        default:
+          return false;
+      }
+    })
+  ) return true;
   let offset = source.indexOf(value);
   while (offset >= 0) {
     const before = offset > 0 ? source[offset - 1] : "";
