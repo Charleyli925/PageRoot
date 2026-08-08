@@ -4091,6 +4091,7 @@ function reviewBootstrap(
   const runtimeVisualInvalidKeys = new RuntimeVisualSet();
   const reviewCommentSourceNodeIdPattern = /^element:\d+:\d+:[a-z][a-z0-9:-]{0,127}$/iu;
   const reviewCommentIdentityElements = new RuntimeVisualMap();
+  const reviewCommentDeferredBindings = new RuntimeVisualMap();
   const reviewCommentInvalidSourceNodeIds = new RuntimeVisualSet();
   const runtimeVisualIdentityKey = (value) => {
     const key = safeKey(value);
@@ -4218,13 +4219,13 @@ function reviewBootstrap(
       || (typeof binding?.identityText === "string" && binding.identityText.length),
     );
   };
-  const runtimeVisualInitialBindingElement = (binding) => {
+  const runtimeVisualInitialBindingElement = (binding, useFrozenPath = true) => {
     const pathElement = runtimeVisualInitialBindingPathElement(binding?.path);
     const identityAttributes = runtimeVisualInitialBindingIdentityAttributes(binding);
     const identityText = typeof binding?.identityText === "string"
       ? RuntimeVisualString(binding.identityText)
       : "";
-    if (runtimeVisualInitialBindingMatches(
+    if (useFrozenPath && runtimeVisualInitialBindingMatches(
       pathElement,
       binding,
       Boolean(identityAttributes?.length) || identityText.length === 0,
@@ -4235,7 +4236,11 @@ function reviewBootstrap(
     runtimeVisualArrayForEach(runtimeVisualQueryElements("*"), (element) => {
       if (
         matching.length < 2
-        && runtimeVisualInitialBindingMatches(element, binding)
+        && runtimeVisualInitialBindingMatches(
+          element,
+          binding,
+          Boolean(identityAttributes?.length) || identityText.length === 0,
+        )
       ) runtimeVisualArrayPush(matching, element);
     });
     return matching.length === 1 ? matching[0] : null;
@@ -4275,11 +4280,23 @@ function reviewBootstrap(
       !sourceNodeId
       || runtimeVisualSetHas(reviewCommentInvalidSourceNodeIds, sourceNodeId)
     ) return;
-    if (
-      observedElement !== null
-      && !runtimeVisualObservedBindingMatches(observedElement, binding)
-    ) return;
-    const element = observedElement || runtimeVisualInitialBindingElement(binding);
+    if (observedElement !== null) {
+      const identityAttributes = runtimeVisualInitialBindingIdentityAttributes(binding);
+      const identityText = typeof binding?.identityText === "string"
+        ? RuntimeVisualString(binding.identityText)
+        : "";
+      if (!runtimeVisualInitialBindingMatches(
+        observedElement,
+        binding,
+        Boolean(identityAttributes?.length) || identityText.length === 0,
+      )) return;
+      runtimeVisualMapSet(reviewCommentDeferredBindings, binding, true);
+      return;
+    }
+    const element = runtimeVisualInitialBindingElement(
+      binding,
+      !runtimeVisualMapHas(reviewCommentDeferredBindings, binding),
+    );
     if (!element) return;
     const existing = runtimeVisualMapGet(reviewCommentIdentityElements, sourceNodeId);
     if (existing && existing !== element) {
@@ -4348,6 +4365,14 @@ function reviewBootstrap(
   const closeInitialBindings = () => {
     if (!initialBindingObserver || runtimeVisualInitialBindingsClosed) return;
     drainInitialBindings();
+    runtimeVisualArrayForEach(
+      reviewCommentInitialBindings,
+      (binding) => {
+        if (runtimeVisualMapHas(reviewCommentDeferredBindings, binding)) {
+          captureReviewCommentInitialBinding(binding);
+        }
+      },
+    );
     runtimeVisualMutationObserverDisconnect(initialBindingObserver);
     runtimeVisualInitialBindingsClosed = true;
   };
