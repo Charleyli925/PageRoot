@@ -101,6 +101,11 @@ test("exact-SHA review requests require the trusted hidden marker", () => {
       ...request({ id: 5 }),
       body: request().body.replace(`Review exact SHA \`${headSha}\``, `Review exact SHA \`${oldSha}\``),
     },
+    request({
+      id: 6,
+      createdAt: "2026-08-08T03:45:00.000Z",
+      updatedAt: "2026-08-08T03:59:00.000Z",
+    }),
   ], headSha).id, 2);
   assert.equal(visibleReviewRequestSha(
     request().body.replace(
@@ -211,6 +216,13 @@ test("repeated promotion cannot recycle requests or completions from an earlier 
     })],
     now: new Date("2026-08-08T04:08:01.000Z"),
   }).reason, "draft_review_not_completed_before_promotion");
+  assert.equal(evaluate({
+    issueComments: [request({
+      createdAt: requestAt,
+      updatedAt: "2026-08-08T04:03:10.000Z",
+    })],
+    timelineEvents: repeatedTimeline,
+  }).reason, "exact_sha_review_not_requested");
 });
 
 test("the settle window prevents late review threads from racing the full gate", () => {

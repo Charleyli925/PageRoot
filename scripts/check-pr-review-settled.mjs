@@ -29,11 +29,6 @@ function timestamp(value) {
   return Number.isFinite(milliseconds) ? milliseconds : null;
 }
 
-function latestTimestamp(...values) {
-  const timestamps = values.map(timestamp).filter(Number.isFinite);
-  return timestamps.length > 0 ? Math.max(...timestamps) : null;
-}
-
 function assertSha(value, label) {
   const normalized = String(value || "").toLowerCase();
   if (!SHA_PATTERN.test(normalized)) {
@@ -106,7 +101,8 @@ function exactReviewRequests(issueComments, expectedHeadSha) {
     && TRUSTED_REQUEST_ASSOCIATIONS.has(commentAssociation(comment))
     && reviewRequestSha(comment?.body) === expectedHeadSha
     && visibleReviewRequestSha(comment?.body) === expectedHeadSha
-    && Number.isFinite(latestTimestamp(commentCreatedAt(comment), commentUpdatedAt(comment)))
+    && Number.isFinite(timestamp(commentCreatedAt(comment)))
+    && timestamp(commentUpdatedAt(comment)) === timestamp(commentCreatedAt(comment))
   ));
 }
 
@@ -139,8 +135,7 @@ export function latestExactReviewRequest(issueComments, expectedHeadSha) {
   assertSha(expectedHeadSha, "expectedHeadSha");
   return exactReviewRequests(issueComments, expectedHeadSha)
     .sort((left, right) => (
-      latestTimestamp(commentCreatedAt(right), commentUpdatedAt(right))
-      - latestTimestamp(commentCreatedAt(left), commentUpdatedAt(left))
+      timestamp(commentCreatedAt(right)) - timestamp(commentCreatedAt(left))
     ))[0] || null;
 }
 
@@ -334,7 +329,7 @@ export function evaluateReviewSettlement({
       blockingThreads: [],
     });
   }
-  const requestAt = latestTimestamp(commentCreatedAt(request), commentUpdatedAt(request));
+  const requestAt = timestamp(commentCreatedAt(request));
   const requestSummary = Object.freeze({
     id: request?.id || request?.databaseId || null,
     at: new Date(requestAt).toISOString(),
