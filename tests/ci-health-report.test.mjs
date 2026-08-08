@@ -5,6 +5,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
+  CI_HEALTH_WORKFLOW_INPUTS,
   renderCiHealthMarkdown,
   summarizeCiHealth,
   workflowRuns,
@@ -552,9 +553,18 @@ test("CI health workflow stays read-only and retains a machine-readable report",
   assert.match(workflow, /DEPENDENCY_HEALTH_RESULT: \$\{\{ needs\.dependency-health\.result \}\}/u);
   assert.match(workflow, /retention-days: 90/u);
   assert.doesNotMatch(workflow, /contents: write|pull-requests: write|issues: write/u);
-  assert.match(reportScript, /workflow: "ci\.yml"/u);
-  assert.match(reportScript, /workflow: "pr-feedback\.yml"/u);
-  assert.match(reportScript, /workflow: "release-dry-run\.yml"/u);
+  assert.deepEqual(CI_HEALTH_WORKFLOW_INPUTS, {
+    ci: "ci.yml",
+    feedback: "pr-feedback.yml",
+    releaseDryRun: "release-dry-run.yml",
+    releaseCandidate: "release-candidate.yml",
+    release: "release.yml",
+  });
+  assert.match(reportScript, /workflow: CI_HEALTH_WORKFLOW_INPUTS\.ci/u);
+  assert.match(reportScript, /workflow: CI_HEALTH_WORKFLOW_INPUTS\.feedback/u);
+  assert.match(reportScript, /workflow: CI_HEALTH_WORKFLOW_INPUTS\.releaseDryRun/u);
+  assert.match(reportScript, /workflow: CI_HEALTH_WORKFLOW_INPUTS\.releaseCandidate/u);
+  assert.match(reportScript, /workflow: CI_HEALTH_WORKFLOW_INPUTS\.release/u);
   assert.match(reportScript, /\| Metric \| Actual \| Target \| Status \|/u);
   assert.match(reportScript, /Cancelled promoted candidates/u);
 });

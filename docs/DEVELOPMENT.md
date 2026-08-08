@@ -116,7 +116,7 @@ The CI-evidence contract test enumerates every stage used by the active source,
 developer-preview, candidate and publication workflows, so an unsupported stage
 name fails during source review rather than after formal packaging begins.
 
-The daily/manual read-only `CI Health` workflow first runs the dependency baseline, then computes a rolling 30-day report from PR Feedback, source-candidate and automatic Release Dry Run Actions history even when that baseline fails. In addition to exact-tree attempts, latency, repeated-green jobs and environment failures, it measures complete gates per Pull Request, total/full/feedback/dry-run/churn runner minutes and PR/candidate cancellation rates. The Actions Summary marks every machine-measured report target as met, missed or lacking data. Reports are written under `output/ci-health/`.
+The daily/manual read-only `CI Health` workflow first runs the dependency baseline, then computes a rolling 30-day report from `ci.yml`, `pr-feedback.yml`, `release-dry-run.yml`, `release-candidate.yml` and `release.yml` Actions history even when that baseline fails. In addition to exact-tree attempts, latency, repeated-green jobs and environment failures, it measures complete gates per Pull Request, total/full/feedback/dry-run/churn runner minutes and PR/candidate cancellation rates. The Actions Summary marks every machine-measured report target as met, missed or lacking data. Reports are written under `output/ci-health/`.
 
 ## Design constraints
 

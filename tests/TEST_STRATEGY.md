@@ -182,8 +182,8 @@ Browser 验证真实 DOM 中保存卡片、草稿卡片和输入框在当前/其
 每个 evidence stage；任何未同步到允许列表的名称必须在源码门禁中失败，不能等到
 正式候选打包才暴露。
 
-CI Health 每日先跑依赖健康基线，并同时读取 `pr-feedback.yml`、`ci.yml`
-与 `release-dry-run.yml`。
+CI Health 每日先跑依赖健康基线，并同时读取 `ci.yml`、`pr-feedback.yml`、
+`release-dry-run.yml`、`release-candidate.yml` 与 `release.yml`。
 除了同一 run 的绿色 job
 重跑，它还按 PR number（旧数据缺失时按 head branch）聚合不同 SHA 的完整
 门禁：`runsPerPullRequestAverage` 目标不超过 `1.25`，后续候选 SHA 消耗的

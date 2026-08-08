@@ -14,6 +14,13 @@ const DEFAULT_DAYS = 30;
 const MAX_WORKFLOW_RUN_PAGES = 20;
 const MAX_JOB_PAGES = 20;
 const PUBLICATION_STEP_NAME = "Publish immutable GitHub Release";
+export const CI_HEALTH_WORKFLOW_INPUTS = Object.freeze({
+  ci: "ci.yml",
+  feedback: "pr-feedback.yml",
+  releaseDryRun: "release-dry-run.yml",
+  releaseCandidate: "release-candidate.yml",
+  release: "release.yml",
+});
 const TARGETS = Object.freeze({
   attemptsPerTreeAverage: Object.freeze({ operator: "at_most", value: 1.5 }),
   runsPerPullRequestAverage: Object.freeze({ operator: "at_most", value: 1.25 }),
@@ -552,11 +559,11 @@ async function main() {
   ).toISOString();
   const repositoryPath = options.repository.split("/").map(encodeURIComponent).join("/");
   const [ciRuns, feedbackRuns, dryRunRuns, candidateRuns, releaseRuns] = await Promise.all([
-    workflowRuns({ repositoryPath, workflow: "ci.yml", token, since }),
-    workflowRuns({ repositoryPath, workflow: "pr-feedback.yml", token, since }),
-    workflowRuns({ repositoryPath, workflow: "release-dry-run.yml", token, since }),
-    workflowRuns({ repositoryPath, workflow: "release-candidate.yml", token, since }),
-    workflowRuns({ repositoryPath, workflow: "release.yml", token, since }),
+    workflowRuns({ repositoryPath, workflow: CI_HEALTH_WORKFLOW_INPUTS.ci, token, since }),
+    workflowRuns({ repositoryPath, workflow: CI_HEALTH_WORKFLOW_INPUTS.feedback, token, since }),
+    workflowRuns({ repositoryPath, workflow: CI_HEALTH_WORKFLOW_INPUTS.releaseDryRun, token, since }),
+    workflowRuns({ repositoryPath, workflow: CI_HEALTH_WORKFLOW_INPUTS.releaseCandidate, token, since }),
+    workflowRuns({ repositoryPath, workflow: CI_HEALTH_WORKFLOW_INPUTS.release, token, since }),
   ]);
   const pullRequestRuns = [...ciRuns, ...feedbackRuns, ...dryRunRuns]
     .filter((run) => run.event === "pull_request");
