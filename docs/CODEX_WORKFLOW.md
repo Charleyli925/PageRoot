@@ -120,7 +120,7 @@ Do not use an installed app, DMG, backup folder or another checkout as a source 
 
 The required PR `release-gate` is the one complete source gate for an explicitly promoted final tree. `PR Feedback` owns only `opened`, `synchronize` and `reopened`; returning to Draft changes no code and starts no Feedback run. It runs `gate:edit` and never reports the `release-gate` status. The complete workflow listens only to `ready_for_review`. A later commit shares the same concurrency key, cancels an in-flight stale complete run, and leaves the new SHA without the required check. Convert the PR back to Draft, finish the work, request review for the new exact SHA and mark it Ready again only after that head is final. Opening a PR directly as Ready cannot provide the required Draft request marker and therefore fails closed. Local development should normally stop at impact-selected `gate:edit` and `task:finish`; rerun the complete source gate locally only for CI diagnosis or high-risk editing-engine work where the additional evidence is useful.
 
-The exact-SHA request must be posted by a repository owner, member or collaborator while the PR is Draft. Replace the placeholder in both visible and hidden fields with the same 40-character head SHA:
+The exact-SHA request must be posted by a repository owner, member or collaborator while the PR is Draft. Replace the placeholder in both visible and hidden fields with the same 40-character head SHA. The comment must contain exactly one visible `Review exact SHA` declaration; declarations hidden in HTML comments and duplicate declarations are rejected:
 
 ```text
 @codex review

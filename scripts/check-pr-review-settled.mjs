@@ -49,11 +49,27 @@ export function reviewRequestSha(body) {
   return match?.[1]?.toLowerCase() || null;
 }
 
+function markdownWithoutHtmlComments(body) {
+  const markdown = String(body || "");
+  let visible = "";
+  let cursor = 0;
+  for (;;) {
+    const commentStart = markdown.indexOf("<!--", cursor);
+    if (commentStart < 0) return `${visible}${markdown.slice(cursor)}`;
+    visible += markdown.slice(cursor, commentStart);
+    const commentEnd = markdown.indexOf("-->", commentStart + 4);
+    if (commentEnd < 0) return null;
+    cursor = commentEnd + 3;
+  }
+}
+
 export function visibleReviewRequestSha(body) {
-  const match = String(body || "").match(
-    /\bReview exact SHA\s+`([0-9a-f]{40})`/iu,
-  );
-  return match?.[1]?.toLowerCase() || null;
+  const visibleMarkdown = markdownWithoutHtmlComments(body);
+  if (visibleMarkdown === null) return null;
+  const matches = [...visibleMarkdown.matchAll(
+    /\bReview exact SHA\s+`([0-9a-f]{40})`/giu,
+  )];
+  return matches.length === 1 ? matches[0][1].toLowerCase() : null;
 }
 
 export function reviewedCommitPrefix(body) {

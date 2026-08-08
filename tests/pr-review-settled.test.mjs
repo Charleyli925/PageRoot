@@ -101,6 +101,18 @@ test("exact-SHA review requests require the trusted hidden marker", () => {
       body: request().body.replace(`Review exact SHA \`${headSha}\``, `Review exact SHA \`${oldSha}\``),
     },
   ], headSha).id, 2);
+  assert.equal(visibleReviewRequestSha(
+    request().body.replace(
+      `Review exact SHA \`${headSha}\`.`,
+      `<!-- Review exact SHA \`${headSha}\`. -->\nReview exact SHA \`${oldSha}\`.`,
+    ),
+  ), oldSha);
+  assert.equal(visibleReviewRequestSha(
+    `${request().body}\nReview exact SHA \`${headSha}\`.`,
+  ), null);
+  assert.equal(visibleReviewRequestSha(
+    `${request().body}\n<!-- unterminated`,
+  ), null);
 });
 
 test("Draft and final Codex reviews bind to the current full head SHA and their promotion phase", () => {
