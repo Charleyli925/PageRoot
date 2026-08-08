@@ -4252,6 +4252,8 @@ function reviewBootstrap(
         || candidate === binding
         || !runtimeVisualIdentityKey(candidate?.key)
         || !runtimeVisualInitialBindingPathMatches(element, candidate)
+        || !runtimeVisualInitialBindingMatches(element, candidate, true)
+        || !runtimeVisualInitialBindingSourceBoxMatches(element, candidate)
       ) return;
       matchingBinding = candidate;
     });
@@ -4265,6 +4267,8 @@ function reviewBootstrap(
         || candidate === binding
         || !safeReviewCommentSourceNodeId(candidate?.sourceNodeId)
         || !runtimeVisualInitialBindingPathMatches(element, candidate)
+        || !runtimeVisualInitialBindingMatches(element, candidate, true)
+        || !runtimeVisualInitialBindingSourceBoxMatches(element, candidate)
       ) return;
       matchingBinding = candidate;
     });

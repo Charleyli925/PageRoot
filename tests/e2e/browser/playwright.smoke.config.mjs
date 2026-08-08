@@ -28,6 +28,7 @@ const smokeTitles = [
   "fingerprintless runtime hosts fail closed when a same-tag parser decoy shifts the target",
   "identical fingerprintless runtime siblings keep their separate frozen paths",
   "identical path-only comment siblings keep their separate frozen paths",
+  "mixed-shape path-only comment decoys fail closed",
 ];
 const escapedTitles = smokeTitles.map((title) => title.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"));
 

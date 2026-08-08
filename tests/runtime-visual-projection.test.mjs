@@ -244,6 +244,19 @@ test("stable ID lookup does not consume the cap with same-token name hosts", () 
   );
 });
 
+test("named ID property references retain their exact host", () => {
+  const source = `<!doctype html><main>
+    <div id="chart"></div>
+    <script>chart.textContent = "ready";</script>
+  </main>`;
+  const prepared = prepareRuntimeVisualCapture({
+    html: source,
+    sourcePath: "/tmp/named-id-runtime-host.html",
+    viewportWidth: 900,
+  });
+  assert.equal(prepared?.candidates.length, 1);
+});
+
 test("direct references keep punctuation identifiers distinct from class tokens", () => {
   const unrelatedHosts = Array.from(
     { length: RUNTIME_VISUAL_CONTRACT.candidateLimit },

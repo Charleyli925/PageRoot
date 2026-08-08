@@ -10,6 +10,14 @@ const COMMENT_SOURCE_BOX_SIGNATURE = JSON.stringify([
   ["width", null],
 ]);
 
+const COMMENT_OTHER_SOURCE_BOX_SIGNATURE = JSON.stringify([
+  ["class", "comment-other"],
+  ["height", null],
+  ["hidden", null],
+  ["style", null],
+  ["width", null],
+]);
+
 const RUNTIME_SOURCE_BOX_SIGNATURE = JSON.stringify([
   ["class", "runtime-host"],
   ["height", null],
@@ -113,6 +121,7 @@ async function parsedReviewCommentLayouts(page, {
       html, body { margin: 0; }
       main { display: block; }
       .comment-host { display: block; width: 10px; height: 10px; }
+      .comment-other { display: block; width: 10px; height: 10px; }
     </style>
     <script>${bootstrap}</script>
   </head>
@@ -304,6 +313,46 @@ test("identical path-only comment siblings keep their separate frozen paths", as
     && new Set(message.commentLayouts?.map((layout) => layout.key) || [])
       .has("parsed-comment-2")
   ))).toBe(true);
+});
+
+test("mixed-shape path-only comment decoys fail closed", async ({ page }) => {
+  const bindings = [
+    {
+      sourceNodeId: "element:1:1:div",
+      path: [1, 0, 0],
+      tagName: "DIV",
+      sourceBoxSignature: COMMENT_SOURCE_BOX_SIGNATURE,
+      identityAttributes: [],
+      identityText: "",
+    },
+    {
+      sourceNodeId: "element:1:2:div",
+      path: [1, 0, 1],
+      tagName: "DIV",
+      sourceBoxSignature: COMMENT_OTHER_SOURCE_BOX_SIGNATURE,
+      identityAttributes: [],
+      identityText: "",
+    },
+  ];
+  const result = await parsedReviewCommentLayouts(page, {
+    bindings,
+    authoredScript: `
+      const main = document.querySelector("main");
+      const decoy = document.createElement("div");
+      decoy.className = "comment-host";
+      main.append(decoy);
+      const actualFirst = document.createElement("div");
+      actualFirst.className = "comment-host";
+      main.append(actualFirst);
+      const actualSecond = document.createElement("div");
+      actualSecond.className = "comment-other";
+      main.append(actualSecond);
+    `,
+  });
+  expect(result.channel).toBe(true);
+  expect(result.layouts.some((message) => (
+    message.commentLayouts?.some((layout) => layout.key.startsWith("parsed-comment-"))
+  ))).toBe(false);
 });
 
 test("fingerprintless runtime hosts fail closed when a same-tag parser decoy shifts the target", async ({ page }) => {

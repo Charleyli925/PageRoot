@@ -193,7 +193,7 @@ function runtimeIdentityValueMatches(source, value, kind) {
     return STABLE_RUNTIME_ID_LITERAL.test(literal)
       && runtimeSelectorLiteralValue(literal) === value;
   })) return true;
-  return [...source.matchAll(RUNTIME_DOM_QUERY_CALL)].some((match) => {
+  if ([...source.matchAll(RUNTIME_DOM_QUERY_CALL)].some((match) => {
     const literal = match[1].trim();
     if (!STABLE_RUNTIME_SELECTOR_LITERAL.test(literal)) return false;
     const selector = runtimeSelectorLiteralValue(literal);
@@ -210,7 +210,10 @@ function runtimeIdentityValueMatches(source, value, kind) {
     return (attributeSelector.groups.operator === "="
       || attributeSelector.groups.operator === "~=")
       && expected === value;
-  });
+  })) return true;
+  if (kind !== "id-value") return false;
+  const escapedValue = value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  return new RegExp(`(?:^|[^A-Za-z0-9_$])${escapedValue}(?=\\s*\\.)`, "u").test(source);
 }
 
 function runtimeAttributeSelectorMatches(source, value, kind) {
