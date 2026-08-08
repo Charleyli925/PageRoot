@@ -1,8 +1,12 @@
-export const REVIEW_RUNTIME_VISUAL_DEADLINE_MS = 500;
-export const REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT = 128;
+import { RUNTIME_VISUAL_CONTRACT } from "../domain/runtime-visual-contract.js";
 
-const MAX_RUNTIME_VISUAL_ATOMS = 4_096;
-const MAX_RUNTIME_CANVAS_PIXELS = 4_194_304;
+export const REVIEW_RUNTIME_VISUAL_DEADLINE_MS =
+  RUNTIME_VISUAL_CONTRACT.comparisonDeadlineMs;
+export const REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT =
+  RUNTIME_VISUAL_CONTRACT.candidateLimit;
+
+const MAX_RUNTIME_VISUAL_ATOMS = RUNTIME_VISUAL_CONTRACT.pageBudget.hostAtoms;
+const MAX_RUNTIME_CANVAS_PIXELS = RUNTIME_VISUAL_CONTRACT.pageBudget.canvasPixels;
 const SIGNATURE_PATTERN = /^[a-f0-9]{32}:[1-9]\d{0,7}$/u;
 const SNAPSHOT_KEYS = new Set([
   "key",
@@ -47,6 +51,8 @@ export function acceptReviewRuntimeVisualSnapshots(value, allowedCandidateKeys) 
 
   const seen = new Set();
   const accepted = [];
+  let pageAtoms = 0;
+  let pageCanvasPixels = 0;
   for (const rawSnapshot of value) {
     if (
       !isRecord(rawSnapshot)
@@ -107,6 +113,8 @@ export function acceptReviewRuntimeVisualSnapshots(value, allowedCandidateKeys) 
       canvasPixels,
     );
     const atomCount = contentAtoms + paintAtoms + geometryAtoms + vectorAtoms;
+    pageAtoms += atomCount;
+    pageCanvasPixels += canvasPixels;
     if (
       contentSignature === null
       || paintSignature === null
@@ -118,6 +126,8 @@ export function acceptReviewRuntimeVisualSnapshots(value, allowedCandidateKeys) 
         && (atomCount !== 0 || canvasPixels !== 0)
       )
       || (state === "stable" && atomCount === 0 && canvasPixels === 0)
+      || pageAtoms > RUNTIME_VISUAL_CONTRACT.pageBudget.atoms
+      || pageCanvasPixels > RUNTIME_VISUAL_CONTRACT.pageBudget.canvasPixels
     ) return null;
 
     seen.add(key);
@@ -178,6 +188,13 @@ function runtimeSnapshotChanged(before, after) {
     && (
       Math.max(before.geometryAtoms, after.geometryAtoms) >= 2
       || Math.max(before.vectorAtoms, after.vectorAtoms) > 0
+      || (
+        Math.max(before.geometryAtoms, after.geometryAtoms) > 0
+        && (
+          Math.max(before.paintAtoms, after.paintAtoms) > 0
+          || Math.max(before.contentAtoms, after.contentAtoms) > 0
+        )
+      )
     );
   return canvasChanged
     || vectorChanged

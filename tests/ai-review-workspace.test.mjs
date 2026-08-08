@@ -4,6 +4,7 @@ import test from "node:test";
 import vm from "node:vm";
 
 import ts from "typescript";
+import { runtimeVisualHostilePage } from "./fixtures/runtime-visual-hostile-pages.mjs";
 
 const [
   workbench,
@@ -52,6 +53,18 @@ function generatedReviewBootstrap(candidateKeys = [], reviewCommentBindings = []
     },
   ).outputText;
   const context = vm.createContext({
+    RUNTIME_VISUAL_CONTRACT_VERSION: 1,
+    RUNTIME_VISUAL_CONTRACT: {
+      identityAttributeLimit: 24,
+      pageBudget: {
+        hostAtoms: 4_096,
+        atoms: 8_192,
+        nodes: 8_192,
+        canvasPixels: 4_194_304,
+        hostValueLength: 200_000,
+        valueLength: 400_000,
+      },
+    },
     REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT: 128,
     REVIEW_RUNTIME_VISUAL_SOURCE_BOX_ATTRIBUTES: [
       "class",
@@ -71,6 +84,7 @@ function generatedReviewBootstrap(candidateKeys = [], reviewCommentBindings = []
   return context.reviewBootstrap(
     "review-session",
     "before",
+    `sha256:${"a".repeat(64)}`,
     runtimeVisualBindings,
     reviewCommentBindings,
   );
@@ -576,10 +590,7 @@ test("runtime chart review supplements only the initial bounded static footprint
   assert.match(review, /onRequestConfirmation: requestRuntimeVisualConfirmation/);
   assert.match(review, /setRuntimeVisualFrameRun\(\(current\) => current \+ 1\)/);
   assert.match(review, /runtimeVisualCoordinatorRef\.current\?\.failConfirmation\(\)/);
-  assert.match(
-    review,
-    /REVIEW_RUNTIME_VISUAL_FRAME_REGISTRATION_MS = 1_500/,
-  );
+  assert.match(review, /RUNTIME_VISUAL_CONTRACT\.ownerDeadlineMs/);
   assert.match(review, /createReviewCapabilityChallenge/);
   assert.match(review, /event\.ports\.length === 1/);
   assert.match(review, /message\.challenge !== expectedChallenge/);
@@ -613,7 +624,7 @@ test("runtime chart review supplements only the initial bounded static footprint
   assert.match(review, /confirmationAction \|\| runtimeVisualPending/);
   assert.match(
     review,
-    /if \(reviewLoadFailed\)[\s\S]*?settleWithoutRuntime[\s\S]*?REVIEW_RUNTIME_VISUAL_FRAME_REGISTRATION_MS/,
+    /if \(reviewLoadFailed\)[\s\S]*?settleWithoutRuntime[\s\S]*?RUNTIME_VISUAL_CONTRACT\.ownerDeadlineMs/,
   );
   assert.doesNotMatch(review, /运行态不稳定|分析未完成|概括标记/);
 });
@@ -641,6 +652,34 @@ test("the generated runtime review bootstrap stays syntactically valid", () => {
   assert.doesNotMatch(bootstrap, /data-pageroot-review-runtime-source-/);
   assert.doesNotMatch(bootstrap, /data-pageroot-review-comment-source-/);
   assert.doesNotMatch(bootstrap, /review-comment-1|runtime-comment-caption/);
+});
+
+test("hostile review fixtures are enforced by the adapter and page contract", () => {
+  const nativeCanvas = runtimeVisualHostilePage("pr100-canvas-native-intrinsics");
+  const transparentText = runtimeVisualHostilePage("pr100-transparent-text");
+  const parserMutation = runtimeVisualHostilePage("pr107-parser-text-mutation");
+  const attributeLimit = runtimeVisualHostilePage("pr107-attribute-limit");
+  assert.match(nativeCanvas.html, /Math\.round=\(\)=>0/u);
+  assert.match(transparentText.html, /color="transparent"/u);
+  assert.match(parserMutation.html, /textContent="mutated"/u);
+  assert.match(attributeLimit.html, /data-key-24/u);
+
+  assert.match(reviewDocument, /ReviewRuntimeVisualCaptureAdapter/);
+  assert.match(reviewDocument, /REVIEW_PAGE_RUNTIME_VISUAL_CAPTURE_ADAPTER/);
+  assert.match(reviewDocument, /sourceSha256BySide/);
+  assert.match(reviewDocument, /runtimeVisualMathRound\(RuntimeVisualNumber/);
+  assert.match(reviewDocument, /runtimeVisualTextHasPaint/);
+  assert.match(reviewDocument, /runtimeVisualObservedBindingMatches/);
+  assert.match(reviewDocument, /runtimeVisualMutationRecordAddedNodes/);
+  assert.match(
+    reviewDocument,
+    /\.slice\(0, RUNTIME_VISUAL_CONTRACT\.identityAttributeLimit\)/,
+  );
+  const bootstrap = generatedReviewBootstrap(["runtime-host-1"]);
+  assert.match(bootstrap, /rawAttributes\.length > runtimeVisualIdentityAttributeLimit/);
+  assert.match(bootstrap, /contractVersion: runtimeVisualContractVersion/);
+  assert.match(bootstrap, /sourceSha256,/);
+  assert.match(review, /acceptedRuntimeVisualEnvelope/);
 });
 
 test("formal review projects frozen user comments with private source identities", () => {

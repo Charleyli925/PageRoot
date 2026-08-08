@@ -42,6 +42,10 @@ import {
   ReviewRuntimeVisualCoordinator,
   mergeReviewRuntimeVisualChanges,
 } from "../lib/review-runtime-visual.js";
+import {
+  RUNTIME_VISUAL_CONTRACT,
+  acceptedRuntimeVisualEnvelope,
+} from "../domain/runtime-visual-contract.js";
 import { ReviewScrollCoordinator } from "../lib/review-scroll-sync.js";
 import {
   DEFAULT_REVIEW_STATE,
@@ -97,8 +101,10 @@ const subscribeHydration = () => () => {};
 
 type ReviewMessage = {
   source?: string;
+  contractVersion?: number;
   sessionId?: string;
   side?: ReviewSide;
+  sourceSha256?: string;
   type?: string;
   top?: number;
   left?: number;
@@ -118,8 +124,6 @@ type ReviewMessage = {
 };
 
 const MAX_REVIEW_COMMENT_COORDINATE = 10_000_000;
-const REVIEW_RUNTIME_VISUAL_FRAME_REGISTRATION_MS = 1_500;
-
 function createReviewCapabilityChallenge(): string | null {
   try {
     const bytes = new Uint8Array(16);
@@ -770,6 +774,8 @@ export default function AiReviewWorkspace({
           runtimeVisualChannelChallengesRef.current[side] = challenge;
           postToFrame(frame, sessionId, {
             type: "request-runtime-visual-channel",
+            contractVersion: documents.runtimeVisualCaptureIdentity.contractVersion,
+            sourceSha256: documents.runtimeVisualCaptureIdentity.sourceSha256BySide[side],
             challenge,
           });
         }
@@ -885,7 +891,7 @@ export default function AiReviewWorkspace({
         && runtimeVisualFrameDocumentsRef.current[side] === documents
       ));
       if (!allFramesReady) settleWithoutRuntime();
-    }, REVIEW_RUNTIME_VISUAL_FRAME_REGISTRATION_MS);
+    }, RUNTIME_VISUAL_CONTRACT.ownerDeadlineMs);
     return () => window.clearTimeout(registrationTimer);
   }, [
     activeRuntimeVisualResult,
@@ -1054,8 +1060,14 @@ export default function AiReviewWorkspace({
         const runtimeVisualSide = message.side;
         const port = event.ports.length === 1 ? event.ports[0] : null;
         const expectedChallenge = runtimeVisualChannelChallengesRef.current[runtimeVisualSide];
+        const expectedEnvelope = {
+          sessionId: documents.runtimeVisualCaptureIdentity.sessionId,
+          sourceSha256:
+            documents.runtimeVisualCaptureIdentity.sourceSha256BySide[runtimeVisualSide],
+        };
         if (
           !port
+          || !acceptedRuntimeVisualEnvelope(message, expectedEnvelope)
           || typeof message.challenge !== "string"
           || message.challenge !== expectedChallenge
           || runtimeVisualPortsRef.current[message.side]
@@ -1069,15 +1081,17 @@ export default function AiReviewWorkspace({
           if (runtimeVisualPortsRef.current[runtimeVisualSide] !== port) return;
           const portMessage = portEvent.data as {
             source?: unknown;
+            contractVersion?: unknown;
             sessionId?: unknown;
             side?: unknown;
+            sourceSha256?: unknown;
             type?: unknown;
             runtimeVisualSnapshots?: unknown;
           } | null;
           if (
             !portMessage
             || portMessage.source !== "pageroot-ai-review-runtime-visual"
-            || portMessage.sessionId !== sessionId
+            || !acceptedRuntimeVisualEnvelope(portMessage, expectedEnvelope)
             || portMessage.side !== runtimeVisualSide
             || portMessage.type !== "runtime-visual-snapshots"
           ) return;

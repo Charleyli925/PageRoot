@@ -59,11 +59,12 @@ Comments + frozen input
 - Desktop Edit has one separate, disposable runtime-visual projection. A
   renderer session reuses the Canvas `SourceIndex`, limits source-empty hosts
   to authored executable causality (scripts or inline handlers), and keys capture
-  work by executable source, script/handler-referenced data containers, stable host TargetRef, a 64px
-  viewport bucket and presentation context. Structural or indirect DOM reads conservatively fold the
-  complete source Hash into that identity. Ordinary dependency-stable text/history edits
-  therefore resolve that TargetRef against the current SourceIndex and rebind the committed projection to the
-  exact new source Hash instead of running the page again. A bounded LRU keeps
+  work first by the complete source Hash, then by executable source,
+  script/handler-referenced data containers, stable host TargetRef, a 64px
+  viewport bucket and presentation context. Structural, generic, or computed
+  DOM reads conservatively widen exact source-empty candidates and fold the
+  complete source Hash into the dependency. No projection or deferred bitmap
+  may rebind across a source Hash change. A bounded LRU keeps
   recent viewport/context results under both entry and byte budgets, and Preview/Edit suspension retains the last
   committed result while canceling pending work. A real dependency change asks
   one hidden sandboxed `pageroot-preview:` window to run the authored page and
@@ -84,6 +85,8 @@ Comments + frozen input
   measurement. It captures the content box for ordinary hosts and the border
   box for `tbody`, and rejects a
   viewport/overflow-clipped rectangle rather than stretching a partial bitmap.
+  Every page-realm evaluation and bitmap operation is bounded by the shared
+  1500ms owner deadline; timeout destroys the hidden window/session.
   Hidden or temporarily uncapturable hosts are deferred so their previous
   committed bitmap can remain; a valid non-deferred empty result is an
   authoritative clear. The Canvas reconciles by stable host key, keeps
@@ -215,6 +218,10 @@ Comments + frozen input
   channel challenges, validates parent/session/type, and stops propagation
   before later authored capture listeners can observe a challenge or race a
   forged port; the ordinary message listener never transfers either capability.
+  Runtime messages additionally bind contract version, review session identity,
+  and the exact side-specific source Hash. The page bootstrap is provided through
+  `ReviewRuntimeVisualCaptureAdapter`, so a future capture backend can replace
+  it without changing the analyzer or review UI.
   Each isolated frame samples visible HTML/SVG/Canvas paint twice, including
   the host's own painted box, a fully transparent host as a stable disappearance
   state, and directly mutated size but not an unpainted empty box or indirect
@@ -312,6 +319,7 @@ they do not import application services.
 | Volatile desktop preview sessions and contained local-asset serving | `desktop/preview-protocol.mjs` |
 | Source-backed preview/edit display-state filtering, rebinding and safe action resolution | `app/lib/page-view-context.js` |
 | Source-bound edit visual request/late-result ownership and payload validation | `app/application/runtime-visual-projection-session.js`, `app/domain/runtime-visual-projection.js` |
+| Shared runtime-visual limits, source/session envelope and page budgets | `app/domain/runtime-visual-contract.js` |
 | Sandboxed offscreen page execution and bounded bitmap capture | `desktop/edit-visual-capture.mjs` |
 | Read-only bitmap mounting inside original source hosts | `app/components/html-canvas-runtime-visual.ts` |
 | Run lifecycle decoding and transition policy | `app/domain/run-lifecycle.js` |
@@ -322,6 +330,7 @@ they do not import application services.
 | Bounded pure sibling alignment for semantic review units | `app/lib/review-semantic-alignment.js` |
 | Typed, per-element review projection fact normalization and filtering | `app/lib/review-projection-facts.js` |
 | Bounded review-runtime snapshot validation, comparison, deduplication and comparison deadline | `app/lib/review-runtime-visual.js` |
+| Review runtime-capture migration interface and capture identity | `app/workbench/review-runtime-capture-adapter.ts` |
 | Formal AI review analysis, paired runtime mapping, global mask and overlay projection | `app/workbench/review-document.ts` |
 | Formal AI review composition and isolated-frame coordination | `app/workbench/AiReviewWorkspace.tsx` |
 

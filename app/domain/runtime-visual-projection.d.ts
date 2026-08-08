@@ -147,6 +147,7 @@ export function acceptRuntimeVisualProjection(options?: {
   sourceIndex?: unknown;
 }): RuntimeVisualProjection | null;
 
+/** Re-issues generation metadata only when the supplied HTML has the same exact source Hash. */
 export function rebindRuntimeVisualProjection(options?: {
   html?: string;
   documentKey?: string;

@@ -54,7 +54,9 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   process revalidates the known source path and a bounded payload, owns one
   hidden sandboxed BrowserWindow with Node disabled, denies navigation,
   popups and webviews, and destroys the window plus preview session after each
-  capture or superseding request. It returns only bounded PNG bytes plus
+  capture or superseding request. Every page-realm evaluation and bitmap
+  operation is bounded by the shared owner deadline; authored clocks cannot keep
+  the window alive. It returns only bounded PNG bytes plus
   validated PNG dimensions/content SHA/byte length/DPR/sizing/crop metadata,
   explicit content/border-box geometry and deferred source-node identities tied
   to the renderer-provided exact source Hash; it never returns
@@ -134,7 +136,9 @@ PageRoot accepts only an allowlisted source-backed presentation diff. It rejects
 unknown or duplicated source nodes, stale Hashes, truncated captures, arbitrary
 one-sided runtime classes, text/HTML, inline style, form state and runtime
 children. Independently, Edit may display a PNG capture only inside a unique
-source-empty host with the exact current source Hash. The bitmap has pointer
+source-empty host with the exact current source Hash. Source Hash is the first
+cache invalidator, and no bitmap, deferred fallback or TargetRef may rebind
+across source Hashes. The bitmap has pointer
 events disabled, so selection and comments resolve the original source host.
 Projection nodes are keyed/reconciled as disposable presentation and cannot be
 serialized by the source engine. Save, review comparison and Request creation
@@ -215,8 +219,9 @@ manufactured runtime evidence. A confirmation pair uses fresh sessions and its
 own one-shot bindings.
 The trusted bootstrap pre-creates separate `MessageChannel` capabilities for
 runtime evidence and, on the before side only, private locator delivery, and binds
-the DOM traversal, attribute, layout, computed-style, Canvas, string
-normalization/digest, and Promise/timer/animation scheduling primitives used for evidence before any
+  the DOM traversal, attribute, layout, computed-style, Canvas, numeric
+conversion/rounding, string normalization/digest, and
+Promise/timer/animation scheduling primitives used for evidence before any
 authored script runs. Its bounded font wait composes only captured Promise capabilities, so it never re-reads
 page-mutable static methods. An early observer records the
 parser-created element that first claims every frozen candidate key. Snapshot
@@ -230,9 +235,15 @@ that the bootstrap consumes only from a browser-trusted parent event in its firs
 capture listener without exposing it to later authored listeners, then transfers
 the pre-created capability port. The same first capture listener protects the
 before-side comment-channel challenge; it validates the trusted parent,
-session and type, stops propagation before any authored capture listener runs,
-and leaves the ordinary bridge listener unable to transfer either port. Only
-the matching port may submit snapshots.
+  session and type, stops propagation before any authored capture listener runs,
+  and leaves the ordinary bridge listener unable to transfer either port. Only
+  the matching port may submit snapshots. Runtime requests, channel transfer and
+  snapshot envelopes must also match the shared contract version and the exact
+  side-specific source Hash. The producer truncates deterministic identity
+  attributes at the same shared 24-attribute boundary enforced by the consumer.
+  Parser-added Elements may ignore mutable text only when at least one stable
+  attribute proves the exact record; ambiguity, replacement or disconnection
+  remains a static-only result.
 They contain no executable DOM and can
 only add a disposable visual marker after a complete stable pair, plus the
 required same-side fresh-pair confirmation for scope-only admission; forged window

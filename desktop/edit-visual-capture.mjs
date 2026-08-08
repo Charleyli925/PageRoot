@@ -1,18 +1,21 @@
 import { createHash } from "node:crypto";
+import {
+  RUNTIME_VISUAL_CONTRACT,
+  isRuntimeVisualSourceSha256,
+} from "../app/domain/runtime-visual-contract.js";
 
 const PROJECTION_PROTOCOL = "pageroot-runtime-visual-projection";
 const PROJECTION_VERSION = 2;
 const SOURCE_NODE_ATTRIBUTE = "data-html-ai-source-node-id";
-const SOURCE_SHA256_PATTERN = /^sha256:[a-f0-9]{64}$/u;
 const CLASS_TOKEN_PATTERN = /^[^\t\n\f\r \u0000-\u001f\u007f]{1,96}$/u;
 
-const MAX_HTML_BYTES = 25 * 1024 * 1024;
-const MAX_CANDIDATES = 256;
-const MAX_VISUALS = 32;
+const MAX_HTML_BYTES = RUNTIME_VISUAL_CONTRACT.pageBudget.htmlBytes;
+const MAX_CANDIDATES = RUNTIME_VISUAL_CONTRACT.candidateLimit;
+const MAX_VISUALS = RUNTIME_VISUAL_CONTRACT.pageBudget.visualLimit;
 const MAX_PRESENTATION_ENTRIES = 64;
 const MAX_CLASS_TOKENS = 128;
 const MAX_VISUAL_PNG_BYTES = 2_000_000;
-const MAX_TOTAL_VISUAL_BYTES = 16_000_000;
+const MAX_TOTAL_VISUAL_BYTES = RUNTIME_VISUAL_CONTRACT.pageBudget.visualBytes;
 const MAX_VISUAL_DIMENSION = 4_096;
 const MIN_VIEWPORT_WIDTH = 320;
 const MAX_VIEWPORT_WIDTH = 4_096;
@@ -120,7 +123,7 @@ export function validateEditVisualCapturePayload(payload) {
     throw new TypeError("Edit visual capture sourcePath is invalid.");
   }
   const sourceSha256 = String(payload.sourceSha256 ?? "").toLowerCase();
-  if (!SOURCE_SHA256_PATTERN.test(sourceSha256)) {
+  if (!isRuntimeVisualSourceSha256(sourceSha256)) {
     throw new TypeError("Edit visual capture source hash is invalid.");
   }
   if (payload.sourceNodeAttribute !== SOURCE_NODE_ATTRIBUTE) {
@@ -745,6 +748,7 @@ export function createEditVisualCaptureController({
   BrowserWindowClass,
   createSession,
   revokeSession,
+  ownerDeadlineMs = RUNTIME_VISUAL_CONTRACT.ownerDeadlineMs,
 } = {}) {
   if (typeof BrowserWindowClass !== "function") {
     throw new TypeError("Edit visual capture requires BrowserWindow.");
@@ -752,6 +756,10 @@ export function createEditVisualCaptureController({
   if (typeof createSession !== "function" || typeof revokeSession !== "function") {
     throw new TypeError("Edit visual capture requires preview session ownership.");
   }
+  const pageOwnerDeadlineMs = Math.max(1, Math.min(
+    RUNTIME_VISUAL_CONTRACT.ownerDeadlineMs,
+    Math.round(Number(ownerDeadlineMs)) || RUNTIME_VISUAL_CONTRACT.ownerDeadlineMs,
+  ));
 
   let activeCapture = null;
 
@@ -808,20 +816,21 @@ export function createEditVisualCaptureController({
       if (cancelled || captureWindow.isDestroyed()) {
         throw new Error("Edit visual capture was superseded.");
       }
-      await captureWindow.webContents.executeJavaScript(
+      const executePageScript = (source) => withTimeout(
+        captureWindow.webContents.executeJavaScript(source, true),
+        pageOwnerDeadlineMs,
+        operation.cancel,
+      );
+      await executePageScript(
         "document.fonts?.ready?.catch?.(() => undefined) ?? Promise.resolve()",
-        true,
-      ).catch(() => undefined);
-      const initiallyPopulatedCandidates = await captureWindow.webContents
-        .executeJavaScript(
-          populatedCandidateScript(
-            payload.candidates,
-            payload.sourceNodeAttribute,
-            payload.candidates.length,
-          ),
-          true,
-        )
-        .catch(() => []);
+      );
+      const initiallyPopulatedCandidates = await executePageScript(
+        populatedCandidateScript(
+          payload.candidates,
+          payload.sourceNodeAttribute,
+          payload.candidates.length,
+        ),
+      );
       const candidateSourceNodeIds = new Set(
         payload.candidates.map((candidate) => candidate.sourceNodeId),
       );
@@ -835,7 +844,7 @@ export function createEditVisualCaptureController({
             && candidateSourceNodeIds.has(sourceNodeId)
           )))]
         : [];
-      await captureWindow.webContents.executeJavaScript(
+      await executePageScript(
         settleRuntimeScript(
           INITIAL_QUIET_MS,
           INITIAL_SETTLE_TIMEOUT_MS,
@@ -845,25 +854,21 @@ export function createEditVisualCaptureController({
             initiallyPopulatedSourceNodeIds,
           },
         ),
-        true,
       );
-      await captureWindow.webContents.executeJavaScript(
+      await executePageScript(
         presentationScript(
           payload.presentationEntries,
           payload.sourceNodeAttribute,
         ),
-        true,
       );
-      await captureWindow.webContents.executeJavaScript(
+      await executePageScript(
         settleRuntimeScript(
           PRESENTATION_QUIET_MS,
           PRESENTATION_SETTLE_TIMEOUT_MS,
         ),
-        true,
       );
-      const populatedCandidates = await captureWindow.webContents.executeJavaScript(
+      const populatedCandidates = await executePageScript(
         populatedCandidateScript(payload.candidates, payload.sourceNodeAttribute),
-        true,
       );
       const capturableCandidates = Array.isArray(populatedCandidates)
         ? populatedCandidates.slice(0, MAX_VISUALS)
@@ -881,35 +886,37 @@ export function createEditVisualCaptureController({
         if (cancelled || captureWindow.isDestroyed()) break;
         const restoreKey = `__pagerootEditVisualRestore_${visuals.length}`;
         try {
-          const prepared = await captureWindow.webContents.executeJavaScript(
+          const prepared = await executePageScript(
             prepareCandidateScript(
               candidate,
               payload.sourceNodeAttribute,
               restoreKey,
             ),
-            true,
           );
           if (!prepared) {
             deferredSourceNodeIds.push(candidate.sourceNodeId);
             continue;
           }
-          const measurement = await captureWindow.webContents.executeJavaScript(
+          const measurement = await executePageScript(
             measureCandidateScript(candidate, payload.sourceNodeAttribute),
-            true,
           );
           const rect = boundedCaptureRect(measurement, payload.viewport);
           if (!rect) {
             deferredSourceNodeIds.push(candidate.sourceNodeId);
             continue;
           }
-          const image = await captureWindow.capturePage(
-            {
-              x: rect.x,
-              y: rect.y,
-              width: rect.width,
-              height: rect.height,
-            },
-            { stayHidden: true },
+          const image = await withTimeout(
+            captureWindow.capturePage(
+              {
+                x: rect.x,
+                y: rect.y,
+                width: rect.width,
+                height: rect.height,
+              },
+              { stayHidden: true },
+            ),
+            pageOwnerDeadlineMs,
+            operation.cancel,
           );
           const png = boundedPng(image);
           if (!png) {
@@ -953,9 +960,8 @@ export function createEditVisualCaptureController({
           continue;
         } finally {
           if (!captureWindow.isDestroyed()) {
-            await captureWindow.webContents.executeJavaScript(
+            await executePageScript(
               restoreCandidateScript(restoreKey),
-              true,
             ).catch(() => undefined);
           }
           measureCapturePhase("host", candidateStartedAt);

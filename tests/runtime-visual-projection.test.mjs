@@ -10,8 +10,10 @@ import {
   describeRuntimeVisualCapture,
   mergeDeferredRuntimeVisualProjection,
   prepareRuntimeVisualCapture,
+  rebindRuntimeVisualProjection,
 } from "../app/domain/runtime-visual-projection.js";
 import { buildSourceIndex } from "../app/lib/source-index.js";
+import { runtimeVisualHostilePage } from "./fixtures/runtime-visual-hostile-pages.mjs";
 
 const PNG_BYTES = new Uint8Array(Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAEElEQVR42mNk+M/wHwAEAQH/2p9Z5QAAAABJRU5ErkJggg==",
@@ -243,6 +245,37 @@ test("literal tag selectors conservatively invalidate the runtime dependency", (
   assert.notEqual(first?.dependencySha256, changedData?.dependencySha256);
 });
 
+test("generic selectors retain anonymous exact visual hosts", () => {
+  const fixture = runtimeVisualHostilePage("pr105-generic-selector-host");
+  const prepared = prepareRuntimeVisualCapture({
+    html: fixture.html,
+    sourcePath: "/tmp/generic-selector.html",
+    viewportWidth: 900,
+  });
+  assert.deepEqual(
+    prepared?.candidates.map(({ tagName }) => tagName),
+    ["canvas"],
+    fixture.contract,
+  );
+});
+
+test("computed element lookup fails closed to the full source dependency", () => {
+  const fixture = runtimeVisualHostilePage("pr105-dynamic-id-dependency");
+  const before = describeRuntimeVisualCapture({
+    html: fixture.html,
+    sourcePath: "/tmp/dynamic-id.html",
+    viewportWidth: 900,
+  });
+  const after = describeRuntimeVisualCapture({
+    html: fixture.changedHtml,
+    sourcePath: "/tmp/dynamic-id.html",
+    viewportWidth: 900,
+  });
+  assert.equal(before?.candidates.length, 1);
+  assert.notEqual(before?.sourceSha256, after?.sourceSha256);
+  assert.notEqual(before?.dependencySha256, after?.dependencySha256, fixture.contract);
+});
+
 test("accepted projections stay bound to the exact original source hash and empty host", () => {
   const prepared = prepareRuntimeVisualCapture({
     html: SOURCE,
@@ -283,6 +316,18 @@ test("accepted projections stay bound to the exact original source hash and empt
     generation: 5,
     rawProjection: rawProjection(prepared.payload),
   }), null);
+  assert.equal(rebindRuntimeVisualProjection({
+    html: SOURCE.replace("source text", "changed source text"),
+    documentKey: "current:/tmp/report.html",
+    generation: 5,
+    projection,
+  }), null);
+  assert.equal(rebindRuntimeVisualProjection({
+    html: SOURCE,
+    documentKey: "current:/tmp/report.html",
+    generation: 5,
+    projection,
+  })?.sourceSha256, prepared.sourceSha256);
 
   const authoredNodeId = [...buildSourceIndex(SOURCE).elements]
     .find((element) => element.stableAttributes.id === "authored")
@@ -451,7 +496,7 @@ test("projection session commits a non-deferred empty capture as a clear", async
   session.dispose();
 });
 
-test("projection session rebinds non-visual source edits without recapturing", async () => {
+test("projection session invalidates first on every full source hash change", async () => {
   const pending = [];
   const session = new RuntimeVisualProjectionSession({
     captureDebounceMs: 0,
@@ -467,6 +512,9 @@ test("projection session rebinds non-visual source edits without recapturing", a
   });
   await nextTask();
   assert.equal(pending.length, 1);
+  pending[0].resolve(rawProjection(pending[0].payload));
+  await nextTask();
+  assert.equal(session.snapshot.status, "ready");
 
   const nextSource = SOURCE.replace("source text", "new source text");
   session.request({
@@ -475,21 +523,19 @@ test("projection session rebinds non-visual source edits without recapturing", a
     documentKey: "current:/tmp/report.html",
     viewportWidth: 900,
   });
+  assert.equal(session.snapshot.status, "scheduled");
+  assert.equal(session.snapshot.projection, null);
   await nextTask();
-  assert.equal(pending.length, 1);
-  pending[0].resolve(rawProjection(pending[0].payload));
+  assert.equal(pending.length, 2);
+  pending[1].resolve(rawProjection(pending[1].payload));
   await nextTask();
   assert.equal(session.snapshot.status, "ready");
   assert.equal(
     session.snapshot.projection?.sourceSha256,
     buildSourceIndex(nextSource).sourceSha256,
   );
-  assert.equal(
-    pending.length,
-    1,
-  );
+  assert.equal(pending.length, 2);
   assert.equal(session.snapshot.projection?.visuals.length, 1);
-  const retainedPngBytes = session.snapshot.projection.visuals[0].pngBytes;
   const secondTextEdit = nextSource.replace("new source text", "newer source text");
   session.request({
     html: secondTextEdit,
@@ -497,26 +543,10 @@ test("projection session rebinds non-visual source edits without recapturing", a
     documentKey: "current:/tmp/report.html",
     viewportWidth: 900,
   });
-  assert.equal(pending.length, 1);
-  assert.equal(
-    session.snapshot.projection?.visuals[0].pngBytes,
-    retainedPngBytes,
-  );
-
-  const runtimeChangedSource = secondTextEdit.replace(
-    'document.createElement("svg")',
-    'document.createElement("canvas")',
-  );
-  session.request({
-    html: runtimeChangedSource,
-    sourcePath: "/tmp/report.html",
-    documentKey: "current:/tmp/report.html",
-    viewportWidth: 900,
-  });
+  assert.equal(session.snapshot.projection, null);
   await nextTask();
-  assert.equal(pending.length, 2);
+  assert.equal(pending.length, 3);
   assert.equal(session.snapshot.status, "capturing");
-  assert.ok(session.snapshot.projection);
   session.dispose();
 });
 

@@ -9111,6 +9111,10 @@ export default function Workbench() {
           const sessionId = `review-${Date.now().toString(36)}-${++reviewSessionSequenceRef.current}`;
           const documents = await buildReviewDocumentsAsync(frozenHtml, candidateHtml, {
             sessionId,
+            sourceSha256BySide: {
+              before: run.baseSnapshotSha256,
+              after: candidateHash,
+            },
             sourcePath: run.sourcePath,
             externalBootstrap,
             comments: reviewComments,

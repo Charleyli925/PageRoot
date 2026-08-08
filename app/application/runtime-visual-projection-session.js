@@ -5,7 +5,6 @@ import {
   describeRuntimeVisualCapture,
   mergeDeferredRuntimeVisualProjection,
   prepareRuntimeVisualCapture,
-  rebindRuntimeVisualProjection,
 } from "../domain/runtime-visual-projection.js";
 
 const DEFAULT_CAPTURE_DEBOUNCE_MS = 180;
@@ -120,23 +119,6 @@ export class RuntimeVisualProjectionSession {
     });
   }
 
-  #rebind(projection, {
-    html,
-    documentKey,
-    descriptor,
-    sourceIndex,
-  }, generation) {
-    if (!projection || projection.documentKey !== documentKey) return null;
-    if (projection.sourceSha256 === descriptor.sourceSha256) return projection;
-    return rebindRuntimeVisualProjection({
-      html,
-      documentKey,
-      generation,
-      projection,
-      sourceIndex,
-    });
-  }
-
   request({
     html,
     sourcePath,
@@ -162,6 +144,7 @@ export class RuntimeVisualProjectionSession {
     }
     const requestKey = [
       documentKey,
+      descriptor.sourceSha256,
       sourcePath,
       descriptor.dependencySha256,
       descriptor.viewportBucket,
@@ -182,16 +165,10 @@ export class RuntimeVisualProjectionSession {
       && ["scheduled", "capturing"].includes(this.#snapshot.status)
     ) {
       this.#pending.latest = latest;
-      const rebound = this.#rebind(
-        this.#snapshot.projection,
-        latest,
-        this.#sequence,
-      );
       this.#emit({
         ...this.#snapshot,
         documentKey,
         sourceSha256: descriptor.sourceSha256,
-        projection: rebound ?? this.#snapshot.projection,
       });
       return true;
     }
@@ -211,12 +188,14 @@ export class RuntimeVisualProjectionSession {
         ? this.#snapshot.projection
         : null);
     if (cached) {
-      const rebound = this.#rebind(cached, latest, this.#sequence + 1);
-      if (rebound) {
+      if (
+        cached.documentKey === documentKey
+        && cached.sourceSha256 === descriptor.sourceSha256
+      ) {
         this.#sequence += 1;
         if (this.#timer !== null) clearTimeout(this.#timer);
         this.#timer = null;
-        this.#commit({ requestKey, projection: rebound });
+        this.#commit({ requestKey, projection: cached });
         markProjectionEvent("cache-hit");
         return true;
       }
@@ -250,6 +229,7 @@ export class RuntimeVisualProjectionSession {
     }
 
     const retainedProjection = this.#snapshot.projection?.documentKey === documentKey
+      && this.#snapshot.projection.sourceSha256 === descriptor.sourceSha256
       ? this.#snapshot.projection
       : null;
     this.#pending = { requestKey, sequence, latest, capture: null };
@@ -276,6 +256,7 @@ export class RuntimeVisualProjectionSession {
       });
       if (
         !prepared?.payload
+        || prepared.sourceSha256 !== captureContext.descriptor.sourceSha256
         || prepared.dependencySha256 !== captureContext.descriptor.dependencySha256
       ) {
         this.#pending = null;
@@ -308,18 +289,6 @@ export class RuntimeVisualProjectionSession {
             sourceIndex: captureContext.sourceIndex,
           });
           const current = currentPending.latest;
-          if (
-            projection
-            && projection.sourceSha256 !== current.descriptor.sourceSha256
-          ) {
-            projection = rebindRuntimeVisualProjection({
-              html: current.html,
-              documentKey,
-              generation: sequence,
-              projection,
-              sourceIndex: current.sourceIndex,
-            });
-          }
           if (projection) {
             projection = mergeDeferredRuntimeVisualProjection({
               html: current.html,

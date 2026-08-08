@@ -7,6 +7,8 @@ import {
   validateEditVisualCapturePayload,
 } from "../desktop/edit-visual-capture.mjs";
 import { prepareRuntimeVisualCapture } from "../app/domain/runtime-visual-projection.js";
+import { RUNTIME_VISUAL_CONTRACT } from "../app/domain/runtime-visual-contract.js";
+import { runtimeVisualHostilePage } from "./fixtures/runtime-visual-hostile-pages.mjs";
 
 const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAEElEQVR42mNk+M/wHwAEAQH/2p9Z5QAAAABJRU5ErkJggg==";
 const PNG_BYTES = Buffer.from(PNG.slice(PNG.indexOf(",") + 1), "base64");
@@ -52,6 +54,13 @@ test("main-process capture validation accepts only the bounded renderer contract
     ...payload(),
     runtimeDom: "<script>bad()</script>",
   }), /unsupported fields/u);
+  assert.throws(() => validateEditVisualCapturePayload({
+    ...payload(),
+    candidates: Array.from(
+      { length: RUNTIME_VISUAL_CONTRACT.candidateLimit + 1 },
+      (_, index) => ({ sourceNodeId: `element:${index}:1:div`, tagName: "div" }),
+    ),
+  }), /candidates/u);
 });
 
 test("capture operation authorizes and replaces the renderer source path", async () => {
@@ -267,4 +276,57 @@ test("capture controller defers an incomplete host instead of stretching a clipp
     result.deferredSourceNodeIds,
     [payload().candidates[0].sourceNodeId],
   );
+});
+
+test("capture owner deadline destroys a page that stalls its settle clock", async () => {
+  const fixture = runtimeVisualHostilePage("pr105-owner-deadline");
+  const hostilePayload = prepareRuntimeVisualCapture({
+    html: fixture.html,
+    sourcePath: "/tmp/hostile-clock.html",
+    viewportWidth: 900,
+  }).payload;
+  const windows = [];
+  class FakeBrowserWindow {
+    destroyed = false;
+
+    webContents = {
+      setWindowOpenHandler() {},
+      on() {},
+      executeJavaScript: async (source) => {
+        if (source.includes("const populated = []")) return hostilePayload.candidates;
+        if (source.includes("let lastMutationAt = startedAt")) {
+          return new Promise(() => {});
+        }
+        return true;
+      },
+    };
+
+    constructor() {
+      windows.push(this);
+    }
+
+    async loadURL() {}
+
+    isDestroyed() {
+      return this.destroyed;
+    }
+
+    destroy() {
+      this.destroyed = true;
+    }
+  }
+
+  const revoked = [];
+  const controller = createEditVisualCaptureController({
+    BrowserWindowClass: FakeBrowserWindow,
+    createSession: async () => ({
+      sessionId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      url: "pageroot-preview://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/index.html",
+    }),
+    revokeSession: async (sessionId) => revoked.push(sessionId),
+    ownerDeadlineMs: 10,
+  });
+  await assert.rejects(controller.capture(hostilePayload), /timed out/u);
+  assert.equal(windows[0].destroyed, true, fixture.contract);
+  assert.deepEqual(revoked, ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]);
 });

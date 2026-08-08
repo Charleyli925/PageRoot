@@ -8,6 +8,7 @@ import {
   mergeReviewRuntimeVisualChanges,
   selectPrioritizedReviewRuntimeVisualCandidates,
 } from "../app/lib/review-runtime-visual.js";
+import { runtimeVisualHostilePage } from "./fixtures/runtime-visual-hostile-pages.mjs";
 
 const signature = (seed) => `${seed.repeat(32).slice(0, 32)}:12`;
 
@@ -155,6 +156,36 @@ test("runtime comparison recognizes stable intrinsic visuals but ignores a lone 
       geometryAtoms: 0,
     }],
   }), []);
+});
+
+test("one painted child and its geometry form review visual evidence", () => {
+  const fixture = runtimeVisualHostilePage("pr100-single-painted-child");
+  const candidates = [{ key: "runtime-host-1" }];
+  const paintedChild = (geometrySeed) => snapshot("runtime-host-1", {
+    contentSignature: "",
+    paintSignature: signature("b"),
+    geometrySignature: signature(geometrySeed),
+    contentAtoms: 0,
+    paintAtoms: 1,
+    geometryAtoms: 1,
+  });
+  assert.deepEqual(changedReviewRuntimeVisualCandidateKeys({
+    candidates,
+    before: [paintedChild("c")],
+    after: [paintedChild("d")],
+  }), ["runtime-host-1"], fixture.contract);
+});
+
+test("snapshot validation enforces the aggregate page atom budget", () => {
+  const keys = new Set(["runtime-host-1", "runtime-host-2", "runtime-host-3"]);
+  const snapshots = [...keys].map((key) => snapshot(key, {
+    contentAtoms: 3_000,
+    paintAtoms: 0,
+    paintSignature: "",
+    geometryAtoms: 0,
+    geometrySignature: "",
+  }));
+  assert.equal(acceptReviewRuntimeVisualSnapshots(snapshots, keys), null);
 });
 
 test("runtime visual merge reuses a static change and creates at most one change per untouched outline", () => {

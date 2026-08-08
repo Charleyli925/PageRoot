@@ -1,5 +1,6 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex } from "@noble/hashes/utils.js";
+import { RUNTIME_VISUAL_CONTRACT } from "./runtime-visual-contract.js";
 import {
   SOURCE_NODE_ATTRIBUTE,
   buildSourceIndex,
@@ -8,7 +9,6 @@ import {
 } from "../lib/source-index.js";
 import {
   createTargetRef,
-  resolveTargetRef,
 } from "../lib/target-resolver.js";
 import { resolvePageViewContext } from "../lib/page-view-context.js";
 
@@ -16,9 +16,9 @@ export const RUNTIME_VISUAL_PROJECTION_PROTOCOL =
   "pageroot-runtime-visual-projection";
 export const RUNTIME_VISUAL_PROJECTION_VERSION = 2;
 
-const MAX_CAPTURE_CANDIDATES = 256;
-const MAX_CAPTURE_VISUALS = 32;
-const MAX_TOTAL_VISUAL_BYTES = 16_000_000;
+const MAX_CAPTURE_CANDIDATES = RUNTIME_VISUAL_CONTRACT.candidateLimit;
+const MAX_CAPTURE_VISUALS = RUNTIME_VISUAL_CONTRACT.pageBudget.visualLimit;
+const MAX_TOTAL_VISUAL_BYTES = RUNTIME_VISUAL_CONTRACT.pageBudget.visualBytes;
 const MAX_VISUAL_PIXEL_DIMENSION = 4_096;
 const MIN_VIEWPORT_WIDTH = 320;
 const MAX_VIEWPORT_WIDTH = 4_096;
@@ -73,7 +73,9 @@ const INLINE_EVENT_HANDLER_ATTRIBUTE = /^on[a-z][a-z0-9]*$/u;
 const BROAD_RUNTIME_HOST_MUTATION = /(?:appendChild|insertAdjacentHTML|replaceChildren|\.innerHTML\s*=|document\.createElement|echarts\.init|Highcharts\.chart|Plotly\.newPlot|vegaEmbed|d3\.select|new\s+Chart\s*\()/u;
 const INDIRECT_RUNTIME_DOM_READ = /(?:\bdocument\.(?:body|documentElement|forms|images|links)\b|\.(?:children|childNodes|first(?:Child|ElementChild)|last(?:Child|ElementChild)|parent(?:Node|Element)|previous(?:Sibling|ElementSibling)|next(?:Sibling|ElementSibling)|closest)\b|\bgetElementsBy(?:ClassName|TagName|Name)\s*\()/u;
 const RUNTIME_DOM_QUERY_CALL = /\bquerySelector(?:All)?\s*\(\s*([^)]*)\)/gu;
+const RUNTIME_GET_ELEMENT_BY_ID_CALL = /\bgetElementById\s*\(\s*([^)]*)\)/gu;
 const STABLE_RUNTIME_SELECTOR_LITERAL = /^("|'|`)(?:#[A-Za-z_][\w-]*|\.[A-Za-z_][\w-]*|\[\s*(?:id|name|class|data-[\w-]+)(?:\s*(?:[~|^$*]?=)\s*(?:[A-Za-z0-9_-]+|"[^"]*"|'[^']*'|`[^`]*`))?\s*\])\1$/u;
+const STABLE_RUNTIME_ID_LITERAL = /^("|'|`)[A-Za-z_][\w:.-]*\1$/u;
 const acceptedProjectionAuthority = new WeakSet();
 
 function reusableSourceIndex(html, candidate) {
@@ -189,6 +191,8 @@ function usesIndirectRuntimeDomRead(source) {
   if (INDIRECT_RUNTIME_DOM_READ.test(source)) return true;
   return [...source.matchAll(RUNTIME_DOM_QUERY_CALL)].some((match) => (
     !STABLE_RUNTIME_SELECTOR_LITERAL.test(match[1].trim())
+  )) || [...source.matchAll(RUNTIME_GET_ELEMENT_BY_ID_CALL)].some((match) => (
+    !STABLE_RUNTIME_ID_LITERAL.test(match[1].trim())
   ));
 }
 
@@ -227,7 +231,11 @@ function runtimeReferencedCandidates(sourceIndex, candidates) {
   const hasExternalScript = scripts.some(
     (element) => (element.attributesByName.get("src")?.length ?? 0) === 1,
   );
-  if (hasExternalScript || BROAD_RUNTIME_HOST_MUTATION.test(source)) {
+  if (
+    hasExternalScript
+    || BROAD_RUNTIME_HOST_MUTATION.test(source)
+    || usesIndirectRuntimeDomRead(source)
+  ) {
     return candidates;
   }
   return referenced;
@@ -661,63 +669,12 @@ export function rebindRuntimeVisualProjection({
     || generation < 0
   ) return null;
   const sourceIndex = reusableSourceIndex(html, suppliedSourceIndex);
-  const candidatesByNodeId = new Map(
-    captureCandidates(sourceIndex).map((candidate) => [
-      candidate.sourceNodeId,
-      candidate,
-    ]),
-  );
-  const resolveCandidate = (visual) => {
-    if (!visual?.hostTargetRef) return null;
-    let resolution;
-    try {
-      resolution = resolveTargetRef(sourceIndex, visual.hostTargetRef);
-    } catch {
-      return null;
-    }
-    if (!resolution?.target || !["exact", "rebound"].includes(resolution.resolution)) {
-      return null;
-    }
-    const candidate = candidatesByNodeId.get(resolution.target.nodeId);
-    return candidate?.tagName === visual.tagName ? candidate : null;
-  };
-  const visuals = [];
-  const usedVisualNodeIds = new Set();
-  for (const visual of projection.visuals) {
-    const candidate = resolveCandidate(visual);
-    if (!candidate || usedVisualNodeIds.has(candidate.sourceNodeId)) continue;
-    usedVisualNodeIds.add(candidate.sourceNodeId);
-    visuals.push(Object.freeze({
-      ...visual,
-      sourceNodeId: candidate.sourceNodeId,
-      tagName: candidate.tagName,
-      captureKey: candidate.captureKey,
-      hostTargetRef: candidate.hostTargetRef,
-    }));
-  }
-  const deferredTargets = [];
-  const usedDeferredNodeIds = new Set();
-  for (const deferredTarget of projection.deferredTargets ?? []) {
-    const candidate = resolveCandidate(deferredTarget);
-    if (!candidate || usedDeferredNodeIds.has(candidate.sourceNodeId)) continue;
-    usedDeferredNodeIds.add(candidate.sourceNodeId);
-    deferredTargets.push(Object.freeze({
-      captureKey: candidate.captureKey,
-      tagName: candidate.tagName,
-      hostTargetRef: candidate.hostTargetRef,
-    }));
-  }
+  if (projection.sourceSha256 !== sourceIndex.sourceSha256) return null;
   return finalizeAcceptedProjection({
-    protocol: RUNTIME_VISUAL_PROJECTION_PROTOCOL,
-    version: RUNTIME_VISUAL_PROJECTION_VERSION,
+    ...projection,
     documentKey,
     generation,
     sourceSha256: sourceIndex.sourceSha256,
-    visuals: Object.freeze(visuals),
-    deferredCaptureKeys: Object.freeze(
-      deferredTargets.map((target) => target.captureKey),
-    ),
-    deferredTargets: Object.freeze(deferredTargets),
   });
 }
 
@@ -745,14 +702,13 @@ export function mergeDeferredRuntimeVisualProjection({
     || generation < 0
   ) return null;
   if (projection.deferredCaptureKeys.length === 0) return projection;
-  const fallback = rebindRuntimeVisualProjection({
-    html,
-    documentKey,
-    generation,
-    projection: fallbackProjection,
-    sourceIndex,
-  });
-  if (!fallback) return projection;
+  const fallback = fallbackProjection;
+  if (
+    !fallback
+    || !acceptedProjectionAuthority.has(fallback)
+    || fallback.documentKey !== documentKey
+    || fallback.sourceSha256 !== sourceIndex.sourceSha256
+  ) return projection;
   const fallbackByCaptureKey = new Map(
     fallback.visuals.map((visual) => [visual.captureKey, visual]),
   );

@@ -140,6 +140,17 @@ Electron job 依赖这些前置条件；`release-gate` 在 attestation 前刷新
   Browser 另外证明点击页面 padding 与 App 空白会一起结束编辑、选区和
   工具栏。测试自动生成受控 AI 输出并执行正式 finalizer，不等待外部模型
   或真人接力。
+- 运行态视觉合同只有一个生产声明：Node 必须直接验证候选上限 128、身份属性
+  上限 24、页面/单宿主预算、1500ms owner deadline、完整 source SHA 与
+  `contractVersion + sessionId + side source SHA` 封包；Edit 与 Review 的生产者、
+  消费者不得各自重复常量。`runtime-visual-hostile-pages.mjs` 固定覆盖 #100/#105/#107
+  的 8 个遗留线程，每项同时具备最小 fixture、明确合同与关闭理由。低成本 oracle
+  分别证明匿名通用 selector 候选、动态 `getElementById` 完整源码依赖、source SHA
+  优先失效、页面时钟卡死后 owner 销毁、单 painted child + geometry 命中、透明无
+  shadow/stroke/decoration 文本不命中、25 属性由生产者确定性截断。正式 Electron
+  闭环必须再证明作者覆盖 `Number`/`Math.round` 后 Canvas 仍命中，解析器阻塞脚本
+  改写评论目标文字后仍只绑定原 Element，透明文字仍无 marker；不允许以新增临时
+  DOM 属性或截图人工判读替代这些机器 oracle。
 - 评论标记必须覆盖无 `id`、`data-*`、`name`、`aria-label` 的 class-only 普通目标：即使作者插入或重排同标签兄弟，before bootstrap 也必须仅凭首个私有响应中的冻结源 `sourceNodeId` 路径/指纹绑定解析器创建的原元素并保留 marker。测试还必须证明 HTML、后续 bootstrap 读取和作者可枚举 DOM 均不含该绑定、评论正文、评论 key 或定位映射；恶意作者脚本读取当前页面或 bootstrap 地址后仍不得产生伪造 marker。恶意的作者 capture listener 即使尝试读取 challenge、以同一 challenge 伪造评论端口，也既看不到评论 channel 请求，也收不到 `comment-targets`。
 - 评论范围放宽而没有直接变化脚本因果证据的运行态候选，Node 必须证明首轮
   before/after 差异会请求且只请求一次新 frame run：两侧各自与首轮完全一致时
