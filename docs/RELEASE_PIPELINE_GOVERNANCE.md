@@ -7,7 +7,7 @@ PageRoot keeps the release standard high while avoiding repeated proof of the sa
 | Boundary | Trigger | Evidence | What it must not do |
 | --- | --- | --- | --- |
 | PR feedback | Pull Request opens, updates or reopens | Impact-selected Node/compiler feedback for the current head | Report `release-gate` or run the complete Browser/Electron matrix |
-| Review settlement | A frozen, exact-SHA-reviewed Pull Request explicitly transitions from Draft to Ready | Draft request marker, final Ready-triggered Codex completion, 180-second settle window and no active P0-P2 thread | Start dependency, build, Browser or Electron work while review is pending or stale |
+| Review settlement | A frozen, exact-SHA-reviewed Pull Request explicitly transitions from Draft to Ready | Draft request marker/completion, distinct post-Ready final request and comment-bound or commit-bound completion, 180-second settle window and no active P0-P2 thread | Start dependency, build, Browser or Electron work while review is pending or stale |
 | Dependency baseline | Review settlement and branch policy pass | Unchanged advisory threshold plus exact packaged-runtime closure | Start a complete source lane or macOS runner while the global baseline is red |
 | Source candidate | Review settlement and dependency baseline pass for one promoted head | Full Node, three Browser shards, real HTML, native Electron and deterministic AI; exact-tree attestation | Automatically rerun on later commits, package or publish an installer |
 | Main integrity | Source candidate is merged | Match merged PR, Tree Hash, version and fresh PR attestation | Repeat any Node, Browser or Electron source test |
@@ -36,7 +36,7 @@ candidate merges, then update and promote the next branch against the new
 
 ## CI ownership and isolation
 
-- `review-settled` is the first promotion barrier. It revalidates the live head and latest Ready event, requires a trusted exact-SHA request made in Draft, waits for the final Codex completion after Ready, then holds three minutes before rejecting active non-outdated P0-P2 threads.
+- `review-settled` is the first promotion barrier. It revalidates the live head and latest Ready event, requires a trusted exact-SHA request and completion made in Draft, then waits for a distinct trusted exact-SHA request posted strictly after Ready and its comment-bound or commit-bound Codex completion. It ignores PR-level reactions, holds three minutes and rejects active non-outdated P0-P2 threads.
 - The promotion workflow remains a read-only `pull_request` workflow. It grants no write permission, never uses `pull_request_target` to execute checked-out PR code and never merges a Pull Request.
 - `baseline-policy` waits for both review settlement and branch policy. It runs `audit:dependencies`, whose single command owns both advisory policy and packaged-runtime closure. `source-build`, Native Electron and AI Electron depend on this job, so a red global baseline consumes no macOS runner.
 - Linux builds and shares only the Web renderer used by Node and Browser lanes.

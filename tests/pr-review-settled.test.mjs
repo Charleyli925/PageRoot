@@ -4,9 +4,12 @@ import test from "node:test";
 import {
   evaluateReviewSettlement,
   latestExactReviewRequest,
+  latestFinalReviewRequest,
   reviewedCommitPrefix,
   reviewPriority,
+  finalReviewRequestSha,
   reviewRequestSha,
+  visibleFinalReviewRequestSha,
   visibleReviewRequestSha,
 } from "../scripts/check-pr-review-settled.mjs";
 
@@ -16,6 +19,7 @@ const createdAt = "2026-08-08T03:59:00.000Z";
 const requestAt = "2026-08-08T04:00:00.000Z";
 const draftCompletedAt = "2026-08-08T04:00:30.000Z";
 const readyAt = "2026-08-08T04:01:00.000Z";
+const finalRequestAt = "2026-08-08T04:01:15.000Z";
 const completedAt = "2026-08-08T04:02:00.000Z";
 
 function request({
@@ -28,6 +32,23 @@ function request({
   return {
     id,
     body: `@codex review\n\nReview exact SHA \`${sha}\`.\n\n<!-- pageroot-codex-review-sha:${sha} -->`,
+    user: { login: "maintainer" },
+    author_association: association,
+    created_at: createdAt,
+    updated_at: updatedAt,
+  };
+}
+
+function finalRequest({
+  sha = headSha,
+  createdAt = finalRequestAt,
+  updatedAt = createdAt,
+  association = "OWNER",
+  id = 11,
+} = {}) {
+  return {
+    id,
+    body: `@codex review\n\nFinal review exact SHA \`${sha}\`.\n\n<!-- pageroot-codex-final-review-sha:${sha} -->`,
     user: { login: "maintainer" },
     author_association: association,
     created_at: createdAt,
@@ -77,7 +98,7 @@ function evaluate(overrides = {}) {
   return evaluateReviewSettlement({
     expectedHeadSha: headSha,
     pullRequest: pullRequest(),
-    issueComments: [request()],
+    issueComments: [request(), finalRequest()],
     timelineEvents: [{ id: 15, event: "ready_for_review", created_at: readyAt }],
     reviews: [draftReview(), exactReview()],
     reviewThreads: [],
@@ -87,9 +108,13 @@ function evaluate(overrides = {}) {
   });
 }
 
-test("exact-SHA review requests require the trusted hidden marker", () => {
+test("Draft and final exact-SHA requests require distinct trusted canonical markers", () => {
   assert.equal(reviewRequestSha(request().body), headSha);
   assert.equal(visibleReviewRequestSha(request().body), headSha);
+  assert.equal(finalReviewRequestSha(finalRequest().body), headSha);
+  assert.equal(visibleFinalReviewRequestSha(finalRequest().body), headSha);
+  assert.equal(reviewRequestSha(finalRequest().body), null);
+  assert.equal(finalReviewRequestSha(request().body), null);
   assert.equal(reviewedCommitPrefix("**Reviewed commit:** `aaaaaaaaaa`"), "aaaaaaaaaa");
   assert.equal(reviewPriority("![P1 Badge](badge)"), "P1");
   assert.equal(latestExactReviewRequest([
@@ -125,11 +150,27 @@ test("exact-SHA review requests require the trusted hidden marker", () => {
   assert.equal(reviewRequestSha(
     `${request().body}\n<!-- pageroot-codex-review-sha:${headSha} -->`,
   ), null);
+  assert.equal(latestFinalReviewRequest([
+    finalRequest({ id: 7, createdAt: "2026-08-08T04:01:10.000Z" }),
+    finalRequest({ id: 8, createdAt: "2026-08-08T04:01:20.000Z" }),
+    finalRequest({ id: 9, association: "CONTRIBUTOR" }),
+    {
+      ...finalRequest({ id: 10 }),
+      body: finalRequest().body.replace(`Final review exact SHA \`${headSha}\``, `Final review exact SHA \`${oldSha}\``),
+    },
+  ], headSha).id, 8);
+  assert.equal(visibleFinalReviewRequestSha(
+    finalRequest().body.replace("Final review exact SHA", "Review exact SHA"),
+  ), null);
+  assert.equal(finalReviewRequestSha(
+    `${finalRequest().body}\n<!-- pageroot-codex-final-review-sha:${headSha} -->`,
+  ), null);
 });
 
 test("Draft and final Codex reviews bind to the current full head SHA and their promotion phase", () => {
   assert.equal(evaluate().status, "settled");
   assert.equal(evaluate().draftCompletion.at, draftCompletedAt);
+  assert.equal(evaluate().finalRequest.at, finalRequestAt);
   assert.equal(evaluate({
     reviews: [draftReview({ sha: oldSha }), exactReview()],
   }).reason, "draft_review_not_completed_before_promotion");
@@ -138,14 +179,25 @@ test("Draft and final Codex reviews bind to the current full head SHA and their 
   }).reason, "draft_review_not_completed_before_promotion");
   assert.equal(evaluate({
     reviews: [draftReview()],
-  }).reason, "codex_review_in_progress");
+  }).reason, "codex_final_review_in_progress");
   assert.equal(evaluate({
     reviews: [draftReview(), exactReview({ sha: oldSha })],
-  }).reason, "codex_review_in_progress");
+  }).reason, "codex_final_review_in_progress");
+  assert.equal(evaluate({
+    reviews: [draftReview(), { ...exactReview(), state: "DISMISSED" }],
+  }).reason, "codex_final_review_in_progress");
+  assert.equal(evaluate({
+    issueComments: [request()],
+  }).reason, "final_exact_sha_review_not_requested");
+  assert.equal(evaluate({
+    issueComments: [request(), finalRequest({
+      createdAt: "2026-08-08T04:00:45.000Z",
+    })],
+  }).reason, "final_exact_sha_request_not_after_ready");
   assert.equal(evaluate({ pullRequest: pullRequest({ sha: oldSha }) }).reason, "head_sha_changed");
 });
 
-test("clean Codex completion comments and reactions remain exact-request-bound", () => {
+test("clean Codex comments and reactions bind to the correct exact-SHA request", () => {
   const cleanComment = {
     id: 40,
     user: { login: "chatgpt-codex-connector[bot]" },
@@ -153,18 +205,27 @@ test("clean Codex completion comments and reactions remain exact-request-bound",
     body: "Codex Review: Didn't find any major issues.\n\n**Reviewed commit:** `aaaaaaaaaa`",
   };
   assert.equal(evaluate({
-    issueComments: [request(), cleanComment],
+    issueComments: [request(), finalRequest(), cleanComment],
     reviews: [draftReview()],
   }).completion.kind, "review_completion_comment");
   assert.equal(evaluate({
     reviews: [draftReview()],
-    issueReactions: [{
+    finalRequestReactions: [{
       id: 50,
       user: { login: "chatgpt-codex-connector[bot]" },
       content: "+1",
       created_at: completedAt,
     }],
   }).completion.kind, "clean_review_reaction");
+  assert.equal(evaluate({
+    reviews: [draftReview()],
+    issueReactions: [{
+      id: 51,
+      user: { login: "chatgpt-codex-connector[bot]" },
+      content: "+1",
+      created_at: completedAt,
+    }],
+  }).reason, "codex_final_review_in_progress");
   assert.equal(evaluate({
     reviews: [exactReview()],
     requestReactions: [{
@@ -176,7 +237,7 @@ test("clean Codex completion comments and reactions remain exact-request-bound",
   }).draftCompletion.kind, "clean_review_reaction");
   assert.equal(evaluate({
     reviews: [exactReview()],
-    issueReactions: [{
+    finalRequestReactions: [{
       id: 53,
       user: { login: "chatgpt-codex-connector[bot]" },
       content: "+1",
@@ -191,53 +252,33 @@ test("clean Codex completion comments and reactions remain exact-request-bound",
       content: "+1",
       created_at: completedAt,
     }],
-  }).reason, "codex_review_in_progress");
+  }).reason, "codex_final_review_in_progress");
   assert.equal(evaluate({
-    issueComments: [request(), {
+    issueComments: [request(), finalRequest(), {
       id: 55,
       user: { login: "maintainer" },
       author_association: "OWNER",
       created_at: "2026-08-08T04:01:30.000Z",
       updated_at: "2026-08-08T04:01:30.000Z",
-      body: "@codex explain this workflow",
+      body: "> @codex review\n\nQuoted context only.",
     }],
     reviews: [draftReview()],
-    issueReactions: [{
+    finalRequestReactions: [{
       id: 56,
       user: { login: "chatgpt-codex-connector[bot]" },
       content: "+1",
       created_at: completedAt,
     }],
-  }).reason, "ready_reaction_not_exclusively_bound");
-  assert.equal(evaluate({
-    pullRequest: { ...pullRequest(), body: "@codex explain this PR" },
-    reviews: [draftReview()],
-    issueReactions: [{
-      id: 57,
-      user: { login: "chatgpt-codex-connector[bot]" },
-      content: "+1",
-      created_at: completedAt,
-    }],
-  }).reason, "ready_reaction_not_exclusively_bound");
+  }).status, "settled");
   assert.equal(evaluate({
     reviews: [draftReview()],
-    issueReactions: [{
+    finalRequestReactions: [{
       id: 58,
       user: { login: "chatgpt-codex-connector[bot]" },
       content: "+1",
-      created_at: "2026-08-08T04:21:01.000Z",
+      created_at: "2026-08-08T04:01:14.000Z",
     }],
-    now: new Date("2026-08-08T04:24:02.000Z"),
-  }).reason, "ready_reaction_not_exclusively_bound");
-  assert.equal(evaluate({
-    reviews: [draftReview()],
-    issueReactions: [{
-      id: 51,
-      user: { login: "chatgpt-codex-connector[bot]" },
-      content: "+1",
-      created_at: "2026-08-08T03:59:00.000Z",
-    }],
-  }).reason, "codex_review_in_progress");
+  }).reason, "codex_final_review_in_progress");
 });
 
 test("Codex environment failures block promotion immediately until a later Draft review succeeds", () => {
@@ -248,11 +289,25 @@ test("Codex environment failures block promotion immediately until a later Draft
     body: "To use Codex here, create an environment for this repo.",
   };
   assert.equal(evaluate({
-    issueComments: [request(), unavailable],
+    issueComments: [request(), finalRequest(), unavailable],
     reviews: [exactReview()],
   }).reason, "codex_review_environment_unavailable");
   assert.equal(evaluate({
-    issueComments: [request(), unavailable],
+    issueComments: [request(), finalRequest(), unavailable],
+    reviews: [draftReview(), exactReview()],
+  }).status, "settled");
+
+  const finalUnavailable = {
+    ...unavailable,
+    id: 61,
+    created_at: "2026-08-08T04:01:30.000Z",
+  };
+  assert.equal(evaluate({
+    issueComments: [request(), finalRequest(), finalUnavailable],
+    reviews: [draftReview()],
+  }).reason, "codex_final_review_environment_unavailable");
+  assert.equal(evaluate({
+    issueComments: [request(), finalRequest(), finalUnavailable],
     reviews: [draftReview(), exactReview()],
   }).status, "settled");
 });
@@ -287,6 +342,45 @@ test("repeated promotion cannot recycle requests or completions from an earlier 
     })],
     timelineEvents: repeatedTimeline,
   }).reason, "exact_sha_review_not_requested");
+
+  const secondDraftRequest = request({
+    id: 74,
+    createdAt: "2026-08-08T04:03:10.000Z",
+  });
+  const secondDraftCompletion = exactReview({
+    id: 75,
+    submittedAt: "2026-08-08T04:03:30.000Z",
+  });
+  assert.equal(evaluate({
+    issueComments: [secondDraftRequest, finalRequest()],
+    timelineEvents: repeatedTimeline,
+    reviews: [secondDraftCompletion, exactReview({
+      id: 76,
+      submittedAt: "2026-08-08T04:05:00.000Z",
+    })],
+  }).reason, "final_exact_sha_request_not_after_ready");
+
+  const secondFinalRequest = finalRequest({
+    id: 77,
+    createdAt: "2026-08-08T04:04:10.000Z",
+  });
+  assert.equal(evaluate({
+    issueComments: [secondDraftRequest, secondFinalRequest],
+    timelineEvents: repeatedTimeline,
+    reviews: [secondDraftCompletion, exactReview({
+      id: 78,
+      submittedAt: "2026-08-08T04:04:05.000Z",
+    })],
+  }).reason, "codex_final_review_in_progress");
+  assert.equal(evaluate({
+    issueComments: [secondDraftRequest, secondFinalRequest],
+    timelineEvents: repeatedTimeline,
+    reviews: [secondDraftCompletion, exactReview({
+      id: 79,
+      submittedAt: "2026-08-08T04:05:00.000Z",
+    })],
+    now: new Date("2026-08-08T04:08:01.000Z"),
+  }).status, "settled");
 });
 
 test("the settle window prevents late review threads from racing the full gate", () => {
@@ -318,6 +412,7 @@ test("Ready promotion fails closed when the exact request is absent or the PR re
   assert.equal(evaluate({
     issueComments: [request({ createdAt: "2026-08-08T04:01:30.000Z" })],
   }).reason, "exact_sha_request_not_in_latest_draft");
+  assert.equal(evaluate({ issueComments: [request()] }).reason, "final_exact_sha_review_not_requested");
   assert.equal(evaluate({
     pullRequest: { head: { sha: headSha }, draft: false, state: "open" },
   }).reason, "draft_interval_unavailable");

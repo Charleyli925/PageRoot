@@ -86,8 +86,9 @@ current `origin/main`, then post the trusted exact-SHA Codex request documented
 in `docs/CODEX_WORKFLOW.md` while it remains Draft. Address P0-P2 findings and
 repeat for every new head. After that Draft review completes, confirm no other
 PR is occupying the source-candidate lane and mark it Ready. That single
-`ready_for_review` transition starts `review-settled`; only its final post-Ready
-Codex completion, 180-second settle window and clean active-thread check may
+`ready_for_review` transition starts `review-settled`; after GitHub records the
+transition, post the canonical final exact-SHA request. Only a completion bound
+to that request comment or the exact commit, the 180-second settle window and clean active-thread check may
 unlock `baseline-policy` and the complete source matrix that can create the
 required `release-gate` and exact-tree attestation.
 

@@ -44,6 +44,13 @@ export function reviewRequestSha(body) {
   return matches.length === 1 ? matches[0][1].toLowerCase() : null;
 }
 
+export function finalReviewRequestSha(body) {
+  const matches = [...String(body || "").matchAll(
+    /<!--\s*pageroot-codex-final-review-sha:\s*([0-9a-f]{40})\s*-->/giu,
+  )];
+  return matches.length === 1 ? matches[0][1].toLowerCase() : null;
+}
+
 function markdownWithoutHtmlComments(body) {
   const markdown = String(body || "");
   let visible = "";
@@ -63,6 +70,15 @@ export function visibleReviewRequestSha(body) {
   if (visibleMarkdown === null) return null;
   const match = visibleMarkdown.match(
     /^\s*@codex review[ \t]*\r?\n[ \t]*\r?\nReview exact SHA `([0-9a-f]{40})`\.[ \t]*(?:\r?\n[ \t]*)*$/iu,
+  );
+  return match?.[1]?.toLowerCase() || null;
+}
+
+export function visibleFinalReviewRequestSha(body) {
+  const visibleMarkdown = markdownWithoutHtmlComments(body);
+  if (visibleMarkdown === null) return null;
+  const match = visibleMarkdown.match(
+    /^\s*@codex review[ \t]*\r?\n[ \t]*\r?\nFinal review exact SHA `([0-9a-f]{40})`\.[ \t]*(?:\r?\n[ \t]*)*$/iu,
   );
   return match?.[1]?.toLowerCase() || null;
 }
@@ -95,39 +111,19 @@ function commentUpdatedAt(comment) {
   return comment?.updated_at || comment?.updatedAt || commentCreatedAt(comment);
 }
 
-function commentId(comment) {
-  return comment?.id || comment?.databaseId || null;
-}
-
-function invokesCodex(body) {
-  return /(?:^|\s)@codex\b/iu.test(body || "");
-}
-
-function exactReviewRequests(issueComments, expectedHeadSha) {
+function exactReviewRequests(issueComments, expectedHeadSha, phase) {
+  const hiddenSha = phase === "final" ? finalReviewRequestSha : reviewRequestSha;
+  const visibleSha = phase === "final"
+    ? visibleFinalReviewRequestSha
+    : visibleReviewRequestSha;
   return (issueComments || []).filter((comment) => (
     !isCodexActor(commentAuthor(comment))
     && TRUSTED_REQUEST_ASSOCIATIONS.has(commentAssociation(comment))
-    && reviewRequestSha(comment?.body) === expectedHeadSha
-    && visibleReviewRequestSha(comment?.body) === expectedHeadSha
+    && hiddenSha(comment?.body) === expectedHeadSha
+    && visibleSha(comment?.body) === expectedHeadSha
     && Number.isFinite(timestamp(commentCreatedAt(comment)))
     && timestamp(commentUpdatedAt(comment)) === timestamp(commentCreatedAt(comment))
   ));
-}
-
-function hasCompetingCodexInvocation({ issueComments, pullRequest, request, requestAt }) {
-  if (invokesCodex(pullRequest?.body)) return true;
-  const requestId = String(commentId(request) || "");
-  return (issueComments || []).some((comment) => {
-    const sameRequest = comment === request || (
-      requestId && String(commentId(comment) || "") === requestId
-    );
-    return (
-      !sameRequest
-      && !isCodexActor(commentAuthor(comment))
-      && invokesCodex(comment?.body)
-      && timestamp(commentUpdatedAt(comment)) >= requestAt
-    );
-  });
 }
 
 function latestReadyForReviewEvent(timelineEvents) {
@@ -157,7 +153,15 @@ function latestDraftEventBefore(timelineEvents, readyAt) {
 
 export function latestExactReviewRequest(issueComments, expectedHeadSha) {
   assertSha(expectedHeadSha, "expectedHeadSha");
-  return exactReviewRequests(issueComments, expectedHeadSha)
+  return exactReviewRequests(issueComments, expectedHeadSha, "draft")
+    .sort((left, right) => (
+      timestamp(commentCreatedAt(right)) - timestamp(commentCreatedAt(left))
+    ))[0] || null;
+}
+
+export function latestFinalReviewRequest(issueComments, expectedHeadSha) {
+  assertSha(expectedHeadSha, "expectedHeadSha");
+  return exactReviewRequests(issueComments, expectedHeadSha, "final")
     .sort((left, right) => (
       timestamp(commentCreatedAt(right)) - timestamp(commentCreatedAt(left))
     ))[0] || null;
@@ -169,16 +173,17 @@ function reviewCompletionSignals({
   reviews,
   issueComments,
   requestReactions,
-  issueReactions,
 }) {
   const signals = [];
   for (const review of reviews || []) {
     const completedAt = timestamp(review?.submitted_at || review?.submittedAt);
+    const state = String(review?.state || "").toUpperCase();
     const commitSha = String(
       review?.commit_id || review?.commit?.oid || review?.commitSha || "",
     ).toLowerCase();
     if (
       isCodexActor(review?.user?.login || review?.author?.login || review?.author)
+      && ["APPROVED", "CHANGES_REQUESTED", "COMMENTED"].includes(state)
       && commitSha === expectedHeadSha
       && Number.isFinite(completedAt)
       && completedAt >= requestAt
@@ -209,31 +214,26 @@ function reviewCompletionSignals({
     }
   }
 
-  for (const [scope, reactions] of [
-    ["request_comment", requestReactions || []],
-    ["pull_request", issueReactions || []],
-  ]) {
-    for (const reaction of reactions) {
-      const completedAt = timestamp(reaction?.created_at || reaction?.createdAt);
-      if (
-        isCodexActor(reaction?.user?.login || reaction?.author?.login || reaction?.author)
-        && ["+1", "THUMBS_UP"].includes(reaction?.content)
-        && Number.isFinite(completedAt)
-        && completedAt >= requestAt
-      ) {
-        signals.push({
-          kind: "clean_review_reaction",
-          scope,
-          at: completedAt,
-          id: reaction?.id || reaction?.databaseId || null,
-        });
-      }
+  for (const reaction of requestReactions || []) {
+    const completedAt = timestamp(reaction?.created_at || reaction?.createdAt);
+    if (
+      isCodexActor(reaction?.user?.login || reaction?.author?.login || reaction?.author)
+      && ["+1", "THUMBS_UP"].includes(reaction?.content)
+      && Number.isFinite(completedAt)
+      && completedAt >= requestAt
+    ) {
+      signals.push({
+        kind: "clean_review_reaction",
+        scope: "request_comment",
+        at: completedAt,
+        id: reaction?.id || reaction?.databaseId || null,
+      });
     }
   }
   return signals.sort((left, right) => right.at - left.at);
 }
 
-function latestCodexEnvironmentFailure(issueComments, requestAt) {
+function latestCodexEnvironmentFailure(issueComments, requestAt, beforeAt = Number.POSITIVE_INFINITY) {
   return (issueComments || [])
     .flatMap((comment) => {
       const failedAt = timestamp(commentCreatedAt(comment));
@@ -242,6 +242,7 @@ function latestCodexEnvironmentFailure(issueComments, requestAt) {
         || !CODEX_ENVIRONMENT_UNAVAILABLE_PATTERN.test(comment?.body || "")
         || !Number.isFinite(failedAt)
         || failedAt < requestAt
+        || failedAt >= beforeAt
       ) return [];
       return [{
         kind: "codex_environment_unavailable",
@@ -298,7 +299,7 @@ export function evaluateReviewSettlement({
   reviews = [],
   reviewThreads = [],
   requestReactions = [],
-  issueReactions = [],
+  finalRequestReactions = [],
   now = new Date(),
   settleSeconds = DEFAULT_SETTLE_SECONDS,
 }) {
@@ -415,28 +416,24 @@ export function evaluateReviewSettlement({
       blockingThreads: [],
     });
   }
-  const completionSignals = reviewCompletionSignals({
+  const draftCompletionSignals = reviewCompletionSignals({
     expectedHeadSha: expectedSha,
     requestAt,
     reviews,
     issueComments,
     requestReactions,
-    issueReactions,
   });
-  const readyReactionBound = !hasCompetingCodexInvocation({
-    issueComments,
-    pullRequest,
-    request,
-    requestAt,
-  });
-  const draftCompletion = completionSignals.find((signal) => (
+  const draftCompletion = draftCompletionSignals.find((signal) => (
     signal.at >= draftStartedAt && signal.at < readyAt
-    && (signal.kind !== "clean_review_reaction" || signal.scope === "request_comment")
   )) || null;
-  const environmentFailure = latestCodexEnvironmentFailure(issueComments, requestAt);
+  const draftEnvironmentFailure = latestCodexEnvironmentFailure(
+    issueComments,
+    requestAt,
+    readyAt,
+  );
   if (
-    environmentFailure
-    && (!draftCompletion || environmentFailure.at > draftCompletion.at)
+    draftEnvironmentFailure
+    && (!draftCompletion || draftEnvironmentFailure.at > draftCompletion.at)
   ) {
     return Object.freeze({
       status: "blocked",
@@ -446,6 +443,7 @@ export function evaluateReviewSettlement({
       request: requestSummary,
       promotion: promotionSummary,
       draftCompletion: completionSummary(draftCompletion),
+      finalRequest: null,
       completion: null,
       settlesAt: null,
       blockingThreads: [],
@@ -460,38 +458,88 @@ export function evaluateReviewSettlement({
       request: requestSummary,
       promotion: promotionSummary,
       draftCompletion: null,
+      finalRequest: null,
       completion: null,
       settlesAt: null,
       blockingThreads: [],
     });
   }
-  const completion = completionSignals.find((signal) => (
-    signal.at >= readyAt
-    && (
-      signal.kind !== "clean_review_reaction"
-      || (
-        signal.scope === "pull_request"
-        && readyReactionBound
-        && signal.at <= readyAt + DEFAULT_TIMEOUT_SECONDS * 1000
-      )
-    )
-  )) || null;
-  if (!completion) {
-    const unboundReadyReaction = completionSignals.some((signal) => (
-      signal.kind === "clean_review_reaction"
-      && signal.scope === "pull_request"
-      && signal.at >= readyAt
-    ));
+  const finalRequest = latestFinalReviewRequest(issueComments, expectedSha);
+  if (!finalRequest) {
     return Object.freeze({
-      status: unboundReadyReaction ? "blocked" : "waiting",
-      reason: unboundReadyReaction
-        ? "ready_reaction_not_exclusively_bound"
-        : "codex_review_in_progress",
+      status: "waiting",
+      reason: "final_exact_sha_review_not_requested",
       expectedHeadSha: expectedSha,
       currentHeadSha,
       request: requestSummary,
       promotion: promotionSummary,
       draftCompletion: completionSummary(draftCompletion),
+      finalRequest: null,
+      completion: null,
+      settlesAt: null,
+      blockingThreads: [],
+    });
+  }
+  const finalRequestAt = timestamp(commentCreatedAt(finalRequest));
+  const finalRequestSummary = Object.freeze({
+    id: finalRequest?.id || finalRequest?.databaseId || null,
+    at: new Date(finalRequestAt).toISOString(),
+  });
+  if (finalRequestAt <= readyAt) {
+    return Object.freeze({
+      status: "waiting",
+      reason: "final_exact_sha_request_not_after_ready",
+      expectedHeadSha: expectedSha,
+      currentHeadSha,
+      request: requestSummary,
+      promotion: promotionSummary,
+      draftCompletion: completionSummary(draftCompletion),
+      finalRequest: finalRequestSummary,
+      completion: null,
+      settlesAt: null,
+      blockingThreads: [],
+    });
+  }
+  const finalCompletionSignals = reviewCompletionSignals({
+    expectedHeadSha: expectedSha,
+    requestAt: finalRequestAt,
+    reviews,
+    issueComments,
+    requestReactions: finalRequestReactions,
+  });
+  const completion = finalCompletionSignals[0] || null;
+  const finalEnvironmentFailure = latestCodexEnvironmentFailure(
+    issueComments,
+    finalRequestAt,
+  );
+  if (
+    finalEnvironmentFailure
+    && (!completion || finalEnvironmentFailure.at > completion.at)
+  ) {
+    return Object.freeze({
+      status: "blocked",
+      reason: "codex_final_review_environment_unavailable",
+      expectedHeadSha: expectedSha,
+      currentHeadSha,
+      request: requestSummary,
+      promotion: promotionSummary,
+      draftCompletion: completionSummary(draftCompletion),
+      finalRequest: finalRequestSummary,
+      completion: completionSummary(completion),
+      settlesAt: null,
+      blockingThreads: [],
+    });
+  }
+  if (!completion) {
+    return Object.freeze({
+      status: "waiting",
+      reason: "codex_final_review_in_progress",
+      expectedHeadSha: expectedSha,
+      currentHeadSha,
+      request: requestSummary,
+      promotion: promotionSummary,
+      draftCompletion: completionSummary(draftCompletion),
+      finalRequest: finalRequestSummary,
       completion: null,
       settlesAt: null,
       blockingThreads: [],
@@ -510,6 +558,7 @@ export function evaluateReviewSettlement({
       request: requestSummary,
       promotion: promotionSummary,
       draftCompletion: draftCompletionSummary,
+      finalRequest: finalRequestSummary,
       completion: finalCompletionSummary,
       settlesAt: new Date(settlesAtMs).toISOString(),
       blockingThreads: [],
@@ -526,6 +575,7 @@ export function evaluateReviewSettlement({
       request: requestSummary,
       promotion: promotionSummary,
       draftCompletion: draftCompletionSummary,
+      finalRequest: finalRequestSummary,
       completion: finalCompletionSummary,
       settlesAt: new Date(settlesAtMs).toISOString(),
       blockingThreads: unresolved,
@@ -540,6 +590,7 @@ export function evaluateReviewSettlement({
     request: requestSummary,
     promotion: promotionSummary,
     draftCompletion: draftCompletionSummary,
+    finalRequest: finalRequestSummary,
     completion: finalCompletionSummary,
     settlesAt: new Date(settlesAtMs).toISOString(),
     blockingThreads: [],
@@ -682,7 +733,6 @@ async function collectSnapshot(options, token) {
     timelineEvents,
     reviews,
     reviewThreads,
-    issueReactions,
   ] = await Promise.all([
     githubJson(`${apiBase}${basePath}/pulls/${options.pullRequest}`, token),
     restPages(apiBase, `${basePath}/issues/${options.pullRequest}/comments`, token),
@@ -695,13 +745,19 @@ async function collectSnapshot(options, token) {
       pullRequest: options.pullRequest,
       token,
     }),
-    restPages(apiBase, `${basePath}/issues/${options.pullRequest}/reactions`, token),
   ]);
   const request = latestExactReviewRequest(issueComments, options.expectedHeadSha);
+  const finalRequest = latestFinalReviewRequest(issueComments, options.expectedHeadSha);
   const requestId = request?.id || request?.databaseId;
-  const requestReactions = requestId
-    ? await restPages(apiBase, `${basePath}/issues/comments/${requestId}/reactions`, token)
-    : [];
+  const finalRequestId = finalRequest?.id || finalRequest?.databaseId;
+  const [requestReactions, finalRequestReactions] = await Promise.all([
+    requestId
+      ? restPages(apiBase, `${basePath}/issues/comments/${requestId}/reactions`, token)
+      : [],
+    finalRequestId
+      ? restPages(apiBase, `${basePath}/issues/comments/${finalRequestId}/reactions`, token)
+      : [],
+  ]);
   return {
     pullRequest,
     issueComments,
@@ -709,7 +765,7 @@ async function collectSnapshot(options, token) {
     reviews,
     reviewThreads,
     requestReactions,
-    issueReactions,
+    finalRequestReactions,
   };
 }
 
@@ -728,6 +784,7 @@ function conciseResult(result) {
     request: result.request,
     promotion: result.promotion,
     draftCompletion: result.draftCompletion,
+    finalRequest: result.finalRequest,
     completion: result.completion,
     settlesAt: result.settlesAt,
     blockingThreads: result.blockingThreads,
@@ -745,6 +802,7 @@ async function appendSummary(result) {
     `- Exact-SHA request: ${result.request ? `comment ${result.request.id} at ${result.request.at}` : "missing"}`,
     `- Ready promotion: ${result.promotion ? `event ${result.promotion.id} at ${result.promotion.at}` : "missing"}`,
     `- Draft completion: ${result.draftCompletion ? `${result.draftCompletion.kind} at ${result.draftCompletion.at}` : "not observed"}`,
+    `- Final exact-SHA request: ${result.finalRequest ? `comment ${result.finalRequest.id} at ${result.finalRequest.at}` : "missing"}`,
     `- Final completion: ${result.completion ? `${result.completion.kind} at ${result.completion.at}` : "not observed"}`,
     `- Settle boundary: ${result.settlesAt || "not reached"}`,
     `- Blocking active threads: ${result.blockingThreads.length}`,
