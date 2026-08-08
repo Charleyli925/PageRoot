@@ -171,18 +171,16 @@ function exactReviewRequests(issueComments, expectedHeadSha, expectedBaseSha, ph
   });
 }
 
-function hasPriorRequestForDifferentBase({
+function hasRequestForDifferentBase({
   issueComments,
   expectedHeadSha,
   expectedBaseSha,
-  beforeAt,
 }) {
   return (issueComments || []).some((comment) => (
     ["draft", "final"].some((phase) => {
       const identity = canonicalRequestIdentity(comment, phase);
       return identity?.headSha === expectedHeadSha
-        && identity.baseSha !== expectedBaseSha
-        && identity.at < beforeAt;
+        && identity.baseSha !== expectedBaseSha;
     })
   ));
 }
@@ -515,11 +513,10 @@ export function evaluateReviewSettlement({
     reviews,
     issueComments,
     requestReactions,
-    acceptCommitBoundSignals: !hasPriorRequestForDifferentBase({
+    acceptCommitBoundSignals: !hasRequestForDifferentBase({
       issueComments,
       expectedHeadSha: expectedSha,
       expectedBaseSha: expectedBase,
-      beforeAt: requestAt,
     }),
   });
   const draftCompletion = draftCompletionSignals.find((signal) => (
@@ -605,11 +602,10 @@ export function evaluateReviewSettlement({
     reviews,
     issueComments,
     requestReactions: finalRequestReactions,
-    acceptCommitBoundSignals: !hasPriorRequestForDifferentBase({
+    acceptCommitBoundSignals: !hasRequestForDifferentBase({
       issueComments,
       expectedHeadSha: expectedSha,
       expectedBaseSha: expectedBase,
-      beforeAt: finalRequestAt,
     }),
   });
   const completion = finalCompletionSignals[0] || null;

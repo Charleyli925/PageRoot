@@ -227,6 +227,12 @@ test("Draft and final Codex reviews bind to the current head/base pair and their
   }).reason, "exact_sha_review_not_requested");
   assert.equal(evaluate({
     issueComments: [request(), finalRequest({ base: oldBaseSha })],
+    requestReactions: [{
+      id: 57,
+      user: { login: "chatgpt-codex-connector[bot]" },
+      content: "+1",
+      created_at: draftCompletedAt,
+    }],
   }).reason, "final_exact_sha_review_not_requested");
 });
 
@@ -260,6 +266,49 @@ test("base-only request changes accept only completion reactions on the exact ne
       created_at: completedAt,
     }],
   }).status, "settled");
+});
+
+test("later cross-base requests cannot lend commit-bound completion to the current pair", () => {
+  const laterOldBaseDraftRequest = request({
+    id: 83,
+    base: oldBaseSha,
+    createdAt: "2026-08-08T04:00:10.000Z",
+  });
+  const finalReaction = {
+    id: 84,
+    user: { login: "chatgpt-codex-connector[bot]" },
+    content: "+1",
+    created_at: completedAt,
+  };
+  assert.equal(evaluate({
+    issueComments: [request(), laterOldBaseDraftRequest, finalRequest()],
+    reviews: [draftReview()],
+    finalRequestReactions: [finalReaction],
+  }).reason, "draft_review_not_completed_before_promotion");
+
+  const draftReaction = {
+    id: 85,
+    user: { login: "chatgpt-codex-connector[bot]" },
+    content: "+1",
+    created_at: draftCompletedAt,
+  };
+  assert.equal(evaluate({
+    issueComments: [request(), laterOldBaseDraftRequest, finalRequest()],
+    reviews: [draftReview()],
+    requestReactions: [draftReaction],
+    finalRequestReactions: [finalReaction],
+  }).status, "settled");
+
+  const laterOldBaseFinalRequest = finalRequest({
+    id: 86,
+    base: oldBaseSha,
+    createdAt: "2026-08-08T04:01:30.000Z",
+  });
+  assert.equal(evaluate({
+    issueComments: [request(), finalRequest(), laterOldBaseFinalRequest],
+    reviews: [draftReview(), exactReview()],
+    requestReactions: [draftReaction],
+  }).reason, "codex_final_review_in_progress");
 });
 
 test("clean Codex comments and reactions bind to the correct exact-head/base request", () => {
