@@ -383,6 +383,37 @@ test("PR-body and malformed review invocations fail closed without misreading fe
   }).status, "settled");
 });
 
+test("edited and review-thread request surfaces cannot hide prior invocations", () => {
+  const erasedEditedComment = {
+    ...request({
+      id: 93,
+      createdAt: "2026-08-08T03:30:00.000Z",
+      updatedAt: "2026-08-08T03:31:00.000Z",
+    }),
+    body: "Ordinary follow-up after the original command was erased.",
+  };
+  assert.equal(evaluate({
+    issueComments: [erasedEditedComment, request(), finalRequest()],
+  }).reason, "draft_review_not_completed_before_promotion");
+
+  assert.equal(evaluate({
+    pullRequestBody: {
+      body: "Current Pull Request description without the erased command.",
+      author: { login: "maintainer" },
+      authorAssociation: "OWNER",
+      createdAt: "2026-08-08T03:00:00.000Z",
+      updatedAt: "2026-08-08T03:30:00.000Z",
+    },
+  }).reason, "draft_review_not_completed_before_promotion");
+
+  assert.equal(evaluate({
+    reviewComments: [{
+      ...request({ id: 94, base: oldBaseSha }),
+      body: `@codex review\n\nReview exact head SHA \`${headSha}\` on base SHA \`${oldBaseSha}\`.`,
+    }],
+  }).reason, "draft_review_not_completed_before_promotion");
+});
+
 test("clean Codex comments and reactions bind to the correct exact-head/base request", () => {
   const cleanComment = {
     id: 40,

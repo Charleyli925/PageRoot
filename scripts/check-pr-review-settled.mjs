@@ -211,21 +211,34 @@ function exactReviewRequests(issueComments, expectedHeadSha, expectedBaseSha, ph
 
 function hasAmbiguousReviewInvocation({
   pullRequest,
+  pullRequestBody,
   issueComments,
+  reviewComments,
   expectedHeadSha,
   expectedBaseSha,
 }) {
   const sources = [
-    { entry: pullRequest, allowCanonicalRequest: false },
+    {
+      entry: pullRequestBody || pullRequest,
+      allowCanonicalRequest: false,
+      failClosedOnEdit: true,
+    },
     ...(issueComments || []).map((comment) => ({
       entry: comment,
       allowCanonicalRequest: true,
+      failClosedOnEdit: true,
+    })),
+    ...(reviewComments || []).map((comment) => ({
+      entry: comment,
+      allowCanonicalRequest: false,
+      failClosedOnEdit: true,
     })),
   ];
-  return sources.some(({ entry, allowCanonicalRequest }) => {
+  return sources.some(({ entry, allowCanonicalRequest, failClosedOnEdit }) => {
     if (!isTrustedRequestActor(entry)) {
       return false;
     }
+    if (failClosedOnEdit && !isTrustedRequestComment(entry)) return true;
     const invocationStatus = reviewInvocationStatus(entry?.body);
     if (invocationStatus === "none") return false;
     if (invocationStatus === "ambiguous" || !allowCanonicalRequest) return true;
@@ -417,7 +430,9 @@ export function evaluateReviewSettlement({
   expectedHeadSha,
   expectedBaseSha,
   pullRequest,
+  pullRequestBody = null,
   issueComments = [],
+  reviewComments = [],
   timelineEvents = [],
   reviews = [],
   reviewThreads = [],
@@ -567,7 +582,9 @@ export function evaluateReviewSettlement({
     requestReactions,
     acceptCommitBoundSignals: !hasAmbiguousReviewInvocation({
       pullRequest,
+      pullRequestBody,
       issueComments,
+      reviewComments,
       expectedHeadSha: expectedSha,
       expectedBaseSha: expectedBase,
     }),
@@ -657,7 +674,9 @@ export function evaluateReviewSettlement({
     requestReactions: finalRequestReactions,
     acceptCommitBoundSignals: !hasAmbiguousReviewInvocation({
       pullRequest,
+      pullRequestBody,
       issueComments,
+      reviewComments,
       expectedHeadSha: expectedSha,
       expectedBaseSha: expectedBase,
     }),
@@ -835,6 +854,11 @@ async function collectReviewThreads({ graphqlUrl, owner, name, pullRequest, toke
     query($owner: String!, $name: String!, $number: Int!, $after: String) {
       repository(owner: $owner, name: $name) {
         pullRequest(number: $number) {
+          body
+          createdAt
+          lastEditedAt
+          authorAssociation
+          author { login }
           reviewThreads(first: 100, after: $after) {
             nodes {
               isResolved
@@ -857,6 +881,7 @@ async function collectReviewThreads({ graphqlUrl, owner, name, pullRequest, toke
     }
   `;
   const threads = [];
+  let pullRequestBody = null;
   let after = null;
   for (;;) {
     const response = await githubJson(graphqlUrl, token, {
@@ -869,10 +894,23 @@ async function collectReviewThreads({ graphqlUrl, owner, name, pullRequest, toke
     if (response.errors?.length) {
       throw new Error(`GitHub GraphQL: ${response.errors.map((error) => error.message).join("; ")}`);
     }
-    const connection = response?.data?.repository?.pullRequest?.reviewThreads;
+    const pullRequestNode = response?.data?.repository?.pullRequest;
+    if (!pullRequestBody && pullRequestNode) {
+      pullRequestBody = {
+        body: pullRequestNode.body,
+        author: pullRequestNode.author,
+        authorAssociation: pullRequestNode.authorAssociation,
+        createdAt: pullRequestNode.createdAt,
+        updatedAt: pullRequestNode.lastEditedAt || pullRequestNode.createdAt,
+      };
+    }
+    const connection = pullRequestNode?.reviewThreads;
     if (!connection) throw new Error("Pull Request review threads were unavailable.");
     threads.push(...(connection.nodes || []));
-    if (!connection.pageInfo?.hasNextPage) return threads;
+    if (!connection.pageInfo?.hasNextPage) {
+      if (!pullRequestBody) throw new Error("Pull Request body evidence was unavailable.");
+      return { reviewThreads: threads, pullRequestBody };
+    }
     after = connection.pageInfo.endCursor;
     if (!after) throw new Error("GitHub review-thread pagination omitted endCursor.");
   }
@@ -890,12 +928,14 @@ async function collectSnapshot(options, token) {
     issueComments,
     timelineEvents,
     reviews,
-    reviewThreads,
+    reviewComments,
+    reviewThreadEvidence,
   ] = await Promise.all([
     githubJson(`${apiBase}${basePath}/pulls/${options.pullRequest}`, token),
     restPages(apiBase, `${basePath}/issues/${options.pullRequest}/comments`, token),
     restPages(apiBase, `${basePath}/issues/${options.pullRequest}/events`, token),
     restPages(apiBase, `${basePath}/pulls/${options.pullRequest}/reviews`, token),
+    restPages(apiBase, `${basePath}/pulls/${options.pullRequest}/comments`, token),
     collectReviewThreads({
       graphqlUrl,
       owner,
@@ -926,10 +966,12 @@ async function collectSnapshot(options, token) {
   ]);
   return {
     pullRequest,
+    pullRequestBody: reviewThreadEvidence.pullRequestBody,
     issueComments,
+    reviewComments,
     timelineEvents,
     reviews,
-    reviewThreads,
+    reviewThreads: reviewThreadEvidence.reviewThreads,
     requestReactions,
     finalRequestReactions,
   };
