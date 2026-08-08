@@ -29,9 +29,10 @@ export const RUNTIME_VISUAL_HOSTILE_PAGES = Object.freeze([
     surface: "review",
     html: `<!doctype html><main><div id="chart"></div><script>
       const label=document.createElement("span");label.style.color="transparent";label.textContent="hidden";
-      document.getElementById("chart").append(label);</script></main>`,
-    contract: "Text without color, shadow, decoration, or stroke paint is not visual evidence.",
-    closureReason: "Transparent unpainted text is excluded before content, paint, and geometry hashing.",
+      const alphaLabel=document.createElement("span");alphaLabel.style.cssText="color:rgba(255, 0, 0, 0);text-shadow:0 0 2px rgba(0, 255, 0, 0)";alphaLabel.textContent="also hidden";
+      document.getElementById("chart").append(label,alphaLabel);</script></main>`,
+    contract: "Text without visible color, shadow, decoration, or stroke paint is not visual evidence.",
+    closureReason: "Keyword and zero-alpha paint are both excluded before content, paint, and geometry hashing.",
   }),
   Object.freeze({
     id: "pr105-generic-selector-host",

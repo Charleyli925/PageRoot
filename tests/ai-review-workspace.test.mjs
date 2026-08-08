@@ -665,6 +665,8 @@ test("hostile review fixtures are enforced by the adapter and page contract", ()
   const attributeLimit = runtimeVisualHostilePage("pr107-attribute-limit");
   assert.match(nativeCanvas.html, /Math\.round=\(\)=>0/u);
   assert.match(transparentText.html, /color="transparent"/u);
+  assert.match(transparentText.html, /rgba\(255, 0, 0, 0\)/u);
+  assert.match(transparentText.html, /text-shadow/iu);
   assert.match(parserMutation.html, /textContent="mutated"/u);
   assert.match(attributeLimit.html, /data-key-24/u);
 
@@ -674,6 +676,9 @@ test("hostile review fixtures are enforced by the adapter and page contract", ()
   assert.match(reviewDocument, /runtimeVisualMathRound\(RuntimeVisualNumber/);
   assert.match(reviewDocument, /runtimeVisualTextHasPaint/);
   assert.match(reviewDocument, /runtimeVisualObservedBindingMatches/);
+  assert.match(reviewDocument, /runtimeVisualInitialBindingPathMatches/);
+  assert.match(reviewDocument, /runtimeVisualStringMatch/);
+  assert.match(reviewDocument, /runtimeVisualNumberIsFinite/);
   assert.match(reviewDocument, /runtimeVisualMutationRecordAddedNodes/);
   assert.match(
     reviewDocument,

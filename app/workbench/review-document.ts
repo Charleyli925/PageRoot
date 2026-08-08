@@ -3722,6 +3722,7 @@ function reviewBootstrap(
   const runtimeVisualMathRound = Math.round.bind(Math);
   const runtimeVisualMathMax = Math.max.bind(Math);
   const runtimeVisualParseFloat = Number.parseFloat.bind(Number);
+  const runtimeVisualNumberIsFinite = Number.isFinite.bind(Number);
   const runtimeVisualSetTimeout = window.setTimeout.bind(window);
   const runtimeVisualRequestAnimationFrame = window.requestAnimationFrame.bind(window);
   const runtimeVisualPromiseResolve = RuntimeVisualPromise.resolve.bind(RuntimeVisualPromise);
@@ -3741,6 +3742,9 @@ function reviewBootstrap(
   const runtimeVisualStringCharCodeAt = runtimeVisualBindCall(
     String.prototype.charCodeAt,
   );
+  const runtimeVisualStringMatch = runtimeVisualBindCall(String.prototype.match);
+  const runtimeVisualStringToLowerCase = runtimeVisualBindCall(String.prototype.toLowerCase);
+  const runtimeVisualStringTrim = runtimeVisualBindCall(String.prototype.trim);
   const runtimeVisualStringFromCharCode = String.fromCharCode.bind(String);
   const runtimeVisualNumberToString = runtimeVisualBindCall(Number.prototype.toString);
   const runtimeVisualStringPadStart = runtimeVisualBindCall(String.prototype.padStart);
@@ -4134,6 +4138,9 @@ function reviewBootstrap(
     }
     return element;
   };
+  const runtimeVisualInitialBindingPathMatches = (element, binding) => (
+    runtimeVisualInitialBindingPathElement(binding?.path) === element
+  );
   const runtimeVisualInitialBindingIdentityAttributes = (binding) => {
     const runtimeVisualBindingAttributeNamePattern = /^[a-z_:][a-z0-9:._-]{0,127}$/iu;
     const runtimeVisualOwnedAttributeNamePattern = /^data-pageroot-/iu;
@@ -4192,6 +4199,7 @@ function reviewBootstrap(
   const runtimeVisualObservedBindingMatches = (element, binding) => {
     const identityAttributes = runtimeVisualInitialBindingIdentityAttributes(binding);
     return Boolean(identityAttributes?.length)
+      && runtimeVisualInitialBindingPathMatches(element, binding)
       && runtimeVisualInitialBindingMatches(element, binding, true);
   };
   const runtimeVisualInitialBindingHasFingerprint = (binding) => {
@@ -4409,12 +4417,37 @@ function reviewBootstrap(
       && rect.width > 0
       && rect.height > 0;
   };
-  const runtimeVisualTransparent = (value) => (
-    !value
-    || value === "transparent"
-    || value === "rgba(0, 0, 0, 0)"
-    || value === "rgba(0,0,0,0)"
+  const runtimeVisualNormalizedPaintValue = (value) => (
+    runtimeVisualStringToLowerCase(
+      runtimeVisualStringTrim(RuntimeVisualString(value || "")),
+    )
   );
+  const runtimeVisualTransparent = (value) => {
+    const normalized = runtimeVisualNormalizedPaintValue(value);
+    if (!normalized || normalized === "transparent") return true;
+    const alphaMatch = runtimeVisualStringMatch(
+      normalized,
+      /^rgba?\([^)]*[,/]\s*([0-9.]+%?)\s*\)$/iu,
+    );
+    if (alphaMatch) {
+      const alpha = runtimeVisualParseFloat(alphaMatch[1]);
+      if (runtimeVisualNumberIsFinite(alpha) && alpha <= 0) return true;
+    }
+    return runtimeVisualRegExpTest(
+      /^#(?:[0-9a-f]{3}0|[0-9a-f]{6}00)$/iu,
+      normalized,
+    );
+  };
+  const runtimeVisualShadowHasPaint = (value) => {
+    const normalized = runtimeVisualNormalizedPaintValue(value);
+    if (!normalized || normalized === "none") return false;
+    const colors = runtimeVisualStringMatch(
+      normalized,
+      /(?:rgba?\([^)]*\)|#[0-9a-f]{3,8}|transparent)/giu,
+    ) || [];
+    return !colors.length
+      || runtimeVisualArraySome(colors, (color) => !runtimeVisualTransparent(color));
+  };
   const runtimeVisualTextPaint = (style) => [
     runtimeVisualStyleValue(style, "color"),
     runtimeVisualStyleValue(style, "font-family"),
@@ -4439,7 +4472,7 @@ function reviewBootstrap(
     );
     const strokeColor = runtimeVisualStyleValue(style, "-webkit-text-stroke-color");
     return !runtimeVisualTransparent(runtimeVisualStyleValue(style, "color"))
-      || Boolean(textShadow && textShadow !== "none")
+      || runtimeVisualShadowHasPaint(textShadow)
       || Boolean(
         decorationLine
         && decorationLine !== "none"
@@ -4469,10 +4502,7 @@ function reviewBootstrap(
     )
       || Boolean(backgroundImage && backgroundImage !== "none")
       || borderVisible
-      || Boolean(
-        runtimeVisualStyleValue(style, "box-shadow")
-        && runtimeVisualStyleValue(style, "box-shadow") !== "none"
-      )
+      || runtimeVisualShadowHasPaint(runtimeVisualStyleValue(style, "box-shadow"))
       || Boolean(
         runtimeVisualStyleValue(style, "filter")
         && runtimeVisualStyleValue(style, "filter") !== "none"
