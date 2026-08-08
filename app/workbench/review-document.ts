@@ -4245,6 +4245,10 @@ function reviewBootstrap(
       || (typeof binding?.identityText === "string" && binding.identityText.length),
     );
   };
+  const runtimeVisualInitialBindingSourceBoxMatches = (element, binding) => (
+    RuntimeVisualString(binding?.sourceBoxSignature || "")
+      === runtimeVisualSourceBoxSignature(element)
+  );
   const runtimeVisualInitialBindingElement = (binding, useFrozenPath = true) => {
     const pathElement = runtimeVisualInitialBindingPathElement(binding?.path);
     const identityAttributes = runtimeVisualInitialBindingIdentityAttributes(binding);
@@ -4339,6 +4343,7 @@ function reviewBootstrap(
         !pathMatches
         && !hasFingerprint
         && runtimeVisualInitialBindingMatches(observedElement, binding, true)
+        && runtimeVisualInitialBindingSourceBoxMatches(observedElement, binding)
       ) {
         runtimeVisualSetAdd(reviewCommentInvalidSourceNodeIds, sourceNodeId);
         return;

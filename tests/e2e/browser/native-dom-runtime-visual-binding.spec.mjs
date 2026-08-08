@@ -2,6 +2,14 @@ import { expect, test } from "@playwright/test";
 
 import { generatedReviewBootstrap } from "../../helpers/generated-review-bootstrap.mjs";
 
+const COMMENT_SOURCE_BOX_SIGNATURE = JSON.stringify([
+  ["class", "comment-host"],
+  ["height", null],
+  ["hidden", null],
+  ["style", null],
+  ["width", null],
+]);
+
 async function parsedReviewCommentLayouts(page, { binding, authoredScript }) {
   const bootstrap = generatedReviewBootstrap([], [binding]);
   await page.setContent(`<!doctype html>
@@ -81,7 +89,7 @@ test("path-only review comments bind against a real parsed DOM", async ({ page }
     sourceNodeId: "element:1:1:div",
     path: [1, 0, 0],
     tagName: "DIV",
-    sourceBoxSignature: "[]",
+    sourceBoxSignature: COMMENT_SOURCE_BOX_SIGNATURE,
     identityAttributes: [],
     identityText: "",
   };
@@ -104,7 +112,7 @@ test("path-only review comments fail closed when the parsed path and tag diverge
     sourceNodeId: "element:1:1:div",
     path: [1, 0, 0],
     tagName: "DIV",
-    sourceBoxSignature: "[]",
+    sourceBoxSignature: COMMENT_SOURCE_BOX_SIGNATURE,
     identityAttributes: [],
     identityText: "",
   };
@@ -131,7 +139,7 @@ test("path-only review comments fail closed when a same-tag parser decoy shifts 
     sourceNodeId: "element:1:1:div",
     path: [1, 0, 0],
     tagName: "DIV",
-    sourceBoxSignature: "[]",
+    sourceBoxSignature: COMMENT_SOURCE_BOX_SIGNATURE,
     identityAttributes: [],
     identityText: "",
   };
@@ -151,4 +159,29 @@ test("path-only review comments fail closed when a same-tag parser decoy shifts 
   expect(result.layouts.some((message) => (
     message.commentLayouts?.some((layout) => layout.key === "parsed-comment")
   ))).toBe(false);
+});
+
+test("path-only review comments keep a bound target when a later same-tag node is unrelated", async ({ page }) => {
+  const binding = {
+    sourceNodeId: "element:1:1:div",
+    path: [1, 0, 0],
+    tagName: "DIV",
+    sourceBoxSignature: COMMENT_SOURCE_BOX_SIGNATURE,
+    identityAttributes: [],
+    identityText: "",
+  };
+  const result = await parsedReviewCommentLayouts(page, {
+    binding,
+    authoredScript: `
+      const main = document.querySelector("main");
+      const actualTarget = document.createElement("div");
+      actualTarget.className = "comment-host";
+      main.append(actualTarget);
+      main.append(document.createElement("div"));
+    `,
+  });
+  expect(result.channel).toBe(true);
+  expect(result.layouts.some((message) => (
+    message.commentLayouts?.some((layout) => layout.key === "parsed-comment")
+  ))).toBe(true);
 });

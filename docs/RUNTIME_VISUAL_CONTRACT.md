@@ -37,6 +37,11 @@ The main-process Edit owner bounds every page-realm evaluation and screenshot
 operation. Timeout, navigation, instability, unsupported paint, budget
 exhaustion, an ambiguous binding, or a source/session mismatch fails closed.
 
+For fingerprintless review comments, an observation at the frozen path is
+accepted directly. A shifted same-tag observation is considered ambiguous only
+when its frozen source-box shape also matches; a clearly unrelated same-tag
+node cannot invalidate the already proven path binding.
+
 Formal review uses `ReviewRuntimeVisualCaptureAdapter` as its migration seam.
 The current adapter emits the existing first-party page bootstrap; a later
 capture implementation can replace that adapter without changing semantic
