@@ -17,6 +17,14 @@ import type {
   ReviewTextChangeOperation,
   ReviewTextChangeScope,
 } from "../lib/review-text-diff.js";
+import {
+  appendReviewProjectionFact,
+  parseReviewProjectionFacts,
+  serializeReviewProjectionFacts,
+} from "../lib/review-projection-facts.js";
+import type {
+  ReviewProjectionFact,
+} from "../lib/review-projection-facts.js";
 import { alignReviewSemanticUnits } from "../lib/review-semantic-alignment.js";
 import type {
   ReviewSemanticAlignmentMatch,
@@ -99,6 +107,7 @@ const REVIEW_STYLE_ID = "pageroot-ai-review-style";
 const REVIEW_BOOTSTRAP_ATTRIBUTE = "data-pageroot-ai-review-bootstrap";
 const REVIEW_BASE_ATTRIBUTE = "data-pageroot-ai-review-base";
 const REVIEW_BOOTSTRAP_PATH = "/.pageroot/preview-bootstrap.js";
+const REVIEW_PROJECTION_FACTS_ATTRIBUTE = "data-pageroot-review-projection-facts";
 const REVIEW_DOCUMENT_STYLE = String.raw`
   html {
     --pageroot-review-context-opacity: .18;
@@ -442,7 +451,7 @@ const GENERIC_RUNTIME_VISUAL_CLASSES = new Set([
 
 type ReviewTextInventory = {
   text: string;
-  nodes: Array<{ node: Text; start: number; end: number }>;
+  nodes: Array<{ node: Text; start: number; end: number; nodeOffset: number }>;
   breakOffsets: number[];
 };
 
@@ -461,7 +470,7 @@ function reviewTextInventoryForNodes(sourceNodes: Iterable<Node>): ReviewTextInv
       const value = node.textContent || "";
       const start = text.length;
       text += value;
-      nodes.push({ node: node as Text, start, end: text.length });
+      nodes.push({ node: node as Text, start, end: text.length, nodeOffset: 0 });
       return;
     }
     if (!(node instanceof Element)) return;
@@ -1865,6 +1874,43 @@ function markTextAnchor(anchor: Element, groupId: string, offset: number) {
   anchor.setAttribute(attribute, [...anchors].join(" "));
 }
 
+function reviewTextAnchorOffset(
+  anchor: Element,
+  inventory: ReviewTextInventory,
+): number {
+  const firstEntry = inventory.nodes[0];
+  if (!firstEntry) return 0;
+  const ownerId = anchor.getAttribute("data-pageroot-review-geometry-owner") || "";
+  let offset = 0;
+  const walker = anchor.ownerDocument.createTreeWalker(anchor, NodeFilter.SHOW_TEXT);
+  let node = walker.nextNode();
+  while (node) {
+    const parent = node.parentElement;
+    let nestedOwner = parent;
+    let crossesOwner = false;
+    while (nestedOwner && nestedOwner !== anchor) {
+      const nestedOwnerId = nestedOwner.getAttribute("data-pageroot-review-geometry-owner") || "";
+      if (nestedOwnerId && nestedOwnerId !== ownerId) {
+        crossesOwner = true;
+        break;
+      }
+      nestedOwner = nestedOwner.parentElement;
+    }
+    const visibleTextNode = Boolean(
+      parent
+      && !crossesOwner
+      && parent.namespaceURI === "http://www.w3.org/1999/xhtml"
+      && !parent.closest("script, style, noscript, template, [data-pageroot-review-projection-layer]"),
+    );
+    if (visibleTextNode) {
+      if (node === firstEntry.node) return offset + firstEntry.nodeOffset;
+      offset += node.textContent?.length || 0;
+    }
+    node = walker.nextNode();
+  }
+  return 0;
+}
+
 function applyTextFootprintMetadata(
   marker: HTMLElement,
   group: ReviewTextFootprintGroup,
@@ -1889,7 +1935,7 @@ function wrapTextRanges(
   const annotatedRanges = groups.flatMap((group) => (
     mergeReviewTextRanges(group.ranges).map((range) => ({ ...range, group }))
   )).sort((left, right) => left.start - right.start || left.end - right.end);
-  inventory.nodes.forEach(({ node, start, end }) => {
+  inventory.nodes.forEach(({ node, start, end, nodeOffset }) => {
     const intersections = annotatedRanges
       .map((range) => ({
         start: Math.max(start, range.start),
@@ -1910,8 +1956,8 @@ function wrapTextRanges(
     };
     let cursor = 0;
     intersections.forEach((range) => {
-      const localStart = range.start - start;
-      const localEnd = range.end - start;
+      const localStart = nodeOffset + range.start - start;
+      const localEnd = nodeOffset + range.end - start;
       if (localStart > cursor) {
         fragment.append(source.slice(cursor, localStart));
       }
@@ -1986,6 +2032,7 @@ function sliceReviewTextInventory(
         node: entry.node,
         start: Math.max(entry.start, start) - start,
         end: Math.min(entry.end, end) - start,
+        nodeOffset: entry.nodeOffset + Math.max(0, start - entry.start),
       })),
     breakOffsets: inventory.breakOffsets
       .filter((offset) => offset > start && offset < end)
@@ -2475,11 +2522,9 @@ function markSemanticAllText(
 
 function markSemanticTextDifferences(graph: ReviewSemanticPairGraph): {
   changed: boolean;
-  layoutPairs: ReviewSemanticPairNode[];
 } {
   let changed = false;
   let groupSequence = 0;
-  const layoutPairs: ReviewSemanticPairNode[] = [];
   flattenReviewSemanticPairs(graph.root).forEach((pair) => {
     const beforeInventory = pair.before?.inventory || null;
     const afterInventory = pair.after?.inventory || null;
@@ -2495,20 +2540,18 @@ function markSemanticTextDifferences(graph: ReviewSemanticPairGraph): {
     }
     if (!beforeInventory || !afterInventory || !pair.before || !pair.after) return;
     const layoutChanged = !sameBreakLayout(beforeInventory, afterInventory);
-    if (beforeInventory.text === afterInventory.text) {
-      if (layoutChanged) layoutPairs.push(pair);
-      return;
-    }
-    const differences = sentenceAwareTextDifferences(
-      beforeInventory.text,
-      afterInventory.text,
-    );
-    if (!differences.before.length && !differences.after.length) return;
+    const differences = beforeInventory.text === afterInventory.text
+      ? { before: [], after: [] }
+      : sentenceAwareTextDifferences(beforeInventory.text, afterInventory.text);
     const plan = readableReviewTextFootprintPlan(
       beforeInventory.text,
       afterInventory.text,
-      differences,
+      { ...differences, layout: layoutChanged },
     );
+    if (plan.operation === "none") return;
+    if (plan.operation === "layout") {
+      return;
+    }
     if (plan.operation === "replace") {
       markStableSentenceRanges(pair.before, beforeInventory, plan.before.evidenceRanges);
       markStableSentenceRanges(pair.after, afterInventory, plan.after.evidenceRanges);
@@ -2541,17 +2584,25 @@ function markSemanticTextDifferences(graph: ReviewSemanticPairGraph): {
       wrapTextRanges(beforeInventory, beforeGroups, "removed");
       changed = true;
     } else if (plan.before.anchorOffset !== null) {
-      markTextAnchor(pair.before.element, `${groupBase}-1`, plan.before.anchorOffset);
+      markTextAnchor(
+        pair.before.element,
+        `${groupBase}-1`,
+        reviewTextAnchorOffset(pair.before.element, beforeInventory) + plan.before.anchorOffset,
+      );
     }
     if (afterGroups.length) {
       markSemanticTextFootprintOwner(pair.after, afterGroups);
       wrapTextRanges(afterInventory, afterGroups, "added");
       changed = true;
     } else if (plan.after.anchorOffset !== null) {
-      markTextAnchor(pair.after.element, `${groupBase}-1`, plan.after.anchorOffset);
+      markTextAnchor(
+        pair.after.element,
+        `${groupBase}-1`,
+        reviewTextAnchorOffset(pair.after.element, afterInventory) + plan.after.anchorOffset,
+      );
     }
   });
-  return { changed, layoutPairs };
+  return { changed };
 }
 
 function selfPresentationSignature(element: Element): string {
@@ -2862,6 +2913,18 @@ function changedStylesheetSelectors(before: Document, after: Document) {
 
 type ReviewStyleScope = "box" | "content";
 
+function reviewProjectionFactsForElement(element: Element): ReviewProjectionFact[] {
+  return parseReviewProjectionFacts(element.getAttribute(REVIEW_PROJECTION_FACTS_ATTRIBUTE));
+}
+
+function appendProjectionFactToElement(
+  element: Element,
+  fact: ReviewProjectionFact,
+) {
+  const facts = appendReviewProjectionFact(reviewProjectionFactsForElement(element), fact);
+  element.setAttribute(REVIEW_PROJECTION_FACTS_ATTRIBUTE, serializeReviewProjectionFacts(facts));
+}
+
 const BOX_OWNED_STYLE_PROPERTIES = new Set([
   "aspect-ratio",
   "backdrop-filter",
@@ -2980,16 +3043,22 @@ function semanticStylePairs(graph: ReviewSemanticPairGraph): Array<{
   before: Element;
   after: Element;
   semanticOwnerId: string;
+  geometryOwnerId: string;
 }> {
   const assignments = new Map<Element, {
     after: Element;
     semanticOwnerId: string;
+    geometryOwnerId: string;
   }>();
   flattenReviewSemanticPairs(graph.root).forEach((pair) => {
     if (!pair.before || !pair.after) return;
     const add = (before: Element, after: Element) => {
       if (!assignments.has(before)) {
-        assignments.set(before, { after, semanticOwnerId: pair.semanticOwnerId });
+        assignments.set(before, {
+          after,
+          semanticOwnerId: pair.semanticOwnerId,
+          geometryOwnerId: pair.geometryOwnerId,
+        });
       }
     };
     add(pair.before.element, pair.after.element);
@@ -3019,6 +3088,7 @@ function semanticStylePairs(graph: ReviewSemanticPairGraph): Array<{
     before,
     after: value.after,
     semanticOwnerId: value.semanticOwnerId,
+    geometryOwnerId: value.geometryOwnerId,
   }));
 }
 
@@ -3038,11 +3108,16 @@ function markStyleDifferences(
     afterElement: Element,
     scope: ReviewStyleScope,
     semanticOwnerId: string,
-    summary = "",
+    geometryOwnerId: string,
+    summary = "视觉调整",
+    factOwner?: string,
+    operation?: ReviewTextChangeOperation,
   ) => {
-    const owner = beforeElement.getAttribute("data-pageroot-review-style-owner")
+    const existingOwner = beforeElement.getAttribute("data-pageroot-review-style-owner")
       || afterElement.getAttribute("data-pageroot-review-style-owner")
+      || factOwner
       || `style-owner-${++ownerSequence}`;
+    const owner = factOwner || existingOwner;
     const existingScope = beforeElement.getAttribute("data-pageroot-review-style-scope")
       || afterElement.getAttribute("data-pageroot-review-style-scope");
     const resolvedScope: ReviewStyleScope = existingScope === "box" || scope === "box"
@@ -3050,16 +3125,37 @@ function markStyleDifferences(
       : "content";
     beforeElement.setAttribute("data-pageroot-review-style", "before");
     afterElement.setAttribute("data-pageroot-review-style", "after");
-    beforeElement.setAttribute("data-pageroot-review-style-owner", owner);
-    afterElement.setAttribute("data-pageroot-review-style-owner", owner);
+    // Legacy single-value attributes remain only as compatibility metadata for
+    // runtime candidate suppression. The serialized fact list below is the
+    // projection authority and can retain multiple independent facts.
+    beforeElement.setAttribute("data-pageroot-review-style-owner", existingOwner);
+    afterElement.setAttribute("data-pageroot-review-style-owner", existingOwner);
     beforeElement.setAttribute("data-pageroot-review-style-scope", resolvedScope);
     afterElement.setAttribute("data-pageroot-review-style-scope", resolvedScope);
     beforeElement.setAttribute("data-pageroot-review-semantic-owner", semanticOwnerId);
     afterElement.setAttribute("data-pageroot-review-semantic-owner", semanticOwnerId);
-    if (summary) {
+    if (geometryOwnerId) {
+      beforeElement.setAttribute("data-pageroot-review-geometry-owner", geometryOwnerId);
+      afterElement.setAttribute("data-pageroot-review-geometry-owner", geometryOwnerId);
+    }
+    const existingSummary = beforeElement.getAttribute("data-pageroot-review-style-summary")
+      || afterElement.getAttribute("data-pageroot-review-style-summary");
+    if (!existingSummary || summary !== "换行调整") {
       beforeElement.setAttribute("data-pageroot-review-style-summary", summary);
       afterElement.setAttribute("data-pageroot-review-style-summary", summary);
     }
+    [beforeElement, afterElement].forEach((element) => {
+      appendProjectionFactToElement(element, {
+        id: owner,
+        type: "style",
+        semanticOwnerId,
+        ...(geometryOwnerId ? { geometryOwnerId } : {}),
+        ownerKey: owner,
+        scope,
+        summary,
+        ...(operation ? { operation } : {}),
+      });
+    });
     marked += 1;
   };
   const boundedPairs = semanticStylePairs(graph);
@@ -3070,6 +3166,7 @@ function markStyleDifferences(
       pair.after,
       styleScopeForProperties(changedVisualProperties(pair.before, pair.after)),
       pair.semanticOwnerId,
+      pair.geometryOwnerId,
     );
     if (marked >= 40) break;
   }
@@ -3083,12 +3180,13 @@ function markStyleDifferences(
         .filter((pair) => beforeMatches.has(pair.before) && afterMatches.has(pair.after))
         .slice(0, 40)
         .forEach((pair) => {
-          markPair(pair.before, pair.after, scope, pair.semanticOwnerId);
+          markPair(pair.before, pair.after, scope, pair.semanticOwnerId, pair.geometryOwnerId);
         });
     });
   });
   layoutPairs.forEach((pair) => {
     if (!pair.before || !pair.after) return;
+    const layoutOwner = `layout-owner-${++ownerSequence}`;
     pair.before.element.setAttribute("data-pageroot-review-layout", "before");
     pair.after.element.setAttribute("data-pageroot-review-layout", "after");
     pair.before.element.setAttribute("data-pageroot-review-operation", "layout");
@@ -3098,26 +3196,45 @@ function markStyleDifferences(
       pair.after.element,
       "content",
       pair.semanticOwnerId,
+      pair.geometryOwnerId,
       "换行调整",
+      layoutOwner,
+      "layout",
     );
   });
   return marked > 0;
 }
 
+function semanticLayoutPairs(graph: ReviewSemanticPairGraph): ReviewSemanticPairNode[] {
+  return flattenReviewSemanticPairs(graph.root).filter((pair) => {
+    const beforeInventory = pair.before?.inventory;
+    const afterInventory = pair.after?.inventory;
+    if (!beforeInventory || !afterInventory || beforeInventory.text !== afterInventory.text) return false;
+    const plan = readableReviewTextFootprintPlan(
+      beforeInventory.text,
+      afterInventory.text,
+      {
+        before: [],
+        after: [],
+        layout: !sameBreakLayout(beforeInventory, afterInventory),
+      },
+    );
+    return plan.operation === "layout";
+  });
+}
+
 function changeTypesForSemanticGraph(
   graph: ReviewSemanticPairGraph,
 ): ReviewChangeType[] {
-  const layoutPairs = flattenReviewSemanticPairs(graph.root).filter((semanticPair) => (
-    semanticPair.before?.inventory
-    && semanticPair.after?.inventory
-    && semanticPair.before.inventory.text === semanticPair.after.inventory.text
-    && !sameBreakLayout(semanticPair.before.inventory, semanticPair.after.inventory)
-  ));
+  // Style inspection still runs against the unwrapped source DOM. The same
+  // layout planner identifies visual-only pairs first; text marking consumes
+  // it again below to avoid fabricating red/green evidence.
+  const layoutPairs = semanticLayoutPairs(graph);
   const structureChanged = markStructureDifferences(graph);
   const styleChanged = markStyleDifferences(graph, layoutPairs);
-  const textChanged = markSemanticTextDifferences(graph).changed;
+  const textMarking = markSemanticTextDifferences(graph);
   return [
-    ...(textChanged ? ["text" as const] : []),
+    ...(textMarking.changed ? ["text" as const] : []),
     ...(structureChanged ? ["structure" as const] : []),
     ...(styleChanged ? ["style" as const] : []),
   ];
@@ -3146,29 +3263,93 @@ function attachChangeMarkerMetadata(
       element.hasAttribute("data-pageroot-review-text")
       || element.hasAttribute("data-pageroot-review-structure")
       || element.hasAttribute("data-pageroot-review-style")
+      || element.hasAttribute(REVIEW_PROJECTION_FACTS_ATTRIBUTE)
     ));
     markerElements.forEach((element, index) => {
-      const markerTypes: ReviewChangeType[] = [];
+      let facts = reviewProjectionFactsForElement(element);
       const textMarker = element.hasAttribute("data-pageroot-review-text");
-      if (textMarker) markerTypes.push("text");
-      if (element.hasAttribute("data-pageroot-review-structure")) markerTypes.push("structure");
-      if (element.hasAttribute("data-pageroot-review-style")) markerTypes.push("style");
       const textOperation = element.getAttribute("data-pageroot-review-text-operation");
+      const normalizedTextOperation = textOperation === "none"
+        || textOperation === "insert"
+        || textOperation === "delete"
+        || textOperation === "replace"
+        || textOperation === "layout"
+        ? textOperation
+        : null;
+      const rawTextScope = element.getAttribute("data-pageroot-review-text-scope");
+      const textScope: ReviewTextChangeScope = rawTextScope === "sentence"
+        ? "sentence"
+        : rawTextScope === "block"
+          ? "block"
+          : "inline";
       const readableTextSummary = element.getAttribute(
         "data-pageroot-review-text-summary",
       );
-      const styleSummary = element.getAttribute("data-pageroot-review-style-summary");
-      const summary = textMarker
+      const textSummary = textMarker
         ? readableTextSummary
           || (textOperation === "insert"
             ? "新增内容"
             : textOperation === "delete"
               ? "删除内容"
               : "文本调整")
-        : styleSummary || helper;
+        : "";
+      if (textMarker) {
+        const semanticOwnerId = element.getAttribute("data-pageroot-review-semantic-owner")
+          || `fallback-owner-${changeId}-text-${index + 1}`;
+        const geometryOwnerId = element.getAttribute("data-pageroot-review-geometry-owner") || "";
+        const textGroup = element.getAttribute("data-pageroot-review-text-group")
+          || `text-marker-${index + 1}`;
+        facts = appendReviewProjectionFact(facts, {
+          id: textGroup,
+          type: "text",
+          semanticOwnerId,
+          ...(geometryOwnerId ? { geometryOwnerId } : {}),
+          scope: "text",
+          tone: element.getAttribute("data-pageroot-review-text") === "removed"
+            ? "removed"
+            : "added",
+          textGroup,
+          textScope,
+          textDensity: Number(element.getAttribute("data-pageroot-review-text-density") || 0),
+          ...(normalizedTextOperation ? { operation: normalizedTextOperation } : {}),
+          summary: textSummary,
+        });
+      }
+      if (element.hasAttribute("data-pageroot-review-structure")) {
+        const semanticOwnerId = element.getAttribute("data-pageroot-review-semantic-owner")
+          || `fallback-owner-${changeId}-structure-${index + 1}`;
+        const geometryOwnerId = element.getAttribute("data-pageroot-review-geometry-owner") || "";
+        const structureChange = element.getAttribute("data-pageroot-review-structure") || "changed";
+        facts = appendReviewProjectionFact(facts, {
+          id: `structure-${semanticOwnerId}-${structureChange}`,
+          type: "structure",
+          semanticOwnerId,
+          ...(geometryOwnerId ? { geometryOwnerId } : {}),
+          scope: "element",
+          structureChange,
+          summary: structureChange === "from" || structureChange === "to"
+            ? "位置调整"
+            : "结构调整",
+        });
+      }
+      const markerTypes = [...new Set(facts.map((fact) => fact.type))] as ReviewChangeType[];
+      const textFact = facts.find((fact) => fact.type === "text");
+      const visualFact = facts.find((fact) => (
+        fact.type === "style" && fact.operation !== "layout"
+      ));
+      const layoutFact = facts.find((fact) => (
+        fact.type === "style" && fact.operation === "layout"
+      ));
+      const structureFact = facts.find((fact) => fact.type === "structure");
+      const summary = textFact?.summary
+        || visualFact?.summary
+        || layoutFact?.summary
+        || structureFact?.summary
+        || helper;
       element.setAttribute("data-pageroot-review-marker", changeId);
       element.setAttribute("data-pageroot-review-marker-types", markerTypes.join(" "));
       element.setAttribute("data-pageroot-review-summary", summary);
+      element.setAttribute(REVIEW_PROJECTION_FACTS_ATTRIBUTE, serializeReviewProjectionFacts(facts));
       element.setAttribute("data-pageroot-review-active", "false");
       if (index === 0) element.setAttribute("data-pageroot-review-primary", "true");
     });
@@ -4593,6 +4774,7 @@ function reviewBootstrap(
       runtimeVisualElementRemoveAttribute(element, "data-pageroot-review-summary");
       runtimeVisualElementRemoveAttribute(element, "data-pageroot-review-style-scope");
       runtimeVisualElementRemoveAttribute(element, "data-pageroot-review-style-owner");
+      runtimeVisualElementRemoveAttribute(element, "data-pageroot-review-projection-facts");
     });
     const hosts = runtimeVisualExpectedHosts();
     const hostsByKey = new RuntimeVisualMap();
@@ -5000,13 +5182,29 @@ function reviewBootstrap(
       }
     });
   };
+  const recordFocusScrollCommand = (commandId, top = scrollY, left = scrollX) => {
+    const maximumScroll = Math.max(0, documentHeight() - innerHeight);
+    const resolvedTop = clamp(Number(top || 0), 0, maximumScroll);
+    const resolvedLeft = Math.max(0, Number(left || 0));
+    activeScrollCommand = { commandId, top: resolvedTop, left: resolvedLeft };
+    return activeScrollCommand;
+  };
   const scrollToReviewRect = (rect) => {
     if (!rect || rect.height <= 0 || !Number.isFinite(rect.top)) return false;
     const token = "focus-" + Date.now() + "-" + Math.random();
-    const top = Math.max(0, scrollY + rect.top - Math.max(18, innerHeight * .12));
-    scrollTo({ top, left: scrollX, behavior: "auto" });
-    activeScrollCommand = { commandId: token, top, left: scrollX };
+    const top = clamp(
+      scrollY + rect.top - Math.max(18, innerHeight * .12),
+      0,
+      Math.max(0, documentHeight() - innerHeight),
+    );
+    const command = recordFocusScrollCommand(token, top, scrollX);
+    scrollTo({ top: command.top, left: command.left, behavior: "auto" });
     return true;
+  };
+  const scrollIntoReviewTarget = (target) => {
+    const token = "focus-" + Date.now() + "-" + Math.random();
+    target.scrollIntoView({ block: "start", behavior: "auto" });
+    recordFocusScrollCommand(token);
   };
   const anchorTextNodes = (anchor) => {
     const ownerId = anchor.getAttribute("data-pageroot-review-geometry-owner") || "";
@@ -5032,13 +5230,15 @@ function reviewBootstrap(
       if (
         parent
         && !crossesOwner
+        && parent.namespaceURI === "http://www.w3.org/1999/xhtml"
         && !parent.closest("script, style, noscript, template, [data-pageroot-review-projection-layer]")
       ) nodes.push(node);
       node = walker.nextNode();
     }
     return nodes;
   };
-  const collapsedAnchorRect = (anchor) => {
+  const collapsedAnchorRect = (anchor, changeId) => {
+    if (anchor.getAttribute("data-pageroot-review-anchor-change") !== changeId) return null;
     const encoded = String(
       anchor.getAttribute("data-pageroot-review-text-anchors") || "",
     ).split(/\s+/).find(Boolean) || "";
@@ -5059,9 +5259,30 @@ function reviewBootstrap(
     }
     if (!targetNode) return null;
     const range = document.createRange();
-    range.setStart(targetNode, Math.min(targetOffset, targetNode.textContent?.length || 0));
+    const targetLength = targetNode.textContent?.length || 0;
+    targetOffset = Math.min(targetOffset, targetLength);
+    range.setStart(targetNode, targetOffset);
     range.collapse(true);
     let rect = range.getBoundingClientRect();
+    // A collapsed Range immediately after an authored <br> is often reported
+    // on the preceding visual line. Its offset remains the navigation anchor,
+    // while the next visible glyph supplies the measurable context rectangle.
+    let probeNode = targetNode;
+    let probeOffset = targetOffset;
+    let probeIndex = nodes.indexOf(targetNode);
+    while (probeNode && probeOffset >= (probeNode.textContent?.length || 0)) {
+      probeIndex += 1;
+      probeNode = nodes[probeIndex] || null;
+      probeOffset = 0;
+    }
+    if (probeNode && (probeNode.textContent?.length || 0) > probeOffset) {
+      const probe = document.createRange();
+      probe.setStart(probeNode, probeOffset);
+      probe.setEnd(probeNode, probeOffset + 1);
+      const probeRect = probe.getBoundingClientRect();
+      probe.detach();
+      if (probeRect.height > 0) rect = probeRect;
+    }
     if (rect.height <= 0) {
       const length = targetNode.textContent?.length || 0;
       const start = Math.max(0, Math.min(targetOffset > 0 ? targetOffset - 1 : 0, length));
@@ -5080,7 +5301,7 @@ function reviewBootstrap(
     if (!target) return;
     requestAnimationFrame(() => {
       if (!scrollToReviewRect(target.getBoundingClientRect())) {
-        target.scrollIntoView({ block: "start", behavior: "auto" });
+        scrollIntoReviewTarget(target);
       }
     });
   };
@@ -5091,12 +5312,12 @@ function reviewBootstrap(
         '[data-pageroot-review-overlay-box="' + changeId + '"]',
       );
       if (visibleBox && scrollToReviewRect(visibleBox.getBoundingClientRect())) return;
-      const anchor = document.querySelector(
+      const anchors = [...document.querySelectorAll(
         '[data-pageroot-review-anchor-change="' + changeId + '"]',
-      );
-      if (anchor && scrollToReviewRect(collapsedAnchorRect(anchor))) return;
+      )];
+      if (anchors.some((anchor) => scrollToReviewRect(collapsedAnchorRect(anchor, changeId)))) return;
       if (target && !scrollToReviewRect(target.getBoundingClientRect())) {
-        target.scrollIntoView({ block: "start", behavior: "auto" });
+        scrollIntoReviewTarget(target);
       }
     });
   };
@@ -5123,6 +5344,132 @@ function reviewBootstrap(
   const markerTypes = (element) => String(
     element.getAttribute("data-pageroot-review-marker-types") || "",
   ).split(/\s+/).filter(Boolean);
+  const safeProjectionFactKey = (value) => {
+    const key = String(value || "").trim();
+    return /^[a-z0-9:_-]{1,160}$/iu.test(key) ? key : "";
+  };
+  const safeProjectionSummary = (value) => {
+    const summary = String(value || "").trim();
+    return summary && summary.length <= 80 ? summary : "";
+  };
+  const normalizeProjectionFact = (value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    const id = safeProjectionFactKey(value.id);
+    const type = value.type === "text" || value.type === "structure" || value.type === "style"
+      ? value.type
+      : "";
+    const semanticOwnerId = safeProjectionFactKey(value.semanticOwnerId);
+    if (!id || !type || !semanticOwnerId) return null;
+    const fact = { id, type, semanticOwnerId };
+    const geometryOwnerId = safeProjectionFactKey(value.geometryOwnerId);
+    const ownerKey = safeProjectionFactKey(value.ownerKey);
+    const textGroup = safeProjectionFactKey(value.textGroup);
+    const structureChange = safeProjectionFactKey(value.structureChange);
+    const scope = ["text", "text-phrase", "text-line", "text-block", "element", "box", "content"]
+      .includes(value.scope)
+      ? value.scope
+      : "";
+    const textScope = ["inline", "sentence", "block"]
+      .includes(value.textScope)
+      ? value.textScope
+      : "";
+    const operation = ["none", "insert", "delete", "replace", "layout"].includes(value.operation)
+      ? value.operation
+      : "";
+    const tone = value.tone === "added" || value.tone === "removed" ? value.tone : "";
+    const summary = safeProjectionSummary(value.summary);
+    const textDensity = Number(value.textDensity);
+    if (geometryOwnerId) fact.geometryOwnerId = geometryOwnerId;
+    if (ownerKey) fact.ownerKey = ownerKey;
+    if (textGroup) fact.textGroup = textGroup;
+    if (structureChange) fact.structureChange = structureChange;
+    if (scope) fact.scope = scope;
+    if (textScope) fact.textScope = textScope;
+    if (operation) fact.operation = operation;
+    if (tone) fact.tone = tone;
+    if (summary) fact.summary = summary;
+    if (Number.isFinite(textDensity) && textDensity >= 0 && textDensity <= 1) {
+      fact.textDensity = textDensity;
+    }
+    return fact;
+  };
+  const projectionFactIdentity = (fact) => [
+    fact.type,
+    fact.id,
+    fact.semanticOwnerId,
+    fact.geometryOwnerId || "",
+  ].join("\u001f");
+  const projectionFactsForElement = (element, fallbackSequence) => {
+    const serialized = element.getAttribute("data-pageroot-review-projection-facts");
+    if (serialized) {
+      try {
+        const parsed = JSON.parse(serialized);
+        if (!Array.isArray(parsed) || parsed.length > 24) return [];
+        const seen = new Set();
+        const facts = [];
+        for (const value of parsed) {
+          const fact = normalizeProjectionFact(value);
+          if (!fact) return [];
+          const key = projectionFactIdentity(fact);
+          if (seen.has(key)) continue;
+          seen.add(key);
+          facts.push(fact);
+        }
+        return facts;
+      } catch {
+        return [];
+      }
+    }
+    const changeId = element.getAttribute("data-pageroot-review-marker") || "";
+    const semanticOwnerId = element.getAttribute("data-pageroot-review-semantic-owner")
+      || ("fallback-owner-" + changeId + "-" + fallbackSequence);
+    const geometryOwnerId = element.getAttribute("data-pageroot-review-geometry-owner") || "";
+    const facts = [];
+    if (element.hasAttribute("data-pageroot-review-text")) {
+      const textGroup = element.getAttribute("data-pageroot-review-text-group")
+        || ("text-marker-" + fallbackSequence);
+      facts.push({
+        id: textGroup,
+        type: "text",
+        semanticOwnerId,
+        ...(geometryOwnerId ? { geometryOwnerId } : {}),
+        scope: "text",
+        tone: element.getAttribute("data-pageroot-review-text") === "removed" ? "removed" : "added",
+        textGroup,
+        textScope: element.getAttribute("data-pageroot-review-text-scope") || "inline",
+        textDensity: Number(element.getAttribute("data-pageroot-review-text-density") || 0),
+        operation: element.getAttribute("data-pageroot-review-text-operation") || "",
+        summary: element.getAttribute("data-pageroot-review-summary") || "",
+      });
+    }
+    if (markerTypes(element).includes("structure")) {
+      const structureChange = element.getAttribute("data-pageroot-review-structure") || "changed";
+      facts.push({
+        id: "structure-" + semanticOwnerId + "-" + structureChange,
+        type: "structure",
+        semanticOwnerId,
+        ...(geometryOwnerId ? { geometryOwnerId } : {}),
+        scope: "element",
+        structureChange,
+        summary: element.getAttribute("data-pageroot-review-summary") || "结构调整",
+      });
+    }
+    if (markerTypes(element).includes("style")) {
+      const ownerKey = element.getAttribute("data-pageroot-review-style-owner")
+        || ("style-owner-" + fallbackSequence);
+      facts.push({
+        id: ownerKey,
+        type: "style",
+        semanticOwnerId,
+        ...(geometryOwnerId ? { geometryOwnerId } : {}),
+        ownerKey,
+        scope: element.getAttribute("data-pageroot-review-style-scope") || "content",
+        operation: element.getAttribute("data-pageroot-review-operation") || "",
+        summary: element.getAttribute("data-pageroot-review-summary") || "视觉调整",
+      });
+    }
+    return facts.map(normalizeProjectionFact).filter(Boolean);
+  };
   const recordContains = (outer, inner, tolerance = 2) => (
     inner.left >= outer.left - tolerance
     && inner.top >= outer.top - tolerance
@@ -5558,6 +5905,7 @@ function reviewBootstrap(
         record.changeId,
         record.semanticOwnerId,
         record.geometryOwnerId,
+        record.factIdentity,
         record.textGroup,
       ].join("|");
       const group = groups.get(key) || [];
@@ -5612,98 +5960,75 @@ function reviewBootstrap(
     document.querySelector('[data-pageroot-review-projection-layer]')?.remove();
     const filter = currentState.filter || "all";
     const records = [];
-    if (filter === "all" || filter === "text") {
-      let textMarkerSequence = 0;
-      document.querySelectorAll('[data-pageroot-review-marker-types~="text"]').forEach((element) => {
-        textMarkerSequence += 1;
-        const textToneValue = element.getAttribute("data-pageroot-review-text");
-        const textTone = textToneValue === "removed" ? "text-removed" : "text-added";
-        const changeId = element.getAttribute("data-pageroot-review-marker") || "";
-        const semanticOwnerId = element.getAttribute("data-pageroot-review-semantic-owner") || "";
-        const geometryOwnerId = element.getAttribute("data-pageroot-review-geometry-owner") || "";
-        const textGroup = element.getAttribute("data-pageroot-review-text-group")
-          || ("text-marker-" + textMarkerSequence);
-        rangeClientRects(element)
-          .forEach((rect) => records.push({
-            element,
-            changeId,
-            semanticOwnerId,
-            geometryOwnerId,
-            factKey: "text:" + textGroup,
-            allFactKey: "text:" + semanticOwnerId + ":" + geometryOwnerId + ":" + textGroup,
-            ownerKey: "",
-            textGroup,
-            textScope: element.getAttribute("data-pageroot-review-text-scope") || "inline",
-            textDensity: Number(
-              element.getAttribute("data-pageroot-review-text-density") || 0,
-            ),
-            textOperation: element.getAttribute("data-pageroot-review-text-operation") || "",
-            scope: "text",
-            summary: element.getAttribute("data-pageroot-review-summary") || "",
-            tone: textTone,
-            tones: [textTone],
-            types: ["text"],
-            left: rect.left + scrollX,
-            top: rect.top + scrollY,
-            right: rect.right + scrollX,
-            bottom: rect.bottom + scrollY,
-          }));
-      });
-    }
-    const selector = filter === "all"
-      ? '[data-pageroot-review-marker-types~="structure"], [data-pageroot-review-marker-types~="style"]'
-      : filter === "text"
-        ? ""
-        : '[data-pageroot-review-marker-types~="' + filter + '"]';
-    if (selector) [...document.querySelectorAll(selector)]
-      .forEach((element) => {
-        const types = markerTypes(element).filter((type) => filter === "all" || type === filter);
-        types.forEach((type) => {
-          const changeId = element.getAttribute("data-pageroot-review-marker") || "";
-          const ownerKey = type === "style"
-            ? element.getAttribute("data-pageroot-review-style-owner") || ""
-            : "";
-          const semanticOwnerId = element.getAttribute("data-pageroot-review-semantic-owner")
-            || ("fallback-owner:" + changeId + ":" + type + ":" + ownerKey);
-          const geometryOwnerId = element.getAttribute("data-pageroot-review-geometry-owner") || "";
-          const structureChange = type === "structure"
-            ? element.getAttribute("data-pageroot-review-structure") || ""
-            : "";
-          const scope = type === "style"
-            ? element.getAttribute("data-pageroot-review-style-scope") || "content"
-            : "element";
-          const rects = type === "style" && scope === "content"
+    let markerSequence = 0;
+    document.querySelectorAll('[data-pageroot-review-marker]').forEach((element) => {
+      markerSequence += 1;
+      const changeId = element.getAttribute("data-pageroot-review-marker") || "";
+      projectionFactsForElement(element, markerSequence)
+        .filter((fact) => filter === "all" || fact.type === filter)
+        .forEach((fact) => {
+          const semanticOwnerId = fact.semanticOwnerId;
+          const geometryOwnerId = fact.geometryOwnerId || "";
+          const factKey = fact.type + ":" + fact.id;
+          const factIdentity = projectionFactIdentity(fact);
+          if (fact.type === "text") {
+            const textTone = fact.tone === "removed" ? "text-removed" : "text-added";
+            const textGroup = fact.textGroup || fact.id;
+            rangeClientRects(element).forEach((rect) => records.push({
+              element,
+              changeId,
+              semanticOwnerId,
+              geometryOwnerId,
+              factKey,
+              factIdentity,
+              ownerKey: "",
+              textGroup,
+              textScope: fact.textScope || "inline",
+              textDensity: Number(fact.textDensity || 0),
+              textOperation: fact.operation || "",
+              scope: "text",
+              summary: fact.summary || element.getAttribute("data-pageroot-review-summary") || "文本调整",
+              tone: textTone,
+              tones: [textTone],
+              types: ["text"],
+              left: rect.left + scrollX,
+              top: rect.top + scrollY,
+              right: rect.right + scrollX,
+              bottom: rect.bottom + scrollY,
+            }));
+            return;
+          }
+          const scope = fact.scope || (fact.type === "style" ? "content" : "element");
+          const rects = fact.type === "style" && scope === "content"
             ? contentStyleRects(element)
             : [element.getBoundingClientRect()];
+          const structureChange = fact.type === "structure" ? fact.structureChange || "" : "";
+          const summary = fact.summary || (fact.type === "style"
+            ? (fact.operation === "layout" ? "换行调整" : "视觉调整")
+            : (structureChange === "from" || structureChange === "to"
+              ? "位置调整"
+              : "结构调整"));
           rects.forEach((rect) => records.push({
             element,
             changeId,
             semanticOwnerId,
             geometryOwnerId,
-            factKey: type === "style"
-              ? "style:" + ownerKey
-              : "structure:" + semanticOwnerId + ":" + structureChange,
-            allFactKey: "owner:" + semanticOwnerId + ":" + geometryOwnerId,
-            ownerKey,
+            factKey,
+            factIdentity,
+            ownerKey: fact.ownerKey || "",
             structureChange,
             scope,
-            summary: type === "style"
-              ? (element.getAttribute("data-pageroot-review-operation") === "layout"
-                ? "换行调整"
-                : "视觉调整")
-              : (structureChange === "from" || structureChange === "to"
-                ? "位置调整"
-                : "结构调整"),
-            tone: type,
-            tones: [type],
-            types: [type],
+            summary,
+            tone: fact.type,
+            tones: [fact.type],
+            types: [fact.type],
             left: rect.left + scrollX,
             top: rect.top + scrollY,
             right: rect.right + scrollX,
             bottom: rect.bottom + scrollY,
           }));
         });
-      });
+    });
     const visibleRecords = records
       .filter((rect) => rect.right - rect.left > 1 && rect.bottom - rect.top > 1)
       .sort((left, right) => left.changeId.localeCompare(right.changeId) || left.top - right.top || left.left - right.left);
@@ -5750,7 +6075,7 @@ function reviewBootstrap(
           index === candidateIndex
           || record.changeId !== candidate.changeId
           || record.semanticOwnerId !== candidate.semanticOwnerId
-          || record.factKey !== candidate.factKey
+          || record.factIdentity !== candidate.factIdentity
           || record.tone !== candidate.tone
         ) return false;
         const recordArea = (record.right - record.left) * (record.bottom - record.top);
@@ -5769,7 +6094,7 @@ function reviewBootstrap(
       ...mergeConnectedRecords(nonTextRecords, (left, right) => (
         left.changeId === right.changeId
         && left.semanticOwnerId === right.semanticOwnerId
-        && left.factKey === right.factKey
+        && left.factIdentity === right.factIdentity
         && left.tone === right.tone
         && recordsAreClose(left, right)
       )),
@@ -5778,7 +6103,10 @@ function reviewBootstrap(
       merged = mergeConnectedRecords(merged, (left, right) => (
         left.changeId === right.changeId
         && left.semanticOwnerId === right.semanticOwnerId
-        && left.allFactKey === right.allFactKey
+        // “全部变化” may suppress a structural child by its explicit owner
+        // rule, but it must never turn merely adjacent independent facts into
+        // one outline or one mask hole.
+        && left.factIdentity === right.factIdentity
         && recordsOverlapStrongly(left, right)
       )).map((record) => ({
         ...record,

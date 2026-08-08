@@ -130,9 +130,13 @@ Comments + frozen input
   fallback. Repeated, low-confidence and ambiguous candidates remain unmatched;
   it never promotes tag, position or geometric proximity into a change fact.
   The shared pair graph derives copy, structure and visual facts once, and only
-  then emits one typed canonical change footprint. Each fact carries a
-  disposable semantic owner and a geometry owner for the prepared review pair;
-  neither identity is persisted, sent over IPC, or available to comments. The
+  then emits a typed canonical fact list. One prepared element may carry more
+  than one independent fact (for example, a box-style change and a layout
+  change), each with its own fact identity, disposable semantic owner and
+  geometry owner. Facts never merge merely because they share an element or
+  are geometrically close; final projection rectangles require the same fact
+  and owners, except for the explicit structural-owner dominance rule. Neither
+  identity is persisted, sent over IPC, or available to comments. The
   ready-review session prepares that immutable document pair for the exact
   operation/source/comment identity before the React review surface mounts;
   rerenders and bounded cache hits reuse it. Static source analysis remains the primary fact
@@ -311,6 +315,7 @@ they do not import application services.
 | AI handoff drawer presentation | `app/workbench/handoff-view.tsx` |
 | Formal AI review state transitions | `app/workbench/review-state.ts` |
 | Bounded pure sibling alignment for semantic review units | `app/lib/review-semantic-alignment.js` |
+| Typed, per-element review projection fact normalization and filtering | `app/lib/review-projection-facts.js` |
 | Bounded review-runtime snapshot validation, comparison, deduplication and comparison deadline | `app/lib/review-runtime-visual.js` |
 | Formal AI review analysis, paired runtime mapping, global mask and overlay projection | `app/workbench/review-document.ts` |
 | Formal AI review composition and isolated-frame coordination | `app/workbench/AiReviewWorkspace.tsx` |

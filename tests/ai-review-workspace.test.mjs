@@ -257,9 +257,12 @@ test("change discovery builds a complete outline and precise change markers", ()
   assert.doesNotMatch(reviewDocument, /STRUCTURE_TRANSPARENT_TAGS/);
   assert.doesNotMatch(reviewDocument, /beforeTokenRanges\.length \?/);
   assert.doesNotMatch(reviewDocument, /afterTokenRanges\.length \?/);
+  assert.match(reviewDocument, /const layoutPairs = semanticLayoutPairs\(graph\)/);
   assert.match(reviewDocument, /const structureChanged = markStructureDifferences\(graph\)/);
   assert.match(reviewDocument, /const styleChanged = markStyleDifferences\(graph, layoutPairs\)/);
-  assert.match(reviewDocument, /const textChanged = markSemanticTextDifferences\(graph\)\.changed/);
+  assert.match(reviewDocument, /const textMarking = markSemanticTextDifferences\(graph\)/);
+  assert.match(reviewDocument, /REVIEW_PROJECTION_FACTS_ATTRIBUTE/);
+  assert.match(reviewDocument, /appendProjectionFactToElement/);
   assert.doesNotMatch(reviewDocument, /presentationSignature\(before\) !== presentationSignature\(after\)/);
   assert.doesNotMatch(reviewDocument, /const positional = afterElements\[index\]/);
   assert.match(reviewDocument, /annotatePanelPairs/);
@@ -335,7 +338,8 @@ test("all-change review keeps text treatment precise and mirrors authored action
   assert.doesNotMatch(reviewDocument, /data-pageroot-review-filter="all"\] \[data-pageroot-review-id\]/);
   assert.match(reviewDocument, /data-pageroot-review-filter="all"\] \[data-pageroot-review-text="removed"\]/);
   assert.match(reviewDocument, /color: inherit !important;[\s\S]*?text-decoration: none !important/);
-  assert.match(reviewDocument, /querySelectorAll\('\[data-pageroot-review-marker-types~="text"\]'\)/);
+  assert.match(reviewDocument, /projectionFactsForElement\(element, markerSequence\)/);
+  assert.match(reviewDocument, /data-pageroot-review-projection-facts/);
   assert.match(reviewDocument, /textTone[\s\S]*?"text-removed"[\s\S]*?"text-added"/);
   assert.match(reviewDocument, /"新增内容"/);
   assert.match(reviewDocument, /"删除内容"/);
@@ -356,7 +360,9 @@ test("all-change review keeps text treatment precise and mirrors authored action
   assert.match(reviewDocument, /dominantStyleBoxes/);
   assert.match(reviewDocument, /candidate\.element\.contains\(record\.element\)/);
   assert.match(reviewDocument, /left\.semanticOwnerId === right\.semanticOwnerId/);
-  assert.match(reviewDocument, /left\.factKey === right\.factKey/);
+  assert.match(reviewDocument, /const factIdentity = projectionFactIdentity\(fact\)/);
+  assert.match(reviewDocument, /left\.factIdentity === right\.factIdentity/);
+  assert.doesNotMatch(reviewDocument, /left\.allFactKey === right\.allFactKey/);
   assert.match(reviewDocument, /structureDominators/);
   assert.match(reviewDocument, /range\.selectNodeContents\(element\)/);
   assert.match(reviewDocument, /tone: record\.tones\.length > 1 \? "mixed" : record\.tones\[0\]/);

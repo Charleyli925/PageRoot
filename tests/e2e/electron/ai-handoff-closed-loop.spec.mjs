@@ -521,7 +521,7 @@ test("a verified AI result stays pending through desktop review until the user a
       <div data-review-regression-summary>在守住 EBITA 率底线的基础上，锁单确收实现 +8.52% 增长；21 天日均增量 +4.12 万，累计增量 +86.6 万。</div>
       <div data-review-semantic-copy>而非「让每个商品卖得更好」（品均基本持平）。这说明增长主要来自有效成交覆盖扩大。</div>
       <div data-review-readable-rewrite style="width: 360px; line-height: 1.7">${READABLE_REWRITE_BEFORE}</div>
-      <p data-review-layout-only style="width: 240px">同一段文字保持不变<br>只是换行位置调整。</p>
+      <p data-review-layout-only style="width: 240px; padding: 4px; border: 1px solid #c9ceda">同一段文字保持不变<br>只是换行位置调整。</p>
       <p data-review-cross-line style="width: 150px; line-height: 1.6">稳定前缀，稳定后缀。</p>
       <p data-review-stable-sentence-rewrite style="width: 150px; line-height: 1.6">稳定前句。旧方案覆盖多个指标、多个渠道、多个阶段，并给出较长说明。稳定后句。</p>
       <style data-review-marker-style>[data-review-injection-stability] span { display:block !important; padding:9px !important; }</style>
@@ -563,7 +563,8 @@ test("a verified AI result stays pending through desktop review until the user a
     <section data-review-anchor-only-section>
       <h2>删除锚点导航</h2>
       <div style="height:280px" aria-hidden="true"></div>
-      <p data-review-anchor-only>稳定开头。只删除这句定位文字。稳定结尾。</p>
+      <p data-review-anchor-only style="line-height:48px">稳定开头。<br>稳定中段。<br>只删除这句定位文字。稳定结尾。</p>
+      <div style="height:360px" aria-hidden="true"></div>
     </section>
     <section data-review-runtime-visuals>
       <h2>运行态图表回归</h2>
@@ -1086,12 +1087,15 @@ test("a verified AI result stays pending through desktop review until the user a
     "utf8",
   );
   const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
-  let delayedReviewResourceRequests = 0;
+  const delayedReviewResourceRequestsBySide = new Map();
   const runtimeVisualCommentText = "这两个图的配色改一下，包括旁边这个柱状图的颜色。";
   const ordinaryReviewCommentText = "这个普通段落也请保留。";
   await launched.page.route("**/review-runtime-slow.png*", async (route) => {
-    delayedReviewResourceRequests += 1;
     const reviewSide = new URL(route.request().url()).searchParams.get("side");
+    delayedReviewResourceRequestsBySide.set(
+      reviewSide,
+      (delayedReviewResourceRequestsBySide.get(reviewSide) || 0) + 1,
+    );
     await new Promise((resolve) => setTimeout(
       resolve,
       reviewSide === "after" ? 750 : 50,
@@ -1226,8 +1230,8 @@ test("a verified AI result stays pending through desktop review until the user a
           `<div data-review-readable-rewrite style="width: 360px; line-height: 1.7">${READABLE_REWRITE_AFTER}</div>`,
         )
         .replace(
-          '<p data-review-layout-only style="width: 240px">同一段文字保持不变<br>只是换行位置调整。</p>',
-          '<p data-review-layout-only style="width: 240px">同一段文字保持不变只是<br>换行位置调整。</p>',
+          '<p data-review-layout-only style="width: 240px; padding: 4px; border: 1px solid #c9ceda">同一段文字保持不变<br>只是换行位置调整。</p>',
+          '<p data-review-layout-only style="width: 240px; padding: 14px; border: 3px solid #6d5ce7">同一段文字保持不变只是<br>换行位置调整。</p>',
         )
         .replace(
           '<p data-review-cross-line style="width: 150px; line-height: 1.6">稳定前缀，稳定后缀。</p>',
@@ -1258,8 +1262,8 @@ test("a verified AI result stays pending through desktop review until the user a
           '<div data-review-ebita-copy><strong>结论：</strong>EBITA差异均在波动范围内（0.06~0.13pt），AI托管未恶化盈利能力，建议继续保留实验策略。</div>',
         )
         .replace(
-          '<p data-review-anchor-only>稳定开头。只删除这句定位文字。稳定结尾。</p>',
-          '<p data-review-anchor-only>稳定开头。稳定结尾。</p>',
+          '<p data-review-anchor-only style="line-height:48px">稳定开头。<br>稳定中段。<br>只删除这句定位文字。稳定结尾。</p>',
+          '<p data-review-anchor-only style="line-height:48px">稳定开头。<br>稳定中段。<br>稳定结尾。</p>',
         )
         .replace(
           "<article><h2>标签一概览</h2><p>第一块完整内容</p></article>\n      <article><h2>标签一详情</h2><p>第二块完整内容</p></article>",
@@ -1433,7 +1437,10 @@ test("a verified AI result stays pending through desktop review until the user a
       .toHaveAttribute("data-review-runtime-promise-digest-api-restored", "true");
     await expect(afterReviewFrame.locator("html"))
       .toHaveAttribute("data-review-runtime-promise-digest-api-restored", "true");
-    expect(delayedReviewResourceRequests).toBeGreaterThanOrEqual(4);
+    expect(delayedReviewResourceRequestsBySide.get("before") || 0)
+      .toBeGreaterThanOrEqual(1);
+    expect(delayedReviewResourceRequestsBySide.get("after") || 0)
+      .toBeGreaterThanOrEqual(1);
     const runtimeChangedHosts = [
       "#review-runtime-html-chart",
       "#review-runtime-text-chart",
@@ -2024,6 +2031,14 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect(afterReviewFrame.locator(
       "[data-review-anchor-only]",
     )).toHaveAttribute("data-pageroot-review-anchor-change", anchorOnlyChangeId);
+    const anchorOffsets = await afterReviewFrame.locator(
+      "[data-review-anchor-only]",
+    ).evaluate((anchor) => String(
+      anchor.getAttribute("data-pageroot-review-text-anchors") || "",
+    ).split(/\s+/).filter(Boolean).map((encoded) => (
+      Number(encoded.slice(encoded.lastIndexOf("@") + 1))
+    )));
+    expect(anchorOffsets).toContain("稳定开头。稳定中段。".length);
     await expect(afterReviewFrame.locator(
       `[data-pageroot-review-overlay-box="${anchorOnlyChangeId}"]`,
     )).toHaveCount(0);
@@ -2153,6 +2168,47 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect(afterReviewFrame.locator(
       '[data-review-layout-only] [data-pageroot-review-text], [data-review-layout-only] [data-pageroot-review-text-context]',
     )).toHaveCount(0);
+    const layoutProjectionFactsBySide = await Promise.all(
+      [beforeReviewFrame, afterReviewFrame].map((frame) => frame.locator(
+        "[data-review-layout-only]",
+      ).evaluate((element) => JSON.parse(
+        element.getAttribute("data-pageroot-review-projection-facts") || "[]",
+      ))),
+    );
+    layoutProjectionFactsBySide.forEach((facts) => {
+      const boxFact = facts.find((fact) => (
+        fact.type === "style" && fact.scope === "box" && fact.operation !== "layout"
+      ));
+      const layoutFact = facts.find((fact) => (
+        fact.type === "style" && fact.operation === "layout"
+      ));
+      expect(boxFact).toMatchObject({ summary: "视觉调整" });
+      expect(layoutFact).toMatchObject({ scope: "content", summary: "换行调整" });
+      expect(layoutFact.id).not.toBe(boxFact.id);
+      expect(layoutFact.semanticOwnerId).toBe(boxFact.semanticOwnerId);
+      expect(layoutFact.geometryOwnerId).toBe(boxFact.geometryOwnerId);
+    });
+    const [beforeLayoutFacts, afterLayoutFacts] = layoutProjectionFactsBySide;
+    const beforeLayoutChangeId = await beforeReviewFrame.locator(
+      "[data-review-layout-only]",
+    ).getAttribute("data-pageroot-review-marker");
+    const afterLayoutChangeId = await afterReviewFrame.locator(
+      "[data-review-layout-only]",
+    ).getAttribute("data-pageroot-review-marker");
+    expect(beforeLayoutChangeId).toBeTruthy();
+    expect(afterLayoutChangeId).toBeTruthy();
+    const beforeLayoutBoxFact = beforeLayoutFacts.find((fact) => (
+      fact.type === "style" && fact.scope === "box" && fact.operation !== "layout"
+    ));
+    const beforeLayoutFact = beforeLayoutFacts.find((fact) => (
+      fact.type === "style" && fact.operation === "layout"
+    ));
+    const afterLayoutBoxFact = afterLayoutFacts.find((fact) => (
+      fact.type === "style" && fact.scope === "box" && fact.operation !== "layout"
+    ));
+    const afterLayoutFact = afterLayoutFacts.find((fact) => (
+      fact.type === "style" && fact.operation === "layout"
+    ));
     const crossLineMarker = afterReviewFrame.locator(
       '[data-review-cross-line] [data-pageroot-review-text="added"]',
     );
@@ -2555,13 +2611,17 @@ test("a verified AI result stays pending through desktop review until the user a
     )).toBe(anchorOnlyChangeId);
     await expect.poll(() => afterReviewFrame.locator("html").evaluate(() => {
       const anchor = document.querySelector("[data-review-anchor-only]");
-      const section = document.querySelector("[data-review-anchor-only-section]");
-      if (!anchor || !section) return false;
-      const anchorRect = anchor.getBoundingClientRect();
-      const sectionRect = section.getBoundingClientRect();
-      return anchorRect.top >= 10
-        && anchorRect.top <= innerHeight * .26
-        && anchorRect.top - sectionRect.top > 220;
+      if (!anchor) return false;
+      const targetNode = [...anchor.childNodes].find((node) => (
+        node.nodeType === Node.TEXT_NODE
+        && node.textContent?.includes("稳定结尾。")
+      ));
+      if (!targetNode) return false;
+      const range = document.createRange();
+      range.selectNodeContents(targetNode);
+      const targetTop = range.getBoundingClientRect().top;
+      range.detach();
+      return Math.abs(targetTop - Math.max(18, innerHeight * .12)) <= 28;
     })).toBe(true);
     await expect(afterReviewFrame.locator(
       `[data-pageroot-review-overlay-box="${anchorOnlyChangeId}"]`,
@@ -2605,6 +2665,21 @@ test("a verified AI result stays pending through desktop review until the user a
       name: "非修改区域上下文可见度",
     })).toHaveValue("18");
     await launched.page.getByRole("button", { name: "查看全部变化" }).click();
+    await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
+      "data-pageroot-review-filter",
+    )).toBe("all");
+    await expect(beforeReviewFrame.locator(
+      `[data-pageroot-review-overlay-box="${beforeLayoutChangeId}"][data-pageroot-review-fact="style:${beforeLayoutBoxFact.id}"]`,
+    )).toHaveCount(1);
+    await expect(beforeReviewFrame.locator(
+      `[data-pageroot-review-overlay-box="${beforeLayoutChangeId}"][data-pageroot-review-fact="style:${beforeLayoutFact.id}"]`,
+    )).toHaveCount(1);
+    await expect(afterReviewFrame.locator(
+      `[data-pageroot-review-overlay-box="${afterLayoutChangeId}"][data-pageroot-review-fact="style:${afterLayoutBoxFact.id}"]`,
+    )).toHaveCount(1);
+    await expect(afterReviewFrame.locator(
+      `[data-pageroot-review-overlay-box="${afterLayoutChangeId}"][data-pageroot-review-fact="style:${afterLayoutFact.id}"]`,
+    )).toHaveCount(1);
     await expect(launched.page.locator('[data-view="split"]')).toBeVisible();
     await expect(beforeReviewFrame.locator('[data-review-tab-panel="one"]'))
       .toBeVisible();
@@ -2682,22 +2757,23 @@ test("a verified AI result stays pending through desktop review until the user a
       .toBeVisible();
     await expect(beforeReviewFrame.locator(
       '[data-review-layout-only][data-pageroot-review-style="before"]',
-    )).toHaveAttribute("data-pageroot-review-style-scope", "content");
+    )).toHaveAttribute("data-pageroot-review-style-scope", "box");
     await expect(afterReviewFrame.locator(
       '[data-review-layout-only][data-pageroot-review-style="after"]',
-    )).toHaveAttribute("data-pageroot-review-style-scope", "content");
-    await expect(afterReviewFrame.locator(
-      '[data-review-layout-only][data-pageroot-review-operation="layout"]',
-    )).toHaveAttribute("data-pageroot-review-summary", "换行调整");
-    const layoutStyleOwner = await afterReviewFrame.locator(
-      "[data-review-layout-only]",
-    ).getAttribute("data-pageroot-review-style-owner");
-    expect(layoutStyleOwner).toBeTruthy();
-    const layoutStyleFrame = afterReviewFrame.locator(
-      `[data-pageroot-review-overlay-box][data-tone="style"][data-pageroot-review-overlay-owner="${layoutStyleOwner}"]`,
+    )).toHaveAttribute("data-pageroot-review-style-scope", "box");
+    const boxStyleFrame = afterReviewFrame.locator(
+      `[data-pageroot-review-overlay-box="${afterLayoutChangeId}"][data-tone="style"][data-pageroot-review-fact="style:${afterLayoutBoxFact.id}"]`,
     );
+    const layoutStyleFrame = afterReviewFrame.locator(
+      `[data-pageroot-review-overlay-box="${afterLayoutChangeId}"][data-tone="style"][data-pageroot-review-fact="style:${afterLayoutFact.id}"]`,
+    );
+    await expect(boxStyleFrame).toHaveCount(1);
     await expect(layoutStyleFrame).toHaveCount(1);
+    await expect(boxStyleFrame).toHaveAttribute("data-scope", "box");
     await expect(layoutStyleFrame).toHaveAttribute("data-scope", "content");
+    await expect(boxStyleFrame.locator(
+      "[data-pageroot-review-overlay-label]",
+    )).toHaveText("视觉调整");
     await expect(layoutStyleFrame.locator(
       "[data-pageroot-review-overlay-label]",
     )).toHaveText("换行调整");
