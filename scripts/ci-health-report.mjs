@@ -12,6 +12,7 @@ const scriptPath = fileURLToPath(import.meta.url);
 const productRoot = path.resolve(path.dirname(scriptPath), "..");
 const DEFAULT_DAYS = 30;
 const MAX_RUNS_PER_WORKFLOW = 200;
+const PUBLICATION_STEP_NAME = "Publish immutable GitHub Release";
 const TARGETS = Object.freeze({
   attemptsPerTreeAverage: Object.freeze({ operator: "at_most", value: 1.5 }),
   runsPerPullRequestAverage: Object.freeze({ operator: "at_most", value: 1.25 }),
@@ -147,13 +148,17 @@ function preflightSteps(jobs) {
 }
 
 function publicationRebuildCount(releaseRuns, jobsByRunId) {
-  const completedRuns = (releaseRuns || []).filter((run) => (
-    run?.status === "completed" || Boolean(run?.conclusion)
+  const publishedRuns = (releaseRuns || []).filter((run) => (
+    run?.conclusion === "success"
   ));
-  if (completedRuns.length === 0) return null;
-  const jobs = completedRuns.map((run) => jobsForRun(jobsByRunId, run.id));
+  if (publishedRuns.length === 0) return null;
+  const jobs = publishedRuns.map((run) => jobsForRun(jobsByRunId, run.id));
   if (jobs.some((runJobs) => runJobs.length === 0)) return null;
-  return jobs.flat().flatMap((job) => job.steps || []).filter((step) => (
+  const stepsByRun = jobs.map((runJobs) => runJobs.flatMap((job) => job.steps || []));
+  if (stepsByRun.some((steps) => !steps.some((step) => (
+    step?.name === PUBLICATION_STEP_NAME && step?.conclusion === "success"
+  )))) return null;
+  return stepsByRun.flat().filter((step) => (
     step?.conclusion && step.conclusion !== "skipped"
     && /^(?:Assemble|Build|Package|Rebuild)\b|\b(?:electron-builder|npm run build)\b/iu.test(
       step?.name || "",

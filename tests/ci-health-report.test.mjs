@@ -105,6 +105,9 @@ test("CI health distinguishes full-gate latency, repeated green work and preflig
         steps: [{
           name: "Verify downloaded provenance and every asset byte",
           conclusion: "success",
+        }, {
+          name: "Publish immutable GitHub Release",
+          conclusion: "success",
         }],
       })],
     },
@@ -304,7 +307,7 @@ test("CI health keeps empty periods explicit instead of reporting false zero rat
   assert.equal(report.targetAssessment.overall, "insufficient_data");
 });
 
-test("CI health derives publication rebuild attempts from completed Release job steps", () => {
+test("CI health derives rebuild attempts only from proven publication job steps", () => {
   const report = summarizeCiHealth({
     periodDays: 30,
     generatedAt: "2026-08-08T12:00:00.000Z",
@@ -314,19 +317,47 @@ test("CI health derives publication rebuild attempts from completed Release job 
       401: [job({
         name: "publish-verified-candidate",
         attempt: 1,
-        conclusion: "failure",
+        conclusion: "success",
         startedAt: "2026-08-08T10:00:00.000Z",
         completedAt: "2026-08-08T10:02:00.000Z",
-        steps: [{ name: "Build release assets", conclusion: "failure" }],
+        steps: [
+          { name: "Build release assets", conclusion: "success" },
+          { name: "Publish immutable GitHub Release", conclusion: "success" },
+        ],
       })],
     },
     candidateRuns: [],
-    releaseRuns: [{ id: 401, status: "completed", conclusion: "failure" }],
+    releaseRuns: [{ id: 401, status: "completed", conclusion: "success" }],
     dependencyHealth: "success",
   });
 
   assert.equal(report.publication.rebuildsAfterCandidateApproval, 1);
   assert.equal(report.targetAssessment.metrics.publicationRebuilds.status, "missed");
+});
+
+test("CI health reports no publication data when Release fails before publishing", () => {
+  const report = summarizeCiHealth({
+    periodDays: 30,
+    generatedAt: "2026-08-08T12:00:00.000Z",
+    ciRuns: [],
+    feedbackRuns: [],
+    jobsByRunId: {
+      402: [job({
+        name: "publish-verified-candidate",
+        attempt: 1,
+        conclusion: "failure",
+        startedAt: "2026-08-08T10:00:00.000Z",
+        completedAt: "2026-08-08T10:00:10.000Z",
+        steps: [{ name: "Require exact version on current main", conclusion: "failure" }],
+      })],
+    },
+    candidateRuns: [],
+    releaseRuns: [{ id: 402, status: "completed", conclusion: "failure" }],
+    dependencyHealth: "success",
+  });
+
+  assert.equal(report.publication.rebuildsAfterCandidateApproval, null);
+  assert.equal(report.targetAssessment.metrics.publicationRebuilds.status, "no_data");
 });
 
 test("CI health workflow stays read-only and retains a machine-readable report", async () => {
