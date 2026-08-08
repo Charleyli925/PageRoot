@@ -3753,7 +3753,6 @@ function reviewBootstrap(
   const runtimeVisualStringFromCharCode = String.fromCharCode.bind(String);
   const runtimeVisualNumberToString = runtimeVisualBindCall(Number.prototype.toString);
   const runtimeVisualStringPadStart = runtimeVisualBindCall(String.prototype.padStart);
-  const runtimeVisualRegExpTest = runtimeVisualBindCall(RegExp.prototype.test);
   const runtimeVisualRegExpExec = runtimeVisualBindCall(RegExp.prototype.exec);
   const runtimeVisualDocumentQuerySelectorAll = runtimeVisualBindCall(
     Document.prototype.querySelectorAll,
@@ -4023,7 +4022,7 @@ function reviewBootstrap(
   };
   const transferRuntimeVisualChannel = (rawChallenge) => {
     const challenge = String(rawChallenge || "");
-    if (!/^[a-f0-9]{32}$/u.test(challenge)) return;
+    if (runtimeVisualRegExpExec(/^[a-f0-9]{32}$/u, challenge) === null) return;
     if (!runtimeVisualChannel || runtimeVisualChannelTransferred) return;
     runtimeVisualChannelTransferred = true;
     postToParent({
@@ -4042,7 +4041,7 @@ function reviewBootstrap(
   };
   const transferReviewCommentChannel = (rawChallenge) => {
     const challenge = String(rawChallenge || "");
-    if (!/^[a-f0-9]{32}$/u.test(challenge)) return;
+    if (runtimeVisualRegExpExec(/^[a-f0-9]{32}$/u, challenge) === null) return;
     if (!reviewCommentChannel || reviewCommentChannelTransferred) return;
     reviewCommentChannelTransferred = true;
     postToParent({
@@ -4070,7 +4069,20 @@ function reviewBootstrap(
     document.documentElement.scrollHeight,
     document.body?.scrollHeight || 0,
   );
-  const safeKey = (value) => String(value || "").replace(/[^a-z0-9-]/gi, "");
+  const safeKey = (value) => {
+    const source = RuntimeVisualString(value || "");
+    let result = "";
+    for (let index = 0; index < source.length; index += 1) {
+      const code = runtimeVisualStringCharCodeAt(source, index);
+      if (
+        (code >= 0x30 && code <= 0x39)
+        || (code >= 0x41 && code <= 0x5a)
+        || (code >= 0x61 && code <= 0x7a)
+        || code === 0x2d
+      ) result += source[index];
+    }
+    return result;
+  };
   const safePanelPath = (value) => [...new Set(
     (Array.isArray(value) ? value : String(value || "").split(/\s+/))
       .map(safeKey)
@@ -4106,7 +4118,7 @@ function reviewBootstrap(
   const safeReviewCommentSourceNodeId = (value) => {
     const sourceNodeId = RuntimeVisualString(value || "");
     return sourceNodeId.length <= 256
-      && runtimeVisualRegExpTest(reviewCommentSourceNodeIdPattern, sourceNodeId)
+      && runtimeVisualRegExpExec(reviewCommentSourceNodeIdPattern, sourceNodeId) !== null
       ? sourceNodeId
       : "";
   };
@@ -4166,8 +4178,8 @@ function reviewBootstrap(
       const name = RuntimeVisualString(rawAttribute[0] || "");
       const value = RuntimeVisualString(rawAttribute[1] || "");
       if (
-        !runtimeVisualRegExpTest(runtimeVisualBindingAttributeNamePattern, name)
-        || runtimeVisualRegExpTest(runtimeVisualOwnedAttributeNamePattern, name)
+        runtimeVisualRegExpExec(runtimeVisualBindingAttributeNamePattern, name) === null
+        || runtimeVisualRegExpExec(runtimeVisualOwnedAttributeNamePattern, name) !== null
         || value.length > 1024
       ) return null;
       runtimeVisualArrayPush(attributes, [name, value]);
@@ -5771,7 +5783,7 @@ function reviewBootstrap(
   ).split(/\s+/).filter(Boolean);
   const safeProjectionFactKey = (value) => {
     const key = String(value || "").trim();
-    return /^[a-z0-9:_-]{1,160}$/iu.test(key) ? key : "";
+    return runtimeVisualRegExpExec(/^[a-z0-9:_-]{1,160}$/iu, key) !== null ? key : "";
   };
   const safeProjectionSummary = (value) => {
     const summary = String(value || "").trim();
@@ -6286,7 +6298,7 @@ function reviewBootstrap(
     )) return false;
     const style = getComputedStyle(owner);
     if (
-      /^(?:inline-)?(?:grid|flex)$/u.test(style.display)
+      runtimeVisualRegExpExec(/^(?:inline-)?(?:grid|flex)$/u, style.display) !== null
       || (style.columnCount !== "auto" && Number(style.columnCount) > 1)
     ) return false;
     if (owner.matches("div") && owner.querySelector(

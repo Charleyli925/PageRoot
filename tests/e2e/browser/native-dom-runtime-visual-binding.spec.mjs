@@ -207,6 +207,54 @@ test("path-only review comments bind against a real parsed DOM", async ({ page }
   ))).toBe(true);
 });
 
+test("source-backed comment IDs survive an authored RegExp exec mutation", async ({ page }) => {
+  const binding = {
+    sourceNodeId: "element:1:1:div",
+    path: [1, 0, 0],
+    tagName: "DIV",
+    sourceBoxSignature: COMMENT_SOURCE_BOX_SIGNATURE,
+    identityAttributes: [],
+    identityText: "",
+  };
+  const result = await parsedReviewCommentLayouts(page, {
+    binding,
+    authoredScript: `
+      RegExp.prototype.exec = () => null;
+      const host = document.createElement("div");
+      host.className = "comment-host";
+      document.querySelector("main").append(host);
+    `,
+  });
+  expect(result.channel).toBe(true);
+  expect(result.layouts.some((message) => (
+    message.commentLayouts?.some((layout) => layout.key === "parsed-comment")
+  ))).toBe(true);
+});
+
+test("runtime visual keys survive an authored String replace mutation", async ({ page }) => {
+  const binding = {
+    sourceNodeId: "element:1:1:div",
+    path: [1, 0, 0],
+    tagName: "DIV",
+    sourceBoxSignature: COMMENT_SOURCE_BOX_SIGNATURE,
+    identityAttributes: [],
+    identityText: "",
+  };
+  const result = await parsedReviewCommentLayouts(page, {
+    binding,
+    authoredScript: `
+      String.prototype.replace = () => "";
+      const host = document.createElement("div");
+      host.className = "comment-host";
+      document.querySelector("main").append(host);
+    `,
+  });
+  expect(result.channel).toBe(true);
+  expect(result.layouts.some((message) => (
+    message.commentLayouts?.some((layout) => layout.key === "parsed-comment")
+  ))).toBe(true);
+});
+
 test("path-only review comments fail closed when the parsed path and tag diverge", async ({ page }) => {
   const binding = {
     sourceNodeId: "element:1:1:div",

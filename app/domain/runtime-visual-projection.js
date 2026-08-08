@@ -174,7 +174,10 @@ function candidateReferenceTokens(element) {
   }
   return tokens.filter(({ value, kind }) => (
     kind === "identity-attribute"
-      || kind === "data-value"
+      || (
+        ["id-value", "name-value", "class", "class-value", "data-value"].includes(kind)
+        && String(value).length > 0
+      )
       || String(value).length >= 3
   ));
 }
@@ -302,10 +305,17 @@ function sourceReferencesToken(source, tokenDescriptor) {
   const kind = typeof tokenDescriptor === "object"
     ? tokenDescriptor?.kind
     : "identity";
+  const exactNamespaceKind = [
+    "id-value",
+    "name-value",
+    "class",
+    "class-value",
+    "data-value",
+  ].includes(kind);
   if (
     value.length < 3
     && kind !== "identity-attribute"
-    && kind !== "data-value"
+    && !exactNamespaceKind
   ) return false;
   if (kind === "id-value" || kind === "name-value") {
     return runtimeIdentityValueMatches(source, value, kind);

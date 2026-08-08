@@ -22,6 +22,8 @@ const smokeTitles = [
   "one unsaved comment blocks a second target and Canvas selection keeps its scroll",
   "indexed script tabs keep hidden comments grouped, suppress ghost markers, and shrink the canvas",
   "path-only review comments bind against a real parsed DOM",
+  "source-backed comment IDs survive an authored RegExp exec mutation",
+  "runtime visual keys survive an authored String replace mutation",
   "path-only review comments fail closed when the parsed path and tag diverge",
   "path-only review comments fail closed when a same-tag parser decoy shifts the target",
   "path-only review comments keep a bound target when a later same-tag node is unrelated",

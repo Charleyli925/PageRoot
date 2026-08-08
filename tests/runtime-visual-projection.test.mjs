@@ -285,6 +285,51 @@ test("stable data selectors retain exact short values", () => {
   assert.equal(prepared?.candidates.length, 1);
 });
 
+test("stable short ID lookups retain the exact host", () => {
+  const source = `<!doctype html><main>
+    <div class="go"></div>
+    <div id="go"></div>
+    <script>
+      document.getElementById("go").textContent = "ready";
+    </script>
+  </main>`;
+  const sourceIndex = buildSourceIndex(source);
+  const prepared = prepareRuntimeVisualCapture({
+    html: source,
+    sourcePath: "/tmp/short-id-runtime-host.html",
+    viewportWidth: 900,
+  });
+  assert.deepEqual(
+    prepared?.candidates.map((candidate) => (
+      sourceIndex.byNodeId.get(candidate.sourceNodeId)?.stableAttributes.id || ""
+    )),
+    ["go"],
+  );
+});
+
+test("stable short class selectors retain the exact host", () => {
+  const source = `<!doctype html><main>
+    <div class="go"></div>
+    <div class="other"></div>
+    <script>
+      document.querySelector(".go").textContent = "ready";
+    </script>
+  </main>`;
+  const sourceIndex = buildSourceIndex(source);
+  const prepared = prepareRuntimeVisualCapture({
+    html: source,
+    sourcePath: "/tmp/short-class-runtime-host.html",
+    viewportWidth: 900,
+  });
+  assert.deepEqual(
+    prepared?.candidates.map((candidate) => (
+      sourceIndex.byNodeId.get(candidate.sourceNodeId)?.attributesByName
+        .get("class")?.[0]?.value
+    )),
+    ["go"],
+  );
+});
+
 test("named ID property references retain their exact host", () => {
   const source = `<!doctype html><main>
     <div id="chart"></div>
