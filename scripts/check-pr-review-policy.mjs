@@ -13,11 +13,12 @@ const DEFAULT_SETTLE_SECONDS = 30;
 const DEFAULT_TIMEOUT_SECONDS = 15 * 60;
 const DEFAULT_POLL_SECONDS = 15;
 const MAX_REST_PAGES = 20;
-const POLICY_VERSION = "2026-08-09";
+const POLICY_VERSION = "2026-08-09.1";
 const PRIORITY_BADGE_PATTERN = /\bP([0-3])\s+Badge\b/giu;
 const PRIORITY_LINE_PATTERN = /(?:^|\r?\n)\s*(?:[-*]\s*)?(?:\*\*)?\[?P([0-3])\]?(?:\*\*)?\s*[:：-]/gimu;
 const REVIEWED_COMMIT_PATTERN = /\*\*Reviewed commit:\*\*\s*`([0-9a-f]{10,40})`/iu;
 const CLEAN_COMPLETION_PATTERN = /^Codex Review:\s*Didn't find any major issues\.[^\r\n]*\r?\n\r?\n/iu;
+const EFFECTIVE_REVIEW_STATES = new Set(["CHANGES_REQUESTED", "APPROVED", "DISMISSED"]);
 
 function normalizedLogin(value) {
   return String(value || "").toLowerCase().replace(/\[bot\]$/u, "");
@@ -56,6 +57,29 @@ function reviewCommitSha(review) {
   return String(
     review?.commit_id || review?.commit?.oid || review?.commitSha || "",
   ).toLowerCase();
+}
+
+function reviewActorKey(review, index) {
+  const actor = normalizedLogin(actorLogin(review));
+  if (actor) return actor;
+  const id = review?.id || review?.databaseId || review?.node_id || index;
+  return `unknown:${String(id)}`;
+}
+
+function compareReviewRecency(left, right) {
+  const leftAt = reviewSubmittedAt(left.review);
+  const rightAt = reviewSubmittedAt(right.review);
+  if (Number.isFinite(leftAt) && Number.isFinite(rightAt) && leftAt !== rightAt) {
+    return leftAt - rightAt;
+  }
+  if (Number.isFinite(leftAt)) return 1;
+  if (Number.isFinite(rightAt)) return -1;
+  const leftId = Number(left.review?.id || left.review?.databaseId || 0);
+  const rightId = Number(right.review?.id || right.review?.databaseId || 0);
+  if (Number.isFinite(leftId) && Number.isFinite(rightId) && leftId !== rightId) {
+    return leftId - rightId;
+  }
+  return left.index - right.index;
 }
 
 function threadComments(thread) {
@@ -134,6 +158,29 @@ export function classifyReviewState(review) {
   return Object.freeze({ ...finding, state: "non_blocking", reason: "deferred_changes_requested" });
 }
 
+// GitHub preserves every submitted review. For the current candidate, a
+// reviewer’s latest decision is the effective state; a later approval or
+// dismissal retracts an earlier same-head change request. A plain comment is
+// not an explicit withdrawal and therefore cannot let a P0/P1 concern pass.
+export function latestEffectiveReviews(reviews = [], { expectedHeadSha = null } = {}) {
+  const expectedHead = String(expectedHeadSha || "").toLowerCase();
+  const latestByActor = new Map();
+  (reviews || []).forEach((review, index) => {
+    const state = String(review?.state || "").toUpperCase();
+    if (!EFFECTIVE_REVIEW_STATES.has(state)) return;
+    if (expectedHead && reviewCommitSha(review) !== expectedHead) return;
+    const candidate = { review, index };
+    const key = reviewActorKey(review, index);
+    const previous = latestByActor.get(key);
+    if (!previous || compareReviewRecency(candidate, previous) > 0) {
+      latestByActor.set(key, candidate);
+    }
+  });
+  return Object.freeze([...latestByActor.values()]
+    .sort((left, right) => left.index - right.index)
+    .map((entry) => entry.review));
+}
+
 function latestReadyForReviewEvent(timelineEvents) {
   return (timelineEvents || [])
     .filter((event) => (
@@ -187,6 +234,24 @@ function completionCommentSignal(comment, expectedHeadSha, readyAt) {
     at: createdAt,
     reviewState: "COMMENTED",
   });
+}
+
+// This is intentionally shared with CI Health so that the reported review
+// latency uses the exact same evidence contract that controls release-gate.
+export function finalCodexCompletion({
+  reviews = [],
+  issueComments = [],
+  expectedHeadSha,
+  readyAt,
+} = {}) {
+  const expectedHead = String(expectedHeadSha || "").toLowerCase();
+  const readyAtMs = typeof readyAt === "number" ? readyAt : timestamp(readyAt);
+  if (!SHA_PATTERN.test(expectedHead) || !Number.isFinite(readyAtMs)) return null;
+  const completions = [
+    ...(reviews || []).map((review) => completionSignal(review, expectedHead, readyAtMs)).filter(Boolean),
+    ...(issueComments || []).map((comment) => completionCommentSignal(comment, expectedHead, readyAtMs)).filter(Boolean),
+  ].sort((left, right) => right.at - left.at);
+  return completions[0] || null;
 }
 
 function findingSummary(finding) {
@@ -254,8 +319,7 @@ export function evaluateReviewPolicy({
   if (!Number.isFinite(readyAtMs)) return policyResult(identity, "blocked", "ready_transition_invalid");
   const readyAt = new Date(readyAtMs).toISOString();
 
-  const reviewFindings = (reviews || [])
-    .filter((review) => reviewCommitSha(review) === expectedHead)
+  const reviewFindings = latestEffectiveReviews(reviews, { expectedHeadSha: expectedHead })
     .map(classifyReviewState);
   const threadFindings = (reviewThreads || []).map(classifyReviewThread);
   const blockingFindings = [
@@ -266,11 +330,12 @@ export function evaluateReviewPolicy({
     ...reviewFindings.filter((finding) => finding.state === "non_blocking" && finding.reason !== "review_not_changes_requested"),
     ...threadFindings.filter((finding) => finding.state === "non_blocking"),
   ].map(findingSummary);
-  const completions = [
-    ...(reviews || []).map((review) => completionSignal(review, expectedHead, readyAtMs)).filter(Boolean),
-    ...(issueComments || []).map((comment) => completionCommentSignal(comment, expectedHead, readyAtMs)).filter(Boolean),
-  ].sort((left, right) => right.at - left.at);
-  const completion = completions[0] || null;
+  const completion = finalCodexCompletion({
+    reviews,
+    issueComments,
+    expectedHeadSha: expectedHead,
+    readyAt: readyAtMs,
+  });
   const baseFields = {
     readyAt,
     blockingFindings,
