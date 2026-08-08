@@ -2058,6 +2058,7 @@ type ReviewSemanticUnitKind =
   | "leaf-text-block"
   | "direct-flow"
   | "br-line"
+  | "atomic-content"
   | "list"
   | "list-item"
   | "table"
@@ -2121,6 +2122,67 @@ const REVIEW_DIRECT_TEXT_OWNER_TAGS = new Set([
   "TH",
 ]);
 
+// These elements contribute visible content without contributing to the text
+// inventory. They must not be left inside a direct-flow unit: that unit is
+// intentionally discarded when it contains neither text nor authored <br>s.
+// Foreign-namespace content (notably SVG and MathML) follows the same rule.
+const REVIEW_ATOMIC_CONTENT_TAGS = new Set([
+  "AREA",
+  "AUDIO",
+  "CANVAS",
+  "EMBED",
+  "HR",
+  "IFRAME",
+  "IMG",
+  "INPUT",
+  "METER",
+  "OBJECT",
+  "PICTURE",
+  "PROGRESS",
+  "SELECT",
+  "TEXTAREA",
+  "VIDEO",
+]);
+
+function isReviewAtomicContentElement(element: Element): boolean {
+  return element.namespaceURI !== "http://www.w3.org/1999/xhtml"
+    || REVIEW_ATOMIC_CONTENT_TAGS.has(element.tagName);
+}
+
+function atomicContentSemanticSignature(element: Element): string | null {
+  const identityAttributes = [...element.attributes]
+    .filter((attribute) => (
+      !VISUAL_ATTRIBUTE_NAMES.has(attribute.name.toLowerCase())
+      && !attribute.name.startsWith("data-pageroot-review-")
+      && (
+        attribute.value.trim().length > 0
+        // A present authored data attribute is an intentional, stable
+        // identity even when written in HTML boolean form (`data-key`).
+        || attribute.name.startsWith("data-")
+      )
+    ))
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .map((attribute) => `${attribute.name.toLowerCase()}=${attribute.value}`);
+  // A bare tag is not a high-confidence identity. Let repeated or anonymous
+  // media remain unmatched rather than guessing that a replacement is a move.
+  if (!identityAttributes.length) return null;
+  return [
+    element.namespaceURI || "",
+    element.localName.toLowerCase(),
+    ...identityAttributes,
+  ].join("\u0000");
+}
+
+function atomicContentSemanticUnit(element: Element): ReviewSemanticUnit {
+  return {
+    kind: "atomic-content",
+    element,
+    inventory: null,
+    maximumScope: "inline",
+    children: [],
+  };
+}
+
 function semanticFlowUnit(
   owner: Element,
   sourceNodes: Node[],
@@ -2182,6 +2244,11 @@ function semanticChildrenForContainer(container: Element): ReviewSemanticUnit[] 
   };
   container.childNodes.forEach((node) => {
     if (node instanceof Element && NON_CONTENT_TAGS.has(node.tagName)) return;
+    if (node instanceof Element && isReviewAtomicContentElement(node)) {
+      flush();
+      children.push(atomicContentSemanticUnit(node));
+      return;
+    }
     if (
       node instanceof Element
       && node.namespaceURI === "http://www.w3.org/1999/xhtml"
@@ -2213,6 +2280,7 @@ function tableCellUnits(row: Element): ReviewSemanticUnit[] {
 }
 
 function buildReviewSemanticUnit(element: Element): ReviewSemanticUnit {
+  if (isReviewAtomicContentElement(element)) return atomicContentSemanticUnit(element);
   if (element.matches("ul, ol")) {
     return {
       kind: "list",
@@ -2316,11 +2384,16 @@ function semanticUnitDescriptor(unit: ReviewSemanticUnit, parentKey: string) {
     ? text.match(NUMBERED_TEXT_LINE_PATTERN)?.[0]?.trim() || ""
     : "";
   const ownsElementIdentity = unit.kind !== "direct-flow" && unit.kind !== "br-line";
+  const atomicSignature = unit.kind === "atomic-content"
+    ? atomicContentSemanticSignature(unit.element)
+    : null;
   return {
     kind: `${unit.kind}${logicalCell}`,
     text,
     stableId: ownsElementIdentity ? pairKey(unit.element) : null,
-    exactSignature: text ? `${unit.kind}\u0000${logicalCell}\u0000${text}` : null,
+    exactSignature: atomicSignature
+      ? `${unit.kind}\u0000${logicalCell}\u0000${atomicSignature}`
+      : text ? `${unit.kind}\u0000${logicalCell}\u0000${text}` : null,
     affinities: [
       ...classTokens(unit.element).filter((token) => !GENERIC_REVIEW_TEXT_CLASSES.has(token)),
       ...(numberedPrefix ? [`number:${numberedPrefix}`] : []),

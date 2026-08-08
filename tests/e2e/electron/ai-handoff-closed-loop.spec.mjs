@@ -535,6 +535,13 @@ test("a verified AI result stays pending through desktop review until the user a
       </div>
       <div data-review-inherited-copy style="width: 420px; padding: 24px; border: 2px solid #b8b8c7">内容级视觉调整</div>
       <div data-review-logical-card style="padding: 12px; border: 2px solid #b8b8c7">逻辑尺寸视觉调整</div>
+      <div data-review-atomic-media style="display:flex;align-items:center;gap:6px">
+        <span data-review-atomic-stable-before>稳定媒体前文。</span>
+        <img data-review-atomic-removed alt="旧品牌图示" src="data:image/svg+xml,%3Csvg/%3E" width="28" height="20">
+        <svg data-review-atomic-paired role="img" aria-label="趋势图" width="30" height="20" viewBox="0 0 30 20" fill="#8aa4c8"></svg>
+        <input data-review-atomic-input name="品牌标识" type="text" value="品牌甲" style="width:60px;border:1px solid #9aa4b2">
+        <span data-review-atomic-stable-after>稳定媒体后文。</span>
+      </div>
       <div data-review-mixed-copy>
         <p data-review-reference>参考：示例日均确收约207万，增量4.12万/天约占2.0%。</p>
         <p data-review-delete-only>实验结果稳定。换言之，策略有效。</p>
@@ -1246,6 +1253,22 @@ test("a verified AI result stays pending through desktop review until the user a
           '<p data-review-injection-stability><span data-review-stable-left>稳定左侧</span><strong>新词</strong><em data-review-stable-right>稳定右侧</em></p>',
         )
         .replace(
+          `      <div data-review-atomic-media style="display:flex;align-items:center;gap:6px">
+        <span data-review-atomic-stable-before>稳定媒体前文。</span>
+        <img data-review-atomic-removed alt="旧品牌图示" src="data:image/svg+xml,%3Csvg/%3E" width="28" height="20">
+        <svg data-review-atomic-paired role="img" aria-label="趋势图" width="30" height="20" viewBox="0 0 30 20" fill="#8aa4c8"></svg>
+        <input data-review-atomic-input name="品牌标识" type="text" value="品牌甲" style="width:60px;border:1px solid #9aa4b2">
+        <span data-review-atomic-stable-after>稳定媒体后文。</span>
+      </div>`,
+          `      <div data-review-atomic-media style="display:flex;align-items:center;gap:6px">
+        <span data-review-atomic-stable-before>稳定媒体前文。</span>
+        <canvas data-review-atomic-added aria-label="新增画布图" width="28" height="20"></canvas>
+        <svg data-review-atomic-paired role="img" aria-label="趋势图" width="30" height="20" viewBox="0 0 30 20" fill="#d26a81"></svg>
+        <input data-review-atomic-input name="品牌标识" type="text" value="品牌甲" style="width:60px;border:3px solid #6d5ce7">
+        <span data-review-atomic-stable-after>稳定媒体后文。</span>
+      </div>`,
+        )
+        .replace(
           '<p data-review-warning>⚠️ 近6天(7/23-<span><strong>7/28)增幅收窄至负值区间，需</strong></span>持续关注。</p>',
           '<p data-review-warning>⚠️ 近6天（7/23—<strong>7/28）增幅收窄至负值区间，需</strong>持续关注定价调整和转化波动。</p>',
         )
@@ -1815,6 +1838,37 @@ test("a verified AI result stays pending through desktop review until the user a
         && Math.abs(frameRect.width - (rowRect.width + 6)) < .75
         && Math.abs(frameRect.height - (rowRect.height + 6)) < .75;
     })).toBe(true);
+    const removedAtomicOwner = await beforeReviewFrame.locator(
+      "[data-review-atomic-removed]",
+    ).getAttribute("data-pageroot-review-semantic-owner");
+    const addedAtomicOwner = await afterReviewFrame.locator(
+      "[data-review-atomic-added]",
+    ).getAttribute("data-pageroot-review-semantic-owner");
+    expect(removedAtomicOwner).toBeTruthy();
+    expect(addedAtomicOwner).toBeTruthy();
+    await expect(beforeReviewFrame.locator(
+      '[data-review-atomic-removed][data-pageroot-review-structure="removed"]',
+    )).toHaveCount(1);
+    await expect(afterReviewFrame.locator(
+      '[data-review-atomic-added][data-pageroot-review-structure="added"]',
+    )).toHaveCount(1);
+    for (const [frame, owner] of [
+      [beforeReviewFrame, removedAtomicOwner],
+      [afterReviewFrame, addedAtomicOwner],
+    ]) {
+      await expect(frame.locator(
+        `[data-pageroot-review-overlay-box][data-tone="structure"][data-pageroot-review-semantic-owner="${owner}"]`,
+      )).toHaveCount(1);
+      await expect(frame.locator(
+        `[data-pageroot-review-mask-hole][data-pageroot-review-semantic-owner="${owner}"]`,
+      )).toHaveCount(1);
+    }
+    await expect(beforeReviewFrame.locator(
+      '[data-review-atomic-stable-before] [data-pageroot-review-text], [data-review-atomic-stable-after] [data-pageroot-review-text]',
+    )).toHaveCount(0);
+    await expect(afterReviewFrame.locator(
+      '[data-review-atomic-stable-before] [data-pageroot-review-text], [data-review-atomic-stable-after] [data-pageroot-review-text]',
+    )).toHaveCount(0);
     await expect.poll(async () => beforeReviewFrame.locator(
       "[data-pageroot-review-id]",
     ).first().evaluate((element) => getComputedStyle(element).outlineStyle)).toBe("none");
@@ -2755,6 +2809,26 @@ test("a verified AI result stays pending through desktop review until the user a
     )).toBe("style");
     await expect(afterReviewFrame.locator("[data-pageroot-review-style]").first())
       .toBeVisible();
+    for (const [frame, tone] of [
+      [beforeReviewFrame, "before"],
+      [afterReviewFrame, "after"],
+    ]) {
+      for (const selector of [
+        "[data-review-atomic-paired]",
+        "[data-review-atomic-input]",
+      ]) {
+        const atomicElement = frame.locator(`${selector}[data-pageroot-review-style="${tone}"]`);
+        await expect(atomicElement).toHaveCount(1);
+        const owner = await atomicElement.getAttribute("data-pageroot-review-style-owner");
+        expect(owner).toBeTruthy();
+        await expect(frame.locator(
+          `[data-pageroot-review-overlay-owner="${owner}"][data-tone="style"]`,
+        )).toHaveCount(1);
+        await expect(frame.locator(
+          `[data-pageroot-review-mask-owner="${owner}"]`,
+        )).toHaveCount(1);
+      }
+    }
     await expect(beforeReviewFrame.locator(
       '[data-review-layout-only][data-pageroot-review-style="before"]',
     )).toHaveAttribute("data-pageroot-review-style-scope", "box");

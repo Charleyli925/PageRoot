@@ -123,8 +123,10 @@ Comments + frozen input
   between parse/control/pair/annotation/serialization phases and after bounded
   semantic row/list-item batches, then caches multiple
   exact identities. Its document analyzer first builds a hierarchy of semantic
-  units (`direct-flow`/`br-line`, list/list item, table/row group/row/cell and
-  leaf text owner), then aligns only siblings of an already-paired parent.
+  units (`direct-flow`/`br-line`, list/list item, table/row group/row/cell,
+  leaf text owner and atomic non-text content such as media, controls and
+  foreign-namespace graphics), then aligns only siblings of an already-paired
+  parent.
   `review-semantic-alignment` is the pure, bounded alignment helper: it consumes
   unique stable keys and exact signatures first, cuts remaining intervals on
   those anchors, then uses a weighted monotonic alignment or a finite-lookahead
