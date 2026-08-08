@@ -15,19 +15,31 @@ import { fileURLToPath } from "node:url";
 import { parseBuildOptions } from "../scripts/build-package.mjs";
 import {
   createReleaseAppCheckpoint,
+  createReleaseDryRunCheckpoint,
   releaseAppCheckpointArtifactName,
+  releaseDryRunCheckpointArtifactName,
   restoreReleaseAppCheckpoint,
+  restoreReleaseDryRunCheckpoint,
   verifyReleaseAppCheckpoint,
+  verifyReleaseDryRunCheckpoint,
 } from "../scripts/release-app-checkpoint.mjs";
 import {
+  RELEASE_DRY_RUN_TELEMETRY_HOST,
+  RELEASE_DRY_RUN_TELEMETRY_TOKEN,
   candidateAppBuilderArguments,
   candidateAppEnvironment,
   candidateArtifactBuilderArguments,
   candidateArtifactBuilderEnvironment,
   notarizeCandidateApp,
+  releaseDryRunAppBuilderArguments,
+  releaseDryRunAppEnvironment,
   restoreReleaseMetadataFromApp,
   signCandidateApp,
 } from "../scripts/release-app-stage.mjs";
+import {
+  assertPackagedAppIdentity,
+  expectedPackagedAppIdentity,
+} from "../scripts/packaged-app-identity.mjs";
 
 const productRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const commitSha = "a".repeat(40);
@@ -41,6 +53,7 @@ function fixturePackageJson() {
     version: packageVersion,
     devDependencies: { electron: "43.2.0" },
     build: {
+      appId: "com.htmlai.workbench",
       productName: "PageRoot",
       mac: {
         entitlements: "desktop/resources/entitlements.mac.plist",
@@ -121,6 +134,16 @@ async function writeCandidateApp(root) {
   return appPath;
 }
 
+async function writeDryRunApp(root) {
+  const candidateApp = await writeCandidateApp(root);
+  const dryRunApp = path.join(
+    root,
+    "output/release-dry-run/staged/mac-arm64/PageRoot.app",
+  );
+  await cp(candidateApp, dryRunApp, { recursive: true });
+  return dryRunApp;
+}
+
 test("formal candidate profiles assemble once and package only a verified prepackaged app", () => {
   const staged = "/tmp/pageroot-release-candidate/staged";
   const appPath = `${staged}/mac-arm64/PageRoot.app`;
@@ -186,6 +209,35 @@ test("formal candidate profiles assemble once and package only a verified prepac
   );
 });
 
+test("release dry-run profile reuses ad-hoc assembly without producing distributables", () => {
+  const releaseDirectory = "/tmp/pageroot-release-dry-run/staged";
+  assert.deepEqual(
+    parseBuildOptions(["--arch", "arm64", "--profile", "release-dry-run"]),
+    {
+      architecture: "arm64",
+      prepackagedAppPath: null,
+      profile: "release-dry-run",
+    },
+  );
+  assert.deepEqual(
+    releaseDryRunAppBuilderArguments({
+      architecture: "arm64",
+      releaseDirectory,
+    }),
+    candidateAppBuilderArguments({
+      architecture: "arm64",
+      releaseDirectory,
+    }),
+  );
+  assert.deepEqual(
+    releaseDryRunAppBuilderArguments({
+      architecture: "arm64",
+      releaseDirectory,
+    }).slice(0, 5),
+    ["--mac", "dir", "--arm64", "--publish", "never"],
+  );
+});
+
 test("pre-sign assembly keeps public telemetry but cannot see signing or notarization credentials", () => {
   const source = {
     PATH: "/usr/bin",
@@ -217,6 +269,22 @@ test("pre-sign assembly keeps public telemetry but cannot see signing or notariz
   assert.equal(finalBuilder.PAGEROOT_POSTHOG_HOST, undefined);
   assert.equal(finalBuilder.CSC_LINK, undefined);
   assert.equal(finalBuilder.APPLE_ID, undefined);
+
+  const dryRun = releaseDryRunAppEnvironment(source);
+  assert.equal(dryRun.PAGEROOT_POSTHOG_TOKEN, RELEASE_DRY_RUN_TELEMETRY_TOKEN);
+  assert.equal(dryRun.PAGEROOT_POSTHOG_HOST, RELEASE_DRY_RUN_TELEMETRY_HOST);
+  assert.equal(dryRun.PAGEROOT_REQUIRE_TELEMETRY_CONFIG, "1");
+  assert.equal(dryRun.PAGEROOT_REQUIRE_NOTARIZATION, "0");
+  for (const name of [
+    "CSC_LINK",
+    "CSC_KEY_PASSWORD",
+    "APPLE_ID",
+    "APPLE_APP_SPECIFIC_PASSWORD",
+    "APPLE_TEAM_ID",
+    "GITHUB_TOKEN",
+  ]) {
+    assert.equal(dryRun[name], undefined);
+  }
 });
 
 test("final artifact packaging restores the exact embedded provenance and telemetry bytes", async () => {
@@ -435,6 +503,147 @@ test("signed-app checkpoint binds source and archive bytes and restores the same
   }
 });
 
+test("release dry-run checkpoint is non-release, restores metadata and cannot enter the formal lane", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "pageroot-dry-run-checkpoint-"));
+  try {
+    const appPath = await writeDryRunApp(root);
+    const outputDirectory = "output/release-dry-run-checkpoint/bundle";
+    const identity = fixtureIdentity();
+    const record = await createReleaseDryRunCheckpoint({
+      productRoot: root,
+      appPath,
+      architecture: "arm64",
+      repository: "Charleyli925/PageRoot",
+      workflow: {
+        runId: 700,
+        runAttempt: 3,
+      },
+      outputDirectory,
+      createdAt: new Date("2026-08-08T01:00:00.000Z"),
+      async commandRunner(_command, arguments_) {
+        await writeFile(arguments_.at(-1), "synthetic release dry-run archive");
+      },
+      identity,
+    });
+    assert.equal(record.attestation.kind, "release-dry-run-checkpoint");
+    assert.equal(record.attestation.releaseEligible, false);
+    assert.equal(record.attestation.publicReleaseEligible, false);
+    assert.equal(
+      record.attestation.artifactName,
+      releaseDryRunCheckpointArtifactName({
+        treeSha,
+        packageVersion,
+        architecture: "arm64",
+        runAttempt: 3,
+      }),
+    );
+    await assert.doesNotReject(() => verifyReleaseDryRunCheckpoint({
+      productRoot: root,
+      directory: outputDirectory,
+      architecture: "arm64",
+      repository: "Charleyli925/PageRoot",
+      workflowRunId: 700,
+      identity,
+    }));
+
+    const restored = await restoreReleaseDryRunCheckpoint({
+      productRoot: root,
+      directory: outputDirectory,
+      outputDirectory: "output/release-dry-run/restored",
+      architecture: "arm64",
+      repository: "Charleyli925/PageRoot",
+      workflowRunId: 700,
+      identity,
+      expectedBuildInfoResolver: fixtureExpectedBuildInfo,
+      async commandRunner(_command, arguments_) {
+        await cp(appPath, path.join(arguments_.at(-1), "PageRoot.app"), {
+          recursive: true,
+        });
+      },
+    });
+    assert.equal(
+      restored.appPath,
+      path.join(root, "output/release-dry-run/restored/PageRoot.app"),
+    );
+    assert.equal(restored.metadata.telemetry.enabled, true);
+
+    await assert.rejects(
+      restoreReleaseDryRunCheckpoint({
+        productRoot: root,
+        directory: outputDirectory,
+        outputDirectory: "output/release-dry-run/missing-telemetry",
+        architecture: "arm64",
+        repository: "Charleyli925/PageRoot",
+        workflowRunId: 700,
+        identity,
+        expectedBuildInfoResolver: fixtureExpectedBuildInfo,
+        async commandRunner(_command, arguments_) {
+          const destination = path.join(arguments_.at(-1), "PageRoot.app");
+          await cp(appPath, destination, { recursive: true });
+          await rm(path.join(
+            destination,
+            "Contents/Resources/usage-telemetry-config.json",
+          ));
+        },
+      }),
+      /usage-telemetry-config\.json/u,
+    );
+
+    const renamedFormalDirectory = path.join(
+      root,
+      "output/release-app-checkpoint/renamed-dry-run",
+    );
+    await mkdir(renamedFormalDirectory, { recursive: true });
+    await Promise.all([
+      writeFile(
+        path.join(renamedFormalDirectory, "signed-app-checkpoint.json"),
+        await readFile(record.attestationPath),
+      ),
+      writeFile(
+        path.join(renamedFormalDirectory, "PageRoot-signed-app.zip"),
+        "synthetic release dry-run archive",
+      ),
+    ]);
+    await assert.rejects(
+      verifyReleaseAppCheckpoint({
+        productRoot: root,
+        directory: "output/release-app-checkpoint/renamed-dry-run",
+        architecture: "arm64",
+        repository: "Charleyli925/PageRoot",
+        sourceGateRunId: 400,
+        workflowRunId: 700,
+        identity,
+      }),
+      /checkpoint kind is invalid/u,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("packaged startup identity fails on the #102 runtime-name regression and Bundle ID drift", () => {
+  const expected = expectedPackagedAppIdentity({
+    packageJson: fixturePackageJson(),
+    environment: {},
+  });
+  assert.throws(
+    () => assertPackagedAppIdentity({
+      name: "源页",
+      version: packageVersion,
+      bundleId: "com.htmlai.workbench",
+    }, expected),
+    /runtime application name does not match build\.productName/u,
+  );
+  assert.throws(
+    () => assertPackagedAppIdentity({
+      name: "PageRoot",
+      version: packageVersion,
+      bundleId: "com.example.changed",
+    }, expected),
+    /Bundle ID does not match build\.appId/u,
+  );
+});
+
 test("formal workflow verifies before Apple and resumes final packaging from a signed-app checkpoint", async () => {
   const [workflow, packageText] = await Promise.all([
     readFile(path.join(productRoot, ".github/workflows/release-candidate.yml"), "utf8"),
@@ -446,7 +655,7 @@ test("formal workflow verifies before Apple and resumes final packaging from a s
   assert.match(workflow, /signed-app:[\s\S]+candidate:[\s\S]+needs: signed-app/u);
   assert.match(
     workflow,
-    /Assemble and verify the app before release credentials are used[\s\S]+Developer ID sign the already-verified app[\s\S]+Launch the signed app before sending bytes to Apple[\s\S]+Notarize and staple the verified signed app/u,
+    /Assemble and verify the app before release credentials are used[\s\S]+Developer ID sign the already-verified app[\s\S]+Launch and verify the signed app identity before sending bytes to Apple[\s\S]+Notarize and staple the verified signed app/u,
   );
   assert.match(
     workflow,
@@ -460,4 +669,41 @@ test("formal workflow verifies before Apple and resumes final packaging from a s
   assert.match(workflow, /retention-days:\s*14/u);
   assert.doesNotMatch(workflow, /gate:artifact-only:auto/u);
   assert.doesNotMatch(workflow, /(?:git tag|gh release create)/u);
+});
+
+test("release dry-run workflow crosses two clean jobs without credentials or release authority", async () => {
+  const [workflow, candidateWorkflow] = await Promise.all([
+    readFile(path.join(productRoot, ".github/workflows/release-dry-run.yml"), "utf8"),
+    readFile(path.join(productRoot, ".github/workflows/release-candidate.yml"), "utf8"),
+  ]);
+  assert.match(workflow, /on:\s*\n\s+pull_request:[\s\S]+paths:/u);
+  assert.match(workflow, /- desktop\/\*\*/u);
+  assert.match(workflow, /- scripts\/release-app-checkpoint\.mjs/u);
+  assert.match(workflow, /- scripts\/workspace-bridge\.mjs/u);
+  assert.doesNotMatch(workflow, /- app\/\*\*/u);
+  assert.match(workflow, /assemble:[\s\S]+restore:[\s\S]+needs: assemble/u);
+  assert.equal((workflow.match(/actions\/checkout@/gu) || []).length, 2);
+  assert.equal((workflow.match(/- run: npm ci/gu) || []).length, 2);
+  assert.match(
+    workflow,
+    /Build the first clean-job renderer oracle[\s\S]+--profile release-dry-run[\s\S]+Verify app\.asar, Bridge, schemas, resources and metadata[\s\S]+create-dry-run[\s\S]+Upload the non-release dry-run checkpoint/u,
+  );
+  assert.match(
+    workflow,
+    /Download the exact dry-run checkpoint[\s\S]+restore-dry-run[\s\S]+Rebuild the renderer oracle in the second clean job[\s\S]+npm run desktop:renderer[\s\S]+Revalidate the restored payload and metadata[\s\S]+Launch and verify product name, version and Bundle ID/u,
+  );
+  assert.match(workflow, /PAGEROOT_REQUIRE_TELEMETRY_CONFIG:\s*"1"/u);
+  assert.doesNotMatch(workflow, /secrets\.|CSC_LINK|CSC_KEY_PASSWORD|APPLE_ID|APPLE_TEAM_ID/u);
+  assert.doesNotMatch(
+    workflow,
+    /node scripts\/(?:release-candidate-provenance|create-release-assets)\.mjs|--profile candidate-artifacts|git tag|gh release create/u,
+  );
+  assert.doesNotMatch(candidateWorkflow, /release-dry-run|create-dry-run|restore-dry-run/u);
+  for (const sharedScript of [
+    "scripts/verify-packaged-artifact.mjs",
+    "scripts/release-app-checkpoint.mjs",
+  ]) {
+    assert.ok(workflow.includes(sharedScript));
+    assert.ok(candidateWorkflow.includes(sharedScript));
+  }
 });

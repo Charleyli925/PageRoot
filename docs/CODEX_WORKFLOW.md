@@ -119,6 +119,14 @@ Do not use an installed app, DMG, backup folder or another checkout as a source 
 
 The required PR `release-gate` is the one complete source gate for an explicitly promoted final tree. `PR Feedback` owns `opened`, `synchronize`, `reopened` and `converted_to_draft`; it runs `gate:edit` and never reports the `release-gate` status. The complete workflow listens only to `ready_for_review`. A later commit shares the same concurrency key, cancels an in-flight stale complete run, and leaves the new SHA without the required check. Convert the PR back to draft and mark it ready again only after that head is final. Opening a PR directly as ready does not bypass this boundary. Local development should normally stop at impact-selected `gate:edit` and `task:finish`; rerun the complete source gate locally only for CI diagnosis or high-risk editing-engine work where the additional evidence is useful.
 
+Packaging, release-metadata, Electron, packaged Bridge, Schema and resource
+changes additionally trigger the credential-free `Release Dry Run`. It crosses
+an ad-hoc App checkpoint between two clean macOS jobs, restores metadata,
+rebuilds the renderer oracle and launch-checks name/version/Bundle ID. The
+checkpoint is `releaseEligible: false`; the workflow has no secrets, signing,
+notarization, distributable, Candidate, tag or publication authority and cannot
+replace the formal post-merge flow.
+
 Promote only one PR at a time. Other parallel work remains draft and continues receiving cheap feedback; after the current candidate merges, update the next branch onto the new `main` and promote it. This prevents strict up-to-date protection from turning every merge into a cascade of complete runs on the remaining PRs.
 
 After merge, CI authenticates the successful PR result against the exact `main` Tree Hash, package/lockfile version and merged PR. Equality failure blocks immediately; equality success does not repeat Node, Browser or Electron source tests. The source-gate attestation is valid for seven days and only for the exact tree.

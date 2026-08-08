@@ -53,6 +53,7 @@ boundary.
 | `npm run gate:edit` | Fast, impact-selected feedback for uncommitted work |
 | `npm run gate:task` | Static checks plus impacted Node/browser/Electron coverage |
 | `npm run gate:main:auto` | Optional local/diagnostic Node/browser smoke; it is not part of the automatic post-merge path |
+| `Release Dry Run` Actions workflow | Path-filtered PR packaging check: assemble an ad-hoc App, cross a clean-job checkpoint, rebuild metadata/renderer oracles and launch-check identity without credentials |
 | `npm run gate:release:auto` | Complete source gate on a clean commit |
 | `npm run package:developer` | Optional arm64 developer preview requested explicitly: distinct app/Bundle identity, stable-tag-derived test version, ad-hoc DMG, packaged-content verification, one isolated startup, and an exact live PR/content delivery report; no notarization or publication |
 | `npm run package:developer:x64` | The same optional developer preview and delivery report for Intel Macs |
@@ -77,6 +78,19 @@ packaging is a distribution build and therefore requires a valid Developer ID
 identity; publication credentials remain in GitHub encrypted secrets. The
 separate developer-preview profile removes those credentials from its child
 environment and intentionally uses only an ad-hoc signature.
+
+Pull Requests that touch packaging, release metadata, Electron, packaged
+Bridge, Schema or bundled-resource paths also run `Release Dry Run`. Its first
+macOS job builds the renderer, generates build metadata plus an enabled
+synthetic telemetry configuration, assembles and verifies an ad-hoc App, then
+uploads a source-bound checkpoint. A second clean macOS job restores the
+checkpoint and its metadata, rebuilds the renderer comparison oracle,
+revalidates the payload and launches the App to compare `app.getName()`, the
+runtime version and `CFBundleIdentifier` with `package.json`. The workflow does
+not reference repository secrets, build a DMG or updater asset, sign with
+Developer ID, notarize, tag or publish. Its checkpoint is always
+`releaseEligible: false` and is structurally rejected by the formal Candidate
+checkpoint verifier.
 
 Desktop development and every automated test also leave live usage telemetry
 disabled unless `PAGEROOT_TELEMETRY_DEV=1` is explicitly set. Telemetry tests

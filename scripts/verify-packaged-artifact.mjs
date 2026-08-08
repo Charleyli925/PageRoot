@@ -23,7 +23,14 @@ import {
   developerPreviewReleaseDirectory,
   resolveDeveloperPreviewIdentity,
 } from "./developer-preview.mjs";
-import { candidateAppReleaseDirectory } from "./release-app-stage.mjs";
+import {
+  candidateAppReleaseDirectory,
+  releaseDryRunAppReleaseDirectory,
+} from "./release-app-stage.mjs";
+import {
+  expectedPackagedAppIdentity,
+  readPackagedPlistIdentity,
+} from "./packaged-app-identity.mjs";
 import { assertBuildInfo, expectedBuildInfo } from "./release-provenance.mjs";
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
@@ -77,6 +84,8 @@ const EXPECTED_MAC_TEAM_ID = "RNK9RB969G";
 const REQUIRED_APP_SOURCE_FILES = [
   "desktop/main.mjs",
   "desktop/preload.mjs",
+  "desktop/external-file-open.mjs",
+  "desktop/project-open-queue.mjs",
   "desktop/project-files.mjs",
   "desktop/source-rename.mjs",
   "desktop/project-path-policy.mjs",
@@ -150,8 +159,8 @@ function parseArguments(argv) {
   assert.match(options.arch ?? "", /^(arm64|x64)$/, "--arch must be arm64 or x64");
   assert.match(
     options.profile ?? "",
-    /^(release|developer|candidate-app|candidate-app-signed)$/,
-    "--profile must be release, developer, candidate-app or candidate-app-signed",
+    /^(release|developer|candidate-app|candidate-app-signed|release-dry-run)$/,
+    "--profile must be release, developer, candidate-app, candidate-app-signed or release-dry-run",
   );
   if (options.appPath !== undefined) {
     assert.equal(path.isAbsolute(options.appPath), true, "--app-path must be absolute");
@@ -273,25 +282,6 @@ function asarFilePaths(asarPath) {
     .sort();
 }
 
-function decodeXml(value) {
-  return value
-    .replaceAll("&lt;", "<")
-    .replaceAll("&gt;", ">")
-    .replaceAll("&quot;", '"')
-    .replaceAll("&apos;", "'")
-    .replaceAll("&amp;", "&");
-}
-
-async function readPlistString(infoPlistPath, key) {
-  const xml = await readFile(infoPlistPath, "utf8");
-  const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const match = xml.match(
-    new RegExp(`<key>\\s*${escapedKey}\\s*</key>\\s*<string>([\\s\\S]*?)</string>`),
-  );
-  assert.ok(match, `${key} is missing from ${infoPlistPath}`);
-  return decodeXml(match[1].trim());
-}
-
 async function assertDirectoryMatches({ sourceRoot, packagedRoot, predicate, label }) {
   const [sourceFiles, packagedFiles] = await Promise.all([
     listFiles(sourceRoot, predicate),
@@ -410,23 +400,33 @@ export async function verifyAppBundle({
     "signaturePolicy must be developer-id, adhoc or none",
   );
   const resourcesPath = path.join(appPath, "Contents", "Resources");
-  const infoPlistPath = path.join(appPath, "Contents", "Info.plist");
   const asarPath = path.join(resourcesPath, "app.asar");
   await Promise.all([
     access(appPath),
-    access(infoPlistPath),
     access(asarPath),
     assertSourceDependencyClosureIsClean(productRoot, sourcePackageJson),
   ]);
 
-  const [shortVersion, bundleVersion, bundleIdentifier] = await Promise.all([
-    readPlistString(infoPlistPath, "CFBundleShortVersionString"),
-    readPlistString(infoPlistPath, "CFBundleVersion"),
-    readPlistString(infoPlistPath, "CFBundleIdentifier"),
-  ]);
-  assert.equal(shortVersion, packageJson.version, "CFBundleShortVersionString is stale");
-  assert.equal(bundleVersion, packageJson.version, "CFBundleVersion is stale");
-  assert.equal(bundleIdentifier, packageJson.build.appId, "CFBundleIdentifier is incorrect");
+  const expectedIdentity = expectedPackagedAppIdentity({
+    packageJson,
+    environment: {},
+  });
+  const plistIdentity = await readPackagedPlistIdentity(appPath);
+  assert.equal(
+    plistIdentity.version,
+    expectedIdentity.version,
+    "CFBundleShortVersionString is stale",
+  );
+  assert.equal(
+    plistIdentity.bundleVersion,
+    expectedIdentity.version,
+    "CFBundleVersion is stale",
+  );
+  assert.equal(
+    plistIdentity.bundleId,
+    expectedIdentity.bundleId,
+    "CFBundleIdentifier is incorrect",
+  );
 
   const expectedAsarFiles = ["package.json", ...REQUIRED_APP_SOURCE_FILES];
   const rendererSourceRoot = path.join(productRoot, "dist-desktop");
@@ -656,7 +656,7 @@ export async function verifyAppBundle({
 
   return {
     appPath,
-    version: shortVersion,
+    version: plistIdentity.version,
     asarFileCount: expectedAsarFiles.length,
     schemaFileCount: schemas.length,
     legalResourceCount: REQUIRED_LEGAL_RESOURCES.length,
@@ -826,14 +826,15 @@ export async function verifyPackagedArtifact({
 } = {}) {
   assert.match(
     profile,
-    /^(?:release|developer|candidate-app|candidate-app-signed)$/u,
-    "profile must be release, developer, candidate-app or candidate-app-signed",
+    /^(?:release|developer|candidate-app|candidate-app-signed|release-dry-run)$/u,
+    "profile must be release, developer, candidate-app, candidate-app-signed or release-dry-run",
   );
   const sourcePackageJson = JSON.parse(
     await readFile(path.join(productRoot, "package.json"), "utf8"),
   );
   const isDeveloperPreview = profile === "developer";
   const isCandidateApp = profile === "candidate-app" || profile === "candidate-app-signed";
+  const isReleaseDryRun = profile === "release-dry-run";
   const developerPreviewIdentity = isDeveloperPreview
     ? resolveDeveloperPreviewIdentity({ productRoot, packageJson: sourcePackageJson })
     : null;
@@ -849,7 +850,9 @@ export async function verifyPackagedArtifact({
         ? developerPreviewReleaseDirectory(productRoot)
         : isCandidateApp
           ? candidateAppReleaseDirectory(productRoot)
-          : undefined),
+          : isReleaseDryRun
+            ? releaseDryRunAppReleaseDirectory(productRoot)
+            : undefined),
     artifactName: isDeveloperPreview
       ? DEVELOPER_PREVIEW_ARTIFACT_PATTERN
       : undefined,
@@ -896,7 +899,7 @@ export async function verifyPackagedArtifact({
       update: null,
     };
   }
-  if (isCandidateApp) {
+  if (isCandidateApp || isReleaseDryRun) {
     const app = await verifyAppBundle({
       productRoot,
       appPath: layout.appPath,
@@ -950,7 +953,9 @@ async function main() {
     releaseDirectory: options.releaseDirectory,
   });
   if (result.dmg) console.log(`Packaged artifact verified: ${result.dmgPath}`);
-  else console.log(`Candidate app verified: ${result.appPath}`);
+  else if (result.profile === "release-dry-run") {
+    console.log(`Release dry-run app verified: ${result.appPath}`);
+  } else console.log(`Candidate app verified: ${result.appPath}`);
   if (result.update) console.log(`Updater ZIP verified: ${result.zipPath}`);
   else if (result.profile === "developer") {
     console.log("Developer preview skips updater ZIP and release metadata verification.");

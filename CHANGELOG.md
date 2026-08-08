@@ -4,6 +4,14 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+- Add a credential-free Release Dry Run for Pull Requests that change packaging,
+  release metadata, Electron or packaged Bridge paths. Two independent macOS
+  jobs now assemble and checkpoint a non-release ad-hoc App, then restore it in
+  a clean checkout, rebuild the renderer oracle, revalidate telemetry/build
+  metadata and launch-check the product name, version and Bundle ID. The
+  checkpoint is always `releaseEligible: false`, uses only a synthetic public
+  telemetry token, and cannot enter the signed/notarized Candidate or
+  publication lanes.
 - Fixed formal AI review missing chart palette, data, or configuration changes
   when the changed script did not directly name the rendered chart host. A
   source-empty chart directly covered by a saved local comment target, plus

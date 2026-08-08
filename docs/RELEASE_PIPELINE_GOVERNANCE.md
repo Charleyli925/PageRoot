@@ -8,6 +8,7 @@ PageRoot keeps the release standard high while avoiding repeated proof of the sa
 | --- | --- | --- | --- |
 | PR feedback | Pull Request opens, updates, reopens or returns to Draft | Impact-selected Node/compiler feedback for the current head | Report `release-gate` or run the complete Browser/Electron matrix |
 | Source candidate | One frozen Pull Request explicitly transitions from Draft to Ready | Full Node, three Browser shards, real HTML, native Electron and deterministic AI; exact-tree attestation | Automatically rerun on later commits, package or publish an installer |
+| Release dry run | Packaging/release metadata/Electron/Bridge/Schema/resource path changes on a Pull Request | Credential-free ad-hoc App, non-release checkpoint, clean-job renderer/metadata revalidation and startup identity | Read signing/Apple secrets, create distributables or enter Candidate/publication |
 | Main integrity | Source candidate is merged | Match merged PR, Tree Hash, version and fresh PR attestation | Repeat any Node, Browser or Electron source test |
 | Developer preview | Explicit manual request only | Clean Tree, ad-hoc DMG, packaged-content audit, isolated startup and non-release attestation | Sign/notarize, create updater assets, become a prerequisite, tag or publish |
 | Release candidate | Manual `Release Candidate` dispatch on current `main` | Pre-sign content/runtime proof, signed-App checkpoint, final DMG/ZIP/update checks, release asset hashes and candidate attestation | Rebuild the verified App after checkpoint, create a tag or GitHub Release |
@@ -20,6 +21,13 @@ startup feedback ahead of an optionally requested installation check. No
 push, Pull Request, schedule, formal candidate or publication event triggers
 it. Its seven-day artifact cannot be promoted; formal release evidence starts
 independently from reviewed `main`.
+
+`Release Dry Run` is automatic only for its narrow `pull_request.paths` set.
+It uses two clean macOS jobs and a synthetic public-format telemetry token, but
+no repository secret. Its checkpoint says `releaseEligible: false` and has a
+separate kind, directory and filename that the formal signed-App restore will
+not accept. It is deterministic pre-merge feedback, not reusable release
+evidence.
 
 `PR Feedback` and the source-candidate workflow share a per-PR concurrency key.
 A commit or Draft conversion therefore cancels an in-flight complete run for
@@ -36,9 +44,10 @@ promote the next branch against the new `main`.
 - Native Electron and deterministic AI run as separate jobs. A failure can be rerun independently.
 - Each macOS job first runs a product-independent synthetic Electron environment preflight. It proves that the hosted window is visible and that renderer timers and animation frames advance before PageRoot code or assertions begin.
 - Browser shards, real HTML, native Electron and AI keep retries at zero. Reliability is obtained from deterministic readiness and better evidence, not blanket retrying.
+- Release Dry Run has two sequential macOS jobs. The first builds metadata and an ad-hoc App, runs the shared packaged verifier and freezes a non-release checkpoint. The second restores the checkpoint in a fresh checkout, restores its exact metadata, rebuilds `dist-desktop`, reruns the shared verifier, then launches the App to compare runtime name/version and Bundle ID with the source package contract. Neither job builds a DMG or sees signing/notarization inputs.
 - Release Candidate has two sequential macOS jobs. `preflight-sign-and-notarize-app` first assembles an ad-hoc App, checks packaged contents, runs the complete packaged-runtime oracle, signs it and proves signed startup before the App is submitted to Apple. Only after App acceptance does it upload an archive/hash/source-bound checkpoint.
 - `package-and-verify-candidate` downloads and revalidates that checkpoint, restores the exact embedded build and telemetry metadata as comparison inputs, rebuilds only the deterministic Electron renderer as a source-comparison oracle, uses electron-builder `--prepackaged` to avoid rebuilding the App, creates updater assets, submits only the final DMG to Apple and performs final mounted/extracted verification. The fresh job never regenerates telemetry configuration or receives its project token. The jobs have 90- and 75-minute guards; App and DMG Apple steps have 45- and 50-minute limits. All non-Apple steps keep explicit 2–10 minute limits.
-- The checkpoint transfer is the only added normal-path handoff. Its ZIP is uploaded without redundant Actions compression. This small fixed cost prevents content/runtime failures from consuming Apple queue time and lets a failed second job resume without rebuilding, rerunning packaged runtime, resigning or renotarizing the App.
+- The formal Candidate checkpoint transfer is its only added normal-path handoff. Its ZIP is uploaded without redundant Actions compression. This small fixed cost prevents content/runtime failures from consuming Apple queue time and lets a failed second job resume without rebuilding, rerunning packaged runtime, resigning or renotarizing the App.
 
 ## Failure evidence and classification
 
