@@ -122,12 +122,12 @@ function latestReadyForReviewEvent(timelineEvents) {
     ))[0] || null;
 }
 
-function latestDraftEventBefore(timelineEvents, readyAt) {
+function latestDraftEventAtOrBefore(timelineEvents, readyAt) {
   return (timelineEvents || [])
     .filter((event) => (
       ["convert_to_draft", "converted_to_draft"].includes(event?.event)
       && Number.isFinite(timestamp(event?.created_at || event?.createdAt))
-      && timestamp(event?.created_at || event?.createdAt) < readyAt
+      && timestamp(event?.created_at || event?.createdAt) <= readyAt
     ))
     .sort((left, right) => (
       timestamp(right?.created_at || right?.createdAt)
@@ -139,7 +139,11 @@ function inInterval(at, atOrAfter, before = Number.POSITIVE_INFINITY) {
   return Number.isFinite(at) && at >= atOrAfter && at < before;
 }
 
-function substantiveReviewSignal(review, expectedHeadSha, atOrAfter, before) {
+function strictlyInInterval(at, after, before = Number.POSITIVE_INFINITY) {
+  return Number.isFinite(at) && at > after && at < before;
+}
+
+function substantiveReviewSignal(review, expectedHeadSha, after, before) {
   const completedAt = timestamp(review?.submitted_at || review?.submittedAt);
   const state = String(review?.state || "").toUpperCase();
   const commitSha = String(
@@ -152,7 +156,7 @@ function substantiveReviewSignal(review, expectedHeadSha, atOrAfter, before) {
     || commitSha !== expectedHeadSha
     || !prefix
     || !expectedHeadSha.startsWith(prefix)
-    || !inInterval(completedAt, atOrAfter, before)
+    || !strictlyInInterval(completedAt, after, before)
   ) return null;
   return {
     kind: "substantive_review",
@@ -162,12 +166,12 @@ function substantiveReviewSignal(review, expectedHeadSha, atOrAfter, before) {
   };
 }
 
-function cleanReactionSignal(reaction, scope, atOrAfter, before) {
+function cleanReactionSignal(reaction, scope, after, before) {
   const completedAt = timestamp(reaction?.created_at || reaction?.createdAt);
   if (
     !isCodexActor(reaction?.user?.login || reaction?.author?.login || reaction?.author)
     || !["+1", "THUMBS_UP"].includes(reaction?.content)
-    || !inInterval(completedAt, atOrAfter, before)
+    || !strictlyInInterval(completedAt, after, before)
   ) return null;
   return {
     kind: "clean_review_reaction",
@@ -179,19 +183,19 @@ function cleanReactionSignal(reaction, scope, atOrAfter, before) {
 
 function reviewCompletionSignals({
   expectedHeadSha,
-  atOrAfter,
+  after,
   before = Number.POSITIVE_INFINITY,
   reviews = [],
   reactionGroups = [],
 }) {
   const signals = [];
   for (const review of reviews) {
-    const signal = substantiveReviewSignal(review, expectedHeadSha, atOrAfter, before);
+    const signal = substantiveReviewSignal(review, expectedHeadSha, after, before);
     if (signal) signals.push(signal);
   }
   for (const group of reactionGroups) {
     for (const reaction of group.reactions || []) {
-      const signal = cleanReactionSignal(reaction, group.scope, atOrAfter, before);
+      const signal = cleanReactionSignal(reaction, group.scope, after, before);
       if (signal) signals.push(signal);
     }
   }
@@ -322,7 +326,13 @@ export function evaluateReviewSettlement({
     return outcome(identity, "waiting", "ready_transition_missing");
   }
   const readyAt = timestamp(readyEvent?.created_at || readyEvent?.createdAt);
-  const draftEvent = latestDraftEventBefore(timelineEvents, readyAt);
+  const draftEvent = latestDraftEventAtOrBefore(timelineEvents, readyAt);
+  if (
+    draftEvent
+    && timestamp(draftEvent?.created_at || draftEvent?.createdAt) === readyAt
+  ) {
+    return outcome(identity, "blocked", "draft_ready_order_ambiguous");
+  }
   const draftStartedAt = draftEvent
     ? timestamp(draftEvent?.created_at || draftEvent?.createdAt)
     : timestamp(pullRequest?.created_at || pullRequest?.createdAt);
@@ -344,7 +354,7 @@ export function evaluateReviewSettlement({
     id: request?.id || request?.databaseId || null,
     at: new Date(requestAt).toISOString(),
   });
-  if (requestAt < draftStartedAt || requestAt >= readyAt) {
+  if (requestAt <= draftStartedAt || requestAt >= readyAt) {
     return outcome(identity, "blocked", "exact_sha_request_not_in_latest_draft", {
       request: requestSummary,
       promotion,
@@ -353,7 +363,7 @@ export function evaluateReviewSettlement({
 
   const draftCompletion = reviewCompletionSignals({
     expectedHeadSha: expectedHead,
-    atOrAfter: requestAt,
+    after: requestAt,
     before: readyAt,
     reviews,
     reactionGroups: [
@@ -385,7 +395,7 @@ export function evaluateReviewSettlement({
 
   const finalCompletion = reviewCompletionSignals({
     expectedHeadSha: expectedHead,
-    atOrAfter: readyAt,
+    after: readyAt,
     reviews,
     reactionGroups: [{ scope: "pull_request", reactions: pullRequestReactions }],
   })[0] || null;

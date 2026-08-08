@@ -283,6 +283,32 @@ test("live identity and phase ordering invalidate stale evidence", () => {
   }
 });
 
+test("second-resolution causal boundaries fail closed", () => {
+  assert.equal(evaluate({
+    issueComments: [request({ createdAt })],
+  }).reason, "exact_sha_request_not_in_latest_draft");
+  assert.equal(evaluate({
+    reviews: [draftReview({ submittedAt: requestAt }), codexReview()],
+  }).reason, "draft_review_not_completed_before_promotion");
+  assert.equal(evaluate({
+    reviews: [codexReview()],
+    requestReactions: [reaction({ createdAt: requestAt })],
+  }).reason, "draft_review_not_completed_before_promotion");
+  assert.equal(evaluate({
+    reviews: [draftReview(), codexReview({ submittedAt: readyAt })],
+  }).reason, "final_review_in_progress");
+  assert.equal(evaluate({
+    reviews: [draftReview()],
+    pullRequestReactions: [reaction({ createdAt: readyAt })],
+  }).reason, "final_review_in_progress");
+  assert.equal(evaluate({
+    timelineEvents: [
+      { id: 81, event: "convert_to_draft", created_at: readyAt },
+      { id: 82, event: "ready_for_review", created_at: readyAt },
+    ],
+  }).reason, "draft_ready_order_ambiguous");
+});
+
 test("the latest Draft interval cannot recycle an earlier promotion", () => {
   const repeatedTimeline = [
     { id: 70, event: "ready_for_review", created_at: readyAt },

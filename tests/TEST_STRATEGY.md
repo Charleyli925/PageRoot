@@ -32,7 +32,7 @@ PR 必须从 Draft 开始。普通推送由独立的 `PR Feedback` workflow 处�
 不会创建名为 `release-gate` 的跳过 job；因此分支保护不会把轻量反馈误当
 完整通过。只切回 Draft 不触发 Feedback。冻结 head 并更新到当前 base 后必须先在 Draft 用完整
 head/base SHA marker 明确请求 Codex review；每个新提交或 base 更新都需要新请求。只有
-`ready_for_review` 事件存在完整 workflow，并且 Ready 本身是唯一的最终审阅触发器，期间不再发布第二条 review 命令。`review-settled` 只接受携带当前完整 `commit_id` 与匹配 `Reviewed commit` marker 的正式 Codex review，或处于正确 Draft/Ready 时间区间的 clean `THUMBS_UP`；空 review、`EYES`、普通讨论文本和任意非协议 Markdown 都不参与判定。它在每轮轮询中同时重验 live head/base，随后从真实完成时刻等待 180 秒，再检查未解决且未 outdated 的 P0-P2
+`ready_for_review` 事件存在完整 workflow，并且 Ready 本身是唯一的最终审阅触发器，期间不再发布第二条 review 命令。`review-settled` 只接受携带当前完整 `commit_id` 与匹配 `Reviewed commit` marker 的正式 Codex review，或处于正确 Draft/Ready 时间区间且严格晚于对应触发的 clean `THUMBS_UP`；同秒时间戳无法证明先后时失败关闭，空 review、`EYES`、普通讨论文本和任意非协议 Markdown 都不参与判定。它在每轮轮询中同时重验 live head/base，随后从真实完成时刻等待 180 秒，再检查未解决且未 outdated 的 P0-P2
 线程。通过后 `baseline-policy` 才检查依赖与打包运行时闭包；完整 Linux/Browser/
 Electron job 依赖这些前置条件；`release-gate` 在 attestation 前刷新同一基线，覆盖延迟 failed-job retry 不重跑已绿 prerequisite 的情况。若晋升后又有提交，新 SHA 只获得反馈且缺少
 必需检查，必须重新转 Draft、冻结、审阅后再转 Ready；base 更新同样使已审组合失效。
