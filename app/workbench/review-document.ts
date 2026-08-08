@@ -8,11 +8,18 @@ import {
 } from "../lib/source-patch-core.js";
 import {
   mergeReviewTextRanges,
-  pairReviewSemanticTextUnits,
   readableReviewTextFootprintPlan,
   reviewTextSimilarity,
   sentenceAwareTextDifferences,
 } from "../lib/review-text-diff.js";
+import type {
+  ReviewTextChangeOperation,
+  ReviewTextChangeScope,
+} from "../lib/review-text-diff.js";
+import { alignReviewSemanticUnits } from "../lib/review-semantic-alignment.js";
+import type {
+  ReviewSemanticAlignmentMatch,
+} from "../lib/review-semantic-alignment.js";
 import {
   REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT,
   selectPrioritizedReviewRuntimeVisualCandidates,
@@ -1824,8 +1831,11 @@ type TextRange = { start: number; end: number };
 type ReviewTextFootprintGroup = {
   id: string;
   ranges: TextRange[];
-  scope: "inline" | "block";
+  scope: ReviewTextChangeScope;
   density: number;
+  operation: ReviewTextChangeOperation;
+  semanticOwnerId: string;
+  geometryOwnerId: string;
   summary?: string;
 };
 
@@ -1859,6 +1869,9 @@ function applyTextFootprintMetadata(
   marker.dataset.pagerootReviewTextDensity = String(
     Math.round(group.density * 10_000) / 10_000,
   );
+  marker.dataset.pagerootReviewTextOperation = group.operation;
+  marker.dataset.pagerootReviewSemanticOwner = group.semanticOwnerId;
+  marker.dataset.pagerootReviewGeometryOwner = group.geometryOwnerId;
   if (group.summary) marker.dataset.pagerootReviewTextSummary = group.summary;
 }
 
@@ -1909,24 +1922,6 @@ function wrapTextRanges(
   });
 }
 
-function wrapTextContext(
-  inventory: ReviewTextInventory,
-  tone: "removed" | "added",
-  changeKind: "before" | "after",
-  group: ReviewTextFootprintGroup,
-) {
-  inventory.nodes.forEach(({ node }) => {
-    const value = node.textContent || "";
-    if (!value.trim()) return;
-    const marker = node.ownerDocument.createElement("span");
-    marker.dataset.pagerootReviewTextContext = tone;
-    marker.dataset.pagerootReviewTextChange = changeKind;
-    applyTextFootprintMetadata(marker, group);
-    marker.textContent = value;
-    node.replaceWith(marker);
-  });
-}
-
 const REVIEW_TEXT_BLOCK_TAGS = new Set([
   "ADDRESS",
   "ARTICLE",
@@ -1970,13 +1965,6 @@ const REVIEW_TEXT_BLOCK_TAGS = new Set([
   "UL",
 ]);
 
-type ReviewTextBlock = {
-  anchor: Element;
-  inventory: ReviewTextInventory;
-  kind: "block" | "flow-line" | "numbered-line" | "list-item" | "table-row";
-  maximumScope: "inline" | "block";
-};
-
 function isReviewTextBlockElement(element: Element): boolean {
   return element.namespaceURI === "http://www.w3.org/1999/xhtml"
     && REVIEW_TEXT_BLOCK_TAGS.has(element.tagName);
@@ -2004,258 +1992,511 @@ function sliceReviewTextInventory(
 
 const NUMBERED_TEXT_LINE_PATTERN = /^\s*(?:[\u2460-\u2473]|\(?\d+\)?[.、:：]|[一二三四五六七八九十]+、)\s*/u;
 
-function semanticTextInventories(sourceNodes: Node[]): Array<{
-  inventory: ReviewTextInventory;
-  kind: "flow-line" | "numbered-line";
-}> {
-  const inventory = reviewTextInventoryForNodes(sourceNodes);
-  if (!inventory.text.trim()) return [];
-  const breakOffsets = [...new Set(inventory.breakOffsets)]
-    .filter((offset) => offset > 0 && offset < inventory.text.length);
-  const lineRanges: TextRange[] = [];
-  let lineStart = 0;
-  [...breakOffsets, inventory.text.length].forEach((end) => {
-    if (inventory.text.slice(lineStart, end).trim()) lineRanges.push({ start: lineStart, end });
-    lineStart = end;
-  });
-  const numberedLines = lineRanges.length >= 2
-    && lineRanges.every((range) => NUMBERED_TEXT_LINE_PATTERN.test(
-      inventory.text.slice(range.start, range.end),
-    ));
-  const boundaries = breakOffsets
-    .filter((offset) => numberedLines
-      || /[\u3002\uff01\uff1f!?\uff1b;]\s*$/u.test(inventory.text.slice(0, offset)));
-  const ranges: TextRange[] = [];
-  let start = 0;
-  boundaries.forEach((end) => {
-    if (inventory.text.slice(start, end).trim()) ranges.push({ start, end });
-    start = end;
-  });
-  if (inventory.text.slice(start).trim()) ranges.push({ start, end: inventory.text.length });
-  return ranges.map((range) => ({
-    inventory: sliceReviewTextInventory(inventory, range.start, range.end),
-    kind: numberedLines ? "numbered-line" : "flow-line",
-  }));
-}
-
-function reviewTextBlocks(region: Element): ReviewTextBlock[] {
-  const blocks: ReviewTextBlock[] = [];
-  const collect = (container: Element) => {
-    const atomicKind = container.tagName === "TR"
-      ? "table-row" as const
-      : container.tagName === "LI" ? "list-item" as const : null;
-    if (atomicKind) {
-      const inventory = reviewTextInventory(container);
-      if (inventory.text.trim()) {
-        blocks.push({
-          anchor: container,
-          inventory,
-          kind: atomicKind,
-          maximumScope: "block",
-        });
-      }
-      return;
-    }
-    const containsBlockChildren = [...container.children]
-      .some((child) => isReviewTextBlockElement(child));
-    let flow: Node[] = [];
-    const flush = () => {
-      if (!flow.length) return;
-      const semanticInventories = semanticTextInventories(flow);
-      semanticInventories.forEach(({ inventory, kind }) => {
-        const isWholeBlock = semanticInventories.length === 1 && !containsBlockChildren;
-        blocks.push({
-          anchor: container,
-          inventory,
-          kind: isWholeBlock ? "block" : kind,
-          maximumScope: isWholeBlock ? "block" : "inline",
-        });
-      });
-      flow = [];
-    };
-    container.childNodes.forEach((node) => {
-      if (node instanceof Element && NON_CONTENT_TAGS.has(node.tagName)) return;
-      if (node instanceof Element && isReviewTextBlockElement(node)) {
-        flush();
-        collect(node);
-        return;
-      }
-      flow.push(node);
-    });
-    flush();
-  };
-  collect(region);
-  if (!blocks.length) {
-    const inventory = reviewTextInventory(region);
-    if (inventory.text.trim()) {
-      blocks.push({
-        anchor: region,
-        inventory,
-        kind: "block",
-        maximumScope: "block",
-      });
-    }
-  }
-  return blocks;
-}
-
 const GENERIC_REVIEW_TEXT_CLASSES = new Set([
     "active", "card", "col", "column", "container", "content", "grid", "item",
     "main", "panel", "row", "section", "selected", "wrap", "wrapper",
 ]);
-
-function pairTextBlocks(
-  before: ReviewTextBlock[],
-  after: ReviewTextBlock[],
-): Array<{ before: ReviewTextBlock | null; after: ReviewTextBlock | null }> {
-  const descriptor = (block: ReviewTextBlock) => ({
-    kind: `${block.kind}:${block.anchor.tagName}`,
-    identity: pairKey(block.anchor),
-    text: block.kind === "table-row"
-      ? [...block.anchor.children]
-        .filter((element) => element.matches("th, td"))
-        .map((element) => normalizedText(element))
-        .join("\u001f")
-      : block.inventory.text,
-    affinities: classTokens(block.anchor)
-      .filter((token) => !GENERIC_REVIEW_TEXT_CLASSES.has(token)),
-  });
-  return pairReviewSemanticTextUnits(
-    before.map(descriptor),
-    after.map(descriptor),
-  ).map((pair) => ({
-    before: pair.beforeIndex === null ? null : before[pair.beforeIndex],
-    after: pair.afterIndex === null ? null : after[pair.afterIndex],
-  }));
-}
-
-function markAllText(
-  block: ReviewTextBlock,
-  tone: "removed" | "added",
-  groupId: string,
-): boolean {
-  const { inventory } = block;
-  if (!inventory.text.trim()) return false;
-  const group: ReviewTextFootprintGroup = {
-    id: groupId,
-    ranges: [{ start: 0, end: inventory.text.length }],
-    scope: block.maximumScope,
-    density: 1,
-  };
-  markTextFootprintOwner(block.anchor, [group]);
-  wrapTextRanges(inventory, [group], tone);
-  return true;
-}
 
 function sameBreakLayout(before: ReviewTextInventory, after: ReviewTextInventory): boolean {
   return before.breakOffsets.length === after.breakOffsets.length
     && before.breakOffsets.every((offset, index) => offset === after.breakOffsets[index]);
 }
 
-function markTextDifferences(before: Element | null, after: Element | null): boolean {
+type ReviewSemanticUnitKind =
+  | "section"
+  | "container"
+  | "leaf-text-block"
+  | "direct-flow"
+  | "br-line"
+  | "list"
+  | "list-item"
+  | "table"
+  | "row-group"
+  | "table-row"
+  | "table-cell";
+
+type ReviewSemanticUnit = {
+  kind: ReviewSemanticUnitKind;
+  element: Element;
+  inventory: ReviewTextInventory | null;
+  maximumScope: "inline" | "block";
+  children: ReviewSemanticUnit[];
+  columnStart?: number;
+  columnSpan?: number;
+};
+
+type ReviewSemanticPairNode = {
+  before: ReviewSemanticUnit | null;
+  after: ReviewSemanticUnit | null;
+  match: ReviewSemanticAlignmentMatch;
+  moved: boolean;
+  semanticOwnerId: string;
+  geometryOwnerId: string;
+  structureFallback: boolean;
+  children: ReviewSemanticPairNode[];
+};
+
+type ReviewSemanticPairGraph = {
+  root: ReviewSemanticPairNode;
+};
+
+const REVIEW_LEAF_TEXT_OWNER_TAGS = new Set([
+  "ADDRESS",
+  "BLOCKQUOTE",
+  "BUTTON",
+  "CAPTION",
+  "DD",
+  "DT",
+  "FIGCAPTION",
+  "H1",
+  "H2",
+  "H3",
+  "H4",
+  "H5",
+  "H6",
+  "P",
+  "PRE",
+  "SUMMARY",
+]);
+
+const REVIEW_DIRECT_TEXT_OWNER_TAGS = new Set([
+  "BUTTON",
+  "CAPTION",
+  "DD",
+  "DIV",
+  "DT",
+  "FIGCAPTION",
+  "LI",
+  "TD",
+  "TH",
+]);
+
+function semanticFlowUnit(
+  owner: Element,
+  sourceNodes: Node[],
+  maximumScope: "inline" | "block",
+): ReviewSemanticUnit | null {
+  const inventory = reviewTextInventoryForNodes(sourceNodes);
+  if (!inventory.text.trim() && !inventory.breakOffsets.length) return null;
+  const breakOffsets = [...new Set(inventory.breakOffsets)]
+    .filter((offset) => offset >= 0 && offset <= inventory.text.length)
+    .sort((left, right) => left - right);
+  const lineRanges: TextRange[] = [];
+  let start = 0;
+  [...breakOffsets, inventory.text.length].forEach((end) => {
+    lineRanges.push({ start, end });
+    start = end;
+  });
+  const nonEmptyLines = lineRanges.filter((range) => (
+    inventory.text.slice(range.start, range.end).trim()
+  ));
+  const numberedLines = nonEmptyLines.length >= 2 && nonEmptyLines.every((range) => (
+    NUMBERED_TEXT_LINE_PATTERN.test(inventory.text.slice(range.start, range.end))
+  ));
+  if (!numberedLines) {
+    return {
+      kind: "direct-flow",
+      element: owner,
+      inventory,
+      maximumScope,
+      children: [],
+    };
+  }
+  return {
+    kind: "direct-flow",
+    element: owner,
+    inventory: null,
+    maximumScope: "inline",
+    children: lineRanges.map((range) => ({
+      kind: "br-line" as const,
+      element: owner,
+      inventory: sliceReviewTextInventory(inventory, range.start, range.end),
+      maximumScope: "inline" as const,
+      children: [],
+    })),
+  };
+}
+
+function semanticChildrenForContainer(container: Element): ReviewSemanticUnit[] {
+  const children: ReviewSemanticUnit[] = [];
+  let flow: Node[] = [];
+  const flush = () => {
+    if (!flow.length) return;
+    const unit = semanticFlowUnit(
+      container,
+      flow,
+      REVIEW_DIRECT_TEXT_OWNER_TAGS.has(container.tagName) ? "block" : "inline",
+    );
+    if (unit) children.push(unit);
+    flow = [];
+  };
+  container.childNodes.forEach((node) => {
+    if (node instanceof Element && NON_CONTENT_TAGS.has(node.tagName)) return;
+    if (
+      node instanceof Element
+      && node.namespaceURI === "http://www.w3.org/1999/xhtml"
+      && isReviewTextBlockElement(node)
+    ) {
+      flush();
+      children.push(buildReviewSemanticUnit(node));
+      return;
+    }
+    flow.push(node);
+  });
+  flush();
+  return children;
+}
+
+function tableCellUnits(row: Element): ReviewSemanticUnit[] {
+  let logicalColumn = 0;
+  return [...row.children]
+    .filter((element) => element.matches("th, td"))
+    .map((element) => {
+      const rawSpan = Number.parseInt(element.getAttribute("colspan") || "1", 10);
+      const columnSpan = Number.isFinite(rawSpan) && rawSpan > 0 ? rawSpan : 1;
+      const unit = buildReviewSemanticUnit(element);
+      unit.columnStart = logicalColumn;
+      unit.columnSpan = columnSpan;
+      logicalColumn += columnSpan;
+      return unit;
+    });
+}
+
+function buildReviewSemanticUnit(element: Element): ReviewSemanticUnit {
+  if (element.matches("ul, ol")) {
+    return {
+      kind: "list",
+      element,
+      inventory: null,
+      maximumScope: "inline",
+      children: [...element.children]
+        .filter((child) => child.tagName === "LI")
+        .map(buildReviewSemanticUnit),
+    };
+  }
+  if (element.tagName === "LI") {
+    return {
+      kind: "list-item",
+      element,
+      inventory: null,
+      maximumScope: "block",
+      children: semanticChildrenForContainer(element),
+    };
+  }
+  if (element.tagName === "TABLE") {
+    return {
+      kind: "table",
+      element,
+      inventory: null,
+      maximumScope: "inline",
+      children: [...element.children]
+        .filter((child) => child.matches("caption, thead, tbody, tfoot, tr"))
+        .map(buildReviewSemanticUnit),
+    };
+  }
+  if (element.matches("thead, tbody, tfoot")) {
+    return {
+      kind: "row-group",
+      element,
+      inventory: null,
+      maximumScope: "inline",
+      children: [...element.children]
+        .filter((child) => child.tagName === "TR")
+        .map(buildReviewSemanticUnit),
+    };
+  }
+  if (element.tagName === "TR") {
+    return {
+      kind: "table-row",
+      element,
+      inventory: null,
+      maximumScope: "block",
+      children: tableCellUnits(element),
+    };
+  }
+  if (element.matches("td, th")) {
+    return {
+      kind: "table-cell",
+      element,
+      inventory: null,
+      maximumScope: "block",
+      children: semanticChildrenForContainer(element),
+    };
+  }
+  const hasBlockChild = [...element.children].some((child) => (
+    isReviewTextBlockElement(child)
+  ));
+  if (REVIEW_LEAF_TEXT_OWNER_TAGS.has(element.tagName) && !hasBlockChild) {
+    return {
+      kind: "leaf-text-block",
+      element,
+      inventory: reviewTextInventory(element),
+      maximumScope: "block",
+      children: [],
+    };
+  }
+  return {
+    kind: element.matches("section, article, main, header, footer, nav")
+      ? "section"
+      : "container",
+    element,
+    inventory: null,
+    maximumScope: "inline",
+    children: semanticChildrenForContainer(element),
+  };
+}
+
+function semanticUnitText(unit: ReviewSemanticUnit): string {
+  if (unit.inventory) return unit.inventory.text;
+  if (unit.kind === "table-row") {
+    return [...unit.element.children]
+      .filter((element) => element.matches("th, td"))
+      .map((element) => normalizedText(element))
+      .join("\u001f");
+  }
+  return normalizedText(unit.element);
+}
+
+function semanticUnitDescriptor(unit: ReviewSemanticUnit, parentKey: string) {
+  const logicalCell = unit.kind === "table-cell"
+    ? `:${unit.element.tagName}:${unit.columnStart ?? -1}:${unit.columnSpan ?? 1}`
+    : `:${unit.element.tagName}`;
+  const text = semanticUnitText(unit);
+  const numberedPrefix = unit.kind === "br-line"
+    ? text.match(NUMBERED_TEXT_LINE_PATTERN)?.[0]?.trim() || ""
+    : "";
+  const ownsElementIdentity = unit.kind !== "direct-flow" && unit.kind !== "br-line";
+  return {
+    kind: `${unit.kind}${logicalCell}`,
+    text,
+    stableId: ownsElementIdentity ? pairKey(unit.element) : null,
+    exactSignature: text ? `${unit.kind}\u0000${logicalCell}\u0000${text}` : null,
+    affinities: [
+      ...classTokens(unit.element).filter((token) => !GENERIC_REVIEW_TEXT_CLASSES.has(token)),
+      ...(numberedPrefix ? [`number:${numberedPrefix}`] : []),
+    ],
+    parentKey,
+  };
+}
+
+function sameLogicalCellPattern(
+  before: ReviewSemanticUnit[],
+  after: ReviewSemanticUnit[],
+): boolean {
+  return before.length === after.length && before.every((unit, index) => {
+    const candidate = after[index];
+    return candidate
+      && unit.element.tagName === candidate.element.tagName
+      && unit.columnStart === candidate.columnStart
+      && unit.columnSpan === candidate.columnSpan;
+  });
+}
+
+function buildReviewSemanticPairGraph(pair: SectionPair): ReviewSemanticPairGraph {
+  let semanticOwnerSequence = 0;
+  let geometryOwnerSequence = 0;
+  let parentSequence = 0;
+  const geometryOwners = new WeakMap<Element, string>();
+  const semanticOwner = () => `semantic-owner-${++semanticOwnerSequence}`;
+  const geometryOwner = (before: Element | null, after: Element | null) => {
+    const existing = (before && geometryOwners.get(before))
+      || (after && geometryOwners.get(after));
+    const ownerId = existing || `geometry-owner-${++geometryOwnerSequence}`;
+    [before, after].forEach((element) => {
+      if (!element) return;
+      geometryOwners.set(element, ownerId);
+      element.setAttribute("data-pageroot-review-geometry-owner", ownerId);
+    });
+    return ownerId;
+  };
+  const createPair = (
+    before: ReviewSemanticUnit | null,
+    after: ReviewSemanticUnit | null,
+    match: ReviewSemanticAlignmentMatch,
+    moved: boolean,
+    inheritedOwnerId?: string,
+  ): ReviewSemanticPairNode => {
+    const ownerId = inheritedOwnerId || semanticOwner();
+    const node: ReviewSemanticPairNode = {
+      before,
+      after,
+      match,
+      moved,
+      semanticOwnerId: ownerId,
+      geometryOwnerId: geometryOwner(before?.element || null, after?.element || null),
+      structureFallback: false,
+      children: [],
+    };
+    if (!before || !after) {
+      const children = before?.children || after?.children || [];
+      node.children = children.map((child) => createPair(
+        before ? child : null,
+        after ? child : null,
+        "unmatched",
+        false,
+        ownerId,
+      ));
+      return node;
+    }
+    if (
+      before.kind === "table-row"
+      && after.kind === "table-row"
+      && !sameLogicalCellPattern(before.children, after.children)
+    ) {
+      node.structureFallback = true;
+      node.children = [
+        ...before.children.map((child) => createPair(child, null, "unmatched", false, ownerId)),
+        ...after.children.map((child) => createPair(null, child, "unmatched", false, ownerId)),
+      ];
+      return node;
+    }
+    const parentKey = `semantic-parent-${++parentSequence}`;
+    const aligned = alignReviewSemanticUnits(
+      before.children.map((unit) => semanticUnitDescriptor(unit, parentKey)),
+      after.children.map((unit) => semanticUnitDescriptor(unit, parentKey)),
+    );
+    node.children = aligned.map((childPair) => createPair(
+      childPair.beforeIndex === null ? null : before.children[childPair.beforeIndex],
+      childPair.afterIndex === null ? null : after.children[childPair.afterIndex],
+      childPair.match,
+      childPair.moved,
+    ));
+    return node;
+  };
+  const beforeRoot = pair.before ? buildReviewSemanticUnit(pair.before) : null;
+  const afterRoot = pair.after ? buildReviewSemanticUnit(pair.after) : null;
+  return {
+    root: createPair(
+      beforeRoot,
+      afterRoot,
+      beforeRoot && afterRoot ? "weighted" : "unmatched",
+      Boolean(pair.moved),
+    ),
+  };
+}
+
+function flattenReviewSemanticPairs(root: ReviewSemanticPairNode): ReviewSemanticPairNode[] {
+  return [root, ...root.children.flatMap(flattenReviewSemanticPairs)];
+}
+
+function markSemanticTextFootprintOwner(
+  unit: ReviewSemanticUnit,
+  groups: ReviewTextFootprintGroup[],
+) {
+  markTextFootprintOwner(unit.element, groups);
+  unit.element.setAttribute(
+    "data-pageroot-review-geometry-owner",
+    groups[0]?.geometryOwnerId || "",
+  );
+}
+
+function markSemanticAllText(
+  pair: ReviewSemanticPairNode,
+  unit: ReviewSemanticUnit,
+  tone: "removed" | "added",
+  groupId: string,
+): boolean {
+  const inventory = unit.inventory;
+  if (!inventory?.text.trim()) return false;
+  const differences = tone === "added"
+    ? { before: [], after: [{ start: 0, end: inventory.text.length }] }
+    : { before: [{ start: 0, end: inventory.text.length }], after: [] };
+  const plan = readableReviewTextFootprintPlan(
+    tone === "added" ? "" : inventory.text,
+    tone === "added" ? inventory.text : "",
+    differences,
+  );
+  const side = tone === "added" ? plan.after : plan.before;
+  const scope = unit.maximumScope === "inline" ? "inline" : plan.scope;
+  const group: ReviewTextFootprintGroup = {
+    id: groupId,
+    ranges: side.footprintGroups.flat(),
+    scope,
+    density: plan.density,
+    operation: plan.operation,
+    semanticOwnerId: pair.semanticOwnerId,
+    geometryOwnerId: pair.geometryOwnerId,
+  };
+  markSemanticTextFootprintOwner(unit, [group]);
+  wrapTextRanges(inventory, [group], tone, tone);
+  return true;
+}
+
+function markSemanticTextDifferences(graph: ReviewSemanticPairGraph): {
+  changed: boolean;
+  layoutPairs: ReviewSemanticPairNode[];
+} {
   let changed = false;
-  if (!before && after) {
-    reviewTextBlocks(after).forEach((element, index) => {
-      changed = markAllText(element, "added", `text-${index + 1}-1`) || changed;
-    });
-    return changed;
-  }
-  if (before && !after) {
-    reviewTextBlocks(before).forEach((element, index) => {
-      changed = markAllText(element, "removed", `text-${index + 1}-1`) || changed;
-    });
-    return changed;
-  }
-  if (!before || !after) return false;
-  pairTextBlocks(reviewTextBlocks(before), reviewTextBlocks(after)).forEach((pair, pairIndex) => {
-    const groupBase = `text-${pairIndex + 1}`;
-    if (!pair.before && pair.after) {
-      changed = markAllText(pair.after, "added", `${groupBase}-1`) || changed;
+  let groupSequence = 0;
+  const layoutPairs: ReviewSemanticPairNode[] = [];
+  flattenReviewSemanticPairs(graph.root).forEach((pair) => {
+    const beforeInventory = pair.before?.inventory || null;
+    const afterInventory = pair.after?.inventory || null;
+    if (!beforeInventory && !afterInventory) return;
+    const groupBase = `text-${++groupSequence}`;
+    if (!beforeInventory && pair.after) {
+      changed = markSemanticAllText(pair, pair.after, "added", `${groupBase}-1`) || changed;
       return;
     }
-    if (pair.before && !pair.after) {
-      changed = markAllText(pair.before, "removed", `${groupBase}-1`) || changed;
+    if (!afterInventory && pair.before) {
+      changed = markSemanticAllText(pair, pair.before, "removed", `${groupBase}-1`) || changed;
       return;
     }
-    if (!pair.before || !pair.after) return;
-    const beforeInventory = pair.before.inventory;
-    const afterInventory = pair.after.inventory;
-    const maximumScope = pair.before.maximumScope === "inline"
-      || pair.after.maximumScope === "inline"
-      ? "inline"
-      : "block";
+    if (!beforeInventory || !afterInventory || !pair.before || !pair.after) return;
     const layoutChanged = !sameBreakLayout(beforeInventory, afterInventory);
     if (beforeInventory.text === afterInventory.text) {
-      if (!layoutChanged) return;
-      const group: ReviewTextFootprintGroup = {
-        id: `${groupBase}-1`,
-        ranges: [{ start: 0, end: beforeInventory.text.length }],
-        scope: maximumScope,
-        density: 1,
-      };
-      markTextFootprintOwner(pair.before.anchor, [group]);
-      markTextFootprintOwner(pair.after.anchor, [group]);
-      wrapTextContext(beforeInventory, "removed", "before", group);
-      wrapTextContext(afterInventory, "added", "after", group);
-      changed = true;
+      if (layoutChanged) layoutPairs.push(pair);
       return;
     }
     const differences = sentenceAwareTextDifferences(
       beforeInventory.text,
       afterInventory.text,
     );
-    if (!differences.before.length && !differences.after.length && !layoutChanged) return;
+    if (!differences.before.length && !differences.after.length) return;
     const plan = readableReviewTextFootprintPlan(
       beforeInventory.text,
       afterInventory.text,
       differences,
     );
+    const maximumScope = pair.before.maximumScope === "inline"
+      || pair.after.maximumScope === "inline"
+      ? "inline"
+      : "block";
     const footprintScope = maximumScope === "inline" ? "inline" : plan.scope;
-    const preferredSummary = footprintScope === "block"
-      && differences.before.length
-      && differences.after.length
+    const preferredSummary = footprintScope === "block" && plan.operation === "replace"
       ? "段落改写"
       : undefined;
-    const beforeGroups: ReviewTextFootprintGroup[] = plan.before.groups.map((ranges, index) => ({
+    const createGroups = (
+      ranges: TextRange[][],
+      geometryOwnerId: string,
+    ): ReviewTextFootprintGroup[] => ranges.map((groupRanges, index) => ({
       id: `${groupBase}-${index + 1}`,
-      ranges,
+      ranges: groupRanges,
       scope: footprintScope,
       density: plan.density,
+      operation: plan.operation,
+      semanticOwnerId: pair.semanticOwnerId,
+      geometryOwnerId,
       summary: preferredSummary,
     }));
-    const afterGroups: ReviewTextFootprintGroup[] = plan.after.groups.map((ranges, index) => ({
-      id: `${groupBase}-${index + 1}`,
-      ranges,
-      scope: footprintScope,
-      density: plan.density,
-      summary: preferredSummary,
-    }));
-    if (plan.before.groups.length) {
-      markTextFootprintOwner(pair.before.anchor, beforeGroups);
-      wrapTextRanges(
-        beforeInventory,
-        beforeGroups,
-        "removed",
-        plan.operation === "replace" ? "before" : "removed",
-      );
+    const beforeGroups = createGroups(plan.before.footprintGroups, pair.geometryOwnerId);
+    const afterGroups = createGroups(plan.after.footprintGroups, pair.geometryOwnerId);
+    if (beforeGroups.length) {
+      markSemanticTextFootprintOwner(pair.before, beforeGroups);
+      wrapTextRanges(beforeInventory, beforeGroups, "removed", plan.operation === "replace" ? "before" : "removed");
       changed = true;
     } else if (plan.before.anchorOffset !== null) {
-      markTextAnchor(pair.before.anchor, `${groupBase}-1`, plan.before.anchorOffset);
+      markTextAnchor(pair.before.element, `${groupBase}-1`, plan.before.anchorOffset);
     }
-    if (plan.after.groups.length) {
-      markTextFootprintOwner(pair.after.anchor, afterGroups);
-      wrapTextRanges(
-        afterInventory,
-        afterGroups,
-        "added",
-        plan.operation === "replace" ? "after" : "added",
-      );
+    if (afterGroups.length) {
+      markSemanticTextFootprintOwner(pair.after, afterGroups);
+      wrapTextRanges(afterInventory, afterGroups, "added", plan.operation === "replace" ? "after" : "added");
       changed = true;
     } else if (plan.after.anchorOffset !== null) {
-      markTextAnchor(pair.after.anchor, `${groupBase}-1`, plan.after.anchorOffset);
+      markTextAnchor(pair.after.element, `${groupBase}-1`, plan.after.anchorOffset);
     }
   });
-  return changed;
+  return { changed, layoutPairs };
 }
 
 function selfPresentationSignature(element: Element): string {
@@ -2426,8 +2667,9 @@ function structuralChildren(element: Element): Element[] {
   ));
 }
 
-function markStructureElement(element: Element, tone: string) {
+function markStructureElement(element: Element, tone: string, semanticOwnerId: string) {
   element.setAttribute("data-pageroot-review-structure", tone);
+  element.setAttribute("data-pageroot-review-semantic-owner", semanticOwnerId);
 }
 
 function pairSiblingElements(before: Element[], after: Element[]): Map<Element, Element> {
@@ -2483,62 +2725,49 @@ function pairSiblingElements(before: Element[], after: Element[]): Map<Element, 
   return assignments;
 }
 
-function markStructureDifferences(pair: SectionPair): boolean {
+function markStructureDifferences(graph: ReviewSemanticPairGraph): boolean {
   const stats: StructureDifferenceStats = { added: [], removed: [], moved: [], replaced: [] };
-  if (!pair.before && pair.after) {
-    markStructureElement(pair.after, "added");
-    stats.added.push(semanticElementName(pair.after));
-  } else if (pair.before && !pair.after) {
-    markStructureElement(pair.before, "removed");
-    stats.removed.push(semanticElementName(pair.before));
-  } else if (pair.before && pair.after) {
-    if (pair.moved) {
-      markStructureElement(pair.before, "from");
-      markStructureElement(pair.after, "to");
-      stats.moved.push(semanticElementName(pair.after));
+  let inspected = 0;
+  const compare = (pair: ReviewSemanticPairNode, depth: number) => {
+    if (depth > 12 || inspected >= 800) return;
+    inspected += 1;
+    const beforeElement = pair.before?.element || null;
+    const afterElement = pair.after?.element || null;
+    if (!beforeElement && afterElement) {
+      markStructureElement(afterElement, "added", pair.semanticOwnerId);
+      stats.added.push(semanticElementName(afterElement));
+      return;
     }
-    let inspected = 0;
-    const compareChildren = (beforeParent: Element, afterParent: Element, depth: number) => {
-      if (depth > 8 || inspected >= 500) return;
-      inspected += 1;
-      if (structuralSelfSignature(beforeParent) !== structuralSelfSignature(afterParent)) {
-        markStructureElement(beforeParent, "before");
-        markStructureElement(afterParent, "after");
-        stats.replaced.push(semanticElementName(afterParent));
-      }
-      const beforeChildren = structuralChildren(beforeParent);
-      const afterChildren = structuralChildren(afterParent);
-      const assignments = pairSiblingElements(beforeChildren, afterChildren);
-      const usedAfter = new Set(assignments.values());
-      const matchedBeforeOrder = beforeChildren.filter((element) => assignments.has(element));
-      const matchedAfterOrder = [...matchedBeforeOrder].sort((left, right) => (
-        afterChildren.indexOf(assignments.get(left) as Element)
-        - afterChildren.indexOf(assignments.get(right) as Element)
-      ));
-      const afterRank = new Map(matchedAfterOrder.map((element, index) => [element, index]));
-      beforeChildren.forEach((element) => {
-        const match = assignments.get(element);
-        if (!match) {
-          markStructureElement(element, "removed");
-          stats.removed.push(semanticElementName(element));
-          return;
-        }
-        const matchedIndex = matchedBeforeOrder.indexOf(element);
-        if (matchedIndex !== afterRank.get(element)) {
-          markStructureElement(element, "from");
-          markStructureElement(match, "to");
-          stats.moved.push(semanticElementName(match));
-        }
-        compareChildren(element, match, depth + 1);
-      });
-      afterChildren.forEach((element) => {
-        if (usedAfter.has(element)) return;
-        markStructureElement(element, "added");
-        stats.added.push(semanticElementName(element));
-      });
-    };
-    compareChildren(pair.before, pair.after, 0);
-  }
+    if (beforeElement && !afterElement) {
+      markStructureElement(beforeElement, "removed", pair.semanticOwnerId);
+      stats.removed.push(semanticElementName(beforeElement));
+      return;
+    }
+    if (!beforeElement || !afterElement || !pair.before || !pair.after) return;
+    if (pair.moved) {
+      markStructureElement(beforeElement, "from", pair.semanticOwnerId);
+      markStructureElement(afterElement, "to", pair.semanticOwnerId);
+      stats.moved.push(semanticElementName(afterElement));
+    }
+    if (pair.structureFallback) {
+      markStructureElement(beforeElement, "before", pair.semanticOwnerId);
+      markStructureElement(afterElement, "after", pair.semanticOwnerId);
+      stats.replaced.push(semanticElementName(afterElement));
+      return;
+    }
+    const ownsStructuralElement = pair.before.kind !== "direct-flow"
+      && pair.before.kind !== "br-line";
+    if (
+      ownsStructuralElement
+      && structuralSelfSignature(beforeElement) !== structuralSelfSignature(afterElement)
+    ) {
+      markStructureElement(beforeElement, "before", pair.semanticOwnerId);
+      markStructureElement(afterElement, "after", pair.semanticOwnerId);
+      stats.replaced.push(semanticElementName(afterElement));
+    }
+    pair.children.forEach((child) => compare(child, depth + 1));
+  };
+  compare(graph.root, 0);
   return Object.values(stats).some((entries) => entries.length > 0);
 }
 
@@ -2727,7 +2956,58 @@ function elementsMatchingSelector(root: Element, rawSelector: string): Element[]
   }
 }
 
-function markStyleDifferences(before: Element | null, after: Element | null): boolean {
+function semanticStylePairs(graph: ReviewSemanticPairGraph): Array<{
+  before: Element;
+  after: Element;
+  semanticOwnerId: string;
+}> {
+  const assignments = new Map<Element, {
+    after: Element;
+    semanticOwnerId: string;
+  }>();
+  flattenReviewSemanticPairs(graph.root).forEach((pair) => {
+    if (!pair.before || !pair.after) return;
+    const add = (before: Element, after: Element) => {
+      if (!assignments.has(before)) {
+        assignments.set(before, { after, semanticOwnerId: pair.semanticOwnerId });
+      }
+    };
+    add(pair.before.element, pair.after.element);
+    if (pair.before.inventory && pair.after.inventory) {
+      const inlineElements = (unit: ReviewSemanticUnit) => [...new Set(
+        unit.inventory?.nodes.flatMap(({ node }) => {
+          const elements: Element[] = [];
+          let candidate = node.parentElement;
+          while (candidate && candidate !== unit.element) {
+            elements.unshift(candidate);
+            candidate = candidate.parentElement;
+          }
+          return elements;
+        }) || [],
+      )];
+      pairSiblingElements(
+        inlineElements(pair.before),
+        inlineElements(pair.after),
+      ).forEach((afterElement, beforeElement) => add(beforeElement, afterElement));
+    } else if (pair.children.length === 0) {
+      pairVisualElements(pair.before.element, pair.after.element).forEach((visualPair) => {
+        add(visualPair.before, visualPair.after);
+      });
+    }
+  });
+  return [...assignments].map(([before, value]) => ({
+    before,
+    after: value.after,
+    semanticOwnerId: value.semanticOwnerId,
+  }));
+}
+
+function markStyleDifferences(
+  graph: ReviewSemanticPairGraph,
+  layoutPairs: ReviewSemanticPairNode[],
+): boolean {
+  const before = graph.root.before?.element || null;
+  const after = graph.root.after?.element || null;
   if (!before || !after) return false;
   let marked = 0;
   let ownerSequence = before.ownerDocument.querySelectorAll(
@@ -2737,6 +3017,8 @@ function markStyleDifferences(before: Element | null, after: Element | null): bo
     beforeElement: Element,
     afterElement: Element,
     scope: ReviewStyleScope,
+    semanticOwnerId: string,
+    summary = "",
   ) => {
     const owner = beforeElement.getAttribute("data-pageroot-review-style-owner")
       || afterElement.getAttribute("data-pageroot-review-style-owner")
@@ -2752,14 +3034,22 @@ function markStyleDifferences(before: Element | null, after: Element | null): bo
     afterElement.setAttribute("data-pageroot-review-style-owner", owner);
     beforeElement.setAttribute("data-pageroot-review-style-scope", resolvedScope);
     afterElement.setAttribute("data-pageroot-review-style-scope", resolvedScope);
+    beforeElement.setAttribute("data-pageroot-review-semantic-owner", semanticOwnerId);
+    afterElement.setAttribute("data-pageroot-review-semantic-owner", semanticOwnerId);
+    if (summary) {
+      beforeElement.setAttribute("data-pageroot-review-style-summary", summary);
+      afterElement.setAttribute("data-pageroot-review-style-summary", summary);
+    }
     marked += 1;
   };
-  for (const pair of pairVisualElements(before, after)) {
+  const boundedPairs = semanticStylePairs(graph);
+  for (const pair of boundedPairs) {
     if (selfPresentationSignature(pair.before) === selfPresentationSignature(pair.after)) continue;
     markPair(
       pair.before,
       pair.after,
       styleScopeForProperties(changedVisualProperties(pair.before, pair.after)),
+      pair.semanticOwnerId,
     );
     if (marked >= 40) break;
   }
@@ -2767,12 +3057,27 @@ function markStyleDifferences(before: Element | null, after: Element | null): bo
   changedRules.forEach(({ selector, labels }) => {
     const scope = styleScopeForProperties(labels);
     selector.split(",").forEach((part) => {
-      const beforeMatches = elementsMatchingSelector(before, part).slice(0, 40);
-      const afterMatches = elementsMatchingSelector(after, part).slice(0, 40);
-      pairSiblingElements(beforeMatches, afterMatches).forEach((afterElement, beforeElement) => {
-        markPair(beforeElement, afterElement, scope);
-      });
+      const beforeMatches = new Set(elementsMatchingSelector(before, part));
+      const afterMatches = new Set(elementsMatchingSelector(after, part));
+      boundedPairs
+        .filter((pair) => beforeMatches.has(pair.before) && afterMatches.has(pair.after))
+        .slice(0, 40)
+        .forEach((pair) => {
+          markPair(pair.before, pair.after, scope, pair.semanticOwnerId);
+        });
     });
+  });
+  layoutPairs.forEach((pair) => {
+    if (!pair.before || !pair.after) return;
+    pair.before.element.setAttribute("data-pageroot-review-layout", "before");
+    pair.after.element.setAttribute("data-pageroot-review-layout", "after");
+    markPair(
+      pair.before.element,
+      pair.after.element,
+      "content",
+      pair.semanticOwnerId,
+      "换行调整",
+    );
   });
   return marked > 0;
 }
@@ -2780,9 +3085,16 @@ function markStyleDifferences(before: Element | null, after: Element | null): bo
 function annotateChangePair(
   pair: SectionPair,
 ): ReviewChangeType[] {
-  const structureChanged = markStructureDifferences(pair);
-  const styleChanged = markStyleDifferences(pair.before, pair.after);
-  const textChanged = markTextDifferences(pair.before, pair.after);
+  const graph = buildReviewSemanticPairGraph(pair);
+  const layoutPairs = flattenReviewSemanticPairs(graph.root).filter((semanticPair) => (
+    semanticPair.before?.inventory
+    && semanticPair.after?.inventory
+    && semanticPair.before.inventory.text === semanticPair.after.inventory.text
+    && !sameBreakLayout(semanticPair.before.inventory, semanticPair.after.inventory)
+  ));
+  const structureChanged = markStructureDifferences(graph);
+  const styleChanged = markStyleDifferences(graph, layoutPairs);
+  const textChanged = markSemanticTextDifferences(graph).changed;
   return [
     ...(textChanged ? ["text" as const] : []),
     ...(structureChanged ? ["structure" as const] : []),
@@ -2810,14 +3122,12 @@ function attachChangeMarkerMetadata(
     if (!root) return;
     const markerElements = [root, ...root.querySelectorAll("*")].filter((element) => (
       element.hasAttribute("data-pageroot-review-text")
-      || element.hasAttribute("data-pageroot-review-text-context")
       || element.hasAttribute("data-pageroot-review-structure")
       || element.hasAttribute("data-pageroot-review-style")
     ));
     markerElements.forEach((element, index) => {
       const markerTypes: ReviewChangeType[] = [];
-      const textMarker = element.hasAttribute("data-pageroot-review-text")
-        || element.hasAttribute("data-pageroot-review-text-context");
+      const textMarker = element.hasAttribute("data-pageroot-review-text");
       if (textMarker) markerTypes.push("text");
       if (element.hasAttribute("data-pageroot-review-structure")) markerTypes.push("structure");
       if (element.hasAttribute("data-pageroot-review-style")) markerTypes.push("style");
@@ -2831,6 +3141,7 @@ function attachChangeMarkerMetadata(
       const readableTextSummary = element.getAttribute(
         "data-pageroot-review-text-summary",
       );
+      const styleSummary = element.getAttribute("data-pageroot-review-style-summary");
       const summary = textMarker
         ? readableTextSummary
           || (textChange === "added" && (!pairedTextReplacement || structuralAddition)
@@ -2838,7 +3149,7 @@ function attachChangeMarkerMetadata(
             : textChange === "removed" && (!pairedTextReplacement || structuralRemoval)
               ? "删除内容"
               : "文本调整")
-        : helper;
+        : styleSummary || helper;
       element.setAttribute("data-pageroot-review-marker", changeId);
       element.setAttribute("data-pageroot-review-marker-types", markerTypes.join(" "));
       element.setAttribute("data-pageroot-review-summary", summary);
@@ -5056,8 +5367,7 @@ function reviewBootstrap(
       let textMarkerSequence = 0;
       document.querySelectorAll('[data-pageroot-review-marker-types~="text"]').forEach((element) => {
         textMarkerSequence += 1;
-        const textToneValue = element.getAttribute("data-pageroot-review-text")
-          || element.getAttribute("data-pageroot-review-text-context");
+        const textToneValue = element.getAttribute("data-pageroot-review-text");
         const textTone = textToneValue === "removed" ? "text-removed" : "text-added";
         [...element.getClientRects()]
           .filter((rect) => rect.width > 1 && rect.height > 1)
