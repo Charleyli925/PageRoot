@@ -67,6 +67,7 @@ function evaluate(overrides = {}) {
 
 test("priority parsing defaults safely to deferred unclassified debt", () => {
   assert.equal(classifyReviewPriority("![P0 Badge](badge)"), "P0");
+  assert.equal(classifyReviewPriority("![P3 Badge](x) then ![P1 Badge](x)"), "P1");
   assert.equal(classifyReviewPriority("ordinary comment"), "unclassified");
   assert.equal(reviewedCommitPrefix("**Reviewed commit:** `aaaaaaaaaa`"), "aaaaaaaaaa");
 });
@@ -86,6 +87,10 @@ test("only P0/P1 changes-requested reviews block regardless of reviewer", () => 
   assert.equal(classifyReviewState(codexReview({ state: "CHANGES_REQUESTED", body: "![P1 Badge](x)" })).state, "blocking");
   assert.equal(classifyReviewState(codexReview({ state: "CHANGES_REQUESTED", body: "![P2 Badge](x)" })).state, "non_blocking");
   assert.equal(classifyReviewState(codexReview({ state: "CHANGES_REQUESTED", body: "![P3 Badge](x)" })).state, "non_blocking");
+  assert.equal(classifyReviewState(codexReview({
+    state: "CHANGES_REQUESTED",
+    body: "![P3 Badge](x) followed by ![P1 Badge](x)",
+  })).state, "blocking");
   assert.equal(classifyReviewState(codexReview({ state: "CHANGES_REQUESTED", actor: "maintainer" })).state, "non_blocking");
   assert.equal(classifyReviewState(codexReview({ state: "CHANGES_REQUESTED", actor: "maintainer", body: "![P1 Badge](x)" })).state, "blocking");
 });

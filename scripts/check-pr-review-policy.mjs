@@ -14,7 +14,7 @@ const DEFAULT_TIMEOUT_SECONDS = 15 * 60;
 const DEFAULT_POLL_SECONDS = 15;
 const MAX_REST_PAGES = 20;
 const POLICY_VERSION = "2026-08-09";
-const PRIORITY_PATTERN = /\bP([0-3])(?:\s+Badge|\b)/iu;
+const PRIORITY_PATTERN = /\bP([0-3])(?:\s+Badge|\b)/giu;
 const REVIEWED_COMMIT_PATTERN = /\*\*Reviewed commit:\*\*\s*`([0-9a-f]{10,40})`/iu;
 const CLEAN_COMPLETION_PATTERN = /^Codex Review:\s*Didn't find any major issues\.[^\r\n]*\r?\n\r?\n/iu;
 
@@ -75,8 +75,11 @@ function pullRequestBaseSha(pullRequest) {
 }
 
 export function classifyReviewPriority(body) {
-  const match = String(body || "").match(PRIORITY_PATTERN);
-  return match ? `P${match[1]}` : "unclassified";
+  let highestRank = Number.POSITIVE_INFINITY;
+  for (const match of String(body || "").matchAll(PRIORITY_PATTERN)) {
+    highestRank = Math.min(highestRank, Number(match[1]));
+  }
+  return Number.isFinite(highestRank) ? `P${highestRank}` : "unclassified";
 }
 
 export function reviewedCommitPrefix(body) {
