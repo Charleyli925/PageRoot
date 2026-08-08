@@ -538,13 +538,13 @@ test("a verified AI result stays pending through desktop review until the user a
       <ol data-review-list-items>
         <li>业务盘子稳定</li><li>实验贡献明确</li><li>经营效率稳定</li>
       </ol>
-      <table data-review-brand-table>
-        <thead><tr><th>品牌</th><th>类目</th><th>对照组</th></tr></thead>
+      <table data-review-brand-table style="table-layout:fixed;width:210px;word-break:break-all">
+        <thead><tr><th style="width:42px">品牌</th><th>类目</th><th>对照组</th></tr></thead>
         <tbody>
-          <tr data-review-brand-row="coach"><td>COACH/蔻驰</td><td>箱包皮具</td><td>3.7万</td></tr>
-          <tr data-review-brand-row="wilson"><td>Wilson/威尔胜</td><td>运动/健身</td><td>1.4万</td></tr>
-          <tr data-review-brand-row="arcteryx"><td>ARC'TERYX/始祖鸟</td><td>户外/登山</td><td>2.3万</td></tr>
-          <tr data-review-brand-row="nike"><td>耐克</td><td>运动/健身</td><td>3.7万</td></tr>
+          <tr data-review-brand-row="alpha"><td>品牌甲</td><td>类目一</td><td>3.7万</td></tr>
+          <tr data-review-brand-row="beta"><td>品牌乙</td><td>类目二</td><td>1.4万</td></tr>
+          <tr data-review-brand-row="gamma"><td>品牌丙</td><td>类目三</td><td>2.3万</td></tr>
+          <tr data-review-brand-row="delta"><td>品牌丁</td><td>类目二</td><td>3.7万</td></tr>
         </tbody>
       </table>
       <div data-review-break-layout><span>日均63<br><br>.4万<br>60.7万</span></div>
@@ -1202,9 +1202,9 @@ test("a verified AI result stays pending through desktop review until the user a
           '        <li>业务盘子稳定</li><li>实验贡献明确</li><li>经营效率稳定</li><li data-review-added-list-item>后续观察新增商品</li>',
         )
         .replace(
-          '          <tr data-review-brand-row="arcteryx"><td>ARC\'TERYX/始祖鸟</td><td>户外/登山</td><td>2.3万</td></tr>',
-          `          <tr data-review-brand-row="adidas"><td>阿迪达斯</td><td>运动/健身</td><td>1.4万</td></tr>
-          <tr data-review-brand-row="arcteryx"><td>ARC'TERYX/始祖鸟</td><td>户外/登山</td><td>2.3万</td></tr>`,
+          '          <tr data-review-brand-row="gamma"><td>品牌丙</td><td>类目三</td><td>2.3万</td></tr>',
+          `          <tr data-review-brand-row="added"><td>品牌新增</td><td>类目二</td><td>1.4万</td></tr>
+          <tr data-review-brand-row="gamma"><td>品牌丙</td><td>类目三</td><td>2.3万</td></tr>`,
         )
         .replace(
           '<div data-review-semantic-copy>而非「让每个商品卖得更好」（品均基本持平）。这说明增长主要来自有效成交覆盖扩大。</div>',
@@ -1912,10 +1912,10 @@ test("a verified AI result stays pending through desktop review until the user a
       '[data-review-brand-table] [data-pageroot-review-text]',
     )).toHaveCount(0);
     await expect(afterReviewFrame.locator(
-      '[data-review-brand-row="adidas"] [data-pageroot-review-text="added"]',
+      '[data-review-brand-row="added"] [data-pageroot-review-text="added"]',
     )).toHaveCount(3);
     await expect(afterReviewFrame.locator(
-      '[data-review-brand-row]:not([data-review-brand-row="adidas"]) [data-pageroot-review-text]',
+      '[data-review-brand-row]:not([data-review-brand-row="added"]) [data-pageroot-review-text]',
     )).toHaveCount(0);
     const addedChartChangeId = await afterReviewFrame.locator(
       "[data-review-added-chart] [data-pageroot-review-marker]",

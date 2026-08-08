@@ -1990,7 +1990,7 @@ function sliceReviewTextInventory(
   };
 }
 
-const NUMBERED_TEXT_LINE_PATTERN = /^\s*(?:[\u2460-\u2473]|\(?\d+\)?[.、:：]|[一二三四五六七八九十]+、)\s*/u;
+const NUMBERED_TEXT_LINE_PATTERN = /^\s*(?:[\u2460-\u2473]|[（(]?\d+[）).、:：]|[（(][一二三四五六七八九十]+[）)]|[一二三四五六七八九十]+[）、.]|[•·▪◦●]|[-–—])\s*/u;
 
 const GENERIC_REVIEW_TEXT_CLASSES = new Set([
     "active", "card", "col", "column", "container", "content", "grid", "item",
@@ -2292,10 +2292,13 @@ function sameLogicalCellPattern(
   });
 }
 
-function buildReviewSemanticPairGraph(pair: SectionPair): ReviewSemanticPairGraph {
+function* buildReviewSemanticPairGraphSteps(
+  pair: SectionPair,
+): Generator<"semantic-row", ReviewSemanticPairGraph, void> {
   let semanticOwnerSequence = 0;
   let geometryOwnerSequence = 0;
   let parentSequence = 0;
+  let semanticRowsSinceYield = 0;
   const geometryOwners = new WeakMap<Element, string>();
   const semanticOwner = () => `semantic-owner-${++semanticOwnerSequence}`;
   const geometryOwner = (before: Element | null, after: Element | null) => {
@@ -2309,13 +2312,13 @@ function buildReviewSemanticPairGraph(pair: SectionPair): ReviewSemanticPairGrap
     });
     return ownerId;
   };
-  const createPair = (
+  const createPair = function* (
     before: ReviewSemanticUnit | null,
     after: ReviewSemanticUnit | null,
     match: ReviewSemanticAlignmentMatch,
     moved: boolean,
     inheritedOwnerId?: string,
-  ): ReviewSemanticPairNode => {
+  ): Generator<"semantic-row", ReviewSemanticPairNode, void> {
     const ownerId = inheritedOwnerId || semanticOwner();
     const node: ReviewSemanticPairNode = {
       before,
@@ -2329,13 +2332,24 @@ function buildReviewSemanticPairGraph(pair: SectionPair): ReviewSemanticPairGrap
     };
     if (!before || !after) {
       const children = before?.children || after?.children || [];
-      node.children = children.map((child) => createPair(
-        before ? child : null,
-        after ? child : null,
-        "unmatched",
-        false,
-        ownerId,
-      ));
+      for (const child of children) {
+        node.children.push(yield* createPair(
+          before ? child : null,
+          after ? child : null,
+          "unmatched",
+          false,
+          ownerId,
+        ));
+      }
+      if (node.before?.kind === "table-row" || node.before?.kind === "list-item"
+        || node.before?.kind === "br-line" || node.after?.kind === "table-row"
+        || node.after?.kind === "list-item" || node.after?.kind === "br-line") {
+        semanticRowsSinceYield += 1;
+        if (semanticRowsSinceYield >= 24) {
+          semanticRowsSinceYield = 0;
+          yield "semantic-row";
+        }
+      }
       return node;
     }
     if (
@@ -2344,10 +2358,17 @@ function buildReviewSemanticPairGraph(pair: SectionPair): ReviewSemanticPairGrap
       && !sameLogicalCellPattern(before.children, after.children)
     ) {
       node.structureFallback = true;
-      node.children = [
-        ...before.children.map((child) => createPair(child, null, "unmatched", false, ownerId)),
-        ...after.children.map((child) => createPair(null, child, "unmatched", false, ownerId)),
-      ];
+      for (const child of before.children) {
+        node.children.push(yield* createPair(child, null, "unmatched", false, ownerId));
+      }
+      for (const child of after.children) {
+        node.children.push(yield* createPair(null, child, "unmatched", false, ownerId));
+      }
+      semanticRowsSinceYield += 1;
+      if (semanticRowsSinceYield >= 24) {
+        semanticRowsSinceYield = 0;
+        yield "semantic-row";
+      }
       return node;
     }
     const parentKey = `semantic-parent-${++parentSequence}`;
@@ -2355,18 +2376,29 @@ function buildReviewSemanticPairGraph(pair: SectionPair): ReviewSemanticPairGrap
       before.children.map((unit) => semanticUnitDescriptor(unit, parentKey)),
       after.children.map((unit) => semanticUnitDescriptor(unit, parentKey)),
     );
-    node.children = aligned.map((childPair) => createPair(
-      childPair.beforeIndex === null ? null : before.children[childPair.beforeIndex],
-      childPair.afterIndex === null ? null : after.children[childPair.afterIndex],
-      childPair.match,
-      childPair.moved,
-    ));
+    for (const childPair of aligned) {
+      node.children.push(yield* createPair(
+        childPair.beforeIndex === null ? null : before.children[childPair.beforeIndex],
+        childPair.afterIndex === null ? null : after.children[childPair.afterIndex],
+        childPair.match,
+        childPair.moved,
+      ));
+    }
+    if (node.before?.kind === "table-row" || node.before?.kind === "list-item"
+      || node.before?.kind === "br-line" || node.after?.kind === "table-row"
+      || node.after?.kind === "list-item" || node.after?.kind === "br-line") {
+      semanticRowsSinceYield += 1;
+      if (semanticRowsSinceYield >= 24) {
+        semanticRowsSinceYield = 0;
+        yield "semantic-row";
+      }
+    }
     return node;
   };
   const beforeRoot = pair.before ? buildReviewSemanticUnit(pair.before) : null;
   const afterRoot = pair.after ? buildReviewSemanticUnit(pair.after) : null;
   return {
-    root: createPair(
+    root: yield* createPair(
       beforeRoot,
       afterRoot,
       beforeRoot && afterRoot ? "weighted" : "unmatched",
@@ -3047,10 +3079,9 @@ function markStyleDifferences(
   return marked > 0;
 }
 
-function annotateChangePair(
-  pair: SectionPair,
+function changeTypesForSemanticGraph(
+  graph: ReviewSemanticPairGraph,
 ): ReviewChangeType[] {
-  const graph = buildReviewSemanticPairGraph(pair);
   const layoutPairs = flattenReviewSemanticPairs(graph.root).filter((semanticPair) => (
     semanticPair.before?.inventory
     && semanticPair.after?.inventory
@@ -3065,6 +3096,13 @@ function annotateChangePair(
     ...(structureChanged ? ["structure" as const] : []),
     ...(styleChanged ? ["style" as const] : []),
   ];
+}
+
+function* annotateChangePairSteps(
+  pair: SectionPair,
+): Generator<"semantic-row", ReviewChangeType[], void> {
+  const graph = yield* buildReviewSemanticPairGraphSteps(pair);
+  return changeTypesForSemanticGraph(graph);
 }
 
 function attachChangeMarkerMetadata(
@@ -5941,7 +5979,16 @@ function* buildReviewDocumentSteps(
       && ancestorMarkupSignature(pair.before)
         === ancestorMarkupSignature(pair.after),
     );
-    const types = exactStablePair ? [] : annotateChangePair(pair);
+    let types: ReviewChangeType[] = [];
+    if (!exactStablePair) {
+      const annotationSteps = annotateChangePairSteps(pair);
+      let annotationStep = annotationSteps.next();
+      while (!annotationStep.done) {
+        yield annotationStep.value;
+        annotationStep = annotationSteps.next();
+      }
+      types = annotationStep.value;
+    }
     const changeId = types.length ? `change-${changes.length + 1}` : undefined;
     const helper = types.length
       ? helperText(types, Boolean(pair.before), Boolean(pair.after), pair)
@@ -6104,6 +6151,7 @@ export async function buildReviewDocumentsAsync(
     "candidate-sections-before",
     "candidate-sections-after",
     "section-pairing",
+    "semantic-row",
     "change-annotation",
     "runtime-candidates",
     "prepare-before",

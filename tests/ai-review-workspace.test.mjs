@@ -216,6 +216,10 @@ test("change discovery builds a complete outline and precise change markers", ()
   assert.match(reviewDocument, /readableReviewTextFootprintPlan/);
   assert.match(reviewDocument, /alignReviewSemanticUnits/);
   assert.match(reviewDocument, /buildReviewSemanticPairGraph/);
+  assert.match(reviewDocument, /function\* buildReviewSemanticPairGraphSteps/);
+  assert.match(reviewDocument, /semanticRowsSinceYield >= 24/);
+  assert.match(reviewDocument, /yield "semantic-row"/);
+  assert.match(reviewDocument, /const annotationSteps = annotateChangePairSteps\(pair\)/);
   assert.match(reviewDocument, /"list-item"/);
   assert.match(reviewDocument, /"br-line"/);
   assert.match(reviewDocument, /"table-row"/);

@@ -248,37 +248,52 @@ function matrixIntervalPairs(before, after, beforeIndexes, afterIndexes) {
   return pairs;
 }
 
-function windowBestMatch(before, after, beforeIndexes, afterIndexes, beforeCursor, afterCursor, lookahead) {
+function windowBestMatch(
+  before,
+  after,
+  beforeIndexes,
+  afterIndexes,
+  beforeCursor,
+  afterCursor,
+  lookahead,
+  scoreFor,
+) {
   const candidates = [];
+  const beforeBest = new Map();
+  const afterBest = new Map();
+  const recordBest = (buckets, key, score) => {
+    const previous = buckets.get(key);
+    if (!previous || score > previous.score + SCORE_EPSILON) {
+      buckets.set(key, { score, count: 1 });
+      return;
+    }
+    if (Math.abs(score - previous.score) <= SCORE_EPSILON) previous.count += 1;
+  };
   const beforeEnd = Math.min(beforeIndexes.length, beforeCursor + lookahead + 1);
   const afterEnd = Math.min(afterIndexes.length, afterCursor + lookahead + 1);
   for (let beforeOffset = beforeCursor; beforeOffset < beforeEnd; beforeOffset += 1) {
     for (let afterOffset = afterCursor; afterOffset < afterEnd; afterOffset += 1) {
-      const score = weightedPairScore(
-        before[beforeIndexes[beforeOffset]],
-        after[afterIndexes[afterOffset]],
+      const score = scoreFor(
+        beforeIndexes[beforeOffset],
+        afterIndexes[afterOffset],
       );
       if (!Number.isFinite(score)) continue;
       candidates.push({ beforeOffset, afterOffset, score });
+      recordBest(beforeBest, beforeOffset, score);
+      recordBest(afterBest, afterOffset, score);
     }
   }
   const viable = candidates.filter((candidate) => {
-    const beforeCandidates = candidates.filter((item) => (
-      item.beforeOffset === candidate.beforeOffset
-    ));
-    const afterCandidates = candidates.filter((item) => (
-      item.afterOffset === candidate.afterOffset
-    ));
-    const beforeBest = Math.max(...beforeCandidates.map((item) => item.score));
-    const afterBest = Math.max(...afterCandidates.map((item) => item.score));
-    return Math.abs(candidate.score - beforeBest) <= SCORE_EPSILON
-      && Math.abs(candidate.score - afterBest) <= SCORE_EPSILON
-      && beforeCandidates.filter((item) => (
-        Math.abs(item.score - beforeBest) <= SCORE_EPSILON
-      )).length === 1
-      && afterCandidates.filter((item) => (
-        Math.abs(item.score - afterBest) <= SCORE_EPSILON
-      )).length === 1;
+    const beforeState = beforeBest.get(candidate.beforeOffset);
+    const afterState = afterBest.get(candidate.afterOffset);
+    return Boolean(
+      beforeState
+      && afterState
+      && Math.abs(candidate.score - beforeState.score) <= SCORE_EPSILON
+      && Math.abs(candidate.score - afterState.score) <= SCORE_EPSILON
+      && beforeState.count === 1
+      && afterState.count === 1,
+    );
   });
   viable.sort((left, right) => {
     const leftDistance = (left.beforeOffset - beforeCursor) + (left.afterOffset - afterCursor);
@@ -293,6 +308,14 @@ function windowBestMatch(before, after, beforeIndexes, afterIndexes, beforeCurso
 
 function boundedIntervalPairs(before, after, beforeIndexes, afterIndexes, lookahead) {
   const pairs = [];
+  const scoreCache = new Map();
+  const scoreFor = (beforeIndex, afterIndex) => {
+    const key = `${beforeIndex}:${afterIndex}`;
+    if (!scoreCache.has(key)) {
+      scoreCache.set(key, weightedPairScore(before[beforeIndex], after[afterIndex]));
+    }
+    return scoreCache.get(key);
+  };
   let beforeCursor = 0;
   let afterCursor = 0;
   while (beforeCursor < beforeIndexes.length && afterCursor < afterIndexes.length) {
@@ -304,6 +327,7 @@ function boundedIntervalPairs(before, after, beforeIndexes, afterIndexes, lookah
       beforeCursor,
       afterCursor,
       lookahead,
+      scoreFor,
     );
     if (match) {
       while (beforeCursor < match.beforeOffset) {
