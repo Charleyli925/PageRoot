@@ -14,6 +14,16 @@ verified compatible fix.
 
 ## Reviewed fixes
 
+The 2026-08-08 security baseline moves the PostCSS-selected `nanoid` closure
+to 3.3.17 and selects `vinext` 0.0.45 in place of 0.2.1. This is the
+compatible remediation path identified by the audit; the release is verified
+against this repository's Vite 8 and React 19.2 toolchain and does not depend
+on `image-size`, removing
+GHSA-2v37-7h3g-55p8, GHSA-w3rx-r6r6-pgpr and GHSA-5p2g-fcmc-qvqq without a
+temporary exception. Vinext remains a development dependency and is not in the
+packaged Electron runtime allowlist; that reduced reachability is not used as a
+substitute for resolving the advisories.
+
 The 2026-08-07 release patch moves the single hoisted `js-yaml` runtime and
 tooling closure from 4.3.0 to the parent-compatible 4.3.1. This removes
 GHSA-5p4m-2wfm-xmqj without adding an exception, changing Electron, or
