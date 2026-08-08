@@ -158,24 +158,30 @@ function isTrustedRequestComment(comment) {
   );
 }
 
-function hasVisibleReviewInvocation(body) {
+function reviewInvocationStatus(body) {
   const visibleMarkdown = markdownWithoutHtmlComments(body);
-  if (visibleMarkdown === null) return false;
+  if (visibleMarkdown === null) return "ambiguous";
   let fence = null;
   for (const line of visibleMarkdown.split(/\r?\n/u)) {
-    const fenceMatch = line.match(/^[ \t]{0,3}(`{3,}|~{3,})/u);
+    const fenceMatch = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/u);
     if (fenceMatch) {
       const marker = fenceMatch[1];
+      const suffix = fenceMatch[2];
       if (!fence) {
+        if (marker[0] === "`" && suffix.includes("`")) continue;
         fence = { character: marker[0], length: marker.length };
-      } else if (marker[0] === fence.character && marker.length >= fence.length) {
+      } else if (
+        marker[0] === fence.character
+        && marker.length >= fence.length
+        && /^[ \t]*$/u.test(suffix)
+      ) {
         fence = null;
       }
       continue;
     }
-    if (!fence && /^[ \t]{0,3}@codex[ \t]+review\b/iu.test(line)) return true;
+    if (!fence && /^ {0,3}@codex[ \t]+review\b/iu.test(line)) return "invocation";
   }
-  return false;
+  return "none";
 }
 
 function canonicalRequestIdentity(comment, phase) {
@@ -204,16 +210,27 @@ function exactReviewRequests(issueComments, expectedHeadSha, expectedBaseSha, ph
 }
 
 function hasAmbiguousReviewInvocation({
+  pullRequest,
   issueComments,
   expectedHeadSha,
   expectedBaseSha,
 }) {
-  return (issueComments || []).some((comment) => {
-    if (!isTrustedRequestActor(comment) || !hasVisibleReviewInvocation(comment?.body)) {
+  const sources = [
+    { entry: pullRequest, allowCanonicalRequest: false },
+    ...(issueComments || []).map((comment) => ({
+      entry: comment,
+      allowCanonicalRequest: true,
+    })),
+  ];
+  return sources.some(({ entry, allowCanonicalRequest }) => {
+    if (!isTrustedRequestActor(entry)) {
       return false;
     }
+    const invocationStatus = reviewInvocationStatus(entry?.body);
+    if (invocationStatus === "none") return false;
+    if (invocationStatus === "ambiguous" || !allowCanonicalRequest) return true;
     return !["draft", "final"].some((phase) => {
-      const identity = canonicalRequestIdentity(comment, phase);
+      const identity = canonicalRequestIdentity(entry, phase);
       return identity?.headSha === expectedHeadSha
         && identity.baseSha === expectedBaseSha;
     });
@@ -549,6 +566,7 @@ export function evaluateReviewSettlement({
     issueComments,
     requestReactions,
     acceptCommitBoundSignals: !hasAmbiguousReviewInvocation({
+      pullRequest,
       issueComments,
       expectedHeadSha: expectedSha,
       expectedBaseSha: expectedBase,
@@ -638,6 +656,7 @@ export function evaluateReviewSettlement({
     issueComments,
     requestReactions: finalRequestReactions,
     acceptCommitBoundSignals: !hasAmbiguousReviewInvocation({
+      pullRequest,
       issueComments,
       expectedHeadSha: expectedSha,
       expectedBaseSha: expectedBase,

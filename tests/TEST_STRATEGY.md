@@ -34,7 +34,7 @@ PR 必须从 Draft 开始。普通推送由独立的 `PR Feedback` workflow 处�
 head/base SHA marker 明确请求 Codex review；每个新提交或 base 更新都需要新请求。只有
 `ready_for_review` 事件存在完整 workflow，但 `review-settled` 仍要求 Ready
 之后发布不同 marker 的 final exact-head/base 请求，并等到该评论上的 Codex 👍 或携带
-当前 commit 身份的完成信号；它在每轮轮询中同时重验 live head/base，PR 级 reaction 不作为证据。只要 PR 历史中有可信审阅命令曾被编辑，或无法 canonical 绑定到同一 exact head/base（含缺失或不匹配 marker），commit-only 完成信号就因无法区分调用而被忽略，只接受新 request 自身的 Codex 👍；常规处理应把新 base 更新进分支并产生新 head。随后等待 180 秒，再检查未解决且未 outdated 的 P0-P2
+当前 commit 身份的完成信号；它在每轮轮询中同时重验 live head/base，PR 级 reaction 不作为证据。只要可信 PR 正文包含审阅命令，或 PR 历史中的可信审阅命令曾被编辑、无法安全解析、或不能 canonical 绑定到同一 exact head/base（含缺失或不匹配 marker），commit-only 完成信号就因无法区分调用而被忽略，只接受新 request 自身的 Codex 👍；常规处理应把新 base 更新进分支并产生新 head。随后等待 180 秒，再检查未解决且未 outdated 的 P0-P2
 线程。通过后 `baseline-policy` 才检查依赖与打包运行时闭包；完整 Linux/Browser/
 Electron job 依赖这些前置条件。若晋升后又有提交，新 SHA 只获得反馈且缺少
 必需检查，必须重新转 Draft、冻结、审阅后再转 Ready；base 更新同样使已审组合失效。

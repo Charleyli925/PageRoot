@@ -69,8 +69,19 @@ function pullRequest({
   base = baseSha,
   draft = false,
   state = "open",
+  body = "",
+  association = "OWNER",
 } = {}) {
-  return { head: { sha }, base: { sha: base }, draft, state, created_at: createdAt };
+  return {
+    head: { sha },
+    base: { sha: base },
+    draft,
+    state,
+    body,
+    user: { login: "maintainer" },
+    author_association: association,
+    created_at: createdAt,
+  };
 }
 
 function exactReview({ sha = headSha, submittedAt = completedAt, id = 20 } = {}) {
@@ -346,6 +357,29 @@ test("noncanonical review invocations force exact-request completion reactions",
       ...request({ id: 90 }),
       body: "```text\n@codex review\n```\n\n> @codex review",
     }],
+  }).status, "settled");
+});
+
+test("PR-body and malformed review invocations fail closed without misreading fenced examples", () => {
+  const oldBaseBody = `@codex review\n\nReview exact head SHA \`${headSha}\` on base SHA \`${oldBaseSha}\`.`;
+  assert.equal(evaluate({
+    pullRequest: pullRequest({ body: oldBaseBody }),
+  }).reason, "draft_review_not_completed_before_promotion");
+
+  const malformedInvocation = {
+    ...request({ id: 91 }),
+    body: `${oldBaseBody}\n\n<!-- unterminated`,
+  };
+  assert.equal(evaluate({
+    issueComments: [malformedInvocation, request(), finalRequest()],
+  }).reason, "draft_review_not_completed_before_promotion");
+
+  const fencedExample = {
+    ...request({ id: 92 }),
+    body: "```text\n``` trailing text\n@codex review\n```",
+  };
+  assert.equal(evaluate({
+    issueComments: [request(), finalRequest(), fencedExample],
   }).status, "settled");
 });
 
