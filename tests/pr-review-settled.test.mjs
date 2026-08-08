@@ -311,6 +311,44 @@ test("later cross-base requests cannot lend commit-bound completion to the curre
   }).reason, "codex_final_review_in_progress");
 });
 
+test("noncanonical review invocations force exact-request completion reactions", () => {
+  const oldBaseInvocation = {
+    ...request({
+      id: 87,
+      base: oldBaseSha,
+      createdAt: "2026-08-08T03:30:00.000Z",
+      updatedAt: "2026-08-08T03:31:00.000Z",
+    }),
+    body: `@codex review\n\nReview exact head SHA \`${headSha}\` on base SHA \`${oldBaseSha}\`.`,
+  };
+  assert.equal(evaluate({
+    issueComments: [oldBaseInvocation, request(), finalRequest()],
+    reviews: [draftReview(), exactReview()],
+  }).reason, "draft_review_not_completed_before_promotion");
+  assert.equal(evaluate({
+    issueComments: [oldBaseInvocation, request(), finalRequest()],
+    reviews: [draftReview(), exactReview()],
+    requestReactions: [{
+      id: 88,
+      user: { login: "chatgpt-codex-connector[bot]" },
+      content: "+1",
+      created_at: draftCompletedAt,
+    }],
+    finalRequestReactions: [{
+      id: 89,
+      user: { login: "chatgpt-codex-connector[bot]" },
+      content: "+1",
+      created_at: completedAt,
+    }],
+  }).status, "settled");
+  assert.equal(evaluate({
+    issueComments: [request(), finalRequest(), {
+      ...request({ id: 90 }),
+      body: "```text\n@codex review\n```\n\n> @codex review",
+    }],
+  }).status, "settled");
+});
+
 test("clean Codex comments and reactions bind to the correct exact-head/base request", () => {
   const cleanComment = {
     id: 40,

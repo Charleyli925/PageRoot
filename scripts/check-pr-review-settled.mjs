@@ -143,18 +143,50 @@ function commentUpdatedAt(comment) {
   return comment?.updated_at || comment?.updatedAt || commentCreatedAt(comment);
 }
 
+function isTrustedRequestActor(comment) {
+  return (
+    !isCodexActor(commentAuthor(comment))
+    && TRUSTED_REQUEST_ASSOCIATIONS.has(commentAssociation(comment))
+    && Number.isFinite(timestamp(commentCreatedAt(comment)))
+  );
+}
+
+function isTrustedRequestComment(comment) {
+  return (
+    isTrustedRequestActor(comment)
+    && timestamp(commentUpdatedAt(comment)) === timestamp(commentCreatedAt(comment))
+  );
+}
+
+function hasVisibleReviewInvocation(body) {
+  const visibleMarkdown = markdownWithoutHtmlComments(body);
+  if (visibleMarkdown === null) return false;
+  let fence = null;
+  for (const line of visibleMarkdown.split(/\r?\n/u)) {
+    const fenceMatch = line.match(/^[ \t]{0,3}(`{3,}|~{3,})/u);
+    if (fenceMatch) {
+      const marker = fenceMatch[1];
+      if (!fence) {
+        fence = { character: marker[0], length: marker.length };
+      } else if (marker[0] === fence.character && marker.length >= fence.length) {
+        fence = null;
+      }
+      continue;
+    }
+    if (!fence && /^[ \t]{0,3}@codex[ \t]+review\b/iu.test(line)) return true;
+  }
+  return false;
+}
+
 function canonicalRequestIdentity(comment, phase) {
   const hiddenIdentity = hiddenRequestIdentity(comment?.body, phase);
   const visibleIdentity = visibleRequestIdentity(comment?.body, phase);
   if (
-    isCodexActor(commentAuthor(comment))
-    || !TRUSTED_REQUEST_ASSOCIATIONS.has(commentAssociation(comment))
+    !isTrustedRequestComment(comment)
     || !hiddenIdentity
     || !visibleIdentity
     || hiddenIdentity.headSha !== visibleIdentity.headSha
     || hiddenIdentity.baseSha !== visibleIdentity.baseSha
-    || !Number.isFinite(timestamp(commentCreatedAt(comment)))
-    || timestamp(commentUpdatedAt(comment)) !== timestamp(commentCreatedAt(comment))
   ) return null;
   return Object.freeze({
     phase,
@@ -171,18 +203,21 @@ function exactReviewRequests(issueComments, expectedHeadSha, expectedBaseSha, ph
   });
 }
 
-function hasRequestForDifferentBase({
+function hasAmbiguousReviewInvocation({
   issueComments,
   expectedHeadSha,
   expectedBaseSha,
 }) {
-  return (issueComments || []).some((comment) => (
-    ["draft", "final"].some((phase) => {
+  return (issueComments || []).some((comment) => {
+    if (!isTrustedRequestActor(comment) || !hasVisibleReviewInvocation(comment?.body)) {
+      return false;
+    }
+    return !["draft", "final"].some((phase) => {
       const identity = canonicalRequestIdentity(comment, phase);
       return identity?.headSha === expectedHeadSha
-        && identity.baseSha !== expectedBaseSha;
-    })
-  ));
+        && identity.baseSha === expectedBaseSha;
+    });
+  });
 }
 
 function latestReadyForReviewEvent(timelineEvents) {
@@ -513,7 +548,7 @@ export function evaluateReviewSettlement({
     reviews,
     issueComments,
     requestReactions,
-    acceptCommitBoundSignals: !hasRequestForDifferentBase({
+    acceptCommitBoundSignals: !hasAmbiguousReviewInvocation({
       issueComments,
       expectedHeadSha: expectedSha,
       expectedBaseSha: expectedBase,
@@ -602,7 +637,7 @@ export function evaluateReviewSettlement({
     reviews,
     issueComments,
     requestReactions: finalRequestReactions,
-    acceptCommitBoundSignals: !hasRequestForDifferentBase({
+    acceptCommitBoundSignals: !hasAmbiguousReviewInvocation({
       issueComments,
       expectedHeadSha: expectedSha,
       expectedBaseSha: expectedBase,
