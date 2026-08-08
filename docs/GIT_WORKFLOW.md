@@ -16,7 +16,8 @@ GitHub main
 
 When a Pull Request changes packaging, release metadata, Electron, packaged
 Bridge, Schema or resource paths, a separate path-filtered `Release Dry Run`
-also assembles and restores an ad-hoc App across two clean jobs. It is early
+also assembles and restores an explicitly unsigned (`identity=null`) App across
+two clean jobs. It is early
 feedback only: its checkpoint is `releaseEligible: false` and is not on the
 linear Candidate/publication chain above.
 
@@ -149,6 +150,6 @@ Use `git revert <commit>` to undo a merged public change while preserving histor
 
 ## Release rule
 
-Version, commit, tag and artifacts form one immutable set. `npm run release:mac` remains the complete local source-and-artifact gate and refuses a dirty worktree. A path-filtered PR dry run may prove ad-hoc App assembly, checkpoint recovery, metadata/renderer reconstruction and startup identity without credentials, but its distinct non-release checkpoint is never reusable here. The governed GitHub path first runs `Release Candidate` on reviewed `main`: a successful PR source-gate attestation must match the exact tree/version and be no more than seven days old. The workflow embeds the commit/tree in `build-info.json`, verifies one pre-sign App before Apple work, signs/notarizes that same App, freezes it as a resumable checkpoint, and generates the final DMG/ZIP from that checkpoint without rebuilding the App.
+Version, commit, tag and artifacts form one immutable set. `npm run release:mac` remains the complete local source-and-artifact gate and refuses a dirty worktree. A path-filtered PR dry run may prove explicitly unsigned (`identity=null`) App assembly, checkpoint recovery, metadata/renderer reconstruction and startup identity without credentials, but its distinct non-release checkpoint is never reusable here. The governed GitHub path first runs `Release Candidate` on reviewed `main`: a successful PR source-gate attestation must match the exact tree/version and be no more than seven days old. The workflow embeds the commit/tree in `build-info.json`, verifies one pre-sign App before Apple work, signs/notarizes that same App, freezes it as a resumable checkpoint, and generates the final DMG/ZIP from that checkpoint without rebuilding the App.
 
 Only after that candidate succeeds may the separate `Release` workflow run for the exact version on current `main`. It accepts a matching candidate no more than 72 hours old, verifies every downloaded asset hash, creates the annotated tag and publishes the same files without rebuilding. Do not push release tags manually. See `docs/RELEASING.md` and `docs/RELEASE_PIPELINE_GOVERNANCE.md`.
