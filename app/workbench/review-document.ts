@@ -12,6 +12,7 @@ import {
   reviewTextSimilarity,
   sentenceAwareTextDifferences,
 } from "../lib/review-text-diff.js";
+import type { ReviewTextChangeScope } from "../lib/review-text-diff.js";
 import {
   REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT,
   selectPrioritizedReviewRuntimeVisualCandidates,
@@ -1823,7 +1824,7 @@ type TextRange = { start: number; end: number };
 type ReviewTextFootprintGroup = {
   id: string;
   ranges: TextRange[];
-  scope: "inline" | "block";
+  scope: ReviewTextChangeScope;
   density: number;
   summary?: string;
 };
@@ -2236,21 +2237,21 @@ function markTextDifferences(before: Element | null, after: Element | null): boo
       && differences.after.length
       ? "段落改写"
       : undefined;
-    const beforeGroups: ReviewTextFootprintGroup[] = plan.before.groups.map((ranges, index) => ({
+    const beforeGroups: ReviewTextFootprintGroup[] = plan.before.footprintGroups.map((ranges, index) => ({
       id: `${groupBase}-${index + 1}`,
       ranges,
       scope: plan.scope,
       density: plan.density,
       summary: preferredSummary,
     }));
-    const afterGroups: ReviewTextFootprintGroup[] = plan.after.groups.map((ranges, index) => ({
+    const afterGroups: ReviewTextFootprintGroup[] = plan.after.footprintGroups.map((ranges, index) => ({
       id: `${groupBase}-${index + 1}`,
       ranges,
       scope: plan.scope,
       density: plan.density,
       summary: preferredSummary,
     }));
-    if (plan.before.groups.length) {
+    if (plan.before.footprintGroups.length) {
       markTextFootprintOwner(pair.before.anchor, beforeGroups);
       wrapTextRanges(
         beforeInventory,
@@ -2262,7 +2263,7 @@ function markTextDifferences(before: Element | null, after: Element | null): boo
     } else if (plan.before.anchorOffset !== null) {
       markTextAnchor(pair.before.anchor, `${groupBase}-1`, plan.before.anchorOffset);
     }
-    if (plan.after.groups.length) {
+    if (plan.after.footprintGroups.length) {
       markTextFootprintOwner(pair.after.anchor, afterGroups);
       wrapTextRanges(
         afterInventory,

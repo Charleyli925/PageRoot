@@ -380,6 +380,27 @@ function rangeSpanCoverage(source, ranges) {
   return visibleCharacterCount(source.slice(first.start, last.end)) / total;
 }
 
+function rangesCoverWholeSentences(source, ranges) {
+  if (!ranges.length) return false;
+  const sentences = reviewSentenceRanges(source);
+  return ranges.every((range) => {
+    const intersecting = sentences.filter((sentence) => (
+      sentence.end > range.start && sentence.start < range.end
+    ));
+    return intersecting.length > 0 && intersecting.every((sentence) => (
+      range.start <= sentence.start && range.end >= sentence.end
+    ));
+  });
+}
+
+function hasStableSentenceOutsideEvidence(source, ranges) {
+  if (!ranges.length) return false;
+  return reviewSentenceRanges(source).some((sentence) => (
+    visibleCharacterCount(source.slice(sentence.start, sentence.end)) > 0
+    && !ranges.some((range) => range.end > sentence.start && range.start < sentence.end)
+  ));
+}
+
 function readableRangeGroups(source, ranges) {
   const sorted = mergeReviewTextRanges(ranges);
   return sorted.reduce((groups, range) => {
@@ -419,7 +440,7 @@ export function readableReviewTextFootprintPlan(
   const afterRanges = mergeReviewTextRanges(differences.after || []);
   const operation = beforeRanges.length
     ? afterRanges.length ? "replace" : "delete"
-    : afterRanges.length ? "insert" : "none";
+    : afterRanges.length ? "insert" : differences.layout ? "layout" : "none";
   const beforeLength = visibleCharacterCount(beforeText);
   const afterLength = visibleCharacterCount(afterText);
   const changedLength = visibleRangeLength(beforeText, beforeRanges)
@@ -427,13 +448,18 @@ export function readableReviewTextFootprintPlan(
   const totalLength = beforeLength + afterLength;
   const density = totalLength ? changedLength / totalLength : 0;
   const fragmentCount = beforeRanges.length + afterRanges.length;
-  const pairedReplacement = beforeRanges.length > 0 && afterRanges.length > 0;
+  const pairedReplacement = operation === "replace";
   const spanCoverage = Math.max(
     rangeSpanCoverage(beforeText, beforeRanges),
     rangeSpanCoverage(afterText, afterRanges),
   );
   const longEnoughForBlock = Math.max(beforeLength, afterLength) >= 20;
-  const denseRewrite = pairedReplacement && longEnoughForBlock && (
+  const preservesStableSentence = hasStableSentenceOutsideEvidence(beforeText, beforeRanges)
+    || hasStableSentenceOutsideEvidence(afterText, afterRanges);
+  const denseRewrite = pairedReplacement
+    && longEnoughForBlock
+    && !preservesStableSentence
+    && (
     density >= 0.45
     || (
       fragmentCount >= 5
@@ -441,14 +467,18 @@ export function readableReviewTextFootprintPlan(
       && spanCoverage >= 0.65
     )
   );
-  const scope = denseRewrite ? "block" : "inline";
+  const sentenceChange = operation !== "none"
+    && operation !== "layout"
+    && (!beforeRanges.length || rangesCoverWholeSentences(beforeText, beforeRanges))
+    && (!afterRanges.length || rangesCoverWholeSentences(afterText, afterRanges));
+  const scope = denseRewrite ? "block" : sentenceChange ? "sentence" : "inline";
   return {
     operation,
     scope,
     density,
     before: {
       evidenceRanges: beforeRanges,
-      groups: denseRewrite && beforeRanges.length
+      footprintGroups: denseRewrite && beforeRanges.length
         ? [beforeRanges]
         : readableRangeGroups(beforeText, beforeRanges),
       anchorOffset: operation === "insert"
@@ -457,7 +487,7 @@ export function readableReviewTextFootprintPlan(
     },
     after: {
       evidenceRanges: afterRanges,
-      groups: denseRewrite && afterRanges.length
+      footprintGroups: denseRewrite && afterRanges.length
         ? [afterRanges]
         : readableRangeGroups(afterText, afterRanges),
       anchorOffset: operation === "delete"
