@@ -345,6 +345,37 @@ test("live identity and phase ordering invalidate stale evidence", () => {
   }
 });
 
+test("one head cannot reuse completion evidence across canonical base requests", () => {
+  for (const conflictingRequest of [
+    request({
+      id: 76,
+      base: oldBaseSha,
+      createdAt: "2026-08-08T03:30:00.000Z",
+    }),
+    request({
+      id: 77,
+      base: oldBaseSha,
+      createdAt: "2026-08-08T04:00:10.000Z",
+    }),
+  ]) {
+    assert.equal(evaluate({
+      issueComments: [request(), conflictingRequest],
+    }).reason, "same_head_cross_base_request_ambiguous");
+  }
+
+  assert.equal(evaluate({
+    issueComments: [
+      request(),
+      request({
+        id: 78,
+        sha: oldSha,
+        base: oldBaseSha,
+        createdAt: "2026-08-08T03:30:00.000Z",
+      }),
+    ],
+  }).status, "settled");
+});
+
 test("second-resolution causal boundaries fail closed", () => {
   assert.equal(evaluate({
     issueComments: [request({ createdAt })],

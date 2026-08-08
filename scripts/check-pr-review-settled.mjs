@@ -111,6 +111,17 @@ export function latestExactReviewRequest(issueComments, expectedHeadSha, expecte
     ))[0] || null;
 }
 
+function hasCrossBaseReviewRequest(issueComments, expectedHeadSha, expectedBaseSha) {
+  return (issueComments || []).some((comment) => {
+    if (!isTrustedRequestComment(comment)) return false;
+    const identity = requestIdentity(comment?.body);
+    return (
+      identity.headSha === expectedHeadSha
+      && identity.baseSha !== expectedBaseSha
+    );
+  });
+}
+
 function latestReadyForReviewEvent(timelineEvents) {
   return (timelineEvents || [])
     .filter((event) => (
@@ -385,6 +396,12 @@ export function evaluateReviewSettlement({
     id: request?.id || request?.databaseId || null,
     at: new Date(requestAt).toISOString(),
   });
+  if (hasCrossBaseReviewRequest(issueComments, expectedHead, expectedBase)) {
+    return outcome(identity, "blocked", "same_head_cross_base_request_ambiguous", {
+      request: requestSummary,
+      promotion,
+    });
+  }
   if (requestAt <= draftStartedAt || requestAt >= readyAt) {
     return outcome(identity, "blocked", "exact_sha_request_not_in_latest_draft", {
       request: requestSummary,
