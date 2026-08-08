@@ -531,6 +531,7 @@ test("a verified AI result stays pending through desktop review until the user a
       <div data-review-logical-card style="padding: 12px; border: 2px solid #b8b8c7">逻辑尺寸视觉调整</div>
       <div data-review-mixed-copy>
         <p data-review-reference>参考：示例日均确收约207万，增量4.12万/天约占2.0%。</p>
+        <p data-review-delete-only>实验结果稳定。换言之，策略有效。</p>
         <p data-review-warning>⚠️ 近6天(7/23-<span><strong>7/28)增幅收窄至负值区间，需</strong></span>持续关注。</p>
       </div>
       <div data-review-break-layout><span>日均63<br><br>.4万<br>60.7万</span></div>
@@ -1174,6 +1175,10 @@ test("a verified AI result stays pending through desktop review until the user a
         .replace(
           '<p data-review-reference>参考：示例日均确收约207万，增量4.12万/天约占2.0%。</p>',
           '<p data-review-reference>参考：示例日均确收约207万，本实验增量4.12万/天约占2.0%。</p>',
+        )
+        .replace(
+          '<p data-review-delete-only>实验结果稳定。换言之，策略有效。</p>',
+          '<p data-review-delete-only>实验结果稳定。策略有效。</p>',
         )
         .replace(
           '<div data-review-semantic-copy>而非「让每个商品卖得更好」（品均基本持平）。这说明增长主要来自有效成交覆盖扩大。</div>',
@@ -1834,12 +1839,30 @@ test("a verified AI result stays pending through desktop review until the user a
       .toHaveAttribute("data-pageroot-review-summary", "新增内容");
     await expect(beforeReviewFrame.locator(
       '[data-review-reference] [data-pageroot-review-text-context="removed"]',
-    )).toHaveCount(1);
+    )).toHaveCount(0);
+    await expect(beforeReviewFrame.locator(
+      "[data-review-reference]",
+    )).toHaveAttribute(
+      "data-pageroot-review-text-anchors",
+      /text-\d+@\d+/u,
+    );
     await expect(afterReviewFrame.locator(
       '[data-review-reference] [data-pageroot-review-text="added"]',
     ).filter({ hasText: "本实验" })).toHaveAttribute(
       "data-pageroot-review-summary",
       "文本调整",
+    );
+    await expect(beforeReviewFrame.locator(
+      '[data-review-delete-only] [data-pageroot-review-text="removed"]',
+    )).toHaveText("换言之，");
+    await expect(afterReviewFrame.locator(
+      '[data-review-delete-only] [data-pageroot-review-text-context="added"]',
+    )).toHaveCount(0);
+    await expect(afterReviewFrame.locator(
+      "[data-review-delete-only]",
+    )).toHaveAttribute(
+      "data-pageroot-review-text-anchors",
+      /text-\d+@\d+/u,
     );
     const addedChartChangeId = await afterReviewFrame.locator(
       "[data-review-added-chart] [data-pageroot-review-marker]",
@@ -1864,13 +1887,13 @@ test("a verified AI result stays pending through desktop review until the user a
     ).filter({ hasText: /^待删除第/u })).toHaveCount(3);
     await expect(beforeReviewFrame.locator(
       '[data-review-break-layout] [data-pageroot-review-text-context="removed"]',
-    )).toHaveCount(3);
+    )).toHaveCount(0);
     await expect(afterReviewFrame.locator(
       '[data-review-break-layout] [data-pageroot-review-text="added"]',
     ).filter({ hasText: "vs" })).toHaveCount(1);
     await expect(beforeReviewFrame.locator(
       '[data-review-ebita-copy] [data-pageroot-review-text-context="removed"]',
-    ).first()).toBeVisible();
+    )).toHaveCount(0);
     await expect(afterReviewFrame.locator(
       '[data-review-ebita-copy] [data-pageroot-review-text="added"]',
     ).filter({ hasText: "建议继续保留实验策略" })).toBeVisible();
@@ -2059,7 +2082,10 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
       "data-pageroot-review-focus",
     )).toBe(ebitaChangeId);
-    await expect.poll(() => beforeReviewFrame.locator(
+    await expect(beforeReviewFrame.locator(
+      `[data-pageroot-review-overlay-box="${ebitaChangeId}"]`,
+    )).toHaveCount(0);
+    await expect.poll(() => afterReviewFrame.locator(
       `[data-pageroot-review-overlay-box="${ebitaChangeId}"]`,
     ).count()).toBeGreaterThan(0);
     await beforeCounter.click();

@@ -9,11 +9,20 @@ export function mergeReviewTextRanges(
   ranges: readonly ReviewTextRange[],
 ): ReviewTextRange[];
 
+export type ReviewTextChangeOperation = "none" | "insert" | "delete" | "replace";
+
+export type ReadableReviewTextFootprintSide = {
+  evidenceRanges: ReviewTextRange[];
+  groups: ReviewTextRange[][];
+  anchorOffset: number | null;
+};
+
 export type ReadableReviewTextFootprintPlan = {
+  operation: ReviewTextChangeOperation;
   scope: "inline" | "block";
   density: number;
-  before: { groups: ReviewTextRange[][] };
-  after: { groups: ReviewTextRange[][] };
+  before: ReadableReviewTextFootprintSide;
+  after: ReadableReviewTextFootprintSide;
 };
 
 export function readableReviewTextFootprintPlan(

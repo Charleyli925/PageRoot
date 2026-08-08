@@ -417,6 +417,9 @@ export function readableReviewTextFootprintPlan(
 ) {
   const beforeRanges = mergeReviewTextRanges(differences.before || []);
   const afterRanges = mergeReviewTextRanges(differences.after || []);
+  const operation = beforeRanges.length
+    ? afterRanges.length ? "replace" : "delete"
+    : afterRanges.length ? "insert" : "none";
   const beforeLength = visibleCharacterCount(beforeText);
   const afterLength = visibleCharacterCount(afterText);
   const changedLength = visibleRangeLength(beforeText, beforeRanges)
@@ -440,17 +443,26 @@ export function readableReviewTextFootprintPlan(
   );
   const scope = denseRewrite ? "block" : "inline";
   return {
+    operation,
     scope,
     density,
     before: {
+      evidenceRanges: beforeRanges,
       groups: denseRewrite && beforeRanges.length
         ? [beforeRanges]
         : readableRangeGroups(beforeText, beforeRanges),
+      anchorOffset: operation === "insert"
+        ? Math.min(beforeText.length, afterRanges[0]?.start ?? beforeText.length)
+        : null,
     },
     after: {
+      evidenceRanges: afterRanges,
       groups: denseRewrite && afterRanges.length
         ? [afterRanges]
         : readableRangeGroups(afterText, afterRanges),
+      anchorOffset: operation === "delete"
+        ? Math.min(afterText.length, beforeRanges[0]?.start ?? afterText.length)
+        : null,
     },
   };
 }

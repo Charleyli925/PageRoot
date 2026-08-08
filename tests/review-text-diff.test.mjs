@@ -36,10 +36,60 @@ test("unchanged meaningful punctuation keeps independent clause edits separate",
   });
 });
 
-test("pure insertion remains a precise addition with before-side context", () => {
-  assert.deepEqual(compare("增长来自覆盖扩大。", "增长主要来自覆盖扩大。"), {
+test("pure insertion keeps evidence and visible footprint only on the after side", () => {
+  const before = "增长来自覆盖扩大。";
+  const after = "增长主要来自覆盖扩大。";
+  const differences = sentenceAwareTextDifferences(before, after);
+  const plan = readableReviewTextFootprintPlan(before, after, differences);
+
+  assert.deepEqual(compare(before, after), {
     before: [],
     after: ["主要"],
+  });
+  assert.equal(plan.operation, "insert");
+  assert.deepEqual(plan.before.evidenceRanges, []);
+  assert.deepEqual(plan.before.groups, []);
+  assert.equal(plan.before.anchorOffset, after.indexOf("主要"));
+  assert.deepEqual(plan.after.evidenceRanges, differences.after);
+  assert.deepEqual(plan.after.groups, [differences.after]);
+  assert.equal(plan.after.anchorOffset, null);
+});
+
+test("pure deletion keeps evidence and visible footprint only on the before side", () => {
+  const before = "实验结果稳定。换言之，策略有效。";
+  const after = "实验结果稳定。策略有效。";
+  const differences = sentenceAwareTextDifferences(before, after);
+  const plan = readableReviewTextFootprintPlan(before, after, differences);
+
+  assert.deepEqual(compare(before, after), {
+    before: ["换言之，"],
+    after: [],
+  });
+  assert.equal(plan.operation, "delete");
+  assert.deepEqual(plan.before.evidenceRanges, differences.before);
+  assert.deepEqual(plan.before.groups, [differences.before]);
+  assert.equal(plan.before.anchorOffset, null);
+  assert.deepEqual(plan.after.evidenceRanges, []);
+  assert.deepEqual(plan.after.groups, []);
+  assert.equal(plan.after.anchorOffset, before.indexOf("换言之，"));
+});
+
+test("no text evidence produces no operation, anchor, or visible footprint", () => {
+  const plan = readableReviewTextFootprintPlan("稳定文本", "稳定文本", {
+    before: [],
+    after: [],
+  });
+
+  assert.equal(plan.operation, "none");
+  assert.deepEqual(plan.before, {
+    evidenceRanges: [],
+    groups: [],
+    anchorOffset: null,
+  });
+  assert.deepEqual(plan.after, {
+    evidenceRanges: [],
+    groups: [],
+    anchorOffset: null,
   });
 });
 
@@ -76,6 +126,9 @@ test("dense multi-line copy rewrites promote to one readable block footprint", (
   const differences = sentenceAwareTextDifferences(before, after);
   const plan = readableReviewTextFootprintPlan(before, after, differences);
 
+  assert.equal(plan.operation, "replace");
+  assert.equal(plan.before.anchorOffset, null);
+  assert.equal(plan.after.anchorOffset, null);
   assert.equal(plan.scope, "block");
   assert.equal(plan.before.groups.length, 1);
   assert.equal(plan.after.groups.length, 1);

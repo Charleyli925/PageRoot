@@ -1840,6 +1840,15 @@ function markTextFootprintOwner(
   anchor.setAttribute(attribute, [...groupIds].join(" "));
 }
 
+function markTextAnchor(anchor: Element, groupId: string, offset: number) {
+  const attribute = "data-pageroot-review-text-anchors";
+  const anchors = new Set(
+    (anchor.getAttribute(attribute) || "").split(/\s+/).filter(Boolean),
+  );
+  anchors.add(`${groupId}@${Math.max(0, Math.trunc(offset))}`);
+  anchor.setAttribute(attribute, [...anchors].join(" "));
+}
+
 function applyTextFootprintMetadata(
   marker: HTMLElement,
   group: ReviewTextFootprintGroup,
@@ -2241,45 +2250,29 @@ function markTextDifferences(before: Element | null, after: Element | null): boo
       density: plan.density,
       summary: preferredSummary,
     }));
-    if (differences.before.length) {
+    if (plan.before.groups.length) {
       markTextFootprintOwner(pair.before.anchor, beforeGroups);
       wrapTextRanges(
         beforeInventory,
         beforeGroups,
         "removed",
-        differences.after.length ? "before" : "removed",
+        plan.operation === "replace" ? "before" : "removed",
       );
       changed = true;
-    } else {
-      const contextGroup: ReviewTextFootprintGroup = {
-        id: `${groupBase}-1`,
-        ranges: [{ start: 0, end: beforeInventory.text.length }],
-        scope: plan.scope,
-        density: plan.density,
-      };
-      markTextFootprintOwner(pair.before.anchor, [contextGroup]);
-      wrapTextContext(beforeInventory, "removed", "before", contextGroup);
-      changed = true;
+    } else if (plan.before.anchorOffset !== null) {
+      markTextAnchor(pair.before.anchor, `${groupBase}-1`, plan.before.anchorOffset);
     }
-    if (differences.after.length) {
+    if (plan.after.groups.length) {
       markTextFootprintOwner(pair.after.anchor, afterGroups);
       wrapTextRanges(
         afterInventory,
         afterGroups,
         "added",
-        differences.before.length ? "after" : "added",
+        plan.operation === "replace" ? "after" : "added",
       );
       changed = true;
-    } else {
-      const contextGroup: ReviewTextFootprintGroup = {
-        id: `${groupBase}-1`,
-        ranges: [{ start: 0, end: afterInventory.text.length }],
-        scope: plan.scope,
-        density: plan.density,
-      };
-      markTextFootprintOwner(pair.after.anchor, [contextGroup]);
-      wrapTextContext(afterInventory, "added", "after", contextGroup);
-      changed = true;
+    } else if (plan.after.anchorOffset !== null) {
+      markTextAnchor(pair.after.anchor, `${groupBase}-1`, plan.after.anchorOffset);
     }
   });
   return changed;
