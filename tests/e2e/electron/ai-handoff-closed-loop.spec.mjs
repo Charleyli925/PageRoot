@@ -521,6 +521,8 @@ test("a verified AI result stays pending through desktop review until the user a
       <div data-review-regression-summary>在守住 EBITA 率底线的基础上，锁单确收实现 +8.52% 增长；21 天日均增量 +4.12 万，累计增量 +86.6 万。</div>
       <div data-review-semantic-copy>而非「让每个商品卖得更好」（品均基本持平）。这说明增长主要来自有效成交覆盖扩大。</div>
       <div data-review-readable-rewrite style="width: 360px; line-height: 1.7">${READABLE_REWRITE_BEFORE}</div>
+      <p data-review-layout-only style="width: 240px">同一段文字保持不变<br>只是换行位置调整。</p>
+      <p data-review-cross-line style="width: 150px; line-height: 1.6">稳定前缀，稳定后缀。</p>
       <p class="review-comment-ordinary-target">普通段落评论定位保持独立。</p>
       <div data-review-metrics>
         <article data-review-metric="lock"><strong>+8.52%</strong><span>锁单确收增幅（显著 p&lt;0.01）</span><small>日均 52.5 万 vs 48.4 万</small></article>
@@ -1215,6 +1217,14 @@ test("a verified AI result stays pending through desktop review until the user a
           `<div data-review-readable-rewrite style="width: 360px; line-height: 1.7">${READABLE_REWRITE_AFTER}</div>`,
         )
         .replace(
+          '<p data-review-layout-only style="width: 240px">同一段文字保持不变<br>只是换行位置调整。</p>',
+          '<p data-review-layout-only style="width: 240px">同一段文字保持不变只是<br>换行位置调整。</p>',
+        )
+        .replace(
+          '<p data-review-cross-line style="width: 150px; line-height: 1.6">稳定前缀，稳定后缀。</p>',
+          '<p data-review-cross-line style="width: 150px; line-height: 1.6">稳定前缀，新增说明需要跨越多个实际文字行并保持独立框选，稳定后缀。</p>',
+        )
+        .replace(
           '<p data-review-warning>⚠️ 近6天(7/23-<span><strong>7/28)增幅收窄至负值区间，需</strong></span>持续关注。</p>',
           '<p data-review-warning>⚠️ 近6天（7/23—<strong>7/28）增幅收窄至负值区间，需</strong>持续关注定价调整和转化波动。</p>',
         )
@@ -1876,11 +1886,17 @@ test("a verified AI result stays pending through desktop review until the user a
       '[data-review-reference] [data-pageroot-review-text="added"]',
     ).filter({ hasText: "本实验" })).toHaveAttribute(
       "data-pageroot-review-summary",
-      "文本调整",
+      "新增内容",
     );
+    await expect(afterReviewFrame.locator(
+      '[data-review-reference] [data-pageroot-review-text="added"]',
+    )).toHaveAttribute("data-pageroot-review-text-operation", "insert");
     await expect(beforeReviewFrame.locator(
       '[data-review-delete-only] [data-pageroot-review-text="removed"]',
     )).toHaveText("换言之，");
+    await expect(beforeReviewFrame.locator(
+      '[data-review-delete-only] [data-pageroot-review-text="removed"]',
+    )).toHaveAttribute("data-pageroot-review-summary", "删除内容");
     await expect(afterReviewFrame.locator(
       '[data-review-delete-only] [data-pageroot-review-text-context="added"]',
     )).toHaveCount(0);
@@ -1899,6 +1915,25 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect(afterReviewFrame.locator(
       '[data-review-numbered-lines] [data-pageroot-review-text="added"]',
     )).toHaveCount(1);
+    const numberedLineMarker = afterReviewFrame.locator(
+      '[data-review-numbered-lines] [data-pageroot-review-text="added"]',
+    );
+    const numberedLineGroup = await numberedLineMarker.getAttribute(
+      "data-pageroot-review-text-group",
+    );
+    expect(numberedLineGroup).toBeTruthy();
+    const numberedLineFrame = afterReviewFrame.locator(
+      `[data-pageroot-review-overlay-box][data-tone="text-added"][data-text-group="${numberedLineGroup}"]`,
+    );
+    await expect(numberedLineFrame).toHaveCount(1);
+    await expect(numberedLineFrame).not.toHaveAttribute("data-scope", "text-block");
+    await expect.poll(async () => {
+      const frameBox = await numberedLineFrame.boundingBox();
+      const ownerBox = await afterReviewFrame.locator(
+        "[data-review-numbered-lines]",
+      ).boundingBox();
+      return Boolean(frameBox && ownerBox && frameBox.height < ownerBox.height * 0.55);
+    }).toBe(true);
     await expect(beforeReviewFrame.locator(
       '[data-review-list-items] [data-pageroot-review-text]',
     )).toHaveCount(0);
@@ -1914,9 +1949,57 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect(afterReviewFrame.locator(
       '[data-review-brand-row="adidas"] [data-pageroot-review-text="added"]',
     )).toHaveCount(3);
+    const addedRowGroups = await afterReviewFrame.locator(
+      '[data-review-brand-row="adidas"] [data-pageroot-review-text="added"]',
+    ).evaluateAll((markers) => [...new Set(markers.map((marker) => (
+      marker.getAttribute("data-pageroot-review-text-group")
+    )))].filter(Boolean));
+    expect(addedRowGroups).toHaveLength(1);
+    const addedRowFrame = afterReviewFrame.locator(
+      `[data-pageroot-review-overlay-box][data-tone="text-added"][data-text-group="${addedRowGroups[0]}"]`,
+    );
+    await expect(addedRowFrame).toHaveCount(1);
+    await expect(addedRowFrame).toHaveAttribute("data-scope", "text-block");
+    await expect(addedRowFrame).toHaveAttribute(
+      "data-pageroot-review-fragment-count",
+      "1",
+    );
     await expect(afterReviewFrame.locator(
       '[data-review-brand-row]:not([data-review-brand-row="adidas"]) [data-pageroot-review-text]',
     )).toHaveCount(0);
+    await expect(beforeReviewFrame.locator(
+      '[data-review-layout-only] [data-pageroot-review-text], [data-review-layout-only] [data-pageroot-review-text-context]',
+    )).toHaveCount(0);
+    await expect(afterReviewFrame.locator(
+      '[data-review-layout-only] [data-pageroot-review-text], [data-review-layout-only] [data-pageroot-review-text-context]',
+    )).toHaveCount(0);
+    const crossLineMarker = afterReviewFrame.locator(
+      '[data-review-cross-line] [data-pageroot-review-text="added"]',
+    );
+    await expect(crossLineMarker).toHaveAttribute(
+      "data-pageroot-review-text-operation",
+      "insert",
+    );
+    const crossLineGroup = await crossLineMarker.getAttribute(
+      "data-pageroot-review-text-group",
+    );
+    expect(crossLineGroup).toBeTruthy();
+    const crossLineRectCount = await crossLineMarker.evaluate((element) => (
+      [...element.getClientRects()].filter((rect) => rect.width > 1 && rect.height > 1).length
+    ));
+    expect(crossLineRectCount).toBeGreaterThan(1);
+    const crossLineFrames = afterReviewFrame.locator(
+      `[data-pageroot-review-overlay-box][data-tone="text-added"][data-text-group="${crossLineGroup}"]`,
+    );
+    await expect(crossLineFrames).toHaveCount(crossLineRectCount);
+    await expect.poll(() => crossLineFrames.evaluateAll((frames) => frames.every((frame) => (
+      frame.getAttribute("data-scope") === "text-line"
+      && frame.getAttribute("data-shaped") !== "true"
+      && frame.getAttribute("data-pageroot-review-fragment-count") === "1"
+    )))).toBe(true);
+    await expect(crossLineFrames.locator(
+      "[data-pageroot-review-overlay-label]",
+    )).toHaveCount(1);
     const addedChartChangeId = await afterReviewFrame.locator(
       "[data-review-added-chart] [data-pageroot-review-marker]",
     ).first().getAttribute("data-pageroot-review-marker");
@@ -2217,6 +2300,25 @@ test("a verified AI result stays pending through desktop review until the user a
     )).toBe("style");
     await expect(afterReviewFrame.locator("[data-pageroot-review-style]").first())
       .toBeVisible();
+    await expect(beforeReviewFrame.locator(
+      '[data-review-layout-only][data-pageroot-review-style="before"]',
+    )).toHaveAttribute("data-pageroot-review-style-scope", "box");
+    await expect(afterReviewFrame.locator(
+      '[data-review-layout-only][data-pageroot-review-style="after"]',
+    )).toHaveAttribute("data-pageroot-review-style-scope", "box");
+    const layoutStyleOwner = await afterReviewFrame.locator(
+      "[data-review-layout-only]",
+    ).getAttribute("data-pageroot-review-style-owner");
+    expect(layoutStyleOwner).toBeTruthy();
+    const layoutStyleFrame = afterReviewFrame.locator(
+      `[data-pageroot-review-overlay-box][data-tone="style"][data-pageroot-review-overlay-owner="${layoutStyleOwner}"]`,
+    );
+    await expect(layoutStyleFrame).toHaveCount(1);
+    await expect(layoutStyleFrame).toHaveAttribute("data-scope", "box");
+    await expect(layoutStyleFrame).toHaveAttribute(
+      "data-pageroot-review-fragment-count",
+      "1",
+    );
     await expect(afterReviewFrame.locator(
       '[data-pageroot-review-overlay-box][data-tone="style"]',
     ).first()).toBeAttached();

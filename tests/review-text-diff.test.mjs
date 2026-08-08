@@ -236,3 +236,18 @@ test("large semantic unit lists stay bounded while preserving an insertion", () 
   assert.deepEqual(pairs.at(-1), { beforeIndex: 799, afterIndex: 800 });
   assert.equal(pairs.length, 801);
 });
+
+test("stable text boundaries keep a long middle insertion in the same block", () => {
+  const before = [{
+    kind: "block:P",
+    text: "稳定前缀，稳定后缀。",
+  }];
+  const after = [{
+    kind: "block:P",
+    text: "稳定前缀，新增说明需要跨越多个实际文字行并保持独立框选，稳定后缀。",
+  }];
+
+  assert.deepEqual(pairReviewSemanticTextUnits(before, after), [
+    { beforeIndex: 0, afterIndex: 0 },
+  ]);
+});

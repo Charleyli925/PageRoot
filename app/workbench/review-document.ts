@@ -13,6 +13,7 @@ import {
   reviewTextSimilarity,
   sentenceAwareTextDifferences,
 } from "../lib/review-text-diff.js";
+import type { ReviewTextChangeOperation } from "../lib/review-text-diff.js";
 import {
   REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT,
   selectPrioritizedReviewRuntimeVisualCandidates,
@@ -1826,6 +1827,7 @@ type ReviewTextFootprintGroup = {
   ranges: TextRange[];
   scope: "inline" | "block";
   density: number;
+  operation: ReviewTextChangeOperation;
   summary?: string;
 };
 
@@ -1859,6 +1861,7 @@ function applyTextFootprintMetadata(
   marker.dataset.pagerootReviewTextDensity = String(
     Math.round(group.density * 10_000) / 10_000,
   );
+  marker.dataset.pagerootReviewTextOperation = group.operation;
   if (group.summary) marker.dataset.pagerootReviewTextSummary = group.summary;
 }
 
@@ -1866,7 +1869,6 @@ function wrapTextRanges(
   inventory: ReviewTextInventory,
   groups: ReviewTextFootprintGroup[],
   tone: "removed" | "added",
-  changeKind: "added" | "removed" | "before" | "after" = tone,
 ) {
   if (!groups.length) return;
   const annotatedRanges = groups.flatMap((group) => (
@@ -1887,7 +1889,6 @@ function wrapTextRanges(
       if (!value) return;
       const marker = node.ownerDocument.createElement("span");
       marker.dataset.pagerootReviewText = tone;
-      marker.dataset.pagerootReviewTextChange = changeKind;
       applyTextFootprintMetadata(marker, group);
       marker.textContent = value;
       fragment.append(marker);
@@ -1906,24 +1907,6 @@ function wrapTextRanges(
       fragment.append(source.slice(cursor));
     }
     node.replaceWith(fragment);
-  });
-}
-
-function wrapTextContext(
-  inventory: ReviewTextInventory,
-  tone: "removed" | "added",
-  changeKind: "before" | "after",
-  group: ReviewTextFootprintGroup,
-) {
-  inventory.nodes.forEach(({ node }) => {
-    const value = node.textContent || "";
-    if (!value.trim()) return;
-    const marker = node.ownerDocument.createElement("span");
-    marker.dataset.pagerootReviewTextContext = tone;
-    marker.dataset.pagerootReviewTextChange = changeKind;
-    applyTextFootprintMetadata(marker, group);
-    marker.textContent = value;
-    node.replaceWith(marker);
   });
 }
 
@@ -1975,6 +1958,11 @@ type ReviewTextBlock = {
   inventory: ReviewTextInventory;
   kind: "block" | "flow-line" | "numbered-line" | "list-item" | "table-row";
   maximumScope: "inline" | "block";
+};
+
+type ReviewTextBlockPair = {
+  before: ReviewTextBlock | null;
+  after: ReviewTextBlock | null;
 };
 
 function isReviewTextBlockElement(element: Element): boolean {
@@ -2107,7 +2095,7 @@ const GENERIC_REVIEW_TEXT_CLASSES = new Set([
 function pairTextBlocks(
   before: ReviewTextBlock[],
   after: ReviewTextBlock[],
-): Array<{ before: ReviewTextBlock | null; after: ReviewTextBlock | null }> {
+): ReviewTextBlockPair[] {
   const descriptor = (block: ReviewTextBlock) => ({
     kind: `${block.kind}:${block.anchor.tagName}`,
     identity: pairKey(block.anchor),
@@ -2141,6 +2129,7 @@ function markAllText(
     ranges: [{ start: 0, end: inventory.text.length }],
     scope: block.maximumScope,
     density: 1,
+    operation: tone === "added" ? "insert" : "delete",
   };
   markTextFootprintOwner(block.anchor, [group]);
   wrapTextRanges(inventory, [group], tone);
@@ -2152,22 +2141,9 @@ function sameBreakLayout(before: ReviewTextInventory, after: ReviewTextInventory
     && before.breakOffsets.every((offset, index) => offset === after.breakOffsets[index]);
 }
 
-function markTextDifferences(before: Element | null, after: Element | null): boolean {
+function markTextDifferences(pairs: ReviewTextBlockPair[]): boolean {
   let changed = false;
-  if (!before && after) {
-    reviewTextBlocks(after).forEach((element, index) => {
-      changed = markAllText(element, "added", `text-${index + 1}-1`) || changed;
-    });
-    return changed;
-  }
-  if (before && !after) {
-    reviewTextBlocks(before).forEach((element, index) => {
-      changed = markAllText(element, "removed", `text-${index + 1}-1`) || changed;
-    });
-    return changed;
-  }
-  if (!before || !after) return false;
-  pairTextBlocks(reviewTextBlocks(before), reviewTextBlocks(after)).forEach((pair, pairIndex) => {
+  pairs.forEach((pair, pairIndex) => {
     const groupBase = `text-${pairIndex + 1}`;
     if (!pair.before && pair.after) {
       changed = markAllText(pair.after, "added", `${groupBase}-1`) || changed;
@@ -2180,31 +2156,18 @@ function markTextDifferences(before: Element | null, after: Element | null): boo
     if (!pair.before || !pair.after) return;
     const beforeInventory = pair.before.inventory;
     const afterInventory = pair.after.inventory;
+    if (beforeInventory.text === afterInventory.text) {
+      return;
+    }
     const maximumScope = pair.before.maximumScope === "inline"
       || pair.after.maximumScope === "inline"
       ? "inline"
       : "block";
-    const layoutChanged = !sameBreakLayout(beforeInventory, afterInventory);
-    if (beforeInventory.text === afterInventory.text) {
-      if (!layoutChanged) return;
-      const group: ReviewTextFootprintGroup = {
-        id: `${groupBase}-1`,
-        ranges: [{ start: 0, end: beforeInventory.text.length }],
-        scope: maximumScope,
-        density: 1,
-      };
-      markTextFootprintOwner(pair.before.anchor, [group]);
-      markTextFootprintOwner(pair.after.anchor, [group]);
-      wrapTextContext(beforeInventory, "removed", "before", group);
-      wrapTextContext(afterInventory, "added", "after", group);
-      changed = true;
-      return;
-    }
     const differences = sentenceAwareTextDifferences(
       beforeInventory.text,
       afterInventory.text,
     );
-    if (!differences.before.length && !differences.after.length && !layoutChanged) return;
+    if (!differences.before.length && !differences.after.length) return;
     const plan = readableReviewTextFootprintPlan(
       beforeInventory.text,
       afterInventory.text,
@@ -2221,6 +2184,7 @@ function markTextDifferences(before: Element | null, after: Element | null): boo
       ranges,
       scope: footprintScope,
       density: plan.density,
+      operation: plan.operation,
       summary: preferredSummary,
     }));
     const afterGroups: ReviewTextFootprintGroup[] = plan.after.groups.map((ranges, index) => ({
@@ -2228,6 +2192,7 @@ function markTextDifferences(before: Element | null, after: Element | null): boo
       ranges,
       scope: footprintScope,
       density: plan.density,
+      operation: plan.operation,
       summary: preferredSummary,
     }));
     if (plan.before.groups.length) {
@@ -2236,7 +2201,6 @@ function markTextDifferences(before: Element | null, after: Element | null): boo
         beforeInventory,
         beforeGroups,
         "removed",
-        plan.operation === "replace" ? "before" : "removed",
       );
       changed = true;
     } else if (plan.before.anchorOffset !== null) {
@@ -2248,7 +2212,6 @@ function markTextDifferences(before: Element | null, after: Element | null): boo
         afterInventory,
         afterGroups,
         "added",
-        plan.operation === "replace" ? "after" : "added",
       );
       changed = true;
     } else if (plan.after.anchorOffset !== null) {
@@ -2727,7 +2690,11 @@ function elementsMatchingSelector(root: Element, rawSelector: string): Element[]
   }
 }
 
-function markStyleDifferences(before: Element | null, after: Element | null): boolean {
+function markStyleDifferences(
+  before: Element | null,
+  after: Element | null,
+  layoutPairs: ReviewTextBlockPair[],
+): boolean {
   if (!before || !after) return false;
   let marked = 0;
   let ownerSequence = before.ownerDocument.querySelectorAll(
@@ -2774,15 +2741,41 @@ function markStyleDifferences(before: Element | null, after: Element | null): bo
       });
     });
   });
+  const markedLayoutOwners = new Set<Element>();
+  layoutPairs.forEach((pair) => {
+    if (
+      !pair.before
+      || !pair.after
+      || pair.before.maximumScope !== "block"
+      || pair.after.maximumScope !== "block"
+      || pair.before.inventory.text !== pair.after.inventory.text
+      || sameBreakLayout(pair.before.inventory, pair.after.inventory)
+      || markedLayoutOwners.has(pair.before.anchor)
+    ) return;
+    markedLayoutOwners.add(pair.before.anchor);
+    markPair(pair.before.anchor, pair.after.anchor, "box");
+  });
   return marked > 0;
 }
 
 function annotateChangePair(
   pair: SectionPair,
 ): ReviewChangeType[] {
+  const textPairs = pairTextBlocks(
+    pair.before ? reviewTextBlocks(pair.before) : [],
+    pair.after ? reviewTextBlocks(pair.after) : [],
+  );
+  const layoutPairs = textPairs.filter((textPair) => (
+    textPair.before
+    && textPair.after
+    && textPair.before.maximumScope === "block"
+    && textPair.after.maximumScope === "block"
+    && textPair.before.inventory.text === textPair.after.inventory.text
+    && !sameBreakLayout(textPair.before.inventory, textPair.after.inventory)
+  ));
   const structureChanged = markStructureDifferences(pair);
-  const styleChanged = markStyleDifferences(pair.before, pair.after);
-  const textChanged = markTextDifferences(pair.before, pair.after);
+  const styleChanged = markStyleDifferences(pair.before, pair.after, layoutPairs);
+  const textChanged = markTextDifferences(textPairs);
   return [
     ...(textChanged ? ["text" as const] : []),
     ...(structureChanged ? ["structure" as const] : []),
@@ -2795,47 +2788,28 @@ function attachChangeMarkerMetadata(
   changeId: string,
   helper: string,
 ) {
-  const pairTextKinds = new Set(
-    [pair.before, pair.after].flatMap((root) => (
-      root
-        ? [root, ...root.querySelectorAll("[data-pageroot-review-text-change]")]
-          .map((element) => element.getAttribute("data-pageroot-review-text-change"))
-          .filter(Boolean)
-        : []
-    )),
-  );
-  const pairedTextReplacement = pairTextKinds.has("added")
-    && pairTextKinds.has("removed");
   [pair.before, pair.after].forEach((root) => {
     if (!root) return;
     const markerElements = [root, ...root.querySelectorAll("*")].filter((element) => (
       element.hasAttribute("data-pageroot-review-text")
-      || element.hasAttribute("data-pageroot-review-text-context")
       || element.hasAttribute("data-pageroot-review-structure")
       || element.hasAttribute("data-pageroot-review-style")
     ));
     markerElements.forEach((element, index) => {
       const markerTypes: ReviewChangeType[] = [];
-      const textMarker = element.hasAttribute("data-pageroot-review-text")
-        || element.hasAttribute("data-pageroot-review-text-context");
+      const textMarker = element.hasAttribute("data-pageroot-review-text");
       if (textMarker) markerTypes.push("text");
       if (element.hasAttribute("data-pageroot-review-structure")) markerTypes.push("structure");
       if (element.hasAttribute("data-pageroot-review-style")) markerTypes.push("style");
-      const textChange = element.getAttribute("data-pageroot-review-text-change");
-      const structuralAddition = Boolean(
-        element.closest('[data-pageroot-review-structure="added"]'),
-      );
-      const structuralRemoval = Boolean(
-        element.closest('[data-pageroot-review-structure="removed"]'),
-      );
+      const textOperation = element.getAttribute("data-pageroot-review-text-operation");
       const readableTextSummary = element.getAttribute(
         "data-pageroot-review-text-summary",
       );
       const summary = textMarker
         ? readableTextSummary
-          || (textChange === "added" && (!pairedTextReplacement || structuralAddition)
+          || (textOperation === "insert"
             ? "新增内容"
-            : textChange === "removed" && (!pairedTextReplacement || structuralRemoval)
+            : textOperation === "delete"
               ? "删除内容"
               : "文本调整")
         : helper;
@@ -5002,7 +4976,11 @@ function reviewBootstrap(
       const density = Math.max(...group.map((record) => Number(record.textDensity || 0)));
       const owner = textFootprintOwner(base.element, base.textGroup);
       const useBlock = base.textScope === "block"
-        || (lines.length > 3 && density >= .35);
+        || (
+          base.textOperation === "replace"
+          && lines.length > 3
+          && density >= .35
+        );
       if (useBlock && owner) {
         const ownerBounds = boundsForRects(contentStyleRects(owner)
           .filter((rect) => rect.width > 1 && rect.height > 1)
@@ -5056,8 +5034,7 @@ function reviewBootstrap(
       let textMarkerSequence = 0;
       document.querySelectorAll('[data-pageroot-review-marker-types~="text"]').forEach((element) => {
         textMarkerSequence += 1;
-        const textToneValue = element.getAttribute("data-pageroot-review-text")
-          || element.getAttribute("data-pageroot-review-text-context");
+        const textToneValue = element.getAttribute("data-pageroot-review-text");
         const textTone = textToneValue === "removed" ? "text-removed" : "text-added";
         [...element.getClientRects()]
           .filter((rect) => rect.width > 1 && rect.height > 1)
@@ -5071,6 +5048,7 @@ function reviewBootstrap(
             textDensity: Number(
               element.getAttribute("data-pageroot-review-text-density") || 0,
             ),
+            textOperation: element.getAttribute("data-pageroot-review-text-operation") || "",
             scope: "text",
             summary: element.getAttribute("data-pageroot-review-summary") || "",
             tone: textTone,
@@ -5253,6 +5231,7 @@ function reviewBootstrap(
       box.dataset.scope = record.scope || "element";
       box.dataset.summary = record.summary;
       if (record.textGroup) box.dataset.textGroup = record.textGroup;
+      if (record.textOperation) box.dataset.textOperation = record.textOperation;
       box.setAttribute(
         "data-pageroot-review-fragment-count",
         String((record.renderFragments || []).length || 1),

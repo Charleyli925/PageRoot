@@ -5,12 +5,14 @@ const WORD_SEGMENTER = typeof Intl.Segmenter === "function"
 const FALLBACK_TOKEN_PATTERN = /[\p{Script=Han}]|[\p{Script=Latin}\p{N}_]+|[\p{L}]|[^\s]/gu;
 const NON_WHITESPACE_PATTERN = /[^\s]/gu;
 const HAN_CHARACTER_PATTERN = /^\p{Script=Han}$/u;
+const MEANINGFUL_REVIEW_CHARACTER_PATTERN = /[\p{L}\p{N}]/u;
 const SEMANTIC_BOUNDARY_PATTERN = /^[\s\p{P}\p{S}]$/u;
 const SHORT_HAN_TEXT_PATTERN = /^\p{Script=Han}{3,12}$/u;
 const MAX_TOKEN_MATRIX_CELLS = 60_000;
 const MAX_SEMANTIC_UNIT_MATRIX_CELLS = 250_000;
 const SEMANTIC_UNIT_LOOKAHEAD = 32;
 const TOKEN_CHUNK_ANCHOR_LENGTHS = [4, 3, 2, 1];
+const semanticTextUnitFactsCache = new WeakMap();
 
 function tokenizeFallback(value) {
   const tokens = [];
@@ -301,6 +303,52 @@ export function reviewTextSimilarity(left, right) {
   );
 }
 
+function semanticTextUnitFacts(unit) {
+  const cached = semanticTextUnitFactsCache.get(unit);
+  if (cached) return cached;
+  const text = unit.text.replace(/\s+/gu, " ").trim();
+  const facts = {
+    text,
+    characters: [...text.replace(/\s/gu, "")],
+  };
+  semanticTextUnitFactsCache.set(unit, facts);
+  return facts;
+}
+
+function stableTextBoundaryEvidence(beforeCharacters, afterCharacters) {
+  let prefixLength = 0;
+  let prefixEvidence = 0;
+  while (
+    prefixLength < beforeCharacters.length
+    && prefixLength < afterCharacters.length
+    && beforeCharacters[prefixLength] === afterCharacters[prefixLength]
+  ) {
+    if (MEANINGFUL_REVIEW_CHARACTER_PATTERN.test(beforeCharacters[prefixLength])) {
+      prefixEvidence += 1;
+    }
+    prefixLength += 1;
+  }
+  let suffixLength = 0;
+  let suffixEvidence = 0;
+  while (
+    suffixLength < beforeCharacters.length - prefixLength
+    && suffixLength < afterCharacters.length - prefixLength
+    && beforeCharacters[beforeCharacters.length - suffixLength - 1]
+      === afterCharacters[afterCharacters.length - suffixLength - 1]
+  ) {
+    if (MEANINGFUL_REVIEW_CHARACTER_PATTERN.test(
+      beforeCharacters[beforeCharacters.length - suffixLength - 1],
+    )) suffixEvidence += 1;
+    suffixLength += 1;
+  }
+  return {
+    stable: Math.max(prefixEvidence, suffixEvidence) >= 7
+      || (prefixEvidence >= 2 && suffixEvidence >= 2
+        && prefixEvidence + suffixEvidence >= 6),
+    strength: prefixEvidence + suffixEvidence,
+  };
+}
+
 function semanticTextUnitPairScore(before, after, beforeIndex, afterIndex) {
   if (before.kind !== after.kind) return Number.NEGATIVE_INFINITY;
   const beforeIdentity = before.identity || "";
@@ -308,25 +356,37 @@ function semanticTextUnitPairScore(before, after, beforeIndex, afterIndex) {
   if ((beforeIdentity || afterIdentity) && beforeIdentity !== afterIdentity) {
     return Number.NEGATIVE_INFINITY;
   }
-  const beforeText = before.text.replace(/\s+/gu, " ").trim();
-  const afterText = after.text.replace(/\s+/gu, " ").trim();
+  const beforeFacts = semanticTextUnitFacts(before);
+  const afterFacts = semanticTextUnitFacts(after);
+  const beforeText = beforeFacts.text;
+  const afterText = afterFacts.text;
   const exactText = Boolean(beforeText && beforeText === afterText);
   const similarity = reviewTextSimilarity(beforeText, afterText);
+  const boundaryEvidence = stableTextBoundaryEvidence(
+    beforeFacts.characters,
+    afterFacts.characters,
+  );
   const beforeAffinities = new Set(before.affinities || []);
   const sharedAffinities = (after.affinities || [])
     .filter((affinity) => beforeAffinities.has(affinity));
-  if (!exactText && similarity < 0.48 && !(sharedAffinities.length && similarity >= 0.24)) {
+  if (
+    !exactText
+    && !boundaryEvidence.stable
+    && similarity < 0.48
+    && !(sharedAffinities.length && similarity >= 0.24)
+  ) {
     return Number.NEGATIVE_INFINITY;
   }
   return (beforeIdentity ? 600 : 0)
     + (exactText ? 420 : 0)
+    + (boundaryEvidence.stable ? 120 + Math.min(80, boundaryEvidence.strength * 8) : 0)
     + Math.round(similarity * 160)
     + Math.min(80, sharedAffinities.length * 24)
     + Math.max(0, 24 - Math.abs(beforeIndex - afterIndex) * 2);
 }
 
 function semanticTextUnitSignature(unit) {
-  const text = unit.text.replace(/\s+/gu, " ").trim();
+  const text = semanticTextUnitFacts(unit).text;
   if (!text) return null;
   return `${unit.kind}\u0000${unit.identity || ""}\u0000${text}`;
 }

@@ -220,9 +220,10 @@ test("change discovery builds a complete outline and precise change markers", ()
   assert.match(reviewDocument, /"table-row"/);
   assert.match(reviewDocument, /data-pageroot-review-text-block-groups/);
   assert.match(reviewDocument, /data-pageroot-review-text-group/);
+  assert.match(reviewDocument, /data-pageroot-review-text-operation/);
   assert.match(reviewDocument, /data-pageroot-review-text-anchors/);
-  assert.match(reviewDocument, /data-pageroot-review-text-context/);
-  assert.match(reviewDocument, /data-pageroot-review-text-change/);
+  assert.doesNotMatch(reviewDocument, /data-pageroot-review-text-context/);
+  assert.doesNotMatch(reviewDocument, /data-pageroot-review-text-change/);
   assert.match(reviewDocument, /data-pageroot-review-text/);
   assert.match(reviewDocument, /data-pageroot-review-marker/);
   assert.match(reviewDocument, /attachChangeMarkerMetadata/);
@@ -249,8 +250,10 @@ test("change discovery builds a complete outline and precise change markers", ()
   assert.doesNotMatch(reviewDocument, /beforeTokenRanges\.length \?/);
   assert.doesNotMatch(reviewDocument, /afterTokenRanges\.length \?/);
   assert.match(reviewDocument, /const structureChanged = markStructureDifferences\(pair\)/);
-  assert.match(reviewDocument, /const styleChanged = markStyleDifferences\(pair\.before, pair\.after\)/);
-  assert.match(reviewDocument, /const textChanged = markTextDifferences\(pair\.before, pair\.after\)/);
+  assert.match(reviewDocument, /const textPairs = pairTextBlocks\(/);
+  assert.match(reviewDocument, /const layoutPairs = textPairs\.filter\(/);
+  assert.match(reviewDocument, /const styleChanged = markStyleDifferences\(pair\.before, pair\.after, layoutPairs\)/);
+  assert.match(reviewDocument, /const textChanged = markTextDifferences\(textPairs\)/);
   assert.doesNotMatch(reviewDocument, /presentationSignature\(before\) !== presentationSignature\(after\)/);
   assert.doesNotMatch(reviewDocument, /const positional = afterElements\[index\]/);
   assert.match(reviewDocument, /annotatePanelPairs/);
