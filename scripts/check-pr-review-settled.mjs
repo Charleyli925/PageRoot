@@ -7,8 +7,10 @@ import { fileURLToPath } from "node:url";
 const scriptPath = fileURLToPath(import.meta.url);
 const SHA_PATTERN = /^[0-9a-f]{40}$/u;
 const REPOSITORY_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u;
+const DRAFT_REQUEST_PATTERN = /^@codex review\r?\n\r?\nReview exact head SHA `([0-9a-f]{40})` on base SHA `([0-9a-f]{40})`\.\r?\n\r?\n<!-- pageroot-codex-review-sha:([0-9a-f]{40});base-sha:([0-9a-f]{40}) -->[ \t]*(?:\r?\n)?$/u;
 const CODEX_LOGIN = "chatgpt-codex-connector";
 const TRUSTED_REQUEST_ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
+const REVIEW_STATES = new Set(["APPROVED", "CHANGES_REQUESTED", "COMMENTED"]);
 const BLOCKING_PRIORITIES = new Set(["P0", "P1", "P2"]);
 const DEFAULT_SETTLE_SECONDS = 180;
 const DEFAULT_TIMEOUT_SECONDS = 20 * 60;
@@ -37,82 +39,21 @@ function assertSha(value, label) {
   return normalized;
 }
 
-function hiddenRequestIdentity(body, phase) {
-  const markdown = String(body || "");
-  const marker = phase === "final"
-    ? "pageroot-codex-final-review-sha"
-    : "pageroot-codex-review-sha";
-  const declarations = [...markdown.matchAll(new RegExp(`${marker}:`, "giu"))];
-  if (declarations.length !== 1) return null;
-  const match = markdown.match(new RegExp(
-    `<!--\\s*${marker}:\\s*([0-9a-f]{40})\\s*;\\s*base-sha:\\s*([0-9a-f]{40})\\s*-->`,
-    "iu",
-  ));
+function requestIdentity(body) {
+  const match = String(body || "").match(DRAFT_REQUEST_PATTERN);
   if (!match) return null;
-  return Object.freeze({
-    headSha: match[1].toLowerCase(),
-    baseSha: match[2].toLowerCase(),
-  });
+  const headSha = match[1];
+  const baseSha = match[2];
+  if (match[3] !== headSha || match[4] !== baseSha) return null;
+  return Object.freeze({ headSha, baseSha });
 }
 
 export function reviewRequestSha(body) {
-  return hiddenRequestIdentity(body, "draft")?.headSha || null;
+  return requestIdentity(body)?.headSha || null;
 }
 
 export function reviewRequestBaseSha(body) {
-  return hiddenRequestIdentity(body, "draft")?.baseSha || null;
-}
-
-export function finalReviewRequestSha(body) {
-  return hiddenRequestIdentity(body, "final")?.headSha || null;
-}
-
-export function finalReviewRequestBaseSha(body) {
-  return hiddenRequestIdentity(body, "final")?.baseSha || null;
-}
-
-function markdownWithoutHtmlComments(body) {
-  const markdown = String(body || "");
-  let visible = "";
-  let cursor = 0;
-  for (;;) {
-    const commentStart = markdown.indexOf("<!--", cursor);
-    if (commentStart < 0) return `${visible}${markdown.slice(cursor)}`;
-    visible += markdown.slice(cursor, commentStart);
-    const commentEnd = markdown.indexOf("-->", commentStart + 4);
-    if (commentEnd < 0) return null;
-    cursor = commentEnd + 3;
-  }
-}
-
-function visibleRequestIdentity(body, phase) {
-  const visibleMarkdown = markdownWithoutHtmlComments(body);
-  if (visibleMarkdown === null) return null;
-  const pattern = phase === "final"
-    ? /^ {0,3}@codex review[ \t]*\r?\n[ \t]*\r?\nFinal review exact head SHA `([0-9a-f]{40})` on base SHA `([0-9a-f]{40})`\.[ \t]*(?:\r?\n[ \t]*)*$/iu
-    : /^ {0,3}@codex review[ \t]*\r?\n[ \t]*\r?\nReview exact head SHA `([0-9a-f]{40})` on base SHA `([0-9a-f]{40})`\.[ \t]*(?:\r?\n[ \t]*)*$/iu;
-  const match = visibleMarkdown.match(pattern);
-  if (!match) return null;
-  return Object.freeze({
-    headSha: match[1].toLowerCase(),
-    baseSha: match[2].toLowerCase(),
-  });
-}
-
-export function visibleReviewRequestSha(body) {
-  return visibleRequestIdentity(body, "draft")?.headSha || null;
-}
-
-export function visibleReviewRequestBaseSha(body) {
-  return visibleRequestIdentity(body, "draft")?.baseSha || null;
-}
-
-export function visibleFinalReviewRequestSha(body) {
-  return visibleRequestIdentity(body, "final")?.headSha || null;
-}
-
-export function visibleFinalReviewRequestBaseSha(body) {
-  return visibleRequestIdentity(body, "final")?.baseSha || null;
+  return requestIdentity(body)?.baseSha || null;
 }
 
 export function reviewedCommitPrefix(body) {
@@ -143,115 +84,30 @@ function commentUpdatedAt(comment) {
   return comment?.updated_at || comment?.updatedAt || commentCreatedAt(comment);
 }
 
-function isTrustedRequestActor(comment) {
+function isTrustedRequestComment(comment) {
+  const createdAt = timestamp(commentCreatedAt(comment));
+  const updatedAt = timestamp(commentUpdatedAt(comment));
   return (
     !isCodexActor(commentAuthor(comment))
     && TRUSTED_REQUEST_ASSOCIATIONS.has(commentAssociation(comment))
-    && Number.isFinite(timestamp(commentCreatedAt(comment)))
+    && Number.isFinite(createdAt)
+    && updatedAt === createdAt
+    && Boolean(requestIdentity(comment?.body))
   );
 }
 
-function isTrustedRequestComment(comment) {
-  return (
-    isTrustedRequestActor(comment)
-    && timestamp(commentUpdatedAt(comment)) === timestamp(commentCreatedAt(comment))
-  );
-}
-
-function reviewInvocationStatus(body) {
-  const visibleMarkdown = markdownWithoutHtmlComments(body);
-  if (visibleMarkdown === null) return "ambiguous";
-  let fence = null;
-  for (const line of visibleMarkdown.split(/\r?\n/u)) {
-    const fenceMatch = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/u);
-    if (fenceMatch) {
-      const marker = fenceMatch[1];
-      const suffix = fenceMatch[2];
-      if (!fence) {
-        if (marker[0] === "`" && suffix.includes("`")) continue;
-        fence = { character: marker[0], length: marker.length };
-      } else if (
-        marker[0] === fence.character
-        && marker.length >= fence.length
-        && /^[ \t]*$/u.test(suffix)
-      ) {
-        fence = null;
-      }
-      continue;
-    }
-    if (
-      !fence
-      && !/^(?: {4}|\t)/u.test(line)
-      && /@codex[ \t]+review\b/iu.test(line)
-    ) return "invocation";
-  }
-  return "none";
-}
-
-function canonicalRequestIdentity(comment, phase) {
-  const hiddenIdentity = hiddenRequestIdentity(comment?.body, phase);
-  const visibleIdentity = visibleRequestIdentity(comment?.body, phase);
-  if (
-    !isTrustedRequestComment(comment)
-    || !hiddenIdentity
-    || !visibleIdentity
-    || hiddenIdentity.headSha !== visibleIdentity.headSha
-    || hiddenIdentity.baseSha !== visibleIdentity.baseSha
-  ) return null;
-  return Object.freeze({
-    phase,
-    headSha: hiddenIdentity.headSha,
-    baseSha: hiddenIdentity.baseSha,
-    at: timestamp(commentCreatedAt(comment)),
-  });
-}
-
-function exactReviewRequests(issueComments, expectedHeadSha, expectedBaseSha, phase) {
-  return (issueComments || []).filter((comment) => {
-    const identity = canonicalRequestIdentity(comment, phase);
-    return identity?.headSha === expectedHeadSha && identity?.baseSha === expectedBaseSha;
-  });
-}
-
-function hasAmbiguousReviewInvocation({
-  pullRequest,
-  pullRequestBody,
-  issueComments,
-  reviewComments,
-  expectedHeadSha,
-  expectedBaseSha,
-}) {
-  const sources = [
-    {
-      entry: pullRequestBody || pullRequest,
-      allowCanonicalRequest: false,
-      failClosedOnEdit: true,
-    },
-    ...(issueComments || []).map((comment) => ({
-      entry: comment,
-      allowCanonicalRequest: true,
-      failClosedOnEdit: true,
-    })),
-    ...(reviewComments || []).map((comment) => ({
-      entry: comment,
-      allowCanonicalRequest: false,
-      failClosedOnEdit: true,
-    })),
-  ];
-  return sources.some(({ entry, allowCanonicalRequest, failClosedOnEdit }) => {
-    if (!isTrustedRequestActor(entry)) {
-      return false;
-    }
-    if (failClosedOnEdit && !isTrustedRequestComment(entry)) return true;
-    const invocationStatus = reviewInvocationStatus(entry?.body);
-    if (invocationStatus === "none") return false;
-    if (invocationStatus === "ambiguous" || !allowCanonicalRequest) return true;
-    return !["draft", "final"].some((phase) => {
-      const identity = canonicalRequestIdentity(entry, phase);
-      return identity?.headSha === expectedHeadSha
-        && identity.baseSha === expectedBaseSha;
-    });
-  });
+export function latestExactReviewRequest(issueComments, expectedHeadSha, expectedBaseSha) {
+  const expectedHead = assertSha(expectedHeadSha, "expectedHeadSha");
+  const expectedBase = assertSha(expectedBaseSha, "expectedBaseSha");
+  return (issueComments || [])
+    .filter((comment) => {
+      if (!isTrustedRequestComment(comment)) return false;
+      const identity = requestIdentity(comment.body);
+      return identity.headSha === expectedHead && identity.baseSha === expectedBase;
+    })
+    .sort((left, right) => (
+      timestamp(commentCreatedAt(right)) - timestamp(commentCreatedAt(left))
+    ))[0] || null;
 }
 
 function latestReadyForReviewEvent(timelineEvents) {
@@ -279,103 +135,77 @@ function latestDraftEventBefore(timelineEvents, readyAt) {
     ))[0] || null;
 }
 
-export function latestExactReviewRequest(issueComments, expectedHeadSha, expectedBaseSha) {
-  assertSha(expectedHeadSha, "expectedHeadSha");
-  assertSha(expectedBaseSha, "expectedBaseSha");
-  return exactReviewRequests(issueComments, expectedHeadSha, expectedBaseSha, "draft")
-    .sort((left, right) => (
-      timestamp(commentCreatedAt(right)) - timestamp(commentCreatedAt(left))
-    ))[0] || null;
+function inInterval(at, atOrAfter, before = Number.POSITIVE_INFINITY) {
+  return Number.isFinite(at) && at >= atOrAfter && at < before;
 }
 
-export function latestFinalReviewRequest(issueComments, expectedHeadSha, expectedBaseSha) {
-  assertSha(expectedHeadSha, "expectedHeadSha");
-  assertSha(expectedBaseSha, "expectedBaseSha");
-  return exactReviewRequests(issueComments, expectedHeadSha, expectedBaseSha, "final")
-    .sort((left, right) => (
-      timestamp(commentCreatedAt(right)) - timestamp(commentCreatedAt(left))
-    ))[0] || null;
+function substantiveReviewSignal(review, expectedHeadSha, atOrAfter, before) {
+  const completedAt = timestamp(review?.submitted_at || review?.submittedAt);
+  const state = String(review?.state || "").toUpperCase();
+  const commitSha = String(
+    review?.commit_id || review?.commit?.oid || review?.commitSha || "",
+  ).toLowerCase();
+  const prefix = reviewedCommitPrefix(review?.body);
+  if (
+    !isCodexActor(review?.user?.login || review?.author?.login || review?.author)
+    || !REVIEW_STATES.has(state)
+    || commitSha !== expectedHeadSha
+    || !prefix
+    || !expectedHeadSha.startsWith(prefix)
+    || !inInterval(completedAt, atOrAfter, before)
+  ) return null;
+  return {
+    kind: "substantive_review",
+    scope: "pull_request_review",
+    at: completedAt,
+    id: review?.id || review?.databaseId || null,
+  };
+}
+
+function cleanReactionSignal(reaction, scope, atOrAfter, before) {
+  const completedAt = timestamp(reaction?.created_at || reaction?.createdAt);
+  if (
+    !isCodexActor(reaction?.user?.login || reaction?.author?.login || reaction?.author)
+    || !["+1", "THUMBS_UP"].includes(reaction?.content)
+    || !inInterval(completedAt, atOrAfter, before)
+  ) return null;
+  return {
+    kind: "clean_review_reaction",
+    scope,
+    at: completedAt,
+    id: reaction?.id || reaction?.databaseId || null,
+  };
 }
 
 function reviewCompletionSignals({
   expectedHeadSha,
-  requestAt,
-  reviews,
-  issueComments,
-  requestReactions,
-  acceptCommitBoundSignals = true,
+  atOrAfter,
+  before = Number.POSITIVE_INFINITY,
+  reviews = [],
+  reactionGroups = [],
 }) {
   const signals = [];
-  for (const review of reviews || []) {
-    const completedAt = timestamp(review?.submitted_at || review?.submittedAt);
-    const state = String(review?.state || "").toUpperCase();
-    const commitSha = String(
-      review?.commit_id || review?.commit?.oid || review?.commitSha || "",
-    ).toLowerCase();
-    if (
-      isCodexActor(review?.user?.login || review?.author?.login || review?.author)
-      && acceptCommitBoundSignals
-      && ["APPROVED", "CHANGES_REQUESTED", "COMMENTED"].includes(state)
-      && commitSha === expectedHeadSha
-      && Number.isFinite(completedAt)
-      && completedAt >= requestAt
-    ) {
-      signals.push({
-        kind: "pull_request_review",
-        at: completedAt,
-        id: review?.id || review?.databaseId || null,
-      });
-    }
+  for (const review of reviews) {
+    const signal = substantiveReviewSignal(review, expectedHeadSha, atOrAfter, before);
+    if (signal) signals.push(signal);
   }
-
-  for (const comment of issueComments || []) {
-    const completedAt = timestamp(commentCreatedAt(comment));
-    const prefix = reviewedCommitPrefix(comment?.body);
-    if (
-      isCodexActor(commentAuthor(comment))
-      && acceptCommitBoundSignals
-      && prefix
-      && expectedHeadSha.startsWith(prefix)
-      && Number.isFinite(completedAt)
-      && completedAt >= requestAt
-    ) {
-      signals.push({
-        kind: "review_completion_comment",
-        at: completedAt,
-        id: comment?.id || comment?.databaseId || null,
-      });
-    }
-  }
-
-  for (const reaction of requestReactions || []) {
-    const completedAt = timestamp(reaction?.created_at || reaction?.createdAt);
-    if (
-      isCodexActor(reaction?.user?.login || reaction?.author?.login || reaction?.author)
-      && ["+1", "THUMBS_UP"].includes(reaction?.content)
-      && Number.isFinite(completedAt)
-      && completedAt >= requestAt
-    ) {
-      signals.push({
-        kind: "clean_review_reaction",
-        scope: "request_comment",
-        at: completedAt,
-        id: reaction?.id || reaction?.databaseId || null,
-      });
+  for (const group of reactionGroups) {
+    for (const reaction of group.reactions || []) {
+      const signal = cleanReactionSignal(reaction, group.scope, atOrAfter, before);
+      if (signal) signals.push(signal);
     }
   }
   return signals.sort((left, right) => right.at - left.at);
 }
 
-function latestCodexEnvironmentFailure(issueComments, requestAt, beforeAt = Number.POSITIVE_INFINITY) {
+function latestCodexEnvironmentFailure(issueComments, atOrAfter, before) {
   return (issueComments || [])
     .flatMap((comment) => {
       const failedAt = timestamp(commentCreatedAt(comment));
       if (
         !isCodexActor(commentAuthor(comment))
         || !CODEX_ENVIRONMENT_UNAVAILABLE_PATTERN.test(comment?.body || "")
-        || !Number.isFinite(failedAt)
-        || failedAt < requestAt
-        || failedAt >= beforeAt
+        || !inInterval(failedAt, atOrAfter, before)
       ) return [];
       return [{
         kind: "codex_environment_unavailable",
@@ -430,22 +260,35 @@ function pullRequestBaseSha(pullRequest) {
   ).toLowerCase();
 }
 
+function outcome(identity, status, reason, fields = {}) {
+  return Object.freeze({
+    ...identity,
+    status,
+    reason,
+    request: null,
+    promotion: null,
+    draftCompletion: null,
+    completion: null,
+    settlesAt: null,
+    blockingThreads: [],
+    ...fields,
+  });
+}
+
 export function evaluateReviewSettlement({
   expectedHeadSha,
   expectedBaseSha,
   pullRequest,
-  pullRequestBody = null,
   issueComments = [],
-  reviewComments = [],
   timelineEvents = [],
   reviews = [],
   reviewThreads = [],
   requestReactions = [],
-  finalRequestReactions = [],
+  pullRequestReactions = [],
   now = new Date(),
   settleSeconds = DEFAULT_SETTLE_SECONDS,
 }) {
-  const expectedSha = assertSha(expectedHeadSha, "expectedHeadSha");
+  const expectedHead = assertSha(expectedHeadSha, "expectedHeadSha");
   const expectedBase = assertSha(expectedBaseSha, "expectedBaseSha");
   if (!Number.isFinite(settleSeconds) || settleSeconds < 0) {
     throw new Error("settleSeconds must be a non-negative number.");
@@ -455,92 +298,28 @@ export function evaluateReviewSettlement({
 
   const currentHeadSha = pullRequestHeadSha(pullRequest);
   const currentBaseSha = pullRequestBaseSha(pullRequest);
-  const resultIdentity = Object.freeze({
-    expectedHeadSha: expectedSha,
+  const identity = Object.freeze({
+    expectedHeadSha: expectedHead,
     currentHeadSha: currentHeadSha || null,
     expectedBaseSha: expectedBase,
     currentBaseSha: currentBaseSha || null,
   });
-  if (currentHeadSha !== expectedSha) {
-    return Object.freeze({
-      ...resultIdentity,
-      status: "blocked",
-      reason: "head_sha_changed",
-      expectedHeadSha: expectedSha,
-      currentHeadSha: currentHeadSha || null,
-      request: null,
-      completion: null,
-      settlesAt: null,
-      blockingThreads: [],
-    });
+  if (currentHeadSha !== expectedHead) {
+    return outcome(identity, "blocked", "head_sha_changed");
   }
   if (currentBaseSha !== expectedBase) {
-    return Object.freeze({
-      ...resultIdentity,
-      status: "blocked",
-      reason: "base_sha_changed",
-      request: null,
-      completion: null,
-      settlesAt: null,
-      blockingThreads: [],
-    });
+    return outcome(identity, "blocked", "base_sha_changed");
   }
   if (String(pullRequest?.state || "").toLowerCase() !== "open") {
-    return Object.freeze({
-      status: "blocked",
-      reason: "pull_request_not_open",
-      expectedHeadSha: expectedSha,
-      currentHeadSha,
-      request: null,
-      completion: null,
-      settlesAt: null,
-      blockingThreads: [],
-    });
+    return outcome(identity, "blocked", "pull_request_not_open");
   }
   if (pullRequest?.draft === true || pullRequest?.isDraft === true) {
-    return Object.freeze({
-      status: "blocked",
-      reason: "pull_request_is_draft",
-      expectedHeadSha: expectedSha,
-      currentHeadSha,
-      request: null,
-      completion: null,
-      settlesAt: null,
-      blockingThreads: [],
-    });
+    return outcome(identity, "blocked", "pull_request_is_draft");
   }
 
-  const request = latestExactReviewRequest(issueComments, expectedSha, expectedBase);
-  if (!request) {
-    return Object.freeze({
-      status: "blocked",
-      reason: "exact_sha_review_not_requested",
-      expectedHeadSha: expectedSha,
-      currentHeadSha,
-      request: null,
-      completion: null,
-      settlesAt: null,
-      blockingThreads: [],
-    });
-  }
-  const requestAt = timestamp(commentCreatedAt(request));
-  const requestSummary = Object.freeze({
-    id: request?.id || request?.databaseId || null,
-    at: new Date(requestAt).toISOString(),
-  });
   const readyEvent = latestReadyForReviewEvent(timelineEvents);
   if (!readyEvent) {
-    return Object.freeze({
-      status: "waiting",
-      reason: "ready_transition_missing",
-      expectedHeadSha: expectedSha,
-      currentHeadSha,
-      request: requestSummary,
-      promotion: null,
-      completion: null,
-      settlesAt: null,
-      blockingThreads: [],
-    });
+    return outcome(identity, "waiting", "ready_transition_missing");
   }
   const readyAt = timestamp(readyEvent?.created_at || readyEvent?.createdAt);
   const draftEvent = latestDraftEventBefore(timelineEvents, readyAt);
@@ -548,54 +327,40 @@ export function evaluateReviewSettlement({
     ? timestamp(draftEvent?.created_at || draftEvent?.createdAt)
     : timestamp(pullRequest?.created_at || pullRequest?.createdAt);
   if (!Number.isFinite(draftStartedAt)) {
-    return Object.freeze({
-      status: "blocked",
-      reason: "draft_interval_unavailable",
-      expectedHeadSha: expectedSha,
-      currentHeadSha,
-      request: requestSummary,
-      promotion: null,
-      completion: null,
-      settlesAt: null,
-      blockingThreads: [],
-    });
+    return outcome(identity, "blocked", "draft_interval_unavailable");
   }
-  const promotionSummary = Object.freeze({
+  const promotion = Object.freeze({
     id: readyEvent?.id || readyEvent?.databaseId || null,
     at: new Date(readyAt).toISOString(),
     draftStartedAt: new Date(draftStartedAt).toISOString(),
   });
+
+  const request = latestExactReviewRequest(issueComments, expectedHead, expectedBase);
+  if (!request) {
+    return outcome(identity, "blocked", "exact_sha_review_not_requested", { promotion });
+  }
+  const requestAt = timestamp(commentCreatedAt(request));
+  const requestSummary = Object.freeze({
+    id: request?.id || request?.databaseId || null,
+    at: new Date(requestAt).toISOString(),
+  });
   if (requestAt < draftStartedAt || requestAt >= readyAt) {
-    return Object.freeze({
-      status: "blocked",
-      reason: "exact_sha_request_not_in_latest_draft",
-      expectedHeadSha: expectedSha,
-      currentHeadSha,
+    return outcome(identity, "blocked", "exact_sha_request_not_in_latest_draft", {
       request: requestSummary,
-      promotion: promotionSummary,
-      completion: null,
-      settlesAt: null,
-      blockingThreads: [],
+      promotion,
     });
   }
-  const draftCompletionSignals = reviewCompletionSignals({
-    expectedHeadSha: expectedSha,
-    requestAt,
+
+  const draftCompletion = reviewCompletionSignals({
+    expectedHeadSha: expectedHead,
+    atOrAfter: requestAt,
+    before: readyAt,
     reviews,
-    issueComments,
-    requestReactions,
-    acceptCommitBoundSignals: !hasAmbiguousReviewInvocation({
-      pullRequest,
-      pullRequestBody,
-      issueComments,
-      reviewComments,
-      expectedHeadSha: expectedSha,
-      expectedBaseSha: expectedBase,
-    }),
-  });
-  const draftCompletion = draftCompletionSignals.find((signal) => (
-    signal.at >= draftStartedAt && signal.at < readyAt
-  )) || null;
+    reactionGroups: [
+      { scope: "request_comment", reactions: requestReactions },
+      { scope: "pull_request", reactions: pullRequestReactions },
+    ],
+  })[0] || null;
   const draftEnvironmentFailure = latestCodexEnvironmentFailure(
     issueComments,
     requestAt,
@@ -603,176 +368,71 @@ export function evaluateReviewSettlement({
   );
   if (
     draftEnvironmentFailure
-    && (!draftCompletion || draftEnvironmentFailure.at > draftCompletion.at)
+    && (!draftCompletion || draftEnvironmentFailure.at >= draftCompletion.at)
   ) {
-    return Object.freeze({
-      status: "blocked",
-      reason: "codex_review_environment_unavailable",
-      expectedHeadSha: expectedSha,
-      currentHeadSha,
+    return outcome(identity, "blocked", "draft_review_environment_unavailable", {
       request: requestSummary,
-      promotion: promotionSummary,
+      promotion,
       draftCompletion: completionSummary(draftCompletion),
-      finalRequest: null,
-      completion: null,
-      settlesAt: null,
-      blockingThreads: [],
     });
   }
   if (!draftCompletion) {
-    return Object.freeze({
-      status: "blocked",
-      reason: "draft_review_not_completed_before_promotion",
-      expectedHeadSha: expectedSha,
-      currentHeadSha,
+    return outcome(identity, "blocked", "draft_review_not_completed_before_promotion", {
       request: requestSummary,
-      promotion: promotionSummary,
-      draftCompletion: null,
-      finalRequest: null,
-      completion: null,
-      settlesAt: null,
-      blockingThreads: [],
-    });
-  }
-  const finalRequest = latestFinalReviewRequest(issueComments, expectedSha, expectedBase);
-  if (!finalRequest) {
-    return Object.freeze({
-      status: "waiting",
-      reason: "final_exact_sha_review_not_requested",
-      expectedHeadSha: expectedSha,
-      currentHeadSha,
-      request: requestSummary,
-      promotion: promotionSummary,
-      draftCompletion: completionSummary(draftCompletion),
-      finalRequest: null,
-      completion: null,
-      settlesAt: null,
-      blockingThreads: [],
-    });
-  }
-  const finalRequestAt = timestamp(commentCreatedAt(finalRequest));
-  const finalRequestSummary = Object.freeze({
-    id: finalRequest?.id || finalRequest?.databaseId || null,
-    at: new Date(finalRequestAt).toISOString(),
-  });
-  if (finalRequestAt <= readyAt) {
-    return Object.freeze({
-      status: "waiting",
-      reason: "final_exact_sha_request_not_after_ready",
-      expectedHeadSha: expectedSha,
-      currentHeadSha,
-      request: requestSummary,
-      promotion: promotionSummary,
-      draftCompletion: completionSummary(draftCompletion),
-      finalRequest: finalRequestSummary,
-      completion: null,
-      settlesAt: null,
-      blockingThreads: [],
-    });
-  }
-  const finalCompletionSignals = reviewCompletionSignals({
-    expectedHeadSha: expectedSha,
-    requestAt: finalRequestAt,
-    reviews,
-    issueComments,
-    requestReactions: finalRequestReactions,
-    acceptCommitBoundSignals: !hasAmbiguousReviewInvocation({
-      pullRequest,
-      pullRequestBody,
-      issueComments,
-      reviewComments,
-      expectedHeadSha: expectedSha,
-      expectedBaseSha: expectedBase,
-    }),
-  });
-  const completion = finalCompletionSignals[0] || null;
-  const finalEnvironmentFailure = latestCodexEnvironmentFailure(
-    issueComments,
-    finalRequestAt,
-  );
-  if (
-    finalEnvironmentFailure
-    && (!completion || finalEnvironmentFailure.at > completion.at)
-  ) {
-    return Object.freeze({
-      status: "blocked",
-      reason: "codex_final_review_environment_unavailable",
-      expectedHeadSha: expectedSha,
-      currentHeadSha,
-      request: requestSummary,
-      promotion: promotionSummary,
-      draftCompletion: completionSummary(draftCompletion),
-      finalRequest: finalRequestSummary,
-      completion: completionSummary(completion),
-      settlesAt: null,
-      blockingThreads: [],
-    });
-  }
-  if (!completion) {
-    return Object.freeze({
-      status: "waiting",
-      reason: "codex_final_review_in_progress",
-      expectedHeadSha: expectedSha,
-      currentHeadSha,
-      request: requestSummary,
-      promotion: promotionSummary,
-      draftCompletion: completionSummary(draftCompletion),
-      finalRequest: finalRequestSummary,
-      completion: null,
-      settlesAt: null,
-      blockingThreads: [],
+      promotion,
     });
   }
 
-  const settlesAtMs = completion.at + settleSeconds * 1000;
-  const finalCompletionSummary = completionSummary(completion);
-  const draftCompletionSummary = completionSummary(draftCompletion);
-  if (nowMs < settlesAtMs) {
-    return Object.freeze({
-      status: "waiting",
-      reason: "settle_window",
-      expectedHeadSha: expectedSha,
-      currentHeadSha,
+  const finalCompletion = reviewCompletionSignals({
+    expectedHeadSha: expectedHead,
+    atOrAfter: readyAt,
+    reviews,
+    reactionGroups: [{ scope: "pull_request", reactions: pullRequestReactions }],
+  })[0] || null;
+  const finalEnvironmentFailure = latestCodexEnvironmentFailure(
+    issueComments,
+    readyAt,
+    Number.POSITIVE_INFINITY,
+  );
+  if (
+    finalEnvironmentFailure
+    && (!finalCompletion || finalEnvironmentFailure.at >= finalCompletion.at)
+  ) {
+    return outcome(identity, "blocked", "final_review_environment_unavailable", {
       request: requestSummary,
-      promotion: promotionSummary,
-      draftCompletion: draftCompletionSummary,
-      finalRequest: finalRequestSummary,
-      completion: finalCompletionSummary,
-      settlesAt: new Date(settlesAtMs).toISOString(),
-      blockingThreads: [],
+      promotion,
+      draftCompletion: completionSummary(draftCompletion),
+      completion: completionSummary(finalCompletion),
     });
+  }
+  if (!finalCompletion) {
+    return outcome(identity, "waiting", "final_review_in_progress", {
+      request: requestSummary,
+      promotion,
+      draftCompletion: completionSummary(draftCompletion),
+    });
+  }
+
+  const settlesAtMs = finalCompletion.at + settleSeconds * 1000;
+  const fields = {
+    request: requestSummary,
+    promotion,
+    draftCompletion: completionSummary(draftCompletion),
+    completion: completionSummary(finalCompletion),
+    settlesAt: new Date(settlesAtMs).toISOString(),
+  };
+  if (nowMs < settlesAtMs) {
+    return outcome(identity, "waiting", "settle_window", fields);
   }
 
   const unresolved = blockingThreads(reviewThreads);
   if (unresolved.length > 0) {
-    return Object.freeze({
-      status: "blocked",
-      reason: "unresolved_blocking_threads",
-      expectedHeadSha: expectedSha,
-      currentHeadSha,
-      request: requestSummary,
-      promotion: promotionSummary,
-      draftCompletion: draftCompletionSummary,
-      finalRequest: finalRequestSummary,
-      completion: finalCompletionSummary,
-      settlesAt: new Date(settlesAtMs).toISOString(),
+    return outcome(identity, "blocked", "unresolved_blocking_threads", {
+      ...fields,
       blockingThreads: unresolved,
     });
   }
-
-  return Object.freeze({
-    status: "settled",
-    reason: "exact_sha_review_settled",
-    expectedHeadSha: expectedSha,
-    currentHeadSha,
-    request: requestSummary,
-    promotion: promotionSummary,
-    draftCompletion: draftCompletionSummary,
-    finalRequest: finalRequestSummary,
-    completion: finalCompletionSummary,
-    settlesAt: new Date(settlesAtMs).toISOString(),
-    blockingThreads: [],
-  });
+  return outcome(identity, "settled", "exact_sha_review_settled", fields);
 }
 
 function parseOptions(argv) {
@@ -858,11 +518,6 @@ async function collectReviewThreads({ graphqlUrl, owner, name, pullRequest, toke
     query($owner: String!, $name: String!, $number: Int!, $after: String) {
       repository(owner: $owner, name: $name) {
         pullRequest(number: $number) {
-          body
-          createdAt
-          lastEditedAt
-          authorAssociation
-          author { login }
           reviewThreads(first: 100, after: $after) {
             nodes {
               isResolved
@@ -874,7 +529,6 @@ async function collectReviewThreads({ graphqlUrl, owner, name, pullRequest, toke
                   body
                   createdAt
                   author { login }
-                  pullRequestReview { commit { oid } }
                 }
               }
             }
@@ -885,7 +539,6 @@ async function collectReviewThreads({ graphqlUrl, owner, name, pullRequest, toke
     }
   `;
   const threads = [];
-  let pullRequestBody = null;
   let after = null;
   for (;;) {
     const response = await githubJson(graphqlUrl, token, {
@@ -898,23 +551,10 @@ async function collectReviewThreads({ graphqlUrl, owner, name, pullRequest, toke
     if (response.errors?.length) {
       throw new Error(`GitHub GraphQL: ${response.errors.map((error) => error.message).join("; ")}`);
     }
-    const pullRequestNode = response?.data?.repository?.pullRequest;
-    if (!pullRequestBody && pullRequestNode) {
-      pullRequestBody = {
-        body: pullRequestNode.body,
-        author: pullRequestNode.author,
-        authorAssociation: pullRequestNode.authorAssociation,
-        createdAt: pullRequestNode.createdAt,
-        updatedAt: pullRequestNode.lastEditedAt || pullRequestNode.createdAt,
-      };
-    }
-    const connection = pullRequestNode?.reviewThreads;
+    const connection = response?.data?.repository?.pullRequest?.reviewThreads;
     if (!connection) throw new Error("Pull Request review threads were unavailable.");
     threads.push(...(connection.nodes || []));
-    if (!connection.pageInfo?.hasNextPage) {
-      if (!pullRequestBody) throw new Error("Pull Request body evidence was unavailable.");
-      return { reviewThreads: threads, pullRequestBody };
-    }
+    if (!connection.pageInfo?.hasNextPage) return threads;
     after = connection.pageInfo.endCursor;
     if (!after) throw new Error("GitHub review-thread pagination omitted endCursor.");
   }
@@ -932,14 +572,14 @@ async function collectSnapshot(options, token) {
     issueComments,
     timelineEvents,
     reviews,
-    reviewComments,
-    reviewThreadEvidence,
+    pullRequestReactions,
+    reviewThreads,
   ] = await Promise.all([
     githubJson(`${apiBase}${basePath}/pulls/${options.pullRequest}`, token),
     restPages(apiBase, `${basePath}/issues/${options.pullRequest}/comments`, token),
     restPages(apiBase, `${basePath}/issues/${options.pullRequest}/events`, token),
     restPages(apiBase, `${basePath}/pulls/${options.pullRequest}/reviews`, token),
-    restPages(apiBase, `${basePath}/pulls/${options.pullRequest}/comments`, token),
+    restPages(apiBase, `${basePath}/issues/${options.pullRequest}/reactions`, token),
     collectReviewThreads({
       graphqlUrl,
       owner,
@@ -953,31 +593,18 @@ async function collectSnapshot(options, token) {
     options.expectedHeadSha,
     options.expectedBaseSha,
   );
-  const finalRequest = latestFinalReviewRequest(
-    issueComments,
-    options.expectedHeadSha,
-    options.expectedBaseSha,
-  );
   const requestId = request?.id || request?.databaseId;
-  const finalRequestId = finalRequest?.id || finalRequest?.databaseId;
-  const [requestReactions, finalRequestReactions] = await Promise.all([
-    requestId
-      ? restPages(apiBase, `${basePath}/issues/comments/${requestId}/reactions`, token)
-      : [],
-    finalRequestId
-      ? restPages(apiBase, `${basePath}/issues/comments/${finalRequestId}/reactions`, token)
-      : [],
-  ]);
+  const requestReactions = requestId
+    ? await restPages(apiBase, `${basePath}/issues/comments/${requestId}/reactions`, token)
+    : [];
   return {
     pullRequest,
-    pullRequestBody: reviewThreadEvidence.pullRequestBody,
     issueComments,
-    reviewComments,
     timelineEvents,
     reviews,
-    reviewThreads: reviewThreadEvidence.reviewThreads,
+    reviewThreads,
     requestReactions,
-    finalRequestReactions,
+    pullRequestReactions,
   };
 }
 
@@ -998,7 +625,6 @@ function conciseResult(result) {
     request: result.request,
     promotion: result.promotion,
     draftCompletion: result.draftCompletion,
-    finalRequest: result.finalRequest,
     completion: result.completion,
     settlesAt: result.settlesAt,
     blockingThreads: result.blockingThreads,
@@ -1017,8 +643,7 @@ async function appendSummary(result) {
     `- Draft exact-head/base request: ${result.request ? `comment ${result.request.id} at ${result.request.at}` : "missing"}`,
     `- Ready promotion: ${result.promotion ? `event ${result.promotion.id} at ${result.promotion.at}` : "missing"}`,
     `- Draft completion: ${result.draftCompletion ? `${result.draftCompletion.kind} at ${result.draftCompletion.at}` : "not observed"}`,
-    `- Final exact-head/base request: ${result.finalRequest ? `comment ${result.finalRequest.id} at ${result.finalRequest.at}` : "missing"}`,
-    `- Final completion: ${result.completion ? `${result.completion.kind} at ${result.completion.at}` : "not observed"}`,
+    `- Post-Ready completion: ${result.completion ? `${result.completion.kind} at ${result.completion.at}` : "not observed"}`,
     `- Settle boundary: ${result.settlesAt || "not reached"}`,
     `- Blocking active threads: ${result.blockingThreads.length}`,
     "",
@@ -1044,16 +669,11 @@ async function run(options) {
       await delay(Math.min(options.pollSeconds * 1000, Math.max(1, deadline - Date.now())));
       continue;
     }
-    const evaluated = evaluateReviewSettlement({
+    const result = evaluateReviewSettlement({
       expectedHeadSha: options.expectedHeadSha,
       expectedBaseSha: options.expectedBaseSha,
       ...snapshot,
       settleSeconds: options.settleSeconds,
-    });
-    const result = Object.freeze({
-      expectedBaseSha: options.expectedBaseSha,
-      currentBaseSha: pullRequestBaseSha(snapshot.pullRequest) || null,
-      ...evaluated,
     });
     if (result.reason !== lastReason || result.status !== "waiting") {
       console.log(JSON.stringify(conciseResult(result), null, 2));
@@ -1068,12 +688,15 @@ async function run(options) {
       throw new Error(`Codex review gate blocked: ${result.reason}.`);
     }
     if (Date.now() >= deadline) {
-      const timedOut = Object.freeze({ ...result, status: "blocked", reason: "review_wait_timed_out" });
+      const timedOut = Object.freeze({
+        ...result,
+        status: "blocked",
+        reason: "review_wait_timed_out",
+      });
       await appendSummary(timedOut);
       throw new Error("Codex review did not settle before the review wait timeout.");
     }
-    const waitMs = Math.min(options.pollSeconds * 1000, Math.max(1, deadline - Date.now()));
-    await delay(waitMs);
+    await delay(Math.min(options.pollSeconds * 1000, Math.max(1, deadline - Date.now())));
   }
 }
 

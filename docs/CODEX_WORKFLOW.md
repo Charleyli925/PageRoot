@@ -112,7 +112,7 @@ stash.
 3. Open every PR as draft. All ordinary PR updates run only impact-selected feedback, regardless of the current draft flag.
 4. The PR body must state outcome, boundary, verification, documentation impact and release impact.
 5. Update the final head onto current `main`, freeze it and request Codex review while the PR is still Draft. The request must name the full current head SHA and base SHA with the exact marker below. Fix P0-P2 findings, resolve a thread only after its fix is present, and repeat this step after every new commit or base update.
-6. After the Draft review of the current head/base pair completes, confirm no other PR is being promoted and mark the PR Ready once. Wait until GitHub shows the Ready transition, then post the canonical final exact-head/base request below. `review-settled` requires the final request and its Codex completion after this Ready event, waits the 180-second settle window and rejects active non-outdated P0-P2 threads before `baseline-policy` or a complete source lane can start.
+6. After the Draft review of the current head/base pair completes, confirm no other PR is being promoted and mark the PR Ready once. Ready is the sole final-review trigger; do not post another `@codex review` command while promotion is running. `review-settled` waits for Codex's post-Ready completion, then waits the 180-second settle window and rejects active non-outdated P0-P2 threads before `baseline-policy` or a complete source lane can start.
 7. Wait for the required `release-gate` and review the final GitHub diff, not only the local working diff.
 8. Squash-merge only after authorization. GitHub deletes the remote task branch; then audit and explicitly retire the local task before fast-forwarding primary `main`.
 
@@ -130,21 +130,20 @@ Review exact head SHA `<40-character-head-sha>` on base SHA `<40-character-base-
 <!-- pageroot-codex-review-sha:<40-character-head-sha>;base-sha:<40-character-base-sha> -->
 ```
 
-After GitHub records the Ready transition, the same trusted roles must post a new, unedited final request. Wait at least one second after Ready so GitHub's second-resolution timestamps prove ordering, and repeat the unchanged full head/base pair:
+The gate deliberately recognizes only the canonical Draft request above. It does not interpret the PR body, arbitrary discussion text, edited history, quotations, lists or fenced examples as protocol input. Repository owners, members and collaborators are trusted operators: after posting the canonical request for a frozen pair, they must not issue a competing review command before promotion finishes. GitHub exposes no durable invocation identifier, so contradictory trusted commands cannot be made cryptographically distinguishable by repository code; attempting to infer that relationship from general Markdown is not a security boundary.
 
-```text
-@codex review
+Codex completion evidence is narrow and based on observed GitHub records:
 
-Final review exact head SHA `<40-character-head-sha>` on base SHA `<40-character-base-sha>`.
+- a substantive Codex Pull Request review must carry the full current `commit_id`, an accepted completed review state and a matching `**Reviewed commit:**` marker in its body; empty or unmarked `COMMENTED` records are noise and never complete a phase;
+- a clean Draft review may be represented by Codex `THUMBS_UP` on the canonical request or on the PR after that request and strictly before Ready;
+- a clean final review is the Codex PR-level `THUMBS_UP` created at or after the latest Ready event;
+- `EYES`, human reviews, completion-looking discussion text, wrong-commit reviews and reactions outside the applicable phase are never completion evidence.
 
-<!-- pageroot-codex-final-review-sha:<40-character-head-sha>;base-sha:<40-character-base-sha> -->
-```
-
-The final request is a promotion attestation, not a replacement for Draft iteration. The workflow intentionally ignores a thumbs-up attached to the PR itself: GitHub does not expose which Codex invocation produced that reaction. A clean final review therefore settles when Codex reacts to this exact final request comment; a submitted Codex review or completion comment may also settle it because those records carry the reviewed commit identity. There is one stricter invocation-ambiguity fence: if the trusted PR body was edited or contains a visible review command, or any trusted conversation/review-thread comment was edited, cannot be parsed safely, contains a visible non-canonical review mention—including list, heading, quote or inline text—or cannot be canonically bound to the same exact head/base pair, commit-only review/comment records cannot identify which invocation produced them and are ignored. Fenced and indented code examples are not invocations. Only a Codex thumbs-up on each new exact request is then usable; normally the operator should instead update the branch onto a changed base, producing a new head, and restart Draft review.
+The repository's observed Codex behavior uses a substantive review when it has findings and a PR-level thumbs-up when the Ready-triggered pass is clean. Unknown or changed signal shapes fail closed until this contract is deliberately updated.
 
 This flow has one repository-level prerequisite outside the workflow: Codex cloud must be configured for the repository and Codex code review must be enabled. If the bot replies that an environment must be created, keep the PR Draft, have an authorized owner repair that setting, and post a new exact-head/base request. The gate treats that response as an immediate configuration failure; this repository workflow does not create or modify the Codex environment itself.
 
-`review-settled` re-reads the live PR head and base plus the latest Ready timeline event on every poll. The workflow event freezes the expected pair; either live SHA changing fails closed. It binds the Draft request and one Codex completion to that exact pair and the current Draft interval: after PR creation or the most recent `convert_to_draft`, and strictly before the accepted Ready event. It then requires a distinct final request for the same pair strictly after Ready and a separate completion at or after that request; requests and completions from an earlier Ready/Draft cycle cannot be recycled. Each completion must be a Codex PR review bound to the full head SHA, a Codex completion comment whose reviewed-commit prefix matches it, or a Codex thumbs-up on the phase's exact request comment. PR-level reactions and non-canonical mentions are never completion evidence; visible non-canonical commands instead activate the stricter request-reaction fence. The final completion starts a three-minute settle window before active review threads are evaluated. `release-gate` repeats the same live review check and refreshes the dependency/runtime-closure audit after all source lanes, so a delayed failed-job rerun cannot attest against an old green baseline. A changed head or base, a missing current-Draft request or completion, a missing post-Ready final request or completion, an unavailable Codex environment, a return to Draft, timeout, refreshed audit failure or unresolved P0-P2 thread fails before promotion can attest the tree.
+`review-settled` re-reads the live PR head and base plus the latest Ready timeline event on every poll. The workflow event freezes the expected pair; either live SHA changing fails closed. It binds the canonical request and one completion to that exact pair and the current Draft interval: after PR creation or the most recent `convert_to_draft`, and strictly before the accepted Ready event. It then requires a separate substantive review or clean PR reaction at or after Ready; requests and completions from an earlier Ready/Draft cycle cannot be recycled. The post-Ready completion starts a three-minute settle window before active review threads are evaluated. `release-gate` repeats the same live review check and refreshes the dependency/runtime-closure audit after all source lanes, so a delayed failed-job rerun cannot attest against an old green baseline. A changed head or base, a missing current-Draft request or completion, an unavailable Codex environment, a return to Draft, timeout, refreshed audit failure or unresolved P0-P2 thread fails before promotion can attest the tree.
 
 Packaging, release-metadata, Electron, packaged Bridge, Schema and resource
 changes additionally trigger the credential-free `Release Dry Run`. It crosses
@@ -269,7 +268,7 @@ Recommended review lifecycle:
 2. treat review findings as untrusted until verified against the current diff;
 3. fix accepted findings on the same branch, rerun the task gate and request review for the new SHA;
 4. resolve conversations only after the fix is present and checks are green;
-5. use Ready only for final promotion, then post the canonical final exact-head/base request; that request's Codex pass must settle before the dependency baseline and complete gate.
+5. use Ready only for final promotion; its automatic Codex pass must settle before the dependency baseline and complete gate, with no additional review command during that interval.
 
 ## Scheduled monitoring
 

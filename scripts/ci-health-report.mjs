@@ -11,7 +11,8 @@ import { fileURLToPath } from "node:url";
 const scriptPath = fileURLToPath(import.meta.url);
 const productRoot = path.resolve(path.dirname(scriptPath), "..");
 const DEFAULT_DAYS = 30;
-const MAX_RUNS_PER_WORKFLOW = 200;
+const MAX_WORKFLOW_RUN_PAGES = 20;
+const MAX_JOB_PAGES = 20;
 const PUBLICATION_STEP_NAME = "Publish immutable GitHub Release";
 const TARGETS = Object.freeze({
   attemptsPerTreeAverage: Object.freeze({ operator: "at_most", value: 1.5 }),
@@ -429,24 +430,41 @@ async function githubJson(apiPath, token, { allowNotFound = false } = {}) {
   return await response.json();
 }
 
-async function workflowRuns({ repositoryPath, workflow, token, since }) {
+export async function workflowRuns({ repositoryPath, workflow, token, since }) {
   const results = [];
   const sinceMs = Date.parse(since);
-  const maxPages = Math.ceil(MAX_RUNS_PER_WORKFLOW / 100);
-  for (let page = 1; page <= maxPages; page += 1) {
+  const createdFilter = encodeURIComponent(`>=${since}`);
+  for (let page = 1; page <= MAX_WORKFLOW_RUN_PAGES; page += 1) {
     const response = await githubJson(
       `/repos/${repositoryPath}/actions/workflows/${encodeURIComponent(workflow)}/runs`
-      + `?per_page=100&page=${page}`,
+      + `?created=${createdFilter}&per_page=100&page=${page}`,
       token,
       { allowNotFound: true },
     );
     if (!response) return [];
     const runs = response.workflow_runs || [];
     results.push(...runs.filter((run) => Date.parse(run.created_at || "") >= sinceMs));
-    const oldestMs = Math.min(...runs.map((run) => Date.parse(run.created_at || "")));
-    if (runs.length < 100 || (Number.isFinite(oldestMs) && oldestMs < sinceMs)) break;
+    if (runs.length < 100) return results;
   }
-  return results.slice(0, MAX_RUNS_PER_WORKFLOW);
+  throw new Error(
+    `${workflow} exceeded ${MAX_WORKFLOW_RUN_PAGES * 100} runs in the requested window.`,
+  );
+}
+
+async function jobsForWorkflowRun(repositoryPath, run, token) {
+  const jobs = [];
+  for (let page = 1; page <= MAX_JOB_PAGES; page += 1) {
+    const response = await githubJson(
+      `/repos/${repositoryPath}/actions/runs/${run.id}/jobs?filter=all&per_page=100&page=${page}`,
+      token,
+    );
+    const pageJobs = response.jobs || [];
+    jobs.push(...pageJobs);
+    if (pageJobs.length < 100) return jobs;
+  }
+  throw new Error(
+    `Workflow run ${run.id} exceeded ${MAX_JOB_PAGES * 100} jobs.`,
+  );
 }
 
 async function collectJobs(repositoryPath, runs, token) {
@@ -455,11 +473,8 @@ async function collectJobs(repositoryPath, runs, token) {
   for (let index = 0; index < runs.length; index += batchSize) {
     const batch = runs.slice(index, index + batchSize);
     const entries = await Promise.all(batch.map(async (run) => {
-      const response = await githubJson(
-        `/repos/${repositoryPath}/actions/runs/${run.id}/jobs?filter=all&per_page=100`,
-        token,
-      );
-      return [String(run.id), response.jobs || []];
+      const jobs = await jobsForWorkflowRun(repositoryPath, run, token);
+      return [String(run.id), jobs];
     }));
     Object.assign(jobsByRunId, Object.fromEntries(entries));
   }

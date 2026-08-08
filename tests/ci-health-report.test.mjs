@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import {
   renderCiHealthMarkdown,
   summarizeCiHealth,
+  workflowRuns,
 } from "../scripts/ci-health-report.mjs";
 
 const productRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -458,6 +459,43 @@ test("CI health reports no publication data when Release fails before publishing
 
   assert.equal(report.publication.rebuildsAfterCandidateApproval, null);
   assert.equal(report.targetAssessment.metrics.publicationRebuilds.status, "no_data");
+});
+
+test("CI health paginates the complete requested workflow window", async () => {
+  const originalFetch = globalThis.fetch;
+  const requested = [];
+  globalThis.fetch = async (url) => {
+    requested.push(String(url));
+    const page = Number(new URL(url).searchParams.get("page"));
+    const count = page < 3 ? 100 : 1;
+    return {
+      ok: true,
+      status: 200,
+      async json() {
+        return {
+          workflow_runs: Array.from({ length: count }, (_, index) => ({
+            id: page * 1000 + index,
+            created_at: "2026-08-08T00:00:00.000Z",
+          })),
+        };
+      },
+    };
+  };
+  try {
+    const runs = await workflowRuns({
+      repositoryPath: "owner/repository",
+      workflow: "ci.yml",
+      token: "test-token",
+      since: "2026-08-01T00:00:00.000Z",
+    });
+    assert.equal(runs.length, 201);
+    assert.equal(requested.length, 3);
+    assert.ok(requested.every((url) => (
+      new URL(url).searchParams.get("created") === ">=2026-08-01T00:00:00.000Z"
+    )));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("CI health workflow stays read-only and retains a machine-readable report", async () => {

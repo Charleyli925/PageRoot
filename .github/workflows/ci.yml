@@ -32,7 +32,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22.13.0
-      - name: Wait for Draft and post-Ready exact-SHA Codex reviews to settle
+      - name: Wait for Draft evidence and the Ready-triggered Codex review to settle
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: >-
