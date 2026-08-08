@@ -96,9 +96,20 @@ test("CI health distinguishes full-gate latency, repeated green work and preflig
           completedAt: "2026-07-24T10:07:10.000Z",
         }),
       ],
+      900: [job({
+        name: "publish-verified-candidate",
+        attempt: 1,
+        conclusion: "success",
+        startedAt: "2026-07-24T11:00:00.000Z",
+        completedAt: "2026-07-24T11:02:00.000Z",
+        steps: [{
+          name: "Verify downloaded provenance and every asset byte",
+          conclusion: "success",
+        }],
+      })],
     },
     candidateRuns: [{ conclusion: "success" }, { conclusion: "failure" }],
-    releaseRuns: [{ conclusion: "success" }],
+    releaseRuns: [{ id: 900, status: "completed", conclusion: "success" }],
     dependencyHealth: "success",
   });
 
@@ -287,7 +298,35 @@ test("CI health keeps empty periods explicit instead of reporting false zero rat
   assert.equal(report.runnerUse.repeatedGreenShare, null);
   assert.equal(report.environmentPreflight.failureRate, null);
   assert.equal(report.workflowCancellation.pullRequestCancellationRate, null);
+  assert.equal(report.publication.rebuildsAfterCandidateApproval, null);
+  assert.equal(report.targetAssessment.metrics.publicationRebuilds.status, "no_data");
+  assert.match(renderCiHealthMarkdown(report), /\| Publication rebuilds \| n\/a \| 0 \| ⚪ NO DATA \|/u);
   assert.equal(report.targetAssessment.overall, "insufficient_data");
+});
+
+test("CI health derives publication rebuild attempts from completed Release job steps", () => {
+  const report = summarizeCiHealth({
+    periodDays: 30,
+    generatedAt: "2026-08-08T12:00:00.000Z",
+    ciRuns: [],
+    feedbackRuns: [],
+    jobsByRunId: {
+      401: [job({
+        name: "publish-verified-candidate",
+        attempt: 1,
+        conclusion: "failure",
+        startedAt: "2026-08-08T10:00:00.000Z",
+        completedAt: "2026-08-08T10:02:00.000Z",
+        steps: [{ name: "Build release assets", conclusion: "failure" }],
+      })],
+    },
+    candidateRuns: [],
+    releaseRuns: [{ id: 401, status: "completed", conclusion: "failure" }],
+    dependencyHealth: "success",
+  });
+
+  assert.equal(report.publication.rebuildsAfterCandidateApproval, 1);
+  assert.equal(report.targetAssessment.metrics.publicationRebuilds.status, "missed");
 });
 
 test("CI health workflow stays read-only and retains a machine-readable report", async () => {

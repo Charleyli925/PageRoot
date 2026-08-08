@@ -146,6 +146,21 @@ function preflightSteps(jobs) {
   )));
 }
 
+function publicationRebuildCount(releaseRuns, jobsByRunId) {
+  const completedRuns = (releaseRuns || []).filter((run) => (
+    run?.status === "completed" || Boolean(run?.conclusion)
+  ));
+  if (completedRuns.length === 0) return null;
+  const jobs = completedRuns.map((run) => jobsForRun(jobsByRunId, run.id));
+  if (jobs.some((runJobs) => runJobs.length === 0)) return null;
+  return jobs.flat().flatMap((job) => job.steps || []).filter((step) => (
+    step?.conclusion && step.conclusion !== "skipped"
+    && /^(?:Assemble|Build|Package|Rebuild)\b|\b(?:electron-builder|npm run build)\b/iu.test(
+      step?.name || "",
+    )
+  )).length;
+}
+
 function cancellationSummary(runs) {
   const total = (runs || []).length;
   const cancelled = (runs || []).filter((run) => run?.conclusion === "cancelled").length;
@@ -249,6 +264,7 @@ export function summarizeCiHealth({
   const roundedRepeatedShare = round(repeatedShare);
   const roundedCandidateChurnShare = round(candidateChurnShare);
   const roundedPreflightFailureRate = round(preflightFailureRate);
+  const publicationRebuilds = publicationRebuildCount(releaseRuns, jobsByRunId);
   const targetMetrics = Object.freeze({
     attemptsPerTreeAverage: numericTarget(
       averageAttempts,
@@ -272,7 +288,10 @@ export function summarizeCiHealth({
       preflightFailureRate,
       TARGETS.environmentPreflightFailureRate,
     ),
-    publicationRebuilds: numericTarget(0, TARGETS.publicationRebuilds),
+    publicationRebuilds: numericTarget(
+      publicationRebuilds,
+      TARGETS.publicationRebuilds,
+    ),
     dependencyHealth: dependencyTarget(dependencyHealth),
   });
   return Object.freeze({
@@ -323,7 +342,7 @@ export function summarizeCiHealth({
     publication: {
       runs: (releaseRuns || []).length,
       conclusions: conclusionCounts(releaseRuns),
-      rebuildsAfterCandidateApproval: 0,
+      rebuildsAfterCandidateApproval: publicationRebuilds,
       targetRebuilds: 0,
     },
     workflowCancellation: {
@@ -452,7 +471,7 @@ export function renderCiHealthMarkdown(report) {
     `| Repeated-green runner share | ${percent(report.runnerUse.repeatedGreenShare)} | < 20% | ${metricStatus("repeatedGreenShare")} |`,
     `| Cross-SHA candidate churn share | ${percent(report.runnerUse.candidateChurnShare)} | < 20% | ${metricStatus("candidateChurnShare")} |`,
     `| Environment preflight failure rate | ${percent(report.environmentPreflight.failureRate)} | < 2% | ${metricStatus("environmentPreflightFailureRate")} |`,
-    `| Publication rebuilds | ${report.publication.rebuildsAfterCandidateApproval} | 0 | ${metricStatus("publicationRebuilds")} |`,
+    `| Publication rebuilds | ${report.publication.rebuildsAfterCandidateApproval ?? "n/a"} | 0 | ${metricStatus("publicationRebuilds")} |`,
     "",
     "### Recorded workload",
     "",
@@ -491,7 +510,11 @@ async function main() {
   ]);
   const pullRequestRuns = [...ciRuns, ...feedbackRuns]
     .filter((run) => run.event === "pull_request");
-  const jobsByRunId = await collectJobs(repositoryPath, pullRequestRuns, token);
+  const jobsByRunId = await collectJobs(
+    repositoryPath,
+    [...pullRequestRuns, ...releaseRuns],
+    token,
+  );
   const report = summarizeCiHealth({
     periodDays: options.days,
     generatedAt: generatedAt.toISOString(),
