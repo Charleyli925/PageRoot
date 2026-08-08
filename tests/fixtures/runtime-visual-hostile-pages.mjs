@@ -30,8 +30,10 @@ export const RUNTIME_VISUAL_HOSTILE_PAGES = Object.freeze([
     html: `<!doctype html><main><div id="chart"></div><script>
       const label=document.createElement("span");label.style.color="transparent";label.textContent="hidden";
       const alphaLabel=document.createElement("span");alphaLabel.style.cssText="color:rgba(255, 0, 0, 0);text-shadow:0 0 2px rgba(0, 255, 0, 0)";alphaLabel.textContent="also hidden";
+      const opaqueBlack=document.createElement("span");opaqueBlack.style.color="rgb(0, 0, 0)";opaqueBlack.textContent="visible black";
+      const opaqueRed=document.createElement("span");opaqueRed.style.color="rgb(255, 0, 0)";opaqueRed.textContent="visible red";
       RegExp.prototype[Symbol.match]=()=>null;
-      document.getElementById("chart").append(label,alphaLabel);</script></main>`,
+      document.getElementById("chart").append(label,alphaLabel,opaqueBlack,opaqueRed);</script></main>`,
     contract: "Text without visible color, shadow, decoration, or stroke paint is not visual evidence.",
     closureReason: "Keyword and zero-alpha paint are both excluded before content, paint, and geometry hashing.",
   }),

@@ -4477,7 +4477,10 @@ function reviewBootstrap(
     const normalized = runtimeVisualNormalizedPaintValue(value);
     if (!normalized || normalized === "transparent") return true;
     const alphaMatch = runtimeVisualRegExpExec(
-      /^rgba?\([^)]*[,/]\s*([0-9.]+%?)\s*\)$/iu,
+      /^rgba\(\s*[^,]+,\s*[^,]+,\s*[^,]+,\s*([0-9.]+%?)\s*\)$/iu,
+      normalized,
+    ) || runtimeVisualRegExpExec(
+      /^rgba?\([^/]*\/\s*([0-9.]+%?)\s*\)$/iu,
       normalized,
     );
     if (alphaMatch) {

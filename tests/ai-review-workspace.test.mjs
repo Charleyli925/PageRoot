@@ -666,6 +666,8 @@ test("hostile review fixtures are enforced by the adapter and page contract", ()
   assert.match(nativeCanvas.html, /Math\.round=\(\)=>0/u);
   assert.match(transparentText.html, /color="transparent"/u);
   assert.match(transparentText.html, /rgba\(255, 0, 0, 0\)/u);
+  assert.match(transparentText.html, /rgb\(0, 0, 0\)/u);
+  assert.match(transparentText.html, /rgb\(255, 0, 0\)/u);
   assert.match(transparentText.html, /text-shadow/iu);
   assert.match(transparentText.html, /RegExp\.prototype\[Symbol\.match\]/u);
   assert.match(parserMutation.html, /textContent="mutated"/u);
