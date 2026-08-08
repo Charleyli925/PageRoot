@@ -1,0 +1,264 @@
+name: Release Dry Run
+run-name: "Credential-free release dry run for PR #${{ github.event.pull_request.number }}"
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - .github/workflows/developer-preview.yml
+      - .github/workflows/release-candidate.yml
+      - .github/workflows/release-dry-run.yml
+      - .github/workflows/release.yml
+      - package.json
+      - package-lock.json
+      - desktop/**
+      - public/brand-logo.png
+      - schemas/**
+      - shared/**
+      - scripts/attachment-storage.mjs
+      - scripts/build-package.mjs
+      - scripts/candidate-assessment.mjs
+      - scripts/ci-evidence.mjs
+      - scripts/create-release-assets.mjs
+      - scripts/developer-preview.mjs
+      - scripts/draft-aggregate.mjs
+      - scripts/draft-service.mjs
+      - scripts/finalize-attempt.mjs
+      - scripts/html-source-parser.mjs
+      - scripts/lifecycle-core.mjs
+      - scripts/package-delivery-report.mjs
+      - scripts/packaged-app-identity.mjs
+      - scripts/product-contract.mjs
+      - scripts/project-context-service.mjs
+      - scripts/record-user-supplement.mjs
+      - scripts/release-app-checkpoint.mjs
+      - scripts/release-app-stage.mjs
+      - scripts/release-candidate-provenance.mjs
+      - scripts/release-provenance.mjs
+      - scripts/scope-validator.mjs
+      - scripts/source-gate-provenance.mjs
+      - scripts/source-history-service.mjs
+      - scripts/target-identity.mjs
+      - scripts/user-supplement-core.mjs
+      - scripts/verify-packaged-artifact.mjs
+      - scripts/workspace-bridge.mjs
+      - tests/desktop-package.test.mjs
+      - tests/developer-preview-package.test.mjs
+      - tests/e2e/electron/packaged-runtime-smoke.spec.mjs
+      - tests/e2e/electron/packaged-startup-smoke.spec.mjs
+      - tests/e2e/electron/playwright.packaged-startup.config.mjs
+      - tests/e2e/electron/playwright.packaged.config.mjs
+      - tests/packaged-artifact-gate.test.mjs
+      - tests/release-app-stage.test.mjs
+      - tests/test-impact-map.json
+      - LICENSE
+      - NOTICE
+      - PRIVACY.md
+      - THIRD_PARTY_NOTICES.md
+      - PageRoot 用户声明与免责声明.txt
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: release-dry-run-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  assemble:
+    name: assemble-and-checkpoint-unsigned-app
+    runs-on: macos-14
+    timeout-minutes: 35
+    outputs:
+      checkpoint_artifact: ${{ steps.checkpoint.outputs.artifact_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        timeout-minutes: 5
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - name: Restore Electron and builder downloads
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        timeout-minutes: 10
+        with:
+          path: |
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+          key: ${{ runner.os }}-release-dry-run-${{ hashFiles('package-lock.json') }}
+      - run: npm ci
+        timeout-minutes: 10
+      - name: Build the first clean-job renderer oracle
+        timeout-minutes: 5
+        run: npm run desktop:renderer
+      - name: Generate synthetic telemetry and build metadata and assemble the unsigned App
+        timeout-minutes: 15
+        run: >-
+          node scripts/ci-evidence.mjs run
+          --suite release-dry-run-assemble
+          --stage artifact-preflight
+          --
+          node scripts/build-package.mjs
+          --arch arm64
+          --profile release-dry-run
+      - name: Verify app.asar, Bridge, schemas, resources and metadata
+        timeout-minutes: 5
+        env:
+          PAGEROOT_REQUIRE_TELEMETRY_CONFIG: "1"
+        run: >-
+          node scripts/ci-evidence.mjs run
+          --suite release-dry-run-verify
+          --stage artifact-preflight
+          --
+          node scripts/verify-packaged-artifact.mjs
+          --arch arm64
+          --profile release-dry-run
+      - name: Create the non-release dry-run checkpoint
+        id: checkpoint
+        timeout-minutes: 10
+        run: >-
+          node scripts/ci-evidence.mjs run
+          --suite release-dry-run-checkpoint
+          --stage artifact-checkpoint
+          --
+          node scripts/release-app-checkpoint.mjs create-dry-run
+          --arch arm64
+          --repository "$GITHUB_REPOSITORY"
+          --run-id "$GITHUB_RUN_ID"
+          --run-attempt "$GITHUB_RUN_ATTEMPT"
+          --output output/release-dry-run-checkpoint/bundle
+          --github-output "$GITHUB_OUTPUT"
+      - name: Upload the non-release dry-run checkpoint
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        timeout-minutes: 10
+        with:
+          name: ${{ steps.checkpoint.outputs.artifact_name }}
+          path: ${{ steps.checkpoint.outputs.checkpoint_directory }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+      - name: Upload assembly failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        timeout-minutes: 10
+        with:
+          name: PageRoot-release-dry-run-assembly-diagnostics-${{ github.run_attempt }}
+          path: |
+            output/test-runs
+            output/playwright
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Upload assembly CI evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        timeout-minutes: 10
+        with:
+          name: PageRoot-release-dry-run-assembly-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: output/ci-evidence
+          if-no-files-found: warn
+          retention-days: 30
+
+  restore:
+    name: restore-rebuild-oracles-and-launch
+    needs: assemble
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        timeout-minutes: 5
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - name: Restore Electron and builder downloads
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        timeout-minutes: 10
+        with:
+          path: |
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+          key: ${{ runner.os }}-release-dry-run-${{ hashFiles('package-lock.json') }}
+      - run: npm ci
+        timeout-minutes: 10
+      - name: Download the exact dry-run checkpoint
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        timeout-minutes: 10
+        with:
+          name: ${{ needs.assemble.outputs.checkpoint_artifact }}
+          path: output/release-dry-run-checkpoint/downloaded
+      - name: Verify and restore payload plus build and telemetry metadata
+        id: restore
+        timeout-minutes: 10
+        run: >-
+          node scripts/ci-evidence.mjs run
+          --suite release-dry-run-restore
+          --stage artifact-checkpoint
+          --
+          node scripts/release-app-checkpoint.mjs restore-dry-run
+          --arch arm64
+          --repository "$GITHUB_REPOSITORY"
+          --run-id "$GITHUB_RUN_ID"
+          --directory output/release-dry-run-checkpoint/downloaded
+          --output output/release-dry-run/restored
+          --github-output "$GITHUB_OUTPUT"
+      - name: Rebuild the renderer oracle in the second clean job
+        timeout-minutes: 5
+        run: >-
+          node scripts/ci-evidence.mjs run
+          --suite release-dry-run-renderer
+          --stage artifact-checkpoint
+          --
+          npm run desktop:renderer
+      - name: Revalidate the restored payload and metadata
+        timeout-minutes: 5
+        env:
+          PAGEROOT_REQUIRE_TELEMETRY_CONFIG: "1"
+        run: >-
+          node scripts/ci-evidence.mjs run
+          --suite release-dry-run-revalidate
+          --stage artifact-checkpoint
+          --
+          node scripts/verify-packaged-artifact.mjs
+          --arch arm64
+          --profile release-dry-run
+          --app-path "${{ steps.restore.outputs.app_path }}"
+      - name: Launch and verify product name, version and Bundle ID
+        timeout-minutes: 10
+        env:
+          PAGEROOT_PACKAGED_APP_PATH: ${{ steps.restore.outputs.app_path }}
+          PAGEROOT_TEST_ARCH: arm64
+        run: >-
+          node scripts/ci-evidence.mjs run
+          --suite release-dry-run-startup
+          --stage artifact-checkpoint
+          --
+          npm run test:packaged-startup:prepared
+      - name: Upload restore failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        timeout-minutes: 10
+        with:
+          name: PageRoot-release-dry-run-restore-diagnostics-${{ github.run_attempt }}
+          path: |
+            output/test-runs
+            output/playwright
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Upload restore CI evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        timeout-minutes: 10
+        with:
+          name: PageRoot-release-dry-run-restore-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: output/ci-evidence
+          if-no-files-found: warn
+          retention-days: 30

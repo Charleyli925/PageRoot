@@ -228,7 +228,7 @@
       "patterns": [
         "^scripts/source-gate-provenance\\.mjs$",
         "^tests/source-gate-provenance\\.test\\.mjs$",
-        "^\\.github/workflows/(?:ci|pr-feedback|developer-preview|release|release-candidate)\\.yml$"
+        "^\\.github/workflows/(?:ci|pr-feedback|developer-preview|release|release-candidate|release-dry-run)\\.yml$"
       ],
       "suites": [],
       "nodeTests": ["tests/source-gate-provenance.test.mjs"]
@@ -238,7 +238,7 @@
       "patterns": [
         "^scripts/ci-evidence\\.mjs$",
         "^tests/ci-evidence\\.test\\.mjs$",
-        "^\\.github/workflows/(?:ci|pr-feedback|developer-preview|release|release-candidate)\\.yml$"
+        "^\\.github/workflows/(?:ci|pr-feedback|developer-preview|release|release-candidate|release-dry-run)\\.yml$"
       ],
       "suites": [],
       "nodeTests": ["tests/ci-evidence.test.mjs"]
@@ -288,7 +288,7 @@
         "^scripts/(?:check-architecture|draft-aggregate|draft-service|project-context-service|source-history-service)\\.mjs$",
         "^tests/(?:architecture-boundaries|bridge-client|comment-session|document-session|draft-aggregate|draft-service|draft-session|drain-coordinator|external-file-open-session|project-application-session|project-open-queue|project-query-fence|project-rules-session|project-session|recovery-store|review-analysis-session|run-lifecycle|run-session|runtime-capabilities|source-history|source-history-session|version-session)\\.test\\.mjs$",
         "^(?:CONTRIBUTING|docs/(?:ARCHITECTURE|ARCHITECTURE_CONTRACT|STATE_OWNERSHIP|ENGINEERING_STANDARDS))\\.md$",
-        "^docs/decisions/(?:0003-session-ownership-and-mutation-outcomes|0004-v2-editable-islands|0007-independent-interactive-preview|0008-safe-presentation-actions-in-edit-mode|0009-persistent-source-patch-history|0011-workbench-session-decomposition|0012-id-first-project-context|0013-edit-runtime-visual-projection)\\.md$"
+        "^docs/decisions/(?:0003-session-ownership-and-mutation-outcomes|0004-v2-editable-islands|0007-independent-interactive-preview|0008-safe-presentation-actions-in-edit-mode|0009-persistent-source-patch-history|0011-workbench-session-decomposition|0012-id-first-project-context|0013-edit-runtime-visual-projection|0015-safe-host-fallback-and-direct-text-nodes)\\.md$"
       ],
       "suites": ["typecheck"],
       "nodeTests": [
@@ -546,7 +546,7 @@
     {
       "id": "packaging",
       "patterns": [
-        "^(?:\\.github/workflows/(?:developer-preview|release-candidate|release)\\.yml|package(?:-lock)?\\.json|PageRoot 用户声明与免责声明\\.txt|desktop/after-pack\\.mjs|desktop/resources/.*|scripts/(?:build-package|create-release-assets|developer-preview|package-delivery-report|release-app-(?:checkpoint|stage)|release-candidate-provenance|release-provenance|source-gate-provenance|verify-packaged-artifact)\\.mjs)$"
+        "^(?:\\.github/workflows/(?:developer-preview|release-candidate|release-dry-run|release)\\.yml|package(?:-lock)?\\.json|PageRoot 用户声明与免责声明\\.txt|desktop/after-pack\\.mjs|desktop/resources/.*|scripts/(?:build-package|create-release-assets|developer-preview|package-delivery-report|packaged-app-identity|release-app-(?:checkpoint|stage)|release-candidate-provenance|release-provenance|source-gate-provenance|verify-packaged-artifact)\\.mjs)$"
       ],
       "suites": [],
       "nodeTests": [

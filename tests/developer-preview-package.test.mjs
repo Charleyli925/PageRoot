@@ -365,10 +365,11 @@ test("developer preview attestation is explicitly non-release and binds exact by
 });
 
 test("developer preview stays optional, manual-only and independent from release lanes", async () => {
-  const [packageText, impactMapText, workflow] = await Promise.all([
+  const [packageText, impactMapText, workflow, gateRunner] = await Promise.all([
     readFile(path.join(productRoot, "package.json"), "utf8"),
     readFile(path.join(productRoot, "tests/test-impact-map.json"), "utf8"),
     readFile(path.join(productRoot, ".github/workflows/developer-preview.yml"), "utf8"),
+    readFile(path.join(productRoot, "scripts/test-gate.mjs"), "utf8"),
   ]);
   const packageJson = JSON.parse(packageText);
   const impactMap = validateImpactMap(JSON.parse(impactMapText));
@@ -403,4 +404,9 @@ test("developer preview stays optional, manual-only and independent from release
   assert.match(workflow, /developer-package/u);
   assert.match(workflow, /retention-days:\s*7/u);
   assert.match(workflow, /not eligible for a tag, GitHub Release, or updater publication/u);
+  assert.match(
+    gateRunner,
+    /PAGEROOT_EXPECTED_BUNDLE_ID:\s*packagedPackageJson\.build\.appId/u,
+    "packaged startup must receive the Developer Preview Bundle ID, not the stable package identity",
+  );
 });

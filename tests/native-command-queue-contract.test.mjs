@@ -134,7 +134,7 @@ test("format replay rebinds the live element after its checkpoint", () => {
       "activeNativeEdit = activeNativeEditRef.current",
       "element = selectedElementRef.current",
       "!element.isConnected",
-      "element !== activeNativeEdit.rootElement",
+      "element !== activeNativeEdit.selectionElement",
       "view = element.ownerDocument.defaultView",
       "sourceTextParentsForSegments(element",
     ],
@@ -222,7 +222,7 @@ test("V2 composition and source revision advance both use hard generation bounda
     rebase,
     [
       "leaseStampsMatch(",
-      "normalizeEditableIslandHtml(",
+      "this.normalizeInnerHtml(",
       "this.ownedCanonicalInnerHtml !== canonical",
       "this.lease.advance(currentLease, nextLease)",
       "this.leaseStamp = nextLease",

@@ -36,7 +36,7 @@
 | Stable application update schedule, coalesced manual check, download progress and restart-install readiness | Main-process application-update controller | signed GitHub Release metadata plus updater cache; no editor authority | preload status snapshot, About PageRoot, Workbench update notice, drain coordinator |
 | Random installation identity, project pseudonym secret, aggregate counters and unsent usage events | Main-process usage-telemetry controller | bounded `usage-telemetry.json` under PageRoot Application Support | PostHog batch ingestion only |
 | Crash-only renderer recovery records | Recovery store adapter | browser storage, subordinate to Bridge authority | document and draft sessions |
-| V2 editable-island lease, draft DOM, logical Selection and IME snapshot | `IslandEditingController` | in-memory until the exact island SourcePatch is acknowledged | Canvas coordinator and document session |
+| V2 text-session lease, editable-island or disposable direct-text host DOM, logical Selection and IME snapshot | `IslandEditingController` | in-memory until the exact island or direct-text-node SourcePatch is acknowledged | Canvas coordinator and document session |
 | Last proven comment-target geometry during Canvas replacement | Comment-rail layout session | in-memory and cleared on project transition | comment rail only |
 | Current source/Draft persistence recovery banner | Workbench status-banner projection, with source failure priority | owner snapshots only; no independent durable state | workspace view and recovery actions |
 
