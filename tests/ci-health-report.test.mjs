@@ -288,6 +288,43 @@ test("CI health excludes same-SHA full-gate reruns from cross-SHA candidate chur
   assert.equal(report.runnerUse.candidateChurnShare, 0.28);
 });
 
+test("CI health counts a return to an earlier SHA as new candidate churn", () => {
+  const firstSha = "a".repeat(40);
+  const secondSha = "b".repeat(40);
+  const shas = [firstSha, firstSha, secondSha, secondSha, firstSha, firstSha];
+  const ciRuns = shas.map((headSha, index) => ({
+    id: 209 + index,
+    event: "pull_request",
+    head_sha: headSha,
+    pull_requests: [{ number: 83 }],
+    created_at: `2026-07-24T${String(9 + index).padStart(2, "0")}:00:00.000Z`,
+    updated_at: `2026-07-24T${String(9 + index).padStart(2, "0")}:01:00.000Z`,
+  }));
+  const jobsByRunId = Object.fromEntries(ciRuns.map((run) => ([run.id, [job({
+    name: "source-build",
+    attempt: 1,
+    conclusion: "success",
+    startedAt: run.created_at,
+    completedAt: run.updated_at,
+  })]])));
+
+  const report = summarizeCiHealth({
+    periodDays: 30,
+    generatedAt: "2026-07-24T15:30:00.000Z",
+    ciRuns,
+    jobsByRunId,
+    candidateRuns: [],
+    releaseRuns: [],
+    dependencyHealth: "success",
+  });
+
+  assert.equal(report.sourceGate.completeRuns, 6);
+  assert.equal(report.sourceGate.repeatedCandidateRuns, 2);
+  assert.equal(report.runnerUse.fullGateMinutes, 6);
+  assert.equal(report.runnerUse.candidateChurnMinutes, 2);
+  assert.equal(report.runnerUse.candidateChurnShare, 0.33);
+});
+
 test("CI health records cancellation rates without treating pre-review jobs as full gates", () => {
   const report = summarizeCiHealth({
     periodDays: 30,

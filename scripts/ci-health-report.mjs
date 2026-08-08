@@ -110,17 +110,26 @@ function candidateRunCounts(fullRuns) {
 }
 
 function repeatedCandidateRuns(fullRuns) {
-  const seenShasByCandidate = new Map();
+  const previousShaByCandidate = new Map();
   return [...fullRuns]
-    .sort((left, right) => Date.parse(left.created_at || "") - Date.parse(right.created_at || ""))
+    .sort((left, right) => {
+      const leftAt = Date.parse(left.created_at || "");
+      const rightAt = Date.parse(right.created_at || "");
+      if (Number.isFinite(leftAt) && Number.isFinite(rightAt) && leftAt !== rightAt) {
+        return leftAt - rightAt;
+      }
+      return Number(left?.id || 0) - Number(right?.id || 0);
+    })
     .filter((run) => {
       const key = pullRequestKey(run);
       const sha = run?.head_sha || `unknown:${run?.id || "run"}`;
-      const seenShas = seenShasByCandidate.get(key) || new Set();
-      const isLaterDistinctSha = seenShas.size > 0 && !seenShas.has(sha);
-      seenShas.add(sha);
-      seenShasByCandidate.set(key, seenShas);
-      return isLaterDistinctSha;
+      const hasPreviousCandidate = previousShaByCandidate.has(key);
+      const isCandidateTransition = (
+        hasPreviousCandidate
+        && previousShaByCandidate.get(key) !== sha
+      );
+      previousShaByCandidate.set(key, sha);
+      return isCandidateTransition;
     });
 }
 
