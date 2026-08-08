@@ -13,7 +13,7 @@
 | `baseline-policy` | 分支策略通过，与 review-policy 并行 | 全局依赖 advisory policy 与 packaged-runtime closure | 基线红时不启动 Linux build、Browser 或 macOS Electron runner |
 | 一次性晋升 `release-gate` | review、baseline、完整测试和相关 dry run 都完成的最终 PR Tree | 全量 Node、三分片完整 Browser、独立 Native Electron、独立确定性 AI 闭环、真实 HTML 发现式门禁、即时 review revalidation 与 Tree Hash 凭证 | 每个最终候选只跑一次；后续新 SHA 必须重新 Draft 后 Ready |
 | `Release Dry Run` | `candidate-context` 判定 Ready 候选有打包、release metadata、Electron、Bridge、Schema 或资源风险 | clean job 组装/静态校验显式未签名（`identity=null`）App → 非发布 checkpoint → 第二 clean job 恢复 metadata、重建 renderer oracle、再次校验并启动核对名称/版本/Bundle ID | 不读取签名或 Apple 凭证、不生成 DMG/updater、不成为 Candidate、不创建 tag、不发布；PR 大小只作建议，不作为触发或阻断 |
-| `Review Debt` | 每周 trusted default-branch schedule/manual run | 汇总最近 PR 的 P2/P3/unclassified finding 到滚动 Issue | 不 checkout PR head、不改代码、不合并、不成为必需检查 |
+| `Review Debt` | 每周 trusted default-branch schedule/manual run | 汇总最近 PR 的行内线程和 review-level P2/P3/unclassified `CHANGES_REQUESTED` finding 到滚动 Issue | 不 checkout PR head、不改代码、不合并、不成为必需检查 |
 | `main-integrity` | 合并到 `main` | 校验合并 PR、Tree Hash、package/lockfile 版本和凭证时效 | 相等即复用完整源码证据，不重复 Node、Browser 或 Electron 测试；不相等直接失败 |
 | 按需 `Developer Preview` | 仅在开发者明确要求时 | 干净 Tree、最新 renderer、ad-hoc DMG、包内容完整性、一次隔离启动和精确 PR/内容交付报告 | 在消耗签名/公证时间前发现“漏打包或根本跑不起来”；不成为正式门禁 |
 | `Release Candidate` | 打标签之前，凭证新鲜且 Tree/版本完全一致 | 预签名 App 内容/完整运行校验 → Developer ID 签名后启动 → App 公证 checkpoint → 从同一 App 生成并公证 DMG → 最终字节校验 | 内容错误不消耗 Apple 队列；后段失败只重跑后段 |

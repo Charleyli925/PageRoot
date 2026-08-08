@@ -4,7 +4,7 @@ import { appendFile, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { classifyReviewThread } from "./check-pr-review-policy.mjs";
+import { classifyReviewState, classifyReviewThread } from "./check-pr-review-policy.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
 const productRoot = path.resolve(path.dirname(scriptPath), "..");
@@ -14,6 +14,7 @@ const DEFAULT_TITLE = "[Review debt] P2/P3 and deferred findings";
 const DEFAULT_DAYS = 7;
 const MAX_PULL_REQUESTS = 100;
 const MAX_PULL_REQUEST_PAGES = 10;
+const MAX_REVIEW_PAGES = 10;
 const MAX_ISSUE_PAGES = 10;
 
 function priorityOrder(priority) {
@@ -27,8 +28,12 @@ function normalizeFinding({ pullRequest, finding }) {
     pullRequestTitle: pullRequest?.title || "Untitled Pull Request",
     updatedAt: pullRequest?.updated_at || pullRequest?.updatedAt || null,
     priority: finding.priority,
+    findingKind: finding.kind || "unknown",
     path: finding.path || null,
     commentId: finding.commentId || null,
+    reviewId: finding.reviewId || null,
+    reviewState: finding.reviewState || null,
+    commitSha: finding.commitSha || null,
     actor: finding.actor || "unknown",
     reason: finding.reason,
   });
@@ -38,12 +43,17 @@ export function summarizeReviewDebt({ pullRequests = [], generatedAt = new Date(
   if (!Number.isInteger(periodDays) || periodDays < 1 || periodDays > 31) {
     throw new Error("periodDays must be an integer from 1 to 31.");
   }
-  const findings = (pullRequests || []).flatMap((pullRequest) => (
-    (pullRequest.reviewThreads || pullRequest.review_threads || [])
+  const findings = (pullRequests || []).flatMap((pullRequest) => {
+    const threadFindings = (pullRequest.reviewThreads || pullRequest.review_threads || [])
       .map(classifyReviewThread)
       .filter((finding) => finding.state === "non_blocking")
-      .map((finding) => normalizeFinding({ pullRequest, finding }))
-  )).sort((left, right) => (
+      .map((finding) => normalizeFinding({ pullRequest, finding }));
+    const reviewFindings = (pullRequest.reviews || [])
+      .map(classifyReviewState)
+      .filter((finding) => finding.state === "non_blocking" && finding.reason === "deferred_changes_requested")
+      .map((finding) => normalizeFinding({ pullRequest, finding }));
+    return [...threadFindings, ...reviewFindings];
+  }).sort((left, right) => (
     priorityOrder(left.priority) - priorityOrder(right.priority)
     || Number(left.pullRequestNumber) - Number(right.pullRequestNumber)
     || String(left.path || "").localeCompare(String(right.path || ""))
@@ -76,7 +86,7 @@ export function renderReviewDebtMarkdown(report) {
     MARKER,
     "# Review debt (weekly rolling)",
     "",
-    "This issue is an operational backlog, not a merge blocker. Only active P0/P1 findings or P0/P1 changes-requested reviews remain blocking in the PR review policy.",
+    "This issue is an operational backlog, not a merge blocker. It retains deferred inline-thread and review-level findings; only active P0/P1 findings or P0/P1 changes-requested reviews remain blocking in the PR review policy.",
     "",
     `- Window: last ${report.periodDays} days`,
     `- Generated: ${report.generatedAt}`,
@@ -160,6 +170,22 @@ async function githubJson(apiBase, apiPath, token, init = {}) {
   return await response.json();
 }
 
+async function githubArrayPages({ apiBase, apiPath, token, maxPages, label }) {
+  const entries = [];
+  const separator = apiPath.includes("?") ? "&" : "?";
+  for (let page = 1; page <= maxPages; page += 1) {
+    const response = await githubJson(
+      apiBase,
+      `${apiPath}${separator}per_page=100&page=${page}`,
+      token,
+    );
+    if (!Array.isArray(response)) throw new Error(`Expected a ${label} array from GitHub.`);
+    entries.push(...response);
+    if (response.length < 100) return entries;
+  }
+  throw new Error(`${label} pagination exceeded ${maxPages * 100} entries.`);
+}
+
 async function graphqlThreads({ graphqlUrl, owner, name, number, token }) {
   const query = `
     query($owner: String!, $name: String!, $number: Int!, $after: String) {
@@ -226,10 +252,19 @@ async function collectRecentPullRequests({ repository, token, days }) {
       throw new Error(`Pull Request debt window exceeded ${MAX_PULL_REQUEST_PAGES * MAX_PULL_REQUESTS} entries.`);
     }
   }
-  const enriched = await Promise.all(recent.map(async (pullRequest) => ({
-    ...pullRequest,
-    reviewThreads: await graphqlThreads({ graphqlUrl, owner, name, number: pullRequest.number, token }),
-  })));
+  const enriched = await Promise.all(recent.map(async (pullRequest) => {
+    const [reviewThreads, reviews] = await Promise.all([
+      graphqlThreads({ graphqlUrl, owner, name, number: pullRequest.number, token }),
+      githubArrayPages({
+        apiBase,
+        apiPath: `/repos/${repositoryPath}/pulls/${pullRequest.number}/reviews`,
+        token,
+        maxPages: MAX_REVIEW_PAGES,
+        label: `Pull Request #${pullRequest.number} review`,
+      }),
+    ]);
+    return { ...pullRequest, reviewThreads, reviews };
+  }));
   return { apiBase, repositoryPath, pullRequests: enriched };
 }
 

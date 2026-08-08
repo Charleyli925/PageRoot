@@ -106,7 +106,6 @@ jobs:
     with:
       pull_request_number: ${{ github.event.pull_request.number }}
       source_head: ${{ github.event.pull_request.head.sha }}
-    secrets: inherit
 
   baseline-policy:
     name: baseline-policy

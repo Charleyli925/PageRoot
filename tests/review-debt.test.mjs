@@ -20,6 +20,15 @@ function thread(priority, { resolved = false, outdated = false } = {}) {
   };
 }
 
+function review(priority, { id = 20, state = "CHANGES_REQUESTED", actor = "reviewer" } = {}) {
+  return {
+    id,
+    state,
+    user: { login: actor },
+    body: priority ? `![${priority} Badge](x)` : "No priority",
+  };
+}
+
 test("review debt preserves P2/P3/unclassified findings and excludes P0/P1 or resolved findings", () => {
   const report = summarizeReviewDebt({
     generatedAt: "2026-08-09T00:00:00.000Z",
@@ -40,6 +49,32 @@ test("review debt preserves P2/P3/unclassified findings and excludes P0/P1 or re
   assert.match(renderReviewDebtMarkdown(report), /#12/u);
 });
 
+test("review debt preserves non-blocking review-level changes requests without recording ordinary reviews", () => {
+  const report = summarizeReviewDebt({
+    generatedAt: "2026-08-09T00:00:00.000Z",
+    pullRequests: [{
+      number: 13,
+      html_url: "https://example.test/pr/13",
+      title: "Review-level deferred findings",
+      reviews: [
+        review("P2", { id: 21 }),
+        review("P3", { id: 22 }),
+        review(null, { id: 23 }),
+        review("P1", { id: 24 }),
+        review("P2", { id: 25, state: "COMMENTED" }),
+      ],
+    }],
+  });
+  assert.equal(report.totalDeferredFindings, 3);
+  assert.deepEqual(report.priorityCounts, { P2: 1, P3: 1, unclassified: 1 });
+  assert.deepEqual(report.findings.map((finding) => finding.reviewId), [21, 22, 23]);
+  assert.deepEqual(report.findings.map((finding) => finding.findingKind), [
+    "pull_request_review",
+    "pull_request_review",
+    "pull_request_review",
+  ]);
+});
+
 test("a weekly rolling artifact is machine-readable and repository-scoped", async () => {
   const output = "output/review-debt/test-review-debt.json";
   try {
@@ -56,7 +91,10 @@ test("a weekly rolling artifact is machine-readable and repository-scoped", asyn
 });
 
 test("the weekly workflow can update only review debt from trusted default-branch code", async () => {
-  const workflow = await readFile(path.join(productRoot, ".github/workflows/review-debt.yml"), "utf8");
+  const [workflow, debtScript] = await Promise.all([
+    readFile(path.join(productRoot, ".github/workflows/review-debt.yml"), "utf8"),
+    readFile(path.join(productRoot, "scripts/review-debt.mjs"), "utf8"),
+  ]);
   assert.match(workflow, /schedule:/u);
   assert.match(workflow, /workflow_dispatch:/u);
   assert.match(workflow, /contents: read/u);
@@ -66,4 +104,6 @@ test("the weekly workflow can update only review debt from trusted default-branc
   assert.match(workflow, /github\.ref == format\('refs\/heads\/\{0\}', github\.event\.repository\.default_branch\)/u);
   assert.doesNotMatch(workflow, /pull_request:|pull_request_target|gh pr merge|mergePullRequest/u);
   assert.doesNotMatch(workflow, /ref: \$\{\{ github\.event\.pull_request/u);
+  assert.match(debtScript, /classifyReviewState/u);
+  assert.match(debtScript, /pulls\/\$\{pullRequest\.number\}\/reviews/u);
 });

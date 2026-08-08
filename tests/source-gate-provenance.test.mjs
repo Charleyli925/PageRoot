@@ -138,6 +138,7 @@ test("GitHub workflows run tests in parallel with one final-review policy and ke
   const sourceBrowser = workflowJob(ci, "source-browser");
   const electronNative = workflowJob(ci, "source-electron-native");
   const electronAi = workflowJob(ci, "source-electron-ai");
+  const releaseDryRun = workflowJob(ci, "release-dry-run");
   const releaseGate = workflowJob(ci, "release-gate");
 
   assert.match(ci, /types: \[ready_for_review\]/u);
@@ -229,6 +230,8 @@ test("GitHub workflows run tests in parallel with one final-review policy and ke
   );
 
   assert.match(ci, /uses: \.\/\.github\/workflows\/release-dry-run\.yml/u);
+  assert.match(releaseDryRun, /uses: \.\/\.github\/workflows\/release-dry-run\.yml/u);
+  assert.doesNotMatch(releaseDryRun, /\bsecrets\s*:/u);
   assert.match(ci, /packaging_required == 'true'/u);
   assert.match(dryRun, /workflow_call:/u);
   assert.match(dryRun, /workflow_dispatch:/u);
