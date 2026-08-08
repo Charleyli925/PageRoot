@@ -188,6 +188,30 @@ test("snapshot validation enforces the aggregate page atom budget", () => {
   assert.equal(acceptReviewRuntimeVisualSnapshots(snapshots, keys), null);
 });
 
+test("snapshot validation enforces the combined per-host atom budget", () => {
+  const keys = new Set(["runtime-host-1"]);
+  assert.equal(acceptReviewRuntimeVisualSnapshots([
+    snapshot("runtime-host-1", {
+      contentAtoms: 3_000,
+      paintAtoms: 1_096,
+      geometryAtoms: 0,
+      vectorAtoms: 0,
+      geometrySignature: "",
+      vectorSignature: "",
+    }),
+  ], keys)?.length, 1);
+  assert.equal(acceptReviewRuntimeVisualSnapshots([
+    snapshot("runtime-host-1", {
+      contentAtoms: 3_000,
+      paintAtoms: 1_097,
+      geometryAtoms: 0,
+      vectorAtoms: 0,
+      geometrySignature: "",
+      vectorSignature: "",
+    }),
+  ], keys), null);
+});
+
 test("runtime visual merge reuses a static change and creates at most one change per untouched outline", () => {
   const documents = {
     changes: [{

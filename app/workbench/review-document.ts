@@ -4502,8 +4502,13 @@ function reviewBootstrap(
   };
   const runtimeVisualPush = (capture, channel, value) => {
     const normalized = RuntimeVisualString(value || "");
+    const hostAtomCount = capture.content.length
+      + capture.paint.length
+      + capture.geometry.length
+      + capture.vector.length;
     if (
       capture[channel].length >= runtimeVisualAtomLimit
+      || (channel !== "canvas" && hostAtomCount >= runtimeVisualAtomLimit)
       || capture.valueLength + normalized.length > runtimeVisualValueLimit
       || capture.budget.atoms >= runtimeVisualBatchAtomLimit
       || capture.budget.valueLength + normalized.length > runtimeVisualBatchValueLimit

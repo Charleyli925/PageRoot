@@ -491,6 +491,10 @@ test("runtime chart review supplements only the initial bounded static footprint
   assert.match(reviewDocument, /runtimeVisualSnapshotBudgetExhausted/);
   assert.match(
     reviewDocument,
+    /capture\.content\.length\s*\+\s*capture\.paint\.length\s*\+\s*capture\.geometry\.length\s*\+\s*capture\.vector\.length/,
+  );
+  assert.match(
+    reviewDocument,
     /const runtimeVisualSnapshotBudget = \{\s+atoms: 0,\s+nodes: 0,\s+valueLength: 0,\s+canvasPixels: 0,\s+\}/,
   );
   assert.match(

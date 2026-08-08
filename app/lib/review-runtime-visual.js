@@ -126,6 +126,7 @@ export function acceptReviewRuntimeVisualSnapshots(value, allowedCandidateKeys) 
         && (atomCount !== 0 || canvasPixels !== 0)
       )
       || (state === "stable" && atomCount === 0 && canvasPixels === 0)
+      || atomCount > RUNTIME_VISUAL_CONTRACT.pageBudget.hostAtoms
       || pageAtoms > RUNTIME_VISUAL_CONTRACT.pageBudget.atoms
       || pageCanvasPixels > RUNTIME_VISUAL_CONTRACT.pageBudget.canvasPixels
     ) return null;
