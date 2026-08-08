@@ -270,6 +270,21 @@ test("stable data selectors keep the exact value ahead of same-attribute cap", (
   );
 });
 
+test("stable data selectors retain exact short values", () => {
+  const source = `<!doctype html><main>
+    <div data-x="go"></div>
+    <script>
+      document.querySelector('[data-x="go"]').textContent = "ready";
+    </script>
+  </main>`;
+  const prepared = prepareRuntimeVisualCapture({
+    html: source,
+    sourcePath: "/tmp/short-data-selector-runtime-host.html",
+    viewportWidth: 900,
+  });
+  assert.equal(prepared?.candidates.length, 1);
+});
+
 test("named ID property references retain their exact host", () => {
   const source = `<!doctype html><main>
     <div id="chart"></div>

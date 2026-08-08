@@ -173,7 +173,9 @@ function candidateReferenceTokens(element) {
     }
   }
   return tokens.filter(({ value, kind }) => (
-    kind === "identity-attribute" || String(value).length >= 3
+    kind === "identity-attribute"
+      || kind === "data-value"
+      || String(value).length >= 3
   ));
 }
 
@@ -300,7 +302,11 @@ function sourceReferencesToken(source, tokenDescriptor) {
   const kind = typeof tokenDescriptor === "object"
     ? tokenDescriptor?.kind
     : "identity";
-  if (value.length < 3 && kind !== "identity-attribute") return false;
+  if (
+    value.length < 3
+    && kind !== "identity-attribute"
+    && kind !== "data-value"
+  ) return false;
   if (kind === "id-value" || kind === "name-value") {
     return runtimeIdentityValueMatches(source, value, kind);
   }
@@ -313,6 +319,7 @@ function sourceReferencesToken(source, tokenDescriptor) {
     );
     if (dataSelectorReference !== null) return dataSelectorReference;
     if (kind === "data-attribute") return false;
+    if (value.length < 3) return false;
   }
   const attributeSelectorReference = (
     (kind === "class" || kind === "class-value" || kind === "identity-attribute")
