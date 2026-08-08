@@ -13,6 +13,8 @@ const productRoot = path.resolve(path.dirname(scriptPath), "..");
 const DEFAULT_DAYS = 30;
 const MAX_WORKFLOW_RUN_PAGES = 20;
 const MAX_JOB_PAGES = 20;
+const MAX_PULL_REQUEST_PAGES = 5;
+const MAX_REST_PAGES = 20;
 const PUBLICATION_STEP_NAME = "Publish immutable GitHub Release";
 export const CI_HEALTH_WORKFLOW_INPUTS = Object.freeze({
   ci: "ci.yml",
@@ -30,6 +32,11 @@ const TARGETS = Object.freeze({
   candidateChurnShare: Object.freeze({ operator: "under", value: 0.2 }),
   environmentPreflightFailureRate: Object.freeze({ operator: "under", value: 0.02 }),
   publicationRebuilds: Object.freeze({ operator: "at_most", value: 0 }),
+  candidateToMergeMinutesP50: Object.freeze({ operator: "under", value: 40 }),
+  reviewMinutesP50: Object.freeze({ operator: "under", value: 15 }),
+  testMinutesP50: Object.freeze({ operator: "under", value: 20 }),
+  mergeWaitMinutesP50: Object.freeze({ operator: "under", value: 10 }),
+  readyTransitionsPerPullRequestAverage: Object.freeze({ operator: "at_most", value: 1.25 }),
 });
 
 function finiteDurationMinutes(startedAt, completedAt) {
@@ -83,6 +90,10 @@ function isFullGateLane(job) {
     "electron-native",
     "electron-ai",
   ].includes(job?.name) || /^browser-/u.test(job?.name || "");
+}
+
+function isReleaseDryRunLane(job) {
+  return /(?:release-dry-run\s*\/\s*)?(?:assemble-and-checkpoint-unsigned-app|restore-rebuild-oracles-and-launch)/u.test(job?.name || "");
 }
 
 function fullGateAttempts(jobs) {
@@ -203,6 +214,135 @@ function cancellationSummary(runs) {
   });
 }
 
+function timestampMilliseconds(value) {
+  const milliseconds = Date.parse(value || "");
+  return Number.isFinite(milliseconds) ? milliseconds : null;
+}
+
+function minutesBetween(startedAt, completedAt) {
+  const startedMs = timestampMilliseconds(startedAt);
+  const completedMs = timestampMilliseconds(completedAt);
+  if (!Number.isFinite(startedMs) || !Number.isFinite(completedMs) || completedMs < startedMs) return null;
+  return (completedMs - startedMs) / 60_000;
+}
+
+function reviewPriority(body) {
+  const match = String(body || "").match(/\bP([0-3])(?:\s+Badge|\b)/iu);
+  return match ? `P${match[1]}` : "unclassified";
+}
+
+function pullRequestNumber(run) {
+  return (run?.pull_requests || [])
+    .map((pullRequest) => Number(pullRequest?.number))
+    .find((number) => Number.isInteger(number) && number > 0) || null;
+}
+
+function latestReadyTransition(pullRequest) {
+  return (pullRequest?.timelineEvents || pullRequest?.timeline_events || [])
+    .filter((event) => event?.event === "ready_for_review" && Number.isFinite(timestampMilliseconds(event?.created_at || event?.createdAt)))
+    .sort((left, right) => timestampMilliseconds(right?.created_at || right?.createdAt) - timestampMilliseconds(left?.created_at || left?.createdAt))[0] || null;
+}
+
+function reviewCompletionAfterReady(pullRequest, readyAt) {
+  const readyAtMs = timestampMilliseconds(readyAt);
+  if (!Number.isFinite(readyAtMs)) return null;
+  return (pullRequest?.reviews || [])
+    .filter((review) => {
+      const state = String(review?.state || "").toUpperCase();
+      const submittedAt = review?.submitted_at || review?.submittedAt;
+      return ["APPROVED", "COMMENTED", "CHANGES_REQUESTED"].includes(state)
+        && timestampMilliseconds(submittedAt) > readyAtMs;
+    })
+    .sort((left, right) => timestampMilliseconds(left?.submitted_at || left?.submittedAt) - timestampMilliseconds(right?.submitted_at || right?.submittedAt))[0] || null;
+}
+
+function releaseGateCompletionForPullRequest({ pullRequestNumber: number, ciRuns, jobsByRunId, mergedAt }) {
+  const mergedAtMs = timestampMilliseconds(mergedAt);
+  return (ciRuns || []).flatMap((run) => {
+    if (pullRequestNumber(run) !== number) return [];
+    return jobsForRun(jobsByRunId, run.id)
+      .filter((job) => job?.name === "release-gate" && job?.conclusion === "success")
+      .map((job) => ({ run, job, completedAt: job.completed_at || job.completedAt }));
+  }).filter((candidate) => {
+    const completedAtMs = timestampMilliseconds(candidate.completedAt);
+    return !Number.isFinite(mergedAtMs) || (Number.isFinite(completedAtMs) && completedAtMs <= mergedAtMs);
+  }).sort((left, right) => timestampMilliseconds(right.completedAt) - timestampMilliseconds(left.completedAt))[0] || null;
+}
+
+export function summarizeCandidateFlow({ pullRequests = [], ciRuns = [], jobsByRunId = {} } = {}) {
+  const candidateToMergeMinutes = [];
+  const reviewMinutes = [];
+  const testMinutes = [];
+  const mergeWaitMinutes = [];
+  const priorityCounts = { P0: 0, P1: 0, P2: 0, P3: 0, unclassified: 0 };
+  let readyTransitions = 0;
+  const perPullRequestReadyCounts = [];
+  const rows = [];
+
+  for (const pullRequest of pullRequests || []) {
+    const events = pullRequest?.timelineEvents || pullRequest?.timeline_events || [];
+    const readyEvents = events.filter((event) => event?.event === "ready_for_review");
+    readyTransitions += readyEvents.length;
+    if (readyEvents.length > 0) perPullRequestReadyCounts.push(readyEvents.length);
+    for (const review of pullRequest?.reviews || []) {
+      const priority = reviewPriority(review?.body);
+      if (priority !== "unclassified") priorityCounts[priority] += 1;
+    }
+    for (const comment of pullRequest?.reviewComments || pullRequest?.review_comments || []) {
+      priorityCounts[reviewPriority(comment?.body)] += 1;
+    }
+
+    const readyEvent = latestReadyTransition(pullRequest);
+    const readyAt = readyEvent?.created_at || readyEvent?.createdAt || null;
+    const review = reviewCompletionAfterReady(pullRequest, readyAt);
+    const reviewAt = review?.submitted_at || review?.submittedAt || null;
+    const mergedAt = pullRequest?.merged_at || pullRequest?.mergedAt || null;
+    const gate = releaseGateCompletionForPullRequest({
+      pullRequestNumber: Number(pullRequest?.number),
+      ciRuns,
+      jobsByRunId,
+      mergedAt,
+    });
+    const gateAt = gate?.completedAt || null;
+    const candidateToMerge = minutesBetween(readyAt, mergedAt);
+    const reviewDuration = minutesBetween(readyAt, reviewAt);
+    const testDuration = gate ? minutesBetween(gate.run?.created_at, gateAt) : null;
+    const mergeWait = minutesBetween(gateAt, mergedAt);
+    if (Number.isFinite(candidateToMerge)) candidateToMergeMinutes.push(candidateToMerge);
+    if (Number.isFinite(reviewDuration)) reviewMinutes.push(reviewDuration);
+    if (Number.isFinite(testDuration)) testMinutes.push(testDuration);
+    if (Number.isFinite(mergeWait)) mergeWaitMinutes.push(mergeWait);
+    rows.push(Object.freeze({
+      pullRequestNumber: Number(pullRequest?.number) || null,
+      readyTransitions: readyEvents.length,
+      candidateToMergeMinutes: round(candidateToMerge),
+      reviewMinutes: round(reviewDuration),
+      testMinutes: round(testDuration),
+      mergeWaitMinutes: round(mergeWait),
+    }));
+  }
+
+  const readyAverage = perPullRequestReadyCounts.length > 0
+    ? perPullRequestReadyCounts.reduce((total, count) => total + count, 0) / perPullRequestReadyCounts.length
+    : null;
+  return Object.freeze({
+    pullRequests: (pullRequests || []).length,
+    readyTransitions,
+    readyTransitionsPerPullRequestAverage: round(readyAverage),
+    readyTransitionsPerPullRequestP50: percentile(perPullRequestReadyCounts, 50),
+    candidateToMergeMinutesP50: percentile(candidateToMergeMinutes, 50),
+    candidateToMergeMinutesP95: percentile(candidateToMergeMinutes, 95),
+    reviewMinutesP50: percentile(reviewMinutes, 50),
+    reviewMinutesP95: percentile(reviewMinutes, 95),
+    testMinutesP50: percentile(testMinutes, 50),
+    testMinutesP95: percentile(testMinutes, 95),
+    mergeWaitMinutesP50: percentile(mergeWaitMinutes, 50),
+    mergeWaitMinutesP95: percentile(mergeWaitMinutes, 95),
+    priorityCounts,
+    rows,
+  });
+}
+
 function numericTarget(actual, target) {
   if (!Number.isFinite(actual)) {
     return Object.freeze({ actual: null, ...target, status: "no_data" });
@@ -239,6 +379,7 @@ export function summarizeCiHealth({
   jobsByRunId,
   candidateRuns,
   releaseRuns,
+  pullRequests = [],
   dependencyHealth = "unknown",
 }) {
   const sourcePullRequestRuns = (ciRuns || []).filter((run) => run?.event === "pull_request");
@@ -310,13 +451,12 @@ export function summarizeCiHealth({
   const fullGateMinutes = runnerMinutesForRuns(fullRuns, jobsByRunId);
   const activeGateMinutes = runnerMinutesForRuns(activeFullRuns, jobsByRunId);
   const feedbackMinutes = runnerMinutesForRuns(completedFeedbackRuns, jobsByRunId);
-  const completedDryRunPullRequestRuns = dryRunPullRequestRuns.filter(
-    isCompletedWorkflowRun,
-  );
-  const releaseDryRunMinutes = runnerMinutesForRuns(
-    completedDryRunPullRequestRuns,
-    jobsByRunId,
-  );
+  const embeddedDryRunRuns = sourcePullRequestRuns.filter((run) => (
+    jobsForRun(jobsByRunId, run.id).some(isReleaseDryRunLane)
+  ));
+  const releaseDryRunMinutes = allJobs
+    .filter((job) => isExecutedJob(job) && isReleaseDryRunLane(job))
+    .reduce((total, job) => total + finiteDurationMinutes(job.started_at, job.completed_at), 0);
   const candidateChurnMinutes = runnerMinutesForRuns(repeatedCandidates, jobsByRunId);
   const repeatedShare = completedRunnerMinutes > 0
     ? repeatedMinutes / completedRunnerMinutes
@@ -337,6 +477,11 @@ export function summarizeCiHealth({
   const roundedCandidateChurnShare = round(candidateChurnShare);
   const roundedPreflightFailureRate = round(preflightFailureRate);
   const publicationRebuilds = publicationRebuildCount(releaseRuns, jobsByRunId);
+  const candidateFlow = summarizeCandidateFlow({
+    pullRequests,
+    ciRuns: sourcePullRequestRuns,
+    jobsByRunId,
+  });
   const targetMetrics = Object.freeze({
     attemptsPerTreeAverage: numericTarget(
       averageAttempts,
@@ -364,10 +509,30 @@ export function summarizeCiHealth({
       publicationRebuilds,
       TARGETS.publicationRebuilds,
     ),
+    candidateToMergeMinutesP50: numericTarget(
+      candidateFlow.candidateToMergeMinutesP50,
+      TARGETS.candidateToMergeMinutesP50,
+    ),
+    reviewMinutesP50: numericTarget(
+      candidateFlow.reviewMinutesP50,
+      TARGETS.reviewMinutesP50,
+    ),
+    testMinutesP50: numericTarget(
+      candidateFlow.testMinutesP50,
+      TARGETS.testMinutesP50,
+    ),
+    mergeWaitMinutesP50: numericTarget(
+      candidateFlow.mergeWaitMinutesP50,
+      TARGETS.mergeWaitMinutesP50,
+    ),
+    readyTransitionsPerPullRequestAverage: numericTarget(
+      candidateFlow.readyTransitionsPerPullRequestAverage,
+      TARGETS.readyTransitionsPerPullRequestAverage,
+    ),
     dependencyHealth: dependencyTarget(dependencyHealth),
   });
   return Object.freeze({
-    schemaVersion: 4,
+    schemaVersion: 5,
     generatedAt,
     periodDays,
     sourceGate: {
@@ -420,8 +585,20 @@ export function summarizeCiHealth({
       conclusions: conclusionCounts(candidateRuns),
     },
     releaseDryRun: {
-      runs: dryRunPullRequestRuns.length,
-      conclusions: conclusionCounts(dryRunPullRequestRuns),
+      runs: dryRunPullRequestRuns.length + embeddedDryRunRuns.length,
+      directRuns: dryRunPullRequestRuns.length,
+      embeddedRuns: embeddedDryRunRuns.length,
+      conclusions: conclusionCounts([...dryRunPullRequestRuns, ...embeddedDryRunRuns]),
+    },
+    candidateFlow: {
+      ...candidateFlow,
+      target: {
+        candidateToMergeMinutesP50Under: 40,
+        reviewMinutesP50Under: 15,
+        testMinutesP50Under: 20,
+        mergeWaitMinutesP50Under: 10,
+        readyTransitionsPerPullRequestAverageAtMost: 1.25,
+      },
     },
     publication: {
       runs: (releaseRuns || []).length,
@@ -516,6 +693,58 @@ export async function workflowRuns({ repositoryPath, workflow, token, since }) {
   );
 }
 
+async function restPages({ apiPath, token, maxPages = MAX_REST_PAGES }) {
+  const entries = [];
+  for (let page = 1; page <= maxPages; page += 1) {
+    const separator = apiPath.includes("?") ? "&" : "?";
+    const response = await githubJson(`${apiPath}${separator}per_page=100&page=${page}`, token);
+    if (!Array.isArray(response)) throw new Error(`Expected an array from ${apiPath}.`);
+    entries.push(...response);
+    if (response.length < 100) return entries;
+  }
+  throw new Error(`${apiPath} exceeded ${maxPages * 100} entries in the requested window.`);
+}
+
+export async function pullRequestMetrics({ repositoryPath, token, since }) {
+  const sinceMs = timestampMilliseconds(since);
+  const pullRequests = [];
+  for (let page = 1; page <= MAX_PULL_REQUEST_PAGES; page += 1) {
+    const response = await githubJson(
+      `/repos/${repositoryPath}/pulls?state=all&sort=updated&direction=desc&per_page=100&page=${page}`,
+      token,
+    );
+    if (!Array.isArray(response)) throw new Error("Expected Pull Request list to be an array.");
+    const recent = response.filter((pullRequest) => {
+      const activity = [pullRequest?.updated_at, pullRequest?.merged_at, pullRequest?.created_at]
+        .map(timestampMilliseconds)
+        .filter(Number.isFinite);
+      return activity.some((at) => at >= sinceMs);
+    });
+    pullRequests.push(...recent);
+    const oldestUpdatedAt = response
+      .map((pullRequest) => timestampMilliseconds(pullRequest?.updated_at))
+      .filter(Number.isFinite)
+      .sort((left, right) => left - right)[0];
+    if (response.length < 100 || (Number.isFinite(oldestUpdatedAt) && oldestUpdatedAt < sinceMs)) break;
+  }
+  const enriched = [];
+  const batchSize = 8;
+  for (let index = 0; index < pullRequests.length; index += batchSize) {
+    const batch = pullRequests.slice(index, index + batchSize);
+    const entries = await Promise.all(batch.map(async (pullRequest) => {
+      const number = Number(pullRequest.number);
+      const [timelineEvents, reviews, reviewComments] = await Promise.all([
+        restPages({ apiPath: `/repos/${repositoryPath}/issues/${number}/events`, token }),
+        restPages({ apiPath: `/repos/${repositoryPath}/pulls/${number}/reviews`, token }),
+        restPages({ apiPath: `/repos/${repositoryPath}/pulls/${number}/comments`, token }),
+      ]);
+      return { ...pullRequest, timelineEvents, reviews, reviewComments };
+    }));
+    enriched.push(...entries);
+  }
+  return enriched;
+}
+
 async function jobsForWorkflowRun(repositoryPath, run, token) {
   const jobs = [];
   for (let page = 1; page <= MAX_JOB_PAGES; page += 1) {
@@ -574,6 +803,11 @@ export function renderCiHealthMarkdown(report) {
     `| Cross-SHA candidate churn share | ${percent(report.runnerUse.candidateChurnShare)} | < 20% | ${metricStatus("candidateChurnShare")} |`,
     `| Environment preflight failure rate | ${percent(report.environmentPreflight.failureRate)} | < 2% | ${metricStatus("environmentPreflightFailureRate")} |`,
     `| Publication rebuilds | ${report.publication.rebuildsAfterCandidateApproval ?? "n/a"} | 0 | ${metricStatus("publicationRebuilds")} |`,
+    `| Candidate-to-merge P50 | ${report.candidateFlow.candidateToMergeMinutesP50 ?? "n/a"} min | < 40 min | ${metricStatus("candidateToMergeMinutesP50")} |`,
+    `| Final review P50 | ${report.candidateFlow.reviewMinutesP50 ?? "n/a"} min | < 15 min | ${metricStatus("reviewMinutesP50")} |`,
+    `| Test completion P50 | ${report.candidateFlow.testMinutesP50 ?? "n/a"} min | < 20 min | ${metricStatus("testMinutesP50")} |`,
+    `| Gate-to-merge wait P50 | ${report.candidateFlow.mergeWaitMinutesP50 ?? "n/a"} min | < 10 min | ${metricStatus("mergeWaitMinutesP50")} |`,
+    `| Ready transitions per Pull Request | ${report.candidateFlow.readyTransitionsPerPullRequestAverage ?? "n/a"} | <= 1.25 | ${metricStatus("readyTransitionsPerPullRequestAverage")} |`,
     "",
     "### Recorded workload",
     "",
@@ -590,6 +824,9 @@ export function renderCiHealthMarkdown(report) {
     `| Feedback runner minutes | ${report.runnerUse.feedbackMinutes} |`,
     `| Release-dry-run runner minutes | ${report.runnerUse.releaseDryRunMinutes} |`,
     `| Candidate-churn runner minutes | ${report.runnerUse.candidateChurnMinutes} |`,
+    `| Ready transitions | ${report.candidateFlow.readyTransitions} |`,
+    `| Review findings P0/P1/P2/P3 | ${report.candidateFlow.priorityCounts.P0}/${report.candidateFlow.priorityCounts.P1}/${report.candidateFlow.priorityCounts.P2}/${report.candidateFlow.priorityCounts.P3} |`,
+    `| Unclassified review comments | ${report.candidateFlow.priorityCounts.unclassified} |`,
     `| Active PR workflow runs | ${report.workflowCancellation.activePullRequestRuns} |`,
     `| Cancelled completed PR workflow runs | ${report.workflowCancellation.cancelledPullRequestRuns}/${report.workflowCancellation.completedPullRequestRuns} (${percent(report.workflowCancellation.pullRequestCancellationRate)}) |`,
     `| Active promoted candidates | ${report.workflowCancellation.activePromotedCandidateRuns} |`,
@@ -613,12 +850,13 @@ async function main() {
     generatedAt.getTime() - options.days * 24 * 60 * 60 * 1000,
   ).toISOString();
   const repositoryPath = options.repository.split("/").map(encodeURIComponent).join("/");
-  const [ciRuns, feedbackRuns, dryRunRuns, candidateRuns, releaseRuns] = await Promise.all([
+  const [ciRuns, feedbackRuns, dryRunRuns, candidateRuns, releaseRuns, pullRequests] = await Promise.all([
     workflowRuns({ repositoryPath, workflow: CI_HEALTH_WORKFLOW_INPUTS.ci, token, since }),
     workflowRuns({ repositoryPath, workflow: CI_HEALTH_WORKFLOW_INPUTS.feedback, token, since }),
     workflowRuns({ repositoryPath, workflow: CI_HEALTH_WORKFLOW_INPUTS.releaseDryRun, token, since }),
     workflowRuns({ repositoryPath, workflow: CI_HEALTH_WORKFLOW_INPUTS.releaseCandidate, token, since }),
     workflowRuns({ repositoryPath, workflow: CI_HEALTH_WORKFLOW_INPUTS.release, token, since }),
+    pullRequestMetrics({ repositoryPath, token, since }),
   ]);
   const pullRequestRuns = [...ciRuns, ...feedbackRuns, ...dryRunRuns]
     .filter((run) => run.event === "pull_request");
@@ -636,6 +874,7 @@ async function main() {
     jobsByRunId,
     candidateRuns,
     releaseRuns,
+    pullRequests,
     dependencyHealth: process.env.DEPENDENCY_HEALTH_RESULT || "unknown",
   });
   const destination = path.resolve(productRoot, options.output);

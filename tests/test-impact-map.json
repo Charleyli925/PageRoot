@@ -234,14 +234,34 @@
       "nodeTests": ["tests/source-gate-provenance.test.mjs"]
     },
     {
-      "id": "pr-review-settled",
+      "id": "pr-review-policy",
       "patterns": [
-        "^scripts/check-pr-review-settled\\.mjs$",
-        "^tests/pr-review-settled\\.test\\.mjs$",
+        "^scripts/check-pr-review-policy\\.mjs$",
+        "^tests/pr-review-policy\\.test\\.mjs$",
         "^\\.github/workflows/(?:ci|pr-feedback)\\.yml$"
       ],
       "suites": [],
-      "nodeTests": ["tests/pr-review-settled.test.mjs"]
+      "nodeTests": ["tests/pr-review-policy.test.mjs"]
+    },
+    {
+      "id": "pr-candidate-classification",
+      "patterns": [
+        "^scripts/classify-pr-candidate\\.mjs$",
+        "^tests/classify-pr-candidate\\.test\\.mjs$",
+        "^\\.github/workflows/(?:ci|release-dry-run)\\.yml$"
+      ],
+      "suites": [],
+      "nodeTests": ["tests/classify-pr-candidate.test.mjs"]
+    },
+    {
+      "id": "review-debt",
+      "patterns": [
+        "^scripts/review-debt\\.mjs$",
+        "^tests/review-debt\\.test\\.mjs$",
+        "^\\.github/workflows/review-debt\\.yml$"
+      ],
+      "suites": [],
+      "nodeTests": ["tests/review-debt.test.mjs"]
     },
     {
       "id": "ci-evidence",

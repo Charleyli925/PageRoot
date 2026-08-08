@@ -8,18 +8,18 @@
 GitHub main
   -> short-lived branch
   -> Pull Request updates + impact-selected feedback
-  -> one explicit draft-to-ready promotion + complete source gate + Tree Hash attestation
+  -> one explicit Draft-to-Ready final promotion + parallel review/test candidate gate + Tree Hash attestation
   -> main commit + exact-tree/version/PR attestation verification
   -> pre-tag installer candidate + packaged-runtime verification
   -> exact candidate verification + immutable version tag + GitHub Release
 ```
 
-When a Pull Request changes packaging, release metadata, Electron, packaged
-Bridge, Schema or resource paths, a separate path-filtered `Release Dry Run`
-also assembles and restores an explicitly unsigned (`identity=null`) App across
-two clean jobs. It is early
-feedback only: its checkpoint is `releaseEligible: false` and is not on the
-linear Candidate/publication chain above.
+When `candidate-context` finds packaging, release metadata, Electron, packaged
+Bridge, Schema or resource risk on a Ready candidate, it calls the reusable
+`Release Dry Run` to assemble and restore an explicitly unsigned
+(`identity=null`) App across two clean jobs. Source-only candidates skip it. It
+is early feedback only: its checkpoint is `releaseEligible: false` and is not
+on the linear Candidate/publication chain above.
 
 ## Daily changes
 
@@ -88,34 +88,31 @@ Open a Pull Request, wait for required CI, review the final diff, then squash-me
 
 Every Pull Request starts as Draft. `opened`, `synchronize` and `reopened`
 events run only the impact-selected `PR Feedback` workflow; returning to Draft
-alone starts nothing. When the intended head is frozen, first update it onto
-current `origin/main`, then post the trusted exact-head/base Codex request documented
-in `docs/CODEX_WORKFLOW.md` while it remains Draft. Address P0-P2 findings and
-repeat for every new head or base. After that Draft review completes, confirm no other
-PR is occupying the source-candidate lane and mark it Ready. That single
-`ready_for_review` transition starts `review-settled` and the final Codex pass;
-do not post another review command while it runs. Only a non-blocking substantive review,
-immutable clean completion comment bound to the exact commit or a phase-correct clean reaction, the 180-second settle window,
-clean active-thread check and continuous live head/base validation may unlock
-`baseline-policy` and the complete source matrix that can create the required
-`release-gate` and exact-tree attestation. A current-commit `CHANGES_REQUESTED`
-blocks even when Codex creates no inline thread.
+alone starts nothing. Batch implementation and accepted P0/P1 corrections while
+Draft. When the intended head is frozen, update it onto current `origin/main`
+and mark it Ready once. That single `ready_for_review` transition starts
+`review-policy` and the final Codex pass; do not post a Draft marker or another
+review command while it runs. A substantive exact-commit Codex review or
+immutable clean completion after Ready, a 30-second settle window and continuous
+live head/base validation are required. Active P0/P1 findings and P0/P1
+`CHANGES_REQUESTED` reviews block regardless of reviewer; P2/P3/unclassified findings become review debt and
+are triaged in regular maintenance work. Deterministic dependency, source,
+security and release checks remain hard gates regardless of review priority.
 
-Codex cloud and repository code review are operational prerequisites. A bot
-response asking for an environment is a hard stop: keep the PR Draft, let an
-authorized owner repair the external Codex setting, then issue a new exact-head/base
-request. Neither the workflow nor the PR changes that repository setting.
+`branch-policy` and `baseline-policy` run independently of review, and the
+complete source matrix starts after the deterministic baseline so review and
+tests overlap. `release-gate` joins every lane, relevant candidate-only dry run
+and review result, then revalidates the exact pair before attesting the tree.
+The candidate classifier records PR scope and size only as advisory information;
+it never rejects a PR for being large.
 
-Do not promote several parallel PRs at once. Keep other reviewed work draft
-until the preceding candidate merges, then update the next branch and promote
-it. A commit pushed after promotion cancels any in-flight stale candidate and
-receives only PR feedback. The new head cannot merge because it has no
-`release-gate`; convert it to Draft, review its current exact head/base pair and mark it Ready
-again only after the pair is final. A PR opened non-draft likewise receives
-Feedback only and must be re-armed through Draft before promotion. `main`
-accepts the resulting tree
-only when provenance verification finds the fresh matching attestation; it
-does not repeat Node or Browser smoke after that equality proof.
+A Ready event freezes the expected head/base and must not be followed by a
+commit. A new commit cancels any in-flight stale candidate and receives only PR
+feedback. The new head cannot merge because it has no `release-gate`; convert it
+to Draft, batch required P0/P1 work and mark it Ready again only after the new
+pair is final. `main` accepts the resulting tree only when provenance
+verification finds the fresh matching attestation; it does not repeat Node or
+Browser smoke after that equality proof.
 
 GitHub deletes the remote task branch after squash merge. Local worktrees are a
 separate lifecycle: run `npm run task:audit` from the primary checkout, preview
@@ -163,6 +160,6 @@ Use `git revert <commit>` to undo a merged public change while preserving histor
 
 ## Release rule
 
-Version, commit, tag and artifacts form one immutable set. `npm run release:mac` remains the complete local source-and-artifact gate and refuses a dirty worktree. A path-filtered PR dry run may prove explicitly unsigned (`identity=null`) App assembly, checkpoint recovery, metadata/renderer reconstruction and startup identity without credentials, but its distinct non-release checkpoint is never reusable here. The governed GitHub path first runs `Release Candidate` on reviewed `main`: a successful PR source-gate attestation must match the exact tree/version and be no more than seven days old. The workflow embeds the commit/tree in `build-info.json`, verifies one pre-sign App before Apple work, signs/notarizes that same App, freezes it as a resumable checkpoint, and generates the final DMG/ZIP from that checkpoint without rebuilding the App.
+Version, commit, tag and artifacts form one immutable set. `npm run release:mac` remains the complete local source-and-artifact gate and refuses a dirty worktree. A candidate-classified Ready PR may invoke the credential-free unsigned (`identity=null`) dry run to prove App assembly, checkpoint recovery, metadata/renderer reconstruction and startup identity without credentials; source-only candidates intentionally skip it, and its distinct non-release checkpoint is never reusable here. The governed GitHub path first runs `Release Candidate` on reviewed `main`: a successful PR source-gate attestation must match the exact tree/version and be no more than seven days old. The workflow embeds the commit/tree in `build-info.json`, verifies one pre-sign App before Apple work, signs/notarizes that same App, freezes it as a resumable checkpoint, and generates the final DMG/ZIP from that checkpoint without rebuilding the App.
 
 Only after that candidate succeeds may the separate `Release` workflow run for the exact version on current `main`. It accepts a matching candidate no more than 72 hours old, verifies every downloaded asset hash, creates the annotated tag and publishes the same files without rebuilding. Do not push release tags manually. See `docs/RELEASING.md` and `docs/RELEASE_PIPELINE_GOVERNANCE.md`.
