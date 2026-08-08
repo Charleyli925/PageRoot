@@ -94,11 +94,12 @@ in `docs/CODEX_WORKFLOW.md` while it remains Draft. Address P0-P2 findings and
 repeat for every new head or base. After that Draft review completes, confirm no other
 PR is occupying the source-candidate lane and mark it Ready. That single
 `ready_for_review` transition starts `review-settled` and the final Codex pass;
-do not post another review command while it runs. Only a substantive review,
+do not post another review command while it runs. Only a non-blocking substantive review,
 immutable clean completion comment bound to the exact commit or a phase-correct clean reaction, the 180-second settle window,
 clean active-thread check and continuous live head/base validation may unlock
 `baseline-policy` and the complete source matrix that can create the required
-`release-gate` and exact-tree attestation.
+`release-gate` and exact-tree attestation. A current-commit `CHANGES_REQUESTED`
+blocks even when Codex creates no inline thread.
 
 Codex cloud and repository code review are operational prerequisites. A bot
 response asking for an environment is a hard stop: keep the PR Draft, let an

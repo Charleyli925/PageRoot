@@ -10,7 +10,8 @@ const REPOSITORY_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u;
 const DRAFT_REQUEST_PATTERN = /^@codex review\r?\n\r?\nReview exact head SHA `([0-9a-f]{40})` on base SHA `([0-9a-f]{40})`\.\r?\n\r?\n<!-- pageroot-codex-review-sha:([0-9a-f]{40});base-sha:([0-9a-f]{40}) -->[ \t]*(?:\r?\n)?$/u;
 const CODEX_LOGIN = "chatgpt-codex-connector";
 const TRUSTED_REQUEST_ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
-const REVIEW_STATES = new Set(["APPROVED", "CHANGES_REQUESTED", "COMMENTED"]);
+const COMPLETION_REVIEW_STATES = new Set(["APPROVED", "COMMENTED"]);
+const BLOCKING_REVIEW_STATES = new Set(["CHANGES_REQUESTED"]);
 const BLOCKING_PRIORITIES = new Set(["P0", "P1", "P2"]);
 const DEFAULT_SETTLE_SECONDS = 180;
 const DEFAULT_TIMEOUT_SECONDS = 20 * 60;
@@ -169,7 +170,7 @@ function substantiveReviewSignal(review, expectedHeadSha, after, before) {
   const prefix = reviewedCommitPrefix(review?.body);
   if (
     !isCodexActor(review?.user?.login || review?.author?.login || review?.author)
-    || !REVIEW_STATES.has(state)
+    || !COMPLETION_REVIEW_STATES.has(state)
     || commitSha !== expectedHeadSha
     || !prefix
     || !expectedHeadSha.startsWith(prefix)
@@ -177,6 +178,26 @@ function substantiveReviewSignal(review, expectedHeadSha, after, before) {
   ) return null;
   return {
     kind: "substantive_review",
+    scope: "pull_request_review",
+    at: completedAt,
+    id: review?.id || review?.databaseId || null,
+  };
+}
+
+function blockingReviewSignal(review, expectedHeadSha, after, before) {
+  const completedAt = timestamp(review?.submitted_at || review?.submittedAt);
+  const state = String(review?.state || "").toUpperCase();
+  const commitSha = String(
+    review?.commit_id || review?.commit?.oid || review?.commitSha || "",
+  ).toLowerCase();
+  if (
+    !isCodexActor(review?.user?.login || review?.author?.login || review?.author)
+    || !BLOCKING_REVIEW_STATES.has(state)
+    || commitSha !== expectedHeadSha
+    || !strictlyInInterval(completedAt, after, before)
+  ) return null;
+  return {
+    kind: "changes_requested_review",
     scope: "pull_request_review",
     at: completedAt,
     id: review?.id || review?.databaseId || null,
@@ -248,6 +269,18 @@ function reviewCompletionSignals({
     }
   }
   return signals.sort((left, right) => right.at - left.at);
+}
+
+function blockingReviewSignals({
+  expectedHeadSha,
+  after,
+  before = Number.POSITIVE_INFINITY,
+  reviews = [],
+}) {
+  return reviews
+    .map((review) => blockingReviewSignal(review, expectedHeadSha, after, before))
+    .filter(Boolean)
+    .sort((left, right) => right.at - left.at);
 }
 
 function latestCodexEnvironmentFailure(issueComments, atOrAfter, before) {
@@ -322,6 +355,7 @@ function outcome(identity, status, reason, fields = {}) {
     draftCompletion: null,
     completion: null,
     settlesAt: null,
+    blockingReviews: [],
     blockingThreads: [],
     ...fields,
   });
@@ -415,6 +449,20 @@ export function evaluateReviewSettlement({
     });
   }
 
+  const draftBlockingReview = blockingReviewSignals({
+    expectedHeadSha: expectedHead,
+    after: requestAt,
+    before: readyAt,
+    reviews,
+  })[0] || null;
+  if (draftBlockingReview) {
+    return outcome(identity, "blocked", "draft_review_changes_requested", {
+      request: requestSummary,
+      promotion,
+      blockingReviews: [completionSummary(draftBlockingReview)],
+    });
+  }
+
   const draftCompletion = reviewCompletionSignals({
     expectedHeadSha: expectedHead,
     after: requestAt,
@@ -455,6 +503,11 @@ export function evaluateReviewSettlement({
     completionComments: issueComments,
     reactionGroups: [{ scope: "pull_request", reactions: pullRequestReactions }],
   })[0] || null;
+  const finalBlockingReview = blockingReviewSignals({
+    expectedHeadSha: expectedHead,
+    after: readyAt,
+    reviews,
+  })[0] || null;
   const finalEnvironmentFailure = latestCodexEnvironmentFailure(
     issueComments,
     readyAt,
@@ -462,14 +515,39 @@ export function evaluateReviewSettlement({
   );
   if (
     finalEnvironmentFailure
-    && (!finalCompletion || finalEnvironmentFailure.at >= finalCompletion.at)
+    && finalEnvironmentFailure.at >= Math.max(
+      finalCompletion?.at || Number.NEGATIVE_INFINITY,
+      finalBlockingReview?.at || Number.NEGATIVE_INFINITY,
+    )
   ) {
     return outcome(identity, "blocked", "final_review_environment_unavailable", {
       request: requestSummary,
       promotion,
       draftCompletion: completionSummary(draftCompletion),
       completion: completionSummary(finalCompletion),
+      blockingReviews: finalBlockingReview
+        ? [completionSummary(finalBlockingReview)]
+        : [],
     });
+  }
+  if (finalBlockingReview) {
+    const latestFinalSignalAt = Math.max(
+      finalBlockingReview.at,
+      finalCompletion?.at || Number.NEGATIVE_INFINITY,
+    );
+    const settlesAtMs = latestFinalSignalAt + settleSeconds * 1000;
+    const fields = {
+      request: requestSummary,
+      promotion,
+      draftCompletion: completionSummary(draftCompletion),
+      completion: completionSummary(finalCompletion),
+      settlesAt: new Date(settlesAtMs).toISOString(),
+      blockingReviews: [completionSummary(finalBlockingReview)],
+    };
+    if (nowMs < settlesAtMs) {
+      return outcome(identity, "waiting", "settle_window", fields);
+    }
+    return outcome(identity, "blocked", "final_review_changes_requested", fields);
   }
   if (!finalCompletion) {
     return outcome(identity, "waiting", "final_review_in_progress", {
@@ -742,6 +820,7 @@ function conciseResult(result) {
     draftCompletion: result.draftCompletion,
     completion: result.completion,
     settlesAt: result.settlesAt,
+    blockingReviews: result.blockingReviews,
     blockingThreads: result.blockingThreads,
   };
 }
@@ -760,6 +839,7 @@ async function appendSummary(result) {
     `- Draft completion: ${result.draftCompletion ? `${result.draftCompletion.kind} at ${result.draftCompletion.at}` : "not observed"}`,
     `- Post-Ready completion: ${result.completion ? `${result.completion.kind} at ${result.completion.at}` : "not observed"}`,
     `- Settle boundary: ${result.settlesAt || "not reached"}`,
+    `- Blocking exact-commit reviews: ${result.blockingReviews.length}`,
     `- Blocking active threads: ${result.blockingThreads.length}`,
     "",
   ];

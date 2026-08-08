@@ -9,7 +9,7 @@
 | `npm run gate:edit` | 一次局部修改后 | 只运行影响映射命中的 Node 文件；必要时 typecheck | 快速发现局部逻辑错误，不启动浏览器或 Electron |
 | `npm run gate:task` | 一个开发任务完成时 | 静态检查、受影响 Node 文件，以及相关 Browser/Electron/AI 冒烟 | 在较短时间内证明生产链路已经接通 |
 | PR `pr-feedback` | `opened/synchronize/reopened` | 按影响映射选择 Node/编译检查 | 普通推送无论 Draft/Ready 都不重复消费完整矩阵；仅切回 Draft 不产生 Feedback |
-| `review-settled` | 已在 Draft 请求 exact head/base 审阅的最终 Tree 转为 Ready，由 Ready 唯一触发最终审阅 | 实时 head/base、Draft 请求/完成、post-Ready 正式 review、不可变 exact-commit clean comment 或 phase-correct reaction、180 秒 settle window、活动非 outdated P0-P2 线程 | 审阅未结束、空 review/`EYES`、旧 head/base、迟到意见或未解决意见时不启动完整矩阵 |
+| `review-settled` | 已在 Draft 请求 exact head/base 审阅的最终 Tree 转为 Ready，由 Ready 唯一触发最终审阅 | 实时 head/base、Draft 请求/完成、post-Ready 非阻断正式 review、不可变 exact-commit clean comment 或 phase-correct reaction、当前提交 `CHANGES_REQUESTED`、180 秒 settle window、活动非 outdated P0-P2 线程 | 审阅未结束、阻断、空 review/`EYES`、旧 head/base、迟到意见或未解决意见时不启动完整矩阵 |
 | `baseline-policy` | review 与分支策略通过 | 全局依赖 advisory policy 与 packaged-runtime closure | 基线红时不启动 Linux build、Browser 或 macOS Electron runner |
 | 一次性晋升 `release-gate` | review 与 baseline 均通过的最终 PR Tree | 全量 Node、三分片完整 Browser、独立 Native Electron、独立确定性 AI 闭环、真实 HTML 发现式门禁 | 每个最终候选只跑一次并签发 Tree Hash 凭证；后续新 SHA 必须重新 Draft 审阅并晋升 |
 | `Release Dry Run` | PR 改动命中打包、release metadata、Electron、Bridge、Schema 或资源路径 | clean job 组装/静态校验显式未签名（`identity=null`）App → 非发布 checkpoint → 第二 clean job 恢复 metadata、重建 renderer oracle、再次校验并启动核对名称/版本/Bundle ID | 不读取签名或 Apple 凭证、不生成 DMG/updater、不成为 Candidate、不创建 tag、不发布 |
@@ -32,7 +32,7 @@ PR 必须从 Draft 开始。普通推送由独立的 `PR Feedback` workflow 处�
 不会创建名为 `release-gate` 的跳过 job；因此分支保护不会把轻量反馈误当
 完整通过。只切回 Draft 不触发 Feedback。冻结 head 并更新到当前 base 后必须先在 Draft 用完整
 head/base SHA marker 明确请求 Codex review；每个新提交或 base 更新都需要新请求。只有
-`ready_for_review` 事件存在完整 workflow，并且 Ready 本身是唯一的最终审阅触发器，期间不再发布第二条 review 命令。`review-settled` 只接受携带当前完整 `commit_id` 与匹配 `Reviewed commit` marker 的正式 Codex review、以固定 clean 结论开头且不可编辑的 exact-commit Codex comment，或处于正确 Draft/Ready 时间区间且严格晚于对应触发的 clean `THUMBS_UP`；canonical request 与 clean comment 的编辑状态来自 GraphQL `lastEditedAt`，即使创建/更新时间落在同一秒也不能绕过。Ready 把 Draft PR reaction 替换为 `EYES` 后，持久 clean comment 仍保留 Draft 证据。同一 head 的严格 canonical 历史若出现不同 base，整对证据失败关闭并要求产生新 head，不猜测 commit-only completion 的 base。同秒时间戳无法证明先后时失败关闭，空 review、`EYES`、普通讨论文本和任意非协议 Markdown 都不参与判定。它在每轮轮询中同时重验 live head/base，随后从真实完成时刻等待 180 秒，再检查未解决且未 outdated 的 P0-P2
+`ready_for_review` 事件存在完整 workflow，并且 Ready 本身是唯一的最终审阅触发器，期间不再发布第二条 review 命令。`review-settled` 只接受携带当前完整 `commit_id`、匹配 `Reviewed commit` marker 且状态为 `COMMENTED` 或 `APPROVED` 的非阻断 Codex review、以固定 clean 结论开头且不可编辑的 exact-commit Codex comment，或处于正确 Draft/Ready 时间区间且严格晚于对应触发的 clean `THUMBS_UP`；当前提交的 `CHANGES_REQUESTED` 即使没有 inline thread 也不属于完成证据，Draft 阶段立即阻断，Ready 阶段从该信号等待 180 秒后阻断。canonical request 与 clean comment 的编辑状态来自 GraphQL `lastEditedAt`，即使创建/更新时间落在同一秒也不能绕过。Ready 把 Draft PR reaction 替换为 `EYES` 后，持久 clean comment 仍保留 Draft 证据。同一 head 的严格 canonical 历史若出现不同 base，整对证据失败关闭并要求产生新 head，不猜测 commit-only completion 的 base。同秒时间戳无法证明先后时失败关闭，空 review、`EYES`、普通讨论文本和任意非协议 Markdown 都不参与判定。它在每轮轮询中同时重验 live head/base，随后从真实完成或阻断时刻等待 180 秒，再检查未解决且未 outdated 的 P0-P2
 线程。通过后 `baseline-policy` 才检查依赖与打包运行时闭包；完整 Linux/Browser/
 Electron job 依赖这些前置条件；`release-gate` 在 attestation 前刷新同一基线，覆盖延迟 failed-job retry 不重跑已绿 prerequisite 的情况。若晋升后又有提交，新 SHA 只获得反馈且缺少
 必需检查，必须重新转 Draft、冻结、审阅后再转 Ready；base 更新同样使已审组合失效。

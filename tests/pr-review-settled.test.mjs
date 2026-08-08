@@ -227,6 +227,13 @@ test("substantive exact-commit reviews settle both phases", () => {
   assert.equal(result.draftCompletion.at, draftCompletedAt);
   assert.equal(result.completion.kind, "substantive_review");
   assert.equal(result.completion.at, finalCompletedAt);
+
+  assert.equal(evaluate({
+    reviews: [
+      draftReview({ state: "APPROVED" }),
+      codexReview({ state: "APPROVED" }),
+    ],
+  }).status, "settled");
 });
 
 test("clean reactions settle only inside their Draft or Ready phase", () => {
@@ -352,6 +359,54 @@ test("completion requires a matching body marker as well as GitHub commit identi
   assert.equal(evaluate({
     reviews: [draftReview(), codexReview({ state: "PENDING" })],
   }).reason, "final_review_in_progress");
+});
+
+test("exact-commit changes-requested reviews block both phases without a thread", () => {
+  const draftBlocked = evaluate({
+    reviews: [
+      draftReview({ state: "CHANGES_REQUESTED", body: "" }),
+      codexReview(),
+    ],
+  });
+  assert.equal(draftBlocked.status, "blocked");
+  assert.equal(draftBlocked.reason, "draft_review_changes_requested");
+  assert.equal(draftBlocked.blockingReviews[0].kind, "changes_requested_review");
+
+  const finalReview = codexReview({ state: "CHANGES_REQUESTED", body: "" });
+  const settling = evaluate({
+    reviews: [draftReview(), finalReview],
+    now: new Date("2026-08-08T04:04:59.999Z"),
+  });
+  assert.equal(settling.status, "waiting");
+  assert.equal(settling.reason, "settle_window");
+  assert.equal(settling.settlesAt, "2026-08-08T04:05:00.000Z");
+
+  const finalBlocked = evaluate({
+    reviews: [draftReview(), finalReview],
+  });
+  assert.equal(finalBlocked.status, "blocked");
+  assert.equal(finalBlocked.reason, "final_review_changes_requested");
+  assert.equal(finalBlocked.blockingReviews[0].kind, "changes_requested_review");
+  assert.equal(finalBlocked.blockingThreads.length, 0);
+
+  assert.equal(evaluate({
+    issueComments: [request(), cleanComment()],
+    reviews: [draftReview(), finalReview],
+  }).reason, "final_review_changes_requested");
+});
+
+test("non-current or non-active blocking review states remain noise", () => {
+  for (const noise of [
+    codexReview({ state: "CHANGES_REQUESTED", sha: oldSha }),
+    codexReview({ state: "CHANGES_REQUESTED", actor: "maintainer" }),
+    codexReview({ state: "CHANGES_REQUESTED", submittedAt: readyAt }),
+    codexReview({ state: "DISMISSED" }),
+    codexReview({ state: "PENDING" }),
+  ]) {
+    assert.equal(evaluate({
+      reviews: [draftReview(), noise],
+    }).reason, "final_review_in_progress");
+  }
 });
 
 test("live identity and phase ordering invalidate stale evidence", () => {
