@@ -185,19 +185,25 @@ function reviewCompletionSignals({
     }
   }
 
-  for (const reaction of [...(requestReactions || []), ...(issueReactions || [])]) {
-    const completedAt = timestamp(reaction?.created_at || reaction?.createdAt);
-    if (
-      isCodexActor(reaction?.user?.login || reaction?.author?.login || reaction?.author)
-      && ["+1", "THUMBS_UP"].includes(reaction?.content)
-      && Number.isFinite(completedAt)
-      && completedAt >= requestAt
-    ) {
-      signals.push({
-        kind: "clean_review_reaction",
-        at: completedAt,
-        id: reaction?.id || reaction?.databaseId || null,
-      });
+  for (const [scope, reactions] of [
+    ["request_comment", requestReactions || []],
+    ["pull_request", issueReactions || []],
+  ]) {
+    for (const reaction of reactions) {
+      const completedAt = timestamp(reaction?.created_at || reaction?.createdAt);
+      if (
+        isCodexActor(reaction?.user?.login || reaction?.author?.login || reaction?.author)
+        && ["+1", "THUMBS_UP"].includes(reaction?.content)
+        && Number.isFinite(completedAt)
+        && completedAt >= requestAt
+      ) {
+        signals.push({
+          kind: "clean_review_reaction",
+          scope,
+          at: completedAt,
+          id: reaction?.id || reaction?.databaseId || null,
+        });
+      }
     }
   }
   return signals.sort((left, right) => right.at - left.at);
@@ -226,6 +232,7 @@ function completionSummary(completion) {
   if (!completion) return null;
   return Object.freeze({
     kind: completion.kind,
+    scope: completion.scope || null,
     id: completion.id,
     at: new Date(completion.at).toISOString(),
   });
@@ -394,6 +401,7 @@ export function evaluateReviewSettlement({
   });
   const draftCompletion = completionSignals.find((signal) => (
     signal.at >= draftStartedAt && signal.at < readyAt
+    && (signal.kind !== "clean_review_reaction" || signal.scope === "request_comment")
   )) || null;
   const environmentFailure = latestCodexEnvironmentFailure(issueComments, requestAt);
   if (
@@ -427,7 +435,10 @@ export function evaluateReviewSettlement({
       blockingThreads: [],
     });
   }
-  const completion = completionSignals.find((signal) => signal.at >= readyAt) || null;
+  const completion = completionSignals.find((signal) => (
+    signal.at >= readyAt
+    && (signal.kind !== "clean_review_reaction" || signal.scope === "pull_request")
+  )) || null;
   if (!completion) {
     return Object.freeze({
       status: "waiting",

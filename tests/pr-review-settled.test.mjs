@@ -158,13 +158,40 @@ test("clean Codex completion comments and reactions remain exact-request-bound",
   }).completion.kind, "review_completion_comment");
   assert.equal(evaluate({
     reviews: [draftReview()],
-    requestReactions: [{
+    issueReactions: [{
       id: 50,
       user: { login: "chatgpt-codex-connector[bot]" },
       content: "+1",
       created_at: completedAt,
     }],
   }).completion.kind, "clean_review_reaction");
+  assert.equal(evaluate({
+    reviews: [exactReview()],
+    requestReactions: [{
+      id: 52,
+      user: { login: "chatgpt-codex-connector[bot]" },
+      content: "+1",
+      created_at: draftCompletedAt,
+    }],
+  }).draftCompletion.kind, "clean_review_reaction");
+  assert.equal(evaluate({
+    reviews: [exactReview()],
+    issueReactions: [{
+      id: 53,
+      user: { login: "chatgpt-codex-connector[bot]" },
+      content: "+1",
+      created_at: draftCompletedAt,
+    }],
+  }).reason, "draft_review_not_completed_before_promotion");
+  assert.equal(evaluate({
+    reviews: [draftReview()],
+    requestReactions: [{
+      id: 54,
+      user: { login: "chatgpt-codex-connector[bot]" },
+      content: "+1",
+      created_at: completedAt,
+    }],
+  }).reason, "codex_review_in_progress");
   assert.equal(evaluate({
     reviews: [draftReview()],
     issueReactions: [{
