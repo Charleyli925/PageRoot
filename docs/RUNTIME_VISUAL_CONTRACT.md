@@ -15,7 +15,7 @@ the same frozen values and the accompanying TypeScript declarations.
 | --- | --- |
 | Contract version | `1` |
 | Candidate limit | `128` exact source-empty hosts; directly referenced hosts are prioritized before conservative widening fills remaining slots |
-| Identity-attribute limit | `24`; deterministic attributes are shared with the consumer, while an over-limit host without an explicit `id`/`name` anchor is omitted rather than truncated into an unsafe fingerprint |
+| Identity-attribute limit | `24`; deterministic attributes are shared with the consumer, while every over-limit host is omitted rather than truncated into an unsafe fingerprint, even with an `id`/`name` anchor |
 | Owner deadline | `1500ms` for page-realm capture work and review-frame registration |
 | Comparison deadline | `500ms` after both exact review frames register |
 | Page budget | `8192` atoms, `8192` traversed nodes, `400000` value characters, `4194304` Canvas pixels, `32` bitmap visuals, `16000000` PNG bytes |
@@ -62,7 +62,7 @@ minimal fixture in `tests/fixtures/runtime-visual-hostile-pages.mjs`.
 | #105 `PRRT_kwDOTdtgh86XQhQm` / `pr105-dynamic-id-dependency` | A computed element lookup depends on the complete source. | Computed `getElementById` widens candidates and changes the dependency Hash when referenced data changes. |
 | #105 `PRRT_kwDOTdtgh86XQhQo` / `pr105-owner-deadline` | Page-owned clocks cannot extend capture ownership. | A never-resolving settle promise reaches the shared owner deadline, destroys the hidden window, and revokes its session. |
 | #107 `PRRT_kwDOTdtgh86XW6Z8` / `pr107-parser-text-mutation` | Parser-added targets may use stable attributes to retain the exact inserted Element before mutable text is compared; fingerprintless comment targets may bind only to their unchanged frozen path. | Mutation records bind that exact Element; ignoring text requires at least one stable identity attribute. A same-tag observation at a shifted path invalidates a fingerprintless comment binding, while duplicates, replacement, or disconnection still invalidate the batch. |
-| #107 `PRRT_kwDOTdtgh86XW6Z_` / `pr107-attribute-limit` | A host with more than 24 identity attributes and no explicit `id`/`name` anchor is not bindable. | The producer drops an over-limit fingerprint instead of allowing the retained prefix to guess a parser sibling; the bootstrap enforces the same shared ceiling. |
+| #107 `PRRT_kwDOTdtgh86XW6Z_` / `pr107-attribute-limit` | A host with more than 24 identity attributes is not bindable, even with an explicit `id`/`name` anchor. | The producer drops every over-limit fingerprint instead of allowing a retained prefix or an anchor exception to guess a parser sibling; the bootstrap enforces the same shared ceiling. |
 
 This contract does not add screenshot features, serialize new temporary DOM
 attributes, or change the review UI.

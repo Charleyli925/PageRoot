@@ -1468,16 +1468,11 @@ function reviewBootstrapElementBinding(
       || leftValue.localeCompare(rightValue)
     ))
     .slice(0, RUNTIME_VISUAL_CONTRACT.identityAttributeLimit);
-  // A truncated fingerprint is not evidence of identity. Without an
-  // explicit id/name anchor, an omitted attribute may be the only thing that
-  // distinguishes a parser-inserted sibling at the frozen path. Drop the
-  // binding rather than letting the consumer bind the retained prefix.
-  if (
-    nonReviewAttributes.length > RUNTIME_VISUAL_CONTRACT.identityAttributeLimit
-    && !nonReviewAttributes.some((attribute) => (
-      attribute.name === "id" || attribute.name === "name"
-    ))
-  ) return null;
+  // A truncated fingerprint is never evidence of identity. Even an id/name
+  // anchor can be shared by an authored parser decoy while an omitted
+  // attribute distinguishes the real source target, so drop every binding
+  // that cannot be represented completely.
+  if (nonReviewAttributes.length > RUNTIME_VISUAL_CONTRACT.identityAttributeLimit) return null;
   const identityText = includeIdentityText
     ? (element.textContent || "").replace(/\s+/gu, " ").trim().slice(0, 1024)
     : "";

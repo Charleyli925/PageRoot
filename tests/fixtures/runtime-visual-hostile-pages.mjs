@@ -1,4 +1,8 @@
 const SHA = (digit) => `sha256:${digit.repeat(64)}`;
+const OVER_LIMIT_ATTRIBUTES = Array.from(
+  { length: 25 },
+  (_, index) => `data-key-${index}="${index}"`,
+).join(" ");
 
 export const RUNTIME_VISUAL_HOSTILE_PAGES = Object.freeze([
   Object.freeze({
@@ -90,13 +94,10 @@ export const RUNTIME_VISUAL_HOSTILE_PAGES = Object.freeze([
     pr: 107,
     threadId: "PRRT_kwDOTdtgh86XW6Z_",
     surface: "review",
-    html: `<!doctype html><main><div ${Array.from(
-      { length: 25 },
-      (_, index) => `data-key-${index}="${index}"`,
-    ).join(" ")}></div><script>
-      document.querySelector("div").append(document.createElement("canvas"));</script></main>`,
-    contract: "A host with more than 24 identity attributes and no explicit id/name anchor is not bindable.",
-    closureReason: "The producer drops an over-limit fingerprint instead of allowing the retained prefix to guess a parser sibling; the consumer enforces the same 24-attribute ceiling.",
+    html: `<!doctype html><main><div id="anchored" ${OVER_LIMIT_ATTRIBUTES}></div><div ${OVER_LIMIT_ATTRIBUTES}></div><script>
+      document.querySelectorAll("div").forEach((host) => host.append(document.createElement("canvas")));</script></main>`,
+    contract: "A host with more than 24 identity attributes is not bindable, even when it also has an id/name anchor.",
+    closureReason: "The producer drops every over-limit fingerprint instead of allowing a retained prefix or an id/name exception to guess a parser sibling; the consumer enforces the same 24-attribute ceiling.",
   }),
 ]);
 

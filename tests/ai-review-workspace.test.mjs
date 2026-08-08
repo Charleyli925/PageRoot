@@ -620,6 +620,7 @@ test("hostile review fixtures are enforced by the adapter and page contract", ()
   assert.match(parserMutation.html, /class="comment-target"/u);
   assert.match(parserMutation.html, /class="comment-host"/u);
   assert.match(attributeLimit.html, /data-key-24/u);
+  assert.match(attributeLimit.html, /id="anchored"/u);
   assert.doesNotMatch(attributeLimit.html, /id=["']chart["']/u);
 
   assert.match(reviewDocument, /ReviewRuntimeVisualCaptureAdapter/);

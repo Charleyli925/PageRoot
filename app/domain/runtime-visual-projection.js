@@ -168,8 +168,8 @@ function sourceReferencesToken(source, token) {
     const before = offset > 0 ? source[offset - 1] : "";
     const after = source[offset + value.length] || "";
     if (
-      !/[A-Za-z0-9_-]/u.test(before)
-      && !/[A-Za-z0-9_-]/u.test(after)
+      !/[A-Za-z0-9_.:-]/u.test(before)
+      && !/[A-Za-z0-9_.:-]/u.test(after)
     ) return true;
     offset = source.indexOf(value, offset + 1);
   }

@@ -242,8 +242,9 @@ before-side comment-channel challenge; it validates the trusted parent,
   the matching port may submit snapshots. Runtime requests, channel transfer and
   snapshot envelopes must also match the shared contract version and the exact
   side-specific source Hash. The producer uses the same shared 24-attribute
-  boundary enforced by the consumer; an over-limit host without an explicit
-  `id`/`name` anchor is omitted rather than represented by an unsafe prefix.
+  boundary enforced by the consumer; every over-limit host is omitted rather
+  than represented by an unsafe prefix, including hosts with an explicit
+  `id`/`name` anchor.
   Parser-added Elements may ignore mutable text only when at least one stable
   attribute proves the exact record; ambiguity, replacement or disconnection
   remains a static-only result.
