@@ -4580,6 +4580,7 @@ function reviewBootstrap(
     runtimeVisualStyleValue(style, "text-shadow"),
     runtimeVisualStyleValue(style, "-webkit-text-stroke-color"),
     runtimeVisualStyleValue(style, "-webkit-text-stroke-width"),
+    runtimeVisualStyleValue(style, "-webkit-text-fill-color"),
   ];
   const runtimeVisualTextHasPaint = (style) => {
     const textShadow = runtimeVisualStyleValue(style, "text-shadow");
@@ -4589,14 +4590,21 @@ function reviewBootstrap(
       runtimeVisualStyleValue(style, "-webkit-text-stroke-width") || "0",
     );
     const strokeColor = runtimeVisualStyleValue(style, "-webkit-text-stroke-color");
-    return !runtimeVisualTransparent(runtimeVisualStyleValue(style, "color"))
+    const textFillColor = runtimeVisualStyleValue(
+      style,
+      "-webkit-text-fill-color",
+    );
+    return (
+      !runtimeVisualTransparent(runtimeVisualStyleValue(style, "color"))
+      || !runtimeVisualTransparent(textFillColor)
       || runtimeVisualShadowHasPaint(textShadow)
       || Boolean(
         decorationLine
         && decorationLine !== "none"
         && !runtimeVisualTransparent(decorationColor)
       )
-      || (strokeWidth > 0 && !runtimeVisualTransparent(strokeColor));
+      || (strokeWidth > 0 && !runtimeVisualTransparent(strokeColor))
+    );
   };
   const runtimeVisualTextPaintSignature = (style) => (
     runtimeVisualArrayJoin(runtimeVisualTextPaint(style), "|")

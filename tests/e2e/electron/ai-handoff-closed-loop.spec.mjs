@@ -910,7 +910,9 @@ test("a verified AI result stays pending through desktop review until the user a
       );
       runtimeTransparentText.innerHTML = '<span style="color:transparent">'
         + (runtimeReviewChartVariant === "before" ? '隐藏旧值' : '隐藏新值')
-        + '</span>';
+        + '</span><span style="color:transparent;-webkit-text-fill-color:'
+        + (runtimeReviewChartVariant === "before" ? '#9aaec2' : '#6d5ce7')
+        + '">' + (runtimeReviewChartVariant === "before" ? '填充旧值' : '填充新值') + '</span>';
       const runtimeAttributeLimit = document.querySelector(
         "#review-runtime-attribute-limit",
       );
@@ -1525,6 +1527,7 @@ test("a verified AI result stays pending through desktop review until the user a
       "#review-runtime-canvas-chart",
       "#review-runtime-host-paint-chart",
       "#review-runtime-single-painted-child",
+      "#review-runtime-transparent-text",
       "#review-runtime-opacity-chart",
       "#review-runtime-descendant-opacity-chart",
       "#review-runtime-svg-descendant-opacity-chart",
@@ -1552,7 +1555,6 @@ test("a verified AI result stays pending through desktop review until the user a
       "#review-runtime-flow-chart",
       "#review-runtime-unstable-chart",
       "#review-runtime-root-geometry-chart",
-      "#review-runtime-transparent-text",
       "#review-runtime-hidden-churn-chart",
       "#review-runtime-hidden-descendant-churn-chart",
       "#review-runtime-svg-hidden-descendant-churn-chart",
@@ -1591,10 +1593,6 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect(afterReviewFrame.locator("#review-runtime-unstable-chart"))
       .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
     await expect(afterReviewFrame.locator("#review-runtime-root-geometry-chart"))
-      .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
-    await expect(beforeReviewFrame.locator("#review-runtime-transparent-text"))
-      .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
-    await expect(afterReviewFrame.locator("#review-runtime-transparent-text"))
       .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
     await expect(afterReviewFrame.locator("#review-runtime-hidden-churn-chart"))
       .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");

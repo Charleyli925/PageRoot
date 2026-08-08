@@ -219,6 +219,28 @@ test("direct references keep punctuation identifiers distinct from class tokens"
   );
 });
 
+test("class-selector references retain class-only runtime hosts", () => {
+  const source = `<!doctype html><main>
+    <div class="chart"></div>
+    <div id="late.chart"></div>
+    <script>
+      document.querySelector(".chart").textContent = "ready";
+    </script>
+  </main>`;
+  const sourceIndex = buildSourceIndex(source);
+  const prepared = prepareRuntimeVisualCapture({
+    html: source,
+    sourcePath: "/tmp/class-selector-runtime-host.html",
+    viewportWidth: 900,
+  });
+  assert.deepEqual(
+    prepared?.candidates.map((candidate) => (
+      sourceIndex.byNodeId.get(candidate.sourceNodeId)?.selector
+    )),
+    ["div.chart"],
+  );
+});
+
 test("script-referenced data containers participate in the runtime dependency", () => {
   const source = `<!doctype html><main>
     <div id="chart"></div><div id="chart-data">1,2,3</div>

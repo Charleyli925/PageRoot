@@ -142,33 +142,51 @@ function sourceVisualPlaceholder(sourceIndex, element) {
 }
 
 function candidateReferenceTokens(element) {
-  const tokens = new Set([element.selector]);
+  const tokens = [{ value: element.selector, kind: "selector" }];
   for (const attribute of element.attributes ?? []) {
     if (attribute.name === "id" || attribute.name === "name") {
-      tokens.add(attribute.value ?? attribute.rawValue ?? "");
+      tokens.push({
+        value: attribute.value ?? attribute.rawValue ?? "",
+        kind: "identity",
+      });
     }
     if (attribute.name === "class") {
       String(attribute.value ?? attribute.rawValue ?? "")
         .split(/[\t\n\f\r ]+/u)
-        .forEach((token) => tokens.add(token));
+        .forEach((token) => tokens.push({ value: token, kind: "class" }));
     }
     if (attribute.name.startsWith("data-")) {
-      tokens.add(attribute.name);
-      tokens.add(attribute.value ?? attribute.rawValue ?? "");
+      tokens.push({ value: attribute.name, kind: "data-attribute" });
+      tokens.push({
+        value: attribute.value ?? attribute.rawValue ?? "",
+        kind: "data-value",
+      });
     }
   }
-  return [...tokens].filter((token) => String(token).length >= 3);
+  return tokens.filter(({ value }) => String(value).length >= 3);
 }
 
-function sourceReferencesToken(source, token) {
-  const value = String(token ?? "");
+function sourceReferencesToken(source, tokenDescriptor) {
+  const value = String(
+    typeof tokenDescriptor === "object"
+      ? tokenDescriptor?.value
+      : tokenDescriptor,
+  );
+  const kind = typeof tokenDescriptor === "object"
+    ? tokenDescriptor?.kind
+    : "identity";
   if (value.length < 3) return false;
   let offset = source.indexOf(value);
   while (offset >= 0) {
     const before = offset > 0 ? source[offset - 1] : "";
     const after = source[offset + value.length] || "";
+    const classSelectorPunctuation = (
+      kind === "class"
+      && before === "."
+      && !/[A-Za-z0-9_.:-]/u.test(source[offset - 2] || "")
+    );
     if (
-      !/[A-Za-z0-9_.:-]/u.test(before)
+      (classSelectorPunctuation || !/[A-Za-z0-9_.:-]/u.test(before))
       && !/[A-Za-z0-9_.:-]/u.test(after)
     ) return true;
     offset = source.indexOf(value, offset + 1);

@@ -287,12 +287,12 @@ unsupported, unstable, over-budget or locally failed host must produce one
 validated `unavailable` fact; that fact has no comparison
 authority and cannot suppress valid sibling-host facts.
 The producer must select at most 24 deterministic identity attributes and the
-consumer must enforce that same shared limit. If a host exceeds the limit
-without an explicit `id` or `name` anchor, the producer omits the binding
-instead of serializing an unsafe prefix. Parser mutation records may bind
+consumer must enforce that same shared limit. If a host exceeds the limit, the
+producer omits the binding even when it has an explicit `id` or `name` anchor;
+no retained prefix or anchor exception may guess a parser sibling. Parser mutation records may bind
 an exact inserted Element without comparing mutable text only when at least one
 stable attribute matches; duplication, replacement or disconnection still
-fails closed. Text without visible color, shadow, decoration or stroke is not
+fails closed. Text without visible color, text fill, shadow, decoration or stroke is not
 paint evidence, while one painted child plus its geometry is sufficient visual
 evidence.
 Both already-isolated review frames may then report one bounded pair of
