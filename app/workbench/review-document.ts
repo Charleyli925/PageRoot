@@ -4218,16 +4218,15 @@ function reviewBootstrap(
     const identityText = typeof binding?.identityText === "string"
       ? RuntimeVisualString(binding.identityText)
       : "";
+    if (!runtimeVisualInitialBindingPathMatches(element, binding)) return false;
     if (!identityAttributes?.length && identityText.length > 0) {
       return runtimeVisualInitialBindingMatches(element, binding, false);
     }
-    return Boolean(identityAttributes?.length)
-      && runtimeVisualInitialBindingPathMatches(element, binding)
-      && runtimeVisualInitialBindingMatches(
-        element,
-        binding,
-        runtimeVisualInitialBindingIgnoresIdentityText(identityAttributes, identityText),
-      );
+    return runtimeVisualInitialBindingMatches(
+      element,
+      binding,
+      runtimeVisualInitialBindingIgnoresIdentityText(identityAttributes, identityText),
+    );
   };
   const runtimeVisualInitialBindingHasFingerprint = (binding) => {
     const attributes = runtimeVisualInitialBindingIdentityAttributes(binding);

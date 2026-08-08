@@ -16,11 +16,11 @@ export const RUNTIME_VISUAL_HOSTILE_PAGES = Object.freeze([
     pr: 100,
     threadId: "PRRT_kwDOTdtgh86W9A1b",
     surface: "review",
-    html: `<!doctype html><main><div id="chart"></div><script>
+    html: `<!doctype html><main><div class="chart-host"></div><script>
       const bar=document.createElement("i");bar.style.cssText="display:block;background:red;width:8px;height:8px";
-      document.getElementById("chart").append(bar);</script></main>`,
-    contract: "One visible painted child plus one geometry atom is chart-like evidence.",
-    closureReason: "Admission and change comparison both accept the paint-plus-geometry pair.",
+      document.querySelector(".chart-host").append(bar);</script></main>`,
+    contract: "A class-only runtime host remains path-bound even when its identity attributes are limited to the source-box class.",
+    closureReason: "The frozen path proves the unique host before the painted child is observed, so the runtime batch is not discarded for lack of non-class attributes.",
   }),
   Object.freeze({
     id: "pr100-transparent-text",

@@ -660,10 +660,13 @@ test("the generated runtime review bootstrap stays syntactically valid", () => {
 
 test("hostile review fixtures are enforced by the adapter and page contract", () => {
   const nativeCanvas = runtimeVisualHostilePage("pr100-canvas-native-intrinsics");
+  const classOnlyHost = runtimeVisualHostilePage("pr100-single-painted-child");
   const transparentText = runtimeVisualHostilePage("pr100-transparent-text");
   const parserMutation = runtimeVisualHostilePage("pr107-parser-text-mutation");
   const attributeLimit = runtimeVisualHostilePage("pr107-attribute-limit");
   assert.match(nativeCanvas.html, /Math\.round=\(\)=>0/u);
+  assert.match(classOnlyHost.html, /class="chart-host"/u);
+  assert.match(classOnlyHost.html, /querySelector\("\.chart-host"\)/u);
   assert.match(transparentText.html, /color="transparent"/u);
   assert.match(transparentText.html, /rgba\(255, 0, 0, 0\)/u);
   assert.match(transparentText.html, /rgb\(0, 0, 0\)/u);
