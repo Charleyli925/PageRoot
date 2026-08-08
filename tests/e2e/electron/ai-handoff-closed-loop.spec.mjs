@@ -534,6 +534,19 @@ test("a verified AI result stays pending through desktop review until the user a
         <p data-review-delete-only>实验结果稳定。换言之，策略有效。</p>
         <p data-review-warning>⚠️ 近6天(7/23-<span><strong>7/28)增幅收窄至负值区间，需</strong></span>持续关注。</p>
       </div>
+      <div data-review-numbered-lines>① 业务盘子：整体规模稳定。<br>② 实验贡献：日均增量明确。<br>③ 经营解读：效率保持稳定。</div>
+      <ol data-review-list-items>
+        <li>业务盘子稳定</li><li>实验贡献明确</li><li>经营效率稳定</li>
+      </ol>
+      <table data-review-brand-table>
+        <thead><tr><th>品牌</th><th>类目</th><th>对照组</th></tr></thead>
+        <tbody>
+          <tr data-review-brand-row="coach"><td>COACH/蔻驰</td><td>箱包皮具</td><td>3.7万</td></tr>
+          <tr data-review-brand-row="wilson"><td>Wilson/威尔胜</td><td>运动/健身</td><td>1.4万</td></tr>
+          <tr data-review-brand-row="arcteryx"><td>ARC'TERYX/始祖鸟</td><td>户外/登山</td><td>2.3万</td></tr>
+          <tr data-review-brand-row="nike"><td>耐克</td><td>运动/健身</td><td>3.7万</td></tr>
+        </tbody>
+      </table>
       <div data-review-break-layout><span>日均63<br><br>.4万<br>60.7万</span></div>
       <div data-review-deleted-copy><strong>品均拆解：</strong>总确收增长来自覆盖扩大。<br>待删除第一行<br>待删除第二行<br>待删除第三行<br>AI托管的核心价值保持不变。</div>
     </section>
@@ -1179,6 +1192,19 @@ test("a verified AI result stays pending through desktop review until the user a
         .replace(
           '<p data-review-delete-only>实验结果稳定。换言之，策略有效。</p>',
           '<p data-review-delete-only>实验结果稳定。策略有效。</p>',
+        )
+        .replace(
+          '<div data-review-numbered-lines>① 业务盘子：整体规模稳定。<br>② 实验贡献：日均增量明确。<br>③ 经营解读：效率保持稳定。</div>',
+          '<div data-review-numbered-lines>① 业务盘子：整体规模稳定。<br>② 实验贡献：日均增量明确。<br>③ 经营解读：效率保持稳定。<br>④ 后续重点：继续观察新增商品。</div>',
+        )
+        .replace(
+          '        <li>业务盘子稳定</li><li>实验贡献明确</li><li>经营效率稳定</li>',
+          '        <li>业务盘子稳定</li><li>实验贡献明确</li><li>经营效率稳定</li><li data-review-added-list-item>后续观察新增商品</li>',
+        )
+        .replace(
+          '          <tr data-review-brand-row="arcteryx"><td>ARC\'TERYX/始祖鸟</td><td>户外/登山</td><td>2.3万</td></tr>',
+          `          <tr data-review-brand-row="adidas"><td>阿迪达斯</td><td>运动/健身</td><td>1.4万</td></tr>
+          <tr data-review-brand-row="arcteryx"><td>ARC'TERYX/始祖鸟</td><td>户外/登山</td><td>2.3万</td></tr>`,
         )
         .replace(
           '<div data-review-semantic-copy>而非「让每个商品卖得更好」（品均基本持平）。这说明增长主要来自有效成交覆盖扩大。</div>',
@@ -1844,7 +1870,7 @@ test("a verified AI result stays pending through desktop review until the user a
       "[data-review-reference]",
     )).toHaveAttribute(
       "data-pageroot-review-text-anchors",
-      /text-\d+@\d+/u,
+      /text-\d+-\d+@\d+/u,
     );
     await expect(afterReviewFrame.locator(
       '[data-review-reference] [data-pageroot-review-text="added"]',
@@ -1862,8 +1888,35 @@ test("a verified AI result stays pending through desktop review until the user a
       "[data-review-delete-only]",
     )).toHaveAttribute(
       "data-pageroot-review-text-anchors",
-      /text-\d+@\d+/u,
+      /text-\d+-\d+@\d+/u,
     );
+    await expect(beforeReviewFrame.locator(
+      '[data-review-numbered-lines] [data-pageroot-review-text]',
+    )).toHaveCount(0);
+    await expect(afterReviewFrame.locator(
+      '[data-review-numbered-lines] [data-pageroot-review-text="added"]',
+    )).toHaveText("④ 后续重点：继续观察新增商品。");
+    await expect(afterReviewFrame.locator(
+      '[data-review-numbered-lines] [data-pageroot-review-text="added"]',
+    )).toHaveCount(1);
+    await expect(beforeReviewFrame.locator(
+      '[data-review-list-items] [data-pageroot-review-text]',
+    )).toHaveCount(0);
+    await expect(afterReviewFrame.locator(
+      '[data-review-list-items] [data-pageroot-review-text="added"]',
+    )).toHaveText("后续观察新增商品");
+    await expect(afterReviewFrame.locator(
+      '[data-review-list-items] li:not([data-review-added-list-item]) [data-pageroot-review-text]',
+    )).toHaveCount(0);
+    await expect(beforeReviewFrame.locator(
+      '[data-review-brand-table] [data-pageroot-review-text]',
+    )).toHaveCount(0);
+    await expect(afterReviewFrame.locator(
+      '[data-review-brand-row="adidas"] [data-pageroot-review-text="added"]',
+    )).toHaveCount(3);
+    await expect(afterReviewFrame.locator(
+      '[data-review-brand-row]:not([data-review-brand-row="adidas"]) [data-pageroot-review-text]',
+    )).toHaveCount(0);
     const addedChartChangeId = await afterReviewFrame.locator(
       "[data-review-added-chart] [data-pageroot-review-marker]",
     ).first().getAttribute("data-pageroot-review-marker");

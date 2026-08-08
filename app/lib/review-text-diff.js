@@ -8,6 +8,8 @@ const HAN_CHARACTER_PATTERN = /^\p{Script=Han}$/u;
 const SEMANTIC_BOUNDARY_PATTERN = /^[\s\p{P}\p{S}]$/u;
 const SHORT_HAN_TEXT_PATTERN = /^\p{Script=Han}{3,12}$/u;
 const MAX_TOKEN_MATRIX_CELLS = 60_000;
+const MAX_SEMANTIC_UNIT_MATRIX_CELLS = 250_000;
+const SEMANTIC_UNIT_LOOKAHEAD = 32;
 const TOKEN_CHUNK_ANCHOR_LENGTHS = [4, 3, 2, 1];
 
 function tokenizeFallback(value) {
@@ -297,6 +299,166 @@ export function reviewTextSimilarity(left, right) {
     wordSimilarity,
     characterMatches / Math.max(leftCharacters.length, rightCharacters.length),
   );
+}
+
+function semanticTextUnitPairScore(before, after, beforeIndex, afterIndex) {
+  if (before.kind !== after.kind) return Number.NEGATIVE_INFINITY;
+  const beforeIdentity = before.identity || "";
+  const afterIdentity = after.identity || "";
+  if ((beforeIdentity || afterIdentity) && beforeIdentity !== afterIdentity) {
+    return Number.NEGATIVE_INFINITY;
+  }
+  const beforeText = before.text.replace(/\s+/gu, " ").trim();
+  const afterText = after.text.replace(/\s+/gu, " ").trim();
+  const exactText = Boolean(beforeText && beforeText === afterText);
+  const similarity = reviewTextSimilarity(beforeText, afterText);
+  const beforeAffinities = new Set(before.affinities || []);
+  const sharedAffinities = (after.affinities || [])
+    .filter((affinity) => beforeAffinities.has(affinity));
+  if (!exactText && similarity < 0.48 && !(sharedAffinities.length && similarity >= 0.24)) {
+    return Number.NEGATIVE_INFINITY;
+  }
+  return (beforeIdentity ? 600 : 0)
+    + (exactText ? 420 : 0)
+    + Math.round(similarity * 160)
+    + Math.min(80, sharedAffinities.length * 24)
+    + Math.max(0, 24 - Math.abs(beforeIndex - afterIndex) * 2);
+}
+
+function semanticTextUnitSignature(unit) {
+  const text = unit.text.replace(/\s+/gu, " ").trim();
+  if (!text) return null;
+  return `${unit.kind}\u0000${unit.identity || ""}\u0000${text}`;
+}
+
+function boundedSemanticTextUnitPairs(before, after) {
+  const pairs = [];
+  let beforeIndex = 0;
+  let afterIndex = 0;
+  const exactDistance = (items, start, signature) => {
+    if (!signature) return -1;
+    const end = Math.min(items.length, start + SEMANTIC_UNIT_LOOKAHEAD + 1);
+    for (let index = start; index < end; index += 1) {
+      if (semanticTextUnitSignature(items[index]) === signature) return index - start;
+    }
+    return -1;
+  };
+  while (beforeIndex < before.length && afterIndex < after.length) {
+    const beforeSignature = semanticTextUnitSignature(before[beforeIndex]);
+    const afterSignature = semanticTextUnitSignature(after[afterIndex]);
+    const afterDistance = exactDistance(after, afterIndex + 1, beforeSignature);
+    const beforeDistance = exactDistance(before, beforeIndex + 1, afterSignature);
+    if (afterDistance >= 0 && (beforeDistance < 0 || afterDistance <= beforeDistance)) {
+      pairs.push({ beforeIndex: null, afterIndex });
+      afterIndex += 1;
+      continue;
+    }
+    if (beforeDistance >= 0) {
+      pairs.push({ beforeIndex, afterIndex: null });
+      beforeIndex += 1;
+      continue;
+    }
+    const pairScore = semanticTextUnitPairScore(
+      before[beforeIndex],
+      after[afterIndex],
+      beforeIndex,
+      afterIndex,
+    );
+    if (Number.isFinite(pairScore)) {
+      pairs.push({ beforeIndex, afterIndex });
+      beforeIndex += 1;
+      afterIndex += 1;
+      continue;
+    }
+    if (after.length - afterIndex > before.length - beforeIndex) {
+      pairs.push({ beforeIndex: null, afterIndex });
+      afterIndex += 1;
+    } else {
+      pairs.push({ beforeIndex, afterIndex: null });
+      beforeIndex += 1;
+    }
+  }
+  while (beforeIndex < before.length) {
+    pairs.push({ beforeIndex, afterIndex: null });
+    beforeIndex += 1;
+  }
+  while (afterIndex < after.length) {
+    pairs.push({ beforeIndex: null, afterIndex });
+    afterIndex += 1;
+  }
+  return pairs;
+}
+
+function matrixSemanticTextUnitPairs(before, after) {
+  const columnCount = after.length + 1;
+  const scores = new Float64Array((before.length + 1) * columnCount);
+  const decisions = new Uint8Array(before.length * Math.max(1, after.length));
+  const scoreAt = (beforeIndex, afterIndex) => (
+    scores[beforeIndex * columnCount + afterIndex]
+  );
+  for (let beforeIndex = before.length - 1; beforeIndex >= 0; beforeIndex -= 1) {
+    for (let afterIndex = after.length - 1; afterIndex >= 0; afterIndex -= 1) {
+      const skipBefore = scoreAt(beforeIndex + 1, afterIndex);
+      const skipAfter = scoreAt(beforeIndex, afterIndex + 1);
+      const pairScore = semanticTextUnitPairScore(
+        before[beforeIndex],
+        after[afterIndex],
+        beforeIndex,
+        afterIndex,
+      );
+      const match = Number.isFinite(pairScore)
+        ? pairScore + scoreAt(beforeIndex + 1, afterIndex + 1)
+        : Number.NEGATIVE_INFINITY;
+      const preferSkipAfter = after.length - afterIndex > before.length - beforeIndex;
+      let decision = skipAfter > skipBefore || (skipAfter === skipBefore && preferSkipAfter)
+        ? 2
+        : 1;
+      let best = decision === 2 ? skipAfter : skipBefore;
+      if (match >= best && Number.isFinite(match)) {
+        decision = 3;
+        best = match;
+      }
+      scores[beforeIndex * columnCount + afterIndex] = best;
+      decisions[beforeIndex * Math.max(1, after.length) + afterIndex] = decision;
+    }
+  }
+
+  const pairs = [];
+  let beforeIndex = 0;
+  let afterIndex = 0;
+  while (beforeIndex < before.length || afterIndex < after.length) {
+    if (beforeIndex >= before.length) {
+      pairs.push({ beforeIndex: null, afterIndex });
+      afterIndex += 1;
+      continue;
+    }
+    if (afterIndex >= after.length) {
+      pairs.push({ beforeIndex, afterIndex: null });
+      beforeIndex += 1;
+      continue;
+    }
+    const decision = decisions[
+      beforeIndex * Math.max(1, after.length) + afterIndex
+    ];
+    if (decision === 3) {
+      pairs.push({ beforeIndex, afterIndex });
+      beforeIndex += 1;
+      afterIndex += 1;
+    } else if (decision === 2) {
+      pairs.push({ beforeIndex: null, afterIndex });
+      afterIndex += 1;
+    } else {
+      pairs.push({ beforeIndex, afterIndex: null });
+      beforeIndex += 1;
+    }
+  }
+  return pairs;
+}
+
+export function pairReviewSemanticTextUnits(before, after) {
+  return before.length * after.length <= MAX_SEMANTIC_UNIT_MATRIX_CELLS
+    ? matrixSemanticTextUnitPairs(before, after)
+    : boundedSemanticTextUnitPairs(before, after);
 }
 
 function rangesForTokens(source, tokens, indexes) {

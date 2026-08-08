@@ -8,6 +8,7 @@ import {
 } from "../lib/source-patch-core.js";
 import {
   mergeReviewTextRanges,
+  pairReviewSemanticTextUnits,
   readableReviewTextFootprintPlan,
   reviewTextSimilarity,
   sentenceAwareTextDifferences,
@@ -1972,6 +1973,8 @@ const REVIEW_TEXT_BLOCK_TAGS = new Set([
 type ReviewTextBlock = {
   anchor: Element;
   inventory: ReviewTextInventory;
+  kind: "block" | "flow-line" | "numbered-line" | "list-item" | "table-row";
+  maximumScope: "inline" | "block";
 };
 
 function isReviewTextBlockElement(element: Element): boolean {
@@ -1999,12 +2002,29 @@ function sliceReviewTextInventory(
   };
 }
 
-function semanticTextInventories(sourceNodes: Node[]): ReviewTextInventory[] {
+const NUMBERED_TEXT_LINE_PATTERN = /^\s*(?:[\u2460-\u2473]|\(?\d+\)?[.、:：]|[一二三四五六七八九十]+、)\s*/u;
+
+function semanticTextInventories(sourceNodes: Node[]): Array<{
+  inventory: ReviewTextInventory;
+  kind: "flow-line" | "numbered-line";
+}> {
   const inventory = reviewTextInventoryForNodes(sourceNodes);
   if (!inventory.text.trim()) return [];
-  const boundaries = [...new Set(inventory.breakOffsets)]
-    .filter((offset) => /[\u3002\uff01\uff1f!?\uff1b;]\s*$/u.test(inventory.text.slice(0, offset)))
+  const breakOffsets = [...new Set(inventory.breakOffsets)]
     .filter((offset) => offset > 0 && offset < inventory.text.length);
+  const lineRanges: TextRange[] = [];
+  let lineStart = 0;
+  [...breakOffsets, inventory.text.length].forEach((end) => {
+    if (inventory.text.slice(lineStart, end).trim()) lineRanges.push({ start: lineStart, end });
+    lineStart = end;
+  });
+  const numberedLines = lineRanges.length >= 2
+    && lineRanges.every((range) => NUMBERED_TEXT_LINE_PATTERN.test(
+      inventory.text.slice(range.start, range.end),
+    ));
+  const boundaries = breakOffsets
+    .filter((offset) => numberedLines
+      || /[\u3002\uff01\uff1f!?\uff1b;]\s*$/u.test(inventory.text.slice(0, offset)));
   const ranges: TextRange[] = [];
   let start = 0;
   boundaries.forEach((end) => {
@@ -2012,29 +2032,44 @@ function semanticTextInventories(sourceNodes: Node[]): ReviewTextInventory[] {
     start = end;
   });
   if (inventory.text.slice(start).trim()) ranges.push({ start, end: inventory.text.length });
-  return ranges.map((range) => sliceReviewTextInventory(inventory, range.start, range.end));
-}
-
-function flowEndsAtHardBoundary(nodes: Node[]): boolean {
-  const inventory = reviewTextInventoryForNodes(nodes);
-  if (/[\u3002\uff01\uff1f!?\uff1b;]\s*$/u.test(inventory.text)) return true;
-  const meaningfulElements = nodes.filter((node) => (
-    node instanceof Element && node.tagName !== "BR" && normalizedText(node).length > 0
-  ));
-  const directCopy = nodes.some((node) => (
-    node.nodeType === Node.TEXT_NODE && Boolean((node.textContent || "").trim())
-  ));
-  return meaningfulElements.length === 1 && !directCopy;
+  return ranges.map((range) => ({
+    inventory: sliceReviewTextInventory(inventory, range.start, range.end),
+    kind: numberedLines ? "numbered-line" : "flow-line",
+  }));
 }
 
 function reviewTextBlocks(region: Element): ReviewTextBlock[] {
   const blocks: ReviewTextBlock[] = [];
   const collect = (container: Element) => {
+    const atomicKind = container.tagName === "TR"
+      ? "table-row" as const
+      : container.tagName === "LI" ? "list-item" as const : null;
+    if (atomicKind) {
+      const inventory = reviewTextInventory(container);
+      if (inventory.text.trim()) {
+        blocks.push({
+          anchor: container,
+          inventory,
+          kind: atomicKind,
+          maximumScope: "block",
+        });
+      }
+      return;
+    }
+    const containsBlockChildren = [...container.children]
+      .some((child) => isReviewTextBlockElement(child));
     let flow: Node[] = [];
     const flush = () => {
       if (!flow.length) return;
-      semanticTextInventories(flow).forEach((inventory) => {
-        blocks.push({ anchor: container, inventory });
+      const semanticInventories = semanticTextInventories(flow);
+      semanticInventories.forEach(({ inventory, kind }) => {
+        const isWholeBlock = semanticInventories.length === 1 && !containsBlockChildren;
+        blocks.push({
+          anchor: container,
+          inventory,
+          kind: isWholeBlock ? "block" : kind,
+          maximumScope: isWholeBlock ? "block" : "inline",
+        });
       });
       flow = [];
     };
@@ -2046,112 +2081,52 @@ function reviewTextBlocks(region: Element): ReviewTextBlock[] {
         return;
       }
       flow.push(node);
-      if (node instanceof Element && node.tagName === "BR" && flowEndsAtHardBoundary(flow)) {
-        flush();
-      }
     });
     flush();
   };
   collect(region);
   if (!blocks.length) {
     const inventory = reviewTextInventory(region);
-    if (inventory.text.trim()) blocks.push({ anchor: region, inventory });
+    if (inventory.text.trim()) {
+      blocks.push({
+        anchor: region,
+        inventory,
+        kind: "block",
+        maximumScope: "block",
+      });
+    }
   }
   return blocks;
 }
 
-function textBlockPairScore(
-  before: ReviewTextBlock,
-  after: ReviewTextBlock,
-  beforeIndex: number,
-  afterIndex: number,
-): number {
-  if (before.anchor.tagName !== after.anchor.tagName) return Number.NEGATIVE_INFINITY;
-  const beforeKey = pairKey(before.anchor);
-  const afterKey = pairKey(after.anchor);
-  if ((beforeKey || afterKey) && beforeKey !== afterKey) return Number.NEGATIVE_INFINITY;
-  const beforeText = before.inventory.text.replace(/\s+/g, " ").trim();
-  const afterText = after.inventory.text.replace(/\s+/g, " ").trim();
-  const exactText = beforeText === afterText;
-  const similarity = reviewTextSimilarity(beforeText, afterText);
-  const beforeClasses = new Set(classTokens(before.anchor));
-  const sharedClasses = classTokens(after.anchor).filter((token) => beforeClasses.has(token));
-  const distinctiveClasses = sharedClasses.filter((token) => ![
+const GENERIC_REVIEW_TEXT_CLASSES = new Set([
     "active", "card", "col", "column", "container", "content", "grid", "item",
     "main", "panel", "row", "section", "selected", "wrap", "wrapper",
-  ].includes(token));
-  if (!exactText && similarity < .48 && !(distinctiveClasses.length && similarity >= .24)) {
-    return Number.NEGATIVE_INFINITY;
-  }
-  return (beforeKey ? 600 : 0)
-    + (exactText ? 420 : 0)
-    + Math.round(similarity * 160)
-    + Math.min(80, distinctiveClasses.length * 24)
-    + Math.max(0, 24 - Math.abs(beforeIndex - afterIndex) * 2);
-}
+]);
 
 function pairTextBlocks(
   before: ReviewTextBlock[],
   after: ReviewTextBlock[],
 ): Array<{ before: ReviewTextBlock | null; after: ReviewTextBlock | null }> {
-  const assignments = new Map<ReviewTextBlock, ReviewTextBlock>();
-  const usedAfter = new Set<ReviewTextBlock>();
-  const afterIndexByBlock = new Map(
-    after.map((block, index) => [block, index]),
-  );
-  const afterBuckets = new Map<string, ReviewTextBlock[]>();
-  const textBlockSignature = (block: ReviewTextBlock) => {
-    const identity = pairKey(block.anchor);
-    const bucketKey = `${block.anchor.tagName}\u0000${identity ? `key:${identity}` : "unkeyed"}`;
-    const text = block.inventory.text.replace(/\s+/g, " ").trim();
-    return text ? `${bucketKey}\u0000${text}` : null;
-  };
-  const uniqueBeforeText = uniqueSignatureMap(before, textBlockSignature);
-  const uniqueAfterText = uniqueSignatureMap(after, textBlockSignature);
-  uniqueBeforeText.forEach((beforeBlock, signature) => {
-    const afterBlock = uniqueAfterText.get(signature);
-    if (!beforeBlock || !afterBlock) return;
-    assignments.set(beforeBlock, afterBlock);
-    usedAfter.add(afterBlock);
+  const descriptor = (block: ReviewTextBlock) => ({
+    kind: `${block.kind}:${block.anchor.tagName}`,
+    identity: pairKey(block.anchor),
+    text: block.kind === "table-row"
+      ? [...block.anchor.children]
+        .filter((element) => element.matches("th, td"))
+        .map((element) => normalizedText(element))
+        .join("\u001f")
+      : block.inventory.text,
+    affinities: classTokens(block.anchor)
+      .filter((token) => !GENERIC_REVIEW_TEXT_CLASSES.has(token)),
   });
-  after.forEach((block) => {
-    if (usedAfter.has(block)) return;
-    const identity = pairKey(block.anchor);
-    const bucketKey = `${block.anchor.tagName}\u0000${identity ? `key:${identity}` : "unkeyed"}`;
-    const bucket = afterBuckets.get(bucketKey) ?? [];
-    bucket.push(block);
-    afterBuckets.set(bucketKey, bucket);
-  });
-  const edges = before.flatMap((beforeBlock, beforeIndex) => {
-    if (assignments.has(beforeBlock)) return [];
-    const identity = pairKey(beforeBlock.anchor);
-    const bucketKey = `${beforeBlock.anchor.tagName}\u0000${identity ? `key:${identity}` : "unkeyed"}`;
-    return (afterBuckets.get(bucketKey) ?? []).map((afterBlock) => ({
-      beforeBlock,
-      afterBlock,
-      score: textBlockPairScore(
-        beforeBlock,
-        afterBlock,
-        beforeIndex,
-        afterIndexByBlock.get(afterBlock) ?? -1,
-      ),
-    }));
-  }).filter((edge) => Number.isFinite(edge.score))
-    .sort((left, right) => right.score - left.score);
-  edges.forEach(({ beforeBlock, afterBlock }) => {
-    if (assignments.has(beforeBlock) || usedAfter.has(afterBlock)) return;
-    assignments.set(beforeBlock, afterBlock);
-    usedAfter.add(afterBlock);
-  });
-
-  const pairs: Array<{ before: ReviewTextBlock | null; after: ReviewTextBlock | null }> = before.map((beforeBlock) => ({
-    before: beforeBlock,
-    after: assignments.get(beforeBlock) || null,
+  return pairReviewSemanticTextUnits(
+    before.map(descriptor),
+    after.map(descriptor),
+  ).map((pair) => ({
+    before: pair.beforeIndex === null ? null : before[pair.beforeIndex],
+    after: pair.afterIndex === null ? null : after[pair.afterIndex],
   }));
-  after.forEach((afterBlock) => {
-    if (!usedAfter.has(afterBlock)) pairs.push({ before: null, after: afterBlock });
-  });
-  return pairs;
 }
 
 function markAllText(
@@ -2164,7 +2139,7 @@ function markAllText(
   const group: ReviewTextFootprintGroup = {
     id: groupId,
     ranges: [{ start: 0, end: inventory.text.length }],
-    scope: "block",
+    scope: block.maximumScope,
     density: 1,
   };
   markTextFootprintOwner(block.anchor, [group]);
@@ -2205,13 +2180,17 @@ function markTextDifferences(before: Element | null, after: Element | null): boo
     if (!pair.before || !pair.after) return;
     const beforeInventory = pair.before.inventory;
     const afterInventory = pair.after.inventory;
+    const maximumScope = pair.before.maximumScope === "inline"
+      || pair.after.maximumScope === "inline"
+      ? "inline"
+      : "block";
     const layoutChanged = !sameBreakLayout(beforeInventory, afterInventory);
     if (beforeInventory.text === afterInventory.text) {
       if (!layoutChanged) return;
       const group: ReviewTextFootprintGroup = {
         id: `${groupBase}-1`,
         ranges: [{ start: 0, end: beforeInventory.text.length }],
-        scope: "block",
+        scope: maximumScope,
         density: 1,
       };
       markTextFootprintOwner(pair.before.anchor, [group]);
@@ -2231,7 +2210,8 @@ function markTextDifferences(before: Element | null, after: Element | null): boo
       afterInventory.text,
       differences,
     );
-    const preferredSummary = plan.scope === "block"
+    const footprintScope = maximumScope === "inline" ? "inline" : plan.scope;
+    const preferredSummary = footprintScope === "block"
       && differences.before.length
       && differences.after.length
       ? "段落改写"
@@ -2239,14 +2219,14 @@ function markTextDifferences(before: Element | null, after: Element | null): boo
     const beforeGroups: ReviewTextFootprintGroup[] = plan.before.groups.map((ranges, index) => ({
       id: `${groupBase}-${index + 1}`,
       ranges,
-      scope: plan.scope,
+      scope: footprintScope,
       density: plan.density,
       summary: preferredSummary,
     }));
     const afterGroups: ReviewTextFootprintGroup[] = plan.after.groups.map((ranges, index) => ({
       id: `${groupBase}-${index + 1}`,
       ranges,
-      scope: plan.scope,
+      scope: footprintScope,
       density: plan.density,
       summary: preferredSummary,
     }));

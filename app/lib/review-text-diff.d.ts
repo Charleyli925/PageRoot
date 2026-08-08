@@ -5,6 +5,23 @@ export type ReviewTextRange = {
 
 export function reviewTextSimilarity(left: string, right: string): number;
 
+export type ReviewSemanticTextUnit = {
+  kind: string;
+  text: string;
+  identity?: string | null;
+  affinities?: readonly string[];
+};
+
+export type ReviewSemanticTextUnitPair = {
+  beforeIndex: number | null;
+  afterIndex: number | null;
+};
+
+export function pairReviewSemanticTextUnits(
+  before: readonly ReviewSemanticTextUnit[],
+  after: readonly ReviewSemanticTextUnit[],
+): ReviewSemanticTextUnitPair[];
+
 export function mergeReviewTextRanges(
   ranges: readonly ReviewTextRange[],
 ): ReviewTextRange[];

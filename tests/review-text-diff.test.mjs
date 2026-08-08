@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  pairReviewSemanticTextUnits,
   readableReviewTextFootprintPlan,
   reviewTextSimilarity,
   sentenceAwareTextDifferences,
@@ -172,4 +173,66 @@ test("tiny unchanged gaps are absorbed but sentence boundaries split footprints"
   assert.equal(compact.before.groups.length, 1);
   assert.equal(separated.scope, "inline");
   assert.equal(separated.before.groups.length, 2);
+});
+
+test("monotonic semantic pairing leaves only a fourth numbered line unmatched", () => {
+  const unit = (text) => ({ kind: "numbered-line", text });
+  const before = [
+    unit("① 业务盘子：整体规模稳定。"),
+    unit("② 实验贡献：日均增量明确。"),
+    unit("③ 经营解读：效率保持稳定。"),
+  ];
+  const after = [
+    ...before,
+    unit("④ 后续重点：继续观察新增商品。"),
+  ];
+
+  assert.deepEqual(pairReviewSemanticTextUnits(before, after), [
+    { beforeIndex: 0, afterIndex: 0 },
+    { beforeIndex: 1, afterIndex: 1 },
+    { beforeIndex: 2, afterIndex: 2 },
+    { beforeIndex: null, afterIndex: 3 },
+  ]);
+});
+
+test("table rows pair monotonically when an inserted row repeats a cell value", () => {
+  const row = (text) => ({ kind: "table-row", text });
+  const before = [
+    row("COACH/蔻驰\u001f箱包皮具\u001f3.7万"),
+    row("Wilson/威尔胜\u001f运动/健身\u001f1.4万"),
+    row("ARC'TERYX/始祖鸟\u001f户外/登山\u001f2.3万"),
+    row("耐克\u001f运动/健身\u001f3.7万"),
+  ];
+  const after = [
+    before[0],
+    before[1],
+    row("阿迪达斯\u001f运动/健身\u001f1.4万"),
+    before[2],
+    before[3],
+  ];
+
+  assert.deepEqual(pairReviewSemanticTextUnits(before, after), [
+    { beforeIndex: 0, afterIndex: 0 },
+    { beforeIndex: 1, afterIndex: 1 },
+    { beforeIndex: null, afterIndex: 2 },
+    { beforeIndex: 2, afterIndex: 3 },
+    { beforeIndex: 3, afterIndex: 4 },
+  ]);
+});
+
+test("large semantic unit lists stay bounded while preserving an insertion", () => {
+  const before = Array.from({ length: 800 }, (_, index) => ({
+    kind: "table-row",
+    text: `品牌${index}\u001f类目${index % 7}\u001f${index}万`,
+  }));
+  const after = [
+    ...before.slice(0, 420),
+    { kind: "table-row", text: "新增品牌\u001f类目0\u001f1.4万" },
+    ...before.slice(420),
+  ];
+  const pairs = pairReviewSemanticTextUnits(before, after);
+
+  assert.deepEqual(pairs[420], { beforeIndex: null, afterIndex: 420 });
+  assert.deepEqual(pairs.at(-1), { beforeIndex: 799, afterIndex: 800 });
+  assert.equal(pairs.length, 801);
 });

@@ -214,6 +214,10 @@ test("change discovery builds a complete outline and precise change markers", ()
   assert.match(reviewDocument, /markTextDifferences/);
   assert.match(reviewDocument, /sentenceAwareTextDifferences/);
   assert.match(reviewDocument, /readableReviewTextFootprintPlan/);
+  assert.match(reviewDocument, /pairReviewSemanticTextUnits/);
+  assert.match(reviewDocument, /"list-item"/);
+  assert.match(reviewDocument, /"numbered-line"/);
+  assert.match(reviewDocument, /"table-row"/);
   assert.match(reviewDocument, /data-pageroot-review-text-block-groups/);
   assert.match(reviewDocument, /data-pageroot-review-text-group/);
   assert.match(reviewDocument, /data-pageroot-review-text-anchors/);
