@@ -5,14 +5,10 @@ const WORD_SEGMENTER = typeof Intl.Segmenter === "function"
 const FALLBACK_TOKEN_PATTERN = /[\p{Script=Han}]|[\p{Script=Latin}\p{N}_]+|[\p{L}]|[^\s]/gu;
 const NON_WHITESPACE_PATTERN = /[^\s]/gu;
 const HAN_CHARACTER_PATTERN = /^\p{Script=Han}$/u;
-const MEANINGFUL_REVIEW_CHARACTER_PATTERN = /[\p{L}\p{N}]/u;
 const SEMANTIC_BOUNDARY_PATTERN = /^[\s\p{P}\p{S}]$/u;
 const SHORT_HAN_TEXT_PATTERN = /^\p{Script=Han}{3,12}$/u;
 const MAX_TOKEN_MATRIX_CELLS = 60_000;
-const MAX_SEMANTIC_UNIT_MATRIX_CELLS = 250_000;
-const SEMANTIC_UNIT_LOOKAHEAD = 32;
 const TOKEN_CHUNK_ANCHOR_LENGTHS = [4, 3, 2, 1];
-const semanticTextUnitFactsCache = new WeakMap();
 
 function tokenizeFallback(value) {
   const tokens = [];
@@ -303,224 +299,6 @@ export function reviewTextSimilarity(left, right) {
   );
 }
 
-function semanticTextUnitFacts(unit) {
-  const cached = semanticTextUnitFactsCache.get(unit);
-  if (cached) return cached;
-  const text = unit.text.replace(/\s+/gu, " ").trim();
-  const facts = {
-    text,
-    characters: [...text.replace(/\s/gu, "")],
-  };
-  semanticTextUnitFactsCache.set(unit, facts);
-  return facts;
-}
-
-function stableTextBoundaryEvidence(beforeCharacters, afterCharacters) {
-  let prefixLength = 0;
-  let prefixEvidence = 0;
-  while (
-    prefixLength < beforeCharacters.length
-    && prefixLength < afterCharacters.length
-    && beforeCharacters[prefixLength] === afterCharacters[prefixLength]
-  ) {
-    if (MEANINGFUL_REVIEW_CHARACTER_PATTERN.test(beforeCharacters[prefixLength])) {
-      prefixEvidence += 1;
-    }
-    prefixLength += 1;
-  }
-  let suffixLength = 0;
-  let suffixEvidence = 0;
-  while (
-    suffixLength < beforeCharacters.length - prefixLength
-    && suffixLength < afterCharacters.length - prefixLength
-    && beforeCharacters[beforeCharacters.length - suffixLength - 1]
-      === afterCharacters[afterCharacters.length - suffixLength - 1]
-  ) {
-    if (MEANINGFUL_REVIEW_CHARACTER_PATTERN.test(
-      beforeCharacters[beforeCharacters.length - suffixLength - 1],
-    )) suffixEvidence += 1;
-    suffixLength += 1;
-  }
-  return {
-    stable: Math.max(prefixEvidence, suffixEvidence) >= 7
-      || (prefixEvidence >= 2 && suffixEvidence >= 2
-        && prefixEvidence + suffixEvidence >= 6),
-    strength: prefixEvidence + suffixEvidence,
-  };
-}
-
-function semanticTextUnitPairScore(before, after, beforeIndex, afterIndex) {
-  if (before.kind !== after.kind) return Number.NEGATIVE_INFINITY;
-  const beforeIdentity = before.identity || "";
-  const afterIdentity = after.identity || "";
-  if ((beforeIdentity || afterIdentity) && beforeIdentity !== afterIdentity) {
-    return Number.NEGATIVE_INFINITY;
-  }
-  const beforeFacts = semanticTextUnitFacts(before);
-  const afterFacts = semanticTextUnitFacts(after);
-  const beforeText = beforeFacts.text;
-  const afterText = afterFacts.text;
-  const exactText = Boolean(beforeText && beforeText === afterText);
-  const similarity = reviewTextSimilarity(beforeText, afterText);
-  const boundaryEvidence = stableTextBoundaryEvidence(
-    beforeFacts.characters,
-    afterFacts.characters,
-  );
-  const beforeAffinities = new Set(before.affinities || []);
-  const sharedAffinities = (after.affinities || [])
-    .filter((affinity) => beforeAffinities.has(affinity));
-  if (
-    !exactText
-    && !boundaryEvidence.stable
-    && similarity < 0.48
-    && !(sharedAffinities.length && similarity >= 0.24)
-  ) {
-    return Number.NEGATIVE_INFINITY;
-  }
-  return (beforeIdentity ? 600 : 0)
-    + (exactText ? 420 : 0)
-    + (boundaryEvidence.stable ? 120 + Math.min(80, boundaryEvidence.strength * 8) : 0)
-    + Math.round(similarity * 160)
-    + Math.min(80, sharedAffinities.length * 24)
-    + Math.max(0, 24 - Math.abs(beforeIndex - afterIndex) * 2);
-}
-
-function semanticTextUnitSignature(unit) {
-  const text = semanticTextUnitFacts(unit).text;
-  if (!text) return null;
-  return `${unit.kind}\u0000${unit.identity || ""}\u0000${text}`;
-}
-
-function boundedSemanticTextUnitPairs(before, after) {
-  const pairs = [];
-  let beforeIndex = 0;
-  let afterIndex = 0;
-  const exactDistance = (items, start, signature) => {
-    if (!signature) return -1;
-    const end = Math.min(items.length, start + SEMANTIC_UNIT_LOOKAHEAD + 1);
-    for (let index = start; index < end; index += 1) {
-      if (semanticTextUnitSignature(items[index]) === signature) return index - start;
-    }
-    return -1;
-  };
-  while (beforeIndex < before.length && afterIndex < after.length) {
-    const beforeSignature = semanticTextUnitSignature(before[beforeIndex]);
-    const afterSignature = semanticTextUnitSignature(after[afterIndex]);
-    const afterDistance = exactDistance(after, afterIndex + 1, beforeSignature);
-    const beforeDistance = exactDistance(before, beforeIndex + 1, afterSignature);
-    if (afterDistance >= 0 && (beforeDistance < 0 || afterDistance <= beforeDistance)) {
-      pairs.push({ beforeIndex: null, afterIndex });
-      afterIndex += 1;
-      continue;
-    }
-    if (beforeDistance >= 0) {
-      pairs.push({ beforeIndex, afterIndex: null });
-      beforeIndex += 1;
-      continue;
-    }
-    const pairScore = semanticTextUnitPairScore(
-      before[beforeIndex],
-      after[afterIndex],
-      beforeIndex,
-      afterIndex,
-    );
-    if (Number.isFinite(pairScore)) {
-      pairs.push({ beforeIndex, afterIndex });
-      beforeIndex += 1;
-      afterIndex += 1;
-      continue;
-    }
-    if (after.length - afterIndex > before.length - beforeIndex) {
-      pairs.push({ beforeIndex: null, afterIndex });
-      afterIndex += 1;
-    } else {
-      pairs.push({ beforeIndex, afterIndex: null });
-      beforeIndex += 1;
-    }
-  }
-  while (beforeIndex < before.length) {
-    pairs.push({ beforeIndex, afterIndex: null });
-    beforeIndex += 1;
-  }
-  while (afterIndex < after.length) {
-    pairs.push({ beforeIndex: null, afterIndex });
-    afterIndex += 1;
-  }
-  return pairs;
-}
-
-function matrixSemanticTextUnitPairs(before, after) {
-  const columnCount = after.length + 1;
-  const scores = new Float64Array((before.length + 1) * columnCount);
-  const decisions = new Uint8Array(before.length * Math.max(1, after.length));
-  const scoreAt = (beforeIndex, afterIndex) => (
-    scores[beforeIndex * columnCount + afterIndex]
-  );
-  for (let beforeIndex = before.length - 1; beforeIndex >= 0; beforeIndex -= 1) {
-    for (let afterIndex = after.length - 1; afterIndex >= 0; afterIndex -= 1) {
-      const skipBefore = scoreAt(beforeIndex + 1, afterIndex);
-      const skipAfter = scoreAt(beforeIndex, afterIndex + 1);
-      const pairScore = semanticTextUnitPairScore(
-        before[beforeIndex],
-        after[afterIndex],
-        beforeIndex,
-        afterIndex,
-      );
-      const match = Number.isFinite(pairScore)
-        ? pairScore + scoreAt(beforeIndex + 1, afterIndex + 1)
-        : Number.NEGATIVE_INFINITY;
-      const preferSkipAfter = after.length - afterIndex > before.length - beforeIndex;
-      let decision = skipAfter > skipBefore || (skipAfter === skipBefore && preferSkipAfter)
-        ? 2
-        : 1;
-      let best = decision === 2 ? skipAfter : skipBefore;
-      if (match >= best && Number.isFinite(match)) {
-        decision = 3;
-        best = match;
-      }
-      scores[beforeIndex * columnCount + afterIndex] = best;
-      decisions[beforeIndex * Math.max(1, after.length) + afterIndex] = decision;
-    }
-  }
-
-  const pairs = [];
-  let beforeIndex = 0;
-  let afterIndex = 0;
-  while (beforeIndex < before.length || afterIndex < after.length) {
-    if (beforeIndex >= before.length) {
-      pairs.push({ beforeIndex: null, afterIndex });
-      afterIndex += 1;
-      continue;
-    }
-    if (afterIndex >= after.length) {
-      pairs.push({ beforeIndex, afterIndex: null });
-      beforeIndex += 1;
-      continue;
-    }
-    const decision = decisions[
-      beforeIndex * Math.max(1, after.length) + afterIndex
-    ];
-    if (decision === 3) {
-      pairs.push({ beforeIndex, afterIndex });
-      beforeIndex += 1;
-      afterIndex += 1;
-    } else if (decision === 2) {
-      pairs.push({ beforeIndex: null, afterIndex });
-      afterIndex += 1;
-    } else {
-      pairs.push({ beforeIndex, afterIndex: null });
-      beforeIndex += 1;
-    }
-  }
-  return pairs;
-}
-
-export function pairReviewSemanticTextUnits(before, after) {
-  return before.length * after.length <= MAX_SEMANTIC_UNIT_MATRIX_CELLS
-    ? matrixSemanticTextUnitPairs(before, after)
-    : boundedSemanticTextUnitPairs(before, after);
-}
-
 function rangesForTokens(source, tokens, indexes) {
   const ranges = [];
   [...indexes].sort((left, right) => left - right).forEach((index) => {
@@ -602,6 +380,27 @@ function rangeSpanCoverage(source, ranges) {
   return visibleCharacterCount(source.slice(first.start, last.end)) / total;
 }
 
+function rangesCoverWholeSentences(source, ranges) {
+  if (!ranges.length) return false;
+  const sentences = reviewSentenceRanges(source);
+  return ranges.every((range) => {
+    const intersecting = sentences.filter((sentence) => (
+      sentence.end > range.start && sentence.start < range.end
+    ));
+    return intersecting.length > 0 && intersecting.every((sentence) => (
+      range.start <= sentence.start && range.end >= sentence.end
+    ));
+  });
+}
+
+function hasStableSentenceOutsideEvidence(source, ranges) {
+  if (!ranges.length) return false;
+  return reviewSentenceRanges(source).some((sentence) => (
+    visibleCharacterCount(source.slice(sentence.start, sentence.end)) > 0
+    && !ranges.some((range) => range.end > sentence.start && range.start < sentence.end)
+  ));
+}
+
 function readableRangeGroups(source, ranges) {
   const sorted = mergeReviewTextRanges(ranges);
   return sorted.reduce((groups, range) => {
@@ -641,7 +440,7 @@ export function readableReviewTextFootprintPlan(
   const afterRanges = mergeReviewTextRanges(differences.after || []);
   const operation = beforeRanges.length
     ? afterRanges.length ? "replace" : "delete"
-    : afterRanges.length ? "insert" : "none";
+    : afterRanges.length ? "insert" : differences.layout ? "layout" : "none";
   const beforeLength = visibleCharacterCount(beforeText);
   const afterLength = visibleCharacterCount(afterText);
   const changedLength = visibleRangeLength(beforeText, beforeRanges)
@@ -649,13 +448,18 @@ export function readableReviewTextFootprintPlan(
   const totalLength = beforeLength + afterLength;
   const density = totalLength ? changedLength / totalLength : 0;
   const fragmentCount = beforeRanges.length + afterRanges.length;
-  const pairedReplacement = beforeRanges.length > 0 && afterRanges.length > 0;
+  const pairedReplacement = operation === "replace";
   const spanCoverage = Math.max(
     rangeSpanCoverage(beforeText, beforeRanges),
     rangeSpanCoverage(afterText, afterRanges),
   );
   const longEnoughForBlock = Math.max(beforeLength, afterLength) >= 20;
-  const denseRewrite = pairedReplacement && longEnoughForBlock && (
+  const preservesStableSentence = hasStableSentenceOutsideEvidence(beforeText, beforeRanges)
+    || hasStableSentenceOutsideEvidence(afterText, afterRanges);
+  const denseRewrite = pairedReplacement
+    && longEnoughForBlock
+    && !preservesStableSentence
+    && (
     density >= 0.45
     || (
       fragmentCount >= 5
@@ -663,14 +467,18 @@ export function readableReviewTextFootprintPlan(
       && spanCoverage >= 0.65
     )
   );
-  const scope = denseRewrite ? "block" : "inline";
+  const sentenceChange = operation !== "none"
+    && operation !== "layout"
+    && (!beforeRanges.length || rangesCoverWholeSentences(beforeText, beforeRanges))
+    && (!afterRanges.length || rangesCoverWholeSentences(afterText, afterRanges));
+  const scope = denseRewrite ? "block" : sentenceChange ? "sentence" : "inline";
   return {
     operation,
     scope,
     density,
     before: {
       evidenceRanges: beforeRanges,
-      groups: denseRewrite && beforeRanges.length
+      footprintGroups: denseRewrite && beforeRanges.length
         ? [beforeRanges]
         : readableRangeGroups(beforeText, beforeRanges),
       anchorOffset: operation === "insert"
@@ -679,7 +487,7 @@ export function readableReviewTextFootprintPlan(
     },
     after: {
       evidenceRanges: afterRanges,
-      groups: denseRewrite && afterRanges.length
+      footprintGroups: denseRewrite && afterRanges.length
         ? [afterRanges]
         : readableRangeGroups(afterText, afterRanges),
       anchorOffset: operation === "delete"

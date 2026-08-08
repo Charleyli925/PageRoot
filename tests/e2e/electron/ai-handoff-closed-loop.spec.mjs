@@ -523,6 +523,9 @@ test("a verified AI result stays pending through desktop review until the user a
       <div data-review-readable-rewrite style="width: 360px; line-height: 1.7">${READABLE_REWRITE_BEFORE}</div>
       <p data-review-layout-only style="width: 240px">同一段文字保持不变<br>只是换行位置调整。</p>
       <p data-review-cross-line style="width: 150px; line-height: 1.6">稳定前缀，稳定后缀。</p>
+      <style data-review-marker-style>[data-review-injection-stability] span { display:block !important; padding:9px !important; }</style>
+      <style data-review-projection-style>div, svg { outline:7px solid rgb(255 0 153) !important; }</style>
+      <p data-review-injection-stability><span data-review-stable-left>稳定左侧</span><strong>旧词</strong><em data-review-stable-right>稳定右侧</em></p>
       <p class="review-comment-ordinary-target">普通段落评论定位保持独立。</p>
       <div data-review-metrics>
         <article data-review-metric="lock"><strong>+8.52%</strong><span>锁单确收增幅（显著 p&lt;0.01）</span><small>日均 52.5 万 vs 48.4 万</small></article>
@@ -538,15 +541,15 @@ test("a verified AI result stays pending through desktop review until the user a
       </div>
       <div data-review-numbered-lines>① 业务盘子：整体规模稳定。<br>② 实验贡献：日均增量明确。<br>③ 经营解读：效率保持稳定。</div>
       <ol data-review-list-items>
-        <li>业务盘子稳定</li><li>实验贡献明确</li><li>经营效率稳定</li>
+        <li>业务盘子稳定</li><li>实验贡献明确<ul data-review-nested-list><li>嵌套稳定项</li></ul></li><li>经营效率稳定</li>
       </ol>
-      <table data-review-brand-table>
-        <thead><tr><th>品牌</th><th>类目</th><th>对照组</th></tr></thead>
+      <table data-review-brand-table style="table-layout:fixed;width:210px;word-break:break-all">
+        <thead><tr><th style="width:42px">品牌</th><th>类目</th><th>对照组</th></tr></thead>
         <tbody>
-          <tr data-review-brand-row="coach"><td>COACH/蔻驰</td><td>箱包皮具</td><td>3.7万</td></tr>
-          <tr data-review-brand-row="wilson"><td>Wilson/威尔胜</td><td>运动/健身</td><td>1.4万</td></tr>
-          <tr data-review-brand-row="arcteryx"><td>ARC'TERYX/始祖鸟</td><td>户外/登山</td><td>2.3万</td></tr>
-          <tr data-review-brand-row="nike"><td>耐克</td><td>运动/健身</td><td>3.7万</td></tr>
+          <tr data-review-brand-row="alpha"><td>品牌甲</td><td>类目一</td><td>3.7万</td></tr>
+          <tr data-review-brand-row="beta"><td>品牌乙</td><td>类目二</td><td>1.4万</td></tr>
+          <tr data-review-brand-row="gamma"><td>品牌丙</td><td>类目三</td><td>2.3万</td></tr>
+          <tr data-review-brand-row="delta"><td>品牌丁</td><td>类目二</td><td>3.7万</td></tr>
         </tbody>
       </table>
       <div data-review-break-layout><span>日均63<br><br>.4万<br>60.7万</span></div>
@@ -555,6 +558,11 @@ test("a verified AI result stays pending through desktop review until the user a
     <section data-review-ebita-section>
       <h2>3EBITA分析</h2>
       <div data-review-ebita-copy><strong>结论：</strong>EBITA差异均在波动范围<br>内（0.06~0.13pt），AI托管未恶化盈利能力。</div>
+    </section>
+    <section data-review-anchor-only-section>
+      <h2>删除锚点导航</h2>
+      <div style="height:280px" aria-hidden="true"></div>
+      <p data-review-anchor-only>稳定开头。只删除这句定位文字。稳定结尾。</p>
     </section>
     <section data-review-runtime-visuals>
       <h2>运行态图表回归</h2>
@@ -1200,13 +1208,13 @@ test("a verified AI result stays pending through desktop review until the user a
           '<div data-review-numbered-lines>① 业务盘子：整体规模稳定。<br>② 实验贡献：日均增量明确。<br>③ 经营解读：效率保持稳定。<br>④ 后续重点：继续观察新增商品。</div>',
         )
         .replace(
-          '        <li>业务盘子稳定</li><li>实验贡献明确</li><li>经营效率稳定</li>',
-          '        <li>业务盘子稳定</li><li>实验贡献明确</li><li>经营效率稳定</li><li data-review-added-list-item>后续观察新增商品</li>',
+          '        <li>业务盘子稳定</li><li>实验贡献明确<ul data-review-nested-list><li>嵌套稳定项</li></ul></li><li>经营效率稳定</li>',
+          '        <li>业务盘子稳定</li><li>实验贡献明确<ul data-review-nested-list><li>嵌套稳定项</li></ul></li><li>经营效率稳定</li><li data-review-added-list-item>后续观察新增商品</li>',
         )
         .replace(
-          '          <tr data-review-brand-row="arcteryx"><td>ARC\'TERYX/始祖鸟</td><td>户外/登山</td><td>2.3万</td></tr>',
-          `          <tr data-review-brand-row="adidas"><td>阿迪达斯</td><td>运动/健身</td><td>1.4万</td></tr>
-          <tr data-review-brand-row="arcteryx"><td>ARC'TERYX/始祖鸟</td><td>户外/登山</td><td>2.3万</td></tr>`,
+          '          <tr data-review-brand-row="gamma"><td>品牌丙</td><td>类目三</td><td>2.3万</td></tr>',
+          `          <tr data-review-brand-row="added"><td>品牌新增</td><td>类目二</td><td>1.4万</td></tr>
+          <tr data-review-brand-row="gamma"><td>品牌丙</td><td>类目三</td><td>2.3万</td></tr>`,
         )
         .replace(
           '<div data-review-semantic-copy>而非「让每个商品卖得更好」（品均基本持平）。这说明增长主要来自有效成交覆盖扩大。</div>',
@@ -1225,6 +1233,10 @@ test("a verified AI result stays pending through desktop review until the user a
           '<p data-review-cross-line style="width: 150px; line-height: 1.6">稳定前缀，新增说明需要跨越多个实际文字行并保持独立框选，稳定后缀。</p>',
         )
         .replace(
+          '<p data-review-injection-stability><span data-review-stable-left>稳定左侧</span><strong>旧词</strong><em data-review-stable-right>稳定右侧</em></p>',
+          '<p data-review-injection-stability><span data-review-stable-left>稳定左侧</span><strong>新词</strong><em data-review-stable-right>稳定右侧</em></p>',
+        )
+        .replace(
           '<p data-review-warning>⚠️ 近6天(7/23-<span><strong>7/28)增幅收窄至负值区间，需</strong></span>持续关注。</p>',
           '<p data-review-warning>⚠️ 近6天（7/23—<strong>7/28）增幅收窄至负值区间，需</strong>持续关注定价调整和转化波动。</p>',
         )
@@ -1239,6 +1251,10 @@ test("a verified AI result stays pending through desktop review until the user a
         .replace(
           '<div data-review-ebita-copy><strong>结论：</strong>EBITA差异均在波动范围<br>内（0.06~0.13pt），AI托管未恶化盈利能力。</div>',
           '<div data-review-ebita-copy><strong>结论：</strong>EBITA差异均在波动范围内（0.06~0.13pt），AI托管未恶化盈利能力，建议继续保留实验策略。</div>',
+        )
+        .replace(
+          '<p data-review-anchor-only>稳定开头。只删除这句定位文字。稳定结尾。</p>',
+          '<p data-review-anchor-only>稳定开头。稳定结尾。</p>',
         )
         .replace(
           "<article><h2>标签一概览</h2><p>第一块完整内容</p></article>\n      <article><h2>标签一详情</h2><p>第二块完整内容</p></article>",
@@ -1292,6 +1308,19 @@ test("a verified AI result stays pending through desktop review until the user a
     const afterReviewFrame = launched.page.frameLocator(
       'iframe[title^="修改后"]',
     );
+    const projectionIsCanonical = (frame) => frame.locator("html").evaluate(() => {
+      const boxes = [...document.querySelectorAll("[data-pageroot-review-overlay-box]")];
+      const holes = [...document.querySelectorAll("[data-pageroot-review-mask-hole]")];
+      return boxes.length === holes.length && boxes.every((box, index) => {
+        const hole = holes[index];
+        return Math.abs(Number(box.getAttribute("data-left")) - Number(hole.getAttribute("data-left"))) < .02
+          && Math.abs(Number(box.getAttribute("data-top")) - Number(hole.getAttribute("data-top"))) < .02
+          && Math.abs(Number(box.getAttribute("data-width")) - Number(hole.getAttribute("data-width"))) < .02
+          && Math.abs(Number(box.getAttribute("data-height")) - Number(hole.getAttribute("data-height"))) < .02
+          && Boolean(box.getAttribute("data-path"))
+          && box.getAttribute("data-path") === hole.getAttribute("d");
+      });
+    });
     await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
       "data-pageroot-review-filter",
     ), { timeout: 30_000 }).toBe("all");
@@ -1615,7 +1644,16 @@ test("a verified AI result stays pending through desktop review until the user a
                 marker.getAttribute("data-pageroot-review-marker-types") || "",
               ).split(/\s+/u);
               const matchesFilter = filter === "all" || markerTypes.includes(filter);
-              return matchesFilter && [...marker.getClientRects()]
+              if (!matchesFilter) return false;
+              if (markerTypes.includes("text")) {
+                const range = document.createRange();
+                range.selectNodeContents(marker);
+                const visible = [...range.getClientRects()]
+                  .some((rect) => rect.width > 1 && rect.height > 1);
+                range.detach();
+                return visible;
+              }
+              return [...marker.getClientRects()]
                 .some((rect) => rect.width > 1 && rect.height > 1);
             });
           });
@@ -1714,8 +1752,14 @@ test("a verified AI result stays pending through desktop review until the user a
       return boxes.flatMap((inner, innerIndex) => {
         if (outerIndex === innerIndex) return [];
         const innerRect = inner.getBoundingClientRect();
+        const sameOwner = outer.getAttribute("data-pageroot-review-semantic-owner")
+          === inner.getAttribute("data-pageroot-review-semantic-owner");
+        const sameFact = outer.getAttribute("data-pageroot-review-fact")
+          === inner.getAttribute("data-pageroot-review-fact");
         const nested = outer.getAttribute("data-pageroot-review-overlay-box")
           === inner.getAttribute("data-pageroot-review-overlay-box")
+          && sameOwner
+          && sameFact
           && innerRect.width * innerRect.height < outerRect.width * outerRect.height * .86
           && innerRect.left >= outerRect.left - 2
           && innerRect.top >= outerRect.top - 2
@@ -1737,6 +1781,28 @@ test("a verified AI result stays pending through desktop review until the user a
       });
     }));
     expect(nestedOverlayPairs).toEqual([]);
+    const addedRowSemanticOwner = await afterReviewFrame.locator(
+      '[data-review-brand-row="added"]',
+    ).getAttribute("data-pageroot-review-semantic-owner");
+    expect(addedRowSemanticOwner).toBeTruthy();
+    const allModeAddedRowFrames = afterReviewFrame.locator(
+      `[data-pageroot-review-overlay-box][data-pageroot-review-semantic-owner="${addedRowSemanticOwner}"]`,
+    );
+    await expect(allModeAddedRowFrames).toHaveCount(1);
+    await expect(allModeAddedRowFrames).toHaveAttribute("data-tone", "structure");
+    await expect(afterReviewFrame.locator(
+      `[data-pageroot-review-mask-hole][data-pageroot-review-semantic-owner="${addedRowSemanticOwner}"]`,
+    )).toHaveCount(1);
+    await expect.poll(() => allModeAddedRowFrames.evaluate((frame) => {
+      const row = document.querySelector('[data-review-brand-row="added"]');
+      if (!row) return false;
+      const frameRect = frame.getBoundingClientRect();
+      const rowRect = row.getBoundingClientRect();
+      return Math.abs(frameRect.left - (rowRect.left - 3)) < .75
+        && Math.abs(frameRect.top - (rowRect.top - 3)) < .75
+        && Math.abs(frameRect.width - (rowRect.width + 6)) < .75
+        && Math.abs(frameRect.height - (rowRect.height + 6)) < .75;
+    })).toBe(true);
     await expect.poll(async () => beforeReviewFrame.locator(
       "[data-pageroot-review-id]",
     ).first().evaluate((element) => getComputedStyle(element).outlineStyle)).toBe("none");
@@ -1779,6 +1845,40 @@ test("a verified AI result stays pending through desktop review until the user a
     )).toBe("none");
     expect(await addedText.evaluate((element) => getComputedStyle(element).color))
       .toBe(await addedText.evaluate((element) => getComputedStyle(element.parentElement).color));
+    await expect.poll(async () => Promise.all(
+      [beforeReviewFrame, afterReviewFrame].map((frame) => frame.locator(
+        "[data-review-injection-stability]",
+      ).evaluate((target) => {
+        const marker = target.querySelector("[data-pageroot-review-text]");
+        const left = target.querySelector("[data-review-stable-left]");
+        const right = target.querySelector("[data-review-stable-right]");
+        if (!marker || !left || !right) return false;
+        const range = document.createRange();
+        range.selectNodeContents(marker);
+        const rangeRects = [...range.getClientRects()]
+          .filter((rect) => rect.width > 1 && rect.height > 1).length;
+        range.detach();
+        const snapshot = () => [left, right].map((element) => {
+          const rect = element.getBoundingClientRect();
+          return [rect.left, rect.top, rect.right, rect.bottom];
+        });
+        const wrapped = snapshot();
+        const placeholder = document.createComment("review-marker-position");
+        const text = document.createTextNode(marker.textContent || "");
+        marker.before(placeholder);
+        marker.replaceWith(text);
+        const unwrapped = snapshot();
+        text.replaceWith(marker);
+        placeholder.remove();
+        const maximumDelta = Math.max(...wrapped.flatMap((rect, index) => (
+          rect.map((value, coordinate) => Math.abs(value - unwrapped[index][coordinate]))
+        )));
+        return rangeRects > 0
+          && marker.getClientRects().length === 0
+          && getComputedStyle(marker).display === "contents"
+          && maximumDelta < .25;
+      })),
+    ).then((results) => results.every(Boolean))).toBe(true);
     await expect.poll(() => afterReviewFrame.locator(
       '[data-pageroot-review-overlay-box][data-tone="text-added"]',
     ).count()).toBeGreaterThan(0);
@@ -1907,6 +2007,25 @@ test("a verified AI result stays pending through desktop review until the user a
       /text-\d+-\d+@\d+/u,
     );
     await expect(beforeReviewFrame.locator(
+      '[data-review-anchor-only] [data-pageroot-review-text="removed"]',
+    )).toHaveText("只删除这句定位文字。");
+    await expect(afterReviewFrame.locator(
+      '[data-review-anchor-only] [data-pageroot-review-text]',
+    )).toHaveCount(0);
+    const anchorOnlyChangeId = await afterReviewFrame.locator(
+      "[data-review-anchor-only-section]",
+    ).getAttribute("data-pageroot-review-id");
+    expect(anchorOnlyChangeId).toBeTruthy();
+    await expect(afterReviewFrame.locator(
+      "[data-review-anchor-only]",
+    )).toHaveAttribute("data-pageroot-review-anchor-change", anchorOnlyChangeId);
+    await expect(afterReviewFrame.locator(
+      `[data-pageroot-review-overlay-box="${anchorOnlyChangeId}"]`,
+    )).toHaveCount(0);
+    await expect(afterReviewFrame.locator(
+      `[data-pageroot-review-mask-hole="${anchorOnlyChangeId}"]`,
+    )).toHaveCount(0);
+    await expect(beforeReviewFrame.locator(
       '[data-review-numbered-lines] [data-pageroot-review-text]',
     )).toHaveCount(0);
     await expect(afterReviewFrame.locator(
@@ -1926,6 +2045,18 @@ test("a verified AI result stays pending through desktop review until the user a
       `[data-pageroot-review-overlay-box][data-tone="text-added"][data-text-group="${numberedLineGroup}"]`,
     );
     await expect(numberedLineFrame).toHaveCount(1);
+    await expect(beforeReviewFrame.locator(
+      `[data-pageroot-review-overlay-box][data-text-group="${numberedLineGroup}"]`,
+    )).toHaveCount(0);
+    await expect(beforeReviewFrame.locator(
+      `[data-pageroot-review-mask-hole][data-text-group="${numberedLineGroup}"]`,
+    )).toHaveCount(0);
+    await expect(afterReviewFrame.locator(
+      `[data-pageroot-review-mask-hole][data-text-group="${numberedLineGroup}"]`,
+    )).toHaveCount(1);
+    await expect(numberedLineFrame.locator(
+      "[data-pageroot-review-overlay-label]",
+    )).toHaveCount(1);
     await expect(numberedLineFrame).not.toHaveAttribute("data-scope", "text-block");
     await expect.poll(async () => {
       const frameBox = await numberedLineFrame.boundingBox();
@@ -1944,28 +2075,72 @@ test("a verified AI result stays pending through desktop review until the user a
       '[data-review-list-items] li:not([data-review-added-list-item]) [data-pageroot-review-text]',
     )).toHaveCount(0);
     await expect(beforeReviewFrame.locator(
+      '[data-review-nested-list] [data-pageroot-review-text], [data-review-nested-list][data-pageroot-review-structure]',
+    )).toHaveCount(0);
+    await expect(afterReviewFrame.locator(
+      '[data-review-nested-list] [data-pageroot-review-text], [data-review-nested-list][data-pageroot-review-structure]',
+    )).toHaveCount(0);
+    await expect(beforeReviewFrame.locator(
       '[data-review-brand-table] [data-pageroot-review-text]',
     )).toHaveCount(0);
     await expect(afterReviewFrame.locator(
-      '[data-review-brand-row="adidas"] [data-pageroot-review-text="added"]',
+      '[data-review-brand-row="added"] [data-pageroot-review-text="added"]',
     )).toHaveCount(3);
     const addedRowGroups = await afterReviewFrame.locator(
-      '[data-review-brand-row="adidas"] [data-pageroot-review-text="added"]',
+      '[data-review-brand-row="added"] [data-pageroot-review-text="added"]',
     ).evaluateAll((markers) => [...new Set(markers.map((marker) => (
       marker.getAttribute("data-pageroot-review-text-group")
     )))].filter(Boolean));
-    expect(addedRowGroups).toHaveLength(1);
-    const addedRowFrame = afterReviewFrame.locator(
-      `[data-pageroot-review-overlay-box][data-tone="text-added"][data-text-group="${addedRowGroups[0]}"]`,
+    expect(addedRowGroups).toHaveLength(3);
+    const addedRowSemanticOwners = await afterReviewFrame.locator(
+      '[data-review-brand-row="added"] [data-pageroot-review-text="added"]',
+    ).evaluateAll((markers) => [...new Set(markers.map((marker) => (
+      marker.getAttribute("data-pageroot-review-semantic-owner")
+    )))].filter(Boolean));
+    expect(addedRowSemanticOwners).toEqual([addedRowSemanticOwner]);
+    const addedRowFrames = afterReviewFrame.locator(
+      `[data-pageroot-review-overlay-box][data-tone="text-added"][data-pageroot-review-semantic-owner="${addedRowSemanticOwners[0]}"]`,
     );
-    await expect(addedRowFrame).toHaveCount(1);
-    await expect(addedRowFrame).toHaveAttribute("data-scope", "text-block");
-    await expect(addedRowFrame).toHaveAttribute(
-      "data-pageroot-review-fragment-count",
-      "1",
-    );
+    const addedRowRangeRectCount = await afterReviewFrame.locator(
+      '[data-review-brand-row="added"] [data-pageroot-review-text="added"]',
+    ).evaluateAll((markers) => markers.reduce((total, marker) => {
+      const range = document.createRange();
+      range.selectNodeContents(marker);
+      const count = [...range.getClientRects()]
+        .filter((rect) => rect.width > 1 && rect.height > 1).length;
+      range.detach();
+      return total + count;
+    }, 0));
+    expect(addedRowRangeRectCount).toBeGreaterThan(3);
+    await expect(addedRowFrames).toHaveCount(addedRowRangeRectCount);
+    await expect.poll(() => addedRowFrames.evaluateAll((frames) => {
+      const row = document.querySelector('[data-review-brand-row="added"]');
+      if (!row) return false;
+      const rowRect = row.getBoundingClientRect();
+      return frames.every((frame) => {
+        const rect = frame.getBoundingClientRect();
+        const geometryOwnerId = frame.getAttribute("data-pageroot-review-geometry-owner");
+        const geometryOwner = [...document.querySelectorAll(
+          '[data-pageroot-review-geometry-owner="' + geometryOwnerId + '"]',
+        )].find((candidate) => (
+          candidate.matches("td, th")
+          && !candidate.hasAttribute("data-pageroot-review-text")
+        ));
+        const ownerRect = geometryOwner?.getBoundingClientRect();
+        return frame.getAttribute("data-scope") !== "text-block"
+          && frame.getAttribute("data-shaped") !== "true"
+          && frame.getAttribute("data-pageroot-review-fragment-count") === "1"
+          && Boolean(ownerRect)
+          && rect.left >= ownerRect.left - 4
+          && rect.right <= ownerRect.right + 4
+          && rect.left >= rowRect.left - 4
+          && rect.top >= rowRect.top - 4
+          && rect.right <= rowRect.right + 4
+          && rect.bottom <= rowRect.bottom + 4;
+      });
+    })).toBe(true);
     await expect(afterReviewFrame.locator(
-      '[data-review-brand-row]:not([data-review-brand-row="adidas"]) [data-pageroot-review-text]',
+      '[data-review-brand-row]:not([data-review-brand-row="added"]) [data-pageroot-review-text]',
     )).toHaveCount(0);
     await expect(beforeReviewFrame.locator(
       '[data-review-layout-only] [data-pageroot-review-text], [data-review-layout-only] [data-pageroot-review-text-context]',
@@ -1984,9 +2159,14 @@ test("a verified AI result stays pending through desktop review until the user a
       "data-pageroot-review-text-group",
     );
     expect(crossLineGroup).toBeTruthy();
-    const crossLineRectCount = await crossLineMarker.evaluate((element) => (
-      [...element.getClientRects()].filter((rect) => rect.width > 1 && rect.height > 1).length
-    ));
+    const crossLineRectCount = await crossLineMarker.evaluate((element) => {
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      const count = [...range.getClientRects()]
+        .filter((rect) => rect.width > 1 && rect.height > 1).length;
+      range.detach();
+      return count;
+    });
     expect(crossLineRectCount).toBeGreaterThan(1);
     const crossLineFrames = afterReviewFrame.locator(
       `[data-pageroot-review-overlay-box][data-tone="text-added"][data-text-group="${crossLineGroup}"]`,
@@ -2068,6 +2248,11 @@ test("a verified AI result stays pending through desktop review until the user a
       background: getComputedStyle(element).backgroundColor,
       borderWidth: getComputedStyle(element).borderTopWidth,
     }))).toEqual({ background: "rgba(0, 0, 0, 0)", borderWidth: "0px" });
+    await expect.poll(() => afterReviewFrame.locator(
+      '[data-pageroot-review-projection-layer], [data-pageroot-review-mask-layer], [data-pageroot-review-overlay-box], [data-pageroot-review-overlay-shape-svg]',
+    ).evaluateAll((elements) => elements.length > 0 && elements.every((element) => (
+      getComputedStyle(element).outlineStyle === "none"
+    )))).toBe(true);
     await expect.poll(async () => {
       const boxes = await afterReviewFrame.locator(
         '[data-pageroot-review-overlay-box]',
@@ -2076,6 +2261,7 @@ test("a verified AI result stays pending through desktop review until the user a
         top: Number.parseFloat(element.style.top),
         width: Number.parseFloat(element.style.width),
         height: Number.parseFloat(element.style.height),
+        path: element.getAttribute("data-path"),
       })));
       const holes = await afterReviewFrame.locator(
         '[data-pageroot-review-mask-hole]',
@@ -2092,13 +2278,19 @@ test("a verified AI result stays pending through desktop review until the user a
         && Math.abs(box.width - holes[index].width) < 0.02
         && Math.abs(box.height - holes[index].height) < 0.02
         && Boolean(holes[index].path)
+        && box.path === holes[index].path
       ));
     }).toBe(true);
     await expect.poll(() => afterReviewFrame.locator("html").evaluate(() => {
       const path = document.querySelector("[data-pageroot-review-mask-dim]");
       const boxes = [...document.querySelectorAll("[data-pageroot-review-overlay-box]")];
       const changedText = document.querySelector('[data-pageroot-review-marker-types~="text"]');
-      const changedRect = changedText?.getClientRects()[0];
+      const range = changedText ? document.createRange() : null;
+      range?.selectNodeContents(changedText);
+      const changedRect = range ? [...range.getClientRects()].find((rect) => (
+        rect.width > 1 && rect.height > 1
+      )) : null;
+      range?.detach();
       if (!(path instanceof SVGGeometryElement) || !changedRect) return false;
       const changedPointIsDimmed = path.isPointInFill(new DOMPoint(
         changedRect.left + scrollX + changedRect.width / 2,
@@ -2208,6 +2400,32 @@ test("a verified AI result stays pending through desktop review until the user a
       .toBe("1");
     expect(Number(await unchangedMapItem.evaluate((element) => getComputedStyle(element).opacity)))
       .toBeLessThan(0.7);
+    const anchorOnlyMapItem = launched.page.getByRole("button", {
+      name: /删除锚点导航/u,
+    });
+    await expect(anchorOnlyMapItem).toBeVisible();
+    await anchorOnlyMapItem.click();
+    await expect.poll(async () => afterReviewFrame.locator("html").getAttribute(
+      "data-pageroot-review-focus",
+    )).toBe(anchorOnlyChangeId);
+    await expect.poll(() => afterReviewFrame.locator("html").evaluate(() => {
+      const anchor = document.querySelector("[data-review-anchor-only]");
+      const section = document.querySelector("[data-review-anchor-only-section]");
+      if (!anchor || !section) return false;
+      const anchorRect = anchor.getBoundingClientRect();
+      const sectionRect = section.getBoundingClientRect();
+      return anchorRect.top >= 10
+        && anchorRect.top <= innerHeight * .26
+        && anchorRect.top - sectionRect.top > 220;
+    })).toBe(true);
+    await expect(afterReviewFrame.locator(
+      `[data-pageroot-review-overlay-box="${anchorOnlyChangeId}"]`,
+    )).toHaveCount(0);
+    await expect(afterReviewFrame.locator(
+      `[data-pageroot-review-mask-hole="${anchorOnlyChangeId}"]`,
+    )).toHaveCount(0);
+    const reopenOutline = launched.page.getByRole("button", { name: "打开内容地图" });
+    if (await reopenOutline.isVisible()) await reopenOutline.click();
     const ebitaChangeId = await beforeReviewFrame.locator(
       "[data-review-ebita-section]",
     ).getAttribute("data-pageroot-review-id");
@@ -2282,6 +2500,23 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect(afterReviewFrame.locator(
       '[data-review-added-chart][data-pageroot-review-structure]',
     )).toHaveCount(1);
+    const structureAddedRowFrame = afterReviewFrame.locator(
+      `[data-pageroot-review-overlay-box][data-tone="structure"][data-pageroot-review-semantic-owner="${addedRowSemanticOwner}"]`,
+    );
+    await expect(structureAddedRowFrame).toHaveCount(1);
+    await expect(afterReviewFrame.locator(
+      `[data-pageroot-review-overlay-box][data-tone="text-added"][data-pageroot-review-semantic-owner="${addedRowSemanticOwner}"]`,
+    )).toHaveCount(0);
+    await expect.poll(() => structureAddedRowFrame.evaluate((frame) => {
+      const row = document.querySelector('[data-review-brand-row="added"]');
+      if (!row) return false;
+      const frameRect = frame.getBoundingClientRect();
+      const rowRect = row.getBoundingClientRect();
+      return Math.abs(frameRect.left - (rowRect.left - 3)) < .75
+        && Math.abs(frameRect.top - (rowRect.top - 3)) < .75
+        && Math.abs(frameRect.width - (rowRect.width + 6)) < .75
+        && Math.abs(frameRect.height - (rowRect.height + 6)) < .75;
+    })).toBe(true);
     await expect(beforeReviewFrame.locator(
       '[data-review-metrics] [data-pageroot-review-structure]',
     )).toHaveCount(0);
@@ -2302,10 +2537,13 @@ test("a verified AI result stays pending through desktop review until the user a
       .toBeVisible();
     await expect(beforeReviewFrame.locator(
       '[data-review-layout-only][data-pageroot-review-style="before"]',
-    )).toHaveAttribute("data-pageroot-review-style-scope", "box");
+    )).toHaveAttribute("data-pageroot-review-style-scope", "content");
     await expect(afterReviewFrame.locator(
       '[data-review-layout-only][data-pageroot-review-style="after"]',
-    )).toHaveAttribute("data-pageroot-review-style-scope", "box");
+    )).toHaveAttribute("data-pageroot-review-style-scope", "content");
+    await expect(afterReviewFrame.locator(
+      '[data-review-layout-only][data-pageroot-review-operation="layout"]',
+    )).toHaveAttribute("data-pageroot-review-summary", "换行调整");
     const layoutStyleOwner = await afterReviewFrame.locator(
       "[data-review-layout-only]",
     ).getAttribute("data-pageroot-review-style-owner");
@@ -2314,11 +2552,20 @@ test("a verified AI result stays pending through desktop review until the user a
       `[data-pageroot-review-overlay-box][data-tone="style"][data-pageroot-review-overlay-owner="${layoutStyleOwner}"]`,
     );
     await expect(layoutStyleFrame).toHaveCount(1);
-    await expect(layoutStyleFrame).toHaveAttribute("data-scope", "box");
-    await expect(layoutStyleFrame).toHaveAttribute(
-      "data-pageroot-review-fragment-count",
-      "1",
-    );
+    await expect(layoutStyleFrame).toHaveAttribute("data-scope", "content");
+    await expect(layoutStyleFrame.locator(
+      "[data-pageroot-review-overlay-label]",
+    )).toHaveText("换行调整");
+    await expect.poll(() => layoutStyleFrame.evaluate((frame) => {
+      const owner = document.querySelector("[data-review-layout-only]");
+      if (!owner) return false;
+      const frameRect = frame.getBoundingClientRect();
+      const ownerRect = owner.getBoundingClientRect();
+      return frameRect.left >= ownerRect.left - 4
+        && frameRect.top >= ownerRect.top - 4
+        && frameRect.right <= ownerRect.right + 4
+        && frameRect.bottom <= ownerRect.bottom + 4;
+    })).toBe(true);
     await expect(afterReviewFrame.locator(
       '[data-pageroot-review-overlay-box][data-tone="style"]',
     ).first()).toBeAttached();
@@ -2341,7 +2588,7 @@ test("a verified AI result stays pending through desktop review until the user a
       .toBeVisible();
     await expect(afterReviewFrame.locator(
       '[data-pageroot-review-overlay-box][data-tone="style"] [data-pageroot-review-overlay-label]',
-    ).first()).toHaveText("视觉调整");
+    ).filter({ hasText: /^视觉调整$/u }).first()).toHaveText("视觉调整");
     await expect.poll(async () => Promise.all(
       [beforeReviewFrame, afterReviewFrame].map((frame) => frame.locator("html").evaluate(() => {
         const copy = document.querySelector("[data-review-inherited-copy]");
@@ -2478,6 +2725,80 @@ test("a verified AI result stays pending through desktop review until the user a
         && grid.x + grid.width - (afterPane.x + afterPane.width) <= 4
         && afterPane.x - (beforePane.x + beforePane.width) <= 4;
     }).toBe(true);
+    const crossLineProjectionState = () => afterReviewFrame.locator("html").evaluate(() => {
+        const marker = document.querySelector(
+          '[data-review-cross-line] [data-pageroot-review-text="added"]',
+        );
+        if (!marker) return { matches: false, reason: "marker-missing" };
+        const groupId = marker.getAttribute("data-pageroot-review-text-group") || "";
+        const range = document.createRange();
+        range.selectNodeContents(marker);
+        const rangeRectCount = [...range.getClientRects()]
+          .filter((rect) => rect.width > 1 && rect.height > 1).length;
+        range.detach();
+        const frames = [...document.querySelectorAll(
+          '[data-pageroot-review-overlay-box][data-text-group="' + groupId + '"]',
+        )];
+        const labelCount = frames.filter((frame) => (
+          frame.querySelector("[data-pageroot-review-overlay-label]")
+        )).length;
+        const framesArePlain = frames.every((frame) => (
+            frame.getAttribute("data-shaped") !== "true"
+            && frame.getAttribute("data-pageroot-review-fragment-count") === "1"
+        ));
+        return {
+          matches: frames.length === rangeRectCount
+            && labelCount === 1
+            && framesArePlain,
+          rangeRectCount,
+          frameCount: frames.length,
+          labelCount,
+          framesArePlain,
+          filter: document.documentElement.dataset.pagerootReviewFilter,
+        };
+      });
+    await launched.page.getByRole("button", { name: "适应", exact: true }).click();
+    await expect(launched.page.getByRole("button", { name: "适应", exact: true }))
+      .toHaveAttribute("aria-pressed", "true");
+    await expect.poll(crossLineProjectionState).toMatchObject({ matches: true });
+    await expect.poll(() => projectionIsCanonical(afterReviewFrame)).toBe(true);
+    await launched.page.getByRole("button", { name: "100%", exact: true }).click();
+    await expect(launched.page.getByRole("button", { name: "100%", exact: true }))
+      .toHaveAttribute("aria-pressed", "true");
+    await expect.poll(crossLineProjectionState).toMatchObject({ matches: true });
+    const originalWindowBounds = await launched.electronApp.evaluate(({ BrowserWindow }) => {
+      const window = BrowserWindow.getAllWindows().find((candidate) => (
+        candidate.webContents.getURL().includes("/dist-desktop/renderer/")
+        || candidate.getTitle() === "源页"
+      ));
+      return window?.getBounds() || null;
+    });
+    expect(originalWindowBounds).toBeTruthy();
+    const originalViewportWidth = await launched.page.evaluate(() => innerWidth);
+    const resizedBounds = { ...originalWindowBounds, width: originalWindowBounds.width + 180 };
+    await launched.electronApp.evaluate(({ BrowserWindow }, bounds) => {
+      BrowserWindow.getAllWindows().find((candidate) => (
+        candidate.webContents.getURL().includes("/dist-desktop/renderer/")
+        || candidate.getTitle() === "源页"
+      ))?.setBounds(bounds, false);
+    }, resizedBounds);
+    await expect.poll(() => launched.page.evaluate(
+      (original) => innerWidth - original >= 120,
+      originalViewportWidth,
+    )).toBe(true);
+    await expect.poll(crossLineProjectionState).toMatchObject({ matches: true });
+    await expect.poll(() => projectionIsCanonical(afterReviewFrame)).toBe(true);
+    await launched.electronApp.evaluate(({ BrowserWindow }, bounds) => {
+      BrowserWindow.getAllWindows().find((candidate) => (
+        candidate.webContents.getURL().includes("/dist-desktop/renderer/")
+        || candidate.getTitle() === "源页"
+      ))?.setBounds(bounds, false);
+    }, originalWindowBounds);
+    await expect.poll(() => launched.page.evaluate(
+      (original) => Math.abs(innerWidth - original) <= 2,
+      originalViewportWidth,
+    )).toBe(true);
+    await expect.poll(crossLineProjectionState).toMatchObject({ matches: true });
     const beforeViewport = launched.page.locator('[aria-label="修改前画布滚动区"]');
     const afterViewport = launched.page.locator('[aria-label="修改后画布滚动区"]');
     await launched.page.waitForTimeout(450);
