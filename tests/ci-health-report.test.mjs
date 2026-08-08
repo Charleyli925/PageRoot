@@ -286,6 +286,49 @@ test("CI health records cancellation rates without treating pre-review jobs as f
   assert.equal(report.workflowCancellation.promotedCandidateCancellationRate, 0.5);
 });
 
+test("CI health includes automatic Release Dry Run minutes and cancellations in PR totals", () => {
+  const report = summarizeCiHealth({
+    periodDays: 30,
+    generatedAt: "2026-08-08T12:00:00.000Z",
+    ciRuns: [],
+    feedbackRuns: [],
+    dryRunRuns: [{
+      id: 305,
+      event: "pull_request",
+      conclusion: "success",
+    }, {
+      id: 306,
+      event: "pull_request",
+      conclusion: "cancelled",
+    }],
+    jobsByRunId: {
+      305: [job({
+        name: "assemble-and-checkpoint-unsigned-app",
+        attempt: 1,
+        conclusion: "success",
+        startedAt: "2026-08-08T10:00:00.000Z",
+        completedAt: "2026-08-08T10:02:00.000Z",
+      }), job({
+        name: "restore-rebuild-oracles-and-launch",
+        attempt: 1,
+        conclusion: "success",
+        startedAt: "2026-08-08T10:02:00.000Z",
+        completedAt: "2026-08-08T10:05:00.000Z",
+      })],
+    },
+    candidateRuns: [],
+    releaseRuns: [],
+    dependencyHealth: "success",
+  });
+
+  assert.equal(report.sourceGate.pullRequestRuns, 2);
+  assert.equal(report.runnerUse.totalMinutes, 5);
+  assert.equal(report.runnerUse.releaseDryRunMinutes, 5);
+  assert.equal(report.releaseDryRun.runs, 2);
+  assert.deepEqual(report.releaseDryRun.conclusions, { success: 1, cancelled: 1 });
+  assert.equal(report.workflowCancellation.pullRequestCancellationRate, 0.5);
+});
+
 test("CI health keeps empty periods explicit instead of reporting false zero rates", () => {
   const report = summarizeCiHealth({
     periodDays: 30,
@@ -379,6 +422,7 @@ test("CI health workflow stays read-only and retains a machine-readable report",
   assert.doesNotMatch(workflow, /contents: write|pull-requests: write|issues: write/u);
   assert.match(reportScript, /workflow: "ci\.yml"/u);
   assert.match(reportScript, /workflow: "pr-feedback\.yml"/u);
+  assert.match(reportScript, /workflow: "release-dry-run\.yml"/u);
   assert.match(reportScript, /\| Metric \| Actual \| Target \| Status \|/u);
   assert.match(reportScript, /Cancelled promoted candidates/u);
 });

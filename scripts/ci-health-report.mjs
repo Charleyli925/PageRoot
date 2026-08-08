@@ -208,6 +208,7 @@ export function summarizeCiHealth({
   generatedAt,
   ciRuns,
   feedbackRuns = [],
+  dryRunRuns = [],
   jobsByRunId,
   candidateRuns,
   releaseRuns,
@@ -215,7 +216,14 @@ export function summarizeCiHealth({
 }) {
   const sourcePullRequestRuns = (ciRuns || []).filter((run) => run?.event === "pull_request");
   const feedbackPullRequestRuns = (feedbackRuns || []).filter((run) => run?.event === "pull_request");
-  const pullRequestRuns = [...sourcePullRequestRuns, ...feedbackPullRequestRuns];
+  const dryRunPullRequestRuns = (dryRunRuns || []).filter((run) => (
+    run?.event === "pull_request"
+  ));
+  const pullRequestRuns = [
+    ...sourcePullRequestRuns,
+    ...feedbackPullRequestRuns,
+    ...dryRunPullRequestRuns,
+  ];
   const fullRuns = sourcePullRequestRuns.filter((run) => (
     fullGateAttempts(jobsForRun(jobsByRunId, run.id)) > 0
   ));
@@ -254,6 +262,7 @@ export function summarizeCiHealth({
     : null;
   const fullGateMinutes = runnerMinutesForRuns(fullRuns, jobsByRunId);
   const feedbackMinutes = runnerMinutesForRuns(selectedFeedbackRuns, jobsByRunId);
+  const releaseDryRunMinutes = runnerMinutesForRuns(dryRunPullRequestRuns, jobsByRunId);
   const candidateChurnMinutes = runnerMinutesForRuns(repeatedCandidates, jobsByRunId);
   const repeatedShare = runnerMinutes > 0 ? repeatedMinutes / runnerMinutes : null;
   const candidateChurnShare = runnerMinutes > 0 ? candidateChurnMinutes / runnerMinutes : null;
@@ -326,6 +335,7 @@ export function summarizeCiHealth({
     runnerUse: {
       totalMinutes: round(runnerMinutes),
       feedbackMinutes: round(feedbackMinutes),
+      releaseDryRunMinutes: round(releaseDryRunMinutes),
       fullGateMinutes: round(fullGateMinutes),
       repeatedGreenMinutes: round(repeatedMinutes),
       repeatedGreenShare: roundedRepeatedShare,
@@ -343,6 +353,10 @@ export function summarizeCiHealth({
     releaseCandidate: {
       runs: (candidateRuns || []).length,
       conclusions: conclusionCounts(candidateRuns),
+    },
+    releaseDryRun: {
+      runs: dryRunPullRequestRuns.length,
+      conclusions: conclusionCounts(dryRunPullRequestRuns),
     },
     publication: {
       runs: (releaseRuns || []).length,
@@ -487,11 +501,14 @@ export function renderCiHealthMarkdown(report) {
     `| Total PR runner minutes | ${report.runnerUse.totalMinutes} |`,
     `| Full-gate runner minutes | ${report.runnerUse.fullGateMinutes} |`,
     `| Feedback runner minutes | ${report.runnerUse.feedbackMinutes} |`,
+    `| Release-dry-run runner minutes | ${report.runnerUse.releaseDryRunMinutes} |`,
     `| Candidate-churn runner minutes | ${report.runnerUse.candidateChurnMinutes} |`,
     `| Cancelled PR workflow runs | ${report.workflowCancellation.cancelledPullRequestRuns}/${report.workflowCancellation.pullRequestRuns} (${percent(report.workflowCancellation.pullRequestCancellationRate)}) |`,
     `| Cancelled promoted candidates | ${report.workflowCancellation.cancelledPromotedCandidateRuns}/${report.workflowCancellation.promotedCandidateRuns} (${percent(report.workflowCancellation.promotedCandidateCancellationRate)}) |`,
     "",
     `Candidate conclusions: \`${JSON.stringify(report.releaseCandidate.conclusions)}\``,
+    "",
+    `Release dry-run conclusions: \`${JSON.stringify(report.releaseDryRun.conclusions)}\``,
     "",
     `Publication conclusions: \`${JSON.stringify(report.publication.conclusions)}\``,
     "",
@@ -507,13 +524,14 @@ async function main() {
     generatedAt.getTime() - options.days * 24 * 60 * 60 * 1000,
   ).toISOString();
   const repositoryPath = options.repository.split("/").map(encodeURIComponent).join("/");
-  const [ciRuns, feedbackRuns, candidateRuns, releaseRuns] = await Promise.all([
+  const [ciRuns, feedbackRuns, dryRunRuns, candidateRuns, releaseRuns] = await Promise.all([
     workflowRuns({ repositoryPath, workflow: "ci.yml", token, since }),
     workflowRuns({ repositoryPath, workflow: "pr-feedback.yml", token, since }),
+    workflowRuns({ repositoryPath, workflow: "release-dry-run.yml", token, since }),
     workflowRuns({ repositoryPath, workflow: "release-candidate.yml", token, since }),
     workflowRuns({ repositoryPath, workflow: "release.yml", token, since }),
   ]);
-  const pullRequestRuns = [...ciRuns, ...feedbackRuns]
+  const pullRequestRuns = [...ciRuns, ...feedbackRuns, ...dryRunRuns]
     .filter((run) => run.event === "pull_request");
   const jobsByRunId = await collectJobs(
     repositoryPath,
@@ -525,6 +543,7 @@ async function main() {
     generatedAt: generatedAt.toISOString(),
     ciRuns,
     feedbackRuns,
+    dryRunRuns,
     jobsByRunId,
     candidateRuns,
     releaseRuns,
