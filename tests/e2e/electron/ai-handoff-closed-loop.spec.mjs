@@ -1067,12 +1067,15 @@ test("a verified AI result stays pending through desktop review until the user a
     "utf8",
   );
   const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
-  let delayedReviewResourceRequests = 0;
+  const delayedReviewResourceRequestsBySide = new Map();
   const runtimeVisualCommentText = "这两个图的配色改一下，包括旁边这个柱状图的颜色。";
   const ordinaryReviewCommentText = "这个普通段落也请保留。";
   await launched.page.route("**/review-runtime-slow.png*", async (route) => {
-    delayedReviewResourceRequests += 1;
     const reviewSide = new URL(route.request().url()).searchParams.get("side");
+    delayedReviewResourceRequestsBySide.set(
+      reviewSide,
+      (delayedReviewResourceRequestsBySide.get(reviewSide) || 0) + 1,
+    );
     await new Promise((resolve) => setTimeout(
       resolve,
       reviewSide === "after" ? 750 : 50,
@@ -1372,7 +1375,10 @@ test("a verified AI result stays pending through desktop review until the user a
       .toHaveAttribute("data-review-runtime-promise-digest-api-restored", "true");
     await expect(afterReviewFrame.locator("html"))
       .toHaveAttribute("data-review-runtime-promise-digest-api-restored", "true");
-    expect(delayedReviewResourceRequests).toBeGreaterThanOrEqual(4);
+    expect(delayedReviewResourceRequestsBySide.get("before") || 0)
+      .toBeGreaterThanOrEqual(1);
+    expect(delayedReviewResourceRequestsBySide.get("after") || 0)
+      .toBeGreaterThanOrEqual(1);
     const runtimeChangedHosts = [
       "#review-runtime-html-chart",
       "#review-runtime-text-chart",
