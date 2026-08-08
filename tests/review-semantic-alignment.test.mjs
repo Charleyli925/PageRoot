@@ -157,3 +157,40 @@ test("the over-budget fallback stays monotonic and keeps a middle insertion", ()
     index === 0 || pair.afterIndex > matched[index - 1].afterIndex
   )));
 });
+
+test("large table rows and list items stay ordered within their own parent budget", () => {
+  const changedSequence = (kind, parentKey, count, insertionAt) => {
+    const before = Array.from({ length: count }, (_, index) => unit(
+      `稳定前缀 ${index} 的旧说明保持可配对`,
+      { kind, parentKey, affinities: [`${kind}:${index}`] },
+    ));
+    const after = before.map((entry, index) => unit(
+      `稳定前缀 ${index} 的新说明保持可配对`,
+      { kind, parentKey, affinities: [`${kind}:${index}`] },
+    ));
+    after.splice(insertionAt, 0, unit(
+      `新增 ${kind} 不借用稳定项`,
+      { kind, parentKey, affinities: [`${kind}:inserted`] },
+    ));
+    return { before, after };
+  };
+  const cases = [
+    changedSequence("table-row", "table:primary/tbody", 240, 120),
+    changedSequence("list-item", "list:primary", 320, 160),
+  ];
+  for (const { before, after } of cases) {
+    const pairs = alignReviewSemanticUnits(before, after, {
+      matrixBudget: REVIEW_SEMANTIC_ALIGNMENT_MATRIX_BUDGET,
+      lookahead: 32,
+    });
+    const matched = matchedPairs(pairs).sort((left, right) => (
+      left.beforeIndex - right.beforeIndex
+    ));
+    const insertionAt = after.findIndex((entry) => entry.text.startsWith("新增 "));
+    assert.deepEqual(unmatchedAfter(pairs), [insertionAt]);
+    assert.equal(matched.length, before.length);
+    assert.ok(matched.every((pair, index) => (
+      index === 0 || pair.afterIndex > matched[index - 1].afterIndex
+    )));
+  }
+});

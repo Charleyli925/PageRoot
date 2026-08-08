@@ -119,13 +119,20 @@ Comments + frozen input
 - Formal AI review owns one disposable reducer with independent page, change
   filter, context visibility, navigation, canonical presentation path, scroll
   and zoom fields. A cancellable, byte-bounded `ReviewAnalysisSession` yields
-  between parse/control/pair/annotation/serialization phases and caches multiple
-  exact identities. Its document analyzer first establishes high-confidence before/after node pairs, derives
-  copy, structure and visual facts from those pairs, and only then emits one
-  typed canonical change footprint. It never promotes tag/position proximity
-  alone into a change fact. Pairing consumes unique stable keys, unchanged
-  markup and distinctive identities first, then limits fuzzy edges to compatible
-  tag/context buckets rather than a page-wide Cartesian product. The
+  between parse/control/pair/annotation/serialization phases and after bounded
+  semantic row/list-item batches, then caches multiple
+  exact identities. Its document analyzer first builds a hierarchy of semantic
+  units (`direct-flow`/`br-line`, list/list item, table/row group/row/cell and
+  leaf text owner), then aligns only siblings of an already-paired parent.
+  `review-semantic-alignment` is the pure, bounded alignment helper: it consumes
+  unique stable keys and exact signatures first, cuts remaining intervals on
+  those anchors, then uses a weighted monotonic alignment or a finite-lookahead
+  fallback. Repeated, low-confidence and ambiguous candidates remain unmatched;
+  it never promotes tag, position or geometric proximity into a change fact.
+  The shared pair graph derives copy, structure and visual facts once, and only
+  then emits one typed canonical change footprint. Each fact carries a
+  disposable semantic owner and a geometry owner for the prepared review pair;
+  neither identity is persisted, sent over IPC, or available to comments. The
   ready-review session prepares that immutable document pair for the exact
   operation/source/comment identity before the React review surface mounts;
   rerenders and bounded cache hits reuse it. Static source analysis remains the primary fact
@@ -302,6 +309,7 @@ they do not import application services.
 | History, attachment and preview presentation | `app/workbench/presentation.tsx` |
 | AI handoff drawer presentation | `app/workbench/handoff-view.tsx` |
 | Formal AI review state transitions | `app/workbench/review-state.ts` |
+| Bounded pure sibling alignment for semantic review units | `app/lib/review-semantic-alignment.js` |
 | Bounded review-runtime snapshot validation, comparison, deduplication and comparison deadline | `app/lib/review-runtime-visual.js` |
 | Formal AI review analysis, paired runtime mapping, global mask and overlay projection | `app/workbench/review-document.ts` |
 | Formal AI review composition and isolated-frame coordination | `app/workbench/AiReviewWorkspace.tsx` |

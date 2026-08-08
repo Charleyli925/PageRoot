@@ -2478,6 +2478,25 @@ test("a verified AI result stays pending through desktop review until the user a
       .toBe("1");
     expect(Number(await unchangedMapItem.evaluate((element) => getComputedStyle(element).opacity)))
       .toBeLessThan(0.7);
+    await expect(beforeReviewFrame.locator(
+      '[data-review-anchor-only] [data-pageroot-review-text="removed"]',
+    )).toHaveText("只删除这句定位文字。");
+    await expect(afterReviewFrame.locator(
+      '[data-review-anchor-only] [data-pageroot-review-text], [data-review-anchor-only] [data-pageroot-review-text-context]',
+    )).toHaveCount(0);
+    const anchorOnlyChangeId = await afterReviewFrame.locator(
+      "[data-review-anchor-only-section]",
+    ).getAttribute("data-pageroot-review-id");
+    expect(anchorOnlyChangeId).toBeTruthy();
+    await expect(afterReviewFrame.locator(
+      "[data-review-anchor-only]",
+    )).toHaveAttribute("data-pageroot-review-anchor-change", anchorOnlyChangeId);
+    await expect(afterReviewFrame.locator(
+      `[data-pageroot-review-overlay-box="${anchorOnlyChangeId}"]`,
+    )).toHaveCount(0);
+    await expect(afterReviewFrame.locator(
+      `[data-pageroot-review-mask-hole="${anchorOnlyChangeId}"]`,
+    )).toHaveCount(0);
     const anchorOnlyMapItem = launched.page.getByRole("button", {
       name: /删除锚点导航/u,
     });
