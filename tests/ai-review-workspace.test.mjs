@@ -404,7 +404,14 @@ test("runtime chart review is captured by the owner and never trusted from the a
   assert.match(review, /acceptedRuntimeVisualEnvelope/);
   assert.match(review, /acceptRuntimeVisualSnapshots/);
   assert.match(review, /changedReviewRuntimeVisualCandidateKeys/);
-  assert.match(review, /Promise\.all\(/);
+  assert.match(
+    review,
+    /const before = await captureSide\("before"\);\s+const after = await captureSide\("after"\);/u,
+  );
+  assert.doesNotMatch(
+    review,
+    /Promise\.all\(\[\s*captureSide\("before"\),\s*captureSide\("after"\),\s*\]\)/u,
+  );
   assert.match(review, /runtimeVisualStaticReadyRef/);
   assert.match(review, /staticReady\.sides\.size === 2/);
   assert.match(review, /requestOwnerRuntimeVisualCapture\(\);/);

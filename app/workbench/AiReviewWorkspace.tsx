@@ -779,10 +779,13 @@ export default function AiReviewWorkspace({
         return [];
       }
     };
-    void Promise.all([
-      captureSide("before"),
-      captureSide("after"),
-    ]).then(([before, after]) => {
+    // Keep the one before/after pair bounded, but do not make two hidden
+    // offscreen Electron renderers compete for their short owner deadline.
+    void (async () => {
+      const before = await captureSide("before");
+      const after = await captureSide("after");
+      return { before, after };
+    })().then(({ before, after }) => {
       if (
         runtimeVisualOwnerDocumentsRef.current !== documents
         || runtimeVisualResolutionRef.current?.documents === documents

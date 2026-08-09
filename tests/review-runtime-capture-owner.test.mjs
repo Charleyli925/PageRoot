@@ -77,9 +77,13 @@ function fakeOwner({
 
     constructor(options) {
       this.options = options;
+      this.paintHandlers = [];
       this.webContents = {
         setWindowOpenHandler: (handler) => {
           this.windowOpenHandler = handler;
+        },
+        once: (event, handler) => {
+          if (event === "paint") this.paintHandlers.push(handler);
         },
         on: (event, handler) => {
           this.handlers ??= new Map();
@@ -99,6 +103,11 @@ function fakeOwner({
     async loadURL(url) {
       this.url = url;
       await loadURL(url);
+      const paintHandlers = this.paintHandlers.splice(0);
+      if (paintHandlers.length) {
+        state.captureEvents.push({ type: "paint" });
+        paintHandlers.forEach((handler) => handler());
+      }
     }
 
     async capturePage(rect, options) {
@@ -291,6 +300,7 @@ test("runtime snapshot owner captures each host before measuring the next viewpo
 
   assert.equal(captured.outcome, "captured");
   assert.deepEqual(state.captureEvents.map((event) => event.type), [
+    "paint",
     "measure",
     "capture",
     "measure",

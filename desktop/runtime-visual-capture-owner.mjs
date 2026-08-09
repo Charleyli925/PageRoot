@@ -516,6 +516,13 @@ function ownerExecutor(webContents, source) {
   );
 }
 
+function waitForFirstOffscreenPaint(webContents) {
+  if (typeof webContents?.once !== "function") return Promise.resolve();
+  return new Promise((resolve) => {
+    webContents.once("paint", () => resolve());
+  });
+}
+
 async function settleOwnerCleanup(cleanup) {
   let timeoutId = null;
   const completed = Promise.resolve().then(cleanup).catch(() => undefined);
@@ -662,7 +669,9 @@ export function createRuntimeSnapshotCaptureController({
       captureWindow.webContents.on?.("will-navigate", (event, url) => {
         if (url !== previewSession.url) event.preventDefault();
       });
+      const firstPaint = waitForFirstOffscreenPaint(captureWindow.webContents);
       await withOwnerDeadline(captureWindow.loadURL(previewSession.url));
+      await withOwnerDeadline(firstPaint);
       if (cancellationReason || captureWindow.isDestroyed()) throw new CaptureCancelledError();
 
       let capturedPixels = 0;
