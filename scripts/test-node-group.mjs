@@ -43,7 +43,6 @@ const INTEGRATION_TESTS = new Set([
   "fixed-targeted-change-fixtures.test.mjs",
   "html-source-parser.test.mjs",
   "lifecycle-core.test.mjs",
-  "manual-update.test.mjs",
   "product-contract.test.mjs",
   "qoder-handoff.test.mjs",
   "rendered-html.test.mjs",

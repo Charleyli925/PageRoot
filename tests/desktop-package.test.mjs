@@ -25,7 +25,7 @@ test("desktop package carries the v3 patch engine, candidate assessment and acti
     bridgeShutdown,
     closeRecovery,
     qoderHandoff,
-    manualUpdate,
+    productLinks,
     applicationUpdate,
     userNotice,
     usageTelemetry,
@@ -54,7 +54,7 @@ test("desktop package carries the v3 patch engine, candidate assessment and acti
     readFile(new URL("../desktop/bridge-shutdown.mjs", import.meta.url), "utf8"),
     readFile(new URL("../desktop/close-recovery.mjs", import.meta.url), "utf8"),
     readFile(new URL("../desktop/qoder-handoff.mjs", import.meta.url), "utf8"),
-    readFile(new URL("../desktop/manual-update.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../desktop/product-links.mjs", import.meta.url), "utf8"),
     readFile(new URL("../desktop/application-update.mjs", import.meta.url), "utf8"),
     readFile(new URL("../PageRoot 用户声明与免责声明.txt", import.meta.url), "utf8"),
     readFile(new URL("../desktop/usage-telemetry.mjs", import.meta.url), "utf8"),
@@ -113,7 +113,8 @@ test("desktop package carries the v3 patch engine, candidate assessment and acti
   assert.ok(packageJson.build.files.includes("desktop/close-recovery.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/product-contract.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/qoder-handoff.mjs"));
-  assert.ok(packageJson.build.files.includes("desktop/manual-update.mjs"));
+  assert.ok(packageJson.build.files.includes("desktop/product-links.mjs"));
+  assert.equal(packageJson.build.files.includes("desktop/manual-update.mjs"), false);
   assert.ok(packageJson.build.files.includes("desktop/application-update.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/usage-telemetry.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/preview-protocol.mjs"));
@@ -583,18 +584,19 @@ test("desktop package carries the v3 patch engine, candidate assessment and acti
     /qoder-work:\/\/|osascript|System Events|openExternal|keystroke|execFile/,
   );
   assert.match(
-    manualUpdate,
-    /Charleyli925\/PageRoot\/releases\/latest\/download\/update-manifest\.json/,
+    productLinks,
+    /export const PROJECT_REPOSITORY_URL[\s\S]*?Charleyli925\/PageRoot/,
   );
   assert.match(
-    manualUpdate,
+    productLinks,
     /Charleyli925\/PageRoot\/releases\/latest/,
   );
   assert.match(
-    manualUpdate,
-    /PROJECT_REPOSITORY_URL[\s\S]*?Charleyli925\/PageRoot/,
+    productLinks,
+    /export const LATEST_RELEASE_PAGE_URL/,
   );
-  assert.doesNotMatch(manualUpdate, /api\.github\.com/);
+  assert.doesNotMatch(productLinks, /update-manifest|fetch|checkForManualUpdate|api\.github\.com/);
+  assert.doesNotMatch(mainProcess, /manual-update\.mjs/);
   assert.match(applicationUpdate, /updater\.autoDownload = false/);
   assert.match(applicationUpdate, /updater\.autoInstallOnAppQuit = false/);
   assert.match(applicationUpdate, /updater\.allowPrerelease = false/);

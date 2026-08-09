@@ -307,4 +307,10 @@ Public macOS candidates fail closed unless they are signed by the expected Devel
 
 The main-process update controller accepts only the stable GitHub Release channel, owns both the startup-plus-four-hour schedule and coalesced manual checks, downloads the hash-described ZIP only after an explicit renderer intent, keeps differential transfer enabled, and disables install-on-ordinary-quit. The renderer receives only a bounded immutable status snapshot and narrow check/download/install intents. The About entry opens only the main-process constant for the project repository; renderer input can never choose an external URL. The same surface opens the user statement and disclaimer only from its fixed signed-app resource path and accepts neither renderer paths nor URLs. A downloaded update can install only after a second explicit restart confirmation and the normal renderer/Bridge drain succeeds; update metadata never gains filesystem or editor authority.
 
-Clients from the earlier ad-hoc/manual-update era cannot securely self-bootstrap into this trust chain. They must manually install the first signed and notarized migration release once; the legacy `update-manifest.json` remains published only to point those clients at that release.
+The current application contains no legacy manifest parser, fetch client, or
+version decision path. Clients from the earlier ad-hoc update era cannot
+securely self-bootstrap into this trust chain; they must manually install the
+first signed and notarized migration release once. The legacy
+`update-manifest.json` remains a Release-produced compatibility artifact only,
+so already-published clients can find that migration release without restoring
+the retired client code to the current application.
