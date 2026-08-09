@@ -27,8 +27,10 @@ import {
 } from "../app/lib/target-resolver.js";
 import {
   assessHtmlCandidate,
-  normalizeCandidateAssessmentPolicy,
 } from "../scripts/candidate-assessment.mjs";
+import {
+  normalizeCandidateAssessmentPolicy,
+} from "../scripts/candidate-assessment-decoder.mjs";
 import { injectManagedMeta, sha256 } from "../scripts/lifecycle-core.mjs";
 import { validateScope } from "../scripts/scope-validator.mjs";
 

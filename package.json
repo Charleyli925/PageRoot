@@ -231,6 +231,10 @@
       "from": "scripts/candidate-assessment.mjs",
       "to": "bridge/candidate-assessment.mjs"
     },
+    {
+      "from": "scripts/candidate-assessment-decoder.mjs",
+      "to": "bridge/candidate-assessment-decoder.mjs"
+    },
       {
         "from": "scripts/scope-validator.mjs",
         "to": "bridge/scope-validator.mjs"
@@ -256,6 +260,10 @@
         "to": "bridge/draft-service.mjs"
       },
       {
+        "from": "scripts/draft-command-decoder.mjs",
+        "to": "bridge/draft-command-decoder.mjs"
+      },
+      {
         "from": "scripts/source-history-service.mjs",
         "to": "bridge/source-history-service.mjs"
       },
@@ -266,6 +274,10 @@
       {
         "from": "shared/draft-aggregate.mjs",
         "to": "shared/draft-aggregate.mjs"
+      },
+      {
+        "from": "shared/direct-edit-compatibility.mjs",
+        "to": "shared/direct-edit-compatibility.mjs"
       },
       {
         "from": "shared/source-history.mjs",

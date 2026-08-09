@@ -308,8 +308,9 @@ test("history cards read only v3 immutable annotations and show audit details", 
   assert.match(workbench, /historyRecordValue\(event, event\.after\)/);
   assert.doesNotMatch(workbench, /function displayRecordValue/);
   assert.match(workbench, /dateTime=\{event\.createdAt\}/);
-  assert.match(workbench, /value\.capturedRevision \?\? value\.revision/);
-  assert.match(workbench, /value\.baseVersionId \|\| value\.basedOnVersionId/);
+  assert.match(workbench, /decodeVersionAuditChange\(value\)/);
+  assert.doesNotMatch(workbench, /value\.capturedRevision \?\? value\.revision/);
+  assert.doesNotMatch(workbench, /value\.baseVersionId \|\| value\.basedOnVersionId/);
 
   assert.match(archiveSelector, /raw\.annotations\.schemaVersion === "3\.0\.0"/);
   assert.match(archiveSelector, /topLevelAnnotations\.comments/);

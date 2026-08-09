@@ -1,8 +1,9 @@
 # Candidate assessment compatibility fixture
 
-This synthetic fixture represents a short-lived August 4, 2026 PageRoot
-Developer Preview record that omitted the executable-surface fields later
-written by another preview build.
+These synthetic fixtures represent short-lived August 4, 2026 PageRoot
+Developer Preview records both before and during the executable-surface
+experiment. `candidate-assessment.pre-executable-dev.json` omitted the pair;
+`candidate-assessment.retired-executable-dev.json` retained it.
 
 Both historical shapes remain valid v1 input. The history reader accepts them
 only after the frozen base and sealed output are ordinary files, all four

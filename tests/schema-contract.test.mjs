@@ -623,14 +623,12 @@ test("the candidate assessment Schema accepts only current and paired retired ex
   );
   assertValid(ajv, validate, current, "current candidate assessment");
 
-  const legacy = structuredClone(current);
-  legacy.health.executableSurfaceUnchanged = false;
-  legacy.executable = {
-    unchanged: false,
-    baseCount: 1,
-    outputCount: 1,
-    changedCount: 1,
-  };
+  const legacy = await json(
+    new URL(
+      "../fixtures/candidate-assessment-compat/candidate-assessment.retired-executable-dev.json",
+      import.meta.url,
+    ),
+  );
   assertValid(ajv, validate, legacy, "legacy candidate assessment");
 
   const healthOnly = structuredClone(current);

@@ -1,0 +1,377 @@
+import { isDeepStrictEqual } from "node:util";
+
+import {
+  assessHtmlCandidate,
+  candidateAssessmentDecision,
+} from "./candidate-assessment.mjs";
+import {
+  assertSchemaVersion,
+  AUXILIARY_SCHEMA_VERSION,
+  comparisonSha256,
+  LifecycleError,
+  sha256,
+} from "./lifecycle-core.mjs";
+
+const ROOT_FIELDS = new Set([
+  "schemaVersion",
+  "status",
+  "projectId",
+  "documentId",
+  "requestId",
+  "attemptId",
+  "candidateVersionId",
+  "baseSha256",
+  "outputSha256",
+  "baseComparisonSha256",
+  "outputComparisonSha256",
+  "issueCodes",
+  "health",
+  "continuity",
+  "assessedAt",
+  "executable",
+]);
+const REQUIRED_ROOT_FIELDS = [
+  "schemaVersion",
+  "status",
+  "projectId",
+  "documentId",
+  "requestId",
+  "attemptId",
+  "candidateVersionId",
+  "baseSha256",
+  "outputSha256",
+  "baseComparisonSha256",
+  "outputComparisonSha256",
+  "issueCodes",
+  "health",
+  "continuity",
+  "assessedAt",
+];
+const HEALTH_FIELDS = new Set([
+  "completeDocument",
+  "bodyHasContent",
+  "executableSurfaceUnchanged",
+]);
+const CONTINUITY_FIELDS = new Set([
+  "status",
+  "evidencePoints",
+  "sameTitle",
+  "text",
+  "anchors",
+  "classes",
+  "assets",
+  "baseVisibleTextLength",
+  "outputVisibleTextLength",
+  "baseBodyElementCount",
+  "outputBodyElementCount",
+  "baseParseErrorCount",
+  "outputParseErrorCount",
+]);
+const OVERLAP_FIELDS = new Set(["score", "shared", "base", "output"]);
+const EXECUTABLE_FIELDS = new Set([
+  "unchanged",
+  "baseCount",
+  "outputCount",
+  "changedCount",
+]);
+const SHA256_PATTERN = /^sha256:[a-f0-9]{64}$/;
+const ID_PATTERNS = {
+  projectId: /^project_[A-Za-z0-9_-]+$/,
+  documentId: /^doc_[A-Za-z0-9_-]+$/,
+  requestId: /^req_[A-Za-z0-9_-]+$/,
+  attemptId: /^attempt_[0-9]{3}$/,
+  candidateVersionId: /^ver_\d{4,}$/,
+};
+
+function decodeError(code, message, details) {
+  return new LifecycleError(code, message, details, 409);
+}
+
+function record(value, label) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw decodeError(
+      "CANDIDATE_ASSESSMENT_INVALID",
+      `${label} must be an object.`,
+    );
+  }
+  return value;
+}
+
+function assertExactFields(value, allowed, label) {
+  const item = record(value, label);
+  const unknown = Object.keys(item).find((key) => !allowed.has(key));
+  if (unknown) {
+    throw decodeError(
+      "CANDIDATE_ASSESSMENT_INVALID",
+      `${label}.${unknown} is not supported.`,
+    );
+  }
+  return item;
+}
+
+function assertRequiredFields(value, fields, label) {
+  const missing = fields.find((field) => !Object.hasOwn(value, field));
+  if (missing) {
+    throw decodeError(
+      "CANDIDATE_ASSESSMENT_INVALID",
+      `${label}.${missing} is required.`,
+    );
+  }
+}
+
+function assertNonNegativeInteger(value, label) {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw decodeError(
+      "CANDIDATE_ASSESSMENT_INVALID",
+      `${label} must be a non-negative safe integer.`,
+    );
+  }
+}
+
+function assertOverlap(value, label) {
+  const overlap = assertExactFields(value, OVERLAP_FIELDS, label);
+  assertRequiredFields(overlap, [...OVERLAP_FIELDS], label);
+  if (
+    overlap.score !== null
+    && (typeof overlap.score !== "number" || !Number.isFinite(overlap.score))
+  ) {
+    throw decodeError(
+      "CANDIDATE_ASSESSMENT_INVALID",
+      `${label}.score must be a finite number or null.`,
+    );
+  }
+  for (const field of ["shared", "base", "output"]) {
+    assertNonNegativeInteger(overlap[field], `${label}.${field}`);
+  }
+}
+
+function assertCandidateAssessmentShape(assessment, label) {
+  const value = assertExactFields(assessment, ROOT_FIELDS, label);
+  assertRequiredFields(value, REQUIRED_ROOT_FIELDS, label);
+  assertSchemaVersion(value, AUXILIARY_SCHEMA_VERSION, label);
+  if (!["ready", "attention", "blocked"].includes(value.status)) {
+    throw decodeError(
+      "CANDIDATE_ASSESSMENT_INVALID",
+      `${label} has an unsupported status.`,
+    );
+  }
+  for (const [field, pattern] of Object.entries(ID_PATTERNS)) {
+    if (typeof value[field] !== "string" || !pattern.test(value[field])) {
+      throw decodeError(
+        "CANDIDATE_ASSESSMENT_INVALID",
+        `${label}.${field} has an invalid format.`,
+      );
+    }
+  }
+  for (const field of [
+    "baseSha256",
+    "outputSha256",
+    "baseComparisonSha256",
+    "outputComparisonSha256",
+  ]) {
+    if (typeof value[field] !== "string" || !SHA256_PATTERN.test(value[field])) {
+      throw decodeError(
+        "CANDIDATE_ASSESSMENT_INVALID",
+        `${label}.${field} must use sha256:<64 lowercase hex>.`,
+      );
+    }
+  }
+  if (
+    !Array.isArray(value.issueCodes)
+    || value.issueCodes.some((code) => typeof code !== "string" || !code)
+    || new Set(value.issueCodes).size !== value.issueCodes.length
+    || typeof value.assessedAt !== "string"
+    || Number.isNaN(Date.parse(value.assessedAt))
+  ) {
+    throw decodeError(
+      "CANDIDATE_ASSESSMENT_INVALID",
+      `${label} has invalid status evidence.`,
+    );
+  }
+  const health = assertExactFields(value.health, HEALTH_FIELDS, `${label}.health`);
+  assertRequiredFields(health, ["completeDocument", "bodyHasContent"], `${label}.health`);
+  if (
+    typeof health.completeDocument !== "boolean"
+    || typeof health.bodyHasContent !== "boolean"
+  ) {
+    throw decodeError(
+      "CANDIDATE_ASSESSMENT_INVALID",
+      `${label}.health is structurally invalid.`,
+    );
+  }
+  const continuity = assertExactFields(
+    value.continuity,
+    CONTINUITY_FIELDS,
+    `${label}.continuity`,
+  );
+  assertRequiredFields(continuity, [...CONTINUITY_FIELDS], `${label}.continuity`);
+  if (
+    !["related", "uncertain"].includes(continuity.status)
+    || typeof continuity.sameTitle !== "boolean"
+  ) {
+    throw decodeError(
+      "CANDIDATE_ASSESSMENT_INVALID",
+      `${label}.continuity is structurally invalid.`,
+    );
+  }
+  for (const field of [
+    "evidencePoints",
+    "baseVisibleTextLength",
+    "outputVisibleTextLength",
+    "baseBodyElementCount",
+    "outputBodyElementCount",
+    "baseParseErrorCount",
+    "outputParseErrorCount",
+  ]) {
+    assertNonNegativeInteger(continuity[field], `${label}.continuity.${field}`);
+  }
+  for (const field of ["text", "anchors", "classes", "assets"]) {
+    assertOverlap(continuity[field], `${label}.continuity.${field}`);
+  }
+
+  const hasRetiredExecutable = Object.hasOwn(value, "executable");
+  const hasRetiredHealth = Object.hasOwn(
+    health,
+    "executableSurfaceUnchanged",
+  );
+  if (hasRetiredExecutable !== hasRetiredHealth) {
+    throw decodeError(
+      "CANDIDATE_ASSESSMENT_INVALID",
+      `${label} must retain the retired executable fields as a pair.`,
+    );
+  }
+  if (hasRetiredExecutable) {
+    const executable = assertExactFields(
+      value.executable,
+      EXECUTABLE_FIELDS,
+      `${label}.executable`,
+    );
+    assertRequiredFields(executable, [...EXECUTABLE_FIELDS], `${label}.executable`);
+    if (
+      typeof health.executableSurfaceUnchanged !== "boolean"
+      || typeof executable.unchanged !== "boolean"
+      || health.executableSurfaceUnchanged !== executable.unchanged
+    ) {
+      throw decodeError(
+        "CANDIDATE_ASSESSMENT_INVALID",
+        `${label} has inconsistent retired executable evidence.`,
+      );
+    }
+    for (const field of ["baseCount", "outputCount", "changedCount"]) {
+      assertNonNegativeInteger(executable[field], `${label}.executable.${field}`);
+    }
+  }
+  return value;
+}
+
+function assertExpectedIdentity(value, expected, label) {
+  for (const [field, expectedValue] of Object.entries(expected)) {
+    if (
+      expectedValue !== undefined
+      && expectedValue !== null
+      && value[field] !== expectedValue
+    ) {
+      throw decodeError(
+        "CANDIDATE_ASSESSMENT_IDENTITY_MISMATCH",
+        `${label} ${field} does not match its lifecycle record.`,
+        { field, expected: expectedValue, actual: value[field] },
+      );
+    }
+  }
+}
+
+/**
+ * Decode the short-lived Developer Preview executable-surface policy into the
+ * current candidate assessment. The small policy-only export intentionally
+ * supports focused current-policy tests; persisted input must use the strict
+ * decoder below.
+ */
+export function normalizeCandidateAssessmentPolicy(assessment) {
+  const value = assessment && typeof assessment === "object"
+    && !Array.isArray(assessment)
+    ? assessment
+    : {};
+  const health = value.health && typeof value.health === "object"
+    && !Array.isArray(value.health)
+    ? { ...value.health }
+    : {};
+  const hasRetiredPolicyEvidence = Object.hasOwn(value, "executable")
+    || Object.hasOwn(health, "executableSurfaceUnchanged");
+  const current = { ...value };
+  delete current.executable;
+  delete health.executableSurfaceUnchanged;
+  const decision = hasRetiredPolicyEvidence
+    ? candidateAssessmentDecision({
+      completeDocument: health.completeDocument,
+      bodyHasContent: health.bodyHasContent,
+      continuityStatus: value.continuity?.status,
+    })
+    : { status: value.status, issueCodes: value.issueCodes };
+  return { ...current, ...decision, health };
+}
+
+export function decodeCandidateAssessmentRecord(
+  assessment,
+  { expected = {}, label = "candidate-assessment.json" } = {},
+) {
+  const value = assertCandidateAssessmentShape(assessment, label);
+  assertExpectedIdentity(value, expected, label);
+  const canonical = normalizeCandidateAssessmentPolicy(value);
+  assertCandidateAssessmentShape(canonical, label);
+  return canonical;
+}
+
+export function decodeHistoricalCandidateAssessment(
+  assessment,
+  {
+    expected = {},
+    baseBuffer,
+    outputBuffer,
+    label = "candidate-assessment.json",
+  } = {},
+) {
+  const normalized = decodeCandidateAssessmentRecord(assessment, {
+    expected,
+    label,
+  });
+  if (!Buffer.isBuffer(baseBuffer) || !Buffer.isBuffer(outputBuffer)) {
+    throw decodeError(
+      "CANDIDATE_ASSESSMENT_LEGACY_EVIDENCE_INVALID",
+      `${label} evidence must be ordinary file bytes.`,
+    );
+  }
+  const baseHtml = baseBuffer.toString("utf8");
+  const outputHtml = outputBuffer.toString("utf8");
+  if (
+    sha256(baseBuffer) !== normalized.baseSha256
+    || sha256(outputBuffer) !== normalized.outputSha256
+    || comparisonSha256(baseHtml) !== normalized.baseComparisonSha256
+    || comparisonSha256(outputHtml) !== normalized.outputComparisonSha256
+  ) {
+    throw decodeError(
+      "CANDIDATE_ASSESSMENT_LEGACY_EVIDENCE_MISMATCH",
+      `${label} no longer matches its sealed HTML evidence.`,
+    );
+  }
+  const current = {
+    schemaVersion: normalized.schemaVersion,
+    projectId: normalized.projectId,
+    documentId: normalized.documentId,
+    requestId: normalized.requestId,
+    attemptId: normalized.attemptId,
+    candidateVersionId: normalized.candidateVersionId,
+    baseSha256: normalized.baseSha256,
+    outputSha256: normalized.outputSha256,
+    baseComparisonSha256: normalized.baseComparisonSha256,
+    outputComparisonSha256: normalized.outputComparisonSha256,
+    ...assessHtmlCandidate({ baseHtml, outputHtml }),
+    assessedAt: normalized.assessedAt,
+  };
+  if (!isDeepStrictEqual(normalized, current)) {
+    throw decodeError(
+      "CANDIDATE_ASSESSMENT_INVALID",
+      `${label} does not match its sealed HTML evidence.`,
+    );
+  }
+  return normalized;
+}

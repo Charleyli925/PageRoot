@@ -18,7 +18,7 @@ import {
 import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
-import { isDeepStrictEqual, promisify } from "node:util";
+import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import {
   assertSchemaVersion,
@@ -59,8 +59,15 @@ import {
 } from "./scope-validator.mjs";
 import {
   assessHtmlCandidate,
-  normalizeCandidateAssessmentPolicy,
 } from "./candidate-assessment.mjs";
+import {
+  decodeCandidateAssessmentRecord,
+  decodeHistoricalCandidateAssessment,
+} from "./candidate-assessment-decoder.mjs";
+import {
+  decodeDirectEditIdentity,
+  DirectEditCompatibilityError,
+} from "../shared/direct-edit-compatibility.mjs";
 import {
   PRODUCT_MAX_BRIDGE_BODY_BYTES,
   PRODUCT_MAX_HTML_BYTES,
@@ -4901,37 +4908,47 @@ async function collectRequestAttachments(context, comments, requestId) {
 }
 
 function normalizeFrozenEditEvents(events, frozenAt, revision, basedOnVersionId) {
-  return events.map((event, index) => ({
-    eventId: schemaRecordId(
-      "edit",
-      event.eventId ?? event.id,
-      String(index + 1),
-    ),
-    createdAt: event.createdAt ?? frozenAt,
-    revision:
-      Number.isSafeInteger(event.revision) && event.revision >= 1
-        ? event.revision
-        : Number.isSafeInteger(event.capturedRevision)
-            && event.capturedRevision >= 1
-          ? event.capturedRevision
-        : Math.max(1, revision),
-    basedOnVersionId: event.basedOnVersionId ?? basedOnVersionId,
-    kind: ["text", "style", "reorder", "structure"].includes(event.kind)
-      ? event.kind
-      : "structure",
-    ...(cleanText(event.property, 300)
-      ? { property: cleanText(event.property, 300) }
-      : {}),
-    summary:
-      cleanText(event.summary, 5000)
-      || "提交前已自动写回的本地编辑",
-    // Direct edits are immutable audit evidence, not authorization for the AI
-    // to change that target again. Their historical target may legitimately be
-    // ambiguous or orphaned after a later edit and must not block submission.
-    target: normalizedTarget(event.target, index, { requireResolved: false }),
-    before: event.before ?? null,
-    after: event.after ?? null,
-  }));
+  return events.map((event, index) => {
+    let identity;
+    try {
+      identity = decodeDirectEditIdentity(event, {
+        fallbackBasedOnVersionId: basedOnVersionId,
+        fallbackRevision: Math.max(1, revision),
+        allowUnassignedRevision: true,
+        label: `Draft direct edit ${index + 1}`,
+      });
+    } catch (error) {
+      if (error instanceof DirectEditCompatibilityError) {
+        throw new HttpError(422, error.code, error.message);
+      }
+      throw error;
+    }
+    return {
+      eventId: schemaRecordId(
+        "edit",
+        event.eventId ?? event.id,
+        String(index + 1),
+      ),
+      createdAt: event.createdAt ?? frozenAt,
+      revision: identity.revision,
+      basedOnVersionId: identity.basedOnVersionId,
+      kind: ["text", "style", "reorder", "structure"].includes(event.kind)
+        ? event.kind
+        : "structure",
+      ...(cleanText(event.property, 300)
+        ? { property: cleanText(event.property, 300) }
+        : {}),
+      summary:
+        cleanText(event.summary, 5000)
+        || "提交前已自动写回的本地编辑",
+      // Direct edits are immutable audit evidence, not authorization for the AI
+      // to change that target again. Their historical target may legitimately be
+      // ambiguous or orphaned after a later edit and must not block submission.
+      target: normalizedTarget(event.target, index, { requireResolved: false }),
+      before: event.before ?? null,
+      after: event.after ?? null,
+    };
+  });
 }
 
 async function saveDraft(body) {
@@ -5999,97 +6016,16 @@ function candidateAssessmentIdentity(context, activeRun, validated) {
   };
 }
 
-function assertCandidateAssessmentRecord(
-  assessment,
-  expected = {},
-  label = "candidate-assessment.json",
-) {
-  assertCandidateAssessmentIdentity(assessment, expected, label);
-  if (!["ready", "attention", "blocked"].includes(assessment.status)) {
-    throw new HttpError(
-      409,
-      "CANDIDATE_ASSESSMENT_INVALID",
-      `${label} has an unsupported status.`,
-    );
-  }
-  const hasRetiredExecutable = assessment.executable !== undefined;
-  const hasRetiredExecutableHealth =
-    assessment.health?.executableSurfaceUnchanged !== undefined;
-  if (
-    !Array.isArray(assessment.issueCodes)
-    || !assessment.issueCodes.every((value) => typeof value === "string")
-    || !assessment.health
-    || typeof assessment.health.completeDocument !== "boolean"
-    || typeof assessment.health.bodyHasContent !== "boolean"
-    || !["related", "uncertain"].includes(assessment.continuity?.status)
-    || hasRetiredExecutable !== hasRetiredExecutableHealth
-    || (
-      hasRetiredExecutable
-      && (
-        typeof assessment.health.executableSurfaceUnchanged !== "boolean"
-        || typeof assessment.executable?.unchanged !== "boolean"
-        || !Number.isSafeInteger(assessment.executable?.baseCount)
-        || assessment.executable.baseCount < 0
-        || !Number.isSafeInteger(assessment.executable?.outputCount)
-        || assessment.executable.outputCount < 0
-        || !Number.isSafeInteger(assessment.executable?.changedCount)
-        || assessment.executable.changedCount < 0
-        || assessment.health.executableSurfaceUnchanged
-          !== assessment.executable.unchanged
-      )
-    )
-  ) {
-    throw new HttpError(
-      409,
-      "CANDIDATE_ASSESSMENT_INVALID",
-      `${label} is structurally invalid.`,
-    );
-  }
-  return normalizeCandidateAssessmentPolicy(assessment);
-}
-
-function assertCandidateAssessmentIdentity(
-  assessment,
-  expected = {},
-  label = "candidate-assessment.json",
-) {
-  assertAuxiliarySchemaVersion(assessment, label);
-  for (const field of [
-    "baseSha256",
-    "outputSha256",
-    "baseComparisonSha256",
-    "outputComparisonSha256",
-  ]) {
-    requireSha256(assessment[field], `${label}.${field}`);
-  }
-  for (const [field, expectedValue] of Object.entries(expected)) {
-    if (
-      expectedValue !== undefined
-      && expectedValue !== null
-      && assessment[field] !== expectedValue
-    ) {
-      throw new HttpError(
-        409,
-        "CANDIDATE_ASSESSMENT_IDENTITY_MISMATCH",
-        `${label} ${field} does not match its lifecycle record.`,
-        { field, expected: expectedValue, actual: assessment[field] },
-      );
-    }
-  }
-  return assessment;
-}
-
 async function readHistoricalCandidateAssessment(
   assessmentPath,
   assessment,
   expected,
 ) {
   const label = "candidate-assessment.json";
-  const normalized = assertCandidateAssessmentRecord(
-    assessment,
+  const normalized = decodeCandidateAssessmentRecord(assessment, {
     expected,
     label,
-  );
+  });
   const attemptRoot = path.dirname(assessmentPath);
   const requestRoot = path.dirname(path.dirname(attemptRoot));
   const projectRoot = path.dirname(path.dirname(requestRoot));
@@ -6129,42 +6065,12 @@ async function readHistoricalCandidateAssessment(
     buffers.push(await readFile(sourcePath));
   }
   const [baseBuffer, outputBuffer] = buffers;
-  const baseHtml = baseBuffer.toString("utf8");
-  const outputHtml = outputBuffer.toString("utf8");
-  if (
-    sha256(baseBuffer) !== assessment.baseSha256
-    || sha256(outputBuffer) !== assessment.outputSha256
-    || comparisonSha256(baseHtml) !== assessment.baseComparisonSha256
-    || comparisonSha256(outputHtml) !== assessment.outputComparisonSha256
-  ) {
-    throw new HttpError(
-      409,
-      "CANDIDATE_ASSESSMENT_LEGACY_EVIDENCE_MISMATCH",
-      `${label} no longer matches its sealed HTML evidence.`,
-    );
-  }
-  const current = {
-    schemaVersion: normalized.schemaVersion,
-    projectId: normalized.projectId,
-    documentId: normalized.documentId,
-    requestId: normalized.requestId,
-    attemptId: normalized.attemptId,
-    candidateVersionId: normalized.candidateVersionId,
-    baseSha256: normalized.baseSha256,
-    outputSha256: normalized.outputSha256,
-    baseComparisonSha256: normalized.baseComparisonSha256,
-    outputComparisonSha256: normalized.outputComparisonSha256,
-    ...assessHtmlCandidate({ baseHtml, outputHtml }),
-    assessedAt: normalized.assessedAt,
-  };
-  if (!isDeepStrictEqual(normalized, current)) {
-    throw new HttpError(
-      409,
-      "CANDIDATE_ASSESSMENT_INVALID",
-      `${label} does not match its sealed HTML evidence.`,
-    );
-  }
-  return normalized;
+  return decodeHistoricalCandidateAssessment(normalized, {
+    expected,
+    baseBuffer,
+    outputBuffer,
+    label,
+  });
 }
 
 async function readCandidateAssessment(
@@ -6183,7 +6089,7 @@ async function readCandidateAssessment(
       expected,
     );
   }
-  return assertCandidateAssessmentRecord(assessment, expected);
+  return decodeCandidateAssessmentRecord(assessment, { expected });
 }
 
 async function writeCandidateAssessmentRaw(context, runtime, validated) {
@@ -6214,10 +6120,9 @@ async function writeCandidateAssessmentRaw(context, runtime, validated) {
     }
     return { assessment: existing, assessmentPath };
   }
-  assertCandidateAssessmentRecord(
-    assessment,
-    candidateAssessmentIdentity(context, activeRun, validated),
-  );
+  decodeCandidateAssessmentRecord(assessment, {
+    expected: candidateAssessmentIdentity(context, activeRun, validated),
+  });
   await atomicWriteJson(assessmentPath, assessment);
   return { assessment, assessmentPath };
 }
