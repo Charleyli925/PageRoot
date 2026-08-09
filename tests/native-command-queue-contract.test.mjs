@@ -106,6 +106,49 @@ test("system work cannot replace a queued or scheduled user command", () => {
   );
 });
 
+test("empty text-fragment deletion replays its queued explicit command after retirement", () => {
+  const emptyFragment = section(
+    canvas,
+    "active.mode === \"text-fragment\"",
+    "const currentActive = activeNativeEditRef.current",
+  );
+  const finish = section(
+    canvas,
+    "const finishNativeEditing = useCallback",
+    "finishNativeEditingRef.current = finishNativeEditing",
+  );
+
+  assert.match(
+    emptyFragment,
+    /finishNativeEditingRef\.current\(false, trigger, \{\s*replayQueuedUserCommand: true,\s*\}\)/u,
+    "only the committed empty-fragment path may request replay",
+  );
+  assertOrdered(
+    finish,
+    [
+      "const completedUserCommand = replayQueuedUserCommand",
+      "takeReplayableNativeCommandForCompletedSession(active)",
+      "currentNativeEditLeaseRef.current = null",
+      "activeNativeEditRef.current = null",
+      "discardPendingNativeCommands(\"session-ended\")",
+      "active.session.dispose()",
+      "loadFrameSource(source, { preserveViewport: true })",
+      "replayCompletedUserCommand()",
+    ],
+    "the explicit command must run only after its committed session has retired",
+  );
+  assert.match(
+    canvas,
+    /callback\.authority !== "user-explicit"[\s\S]*?callback\.session !== active\.session[\s\S]*?nativeEditLeasesMatch\(currentNativeEditLeaseRef\.current, callback\.lease\)/u,
+    "replay must remain limited to the active session's user command",
+  );
+  assert.match(
+    finish,
+    /scheduledNativeCommandCallbackRef\.current = completedUserCommand;[\s\S]*?queueMicrotask\(\(\) => \{[\s\S]*?scheduledNativeCommandCallbackRef\.current !== completedUserCommand[\s\S]*?completedUserCommand\.run\(\)/u,
+    "the replay remains cancellable until its microtask executes",
+  );
+});
+
 test("Workbench header drawers defer until the active composition is settled", () => {
   const headerActions = section(
     workbench,

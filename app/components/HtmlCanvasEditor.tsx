@@ -427,6 +427,10 @@ type NativeEditCommitResult = {
   frameReloading?: boolean;
 };
 
+type FinishNativeEditingOptions = {
+  replayQueuedUserCommand?: boolean;
+};
+
 type EditFeedback = {
   code: string;
   title: string;
@@ -500,6 +504,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const finishNativeEditingRef = useRef<(
     shouldApply: boolean,
     trigger?: NativeEditCheckpointTrigger,
+    options?: FinishNativeEditingOptions,
   ) => NativeEditCommitResult>(() => ({
     ok: false,
     mutation: null,
@@ -1949,6 +1954,33 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     }
   }, [discardNativeCommandCallback]);
 
+  const takeReplayableNativeCommandForCompletedSession = useCallback((
+    active: ActiveNativeEdit,
+  ): PendingNativeCommandCallback | null => {
+    const pending = pendingNativeCommandCallbackRef.current;
+    const scheduled = scheduledNativeCommandCallbackRef.current;
+    const callback = pending ?? scheduled;
+    if (
+      !callback
+      || callback.authority !== "user-explicit"
+      || callback.session !== active.session
+      || !nativeEditLeasesMatch(currentNativeEditLeaseRef.current, callback.lease)
+      || !nativeEditLeasesMatch(active.lease, callback.lease)
+    ) return null;
+    if (callback === pending) {
+      const command = active.session.takePendingCommand();
+      if (
+        !command
+        || command.sequence !== callback.sequence
+        || command.kind !== callback.kind
+      ) return null;
+      pendingNativeCommandCallbackRef.current = null;
+    } else {
+      scheduledNativeCommandCallbackRef.current = null;
+    }
+    return callback;
+  }, []);
+
   const deferNativeCommand = useCallback((
     kind: string,
     run: () => void,
@@ -2304,7 +2336,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         // is therefore no fragment projection to rebase or resume after the
         // canonical frame reload. Retire the transient host without running a
         // second checkpoint; its committed mutation is returned below.
-        const retired = finishNativeEditingRef.current(false, trigger);
+        const retired = finishNativeEditingRef.current(false, trigger, {
+          replayQueuedUserCommand: true,
+        });
         if (!retired.ok) {
           throw new Error(
             retired.reason || "文字片段删除后无法安全结束编辑会话。",
@@ -2377,6 +2411,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const finishNativeEditing = useCallback((
     shouldApply: boolean,
     trigger: NativeEditCheckpointTrigger = "manual",
+    { replayQueuedUserCommand = false }: FinishNativeEditingOptions = {},
   ): NativeEditCommitResult => {
     const active = activeNativeEditRef.current;
     if (!active) return { ok: true, mutation: null };
@@ -2390,6 +2425,18 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         ? checkpointNativeEdit(trigger)
         : { ok: true, mutation: null };
       if (!committed.ok) return committed;
+      const completedUserCommand = replayQueuedUserCommand
+        ? takeReplayableNativeCommandForCompletedSession(active)
+        : null;
+      const replayCompletedUserCommand = () => {
+        if (!completedUserCommand) return;
+        scheduledNativeCommandCallbackRef.current = completedUserCommand;
+        window.queueMicrotask(() => {
+          if (scheduledNativeCommandCallbackRef.current !== completedUserCommand) return;
+          scheduledNativeCommandCallbackRef.current = null;
+          completedUserCommand.run();
+        });
+      };
       const source = frameSourceHtmlRef.current;
       const target = active.target;
       const rootElement = active.rootElement;
@@ -2421,6 +2468,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         pendingToolbarVisibleRef.current = true;
         renderedSourceHtmlRef.current = null;
         loadFrameSource(source, { preserveViewport: true });
+        replayCompletedUserCommand();
         return { ...committed, frameReloading: true };
       }
 
@@ -2444,6 +2492,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       updateMoveAvailability();
       observeSelectedElement(selectionElement);
       requestAnimationFrame(updateOverlayPosition);
+      replayCompletedUserCommand();
       return { ...committed, frameReloading: false };
     } finally {
       nativeEditFinishingRef.current = false;
@@ -2454,6 +2503,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     discardPendingNativeCommands,
     loadFrameSource,
     observeSelectedElement,
+    takeReplayableNativeCommandForCompletedSession,
     updateMoveAvailability,
     updateOverlayPosition,
     updateSelectedStyle,
