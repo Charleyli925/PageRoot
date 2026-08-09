@@ -81,7 +81,7 @@ import { handoffToQoderWork } from "./qoder-handoff.mjs";
 import {
   LATEST_RELEASE_PAGE_URL,
   PROJECT_REPOSITORY_URL,
-} from "./manual-update.mjs";
+} from "./product-links.mjs";
 import { createApplicationUpdateController } from "./application-update.mjs";
 import {
   normalizeCompletedSourceRename,

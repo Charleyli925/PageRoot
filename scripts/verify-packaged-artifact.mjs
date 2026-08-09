@@ -98,7 +98,7 @@ const REQUIRED_APP_SOURCE_FILES = [
   "desktop/close-recovery.mjs",
   "desktop/product-contract.mjs",
   "desktop/qoder-handoff.mjs",
-  "desktop/manual-update.mjs",
+  "desktop/product-links.mjs",
   "desktop/application-update.mjs",
   "desktop/usage-telemetry.mjs",
   "desktop/preview-protocol.mjs",
