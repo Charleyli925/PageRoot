@@ -36,13 +36,11 @@ import { alignReviewSemanticUnits } from "../lib/review-semantic-alignment.js";
 import type {
   ReviewSemanticAlignmentMatch,
 } from "../lib/review-semantic-alignment.js";
-import {
-  REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT,
-  selectPrioritizedReviewRuntimeVisualCandidates,
-} from "../lib/review-runtime-visual.js";
 import type {
   ReviewRuntimeVisualCandidate,
 } from "../lib/review-runtime-visual.js";
+import { REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT } from "../lib/review-runtime-visual.js";
+import { resolveRuntimeSnapshotHosts } from "../domain/runtime-snapshot-hosts.js";
 import {
   REVIEW_SOURCE_NODE_ATTRIBUTE,
   prepareReviewCommentSourceProjection,
@@ -433,37 +431,6 @@ const REVIEW_COMMENT_KEY_ATTRIBUTE = "data-pageroot-review-comment-key";
 const REVIEW_COMMENT_GLOBAL_ATTRIBUTE = "data-pageroot-review-comment-global";
 const REVIEW_COMMENT_MARKUP_ATTRIBUTE_PATTERN =
   /\sdata-pageroot-review-comment-(?:key|global)="[^"]*"/gu;
-const RUNTIME_VISUAL_HOST_SELECTOR = [
-  "article",
-  "aside",
-  "canvas",
-  "div",
-  "figure",
-  "figcaption",
-  "li",
-  "main",
-  "section",
-  "span",
-  "svg",
-  "td",
-  "th",
-  "tbody",
-].join(",");
-const GENERIC_RUNTIME_VISUAL_CLASSES = new Set([
-  "active",
-  "card",
-  "chart",
-  "container",
-  "content",
-  "grid",
-  "item",
-  "main",
-  "panel",
-  "row",
-  "section",
-  "wrap",
-  "wrapper",
-]);
 
 type ReviewTextInventory = {
   text: string;
@@ -1327,43 +1294,6 @@ function pairSections(before: Element[], after: Element[]): SectionPair[] {
   return markMovedPairs(pairs);
 }
 
-type ReviewRuntimeSectionContext = {
-  pair: SectionPair;
-  outlineId: string;
-  changeId?: string;
-  label: string;
-  panelKey?: string;
-  panelPath: string[];
-};
-
-type ReviewRuntimeHostPair = {
-  before: Element;
-  after: Element;
-};
-
-type ReviewScriptDescriptor = {
-  content: string;
-  signature: string;
-};
-
-type ChangedReviewScript = {
-  content: string;
-};
-
-export type RuntimeVisualScriptTokenKind =
-  | "id"
-  | "class"
-  | "class-value"
-  | "data-attribute"
-  | "data-value"
-  | "semantic-value";
-
-export type RuntimeVisualScriptToken = {
-  value: string;
-  kind: RuntimeVisualScriptTokenKind;
-  attributeName?: string;
-};
-
 type ReviewBootstrapElementBinding = {
   path: number[];
   tagName: string;
@@ -1380,65 +1310,6 @@ type ReviewRuntimeVisualAnnotations = {
   candidates: ReviewRuntimeVisualCandidate[];
   captureCandidates: Record<ReviewSide, ReviewRuntimeCaptureCandidate[]>;
 };
-
-function isRuntimeVisualPlaceholder(element: Element): boolean {
-  if (!element.matches(RUNTIME_VISUAL_HOST_SELECTOR)) return false;
-  return [...element.childNodes].every((node) => (
-    node.nodeType === Node.COMMENT_NODE
-    || (node.nodeType === Node.TEXT_NODE && !(node.textContent || "").trim())
-  ));
-}
-
-function runtimeVisualIdentityParts(element: Element): string[] {
-  const parts: string[] = [];
-  if (element.id) parts.push(`id:${element.id}`);
-  for (const attributeName of ["aria-label", "name", "title"]) {
-    const value = element.getAttribute(attributeName)?.trim();
-    if (value) parts.push(`${attributeName}:${value}`);
-  }
-  [...element.attributes].forEach((attribute) => {
-    if (
-      !attribute.name.startsWith("data-")
-      || attribute.name.startsWith("data-pageroot-")
-      || !/(?:canvas|chart|graph|plot|table|visual|viz)/iu.test(attribute.name)
-    ) return;
-    parts.push(`${attribute.name}:${attribute.value.trim()}`);
-  });
-  const distinctiveClasses = classTokens(element).filter((token) => (
-    token.length >= 4 && !GENERIC_RUNTIME_VISUAL_CLASSES.has(token.toLowerCase())
-  ));
-  if (distinctiveClasses.length) {
-    parts.push(`class:${distinctiveClasses.sort().join(".")}`);
-  }
-  return parts;
-}
-
-function runtimeVisualPairIdentity(element: Element): string | null {
-  const explicitKey = pairKey(element);
-  if (explicitKey) return `${element.tagName}:${explicitKey}`;
-  const parts = runtimeVisualIdentityParts(element);
-  return parts.length ? `${element.tagName}:${parts.join("|")}` : null;
-}
-
-function runtimeVisualSourceSignature(element: Element): string {
-  const attributes = [...element.attributes]
-    .filter((attribute) => !attribute.name.startsWith("data-pageroot-"))
-    .map((attribute) => `${attribute.name}=${attribute.value}`)
-    .sort();
-  return `${element.tagName}|${attributes.join("|")}`;
-}
-
-function relativeElementPath(root: Element, element: Element): string | null {
-  const indexes: number[] = [];
-  let current: Element | null = element;
-  while (current && current !== root) {
-    const parent: Element | null = current.parentElement;
-    if (!parent) return null;
-    indexes.unshift([...parent.children].indexOf(current));
-    current = parent;
-  }
-  return current === root ? indexes.join(".") : null;
-}
 
 function reviewBootstrapElementBinding(
   document: Document,
@@ -1503,585 +1374,91 @@ function reviewBootstrapElementBinding(
   };
 }
 
-function runtimeVisualHosts(root: Element): Element[] {
-  return [root, ...root.querySelectorAll(RUNTIME_VISUAL_HOST_SELECTOR)]
-    .filter(isRuntimeVisualPlaceholder);
+function sourceElementsByNodeId(document: Document): Map<string, Element> {
+  const elements = new Map<string, Element>();
+  document.querySelectorAll(`[${REVIEW_SOURCE_NODE_ATTRIBUTE}]`).forEach((element) => {
+    const sourceNodeId = element.getAttribute(REVIEW_SOURCE_NODE_ATTRIBUTE);
+    if (sourceNodeId) elements.set(sourceNodeId, element);
+  });
+  return elements;
 }
 
-function pairRuntimeVisualHosts(
-  beforeRoot: Element,
-  afterRoot: Element,
-): ReviewRuntimeHostPair[] {
-  const beforeHosts = runtimeVisualHosts(beforeRoot);
-  const afterHosts = runtimeVisualHosts(afterRoot);
-  const beforeIdentityCounts = new Map<string, number>();
-  const afterByIdentity = new Map<string, Element[]>();
-  beforeHosts.forEach((element) => {
-    const identity = runtimeVisualPairIdentity(element);
-    if (identity) beforeIdentityCounts.set(identity, (beforeIdentityCounts.get(identity) || 0) + 1);
-  });
-  afterHosts.forEach((element) => {
-    const identity = runtimeVisualPairIdentity(element);
-    if (!identity) return;
-    const matches = afterByIdentity.get(identity) || [];
-    matches.push(element);
-    afterByIdentity.set(identity, matches);
-  });
-
-  const usedAfter = new Set<Element>();
-  const assignments = new Map<Element, Element>();
-  beforeHosts.forEach((beforeHost) => {
-    const identity = runtimeVisualPairIdentity(beforeHost);
-    const matches = identity ? afterByIdentity.get(identity) || [] : [];
-    if (
-      !identity
-      || beforeIdentityCounts.get(identity) !== 1
-      || matches.length !== 1
-      || usedAfter.has(matches[0])
-    ) return;
-    assignments.set(beforeHost, matches[0]);
-    usedAfter.add(matches[0]);
-  });
-
-  const afterByPath = new Map(afterHosts.flatMap((afterHost) => {
-    const path = relativeElementPath(afterRoot, afterHost);
-    return path === null ? [] : [[path, afterHost] as const];
-  }));
-  beforeHosts.forEach((beforeHost) => {
-    if (assignments.has(beforeHost)) return;
-    const identityParts = runtimeVisualIdentityParts(beforeHost);
-    const path = relativeElementPath(beforeRoot, beforeHost);
-    const afterHost = path === null ? null : afterByPath.get(path) || null;
-    if (
-      !identityParts.length
-      || !afterHost
-      || usedAfter.has(afterHost)
-      || beforeHost.tagName !== afterHost.tagName
-      || runtimeVisualSourceSignature(beforeHost) !== runtimeVisualSourceSignature(afterHost)
-    ) return;
-    assignments.set(beforeHost, afterHost);
-    usedAfter.add(afterHost);
-  });
-  return [...assignments].map(([before, after]) => ({ before, after }));
+function runtimeOutlineId(element: Element): string | null {
+  return element.closest("[data-pageroot-outline-id]")
+    ?.getAttribute("data-pageroot-outline-id") || null;
 }
 
-function reviewScriptDescriptors(document: Document): ReviewScriptDescriptor[] {
-  return [...document.scripts].map((element) => {
-    const content = [
-      element.getAttribute("src") || "",
-      element.getAttribute("type") || "",
-      element.textContent || "",
-    ].join("\n");
-    return {
-      content,
-      signature: `${element.getAttribute("src") || ""}\u0000${element.getAttribute("type") || ""}\u0000${element.textContent || ""}`,
-    };
-  });
-}
-
-function changedReviewScripts(
-  beforeScripts: ReviewScriptDescriptor[],
-  afterScripts: ReviewScriptDescriptor[],
-): ChangedReviewScript[] {
-  const unmatched = (
-    scripts: ReviewScriptDescriptor[],
-    counterparts: ReviewScriptDescriptor[],
-  ) => {
-    const remainingSignatures = new Map<string, number>();
-    counterparts.forEach(({ signature }) => {
-      remainingSignatures.set(signature, (remainingSignatures.get(signature) || 0) + 1);
-    });
-    return scripts.filter(({ signature }) => {
-      const remaining = remainingSignatures.get(signature) || 0;
-      if (!remaining) return true;
-      remainingSignatures.set(signature, remaining - 1);
-      return false;
-    });
+function runtimeSnapshotCaptureCandidate(key: string, host: {
+  binding: {
+    path: readonly number[];
+    tagName: string;
+    kind: "canvas" | "svg" | "host";
+    identityAttributes: readonly (readonly [string, string])[];
   };
-  return [
-    ...unmatched(beforeScripts, afterScripts),
-    ...unmatched(afterScripts, beforeScripts),
-  ].map(({ content }) => ({ content }));
-}
-
-function runtimeVisualScriptTokens(
-  before: Element,
-  after: Element,
-): RuntimeVisualScriptToken[] {
-  const elementTokens = (element: Element): RuntimeVisualScriptToken[] => {
-    const explicitTokens: RuntimeVisualScriptToken[] = [];
-    const id = element.id.trim();
-    if (id.length >= 3) explicitTokens.push({ value: id, kind: "id" });
-    [...element.attributes]
-        .filter((attribute) => (
-          attribute.name.startsWith("data-")
-          && !attribute.name.startsWith("data-pageroot-")
-          && /(?:canvas|chart|graph|plot|table|visual|viz)/iu.test(attribute.name)
-        ))
-        .forEach((attribute) => {
-          const attributeName = attribute.name.trim();
-          const value = attribute.value.trim();
-          if (attributeName.length >= 3) {
-            explicitTokens.push({
-              value: attributeName,
-              kind: "data-attribute",
-              attributeName,
-            });
-          }
-          if (value.length >= 3) {
-            explicitTokens.push({
-              value,
-              kind: "data-value",
-              attributeName,
-            });
-          }
-        });
-    if (explicitTokens.length) return explicitTokens;
-    const semanticTokens: RuntimeVisualScriptToken[] = [];
-    ["aria-label", "name", "title"].forEach((attributeName) => {
-      const value = (element.getAttribute(attributeName) || "").trim();
-      if (value.length >= 3) {
-        semanticTokens.push({ value, kind: "semantic-value", attributeName });
-      }
-    });
-    if (semanticTokens.length) return semanticTokens;
-    const classValue = (element.getAttribute("class") || "").trim();
-    return [
-      ...(classValue.length >= 3
-        ? [{ value: classValue, kind: "class-value" as const, attributeName: "class" }]
-        : []),
-      ...classTokens(element)
-      .filter((token) => (
-        !GENERIC_RUNTIME_VISUAL_CLASSES.has(token.toLowerCase())
-      ))
-      .filter((value) => value.length >= 3)
-      .map((value) => ({ value, kind: "class" as const })),
-    ];
+}): ReviewRuntimeCaptureCandidate {
+  return {
+    key,
+    path: [...host.binding.path],
+    tagName: host.binding.tagName,
+    kind: host.binding.kind,
+    identityAttributes: host.binding.identityAttributes.map(([name, value]) => [name, value]),
   };
-  const unique = new Map<string, RuntimeVisualScriptToken>();
-  [...elementTokens(before), ...elementTokens(after)].forEach((token) => {
-    const key = `${token.kind}\u0000${token.attributeName || ""}\u0000${token.value}`;
-    if (!unique.has(key)) unique.set(key, token);
-  });
-  return [...unique.values()];
 }
 
-function runtimeVisualScriptRegexValue(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-}
-
-function runtimeVisualScriptStringLiteral(value: string): string {
-  return `["'\\x60]${runtimeVisualScriptRegexValue(value)}["'\\x60]`;
-}
-
-function runtimeVisualScriptBoundaryMatches(source: string, value: string): boolean {
-  const escaped = runtimeVisualScriptRegexValue(value);
-  return new RegExp(
-    `(?:^|[^A-Za-z0-9_$-])${escaped}(?=$|[^A-Za-z0-9_$-])`,
-    "u",
-  ).test(source);
-}
-
-function runtimeVisualScriptSelectorLiteral(value: string): string | null {
-  const trimmed = value.trim();
-  const quote = trimmed[0];
-  return quote && trimmed.at(-1) === quote
-    ? trimmed.slice(1, -1)
-    : null;
-}
-
-function runtimeVisualScriptAttributeOperatorMatches(
-  actual: string,
-  operator: string,
-  expected: string,
-): boolean {
-  if (
-    expected.length === 0
-    && ["~=", "^=", "$=", "*="].includes(operator)
-  ) return false;
-  switch (operator) {
-    case "=":
-      return actual === expected;
-    case "~=":
-      return actual.split(/[\t\n\f\r ]+/u).includes(expected);
-    case "^=":
-      return actual.startsWith(expected);
-    case "$=":
-      return actual.endsWith(expected);
-    case "*=":
-      return actual.includes(expected);
-    case "|=":
-      return actual === expected || actual.startsWith(`${expected}-`);
-    default:
-      return false;
-  }
-}
-
-function runtimeVisualScriptDataSelectorMatches(
-  source: string,
-  token: RuntimeVisualScriptToken,
-): boolean {
-  const attributeName = token.attributeName || token.value;
-  const escapedAttributeName = runtimeVisualScriptRegexValue(attributeName);
-  const attributeSelector = new RegExp(
-    `\\[\\s*${escapedAttributeName}(?:\\s*(?<operator>[~|^$*]?=)\\s*(?<operand>[^\\]]*))?\\s*\\]`,
-    "u",
-  );
-  for (const queryMatch of source.matchAll(/\bquerySelector(?:All)?\s*\(\s*([^)]*)\)/gu)) {
-    const selector = runtimeVisualScriptSelectorLiteral(queryMatch[1]);
-    if (selector === null) continue;
-    const match = selector.match(attributeSelector);
-    if (!match) continue;
-    const operator = match.groups?.operator || "";
-    if (!operator) {
-      if (token.kind === "data-attribute") return true;
-      continue;
-    }
-    if (token.kind !== "data-value") continue;
-    const rawOperand = match.groups?.operand?.trim() || "";
-    const operand = runtimeVisualScriptSelectorLiteral(rawOperand) ?? rawOperand;
-    if (runtimeVisualScriptAttributeOperatorMatches(token.value, operator, operand)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function runtimeVisualScriptClassSelectorMatches(
-  source: string,
-  token: RuntimeVisualScriptToken,
-): boolean {
-  const classSelector = new RegExp(
-    "\\[\\s*class(?:\\s*(?<operator>[~|^$*]?=)\\s*(?<operand>[^\\]]*))?\\s*\\]",
-    "u",
-  );
-  for (const queryMatch of source.matchAll(/\bquerySelector(?:All)?\s*\(\s*([^)]*)\)/gu)) {
-    const selector = runtimeVisualScriptSelectorLiteral(queryMatch[1]);
-    if (selector === null) continue;
-    const match = selector.match(classSelector);
-    if (!match) continue;
-    const operator = match.groups?.operator || "";
-    if (!operator) return token.kind === "class-value";
-    const rawOperand = match.groups?.operand?.trim() || "";
-    const operand = runtimeVisualScriptSelectorLiteral(rawOperand) ?? rawOperand;
-    if (operator === "~=" && token.kind === "class") {
-      if (runtimeVisualScriptAttributeOperatorMatches(token.value, operator, operand)) {
-        return true;
-      }
-      continue;
-    }
-    if (token.kind === "class-value"
-      && runtimeVisualScriptAttributeOperatorMatches(token.value, operator, operand)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function runtimeVisualScriptClassSelectorReferencesToken(
-  selector: string,
-  token: RuntimeVisualScriptToken,
-): boolean {
-  if (token.kind === "class") {
-    const escaped = runtimeVisualScriptRegexValue(token.value);
-    if (new RegExp(
-      `(?:^|[^A-Za-z0-9_.-])\\.${escaped}(?=$|[^A-Za-z0-9_.-])`,
-      "u",
-    ).test(selector)) return true;
-  }
-  return runtimeVisualScriptClassSelectorMatches(
-    `document.querySelector(${JSON.stringify(selector)})`,
-    token,
-  );
-}
-
-function runtimeVisualScriptAssignedClassMatches(
-  assignedValue: string,
-  token: RuntimeVisualScriptToken,
-): boolean {
-  if (token.kind === "class-value") return assignedValue === token.value;
-  return token.kind === "class"
-    && assignedValue.split(/[\t\n\f\r ]+/u).includes(token.value);
-}
-
-function runtimeVisualScriptClassWriteMatches(
-  source: string,
-  token: RuntimeVisualScriptToken,
-): boolean {
-  // A written class value alone is not evidence that the write targeted this
-  // host: an unrelated tooltip can receive the same class. Only accept a
-  // direct querySelector receiver whose selector already identifies the
-  // candidate token. Variable aliases and generic tag selectors intentionally
-  // fail closed because this lightweight parser cannot prove their target.
-  const receiver = "(?:document\\.)?querySelector(?:All)?\\s*\\(\\s*(?<selector>[^)]*)\\s*\\)(?:\\s*\\[\\s*\\d+\\s*\\])?";
-  const classNameWrite = new RegExp(
-    `${receiver}\\s*\\.\\s*className\\s*=\\s*(?<quote>[\"'\\x60])(?<assigned>[^\"'\\x60]*)\\k<quote>`,
-    "gu",
-  );
-  const setAttributeWrite = new RegExp(
-    `${receiver}\\s*\\.\\s*setAttribute\\s*\\(\\s*(?<classQuote>[\"'\\x60])class\\k<classQuote>\\s*,\\s*(?<valueQuote>[\"'\\x60])(?<assigned>[^\"'\\x60]*)\\k<valueQuote>\\s*\\)`,
-    "gu",
-  );
-  return [classNameWrite, setAttributeWrite].some((pattern) => (
-    [...source.matchAll(pattern)].some((match) => {
-      const selector = runtimeVisualScriptSelectorLiteral(match.groups?.selector || "");
-      return selector !== null
-        && runtimeVisualScriptClassSelectorReferencesToken(selector, token)
-        && runtimeVisualScriptAssignedClassMatches(match.groups?.assigned || "", token);
-    })
-  ));
-}
-
-export function runtimeVisualScriptReferencesToken(
-  source: string,
-  token: RuntimeVisualScriptToken,
-): boolean {
-  const value = token.value;
-  const escaped = runtimeVisualScriptRegexValue(value);
-  if (token.kind === "class") {
-    return new RegExp(
-      `(?:^|[^A-Za-z0-9_.-])\\.${escaped}(?=$|[^A-Za-z0-9_.-])`,
-      "u",
-    ).test(source) || new RegExp(
-      `(?:\\bgetElementsByClassName|\\bclassList\\.(?:add|contains|remove|replace|toggle))\\s*\\(\\s*${runtimeVisualScriptStringLiteral(value)}`,
-      "u",
-    ).test(source) || new RegExp(
-      `\\[\\s*class\\s*(?:[~|^$*]?=)\\s*${runtimeVisualScriptStringLiteral(value)}`,
-      "u",
-    ).test(source)
-      || runtimeVisualScriptClassSelectorMatches(source, token)
-      || runtimeVisualScriptClassWriteMatches(source, token);
-  }
-  if (token.kind === "class-value") {
-    return runtimeVisualScriptClassSelectorMatches(source, token)
-      || new RegExp(
-        `\\bgetElementsByClassName\\s*\\(\\s*${runtimeVisualScriptStringLiteral(value)}\\s*\\)`,
-        "u",
-      ).test(source)
-      || runtimeVisualScriptClassWriteMatches(source, token);
-  }
-  if (token.kind === "data-attribute") {
-    return runtimeVisualScriptDataSelectorMatches(source, token)
-      || new RegExp(
-        `\\bgetAttribute\\s*\\(\\s*${runtimeVisualScriptStringLiteral(token.attributeName || value)}\\s*\\)`,
-        "u",
-      ).test(source);
-  }
-  if (token.kind === "data-value") {
-    return runtimeVisualScriptDataSelectorMatches(source, token);
-  }
-  if (token.kind === "id") {
-    return new RegExp(
-      `\\bgetElementById\\s*\\(\\s*${runtimeVisualScriptStringLiteral(value)}\\s*\\)`,
-      "u",
-    ).test(source) || new RegExp(
-      `\\bquerySelector(?:All)?\\s*\\(\\s*${runtimeVisualScriptStringLiteral(`#${value}`)}\\s*\\)`,
-      "u",
-    ).test(source) || runtimeVisualScriptBoundaryMatches(source, value);
-  }
-  return runtimeVisualScriptBoundaryMatches(source, value);
-}
-
-function hasRuntimeVisualCause(
-  hostPair: ReviewRuntimeHostPair,
-  changedScripts: ChangedReviewScript[],
-): boolean {
-  const tokens = runtimeVisualScriptTokens(hostPair.before, hostPair.after);
-  const referencesHost = (content: string) => tokens.some((token) => (
-    runtimeVisualScriptReferencesToken(content, token)
-  ));
-  return tokens.length > 0 && changedScripts.some(({ content }) => referencesHost(content));
-}
-
-function isLocalReviewCommentTarget(element: Element): boolean {
-  return element.hasAttribute(REVIEW_COMMENT_KEY_ATTRIBUTE)
-    && element.getAttribute(REVIEW_COMMENT_GLOBAL_ATTRIBUTE) !== "true";
-}
-
-function runtimeVisualCommentMatch(host: Element): {
-  priority: number;
-  target: Element;
-} | null {
-  if (isLocalReviewCommentTarget(host)) return { priority: 3, target: host };
-  let candidate = host.parentElement;
-  while (candidate) {
-    if (isLocalReviewCommentTarget(candidate)) {
-      return { priority: 2, target: candidate };
-    }
-    candidate = candidate.parentElement;
-  }
-  return null;
-}
-
-function localRuntimeVisualCommentTargets(sectionRoot: Element): Element[] {
-  const targets = new Set<Element>();
-  if (isLocalReviewCommentTarget(sectionRoot)) targets.add(sectionRoot);
-  sectionRoot.querySelectorAll(`[${REVIEW_COMMENT_KEY_ATTRIBUTE}]`).forEach((target) => {
-    if (isLocalReviewCommentTarget(target)) targets.add(target);
-  });
-  return [...targets];
-}
-
-function runtimeVisualHostAncestorCounts(
-  sectionRoot: Element,
-  hostPairs: readonly ReviewRuntimeHostPair[],
-): Map<Element, number> {
-  const counts = new Map<Element, number>();
-  hostPairs.forEach((hostPair) => {
-    let candidate: Element | null = hostPair.before;
-    while (candidate) {
-      counts.set(candidate, (counts.get(candidate) || 0) + 1);
-      if (candidate === sectionRoot) break;
-      candidate = candidate.parentElement;
-    }
-  });
-  return counts;
-}
-
-function nearestRuntimeVisualCommentGroup(
-  target: Element,
-  sectionRoot: Element,
-  hostAncestorCounts: ReadonlyMap<Element, number>,
-): Element | null {
-  if (target !== sectionRoot && !sectionRoot.contains(target)) return null;
-  let candidate: Element | null = target;
-  while (candidate) {
-    if ((hostAncestorCounts.get(candidate) || 0) >= 2) return candidate;
-    if (candidate === sectionRoot) return null;
-    candidate = candidate.parentElement;
-  }
-  return null;
-}
-
-function staticReviewMarkerCoversRuntimeHost(
-  host: Element,
-  sectionRoot: Element,
-): boolean {
-  let candidate: Element | null = host;
-  while (candidate) {
-    if (candidate.hasAttribute("data-pageroot-review-marker")) {
-      const markerTypes = String(
-        candidate.getAttribute("data-pageroot-review-marker-types") || "",
-      ).split(/\s+/u);
-      if (
-        candidate === host
-        || markerTypes.includes("structure")
-        || (
-          markerTypes.includes("style")
-          && candidate.getAttribute("data-pageroot-review-style-scope") === "box"
-        )
-      ) return true;
-    }
-    if (candidate === sectionRoot) break;
-    candidate = candidate.parentElement;
-  }
-  return false;
-}
-
-function annotateRuntimeVisualCandidates(
-  beforeDocument: Document,
-  afterDocument: Document,
-  sections: ReviewRuntimeSectionContext[],
-): ReviewRuntimeVisualAnnotations {
-  const beforeScripts = reviewScriptDescriptors(beforeDocument);
-  const afterScripts = reviewScriptDescriptors(afterDocument);
-  const changedScripts = changedReviewScripts(beforeScripts, afterScripts);
+function annotateRuntimeVisualCandidates({
+  beforeHtml,
+  afterHtml,
+  beforeIndex,
+  afterIndex,
+  beforeSourceElements,
+  afterSourceElements,
+  outline,
+}: {
+  beforeHtml: string;
+  afterHtml: string;
+  beforeIndex: ReturnType<typeof buildSourceIndex> | null;
+  afterIndex: ReturnType<typeof buildSourceIndex> | null;
+  beforeSourceElements: ReadonlyMap<string, Element>;
+  afterSourceElements: ReadonlyMap<string, Element>;
+  outline: readonly ReviewOutlineItem[];
+}): ReviewRuntimeVisualAnnotations {
   const captureCandidates: Record<ReviewSide, ReviewRuntimeCaptureCandidate[]> = {
     before: [],
     after: [],
   };
-  if (!changedScripts.length) return { candidates: [], captureCandidates };
-  const proposed: Array<{
-    before: Element;
-    after: Element;
-    section: ReviewRuntimeSectionContext;
-    commentPriority: number;
-    requiresDeterministicConfirmation: boolean;
-  }> = [];
-  const usedBefore = new Set<Element>();
-  const usedAfter = new Set<Element>();
-  sections.forEach((section) => {
-    if (!section.pair.before || !section.pair.after) return;
-    const hostPairs = pairRuntimeVisualHosts(section.pair.before, section.pair.after);
-    const hostAncestorCounts = runtimeVisualHostAncestorCounts(
-      section.pair.before,
-      hostPairs,
-    );
-    const commentMatches = new Map<Element, ReturnType<typeof runtimeVisualCommentMatch>>();
-    const commentGroups = new Set<Element>();
-    localRuntimeVisualCommentTargets(section.pair.before).forEach((target) => {
-      const group = nearestRuntimeVisualCommentGroup(
-        target,
-        section.pair.before as Element,
-        hostAncestorCounts,
-      );
-      if (group) commentGroups.add(group);
-    });
-    hostPairs.forEach((hostPair) => {
-      const match = runtimeVisualCommentMatch(hostPair.before);
-      commentMatches.set(hostPair.before, match);
-    });
-    hostPairs.forEach((hostPair) => {
-      let commentPriority = commentMatches.get(hostPair.before)?.priority || 0;
-      if (!commentPriority) {
-        for (const group of commentGroups) {
-          if (group === hostPair.before || group.contains(hostPair.before)) {
-            commentPriority = 1;
-            break;
-          }
-        }
-      }
-      const runtimeVisualCause = hasRuntimeVisualCause(hostPair, changedScripts);
-      if (
-        usedBefore.has(hostPair.before)
-        || usedAfter.has(hostPair.after)
-        || staticReviewMarkerCoversRuntimeHost(hostPair.before, section.pair.before as Element)
-        || staticReviewMarkerCoversRuntimeHost(hostPair.after, section.pair.after as Element)
-        || (
-          commentPriority === 0
-          && !runtimeVisualCause
-        )
-      ) return;
-      usedBefore.add(hostPair.before);
-      usedAfter.add(hostPair.after);
-      proposed.push({
-        ...hostPair,
-        section,
-        commentPriority,
-        // Every local runtime marker needs a second fresh owner session.
-        // The first run can establish a candidate, but it must not be
-        // presented until its source identity, frozen viewport, facts, and
-        // screenshot evidence agree across independently created sessions.
-        requiresDeterministicConfirmation: true,
-      });
-    });
+  const resolved = resolveRuntimeSnapshotHosts({
+    beforeHtml,
+    afterHtml,
+    beforeIndex,
+    afterIndex,
   });
-  const selected = selectPrioritizedReviewRuntimeVisualCandidates(
-    proposed,
-    REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT,
-  );
+  if (!resolved) return { candidates: [], captureCandidates };
+  const outlineById = new Map(outline.map((item) => [item.id, item]));
   const candidates: ReviewRuntimeVisualCandidate[] = [];
-  selected.forEach(({
-    before,
-    after,
-    section,
-    requiresDeterministicConfirmation,
-  }) => {
-    const beforeBinding = reviewBootstrapElementBinding(beforeDocument, before);
-    const afterBinding = reviewBootstrapElementBinding(afterDocument, after);
-    if (!beforeBinding || !afterBinding) return;
+  resolved.hosts.forEach(({ before, after }) => {
+    const beforeElement = beforeSourceElements.get(before.sourceNodeId);
+    const afterElement = afterSourceElements.get(after.sourceNodeId);
+    if (!beforeElement || !afterElement) return;
+    const beforeOutlineId = runtimeOutlineId(beforeElement);
+    const afterOutlineId = runtimeOutlineId(afterElement);
+    if (!beforeOutlineId || beforeOutlineId !== afterOutlineId) return;
+    const outlineItem = outlineById.get(beforeOutlineId);
+    if (!outlineItem) return;
     const key = `runtime-host-${candidates.length + 1}`;
-    const changeId = section.changeId || `runtime-change-${section.outlineId}`;
-    captureCandidates.before.push({ ...beforeBinding, key });
-    captureCandidates.after.push({ ...afterBinding, key });
+    const changeId = outlineItem.changeId || `runtime-change-${outlineItem.id}`;
+    captureCandidates.before.push(runtimeSnapshotCaptureCandidate(key, before));
+    captureCandidates.after.push(runtimeSnapshotCaptureCandidate(key, after));
     candidates.push({
       key,
-      outlineId: section.outlineId,
+      outlineId: outlineItem.id,
       changeId,
-      label: section.label,
-      ...(section.panelKey ? { panelKey: section.panelKey } : {}),
-      ...(section.panelPath.length ? { panelPath: [...section.panelPath] } : {}),
-      requiresDeterministicConfirmation,
+      label: outlineItem.label,
+      sourceHostTargetRefs: {
+        before: before.hostTargetRef,
+        after: after.hostTargetRef,
+      },
+      ...(outlineItem.panelKey ? { panelKey: outlineItem.panelKey } : {}),
+      ...(outlineItem.panelPath?.length ? { panelPath: [...outlineItem.panelPath] } : {}),
     });
   });
   return { candidates, captureCandidates };
@@ -6341,25 +5718,27 @@ function* buildReviewDocumentSteps(
   }
   const parser = new DOMParser();
   const comments = options.comments || [];
-  const sourceProjection = prepareReviewCommentSourceProjection(
-    beforeHtml,
-    comments.length > 0,
-  );
-  const beforeDocument = parser.parseFromString(sourceProjection.html, "text/html");
-  const afterDocument = parser.parseFromString(afterHtml, "text/html");
-  clearReservedReviewMarkup(beforeDocument, sourceProjection.projected);
-  clearReservedReviewMarkup(afterDocument);
+  const beforeSourceProjection = prepareReviewCommentSourceProjection(beforeHtml, true);
+  const afterSourceProjection = prepareReviewCommentSourceProjection(afterHtml, true);
+  const beforeDocument = parser.parseFromString(beforeSourceProjection.html, "text/html");
+  const afterDocument = parser.parseFromString(afterSourceProjection.html, "text/html");
+  clearReservedReviewMarkup(beforeDocument, beforeSourceProjection.projected);
+  clearReservedReviewMarkup(afterDocument, afterSourceProjection.projected);
+  const beforeSourceElements = sourceElementsByNodeId(beforeDocument);
+  const afterSourceElements = sourceElementsByNodeId(afterDocument);
   yield "parse";
   const commentAnnotations = annotateReviewComments(
     beforeDocument,
     beforeHtml,
     comments,
-    sourceProjection.sourceIndex,
+    beforeSourceProjection.sourceIndex,
   );
   const commentGroups = commentAnnotations.groups;
   const reviewCommentTargets = commentAnnotations.targets;
-  beforeDocument.querySelectorAll(`[${REVIEW_SOURCE_NODE_ATTRIBUTE}]`).forEach((element) => {
-    element.removeAttribute(REVIEW_SOURCE_NODE_ATTRIBUTE);
+  [beforeDocument, afterDocument].forEach((document) => {
+    document.querySelectorAll(`[${REVIEW_SOURCE_NODE_ATTRIBUTE}]`).forEach((element) => {
+      element.removeAttribute(REVIEW_SOURCE_NODE_ATTRIBUTE);
+    });
   });
   yield "comments";
   annotatePanelPairs(beforeDocument, afterDocument);
@@ -6373,7 +5752,6 @@ function* buildReviewDocumentSteps(
   const pairs = pairSections(beforeSections, afterSections);
   const changes: ReviewChange[] = [];
   const outline: ReviewOutlineItem[] = [];
-  const runtimeSections: ReviewRuntimeSectionContext[] = [];
   const stylesheetsMatch = reviewStylesheetSignature(beforeDocument)
     === reviewStylesheetSignature(afterDocument);
   yield "section-pairing";
@@ -6412,14 +5790,6 @@ function* buildReviewDocumentSteps(
       ? panelPathForElement(pair.after)
       : panelPathForElement(pair.before);
     const panelKey = panelPath.at(-1);
-    runtimeSections.push({
-      pair,
-      outlineId,
-      ...(changeId ? { changeId } : {}),
-      label,
-      ...(panelKey ? { panelKey } : {}),
-      panelPath,
-    });
     [pair.before, pair.after].forEach((element) => {
       if (!element) return;
       element.setAttribute("data-pageroot-outline-id", outlineId);
@@ -6460,11 +5830,15 @@ function* buildReviewDocumentSteps(
   }
 
   const runtimeVisualAnnotations: ReviewRuntimeVisualAnnotations = options.externalBootstrap
-    ? annotateRuntimeVisualCandidates(
-        beforeDocument,
-        afterDocument,
-        runtimeSections,
-      )
+    ? annotateRuntimeVisualCandidates({
+        beforeHtml,
+        afterHtml,
+        beforeIndex: beforeSourceProjection.sourceIndex,
+        afterIndex: afterSourceProjection.sourceIndex,
+        beforeSourceElements,
+        afterSourceElements,
+        outline,
+      })
     : {
         candidates: [],
         captureCandidates: { before: [], after: [] },

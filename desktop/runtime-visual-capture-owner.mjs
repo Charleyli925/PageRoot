@@ -10,26 +10,15 @@ import {
 
 const REVIEW_CAPTURE_WORLD_ID = 91_117;
 const REVIEW_CAPTURE_PARTITION_PREFIX = "pageroot-review-runtime-";
-const REVIEW_CAPTURE_SOURCE_BOX_ATTRIBUTES = Object.freeze([
-  "class",
-  "height",
-  "hidden",
-  "style",
-  "width",
-]);
 const MAX_VIEWPORT_WIDTH = 4_096;
 const MAX_VIEWPORT_HEIGHT = 2_400;
 const MIN_VIEWPORT_WIDTH = 320;
 const MIN_VIEWPORT_HEIGHT = 320;
 const MAX_PATH_DEPTH = 256;
 const MAX_IDENTITY_VALUE_LENGTH = 2_048;
-const MAX_SOURCE_BOX_SIGNATURE_LENGTH = 4_096;
 const MAX_PNG_BYTES = 2_000_000;
 const MAX_PNG_DIMENSION = 4_096;
-const MAX_DOCUMENT_COORDINATE = 10_000_000;
-const MAX_DOCUMENT_DIMENSION = 1_000_000;
 const OWNER_CLEANUP_GRACE_MS = 250;
-const DIGEST_PATTERN = /^[a-f0-9]{32}$/u;
 const CAPTURE_REQUEST_KEYS = new Set([
   "contractVersion",
   "captureSessionId",
@@ -43,34 +32,21 @@ const CAPTURE_CANDIDATE_KEYS = new Set([
   "key",
   "path",
   "tagName",
-  "sourceBoxSignature",
+  "kind",
   "identityAttributes",
-  "identityText",
 ]);
-const FACT_KEYS = new Set([
-  "key",
-  "state",
-  "contentDigest",
-  "paintDigest",
-  "geometryDigest",
-  "vectorDigest",
-  "contentAtoms",
-  "paintAtoms",
-  "geometryAtoms",
-  "vectorAtoms",
-  "rect",
-]);
+const OWNER_RECT_KEYS = new Set(["key", "state", "rect"]);
 const RECT_KEYS = new Set(["x", "y", "width", "height"]);
 
 class CaptureCancelledError extends Error {
   constructor() {
-    super("Review runtime capture was cancelled.");
+    super("Runtime snapshot capture was cancelled.");
   }
 }
 
 class CaptureTimedOutError extends Error {
   constructor() {
-    super("Review runtime capture timed out.");
+    super("Runtime snapshot capture timed out.");
   }
 }
 
@@ -92,8 +68,8 @@ function sourceSha256(value) {
   return `sha256:${createHash("sha256").update(value, "utf8").digest("hex")}`;
 }
 
-function snapshotDigest(value) {
-  return createHash("sha256").update(value).digest("hex");
+function pngSha256(value) {
+  return `sha256:${createHash("sha256").update(value).digest("hex")}`;
 }
 
 function result(outcome, reason) {
@@ -118,7 +94,8 @@ function safeScriptValue(value) {
 
 function validAttributeName(value) {
   return typeof value === "string"
-    && /^[A-Za-z_:][A-Za-z0-9:_.-]{0,127}$/u.test(value);
+    && /^[A-Za-z_:][A-Za-z0-9:_.-]{0,127}$/u.test(value)
+    && !value.toLowerCase().startsWith("data-pageroot-");
 }
 
 function validCandidateKey(value) {
@@ -126,10 +103,11 @@ function validCandidateKey(value) {
 }
 
 function validTagName(value) {
-  // HTML exposes upper-case tag names while SVG/XML namespaces preserve case.
-  // The frozen owner binding compares the exact string again in the isolated
-  // document, so accepting either form does not weaken its identity check.
   return typeof value === "string" && /^[A-Za-z][A-Za-z0-9:-]{0,63}$/u.test(value);
+}
+
+function validKind(value) {
+  return value === "canvas" || value === "svg" || value === "host";
 }
 
 function normalizeIdentityAttributes(value) {
@@ -160,21 +138,17 @@ function normalizeCandidate(value, keys) {
   ) return null;
   const key = validCandidateKey(value.key) ? value.key : null;
   const tagName = validTagName(value.tagName) ? value.tagName : null;
-  const sourceBoxSignature = normalizedString(
-    value.sourceBoxSignature,
-    MAX_SOURCE_BOX_SIGNATURE_LENGTH,
-  );
+  const kind = validKind(value.kind) ? value.kind : null;
   const identityAttributes = normalizeIdentityAttributes(value.identityAttributes);
-  const identityText = value.identityText === undefined
-    ? undefined
-    : normalizedString(value.identityText, 1_024);
   if (
     !key
     || keys.has(key)
     || !tagName
-    || !sourceBoxSignature
+    || !kind
     || !identityAttributes
-    || (value.identityText !== undefined && identityText === null)
+    || (kind === "canvas" && tagName.toLowerCase() !== "canvas")
+    || (kind === "svg" && tagName.toLowerCase() !== "svg")
+    || (kind === "host" && identityAttributes.length === 0)
     || !Array.isArray(value.path)
     || value.path.length > MAX_PATH_DEPTH
   ) return null;
@@ -185,9 +159,8 @@ function normalizeCandidate(value, keys) {
     key,
     path: Object.freeze(path),
     tagName,
-    sourceBoxSignature,
+    kind,
     identityAttributes,
-    ...(identityText ? { identityText } : {}),
   });
 }
 
@@ -217,28 +190,20 @@ function staticAttribute(element, name) {
   return htmlAttribute ? String(htmlAttribute.value ?? "") : null;
 }
 
-function staticTextContent(node) {
-  const ownValue = typeof node?.value === "string" ? node.value : "";
-  const children = (node?.childNodes || []).map(staticTextContent).join("");
-  const content = node?.content ? staticTextContent(node.content) : "";
-  return `${ownValue}${children}${content}`;
-}
-
-function staticSourceBoxSignature(element) {
-  return JSON.stringify(REVIEW_CAPTURE_SOURCE_BOX_ATTRIBUTES.map((name) => [
-    name,
-    staticAttribute(element, name),
-  ]));
+function staticSourceContentIsEmpty(node) {
+  return (node?.childNodes || []).every((child) => {
+    if (child?.nodeName === "#comment") return true;
+    if (child?.nodeName === "#text") return !String(child.value || "").trim();
+    return false;
+  });
 }
 
 function staticMatchesBinding(element, candidate) {
   if (!staticTagMatches(element, candidate.tagName)) return false;
-  if (staticSourceBoxSignature(element) !== candidate.sourceBoxSignature) return false;
-  if (candidate.identityAttributes.some(([name, value]) => (
-    staticAttribute(element, name) !== value
-  ))) return false;
-  return !candidate.identityText
-    || staticTextContent(element).replace(/\s+/gu, " ").trim() === candidate.identityText;
+  if (candidate.kind === "host" && !staticSourceContentIsEmpty(element)) return false;
+  return candidate.identityAttributes.every(([name, value]) => (
+    staticAttribute(element, name) === value
+  ));
 }
 
 function staticElements(root) {
@@ -262,30 +227,32 @@ function staticChildAtPath(root, path) {
   return element;
 }
 
-// Validate the immutable source binding before any authored script is allowed
-// to run. At runtime, style/size attributes may legitimately change, so the
-// isolated world rechecks the same path and identity attributes rather than
-// treating the initial visual box as a post-script invariant.
-function requestHasFrozenSourceBindings(request) {
+// Validate the source-backed binding before authored JavaScript runs. The path
+// is the authority for direct Canvas/SVG roots. Source-empty hosts additionally
+// require their stable source identity to be unique, rather than asking the
+// runtime DOM to guess a replacement target.
+function frozenSourceBindingKeys(request) {
   let document;
   try {
     document = parseHtml(request.html);
   } catch {
-    return false;
+    return null;
   }
   const root = staticHtmlElement(document);
-  if (!root) return false;
+  if (!root) return null;
   const elements = staticElements(root);
-  return request.candidates.every((candidate) => {
+  const keys = new Set();
+  request.candidates.forEach((candidate) => {
     const bound = staticChildAtPath(root, candidate.path);
+    if (!bound || !staticMatchesBinding(bound, candidate)) return;
+    if (candidate.kind !== "host") {
+      keys.add(candidate.key);
+      return;
+    }
     const matches = elements.filter((element) => staticMatchesBinding(element, candidate));
-    return Boolean(
-      bound
-      && staticMatchesBinding(bound, candidate)
-      && matches.length === 1
-      && matches[0] === bound,
-    );
+    if (matches.length === 1 && matches[0] === bound) keys.add(candidate.key);
   });
+  return keys;
 }
 
 /**
@@ -323,22 +290,14 @@ export function validateReviewRuntimeCaptureRequest(value) {
   ) {
     throw new TypeError("Review runtime capture viewport is invalid.");
   }
-  const width = boundedInteger(
-    value.viewport.width,
-    MIN_VIEWPORT_WIDTH,
-    MAX_VIEWPORT_WIDTH,
-  );
-  const height = boundedInteger(
-    value.viewport.height,
-    MIN_VIEWPORT_HEIGHT,
-    MAX_VIEWPORT_HEIGHT,
-  );
+  const width = boundedInteger(value.viewport.width, MIN_VIEWPORT_WIDTH, MAX_VIEWPORT_WIDTH);
+  const height = boundedInteger(value.viewport.height, MIN_VIEWPORT_HEIGHT, MAX_VIEWPORT_HEIGHT);
   if (width === null || height === null) {
     throw new TypeError("Review runtime capture viewport is invalid.");
   }
   if (
     !Array.isArray(value.candidates)
-    || value.candidates.length > RUNTIME_VISUAL_CONTRACT.candidateLimit
+    || value.candidates.length > RUNTIME_VISUAL_CONTRACT.pageBudget.visualLimit
   ) {
     throw new TypeError("Review runtime capture candidates are invalid.");
   }
@@ -358,32 +317,15 @@ export function validateReviewRuntimeCaptureRequest(value) {
   });
 }
 
-function isolatedFactsScript(candidates) {
+function isolatedSnapshotRectScript(candidates) {
   return String.raw`(() => {
   "use strict";
-  const __pagerootReviewRuntimeCaptureFacts = true;
+  const __pagerootRuntimeSnapshotRects = true;
   const candidates = ${safeScriptValue(candidates)};
-  const queryDocument = Function.prototype.call.bind(Document.prototype.querySelectorAll);
   const queryElements = Function.prototype.call.bind(Element.prototype.querySelectorAll);
   const getAttribute = Function.prototype.call.bind(Element.prototype.getAttribute);
-  const textContent = Object.getOwnPropertyDescriptor(Node.prototype, "textContent")?.get;
-  const computedStyle = getComputedStyle.bind(window);
-  const normalizeText = (value) => String(value || "").replace(/\s+/gu, " ").trim().slice(0, 200000);
-  const digest = (value) => {
-    const text = String(value || "");
-    let a = 0x811c9dc5;
-    let b = 0x01000193;
-    let c = 0x9e3779b9;
-    let d = 0x85ebca6b;
-    for (let index = 0; index < text.length; index += 1) {
-      const code = text.charCodeAt(index);
-      a = Math.imul(a ^ code, 0x01000193) >>> 0;
-      b = Math.imul(b + code + (a >>> 16), 0x85ebca6b) >>> 0;
-      c = Math.imul(c ^ (code + b), 0xc2b2ae35) >>> 0;
-      d = Math.imul(d + (code ^ c), 0x27d4eb2f) >>> 0;
-    }
-    return [a, b, c, d].map((value) => value.toString(16).padStart(8, "0")).join("");
-  };
+  const getRect = Function.prototype.call.bind(Element.prototype.getBoundingClientRect);
+  const scrollIntoView = Function.prototype.call.bind(Element.prototype.scrollIntoView);
   const childAtPath = (path) => {
     let element = document.documentElement;
     for (const index of path) {
@@ -392,255 +334,59 @@ function isolatedFactsScript(candidates) {
     }
     return element instanceof Element ? element : null;
   };
-  const matchesBinding = (element, candidate) => {
-    if (!(element instanceof Element) || element.tagName !== candidate.tagName) return false;
-    for (const [name, value] of candidate.identityAttributes) {
-      if (getAttribute(element, name) !== value) return false;
-    }
-    return !candidate.identityText
-      || normalizeText(textContent?.call(element) || "") === candidate.identityText;
-  };
-  const allElements = Array.from(queryDocument(document, "*"));
-  const facts = [];
-  for (const candidate of candidates) {
-    const bound = childAtPath(candidate.path);
-    const matches = allElements.filter((element) => matchesBinding(element, candidate));
-    if (!bound || !matchesBinding(bound, candidate) || matches.length !== 1 || matches[0] !== bound) {
-      return { status: "unmapped", facts: [] };
-    }
-    const rect = bound.getBoundingClientRect();
-    const pageX = window.scrollX + rect.x;
-    const pageY = window.scrollY + rect.y;
+  const tagMatches = (element, tagName) => (
+    element instanceof Element
+    && String(element.tagName || "").toLowerCase() === String(tagName || "").toLowerCase()
+  );
+  const bindingMatches = (element, candidate) => (
+    tagMatches(element, candidate.tagName)
+    && candidate.identityAttributes.every(([name, value]) => getAttribute(element, name) === value)
+  );
+  const usableRect = (element) => {
+    const rect = getRect(element);
     if (
-      !Number.isFinite(pageX)
-      || !Number.isFinite(pageY)
+      !Number.isFinite(rect.x)
+      || !Number.isFinite(rect.y)
       || !Number.isFinite(rect.width)
       || !Number.isFinite(rect.height)
       || rect.width < 1
       || rect.height < 1
-    ) {
-      facts.push({
-        key: candidate.key,
-        state: "unavailable",
-        contentDigest: "",
-        paintDigest: "",
-        geometryDigest: "",
-        vectorDigest: "",
-        contentAtoms: 0,
-        paintAtoms: 0,
-        geometryAtoms: 0,
-        vectorAtoms: 0,
-        rect: null,
-      });
-      continue;
-    }
-    const style = computedStyle(bound);
-    const text = normalizeText(textContent?.call(bound) || "");
-    const paint = [
-      style.backgroundColor,
-      style.borderTopColor,
-      style.borderRightColor,
-      style.borderBottomColor,
-      style.borderLeftColor,
-      style.color,
-      style.fill,
-      style.stroke,
-      style.opacity,
-      style.visibility,
-      style.display,
-      style.transform,
-    ].join("|");
-    const vectorCount = Math.min(
-      4096,
-      queryElements(bound, "svg, path, rect, circle, ellipse, line, polyline, polygon").length,
-    );
-    const geometry = [pageX, pageY, rect.width, rect.height]
-      .map((number) => Math.round(number * 100) / 100)
-      .join("|");
-    facts.push({
-      key: candidate.key,
-      state: "stable",
-      contentDigest: text ? digest(text) : "",
-      paintDigest: digest(paint),
-      geometryDigest: digest(geometry),
-      vectorDigest: vectorCount ? digest(String(vectorCount)) : "",
-      contentAtoms: text ? 1 : 0,
-      paintAtoms: 1,
-      geometryAtoms: 4,
-      vectorAtoms: vectorCount ? 1 : 0,
-      rect: {
-        x: Math.floor(pageX),
-        y: Math.floor(pageY),
-        width: Math.max(1, Math.ceil(rect.width)),
-        height: Math.max(1, Math.ceil(rect.height)),
-      },
-    });
-  }
-  return { status: "captured", facts };
-})()`;
-}
-
-function isolatedViewportRectScript(candidate) {
-  return String.raw`(() => {
-  "use strict";
-  const candidate = ${safeScriptValue(candidate)};
-  const queryAll = Function.prototype.call.bind(Document.prototype.querySelectorAll);
-  const getAttribute = Function.prototype.call.bind(Element.prototype.getAttribute);
-  const textContent = Object.getOwnPropertyDescriptor(Node.prototype, "textContent")?.get;
-  const normalizeText = (value) => String(value || "").replace(/\s+/gu, " ").trim().slice(0, 200000);
-  const childAtPath = (path) => {
-    let element = document.documentElement;
-    for (const index of path) {
-      element = element?.children?.[index] || null;
-      if (!(element instanceof Element)) return null;
-    }
-    return element instanceof Element ? element : null;
-  };
-  const matchesBinding = (element) => {
-    if (!(element instanceof Element) || element.tagName !== candidate.tagName) return false;
-    for (const [name, value] of candidate.identityAttributes) {
-      if (getAttribute(element, name) !== value) return false;
-    }
-    return !candidate.identityText
-      || normalizeText(textContent?.call(element) || "") === candidate.identityText;
-  };
-  const bound = childAtPath(candidate.path);
-  const matches = Array.from(queryAll(document, "*")).filter(matchesBinding);
-  if (!bound || !matchesBinding(bound) || matches.length !== 1 || matches[0] !== bound) {
-    return null;
-  }
-  const initialRect = bound.getBoundingClientRect();
-  if (
-    !Number.isFinite(initialRect.x)
-    || !Number.isFinite(initialRect.y)
-    || !Number.isFinite(initialRect.width)
-    || !Number.isFinite(initialRect.height)
-    || initialRect.width < 1
-    || initialRect.height < 1
-  ) return null;
-  try {
-    if (typeof bound.scrollIntoView !== "function") return null;
-    bound.scrollIntoView({ block: "center", inline: "nearest" });
-  } catch { return null; }
-  const rect = bound.getBoundingClientRect();
-  if (
-    !Number.isFinite(rect.x)
-    || !Number.isFinite(rect.y)
-    || !Number.isFinite(rect.width)
-    || !Number.isFinite(rect.height)
-    || rect.width < 1
-    || rect.height < 1
-    || rect.x < 0
-    || rect.y < 0
-    || rect.x + rect.width > window.innerWidth
-    || rect.y + rect.height > window.innerHeight
-  ) return null;
-  return {
-    x: Math.floor(rect.x),
-    y: Math.floor(rect.y),
-    width: Math.max(1, Math.ceil(rect.width)),
-    height: Math.max(1, Math.ceil(rect.height)),
-  };
-})()`;
-}
-
-function normalizedFacts(value, request) {
-  if (
-    !isRecord(value)
-    || (value.status !== "captured" && value.status !== "unmapped")
-    || !Array.isArray(value.facts)
-  ) return null;
-  if (value.status === "unmapped") return Object.freeze({ unmapped: true, facts: [] });
-  if (value.facts.length !== request.candidates.length) return null;
-  const expectedKeys = new Set(request.candidates.map((candidate) => candidate.key));
-  const seen = new Set();
-  const facts = [];
-  for (const fact of value.facts) {
-    if (
-      !isRecord(fact)
-      || Object.keys(fact).some((key) => !FACT_KEYS.has(key))
-      || !validCandidateKey(fact.key)
-      || !expectedKeys.has(fact.key)
-      || seen.has(fact.key)
-      || (fact.state !== "stable" && fact.state !== "unavailable")
+      || rect.x < 0
+      || rect.y < 0
+      || rect.x + rect.width > window.innerWidth
+      || rect.y + rect.height > window.innerHeight
     ) return null;
-    const contentAtoms = boundedInteger(fact.contentAtoms, 0, RUNTIME_VISUAL_CONTRACT.pageBudget.hostAtoms);
-    const paintAtoms = boundedInteger(fact.paintAtoms, 0, RUNTIME_VISUAL_CONTRACT.pageBudget.hostAtoms);
-    const geometryAtoms = boundedInteger(fact.geometryAtoms, 0, RUNTIME_VISUAL_CONTRACT.pageBudget.hostAtoms);
-    const vectorAtoms = boundedInteger(fact.vectorAtoms, 0, RUNTIME_VISUAL_CONTRACT.pageBudget.hostAtoms);
-    const digests = [
-      fact.contentDigest,
-      fact.paintDigest,
-      fact.geometryDigest,
-      fact.vectorDigest,
-    ];
-    if (
-      contentAtoms === null
-      || paintAtoms === null
-      || geometryAtoms === null
-      || vectorAtoms === null
-      || !digests.every((digest) => typeof digest === "string" && (!digest || DIGEST_PATTERN.test(digest)))
-    ) return null;
-    if (fact.state === "unavailable") {
-      if (
-        contentAtoms !== 0
-        || paintAtoms !== 0
-        || geometryAtoms !== 0
-        || vectorAtoms !== 0
-        || digests.some(Boolean)
-        || fact.rect !== null
-      ) return null;
-      seen.add(fact.key);
-      facts.push(Object.freeze({
-        key: fact.key,
-        state: "unavailable",
-        contentDigest: "",
-        paintDigest: "",
-        geometryDigest: "",
-        vectorDigest: "",
-        contentAtoms: 0,
-        paintAtoms: 0,
-        geometryAtoms: 0,
-        vectorAtoms: 0,
-        rect: null,
-      }));
-      continue;
-    }
-    if (
-      !isRecord(fact.rect)
-      || Object.keys(fact.rect).some((key) => !RECT_KEYS.has(key))
-    ) return null;
-    const rect = {
-      x: boundedInteger(
-        fact.rect.x,
-        -MAX_DOCUMENT_COORDINATE,
-        MAX_DOCUMENT_COORDINATE,
-      ),
-      y: boundedInteger(
-        fact.rect.y,
-        -MAX_DOCUMENT_COORDINATE,
-        MAX_DOCUMENT_COORDINATE,
-      ),
-      width: boundedInteger(fact.rect.width, 1, MAX_DOCUMENT_DIMENSION),
-      height: boundedInteger(fact.rect.height, 1, MAX_DOCUMENT_DIMENSION),
+    return {
+      x: Math.floor(rect.x),
+      y: Math.floor(rect.y),
+      width: Math.max(1, Math.ceil(rect.width)),
+      height: Math.max(1, Math.ceil(rect.height)),
     };
-    if (Object.values(rect).some((number) => number === null)) return null;
-    seen.add(fact.key);
-    facts.push(Object.freeze({
-      key: fact.key,
-      state: "stable",
-      contentDigest: fact.contentDigest,
-      paintDigest: fact.paintDigest,
-      geometryDigest: fact.geometryDigest,
-      vectorDigest: fact.vectorDigest,
-      contentAtoms,
-      paintAtoms,
-      geometryAtoms,
-      vectorAtoms,
-      rect: Object.freeze(rect),
-    }));
+  };
+  const result = [];
+  for (const candidate of candidates) {
+    const host = childAtPath(candidate.path);
+    if (!bindingMatches(host, candidate)) {
+      result.push({ key: candidate.key, state: "unavailable", rect: null });
+      continue;
+    }
+    try { scrollIntoView(host, { block: "center", inline: "nearest" }); } catch {
+      result.push({ key: candidate.key, state: "unavailable", rect: null });
+      continue;
+    }
+    const hostRect = usableRect(host);
+    const paintTargets = candidate.kind === "host"
+      ? Array.from(queryElements(host, "canvas,svg"))
+      : [host];
+    const hasVisiblePaint = paintTargets.some((target) => usableRect(target) !== null);
+    result.push(
+      hostRect && hasVisiblePaint
+        ? { key: candidate.key, state: "captured", rect: hostRect }
+        : { key: candidate.key, state: "unavailable", rect: null },
+    );
   }
-  return Object.freeze({ unmapped: false, facts: Object.freeze(facts) });
+  return { status: "captured", snapshots: result };
+})()`;
 }
 
 function normalizedViewportRect(value, request) {
@@ -662,29 +408,49 @@ function normalizedViewportRect(value, request) {
   return Object.freeze(rect);
 }
 
-function sameFact(fact, other) {
-  return Boolean(other)
-    && fact.key === other.key
-    && fact.state === other.state
-    && fact.contentDigest === other.contentDigest
-    && fact.paintDigest === other.paintDigest
-    && fact.geometryDigest === other.geometryDigest
-    && fact.vectorDigest === other.vectorDigest
-    && fact.contentAtoms === other.contentAtoms
-    && fact.paintAtoms === other.paintAtoms
-    && fact.geometryAtoms === other.geometryAtoms
-    && fact.vectorAtoms === other.vectorAtoms
-    && (
-      (fact.rect === null && other.rect === null)
-      || (
-        fact.rect !== null
-        && other.rect !== null
-        && fact.rect.x === other.rect.x
-        && fact.rect.y === other.rect.y
-        && fact.rect.width === other.rect.width
-        && fact.rect.height === other.rect.height
-      )
-    );
+function normalizedOwnerRects(value, request) {
+  if (
+    !isRecord(value)
+    || value.status !== "captured"
+    || !Array.isArray(value.snapshots)
+  ) return null;
+  if (value.snapshots.length !== request.candidates.length) return null;
+  const expectedKeys = new Set(request.candidates.map((candidate) => candidate.key));
+  const seen = new Set();
+  const snapshots = [];
+  for (const rawSnapshot of value.snapshots) {
+    if (
+      !isRecord(rawSnapshot)
+      || Object.keys(rawSnapshot).some((key) => !OWNER_RECT_KEYS.has(key))
+      || !validCandidateKey(rawSnapshot.key)
+      || !expectedKeys.has(rawSnapshot.key)
+      || seen.has(rawSnapshot.key)
+      || (rawSnapshot.state !== "captured" && rawSnapshot.state !== "unavailable")
+    ) return null;
+    const rect = rawSnapshot.state === "captured"
+      ? normalizedViewportRect(rawSnapshot.rect, request)
+      : rawSnapshot.rect === null ? null : undefined;
+    if (rect === undefined || (rawSnapshot.state === "captured" && !rect)) return null;
+    seen.add(rawSnapshot.key);
+    snapshots.push(Object.freeze({
+      key: rawSnapshot.key,
+      state: rawSnapshot.state,
+      rect,
+    }));
+  }
+  return Object.freeze({ snapshots: Object.freeze(snapshots) });
+}
+
+function unavailableSnapshot(key) {
+  return Object.freeze({
+    key,
+    state: "unavailable",
+    pngSha256: "",
+    width: 0,
+    height: 0,
+    byteLength: 0,
+    pngBytes: new Uint8Array(),
+  });
 }
 
 function validatedPng(image) {
@@ -693,9 +459,9 @@ function validatedPng(image) {
   if (!(png instanceof Uint8Array) || png.byteLength < 24 || png.byteLength > MAX_PNG_BYTES) {
     return null;
   }
-  if (![
-    137, 80, 78, 71, 13, 10, 26, 10,
-  ].every((byte, index) => png[index] === byte)) return null;
+  if (![137, 80, 78, 71, 13, 10, 26, 10].every((byte, index) => png[index] === byte)) {
+    return null;
+  }
   if (![73, 72, 68, 82].every((byte, index) => png[12 + index] === byte)) return null;
   const view = new DataView(png.buffer, png.byteOffset, png.byteLength);
   const width = view.getUint32(16, false);
@@ -707,44 +473,13 @@ function validatedPng(image) {
     || height > MAX_PNG_DIMENSION
     || width * height > RUNTIME_VISUAL_CONTRACT.pageBudget.canvasPixels
   ) return null;
+  const pngBytes = new Uint8Array(png);
   return Object.freeze({
-    digest: snapshotDigest(png),
-    pixels: width * height,
-    bytes: png.byteLength,
-  });
-}
-
-function snapshotForFact(fact, bitmap, unavailable = false) {
-  if (fact.state !== "stable" || unavailable) {
-    return Object.freeze({
-      key: fact.key,
-      state: "unavailable",
-      contentSignature: "",
-      paintSignature: "",
-      geometrySignature: "",
-      vectorSignature: "",
-      canvasSignature: "",
-      contentAtoms: 0,
-      paintAtoms: 0,
-      geometryAtoms: 0,
-      vectorAtoms: 0,
-      canvasPixels: 0,
-    });
-  }
-  const signature = (digest, count) => count ? `${digest}:${count}` : "";
-  return Object.freeze({
-    key: fact.key,
-    state: "stable",
-    contentSignature: signature(fact.contentDigest, fact.contentAtoms),
-    paintSignature: signature(fact.paintDigest, fact.paintAtoms),
-    geometrySignature: signature(fact.geometryDigest, fact.geometryAtoms),
-    vectorSignature: signature(fact.vectorDigest, fact.vectorAtoms),
-    canvasSignature: bitmap ? signature(bitmap.digest, bitmap.pixels) : "",
-    contentAtoms: fact.contentAtoms,
-    paintAtoms: fact.paintAtoms,
-    geometryAtoms: fact.geometryAtoms,
-    vectorAtoms: fact.vectorAtoms,
-    canvasPixels: bitmap?.pixels || 0,
+    pngSha256: pngSha256(pngBytes),
+    width,
+    height,
+    byteLength: pngBytes.byteLength,
+    pngBytes,
   });
 }
 
@@ -772,20 +507,19 @@ function configureIsolatedSession(session, expectedUrl) {
 
 function ownerExecutor(webContents, source) {
   if (typeof webContents?.executeJavaScriptInIsolatedWorld !== "function") {
-    throw new Error("Review runtime capture requires isolated-world evaluation.");
+    throw new Error("Runtime snapshot capture requires isolated-world evaluation.");
   }
   return webContents.executeJavaScriptInIsolatedWorld(
     REVIEW_CAPTURE_WORLD_ID,
-    [{ code: source, url: "pageroot-review-runtime-owner.js" }],
+    [{ code: source, url: "pageroot-runtime-snapshot-owner.js" }],
+    true,
     true,
   );
 }
 
 async function settleOwnerCleanup(cleanup) {
   let timeoutId = null;
-  const completed = Promise.resolve()
-    .then(cleanup)
-    .catch(() => undefined);
+  const completed = Promise.resolve().then(cleanup).catch(() => undefined);
   const grace = new Promise((resolve) => {
     timeoutId = setTimeout(resolve, OWNER_CLEANUP_GRACE_MS);
   });
@@ -797,9 +531,9 @@ async function settleOwnerCleanup(cleanup) {
 }
 
 /**
- * Owns a one-use, no-bridge review capture window. The authored page has no
- * path, IPC, private candidate key, comment ID, or challenge channel; it can
- * only influence the disposable facts that are revalidated by this owner.
+ * One-use RuntimeSnapshotOwner. The authored page gets no Bridge, project
+ * capability, comment data, or owner protocol; it can only affect a bounded
+ * PNG presentation result that the trusted renderer may discard.
  */
 export function createReviewRuntimeCaptureController({
   BrowserWindowClass,
@@ -826,10 +560,6 @@ export function createReviewRuntimeCaptureController({
     RUNTIME_VISUAL_CONTRACT.ownerDeadlineMs,
     Math.round(Number(ownerDeadlineMs)) || RUNTIME_VISUAL_CONTRACT.ownerDeadlineMs,
   ));
-  // A review comparison captures the before and after documents in parallel.
-  // They must not share a window or session, but neither side should cancel
-  // the other. Only a duplicate request for the same review side supersedes
-  // its predecessor.
   const activeCaptures = new Map();
 
   const capture = async (rawRequest) => {
@@ -839,8 +569,18 @@ export function createReviewRuntimeCaptureController({
     } catch {
       return result("failed", "invalid-request");
     }
-    if (!requestHasFrozenSourceBindings(request)) {
-      return result("unmapped", "frozen-binding-mismatch");
+    const frozenBindingKeys = frozenSourceBindingKeys(request);
+    if (!frozenBindingKeys) {
+      return result("failed", "frozen-source-unavailable");
+    }
+    const captureCandidates = request.candidates.filter((candidate) => (
+      frozenBindingKeys.has(candidate.key)
+    ));
+    if (!captureCandidates.length) {
+      return captureResult(
+        request,
+        request.candidates.map((candidate) => unavailableSnapshot(candidate.key)),
+      );
     }
     const operationKey = `${request.captureSessionId}:${request.side}`;
     activeCaptures.get(operationKey)?.cancel("superseded");
@@ -863,7 +603,6 @@ export function createReviewRuntimeCaptureController({
     };
     activeCaptures.set(operationKey, operation);
     const deadlineAt = Date.now() + deadlineMs;
-
     const withOwnerDeadline = async (promise) => {
       const remaining = deadlineAt - Date.now();
       if (remaining <= 0) {
@@ -925,97 +664,68 @@ export function createReviewRuntimeCaptureController({
         if (url !== previewSession.url) event.preventDefault();
       });
       await withOwnerDeadline(captureWindow.loadURL(previewSession.url));
-      if (cancellationReason || captureWindow.isDestroyed()) {
-        throw new CaptureCancelledError();
-      }
-      const evaluateFacts = () => withOwnerDeadline(ownerExecutor(
-        captureWindow.webContents,
-        isolatedFactsScript(request.candidates),
-      ));
-      const first = normalizedFacts(await evaluateFacts(), request);
-      if (!first) return result("failed", "invalid-owner-facts");
-      if (first.unmapped) return result("unmapped", "frozen-binding-mismatch");
+      if (cancellationReason || captureWindow.isDestroyed()) throw new CaptureCancelledError();
 
-      const bitmaps = new Map();
-      const unavailableKeys = new Set();
-      const candidatesByKey = new Map(request.candidates.map((candidate) => [
-        candidate.key,
-        candidate,
-      ]));
-      const stableFacts = first.facts.filter((fact) => fact.state === "stable");
-      const visualFacts = stableFacts.slice(
-        0,
-        RUNTIME_VISUAL_CONTRACT.pageBudget.visualLimit,
-      );
-      stableFacts.slice(RUNTIME_VISUAL_CONTRACT.pageBudget.visualLimit).forEach((fact) => {
-        unavailableKeys.add(fact.key);
+      const ownerRequest = Object.freeze({
+        ...request,
+        candidates: Object.freeze(captureCandidates),
       });
+      const ownerRects = normalizedOwnerRects(await withOwnerDeadline(ownerExecutor(
+        captureWindow.webContents,
+        isolatedSnapshotRectScript(captureCandidates),
+      )), ownerRequest);
+      if (!ownerRects) return result("failed", "invalid-owner-snapshot");
+
       let capturedPixels = 0;
       let capturedBytes = 0;
-      for (const fact of visualFacts) {
-        const candidate = candidatesByKey.get(fact.key);
+      const snapshots = [];
+      const ownerSnapshotsByKey = new Map(
+        ownerRects.snapshots.map((snapshot) => [snapshot.key, snapshot]),
+      );
+      for (const candidate of request.candidates) {
+        if (!frozenBindingKeys.has(candidate.key)) {
+          snapshots.push(unavailableSnapshot(candidate.key));
+          continue;
+        }
+        const ownerSnapshot = ownerSnapshotsByKey.get(candidate.key);
+        if (!ownerSnapshot || ownerSnapshot.state !== "captured" || !ownerSnapshot.rect) {
+          snapshots.push(unavailableSnapshot(candidate.key));
+          continue;
+        }
         try {
-          const viewportValue = candidate
-            ? await withOwnerDeadline(ownerExecutor(
-                captureWindow.webContents,
-                isolatedViewportRectScript(candidate),
-              ))
-            : null;
-          const viewportRect = normalizedViewportRect(viewportValue, request);
-          if (!viewportRect) {
-            unavailableKeys.add(fact.key);
-            continue;
-          }
-          const remainingPixels = RUNTIME_VISUAL_CONTRACT.pageBudget.canvasPixels
-            - capturedPixels;
-          const remainingBytes = RUNTIME_VISUAL_CONTRACT.pageBudget.visualBytes
-            - capturedBytes;
+          const remainingPixels = RUNTIME_VISUAL_CONTRACT.pageBudget.canvasPixels - capturedPixels;
+          const remainingBytes = RUNTIME_VISUAL_CONTRACT.pageBudget.visualBytes - capturedBytes;
           if (
             remainingPixels < 1
             || remainingBytes < 1
-            || viewportRect.width * viewportRect.height > remainingPixels
+            || ownerSnapshot.rect.width * ownerSnapshot.rect.height > remainingPixels
           ) {
-            unavailableKeys.add(fact.key);
+            snapshots.push(unavailableSnapshot(candidate.key));
             continue;
           }
-          const firstImage = await withOwnerDeadline(captureWindow.capturePage(viewportRect, {
+          const image = await withOwnerDeadline(captureWindow.capturePage(ownerSnapshot.rect, {
             stayHidden: true,
           }));
-          const firstPng = validatedPng(firstImage);
+          const png = validatedPng(image);
           if (
-            !firstPng
-            || firstPng.pixels > remainingPixels
-            || firstPng.bytes > remainingBytes
+            !png
+            || png.width * png.height > remainingPixels
+            || png.byteLength > remainingBytes
           ) {
-            unavailableKeys.add(fact.key);
+            snapshots.push(unavailableSnapshot(candidate.key));
             continue;
           }
-          bitmaps.set(fact.key, firstPng);
-          capturedPixels += firstPng.pixels;
-          capturedBytes += firstPng.bytes;
+          capturedPixels += png.width * png.height;
+          capturedBytes += png.byteLength;
+          snapshots.push(Object.freeze({ key: candidate.key, state: "captured", ...png }));
         } catch (error) {
           if (error instanceof CaptureTimedOutError || error instanceof CaptureCancelledError) {
             throw error;
           }
-          unavailableKeys.add(fact.key);
+          snapshots.push(unavailableSnapshot(candidate.key));
         }
       }
-
-      const second = normalizedFacts(await evaluateFacts(), request);
-      if (!second) return result("failed", "invalid-owner-facts");
-      if (second.unmapped) return result("unmapped", "frozen-binding-mismatch");
-      const secondByKey = new Map(second.facts.map((fact) => [fact.key, fact]));
-      first.facts.forEach((fact) => {
-        if (!sameFact(fact, secondByKey.get(fact.key))) unavailableKeys.add(fact.key);
-      });
-      return captureResult(
-        request,
-        first.facts.map((fact) => snapshotForFact(
-          fact,
-          bitmaps.get(fact.key),
-          unavailableKeys.has(fact.key),
-        )),
-      );
+      return captureResult(request, snapshots);
     } catch (error) {
       if (error instanceof CaptureTimedOutError || cancellationReason === "timed-out") {
         return result("timed-out", "owner-deadline");
@@ -1034,9 +744,7 @@ export function createReviewRuntimeCaptureController({
           ? settleOwnerCleanup(() => revokeSession(previewSession.sessionId))
           : undefined,
       ]);
-      if (activeCaptures.get(operationKey) === operation) {
-        activeCaptures.delete(operationKey);
-      }
+      if (activeCaptures.get(operationKey) === operation) activeCaptures.delete(operationKey);
     }
   };
 

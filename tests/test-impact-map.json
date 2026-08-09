@@ -407,6 +407,7 @@
       "id": "ai-review-workspace",
       "patterns": [
         "^app/application/review-analysis-session\\.(?:js|d\\.ts)$",
+        "^app/domain/runtime-snapshot-hosts\\.(?:d\\.ts|js)$",
         "^app/lib/review-(?:projection-facts|runtime-visual|semantic-alignment|text-diff)\\.(?:d\\.ts|js)$",
         "^app/lib/review-comment-source-map\\.js$",
         "^app/lib/page-presentation-dom\\.ts$",
@@ -416,8 +417,7 @@
         "^desktop/runtime-visual-capture-owner\\.mjs$",
         "^app/workbench/ai-review-workspace\\.module\\.css$",
         "^scripts/benchmark-review-analysis\\.mjs$",
-        "^tests/(?:ai-review-workspace|review-analysis-session|review-comment-source-map|review-projection-facts|review-runtime-capture-owner|review-runtime-visual|review-scroll-sync|review-semantic-alignment|review-text-diff|runtime-visual-contract)\\.test\\.mjs$",
-        "^tests/fixtures/runtime-visual-hostile-pages\\.mjs$",
+        "^tests/(?:ai-review-workspace|review-analysis-session|review-comment-source-map|review-projection-facts|review-runtime-capture-owner|review-runtime-visual|review-scroll-sync|review-semantic-alignment|review-text-diff|runtime-snapshot-hosts|runtime-visual-contract)\\.test\\.mjs$",
         "^tests/e2e/electron/ai-handoff-closed-loop\\.spec\\.mjs$",
         "^docs/(?:AI_SUPPLEMENT_AND_VALIDATION|ARCHITECTURE|ARCHITECTURE_CONTRACT|CHANGE_REQUEST_PROTOCOL|INTERACTION_FLOW|MVP_PRD|RUNTIME_VISUAL_CONTRACT|SECURITY_MODEL|STATE_OWNERSHIP)\\.md$",
         "^docs/decisions/0016-owner-controlled-review-runtime-capture\\.md$"
@@ -430,6 +430,7 @@
         "tests/review-projection-facts.test.mjs",
         "tests/review-runtime-capture-owner.test.mjs",
         "tests/review-runtime-visual.test.mjs",
+        "tests/runtime-snapshot-hosts.test.mjs",
         "tests/runtime-visual-contract.test.mjs",
         "tests/desktop-preload-ipc.test.mjs",
         "tests/desktop-package.test.mjs",

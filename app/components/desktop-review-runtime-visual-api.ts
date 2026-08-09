@@ -21,9 +21,8 @@ export type ReviewRuntimeCaptureCandidate = {
   readonly key: string;
   readonly path: readonly number[];
   readonly tagName: string;
-  readonly sourceBoxSignature: string;
+  readonly kind: "canvas" | "svg" | "host";
   readonly identityAttributes: readonly (readonly [string, string])[];
-  readonly identityText?: string;
 };
 
 export type ReviewRuntimeCaptureResult =
@@ -34,7 +33,7 @@ export type ReviewRuntimeCaptureResult =
     };
   }
   | {
-    readonly outcome: "unstable" | "unmapped" | "timed-out" | "cancelled" | "failed";
+    readonly outcome: "timed-out" | "cancelled" | "failed";
     readonly reason: string;
   };
 

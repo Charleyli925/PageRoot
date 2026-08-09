@@ -1,27 +1,24 @@
+import { sha256 } from "@noble/hashes/sha2.js";
+import { bytesToHex } from "@noble/hashes/utils.js";
+
 import { RUNTIME_VISUAL_CONTRACT } from "../domain/runtime-visual-contract.js";
 
-export const REVIEW_RUNTIME_VISUAL_DEADLINE_MS =
-  RUNTIME_VISUAL_CONTRACT.comparisonDeadlineMs;
 export const REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT =
-  RUNTIME_VISUAL_CONTRACT.candidateLimit;
+  RUNTIME_VISUAL_CONTRACT.pageBudget.visualLimit;
 
-const MAX_RUNTIME_VISUAL_ATOMS = RUNTIME_VISUAL_CONTRACT.pageBudget.hostAtoms;
-const MAX_RUNTIME_CANVAS_PIXELS = RUNTIME_VISUAL_CONTRACT.pageBudget.canvasPixels;
-const SIGNATURE_PATTERN = /^(?:[a-f0-9]{32}|[a-f0-9]{64}):[1-9]\d{0,7}$/u;
+const MAX_PNG_BYTES = RUNTIME_VISUAL_CONTRACT.pageBudget.visualBytes;
+const MAX_PNG_PIXELS = RUNTIME_VISUAL_CONTRACT.pageBudget.canvasPixels;
 const SNAPSHOT_KEYS = new Set([
   "key",
   "state",
-  "contentSignature",
-  "paintSignature",
-  "geometrySignature",
-  "vectorSignature",
-  "canvasSignature",
-  "contentAtoms",
-  "paintAtoms",
-  "geometryAtoms",
-  "vectorAtoms",
-  "canvasPixels",
+  "pngSha256",
+  "width",
+  "height",
+  "byteLength",
+  "pngBytes",
 ]);
+const PNG_HEADER = Object.freeze([137, 80, 78, 71, 13, 10, 26, 10]);
+const PNG_HASH_PATTERN = /^sha256:[a-f0-9]{64}$/u;
 
 function isRecord(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -33,13 +30,83 @@ function boundedInteger(value, maximum) {
     : null;
 }
 
-function acceptedSignature(value, atomCount) {
-  if (atomCount === 0) return value === "" ? "" : null;
-  return typeof value === "string" && SIGNATURE_PATTERN.test(value)
-    ? value
-    : null;
+function copiedPngBytes(value) {
+  return value instanceof Uint8Array ? new Uint8Array(value) : null;
 }
 
+function pngDimensions(pngBytes) {
+  if (pngBytes.byteLength < 24) return null;
+  if (!PNG_HEADER.every((byte, index) => pngBytes[index] === byte)) return null;
+  if (![73, 72, 68, 82].every((byte, index) => pngBytes[12 + index] === byte)) {
+    return null;
+  }
+  const view = new DataView(pngBytes.buffer, pngBytes.byteOffset, pngBytes.byteLength);
+  const width = view.getUint32(16, false);
+  const height = view.getUint32(20, false);
+  if (
+    width < 1
+    || height < 1
+    || width * height > MAX_PNG_PIXELS
+  ) return null;
+  return Object.freeze({ width, height });
+}
+
+function acceptedUnavailableSnapshot(rawSnapshot, key) {
+  const pngBytes = copiedPngBytes(rawSnapshot.pngBytes);
+  if (
+    rawSnapshot.pngSha256 !== ""
+    || rawSnapshot.width !== 0
+    || rawSnapshot.height !== 0
+    || rawSnapshot.byteLength !== 0
+    || !pngBytes
+    || pngBytes.byteLength !== 0
+  ) return null;
+  return Object.freeze({
+    key,
+    state: "unavailable",
+    pngSha256: "",
+    width: 0,
+    height: 0,
+    byteLength: 0,
+    pngBytes,
+  });
+}
+
+function acceptedCapturedSnapshot(rawSnapshot, key) {
+  const pngBytes = copiedPngBytes(rawSnapshot.pngBytes);
+  const byteLength = boundedInteger(rawSnapshot.byteLength, MAX_PNG_BYTES);
+  if (
+    !pngBytes
+    || byteLength === null
+    || byteLength !== pngBytes.byteLength
+    || byteLength < 24
+    || typeof rawSnapshot.pngSha256 !== "string"
+    || !PNG_HASH_PATTERN.test(rawSnapshot.pngSha256)
+  ) return null;
+  const dimensions = pngDimensions(pngBytes);
+  if (
+    !dimensions
+    || rawSnapshot.width !== dimensions.width
+    || rawSnapshot.height !== dimensions.height
+    || `sha256:${bytesToHex(sha256(pngBytes))}` !== rawSnapshot.pngSha256
+  ) return null;
+  return Object.freeze({
+    key,
+    state: "captured",
+    pngSha256: rawSnapshot.pngSha256,
+    width: dimensions.width,
+    height: dimensions.height,
+    byteLength,
+    pngBytes,
+  });
+}
+
+/**
+ * The trusted renderer accepts only the exact candidate set it asked the
+ * owner for. PNG bytes remain presentation data; validating and retaining
+ * them here establishes the small snapshot shape used by Review today and
+ * Edit's shared last-snapshot cache in the following milestone.
+ */
 export function acceptReviewRuntimeVisualSnapshots(value, allowedCandidateKeys) {
   if (
     !Array.isArray(value)
@@ -51,174 +118,43 @@ export function acceptReviewRuntimeVisualSnapshots(value, allowedCandidateKeys) 
 
   const seen = new Set();
   const accepted = [];
-  let pageAtoms = 0;
-  let pageCanvasPixels = 0;
+  let pageBytes = 0;
+  let pagePixels = 0;
   for (const rawSnapshot of value) {
     if (
       !isRecord(rawSnapshot)
       || Object.keys(rawSnapshot).some((key) => !SNAPSHOT_KEYS.has(key))
+      || typeof rawSnapshot.key !== "string"
+      || !allowedCandidateKeys.has(rawSnapshot.key)
+      || seen.has(rawSnapshot.key)
     ) return null;
-    const key = typeof rawSnapshot.key === "string" ? rawSnapshot.key : "";
-    const state = rawSnapshot.state;
-    const contentAtoms = boundedInteger(
-      rawSnapshot.contentAtoms,
-      MAX_RUNTIME_VISUAL_ATOMS,
-    );
-    const paintAtoms = boundedInteger(
-      rawSnapshot.paintAtoms,
-      MAX_RUNTIME_VISUAL_ATOMS,
-    );
-    const geometryAtoms = boundedInteger(
-      rawSnapshot.geometryAtoms,
-      MAX_RUNTIME_VISUAL_ATOMS,
-    );
-    const vectorAtoms = boundedInteger(
-      rawSnapshot.vectorAtoms,
-      MAX_RUNTIME_VISUAL_ATOMS,
-    );
-    const canvasPixels = boundedInteger(
-      rawSnapshot.canvasPixels,
-      MAX_RUNTIME_CANVAS_PIXELS,
-    );
+    const snapshot = rawSnapshot.state === "unavailable"
+      ? acceptedUnavailableSnapshot(rawSnapshot, rawSnapshot.key)
+      : rawSnapshot.state === "captured"
+        ? acceptedCapturedSnapshot(rawSnapshot, rawSnapshot.key)
+        : null;
+    if (!snapshot) return null;
+    pageBytes += snapshot.byteLength;
+    pagePixels += snapshot.width * snapshot.height;
     if (
-      !key
-      || !allowedCandidateKeys.has(key)
-      || seen.has(key)
-      || (state !== "empty" && state !== "stable" && state !== "unavailable")
-      || contentAtoms === null
-      || paintAtoms === null
-      || geometryAtoms === null
-      || vectorAtoms === null
-      || canvasPixels === null
+      pageBytes > RUNTIME_VISUAL_CONTRACT.pageBudget.visualBytes
+      || pagePixels > MAX_PNG_PIXELS
     ) return null;
-
-    const contentSignature = acceptedSignature(
-      rawSnapshot.contentSignature,
-      contentAtoms,
-    );
-    const paintSignature = acceptedSignature(
-      rawSnapshot.paintSignature,
-      paintAtoms,
-    );
-    const geometrySignature = acceptedSignature(
-      rawSnapshot.geometrySignature,
-      geometryAtoms,
-    );
-    const vectorSignature = acceptedSignature(
-      rawSnapshot.vectorSignature,
-      vectorAtoms,
-    );
-    const canvasSignature = acceptedSignature(
-      rawSnapshot.canvasSignature,
-      canvasPixels,
-    );
-    const atomCount = contentAtoms + paintAtoms + geometryAtoms + vectorAtoms;
-    pageAtoms += atomCount;
-    pageCanvasPixels += canvasPixels;
-    if (
-      contentSignature === null
-      || paintSignature === null
-      || geometrySignature === null
-      || vectorSignature === null
-      || canvasSignature === null
-      || (
-        (state === "empty" || state === "unavailable")
-        && (atomCount !== 0 || canvasPixels !== 0)
-      )
-      || (state === "stable" && atomCount === 0 && canvasPixels === 0)
-      || atomCount > RUNTIME_VISUAL_CONTRACT.pageBudget.hostAtoms
-      || pageAtoms > RUNTIME_VISUAL_CONTRACT.pageBudget.atoms
-      || pageCanvasPixels > RUNTIME_VISUAL_CONTRACT.pageBudget.canvasPixels
-    ) return null;
-
-    seen.add(key);
-    accepted.push(Object.freeze({
-      key,
-      state,
-      contentSignature,
-      paintSignature,
-      geometrySignature,
-      vectorSignature,
-      canvasSignature,
-      contentAtoms,
-      paintAtoms,
-      geometryAtoms,
-      vectorAtoms,
-      canvasPixels,
-    }));
+    seen.add(snapshot.key);
+    accepted.push(snapshot);
   }
   return Object.freeze(accepted);
 }
 
-export function selectPrioritizedReviewRuntimeVisualCandidates(
-  candidates,
-  maximum = REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT,
-) {
-  if (!Array.isArray(candidates)) return Object.freeze([]);
-  const limit = Number.isSafeInteger(maximum)
-    ? Math.max(0, Math.min(REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT, maximum))
-    : REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT;
-  return Object.freeze(candidates
-    .map((candidate, index) => ({
-      candidate,
-      index,
-      priority: Number.isFinite(candidate?.commentPriority)
-        ? Math.max(0, Math.trunc(candidate.commentPriority))
-        : 0,
-    }))
-    .sort((left, right) => right.priority - left.priority || left.index - right.index)
-    .slice(0, limit)
-    .map(({ candidate }) => candidate));
-}
-
 function runtimeSnapshotChanged(before, after) {
-  if (before.state === "unavailable" || after.state === "unavailable") return false;
-  if (before.state !== after.state) {
-    return before.state === "stable" || after.state === "stable";
-  }
-  if (before.state !== "stable") return false;
-  const canvasChanged = before.canvasSignature !== after.canvasSignature
-    && Math.max(before.canvasPixels, after.canvasPixels) > 0;
-  const vectorChanged = before.vectorSignature !== after.vectorSignature
-    && Math.max(before.vectorAtoms, after.vectorAtoms) > 0;
-  const contentChanged = before.contentSignature !== after.contentSignature
-    && Math.max(before.contentAtoms, after.contentAtoms) > 0;
-  const paintChanged = before.paintSignature !== after.paintSignature
-    && Math.max(before.paintAtoms, after.paintAtoms) > 0;
-  const geometryChanged = before.geometrySignature !== after.geometrySignature
+  return before?.state === "captured"
+    && after?.state === "captured"
     && (
-      Math.max(before.geometryAtoms, after.geometryAtoms) >= 2
-      || Math.max(before.vectorAtoms, after.vectorAtoms) > 0
-      || (
-        Math.max(before.geometryAtoms, after.geometryAtoms) > 0
-        && (
-          Math.max(before.paintAtoms, after.paintAtoms) > 0
-          || Math.max(before.contentAtoms, after.contentAtoms) > 0
-        )
-      )
+      before.pngSha256 !== after.pngSha256
+      || before.width !== after.width
+      || before.height !== after.height
+      || before.byteLength !== after.byteLength
     );
-  return canvasChanged
-    || vectorChanged
-    || contentChanged
-    || paintChanged
-    || geometryChanged;
-}
-
-function runtimeSnapshotsMatch(left, right) {
-  return Boolean(left)
-    && Boolean(right)
-    && left.key === right.key
-    && left.state === right.state
-    && left.contentSignature === right.contentSignature
-    && left.paintSignature === right.paintSignature
-    && left.geometrySignature === right.geometrySignature
-    && left.vectorSignature === right.vectorSignature
-    && left.canvasSignature === right.canvasSignature
-    && left.contentAtoms === right.contentAtoms
-    && left.paintAtoms === right.paintAtoms
-    && left.geometryAtoms === right.geometryAtoms
-    && left.vectorAtoms === right.vectorAtoms
-    && left.canvasPixels === right.canvasPixels;
 }
 
 export function changedReviewRuntimeVisualCandidateKeys({
@@ -233,12 +169,8 @@ export function changedReviewRuntimeVisualCandidateKeys({
   const afterByKey = new Map(after.map((snapshot) => [snapshot.key, snapshot]));
   return Object.freeze(candidates.flatMap((candidate) => {
     const key = typeof candidate?.key === "string" ? candidate.key : "";
-    const beforeSnapshot = beforeByKey.get(key);
-    const afterSnapshot = afterByKey.get(key);
     return key
-      && beforeSnapshot
-      && afterSnapshot
-      && runtimeSnapshotChanged(beforeSnapshot, afterSnapshot)
+      && runtimeSnapshotChanged(beforeByKey.get(key), afterByKey.get(key))
       ? [key]
       : [];
   }));
@@ -256,6 +188,11 @@ function helperForTypes(types) {
   return labels.length ? `${labels.join("、")}调整` : "本轮未修改";
 }
 
+/**
+ * Runtime evidence can add a single opaque style marker to an already static
+ * review outline. It cannot change source bytes, acceptance semantics, or the
+ * authored review page's knowledge of source-host identities.
+ */
 export function mergeReviewRuntimeVisualChanges(documents, changedCandidateKeys) {
   const changes = Array.isArray(documents?.changes) ? documents.changes : [];
   const outline = Array.isArray(documents?.outline) ? documents.outline : [];
@@ -327,10 +264,6 @@ export function mergeReviewRuntimeVisualChanges(documents, changedCandidateKeys)
       helper: helperForTypes(types),
     });
   });
-  // The authored review page receives only opaque section-level fallback
-  // markers. Several runtime hosts can belong to one static outline, so send
-  // one marker per outline instead of exposing host identities or causing the
-  // page-side all-or-nothing marker validator to reject duplicates.
   const seenMarkerOutlineIds = new Set();
   const markers = changedCandidates.flatMap((candidate) => {
     if (seenMarkerOutlineIds.has(candidate.outlineId)) return [];
@@ -345,175 +278,4 @@ export function mergeReviewRuntimeVisualChanges(documents, changedCandidateKeys)
     outline: Object.freeze(mergedOutline),
     markers: Object.freeze(markers),
   });
-}
-
-export class ReviewRuntimeVisualCoordinator {
-  constructor({
-    candidates,
-    onResolve,
-    onRequestConfirmation,
-    deadlineMs = REVIEW_RUNTIME_VISUAL_DEADLINE_MS,
-    setTimer = (callback, delay) => setTimeout(callback, delay),
-    clearTimer = (handle) => clearTimeout(handle),
-  } = {}) {
-    this.candidates = Array.isArray(candidates) ? Object.freeze([...candidates]) : Object.freeze([]);
-    this.allowedCandidateKeys = new Set(this.candidates.map((candidate) => candidate.key));
-    this.confirmationCandidateKeys = new Set(this.candidates
-      .filter((candidate) => candidate?.requiresDeterministicConfirmation === true)
-      .map((candidate) => candidate.key));
-    this.onResolve = typeof onResolve === "function" ? onResolve : () => {};
-    this.onRequestConfirmation = typeof onRequestConfirmation === "function"
-      ? onRequestConfirmation
-      : () => false;
-    this.deadlineMs = Number.isFinite(deadlineMs)
-      ? Math.max(1, Math.min(5_000, Math.round(deadlineMs)))
-      : REVIEW_RUNTIME_VISUAL_DEADLINE_MS;
-    this.setTimer = setTimer;
-    this.clearTimer = clearTimer;
-    this.snapshots = { before: null, after: null };
-    this.confirmationSnapshots = { before: null, after: null };
-    this.phase = "initial";
-    this.resolved = false;
-    this.disposed = false;
-    this.timer = null;
-  }
-
-  start() {
-    if (
-      this.resolved
-      || this.disposed
-      || !this.candidates.length
-      || this.timer !== null
-    ) return false;
-    if (this.phase === "awaiting-confirmation") this.phase = "confirmation";
-    if (this.phase !== "initial" && this.phase !== "confirmation") return false;
-    this.timer = this.setTimer(
-      () => {
-        if (this.phase === "confirmation") {
-          this.failConfirmation();
-          return;
-        }
-        this.#resolve(Object.freeze([]));
-      },
-      this.deadlineMs,
-    );
-    return true;
-  }
-
-  accept(side, rawSnapshots) {
-    if (
-      this.resolved
-      || this.disposed
-      || (side !== "before" && side !== "after")
-      || (
-        this.phase !== "initial"
-        && this.phase !== "awaiting-confirmation"
-        && this.phase !== "confirmation"
-      )
-    ) return false;
-    this.start();
-    const snapshots = this.phase === "confirmation"
-      ? this.confirmationSnapshots
-      : this.snapshots;
-    if (snapshots[side] !== null) return false;
-    snapshots[side] = acceptReviewRuntimeVisualSnapshots(
-      rawSnapshots,
-      this.allowedCandidateKeys,
-    ) || Object.freeze([]);
-    if (snapshots.before !== null && snapshots.after !== null) {
-      if (this.phase === "initial") this.#resolveInitialSnapshots();
-      else this.#resolveConfirmedSnapshots();
-    }
-    return true;
-  }
-
-  failConfirmation() {
-    if (
-      this.resolved
-      || this.disposed
-      || (this.phase !== "awaiting-confirmation" && this.phase !== "confirmation")
-      || this.snapshots.before === null
-      || this.snapshots.after === null
-    ) return false;
-    this.#resolve(this.#initialChangedCandidateKeys().filter((key) => (
-      !this.confirmationCandidateKeys.has(key)
-    )));
-    return true;
-  }
-
-  #initialChangedCandidateKeys() {
-    if (this.snapshots.before === null || this.snapshots.after === null) {
-      return Object.freeze([]);
-    }
-    return changedReviewRuntimeVisualCandidateKeys({
-      candidates: this.candidates,
-      before: this.snapshots.before,
-      after: this.snapshots.after,
-    });
-  }
-
-  #resolveInitialSnapshots() {
-    const changedCandidateKeys = this.#initialChangedCandidateKeys();
-    const needsConfirmation = changedCandidateKeys.some((key) => (
-      this.confirmationCandidateKeys.has(key)
-    ));
-    if (!needsConfirmation) {
-      this.#resolve(changedCandidateKeys);
-      return;
-    }
-    if (this.timer !== null) this.clearTimer(this.timer);
-    this.timer = null;
-    this.phase = "awaiting-confirmation";
-    let confirmationRequested = false;
-    try {
-      confirmationRequested = this.onRequestConfirmation() === true;
-    } catch {
-      confirmationRequested = false;
-    }
-    if (!confirmationRequested) this.failConfirmation();
-  }
-
-  #resolveConfirmedSnapshots() {
-    if (
-      this.confirmationSnapshots.before === null
-      || this.confirmationSnapshots.after === null
-    ) return;
-    const initialBeforeByKey = new Map(this.snapshots.before.map((snapshot) => [
-      snapshot.key,
-      snapshot,
-    ]));
-    const initialAfterByKey = new Map(this.snapshots.after.map((snapshot) => [
-      snapshot.key,
-      snapshot,
-    ]));
-    const confirmedBeforeByKey = new Map(this.confirmationSnapshots.before.map((snapshot) => [
-      snapshot.key,
-      snapshot,
-    ]));
-    const confirmedAfterByKey = new Map(this.confirmationSnapshots.after.map((snapshot) => [
-      snapshot.key,
-      snapshot,
-    ]));
-    const stableConfirmationKeys = new Set([...this.confirmationCandidateKeys].filter((key) => (
-      runtimeSnapshotsMatch(initialBeforeByKey.get(key), confirmedBeforeByKey.get(key))
-      && runtimeSnapshotsMatch(initialAfterByKey.get(key), confirmedAfterByKey.get(key))
-    )));
-    this.#resolve(this.#initialChangedCandidateKeys().filter((key) => (
-      !this.confirmationCandidateKeys.has(key) || stableConfirmationKeys.has(key)
-    )));
-  }
-
-  #resolve(changedCandidateKeys) {
-    if (this.resolved || this.disposed) return;
-    this.resolved = true;
-    if (this.timer !== null) this.clearTimer(this.timer);
-    this.timer = null;
-    this.onResolve(Object.freeze([...changedCandidateKeys]));
-  }
-
-  dispose() {
-    if (this.timer !== null) this.clearTimer(this.timer);
-    this.timer = null;
-    this.disposed = true;
-  }
 }

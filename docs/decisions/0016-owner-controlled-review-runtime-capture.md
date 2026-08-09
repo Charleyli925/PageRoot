@@ -1,65 +1,60 @@
-# ADR 0016: Electron owns Review runtime capture
+# ADR 0016: Review Runtime Snapshot owner
 
 - Status: Accepted
 - Date: 2026-08-09
 
 ## Context
 
-Formal Review compares immutable source HTML first, but some source-empty
-hosts acquire meaningful Canvas, SVG or script-generated paint at runtime. The
-old review bootstrap ran the supplemental fact collection in the authored page
-realm. Even with a narrow channel, that made a mutable page responsible for
-private candidate identity, scheduling and the evidence it reported.
+Static Review compares immutable source HTML and remains the only authority for
+source bytes, comments, acceptance and Versions. Some supported source hosts
+are empty in those bytes but render a Canvas or SVG after authored code runs.
+That paint is useful supplemental presentation evidence, but it must not give
+an authored review page control over discovery, scheduling or persistence.
 
-Authored JavaScript shares the DOM with any isolated world and can alter it, so
-isolation alone is not enough. Review capture needs a single privileged owner,
-stable source binding and failure behavior that never delays or changes the
-static review result.
+The previous deterministic-review design tried to establish a stronger
+forensic conclusion through script causality, comment-scope groups and a second
+fresh before/after confirmation pair. Those mechanisms made Review own a large
+state machine without changing its source authority.
 
 ## Decision
 
-- Static source/TargetRef analysis remains the Review authority. Runtime facts
-  are optional presentation evidence only.
-- `AiReviewWorkspace` retains the raw before/after source HTML and frozen
-  candidate bindings in trusted renderer memory. Its preload API sends one
-  bounded owner request containing only contract version, capture session,
-  source SHA-256, side, HTML, candidates and viewport. It cannot send a source
-  path, TargetRef, comment data, script or binary payload.
-- `desktop/runtime-visual-capture-owner.mjs` owns every request. Each before or
-  after request creates a fresh non-persistent partition, a volatile preview
-  session with no source root/assets and a hidden sandboxed `BrowserWindow`.
-  Before/after may run in parallel but never share a window or session; only a
-  duplicate request for the same side supersedes its predecessor. The window
-  has no preload, Node, Bridge, popup, navigation, download, webview or general
-  network authority. Main owns the 1.5-second deadline, cancellation,
-  destruction, preview-session revocation and isolated-session cleanup.
-- The owner evaluates facts only in a dedicated isolated world. It rechecks the
-  frozen element path, tag and identity fingerprint after authored scripts run;
-  missing, duplicate or rebound matches fail closed. The owner separately
-  validates path/tag/source-box/fingerprint against raw source before scripts
-  run. It takes two fact passes, captures each accepted rectangle once, and
-  validates PNG header/dimensions/aggregate budget before hashing the pixels.
-- Screenshot bytes, raw DOM, node handles and candidate bindings stop in the
-  owner. The renderer receives only a bounded envelope of derived signatures
-  bound to contract version, capture session and exact source SHA.
-- The authored review bootstrap retains static presentation and its separate
-  comment-locator capability only. It receives no runtime candidate key, path,
-  baseline, challenge, runtime message channel or screenshot result.
-- Every local runtime candidate needs a second fresh owner capture pair. The
-  source SHA, frozen viewport, facts and pixel hash must all match before its
-  marker can appear. Any timeout, cancellation, mapping failure or instability
-  omits only that supplemental marker and preserves the static review unchanged.
+- `SourceHostResolver` starts from `SourceIndex` and `TargetRef` before scripts
+  execute. It supports direct source Canvas/SVG roots and source-empty stable
+  hosts with an unambiguous `id`, `name`, `aria-label`, `data-*` value or class
+  token. Deleted, ambiguous, changed-type or non-empty ordinary hosts are
+  omitted.
+- The Electron `RuntimeSnapshotOwner` is the only Review capture owner. The
+  trusted renderer retains the source-backed binding and sends one bounded,
+  side-specific request with exact HTML, source SHA, viewport and owner
+  bindings through preload IPC. Authored review pages receive none of that
+  information and have no capture channel.
+- For each request the owner validates the raw source binding before scripts,
+  then uses one-use isolated-world capture to confirm the exact rendered host
+  and visible Canvas/SVG paint. It uses a disposable non-persistent session and
+  hidden sandboxed window, denies navigation, popups, downloads, webviews,
+  permissions and non-preview URLs, applies a main-process deadline and tears
+  down the window and session on every result.
+- One rect pass and at most one PNG capture per accepted host produce a bounded
+  `{ key, state, PNG bytes/hash/size }` snapshot. Trusted renderer memory
+  revalidates PNG structure, dimensions, hash and page budgets before comparing
+  one before/after pair. Only a completed captured pair with different PNG
+  presentation can add one opaque style marker to an existing static outline.
+- Capture failure, late completion, malformed data, unavailable hosts and
+  missing desktop capability are silent static-only outcomes. There is no
+  second fresh pair, confirmation coordinator, runtime status UI, runtime cache
+  or Edit migration in this milestone.
 
 ## Consequences
 
-Review can become usable before capture completes, and an unavailable desktop
-owner becomes a static-only review rather than a blocked screen. The main
-process adds a narrowly audited BrowserWindow/session lifecycle and packaged
-runtime module. Existing Review candidate analysis and coordinator logic stay
-separate from source persistence, Draft, Version and AI acceptance authority.
+Review becomes usable as soon as static frames are ready. Runtime data can
+decorate the existing review presentation but cannot change source HTML,
+TargetRefs, comment targets, acceptance, persistence or AI input. The simpler
+snapshot shape is intentionally retained as the foundation for the later Edit
+and Review convergence milestone; it does not itself replace the existing Edit
+capture implementation.
 
-Tests must cover request rejection, isolated-world-only execution, poisoned
-page scheduling, navigation/download/network denial, session/window cleanup,
-late results, two-session confirmation, package inclusion and a real Electron
-static-first regression. Future Edit capture may reuse the owner boundary, but
-must preserve its separate PNG projection contract.
+Tests cover source-host resolution, owner request rejection and containment,
+one-pass PNG validation, silent static fallback, package inclusion and the
+existing comment-location privacy boundary. They do not enumerate arbitrary
+script causality, computed selectors, comment-scope groups or forensic replay
+cases.

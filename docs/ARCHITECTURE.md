@@ -145,71 +145,38 @@ Comments + frozen input
   identity is persisted, sent over IPC, or available to comments. The
   ready-review session prepares that immutable document pair for the exact
   operation/source/comment identity before the React review surface mounts;
-  rerenders and bounded cache hits reuse it. Static source analysis remains the primary fact
-  channel. The runtime supplement is available only through a separate Electron
-  owner capture. Static review frames do not request or receive runtime facts;
-  after they are usable, the trusted parent may send raw source bytes, frozen
-  candidate bindings and a viewport through the narrow preload IPC. Main creates
-  a fresh hidden sandboxed owner session that accepts only derived evidence, so
-  inline/browser review remains static-only. A bounded supplement is then available only for a high-confidence
-  pair of source-empty chart hosts that the existing static footprint does not
-  already cover. An ordinary host requires a changed authored script to
-  reference its distinctive identity. A host directly targeted by, or contained
-  beneath, a frozen non-global review comment is instead admitted as explicit
-  local user scope, even when a changed palette/data/config script and the stable
-  host-binding script are separate. Within the same high-confidence review
-  section, every frozen non-global comment target also seeds a nearest-group
-  search. The first ancestor of that target containing at least two hosts admits
-  its pairable sibling hosts, including when the comment anchors a caption or
-  heading beside the charts. It does not cross a section, infer visual distance
-  or inspect comment text. Group discovery builds one source-DOM
-  ancestor-count map per section, then performs a bounded ancestor walk per
-  local target without a layout read. Direct, contained and nearest-group hosts
-  take the bounded 128 candidate slots in that order. A
-  global comment does not authorize the page, and ordinary group-external script
-  co-location inside the same section is not causal evidence. Comment scope
-  attributes exist only while the frozen analyzer makes this decision, then are
-  stripped from both serialized documents. For every source-resolved local
-  before target, the analyzer retains an opaque private initial-bootstrap
-  binding: a parser path plus a narrowly scoped static fingerprint, never a
-  source-node attribute in the prepared document. The desktop managed-preview
-  session serves that binding only to the parser-blocking first request for the
-  external bootstrap, then replaces it with an unbound fallback response. The
-  trusted parent keeps the source-node mapping and, after the before frame
-  loads, delivers targets only over a separately challenged bootstrap-owned
-  `MessageChannel`. Comment body, comment key, source-node and locator-map data
-  are absent from document bytes and from any later author-initiated bootstrap
-  read. A unique source `id`, `data-*`, `name`, or `aria-label` locator is an
-  optional safe fallback only when the private binding is unavailable, never a
-  positional sibling path; a missing, ambiguous, replaced or disconnected
-  binding, or unavailable private channel, omits the before-side marker rather
-  than rebinding by guess. Only the before bootstrap reports geometry, so
-  authored code cannot react to a comment marker. When comment
-  scope admits a host without a direct changed-script
-  reference, it still follows the same confirmation rule as every other local
-  runtime candidate: a first-pair visual difference must be reproduced by fresh
-  owner sessions on the same frozen before/after source before the parent may
-  project it. A clock/random one-shot result, mismatched replay, or unavailable
-  replay keeps the static footprint.
-  Candidate host keys and original source-box baselines never enter a review
-  document or bootstrap. The owner verifies path/tag/source-box/fingerprint
-  against raw source before authored scripts run, then revalidates path/tag and
-  identity in an isolated world after the page has run. A missing, duplicated,
-  transferred or replaced binding fails the entire capture back to static
-  evidence. It takes two isolated fact passes and one bounded screenshot per
-  accepted rectangle, verifies PNG header, dimensions and aggregate budgets,
-  hashes pixels, then discards pixels and DOM references. The main-process
-  deadline cannot be controlled by authored timers or promises; timeout,
-  navigation, cancellation and late completion always destroy the window and
-  release the preview session.
-  `ReviewRuntimeVisualCoordinator` accepts only a complete bounded owner
-  envelope matching contract version, review session and each side's exact
-  source SHA. It compares derived before/after facts, reuses the owning static
-  `changeId` where present, and otherwise adds one visual change for that
-  outline. It can publish late without blocking static presentation. Every
-  changed local candidate starts one additional fresh owner session per side;
-  source SHA, frozen viewport, facts and pixel hashes must match, and
-  instability removes only that local marker without changing any static fact.
+  rerenders and bounded cache hits reuse it. Static source analysis remains the
+  primary fact channel. `SourceHostResolver` optionally pairs direct source
+  Canvas/SVG roots and source-empty stable hosts, using `SourceIndex` and
+  `TargetRef` before scripts execute. It does not inspect script causality,
+  computed selectors, comments or runtime-discovered nodes. After both static
+  frames are usable, the trusted parent may send exact source HTML, source SHA,
+  viewport and frozen bindings to the one Electron `RuntimeSnapshotOwner`.
+  Inline/browser review stays static-only. The owner uses a fresh hidden
+  sandboxed window and non-persistent session, validates raw source binding,
+  then confirms the same rendered host and visible Canvas/SVG paint in an
+  isolated world. It collects one rect pass and at most one bounded PNG per
+  host, with main-owned deadline, navigation/permission denial and mandatory
+  cleanup. Renderer memory revalidates PNG bytes/hash/dimensions and compares
+  one before/after pair. A difference may add an opaque style marker to the
+  existing outline; unavailable, late or malformed evidence silently leaves
+  static Review unchanged. Candidate bindings, target references and PNG bytes
+  never enter review HTML, bootstrap code, page messages or persistence. There
+  is no confirmation coordinator or second fresh pair.
+
+  Frozen comments use a separate private locator capability. For every
+  source-resolved before target the analyzer keeps an opaque initial-bootstrap
+  binding: a parser path plus a narrow static fingerprint, never a source-node
+  attribute in prepared HTML. The managed preview serves it only to the first
+  parser-blocking bootstrap request, then serves an unbound fallback. The
+  trusted parent subsequently delivers targets only over a challenged private
+  `MessageChannel`. Comment body, key, source-node and locator-map data are
+  absent from document bytes and later bootstrap reads. A unique source `id`,
+  `data-*`, `name`, or `aria-label` is only a safe fallback; missing, ambiguous,
+  replaced or disconnected targets omit the before-side marker rather than
+  rebinding by guess. This comment capability does not authorize runtime host
+  discovery. Only the before bootstrap reports geometry, so authored code
+  cannot react to a comment marker.
   Exact leaf text
   ranges remain immutable evidence; a separate readable-footprint planner
   groups nearby ranges, keeps stable sentence gaps separate, records exact

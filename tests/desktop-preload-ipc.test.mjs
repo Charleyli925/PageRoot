@@ -92,7 +92,7 @@ test("preload exposes one narrow owner-controlled review runtime capture method"
   const calls = [];
   const { reviewRuntimeVisuals } = await loadPreloadApis(async (...args) => {
     calls.push(args);
-    return success({ outcome: "unmapped", reason: "frozen-binding-mismatch" });
+    return success({ outcome: "failed", reason: "capture-failed" });
   });
   const payload = {
     contractVersion: 1,
@@ -106,7 +106,7 @@ test("preload exposes one narrow owner-controlled review runtime capture method"
 
   assert.deepEqual(
     await reviewRuntimeVisuals.capture(payload),
-    { outcome: "unmapped", reason: "frozen-binding-mismatch" },
+    { outcome: "failed", reason: "capture-failed" },
   );
   assert.deepEqual(calls, [["html-review-runtime-visuals:capture", payload]]);
   assert.deepEqual(Object.keys(reviewRuntimeVisuals), ["capture"]);

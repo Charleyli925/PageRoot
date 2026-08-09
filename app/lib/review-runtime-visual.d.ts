@@ -1,16 +1,11 @@
 export type ReviewRuntimeVisualSnapshot = Readonly<{
   key: string;
-  state: "empty" | "stable" | "unavailable";
-  contentSignature: string;
-  paintSignature: string;
-  geometrySignature: string;
-  vectorSignature: string;
-  canvasSignature: string;
-  contentAtoms: number;
-  paintAtoms: number;
-  geometryAtoms: number;
-  vectorAtoms: number;
-  canvasPixels: number;
+  state: "captured" | "unavailable";
+  pngSha256: string;
+  width: number;
+  height: number;
+  byteLength: number;
+  pngBytes: Uint8Array;
 }>;
 
 export type ReviewRuntimeVisualCandidate = Readonly<{
@@ -18,21 +13,15 @@ export type ReviewRuntimeVisualCandidate = Readonly<{
   outlineId: string;
   changeId: string;
   label: string;
-  /** Owner-produced local markers require a fresh independent capture session. */
-  requiresDeterministicConfirmation?: boolean;
+  sourceHostTargetRefs?: Readonly<{
+    before: Readonly<Record<string, unknown>>;
+    after: Readonly<Record<string, unknown>>;
+  }>;
   panelKey?: string;
   panelPath?: readonly string[];
 }>;
 
-export const REVIEW_RUNTIME_VISUAL_DEADLINE_MS: 1500;
-export const REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT: 128;
-
-export function selectPrioritizedReviewRuntimeVisualCandidates<
-  TCandidate extends { commentPriority?: number },
->(
-  candidates: readonly TCandidate[],
-  maximum?: number,
-): readonly TCandidate[];
+export const REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT: 32;
 
 export function acceptReviewRuntimeVisualSnapshots(
   value: unknown,
@@ -62,20 +51,3 @@ export function mergeReviewRuntimeVisualChanges<
   outline: readonly TOutline[];
   markers: readonly Readonly<{ changeId: string; outlineId: string }>[];
 }>;
-
-export class ReviewRuntimeVisualCoordinator {
-  constructor(options?: {
-    candidates?: readonly ReviewRuntimeVisualCandidate[];
-    onResolve?: (changedCandidateKeys: readonly string[]) => void;
-    onRequestConfirmation?: () => boolean;
-    deadlineMs?: number;
-    setTimer?: (callback: () => void, delay: number) => unknown;
-    clearTimer?: (handle: unknown) => void;
-  });
-  readonly resolved: boolean;
-  start(): boolean;
-  accept(side: "before" | "after", rawSnapshots: unknown): boolean;
-  /** Fail closed only the candidates that need a fresh deterministic rerun. */
-  failConfirmation(): boolean;
-  dispose(): void;
-}

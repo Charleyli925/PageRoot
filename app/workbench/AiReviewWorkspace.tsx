@@ -41,11 +41,11 @@ import type {
   ReviewRuntimeCaptureResult,
 } from "../components/desktop-review-runtime-visual-api";
 import {
-  ReviewRuntimeVisualCoordinator,
+  acceptReviewRuntimeVisualSnapshots,
+  changedReviewRuntimeVisualCandidateKeys,
   mergeReviewRuntimeVisualChanges,
 } from "../lib/review-runtime-visual.js";
 import {
-  RUNTIME_VISUAL_CONTRACT,
   acceptedRuntimeVisualEnvelope,
 } from "../domain/runtime-visual-contract.js";
 import { ReviewScrollCoordinator } from "../lib/review-scroll-sync.js";
@@ -495,7 +495,6 @@ export default function AiReviewWorkspace({
     afterCommit: Array<() => void>;
     timer: number | null;
   } | null>(null);
-  const runtimeVisualCoordinatorRef = useRef<ReviewRuntimeVisualCoordinator | null>(null);
   const runtimeVisualOwnerDocumentsRef = useRef<ReviewDocuments | null>(null);
   const runtimeVisualResolutionRef = useRef<ReviewRuntimeVisualResult | null>(null);
   const runtimeVisualViewportRef = useRef<ReviewRuntimeVisualViewport | null>(null);
@@ -694,7 +693,6 @@ export default function AiReviewWorkspace({
 
   const resolveRuntimeVisuals = useCallback((changedCandidateKeys: readonly string[]) => {
     if (runtimeVisualResolutionRef.current?.documents === documents) return;
-    runtimeVisualCoordinatorRef.current?.dispose();
     const merged = mergeReviewRuntimeVisualChanges(documents, changedCandidateKeys);
     const result: ReviewRuntimeVisualResult = {
       documents,
@@ -736,81 +734,72 @@ export default function AiReviewWorkspace({
     }
   }, [commitRuntimeVisualFrame, documents]);
 
-  const requestOwnerRuntimeVisualCapture = useCallback((
-    coordinator: ReviewRuntimeVisualCoordinator,
-  ) => {
+  const requestOwnerRuntimeVisualCapture = useCallback(() => {
+    if (
+      runtimeVisualOwnerDocumentsRef.current !== documents
+      || runtimeVisualResolutionRef.current?.documents === documents
+    ) return;
+    const candidateKeys = new Set(documents.runtimeVisualCandidates.map(({ key }) => key));
     const captureApi = window.htmlAIReviewRuntimeVisuals;
-    const acceptUnavailable = (side: ReviewSide) => {
-      if (
-        runtimeVisualOwnerDocumentsRef.current !== documents
-        || runtimeVisualCoordinatorRef.current !== coordinator
-      ) return;
-      coordinator.accept(side, []);
-    };
     if (!captureApi) {
-      acceptUnavailable("before");
-      acceptUnavailable("after");
-      return true;
+      resolveRuntimeVisuals([]);
+      return;
     }
     const viewport = runtimeVisualViewportRef.current || Object.freeze({
       width: Math.max(320, Math.min(4_096, Math.round(window.innerWidth || 1_280))),
       height: Math.max(320, Math.min(2_400, Math.round(window.innerHeight || 900))),
     });
     runtimeVisualViewportRef.current = viewport;
-    (["before", "after"] as ReviewSide[]).forEach((side) => {
+    const captureSide = async (side: ReviewSide) => {
       const candidates = documents.runtimeVisualCaptureCandidates[side];
       const expected = {
         sessionId: documents.runtimeVisualCaptureIdentity.sessionId,
         sourceSha256: documents.runtimeVisualCaptureIdentity.sourceSha256BySide[side],
       };
-      if (!candidates.length) {
-        acceptUnavailable(side);
-        return;
-      }
-      void captureApi.capture({
-        contractVersion: documents.runtimeVisualCaptureIdentity.contractVersion,
-        captureSessionId: expected.sessionId,
-        sourceSha256: expected.sourceSha256,
-        side,
-        html: documents.runtimeVisualSourceHtml[side],
-        candidates,
-        viewport,
-      }).then((capture: ReviewRuntimeCaptureResult) => {
-        if (
-          runtimeVisualOwnerDocumentsRef.current !== documents
-          || runtimeVisualCoordinatorRef.current !== coordinator
-          || runtimeVisualResolutionRef.current?.documents === documents
-        ) {
-          return;
-        }
-        if (capture?.outcome !== "captured") {
-          coordinator.accept(side, []);
-          return;
-        }
-        const envelope = acceptedRuntimeVisualEnvelope(capture.envelope, expected);
-        coordinator.accept(
+      if (!candidates.length) return [];
+      try {
+        const capture: ReviewRuntimeCaptureResult = await captureApi.capture({
+          contractVersion: documents.runtimeVisualCaptureIdentity.contractVersion,
+          captureSessionId: expected.sessionId,
+          sourceSha256: expected.sourceSha256,
           side,
-          envelope ? capture.envelope.runtimeVisualSnapshots : [],
-        );
-      }).catch(() => {
-        acceptUnavailable(side);
-      });
+          html: documents.runtimeVisualSourceHtml[side],
+          candidates,
+          viewport,
+        });
+        if (capture?.outcome !== "captured") return [];
+        const envelope = acceptedRuntimeVisualEnvelope(capture.envelope, expected);
+        return envelope
+          ? acceptReviewRuntimeVisualSnapshots(
+              capture.envelope.runtimeVisualSnapshots,
+              candidateKeys,
+            ) || []
+          : [];
+      } catch {
+        return [];
+      }
+    };
+    void Promise.all([
+      captureSide("before"),
+      captureSide("after"),
+    ]).then(([before, after]) => {
+      if (
+        runtimeVisualOwnerDocumentsRef.current !== documents
+        || runtimeVisualResolutionRef.current?.documents === documents
+      ) return;
+      resolveRuntimeVisuals(changedReviewRuntimeVisualCandidateKeys({
+        candidates: documents.runtimeVisualCandidates,
+        before,
+        after,
+      }));
+    }).catch(() => {
+      if (runtimeVisualOwnerDocumentsRef.current === documents) {
+        resolveRuntimeVisuals([]);
+      }
     });
-    return true;
-  }, [documents]);
-
-  const requestRuntimeVisualConfirmation = useCallback(() => {
-    if (
-      runtimeVisualOwnerDocumentsRef.current !== documents
-      || runtimeVisualResolutionRef.current?.documents === documents
-    ) return false;
-    const coordinator = runtimeVisualCoordinatorRef.current;
-    return coordinator ? requestOwnerRuntimeVisualCapture(coordinator) : false;
-  }, [documents, requestOwnerRuntimeVisualCapture]);
+  }, [documents, resolveRuntimeVisuals]);
 
   useLayoutEffect(() => {
-    runtimeVisualCoordinatorRef.current?.dispose();
-    runtimeVisualCoordinatorRef.current = null;
     runtimeVisualOwnerDocumentsRef.current = documents;
     runtimeVisualViewportRef.current = Object.freeze({
       width: Math.max(320, Math.min(4_096, Math.round(window.innerWidth || 1_280))),
@@ -855,22 +844,9 @@ export default function AiReviewWorkspace({
         }
       };
     }
-    const coordinator = new ReviewRuntimeVisualCoordinator({
-      candidates: documents.runtimeVisualCandidates,
-      deadlineMs: RUNTIME_VISUAL_CONTRACT.ownerDeadlineMs,
-      onResolve: resolveRuntimeVisuals,
-      onRequestConfirmation: requestRuntimeVisualConfirmation,
-      setTimer: (callback, delay) => window.setTimeout(callback, delay),
-      clearTimer: (handle) => window.clearTimeout(handle as number),
-    });
-    runtimeVisualCoordinatorRef.current = coordinator;
     drainRegisteredFrames();
     return () => {
-      coordinator.dispose();
       closeReviewCommentChannel();
-      if (runtimeVisualCoordinatorRef.current === coordinator) {
-        runtimeVisualCoordinatorRef.current = null;
-      }
       if (runtimeVisualOwnerDocumentsRef.current === documents) {
         runtimeVisualOwnerDocumentsRef.current = null;
         runtimeVisualViewportRef.current = null;
@@ -884,8 +860,6 @@ export default function AiReviewWorkspace({
     documents,
     prepareReviewCommentFrame,
     prepareRuntimeVisualFrame,
-    requestOwnerRuntimeVisualCapture,
-    requestRuntimeVisualConfirmation,
     resolveRuntimeVisuals,
   ]);
 
@@ -1063,11 +1037,7 @@ export default function AiReviewWorkspace({
           staticReady.sides.add(message.side);
           if (staticReady.sides.size === 2 && !staticReady.started) {
             staticReady.started = true;
-            const coordinator = runtimeVisualCoordinatorRef.current;
-            if (coordinator) {
-              coordinator.start();
-              requestOwnerRuntimeVisualCapture(coordinator);
-            }
+            requestOwnerRuntimeVisualCapture();
           }
         }
         const resolved = runtimeVisualResolutionRef.current;

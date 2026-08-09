@@ -1,44 +1,6 @@
 import { expect, test } from "@playwright/test";
-import { build } from "esbuild";
-import { fileURLToPath } from "node:url";
 
-import { runtimeVisualHostilePage } from "../../fixtures/runtime-visual-hostile-pages.mjs";
 import { generatedReviewBootstrap } from "../../helpers/generated-review-bootstrap.mjs";
-
-const REVIEW_DOCUMENT_ENTRY_POINT = fileURLToPath(
-  new URL("../../../app/workbench/review-document.ts", import.meta.url),
-);
-let reviewDocumentBundlePromise;
-
-async function formalReviewScriptTokenMatches(page, probes) {
-  reviewDocumentBundlePromise ??= build({
-    entryPoints: [REVIEW_DOCUMENT_ENTRY_POINT],
-    bundle: true,
-    format: "iife",
-    globalName: "PageRootReviewDocument",
-    platform: "browser",
-    target: "es2022",
-    write: false,
-  }).then((result) => result.outputFiles[0]?.text || "");
-  const bundle = await reviewDocumentBundlePromise;
-  if (!bundle) throw new Error("Review document bundle is missing.");
-  await page.setContent("<!doctype html><html><body></body></html>");
-  await page.addScriptTag({ content: bundle });
-  return page.evaluate((entries) => {
-    const matcher = globalThis.PageRootReviewDocument
-      ?.runtimeVisualScriptReferencesToken;
-    if (typeof matcher !== "function") {
-      throw new Error("Review runtime visual token matcher is unavailable.");
-    }
-    return entries.map(({ source, token }) => matcher(source, token));
-  }, probes);
-}
-
-function firstInlineScript(html) {
-  const source = html.match(/<script>(?<source>[\s\S]*?)<\/script>/iu)?.groups?.source;
-  if (!source) throw new Error("Runtime visual fixture is missing an inline script.");
-  return source;
-}
 
 const COMMENT_SOURCE_BOX_SIGNATURE = JSON.stringify([
   ["class", "comment-host"],
@@ -357,35 +319,4 @@ test("mixed-shape path-only comment decoys fail closed", async ({ page }) => {
   expect(result.layouts.some((message) => (
     message.commentLayouts?.some((layout) => layout.key.startsWith("parsed-comment-"))
   ))).toBe(false);
-});
-
-test("formal Review recognizes class selector operators and class writes", async ({ page }) => {
-  const classWriteFixture = runtimeVisualHostilePage("pr115-class-write-causality");
-  expect(classWriteFixture).toBeDefined();
-  await expect(formalReviewScriptTokenMatches(page, [
-    {
-      source: `document.querySelector('[class^="chart"]').textContent = "ready";`,
-      token: { value: "chart-host", kind: "class-value" },
-    },
-    {
-      source: "document.querySelector('.chart-host').className = 'chart-host active';",
-      token: { value: "chart-host", kind: "class" },
-    },
-    {
-      source: "document.querySelector('[class~=\"chart-host\"]').setAttribute('class', 'chart-host active');",
-      token: { value: "chart-host", kind: "class" },
-    },
-    {
-      source: "document.querySelector('.tooltip').className = 'chart-host active';",
-      token: { value: "chart-host", kind: "class" },
-    },
-    {
-      source: "const tooltip = document.querySelector('.tooltip'); tooltip.className = 'chart-host active';",
-      token: { value: "chart-host", kind: "class" },
-    },
-    {
-      source: firstInlineScript(classWriteFixture?.changedHtml || ""),
-      token: { value: "chart-host", kind: "class" },
-    },
-  ])).resolves.toEqual([true, true, true, false, false, true]);
 });

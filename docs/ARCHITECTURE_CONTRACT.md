@@ -205,80 +205,35 @@ compatible tag/context/stable-key buckets after exact and unique identity
 matches; it cannot restore a page-wide Cartesian candidate set or change the
 existing evidence thresholds.
 
-Formal review has a separate, narrower runtime-visual supplement owned by the
-parent `AiReviewWorkspace` and its `ReviewRuntimeVisualCoordinator`, while the
-Electron `ReviewRuntimeCaptureController` is the only capture owner. The frozen
-source analyzer enables it only for the desktop owner API. Edit and Review share
-the frozen limits, page budget, owner deadline and source/session envelope
-declared by `runtime-visual-contract.js`; neither side may restate a numeric
-boundary. The trusted renderer sends raw HTML, side-specific full source SHA,
-viewport and frozen bindings only through a narrow preload request. Main creates
-a fresh non-persistent preview/session and hidden sandboxed window, denies
-navigation/popups/downloads/webviews and non-preview requests, evaluates facts
-only in an isolated world, and returns a bounded derived envelope after dropping
-the raw DOM and PNG bytes. Inline/browser review remains static-only. The frozen
-source analyzer must first prove a unique source-empty host pair and absence of
-an existing static footprint over that host. An ordinary host additionally
-requires a relevant changed authored script that directly references its
-distinctive identity. A host directly targeted by, or nested below, a frozen
-non-global review comment may instead use that opaque local target as scope
-evidence, so split palette/data/config and host-binding scripts remain
-detectable. Every frozen non-global comment target inside that high-confidence
-review section also starts a nearest-chart-group search: its first ancestor with
-at least two pairable source-empty hosts defines the group, so a caption or
-heading target may grant lower-priority local scope to its sibling charts
-without parsing comment text or inferring visual distance. Direct, contained
-and nearest-group hosts are selected in that order before ordinary hosts under
-the same 128-candidate cap. A global comment never authorizes
-page-wide runtime capture, the group cannot cross its section, and merely
-placing another changed script elsewhere in the section remains insufficient
-causal evidence. Every local runtime host has no marker authority until a first
-observed before/after difference repeats in one fresh run of the same frozen
-document pair on both sides, whether it was admitted through direct
-changed-script causality or comment scope. A replay mismatch, failure or timeout
-removes only that supplemental evidence and retains the static result. Comment
-scope attributes are analysis-only and are removed before either review document
-is serialized. Each source-resolved local before target is represented only by
-an opaque private initial-bootstrap binding: an element path plus a narrow
-static fingerprint, never a source-node identity attribute. The managed preview
-serves that binding only to the parser-blocking first bootstrap request and then
-serves an unbound fallback to later author-initiated requests. The trusted
-parent keeps the source-node configuration and sends targets only to the before
-bootstrap over a separately challenged private `MessageChannel`; comment body,
-comment key, source-node and locator-map data never enter document bytes or a
-later fetchable bootstrap response. A unique source `id`, `data-*`, `name`, or
-`aria-label` is an optional fallback only when private binding is unavailable,
-never a positional sibling path. A fingerprintless binding remains valid only
-while its observed element is the exact frozen path; a same-tag observation at
-a shifted path makes that target ambiguous and omits the marker. Missing,
-ambiguous, replaced or disconnected bindings, and unavailable private transport,
-omit the marker rather than guessing. Only the before bootstrap returns comment geometry, so authored CSS
-or scripts cannot observe a comment scope marker and create runtime evidence
-themselves.
-Runtime candidate keys and original source-box baselines are held only by the
-trusted renderer and injected into the owner isolated-world closure; no review
-HTML, bootstrap response or author-visible message carries them. Before authored
-code runs, the owner must prove each raw-source path, tag, source-box signature
-and up to 24 stable identity attributes uniquely. Its isolated program then
-must prove the exact path, tag and identity attributes uniquely after authored
-code has run. Missing, duplicate, transferred, replaced or mismatched bindings
-invalidate the complete capture.
+Formal Review has an optional, narrower runtime-snapshot supplement. One
+`SourceHostResolver` pairs only direct source Canvas/SVG roots and source-empty
+stable hosts from `SourceIndex`/`TargetRef`; it does not use changed-script
+causality, computed selectors, comment scope or runtime DOM guessing. The
+trusted `AiReviewWorkspace` begins static Review immediately and, after both
+frames are ready, sends exact HTML, side-specific source SHA, viewport and those
+frozen bindings through one narrow preload call. Inline/browser review remains
+static-only.
 
-For each accepted candidate, main performs one bounded `capturePage` call and a
-second isolated fact read. It validates PNG header/dimensions and aggregate
-budgets, hashes pixels and returns only bounded signatures. The raw DOM, nodes
-and PNG bytes do not leave the owner. Main's deadline, cancellation and cleanup
-are independent of page timers, promises or `performance`; every timeout,
-navigation, invalid result or late result resolves to static-only review after
-destroying the window and revoking the preview session.
+Comment location remains a separate private capability. An opaque initial
+bootstrap binding may identify a frozen before target for comment geometry, but
+it neither reaches authored markup nor authorizes runtime host discovery.
+Electron's one-use `RuntimeSnapshotOwner` owns capture. It validates the raw
+source path/tag/identity, creates a non-persistent preview session and hidden
+sandboxed window, denies navigation/popups/downloads/webviews/permissions and
+non-preview requests, and reads the exact rendered host only in an isolated
+world. A source-empty host must contain visible Canvas/SVG paint. One rect pass
+and at most one `capturePage` PNG per host are bounded by the shared contract;
+the owner validates PNG shape, and trusted renderer memory validates bytes,
+dimensions, SHA-256 and aggregate budgets. Raw DOM/node handles never cross the
+owner boundary, and no candidate binding or PNG enters authored review HTML,
+bootstrap code or page messaging.
 
-The coordinator accepts only a complete before/after owner envelope matched to
-contract version, capture session and full side-specific source SHA. It may add
-only public `changeId`/`outlineId` presentation markers, and it owns no source,
-Version, persistence, Bridge, drain or activation state. Every local candidate
-must match a second fresh owner session on both sides, with the same frozen
-viewport, facts and pixel hash. Partial, unstable, timed-out or late evidence
-fails closed without altering the static review.
+The one before/after snapshot pair is compared once. Only captured snapshots
+with different PNG presentation can add an opaque `changeId`/`outlineId` style
+marker. A missing desktop API, unmapped host, malformed envelope, timeout,
+cancellation or late result is a silent static-only outcome. There is no second
+fresh pair, confirmation coordinator, runtime UI or Review cache. Edit remains
+on its existing implementation until the later convergence milestone.
 
 Comment layout is measured only after current disposable presentation is
 applied. The Workbench accepts no card coordinates until the Canvas reports a
