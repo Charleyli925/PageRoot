@@ -317,10 +317,11 @@
         "^app/application/(?:bridge-client|comment-session|document-session|draft-session|drain-coordinator|external-file-open-session|local-action-outcomes|project-application-session|project-query-fence|project-rules-session|project-session|recovery-store|review-analysis-session|run-session|runtime-capabilities|runtime-visual-projection-session|source-history-session|version-session)\\.(?:js|d\\.ts)$",
         "^desktop/project-open-queue\\.mjs$",
         "^app/domain/(?:draft-aggregate|run-lifecycle|runtime-visual-(?:contract|projection)|source-history)\\.(?:js|d\\.ts)$",
-        "^shared/(?:draft-aggregate|source-history)\\.mjs$",
-        "^scripts/(?:check-architecture|draft-aggregate|draft-service|project-context-service|source-history-service)\\.mjs$",
-        "^tests/(?:architecture-boundaries|bridge-client|comment-session|document-session|draft-aggregate|draft-service|draft-session|drain-coordinator|external-file-open-session|local-action-outcomes|project-application-session|project-open-queue|project-query-fence|project-rules-session|project-session|recovery-store|review-analysis-session|run-lifecycle|run-session|runtime-capabilities|source-history|source-history-session|version-session)\\.test\\.mjs$",
-        "^(?:CONTRIBUTING|docs/(?:ARCHITECTURE|ARCHITECTURE_CONTRACT|STATE_OWNERSHIP|ENGINEERING_STANDARDS|SECURITY_MODEL|RUNTIME_VISUAL_CONTRACT))\\.md$",
+        "^app/workbench/(?:version-model|version-compatibility-decoder)\\.(?:js|ts)$",
+        "^shared/(?:direct-edit-compatibility|draft-aggregate|source-history)\\.mjs$",
+        "^scripts/(?:check-architecture|draft-aggregate|draft-command-decoder|draft-service|project-context-service|source-history-service)\\.mjs$",
+        "^tests/(?:architecture-boundaries|bridge-client|comment-session|compatibility-decoders|document-session|draft-aggregate|draft-service|draft-session|drain-coordinator|external-file-open-session|local-action-outcomes|project-application-session|project-open-queue|project-query-fence|project-rules-session|project-session|recovery-store|review-analysis-session|run-lifecycle|run-session|runtime-capabilities|source-history|source-history-session|version-session)\\.test\\.mjs$",
+        "^(?:CONTRIBUTING|docs/(?:ARCHITECTURE|ARCHITECTURE_CONTRACT|COMPATIBILITY|STATE_OWNERSHIP|ENGINEERING_STANDARDS|SECURITY_MODEL|RUNTIME_VISUAL_CONTRACT))\\.md$",
         "^docs/decisions/(?:0003-session-ownership-and-mutation-outcomes|0004-v2-editable-islands|0007-independent-interactive-preview|0008-safe-presentation-actions-in-edit-mode|0009-persistent-source-patch-history|0011-workbench-session-decomposition|0012-id-first-project-context|0013-edit-runtime-visual-projection|0015-safe-host-fallback-and-direct-text-nodes)\\.md$"
       ],
       "suites": ["typecheck"],
@@ -328,6 +329,7 @@
         "tests/architecture-boundaries.test.mjs",
         "tests/bridge-client.test.mjs",
         "tests/comment-session.test.mjs",
+        "tests/compatibility-decoders.test.mjs",
         "tests/document-session.test.mjs",
         "tests/draft-aggregate.test.mjs",
         "tests/draft-service.test.mjs",
@@ -434,12 +436,15 @@
       "id": "workbench-lifecycle",
       "patterns": [
         "^app/workbench(?:\\.tsx|/.*\\.(?:ts|tsx))$",
+        "^app/lib/(?:audit-events|direct-edit-events)\\.js$",
         "^app/lib/comment-rail-layout\\.js$",
-        "^tests/(?:comment-rail-layout\\.test|source-architecture-fixture)\\.mjs$",
+        "^tests/(?:audit-events|comment-rail-layout|direct-edit-events)\\.test\\.mjs$",
+        "^tests/source-architecture-fixture\\.mjs$",
         "^tests/native-command-queue-contract\\.test\\.mjs$"
       ],
       "suites": ["typecheck", "browser-smoke", "electron-smoke", "ai-smoke"],
       "nodeTests": [
+        "tests/audit-events.test.mjs",
         "tests/direct-edit-events.test.mjs",
         "tests/comment-rail-layout.test.mjs",
         "tests/native-command-queue-contract.test.mjs",
@@ -539,7 +544,8 @@
     {
       "id": "bridge-lifecycle",
       "patterns": [
-        "^scripts/(?:workspace-bridge|lifecycle-core|finalize-attempt|record-user-supplement|user-supplement-core|candidate-assessment|scope-validator|html-source-parser|attachment-storage|draft-aggregate|draft-service|project-context-service|source-history-service|product-contract|target-identity)\\.mjs$"
+        "^scripts/(?:workspace-bridge|lifecycle-core|finalize-attempt|record-user-supplement|user-supplement-core|candidate-assessment(?:-decoder)?|scope-validator|html-source-parser|attachment-storage|draft-aggregate|draft-command-decoder|draft-service|project-context-service|source-history-service|product-contract|target-identity)\\.mjs$",
+        "^app/workbench/(?:version-model|version-compatibility-decoder)\\.(?:js|ts)$"
       ],
       "suites": ["ai-smoke"],
       "nodeTests": [
@@ -548,6 +554,7 @@
         "tests/scope-validator.test.mjs",
         "tests/html-source-parser.test.mjs",
         "tests/attachment-storage.test.mjs",
+        "tests/compatibility-decoders.test.mjs",
         "tests/product-contract.test.mjs",
         "tests/project-context-service.test.mjs",
         "tests/targeted-change-schema.test.mjs",
@@ -559,11 +566,12 @@
       "patterns": [
         "^schemas/.*\\.json$",
         "^fixtures/v3/source-history\\.current\\.json$",
-        "^fixtures/candidate-assessment-compat/.*$"
+        "^fixtures/(?:candidate-assessment-compat|compatibility-decoders)/.*$"
       ],
       "suites": [],
       "nodeTests": [
         "tests/schema-contract.test.mjs",
+        "tests/compatibility-decoders.test.mjs",
         "tests/targeted-change-schema.test.mjs",
         "tests/scope-validator.test.mjs",
         "tests/workspace-bridge.test.mjs"

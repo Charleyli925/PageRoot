@@ -2783,9 +2783,9 @@ export default function Workbench() {
     if (mutation) {
       const nextEvents = appendDirectEditEvent({
         mutation,
-        capturedRevision: nextRevision,
+        revision: nextRevision,
         createdAt: new Date().toISOString(),
-        baseVersionId: currentBasedOnVersionId,
+        basedOnVersionId: currentBasedOnVersionId,
         events: commentSessionRef.current.changeEvents,
         pendingEvents: auditPendingRef.current,
         inFlightKeys: auditInFlightKeysRef.current,

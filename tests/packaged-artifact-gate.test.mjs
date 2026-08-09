@@ -157,12 +157,14 @@ async function createPackagedFixture(t) {
     "record-user-supplement.mjs",
     "html-source-parser.mjs",
     "candidate-assessment.mjs",
+    "candidate-assessment-decoder.mjs",
     "scope-validator.mjs",
     "target-identity.mjs",
     "product-contract.mjs",
     "attachment-storage.mjs",
     "draft-aggregate.mjs",
     "draft-service.mjs",
+    "draft-command-decoder.mjs",
     "project-context-service.mjs",
     "source-history-service.mjs",
   ]) {
@@ -258,12 +260,14 @@ async function createPackagedFixture(t) {
     "record-user-supplement.mjs",
     "html-source-parser.mjs",
     "candidate-assessment.mjs",
+    "candidate-assessment-decoder.mjs",
     "scope-validator.mjs",
     "target-identity.mjs",
     "product-contract.mjs",
     "attachment-storage.mjs",
     "draft-aggregate.mjs",
     "draft-service.mjs",
+    "draft-command-decoder.mjs",
     "project-context-service.mjs",
     "source-history-service.mjs",
   ]) {
@@ -284,6 +288,19 @@ async function createPackagedFixture(t) {
     await writeFixtureFile(
       resourcesPath,
       "shared/draft-aggregate.mjs",
+      "",
+    ),
+  );
+  await writeFixtureFile(
+    fixtureProductRoot,
+    "shared/direct-edit-compatibility.mjs",
+    "export const fixtureDirectEditCompatibility = true;\n",
+  );
+  await copyFile(
+    path.join(fixtureProductRoot, "shared/direct-edit-compatibility.mjs"),
+    await writeFixtureFile(
+      resourcesPath,
+      "shared/direct-edit-compatibility.mjs",
       "",
     ),
   );

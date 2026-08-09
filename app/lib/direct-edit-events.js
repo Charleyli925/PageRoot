@@ -4,8 +4,8 @@ function eventFromMutation({
   mutation,
   eventId,
   createdAt,
-  baseVersionId,
-  capturedRevision,
+  basedOnVersionId,
+  revision,
 }) {
   return {
     eventId,
@@ -15,8 +15,8 @@ function eventFromMutation({
     ...(mutation.property ? { property: mutation.property } : {}),
     before: mutation.before,
     after: mutation.after,
-    baseVersionId,
-    capturedRevision,
+    basedOnVersionId,
+    revision,
   };
 }
 
@@ -41,9 +41,9 @@ function canCoalesceStyle(last, mutation, createdAt) {
  */
 export function appendDirectEditEvent({
   mutation,
-  capturedRevision,
+  revision,
   createdAt,
-  baseVersionId,
+  basedOnVersionId,
   events,
   pendingEvents,
   inFlightKeys,
@@ -62,14 +62,14 @@ export function appendDirectEditEvent({
         ...last,
         after: mutation.after,
         target: mutation.target,
-        capturedRevision,
+        revision,
       }
     : eventFromMutation({
         mutation,
         eventId: nextEventId(),
         createdAt,
-        baseVersionId,
-        capturedRevision,
+        basedOnVersionId,
+        revision,
       });
   const nextEvents = sameStyle
     ? [...events.slice(0, -1), nextEvent]

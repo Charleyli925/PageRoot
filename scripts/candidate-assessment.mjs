@@ -225,7 +225,7 @@ function continuityAssessment(baseHtml, outputHtml) {
   };
 }
 
-function assessmentDecision({
+export function candidateAssessmentDecision({
   completeDocument,
   bodyHasContent,
   continuityStatus,
@@ -251,40 +251,6 @@ function assessmentDecision({
   return { status: "ready", issueCodes: [] };
 }
 
-/**
- * Historical v1 records may carry executable-surface fields from a retired
- * policy. They remain readable evidence, but never influence current
- * acceptance, review routing, or user-facing status.
- */
-export function normalizeCandidateAssessmentPolicy(assessment) {
-  const hasRetiredPolicyEvidence = Object.hasOwn(
-    assessment,
-    "executable",
-  ) || Object.hasOwn(
-    assessment.health ?? {},
-    "executableSurfaceUnchanged",
-  );
-  const current = { ...assessment };
-  delete current.executable;
-  const health = { ...(assessment.health ?? {}) };
-  delete health.executableSurfaceUnchanged;
-  const decision = hasRetiredPolicyEvidence
-    ? assessmentDecision({
-      completeDocument: health.completeDocument,
-      bodyHasContent: health.bodyHasContent,
-      continuityStatus: assessment.continuity?.status,
-    })
-    : {
-      status: assessment.status,
-      issueCodes: assessment.issueCodes,
-    };
-  return {
-    ...current,
-    ...decision,
-    health,
-  };
-}
-
 export function assessHtmlCandidate({ baseHtml, outputHtml }) {
   const completeDocument = hasCompleteDocumentStructure(outputHtml);
   const continuity = continuityAssessment(baseHtml, outputHtml);
@@ -292,7 +258,7 @@ export function assessHtmlCandidate({ baseHtml, outputHtml }) {
     continuity.outputVisibleTextLength > 0
     || continuity.outputBodyElementCount > 0
   );
-  const decision = assessmentDecision({
+  const decision = candidateAssessmentDecision({
     completeDocument,
     bodyHasContent,
     continuityStatus: continuity.status,

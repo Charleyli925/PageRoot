@@ -1,0 +1,17 @@
+{
+  "eventId": "edit_legacy_title",
+  "createdAt": "2026-08-04T07:45:14.371Z",
+  "kind": "text",
+  "baseVersionId": "ver_0004",
+  "capturedRevision": 4,
+  "summary": "旧版工作台保存的标题修改",
+  "target": {
+    "targetId": "target_fixture_title",
+    "label": "页面标题",
+    "level": "subregion",
+    "selector": "main > h1",
+    "resolution": "exact"
+  },
+  "before": "旧标题",
+  "after": "新标题"
+}

@@ -1,8 +1,8 @@
 import { LifecycleError } from "./lifecycle-core.mjs";
 import {
-  isDraftOperationId,
   normalizeAuthoritativeDraft,
 } from "./draft-aggregate.mjs";
+import { decodeDraftCommandOperationId } from "./draft-command-decoder.mjs";
 
 const COMMENT_ID_PATTERN = /^comment_[A-Za-z0-9_-]+$/;
 const APPLIED_OPERATION_LIMIT = 256;
@@ -64,17 +64,19 @@ export function applyDraftCommand(
     throw new TypeError("applyDraftCommand requires a UUID generator.");
   }
   const current = activeDraftSnapshot(runtimeDraft, now);
-  const suppliedOperationId = String(body?.operationId || "");
-  if (suppliedOperationId && !isDraftOperationId(suppliedOperationId)) {
+  let decodedOperation;
+  try {
+    decodedOperation = decodeDraftCommandOperationId(body?.operationId, {
+      randomUUID,
+    });
+  } catch {
     throw draftError(
       400,
       "INVALID_DRAFT_OPERATION_ID",
       "operationId must be a stable draftop_ identifier.",
     );
   }
-  // This is the only compatibility adapter for older packaged renderers.
-  const operationId = suppliedOperationId
-    || `draftop_legacy_${randomUUID().replaceAll("-", "_")}`;
+  const operationId = decodedOperation.operationId;
   if (current.appliedOperationIds.includes(operationId)) {
     return {
       replayed: true,

@@ -43,12 +43,14 @@ const REQUIRED_BRIDGE_FILES = [
   "record-user-supplement.mjs",
   "html-source-parser.mjs",
   "candidate-assessment.mjs",
+  "candidate-assessment-decoder.mjs",
   "scope-validator.mjs",
   "target-identity.mjs",
   "product-contract.mjs",
   "attachment-storage.mjs",
   "draft-aggregate.mjs",
   "draft-service.mjs",
+  "draft-command-decoder.mjs",
   "project-context-service.mjs",
   "source-history-service.mjs",
 ];
@@ -72,7 +74,11 @@ const REQUIRED_PACKAGED_MODULES = [
   "tiny-typed-emitter",
   "universalify",
 ];
-const REQUIRED_SHARED_FILES = ["draft-aggregate.mjs", "source-history.mjs"];
+const REQUIRED_SHARED_FILES = [
+  "direct-edit-compatibility.mjs",
+  "draft-aggregate.mjs",
+  "source-history.mjs",
+];
 const REQUIRED_LEGAL_RESOURCES = [
   "PageRoot 用户声明与免责声明.txt",
   "LICENSE",
@@ -545,15 +551,21 @@ export async function verifyAppBundle({
     const candidateAssessmentUrl = pathToFileURL(
       path.join(resourcesPath, "bridge", "candidate-assessment.mjs"),
     ).href;
+    const candidateAssessmentDecoderUrl = pathToFileURL(
+      path.join(resourcesPath, "bridge", "candidate-assessment-decoder.mjs"),
+    ).href;
     const draftServiceUrl = pathToFileURL(
       path.join(resourcesPath, "bridge", "draft-service.mjs"),
+    ).href;
+    const draftCommandDecoderUrl = pathToFileURL(
+      path.join(resourcesPath, "bridge", "draft-command-decoder.mjs"),
     ).href;
     runCommand(
       helperExecutable,
       [
         "--input-type=module",
         "--eval",
-        `await import(${JSON.stringify(lifecycleCoreUrl)}); await import(${JSON.stringify(candidateAssessmentUrl)}); await import(${JSON.stringify(scopeValidatorUrl)}); await import(${JSON.stringify(draftServiceUrl)})`,
+        `await import(${JSON.stringify(lifecycleCoreUrl)}); await import(${JSON.stringify(candidateAssessmentUrl)}); await import(${JSON.stringify(candidateAssessmentDecoderUrl)}); await import(${JSON.stringify(scopeValidatorUrl)}); await import(${JSON.stringify(draftServiceUrl)}); await import(${JSON.stringify(draftCommandDecoderUrl)})`,
       ],
       "packaged Bridge dependency smoke",
       {

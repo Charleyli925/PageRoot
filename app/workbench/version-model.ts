@@ -6,6 +6,7 @@ import { versionAuditCollections } from "../lib/version-audit-records";
 import { commentsFromRecords, selectionFromRecord } from "./comment-model";
 import { displayVersionLabel } from "./project-model";
 import { isRecord } from "./record-model";
+import { decodeVersionAuditChange } from "./version-compatibility-decoder.js";
 import type {
   DirectEditEvent,
   UserSupplementRecord,
@@ -14,32 +15,19 @@ import type {
 
 export function changesFromRecords(raw: unknown): DirectEditEvent[] {
   if (!Array.isArray(raw)) return [];
-  return raw.flatMap((value, index) => {
-    if (!isRecord(value)) return [];
-    const kind = String(value.kind || "");
-    if (!["text", "style", "reorder", "structure"].includes(kind)) return [];
+  return raw.flatMap((value) => {
+    const decoded = decodeVersionAuditChange(value);
+    if (!decoded) return [];
     return [{
-      eventId: String(value.eventId || value.id || `change_unknown_${index + 1}`),
-      createdAt: String(value.createdAt || ""),
-      kind: kind as DirectEditEvent["kind"],
-      target: selectionFromRecord(value.target || value),
-      ...(value.property ? { property: String(value.property) } : {}),
-      before: value.before,
-      after: value.after,
-      baseVersionId: value.baseVersionId || value.basedOnVersionId
-        ? String(value.baseVersionId || value.basedOnVersionId)
-        : null,
-      ...(Number.isFinite(Number(value.capturedRevision ?? value.revision))
-        ? {
-            capturedRevision: Number(
-              value.capturedRevision ?? value.revision,
-            ),
-          }
-        : {}),
-      ...(value.inherited === true ? { inherited: true } : {}),
-      ...(value.inheritedFromVersionId
-        ? { inheritedFromVersionId: String(value.inheritedFromVersionId) }
-        : {}),
+      eventId: decoded.eventId,
+      createdAt: decoded.createdAt,
+      kind: decoded.kind as DirectEditEvent["kind"],
+      target: selectionFromRecord(decoded.target),
+      ...(decoded.property ? { property: decoded.property } : {}),
+      before: decoded.before,
+      after: decoded.after,
+      basedOnVersionId: decoded.basedOnVersionId,
+      revision: decoded.revision,
     }];
   });
 }

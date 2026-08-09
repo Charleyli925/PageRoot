@@ -510,16 +510,29 @@ The supported compatibility adapters are:
   `storageDirectoryName=projectId` in place without renaming or scanning
   directories. Remove this adapter only when 0.9.0 project records leave the
   supported upgrade window. v1/v2 and incomplete records remain unsupported.
+- Older packaged Draft renderers may omit an `operationId`; the Draft command
+  decoder allocates a current `draftop_` ID while previously persisted
+  `draftop_legacy_*` acknowledgements remain readable. Direct-edit ingress
+  decodes the historical `baseVersionId` / `capturedRevision` pair to the
+  immutable Version pair `basedOnVersionId` / `revision`; the Workbench view
+  receives only its canonical `DirectEditEvent` projection. Unknown fields,
+  dual forms, and unsafe Version ranges fail closed. These adapters never
+  write a retired name.
 - Historical Versions and archived failed/no-change outcomes produced by the
   short-lived August 2026 Developer Previews may use either `1.0.0`
   `candidate-assessment.json` shape: without executable-surface fields or with
-  the now-retired pair. The historical query adapter validates either shape,
+  the now-retired pair. The candidate-assessment decoder validates either shape,
   verifies frozen base and immutable candidate evidence as ordinary files against all
   exact/comparison Hashes, deterministically re-runs current document-health
   and continuity assessment, and exposes a canonical result without retired
   fields. It never rewrites the Attempt; old script conclusions never affect
   current status, and archived outcomes remain terminal. Remove the adapter
   when those Developer Preview records leave the supported upgrade window.
+
+The full producer, fixture, persistence and deletion-evidence register is
+[`COMPATIBILITY.md`](COMPATIBILITY.md). The legacy Release
+`update-manifest.json` is a historical-client distribution artifact, not a
+current application compatibility decoder.
 
 ## Change requirements
 
