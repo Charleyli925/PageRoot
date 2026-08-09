@@ -531,18 +531,22 @@ test("formal Review recognizes class selector operators and class writes", async
       token: { value: "chart-host", kind: "class-value" },
     },
     {
-      source: "document.querySelector('div').className = 'chart-host active';",
-      token: { value: "chart-host active", kind: "class-value" },
-    },
-    {
-      source: "document.querySelector('div').setAttribute('class', 'chart-host active');",
+      source: "document.querySelector('.chart-host').className = 'chart-host active';",
       token: { value: "chart-host", kind: "class" },
     },
     {
-      source: "document.querySelector('div').className = 'other';",
+      source: "document.querySelector('[class~=\"chart-host\"]').setAttribute('class', 'chart-host active');",
       token: { value: "chart-host", kind: "class" },
     },
-  ])).resolves.toEqual([true, true, true, false]);
+    {
+      source: "document.querySelector('.tooltip').className = 'chart-host active';",
+      token: { value: "chart-host", kind: "class" },
+    },
+    {
+      source: "const tooltip = document.querySelector('.tooltip'); tooltip.className = 'chart-host active';",
+      token: { value: "chart-host", kind: "class" },
+    },
+  ])).resolves.toEqual([true, true, true, false, false]);
 });
 
 test("runtime visual paint parsing survives an authored Boolean mutation", async ({ page }) => {

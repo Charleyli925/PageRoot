@@ -1779,17 +1779,58 @@ function runtimeVisualScriptClassSelectorMatches(
   return false;
 }
 
+function runtimeVisualScriptClassSelectorReferencesToken(
+  selector: string,
+  token: RuntimeVisualScriptToken,
+): boolean {
+  if (token.kind === "class") {
+    const escaped = runtimeVisualScriptRegexValue(token.value);
+    if (new RegExp(
+      `(?:^|[^A-Za-z0-9_.-])\\.${escaped}(?=$|[^A-Za-z0-9_.-])`,
+      "u",
+    ).test(selector)) return true;
+  }
+  return runtimeVisualScriptClassSelectorMatches(
+    `document.querySelector(${JSON.stringify(selector)})`,
+    token,
+  );
+}
+
+function runtimeVisualScriptAssignedClassMatches(
+  assignedValue: string,
+  token: RuntimeVisualScriptToken,
+): boolean {
+  if (token.kind === "class-value") return assignedValue === token.value;
+  return token.kind === "class"
+    && assignedValue.split(/[\t\n\f\r ]+/u).includes(token.value);
+}
+
 function runtimeVisualScriptClassWriteMatches(
   source: string,
   token: RuntimeVisualScriptToken,
 ): boolean {
-  const classWrite = /(?:\.\s*className\s*=\s*|\.setAttribute\s*\(\s*(["'\x60])class\1\s*,\s*)(["'\x60])([^"'\x60]*)\2/gu;
-  return [...source.matchAll(classWrite)].some((match) => {
-    const assignedValue = match[3];
-    if (token.kind === "class-value") return assignedValue === token.value;
-    return token.kind === "class"
-      && assignedValue.split(/[\t\n\f\r ]+/u).includes(token.value);
-  });
+  // A written class value alone is not evidence that the write targeted this
+  // host: an unrelated tooltip can receive the same class. Only accept a
+  // direct querySelector receiver whose selector already identifies the
+  // candidate token. Variable aliases and generic tag selectors intentionally
+  // fail closed because this lightweight parser cannot prove their target.
+  const receiver = "(?:document\\.)?querySelector(?:All)?\\s*\\(\\s*(?<selector>[^)]*)\\s*\\)(?:\\s*\\[\\s*\\d+\\s*\\])?";
+  const classNameWrite = new RegExp(
+    `${receiver}\\s*\\.\\s*className\\s*=\\s*(?<quote>[\"'\\x60])(?<assigned>[^\"'\\x60]*)\\k<quote>`,
+    "gu",
+  );
+  const setAttributeWrite = new RegExp(
+    `${receiver}\\s*\\.\\s*setAttribute\\s*\\(\\s*(?<classQuote>[\"'\\x60])class\\k<classQuote>\\s*,\\s*(?<valueQuote>[\"'\\x60])(?<assigned>[^\"'\\x60]*)\\k<valueQuote>\\s*\\)`,
+    "gu",
+  );
+  return [classNameWrite, setAttributeWrite].some((pattern) => (
+    [...source.matchAll(pattern)].some((match) => {
+      const selector = runtimeVisualScriptSelectorLiteral(match.groups?.selector || "");
+      return selector !== null
+        && runtimeVisualScriptClassSelectorReferencesToken(selector, token)
+        && runtimeVisualScriptAssignedClassMatches(match.groups?.assigned || "", token);
+    })
+  ));
 }
 
 export function runtimeVisualScriptReferencesToken(
