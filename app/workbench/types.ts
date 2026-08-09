@@ -346,12 +346,6 @@ export type WorkspaceIssue = {
   title: string;
   message: string;
 };
-export type OpenedAiVersionNotice = {
-  sourcePath: string;
-  fileName: string;
-  versionLabel: string;
-  generatedAt: string;
-};
 export type WorkspaceFileView = {
   path: string;
   content: string;

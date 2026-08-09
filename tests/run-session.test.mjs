@@ -125,6 +125,45 @@ test("run session treats a recovered processing run as potentially handed off", 
   assert.equal(fresh.activeHandoffMayBeRunning, false);
 });
 
+test("run session owns submission preparation, freeze and unknown-outcome locking", () => {
+  const session = new RunSession({ sourcePath: "/tmp/page.html" });
+  const submission = session.beginSubmission({
+    sourcePath: "/tmp/page.html",
+  });
+
+  assert.ok(submission);
+  assert.equal(session.snapshot.activeSubmission?.phase, "preparing");
+  assert.equal(session.submissionPending, true);
+  assert.equal(session.snapshot.activeSubmission?.phase === "preparing", true);
+  assert.equal(session.activeLocked, false);
+  assert.equal(session.beginSubmission({ sourcePath: "/tmp/other.html" }), null);
+
+  assert.equal(session.freezeSubmission(submission), true);
+  assert.equal(session.snapshot.activeSubmission?.phase, "frozen");
+  assert.equal(session.submissionPending, true);
+  assert.equal(session.snapshot.activeSubmission?.phase === "preparing", false);
+  assert.equal(session.activeLocked, true);
+
+  assert.equal(session.markSubmissionUncertain(submission), true);
+  assert.equal(session.snapshot.activeSubmission?.phase, "uncertain");
+  assert.equal(session.submissionPending, false);
+  assert.equal(session.activeLocked, true);
+
+  session.activate("/tmp/other.html");
+  assert.equal(session.snapshot.activeSubmission, null);
+  assert.equal(session.activeLocked, false);
+  const nextSubmission = session.beginSubmission({
+    sourcePath: "/tmp/other.html",
+  });
+  assert.ok(nextSubmission);
+  assert.equal(session.snapshot.activeSubmission, nextSubmission);
+  assert.equal(session.activeLocked, false);
+
+  assert.equal(session.releaseSubmission(nextSubmission), true);
+  assert.equal(session.snapshot.activeSubmission, null);
+  assert.equal(session.activeLocked, false);
+});
+
 test("run session rebases run, handoff and result through a source rename", () => {
   const session = new RunSession({ sourcePath: "/tmp/page.html" });
   const current = run();
@@ -141,7 +180,6 @@ test("run session rebases run, handoff and result through a source rename", () =
     updatedAt: 1,
   });
   session.rememberOutcome({ ...current, status: "error" });
-
   assert.equal(session.rebaseSource({
     previousSourcePath: current.sourcePath,
     sourcePath: "/tmp/renamed.html",
@@ -178,9 +216,14 @@ test("terminal outcomes remain reopenable after the active panel is dismissed", 
 
 test("run session owns exact-once operation locks", () => {
   const session = new RunSession();
+  const snapshots = [];
+  session.setObserver((snapshot) => snapshots.push(snapshot));
   assert.equal(session.beginOperation("cancel", "operation"), true);
   assert.equal(session.beginOperation("cancel", "operation"), false);
   assert.equal(session.isOperationBusy("cancel", "operation"), true);
+  assert.deepEqual(session.snapshot.operationKeys, [["cancel", "operation"]]);
   assert.equal(session.endOperation("cancel", "operation"), true);
+  assert.deepEqual(session.snapshot.operationKeys, []);
   assert.equal(session.beginOperation("cancel", "operation"), true);
+  assert.equal(snapshots.length, 3);
 });

@@ -225,20 +225,10 @@ test("the verified AI file identity appears only after the user opens the ready 
     workbench,
     /const currentSourceFileName =[\s\S]*?localFileNameFromSourcePath\(sourcePath\)[\s\S]*?const currentSourceFileStem = fileStem\(currentSourceFileName\)[\s\S]*?<strong>\{currentSourceFileStem\}<\/strong>/,
   );
-  assert.match(workbench, /setOpenedAiVersionNotice\(\{[\s\S]*?sourcePath: committedSourcePath/);
   assert.doesNotMatch(workbench, /QoderWork 返回的新文件已打开|原文件已保留/);
 });
 
-test("ready polling never opens automatically; the adopted marker ends on first edit or comment", () => {
-  assert.equal(
-    workbench.match(/setOpenedAiVersionNotice\(\{/g)?.length,
-    1,
-    "only the verified AI-completion path may create the fused state",
-  );
-  assert.match(
-    workbench,
-    /await refreshWorkspace\(committedSourcePath, adoptedContext\.epoch\);[\s\S]*?if \(projectLoadErrorRef\.current\)[\s\S]*?setOpenedAiVersionNotice\(\{/,
-  );
+test("ready polling never opens automatically", () => {
   const statusFlow = workbench.slice(
     workbench.indexOf("const processRunStatus"),
     workbench.indexOf(
@@ -253,18 +243,6 @@ test("ready polling never opens automatically; the adopted marker ends on first 
   );
   assert.match(activationFlow, /bridgeClient\.activateReadyVersion/);
   assert.match(activationFlow, /await openCommittedVersion\(run, mergedPayload\)/);
-  assert.match(
-    workbench,
-    /const handleCanvasChange[\s\S]*?setOpenedAiVersionNotice\(null\);/,
-  );
-  assert.match(
-    workbench,
-    /const addComment[\s\S]*?commentSessionRef\.current\.update\(\{[\s\S]*?comments: nextComments,[\s\S]*?\}\);\s*setOpenedAiVersionNotice\(null\);/,
-  );
-  assert.match(
-    workbench,
-    /const applyProject[\s\S]*?setProjectName\(project\.name\);\s*setOpenedAiVersionNotice\(null\);/,
-  );
   assert.match(workbench, /className="window-file"/);
   assert.doesNotMatch(workbench, /className="project-switcher"/);
 });

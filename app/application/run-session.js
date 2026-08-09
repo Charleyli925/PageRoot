@@ -1,3 +1,5 @@
+import { isLockedLifecycleState } from "../domain/run-lifecycle.js";
+
 function normalizedPath(value) {
   return value ? String(value) : null;
 }
@@ -44,6 +46,14 @@ function frozenEntries(map) {
   );
 }
 
+function frozenOperationKeys(map) {
+  return Object.freeze(
+    [...map].flatMap(([kind, keys]) => (
+      [...keys].map((key) => Object.freeze([kind, key]))
+    )),
+  );
+}
+
 const OPERATION_KINDS = Object.freeze([
   "activate",
   "cancel",
@@ -72,6 +82,10 @@ export class RunSession {
 
   #outcomes = new Map();
 
+  #submission = null;
+
+  #submissionSequence = 0;
+
   #busy = new Map(
     OPERATION_KINDS.map((kind) => [kind, new Set()]),
   );
@@ -92,6 +106,20 @@ export class RunSession {
     } catch {
       // A view observer cannot change run authority.
     }
+  }
+
+  #matchesSubmission(submission) {
+    return Boolean(
+      this.#submission
+      && submission?.token === this.#submission.token
+      && samePath(submission?.sourcePath, this.#submission.sourcePath),
+    );
+  }
+
+  #setSubmission(submission) {
+    this.#submission = submission && Object.freeze(submission);
+    this.#emit();
+    return this.#submission;
   }
 
   #findBySource(map, sourcePath) {
@@ -138,6 +166,56 @@ export class RunSession {
     this.#activeOutcome = this.outcomeForSource(this.#activeSourcePath);
     this.#emit();
     return this.snapshot;
+  }
+
+  beginSubmission({
+    sourcePath,
+  } = {}) {
+    const activeSourcePath = normalizedPath(sourcePath);
+    if (
+      !activeSourcePath
+      || (
+        this.#submission
+        && (
+          this.#submission.phase !== "uncertain"
+          || samePath(this.#submission.sourcePath, activeSourcePath)
+        )
+      )
+    ) return null;
+    return this.#setSubmission({
+      token: ++this.#submissionSequence,
+      sourcePath: activeSourcePath,
+      phase: "preparing",
+    });
+  }
+
+  #advanceSubmission(submission, phase) {
+    if (
+      !this.#matchesSubmission(submission)
+      || (phase === "frozen" && this.#submission.phase !== "preparing")
+    ) return false;
+    if (this.#submission.phase !== phase) {
+      this.#setSubmission({ ...this.#submission, phase });
+    }
+    return true;
+  }
+
+  freezeSubmission(submission) {
+    return this.#advanceSubmission(submission, "frozen");
+  }
+
+  markSubmissionUncertain(submission) {
+    return this.#advanceSubmission(submission, "uncertain");
+  }
+
+  releaseSubmission(submission) {
+    if (!this.#matchesSubmission(submission)) return false;
+    this.#setSubmission(null);
+    return true;
+  }
+
+  clearActiveSubmission() {
+    return this.releaseSubmission(this.activeSubmission);
   }
 
   setActiveRun(run) {
@@ -409,11 +487,14 @@ export class RunSession {
     const busy = this.#busy.get(kind);
     if (!busy || !key || busy.has(key)) return false;
     busy.add(key);
+    this.#emit();
     return true;
   }
 
   endOperation(kind, key) {
-    return this.#busy.get(kind)?.delete(key) ?? false;
+    const changed = this.#busy.get(kind)?.delete(key) ?? false;
+    if (changed) this.#emit();
+    return changed;
   }
 
   isOperationBusy(kind, key) {
@@ -437,6 +518,24 @@ export class RunSession {
       );
   }
 
+  get activeSubmission() {
+    return samePath(this.#submission?.sourcePath, this.#activeSourcePath)
+      ? this.#submission
+      : null;
+  }
+
+  get submissionPending() {
+    return this.#submission?.phase === "preparing"
+      || this.#submission?.phase === "frozen";
+  }
+
+  get activeLocked() {
+    return Boolean(
+      this.activeSubmission
+      && this.activeSubmission.phase !== "preparing",
+    ) || isLockedLifecycleState(this.#activeRun?.status);
+  }
+
   get runs() {
     return Object.freeze([...this.#runs.values()]);
   }
@@ -447,6 +546,10 @@ export class RunSession {
       activeRun: this.#activeRun,
       activeHandoff: this.#activeHandoff,
       activeHandoffMayBeRunning: this.activeHandoffMayBeRunning,
+      activeSubmission: this.activeSubmission,
+      submissionPending: this.submissionPending,
+      activeLocked: this.activeLocked,
+      operationKeys: frozenOperationKeys(this.#busy),
       recentOutcome: this.#activeOutcome,
       backgroundResults: frozenEntries(this.#results),
     });

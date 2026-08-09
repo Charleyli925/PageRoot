@@ -746,7 +746,10 @@ test("handoff commits a pending source edit before recapturing and freezing comm
     /comments: activeComments\.map/,
   );
   const freezeGuard = workbench.indexOf("!frozen", freeze);
-  const projectLock = workbench.indexOf("projectLockedRef.current = true", freeze);
+  const projectLock = workbench.indexOf(
+    "runSessionRef.current.freezeSubmission(submission)",
+    freeze,
+  );
   assert.ok(freezeGuard > freeze, "handoff must inspect the freeze result");
   assert.ok(projectLock > freezeGuard, "handoff must not lock before a successful freeze");
   assert.match(
