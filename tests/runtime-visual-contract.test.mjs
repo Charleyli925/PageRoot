@@ -65,6 +65,12 @@ test("the hostile-page settlement matrix closes all thirteen tracked threads", (
     RUNTIME_VISUAL_HOSTILE_PAGES.filter(({ pr }) => pr === 115).length,
     5,
   );
+  const classWriteFixture = RUNTIME_VISUAL_HOSTILE_PAGES.find(
+    ({ id }) => id === "pr115-class-write-causality",
+  );
+  assert.ok(classWriteFixture?.changedHtml);
+  assert.match(classWriteFixture.changedHtml, /querySelector\('\[class~="chart-host"\]'\)/u);
+  assert.doesNotMatch(classWriteFixture.changedHtml, /querySelector\("div"\)/u);
   assert.ok(runtimeVisualContractDocument.includes(RUNTIME_VISUAL_SETTLEMENT_SOURCE_SHA));
   for (const fixture of RUNTIME_VISUAL_HOSTILE_PAGES) {
     assert.match(fixture.id, /^pr(?:100|105|107|115)-/u);

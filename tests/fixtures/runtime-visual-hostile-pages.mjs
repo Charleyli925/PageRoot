@@ -168,10 +168,10 @@ export const RUNTIME_VISUAL_HOSTILE_PAGES = Object.freeze([
     surface: "review",
     html: `<!doctype html><main><section><div class="chart-host"></div><script>void 0;</script></section></main>`,
     changedHtml: `<!doctype html><main><section><div class="chart-host"></div><script>
-      document.querySelector("div").className="chart-host active";
-      document.querySelector("div").setAttribute("class", "chart-host active");</script></section></main>`,
-    contract: "Formal Review treats literal className and setAttribute(\"class\", ...) writes as class-value or token causality without guessing target identity.",
-    closureReason: "The token matcher parses literal class writes and only admits an exact class value or one of its whitespace-separated tokens.",
+      document.querySelector('[class~="chart-host"]').className="chart-host active";
+      document.querySelector('[class~="chart-host"]').setAttribute("class", "chart-host active");</script></section></main>`,
+    contract: "Formal Review treats literal className and setAttribute(\"class\", ...) writes as causality only when their direct selector identifies the candidate host.",
+    closureReason: "The token matcher combines a literal class value with a candidate-identifying direct selector; generic and alias writes fail closed.",
   }),
 ]);
 

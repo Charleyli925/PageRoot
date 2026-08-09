@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 import { build } from "esbuild";
 import { fileURLToPath } from "node:url";
 
+import { runtimeVisualHostilePage } from "../../fixtures/runtime-visual-hostile-pages.mjs";
 import { generatedReviewBootstrap } from "../../helpers/generated-review-bootstrap.mjs";
 
 const REVIEW_DOCUMENT_ENTRY_POINT = fileURLToPath(
@@ -31,6 +32,12 @@ async function formalReviewScriptTokenMatches(page, probes) {
     }
     return entries.map(({ source, token }) => matcher(source, token));
   }, probes);
+}
+
+function firstInlineScript(html) {
+  const source = html.match(/<script>(?<source>[\s\S]*?)<\/script>/iu)?.groups?.source;
+  if (!source) throw new Error("Runtime visual fixture is missing an inline script.");
+  return source;
 }
 
 const COMMENT_SOURCE_BOX_SIGNATURE = JSON.stringify([
@@ -525,6 +532,8 @@ test("fingerprinted runtime hosts fail closed when a matching parser decoy shift
 });
 
 test("formal Review recognizes class selector operators and class writes", async ({ page }) => {
+  const classWriteFixture = runtimeVisualHostilePage("pr115-class-write-causality");
+  expect(classWriteFixture).toBeDefined();
   await expect(formalReviewScriptTokenMatches(page, [
     {
       source: `document.querySelector('[class^="chart"]').textContent = "ready";`,
@@ -546,7 +555,11 @@ test("formal Review recognizes class selector operators and class writes", async
       source: "const tooltip = document.querySelector('.tooltip'); tooltip.className = 'chart-host active';",
       token: { value: "chart-host", kind: "class" },
     },
-  ])).resolves.toEqual([true, true, true, false, false]);
+    {
+      source: firstInlineScript(classWriteFixture?.changedHtml || ""),
+      token: { value: "chart-host", kind: "class" },
+    },
+  ])).resolves.toEqual([true, true, true, false, false, true]);
 });
 
 test("runtime visual paint parsing survives an authored Boolean mutation", async ({ page }) => {
