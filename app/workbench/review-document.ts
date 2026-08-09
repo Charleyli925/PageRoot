@@ -1787,7 +1787,7 @@ function runtimeVisualScriptReferencesToken(
   const escaped = runtimeVisualScriptRegexValue(value);
   if (token.kind === "class") {
     return new RegExp(
-      `(?:^|[^A-Za-z0-9_.:-])\\.${escaped}(?=$|[^A-Za-z0-9_.:-])`,
+      `(?:^|[^A-Za-z0-9_.-])\\.${escaped}(?=$|[^A-Za-z0-9_.-])`,
       "u",
     ).test(source) || new RegExp(
       `(?:\\bgetElementsByClassName|\\bclassList\\.(?:add|contains|remove|replace|toggle))\\s*\\(\\s*${runtimeVisualScriptStringLiteral(value)}`,
@@ -1798,7 +1798,11 @@ function runtimeVisualScriptReferencesToken(
     ).test(source) || runtimeVisualScriptClassSelectorMatches(source, token);
   }
   if (token.kind === "class-value") {
-    return runtimeVisualScriptClassSelectorMatches(source, token);
+    return runtimeVisualScriptClassSelectorMatches(source, token)
+      || new RegExp(
+        `\\bgetElementsByClassName\\s*\\(\\s*${runtimeVisualScriptStringLiteral(value)}\\s*\\)`,
+        "u",
+      ).test(source);
   }
   if (token.kind === "data-attribute") {
     return runtimeVisualScriptDataSelectorMatches(source, token)

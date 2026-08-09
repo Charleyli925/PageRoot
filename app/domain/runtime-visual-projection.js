@@ -77,7 +77,7 @@ const RUNTIME_GET_ELEMENT_BY_ID_CALL = /\bgetElementById\s*\(\s*([^)]*)\)/gu;
 const RUNTIME_GET_ELEMENTS_BY_NAME_CALL = /\bgetElementsByName\s*\(\s*([^)]*)\)/gu;
 const RUNTIME_CLASS_LOOKUP_CALL = /(?:\bgetElementsByClassName|\bclassList\.(?:add|contains|remove|replace|toggle))\s*\(\s*(["'`])([^"'`]+)\1/gu;
 const STABLE_RUNTIME_SELECTOR_LITERAL = /^("|'|`)(?:#[A-Za-z_][\w-]*|\.[A-Za-z_][\w-]*|\[\s*(?:id|name|class|data-[\w-]+)(?:\s*(?:[~|^$*]?=)\s*(?:[A-Za-z0-9_-]+|"[^"]*"|'[^']*'|`[^`]*`))?\s*\])\1$/u;
-const STABLE_RUNTIME_ID_LITERAL = /^("|'|`)[A-Za-z_][\w:.-]*\1$/u;
+const STABLE_RUNTIME_STRING_LITERAL = /^("|'|`)[^"'`]*\1$/u;
 const RUNTIME_CLASS_ATTRIBUTE_SELECTOR = /^\[\s*class(?:\s*(?<operator>[~|^$*]?=)\s*(?<value>[A-Za-z0-9_-]+|"[^"]*"|'[^']*'|`[^`]*`))?\s*\]$/u;
 const RUNTIME_IDENTITY_ATTRIBUTE_SELECTOR = /^\[\s*(?<name>id|name)(?:\s*(?<operator>[~|^$*]?=)\s*(?<value>[A-Za-z0-9_-]+|"[^"]*"|'[^']*'|`[^`]*`))?\s*\]$/u;
 const RUNTIME_DATA_ATTRIBUTE_SELECTOR = /^\[\s*(?<name>data-[\w-]+)(?:\s*(?<operator>[~|^$*]?=)\s*(?<value>[A-Za-z0-9_-]+|"[^"]*"|'[^']*'|`[^`]*`))?\s*\]$/u;
@@ -198,7 +198,7 @@ function runtimeIdentityValueMatches(source, value, kind) {
     : RUNTIME_GET_ELEMENTS_BY_NAME_CALL;
   if ([...source.matchAll(lookupCall)].some((match) => {
     const literal = match[1].trim();
-    return STABLE_RUNTIME_ID_LITERAL.test(literal)
+    return STABLE_RUNTIME_STRING_LITERAL.test(literal)
       && runtimeSelectorLiteralValue(literal) === value;
   })) return true;
   if ([...source.matchAll(RUNTIME_DOM_QUERY_CALL)].some((match) => {
@@ -431,7 +431,7 @@ function usesIndirectRuntimeDomRead(source) {
   return [...source.matchAll(RUNTIME_DOM_QUERY_CALL)].some((match) => (
     !STABLE_RUNTIME_SELECTOR_LITERAL.test(match[1].trim())
   )) || [...source.matchAll(RUNTIME_GET_ELEMENT_BY_ID_CALL)].some((match) => (
-    !STABLE_RUNTIME_ID_LITERAL.test(match[1].trim())
+    !STABLE_RUNTIME_STRING_LITERAL.test(match[1].trim())
   ));
 }
 
