@@ -123,7 +123,7 @@ function acceptedCapturedSnapshot(rawSnapshot, key) {
 
 /**
  * Accepts only the snapshots corresponding to the bounded candidate set the
- * trusted renderer requested. Both Edit and Review consume this same parser.
+ * trusted renderer requested for one Review capture pair.
  */
 export function acceptRuntimeVisualSnapshots(value, allowedCandidateKeys) {
   if (

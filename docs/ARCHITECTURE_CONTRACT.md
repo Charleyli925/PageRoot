@@ -217,8 +217,8 @@ The one before/after snapshot pair is compared once. Only captured snapshots
 with different PNG presentation can add an opaque `changeId`/`outlineId` style
 marker. A missing desktop API, unmapped host, malformed envelope, timeout,
 cancellation or late result is a silent static-only outcome. There is no second
-fresh pair, confirmation coordinator, runtime UI or Review cache. Edit uses the
-same owner and resolver under its separate disposable cache/session owner.
+fresh pair, confirmation coordinator, runtime UI or Review cache. Edit does
+not invoke the resolver or owner and has no snapshot state.
 
 Comment layout is measured only after current disposable presentation is
 applied. The Workbench accepts no card coordinates until the Canvas reports a
