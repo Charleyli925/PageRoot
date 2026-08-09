@@ -45,8 +45,9 @@ collected. A guessed date is not a support-window policy.
 - Decoder and canonical output:
   `shared/direct-edit-compatibility.mjs` yields the persisted canonical pair
   `{ basedOnVersionId, revision }`. The Workbench-only
-  `app/workbench/version-compatibility-decoder.js` maps a validated Version
-  archive into the current `DirectEditEvent` view model. A transient
+  `app/workbench/version-compatibility-decoder.js` passes that same canonical
+  pair into the `DirectEditEvent` view model. New Workbench producers emit
+  only those canonical names. A transient
   `capturedRevision: 0` may use only the trusted freeze revision and is never
   written into a Version archive. The existing legacy envelope `id` is also
   accepted only here when `eventId` is absent; both forms together fail closed.

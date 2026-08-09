@@ -88,14 +88,16 @@ test("direct-edit aliases decode once and reject unknown, ambiguous, and out-of-
       target: legacy.target,
       before: "旧标题",
       after: "新标题",
-      baseVersionId: "ver_0004",
-      capturedRevision: 4,
+      basedOnVersionId: "ver_0004",
+      revision: 4,
     },
   );
   const currentArchive = await fixture("v3/annotation-records.frozen.json");
   const current = decodeVersionAuditChange(currentArchive.editEvents[0]);
-  assert.equal(current?.baseVersionId, "ver_0005");
-  assert.equal(current?.capturedRevision, 41);
+  assert.equal(current?.basedOnVersionId, "ver_0005");
+  assert.equal(current?.revision, 41);
+  assert.equal("baseVersionId" in current, false);
+  assert.equal("capturedRevision" in current, false);
 
   assert.throws(
     () => decodeDirectEditIdentity({ ...legacy, unknown: true }),

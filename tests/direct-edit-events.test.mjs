@@ -35,9 +35,9 @@ function harness() {
     apply(nextMutation, milliseconds, inFlightEvents = []) {
       state = appendDirectEditEvent({
         mutation: nextMutation,
-        capturedRevision: milliseconds,
+        revision: milliseconds,
         createdAt: new Date(Date.UTC(2026, 6, 21, 0, 0, 0, milliseconds)).toISOString(),
-        baseVersionId: "version-1",
+        basedOnVersionId: "ver_0001",
         ...state,
         inFlightKeys: new Set(inFlightEvents.map(auditEventKey)),
         nextEventId: () => `change-${++eventSequence}`,
@@ -59,6 +59,10 @@ test("each forward text edit appends one exact audit event", () => {
   assert.equal(events.state.events[0].eventId, "change-1");
   assert.equal(events.state.events[0].before, "before");
   assert.equal(events.state.events[0].after, "after");
+  assert.equal(events.state.events[0].basedOnVersionId, "ver_0001");
+  assert.equal(events.state.events[0].revision, 100);
+  assert.equal("baseVersionId" in events.state.events[0], false);
+  assert.equal("capturedRevision" in events.state.events[0], false);
 });
 
 test("a pending style gesture coalesces only its latest value", () => {

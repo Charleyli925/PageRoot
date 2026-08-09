@@ -9,9 +9,9 @@ function isRecord(value) {
 }
 
 /**
- * Version archive ingress. The view receives only DirectEditEvent's current
- * baseVersionId/capturedRevision names; retired or persisted wire names never
- * escape this decoder.
+ * Version archive ingress. The view receives only DirectEditEvent's canonical
+ * basedOnVersionId/revision names; retired wire names never escape this
+ * decoder.
  */
 export function decodeVersionAuditChange(value) {
   if (!isRecord(value)) return null;
@@ -44,8 +44,8 @@ export function decodeVersionAuditChange(value) {
       ...(value.property ? { property: value.property } : {}),
       before: value.before,
       after: value.after,
-      baseVersionId: identity.basedOnVersionId,
-      capturedRevision: identity.revision,
+      basedOnVersionId: identity.basedOnVersionId,
+      revision: identity.revision,
     };
   } catch {
     return null;

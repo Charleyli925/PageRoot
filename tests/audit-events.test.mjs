@@ -10,12 +10,12 @@ test("autosave acknowledgement keeps a coalesced style event from a newer revisi
   const revisionN = {
     eventId: "change_style_1",
     kind: "style",
-    capturedRevision: 7,
+    revision: 7,
   };
   const revisionNPlusOne = {
     ...revisionN,
     after: "#ffffff",
-    capturedRevision: 8,
+    revision: 8,
   };
 
   assert.notEqual(auditEventKey(revisionN), auditEventKey(revisionNPlusOne));
@@ -38,6 +38,6 @@ test("autosave acknowledgement keeps a coalesced style event from a newer revisi
 test("audit acknowledgement rejects records without the v3 revision identity", () => {
   assert.throws(
     () => auditEventKey({ eventId: "change_missing_revision" }),
-    /requires eventId and capturedRevision/,
+    /requires eventId and revision/,
   );
 });

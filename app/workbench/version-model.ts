@@ -26,8 +26,8 @@ export function changesFromRecords(raw: unknown): DirectEditEvent[] {
       ...(decoded.property ? { property: decoded.property } : {}),
       before: decoded.before,
       after: decoded.after,
-      baseVersionId: decoded.baseVersionId,
-      capturedRevision: decoded.capturedRevision,
+      basedOnVersionId: decoded.basedOnVersionId,
+      revision: decoded.revision,
     }];
   });
 }

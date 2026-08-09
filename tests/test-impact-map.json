@@ -436,12 +436,15 @@
       "id": "workbench-lifecycle",
       "patterns": [
         "^app/workbench(?:\\.tsx|/.*\\.(?:ts|tsx))$",
+        "^app/lib/(?:audit-events|direct-edit-events)\\.js$",
         "^app/lib/comment-rail-layout\\.js$",
-        "^tests/(?:comment-rail-layout\\.test|source-architecture-fixture)\\.mjs$",
+        "^tests/(?:audit-events|comment-rail-layout|direct-edit-events)\\.test\\.mjs$",
+        "^tests/source-architecture-fixture\\.mjs$",
         "^tests/native-command-queue-contract\\.test\\.mjs$"
       ],
       "suites": ["typecheck", "browser-smoke", "electron-smoke", "ai-smoke"],
       "nodeTests": [
+        "tests/audit-events.test.mjs",
         "tests/direct-edit-events.test.mjs",
         "tests/comment-rail-layout.test.mjs",
         "tests/native-command-queue-contract.test.mjs",

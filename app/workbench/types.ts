@@ -212,8 +212,8 @@ export type DirectEditEvent = {
   property?: string;
   before: unknown;
   after: unknown;
-  baseVersionId: string | null;
-  capturedRevision?: number;
+  basedOnVersionId: string | null;
+  revision: number;
   inherited?: boolean;
   inheritedFromVersionId?: string;
 };

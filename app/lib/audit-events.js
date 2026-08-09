@@ -1,5 +1,5 @@
 /**
- * @typedef {{ eventId: string, capturedRevision?: number }} AuditEventIdentity
+ * @typedef {{ eventId: string, revision?: number }} AuditEventIdentity
  */
 
 /**
@@ -13,12 +13,12 @@ export function auditEventKey(event) {
   if (
     !event
     || typeof event.eventId !== "string"
-    || !Number.isSafeInteger(event.capturedRevision)
-    || event.capturedRevision < 1
+    || !Number.isSafeInteger(event.revision)
+    || event.revision < 1
   ) {
-    throw new TypeError("A v3 audit event requires eventId and capturedRevision.");
+    throw new TypeError("A v3 audit event requires eventId and revision.");
   }
-  return `${event.eventId}:${event.capturedRevision}`;
+  return `${event.eventId}:${event.revision}`;
 }
 
 /**
