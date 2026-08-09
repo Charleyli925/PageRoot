@@ -93,6 +93,32 @@ test("Bridge client treats a server-side mutation failure as an unknown outcome"
   );
 });
 
+test("opening project records is a one-shot command, not a read retry", async () => {
+  let requests = 0;
+  const client = createBridgeClient({
+    baseUrl: "http://127.0.0.1:4317",
+    retryDelayMs: 0,
+    fetchImpl: async () => {
+      requests += 1;
+      throw new Error("connection reset while opening folder");
+    },
+  });
+  const payload = { sourcePath: "/tmp/page.html" };
+
+  await assert.rejects(
+    () => client.openFolder(payload),
+    (error) => {
+      assert.equal(isBridgeRequestError(error), true);
+      assert.equal(error.outcome, "unknown");
+      return true;
+    },
+  );
+  assert.equal(requests, 1, "a command must not be retried blindly");
+
+  await assert.rejects(() => client.openFolder(payload));
+  assert.equal(requests, 2, "a later user action may issue a new command");
+});
+
 test("Bridge client retries a transient read and attaches authorization", async () => {
   const requests = [];
   const client = createBridgeClient({

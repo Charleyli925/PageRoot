@@ -103,6 +103,7 @@ import {
   type DocumentSessionSnapshot,
 } from "./application/document-session.js";
 import { DrainCoordinator } from "./application/drain-coordinator.js";
+import { runLocalUserAction } from "./application/local-action-outcomes.js";
 import {
   ExternalFileOpenSession,
   type ExternalFileOpenRequest,
@@ -332,7 +333,6 @@ type DeferredProjectApplicationRetry = {
 const AUTOSAVE_DELAY_MS = 700;
 const bridgeClient = createRuntimeBridgeClient();
 const recoveryStore = createBrowserRecoveryStore();
-const LOCAL_ACTION_RETRY_DELAY_MS = 180;
 const PROJECT_RULES_AUTOSAVE_DELAY_MS = 700;
 const INITIAL_PROJECT_RULES_SNAPSHOT: ProjectRulesSnapshot = {
   open: false,
@@ -470,17 +470,6 @@ function commentMeasurementKey(
     hash = Math.imul(hash, 16_777_619);
   }
   return `${itemKey}::${text.length}-${(hash >>> 0).toString(36)}`;
-}
-
-async function withOneAutomaticRetry<T>(
-  work: () => Promise<T>,
-): Promise<T> {
-  try {
-    return await work();
-  } catch {
-    await waitFor(LOCAL_ACTION_RETRY_DELAY_MS);
-    return work();
-  }
 }
 
 function markProjectHydrationStage(stage: string): void {
@@ -5931,11 +5920,11 @@ export default function Workbench() {
     const activeSourcePath = requestedSourcePath || projectSessionRef.current.sourcePath;
     const showInFolder = window.htmlAIProjects?.showInFolder;
     if (!activeSourcePath || !showInFolder) return;
-    try {
-      await withOneAutomaticRetry(() => showInFolder(activeSourcePath));
-      setProjectMenuOpen(false);
-    } catch (cause) {
-      setToast({
+    await runLocalUserAction({
+      kind: "show-source-in-folder",
+      invoke: () => showInFolder(activeSourcePath),
+      onSuccess: () => setProjectMenuOpen(false),
+      onFailure: (cause: unknown) => setToast({
         title: "无法在 Finder 中显示",
         message: productErrorMessage(
           cause,
@@ -5944,8 +5933,8 @@ export default function Workbench() {
         tone: "warning",
         disposition: "background-result",
         dedupeKey: "show-project-in-folder-error",
-      });
-    }
+      }),
+    });
   }, []);
 
   const openCurrentHtmlInDefaultBrowser = useCallback(async () => {
@@ -5953,49 +5942,51 @@ export default function Workbench() {
     const activeEpoch = projectSessionRef.current.epoch;
     const openInDefaultBrowser = window.htmlAIProjects?.openInDefaultBrowser;
     if (!activeSourcePath || !openInDefaultBrowser) return;
-    try {
-      // The browser reads the on-disk file, so this action is a source-authority
-      // boundary: capture delivered native input and wait for its exact revision
-      // to be acknowledged before asking the main process to launch the file.
-      const committed = editorRef.current?.fencePendingEdit({
-        resumeEditing: true,
-        trigger: "save",
-      });
-      if (!committed || !committed.ok) {
-        editorRef.current?.showCommitBlocked(
-          committed?.reason
-            || "请点回文字完成输入，再在默认浏览器中打开。",
-        );
-        return;
-      }
-      let launchRevision = documentSessionRef.current.editRevision;
-      if (
-        committed.html !== documentSessionRef.current.html
-        || committed.pendingMutation
-      ) {
-        launchRevision = enqueueAutosave(
-          committed.html,
-          committed.pendingMutation || undefined,
-        );
-      }
-      const persisted = await flushAutosave(launchRevision);
-      if (
-        !persisted
-        || activeEpoch !== projectSessionRef.current.epoch
-        || !sameLocalSourcePath(projectSessionRef.current.sourcePath, activeSourcePath)
-        || documentSessionRef.current.pendingWrite
-        || documentSessionRef.current.flushPromise
-        || historyActionPromiseRef.current
-        || documentSessionRef.current.persistState !== "idle"
-        || documentSessionRef.current.lastPersistedRevision < launchRevision
-      ) {
-        throw new Error(
-          "当前修改尚未安全写入源 HTML，因此没有打开浏览器。请稍后重试。",
-        );
-      }
-      await withOneAutomaticRetry(() => openInDefaultBrowser(activeSourcePath));
-    } catch (cause) {
-      setToast({
+    await runLocalUserAction({
+      kind: "open-source-in-browser",
+      invoke: async () => {
+        // The browser reads the on-disk file, so this action is a source-authority
+        // boundary: capture delivered native input and wait for its exact revision
+        // to be acknowledged before asking the main process to launch the file.
+        const committed = editorRef.current?.fencePendingEdit({
+          resumeEditing: true,
+          trigger: "save",
+        });
+        if (!committed || !committed.ok) {
+          editorRef.current?.showCommitBlocked(
+            committed?.reason
+              || "请点回文字完成输入，再在默认浏览器中打开。",
+          );
+          return;
+        }
+        let launchRevision = documentSessionRef.current.editRevision;
+        if (
+          committed.html !== documentSessionRef.current.html
+          || committed.pendingMutation
+        ) {
+          launchRevision = enqueueAutosave(
+            committed.html,
+            committed.pendingMutation || undefined,
+          );
+        }
+        const persisted = await flushAutosave(launchRevision);
+        if (
+          !persisted
+          || activeEpoch !== projectSessionRef.current.epoch
+          || !sameLocalSourcePath(projectSessionRef.current.sourcePath, activeSourcePath)
+          || documentSessionRef.current.pendingWrite
+          || documentSessionRef.current.flushPromise
+          || historyActionPromiseRef.current
+          || documentSessionRef.current.persistState !== "idle"
+          || documentSessionRef.current.lastPersistedRevision < launchRevision
+        ) {
+          throw new Error(
+            "当前修改尚未安全写入源 HTML，因此没有打开浏览器。请稍后重试。",
+          );
+        }
+        return openInDefaultBrowser(activeSourcePath);
+      },
+      onFailure: (cause: unknown) => setToast({
         title: "无法在默认浏览器中打开",
         message: productErrorMessage(
           cause,
@@ -6004,8 +5995,8 @@ export default function Workbench() {
         tone: "warning",
         disposition: "background-result",
         dedupeKey: "open-project-in-default-browser-error",
-      });
-    }
+      }),
+    });
   }, [enqueueAutosave, flushAutosave]);
 
   const cancelFileRename = useCallback(() => {
@@ -6274,15 +6265,15 @@ export default function Workbench() {
   const showProjectRecordsInFolder = useCallback(async () => {
     const activeSourcePath = projectSessionRef.current.sourcePath;
     if (!activeSourcePath || !projectRecordsPath) return;
-    try {
-      await withOneAutomaticRetry(async () => {
+    await runLocalUserAction({
+      kind: "open-project-records",
+      invoke: async () => {
         const payload = await bridgeClient.openFolder({
           sourcePath: activeSourcePath,
         });
         if (payload.ok === false) throw new Error("无法打开项目记录。");
-      });
-    } catch (cause) {
-      setToast({
+      },
+      onFailure: (cause: unknown) => setToast({
         title: "项目记录暂时无法打开",
         message: productErrorMessage(
           cause,
@@ -6291,8 +6282,8 @@ export default function Workbench() {
         tone: "warning",
         disposition: "background-result",
         dedupeKey: "show-project-records-error",
-      });
-    }
+      }),
+    });
   }, [projectRecordsPath]);
 
   const handleBrowserFile = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
@@ -8199,13 +8190,13 @@ export default function Workbench() {
     const requestPath = activeRun?.requestPath;
     const revealRequestFolder = window.htmlAIProjects?.revealRequestFolder;
     if (!activeSourcePath || !requestPath || !revealRequestFolder) return;
-    try {
-      await withOneAutomaticRetry(() => revealRequestFolder({
+    await runLocalUserAction({
+      kind: "reveal-request-folder",
+      invoke: () => revealRequestFolder({
         sourcePath: activeSourcePath,
         requestPath,
-      }));
-    } catch (cause) {
-      setToast({
+      }),
+      onFailure: (cause: unknown) => setToast({
         title: "本轮文件暂时无法打开",
         message: productErrorMessage(
           cause,
@@ -8214,28 +8205,28 @@ export default function Workbench() {
         tone: "warning",
         disposition: "background-result",
         dedupeKey: "reveal-request-folder",
-      });
-    }
+      }),
+    });
   }, [activeRun?.requestPath]);
 
   const revealVersionInFinder = useCallback(async (version: Pick<Version, "id">) => {
     const activeSourcePath = projectSessionRef.current.sourcePath;
     const revealVersionFile = window.htmlAIProjects?.revealVersionFile;
     if (!activeSourcePath || !revealVersionFile) return;
-    try {
-      await withOneAutomaticRetry(() => revealVersionFile({
+    await runLocalUserAction({
+      kind: "reveal-version-file",
+      invoke: () => revealVersionFile({
         sourcePath: activeSourcePath,
         versionId: version.id,
-      }));
-    } catch (cause) {
-      setToast({
+      }),
+      onFailure: (cause: unknown) => setToast({
         title: "历史版本暂时无法在 Finder 中显示",
         message: productErrorMessage(cause, "请确认项目记录仍然完整后重试。"),
         tone: "warning",
         disposition: "background-result",
         dedupeKey: `reveal-version-file-${version.id}`,
-      });
-    }
+      }),
+    });
   }, []);
 
   const generateRequest = useCallback(async (fromDeferred = false) => {

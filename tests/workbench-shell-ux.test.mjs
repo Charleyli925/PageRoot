@@ -143,7 +143,7 @@ test("the right-side project panel keeps file actions concise and safe", () => {
   assert.doesNotMatch(workbench, /className="project-switcher"|className="project-menu"/);
   assert.match(
     workbench,
-    /const showInFolder = window\.htmlAIProjects\?\.showInFolder[\s\S]*?withOneAutomaticRetry\(\(\) => showInFolder\(activeSourcePath\)\)/,
+    /kind: "show-source-in-folder"[\s\S]*?invoke: \(\) => showInFolder\(activeSourcePath\)[\s\S]*?onSuccess: \(\) => setProjectMenuOpen\(false\)/,
   );
   assert.match(workbench, /formatProjectTimestamp\(project\.lastOpenedAt\)/);
   assert.doesNotMatch(workbench, /formatRecentProjectTimestamp/);
@@ -1015,7 +1015,7 @@ test("history opens concise immutable versions in the canvas with their comments
   );
   assert.match(
     workbench,
-    /const revealVersionInFinder = useCallback[\s\S]*?withOneAutomaticRetry\(\(\) => revealVersionFile\(\{[\s\S]*?versionId: version\.id/,
+    /const revealVersionInFinder = useCallback[\s\S]*?kind: "reveal-version-file"[\s\S]*?invoke: \(\) => revealVersionFile\(\{[\s\S]*?versionId: version\.id/,
   );
   assert.match(
     workbench,
@@ -1166,7 +1166,7 @@ test("the filename keeps distinct quick actions with non-layout tooltips", () =>
   );
   assert.match(
     workbench,
-    /const openInDefaultBrowser = window\.htmlAIProjects\?\.openInDefaultBrowser[\s\S]*?withOneAutomaticRetry\(\(\) => openInDefaultBrowser\(activeSourcePath\)\)/,
+    /const openInDefaultBrowser = window\.htmlAIProjects\?\.openInDefaultBrowser[\s\S]*?kind: "open-source-in-browser"[\s\S]*?return openInDefaultBrowser\(activeSourcePath\)/,
   );
   const browserOpenFlow = workbench.slice(
     workbench.indexOf("const openCurrentHtmlInDefaultBrowser"),
@@ -1212,6 +1212,23 @@ test("the filename keeps distinct quick actions with non-layout tooltips", () =>
     workbench,
     /!canOpenCurrentHtmlInDefaultBrowser[\s\S]*?persistState !== "idle"[\s\S]*?editRevision !== lastPersistedRevision/,
   );
+});
+
+test("local external actions expose one-shot success or failure outcomes", () => {
+  assert.doesNotMatch(workbench, /LOCAL_ACTION_RETRY_DELAY_MS|withOneAutomaticRetry/u);
+  for (const [kind, invocation] of [
+    ["show-source-in-folder", "showInFolder(activeSourcePath)"],
+    ["open-source-in-browser", "openInDefaultBrowser(activeSourcePath)"],
+    ["open-project-records", "bridgeClient.openFolder"],
+    ["reveal-request-folder", "revealRequestFolder({"],
+    ["reveal-version-file", "revealVersionFile({"],
+  ]) {
+    const start = workbench.indexOf(`kind: "${kind}"`);
+    assert.ok(start >= 0, `${kind} must be a named one-click action`);
+    const action = workbench.slice(start, start + 3_000);
+    assert.ok(action.includes(invocation), `${kind} must call its exact operation`);
+    assert.match(action, /onFailure: \(cause(?:: unknown)?\) => setToast\(/u);
+  }
 });
 
 test("project panel keeps actions clear without technical paths in the header", () => {

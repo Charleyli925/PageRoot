@@ -562,6 +562,41 @@ test("preload exposes the narrow request-folder Finder operation", async () => {
   ]);
 });
 
+test("preload never replays a failed local side-effect request", async () => {
+  const calls = [];
+  const api = await loadPreload(async (...args) => {
+    calls.push(args);
+    throw new Error("desktop operation unavailable");
+  });
+  const actions = [
+    ["showInFolder", "/Users/demo/report.html"],
+    ["openInDefaultBrowser", "/Users/demo/report.html"],
+    ["revealRequestFolder", {
+      sourcePath: "/Users/demo/report.html",
+      requestPath: "/Users/demo/PageRoot/项目记录/requests/req_0001",
+    }],
+    ["revealVersionFile", {
+      sourcePath: "/Users/demo/report.html",
+      versionId: "ver_0002",
+    }],
+  ];
+
+  for (const [method, payload] of actions) {
+    const before = calls.length;
+    await assert.rejects(
+      () => api[method](payload),
+      (error) => error?.code === "PROJECT_SERVICE_UNAVAILABLE",
+    );
+    assert.equal(calls.length, before + 1, `${method} must invoke once`);
+
+    await new Promise((resolve) => setTimeout(resolve, 220));
+    assert.equal(calls.length, before + 1, `${method} must not retry on a timer`);
+
+    await assert.rejects(() => api[method](payload));
+    assert.equal(calls.length, before + 2, `${method} runs again only for a new call`);
+  }
+});
+
 test("preload exposes the narrow QoderWork handoff integration", async () => {
   const calls = [];
   const { integrations } = await loadPreloadApis(async (...args) => {
