@@ -5,7 +5,7 @@ const OVER_LIMIT_ATTRIBUTES = Array.from(
 ).join(" ");
 
 export const RUNTIME_VISUAL_SETTLEMENT_SOURCE_SHA =
-  "ef28d59116136a264fa5d4226b57683eb6a4c770";
+  "795ed18380a67a56e267cad43cd188877ea1c8f8";
 
 export const RUNTIME_VISUAL_HOSTILE_PAGES = Object.freeze([
   Object.freeze({

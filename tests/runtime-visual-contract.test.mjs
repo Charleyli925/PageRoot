@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   RUNTIME_VISUAL_CONTRACT,
@@ -17,6 +19,14 @@ const runtimeVisualContractDocument = await readFile(
   new URL("../docs/RUNTIME_VISUAL_CONTRACT.md", import.meta.url),
   "utf8",
 );
+const productRoot = fileURLToPath(new URL("../", import.meta.url));
+
+function gitOutput(arguments_) {
+  return execFileSync("git", arguments_, {
+    cwd: productRoot,
+    encoding: "utf8",
+  });
+}
 
 test("runtime visual producers and consumers share one immutable contract", () => {
   assert.equal(RUNTIME_VISUAL_CONTRACT_VERSION, 1);
@@ -53,6 +63,31 @@ test("runtime visual envelopes bind contract, session, and full source SHA", () 
     contractVersion: "1",
     ...expected,
   }, expected), null);
+});
+
+test("the settlement matrix points to a reachable implementation snapshot", () => {
+  assert.match(RUNTIME_VISUAL_SETTLEMENT_SOURCE_SHA, /^[0-9a-f]{40}$/u);
+  assert.doesNotThrow(() => {
+    execFileSync("git", [
+      "merge-base",
+      "--is-ancestor",
+      RUNTIME_VISUAL_SETTLEMENT_SOURCE_SHA,
+      "HEAD",
+    ], {
+      cwd: productRoot,
+      stdio: "ignore",
+    });
+  });
+  const fixtureAtSettlement = gitOutput([
+    "show",
+    `${RUNTIME_VISUAL_SETTLEMENT_SOURCE_SHA}:tests/fixtures/runtime-visual-hostile-pages.mjs`,
+  ]);
+  const browserOracleAtSettlement = gitOutput([
+    "show",
+    `${RUNTIME_VISUAL_SETTLEMENT_SOURCE_SHA}:tests/e2e/browser/native-dom-runtime-visual-binding.spec.mjs`,
+  ]);
+  assert.match(fixtureAtSettlement, /querySelector\('\[class~="chart-host"\]'\)\.className/u);
+  assert.match(browserOracleAtSettlement, /runtimeVisualHostilePage\("pr115-class-write-causality"\)/u);
 });
 
 test("the hostile-page settlement matrix closes all thirteen tracked threads", () => {
