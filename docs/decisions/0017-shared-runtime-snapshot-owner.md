@@ -24,8 +24,9 @@ needlessly recapture or clear an otherwise valid visual.
   TargetRef, comment identity, binary input or arbitrary script.
 - The owner creates a one-use isolated preview/session and validates bindings
   before scripts run. It confirms only the corresponding runtime host and
-  visible Canvas/SVG paint, then returns bounded PNG bytes. A shared trusted
-  parser validates every response for both Edit and Review.
+  visible Canvas/SVG paint, then returns bounded PNG bytes plus the measured
+  CSS-pixel layout rectangle. A shared trusted parser validates every response
+  for both Edit and Review.
 - `EditRuntimeSnapshotSession` is a separate renderer owner for Edit's small,
   non-durable cache. Its coarse input hash covers supported host markup plus
   `base`, `link`, `script` and `style`, not every text byte or an inferred
@@ -35,6 +36,10 @@ needlessly recapture or clear an otherwise valid visual.
 - Review remains static-first and requests one before/after pair after both
   frames are ready. It may add an opaque marker only for a verified difference;
   unavailable, malformed, timed-out or late data is a static-only result.
+- Direct Edit projections own only their temporary overrides. If a source patch
+  replaces a mounted Canvas/SVG inline style, clearing or replacing the bitmap
+  leaves the newer source style intact while the direct host keeps the captured
+  CSS-pixel geometry.
 
 ## Consequences
 

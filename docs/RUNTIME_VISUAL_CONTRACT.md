@@ -45,11 +45,12 @@ The owner always has these containment properties:
 - one isolated rect pass, at most one PNG per host, bounded PNG/pixel budgets,
   a main-process deadline, and forced cleanup.
 
-It returns only a captured/unavailable key plus an envelope and PNG
-bytes/hash/size. Trusted renderer memory revalidates PNG headers, dimensions,
-byte length, SHA-256, per-page pixels and aggregate bytes. Raw DOM/node handles
-never leave the owner; authored pages receive no owner channel, binding or image
-data.
+It returns only a captured/unavailable key plus an envelope, PNG
+bytes/hash/bitmap size, and the owner-measured CSS-pixel layout width/height.
+Trusted renderer memory revalidates PNG headers, bitmap dimensions, layout
+bounds, byte length, SHA-256, per-page pixels and aggregate bytes. Raw DOM/node
+handles never leave the owner; authored pages receive no owner channel, binding
+or image data.
 
 ## Edit behavior
 
@@ -69,9 +70,14 @@ projection and cannot affect source, selection, IME, comments, save, history,
 Review, or AI input.
 
 `HtmlCanvasEditor` mounts a direct Canvas/SVG image as a reversible background
-or a stable empty host image as pointer-transparent presentation. It stages a
-new Blob URL off-DOM before replacement and revokes retired URLs. The original
-source host remains the comment and edit target.
+or a stable empty host image as pointer-transparent presentation. Direct roots
+use the owner-measured CSS-pixel rectangle rather than DPR-dependent PNG
+dimensions, so an authored script that changes Canvas/SVG size keeps its runtime
+geometry in the script-disabled Edit frame. Projection overrides track only
+their own inline values: an in-place SourcePatch that changes a host style stays
+the current baseline when a bitmap is replaced or cleared. New Blob URLs stage
+off-DOM before replacement and retired URLs are revoked. The original source
+host remains the comment and edit target.
 
 ## Review behavior
 

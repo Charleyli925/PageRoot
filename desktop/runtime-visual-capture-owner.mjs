@@ -447,6 +447,8 @@ function unavailableSnapshot(key) {
     pngSha256: "",
     width: 0,
     height: 0,
+    layoutWidth: 0,
+    layoutHeight: 0,
     byteLength: 0,
     pngBytes: new Uint8Array(),
   });
@@ -720,7 +722,13 @@ export function createRuntimeSnapshotCaptureController({
           }
           capturedPixels += png.width * png.height;
           capturedBytes += png.byteLength;
-          snapshots.push(Object.freeze({ key: candidate.key, state: "captured", ...png }));
+          snapshots.push(Object.freeze({
+            key: candidate.key,
+            state: "captured",
+            ...png,
+            layoutWidth: ownerSnapshot.rect.width,
+            layoutHeight: ownerSnapshot.rect.height,
+          }));
         } catch (error) {
           if (error instanceof CaptureTimedOutError || error instanceof CaptureCancelledError) {
             throw error;

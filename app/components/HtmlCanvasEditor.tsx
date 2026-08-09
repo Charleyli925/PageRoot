@@ -1501,6 +1501,14 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       frameSourceHtmlRef.current = result.html;
       renderedSourceHtmlRef.current = result.html;
       containerRef.current?.setAttribute("data-render-verified", "true");
+      // A direct source patch may replace the host's inline style while an
+      // unchanged runtime bitmap is retained for the replacement capture.
+      // Reapply only the disposable projection against the exact new source.
+      applyRuntimeVisualProjectionToDocument(
+        documentNode,
+        result.html,
+        runtimeVisualProjectionRef.current,
+      );
       pendingFrameRestoreEpochRef.current += 1;
       pendingSelectionRef.current = null;
       pendingToolbarVisibleRef.current = false;

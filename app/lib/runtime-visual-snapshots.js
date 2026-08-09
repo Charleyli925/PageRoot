@@ -8,12 +8,16 @@ export const RUNTIME_VISUAL_SNAPSHOT_LIMIT =
 
 const MAX_PNG_BYTES = RUNTIME_VISUAL_CONTRACT.pageBudget.visualBytes;
 const MAX_PNG_PIXELS = RUNTIME_VISUAL_CONTRACT.pageBudget.canvasPixels;
+const MAX_LAYOUT_WIDTH = 4_096;
+const MAX_LAYOUT_HEIGHT = 2_400;
 const SNAPSHOT_KEYS = new Set([
   "key",
   "state",
   "pngSha256",
   "width",
   "height",
+  "layoutWidth",
+  "layoutHeight",
   "byteLength",
   "pngBytes",
 ]);
@@ -26,6 +30,12 @@ function isRecord(value) {
 
 function boundedInteger(value, maximum) {
   return Number.isSafeInteger(value) && value >= 0 && value <= maximum
+    ? value
+    : null;
+}
+
+function boundedPositiveInteger(value, maximum) {
+  return Number.isSafeInteger(value) && value >= 1 && value <= maximum
     ? value
     : null;
 }
@@ -57,6 +67,8 @@ function acceptedUnavailableSnapshot(rawSnapshot, key) {
     rawSnapshot.pngSha256 !== ""
     || rawSnapshot.width !== 0
     || rawSnapshot.height !== 0
+    || rawSnapshot.layoutWidth !== 0
+    || rawSnapshot.layoutHeight !== 0
     || rawSnapshot.byteLength !== 0
     || !pngBytes
     || pngBytes.byteLength !== 0
@@ -67,6 +79,8 @@ function acceptedUnavailableSnapshot(rawSnapshot, key) {
     pngSha256: "",
     width: 0,
     height: 0,
+    layoutWidth: 0,
+    layoutHeight: 0,
     byteLength: 0,
     pngBytes,
   });
@@ -75,9 +89,13 @@ function acceptedUnavailableSnapshot(rawSnapshot, key) {
 function acceptedCapturedSnapshot(rawSnapshot, key) {
   const pngBytes = copiedPngBytes(rawSnapshot.pngBytes);
   const byteLength = boundedInteger(rawSnapshot.byteLength, MAX_PNG_BYTES);
+  const layoutWidth = boundedPositiveInteger(rawSnapshot.layoutWidth, MAX_LAYOUT_WIDTH);
+  const layoutHeight = boundedPositiveInteger(rawSnapshot.layoutHeight, MAX_LAYOUT_HEIGHT);
   if (
     !pngBytes
     || byteLength === null
+    || layoutWidth === null
+    || layoutHeight === null
     || byteLength !== pngBytes.byteLength
     || byteLength < 24
     || typeof rawSnapshot.pngSha256 !== "string"
@@ -96,6 +114,8 @@ function acceptedCapturedSnapshot(rawSnapshot, key) {
     pngSha256: rawSnapshot.pngSha256,
     width: dimensions.width,
     height: dimensions.height,
+    layoutWidth,
+    layoutHeight,
     byteLength,
     pngBytes,
   });

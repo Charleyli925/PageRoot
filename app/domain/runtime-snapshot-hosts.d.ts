@@ -62,6 +62,8 @@ export type RuntimeVisualProjection = Readonly<{
     pngSha256: string;
     width: number;
     height: number;
+    layoutWidth: number;
+    layoutHeight: number;
     byteLength: number;
     pngBytes: Uint8Array;
   }>[];

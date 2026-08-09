@@ -4,6 +4,9 @@ export type RuntimeVisualSnapshot = Readonly<{
   pngSha256: string;
   width: number;
   height: number;
+  /** CSS-pixel dimensions of the captured owner rectangle. */
+  layoutWidth: number;
+  layoutHeight: number;
   byteLength: number;
   pngBytes: Uint8Array;
 }>;

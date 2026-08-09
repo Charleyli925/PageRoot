@@ -15,6 +15,8 @@ function runtimeSnapshotChanged(before, after) {
       before.pngSha256 !== after.pngSha256
       || before.width !== after.width
       || before.height !== after.height
+      || before.layoutWidth !== after.layoutWidth
+      || before.layoutHeight !== after.layoutHeight
       || before.byteLength !== after.byteLength
     );
 }

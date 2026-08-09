@@ -40,6 +40,8 @@ function response(request, png = PNG) {
         pngSha256,
         width: 1,
         height: 1,
+        layoutWidth: 320,
+        layoutHeight: 120,
         byteLength: pngBytes.byteLength,
         pngBytes,
       })),

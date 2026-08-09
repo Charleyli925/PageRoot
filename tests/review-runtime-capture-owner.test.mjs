@@ -213,6 +213,8 @@ test("runtime snapshot owner captures once through an isolated one-use Electron 
   assert.equal(snapshot.pngSha256, `sha256:${createHash("sha256").update(PNG).digest("hex")}`);
   assert.equal(snapshot.width, 1);
   assert.equal(snapshot.height, 1);
+  assert.equal(snapshot.layoutWidth, 1);
+  assert.equal(snapshot.layoutHeight, 1);
   assert.equal(snapshot.byteLength, PNG.byteLength);
   assert.deepEqual([...snapshot.pngBytes], [...PNG]);
   assert.deepEqual(state.createRequests, [{ html: HTML, bootstrapJavaScript: "" }]);
@@ -269,6 +271,8 @@ test("runtime snapshot owner keeps valid hosts when another frozen binding is re
     pngSha256: "",
     width: 0,
     height: 0,
+    layoutWidth: 0,
+    layoutHeight: 0,
     byteLength: 0,
     pngBytes: new Uint8Array(),
   });
@@ -286,8 +290,8 @@ test("runtime snapshot owner captures each host before measuring the next viewpo
     },
   ];
   const rects = [
-    ownerRectsFor("runtime-host-1", { x: 11, y: 12, width: 1, height: 1 }),
-    ownerRectsFor("runtime-host-2", { x: 21, y: 22, width: 1, height: 1 }),
+    ownerRectsFor("runtime-host-1", { x: 11, y: 12, width: 41, height: 21 }),
+    ownerRectsFor("runtime-host-2", { x: 21, y: 22, width: 51, height: 31 }),
   ];
   const { controller, state } = fakeOwner({
     rects: ({ index }) => rects[index],
@@ -307,8 +311,15 @@ test("runtime snapshot owner captures each host before measuring the next viewpo
     "capture",
   ]);
   assert.deepEqual(state.capturePage.map(({ rect }) => rect), [
-    { x: 11, y: 12, width: 1, height: 1 },
-    { x: 21, y: 22, width: 1, height: 1 },
+    { x: 11, y: 12, width: 41, height: 21 },
+    { x: 21, y: 22, width: 51, height: 31 },
+  ]);
+  assert.deepEqual(captured.envelope.runtimeVisualSnapshots.map((snapshot) => ({
+    layoutWidth: snapshot.layoutWidth,
+    layoutHeight: snapshot.layoutHeight,
+  })), [
+    { layoutWidth: 41, layoutHeight: 21 },
+    { layoutWidth: 51, layoutHeight: 31 },
   ]);
   assert.match(state.isolatedSources[0].scripts[0].code, /runtime-host-1/u);
   assert.match(state.isolatedSources[1].scripts[0].code, /runtime-host-2/u);
@@ -338,6 +349,8 @@ test("runtime snapshot owner silently marks invalid PNG output unavailable", asy
     pngSha256: "",
     width: 0,
     height: 0,
+    layoutWidth: 0,
+    layoutHeight: 0,
     byteLength: 0,
     pngBytes: new Uint8Array(),
   });

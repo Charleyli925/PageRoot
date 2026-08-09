@@ -16,17 +16,21 @@ const objectUrlByImage = new WeakMap<HTMLImageElement, string>();
 const pendingImageByHost = new WeakMap<HTMLElement, HTMLImageElement>();
 const pendingBackgroundUrlByHost = new WeakMap<HTMLElement, string>();
 const backgroundObjectUrlByHost = new WeakMap<HTMLElement, string>();
-const backgroundStyleByHost = new WeakMap<HTMLElement, ReadonlyArray<Readonly<{
+type InlineStyleValue = Readonly<{
   property: string;
   value: string;
   priority: string;
-}>>>();
+}>;
+type BackgroundStyleState = {
+  baseline: InlineStyleValue[];
+  projection: InlineStyleValue[];
+};
+const backgroundStyleByHost = new WeakMap<HTMLElement, BackgroundStyleState>();
 const BACKGROUND_PROPERTIES = [
   "background-image",
   "background-position",
   "background-repeat",
   "background-size",
-  "display",
   "height",
   "width",
 ] as const;
@@ -217,22 +221,89 @@ function stageHostImage(
   else void pending.decode?.().then(finish, fail);
 }
 
-function savedBackgroundStyles(host: HTMLElement) {
-  const existing = backgroundStyleByHost.get(host);
-  if (existing) return existing;
-  const saved = Object.freeze(BACKGROUND_PROPERTIES.map((property) => Object.freeze({
+function inlineStyleValue(host: HTMLElement, property: string): InlineStyleValue {
+  return Object.freeze({
     property,
     value: host.style.getPropertyValue(property),
     priority: host.style.getPropertyPriority(property),
-  })));
+  });
+}
+
+function sameInlineStyle(
+  first: InlineStyleValue,
+  second: InlineStyleValue | undefined,
+): boolean {
+  return Boolean(
+    second
+    && first.property === second.property
+    && first.value === second.value
+    && first.priority === second.priority,
+  );
+}
+
+function savedBackgroundStyles(host: HTMLElement): BackgroundStyleState {
+  const existing = backgroundStyleByHost.get(host);
+  if (existing) return existing;
+  const saved = {
+    baseline: BACKGROUND_PROPERTIES.map((property) => inlineStyleValue(host, property)),
+    projection: [],
+  };
   backgroundStyleByHost.set(host, saved);
   return saved;
 }
 
+/**
+ * A SourcePatch can replace an element's inline style while a disposable
+ * background is mounted. Keep its latest source-owned values as the baseline;
+ * only values still equal to our previous override may be restored later.
+ */
+function rebaseBackgroundStyles(host: HTMLElement, state: BackgroundStyleState) {
+  const projectionByProperty = new Map(
+    state.projection.map((style) => [style.property, style]),
+  );
+  state.baseline = state.baseline.map((saved) => {
+    const current = inlineStyleValue(host, saved.property);
+    return sameInlineStyle(current, projectionByProperty.get(saved.property))
+      ? saved
+      : current;
+  });
+}
+
+function applyDirectBackgroundStyles(
+  host: HTMLElement,
+  visual: RuntimeVisualProjection["visuals"][number],
+  objectUrl: string,
+) {
+  const state = savedBackgroundStyles(host);
+  rebaseBackgroundStyles(host, state);
+  const projection = [
+    Object.freeze({
+      property: "background-image",
+      value: `url("${objectUrl}")`,
+      priority: "important",
+    }),
+    Object.freeze({ property: "background-position", value: "center", priority: "important" }),
+    Object.freeze({ property: "background-repeat", value: "no-repeat", priority: "important" }),
+    Object.freeze({ property: "background-size", value: "100% 100%", priority: "important" }),
+    Object.freeze({ property: "width", value: `${visual.layoutWidth}px`, priority: "important" }),
+    Object.freeze({ property: "height", value: `${visual.layoutHeight}px`, priority: "important" }),
+  ] satisfies InlineStyleValue[];
+  projection.forEach(({ property, value }) => setImportantStyle(host, property, value));
+  state.projection = projection;
+}
+
 function restoreBackground(host: HTMLElement) {
   releaseBackgroundObjectUrl(host);
-  const saved = backgroundStyleByHost.get(host);
-  saved?.forEach(({ property, value, priority }) => {
+  const state = backgroundStyleByHost.get(host);
+  const projectionByProperty = new Map(
+    state?.projection.map((style) => [style.property, style]),
+  );
+  state?.baseline.forEach(({ property, value, priority }) => {
+    // A newer source patch already owns a changed inline value. Never write an
+    // older captured baseline over it while removing the projection.
+    if (!sameInlineStyle(inlineStyleValue(host, property), projectionByProperty.get(property))) {
+      return;
+    }
     if (value) host.style.setProperty(property, value, priority);
     else host.style.removeProperty(property);
   });
@@ -245,7 +316,15 @@ function stageDirectBackground(
 ) {
   const currentKey = host.getAttribute(RUNTIME_VISUAL_KEY_ATTRIBUTE);
   const currentSha = host.getAttribute(RUNTIME_VISUAL_SHA_ATTRIBUTE);
-  if (currentKey === visual.captureKey && currentSha === visual.pngSha256) return;
+  if (currentKey === visual.captureKey && currentSha === visual.pngSha256) {
+    // A rapid undo/cache hit can reselect the mounted A snapshot while B is
+    // still decoding. It must also cancel B, otherwise B may settle late and
+    // replace the snapshot that the current projection selected.
+    releasePendingBackgroundObjectUrl(host);
+    const objectUrl = backgroundObjectUrlByHost.get(host);
+    if (objectUrl) applyDirectBackgroundStyles(host, visual, objectUrl);
+    return;
+  }
   const documentNode = host.ownerDocument;
   const objectUrl = createObjectUrl(documentNode, visual);
   if (!objectUrl) return;
@@ -274,16 +353,10 @@ function stageDirectBackground(
     host.setAttribute(RUNTIME_VISUAL_HOST_ATTRIBUTE, "runtime-bitmap");
     host.setAttribute(RUNTIME_VISUAL_KEY_ATTRIBUTE, visual.captureKey);
     host.setAttribute(RUNTIME_VISUAL_SHA_ATTRIBUTE, visual.pngSha256);
-    setImportantStyle(host, "background-image", `url("${objectUrl}")`);
-    setImportantStyle(host, "background-position", "center");
-    setImportantStyle(host, "background-repeat", "no-repeat");
-    setImportantStyle(host, "background-size", "100% 100%");
-    const rect = host.getBoundingClientRect();
-    if (rect.width < 1 || rect.height < 1) {
-      setImportantStyle(host, "display", "inline-block");
-      setImportantStyle(host, "width", `${visual.width}px`);
-      setImportantStyle(host, "height", `${visual.height}px`);
-    }
+    // PNG dimensions can be DPR-scaled. Direct Canvas/SVG hosts instead keep
+    // the owner-measured CSS-pixel rectangle, including script-set dimensions
+    // that do not exist in the script-disabled Edit DOM.
+    applyDirectBackgroundStyles(host, visual, objectUrl);
   };
   const fail = () => {
     if (settled) return;

@@ -29,6 +29,8 @@ function snapshot(key, pngBytes = PNG, overrides = {}) {
     pngSha256: hash(pngBytes),
     width: 1,
     height: 1,
+    layoutWidth: 1,
+    layoutHeight: 1,
     byteLength: pngBytes.byteLength,
     pngBytes: new Uint8Array(pngBytes),
     ...overrides,
@@ -42,6 +44,8 @@ function unavailable(key) {
     pngSha256: "",
     width: 0,
     height: 0,
+    layoutWidth: 0,
+    layoutHeight: 0,
     byteLength: 0,
     pngBytes: new Uint8Array(),
   };
@@ -68,6 +72,9 @@ test("runtime snapshots accept only bounded declared PNG results", () => {
     { ...snapshot("runtime-host-1"), width: 2 },
   ], allowed), null);
   assert.equal(acceptRuntimeVisualSnapshots([
+    { ...snapshot("runtime-host-1"), layoutWidth: 0 },
+  ], allowed), null);
+  assert.equal(acceptRuntimeVisualSnapshots([
     unavailable("runtime-host-1"),
   ], allowed)?.[0].state, "unavailable");
   assert.equal(acceptRuntimeVisualSnapshots(
@@ -87,6 +94,11 @@ test("runtime comparison uses one before/after PNG pair and fails closed", () =>
     candidates,
     before: [snapshot("runtime-host-1")],
     after: [snapshot("runtime-host-1", CHANGED_PNG)],
+  }), ["runtime-host-1"]);
+  assert.deepEqual(changedReviewRuntimeVisualCandidateKeys({
+    candidates,
+    before: [snapshot("runtime-host-1")],
+    after: [snapshot("runtime-host-1", PNG, { layoutWidth: 2 })],
   }), ["runtime-host-1"]);
   assert.deepEqual(changedReviewRuntimeVisualCandidateKeys({
     candidates,

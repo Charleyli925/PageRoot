@@ -90,6 +90,8 @@ function snapshotsFromProjection(projection) {
       pngSha256: visual.pngSha256,
       width: visual.width,
       height: visual.height,
+      layoutWidth: visual.layoutWidth,
+      layoutHeight: visual.layoutHeight,
       byteLength: visual.byteLength,
       pngBytes: visual.pngBytes,
     }));
@@ -117,6 +119,8 @@ function projectionFor({
       pngSha256: snapshot.pngSha256,
       width: snapshot.width,
       height: snapshot.height,
+      layoutWidth: snapshot.layoutWidth,
+      layoutHeight: snapshot.layoutHeight,
       byteLength: snapshot.byteLength,
       pngBytes: snapshot.pngBytes,
     })];
