@@ -1,6 +1,37 @@
 import { expect, test } from "@playwright/test";
+import { build } from "esbuild";
+import { fileURLToPath } from "node:url";
 
 import { generatedReviewBootstrap } from "../../helpers/generated-review-bootstrap.mjs";
+
+const REVIEW_DOCUMENT_ENTRY_POINT = fileURLToPath(
+  new URL("../../../app/workbench/review-document.ts", import.meta.url),
+);
+let reviewDocumentBundlePromise;
+
+async function formalReviewScriptTokenMatches(page, probes) {
+  reviewDocumentBundlePromise ??= build({
+    entryPoints: [REVIEW_DOCUMENT_ENTRY_POINT],
+    bundle: true,
+    format: "iife",
+    globalName: "PageRootReviewDocument",
+    platform: "browser",
+    target: "es2022",
+    write: false,
+  }).then((result) => result.outputFiles[0]?.text || "");
+  const bundle = await reviewDocumentBundlePromise;
+  if (!bundle) throw new Error("Review document bundle is missing.");
+  await page.setContent("<!doctype html><html><body></body></html>");
+  await page.addScriptTag({ content: bundle });
+  return page.evaluate((entries) => {
+    const matcher = globalThis.PageRootReviewDocument
+      ?.runtimeVisualScriptReferencesToken;
+    if (typeof matcher !== "function") {
+      throw new Error("Review runtime visual token matcher is unavailable.");
+    }
+    return entries.map(({ source, token }) => matcher(source, token));
+  }, probes);
+}
 
 const COMMENT_SOURCE_BOX_SIGNATURE = JSON.stringify([
   ["class", "comment-host"],
@@ -445,6 +476,73 @@ test("fingerprintless runtime hosts fail closed when a same-tag parser decoy shi
   });
   expect(decoy.channel).toBe(true);
   expect(decoy.snapshots).toHaveLength(0);
+});
+
+test("fingerprinted runtime hosts fail closed when a matching parser decoy shifts the target", async ({ page }) => {
+  const binding = {
+    key: "runtime-host-fingerprinted-decoy",
+    path: [1, 0, 0],
+    tagName: "DIV",
+    sourceBoxSignature: RUNTIME_SOURCE_BOX_SIGNATURE,
+    identityAttributes: [["id", "runtime-host"]],
+  };
+  const stable = await parsedRuntimeVisualSnapshots(page, {
+    binding,
+    authoredScript: `
+      const main = document.querySelector("main");
+      const actual = document.createElement("div");
+      actual.id = "runtime-host";
+      actual.className = "runtime-host";
+      const painted = document.createElement("i");
+      painted.style.cssText = "display:block;background:red;width:8px;height:8px";
+      actual.append(painted);
+      main.append(actual);
+    `,
+  });
+  expect(stable.channel).toBe(true);
+  expect(stable.snapshots).toHaveLength(1);
+  expect(stable.snapshots[0]).toHaveLength(1);
+
+  const decoy = await parsedRuntimeVisualSnapshots(page, {
+    binding,
+    authoredScript: `
+      const main = document.querySelector("main");
+      const decoy = document.createElement("div");
+      decoy.id = "runtime-host";
+      decoy.className = "runtime-host";
+      main.append(decoy);
+      const actual = document.createElement("div");
+      actual.id = "runtime-host";
+      actual.className = "runtime-host";
+      const painted = document.createElement("i");
+      painted.style.cssText = "display:block;background:red;width:8px;height:8px";
+      actual.append(painted);
+      main.append(actual);
+    `,
+  });
+  expect(decoy.channel).toBe(true);
+  expect(decoy.snapshots).toHaveLength(0);
+});
+
+test("formal Review recognizes class selector operators and class writes", async ({ page }) => {
+  await expect(formalReviewScriptTokenMatches(page, [
+    {
+      source: `document.querySelector('[class^="chart"]').textContent = "ready";`,
+      token: { value: "chart-host", kind: "class-value" },
+    },
+    {
+      source: "document.querySelector('div').className = 'chart-host active';",
+      token: { value: "chart-host active", kind: "class-value" },
+    },
+    {
+      source: "document.querySelector('div').setAttribute('class', 'chart-host active');",
+      token: { value: "chart-host", kind: "class" },
+    },
+    {
+      source: "document.querySelector('div').className = 'other';",
+      token: { value: "chart-host", kind: "class" },
+    },
+  ])).resolves.toEqual([true, true, true, false]);
 });
 
 test("runtime visual paint parsing survives an authored Boolean mutation", async ({ page }) => {

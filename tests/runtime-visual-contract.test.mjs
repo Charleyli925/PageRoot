@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
@@ -9,7 +10,13 @@ import {
 import {
   RUNTIME_VISUAL_FIXTURE_SOURCE_SHA,
   RUNTIME_VISUAL_HOSTILE_PAGES,
+  RUNTIME_VISUAL_SETTLEMENT_SOURCE_SHA,
 } from "./fixtures/runtime-visual-hostile-pages.mjs";
+
+const runtimeVisualContractDocument = await readFile(
+  new URL("../docs/RUNTIME_VISUAL_CONTRACT.md", import.meta.url),
+  "utf8",
+);
 
 test("runtime visual producers and consumers share one immutable contract", () => {
   assert.equal(RUNTIME_VISUAL_CONTRACT_VERSION, 1);
@@ -48,16 +55,25 @@ test("runtime visual envelopes bind contract, session, and full source SHA", () 
   }, expected), null);
 });
 
-test("the hostile-page matrix closes all eight live legacy threads", () => {
-  assert.equal(RUNTIME_VISUAL_HOSTILE_PAGES.length, 8);
+test("the hostile-page settlement matrix closes all thirteen tracked threads", () => {
+  assert.equal(RUNTIME_VISUAL_HOSTILE_PAGES.length, 13);
   assert.equal(
     new Set(RUNTIME_VISUAL_HOSTILE_PAGES.map(({ threadId }) => threadId)).size,
-    8,
+    13,
   );
+  assert.equal(
+    RUNTIME_VISUAL_HOSTILE_PAGES.filter(({ pr }) => pr === 115).length,
+    5,
+  );
+  assert.ok(runtimeVisualContractDocument.includes(RUNTIME_VISUAL_SETTLEMENT_SOURCE_SHA));
   for (const fixture of RUNTIME_VISUAL_HOSTILE_PAGES) {
-    assert.match(fixture.id, /^pr(?:100|105|107)-/u);
+    assert.match(fixture.id, /^pr(?:100|105|107|115)-/u);
     assert.match(fixture.html, /<!doctype html>/iu);
     assert.ok(fixture.contract.length > 20);
     assert.ok(fixture.closureReason.length > 20);
+    assert.match(fixture.threadUrl, new RegExp(`/pull/${fixture.pr}#discussion_`, "u"));
+    assert.ok(runtimeVisualContractDocument.includes(fixture.id));
+    assert.ok(runtimeVisualContractDocument.includes(fixture.threadId));
+    assert.ok(runtimeVisualContractDocument.includes(fixture.threadUrl));
   }
 });

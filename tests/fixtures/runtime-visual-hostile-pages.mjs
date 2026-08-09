@@ -4,11 +4,15 @@ const OVER_LIMIT_ATTRIBUTES = Array.from(
   (_, index) => `data-key-${index}="${index}"`,
 ).join(" ");
 
+export const RUNTIME_VISUAL_SETTLEMENT_SOURCE_SHA =
+  "ef28d59116136a264fa5d4226b57683eb6a4c770";
+
 export const RUNTIME_VISUAL_HOSTILE_PAGES = Object.freeze([
   Object.freeze({
     id: "pr100-canvas-native-intrinsics",
     pr: 100,
     threadId: "PRRT_kwDOTdtgh86W9A1Y",
+    threadUrl: "https://github.com/Charleyli925/PageRoot/pull/100#discussion_r3728044924",
     surface: "review",
     html: `<!doctype html><main><div id="chart"><canvas width="8" height="8"></canvas></div>
       <script>Math.round=()=>0;Math.max=()=>0;Number=()=>0;</script></main>`,
@@ -19,6 +23,7 @@ export const RUNTIME_VISUAL_HOSTILE_PAGES = Object.freeze([
     id: "pr100-single-painted-child",
     pr: 100,
     threadId: "PRRT_kwDOTdtgh86W9A1b",
+    threadUrl: "https://github.com/Charleyli925/PageRoot/pull/100#discussion_r3728044929",
     surface: "review",
     html: `<!doctype html><main><div class="chart-host"></div><script>
       const bar=document.createElement("i");bar.style.cssText="display:block;background:red;width:8px;height:8px";
@@ -30,6 +35,7 @@ export const RUNTIME_VISUAL_HOSTILE_PAGES = Object.freeze([
     id: "pr100-transparent-text",
     pr: 100,
     threadId: "PRRT_kwDOTdtgh86W9A1d",
+    threadUrl: "https://github.com/Charleyli925/PageRoot/pull/100#discussion_r3728044932",
     surface: "review",
     html: `<!doctype html><main><div id="chart"></div><script>
       const label=document.createElement("span");label.style.color="transparent";label.textContent="hidden";
@@ -50,6 +56,7 @@ export const RUNTIME_VISUAL_HOSTILE_PAGES = Object.freeze([
     id: "pr105-generic-selector-host",
     pr: 105,
     threadId: "PRRT_kwDOTdtgh86XQhQi",
+    threadUrl: "https://github.com/Charleyli925/PageRoot/pull/105#discussion_r3735482719",
     surface: "edit",
     html: `<!doctype html><main><canvas></canvas><script>
       document.querySelector("canvas").getContext("2d").fillRect(0,0,8,8);</script></main>`,
@@ -60,6 +67,7 @@ export const RUNTIME_VISUAL_HOSTILE_PAGES = Object.freeze([
     id: "pr105-dynamic-id-dependency",
     pr: 105,
     threadId: "PRRT_kwDOTdtgh86XQhQm",
+    threadUrl: "https://github.com/Charleyli925/PageRoot/pull/105#discussion_r3735482725",
     surface: "edit",
     html: `<!doctype html><main><p id="data">1,2,3</p><div id="chart"></div><script>
       document.getElementById("chart").textContent=document.getElementById(["da","ta"].join("")).textContent;
@@ -74,6 +82,7 @@ export const RUNTIME_VISUAL_HOSTILE_PAGES = Object.freeze([
     id: "pr105-owner-deadline",
     pr: 105,
     threadId: "PRRT_kwDOTdtgh86XQhQo",
+    threadUrl: "https://github.com/Charleyli925/PageRoot/pull/105#discussion_r3735482728",
     surface: "edit",
     html: `<!doctype html><main><div id="chart"></div><script>
       Object.defineProperty(performance,"now",{value:()=>0});
@@ -85,6 +94,7 @@ export const RUNTIME_VISUAL_HOSTILE_PAGES = Object.freeze([
     id: "pr107-parser-text-mutation",
     pr: 107,
     threadId: "PRRT_kwDOTdtgh86XW6Z8",
+    threadUrl: "https://github.com/Charleyli925/PageRoot/pull/107#discussion_r3737918687",
     surface: "review",
     html: `<!doctype html><main><section id="target">original</section><p class="comment-target">first comment</p><p class="comment-target">second comment</p><div class="comment-host"></div><div class="chart"></div><script>
       document.getElementById("target").textContent="mutated";</script><div class="chart"></div></main>`,
@@ -95,11 +105,73 @@ export const RUNTIME_VISUAL_HOSTILE_PAGES = Object.freeze([
     id: "pr107-attribute-limit",
     pr: 107,
     threadId: "PRRT_kwDOTdtgh86XW6Z_",
+    threadUrl: "https://github.com/Charleyli925/PageRoot/pull/107#discussion_r3737918691",
     surface: "review",
     html: `<!doctype html><main><div id="anchored" ${OVER_LIMIT_ATTRIBUTES}></div><div ${OVER_LIMIT_ATTRIBUTES}></div><script>
       document.querySelectorAll("div").forEach((host) => host.append(document.createElement("canvas")));</script></main>`,
     contract: "A host with more than 24 identity attributes is not bindable, even when it also has an id/name anchor.",
     closureReason: "The producer drops every over-limit fingerprint instead of allowing a retained prefix or an id/name exception to guess a parser sibling; the consumer enforces the same 24-attribute ceiling.",
+  }),
+  Object.freeze({
+    id: "pr115-empty-id-substring-selector",
+    pr: 115,
+    threadId: "PRRT_kwDOTdtgh86XguR7",
+    threadUrl: "https://github.com/Charleyli925/PageRoot/pull/115#discussion_r3741631696",
+    surface: "edit",
+    html: `<!doctype html><main><div id="late-chart"></div><script>
+      document.querySelector('[id$=""]').textContent="ignored";
+      document.getElementById("late-chart").textContent="ready";</script></main>`,
+    contract: "Empty ID substring selector operands match no host and cannot consume a candidate priority slot.",
+    closureReason: "The projection parser rejects empty ^=, $=, and *= operands before candidate prioritization, leaving the explicitly referenced ID eligible.",
+  }),
+  Object.freeze({
+    id: "pr115-empty-class-substring-selector",
+    pr: 115,
+    threadId: "PRRT_kwDOTdtgh86Xi4nh",
+    threadUrl: "https://github.com/Charleyli925/PageRoot/pull/115#discussion_r3742374961",
+    surface: "edit",
+    html: `<!doctype html><main><div class="early-chart"></div><div id="late-chart"></div><script>
+      document.querySelector('[class$=""]').textContent="ignored";
+      document.getElementById("late-chart").textContent="ready";</script></main>`,
+    contract: "Empty class substring selector operands match no host and cannot consume a candidate priority slot.",
+    closureReason: "Class selector matching applies the same empty-operand rejection as ID and data selector matching.",
+  }),
+  Object.freeze({
+    id: "pr115-class-selector-operator",
+    pr: 115,
+    threadId: "PRRT_kwDOTdtgh86Xi4ni",
+    threadUrl: "https://github.com/Charleyli925/PageRoot/pull/115#discussion_r3742374962",
+    surface: "review",
+    html: `<!doctype html><main><section><div class="chart-host"></div><script>void 0;</script></section></main>`,
+    changedHtml: `<!doctype html><main><section><div class="chart-host"></div><script>
+      document.querySelector('[class^="chart"]').textContent="ready";</script></section></main>`,
+    contract: "Formal Review applies supported class attribute selector operators to the complete class value before admitting runtime causality.",
+    closureReason: "The Review matcher shares the operator semantics with data selectors and proves the class-value match with a browser oracle.",
+  }),
+  Object.freeze({
+    id: "pr115-fingerprinted-parser-decoy",
+    pr: 115,
+    threadId: "PRRT_kwDOTdtgh86XjDNb",
+    threadUrl: "https://github.com/Charleyli925/PageRoot/pull/115#discussion_r3742429285",
+    surface: "review",
+    html: `<!doctype html><main><script>
+      const decoy=document.createElement("div");decoy.id="runtime-host";
+      document.currentScript.after(decoy);</script><div id="runtime-host"></div></main>`,
+    contract: "A second matching fingerprint observed off the frozen path invalidates the runtime binding instead of attributing the decoy to the source host.",
+    closureReason: "The bootstrap rejects the batch when a frozen-path binding and an off-path matching parser observation make identity ambiguous.",
+  }),
+  Object.freeze({
+    id: "pr115-class-write-causality",
+    pr: 115,
+    threadId: "PRRT_kwDOTdtgh86XjDNd",
+    threadUrl: "https://github.com/Charleyli925/PageRoot/pull/115#discussion_r3742429287",
+    surface: "review",
+    html: `<!doctype html><main><section><div class="chart-host"></div><script>void 0;</script></section></main>`,
+    changedHtml: `<!doctype html><main><section><div class="chart-host"></div><script>
+      document.querySelector("div").className="chart-host active";
+      document.querySelector("div").setAttribute("class", "chart-host active");</script></section></main>`,
+    contract: "Formal Review treats literal className and setAttribute(\"class\", ...) writes as class-value or token causality without guessing target identity.",
+    closureReason: "The token matcher parses literal class writes and only admits an exact class value or one of its whitespace-separated tokens.",
   }),
 ]);
 

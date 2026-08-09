@@ -48,21 +48,30 @@ capture implementation can replace that adapter without changing semantic
 analysis or the review UI. The adapter receives only the frozen session,
 side-specific source SHA, candidate bindings, and private comment bindings.
 
-## Hostile-page closure matrix
+## Thread settlement matrix
 
-Every still-applicable unresolved thread from PRs #100, #105, and #107 has one
-minimal fixture in `tests/fixtures/runtime-visual-hostile-pages.mjs`.
+这 13 项结算以 `origin/main@ef28d59116136a264fa5d4226b57683eb6a4c770`
+为当前源基线。每项在
+`tests/fixtures/runtime-visual-hostile-pages.mjs` 有最小 fixture；测试同时校验
+fixture、线程 URL 和本表没有漂移。这里的“源码闭合”只表示该 SHA 上有明确的
+机器 oracle；GitHub 讨论线程仍按正常 PR 审阅流程处理，不能被当作另一个产品
+真值来源。
 
-| Thread / fixture | Explicit contract | Closure reason |
-| --- | --- | --- |
-| #100 `PRRT_kwDOTdtgh86W9A1Y` / `pr100-canvas-native-intrinsics` | Numeric and Canvas intrinsics are bound before authored scripts run. | Canvas sizing and sampling use captured `Number`, `Math.round`, and `Math.max`; the Electron hostile page replaces them and still produces the expected marker. |
-| #100 `PRRT_kwDOTdtgh86W9A1b` / `pr100-single-painted-child` | One visible painted child plus one geometry atom is sufficient chart evidence. | Producer admission and consumer geometry comparison share the paint-plus-geometry rule. |
-| #100 `PRRT_kwDOTdtgh86W9A1d` / `pr100-transparent-text` | Text with no visible color, text fill, shadow, decoration, or stroke has no visual authority. | Invisible text is removed before content, paint, and geometry hashing; its text churn produces no marker, while opaque `-webkit-text-fill-color` over transparent `color` remains visual evidence. |
-| #105 `PRRT_kwDOTdtgh86XQhQi` / `pr105-generic-selector-host` | A generic selector conservatively retains every exact matching source-empty visual host. | `querySelector("canvas")` is an indirect query; the anonymous Canvas becomes a candidate without inventing identity. |
-| #105 `PRRT_kwDOTdtgh86XQhQm` / `pr105-dynamic-id-dependency` | A computed element lookup depends on the complete source. | Computed `getElementById` widens candidates and changes the dependency Hash when referenced data changes. |
-| #105 `PRRT_kwDOTdtgh86XQhQo` / `pr105-owner-deadline` | Page-owned clocks cannot extend capture ownership. | A never-resolving settle promise reaches the shared owner deadline, destroys the hidden window, and revokes its session. |
-| #107 `PRRT_kwDOTdtgh86XW6Z8` / `pr107-parser-text-mutation` | Parser-added targets may use stable attributes to retain the exact inserted Element before mutable text is compared; fingerprintless comment targets may bind only to their unchanged frozen path. | Mutation records bind that exact Element; ignoring text requires at least one stable identity attribute. A same-tag observation at a shifted path invalidates a fingerprintless comment binding, while duplicates, replacement, or disconnection still invalidate the batch. |
-| #107 `PRRT_kwDOTdtgh86XW6Z_` / `pr107-attribute-limit` | A host with more than 24 identity attributes is not bindable, even with an explicit `id`/`name` anchor. | The producer drops every over-limit fingerprint instead of allowing a retained prefix or an anchor exception to guess a parser sibling; the bootstrap enforces the same shared ceiling. |
+| Thread | Source SHA | 最小 fixture | Producer → consumer | 机器 oracle | 合同与结算 |
+| --- | --- | --- | --- | --- | --- |
+| [#100 `PRRT_kwDOTdtgh86W9A1Y`](https://github.com/Charleyli925/PageRoot/pull/100#discussion_r3728044924) | `ef28d59116136a264fa5d4226b57683eb6a4c770` | `pr100-canvas-native-intrinsics` | `reviewBootstrap` → `acceptReviewRuntimeVisualSnapshots` | Native DOM/Electron Canvas hostile-page coverage | 在作者脚本前冻结 `Number`、`Math.round`、`Math.max`；源码闭合。 |
+| [#100 `PRRT_kwDOTdtgh86W9A1b`](https://github.com/Charleyli925/PageRoot/pull/100#discussion_r3728044929) | `ef28d59116136a264fa5d4226b57683eb6a4c770` | `pr100-single-painted-child` | `reviewBootstrap` → runtime comparison | `one painted child and its geometry` Node oracle | 一个可见 painted child 加 geometry atom 足以作为视觉证据；源码闭合。 |
+| [#100 `PRRT_kwDOTdtgh86W9A1d`](https://github.com/Charleyli925/PageRoot/pull/100#discussion_r3728044932) | `ef28d59116136a264fa5d4226b57683eb6a4c770` | `pr100-transparent-text` | `reviewBootstrap` paint producer → signature consumer | hostile browser/Electron text-paint coverage | 不可见 color/fill/shadow/decoration/stroke 不产生视觉权威；源码闭合。 |
+| [#105 `PRRT_kwDOTdtgh86XQhQi`](https://github.com/Charleyli925/PageRoot/pull/105#discussion_r3735482719) | `ef28d59116136a264fa5d4226b57683eb6a4c770` | `pr105-generic-selector-host` | `runtime-visual-projection` → Edit capture owner | `generic selectors retain anonymous exact visual hosts` | 间接通用 selector 保守纳入精确空宿主，不伪造身份；源码闭合。 |
+| [#105 `PRRT_kwDOTdtgh86XQhQm`](https://github.com/Charleyli925/PageRoot/pull/105#discussion_r3735482725) | `ef28d59116136a264fa5d4226b57683eb6a4c770` | `pr105-dynamic-id-dependency` | dependency Hash producer → projection session cache consumer | `computed element lookup fails closed to the full source dependency` | 计算出的 `getElementById` 依赖完整 source SHA；源码闭合。 |
+| [#105 `PRRT_kwDOTdtgh86XQhQo`](https://github.com/Charleyli925/PageRoot/pull/105#discussion_r3735482728) | `ef28d59116136a264fa5d4226b57683eb6a4c770` | `pr105-owner-deadline` | main-process capture owner → session revocation | `capture owner deadline destroys a page that stalls its settle clock` | 页面时钟不能延长 owner deadline；超时销毁窗口并撤销会话；源码闭合。 |
+| [#107 `PRRT_kwDOTdtgh86XW6Z8`](https://github.com/Charleyli925/PageRoot/pull/107#discussion_r3737918687) | `ef28d59116136a264fa5d4226b57683eb6a4c770` | `pr107-parser-text-mutation` | parser binding producer → private comment/runtime consumer | Native DOM path-only parser-decoy coverage | 解析器新增目标只按冻结 path/完整 fingerprint 绑定；指纹缺失的移位同标签目标 fail closed；源码闭合。 |
+| [#107 `PRRT_kwDOTdtgh86XW6Z_`](https://github.com/Charleyli925/PageRoot/pull/107#discussion_r3737918691) | `ef28d59116136a264fa5d4226b57683eb6a4c770` | `pr107-attribute-limit` | `reviewBootstrapElementBinding` → page bootstrap | 24/25 identity-attribute boundary coverage | 超过 24 个属性时 producer 和 consumer 都整体省略 binding，`id`/`name` 也不能例外；源码闭合。 |
+| [#115 `PRRT_kwDOTdtgh86XguR7`](https://github.com/Charleyli925/PageRoot/pull/115#discussion_r3741631696) | `ef28d59116136a264fa5d4226b57683eb6a4c770` | `pr115-empty-id-substring-selector` | Edit selector matcher → candidate prioritizer | `empty ID substring selectors do not consume the candidate cap` | 空 `id` substring operand 匹配零宿主，不能耗尽 128 个候选位；已重新验证并源码闭合。 |
+| [#115 `PRRT_kwDOTdtgh86Xi4nh`](https://github.com/Charleyli925/PageRoot/pull/115#discussion_r3742374961) | `ef28d59116136a264fa5d4226b57683eb6a4c770` | `pr115-empty-class-substring-selector` | Edit class selector matcher → candidate prioritizer | `empty class substring selectors do not consume the candidate cap` | 空 `class` substring operand 与 ID/data 语义一致，匹配零宿主；已重新验证并源码闭合。 |
+| [#115 `PRRT_kwDOTdtgh86Xi4ni`](https://github.com/Charleyli925/PageRoot/pull/115#discussion_r3742374962) | `ef28d59116136a264fa5d4226b57683eb6a4c770` | `pr115-class-selector-operator` | Review class-selector matcher → `annotateRuntimeVisualCandidates` | Native DOM `formal Review recognizes class selector operators and class writes` | Formal Review 对完整 class value 应用已支持的属性操作符，而不是做字面 token 猜测；已重新验证并源码闭合。 |
+| [#115 `PRRT_kwDOTdtgh86XjDNb`](https://github.com/Charleyli925/PageRoot/pull/115#discussion_r3742429285) | `ef28d59116136a264fa5d4226b57683eb6a4c770` | `pr115-fingerprinted-parser-decoy` | page bootstrap parser binding → runtime snapshot consumer | Native DOM `fingerprinted runtime hosts fail closed when a matching parser decoy shifts the target` | 冻结 path 已绑定一个元素后，第二个 off-path matching fingerprint 使整个 binding 失效，不能把 decoy 归属给 source host；源码闭合。 |
+| [#115 `PRRT_kwDOTdtgh86XjDNd`](https://github.com/Charleyli925/PageRoot/pull/115#discussion_r3742429287) | `ef28d59116136a264fa5d4226b57683eb6a4c770` | `pr115-class-write-causality` | Review class-write matcher → `annotateRuntimeVisualCandidates` | Native DOM `formal Review recognizes class selector operators and class writes` | `className =` 与 `setAttribute("class", ...)` 只以精确 class value 或空白分词命中因果；已源码闭合。 |
 
 This contract does not add screenshot features, serialize new temporary DOM
 attributes, or change the review UI.
