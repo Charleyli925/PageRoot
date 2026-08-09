@@ -4,9 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
-    # A ready transition is an explicit, one-shot promotion of the current
-    # Pull Request head. Ordinary updates are handled by pr-feedback.yml and
-    # deliberately do not recreate the required release-gate check.
+    # A Ready transition is the one explicit promotion of a frozen candidate.
+    # Ordinary updates receive fast impact feedback only; a later code change
+    # returns the PR to Draft and requires one new final candidate promotion.
     types: [ready_for_review]
 
 permissions:
@@ -22,28 +22,37 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  review-settled:
-    name: review-settled
+  review-policy:
+    name: review-policy
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22.13.0
-      - name: Wait for Draft evidence and the Ready-triggered Codex review to settle
+      - name: Wait for one final Ready-triggered review on the frozen head
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: >-
-          node scripts/check-pr-review-settled.mjs
+          node scripts/check-pr-review-policy.mjs
           --repository "$GITHUB_REPOSITORY"
           --pull-request "${{ github.event.pull_request.number }}"
           --expected-head "${{ github.event.pull_request.head.sha }}"
           --expected-base "${{ github.event.pull_request.base.sha }}"
-          --settle-seconds 180
-          --timeout-seconds 1200
-          --poll-seconds 20
+          --settle-seconds 30
+          --timeout-seconds 900
+          --poll-seconds 15
+          --mode wait
+      - name: Upload final-review policy snapshot
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: PageRoot-review-policy-${{ github.run_id }}-${{ github.run_attempt }}
+          path: output/review-policy/review-policy.json
+          if-no-files-found: warn
+          retention-days: 30
 
   branch-policy:
     name: branch-policy
@@ -60,11 +69,48 @@ jobs:
           BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
         run: npm run task:policy -- "$BRANCH_NAME"
 
+  candidate-context:
+    name: candidate-context
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      packaging_required: ${{ steps.classify.outputs.packaging_required }}
+      advisory_scope: ${{ steps.classify.outputs.advisory_scope }}
+      advisory_size: ${{ steps.classify.outputs.advisory_size }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.13.0
+      - name: Classify candidate packaging risk without imposing a PR-size limit
+        id: classify
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: >-
+          node scripts/classify-pr-candidate.mjs
+          --base "$PR_BASE_SHA"
+          --head "$PR_HEAD_SHA"
+          --github-output "$GITHUB_OUTPUT"
+
+  release-dry-run:
+    name: release-dry-run
+    needs: candidate-context
+    if: >-
+      github.event_name == 'pull_request'
+      && needs.candidate-context.outputs.packaging_required == 'true'
+    uses: ./.github/workflows/release-dry-run.yml
+    with:
+      pull_request_number: ${{ github.event.pull_request.number }}
+      source_head: ${{ github.event.pull_request.head.sha }}
+
   baseline-policy:
     name: baseline-policy
     if: github.event_name == 'pull_request'
     needs:
-      - review-settled
       - branch-policy
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -80,7 +126,6 @@ jobs:
     name: source-build
     if: github.event_name == 'pull_request'
     needs:
-      - review-settled
       - baseline-policy
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -241,7 +286,6 @@ jobs:
     name: electron-native
     if: github.event_name == 'pull_request'
     needs:
-      - review-settled
       - baseline-policy
     runs-on: macos-14
     timeout-minutes: 45
@@ -303,7 +347,6 @@ jobs:
     name: electron-ai
     if: github.event_name == 'pull_request'
     needs:
-      - review-settled
       - baseline-policy
     runs-on: macos-14
     timeout-minutes: 45
@@ -365,9 +408,11 @@ jobs:
     name: release-gate
     if: ${{ always() && github.event_name == 'pull_request' }}
     needs:
-      - review-settled
+      - review-policy
       - baseline-policy
       - branch-policy
+      - candidate-context
+      - release-dry-run
       - source-build
       - source-node
       - source-browser
@@ -378,9 +423,12 @@ jobs:
     steps:
       - name: Require every source lane
         env:
-          REVIEW_RESULT: ${{ needs.review-settled.result }}
+          REVIEW_RESULT: ${{ needs.review-policy.result }}
           BASELINE_RESULT: ${{ needs.baseline-policy.result }}
           POLICY_RESULT: ${{ needs.branch-policy.result }}
+          CANDIDATE_CONTEXT_RESULT: ${{ needs.candidate-context.result }}
+          PACKAGING_REQUIRED: ${{ needs.candidate-context.outputs.packaging_required }}
+          DRY_RUN_RESULT: ${{ needs.release-dry-run.result }}
           BUILD_RESULT: ${{ needs.source-build.result }}
           NODE_RESULT: ${{ needs.source-node.result }}
           BROWSER_RESULT: ${{ needs.source-browser.result }}
@@ -390,29 +438,36 @@ jobs:
           test "$REVIEW_RESULT" = "success"
           test "$BASELINE_RESULT" = "success"
           test "$POLICY_RESULT" = "success"
+          test "$CANDIDATE_CONTEXT_RESULT" = "success"
           test "$BUILD_RESULT" = "success"
           test "$NODE_RESULT" = "success"
           test "$BROWSER_RESULT" = "success"
           test "$ELECTRON_NATIVE_RESULT" = "success"
           test "$ELECTRON_AI_RESULT" = "success"
+          if test "$PACKAGING_REQUIRED" = "true"; then
+            test "$DRY_RUN_RESULT" = "success"
+          else
+            test "$DRY_RUN_RESULT" = "skipped"
+          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22.13.0
-      - name: Revalidate frozen head/base review evidence
+      - name: Revalidate frozen head/base final-review policy immediately
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: >-
-          node scripts/check-pr-review-settled.mjs
+          node scripts/check-pr-review-policy.mjs
           --repository "$GITHUB_REPOSITORY"
           --pull-request "${{ github.event.pull_request.number }}"
           --expected-head "${{ github.event.pull_request.head.sha }}"
           --expected-base "${{ github.event.pull_request.base.sha }}"
-          --settle-seconds 180
-          --timeout-seconds 60
-          --poll-seconds 10
+          --settle-seconds 0
+          --timeout-seconds 1
+          --poll-seconds 1
+          --mode revalidate
       - name: Refresh dependency and packaged-runtime baseline before attestation
         run: npm run audit:dependencies
       - name: Create exact-tree source gate attestation

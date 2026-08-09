@@ -7,10 +7,11 @@ PageRoot keeps the release standard high while avoiding repeated proof of the sa
 | Boundary | Trigger | Evidence | What it must not do |
 | --- | --- | --- | --- |
 | PR feedback | Pull Request opens, updates or reopens | Impact-selected Node/compiler feedback for the current head | Report `release-gate` or run the complete Browser/Electron matrix |
-| Review settlement | A frozen, exact-head/base-reviewed Pull Request explicitly transitions from Draft to Ready | Live head/base equality, Draft request/completion, Ready-triggered non-blocking substantive review, immutable exact-commit clean comment or phase-correct clean reaction, no current-commit `CHANGES_REQUESTED`, 180-second settle window and no active P0-P2 thread | Start dependency, build, Browser or Electron work while review is pending, blocking or stale |
-| Dependency baseline | Review settlement and branch policy pass | Unchanged advisory threshold plus exact packaged-runtime closure | Start a complete source lane or macOS runner while the global baseline is red |
-| Source candidate | Review settlement and dependency baseline pass for one promoted head | Full Node, three Browser shards, real HTML, native Electron and deterministic AI; exact-tree attestation | Automatically rerun on later commits, package or publish an installer |
-| Release dry run | Packaging/release metadata/Electron/Bridge/Schema/resource path changes on a Pull Request | Credential-free unsigned App, non-release checkpoint, clean-job renderer/metadata revalidation and startup identity | Read signing/Apple secrets, create distributables or enter Candidate/publication |
+| Review policy | A frozen Pull Request transitions to Ready once | Live head/base equality, post-Ready exact-commit Codex completion, 30-second settle window, active P0/P1 and P0/P1 `CHANGES_REQUESTED` blocking, P2/P3/unclassified debt artifact | Reuse an old review, make review priority weaken deterministic safety checks or block a candidate solely for P2/P3 debt |
+| Dependency baseline | Branch policy pass | Unchanged advisory threshold plus exact packaged-runtime closure | Start a complete source lane or macOS runner while the global baseline is red |
+| Source candidate | Dependency baseline pass for one promoted head; final review runs in parallel | Full Node, three Browser shards, real HTML, native Electron and deterministic AI; exact-tree attestation | Automatically rerun on later commits, package or publish an installer |
+| Release dry run | `candidate-context` identifies packaging/release metadata/Electron/Bridge/Schema/resource risk on a Ready candidate | Credential-free unsigned App, non-release checkpoint, clean-job renderer/metadata revalidation and startup identity | Read signing/Apple secrets, create distributables or enter Candidate/publication; reject a PR merely because it is large |
+| Review debt | Trusted weekly default-branch scheduled/manual run | Rolling P2/P3/unclassified review issue, machine-readable snapshot and carried-forward state for unresolved aged findings | Check out PR code, modify a PR, merge or turn debt into a required check |
 | Main integrity | Source candidate is merged | Match merged PR, Tree Hash, version and fresh PR attestation | Repeat any Node, Browser or Electron source test |
 | Developer preview | Explicit manual request only | Clean Tree, ad-hoc DMG, packaged-content audit, isolated startup and non-release attestation | Sign/notarize, create updater assets, become a prerequisite, tag or publish |
 | Release candidate | Manual `Release Candidate` dispatch on current `main` | Pre-sign content/runtime proof, signed-App checkpoint, final DMG/ZIP/update checks, release asset hashes and candidate attestation | Rebuild the verified App after checkpoint, create a tag or GitHub Release |
@@ -24,35 +25,38 @@ push, Pull Request, schedule, formal candidate or publication event triggers
 it. Its seven-day artifact cannot be promoted; formal release evidence starts
 independently from reviewed `main`.
 
-`Release Dry Run` is automatic only for its narrow `pull_request.paths` set.
-It uses two clean macOS jobs and a synthetic public-format telemetry token, but
-no repository secret. Its checkpoint says `releaseEligible: false` and has a
-separate kind, directory and filename that the formal signed-App restore will
-not accept. It is deterministic pre-merge feedback, not reusable release
-evidence.
+`candidate-context` is a narrow deterministic path classifier. It reports
+packaging risk, changed-file count and advisory scope, but never rejects a Pull
+Request for size. When it finds packaging risk, `ci.yml` calls the reusable
+`Release Dry Run` workflow for that exact candidate head. It uses two clean
+macOS jobs and a synthetic public-format telemetry token, but no repository
+secret. Its checkpoint says `releaseEligible: false` and has a separate kind,
+directory and filename that the formal signed-App restore will not accept. A
+source-only candidate skips it successfully. It is deterministic pre-merge
+feedback, not reusable release evidence.
 
 `PR Feedback` and the source-candidate workflow share a per-PR concurrency key.
 A new commit therefore cancels an in-flight complete run for the stale head but
 does not create a `release-gate` job for the new SHA. Returning to Draft alone
-starts no Feedback workflow; a still-running `review-settled` poll re-reads that
-state and fails closed. The required check stays absent until the new head gets
-an explicit exact-SHA Draft request and is promoted again. A PR opened
-non-draft receives Feedback only and cannot satisfy the Draft request boundary.
-Promote one PR at a time; keep other parallel work Draft until the current
-candidate merges, then update and promote the next branch against the new
-`main`.
+starts no Feedback workflow; a still-running `review-policy` poll re-reads that
+state and fails closed. The required check stays absent until the new head is
+batched and promoted Ready again. Keep parallel PR scope a judgement call, not
+a fixed capacity rule: use the CI Health Ready-count and candidate-churn data to
+coordinate real congestion, while allowing coherent large changes when their
+review and rollback boundary is clear.
 
 ## CI ownership and isolation
 
-- `review-settled` is the first promotion barrier. It revalidates the live head and base against the Ready event plus the latest Ready timeline event, requires a trusted exact-head/base request and completion made strictly inside the Draft interval, then waits for the Ready-triggered non-blocking substantive exact-commit review, immutable exact-commit clean comment or phase-correct clean reaction strictly after Ready. The durable clean comment preserves Draft evidence when Ready replaces the earlier PR thumbs-up. Equal second-resolution causal boundaries fail closed. Empty/unmarked reviews and `EYES` are ignored. A current-commit `CHANGES_REQUESTED` blocks Draft promotion immediately or, after Ready, starts the three-minute settle window and then blocks even without an inline thread. The gate holds three minutes from the real completion or blocking review and rejects active non-outdated P0-P2 threads. `release-gate` repeats that live evidence check after all source lanes and before exact-tree attestation.
+- `review-policy` is a final-candidate barrier that runs in parallel with deterministic work. It revalidates live head/base and the latest Ready event, accepts only a post-Ready exact-commit Codex review with `Reviewed commit` evidence or an unedited exact-commit clean Codex comment, then waits 30 seconds. It blocks active non-outdated P0/P1 threads and P0/P1 `CHANGES_REQUESTED` reviews; GitHub review history is reduced to each reviewer's latest explicit decision on the final head, so only a later approval or dismissal retracts an earlier request. P2/P3/unclassified findings are written to non-blocking debt regardless of reviewer. `release-gate` repeats the evidence check in immediate revalidation mode after all source lanes and before exact-tree attestation.
 - The promotion workflow remains a read-only `pull_request` workflow. It grants no write permission, never uses `pull_request_target` to execute checked-out PR code and never merges a Pull Request.
-- `baseline-policy` waits for both review settlement and branch policy. It runs `audit:dependencies`, whose single command owns both advisory policy and packaged-runtime closure. `source-build`, Native Electron and AI Electron depend on this job, so a red global baseline consumes no macOS runner.
+- `branch-policy`, `review-policy` and `candidate-context` have no dependency on one another. `baseline-policy` waits only for branch policy and runs `audit:dependencies`, whose single command owns both advisory policy and packaged-runtime closure. `source-build`, Native Electron and AI Electron depend on this job, so a red global baseline consumes no macOS runner while a review wait no longer serializes the test matrix.
 - Linux builds and shares only the Web renderer used by Node and Browser lanes.
 - Each macOS Electron lane builds the Electron renderer locally. The build is normally sub-second and removes Linux-to-macOS build output as a variable.
 - Native Electron and deterministic AI run as separate jobs. A failure can be rerun independently.
 - Each macOS job first runs a product-independent synthetic Electron environment preflight. It proves that the hosted window is visible and that renderer timers and animation frames advance before PageRoot code or assertions begin.
 - Browser shards, real HTML, native Electron and AI keep retries at zero. Reliability is obtained from deterministic readiness and better evidence, not blanket retrying.
 - Release Dry Run has two sequential macOS jobs. The first builds metadata and an explicitly unsigned App, runs the shared packaged verifier with the dry-run signature policy and freezes a non-release checkpoint. The second restores the checkpoint in a fresh checkout, restores its exact metadata, rebuilds `dist-desktop`, reruns the same verifier, then launches the App to compare runtime name/version and Bundle ID with the source package contract. Neither job builds a DMG or sees signing/notarization inputs. Formal Candidate profiles keep their ad-hoc pre-sign and Developer ID signature gates unchanged.
+- `review-debt.yml` runs from scheduled/manual trusted default-branch code with `contents: read`, `pull-requests: read` and `issues: write`. It only refreshes one rolling issue from active non-blocking findings; its hidden state retains a finding when its PR is outside the seven-day activity scan, and removes it only after a later scan of that PR confirms it is absent. It has no `pull_request` trigger, no PR-head checkout and no merge permission.
 - Release Candidate has two sequential macOS jobs. `preflight-sign-and-notarize-app` first assembles an ad-hoc App, checks packaged contents, runs the complete packaged-runtime oracle, signs it and proves signed startup before the App is submitted to Apple. Only after App acceptance does it upload an archive/hash/source-bound checkpoint.
 - `package-and-verify-candidate` downloads and revalidates that checkpoint, restores the exact embedded build and telemetry metadata as comparison inputs, rebuilds only the deterministic Electron renderer as a source-comparison oracle, uses electron-builder `--prepackaged` to avoid rebuilding the App, creates updater assets, submits only the final DMG to Apple and performs final mounted/extracted verification. The fresh job never regenerates telemetry configuration or receives its project token. The jobs have 90- and 75-minute guards; App and DMG Apple steps have 45- and 50-minute limits. All non-Apple steps keep explicit 2–10 minute limits.
 - The formal Candidate checkpoint transfer is its only added normal-path handoff. Its ZIP is uploaded without redundant Actions compression. This small fixed cost prevents content/runtime failures from consuming Apple queue time and lets a failed second job resume without rebuilding, rerunning packaged runtime, resigning or renotarizing the App.
@@ -115,6 +119,11 @@ Review these metrics per release and as a rolling 30-day view:
 | Complete source-gate attempts per released Tree Hash | P50 `1`, average at most `1.5` |
 | Complete source-gate runs per Pull Request | Average at most `1.25` |
 | Ready-PR full gate wall time | P50 under `6 min`, P95 under `10 min` |
+| Final candidate to merge | P50 under `40 min` |
+| Ready to final review completion | P50 under `15 min` |
+| Ready candidate test completion | P50 under `20 min` |
+| Required gate to merge wait | P50 under `10 min` |
+| Ready transitions per Pull Request | Average at most `1.25` |
 | CI-environment false-failure rate | Under `2%` of critical jobs |
 | Repeated green runner share | Under `20%` of runner minutes |
 | Later candidate-SHA churn | Under `20%` of all PR runner minutes |
@@ -124,7 +133,7 @@ Review these metrics per release and as a rolling 30-day view:
 
 Runner minutes and wall time are different signals. Splitting Electron lanes may use similar total macOS minutes while reducing critical-path time and allowing only the failed lane to rerun. The goal is less repeated evidence, not simply fewer tests.
 
-The read-only `CI Health` workflow runs daily and can also be dispatched manually. Its first job runs the same dependency advisory and packaged-runtime closure baseline even when no PR is promoted; the report job still runs with `always()` so a red baseline is recorded rather than hiding the thirty-day metrics. `scripts/ci-health-report.mjs` reads the complete paginated `ci.yml`, `pr-feedback.yml`, `release-dry-run.yml`, `release-candidate.yml` and `release.yml` Actions history for the requested window and fails explicitly rather than silently truncating an exceptional oversized window. The five external workflow inputs live in one exported contract shared by report collection and test-ownership selection, so adding an input without mapping it to CI Health coverage fails the source gate. The report groups terminal complete runs by Pull Request number, falling back to head branch for legacy records, charges every transition from one completed candidate SHA to a different SHA to candidate churn—including a later return to an earlier SHA—without treating adjacent same-SHA reruns as cross-SHA churn, records total/full/feedback/dry-run/churn runner minutes, and reports cancellation rates for all PR workflows and promoted candidates. A run is terminal only when Actions reports `status=completed` and a conclusion; active runs cannot contribute attempts, wall latency, churn or cancellation-rate denominators. Their counts and the minutes from already-completed jobs remain visible as separate active workload, while assessment shares use terminal-workflow minutes. Review-only, baseline-only and still-running promotions are therefore not miscounted as complete gates. Publication rebuild attempts are derived only from successful Release runs whose `Publish immutable GitHub Release` step also succeeded; a period with no proven publication or missing job evidence reports `NO DATA`, never a synthetic zero. The Actions Summary gives every machine-measured report target an explicit `MET`, `MISSED` or `NO DATA` result plus an overall status; `output/ci-health/ci-health.json` retains the same assessment for 90 days. Empty periods remain `null`/`n/a`; they are never reported as a false zero failure rate.
+The read-only `CI Health` workflow runs daily and can also be dispatched manually. Its first job runs the same dependency advisory and packaged-runtime closure baseline even when no PR is promoted; the report job still runs with `always()` so a red baseline is recorded rather than hiding the thirty-day metrics. `scripts/ci-health-report.mjs` reads paginated Actions history plus Pull Request Ready events, reviews, review comments and issue comments for the requested window and fails explicitly rather than silently truncating an exceptional oversized window. Its review latency accepts only the same post-Ready, exact-final-head Codex completion that `review-policy` accepts; its test-completion latency ends at the last successful source/dry-run lane rather than the gate that also waits for review. It filters flow intervals to their relevant Ready/merge timestamps, and binds each gate to the final candidate SHA. It reports candidate-to-merge, Ready-to-review, Ready-to-gate, gate-to-merge, Ready count and P0/P1/P2/P3/unclassified distributions alongside tree attempts, repeated-green work, churn, runner minutes and cancellation rates. The five external workflow inputs live in one exported contract shared by report collection and test-ownership selection, so adding an input without mapping it to CI Health coverage fails the source gate. A run is terminal only when Actions reports `status=completed` and a conclusion; active runs cannot contribute attempts, wall latency, churn or cancellation-rate denominators. Their counts and the minutes from already-completed jobs remain visible as separate active workload, while assessment shares use terminal-workflow minutes. Review-only, baseline-only and still-running promotions are therefore not miscounted as complete gates. Publication rebuild attempts are derived only from successful Release runs whose `Publish immutable GitHub Release` step also succeeded; a period with no proven publication or missing job evidence reports `NO DATA`, never a synthetic zero. The Actions Summary gives every machine-measured report target an explicit `MET`, `MISSED` or `NO DATA` result plus an overall status; `output/ci-health/ci-health.json` retains the same assessment for 90 days. Empty periods remain `null`/`n/a`; they are never reported as a false zero failure rate.
 
 ## Change control
 

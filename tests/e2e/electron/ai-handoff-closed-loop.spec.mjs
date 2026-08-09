@@ -4177,7 +4177,9 @@ test("a clipboard handoff failure keeps the frozen Request recoverable", async (
     await launched.page.getByRole("textbox", { name: "评论内容" })
       .fill(`改为 ${UPDATED_TEXT}`);
     await launched.page.getByRole("button", { name: "评论", exact: true }).click();
-    await launched.page.getByRole("button", { name: /发送至 Qoder/u }).click();
+    const sendToQoder = launched.page.getByRole("button", { name: /发送至 Qoder/u });
+    await expect(sendToQoder).toBeEnabled();
+    await sendToQoder.click();
     await expect(launched.page.getByText("等待 QoderWork 返回修改结果", { exact: true }))
       .toBeVisible();
     expect(await launched.electronApp.evaluate(({ clipboard }) => clipboard.readText()))

@@ -681,12 +681,11 @@ test("release dry-run workflow crosses two clean jobs without credentials or rel
     readFile(path.join(productRoot, ".github/workflows/release-dry-run.yml"), "utf8"),
     readFile(path.join(productRoot, ".github/workflows/release-candidate.yml"), "utf8"),
   ]);
-  assert.match(workflow, /on:\s*\n\s+pull_request:[\s\S]+paths:/u);
-  assert.match(workflow, /- desktop\/\*\*/u);
-  assert.match(workflow, /- scripts\/ci-evidence\.mjs/u);
-  assert.match(workflow, /- scripts\/release-app-checkpoint\.mjs/u);
-  assert.match(workflow, /- scripts\/workspace-bridge\.mjs/u);
-  assert.doesNotMatch(workflow, /- app\/\*\*/u);
+  assert.match(workflow, /on:\s*\n\s+workflow_call:/u);
+  assert.match(workflow, /workflow_dispatch:/u);
+  assert.match(workflow, /pull_request_number:[\s\S]+source_head:/u);
+  assert.match(workflow, /ref:\s*\$\{\{ inputs\.source_head \}\}/u);
+  assert.doesNotMatch(workflow, /^\s+pull_request:/mu);
   assert.match(workflow, /assemble:[\s\S]+restore:[\s\S]+needs: assemble/u);
   assert.equal((workflow.match(/actions\/checkout@/gu) || []).length, 2);
   assert.equal((workflow.match(/- run: npm ci/gu) || []).length, 2);

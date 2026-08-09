@@ -33,7 +33,7 @@ State, persistence and lifecycle changes must follow
 mutation outcomes, reuse the shared drain boundaries and remove any workaround
 the new invariant supersedes. `npm run architecture:check` is mandatory.
 
-Push the branch and open a Pull Request. The PR must explain the problem, the chosen boundary, verification performed and any user-visible impact. Maintainers may request a smaller change when a PR mixes unrelated concerns.
+Push the branch and open a Draft Pull Request. The PR must explain the problem, the chosen boundary, verification performed and any user-visible impact. Keep changes coherent, but PR size is advisory rather than a hard repository limit: split only when review, rollback or product boundaries are genuinely separate. Batch verified P0/P1 user-impact fixes before marking the final head Ready once; P2/P3 and unclassified review findings are tracked in the weekly debt queue unless a maintainer explicitly escalates them.
 
 GitHub removes the remote task branch after squash merge. Maintainers use the
 read-only `npm run task:audit` report and an explicit
@@ -44,6 +44,7 @@ implicitly.
 ## Pull Request requirements
 
 - CI passes without skipped required checks.
+- The final Ready review policy has no active P0/P1 finding or P0/P1 `CHANGES_REQUESTED`; deferred P2/P3/unclassified findings do not require a churn-inducing follow-up commit, regardless of reviewer.
 - No secrets, personal data, user HTML, generated output or release binary is committed.
 - Protocol or schema changes include fixtures, migration/compatibility notes and tests.
 - UI changes include a concise description or screenshot when it materially helps review.
