@@ -322,7 +322,7 @@
         "^scripts/(?:check-architecture|draft-aggregate|draft-command-decoder|draft-service|project-context-service|source-history-service)\\.mjs$",
         "^tests/(?:architecture-boundaries|bridge-client|comment-session|compatibility-decoders|document-session|draft-aggregate|draft-service|draft-session|drain-coordinator|external-file-open-session|local-action-outcomes|project-application-session|project-open-queue|project-query-fence|project-rules-session|project-session|recovery-store|review-analysis-session|run-lifecycle|run-session|runtime-capabilities|source-history|source-history-session|version-session)\\.test\\.mjs$",
         "^(?:CONTRIBUTING|docs/(?:ARCHITECTURE|ARCHITECTURE_CONTRACT|COMPATIBILITY|STATE_OWNERSHIP|ENGINEERING_STANDARDS|SECURITY_MODEL|RUNTIME_VISUAL_CONTRACT))\\.md$",
-        "^docs/decisions/(?:0003-session-ownership-and-mutation-outcomes|0004-v2-editable-islands|0007-independent-interactive-preview|0008-safe-presentation-actions-in-edit-mode|0009-persistent-source-patch-history|0011-workbench-session-decomposition|0012-id-first-project-context|0013-edit-runtime-visual-projection|0015-safe-host-fallback-and-direct-text-nodes)\\.md$"
+        "^docs/decisions/(?:0003-session-ownership-and-mutation-outcomes|0004-v2-editable-islands|0007-independent-interactive-preview|0008-safe-presentation-actions-in-edit-mode|0009-persistent-source-patch-history|0011-workbench-session-decomposition|0012-id-first-project-context|0013-edit-runtime-visual-projection|0015-safe-host-fallback-and-direct-text-nodes|0016-owner-controlled-review-runtime-capture)\\.md$"
       ],
       "suites": ["typecheck"],
       "nodeTests": [
@@ -407,17 +407,20 @@
       "id": "ai-review-workspace",
       "patterns": [
         "^app/application/review-analysis-session\\.(?:js|d\\.ts)$",
+        "^app/domain/runtime-snapshot-hosts\\.(?:d\\.ts|js)$",
         "^app/lib/review-(?:projection-facts|runtime-visual|semantic-alignment|text-diff)\\.(?:d\\.ts|js)$",
         "^app/lib/review-comment-source-map\\.js$",
         "^app/lib/page-presentation-dom\\.ts$",
         "^app/lib/review-scroll-sync\\.(?:js|d\\.ts)$",
         "^app/workbench/(?:AiReviewWorkspace|review-document|review-runtime-capture-adapter|review-state)\\.(?:ts|tsx)$",
+        "^app/components/desktop-review-runtime-visual-api\\.ts$",
+        "^desktop/runtime-visual-capture-owner\\.mjs$",
         "^app/workbench/ai-review-workspace\\.module\\.css$",
         "^scripts/benchmark-review-analysis\\.mjs$",
-        "^tests/(?:ai-review-workspace|review-analysis-session|review-comment-source-map|review-projection-facts|review-runtime-visual|review-scroll-sync|review-semantic-alignment|review-text-diff|runtime-visual-contract)\\.test\\.mjs$",
-        "^tests/fixtures/runtime-visual-hostile-pages\\.mjs$",
+        "^tests/(?:ai-review-workspace|review-analysis-session|review-comment-source-map|review-projection-facts|review-runtime-capture-owner|review-runtime-visual|review-scroll-sync|review-semantic-alignment|review-text-diff|runtime-snapshot-hosts|runtime-visual-contract)\\.test\\.mjs$",
         "^tests/e2e/electron/ai-handoff-closed-loop\\.spec\\.mjs$",
-        "^docs/(?:AI_SUPPLEMENT_AND_VALIDATION|CHANGE_REQUEST_PROTOCOL|INTERACTION_FLOW|MVP_PRD|RUNTIME_VISUAL_CONTRACT)\\.md$"
+        "^docs/(?:AI_SUPPLEMENT_AND_VALIDATION|ARCHITECTURE|ARCHITECTURE_CONTRACT|CHANGE_REQUEST_PROTOCOL|INTERACTION_FLOW|MVP_PRD|RUNTIME_VISUAL_CONTRACT|SECURITY_MODEL|STATE_OWNERSHIP)\\.md$",
+        "^docs/decisions/0016-owner-controlled-review-runtime-capture\\.md$"
       ],
       "suites": ["typecheck", "ai-smoke"],
       "nodeTests": [
@@ -425,8 +428,13 @@
         "tests/review-analysis-session.test.mjs",
         "tests/review-comment-source-map.test.mjs",
         "tests/review-projection-facts.test.mjs",
+        "tests/review-runtime-capture-owner.test.mjs",
         "tests/review-runtime-visual.test.mjs",
+        "tests/runtime-snapshot-hosts.test.mjs",
         "tests/runtime-visual-contract.test.mjs",
+        "tests/desktop-preload-ipc.test.mjs",
+        "tests/desktop-package.test.mjs",
+        "tests/preview-protocol.test.mjs",
         "tests/review-scroll-sync.test.mjs",
         "tests/review-semantic-alignment.test.mjs",
         "tests/review-text-diff.test.mjs"
@@ -511,7 +519,7 @@
       "id": "desktop-runtime",
       "patterns": [
         "^desktop/.*\\.(?:mjs|tsx|ts|html)$",
-        "^tests/(?:bridge-startup|edit-visual-capture|electron-window-policy|open-in-default-browser|preview-protocol)\\.test\\.mjs$"
+        "^tests/(?:bridge-startup|edit-visual-capture|electron-window-policy|open-in-default-browser|preview-protocol|review-runtime-capture-owner)\\.test\\.mjs$"
       ],
       "suites": ["electron-smoke"],
       "nodeTests": [
@@ -529,6 +537,7 @@
         "tests/electron-window-policy.test.mjs",
         "tests/open-in-default-browser.test.mjs",
         "tests/preview-protocol.test.mjs",
+        "tests/review-runtime-capture-owner.test.mjs",
         "tests/desktop-package.test.mjs",
         "tests/usage-telemetry.test.mjs"
       ]

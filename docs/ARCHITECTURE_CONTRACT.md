@@ -205,133 +205,35 @@ compatible tag/context/stable-key buckets after exact and unique identity
 matches; it cannot restore a page-wide Cartesian candidate set or change the
 existing evidence thresholds.
 
-Formal review has a separate, narrower runtime-visual supplement owned by the
-parent `AiReviewWorkspace` and its `ReviewRuntimeVisualCoordinator`. The frozen
-source analyzer enables it only for the managed desktop preview transport.
-Edit and Review share the frozen limits, page budget, owner deadline and
-source/session envelope declared by `runtime-visual-contract.js`; neither side
-may restate a numeric boundary. Review bootstrap production is behind
-`ReviewRuntimeVisualCaptureAdapter`, whose input is the exact review session,
-side-specific full source Hash and private frozen bindings. Evidence transport
-must match contract version, session and source Hash before snapshots are read.
-The
-main process must reject authored navigation away from that direct
-`pageroot-preview` subframe. On an attempt before the first load completes, the preview protocol owner
-must atomically switch only that volatile session to a stricter-CSP document
-with authored scripts removed and the owned external bootstrap retained, then
-reload the same frame. That pair completes with static evidence instead of
-trusting a replacement document; inline/browser review remains static-only. The frozen
-source analyzer must first prove a unique source-empty host pair and absence of
-an existing static footprint over that host. An ordinary host additionally
-requires a relevant changed authored script that directly references its
-distinctive identity. A host directly targeted by, or nested below, a frozen
-non-global review comment may instead use that opaque local target as scope
-evidence, so split palette/data/config and host-binding scripts remain
-detectable. Every frozen non-global comment target inside that high-confidence
-review section also starts a nearest-chart-group search: its first ancestor with
-at least two pairable source-empty hosts defines the group, so a caption or
-heading target may grant lower-priority local scope to its sibling charts
-without parsing comment text or inferring visual distance. Direct, contained
-and nearest-group hosts are selected in that order before ordinary hosts under
-the same 128-candidate cap. A global comment never authorizes
-page-wide runtime capture, the group cannot cross its section, and merely
-placing another changed script elsewhere in the section remains insufficient
-causal evidence. A host admitted only by that comment scope has no marker
-authority until a first observed before/after difference repeats in one fresh
-run of the same frozen document pair on both sides; a direct changed-script
-reference does not need the replay. A replay mismatch, failure or timeout
-removes only that scope-relaxed evidence and retains the static result. Comment
-scope attributes are analysis-only and are removed before either review document
-is serialized. Each source-resolved local before target is represented only by
-an opaque private initial-bootstrap binding: an element path plus a narrow
-static fingerprint, never a source-node identity attribute. The managed preview
-serves that binding only to the parser-blocking first bootstrap request and then
-serves an unbound fallback to later author-initiated requests. The trusted
-parent keeps the source-node configuration and sends targets only to the before
-bootstrap over a separately challenged private `MessageChannel`; comment body,
-comment key, source-node and locator-map data never enter document bytes or a
-later fetchable bootstrap response. A unique source `id`, `data-*`, `name`, or
-`aria-label` is an optional fallback only when private binding is unavailable,
-never a positional sibling path. A fingerprintless binding remains valid only
-while its observed element is the exact frozen path; a same-tag observation at
-a shifted path makes that target ambiguous and omits the marker. Missing,
-ambiguous, replaced or disconnected bindings, and unavailable private transport,
-omit the marker rather than guessing. Only the before bootstrap returns comment geometry, so authored CSS
-or scripts cannot observe a comment scope marker and create runtime evidence
-themselves.
-Runtime candidate keys and original source-box baselines are carried by the
-same one-shot private bootstrap binding, not by attributes in review HTML. The
-first parser request consumes an opaque path/fingerprint/baseline record; later
-sampling resolves only its closure-held element/key/baseline map and later
-bootstrap reads receive unbound source. No fixed runtime-host or source-box
-attribute, candidate key or locator path is serialized. A stale path may match
-only one private fingerprint; a missing, ambiguous, replaced or disconnected
-binding invalidates the complete runtime batch and retains static evidence.
-Confirmation creates fresh preview sessions, so its new frame pair gets new
-one-shot bindings.
-The trusted first bootstrap must bind the DOM/style/Canvas collection,
-numeric conversion/rounding, string-normalization/digest and
-Promise/timer/animation scheduling entry points
-before authored scripts run. Its bounded font wait must use only captured Promise
-capabilities, rather than a native `Promise.race` that re-reads mutable static
-methods. It receives the exact declared candidate-key list from frozen analysis and
-must record the parser-created element that first
-claims each key. Undeclared host attributes have no authority. A missing,
-duplicate, transferred or replaced declared key, or key/element drift during
-either sample invalidates the complete runtime batch and retains the static
-result. Per-host traversal, node, value and Canvas limits remain isolated, while
-one aggregate budget spans every declared host and both stability samples within
-each frame run. The conditional confirmation is at most one additional run and
-starts only after a scope-only candidate actually differs. An
-unsupported, unstable, over-budget or locally failed host must produce one
-validated `unavailable` fact; that fact has no comparison
-authority and cannot suppress valid sibling-host facts.
-The producer must select at most 24 deterministic identity attributes and the
-consumer must enforce that same shared limit. If a host exceeds the limit, the
-producer omits the binding even when it has an explicit `id` or `name` anchor;
-no retained prefix or anchor exception may guess a parser sibling. Parser mutation records may bind
-an exact inserted Element without comparing mutable text only when at least one
-stable attribute matches; duplication, replacement or disconnection still
-fails closed. Text without visible color, text fill, shadow, decoration or stroke is not
-paint evidence, while one painted child plus its geometry is sufficient visual
-evidence.
-Both already-isolated review frames may then report one bounded pair of
-same-side-stable, host-relative HTML/SVG/Canvas fingerprints for every declared
-candidate. Only a first-pair change from a comment-scope-only candidate asks
-the parent to clear its old ports and reload the same two isolated frames once;
-the candidate must match its own side's fresh fingerprint before that first
-pair may be compared. Every other candidate uses the first pair only, including
-comment-scope candidates with no first-pair difference. Fingerprints include the
-host's own painted box, a fully transparent host as a stable disappearance
-state, and directly mutated size while excluding an unpainted empty box,
-indirect layout size and any subtree hidden beneath a zero-opacity host or
-descendant wrapper, including SVG vector groups. A visible subtree becoming transparent remains a real
-stable-result change. An omitted candidate entry, malformed available
-fingerprint or invalid identity still invalidates the whole runtime batch; a
-well-formed unavailable entry is ignored during comparison. A batch
-completed before frame registration remains cached for the challenged claim.
-Coordinator installation must drain every already-registered frame bound to the
-same document pair; neither load-before-owner nor owner-before-load may strand
-the initial projection. Once the managed session pair exists, the parent must
-resolve to static evidence if both exact frame documents have not registered
-within 1.5s; a session failure takes the same path and late registration cannot
-reopen it. The separate 500ms comparison deadline may start only after both
-exact frame documents have loaded; asymmetric resource loading is not analysis time.
-The one permitted comment-scope confirmation reload receives the same 1.5s
-registration boundary and a fresh 500ms comparison deadline only after both
-replacement frames load. Its failure cannot erase a direct-causality marker
-from the first pair, but its scope-relaxed candidates fail closed. Evidence
-travels only over a challenged `MessageChannel` capability created by the
-trusted first bootstrap script and transferred only for a browser-trusted parent
-event. Its first owned capture listener validates the trusted parent/session/type
-and stops propagation before later authored capture listeners can inspect either
-runtime or comment challenge; the ordinary bridge listener cannot transfer a
-port. Authored-window `ready`, synthetic requests or lookalike channel messages
-have no fact authority. Only a complete
-before/after batch received before the applicable initial or confirmation deadline may add a visual marker;
-absolute page position, one-sided, unstable, invalid, timed-out and late facts
-fail closed to the unchanged static result. The supplement owns no source,
-Version, persistence, Bridge, drain or activation state.
+Formal Review has an optional, narrower runtime-snapshot supplement. One
+`SourceHostResolver` pairs only direct source Canvas/SVG roots and source-empty
+stable hosts from `SourceIndex`/`TargetRef`; it does not use changed-script
+causality, computed selectors, comment scope or runtime DOM guessing. The
+trusted `AiReviewWorkspace` begins static Review immediately and, after both
+frames are ready, sends exact HTML, side-specific source SHA, viewport and those
+frozen bindings through one narrow preload call. Inline/browser review remains
+static-only.
+
+Comment location remains a separate private capability. An opaque initial
+bootstrap binding may identify a frozen before target for comment geometry, but
+it neither reaches authored markup nor authorizes runtime host discovery.
+Electron's one-use `RuntimeSnapshotOwner` owns capture. It validates the raw
+source path/tag/identity, creates a non-persistent preview session and hidden
+sandboxed window, denies navigation/popups/downloads/webviews/permissions and
+non-preview requests, and reads the exact rendered host only in an isolated
+world. A source-empty host must contain visible Canvas/SVG paint. One rect pass
+and at most one `capturePage` PNG per host are bounded by the shared contract;
+the owner validates PNG shape, and trusted renderer memory validates bytes,
+dimensions, SHA-256 and aggregate budgets. Raw DOM/node handles never cross the
+owner boundary, and no candidate binding or PNG enters authored review HTML,
+bootstrap code or page messaging.
+
+The one before/after snapshot pair is compared once. Only captured snapshots
+with different PNG presentation can add an opaque `changeId`/`outlineId` style
+marker. A missing desktop API, unmapped host, malformed envelope, timeout,
+cancellation or late result is a silent static-only outcome. There is no second
+fresh pair, confirmation coordinator, runtime UI or Review cache. Edit remains
+on its existing implementation until the later convergence milestone.
 
 Comment layout is measured only after current disposable presentation is
 applied. The Workbench accepts no card coordinates until the Canvas reports a

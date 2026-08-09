@@ -156,103 +156,48 @@ popup, download, modal or host IPC capability. Parent-side capture also blocks
 anchor navigation and form submission, nested iframes receive an empty sandbox,
 and refresh/CSP meta directives are removed only from the disposable review copy
 so they cannot navigate the frame or suppress the trusted review bootstrap.
-Runtime-chart evidence is enabled only for the managed desktop preview transport.
-The main process rejects authored navigation away from a direct
-`pageroot-preview` subframe. A rejected pre-load attempt atomically marks that
-volatile protocol session for a one-time reload: every authored script is
-removed, inline handlers are disabled by the stricter CSP, and only the owned
-external bootstrap remains executable. The replacement document therefore
-cannot receive or answer the challenge, while the review completes silently
-from static evidence. Inline/browser review uses static evidence only.
+Runtime-chart evidence is enabled only through the managed desktop owner.
+The authored review iframe remains presentation-only: it has no runtime capture
+request, candidate binding, screenshot result, or runtime `MessagePort`.
+For every capture, Electron main creates a fresh non-persistent partition and
+hidden sandboxed window that can load only its expected `pageroot-preview:` URL.
+Permissions, navigation, popups, downloads, webviews and all non-preview
+network requests are denied. The ephemeral preview has no source path, Bridge,
+preload, Node or filesystem capability. Inline/browser review remains
+static-only.
 
 Entering review does not change `project.json.sourcePath`, the current Canvas,
 the immutable Version or the activation transaction, and runtime interaction
-state is never serialized. The renderer accepts review messages only when the
-session ID, side, declared message source and `MessageEvent.source` all match the
-registered frame. Runtime-chart snapshot messages are additionally limited to
-host keys declared by the frozen source analyzer, per-host bounded atom/signature
-counts plus one aggregate traversal/value/Canvas budget across each per-run
-two-sample batch, exactly one well-formed available or unavailable snapshot for every
-declared key, and one accepted batch
-per side. Ordinary frame `ready` messages never carry
-runtime evidence. An omitted or malformed snapshot invalidates the complete
-runtime batch and leaves static review authoritative; a validated unavailable
-host has no comparison authority and does not grant authority to or suppress a
-different host. Candidate declaration requires either a changed-script reference
-to the unique source-empty host or a frozen non-global opaque comment target on
-that host or an ancestor. Independently, every frozen non-global opaque comment
-target inside the same high-confidence review section seeds the first ancestor
-with at least two pairable hosts, so an anchored caption or heading may grant
-lower-priority scope to its sibling charts. The group cannot cross its section
-or derive from visual distance; comment text never enters either frame, and a
-global comment never authorizes page-wide capture. Opaque scope attributes exist
-only while frozen analysis prioritizes candidates and are stripped before either
-document is serialized. Each source-resolved local target is represented only
-by an opaque private initial-bootstrap binding: an element path plus a narrow
-static fingerprint, never a source-node identity in the document. The managed
-preview serves that binding only to the parser-blocking first bootstrap request,
-then replaces it with an unbound fallback for later author-initiated reads. The
-trusted parent retains the source-node map; only after the before frame loads
-does a separately challenged bootstrap-owned `MessageChannel` receive targets.
-Comment body, key, source-node and locator-map data are absent from document
-bytes and any later fetchable bootstrap response. A unique source `id`,
-`data-*`, `name`, or `aria-label` is a safe fallback only when private binding
-is unavailable, never a mutable sibling ordinal. A fingerprintless binding is
-accepted only at its exact frozen path; a same-tag observation at a shifted path
-is ambiguous and omits the marker. Missing, ambiguous, replaced or disconnected
-bindings, or an unavailable private capability exchange, omit the marker rather
-than guessing. Authored CSS or scripts therefore cannot
-observe a comment scope marker or manufacture a change. If a host was admitted only through that scope,
-not a direct changed-script reference, a first-pair difference must match the
-same side in one newly loaded frozen frame pair; clock/random one-shots, a
-replacement-frame failure, or a mismatch have no marker authority. Every later
-identity, stability, budget and transport check remains unchanged.
-Runtime candidate keys and original source-box baselines are not persistent
-authored-page metadata. Each selected host is represented only by a one-shot
-private initial-bootstrap binding containing an opaque path, narrow static
-fingerprint and frozen baseline. The first parser request receives it; the
-managed preview then serves unbound fallback source, and the bootstrap uses
-only its closure-held element/key/baseline map thereafter. Fixed
-runtime-host/source-box attributes, candidate keys and locator paths are never
-serialized. A stale path can resolve only to one matching private fingerprint;
-missing, ambiguous, replaced or disconnected bindings invalidate the whole
-runtime batch, so authored CSS or scripts cannot turn those internals into
-manufactured runtime evidence. A confirmation pair uses fresh sessions and its
-own one-shot bindings.
-The trusted bootstrap pre-creates separate `MessageChannel` capabilities for
-runtime evidence and, on the before side only, private locator delivery, and binds
-  the DOM traversal, attribute, layout, computed-style, Canvas, numeric
-conversion/rounding, string normalization/digest, and
-Promise/timer/animation scheduling primitives used for evidence before any
-authored script runs. Its bounded font wait composes only captured Promise capabilities, so it never re-reads
-page-mutable static methods. An early observer records the
-parser-created element that first claims every frozen candidate key. Snapshot
-discovery accepts only that exact key/element set: undeclared attributes are
-ignored, while a missing, duplicate, transferred or replaced declared host or
-key/element drift invalidates the whole runtime batch and leaves static review
-authoritative. A local capture exception, instability or budget exhaustion is
-contained to that declared host as unavailable. For runtime evidence, after both exact
-frame documents load, the parent sends a fresh random challenge
-that the bootstrap consumes only from a browser-trusted parent event in its first
-capture listener without exposing it to later authored listeners, then transfers
-the pre-created capability port. The same first capture listener protects the
-before-side comment-channel challenge; it validates the trusted parent,
-  session and type, stops propagation before any authored capture listener runs,
-  and leaves the ordinary bridge listener unable to transfer either port. Only
-  the matching port may submit snapshots. Runtime requests, channel transfer and
-  snapshot envelopes must also match the shared contract version and the exact
-  side-specific source Hash. The producer uses the same shared 24-attribute
-  boundary enforced by the consumer; every over-limit host is omitted rather
-  than represented by an unsafe prefix, including hosts with an explicit
-  `id`/`name` anchor.
-  Parser-added Elements may ignore mutable text only when at least one stable
-  attribute proves the exact record; ambiguity, replacement or disconnection
-  remains a static-only result.
-They contain no executable DOM and can
-only add a disposable visual marker after a complete stable pair, plus the
-required same-side fresh-pair confirmation for scope-only admission; forged window
-messages, invalid, partial, timed-out or late input are ignored. A user must
-still invoke the existing fail-closed ready-version activation path through
+state is never serialized. The renderer accepts a snapshot result only when its
+envelope matches contract version, capture session, side and full source SHA.
+Candidates come only from the frozen `SourceHostResolver`: direct Canvas/SVG
+roots or source-empty stable hosts. Candidate bindings and TargetRefs remain in
+trusted renderer memory; they never enter review HTML, bootstrap bytes,
+attributes or page messages. An omitted, malformed, late or failed owner result
+leaves static Review authoritative.
+
+Before scripts run, the owner validates the source path/tag/identity. Its
+isolated-world program then confirms that same runtime host and, for a stable
+container, visible Canvas/SVG paint. It performs one rect pass and at most one
+bounded PNG capture per host. Renderer memory revalidates PNG bytes, dimensions,
+hash and aggregate limits. The owner deadline is scheduled in main, so
+page-controlled promises or timers cannot extend it.
+
+Comment location remains separately private. Each source-resolved local target
+may use an opaque initial-bootstrap binding: an element path plus a narrow
+static fingerprint, never a source-node identity in authored HTML. The managed
+preview serves that binding only to the first parser-blocking bootstrap request,
+then falls back to an unbound response. The trusted parent sends the final
+key-to-target mapping only to the before bootstrap over a challenged private
+`MessageChannel`. Comment body, key, source-node and locator-map data are absent
+from document bytes and later bootstrap reads. A unique source `id`, `data-*`,
+`name`, or `aria-label` is only a safe fallback; missing, ambiguous, replaced or
+disconnected targets omit the comment marker rather than rebinding by guess.
+This capability cannot discover or authorize runtime snapshots. Capture results
+are compared once; no replay/confirmation pair, script analysis or
+comment-group discovery exists. Navigation, cancellation, timeout, invalid PNG or
+cleanup failure destroys the window and revokes the ephemeral session. The user
+still invokes the existing fail-closed ready-version activation path through
 “直接打开” or the review confirmation “打开 AI 修改后”.
 
 Edit-mode reveal actions use the same trust boundary. They accept only strict

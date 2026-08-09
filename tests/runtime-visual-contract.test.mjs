@@ -1,55 +1,34 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
 
 import {
   RUNTIME_VISUAL_CONTRACT,
   RUNTIME_VISUAL_CONTRACT_VERSION,
   acceptedRuntimeVisualEnvelope,
 } from "../app/domain/runtime-visual-contract.js";
-import {
-  RUNTIME_VISUAL_FIXTURE_SOURCE_SHA,
-  RUNTIME_VISUAL_HOSTILE_PAGES,
-} from "./fixtures/runtime-visual-hostile-pages.mjs";
-import {
-  RUNTIME_VISUAL_SETTLEMENT_IMPLEMENTATION_FILES,
-  RUNTIME_VISUAL_SETTLEMENT_IMPLEMENTATION_FINGERPRINT,
-} from "./fixtures/runtime-visual-settlement-manifest.mjs";
 
 const runtimeVisualContractDocument = await readFile(
   new URL("../docs/RUNTIME_VISUAL_CONTRACT.md", import.meta.url),
   "utf8",
 );
-const productRoot = fileURLToPath(new URL("../", import.meta.url));
 
-async function settlementImplementationFingerprint() {
-  const hash = createHash("sha256");
-  for (const relativePath of RUNTIME_VISUAL_SETTLEMENT_IMPLEMENTATION_FILES) {
-    hash.update(relativePath);
-    hash.update("\0");
-    hash.update(await readFile(resolve(productRoot, relativePath)));
-    hash.update("\0");
-  }
-  return `sha256:${hash.digest("hex")}`;
-}
-
-test("runtime visual producers and consumers share one immutable contract", () => {
+test("runtime snapshot producers and consumers share one immutable contract", () => {
   assert.equal(RUNTIME_VISUAL_CONTRACT_VERSION, 1);
   assert.equal(RUNTIME_VISUAL_CONTRACT.candidateLimit, 128);
   assert.equal(RUNTIME_VISUAL_CONTRACT.identityAttributeLimit, 24);
   assert.equal(RUNTIME_VISUAL_CONTRACT.ownerDeadlineMs, 1_500);
-  assert.equal(RUNTIME_VISUAL_CONTRACT.pageBudget.atoms, 8_192);
+  assert.equal(RUNTIME_VISUAL_CONTRACT.pageBudget.visualLimit, 32);
+  assert.equal(RUNTIME_VISUAL_CONTRACT.pageBudget.canvasPixels, 4_194_304);
+  assert.equal(RUNTIME_VISUAL_CONTRACT.pageBudget.visualBytes, 16_000_000);
   assert.equal(Object.isFrozen(RUNTIME_VISUAL_CONTRACT), true);
   assert.equal(Object.isFrozen(RUNTIME_VISUAL_CONTRACT.pageBudget), true);
 });
 
-test("runtime visual envelopes bind contract, session, and full source SHA", () => {
+test("runtime snapshot envelopes bind contract, session, and full source SHA", () => {
   const expected = {
     sessionId: "review-contract-session",
-    sourceSha256: RUNTIME_VISUAL_FIXTURE_SOURCE_SHA.before,
+    sourceSha256: `sha256:${"a".repeat(64)}`,
   };
   assert.deepEqual(acceptedRuntimeVisualEnvelope({
     contractVersion: RUNTIME_VISUAL_CONTRACT_VERSION,
@@ -61,58 +40,18 @@ test("runtime visual envelopes bind contract, session, and full source SHA", () 
   assert.equal(acceptedRuntimeVisualEnvelope({
     contractVersion: RUNTIME_VISUAL_CONTRACT_VERSION,
     ...expected,
-    sourceSha256: RUNTIME_VISUAL_FIXTURE_SOURCE_SHA.after,
+    sourceSha256: `sha256:${"b".repeat(64)}`,
   }, expected), null);
   assert.equal(acceptedRuntimeVisualEnvelope({
     contractVersion: 0,
     ...expected,
   }, expected), null);
-  assert.equal(acceptedRuntimeVisualEnvelope({
-    contractVersion: "1",
-    ...expected,
-  }, expected), null);
 });
 
-test("the settlement matrix locks an immutable implementation snapshot", async () => {
-  assert.match(
-    RUNTIME_VISUAL_SETTLEMENT_IMPLEMENTATION_FINGERPRINT,
-    /^sha256:[0-9a-f]{64}$/u,
-  );
-  assert.equal(
-    await settlementImplementationFingerprint(),
-    RUNTIME_VISUAL_SETTLEMENT_IMPLEMENTATION_FINGERPRINT,
-  );
-});
-
-test("the hostile-page settlement matrix closes all thirteen tracked threads", () => {
-  assert.equal(RUNTIME_VISUAL_HOSTILE_PAGES.length, 13);
-  assert.equal(
-    new Set(RUNTIME_VISUAL_HOSTILE_PAGES.map(({ threadId }) => threadId)).size,
-    13,
-  );
-  assert.equal(
-    RUNTIME_VISUAL_HOSTILE_PAGES.filter(({ pr }) => pr === 115).length,
-    5,
-  );
-  const classWriteFixture = RUNTIME_VISUAL_HOSTILE_PAGES.find(
-    ({ id }) => id === "pr115-class-write-causality",
-  );
-  assert.ok(classWriteFixture?.changedHtml);
-  assert.match(classWriteFixture.changedHtml, /querySelector\('\[class~="chart-host"\]'\)/u);
-  assert.doesNotMatch(classWriteFixture.changedHtml, /querySelector\("div"\)/u);
-  assert.ok(
-    runtimeVisualContractDocument.includes(
-      RUNTIME_VISUAL_SETTLEMENT_IMPLEMENTATION_FINGERPRINT,
-    ),
-  );
-  for (const fixture of RUNTIME_VISUAL_HOSTILE_PAGES) {
-    assert.match(fixture.id, /^pr(?:100|105|107|115)-/u);
-    assert.match(fixture.html, /<!doctype html>/iu);
-    assert.ok(fixture.contract.length > 20);
-    assert.ok(fixture.closureReason.length > 20);
-    assert.match(fixture.threadUrl, new RegExp(`/pull/${fixture.pr}#discussion_`, "u"));
-    assert.ok(runtimeVisualContractDocument.includes(fixture.id));
-    assert.ok(runtimeVisualContractDocument.includes(fixture.threadId));
-    assert.ok(runtimeVisualContractDocument.includes(fixture.threadUrl));
-  }
+test("the published contract names the reduced Review snapshot boundary", () => {
+  assert.match(runtimeVisualContractDocument, /SourceHostResolver/u);
+  assert.match(runtimeVisualContractDocument, /RuntimeSnapshotOwner/u);
+  assert.match(runtimeVisualContractDocument, /one bounded before\/after owner capture/u);
+  assert.match(runtimeVisualContractDocument, /no second fresh before\/after pair/u);
+  assert.doesNotMatch(runtimeVisualContractDocument, /settlement matrix|thirteen tracked threads/u);
 });

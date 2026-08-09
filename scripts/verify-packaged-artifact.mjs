@@ -109,6 +109,7 @@ const REQUIRED_APP_SOURCE_FILES = [
   "desktop/usage-telemetry.mjs",
   "desktop/preview-protocol.mjs",
   "desktop/edit-visual-capture.mjs",
+  "desktop/runtime-visual-capture-owner.mjs",
   "app/domain/runtime-visual-contract.js",
   "public/brand-logo.png",
 ];

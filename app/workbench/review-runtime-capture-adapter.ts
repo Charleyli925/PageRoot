@@ -13,18 +13,6 @@ export type ReviewRuntimeVisualCaptureIdentity = {
   readonly sourceSha256BySide: Readonly<Record<ReviewRuntimeVisualSide, string>>;
 };
 
-export type ReviewRuntimeVisualBootstrapRequest = {
-  readonly identity: ReviewRuntimeVisualCaptureIdentity;
-  readonly side: ReviewRuntimeVisualSide;
-  readonly runtimeVisualBindings: readonly unknown[];
-  readonly reviewCommentBindings: readonly unknown[];
-};
-
-export interface ReviewRuntimeVisualCaptureAdapter {
-  readonly id: string;
-  createBootstrap(request: ReviewRuntimeVisualBootstrapRequest): string;
-}
-
 export function createReviewRuntimeVisualCaptureIdentity({
   sessionId,
   sourceSha256BySide,

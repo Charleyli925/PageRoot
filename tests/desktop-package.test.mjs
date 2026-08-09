@@ -118,6 +118,7 @@ test("desktop package carries the v3 patch engine, candidate assessment and acti
   assert.ok(packageJson.build.files.includes("desktop/application-update.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/usage-telemetry.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/preview-protocol.mjs"));
+  assert.ok(packageJson.build.files.includes("desktop/runtime-visual-capture-owner.mjs"));
   assert.ok(packageJson.build.files.includes("app/domain/runtime-visual-contract.js"));
   assert.ok(packageJson.build.files.includes("public/brand-logo.png"));
   const mainLocalImports = [...mainProcess.matchAll(
@@ -431,7 +432,8 @@ test("desktop package carries the v3 patch engine, candidate assessment and acti
     "only a preview that has not completed its first load needs the scriptless reload",
   );
   assert.match(previewProtocol, /PREVIEW_PROTOCOL_SCHEME = "pageroot-preview"/);
-  assert.match(previewProtocol, /protocolApi\.handle\(PREVIEW_PROTOCOL_SCHEME/);
+  assert.match(previewProtocol, /targetProtocol\.handle\(PREVIEW_PROTOCOL_SCHEME/);
+  assert.match(previewProtocol, /const installFor = \(targetProtocol = protocolApi\)/);
   assert.match(previewProtocol, /isContainedPath\(session\.sourceRoot, resolvedPath\)/);
   assert.doesNotMatch(previewProtocol, /bypassCSP:\s*true/);
   assert.match(
@@ -509,6 +511,12 @@ test("desktop package carries the v3 patch engine, candidate assessment and acti
     preload,
     /exposeInMainWorld\(["']htmlAIEditVisuals["'],\s*editVisualApi\)/,
   );
+  assert.match(
+    preload,
+    /exposeInMainWorld\(\s*["']htmlAIReviewRuntimeVisuals["'],\s*reviewRuntimeVisualApi,?\s*\)/,
+  );
+  assert.match(mainProcess, /createReviewRuntimeCaptureController/);
+  assert.match(mainProcess, /html-review-runtime-visuals:capture/);
   assert.match(preload, /exposeInMainWorld\(["']htmlAIRuntime["'],\s*runtimeConfig\)/);
   assert.match(preload, /exposeInMainWorld\(["']htmlAIAppLifecycle["'],\s*appLifecycleApi\)/);
   assert.match(preload, /onPrepareClose/);

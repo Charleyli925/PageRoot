@@ -3,7 +3,6 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import vm from "node:vm";
 
-import { runtimeVisualHostilePage } from "./fixtures/runtime-visual-hostile-pages.mjs";
 import { generatedReviewBootstrap } from "./helpers/generated-review-bootstrap.mjs";
 
 const [
@@ -393,193 +392,36 @@ test("all-change review keeps text treatment precise and mirrors authored action
   assert.match(review, /document\.addEventListener\("pointerdown", closeOnOutsidePointer, true\)/);
 });
 
-test("runtime chart review supplements only the initial bounded static footprint", () => {
-  assert.match(reviewDocument, /annotateRuntimeVisualCandidates/);
-  assert.match(
-    reviewDocument,
-    /const runtimeVisualAnnotations: ReviewRuntimeVisualAnnotations = options\.externalBootstrap\s+\? annotateRuntimeVisualCandidates/,
-  );
-  assert.match(
-    reviewDocument,
-    /const runtimeVisualCandidates = runtimeVisualAnnotations\.candidates/,
-  );
-  assert.match(reviewDocument, /reviewBootstrapElementBinding/);
-  assert.match(reviewDocument, /runtimeVisualInitialBindings = Object\.freeze/);
-  assert.match(reviewDocument, /initialBindingObserver/);
-  assert.match(reviewDocument, /bootstrapFallbackJavaScript/);
-  assert.match(review, /bootstrapFallbackJavaScript: documents\.bootstrapFallbackJavaScript\.before/);
-  assert.match(review, /bootstrapFallbackJavaScript: documents\.bootstrapFallbackJavaScript\.after/);
-  assert.match(review, /\[documents, independentTransport, runtimeVisualFrameRun, sourcePath\]/);
-  assert.match(review, /frameRun: number;/);
-  assert.match(
-    review,
-    /desktopSessionResult\.frameRun === runtimeVisualFrameRun/,
-  );
-  assert.match(
-    review,
-    /const frame = event\.currentTarget;\s+if \(iframeRef\.current !== frame\) return;/,
-  );
-  assert.match(
-    review,
-    /if \(message\.type === "ready"\) \{\s+runtimeVisualReadySidesRef\.current\.add\(message\.side\);\s+const frame = framesRef\.current\[message\.side\];\s+if \(frame\) \{\s+prepareReviewCommentFrame\(message\.side, frame\);\s+prepareRuntimeVisualFrame\(message\.side, frame\);/,
-  );
-  assert.match(reviewDocument, /staticReviewMarkerCoversRuntimeHost/);
-  assert.match(reviewDocument, /collectRuntimeVisualSnapshots/);
-  assert.match(reviewDocument, /runtimeVisualBatchNodeLimit/);
-  assert.match(reviewDocument, /runtimeVisualBatchAtomLimit/);
-  assert.match(reviewDocument, /runtimeVisualBatchValueLimit/);
-  assert.match(reviewDocument, /runtimeVisualSnapshotBudgetExhausted/);
-  assert.match(
-    reviewDocument,
-    /capture\.content\.length\s*\+\s*capture\.paint\.length\s*\+\s*capture\.geometry\.length\s*\+\s*capture\.vector\.length/,
-  );
-  assert.match(
-    reviewDocument,
-    /const runtimeVisualSnapshotBudget = \{\s+atoms: 0,\s+nodes: 0,\s+valueLength: 0,\s+canvasPixels: 0,\s+\}/,
-  );
-  assert.match(
-    reviewDocument,
-    /captureRuntimeVisualHost\(\s+host,\s+expectedKey,\s+sourceBoxSignature,\s+runtimeVisualSnapshotBudget,\s+\)/,
-  );
-  assert.doesNotMatch(
-    reviewDocument,
-    /captureRuntimeVisualHost\(host, \{\s+atoms: 0,/,
-  );
-  assert.match(reviewDocument, /runtimeVisualUnavailableSnapshot/);
-  assert.match(reviewDocument, /hostIndex % 4 === 0/);
-  assert.match(reviewDocument, /runtimeVisualExpectedKeys = Object\.freeze/);
-  assert.match(reviewDocument, /const RuntimeVisualString = String;/);
-  assert.match(reviewDocument, /const RuntimeVisualPromise = Promise;/);
-  assert.match(reviewDocument, /runtimeVisualMathImul = Math\.imul\.bind\(Math\)/);
-  assert.match(reviewDocument, /runtimeVisualSetTimeout = window\.setTimeout\.bind\(window\)/);
-  assert.match(
-    reviewDocument,
-    /runtimeVisualRequestAnimationFrame = window\.requestAnimationFrame\.bind\(window\)/,
-  );
-  assert.match(
-    reviewDocument,
-    /runtimeVisualPromiseRace = \(values\) => new RuntimeVisualPromise\(\(resolve, reject\) => \{/,
-  );
-  assert.match(
-    reviewDocument,
-    /runtimeVisualPromiseResolve = RuntimeVisualPromise\.resolve\.bind\(RuntimeVisualPromise\)/,
-  );
-  assert.match(reviewDocument, /runtimeVisualStringCharCodeAt/);
-  assert.match(reviewDocument, /runtimeVisualStringPadStart/);
-  assert.match(reviewDocument, /const runtimeVisualNormalizeText = \(value\) =>/);
-  assert.match(
-    reviewDocument,
-    /const text = runtimeVisualNormalizeText\(\s*runtimeVisualNodeTextContent\(textNode\) \|\| "",\s*\);/,
-  );
-  assert.match(reviewDocument, /runtimeVisualDocumentQuerySelectorAll/);
-  assert.match(reviewDocument, /runtimeVisualGetComputedStyle = getComputedStyle\.bind\(window\)/);
-  assert.match(reviewDocument, /const hosts = runtimeVisualExpectedHosts\(\)/);
-  assert.match(reviewDocument, /if \(hosts === null\) return null/);
-  assert.match(reviewDocument, /if \(runtimeVisualSnapshots !== null\)/);
-  assert.match(reviewDocument, /runtimeVisualInitialBindingElement/);
-  assert.match(reviewDocument, /runtimeVisualInitialBindingMatches/);
-  assert.match(reviewDocument, /drainInitialBindings\(\);/);
-  assert.match(reviewDocument, /runtimeVisualKeyForHost\(host\) !== key/);
-  assert.match(reviewDocument, /type === "apply-runtime-visual-changes"/);
-  assert.match(reviewDocument, /new MessageChannel\(\)/);
-  assert.match(reviewDocument, /!event\.isTrusted/);
-  assert.match(reviewDocument, /stopImmediateMessagePropagation\(event\)/);
-  assert.match(reviewDocument, /type: "runtime-visual-channel"/);
-  assert.match(reviewDocument, /type: "runtime-visual-snapshots"/);
-  assert.match(reviewDocument, /runtimeVisualSnapshotBatch = runtimeVisualSnapshots/);
-  assert.match(reviewDocument, /runtimeVisualSourceBoxSignatures/);
-  assert.doesNotMatch(reviewDocument, /data-pageroot-review-runtime-identity-attribute/);
-  assert.doesNotMatch(reviewDocument, /data-pageroot-review-runtime-source-/);
-  assert.doesNotMatch(reviewDocument, /data-pageroot-review-runtime-host/);
-  assert.doesNotMatch(reviewDocument, /data-pageroot-review-runtime-source-box/);
-  assert.match(
-    reviewDocument,
-    /changedScripts\.some\(\(\{ content \}\) => referencesHost\(content\)\)/,
-  );
-  assert.match(
-    reviewDocument,
-    /requiresDeterministicConfirmation: commentPriority > 0 && !runtimeVisualCause/,
-  );
-  assert.doesNotMatch(reviewDocument, /sectionPair\.(?:before|after)\?\.contains/);
-  assert.doesNotMatch(reviewDocument, /hostReferenceScripts/);
-  assert.match(reviewDocument, /remainingSignatures/);
-  assert.match(reviewDocument, /if \(explicitTokens\.length\) return explicitTokens/);
-  assert.match(reviewDocument, /hostBoxMutated/);
-  assert.match(reviewDocument, /hostFullyTransparent/);
-  assert.match(reviewDocument, /"host-box\|opacity=0"/);
-  assert.match(reviewDocument, /runtimeVisualVisibilityCache = new RuntimeVisualWeakMap/);
-  assert.match(
-    reviewDocument,
-    /while \(runtimeVisualIsInstance\(RuntimeVisualElement, current\)\)[\s\S]*?runtimeVisualStyleValue\(style, "opacity"\)[\s\S]*?current === host/,
-  );
-  assert.match(
-    reviewDocument,
-    /if \(isVector\) \{[\s\S]*?runtimeVisualVisible\([\s\S]*?runtimeVisualVisibilityCache/,
-  );
-  const runtimeChannelTransferStart = reviewDocument.indexOf(
-    "const transferRuntimeVisualChannel",
-  );
-  const runtimeChannelTransferEnd = reviewDocument.indexOf(
-    "const clamp",
-    runtimeChannelTransferStart,
-  );
-  assert.match(
-    reviewDocument.slice(runtimeChannelTransferStart, runtimeChannelTransferEnd),
-    /publishRuntimeVisualSnapshots\(\);[\s\S]*post\("ready"/,
-  );
-  assert.match(reviewDocument, /\|size=" \+ runtimeVisualRounded\(rect\.width\)/);
-  assert.match(reviewDocument, /\|\| hostOwnPaint/);
-  assert.match(review, /new ReviewRuntimeVisualCoordinator/);
-  assert.match(review, /REVIEW_RUNTIME_VISUAL_DEADLINE_MS/);
-  assert.match(review, /onRequestConfirmation: requestRuntimeVisualConfirmation/);
-  assert.match(review, /setRuntimeVisualFrameRun\(\(current\) => current \+ 1\)/);
-  assert.match(review, /runtimeVisualCoordinatorRef\.current\?\.failConfirmation\(\)/);
-  assert.match(review, /RUNTIME_VISUAL_CONTRACT\.ownerDeadlineMs/);
-  assert.match(review, /createReviewCapabilityChallenge/);
-  assert.match(review, /event\.ports\.length === 1/);
-  assert.match(review, /message\.challenge !== expectedChallenge/);
-  assert.match(review, /coordinator\.start\(\)/);
-  assert.match(review, /useLayoutEffect\(\(\) => \{/);
-  assert.match(review, /runtimeVisualOwnerDocumentsRef/);
-  assert.match(review, /runtimeVisualFrameDocumentsRef/);
-  const runtimeOwnerStart = review.indexOf("useLayoutEffect(() => {");
-  const runtimeOwnerEnd = review.indexOf(
-    "const finishPagePresentation",
-    runtimeOwnerStart,
-  );
-  assert.match(
-    review.slice(runtimeOwnerStart, runtimeOwnerEnd),
-    /drainRegisteredFrames\(\);[\s\S]*runtimeVisualCoordinatorRef\.current = coordinator;[\s\S]*drainRegisteredFrames\(\);/,
-  );
-  assert.match(review, /prepareRuntimeVisualFrame\(side, frame\)/);
-  assert.match(
-    review,
-    /useLayoutEffect\(\(\) => \{\s+const handleMessage =/,
-  );
-  const runtimeReadyStart = review.indexOf('if (message.type === "ready")');
-  const runtimeReadyEnd = review.indexOf(
-    'if (message.type === "presentation-ready")',
-    runtimeReadyStart,
-  );
-  assert.doesNotMatch(
-    review.slice(runtimeReadyStart, runtimeReadyEnd),
-    /runtimeVisualSnapshots|coordinator\.accept/,
-  );
-  assert.match(review, /confirmationAction \|\| runtimeVisualPending/);
-  assert.match(
-    review,
-    /if \(reviewLoadFailed\)[\s\S]*?settleWithoutRuntime[\s\S]*?RUNTIME_VISUAL_CONTRACT\.ownerDeadlineMs/,
-  );
-  assert.doesNotMatch(review, /运行态不稳定|分析未完成|概括标记/);
+test("runtime chart review is captured by the owner and never trusted from the authored page", () => {
+  assert.match(reviewDocument, /runtimeVisualCaptureCandidates/);
+  assert.match(reviewDocument, /runtimeVisualSourceHtml/);
+  assert.match(reviewDocument, /resolveRuntimeSnapshotHosts/);
+  assert.match(reviewDocument, /sourceHostTargetRefs/);
+  assert.match(review, /window\.htmlAIReviewRuntimeVisuals/);
+  assert.match(review, /requestOwnerRuntimeVisualCapture/);
+  assert.match(review, /documents\.runtimeVisualSourceHtml\[side\]/);
+  assert.match(review, /documents\.runtimeVisualCaptureCandidates\[side\]/);
+  assert.match(review, /acceptedRuntimeVisualEnvelope/);
+  assert.match(review, /acceptReviewRuntimeVisualSnapshots/);
+  assert.match(review, /changedReviewRuntimeVisualCandidateKeys/);
+  assert.match(review, /Promise\.all\(/);
+  assert.match(review, /runtimeVisualStaticReadyRef/);
+  assert.match(review, /staticReady\.sides\.size === 2/);
+  assert.match(review, /requestOwnerRuntimeVisualCapture\(\);/);
+  assert.match(review, /inert=\{confirmationAction \? true : undefined\}/);
+  assert.doesNotMatch(review, /runtimeVisualPending|runtimeVisualFrameRun/);
+  assert.doesNotMatch(review, /ReviewRuntimeVisualCoordinator|requiresDeterministicConfirmation/);
+  assert.doesNotMatch(reviewDocument, /runtimeVisualScriptReferencesToken|runtimeVisualCommentMatch/);
+  assert.doesNotMatch(reviewDocument, /request-runtime-visual-channel/);
+  assert.doesNotMatch(reviewDocument, /runtime-visual-channel/);
+  assert.doesNotMatch(reviewDocument, /runtime-visual-snapshots/);
+  assert.doesNotMatch(reviewDocument, /collectRuntimeVisualSnapshots|captureRuntimeVisualHost/);
+  assert.doesNotMatch(reviewDocument, /runtimeVisualExpectedKeys|runtimeVisualInitialBindings/);
 });
 
-test("the generated runtime review bootstrap stays syntactically valid", () => {
-  const bootstrap = generatedReviewBootstrap(["runtime-host-1", "runtime-host-2"]);
+test("the generated review bootstrap keeps comments but has no runtime-evidence protocol", () => {
+  const bootstrap = generatedReviewBootstrap();
   assert.doesNotThrow(() => new vm.Script(bootstrap));
-  assert.match(
-    bootstrap,
-    /const runtimeVisualExpectedKeys = Object\.freeze\([\s\S]*?\["runtime-host-1","runtime-host-2"\]/,
-  );
   assert.match(bootstrap, /const reviewCommentChannel = side === "before"/);
   assert.match(bootstrap, /type: "review-comment-channel"/);
   assert.match(bootstrap, /const capturePrivateChannelRequest = \(event\) =>/);
@@ -587,65 +429,31 @@ test("the generated runtime review bootstrap stays syntactically valid", () => {
     bootstrap,
     /runtimeVisualAddEventListener\("message", capturePrivateChannelRequest, \{ capture: true \}\)/,
   );
-  assert.match(bootstrap, /const runtimeVisualInitialBindings = Object\.freeze/);
   assert.match(bootstrap, /const reviewCommentInitialBindings = Object\.freeze/);
   assert.match(bootstrap, /const initialBindingObserver/);
-  assert.match(bootstrap, /const runtimeVisualIdentityElements = new RuntimeVisualMap\(\)/);
   assert.match(bootstrap, /const reviewCommentIdentityElements = new RuntimeVisualMap\(\)/);
   assert.match(bootstrap, /message\.type !== "comment-targets"/);
+  assert.doesNotMatch(bootstrap, /request-runtime-visual-channel/);
+  assert.doesNotMatch(bootstrap, /runtime-visual-channel/);
+  assert.doesNotMatch(bootstrap, /runtime-visual-snapshots/);
+  assert.doesNotMatch(bootstrap, /collectRuntimeVisualSnapshots|captureRuntimeVisualHost/);
+  assert.doesNotMatch(bootstrap, /runtimeVisualExpectedKeys|runtimeVisualInitialBindings/);
   assert.doesNotMatch(bootstrap, /data-pageroot-review-runtime-source-/);
   assert.doesNotMatch(bootstrap, /data-pageroot-review-comment-source-/);
   assert.doesNotMatch(bootstrap, /review-comment-1|runtime-comment-caption/);
 });
 
-test("hostile review fixtures are enforced by the adapter and page contract", () => {
-  const nativeCanvas = runtimeVisualHostilePage("pr100-canvas-native-intrinsics");
-  const classOnlyHost = runtimeVisualHostilePage("pr100-single-painted-child");
-  const transparentText = runtimeVisualHostilePage("pr100-transparent-text");
-  const parserMutation = runtimeVisualHostilePage("pr107-parser-text-mutation");
-  const attributeLimit = runtimeVisualHostilePage("pr107-attribute-limit");
-  assert.match(nativeCanvas.html, /Math\.round=\(\)=>0/u);
-  assert.match(classOnlyHost.html, /class="chart-host"/u);
-  assert.match(classOnlyHost.html, /querySelector\('\[class~="chart-host"\]'\)/u);
-  assert.match(transparentText.html, /color="transparent"/u);
-  assert.match(transparentText.html, /rgba\(255, 0, 0, 0\)/u);
-  assert.match(transparentText.html, /rgb\(0, 0, 0\)/u);
-  assert.match(transparentText.html, /rgb\(255, 0, 0\)/u);
-  assert.match(transparentText.html, /-webkit-text-fill-color:rgb\(0, 0, 255\)/u);
-  assert.match(transparentText.html, /-webkit-text-fill-color:transparent/u);
-  assert.match(transparentText.html, /color\(srgb 1 0 0 \/ 0\)/u);
-  assert.match(transparentText.html, /oklab\(60% 0 0 \/ 0\)/u);
-  assert.match(transparentText.html, /text-shadow/iu);
-  assert.match(transparentText.html, /RegExp\.prototype\[Symbol\.match\]/u);
-  assert.match(transparentText.html, /RegExp\.prototype\.exec/u);
-  assert.match(parserMutation.html, /textContent="mutated"/u);
-  assert.match(parserMutation.html, /class="comment-target"/u);
-  assert.match(parserMutation.html, /class="comment-host"/u);
-  assert.match(attributeLimit.html, /data-key-24/u);
-  assert.match(attributeLimit.html, /id="anchored"/u);
-  assert.doesNotMatch(attributeLimit.html, /id=["']chart["']/u);
-
-  assert.match(reviewDocument, /ReviewRuntimeVisualCaptureAdapter/);
-  assert.match(reviewDocument, /REVIEW_PAGE_RUNTIME_VISUAL_CAPTURE_ADAPTER/);
+test("review candidates are source-backed rather than script or comment-scope inference", () => {
+  assert.doesNotMatch(reviewDocument, /ReviewRuntimeVisualCaptureAdapter/);
+  assert.doesNotMatch(reviewDocument, /REVIEW_PAGE_RUNTIME_VISUAL_CAPTURE_ADAPTER/);
+  assert.match(reviewDocument, /runtimeVisualCaptureCandidates/);
   assert.match(reviewDocument, /sourceSha256BySide/);
-  assert.match(reviewDocument, /runtimeVisualMathRound\(RuntimeVisualNumber/);
-  assert.match(reviewDocument, /runtimeVisualTextHasPaint/);
-  assert.match(reviewDocument, /runtimeVisualObservedBindingMatches/);
-  assert.match(reviewDocument, /runtimeVisualInitialBindingPathMatches/);
-  assert.match(reviewDocument, /runtimeVisualInitialBindingsBootstrapped/);
   assert.match(reviewDocument, /reviewCommentDeferredBindings/);
-  assert.match(reviewDocument, /runtimeVisualDocumentReadyState/);
-  assert.match(reviewDocument, /runtimeVisualRegExpExec/);
-  assert.match(reviewDocument, /runtimeVisualInitialBindingIgnoresIdentityText/);
-  assert.match(reviewDocument, /runtimeVisualScriptReferencesToken/);
-  assert.match(reviewDocument, /runtimeVisualScriptDataSelectorMatches/);
-  assert.match(reviewDocument, /runtimeVisualScriptAttributeOperatorMatches/);
-  assert.match(reviewDocument, /runtimeVisualScriptClassSelectorMatches/);
-  assert.match(reviewDocument, /kind: "class-value"/);
-  assert.doesNotMatch(reviewDocument, /content\.includes\(token\)/u);
-  assert.match(reviewDocument, /(?:color\|lab\|lch\|oklab\|oklch\|hsl\|hwb)/u);
-  assert.match(reviewDocument, /runtimeVisualNumberIsFinite/);
-  assert.match(reviewDocument, /runtimeVisualMutationRecordAddedNodes/);
+  assert.match(reviewDocument, /resolveRuntimeSnapshotHosts/);
+  assert.match(reviewDocument, /sourceElementsByNodeId/);
+  assert.doesNotMatch(reviewDocument, /runtimeVisualScript(?:ReferencesToken|DataSelectorMatches|AttributeOperatorMatches|ClassSelectorMatches)/);
+  assert.doesNotMatch(reviewDocument, /commentPriority|runtimeVisualCommentMatch|requiresDeterministicConfirmation/);
+  assert.doesNotMatch(reviewDocument, /selectPrioritizedReviewRuntimeVisualCandidates/);
   assert.match(
     reviewDocument,
     /nonReviewAttributes\.length > RUNTIME_VISUAL_CONTRACT\.identityAttributeLimit[\s\S]*?return null;/u,
@@ -654,10 +462,9 @@ test("hostile review fixtures are enforced by the adapter and page contract", ()
     reviewDocument,
     /\.slice\(0, RUNTIME_VISUAL_CONTRACT\.identityAttributeLimit\)/,
   );
-  const bootstrap = generatedReviewBootstrap(["runtime-host-1"]);
-  assert.match(bootstrap, /rawAttributes\.length > runtimeVisualIdentityAttributeLimit/);
-  assert.match(bootstrap, /contractVersion: runtimeVisualContractVersion/);
-  assert.match(bootstrap, /sourceSha256,/);
+  const bootstrap = generatedReviewBootstrap();
+  assert.doesNotMatch(bootstrap, /runtime-visual-channel/);
+  assert.doesNotMatch(bootstrap, /runtime-visual-snapshots/);
   assert.match(review, /acceptedRuntimeVisualEnvelope/);
 });
 

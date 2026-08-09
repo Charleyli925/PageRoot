@@ -500,7 +500,7 @@ export function createPreviewProtocolController({
   }
 
   const sessions = new Map();
-  let installed = false;
+  const installedProtocols = new WeakSet();
 
   const removeExpiredSessions = () => {
     const cutoff = now() - sessionTtlMs;
@@ -673,11 +673,16 @@ export function createPreviewProtocolController({
     }
   };
 
-  const install = () => {
-    if (installed) return;
-    protocolApi.handle(PREVIEW_PROTOCOL_SCHEME, handleRequest);
-    installed = true;
+  const installFor = (targetProtocol = protocolApi) => {
+    if (!targetProtocol || typeof targetProtocol.handle !== "function") {
+      throw new TypeError("Preview protocol target requires handle().");
+    }
+    if (installedProtocols.has(targetProtocol)) return;
+    targetProtocol.handle(PREVIEW_PROTOCOL_SCHEME, handleRequest);
+    installedProtocols.add(targetProtocol);
   };
+
+  const install = () => installFor(protocolApi);
 
   const dispose = () => {
     sessions.clear();
@@ -685,6 +690,7 @@ export function createPreviewProtocolController({
 
   return Object.freeze({
     install,
+    installFor,
     createSession,
     revokeSession,
     activateNavigationFallback,
