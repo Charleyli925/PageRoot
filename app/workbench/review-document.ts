@@ -1347,7 +1347,7 @@ type ChangedReviewScript = {
   content: string;
 };
 
-type RuntimeVisualScriptTokenKind =
+export type RuntimeVisualScriptTokenKind =
   | "id"
   | "class"
   | "class-value"
@@ -1355,7 +1355,7 @@ type RuntimeVisualScriptTokenKind =
   | "data-value"
   | "semantic-value";
 
-type RuntimeVisualScriptToken = {
+export type RuntimeVisualScriptToken = {
   value: string;
   kind: RuntimeVisualScriptTokenKind;
   attributeName?: string;
@@ -1779,7 +1779,61 @@ function runtimeVisualScriptClassSelectorMatches(
   return false;
 }
 
-function runtimeVisualScriptReferencesToken(
+function runtimeVisualScriptClassSelectorReferencesToken(
+  selector: string,
+  token: RuntimeVisualScriptToken,
+): boolean {
+  if (token.kind === "class") {
+    const escaped = runtimeVisualScriptRegexValue(token.value);
+    if (new RegExp(
+      `(?:^|[^A-Za-z0-9_.-])\\.${escaped}(?=$|[^A-Za-z0-9_.-])`,
+      "u",
+    ).test(selector)) return true;
+  }
+  return runtimeVisualScriptClassSelectorMatches(
+    `document.querySelector(${JSON.stringify(selector)})`,
+    token,
+  );
+}
+
+function runtimeVisualScriptAssignedClassMatches(
+  assignedValue: string,
+  token: RuntimeVisualScriptToken,
+): boolean {
+  if (token.kind === "class-value") return assignedValue === token.value;
+  return token.kind === "class"
+    && assignedValue.split(/[\t\n\f\r ]+/u).includes(token.value);
+}
+
+function runtimeVisualScriptClassWriteMatches(
+  source: string,
+  token: RuntimeVisualScriptToken,
+): boolean {
+  // A written class value alone is not evidence that the write targeted this
+  // host: an unrelated tooltip can receive the same class. Only accept a
+  // direct querySelector receiver whose selector already identifies the
+  // candidate token. Variable aliases and generic tag selectors intentionally
+  // fail closed because this lightweight parser cannot prove their target.
+  const receiver = "(?:document\\.)?querySelector(?:All)?\\s*\\(\\s*(?<selector>[^)]*)\\s*\\)(?:\\s*\\[\\s*\\d+\\s*\\])?";
+  const classNameWrite = new RegExp(
+    `${receiver}\\s*\\.\\s*className\\s*=\\s*(?<quote>[\"'\\x60])(?<assigned>[^\"'\\x60]*)\\k<quote>`,
+    "gu",
+  );
+  const setAttributeWrite = new RegExp(
+    `${receiver}\\s*\\.\\s*setAttribute\\s*\\(\\s*(?<classQuote>[\"'\\x60])class\\k<classQuote>\\s*,\\s*(?<valueQuote>[\"'\\x60])(?<assigned>[^\"'\\x60]*)\\k<valueQuote>\\s*\\)`,
+    "gu",
+  );
+  return [classNameWrite, setAttributeWrite].some((pattern) => (
+    [...source.matchAll(pattern)].some((match) => {
+      const selector = runtimeVisualScriptSelectorLiteral(match.groups?.selector || "");
+      return selector !== null
+        && runtimeVisualScriptClassSelectorReferencesToken(selector, token)
+        && runtimeVisualScriptAssignedClassMatches(match.groups?.assigned || "", token);
+    })
+  ));
+}
+
+export function runtimeVisualScriptReferencesToken(
   source: string,
   token: RuntimeVisualScriptToken,
 ): boolean {
@@ -1795,14 +1849,17 @@ function runtimeVisualScriptReferencesToken(
     ).test(source) || new RegExp(
       `\\[\\s*class\\s*(?:[~|^$*]?=)\\s*${runtimeVisualScriptStringLiteral(value)}`,
       "u",
-    ).test(source) || runtimeVisualScriptClassSelectorMatches(source, token);
+    ).test(source)
+      || runtimeVisualScriptClassSelectorMatches(source, token)
+      || runtimeVisualScriptClassWriteMatches(source, token);
   }
   if (token.kind === "class-value") {
     return runtimeVisualScriptClassSelectorMatches(source, token)
       || new RegExp(
         `\\bgetElementsByClassName\\s*\\(\\s*${runtimeVisualScriptStringLiteral(value)}\\s*\\)`,
         "u",
-      ).test(source);
+      ).test(source)
+      || runtimeVisualScriptClassWriteMatches(source, token);
   }
   if (token.kind === "data-attribute") {
     return runtimeVisualScriptDataSelectorMatches(source, token)
@@ -4441,12 +4498,11 @@ function reviewBootstrap(
       || runtimeVisualNormalizeText(runtimeVisualNodeTextContent(element) || "")
         .slice(0, 1024) === identityText;
   };
-  const runtimeVisualObservedBindingMatches = (element, binding) => {
+  const runtimeVisualInitialBindingIdentityMatches = (element, binding) => {
     const identityAttributes = runtimeVisualInitialBindingIdentityAttributes(binding);
     const identityText = typeof binding?.identityText === "string"
       ? RuntimeVisualString(binding.identityText)
       : "";
-    if (!runtimeVisualInitialBindingPathMatches(element, binding)) return false;
     if (!identityAttributes?.length && identityText.length > 0) {
       return runtimeVisualInitialBindingMatches(element, binding, false);
     }
@@ -4456,6 +4512,10 @@ function reviewBootstrap(
       runtimeVisualInitialBindingIgnoresIdentityText(identityAttributes, identityText),
     );
   };
+  const runtimeVisualObservedBindingMatches = (element, binding) => (
+    runtimeVisualInitialBindingPathMatches(element, binding)
+    && runtimeVisualInitialBindingIdentityMatches(element, binding)
+  );
   const runtimeVisualInitialBindingHasFingerprint = (binding) => {
     const attributes = runtimeVisualInitialBindingIdentityAttributes(binding);
     return runtimeVisualBoolean(
@@ -4555,21 +4615,24 @@ function reviewBootstrap(
         }
         return;
       }
-      // A fingerprintless runtime host has no evidence with which to
-      // distinguish a same-tag parser decoy from the source target after the
-      // frozen path shifts. Keep the entire runtime binding unavailable rather
-      // than letting the first observed element fabricate a visual diff.
+      // A path-shifted matching observation can be either the source target
+      // or an authored parser decoy. A path-only binding has no way to
+      // distinguish them; a fingerprinted binding becomes equally ambiguous
+      // once a second matching element is already bound at its frozen path.
+      // In both cases, do not attribute runtime evidence to either element.
       if (
         !pathMatches
-        && !hasFingerprint
-        && runtimeVisualInitialBindingMatches(observedElement, binding, true)
+        && runtimeVisualInitialBindingIdentityMatches(observedElement, binding)
         && runtimeVisualInitialBindingSourceBoxMatches(observedElement, binding)
       ) {
         // A legitimate sibling can have the same tag and source-box
         // attributes. Its observation belongs to the other declared frozen
         // path, not to this binding's decoy check.
         if (runtimeVisualInitialBindingForPath(observedElement, binding)) return;
-        runtimeVisualSetAdd(runtimeVisualInvalidKeys, key);
+        const existing = runtimeVisualMapGet(runtimeVisualIdentityElements, key);
+        if (!hasFingerprint || (existing && existing !== observedElement)) {
+          runtimeVisualSetAdd(runtimeVisualInvalidKeys, key);
+        }
         return;
       }
       if (!runtimeVisualObservedBindingMatches(observedElement, binding)) return;

@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   RUNTIME_VISUAL_CONTRACT,
@@ -10,6 +14,27 @@ import {
   RUNTIME_VISUAL_FIXTURE_SOURCE_SHA,
   RUNTIME_VISUAL_HOSTILE_PAGES,
 } from "./fixtures/runtime-visual-hostile-pages.mjs";
+import {
+  RUNTIME_VISUAL_SETTLEMENT_IMPLEMENTATION_FILES,
+  RUNTIME_VISUAL_SETTLEMENT_IMPLEMENTATION_FINGERPRINT,
+} from "./fixtures/runtime-visual-settlement-manifest.mjs";
+
+const runtimeVisualContractDocument = await readFile(
+  new URL("../docs/RUNTIME_VISUAL_CONTRACT.md", import.meta.url),
+  "utf8",
+);
+const productRoot = fileURLToPath(new URL("../", import.meta.url));
+
+async function settlementImplementationFingerprint() {
+  const hash = createHash("sha256");
+  for (const relativePath of RUNTIME_VISUAL_SETTLEMENT_IMPLEMENTATION_FILES) {
+    hash.update(relativePath);
+    hash.update("\0");
+    hash.update(await readFile(resolve(productRoot, relativePath)));
+    hash.update("\0");
+  }
+  return `sha256:${hash.digest("hex")}`;
+}
 
 test("runtime visual producers and consumers share one immutable contract", () => {
   assert.equal(RUNTIME_VISUAL_CONTRACT_VERSION, 1);
@@ -48,16 +73,46 @@ test("runtime visual envelopes bind contract, session, and full source SHA", () 
   }, expected), null);
 });
 
-test("the hostile-page matrix closes all eight live legacy threads", () => {
-  assert.equal(RUNTIME_VISUAL_HOSTILE_PAGES.length, 8);
+test("the settlement matrix locks an immutable implementation snapshot", async () => {
+  assert.match(
+    RUNTIME_VISUAL_SETTLEMENT_IMPLEMENTATION_FINGERPRINT,
+    /^sha256:[0-9a-f]{64}$/u,
+  );
+  assert.equal(
+    await settlementImplementationFingerprint(),
+    RUNTIME_VISUAL_SETTLEMENT_IMPLEMENTATION_FINGERPRINT,
+  );
+});
+
+test("the hostile-page settlement matrix closes all thirteen tracked threads", () => {
+  assert.equal(RUNTIME_VISUAL_HOSTILE_PAGES.length, 13);
   assert.equal(
     new Set(RUNTIME_VISUAL_HOSTILE_PAGES.map(({ threadId }) => threadId)).size,
-    8,
+    13,
+  );
+  assert.equal(
+    RUNTIME_VISUAL_HOSTILE_PAGES.filter(({ pr }) => pr === 115).length,
+    5,
+  );
+  const classWriteFixture = RUNTIME_VISUAL_HOSTILE_PAGES.find(
+    ({ id }) => id === "pr115-class-write-causality",
+  );
+  assert.ok(classWriteFixture?.changedHtml);
+  assert.match(classWriteFixture.changedHtml, /querySelector\('\[class~="chart-host"\]'\)/u);
+  assert.doesNotMatch(classWriteFixture.changedHtml, /querySelector\("div"\)/u);
+  assert.ok(
+    runtimeVisualContractDocument.includes(
+      RUNTIME_VISUAL_SETTLEMENT_IMPLEMENTATION_FINGERPRINT,
+    ),
   );
   for (const fixture of RUNTIME_VISUAL_HOSTILE_PAGES) {
-    assert.match(fixture.id, /^pr(?:100|105|107)-/u);
+    assert.match(fixture.id, /^pr(?:100|105|107|115)-/u);
     assert.match(fixture.html, /<!doctype html>/iu);
     assert.ok(fixture.contract.length > 20);
     assert.ok(fixture.closureReason.length > 20);
+    assert.match(fixture.threadUrl, new RegExp(`/pull/${fixture.pr}#discussion_`, "u"));
+    assert.ok(runtimeVisualContractDocument.includes(fixture.id));
+    assert.ok(runtimeVisualContractDocument.includes(fixture.threadId));
+    assert.ok(runtimeVisualContractDocument.includes(fixture.threadUrl));
   }
 });

@@ -154,13 +154,16 @@ PR 批量是建议而非固定限制：用 CI Health 的 Ready 次数、candidat
   上限 24、页面/单宿主预算、1500ms owner deadline、完整 source SHA 与
   `contractVersion + sessionId + side source SHA` 封包；Edit 与 Review 的生产者、
   消费者不得各自重复常量。`runtime-visual-hostile-pages.mjs` 固定覆盖 #100/#105/#107
-  的 8 个遗留线程，每项同时具备最小 fixture、明确合同与关闭理由。低成本 oracle
-  分别证明匿名通用 selector 候选、动态 `getElementById` 完整源码依赖、source SHA
-  优先失效、页面时钟卡死后 owner 销毁、单 painted child + geometry 命中、透明无
-  shadow/stroke/decoration 文本不命中、25 属性由生产者确定性截断。正式 Electron
-  闭环必须再证明作者覆盖 `Number`/`Math.round` 后 Canvas 仍命中，解析器阻塞脚本
-  改写评论目标文字后仍只绑定原 Element，透明文字仍无 marker；不允许以新增临时
-  DOM 属性或截图人工判读替代这些机器 oracle。
+  和 #115 的 13 个结算线程，每项同时具备最小 fixture、线程 URL、明确合同与关闭理由。
+  低成本 oracle 分别证明匿名通用 selector 候选、动态 `getElementById` 完整源码依赖、
+  source SHA 优先失效、页面时钟卡死后 owner 销毁、单 painted child + geometry 命中、
+  透明无 shadow/stroke/decoration 文本不命中、空 ID/class substring selector 不耗尽
+  候选位、class 属性操作符与 class 写入的 Review 因果，以及超过 24 个 identity
+  attributes 时 producer/consumer 都整体省略 binding 而非截断。正式 Electron 闭环
+  必须再证明作者覆盖 `Number`/`Math.round` 后 Canvas 仍命中，解析器阻塞脚本改写评论
+  目标文字后仍只绑定原 Element，matching fingerprint 的 parser decoy 不产生 runtime
+  evidence，透明文字仍无 marker；不允许以新增临时 DOM 属性或截图人工判读替代这些机器
+  oracle。
 - 评论标记必须覆盖无 `id`、`data-*`、`name`、`aria-label` 的 class-only 普通目标：即使作者插入或重排同标签兄弟，before bootstrap 也必须仅凭首个私有响应中的冻结源 `sourceNodeId` 路径/指纹绑定解析器创建的原元素并保留 marker。测试还必须证明 HTML、后续 bootstrap 读取和作者可枚举 DOM 均不含该绑定、评论正文、评论 key 或定位映射；恶意作者脚本读取当前页面或 bootstrap 地址后仍不得产生伪造 marker。恶意的作者 capture listener 即使尝试读取 challenge、以同一 challenge 伪造评论端口，也既看不到评论 channel 请求，也收不到 `comment-targets`。
 - 评论范围放宽而没有直接变化脚本因果证据的运行态候选，Node 必须证明首轮
   before/after 差异会请求且只请求一次新 frame run：两侧各自与首轮完全一致时
