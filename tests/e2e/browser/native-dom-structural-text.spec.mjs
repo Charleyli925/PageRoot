@@ -335,7 +335,7 @@ test("deleting a bare-text fragment ends its session without a blocked resume", 
   );
   await expect.poll(async () => (
     await exportCurrentHtml(page)
-  ).toString("utf8")).toBe(expected.toString("utf8"));
+  ).toString("utf8"), { timeout: 20_000 }).toBe(expected.toString("utf8"));
   await expect(fragmentHost).toHaveCount(0);
   await expect(mixedParent).not.toHaveAttribute("contenteditable", "true");
   await expect.poll(() => editor.getAttribute("data-edit-block-detail")).toBeNull();

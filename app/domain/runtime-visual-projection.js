@@ -1,5 +1,6 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex } from "@noble/hashes/utils.js";
+import { RUNTIME_VISUAL_CONTRACT } from "./runtime-visual-contract.js";
 import {
   SOURCE_NODE_ATTRIBUTE,
   buildSourceIndex,
@@ -8,7 +9,6 @@ import {
 } from "../lib/source-index.js";
 import {
   createTargetRef,
-  resolveTargetRef,
 } from "../lib/target-resolver.js";
 import { resolvePageViewContext } from "../lib/page-view-context.js";
 
@@ -16,9 +16,9 @@ export const RUNTIME_VISUAL_PROJECTION_PROTOCOL =
   "pageroot-runtime-visual-projection";
 export const RUNTIME_VISUAL_PROJECTION_VERSION = 2;
 
-const MAX_CAPTURE_CANDIDATES = 256;
-const MAX_CAPTURE_VISUALS = 32;
-const MAX_TOTAL_VISUAL_BYTES = 16_000_000;
+const MAX_CAPTURE_CANDIDATES = RUNTIME_VISUAL_CONTRACT.candidateLimit;
+const MAX_CAPTURE_VISUALS = RUNTIME_VISUAL_CONTRACT.pageBudget.visualLimit;
+const MAX_TOTAL_VISUAL_BYTES = RUNTIME_VISUAL_CONTRACT.pageBudget.visualBytes;
 const MAX_VISUAL_PIXEL_DIMENSION = 4_096;
 const MIN_VIEWPORT_WIDTH = 320;
 const MAX_VIEWPORT_WIDTH = 4_096;
@@ -73,7 +73,14 @@ const INLINE_EVENT_HANDLER_ATTRIBUTE = /^on[a-z][a-z0-9]*$/u;
 const BROAD_RUNTIME_HOST_MUTATION = /(?:appendChild|insertAdjacentHTML|replaceChildren|\.innerHTML\s*=|document\.createElement|echarts\.init|Highcharts\.chart|Plotly\.newPlot|vegaEmbed|d3\.select|new\s+Chart\s*\()/u;
 const INDIRECT_RUNTIME_DOM_READ = /(?:\bdocument\.(?:body|documentElement|forms|images|links)\b|\.(?:children|childNodes|first(?:Child|ElementChild)|last(?:Child|ElementChild)|parent(?:Node|Element)|previous(?:Sibling|ElementSibling)|next(?:Sibling|ElementSibling)|closest)\b|\bgetElementsBy(?:ClassName|TagName|Name)\s*\()/u;
 const RUNTIME_DOM_QUERY_CALL = /\bquerySelector(?:All)?\s*\(\s*([^)]*)\)/gu;
+const RUNTIME_GET_ELEMENT_BY_ID_CALL = /\bgetElementById\s*\(\s*([^)]*)\)/gu;
+const RUNTIME_GET_ELEMENTS_BY_NAME_CALL = /\bgetElementsByName\s*\(\s*([^)]*)\)/gu;
+const RUNTIME_CLASS_LOOKUP_CALL = /(?:\bgetElementsByClassName|\bclassList\.(?:add|contains|remove|replace|toggle))\s*\(\s*(["'`])([^"'`]+)\1/gu;
 const STABLE_RUNTIME_SELECTOR_LITERAL = /^("|'|`)(?:#[A-Za-z_][\w-]*|\.[A-Za-z_][\w-]*|\[\s*(?:id|name|class|data-[\w-]+)(?:\s*(?:[~|^$*]?=)\s*(?:[A-Za-z0-9_-]+|"[^"]*"|'[^']*'|`[^`]*`))?\s*\])\1$/u;
+const STABLE_RUNTIME_STRING_LITERAL = /^("|'|`)[^"'`]*\1$/u;
+const RUNTIME_CLASS_ATTRIBUTE_SELECTOR = /^\[\s*class(?:\s*(?<operator>[~|^$*]?=)\s*(?<value>[A-Za-z0-9_-]+|"[^"]*"|'[^']*'|`[^`]*`))?\s*\]$/u;
+const RUNTIME_IDENTITY_ATTRIBUTE_SELECTOR = /^\[\s*(?<name>id|name)(?:\s*(?<operator>[~|^$*]?=)\s*(?<value>[A-Za-z0-9_-]+|"[^"]*"|'[^']*'|`[^`]*`))?\s*\]$/u;
+const RUNTIME_DATA_ATTRIBUTE_SELECTOR = /^\[\s*(?<name>data-[\w-]+)(?:\s*(?<operator>[~|^$*]?=)\s*(?<value>[A-Za-z0-9_-]+|"[^"]*"|'[^']*'|`[^`]*`))?\s*\]$/u;
 const acceptedProjectionAuthority = new WeakSet();
 
 function reusableSourceIndex(html, candidate) {
@@ -140,22 +147,256 @@ function sourceVisualPlaceholder(sourceIndex, element) {
 }
 
 function candidateReferenceTokens(element) {
-  const tokens = new Set([element.selector]);
+  const tokens = [{ value: element.selector, kind: "selector" }];
   for (const attribute of element.attributes ?? []) {
     if (attribute.name === "id" || attribute.name === "name") {
-      tokens.add(attribute.value ?? attribute.rawValue ?? "");
+      tokens.push({ value: attribute.name, kind: "identity-attribute" });
+      tokens.push({
+        value: attribute.value ?? attribute.rawValue ?? "",
+        kind: `${attribute.name}-value`,
+      });
     }
     if (attribute.name === "class") {
-      String(attribute.value ?? attribute.rawValue ?? "")
+      const classValue = String(attribute.value ?? attribute.rawValue ?? "");
+      tokens.push({ value: classValue, kind: "class-value" });
+      classValue
         .split(/[\t\n\f\r ]+/u)
-        .forEach((token) => tokens.add(token));
+        .forEach((token) => tokens.push({ value: token, kind: "class" }));
     }
     if (attribute.name.startsWith("data-")) {
-      tokens.add(attribute.name);
-      tokens.add(attribute.value ?? attribute.rawValue ?? "");
+      tokens.push({ value: attribute.name, kind: "data-attribute" });
+      tokens.push({
+        value: attribute.value ?? attribute.rawValue ?? "",
+        kind: "data-value",
+        attributeName: attribute.name,
+      });
     }
   }
-  return [...tokens].filter((token) => String(token).length >= 3);
+  return tokens.filter(({ value, kind }) => (
+    kind === "identity-attribute"
+      || kind === "data-value"
+      || (
+        ["id-value", "name-value", "class", "class-value"].includes(kind)
+        && String(value).length > 0
+      )
+      || String(value).length >= 3
+  ));
+}
+
+function runtimeSelectorLiteralValue(literal) {
+  const trimmed = String(literal || "").trim();
+  const quote = trimmed[0];
+  return quote && trimmed.at(-1) === quote
+    ? trimmed.slice(1, -1)
+    : null;
+}
+
+function runtimeIdentityValueMatches(source, value, kind) {
+  const attributeName = kind === "id-value" ? "id" : "name";
+  const lookupCall = kind === "id-value"
+    ? RUNTIME_GET_ELEMENT_BY_ID_CALL
+    : RUNTIME_GET_ELEMENTS_BY_NAME_CALL;
+  if ([...source.matchAll(lookupCall)].some((match) => {
+    const literal = match[1].trim();
+    return STABLE_RUNTIME_STRING_LITERAL.test(literal)
+      && runtimeSelectorLiteralValue(literal) === value;
+  })) return true;
+  if ([...source.matchAll(RUNTIME_DOM_QUERY_CALL)].some((match) => {
+    const literal = match[1].trim();
+    if (!STABLE_RUNTIME_SELECTOR_LITERAL.test(literal)) return false;
+    const selector = runtimeSelectorLiteralValue(literal);
+    if (selector === null) return false;
+    if (attributeName === "id" && selector === `#${value}`) return true;
+    const attributeSelector = selector.match(RUNTIME_IDENTITY_ATTRIBUTE_SELECTOR);
+    if (
+      !attributeSelector
+      || attributeSelector.groups?.name !== attributeName
+      || !attributeSelector.groups?.value
+    ) return false;
+    const expected = runtimeSelectorLiteralValue(attributeSelector.groups.value)
+      ?? attributeSelector.groups.value;
+    const actual = String(value);
+    if (
+      expected.length === 0
+      && ["^=", "$=", "*="].includes(attributeSelector.groups.operator)
+    ) return false;
+    switch (attributeSelector.groups.operator) {
+      case "=":
+        return actual === expected;
+      case "~=":
+        return actual.split(/[\t\n\f\r ]+/u).includes(expected);
+      case "^=":
+        return actual.startsWith(expected);
+      case "$=":
+        return actual.endsWith(expected);
+      case "*=":
+        return actual.includes(expected);
+      case "|=":
+        return actual === expected || actual.startsWith(`${expected}-`);
+      default:
+        return false;
+    }
+  })) return true;
+  if (kind !== "id-value") return false;
+  const escapedValue = value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  return new RegExp(`(?:^|[^A-Za-z0-9_$])${escapedValue}(?=\\s*\\.)`, "u").test(source);
+}
+
+function runtimeAttributeSelectorMatches(source, value, kind) {
+  return [...source.matchAll(RUNTIME_DOM_QUERY_CALL)].some((match) => {
+    const literal = match[1].trim();
+    if (!STABLE_RUNTIME_SELECTOR_LITERAL.test(literal)) return false;
+    const selector = runtimeSelectorLiteralValue(literal);
+    if (selector === null) return false;
+    if (kind === "identity-attribute") {
+      const identitySelector = selector.match(RUNTIME_IDENTITY_ATTRIBUTE_SELECTOR);
+      return identitySelector?.groups?.name === value
+        && !identitySelector.groups.operator;
+    }
+    const classSelector = selector.match(RUNTIME_CLASS_ATTRIBUTE_SELECTOR);
+    if (!classSelector) return false;
+    if (!classSelector.groups?.value) return true;
+    const expected = runtimeSelectorLiteralValue(classSelector.groups.value)
+      ?? classSelector.groups.value;
+    const actual = String(value);
+    if (
+      expected.length === 0
+      && ["~=", "^=", "$=", "*="].includes(classSelector.groups.operator)
+    ) return false;
+    switch (classSelector.groups.operator) {
+      case "=":
+        return kind === "class-value" && expected === actual;
+      case "~=":
+        return kind === "class"
+          ? expected === actual
+          : actual.split(/[\t\n\f\r ]+/u).includes(expected);
+      case "^=":
+        return kind === "class-value"
+          && actual.startsWith(expected);
+      case "$=":
+        return kind === "class-value"
+          && actual.endsWith(expected);
+      case "*=":
+        return kind === "class-value"
+          && actual.includes(expected);
+      case "|=":
+        return kind === "class-value"
+          && (actual === expected || actual.startsWith(`${expected}-`));
+      default:
+        return false;
+    }
+  });
+}
+
+function runtimeDataAttributeSelectorMatches(source, attributeName, value, kind) {
+  let sawAttributeSelector = false;
+  for (const match of source.matchAll(RUNTIME_DOM_QUERY_CALL)) {
+    const literal = match[1].trim();
+    if (!STABLE_RUNTIME_SELECTOR_LITERAL.test(literal)) continue;
+    const selector = runtimeSelectorLiteralValue(literal);
+    if (selector === null) continue;
+    const dataSelector = selector.match(RUNTIME_DATA_ATTRIBUTE_SELECTOR);
+    if (dataSelector?.groups?.name !== attributeName) continue;
+    sawAttributeSelector = true;
+    const operator = dataSelector.groups.operator;
+    if (kind === "data-attribute") {
+      if (!operator) return true;
+      continue;
+    }
+    if (kind !== "data-value" || !operator) continue;
+    const expected = runtimeSelectorLiteralValue(dataSelector.groups.value)
+      ?? dataSelector.groups.value;
+    const actual = String(value);
+    if (
+      expected.length === 0
+      && ["^=", "$=", "*="].includes(operator)
+    ) continue;
+    if (
+      (operator === "=" && actual === expected)
+      || (operator === "~=" && actual.split(/[\t\n\f\r ]+/u).includes(expected))
+      || (operator === "^=" && actual.startsWith(expected))
+      || (operator === "$=" && actual.endsWith(expected))
+      || (operator === "*=" && actual.includes(expected))
+      || (operator === "|=" && (actual === expected || actual.startsWith(`${expected}-`)))
+    ) return true;
+  }
+  return sawAttributeSelector ? false : null;
+}
+
+function sourceReferencesToken(source, tokenDescriptor) {
+  const value = String(
+    typeof tokenDescriptor === "object"
+      ? tokenDescriptor?.value
+      : tokenDescriptor,
+  );
+  const kind = typeof tokenDescriptor === "object"
+    ? tokenDescriptor?.kind
+    : "identity";
+  const exactNamespaceKind = [
+    "id-value",
+    "name-value",
+    "class",
+    "class-value",
+    "data-value",
+  ].includes(kind);
+  if (
+    value.length < 3
+    && kind !== "identity-attribute"
+    && !exactNamespaceKind
+  ) return false;
+  if (kind === "id-value" || kind === "name-value") {
+    return runtimeIdentityValueMatches(source, value, kind);
+  }
+  if (kind === "data-attribute" || kind === "data-value") {
+    const dataSelectorReference = runtimeDataAttributeSelectorMatches(
+      source,
+      tokenDescriptor?.attributeName ?? value,
+      value,
+      kind,
+    );
+    if (dataSelectorReference !== null) return dataSelectorReference;
+    if (kind === "data-attribute") return false;
+    if (value.length < 3) return false;
+  }
+  const attributeSelectorReference = (
+    (kind === "class" || kind === "class-value" || kind === "identity-attribute")
+    && runtimeAttributeSelectorMatches(source, value, kind)
+  );
+  if (kind === "identity-attribute") return attributeSelectorReference;
+  if (attributeSelectorReference) return true;
+  if (kind === "class-value") {
+    return [...source.matchAll(RUNTIME_CLASS_LOOKUP_CALL)].some((match) => (
+      String(match[2]) === value
+    ));
+  }
+  let offset = source.indexOf(value);
+  while (offset >= 0) {
+    const before = offset > 0 ? source[offset - 1] : "";
+    const after = source[offset + value.length] || "";
+    const classSelectorPunctuation = (
+      kind === "class"
+      && before === "."
+      && !/[A-Za-z0-9_.:-]/u.test(source[offset - 2] || "")
+    );
+    if (
+      kind === "class"
+      && !classSelectorPunctuation
+      && ![...source.matchAll(RUNTIME_CLASS_LOOKUP_CALL)].some((match) => (
+        String(match[2])
+          .split(/[\t\n\f\r ]+/u)
+          .includes(value)
+      ))
+    ) {
+      offset = source.indexOf(value, offset + 1);
+      continue;
+    }
+    if (
+      (classSelectorPunctuation || !/[A-Za-z0-9_.:-]/u.test(before))
+      && !/[A-Za-z0-9_.:-]/u.test(after)
+    ) return true;
+    offset = source.indexOf(value, offset + 1);
+  }
+  return false;
 }
 
 function runtimeExecutableSources(sourceIndex) {
@@ -189,6 +430,8 @@ function usesIndirectRuntimeDomRead(source) {
   if (INDIRECT_RUNTIME_DOM_READ.test(source)) return true;
   return [...source.matchAll(RUNTIME_DOM_QUERY_CALL)].some((match) => (
     !STABLE_RUNTIME_SELECTOR_LITERAL.test(match[1].trim())
+  )) || [...source.matchAll(RUNTIME_GET_ELEMENT_BY_ID_CALL)].some((match) => (
+    !STABLE_RUNTIME_STRING_LITERAL.test(match[1].trim())
   ));
 }
 
@@ -221,14 +464,26 @@ function runtimeReferencedCandidates(sourceIndex, candidates) {
         element,
         handlerOwnerNodeIds,
       )
-      || candidateReferenceTokens(element).some((token) => source.includes(token))
+      || candidateReferenceTokens(element).some((token) => (
+        sourceReferencesToken(source, token)
+      ))
     );
   });
   const hasExternalScript = scripts.some(
     (element) => (element.attributesByName.get("src")?.length ?? 0) === 1,
   );
-  if (hasExternalScript || BROAD_RUNTIME_HOST_MUTATION.test(source)) {
-    return candidates;
+  if (
+    hasExternalScript
+    || BROAD_RUNTIME_HOST_MUTATION.test(source)
+    || usesIndirectRuntimeDomRead(source)
+  ) {
+    const referencedIds = new Set(
+      referenced.map((candidate) => candidate.sourceNodeId),
+    );
+    return [
+      ...referenced,
+      ...candidates.filter((candidate) => !referencedIds.has(candidate.sourceNodeId)),
+    ];
   }
   return referenced;
 }
@@ -239,7 +494,6 @@ function captureCandidates(sourceIndex) {
       VISUAL_HOST_TAGS.has(element.tagName)
       && sourceVisualPlaceholder(sourceIndex, element)
     ))
-    .slice(0, MAX_CAPTURE_CANDIDATES)
     .map((element) => {
       const hostTargetRef = immutableTargetRef(createTargetRef(
         sourceIndex,
@@ -253,7 +507,8 @@ function captureCandidates(sourceIndex) {
         hostTargetRef,
       });
     });
-  return runtimeReferencedCandidates(sourceIndex, placeholders);
+  return runtimeReferencedCandidates(sourceIndex, placeholders)
+    .slice(0, MAX_CAPTURE_CANDIDATES);
 }
 
 function runtimeDependencySha256(sourceIndex, candidates) {
@@ -273,9 +528,9 @@ function runtimeDependencySha256(sourceIndex, candidates) {
     ? sourceIndex.elements
       .filter((element) => (
         !RUNTIME_DEPENDENCY_TAGS.has(element.tagName)
-        && candidateReferenceTokens(element).some(
-          (token) => scriptSource.includes(token),
-        )
+        && candidateReferenceTokens(element).some((token) => (
+          sourceReferencesToken(scriptSource, token)
+        ))
       ))
       .map((element) => [element.tagName, element.selector, element.raw])
     : [];
@@ -661,63 +916,12 @@ export function rebindRuntimeVisualProjection({
     || generation < 0
   ) return null;
   const sourceIndex = reusableSourceIndex(html, suppliedSourceIndex);
-  const candidatesByNodeId = new Map(
-    captureCandidates(sourceIndex).map((candidate) => [
-      candidate.sourceNodeId,
-      candidate,
-    ]),
-  );
-  const resolveCandidate = (visual) => {
-    if (!visual?.hostTargetRef) return null;
-    let resolution;
-    try {
-      resolution = resolveTargetRef(sourceIndex, visual.hostTargetRef);
-    } catch {
-      return null;
-    }
-    if (!resolution?.target || !["exact", "rebound"].includes(resolution.resolution)) {
-      return null;
-    }
-    const candidate = candidatesByNodeId.get(resolution.target.nodeId);
-    return candidate?.tagName === visual.tagName ? candidate : null;
-  };
-  const visuals = [];
-  const usedVisualNodeIds = new Set();
-  for (const visual of projection.visuals) {
-    const candidate = resolveCandidate(visual);
-    if (!candidate || usedVisualNodeIds.has(candidate.sourceNodeId)) continue;
-    usedVisualNodeIds.add(candidate.sourceNodeId);
-    visuals.push(Object.freeze({
-      ...visual,
-      sourceNodeId: candidate.sourceNodeId,
-      tagName: candidate.tagName,
-      captureKey: candidate.captureKey,
-      hostTargetRef: candidate.hostTargetRef,
-    }));
-  }
-  const deferredTargets = [];
-  const usedDeferredNodeIds = new Set();
-  for (const deferredTarget of projection.deferredTargets ?? []) {
-    const candidate = resolveCandidate(deferredTarget);
-    if (!candidate || usedDeferredNodeIds.has(candidate.sourceNodeId)) continue;
-    usedDeferredNodeIds.add(candidate.sourceNodeId);
-    deferredTargets.push(Object.freeze({
-      captureKey: candidate.captureKey,
-      tagName: candidate.tagName,
-      hostTargetRef: candidate.hostTargetRef,
-    }));
-  }
+  if (projection.sourceSha256 !== sourceIndex.sourceSha256) return null;
   return finalizeAcceptedProjection({
-    protocol: RUNTIME_VISUAL_PROJECTION_PROTOCOL,
-    version: RUNTIME_VISUAL_PROJECTION_VERSION,
+    ...projection,
     documentKey,
     generation,
     sourceSha256: sourceIndex.sourceSha256,
-    visuals: Object.freeze(visuals),
-    deferredCaptureKeys: Object.freeze(
-      deferredTargets.map((target) => target.captureKey),
-    ),
-    deferredTargets: Object.freeze(deferredTargets),
   });
 }
 
@@ -745,14 +949,13 @@ export function mergeDeferredRuntimeVisualProjection({
     || generation < 0
   ) return null;
   if (projection.deferredCaptureKeys.length === 0) return projection;
-  const fallback = rebindRuntimeVisualProjection({
-    html,
-    documentKey,
-    generation,
-    projection: fallbackProjection,
-    sourceIndex,
-  });
-  if (!fallback) return projection;
+  const fallback = fallbackProjection;
+  if (
+    !fallback
+    || !acceptedProjectionAuthority.has(fallback)
+    || fallback.documentKey !== documentKey
+    || fallback.sourceSha256 !== sourceIndex.sourceSha256
+  ) return projection;
   const fallbackByCaptureKey = new Map(
     fallback.visuals.map((visual) => [visual.captureKey, visual]),
   );

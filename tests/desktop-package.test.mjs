@@ -117,6 +117,7 @@ test("desktop package carries the v3 patch engine, candidate assessment and acti
   assert.ok(packageJson.build.files.includes("desktop/application-update.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/usage-telemetry.mjs"));
   assert.ok(packageJson.build.files.includes("desktop/preview-protocol.mjs"));
+  assert.ok(packageJson.build.files.includes("app/domain/runtime-visual-contract.js"));
   assert.ok(packageJson.build.files.includes("public/brand-logo.png"));
   const mainLocalImports = [...mainProcess.matchAll(
     /from\s+"\.\/([^"]+)";/gu,

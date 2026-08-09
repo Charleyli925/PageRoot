@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import test from "node:test";
 
 import { RuntimeVisualProjectionSession } from "../app/application/runtime-visual-projection-session.js";
+import { RUNTIME_VISUAL_CONTRACT } from "../app/domain/runtime-visual-contract.js";
 import {
   RUNTIME_VISUAL_PROJECTION_PROTOCOL,
   RUNTIME_VISUAL_PROJECTION_VERSION,
@@ -10,8 +11,10 @@ import {
   describeRuntimeVisualCapture,
   mergeDeferredRuntimeVisualProjection,
   prepareRuntimeVisualCapture,
+  rebindRuntimeVisualProjection,
 } from "../app/domain/runtime-visual-projection.js";
 import { buildSourceIndex } from "../app/lib/source-index.js";
+import { runtimeVisualHostilePage } from "./fixtures/runtime-visual-hostile-pages.mjs";
 
 const PNG_BYTES = new Uint8Array(Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAEElEQVR42mNk+M/wHwAEAQH/2p9Z5QAAAABJRU5ErkJggg==",
@@ -166,6 +169,418 @@ test("external runtime scripts do not hide candidates referenced by another scri
   assert.equal(prepared?.candidates.length, 2);
 });
 
+test("directly referenced runtime hosts keep priority before the shared candidate cap", () => {
+  const unrelatedHosts = Array.from(
+    { length: RUNTIME_VISUAL_CONTRACT.candidateLimit },
+    () => `<div class="chart"></div>`,
+  ).join("");
+  const source = `<!doctype html><main>${unrelatedHosts}
+    <div id="late-chart"></div>
+    <script>
+      document.getElementById("late-chart").appendChild(document.createElement("svg"));
+    </script>
+  </main>`;
+  const sourceIndex = buildSourceIndex(source);
+  const prepared = prepareRuntimeVisualCapture({
+    html: source,
+    sourcePath: "/tmp/late-runtime-host.html",
+    viewportWidth: 900,
+  });
+  assert.equal(prepared?.candidates.length, RUNTIME_VISUAL_CONTRACT.candidateLimit);
+  const firstCandidate = prepared?.candidates[0];
+  assert.equal(
+    firstCandidate && sourceIndex.byNodeId.get(firstCandidate.sourceNodeId)?.stableAttributes.id,
+    "late-chart",
+  );
+});
+
+test("stable lookup namespaces keep an ID reference ahead of same-token classes", () => {
+  const unrelatedHosts = Array.from(
+    { length: RUNTIME_VISUAL_CONTRACT.candidateLimit },
+    () => `<div class="chart"></div>`,
+  ).join("");
+  const source = `<!doctype html><main>${unrelatedHosts}
+    <div id="chart"></div>
+    <script>
+      document.getElementById("chart").appendChild(document.createElement("svg"));
+    </script>
+  </main>`;
+  const sourceIndex = buildSourceIndex(source);
+  const prepared = prepareRuntimeVisualCapture({
+    html: source,
+    sourcePath: "/tmp/namespaced-runtime-host.html",
+    viewportWidth: 900,
+  });
+  assert.equal(prepared?.candidates.length, RUNTIME_VISUAL_CONTRACT.candidateLimit);
+  const firstCandidate = prepared?.candidates[0];
+  assert.equal(
+    firstCandidate && sourceIndex.byNodeId.get(firstCandidate.sourceNodeId)?.stableAttributes.id,
+    "chart",
+  );
+});
+
+test("stable ID lookup does not consume the cap with same-token name hosts", () => {
+  const unrelatedHosts = Array.from(
+    { length: RUNTIME_VISUAL_CONTRACT.candidateLimit },
+    () => `<div name="chart"></div>`,
+  ).join("");
+  const source = `<!doctype html><main>${unrelatedHosts}
+    <div id="chart"></div>
+    <script>
+      document.getElementById("chart").appendChild(document.createElement("svg"));
+    </script>
+  </main>`;
+  const sourceIndex = buildSourceIndex(source);
+  const prepared = prepareRuntimeVisualCapture({
+    html: source,
+    sourcePath: "/tmp/id-name-runtime-host.html",
+    viewportWidth: 900,
+  });
+  assert.equal(prepared?.candidates.length, RUNTIME_VISUAL_CONTRACT.candidateLimit);
+  const firstCandidate = prepared?.candidates[0];
+  assert.equal(
+    firstCandidate && sourceIndex.byNodeId.get(firstCandidate.sourceNodeId)?.stableAttributes.id,
+    "chart",
+  );
+});
+
+test("stable data selectors keep the exact value ahead of same-attribute cap", () => {
+  const unrelatedHosts = Array.from(
+    { length: RUNTIME_VISUAL_CONTRACT.candidateLimit },
+    (_, index) => `<div data-chart="early-${index}"></div>`,
+  ).join("");
+  const source = `<!doctype html><main>${unrelatedHosts}
+    <div data-chart="late"></div>
+    <script>
+      document.querySelector('[data-chart="late"]').appendChild(document.createElement("svg"));
+    </script>
+  </main>`;
+  const sourceIndex = buildSourceIndex(source);
+  const prepared = prepareRuntimeVisualCapture({
+    html: source,
+    sourcePath: "/tmp/data-selector-runtime-host.html",
+    viewportWidth: 900,
+  });
+  assert.equal(prepared?.candidates.length, RUNTIME_VISUAL_CONTRACT.candidateLimit);
+  const firstCandidate = prepared?.candidates[0];
+  assert.equal(
+    firstCandidate && sourceIndex.byNodeId.get(firstCandidate.sourceNodeId)
+      ?.stableAttributes["data-chart"],
+    "late",
+  );
+});
+
+test("stable data selectors retain exact short values", () => {
+  const source = `<!doctype html><main>
+    <div data-x="go"></div>
+    <script>
+      document.querySelector('[data-x="go"]').textContent = "ready";
+    </script>
+  </main>`;
+  const prepared = prepareRuntimeVisualCapture({
+    html: source,
+    sourcePath: "/tmp/short-data-selector-runtime-host.html",
+    viewportWidth: 900,
+  });
+  assert.equal(prepared?.candidates.length, 1);
+});
+
+test("stable data selectors retain exact empty values", () => {
+  const source = `<!doctype html><main>
+    <div data-x=""></div>
+    <script>
+      document.querySelector('[data-x=""]').textContent = "ready";
+    </script>
+  </main>`;
+  const prepared = prepareRuntimeVisualCapture({
+    html: source,
+    sourcePath: "/tmp/empty-data-selector-runtime-host.html",
+    viewportWidth: 900,
+  });
+  assert.equal(prepared?.candidates.length, 1);
+});
+
+test("stable ID selectors implement every supported attribute operator", () => {
+  const cases = [
+    ["=", "chart", "chart"],
+    ["~=", "chart", "late chart"],
+    ["^=", "late", "late-chart"],
+    ["$=", "chart", "late-chart"],
+    ["*=", "te-cha", "late-chart"],
+    ["|=", "late", "late-chart"],
+  ];
+  for (const [operator, expected, actual] of cases) {
+    const source = `<!doctype html><main>
+      <div id="${actual}"></div>
+      <script>
+        document.querySelector('[id${operator}"${expected}"]').textContent = "ready";
+      </script>
+    </main>`;
+    const prepared = prepareRuntimeVisualCapture({
+      html: source,
+      sourcePath: `/tmp/id-${operator.replace("=", "")}-selector-runtime-host.html`,
+      viewportWidth: 900,
+    });
+    assert.equal(prepared?.candidates.length, 1, operator);
+  }
+});
+
+test("empty ID substring selectors do not consume the candidate cap", () => {
+  const unrelatedHosts = Array.from(
+    { length: RUNTIME_VISUAL_CONTRACT.candidateLimit },
+    (_, index) => `<div id="early-${index}"></div>`,
+  ).join("");
+  const source = `<!doctype html><main>${unrelatedHosts}
+    <div id="late-chart"></div>
+    <script>
+      document.querySelector('[id$=""]').textContent = "ignored";
+      document.getElementById("late-chart").textContent = "ready";
+      document.createElement("span");
+    </script>
+  </main>`;
+  const sourceIndex = buildSourceIndex(source);
+  const prepared = prepareRuntimeVisualCapture({
+    html: source,
+    sourcePath: "/tmp/empty-id-substring-runtime-host.html",
+    viewportWidth: 900,
+  });
+  assert.equal(prepared?.candidates.length, RUNTIME_VISUAL_CONTRACT.candidateLimit);
+  const firstCandidate = prepared?.candidates[0];
+  assert.equal(
+    firstCandidate && sourceIndex.byNodeId.get(firstCandidate.sourceNodeId)?.stableAttributes.id,
+    "late-chart",
+  );
+});
+
+test("empty class substring selectors do not consume the candidate cap", () => {
+  const unrelatedHosts = Array.from(
+    { length: RUNTIME_VISUAL_CONTRACT.candidateLimit },
+    (_, index) => `<div class="early-${index}"></div>`,
+  ).join("");
+  const source = `<!doctype html><main>${unrelatedHosts}
+    <div id="late-chart"></div>
+    <script>
+      document.querySelector('[class$=""]').textContent = "ignored";
+      document.getElementById("late-chart").textContent = "ready";
+      document.createElement("span");
+    </script>
+  </main>`;
+  const sourceIndex = buildSourceIndex(source);
+  const prepared = prepareRuntimeVisualCapture({
+    html: source,
+    sourcePath: "/tmp/empty-class-substring-runtime-host.html",
+    viewportWidth: 900,
+  });
+  assert.equal(prepared?.candidates.length, RUNTIME_VISUAL_CONTRACT.candidateLimit);
+  const firstCandidate = prepared?.candidates[0];
+  assert.equal(
+    firstCandidate && sourceIndex.byNodeId.get(firstCandidate.sourceNodeId)?.stableAttributes.id,
+    "late-chart",
+  );
+});
+
+test("literal ID lookups retain numeric-leading hosts", () => {
+  const unrelatedHosts = Array.from(
+    { length: RUNTIME_VISUAL_CONTRACT.candidateLimit },
+    (_, index) => `<div class="early-${index}"></div>`,
+  ).join("");
+  const source = `<!doctype html><main>${unrelatedHosts}
+    <div id="123-chart"></div>
+    <script>
+      document.getElementById("123-chart").textContent = "ready";
+      document.createElement("span");
+    </script>
+  </main>`;
+  const sourceIndex = buildSourceIndex(source);
+  const prepared = prepareRuntimeVisualCapture({
+    html: source,
+    sourcePath: "/tmp/numeric-id-runtime-host.html",
+    viewportWidth: 900,
+  });
+  assert.equal(prepared?.candidates.length, RUNTIME_VISUAL_CONTRACT.candidateLimit);
+  const firstCandidate = prepared?.candidates[0];
+  assert.equal(
+    firstCandidate && sourceIndex.byNodeId.get(firstCandidate.sourceNodeId)?.stableAttributes.id,
+    "123-chart",
+  );
+});
+
+test("stable short ID lookups retain the exact host", () => {
+  const source = `<!doctype html><main>
+    <div class="go"></div>
+    <div id="go"></div>
+    <script>
+      document.getElementById("go").textContent = "ready";
+    </script>
+  </main>`;
+  const sourceIndex = buildSourceIndex(source);
+  const prepared = prepareRuntimeVisualCapture({
+    html: source,
+    sourcePath: "/tmp/short-id-runtime-host.html",
+    viewportWidth: 900,
+  });
+  assert.deepEqual(
+    prepared?.candidates.map((candidate) => (
+      sourceIndex.byNodeId.get(candidate.sourceNodeId)?.stableAttributes.id || ""
+    )),
+    ["go"],
+  );
+});
+
+test("stable short class selectors retain the exact host", () => {
+  const source = `<!doctype html><main>
+    <div class="go"></div>
+    <div class="other"></div>
+    <script>
+      document.querySelector(".go").textContent = "ready";
+    </script>
+  </main>`;
+  const sourceIndex = buildSourceIndex(source);
+  const prepared = prepareRuntimeVisualCapture({
+    html: source,
+    sourcePath: "/tmp/short-class-runtime-host.html",
+    viewportWidth: 900,
+  });
+  assert.deepEqual(
+    prepared?.candidates.map((candidate) => (
+      sourceIndex.byNodeId.get(candidate.sourceNodeId)?.attributesByName
+        .get("class")?.[0]?.value
+    )),
+    ["go"],
+  );
+});
+
+test("named ID property references retain their exact host", () => {
+  const source = `<!doctype html><main>
+    <div id="chart"></div>
+    <script>chart.textContent = "ready";</script>
+  </main>`;
+  const prepared = prepareRuntimeVisualCapture({
+    html: source,
+    sourcePath: "/tmp/named-id-runtime-host.html",
+    viewportWidth: 900,
+  });
+  assert.equal(prepared?.candidates.length, 1);
+});
+
+test("direct references keep punctuation identifiers distinct from class tokens", () => {
+  const unrelatedHosts = Array.from(
+    { length: RUNTIME_VISUAL_CONTRACT.candidateLimit },
+    () => `<div class="chart"></div>`,
+  ).join("");
+  const source = `<!doctype html><main>${unrelatedHosts}
+    <div id="late.chart"></div>
+    <script>
+      document.getElementById("late.chart").appendChild(document.createElement("svg"));
+    </script>
+  </main>`;
+  const sourceIndex = buildSourceIndex(source);
+  const prepared = prepareRuntimeVisualCapture({
+    html: source,
+    sourcePath: "/tmp/punctuation-runtime-host.html",
+    viewportWidth: 900,
+  });
+  assert.equal(prepared?.candidates.length, RUNTIME_VISUAL_CONTRACT.candidateLimit);
+  const firstCandidate = prepared?.candidates[0];
+  assert.equal(
+    firstCandidate && sourceIndex.byNodeId.get(firstCandidate.sourceNodeId)?.stableAttributes.id,
+    "late.chart",
+  );
+});
+
+test("class-selector references retain class-only runtime hosts", () => {
+  const source = `<!doctype html><main>
+    <div class="chart"></div>
+    <div id="late.chart"></div>
+    <script>
+      document.querySelector(".chart").textContent = "ready";
+    </script>
+  </main>`;
+  const sourceIndex = buildSourceIndex(source);
+  const prepared = prepareRuntimeVisualCapture({
+    html: source,
+    sourcePath: "/tmp/class-selector-runtime-host.html",
+    viewportWidth: 900,
+  });
+  assert.deepEqual(
+    prepared?.candidates.map((candidate) => (
+      sourceIndex.byNodeId.get(candidate.sourceNodeId)?.selector
+    )),
+    ["div.chart"],
+  );
+});
+
+test("class attribute-selector references retain class-only runtime hosts", () => {
+  const source = `<!doctype html><main>
+    <div class="chart"></div>
+    <div id="late.chart"></div>
+    <script>
+      document.querySelector('[class~="chart"]').textContent = "ready";
+    </script>
+  </main>`;
+  const sourceIndex = buildSourceIndex(source);
+  const prepared = prepareRuntimeVisualCapture({
+    html: source,
+    sourcePath: "/tmp/class-attribute-selector-runtime-host.html",
+    viewportWidth: 900,
+  });
+  assert.deepEqual(
+    prepared?.candidates.map((candidate) => (
+      sourceIndex.byNodeId.get(candidate.sourceNodeId)?.selector
+    )),
+    ["div.chart"],
+  );
+});
+
+test("class equality selectors match the complete class attribute value", () => {
+  const source = `<!doctype html><main>
+    <div class="chart wide"></div>
+    <div class="chart"></div>
+    <script>
+      document.querySelector('[class="chart wide"]').textContent = "ready";
+    </script>
+  </main>`;
+  const sourceIndex = buildSourceIndex(source);
+  const prepared = prepareRuntimeVisualCapture({
+    html: source,
+    sourcePath: "/tmp/class-equality-runtime-host.html",
+    viewportWidth: 900,
+  });
+  assert.deepEqual(
+    prepared?.candidates.map((candidate) => (
+      sourceIndex.byNodeId.get(candidate.sourceNodeId)?.attributesByName
+        .get("class")?.[0]?.value
+    )),
+    ["chart wide"],
+  );
+});
+
+test("identity presence selectors retain only the matching namespace hosts", () => {
+  for (const attributeName of ["id", "name"]) {
+    const source = `<!doctype html><main>
+      <div ${attributeName}="chart"></div>
+      <div class="unrelated"></div>
+      <script>
+        document.querySelector('[${attributeName}]').textContent = "ready";
+      </script>
+    </main>`;
+    const sourceIndex = buildSourceIndex(source);
+    const prepared = prepareRuntimeVisualCapture({
+      html: source,
+      sourcePath: `/tmp/${attributeName}-presence-runtime-host.html`,
+      viewportWidth: 900,
+    });
+    assert.deepEqual(
+      prepared?.candidates.map((candidate) => (
+        sourceIndex.byNodeId.get(candidate.sourceNodeId)?.attributesByName
+          .get(attributeName)?.[0]?.value
+      )),
+      ["chart"],
+      attributeName,
+    );
+  }
+});
+
 test("script-referenced data containers participate in the runtime dependency", () => {
   const source = `<!doctype html><main>
     <div id="chart"></div><div id="chart-data">1,2,3</div>
@@ -243,6 +658,37 @@ test("literal tag selectors conservatively invalidate the runtime dependency", (
   assert.notEqual(first?.dependencySha256, changedData?.dependencySha256);
 });
 
+test("generic selectors retain anonymous exact visual hosts", () => {
+  const fixture = runtimeVisualHostilePage("pr105-generic-selector-host");
+  const prepared = prepareRuntimeVisualCapture({
+    html: fixture.html,
+    sourcePath: "/tmp/generic-selector.html",
+    viewportWidth: 900,
+  });
+  assert.deepEqual(
+    prepared?.candidates.map(({ tagName }) => tagName),
+    ["canvas"],
+    fixture.contract,
+  );
+});
+
+test("computed element lookup fails closed to the full source dependency", () => {
+  const fixture = runtimeVisualHostilePage("pr105-dynamic-id-dependency");
+  const before = describeRuntimeVisualCapture({
+    html: fixture.html,
+    sourcePath: "/tmp/dynamic-id.html",
+    viewportWidth: 900,
+  });
+  const after = describeRuntimeVisualCapture({
+    html: fixture.changedHtml,
+    sourcePath: "/tmp/dynamic-id.html",
+    viewportWidth: 900,
+  });
+  assert.equal(before?.candidates.length, 1);
+  assert.notEqual(before?.sourceSha256, after?.sourceSha256);
+  assert.notEqual(before?.dependencySha256, after?.dependencySha256, fixture.contract);
+});
+
 test("accepted projections stay bound to the exact original source hash and empty host", () => {
   const prepared = prepareRuntimeVisualCapture({
     html: SOURCE,
@@ -283,6 +729,18 @@ test("accepted projections stay bound to the exact original source hash and empt
     generation: 5,
     rawProjection: rawProjection(prepared.payload),
   }), null);
+  assert.equal(rebindRuntimeVisualProjection({
+    html: SOURCE.replace("source text", "changed source text"),
+    documentKey: "current:/tmp/report.html",
+    generation: 5,
+    projection,
+  }), null);
+  assert.equal(rebindRuntimeVisualProjection({
+    html: SOURCE,
+    documentKey: "current:/tmp/report.html",
+    generation: 5,
+    projection,
+  })?.sourceSha256, prepared.sourceSha256);
 
   const authoredNodeId = [...buildSourceIndex(SOURCE).elements]
     .find((element) => element.stableAttributes.id === "authored")
@@ -451,7 +909,7 @@ test("projection session commits a non-deferred empty capture as a clear", async
   session.dispose();
 });
 
-test("projection session rebinds non-visual source edits without recapturing", async () => {
+test("projection session invalidates first on every full source hash change", async () => {
   const pending = [];
   const session = new RuntimeVisualProjectionSession({
     captureDebounceMs: 0,
@@ -467,6 +925,9 @@ test("projection session rebinds non-visual source edits without recapturing", a
   });
   await nextTask();
   assert.equal(pending.length, 1);
+  pending[0].resolve(rawProjection(pending[0].payload));
+  await nextTask();
+  assert.equal(session.snapshot.status, "ready");
 
   const nextSource = SOURCE.replace("source text", "new source text");
   session.request({
@@ -475,21 +936,19 @@ test("projection session rebinds non-visual source edits without recapturing", a
     documentKey: "current:/tmp/report.html",
     viewportWidth: 900,
   });
+  assert.equal(session.snapshot.status, "scheduled");
+  assert.equal(session.snapshot.projection, null);
   await nextTask();
-  assert.equal(pending.length, 1);
-  pending[0].resolve(rawProjection(pending[0].payload));
+  assert.equal(pending.length, 2);
+  pending[1].resolve(rawProjection(pending[1].payload));
   await nextTask();
   assert.equal(session.snapshot.status, "ready");
   assert.equal(
     session.snapshot.projection?.sourceSha256,
     buildSourceIndex(nextSource).sourceSha256,
   );
-  assert.equal(
-    pending.length,
-    1,
-  );
+  assert.equal(pending.length, 2);
   assert.equal(session.snapshot.projection?.visuals.length, 1);
-  const retainedPngBytes = session.snapshot.projection.visuals[0].pngBytes;
   const secondTextEdit = nextSource.replace("new source text", "newer source text");
   session.request({
     html: secondTextEdit,
@@ -497,26 +956,10 @@ test("projection session rebinds non-visual source edits without recapturing", a
     documentKey: "current:/tmp/report.html",
     viewportWidth: 900,
   });
-  assert.equal(pending.length, 1);
-  assert.equal(
-    session.snapshot.projection?.visuals[0].pngBytes,
-    retainedPngBytes,
-  );
-
-  const runtimeChangedSource = secondTextEdit.replace(
-    'document.createElement("svg")',
-    'document.createElement("canvas")',
-  );
-  session.request({
-    html: runtimeChangedSource,
-    sourcePath: "/tmp/report.html",
-    documentKey: "current:/tmp/report.html",
-    viewportWidth: 900,
-  });
+  assert.equal(session.snapshot.projection, null);
   await nextTask();
-  assert.equal(pending.length, 2);
+  assert.equal(pending.length, 3);
   assert.equal(session.snapshot.status, "capturing");
-  assert.ok(session.snapshot.projection);
   session.dispose();
 });
 

@@ -103,6 +103,7 @@ const REQUIRED_APP_SOURCE_FILES = [
   "desktop/usage-telemetry.mjs",
   "desktop/preview-protocol.mjs",
   "desktop/edit-visual-capture.mjs",
+  "app/domain/runtime-visual-contract.js",
   "public/brand-logo.png",
 ];
 const RETIRED_EDITOR_ARTIFACTS = [

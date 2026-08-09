@@ -3,7 +3,8 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import vm from "node:vm";
 
-import ts from "typescript";
+import { runtimeVisualHostilePage } from "./fixtures/runtime-visual-hostile-pages.mjs";
+import { generatedReviewBootstrap } from "./helpers/generated-review-bootstrap.mjs";
 
 const [
   workbench,
@@ -28,53 +29,6 @@ const [
   readFile(new URL("../app/components/html-canvas-page-view.ts", import.meta.url), "utf8"),
   readFile(new URL("../app/lib/review-scroll-sync.js", import.meta.url), "utf8"),
 ]);
-
-function generatedReviewBootstrap(candidateKeys = [], reviewCommentBindings = []) {
-  const sourceFile = ts.createSourceFile(
-    "review-document.ts",
-    reviewDocument,
-    ts.ScriptTarget.Latest,
-    true,
-    ts.ScriptKind.TS,
-  );
-  const declaration = sourceFile.statements.find((node) => (
-    ts.isFunctionDeclaration(node)
-    && node.name?.text === "reviewBootstrap"
-  ));
-  assert.ok(declaration, "reviewBootstrap declaration must exist");
-  const transpiled = ts.transpileModule(
-    reviewDocument.slice(declaration.getStart(sourceFile), declaration.end),
-    {
-      compilerOptions: {
-        module: ts.ModuleKind.None,
-        target: ts.ScriptTarget.ES2022,
-      },
-    },
-  ).outputText;
-  const context = vm.createContext({
-    REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT: 128,
-    REVIEW_RUNTIME_VISUAL_SOURCE_BOX_ATTRIBUTES: [
-      "class",
-      "height",
-      "hidden",
-      "style",
-      "width",
-    ],
-  });
-  new vm.Script(transpiled).runInContext(context);
-  const runtimeVisualBindings = candidateKeys.map((key, index) => ({
-    key,
-    path: [1, index],
-    tagName: "DIV",
-    sourceBoxSignature: "[]",
-  }));
-  return context.reviewBootstrap(
-    "review-session",
-    "before",
-    runtimeVisualBindings,
-    reviewCommentBindings,
-  );
-}
 
 test("a ready AI result is review-first with exactly one direct-open alternative", () => {
   const readyStart = handoff.indexOf('activeRun.status === "ready-to-open"');
@@ -477,6 +431,10 @@ test("runtime chart review supplements only the initial bounded static footprint
   assert.match(reviewDocument, /runtimeVisualSnapshotBudgetExhausted/);
   assert.match(
     reviewDocument,
+    /capture\.content\.length\s*\+\s*capture\.paint\.length\s*\+\s*capture\.geometry\.length\s*\+\s*capture\.vector\.length/,
+  );
+  assert.match(
+    reviewDocument,
     /const runtimeVisualSnapshotBudget = \{\s+atoms: 0,\s+nodes: 0,\s+valueLength: 0,\s+canvasPixels: 0,\s+\}/,
   );
   assert.match(
@@ -545,7 +503,7 @@ test("runtime chart review supplements only the initial bounded static footprint
   assert.doesNotMatch(reviewDocument, /sectionPair\.(?:before|after)\?\.contains/);
   assert.doesNotMatch(reviewDocument, /hostReferenceScripts/);
   assert.match(reviewDocument, /remainingSignatures/);
-  assert.match(reviewDocument, /if \(explicitValues\.length\) return explicitValues/);
+  assert.match(reviewDocument, /if \(explicitTokens\.length\) return explicitTokens/);
   assert.match(reviewDocument, /hostBoxMutated/);
   assert.match(reviewDocument, /hostFullyTransparent/);
   assert.match(reviewDocument, /"host-box\|opacity=0"/);
@@ -576,10 +534,7 @@ test("runtime chart review supplements only the initial bounded static footprint
   assert.match(review, /onRequestConfirmation: requestRuntimeVisualConfirmation/);
   assert.match(review, /setRuntimeVisualFrameRun\(\(current\) => current \+ 1\)/);
   assert.match(review, /runtimeVisualCoordinatorRef\.current\?\.failConfirmation\(\)/);
-  assert.match(
-    review,
-    /REVIEW_RUNTIME_VISUAL_FRAME_REGISTRATION_MS = 1_500/,
-  );
+  assert.match(review, /RUNTIME_VISUAL_CONTRACT\.ownerDeadlineMs/);
   assert.match(review, /createReviewCapabilityChallenge/);
   assert.match(review, /event\.ports\.length === 1/);
   assert.match(review, /message\.challenge !== expectedChallenge/);
@@ -613,7 +568,7 @@ test("runtime chart review supplements only the initial bounded static footprint
   assert.match(review, /confirmationAction \|\| runtimeVisualPending/);
   assert.match(
     review,
-    /if \(reviewLoadFailed\)[\s\S]*?settleWithoutRuntime[\s\S]*?REVIEW_RUNTIME_VISUAL_FRAME_REGISTRATION_MS/,
+    /if \(reviewLoadFailed\)[\s\S]*?settleWithoutRuntime[\s\S]*?RUNTIME_VISUAL_CONTRACT\.ownerDeadlineMs/,
   );
   assert.doesNotMatch(review, /运行态不稳定|分析未完成|概括标记/);
 });
@@ -641,6 +596,69 @@ test("the generated runtime review bootstrap stays syntactically valid", () => {
   assert.doesNotMatch(bootstrap, /data-pageroot-review-runtime-source-/);
   assert.doesNotMatch(bootstrap, /data-pageroot-review-comment-source-/);
   assert.doesNotMatch(bootstrap, /review-comment-1|runtime-comment-caption/);
+});
+
+test("hostile review fixtures are enforced by the adapter and page contract", () => {
+  const nativeCanvas = runtimeVisualHostilePage("pr100-canvas-native-intrinsics");
+  const classOnlyHost = runtimeVisualHostilePage("pr100-single-painted-child");
+  const transparentText = runtimeVisualHostilePage("pr100-transparent-text");
+  const parserMutation = runtimeVisualHostilePage("pr107-parser-text-mutation");
+  const attributeLimit = runtimeVisualHostilePage("pr107-attribute-limit");
+  assert.match(nativeCanvas.html, /Math\.round=\(\)=>0/u);
+  assert.match(classOnlyHost.html, /class="chart-host"/u);
+  assert.match(classOnlyHost.html, /querySelector\('\[class~="chart-host"\]'\)/u);
+  assert.match(transparentText.html, /color="transparent"/u);
+  assert.match(transparentText.html, /rgba\(255, 0, 0, 0\)/u);
+  assert.match(transparentText.html, /rgb\(0, 0, 0\)/u);
+  assert.match(transparentText.html, /rgb\(255, 0, 0\)/u);
+  assert.match(transparentText.html, /-webkit-text-fill-color:rgb\(0, 0, 255\)/u);
+  assert.match(transparentText.html, /-webkit-text-fill-color:transparent/u);
+  assert.match(transparentText.html, /color\(srgb 1 0 0 \/ 0\)/u);
+  assert.match(transparentText.html, /oklab\(60% 0 0 \/ 0\)/u);
+  assert.match(transparentText.html, /text-shadow/iu);
+  assert.match(transparentText.html, /RegExp\.prototype\[Symbol\.match\]/u);
+  assert.match(transparentText.html, /RegExp\.prototype\.exec/u);
+  assert.match(parserMutation.html, /textContent="mutated"/u);
+  assert.match(parserMutation.html, /class="comment-target"/u);
+  assert.match(parserMutation.html, /class="comment-host"/u);
+  assert.match(attributeLimit.html, /data-key-24/u);
+  assert.match(attributeLimit.html, /id="anchored"/u);
+  assert.doesNotMatch(attributeLimit.html, /id=["']chart["']/u);
+
+  assert.match(reviewDocument, /ReviewRuntimeVisualCaptureAdapter/);
+  assert.match(reviewDocument, /REVIEW_PAGE_RUNTIME_VISUAL_CAPTURE_ADAPTER/);
+  assert.match(reviewDocument, /sourceSha256BySide/);
+  assert.match(reviewDocument, /runtimeVisualMathRound\(RuntimeVisualNumber/);
+  assert.match(reviewDocument, /runtimeVisualTextHasPaint/);
+  assert.match(reviewDocument, /runtimeVisualObservedBindingMatches/);
+  assert.match(reviewDocument, /runtimeVisualInitialBindingPathMatches/);
+  assert.match(reviewDocument, /runtimeVisualInitialBindingsBootstrapped/);
+  assert.match(reviewDocument, /reviewCommentDeferredBindings/);
+  assert.match(reviewDocument, /runtimeVisualDocumentReadyState/);
+  assert.match(reviewDocument, /runtimeVisualRegExpExec/);
+  assert.match(reviewDocument, /runtimeVisualInitialBindingIgnoresIdentityText/);
+  assert.match(reviewDocument, /runtimeVisualScriptReferencesToken/);
+  assert.match(reviewDocument, /runtimeVisualScriptDataSelectorMatches/);
+  assert.match(reviewDocument, /runtimeVisualScriptAttributeOperatorMatches/);
+  assert.match(reviewDocument, /runtimeVisualScriptClassSelectorMatches/);
+  assert.match(reviewDocument, /kind: "class-value"/);
+  assert.doesNotMatch(reviewDocument, /content\.includes\(token\)/u);
+  assert.match(reviewDocument, /(?:color\|lab\|lch\|oklab\|oklch\|hsl\|hwb)/u);
+  assert.match(reviewDocument, /runtimeVisualNumberIsFinite/);
+  assert.match(reviewDocument, /runtimeVisualMutationRecordAddedNodes/);
+  assert.match(
+    reviewDocument,
+    /nonReviewAttributes\.length > RUNTIME_VISUAL_CONTRACT\.identityAttributeLimit[\s\S]*?return null;/u,
+  );
+  assert.match(
+    reviewDocument,
+    /\.slice\(0, RUNTIME_VISUAL_CONTRACT\.identityAttributeLimit\)/,
+  );
+  const bootstrap = generatedReviewBootstrap(["runtime-host-1"]);
+  assert.match(bootstrap, /rawAttributes\.length > runtimeVisualIdentityAttributeLimit/);
+  assert.match(bootstrap, /contractVersion: runtimeVisualContractVersion/);
+  assert.match(bootstrap, /sourceSha256,/);
+  assert.match(review, /acceptedRuntimeVisualEnvelope/);
 });
 
 test("formal review projects frozen user comments with private source identities", () => {

@@ -528,6 +528,13 @@ test("a verified AI result stays pending through desktop review until the user a
       <style data-review-projection-style>div, svg { outline:7px solid rgb(255 0 153) !important; }</style>
       <p data-review-injection-stability><span data-review-stable-left>稳定左侧</span><strong>旧词</strong><em data-review-stable-right>稳定右侧</em></p>
       <p class="review-comment-ordinary-target">普通段落评论定位保持独立。</p>
+      <script>
+        const ordinaryCommentTarget = document.querySelector(".review-comment-ordinary-target");
+        const ordinaryCommentSibling = document.createElement("p");
+        ordinaryCommentSibling.className = ordinaryCommentTarget.className;
+        ordinaryCommentSibling.textContent = "运行时插入的同类段落";
+        ordinaryCommentTarget.before(ordinaryCommentSibling);
+      </script>
       <div data-review-metrics>
         <article data-review-metric="lock"><strong>+8.52%</strong><span>锁单确收增幅（显著 p&lt;0.01）</span><small>日均 52.5 万 vs 48.4 万</small></article>
         <article data-review-metric="ipv"><strong>+4.49%</strong><span>IPV 增幅（显著 p&lt;0.01）</span><small>日均 63.4 万 vs 60.7 万</small></article>
@@ -582,6 +589,17 @@ test("a verified AI result stays pending through desktop review until the user a
       <svg id="review-runtime-svg-chart" class="review-runtime-chart-host" viewBox="0 0 320 96" width="320" height="96"></svg>
       <canvas id="review-runtime-canvas-chart" class="review-runtime-chart-host" width="320" height="96"></canvas>
       <div id="review-runtime-host-paint-chart" class="review-runtime-chart-host"></div>
+      <div id="review-runtime-single-painted-child" class="review-runtime-chart-host"></div>
+      <div id="review-runtime-transparent-text" class="review-runtime-chart-host"></div>
+      <div id="review-runtime-transparent-fill-text" class="review-runtime-chart-host"></div>
+      <div id="review-runtime-attribute-limit" class="review-runtime-chart-host"
+        data-key-00="00" data-key-01="01" data-key-02="02" data-key-03="03"
+        data-key-04="04" data-key-05="05" data-key-06="06" data-key-07="07"
+        data-key-08="08" data-key-09="09" data-key-10="10" data-key-11="11"
+        data-key-12="12" data-key-13="13" data-key-14="14" data-key-15="15"
+        data-key-16="16" data-key-17="17" data-key-18="18" data-key-19="19"
+        data-key-20="20" data-key-21="21" data-key-22="22" data-key-23="23"
+        data-key-24="24"></div>
       <div id="review-runtime-opacity-chart" class="review-runtime-chart-host"></div>
       <div id="review-runtime-hidden-churn-chart" class="review-runtime-chart-host"></div>
       <div id="review-runtime-descendant-opacity-chart" class="review-runtime-chart-host"></div>
@@ -609,6 +627,7 @@ test("a verified AI result stays pending through desktop review until the user a
         runtimeCommentInsertedSibling.textContent = "运行态插入的同标签说明";
         runtimeCommentCaption.before(runtimeCommentInsertedSibling);
         runtimeCommentCaption.parentElement.append(runtimeCommentCaption);
+        runtimeCommentCaption.textContent = "相邻图表统一配色（运行时更新）";
         document.documentElement.dataset.reviewRuntimeCommentScopeTarget = (
           runtimeCommentCaption.hasAttribute("data-pageroot-review-comment-key")
             ? "caption"
@@ -879,6 +898,40 @@ test("a verified AI result stays pending through desktop review until the user a
         + (runtimeReviewChartVariant === "before" ? '180px' : '236px')
         + ';background:' + (runtimeReviewChartVariant === "before" ? '#9aaec2' : '#6d5ce7')
         + ';border:2px solid #241d58;border-radius:10px';
+      const runtimeSinglePaintedChild = document.querySelector(
+        "#review-runtime-single-painted-child",
+      );
+      const runtimeSinglePaintedBar = document.createElement("i");
+      runtimeSinglePaintedBar.style.cssText = 'display:block;height:24px;width:'
+        + (runtimeReviewChartVariant === "before" ? '96px' : '188px')
+        + ';background:' + (runtimeReviewChartVariant === "before" ? '#9aaec2' : '#6d5ce7');
+      runtimeSinglePaintedChild.append(runtimeSinglePaintedBar);
+      const runtimeTransparentText = document.querySelector(
+        "#review-runtime-transparent-text",
+      );
+      runtimeTransparentText.innerHTML = '<span style="color:transparent">'
+        + (runtimeReviewChartVariant === "before" ? '隐藏旧值' : '隐藏新值')
+        + '</span><span style="color:transparent;-webkit-text-fill-color:'
+        + (runtimeReviewChartVariant === "before" ? '#9aaec2' : '#6d5ce7')
+        + '">' + (runtimeReviewChartVariant === "before" ? '填充旧值' : '填充新值') + '</span>';
+      const runtimeTransparentFillText = document.querySelector(
+        "#review-runtime-transparent-fill-text",
+      );
+      runtimeTransparentFillText.innerHTML = '<span style="color:#d34f6a;-webkit-text-fill-color:transparent">'
+        + (runtimeReviewChartVariant === "before" ? '反向隐藏旧值' : '反向隐藏新值')
+        + '</span>';
+      const runtimeAttributeLimit = document.querySelector(
+        "#review-runtime-attribute-limit",
+      );
+      const runtimeAttributeCanvas = document.createElement("canvas");
+      runtimeAttributeCanvas.width = 48;
+      runtimeAttributeCanvas.height = 24;
+      runtimeAttributeLimit.append(runtimeAttributeCanvas);
+      const runtimeAttributeContext = runtimeAttributeCanvas.getContext("2d");
+      runtimeAttributeContext.fillStyle = runtimeReviewChartVariant === "before"
+        ? "#9aaec2"
+        : "#6d5ce7";
+      runtimeAttributeContext.fillRect(0, 0, 48, 24);
       const runtimeOpacityChart = document.querySelector("#review-runtime-opacity-chart");
       runtimeOpacityChart.style.cssText = 'display:block;width:220px;height:48px;'
         + 'background:#6d5ce7;opacity:'
@@ -1055,9 +1108,17 @@ test("a verified AI result stays pending through desktop review until the user a
           : nativeRuntimeStringCharCodeAt.call(this, index);
       };
       const nativeRuntimeMathImul = Math.imul;
+      const nativeRuntimeMathRound = Math.round;
+      const nativeRuntimeNumber = Number;
       const nativeRuntimePromiseRace = Promise.race;
       const nativeRuntimePromiseResolve = Promise.resolve;
       Math.imul = () => 0;
+      Math.round = (value) => (
+        value === 320 || value === 96 ? 0 : nativeRuntimeMathRound(value)
+      );
+      window.Number = (value) => (
+        value === 320 || value === 96 ? 0 : nativeRuntimeNumber(value)
+      );
       Promise.race = () => new Promise(() => {});
       Promise.resolve = () => new Promise(() => {});
       const nativeRuntimeSetTimeout = window.setTimeout.bind(window);
@@ -1066,6 +1127,8 @@ test("a verified AI result stays pending through desktop review until the user a
       window.requestAnimationFrame = () => 0;
       nativeRuntimeSetTimeout(() => {
         Math.imul = nativeRuntimeMathImul;
+        Math.round = nativeRuntimeMathRound;
+        window.Number = nativeRuntimeNumber;
         Promise.race = nativeRuntimePromiseRace;
         Promise.resolve = nativeRuntimePromiseResolve;
         window.setTimeout = nativeRuntimeSetTimeout;
@@ -1470,6 +1533,8 @@ test("a verified AI result stays pending through desktop review until the user a
       "#review-runtime-svg-chart",
       "#review-runtime-canvas-chart",
       "#review-runtime-host-paint-chart",
+      "#review-runtime-single-painted-child",
+      "#review-runtime-transparent-text",
       "#review-runtime-opacity-chart",
       "#review-runtime-descendant-opacity-chart",
       "#review-runtime-svg-descendant-opacity-chart",
@@ -1493,9 +1558,11 @@ test("a verified AI result stays pending through desktop review until the user a
     }
     const runtimeCandidateMetadataHosts = [
       ...runtimeChangedHosts,
+      "#review-runtime-attribute-limit",
       "#review-runtime-flow-chart",
       "#review-runtime-unstable-chart",
       "#review-runtime-root-geometry-chart",
+      "#review-runtime-transparent-fill-text",
       "#review-runtime-hidden-churn-chart",
       "#review-runtime-hidden-descendant-churn-chart",
       "#review-runtime-svg-hidden-descendant-churn-chart",
@@ -1529,9 +1596,15 @@ test("a verified AI result stays pending through desktop review until the user a
     )).toBeVisible();
     await expect(afterReviewFrame.locator("#review-runtime-flow-chart"))
       .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
+    await expect(afterReviewFrame.locator("#review-runtime-attribute-limit"))
+      .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
     await expect(afterReviewFrame.locator("#review-runtime-unstable-chart"))
       .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
     await expect(afterReviewFrame.locator("#review-runtime-root-geometry-chart"))
+      .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
+    await expect(beforeReviewFrame.locator("#review-runtime-transparent-fill-text"))
+      .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
+    await expect(afterReviewFrame.locator("#review-runtime-transparent-fill-text"))
       .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
     await expect(afterReviewFrame.locator("#review-runtime-hidden-churn-chart"))
       .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");

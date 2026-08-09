@@ -1,5 +1,9 @@
 import type { HtmlCanvasSelection } from "../components/HtmlCanvasEditor.types";
 import {
+  RUNTIME_VISUAL_CONTRACT,
+  RUNTIME_VISUAL_CONTRACT_VERSION,
+} from "../domain/runtime-visual-contract.js";
+import {
   PAGE_TAB_STATE_CLASS_NAMES,
   pageTabAssociations,
 } from "../lib/page-presentation-dom";
@@ -42,6 +46,14 @@ import {
   resolveReviewCommentSourceElement,
 } from "../lib/review-comment-source-map.js";
 import type { CommentItem } from "./types";
+import {
+  createReviewRuntimeVisualCaptureIdentity,
+} from "./review-runtime-capture-adapter";
+import type {
+  ReviewRuntimeVisualCaptureAdapter,
+  ReviewRuntimeVisualCaptureIdentity,
+  ReviewRuntimeVisualBootstrapRequest,
+} from "./review-runtime-capture-adapter";
 
 export type ReviewFilter = "all" | "text" | "structure" | "style";
 export type ReviewChangeType = Exclude<ReviewFilter, "all">;
@@ -79,6 +91,7 @@ export type ReviewDocuments = {
   changes: ReviewChange[];
   outline: ReviewOutlineItem[];
   runtimeVisualCandidates: ReviewRuntimeVisualCandidate[];
+  runtimeVisualCaptureIdentity: ReviewRuntimeVisualCaptureIdentity;
   commentGroups: ReviewCommentGroup[];
   commentTargets: ReviewCommentTarget[];
 };
@@ -1334,6 +1347,20 @@ type ChangedReviewScript = {
   content: string;
 };
 
+type RuntimeVisualScriptTokenKind =
+  | "id"
+  | "class"
+  | "class-value"
+  | "data-attribute"
+  | "data-value"
+  | "semantic-value";
+
+type RuntimeVisualScriptToken = {
+  value: string;
+  kind: RuntimeVisualScriptTokenKind;
+  attributeName?: string;
+};
+
 type ReviewBootstrapElementBinding = {
   path: number[];
   tagName: string;
@@ -1437,6 +1464,12 @@ function reviewBootstrapElementBinding(
     !attribute.name.startsWith("data-pageroot-")
     && !REVIEW_RUNTIME_VISUAL_SOURCE_BOX_ATTRIBUTES.includes(attribute.name)
   ));
+  const identityAttributePriority = (name: string) => {
+    if (name === "id") return 0;
+    if (name === "name" || name === "aria-label") return 1;
+    if (name.startsWith("data-")) return 2;
+    return 3;
+  };
   const identityAttributes = (nonReviewAttributes.some(
     (attribute) => attribute.name !== "class",
   )
@@ -1444,8 +1477,16 @@ function reviewBootstrapElementBinding(
     : nonReviewAttributes
   ).map((attribute) => [attribute.name, attribute.value] as [string, string])
     .sort(([leftName, leftValue], [rightName, rightValue]) => (
-      leftName.localeCompare(rightName) || leftValue.localeCompare(rightValue)
-    ));
+      identityAttributePriority(leftName) - identityAttributePriority(rightName)
+      || leftName.localeCompare(rightName)
+      || leftValue.localeCompare(rightValue)
+    ))
+    .slice(0, RUNTIME_VISUAL_CONTRACT.identityAttributeLimit);
+  // A truncated fingerprint is never evidence of identity. Even an id/name
+  // anchor can be shared by an authored parser decoy while an omitted
+  // attribute distinguishes the real source target, so drop every binding
+  // that cannot be represented completely.
+  if (nonReviewAttributes.length > RUNTIME_VISUAL_CONTRACT.identityAttributeLimit) return null;
   const identityText = includeIdentityText
     ? (element.textContent || "").replace(/\s+/gu, " ").trim().slice(0, 1024)
     : "";
@@ -1564,31 +1605,225 @@ function changedReviewScripts(
   ].map(({ content }) => ({ content }));
 }
 
-function runtimeVisualScriptTokens(before: Element, after: Element): string[] {
-  const elementTokens = (element: Element) => {
-    const explicitValues = [
-      element.id,
-      ...[...element.attributes]
+function runtimeVisualScriptTokens(
+  before: Element,
+  after: Element,
+): RuntimeVisualScriptToken[] {
+  const elementTokens = (element: Element): RuntimeVisualScriptToken[] => {
+    const explicitTokens: RuntimeVisualScriptToken[] = [];
+    const id = element.id.trim();
+    if (id.length >= 3) explicitTokens.push({ value: id, kind: "id" });
+    [...element.attributes]
         .filter((attribute) => (
           attribute.name.startsWith("data-")
           && !attribute.name.startsWith("data-pageroot-")
           && /(?:canvas|chart|graph|plot|table|visual|viz)/iu.test(attribute.name)
         ))
-        .flatMap((attribute) => [attribute.name, attribute.value]),
-    ].map((value) => value.trim()).filter((value) => value.length >= 3);
-    if (explicitValues.length) return explicitValues;
-    const semanticValues = ["aria-label", "name", "title"]
-      .map((attributeName) => element.getAttribute(attributeName) || "")
-      .map((value) => value.trim())
-      .filter((value) => value.length >= 3);
-    if (semanticValues.length) return semanticValues;
-    return classTokens(element)
+        .forEach((attribute) => {
+          const attributeName = attribute.name.trim();
+          const value = attribute.value.trim();
+          if (attributeName.length >= 3) {
+            explicitTokens.push({
+              value: attributeName,
+              kind: "data-attribute",
+              attributeName,
+            });
+          }
+          if (value.length >= 3) {
+            explicitTokens.push({
+              value,
+              kind: "data-value",
+              attributeName,
+            });
+          }
+        });
+    if (explicitTokens.length) return explicitTokens;
+    const semanticTokens: RuntimeVisualScriptToken[] = [];
+    ["aria-label", "name", "title"].forEach((attributeName) => {
+      const value = (element.getAttribute(attributeName) || "").trim();
+      if (value.length >= 3) {
+        semanticTokens.push({ value, kind: "semantic-value", attributeName });
+      }
+    });
+    if (semanticTokens.length) return semanticTokens;
+    const classValue = (element.getAttribute("class") || "").trim();
+    return [
+      ...(classValue.length >= 3
+        ? [{ value: classValue, kind: "class-value" as const, attributeName: "class" }]
+        : []),
+      ...classTokens(element)
       .filter((token) => (
         !GENERIC_RUNTIME_VISUAL_CLASSES.has(token.toLowerCase())
       ))
-      .filter((value) => value.length >= 3);
+      .filter((value) => value.length >= 3)
+      .map((value) => ({ value, kind: "class" as const })),
+    ];
   };
-  return [...new Set([...elementTokens(before), ...elementTokens(after)])];
+  const unique = new Map<string, RuntimeVisualScriptToken>();
+  [...elementTokens(before), ...elementTokens(after)].forEach((token) => {
+    const key = `${token.kind}\u0000${token.attributeName || ""}\u0000${token.value}`;
+    if (!unique.has(key)) unique.set(key, token);
+  });
+  return [...unique.values()];
+}
+
+function runtimeVisualScriptRegexValue(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}
+
+function runtimeVisualScriptStringLiteral(value: string): string {
+  return `["'\\x60]${runtimeVisualScriptRegexValue(value)}["'\\x60]`;
+}
+
+function runtimeVisualScriptBoundaryMatches(source: string, value: string): boolean {
+  const escaped = runtimeVisualScriptRegexValue(value);
+  return new RegExp(
+    `(?:^|[^A-Za-z0-9_$-])${escaped}(?=$|[^A-Za-z0-9_$-])`,
+    "u",
+  ).test(source);
+}
+
+function runtimeVisualScriptSelectorLiteral(value: string): string | null {
+  const trimmed = value.trim();
+  const quote = trimmed[0];
+  return quote && trimmed.at(-1) === quote
+    ? trimmed.slice(1, -1)
+    : null;
+}
+
+function runtimeVisualScriptAttributeOperatorMatches(
+  actual: string,
+  operator: string,
+  expected: string,
+): boolean {
+  if (
+    expected.length === 0
+    && ["~=", "^=", "$=", "*="].includes(operator)
+  ) return false;
+  switch (operator) {
+    case "=":
+      return actual === expected;
+    case "~=":
+      return actual.split(/[\t\n\f\r ]+/u).includes(expected);
+    case "^=":
+      return actual.startsWith(expected);
+    case "$=":
+      return actual.endsWith(expected);
+    case "*=":
+      return actual.includes(expected);
+    case "|=":
+      return actual === expected || actual.startsWith(`${expected}-`);
+    default:
+      return false;
+  }
+}
+
+function runtimeVisualScriptDataSelectorMatches(
+  source: string,
+  token: RuntimeVisualScriptToken,
+): boolean {
+  const attributeName = token.attributeName || token.value;
+  const escapedAttributeName = runtimeVisualScriptRegexValue(attributeName);
+  const attributeSelector = new RegExp(
+    `\\[\\s*${escapedAttributeName}(?:\\s*(?<operator>[~|^$*]?=)\\s*(?<operand>[^\\]]*))?\\s*\\]`,
+    "u",
+  );
+  for (const queryMatch of source.matchAll(/\bquerySelector(?:All)?\s*\(\s*([^)]*)\)/gu)) {
+    const selector = runtimeVisualScriptSelectorLiteral(queryMatch[1]);
+    if (selector === null) continue;
+    const match = selector.match(attributeSelector);
+    if (!match) continue;
+    const operator = match.groups?.operator || "";
+    if (!operator) {
+      if (token.kind === "data-attribute") return true;
+      continue;
+    }
+    if (token.kind !== "data-value") continue;
+    const rawOperand = match.groups?.operand?.trim() || "";
+    const operand = runtimeVisualScriptSelectorLiteral(rawOperand) ?? rawOperand;
+    if (runtimeVisualScriptAttributeOperatorMatches(token.value, operator, operand)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function runtimeVisualScriptClassSelectorMatches(
+  source: string,
+  token: RuntimeVisualScriptToken,
+): boolean {
+  const classSelector = new RegExp(
+    "\\[\\s*class(?:\\s*(?<operator>[~|^$*]?=)\\s*(?<operand>[^\\]]*))?\\s*\\]",
+    "u",
+  );
+  for (const queryMatch of source.matchAll(/\bquerySelector(?:All)?\s*\(\s*([^)]*)\)/gu)) {
+    const selector = runtimeVisualScriptSelectorLiteral(queryMatch[1]);
+    if (selector === null) continue;
+    const match = selector.match(classSelector);
+    if (!match) continue;
+    const operator = match.groups?.operator || "";
+    if (!operator) return token.kind === "class-value";
+    const rawOperand = match.groups?.operand?.trim() || "";
+    const operand = runtimeVisualScriptSelectorLiteral(rawOperand) ?? rawOperand;
+    if (operator === "~=" && token.kind === "class") {
+      if (runtimeVisualScriptAttributeOperatorMatches(token.value, operator, operand)) {
+        return true;
+      }
+      continue;
+    }
+    if (token.kind === "class-value"
+      && runtimeVisualScriptAttributeOperatorMatches(token.value, operator, operand)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function runtimeVisualScriptReferencesToken(
+  source: string,
+  token: RuntimeVisualScriptToken,
+): boolean {
+  const value = token.value;
+  const escaped = runtimeVisualScriptRegexValue(value);
+  if (token.kind === "class") {
+    return new RegExp(
+      `(?:^|[^A-Za-z0-9_.-])\\.${escaped}(?=$|[^A-Za-z0-9_.-])`,
+      "u",
+    ).test(source) || new RegExp(
+      `(?:\\bgetElementsByClassName|\\bclassList\\.(?:add|contains|remove|replace|toggle))\\s*\\(\\s*${runtimeVisualScriptStringLiteral(value)}`,
+      "u",
+    ).test(source) || new RegExp(
+      `\\[\\s*class\\s*(?:[~|^$*]?=)\\s*${runtimeVisualScriptStringLiteral(value)}`,
+      "u",
+    ).test(source) || runtimeVisualScriptClassSelectorMatches(source, token);
+  }
+  if (token.kind === "class-value") {
+    return runtimeVisualScriptClassSelectorMatches(source, token)
+      || new RegExp(
+        `\\bgetElementsByClassName\\s*\\(\\s*${runtimeVisualScriptStringLiteral(value)}\\s*\\)`,
+        "u",
+      ).test(source);
+  }
+  if (token.kind === "data-attribute") {
+    return runtimeVisualScriptDataSelectorMatches(source, token)
+      || new RegExp(
+        `\\bgetAttribute\\s*\\(\\s*${runtimeVisualScriptStringLiteral(token.attributeName || value)}\\s*\\)`,
+        "u",
+      ).test(source);
+  }
+  if (token.kind === "data-value") {
+    return runtimeVisualScriptDataSelectorMatches(source, token);
+  }
+  if (token.kind === "id") {
+    return new RegExp(
+      `\\bgetElementById\\s*\\(\\s*${runtimeVisualScriptStringLiteral(value)}\\s*\\)`,
+      "u",
+    ).test(source) || new RegExp(
+      `\\bquerySelector(?:All)?\\s*\\(\\s*${runtimeVisualScriptStringLiteral(`#${value}`)}\\s*\\)`,
+      "u",
+    ).test(source) || runtimeVisualScriptBoundaryMatches(source, value);
+  }
+  return runtimeVisualScriptBoundaryMatches(source, value);
 }
 
 function hasRuntimeVisualCause(
@@ -1596,7 +1831,9 @@ function hasRuntimeVisualCause(
   changedScripts: ChangedReviewScript[],
 ): boolean {
   const tokens = runtimeVisualScriptTokens(hostPair.before, hostPair.after);
-  const referencesHost = (content: string) => tokens.some((token) => content.includes(token));
+  const referencesHost = (content: string) => tokens.some((token) => (
+    runtimeVisualScriptReferencesToken(content, token)
+  ));
   return tokens.length > 0 && changedScripts.some(({ content }) => referencesHost(content));
 }
 
@@ -3658,6 +3895,7 @@ function baseHrefFromSourcePath(sourcePath?: string): string | undefined {
 function reviewBootstrap(
   sessionId: string,
   side: ReviewSide,
+  sourceSha256: string,
   runtimeVisualBindings: readonly ReviewRuntimeVisualBootstrapBinding[] = [],
   reviewCommentBindings: readonly ReviewCommentBootstrapBinding[] = [],
 ): string {
@@ -3667,8 +3905,10 @@ function reviewBootstrap(
   );
   return String.raw`
 (() => {
+  const runtimeVisualContractVersion = ${RUNTIME_VISUAL_CONTRACT_VERSION};
   const sessionId = ${JSON.stringify(sessionId)};
   const side = ${JSON.stringify(side)};
+  const sourceSha256 = ${JSON.stringify(sourceSha256)};
   // This first managed script binds evidence readers before authored scripts execute.
   const runtimeVisualExpectedKeys = Object.freeze(
     ${JSON.stringify([...runtimeVisualCandidateKeys])},
@@ -3690,9 +3930,15 @@ function reviewBootstrap(
   const RuntimeVisualSet = Set;
   const RuntimeVisualWeakMap = WeakMap;
   const RuntimeVisualString = String;
+  const RuntimeVisualNumber = Number;
+  const runtimeVisualBoolean = Boolean;
   const RuntimeVisualPromise = Promise;
   const runtimeVisualMathImul = Math.imul.bind(Math);
   const runtimeVisualMathFloor = Math.floor.bind(Math);
+  const runtimeVisualMathRound = Math.round.bind(Math);
+  const runtimeVisualMathMax = Math.max.bind(Math);
+  const runtimeVisualParseFloat = Number.parseFloat.bind(Number);
+  const runtimeVisualNumberIsFinite = Number.isFinite.bind(Number);
   const runtimeVisualSetTimeout = window.setTimeout.bind(window);
   const runtimeVisualRequestAnimationFrame = window.requestAnimationFrame.bind(window);
   const runtimeVisualPromiseResolve = RuntimeVisualPromise.resolve.bind(RuntimeVisualPromise);
@@ -3712,10 +3958,12 @@ function reviewBootstrap(
   const runtimeVisualStringCharCodeAt = runtimeVisualBindCall(
     String.prototype.charCodeAt,
   );
+  const runtimeVisualStringToLowerCase = runtimeVisualBindCall(String.prototype.toLowerCase);
+  const runtimeVisualStringTrim = runtimeVisualBindCall(String.prototype.trim);
   const runtimeVisualStringFromCharCode = String.fromCharCode.bind(String);
   const runtimeVisualNumberToString = runtimeVisualBindCall(Number.prototype.toString);
   const runtimeVisualStringPadStart = runtimeVisualBindCall(String.prototype.padStart);
-  const runtimeVisualRegExpTest = runtimeVisualBindCall(RegExp.prototype.test);
+  const runtimeVisualRegExpExec = runtimeVisualBindCall(RegExp.prototype.exec);
   const runtimeVisualDocumentQuerySelectorAll = runtimeVisualBindCall(
     Document.prototype.querySelectorAll,
   );
@@ -3750,6 +3998,9 @@ function reviewBootstrap(
   );
   const runtimeVisualNodeParentElement = runtimeVisualBindCall(
     Object.getOwnPropertyDescriptor(Node.prototype, "parentElement").get,
+  );
+  const runtimeVisualDocumentReadyState = runtimeVisualBindCall(
+    Object.getOwnPropertyDescriptor(Document.prototype, "readyState").get,
   );
   const runtimeVisualNodeIsConnected = runtimeVisualBindCall(
     Object.getOwnPropertyDescriptor(Node.prototype, "isConnected").get,
@@ -3934,6 +4185,13 @@ function reviewBootstrap(
         message.type !== "request-runtime-visual-channel"
         && message.type !== "request-review-comment-channel"
       )
+      || (
+        message.type === "request-runtime-visual-channel"
+        && (
+          message.contractVersion !== runtimeVisualContractVersion
+          || message.sourceSha256 !== sourceSha256
+        )
+      )
     ) return;
     // This listener is installed by the first owned script with capture=true.
     // It consumes the capability challenge before authored capture listeners can
@@ -3949,8 +4207,10 @@ function reviewBootstrap(
   runtimeVisualAddEventListener("message", capturePrivateChannelRequest, { capture: true });
   const post = (type, extra = {}) => postToParent({
     source: "pageroot-ai-review",
+    contractVersion: runtimeVisualContractVersion,
     sessionId,
     side,
+    sourceSha256,
     type,
     ...extra,
   }, "*");
@@ -3962,21 +4222,25 @@ function reviewBootstrap(
     ) return;
     postRuntimeVisualPort({
       source: "pageroot-ai-review-runtime-visual",
+      contractVersion: runtimeVisualContractVersion,
       sessionId,
       side,
+      sourceSha256,
       type: "runtime-visual-snapshots",
       runtimeVisualSnapshots: runtimeVisualSnapshotBatch,
     });
   };
   const transferRuntimeVisualChannel = (rawChallenge) => {
     const challenge = String(rawChallenge || "");
-    if (!/^[a-f0-9]{32}$/u.test(challenge)) return;
+    if (runtimeVisualRegExpExec(/^[a-f0-9]{32}$/u, challenge) === null) return;
     if (!runtimeVisualChannel || runtimeVisualChannelTransferred) return;
     runtimeVisualChannelTransferred = true;
     postToParent({
       source: "pageroot-ai-review",
+      contractVersion: runtimeVisualContractVersion,
       sessionId,
       side,
+      sourceSha256,
       type: "runtime-visual-channel",
       challenge,
     }, "*", [runtimeVisualChannel.port2]);
@@ -3987,13 +4251,15 @@ function reviewBootstrap(
   };
   const transferReviewCommentChannel = (rawChallenge) => {
     const challenge = String(rawChallenge || "");
-    if (!/^[a-f0-9]{32}$/u.test(challenge)) return;
+    if (runtimeVisualRegExpExec(/^[a-f0-9]{32}$/u, challenge) === null) return;
     if (!reviewCommentChannel || reviewCommentChannelTransferred) return;
     reviewCommentChannelTransferred = true;
     postToParent({
       source: "pageroot-ai-review",
+      contractVersion: runtimeVisualContractVersion,
       sessionId,
       side,
+      sourceSha256,
       type: "review-comment-channel",
       challenge,
     }, "*", [reviewCommentChannel.port2]);
@@ -4013,7 +4279,20 @@ function reviewBootstrap(
     document.documentElement.scrollHeight,
     document.body?.scrollHeight || 0,
   );
-  const safeKey = (value) => String(value || "").replace(/[^a-z0-9-]/gi, "");
+  const safeKey = (value) => {
+    const source = RuntimeVisualString(value || "");
+    let result = "";
+    for (let index = 0; index < source.length; index += 1) {
+      const code = runtimeVisualStringCharCodeAt(source, index);
+      if (
+        (code >= 0x30 && code <= 0x39)
+        || (code >= 0x41 && code <= 0x5a)
+        || (code >= 0x61 && code <= 0x7a)
+        || code === 0x2d
+      ) result += source[index];
+    }
+    return result;
+  };
   const safePanelPath = (value) => [...new Set(
     (Array.isArray(value) ? value : String(value || "").split(/\s+/))
       .map(safeKey)
@@ -4021,12 +4300,13 @@ function reviewBootstrap(
   )];
   const runtimeVisualSourceBoxAttributes = ${JSON.stringify(REVIEW_RUNTIME_VISUAL_SOURCE_BOX_ATTRIBUTES)};
   const runtimeVisualCandidateLimit = ${REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT};
-  const runtimeVisualAtomLimit = 4096;
-  const runtimeVisualBatchAtomLimit = 8192;
-  const runtimeVisualBatchNodeLimit = 8192;
-  const runtimeVisualCanvasPixelLimit = 4194304;
-  const runtimeVisualValueLimit = 200000;
-  const runtimeVisualBatchValueLimit = 400000;
+  const runtimeVisualIdentityAttributeLimit = ${RUNTIME_VISUAL_CONTRACT.identityAttributeLimit};
+  const runtimeVisualAtomLimit = ${RUNTIME_VISUAL_CONTRACT.pageBudget.hostAtoms};
+  const runtimeVisualBatchAtomLimit = ${RUNTIME_VISUAL_CONTRACT.pageBudget.atoms};
+  const runtimeVisualBatchNodeLimit = ${RUNTIME_VISUAL_CONTRACT.pageBudget.nodes};
+  const runtimeVisualCanvasPixelLimit = ${RUNTIME_VISUAL_CONTRACT.pageBudget.canvasPixels};
+  const runtimeVisualValueLimit = ${RUNTIME_VISUAL_CONTRACT.pageBudget.hostValueLength};
+  const runtimeVisualBatchValueLimit = ${RUNTIME_VISUAL_CONTRACT.pageBudget.valueLength};
   const runtimeVisualSnapshotBudgetExhausted = (budget) => (
     budget.atoms >= runtimeVisualBatchAtomLimit
     || budget.nodes >= runtimeVisualBatchNodeLimit
@@ -4039,6 +4319,7 @@ function reviewBootstrap(
   const runtimeVisualInvalidKeys = new RuntimeVisualSet();
   const reviewCommentSourceNodeIdPattern = /^element:\d+:\d+:[a-z][a-z0-9:-]{0,127}$/iu;
   const reviewCommentIdentityElements = new RuntimeVisualMap();
+  const reviewCommentDeferredBindings = new RuntimeVisualMap();
   const reviewCommentInvalidSourceNodeIds = new RuntimeVisualSet();
   const runtimeVisualIdentityKey = (value) => {
     const key = safeKey(value);
@@ -4047,7 +4328,7 @@ function reviewBootstrap(
   const safeReviewCommentSourceNodeId = (value) => {
     const sourceNodeId = RuntimeVisualString(value || "");
     return sourceNodeId.length <= 256
-      && runtimeVisualRegExpTest(reviewCommentSourceNodeIdPattern, sourceNodeId)
+      && runtimeVisualRegExpExec(reviewCommentSourceNodeIdPattern, sourceNodeId) !== null
       ? sourceNodeId
       : "";
   };
@@ -4089,11 +4370,17 @@ function reviewBootstrap(
     }
     return element;
   };
+  const runtimeVisualInitialBindingPathMatches = (element, binding) => (
+    runtimeVisualInitialBindingPathElement(binding?.path) === element
+  );
   const runtimeVisualInitialBindingIdentityAttributes = (binding) => {
     const runtimeVisualBindingAttributeNamePattern = /^[a-z_:][a-z0-9:._-]{0,127}$/iu;
     const runtimeVisualOwnedAttributeNamePattern = /^data-pageroot-/iu;
     const rawAttributes = binding?.identityAttributes;
-    if (!runtimeVisualArrayIsArray(rawAttributes) || rawAttributes.length > 24) return null;
+    if (
+      !runtimeVisualArrayIsArray(rawAttributes)
+      || rawAttributes.length > runtimeVisualIdentityAttributeLimit
+    ) return null;
     const attributes = [];
     for (let index = 0; index < rawAttributes.length; index += 1) {
       const rawAttribute = rawAttributes[index];
@@ -4101,15 +4388,32 @@ function reviewBootstrap(
       const name = RuntimeVisualString(rawAttribute[0] || "");
       const value = RuntimeVisualString(rawAttribute[1] || "");
       if (
-        !runtimeVisualRegExpTest(runtimeVisualBindingAttributeNamePattern, name)
-        || runtimeVisualRegExpTest(runtimeVisualOwnedAttributeNamePattern, name)
+        runtimeVisualRegExpExec(runtimeVisualBindingAttributeNamePattern, name) === null
+        || runtimeVisualRegExpExec(runtimeVisualOwnedAttributeNamePattern, name) !== null
         || value.length > 1024
       ) return null;
       runtimeVisualArrayPush(attributes, [name, value]);
     }
     return attributes;
   };
-  const runtimeVisualInitialBindingMatches = (element, binding) => {
+  const runtimeVisualInitialBindingIgnoresIdentityText = (
+    identityAttributes,
+    identityText,
+  ) => {
+    if (!identityText) return true;
+    if (!identityAttributes?.length) return false;
+    // A class-only fingerprint is intentionally text-sensitive. Class names
+    // are commonly shared by sibling comment targets, so dropping the frozen
+    // text would make the final uniqueness pass bind an arbitrary sibling.
+    return !identityAttributes.every(([name]) => (
+      runtimeVisualStringToLowerCase(RuntimeVisualString(name)) === "class"
+    ));
+  };
+  const runtimeVisualInitialBindingMatches = (
+    element,
+    binding,
+    ignoreIdentityText = false,
+  ) => {
     if (!runtimeVisualIsInstance(RuntimeVisualElement, element)) return false;
     const tagName = RuntimeVisualString(binding?.tagName || "");
     const sourceBoxSignature = RuntimeVisualString(binding?.sourceBoxSignature || "");
@@ -4132,34 +4436,145 @@ function reviewBootstrap(
       const [name, value] = identityAttributes[index];
       if (runtimeVisualElementGetAttribute(element, name) !== value) return false;
     }
-    return !identityText
+    return ignoreIdentityText
+      || !identityText
       || runtimeVisualNormalizeText(runtimeVisualNodeTextContent(element) || "")
         .slice(0, 1024) === identityText;
   };
+  const runtimeVisualObservedBindingMatches = (element, binding) => {
+    const identityAttributes = runtimeVisualInitialBindingIdentityAttributes(binding);
+    const identityText = typeof binding?.identityText === "string"
+      ? RuntimeVisualString(binding.identityText)
+      : "";
+    if (!runtimeVisualInitialBindingPathMatches(element, binding)) return false;
+    if (!identityAttributes?.length && identityText.length > 0) {
+      return runtimeVisualInitialBindingMatches(element, binding, false);
+    }
+    return runtimeVisualInitialBindingMatches(
+      element,
+      binding,
+      runtimeVisualInitialBindingIgnoresIdentityText(identityAttributes, identityText),
+    );
+  };
   const runtimeVisualInitialBindingHasFingerprint = (binding) => {
     const attributes = runtimeVisualInitialBindingIdentityAttributes(binding);
-    return Boolean(
+    return runtimeVisualBoolean(
       attributes?.length
       || (typeof binding?.identityText === "string" && binding.identityText.length),
     );
   };
-  const runtimeVisualInitialBindingElement = (binding) => {
+  const runtimeVisualInitialBindingSourceBoxMatches = (element, binding) => (
+    RuntimeVisualString(binding?.sourceBoxSignature || "")
+      === runtimeVisualSourceBoxSignature(element)
+  );
+  const runtimeVisualInitialBindingForPath = (element, binding) => {
+    let matchingBinding = null;
+    runtimeVisualArrayForEach(runtimeVisualInitialBindings, (candidate) => {
+      if (
+        matchingBinding
+        || candidate === binding
+        || !runtimeVisualIdentityKey(candidate?.key)
+        || !runtimeVisualInitialBindingPathMatches(element, candidate)
+        || !runtimeVisualInitialBindingMatches(element, candidate, true)
+        || !runtimeVisualInitialBindingSourceBoxMatches(element, candidate)
+      ) return;
+      matchingBinding = candidate;
+    });
+    return matchingBinding;
+  };
+  const reviewCommentInitialBindingForPath = (element, binding) => {
+    let matchingBinding = null;
+    runtimeVisualArrayForEach(reviewCommentInitialBindings, (candidate) => {
+      if (
+        matchingBinding
+        || candidate === binding
+        || !safeReviewCommentSourceNodeId(candidate?.sourceNodeId)
+        || !runtimeVisualInitialBindingPathMatches(element, candidate)
+        || !runtimeVisualInitialBindingMatches(element, candidate, true)
+        || !runtimeVisualInitialBindingSourceBoxMatches(element, candidate)
+      ) return;
+      matchingBinding = candidate;
+    });
+    return matchingBinding;
+  };
+  const runtimeVisualInitialBindingElement = (binding, useFrozenPath = true) => {
     const pathElement = runtimeVisualInitialBindingPathElement(binding?.path);
-    if (runtimeVisualInitialBindingMatches(pathElement, binding)) return pathElement;
+    const identityAttributes = runtimeVisualInitialBindingIdentityAttributes(binding);
+    const identityText = typeof binding?.identityText === "string"
+      ? RuntimeVisualString(binding.identityText)
+      : "";
+    if (useFrozenPath && runtimeVisualInitialBindingMatches(
+      pathElement,
+      binding,
+      runtimeVisualInitialBindingIgnoresIdentityText(identityAttributes, identityText),
+    )) return pathElement;
+    if (runtimeVisualDocumentReadyState(document) === "loading") return null;
     if (!runtimeVisualInitialBindingHasFingerprint(binding)) return null;
     const matching = [];
     runtimeVisualArrayForEach(runtimeVisualQueryElements("*"), (element) => {
       if (
         matching.length < 2
-        && runtimeVisualInitialBindingMatches(element, binding)
+        && runtimeVisualInitialBindingMatches(
+          element,
+          binding,
+          runtimeVisualInitialBindingIgnoresIdentityText(identityAttributes, identityText),
+        )
       ) runtimeVisualArrayPush(matching, element);
     });
     return matching.length === 1 ? matching[0] : null;
   };
-  const captureRuntimeVisualInitialBinding = (binding) => {
+  const captureRuntimeVisualInitialBinding = (binding, observedElement = null) => {
     const key = runtimeVisualIdentityKey(binding?.key);
     if (!key || runtimeVisualSetHas(runtimeVisualInvalidKeys, key)) return;
-    const element = runtimeVisualInitialBindingElement(binding);
+    if (observedElement !== null) {
+      const pathMatches = runtimeVisualInitialBindingPathMatches(
+        observedElement,
+        binding,
+      );
+      const hasFingerprint = runtimeVisualInitialBindingHasFingerprint(binding);
+      if (
+        pathMatches
+        && !hasFingerprint
+        && runtimeVisualInitialBindingMatches(observedElement, binding, true)
+      ) {
+        const existing = runtimeVisualMapGet(runtimeVisualIdentityElements, key);
+        const existingKey = runtimeVisualMapGet(runtimeVisualHostKeys, observedElement);
+        if ((existing && existing !== observedElement) || (existingKey && existingKey !== key)) {
+          runtimeVisualSetAdd(runtimeVisualInvalidKeys, key);
+          if (existingKey) runtimeVisualSetAdd(runtimeVisualInvalidKeys, existingKey);
+          return;
+        }
+        if (!existing && !existingKey) {
+          runtimeVisualMapSet(runtimeVisualIdentityElements, key, observedElement);
+          runtimeVisualMapSet(runtimeVisualHostKeys, observedElement, key);
+          runtimeVisualMapSet(
+            runtimeVisualSourceBoxSignatures,
+            observedElement,
+            RuntimeVisualString(binding.sourceBoxSignature),
+          );
+        }
+        return;
+      }
+      // A fingerprintless runtime host has no evidence with which to
+      // distinguish a same-tag parser decoy from the source target after the
+      // frozen path shifts. Keep the entire runtime binding unavailable rather
+      // than letting the first observed element fabricate a visual diff.
+      if (
+        !pathMatches
+        && !hasFingerprint
+        && runtimeVisualInitialBindingMatches(observedElement, binding, true)
+        && runtimeVisualInitialBindingSourceBoxMatches(observedElement, binding)
+      ) {
+        // A legitimate sibling can have the same tag and source-box
+        // attributes. Its observation belongs to the other declared frozen
+        // path, not to this binding's decoy check.
+        if (runtimeVisualInitialBindingForPath(observedElement, binding)) return;
+        runtimeVisualSetAdd(runtimeVisualInvalidKeys, key);
+        return;
+      }
+      if (!runtimeVisualObservedBindingMatches(observedElement, binding)) return;
+    }
+    const element = observedElement || runtimeVisualInitialBindingElement(binding);
     if (!element) return;
     const existing = runtimeVisualMapGet(runtimeVisualIdentityElements, key);
     const existingKey = runtimeVisualMapGet(runtimeVisualHostKeys, element);
@@ -4181,13 +4596,66 @@ function reviewBootstrap(
       );
     }
   };
-  const captureReviewCommentInitialBinding = (binding) => {
+  const captureReviewCommentInitialBinding = (binding, observedElement = null) => {
     const sourceNodeId = safeReviewCommentSourceNodeId(binding?.sourceNodeId);
     if (
       !sourceNodeId
       || runtimeVisualSetHas(reviewCommentInvalidSourceNodeIds, sourceNodeId)
     ) return;
-    const element = runtimeVisualInitialBindingElement(binding);
+    if (observedElement !== null) {
+      const identityAttributes = runtimeVisualInitialBindingIdentityAttributes(binding);
+      const identityText = typeof binding?.identityText === "string"
+        ? RuntimeVisualString(binding.identityText)
+        : "";
+      const pathMatches = runtimeVisualInitialBindingPathMatches(
+        observedElement,
+        binding,
+      );
+      const hasFingerprint = runtimeVisualInitialBindingHasFingerprint(binding);
+      if (
+        pathMatches
+        && !hasFingerprint
+        && runtimeVisualInitialBindingMatches(observedElement, binding, true)
+      ) {
+        const existing = runtimeVisualMapGet(reviewCommentIdentityElements, sourceNodeId);
+        if (existing && existing !== observedElement) {
+          runtimeVisualSetAdd(reviewCommentInvalidSourceNodeIds, sourceNodeId);
+          return;
+        }
+        if (!existing) {
+          runtimeVisualMapSet(reviewCommentIdentityElements, sourceNodeId, observedElement);
+        }
+        return;
+      }
+      // A path-only binding has no evidence with which to distinguish a
+      // same-tag parser decoy from the source target after the frozen path
+      // shifts. Keep the entire comment binding unavailable rather than
+      // allowing the first observed element to become a guessed TargetRef.
+      if (
+        !pathMatches
+        && !hasFingerprint
+        && runtimeVisualInitialBindingMatches(observedElement, binding, true)
+        && runtimeVisualInitialBindingSourceBoxMatches(observedElement, binding)
+      ) {
+        // A legitimate sibling can have the same tag and source-box
+        // attributes. Its observation belongs to the other declared frozen
+        // path, not to this binding's decoy check.
+        if (reviewCommentInitialBindingForPath(observedElement, binding)) return;
+        runtimeVisualSetAdd(reviewCommentInvalidSourceNodeIds, sourceNodeId);
+        return;
+      }
+      if (!runtimeVisualInitialBindingMatches(
+        observedElement,
+        binding,
+        runtimeVisualInitialBindingIgnoresIdentityText(identityAttributes, identityText),
+      )) return;
+      runtimeVisualMapSet(reviewCommentDeferredBindings, binding, true);
+      return;
+    }
+    const element = runtimeVisualInitialBindingElement(
+      binding,
+      !runtimeVisualMapHas(reviewCommentDeferredBindings, binding),
+    );
     if (!element) return;
     const existing = runtimeVisualMapGet(reviewCommentIdentityElements, sourceNodeId);
     if (existing && existing !== element) {
@@ -4196,17 +4664,45 @@ function reviewBootstrap(
     }
     if (!existing) runtimeVisualMapSet(reviewCommentIdentityElements, sourceNodeId, element);
   };
+  let runtimeVisualInitialBindingsBootstrapped = false;
   let runtimeVisualInitialBindingsClosed = false;
-  const captureInitialBindings = () => {
+  const captureInitialBindings = (records = []) => {
     if (runtimeVisualInitialBindingsClosed) return;
-    runtimeVisualArrayForEach(
-      runtimeVisualInitialBindings,
-      captureRuntimeVisualInitialBinding,
-    );
-    runtimeVisualArrayForEach(
-      reviewCommentInitialBindings,
-      captureReviewCommentInitialBinding,
-    );
+    if (!runtimeVisualInitialBindingsBootstrapped) {
+      runtimeVisualInitialBindingsBootstrapped = true;
+      runtimeVisualArrayForEach(
+        runtimeVisualInitialBindings,
+        captureRuntimeVisualInitialBinding,
+      );
+      runtimeVisualArrayForEach(
+        reviewCommentInitialBindings,
+        captureReviewCommentInitialBinding,
+      );
+    }
+    runtimeVisualArrayForEach(records, (record) => {
+      if (runtimeVisualMutationRecordType(record) !== "childList") return;
+      const addedNodes = runtimeVisualMutationRecordAddedNodes(record);
+      const addedNodeCount = runtimeVisualNodeListLength(addedNodes);
+      for (let nodeIndex = 0; nodeIndex < addedNodeCount; nodeIndex += 1) {
+        const addedNode = runtimeVisualNodeListItem(addedNodes, nodeIndex);
+        if (!runtimeVisualIsInstance(RuntimeVisualElement, addedNode)) continue;
+        const addedElements = [addedNode];
+        runtimeVisualArrayForEach(
+          runtimeVisualElementQuerySelectorAll(addedNode, "*"),
+          (element) => runtimeVisualArrayPush(addedElements, element),
+        );
+        runtimeVisualArrayForEach(addedElements, (element) => {
+          runtimeVisualArrayForEach(
+            runtimeVisualInitialBindings,
+            (binding) => captureRuntimeVisualInitialBinding(binding, element),
+          );
+          runtimeVisualArrayForEach(
+            reviewCommentInitialBindings,
+            (binding) => captureReviewCommentInitialBinding(binding, element),
+          );
+        });
+      }
+    });
   };
   const initialBindingObserver = (
     runtimeVisualInitialBindings.length || reviewCommentInitialBindings.length
@@ -4223,12 +4719,19 @@ function reviewBootstrap(
   }
   const drainInitialBindings = () => {
     if (!initialBindingObserver || runtimeVisualInitialBindingsClosed) return;
-    runtimeVisualMutationObserverTakeRecords(initialBindingObserver);
-    captureInitialBindings();
+    captureInitialBindings(runtimeVisualMutationObserverTakeRecords(initialBindingObserver));
   };
   const closeInitialBindings = () => {
     if (!initialBindingObserver || runtimeVisualInitialBindingsClosed) return;
     drainInitialBindings();
+    runtimeVisualArrayForEach(
+      reviewCommentInitialBindings,
+      (binding) => {
+        if (runtimeVisualMapHas(reviewCommentDeferredBindings, binding)) {
+          captureReviewCommentInitialBinding(binding);
+        }
+      },
+    );
     runtimeVisualMutationObserverDisconnect(initialBindingObserver);
     runtimeVisualInitialBindingsClosed = true;
   };
@@ -4260,7 +4763,7 @@ function reviewBootstrap(
       + runtimeVisualHex(second)
       + runtimeVisualHex(third)
       + runtimeVisualHex(fourth)
-      + ":" + Math.max(1, textValue.length);
+      + ":" + runtimeVisualMathMax(1, textValue.length);
   };
   const runtimeVisualByteDigest = (bytes) => {
     let first = 2166136261;
@@ -4278,9 +4781,11 @@ function reviewBootstrap(
       + runtimeVisualHex(second)
       + runtimeVisualHex(third)
       + runtimeVisualHex(fourth)
-      + ":" + Math.max(1, bytes.length);
+      + ":" + runtimeVisualMathMax(1, bytes.length);
   };
-  const runtimeVisualRounded = (value) => Math.round(Number(value || 0) * 2) / 2;
+  const runtimeVisualRounded = (value) => (
+    runtimeVisualMathRound(RuntimeVisualNumber(value || 0) * 2) / 2
+  );
   const runtimeVisualRect = (rect, hostRect) => [
     runtimeVisualRounded(rect.left - hostRect.left),
     runtimeVisualRounded(rect.top - hostRect.top),
@@ -4306,7 +4811,7 @@ function reviewBootstrap(
         runtimeVisualStyleValue(style, "display") === "none"
         || runtimeVisualStyleValue(style, "visibility") === "hidden"
         || runtimeVisualStyleValue(style, "visibility") === "collapse"
-        || Number(runtimeVisualStyleValue(style, "opacity") || 1) <= 0
+        || RuntimeVisualNumber(runtimeVisualStyleValue(style, "opacity") || 1) <= 0
       ) {
         visible = false;
         break;
@@ -4322,14 +4827,52 @@ function reviewBootstrap(
       && rect.width > 0
       && rect.height > 0;
   };
-  const runtimeVisualTransparent = (value) => (
-    !value
-    || value === "transparent"
-    || value === "rgba(0, 0, 0, 0)"
-    || value === "rgba(0,0,0,0)"
+  const runtimeVisualNormalizedPaintValue = (value) => (
+    runtimeVisualStringToLowerCase(
+      runtimeVisualStringTrim(RuntimeVisualString(value || "")),
+    )
+  );
+  const runtimeVisualTransparent = (value) => {
+    const normalized = runtimeVisualNormalizedPaintValue(value);
+    if (!normalized || normalized === "transparent") return true;
+    const alphaMatch = runtimeVisualRegExpExec(
+      /^rgba\(\s*[^,]+,\s*[^,]+,\s*[^,]+,\s*([0-9.]+%?)\s*\)$/iu,
+      normalized,
+    ) || runtimeVisualRegExpExec(
+      /^rgba?\([^/]*\/\s*([0-9.]+%?)\s*\)$/iu,
+      normalized,
+    ) || runtimeVisualRegExpExec(
+      /^(?:color|lab|lch|oklab|oklch|hsl|hwb)\([^/]*\/\s*([0-9.]+%?)\s*\)$/iu,
+      normalized,
+    );
+    if (alphaMatch) {
+      const alpha = runtimeVisualParseFloat(alphaMatch[1]);
+      if (runtimeVisualNumberIsFinite(alpha) && alpha <= 0) return true;
+    }
+    return runtimeVisualRegExpExec(
+      /^#(?:[0-9a-f]{3}0|[0-9a-f]{6}00)$/iu,
+      normalized,
+    ) !== null;
+  };
+  const runtimeVisualShadowHasPaint = (value) => {
+    const normalized = runtimeVisualNormalizedPaintValue(value);
+    if (!normalized || normalized === "none") return false;
+    const colorPattern = /(?:(?:rgba?|color|lab|lch|oklab|oklch|hsl|hwb)\([^)]*\)|#[0-9a-f]{3,8}|transparent)/giu;
+    const colors = [];
+    let colorMatch = runtimeVisualRegExpExec(colorPattern, normalized);
+    while (colorMatch) {
+      runtimeVisualArrayPush(colors, colorMatch[0]);
+      colorMatch = runtimeVisualRegExpExec(colorPattern, normalized);
+    }
+    return !colors.length
+      || runtimeVisualArraySome(colors, (color) => !runtimeVisualTransparent(color));
+  };
+  const runtimeVisualTextEffectiveColor = (style) => (
+    runtimeVisualStyleValue(style, "-webkit-text-fill-color")
+      || runtimeVisualStyleValue(style, "color")
   );
   const runtimeVisualTextPaint = (style) => [
-    runtimeVisualStyleValue(style, "color"),
+    runtimeVisualTextEffectiveColor(style),
     runtimeVisualStyleValue(style, "font-family"),
     runtimeVisualStyleValue(style, "font-size"),
     runtimeVisualStyleValue(style, "font-style"),
@@ -4340,7 +4883,28 @@ function reviewBootstrap(
     runtimeVisualStyleValue(style, "text-decoration-line"),
     runtimeVisualStyleValue(style, "text-decoration-style"),
     runtimeVisualStyleValue(style, "text-shadow"),
+    runtimeVisualStyleValue(style, "-webkit-text-stroke-color"),
+    runtimeVisualStyleValue(style, "-webkit-text-stroke-width"),
   ];
+  const runtimeVisualTextHasPaint = (style) => {
+    const textShadow = runtimeVisualStyleValue(style, "text-shadow");
+    const decorationLine = runtimeVisualStyleValue(style, "text-decoration-line");
+    const decorationColor = runtimeVisualStyleValue(style, "text-decoration-color");
+    const strokeWidth = runtimeVisualParseFloat(
+      runtimeVisualStyleValue(style, "-webkit-text-stroke-width") || "0",
+    );
+    const strokeColor = runtimeVisualStyleValue(style, "-webkit-text-stroke-color");
+    return (
+      !runtimeVisualTransparent(runtimeVisualTextEffectiveColor(style))
+      || runtimeVisualShadowHasPaint(textShadow)
+      || runtimeVisualBoolean(
+        decorationLine
+        && decorationLine !== "none"
+        && !runtimeVisualTransparent(decorationColor)
+      )
+      || (strokeWidth > 0 && !runtimeVisualTransparent(strokeColor))
+    );
+  };
   const runtimeVisualTextPaintSignature = (style) => (
     runtimeVisualArrayJoin(runtimeVisualTextPaint(style), "|")
   );
@@ -4348,7 +4912,7 @@ function reviewBootstrap(
     const borderVisible = runtimeVisualArraySome(
       ["top", "right", "bottom", "left"],
       (sideName) => (
-        parseFloat(
+        runtimeVisualParseFloat(
           runtimeVisualStyleValue(style, "border-" + sideName + "-width") || "0",
         ) > 0
         && runtimeVisualStyleValue(style, "border-" + sideName + "-style") !== "none"
@@ -4361,17 +4925,14 @@ function reviewBootstrap(
     const painted = !runtimeVisualTransparent(
       runtimeVisualStyleValue(style, "background-color"),
     )
-      || Boolean(backgroundImage && backgroundImage !== "none")
+      || runtimeVisualBoolean(backgroundImage && backgroundImage !== "none")
       || borderVisible
-      || Boolean(
-        runtimeVisualStyleValue(style, "box-shadow")
-        && runtimeVisualStyleValue(style, "box-shadow") !== "none"
-      )
-      || Boolean(
+      || runtimeVisualShadowHasPaint(runtimeVisualStyleValue(style, "box-shadow"))
+      || runtimeVisualBoolean(
         runtimeVisualStyleValue(style, "filter")
         && runtimeVisualStyleValue(style, "filter") !== "none"
       )
-      || Number(runtimeVisualStyleValue(style, "opacity") || 1) < 1;
+      || RuntimeVisualNumber(runtimeVisualStyleValue(style, "opacity") || 1) < 1;
     if (!painted) return "";
     return runtimeVisualArrayJoin([
       runtimeVisualStyleValue(style, "background-color"),
@@ -4396,8 +4957,13 @@ function reviewBootstrap(
   };
   const runtimeVisualPush = (capture, channel, value) => {
     const normalized = RuntimeVisualString(value || "");
+    const hostAtomCount = capture.content.length
+      + capture.paint.length
+      + capture.geometry.length
+      + capture.vector.length;
     if (
       capture[channel].length >= runtimeVisualAtomLimit
+      || (channel !== "canvas" && hostAtomCount >= runtimeVisualAtomLimit)
       || capture.valueLength + normalized.length > runtimeVisualValueLimit
       || capture.budget.atoms >= runtimeVisualBatchAtomLimit
       || capture.budget.valueLength + normalized.length > runtimeVisualBatchValueLimit
@@ -4408,8 +4974,14 @@ function reviewBootstrap(
     runtimeVisualArrayPush(capture[channel], normalized);
   };
   const runtimeVisualCanvas = (canvas, capture, displayRect, includeDisplaySize) => {
-    const width = Math.max(0, Math.round(Number(runtimeVisualCanvasWidth(canvas) || 0)));
-    const height = Math.max(0, Math.round(Number(runtimeVisualCanvasHeight(canvas) || 0)));
+    const width = runtimeVisualMathMax(
+      0,
+      runtimeVisualMathRound(RuntimeVisualNumber(runtimeVisualCanvasWidth(canvas) || 0)),
+    );
+    const height = runtimeVisualMathMax(
+      0,
+      runtimeVisualMathRound(RuntimeVisualNumber(runtimeVisualCanvasHeight(canvas) || 0)),
+    );
     const pixels = width * height;
     if (!pixels || pixels > runtimeVisualCanvasPixelLimit) {
       throw new Error("runtime-visual-canvas-size");
@@ -4465,7 +5037,7 @@ function reviewBootstrap(
       const hostFullyTransparent = runtimeVisualStyleValue(hostStyle, "display") !== "none"
         && runtimeVisualStyleValue(hostStyle, "visibility") !== "hidden"
         && runtimeVisualStyleValue(hostStyle, "visibility") !== "collapse"
-        && Number(runtimeVisualStyleValue(hostStyle, "opacity") || 1) <= 0
+        && RuntimeVisualNumber(runtimeVisualStyleValue(hostStyle, "opacity") || 1) <= 0
         && hostRect.width > 0
         && hostRect.height > 0;
       const capture = {
@@ -4640,6 +5212,7 @@ function reviewBootstrap(
             host,
             runtimeVisualVisibilityCache,
           )
+          && runtimeVisualTextHasPaint(runtimeVisualGetComputedStyle(parentElement))
         ) {
           const range = runtimeVisualDocumentCreateRange(document);
           runtimeVisualRangeSelectNodeContents(range, textNode);
@@ -4673,7 +5246,7 @@ function reviewBootstrap(
       }
 
       const specialRuntimeContent = runtimeVisualElementMatches(host, "canvas, svg, tbody")
-        || Boolean(runtimeVisualElementQuerySelector(
+        || runtimeVisualBoolean(runtimeVisualElementQuerySelector(
           host,
           "canvas, svg, table, tbody, progress, meter",
         ));
@@ -4685,7 +5258,8 @@ function reviewBootstrap(
         ))
         || capture.paint.length >= 2
         || capture.content.length >= 2
-        || (capture.paint.length >= 1 && capture.content.length >= 1);
+        || (capture.paint.length >= 1 && capture.content.length >= 1)
+        || (capture.paint.length >= 1 && capture.geometry.length >= 1);
       if (!chartLike) {
         return {
           key,
@@ -5399,7 +5973,7 @@ function reviewBootstrap(
     const leader = message.leader === "before" || message.leader === "after"
       ? message.leader
       : "";
-    acceptsFollowerScroll = message.linked === true && Boolean(leader) && leader !== side;
+    acceptsFollowerScroll = message.linked === true && runtimeVisualBoolean(leader) && leader !== side;
     followerGestureId = acceptsFollowerScroll ? gestureId : 0;
     if (!acceptsFollowerScroll) activeScrollCommand = null;
   };
@@ -5419,7 +5993,7 @@ function reviewBootstrap(
   ).split(/\s+/).filter(Boolean);
   const safeProjectionFactKey = (value) => {
     const key = String(value || "").trim();
-    return /^[a-z0-9:_-]{1,160}$/iu.test(key) ? key : "";
+    return runtimeVisualRegExpExec(/^[a-z0-9:_-]{1,160}$/iu, key) !== null ? key : "";
   };
   const safeProjectionSummary = (value) => {
     const summary = String(value || "").trim();
@@ -5672,7 +6246,7 @@ function reviewBootstrap(
       return rects.some((rect) => centerX >= rect.left && centerX <= rect.right && centerY >= rect.top && centerY <= rect.bottom);
     }));
     const edges = [];
-    const hasCell = (row, column) => Boolean(filled[row]?.[column]);
+    const hasCell = (row, column) => runtimeVisualBoolean(filled[row]?.[column]);
     filled.forEach((row, rowIndex) => row.forEach((inside, columnIndex) => {
       if (!inside) return;
       const left = xs[columnIndex];
@@ -5934,7 +6508,7 @@ function reviewBootstrap(
     )) return false;
     const style = getComputedStyle(owner);
     if (
-      /^(?:inline-)?(?:grid|flex)$/u.test(style.display)
+      runtimeVisualRegExpExec(/^(?:inline-)?(?:grid|flex)$/u, style.display) !== null
       || (style.columnCount !== "auto" && Number(style.columnCount) > 1)
     ) return false;
     if (owner.matches("div") && owner.querySelector(
@@ -6504,7 +7078,7 @@ function reviewBootstrap(
       return changedNodes.length > 0 && changedNodes.every((node) => (
         node instanceof Element
         && (node.matches("[data-pageroot-review-projection-layer], [data-pageroot-review-transition-mask]")
-          || Boolean(node.closest("[data-pageroot-review-projection-layer], [data-pageroot-review-transition-mask]")))
+          || runtimeVisualBoolean(node.closest("[data-pageroot-review-projection-layer], [data-pageroot-review-transition-mask]")))
       ));
     });
     if (!onlyOverlayChanges) handleLayoutChange();
@@ -6550,10 +7124,23 @@ function reviewBootstrap(
 `;
 }
 
+export const REVIEW_PAGE_RUNTIME_VISUAL_CAPTURE_ADAPTER =
+  Object.freeze<ReviewRuntimeVisualCaptureAdapter>({
+    id: "page-bootstrap-runtime-visual-v1",
+    createBootstrap: (request: ReviewRuntimeVisualBootstrapRequest) => reviewBootstrap(
+      request.identity.sessionId,
+      request.side,
+      request.identity.sourceSha256BySide[request.side],
+      request.runtimeVisualBindings as readonly ReviewRuntimeVisualBootstrapBinding[],
+      request.reviewCommentBindings as readonly ReviewCommentBootstrapBinding[],
+    ),
+  });
+
 function prepareDocument(
   document: Document,
   side: ReviewSide,
-  sessionId: string,
+  captureIdentity: ReviewRuntimeVisualCaptureIdentity,
+  captureAdapter: ReviewRuntimeVisualCaptureAdapter,
   sourcePath?: string,
   externalBootstrap = false,
   runtimeVisualBindings: readonly ReviewRuntimeVisualBootstrapBinding[] = [],
@@ -6588,13 +7175,18 @@ function prepareDocument(
 
   const bootstrap = document.createElement("script");
   bootstrap.setAttribute(REVIEW_BOOTSTRAP_ATTRIBUTE, "true");
-  const bootstrapJavaScript = reviewBootstrap(
-    sessionId,
+  const bootstrapJavaScript = captureAdapter.createBootstrap({
+    identity: captureIdentity,
     side,
-    runtimeVisualBindings,
-    reviewCommentBindings,
-  );
-  const bootstrapFallbackJavaScript = reviewBootstrap(sessionId, side);
+    runtimeVisualBindings: [...runtimeVisualBindings],
+    reviewCommentBindings: [...reviewCommentBindings],
+  });
+  const bootstrapFallbackJavaScript = captureAdapter.createBootstrap({
+    identity: captureIdentity,
+    side,
+    runtimeVisualBindings: [],
+    reviewCommentBindings: [],
+  });
   if (externalBootstrap) {
     bootstrap.src = REVIEW_BOOTSTRAP_PATH;
   } else {
@@ -6617,11 +7209,13 @@ function prepareDocument(
   };
 }
 
-type ReviewDocumentBuildOptions = {
+export type ReviewDocumentBuildOptions = {
   sessionId: string;
+  sourceSha256BySide: Record<ReviewSide, string>;
   sourcePath?: string;
   externalBootstrap?: boolean;
   comments?: readonly CommentItem[];
+  captureAdapter?: ReviewRuntimeVisualCaptureAdapter;
 };
 
 function* buildReviewDocumentSteps(
@@ -6629,21 +7223,53 @@ function* buildReviewDocumentSteps(
   afterHtml: string,
   options: ReviewDocumentBuildOptions,
 ): Generator<string, ReviewDocuments, void> {
+  const runtimeVisualCaptureIdentity = createReviewRuntimeVisualCaptureIdentity({
+    sessionId: options.sessionId,
+    sourceSha256BySide: options.sourceSha256BySide,
+  });
+  const captureAdapter = options.captureAdapter
+    ?? REVIEW_PAGE_RUNTIME_VISUAL_CAPTURE_ADAPTER;
+  if (
+    typeof captureAdapter.id !== "string"
+    || !captureAdapter.id
+    || typeof captureAdapter.createBootstrap !== "function"
+  ) throw new TypeError("Review runtime capture adapter is invalid.");
   if (typeof DOMParser === "undefined") {
     return {
       before: beforeHtml,
       after: afterHtml,
       bootstrapJavaScript: {
-        before: reviewBootstrap(options.sessionId, "before"),
-        after: reviewBootstrap(options.sessionId, "after"),
+        before: captureAdapter.createBootstrap({
+          identity: runtimeVisualCaptureIdentity,
+          side: "before",
+          runtimeVisualBindings: [],
+          reviewCommentBindings: [],
+        }),
+        after: captureAdapter.createBootstrap({
+          identity: runtimeVisualCaptureIdentity,
+          side: "after",
+          runtimeVisualBindings: [],
+          reviewCommentBindings: [],
+        }),
       },
       bootstrapFallbackJavaScript: {
-        before: reviewBootstrap(options.sessionId, "before"),
-        after: reviewBootstrap(options.sessionId, "after"),
+        before: captureAdapter.createBootstrap({
+          identity: runtimeVisualCaptureIdentity,
+          side: "before",
+          runtimeVisualBindings: [],
+          reviewCommentBindings: [],
+        }),
+        after: captureAdapter.createBootstrap({
+          identity: runtimeVisualCaptureIdentity,
+          side: "after",
+          runtimeVisualBindings: [],
+          reviewCommentBindings: [],
+        }),
       },
       changes: [],
       outline: [],
       runtimeVisualCandidates: [],
+      runtimeVisualCaptureIdentity,
       commentGroups: [],
       commentTargets: [],
     };
@@ -6792,7 +7418,8 @@ function* buildReviewDocumentSteps(
   const preparedBefore = prepareDocument(
     beforeDocument,
     "before",
-    options.sessionId,
+    runtimeVisualCaptureIdentity,
+    captureAdapter,
     options.sourcePath,
     options.externalBootstrap,
     runtimeVisualAnnotations.bindings.before,
@@ -6802,7 +7429,8 @@ function* buildReviewDocumentSteps(
   const preparedAfter = prepareDocument(
     afterDocument,
     "after",
-    options.sessionId,
+    runtimeVisualCaptureIdentity,
+    captureAdapter,
     options.sourcePath,
     options.externalBootstrap,
     runtimeVisualAnnotations.bindings.after,
@@ -6822,6 +7450,7 @@ function* buildReviewDocumentSteps(
     changes,
     outline,
     runtimeVisualCandidates,
+    runtimeVisualCaptureIdentity,
     commentGroups,
     commentTargets: reviewCommentTargets,
   };

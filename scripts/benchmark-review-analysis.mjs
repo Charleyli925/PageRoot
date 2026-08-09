@@ -73,9 +73,22 @@ try {
           lastTimerAt = now;
         }, 10);
         const startedAt = performance.now();
+        const sourceSha256 = async (value) => {
+          const digest = await crypto.subtle.digest(
+            "SHA-256",
+            new TextEncoder().encode(value),
+          );
+          return `sha256:${[...new Uint8Array(digest)]
+            .map((byte) => byte.toString(16).padStart(2, "0"))
+            .join("")}`;
+        };
         const review = await globalThis.PageRootReviewBenchmark
           .buildReviewDocumentsAsync(before, after, {
-            sessionId: `benchmark-${count}`,
+            sessionId: `review-benchmark-${count}`,
+            sourceSha256BySide: {
+              before: await sourceSha256(before),
+              after: await sourceSha256(after),
+            },
             sourcePath: "/tmp/pageroot-complex-review.html",
             externalBootstrap: false,
             comments: [],

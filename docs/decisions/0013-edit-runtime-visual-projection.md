@@ -27,14 +27,14 @@ version comparison or AI input.
   Canvas pixels or table HTML.
 - A renderer `RuntimeVisualProjectionSession` indexes source-empty hosts in the
   exact current HTML, reusing the Canvas `SourceIndex`. Its capture identity
-  includes document key, source path, stable host TargetRefs, executable/style
+  includes document key, the complete source Hash first, source path, stable host TargetRefs, executable/style
   and script-referenced data dependencies, a 64px edit-viewport bucket and
   applied presentation entries.
-  The exact source Hash remains mandatory when accepting or rebinding a result.
-  Debouncing and a monotonic generation discard late results; an entry- and
-  byte-bounded LRU
-  allows dependency-stable text/history edits and Preview/Edit transitions to
-  reuse an already accepted projection.
+  The exact source Hash remains mandatory when accepting a result. Debouncing
+  and a monotonic generation discard late results; an entry- and byte-bounded
+  LRU may reuse only exact-source results across viewport/presentation contexts.
+  A source Hash change clears the visible projection and never rebinds an old
+  bitmap or deferred fallback through TargetRef.
 - A narrow preload method sends the bounded request to one main-process capture
   controller. The controller reuses the contained `pageroot-preview:` resource
   session, runs the authored page in a hidden sandboxed BrowserWindow, denies
@@ -45,6 +45,9 @@ version comparison or AI input.
   scale/translate and zoom remain part of the final painted geometry; other
   disposable transforms/effects are neutralized. Clipped partial rectangles
   are rejected.
+  Every page-realm evaluation and bitmap operation is bounded by the shared
+  runtime-visual owner deadline. Timeout destroys the hidden window and its
+  preview session.
 - The response contains bounded PNG bytes plus validated IHDR dimensions,
   content SHA, byte length, DPR, sizing mode and crop geometry only. It is
   accepted only for the exact source Hash, a unique known source node and a
@@ -68,9 +71,8 @@ version comparison or AI input.
   projection data.
 - The projection owns no drain obligation and no runtime-DOM synchronization.
   A document-authority reset clears it. Mode suspension cancels pending capture
-  but retains the bounded committed/cache state; source changes that affect a
-  runtime dependency schedule a replacement without blanking the committed
-  projection.
+  but retains bounded exact-source committed/cache state; any source change
+  invalidates the visible projection before replacement capture.
 
 ## Consequences
 

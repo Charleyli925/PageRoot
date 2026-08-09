@@ -161,20 +161,22 @@ Version authority.
 
 Edit runtime visuals have a separate owner:
 `RuntimeVisualProjectionSession`. Its request identity includes document key,
-source path, a runtime dependency Hash over stable source-empty TargetRefs,
+the complete source Hash first, source path, a runtime dependency Hash over stable source-empty TargetRefs,
 executable/style sources and script/handler-referenced data containers, a bucketed edit viewport and resolved
 `PageViewContext` dependency. The exact source Hash remains mandatory at every
 acceptance boundary. An indirect DOM traversal conservatively includes the complete
 source Hash in that dependency, so any source edit schedules a replacement rather
-than reusing a stale bitmap. A dependency-stable source edit may only rebind a previously
-accepted bitmap through the current `SourceIndex`; it cannot relax the empty-host,
-unique-host, tag, protocol or PNG checks. Only the newest generation may publish
+than reusing a stale bitmap. A projection, deferred fallback or late result may
+never rebind across source Hashes; the visible projection is cleared before the
+new source capture starts. Only the newest exact-source generation may publish
 a changed result. The session may retain the committed projection while a
-replacement is scheduled/captured, suspend it across Preview/Edit transitions,
+same-source viewport or presentation replacement is scheduled/captured, suspend it across Preview/Edit transitions,
 and keep a recent-result LRU bounded by both bytes and entry count. Resetting
 document authority clears both committed state and cache.
 The main-process capture controller owns at most one hidden authored-page
 window and its preview session; replacement or disposal destroys both. The
+shared runtime-visual owner deadline bounds every page-realm evaluation and
+bitmap operation; timeout cancels capture and destroys both. The
 accepted result is a bounded binary PNG projection for source-empty hosts,
 including direct Canvas/SVG roots, not a copy
 of runtime DOM. It has no drain, persistence, review-diff, source-history or AI
@@ -205,7 +207,14 @@ existing evidence thresholds.
 
 Formal review has a separate, narrower runtime-visual supplement owned by the
 parent `AiReviewWorkspace` and its `ReviewRuntimeVisualCoordinator`. The frozen
-source analyzer enables it only for the managed desktop preview transport. The
+source analyzer enables it only for the managed desktop preview transport.
+Edit and Review share the frozen limits, page budget, owner deadline and
+source/session envelope declared by `runtime-visual-contract.js`; neither side
+may restate a numeric boundary. Review bootstrap production is behind
+`ReviewRuntimeVisualCaptureAdapter`, whose input is the exact review session,
+side-specific full source Hash and private frozen bindings. Evidence transport
+must match contract version, session and source Hash before snapshots are read.
+The
 main process must reject authored navigation away from that direct
 `pageroot-preview` subframe. On an attempt before the first load completes, the preview protocol owner
 must atomically switch only that volatile session to a stricter-CSP document
@@ -243,9 +252,11 @@ bootstrap over a separately challenged private `MessageChannel`; comment body,
 comment key, source-node and locator-map data never enter document bytes or a
 later fetchable bootstrap response. A unique source `id`, `data-*`, `name`, or
 `aria-label` is an optional fallback only when private binding is unavailable,
-never a positional sibling path. Missing, ambiguous, replaced or disconnected
-bindings, and unavailable private transport, omit the marker rather than
-guessing. Only the before bootstrap returns comment geometry, so authored CSS
+never a positional sibling path. A fingerprintless binding remains valid only
+while its observed element is the exact frozen path; a same-tag observation at
+a shifted path makes that target ambiguous and omits the marker. Missing,
+ambiguous, replaced or disconnected bindings, and unavailable private transport,
+omit the marker rather than guessing. Only the before bootstrap returns comment geometry, so authored CSS
 or scripts cannot observe a comment scope marker and create runtime evidence
 themselves.
 Runtime candidate keys and original source-box baselines are carried by the
@@ -259,11 +270,12 @@ binding invalidates the complete runtime batch and retains static evidence.
 Confirmation creates fresh preview sessions, so its new frame pair gets new
 one-shot bindings.
 The trusted first bootstrap must bind the DOM/style/Canvas collection,
-string-normalization/digest and Promise/timer/animation scheduling entry points
+numeric conversion/rounding, string-normalization/digest and
+Promise/timer/animation scheduling entry points
 before authored scripts run. Its bounded font wait must use only captured Promise
 capabilities, rather than a native `Promise.race` that re-reads mutable static
 methods. It receives the exact declared candidate-key list from frozen analysis and
-record the parser-created element that first
+must record the parser-created element that first
 claims each key. Undeclared host attributes have no authority. A missing,
 duplicate, transferred or replaced declared key, or key/element drift during
 either sample invalidates the complete runtime batch and retains the static
@@ -274,6 +286,15 @@ starts only after a scope-only candidate actually differs. An
 unsupported, unstable, over-budget or locally failed host must produce one
 validated `unavailable` fact; that fact has no comparison
 authority and cannot suppress valid sibling-host facts.
+The producer must select at most 24 deterministic identity attributes and the
+consumer must enforce that same shared limit. If a host exceeds the limit, the
+producer omits the binding even when it has an explicit `id` or `name` anchor;
+no retained prefix or anchor exception may guess a parser sibling. Parser mutation records may bind
+an exact inserted Element without comparing mutable text only when at least one
+stable attribute matches; duplication, replacement or disconnection still
+fails closed. Text without visible color, text fill, shadow, decoration or stroke is not
+paint evidence, while one painted child plus its geometry is sufficient visual
+evidence.
 Both already-isolated review frames may then report one bounded pair of
 same-side-stable, host-relative HTML/SVG/Canvas fingerprints for every declared
 candidate. Only a first-pair change from a comment-scope-only candidate asks
