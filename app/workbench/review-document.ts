@@ -1676,6 +1676,71 @@ function runtimeVisualScriptBoundaryMatches(source: string, value: string): bool
   ).test(source);
 }
 
+function runtimeVisualScriptSelectorLiteral(value: string): string | null {
+  const trimmed = value.trim();
+  const quote = trimmed[0];
+  return quote && trimmed.at(-1) === quote
+    ? trimmed.slice(1, -1)
+    : null;
+}
+
+function runtimeVisualScriptAttributeOperatorMatches(
+  actual: string,
+  operator: string,
+  expected: string,
+): boolean {
+  if (
+    expected.length === 0
+    && ["~=", "^=", "$=", "*="].includes(operator)
+  ) return false;
+  switch (operator) {
+    case "=":
+      return actual === expected;
+    case "~=":
+      return actual.split(/[\t\n\f\r ]+/u).includes(expected);
+    case "^=":
+      return actual.startsWith(expected);
+    case "$=":
+      return actual.endsWith(expected);
+    case "*=":
+      return actual.includes(expected);
+    case "|=":
+      return actual === expected || actual.startsWith(`${expected}-`);
+    default:
+      return false;
+  }
+}
+
+function runtimeVisualScriptDataSelectorMatches(
+  source: string,
+  token: RuntimeVisualScriptToken,
+): boolean {
+  const attributeName = token.attributeName || token.value;
+  const escapedAttributeName = runtimeVisualScriptRegexValue(attributeName);
+  const attributeSelector = new RegExp(
+    `\\[\\s*${escapedAttributeName}(?:\\s*(?<operator>[~|^$*]?=)\\s*(?<operand>[^\\]]*))?\\s*\\]`,
+    "u",
+  );
+  for (const queryMatch of source.matchAll(/\bquerySelector(?:All)?\s*\(\s*([^)]*)\)/gu)) {
+    const selector = runtimeVisualScriptSelectorLiteral(queryMatch[1]);
+    if (selector === null) continue;
+    const match = selector.match(attributeSelector);
+    if (!match) continue;
+    const operator = match.groups?.operator || "";
+    if (!operator) {
+      if (token.kind === "data-attribute") return true;
+      continue;
+    }
+    if (token.kind !== "data-value") continue;
+    const rawOperand = match.groups?.operand?.trim() || "";
+    const operand = runtimeVisualScriptSelectorLiteral(rawOperand) ?? rawOperand;
+    if (runtimeVisualScriptAttributeOperatorMatches(token.value, operator, operand)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function runtimeVisualScriptReferencesToken(
   source: string,
   token: RuntimeVisualScriptToken,
@@ -1695,22 +1760,14 @@ function runtimeVisualScriptReferencesToken(
     ).test(source);
   }
   if (token.kind === "data-attribute") {
-    const attributeName = runtimeVisualScriptRegexValue(token.attributeName || value);
-    return new RegExp(`\\[\\s*${attributeName}\\s*\\]`, "u").test(source)
+    return runtimeVisualScriptDataSelectorMatches(source, token)
       || new RegExp(
         `\\bgetAttribute\\s*\\(\\s*${runtimeVisualScriptStringLiteral(token.attributeName || value)}\\s*\\)`,
         "u",
       ).test(source);
   }
   if (token.kind === "data-value") {
-    const attributeName = runtimeVisualScriptRegexValue(token.attributeName || "");
-    if (!attributeName) return false;
-    const literal = runtimeVisualScriptStringLiteral(value);
-    const unquoted = `${escaped}(?=\\s*\\])`;
-    return new RegExp(
-      `\\[\\s*${attributeName}\\s*(?:[~|^$*]?=)\\s*(?:${literal}|${unquoted})`,
-      "u",
-    ).test(source);
+    return runtimeVisualScriptDataSelectorMatches(source, token);
   }
   if (token.kind === "id") {
     return new RegExp(

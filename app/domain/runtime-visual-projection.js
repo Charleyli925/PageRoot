@@ -216,6 +216,10 @@ function runtimeIdentityValueMatches(source, value, kind) {
     const expected = runtimeSelectorLiteralValue(attributeSelector.groups.value)
       ?? attributeSelector.groups.value;
     const actual = String(value);
+    if (
+      expected.length === 0
+      && ["^=", "$=", "*="].includes(attributeSelector.groups.operator)
+    ) return false;
     switch (attributeSelector.groups.operator) {
       case "=":
         return actual === expected;
@@ -299,6 +303,10 @@ function runtimeDataAttributeSelectorMatches(source, attributeName, value, kind)
     const expected = runtimeSelectorLiteralValue(dataSelector.groups.value)
       ?? dataSelector.groups.value;
     const actual = String(value);
+    if (
+      expected.length === 0
+      && ["^=", "$=", "*="].includes(operator)
+    ) continue;
     if (
       (operator === "=" && actual === expected)
       || (operator === "~=" && actual.split(/[\t\n\f\r ]+/u).includes(expected))

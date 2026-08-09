@@ -638,6 +638,8 @@ test("hostile review fixtures are enforced by the adapter and page contract", ()
   assert.match(reviewDocument, /runtimeVisualRegExpExec/);
   assert.match(reviewDocument, /runtimeVisualInitialBindingIgnoresIdentityText/);
   assert.match(reviewDocument, /runtimeVisualScriptReferencesToken/);
+  assert.match(reviewDocument, /runtimeVisualScriptDataSelectorMatches/);
+  assert.match(reviewDocument, /runtimeVisualScriptAttributeOperatorMatches/);
   assert.doesNotMatch(reviewDocument, /content\.includes\(token\)/u);
   assert.match(reviewDocument, /(?:color\|lab\|lch\|oklab\|oklch\|hsl\|hwb)/u);
   assert.match(reviewDocument, /runtimeVisualNumberIsFinite/);
