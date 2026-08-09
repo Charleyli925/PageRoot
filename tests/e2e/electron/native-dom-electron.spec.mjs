@@ -149,8 +149,11 @@ async function stopPageRoot(electronApp, isolatedUserData, { cleanup = true } = 
   if (cleanup) removeIsolatedUserData(isolatedUserData);
 }
 
-async function closePageRootGracefully(electronApp) {
-  const page = electronApp.windows()[0];
+async function closePageRootGracefully(electronApp, page) {
+  const mainRendererUrl = page?.url();
+  if (!mainRendererUrl) {
+    throw new Error("PageRoot main renderer URL is unavailable for graceful close.");
+  }
   await page?.evaluate(() => {
     window.__PAGEROOT_CLOSE_ABORT_REASON__ = null;
     window.addEventListener("html-ai:close-aborted", (event) => {
@@ -158,9 +161,19 @@ async function closePageRootGracefully(electronApp) {
     }, { once: true });
   });
   const closed = electronApp.waitForEvent("close", { timeout: 35_000 });
-  await electronApp.evaluate(({ BrowserWindow }) => {
-    BrowserWindow.getAllWindows()[0]?.close();
-  });
+  const requested = await electronApp.evaluate(({ BrowserWindow }, rendererUrl) => {
+    // Runtime snapshots own hidden offscreen BrowserWindows. The E2E close
+    // must target the known app renderer instead of assuming array order.
+    const mainWindow = BrowserWindow.getAllWindows().find((candidate) => (
+      candidate.webContents.getURL() === rendererUrl
+    ));
+    if (!mainWindow) return false;
+    mainWindow.close();
+    return true;
+  }, mainRendererUrl);
+  if (!requested) {
+    throw new Error("PageRoot main BrowserWindow was unavailable for graceful close.");
+  }
   try {
     await closed;
   } catch (error) {
@@ -1294,7 +1307,7 @@ test("Electron autosaves one authorized disk patch and reopens the same forward 
     await expect.poll(() => frame.locator(caseSelector("source-fidelity")).textContent())
       .toBe(replacement);
 
-    await closePageRootGracefully(firstApp);
+    await closePageRootGracefully(firstApp, firstLaunch.page);
     firstApp = null;
 
     const reopened = await launchPageRoot({ isolatedUserData });
@@ -1316,7 +1329,7 @@ test("Electron autosaves one authorized disk patch and reopens the same forward 
     expect(await reopenedFrame.locator("[data-lexical-editor]").count()).toBe(0);
     expect(readFileSync(sourcePath).equals(expected)).toBe(true);
 
-    await closePageRootGracefully(reopenedApp);
+    await closePageRootGracefully(reopenedApp, reopened.page);
     reopenedApp = null;
   } finally {
     if (firstApp) await stopPageRoot(firstApp, isolatedUserData, { cleanup: false });
@@ -1366,7 +1379,7 @@ test("Electron persists text, style, structure, and reorder undo while focused f
       0,
     );
     expect(readFileSync(sourcePath).equals(expected)).toBe(true);
-    await closePageRootGracefully(firstApp);
+    await closePageRootGracefully(firstApp, firstLaunch.page);
     firstApp = null;
 
     const reopened = await launchPageRoot({ isolatedUserData });
@@ -1565,7 +1578,7 @@ test("Electron persists text, style, structure, and reorder undo while focused f
         "redo",
       ]);
 
-    await closePageRootGracefully(reopenedApp);
+    await closePageRootGracefully(reopenedApp, reopened.page);
     reopenedApp = null;
   } finally {
     if (firstApp) await stopPageRoot(firstApp, isolatedUserData, { cleanup: false });
@@ -1862,7 +1875,7 @@ test("Electron persists an Apple Pinyin boundary composition with left affinity"
     await expect.poll(() => frame.locator(caseSelector("heading-inline")).innerHTML())
       .toContain("你好<em");
 
-    await closePageRootGracefully(firstApp);
+    await closePageRootGracefully(firstApp, firstLaunch.page);
     firstApp = null;
     const workspace = path.join(isolatedUserData, "workspace");
     const registry = JSON.parse(
@@ -1902,7 +1915,7 @@ test("Electron persists an Apple Pinyin boundary composition with left affinity"
     expect(reopenedHtml).not.toContain("<i>");
     expect(readFileSync(sourcePath).equals(expected)).toBe(true);
 
-    await closePageRootGracefully(reopenedApp);
+    await closePageRootGracefully(reopenedApp, reopened.page);
     reopenedApp = null;
   } finally {
     if (firstApp) await stopPageRoot(firstApp, isolatedUserData, { cleanup: false });
